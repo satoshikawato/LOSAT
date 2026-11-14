@@ -1,0 +1,120 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: mask probe v5
+Masked using: 'dust', options: 'window=64; level=20; linker=1'
+           5 sequences; 7,360 total letters
+
+
+
+Query= q1
+
+Length=900
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 6447225
+
+
+Query= q2
+
+Length=700
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 4990225
+
+
+Query= q3
+
+Length=600
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 4271940
+
+
+Query= q4
+
+Length=600
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 4271940
+
+
+Query= q5
+
+Length=1000
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 7175725
+
+
+  Database: mask probe v5
+  Masked using: 'dust', options: 'window=64; level=20; linker=1'
+    Posted date:  Nov 14, 2026  5:20 AM
+  Number of letters in database: 7,360
+  Number of sequences in database:  5
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

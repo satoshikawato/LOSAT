@@ -51,7 +51,7 @@ use crate::report::serial::pssm::{PssmWithParameters, SeqData};
 use super::pssm::{AsciiPssmDiagnostics, PssmRequest};
 #[cfg(test)]
 use crate::algorithm::pssm_search::in_pssm::with_computed_scores;
-use crate::algorithm::pssm_search::in_pssm::InPssmFile;
+use crate::algorithm::pssm_search::in_pssm::{refuse_skipped_members, InPssmFile};
 
 /// The query PSSM of psiblast's rounds with `-in_pssm` (`rounds::PsiRoundPlan::input`): when a
 /// PSSM file is written, the object that `SavePssmToFile` writes. (The Seq-id that the PSSM of
@@ -59,11 +59,16 @@ use crate::algorithm::pssm_search::in_pssm::InPssmFile;
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct InPssmRounds {
     object: Option<PssmWithParameters>,
+    /// LOSAT's refusal of a file NCBI would write back in a way LOSAT does not (`rounds_input`),
+    /// made once the database is opened (`refuse_written_back`).
+    refusal: Option<String>,
 }
 
 /// The input PSSM of a run of psiblast's rounds or PSSM files with `-in_pssm` (`request`: the
-/// files), or LOSAT's refusal before the search of a file NCBI would write back in a way LOSAT
-/// does not:
+/// files), with LOSAT's refusal of a file NCBI would write back in a way LOSAT does not, which the
+/// run makes once the database is opened, before any output (`InPssmRounds::refuse_written_back`:
+/// NCBI's error of a database it cannot open comes first, and so do the errors that stop NCBI
+/// before round 1, `PsiSearch::stop_before_search`):
 /// - with `-out_pssm`, a member that the reader skipped (NCBI's object keeps it and writes it:
 ///   the descriptors of the query other than titles, its `annot`, the members of its `Seq-inst`
 ///   other than `repr`, `mol`, `length` and `seq-data`, the `constraints` and `annotatedSites` of
@@ -76,18 +81,28 @@ pub(crate) struct InPssmRounds {
 ///   the missing matrix or reads past the vectors: undefined behaviour).
 ///
 /// A PSSM that `CPsiBlastValidate::Pssm` refuses gets NCBI's error when the search starts, before
-/// any file (the batch stop, `blast_engine::psiblast_stop_at_invalid_pssm`).
-pub(crate) fn rounds_input(file: InPssmFile, request: &PssmRequest) -> Result<InPssmRounds> {
+/// any file (the batch stop, `blast_engine::psiblast_stop_at_pssm_query`).
+pub(crate) fn rounds_input(file: InPssmFile, request: &PssmRequest) -> InPssmRounds {
     if !file.valid {
-        return Ok(InPssmRounds { object: None });
+        return InPssmRounds {
+            object: None,
+            refusal: None,
+        };
     }
+    let refusal = written_back_refusal(&file, request)
+        .err()
+        .map(|error| error.to_string());
+    let files = request.asn_path.is_some() || request.ascii_path.is_some();
+    InPssmRounds {
+        object: files.then_some(file.object),
+        refusal,
+    }
+}
+
+/// The refusals of `rounds_input`.
+fn written_back_refusal(file: &InPssmFile, request: &PssmRequest) -> Result<()> {
     if request.asn_path.is_some() {
-        if !file.skipped.is_empty() {
-            bail!(
-                "a PSSM file with members that LOSAT's reader does not keep ({}), which NCBI BLAST+ writes back with -out_pssm, is not supported by LOSAT's PSIBLAST",
-                file.skipped.join(", ")
-            );
-        }
+        refuse_skipped_members(&file.skipped, "-out_pssm", "PSIBLAST")?;
         let rpsdbparams = file
             .object
             .params
@@ -102,10 +117,7 @@ pub(crate) fn rounds_input(file: InPssmFile, request: &PssmRequest) -> Result<In
     if request.ascii_path.is_some() {
         check_long_ascii(&file.object)?;
     }
-    let files = request.asn_path.is_some() || request.ascii_path.is_some();
-    Ok(InPssmRounds {
-        object: files.then_some(file.object),
-    })
+    Ok(())
 }
 
 /// The refusal of the long ASCII form of a PSSM file that NCBI cannot print (`rounds_input`).
@@ -202,6 +214,15 @@ fn query_codes(object: &PssmWithParameters) -> Vec<u8> {
 }
 
 impl InPssmRounds {
+    /// LOSAT's refusal of the input PSSM's files (`rounds_input`), made once the database is opened
+    /// for a run that searches (`blastp::blast_engine` `search_cli`).
+    pub(crate) fn refuse_written_back(&self) -> Result<()> {
+        match &self.refusal {
+            Some(refusal) => bail!("{refusal}"),
+            None => Ok(()),
+        }
+    }
+
     /// The files of the input PSSM at the start of round 1 (`SavePssmToFile`): its ASN.1 text and
     /// its ASCII PSSM, as requested.
     pub(crate) fn files(
@@ -489,28 +510,48 @@ mod tests {
                 valid: true,
             }
         };
-        let input = rounds_input(file(vec![], false, true), &request(false, false)).unwrap();
+        let refusal = |input: InPssmRounds| input.refuse_written_back().map(|()| input);
+        let input = refusal(rounds_input(
+            file(vec![], false, true),
+            &request(false, false),
+        ))
+        .unwrap();
         assert!(input.object.is_none());
-        let input = rounds_input(file(vec![], false, true), &request(true, false)).unwrap();
+        let input = refusal(rounds_input(
+            file(vec![], false, true),
+            &request(true, false),
+        ))
+        .unwrap();
         assert!(input.object.is_some());
-        let error = rounds_input(
+        let error = refusal(rounds_input(
             file(vec!["Seqdesc", "topology"], false, true),
             &request(true, false),
-        )
+        ))
         .unwrap_err()
         .to_string();
         assert!(error.contains("(Seqdesc, topology)"), "{error}");
         // Without -out_pssm the skipped members are never written.
-        rounds_input(file(vec!["annot"], false, true), &request(false, true)).unwrap();
-        let error = rounds_input(file(vec![], true, false), &request(true, false))
-            .unwrap_err()
-            .to_string();
+        refusal(rounds_input(
+            file(vec!["annot"], false, true),
+            &request(false, true),
+        ))
+        .unwrap();
+        let error = refusal(rounds_input(
+            file(vec![], true, false),
+            &request(true, false),
+        ))
+        .unwrap_err()
+        .to_string();
         assert!(error.contains("without params.rpsdbparams"), "{error}");
-        rounds_input(file(vec![], false, false), &request(true, false)).unwrap();
+        refusal(rounds_input(
+            file(vec![], false, false),
+            &request(true, false),
+        ))
+        .unwrap();
         // A PSSM that NCBI's checks refuse writes nothing.
         let mut invalid = file(vec!["annot"], true, false);
         invalid.valid = false;
-        assert!(rounds_input(invalid, &request(true, true))
+        assert!(refusal(rounds_input(invalid, &request(true, true)))
             .unwrap()
             .object
             .is_none());
@@ -521,7 +562,7 @@ mod tests {
         data.num_matching_seqs = Some(vec![2, 2]);
         data.gapless_column_weights = Some(vec![1.0]);
         data.weighted_res_freqs_per_pos = Some(vec![0.0; 56]);
-        let error = rounds_input(long, &request(false, true))
+        let error = refusal(rounds_input(long, &request(false, true)))
             .unwrap_err()
             .to_string();
         assert!(error.contains("informationContent"), "{error}");
@@ -571,6 +612,7 @@ mod tests {
         with_computed_scores(&mut object, &[[0; BLASTAA_SIZE]], GAPPED);
         let input = InPssmRounds {
             object: Some(object),
+            refusal: None,
         };
         let ungapped = KarlinBlk {
             lambda: 0.3176,

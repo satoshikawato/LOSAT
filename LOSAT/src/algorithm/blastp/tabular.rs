@@ -221,7 +221,7 @@ impl<'a> TabularSubjects<'a> {
                 ids,
                 accessions,
                 ordinals,
-                oids: _,
+                oids,
                 titles,
                 parsed,
                 length,
@@ -245,7 +245,7 @@ impl<'a> TabularSubjects<'a> {
                         let all_ids = if needs.all_deflines {
                             subject.all_tabular_ids(true).map_err(|problem| {
                                 crate::algorithm::common::database::parsed_refusal(
-                                    ordinals.get(s_idx).copied().unwrap_or_default(),
+                                    oids.oid(ordinals.get(s_idx).copied().unwrap_or_default()),
                                     &format!("has {problem}"),
                                     app.name(),
                                 )

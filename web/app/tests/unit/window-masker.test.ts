@@ -17,7 +17,7 @@ import { changedFields, formParameters, setField, writtenValue, type EngineOptio
 import { programById } from '../../src/domain/programs';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
-import { COUNTS_CHUNK_BYTES, EngineRuntime } from '../../../packages/losat/src/infra/engine-worker/runtime';
+import { EngineRuntime } from '../../../packages/losat/src/infra/engine-worker/runtime';
 import { countsKey, WasmEngine } from '../../../packages/losat/src/infra/engine-worker/gateway';
 import type { EngineCommand, EngineEvent, WorkerCounts, WorkerRun } from '../../../packages/losat/src/infra/engine-worker/protocol';
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
@@ -27,6 +27,7 @@ import { NodeInflater } from './support/node-inflater';
 import {
   EngineCallError,
   EngineStoppedError,
+  FILE_CHUNK_BYTES,
   FILE_WINDOW_MASKER_COUNTS,
   ReactorAbi,
   ROLE_QUERY,
@@ -84,7 +85,7 @@ function draftSetup() {
     cleanup: Promise.resolve({ state: 'done', removedSessions: 0 }),
   });
   const fake = new FakeEngine();
-  const engine = { describe: fake.describe.bind(fake), validate: fake.validate.bind(fake), prepare: () => undefined };
+  const engine = { describe: fake.describe.bind(fake), start: fake.start.bind(fake), validate: fake.validate.bind(fake), prepare: () => undefined };
   let id = 0;
   const coordinator = new Coordinator({
     engine: { ...engine, run: fake.run.bind(fake), cancel: fake.cancel.bind(fake) },
@@ -92,6 +93,7 @@ function draftSetup() {
     downloader: { save: () => undefined },
     now: () => 0,
     newRunId: () => `run-${++id}`,
+    digest: sha256Hex,
   });
   const requests: SearchRequest[] = [];
   const draft = new SearchDraft({
@@ -202,7 +204,7 @@ describe('the gateway and the counts file', () => {
     };
     const engine = new WasmEngine({
       assets,
-      control: { describe: () => Promise.reject(new Error('unused')), validate: () => Promise.reject(new Error('unused')) },
+      control: { describe: () => Promise.reject(new Error('unused')), start: () => Promise.reject(new Error('unused')), validate: () => Promise.reject(new Error('unused')) },
       hardwareConcurrency: 8,
       createWorker: () => worker as unknown as Worker,
       loadModules: async () => ({ serial: { asset: assets.serial }, threads: { asset: assets.threads } }),
@@ -346,17 +348,17 @@ describe('the counts file in the Engine runtime', () => {
     const { abi, calls } = fakeAbi();
     const runtime = runtimeWith(abi);
     const phases: string[] = [];
-    const result = await runtime.run(workerRun('blastn', counts3('a.obinary', COUNTS_CHUNK_BYTES + 5)), (phase) => {
+    const result = await runtime.run(workerRun('blastn', counts3('a.obinary', FILE_CHUNK_BYTES + 5)), (phase) => {
       phases.push(phase);
       calls.push(`phase ${phase}`);
     });
-    const size = COUNTS_CHUNK_BYTES + 5;
+    const size = FILE_CHUNK_BYTES + 5;
     // validate after the file: it checks the file where the command line does (ABI v2 §4).
     expect(calls.slice(0, 10)).toEqual([
       'phase preparing',
       `begin ${FILE_WINDOW_MASKER_COUNTS} a.obinary ${size}`,
-      `buffer ${COUNTS_CHUNK_BYTES}`,
-      `chunk 101 ${COUNTS_CHUNK_BYTES}`,
+      `buffer ${FILE_CHUNK_BYTES}`,
+      `chunk 101 ${FILE_CHUNK_BYTES}`,
       'chunk 101 5',
       'end 101',
       'free buffer',

@@ -286,7 +286,7 @@ fn parse_words(
         word.push(path);
         word
     });
-    let cli: Cli = crate::cli::try_parse_from_library(
+    let cli: Cli = crate::cli::try_parse_with_own_start(
         words
             .iter()
             .map(|word| std::ffi::OsString::from(*word))
@@ -565,17 +565,24 @@ mod tests {
     fn the_file_of_run_to_file_is_the_parsers_out() {
         let search = validate(Program::Blastn, &["-ungapped"]).unwrap();
         let inputs = Inputs::new(&[], &[]).named("q.fna", "s.fna");
-        let mut names = vec![
+        let names = [
             std::ffi::OsString::from("-dryrun"),
             std::ffi::OsString::from("--"),
             std::ffi::OsString::from("-version"),
             std::ffi::OsString::from("dir/o.out"),
-        ];
-        #[cfg(unix)]
-        names.push(
-            <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(b"o\xff.out")
-                .to_os_string(),
-        );
+        ]
+        .into_iter()
+        // A name that is not UTF-8, which only Unix can make.
+        .chain({
+            #[cfg(unix)]
+            let not_utf8 = Some(
+                <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(b"o\xff.out")
+                    .to_os_string(),
+            );
+            #[cfg(not(unix))]
+            let not_utf8 = None;
+            not_utf8
+        });
         for name in names {
             let writing = search.writing_to(std::path::Path::new(&name));
             assert!(!writing.dry_run(), "{name:?}");

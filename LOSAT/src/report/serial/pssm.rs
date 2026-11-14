@@ -323,6 +323,16 @@ fn write_document<E: Encoder>(
     karlin: Option<FinalKarlin>,
 ) {
     enc.begin_document("PssmWithParameters");
+    write_sequence(enc, value, karlin);
+    enc.end_document();
+}
+
+/// The `PssmWithParameters` SEQUENCE, with `karlin` in place of the six values of `finalData`.
+fn write_sequence<E: Encoder>(
+    enc: &mut E,
+    value: &PssmWithParameters,
+    karlin: Option<FinalKarlin>,
+) {
     enc.begin_sequence("PssmWithParameters");
     enc.member("pssm", 0);
     write_pssm(enc, &value.pssm, karlin);
@@ -333,7 +343,23 @@ fn write_document<E: Encoder>(
         enc.end_member();
     }
     enc.end_sequence();
-    enc.end_document();
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:138-142 (the `pssm` variant of the
+// request's queries; line RG F1b-2)
+// ```asn
+// Blast4-queries ::= CHOICE {
+//     pssm                    PssmWithParameters,
+//     seq-loc-list            SEQUENCE OF Seq-loc,
+//     bioseq-set              Bioseq-set
+// }
+// ```
+/// Writes `value` as the value of a member or variant of an enclosing document, with the
+/// enclosing document's encoder: the search strategy's request writes a PSSM query so
+/// (`report::archive::writer`, `queries pssm`), and its strings and octets wrap at the depth where
+/// they stand, as NCBI's object stream writes them.
+pub fn write_value<E: Encoder>(enc: &mut E, value: &PssmWithParameters) {
+    write_sequence(enc, value, None);
 }
 
 fn write_ints<E: Encoder>(enc: &mut E, values: &[i32]) {

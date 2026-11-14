@@ -288,6 +288,9 @@ fn parse_blastn_args(
         db: None,
         // The Web ABI searches a subject, not a database: no taxid list (line DI-8).
         db_filter: Default::default(),
+        // ... and no database masks (series NP, M4a-2).
+        db_mask: Default::default(),
+        db_mask_resolved: None,
         formatting: Default::default(),
         dbsize: None,
         show_gis: false,

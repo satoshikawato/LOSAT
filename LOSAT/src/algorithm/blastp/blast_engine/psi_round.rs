@@ -59,6 +59,7 @@ pub(super) fn search_rounds(
     plan: &PsiRoundPlan,
     query_records: &[FastaRecord],
     searched_queries: &[FastaRecord],
+    query_input: &seq_range::QueryInput,
     batches: QueryBatches,
     subjects: &SubjectSet<'_>,
     subject_source: BlastpSubjectSource<'_>,
@@ -100,10 +101,14 @@ pub(super) fn search_rounds(
                 .then(|| subject_source.fasta_records()),
             args.lcase_masking,
             args.app.name(),
+            args.psi_search.as_ref().and_then(|psi| psi.request_pssm()),
         )
     });
+    // Only requests that are written are looked at: a run that stops before its first batch's
+    // request (the PSSM query's "Remote PSI-BL2SEQ is not supported", `psiblast_stop_at_pssm_query`)
+    // has none, whatever its subjects' titles.
     if let Some(requests) = requests.as_ref() {
-        if titles_may_refuse {
+        if titles_may_refuse && batches.searched_done > 0 {
             requests.check_titles(&searched_queries[..batches.searched_done])?;
         }
         if let Some(span) = batches.stop_batch.clone() {
@@ -116,9 +121,12 @@ pub(super) fn search_rounds(
             requests.as_ref(),
             batches.stop_batch.clone(),
         ) {
-            (Some(strategy), Some(requests), Some(span)) => {
-                requests.write(strategy, span.start, &searched_queries[span], None)
-            }
+            (Some(strategy), Some(requests), Some(span)) => requests.write(
+                strategy,
+                span.start,
+                &searched_queries[span.clone()],
+                query_input.placements.get(span.start),
+            ),
             _ => Ok(()),
         }
     };
@@ -135,12 +143,18 @@ pub(super) fn search_rounds(
             // `kbp_psi` that is not valid, a database without sequences or whose sequence file
             // cannot be opened, `psiblast_stop_at_invalid_query`) comes after round 1 has written
             // the input PSSM's files; NCBI's check of the PSSM (`validation_error`) stops before
-            // (NCBI 2.17.0, probes `y.*`, `y2.*` of the PS5c review; line PS DECISIONS 31).
+            // (NCBI 2.17.0, probes `y.*`, `y2.*` of the PS5c review; line PS DECISIONS 31), and so
+            // do the search strategy's request without a database and the PSSM engine's scores
+            // (`PsiSearch::stop_before_search`: `SaveSearchStrategy` and `CPsiBlast` before the
+            // rounds).
             let search_error = error.downcast_ref::<crate::cli::NativeError>().is_some()
-                && args
-                    .psi_search
-                    .as_deref()
-                    .is_some_and(|psi| psi.validation_error.is_none());
+                && args.psi_search.as_deref().is_some_and(|psi| {
+                    psi.stop_before_search(
+                        args.strategy.is_some(),
+                        subject_source.database().is_some(),
+                    )
+                    .is_none()
+                });
             if let Some(input) = plan.input.as_ref().filter(|_| search_error) {
                 let (asn, ascii) = input.files(&plan.request)?;
                 RoundFiles::new(
@@ -159,6 +173,7 @@ pub(super) fn search_rounds(
                 plan,
                 query_records,
                 searched_queries,
+                query_input,
                 &batches,
                 subjects,
                 subject_source,
@@ -226,6 +241,7 @@ fn run_queries(
     plan: &PsiRoundPlan,
     query_records: &[FastaRecord],
     searched_queries: &[FastaRecord],
+    query_input: &seq_range::QueryInput,
     batches: &QueryBatches,
     subjects: &SubjectSet<'_>,
     subject_source: BlastpSubjectSource<'_>,
@@ -251,14 +267,30 @@ fn run_queries(
     };
     // The rounds formatted so far (`m_QueriesFormatted`: each round's `PrintOneResultSet`).
     let mut calls = 0usize;
-    for &(input_start, query) in &batches.starts {
+    for &(_, query) in &batches.starts {
         let records = std::slice::from_ref(&searched_queries[query]);
-        let query_input = seq_range::QueryInput::whole(records);
+        // The query as round 1 searches it, in every round: with `-query_loc` its range of the
+        // record (`placement`; the PSSM is made of the whole record, `next_pssm`, and searched
+        // at the range's offsets, `PsiSearch::from_engine`). A psiblast batch holds one searched
+        // query, after the records that `-query_loc` skips (a range that starts past the end of
+        // its record; NCBI's batch reader drops them and numbers the query by its place in the
+        // input, `Query_<n>`): the query's record is its input ordinal's, not the batch's first.
+        let ordinal = query_input.ordinal(query);
+        let record = &query_records[ordinal];
+        let placement = query_input.placements.get(query);
+        let query_input = seq_range::QueryInput {
+            placements: seq_range::Placements(placement.into_iter().collect()),
+            ordinals: vec![0],
+            input_lengths: vec![record.seq().len()],
+            skipped: vec![false],
+            range_length: query_input.range_length,
+        };
         let ranges = BlastpRanges {
-            input_records: std::slice::from_ref(&query_records[input_start]),
+            input_records: std::slice::from_ref(record),
             query_input: &query_input,
             subject_placements: &subjects.placements,
-            x_ordinal_base: input_start,
+            x_ordinal_base: ordinal,
+            searched_base: query,
             split_search_spaces: None,
         };
         let mut state = IterationState::new(plan.num_iterations);
@@ -284,7 +316,7 @@ fn run_queries(
         // done. NCBI's handle keeps the last round's space, which is round 1's: every round's
         // effective lengths read the same `kbp_gap_std` (blast_setup.c:766-768).
         if let (Some(strategy), Some(requests)) = (args.strategy.as_ref(), requests) {
-            requests.write(strategy, query, records, None)?;
+            requests.write(strategy, query, records, placement)?;
         }
         while state.go() {
             let round = state.number();
@@ -316,19 +348,26 @@ fn run_queries(
                 } else {
                     pssm_mode
                 };
+                // `PsiBlastSetupScoreBlock`'s warnings look at every column of the PSSM, also
+                // past a range that the search reads (`pssm_setup_messages`).
+                let setup_messages = crate::algorithm::psiblast::in_pssm::pssm_setup_messages(
+                    current
+                        .engine
+                        .diagnostics
+                        .frequency_ratios
+                        .as_deref()
+                        .unwrap_or(&[]),
+                    setup_mode,
+                    &args.matrix_name,
+                );
                 let mut search =
-                    PsiSearch::from_engine(&current.engine, records[0].clone(), Vec::new());
+                    PsiSearch::from_engine(&current.engine, records[0].clone(), setup_messages);
                 // The query source is fixed for the run: a PSSM query's warning label keeps its
                 // title rule in every round (`PsiSearch::warning_title`).
                 search.warning_title = args
                     .psi_search
                     .as_deref()
                     .and_then(|psi| psi.warning_title.clone());
-                search.setup_messages = crate::algorithm::psiblast::in_pssm::setup_messages(
-                    &search,
-                    setup_mode,
-                    &args.matrix_name,
-                );
                 round_args.psi_search = Some(Arc::new(search));
                 round_args.comp_based_stats.mode = pssm_round_mode;
             }

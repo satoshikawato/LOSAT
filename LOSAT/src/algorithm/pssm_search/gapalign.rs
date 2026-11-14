@@ -435,8 +435,16 @@ pub(crate) fn pssm_get_offsets_for_gapped_alignment<R: PssmRows>(
 ///
 ///     return best_score;
 /// ```
+/// The direction is a constant (`REVERSE`, one function for each), and each row reads its columns
+/// in three runs (series PR, item PS12s, D5): before, inside and after the columns whose subject
+/// letter is in `subject` (`subject_columns`, once per call), the runs outside reading 0, the
+/// value `subject_letter` gives there (the sentinel, NCBI's read past it). The statements, their
+/// order and the values read are those above; the cells' reads need no bounds checks.
+// Out of line, as before PS12s (one function for each direction): inlined into a caller's loop
+// (RPS-BLAST's whole preliminary search) its registers spill.
+#[inline(never)]
 #[allow(clippy::too_many_arguments)]
-fn semi_gapped_align_score_only<R: PssmRows>(
+fn semi_gapped_align_score_only<R: PssmRows, const REVERSE: bool>(
     rows: &R,
     m: usize,
     query_offset: usize,
@@ -446,7 +454,6 @@ fn semi_gapped_align_score_only<R: PssmRows>(
     gap_open: i32,
     gap_extend: i32,
     x_drop: i32,
-    reverse: bool,
     scratch: &mut PssmGapScratch,
 ) -> (usize, usize, i32) {
     let gap_open_extend = gap_open + gap_extend;
@@ -455,7 +462,12 @@ fn semi_gapped_align_score_only<R: PssmRows>(
         return (0, 0, 0);
     }
     scratch.reserve_dp(n);
-    let dp = &mut scratch.dp;
+    // The cells the DP addresses: 0 to N + 1 (`b_size` is at most N + 1).
+    let dp = &mut scratch.dp[..n + 2];
+    // The subject letters of the DP's columns, taken once (D5 of PS12s): column `b_index` reads
+    // `subject_letter(subject, s_base, n, b_index, REVERSE)`, which is a letter of `subject` for
+    // the columns `inside` and 0 (the sentinel's value, NCBI's read past it) for the others.
+    let (inside, letters) = subject_columns::<REVERSE>(subject, s_base, n);
     let mut score = -gap_open_extend;
     dp[0].best = 0;
     dp[0].best_gap = -gap_open_extend;
@@ -475,42 +487,76 @@ fn semi_gapped_align_score_only<R: PssmRows>(
     let mut b_offset = 0usize;
     let mut first_b_index = 0usize;
     for a_index in 1..=m {
-        let matrix_row = pssm_row(rows, m, a_index, query_offset, reverse);
+        let matrix_row = pssm_row(rows, m, a_index, query_offset, REVERSE);
         let mut score = MININT;
         let mut score_gap_row = MININT;
         let mut last_b_index = first_b_index;
-        let mut b_index = first_b_index;
-        while b_index < b_size {
-            let letter = subject_letter(subject, s_base, n, b_index, reverse);
-            let mut score_gap_col = dp[b_index].best_gap;
-            let next_score = dp[b_index].best + matrix_row[letter as usize];
-            if score < score_gap_col {
-                score = score_gap_col;
-            }
-            if score < score_gap_row {
-                score = score_gap_row;
-            }
-            if best_score - score > x_dropoff {
-                if b_index == first_b_index {
-                    first_b_index += 1;
+        // The column of the row's last new best score (NCBI's `*a_offset = a_index; *b_offset =
+        // b_index` at each one), `usize::MAX` while the row has none.
+        let mut row_best = usize::MAX;
+        // The row's columns `first_b_index..b_size` in order, in three runs: before the columns
+        // whose letter is in `subject`, those, after them.
+        let start = first_b_index;
+        let end = b_size.max(start);
+        let lo = inside.start.clamp(start, end);
+        let hi = inside.end.clamp(lo, end);
+        {
+            // One cell of the row (the statements of NCBI's inner loop, in its order).
+            let mut cell = |b_index: usize, dp_cell: &mut GapDp, letter: u8| {
+                let mut score_gap_col = dp_cell.best_gap;
+                let next_score = dp_cell.best + matrix_row[letter as usize];
+                if score < score_gap_col {
+                    score = score_gap_col;
+                }
+                if score < score_gap_row {
+                    score = score_gap_row;
+                }
+                if best_score - score > x_dropoff {
+                    if b_index == first_b_index {
+                        first_b_index += 1;
+                    } else {
+                        dp_cell.best = MININT;
+                    }
                 } else {
-                    dp[b_index].best = MININT;
+                    last_b_index = b_index;
+                    if score > best_score {
+                        best_score = score;
+                        row_best = b_index;
+                    }
+                    score_gap_row -= gap_extend;
+                    score_gap_col -= gap_extend;
+                    dp_cell.best_gap = (score - gap_open_extend).max(score_gap_col);
+                    score_gap_row = (score - gap_open_extend).max(score_gap_row);
+                    dp_cell.best = score;
                 }
-            } else {
-                last_b_index = b_index;
-                if score > best_score {
-                    best_score = score;
-                    a_offset = a_index;
-                    b_offset = b_index;
-                }
-                score_gap_row -= gap_extend;
-                score_gap_col -= gap_extend;
-                dp[b_index].best_gap = (score - gap_open_extend).max(score_gap_col);
-                score_gap_row = (score - gap_open_extend).max(score_gap_row);
-                dp[b_index].best = score;
+                score = next_score;
+            };
+            for (b_index, dp_cell) in (start..lo).zip(&mut dp[start..lo]) {
+                cell(b_index, dp_cell, 0);
             }
-            score = next_score;
-            b_index += 1;
+            if lo < hi {
+                let width = hi - lo;
+                let cells = &mut dp[lo..hi];
+                if REVERSE {
+                    // Column `b` reads `letters[n - 1 - b]`: the run reads its letters backward.
+                    let run = &letters[n - hi..n - lo];
+                    for k in 0..width {
+                        cell(lo + k, &mut cells[k], run[width - 1 - k]);
+                    }
+                } else {
+                    let run = &letters[lo..hi];
+                    for k in 0..width {
+                        cell(lo + k, &mut cells[k], run[k]);
+                    }
+                }
+            }
+            for (b_index, dp_cell) in (hi..end).zip(&mut dp[hi..end]) {
+                cell(b_index, dp_cell, 0);
+            }
+        }
+        if row_best != usize::MAX {
+            a_offset = a_index;
+            b_offset = row_best;
         }
         if first_b_index == b_size {
             break;
@@ -532,6 +578,33 @@ fn semi_gapped_align_score_only<R: PssmRows>(
         }
     }
     (a_offset, b_offset, best_score)
+}
+
+/// The DP columns of `semi_gapped_align_score_only` whose subject letter is in `subject`, and
+/// the letters they read; every other column reads 0 (`subject_letter`). Forward, column `b` (0
+/// to N) reads `subject[base + b + 1]`: the columns `0..hi` while that index is in `subject`,
+/// column `b` reading `letters[b]` (`letters` from `base + 1`). Backward, column `b` reads
+/// `subject[base + N - 1 - b]` for `b` below N and 0 at N (NCBI's `b_ptr` before the first
+/// letter): the columns `lo..N` whose index is in `subject`, column `b` reading
+/// `letters[N - 1 - b]` (`letters` from `base`, `N - lo` of them).
+fn subject_columns<const REVERSE: bool>(
+    subject: &[u8],
+    base: usize,
+    n: usize,
+) -> (std::ops::Range<usize>, &[u8]) {
+    if REVERSE {
+        let lo = (base + n).saturating_sub(subject.len()).min(n);
+        match subject.get(base..base + n - lo) {
+            Some(letters) => (lo..n, letters),
+            None => (n..n, &[]),
+        }
+    } else {
+        let hi = (n + 1).min(subject.len().saturating_sub(base + 1));
+        match subject.get(base + 1..base + 1 + hi) {
+            Some(letters) => (0..hi, letters),
+            None => (0..0, &[]),
+        }
+    }
 }
 
 /// A score-only gapped alignment: the alignment's ends and score.
@@ -627,7 +700,7 @@ pub(crate) fn pssm_score_only_gapped_alignment<R: PssmRows>(
     let (s_length, adjusted_length, subject_shift) =
         adjust_subject_range(s_off + 1, subject_length, q_length, query_length);
     // `q_length` and `s_length` are at least 1 here.
-    let (private_q_start, private_s_start, score_left) = semi_gapped_align_score_only(
+    let (private_q_start, private_s_start, score_left) = semi_gapped_align_score_only::<R, true>(
         rows,
         q_length,
         q_off,
@@ -637,14 +710,13 @@ pub(crate) fn pssm_score_only_gapped_alignment<R: PssmRows>(
         gap_open,
         gap_extend,
         x_drop,
-        true,
         scratch,
     );
     let query_start = (q_length - private_q_start) as i32;
     let subject_start = (s_length - private_s_start + subject_shift) as i32;
     let (query_stop, subject_stop, score_right) =
         if q_length < query_length && s_length < adjusted_length {
-            let (q_stop, s_stop, score_right) = semi_gapped_align_score_only(
+            let (q_stop, s_stop, score_right) = semi_gapped_align_score_only::<R, false>(
                 rows,
                 query_length - q_length,
                 q_off,
@@ -654,7 +726,6 @@ pub(crate) fn pssm_score_only_gapped_alignment<R: PssmRows>(
                 gap_open,
                 gap_extend,
                 x_drop,
-                false,
                 scratch,
             );
             (
@@ -1432,5 +1503,201 @@ mod tests {
             pssm_get_start_for_gapped_alignment(&rows, &query, 4, 10, 4),
             9
         );
+    }
+
+    /// The score-only DP before D5 of PS12s (`reverse` a value, each column's letter read by
+    /// `subject_letter`): the reference that `semi_gapped_align_score_only` must equal.
+    #[allow(clippy::too_many_arguments)]
+    fn score_only_reference<R: PssmRows>(
+        rows: &R,
+        m: usize,
+        query_offset: usize,
+        subject: &[u8],
+        s_base: usize,
+        n: usize,
+        gap_open: i32,
+        gap_extend: i32,
+        x_drop: i32,
+        reverse: bool,
+    ) -> (usize, usize, i32) {
+        let gap_open_extend = gap_open + gap_extend;
+        let x_dropoff = x_drop.max(gap_open_extend);
+        if n == 0 || m == 0 {
+            return (0, 0, 0);
+        }
+        let mut dp = vec![
+            GapDp {
+                best: MININT,
+                best_gap: MININT,
+            };
+            n + 2
+        ];
+        let mut score = -gap_open_extend;
+        dp[0].best = 0;
+        dp[0].best_gap = -gap_open_extend;
+        let mut i = 1usize;
+        while i <= n {
+            if score < -x_dropoff {
+                break;
+            }
+            dp[i].best = score;
+            dp[i].best_gap = score - gap_open_extend;
+            score -= gap_extend;
+            i += 1;
+        }
+        let mut b_size = i;
+        let mut best_score = 0i32;
+        let mut a_offset = 0usize;
+        let mut b_offset = 0usize;
+        let mut first_b_index = 0usize;
+        for a_index in 1..=m {
+            let matrix_row = pssm_row(rows, m, a_index, query_offset, reverse);
+            let mut score = MININT;
+            let mut score_gap_row = MININT;
+            let mut last_b_index = first_b_index;
+            let mut b_index = first_b_index;
+            while b_index < b_size {
+                let letter = subject_letter(subject, s_base, n, b_index, reverse);
+                let mut score_gap_col = dp[b_index].best_gap;
+                let next_score = dp[b_index].best + matrix_row[letter as usize];
+                if score < score_gap_col {
+                    score = score_gap_col;
+                }
+                if score < score_gap_row {
+                    score = score_gap_row;
+                }
+                if best_score - score > x_dropoff {
+                    if b_index == first_b_index {
+                        first_b_index += 1;
+                    } else {
+                        dp[b_index].best = MININT;
+                    }
+                } else {
+                    last_b_index = b_index;
+                    if score > best_score {
+                        best_score = score;
+                        a_offset = a_index;
+                        b_offset = b_index;
+                    }
+                    score_gap_row -= gap_extend;
+                    score_gap_col -= gap_extend;
+                    dp[b_index].best_gap = (score - gap_open_extend).max(score_gap_col);
+                    score_gap_row = (score - gap_open_extend).max(score_gap_row);
+                    dp[b_index].best = score;
+                }
+                score = next_score;
+                b_index += 1;
+            }
+            if first_b_index == b_size {
+                break;
+            }
+            if last_b_index + 1 < b_size {
+                b_size = last_b_index + 1;
+            } else {
+                while score_gap_row >= (best_score - x_dropoff) && b_size <= n {
+                    dp[b_size].best = score_gap_row;
+                    dp[b_size].best_gap = score_gap_row - gap_open_extend;
+                    score_gap_row -= gap_extend;
+                    b_size += 1;
+                }
+            }
+            if b_size <= n {
+                dp[b_size].best = MININT;
+                dp[b_size].best_gap = MININT;
+                b_size += 1;
+            }
+        }
+        (a_offset, b_offset, best_score)
+    }
+
+    // D5 of PS12s: the score-only DP with `reverse` a constant and the subject's letters taken
+    // once per call gives the reference's ends and score, on random PSSMs and subjects, both
+    // directions, scratch kept from call to call, and calls whose columns read the sentinel or
+    // past the subject (letter 0): extensions that reach the subject's end, a subject cut short,
+    // a base past it.
+    #[test]
+    fn the_score_only_dp_equals_its_reference() {
+        let mut state = 7u64;
+        let mut next = |bound: u64| -> u64 {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (state >> 33) % bound
+        };
+        let mut scratch = PssmGapScratch::new();
+        for case in 0..3000 {
+            let length = 1 + next(120) as usize;
+            let rows = QueryPssm {
+                rows: (0..length)
+                    .map(|_| {
+                        let mut row = [0i32; BLASTAA_SIZE];
+                        for cell in row.iter_mut() {
+                            *cell = next(16) as i32 - 9;
+                        }
+                        // Matches often score well, so that alignments grow.
+                        row[(next(20) + 1) as usize] = 5 + next(6) as i32;
+                        row
+                    })
+                    .collect(),
+            };
+            let subject_length = next(150) as usize;
+            let mut subject: Vec<u8> = (0..subject_length).map(|_| 1 + next(24) as u8).collect();
+            if next(4) != 0 {
+                subject.push(0);
+            }
+            let m = 1 + next(length as u64) as usize;
+            let query_offset = next((length - m + 1) as u64) as usize;
+            let s_base = next(subject.len() as u64 + 3) as usize;
+            let n = next(subject.len() as u64 + 4) as usize;
+            let (gap_open, gap_extend) = [(11, 1), (1100, 100), (0, 1), (9, 2)][next(4) as usize];
+            let x_drop = [0, 7, 38, 160, 3000][next(5) as usize];
+            for reverse in [false, true] {
+                // The reverse DP reads rows `m - a_index` (0 to m - 1), the forward one rows
+                // `a_index + query_offset` (up to m + query_offset): both inside `length`.
+                if !reverse && m + query_offset >= length {
+                    continue;
+                }
+                let expected = score_only_reference(
+                    &rows,
+                    m,
+                    query_offset,
+                    &subject,
+                    s_base,
+                    n,
+                    gap_open,
+                    gap_extend,
+                    x_drop,
+                    reverse,
+                );
+                let got = if reverse {
+                    semi_gapped_align_score_only::<_, true>(
+                        &rows,
+                        m,
+                        query_offset,
+                        &subject,
+                        s_base,
+                        n,
+                        gap_open,
+                        gap_extend,
+                        x_drop,
+                        &mut scratch,
+                    )
+                } else {
+                    semi_gapped_align_score_only::<_, false>(
+                        &rows,
+                        m,
+                        query_offset,
+                        &subject,
+                        s_base,
+                        n,
+                        gap_open,
+                        gap_extend,
+                        x_drop,
+                        &mut scratch,
+                    )
+                };
+                assert_eq!(got, expected, "case {case} reverse {reverse}");
+            }
+        }
     }
 }

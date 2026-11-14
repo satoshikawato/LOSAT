@@ -19,6 +19,9 @@ pub const STREAM_CUSTOM: u32 = 4;
 /// The inflated bytes of a compressed source file (`inflate_chunk`, `inflate_end`;
 /// docs/web/abi_v2.md §4, §5).
 pub const STREAM_INFLATED: u32 = 5;
+/// The files of a run besides its outputs (the file of `-logfile`): a ZIP archive, emitted after
+/// the run, also when it failed (docs/web/abi_v2.md §5).
+pub const STREAM_RUN_FILES: u32 = 8;
 
 #[cfg(target_arch = "wasm32")]
 #[link(wasm_import_module = "losat_host")]

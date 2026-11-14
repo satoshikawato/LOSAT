@@ -321,6 +321,28 @@ impl RpsVolumeFiles {
         lengths: &[u32],
         program: &str,
     ) -> Result<Self, RpsVolumeFault> {
+        Self::open_checking(base, lengths, program, true)
+    }
+
+    /// `open_for` of files that `open_for` has checked in this run (series PR, item PS12s, D6):
+    /// NCBI's own errors of the files (a missing file, a magic number) and LOSAT's refusals of
+    /// their layout come as there, but the table's hits are not read again (`check_cells`):
+    /// only their presence bits are made.
+    pub(crate) fn open_checked(
+        base: &Path,
+        lengths: &[u32],
+        program: &str,
+    ) -> Result<Self, RpsVolumeFault> {
+        Self::open_checking(base, lengths, program, false)
+    }
+
+    /// `open_for`, the table's hits checked (`check_cells`) when `check_hits`.
+    fn open_checking(
+        base: &Path,
+        lengths: &[u32],
+        program: &str,
+        check_hits: bool,
+    ) -> Result<Self, RpsVolumeFault> {
         if cfg!(target_endian = "big") {
             return Err(RpsOpenError::Refused(format!(
                 "a profile database (its files are little endian) on a big-endian platform is not supported by LOSAT's {program}"
@@ -492,7 +514,9 @@ impl RpsVolumeFiles {
         if files.cells().is_none() || files.overflow().is_none() {
             return Err(refused(".loo file is shorter than its backbone").into());
         }
-        files.check_cells(num_rows).map_err(|what| refused(&what))?;
+        files
+            .check_cells(num_rows, check_hits)
+            .map_err(|what| refused(&what))?;
         if alphabet == 26 {
             files.narrow = Some(files.widen_rows(num_rows));
         }
@@ -668,7 +692,7 @@ impl RpsVolumeFiles {
     ///         }
     ///     }
     /// ```
-    fn check_cells(&mut self, num_rows: usize) -> Result<(), String> {
+    fn check_cells(&mut self, num_rows: usize, check_hits: bool) -> Result<(), String> {
         let cells = self.cells().expect("checked by the caller");
         let overflow = self.overflow().expect("checked by the caller");
         let in_rows = |entry: i32| {
@@ -683,6 +707,9 @@ impl RpsVolumeFiles {
                 continue;
             }
             pv[index / 64] |= 1u64 << (index % 64);
+            if !check_hits {
+                continue;
+            }
             if num_used > RPS_MAX_SCAN_HITS {
                 return Err(format!(
                     ".loo word {index} has {num_used} hits, more than one scan takes (NCBI BLAST+ does not end)"
@@ -1016,6 +1043,38 @@ mod tests {
         assert!(matches!(
             RpsVolumeFiles::open(&base, &[3, 2]),
             Err(RpsOpenError::Refused(_))
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // D6 of PS12s: the files of a volume checked once in the run open again without LOSAT's check of
+    // the table's hits (`open_checked`): the presence bits are the same, and a hit outside the
+    // rows, which `open_for` refuses, is not read again.
+    #[test]
+    fn files_checked_in_the_run_open_without_the_check_of_the_hits() {
+        let dir = scratch("checked");
+        let base = write_volume(&dir, 28, AUX);
+        let checked = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
+        let reopened = RpsVolumeFiles::open_checked(&base, &[3, 2], "RPSBLAST").unwrap();
+        assert_eq!(reopened.pv(), checked.pv());
+        assert_eq!(reopened.rows(), checked.rows());
+        drop((checked, reopened));
+        // The hit of word 5 at row 99 of 7 (cell 5's first entry, byte 40 + 5 * 16 + 4).
+        let mut loo = std::fs::read(base.with_extension("loo")).unwrap();
+        loo[124..128].copy_from_slice(&99i32.to_le_bytes());
+        std::fs::write(base.with_extension("loo"), &loo).unwrap();
+        assert!(matches!(
+            RpsVolumeFiles::open(&base, &[3, 2]),
+            Err(RpsOpenError::Refused(text)) if text.contains(".loo word 5 names a position")
+        ));
+        let reopened = RpsVolumeFiles::open_checked(&base, &[3, 2], "RPSBLAST").unwrap();
+        assert_ne!(reopened.pv()[0] & (1 << 5), 0);
+        drop(reopened);
+        // NCBI's own errors of the files stay: a missing .loo.
+        std::fs::remove_file(base.with_extension("loo")).unwrap();
+        assert!(matches!(
+            RpsVolumeFiles::open_checked(&base, &[3, 2], "RPSBLAST"),
+            Err(RpsVolumeFault::Files(RpsOpenError::Ncbi(_)))
         ));
         let _ = std::fs::remove_dir_all(&dir);
     }

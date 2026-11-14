@@ -44,7 +44,7 @@ function setup(
   });
   const fake = new FakeEngine();
   const draft = new SearchDraft({
-    engine: { describe: fake.describe.bind(fake), validate: async () => ({ ok: true }), prepare: () => undefined },
+    engine: { describe: fake.describe.bind(fake), start: fake.start.bind(fake), validate: async () => ({ ok: true }), prepare: () => undefined },
     data,
     enqueueAll: async (batch) => ({ ok: true, runIds: batch.map((_, i) => `r${i}`) }),
     fetcher: new FakeAccessionFetcher(),

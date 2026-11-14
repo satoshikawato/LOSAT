@@ -122,6 +122,16 @@ pub unsafe extern "C" fn losat_web2_describe(program_ptr: *const u8, program_len
 /// # Safety
 /// The pointer arguments must describe readable buffers of the given lengths.
 #[no_mangle]
+pub unsafe extern "C" fn losat_web2_start(argv_ptr: *const u8, argv_len: usize) -> i32 {
+    guarded(|| {
+        run::emit_start(&words(text(argv_ptr, argv_len, "argv")?))?;
+        Ok(0)
+    })
+}
+
+/// # Safety
+/// The pointer arguments must describe readable buffers of the given lengths.
+#[no_mangle]
 pub unsafe extern "C" fn losat_web2_validate(argv_ptr: *const u8, argv_len: usize) -> i32 {
     guarded(|| {
         run::validate(&words(text(argv_ptr, argv_len, "argv")?))?;

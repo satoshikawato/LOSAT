@@ -965,19 +965,25 @@ fn run_inner(
         if !query_is_regular {
             archive::refuse_irregular_query(archived, program.upper)?;
         }
-        let refusable =
-            archive::prescan_query_titles(
-                query_prescan
-                    .as_ref()
-                    .expect("the second handle of a regular query"),
-                &query_settings,
-                args.lcase_masking,
-                &options,
-                batch_size,
-                query_range.as_ref(),
-                archived,
-                strategic,
-            )? || archive::check_request_titles(&subjects, "subject", archived, strategic).is_err();
+        let refusable = archive::prescan_query_titles(
+            query_prescan
+                .as_ref()
+                .expect("the second handle of a regular query"),
+            &query_settings,
+            args.lcase_masking,
+            &options,
+            batch_size,
+            query_range.as_ref(),
+            archived,
+            strategic,
+        )? || archive::check_request_titles(
+            &subjects,
+            "subject",
+            program.upper,
+            archived,
+            strategic,
+        )
+        .is_err();
         if let (true, Some(hold)) = (refusable, &hold) {
             hold.hold();
         }
@@ -1024,7 +1030,7 @@ fn run_inner(
     // of the reports, as rpsblast refuses them (`args::RpsTblastnSearch::for_database`, once per
     // run).
     if let Some(search) = options.rpstblastn.clone() {
-        let search = search.for_database(&options, database.as_ref())?;
+        let search = search.for_database(&options, database.as_ref(), strategy.is_some())?;
         // What each batch's RPS set-up writes into the options handle, which the search strategy's
         // later requests hold (`OptionsHandle::pass`): the search for the database knows its
         // volumes' costs.
@@ -1226,7 +1232,12 @@ fn run_inner(
             // is dropped, `run`); only a run whose read before the search found such a title can
             // refuse (`titles_may_refuse`).
             if titles_may_refuse {
-                archive::check_batch_titles(queries, subject_records, queries_before == 0)?;
+                archive::check_batch_titles(
+                    queries,
+                    subject_records,
+                    queries_before == 0,
+                    program.upper,
+                )?;
             }
             return archive::write_blastx_archive(
                 &archive::ArchiveCall {
@@ -1749,6 +1760,7 @@ pub(super) fn database_search_error(
     // already (the exception of a query split size that NCBI cannot convert, `split::split_sizes`).
     if error.is::<super::parameters::SearchSpaceOverflow>()
         || error.is::<super::split::QuerySplitRefusal>()
+        || error.is::<super::preliminary::OneHitWindowRefusal>()
         || error.is::<NativeError>()
     {
         return error;
@@ -2620,15 +2632,18 @@ impl XReaderPrep {
         if self.failed.load(Ordering::Acquire) {
             slots.iter_mut().for_each(|slot| **slot = None);
         } else if let Some(layout) = &self.layout {
-            let shape = std::sync::Arc::new(ReaderBatchShape::reduce(
+            let shape = ReaderBatchShape::reduce(
                 layout,
                 slots
                     .iter()
                     .map(|slot| slot.as_ref().expect("a prepared unit")),
-            ));
-            for slot in &mut slots {
-                attach(slot.as_mut().expect("a prepared unit"), &shape);
-            }
+            );
+            attach(
+                slots
+                    .iter_mut()
+                    .map(|slot| slot.as_mut().expect("a prepared unit")),
+                shape,
+            );
         }
         drop(slots);
         let mut gate = self.gate.lock().expect("the reader batch's gate");
@@ -2764,8 +2779,16 @@ impl XUnit {
         match (taken, &prep.layout) {
             (Some(unit), _) => Ok(Some(unit)),
             (None, Some(layout)) => {
+                // Phase 1 failed: a unit's preparation fails the reader batch, as NCBI's set-up
+                // fails it before any search (and as with one thread), so nothing of this unit's
+                // search is written. Its one-hit windows of `-window_size 0` are then not refused
+                // at the buffer's end (`preliminary::refuse_window_past_buffers`), whose bytes
+                // after this unit are not known here: a refusal must not take the batch's error's
+                // place.
                 super::split::split_sizes(layout.query_count)?;
-                prepare_unit(self.queries(), layout, options, subjects).map(Some)
+                let mut unit = prepare_unit(self.queries(), layout, options, subjects)?;
+                unit.prepared.reader_buffer_after = usize::MAX;
+                Ok(Some(unit))
             }
             (None, None) => Ok(None),
         }

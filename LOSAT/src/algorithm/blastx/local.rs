@@ -203,6 +203,7 @@ fn search_records(
         // already (`native::database_search_error`).
         if error.is::<super::parameters::SearchSpaceOverflow>()
             || error.is::<super::split::QuerySplitRefusal>()
+            || error.is::<super::preliminary::OneHitWindowRefusal>()
             || error.is::<crate::cli::NativeError>()
         {
             error
@@ -456,7 +457,8 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
                 deliver,
                 &mut |_| Ok(()),
             )
-        }) || (database.is_none() && archive::check_titles(subjects, "subject").is_err()));
+        }) || (database.is_none()
+            && archive::check_titles(subjects, "subject", resolved[0].program().upper).is_err()));
     // A run in which a `-subject` title (refused with its first hit) or the message of a query
     // (refused where NCBI does not search its batch) could still be refused by those documents
     // holds every format in order, as the archive's titles do and as the command line holds its
@@ -726,6 +728,7 @@ fn write_run(
                 queries,
                 database.is_none().then_some(subjects),
                 queries_before == 0,
+                search_options.program().upper,
             )?;
         }
         let hits = match made_hits {

@@ -200,11 +200,11 @@ fn run_local_does_not_write_outfmt_13_and_14_in_tblastn_and_tblastx() {
     }
 }
 
-/// A receiver of side files that keeps them in memory (`SideFileReceiver`).
+/// A receiver of side files that keeps them in memory (`report::run_files::FileReceiver`).
 #[derive(Default)]
 struct Received(std::sync::Mutex<Vec<(String, Vec<u8>)>>);
 
-impl crate::report::blast_xml2::SideFileReceiver for Received {
+impl crate::report::run_files::FileReceiver for Received {
     fn receive(&self, name: &[u8], bytes: &[u8]) -> std::io::Result<()> {
         self.0
             .lock()

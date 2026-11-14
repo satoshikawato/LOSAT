@@ -64,13 +64,13 @@
 use super::super::super::{DiagHashTable, UngappedHit, DIAGHASH_NUM_BUCKETS};
 use super::super::{Resume, Seed, SeedOut};
 use super::{
-    bucket_of, lock, merge, pause, read, run_participants, write, AtHome, Failing, InStage,
-    OwnLines, PartScratch, PartState, PartStats, Run, HELPER_STALL, IN_STAGE,
+    bucket_of, lock, merge, pause, run_participants, AtHome, Failing, InStage, OwnLines,
+    PartScratch, PartState, PartStats, Run, HELPER_STALL, IN_STAGE,
 };
-use std::cell::Cell;
+use std::cell::{Cell, UnsafeCell};
 use std::mem::MaybeUninit;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Mutex, OnceLock, PoisonError, RwLock};
+use std::sync::{Mutex, OnceLock, PoisonError};
 
 /// No NCBI counterpart: reads LOSAT_X_SEEDPIECE once (a strict-set switch that carries a number:
 /// on unless it is `0`, with pieces of the number of seeds given from 2 to 2^17, else of
@@ -510,12 +510,84 @@ impl SeedOut for PieceSink<'_> {
     }
 }
 
-/// No NCBI counterpart (scheduling only): a strip's pieces: their slots in the pool, in order,
-/// and how many there are, with `DONE` once the strip's scan is done.
+/// No NCBI counterpart (scheduling only): how many pieces a strip has, with `DONE` once its scan
+/// is done (their slots are in `PieceSlots`).
 #[derive(Default)]
 struct StripState {
-    pieces: Mutex<Vec<u32>>,
     published: AtomicU32,
+}
+
+/// No NCBI counterpart (scheduling only): the slot in the pool of each piece a partition may still
+/// fold, which the participants read without a lock: piece k of strip i at `(i % strips) *
+/// pieces + k % pieces`, for `strips` the strips handed out past the slowest partition's (`ahead`)
+/// and `pieces` the slots of the pool. Piece k's entry is written by the piece's producer before
+/// the strip's count says it is there (`Release`) and read after the count is read (`Acquire`),
+/// and it is not written again while a partition has piece k to fold or its slot is to go back:
+/// that piece holds its slot until every partition has folded it (`freed`), and so do the later
+/// pieces, so a strip's piece k + `pieces` would need one more slot than the pool has; and strip
+/// i + `strips` is handed out only once every partition has left strip i and its pieces have gone
+/// back (under the schedule's lock, which the producer takes first).
+/// (A lock of the strip's list of slots and a read lock of the slot, taken by every partition for
+/// every piece, wrote the strip's and the slot's lines that the other partitions read: BLASTN-short
+/// of 30,000 short queries x 3 Mb at 16 threads, the participants took x4 the loads served from
+/// another core's cache of the strips stage's, 73 % of them at the slot's lock and the strip's
+/// count, line EB s19y.)
+struct PieceSlots {
+    slots: Vec<AtomicU32>,
+    strips: usize,
+    pieces: usize,
+}
+
+impl PieceSlots {
+    fn new(strips: usize, pieces: usize) -> Self {
+        let (strips, pieces) = (strips.max(1), pieces.max(1));
+        PieceSlots {
+            slots: (0..strips * pieces).map(|_| AtomicU32::new(0)).collect(),
+            strips,
+            pieces,
+        }
+    }
+
+    #[inline(always)]
+    fn at(&self, strip: usize, k: u32) -> &AtomicU32 {
+        &self.slots[(strip % self.strips) * self.pieces + k as usize % self.pieces]
+    }
+}
+
+/// No NCBI counterpart (scheduling only): a slot of the pool. Its arena is written by the one
+/// participant that took the slot from the schedule, and read by the folds once its piece is
+/// published, until every partition has folded it (`Slot::fill`, `Slot::folded`); no lock.
+struct Slot<'s>(UnsafeCell<Arena<'s>>);
+
+// SAFETY: the arena is shared between threads only as `Slot::fill` and `Slot::folded` say: one
+// writer, or readers after the writer's release; `Arena` itself holds plain data and slices.
+unsafe impl Sync for Slot<'_> {}
+
+impl<'s> Slot<'s> {
+    /// The arena, to fill a piece in it.
+    ///
+    /// # Safety
+    /// The caller took the slot from the schedule (`Sched::take`), so no other participant
+    /// fills it, and every partition folded the piece it held before, its lane stored after the
+    /// fold (`Release`) and read before the slot went back to the schedule (`Acquire`).
+    #[allow(clippy::mut_from_ref)]
+    #[inline(always)]
+    unsafe fn fill(&self) -> &mut Arena<'s> {
+        // SAFETY: as the caller says, nothing else refers to the arena.
+        unsafe { &mut *self.0.get() }
+    }
+
+    /// The arena of a published piece, to fold it.
+    ///
+    /// # Safety
+    /// The caller read the strip's count with the piece in it (`Acquire`, after the producer's
+    /// `Release`) and has not stored its partition's lane past the piece, so the slot has not
+    /// gone back to the schedule.
+    #[inline(always)]
+    unsafe fn folded(&self) -> &Arena<'s> {
+        // SAFETY: as the caller says, no one writes the arena while the reference lives.
+        unsafe { &*self.0.get() }
+    }
 }
 
 /// No NCBI counterpart (scheduling only): a strip whose scan stopped at the end of a piece:
@@ -610,12 +682,12 @@ where
     links.truncate(slots_n);
     links.resize_with(slots_n, Links::default);
     let mut store = std::mem::take(&mut scratch.store);
-    // (each slot's lock and arena on lines of their own: a participant takes the write lock of
-    // the slot it fills while others take the read locks of their neighbours to fold them)
-    let pool: Vec<OwnLines<RwLock<Arena<'_>>>> = store
+    // (each slot's arena on lines of its own: a participant writes the slot it fills while others
+    // read their neighbours to fold them)
+    let pool: Vec<OwnLines<Slot<'_>>> = store
         .slots(slots_n, Arena::blocks(parts, piece_seeds) * BLOCK)
         .zip(links)
-        .map(|((seeds, pos), links)| OwnLines(RwLock::new(Arena { seeds, pos, links })))
+        .map(|((seeds, pos), links)| OwnLines(Slot(UnsafeCell::new(Arena { seeds, pos, links }))))
         .collect();
     let sched = Mutex::new(Sched {
         parked: Vec::new(),
@@ -633,9 +705,10 @@ where
     let lanes: Vec<OwnLines<AtomicU64>> = (0..parts).map(|_| OwnLines(AtomicU64::new(0))).collect();
     let homes: Vec<AtomicBool> = (0..parts).map(|_| AtomicBool::new(false)).collect();
     // (each strip's state on lines of its own: the participant that makes a piece of a strip
-    // writes its pieces and count while others read those of the strips they fold)
+    // writes its count while others read those of the strips they fold)
     let strips: Vec<OwnLines<StripState>> =
         (0..n).map(|_| OwnLines(StripState::default())).collect();
+    let piece_slots = PieceSlots::new(ahead.min(n), slots_n);
     // the pieces below it have gone back to the pool (every partition folded them)
     let freed = AtomicU64::new(0);
     let produced = AtomicU64::new(0);
@@ -662,12 +735,16 @@ where
                 let (fs, fk) = (strip_of(f), f as u32);
                 let (ms, mk) = (strip_of(min_next), min_next as u32);
                 for (i, strip) in strips.iter().enumerate().take((ms + 1).min(n)).skip(fs) {
-                    let pieces = lock(&strip.0.pieces);
-                    let from = if i == fs { fk as usize } else { 0 };
-                    let to = if i == ms { mk as usize } else { pieces.len() };
-                    if from < to {
-                        s.free.extend_from_slice(&pieces[from..to]);
-                    }
+                    let from = if i == fs { fk } else { 0 };
+                    let to = if i == ms {
+                        mk
+                    } else {
+                        strip.0.published.load(Ordering::Acquire) & !DONE
+                    };
+                    // (the pieces below `min_next`: every partition folded them, after their
+                    // producers wrote their slots)
+                    s.free
+                        .extend((from..to).map(|k| piece_slots.at(i, k).load(Ordering::Relaxed)));
                 }
                 free_n.store(s.avail(slots_n), Ordering::Relaxed);
                 given_n.store(s.free.len(), Ordering::Relaxed);
@@ -735,8 +812,9 @@ where
             (strip, from, k, slot)
         };
         let (next, k_end, empty) = {
-            let mut guard = write(&pool[slot as usize].0);
-            let arena = &mut *guard;
+            // SAFETY: the slot was taken from the schedule just now, and a slot goes back to it
+            // only when every partition's lane is past its piece (`slowest`).
+            let arena = unsafe { pool[slot as usize].0.fill() };
             arena.reset(parts, piece_seeds);
             let mut sink = PieceSink {
                 table: &table,
@@ -760,9 +838,11 @@ where
             given_n.store(s.free.len(), Ordering::Relaxed);
             st.published.load(Ordering::Relaxed)
         } else {
-            let mut pieces = lock(&st.pieces);
-            pieces.push(slot);
-            pieces.len() as u32
+            // (one participant at a time makes the strip's pieces: the parked strip passes
+            // through the schedule's lock, so the count is the one it last stored)
+            let k = st.published.load(Ordering::Relaxed) & !DONE;
+            piece_slots.at(strip, k).store(slot, Ordering::Relaxed);
+            k + 1
         };
         st.published.store(
             count | if next.is_none() { DONE } else { 0 },
@@ -828,12 +908,22 @@ where
             // (the steps: a piece folded or a strip left; `away` counts the pieces only, so that
             // it stays within `units`, the pieces made times the partitions)
             let (mut folded, mut pieces) = (0u64, 0u64);
+            // (the strip's count as last read: read again only when it says no more)
+            let mut known = (usize::MAX, 0u32);
             while strip_of(v) < n {
                 let (i, k) = (strip_of(v), v as u32);
-                let published = strips[i].0.published.load(Ordering::Acquire);
+                let published = if known.0 == i && k < known.1 & !DONE {
+                    known.1
+                } else {
+                    let published = strips[i].0.published.load(Ordering::Acquire);
+                    known = (i, published);
+                    published
+                };
                 if k < published & !DONE {
-                    let slot = lock(&strips[i].0.pieces)[k as usize];
-                    let arena = read(&pool[slot as usize].0);
+                    let slot = piece_slots.at(i, k).load(Ordering::Relaxed);
+                    // SAFETY: the count read above (`Acquire`) has piece k, and p's lane is
+                    // stored past it only after the fold below.
+                    let arena = unsafe { pool[slot as usize].0.folded() };
                     st.out.strip = i as u64;
                     let t0 = timed.then(std::time::Instant::now);
                     let pause0 = st.scan_pause_ns;
@@ -844,7 +934,6 @@ where
                     if owner {
                         *pause_ns += st.scan_pause_ns - pause0;
                     }
-                    drop(arena);
                     v = pack(i, k + 1);
                     pieces += 1;
                 } else if published & DONE != 0 {
@@ -1017,11 +1106,7 @@ where
     scratch.parts = states;
     scratch.arenas = pool
         .into_iter()
-        .map(|a| {
-            a.0.into_inner()
-                .unwrap_or_else(PoisonError::into_inner)
-                .links
-        })
+        .map(|a| a.0 .0.into_inner().links)
         .collect();
     scratch.store = store;
     stats

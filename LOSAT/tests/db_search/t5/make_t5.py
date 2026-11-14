@@ -23,9 +23,16 @@ kind whose title NCBI makes from the source (tpg, emb, gi, pdb with and without 
 for the protein also sp, ref NP_ and WP_, and a title ending in a ", partial [name]" suffix that
 `x_AdjustProteinTitleSuffix` rewrites from the first source). Version 5, for `-taxids` and
 `-negative_taxids` with `-no_taxid_expansion` (NCBI filters no version 4 database by taxid). The
-record with the suffix goes to the version 4 database `psuffix` of its own (blastdbcmd only: the
-search programs refuse its outfmt 0 heading, whose generated title NCBI rewrites the same way,
-`ParsedSubject::title_suffix_adjusted`).
+record with the suffix goes to the version 4 database `psuffix` of its own (written before LOSAT's
+searches wrote such a heading; rows `db.t5.psuffix.*` search it since line RG item T5c).
+
+With `--suffix-only` (`python3 tests/db_search/t5/make_t5.py NCBI_BIN --suffix-only`, line RG item
+T5c) it writes only the protein databases of titles ending in `]` whose end NCBI's
+`x_AdjustProteinTitleSuffix` rewrites from the Bioseq's first source (SUFFIX, SUFFIX_STORED): `psfx`
+(version 5, `-parse_seqids`, `-taxid_map`: a titled line and an untitled one, whose outfmt 0 heading
+shows the generated title, and `lcl|Subject_9nn` records, whose tabular ids are its first word) and
+the version 4 databases `psfs_<taxid>` without `-parse_seqids` (`-taxid`, `psfs_none` without one)
+with the alias `psfs` over them (the tabular ids are the first word of the generated title).
 
 Python 3 standard library only; makeblastdb is NCBI's (the comparison oracle builds the inputs).
 """
@@ -88,6 +95,109 @@ MIX = [
     # A title with the suffix of a source the first line does not have (taxid 0 / 100002).
     ([("gb|AB36{k}001.1|", "alpha, partial [Bacillus sp.]", None), ("gb|AB36{k}002.1|", "", 100002)], "f"),
 ]
+
+
+# The records of `psfx` (line RG item T5c): [(Seq-id, title, taxid or None), ...]. The probe of
+# T5c (`remaining-gaps-20261112/T/t5c/make_probe.py`) with three organelle names more.
+SUFFIX = [
+    [("gb|AC400001.1|", "alpha, partial [Bacillus sp.]", None), ("gb|AD400001.1|", "", 100002)],
+    [("gb|AC400002.1|", "alpha, partial [Bacillus sp.]", 100002), ("gb|AD400002.1|", "", None)],
+    [("gb|AC400003.1|", "beta [bacillus SP.]", 100002), ("gb|AD400003.1|", "", None)],
+    [("gb|AC400004.1|", "gamma (mitochondrion) [Bacillus sp.]", 100002), ("gb|AD400004.1|", "", 100002)],
+    [("gb|AC400005.1|", "delta (foo) [Bacillus sp.]", 100002), ("gb|AD400005.1|", "", None)],
+    [("gb|AC400006.1|", "epsilon [Homo sapiens]", 100002), ("gb|AD400006.1|", "", None)],
+    [("gb|AC400007.1|", "zeta protein, partial [ ]", 100002), ("gb|AD400007.1|", "", None)],
+    [("gb|AC400008.1|", "eta protein, partial []", 100002), ("gb|AD400008.1|", "", None)],
+    [("gb|AC400009.1|", "theta. [Bacillus sp.]", 100002), ("gb|AD400009.1|", "", None)],
+    [("gb|AC400010.1|", "TPA: iota, partial [Bacillus sp.].", 100002), ("gb|AD400010.1|", "", None)],
+    [("gb|AC400011.1|", "kappa, partial (chloroplast) [Bacillus sp.]", 100002), ("gb|AD400011.1|", "", None)],
+    [("gb|AC400012.1|", "lambda (chloroplast), partial [Bacillus sp.]", 100002), ("gb|AD400012.1|", "", None)],
+    [("gb|AC400013.1|", "mu(plasmid) [Bacillus sp.]", 100002), ("gb|AD400013.1|", "", None)],
+    [("gb|AC400014.1|", "nu (x)(virus) [Bacillus sp.]", 100002), ("gb|AD400014.1|", "", None)],
+    [("gb|AC400015.1|", "x, [Bacillus sp.]", 100002), ("gb|AD400015.1|", "", None)],
+    [("gb|AC400016.1|", "omicron, partial  [Bacillus sp.]", 100002), ("gb|AD400016.1|", "", None)],
+    [("gb|AC400017.1|", "pi, partial[Bacillus sp.]", 100002), ("gb|AD400017.1|", "", None)],
+    [("gb|AC400018.1|", "rho, partial, partial [Bacillus sp.]", 100002), ("gb|AD400018.1|", "", None)],
+    [("gb|AC400019.1|", "sigma &amp; tau, partial [Bacillus sp.]", 100002), ("gb|AD400019.1|", "", None)],
+    [("gb|AC400020.1|", "upsilon, partial [Bacillus sp.] ~;", 100002), ("gb|AD400020.1|", "", None)],
+    [("gb|AC400021.1|", "phi, partial [Bacillus sp.]", 77777), ("gb|AD400021.1|", "", None)],
+    [("gb|AC400022.1|", "chi protein, partial [ ]", 77777), ("gb|AD400022.1|", "", None)],
+    [("gb|AC400023.1|", "psi protein, partial []", 77777), ("gb|AD400023.1|", "", None)],
+    [("gb|AC400024.1|", "omega, partial [uncultured bacterium]", None), ("gb|AD400024.1|", "", 100001)],
+    [("gb|AC400025.1|", "aa, partial [a &amp; b &lt;x&gt; &#65;]", 100004), ("gb|AD400025.1|", "", None)],
+    [("gb|AC400026.1|", "bb, partial [  spaced   NAME  ]", 100003), ("gb|AD400026.1|", "", None)],
+    [("gb|AC400027.1|", "cc, partial [TPA: tpa organism]", 100005), ("gb|AD400027.1|", "", None)],
+    [("gb|AC400028.1|", "ee, partial [only common]", 100010), ("gb|AD400028.1|", "", None)],
+    [("gb|AC400029.1|", "ff, partial [Bacillus sp.]", 100002), ("gb|AD400029.1|", "", 100001),
+     ("gb|AE400029.1|", "other title", 100001)],
+    [("gb|AC400030.1|", ",, [Bacillus sp.]", 100002), ("gb|AD400030.1|", "", None)],
+    [("gb|AC400031.1|", "gg, partial [Bacillus sp.]", None), ("gb|AD400031.1|", "", None)],
+    [("gb|AC400032.1|", "hh (mitochondrion), partial [Bacillus sp.]", 100002), ("gb|AD400032.1|", "", None)],
+    [("gb|AC400033.1|", "ii protein (plastid) [ ]", 100002), ("gb|AD400033.1|", "", None)],
+    [("gb|AC400035.1|", "MAG: kk, partial [Bacillus sp.]", 100002), ("gb|AD400035.1|", "", None)],
+    [("gb|AC400036.1|", "ll (chromosome) [Bacillus sp.]", 100002), ("gb|AD400036.1|", "", None)],
+    [("gb|AC400037.1|", "mm (protoplast) [Bacillus sp.]", 100002), ("gb|AD400037.1|", "", None)],
+    [("gb|AC400038.1|", "nn (extrachromosomal) [Bacillus sp.]", 100002), ("gb|AD400038.1|", "", None)],
+    [("lcl|Subject_901", "alpha, partial [Bacillus sp.]", 100002)],
+    [("lcl|Subject_902", "x, [Bacillus sp.]", 100002)],
+    [("lcl|Subject_903", "a, [ ]", 77777)],
+    [("lcl|Subject_904", "theta. [Bacillus sp.]", 100002)],
+    [("lcl|Subject_905", "beta, partial [Bacillus sp.]", None), ("gb|AF400005.1|", "", 100002)],
+    [("lcl|Subject_906", "kappa, partial (chloroplast) [Bacillus sp.]", 100002)],
+]
+# The titles of `psfs_<taxid>` (version 4, without -parse_seqids; None: no -taxid).
+SUFFIX_STORED = {
+    100002: ["alpha, partial [Bacillus sp.]", "x, [Bacillus sp.]", "theta. [Bacillus sp.]",
+             "zeta protein, partial [ ]", "kappa, partial (chloroplast) [Bacillus sp.]",
+             "TPA: iota, partial [Bacillus sp.].", "beta [bacillus SP.]", "omicron, partial  [Bacillus sp.]",
+             "epsilon, [Homo sapiens]", "sigma &amp; tau, partial [Bacillus sp.]", "ab, [Bacillus sp.]",
+             "pi, partial[Bacillus sp.]", "nu (x)(virus) [Bacillus sp.]", "ll (chromosome) [Bacillus sp.]",
+             "mm, partial (protoplast) [Bacillus sp.]"],
+    77777: ["a, [ ]", "phi, partial [Bacillus sp.]", "psi protein, partial []", "chi, partial [ ]"],
+    None: ["alpha, partial [Bacillus sp.]", "chi, partial [ ]"],
+}
+
+
+def suffix_main(ncbi_bin):
+    here = os.path.join("tests", "db_search", "t5")
+    seq = letters(os.path.join("tests", "db_search", "ids", "pdup.faa"))
+    work = os.path.join(here, "work")
+    os.makedirs(work, exist_ok=True)
+    env = {"PATH": "/usr/bin:/bin", "HOME": os.path.abspath(work), "BLAST_USAGE_REPORT": "false"}
+    mk = os.path.join(ncbi_bin, "makeblastdb")
+    fasta, taxmap = os.path.join(work, "psfx.fa"), os.path.join(work, "psfx.map")
+    with open(fasta, "w") as f, open(taxmap, "w") as m:
+        for lines in SUFFIX:
+            parts = []
+            for seqid, title, taxid in lines:
+                parts.append(seqid + (" " + title if title else ""))
+                if taxid is not None:
+                    m.write(f"{map_key(seqid)}\t{taxid}\n")
+            f.write(">" + CTRL_A.join(parts) + "\n" + seq + "\n")
+    subprocess.run([mk, "-in", fasta, "-dbtype", "prot", "-parse_seqids", "-blastdb_version", "5",
+                    "-taxid_map", taxmap, "-title", "psfx", "-out", os.path.join(here, "psfx")],
+                   check=True, stdout=subprocess.DEVNULL, env=env)
+    names = []
+    for taxid, titles in SUFFIX_STORED.items():
+        name = f"psfs_{taxid if taxid is not None else 'none'}"
+        names.append(name)
+        fasta = os.path.join(work, name + ".fa")
+        with open(fasta, "w") as f:
+            for title in titles:
+                f.write(">" + title + "\n" + seq + "\n")
+        cmd = [mk, "-in", fasta, "-dbtype", "prot", "-blastdb_version", "4", "-title", name,
+               "-out", os.path.join(here, name)]
+        if taxid is not None:
+            cmd += ["-taxid", str(taxid)]
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, env=env)
+        # makeblastdb's version 4 JSON metadata file is not read by a search.
+        if os.path.exists(os.path.join(here, name + ".pjs")):
+            os.remove(os.path.join(here, name + ".pjs"))
+    with open(os.path.join(here, "psfs.pal"), "w") as f:
+        f.write(f"TITLE psfs\nDBLIST {' '.join(names)} \n")
+    for name in os.listdir(work):
+        os.remove(os.path.join(work, name))
+    os.rmdir(work)
 
 
 def map_key(seqid):
@@ -200,5 +310,7 @@ def makeblastdb(ncbi_bin, fasta, dbtype, taxid, out, parse):
 if __name__ == "__main__":
     if "--mix-only" in sys.argv[2:]:
         mix_main(sys.argv[1])
+    elif "--suffix-only" in sys.argv[2:]:
+        suffix_main(sys.argv[1])
     else:
         main()

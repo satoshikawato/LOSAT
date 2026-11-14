@@ -1200,7 +1200,7 @@ impl<'a> HeaderReader<'a> {
                 match taxdb.names(taxid, &mut messages) {
                     Ok(names) => SourceTaxname::of_names(names.as_ref()),
                     Err(_) => SourceTaxname::Refused(
-                        "an empty title that NCBI BLAST+ makes from its taxid with the taxonomy database, whose lookup of that taxid reads past the mapped end of taxdb.btd (NCBI BLAST+ 2.17.0 reads unmapped memory)",
+                        "a title that NCBI BLAST+ makes from its taxid with the taxonomy database (an empty one, or the end of a protein title ending in ']'), whose lookup of that taxid reads past the mapped end of taxdb.btd (NCBI BLAST+ 2.17.0 reads unmapped memory)",
                     ),
                 }
             })
@@ -1219,24 +1219,45 @@ impl<'a> HeaderReader<'a> {
     // outfmt 18, the first word of the tabular subject ids), where the taxonomy database names
     // the taxid (review 1 of line DBID N1b L1, `blastdb-ids-20261021/R/titlesrc/review1/r2.tsv`;
     // probe of line RG T5, `remaining-gaps-20261112/T/t5`).
-    /// The name of the source from which NCBI makes the title of the sequence `ordinal` without
-    /// parsed Seq-ids, whose stored title is `title` (`report::defline::bioseq_title_from_source`,
+    // A protein title ending in `]` loses its end to `x_AdjustProteinTitleSuffix` where the
+    // Bioseq has a source, named or not (`report::defline::adjust_protein_title_suffix`): the
+    // first word that replaces `gnl|BL_ORD_ID|n` in the tabular ids is the adjusted title's
+    // (`alpha` of `alpha, partial [Bacillus sp.]` with taxid 100002; `chi` of `chi, partial [ ]`
+    // also without a name: probe of line RG T5c, `T/t5c/out/ncbi/psall.blastp.f6.*`). The other
+    // reports show the stored title, or the description's without the adjustment.
+    /// The source of the sequence `ordinal` without parsed Seq-ids, whose stored title is `title`,
+    /// where a title that NCBI makes depends on it: the name from which it makes an empty title
+    /// (`report::defline::bioseq_title_from_source`, where a taxonomy database opens), and for a
+    /// protein title whose end it can rewrite (`report::defline::protein_title_suffix_adjustable`)
+    /// whether there is a source (`SourceTaxname::Nameless` without a name) and its name:
     /// `source_taxname` of its first source's taxid, `DeflineSet::first_source_taxid` of its
-    /// definition lines, which NCBI reads by its ordinal id: no target). The definition lines are
-    /// read only for a title that the source replaces, where a taxonomy database opens; ones that
-    /// do not read are LOSAT's refusal.
+    /// definition lines, which NCBI reads by its ordinal id (no target). The definition lines are
+    /// read only for those titles; ones that do not read are LOSAT's refusal. Other titles ask
+    /// nothing (`Unnamed`).
     fn stored_source(&self, title: &[u8], ordinal: u32) -> crate::report::defline::SourceTaxname {
         use crate::report::defline::SourceTaxname;
-        if !crate::report::defline::bioseq_title_from_source(title, &Default::default())
-            || self.taxdb().is_none()
+        let suffix = self.db.seqtype() == SeqType::Protein
+            && crate::report::defline::protein_title_suffix_adjustable(title);
+        if !suffix
+            && (!crate::report::defline::bioseq_title_from_source(title, &Default::default())
+                || self.taxdb().is_none())
         {
             return SourceTaxname::Unnamed;
         }
         let Ok(set) = self.db.defline_set(ordinal) else {
             return SourceTaxname::Refused(
-                "an empty title that NCBI BLAST+ makes from its taxid with the taxonomy database, and a definition line whose taxid does not read",
+                "a title that NCBI BLAST+ makes from its taxid (an empty one with the taxonomy database, or the end of a protein title ending in ']'), and a definition line whose taxid does not read",
             );
         };
+        if suffix {
+            return match set.first_source_taxid(None) {
+                None => SourceTaxname::Unnamed,
+                Some(taxid) => match self.source_taxname(Some(taxid)) {
+                    SourceTaxname::Unnamed => SourceTaxname::Nameless,
+                    source => source,
+                },
+            };
+        }
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1976-1981
         // ```c++
         //                 } catch (const CException&){
@@ -1693,7 +1714,9 @@ fn reported_header(
                     let (found, weak, also_held) = headers.found_instead(&subject, ordinal);
                     ReportedHeader::Parsed(std::sync::Arc::new(
                         subject
-                            .with_source(|taxid| headers.source_taxname(Some(taxid)))
+                            .with_source(db.seqtype() == SeqType::Protein, |taxid| {
+                                headers.source_taxname(Some(taxid))
+                            })
                             .showing_gis(db.reports_show_gis())
                             .under_positive_list(db.has_positive_list())
                             .found_instead(found)
@@ -1908,13 +1931,12 @@ fn joined_apart(
 /// reads past the end of (NCBI BLAST+ 2.17.0 crashes or does not end; approved exception 2 of
 /// PD-LOSAT-NCBI-DEFECTS has BLASTN, TBLASTN and TBLASTX stop such a nucleotide title at the end
 /// of the string, as for a database without parsed Seq-ids), a description id longer
-/// than NCBI's cut of the line leaves room for (NCBI then pads the line without end), a
-/// generated heading title whose end NCBI rewrites from the taxids
-/// (`ParsedSubject::title_suffix_adjusted`), a title that NCBI makes from a source that LOSAT
-/// refuses (`ParsedSubject::source`, `SourceTaxname::Refused`), and one that it makes from the
+/// than NCBI's cut of the line leaves room for (NCBI then pads the line without end), a title
+/// that NCBI makes from a source that LOSAT refuses (`ParsedSubject::source`, `SourceTaxname::Refused`), and one that it makes from the
 /// taxids of the same record that it can show for the sequence where `taxdb.bti` is found
 /// (`taxdb_found`, `ParsedSubject::generated_title_fetched`). A title made from the sequence's
-/// own source names its organism (`ParsedSubject::with_source`).
+/// own source names its organism, and a generated heading title ending in `]` gets its end from
+/// it (`ParsedSubject::with_source`, `report::defline::adjust_protein_title_suffix`).
 pub(crate) fn check_shown_parsed_subject(
     subject: &crate::report::db_subject::ParsedSubject,
     protein: bool,
@@ -1958,13 +1980,6 @@ pub(crate) fn check_shown_parsed_subject(
         subject
             .generated_title_fetched()
             .map_err(|reason| parsed_refusal(ordinal, &reason, program))?;
-    }
-    if generated && subject.title_suffix_adjusted(protein) {
-        return Err(parsed_refusal(
-            ordinal,
-            "has a definition line without a title and a title ending in ']' that NCBI BLAST+'s outfmt 0 heading rewrites from the taxids (x_AdjustProteinTitleSuffix)",
-            program,
-        ));
     }
     if let Err(reason) = subject.source().name() {
         return Err(parsed_refusal(ordinal, &format!("has {reason}"), program));
@@ -2528,9 +2543,10 @@ pub(crate) fn check_reported_title(
 
 /// The subject id of the tabular formats (`sseqid`, `sacc`, `saccver`) of the database
 /// sequence `ordinal` with the stored title `title` and the source `source` of its Bioseq, from
-/// which NCBI makes an empty title (`report::defline::database_subject_id`; `protein` for a
-/// protein database). A title whose id LOSAT cannot write as NCBI, and a source that it refuses
-/// (`SourceTaxname::Refused`), are LOSAT's refusals (`program` names the program).
+/// which NCBI makes an empty title and rewrites the end of a protein title ending in `]`
+/// (`report::defline::database_subject_id`; `protein` for a protein database;
+/// `HeaderReader::stored_source`). A title whose id LOSAT cannot write as NCBI, and a source that
+/// it refuses (`SourceTaxname::Refused`), are LOSAT's refusals (`program` names the program).
 pub(crate) fn tabular_subject_id(
     title: &[u8],
     source: &crate::report::defline::SourceTaxname,
@@ -2538,8 +2554,9 @@ pub(crate) fn tabular_subject_id(
     protein: bool,
     program: &str,
 ) -> Result<Vec<u8>> {
-    let facts =
+    let mut facts =
         crate::report::defline::BioseqFacts::of_source(source_name(source, ordinal, program)?);
+    facts.has_source = source.has_source();
     crate::report::defline::database_subject_id(title, &facts, protein).map_err(|problem| {
         anyhow::anyhow!(
             "database sequence {ordinal} has a title {problem}, which is not supported by LOSAT's {program}"

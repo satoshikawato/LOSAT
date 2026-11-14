@@ -30,9 +30,13 @@ pub(crate) struct BdbRecord {
     /// The title (`CSeqDB::GetBioseq`'s title descriptor).
     pub title: Vec<u8>,
     /// The name of the organism of the Bioseq's first source, from which `GenerateDefline` makes
-    /// an empty title (`report::defline::BioseqFacts::taxname`); looked up only for such a title
-    /// that the writer prints.
+    /// an empty title and rewrites the end of a protein title ending in `]`
+    /// (`report::defline::BioseqFacts::taxname`); looked up only for such a title that the
+    /// writer prints.
     pub taxname: Option<std::sync::Arc<[u8]>>,
+    /// Whether the Bioseq has a source: a definition line with a positive taxid
+    /// (`report::defline::BioseqFacts::has_source`); asked only where the writer prints the title.
+    pub has_source: bool,
     /// IUPACna letters of a nucleotide, NCBIstdaa codes of a protein.
     pub residues: Vec<u8>,
 }
@@ -157,10 +161,17 @@ impl MaskBdbReader {
             .unwrap_or_default();
         let title = set.bioseq_title();
         // NCBI makes the title of a sequence without one from its BioSource (the taxonomy
-        // names of a definition line with a taxid; seqdbvol.cpp:1100-1188).
+        // names of a definition line with a taxid; seqdbvol.cpp:1100-1188), and rewrites the end
+        // of a protein title ending in `]` from it (`x_AdjustProteinTitleSuffix`,
+        // `report::defline::adjust_protein_title_suffix`, which runs for any source: probe of
+        // line RG T5c, `T/t5c/out/seg`, `>alpha [Bacillus sp.]` of `alpha, partial [Bacillus
+        // sp.]`, `>a` of `a, [ ]` without a name).
+        let has_source = self.title_printed && set.first_source_taxid(None).is_some();
         let taxname = if self.title_printed
-            && set.first_source_taxid(None).is_some()
-            && bioseq_title_from_source(&title, &bioseq_facts(&ids))
+            && has_source
+            && (bioseq_title_from_source(&title, &bioseq_facts(&ids))
+                || (self.molecule == SeqType::Protein
+                    && crate::report::defline::protein_title_suffix_adjustable(&title)))
         {
             self.source_taxname(oid, &set)?
         } else {
@@ -184,6 +195,7 @@ impl MaskBdbReader {
             ids,
             title,
             taxname,
+            has_source,
             residues,
         }))
     }
@@ -213,7 +225,7 @@ impl MaskBdbReader {
     // error) and a lookup that reads past the mapped end of `taxdb.btd` (NCBI reads unmapped
     // memory) are LOSAT's refusals, as blastdbcmd's (`blastdbcmd::retrieve::Source::tax_names`).
     /// The name of the organism of the first source of the sequence `oid`, whose definition lines
-    /// are `set`, from which NCBI makes its empty title.
+    /// are `set`, from which NCBI makes its empty title or the end of its protein title.
     fn source_taxname(
         &self,
         oid: u32,
@@ -232,14 +244,16 @@ impl MaskBdbReader {
             let mut messages = Vec::new();
             let names = taxdb.names(taxid, &mut messages).map_err(|error| {
                 BdbError::Unsupported(format!(
-                    "sequence {oid} of the database, without a title and with the taxid {taxid}, \
-                     whose lookup in the taxonomy database fails ({error}),"
+                    "sequence {oid} of the database, whose title NCBI makes from its taxid {taxid} \
+                     (an empty one, or the end of a protein title ending in ']') and whose lookup \
+                     in the taxonomy database fails ({error}),"
                 ))
             })?;
             if let Some(message) = messages.first() {
                 return Err(BdbError::Unsupported(format!(
-                    "sequence {oid} of the database, without a title and with the taxid {taxid}, \
-                     whose lookup in the taxonomy database writes a diagnostic ({message}),"
+                    "sequence {oid} of the database, whose title NCBI makes from its taxid {taxid} \
+                     (an empty one, or the end of a protein title ending in ']') and whose lookup \
+                     in the taxonomy database writes a diagnostic ({message}),"
                 )));
             }
             if Some(taxid) == first_source {

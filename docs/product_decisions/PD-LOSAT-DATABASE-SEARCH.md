@@ -60,7 +60,11 @@
   name upper-cased, a TPA or MAG prefix dropped in the heading) in outfmt 0, 18 and the tabular
   subject ids, in databases with and without parsed Seq-ids, which lines DBID H3 and N1b L1
   refused (also of a RefSeq chromosome, mRNA or ncRNA sequence, whose own NCBI functions make
-  nothing of a database Bioseq), and kept refused one whose tax id's lookup reads past the end of `taxdb.btd` (NCBI crashes))
+  nothing of a database Bioseq), and kept refused one whose tax id's lookup reads past the end of `taxdb.btd` (NCBI crashes); the same day
+  line RG item T5c wrote the end of a protein title ending in `]` that NCBI rewrites from the first
+  tax id (`x_AdjustProteinTitleSuffix`, with or without a taxonomy database) in the outfmt 0 heading,
+  outfmt 18 and the tabular subject ids, which version 1.3 refused in databases with parsed Seq-ids
+  and LOSAT wrote unchanged in the tabular ids of a database without them)
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
   database search campaign (decisions P1 to P4 below, each as recommended). The decision
   that version 1.0 left open, the thread count of the parity target, was taken by the
@@ -801,7 +805,6 @@ a result that LOSAT does not reproduce.
 | A definition line without a Seq-id (makeblastdb writes none) | every format | Not compared | |
 | An outfmt 0 description id of 65 bytes or more | 0 | Pads the line without end, from 65 bytes with a title of 3 bytes or more, from 67 with any title | 3 |
 | A protein title of punctuation that `x_CleanAndCompress` reads past | 0; tabular formats for an `lcl|Subject_N` id | Crashes | 3 |
-| A protein with a tax id and a title ending in `]`, where a definition line has no title (0) or the id is `lcl|Subject_N` (tabular formats) | 0, tabular formats | With `taxdb.bti` on the search path `x_AdjustProteinTitleSuffix` rewrites the title from the tax ids; without it NCBI keeps the title | 2 |
 | A title in no encoding that NCBI recognises, for an `lcl|Subject_N` id | tabular formats | Not compared | |
 
 A tabular field list reads the sequence that NCBI's formatters find by the Seq-align id only with

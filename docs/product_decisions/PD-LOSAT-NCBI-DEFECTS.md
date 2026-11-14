@@ -574,12 +574,14 @@ would port:
   reports it (with outfmt 5, in any batch): NCBI shows the query's title and letters for it.
 - A stored title or Seq-id with a byte outside ' ' to '~': NCBI prints `#` and an error message
   each time it reads the definition line.
-- Titles NCBI takes from the tax ids, where a report shows them (outfmt 0, a printed tabular id
-  that replaces `lcl|Subject_N`): a title whose end `x_AdjustProteinTitleSuffix` rewrites (an
-  empty title LOSAT makes from the tax id's name as NCBI does since line RG item T5).
 
 ## Ported (rule 4)
 
+- The end of a database protein's title ending in `]` that `x_AdjustProteinTitleSuffix` rewrites
+  from the Bioseq's first tax id (with or without a taxonomy database), where a report shows the
+  generated title (the outfmt 0 heading of a definition line without a title, outfmt 18, a tabular
+  id that the title's first word replaces): ported by line RG item T5c on 2026-11-14; version 1.10
+  listed it above as a deterministic result that LOSAT refused.
 - `-evalue` with a signed infinity or NaN (`+inf`, `-nan`, `+nan(1)`, `1e999`): NCBI's
   `CArg_Double` reads them with `strtod` and its option check (`<= 0`) lets them pass;
   NCBI searches as with the largest e-value (the cutoff stays 1, no HSP is reaped). LOSAT

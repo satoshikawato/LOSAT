@@ -559,239 +559,6 @@ fn short_header(
     Ok(())
 }
 
-// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3090-3110
-// ```c++
-// static size_t s_TitleEndsInOrganism (
-//     string& title,
-//     CTempString taxname
-// )
-//
-// {
-//     size_t  pos, idx;
-//     size_t  len1, len2;
-//
-//     len1 = title.length();
-//     len2 = taxname.length();
-//
-//     idx = len1 - len2 - 3;
-//     if (len1 > len2 + 4 && title [idx] == ' ' && title [idx + 1] == '[' && title [len1 - 1] == ']') {
-//         pos = NStr::Find(title, taxname, NStr::eNocase, NStr::eReverseSearch);
-//         if (pos == idx + 2) {
-//             return pos - 1;
-//         }
-//     }
-//
-//     return NPOS;
-// }
-// ```
-fn title_ends_in_organism(title: &[u8], taxname: &[u8]) -> Option<usize> {
-    let (len1, len2) = (title.len(), taxname.len());
-    if len1 > len2 + 4 {
-        let idx = len1 - len2 - 3;
-        if title[idx] == b' ' && title[idx + 1] == b'[' && title[len1 - 1] == b']' {
-            let pos = (0..=len1 - len2)
-                .rev()
-                .find(|&at| title[at..at + len2].eq_ignore_ascii_case(taxname));
-            if pos == Some(idx + 2) {
-                return Some(idx + 1);
-            }
-        }
-    }
-    None
-}
-
-// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3049-3055
-// ```c++
-// static inline void s_TrimMainTitle (string& str)
-// {
-//     size_t pos = str.find_last_not_of (".,;~ ");
-//     if (pos != NPOS) {
-//         str.erase (pos + 1);
-//     }
-// }
-// ```
-fn trim_main_title(title: &mut Vec<u8>) {
-    if let Some(pos) = title.iter().rposition(|c| !b".,;~ ".contains(c)) {
-        title.truncate(pos + 1);
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:99-133
-// ```c++
-// static const char* s_proteinOrganellePrefix [] = {
-//   "",
-//   "",
-//   "chloroplast",
-//   "chromoplast",
-//   "kinetoplast",
-//   "mitochondrion",
-//   "plastid",
-//   "macronuclear",
-//   "extrachromosomal",
-//   "plasmid",
-//   "",
-//   "",
-//   "cyanelle",
-//   "proviral",
-//   "virus",
-//   "nucleomorph",
-//   "apicoplast",
-//   "leucoplast",
-//   "protoplast",
-//   "endogenous virus",
-//   "hydrogenosome",
-//   "chromosome",
-//   "chromatophore",
-// };
-// ```
-/// `s_proteinOrganellePrefix` from `chloroplast` to `chromatophore`, the non-empty ones.
-const PROTEIN_ORGANELLE_PREFIXES: [&[u8]; 19] = [
-    b"chloroplast",
-    b"chromoplast",
-    b"kinetoplast",
-    b"mitochondrion",
-    b"plastid",
-    b"macronuclear",
-    b"extrachromosomal",
-    b"plasmid",
-    b"cyanelle",
-    b"proviral",
-    b"virus",
-    b"nucleomorph",
-    b"apicoplast",
-    b"leucoplast",
-    b"protoplast",
-    b"endogenous virus",
-    b"hydrogenosome",
-    b"chromosome",
-    b"chromatophore",
-];
-
-// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3263-3410
-// ```c++
-// void CDeflineGenerator::x_AdjustProteinTitleSuffix (
-//     const CBioseq_Handle& bsh
-// )
-//
-// {
-//     ...
-//     if (m_Source.Empty()) return;
-//
-//     if (m_Source->IsSetTaxname()) {
-//         m_Taxname = m_Source->GetTaxname();
-//     }
-//     ...
-//     s_TrimMainTitle (m_MainTitle);
-//
-//     len1 = (int) m_MainTitle.length();
-//     len2 = (int) m_Taxname.length();
-//
-//     // find [taxname]
-//
-//     if (len1 > len2 + 4) {
-//         tpos = s_TitleEndsInOrganism(m_MainTitle, m_Taxname);
-//         ...
-//     }
-//
-//     /* do not change unless [genus species] was at the end */
-//     if (tpos == NPOS) return;
-//
-//     m_MainTitle.erase (tpos);
-//     s_TrimMainTitle (m_MainTitle);
-//     len1 = (int) m_MainTitle.length();
-//
-//     // find (organelle)
-//
-//     if (len1 > 2 && m_MainTitle [len1 - 1] == ')') {
-//         pos = m_MainTitle.find_last_of ("(");
-//         if (pos != NPOS) {
-//             for ( genome = NCBI_GENOME(chloroplast); genome <= NCBI_GENOME(chromatophore); genome++ ) {
-//                 string str = s_proteinOrganellePrefix [genome];
-//                 if ( ! str.empty() ) {
-//                     string paren = "(" + str + ")";
-//                     if (NStr::EndsWith (m_MainTitle, paren )) {
-//                         opos = pos;
-//                         break;
-//                     }
-//                 }
-//             }
-//         }
-//         s_TrimMainTitle (m_MainTitle);
-//         len1 = (int) m_MainTitle.length();
-//     }
-//
-//     if (opos != NPOS) {
-//         m_MainTitle.erase (opos);
-//         s_TrimMainTitle (m_MainTitle);
-//         len1 = (int) m_MainTitle.length();
-//     }
-//
-//     if ( NStr::EndsWith (m_MainTitle, ", partial")) {
-//         m_MainTitle.erase(m_MainTitle.length() - 9);
-//         s_TrimMainTitle (m_MainTitle);
-//     }
-//
-//     // then reconstruct partial (organelle) [taxname] suffix
-//
-//     if ( !x_IsComplete()) {
-//         m_MainTitle += ", partial";
-//     }
-//
-//     if (m_OmitTaxonomicName) return;
-//
-//     CTempString taxname = m_Taxname;
-//
-//     if (m_Genome >= NCBI_GENOME(chloroplast) && m_Genome <= NCBI_GENOME(chromatophore)) {
-//         ...
-//     }
-//
-//     // check for special taxname, go to overlapping source feature
-//     ...
-//     if (m_IsCrossKingdom && ! m_FirstSuperKingdom.empty() && ! m_SecondSuperKingdom.empty()) {
-//         m_MainTitle += " [" + string(m_FirstSuperKingdom) + "][" + string(m_SecondSuperKingdom) + "]";
-//     } else if (! taxname.empty() /* && m_MainTitle.find(taxname) == NPOS */) {
-//         m_MainTitle += " [" + string(taxname) + "]";
-//     }
-// }
-// ```
-/// `x_AdjustProteinTitleSuffix` for the Bioseq of a database protein whose source has the
-/// scientific name `taxname` (the taxonomy database's name of the first definition line
-/// with a taxid; `GetBioseq` gives the Org-ref no name, genome or binomial without it): a
-/// title that ends in ` [taxname]` loses that, a `(organelle)` and `, partial` before it,
-/// and gets ` [taxname]` back (the Bioseq has no MolInfo: it is complete).
-fn adjust_protein_title_suffix(title: &mut Vec<u8>, taxname: &[u8]) {
-    trim_main_title(title);
-    let Some(tpos) = title_ends_in_organism(title, taxname) else {
-        return;
-    };
-    title.truncate(tpos);
-    trim_main_title(title);
-    let mut opos = None;
-    if title.len() > 2 && title[title.len() - 1] == b')' {
-        if let Some(pos) = title.iter().rposition(|&c| c == b'(') {
-            for prefix in PROTEIN_ORGANELLE_PREFIXES {
-                let paren = [b"(", prefix, b")"].concat();
-                if title.ends_with(&paren) {
-                    opos = Some(pos);
-                    break;
-                }
-            }
-        }
-        trim_main_title(title);
-    }
-    if let Some(opos) = opos {
-        title.truncate(opos);
-        trim_main_title(title);
-    }
-    if title.ends_with(b", partial") {
-        title.truncate(title.len() - 9);
-        trim_main_title(title);
-    }
-    title.extend_from_slice(b" [");
-    title.extend_from_slice(taxname);
-    title.push(b']');
-}
-
 // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:540
 // ```c++
 //     	m_fasta.SetAllFlags(CFastaOstream::fKeepGTSigns|CFastaOstream::fNoExpensiveOps|CFastaOstream::fEnableGI);
@@ -819,12 +586,17 @@ fn adjust_protein_title_suffix(title: &mut Vec<u8>, taxname: &[u8]) {
 // protein product` (`m_LocalAnnotsOnly`): `[Homo sapiens]` for a protein, `Homo sapiens` for a
 // nucleotide (probe of line RG T5, `T/t5/out/ncbi/c.*.long`; with `-target_only` of a line without
 // a taxid, the other line's: review of RG T5, `T/t5/review`, cases `*.to.*`).
+// The Bioseq has a source (`BioseqFacts::has_source`) wherever a definition line has a positive
+// taxid, named or not: a protein title ending in `]` loses its end to `x_AdjustProteinTitleSuffix`
+// then (`report::defline::adjust_protein_title_suffix`; a ` [ ]` also without a name: probe of line
+// RG T5c, `T/t5c/out/bdc`, `zeta protein, partial [ ]` -> `zeta protein [Bacillus sp.]`, without
+// a name `zeta protein`; `psi protein, partial []` stays, as an empty name matches nothing).
 /// The title `CDeflineGenerator::GenerateDefline(fFastaFormat | fNoExpensiveOps)` makes of
 /// the Bioseq's title descriptor `title` (`report::defline::generate_bioseq_defline`, with
 /// the suffix adjustment of a protein with a source, and an empty title made from the name of
 /// the source), the Bioseq's ids those of `set`'s first line and its first source's taxid
-/// `source_taxid` (`DeflineSet::first_source_taxid`). `Err`: the Bioseqs whose title NCBI makes
-/// from parts LOSAT does not model (a source without a name and a title ending in ` []`).
+/// `source_taxid` (`DeflineSet::first_source_taxid`), whose names are looked up for a title made
+/// from the source and for every protein, as `GetBioseq` looks them up.
 fn generated_title(
     source: &Source,
     set: &DeflineSet,
@@ -834,34 +606,16 @@ fn generated_title(
     let ids = &set.deflines[0].ids;
     let mut bioseq_facts = crate::report::db_subject::bioseq_facts(ids);
     bioseq_facts.local_annots_only = true;
+    bioseq_facts.has_source = source_taxid.is_some();
     let from_source = bioseq_title_from_source(title, &bioseq_facts);
-    let mut title = title.to_vec();
     if let Some(taxid) = source_taxid.filter(|_| from_source || source.protein) {
         let names = source.tax_names(taxid)?;
-        if from_source {
-            let taxname = crate::report::defline::SourceTaxname::of_names(names.as_ref())
-                .name()
-                .unwrap_or_default();
-            bioseq_facts.taxname = taxname;
-        } else {
-            match names {
-                Some(names) => adjust_protein_title_suffix(&mut title, &names.scientific_name),
-                None => {
-                    let mut trimmed = title.clone();
-                    trim_main_title(&mut trimmed);
-                    if trimmed.ends_with(b" []") {
-                        return Err(Stop::Refused(format!(
-                            "-long_seqids of a protein whose title ends in \" []\" and whose \
-                             taxid has no name is not supported by LOSAT's {}",
-                            super::PROGRAM
-                        )));
-                    }
-                }
-            }
-        }
+        bioseq_facts.taxname = crate::report::defline::SourceTaxname::of_names(names.as_ref())
+            .name()
+            .unwrap_or_default();
     }
     let defline =
-        generate_bioseq_defline(&title, source.protein, false, &bioseq_facts).map_err(|_| {
+        generate_bioseq_defline(title, source.protein, false, &bioseq_facts).map_err(|_| {
             Stop::Refused(format!(
                 "a title whose encoding NCBI cannot tell is not supported by LOSAT's {}",
                 super::PROGRAM
@@ -1012,35 +766,6 @@ mod tests {
             header(text_ids("gi|654321|gb|AB000002.3|"), Some((4, 19)), true),
             ">AB000002.3:c20-5 title\n"
         );
-    }
-
-    #[test]
-    fn the_protein_suffix_is_rebuilt_from_the_organism() {
-        let adjusted = |title: &str, taxname: &str| {
-            let mut title = title.as_bytes().to_vec();
-            adjust_protein_title_suffix(&mut title, taxname.as_bytes());
-            String::from_utf8(title).unwrap()
-        };
-        assert_eq!(
-            adjusted("alpha protein [Homo sapiens]", "Homo sapiens"),
-            "alpha protein [Homo sapiens]"
-        );
-        assert_eq!(
-            adjusted("alpha protein, partial [homo sapiens]", "Homo sapiens"),
-            "alpha protein [Homo sapiens]"
-        );
-        assert_eq!(
-            adjusted(
-                "alpha protein (mitochondrion) [Homo sapiens]",
-                "Homo sapiens"
-            ),
-            "alpha protein [Homo sapiens]"
-        );
-        assert_eq!(
-            adjusted("alpha protein [Pan paniscus]", "Homo sapiens"),
-            "alpha protein [Pan paniscus]"
-        );
-        assert_eq!(adjusted("alpha protein", "Homo sapiens"), "alpha protein");
     }
 
     #[test]

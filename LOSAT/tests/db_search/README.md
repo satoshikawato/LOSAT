@@ -516,12 +516,25 @@ the version 5 databases `t5/nmix` and `t5/pmix` (rows `db.t5.mix.*`, blastdbcmd 
 (taxids 100001 and 100002; the first without a taxid; the first untitled and the second titled; the other way round)
 and one line of each Seq-id kind whose title NCBI makes from the source (`tpg`, `emb`, `gi` for `-show_gis`, `pdb`
 without and with a chain, `lcl|Subject_1`, `gnl`; in `pmix` also `sp`, `ref|NP_`, `ref|WP_`), and the version 4
-database `t5/psuffix` (blastdbcmd only) of one record whose first line, without a taxid, has a title ending in
-`, partial [Bacillus sp.]` (the search programs refuse its outfmt 0 heading, `ParsedSubject::title_suffix_adjusted`).
-The title is made from the Bioseq's first source, the first
+database `t5/psuffix` of one record whose first line, without a taxid, has a title ending in
+`, partial [Bacillus sp.]` (blastdbcmd case `T512`; row `db.t5.psuffix.blastp.0`: the outfmt 0 heading of its untitled
+second line, `AB362002.1 alpha [Bacillus sp.]`). The title is made from the Bioseq's first source, the first
 positive taxid in `x_GetTaxDefline`'s order of the lines that the taxid list keeps (`-taxids 100002` and
 `-negative_taxids 100001` with `-no_taxid_expansion`, which NCBI applies to a version 5 database only), with
 `blastdbcmd -target_only` the target's line first and the others after it.
+
+Protein titles ending in `]` (line RG item T5c; rows `db.t5.sfx.*`, `db.t5.sfs.*`, `db.t5.psuffix.*`, blastdbcmd cases
+`T515`-`T518`, segmasker rows `db_t5c_*`): `t5/make_t5.py NCBI_BIN --suffix-only` writes `t5/psfx` (version 5,
+`-parse_seqids`, `-taxid_map`: records of a titled line and an untitled one, whose outfmt 0 heading and outfmt 18 show
+the titled line's title as `GenerateDefline` makes it, and `lcl|Subject_9nn` records, whose tabular ids are its first
+word) and `t5/psfs_100002`, `psfs_77777`, `psfs_none` (version 4 without `-parse_seqids`, `-taxid`; the alias
+`t5/psfs`: the tabular ids that replace `gnl|BL_ORD_ID|n`). NCBI's `x_AdjustProteinTitleSuffix` rewrites the end of
+such a title from the Bioseq's first source, also without a name: a title ending in ` [<name>]` (any case) or ` [ ]`
+loses it, then an organelle in parentheses of NCBI's list (`(mitochondrion)`, not `(virus)` or `(chromosome)`) and
+`, partial`, and gets ` [<name>]` back where the taxonomy database names the taxid (`alpha, partial [Bacillus sp.]` ->
+`alpha [Bacillus sp.]`; without the taxonomy database `zeta protein, partial [ ]` -> `zeta protein`, and the rows
+`.nt.` show the rest unchanged); ` []` stays. The description (`fLeavePrefixSuffix`), outfmt 5, 13 to 16, `stitle`
+and the stored headings show the title as stored.
 
 A title of punctuation without parsed Seq-ids (line DBID tabfields; rows `db.id.tf.*.punct.*`): `make_ids.py
 --tabfields-only` writes `ids/ppunct_np` (version 4, without `-parse_seqids`) from `ids/ppunct.faa`, whose first title

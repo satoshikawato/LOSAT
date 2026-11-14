@@ -194,6 +194,14 @@ const CASES: &[Case] = &[
     ("T512", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/psuffix", "-entry", "AB362001.1", "-target_only", "-long_seqids"], 0),
     ("T513", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/nmix", "-entry", "AB301002.1", "-target_only", "-long_seqids"], 0),
     ("T514", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/pmix", "-entry", "AB302002.1", "-target_only", "-long_seqids"], 0),
+    // Line RG item T5c (`make_t5.py --suffix-only`): the end of a protein title ending in `]`
+    // rewritten from the Bioseq's first source (`x_AdjustProteinTitleSuffix`), with the taxonomy
+    // database and without it (a source without a name drops a ` [ ]` end; ` []` stays), with
+    // and without parsed Seq-ids (frozen from NCBI BLAST+ 2.17.0 blastdbcmd, 2026-11-14).
+    ("T515", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/psfx", "-entry", "all", "-long_seqids"], 0),
+    ("T516", None, false, &["-db", "../db_search/t5/psfx", "-entry", "all", "-long_seqids"], 0),
+    ("T517", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/psfs", "-entry", "all", "-long_seqids"], 0),
+    ("T518", None, false, &["-db", "../db_search/t5/psfs", "-entry", "all", "-long_seqids"], 0),
 ];
 
 /// The probe's cases that LOSAT refuses (one line naming LOSAT's BLASTDBCMD, exit status 1,

@@ -262,6 +262,10 @@ pub struct BioseqFacts {
     /// `m_Taxname`: the scientific name of the Bioseq's first source, `None` without a source
     /// or a name (never empty).
     pub taxname: Option<std::sync::Arc<[u8]>>,
+    /// `m_Source` is set: some definition line has a positive taxid
+    /// (`DeflineSet::first_source_taxid`), with or without a name. `x_AdjustProteinTitleSuffix`
+    /// runs only then (`adjust_protein_title_suffix`); a name implies it.
+    pub has_source: bool,
     /// `m_LocalAnnotsOnly` (`fLocalAnnotsOnly`, set by blastdbcmd's `CFastaOstream` with
     /// `fNoExpensiveOps`): an empty protein title is not `unnamed protein product`.
     pub local_annots_only: bool,
@@ -289,6 +293,12 @@ pub enum SourceTaxname {
         name: std::sync::Arc<[u8]>,
         seq_id: std::sync::Arc<[u8]>,
     },
+    /// A source without a name: the definition lines have a positive taxid that no taxonomy
+    /// database names. Asked only for a database sequence without parsed Seq-ids whose protein
+    /// title can lose its end to `x_AdjustProteinTitleSuffix` (`protein_title_suffix_adjustable`;
+    /// `common::database::HeaderReader::stored_source`), which runs for any source: it then drops
+    /// a ` [ ]` end. Elsewhere it reads as `Unnamed`.
+    Nameless,
     /// LOSAT's refusal where a report shows the title, with what the sequence has (after
     /// "database sequence N has"): a lookup of the taxid that reads past the mapped end of
     /// `taxdb.btd` (NCBI BLAST+ reads unmapped memory), or a definition line whose taxid does not
@@ -329,12 +339,21 @@ impl SourceTaxname {
     /// The name for `BioseqFacts::taxname`; `Err` with the reason of a refusal.
     pub fn name(&self) -> Result<Option<std::sync::Arc<[u8]>>, &'static str> {
         match self {
-            SourceTaxname::Unnamed => Ok(None),
+            SourceTaxname::Unnamed | SourceTaxname::Nameless => Ok(None),
             SourceTaxname::Named(name) | SourceTaxname::Undecodable { name, .. } => {
                 Ok(Some(std::sync::Arc::clone(name)))
             }
             SourceTaxname::Refused(reason) => Err(reason),
         }
+    }
+
+    /// Whether the source is known to exist (`BioseqFacts::has_source`): a name, or `Nameless`.
+    /// `Unnamed` is no source, or one that no report asked about.
+    pub fn has_source(&self) -> bool {
+        matches!(
+            self,
+            SourceTaxname::Named(_) | SourceTaxname::Undecodable { .. } | SourceTaxname::Nameless
+        )
     }
 
     /// The source of the database sequence without parsed Seq-ids whose Seq-id text is
@@ -371,9 +390,11 @@ impl SourceTaxname {
 
 impl BioseqFacts {
     /// The facts of a database sequence without parsed Seq-ids (its one id is
-    /// `gnl|BL_ORD_ID|n`, which sets no flag) whose first source names the organism `taxname`.
+    /// `gnl|BL_ORD_ID|n`, which sets no flag) whose first source names the organism `taxname`
+    /// (a name implies a source; a source without a name is `SourceTaxname::has_source`).
     pub fn of_source(taxname: Option<std::sync::Arc<[u8]>>) -> Self {
         Self {
+            has_source: taxname.is_some(),
             taxname,
             ..Self::default()
         }
@@ -778,6 +799,23 @@ fn title_before_decoding_of(
 ) -> Vec<u8> {
     let mut main_title = title.to_vec();
     trim_end_of(&mut main_title, b".,;~ ");
+    // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3964-3972
+    // ```c++
+    //     // adjust protein partial/organelle/taxname suffix, if necessary
+    //     if ( m_IsAA && (! m_MainTitle.empty()) && (! (flags & fLeavePrefixSuffix)) ) {
+    //         if (m_Idx) {
+    //             x_AdjustProteinTitleSuffixIdx (bsh);
+    //         } else {
+    //             x_AdjustProteinTitleSuffix (bsh);
+    //         }
+    //     }
+    // ```
+    // `CDeflineGenerator()` has no feature index (`m_Idx` null). The adjustment comes after the
+    // trim and before a title is made for an empty one (which is never adjusted), the prefixes
+    // are removed and the title is decoded; it returns at once without a source.
+    if protein && !leave_prefix_suffix && ids.has_source && !main_title.is_empty() {
+        adjust_protein_title_suffix(&mut main_title, ids.taxname.as_deref().unwrap_or_default());
+    }
     if main_title.is_empty() {
         main_title = pdb_or_patent_title(ids);
     }
@@ -796,6 +834,328 @@ fn title_before_decoding_of(
     }
     trim_leading_spaces(&mut main_title);
     main_title
+}
+
+// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3090-3110
+// ```c++
+// static size_t s_TitleEndsInOrganism (
+//     string& title,
+//     CTempString taxname
+// )
+//
+// {
+//     size_t  pos, idx;
+//     size_t  len1, len2;
+//
+//     len1 = title.length();
+//     len2 = taxname.length();
+//
+//     idx = len1 - len2 - 3;
+//     if (len1 > len2 + 4 && title [idx] == ' ' && title [idx + 1] == '[' && title [len1 - 1] == ']') {
+//         pos = NStr::Find(title, taxname, NStr::eNocase, NStr::eReverseSearch);
+//         if (pos == idx + 2) {
+//             return pos - 1;
+//         }
+//     }
+//
+//     return NPOS;
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2933-2967 (`NStr::Find`, `eNocase`)
+// ```c++
+//         // A set of lower/upper characters for pattern[0].
+//         string x_first(pattern, 0, 1);
+//         if (isupper((unsigned char)x_first[0])) {
+//             x_first += (char)tolower((unsigned char)x_first[0]);
+//         } else if (islower((unsigned char)x_first[0])) {
+//             x_first += (char)toupper((unsigned char)x_first[0]);
+//         }
+//         ...
+//             search_pos = slen - plen;
+//             do {
+//                 pos = str.find_last_of(x_first, search_pos);
+//                 while (pos != NPOS  &&  pos
+//                        &&  CompareNocase(str, pos, plen, pattern) != 0) {
+//                     if (pos == 0) {
+//                         return NPOS;
+//                     }
+//                     pos = str.find_last_of(x_first, pos - 1);
+//                 }
+//                 current_pos = pos;
+// ```
+// The reverse search gives the last place at or before `slen - plen` where the pattern matches
+// without case (ASCII: the C locale): an empty pattern has no first letter, so `find_last_of`
+// finds nothing (an empty name never matches), and a stop at 0 without a match is never
+// `idx + 2` (at least 2). The last match is the same place.
+/// `s_TitleEndsInOrganism`: the position of `[` where `title` ends in ` [<taxname>]` (the name in
+/// any ASCII case).
+fn title_ends_in_organism(title: &[u8], taxname: &[u8]) -> Option<usize> {
+    let (len1, len2) = (title.len(), taxname.len());
+    if len2 == 0 || len1 <= len2 + 4 {
+        return None;
+    }
+    let idx = len1 - len2 - 3;
+    if title[idx] != b' ' || title[idx + 1] != b'[' || title[len1 - 1] != b']' {
+        return None;
+    }
+    let pos = (0..=len1 - len2)
+        .rev()
+        .find(|&at| title[at..at + len2].eq_ignore_ascii_case(taxname));
+    (pos == Some(idx + 2)).then_some(idx + 1)
+}
+
+// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:2123-2147
+// ```c++
+// static const char* s_proteinOrganellePrefix [] = {
+//   "",                  // "",
+//   "",                  // "",
+//   "chloroplast",       // "chloroplast",
+//   "chromoplast",       // "chromoplast",
+//   "kinetoplast",       // "kinetoplast",
+//   "mitochondrion",     // "mitochondrion",
+//   "plastid",           // "plastid",
+//   "macronuclear",      // "macronuclear",
+//   "",                  // "extrachromosomal",
+//   "plasmid",           // "plasmid",
+//   "",                  // "",
+//   "",                  // "",
+//   "cyanelle",          // "cyanelle",
+//   "",                  // "proviral",
+//   "",                  // "virus",
+//   "nucleomorph",       // "nucleomorph",
+//   "apicoplast",        // "apicoplast",
+//   "leucoplast",        // "leucoplast",
+//   "protoplast",        // "protoplast",
+//   "endogenous virus",  // "endogenous virus",
+//   "hydrogenosome",     // "hydrogenosome",
+//   "",                  // "chromosome",
+//   "chromatophore"      // "chromatophore"
+// };
+// ```
+// The commented-out names are not used: `(virus)` stays (probe of line RG T5c, `nu (x)(virus)
+// [Bacillus sp.]` unchanged).
+/// `s_proteinOrganellePrefix` from `chloroplast` (2) to `chromatophore` (22), the non-empty ones.
+const PROTEIN_ORGANELLE_PREFIXES: [&[u8]; 15] = [
+    b"chloroplast",
+    b"chromoplast",
+    b"kinetoplast",
+    b"mitochondrion",
+    b"plastid",
+    b"macronuclear",
+    b"plasmid",
+    b"cyanelle",
+    b"nucleomorph",
+    b"apicoplast",
+    b"leucoplast",
+    b"protoplast",
+    b"endogenous virus",
+    b"hydrogenosome",
+    b"chromatophore",
+];
+
+// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3263-3414
+// ```c++
+// void CDeflineGenerator::x_AdjustProteinTitleSuffix (
+//     const CBioseq_Handle& bsh
+// )
+//
+// {
+//     ...
+//     if (m_Source.Empty()) return;
+//
+//     if (m_Source->IsSetTaxname()) {
+//         m_Taxname = m_Source->GetTaxname();
+//     }
+//     if (m_Source->IsSetGenome()) {
+//         m_Genome = m_Source->GetGenome();
+//     }
+//     if (m_Source->IsSetOrgname()) {
+//         ... (m_Genus and m_Species of a binomial name)
+//     }
+//
+//     s_TrimMainTitle (m_MainTitle);
+//
+//     len1 = (int) m_MainTitle.length();
+//     len2 = (int) m_Taxname.length();
+//
+//     // find [taxname]
+//
+//     if (len1 > len2 + 4) {
+//         tpos = s_TitleEndsInOrganism(m_MainTitle, m_Taxname);
+//         if (tpos == NPOS) {
+//             string binomial = m_Genus;
+//             binomial += " ";
+//             binomial += m_Species;
+//             tpos = s_TitleEndsInOrganism(m_MainTitle, binomial);
+//             if (tpos == NPOS) {
+//                 if (m_IsCrossKingdom) {
+//                     ...
+//                 }
+//             }
+//         }
+//     }
+//
+//     /* do not change unless [genus species] was at the end */
+//     if (tpos == NPOS) return;
+//
+//     m_MainTitle.erase (tpos);
+//     s_TrimMainTitle (m_MainTitle);
+//     len1 = (int) m_MainTitle.length();
+//
+//     // find (organelle)
+//
+//     if (len1 > 2 && m_MainTitle [len1 - 1] == ')') {
+//         pos = m_MainTitle.find_last_of ("(");
+//         if (pos != NPOS) {
+//             for ( genome = NCBI_GENOME(chloroplast); genome <= NCBI_GENOME(chromatophore); genome++ ) {
+//                 string str = s_proteinOrganellePrefix [genome];
+//                 if ( ! str.empty() ) {
+//                     string paren = "(" + str + ")";
+//                     if (NStr::EndsWith (m_MainTitle, paren )) {
+//                         opos = pos;
+//                         break;
+//                     }
+//                 }
+//             }
+//         }
+//         s_TrimMainTitle (m_MainTitle);
+//         len1 = (int) m_MainTitle.length();
+//     }
+//
+//     if (opos != NPOS) {
+//         m_MainTitle.erase (opos);
+//         s_TrimMainTitle (m_MainTitle);
+//         len1 = (int) m_MainTitle.length();
+//     }
+//
+//     if ( NStr::EndsWith (m_MainTitle, ", partial")) {
+//         m_MainTitle.erase(m_MainTitle.length() - 9);
+//         s_TrimMainTitle (m_MainTitle);
+//     }
+//
+//     // then reconstruct partial (organelle) [taxname] suffix
+//
+//     if ( !x_IsComplete()) {
+//         m_MainTitle += ", partial";
+//     }
+//
+//     if (m_OmitTaxonomicName) return;
+//
+//     CTempString taxname = m_Taxname;
+//
+//     if (m_Genome >= NCBI_GENOME(chloroplast) && m_Genome <= NCBI_GENOME(chromatophore)) {
+//         ...
+//     }
+//
+//     // check for special taxname, go to overlapping source feature
+//     if ((taxname.empty()  ||
+//          (!NStr::EqualNocase (taxname, "synthetic construct")  && ...))  &&
+//         !m_LocalAnnotsOnly) {
+//         ...
+//             src = x_GetSourceFeatViaCDS (bsh);
+//             if (src.NotEmpty()  &&  src->IsSetTaxname()) {
+//                 taxname = src->GetTaxname();
+//             }
+//     }
+//
+//     if (m_IsCrossKingdom && ! m_FirstSuperKingdom.empty() && ! m_SecondSuperKingdom.empty()) {
+//         m_MainTitle += " [" + string(m_FirstSuperKingdom) + "][" + string(m_SecondSuperKingdom) + "]";
+//     } else if (! taxname.empty() /* && m_MainTitle.find(taxname) == NPOS */) {
+//         m_MainTitle += " [" + string(taxname) + "]";
+//     }
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3049-3055 (`s_TrimMainTitle`,
+// `trim_end_of(.., b".,;~ ")`)
+// ```c++
+// static inline void s_TrimMainTitle (string& str)
+// {
+//     size_t pos = str.find_last_not_of (".,;~ ");
+//     if (pos != NPOS) {
+//         str.erase (pos + 1);
+//     }
+// }
+// ```
+// The source of a database Bioseq (`CSeqDBVol::x_GetTaxonomy`, seqdbvol.cpp:1161-1176) has the
+// taxid's dbtag and, where the taxonomy database names the taxid, its names: no genome and no
+// orgname, so no genus or species (the binomial is `" "`, which matches a title ending in
+// ` [ ]`), no organelle and not cross-kingdom; the Bioseq has no MolInfo (`x_IsComplete()`,
+// :3416-3428, holds: no `, partial` back) and no CDS feature for `x_GetSourceFeatViaCDS`
+// (:2044-2056); `m_OmitTaxonomicName` comes from a flag no caller sets. NCBI BLAST+ 2.17.0 writes
+// these bytes with and without a taxonomy database (probe of line RG T5c, `T/t5c/out/ncbi`:
+// `alpha, partial [Bacillus sp.]` -> `alpha [Bacillus sp.]`, `zeta protein, partial [ ]` ->
+// `zeta protein [Bacillus sp.]` or, without a name, `zeta protein`).
+/// `x_AdjustProteinTitleSuffix` of the title `title` of a database protein Bioseq with a source
+/// whose scientific name is `taxname` (empty without one): a title that ends in ` [taxname]` (any
+/// ASCII case) or ` [ ]` loses that, then a `(organelle)` and `, partial` before it, and gets
+/// ` [taxname]` back where the name is not empty.
+pub(crate) fn adjust_protein_title_suffix(title: &mut Vec<u8>, taxname: &[u8]) {
+    trim_end_of(title, b".,;~ ");
+    if title.len() <= taxname.len() + 4 {
+        return;
+    }
+    let Some(tpos) =
+        title_ends_in_organism(title, taxname).or_else(|| title_ends_in_organism(title, b" "))
+    else {
+        return;
+    };
+    title.truncate(tpos);
+    trim_end_of(title, b".,;~ ");
+    let mut opos = None;
+    if title.len() > 2 && title[title.len() - 1] == b')' {
+        if let Some(pos) = title.iter().rposition(|&c| c == b'(') {
+            // `NStr::EndsWith(m_MainTitle, "(" + str + ")")`; the title ends in `)`.
+            let len = title.len();
+            let ends_in_paren = |prefix: &[u8]| {
+                len >= prefix.len() + 2
+                    && title[len - prefix.len() - 2] == b'('
+                    && &title[len - prefix.len() - 1..len - 1] == prefix
+            };
+            if PROTEIN_ORGANELLE_PREFIXES
+                .iter()
+                .any(|prefix| ends_in_paren(prefix))
+            {
+                opos = Some(pos);
+            }
+        }
+        trim_end_of(title, b".,;~ ");
+    }
+    if let Some(opos) = opos {
+        title.truncate(opos);
+        trim_end_of(title, b".,;~ ");
+    }
+    if title.ends_with(b", partial") {
+        title.truncate(title.len() - 9);
+        trim_end_of(title, b".,;~ ");
+    }
+    if !taxname.is_empty() {
+        title.extend_from_slice(b" [");
+        title.extend_from_slice(taxname);
+        title.push(b']');
+    }
+}
+
+/// Whether `adjust_protein_title_suffix` can change `title` with some source: its main title
+/// (after `s_TrimMainTitle`) ends in `]` (`s_TitleEndsInOrganism` asks for it). The readers ask
+/// for the name of a database sequence's source only then (and for an empty title).
+pub fn protein_title_suffix_adjustable(title: &[u8]) -> bool {
+    title
+        .iter()
+        .rposition(|byte| !b".,;~ ".contains(byte))
+        .is_some_and(|end| title[end] == b']')
+}
+
+/// Whether `adjust_protein_title_suffix` can take the ` [ ]` branch for `title` (the binomial
+/// `" "`): the one way the source of a database sequence can make a title that NCBI cannot write
+/// out of one that it can (a name appended that is not in the title, or no bracket left: a title
+/// of punctuation, an empty first word). Where the title ends in ` [taxname]`, the name that
+/// comes back has the title's bytes but for their ASCII case and keeps its brackets.
+pub fn protein_title_suffix_may_drop_brackets(title: &[u8]) -> bool {
+    let end = title
+        .iter()
+        .rposition(|byte| !b".,;~ ".contains(byte))
+        .map_or(0, |end| end + 1);
+    title[..end].ends_with(b" [ ]")
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:1545-1550
@@ -2316,5 +2676,176 @@ mod tests {
             SourceTaxname::Unnamed.of_stored(|| unreachable!()),
             SourceTaxname::Unnamed
         );
+    }
+
+    // NCBI BLAST+ 2.17.0 `blastp -num_threads 1`, the outfmt 0 heading of a line without a title
+    // (probe of line RG T5c, `remaining-gaps-20261112/T/t5c/out/ncbi/ppar.blastp.f0.{tx,nt}`),
+    // whose generated title is the Bioseq's (the titled line's) with its end rewritten from the
+    // first source: `Bacillus sp.` with the taxonomy database, no name without it.
+    #[test]
+    fn the_protein_suffix_is_rebuilt_from_the_source() {
+        let adjusted = |title: &str, taxname: &str| {
+            let mut title = title.as_bytes().to_vec();
+            adjust_protein_title_suffix(&mut title, taxname.as_bytes());
+            String::from_utf8(title).unwrap()
+        };
+        let bac = "Bacillus sp.";
+        for (title, named, nameless) in [
+            ("alpha, partial [Bacillus sp.]", "alpha [Bacillus sp.]", ""),
+            ("beta [bacillus SP.]", "beta [Bacillus sp.]", ""),
+            (
+                "gamma (mitochondrion) [Bacillus sp.]",
+                "gamma [Bacillus sp.]",
+                "",
+            ),
+            ("delta (foo) [Bacillus sp.]", "", ""),
+            ("epsilon [Homo sapiens]", "", ""),
+            (
+                "zeta protein, partial [ ]",
+                "zeta protein [Bacillus sp.]",
+                "zeta protein",
+            ),
+            ("eta protein, partial []", "", ""),
+            ("theta. [Bacillus sp.]", "theta [Bacillus sp.]", ""),
+            (
+                "TPA: iota, partial [Bacillus sp.].",
+                "TPA: iota [Bacillus sp.]",
+                "",
+            ),
+            (
+                "kappa, partial (chloroplast) [Bacillus sp.]",
+                "kappa [Bacillus sp.]",
+                "",
+            ),
+            (
+                "lambda (chloroplast), partial [Bacillus sp.]",
+                "lambda (chloroplast) [Bacillus sp.]",
+                "",
+            ),
+            ("mu(plasmid) [Bacillus sp.]", "mu [Bacillus sp.]", ""),
+            ("nu (x)(virus) [Bacillus sp.]", "", ""),
+            ("nu (chromosome) [Bacillus sp.]", "", ""),
+            ("nu (protoplast) [Bacillus sp.]", "nu [Bacillus sp.]", ""),
+            ("x, [Bacillus sp.]", "x [Bacillus sp.]", ""),
+            (
+                "omicron, partial  [Bacillus sp.]",
+                "omicron [Bacillus sp.]",
+                "",
+            ),
+            ("pi, partial[Bacillus sp.]", "", ""),
+            (
+                "rho, partial, partial [Bacillus sp.]",
+                "rho, partial [Bacillus sp.]",
+                "",
+            ),
+            (
+                "upsilon, partial [Bacillus sp.] ~;",
+                "upsilon [Bacillus sp.]",
+                "",
+            ),
+            (
+                "ii protein (plastid) [ ]",
+                "ii protein [Bacillus sp.]",
+                "ii protein",
+            ),
+            (",, [Bacillus sp.]", ",,  [Bacillus sp.]", ""),
+            // Not longer than ` [taxname]` and one letter: never adjusted.
+            ("x [Bacillus sp.]", "", ""),
+        ] {
+            let trimmed = {
+                let mut t = title.as_bytes().to_vec();
+                trim_end_of(&mut t, b".,;~ ");
+                String::from_utf8(t).unwrap()
+            };
+            let named = if named.is_empty() {
+                trimmed.as_str()
+            } else {
+                named
+            };
+            let nameless = if nameless.is_empty() {
+                trimmed.as_str()
+            } else {
+                nameless
+            };
+            assert_eq!(adjusted(title, bac), named, "{title:?} named");
+            assert_eq!(adjusted(title, ""), nameless, "{title:?} without a name");
+            assert!(protein_title_suffix_adjustable(title.as_bytes()));
+        }
+        // The other names of the probe's taxonomy database.
+        assert_eq!(
+            adjusted(
+                "aa, partial [a &amp; b &lt;x&gt; &#65;]",
+                "A &amp; B &lt;x&gt; &#65;"
+            ),
+            "aa [A &amp; B &lt;x&gt; &#65;]"
+        );
+        assert_eq!(
+            adjusted("bb, partial [  spaced   NAME  ]", "  Spaced   name  "),
+            "bb [  Spaced   name  ]"
+        );
+        // ` [ ]` needs the binomial's length: `a, [ ]` is adjusted, `a [ ]` is not.
+        assert_eq!(adjusted("a, [ ]", ""), "a");
+        assert_eq!(adjusted("a [ ]", ""), "a [ ]");
+        assert_eq!(adjusted(", [ ]", ""), ", [ ]");
+        assert_eq!(adjusted(", , [ ]", ""), ", , ");
+        assert!(!protein_title_suffix_adjustable(b"alpha protein"));
+        assert!(!protein_title_suffix_adjustable(b""));
+        assert!(protein_title_suffix_adjustable(b"a] .~"));
+        assert!(protein_title_suffix_may_drop_brackets(
+            b"zeta, partial [ ]."
+        ));
+        assert!(!protein_title_suffix_may_drop_brackets(
+            b"alpha, partial [Bacillus sp.]"
+        ));
+        assert!(!protein_title_suffix_may_drop_brackets(b"..."));
+        // In `GenerateDefline`: a protein heading with a source only, before the prefixes go and
+        // the title is decoded; never a title made from the source.
+        let source = |taxname: Option<&[u8]>| BioseqFacts {
+            has_source: true,
+            taxname: taxname.map(std::sync::Arc::from),
+            ..BioseqFacts::default()
+        };
+        let made = |title: &[u8], protein, leave, facts: &BioseqFacts| {
+            String::from_utf8(
+                generate_bioseq_defline(title, protein, leave, facts)
+                    .unwrap()
+                    .text,
+            )
+            .unwrap()
+        };
+        let named = source(Some(b"Bacillus sp."));
+        let title = b"MAG: sigma &amp; tau, partial [Bacillus sp.]";
+        assert_eq!(
+            made(title, true, false, &named),
+            "sigma & tau [Bacillus sp.]"
+        );
+        assert_eq!(
+            made(title, true, true, &named),
+            "MAG: sigma & tau, partial [Bacillus sp.]"
+        );
+        assert_eq!(
+            made(title, false, false, &named),
+            "sigma & tau, partial [Bacillus sp.]"
+        );
+        assert_eq!(
+            made(title, true, false, &BioseqFacts::default()),
+            "sigma & tau, partial [Bacillus sp.]"
+        );
+        assert_eq!(made(b"chi, partial [ ]", true, false, &source(None)), "chi");
+        assert_eq!(
+            made(b"", true, false, &named),
+            "unnamed protein product [Bacillus sp.]"
+        );
+        // A title that the adjustment leaves as punctuation is read past its end (NCBI BLAST+
+        // 2.17.0 crashes: probe of line RG T5c, `pedge_e3`); a shorter one is not adjusted (NCBI
+        // writes ` [ ]` for `, [ ]`: `pedge_e1`).
+        let edge = generate_bioseq_defline(b", , [ ]", true, false, &source(None)).unwrap();
+        assert!(edge.reads_past_end);
+        assert!(
+            !generate_bioseq_defline(b", , [ ]", true, false, &BioseqFacts::default())
+                .unwrap()
+                .reads_past_end
+        );
+        assert_eq!(made(b", [ ]", true, false, &source(None)), " [ ]");
     }
 }

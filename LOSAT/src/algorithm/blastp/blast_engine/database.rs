@@ -2011,12 +2011,20 @@ pub(super) fn x_titles_allow_blocks(
                         .is_ok()
                     } else {
                         // A protein's word is `unnamed`, with or without the name of its source.
+                        // The end of a title ending in `]` that the source rewrites
+                        // (`report::defline::adjust_protein_title_suffix`) refuses nothing that
+                        // the title without it does not, but for a ` [ ]` end, which can leave
+                        // a title of punctuation or take a name that does not decode: such a
+                        // title goes to the search of all queries.
                         crate::report::defline::database_subject_id(
                             &deflines[0].title,
                             &Default::default(),
                             true,
                         )
                         .is_ok()
+                            && !crate::report::defline::protein_title_suffix_may_drop_brackets(
+                                &deflines[0].title,
+                            )
                     }
             }
             Err(_) => false,

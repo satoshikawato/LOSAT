@@ -511,3 +511,8 @@ db_r100_mask	-infmt blastdb -in db/r100 -outfmt maskinfo_asn1_text
 db_t5_fasta	-infmt blastdb -in ../db_search/t5/pclean -outfmt fasta -conffile conf/t5.ini
 db_t5_interval	-infmt blastdb -in ../db_search/t5/pclean -outfmt interval -conffile conf/t5.ini
 db_t5_fasta_ps	-infmt blastdb -in ../db_search/t5/ppall -outfmt fasta -parse_seqids -conffile conf/t5.ini
+# Protein titles ending in ] whose end NCBI's x_AdjustProteinTitleSuffix rewrites from the Bioseq's first source (line RG item T5c): ../db_search/t5/psfx (-parse_seqids) and psfs (without; make_t5.py --suffix-only), with the taxonomy database of conf/t5.ini and without one (a source without a name drops a ' [ ]' end). NCBI BLAST+ 2.17.0 (local oracle), 2026-11-14, T5c.
+db_t5c_fasta	-infmt blastdb -in ../db_search/t5/psfx -outfmt fasta -conffile conf/t5.ini
+db_t5c_fasta_ps	-infmt blastdb -in ../db_search/t5/psfx -outfmt fasta -parse_seqids -conffile conf/t5.ini
+db_t5c_stored_fasta	-infmt blastdb -in ../db_search/t5/psfs -outfmt fasta -conffile conf/t5.ini
+db_t5c_stored_fasta_nt	-infmt blastdb -in ../db_search/t5/psfs -outfmt fasta

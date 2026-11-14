@@ -29,6 +29,9 @@ pub(crate) struct MaskedBioseq<'a> {
     /// The name of the organism of the Bioseq's first source (a database sequence's), from which
     /// `GenerateDefline` makes an empty title (`report::defline::BioseqFacts::taxname`).
     pub taxname: Option<&'a std::sync::Arc<[u8]>>,
+    /// Whether the Bioseq has a source (`report::defline::BioseqFacts::has_source`): a database
+    /// protein's title ending in `]` gets its end from it.
+    pub has_source: bool,
     pub iupac: &'a [u8],
     /// Whether the sequence is a protein (`CDeflineGenerator` names a protein without a title
     /// `unnamed protein product`).
@@ -496,6 +499,7 @@ fn id_to_string(seq: &MaskedBioseq<'_>, parsed_id: bool) -> Result<Vec<u8>, Writ
     }
     let mut facts = bioseq_facts(seq.ids);
     facts.taxname = seq.taxname.cloned();
+    facts.has_source = seq.has_source;
     let defline =
         generate_bioseq_defline(seq.title.unwrap_or_default(), seq.protein, false, &facts)
             .map_err(|_| {

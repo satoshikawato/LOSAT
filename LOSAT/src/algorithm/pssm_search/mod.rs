@@ -24,6 +24,7 @@
 //!         sbp->kbp_gap = sbp->kbp_gap_psi;
 //! ```
 
+pub(crate) mod annot_index;
 pub(crate) mod evalue;
 pub(crate) mod gapalign;
 pub(crate) mod in_pssm;
@@ -99,6 +100,14 @@ pub struct PsiSearch {
     /// run that writes one (`in_pssm::PssmReader::strategy`, `pssm_request_written`) of a PSSM that
     /// NCBI's check passes; `None` otherwise and for a FASTA query's later rounds.
     pub(crate) request: Option<PssmQueryRequest>,
+    /// What NCBI's object manager makes of the annotations of the PSSM's query when the query
+    /// joins the scope (`annot_index::index_annots`): its messages, the diagnostic stream it
+    /// leaves failed and its exception, which the run writes where NCBI posts them
+    /// (`annot_posts`, `annot_abort`); empty without annotations and for a FASTA query's rounds.
+    pub(crate) annot: annot_index::AnnotOutcome,
+    /// Whether NCBI's definition line of the query, which its XML and JSON reports make, reads
+    /// the query's annotations (`in_pssm::defline_reads_annot`).
+    pub(crate) defline_reads_annot: bool,
 }
 
 /// The PSSM of `-in_pssm` as NCBI's application read it (before `CPsiBlastImpl` computes the
@@ -462,6 +471,45 @@ impl PsiSearch {
             setup_messages,
             warning_title: None,
             request: None,
+            annot: annot_index::AnnotOutcome::default(),
+            defline_reads_annot: false,
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:506, 537 and
+    // c++/src/app/blast/tblastn_app.cpp:226, 270 (psiblast posts the object manager's messages after
+    // its prolog, tblastn before it: `formatter.PrintProlog()` comes before
+    // `scope->AddTopLevelSeqEntry(pssm->SetQuery())` in psiblast, after it in tblastn)
+    /// The messages of NCBI's object manager about the PSSM query's annotations, written to
+    /// `diagnostics` (psiblast after its prolog, as the messages of its query batch,
+    /// `blast_engine::psiblast_stop_at_pssm_query`; tblastn before its prolog), after which a
+    /// failed diagnostic stream silences the run's later messages
+    /// (`ncbi_exception::set_main_diag_failbit`).
+    pub(crate) fn write_annot_posts(
+        &self,
+        diagnostics: &mut dyn std::io::Write,
+    ) -> std::io::Result<()> {
+        diagnostics.write_all(&self.annot.posts)?;
+        self.fail_diag_stream();
+        Ok(())
+    }
+
+    /// Marks the main thread's diagnostic stream failed when the object manager's messages
+    /// failed it (`AnnotOutcome::muted`), once they are written.
+    pub(crate) fn fail_diag_stream(&self) {
+        if self.annot.muted {
+            crate::ncbi_exception::set_main_diag_failbit();
+        }
+    }
+
+    /// The exception with which NCBI's object manager ends the run (`CATCH_ALL`'s report).
+    pub(crate) fn annot_abort(&self) -> Option<anyhow::Error> {
+        self.annot.abort.as_ref().map(|abort| {
+            crate::cli::NativeError {
+                exit: abort.exit,
+                message: abort.message.clone(),
+            }
+            .into()
+        })
     }
 }

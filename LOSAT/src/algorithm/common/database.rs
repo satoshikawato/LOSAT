@@ -4814,13 +4814,13 @@ pub(crate) fn batch_prefetch<'s>(
         }
     }
     if failed_lookup.is_some() || fails {
-        text.extend_from_slice(
-            format!(
-                "Warning: [{}] Error pre-fetching sequence data\n",
-                program.to_ascii_lowercase()
-            )
-            .as_bytes(),
-        );
+        // A post of NCBI's main thread (`ncbi_exception::post_line`).
+        text.extend(crate::ncbi_exception::post_line(
+            crate::ncbi_exception::Severity::Warning,
+            None,
+            Some(&program.to_ascii_lowercase()),
+            b"Error pre-fetching sequence data",
+        ));
     }
     Ok(text)
 }

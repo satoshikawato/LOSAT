@@ -3,7 +3,7 @@
 //! reader (SURVEY_D3 §2.4 of line RG series F: `CSeq_descr`, `CVariation_ref`; the others keep
 //! caches only), and the Seq-id, which LOSAT keeps in its one Seq-id model (`seqid::model`).
 
-use super::read::{Post, ReadError};
+use super::read::{Frame, Post, ReadError};
 use super::table::named;
 use super::{member_index, Value};
 use crate::seqid::model::{
@@ -55,8 +55,8 @@ use crate::seqid::model::{
 // `CException`s): `CATCH_ALL`'s `std::exception` clause reports it, exit status 255. A smaller
 // request that cannot be allocated is a `bad_alloc`, which the hook ignores, as LOSAT does not
 // allocate. (`OBJECTS_DENSE_SEG_RESERVE` is NCBI's default, true: LOSAT reads no NCBI parameter.)
-// The reserve hooks of Seq-graph (`numval` is a TSeqPos: never above `max_size()`) and of
-// SeqTable-multi-data (only in a Seq-annot, which the PSSM search refuses) need nothing here.
+// The reserve hook of Seq-graph (`numval` is a TSeqPos: never above `max_size()`) needs nothing
+// here; SeqTable-multi-data's is a variant hook (`pre_read_variant`).
 /// The hook of NCBI's class `ty` before the value of its member at position `member` is read,
 /// with the members `read` so far.
 pub(super) fn pre_read_member(
@@ -87,6 +87,117 @@ pub(super) fn pre_read_member(
     };
     if size > max_size {
         return Err(ReadError::Std("vector::reserve"));
+    }
+    Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_multi_data.cpp:703-765
+// ```c++
+// void CSeqTable_multi_data::CReserveHook::PreReadChoiceVariant(
+//     CObjectIStream& in,
+//     const CObjectInfoCV& variant)
+// {
+//     static CSafeStatic<NCBI_PARAM_TYPE(OBJECTS, SEQ_TABLE_RESERVE)> s_Reserve;
+//
+//     if ( !s_Reserve->Get() ) {
+//         return;
+//     }
+//     if ( CSeq_table* table = CType<CSeq_table>::GetParent(in, 5, 2) ) {
+//         size_t size = table->GetNum_rows();
+//         CSeqTable_multi_data* data =
+//             CType<CSeqTable_multi_data>::Get(variant.GetChoiceObject());
+//         try {
+//             switch ( variant.GetVariantIndex() ) {
+//             case e_Int:
+//                 data->SetInt().reserve(size);
+//                 break;
+//             ...  (int1, int2, int8, real, string, bytes; the indexes of common-string and
+//                   common-bytes; loc, id, interval: `reserve(size)`)
+//             case e_Bit:
+//                 data->SetBit().reserve((size+7)/8);
+//                 break;
+//             ...
+//             default:
+//                 break;
+//             }
+//         }
+//         catch ( bad_alloc& /*ignored*/ ) {
+//             // ignore insufficient memory exception from advisory reserve()
+//         }
+//     }
+// }
+// ```
+// NCBI reference (598d8ae6): c++/include/objects/seqtable/SeqTable_multi_data.hpp:231-232 (the hook
+// is global: `NCBISER_HAVE_GLOBAL_READ_VARIANT_HOOK(CSeqTable_multi_data, "*", ...)`)
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1906-1923
+// ```c++
+// TObjectPtr CObjectIStream::GetParentObjectPtr(TTypeInfo type,
+//                                               size_t max_depth,
+//                                               size_t min_depth) const
+// {
+//     for ( size_t i = 1, depth = 0, size = GetStackDepth(); i < size; ++i ) {
+//         const TFrame& frame = FetchFrameFromTop(i);
+//         if ( frame.GetFrameType() == TFrame::eFrameClass ||
+//              frame.GetFrameType() == TFrame::eFrameChoice ) {
+//             if ( depth >= min_depth && frame.HasTypeInfo(type) ) {
+//                 return const_cast<TObjectPtr>(frame.GetObjectPtr());
+//             }
+//             if ( ++depth > max_depth ) {
+//                 break;
+//             }
+//         }
+//     }
+//     return 0;
+// }
+// ```
+// The hook runs when the variant has been named, its frame on top of the stack: the multi-data's
+// own choice frame is depth 0, a column's `data` finds its Seq-table at depth 2, an `int-delta`
+// nested 1 to 3 times at 3 to 5, 4 times not (no reserve), an `int-scaled`'s data at 4 (NCBI
+// BLAST+ 2.17.0, line RG D3-1 `om/` cases t62-t65). `num-rows` is an `int` (Seq_table_.hpp): a
+// negative one is a `size_t` above every `max_size()`, and `reserve` throws
+// `std::length_error("vector::reserve")`, which no frame catches (`CATCH_ALL`'s `std::exception`
+// clause, exit status 255: t50, t66, t69); `bit`'s `(size+7)/8` wraps below that size, and any
+// other size is at most 2^31-1 elements, whose `bad_alloc` the hook ignores (LOSAT allocates
+// nothing). (`OBJECTS_SEQ_TABLE_RESERVE` is NCBI's default, true: LOSAT reads no NCBI parameter.)
+/// The hook of the CHOICE `ty` before the value of its variant at position `variant` is read,
+/// with the reader's frames (the variant's on top).
+pub(super) fn pre_read_variant(ty: u16, variant: usize, frames: &[Frame]) -> Result<(), ReadError> {
+    if ty != named::SEQTABLE_MULTI_DATA {
+        return Ok(());
+    }
+    let reserved = matches!(
+        super::members(ty)[variant].name(),
+        "int"
+            | "int1"
+            | "int2"
+            | "int8"
+            | "real"
+            | "string"
+            | "bytes"
+            | "common-string"
+            | "common-bytes"
+            | "loc"
+            | "id"
+            | "interval"
+    );
+    if !reserved {
+        return Ok(());
+    }
+    let mut depth = 0;
+    for frame in frames.iter().rev().skip(1) {
+        if !frame.is_class_or_choice() {
+            continue;
+        }
+        if depth >= 2 && frame.ty() == Some(named::SEQ_TABLE) {
+            if frame.num_rows().is_some_and(|rows| rows < 0) {
+                return Err(ReadError::Std("vector::reserve"));
+            }
+            return Ok(());
+        }
+        depth += 1;
+        if depth > 5 {
+            break;
+        }
     }
     Ok(())
 }

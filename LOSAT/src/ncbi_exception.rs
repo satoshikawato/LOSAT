@@ -425,6 +425,48 @@ impl NcbiException {
         ));
         out
     }
+
+    // NCBI reference (598d8ae6): c++/include/corelib/ncbiexpt.hpp:580-584, 755-757
+    // ```c++
+    // #define NCBI_CATCH(message)                                   \
+    //     catch (NCBI_NS_NCBI::CException& e) {                     \
+    //         NCBI_REPORT_EXCEPTION(message, e);                    \
+    //     }                                                         \
+    //     STD_CATCH(message)
+    // ...
+    // #define NCBI_REPORT_EXCEPTION(title, ex)                        \
+    //     NCBI_NS_NCBI::CExceptionReporter::ReportDefault             \
+    //         (DIAG_COMPILE_INFO, title, ex, NCBI_NS_NCBI::eDPF_Default)
+    // ```
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:670-674
+    // ```c++
+    // void CExceptionReporter::ReportDefault(const CDiagCompileInfo& info,
+    //     const string& title,const exception& ex, TDiagPostFlags flags)
+    // {
+    //     ReportDefaultEx(0, 0, info, title, ex, flags);
+    // }
+    // ```
+    /// `NCBI_CATCH(title)` of this exception in an application whose diagnostic prefix is
+    /// `prefix` (`ReportDefaultEx` without an error code, quoted at `report_default_ex`): `Error:
+    /// (<class>::<code>) [<prefix>] <message>` for each exception of the chain, oldest first, then
+    /// `Error: [<prefix>] <title> (<class>::<code>) <message>` of the newest (NCBI BLAST+ 2.17.0,
+    /// line RG D3-1 `om/` cases t08, t10, t76: the Seq-table checks of the object manager).
+    pub(crate) fn report_default(&self, prefix: &str, title: &str) -> Vec<u8> {
+        let mut out = Vec::new();
+        for e in self.chain().iter().rev() {
+            out.extend(error_post_line(
+                Some(e.site.kind),
+                Some(prefix),
+                e.text().as_bytes(),
+            ));
+        }
+        out.extend(error_post_line(
+            None,
+            Some(prefix),
+            format!("{title} ({}) {}", self.site.kind, self.text()).as_bytes(),
+        ));
+        out
+    }
 }
 
 /// A message of severity `Error` with the error id `id` (`m_ErrText`, or `<err_code>.<err_subcode>`)
@@ -466,16 +508,94 @@ fn post_error_bytes(id: &str, message: &[u8]) -> Vec<u8> {
 /// NCBI's object streams replace (`report::serial::encoder::ReplacedChar::post`) and the
 /// applications' `ERR_POST(Error << ...)` (`ncbi_app::Diag::err_post_bytes`).
 pub(crate) fn error_post_line(id: Option<&str>, prefix: Option<&str>, message: &[u8]) -> Vec<u8> {
-    let mut line = b"Error: ".to_vec();
+    post_line(Severity::Error, id, prefix, message)
+}
+
+/// The severity of a post (`CNcbiDiag::SeverityName`: `Warning`, `Error`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Severity {
+    Warning,
+    Error,
+}
+
+/// A post of severity `severity` from NCBI's main thread (`error_post_line`'s line, of any
+/// severity): after the main thread's diagnostic stream failed (`main_diag_failbit`), the header
+/// alone.
+pub(crate) fn post_line(
+    severity: Severity,
+    id: Option<&str>,
+    prefix: Option<&str>,
+    message: &[u8],
+) -> Vec<u8> {
+    post_line_in(severity, id, prefix, message, main_diag_failbit())
+}
+
+/// `post_line` with the state of the stream given: `failed` drops the message (the post's header,
+/// `<severity>: (<id>) [<prefix>] `, and its line feed stay; see `main_diag_failbit`).
+pub(crate) fn post_line_in(
+    severity: Severity,
+    id: Option<&str>,
+    prefix: Option<&str>,
+    message: &[u8],
+    failed: bool,
+) -> Vec<u8> {
+    let mut line = match severity {
+        Severity::Warning => b"Warning: ".to_vec(),
+        Severity::Error => b"Error: ".to_vec(),
+    };
     if let Some(id) = id {
         line.extend_from_slice(format!("({id}) ").as_bytes());
     }
     if let Some(prefix) = prefix {
         line.extend_from_slice(format!("[{prefix}] ").as_bytes());
     }
-    line.extend_from_slice(message);
+    if !failed {
+        line.extend_from_slice(message);
+    }
     line.push(b'\n');
     line
+}
+
+// NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:676-697
+// ```c++
+//         CNcbiOstrstream s;
+//         ...
+//         ERR_POST_X(6, "Failed to parse location of "<<s.rdbuf()<<" in "<<GetDescription());
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:4389, 4423-4433 (`CDiagBuffer::Flush`)
+// ```c++
+//     string message = CNcbiOstrstreamToString(*m_Stream);
+//     ...
+//     // reset flags to initial value
+//     m_Stream->flags(m_InitialStreamFlags);
+// #  ifdef NCBI_SHUN_OSTRSTREAM
+//     // m_Stream->rdbuf()->PUBSEEKOFF(0, IOS_BASE::beg);
+//     m_Stream->str(kEmptyStr);
+// #  endif
+// #endif
+//
+//     Reset(*m_Diag);
+// ```
+// `s` is an output string stream: its buffer gives nothing to read, so `<< s.rdbuf()` inserts no
+// character and sets `failbit` on the thread's diagnostic stream (`CDiagBuffer::m_Stream`), which
+// `Flush` empties and gives its flags back but never `clear()`s. Every later message of that
+// thread is lost: its post prints the header alone, and `CATCH_ALL`'s `LOG_POST` (no header) its
+// line feed (NCBI BLAST+ 2.17.0, line RG D3-1 `om/` cases k01-k06 and `om/mute/` e01-e16: the query
+// warning line, the taxonomy database warning, the engine error, with 1 to 4 threads).
+static MAIN_DIAG_FAILBIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether the diagnostic stream of NCBI's main thread has failed (`ERR_POST_X(6, "Failed to parse
+/// location of " << s.rdbuf() ...)` of the object manager, `algorithm::pssm_search::annot_index`):
+/// the run's later posts print their header only (`post_line`) and `CATCH_ALL` its line feeds
+/// (`cli::catch_all_text`). False unless a psiblast or tblastn `-in_pssm` run posted it.
+pub(crate) fn main_diag_failbit() -> bool {
+    MAIN_DIAG_FAILBIT.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Marks NCBI's main-thread diagnostic stream failed for the rest of the process
+/// (`main_diag_failbit`); called where the run writes the post that fails it.
+pub(crate) fn set_main_diag_failbit() {
+    MAIN_DIAG_FAILBIT.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
 // NCBI reference (598d8ae6): c++/include/corelib/ncbidiag.hpp:550-551, 564-567

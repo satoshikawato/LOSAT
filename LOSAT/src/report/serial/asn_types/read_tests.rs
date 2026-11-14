@@ -655,6 +655,67 @@ fn dense_seg_reserve_above_max_size_is_a_length_error() {
     ));
 }
 
+// NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_multi_data.cpp:703-765 and
+// c++/src/serial/objistr.cpp:1906-1923 (quoted at `hooks::pre_read_variant`): a negative
+// `num-rows` reserves above `max_size()` for the listed variants (NCBI 2.17.0, line RG D3-1 `om/`
+// cases t50, t62-t69); the Seq-table is found up to 5 class or choice frames above the variant.
+#[test]
+fn seq_table_reserve_of_negative_rows_is_a_length_error() {
+    let table = |rows: i32, data: &str| {
+        format!(
+            "Seq-table ::= {{ feat-type 1, num-rows {rows}, columns {{ {{ header {{ field-id 9999 }}, data {data} }} }} }}"
+        )
+    };
+    let reserve = Err(ReadError::Std("vector::reserve"));
+    for data in [
+        "int { 1 }",
+        "int1 '01'H",
+        "int2 { 1 }",
+        "int8 { 1 }",
+        "real { { 1, 10, 0 } }",
+        "string { \"a\" }",
+        "bytes { '01'H }",
+        "common-string { strings { \"a\" }, indexes { 0 } }",
+        "common-bytes { bytes { '01'H }, indexes { 0 } }",
+        "loc { null NULL }",
+        "id { local id 1 }",
+        "interval { { from 0, to 1, id local id 1 } }",
+        // An `int-delta` nested 1 to 3 times (the table at depth 3 to 5), `int-scaled`'s data (4).
+        "int-delta int { 1 }",
+        "int-delta int-delta int-delta int { 1 }",
+        "int-scaled { mul 1, add 0, data int { 1 } }",
+    ] {
+        assert_eq!(read(named::SEQ_TABLE, table(-1, data)).0, reserve, "{data}");
+    }
+    // `bit` reserves `(size+7)/8`, the outer `int-delta`, `int-scaled`, `real-scaled` and
+    // `bit-bvector` nothing; 4 nested `int-delta`s are past the hook's depth; a row count of 0
+    // or more reserves what NCBI ignores when it fails.
+    for (rows, data) in [
+        (-1, "bit '80'H"),
+        (-9, "bit '80'H"),
+        (-1, "bit-bvector { size 1, data '00'H }"),
+        (-1, "int-delta int-delta int-delta int-delta int { 1 }"),
+        (
+            -1,
+            "real-scaled { mul { 1, 10, 0 }, add { 0, 10, 0 }, data bit '80'H }",
+        ),
+        (0, "int { 1 }"),
+        (2147483647, "string { \"a\" }"),
+    ] {
+        assert!(
+            read(named::SEQ_TABLE, table(rows, data)).0.is_ok(),
+            "{rows} {data}"
+        );
+    }
+    // A default (single data) has no reserve.
+    assert!(read(
+        named::SEQ_TABLE,
+        "Seq-table ::= { feat-type 1, num-rows -1, columns { { header { field-id 9999 }, default int 5 } } }"
+    )
+    .0
+    .is_ok());
+}
+
 // A `Value` stays small: the PSSM's values are many (Seq-ids are boxed, INTEGER and REAL lists are
 // typed vectors).
 #[test]

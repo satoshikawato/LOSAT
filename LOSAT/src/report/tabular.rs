@@ -808,10 +808,16 @@ impl TabularSpec {
 
 /// The warning of `x_CheckTaxDB` (`TabularSpec::checks_taxdb`), as NCBI's `ERR_POST` writes it
 /// for `program` (lower case).
+/// The post's header alone after NCBI's main-thread diagnostic stream failed
+/// (`ncbi_exception::post_line`; line RG D3-1 `om/mute/` e09).
 pub fn taxdb_warning_line(program: &str) -> String {
-    format!(
-        "Warning: [{program}] Taxonomy name lookup from taxid requires installation of taxdb database with ftp://ftp.ncbi.nlm.nih.gov/blast/db/taxdb.tar.gz\n"
-    )
+    String::from_utf8(crate::ncbi_exception::post_line(
+        crate::ncbi_exception::Severity::Warning,
+        None,
+        Some(program),
+        b"Taxonomy name lookup from taxid requires installation of taxdb database with ftp://ftp.ncbi.nlm.nih.gov/blast/db/taxdb.tar.gz",
+    ))
+    .expect("ASCII")
 }
 
 /// A query of the report.

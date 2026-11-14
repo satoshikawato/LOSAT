@@ -703,15 +703,31 @@ pub fn query_warning<R: InputRecord>(
         query.believed_warning_id().unwrap_or(local_id.as_bytes()),
         &query.title_bytes(),
     );
-    let mut warning = format!("Warning: [{program}] ").into_bytes();
-    warning.extend_from_slice(&query_id);
-    warning.extend_from_slice(b": ");
+    warning_line(program, &query_id, messages)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1449-1452
+// ```c++
+//     if (!results.GetWarningStrings().empty()) {
+//         ...
+//         ERR_POST(Warning << results.GetWarningStrings());
+// ```
+/// The warning line of a query whose id is `query_id`, posted by NCBI's main thread
+/// (`ncbi_exception::post_line`: its header alone after the stream failed, line RG D3-1
+/// `om/mute/` e01-e04, e12, e16).
+fn warning_line(program: &str, query_id: &[u8], messages: &[String]) -> Vec<u8> {
+    let mut text = query_id.to_vec();
+    text.extend_from_slice(b": ");
     for message in sorted_query_messages(messages) {
-        warning.extend_from_slice(message.as_bytes());
-        warning.push(b' ');
+        text.extend_from_slice(message.as_bytes());
+        text.push(b' ');
     }
-    warning.push(b'\n');
-    warning
+    crate::ncbi_exception::post_line(
+        crate::ncbi_exception::Severity::Warning,
+        None,
+        Some(program),
+        &text,
+    )
 }
 
 /// `query_warning` for a query whose Seq-id is its own rather than the `Query_N` that NCBI's
@@ -737,15 +753,7 @@ pub fn query_warning_with_seq_id(
     if messages.is_empty() {
         return Vec::new();
     }
-    let mut warning = format!("Warning: [{program}] ").into_bytes();
-    warning.extend_from_slice(&warning_query_id(seq_id, title));
-    warning.extend_from_slice(b": ");
-    for message in sorted_query_messages(messages) {
-        warning.extend_from_slice(message.as_bytes());
-        warning.push(b' ');
-    }
-    warning.push(b'\n');
-    warning
+    warning_line(program, &warning_query_id(seq_id, title), messages)
 }
 
 /// The query ID that NCBI's warnings of a query show: the local ID (`Query_N`), then a

@@ -99,6 +99,10 @@ pub(crate) fn position_based_mode(mode: CompositionMode) -> CompositionMode {
 /// the prolog and NCBI's error, whatever its format or query (line RG F1b-2, review 4 R5-6): these
 /// refusals of the search's results do not apply to it.
 pub(crate) fn check_in_pssm_options(args: &ResolvedBlastpArgs, psi: &Arc<PsiSearch>) -> Result<()> {
+    // The XML and JSON query definition of a query whose annotations NCBI reads for it
+    // (`in_pssm::refuse_annot_defline`), in every run.
+    let number = crate::blastinput::app::parse_formatting_string(&args.outfmt)?.number;
+    crate::algorithm::pssm_search::in_pssm::refuse_annot_defline(psi, number, "PSIBLAST")?;
     if psi
         .stop_before_search(args.strategy.is_some(), args.db.is_some())
         .is_some()

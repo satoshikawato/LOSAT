@@ -595,50 +595,24 @@ pub(crate) fn psi_search_and_object(
         return Err(reader
             .refuse("a PSSM without a query sequence (NCBI BLAST+ stops with a C++ exception)"));
     };
-    // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:403-427
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:537 (tblastn_app.cpp:226)
     // ```c++
-    // void CSeq_annot_Info::x_InitAnnotList(void)
-    // {
-    //     ...
-    //     switch ( data.Which() ) {
-    //     case C_Data::e_Ftable:
-    //         x_InitFeatList(data.SetFtable());
-    //         break;
-    //     case C_Data::e_Align:
-    //         x_InitAlignList(data.SetAlign());
-    //         break;
-    //     case C_Data::e_Graph:
-    //         x_InitGraphList(data.SetGraph());
-    //         break;
-    //     case C_Data::e_Locs:
-    //         x_InitLocsList(data.SetLocs());
-    //         break;
-    //     case C_Data::e_Seq_table:
-    //         x_InitFeatTable(data.SetSeq_table());
-    //         break;
+    // 		scope->AddTopLevelSeqEntry(pssm->SetQuery());
     // ```
-    // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:1055-1058 (one of the posts of
-    // the index, which name the TSE by its address, `CTSE_Info::GetDescription`, tse_info.cpp:2049-2056)
-    // ```c++
-    //                 ERR_POST_X(7, "Empty region in "<<GetDescription()<<
-    // ```
-    // The query's Bioseq joins NCBI's scope with its annotations (psiblast_app.cpp:537,
-    // tblastn_app.cpp:226), whose object manager indexes those of these kinds: NCBI BLAST+ 2.17.0
-    // posts messages for some (`Empty region in 0x... Seq-feat ::= ...` with a memory address,
-    // `Invalid 'lens' size in denseg`, the Seq-table column checks of seq_table_info.cpp) and stops
-    // with C++ exceptions for others (`Duplicate partial column`; a null pointer with a stack of
-    // addresses), line RG D3-1 probe p2. LOSAT does not index them: refused (`ids`, which NCBI does
-    // not index, and an empty `annot` are read and kept).
-    let indexed: Vec<&str> = query
-        .annot_data_kinds()
-        .into_iter()
-        .filter(|kind| *kind != "ids")
-        .collect();
-    if let Some(kind) = indexed.first() {
-        return Err(reader.refuse(format!(
-            "a PSSM query whose annot holds a Seq-annot of {kind} (NCBI's object manager indexes the query's annotations, with messages that name memory addresses and errors that LOSAT does not reproduce)"
-        )));
-    }
+    // The query's Bioseq joins NCBI's scope with its annotations, which NCBI's object manager
+    // checks and indexes (`annot_index`: its messages, the diagnostic stream it can leave failed,
+    // its exceptions), after the reader and before the search; the run writes them where NCBI does
+    // (`PsiSearch::write_annot_posts`). What NCBI does not do the same way on every run (memory
+    // addresses, crashes, undefined behaviour) is refused here, before any output; `ids` and an
+    // empty `annot` give nothing.
+    let annot = match query.annot.as_deref() {
+        Some(annots) if !annots.is_empty() => {
+            super::annot_index::index_annots(&reader.program.to_ascii_lowercase(), annots)
+                .map_err(|refusal| reader.refuse(refusal.text()))?
+        }
+        _ => super::annot_index::AnnotOutcome::default(),
+    };
+    let defline_reads_annot = defline_reads_annot(query);
     let validation_error = validation_error(&pssm);
     // A PSSM of frequency ratios only: NCBI computes its scores with the PSSM engine
     // (`x_CreatePssmScoresFromFrequencyRatios`, below).
@@ -1031,6 +1005,8 @@ pub(crate) fn psi_search_and_object(
         setup_messages: Vec::new(),
         warning_title: Some(warning_title),
         request,
+        annot,
+        defline_reads_annot,
     };
     // The title's refusals (above), for a run whose reports NCBI writes (line RG F1b-2, review 4
     // R5-6: with `-export_search_strategy -subject`, an invalid PSSM or the PSSM engine's error, NCBI
@@ -1053,6 +1029,57 @@ pub(crate) fn psi_search_and_object(
         valid: search.validation_error.is_none() && search.scores_error.is_none(),
     };
     Ok((search, file))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:559 and 705,
+// blastxml2_format.cpp:590 (the query definition of the XML and JSON reports:
+// `sequence::CDeflineGenerator` on the query's Bioseq)
+// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:1977-2077 (`x_SetTitleFromProtein`:
+// a protein without a title takes the name of its `prot` feature from the scope's annotations;
+// `x_SetBioSrc`, :1410, reads its source features)
+/// Whether NCBI's definition line of the PSSM's query (the XML and JSON reports' query
+/// definition) reads its annotations: a query without a title whose annotations hold a feature (a
+/// feature table, or a feature Seq-table, whose rows the lookup makes into features). NCBI BLAST+
+/// 2.17.0 then names the query after its `prot` feature (line RG D3-1 `om/` cases x01-x04, outfmt 5
+/// and 16); LOSAT does not port that lookup (`om/SPEC.md` §1.3) and refuses those reports.
+fn defline_reads_annot(query: &crate::report::serial::pssm::PssmQuery) -> bool {
+    use crate::report::serial::asn_types::{member_index, members, table::named, Value};
+    if !query.titles().is_empty() {
+        return false;
+    }
+    let data = member_index(named::SEQ_ANNOT, "data");
+    let kinds = members(members(named::SEQ_ANNOT)[data].ty);
+    query
+        .annot
+        .iter()
+        .flatten()
+        .any(|annot| match annot.member(data) {
+            Some(Value::Choice(variant, value)) => match kinds[usize::from(*variant)].name() {
+                "ftable" => matches!(value.as_ref(), Value::List(feats) if !feats.is_empty()),
+                "seq-table" => {
+                    let feat_type = value
+                        .member(member_index(named::SEQ_TABLE, "feat-type"))
+                        .map_or(0, |value| match value {
+                            Value::Int(n) => *n,
+                            _ => 0,
+                        });
+                    (1..23).contains(&feat_type)
+                }
+                _ => false,
+            },
+            _ => false,
+        })
+}
+
+/// The refusal of a report whose query definition NCBI makes from the annotations of a PSSM's
+/// query (`PsiSearch::defline_reads_annot`): XML and JSON (`outfmt` 5, 13, 14, 15, 16).
+pub(crate) fn refuse_annot_defline(search: &PsiSearch, outfmt: i32, program: &str) -> Result<()> {
+    if search.defline_reads_annot && matches!(outfmt, 5 | 13..=16) {
+        bail!(
+            "output format {outfmt} with a PSSM query without a title whose annot holds features (NCBI BLAST+ names the query in XML and JSON from those features, which LOSAT does not yet) is not supported by LOSAT's {program}"
+        );
+    }
+    Ok(())
 }
 
 /// The scores of a PSSM of frequency ratios only, and the gapped values of its scaling:
@@ -1812,10 +1839,10 @@ mod tests {
         assert_eq!(warning(b"rnd random", vec!["Seqdesc", "molinfo"]), b"");
     }
 
-    // Line RG D3-1 (probe p2): the annotations of the kinds NCBI's object manager indexes are
-    // refused; `ids` and an empty `annot` are searched.
+    // Line RG D3-1 (`om/` cases i01, m03): annotations without objects give NCBI's object manager
+    // nothing to index; the search keeps no message (`annot_index` has the other cases).
     #[test]
-    fn indexed_annotations_are_refused() {
+    fn empty_annotations_give_no_messages() {
         use crate::report::serial::asn_types::{member_index, members, table::named};
         let data = member_index(named::SEQ_ANNOT, "data");
         let kinds = members(named::SEQ_ANNOT)[data].ty;
@@ -1835,14 +1862,14 @@ mod tests {
             );
             psi_search_of(pssm)
         };
-        assert!(with_annot(&[]).is_ok());
-        assert!(with_annot(&["ids"]).is_ok());
-        for kind in ["ftable", "align", "graph", "locs", "seq-table"] {
-            let error = with_annot(&["ids", kind]).unwrap_err().to_string();
-            assert!(
-                error.contains(&format!("annot holds a Seq-annot of {kind}")),
-                "{error}"
-            );
+        for annot in [
+            &[][..],
+            &["ids"],
+            &["ftable", "align", "graph", "locs", "ids"],
+        ] {
+            let search = with_annot(annot).unwrap();
+            assert_eq!(search.annot, Default::default(), "{annot:?}");
+            assert!(!search.defline_reads_annot);
         }
     }
 

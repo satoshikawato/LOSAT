@@ -764,6 +764,23 @@ fn search_cli(
         psi.refuse_request_members("TBLASTN")?;
         super::in_pssm::check_limits(&args, &resolved, &psi, choice.number)?;
         drop(query_input);
+        // The PSSM's Bioseq as the reports show it (`PsiSearch::query_record`); with
+        // `-parse_deflines` its ids join the scope of the `-subject` records as a FASTA query's do
+        // (`IdScope::add_record`; NCBI BLAST+ 2.17.0 fails on a subject with the query's id), and
+        // the database's sequences are checked as for a FASTA query (`QueryScopes`). Its refusal
+        // comes before any output.
+        let records =
+            vec![psi.query_record_in(args.parse_deflines, args.id_scope.as_deref(), "TBLASTN")?];
+        // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:222-226, 241-270 (the query's
+        // Bioseq joins the scope, quoted above, before the formatter is made and its prolog
+        // written)
+        // The messages of NCBI's object manager about the query's annotations, after the database
+        // and the subjects, before the formatter's warnings and anything on the standard output;
+        // its exception ends the run there (`PsiSearch::write_annot_posts`, `annot_abort`).
+        psi.write_annot_posts(outputs.diagnostics)?;
+        if let Some(abort) = psi.annot_abort() {
+            return Err(abort);
+        }
         crate::blastinput::input_files::write_empty_subject_warnings_by_length(
             subjects,
             |index| {
@@ -773,12 +790,6 @@ fn search_cli(
             outputs.diagnostics,
         )?;
         crate::blastinput::app::xinclude_check_for(choice, args.out.as_deref())?;
-        // The PSSM's Bioseq as the reports show it (`PsiSearch::query_record`); with
-        // `-parse_deflines` its ids join the scope of the `-subject` records as a FASTA query's do
-        // (`IdScope::add_record`; NCBI BLAST+ 2.17.0 fails on a subject with the query's id), and
-        // the database's sequences are checked as for a FASTA query (`QueryScopes`).
-        let records =
-            vec![psi.query_record_in(args.parse_deflines, args.id_scope.as_deref(), "TBLASTN")?];
         return search(
             &args,
             resolved,

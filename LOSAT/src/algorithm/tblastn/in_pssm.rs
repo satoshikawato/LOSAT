@@ -108,6 +108,9 @@ pub(super) fn check_limits(
     psi: &PsiSearch,
     outfmt: i32,
 ) -> Result<()> {
+    // The XML and JSON query definition of a query whose annotations NCBI reads for it
+    // (`in_pssm::refuse_annot_defline`), in every run.
+    crate::algorithm::pssm_search::in_pssm::refuse_annot_defline(psi, outfmt, "TBLASTN")?;
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:159-162
     // ```c++
     // 	if ((mt_mode == CMTArgs::eSplitByQueries) && (num_threads > 1)){

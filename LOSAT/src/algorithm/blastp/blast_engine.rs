@@ -5810,11 +5810,18 @@ fn search_cli(
         // sequence with one of them as the PSSM's query (its title and letters), refused as for a
         // FASTA query (`IdScope::add_record` of the `-subject` records that `-parse_deflines`
         // reads; the database's, `query_batch::QueryScopes`).
-        let records = vec![psi.query_record_in(
+        let mut record = psi.query_record_in(
             resolved.parse_deflines,
             args.id_scope.as_deref(),
             args.app.name(),
-        )?];
+        )?;
+        // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:506, 537 (quoted at
+        // `PsiSearch::write_annot_posts`)
+        // The messages of NCBI's object manager about the query's annotations come after the
+        // prolog, where a FASTA query's batch has its reader's messages: they are the PSSM query's
+        // (`psiblast_stop_at_pssm_query` marks the stream they fail).
+        record.warnings = psi.annot.posts.clone();
+        let records = vec![record];
         // The PSSM files of `-in_pssm`'s rounds (item PS5b), checked as a FASTA query's below.
         if let Some(request) = resolved
             .psi_rounds
@@ -6718,6 +6725,34 @@ fn psiblast_stop_at_pssm_query(
     database: Option<&database::BlastpDatabase>,
     mut batches: crate::blastinput::query_batch::QueryBatches,
 ) -> crate::blastinput::query_batch::QueryBatches {
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:537-540 (the object manager's
+    // index of the query's annotations, `scope->AddTopLevelSeqEntry`, before `DoIterations` and its
+    // `SaveSearchStrategy` and `CPsiBlast`)
+    // The PSSM query's batch carries the object manager's messages (`PsiSearch::annot`); a
+    // diagnostic stream that they fail silences the run's later messages from here on, and an
+    // exception of the index stops the run at its query, after the prolog and those messages,
+    // with no search strategy's request.
+    if let Some(psi) = args.psi_search.as_deref() {
+        psi.fail_diag_stream();
+        if let Some(abort) = psi.annot_abort() {
+            // Before the search's own stops (`psiblast_stop_at_invalid_query`, which took the
+            // batch's messages already).
+            let warnings = match batches.stop.take() {
+                Some((warnings, _)) => warnings,
+                None => batches
+                    .warnings
+                    .first_mut()
+                    .map(std::mem::take)
+                    .unwrap_or_default(),
+            };
+            batches.starts.clear();
+            batches.input_done = 0;
+            batches.searched_done = 0;
+            batches.stop = Some((warnings, abort));
+            batches.stop_batch = None;
+            return batches;
+        }
+    }
     let Some(stop) = args
         .psi_search
         .as_deref()

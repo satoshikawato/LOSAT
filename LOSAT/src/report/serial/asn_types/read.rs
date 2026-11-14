@@ -100,7 +100,7 @@ enum FrameKind {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct Frame {
+pub(super) struct Frame {
     kind: FrameKind,
     /// The type the frame names (`Object type= `): the named, class, choice and array frames.
     type_name: Option<&'static str>,
@@ -108,6 +108,28 @@ struct Frame {
     member: Option<&'static str>,
     /// Whether the frame belongs to a skip function (`SkipClassSequential`, ...).
     skip: bool,
+    /// The type (the table's index) of a class or choice frame, the object whose
+    /// `HasTypeInfo` NCBI's `GetParentObjectPtr` asks (`hooks::pre_read_variant`).
+    ty: Option<u16>,
+    /// A `Seq-table` class frame's `num-rows` once read (the object's `GetNum_rows()`).
+    num_rows: Option<i64>,
+}
+
+impl Frame {
+    /// Whether the frame is a class or a choice frame (`eFrameClass`, `eFrameChoice`).
+    pub(super) fn is_class_or_choice(&self) -> bool {
+        matches!(self.kind, FrameKind::Class | FrameKind::Choice)
+    }
+
+    /// The type of a class or choice frame.
+    pub(super) fn ty(&self) -> Option<u16> {
+        self.ty
+    }
+
+    /// A `Seq-table` class frame's `num-rows`, once read.
+    pub(super) fn num_rows(&self) -> Option<i64> {
+        self.num_rows
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objstack.cpp:366-381
@@ -287,7 +309,17 @@ impl TypedReader<'_> {
             type_name,
             member: None,
             skip,
+            ty: None,
+            num_rows: None,
         });
+    }
+
+    /// `push` of a class or choice frame of the type `ty`.
+    fn push_object(&mut self, kind: FrameKind, ty: u16, type_name: &'static str, skip: bool) {
+        self.push(kind, Some(type_name), skip);
+        if let Some(frame) = self.frames.last_mut() {
+            frame.ty = Some(ty);
+        }
     }
 
     /// `END_OBJECT_FRAME`: the frame is left, and an error that leaves it gets NCBI's handling
@@ -396,7 +428,7 @@ impl TypedReader<'_> {
             Kind::Sequence(members) => {
                 self.sequence(target, info.name(), members.members(), skip)?
             }
-            Kind::Choice(variants) => self.choice(info.name(), variants.members(), skip)?,
+            Kind::Choice(variants) => self.choice(target, info.name(), variants.members(), skip)?,
             Kind::List { element, .. } => self.list(element, skip)?,
             Kind::Alias(_) => unreachable!("resolved"),
             Kind::Integer(storage) => self.integer(storage, skip)?,
@@ -458,7 +490,7 @@ impl TypedReader<'_> {
         members: &'static [Member],
         skip: bool,
     ) -> R<Value> {
-        self.push(FrameKind::Class, Some(name), skip);
+        self.push_object(FrameKind::Class, ty, name, skip);
         let result = self.sequence_in_frame(ty, members, skip);
         self.pop(result)
     }
@@ -502,6 +534,14 @@ impl TypedReader<'_> {
                 self.value(member.ty, skip)?
             };
             if !skip {
+                // The `num-rows` of a Seq-table, which the reserve hook of its columns' data reads
+                // from the object being read (`hooks::pre_read_variant`).
+                if ty == super::table::named::SEQ_TABLE && member.name() == "num-rows" {
+                    let at = self.frames.len() - 2;
+                    if let Value::Int(rows) = &value {
+                        self.frames[at].num_rows = Some(*rows);
+                    }
+                }
                 values.push((index as u16, value));
             }
             pos = index + 1;
@@ -619,15 +659,23 @@ impl TypedReader<'_> {
     // ```
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1453-1475 (`BeginChoiceVariant`,
     // quoted at `Reader::choice`: `NextElement` at the choice's start, then the variant's id)
-    fn choice(&mut self, name: &'static str, variants: &'static [Member], skip: bool) -> R<Value> {
-        self.push(FrameKind::Choice, Some(name), skip);
+    fn choice(
+        &mut self,
+        ty: u16,
+        name: &'static str,
+        variants: &'static [Member],
+        skip: bool,
+    ) -> R<Value> {
+        self.push_object(FrameKind::Choice, ty, name, skip);
         self.push(FrameKind::ChoiceVariant, None, skip);
-        let result = self.variant(variants, skip);
+        let result = self.variant(ty, variants, skip);
         let result = self.pop(result);
         self.pop(result)
     }
 
-    fn variant(&mut self, variants: &'static [Member], skip: bool) -> R<Value> {
+    /// The variant of the CHOICE `ty`; a read (not a skip) runs the class's variant hooks before
+    /// its value (`hooks::pre_read_variant`).
+    fn variant(&mut self, ty: u16, variants: &'static [Member], skip: bool) -> R<Value> {
         let mut block_start = true;
         if !self.r.next_element(&mut block_start)? {
             return Err(ReadError::Serial("choice variant id expected".into()));
@@ -635,6 +683,9 @@ impl TypedReader<'_> {
         let index = self.item_index(variants, 0, false)?;
         let variant = &variants[index];
         self.set_member(variant.name());
+        if !skip {
+            super::hooks::pre_read_variant(ty, index, &self.frames)?;
+        }
         let value = self.value(variant.ty, skip)?;
         Ok(Value::Choice(index as u16, Box::new(value)))
     }

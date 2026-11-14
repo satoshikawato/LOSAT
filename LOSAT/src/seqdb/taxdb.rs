@@ -74,8 +74,18 @@ pub const MSG_OFFSET_ERROR: &str = "Error: Offset error at end of taxdb file.";
 /// `text` (observed with BLAST+ 2.17.0: `Error: [blastp] Error: Tax database
 /// file has wrong magic number.`). `program` is the name of the program, as
 /// it appears after `-version`, in lower case.
+/// A post of NCBI's main thread: its header alone after the stream failed
+/// (`ncbi_exception::post_line`).
 pub fn err_post_line(program: &str, text: &str) -> String {
-    format!("Error: [{program}] {text}")
+    let mut line = String::from_utf8(crate::ncbi_exception::post_line(
+        crate::ncbi_exception::Severity::Error,
+        None,
+        Some(program),
+        text.as_bytes(),
+    ))
+    .expect("UTF-8 parts");
+    line.pop();
+    line
 }
 
 /// The names of one taxid: `SSeqDBTaxInfo` (seqdb.hpp). The names are bytes as

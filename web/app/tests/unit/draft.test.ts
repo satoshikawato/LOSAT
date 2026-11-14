@@ -1,9 +1,10 @@
 import { gzipSync, zstdCompressSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { sha256Hex } from 'losat';
-import type { InputRole } from 'losat/domain';
-import type { EnginePrepareHint, ValidationResult } from 'losat/ports';
+import type { InputRole, RegistryFile } from 'losat/domain';
+import type { EnginePrepareHint, StartResult, ValidationResult } from 'losat/ports';
 import { Coordinator, type EnqueueAllResult, type SearchRequest } from '../../src/application/coordinator';
+import { registryName } from '../../src/application/conffile';
 import { SearchDraft, type DraftSource } from '../../src/application/draft';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
@@ -14,7 +15,9 @@ import { NodeInflater } from './support/node-inflater';
 
 function setup(
   options: {
-    validate?: (argv: readonly string[]) => ValidationResult;
+    validate?: (argv: readonly string[], registry?: RegistryFile) => ValidationResult | Promise<ValidationResult>;
+    /** The engine's start of an argv; by default none of its files and no dry run. */
+    start?: (argv: readonly string[]) => StartResult;
     useCoordinator?: boolean;
     checkInput?: DataService['checkInput'];
     fetcher?: FakeAccessionFetcher;
@@ -38,12 +41,17 @@ function setup(
   };
   const fake = new FakeEngine();
   const validated: Array<readonly string[]> = [];
+  /** The registry file that each validation was given (undefined for none). */
+  const registries: Array<RegistryFile | undefined> = [];
   const prepared: EnginePrepareHint[] = [];
   const engine = {
     describe: fake.describe.bind(fake),
-    validate: async (argv: readonly string[]): Promise<ValidationResult> => {
+    start: async (argv: readonly string[]): Promise<StartResult> =>
+      options.start?.(argv) ?? { ok: true, start: { conffile: null, logFile: null, dryRun: false } },
+    validate: async (argv: readonly string[], registry?: RegistryFile): Promise<ValidationResult> => {
       validated.push(argv);
-      return options.validate?.(argv) ?? { ok: true };
+      registries.push(registry);
+      return (await options.validate?.(argv, registry)) ?? { ok: true };
     },
     prepare: (hint: EnginePrepareHint) => void prepared.push(hint),
   };
@@ -60,6 +68,7 @@ function setup(
     downloader: { save: () => undefined },
     now: () => 0,
     newRunId: () => `run-${++id}`,
+    digest: sha256Hex,
   });
   const requests: SearchRequest[][] = [];
   const draft = new SearchDraft({
@@ -81,7 +90,7 @@ function setup(
       revisionSources: [...new Set([...inner.revisions.values()].map((revision) => revision.sourceId))].sort(),
     };
   };
-  return { draft, data, requests, validated, prepared, coordinator, checks, dropped, held };
+  return { draft, data, requests, validated, registries, prepared, coordinator, checks, dropped, held };
 }
 
 const file = (name: string, text: string) => new File([text], name, { type: 'text/plain' });
@@ -1306,6 +1315,174 @@ describe('SearchDraft submit', () => {
     await draft.idle();
     expect(draft.state.get().validation).toEqual({ state: 'invalid', message: 'BLAST query/options error: bad' });
     expect(validated.at(-1)).toEqual(['blastn', '-query', 'query.fa', '-subject', 'subject.fa', '-word_size', '3']);
+  });
+
+  // NCBI's application start (line RG E1w-3b): the engine's start of the argv names the file of
+  // -conffile; the form asks for it, and the validation and the run read the chosen file's bytes under
+  // the argv's name. Without a file, the engine's message stands.
+  it("asks for the file of the argv's -conffile, validates with its bytes under the argv's name, and runs with it", async () => {
+    const missing = 'Critical: (106.23) Registry file "settings.ini" not found, aborting.';
+    const { draft, registries, requests } = setup({
+      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'settings.ini' : null, logFile: null, dryRun: false } }),
+      validate: (argv, registry) => (argv.includes('-conffile') && registry === undefined ? { ok: false, message: missing } : { ok: true }),
+    });
+    draft.setPaste('query', '>q\nACGT\n');
+    draft.setPaste('subject', '>s\nACGT\n');
+    await draft.idle();
+    expect(draft.state.get().start).toEqual({ conffile: null, logFile: null, dryRun: false });
+    draft.setExtra('-conffile settings.ini');
+    await draft.idle();
+    expect(draft.state.get().start?.conffile).toBe('settings.ini');
+    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: missing });
+    expect(registries.at(-1)).toBeUndefined();
+    // A file of any name is read as the argv's. The page keeps the File, not its bytes: the validation
+    // gets the File (the Data worker reads it on an instance of its own), and so does the run's request.
+    const chosen = file('my.ini', '[BLAST]\n');
+    let reads = 0;
+    const read = chosen.arrayBuffer.bind(chosen);
+    chosen.arrayBuffer = () => (reads++, read());
+    draft.setConffile(chosen);
+    await draft.idle();
+    expect(draft.state.get().conffiles.blastn).toBe(chosen);
+    expect(draft.state.get().validation).toEqual({ state: 'ok' });
+    expect(registries.at(-1)).toEqual({ name: 'settings.ini', file: chosen });
+    expect(registries.at(-1)!.file).toBe(chosen);
+    draft.setField('-word_size', '16');
+    await draft.idle();
+    expect(registries.at(-1)!.file).toBe(chosen);
+    expect((await draft.submit()).ok).toBe(true);
+    expect(requests.at(-1)![0]!.conffile).toBe(chosen);
+    expect(reads).toBe(0);
+    // Another program has its own Additional options and file.
+    draft.setProgram('blastp');
+    await draft.idle();
+    expect(draft.state.get().start?.conffile).toBeNull();
+    expect(registries.at(-1)).toBeUndefined();
+    draft.setProgram('blastn');
+    await draft.idle();
+    expect(registries.at(-1)).toEqual({ name: 'settings.ini', file: chosen });
+    // Without -conffile the chosen file is not read, nor sent with the run.
+    draft.setExtra('');
+    await draft.idle();
+    expect(registries.at(-1)).toBeUndefined();
+    expect((await draft.submit()).ok).toBe(true);
+    expect('conffile' in requests.at(-1)![0]!).toBe(false);
+    // Let go, the file is not read again.
+    draft.setExtra('-conffile settings.ini');
+    draft.setConffile(undefined);
+    await draft.idle();
+    expect(draft.state.get().conffiles.blastn).toBeUndefined();
+    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: missing });
+  });
+
+  // The row of -conffile follows the argv: it goes when the argv cannot be made or the program changes
+  // (until the engine's start of the new argv), and `-conffile=` names no file that the engine can hold.
+  it("forgets the engine's start of an argv that is gone, and gives no file for an empty -conffile name", async () => {
+    const { draft, registries } = setup({
+      start: (argv) => {
+        const at = argv.findIndex((word) => word === '-conffile' || word.startsWith('-conffile='));
+        const name = at < 0 ? null : argv[at] === '-conffile' ? argv[at + 1]! : argv[at]!.slice('-conffile='.length);
+        return { ok: true, start: { conffile: name, logFile: null, dryRun: false } };
+      },
+    });
+    draft.setConffile(file('my.ini', '[BLAST]\n'));
+    draft.setExtra('-conffile settings.ini');
+    await draft.idle();
+    expect(draft.state.get().start?.conffile).toBe('settings.ini');
+    draft.setExtra("-conffile settings.ini -evalue '1");
+    await draft.idle();
+    expect(draft.state.get().validation.state).toBe('invalid');
+    expect(draft.state.get().start).toBeUndefined();
+    draft.setExtra('-conffile settings.ini');
+    await draft.idle();
+    expect(draft.state.get().start?.conffile).toBe('settings.ini');
+    expect(registryName(draft.state.get().start)).toBe('settings.ini');
+    draft.setProgram('blastp');
+    expect(draft.state.get().start).toBeUndefined();
+    expect(registryName(draft.state.get().start)).toBeUndefined();
+    await draft.idle();
+    expect(draft.state.get().start?.conffile).toBeNull();
+    expect(registryName(draft.state.get().start)).toBeUndefined();
+    draft.setProgram('blastn');
+    // `-conffile=`: the form asks for no file (registryName, the row of ParameterForm), and the search reads none.
+    draft.setExtra('-conffile=');
+    await draft.idle();
+    expect(draft.state.get().start?.conffile).toBe('');
+    expect(registryName(draft.state.get().start)).toBeUndefined();
+    expect(registries.at(-1)).toBeUndefined();
+  });
+
+  // One validation at a time, the latest winning (review 3 L1): a validation that reads the file of
+  // -conffile on an instance of its own never runs beside another, and none starts for an argv that is
+  // out of date.
+  it('validates one argv at a time, and only the newest of the changes that came while one ran', async () => {
+    const gates: Array<() => void> = [];
+    let running = 0;
+    let most = 0;
+    const { draft, validated } = setup({
+      validate: async () => {
+        running++;
+        most = Math.max(most, running);
+        await new Promise<void>((resolve) => gates.push(resolve));
+        running--;
+        return { ok: true };
+      },
+    });
+    draft.setConffile(file('my.ini', '[BLAST]\n'));
+    const pause = () => new Promise((resolve) => setTimeout(resolve, 10));
+    await expect.poll(() => validated.length).toBe(1);
+    // Three changes while the validation runs: none starts beside it.
+    for (const percent of ['10', '20', '30']) {
+      draft.setExtra(`-qcov_hsp_perc ${percent}`);
+      await pause();
+    }
+    expect(validated).toHaveLength(1);
+    gates.shift()!();
+    await expect.poll(() => validated.length).toBe(2);
+    await pause();
+    expect(validated).toHaveLength(2);
+    expect(validated[1]).toEqual(['blastn', '-query', 'query.fa', '-subject', 'subject.fa', '-qcov_hsp_perc', '30']);
+    gates.shift()!();
+    await draft.idle();
+    expect(validated).toHaveLength(2);
+    expect(most).toBe(1);
+    expect(draft.state.get().validation).toEqual({ state: 'ok' });
+  });
+
+  // Review 3 L2: a chosen file that changed or went after it was chosen cannot be read; the message names
+  // -conffile, the argv's name and the file, and says what to do.
+  it('says that the file chosen for -conffile could not be read, and asks to choose it again', async () => {
+    const { draft } = setup({
+      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'settings.ini' : null, logFile: null, dryRun: false } }),
+      validate: (_argv, registry) => {
+        if (registry === undefined) return { ok: true };
+        // As the Data worker's error arrives: its name and message (rpc.ts).
+        const error = new Error('The requested file could not be read, typically due to permission problems that have occurred after a reference to a file was acquired.');
+        error.name = 'FileReadError';
+        throw error;
+      },
+    });
+    draft.setExtra('-conffile settings.ini');
+    draft.setConffile(file('my.ini', '[BLAST]\n'));
+    await draft.idle();
+    expect(draft.state.get().validation).toEqual({
+      state: 'invalid',
+      message:
+        'The file chosen for -conffile settings.ini (my.ini) could not be read: The requested file could not be read, typically due to permission problems that have occurred after a reference to a file was acquired. Choose it again.',
+    });
+  });
+
+  it('shows the message of an argv that the engine cannot start, and validates nothing of it', async () => {
+    const { draft, validated } = setup({
+      start: (argv) => (argv.includes('-version') ? { ok: false, message: "error: unexpected argument '-version' found" } : { ok: true, start: { conffile: null, logFile: null, dryRun: false } }),
+    });
+    await draft.idle();
+    const before = validated.length;
+    draft.setExtra('-version');
+    await draft.idle();
+    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: "error: unexpected argument '-version' found" });
+    expect(draft.state.get().start).toBeUndefined();
+    expect(validated).toHaveLength(before);
   });
 
   it('queues runs in the coordinator, a group with shared subject bytes', async () => {

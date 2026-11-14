@@ -4,8 +4,8 @@ use std::fmt::Write as _;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use LOSAT::api::FastaRecord;
-use LOSAT::web_adapter::{
+use losat::api::FastaRecord;
+use losat::web_adapter::{
     run_local_blastn, run_local_blastp, run_local_blastx, run_local_tblastn, run_local_tblastx,
     Cli, Commands, CountsSource, FormatObserver, FormatOutput, HspIndex, OutputSink, PairwiseHit,
     ReportOutputs,
@@ -91,7 +91,7 @@ pub fn outputs(program: Program, custom: Option<&str>) -> Vec<Output> {
     let mut outputs = Vec::new();
     if let Some(outfmt) = custom {
         let choice =
-            LOSAT::web_adapter::parse_formatting_string(outfmt).expect("parse_run read the value");
+            losat::web_adapter::parse_formatting_string(outfmt).expect("parse_run read the value");
         outputs.push(Output {
             stream: STREAM_CUSTOM,
             number: choice.number as u32,
@@ -121,8 +121,8 @@ fn outfmt_of(command: &mut Commands) -> &mut String {
 }
 
 /// The engine's name of the program, for its reading of `-outfmt`.
-fn engine_program(program: Program) -> LOSAT::web_adapter::EngineProgram {
-    use LOSAT::web_adapter::EngineProgram as Engine;
+fn engine_program(program: Program) -> losat::web_adapter::EngineProgram {
+    use losat::web_adapter::EngineProgram as Engine;
     match program {
         Program::Blastp => Engine::Blastp,
         Program::Tblastn => Engine::Tblastn,
@@ -171,17 +171,17 @@ pub fn parse_run(words: &[&str]) -> Result<(Program, Commands, Option<String>), 
     // default `-outfmt 0`, so the host's words are parsed exactly as on the command line,
     // with the CLI's binary name: an error (an unknown program too) is the CLI's message.
     let argv = std::iter::once("losat").chain(words.iter().copied());
-    let cli: Cli = LOSAT::web_adapter::try_parse_cli(argv)
-        .map_err(|error| LOSAT::web_adapter::render_message(&error))?;
+    let cli: Cli = losat::web_adapter::try_parse_cli(argv)
+        .map_err(|error| losat::web_adapter::render_message(&error))?;
     let program = Program::parse(words.first().copied().unwrap_or(""))?;
     let mut command = cli.command;
     let outfmt = std::mem::replace(outfmt_of(&mut command), "0".to_string());
-    let choice = LOSAT::web_adapter::parse_formatting_string(&outfmt)
+    let choice = losat::web_adapter::parse_formatting_string(&outfmt)
         .map_err(|error| format!("{error:#}"))?;
     // The `@PG` line of SAM (outfmt 17) shows the command line, which `main` gives BLASTN: the
     // run's, `losat` and its argv, each word followed by one space (`cli::command_line_bytes`). Only
     // a run that writes SAM holds it.
-    if let (Commands::Blastn(args), LOSAT::web_adapter::SAM_FORMAT) = (&mut command, choice.number)
+    if let (Commands::Blastn(args), losat::web_adapter::SAM_FORMAT) = (&mut command, choice.number)
     {
         let mut line = b"losat ".to_vec();
         for word in words {
@@ -199,10 +199,10 @@ pub fn parse_run(words: &[&str]) -> Result<(Program, Commands, Option<String>), 
     // check of a custom delimiter comes with the program's checks of the options (`validate`) and
     // in the engine's `run_local`.
     let engine = engine_program(program);
-    LOSAT::web_adapter::report_format(&choice, engine, Some(std::path::Path::new("out")))
+    losat::web_adapter::report_format(&choice, engine, Some(std::path::Path::new("out")))
         .and_then(|format| match format {
             Some(_) => Ok(()),
-            None => LOSAT::web_adapter::formatting_handler_check(&choice, engine),
+            None => losat::web_adapter::formatting_handler_check(&choice, engine),
         })
         .map_err(|error| format!("{error:#}"))?;
     // NCBI's white space around the value (`NStr::TruncateSpaces`), as `parse_formatting_string`
@@ -223,8 +223,8 @@ pub fn parse_run(words: &[&str]) -> Result<(Program, Commands, Option<String>), 
 pub fn writes_archive(words: &[&str]) -> bool {
     parse_run(words).is_ok_and(|(_, _, custom)| {
         custom.is_some_and(|outfmt| {
-            LOSAT::web_adapter::parse_formatting_string(&outfmt)
-                .is_ok_and(|choice| choice.number == LOSAT::web_adapter::ARCHIVE_FORMAT)
+            losat::web_adapter::parse_formatting_string(&outfmt)
+                .is_ok_and(|choice| choice.number == losat::web_adapter::ARCHIVE_FORMAT)
         })
     })
 }
@@ -239,7 +239,7 @@ pub fn writes_archive(words: &[&str]) -> bool {
 /// fail, see there), and the error is that of the first search, the tabular formats'.
 /// `run` leaves them to the engine, which reports them as the CLI does.
 pub fn validate(words: &[&str]) -> Result<(), String> {
-    use LOSAT::web_adapter::{parse_optional_range, RangeRole};
+    use losat::web_adapter::{parse_optional_range, RangeRole};
     // The ranges' syntax, in NCBI's order: the subject range where the subjects are read
     // (before the other option handlers), the query range with the query options (the
     // engine's option checks read it). Whether a range fits the records is checked by
@@ -262,7 +262,7 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
     // The CLI checks the thread count before the options (`validate_threads`), the checks of the
     // options alone last; with the argv's `-outfmt` they stop at its delimiter first.
     if custom_rejected {
-        LOSAT::web_adapter::validate_threads(num_threads(&command))
+        losat::web_adapter::validate_threads(num_threads(&command))
             .map_err(|error| format!("{error:#}"))?;
     }
     match command {
@@ -301,21 +301,21 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
         Commands::Tblastx(mut args) => subject_range(args.subject_loc.as_deref(), "TBLASTX")
             .and_then(|()| {
                 with_custom(&mut args.outfmt);
-                LOSAT::web_adapter::check_tblastx_options(&args)
+                losat::web_adapter::check_tblastx_options(&args)
             })
             .map_err(|error| format!("{error:#}"))
             .and_then(|()| custom_check())?,
         Commands::Blastp(mut args) => subject_range(args.subject_loc.as_deref(), "BLASTP")
             .and_then(|()| {
                 with_custom(&mut args.outfmt);
-                LOSAT::web_adapter::check_blastp_options(&args)
+                losat::web_adapter::check_blastp_options(&args)
             })
             .map_err(|error| format!("{error:#}"))
             .and_then(|()| custom_check())?,
         Commands::Tblastn(mut args) => subject_range(args.subject_loc.as_deref(), "TBLASTN")
             .and_then(|()| {
                 with_custom(&mut args.outfmt);
-                LOSAT::web_adapter::check_tblastn_options(&args)
+                losat::web_adapter::check_tblastn_options(&args)
             })
             .map_err(|error| format!("{error:#}"))
             .and_then(|()| custom_check())?,
@@ -354,9 +354,9 @@ fn custom_handler_check(program: Program, custom: Option<&str>) -> Result<(), St
     let Some(outfmt) = custom else {
         return Ok(());
     };
-    LOSAT::web_adapter::parse_formatting_string(outfmt)
+    losat::web_adapter::parse_formatting_string(outfmt)
         .and_then(|choice| {
-            LOSAT::web_adapter::formatting_handler_check(&choice, engine_program(program))
+            losat::web_adapter::formatting_handler_check(&choice, engine_program(program))
         })
         .map_err(|error| format!("{error:#}"))
 }
@@ -375,17 +375,17 @@ fn custom_handler_check(program: Program, custom: Option<&str>) -> Result<(), St
 /// so `run` makes these checks and stops with the CLI's message and exit code.
 /// Making them for a query of any letters would reject what the CLI accepts (WA-FM-01).
 fn blastn_group_check(
-    args: &mut LOSAT::web_adapter::BlastnArgs,
+    args: &mut losat::web_adapter::BlastnArgs,
     group: &[Output],
 ) -> Result<(), String> {
-    use LOSAT::web_adapter::{check_losat_limits, check_scoring_options};
+    use losat::web_adapter::{check_losat_limits, check_scoring_options};
     // The host has no database files.
     if args.db.is_some() {
         return Err("-db (a database search) is not supported in the browser yet".to_string());
     }
     let outfmts: Vec<i32> = group.iter().map(|output| output.number as i32).collect();
     // `process_options` sets the counts that the checks read.
-    let (counts, _) = LOSAT::web_adapter::run_report_counts(
+    let (counts, _) = losat::web_adapter::run_report_counts(
         "blastn",
         &outfmts,
         args.max_target_seqs,
@@ -403,11 +403,11 @@ fn blastn_group_check(
 /// `run_local` makes them before it searches. `validate` runs it for each search of a run, and
 /// `run` asks it which search is rejected (`group_rejected`).
 fn blastx_group_check(
-    args: &LOSAT::web_adapter::BlastxArgs,
+    args: &losat::web_adapter::BlastxArgs,
     group: &[Output],
 ) -> Result<(), String> {
     let outfmts: Vec<&str> = group.iter().map(|output| output.outfmt.as_str()).collect();
-    LOSAT::web_adapter::check_blastx_options(args, &outfmts).map_err(|error| format!("{error:#}"))
+    losat::web_adapter::check_blastx_options(args, &outfmts).map_err(|error| format!("{error:#}"))
 }
 
 /// Whether the options' checks reject the search of the output formats `group`, as the CLI
@@ -546,7 +546,7 @@ fn searched_queries(
     program: &str,
     records: &[FastaRecord],
 ) -> Option<Vec<usize>> {
-    use LOSAT::web_adapter::{parse_optional_range, record_interval, RangeRole, RecordInterval};
+    use losat::web_adapter::{parse_optional_range, record_interval, RangeRole, RecordInterval};
     let range = parse_optional_range(query_loc, RangeRole::Query, program).ok()??;
     Some(
         records
@@ -605,7 +605,7 @@ fn num_threads(command: &Commands) -> usize {
 /// of `command` (`report_counts`, NCBI `blast_args.cpp:2894-2973`).
 pub fn hit_list_size(command: &Commands, format: u32) -> usize {
     let [max_target_seqs, descriptions, alignments] = count_options(command);
-    LOSAT::web_adapter::report_counts(format as i32, max_target_seqs, descriptions, alignments)
+    losat::web_adapter::report_counts(format as i32, max_target_seqs, descriptions, alignments)
         .hitlist_size
 }
 
@@ -660,7 +660,7 @@ impl Failed {
             + std::fmt::Display
             + std::fmt::Debug,
     {
-        let cli_stderr = match error.downcast_ref::<LOSAT::web_adapter::NativeError>() {
+        let cli_stderr = match error.downcast_ref::<losat::web_adapter::NativeError>() {
             Some(native) => native.message.clone().into_bytes(),
             None => format!("Error: {error:?}\n").into_bytes(),
         };
@@ -698,7 +698,7 @@ impl ArchivedFiles {
     }
 }
 
-impl LOSAT::web_adapter::SideFileReceiver for ArchivedFiles {
+impl losat::web_adapter::SideFileReceiver for ArchivedFiles {
     fn receive(&self, name: &[u8], bytes: &[u8]) -> std::io::Result<()> {
         match self
             .0
@@ -774,7 +774,7 @@ fn search(
                     sink: match archive {
                         Some((master, files)) => OutputSink::Files(
                             master,
-                            LOSAT::web_adapter::SideFileSink::new(SIDE_FILE_BASE, files.clone()),
+                            losat::web_adapter::SideFileSink::new(SIDE_FILE_BASE, files.clone()),
                         ),
                         None => OutputSink::Writer(writer),
                     },
@@ -974,7 +974,7 @@ fn link_format0(
 /// not registered is the CLI's file that cannot be opened. A taxid whose file is not registered
 /// is the CLI's taxid without a file, whose error comes with the search (`batch_error`). An argv
 /// without the options is validated as before named input files.
-fn validates_window_masker(args: &LOSAT::web_adapter::BlastnArgs) -> bool {
+fn validates_window_masker(args: &losat::web_adapter::BlastnArgs) -> bool {
     match args.window_masker_db.as_deref() {
         Some(name) => crate::files::registered(name),
         None => args.window_masker_taxid.is_some(),
@@ -1007,7 +1007,7 @@ fn give_counts(command: &mut Commands, counts: Option<&Arc<dyn CountsSource>>) {
 /// Gives BLASTN's arguments the counts source, and with `-window_masker_taxid` LOSAT Web's
 /// registry of counts files, where the command line gives NCBI's registry: the directory
 /// `files::WINDOW_MASKER_PATH`, and no posts of a `.ncbirc` (LOSAT Web reads none).
-fn give_blastn_counts(args: &mut LOSAT::web_adapter::BlastnArgs, counts: &Arc<dyn CountsSource>) {
+fn give_blastn_counts(args: &mut losat::web_adapter::BlastnArgs, counts: &Arc<dyn CountsSource>) {
     args.window_masker_counts = Some(counts.clone());
     if args.window_masker_taxid.is_some() {
         args.window_masker_registry = Some(Ok(Default::default()));
@@ -1058,7 +1058,7 @@ pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Re
     // The searches of the run share one thread pool (`with_run_pool`): a browser holds a thread
     // worker for every thread that may start, and the threads of a pool may not have returned when
     // the next pool starts, so each pool of its own needed thread workers of its own.
-    LOSAT::web_adapter::with_run_pool(threads, program.name(), || -> Result<(), String> {
+    losat::web_adapter::with_run_pool(threads, program.name(), || -> Result<(), String> {
         for group in &groups {
             let mut command = match command.take() {
                 Some(command) => command,
@@ -1232,13 +1232,13 @@ mod tests {
             assert!(parse(&words).is_ok(), "{program}");
             for option in ["-num_descriptions", "-num_alignments"] {
                 let both = [&words[..], &[option, "3"]].concat();
-                let cli = LOSAT::web_adapter::try_parse_cli(
+                let cli = losat::web_adapter::try_parse_cli(
                     std::iter::once("losat").chain(both.iter().copied()),
                 )
                 .unwrap_err();
                 assert_eq!(
                     parse(&both).unwrap_err(),
-                    LOSAT::web_adapter::render_message(&cli),
+                    losat::web_adapter::render_message(&cli),
                     "{program} {option}"
                 );
                 assert!(parse(&both).unwrap_err().contains("cannot be used with"));
@@ -1251,11 +1251,11 @@ mod tests {
         assert!(parse(&["psiblast", "-query", "q", "-subject", "s"]).is_err());
         // An unknown program and a parser error are the CLI's messages.
         for words in [&["nosuch"][..], &["tblastx", "-query", "q"][..]] {
-            let cli = LOSAT::web_adapter::try_parse_cli(
+            let cli = losat::web_adapter::try_parse_cli(
                 std::iter::once("losat").chain(words.iter().copied()),
             )
             .map(|_| ())
-            .map_err(|error| LOSAT::web_adapter::render_message(&error));
+            .map_err(|error| losat::web_adapter::render_message(&error));
             assert_eq!(parse(words).map(|_| ()), cli, "{words:?}");
         }
         assert_eq!(Program::Tblastx.formats(), &[0, 6, 7]);
@@ -1391,13 +1391,13 @@ mod tests {
                 "7",
             ][..],
         ] {
-            let cli = LOSAT::web_adapter::try_parse_cli(
+            let cli = losat::web_adapter::try_parse_cli(
                 ["losat"].into_iter().chain(words.iter().copied()),
             )
             .unwrap_err();
             assert_eq!(
                 parse(words).unwrap_err(),
-                LOSAT::web_adapter::render_message(&cli),
+                losat::web_adapter::render_message(&cli),
                 "{words:?}"
             );
         }
@@ -1783,10 +1783,10 @@ mod tests {
             // What the CLI rejects, with its message.
             let engine = engine_program(Program::parse(program).unwrap());
             for outfmt in ["abc", "99", "1", "6\tqseqid"] {
-                let cli = LOSAT::web_adapter::parse_formatting_string(outfmt)
+                let cli = losat::web_adapter::parse_formatting_string(outfmt)
                     .and_then(|choice| {
-                        LOSAT::web_adapter::report_format(&choice, engine, None)?;
-                        LOSAT::web_adapter::formatting_handler_check(&choice, engine)
+                        losat::web_adapter::report_format(&choice, engine, None)?;
+                        losat::web_adapter::formatting_handler_check(&choice, engine)
                     })
                     .unwrap_err();
                 assert_eq!(
@@ -1800,8 +1800,8 @@ mod tests {
             let conflict = "6 delim=; qseqid staxids";
             assert_eq!(custom(program, conflict), Ok(Some(conflict.to_string())));
             let words = [program, "-query", "q", "-subject", "s", "-outfmt", conflict];
-            let handler = LOSAT::web_adapter::parse_formatting_string(conflict)
-                .and_then(|choice| LOSAT::web_adapter::formatting_handler_check(&choice, engine))
+            let handler = losat::web_adapter::parse_formatting_string(conflict)
+                .and_then(|choice| losat::web_adapter::formatting_handler_check(&choice, engine))
                 .unwrap_err();
             assert_eq!(validate(&words), Err(format!("{handler:#}")), "{program}");
             assert!(validate(&words)

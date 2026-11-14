@@ -1,4 +1,4 @@
-"""The Python side of the binding: the shapes of `LOSAT::api`, in Python's terms.
+"""The Python side of the binding: the shapes of `losat::api`, in Python's terms.
 
 Nothing here computes a BLAST value or formats one
 (docs/product_decisions/PD-LOSAT-PYTHON-BINDING-BOUNDARY.md): options become the command line's

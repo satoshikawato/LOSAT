@@ -290,9 +290,14 @@ fn a_header_file_that_ncbi_cannot_read_comes_before_the_prefetch() {
                 &[],
             )
         };
+        // The path as LOSAT prints it on this platform (Windows: `\` throughout).
         let error = format!(
-            "BLAST Database error: Error: File ({}/tests/db_search/{db}.{header}) not found.\n",
-            env!("CARGO_MANIFEST_DIR")
+            "BLAST Database error: Error: File ({}) not found.\n",
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests")
+                .join("db_search")
+                .join(format!("{db}.{header}"))
+                .display()
         );
         for outfmt in ["0", "6", "7"] {
             let what = format!("{program} -db {db} -outfmt {outfmt}");

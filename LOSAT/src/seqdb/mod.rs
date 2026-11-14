@@ -2079,11 +2079,11 @@ impl SeqDb {
         self.volumes[at.volume].protein_length(at.vol_oid)
     }
 
-    /// The bytes of the volume's sequence file after the sentinel byte of protein `ordinal`
-    /// (`Volume::protein_bytes_after`).
-    pub fn protein_bytes_after(&self, ordinal: u32) -> Result<u64, SeqDbError> {
+    /// The bytes that NCBI's mapping of the volume's sequence file holds after the sentinel byte
+    /// of protein `ordinal` (`Volume::protein_mapped_bytes_after`).
+    pub fn protein_mapped_bytes_after(&self, ordinal: u32) -> Result<u64, SeqDbError> {
         let at = self.find_volume(ordinal)?;
-        self.volumes[at.volume].protein_bytes_after(at.vol_oid)
+        self.volumes[at.volume].protein_mapped_bytes_after(at.vol_oid)
     }
 
     /// EXPERIMENT (LOSAT_X_BNMAPPED): `read_block` with the bytes in a buffer that glibc maps

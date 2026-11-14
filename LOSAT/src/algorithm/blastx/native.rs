@@ -2645,7 +2645,7 @@ impl XReaderPrep {
                 slots
                     .iter_mut()
                     .map(|slot| slot.as_mut().expect("a prepared unit")),
-                &shape,
+                shape,
             );
         }
         drop(slots);
@@ -2782,6 +2782,11 @@ impl XUnit {
         match (taken, &prep.layout) {
             (Some(unit), _) => Ok(Some(unit)),
             (None, Some(layout)) => {
+                // Phase 1 failed: the unit is prepared alone, without the bytes of the later
+                // units after its buffer (`reader_buffer_after` 0). A one-hit window of
+                // `-window_size 0` at its end that NCBI reads in the next unit's letters is then
+                // refused here (`preliminary::refuse_window_past_buffers`) before a later unit's
+                // error; both end the search with a refusal.
                 super::split::split_sizes(layout.query_count)?;
                 prepare_unit(self.queries(), layout, options, subjects).map(Some)
             }

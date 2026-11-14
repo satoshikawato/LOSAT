@@ -608,16 +608,21 @@ asks the maintainer to accept it, as the PRs of versions 1.5 and 1.13 did.
     10002) is one buffer, and each chunk of a split query has its own;
   - past the NULLB after a `-subject` protein (`malloc(len+2)`, `blast_setup_cxx.cpp:885-893,
     1236-1239`);
-  - past the end of a database volume's sequence file, which NCBI maps whole and reads in place
-    (`seqdbvol.cpp:1802`, `seqdbatlas.hpp:700-722`): only a window from the volume's last
-    sequences reaches it.
+  - past the last memory page of a database volume's sequence file. NCBI maps the file whole from
+    offset 0 and reads the sequences in place (`seqdbvol.cpp:1802`, `seqdbatlas.hpp:700-722`,
+    `seqdbatlas.cpp:114-127`, `ncbifile.cpp:5636-5638`), and the system fills the rest of the
+    file's last page with zeros, which NCBI reads as NULLBs, as LOSAT does. So only a window from
+    the volume's last sequence in a file that ends within 10 bytes of a 4,096-byte page boundary
+    reaches past it.
 
   NCBI indexes its matrix with the bytes it reads there. In 400 random searches with this setting
-  (one to three queries of 24 to 300 bases, one to three subjects of 12 to 150 letters, word sizes
-  2 to 5, `-threshold` 1 to 4), NCBI crashed (SIGSEGV) in 6, and in 2 its report lost a line, in one
-  of them only in some runs; 115 of the 366 gapped searches read past a buffer. Under valgrind
-  the 13 such searches checked (the 8 above among them) finish, with the output of reading those
-  bytes as NULLBs. BLASTP's
+  and `-subject` (one to three queries of 24 to 300 bases, one to three subjects of 12 to 150
+  letters, word sizes 2 to 5, `-threshold` 1 to 4), NCBI crashed (SIGSEGV) in 6, and in 2 its report
+  lost a line, in one of them only in some runs; 115 of the 366 gapped searches read past a buffer.
+  Under valgrind the 13 such searches checked (the 8 above among them) finish, with the output of
+  reading those bytes as NULLBs. With `-db`, a window past the volume's last sequence into the rest
+  of the page gave the same output in five runs and no invalid read under valgrind; one past the
+  page of a 4,096-byte file made valgrind report an invalid read and crash. BLASTP's
   approved exception 3 (version 1.3), which reads such letters as the sentinel, is not extended to
   BLASTX.
 

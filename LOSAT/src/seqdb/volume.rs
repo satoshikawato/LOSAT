@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use super::column::{self, Column, MASK_DATA_TITLE};
-use super::file::DbFile;
+use super::file::{DbFile, MAP_PAGE};
 use super::filter::{DeflineList, DeflineRule};
 use super::header::{decode_defline_taxids, decode_deflines_as, decode_full, Defline};
 use super::index::IndexFile;
@@ -258,20 +258,35 @@ impl Volume {
     //
     //         return(const char *)(m_DataPtr + offset);
     // ```
-    /// The bytes of the sequence file after the sentinel byte of protein `oid` (volume-relative):
-    /// the volume's next sequences with their sentinels. NCBI's search reads a protein of a
-    /// database where the volume's sequence file is mapped whole, so these are the bytes it holds
-    /// after the protein's sentinel.
-    pub fn protein_bytes_after(&self, oid: u32) -> Result<u64, SeqDbError> {
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbatlas.cpp:114-127 and
+    // c++/src/corelib/ncbifile.cpp:5636-5638
+    // ```c++
+    // CMemoryFile* CSeqDBAtlas::GetMemoryFile(const string& fileName)
+    // ...
+    //     CAtlasMappedFile* file(new CAtlasMappedFile(fileName));
+    // ...
+    //     m_DataPtrReal = mmap(0, m_LengthReal, attrs.map_protect,
+    //                          attrs.map_access, handle.hMap, m_OffsetReal);
+    // ```
+    /// The bytes that NCBI's mapping of the volume's sequence file holds after the sentinel byte
+    /// of protein `oid` (volume-relative): the volume's next sequences with their sentinels, then
+    /// the rest of the file's last memory page. NCBI's search reads a protein of a database where
+    /// the volume's sequence file is mapped whole from offset 0; the system maps whole pages and
+    /// fills the part of the last page after the end of the file with zeros (POSIX `mmap`,
+    /// Windows `MapViewOfFile`), so those bytes are NCBI's too (`MAP_PAGE`).
+    pub fn protein_mapped_bytes_after(&self, oid: u32) -> Result<u64, SeqDbError> {
         assert!(
             self.index.seqtype == SeqType::Protein,
             "protein bytes of a nucleotide volume"
         );
         self.check_range(oid, oid.saturating_add(1))?;
         let next = self.index.sequence_start(oid + 1)?;
-        self.seq_file()?
-            .len()
+        let length = self.seq_file()?.len();
+        length
+            .div_ceil(MAP_PAGE)
+            .saturating_mul(MAP_PAGE)
             .checked_sub(next)
+            .filter(|_| next <= length)
             .ok_or_else(|| self.index.sequence_changed(oid, 2))
     }
 

@@ -12,10 +12,9 @@ use anyhow::Result;
 use std::{ops::Range, sync::Arc};
 
 /// What the units of one reader batch share (phase 1 of the search of a reader batch of several
-/// units; `ReaderBatchShape::reduce`), and where a unit lies in the batch's query buffer
-/// (`buffer_after`, each unit's own copy of the shape, `attach`). A reader batch of one unit has
-/// none: its unit computes each value itself, from its own contexts, which are then the batch's.
-#[derive(Debug, Clone)]
+/// units; `ReaderBatchShape::reduce`). A reader batch of one unit has none: its unit computes
+/// each value itself, from its own contexts, which are then the batch's.
+#[derive(Debug)]
 pub(crate) struct ReaderBatchShape {
     /// NCBI's `num_queries` of the batch: with more than one the batch is not split.
     pub(crate) query_count: usize,
@@ -39,9 +38,6 @@ pub(crate) struct ReaderBatchShape {
     /// ungapped search: the message of each query of the batch (`query_setup::unknown_matrix_message`),
     /// which every unit's preparation raises (`query_setup::prepare_unit_queries`).
     pub(crate) matrix_error: Option<Arc<str>>,
-    /// The bytes of NCBI's query buffer after the unit's own (the letters and NULLBs of the
-    /// contexts of the units after it, `attach`); 0 in the layout and the reduced shape.
-    pub(crate) buffer_after: usize,
 }
 
 /// One unit of a reader batch, prepared in phase 1: its queries, translated and filtered, and
@@ -75,16 +71,12 @@ impl PreparedQueryBatch {
     // contexts with their NULLBs, then calloc's last byte (0). A reader batch searched in units
     // holds the units' contexts one after another (`query_offset` advances by a positive length
     // + 1 across them as within a unit), so from a unit's first context the buffer holds the
-    // unit's own bytes and then the next units' (`ReaderBatchShape::buffer_after`).
+    // unit's own bytes and then the next units' (`reader_buffer_after`, set by `attach`).
     /// `QueryInfo_GetSeqBufLen` of the batch NCBI searches, counted from this unit's first
     /// context: `query->sequence` (from the unit's first context) is inside NCBI's buffer below
     /// it.
     pub(crate) fn batch_buffer_length(&self) -> usize {
-        self.unit_buffer_length()
-            + self
-                .reader_shape
-                .as_deref()
-                .map_or(0, |shape| shape.buffer_after)
+        self.unit_buffer_length() + self.reader_buffer_after
     }
 
     /// `QueryInfo_GetSeqBufLen` of this unit's contexts alone.
@@ -199,7 +191,6 @@ impl ReaderBatchShape {
             matrix_error: options
                 .unknown_matrix
                 .then(|| super::query_setup::matrix_error_message(records, options).into()),
-            buffer_after: 0,
         }
     }
 
@@ -225,7 +216,6 @@ impl ReaderBatchShape {
             word_cutoff_min: None,
             redo_cutoff_min: None,
             matrix_error: layout.matrix_error.clone(),
-            buffer_after: 0,
         };
         for unit in units {
             for p in unit.params.iter().filter(|p| p.valid) {
@@ -352,18 +342,17 @@ pub(crate) fn prepare_lone_unit(
 // a unit's are the bytes of the units after it (each its `QueryInfo_GetSeqBufLen` less the first
 // NULLB, `PreparedQueryBatch::batch_buffer_length`).
 /// The end of phase 1 for the units of a reader batch, in order: the batch's shape replaces the
-/// layout, each unit's copy with the bytes of NCBI's query buffer after the unit's
-/// (`ReaderBatchShape::buffer_after`).
+/// layout, and each unit learns the bytes of NCBI's query buffer after its own
+/// (`PreparedQueryBatch::reader_buffer_after`).
 pub(crate) fn attach<'u>(
     units: impl DoubleEndedIterator<Item = &'u mut UnitPrep>,
-    shape: &ReaderBatchShape,
+    shape: ReaderBatchShape,
 ) {
+    let shape = Arc::new(shape);
     let mut after = 0;
     for unit in units.rev() {
-        unit.prepared.reader_shape = Some(Arc::new(ReaderBatchShape {
-            buffer_after: after,
-            ..shape.clone()
-        }));
+        unit.prepared.reader_shape = Some(Arc::clone(&shape));
+        unit.prepared.reader_buffer_after = after;
         after += unit.prepared.unit_buffer_length() - 1;
     }
 }
@@ -403,7 +392,7 @@ pub(crate) fn prepare_reader_batch(
     };
     super::x_timing::batch(super::x_timing::Batch::QuerySetup, x_t);
     let shape = ReaderBatchShape::reduce(&layout, &units);
-    attach(units.iter_mut(), &shape);
+    attach(units.iter_mut(), shape);
     Ok(units)
 }
 
@@ -473,7 +462,7 @@ mod tests {
                 assert_eq!(unit.prepared.batch_context_count(), shape.contexts);
             }
             // From each unit's first context NCBI's buffer of the batch holds the unit's bytes and
-            // then the next units' (`buffer_after`), up to the batch's `QueryInfo_GetSeqBufLen`.
+            // then the next units' (`reader_buffer_after`), up to the batch's `QueryInfo_GetSeqBufLen`.
             let mut before = 0;
             for unit in &units {
                 assert_eq!(
@@ -548,7 +537,6 @@ mod tests {
             word_cutoff_min: None,
             redo_cutoff_min: None,
             matrix_error: None,
-            buffer_after: 0,
         }));
         assert_eq!(
             split_queries(&records, &full, &options, DEFAULT_SIZES)

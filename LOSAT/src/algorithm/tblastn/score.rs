@@ -29,6 +29,7 @@ use crate::algorithm::blastp::gapalign::{
     blast_gapped_alignment_with_traceback_in_window, blastp_get_start_for_gapped_alignment,
     blastp_score_only_gapped_alignment_with_scratch, gapped_start_int4, BlastpGapAlignResult,
     BlastpGappedAlignmentMode, BlastpScoreOnlyGappedAlignment, GapAlignScratch,
+    GAPPED_START_WINDOW,
 };
 use crate::algorithm::pssm_search::gapalign::{
     pssm_gapped_alignment_with_traceback, pssm_get_offsets_for_gapped_alignment,
@@ -92,8 +93,8 @@ pub(super) trait TbnScore: Copy + Send + Sync {
     /// `search_gapped::XOneHitBuffers`).
     fn gapped_start_int4(
         self,
-        query_window: &[u8; 11],
-        subject_window: &[u8; 11],
+        query_window: &[u8; GAPPED_START_WINDOW],
+        subject_window: &[u8; GAPPED_START_WINDOW],
         q_start: usize,
         length: i32,
         matrix: ScoringMatrix,
@@ -262,8 +263,8 @@ impl TbnScore for MatrixScore {
     // (PD-LOSAT-NCBI-DEFECTS 1.3 item 3) and stays where BLASTP's gapped stage inlines it.
     fn gapped_start_int4(
         self,
-        query_window: &[u8; 11],
-        subject_window: &[u8; 11],
+        query_window: &[u8; GAPPED_START_WINDOW],
+        subject_window: &[u8; GAPPED_START_WINDOW],
         q_start: usize,
         length: i32,
         matrix: ScoringMatrix,
@@ -520,14 +521,13 @@ impl<'a> TbnScore for PssmScore<'a> {
     // search stops (PD-LOSAT-NCBI-DEFECTS, rule 3).
     fn gapped_start_int4(
         self,
-        _query_window: &[u8; 11],
-        subject_window: &[u8; 11],
+        _query_window: &[u8; GAPPED_START_WINDOW],
+        subject_window: &[u8; GAPPED_START_WINDOW],
         q_start: usize,
         length: i32,
         _matrix: ScoringMatrix,
     ) -> Result<usize> {
-        const HSP_MAX_WINDOW: usize = 11;
-        if q_start + HSP_MAX_WINDOW > self.0.rows.len() {
+        if q_start + GAPPED_START_WINDOW > self.0.rows.len() {
             anyhow::bail!(
                 "TBLASTN -in_pssm with -window_size 0: a one-hit alignment of negative length at query position {} would read past the PSSM (NCBI BLAST+ reads past its matrix there), which LOSAT does not support",
                 q_start + 1

@@ -698,9 +698,10 @@ fn gapped_start_negative(
 /// residues, where it reads past NCBI's buffers and NCBI's result is not defined: past the query
 /// batch's buffer (`calloc(buflen + 1)`, `PreparedQueryBatch::batch_buffer_length`), or past the
 /// subject's (`-subject`: `malloc(len + 2)`, its residues between two sentinel bytes; `-db`: the
-/// volume's sequence file, mapped whole, `subject_after`). Inside them the search gives NCBI's
-/// result. This is the search's one check for it: reading the bytes past NCBI's buffers as
-/// sentinels too, as BLASTP's exception 3 does (PD-LOSAT-NCBI-DEFECTS 1.3), would remove it.
+/// volume's sequence file, mapped whole, to the end of its last memory page, `subject_after`).
+/// Inside them the search gives NCBI's result. This is the search's one check for it, called by
+/// `gapped_start_negative` only: reading the bytes past NCBI's buffers as sentinels too, as
+/// BLASTP's exception 3 does (PD-LOSAT-NCBI-DEFECTS 1.3), would remove it.
 fn refuse_window_past_buffers(
     batch: &PreparedQueryBatch,
     q_abs: usize,
@@ -1171,9 +1172,9 @@ mod tests {
     // `refuse_window_past_buffers`)
     /// A one-hit gapped start of negative length is refused exactly where its window of 11 letters
     /// reads past NCBI's buffers: past calloc's byte after the query batch's last NULLB, past the
-    /// sentinel after a `-subject` record, past what a database sequence's volume holds after its
-    /// sentinel; the subject's bytes after its sentinel are asked for only when the window passes
-    /// it.
+    /// sentinel after a `-subject` record, past what NCBI's mapping of a database sequence's volume
+    /// holds after its sentinel (to the end of the file's last memory page); the subject's bytes
+    /// after its sentinel are asked for only when the window passes it.
     #[test]
     fn a_one_hit_window_is_refused_only_past_ncbis_buffers() {
         let (_, batch, _) = super::super::stage_c_tests::fixture("S06_seed.fna");
@@ -1208,14 +1209,15 @@ mod tests {
             refuse_window_past_buffers(&batch, 0, 30, 21, &fasta),
             "subject",
         );
-        // A database sequence followed by 3 bytes in its volume.
-        let volume = || -> Result<(usize, &'static str)> { Ok((3, "database volume")) };
+        // A database sequence followed by 3 bytes in its volume's mapping.
+        let volume =
+            || -> Result<(usize, &'static str)> { Ok((3, "database volume's last memory page")) };
         for s_start in 21..=23 {
             refuse_window_past_buffers(&batch, 0, 30, s_start, &volume).unwrap();
         }
         refused(
             refuse_window_past_buffers(&batch, 0, 30, 24, &volume),
-            "database volume",
+            "database volume's last memory page",
         );
         // The query's check comes first.
         refused(

@@ -193,12 +193,15 @@ impl<'a> Subjects<'a> {
     /// The bytes that NCBI's buffer of subject `oid` holds after the sentinel byte that follows its
     /// residues: none for a record of `-subject` (`GetSequenceProtein` allocates the residues and a
     /// sentinel byte on each side, `CalculateSeqBufferLength`), and for a database sequence the
-    /// rest of its volume's sequence file, which NCBI maps whole (`XStreamDb::bytes_after`). The
-    /// second item names the buffer in a refusal.
+    /// rest of its volume's sequence file and of the file's last memory page, which NCBI maps
+    /// whole (`XStreamDb::bytes_after`). The second item names the buffer in a refusal.
     pub(crate) fn buffer_after(&self, oid: usize) -> Result<(usize, &'static str)> {
         match self {
             Subjects::Fasta(_) => Ok((0, "subject")),
-            Subjects::Stream(stream) => Ok((stream.db.bytes_after(oid)?, "database volume")),
+            Subjects::Stream(stream) => Ok((
+                stream.db.bytes_after(oid)?,
+                "database volume's last memory page",
+            )),
             Subjects::Unreadable => unreachable!("no subject is read from an unreadable database"),
         }
     }

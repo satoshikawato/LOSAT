@@ -64,6 +64,11 @@ pub struct PreparedQueryBatch {
     /// the batch is searched in several units (`reader_batch.rs`); `None` when the unit is the
     /// whole batch.
     pub(crate) reader_shape: Option<std::sync::Arc<super::reader_batch::ReaderBatchShape>>,
+    /// The bytes of NCBI's query buffer after this unit's own when the unit is a part of a reader
+    /// batch: the letters and NULLBs of the contexts of the units after it
+    /// (`reader_batch::attach`, `batch_buffer_length`); 0 when the unit is the whole batch, and
+    /// for a unit prepared again after phase 1 failed (`native::XUnit::take_prep`).
+    pub(crate) reader_buffer_after: usize,
     /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): whether `sequence_start` is on the path of the seed
     /// loops' sentinel walks (`blastx/x_ungap_sent.rs`, `query_fits`, another matrix than BLOSUM62
     /// `query_fits_of`; false with the switch off).
@@ -86,6 +91,7 @@ impl PreparedQueryBatch {
             sequence_start_nomask: Vec::new(),
             lookup_segments: Vec::new(),
             reader_shape: self.reader_shape.clone(),
+            reader_buffer_after: self.reader_buffer_after,
             x_ungap_sent: self.x_ungap_sent,
         }
     }
@@ -621,6 +627,7 @@ pub(crate) fn prepare_unit_queries(
         sequence_start_nomask: nomask,
         lookup_segments,
         reader_shape: None,
+        reader_buffer_after: 0,
         x_ungap_sent,
     })
 }

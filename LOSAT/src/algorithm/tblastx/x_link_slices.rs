@@ -503,10 +503,11 @@ pub(super) fn link_groups(
 //    number_of_hsps = hp_frame_number[frame_index];
 // ```
 // `link_groups` with the two variables that choose the literal port and size the scratch given
-// (the tests run both ways). The statements of the reference's group step in their order, with the
+// (the tests run both ways, and `x_hsp_inplace::link_in_place_int4` asks for the literal port for
+// a one-hit list with an HSP of length 0 or less). The statements of the reference's group step in their order, with the
 // cut replaced by the slices and the assembly by nothing.
 /// `link_groups` with `legacy_linking_requested()` and `link_shadow_enabled()` given.
-fn link_groups_as(
+pub(super) fn link_groups_as(
     mut hits: Vec<UngappedHit>,
     call: &Call<'_>,
     lap: &mut LinkLap,

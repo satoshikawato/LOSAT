@@ -115,7 +115,8 @@ pub(crate) use super::stage_dump;
 // ```
 pub(crate) use super::sum_stats_linking::{
     apply_sum_stats_even_gap_linking_with_parallel, calculate_link_hsp_cutoffs_ncbi,
-    compute_avg_query_length_ncbi, find_smallest_lambda_params, LinkingParams,
+    compute_avg_query_length_ncbi, find_smallest_lambda_params, link_one_hit_with_int4_ends,
+    LinkingParams,
 };
 pub(crate) use super::tracing::{
     trace_final_hit_if_match, trace_hsp_target, trace_match_target, trace_ungapped_hit_if_match,
@@ -131,8 +132,9 @@ pub(crate) use super::blast_extend::DiagStruct;
 
 // Import InitHSP and related functions from blast_gapalign module (NCBI blast_gapalign.c equivalent)
 pub(crate) use super::blast_gapalign::{
-    get_ungapped_hsp_list, sort_init_hsps_by_score_ncbi, sort_ungapped_hits_by_score_ncbi,
-    trace_init_hsp_if_match, ungapped_hits_is_sorted_by_score_ncbi, InitHSP,
+    get_ungapped_hsp_list, get_ungapped_hsp_list_int4, sort_init_hsps_by_score_ncbi,
+    sort_ungapped_hits_by_score_int4, sort_ungapped_hits_by_score_ncbi, trace_init_hsp_if_match,
+    ungapped_hits_is_sorted_by_score_ncbi, InitHSP,
 };
 
 // Import subject scanning functions from blast_aascan module (NCBI blast_aascan.c equivalent)
@@ -338,6 +340,14 @@ pub(crate) fn reevaluate_ungapped_hsp_list<S: TbxScore>(
     let mut kept_hits = Vec::new();
 
     for mut hit in ungapped_hits {
+        // No HSP of negative length arrives (its end, an `Int4` below its start, would read here
+        // as a large `u32`): the one-hit word finder's path drops the HSPs of length 0 or less
+        // after its first linking call, where NCBI's re-evaluation (this function) deletes them
+        // (`link_one_hit_with_int4_ends`).
+        debug_assert!(
+            hit.q_end_int4() >= hit.q_aa_start as i32,
+            "an HSP of negative length reached the re-evaluation"
+        );
         let ctx = &contexts[hit.ctx_idx as usize];
         let s_frame_scoring = &s_frames_scoring[usize::from(hit.s_f_idx)];
         let s_frame_report = &s_frames_report[usize::from(hit.s_f_idx)];

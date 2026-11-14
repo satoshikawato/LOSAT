@@ -258,7 +258,7 @@ where
 // `UngappedHit` does not compile here until it is compared.
 /// Test check: `actual` (the in-place or sliced path) against `reference`, record by record.
 #[cfg(test)]
-pub(super) fn x_assert_same_hits(what: &str, actual: &[UngappedHit], reference: &[UngappedHit]) {
+pub(crate) fn x_assert_same_hits(what: &str, actual: &[UngappedHit], reference: &[UngappedHit]) {
     fn same(a: &UngappedHit, b: &UngappedHit) -> bool {
         let UngappedHit {
             q_idx,
@@ -765,6 +765,91 @@ fn link_in_place(
     //          s_FwdCompareHSPsTransl);
     // ```
     // The reference's empty/singleton shortcut, then its final sorts and replay.
+    if results.len() <= 1 {
+        return results;
+    }
+    let replayed = replay_in_place(results, &mut lap, allow_parallel);
+    lap.lap(LinkStage::Replay);
+    replayed
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:483-486 and :540-551
+// ```c
+// /* Sort by (reverse) position. */
+// if (kTranslatedQuery) {
+//    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
+//          s_RevCompareHSPsTbx);
+// ...
+//        q_length = (hsp->query.end - hsp->query.offset) / 4;
+//        s_length = (hsp->subject.end - hsp->subject.offset) / 4;
+//        H->q_offset_trim = hsp->query.offset + MIN(q_length, trim_size);
+//        H->q_end_trim = hsp->query.end - MIN(q_length, trim_size);
+// ```
+// `link_in_place` for a list of the one-hit word finder that holds an HSP of length 0 or less
+// (`linking.rs`, `link_one_hit_with_int4_ends`): the same reset, sort, groups and replay, with
+// the sort's comparator reading the ends as NCBI's `Int4` (`rev_compare_hsps_tbx_int4`) and the
+// literal port `link_hsp_group_ncbi` for every group, which reads the four coordinates as `i32`
+// (`frame_relative_coords`) and so computes NCBI's trims, windows and sums on them. The replay's
+// comparators read the starts only. The incremental kernel is not used: it visits the HSPs by
+// decreasing end and assumes every end is after its start (`linking_incr.rs`). The reference
+// body of LOSAT_DEBUG_CUTOFFS and LOSAT_DIAGNOSTICS is not used either (`gate`): it may take that
+// kernel, and its prints are not values of the search.
+/// `link_in_place` with `Int4` ends and the literal port, for a one-hit list.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn link_in_place_int4(
+    mut hits: Vec<UngappedHit>,
+    params: &KarlinParams,
+    linking_params: &LinkingParams,
+    query_contexts: &[QueryContext],
+    subject_frame_bases: &[i32],
+    length_adj_per_context: &[i64],
+    eff_searchsp_per_context: &[i64],
+    allow_parallel: bool,
+) -> Vec<UngappedHit> {
+    let mut lap = LinkLap::start();
+    if hits.is_empty() {
+        return hits;
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1773-1776
+    // ```c
+    //     for (index = 0; index < hsp_list->hspcnt; ++index)
+    //         hsp_list->hsp_array[index]->num = 1;
+    // ```
+    for (link_id, hit) in hits.iter_mut().enumerate() {
+        hit.link_id = u32::try_from(link_id)
+            .expect("link_id: a position in the linking list fits u32 (NCBI's hspcnt is Int4)");
+        hit.chain_next_link_id = None;
+        hit.num = 1;
+    }
+    let cutoffs = linking_params.cutoffs;
+    let log_k_by_ctx: Vec<f64> = query_contexts
+        .iter()
+        .map(|ctx| ctx.karlin_params.k.ln())
+        .collect();
+    lap.lap(LinkStage::Reset);
+    sort_in_place(
+        &mut hits,
+        rev_compare_hsps_tbx_int4,
+        x_link_sort::Site::First(allow_parallel),
+    );
+    lap.lap(LinkStage::Sort);
+    let (results, _groups) = x_link_slices::link_groups_as(
+        hits,
+        &x_link_slices::Call {
+            params,
+            cutoffs: &cutoffs,
+            linking_params,
+            query_contexts,
+            subject_frame_bases,
+            length_adj_per_context,
+            eff_searchsp_per_context,
+            log_k_by_ctx: &log_k_by_ctx,
+            allow_parallel,
+        },
+        &mut lap,
+        true,
+        false,
+    );
     if results.len() <= 1 {
         return results;
     }
@@ -1288,5 +1373,253 @@ mod tests {
             );
             assert_eq!(most_groups, 8);
         }
+    }
+
+    /// An HSP of the one-hit word finder of length 0, -1 or -2 that starts at query offset 0 (so
+    /// it comes after every other HSP of its group in the link sort), with NCBI's `Int4` ends
+    /// (below 0 when the subject start is small) and a score of 1 to `max_score`.
+    fn random_inverted_hit(
+        rng: &mut Rng,
+        index: usize,
+        queries: usize,
+        max_score: u64,
+    ) -> UngappedHit {
+        let mut hit = random_hit(rng, index, 60, queries);
+        let length = -(rng.below(3) as i32);
+        let s_start = rng.below(6) as u32;
+        hit.q_aa_start = 0;
+        hit.s_aa_start = s_start;
+        hit.q_seed_off = 1;
+        hit.s_seed_off = s_start + 1;
+        hit.set_int4_ends(length, s_start as i32 + length);
+        hit.raw_score = 1 + rng.below(max_score) as i32;
+        hit
+    }
+
+    fn one_hit_linking(
+        hits: Vec<UngappedHit>,
+        linking: &LinkingParams,
+        parallel: bool,
+    ) -> Vec<UngappedHit> {
+        let (params, contexts) = two_query_contexts();
+        link_one_hit_with_int4_ends(
+            hits,
+            &params,
+            linking,
+            &contexts,
+            &[0; 6],
+            &[49; 12],
+            &[9_372_428_362; 12],
+            parallel,
+        )
+    }
+
+    fn default_linking(
+        hits: Vec<UngappedHit>,
+        linking: &LinkingParams,
+        parallel: bool,
+    ) -> Vec<UngappedHit> {
+        let (params, contexts) = two_query_contexts();
+        link_in_place(
+            hits,
+            &params,
+            linking,
+            &contexts,
+            &[0; 6],
+            &[49; 12],
+            &[9_372_428_362; 12],
+            parallel,
+        )
+    }
+
+    fn test_cutoff_sets() -> [LinkHspCutoffs; 3] {
+        [
+            fast_test_cutoffs(),
+            LinkHspCutoffs {
+                cutoff_small_gap: 20,
+                cutoff_big_gap: 20,
+                gap_prob: 0.5,
+                ignore_small_gaps: false,
+            },
+            LinkHspCutoffs {
+                cutoff_small_gap: 0,
+                cutoff_big_gap: 30,
+                gap_prob: 0.0,
+                ignore_small_gaps: true,
+            },
+        ]
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:483-486
+    // ```c
+    //    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
+    //          s_RevCompareHSPsTbx);
+    // ```
+    // The `Int4` comparator orders an end below 0 below every other end; the `u32` one above.
+    #[test]
+    fn int4_link_comparator_reads_negative_ends_as_int4() {
+        let positive = mock_hit(0, 5, 3, 8, 50);
+        let mut inverted = mock_hit(0, 0, 1, 1, 7);
+        inverted.set_int4_ends(-1, 0);
+        assert_eq!(
+            rev_compare_hsps_tbx_int4(&positive, &inverted),
+            Ordering::Less
+        );
+        assert_eq!(
+            rev_compare_hsps_tbx(&positive, &inverted),
+            Ordering::Greater
+        );
+        let other = mock_hit(2, 9, 4, 11, 50);
+        assert_eq!(
+            rev_compare_hsps_tbx_int4(&positive, &other),
+            rev_compare_hsps_tbx(&positive, &other)
+        );
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419
+    // ```c
+    // s_BlastEvenGapLinkHSPs(EBlastProgramType program_number, BlastHSPList* hsp_list,
+    // ```
+    // On lists of positive HSPs the one-hit form of the linking call (`Int4` comparator, literal
+    // port for every group) is `link_in_place` (incremental kernel), serially and on the pool.
+    #[test]
+    fn int4_linking_of_positive_lists_is_link_in_place() {
+        let mut rng = Rng(0x5851_F42D_4C95_7F2D);
+        let cutoff_sets = test_cutoff_sets();
+        for case in 0..120 {
+            let n = 1 + rng.below(160) as usize;
+            let queries = 1 + case % 2;
+            let span = [60u64, 400, 3000][case % 3];
+            let hits = random_hits(&mut rng, n, span, queries);
+            let linking = LinkingParams {
+                subject_len_nucl: 300_000,
+                gap_decay_rate: 0.5,
+                cutoffs: cutoff_sets[case % cutoff_sets.len()],
+            };
+            for parallel in [false, true] {
+                let label = format!("case {case} n {n} parallel {parallel}");
+                let expected = default_linking(hits.clone(), &linking, parallel);
+                let actual = link_in_place_int4(
+                    hits.clone(),
+                    &two_query_contexts().0,
+                    &linking,
+                    &two_query_contexts().1,
+                    &[0; 6],
+                    &[49; 12],
+                    &[9_372_428_362; 12],
+                    parallel,
+                );
+                assert_same_list(&label, &actual, &expected);
+            }
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:687,699 and :452-453
+    // ```c
+    //    Int4 hsp_length = hsp->query.end - hsp->query.offset;
+    // ...
+    //    for (index = 0; index < hsp_length; ++index) {
+    // ...
+    //     if (hsp->score >= cutoff_score) {
+    // ```
+    // HSPs of length 0 or less whose score is at most the linking cutoffs stay alone in the link
+    // (no chain takes them or is taken by them); placed after the other HSPs of their group, they
+    // change no value of the others. Linked with them and dropped, the list is the list linked
+    // without them: the same HSPs, E-values and order (the input sorted by score, as the search
+    // gives it).
+    #[test]
+    fn int4_linking_drops_hsps_of_length_zero_or_less() {
+        let mut rng = Rng(0x2545_F491_4F6C_DD1D);
+        let cutoff_sets = test_cutoff_sets();
+        for case in 0..150 {
+            let n = rng.below(120) as usize;
+            let queries = 1 + case % 2;
+            let span = [60u64, 400, 3000][case % 3];
+            let mut base = random_hits(&mut rng, n, span, queries);
+            crate::algorithm::tblastx::blast_gapalign::sort_ungapped_hits_by_score_ncbi(&mut base);
+            let inverted: Vec<UngappedHit> = (0..1 + rng.below(12) as usize)
+                .map(|k| random_inverted_hit(&mut rng, n + k, queries, 20))
+                .collect();
+            let mut with_inverted = base.clone();
+            with_inverted.extend(inverted);
+            let linking = LinkingParams {
+                subject_len_nucl: 300_000,
+                gap_decay_rate: 0.5,
+                cutoffs: cutoff_sets[case % cutoff_sets.len()],
+            };
+            for parallel in [false, true] {
+                let label = format!("case {case} n {n} parallel {parallel}");
+                let actual = one_hit_linking(with_inverted.clone(), &linking, parallel);
+                assert!(actual.iter().all(|hit| !hit.is_int4_inverted()), "{label}");
+                // The dropped HSPs score below the others, so they come last in the score sort
+                // and every other HSP keeps its list position (`link_id`).
+                let expected = default_linking(base.clone(), &linking, parallel);
+                assert_same_list(&label, &actual, &expected);
+            }
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:838-893
+    // ```c
+    //                   if (H2_hsp_sum > H_hsp_sum) {
+    // ...
+    //                if(sum>=max1){max1=sum;best[1]=H;}
+    // ```
+    // HSPs of length 0 or less with any score, anywhere in the list: none leaves the linking call,
+    // every other HSP leaves it once, serially and on the pool alike.
+    #[test]
+    fn int4_linking_lets_no_hsp_of_length_zero_or_less_out() {
+        let mut rng = Rng(0x1405_7B7E_F767_814F);
+        let cutoff_sets = test_cutoff_sets();
+        let mut linked_with_inverted = 0usize;
+        for case in 0..150 {
+            let n = rng.below(100) as usize;
+            let queries = 1 + case % 2;
+            let span = [60u64, 400][case % 2];
+            let mut hits = random_hits(&mut rng, n, span, queries);
+            let inverted_count = 1 + rng.below(20) as usize;
+            for k in 0..inverted_count {
+                let mut hit = random_inverted_hit(&mut rng, n + k, queries, 90);
+                let q = rng.below(span) as u32;
+                let length = hit.q_end_int4();
+                hit.q_aa_start = q;
+                hit.s_aa_start = q + rng.below(5) as u32;
+                let s = hit.s_aa_start as i32;
+                hit.set_int4_ends(q as i32 + length, s + length);
+                hits.push(hit);
+            }
+            crate::algorithm::tblastx::blast_gapalign::sort_ungapped_hits_by_score_ncbi(&mut hits);
+            let linking = LinkingParams {
+                subject_len_nucl: 300_000,
+                gap_decay_rate: 0.5,
+                cutoffs: cutoff_sets[case % cutoff_sets.len()],
+            };
+            let serial = one_hit_linking(hits.clone(), &linking, false);
+            let pooled = one_hit_linking(hits.clone(), &linking, true);
+            assert_same_list(&format!("case {case}: pool"), &pooled, &serial);
+            assert!(
+                serial.iter().all(|hit| !hit.is_int4_inverted()),
+                "case {case}"
+            );
+            let mut orders: Vec<u32> = serial.iter().map(|hit| hit.hsp_list_order).collect();
+            orders.sort_unstable();
+            assert_eq!(orders, (0..n as u32).collect::<Vec<_>>(), "case {case}");
+            let without: Vec<UngappedHit> = hits
+                .iter()
+                .filter(|hit| !hit.is_int4_inverted())
+                .cloned()
+                .collect();
+            let alone = default_linking(without, &linking, false);
+            if alone
+                .iter()
+                .zip(serial.iter())
+                .any(|(a, b)| a.e_value.to_bits() != b.e_value.to_bits() || a.num != b.num)
+            {
+                linked_with_inverted += 1;
+            }
+        }
+        // Some lists link an HSP of length 0 or less into a chain of others, which changes their
+        // E-values or counts.
+        assert!(linked_with_inverted > 0);
     }
 }

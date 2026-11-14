@@ -514,6 +514,113 @@ pub(crate) fn sort_ungapped_hits_by_score_ncbi(hits: &mut [UngappedHit]) {
     sort_ungapped_hits_by_index_replay(hits, score_compare_ungapped_hits_ncbi);
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1347-1353
+// ```c
+//    if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
+//        0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
+//        0 == (result = BLAST_CMP(hsp2->subject.end,    hsp1->subject.end)) &&
+//        0 == (result = BLAST_CMP(hsp1->query  .offset, hsp2->query  .offset))) {
+//        result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
+//    }
+// ```
+// `ScoreCompareHSPs` with the ends read as NCBI's `Int4` (`UngappedHit::q_end_int4`): the
+// comparator of the one-hit word finder's lists, whose HSPs of length 0 or less may end below 0
+// (`chaining.rs`, the impl of `UngappedHit`). On ends of 0 or more it is
+// `score_compare_ungapped_hits_ncbi`.
+pub(crate) fn score_compare_ungapped_hits_int4(a: &UngappedHit, b: &UngappedHit) -> Ordering {
+    b.raw_score
+        .cmp(&a.raw_score)
+        .then_with(|| a.s_aa_start.cmp(&b.s_aa_start))
+        .then_with(|| b.s_end_int4().cmp(&a.s_end_int4()))
+        .then_with(|| a.q_aa_start.cmp(&b.q_aa_start))
+        .then_with(|| b.q_end_int4().cmp(&a.q_end_int4()))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1374-1383
+// ```c
+// void Blast_HSPListSortByScore(BlastHSPList* hsp_list)
+// {
+//     if (!hsp_list || hsp_list->hspcnt <= 1)
+//         return;
+//
+//     if (!Blast_HSPListIsSortedByScore(hsp_list)) {
+//         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+//               ScoreCompareHSPs);
+//     }
+// }
+// ```
+// `sort_ungapped_hits_by_score_ncbi` with `score_compare_ungapped_hits_int4`, the same stable
+// index-replay sort (glibc's qsort is a stable merge sort, `x_link_sort.rs`).
+/// Sorts a list of the one-hit word finder by score, its ends read as `Int4`.
+pub(crate) fn sort_ungapped_hits_by_score_int4(hits: &mut [UngappedHit]) {
+    if hits.len() <= 1 {
+        return;
+    }
+    if hits
+        .windows(2)
+        .all(|pair| score_compare_ungapped_hits_int4(&pair[0], &pair[1]) != Ordering::Greater)
+    {
+        return;
+    }
+    sort_ungapped_hits_by_index_replay(hits, score_compare_ungapped_hits_int4);
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4760-4772
+// ```c
+//       Blast_HSPInit(ungapped_data->q_start,
+//                     ungapped_data->length+ungapped_data->q_start,
+//                     ungapped_data->s_start,
+//                     ungapped_data->length+ungapped_data->s_start,
+//                     init_hsp->offsets.qs_offsets.q_off,
+//                     init_hsp->offsets.qs_offsets.s_off,
+//                     context, query_info->contexts[context].frame,
+//                     subject->frame, ungapped_data->score, NULL, &new_hsp);
+//       Blast_HSPListSaveHSP(hsp_list, new_hsp);
+//    }
+//
+//    /* Sort the HSP array by score */
+//    Blast_HSPListSortByScore(hsp_list);
+// ```
+// `get_ungapped_hsp_list` for the one-hit word finder (`-window_size 0`), whose initial HSPs may
+// have a length of 0 or less (aa_ungapped.c:1054,1083): `Blast_HSPInit` stores their ends,
+// `start + length`, as they are. The conversion is `convert_init_hsps_unsorted`, given a length
+// of 1 for those HSPs (its checks of a positive span hold for every other HSP and are kept for
+// them); the ends NCBI stores are then written with `UngappedHit::set_int4_ends`, and the list is
+// sorted with the `Int4` comparator. On a list without such an HSP the result is
+// `get_ungapped_hsp_list`'s.
+/// The one-hit word finder's `get_ungapped_hsp_list`, which keeps NCBI's `Int4` ends.
+pub(crate) fn get_ungapped_hsp_list_int4(
+    mut init_hsps: Vec<InitHSP>,
+    contexts: &[QueryContext],
+    s_frames: &[QueryFrame],
+) -> Vec<UngappedHit> {
+    // NCBI: query.end = length + q_start (q_start context-relative, s_AdjustInitialHSPOffsets),
+    // subject.end = length + s_start.
+    let ends: Vec<(i32, i32)> = init_hsps
+        .iter()
+        .map(|init_hsp| {
+            let frame_base = contexts[init_hsp.ctx_idx].frame_base;
+            (
+                adjust_initial_hsp_offsets(init_hsp.q_end_absolute, frame_base),
+                init_hsp.s_end,
+            )
+        })
+        .collect();
+    for init_hsp in init_hsps.iter_mut() {
+        if init_hsp.q_end_absolute <= init_hsp.q_start_absolute {
+            init_hsp.q_end_absolute = init_hsp.q_start_absolute + 1;
+            init_hsp.s_end = init_hsp.s_start + 1;
+        }
+    }
+    let mut hits = convert_init_hsps_unsorted(init_hsps, contexts, s_frames, Vec::new());
+    // One HSP per initial HSP, in their order.
+    for (hit, (q_end, s_end)) in hits.iter_mut().zip(ends) {
+        hit.set_int4_ends(q_end, s_end);
+    }
+    sort_ungapped_hits_by_score_int4(&mut hits);
+    hits
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1355-1369
 // ```c
 // Boolean Blast_HSPListIsSortedByScore(const BlastHSPList* hsp_list)
@@ -876,6 +983,78 @@ mod tests {
             &contexts,
             &subject_frames,
             one,
+        );
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4760-4772
+    // ```c
+    //       Blast_HSPInit(ungapped_data->q_start,
+    //                     ungapped_data->length+ungapped_data->q_start,
+    //                     ungapped_data->s_start,
+    //                     ungapped_data->length+ungapped_data->s_start,
+    // ...
+    //    Blast_HSPListSortByScore(hsp_list);
+    // ```
+    // The one-hit conversion keeps the ends `start + length` of HSPs of length 0, -1 and -2 (one
+    // ending at -2, below the frame's start) and sorts with the `Int4` comparator: of two HSPs of
+    // score 9 that start at subject 0, the one ending at 3 comes before the one ending at -2
+    // (`subject.end` descending), which the `u32` comparator orders the other way. The HSPs of
+    // positive length are `get_ungapped_hsp_list`'s, field for field.
+    #[test]
+    fn int4_conversion_keeps_ends_at_or_before_the_start_and_sorts_them_as_int4() {
+        let mut context = make_context();
+        context.frame_base = 100;
+        let contexts = vec![context];
+        let subject_frames = vec![make_subject_frame()];
+        let init_hsps = vec![
+            make_init_hsp(100, 98, 0, -2, 9),
+            make_init_hsp(101, 104, 0, 3, 9),
+            make_init_hsp(103, 103, 2, 2, 4),
+            make_init_hsp(102, 101, 1, 0, 12),
+        ];
+        let hits = get_ungapped_hsp_list_int4(init_hsps.clone(), &contexts, &subject_frames);
+        let ends: Vec<(u32, i32, u32, i32, i32)> = hits
+            .iter()
+            .map(|hit| {
+                (
+                    hit.q_aa_start,
+                    hit.q_end_int4(),
+                    hit.s_aa_start,
+                    hit.s_end_int4(),
+                    hit.raw_score,
+                )
+            })
+            .collect();
+        assert_eq!(
+            ends,
+            vec![
+                (2, 1, 1, 0, 12),
+                (1, 4, 0, 3, 9),
+                (0, -2, 0, -2, 9),
+                (3, 3, 2, 2, 4),
+            ]
+        );
+        assert_eq!(
+            hits.iter()
+                .map(UngappedHit::is_int4_inverted)
+                .collect::<Vec<_>>(),
+            vec![true, false, true, true]
+        );
+        let mut by_u32 = hits.clone();
+        sort_ungapped_hits_by_index_replay(&mut by_u32, score_compare_ungapped_hits_ncbi);
+        assert_eq!(by_u32[1].s_end_int4(), -2);
+
+        let positive = vec![
+            make_init_hsp(101, 104, 0, 3, 9),
+            make_init_hsp(105, 109, 4, 8, 9),
+            make_init_hsp(102, 110, 1, 9, 20),
+        ];
+        let expected = get_ungapped_hsp_list(positive.clone(), &contexts, &subject_frames);
+        let actual = get_ungapped_hsp_list_int4(positive, &contexts, &subject_frames);
+        crate::algorithm::tblastx::sum_stats_linking::x_hsp_inplace::x_assert_same_hits(
+            "positive lengths",
+            &actual,
+            &expected,
         );
     }
 }

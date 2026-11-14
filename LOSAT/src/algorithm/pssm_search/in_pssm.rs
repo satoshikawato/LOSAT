@@ -537,7 +537,7 @@ pub(crate) fn psi_search_and_object(
     //                 ERR_POST_X(7, "Empty region in "<<GetDescription()<<
     // ```
     // The query's Bioseq joins NCBI's scope with its annotations (psiblast_app.cpp:537,
-    // tblastn_app.cpp's own), whose object manager indexes those of these kinds: NCBI BLAST+ 2.17.0
+    // tblastn_app.cpp:226), whose object manager indexes those of these kinds: NCBI BLAST+ 2.17.0
     // posts messages for some (`Empty region in 0x... Seq-feat ::= ...` with a memory address,
     // `Invalid 'lens' size in denseg`, the Seq-table column checks of seq_table_info.cpp) and stops
     // with C++ exceptions for others (`Duplicate partial column`; a null pointer with a stack of

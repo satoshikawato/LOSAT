@@ -12423,6 +12423,9 @@ fn run_call(
                     query_input: &block_input,
                     subject_placements: ranges.subject_placements,
                     x_ordinal_base: ranges.x_ordinal_base + input.start,
+                    // As the block search's blocks; a call of the preliminary stage only makes no
+                    // search strategy requests (`run_resolved_in_pool`), the only reader.
+                    searched_base: ranges.searched_base + input.start,
                     split_search_spaces: None,
                 },
                 &BlastpReports::prelim_only(false),

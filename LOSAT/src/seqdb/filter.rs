@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use super::file::DbFile;
 use super::isam;
-use super::lmdb_read::Env;
+use super::lmdb_read::{Db, Env};
 use super::seqidlist::{self, SeqidListFile};
 use super::{tax_files, SeqDb, SeqDbError, SeqType};
 use crate::seqid::model::ObjectId;
@@ -1392,6 +1392,37 @@ impl LmdbEntry {
     /// `oids` in the entry's LMDB file opened as `env` (`open_env`).
     pub(super) fn oids_in(&self, env: &Env<DbFile>, acc: &[u8]) -> Result<Vec<u32>, SeqDbError> {
         tax_files::acc_oids(env, acc).map_err(|message| self.lookup_error(message))
+    }
+
+    /// The `acc2oid` database of the LMDB file opened as `env` (`tax_files::acc2oid`), for
+    /// `oids_of` and `case_variant_oids_in`.
+    pub(super) fn acc2oid_in(&self, env: &Env<DbFile>) -> Result<Db, SeqDbError> {
+        tax_files::acc2oid(env).map_err(|message| self.lookup_error(message))
+    }
+
+    /// `oids_in` in the `acc2oid` database `db` of `env` (`acc2oid_in`).
+    pub(super) fn oids_of(
+        &self,
+        env: &Env<DbFile>,
+        db: &Db,
+        acc: &[u8],
+    ) -> Result<Vec<u32>, SeqDbError> {
+        tax_files::acc_oids_of(env, db, acc).map_err(|message| self.lookup_error(message))
+    }
+
+    /// The OIDs of the other keys that differ from `acc` only in the case of letters at or after
+    /// byte `from` (`tax_files::acc_case_variant_oids`, the prefixes found kept in `prefixes`), in
+    /// the `acc2oid` database `db` of the LMDB file opened as `env`.
+    pub(super) fn case_variant_oids_in(
+        &self,
+        env: &Env<DbFile>,
+        db: &Db,
+        acc: &[u8],
+        from: usize,
+        prefixes: &mut rustc_hash::FxHashMap<Vec<u8>, bool>,
+    ) -> Result<Vec<u32>, SeqDbError> {
+        tax_files::acc_case_variant_oids(env, db, acc, from, prefixes)
+            .map_err(|message| self.lookup_error(message))
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:153-157

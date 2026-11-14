@@ -13,6 +13,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+mod temp_support;
+use temp_support::TempPath;
+
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fasta/outfmt0")
@@ -30,7 +33,7 @@ fn temp_path(tag: &str) -> PathBuf {
 }
 
 /// The binary with `env` as its only variables that choose a code path.
-fn losat(env: &[(&str, &str)]) -> Command {
+fn losat(env: &[(&str, &str)]) -> (Command, TempPath) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
@@ -43,25 +46,30 @@ fn losat(env: &[(&str, &str)]) -> Command {
             command.env_remove(name);
         }
     }
+    let log = TempPath::keep_on_failure(temp_path("worker.log"));
     command
-        .env("LOSAT_BLASTX_WORKER_LOG", temp_path("worker.log"))
+        .env("LOSAT_BLASTX_WORKER_LOG", &log)
         .envs(env.iter().copied());
-    command
+    (command, log)
 }
 
 struct Run {
+    /// The worker log of the search: kept when the test panics, removed with the run otherwise.
+    _log: TempPath,
     stdout: String,
     stderr: String,
     code: Option<i32>,
 }
 
 fn blastp(args: &[&str], env: &[(&str, &str)]) -> Run {
-    let output = losat(env)
+    let (mut command, log) = losat(env);
+    let output = command
         .arg("blastp")
         .args(args)
         .output()
         .expect("run LOSAT");
     Run {
+        _log: log,
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         code: output.status.code(),
@@ -79,7 +87,8 @@ impl Db {
         let dir = temp_path("db");
         std::fs::create_dir_all(&dir).unwrap();
         let name = dir.join("many");
-        let made = losat(&[])
+        let (mut command, _log) = losat(&[]);
+        let made = command
             .arg("makeblastdb")
             .arg("-in")
             .arg(fixture("e2e_many_subject.faa"))

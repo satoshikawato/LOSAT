@@ -39,8 +39,9 @@
 //! position of its grid `start + k * scan_step` and derives its state from that position.
 //! This module cuts the grid of each scan range into strips (`plan_strips`). Phase 1, on
 //! any thread: the reference kernel scans one strip with `s_range` of the whole range (the
-//! value `scan_range[2] + lut_word_length` NCBI passes), walks the lookup chains as
-//! `on_word` does, and runs the steps of `pair_extend::extend_offset_pairs` that read nothing
+//! value `scan_range[2] + lut_word_length` NCBI passes), walks the lookup chains as `on_word`
+//! of the reference scan (`two_stage_scan::scan_two_stage_lookup`) does, and runs the steps of
+//! `pair_extend::extend_offset_pairs` that read nothing
 //! but the inputs (the context of the query offset, the bounds test, the word extension of
 //! `s_BlastNaExtend`, which `extend_offset_pairs` calls as `word_extend_pair`); a pair that
 //! passes becomes a `Seed`, in the order of the pairs.

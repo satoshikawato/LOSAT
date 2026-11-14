@@ -35,6 +35,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod temp_support;
+use temp_support::{worker_log_if_unset, TempFile};
+
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fasta")
@@ -62,7 +65,7 @@ fn blastp(
     threads: u32,
     vars: &[(&str, &str)],
     extra: &[&str],
-) -> (Vec<u8>, Vec<DiagCounts>, String) {
+) -> (Vec<u8>, Vec<DiagCounts>, String, Option<TempFile>) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
@@ -74,12 +77,7 @@ fn blastp(
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat-bpdefer-worker.log"),
-        );
-    }
+    let log = worker_log_if_unset(&mut command, "blastp_diag_defer_worker");
     let output = command
         .arg("blastp")
         .arg("-query")
@@ -114,7 +112,7 @@ fn blastp(
             }
         })
         .collect();
-    (output.stdout, counts, stderr)
+    (output.stdout, counts, stderr, log)
 }
 
 fn next(seed: &mut u64) -> u32 {
@@ -249,7 +247,7 @@ fn deferred_and_masked_calls_give_the_reports_and_counts_of_the_batches() {
         let extra = ["-outfmt", *outfmt];
         for &threads in *thread_counts {
             let what = format!("{} threads {threads}", query.display());
-            let (reference, reference_counts, _) =
+            let (reference, reference_counts, _, _log) =
                 blastp(query, subject, threads, REFERENCE, &extra);
             // Rows, or a pairwise report with a subject's alignments (it has a header and says
             // "No hits found" for a query without them).
@@ -263,17 +261,18 @@ fn deferred_and_masked_calls_give_the_reports_and_counts_of_the_batches() {
                 reference_counts.is_empty(),
                 "{what}: no line in the reference"
             );
-            let (batched, batched_counts, _) = blastp(query, subject, threads, BATCHES, &extra);
+            let (batched, batched_counts, _, _log) =
+                blastp(query, subject, threads, BATCHES, &extra);
             assert!(batched == reference, "{what}: the batches differ");
             let b = one_line(&batched_counts, &what);
             // The run with the deferred calls (LOSAT_X_BPMASKED=0).
             let what_d = format!("{what} {DEFERRED:?}");
-            let (report, counts, _) = blastp(query, subject, threads, DEFERRED, &extra);
+            let (report, counts, _, _log) = blastp(query, subject, threads, DEFERRED, &extra);
             assert!(report == reference, "{what_d}: the report differs");
             let d = one_line(&counts, &what_d);
             // The run with the masked batch, by default.
             let what = format!("{what} {DEFAULT:?}");
-            let (report, counts, stderr) = blastp(query, subject, threads, DEFAULT, &extra);
+            let (report, counts, stderr, _log) = blastp(query, subject, threads, DEFAULT, &extra);
             assert!(report == reference, "{what}: the report differs");
             let m = one_line(&counts, &what);
             if avx2() {
@@ -310,14 +309,14 @@ fn the_switch_acts_only_on_the_avx2_batches() {
     // These runs' cell tests (the per-hit loop, the scalar batch) are chosen once per run from the
     // variables and the CPU (`x_diag_mode`), not from the input: the generated pair.
     let (query, subject) = generated_pair("only_avx2");
-    let (reference, _, _) = blastp(&query, &subject, 1, REFERENCE, &["-outfmt", "6"]);
+    let (reference, _, _, _log) = blastp(&query, &subject, 1, REFERENCE, &["-outfmt", "6"]);
     assert!(!reference.is_empty(), "the pair has a report");
     // Without LOSAT_X_BPDIAG (the reference): the per-hit fused loop, no line.
-    let (_, counts, _) = blastp(&query, &subject, 1, REFERENCE, &["-outfmt", "6"]);
+    let (_, counts, _, _log) = blastp(&query, &subject, 1, REFERENCE, &["-outfmt", "6"]);
     assert!(counts.is_empty(), "without BPDIAG: {counts:?}");
     // With the scalar batch (LOSAT_X_BPDIAG_SIMD=0): the scalar batch, its calls per batch.
     let vars: &[(&str, &str)] = &[("LOSAT_X_BPDIAG_SIMD", "0")];
-    let (rows, counts, _) = blastp(&query, &subject, 1, vars, &["-outfmt", "6"]);
+    let (rows, counts, _, _log) = blastp(&query, &subject, 1, vars, &["-outfmt", "6"]);
     assert!(rows == reference, "scalar batch {vars:?}: rows differ");
     assert_eq!(one_line(&counts, "scalar batch").mode, "scalar");
 }
@@ -336,12 +335,13 @@ fn the_rule_gives_tables_with_few_hits_per_cell_the_deferred_calls() {
     const FORCED: &[(&str, &str)] = &[("LOSAT_X_BPMASKEDMIN", "0")];
     for threads in [1, 4, 8, 16] {
         let what = format!("short query threads {threads}");
-        let (reference, _, _) = blastp(&short, &subject, threads, REFERENCE, &["-outfmt", "6"]);
+        let (reference, _, _, _log) =
+            blastp(&short, &subject, threads, REFERENCE, &["-outfmt", "6"]);
         assert!(
             !reference.is_empty(),
             "{what}: the short query has a report"
         );
-        let (deferred, deferred_counts, stderr) =
+        let (deferred, deferred_counts, stderr, _log) =
             blastp(&short, &subject, threads, DEFERRED, &["-outfmt", "6"]);
         assert!(
             deferred == reference,
@@ -353,7 +353,8 @@ fn the_rule_gives_tables_with_few_hits_per_cell_the_deferred_calls() {
         assert_eq!(tables, None, "{what} {DEFERRED:?}: {tables:?}");
         for (vars, rule_masks) in [(DEFAULT, false), (FORCED, true)] {
             let what = format!("{what} {vars:?}");
-            let (rows, counts, stderr) = blastp(&short, &subject, threads, vars, &["-outfmt", "6"]);
+            let (rows, counts, stderr, _log) =
+                blastp(&short, &subject, threads, vars, &["-outfmt", "6"]);
             assert!(rows == reference, "{what}: the report differs");
             let c = one_line(&counts, &what);
             assert_eq!(

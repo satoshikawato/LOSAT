@@ -861,12 +861,14 @@ pub fn parse_comp_based_stats(
     Ok((mode, unified_p))
 }
 
-/// The query splitter that NCBI sets up for every query batch (`CBlastPrelimSearch`, in
-/// `BlastSetupPreliminarySearchEx`), which reads `CHUNK_SIZE` and then (where it can split)
-/// `OVERLAP_CHUNK_SIZE` but does not split an ungapped search. The outer `Err` is LOSAT's
-/// rejection of a value that NCBI cannot convert (its `CStringException` names its build's
-/// source files, exit 255); the inner one is NCBI's error for a chunk size that is not
-/// divisible by 3.
+/// The error of the query splitter that NCBI sets up for every query batch (`CQuerySplitter`, made
+/// with the setup data at the start of `BlastSetupPreliminarySearchEx`), which reads `CHUNK_SIZE`
+/// and then (where it can split) `OVERLAP_CHUNK_SIZE` but does not split an ungapped search. The
+/// first query batch meets it after the reading of its records (their reader errors and `Empty
+/// CBlastQueryVector` come first) and before its setup (a query without letters comes after): a
+/// value that `NStr::StringToInt` cannot convert is its `CStringException`
+/// ([`environment_int`]), and a chunk size that is not divisible by 3 is NCBI's engine error. Each
+/// program returns it through the error frame of its first batch, after the outfmt 0 prolog.
 ///
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:55-61
 /// ```c
@@ -877,6 +879,12 @@ pub fn parse_comp_based_stats(
 ///         &m_ChunkSize, m_TotalQueryLength, m_LocalQueryData->GetNumQueries());
 ///     /* No split for ungapped mode JIRA SB-1082 */
 ///     if (!options->GetGappedMode()) m_NumChunks = 1;
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.hpp:104-106
+/// ```c
+///     SBlastSetupData(CRef<IQueryFactory> qf, CRef<CBlastOptions> opts)
+///         : m_InternalData(new SInternalData),
+///       m_QuerySplitter(new CQuerySplitter(qf, opts))
 /// ```
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:98-103
 /// ```c
@@ -907,28 +915,24 @@ pub fn parse_comp_based_stats(
 /// (`translated_query`, tblastx). Whether a blastp or tblastn query batch is split is
 /// `blastp/protein_query_split.rs`.
 pub fn check_query_split_environment(
-    program: &str,
     translated_query: bool,
     reads_overlap: bool,
-) -> anyhow::Result<anyhow::Result<()>> {
-    let read = |variable: &str| read_query_split_variable(program, variable);
-    if let Some(chunk_size) = read("CHUNK_SIZE")? {
+) -> anyhow::Result<()> {
+    if let Some(chunk_size) = read_query_split_variable("CHUNK_SIZE")? {
         if translated_query && !(i64::from(chunk_size) as u64).is_multiple_of(3) {
-            return Ok(Err(NativeError {
-                exit: 3,
-                message: "BLAST engine error: Split query chunk size must be divisible by 3\n"
-                    .to_string(),
-            }
-            .into()));
+            return Err(engine_error(
+                "Split query chunk size must be divisible by 3",
+            ));
         }
     }
     if reads_overlap {
-        read("OVERLAP_CHUNK_SIZE")?;
+        read_query_split_variable("OVERLAP_CHUNK_SIZE")?;
     }
-    Ok(Ok(()))
+    Ok(())
 }
 
-/// `CHUNK_SIZE` or `OVERLAP_CHUNK_SIZE` as NCBI reads it (`None` when unset or blank).
+/// `CHUNK_SIZE` or `OVERLAP_CHUNK_SIZE` as NCBI reads it (`None` when unset or blank); `Err` is
+/// the `CStringException` of a value that it cannot convert ([`environment_int`]).
 ///
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:58-61
 /// ```c
@@ -936,30 +940,44 @@ pub fn check_query_split_environment(
 ///     if (chunk_sz_str && !NStr::IsBlank(chunk_sz_str)) {
 ///         retval = NStr::StringToInt(chunk_sz_str);
 /// ```
-pub(crate) fn read_query_split_variable(
-    program: &str,
-    variable: &str,
-) -> anyhow::Result<Option<i32>> {
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_aux_priv.cpp:54-57
+/// ```c
+///     char* overlap_sz_str = getenv("OVERLAP_CHUNK_SIZE");
+///     if (overlap_sz_str && !NStr::IsBlank(overlap_sz_str)) {
+///         retval = NStr::StringToInt(overlap_sz_str);
+/// ```
+pub(crate) fn read_query_split_variable(variable: &str) -> anyhow::Result<Option<i32>> {
     match std::env::var_os(variable) {
         Some(value) if !crate::ncbi_str::is_blank(value.as_encoded_bytes()) => {
-            match crate::blastinput::query_batch::ncbi_string_to_int(&value) {
-                Some(number) => Ok(Some(number)),
-                None => anyhow::bail!(
-                    "the environment variable {variable} has the value {:?}, which NCBI BLAST+ cannot convert to an int (it stops with a CStringException that names its build's source files); this is not supported by LOSAT's {program}",
-                    value.to_string_lossy()
-                ),
-            }
+            environment_int(&value).map(Some)
         }
         _ => Ok(None),
     }
 }
 
+/// An environment variable's value as NCBI's search converts it, `NStr::StringToInt(str)` with
+/// flags 0 (`ncbi_str::string_to_int`: an optional sign and decimal digits within the range of an
+/// `int`, no spaces). A value that it cannot convert (an empty one too) throws its
+/// `CStringException`, which ends the program through `CATCH_ALL` (`NativeError::exception`: `Error:
+/// ` and the exception's report, exit status 255). The bytes are those of the value as the
+/// process got it.
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:635-643 (quoted at
+/// `ncbi_str::string_to_int`)
+/// ```c++
+/// int NStr::StringToInt(const CTempString str, TStringToNumFlags flags, int base)
+/// {
+///     S2N_CONVERT_GUARD_EX(flags);
+///     Int8 value = StringToInt8(str, flags, base);
+/// ```
+pub(crate) fn environment_int(value: &std::ffi::OsStr) -> anyhow::Result<i32> {
+    crate::ncbi_str::string_to_int(value.as_encoded_bytes(), 0)
+        .map_err(|e| NativeError::exception(&e).into())
+}
+
 /// The environment that changes NCBI's search or report in a way that LOSAT does not
-/// reproduce, where NCBI reads it: `BL2SEQ_LEGACY` in a search of `-subject` sequences
-/// (`fasta_subjects`; NCBI searches each subject on its own and writes another report, a
-/// `-db` search ignores it), and a `PRE_FETCH_SEQS_LIMIT` that NCBI cannot convert unless
-/// the report is the BLAST archive (`archive`: every requested format is outfmt 11,
-/// `ReportOutputs::only_archive`).
+/// reproduce: `BL2SEQ_LEGACY` in a search of `-subject` sequences (`fasta_subjects`; NCBI
+/// searches each subject on its own and writes another report, a `-db` search ignores it).
 ///
 /// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:206-210
 /// ```c
@@ -973,6 +991,27 @@ pub(crate) fn read_query_split_variable(
 /// database: `CLocalBlast` then searches each subject on its own (local_blast.cpp:189,289)
 /// and `CBlastFormat` writes the legacy bl2seq report (`m_IsBl2Seq && !m_IsDbScan`).
 ///
+/// LOSAT refuses before the search, so the refusal is wider than NCBI's: a `-subject` search
+/// with `BL2SEQ_LEGACY` whose report would not change (no hits, or one subject record in outfmt
+/// 5, 6 or 10: NCBI 2.17.0 writes the same bytes as without the variable there) is refused too.
+pub fn check_search_environment(program: &str, fasta_subjects: bool) -> anyhow::Result<()> {
+    if fasta_subjects && std::env::var_os("BL2SEQ_LEGACY").is_some() {
+        anyhow::bail!(
+            "the environment variable BL2SEQ_LEGACY, which makes NCBI BLAST+ search each subject on its own and write its legacy bl2seq report, is not supported by LOSAT's {program}"
+        );
+    }
+    Ok(())
+}
+
+/// The error of the prefetch of the report's sequences before the reports of a query batch
+/// (`BlastFormatter_PreFetchSequenceData`): `PRE_FETCH_SEQS_LIMIT` (any set value, an empty one
+/// too) is converted by `NStr::StringToInt`, and a value that it cannot convert stops NCBI with its
+/// `CStringException` ([`environment_int`]). The first batch meets it after its search (whose
+/// errors come first) and before anything of its report (the query warnings included); each
+/// program returns it through the error frame of that batch, after the outfmt 0 prolog and the
+/// reader's messages of the batch's records. An integer only decides whether the sequences are
+/// fetched ahead (`common::database::prefetch_off`).
+///
 /// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:732-737
 /// ```c
 /// 		char * pre_fetch_limit_str = getenv("PRE_FETCH_SEQS_LIMIT");
@@ -982,10 +1021,18 @@ pub(crate) fn read_query_split_variable(
 /// 				return false;
 /// 			}
 /// ```
-/// An integer only decides whether the report's sequences are fetched ahead; a value
-/// that `NStr::StringToInt` cannot convert (an empty one too) stops NCBI before the report
-/// of each query batch with a `CStringException` that names its build's source files.
-///
+/// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:756-765
+/// ```c
+/// void BlastFormatter_PreFetchSequenceData(const blast::CSearchResultSet& results,
+/// 		                                 CRef<CScope> scope,
+/// 		                                 blast::CFormattingArgs::EOutputFormat format_type)
+/// {
+///     _ASSERT(scope.NotEmpty());
+///     if (results.size() == 0) {
+///         return;
+///     }
+///     if(!s_PreFetchSeqs(results, format_type)){
+/// ```
 /// NCBI reference: ncbi-blast/c++/src/app/blast/blastx_app.cpp:283-288
 /// ```c
 ///             if (fmt_args->ArchiveFormatRequested(args)) {
@@ -995,13 +1042,13 @@ pub(crate) fn read_query_split_variable(
 ///                 BlastFormatter_PreFetchSequenceData(*results, scope,
 ///                 		                            fmt_args->GetFormattedOutputChoice());
 /// ```
-/// The archive is written without the prefetch, so NCBI never converts the value there;
-/// blastp, tblastn, tblastx and blastn write it so too (blastp_app.cpp:280-285,
-/// tblastn_app.cpp:294-299 and 330-335, tblastx_app.cpp:197-202, blastn_app.cpp:304-309),
-/// and so do the nodes of a search split by queries (blastp_node.cpp:178-182,
-/// blastx_node.cpp:182-186, tblastn_node.cpp:206-210 and 243-247, blastn_node.cpp:204-208).
-/// psiblast's iterations fetch ahead before they choose the archive, so PSIBLAST passes
-/// `archive` false.
+/// The archive (`archive`: every requested format is outfmt 11, `ReportOutputs::only_archive`) is
+/// written without the prefetch, so NCBI never converts the value there; blastp, tblastn,
+/// tblastx, rpsblast and blastn write it so too (blastp_app.cpp:280-285, tblastn_app.cpp:294-299
+/// and 330-335, tblastx_app.cpp:197-202, rpsblast_app.cpp:217-222, blastn_app.cpp:304-309), and
+/// so do the nodes of a search split by queries (blastp_node.cpp:178-182, blastx_node.cpp:182-186,
+/// tblastn_node.cpp:206-210 and 243-247, blastn_node.cpp:204-208). psiblast's iterations fetch
+/// ahead before they choose the archive, so PSIBLAST passes `archive` false.
 ///
 /// NCBI reference: ncbi-blast/c++/src/app/blast/psiblast_app.cpp:262-266
 /// ```c
@@ -1011,36 +1058,27 @@ pub(crate) fn read_query_split_variable(
 ///                    if(CFormattingArgs::eArchiveFormat ==
 ///                 	  m_CmdLineArgs->GetFormattingArgs()->GetFormattedOutputChoice())
 /// ```
-///
-/// LOSAT refuses before the search, so the refusal is wider than NCBI's stop: an error that
-/// NCBI raises in the first batch's search before its prefetch (a query record without
-/// letters, `-query_loc` past every record: `BLAST engine error`, exit status 3) is this
-/// refusal here, and so is a `-subject` search with `BL2SEQ_LEGACY` whose report would not
-/// change (no hits, or one subject record in outfmt 5, 6 or 10: NCBI 2.17.0 writes the same
-/// bytes as without the variable there). When NCBI splits a `-db` search by queries (blastp,
-/// blastx, tblastn, blastn: `-mt_mode 1`, or the automatic choice at `-num_threads` 2 or more
-/// for a query file over the program's size and a database under its length,
-/// `s_GetMT1Cutoffs`), its nodes catch the exception: NCBI writes nothing to standard output
-/// and exits 0.
-pub fn check_search_environment(
-    program: &str,
-    fasta_subjects: bool,
-    archive: bool,
-) -> anyhow::Result<()> {
-    if fasta_subjects && std::env::var_os("BL2SEQ_LEGACY").is_some() {
-        anyhow::bail!(
-            "the environment variable BL2SEQ_LEGACY, which makes NCBI BLAST+ search each subject on its own and write its legacy bl2seq report, is not supported by LOSAT's {program}"
-        );
+/// When NCBI splits a `-db` search by queries (blastp, blastx, tblastn, blastn: `-mt_mode 1`, or
+/// the automatic choice at `-num_threads` 2 or more for a query file over the program's size and a
+/// database under its length, `s_GetMT1Cutoffs`), its nodes catch the exception: NCBI writes
+/// nothing to standard output and exits 0; LOSAT gives NCBI's `-num_threads 1` output at any thread
+/// count (env-parity DECISIONS 11).
+pub fn check_prefetch_environment(archive: bool) -> anyhow::Result<()> {
+    if archive {
+        return Ok(());
     }
-    if let Some(value) = std::env::var_os("PRE_FETCH_SEQS_LIMIT").filter(|_| !archive) {
-        if crate::blastinput::query_batch::ncbi_string_to_int(&value).is_none() {
-            anyhow::bail!(
-                "the environment variable PRE_FETCH_SEQS_LIMIT has the value {:?}, which NCBI BLAST+ cannot convert to an int (it stops with a CStringException that names its build's source files); this is not supported by LOSAT's {program}",
-                value.to_string_lossy()
-            );
-        }
-    }
-    Ok(())
+    prefetch_seqs_limit().map(drop)
+}
+
+/// `PRE_FETCH_SEQS_LIMIT` as NCBI's prefetch converts it (`s_PreFetchSeqs`, quoted at
+/// `check_prefetch_environment`): `None` when it is not set; `Err` is the `CStringException` of a
+/// value that `NStr::StringToInt` cannot convert ([`environment_int`]). The one reader of the
+/// variable: the check of the first batch's prefetch, and the limit that decides whether a batch's
+/// prefetch is on (`common::database::prefetch_off`).
+pub(crate) fn prefetch_seqs_limit() -> anyhow::Result<Option<i32>> {
+    std::env::var_os("PRE_FETCH_SEQS_LIMIT")
+        .map(|value| environment_int(&value))
+        .transpose()
 }
 
 /// The query batch size of blastp, tblastn or tblastx (`GetQueryBatchSize`, with the
@@ -1053,17 +1091,16 @@ pub fn check_search_environment(
 ///         retval = 20000;
 ///         break;
 /// ```
-pub fn query_batch_size(program: &str, default: u32) -> anyhow::Result<u32> {
-    match crate::blastinput::query_batch::get_query_batch_size(
-        std::env::var_os("BATCH_SIZE").as_deref(),
-    ) {
-        Ok(0) if std::env::var_os("BATCH_SIZE").is_none() => Ok(default),
+/// A value that `NStr::StringToInt` cannot convert (an empty one too) stops NCBI there, before the
+/// formatter and anything else is written, with its `CStringException` (`NativeError::exception`,
+/// exit status 255; with outfmt 11 NCBI's error archive follows).
+pub fn query_batch_size(default: u32) -> anyhow::Result<u32> {
+    let value = std::env::var_os("BATCH_SIZE");
+    match crate::blastinput::query_batch::get_query_batch_size(value.as_deref()) {
+        Ok(_) if value.is_none() => Ok(default),
         // `CBlastInput` stores the `int` as a `TSeqPos` (blast_input.hpp:313,364).
         Ok(size) => Ok(size as u32),
-        Err(value) => Err(anyhow::anyhow!(
-            "the BATCH_SIZE value '{value}' is not an integer; NCBI stops with a \
-             CStringException for it, which is not supported by LOSAT's {program}"
-        )),
+        Err(e) => Err(NativeError::exception(&e).into()),
     }
 }
 
@@ -1462,5 +1499,58 @@ mod tests {
         assert!(!parse_comp_based_stats("0u", true, false).unwrap().1);
         assert!(parse_comp_based_stats("2", true, true).is_err());
         assert!(parse_comp_based_stats("x", true, true).is_ok());
+    }
+
+    // NCBI BLAST+ 2.17.0 (the official Linux x64 release) with `CHUNK_SIZE`,
+    // `OVERLAP_CHUNK_SIZE`, `BATCH_SIZE` and `PRE_FETCH_SEQS_LIMIT` set to each value (env
+    // parity probe h_probe of 2026-11-12, REPORT.md "Values"): `NStr::StringToInt` with flags 0
+    // takes a sign and no spaces; a value that it cannot convert ends the program with
+    // `CATCH_ALL`'s report of its `CStringException`, exit status 255.
+    #[test]
+    fn environment_values_are_converted_as_ncbis_string_to_int() {
+        use std::ffi::OsStr;
+        for (text, value) in [("5", 5), ("+5", 5), ("-1", -1), ("0", 0)] {
+            assert_eq!(
+                environment_int(OsStr::new(text)).unwrap(),
+                value,
+                "{text:?}"
+            );
+        }
+        let root = crate::ncbi_exception::NCBI_BUILD_ROOT;
+        for (text, line, function, kind, pos) in [
+            ("abc", 861, "StringToInt8", "Int8", 0),
+            (" 5", 861, "StringToInt8", "Int8", 0),
+            ("", 861, "StringToInt8", "Int8", 0),
+            ("1.5", 870, "StringToInt8", "Int8", 1),
+            ("5x", 870, "StringToInt8", "Int8", 1),
+            ("5 ", 870, "StringToInt8", "Int8", 1),
+            (
+                "99999999999999999999",
+                852,
+                "StringToInt8",
+                "Int8, overflow",
+                18,
+            ),
+            (
+                "-99999999999999999999",
+                852,
+                "StringToInt8",
+                "Int8, overflow",
+                19,
+            ),
+            ("2147483648", 640, "StringToInt", "int, overflow", 0),
+            ("-2147483649", 640, "StringToInt", "int, overflow", 0),
+        ] {
+            let error = environment_int(OsStr::new(text)).unwrap_err();
+            let native = error.downcast_ref::<NativeError>().expect("NCBI's report");
+            assert_eq!(native.exit, 255, "{text:?}");
+            assert_eq!(
+                native.message,
+                format!(
+                    "Error: NCBI C++ Exception:\n    T0 \"{root}/src/corelib/ncbistr.cpp\", line {line}: Error: (CStringException::eConvert) ncbi::NStr::{function}() - Cannot convert string '{text}' to {kind} (m_Pos = {pos})\n\n"
+                ),
+                "{text:?}"
+            );
+        }
     }
 }

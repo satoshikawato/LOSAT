@@ -998,7 +998,7 @@ impl ResolvedBlastpArgs {
     /// reads no variable (a batch of one query, and of the queries without letters before it).
     pub fn query_batch_size(&self) -> Result<u32> {
         match self.app {
-            BlastpApp::Blastp => crate::blastinput::app::query_batch_size("BLASTP", 10000),
+            BlastpApp::Blastp => crate::blastinput::app::query_batch_size(10000),
             BlastpApp::Psiblast => Ok(1),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:141-144
             // ```c++
@@ -1008,7 +1008,7 @@ impl ResolvedBlastpArgs {
             //     return blast::GetQueryBatchSize(eRPSBlast, m_IsUngapped, is_remote);
             // ```
             // (`eRPSBlast` takes the default of `GetQueryBatchSize`, 10000, or `BATCH_SIZE`.)
-            BlastpApp::Rpsblast => crate::blastinput::app::query_batch_size("RPSBLAST", 10000),
+            BlastpApp::Rpsblast => crate::blastinput::app::query_batch_size(10000),
         }
     }
 }
@@ -1204,7 +1204,6 @@ impl BlastpArgs {
         let query_range = crate::blastinput::seq_range::parse_optional_range(
             self.query_loc.as_deref(),
             crate::blastinput::seq_range::RangeRole::Query,
-            self.app.name(),
         )?;
         // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2874-2886 and
         // 2960-2977 (the formatting handler: other programs' formats, the hit list size

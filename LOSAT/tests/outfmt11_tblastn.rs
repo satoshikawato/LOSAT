@@ -542,29 +542,6 @@ fn a_missing_database_gives_an_error_archive() {
         .all(|line| line.starts_with(' ')));
 }
 
-/// A `BATCH_SIZE` NCBI cannot convert stops it with a `CStringException`; LOSAT refuses it
-/// before the first byte and says so (outfmt 11 and 6).
-#[test]
-fn a_batch_size_that_is_not_an_integer_is_refused() {
-    let query = input("arch_tbn_q.faa");
-    let subject = input("arch_tbn_s.fna");
-    for value in ["abc", "", "1.5", "0x10"] {
-        for format in ["11", "6"] {
-            let output = run(
-                &[("BATCH_SIZE", value)],
-                &["-query", &query, "-subject", &subject, "-outfmt", format],
-                "1",
-            );
-            assert_ne!(output.status.code(), Some(0), "{value:?} {format}");
-            assert!(output.stdout.is_empty(), "{value:?} {format}");
-            assert!(
-                String::from_utf8_lossy(&output.stderr).contains("BATCH_SIZE"),
-                "{value:?} {format}"
-            );
-        }
-    }
-}
-
 /// NCBI's `PrintErrorArchive` converts the trimmed `-outfmt` text to an integer and writes
 /// nothing when that throws (`11 qseqid`); `11` with white space around it converts. NCBI 2.17.0
 /// with a missing `-query`: rc 1 and no bytes for `11 qseqid` and ` 11 qseqid`, the error

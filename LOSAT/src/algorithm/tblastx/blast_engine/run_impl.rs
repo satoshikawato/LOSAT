@@ -1131,8 +1131,7 @@ fn read_subject_set(
     //         }
     // ```
     // The subject range is read after the subject file is opened, before it is read.
-    let subject_range =
-        parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject, "TBLASTX")?;
+    let subject_range = parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject)?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:242-246
     // ```c++
     //     CRef<CBlastFastaInputSource> fasta(new CBlastFastaInputSource(in, iconfig));
@@ -1285,7 +1284,6 @@ fn check_ncbi_options(
     let query_range = crate::blastinput::seq_range::parse_optional_range(
         args.query_loc.as_deref(),
         crate::blastinput::seq_range::RangeRole::Query,
-        "TBLASTX",
     )?;
     formatting_handler_check(&parse_formatting_string(&args.outfmt)?, Program::Tblastx)?;
     // The hit list size and the counts of the pairwise report
@@ -1632,8 +1630,7 @@ pub fn run_local(
     }
     // The subject range and its record checks come where NCBI reads the subjects (`run`):
     // the messages of each record read, up to a record whose range starts past its end.
-    let subject_range =
-        parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject, "TBLASTX")?;
+    let subject_range = parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject)?;
     for record in &subject_records[..subjects_read(subject_records, subject_range.as_ref())] {
         outputs.diagnostics.write_all(&record.warnings)?;
     }
@@ -1796,7 +1793,7 @@ fn search(
     // ```
     // The batch size is read before the formatter is made and before the queries, which
     // NCBI reads one batch at a time after the outfmt 0 prolog (`run_in_pool`).
-    let batch_size = crate::blastinput::app::query_batch_size("TBLASTX", 10002)?;
+    let batch_size = crate::blastinput::app::query_batch_size(10002)?;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:129-136
     // ```c
     //     if(m_IsDbScan) {
@@ -1859,7 +1856,6 @@ fn search(
     crate::blastinput::app::check_search_environment(
         "TBLASTX",
         !matches!(source, SubjectSource::Database(_)),
-        outputs.only_archive(),
     )?;
     // The query range applies to every query record as NCBI's batch reader reads it
     // (`seq_range::cut_queries`): a record is searched cut, and one whose interval starts
@@ -3523,9 +3519,7 @@ fn run_batch_loop(
         // queries are set up (`check_query_split_environment`); the first batch meets an
         // error there.
         if input_start == 0 {
-            if let Err(error) =
-                crate::blastinput::app::check_query_split_environment("TBLASTX", true, true)?
-            {
+            if let Err(error) = crate::blastinput::app::check_query_split_environment(true, true) {
                 reports.write_before_failed_batch(outputs, done, &warnings)?;
                 batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
                 return Err(error);
@@ -3760,6 +3754,30 @@ fn run_batch_loop(
                     Err(error) => return Err(error),
                 }
             }
+        }
+        // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:197-202
+        // ```c++
+        //             if (fmt_args->ArchiveFormatRequested(args)) {
+        //                 formatter.WriteArchive(*queries, *opts_hndl, *results, 0, bah.GetMessages());
+        //                 bah.ResetMessages();
+        //             } else {
+        //                 BlastFormatter_PreFetchSequenceData(*results, scope,
+        //                 		                            fmt_args->GetFormattedOutputChoice());
+        // ```
+        // The prefetch before the batch's reports reads `PRE_FETCH_SEQS_LIMIT` before it reads any
+        // sequence, after the batch's search (a database's titles are read in its traceback,
+        // above): a value that NCBI cannot convert stops the first batch here, after the
+        // messages of its records and before its query warnings
+        // (`app::check_prefetch_environment`).
+        if let Err(error) =
+            crate::blastinput::app::check_prefetch_environment(outputs.only_archive())
+        {
+            reports.write_before_failed_batch(outputs, done, &warnings)?;
+            batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+            return Err(error);
+        }
+        if let ShownSubjects::Database { database, .. } = &subjects.shown {
+            let ordered = batch.hits.as_slice();
             if let Some(scopes) = query_scopes.as_ref() {
                 crate::algorithm::common::database::refuse_reported_ids_of_queries(
                     &reports.titles.borrow(),

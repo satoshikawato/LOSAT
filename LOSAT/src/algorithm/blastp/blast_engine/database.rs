@@ -110,6 +110,12 @@ pub(super) struct BlastpDatabase {
 }
 
 impl BlastpDatabase {
+    /// LOSAT's refusal of mixed accession tables (`shared::check_accession_tables`), with the
+    /// program's other limits.
+    pub(super) fn check_accession_tables(&self) -> Result<()> {
+        shared::check_accession_tables(&self.db, self.program)
+    }
+
     /// The OIDs of the database's ordinal ids, which name the reported sequences without
     /// parsed Seq-ids (`gnl|BL_ORD_ID|n`).
     pub(super) fn oid_map(&self) -> crate::seqdb::OidMap<'_> {
@@ -144,7 +150,7 @@ impl BlastpDatabase {
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Protein, settings, program)?;
         // A database with parsed Seq-ids (line DBID): BLASTP (ID2a) and psiblast read it.
-        shared::restrict_database(&mut db, name, list, diagnostics, settings, program)?;
+        shared::restrict_database(&mut db, name, list, None, diagnostics, settings, program)?;
         Ok(Self {
             db,
             name: name.to_string(),

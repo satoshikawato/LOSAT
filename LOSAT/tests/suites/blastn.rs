@@ -11,6 +11,8 @@ mod blastn_bn_seed_lists;
 mod blastn_db_cut;
 #[path = "../blastn_db_search.rs"]
 mod blastn_db_search;
+#[path = "../blastn_db_soft_long.rs"]
+mod blastn_db_soft_long;
 #[path = "../blastn_db_stream.rs"]
 mod blastn_db_stream;
 #[path = "../blastn_dc_seed_lean.rs"]
@@ -67,6 +69,8 @@ mod blastn_query_scan_par;
 mod blastn_query_stream;
 #[path = "../blastn_report_stream.rs"]
 mod blastn_report_stream;
+#[path = "../blastn_seed_piece.rs"]
+mod blastn_seed_piece;
 #[path = "../blastn_strand.rs"]
 mod blastn_strand;
 #[path = "../blastn_subject_store.rs"]

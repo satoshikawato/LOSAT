@@ -78,9 +78,7 @@ use crate::seqid::{DeflineSet, ParsedSeqId};
 
 pub use alias::SearchPath;
 pub use header::Defline;
-#[cfg(test)]
-pub use mask::MaskAlgorithm;
-pub use mask::{MaskAlgorithms, MaskRanges};
+pub use mask::{BlockMasks, MaskAlgorithm, MaskAlgorithms, MaskBlock, MaskRanges, NameMaskError};
 pub use volume::{AmbiguityRun, NucleotideAmbiguity, SequenceBlock, Volume, VolumeHeader};
 #[cfg(test)]
 pub use volume::{BLASTNA_SENTINEL, FENCE_SENTRY};
@@ -196,6 +194,10 @@ pub enum SeqDbError {
     },
     /// A file is not a valid database file.
     Format { path: PathBuf, message: String },
+    /// A file fails one of the integrity checks of NCBI's reader (`SEQDB_FILE_ASSERT`, a
+    /// `CSeqDBException` whose text names a line of NCBI's source): LOSAT's words, and NCBI's
+    /// text where NCBI's search replaces it ([`SeqDbError::ncbi_search_message`]).
+    Integrity { path: PathBuf, message: String },
     /// A valid database that needs something LOSAT does not read.
     Unsupported { path: PathBuf, message: String },
     /// A request outside the database (ordinal id, block range).
@@ -214,7 +216,9 @@ impl std::fmt::Display for SeqDbError {
             SeqDbError::Open { path, source } | SeqDbError::Io { path, source } => {
                 write!(f, "{}: {}", path.display(), source)
             }
-            SeqDbError::Format { path, message } => write!(f, "{}: {}", path.display(), message),
+            SeqDbError::Format { path, message } | SeqDbError::Integrity { path, message } => {
+                write!(f, "{}: {}", path.display(), message)
+            }
             SeqDbError::Unsupported { path, message } => {
                 write!(f, "{}: unsupported database: {}", path.display(), message)
             }
@@ -365,6 +369,7 @@ impl SeqDbError {
                 }
             }
             SeqDbError::Io { .. }
+            | SeqDbError::Integrity { .. }
             | SeqDbError::Unsupported { .. }
             | SeqDbError::Range(_)
             | SeqDbError::Ncbi(_) => None,
@@ -416,13 +421,18 @@ impl SeqDbError {
     // reports a `CBlastException` (`BLAST engine error: <text>`, exit status
     // `BLAST_ENGINE_ERROR`, 3; blast_app_util.hpp:155, 216-219). A volume
     // whose sequence file is missing is reported this way, because NCBI opens
-    // that file when the search reads its first sequence.
+    // that file when the search reads its first sequence, and so is a failed
+    // integrity check of a file the search reads (`SeqDbError::Integrity`: the
+    // mask column's offsets and blobs, seqsrc_seqdb.cpp:318-321).
     /// The text NCBI BLAST+ gives when this error is raised while the search
-    /// reads the sequences of the database: a search program prints
-    /// `BLAST engine error: <text>` and ends with exit status 3. `None`: the
-    /// error is LOSAT's ([`Self::ncbi_message`] is `None` too).
+    /// reads the sequences (or their masks) of the database: a search program
+    /// prints `BLAST engine error: <text>` and ends with exit status 3. `None`:
+    /// the error is LOSAT's ([`Self::ncbi_message`] is `None` too).
     pub fn ncbi_search_message(&self) -> Option<&'static str> {
         const TOO_MANY: &str = "Too many open files, please raise the open file limit";
+        if let SeqDbError::Integrity { .. } = self {
+            return Some("Database memory map file error");
+        }
         match self.ncbi_message()? {
             message if message == TOO_MANY => Some(TOO_MANY),
             _ => Some("Database memory map file error"),
@@ -532,7 +542,7 @@ pub(crate) struct LocatedDatabase {
 /// database of that name opened alone and without a list. The `Database:` lines of the
 /// pairwise report, the database counts of XML and JSON and the title of the Seq-annot
 /// formats are made of these, one per name.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct NameRecord {
     /// The name as the reports take it (`alias::report_names`): `GetDBNameList`.
     pub name: String,
@@ -544,6 +554,11 @@ pub struct NameRecord {
     pub num_seqs: u32,
     /// `GetTotalLength`.
     pub total_length: u64,
+    /// The filtering algorithms of the name's database, which the formatter of a search with a
+    /// database mask reads (`GetMaskAlgorithmDetails`, `SeqDb::name_mask_details`), or the error
+    /// of reading them, met only where the formatter asks for them; read with the record when
+    /// the search has a database mask (`read_name_records`), `None` otherwise.
+    pub mask_algorithms: Option<Result<MaskAlgorithms, SeqDbError>>,
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_seqsrc.h:205
@@ -717,8 +732,11 @@ impl SeqDb {
     // database with its lists and after `Query is Empty!`; `blastdbcmd` makes none.
     /// Reads what the reports show of each name of the `-db` value `name` (`NameRecord`,
     /// `name_records`): each name of the list is opened again, alone, along the search path
-    /// the database was opened with; a database of one name is this one, before any list.
-    pub fn read_name_records(&mut self, name: &str) -> Result<(), SeqDbError> {
+    /// the database was opened with; a database of one name is this one, before any list. With
+    /// `masks` (a search with `-db_soft_mask` or `-db_hard_mask`) each record also keeps its
+    /// database's filtering algorithms (`NameRecord::mask_algorithms`): the one opening of each
+    /// name of the formatter (`GetBlastDbInfo`).
+    pub fn read_name_records(&mut self, name: &str, masks: bool) -> Result<(), SeqDbError> {
         let names = alias::report_names(name);
         self.name_records = match names.as_slice() {
             [one] if one == name => {
@@ -729,7 +747,7 @@ impl SeqDb {
                     self.walk_errors(&[WalkKey::Nseq, WalkKey::Length, WalkKey::MinSeqLength])?;
                     self.check_printed_counts()?;
                 }
-                vec![self.name_record(one)]
+                vec![self.name_record(one, masks)]
             }
             _ => {
                 let path = match &self.search_path {
@@ -741,7 +759,7 @@ impl SeqDb {
                 let mut records = Vec::with_capacity(names.len());
                 for one in &names {
                     let mut alone = Self::open_in(one, self.seqtype, &path)?;
-                    alone.read_name_records(one)?;
+                    alone.read_name_records(one, masks)?;
                     records.append(&mut alone.name_records);
                 }
                 records
@@ -750,14 +768,16 @@ impl SeqDb {
         Ok(())
     }
 
-    /// What the reports read of this database under the name `name`, before any list.
-    fn name_record(&self, name: &str) -> NameRecord {
+    /// What the reports read of this database under the name `name`, before any list; with
+    /// `masks`, its filtering algorithms too ([`SeqDb::mask_algorithms`], a copy of the table).
+    fn name_record(&self, name: &str, masks: bool) -> NameRecord {
         NameRecord {
             name: name.to_string(),
             title: self.title.clone(),
             date: self.date.clone(),
             num_seqs: self.printed_num_seqs(),
             total_length: self.printed_total_length(),
+            mask_algorithms: masks.then(|| self.mask_algorithms().cloned()),
         }
     }
 

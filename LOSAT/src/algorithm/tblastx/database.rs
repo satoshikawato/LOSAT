@@ -61,6 +61,12 @@ pub(crate) struct TblastxDatabase {
 }
 
 impl TblastxDatabase {
+    /// LOSAT's refusal of mixed accession tables (`shared::check_accession_tables`), with the
+    /// program's other limits.
+    pub(crate) fn check_accession_tables(&self) -> Result<()> {
+        shared::check_accession_tables(&self.db, PROGRAM)
+    }
+
     /// The OIDs of the database's ordinal ids, which name the reported sequences without
     /// parsed Seq-ids (`gnl|BL_ORD_ID|n`).
     pub(crate) fn oid_map(&self) -> crate::seqdb::OidMap<'_> {
@@ -92,7 +98,7 @@ impl TblastxDatabase {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2b).
         let parsed =
-            shared::restrict_database(&mut db, name, list, diagnostics, settings, PROGRAM)?;
+            shared::restrict_database(&mut db, name, list, None, diagnostics, settings, PROGRAM)?;
         // TBLASTX has no Gumbel block: NCBI's average subject length divides by the statistics'
         // number of sequences (`shared::check_statistics_count`).
         shared::check_statistics_count(&db, PROGRAM)?;

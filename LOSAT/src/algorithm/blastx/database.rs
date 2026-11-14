@@ -77,6 +77,12 @@ pub(crate) struct BlastxDatabase {
 }
 
 impl BlastxDatabase {
+    /// LOSAT's refusal of mixed accession tables (`shared::check_accession_tables`), with the
+    /// program's other limits.
+    pub(crate) fn check_accession_tables(&self) -> Result<()> {
+        shared::check_accession_tables(&self.db, self.program)
+    }
+
     /// `-show_gis` for the subjects of the reports (`ParsedSubject::showing_gis`).
     pub(crate) fn showing_gis(mut self, show_gis: bool) -> Self {
         self.db.set_reports_show_gis(show_gis);
@@ -102,7 +108,7 @@ impl BlastxDatabase {
         let mut db = shared::open_database(name, SeqType::Protein, settings, program)?;
         // A database with parsed Seq-ids is read (line DBID, ID2a).
         let parsed_seqids =
-            shared::restrict_database(&mut db, name, list, diagnostics, settings, program)?;
+            shared::restrict_database(&mut db, name, list, None, diagnostics, settings, program)?;
         Ok(Self {
             db,
             name: name.to_string(),

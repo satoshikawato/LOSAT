@@ -2714,17 +2714,15 @@ pub(crate) fn blastp_section_aborts(
     if view == PairwiseView::Pairwise {
         return Ok(false);
     }
-    let query_hits: Vec<(HspIndex, &PairwiseHit)> = rows
-        .iter()
-        .enumerate()
-        .filter(|(_, hit)| hit.hit.q_idx as usize == q_idx)
-        .collect();
-    let Some(mut group) =
-        super::x_pairwise_par::QueryGroup::new(&query_hits, subject_titles, |_, _| false)
-    else {
+    let Some(group) = blastp_report_group(
+        view.report_sort(sort),
+        q_idx,
+        rows,
+        subject_titles,
+        |_, _| false,
+    ) else {
         return Ok(false);
     };
-    group.sort(view.report_sort(sort), false);
     if !group
         .aligned(num_alignments)
         .iter()
@@ -2733,6 +2731,70 @@ pub(crate) fn blastp_section_aborts(
         return Ok(false);
     }
     super::query_anchored::ncbi_aborts(&blastp_section_hsps(num_alignments, &group, is_query))
+}
+
+/// The group of query `q_idx` of BLASTP's report (`QueryGroup::for_sections`), `rows` the rows
+/// of the call's hits in the final order: its subjects grouped by `joins` (copies of a database
+/// record, `QuerySections::joins`) and sorted by `sort` (`PairwiseConfig::sort`). `None` for a
+/// query without hits.
+fn blastp_report_group<'h>(
+    sort: super::hit_sort::ReportSort,
+    q_idx: usize,
+    rows: &'h [PairwiseHit],
+    subject_titles: &[Arc<[u8]>],
+    joins: impl Fn(u32, u32) -> bool,
+) -> Option<super::x_pairwise_par::QueryGroup<'h>> {
+    let query_hits: Vec<(HspIndex, &PairwiseHit)> = rows
+        .iter()
+        .enumerate()
+        .filter(|(_, hit)| hit.hit.q_idx as usize == q_idx)
+        .collect();
+    let mut group = super::x_pairwise_par::QueryGroup::new(&query_hits, subject_titles, joins)?;
+    group.sort(sort, false);
+    Some(group)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:686-700
+// ```c++
+//     for (CSeq_align_set::Tdata::const_iterator
+//              iter = m_AlnSetRef->Get().begin();
+//          iter != m_AlnSetRef->Get().end() && num_align < m_NumToShow;
+//          iter++, ialn++){
+//         ...
+//         subid = &((*iter)->GetSeq_id(1));
+//         if(is_first_aln || (!is_first_aln && !subid->Match(*previous_id))) {
+//             SScoreInfo* sci = x_GetScoreInfo(**iter, static_cast<int>(num_align));
+// ```
+/// The subjects (by subject index) whose description lines the report of query `q_idx` of a
+/// BLASTP search shows (outfmt 0 to 4, psiblast's rounds), `rows` the rows of the call's hits in
+/// the final order: the first `num_descriptions` subjects of the report's group
+/// (`QueryGroup::described`), grouped by `joins` and sorted by `sort` as the writer's, or with
+/// `two_part` (a psiblast round with the previous round's set, `psiblast_round`) the subjects of
+/// the HSPs that its two-part table shows (`QueryGroup::first_hsps`). The description line of
+/// each looks its title up again by its display id
+/// (`common::database::refuse_display_id_of_a_query`); asked before any format of the call is
+/// written, only for a query that reports a sequence whose display id a query of its batch has.
+pub(crate) fn blastp_described_subjects(
+    sort: super::hit_sort::ReportSort,
+    two_part: bool,
+    num_descriptions: usize,
+    q_idx: usize,
+    rows: &[PairwiseHit],
+    joins: impl Fn(u32, u32) -> bool,
+) -> Vec<u32> {
+    let Some(group) = blastp_report_group(sort, q_idx, rows, &[], joins) else {
+        return Vec::new();
+    };
+    if !two_part {
+        return group.described(num_descriptions).to_vec();
+    }
+    let mut described: Vec<u32> = Vec::new();
+    for (shown, _) in group.first_hsps(num_descriptions) {
+        if !described.contains(&shown) {
+            described.push(shown);
+        }
+    }
+    described
 }
 
 impl BlastpSections<'_> {

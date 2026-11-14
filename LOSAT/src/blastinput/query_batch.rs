@@ -432,9 +432,9 @@ pub(crate) struct QueryScopesFrom<'a> {
     first: usize,
 }
 
-impl QueryScopesFrom<'_> {
+impl<'a> QueryScopesFrom<'a> {
     /// The scope of the call's query `query`.
-    pub(crate) fn of_query(&self, query: usize) -> &QueryScope {
+    pub(crate) fn of_query(&self, query: usize) -> &'a QueryScope {
         self.scopes.of_query(self.first + query)
     }
 }

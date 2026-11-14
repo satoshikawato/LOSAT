@@ -7,7 +7,7 @@
 //!   searched letters start at the `-query_loc` or `-subject_loc` interval.
 //! - Labels: `x_FillSeqid` of the Bioseq's Seq-ids (`query_anchored::fill_seqid`): a record read
 //!   with `-parse_deflines` by its ids, else its local id (`Query_N`, `Subject_N`); a database
-//!   sequence by its parsed Seq-ids (`ParsedSubject::anchored_label`), else by its ordinal id.
+//!   sequence by its parsed Seq-ids (`ParsedSubject::anchored_label`), else by its OID.
 //! - Masks: the query's `TMaskedQueryRegions` (`query_record_masks`) and each subject's
 //!   `-lcase_masking` runs of its HSP list with the query (`x_soft_subject::x_subject_masks`).
 
@@ -33,10 +33,10 @@ pub(super) struct AnchoredSequences<'a> {
     /// The records of a `-subject` set (their labels).
     pub(super) subject_records: &'a [FastaRecord],
     pub(super) subject_placements: &'a Placements,
-    /// The database sequences with parsed Seq-ids by rank, and the ordinal id of each rank (a
-    /// `-db` search).
+    /// The database sequences with parsed Seq-ids by rank, and the ordinal id of each rank with
+    /// the database's OID of each ordinal id (a `-db` search; `None` for `-subject` records).
     pub(super) parsed: &'a [Option<Arc<ParsedSubject>>],
-    pub(super) ordinals: Option<&'a [u32]>,
+    pub(super) listed_ordinals: Option<(&'a [u32], crate::seqdb::OidMap<'a>)>,
     pub(super) show_gis: bool,
     pub(super) query_masks: Option<&'a [Vec<(i32, i32)>]>,
     pub(super) subject_masks: HashMap<(u32, u32), Vec<(i32, i32)>>,
@@ -74,7 +74,7 @@ impl ReportSequences for AnchoredSequences<'_> {
     /// (`subject_is_query_record`; a database sequence with the query's id is refused before the
     /// reports).
     fn subject_is_query(&self, q_idx: usize, s_idx: u32) -> bool {
-        self.ordinals.is_none()
+        self.listed_ordinals.is_none()
             && match (
                 self.query_records.get(q_idx),
                 self.subject_records.get(s_idx as usize),
@@ -123,12 +123,25 @@ impl ReportSequences for AnchoredSequences<'_> {
 
     fn subject_label(&self, s_idx: u32, out: &mut Vec<u8>) {
         let s_idx = s_idx as usize;
-        match self.ordinals {
+        match self.listed_ordinals {
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2231-2236
+            // ```c++
+            //                 if (seqid.Which() == CSeq_id::e_General) {
+            //                     CDbtag & dbt = seqid.SetGeneral();
+            //
+            //                     if (dbt.GetDb() == "BL_ORD_ID") {
+            //                         int vol_oid = dbt.GetTag().GetId();
+            //                         dbt.SetTag().SetId(m_VolStart + vol_oid);
+            // ```
             // A database sequence: its parsed Seq-ids, else `gnl|BL_ORD_ID|<oid>`, whose label is
-            // the tag (`GetLabel` of a `general` id).
-            Some(ordinals) => match self.parsed.get(s_idx).and_then(Option::as_deref) {
+            // the tag (`GetLabel` of a `general` id, `query_anchored::fill_seqid`): its OID in the
+            // opened database, not its ordinal id where a list or an alias range leaves sequences
+            // out (`seqdb::Oid`, as `report::record::SubjectNames::Database`; review 3 of T3a, D2).
+            Some((ordinals, oids)) => match self.parsed.get(s_idx).and_then(Option::as_deref) {
                 Some(parsed) => parsed.anchored_label(out),
-                None => out.extend_from_slice(ordinals[s_idx].to_string().as_bytes()),
+                None => {
+                    out.extend_from_slice(oids.oid(ordinals[s_idx]).get().to_string().as_bytes())
+                }
             },
             None => record_label(&self.subject_records[s_idx], self.show_gis, out),
         }

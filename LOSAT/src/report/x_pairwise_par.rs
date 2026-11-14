@@ -251,6 +251,35 @@ impl<'h> QueryGroup<'h> {
         &self.subject_order[..self.subject_order.len().min(num_descriptions)]
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:541-554
+    // ```c++
+    //     unsigned int count = 0;
+    //     ITERATE(CSeq_align_set::Tdata, alignment, full_alignment->Get()) {
+    //         ...
+    //             new_seqs.Set().push_back(*alignment);
+    //         }
+    //         count++;
+    //         if(count >= (unsigned int)m_NumSummary)
+    //         	break;
+    //     }
+    // ```
+    /// The HSPs of psiblast's two-part description table (`x_SplitSeqAlign`), each with the
+    /// subject whose hit shows it: the first `num_descriptions` in the group's order, and the first
+    /// alone for 0 (the count is checked after an HSP is put in its part).
+    pub(crate) fn first_hsps(
+        &self,
+        num_descriptions: usize,
+    ) -> impl Iterator<Item = (u32, &'h PairwiseHit)> + '_ {
+        self.subject_order
+            .iter()
+            .flat_map(move |&shown| {
+                self.subject_hits[&shown]
+                    .iter()
+                    .map(move |&hit| (shown, hit))
+            })
+            .take(num_descriptions.max(1))
+    }
+
     /// The subjects with alignments (the first `num_alignments`).
     ///
     /// NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:1014-1040
@@ -1279,6 +1308,55 @@ mod tests {
         .unwrap();
         assert_eq!(group.subject_order, [5]);
         assert_eq!((group.subject_hits[&5].len(), group.own_hsps(5)), (8, 3));
+    }
+
+    // Review 3 of line RG T3a, D1: the subjects whose description lines a report shows, each of
+    // which NCBI looks up again by its display id (`pairwise::blastp_described_subjects`): the
+    // first `-num_descriptions` subjects of the group, or in psiblast's two-part table the
+    // subjects of its first `-num_descriptions` HSPs, at least the first (`first_hsps`,
+    // blast_format.cpp:541-554); a subject shown in another's hit is that one's.
+    #[test]
+    fn the_described_subjects_are_the_first_subjects_or_those_of_the_first_hsps() {
+        let hits = report_hits();
+        let by_query = by_query(&hits);
+        let titles = titles();
+        let group = QueryGroup::new(&by_query[0], &titles, |_, _| false).unwrap();
+        let first = |count| -> Vec<u32> {
+            group
+                .first_hsps(count)
+                .map(|(shown, hit)| {
+                    assert_eq!(shown, hit.hit.s_idx);
+                    shown
+                })
+                .collect()
+        };
+        assert_eq!(first(0), [5]);
+        assert_eq!(first(1), [5]);
+        assert_eq!(first(4), [5, 5, 5, 2]);
+        assert_eq!(first(100).len(), 8);
+        let described = |q_idx, two_part, count, joins: fn(u32, u32) -> bool| {
+            crate::report::pairwise::blastp_described_subjects(
+                Default::default(),
+                two_part,
+                count,
+                q_idx,
+                &hits,
+                joins,
+            )
+        };
+        let none: fn(u32, u32) -> bool = |_, _| false;
+        assert!(described(0, false, 0, none).is_empty());
+        assert_eq!(described(0, false, 2, none), [5, 2]);
+        assert_eq!(described(0, false, 500, none), [5, 2, 7]);
+        assert_eq!(described(0, true, 0, none), [5]);
+        assert_eq!(described(0, true, 4, none), [5, 2]);
+        assert_eq!(described(0, true, 5, none), [5, 2, 7]);
+        assert_eq!(
+            described(0, false, 2, |previous, s_idx| (previous, s_idx) == (5, 2)),
+            [5, 7]
+        );
+        assert!(described(1, false, 500, none).is_empty());
+        assert_eq!(described(2, true, 6, none), [1]);
     }
 
     #[test]

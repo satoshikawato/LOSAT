@@ -1375,6 +1375,18 @@ survey's probes (`T/t3/scripts/gen.py`, a seeded generator, and three hand-made 
   shows the query in its place (and aborts on its merge with `-seg yes`): `db.of1.bp.qid*.reject`; with
   `BATCH_SIZE=1` the second query is in the next batch and NCBI shows the database sequence
   (`db.of1.bp.qid2.e1.b1.f2`).
+- `dispid` (the database of `dispid.fa`), `dispref` (of `dispref.fa`) and the queries `dispid_q.fa` (three
+  records without ids), `dispid_q2.fa` (the second of them alone) and `dispid_pq.fa` (`lcl|abc`, `lcl|def`, read
+  with `-parse_deflines`) (review 3 of T3a, D1; `T/t3/review3_t3a/`): `gi|777|lcl|Query_1` and `gi|779|lcl|abc`
+  (the first query's letters with a tenth changed), whose Seq-align id is the GI and whose description line
+  shows the display id `lcl|Query_1` or `lcl|abc` (`GetDisplayIds`, the `WorstRank` best id); NCBI looks the
+  title up again by that id and shows the query's title there (`db.of1.bp.dispid.*.reject`, `psiblast`'s
+  `db.of1.ps.dispid.pd.f0.reject`), not past `-num_descriptions` nor its `-sorthits` order
+  (`db.of1.bp.dispid.nd0.f3`, `db.of1.bp.dispid.q2.s3.f1`). `ref|NP_000777.1|lcl|Query_1` shows the display id
+  `ref|NP_000777.1|`, so NCBI shows the database sequence (`db.of1.bp.dispref.f1`).
+- The rows `db.of1.bp.otx.*` (review 3 of T3a, D2) search `../taxfilter/tfu_pr` (an alias of `FIRST_OID 2` and
+  `LAST_OID 4`) and `../taxfilter/tfu_p` with `-taxids 9606`, without parsed Seq-ids: the rows are labelled with
+  each sequence's OID, the tag of `gnl|BL_ORD_ID|<OID>`.
 
 The databases (version 4; `.pjs` deleted). Run from `LOSAT/`:
 
@@ -1384,4 +1396,8 @@ The databases (version 4; `.pjs` deleted). Run from `LOSAT/`:
         -title "subjects of the query-anchored rows with Seq-ids" -parse_seqids -blastdb_version 4
     makeblastdb -in tests/db_search/of1/qid.fa -dbtype prot -out tests/db_search/of1/qid \
         -title "a database sequence under the id of a query" -parse_seqids -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/dispid.fa -dbtype prot -out tests/db_search/of1/dispid \
+        -title "database sequences whose display id is a query id" -parse_seqids -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/dispref.fa -dbtype prot -out tests/db_search/of1/dispref \
+        -title "a database sequence whose display id is not its local id" -parse_seqids -blastdb_version 4
     rm tests/db_search/of1/*.pjs

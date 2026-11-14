@@ -73,13 +73,18 @@ pub struct ParsedSubject {
 }
 
 /// The keys by which NCBI's scope finds a query for the Seq-align id of a reported database
-/// sequence (`ParsedSubject::query_scope_keys`; `common::database::refuse_id_of_a_query`).
+/// sequence (`ParsedSubject::query_scope_keys`; `common::database::refuse_id_of_a_query`), and
+/// for its display id, by which the description table looks its title up again
+/// (`common::database::refuse_display_id_of_a_query`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct QueryScopeKeys {
     /// Its own keys (`defline_set::scope_keys`).
     pub own: Vec<u64>,
     /// The keys of the ids that it matches weakly (`id_scope::weak_keys`).
     pub weak: Vec<u64>,
+    /// The keys of the display id (`ParsedSubject::display_id`) and of the ids that it matches
+    /// weakly, as `own` and `weak` of the Seq-align id: the same lookup of NCBI's scope.
+    pub display: Vec<u64>,
 }
 
 /// The `use_this_seqid` strings of a database subject, `subject` when it has parsed Seq-ids: a
@@ -1139,7 +1144,12 @@ impl ParsedSubject {
             scope_keys(self, &mut own);
             let mut weak = Vec::new();
             crate::seqid::id_scope::weak_keys(&self.alignment_id, &mut weak);
-            QueryScopeKeys { own, weak }
+            let mut display = Vec::new();
+            if let Some(id) = self.display_id() {
+                crate::seqid::defline_set::scope_keys(id, &mut display);
+                crate::seqid::id_scope::weak_keys(id, &mut display);
+            }
+            QueryScopeKeys { own, weak, display }
         })
     }
 
@@ -1253,14 +1263,36 @@ impl ParsedSubject {
     fn description_id(&self) -> (Vec<u8>, bool) {
         let mut start = Vec::new();
         let mut wrote_gi = false;
-        if let Some(shown) = self.set.display_defline(&self.alignment_id) {
-            let defline = &self.set.deflines[shown.index];
+        if let Some((defline, found)) = self.display_defline() {
             if let Some(id) = defline.display_id() {
-                let gi = if shown.found { defline.gi() } else { 0 };
+                let gi = if found { defline.gi() } else { 0 };
                 wrote_gi = description_id(id, gi, self.show_gis, &mut start);
             }
         }
         (start, wrote_gi)
+    }
+
+    /// The definition line whose id the description line shows (`DeflineSet::display_defline`
+    /// of the Seq-align id) and whether it holds the Seq-align id.
+    fn display_defline(&self) -> Option<(&BlastDefline, bool)> {
+        let shown = self.set.display_defline(&self.alignment_id)?;
+        Some((&self.set.deflines[shown.index], shown.found))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:432-433, 497-498
+    // ```c++
+    //     //get id (sdl->id, sdl-gi)
+    //     sdl->id = CAlignFormatUtil::GetDisplayIds(handle,aln_id,use_this_seqid,&sdl->gi,&sdl->taxid,&sdl->textSeqID);
+    //     ...
+    //     //get defline
+    //     sdl->defline = CDeflineGenerator().GenerateDefline(m_ScopeRef->GetBioseqHandle(*(sdl->id)), sequence::CDeflineGenerator::fLeavePrefixSuffix);
+    // ```
+    /// The display id: the id of the description line (`GetDisplayIds`' `wid`, the `WorstRank`
+    /// best id of `display_defline`), by which the description table (outfmt 0 to 4) looks the
+    /// title up again in NCBI's scope, which finds a query of the batch with that id before the
+    /// database sequence (`common::database::refuse_display_id_of_a_query`).
+    pub fn display_id(&self) -> Option<&ParsedSeqId> {
+        self.display_defline()?.0.display_id()
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2380-2384, 2451-2461
@@ -2062,6 +2094,67 @@ mod tests {
             .iter()
             .map(|string| String::from_utf8(string.clone()).unwrap())
             .collect()
+    }
+
+    // Review 3 of line RG T3a, D1 (NCBI BLAST+ 2.17.0 probes `T/t3/review3_t3a`, `T/t3/fix3_t3a`):
+    // the description line shows the display id, the `WorstRank` best id of the line that holds
+    // the Seq-align id (`gi|777|lcl|Query_1`: the Seq-align id `gi|777`, the display id
+    // `lcl|Query_1`; `ref|NP_000777.1|lcl|Query_1`: `ref|NP_000777.1|` for both), and looks the
+    // title up again by it: its keys and those of the ids it matches weakly are `display`
+    // (`ref|NP_000781|` finds a query `ref|NP_000781.1|`, `ref|NP_000782.1|` not one
+    // `ref|NP_000782|`), apart from the Seq-align id's `own` and `weak`.
+    #[test]
+    fn the_display_id_has_its_own_scope_keys() {
+        let local = |id: &str| ParsedSeqId::Local(ObjectId::Str(id.as_bytes().to_vec()));
+        let refseq = |accession: &str, version: Option<i32>| {
+            ParsedSeqId::Other(crate::seqid::model::TextseqId {
+                accession: Some(accession.as_bytes().to_vec()),
+                version,
+                ..Default::default()
+            })
+        };
+        let fasta = |id: Option<&ParsedSeqId>| {
+            let mut out = Vec::new();
+            label::fasta(id.unwrap(), &mut out);
+            String::from_utf8(out).unwrap()
+        };
+        let keys = |id: &ParsedSeqId| {
+            let mut keys = Vec::new();
+            crate::seqid::defline_set::scope_keys(id, &mut keys);
+            keys
+        };
+        let query = local("Query_1");
+        let gi = lines(vec![vec![ParsedSeqId::Gi(777), local("Query_1")]]);
+        assert_eq!(text(&gi.alignment_fasta()), "gi|777");
+        assert_eq!(fasta(gi.display_id()), "lcl|Query_1");
+        let scope = gi.query_scope_keys();
+        assert!(keys(&query).iter().all(|key| scope.display.contains(key)));
+        assert!(!keys(&query).iter().any(|key| scope.own.contains(key)));
+        let refq = lines(vec![vec![refseq("NP_000777", Some(1)), local("Query_1")]]);
+        assert_eq!(text(&refq.alignment_fasta()), "ref|NP_000777.1|");
+        assert_eq!(fasta(refq.display_id()), "ref|NP_000777.1|");
+        assert!(!keys(&query)
+            .iter()
+            .any(|key| refq.query_scope_keys().display.contains(key)));
+        let versioned_query = |accession: &str, version: Option<i32>| {
+            crate::seqid::id_scope::version_keys(&refseq(accession, version))
+                .map(|(own, _)| own)
+                .unwrap()
+        };
+        let weak = lines(vec![vec![ParsedSeqId::Gi(781), refseq("NP_000781", None)]]);
+        assert_eq!(fasta(weak.display_id()), "ref|NP_000781|");
+        assert!(weak
+            .query_scope_keys()
+            .display
+            .contains(&versioned_query("NP_000781", Some(1))));
+        let versioned = lines(vec![vec![
+            ParsedSeqId::Gi(782),
+            refseq("NP_000782", Some(1)),
+        ]]);
+        assert!(!versioned
+            .query_scope_keys()
+            .display
+            .contains(&versioned_query("NP_000782", None)));
     }
 
     // Line DBID N1b: the titles whose bytes the taxids of the record can change, whatever the

@@ -7802,7 +7802,9 @@ fn x_query_block_plan(
     // shows as a query, in the call that reports the query, before any byte of it (`run_call`, as
     // outfmt 0 refuses the masks of a shared record, `believed::refuse_shared_masks`): in a block
     // search, after the bytes of the blocks before (NCBI's own bytes before its abort depend on
-    // its buffers, so no prefix is NCBI's); the blocks are taken as for outfmt 0.
+    // its buffers, so no prefix is NCBI's); the blocks are taken as for outfmt 0. (The second
+    // has parsed Seq-ids, which the block search never takes, `database::x_titles_allow_blocks`:
+    // it refuses in the search of all queries, before any byte.)
     let tabular = kinds.contains(&XBlockReport::Tabular);
     match subject_source {
         BlastpSubjectSource::Fasta(subjects) => {
@@ -14453,18 +14455,73 @@ fn run_call(
             }
         }
     }
+    // The subjects whose description lines the reports of query `q_idx` show, by rank (outfmt 0
+    // to 4; `anchored`: of outfmt 1 to 4 only): the union over the call's pairwise formats of
+    // `pairwise::blastp_described_subjects` of the rows that the reports read (sorted by the
+    // format's `-sorthits`, none in psiblast and rpsblast; psiblast's round after the first shows
+    // the HSPs of its two-part table, `psiblast_round`). Each such line looks its title up again
+    // by the subject's display id (`ParsedSubject::display_id`), which the refusals below ask
+    // for, only for a query that reports a subject whose display id its batch has.
+    let pairwise_views: Vec<crate::report::pairwise::PairwiseView> = format_plans
+        .iter()
+        .filter_map(|outfmt| match outfmt {
+            BlastpReport::Pairwise(view) => Some(*view),
+            _ => None,
+        })
+        .collect();
+    let described = |q_idx: usize, anchored: bool| -> Result<Vec<u32>> {
+        let rows: std::borrow::Cow<'_, [PairwiseHit]> = match pairwise_hits.as_deref() {
+            Some(hits) => std::borrow::Cow::Borrowed(hits.as_slice()),
+            None => std::borrow::Cow::Owned(rows_of(q_idx..q_idx + 1)?),
+        };
+        let parsed = listed_titles
+            .as_ref()
+            .map_or(&[][..], |titles| titles.parsed.as_slice());
+        let mut described: Vec<u32> = Vec::new();
+        for &view in &pairwise_views {
+            if anchored && view == crate::report::pairwise::PairwiseView::Pairwise {
+                continue;
+            }
+            for s_idx in crate::report::pairwise::blastp_described_subjects(
+                view.report_sort(args.sort),
+                psi_found_before.is_some(),
+                args.num_descriptions,
+                q_idx,
+                &rows,
+                |previous, s_idx| {
+                    crate::report::db_subject::rank_joins_as_copy(
+                        parsed,
+                        previous as usize,
+                        s_idx as usize,
+                    )
+                },
+            ) {
+                if !described.contains(&s_idx) {
+                    described.push(s_idx);
+                }
+            }
+        }
+        Ok(described)
+    };
     // Outfmt 1 to 4 of a database search whose queries are read without `-parse_deflines`: a
     // reported database sequence whose Seq-align id is the generated id (`lcl|Query_N`) of a query
     // of the batch that reports it is that query's own Bioseq for NCBI's scope, which shows the
     // query's title and letters in its place and can abort on its merge (review 2 of line RG
-    // T3a, D2): refused here, with the abort above (`ListedTitles::refuse_generated_query_ids`).
-    // Under `-parse_deflines` every query has a believed id (generated for a record without one)
-    // and the refusal of a reported sequence with a query's id is the scopes' of the batches,
-    // for every format (`ListedTitles::refuse_ids_of_queries` above). A `-subject` search cannot
-    // meet it: without `-parse_deflines` the subjects are `lcl|Subject_N`, and with it a subject
-    // with a query's id is the reader's refusal (`id_scope`) unless it is the query's own record
-    // (the abort above). NCBI's display of such a sequence in outfmt 0, 6 and 7 (the query's
-    // title and letters) is line RG item X7's, the owner of this behaviour for every format.
+    // T3a, D2), and one whose description line shows such an id as its display id gets the
+    // query's title there (review 3 of T3a, D1): refused here, with the abort above
+    // (`ListedTitles::refuse_generated_query_ids`). Under `-parse_deflines` every query has a
+    // believed id (generated for a record without one) and the refusal of a reported sequence with
+    // a query's id is the scopes' of the batches, for every format by its Seq-align id
+    // (`ListedTitles::refuse_ids_of_queries` above) and for outfmt 0 to 4 by its display id
+    // (below). A `-subject` search cannot meet it: without `-parse_deflines` the subjects are
+    // `lcl|Subject_N`, and with it a subject with a query's id is the reader's refusal
+    // (`id_scope`) unless it is the query's own record (the abort above). NCBI's display of such a
+    // sequence in outfmt 0, 6 and 7 (the query's title and letters) is line RG item X7's, the
+    // owner of this behaviour for every format. The refusal runs in the search of all queries,
+    // before any byte of the run's reports: such a sequence has parsed Seq-ids, and the block
+    // search never takes a database with them (`database::x_titles_allow_blocks`). Were a block
+    // search to reach it, it would refuse in the call of the query's block as the abort above,
+    // after the reports of the blocks before (NCBI's bytes for their queries).
     if let (Some(_), false, Some(titles)) =
         (anchored_view, args.parse_deflines, listed_titles.as_ref())
     {
@@ -14482,11 +14539,31 @@ fn run_call(
             })
             .collect();
         let none = crate::blastinput::query_batch::QueryScope::default();
-        titles.refuse_generated_query_ids(&hit_lists, |query| {
-            scopes
-                .get(scopes.partition_point(|&(end, _)| end <= query))
-                .map_or(&none, |(_, scope)| scope)
-        })?;
+        titles.refuse_generated_query_ids(
+            &hit_lists,
+            |query| {
+                scopes
+                    .get(scopes.partition_point(|&(end, _)| end <= query))
+                    .map_or(&none, |(_, scope)| scope)
+            },
+            |q_idx| described(q_idx, true),
+        )?;
+    }
+    // Outfmt 0 to 4 of a database search with queries whose ids the reports show
+    // (`-parse_deflines`, a PSSM query with its ids): a sequence whose description line shows a
+    // query's id of the batch that reports it as its display id (`gi|779|lcl|abc` and a query
+    // `lcl|abc`), where NCBI shows the query's title (review 3 of line RG T3a, D1): refused here
+    // with the refusals above, before any format is written
+    // (`ListedTitles::refuse_display_ids_of_queries`; by its Seq-align id in every format,
+    // `ListedTitles::refuse_ids_of_queries`). It runs in the search of all queries, as the
+    // refusal above.
+    if let (false, Some(titles), Some(scopes)) = (
+        pairwise_views.is_empty(),
+        listed_titles.as_ref(),
+        reports.query_scopes,
+    ) {
+        titles
+            .refuse_display_ids_of_queries(&hit_lists, scopes, |q_idx| described(q_idx, false))?;
     }
     // The subject IDs of the tabular formats, checked for the subjects with rows before any
     // format is written (`tabular_subject_ids`). EXPERIMENT (LOSAT_X_BPQBLOCK): the block
@@ -15284,7 +15361,9 @@ fn run_call(
                             subject_records,
                             subject_placements: ranges.subject_placements,
                             parsed: listed_parsed,
-                            ordinals: listed_subjects.as_ref().map(|listed| &listed.ordinals[..]),
+                            listed_ordinals: listed_subjects.as_ref().zip(database).map(
+                                |(listed, database)| (&listed.ordinals[..], database.oid_map()),
+                            ),
                             show_gis: args.show_gis,
                             query_masks: query_masks.as_deref(),
                             subject_masks: if args.lcase_masking {

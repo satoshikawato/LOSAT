@@ -1,0 +1,139 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: a database sequence whose display id is not its local id
+           3 sequences; 450 total letters
+
+
+
+Query= first query
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NP_000777.1 db ref                                                    277     4e-102
+dbo1 other one                                                        247     3e-90 
+dbo2 other two                                                        13.5    4.6   
+
+
+
+Query_1      1    MGGSYVTIRKHFRLPSIAPLSKEHMLFSHKVIKHMLVIGYDVSQDYDKPGVITQLYTISW  60
+NP_000777.1  1    ...VWT.QD.W.......F..........C..........L..........D........  60
+dbo1         2     .Q..L..........N.....A...T..Y.G....T.PE......E.............  60
+
+Query_1      61   HLLMLGIDCKMEWECNPADQVDRNPYMHFPHLYNMVDVITVLWRTDHCGWSDWNWWQLVK  120
+NP_000777.1  61   ...........R....................F.....Q.....................  120
+dbo1         61   ...A.L....Q......M..............E..R..........W.I.N.........  120
+
+Query_1      121  CYEYSVVRVMNKMAKVYHPEFTNHFETRLN  150
+NP_000777.1  121  ......H..........E............  150
+dbo1         121  .H.D..N.....D.............VV.   149
+dbo2         48   ..N.K.                          53
+
+
+Lambda      K        H        a         alpha
+   0.326    0.139    0.483    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 48387
+
+
+Query= second query
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NP_000777.1 db ref                                                    14.6    2.2  
+dbo2 other two                                                        13.9    3.2  
+dbo1 other one                                                        13.9    3.6  
+
+
+
+Query_2      42   LDDGCNEFTVFWSTYHKMWGLLPTTIRVKNCHFLMNMWSMTQQVAWAHHCECGVVGTMAG  101
+NP_000777.1  100          ..L.R.D.CG.SDWNWWQL..SV.RV..KMAKVYEPEFTN.F.           146
+                                               \                              
+                                               |                              
+                                            CYEY
+NP_000777.1  5               .T.QD.-.FR..SIAFLSKE.M.FS                          28
+dbo2         23                                                     A....ENGQW  32
+dbo1         92   .ENMRDVI..L.R.                                                105
+dbo1         14                        ..SNAPLSKA.M.                            26
+
+Query_2      102  TLM  104
+dbo2         33   .V.  35
+
+
+Lambda      K        H        a         alpha
+   0.324    0.136    0.483    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 48387
+
+
+Query= third query
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+dbo2 other two                                                        257     4e-94
+NP_000777.1 db ref                                                    16.2    0.62 
+
+
+
+Query_3      1    WARAEMSFTPQEILDCSWTCPWACGYVENSQWLVMFMRYTAHGANGDCYNYKVNQQPQPV  60
+dbo2         1    ..A.Y..W.................V...G..T.........ES............S...  60
+NP_000777.1  121                                                 ..E.S.HR       128
+
+Query_3      61   FQYQLRDTNQHVCREADYFEYSTDCNQTEVQIMKILINVGCKPRHGSSQNNNIPEQGYSI  120
+dbo2         61   ..................TAR.....S....H.....Y.........F....M....R.Y  120
+NP_000777.1  45                   ..DKPGV.TQLYTISWHLLMLGID..M.                  72
+
+Query_3      121  NTCWGIFQGIRHSGKATAFHASRHVRGFES  150
+dbo2         121  ....Y...WGC............V......  150
+
+
+Lambda      K        H        a         alpha
+   0.322    0.133    0.456    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 48387
+
+
+  Database: a database sequence whose display id is not its local id
+    Posted date:  Nov 14, 2026  8:41 PM
+  Number of letters in database: 450
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

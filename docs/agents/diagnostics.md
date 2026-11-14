@@ -443,6 +443,7 @@ export LOSAT_X_QSTREAM=1
 export LOSAT_X_REDOCONTAINIDX=1
 export LOSAT_X_RPTSTREAM=1
 export LOSAT_X_SEEDCOMPACT=1
+export LOSAT_X_SEEDPIECE=1
 export LOSAT_X_SEEDUNMAP=1
 export LOSAT_X_TBNBATCHRULE=1
 export LOSAT_X_TBNDIAGPACK=1
@@ -4112,6 +4113,72 @@ Scheduling (each value computed by one thread with the original function; order 
   time +0.03-0.05 s (node 0, `perf stat`). One thread (node 0, `perf stat`, outputs the same): instructions of dev,
   the switch and `=0` within 0.01 % (blastn-short of the 236 cDNAs 260.834 / 260.821 / 260.821 G; 1,775 cDNAs
   blastn, megablast and dc-megablast too).
+- `LOSAT_X_SEEDPIECE=1` (BLASTN `-task dc-megablast`, `blastn`, `megablast` and `blastn-short`: the partitioned stages
+  of `LOSAT_X_DCSEEDLEAN` and `LOSAT_X_BNSEEDLISTS` with `LOSAT_X_PAIRPARHOME`, two threads or more, one unmasked
+  subject, a query block above 8,000 letters; memory; in the strict set from the pull request that added it,
+  2026-11-12: `LOSAT_X_SEEDPIECE=0` turns it off; a number from 2 to 131,072 sets the seeds of a piece, any other
+  value or none the built-in 16,384) holds a strip's seeds in pieces of a fixed size instead of in one list per
+  partition and strip (`x_pair_seed_piece.rs`, exactness argument in its module comment). NCBI scans into an offset
+  array of 4,096 + `longest_chain` pairs, stops when it is full and extends those pairs before the scan goes on
+  (`blast_nascan.c` `MB_ACCESS_HITS`, `na_ungapped.c` `BlastNaWordFinder`); the strips stage did not stop, and a
+  strip's lists waited until every partition had folded them, each keeping the largest capacity any strip had needed
+  (on dc-megablast's 5 Mb chunks at 16 threads about 80 MiB, nearly all capacity left by main-diagonal runs). Now:
+  - the scan kernels' callbacks return whether the scan goes on (the reference callers always `true`); a strip's scan
+    (`scan_strip_from`, `scan_strip_disc_from`, `scan_strip_na_from` with `PIECE`) compares each word's run with the
+    piece's room and stops at the first pair it has no room for, inside a run or a chain as well (`Cut`), returning
+    the word's offset and where in the word it stopped (`Resume`: the pairs of a CSR cell's or the direct table's run
+    it read, or the element of the first or second template's chain); the words still in the CSR's prefetch ring are
+    dropped, and the next piece scans again from that word, going on in its run or chain from there
+    (`for_each_hit_from`, `for_each_hit2_from`), so no pair is read twice; a run the piece has room for goes through
+    the strips' own loop (`Cut::fit`), only one that may not fit through the loop that tests the room before each pair
+    (`Cut::run_cold`), so that the loads of the inputs `seed_of_pair` reads stay out of the loop as in the strips' scan
+    (a closure called from both loops stayed a call per pair, and a room test before each pair kept those loads in
+    the loop: about 30 and 17 instructions more per seed, dc-megablast of 31,168 cDNAs x 3 Mb at 4 threads, `perf`);
+  - a piece is an arena of 16,384 / 64 + P blocks of 64 seeds with their positions (20 bytes each; P partitions,
+    rounded up to a multiple of 4), each partition's seeds a chain of blocks in scan order: its first block (block p),
+    then runs of 4 blocks (a page of seeds) taken in order from the front of the arena, and once those are given out
+    single free blocks of other partitions' runs; so a piece touches the pages of its seeds from the front, a slot
+    keeps those of its largest piece, and a partition's seeds after its first block lie in pages of seeds of its own,
+    which the hardware prefetches of the fold do not leave (equal lanes, one per partition, touched a page of every
+    lane a partition had a seed in, whatever its seeds: megablast Sakai x MG1655 `-db` at 16 threads, peak 1.3 MiB
+    over the strips'); the arenas are a pool of 3 T + 2 (T threads), the last two
+    for the strip the slowest partition is in alone, and a piece takes the slot of a piece every partition has folded
+    before a slot no piece has used (as the strips take a new buffer only when none can be given back). The pool's
+    seeds and positions are two buffers kept in the subject scratch, each slot a region of them, each allocated once
+    with a capacity above glibc's ceiling of the mmap threshold (`x_mapped::x_unthresholded_capacity`) and not
+    initialized: glibc maps them, their free leaves the threshold as it is, and only the pages of the blocks pieces
+    wrote are resident (an arena allocated by itself, 266-328 KiB, was mapped and its free raised the threshold to its
+    size, so that later blocks of up to that size came from the heap's arenas and stayed resident: blastn of the
+    cDNAs x 3 Mb at 16 threads, peak 1.13-1.15 of the strips'; the regions of the seeds begin on a page). So the stage
+    holds at most (3 T + 2) x (16,384 + 64 P) x 20 bytes whatever the subject, the query or the density of the seeds:
+    17 MB at 16 threads, 79 MB at 64;
+  - the folds read a piece's slot and arena without a lock: the producer writes the piece's slot in a ring (the strips
+    within reach of the slowest partition x the pool's slots) before the strip's count, and the arena is written only
+    by the participant that took the slot and read once the piece is counted, until every partition has folded it (a
+    lock of the strip's list of slots and of the slot, taken by every partition for every piece, wrote lines the
+    others read: blastn-short of 30,000 short queries x 3 Mb at 16 threads, the participants' loads served from another
+    core's cache x4 those of the strips stage);
+  - a participant makes a strip's pieces one after another while the pool has a slot a piece gave back for the next
+    one, and parks the rest of the strip when it has none (any participant goes on with it), so no helper waits
+    holding a strip half-scanned, the stage's arenas grow only at a turn's first piece, and a thread leaves a strip's
+    scan for its folds only when the pool has no slot for the strip's next piece (one piece per turn cut
+    blastn-short's strips into 2.3 turns on average and its folds took +1.2 % cycles at the same instructions, their
+    loads missing L1 evenly more); a partition folds the pieces of a strip in order, then the next strip, and
+    the positions count on across a strip's pieces, so the keys, the hits' order and the appended cells' numbers are
+    those of the strips.
+  `x_reach!` at each such stage, always the switch's side while it is on. Tests: the part tests of
+  `x_pair_seed_part.rs` (`seed_stage_part_equals_the_reference_fold` in pieces of 1, a few and hundreds to thousands
+  of seeds on 1 to 8 threads and 2 to 17 partitions; the nested parallel call of #218, the stalled stage and the
+  panicking participant in pieces), `seed_stage_on_strips_equals_one_scan` of `x_pair_seed.rs` and
+  `x_pair_seed_na.rs` and `disc_two_hit_stage_on_strips_equals_one_scan` (the real kernels in pieces of 1 seed, a few
+  and hundreds), and `LOSAT/tests/blastn_seed_piece.rs` (dc-megablast, blastn, megablast and blastn-short: the
+  default at 2 and 4 threads and pieces of 3 to 97 seeds at 2 and 3 threads against `=0`, with the sides of
+  `LOSAT_X_REACH`).
+  Evidence (line EB s20, 590657d1 against dev 159c675a, 16 threads, 8 rounds, same output): peak memory blastn-short of
+  30,000 short queries x 3 Mb 0.59 (182 -> 107 MiB), dc-megablast Sakai x EDL933 0.86, dc-megablast and blastn of 31,168
+  cDNAs x 3 Mb 0.88 / 0.96 (`-subject`) and 0.94 / 0.97 (`-db`), megablast within the null arm's range; run time within the
+  null arm's range except blastn-short +0.9-1.1 % (its folds' loads miss L1 evenly more: a fold unit per piece, 2.3 per
+  strip) and blastn cDNA x 3 Mb at 4 threads +0.5 % (the store mapped again in every query batch: +27 % page faults).
 - `LOSAT_X_BNCSR=1` (BLASTN `-task blastn` and every task with word size 9, 10 or 11 that builds the contiguous
   two-stage table of `build_mb_lookup`, `-subject` and `-db`, any thread count, speed; in the strict set from the pull
   request that added it, 2026-10-25 (perf/bn-csr, evidence at the end of this entry): on unless it is `0`) lays out the

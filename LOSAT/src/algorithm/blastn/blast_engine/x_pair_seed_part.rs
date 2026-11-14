@@ -125,7 +125,13 @@
 //!   operations changes.
 
 use super::super::{DiagHashCell, DiagHashTable, UngappedHit, DIAGHASH_NUM_BUCKETS};
-use super::{FoldCounts, Seed, SeedOut};
+use super::{FoldCounts, Resume, Seed, SeedOut};
+
+// EXPERIMENT (LOSAT_X_SEEDPIECE): the home stage of `seed_stage_part_lists` in seed pieces of a
+// fixed size (`x_pair_seed_piece.rs`).
+#[path = "x_pair_seed_piece.rs"]
+mod piece;
+pub(super) use piece::PieceSink;
 use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError, RwLock};
@@ -459,6 +465,14 @@ pub(in super::super) struct PartScratch {
     raw: Vec<Vec<Seed>>,
     order: Vec<(u64, u32, u32)>,
     apps: Vec<(u64, u32, u32)>,
+    /// EXPERIMENT (LOSAT_X_SEEDPIECE): the chains of the pool's slots (allocated when first
+    /// used) and the pool's seeds (`piece::Store`).
+    arenas: Vec<piece::Links>,
+    store: piece::Store,
+    /// (tests) LOSAT_X_SEEDPIECE's stage as a test asks for it: `None` as the switch says,
+    /// `Some(0)` the strips' lists, `Some(k)` pieces of `k` seeds.
+    #[cfg(test)]
+    pub(super) x_pieces: Option<usize>,
 }
 
 /// How a strips stage folds when the switch is on: the scratch and the partition count.
@@ -487,10 +501,12 @@ pub(super) struct PartStats {
     /// LOSAT_X_PAIRPARHOME: the runs folded (locks of a partition that went through one strip
     /// or more, empty partitions of strips included), and the strips of partitions folded by a
     /// participant whose home the partition is not (a partition without a participant at home,
-    /// the slowest partition, any partition once every strip was handed out)
+    /// the slowest partition, any partition once every strip was handed out; EXPERIMENT
+    /// LOSAT_X_SEEDPIECE: the pieces of partitions so folded)
     pub(super) runs: u64,
     pub(super) away: u64,
-    /// the partitions of strips of the stage (strips x partitions)
+    /// the partitions of strips of the stage (strips x partitions; EXPERIMENT LOSAT_X_SEEDPIECE:
+    /// the pieces made, empty ones included, x partitions)
     pub(super) units: u64,
 }
 
@@ -633,8 +649,10 @@ type NoLists = fn(usize, &mut PartSink<'_>);
 /// changed has the stage's chain, cells below the stage's occupancy, so writing it back changes
 /// nothing). With LOSAT_X_PAIRPARHOME the strips are scanned by `scan_lists` into their
 /// partitions' lists (`PartSink`) instead of by `scan` into one list that `produce` cuts.
+/// EXPERIMENT (LOSAT_X_SEEDPIECE): with LOSAT_X_PAIRPARHOME the strips are scanned by
+/// `scan_piece` in pieces of a fixed size (`piece::seed_stage_pieces`) instead.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn seed_stage_part_lists<FS, FL, FF>(
+pub(super) fn seed_stage_part_lists<FS, FL, FP, FF>(
     n: usize,
     threads: usize,
     ahead: usize,
@@ -643,17 +661,50 @@ pub(super) fn seed_stage_part_lists<FS, FL, FF>(
     fold_part: FoldPart<'_>,
     scan: &FS,
     scan_lists: &FL,
+    scan_piece: &FP,
     fold: &FF,
     timed: bool,
 ) -> PartStats
 where
     FS: Fn(usize, &mut Vec<Seed>) + Sync,
     FL: Fn(usize, &mut PartSink<'_>) + Sync,
+    FP: Fn(usize, Option<Resume>, &mut PieceSink<'_>) -> Option<Resume> + Sync,
     FF: Fn(&mut PartState, &[Seed], &[u32]) + Sync,
 {
     let home = home_on();
     if home {
         crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARHOME", true);
+    }
+    #[cfg(test)]
+    let pieces = match fold_part.scratch.x_pieces {
+        None => piece::seeds(),
+        Some(0) => None,
+        k => k,
+    };
+    #[cfg(not(test))]
+    let pieces = piece::seeds();
+    if let (true, Some(piece_seeds)) = (home, pieces) {
+        let FoldPart { scratch, parts } = fold_part;
+        assert!(
+            (1..=DIAGHASH_NUM_BUCKETS).contains(&parts),
+            "LOSAT_X_PAIRPARFOLD: {parts} partitions"
+        );
+        rebuild(scratch, hash, parts, true);
+        let occ0 = hash.occupancy;
+        return piece::seed_stage_pieces(
+            n,
+            threads,
+            ahead.max(1),
+            hash,
+            hits,
+            scratch,
+            parts,
+            occ0,
+            piece_seeds,
+            scan_piece,
+            fold,
+            timed,
+        );
     }
     seed_stage_in(
         home,
@@ -1751,7 +1802,8 @@ pub(super) fn record(kind: usize, parts: usize, stats: &PartStats) {
 /// on: the partition count of the stages, the number of partitioned stages merged, the time in
 /// merges and the number of helpers that left a stalled stage; with LOSAT_X_PAIRPARHOME also the
 /// runs folded and the partitions of strips folded away from home (`PartStats::runs`, `away`), and
-/// the partitions of strips of the stages (`units`: strips x partitions). Without the
+/// the partitions of strips of the stages (`units`: strips x partitions; with LOSAT_X_SEEDPIECE pieces x
+/// partitions). Without the
 /// switch the lines are those of the strips paths alone.
 pub(super) fn timing_fields(kind: usize) -> String {
     if !switch_on() {
@@ -2099,13 +2151,17 @@ mod tests {
             nested,
             owner_waits,
             home,
-            false,
+            // (a test that asks for pieces asks for the lists' stage they replace)
+            scratch.x_pieces.is_some_and(|k| k > 0),
         )
     }
 
     /// `partitioned_on`; with `lists` the stage of LOSAT_X_DCSEEDLEAN (`seed_stage_part_lists`):
     /// the folds do not record their buckets (`insert_t` without `TRACK`) and the home stage
-    /// scans the strips into the partitions' lists (`PartSink`).
+    /// scans the strips into the partitions' lists (`PartSink`), or with `home` and
+    /// `scratch.x_pieces` `Some(k)` (k > 0) into pieces of `k` seeds (LOSAT_X_SEEDPIECE,
+    /// `piece::seed_stage_pieces`; the scan stops at the first seed a piece has no room for and
+    /// goes on from it).
     #[allow(clippy::too_many_arguments)]
     fn partitioned_with(
         pool: &rayon::ThreadPool,
@@ -2123,6 +2179,51 @@ mod tests {
         owner_waits: bool,
         home: bool,
         lists: bool,
+    ) -> (Vec<usize>, PartStats, usize) {
+        let pieces = if lists && home {
+            scratch.x_pieces.filter(|&k| k > 0)
+        } else {
+            None
+        };
+        partitioned_in(
+            pool,
+            threads,
+            slow,
+            hash,
+            scratch,
+            ops,
+            first,
+            cuts,
+            parts,
+            ahead,
+            window,
+            nested,
+            owner_waits,
+            home,
+            lists,
+            pieces,
+        )
+    }
+
+    /// `partitioned_with` with the pieces given (`None`: the strips' lists).
+    #[allow(clippy::too_many_arguments)]
+    fn partitioned_in(
+        pool: &rayon::ThreadPool,
+        threads: usize,
+        slow: Option<Slow>,
+        hash: &mut DiagHashTable,
+        scratch: &mut PartScratch,
+        ops: &[Op],
+        first: usize,
+        cuts: &[usize],
+        parts: usize,
+        ahead: usize,
+        window: i32,
+        nested: bool,
+        owner_waits: bool,
+        home: bool,
+        lists: bool,
+        pieces: Option<usize>,
     ) -> (Vec<usize>, PartStats, usize) {
         let folders = Mutex::new(std::collections::BTreeSet::new());
         let helper_folded = AtomicBool::new(false);
@@ -2161,6 +2262,18 @@ mod tests {
                 for k in cuts[i]..cuts[i + 1] {
                     out.push(seed_of(first + k, &ops[k]));
                 }
+            };
+            // (a piece's scan: `Resume::s` is the seed's index in its strip)
+            let scan_piece = |i: usize, from: Option<Resume>, out: &mut PieceSink<'_>| {
+                before_scan();
+                let start = cuts[i] + from.map_or(0, |r| r.s);
+                for k in start..cuts[i + 1] {
+                    if out.room() == 0 {
+                        return Some(Resume::at(k - cuts[i]));
+                    }
+                    out.push(seed_of(first + k, &ops[k]));
+                }
+                None
             };
             #[allow(clippy::too_many_arguments)]
             fn put(
@@ -2247,19 +2360,38 @@ mod tests {
                 }
             };
             let mut hits = Vec::new();
-            let stats = seed_stage_in(
-                home,
-                cuts.len() - 1,
-                threads,
-                ahead,
-                hash,
-                &mut hits,
-                FoldPart { scratch, parts },
-                &scan,
-                lists.then_some(&scan_lists),
-                &fold,
-                false,
-            );
+            let stats = if let Some(piece_seeds) = pieces {
+                rebuild(scratch, hash, parts, true);
+                let occ0 = hash.occupancy;
+                piece::seed_stage_pieces(
+                    cuts.len() - 1,
+                    threads,
+                    ahead.max(1),
+                    hash,
+                    &mut hits,
+                    scratch,
+                    parts,
+                    occ0,
+                    piece_seeds,
+                    &scan_piece,
+                    &fold,
+                    false,
+                )
+            } else {
+                seed_stage_in(
+                    home,
+                    cuts.len() - 1,
+                    threads,
+                    ahead,
+                    hash,
+                    &mut hits,
+                    FoldPart { scratch, parts },
+                    &scan,
+                    lists.then_some(&scan_lists),
+                    &fold,
+                    false,
+                )
+            };
             let folders = lock(&folders).len();
             (
                 hits.iter().map(|h| h.seed_q_off as usize).collect(),
@@ -2438,6 +2570,15 @@ mod tests {
                             };
                             let ahead = 1 + rng.below(2 * threads as u64) as usize;
                             most_ahead = most_ahead.max(ahead);
+                            // LOSAT_X_SEEDPIECE in the stages of the lists and home folds: the
+                            // strips' lists, or pieces of 1 seed, a few, or hundreds to thousands
+                            let piece_seeds = match (case * 7 + stage) % 4 {
+                                0 => 0,
+                                1 => 1,
+                                2 => 2 + rng.below(40) as usize,
+                                _ => 100 + rng.below(4000) as usize,
+                            };
+                            scratch.x_pieces = Some(piece_seeds);
                             let (got, stats, folders) = partitioned_with(
                                 &pool,
                                 threads,
@@ -2472,6 +2613,30 @@ mod tests {
                                 "{at}: {} strip buffers, window {most_ahead}",
                                 scratch.spare.len()
                             );
+                            // the pieces: the pool's arenas at most, and every seed a piece of
+                            // its own where a piece holds one seed
+                            let used = scratch.arenas.iter().filter(|a| a.allocated()).count();
+                            assert!(
+                                used <= piece::PIECES_PER_THREAD * threads + piece::RESERVED,
+                                "{at}: {used} arenas"
+                            );
+                            // a piece takes the slot of one every partition has folded before a
+                            // slot no piece has used, and a strip's next piece in the same turn
+                            // only a slot given back: one thread folds a turn's pieces before it
+                            // makes the next turn's, so it holds at most two
+                            if threads == 1 {
+                                assert!(used <= 2, "{at}: {used} arenas on one thread");
+                            }
+                            let pieced = (case + stage) % 2 == 1
+                                && (case / 2 + stage / 2).is_multiple_of(2)
+                                && piece_seeds > 0;
+                            if pieced && piece_seeds == 1 {
+                                assert!(
+                                    stats.units >= n as u64 * stage_parts as u64,
+                                    "{at}: {} piece units for {n} seeds",
+                                    stats.units
+                                );
+                            }
                         }
                         assert_eq!(
                             hash_state(&hash),
@@ -2523,11 +2688,17 @@ mod tests {
             let mut scratch = PartScratch::default();
             let mut s = 50i32;
             let mut first = 0usize;
-            for stage in 0..3 {
+            for stage in 0..4 {
                 let n = 2000 + rng.below(2000) as usize;
                 let ops = random_ops(&mut rng, n, &mut s, 400);
                 let expected = reference::<true>(&mut reference_hash, &ops, first, 40);
                 let cuts = random_cuts(&mut rng, n);
+                // stages 2 and 3 in pieces (LOSAT_X_SEEDPIECE) of a few seeds and of hundreds
+                scratch.x_pieces = match stage {
+                    2 => Some(1 + rng.below(16) as usize),
+                    3 => Some(100 + rng.below(400) as usize),
+                    _ => None,
+                };
                 let (got, _, _) = partitioned(
                     &pool,
                     &mut hash,
@@ -2659,6 +2830,110 @@ mod tests {
         }
     }
 
+    // EXPERIMENT (LOSAT_X_SEEDPIECE): a participant that panics in the stage in pieces (in a
+    // piece's scan, in a fold on the owner, in a fold on a helper) makes the stage panic instead
+    // of hang and leaves the table untouched, and the next stage on the same scratch gives the
+    // reference's result.
+    #[test]
+    fn a_panicking_participant_ends_the_stage_in_pieces() {
+        let mut rng = Lcg(0x9A41_C0DE);
+        for threads in [2usize, 4, 8] {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .unwrap();
+            for place in ["scan", "owner fold", "helper fold"] {
+                let mut reference_hash = DiagHashTable::new(16);
+                let mut hash = copy_hash(&reference_hash);
+                let mut scratch = PartScratch::default();
+                let mut s = 50i32;
+                let n = 3000;
+                let ops = random_ops(&mut rng, n, &mut s, 300);
+                let expected = reference::<true>(&mut reference_hash, &ops, 0, 40);
+                let cuts = random_cuts(&mut rng, n);
+                let strips = cuts.len() - 1;
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    pool.install(|| {
+                        let owner = rayon::current_thread_index();
+                        let scan = |i: usize, from: Option<Resume>, out: &mut PieceSink<'_>| {
+                            if place == "scan" && i == strips / 2 && from.is_some() {
+                                panic!("a test piece scan panics");
+                            }
+                            let start = cuts[i] + from.map_or(0, |r| r.s);
+                            for k in start..cuts[i + 1] {
+                                if out.room() == 0 {
+                                    return Some(Resume::at(k - cuts[i]));
+                                }
+                                out.push(seed_of(k, &ops[k]));
+                            }
+                            None
+                        };
+                        let fold = |st: &mut PartState, seeds: &[Seed], _pos: &[u32]| {
+                            let on_owner = rayon::current_thread_index() == owner;
+                            match place {
+                                "owner fold" if on_owner && st.out.strip >= 2 => {
+                                    panic!("a test fold panics on the owner")
+                                }
+                                "helper fold" if !on_owner => {
+                                    panic!("a test fold panics on a helper")
+                                }
+                                "helper fold" | "owner fold" => {
+                                    std::thread::sleep(std::time::Duration::from_millis(1))
+                                }
+                                _ => {}
+                            }
+                            st.counts.seeds += seeds.len() as u64;
+                        };
+                        let mut hits = Vec::new();
+                        rebuild(&mut scratch, &hash, threads, true);
+                        let occ0 = hash.occupancy;
+                        piece::seed_stage_pieces(
+                            strips,
+                            threads,
+                            2,
+                            &mut hash,
+                            &mut hits,
+                            &mut scratch,
+                            threads,
+                            occ0,
+                            7,
+                            &scan,
+                            &fold,
+                            false,
+                        )
+                        .counts
+                        .seeds
+                    })
+                }));
+                assert!(result.is_err(), "threads {threads} ({place}): no panic");
+                let fresh = DiagHashTable::new(16);
+                assert_eq!(hash_state(&hash), hash_state(&fresh), "{place}");
+                // (the arenas of the failed stage are lost with it; the next stage makes its own)
+                scratch.x_pieces = Some(29);
+                let (got, _, _) = partitioned(
+                    &pool,
+                    &mut hash,
+                    &mut scratch,
+                    &ops,
+                    0,
+                    &cuts,
+                    threads,
+                    2,
+                    40,
+                    false,
+                    false,
+                    true,
+                );
+                assert_eq!(got, expected, "threads {threads} {place}");
+                assert_eq!(
+                    hash_state(&hash),
+                    hash_state(&reference_hash),
+                    "threads {threads} {place}"
+                );
+            }
+        }
+    }
+
     // LOSAT_X_PAIRPARHOME: a home participant whose scans are slow (1 ms each on one pool
     // thread; its partition lags while it scans, and it does not hold its partition's lock
     // then) has its partition folded by the others (`Run::Slowest`, and at the tail
@@ -2750,16 +3025,23 @@ mod tests {
                 .num_threads(threads)
                 .build()
                 .unwrap();
-            for home in [false, true] {
+            // (and LOSAT_X_SEEDPIECE's stage, in pieces of 37 seeds: the owner sleeps in its
+            // first piece, holding strip 0 half-scanned)
+            for (home, pieces) in [(false, None), (true, None), (true, Some(37))] {
                 let mut reference_hash = DiagHashTable::new(16);
                 let mut hash = copy_hash(&reference_hash);
-                let mut scratch = PartScratch::default();
+                let mut scratch = PartScratch {
+                    x_pieces: pieces,
+                    ..PartScratch::default()
+                };
                 let mut s = 50i32;
                 let mut first = 0usize;
                 let mut left = false;
                 let started = std::time::Instant::now();
                 for attempt in 0..40 {
-                    let at = format!("threads {threads} home {home} attempt {attempt}");
+                    let at = format!(
+                        "threads {threads} home {home} pieces {pieces:?} attempt {attempt}"
+                    );
                     let n = 2000;
                     let ops = random_ops(&mut rng, n, &mut s, 300);
                     let expected = reference::<true>(&mut reference_hash, &ops, first, 40);
@@ -2800,7 +3082,7 @@ mod tests {
                 }
                 assert!(
                     left,
-                    "threads {threads} home {home} ({cpus} CPUs): no helper left a stalled stage in {:?}",
+                    "threads {threads} home {home} pieces {pieces:?} ({cpus} CPUs): no helper left a stalled stage in {:?}",
                     started.elapsed()
                 );
             }

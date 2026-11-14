@@ -27,6 +27,7 @@ use crate::report::diag_log::Message;
 use crate::report::serial::asn_ber::AsnBinaryEncoder;
 use crate::report::serial::asn_text::AsnTextEncoder;
 use crate::report::serial::encoder::Encoder;
+use crate::report::serial::pssm::PssmWithParameters;
 use crate::report::serial::xml::XmlEncoder;
 
 /// The bytes that an encoder holds before its buffer is handed to the sink.
@@ -54,13 +55,23 @@ impl KaBlock {
     }
 }
 
+/// The queries of a request (`Blast4-queries`): the batch's Bioseqs (a FASTA query's), or the
+/// PSSM of a PSSM query (`-in_pssm`) as NCBI's application read it.
+#[derive(Clone, Copy)]
+pub enum RequestQueries<'a> {
+    /// The batch's queries, in order.
+    Bioseqs(&'a [BioseqInput<'a>]),
+    /// The `PssmWithParameters` of psiblast's or tblastn's `-in_pssm`.
+    Pssm(&'a PssmWithParameters),
+}
+
 /// What the request of one query batch reads besides the run's options (`ArchiveRequest`): the
 /// archive's and the search strategy's (`requests::RunRequests` makes it from the batch's
 /// records).
 #[derive(Clone, Copy)]
 pub struct RequestInputs<'a> {
-    /// The batch's queries, in order.
-    pub queries: &'a [BioseqInput<'a>],
+    /// The batch's queries.
+    pub queries: RequestQueries<'a>,
     /// `-subject`: every subject (the request's `database` is `None` then).
     pub subjects: &'a [BioseqInput<'a>],
     /// `RequiredStart` and `RequiredEnd` (0-based) of a `-query_loc` that is not the first
@@ -272,56 +283,24 @@ fn write_request_body<E: Encoder>(
     out.enc.end_member();
 
     out.enc.member("queries", 2);
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:609-617,648-655
-    // ```c++
-    //         ITERATE(IRemoteQueryData::TSeqLocs, itr, seqloc_list)
-    //         {
-    //             if (IsLocalId((*itr)->GetId()))
-    //             {
-    //                 has_local_ids = true;
-    //                 break;
-    //             }
-    //         }
-    //     ...
-    //     if (has_local_ids)
-    //     {
-    //         Q->SetBioseq_set(*bioseq_set);
-    //     }
-    //     else
-    //     {
-    //     	Q->SetSeq_loc_list() = seqloc_list;
-    //     }
-    // ```
-    if batch.queries.iter().all(|query| query.seq_loc.is_some()) {
-        out.enc.variant("Blast4-queries", "seq-loc-list", 1);
-        out.enc.begin_list(false);
-        for loc in batch
-            .queries
-            .iter()
-            .filter_map(|query| query.seq_loc.as_ref())
-        {
-            out.enc.element();
-            write_seq_loc(&mut out.enc, loc);
-            out.flush_if_large();
-        }
-        out.enc.end_list();
-        out.enc.end_variant();
-    } else {
-        out.enc.variant("Blast4-queries", "bioseq-set", 2);
-        out.enc.begin_sequence("Bioseq-set");
-        out.enc.member("seq-set", 7);
-        out.enc.begin_list(false);
-        for query in batch.queries {
-            out.enc.element();
-            out.enc.variant("Seq-entry", "seq", 0);
-            write_bioseq(&mut out.enc, query);
+    match batch.queries {
+        RequestQueries::Bioseqs(queries) => write_bioseq_queries(out, queries),
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:555-559
+        // ```c++
+        //     CRef<CBlast4_queries> queries_p(new CBlast4_queries);
+        //     queries_p->SetPssm(*pssm);
+        //
+        //     m_QueueSearchRequest->SetQueries(*queries_p);
+        //     m_QueueSearchRequest->SetService(new_service);
+        // ```
+        // The object that the application read (`x_Process_Pssm` takes the application's `CRef`,
+        // serialized at once), written with the request's encoder.
+        RequestQueries::Pssm(pssm) => {
+            out.enc.variant("Blast4-queries", "pssm", 0);
+            crate::report::serial::pssm::write_value(&mut out.enc, pssm);
             out.enc.end_variant();
             out.flush_if_large();
         }
-        out.enc.end_list();
-        out.enc.end_member();
-        out.enc.end_sequence();
-        out.enc.end_variant();
     }
     out.enc.end_member();
 
@@ -345,6 +324,73 @@ fn write_request_body<E: Encoder>(
     out.enc.end_variant();
     out.enc.end_member();
 
+    write_request_options(out, request, batch, sets, database_list);
+    out.enc.end_sequence();
+    out.enc.end_variant();
+    out.enc.end_member();
+}
+
+/// The `queries` of a request of FASTA queries: the batch's Seq-locs, or its Bioseqs.
+fn write_bioseq_queries<E: Encoder>(out: &mut ArchiveOut<'_, E>, queries: &[BioseqInput<'_>]) {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:609-617,648-655
+    // ```c++
+    //         ITERATE(IRemoteQueryData::TSeqLocs, itr, seqloc_list)
+    //         {
+    //             if (IsLocalId((*itr)->GetId()))
+    //             {
+    //                 has_local_ids = true;
+    //                 break;
+    //             }
+    //         }
+    //     ...
+    //     if (has_local_ids)
+    //     {
+    //         Q->SetBioseq_set(*bioseq_set);
+    //     }
+    //     else
+    //     {
+    //     	Q->SetSeq_loc_list() = seqloc_list;
+    //     }
+    // ```
+    if queries.iter().all(|query| query.seq_loc.is_some()) {
+        out.enc.variant("Blast4-queries", "seq-loc-list", 1);
+        out.enc.begin_list(false);
+        for loc in queries.iter().filter_map(|query| query.seq_loc.as_ref()) {
+            out.enc.element();
+            write_seq_loc(&mut out.enc, loc);
+            out.flush_if_large();
+        }
+        out.enc.end_list();
+        out.enc.end_variant();
+    } else {
+        out.enc.variant("Blast4-queries", "bioseq-set", 2);
+        out.enc.begin_sequence("Bioseq-set");
+        out.enc.member("seq-set", 7);
+        out.enc.begin_list(false);
+        for query in queries {
+            out.enc.element();
+            out.enc.variant("Seq-entry", "seq", 0);
+            write_bioseq(&mut out.enc, query);
+            out.enc.end_variant();
+            out.flush_if_large();
+        }
+        out.enc.end_list();
+        out.enc.end_member();
+        out.enc.end_sequence();
+        out.enc.end_variant();
+    }
+}
+
+/// The options of a request: `algorithm-options` (the command line's with what the handle holds,
+/// `sets`), `program-options` (the query's range and masks, the database's list) and
+/// `format-options` (psiblast's `Web_StepNumber`).
+fn write_request_options<E: Encoder>(
+    out: &mut ArchiveOut<'_, E>,
+    request: &super::ArchiveRequest,
+    batch: &RequestInputs<'_>,
+    sets: &[Param],
+    database_list: Option<&Param>,
+) {
     out.enc.member("algorithm-options", 5);
     out.enc.begin_named("Blast4-parameters");
     out.enc.begin_list(false);
@@ -435,9 +481,6 @@ fn write_request_body<E: Encoder>(
         out.enc.end_named();
         out.enc.end_member();
     }
-    out.enc.end_sequence();
-    out.enc.end_variant();
-    out.enc.end_member();
 }
 
 fn write_search_archive<E: Encoder, A: AlignSource>(

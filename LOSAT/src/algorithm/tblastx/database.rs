@@ -593,6 +593,15 @@ pub(crate) fn reported_subjects(
                 if shown.pairwise {
                     shared::check_shown_stored_title(stored.taxonomy_title, ordinal, PROGRAM)?;
                 }
+                if shown.tabular {
+                    let oid = database.db.oid(ordinal);
+                    shared::check_tabular_stored_title(
+                        stored.taxonomy_title,
+                        shown.words,
+                        oid,
+                        PROGRAM,
+                    )?;
+                }
                 stored.title.clone()
             }
             ReportedHeader::Parsed(subject) => {
@@ -674,13 +683,19 @@ pub(crate) fn reported_subjects(
 }
 
 impl ReportedSubjects {
-    /// The subject ids of the tabular reports, by rank: the first word of the stored title, or
-    /// the id of a sequence with parsed Seq-ids (`common::database::tabular_subject_ids`; an id
-    /// LOSAT cannot write is empty where no tabular report `reads` the subject).
-    pub(crate) fn tabular_subject_ids(&self, reads: bool) -> Result<Vec<Arc<[u8]>>> {
+    /// The subject ids of the tabular reports (`saccver`), by rank: the first word of the stored
+    /// title or the general id's `BL_ORD_ID:n` (`oids`), or the id of a sequence with parsed
+    /// Seq-ids (`common::database::tabular_subject_ids`; an id LOSAT cannot write is empty where no
+    /// tabular report `reads` the subject).
+    pub(crate) fn tabular_subject_ids(
+        &self,
+        oids: crate::seqdb::OidMap<'_>,
+        reads: bool,
+    ) -> Result<Vec<Arc<[u8]>>> {
         shared::tabular_subject_ids(
             &self.records,
             &self.ordinals,
+            oids,
             &self.parsed,
             false,
             reads,

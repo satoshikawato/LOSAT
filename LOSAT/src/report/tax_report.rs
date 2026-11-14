@@ -349,8 +349,8 @@ impl TaxDefline {
         }
     }
 
-    /// The definition line of the database sequence `ordinal` without parsed Seq-ids: the label
-    /// of its `gnl|BL_ORD_ID|<ordinal>` id is the ordinal id, its title the stored one (`title`)
+    /// The definition line of the database sequence `oid` without parsed Seq-ids: the label
+    /// of its `gnl|BL_ORD_ID|<oid>` id is the OID, its title the stored one (`title`)
     /// or, where that is empty, the Bioseq's generated title, which NCBI makes from the taxid and
     /// the taxonomy database (`taxdb_found`) where it has them: LOSAT does not
     /// (`TITLE_FROM_TAXONOMY`, refused where the report shows the title).
@@ -370,7 +370,7 @@ impl TaxDefline {
     ///         }
     /// ```
     pub fn of_stored(
-        ordinal: u32,
+        oid: crate::seqdb::Oid,
         title: &[u8],
         taxid: i32,
         protein: bool,
@@ -391,7 +391,7 @@ impl TaxDefline {
             generated_title(title, protein, &ids)
         };
         TaxDefline {
-            label: ordinal.to_string().into_bytes(),
+            label: oid.get().to_string().into_bytes(),
             title,
             taxid,
         }
@@ -465,9 +465,9 @@ impl std::error::Error for TaxReportRefusal {}
 pub enum TaxPlain<'a> {
     /// A `-subject` record: its local id `Subject_N` and title.
     Record { local_id: &'a [u8], title: &'a [u8] },
-    /// The database sequence `ordinal`: its stored title and taxid.
+    /// The database sequence `oid`: its stored title and taxid.
     Stored {
-        ordinal: u32,
+        oid: crate::seqdb::Oid,
         title: &'a [u8],
         taxid: i32,
     },
@@ -491,15 +491,8 @@ impl TaxSource<'_> {
             (None, TaxPlain::Record { local_id, title }) => {
                 vec![TaxDefline::of_record(local_id, title, protein)]
             }
-            (
-                None,
-                TaxPlain::Stored {
-                    ordinal,
-                    title,
-                    taxid,
-                },
-            ) => vec![TaxDefline::of_stored(
-                ordinal,
+            (None, TaxPlain::Stored { oid, title, taxid }) => vec![TaxDefline::of_stored(
+                oid,
                 title,
                 taxid,
                 protein,
@@ -511,7 +504,7 @@ impl TaxSource<'_> {
     /// How LOSAT's refusals name the subject.
     fn name(&self) -> SubjectName {
         match (self.parsed, self.plain) {
-            (_, TaxPlain::Stored { ordinal, .. }) => SubjectName::Database(ordinal),
+            (_, TaxPlain::Stored { oid, .. }) => SubjectName::Database(oid),
             (Some(subject), TaxPlain::Record { .. }) => SubjectName::Record(
                 String::from_utf8_lossy(&subject.alignment_fasta()).into_owned(),
             ),
@@ -525,7 +518,7 @@ impl TaxSource<'_> {
 /// How LOSAT's refusals name a subject (`TaxSource::name`).
 #[derive(Debug)]
 enum SubjectName {
-    Database(u32),
+    Database(crate::seqdb::Oid),
     Record(String),
 }
 
@@ -598,8 +591,9 @@ impl TaxSubjects for SubjectTable<'_> {
     fn refused(&self, subject: usize, reason: &str) -> anyhow::Error {
         let program = &self.program;
         anyhow::Error::new(TaxReportRefusal(match self.subjects.get(&subject) {
-            Some((_, SubjectName::Database(ordinal))) => format!(
-                "database sequence {ordinal} {reason}; this is not supported by LOSAT's {program}"
+            Some((_, SubjectName::Database(oid))) => format!(
+                "database sequence {} {reason}; this is not supported by LOSAT's {program}",
+                oid.get()
             ),
             Some((_, SubjectName::Record(name))) => format!(
                 "the subject record {name} {reason}, which is not supported by LOSAT's {program}"

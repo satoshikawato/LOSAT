@@ -56,6 +56,7 @@ pub mod taxdb;
 pub mod volume;
 
 pub use filter::{DbList, ListWarning, SeqidList, TaxidList};
+pub(crate) use filter::{Oid, OidMap};
 
 #[cfg(test)]
 mod damaged_files_tests;
@@ -1831,7 +1832,7 @@ impl SeqDb {
                 self.num_seqs
             )));
         }
-        let at = self.locate_oid(self.oid(ordinal))?;
+        let at = self.locate_oid(self.oid(ordinal).get())?;
         Ok(SeqLocation { id: ordinal, ..at })
     }
 

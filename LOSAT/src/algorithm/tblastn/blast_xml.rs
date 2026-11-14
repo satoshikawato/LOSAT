@@ -280,20 +280,20 @@ pub(super) fn prepare(
         let record = subject_records
             .get(oid)
             .context("TBLASTN subject OID out of range")?;
-        subject_names[oid] = Some(match shown.ordinal(oid) {
+        subject_names[oid] = Some(match shown.oid(oid) {
             None => match record.believed() {
                 Some(ids) => SubjectNames::of_believed(ids, record.title(), false),
                 None => SubjectNames::of_record(record.local_id.as_bytes(), record.title(), false),
             }
             .map_err(|refusal| refusal.error(PROGRAM, "a subject title"))?,
             // The taxid is shown by XML2 alone (`taxa` is empty for the other formats).
-            Some(ordinal) => match shown.parsed_subject(oid) {
+            Some(db_oid) => match shown.parsed_subject(oid) {
                 Some(parsed) => SubjectNames::of_parsed(
                     parsed,
                     taxa.parsed_taxonomy.get(oid).map_or(&[], Vec::as_slice),
                 ),
                 None => SubjectNames::of_database_sequence(
-                    ordinal,
+                    db_oid,
                     record.title(),
                     taxa.taxids.get(oid).copied().unwrap_or(0),
                     taxa.taxonomy.get(oid).cloned().unwrap_or_default(),

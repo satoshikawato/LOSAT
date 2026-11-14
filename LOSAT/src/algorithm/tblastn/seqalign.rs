@@ -118,9 +118,9 @@ pub(super) fn query_records_of<'a>(
         let oid = usize::try_from(list.oid).context("negative TBLASTN subject OID")?;
         let subject = subjects.len() as u32;
         subjects.push(SubjectRecord {
-            id: match (shown.parsed_subject(oid), shown.ordinal(oid)) {
+            id: match (shown.parsed_subject(oid), shown.oid(oid)) {
                 (Some(parsed), _) => SeqId::Db(parsed.alignment_id()),
-                (None, Some(ordinal)) => SeqId::BlOrdId(ordinal),
+                (None, Some(db_oid)) => SeqId::BlOrdId(db_oid),
                 (None, None) => SeqId::Local(&subject_records[oid].local_id),
             },
             searched_length: i32::try_from(subject_letters.length(oid))?,

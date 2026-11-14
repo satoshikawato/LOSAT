@@ -110,6 +110,12 @@ pub(super) struct BlastpDatabase {
 }
 
 impl BlastpDatabase {
+    /// The OIDs of the database's ordinal ids, which name the reported sequences without
+    /// parsed Seq-ids (`gnl|BL_ORD_ID|n`).
+    pub(super) fn oid_map(&self) -> crate::seqdb::OidMap<'_> {
+        self.db.oid_map()
+    }
+
     /// `-show_gis` for the subjects of the reports (`ParsedSubject::showing_gis`).
     pub(super) fn showing_gis(mut self, show_gis: bool) -> Self {
         self.db.set_reports_show_gis(show_gis);
@@ -970,7 +976,7 @@ impl ListedSubjects {
             records.push(FastaRecord::new(
                 // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the
                 // OID (line DI-8).
-                format!("gnl|BL_ORD_ID|{}", database.db.oid(ordinal)),
+                database.db.oid(ordinal).fasta_id(),
                 &stored.title,
                 &letters,
             ));

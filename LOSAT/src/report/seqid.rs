@@ -74,9 +74,10 @@ pub enum SeqId<'a> {
     ///                         int vol_oid = dbt.GetTag().GetId();
     ///                         dbt.SetTag().SetId(m_VolStart + vol_oid);
     /// ```
-    /// The tag is the sequence's ordinal ID in the opened database (its volume's start plus
-    /// its position in the volume).
-    BlOrdId(u32),
+    /// The tag is the sequence's OID in the opened database (its volume's start plus its
+    /// position in the volume), not its rank in a list that restricts the search
+    /// (`seqdb::Oid`).
+    BlOrdId(crate::seqdb::Oid),
     /// A Seq-id of a database sequence with parsed Seq-ids: the Seq-align id that
     /// `seqid::DeflineSet::alignment_id` chooses (or the id a format shows).
     Db(&'a ParsedSeqId),
@@ -103,7 +104,7 @@ impl SeqId<'_> {
             SeqId::Local(id) => out.extend_from_slice(id.as_bytes()),
             SeqId::BlOrdId(oid) => {
                 out.extend_from_slice(b"BL_ORD_ID:");
-                out.extend_from_slice(oid.to_string().as_bytes());
+                out.extend_from_slice(oid.get().to_string().as_bytes());
             }
             SeqId::Db(id) => crate::seqid::label::content(id, true, out),
         }
@@ -132,7 +133,7 @@ impl SeqId<'_> {
                 enc.variant("Object-id", "id", 0);
                 // An ordinal ID is an `Int4` in NCBI (`int oid`); a database has fewer than
                 // 2^31 sequences.
-                enc.int(oid as i32);
+                enc.int(oid.get() as i32);
                 enc.end_variant();
                 enc.end_member();
                 enc.end_sequence();

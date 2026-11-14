@@ -6789,9 +6789,14 @@ fn post_process_hits_and_write(
             //         }
             // ```
             // The Seq-annot of each query with alignments (`seqalign`).
-            let subjects = match (report.database_ordinals, report.database) {
-                (Some(ordinals), Some(database)) => SubjectNames::Database {
+            let subjects = match (
+                report.database_ordinals,
+                report.database,
+                report.database_reader,
+            ) {
+                (Some(ordinals), Some(database), Some(reader)) => SubjectNames::Database {
                     ordinals,
+                    oids: reader.oid_map(),
                     title: &database.definition,
                     parsed: report.database_parsed,
                 },
@@ -6815,9 +6820,14 @@ fn post_process_hits_and_write(
             let handle = report
                 .archive
                 .expect("a BLAST archive request has its handle");
-            let subjects = match (report.database_ordinals, report.database) {
-                (Some(ordinals), Some(database)) => SubjectNames::Database {
+            let subjects = match (
+                report.database_ordinals,
+                report.database,
+                report.database_reader,
+            ) {
+                (Some(ordinals), Some(database), Some(reader)) => SubjectNames::Database {
                     ordinals,
+                    oids: reader.oid_map(),
                     title: &database.definition,
                     parsed: report.database_parsed,
                 },
@@ -6882,6 +6892,7 @@ fn post_process_hits_and_write(
                         report.queries_before,
                         SubjectNames::Database {
                             ordinals,
+                            oids: reader.oid_map(),
                             title: &database.definition,
                             parsed: report.database_parsed,
                         },
@@ -7032,17 +7043,20 @@ fn post_process_hits_and_write(
             } else {
                 (Vec::new(), Vec::new())
             };
-            let xml_subjects = match report.database_ordinals {
-                Some(ordinals) if is_database => crate::report::blast_xml::XmlSubjects::Database {
-                    ordinals,
-                    titles: crate::report::blast_xml::XmlTitles::Records(subject_records),
-                    // Only XML2 shows the taxid.
-                    taxids: &xml_taxids,
-                    taxonomy: &xml_taxonomy,
-                    length: &database_length,
-                    parsed: report.database_parsed,
-                    parsed_taxonomy: &xml_parsed_taxonomy,
-                },
+            let xml_subjects = match (report.database_ordinals, report.database_reader) {
+                (Some(ordinals), Some(reader)) if is_database => {
+                    crate::report::blast_xml::XmlSubjects::Database {
+                        ordinals,
+                        oids: reader.oid_map(),
+                        titles: crate::report::blast_xml::XmlTitles::Records(subject_records),
+                        // Only XML2 shows the taxid.
+                        taxids: &xml_taxids,
+                        taxonomy: &xml_taxonomy,
+                        length: &database_length,
+                        parsed: report.database_parsed,
+                        parsed_taxonomy: &xml_parsed_taxonomy,
+                    }
+                }
                 _ => crate::report::blast_xml::XmlSubjects::Records {
                     records: subject_records,
                     length: &record_length,
@@ -7287,10 +7301,11 @@ fn write_custom_tabular(
             .subject_taxdb
             .map(|taxdb| taxdb.report_names("BLASTN")),
     };
-    let subjects = match report.database_ordinals {
-        Some(ordinals) if report.database_reader.is_some() => TabularSubjects::Database {
+    let subjects = match (report.database_ordinals, report.database_reader) {
+        (Some(ordinals), Some(reader)) => TabularSubjects::Database {
             ids: subject_ids,
             ordinals,
+            oids: reader.oid_map(),
             records: report.subjects.records(),
             parsed: report.database_parsed,
             lengths: &lengths,

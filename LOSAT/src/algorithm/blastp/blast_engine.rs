@@ -13634,7 +13634,8 @@ fn run_call(
     let subject_keys = psi_round::SubjectKeys {
         listed_ordinals: listed_subjects
             .as_ref()
-            .map(|listed| listed.ordinals.as_slice()),
+            .zip(database)
+            .map(|(listed, database)| (listed.ordinals.as_slice(), database.oid_map())),
         parsed: listed_titles
             .as_ref()
             .map_or(&[][..], |titles| titles.parsed.as_slice()),
@@ -14469,11 +14470,16 @@ fn run_call(
                 // ```
                 // The Seq-annot of each query with alignments (`seqalign`).
                 let mut writer = format.sink.open()?;
-                let subjects = match (listed_subjects.as_ref(), pairwise_database.as_ref()) {
-                    (Some(listed), Some(database)) => {
+                let subjects = match (
+                    listed_subjects.as_ref(),
+                    pairwise_database.as_ref(),
+                    database,
+                ) {
+                    (Some(listed), Some(pairwise), Some(database)) => {
                         crate::report::record::SubjectNames::Database {
                             ordinals: &listed.ordinals,
-                            title: &database.definition,
+                            oids: database.oid_map(),
+                            title: &pairwise.definition,
                             parsed: listed_parsed,
                         }
                     }
@@ -14511,11 +14517,16 @@ fn run_call(
                     .as_ref()
                     .expect("a BLAST archive request has its handle");
                 let mut writer = format.sink.open()?;
-                let subject_names = match (listed_subjects.as_ref(), pairwise_database.as_ref()) {
-                    (Some(listed), Some(database)) => {
+                let subject_names = match (
+                    listed_subjects.as_ref(),
+                    pairwise_database.as_ref(),
+                    database,
+                ) {
+                    (Some(listed), Some(pairwise), Some(database)) => {
                         crate::report::record::SubjectNames::Database {
                             ordinals: &listed.ordinals,
-                            title: &database.definition,
+                            oids: database.oid_map(),
+                            title: &pairwise.definition,
                             parsed: listed_parsed,
                         }
                     }
@@ -14661,25 +14672,31 @@ fn run_call(
                     }
                     _ => (Vec::new(), Vec::new(), Vec::new(), Default::default()),
                 };
-                let xml_subjects = match (listed_subjects.as_ref(), listed_titles.as_ref()) {
-                    // The stored titles by rank, of the records or of LOSAT_X_BPLISTEDLEAN
-                    // (`subject_titles`, above).
-                    (Some(listed), Some(_)) => crate::report::blast_xml::XmlSubjects::Database {
-                        ordinals: &listed.ordinals,
-                        titles: crate::report::blast_xml::XmlTitles::Shared(&subject_titles),
-                        // Only XML2 shows the taxid.
-                        taxids: &xml_taxids,
-                        taxonomy: &xml_taxonomy,
-                        length: &database_length,
-                        parsed: listed_parsed,
-                        parsed_taxonomy: &xml_parsed_taxonomy,
-                    },
-                    _ => crate::report::blast_xml::XmlSubjects::Records {
-                        protein: true,
-                        records: subject_records,
-                        length: &record_length,
-                    },
-                };
+                let xml_subjects =
+                    match (listed_subjects.as_ref(), listed_titles.as_ref(), database) {
+                        // The stored titles by rank, of the records or of LOSAT_X_BPLISTEDLEAN
+                        // (`subject_titles`, above).
+                        (Some(listed), Some(_), Some(database)) => {
+                            crate::report::blast_xml::XmlSubjects::Database {
+                                ordinals: &listed.ordinals,
+                                oids: database.oid_map(),
+                                titles: crate::report::blast_xml::XmlTitles::Shared(
+                                    &subject_titles,
+                                ),
+                                // Only XML2 shows the taxid.
+                                taxids: &xml_taxids,
+                                taxonomy: &xml_taxonomy,
+                                length: &database_length,
+                                parsed: listed_parsed,
+                                parsed_taxonomy: &xml_parsed_taxonomy,
+                            }
+                        }
+                        _ => crate::report::blast_xml::XmlSubjects::Records {
+                            protein: true,
+                            records: subject_records,
+                            length: &record_length,
+                        },
+                    };
                 let query_names = crate::report::record::QueryNames {
                     records: query_records,
                     searched_lengths: &query_lengths,
@@ -15079,10 +15096,11 @@ fn run_call(
                         .map(|taxdb| taxdb.report_names(args.app.name())),
                 };
                 let tabular_subjects = match (listed_subjects.as_ref(), database) {
-                    (Some(listed), Some(_)) => super::tabular::TabularSubjects::Database {
+                    (Some(listed), Some(database)) => super::tabular::TabularSubjects::Database {
                         ids: &subject_ids,
                         accessions: &subject_accessions,
                         ordinals: &listed.ordinals,
+                        oids: database.oid_map(),
                         titles: &subject_stitles,
                         parsed: listed_parsed,
                         length: &subject_length,

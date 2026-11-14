@@ -712,7 +712,7 @@ fn write_blastx_tax_report(
             title: subjects[oid].title.as_bytes(),
         },
         ShownSubjects::Database { reported, .. } => TaxPlain::Stored {
-            ordinal: reported.ordinal(oid),
+            oid: reported.oid(oid),
             title: reported
                 .stored_titles()
                 .get(oid)

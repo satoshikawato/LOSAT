@@ -261,7 +261,7 @@ fn subject_names(
         ShownSubjects::Database { reported, .. } => match reported.parsed_subject(oid) {
             Some(parsed) => SubjectNames::of_parsed(parsed, reported.parsed_taxonomy(oid)),
             None => SubjectNames::of_database_sequence(
-                reported.ordinal(oid),
+                reported.oid(oid),
                 &reported.stored_titles()[oid],
                 // XML2 and JSON alone show the taxid (`ReportedSubjects` reads it for them only).
                 reported.taxid(oid),

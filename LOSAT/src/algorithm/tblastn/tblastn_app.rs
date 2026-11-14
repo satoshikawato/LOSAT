@@ -2367,6 +2367,7 @@ fn search(
                         .as_ref()
                         .expect("a database search has its Database: lines"),
                     reported,
+                    oids: database.oid_map(),
                 },
             ),
             _ => (

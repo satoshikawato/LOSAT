@@ -3,6 +3,7 @@
 //! (`of18.tsv`: the probe's `t2` database).
 
 use super::*;
+use crate::api::local_blast::OutputSink;
 use crate::seqdb::taxdb::LazyTaxDb;
 use crate::seqdb::SearchPath;
 use std::path::{Path, PathBuf};
@@ -73,8 +74,10 @@ fn report(
 ) -> (Vec<u8>, Vec<Step>) {
     let (steps, text) = organism_report(hsps, subjects, &mut lookups(names)).unwrap();
     let mut out = Vec::new();
-    text.insert_into(&mut crate::cli::NcbiOstream::new(Box::new(&mut out)))
-        .unwrap();
+    text.insert_into(
+        &mut crate::cli::NcbiOstream::sink(&mut OutputSink::Writer(&mut out)).unwrap(),
+    )
+    .unwrap();
     (out, steps)
 }
 
@@ -445,11 +448,11 @@ fn a_title_that_throws_drops_its_subject_before_it_widens() {
 
 /// A writer into a buffer that other writers share: the merged stream of a test.
 #[derive(Clone, Default)]
-struct Merged(std::rc::Rc<std::cell::RefCell<Vec<u8>>>);
+struct Merged(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
 
 impl Write for Merged {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.0.borrow_mut().extend_from_slice(buf);
+        self.0.lock().unwrap().extend_from_slice(buf);
         Ok(buf.len())
     }
 
@@ -472,7 +475,7 @@ fn the_texts_of_a_subjects_read_come_before_its_lookups() {
     let queries = [TaxQuery {
         title: b"q",
         length: 250,
-        hsps: vec![hsp(0, 3e-171, 461.0), hsp(1, 1e-3, 30.0)],
+        hsps: Some(vec![hsp(0, 3e-171, 461.0), hsp(1, 1e-3, 30.0)]),
     }];
     let report = TaxReport::new(&queries, &subjects, lookups(names.as_ref())).unwrap();
     let reads = vec![vec![(0, b"read A\n".to_vec()), (1, b"read B\n".to_vec())]];
@@ -481,14 +484,15 @@ fn the_texts_of_a_subjects_read_come_before_its_lookups() {
     report
         .write_query(
             0,
-            &mut crate::cli::NcbiOstream::new(Box::new(merged.clone())),
+            &mut crate::cli::NcbiOstream::sink(&mut OutputSink::Writer(&mut merged.clone()))
+                .unwrap(),
             &mut merged.clone(),
             Some((&mut cursor, 0)),
             b"q",
             250,
         )
         .unwrap();
-    let merged = String::from_utf8(merged.0.take()).unwrap();
+    let merged = String::from_utf8(std::mem::take(&mut *merged.0.lock().unwrap())).unwrap();
     let start = merged.find("Length=250\n").unwrap() + "Length=250\n".len();
     let end = merged
         .find(&format!("\n{}Organism Report", " ".repeat(43)))
@@ -590,4 +594,61 @@ fn a_registry_read_posts_as_ncbi() {
         registry_posts(&read, "blastp"),
         b"Error: (110.4) [blastp] Error reading the registry after line 1: \n".to_vec()
     );
+}
+
+/// A query whose batch NCBI did not search (no valid context) has a null Seq-align-set, which
+/// NCBI's report dereferences after the query's `Query=` block (NCBI BLAST+ 2.17.0, line RG T2
+/// fix 5's `T/t2/fix5/probe_d2.sh`: `Length=60` and then NCBI's null pointer exception, exit
+/// status 255, in all five programs): the report writes up to there and refuses, while a searched
+/// query without hits gets its headers.
+#[test]
+fn a_query_that_ncbi_did_not_search_is_refused_after_its_query_block() {
+    let subjects = Subjects(vec![vec![line("AAA00001", "a_title", 9606)]]);
+    let queries = [
+        TaxQuery {
+            title: b"q1",
+            length: 250,
+            hsps: Some(Vec::new()),
+        },
+        TaxQuery {
+            title: b"xn all N",
+            length: 60,
+            hsps: None,
+        },
+    ];
+    let report = TaxReport::new(&queries, &subjects, lookups(None)).unwrap();
+    let mut out = Vec::new();
+    for q_idx in 0..2 {
+        let mut sink = OutputSink::Writer(&mut out);
+        let written = report.write_query(
+            q_idx,
+            &mut crate::cli::NcbiOstream::sink(&mut sink).unwrap(),
+            &mut io::sink(),
+            None,
+            queries[q_idx].title,
+            queries[q_idx].length,
+        );
+        let text = String::from_utf8_lossy(&out).into_owned();
+        match q_idx {
+            0 => {
+                written.unwrap();
+                assert!(text.contains("Organism Report"), "{text}");
+            }
+            _ => {
+                let error = written.unwrap_err();
+                assert!(error.is::<TaxReportRefusal>(), "{error}");
+                assert!(
+                    error
+                        .to_string()
+                        .ends_with("this is not supported by LOSAT's BLASTP"),
+                    "{error}"
+                );
+                let caption = format!("\n{}Tax BLAST report{}\n", " ".repeat(42), " ".repeat(42));
+                assert!(
+                    text.ends_with(&format!("{caption}\nQuery= xn all N\n\nLength=60\n")),
+                    "{text}"
+                );
+            }
+        }
+    }
 }

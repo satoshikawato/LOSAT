@@ -859,7 +859,7 @@ fn process_cd_query(
         }
         // (A NaN E-value or bit score, `NOT-A-NUMBER` in the text, is kept: `domains::calculate`
         // sorts the hits as NCBI's `std::sort` does and refuses only where that sort would read
-        // outside its vector; the DOMAINS line prints it `-nan`, `asn_text_reader::NCBI_NAN`.)
+        // outside its vector; the DOMAINS line prints it `-nan`, `ncbi_str::NCBI_NAN`.)
         let dom = match (dom, &align.segs) {
             (Some(mut dom), _) => {
                 dom.pssm_id = pssm_id;

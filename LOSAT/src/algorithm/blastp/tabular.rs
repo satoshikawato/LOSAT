@@ -113,6 +113,8 @@ pub(super) enum TabularSubjects<'a> {
         ids: &'a [Arc<[u8]>],
         accessions: &'a [Option<[Arc<[u8]>; 2]>],
         ordinals: &'a [u32],
+        /// The OID of each ordinal id, which names a sequence without parsed Seq-ids.
+        oids: crate::seqdb::OidMap<'a>,
         titles: &'a [Arc<[u8]>],
         parsed: &'a [Option<Arc<ParsedSubject>>],
         length: &'a dyn Fn(usize) -> usize,
@@ -219,6 +221,7 @@ impl<'a> TabularSubjects<'a> {
                 ids,
                 accessions,
                 ordinals,
+                oids: _,
                 titles,
                 parsed,
                 length,
@@ -484,16 +487,19 @@ pub(super) fn write_blastp_tax_report(
                 .get(q_idx)
                 .map_or(&b""[..], |title| title.as_ref()),
             length: record_lengths.get(q_idx).copied().unwrap_or_default(),
-            hsps: hit_list
-                .iter()
-                .flat_map(reported)
-                .flat_map(|hsp_list| &hsp_list.hsps)
-                .map(|hsp| TaxHsp {
-                    subject: hsp.s_idx as usize,
-                    evalue: hsp.e_value,
-                    bit_score: hsp.bit_score,
-                })
-                .collect(),
+            // A query of a batch that NCBI did not search has no Seq-align-set.
+            hsps: (!tab.unsearched.get(q_idx).copied().unwrap_or(false)).then(|| {
+                hit_list
+                    .iter()
+                    .flat_map(reported)
+                    .flat_map(|hsp_list| &hsp_list.hsps)
+                    .map(|hsp| TaxHsp {
+                        subject: hsp.s_idx as usize,
+                        evalue: hsp.e_value,
+                        bit_score: hsp.bit_score,
+                    })
+                    .collect()
+            }),
         })
         .collect();
     let plain = |s_idx: usize| match &tab.subjects {
@@ -503,11 +509,12 @@ pub(super) fn write_blastp_tax_report(
         },
         TabularSubjects::Database {
             ordinals,
+            oids,
             titles,
             taxonomy,
             ..
         } => TaxPlain::Stored {
-            ordinal: ordinals.get(s_idx).copied().unwrap_or_default(),
+            oid: oids.oid(ordinals.get(s_idx).copied().unwrap_or_default()),
             title: titles.get(s_idx).map_or(&[][..], |title| title),
             taxid: taxonomy.get(s_idx).map_or(0, |taxonomy| taxonomy.taxid),
         },

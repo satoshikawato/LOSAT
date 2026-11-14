@@ -36,8 +36,8 @@
 //! them with `#` and posts a warning with its stack of the read). NCBI's BLAST XML writers produce
 //! none of them.
 
-use super::asn_text_reader::{string_to_double_posix, AsnSource, RealRefusal};
-use crate::ncbi_str::is_space;
+use super::asn_text_reader::AsnSource;
+use crate::ncbi_str::{is_space, string_to_double_posix};
 
 /// A failure while a document is read.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1714,14 +1714,8 @@ impl<S: AsnSource> XmlReader<S> {
     pub(crate) fn real(&mut self) -> Result<f64> {
         let mut word = Vec::new();
         self.read_word(&mut word)?;
-        let (value, mut end) = string_to_double_posix(&word, true).map_err(|refusal| {
-            unsupported(match refusal {
-                RealRefusal::Digits => "a REAL of more than 18 significant digits",
-                RealRefusal::ExponentRange => {
-                    "a REAL whose exponent is outside the range of NCBI's int arithmetic"
-                }
-            })
-        })?;
+        let read = string_to_double_posix(&word, true);
+        let (value, mut end) = (read.value, read.end);
         while end < word.len() && is_white_space(word[end]) {
             end += 1;
         }

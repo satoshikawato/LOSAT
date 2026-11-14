@@ -1931,7 +1931,7 @@ fn ncbi_compressed_lookup_tables(
     if query_chunk {
         return Ok(vec![0..locations.len()]);
     }
-    let sizes = protein_query_split_sizes("BLASTP", 10000)?;
+    let sizes = protein_query_split_sizes(10000)?;
     // The first lookup segment of query `q_idx` or of a query after it.
     let first_segment = |q_idx: usize| {
         let context = contexts.partition_point(|context| (context.q_idx as usize) < q_idx);
@@ -5398,17 +5398,13 @@ fn write_run_error_archive(
 
 /// The `-out` file, created (`-`: standard output).
 fn open_out_file(args: &BlastpArgs) -> Result<Option<std::io::BufWriter<std::fs::File>>> {
-    if let Some(path) = args.out.as_deref() {
-        crate::blastinput::input_files::check_utf8_file_name(path, "out", args.app.name())?;
-    }
-    Ok(
-        match args.out.as_deref().filter(|path| path.as_os_str() != "-") {
-            Some(path) => Some(std::io::BufWriter::new(
-                std::fs::File::create(path).map_err(|_| crate::cli::inaccessible("out", path))?,
-            )),
-            None => None,
-        },
-    )
+    args.out
+        .as_deref()
+        .filter(|path| path.as_os_str() != "-")
+        .map(|path| {
+            crate::cli::create_out_file(path, Some(args.app.name())).map(std::io::BufWriter::new)
+        })
+        .transpose()
 }
 
 /// The subjects of the command line's `-subject`, read where NCBI's handler of the
@@ -5461,7 +5457,6 @@ fn read_cli_subjects(
     let subject_range = seq_range::parse_optional_range(
         args.subject_loc.as_deref(),
         seq_range::RangeRole::Subject,
-        args.app.name(),
     )?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:242-246
     // ```c++
@@ -5620,31 +5615,20 @@ fn open_search_database(
     //     ...
     //    		string resolved = SeqDB_ResolveDbPath("taxdb.bti");
     // ```
-    // A custom tabular field list that shows a name of the taxonomy database asks whether
-    // `taxdb.bti` is on the search path: its formatters warn without it (the plural names). A
-    // `-db` search asks its database; a `-subject` search the search path of NCBI's databases,
-    // as BLASTN's (`algorithm::blastn::tabular`).
-    if database.is_none()
-        && outputs
-            .formats
-            .iter()
-            .filter_map(|format| super::tabular::custom_tabular_spec(format.outfmt))
-            .any(|spec| spec.needs().taxonomy_names)
-    {
-        // The organism report's lookups open the run's own database.
-        if outputs
-            .formats
-            .iter()
-            .filter_map(|format| super::tabular::custom_tabular_spec(format.outfmt))
-            .any(|spec| spec.kind == crate::report::tabular::TabularKind::TaxReport)
-        {
-            resolved.subject_taxdb =
-                crate::algorithm::common::database::SubjectTaxdb::of(settings, args.app.name())?;
-            resolved.subject_taxdb_found = resolved.subject_taxdb.is_some();
-        } else {
-            resolved.subject_taxdb_found =
-                crate::algorithm::common::database::subject_taxdb_found(settings, args.app.name())?;
-        }
+    // A custom tabular field list that looks every taxid up (the plural names of the taxonomy
+    // database, the organism report) asks whether `taxdb.bti` is on the search path: the plural
+    // names' formatters warn without it. A `-db` search asks its database (`BlastpDatabase::
+    // taxdb_found`, at the search); a `-subject` search the search path of NCBI's databases, as
+    // BLASTN's (`subject_taxonomy`).
+    if database.is_none() {
+        subject_taxonomy(
+            args,
+            resolved,
+            Some(&crate::algorithm::common::database::TaxdbSetting::of(
+                settings,
+            )),
+            outputs,
+        )?;
     }
     // LOSAT's refusals of a database for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
@@ -5664,6 +5648,29 @@ fn open_search_database(
         }
     }
     Ok(database)
+}
+
+/// What the reports of `outputs` of a `-subject` search ask of the taxonomy database, through
+/// `setting` (`common::database::subject_taxonomy`): asked by the command line
+/// (`open_search_database`) and by a search of records (`run_local_formats`) at the same point,
+/// after the options are processed.
+fn subject_taxonomy(
+    args: &BlastpArgs,
+    resolved: &mut ResolvedBlastpArgs,
+    setting: Option<&crate::algorithm::common::database::TaxdbSetting>,
+    outputs: &ReportOutputs<'_>,
+) -> Result<()> {
+    let taxonomy = crate::algorithm::common::database::subject_taxonomy(
+        setting,
+        args.app.name(),
+        outputs
+            .formats
+            .iter()
+            .filter_map(|format| super::tabular::custom_tabular_spec(format.outfmt)),
+    )?;
+    resolved.subject_taxdb = taxonomy.taxdb;
+    resolved.subject_taxdb_found = taxonomy.found.unwrap_or(false);
+    Ok(())
 }
 
 /// The part of `run` after the files are opened: NCBI's processing of the options,
@@ -5938,6 +5945,7 @@ pub fn run_local(
     if args.db.is_some() {
         bail!("-db (a database search) is not supported in the browser yet");
     }
+    report_formats(&args, outputs)?;
     // The BLAST archive (outfmt 11) among the formats: its request, the refusals of what LOSAT
     // cannot write (the titles with the query batches, `search`), and a diagnostics stream that
     // saves the messages.
@@ -5984,12 +5992,13 @@ fn run_local_formats(
     subject_label: &str,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
+    // The thread count is checked before the inputs are read, as on the command line (`run`).
+    crate::utils::threading::validate_threads(args.num_threads)?;
     // The subject range and its record checks come where NCBI reads the subjects (`run`):
     // the messages of each record read, up to a record whose range starts past its end.
     let subject_range = seq_range::parse_optional_range(
         args.subject_loc.as_deref(),
         seq_range::RangeRole::Subject,
-        "BLASTP",
     )?;
     for record in
         &subject_records[..seq_range::subjects_read(subject_records, subject_range.as_ref())]
@@ -6017,7 +6026,13 @@ fn run_local_formats(
     if subject_records.is_empty() {
         return Err(crate::blastinput::app::empty_subjects_error());
     }
-    let args = resolve_for_formats(&args, outputs)?;
+    // `-out` (`run_to_file`) is made where the command line opens it (`run`).
+    outputs.open_out()?;
+    let mut resolved = resolve_for_formats(&args, outputs)?;
+    // The taxonomy database of the reports, where the command line asks (`open_search_database`).
+    subject_taxonomy(&args, &mut resolved, args.taxdb_setting.as_ref(), outputs)?;
+    let xinclude = xinclude_format(&args, outputs)?;
+    let args = resolved;
     if args.app == BlastpApp::Psiblast {
         psiblast_check_subject_letters(&subjects.records)?;
     }
@@ -6029,7 +6044,7 @@ fn run_local_formats(
         None,
         subject_label,
         outputs,
-        None,
+        xinclude.as_ref(),
     )
 }
 
@@ -6057,6 +6072,7 @@ pub fn run_local_database(
     // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
     // parser has checked it, a caller of `run_local` has not.
     super::args::BLASTP_TASK.check(&mut args.task)?;
+    report_formats(&args, outputs)?;
     let archive_requested = outputs
         .formats
         .iter()
@@ -6090,9 +6106,12 @@ fn search_database(
     let list = args
         .db_filter
         .resolve(&settings, &mut *outputs.diagnostics)?;
+    // `-out` (`run_to_file`) is made where the command line opens it (`run`).
+    outputs.open_out()?;
     let mut resolved = resolve_for_formats(&args, outputs)?;
     let database = open_search_database(&args, &mut resolved, list.as_ref(), &settings, outputs)?
         .ok_or_else(crate::blastinput::app::missing_subject_error)?;
+    let xinclude = xinclude_format(&args, outputs)?;
     search(
         resolved,
         query_records,
@@ -6104,8 +6123,27 @@ fn search_database(
         Some(&database),
         "",
         outputs,
-        None,
+        xinclude.as_ref(),
     )
+}
+
+/// The first requested format that has no report after the formatting handler's checks (an
+/// XInclude format, 13 or 14, without a file: `app::report_format`), which `search` refuses where
+/// the command line refuses its `-outfmt` (after `Query is Empty!` and the subjects without
+/// letters).
+fn xinclude_format(
+    args: &BlastpArgs,
+    outputs: &ReportOutputs<'_>,
+) -> Result<Option<crate::blastinput::app::FormatChoice>> {
+    use crate::blastinput::app;
+    for format in &outputs.formats {
+        let choice = app::parse_formatting_string(format.outfmt)?;
+        let out = format.side_out(args.out.as_deref());
+        if app::report_format(&choice, app::Program::Blastp, out)?.is_none() {
+            return Ok(Some(choice));
+        }
+    }
+    Ok(None)
 }
 
 /// LOSAT's rejection of a protein subject title of punctuation that NCBI's
@@ -6226,6 +6264,23 @@ struct BlastpRanges<'a> {
     split_search_spaces: Option<&'a [i64]>,
 }
 
+/// Each requested format as NCBI parses `-outfmt` before its option handlers run, and LOSAT's
+/// rejection of a format that its BLASTP does not write (`app::report_format`): the command line's
+/// checks before it opens `-out` (`run`). The formatting handler's come after
+/// (`resolve_for_formats`).
+fn report_formats(args: &BlastpArgs, outputs: &ReportOutputs<'_>) -> Result<()> {
+    use crate::blastinput::app;
+    for format in &outputs.formats {
+        let choice = app::parse_formatting_string(format.outfmt)?;
+        app::report_format(
+            &choice,
+            app::Program::Blastp,
+            format.side_out(args.out.as_deref()),
+        )?;
+    }
+    Ok(())
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
 // ```c
 // int hitlist_size = opt.GetHitlistSize();
@@ -6245,9 +6300,11 @@ fn resolve_for_formats(
         let choice = crate::blastinput::app::parse_formatting_string(&requested.outfmt)?;
         let program = crate::blastinput::app::Program::Blastp;
         let out = format.side_out(args.out.as_deref());
+        // A format without a report: NCBI's formatting handler refuses SAM, AIRR and FASTA here;
+        // the XInclude formats without a file come after `Query is Empty!`, in `search`
+        // (`xinclude_format`).
         if crate::blastinput::app::report_format(&choice, program, out)?.is_none() {
             crate::blastinput::app::formatting_handler_check(&choice, program)?;
-            crate::blastinput::app::xinclude_check(&choice)?;
         }
         // The options handlers of every format (`check_options`, also through `resolve`) make
         // the formatting handler's checks, the custom delimiter's among them.
@@ -6457,7 +6514,7 @@ fn psiblast_stop_at_invalid_query(
     let (input_start, searched_start) = batches.starts[batch];
     let span = batches.searched_span(searched_start);
     let query_length = searched_queries[searched_start].seq().len();
-    let error = match protein_query_split_sizes(args.app.name(), 10000) {
+    let error = match protein_query_split_sizes(10000) {
         _ if empty_database => crate::cli::NativeError {
             exit: 2,
             message: "BLAST Database error: OID not found\n".to_string(),
@@ -6725,7 +6782,7 @@ fn search(
             seq_range::QueryInput::whole(query_records),
         ),
     };
-    check_blastp_environment(args.app, database.is_none(), outputs.only_archive())?;
+    check_blastp_environment(args.app, database.is_none())?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-259
     // ```c++
     //         formatter.PrintProlog();
@@ -6761,6 +6818,8 @@ fn search(
         //         CBlastFastaInputSource fasta(m_CmdLineArgs->GetInputStream(), iconfig);
         //         CBlastInput input(&fasta, m_CmdLineArgs->GetQueryBatchSize());
         // ```
+        // NCBI never splits an RPS-BLAST query, so it does not read OVERLAP_CHUNK_SIZE for it
+        // (`SplitQuery_ShouldSplit`, split_query_aux_priv.cpp:73-97).
         BlastpApp::Blastp | BlastpApp::Rpsblast => {
             crate::blastinput::query_batch::read_query_batches(
                 query_records,
@@ -6768,6 +6827,7 @@ fn search(
                 &query_input,
                 reading,
                 batch_size,
+                args.app != BlastpApp::Rpsblast,
                 query_scopes,
             )
         }
@@ -7722,7 +7782,7 @@ fn x_block_search_refuses_nothing(
     if crate::blastinput::app::check_diag_table_window(query_length, window, "BLASTP").is_err() {
         return false;
     }
-    let Ok(sizes) = protein_query_split_sizes("BLASTP", 10000) else {
+    let Ok(sizes) = protein_query_split_sizes(10000) else {
         return false;
     };
     let searched_batches = || {
@@ -8405,6 +8465,12 @@ impl<'a> CallRequests<'a> {
         Ok(())
     }
 
+    /// The end of the call's first batch, where an NCBI error of that batch's reports ends the
+    /// call (`end_at`).
+    fn first_batch_end(&self) -> usize {
+        self.spans.first().map_or(0, |span| span.end)
+    }
+
     /// The titles of the batch that follows the call (`NextRequest`), refused before the call's
     /// reports when its request is to be written.
     fn check_next(&self) -> Result<()> {
@@ -8648,27 +8714,15 @@ struct BlastpReports<'a> {
 }
 
 /// The environment that NCBI's blastp reads around its search that LOSAT rejects:
-/// `BL2SEQ_LEGACY` in a search of subject records (`fasta_subjects`), a
-/// `PRE_FETCH_SEQS_LIMIT` that NCBI cannot convert unless every requested format is the
-/// archive (`archive`) and query split values that NCBI cannot convert (not
-/// `OVERLAP_CHUNK_SIZE` in RPSBLAST, whose queries it never splits). Other
-/// batch sizes change a blastp report only through the query batches
-/// (`read_query_batches`; the redo of a query reads the heaps of its batch,
-/// `kappa_query_batches`) and the query split (`search_split_query_batches`).
-fn check_blastp_environment(app: BlastpApp, fasta_subjects: bool, archive: bool) -> Result<()> {
-    use crate::blastinput::app;
-    let app_name = app.name();
-    // psiblast's iterations fetch the report's sequences ahead before they choose the
-    // archive (`app::check_search_environment`).
-    app::check_search_environment(
-        app_name,
-        fasta_subjects,
-        archive && app == BlastpApp::Blastp,
-    )?;
-    // NCBI never splits an RPS-BLAST query, so it does not read OVERLAP_CHUNK_SIZE for it
-    // (`SplitQuery_ShouldSplit`, split_query_aux_priv.cpp:73-97).
-    app::check_query_split_environment(app_name, false, app != BlastpApp::Rpsblast)??;
-    Ok(())
+/// `BL2SEQ_LEGACY` in a search of subject records (`fasta_subjects`). The values that NCBI
+/// converts in each query batch stop its first batch: `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE` in its
+/// query splitter (`read_query_batches`; not `OVERLAP_CHUNK_SIZE` in RPSBLAST, whose queries it
+/// never splits) and `PRE_FETCH_SEQS_LIMIT` in its prefetch (`run_resolved_in_pool`). Other batch
+/// sizes change a blastp report only through the query batches (`read_query_batches`; the redo of
+/// a query reads the heaps of its batch, `kappa_query_batches`) and the query split
+/// (`search_split_query_batches`).
+fn check_blastp_environment(app: BlastpApp, fasta_subjects: bool) -> Result<()> {
+    crate::blastinput::app::check_search_environment(app.name(), fasta_subjects)
 }
 
 // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
@@ -8774,7 +8828,7 @@ fn search_split_query_batches(
     if args.rps_search.is_some() {
         return Ok(());
     }
-    let sizes = protein_query_split_sizes(args.app.name(), 10000)?;
+    let sizes = protein_query_split_sizes(10000)?;
     let batch_size = args.query_batch_size()?;
     // The batches count whole records (`seq_range::QueryInput::batches`); a batch is
     // split by the lengths of its searched queries (their intervals with `-query_loc`).
@@ -13406,6 +13460,35 @@ fn run_call(
         }),
         _ => None,
     };
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:280-285
+    // ```c++
+    //             if (fmt_args->ArchiveFormatRequested(args)) {
+    //                 formatter.WriteArchive(*queries, *m_OptsHndl, *results,  0, m_Bah.GetMessages());
+    //                 m_Bah.ResetMessages();
+    //             } else {
+    //                 BlastFormatter_PreFetchSequenceData(*results, scope,
+    //                 		                            fmt_args->GetFormattedOutputChoice());
+    // ```
+    // The prefetch before a batch's reports reads `PRE_FETCH_SEQS_LIMIT`, after the batch's search
+    // and the read of its definition lines (above): a value that NCBI cannot convert stops the
+    // first batch here, after the outfmt 0 prolog and the messages of its records, before any of
+    // its reports (`app::check_prefetch_environment`; the first call of a run that writes reports
+    // meets it: not a chunk's search, which returned above). psiblast's iterations fetch ahead
+    // before they choose the archive, rpsblast's and blastp's write the archive without it.
+    let archive_alone = outputs.only_archive() && args.app != BlastpApp::Psiblast;
+    if let Err(error) = crate::blastinput::app::check_prefetch_environment(archive_alone) {
+        // NCBI wrote the first batch's search strategy request before its search (`CallRequests`).
+        if let Some(call) = reports.call_requests {
+            call.end_at(call.first_batch_end())?;
+        }
+        if reports.x_prolog {
+            write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
+        }
+        if let Some(first_batch_messages) = reports.reader_warnings.first() {
+            outputs.diagnostics.write_all(first_batch_messages)?;
+        }
+        return Err(error);
+    }
     if let (Some(titles), Some(scopes)) = (listed_titles.as_ref(), reports.query_scopes) {
         titles.refuse_ids_of_queries(&hit_lists, scopes)?;
     }
@@ -13610,7 +13693,8 @@ fn run_call(
     let subject_keys = psi_round::SubjectKeys {
         listed_ordinals: listed_subjects
             .as_ref()
-            .map(|listed| listed.ordinals.as_slice()),
+            .zip(database)
+            .map(|(listed, database)| (listed.ordinals.as_slice(), database.oid_map())),
         parsed: listed_titles
             .as_ref()
             .map_or(&[][..], |titles| titles.parsed.as_slice()),
@@ -14445,11 +14529,16 @@ fn run_call(
                 // ```
                 // The Seq-annot of each query with alignments (`seqalign`).
                 let mut writer = format.sink.open()?;
-                let subjects = match (listed_subjects.as_ref(), pairwise_database.as_ref()) {
-                    (Some(listed), Some(database)) => {
+                let subjects = match (
+                    listed_subjects.as_ref(),
+                    pairwise_database.as_ref(),
+                    database,
+                ) {
+                    (Some(listed), Some(pairwise), Some(database)) => {
                         crate::report::record::SubjectNames::Database {
                             ordinals: &listed.ordinals,
-                            title: &database.definition,
+                            oids: database.oid_map(),
+                            title: &pairwise.definition,
                             parsed: listed_parsed,
                         }
                     }
@@ -14487,11 +14576,16 @@ fn run_call(
                     .as_ref()
                     .expect("a BLAST archive request has its handle");
                 let mut writer = format.sink.open()?;
-                let subject_names = match (listed_subjects.as_ref(), pairwise_database.as_ref()) {
-                    (Some(listed), Some(database)) => {
+                let subject_names = match (
+                    listed_subjects.as_ref(),
+                    pairwise_database.as_ref(),
+                    database,
+                ) {
+                    (Some(listed), Some(pairwise), Some(database)) => {
                         crate::report::record::SubjectNames::Database {
                             ordinals: &listed.ordinals,
-                            title: &database.definition,
+                            oids: database.oid_map(),
+                            title: &pairwise.definition,
                             parsed: listed_parsed,
                         }
                     }
@@ -14637,25 +14731,31 @@ fn run_call(
                     }
                     _ => (Vec::new(), Vec::new(), Vec::new(), Default::default()),
                 };
-                let xml_subjects = match (listed_subjects.as_ref(), listed_titles.as_ref()) {
-                    // The stored titles by rank, of the records or of LOSAT_X_BPLISTEDLEAN
-                    // (`subject_titles`, above).
-                    (Some(listed), Some(_)) => crate::report::blast_xml::XmlSubjects::Database {
-                        ordinals: &listed.ordinals,
-                        titles: crate::report::blast_xml::XmlTitles::Shared(&subject_titles),
-                        // Only XML2 shows the taxid.
-                        taxids: &xml_taxids,
-                        taxonomy: &xml_taxonomy,
-                        length: &database_length,
-                        parsed: listed_parsed,
-                        parsed_taxonomy: &xml_parsed_taxonomy,
-                    },
-                    _ => crate::report::blast_xml::XmlSubjects::Records {
-                        protein: true,
-                        records: subject_records,
-                        length: &record_length,
-                    },
-                };
+                let xml_subjects =
+                    match (listed_subjects.as_ref(), listed_titles.as_ref(), database) {
+                        // The stored titles by rank, of the records or of LOSAT_X_BPLISTEDLEAN
+                        // (`subject_titles`, above).
+                        (Some(listed), Some(_), Some(database)) => {
+                            crate::report::blast_xml::XmlSubjects::Database {
+                                ordinals: &listed.ordinals,
+                                oids: database.oid_map(),
+                                titles: crate::report::blast_xml::XmlTitles::Shared(
+                                    &subject_titles,
+                                ),
+                                // Only XML2 shows the taxid.
+                                taxids: &xml_taxids,
+                                taxonomy: &xml_taxonomy,
+                                length: &database_length,
+                                parsed: listed_parsed,
+                                parsed_taxonomy: &xml_parsed_taxonomy,
+                            }
+                        }
+                        _ => crate::report::blast_xml::XmlSubjects::Records {
+                            protein: true,
+                            records: subject_records,
+                            length: &record_length,
+                        },
+                    };
                 let query_names = crate::report::record::QueryNames {
                     records: query_records,
                     searched_lengths: &query_lengths,
@@ -15018,8 +15118,8 @@ fn run_call(
             BlastpReport::CustomTabular(spec) => (|| -> Result<()> {
                 // The tabular reports with a field list or a delimiter, and outfmt 10 and 20
                 // (`tabular`); never the default 6 and 7 below. The format's stream as the sink
-                // opens it (`OutputSink::ostream`): the organism report's.
-                let mut writer = format.sink.ostream()?;
+                // opens it (`cli::NcbiOstream::sink`): the organism report's.
+                let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
                 let needs = spec.needs();
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-842
                 // ```c++
@@ -15055,10 +15155,11 @@ fn run_call(
                         .map(|taxdb| taxdb.report_names(args.app.name())),
                 };
                 let tabular_subjects = match (listed_subjects.as_ref(), database) {
-                    (Some(listed), Some(_)) => super::tabular::TabularSubjects::Database {
+                    (Some(listed), Some(database)) => super::tabular::TabularSubjects::Database {
                         ids: &subject_ids,
                         accessions: &subject_accessions,
                         ordinals: &listed.ordinals,
+                        oids: database.oid_map(),
                         titles: &subject_stitles,
                         parsed: listed_parsed,
                         length: &subject_length,
@@ -15508,7 +15609,7 @@ mod tests {
             strategy: None,
             request_inputs: None,
             app: BlastpApp::Blastp,
-            subject_taxdb: None,
+            taxdb_setting: None,
             inclusion_ethresh: None,
             gap_trigger: None,
             sum_stats: false,

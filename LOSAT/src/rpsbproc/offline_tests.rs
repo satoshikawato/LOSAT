@@ -357,7 +357,7 @@ fn fixture_data() -> CddData {
 // `s_doc2nan`: `-nan` on the DOMAINS line, exit 0).
 #[test]
 fn nan_scores_are_classified() {
-    use crate::report::serial::asn_text_reader::NCBI_NAN;
+    use crate::ncbi_str::NCBI_NAN;
     let data = fixture_data();
     let q_seq = b"VLLPPGPFTRRQAQAVTTTYSNITLEDDQGSHFRLVVRDTEGRMVWRAWNFEPDAGEGLNRYIRTSGIRT";
     for (e_value, bit_score) in [(NCBI_NAN, 133.904), (5e-43, NCBI_NAN)] {

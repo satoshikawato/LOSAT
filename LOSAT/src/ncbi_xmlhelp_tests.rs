@@ -21,8 +21,8 @@ const CLAP_PROGRAMS: [&str; 10] = [
 ];
 
 /// NCBI's arguments that its application start reads before the arguments
-/// (`ncbi_environment::preparse`), which the parser of the library (no application start, as in
-/// these tests) refuses, and the help flags.
+/// (`ncbi_environment::preparse`), which the parser of the Web engine (`try_parse_from`: no
+/// application start, as in these tests) refuses, and the help flags.
 const READ_BEFORE_OR_HELP: [&str; 9] = [
     "version",
     "version-full",

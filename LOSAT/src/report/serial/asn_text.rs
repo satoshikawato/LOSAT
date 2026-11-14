@@ -169,21 +169,30 @@ impl<'b> AsnTextEncoder<'b> {
     //         do {
     //             bufferSize = BiggerBufferSize(bufferSize);
     // ```
+    #[inline(always)]
     fn reserve(&mut self, count: usize) {
         if self.ncbi_used + count > self.ncbi_size {
-            if self.ncbi_used >= NCBI_BACK_LIMIT {
-                self.ncbi_flushed += self.ncbi_used - NCBI_BACK_LIMIT;
-                self.ncbi_used = NCBI_BACK_LIMIT;
-            }
-            while self.ncbi_size < self.ncbi_used + count {
-                self.ncbi_size *= 2;
-            }
+            self.do_reserve(count);
         }
         self.ncbi_used += count;
     }
 
+    /// `DoReserve`: the flush and the growth of `reserve` (once per 4 KB of the document).
+    #[cold]
+    #[inline(never)]
+    fn do_reserve(&mut self, count: usize) {
+        if self.ncbi_used >= NCBI_BACK_LIMIT {
+            self.ncbi_flushed += self.ncbi_used - NCBI_BACK_LIMIT;
+            self.ncbi_used = NCBI_BACK_LIMIT;
+        }
+        while self.ncbi_size < self.ncbi_used + count {
+            self.ncbi_size *= 2;
+        }
+    }
+
     /// `COStreamBuffer::PutString` / `PutChar`: bytes without an end of line, one call of NCBI's
     /// stream (one `Skip` of their count).
+    #[inline(always)]
     fn put(&mut self, bytes: &[u8]) {
         self.reserve(bytes.len());
         self.out.extend_from_slice(bytes);

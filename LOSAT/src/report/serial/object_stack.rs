@@ -78,10 +78,12 @@ impl ObjectStack {
 
     /// A member, variant or element (`E`) frame; `""` for a member frame whose member is not
     /// known yet (`rename` names it).
+    #[inline]
     pub(crate) fn push(&mut self, name: &'static str) {
         self.frames.push(name);
     }
 
+    #[inline]
     pub(crate) fn pop(&mut self) {
         self.frames.pop();
     }

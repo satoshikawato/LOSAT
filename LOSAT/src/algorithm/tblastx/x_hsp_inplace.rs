@@ -746,8 +746,7 @@ where
     //    number_of_hsps = hp_frame_number[frame_index];
     // ```
     // NCBI links its groups as sublists of the one sorted array.
-    let (use_legacy, fast_shadow) = link_modes();
-    let (results, groups) = x_link_slices::link_groups_as(
+    let (results, groups) = x_link_slices::link_groups(
         hits,
         &x_link_slices::Call {
             params,
@@ -761,8 +760,7 @@ where
             allow_parallel,
         },
         &mut lap,
-        use_legacy,
-        fast_shadow,
+        link_modes,
     );
     GROUPS.fetch_add(groups as u64, AtomicOrdering::Relaxed);
 

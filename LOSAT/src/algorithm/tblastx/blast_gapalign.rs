@@ -537,6 +537,9 @@ pub(crate) fn sort_ungapped_hits_by_score_ncbi(hits: &mut [UngappedHit]) {
 // comparator given: the is-sorted check, then the stable index-replay sort (glibc's qsort is a
 // stable merge sort, `x_link_sort.rs`).
 /// `Blast_HSPListSortByScore` with `compare` as `ScoreCompareHSPs`.
+// `inline(always)`: each caller compiles to this body with its comparator in place, as each of
+// the two bodies it replaces did.
+#[inline(always)]
 fn sort_ungapped_hits_by_score_with<C>(hits: &mut [UngappedHit], compare: C)
 where
     C: Fn(&UngappedHit, &UngappedHit) -> Ordering + Sync + Copy,

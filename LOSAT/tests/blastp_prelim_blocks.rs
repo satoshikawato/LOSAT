@@ -197,8 +197,9 @@ fn same_as_one_table(
 // preliminary stage: each lookup table (exact blastp's words of 3 and of 4, blastp-fast's
 // compressed table), one thread and four, blocks of one batch (`1`) and of several (`TWO_BLOCKS`);
 // outfmt 10 (CSV), 18 (the organism report) and 20 (CSV with a header line), and the ordinary
-// traceback of `-comp_based_stats 0`, which reads each HSP's query context. One case per path (CI
-// time).
+// traceback of `-comp_based_stats 0` (which takes each list's query from the list's place among
+// all queries, so it does not check the join's rebase: `the_join_moves_each_list_to_its_query`
+// does). One case per path (CI time).
 #[test]
 fn reports_of_the_search_of_all_queries_with_blocks_of_the_preliminary_stage() {
     let subject = fixture("MejoMJNV.faa");
@@ -225,6 +226,62 @@ fn reports_of_the_search_of_all_queries_with_blocks_of_the_preliminary_stage() {
         assert!(
             sides.0,
             "{extra:?} threads {threads}: the blocks did not run: {sides:?}"
+        );
+    }
+}
+
+// The join of the blocks' hit lists moves each list and its HSPs to their query among all queries
+// (`query_split::rebase_hit_list`): the list's index and each HSP's query index, context and query
+// length. The queries with rows are BDT62581.1 (698 letters) and BDT62582.1 (268) in the first block
+// of `TWO_BLOCKS` (the second block of `1`), and BDT62584.1 (944) in the last, and the ordinary
+// traceback (`-comp_based_stats 0`) reads both:
+// - without the Gumbel block (`OLD_FSC`) each HSP gets the e-value of its list's query's search
+//   space (`list.query_index`, `blast_engine/traceback.rs`), and the queries' spaces differ: a list
+//   left with its index in its block reads another query's;
+// - `-qcov_hsp_perc 50` keeps the HSPs that cover half of their query's length (the HSP's
+//   `query_length`): BDT62582.1's HSP of 221 letters and BDT62584.1's of 376 to 446 letters are
+//   kept or dropped on the length of the query they name.
+// Blocks of one batch and of several, one thread and four, `-subject` and `-db`.
+#[test]
+fn the_join_moves_each_list_to_its_query() {
+    let fasta = fixture("MejoMJNV.faa");
+    let fasta = [OsStr::new("-subject"), fasta.as_os_str()];
+    let (db, _db_dir) = subject_database("join");
+    let db = [OsStr::new("-db"), db.as_os_str()];
+    let (query, _dir) = queries("join", 4);
+    let old_fsc: &[(&str, &str)] = &[BATCH, ("OLD_FSC", "1")];
+    let space: &[&str] = &["-comp_based_stats", "0", "-outfmt", "10"];
+    let coverage: &[&str] = &[
+        "-comp_based_stats",
+        "0",
+        "-qcov_hsp_perc",
+        "50",
+        "-outfmt",
+        "10",
+    ];
+    let cases: [(&[&OsStr], u32, &[(&str, &str)], &str, &[&str]); 8] = [
+        (&fasta, 1, old_fsc, TWO_BLOCKS, space),
+        (&fasta, 4, old_fsc, "1", space),
+        (&db, 1, old_fsc, "1", space),
+        (&db, 4, old_fsc, TWO_BLOCKS, space),
+        (&fasta, 1, &[BATCH], "1", coverage),
+        (&fasta, 4, &[BATCH], TWO_BLOCKS, coverage),
+        (&db, 1, &[BATCH], TWO_BLOCKS, coverage),
+        (&db, 4, &[BATCH], "1", coverage),
+    ];
+    for (subject, threads, vars, letters, extra) in cases {
+        let what = format!(
+            "{:?} {extra:?} {vars:?} threads {threads} blocks {letters}",
+            subject[0]
+        );
+        let (reach, run) = same_as_one_table(&query, subject, threads, vars, Some(letters), extra);
+        assert_eq!(run.code, Some(0), "{what}: {}", run.stderr);
+        assert!(!run.stdout.is_empty(), "{what}: the fixture pair has rows");
+        let sides = reach.sides("LOSAT_X_BPQBLOCK");
+        assert_eq!(
+            sides,
+            (true, true),
+            "{what}: the blocks of the preliminary stage did not run"
         );
     }
 }

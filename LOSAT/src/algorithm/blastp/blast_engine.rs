@@ -2726,19 +2726,36 @@ fn blastp_seqalign_format(outfmt: &str) -> Option<crate::report::serial::SerialF
     )?)
 }
 
-/// The query-anchored view of a `-outfmt` value of 1 to 4 (`PairwiseView`), read as NCBI reads
-/// the value; `None` for the other formats. A field list after the number is refused, as outfmt
-/// 0's is.
+/// The pairwise view (`PairwiseView::of`) of the format number `number` where `app` writes it:
+/// outfmt 0, and BLASTP's query-anchored 1 to 4 (`Program::writes`; psiblast and rpsblast refuse
+/// those, line RG PS15). NCBI's application writes 0 to 4 through one frame (`PrintProlog`, the
+/// query batches, `PrintOneResultSet`), and so does LOSAT; `None` for the other formats.
+fn blastp_pairwise_view_of(
+    app: BlastpApp,
+    number: i32,
+) -> Option<crate::report::pairwise::PairwiseView> {
+    crate::blastinput::app::ReportFormat::from_number(number)
+        .and_then(crate::report::pairwise::PairwiseView::of)
+        .filter(|view| {
+            *view == crate::report::pairwise::PairwiseView::Pairwise || app == BlastpApp::Blastp
+        })
+}
+
+/// The query-anchored view of a `-outfmt` value of 1 to 4 that `app` writes
+/// (`blastp_pairwise_view_of`), read as NCBI reads the value; `None` for the other formats. A
+/// field list after the number is refused, as outfmt 0's is: the library's value keeps the words
+/// after the number (`OutputFormat::split_fields`), the command line's drops them as NCBI does
+/// (`FormatChoice::normalized`).
 fn blastp_query_anchored_view(
+    app: BlastpApp,
     outfmt: &str,
 ) -> Result<Option<crate::report::pairwise::PairwiseView>> {
     let Ok(choice) = crate::blastinput::app::parse_formatting_string(outfmt) else {
         return Ok(None);
     };
-    let view = crate::blastinput::app::ReportFormat::from_number(choice.number)
-        .and_then(crate::report::pairwise::PairwiseView::of)
+    let view = blastp_pairwise_view_of(app, choice.number)
         .filter(|view| *view != crate::report::pairwise::PairwiseView::Pairwise);
-    if view.is_some() && choice.custom() {
+    if view.is_some() && OutputFormat::split_fields(outfmt).1.is_some() {
         bail!(
             "blastp outfmt {} does not accept custom field lists",
             choice.number
@@ -7632,7 +7649,7 @@ fn x_query_block_plan(
     {
         return None;
     }
-    // Outfmt 8, 9, 12, 5, 15 and 16 are the ones `OutputFormat::parse` does not know.
+    // Outfmt 1 to 4, 8, 9, 12, 5, 15 and 16 are the ones `OutputFormat::parse` does not know.
     // The custom tabular reports of outfmt 6 and 7 (a field list or a delimiter, `tabular`) as
     // the default ones: each query's lines depend only on its final list and fixed inputs (the
     // subjects' ids, lengths and titles, a `-subject` search's taxonomy database warning), outfmt
@@ -7653,6 +7670,15 @@ fn x_query_block_plan(
             Some(XBlockReport::Tabular)
         }
         Ok((OutputFormat::Pairwise, _)) => Some(XBlockReport::Pairwise),
+        // Outfmt 1 to 4 (BLASTP's, `blastp_pairwise_view_of`): outfmt 0's report with each
+        // query's alignments as one section, which reads only that query's hits and the
+        // sequences (`report::query_anchored`).
+        Err(_)
+            if crate::blastinput::app::parse_formatting_string(outfmt)
+                .is_ok_and(|choice| blastp_pairwise_view_of(args.app, choice.number).is_some()) =>
+        {
+            Some(XBlockReport::Pairwise)
+        }
         Err(_) if blastp_seqalign_format(outfmt).is_some() => Some(XBlockReport::Seqalign),
         // Outfmt 11 (the BLAST archive: one document per NCBI batch, `x_query_blocks.rs`). Only in a
         // call of one output without hit records and observer, as outfmt 15 and 16: the run-level
@@ -7683,6 +7709,21 @@ fn x_query_block_plan(
         .iter()
         .map(|format| kind_of(format.outfmt))
         .collect::<Option<Vec<_>>>()?;
+    // Outfmt 1 to 4 refuse a query whose own record is a subject and whose section NCBI BLAST+
+    // aborts on before any format is written (`pairwise::blastp_section_aborts`), which only the
+    // query's hits tell: a block search would have written the blocks before. A run that can
+    // have one (`-parse_deflines` with a query record that is also a subject,
+    // `BelievedIds::shared`) takes the search of all queries.
+    if args.parse_deflines
+        && outputs.formats.iter().any(|format| {
+            blastp_query_anchored_view(args.app, format.outfmt).is_ok_and(|view| view.is_some())
+        })
+        && queries
+            .iter()
+            .any(|record| record.believed().is_some_and(|ids| ids.shared.is_some()))
+    {
+        return None;
+    }
     let tabular = kinds.contains(&XBlockReport::Tabular);
     match subject_source {
         BlastpSubjectSource::Fasta(subjects) => {
@@ -8017,9 +8058,10 @@ fn blastp_scan_mode_definition(tag: &str) -> String {
 // {
 //     m_Outfile.exceptions(NcbiBadbit);
 // ```
-/// Writes and flushes the prolog of every outfmt 0, 15, 16 and 20 format (`PrintProlog`), for a
-/// run that stops at its first query batch (outfmt 20's line of the field names; its formatter's
-/// warning came before the search, `search`).
+/// Writes and flushes the prolog of every outfmt 0 to 4, 15, 16 and 20 format (`PrintProlog`;
+/// 1 to 4 where BLASTP writes them, `blastp_pairwise_view_of`), for a run that stops at its
+/// first query batch (outfmt 20's line of the field names; its formatter's warning came before
+/// the search, `search`).
 fn write_pairwise_prologs(
     args: &ResolvedBlastpArgs,
     subject_source: BlastpSubjectSource<'_>,
@@ -8031,7 +8073,8 @@ fn write_pairwise_prologs(
         .database()
         .map(database::BlastpDatabase::pairwise_database);
     for format in outputs.formats.iter_mut() {
-        if crate::blastinput::app::parse_formatting_string(format.outfmt)?.number == 0 {
+        let number = crate::blastinput::app::parse_formatting_string(format.outfmt)?.number;
+        if blastp_pairwise_view_of(args.app, number).is_some() {
             let mut writer = format.sink.open()?;
             crate::report::pairwise::write_blastp_pairwise_prolog(
                 &mut writer,
@@ -8139,10 +8182,7 @@ fn write_reports_without_queries(
             continue;
         }
         // Outfmt 1 to 4 write what outfmt 0 writes without a query.
-        let view = match args.app {
-            BlastpApp::Blastp => blastp_query_anchored_view(format.outfmt)?,
-            _ => None,
-        };
+        let view = blastp_query_anchored_view(args.app, format.outfmt)?;
         let outfmt = match view {
             Some(_) => OutputFormat::Pairwise,
             None => {
@@ -8532,7 +8572,7 @@ impl<'a> CallRequests<'a> {
 /// that batch's reader messages and the error (NCBI 2.17.0 blastp `BATCH_SIZE=1`, an all-X query
 /// before tk, with `-subject` of `MK`, ``, `` and `-searchsp 1000`, or `-db` of an empty
 /// database: outfmt 0 and 7, exit 3; line PS DECISIONS 28 and 30). LOSAT refuses where this is
-/// not ported: no searched batch, another program, or a format other than 0, 6, 7 and 10.
+/// not ported: no searched batch, another program, or a format other than 0 to 4, 6, 7 and 10.
 #[cold]
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
@@ -8554,8 +8594,10 @@ fn unsearched_batches_then_engine_error(
         .iter()
         .find(|batch| !batch.searched.is_empty() && !query_batch_skipped[batch.searched.start]);
     let ported_formats = outputs.formats.iter().all(|format| {
-        crate::blastinput::app::parse_formatting_string(format.outfmt)
-            .is_ok_and(|choice| matches!(choice.number, 0 | 6 | 7 | 10))
+        crate::blastinput::app::parse_formatting_string(format.outfmt).is_ok_and(|choice| {
+            matches!(choice.number, 6 | 7 | 10)
+                || blastp_pairwise_view_of(args.app, choice.number).is_some()
+        })
     });
     let Some(batch) = first_searched
         .filter(|_| ported_formats && args.app == BlastpApp::Blastp && args.archive.is_none())
@@ -9576,10 +9618,8 @@ fn run_call(
             }
             // The query-anchored outfmt 1 to 4: BLASTP's (`Program::writes`; psiblast and rpsblast
             // refuse them, line RG PS15).
-            if args.app == BlastpApp::Blastp {
-                if let Some(view) = blastp_query_anchored_view(format.outfmt)? {
-                    return Ok(BlastpReport::Pairwise(view));
-                }
+            if let Some(view) = blastp_query_anchored_view(args.app, format.outfmt)? {
+                return Ok(BlastpReport::Pairwise(view));
             }
             // Outfmt 0, and outfmt 6 and 7 of the `std` fields and a tab (`TabularSpec::of`).
             let (outfmt, custom_fields) =
@@ -14261,6 +14301,46 @@ fn run_call(
             args.lcase_masking,
             args.app.name(),
         )?;
+    }
+    // Outfmt 1 to 4 of a `-subject` search: a query whose own record is one of the subjects
+    // (`-parse_deflines`) and whose query-anchored section NCBI BLAST+ aborts on is refused
+    // before any format is written (`pairwise::blastp_section_aborts`; line RG T3a,
+    // PD-LOSAT-NCBI-DEFECTS rule 3). The formats 1 to 4 merge one section (their views differ in
+    // the letters they show).
+    let anchored_view = format_plans.iter().find_map(|outfmt| match outfmt {
+        BlastpReport::Pairwise(view)
+            if *view != crate::report::pairwise::PairwiseView::Pairwise =>
+        {
+            Some(*view)
+        }
+        _ => None,
+    });
+    if let (Some(view), true, None) = (anchored_view, args.parse_deflines, database) {
+        for (q_idx, record) in query_records.iter().enumerate() {
+            if !record.believed().is_some_and(|ids| ids.shared.is_some()) {
+                continue;
+            }
+            let rows: std::borrow::Cow<'_, [PairwiseHit]> = match pairwise_hits.as_deref() {
+                Some(hits) => std::borrow::Cow::Borrowed(hits.as_slice()),
+                None => std::borrow::Cow::Owned(rows_of(q_idx..q_idx + 1)?),
+            };
+            let aborts = crate::report::pairwise::blastp_section_aborts(
+                view,
+                args.sort,
+                args.num_alignments,
+                q_idx,
+                &rows,
+                &subject_titles,
+                |s_idx| {
+                    subject_records
+                        .get(s_idx as usize)
+                        .is_some_and(|subject| anchored::subject_is_query_record(record, subject))
+                },
+            )?;
+            if aborts {
+                return Err(anchored::aborted_section(record, args.app.name()));
+            }
+        }
     }
     // The subject IDs of the tabular formats, checked for the subjects with rows before any
     // format is written (`tabular_subject_ids`). EXPERIMENT (LOSAT_X_BPQBLOCK): the block

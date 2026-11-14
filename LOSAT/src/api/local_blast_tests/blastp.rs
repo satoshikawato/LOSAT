@@ -190,6 +190,68 @@ fn unsupported_formats_fail_before_searching() {
     }
 }
 
+// A library call reads a format value as given: words after outfmt 0 to 4 are a field list,
+// which these formats do not take, refused before the search (the command line drops them, as
+// NCBI's application does: `FormatChoice::normalized`; line RG T3a review N2).
+#[test]
+fn a_field_list_after_a_pairwise_format_is_refused() {
+    let inputs = Inputs::new(1);
+    let queries = queries(&inputs.query);
+    let subjects = subjects(&inputs.subject);
+    for (outfmt, number) in [
+        ("0 qseqid", 0),
+        ("1 qseqid", 1),
+        ("2 std", 2),
+        ("3 delim=,", 3),
+        (" 4 qseqid sseqid ", 4),
+    ] {
+        let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
+        let mut outputs = ReportOutputs {
+            formats: vec![
+                FormatOutput {
+                    outfmt: "6",
+                    sink: OutputSink::Writer(&mut valid),
+                },
+                FormatOutput {
+                    outfmt,
+                    sink: OutputSink::Writer(&mut invalid),
+                },
+            ],
+            diagnostics: &mut diagnostics,
+            hits: None,
+            observer: None,
+        };
+        let args = blastp_args(&inputs.query, &inputs.subject, &[]);
+        let result = run_local_blastp(args, &queries, &subjects, "", "", &mut outputs);
+        drop(outputs);
+        let error = format!("{:#}", result.expect_err(outfmt));
+        assert!(
+            error.contains(&format!(
+                "blastp outfmt {number} does not accept custom field lists"
+            )),
+            "{outfmt:?}: {error}"
+        );
+        assert!(valid.is_empty() && invalid.is_empty(), "{outfmt:?}");
+    }
+    // Without words, each writes its report.
+    for outfmt in ["1", "2", " 3 ", "4"] {
+        let (mut report, mut diagnostics) = (Vec::new(), Vec::new());
+        let mut outputs = ReportOutputs {
+            formats: vec![FormatOutput {
+                outfmt,
+                sink: OutputSink::Writer(&mut report),
+            }],
+            diagnostics: &mut diagnostics,
+            hits: None,
+            observer: None,
+        };
+        let args = blastp_args(&inputs.query, &inputs.subject, &[]);
+        run_local_blastp(args, &queries, &subjects, "", "", &mut outputs).expect(outfmt);
+        drop(outputs);
+        assert!(report.starts_with(b"BLASTP 2.17.0+"), "{outfmt:?}");
+    }
+}
+
 // NCBI derives the hit list size per output format (blast_args.cpp:2894-2973): with
 // `-num_descriptions 3` it is 250 for outfmt 0 and 500 for outfmt 6. One run searches once,
 // so formats that need different hit list sizes are refused before anything is written

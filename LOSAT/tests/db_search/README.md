@@ -1331,6 +1331,17 @@ survey's probes (`T/t3/scripts/gen.py`, a seeded generator, and three hand-made 
   11th letter changed, and `s_ins`.
 - `sp_dupid.fa` (two subjects `lcl|dup1`) and `s_sameid.fa` (a subject `lcl|q100`, the id of `q100.fa`): the
   `-parse_deflines` refusals (`db.of1.bp.dupid.reject`, `db.of1.bp.self.reject`).
+- `self1.fa` and `selfseg3.fa` (the T3a review's probes, `T/t3/review_t3a/in/`), each searched against itself
+  with `-parse_deflines`, so that the subject is the query's own Bioseq. `self1` is a record A, a spacer, A with
+  GG inserted, a spacer, A with a quarter of its letters changed and PW inserted before its last 10, and a
+  spacer: with `-query_loc 1-48 -subject_loc 49-223` its HSP with the third copy holds the longest segment
+  and takes the subject's first row from the HSP with the second copy, which NCBI then shows below it
+  (`db.of1.bp.self1.*`, `alnmerger.cpp:499-501`). `selfseg3` is 30 letters, 80 Q and 40 letters: `-seg yes`
+  splits its self diagonal into two ungapped HSPs, the second the longer, where NCBI aborts
+  (`db.of1.bp.selfseg3.reject`, PD-LOSAT-NCBI-DEFECTS 1.19).
+- `deflineonly.fa` (a record without letters) and `allx_q3.fa` (an all-X query, then a query): runs that stop
+  at their first query batch, which write outfmt 0's prolog (`db.of1.bp.defl.*`, `db.of1.bp.emptydb.*`, the
+  empty database `tests/seqdb/db/empty`).
 
 The databases (version 4; `.pjs` deleted). Run from `LOSAT/`:
 

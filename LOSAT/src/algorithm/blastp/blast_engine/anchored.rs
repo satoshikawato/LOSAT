@@ -42,6 +42,16 @@ pub(super) struct AnchoredSequences<'a> {
     pub(super) subject_masks: HashMap<(u32, u32), Vec<(i32, i32)>>,
 }
 
+/// Whether the `-subject` record `subject` is query `query`'s own record: the query is one record
+/// with a subject (the same definition line and letters, `BelievedIds::shared`), and the subject
+/// has its id (any other subject with the query's id is refused before the reports).
+pub(super) fn subject_is_query_record(query: &FastaRecord, subject: &FastaRecord) -> bool {
+    match (query.believed(), subject.believed()) {
+        (Some(query), Some(subject)) => query.shared.is_some() && subject.best == query.best,
+        _ => false,
+    }
+}
+
 /// The label of a record's rows: its ids with `-parse_deflines`, else its local id.
 fn record_label(record: &FastaRecord, show_gis: bool, out: &mut Vec<u8>) {
     match record.believed() {
@@ -60,25 +70,18 @@ fn push_masks(masks: &[(i32, i32)], out: &mut Vec<(u32, u32)>) {
 }
 
 impl ReportSequences for AnchoredSequences<'_> {
-    /// A `-subject` record read with `-parse_deflines` that is the query's record: the query is
-    /// one record with a subject (the same definition line and letters, `BelievedIds::shared`), and
-    /// this subject has its id (any other subject with the query's id is refused before the
-    /// reports, and so is a database sequence).
+    /// A `-subject` record read with `-parse_deflines` that is the query's record
+    /// (`subject_is_query_record`; a database sequence with the query's id is refused before the
+    /// reports).
     fn subject_is_query(&self, q_idx: usize, s_idx: u32) -> bool {
-        let Some(query) = self
-            .query_records
-            .get(q_idx)
-            .and_then(FastaRecord::believed)
-        else {
-            return false;
-        };
         self.ordinals.is_none()
-            && query.shared.is_some()
-            && self
-                .subject_records
-                .get(s_idx as usize)
-                .and_then(FastaRecord::believed)
-                .is_some_and(|subject| subject.best == query.best)
+            && match (
+                self.query_records.get(q_idx),
+                self.subject_records.get(s_idx as usize),
+            ) {
+                (Some(query), Some(subject)) => subject_is_query_record(query, subject),
+                _ => false,
+            }
     }
 
     fn query_letters(&self, q_idx: usize, from: u32, to: u32, out: &mut Vec<u8>) {
@@ -142,4 +145,21 @@ impl ReportSequences for AnchoredSequences<'_> {
             push_masks(masks, out);
         }
     }
+}
+
+/// The refusal of a run whose query `record` (one record as a query and as a subject under
+/// `-parse_deflines`) has a query-anchored section that NCBI BLAST+ aborts on
+/// (`pairwise::blastp_section_aborts`), named as the refusal of its masks in outfmt 0 names it
+/// (`believed::refuse_shared_masks`).
+pub(super) fn aborted_section(record: &FastaRecord, program: &str) -> anyhow::Error {
+    let mut fasta = Vec::new();
+    if let Some(ids) = record.believed() {
+        crate::seqid::label::fasta(&ids.best, &mut fasta);
+    }
+    anyhow::anyhow!(
+        "the record {} is both a query and a subject under -parse_deflines and NCBI BLAST+ aborts \
+         on its query-anchored alignments (outfmt 1 to 4), whose merge leaves out the subject's \
+         rows; this is not supported by LOSAT's {program}",
+        String::from_utf8_lossy(&fasta)
+    )
 }

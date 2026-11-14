@@ -30,10 +30,17 @@ type SegIx = usize;
 /// A `CAlnMixStarts` iterator as the key it points to; `None` is `end()`.
 type It = Option<u32>;
 
-/// An internal error of the merge: a state that NCBI's code reaches only with input that a BLAST
-/// search does not make (each named where it is raised).
+/// Why the merge stops.
 #[derive(Debug)]
-pub(crate) struct MixError(pub(crate) &'static str);
+pub(crate) enum MixError {
+    /// An internal error: a state that NCBI's code reaches only with input that a BLAST search
+    /// does not make (each named where it is raised).
+    Internal(&'static str),
+    /// NCBI aborts: `BuildRows` left out a row that a segment holds, and `FillUnalignedRegions`
+    /// indexes its vectors with that row's `m_RowIdx` of -1 (`Mix::fill_unaligned_regions`).
+    /// Only the query's own Bioseq gets there (`Mix::place`); the caller refuses the section.
+    NcbiAborts,
+}
 
 /// NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnseq.hpp:139-185
 /// ```c++
@@ -130,6 +137,8 @@ struct Mix {
     segs: Vec<MixSegment>,
     /// `m_DsCnt`.
     ds_cnt: u32,
+    /// `m_ExtraRows`: the rows that `x_Merge` made for the HSPs of a subject after its first.
+    extra_rows: Vec<SeqIx>,
     /// `m_Rows` (`BuildRows`).
     rows: Vec<SeqIx>,
     /// `m_Segments` (`Build`).
@@ -606,7 +615,26 @@ impl Mix {
     /// ported; the width is 1. `hi_start_i` is only read as "done" (`end()` or not) here: its value
     /// starts the second row's walk only when the strands differ. The `m_DsIdx` of a segment is
     /// read only by the truncation (`fTruncateOverlaps`), which these flags leave out.
-    fn place(&mut self, seq1: SeqIx, start1: u32, len: u32) -> It {
+    ///
+    /// The first match placed on `seq1` (the query's first, the longest segment of all, ties in
+    /// the order of `Add`) sets the `m_DsIdx` of its second row `seq2` to its Dense-seg. For an
+    /// ordinary subject that is the value `x_SecondRowFits` has just set. For a subject that is the
+    /// query's own Bioseq, whose `m_AnotherRow` `Add` preset to the HSP added first, it is the
+    /// HSP of that match when another HSP of the subject holds it: the match itself still goes to
+    /// an extra row (`x_SecondRowFits` returned `eForceSeparateRow` before), the HSP's other
+    /// segments then fit the `m_AnotherRow`, and the HSP added first goes to the next extra row.
+    /// When that HSP has no other segment the `m_AnotherRow` keeps no start, which NCBI does not
+    /// survive (`MixError::NcbiAborts`, raised by `fill_unaligned_regions`). A first match
+    /// without a second row would have NCBI write through a null `seq2`: the matches of one row
+    /// come after those of two (score 0, `SortByScore`) and every row of a later pass has the
+    /// starts of its Dense-seg's matches with the query, so BLAST's HSPs never make one.
+    fn place(
+        &mut self,
+        seq1: SeqIx,
+        seq2: Option<SeqIx>,
+        matched: &MixMatch,
+    ) -> Result<It, MixError> {
+        let (start1, len) = (matched.start1, matched.len);
         let mut curr_len = len;
         let mut start_i: It = None;
         let mut lo_start_i: It;
@@ -616,6 +644,12 @@ impl Mix {
             self.seqs[seq1].starts.insert(start1, seg);
             self.set_start_iterator(seg, seq1, start1);
             lo_start_i = Some(start1);
+            // `if (m_MergeFlags & fQuerySeqMergeOnly) { seq2->m_DsIdx = match->m_DsIdx; }`
+            // (alnmerger.cpp:499-501, quoted above).
+            let seq2 = seq2.ok_or(MixError::Internal(
+                "the first match of a row has no second row",
+            ))?;
+            self.seqs[seq2].ds_idx = matched.ds_idx;
             done = true;
         } else {
             let starts = &self.seqs[seq1].starts;
@@ -690,7 +724,7 @@ impl Mix {
                 }
             }
         }
-        lo_start_i
+        Ok(lo_start_i)
     }
 
     /// The rows of `prev_seg` cut after `len1` of its letters: the rest of each row starts a
@@ -852,7 +886,9 @@ impl Mix {
         if self.order.first().map(|&seq| self.seqs[seq].key) != Some(SeqKey::Query)
             || self.seqs[self.order[0]].ds_cnt != self.ds_cnt
         {
-            return Err(MixError("the query is not the refseq of the merge"));
+            return Err(MixError::Internal(
+                "the query is not the refseq of the merge",
+            ));
         }
         for (seq_idx, &seq) in self.order.iter().enumerate() {
             self.seqs[seq].seq_idx = seq_idx as i32;
@@ -912,7 +948,7 @@ impl Mix {
             }
             if matched.len == 0 {
                 // A Dense-seg segment of no letters: BLAST's Seq-aligns have none.
-                return Err(MixError("a segment of length 0"));
+                return Err(MixError::Internal("a segment of length 0"));
             }
             self.merge_match(matched, first_refseq)?;
         }
@@ -1066,7 +1102,7 @@ impl Mix {
                 }
                 match self.seqs[seq1].extra_row {
                     Some(row) => seq1 = row,
-                    None => return Err(MixError("proper row not found for the match")),
+                    None => return Err(MixError::Internal("proper row not found for the match")),
                 }
             }
         }
@@ -1076,7 +1112,7 @@ impl Mix {
             self.seqs[row].ref_by = Some(self.order[0]);
             fits = self.second_row_fits(row, matched.ds_idx);
         }
-        let lo_start_i = self.place(seq1, matched.start1, matched.len);
+        let lo_start_i = self.place(seq1, seq2, &matched)?;
         let Some(mut row) = seq2.take() else {
             return Ok(());
         };
@@ -1089,6 +1125,7 @@ impl Mix {
                     extra.ds_idx = matched.ds_idx;
                     self.seqs.push(extra);
                     let extra = self.seqs.len() - 1;
+                    self.extra_rows.push(extra);
                     self.seqs[row].extra_row = Some(extra);
                     row = extra;
                     break;
@@ -1105,13 +1142,15 @@ impl Mix {
         while start < matched.start2 + matched.len {
             let seg = self.seqs[seq1].starts[&start_i.expect("a segment of the first row")];
             if start2_i == Some(start) {
-                return Err(MixError("a subject row's position is already placed"));
+                return Err(MixError::Internal(
+                    "a subject row's position is already placed",
+                ));
             }
             self.seqs[row].starts.insert(start, seg);
             start2_i = Some(start);
             let key = (self.seqs[row].seq_idx, self.seqs[row].child_idx);
             if self.segs[seg].start_its.contains_key(&key) {
-                return Err(MixError("start iterator already exists for seq2"));
+                return Err(MixError::Internal("start iterator already exists for seq2"));
             }
             self.set_start_iterator(seg, row, start);
             start += self.segs[seg].len;
@@ -1299,10 +1338,15 @@ impl Mix {
     ///                 row->SetStarts().current = row->GetStarts().begin();
     ///             } else {
     /// ```
-    /// (`InitExtraRowsStartIts` sets the same of the extra rows, which `m_Rows` holds too.)
+    /// `InitExtraRowsStartIts` sets the same of every extra row (`m_ExtraRows`), also of one that
+    /// `BuildRows` left out with the sequence of its first row (`MixError::NcbiAborts`).
     fn build(&mut self) -> Result<(), MixError> {
         for index in 0..self.rows.len() {
             let row = self.rows[index];
+            self.seqs[row].current = begin(&self.seqs[row].starts);
+        }
+        for index in 0..self.extra_rows.len() {
+            let row = self.extra_rows[index];
             self.seqs[row].current = begin(&self.seqs[row].starts);
         }
         let mut gapped: Vec<SegIx> = Vec::new();
@@ -1334,11 +1378,11 @@ impl Mix {
                     for &(row, at) in self.segs[top].start_its.values() {
                         let current = self.seqs[row].current;
                         if current != Some(at) {
-                            let left = self.seqs[row].starts
-                                [&current.ok_or(MixError("a row's segments ended early"))?];
+                            let left = self.seqs[row].starts[&current
+                                .ok_or(MixError::Internal("a row's segments ended early"))?];
                             stack.push(left);
                             if !on_stack.insert(left) {
-                                return Err(MixError("infinite loop detected"));
+                                return Err(MixError::Internal("infinite loop detected"));
                             }
                             pop_seg = false;
                             break;
@@ -1584,7 +1628,14 @@ impl Mix {
     /// ```
     /// The fill of a row's stretch goes before the segment being read, whose own rows are then
     /// still read from it (`seg_i` points to it again after the insertion).
-    fn fill_unaligned_regions(&mut self) {
+    ///
+    /// A row that `BuildRows` left out keeps the `m_RowIdx` of -1 of `CAlnMixSeq()`: the extra
+    /// rows of a sequence without starts, the query's own Bioseq whose `m_AnotherRow` kept none
+    /// (`place`). NCBI's `starts[rowidx]` and `lens[rowidx]` then write before their vectors'
+    /// buffers (`prev_start = start; prev_len = len;`, a length of at least 1), and glibc stops
+    /// NCBI when it frees them (`double free or corruption (out)`, exit 134): no section to
+    /// write, `MixError::NcbiAborts` (line RG T3a, PD-LOSAT-NCBI-DEFECTS rule 3).
+    fn fill_unaligned_regions(&mut self) -> Result<(), MixError> {
         let mut starts = vec![-1i64; self.rows.len()];
         let mut lens = vec![0u32; self.rows.len()];
         let mut seg_i = 0;
@@ -1593,7 +1644,9 @@ impl Mix {
             let len = self.segs[current].len;
             let rows: Vec<(SeqIx, u32)> = self.segs[current].start_its.values().copied().collect();
             for (row, start) in rows {
-                let rowidx = self.seqs[row].row_idx as usize;
+                let Ok(rowidx) = usize::try_from(self.seqs[row].row_idx) else {
+                    return Err(MixError::NcbiAborts);
+                };
                 let (prev_start, prev_len) = (starts[rowidx], lens[rowidx]);
                 if prev_start >= 0 {
                     let new_start = prev_start as u32 + prev_len;
@@ -1610,6 +1663,7 @@ impl Mix {
             }
             seg_i += 1;
         }
+        Ok(())
     }
 
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:1156-1252
@@ -1659,8 +1713,9 @@ impl Mix {
     ///             ids.erase(ids.begin()+row);
     ///             ...
     /// ```
-    /// The strands are all plus and the widths are not set (module doc).
-    fn create_denseg(&self) -> Denseg {
+    /// The strands are all plus and the widths are not set (module doc). Every row of a segment
+    /// has a row index here (`fill_unaligned_regions` stops at one without).
+    fn create_denseg(&self) -> Result<Denseg, MixError> {
         let numrows = self.rows.len();
         let mut starts = vec![-1i32; numrows * self.segments.len()];
         let mut lens = Vec::with_capacity(self.segments.len());
@@ -1668,7 +1723,8 @@ impl Mix {
         for (numseg, &seg) in self.segments.iter().enumerate() {
             lens.push(self.segs[seg].len);
             for &(row, start) in self.segs[seg].start_its.values() {
-                let row_idx = self.seqs[row].row_idx as usize;
+                let row_idx = usize::try_from(self.seqs[row].row_idx)
+                    .map_err(|_| MixError::Internal("a segment's row has no row index"))?;
                 starts[numseg * numrows + row_idx] = start as i32;
                 row_empty[row_idx] = false;
             }
@@ -1686,7 +1742,7 @@ impl Mix {
                 .map(|(seg, row)| starts[seg * numrows + row])
                 .collect()
         };
-        Denseg { ids, lens, starts }
+        Ok(Denseg { ids, lens, starts })
     }
 }
 
@@ -1700,6 +1756,7 @@ pub(crate) fn merge(hsps: &Hsps) -> Result<Denseg, MixError> {
         matches: Vec::new(),
         segs: Vec::new(),
         ds_cnt: 0,
+        extra_rows: Vec::new(),
         rows: Vec::new(),
         segments: Vec::new(),
     };
@@ -1715,11 +1772,11 @@ pub(crate) fn merge(hsps: &Hsps) -> Result<Denseg, MixError> {
     //     }
     // ```
     if mix.ds_cnt == 0 {
-        return Err(MixError("no alignments were added for merging"));
+        return Err(MixError::Internal("no alignments were added for merging"));
     }
     mix.merge()?;
     mix.build_rows();
     mix.build()?;
-    mix.fill_unaligned_regions();
-    Ok(mix.create_denseg())
+    mix.fill_unaligned_regions()?;
+    mix.create_denseg()
 }

@@ -355,9 +355,13 @@ pub(crate) fn write_section<W: Write + ?Sized>(
     if hsps.is_empty() {
         return Ok(());
     }
+    let denseg = aln_mix::merge(hsps).map_err(|error| match error {
+        aln_mix::MixError::Internal(what) => internal(what),
+        // `ncbi_aborts`, which the program's report asks before the query's first byte.
+        aln_mix::MixError::NcbiAborts => internal("a section that NCBI BLAST+ aborts on"),
+    })?;
     writer.write_all(b"\n")?;
-    let denseg = aln_mix::merge(hsps).map_err(|error| internal(error.0))?;
-    let mut map = AlnMap::new(&denseg);
+    let mut map = AlnMap::new(&denseg).map_err(internal)?;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1206-1208
     // ```c++
     //     if(m_AlignOption & eMasterAnchored){
@@ -365,10 +369,30 @@ pub(crate) fn write_section<W: Write + ?Sized>(
     //     }
     // ```
     if view.anchored {
-        map.set_anchor(0);
+        map.set_anchor(0).map_err(internal)?;
     }
     let rows = prepare_rows(&map, line_length, hsps.query_bioseq, sequences);
     display_rows(writer, &map, view, line_length, rows, sequences)
+}
+
+/// Whether NCBI BLAST+ aborts on the section of `hsps` (`aln_mix::MixError::NcbiAborts`): its
+/// merge leaves out the rows of the query's own Bioseq while segments hold them. A program asks
+/// it before any format is written and refuses the run there
+/// (`pairwise::blastp_section_aborts`): NCBI's output before the abort is what its stream had
+/// flushed, which depends on its buffer (to a file or a pipe, the version line and the two
+/// `NcbiEndl` of `PrintProlog`, blast_format.cpp:387-395, plus each full buffer; more on a
+/// terminal), so LOSAT writes none of it. Only a section with the query's own Bioseq can get
+/// there (an ordinary subject's row takes its first match, `x_SecondRowFits`), so the others are
+/// not merged here.
+pub(crate) fn ncbi_aborts(hsps: &Hsps) -> io::Result<bool> {
+    if hsps.query_bioseq.is_none() || hsps.is_empty() {
+        return Ok(false);
+    }
+    match aln_mix::merge(hsps) {
+        Ok(_) => Ok(false),
+        Err(aln_mix::MixError::NcbiAborts) => Ok(true),
+        Err(aln_mix::MixError::Internal(what)) => Err(internal(what)),
+    }
 }
 
 /// `SAlnRowInfo`: what `x_PrepareRowData` makes of each row.
@@ -438,7 +462,8 @@ fn prepare_rows(
         max_id_len: 0,
         max_start_len: 0,
     };
-    let mut keys: Vec<SeqKey> = Vec::new();
+    // The index of each sequence's list in `data.masks`, made once for the section.
+    let mut lists: std::collections::HashMap<SeqKey, usize> = std::collections::HashMap::new();
     let mut intervals = Vec::new();
     for row in 0..num_rows {
         let key = map.seq_key(row);
@@ -453,17 +478,13 @@ fn prepare_rows(
         let max_cood = map.seq_start(row).max(map.seq_stop(row));
         data.max_start_len = data.max_start_len.max(max_cood.to_string().len());
         // The rows of one sequence have one list (`x_FillLocList` of its masks).
-        let index = match keys.iter().position(|&known| known == key) {
-            Some(index) => index,
-            None => {
-                intervals.clear();
-                sequences.masks(key, &mut intervals);
-                keys.push(key);
-                data.masks
-                    .push(fill_loc_list(map, key, query_bioseq, &intervals));
-                keys.len() - 1
-            }
-        };
+        let index = *lists.entry(key).or_insert_with(|| {
+            intervals.clear();
+            sequences.masks(key, &mut intervals);
+            data.masks
+                .push(fill_loc_list(map, key, query_bioseq, &intervals));
+            data.masks.len() - 1
+        });
         data.masked.push(index);
     }
     data

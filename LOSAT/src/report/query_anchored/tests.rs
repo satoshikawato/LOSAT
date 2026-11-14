@@ -22,6 +22,8 @@ const SEQUENCES: &[(&str, &str)] = &[
     ("s_multi", "KIVWSTFSARIQFAQDVPPKIIVFTWHNHESLEGWNGRQFYDIGENTGMFRLGFPWMPQIEETGDNSPIDYDCKNLEHYTNGRQFYDIGENRGMFWLGFTKFIGCFNSTQNPYFMYNYNTHSSFMSEKRIRTNKHYWSRYHAPMHFQFTKVNNRA"),
     ("s_twice", "IQFAQYVPPKIIRFTNHNHPSLEGWNGRQFYGIGENTGMFHLGFPKFIACFDDDQNSYFMIKYDTVYFYTSTLWNSLMDAIQGAQYGPPKQIRFTWHNHPSLEGWYGRQFYDIGEQTGMFRLGEPAFIGCFQETQNPYFM"),
     ("s_twice_lc", "IQFAQYVPPKIIRFTNHNHPSLEGWNGRQFYGIGENTGMFHLGFPKFIACFDDDQNSYFMIKYDTVYFYTSTLWNSLMDAIQGAqygppkqiRFTWHNHPSLEGWYGRQFYDIGEQTGMfrlgepAFIGCFQETQNPYFM"),
+    ("self1", "QFAYPPMKGTSASGFWSEAFTFGMEGIWIRCKMAMGTMNYPPMLGNYVKDEPQRSISIEYRQVQIINHTPDLCVHEQAQFAYPPMKGTSASGFWSEAFTFGMGGEGIWIRCKMAMGTMNYPPMLGNYVAVQYWHKQSHQNIGQTATPESYIRNTFAYKPMKSTSADGFWTEAFKFGMHGIWGRCKLAMGSMPWNYPPMLGNYVLEVVFAAGCTRFHIMNFMEH"),
+    ("selfseg3", "MYPWCNCMGWNHWCPPCHCNPWGCHGWGGPQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQAKAITRQTISLRITSLLKESISLALKVIQEVLVERKTKSL"),
     ("sseg", "DIVWSWFSARIQFAQYWPPKIIRFTWHWHPSLEGWNGRWFYDIGENTGMWRLGFPKFIGCWQSTQNPYFMYWYNTQQQQQQQWQQQQQQQQQQWQHSSFMSETRWRTNKHYWSRYWAPMHQQFTKVWNGAEPGRQEEWRFTHGTYKKRWCALNERMFCFWCESRLSLVWD"),
 ];
 
@@ -772,48 +774,153 @@ fn no_hsps_write_nothing() {
     assert!(out.is_empty());
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:165-186 (quoted at `aln_mix::Mix::add`):
-// a subject that is the query's Bioseq is the query's `m_AnotherRow`, whose `m_DsIdx` is the
-// Dense-seg that made it, so its first row is the HSP added first, not the HSP of the longest
-// segment (bp.s.f1's two HSPs of s_twice with Query_1 swap their rows; BLASTP's self hit, the
-// longest and first, keeps its place either way: pd.self.blastp.off.0 of the broad sample).
-#[test]
-fn the_query_s_own_bioseq_keeps_its_first_hsp_on_its_first_row() {
-    let probe = probe(
-        "qa",
-        1,
-        &["s_multi", "s_ins", "s_ins2", "s_twice", "s_far", "s_c"],
-    );
-    let rows = [
-        (3, 3, 73, "VL1SNTSFLSMADRA2FG3VG3IQ14NY9NQ7FE1KA6SE7"),
-        (3, 11, 1, "15WN15DG8RH7GA2QDSDTD2PS3YINK1ND1HVSYSFFYMT1ETT-R-I-R-T-N-K-H-Y-W-S-R-Y-H-A-P-MLHWQNQSFLTMKDVANINQ2EQPY1RPQPEKEQ4"),
-    ];
-    let starts = |hsps: Hsps| {
-        let mut out = Vec::new();
-        write_section(
-            &mut out,
-            View {
-                identity: true,
-                anchored: true,
-            },
-            200,
-            &hsps,
-            &probe,
-        )
-        .expect("the section");
-        let text = String::from_utf8(out).expect("ASCII");
-        text.lines()
-            .filter(|line| line.starts_with("Subject_4"))
-            .map(|line| line.split_whitespace().nth(1).unwrap().to_string())
-            .collect::<Vec<_>>()
-    };
-    let mut plain = Hsps::default();
-    let mut own = Hsps::default();
-    for &(subject, qstart, sstart, btop) in &rows {
-        push_btop(&mut plain, subject, qstart, sstart, btop);
-        push_btop(&mut own, subject, qstart, sstart, btop);
+/// One record as the query and as its only subject (`-parse_deflines`): the subject is the query's
+/// own Bioseq (`Hsps::set_query_bioseq`), and both rows show the record's label.
+fn self_probe(name: &str) -> Probe {
+    Probe {
+        query: sequence(name),
+        query_label: name.to_string(),
+        subjects: vec![(sequence(name), name.to_string())],
+        query_masks: Vec::new(),
+        subject_masks: vec![Vec::new()],
     }
-    own.set_query_bioseq(3);
-    assert_eq!(starts(plain), ["1", "73"]);
-    assert_eq!(starts(own), ["73", "1"]);
+}
+
+/// `section` of the query's own Bioseq (`self_probe`).
+fn self_section(name: &str, rows: &[(u32, u32, u32, &str)], format: u8) -> String {
+    let probe = self_probe(name);
+    let mut hsps = Hsps::default();
+    for &(subject, qstart, sstart, btop) in rows {
+        push_btop(&mut hsps, subject, qstart, sstart, btop);
+    }
+    hsps.set_query_bioseq(0);
+    assert!(!ncbi_aborts(&hsps).expect("the merge"));
+    let view = View {
+        identity: matches!(format, 1 | 3),
+        anchored: matches!(format, 1 | 2),
+    };
+    let mut out = Vec::new();
+    write_section(&mut out, view, 60, &hsps, &probe).expect("the section");
+    String::from_utf8(out).expect("ASCII")
+}
+
+/// z.self1's HSPs in the order of the Seq-align set (`-outfmt "6 ... btop"` of the same search).
+const SELF1: &[(u32, u32, u32, &str)] = &[
+    (0, 1, 79, "24-G-G24"),
+    (0, 2, 155, "3PK3GS3SD3ST3TK3EH3IG3ML3TS1-P-W10"),
+];
+
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:499-501 (quoted at `aln_mix::Mix::place`):
+// the first match placed on the query sets the `m_DsIdx` of its second row. In z.self1 (one record as the
+// query, `-query_loc 1-48`, and as the subject, `-subject_loc 49-223`, `-parse_deflines -comp_based_stats 0`,
+// review of line RG T3a, `T/t3/review_t3a/`) the subject is the query's own Bioseq: `Add` presets its row
+// to HSP 1 (q1-48/s79-128, GG inserted), the longest segment (37 columns) is HSP 2's (q2-48/s155-203, PW
+// inserted before its last 10), which goes to an extra row and takes the subject's row for its other
+// segments; HSP 1 moves to the second extra row.
+#[test]
+fn the_query_s_own_bioseq_takes_the_hsp_of_the_first_match_format_1() {
+    let got = self_section("self1", SELF1, 1);
+    assert_eq!(
+        got,
+        r#"
+self1  1    QFAYPPMKGTSASGFWSEAFTFGMEGIWIRCKMAMGTMNYPPMLGNYV  48
+self1  194                                        ..........  203
+                                                  \         
+                                                  |         
+                                                 PW
+self1  155   ...K...S...D...T...K...H...G...L...S.            191
+self1  79   ................................................  128
+                                    \                       
+                                    |                       
+                                   GG
+
+"#
+    );
+}
+
+#[test]
+fn the_query_s_own_bioseq_takes_the_hsp_of_the_first_match_format_2() {
+    let got = self_section("self1", SELF1, 2);
+    assert_eq!(
+        got,
+        r#"
+self1  1    QFAYPPMKGTSASGFWSEAFTFGMEGIWIRCKMAMGTMNYPPMLGNYV  48
+self1  194                                        NYPPMLGNYV  203
+                                                  \         
+                                                  |         
+                                                 PW
+self1  155   FAYKPMKSTSADGFWTEAFKFGMHGIWGRCKLAMGSM            191
+self1  79   QFAYPPMKGTSASGFWSEAFTFGMEGIWIRCKMAMGTMNYPPMLGNYV  128
+                                    \                       
+                                    |                       
+                                   GG
+
+"#
+    );
+}
+
+#[test]
+fn the_query_s_own_bioseq_takes_the_hsp_of_the_first_match_format_3() {
+    let got = self_section("self1", SELF1, 3);
+    assert_eq!(
+        got,
+        r#"
+self1  1    QFAYPPMKGTSASGFWSEAFTFGM--EGIWIRCKMAMGTM--NYPPMLGNYV  48
+self1  192                                          PW..........  203
+self1  155   ...K...S...D...T...K...--H...G...L...S.              191
+self1  79   ........................GG..............--..........  128
+
+"#
+    );
+}
+
+#[test]
+fn the_query_s_own_bioseq_takes_the_hsp_of_the_first_match_format_4() {
+    let got = self_section("self1", SELF1, 4);
+    assert_eq!(
+        got,
+        r#"
+self1  1    QFAYPPMKGTSASGFWSEAFTFGM--EGIWIRCKMAMGTM--NYPPMLGNYV  48
+self1  192                                          PWNYPPMLGNYV  203
+self1  155   FAYKPMKSTSADGFWTEAFKFGM--HGIWGRCKLAMGSM              191
+self1  79   QFAYPPMKGTSASGFWSEAFTFGMGGEGIWIRCKMAMGTM--NYPPMLGNYV  128
+
+"#
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:266-283 and alnsegments.cpp:286-338
+// (quoted at `aln_mix::Mix::build_rows` and `fill_unaligned_regions`). zs3 of the review
+// (`-query in/selfseg3.fa -subject in/selfseg3.fa -parse_deflines -seg yes -outfmt 1`): SEG splits the
+// record's self diagonal into q1-30 (added first) and q111-150 (the longest segment). The latter's match
+// sets the subject's row to its HSP and goes to an extra row; q1-30 goes to a second one, so the
+// subject's row keeps no start, `BuildRows` leaves it and its extra rows out, and NCBI writes before
+// its vectors in `FillUnalignedRegions` (exit 134, `double free or corruption (out)`). LOSAT refuses
+// the query (`ncbi_aborts`) and never writes such a section (an internal error, not a panic).
+#[test]
+fn the_query_s_own_bioseq_without_a_start_is_where_ncbi_aborts() {
+    let rows: &[(u32, u32, u32, &str)] = &[(0, 1, 1, "30"), (0, 111, 111, "40")];
+    let probe = self_probe("selfseg3");
+    let mut hsps = Hsps::default();
+    for &(subject, qstart, sstart, btop) in rows {
+        push_btop(&mut hsps, subject, qstart, sstart, btop);
+    }
+    // The same HSPs of an ordinary subject merge.
+    assert!(!ncbi_aborts(&hsps).expect("the merge"));
+    hsps.set_query_bioseq(0);
+    assert!(ncbi_aborts(&hsps).expect("the merge"));
+    let mut out = Vec::new();
+    let error = write_section(
+        &mut out,
+        View {
+            identity: true,
+            anchored: true,
+        },
+        60,
+        &hsps,
+        &probe,
+    )
+    .expect_err("no section");
+    assert!(error.to_string().contains("internal error"), "{error}");
+    assert!(out.is_empty());
 }

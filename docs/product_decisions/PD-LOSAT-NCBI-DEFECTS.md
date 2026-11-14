@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.18
+- Version: 1.19
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -31,7 +31,10 @@
   1.17 2026-11-13 (the explicit rejections of `losat rpsbproc` in the XML input, rule 3, line PS
   item PS16d);
   1.18 2026-11-14 (the explicit rejections of TBLASTN's one-hit gapped start past NCBI's buffers
-  and of the endless split it can cause, rule 3, line RG item X2)
+  and of the endless split it can cause, rule 3, line RG item X2);
+  1.19 2026-11-14 (the explicit rejection of BLASTP's query-anchored section that NCBI's merge
+  aborts on, rule 3, line RG item T3a; Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -551,6 +554,21 @@ of exception 9 (PS16a) did.
 
   BLASTP's approved exception 3 (version 1.3), which reads such letters as the sentinel, is not
   extended to TBLASTN.
+
+- BLASTP `-outfmt 1` to `4` (the query-anchored views; version 1.19, 2026-11-14, line RG item T3a,
+  Owner-delegated): a query read with `-parse_deflines` that is also a subject (one record, the
+  same definition line and letters) is the query's own Bioseq for NCBI's `CAlnMix`, whose `Add`
+  presets that subject's row to the HSP added first (`alnseq.cpp:165-186`). The first match that
+  `x_Merge` places on the query (the longest aligned segment) sets that row to its own HSP
+  (`alnmerger.cpp:499-501`) and goes to an extra row; when that HSP has no other segment, the
+  row keeps no start, `BuildRows` leaves it and its extra rows out (`alnseq.cpp:266-283`), and
+  `FillUnalignedRegions` indexes its vectors with their row index of -1 (`alnsegments.cpp:286-338`):
+  NCBI writes before the vectors' buffers and aborts (`double free or corruption (out)`, exit 134;
+  review probes `selfseg3`, a record whose SEG mask splits its self diagonal, and `self2`). LOSAT
+  runs the same merge and refuses (exit 1) where it reaches that row, before the report's first
+  byte: NCBI's output before the abort is what its stream had flushed, which depends on its
+  buffer (to a file or a pipe, the version line of the prolog). The other sections of such a
+  record are NCBI's (fixture rows `db.of1.bp.self1.*`).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

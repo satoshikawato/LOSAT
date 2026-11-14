@@ -2669,6 +2669,71 @@ struct BlastpSections<'a> {
     anchored: Option<&'a dyn super::query_anchored::ReportSequences>,
 }
 
+/// The HSPs of a BLASTP query-anchored section (outfmt 1 to 4): the first `num_alignments`
+/// subjects of the query's sorted hits (`QueryGroup::aligned`), each with all its HSPs in their
+/// order. An HSP's Dense-seg is its Seq-align's (`seqalign::protein_row_segments`); the subjects
+/// shown in one hit (copies of a database record, `joins`) are the hit's subject, one Bioseq for
+/// NCBI's scope; `is_query` tells the subject that is the query's own Bioseq.
+fn blastp_section_hsps(
+    num_alignments: usize,
+    group: &super::x_pairwise_par::QueryGroup<'_>,
+    is_query: impl Fn(u32) -> bool,
+) -> super::query_anchored::Hsps {
+    let mut hsps = super::query_anchored::Hsps::default();
+    let mut segments = super::serial::seqalign::Segments::default();
+    for &s_idx in group.aligned(num_alignments) {
+        if is_query(s_idx) {
+            hsps.set_query_bioseq(s_idx);
+        }
+        for hit in &group.subject_hits[&s_idx] {
+            super::serial::seqalign::protein_row_segments(&hit.hit, &mut segments);
+            hsps.push_dense_seg(s_idx, segments.starts(), segments.lens(), 0, 0);
+        }
+    }
+    hsps
+}
+
+/// Whether NCBI BLAST+ aborts on the query-anchored section (`view`) of query `q_idx` of a
+/// BLASTP `-subject` search (`query_anchored::ncbi_aborts`), `rows` the rows of its hits in the
+/// final order: the section of the report (`BlastpSections::alignments`), whose group is sorted
+/// by `sort` (`PairwiseView::report_sort`) and whose aligned subjects are the first
+/// `num_alignments`. Asked before any format is written, for a query whose own record is one of
+/// the subjects (`is_query`, `-parse_deflines`), so that the refusal comes before the report's
+/// first byte, as the other refusals of such a record (`believed::refuse_shared_masks`). Only a
+/// `-subject` search has such a subject, whose hits `joins` never shows in another subject's.
+pub(crate) fn blastp_section_aborts(
+    view: PairwiseView,
+    sort: super::hit_sort::ReportSort,
+    num_alignments: usize,
+    q_idx: usize,
+    rows: &[PairwiseHit],
+    subject_titles: &[Arc<[u8]>],
+    is_query: impl Fn(u32) -> bool,
+) -> io::Result<bool> {
+    if view == PairwiseView::Pairwise {
+        return Ok(false);
+    }
+    let query_hits: Vec<(HspIndex, &PairwiseHit)> = rows
+        .iter()
+        .enumerate()
+        .filter(|(_, hit)| hit.hit.q_idx as usize == q_idx)
+        .collect();
+    let Some(mut group) =
+        super::x_pairwise_par::QueryGroup::new(&query_hits, subject_titles, |_, _| false)
+    else {
+        return Ok(false);
+    };
+    group.sort(view.report_sort(sort), false);
+    if !group
+        .aligned(num_alignments)
+        .iter()
+        .any(|&s_idx| is_query(s_idx))
+    {
+        return Ok(false);
+    }
+    super::query_anchored::ncbi_aborts(&blastp_section_hsps(num_alignments, &group, is_query))
+}
+
 impl BlastpSections<'_> {
     /// The gapped Karlin block of query `q_idx`'s footer: the report's, with rpsblast's K of
     /// the query (the first query of a batch has the K that the RPS traceback wrote).
@@ -2843,10 +2908,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
     //     CSeq_align_set copy_aln_set;
     //     CBlastFormatUtil::PruneSeqalign(*aln_set, copy_aln_set, m_NumAlignments);
     // ```
-    /// The query-anchored section of the first `num_alignments` subjects of the query's sorted
-    /// hits (`QueryGroup::aligned`), each with all its HSPs in their order. An HSP's Dense-seg is
-    /// its Seq-align's (`seqalign::protein_row_segments`); the subjects shown in one hit (copies
-    /// of a database record, `joins`) are the hit's subject, one Bioseq for NCBI's scope.
+    /// The query-anchored section of the query's aligned subjects (`blastp_section_hsps`).
     fn alignments<W: Write>(
         &self,
         writer: &mut W,
@@ -2860,22 +2922,13 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
                 "LOSAT internal error: a query-anchored report without its sequences",
             ));
         };
-        let mut hsps = super::query_anchored::Hsps::default();
-        let mut segments = super::serial::seqalign::Segments::default();
-        for &s_idx in group.aligned(self.report.num_alignments) {
-            if sequences.subject_is_query(q_idx, s_idx) {
-                hsps.set_query_bioseq(s_idx);
-            }
-            for hit in &group.subject_hits[&s_idx] {
-                super::serial::seqalign::protein_row_segments(&hit.hit, &mut segments);
-                hsps.push_dense_seg(s_idx, segments.starts(), segments.lens(), 0, 0);
-            }
-        }
         super::query_anchored::write_section(
             writer,
             super::query_anchored::View { identity, anchored },
             self.config.line_length,
-            &hsps,
+            &blastp_section_hsps(self.report.num_alignments, group, |s_idx| {
+                sequences.subject_is_query(q_idx, s_idx)
+            }),
             &super::query_anchored::OfQuery { sequences, q_idx },
         )
     }

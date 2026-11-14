@@ -146,7 +146,7 @@ pub fn parse(words: &[&str]) -> Result<(Program, Commands), String> {
 /// `delim=`), add an output of their own, the third value returned (docs/web/abi_v2.md §7). The
 /// rule reads the words, not the fields they make, so that the application reads it from the argv
 /// alike: `6 std` adds an output with the bytes of outfmt 6. 0 with words adds none (the CLI writes
-/// outfmt 0). The output of outfmt 13 and 14 is a ZIP archive of the master file and the side
+/// outfmt 0); BLASTP's 1 to 4 add one without the words. The output of outfmt 13 and 14 is a ZIP archive of the master file and the side
 /// files (`search`). The arguments come back with
 /// `-outfmt` at the CLI's default, `0`: the engine is given the formats of each search
 /// (`ReportOutputs`), and the checks of the arguments alone (`check_options`) read the formats
@@ -213,6 +213,10 @@ pub fn parse_run(words: &[&str]) -> Result<(Program, Commands, Option<String>), 
     let custom = match choice.number {
         0 => None,
         6 | 7 => words_follow.then_some(outfmt),
+        // BLASTP's query-anchored formats (the others' are rejected above) without the words
+        // after the number, which the CLI drops (`FormatChoice::normalized`) and the engine's
+        // library refuses after 0 to 4, as a field list.
+        1..=4 => Some(choice.normalized()),
         _ => Some(outfmt),
     };
     Ok((program, command, custom))
@@ -1777,9 +1781,40 @@ mod tests {
                 let words = [program, "-query", "q", "-subject", "s", "-outfmt", outfmt];
                 assert_eq!(validate(&words), Ok(()), "{program} {outfmt:?}");
             }
+            // BLASTP writes the query-anchored formats 1 to 4 (line RG T3a), each an output of its
+            // own without the words after the number, which the CLI drops; the other programs
+            // reject them as the CLI does (below).
+            let anchored: &[(&str, &str)] = if program == "blastp" {
+                &[
+                    ("1", "1"),
+                    ("2", "2"),
+                    ("3", "3"),
+                    ("4", "4"),
+                    (" 3 ", "3"),
+                    ("+02", "2"),
+                    ("1 qseqid", "1"),
+                    ("4 std", "4"),
+                ]
+            } else {
+                &[]
+            };
+            for &(outfmt, number) in anchored {
+                assert_eq!(
+                    custom(program, outfmt),
+                    Ok(Some(number.to_string())),
+                    "{program} {outfmt:?}"
+                );
+                let words = [program, "-query", "q", "-subject", "s", "-outfmt", outfmt];
+                assert_eq!(validate(&words), Ok(()), "{program} {outfmt:?}");
+            }
             // What the CLI rejects, with its message.
             let engine = engine_program(Program::parse(program).unwrap());
-            for outfmt in ["abc", "99", "1", "6\tqseqid"] {
+            let rejected: &[&str] = if program == "blastp" {
+                &["abc", "99", "6\tqseqid"]
+            } else {
+                &["abc", "99", "1", "4", "6\tqseqid"]
+            };
+            for &outfmt in rejected {
                 let cli = losat::web_adapter::parse_formatting_string(outfmt)
                     .and_then(|choice| {
                         losat::web_adapter::report_format(&choice, engine, None)?;

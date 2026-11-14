@@ -74,9 +74,14 @@ impl<'d> AlnMap<'d> {
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:716-755 (`x_GetSeqLeftSeg`,
     /// `x_GetSeqRightSeg`: the first and the last segment of the row with a start; "Invalid
     /// Dense-seg: Row ... contains gaps only." for a row of none, which `x_CreateDenseg` removed).
-    pub(crate) fn new(ds: &'d Denseg) -> Self {
+    /// A Dense-seg without segments is an internal error (the merge of an HSP makes at least one,
+    /// and `GetAlnStop` would read `m_AlnStarts[-1]`).
+    pub(crate) fn new(ds: &'d Denseg) -> Result<Self, &'static str> {
         let num_rows = ds.ids.len();
         let num_segs = ds.lens.len();
+        if num_segs == 0 {
+            return Err("a merged Dense-seg without segments");
+        }
         let mut aln_starts = Vec::with_capacity(num_segs);
         let mut start = 0u32;
         let mut len = 0u32;
@@ -92,7 +97,7 @@ impl<'d> AlnMap<'d> {
             left_segs[row] = (0..num_segs).find(present).unwrap_or(0);
             right_segs[row] = (0..num_segs).rev().find(present).unwrap_or(0);
         }
-        Self {
+        Ok(Self {
             ds,
             num_rows,
             num_segs,
@@ -102,7 +107,7 @@ impl<'d> AlnMap<'d> {
             aln_starts,
             left_segs,
             right_segs,
-        }
+        })
     }
 
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:79-121
@@ -131,8 +136,9 @@ impl<'d> AlnMap<'d> {
     ///                    "Invalid Dense-seg: No sequence on the anchor row");
     ///     }
     /// ```
-    /// (The query row, the anchor, has the letters of every query segment.)
-    pub(crate) fn set_anchor(&mut self, anchor: usize) {
+    /// (The query row, the anchor, has the letters of every query segment; NCBI's throw is an
+    /// internal error here.)
+    pub(crate) fn set_anchor(&mut self, anchor: usize) -> Result<(), &'static str> {
         self.aln_seg_idx.clear();
         self.aln_starts.clear();
         self.num_seg_with_offsets.clear();
@@ -154,6 +160,10 @@ impl<'d> AlnMap<'d> {
                     .push(SegWithOffset { aln_seg, offset });
             }
         }
+        if self.aln_seg_idx.is_empty() {
+            return Err("no sequence on the anchor row");
+        }
+        Ok(())
     }
 
     pub(crate) fn num_rows(&self) -> usize {
@@ -227,7 +237,7 @@ impl<'d> AlnMap<'d> {
             .wrapping_sub(1)
     }
 
-    /// `GetAlnStop()`.
+    /// `GetAlnStop()`. There is a segment: `new` and `set_anchor` refuse a map of none.
     pub(crate) fn aln_stop(&self) -> u32 {
         self.seg_aln_stop(self.aln_num_segs() - 1)
     }

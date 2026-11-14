@@ -5641,10 +5641,15 @@ Scheduling (each value computed by one thread with the original function; order 
   BLOSUM62 word lengths 2 and 3, BLOSUM45 at 2 and 3, PAM30, thresholds 0-1000, masks, the overflow array and a query
   set without words; `tests/tblastn_lut_lean.rs`: the same report as `=0` with BLOSUM62 word size 3 and BLOSUM45 word
   size 2, at one and four threads, every table lean by default and with chains with `=0`, read from
-  `[X_STATS] TBNLUTLEAN lean= chain=` with `LOSAT_X_STATS`). Always: every TBLASTN lookup table (LOSAT's TBLASTN takes
-  word size 3, and 2 with BLOSUM45) outside diagnostics mode, whose prints read the chains; a table of 4 or more
-  letters a word (backbone indexes over 16 bits, which the CLI refuses) would take the chain builder, as the in-place
-  builders decline it.
+  `[X_STATS] TBNLUTLEAN lean= chain=` with `LOSAT_X_STATS`). Always: every TBLASTN lookup table outside diagnostics
+  mode, whose prints read the chains. A table of 4 letters a word (`-word_size 4`: backbone indexes over 16 bits,
+  which the lean build declines) is made by the joint builder of 32-bit indices of BLASTX's tables
+  (`x_pair_lut_wide.rs` `x_build_full_wide`, through `backbone.rs` `x_table_without_chains`, its tasks on the pool's
+  threads when it has two or more; item X2e of line RG, 2026-11-14), counted as `lean`; before, it took the chain
+  builder: `-word_size 4 -threshold 1` (a 329-letter protein against 580 bases, one thread, ws, medians of 3) max RSS
+  274 -> 131 MB (NCBI BLAST+ 2.17.0 244 MB), 1.85 -> 0.69 s; at four threads 274 -> 151 MB, 1.78 -> 0.42 s; unit test
+  `tblastx_and_tblastn_tables_of_other_matrices_and_word_lengths_equal_the_chain_builders` (word lengths 2-4, BLOSUM62,
+  BLOSUM45, PAM30, one thread and pools of 4 and 8), `tests/tblastn_lut_lean.rs` word size 4 at one and four threads.
   Measured 2026-10-30 on the workstation (2x Xeon Gold 6338; base dev a2ee6ff3; every output of a case the same
   bytes in every arm). Peak memory (max of `/usr/bin/time` %M and a 2 ms VmHWM sample, node 0, untimed, at most 16
   CPUs for every run, medians in rotating order, NCBI BLAST+ 2.17.0 in the same rounds): the 595 proteins of AP027131
@@ -6284,6 +6289,15 @@ Scheduling (each value computed by one thread with the original function; order 
   grow in step and the dead blocks are never reused. Diagnostics mode keeps the chain builder.
   `LOSAT/tests/tblastx_ref_lut.rs` compares reports with and without the switch (the reach file shows the
   in-place build); a unit test of `x_lut_direct.rs` compares the table with the chain builder's field by field.
+  Another matrix than BLOSUM62 or another word size than 3 (item X2e of line RG, 2026-11-14; before, those tables
+  always took the chain builder): TBLASTN's builders without chains (`backbone.rs` `x_table_without_chains`: the lean
+  build, no neighbour memo kept after it, and for `-word_size 4` the joint builder of 32-bit indices, one task).
+  `-window_size 0 -word_size 4 -threshold 1` on the arch pair (one thread, ws, medians of 3): max RSS 483 -> 210 MB
+  (NCBI BLAST+ 2.17.0 368 MB), 3.95 -> 0.62 s; `-threshold 2` 341 -> 159 MB (NCBI 281); `-word_size 2` and BLOSUM45
+  at `-threshold 1` no more memory and less time (0.26 -> 0.17 s, 0.24 -> 0.20 s). The default paths' instructions
+  x0.99999-x1.00002 of dev (five programs, five runs each). `tests/tblastx_ref_lut.rs`
+  `the_one_hit_loop_reports_the_same_at_other_word_sizes_and_matrices` (word sizes 4 and 2, BLOSUM45, one and four
+  threads) and the unit test `tblastx_and_tblastn_tables_of_other_matrices_and_word_lengths_equal_the_chain_builders`.
   Measured: 3 kb of the option-sweep query against the sweep subjects at `-threshold +inf` with the
   reference loop (then run with `LOSAT_X_PAIRPAR=0`, a variable that no longer exists), one thread: max RSS 1,069 -> 475 MB, 8.20 -> 7.00 s (NCBI
   589 MB, 9.19 s); the whole sweep input 14.2 -> 3.31 GB (NCBI 5.86 GB). On the batches the gate

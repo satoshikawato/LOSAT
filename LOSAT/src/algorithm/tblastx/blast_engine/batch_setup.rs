@@ -439,9 +439,8 @@ pub(super) fn batch_lookup<S: TbxScore>(inputs: &LookupInputs<'_, S>) -> BatchLo
     // BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
     //                           query, lookup_segments, 0);
     // ```
-    // PAIRLUT builds the group tables with the search's matrix (SC7b; `XLutEarly::sc`). The
-    // batch's table of TBXLUT holds BLOSUM62's scores: another matrix's search without the
-    // stub builds NCBI's lookup table with its scores (`build_ncbi_lookup_for_profile`).
+    // PAIRLUT builds the group tables with the search's matrix (SC7b; `XLutEarly::sc`), and the
+    // batch's full table of TBXLUT holds the scores and words of the search's matrix and word size.
     let mut x_pair_lut_batch = {
         x_pair_par::lut_build(x_pair_par::XLutEarly {
             query_frames,
@@ -470,8 +469,8 @@ pub(super) fn batch_lookup<S: TbxScore>(inputs: &LookupInputs<'_, S>) -> BatchLo
     // (asserted at dispatch point 2).
     let x_pair_lut_is_stub = x_pair_lut_stub.is_some();
     // Dispatch point (LOSAT_X_TBXLUT, on unless `LOSAT_X_TBXLUT=0`): the full table of the batch
-    // from the chain builder (`build_ncbi_lookup`) or filled in place from per-cell counts; the
-    // same table.
+    // from the chain builder (`build_ncbi_lookup_for_profile`) or filled in place from per-cell
+    // counts; the same table.
     let (lookup, contexts) = match x_pair_lut_stub {
         Some(stub) if S::BLOSUM62 => {
             crate::algorithm::tblastx::lookup::x_tbxlut_reach_stub();
@@ -487,42 +486,39 @@ pub(super) fn batch_lookup<S: TbxScore>(inputs: &LookupInputs<'_, S>) -> BatchLo
             }
             (lookup, contexts)
         }
-        None if !S::BLOSUM62 => {
-            // NCBI reference: c++/src/algo/blast/core/blast_setup.c:812-822 (the alpha and beta
-            // of the length adjustment: the matrix's ungapped row, `BLAST_GetAlphaBeta`, for
-            // the Karlin block of every context)
-            // ```c
-            //          BLAST_GetAlphaBeta(sbp->name, &alpha, &beta,
-            //                             scoring_options->gapped_calculation,
-            //                             scoring_options->gap_open,
-            //                             scoring_options->gap_extend,
-            //                             sbp->kbp_std[index]);
-            //       }
-            //       BLAST_ComputeLengthAdjustment(kbp->K, kbp->logK,
-            //                                     alpha/kbp->Lambda, beta,
-            // ```
-            // (`compute_karlin_params_ungapped` gives every block BLOSUM62's.)
-            let (lookup, mut contexts) =
-                crate::algorithm::tblastx::lookup::build_ncbi_lookup_for_profile(
-                    query_frames,
-                    crate::core::blast_util::ncbi_int4_from_double(args.word_threshold()),
-                    &ungapped_params_for_xdrop,
-                    true,
-                    sc.matrix(),
-                    sc.word(),
-                );
-            for ctx in contexts.iter_mut().filter(|ctx| ctx.is_valid) {
-                ctx.karlin_params.alpha = ungapped_params_for_xdrop.alpha;
-                ctx.karlin_params.beta = ungapped_params_for_xdrop.beta;
+        None => {
+            // The table of the search's matrix and word size (`sc`), built without chains (another
+            // matrix or word size than BLOSUM62's 3 letters: TBLASTN's builders; item X2e of line RG).
+            let (lookup, mut contexts) = crate::algorithm::tblastx::lookup::x_tbx_build_ncbi_lookup(
+                query_frames,
+                crate::core::blast_util::ncbi_int4_from_double(args.word_threshold()),
+                &ungapped_params_for_xdrop, // Used for x_dropoff calculation only
+                true,
+                sc.matrix(),
+                sc.word(),
+            );
+            if !S::BLOSUM62 {
+                // NCBI reference: c++/src/algo/blast/core/blast_setup.c:812-822 (the alpha and
+                // beta of the length adjustment: the matrix's ungapped row,
+                // `BLAST_GetAlphaBeta`, for the Karlin block of every context)
+                // ```c
+                //          BLAST_GetAlphaBeta(sbp->name, &alpha, &beta,
+                //                             scoring_options->gapped_calculation,
+                //                             scoring_options->gap_open,
+                //                             scoring_options->gap_extend,
+                //                             sbp->kbp_std[index]);
+                //       }
+                //       BLAST_ComputeLengthAdjustment(kbp->K, kbp->logK,
+                //                                     alpha/kbp->Lambda, beta,
+                // ```
+                // (`compute_karlin_params_ungapped` gives every block BLOSUM62's.)
+                for ctx in contexts.iter_mut().filter(|ctx| ctx.is_valid) {
+                    ctx.karlin_params.alpha = ungapped_params_for_xdrop.alpha;
+                    ctx.karlin_params.beta = ungapped_params_for_xdrop.beta;
+                }
             }
             (lookup, contexts)
         }
-        None => crate::algorithm::tblastx::lookup::x_tbx_build_ncbi_lookup(
-            query_frames,
-            crate::core::blast_util::ncbi_int4_from_double(args.word_threshold()),
-            &ungapped_params_for_xdrop, // Used for x_dropoff calculation only
-            true,
-        ),
     };
     let t_build_lookup = t_phase_build_lookup.elapsed();
     // Diagnostic (LOSAT_TIMING): the same interval for the common line (utils/xtiming.rs). No

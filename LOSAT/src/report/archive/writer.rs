@@ -622,10 +622,40 @@ fn write_strategy_document<E: Encoder>(
     out.enc.end_document();
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:499-505
+// ```c++
+//     // Set the filtering algorithms
+//     string algo_key = db->GetFilteringAlgorithmKey();
+//     if (algo_key != kEmptyStr)
+//     {
+//     	int mask_type = (int) db->GetMaskType();
+//        	x_AddParameterToProgramOptions(CBlast4Field::Get(eBlastOpt_DbFilteringAlgorithmKey), algo_key);
+// ```
+/// Whether `encoding` writes every string of a request's document as it is: the command line's
+/// (`ArchiveRequest::written_as_is`), the batch's Bioseqs (`RequestInputs::written_as_is`) and the
+/// string options that the run's handle adds (`sets`, and `database_params`: the
+/// `DbFilteringAlgorithmKey` of a `-db_soft_mask` name, which the search strategy keeps after the
+/// formatter's warning; NCBI 2.17.0 `blastn -db_soft_mask café`: `value string "caf##"` and
+/// `Error: (803.7) [blastn] Blast4-request.body.queue-search.program-options.E.value.string`,
+/// probe RG K/k4b/agent7/probe4 `bn_mask_e_f6`). The archive's and the search strategy's one rule
+/// for writing through `Traced`.
+fn request_written_as_is(
+    encoding: ArchiveEncoding,
+    request: &super::ArchiveRequest,
+    batch: &RequestInputs<'_>,
+    sets: &[Param],
+    database_params: &[Param],
+) -> bool {
+    request.written_as_is(encoding)
+        && batch.written_as_is(encoding)
+        && encoding.writes_params(sets)
+        && encoding.writes_params(database_params)
+}
+
 /// Writes the search strategy's request of one query batch (`write_strategy_document`) to `sink`
 /// in ASN.1 text (the strategy file is always ASN.1 text), through `Traced` when ASN.1 text does
-/// not write one of its strings as it is (`ArchiveRequest::written_as_is`,
-/// `RequestInputs::written_as_is`): `collect` then gets the bytes that it replaced.
+/// not write one of its strings as it is (`request_written_as_is`): `collect` then gets the bytes
+/// that it replaced.
 pub(super) fn write_strategy_request(
     sink: &mut dyn Write,
     request: &super::ArchiveRequest,
@@ -636,7 +666,7 @@ pub(super) fn write_strategy_request(
 ) -> Result<()> {
     let mut buf = Vec::new();
     let encoding = ArchiveEncoding::Text;
-    if request.written_as_is(encoding) && batch.written_as_is(encoding) {
+    if request_written_as_is(encoding, request, batch, sets, database_params) {
         let mut out = ArchiveOut::new(AsnTextEncoder::new(&mut buf), sink);
         write_strategy_document(&mut out, request, batch, sets, database_params);
         out.finish()
@@ -678,7 +708,7 @@ fn write_error_document<E: Encoder>(out: &mut ArchiveOut<'_, E>, messages: &[Mes
 /// Writes the archive of one query batch to `sink` and takes the messages saved since the
 /// previous archive. `ARCHIVE_FORMAT` values that NCBI does not write leave the sink
 /// untouched. A document with a string that the encoding does not write as it is
-/// (`ArchiveRequest::written_as_is`, `RequestInputs::written_as_is`) is written through `Traced`,
+/// (`request_written_as_is`) is written through `Traced`,
 /// and NCBI's posts of the bytes that its stream replaced go to `diagnostics` (`post_replaced`)
 /// as NCBI writes them: each after the bytes of the document that NCBI's buffer had written to
 /// the output by then (`Traced::posting`; NCBI's `cerr` is tied to `cout`).
@@ -694,7 +724,7 @@ pub fn write_archive<A: AlignSource>(
     let params = handle.options().database_params();
     let request = handle.request();
     let encoding = handle.encoding();
-    let as_is = request.written_as_is(encoding) && batch.request.written_as_is(encoding);
+    let as_is = request_written_as_is(encoding, request, &batch.request, &sets, &params);
     let post = |replaced: &ReplacedChar| {
         super::post_replaced(
             diagnostics,

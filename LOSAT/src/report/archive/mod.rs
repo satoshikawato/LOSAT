@@ -133,6 +133,14 @@ impl ArchiveEncoding {
         };
         !text.iter().any(|&byte| stream.replaces(byte))
     }
+
+    /// Whether the string values of `params` are written as they are (`writes_text`).
+    pub fn writes_params(self, params: &[options::Param]) -> bool {
+        params.iter().all(|param| match &param.value {
+            options::ParamValue::Str(value) => self.writes_text(value.as_bytes()),
+            _ => true,
+        })
+    }
 }
 
 /// Whether NCBI's `PrintErrorArchive` writes the error archive for this `-outfmt` text.
@@ -233,10 +241,7 @@ impl ArchiveRequest {
         self.database
             .as_deref()
             .is_none_or(|name| encoding.writes_text(name))
-            && self.algorithm.iter().all(|param| match &param.value {
-                options::ParamValue::Str(value) => encoding.writes_text(value.as_bytes()),
-                _ => true,
-            })
+            && encoding.writes_params(&self.algorithm)
     }
 }
 

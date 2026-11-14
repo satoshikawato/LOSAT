@@ -2098,8 +2098,9 @@ impl OidMap<'_> {
 }
 
 impl SeqDb {
-    /// The OID of ordinal id `ordinal`: `ordinal` itself unless the database is restricted
-    /// ([`SeqDb::restrict`]). NCBI prints it as `n` of `gnl|BL_ORD_ID|n`.
+    /// The OID of ordinal id `ordinal`: `ordinal` itself unless a list restricts the database
+    /// ([`SeqDb::restrict`]) or its alias files' range starts past OID 0. NCBI prints it as `n`
+    /// of `gnl|BL_ORD_ID|n`.
     pub(crate) fn oid(&self, ordinal: u32) -> Oid {
         self.oid_map().oid(ordinal)
     }
@@ -2109,8 +2110,8 @@ impl SeqDb {
         OidMap(self.filter.as_deref())
     }
 
-    /// The ordinal id of the OID `oid`, one the database's list includes (`oid` itself unless
-    /// the database is restricted): the inverse of [`SeqDb::oid`].
+    /// The ordinal id of the OID `oid`, one the database's list includes (`oid` itself unless a
+    /// list or an alias range restricts the database): the inverse of [`SeqDb::oid`].
     pub fn ordinal_of(&self, oid: u32) -> u32 {
         match &self.filter {
             Some(filter) => filter.rank(oid),

@@ -131,8 +131,8 @@ impl SeqId<'_> {
                 enc.end_member();
                 enc.member("tag", 1);
                 enc.variant("Object-id", "id", 0);
-                // An ordinal ID is an `Int4` in NCBI (`int oid`); a database has fewer than
-                // 2^31 sequences.
+                // An OID is an `Int4` in NCBI (`int oid`); a database has fewer than 2^31
+                // sequences.
                 enc.int(oid.get() as i32);
                 enc.end_variant();
                 enc.end_member();

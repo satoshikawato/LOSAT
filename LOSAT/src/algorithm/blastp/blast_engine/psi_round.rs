@@ -596,8 +596,8 @@ fn engine_block(params: &KarlinParams) -> KarlinBlk {
 // #define BLAST_EXPECT_VALUE 10.0 /**< by default, alignments whose expect
 // ```
 // The Seq-id of a subject is its key (`rounds::SetKey`, `SubjectKeys`): a `-subject` record's
-// index (`lcl|Subject_N`), a database sequence's ordinal id (`gnl|BL_ORD_ID|oid`, the hit lists
-// name it by its rank among the listed ones), or its parsed Seq-align id. The PSSM's multiple
+// index (`lcl|Subject_N`), a database sequence's OID (`gnl|BL_ORD_ID|oid`; the hit lists name it
+// by its rank among the listed ones, `SubjectKeys` maps the rank to the OID), or its parsed Seq-align id. The PSSM's multiple
 // alignment counts its rows by the same keys and joins following Seq-aligns whose ids `Match`
 // (`pssm::input_msa`). Keys that differ but that NCBI's handles can take for one are refused
 // where NCBI compares them (`rounds::HandleIndex`): in the inclusion sets before the round's

@@ -23,7 +23,8 @@ make_taxfilter.py --unparsed-only MAKEBLASTDB   (taxfilter/tfu_n.*, tfu_p.*, tfu
   and 9606 in OID order: `-taxids 9606` keeps OIDs 1 and 3, which the restricted search numbers 0 and 1, and NCBI names
   them `gnl|BL_ORD_ID|1` and `gnl|BL_ORD_ID|3`. makeblastdb gives one taxid to a database without parsed Seq-ids
   (`-taxid`; `-taxid_map` needs them), so each record is a database of its own first, and `-input_type blastdb` joins
-  them. `tfu_nr.nal` and `tfu_pr.pal` read OIDs 1 to 3 of them (`FIRST_OID 2`, `LAST_OID 4`, which count from 1).
+  them. `tfu_nr.nal` and `tfu_pr.pal` read OIDs 1 to 3 of them (`FIRST_OID 2`, `LAST_OID 4`, which count from 1), and
+  `tfu_ord0.txt` is the Seq-id list `gnl|BL_ORD_ID|0` (`-negative_seqidlist` keeps OIDs 1 to 3).
   `make_taxfilter.py --unparsed-only MAKEBLASTDB` builds only these.
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
@@ -124,6 +125,9 @@ def build_unparsed(binary):
         os.remove(os.path.join(HERE, f"tfu_{kind}.{dbtype[0]}js"))
         with open(os.path.join(HERE, f"tfu_{kind}r.{alias}"), "w") as f:
             f.write(f"#\n# Alias file of line DBID, ordtax\n#\nTITLE tfu_{kind}r\nDBLIST tfu_{kind}\nFIRST_OID 2\nLAST_OID 4\n")
+    # The Seq-id list of OID 0 (`-negative_seqidlist` keeps OIDs 1 to 3).
+    with open(os.path.join(HERE, "tfu_ord0.txt"), "w") as f:
+        f.write("gnl|BL_ORD_ID|0\n")
 
 
 def main(binary, source):

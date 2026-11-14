@@ -5808,7 +5808,8 @@ struct BlastnReportInputs<'a> {
     /// (`database::ReportedSubjects::ordinals`); `None` for a subject set.
     database_ordinals: Option<&'a [u32]>,
     /// The opened database of a database search, which the XML2 and JSON formats read the taxids
-    /// of the reported sequences from; `None` for a subject set.
+    /// of the reported sequences from and whose OIDs name the sequences without parsed Seq-ids
+    /// (`oid_map`); `None` for a subject set.
     database_reader: Option<&'a database::BlastnDatabase>,
     /// The reported sequences with parsed Seq-ids of a database search, by rank
     /// (`database::ReportedSubjects::parsed`; empty without them): their ids and titles come from

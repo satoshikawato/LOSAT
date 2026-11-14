@@ -1,0 +1,7 @@
+#
+# Alias file of line DBID, ordname
+#
+TITLE tfe_nr
+DBLIST tfe_n
+FIRST_OID 2
+LAST_OID 4

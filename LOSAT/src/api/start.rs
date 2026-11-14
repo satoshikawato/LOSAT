@@ -17,9 +17,9 @@ use super::error::Error;
 use super::input::Inputs;
 use super::search::Search;
 use crate::blastinput::ncbi_environment::{
-    diag_target, log_file, run_messages_follow_log, ApplicationSettings, ApplicationStart,
-    DiagTarget,
+    log_file, run_messages_follow_log, ApplicationSettings, ApplicationStart, DiagTarget,
 };
+use crate::report::run_files::RunFiles;
 
 /// A start whose `-logfile` file is open (`open`), before its configuration load (`load`).
 pub(super) struct Opened {
@@ -37,14 +37,29 @@ pub(super) fn open<S: AsRef<OsStr> + Clone>(
     words: &[S],
     diagnostics: &mut dyn Write,
 ) -> Result<Opened, Error> {
-    let start = ApplicationStart::of_process(program, words);
+    open_with(
+        ApplicationStart::of_process(program, words),
+        words,
+        &RunFiles::Disk,
+        diagnostics,
+    )
+}
+
+/// `open` with the start `start` (made from the arguments `words`), whose file of `-logfile` goes
+/// to `files` (`RunFiles::log_target`: LOSAT Web's names that it refuses are refusals here).
+fn open_with<S: AsRef<OsStr> + Clone>(
+    start: ApplicationStart,
+    words: &[S],
+    files: &RunFiles,
+    diagnostics: &mut dyn Write,
+) -> Result<Opened, Error> {
     match start.usage_report() {
         Ok(text) => {
             let _ = diagnostics.write_all(text.as_bytes());
         }
         Err(reason) => return Err(Error::Search(reason.to_string())),
     }
-    let mut target = diag_target(log_file(words));
+    let mut target = files.log_target(log_file(words)).map_err(Error::Search)?;
     start.write_log_setup(&mut target);
     Ok(Opened { start, target })
 }
@@ -56,14 +71,20 @@ impl Opened {
     /// line writes for it without a `-logfile` (the file has its part, as there); `Err` with
     /// LOSAT's refusal too.
     pub(super) fn load(mut self, diagnostics: &mut dyn Write) -> Result<Started, Error> {
+        self.write_load(diagnostics)?;
+        Ok(Started {
+            settings: self.start.settings(),
+            target: self.target,
+        })
+    }
+
+    /// `load`, which leaves the start and the target here.
+    fn write_load(&mut self, diagnostics: &mut dyn Write) -> Result<(), Error> {
         let mut stderr = Vec::new();
         match self.start.write_config_load(&mut self.target, &mut stderr) {
             Ok(None) => {
                 let _ = diagnostics.write_all(&stderr);
-                Ok(Started {
-                    settings: self.start.settings(),
-                    target: self.target,
-                })
+                Ok(())
             }
             Ok(Some(_status)) => {
                 let mut text = Vec::new();
@@ -243,10 +264,16 @@ impl RunLog {
     /// command line writes it (its standard error is the file there); the caller's error keeps
     /// it. LOSAT's own refusals stay off the file, as on the command line (`cli::main_entry`).
     pub(super) fn post(&mut self, error: &anyhow::Error) {
-        if let (Some(DiagTarget::File(file)), Some(native)) =
-            (&mut self.0, error.downcast_ref::<crate::cli::NativeError>())
-        {
-            let _ = file.write_all(native.message.as_bytes());
+        if let Some(native) = error.downcast_ref::<crate::cli::NativeError>() {
+            self.post_text(native.message.as_bytes());
+        }
+    }
+
+    /// Writes `text`, the message of a `NativeError` of the run, to the `-logfile` file (on disk or
+    /// in memory), when the run's messages go there (`RunLog::post`).
+    fn post_text(&mut self, text: &[u8]) {
+        if let Some(target) = &mut self.0 {
+            target.write_to_file(text);
         }
     }
 }
@@ -278,6 +305,105 @@ impl Write for RunSink<'_> {
 
     fn flush(&mut self) -> std::io::Result<()> {
         self.diagnostics.flush()
+    }
+}
+
+/// The application start of a run that its caller makes (LOSAT Web's adapter, which runs the start
+/// of every run, as the command line does: `web_adapter::start_run`), with the files of the run
+/// going to the caller's `RunFiles`: what `begin_with` left.
+pub struct CallerStart {
+    /// The error that ends the run at the configuration load (NCBI's report when the program's
+    /// `.ini` or the file of `-conffile` ends it, LOSAT's refusal of the load), as `begin`'s.
+    ended: Option<String>,
+    /// The settings, or LOSAT's refusal of them, which the caller reports after it parsed the
+    /// arguments (`ApplicationStart::settings`).
+    settings: Result<ApplicationSettings, String>,
+    /// Whether the arguments have `-dryrun` (`preparse`).
+    dry_run: bool,
+    /// The `-logfile` target when the run's messages go there (`run_messages_follow_log`).
+    log: RunLog,
+    /// The `-logfile` target otherwise.
+    target: Option<DiagTarget>,
+    /// The file of `-logfile` (`log_file`) and where it goes, for `finish`.
+    log_name: Option<std::ffi::OsString>,
+    files: RunFiles,
+}
+
+/// The start `start`, made from the arguments `words` (after the program's name) by the caller,
+/// up to its configuration load (`open`, `Opened::load`): the usage report's messages and the
+/// configuration's that go to `cerr` are written to `diagnostics`, the file of `-logfile` goes to
+/// `files`. `Err` when the start ends before its `-logfile` target is open (LOSAT's refusal of the
+/// usage report, a `-logfile` name that `files` refuses); a start that ends at the load is a
+/// `CallerStart` whose `ended` is the error, and whose file of `-logfile` has its messages.
+pub fn begin_with<S: AsRef<OsStr> + Clone>(
+    start: ApplicationStart,
+    words: &[S],
+    files: &RunFiles,
+    diagnostics: &mut dyn Write,
+) -> Result<CallerStart, String> {
+    use crate::blastinput::ncbi_environment::{preparse, Preparsed};
+    let follows = run_messages_follow_log(start.program());
+    let mut opened =
+        open_with(start, words, files, diagnostics).map_err(|error| error.message().to_string())?;
+    let ended = opened
+        .write_load(diagnostics)
+        .err()
+        .map(|error| error.message().to_string());
+    let (log, target) = match follows {
+        true => (RunLog(Some(opened.target)), None),
+        false => (RunLog(None), Some(opened.target)),
+    };
+    Ok(CallerStart {
+        ended,
+        settings: opened.start.settings(),
+        dry_run: matches!(preparse(words), Preparsed::Words { dryrun: true, .. }),
+        log,
+        target,
+        log_name: log_file(words).map(OsStr::to_os_string),
+        files: files.clone(),
+    })
+}
+
+impl CallerStart {
+    /// The error that ended the start, which ends the run, before its arguments are parsed.
+    pub fn ended(&self) -> Option<&str> {
+        self.ended.as_deref()
+    }
+
+    /// The settings of the start, or LOSAT's refusal of them (the error of the run after its
+    /// arguments are parsed).
+    pub fn settings(&self) -> Result<&ApplicationSettings, &str> {
+        self.settings.as_ref().map_err(String::as_str)
+    }
+
+    /// Whether the run is a dry run, which ends after its arguments and settings.
+    pub fn dry_run(&self) -> bool {
+        self.dry_run
+    }
+
+    /// The writer of the messages that the run writes for `cerr`: they go where the run's
+    /// messages go (`RunLog::sink`: the file of `-logfile` in TBLASTX, else `diagnostics`), as
+    /// they come.
+    pub fn sink<'a>(
+        &'a mut self,
+        diagnostics: &'a mut (dyn Write + Send),
+    ) -> impl Write + Send + 'a {
+        self.log.sink(diagnostics, true)
+    }
+
+    /// Writes `text`, the message of a `NativeError` that ended the run, to the `-logfile` file
+    /// when the run's messages go there, where the command line writes it (`RunLog::post`).
+    pub fn post(&mut self, text: &[u8]) {
+        self.log.post_text(text);
+    }
+
+    /// Hands the file of `-logfile` to the run's files (`RunFiles::deliver_log`) at the end of the
+    /// run.
+    pub fn finish(self) -> std::io::Result<()> {
+        match self.log.0.or(self.target) {
+            Some(target) => self.files.deliver_log(self.log_name.as_deref(), target),
+            None => Ok(()),
+        }
     }
 }
 

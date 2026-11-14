@@ -10,6 +10,7 @@ pub mod pairwise;
 pub(crate) mod query_anchored;
 pub mod query_warnings;
 pub mod record;
+pub mod run_files;
 pub mod sam;
 pub mod seqid;
 pub mod serial;

@@ -834,6 +834,11 @@ programs. `taxfilter/` holds the inputs and what `make_taxfilter.py MAKEBLASTDB 
   DI-8 DECISIONS 10).
 - `q.faa` (HBA_HUMAN) and `q.fna` (human HBA1 cDNA): the queries. `tl_crlf.txt` (40674 and 8782 with CRLF line ends, an
   empty line and blanks) and `tl_neg.txt` (9443): the taxid lists.
+- `tfu_n`, `tfu_p` (rows `db.id.otx.*`, line DBID ordtax) and `tfe_n`, `tfe_p` (rows `db.id.ord.*`, line DBID ordname):
+  databases without parsed Seq-ids of four records of `tfn.fna` and `tfp.faa`, taxids 7955, 9606, 7227 (protein 8237)
+  and 9606 in OID order, under short titles (`tfu.fna`, `tfu.faa`) or the titles `zebrafish hbaa1 cDNA`, ` `, `  ` and
+  the empty one (`tfe.fna`, `tfe.faa`), with the aliases `tfu_nr`, `tfu_pr`, `tfe_nr`, `tfe_pr` of OIDs 1 to 3
+  (`make_taxfilter.py --unparsed-only MAKEBLASTDB`; its docstring says how).
 
 The `v4` rows search `x16_taxid` and `x16_ntaxid` (version 4 databases with taxids, above).
 
@@ -1355,7 +1360,7 @@ survey's probes (`T/t3/scripts/gen.py`, a seeded generator, and three hand-made 
   and takes the subject's first row from the HSP with the second copy, which NCBI then shows below it
   (`db.of1.bp.self1.*`, `alnmerger.cpp:499-501`). `selfseg3` is 30 letters, 80 Q and 40 letters: `-seg yes`
   splits its self diagonal into two ungapped HSPs, the second the longer, where NCBI aborts
-  (`db.of1.bp.selfseg3.reject`, PD-LOSAT-NCBI-DEFECTS 1.21).
+  (`db.of1.bp.selfseg3.reject`, PD-LOSAT-NCBI-DEFECTS 1.22).
 - `deflineonly.fa` (a record without letters) and `allx_q3.fa` (an all-X query, then a query): runs that stop
   at their first query batch, which write outfmt 0's prolog (`db.of1.bp.defl.*`, `db.of1.bp.emptydb.*`, the
   empty database `tests/seqdb/db/empty`).

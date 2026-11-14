@@ -7,11 +7,14 @@ use std::sync::Arc;
 use losat::api::FastaRecord;
 use losat::web_adapter::{
     run_local_blastn, run_local_blastp, run_local_blastx, run_local_tblastn, run_local_tblastx,
-    Cli, Commands, CountsSource, FormatObserver, FormatOutput, HspIndex, OutputSink, PairwiseHit,
-    ReportOutputs,
+    ApplicationSettings, CallerStart, Cli, Commands, CountsSource, FormatObserver, FormatOutput,
+    HspIndex, OutputSink, PairwiseHit, ReportOutputs, RunFiles,
 };
 
-use crate::emit::{emit, StreamWriter, STREAM_CUSTOM, STREAM_DIAGNOSTICS, STREAM_HITS};
+use crate::emit::{
+    emit, StreamWriter, STREAM_CUSTOM, STREAM_DIAGNOSTICS, STREAM_HITS, STREAM_RESPONSE,
+    STREAM_RUN_FILES,
+};
 use crate::json;
 
 /// The programs that ABI v2 runs.
@@ -153,6 +156,14 @@ pub fn parse(words: &[&str]) -> Result<(Program, Commands), String> {
 /// as they do without `-outfmt`, but for an `-outfmt` whose custom delimiter the CLI rejects
 /// (`validate`).
 pub fn parse_run(words: &[&str]) -> Result<(Program, Commands, Option<String>), String> {
+    let (program, command) = parse_words(words)?;
+    read_outfmt(words, program, command)
+}
+
+/// The first part of `parse_run`: the adapter's own rules and the engine's CLI parser, without the
+/// reading of `-outfmt`, which NCBI makes in `Run`, after the settings and a dry run's end
+/// (`started_command`).
+fn parse_words(words: &[&str]) -> Result<(Program, Commands), String> {
     for word in words.iter().skip(1) {
         let key = word.split('=').next().unwrap_or("");
         if matches!(key, "-out" | "--out") {
@@ -174,7 +185,15 @@ pub fn parse_run(words: &[&str]) -> Result<(Program, Commands, Option<String>), 
     let cli: Cli = losat::web_adapter::try_parse_cli(argv)
         .map_err(|error| losat::web_adapter::render_message(&error))?;
     let program = Program::parse(words.first().copied().unwrap_or(""))?;
-    let mut command = cli.command;
+    Ok((program, cli.command))
+}
+
+/// The second part of `parse_run`: the argv's `-outfmt`, read as the CLI reads it.
+fn read_outfmt(
+    words: &[&str],
+    program: Program,
+    mut command: Commands,
+) -> Result<(Program, Commands, Option<String>), String> {
     let outfmt = std::mem::replace(outfmt_of(&mut command), "0".to_string());
     let choice = losat::web_adapter::parse_formatting_string(&outfmt)
         .map_err(|error| format!("{error:#}"))?;
@@ -233,7 +252,118 @@ pub fn writes_archive(words: &[&str]) -> bool {
     })
 }
 
-/// `validate`: `parse`, then the syntax of `-subject_loc` and `-query_loc`, BLASTN's
+/// The environment of the application start of a run in LOSAT Web (`start`): no variable but the
+/// directory of BLASTN's `-window_masker_taxid` (`files::WINDOW_MASKER_PATH`), set in the layer of
+/// NCBI's registry that comes before its files, so that the registry of `-window_masker_taxid`
+/// (`.ncbirc` and the environment) gives that directory whatever a registered `.ncbirc` sets.
+const START_VARIABLES: &[(&str, &str)] = &[(
+    "NCBI_CONFIG__WINDOW_MASKER__WINDOW_MASKER_PATH",
+    crate::files::WINDOW_MASKER_PATH,
+)];
+
+/// The NCBI application start of a run of `words` (program name first), as the command line's
+/// before it reads the arguments (`losat::web_adapter::start_run`): in the environment
+/// `START_VARIABLES`, with the registry files registered now (kind 2, `files::registry_files`) and
+/// the file of `-logfile` going to `run_files`; the messages that the command line writes to its
+/// standard error go to `diagnostics`. `Err` when the start ends the run (a usage report or a
+/// load that LOSAT refuses, a `-logfile` name that LOSAT Web refuses, the error of NCBI's load:
+/// `-conffile` of a file that is not registered, a registry file that NCBI cannot read), with the
+/// message that the command line writes to its standard error without `-logfile`, and the start
+/// when its file of `-logfile` is open (it has the messages); and for a program that ABI v2 does
+/// not run, with the error of its argv (`parse`: an unknown program's is the command line's).
+fn start(
+    words: &[&str],
+    run_files: &RunFiles,
+    diagnostics: &mut dyn std::io::Write,
+) -> Result<CallerStart, (String, Option<Box<CallerStart>>)> {
+    let (name, arguments) = words.split_first().unwrap_or((&"", &[]));
+    if let Err(error) = Program::parse(name) {
+        return Err((parse(words).err().unwrap_or(error), None));
+    }
+    let files = crate::files::registry_files();
+    let start = losat::web_adapter::start_run(
+        name,
+        arguments,
+        START_VARIABLES,
+        &files,
+        run_files,
+        diagnostics,
+    )
+    .map_err(|message| (message, None))?;
+    match start.ended() {
+        Some(message) => Err((message.to_string(), Some(Box::new(start)))),
+        None => Ok(start),
+    }
+}
+
+/// The argv `words` after the run's start `started`, in the command line's order (`cli::main_entry`):
+/// the arguments parsed (`parse_words`), the settings that LOSAT refuses (`start.settings()?`), the
+/// end of a dry run (`None`: rc 0), then `-outfmt`, which NCBI reads in `Run` (`read_outfmt`: a dry
+/// run does not read it). `validate` and `run` take the argv here.
+fn started_command(
+    words: &[&str],
+    started: &CallerStart,
+) -> Result<Option<(Program, Commands, Option<String>)>, String> {
+    let (program, command) = parse_words(words)?;
+    started.settings()?;
+    if started.dry_run() {
+        return Ok(None);
+    }
+    read_outfmt(words, program, command).map(Some)
+}
+
+/// A receiver of the files of a run that keeps none (`validate`, which emits nothing).
+struct NoFiles;
+
+impl losat::web_adapter::FileReceiver for NoFiles {
+    fn receive(&self, _name: &[u8], _bytes: &[u8]) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// The *start* JSON of `losat_web2_start` (docs/web/abi_v2.md §4, §9): what NCBI's application
+/// reads of the argv `words` (program name first) before its arguments (`preparse`): the file of
+/// the last `-conffile` (which the host registers as kind 2 before it validates), the file of
+/// `-logfile` (NCBI's scan of it, `log_file`: a run gives it on `STREAM_RUN_FILES`) and whether
+/// the run is a dry run. An unknown program, and a version word, which LOSAT Web refuses, are
+/// errors.
+pub fn start_json(words: &[&str]) -> Result<String, String> {
+    use losat::web_adapter::Preparsed;
+    Program::parse(words.first().copied().unwrap_or(""))?;
+    let arguments = &words[1..];
+    let (conffile, dryrun) = match losat::web_adapter::preparse(arguments) {
+        Preparsed::Words {
+            conffile, dryrun, ..
+        } => (conffile, dryrun),
+        Preparsed::Version(_) => {
+            let argv = std::iter::once("losat").chain(words.iter().copied());
+            return Err(match losat::web_adapter::try_parse_cli(argv) {
+                Err(error) => losat::web_adapter::render_message(&error),
+                Ok(_) => unreachable!("the parser refuses a version word"),
+            });
+        }
+    };
+    let mut out = String::from("{\"conffile\":");
+    json::optional_string(&mut out, conffile.as_deref().and_then(|name| name.to_str()));
+    out.push_str(",\"log_file\":");
+    json::optional_string(
+        &mut out,
+        losat::web_adapter::log_file(arguments).and_then(|name| name.to_str()),
+    );
+    let _ = write!(out, ",\"dry_run\":{dryrun}}}");
+    Ok(out)
+}
+
+/// `losat_web2_start`: emits the *start* JSON (`start_json`) on stream 2.
+pub fn emit_start(words: &[&str]) -> Result<(), String> {
+    let response = start_json(words)?;
+    emit(STREAM_RESPONSE, response.as_bytes());
+    Ok(())
+}
+
+/// `validate`: the application start (`start`: its errors are the command line's first), then
+/// `parse`, the settings that LOSAT refuses, and nothing more for a dry run (`-dryrun`); then the
+/// syntax of `-subject_loc` and `-query_loc`, BLASTN's
 /// `-dust` value and the scoring options that NCBI rejects or that its Karlin-Altschul
 /// tables do not support, with NCBI's message (for a batch of one query), and TBLASTX's
 /// checks of its options alone (NCBI's `-evalue` check, the options that LOSAT's TBLASTX
@@ -244,6 +374,16 @@ pub fn writes_archive(words: &[&str]) -> bool {
 /// `run` leaves them to the engine, which reports them as the CLI does.
 pub fn validate(words: &[&str]) -> Result<(), String> {
     use losat::web_adapter::{parse_optional_range, RangeRole};
+    let started = start(
+        words,
+        &RunFiles::Receiver(Arc::new(NoFiles)),
+        &mut std::io::sink(),
+    )
+    .map_err(|(message, _)| message)?;
+    let Some((program, command, custom)) = started_command(words, &started)? else {
+        return Ok(());
+    };
+    let settings = started.settings()?;
     // The ranges' syntax, in NCBI's order: the subject range where the subjects are read
     // (before the other option handlers), the query range with the query options (the
     // engine's option checks read it). Whether a range fits the records is checked by
@@ -251,7 +391,6 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
     let subject_range = |subject_loc: Option<&str>| {
         parse_optional_range(subject_loc, RangeRole::Subject).map(|_| ())
     };
-    let (program, command, custom) = parse_run(words)?;
     let groups = search_groups(&outputs(program, custom.as_deref()), &command);
     let custom_check = || custom_handler_check(program, custom.as_deref());
     // A custom delimiter that a field uses makes the CLI reject the argv, whatever the hit list
@@ -274,7 +413,7 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
             .and_then(|()| args.resolve_dust())
             .and_then(|()| {
                 if validates_window_masker(&args) {
-                    give_blastn_counts(&mut args, &crate::files::source());
+                    give_blastn_counts(&mut args, &crate::files::source(), settings);
                     args.resolve_window_masker()
                 } else {
                     Ok(())
@@ -645,6 +784,9 @@ struct Failed {
     /// What the CLI writes to standard error for the error: NCBI's message (a
     /// `NativeError`), or `Error: ` and the error, as `main` returns it.
     cli_stderr: Vec<u8>,
+    /// NCBI's message (a `NativeError`), which the CLI also writes to the file of `-logfile` when
+    /// the run's messages go there (`CallerStart::post`); `None` for LOSAT's own errors.
+    native: Option<Vec<u8>>,
     /// Whether the search had written a byte of any of its formats. The host discards
     /// the streams of a failed run, but a search that wrote nothing leaves the other
     /// searches' streams as the CLI writes them.
@@ -659,13 +801,17 @@ impl Failed {
             + std::fmt::Display
             + std::fmt::Debug,
     {
-        let cli_stderr = match error.downcast_ref::<losat::web_adapter::NativeError>() {
-            Some(native) => native.message.clone().into_bytes(),
+        let native = error
+            .downcast_ref::<losat::web_adapter::NativeError>()
+            .map(|native| native.message.clone().into_bytes());
+        let cli_stderr = match &native {
+            Some(native) => native.clone(),
             None => format!("Error: {error:?}\n").into_bytes(),
         };
         Self {
             message: format!("{error:#}"),
             cli_stderr,
+            native,
             wrote,
         }
     }
@@ -697,7 +843,7 @@ impl ArchivedFiles {
     }
 }
 
-impl losat::web_adapter::SideFileReceiver for ArchivedFiles {
+impl losat::web_adapter::FileReceiver for ArchivedFiles {
     fn receive(&self, name: &[u8], bytes: &[u8]) -> std::io::Result<()> {
         match self
             .0
@@ -833,6 +979,7 @@ fn search(
                     return Err(Failed {
                         cli_stderr: format!("{error}\n").into_bytes(),
                         message: format!("the archive of outfmt {}: {error}", format.number),
+                        native: None,
                         wrote: true,
                     })
                 }
@@ -857,6 +1004,7 @@ fn search(
         return Err(Failed {
             cli_stderr: message.clone().into_bytes(),
             message,
+            native: None,
             wrote: true,
         });
     }
@@ -997,22 +1145,28 @@ fn window_masker_counts(command: &Commands) -> Option<Arc<dyn CountsSource>> {
 }
 
 /// Gives a search's command the run's counts source (`window_masker_counts`).
-fn give_counts(command: &mut Commands, counts: Option<&Arc<dyn CountsSource>>) {
+fn give_counts(
+    command: &mut Commands,
+    counts: Option<&Arc<dyn CountsSource>>,
+    settings: &ApplicationSettings,
+) {
     if let (Commands::Blastn(args), Some(counts)) = (command, counts) {
-        give_blastn_counts(args, counts);
+        give_blastn_counts(args, counts, settings);
     }
 }
 
-/// Gives BLASTN's arguments the counts source, and with `-window_masker_taxid` LOSAT Web's
-/// registry of counts files, where the command line gives NCBI's registry: the directory
-/// `files::WINDOW_MASKER_PATH`, and no posts of a `.ncbirc` (LOSAT Web reads none).
-fn give_blastn_counts(args: &mut losat::web_adapter::BlastnArgs, counts: &Arc<dyn CountsSource>) {
+/// Gives BLASTN's arguments the counts source, and with `-window_masker_taxid` the registry of
+/// `-window_masker_taxid` of the run's start (`ApplicationSettings::window_masker_registry`), as
+/// the command line gives its own: the directory `files::WINDOW_MASKER_PATH` (`START_VARIABLES`),
+/// and the posts of a registered `.ncbirc`.
+fn give_blastn_counts(
+    args: &mut losat::web_adapter::BlastnArgs,
+    counts: &Arc<dyn CountsSource>,
+    settings: &ApplicationSettings,
+) {
     args.window_masker_counts = Some(counts.clone());
     if args.window_masker_taxid.is_some() {
-        args.window_masker_registry = Some(Ok(Default::default()));
-        if let Some(Ok(registry)) = &mut args.window_masker_registry {
-            registry.path = Some(crate::files::WINDOW_MASKER_PATH.to_string());
-        }
+        args.window_masker_registry = Some(settings.window_masker_registry.clone());
     }
 }
 
@@ -1044,11 +1198,138 @@ fn give_blastn_counts(args: &mut losat::web_adapter::BlastnArgs, counts: &Arc<dy
 /// error when it failed). The diagnostics of the format 0 search of a run without a failure
 /// repeat the first search's and are dropped.
 pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Result<(), String> {
-    use std::io::Write as _;
-    let (program, command, custom) = parse_run(words)?;
+    let files = Arc::new(RunFileArchive::default());
+    let run_files = RunFiles::Receiver(files.clone());
+    let mut diagnostics = StreamWriter::new(STREAM_DIAGNOSTICS);
+    let (result, started) = match start(words, &run_files, &mut diagnostics) {
+        Ok(mut started) => (
+            run_started(words, query, subject, &mut started, &mut diagnostics),
+            Some(started),
+        ),
+        Err((message, started)) => (Err(message), started.map(|started| *started)),
+    };
+    // The run's files (the file of `-logfile`), after the run, whether it failed or not.
+    let handed = started.map_or(Ok(()), CallerStart::finish);
+    let emitted = handed.and_then(|()| files.emit());
+    result.and(emitted.map_err(|error| format!("the files of the run: {error}")))
+}
+
+/// The files of a run besides its outputs (the file of `-logfile`), which the engine hands over
+/// when the run ends (`RunFiles::Receiver`), emitted as a ZIP archive on `STREAM_RUN_FILES` after
+/// the run, whether it succeeded or failed (docs/web/abi_v2.md §5), and only when there are any.
+#[derive(Default)]
+struct RunFileArchive(std::sync::Mutex<Vec<(Vec<u8>, Vec<u8>)>>);
+
+impl RunFileArchive {
+    /// Emits the archive of the files (stored entries, as stream 4's, `zip::ZipStream`). `Err` when
+    /// the archive cannot hold a file (a name of 65,536 bytes or more).
+    fn emit(&self) -> std::io::Result<()> {
+        let files = std::mem::take(
+            &mut *self
+                .0
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        );
+        if files.is_empty() {
+            return Ok(());
+        }
+        let mut zip = crate::zip::ZipStream::new(StreamWriter::new(STREAM_RUN_FILES));
+        for (name, bytes) in &files {
+            zip.add(name, bytes)?;
+        }
+        zip.finish()?.finish();
+        Ok(())
+    }
+}
+
+impl losat::web_adapter::FileReceiver for RunFileArchive {
+    fn receive(&self, name: &[u8], bytes: &[u8]) -> std::io::Result<()> {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push((name.to_vec(), bytes.to_vec()));
+        Ok(())
+    }
+}
+
+/// `run` after the application start `started` (`started_command`: the argv, the settings that
+/// LOSAT refuses, a dry run's end), then the searches. The messages that the command line writes
+/// to its standard error during the run go where the run's messages go, as they come
+/// (`CallerStart::sink`: the file of `-logfile` in TBLASTX, else stream 3), and the error that ends
+/// the run with an NCBI message is posted there too (`CallerStart::post`), as on the command line.
+fn run_started(
+    words: &[&str],
+    query: &[FastaRecord],
+    subject: &[FastaRecord],
+    started: &mut CallerStart,
+    diagnostics: &mut StreamWriter,
+) -> Result<(), String> {
+    let Some(parsed) = started_command(words, started)? else {
+        diagnostics.finish();
+        return Ok(());
+    };
+    let settings = started.settings()?.clone();
+    let mut posted = None;
+    let searched = {
+        let mut sink = started.sink(diagnostics);
+        search_all(
+            parsed,
+            words,
+            query,
+            subject,
+            &settings,
+            &mut sink,
+            &mut posted,
+        )
+    };
+    let Done {
+        mut writers,
+        records,
+    } = match searched {
+        Ok(done) => done,
+        Err(message) => {
+            if let Some(text) = posted {
+                started.post(&text);
+            }
+            return Err(message);
+        }
+    };
+    for writer in &mut writers {
+        writer.finish();
+    }
+    diagnostics.finish();
+    if let Some((hits, recorder, ordinals)) = records {
+        emit_hit_records(&hits, &recorder, ordinals.as_deref());
+    }
+    Ok(())
+}
+
+/// The HSP records of the tabular search (`emit_hit_records`): its hits, the recorder of their
+/// ranges and the hits' ordinals.
+type HitRecords = (Arc<Vec<PairwiseHit>>, RangeRecorder, Option<Vec<usize>>);
+
+/// What the searches of a run wrote (`search_all`): the streams of the formats, and the HSP
+/// records of the tabular search.
+struct Done {
+    writers: Vec<StreamWriter>,
+    records: Option<HitRecords>,
+}
+
+/// The searches of a run of the parsed argv `parsed` (`run`): the messages that the command line
+/// writes to its standard error go to `diagnostics`; for an error that ends the run, `posted` gets
+/// the NCBI message that the command line writes for it (`Failed::native`).
+fn search_all(
+    parsed: (Program, Commands, Option<String>),
+    words: &[&str],
+    query: &[FastaRecord],
+    subject: &[FastaRecord],
+    settings: &ApplicationSettings,
+    diagnostics: &mut (dyn std::io::Write + Send),
+    posted: &mut Option<Vec<u8>>,
+) -> Result<Done, String> {
+    let (program, command, custom) = parsed;
     let groups = search_groups(&outputs(program, custom.as_deref()), &command);
     let custom_accepted = custom_handler_check(program, custom.as_deref()).is_ok();
-    let mut diagnostics = StreamWriter::new(STREAM_DIAGNOSTICS);
     let threads = num_threads(&command);
     let counts = window_masker_counts(&command);
     let mut command = Some(command);
@@ -1063,7 +1344,7 @@ pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Re
                 Some(command) => command,
                 None => parse(words)?.1,
             };
-            give_counts(&mut command, counts.as_ref());
+            give_counts(&mut command, counts.as_ref(), settings);
             let mut scratch = Vec::new();
             // Whether the options' checks reject this search, found before `search` takes the
             // command.
@@ -1071,7 +1352,7 @@ pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Re
             // The warnings of the first search include the reader's and the queries' warnings
             // that the next searches repeat; the CLI writes them once.
             let result = if outcomes.is_empty() {
-                search(command, group, query, subject, &mut diagnostics)
+                search(command, group, query, subject, &mut *diagnostics)
             } else {
                 search(command, group, query, subject, &mut scratch)
             };
@@ -1079,6 +1360,7 @@ pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Re
             // search (the tabular one) is never tolerated.
             if let Err(failed) = &result {
                 if fails_run(failed, rejected && custom_accepted) {
+                    posted.clone_from(&failed.native);
                     return Err(failed.message.clone());
                 }
             }
@@ -1089,7 +1371,10 @@ pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Re
     if outcomes.iter().all(|(result, _)| result.is_err()) {
         // The CLI fails every format; the error is that of the tabular formats.
         return Err(match outcomes.remove(0).0 {
-            Err(failed) => failed.message,
+            Err(failed) => {
+                *posted = failed.native;
+                failed.message
+            }
             Ok(_) => unreachable!("every search failed"),
         });
     }
@@ -1130,14 +1415,7 @@ pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Re
     for other in &mut searched {
         writers.append(&mut other.writers);
     }
-    for writer in &mut writers {
-        writer.finish();
-    }
-    diagnostics.finish();
-    if let Some((hits, recorder, ordinals)) = records {
-        emit_hit_records(&hits, &recorder, ordinals.as_deref());
-    }
-    Ok(())
+    Ok(Done { writers, records })
 }
 
 /// Emits one JSON object per HSP on stream 1 (docs/web/abi_v2.md §8); `ordinals` maps the
@@ -1191,6 +1469,10 @@ fn emit_hit_records(hits: &[PairwiseHit], recorder: &RangeRecorder, ordinals: Op
     }
     emit(STREAM_HITS, lines.as_bytes());
 }
+
+#[cfg(test)]
+#[path = "run_start_tests.rs"]
+mod start_tests;
 
 #[cfg(test)]
 mod tests {
@@ -3222,6 +3504,7 @@ mod tests {
         let failed = |wrote| Failed {
             message: "failed to build blastn pool with 4 threads".into(),
             cli_stderr: Vec::new(),
+            native: None,
             wrote,
         };
         assert!(fails_run(&failed(false), false));

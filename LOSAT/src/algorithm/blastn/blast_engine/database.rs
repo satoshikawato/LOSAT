@@ -1556,6 +1556,15 @@ pub(super) fn reported_subjects(
                 if shown.pairwise {
                     shared::check_shown_stored_title(stored.taxonomy_title, ordinal, PROGRAM)?;
                 }
+                if shown.tabular {
+                    let oid = db.oid(ordinal);
+                    shared::check_tabular_stored_title(
+                        stored.taxonomy_title,
+                        shown.words,
+                        oid,
+                        PROGRAM,
+                    )?;
+                }
                 (stored.title.clone(), None)
             }
             ReportedHeader::Parsed(subject) => {
@@ -1693,10 +1702,15 @@ impl ReportedSubjects {
     /// reported sequence, by rank (`algorithm::common::database::tabular_subject_ids`). A
     /// sequence whose id LOSAT cannot write as NCBI is an error before any format is
     /// written where a tabular report `reads` the subject, else its id is empty.
-    pub(super) fn tabular_subject_ids(&self, reads: bool) -> Result<Vec<Arc<[u8]>>> {
+    pub(super) fn tabular_subject_ids(
+        &self,
+        oids: crate::seqdb::OidMap<'_>,
+        reads: bool,
+    ) -> Result<Vec<Arc<[u8]>>> {
         shared::tabular_subject_ids(
             &self.records,
             &self.ordinals,
+            oids,
             &self.parsed,
             false,
             reads,
@@ -2312,7 +2326,7 @@ mod tests {
             .all(|letter| !letter.is_ascii_lowercase()));
         assert_eq!(
             reported
-                .tabular_subject_ids(true)
+                .tabular_subject_ids(database.db.oid_map(), true)
                 .unwrap()
                 .iter()
                 .map(|id| id.as_ref())

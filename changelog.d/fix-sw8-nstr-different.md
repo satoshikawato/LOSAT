@@ -8,6 +8,9 @@
 - `-seg` takes every locut and hicut that NCBI BLAST+ 2.17.0 takes: hexadecimal values (`-seg "12 0x10 2.5"`
   searches with a locut of 16), and infinities and NaN, which were refused (`+inf` masks every window, a NaN keeps
   SEG's default; BLAST XML's `Parameters_filter` prints them as NCBI does, `S 12 inf 2.5;`, `S 12 2.2 -nan;`).
+- tblastn's BLAST XML (`-outfmt 5`, and the `filter` of 14 and 16) prints the `-seg` options as NCBI does: `S 12 3.0 2.5;`
+  where it printed `S 12 3.0 3.0;` (a hicut below the locut), and `S 12 0.0 2.5;` or `S 12 -inf 2.5;` where it printed
+  `L;` (a cut that is not above 0, which SEG replaces by its default).
 - segmasker takes a `-locut` or `-hicut` with more than 18 digits or 15 decimal places before a final `e`, with
   NCBI's value; it was refused.
 - A `-in_pssm` file (psiblast, tblastn) or a rpsbproc archive or XML input with a REAL of more than 18 significant digits is read

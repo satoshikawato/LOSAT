@@ -1599,5 +1599,33 @@ fn seg_cuts_that_are_not_finite_search_as_ncbis() {
             "{seg}"
         );
     }
+    // TBLASTN prints the options too, not the SEG parameters made of them (it printed
+    // `S 12 inf inf;`, `S 12 3.0 3.0;` and `L;` for the others): NCBI BLAST+ 2.17.0 `tblastn
+    // -outfmt 5`, also in the `filter` of outfmt 14 and 16.
+    fs::write(
+        dir.join("ns.fna"),
+        ">ns1 back-translated subject\nATGAAAGTGCTGGCTGCTGGCATTGTGGCTCTGCTGCTGGCTGCTCAGCAGCAGCAGCAGCAGCAGCAGCAG\n",
+    )
+    .unwrap();
+    for (seg, filter) in [
+        ("12 +inf 2.5", "S 12 inf 2.5;"),
+        ("12 -nan -nan", "S 12 -nan -nan;"),
+        ("12 -inf 2.5", "S 12 -inf 2.5;"),
+        ("12 3 2.5", "S 12 3.0 2.5;"),
+        ("12 0 2.5", "S 12 0.0 2.5;"),
+    ] {
+        let output = clean_losat_command()
+            .current_dir(&dir)
+            .args(["tblastn", "-query", "pq.faa", "-subject", "ns.fna"])
+            .args(["-seg", seg, "-outfmt", "5"])
+            .output()
+            .expect("run LOSAT");
+        assert_eq!(output.status.code(), Some(0), "{seg}: {output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stdout)
+                .contains(&format!("<Parameters_filter>{filter}</Parameters_filter>")),
+            "tblastn {seg}"
+        );
+    }
     fs::remove_dir_all(&dir).unwrap();
 }

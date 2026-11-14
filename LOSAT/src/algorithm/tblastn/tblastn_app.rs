@@ -2395,6 +2395,7 @@ fn search(
             resolved.formatting,
             resolved.db_gencode,
             seg.as_ref(),
+            resolved.seg.filter_options(),
             resolved.lcase_masking,
             &query_warning_lines,
             subject_reads.queries(),

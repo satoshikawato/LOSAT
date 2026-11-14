@@ -568,7 +568,7 @@ fn x_give_back_compressed(table: &mut XBxCompressedLookup) {
 /// EXPERIMENT (LOSAT_X_BPCLUT): the compressed table of a query batch (`-word_size` 5 to 7), flat as
 /// TBLASTN's with `u16` query offsets (`i32` past `X_U16_LETTERS` letters;
 /// `x_bx_build_compressed_lookup`, on vectors kept between builds with `LOSAT_X_BXCLUTPOOL`), on one
-/// thread, or where the bucket fill declines in `parts` (`LOSAT_X_BXBUILDPAR`, the same table). One
+/// thread, or in `parts` above 1 (`LOSAT_X_BXBUILDPAR`, the same table). One
 /// table for the batch, so its one
 /// range is all the segments. Words that fill NCBI's overflow banks are refused, as BLASTP's
 /// (NCBI writes past its banks). Cold and not inlined, so that the standard table's build keeps
@@ -848,6 +848,7 @@ impl Lookup {
                 segments,
                 &[0..segments.len()],
                 parts,
+                x_bx_clut_pool(),
             )
             .ok_or_else(|| anyhow::anyhow!("unsupported BLASTX compressed lookup"))?
             .map(|table| {

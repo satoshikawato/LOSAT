@@ -99,6 +99,12 @@
 //!   and they are not kept beside it). The unit tests fill the spare's vectors with `u32::MAX` /
 //!   `i32::MIN` first (a spare of garbage first gets room for a word-size-5 table), so that an
 //!   entry no stripe writes differs from the fresh build's where the spare has the room.
+//! - lent vectors (line NP, SC9d: `XParallelCuts::lent`, BLASTX's builds in parts with
+//!   LOSAT_X_BXCLUTPOOL): `starts` and `hits` are those of a set the pool of BLASTX's tables lends,
+//!   taken as the spare's above (no entry is read before the stripes write it), and `pv` that set's,
+//!   cleared and zero-filled. The hits are of the table's offset type `H` (`u16` for BLASTX's query
+//!   batches of at most `X_U16_LETTERS` letters, whose offsets are below 2^16): each stripe writes
+//!   `H::from_offset` of the offset it wrote as `i32`, the same number.
 //! - kept segments (item SC2d-2, `XSegmentPool`, the block search's): the appends pass takes a kept
 //!   segment before it makes a new one, and the stripes pass keeps at most as many segments as threads
 //!   for the next build, in place of what the pool still holds. A segment's values are not read: each piece writes every entry of its range
@@ -371,6 +377,7 @@ pub(super) fn x_try_build_flat_in_pool(
                     segments,
                     passes,
                     spare,
+                    lent: None,
                     x_ahead,
                     stripe_fill,
                 },
@@ -440,6 +447,7 @@ pub(super) fn x_try_build_flat_in_pool_of(
                     segments,
                     passes,
                     spare,
+                    lent: None,
                     x_ahead,
                     stripe_fill,
                 },
@@ -476,12 +484,15 @@ pub(super) fn x_try_build_flat_in_pool_of(
 // NCBI builds a query chunk's table on one thread before the search threads start
 // (c++/src/algo/blast/api/prelim_stage.cpp:145-188 starts them for the search); here a BLASTX unit
 // builds it on the threads the unit cap leaves it, the same table (module header).
-/// Item SC9b (2) of line NP: BLASTX's flat table of a query batch with the words of `matrix`, where
-/// the bucket fill declines (`x_clut_direct.rs` `x_flat_in_parts`), built by `parts` tasks of the pool
+/// Item SC9b (2) of line NP: BLASTX's flat table of a query batch with the words of `matrix` (SC9d:
+/// at every word size, `x_clut_direct.rs` `x_flat_in_parts`), built by `parts` tasks of the pool
 /// the build runs on (`LOSAT_X_BXBUILDPAR`, `blastx/x_bx_mem.rs`): the one-latch passes
 /// (`x_one_latch_pass`, the stripes by `x_stripe_fill` as LOSAT_X_BPSTRIPEFILL chooses), without
-/// spare vectors, kept segments or extra tasks. `parts` is above 1.
-pub(super) fn x_try_build_flat_in_parts(
+/// spare vectors, kept segments or extra tasks, the table's vectors `lent` by BLASTX's pool
+/// (`LOSAT_X_BXCLUTPOOL`; else fresh ones), its hits of offset type `H` written by the stripes.
+/// `parts` is above 1.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn x_try_build_flat_in_parts<H: XQueryOffset>(
     matrix: ScoringMatrix,
     word_size: usize,
     scaled_threshold: i32,
@@ -489,7 +500,8 @@ pub(super) fn x_try_build_flat_in_parts(
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
     parts: usize,
-) -> Option<XFlatBuild> {
+    lent: Option<XFlatTableVectors<H>>,
+) -> Option<XFlatBuild<H>> {
     let cuts = XParallelCuts {
         overflow_cell_capacity: NCBI_OVERFLOW_CELL_CAPACITY,
         max_appends: None,
@@ -501,6 +513,7 @@ pub(super) fn x_try_build_flat_in_parts(
         segments: None,
         passes: XPasses::OneLatch(None),
         spare: None,
+        lent,
         x_ahead: false,
         stripe_fill: x_bpstripefill_on(),
     };
@@ -548,7 +561,7 @@ pub(super) fn x_flat_ahead_appends_in_pool(
     if x_flat_args.mode == XLkpFlat::Off || !x_flat_args.x_ahead {
         return None;
     }
-    let cuts = XParallelCuts {
+    let cuts = XParallelCuts::<i32> {
         overflow_cell_capacity: NCBI_OVERFLOW_CELL_CAPACITY,
         max_appends: None,
         threads: pool.threads(),
@@ -560,6 +573,7 @@ pub(super) fn x_flat_ahead_appends_in_pool(
         passes: XPasses::OneLatch(x_flat_args.extra),
         // The spare's vectors are the second part's.
         spare: None,
+        lent: None,
         x_ahead: true,
         stripe_fill: x_bpstripefill_on(),
     };
@@ -620,6 +634,7 @@ pub(super) fn x_flat_ahead_stripes_in_pool(
                 query,
                 locations,
                 Some(spare),
+                None,
                 true,
                 segments,
             )
@@ -630,6 +645,7 @@ pub(super) fn x_flat_ahead_stripes_in_pool(
                 query,
                 locations,
                 Some(spare),
+                None,
                 true,
                 segments,
             )
@@ -661,10 +677,10 @@ enum XPasses<'a> {
     OneLatch(Option<&'a dyn XExtraTasks>),
 }
 
-impl XFlatSpare {
+impl<H> XFlatSpare<H> {
     // No NCBI counterpart: buffer reuse only (`XFlatSpare`).
     /// The vectors kept (empty ones when none are); the spare then keeps none.
-    fn take(&self) -> (Vec<u32>, Vec<i32>) {
+    fn take(&self) -> (Vec<u32>, Vec<H>) {
         std::mem::take(&mut *self.0.lock().unwrap_or_else(PoisonError::into_inner))
     }
 
@@ -757,7 +773,7 @@ fn x_one_latch_pass<S, R: Send + Sync>(
 
 /// The parameters of `x_try_build_flat_parallel_with` that the module header's argument leaves free
 /// (and the capacity and the bound of the serial builder, for the tests).
-struct XParallelCuts<'a> {
+struct XParallelCuts<'a, H = i32> {
     overflow_cell_capacity: usize,
     /// `None`: `x_max_appends`, the serial builder's bound.
     max_appends: Option<usize>,
@@ -778,7 +794,10 @@ struct XParallelCuts<'a> {
     /// LOSAT_X_BPLKPFLAT: how the passes are scheduled, and the extra tasks.
     passes: XPasses<'a>,
     /// LOSAT_X_BPLKPFLAT: the vectors of an earlier table for `starts` and `hits` (else fresh ones).
-    spare: Option<&'a XFlatSpare>,
+    spare: Option<&'a XFlatSpare<H>>,
+    /// LOSAT_X_BXCLUTPOOL: the vectors BLASTX's pool lent for `starts`, `hits` and `pv` (else fresh
+    /// ones; not with `spare`).
+    lent: Option<XFlatTableVectors<H>>,
     /// LOSAT_X_BPLKPAHEAD: `starts`, `hits` and `pv` all come from `spare`, and without their room
     /// the build makes no table (`None`); nothing of the table is allocated here
     /// (`XFlatArgs::x_ahead`).
@@ -1021,12 +1040,12 @@ fn x_sorted_piece(
 }
 
 /// One stripe's part of the table.
-struct XStripe<'t> {
+struct XStripe<'t, H> {
     stripe: usize,
     /// The stripe's first hit.
     base: u32,
     starts: &'t mut [u32],
-    hits: &'t mut [i32],
+    hits: &'t mut [H],
     /// The stripe's PV words when the PV shift is known before the counts (`x_largest_pv_shift` is
     /// `PV_ARRAY_BTS`), else empty.
     pv: &'t mut [u32],
@@ -1061,8 +1080,8 @@ struct XStripeCounts {
 // ```
 /// The count, layout and fill of one stripe (module header).
 #[allow(clippy::too_many_arguments)]
-fn x_stripe_build(
-    part: XStripe<'_>,
+fn x_stripe_build<H: XQueryOffset>(
+    part: XStripe<'_, H>,
     shift: usize,
     backbone_size: usize,
     ranges: usize,
@@ -1127,7 +1146,7 @@ fn x_stripe_build(
     for (chunk, part) in parts() {
         for &packed in part {
             let cursor = &mut counts[(packed >> 16) as usize];
-            hits[*cursor as usize] = chunk.base + (packed & 0xffff) as i32;
+            hits[*cursor as usize] = H::from_offset((chunk.base + (packed & 0xffff) as i32) as u32);
             *cursor += 1;
         }
     }
@@ -1162,8 +1181,8 @@ type XFillScratch = (Vec<u32>, Vec<u32>, Vec<u32>);
 /// order, into a copy while the cells are counted; the layout and the fill from the copy (module
 /// header). The overflow cells are counted only with `need_cells`.
 #[allow(clippy::too_many_arguments)]
-fn x_stripe_fill(
-    part: XStripe<'_>,
+fn x_stripe_fill<H: XQueryOffset>(
+    part: XStripe<'_, H>,
     shift: usize,
     backbone_size: usize,
     ranges: usize,
@@ -1241,7 +1260,7 @@ fn x_stripe_fill(
         let end = at + part_of(piece).len();
         for &packed in &copy[at..end] {
             let cursor = &mut counts[(packed >> 16) as usize];
-            hits[*cursor as usize] = chunk.base + (packed & 0xffff) as i32;
+            hits[*cursor as usize] = H::from_offset((chunk.base + (packed & 0xffff) as i32) as u32);
             *cursor += 1;
         }
         at = end;
@@ -1269,14 +1288,14 @@ fn x_stripe_fill(
 //     s_CompressedLookupFinalize(lookup);
 // ```
 /// The parallel build (module header) in the current rayon pool, with the cuts of `cuts`.
-fn x_try_build_flat_parallel_with(
+fn x_try_build_flat_parallel_with<H: XQueryOffset>(
     word_size: usize,
     scaled_threshold: i32,
     query: &[u8],
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
-    cuts: XParallelCuts<'_>,
-) -> Option<XFlatBuild> {
+    cuts: XParallelCuts<'_, H>,
+) -> Option<XFlatBuild<H>> {
     x_flat_parallel_on(
         Blosum62Compressed,
         word_size,
@@ -1296,6 +1315,7 @@ fn x_try_build_flat_parallel_with(
                 X_COUNT_CHUNK,
                 0,
             )
+            .map(XFlatBuild::x_offsets)
         },
     )
 }
@@ -1310,15 +1330,15 @@ fn x_try_build_flat_parallel_with(
 /// `x_try_build_flat_parallel_with` with the words of the search matrix `matrix`, any but BLOSUM62
 /// (`build_compressed_score_matrix`, item SC2b): the same passes, and the serial builder of the
 /// matrix's words (`x_try_build_flat_of`) where the parallel build takes the serial one.
-fn x_try_build_flat_parallel_of(
+fn x_try_build_flat_parallel_of<H: XQueryOffset>(
     matrix: ScoringMatrix,
     word_size: usize,
     scaled_threshold: i32,
     query: &[u8],
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
-    cuts: XParallelCuts<'_>,
-) -> Option<XFlatBuild> {
+    cuts: XParallelCuts<'_, H>,
+) -> Option<XFlatBuild<H>> {
     x_flat_parallel_on(
         matrix,
         word_size,
@@ -1338,6 +1358,7 @@ fn x_try_build_flat_parallel_of(
                 capacity,
                 X_COUNT_CHUNK,
             )
+            .map(XFlatBuild::x_offsets)
         },
     )
 }
@@ -1348,17 +1369,18 @@ fn x_try_build_flat_parallel_of(
 // the other here; a build ahead of its block may run them apart (item SC2d, module header).
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-fn x_flat_parallel_on<S: CompressedScores>(
+fn x_flat_parallel_on<S: CompressedScores, H: XQueryOffset>(
     scores: S,
     word_size: usize,
     scaled_threshold: i32,
     query: &[u8],
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
-    cuts: XParallelCuts<'_>,
-    serial: impl FnOnce(usize) -> Option<XFlatBuild>,
-) -> Option<XFlatBuild> {
+    mut cuts: XParallelCuts<'_, H>,
+    serial: impl FnOnce(usize) -> Option<XFlatBuild<H>>,
+) -> Option<XFlatBuild<H>> {
     let (spare, x_ahead, segments) = (cuts.spare, cuts.x_ahead, cuts.segments);
+    let lent = cuts.lent.take();
     match x_flat_appends_on(
         scores,
         word_size,
@@ -1370,9 +1392,9 @@ fn x_flat_parallel_on<S: CompressedScores>(
         serial,
     ) {
         XFlatStage::Built(built) => built,
-        XFlatStage::Appends(appends) => {
-            x_flat_stripes_on(scores, appends, query, locations, spare, x_ahead, segments)
-        }
+        XFlatStage::Appends(appends) => x_flat_stripes_on(
+            scores, appends, query, locations, spare, lent, x_ahead, segments,
+        ),
     }
 }
 
@@ -1381,10 +1403,10 @@ fn x_flat_parallel_on<S: CompressedScores>(
     clippy::large_enum_variant,
     reason = "a value moved once per build, as `XFlatBuild`; boxing a variant adds an allocation"
 )]
-enum XFlatStage {
+enum XFlatStage<H: XQueryOffset = i32> {
     /// The build's outcome without a stripes pass: the serial builder's (a backbone past the
     /// stripes), `TooLarge`, or none (no score matrix for the alphabet).
-    Built(Option<XFlatBuild>),
+    Built(Option<XFlatBuild<H>>),
     /// The appends, for the stripes pass.
     Appends(XFlatAppends),
 }
@@ -1417,16 +1439,16 @@ pub(crate) struct XFlatAppends {
 // with the extra tasks of the one-latch passes; `XFlatStage::Built` where the build ends here.
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-fn x_flat_appends_on<S: CompressedScores>(
+fn x_flat_appends_on<S: CompressedScores, H: XQueryOffset>(
     scores: S,
     word_size: usize,
     scaled_threshold: i32,
     query: &[u8],
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
-    cuts: XParallelCuts<'_>,
-    serial: impl FnOnce(usize) -> Option<XFlatBuild>,
-) -> XFlatStage {
+    cuts: XParallelCuts<'_, H>,
+    serial: impl FnOnce(usize) -> Option<XFlatBuild<H>>,
+) -> XFlatStage<H> {
     let Some(header) = XHeader::new(word_size) else {
         return XFlatStage::Built(None);
     };
@@ -1572,15 +1594,17 @@ fn x_flat_appends_on<S: CompressedScores>(
 // its block: all of them, and no table without their room), the capacity test and the PV array. The
 // words of `scores` are those of the appends pass (`XWords`, made again for the capacity test).
 #[inline(always)]
-fn x_flat_stripes_on<S: CompressedScores>(
+#[allow(clippy::too_many_arguments)]
+fn x_flat_stripes_on<S: CompressedScores, H: XQueryOffset>(
     scores: S,
     appends: XFlatAppends,
     query: &[u8],
     locations: &[(i32, i32)],
-    spare: Option<&XFlatSpare>,
+    spare: Option<&XFlatSpare<H>>,
+    lent: Option<XFlatTableVectors<H>>,
     x_ahead: bool,
     segments: Option<&XSegmentPool>,
-) -> Option<XFlatBuild> {
+) -> Option<XFlatBuild<H>> {
     let XFlatAppends {
         header,
         largest_pv_shift,
@@ -1611,16 +1635,26 @@ fn x_flat_stripes_on<S: CompressedScores>(
         x_ahead_pv = spare.and_then(|spare| spare.x_room_for(backbone_size + 1, total, pv_words));
         x_ahead_pv.as_ref()?;
     }
+    // LOSAT_X_BXCLUTPOOL: the vectors BLASTX's pool lent (buffer reuse only, as the spare's).
+    let (lent_kept, mut lent_pv) = match lent {
+        Some(lent) => (Some((lent.starts, lent.hits)), lent.pv),
+        None => (None, Vec::new()),
+    };
     let mut pv = if pv_in_stripes {
         match x_ahead_pv.take() {
             Some(buffer) => x_zeroed_in(buffer, (backbone_size >> PV_ARRAY_BTS) + 1),
-            None => vec![0u32; (backbone_size >> PV_ARRAY_BTS) + 1],
+            None => x_zeroed_on(
+                std::mem::take(&mut lent_pv),
+                (backbone_size >> PV_ARRAY_BTS) + 1,
+            ),
         }
     } else {
         Vec::new()
     };
     // LOSAT_X_BPLKPFLAT: an earlier table's vectors when the spare holds them (module header).
-    let (spare_starts, spare_hits) = spare.map(XFlatSpare::take).unwrap_or_default();
+    let (spare_starts, spare_hits) = lent_kept
+        .or_else(|| spare.map(XFlatSpare::take))
+        .unwrap_or_default();
     let (mut starts, starts_reused) = x_reuse(spare_starts, backbone_size + 1);
     let (mut hits, hits_reused) = x_reuse(spare_hits, total);
     X_LKPFLAT_RECYCLED.fetch_add(u64::from(starts_reused), Ordering::Relaxed);
@@ -1679,7 +1713,7 @@ fn x_flat_stripes_on<S: CompressedScores>(
                     .any(|((_, is_table), &range_total)| {
                         *is_table && range_total > overflow_cell_capacity
                     });
-            let parts: Vec<Mutex<Option<XStripe<'_>>>> = parts
+            let parts: Vec<Mutex<Option<XStripe<'_, H>>>> = parts
                 .into_iter()
                 .map(|part| Mutex::new(Some(part)))
                 .collect();
@@ -1710,7 +1744,7 @@ fn x_flat_stripes_on<S: CompressedScores>(
         }
         (true, false) => {
             // Each stripe's part, taken by the task that takes its index.
-            let parts: Vec<Mutex<Option<XStripe<'_>>>> = parts
+            let parts: Vec<Mutex<Option<XStripe<'_, H>>>> = parts
                 .into_iter()
                 .map(|part| Mutex::new(Some(part)))
                 .collect();
@@ -1804,7 +1838,7 @@ fn x_flat_stripes_on<S: CompressedScores>(
         // LOSAT_X_BPLKPAHEAD: in the spare's buffer for a build ahead of its block (above).
         pv = match x_ahead_pv.take() {
             Some(buffer) => x_zeroed_in(buffer, (backbone_size >> pv_array_bts) + 1),
-            None => vec![0u32; (backbone_size >> pv_array_bts) + 1],
+            None => x_zeroed_on(lent_pv, (backbone_size >> pv_array_bts) + 1),
         };
         for (index, bounds) in starts.windows(2).enumerate() {
             if bounds[1] > bounds[0] {
@@ -1876,6 +1910,7 @@ mod tests {
                     segments: None,
                     passes,
                     spare: spare.map(|(spare, _)| spare),
+                    lent: None,
                     x_ahead: false,
                     stripe_fill,
                 },
@@ -2065,6 +2100,7 @@ mod tests {
             segments: None,
             passes: XPasses::Rayon,
             spare: None,
+            lent: None,
             x_ahead: false,
             stripe_fill: false,
         };
@@ -2379,7 +2415,7 @@ mod tests {
                 1,
                 X_COUNT_CHUNK,
             );
-            let cuts = |threads| XParallelCuts {
+            let cuts = |threads| XParallelCuts::<i32> {
                 overflow_cell_capacity: 1,
                 max_appends: None,
                 threads,
@@ -2390,6 +2426,7 @@ mod tests {
                 segments: None,
                 passes: XPasses::OneLatch(None),
                 spare: None,
+                lent: None,
                 x_ahead: false,
                 stripe_fill: true,
             };
@@ -2409,7 +2446,7 @@ mod tests {
                 panic!("{matrix:?}: the appends pass ended the build")
             };
             let apart = in_pool(2, || {
-                x_flat_stripes_on(matrix, appends, &query, &locations, None, false, None)
+                x_flat_stripes_on(matrix, appends, &query, &locations, None, None, false, None)
             });
             match (&serial_one, &apart) {
                 (Some(XFlatBuild::Refused), Some(XFlatBuild::Refused)) => {}
@@ -2837,6 +2874,7 @@ mod tests {
                     passes: XPasses::OneLatch(None),
                     stripe_fill,
                     spare,
+                    lent: None,
                     x_ahead: true,
                 },
             )
@@ -2892,6 +2930,7 @@ mod tests {
                     segments: None,
                     passes,
                     spare: spare_a,
+                    lent: None,
                     x_ahead,
                     stripe_fill,
                 },
@@ -2918,6 +2957,7 @@ mod tests {
                     query,
                     locations,
                     spare_b,
+                    None,
                     x_ahead,
                     None,
                 )
@@ -3277,7 +3317,7 @@ mod tests {
                     let what = format!(
                         "round {round} {matrix:?} segment {segment} piece {piece} n{threads}"
                     );
-                    let cuts = XParallelCuts {
+                    let cuts = XParallelCuts::<i32> {
                         overflow_cell_capacity: NCBI_OVERFLOW_CELL_CAPACITY,
                         max_appends: None,
                         threads,
@@ -3289,6 +3329,7 @@ mod tests {
                         segments: None,
                         passes,
                         spare: None,
+                        lent: None,
                         x_ahead: false,
                         stripe_fill,
                     };
@@ -3350,7 +3391,9 @@ mod tests {
                         many_seen += 1;
                     }
                     let built = in_pool(threads, || {
-                        x_flat_stripes_on(matrix, appends, &query, &locations, None, false, None)
+                        x_flat_stripes_on(
+                            matrix, appends, &query, &locations, None, None, false, None,
+                        )
                     });
                     x_assert_same_flat_tables_as(&what, &flat(built), &serial);
                 }
@@ -3473,7 +3516,7 @@ mod tests {
                     &query,
                     &locations,
                     &tables,
-                    XParallelCuts {
+                    XParallelCuts::<i32> {
                         overflow_cell_capacity: NCBI_OVERFLOW_CELL_CAPACITY,
                         max_appends: None,
                         threads,
@@ -3484,6 +3527,7 @@ mod tests {
                         segments: Some(&pool),
                         passes: XPasses::OneLatch(None),
                         spare: None,
+                        lent: None,
                         x_ahead: false,
                         stripe_fill: true,
                     },
@@ -3502,6 +3546,7 @@ mod tests {
                     appends,
                     &query,
                     &locations,
+                    None,
                     None,
                     false,
                     Some(&pool),

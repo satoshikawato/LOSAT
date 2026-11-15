@@ -855,10 +855,12 @@ impl Indexer<'_> {
         Ok(info)
     }
 
-    /// `NCBI_CATCH(title)` of `e` (`NcbiException::report_default`).
+    /// `NCBI_CATCH(title)` of `e` (`NcbiException::report_default`): one error post per line.
     fn ncbi_catch(&mut self, e: &NcbiException, title: &str) {
         let lines = e.report_default(self.program, title);
-        self.posts.extend(lines);
+        for line in lines.split_inclusive(|&byte| byte == b'\n') {
+            self.posts.post(crate::report::diag_log::ERROR, line);
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:1028-1170 (`x_InitFeatTableKeys`)

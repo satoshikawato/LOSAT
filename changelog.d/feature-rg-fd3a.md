@@ -13,4 +13,7 @@
   general ids and patent numbers in any letter case; versions and releases exactly; `giim` ids as NCBI's index of
   them takes them), and their messages come in NCBI's order (by gi, accession and general id number). A Seq-table
   bit-bvector column whose size alone is read (an int-delta over it, an extra fuzz column) is no longer refused. A PSSM file that
-  starts with a UTF-8 byte order mark gets NCBI's "Unrecognized format for PSSM".
+  starts with a UTF-8 byte order mark gets NCBI's "Unrecognized format for PSSM". With tblastn `-outfmt 11`, a PSSM
+  that NCBI cannot read (`Error: vector::reserve` too) or whose annotations stop NCBI's object manager gets NCBI's
+  error archive, each of the reader's and the object manager's messages saved whole with its severity; such a stop
+  is no longer refused in tblastn's formats and in psiblast's `-outfmt 10` and `20`.

@@ -31,15 +31,18 @@ use range::{GiimTree, Handle, HandleRangeMap, Mode, Range};
 use view::V;
 
 use crate::ncbi_exception::{post_line_in, NcbiException, Severity};
+use crate::report::diag_log::Posts;
 use crate::report::serial::asn_types::{table::named, Value};
 use crate::seqid::ParsedSeqId;
 
-/// What NCBI's object manager made of the query's annotations: its messages (standard error) in
-/// order, whether its last left the main thread's diagnostic stream failed, and the exception
-/// that ends the run (`CATCH_ALL`'s report, already in the failed stream's form when it is).
+/// What NCBI's object manager made of the query's annotations: its messages in order, each one
+/// post of its severity (standard error shows their lines; the BLAST archive saves each as one
+/// message, `diag_log::Posts::write`), whether its last left the main thread's diagnostic stream
+/// failed, and the exception that ends the run (`CATCH_ALL`'s report, already in the failed
+/// stream's form when it is).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct AnnotOutcome {
-    pub(crate) posts: Vec<u8>,
+    pub(crate) posts: Posts,
     pub(crate) muted: bool,
     pub(crate) abort: Option<Abort>,
 }
@@ -153,7 +156,7 @@ pub(super) enum Event {
 /// stream has failed.
 pub(super) struct Indexer<'p> {
     program: &'p str,
-    posts: Vec<u8>,
+    posts: Posts,
     muted: bool,
     caches: table::Caches,
     /// NCBI's `giim` Seq-id tree (`range::GiimTree`).
@@ -171,7 +174,7 @@ pub(crate) fn index_annots(
 ) -> Result<AnnotOutcome, Refusal> {
     let mut ix = Indexer {
         program,
-        posts: Vec::new(),
+        posts: Posts::new(),
         muted: false,
         caches: table::Caches::default(),
         giim: GiimTree::new(query_ids, subjects),
@@ -225,13 +228,14 @@ impl Indexer<'_> {
     /// in the stream's state.
     fn post(&mut self, severity: Severity, id: &str, text: &[u8]) {
         let id = (!id.is_empty()).then_some(id);
-        self.posts.extend(post_line_in(
-            severity,
-            id,
-            Some(self.program),
-            text,
-            self.muted,
-        ));
+        let code = match severity {
+            Severity::Warning => crate::report::diag_log::WARNING,
+            Severity::Error => crate::report::diag_log::ERROR,
+        };
+        self.posts.post(
+            code,
+            post_line_in(severity, id, Some(self.program), text, self.muted),
+        );
     }
 
     // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:403-427, 474-500 (phase C:

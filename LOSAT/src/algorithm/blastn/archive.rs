@@ -695,5 +695,15 @@ mod tests {
             )]
         );
         assert!(error_lines(&anyhow::anyhow!("unsupported by LOSAT"), false).is_none());
+        // `CATCH_ALL`'s report of a `std::exception` (exit status 255, blast_app_util.hpp:260-263):
+        // one error message (line RG D3-1, `Error: vector::reserve` of the `-in_pssm` reader).
+        let std_exception =
+            anyhow::Error::from(crate::cli::NativeError::std_exception("vector::reserve"));
+        assert_eq!(
+            error_lines(&std_exception, false).unwrap(),
+            vec![(ERROR, b"Error: vector::reserve".to_vec())]
+        );
+        // A text with `Error: ` and another exit status is not one of `CATCH_ALL`'s reports.
+        assert!(error_lines(&native("Error: something\n"), false).is_none());
     }
 }

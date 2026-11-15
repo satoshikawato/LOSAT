@@ -105,8 +105,18 @@ pub(crate) fn check_in_pssm_options(
     psi: &Arc<PsiSearch>,
     outfmts: &[i32],
 ) -> Result<()> {
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:506, 537 (quoted at
+    // `PsiSearch::write_annot_posts`: the prolog, then the query's Bioseq joins the scope)
+    // An exception of NCBI's object manager when the query joins the scope (`PsiSearch::
+    // annot_abort`) ends the run after the prolog of its format, before any report: NCBI BLAST+
+    // 2.17.0 `om/` cases t04 and k02 with -outfmt 10 (nothing on the standard output) and 20 (its
+    // header line). No refusal of the reports below applies to it.
+    if psi.annot.abort.is_some() {
+        return Ok(());
+    }
     // The XML and JSON query definition of a query whose annotations NCBI reads for it
-    // (`in_pssm::refuse_annot_defline`), in every run and for each requested format.
+    // (`in_pssm::refuse_annot_defline`), in every run that writes a report and for each
+    // requested format.
     for &number in outfmts {
         crate::algorithm::pssm_search::in_pssm::refuse_annot_defline(psi, number, "PSIBLAST")?;
     }

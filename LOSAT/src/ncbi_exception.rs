@@ -629,8 +629,8 @@ impl MainDiag {
 /// "Failed to parse location of " << s.rdbuf() ...)` of the object manager,
 /// `algorithm::pssm_search::annot_index`): the run's later posts print their header only
 /// (`post_line`) and `CATCH_ALL` its line feeds (`cli::catch_all_text`). False unless a psiblast
-/// or tblastn `-in_pssm` run posted it (the library API and LOSAT Web refuse `-in_pssm`,
-/// `api::search`).
+/// or tblastn `-in_pssm` run posted it: the command line's, or a library call's (`Inputs::pssm`;
+/// each call is a run, `begin_main_diag_run`); LOSAT Web refuses `-in_pssm`.
 pub(crate) fn main_diag_failbit() -> bool {
     MAIN_DIAG.failed()
 }

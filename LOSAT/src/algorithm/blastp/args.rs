@@ -1276,6 +1276,7 @@ impl BlastpArgs {
                     crate::algorithm::pssm_search::in_pssm::PssmReader {
                         strategy: self.export_search_strategy.is_some(),
                         database: self.db.is_some(),
+                        archive: self.archive.as_ref(),
                         ..crate::algorithm::pssm_search::in_pssm::PssmReader::PSIBLAST
                     },
                     diagnostics,

@@ -949,7 +949,7 @@ fn search_pssm_query(
     // The messages of NCBI's object manager about the query's annotations, after the database
     // and the subjects, before the formatter's warnings and anything on the standard output;
     // its exception ends the run there (`PsiSearch::write_annot_posts`, `annot_abort`).
-    psi.write_annot_posts(outputs.diagnostics)?;
+    psi.write_annot_posts(outputs.diagnostics, args.archive.as_ref())?;
     if let Some(abort) = psi.annot_abort() {
         return Err(abort);
     }

@@ -6089,7 +6089,7 @@ fn search_pssm_query(
     // The messages of NCBI's object manager about the query's annotations come after the
     // prolog, where a FASTA query's batch has its reader's messages: they are the PSSM query's
     // (`psiblast_stop_at_pssm_query` marks the stream they fail).
-    record.warnings = psi.annot.posts.clone();
+    record.warnings = psi.annot.posts.text();
     let records = vec![record];
     // The PSSM files of `-in_pssm`'s rounds (item PS5b), checked as a FASTA query's
     // (`check_psiblast_pssm_files`).

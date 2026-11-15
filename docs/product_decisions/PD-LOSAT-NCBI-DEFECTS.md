@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.31
+- Version: 1.32
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -70,7 +70,12 @@
   accession table in one of its databases cannot look up is written as NCBI writes it; the
   refusal of 1.25 narrowed to the prefetch off and to the orders of loads that LOSAT does not
   model; line DBID item mixdb2, Owner-delegated, standing instruction 2026-09-29, restated
-  2026-10-07)
+  2026-10-07);
+  1.32 2026-11-15 (the explicit rejections of psiblast and tblastn `-in_pssm` where NCBI's object
+  manager or format guess prints addresses, reads outside its data, overflows a signed integer or
+  depends on the machine's memory, rule 3, line RG item D3-1; Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07; no rule-1 exception: the Owner's questions of D3-1
+  stay open)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -864,6 +869,67 @@ here, and names the widening that PS16a made for protein queries.
   of a profile in the RPS traceback come. Where that cell scores 0 or less, NCBI's redo fails at the round of score 0
   and drops the profile, which LOSAT reproduces (rule 2; fixture rows `db.rps.rej.swendless` and
   `db.rps.mini.sw.zero.6`).
+
+- psiblast and tblastn `-in_pssm` (version 1.32, 2026-11-15, line RG item D3-1, Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07): LOSAT reads the PSSM's ASN.1 text as
+  NCBI's reader does (every member of every type it reaches) and indexes the query's annotations
+  as NCBI's object manager does when the PSSM's Bioseq joins the scope
+  (`scope->AddTopLevelSeqEntry(pssm->SetQuery())`, `psiblast_app.cpp:537`, `tblastn_app.cpp:226`;
+  `CSeq_annot_Info::x_InitAnnotList`). It refuses (exit 1, "a PSSM query whose annot has ... is
+  not supported by LOSAT's PSIBLAST", or TBLASTN) where NCBI's output holds memory addresses,
+  where NCBI reads outside its data or overflows a signed integer, and where its outcome depends
+  on the machine's memory:
+  - an empty location of a feature, graph, alignment, location set or Seq-table before NCBI's
+    diagnostic stream fails: `Empty region in 0x...` (1204.1 to 1204.4, 1204.7, 1204.8,
+    `seq_annot_info.cpp:761, 825, 898`) prints a heap address;
+  - a Seq-table row without a Seq-id or a location: NCBI's `CCoreException` NULL-pointer report
+    holds a stack of addresses;
+  - two Seq-ids of one Seq-table row location that get different messages and that no gi,
+    accession or general id number orders: NCBI writes them in the order of its `CSeq_id_Handle`s,
+    which is then the address of their info (`seq_id_handle.hpp:207`);
+  - a Packed-seg with fewer `present`, `starts`, `ids` or `lens` than its `dim` and `numseg`
+    (NCBI reads past its vectors);
+  - a signed overflow that NCBI's build runs without a sign of it (undefined behaviour): the sums
+    of a Seq-table `int-delta` column, an `int-scaled` value past `Int8`, a column `field-id` below
+    -2147483638 (its difference with the column group's base);
+  - a Dense-seg of no segments with `starts` or `strands`: NCBI divides by `numseg` after its
+    warnings (SIGFPE, exit status 136);
+  - a feature Seq-table of more than 10,000,000 rows, a Std-seg `dim` above 1,000,000: NCBI's
+    allocations succeed or fail by the machine's memory (10,000,000 rows take NCBI 1.4 GB,
+    100,000,000 rows end in `BLAST ran out of memory`);
+  - two `giim` Seq-ids of one number in one location after an earlier annotation, a Seq-table
+    column or a Std-seg looked that number up, or with `-subject`: NCBI's `giim` tree
+    (`seq_id_tree.cpp:2926-2964`) takes them for one Seq-id or two by the `giim` handles alive at
+    that moment, which LOSAT follows only within one annotation (a conservative refusal; the port
+    of those handles' lives stays open);
+  - BitMagic data of a Seq-table that NCBI decodes (`bit-bvector` values, a `bit-set-bvector`'s
+    sparse index): NCBI decodes well-formed streams deterministically and reads past or crashes on
+    some malformed ones; refused until the Owner answers question Q-BM of D3-1 (port the decode or
+    keep refusing). A `bit-bvector`'s size, which NCBI reads without a decode, is NCBI's.
+
+  The `-in_pssm` file's format guess (NCBI's `CFormatGuess`, ported) is refused where one of its
+  tests reads memory that the file does not decide: `TestFormatGvf`'s ninth column of a GVF line
+  of eight (`tokens[8]`), `TestFormatPhrapAce`'s tokens of an `AS` line of fewer than three
+  (`values[1]`, `values[2]`; NCBI 2.17.0 crashes on both, exit status 139) and `TestFormatFasta`'s
+  search for `|` past a test buffer of 10 bytes or fewer.
+
+  None of these is a rule-1 exception: D3-1's questions to the Owner, Q1 (the Dense-seg division by
+  zero), Q2 (the memory bounds), Q3 (the signed overflows) and Q-BM, are open, and their cases stay
+  refused until the Owner answers. Not rule-3 items but refusals until LOSAT writes NCBI's ASN.1
+  text of the values it reads (line RG item D3-2): the annotation's text that NCBI prints after its
+  `Failed to parse location of` message (1204.6), and with `-out_pssm`, `-export_search_strategy`
+  or psiblast `-outfmt 11` a PSSM with members that LOSAT's PSSM writer does not write yet; nor
+  the XML and JSON reports of an untitled query whose annotations hold features (NCBI's
+  definition line reads them; not ported). The rest is NCBI's (rules 2 and 4): the index's
+  messages (`Invalid 'lens' size in denseg`, the Seq-table column messages, `Failed to parse
+  location of`, after which NCBI's later messages print their headers only) and exceptions
+  (`Error: NCBI C++ Exception:`, `Error: vector::reserve` of a Dense-seg or Seq-table reserve), the
+  reader's format errors, number-range and member-tag reports, its `#` for a byte outside the
+  visible ASCII range and the deprecated members of a `Variation-ref`; where the index's
+  exception ends the run, each output format's bytes (tblastn's `-outfmt 11` error archive with
+  every message saved whole with its severity, psiblast's `-outfmt 10` and `20`), as with the
+  reader's errors (fixture rows `db.ps.inpssm.d3.*`, `db.tbn.inpssm.d3.*`, `db.ps.inpssm.fg.*`,
+  `db.tbn.inpssm.fg.*`).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

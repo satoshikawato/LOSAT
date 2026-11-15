@@ -24,7 +24,7 @@ fn index(annots: &[&str]) -> Result<AnnotOutcome, Refusal> {
 fn posts(annots: &[&str]) -> String {
     let outcome = index(annots).unwrap();
     assert_eq!(outcome.abort, None);
-    String::from_utf8(outcome.posts).unwrap()
+    String::from_utf8(outcome.posts.text()).unwrap()
 }
 
 /// `CATCH_ALL`'s report of an exception at `file`:`line` (one line of the chain).
@@ -142,7 +142,7 @@ fn seq_table_column_messages() {
     ])
     .unwrap();
     assert_eq!(
-        String::from_utf8(outcome.posts).unwrap(),
+        String::from_utf8(outcome.posts.text()).unwrap(),
         format!("Error: (1213.8) [psiblast] SeqTable-column-info.field-id = 9999\n{FAILED}")
     );
 }
@@ -254,7 +254,7 @@ fn alignment_size_warnings() {
 fn the_failed_stream_keeps_the_headers() {
     let outcome = index(&[&failing_feature()]).unwrap();
     assert!(outcome.muted);
-    assert_eq!(String::from_utf8(outcome.posts).unwrap(), FAILED);
+    assert_eq!(String::from_utf8(outcome.posts.text()).unwrap(), FAILED);
     let rows = format!("{{ header {{ field-id location-id }}, data id {{ {Q1} }} }}, {{ header {{ field-id location-from }}, data int {{ 5, 5 }} }}, {{ header {{ field-id location-to }}, data int {{ 1, 1 }} }}");
     assert_eq!(
         posts(&[&table(2, &rows)]),
@@ -530,7 +530,7 @@ fn table_row_messages_follow_the_handle_order() {
         let annots: Vec<&str> = annots.iter().map(String::as_str).collect();
         let outcome = index(&annots).map(|outcome| {
             assert_eq!(outcome.abort, None, "{case}");
-            String::from_utf8(outcome.posts).unwrap()
+            String::from_utf8(outcome.posts.text()).unwrap()
         });
         assert_eq!(outcome, expected.map(str::to_string), "{case}");
     }

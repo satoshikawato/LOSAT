@@ -526,14 +526,17 @@ impl PsiSearch {
     // `scope->AddTopLevelSeqEntry(pssm->SetQuery())` in psiblast, after it in tblastn)
     /// The messages of NCBI's object manager about the PSSM query's annotations, written to
     /// `diagnostics` (psiblast after its prolog, as the messages of its query batch,
-    /// `blast_engine::psiblast_stop_at_pssm_query`; tblastn before its prolog), after which a
-    /// failed diagnostic stream silences the run's later messages
-    /// (`ncbi_exception::set_main_diag_failbit`).
+    /// `blast_engine::psiblast_stop_at_pssm_query`; tblastn before its prolog), each saved as one
+    /// message of its severity by the BLAST archive of the run (`archive`, outfmt 11: the error
+    /// archive of a run that the object manager's exception ends, NCBI BLAST+ 2.17.0 tblastn
+    /// `k02_failed_then_choice_exc`), after which a failed diagnostic stream silences the run's
+    /// later messages (`ncbi_exception::set_main_diag_failbit`).
     pub(crate) fn write_annot_posts(
         &self,
         diagnostics: &mut dyn std::io::Write,
+        archive: Option<&crate::report::archive::ArchiveHandle>,
     ) -> std::io::Result<()> {
-        diagnostics.write_all(&self.annot.posts)?;
+        self.annot.posts.write(diagnostics, archive)?;
         self.fail_diag_stream();
         Ok(())
     }

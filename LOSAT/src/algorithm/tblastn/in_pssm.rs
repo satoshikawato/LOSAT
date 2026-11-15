@@ -55,6 +55,7 @@ pub(super) fn read(
     matrix_name: &str,
     strategy: bool,
     database: bool,
+    archive: Option<&crate::report::archive::ArchiveHandle>,
     diagnostics: &mut dyn std::io::Write,
 ) -> Result<PsiSearch> {
     let (search, _file) = read_in_pssm(
@@ -64,6 +65,7 @@ pub(super) fn read(
             matrix_name,
             strategy,
             database,
+            archive,
         },
         diagnostics,
     )?;
@@ -118,9 +120,19 @@ pub(super) fn check_limits(
     psi: &PsiSearch,
     outfmt: i32,
 ) -> Result<()> {
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:222-226, 241-270 (quoted at
+    // `tblastn_app::search_pssm_query`: the query's Bioseq joins the scope before the formatter
+    // is made)
+    // An exception of NCBI's object manager when the query joins the scope (`PsiSearch::
+    // annot_abort`) ends the run before any report: its posts and its error, with outfmt 11 the
+    // error archive (NCBI BLAST+ 2.17.0, line RG D3-1 `om/` cases t04, k02 and the other cases of
+    // exit status 255 with -outfmt 11). No refusal of the reports below applies to it.
+    let index_stops = psi.annot.abort.is_some();
     // The XML and JSON query definition of a query whose annotations NCBI reads for it
-    // (`in_pssm::refuse_annot_defline`), in every run.
-    crate::algorithm::pssm_search::in_pssm::refuse_annot_defline(psi, outfmt, "TBLASTN")?;
+    // (`in_pssm::refuse_annot_defline`), in every run that writes a report.
+    if !index_stops {
+        crate::algorithm::pssm_search::in_pssm::refuse_annot_defline(psi, outfmt, "TBLASTN")?;
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:159-162
     // ```c++
     // 	if ((mt_mode == CMTArgs::eSplitByQueries) && (num_threads > 1)){
@@ -148,9 +160,10 @@ pub(super) fn check_limits(
     // prolog of its format and NCBI's error, with outfmt 11 the error archive (NCBI 2.17.0, line
     // RG F1b-2 fix 1: `t.sub.f*`, `t.scaled.db.f11`, `t.ratios45.f11`; review 4 R5-6): these
     // refusals of the search's reports do not apply to it.
-    let searched = psi
-        .stop_before_search(args.strategy.is_some(), args.db.is_some())
-        .is_none();
+    let searched = !index_stops
+        && psi
+            .stop_before_search(args.strategy.is_some(), args.db.is_some())
+            .is_none();
     // The query-anchored formats 1 to 4 are outfmt 0's report with another alignment section
     // (line RG T3b: NCBI 2.17.0's `-in_pssm` sections, probes `tn.t3b.pssm.*`, are those of the
     // PSSM's query).

@@ -293,6 +293,9 @@ pub(crate) struct PssmReader<'a> {
     /// copy); with the strategy alone NCBI stops before any report (`PsiSearch::stop_before_search`).
     pub(crate) strategy: bool,
     pub(crate) database: bool,
+    /// The run's BLAST archive (outfmt 11), which saves each of the reader's posts as one message
+    /// of its severity (`diag_log::Posts::write`); `None` without one.
+    pub(crate) archive: Option<&'a crate::report::archive::ArchiveHandle>,
 }
 
 impl PssmReader<'static> {
@@ -302,6 +305,7 @@ impl PssmReader<'static> {
         matrix_name: "BLOSUM62",
         strategy: false,
         database: true,
+        archive: None,
     };
 }
 
@@ -411,11 +415,18 @@ pub(crate) fn read_in_pssm(
     // Dense-seg's reserve hook (`Error: vector::reserve`); a `CEofException` (a `CIOException`, the
     // text ending directly in the root object) is caught without a word and the run ends with
     // exit status 0 (NCBI BLAST+ 2.17.0, `PssmWithParameters ::=` alone; line RG D3-1 probe e01).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1172
+    // (`CBlastAppDiagHandler::Post`, quoted in `report::diag_log`): the BLAST archive saves each post as one message of its
+    // severity; the reader's posts are errors (`ERR_POST_X(7, ...)` of a replaced byte, whose text
+    // has three lines, and `ERR_POST(Error << ...)` of `PostRead`; NCBI BLAST+ 2.17.0 tblastn
+    // -outfmt 11 of a PSSM whose title has a control byte and whose ratios overflow: `code 2`).
     let read = crate::blastinput::pssm_text::read_pssm(text);
     let program = reader.program.to_ascii_lowercase();
+    let mut posts = crate::report::diag_log::Posts::new();
     for post in &read.posts {
-        diagnostics.write_all(&post.line(&program))?;
+        posts.post(crate::report::diag_log::ERROR, post.line(&program));
     }
+    posts.write(diagnostics, reader.archive)?;
     let pssm = match read.result {
         Ok(pssm) => pssm,
         Err(PssmReadError::Ncbi(ReadError::Serial(_))) => {
@@ -994,11 +1005,13 @@ pub(crate) fn psi_search_and_object(
     };
     // The title's refusals (above), for a run whose reports NCBI writes (line RG F1b-2, review 4
     // R5-6: with `-export_search_strategy -subject`, an invalid PSSM or the PSSM engine's error, NCBI
-    // writes the prolog and its error whatever the title).
+    // writes the prolog and its error whatever the title; so it does when its object manager's
+    // exception ends the run as the query joins the scope, `PsiSearch::annot_abort`, line RG D3-1).
     if let Some(refusal) = title_refusal {
         if search
             .stop_before_search(reader.strategy, reader.database)
             .is_none()
+            && search.annot.abort.is_none()
         {
             return Err(refusal);
         }
@@ -1656,6 +1669,7 @@ mod tests {
             matrix_name,
             strategy: request,
             database: true,
+            archive: None,
         };
         // A PSSM of frequency ratios only: the request holds it as read (no scores), the search
         // and the file the engine's scores (`with_computed_scores`).

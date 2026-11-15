@@ -19,7 +19,7 @@ fn column_value(text: &str) -> Value {
 fn indexer() -> Indexer<'static> {
     Indexer {
         program: "psiblast",
-        posts: Vec::new(),
+        posts: crate::report::diag_log::Posts::new(),
         muted: false,
         caches: Caches::default(),
         giim: Default::default(),

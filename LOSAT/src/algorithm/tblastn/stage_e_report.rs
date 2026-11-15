@@ -1859,6 +1859,7 @@ mod tests {
                     engine_positives: false,
                     culling_limit: 0,
                     pssm: None,
+                    fetch_excluded: None,
                 },
                 if mode == 2 {
                     BlastCompoAdjustMode::CompositionMatrixAdjust

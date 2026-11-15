@@ -1605,6 +1605,15 @@ impl HspStream {
         self.close_observed(trace);
     }
 
+    /// The closed stream without the lists that `keep` refuses, in their order
+    /// (`Runtime::batch_end`: the subjects that the fetches of the redo or the traceback
+    /// exclude).
+    pub fn retain_closed(&mut self, keep: impl FnMut(&HspList) -> bool) {
+        if let Some(sorted) = self.sorted.as_mut() {
+            sorted.retain(keep);
+        }
+    }
+
     pub fn close_observed(&mut self, trace: &mut dyn ResultsObserver) {
         if self.sorted.is_some() {
             return;

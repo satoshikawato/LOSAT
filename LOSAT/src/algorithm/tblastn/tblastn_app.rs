@@ -1847,6 +1847,9 @@ fn search(
         // sequence file failed with its error.
         let mut titles = super::database::DatabaseTitles::new();
         let mut failed: Option<(std::ops::Range<usize>, anyhow::Error)> = None;
+        // NCBI's fetches with `check_oid_exclusion` of the redo and the traceback, one check for
+        // the search's batches (`database::fetch_excluded`).
+        let fetch_excluded = database.and_then(super::database::fetch_excluded);
         // Graduated 2026-10-22 (was LOSAT_X_TBNSSIDE, LOSAT_X_TBNBATCH): the batches of the
         // loop below searched ahead (`x_search_batches`), each with its range; `None` when there
         // is none. A batch whose range does not match is searched by the loop.
@@ -1893,6 +1896,7 @@ fn search(
                 engine_positives,
                 culling_limit: resolved.culling_limit,
                 pssm: pssm.as_deref(),
+                fetch_excluded: fetch_excluded.as_ref(),
             },
             compo_adjust_mode,
             resolved.sum_stats,
@@ -1962,6 +1966,7 @@ fn search(
                             engine_positives,
                             culling_limit: resolved.culling_limit,
                             pssm: pssm.as_deref(),
+                            fetch_excluded: fetch_excluded.as_ref(),
                         },
                         compo_adjust_mode,
                         resolved.sum_stats,

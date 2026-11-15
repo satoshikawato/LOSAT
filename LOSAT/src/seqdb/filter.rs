@@ -2781,14 +2781,23 @@ impl SeqDb {
     //         }
     // ```
     // `GetSequenceLengthAndId` takes the Seq-ids of `CSeqDB::GetSeqIDs`, the filtered header
-    // (seqdbvol.cpp:2106-2111): a sequence that a positive list keeps (the lookup found one of
-    // its ids) while the header read removes every line (a pdb molecule without its chain, a
-    // local id in other letters, a version 4 Swiss-Prot name, a `BL_ORD_ID` tag of a later
-    // volume) has none, and its hits get no Seq-align: no report, prefetch, taxonomy lookup or
-    // PSSM sees them, and the post is not printed. The sequence was searched and its length
-    // counts in the statistics (`drops_lineless_hits`; a negative list's such sequence is
-    // excluded earlier). (Line DBID item lineless; DI-8 `DECISIONS.md` 17 had refused such a
-    // list before the search.)
+    // (seqdbvol.cpp:2106-2111): a sequence that a seqid list keeps while the header read
+    // removes every line has none (a positive list's lookup found a pdb molecule without its
+    // chain, a local id in other letters, a version 4 Swiss-Prot name or a `BL_ORD_ID` tag of a
+    // later volume; a negative list keeps a line only with an id that is neither a gi nor a ti
+    // nor listed), and its hits get no Seq-align: no report, prefetch, taxonomy lookup or PSSM
+    // sees them, and the post is not printed. The sequence was searched and its length counts
+    // in the statistics (`drops_lineless_hits`; under a negative list the search's fetches
+    // exclude it earlier, `excludes_lineless_at_fetch`). (Line DBID items lineless and
+    // lineless2; DI-8 `DECISIONS.md` 17 had refused such a list before the search.)
+    /// Whether the database's rule is a seqid list, positive or negative, which may keep a
+    /// sequence without any of its lines: such a sequence is searched and counts in the
+    /// statistics, and its hits that reach NCBI's Seq-aligns leave the reports there
+    /// (`keeps_line`, `algorithm::common::database::SeqAligned`).
+    pub fn drops_lineless_hits(&self) -> bool {
+        self.volumes.iter().any(|volume| volume.has_seqid_rule())
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:302-313
     // ```c++
     //     if (args->check_oid_exclusion) {
@@ -2801,21 +2810,47 @@ impl SeqDb {
     //         }
     //     }
     // ```
-    // The fetches of the traceback, the composition-based redo and the ungapped re-evaluation of
-    // a nucleotide subject ask for this check. `CSeqDBImpl::x_InitIdSet` (seqdbimpl.cpp:1909-1946)
-    // leaves the id set blank for a positive list of Seq-ids (`-seqidlist` reads only strings,
-    // `CSeqDBFileGiList::eSiList`), and fills it from a negative list's ids: a positive list's
-    // sequence without a line is searched, takes its place in the hit lists and gets no
-    // Seq-align (`keeps_line`), while a negative list's is excluded at those fetches, before the
-    // final hit lists are made (its hits take no place there), which LOSAT does not model: the
-    // reads of such a sequence refuse (`Volume::line_mask`).
-    /// Whether the database's rule is a positive seqid list, whose sequences that keep no line
-    /// are searched and leave the reports where NCBI makes the Seq-aligns (`keeps_line`,
-    /// `algorithm::common::database::SeqAligned`).
-    pub fn drops_lineless_hits(&self) -> bool {
+    // The fetches of the gapped traceback (blast_traceback.c:1567-1573), of the
+    // composition-based redo (blast_kappa.c:1378, a match skipped at 3560-3570) and of the
+    // ungapped re-evaluation of a nucleotide subject (blast_hits.c:2645-2662, the subject's
+    // HSPs freed) ask for this check.
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1929-1943
+    // ```c++
+    //         } else if (! m_NegativeList.Empty()) {
+    //             const vector<TGi> & ngis = m_NegativeList->GetGiList();
+    //             const vector<TTi> & ntis = m_NegativeList->GetTiList();
+    //             const vector<string> & stis = m_NegativeList->GetSiList();
+    //
+    //             if (! ngis.empty()) {
+    //                 CSeqDBIdSet new_ids(ngis, CSeqDBIdSet::eGi, false);
+    //                 m_IdSet = new_ids;
+    //             } else if (! ntis.empty()) {
+    //                 CSeqDBIdSet new_ids(ntis, CSeqDBIdSet::eTi, false);
+    //                 m_IdSet = new_ids;
+    //             } else if (!stis.empty()) {
+    //                 CSeqDBIdSet new_ids(stis, CSeqDBIdSet::eSi, false);
+    //                 m_IdSet = new_ids;
+    //             }
+    // ```
+    // `x_InitIdSet` (seqdbimpl.cpp:1909-1946) leaves the id set blank for a positive list of
+    // Seq-ids (`-seqidlist` reads only strings, `CSeqDBFileGiList::eSiList`, and the branch
+    // above it fills the set from a user list's gis or tis only), and fills it from the ids
+    // of a negative list (on a version 5 database those left after `s_ProcessSeqIDsForV5`
+    // drops the gis; a list left empty sets no rule here: `restrict`). The fetches with
+    // `check_oid_exclusion` then exclude a sequence without a line: a negative list's such
+    // sequence is searched, takes its place in the preliminary hit lists of a gapped search,
+    // and leaves the search at the traceback's or the composition-based redo's fetch, before
+    // the final hit lists are made (its hits take no place there); in an ungapped search of a
+    // nucleotide database it leaves at the re-evaluation, before the preliminary hit lists. A
+    // protein subject of an ungapped search is fetched by none of them and reaches the
+    // Seq-align (`drops_lineless_hits`).
+    /// Whether NCBI's fetches with `check_oid_exclusion` exclude the sequences that keep no
+    /// line (`keeps_line`): the database's rule is a negative seqid list with at least one id
+    /// (`algorithm::common::database::FetchExcluded`).
+    pub fn excludes_lineless_at_fetch(&self) -> bool {
         self.volumes
             .iter()
-            .any(|volume| volume.has_positive_seqid_rule())
+            .any(|volume| volume.has_negative_seqid_ids())
     }
 
     /// Whether NCBI turns a hit on `ordinal` into a Seq-align: false where the database's seqid
@@ -3987,6 +4022,47 @@ mod tests {
         let whole = ids_db("prot_v5", SeqType::Protein);
         assert!(!whole.drops_lineless_hits());
         assert!(whole.keeps_line(0).unwrap());
+    }
+
+    #[test]
+    fn a_negative_list_with_ids_excludes_its_lineless_sequences_at_the_fetches() {
+        // prot_v4's sequence 14 has one line, whose only id is `gi|1414`: a negative seqid list
+        // keeps the sequence (none of its ids is listed) but removes the line (a negative list
+        // keeps a line with an id that is neither a gi nor a ti nor listed). NCBI's id set holds
+        // the list's ids, so its fetches with `check_oid_exclusion` exclude the sequence.
+        let mut db = ids_db("prot_v4", SeqType::Protein);
+        db.restrict(
+            &DbList::Seqids(list_of(b"XP_000011\n", true)),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert!(db.drops_lineless_hits());
+        assert!(db.excludes_lineless_at_fetch());
+        let lineless: Vec<u32> = (0..db.num_seqs() as u32)
+            .filter(|&ordinal| !db.keeps_line(ordinal).unwrap())
+            .collect();
+        assert_eq!(lineless.len(), 1, "{lineless:?}");
+        // A positive list leaves NCBI's id set blank: its sequences without a line are not
+        // excluded at the fetches, and leave at the Seq-aligns.
+        let mut positive = ids_db("prot_v5", SeqType::Protein);
+        positive
+            .restrict(
+                &DbList::Seqids(list_of(b"3ABC\nDAA10001.1\n", false)),
+                &mut Vec::new(),
+            )
+            .unwrap();
+        assert!(positive.drops_lineless_hits());
+        assert!(!positive.excludes_lineless_at_fetch());
+        // A negative list of gis only is empty on a version 5 database once the gis are dropped
+        // (`s_ProcessSeqIDsForV5`): no line rule, no id set.
+        let mut gis = ids_db("prot_v5", SeqType::Protein);
+        gis.restrict(
+            &DbList::Seqids(list_of(b"gi|1414\n", true)),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert!(!gis.drops_lineless_hits());
+        assert!(!gis.excludes_lineless_at_fetch());
     }
 
     #[test]

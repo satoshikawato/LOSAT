@@ -960,45 +960,100 @@ impl ReportedHeader {
     }
 }
 
+/// Whether the sequences of a database search keep a definition line under its seqid list
+/// (`SeqDb::keeps_line`), each read once: the one check of NCBI's two places that drop a
+/// sequence without a line, the fetches with `check_oid_exclusion` (`FetchExcluded`) and the
+/// Seq-aligns (`SeqAligned`). A header that cannot be read as NCBI's header read adjusts it
+/// counts as kept: the reads of the reports then give its error, as before (NCBI's
+/// `GetSeqIDs` fails at the same fetch or Seq-align).
+struct LineCheck<'a> {
+    db: &'a SeqDb,
+    kept: std::sync::Mutex<std::collections::HashMap<u32, bool>>,
+}
+
+impl<'a> LineCheck<'a> {
+    fn new(db: &'a SeqDb) -> Self {
+        LineCheck {
+            db,
+            kept: std::sync::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    /// Whether `ordinal` keeps a line (read at its first check).
+    fn keeps(&self, ordinal: u32) -> bool {
+        let mut kept = self.kept.lock().expect("the line cache is not poisoned");
+        *kept
+            .entry(ordinal)
+            .or_insert_with(|| self.db.keeps_line(ordinal).unwrap_or(true))
+    }
+
+    /// `items` without those on a subject that keeps no line, in their order; `ordinal` names
+    /// an item's subject (`None`: no database ordinal, kept).
+    fn retain<T>(&self, items: &mut Vec<T>, ordinal: impl Fn(&T) -> Option<u32>) {
+        items.retain(|item| ordinal(item).is_none_or(|ordinal| self.keeps(ordinal)));
+    }
+}
+
+/// NCBI's fetches with `check_oid_exclusion` of a database search (line DBID item lineless2):
+/// under a negative seqid list with ids (`SeqDb::excludes_lineless_at_fetch`), a sequence that
+/// the list keeps without any of its definition lines is excluded where the gapped traceback,
+/// the composition-based redo or the ungapped re-evaluation of a nucleotide subject fetches it
+/// (seqsrc_seqdb.cpp:302-313). It was searched and counts in the statistics; a gapped search's
+/// preliminary hit lists hold it (it took its place there), and its hits leave the search
+/// before the final hit lists are made, so they take no place in them. Each program removes
+/// such subjects from the preliminary hit lists right before its traceback or redo, after
+/// their cut and trim (`ADAPTIVE_CBS`), and an ungapped search of a nucleotide database drops
+/// a subject's HSPs before they reach the preliminary hit lists. Shared by the threads of a
+/// search (`Sync`); each subject's header is read once.
+pub(crate) struct FetchExcluded<'a>(LineCheck<'a>);
+
+impl<'a> FetchExcluded<'a> {
+    /// The check of `db`'s fetches; `None` where they exclude nothing (no negative seqid list
+    /// with ids).
+    pub(crate) fn of(db: &'a SeqDb) -> Option<Self> {
+        db.excludes_lineless_at_fetch()
+            .then(|| FetchExcluded(LineCheck::new(db)))
+    }
+
+    /// Whether the fetch of `ordinal` excludes it.
+    pub(crate) fn excludes(&self, ordinal: u32) -> bool {
+        !self.0.keeps(ordinal)
+    }
+
+    /// `items` (preliminary hit lists, or HSP lists) without those on a subject the fetch
+    /// excludes, in their order; `ordinal` names an item's subject (`None`: kept).
+    pub(crate) fn retain<T>(&self, items: &mut Vec<T>, ordinal: impl Fn(&T) -> Option<u32>) {
+        self.0.retain(items, ordinal);
+    }
+}
+
 /// NCBI's Seq-aligns of the final hit lists of a database search (line DBID item lineless):
-/// a hit on a sequence that the database's positive seqid list keeps without any of its
-/// definition lines gets none (`SeqDb::keeps_line`, blast_seqalign.cpp:1582-1586), so it leaves every
+/// a hit on a sequence that the database's seqid list keeps without any of its definition
+/// lines gets none (`SeqDb::keeps_line`, blast_seqalign.cpp:1582-1586), so it leaves every
 /// report, the prefetch, the taxonomy lookups and psiblast's PSSM, while it was searched, took
 /// its place in the hit list before the cut to `-max_target_seqs` and counts in the
 /// statistics. Each program drops such hit lists right after that cut, before the reads of
 /// the reported sequences; a check reads each sequence's header once (one check per query
-/// batch or search call; the reads of the reports decode the kept ones again).
-pub(crate) struct SeqAligned<'a> {
-    db: &'a SeqDb,
-    kept: std::collections::HashMap<u32, bool>,
-}
+/// batch or search call; the reads of the reports decode the kept ones again). Under a
+/// negative seqid list with ids the search's fetches have excluded them before
+/// (`FetchExcluded`), except a protein subject of an ungapped search, which no fetch checks.
+pub(crate) struct SeqAligned<'a>(LineCheck<'a>);
 
 impl<'a> SeqAligned<'a> {
-    /// The check of `db`'s hits; `None` where no positive seqid list removes lines (no hit is
-    /// dropped here: `SeqDb::drops_lineless_hits`).
-    pub(crate) fn of(db: &'a SeqDb) -> Option<Self> {
-        db.drops_lineless_hits().then(|| SeqAligned {
-            db,
-            kept: std::collections::HashMap::new(),
-        })
-    }
-
-    /// Whether a hit on `ordinal` gets a Seq-align. A header that cannot be read as NCBI's
-    /// header read adjusts it counts as kept: the reads of the reports then give its error, as
-    /// before (NCBI's `GetSeqIDs` fails at the same Seq-align).
-    fn keeps(&mut self, ordinal: u32) -> bool {
-        let db = self.db;
-        *self
-            .kept
-            .entry(ordinal)
-            .or_insert_with(|| db.keeps_line(ordinal).unwrap_or(true))
+    /// The check of `db`'s hits; `None` where no seqid list removes lines, or where the
+    /// search's fetches have excluded the sequences without a line (`fetched`: the search
+    /// fetches its subjects with `check_oid_exclusion`, a gapped search or an ungapped one of
+    /// a nucleotide database, and `FetchExcluded::of(db)` is some): no hit is dropped here.
+    pub(crate) fn of(db: &'a SeqDb, fetched: bool) -> Option<Self> {
+        (db.drops_lineless_hits() && !(fetched && db.excludes_lineless_at_fetch()))
+            .then(|| SeqAligned(LineCheck::new(db)))
     }
 
     /// `items` (hit lists, or the HSPs of a batch) without those on a subject that gets no
     /// Seq-align, in their order; `ordinal` names an item's subject (`None`: no database
     /// ordinal, kept).
     pub(crate) fn retain<T>(&mut self, items: &mut Vec<T>, ordinal: impl Fn(&T) -> Option<u32>) {
-        items.retain(|item| ordinal(item).is_none_or(|ordinal| self.keeps(ordinal)));
+        self.0.retain(items, ordinal);
     }
 }
 

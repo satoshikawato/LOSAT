@@ -1311,7 +1311,7 @@ pub(super) fn batch_titles(
     if matches!(search_subjects, Subjects::Unreadable) {
         return Ok(None);
     }
-    ReportedSubjects::drop_unaligned(database, results);
+    ReportedSubjects::drop_unaligned(database, results, gapped);
     let x_t = super::x_timing::lap();
     let titles = ReportedSubjects::read_titles(database, results, gapped, asks.pairwise);
     super::x_timing::run(XRun::Titles, x_t);

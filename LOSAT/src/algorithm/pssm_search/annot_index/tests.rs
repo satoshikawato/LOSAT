@@ -360,10 +360,14 @@ fn refusals_name_their_condition() {
         refused(&[&format!("{{ data align {{ {{ type global, dim 2, segs std {{ {{ dim 1000001, loc {{ int {{ from 0, to 5, id {Q1} }} }} }} }} }} }} }}")]),
         Refusal::StdDim
     );
-    assert_eq!(
-        refused(&["{ data ftable { { data comment NULL, location mix { int { from 0, to 5, id genbank { accession \"A\" } }, int { from 0, to 5, id genbank { accession \"a\" } } } } } }"]),
-        Refusal::AmbiguousIds
-    );
+    // s_i72: two equal `giim` Seq-ids (NCBI: two handles here, one if another `giim` Seq-id of
+    // the number were held); s_i73: two different ones (NCBI: one handle here).
+    for db in ["x", "y"] {
+        assert_eq!(
+            refused(&[&table(1, &format!("{{ header {{ field-id location }}, data loc {{ mix {{ int {{ from 10, to 9, id giim {{ id 5, db \"x\" }} }}, int {{ from 0, to 5, id giim {{ id 5, db \"{db}\" }} }} }} }} }}"))]),
+            Refusal::GiimIds
+        );
+    }
     for refusal in [
         Refusal::EmptyRegion,
         Refusal::MutedDump,
@@ -375,7 +379,7 @@ fn refusals_name_their_condition() {
         Refusal::ScaledOverflow,
         Refusal::FieldIdOverflow,
         Refusal::IdOrder,
-        Refusal::AmbiguousIds,
+        Refusal::GiimIds,
         Refusal::TableRows,
         Refusal::StdDim,
     ] {
@@ -383,5 +387,144 @@ fn refusals_name_their_condition() {
             refusal.text().starts_with("a PSSM query whose annot has "),
             "{refusal:?}"
         );
+    }
+}
+
+// r_ambiguous_ids and the `om/` cases `s_f*`, `s_a*`, `s_t01`, `s_g01` of line RG D3-1 (NCBI BLAST+
+// 2.17.0): Seq-ids that NCBI's trees take for one are one handle in every kind of annotation; two
+// handles leave the reversed range alone, an empty region.
+#[test]
+fn seq_ids_that_ncbi_takes_for_one_share_their_ranges() {
+    let gb = |acc: &str| format!("genbank {{ accession \"{acc}\" }}");
+    let rev_then = |y: &str, x: &str| {
+        format!("mix {{ int {{ from 10, to 9, id {y} }}, int {{ from 0, to 5, id {x} }} }}")
+    };
+    let feature =
+        |loc: &str| format!("{{ data ftable {{ {{ data comment NULL, location {loc} }} }} }}");
+    let std = |locs: &str| {
+        format!("{{ type global, dim 2, segs std {{ {{ dim 2, loc {{ {locs} }} }} }} }}")
+    };
+    assert_eq!(
+        posts(&[&feature(&format!(
+            "mix {{ int {{ from 0, to 5, id {} }}, int {{ from 0, to 5, id {} }} }}",
+            gb("A"),
+            gb("a")
+        ))]),
+        ""
+    );
+    assert_eq!(
+        posts(&[&feature(&rev_then(&gb("ABCDEFGH"), &gb("abcdefgh")))]),
+        ""
+    );
+    assert_eq!(
+        posts(&[&format!("{{ data ftable {{ {{ data comment NULL, product int {{ from 0, to 5, id genbank {{ accession \"ab123456\", version 1 }} }}, location int {{ from 0, to 5, id {} }} }} }} }}", gb("AB123456"))]),
+        ""
+    );
+    assert_eq!(
+        index(&[&feature(&rev_then(
+            "genbank { accession \"AB123456\", version 1 }",
+            &gb("AB123456")
+        ))])
+        .unwrap_err(),
+        Refusal::EmptyRegion
+    );
+    assert_eq!(
+        posts(&[&format!(
+            "{{ data align {{ {} }} }}",
+            std(&format!(
+                "int {{ from 10, to 9, id {} }}, int {{ from 0, to 5, id {} }}",
+                gb("AB123456"),
+                gb("ab123456")
+            ))
+        )]),
+        ""
+    );
+    let disc = |y: &str, x: &str| {
+        format!(
+            "{{ data align {{ {{ type global, dim 2, segs disc {{ {}, {} }} }} }} }}",
+            std(&format!("int {{ from 10, to 9, id {y} }}")),
+            std(&format!("int {{ from 0, to 5, id {x} }}"))
+        )
+    };
+    assert_eq!(
+        posts(&[&disc(
+            "general { db \"TESTDB\", tag str \"abc\" }",
+            "general { db \"testdb\", tag str \"ABC\" }"
+        )]),
+        ""
+    );
+    assert_eq!(
+        index(&[&disc(
+            "general { db \"TESTDB\", tag str \"5\" }",
+            "general { db \"TESTDB\", tag id 5 }"
+        )])
+        .unwrap_err(),
+        Refusal::EmptyRegion
+    );
+    assert_eq!(
+        index(&[&disc("giim { id 5 }", "giim { id 5, db \"x\" }")]).unwrap_err(),
+        Refusal::GiimIds
+    );
+    let patent = |country: &str, number: &str| {
+        format!("patent {{ seqid 1, cit {{ country \"{country}\", id number \"{number}\" }} }}")
+    };
+    assert_eq!(
+        posts(&[&format!("{{ data seq-table {{ feat-type 0, num-rows 1, columns {{ {{ header {{ field-name \"Seq-table location\" }}, data loc {{ {} }} }} }} }} }}", rev_then(&patent("US", "ABC123"), &patent("us", "abc123")))]),
+        ""
+    );
+    assert_eq!(
+        posts(&[&format!("{{ data graph {{ {{ loc {}, numval 5, graph int {{ max 1, min 0, axis 0, values {{ 1, 1, 1, 1, 1 }} }} }} }} }}", rev_then("pdb { mol \"1abc\" }", "pdb { mol \"1ABC\" }"))]),
+        ""
+    );
+}
+
+// The `om/` cases `s_o*` of line RG D3-1 (NCBI BLAST+ 2.17.0, psiblast and tblastn the same): a
+// feature table row `mix { int { from 9, to 4, id Y }, X minus 0-5, X minus empty }` (Y empty:
+// 1204.8; X circular with an empty end: 1204.6), after the stream failed (`_m`) or before (`_u`,
+// where Y first is an "Empty region" with an address). NCBI writes them in `CSeq_id_Handle` order:
+// by packed number (gi, accession, `general` tag), unpacked last; one number, the addresses'.
+#[test]
+fn table_row_messages_follow_the_handle_order() {
+    for (case, y, x, muted, expected) in [
+        ("o01_gi5F_gi7E_m", "gi 7", "gi 5", true, Ok("Error: (1204.6) [psiblast] Failed to parse location of \nError: (1204.6) [psiblast] \nError: (1204.8) [psiblast] \n")),
+        ("o01_gi5F_gi7E_u", "gi 7", "gi 5", false, Ok("Error: (1204.6) [psiblast] Failed to parse location of \nError: (1204.8) [psiblast] \n")),
+        ("o02_gi5F_gi3E_m", "gi 3", "gi 5", true, Ok("Error: (1204.6) [psiblast] Failed to parse location of \nError: (1204.8) [psiblast] \nError: (1204.6) [psiblast] \n")),
+        ("o02_gi5F_gi3E_u", "gi 3", "gi 5", false, Err(Refusal::EmptyRegion)),
+        ("o03_acc5F_acc7E_m", "genbank { accession \"AB000007\" }", "genbank { accession \"AB000005\" }", true, Ok("Error: (1204.6) [psiblast] Failed to parse location of \nError: (1204.6) [psiblast] \nError: (1204.8) [psiblast] \n")),
+        ("o03_acc5F_acc7E_u", "genbank { accession \"AB000007\" }", "genbank { accession \"AB000005\" }", false, Ok("Error: (1204.6) [psiblast] Failed to parse location of \nError: (1204.8) [psiblast] \n")),
+        ("o04_acc9F_gi7E_m", "gi 7", "genbank { accession \"AB000009\" }", true, Ok("Error: (1204.6) [psiblast] Failed to parse location of \nError: (1204.8) [psiblast] \nError: (1204.6) [psiblast] \n")),
+        ("o04_acc9F_gi7E_u", "gi 7", "genbank { accession \"AB000009\" }", false, Err(Refusal::EmptyRegion)),
+        ("o05_localF_gi7E_m", "gi 7", "local str \"Query_1\"", true, Ok("Error: (1204.6) [psiblast] Failed to parse location of \nError: (1204.8) [psiblast] \nError: (1204.6) [psiblast] \n")),
+        ("o05_localF_gi7E_u", "gi 7", "local str \"Query_1\"", false, Err(Refusal::EmptyRegion)),
+        ("o06_gi7F_localE_m", "local str \"Query_1\"", "gi 7", true, Ok("Error: (1204.6) [psiblast] Failed to parse location of \nError: (1204.6) [psiblast] \nError: (1204.8) [psiblast] \n")),
+        ("o06_gi7F_localE_u", "local str \"Query_1\"", "gi 7", false, Ok("Error: (1204.6) [psiblast] Failed to parse location of \nError: (1204.8) [psiblast] \n")),
+        ("o07_genneg5F_gen0E_m", "general { db \"TESTDB\", tag id 0 }", "general { db \"TESTDB\", tag id -5 }", true, Ok("Error: (1204.6) [psiblast] Failed to parse location of \nError: (1204.6) [psiblast] \nError: (1204.8) [psiblast] \n")),
+        ("o07_genneg5F_gen0E_u", "general { db \"TESTDB\", tag id 0 }", "general { db \"TESTDB\", tag id -5 }", false, Ok("Error: (1204.6) [psiblast] Failed to parse location of \nError: (1204.8) [psiblast] \n")),
+        ("o08_genstr5F_genstr3E_m", "general { db \"TESTDB\", tag str \"abc003\" }", "general { db \"TESTDB\", tag str \"abc005\" }", true, Ok("Error: (1204.6) [psiblast] Failed to parse location of \nError: (1204.8) [psiblast] \nError: (1204.6) [psiblast] \n")),
+        ("o08_genstr5F_genstr3E_u", "general { db \"TESTDB\", tag str \"abc003\" }", "general { db \"TESTDB\", tag str \"abc005\" }", false, Err(Refusal::EmptyRegion)),
+        ("o09_tie_gi5_acc5_m", "genbank { accession \"AB000005\" }", "gi 5", true, Err(Refusal::IdOrder)),
+        ("o09_tie_gi5_acc5_u", "genbank { accession \"AB000005\" }", "gi 5", false, Err(Refusal::IdOrder)),
+        ("o10_tie_acc5v1_acc5v2_m", "genbank { accession \"AB000005\", version 1 }", "genbank { accession \"AB000005\", version 2 }", true, Err(Refusal::IdOrder)),
+        ("o10_tie_acc5v1_acc5v2_u", "genbank { accession \"AB000005\", version 1 }", "genbank { accession \"AB000005\", version 2 }", false, Err(Refusal::IdOrder)),
+        ("o11_gi0F_gi5E_m", "gi 5", "gi 0", true, Ok("Error: (1204.6) [psiblast] Failed to parse location of \nError: (1204.8) [psiblast] \nError: (1204.6) [psiblast] \n")),
+        ("o11_gi0F_gi5E_u", "gi 5", "gi 0", false, Err(Refusal::EmptyRegion)),
+        ("o12_gineg_gi5_m", "gi 5", "gi -3", true, Ok("Error: (1204.6) [psiblast] Failed to parse location of \nError: (1204.8) [psiblast] \nError: (1204.6) [psiblast] \n")),
+        ("o12_gineg_gi5_u", "gi 5", "gi -3", false, Err(Refusal::EmptyRegion)),
+        ("o13_refseq5F_gb3E_m", "genbank { accession \"AB000003\" }", "other { accession \"NP_000005\" }", true, Ok("Error: (1204.6) [psiblast] Failed to parse location of \nError: (1204.8) [psiblast] \nError: (1204.6) [psiblast] \n")),
+        ("o13_refseq5F_gb3E_u", "genbank { accession \"AB000003\" }", "other { accession \"NP_000005\" }", false, Err(Refusal::EmptyRegion)),
+        ("o14_tie_local_pdb_m", "pdb { mol \"1ABC\" }", "local str \"Query_1\"", true, Err(Refusal::IdOrder)),
+        ("o14_tie_local_pdb_u", "pdb { mol \"1ABC\" }", "local str \"Query_1\"", false, Err(Refusal::IdOrder)),
+    ] {
+        let row = table(1, &format!("{{ header {{ field-id location }}, data loc {{ mix {{ int {{ from 9, to 4, id {y} }}, int {{ from 0, to 5, strand minus, id {x} }}, int {{ from 10, to 9, strand minus, id {x} }} }} }} }}"));
+        let mut annots = vec![row];
+        if muted {
+            annots.insert(0, failing_feature());
+        }
+        let annots: Vec<&str> = annots.iter().map(String::as_str).collect();
+        let outcome = index(&annots).map(|outcome| {
+            assert_eq!(outcome.abort, None, "{case}");
+            String::from_utf8(outcome.posts).unwrap()
+        });
+        assert_eq!(outcome, expected.map(str::to_string), "{case}");
     }
 }

@@ -73,11 +73,12 @@ pub(crate) enum Refusal {
     ScaledOverflow,
     /// A `field-id` whose difference with the column group's base overflows `int`.
     FieldIdOverflow,
-    /// Two Seq-ids of one table row's location with different messages (their order is that of
-    /// memory addresses).
+    /// Two Seq-ids of one table row's location with different messages whose order is that of
+    /// memory addresses (one `m_Packed`).
     IdOrder,
-    /// Seq-ids of one location that NCBI's Seq-id trees may take for one.
-    AmbiguousIds,
+    /// Two `giim` Seq-ids of one number in one location (or one discontinuous alignment), which
+    /// NCBI takes for one Seq-id or two by the `giim` Seq-ids it holds at the time.
+    GiimIds,
     /// A feature table of more rows than `table::ROWS_LIMIT`.
     TableRows,
     /// A Std-seg `dim` above `align::STD_DIM_LIMIT`.
@@ -98,8 +99,8 @@ impl Refusal {
             Refusal::DeltaOverflow => "a PSSM query whose annot has a Seq-table int-delta column whose sums leave their integer type (a signed overflow in NCBI's object manager)",
             Refusal::ScaledOverflow => "a PSSM query whose annot has a Seq-table int-scaled column whose values leave Int8 (a signed overflow in NCBI's object manager)",
             Refusal::FieldIdOverflow => "a PSSM query whose annot has a Seq-table column field-id below -2147483638 (a signed overflow in NCBI's object manager)",
-            Refusal::IdOrder => "a PSSM query whose annot has a Seq-table row location whose Seq-ids get different messages (NCBI's object manager writes them in the order of memory addresses)",
-            Refusal::AmbiguousIds => "a PSSM query whose annot has a location with two Seq-ids other than local ids and gis (NCBI's object manager may take them for one, which LOSAT does not model)",
+            Refusal::IdOrder => "a PSSM query whose annot has a Seq-table row location whose Seq-ids get different messages and have no different gi, accession or general id numbers (NCBI's object manager writes them in the order of memory addresses)",
+            Refusal::GiimIds => "a PSSM query whose annot has a location with two giim Seq-ids of one id number (NCBI's object manager takes them for one Seq-id or two depending on the giim Seq-ids it holds at that time)",
             Refusal::TableRows => "a PSSM query whose annot has a feature Seq-table of more than 10000000 rows (NCBI's object manager runs out of memory depending on the machine)",
             Refusal::StdDim => "a PSSM query whose annot has a Std-seg dim above 1000000 (NCBI's object manager allocates its rows depending on the machine's memory)",
         }
@@ -274,7 +275,7 @@ impl Indexer<'_> {
                     for graph in graphs.items() {
                         let loc = graph.get("loc").expect("mandatory");
                         let map = HandleRangeMap::of_location(loc, Mode::None);
-                        self.refuse_empty(&map, Event::Graph)?;
+                        self.refuse_empty(std::slice::from_ref(&map), Event::Graph)?;
                     }
                 }
                 Some(("locs", locs)) => self.index_locs(*annot, *locs)?,
@@ -395,9 +396,9 @@ impl Indexer<'_> {
     //     }
     // ```
     // The mapped range is never empty here (no "Failed to parse location"): an alignment posts
-    // only its sizes' warnings, or its empty regions (refused). A Seq-id that NCBI's trees take for
-    // another one LOSAT keeps apart: an empty range then is a refusal, which NCBI's union of the two
-    // could avoid, never a missing message.
+    // only its sizes' warnings, or its empty regions (refused), in any order of its Seq-ids. The
+    // Seq-ids of one row, and for a discontinuous alignment of all its rows, are one handle as
+    // NCBI's trees take them (`Handle`).
     fn index_align(&mut self, align: V<'_>) -> Result<(), Stop> {
         let segs = align.get("segs").map(V::choice);
         if let Some(("disc", subs)) = segs {
@@ -406,6 +407,9 @@ impl Indexer<'_> {
                 let mut rows = Vec::new();
                 align::process_align(self, &mut rows, sub)?;
                 all.push(rows);
+            }
+            if HandleRangeMap::giim_repeats(all.iter().flatten()) {
+                return Err(Stop::Refuse(Refusal::GiimIds));
             }
             let mut total: Vec<(&Handle, Range)> = Vec::new();
             for map in all.iter().flatten() {
@@ -424,7 +428,7 @@ impl Indexer<'_> {
             let mut rows = Vec::new();
             align::process_align(self, &mut rows, align)?;
             for map in &rows {
-                self.refuse_empty(map, Event::Align)?;
+                self.refuse_empty(std::slice::from_ref(map), Event::Align)?;
             }
         }
         Ok(())
@@ -476,16 +480,22 @@ impl Indexer<'_> {
         });
         if let Some(region) = region {
             let map = HandleRangeMap::of_location(region, Mode::None);
-            self.refuse_empty(&map, Event::Locs)?;
+            self.refuse_empty(std::slice::from_ref(&map), Event::Locs)?;
         }
         Ok(())
     }
 
     /// An empty region of an annotation whose index maps only non-empty ranges (a graph, an
-    /// alignment's row, a location set; `event` names its message): refused.
-    fn refuse_empty(&mut self, map: &HandleRangeMap, event: Event) -> Result<(), Stop> {
+    /// alignment's row, a location set; `event` names its message): refused, in any order of the
+    /// Seq-ids.
+    fn refuse_empty(&mut self, maps: &[HandleRangeMap], event: Event) -> Result<(), Stop> {
         debug_assert!(matches!(event, Event::Graph | Event::Align | Event::Locs));
-        if map.map.iter().any(|(_, hr)| hr.overlapping().is_empty()) {
+        if HandleRangeMap::giim_repeats(maps) {
+            return Err(Stop::Refuse(Refusal::GiimIds));
+        }
+        let empty =
+            |map: &HandleRangeMap| map.map.iter().any(|(_, hr)| hr.overlapping().is_empty());
+        if maps.iter().any(empty) {
             return Err(self.empty_region());
         }
         Ok(())
@@ -512,47 +522,53 @@ impl Indexer<'_> {
     // `index_feature`), 1048-1080 and 1119-1150 (a table's location and a table row's location:
     // the same loop with `ERR_POST_X(7, ...)` and `ERR_POST_X(8, "Empty region in "
     // <<GetDescription()<< " Seq-table row "<<row)`)
-    // Each Seq-id of the map: its overlapping range, or for a circular one its two ranges, mapped
-    // (`x_map`). The Seq-ids come in the order of NCBI's map, by `CSeq_id_Handle`, which for most
-    // Seq-ids is the order of their memory addresses: LOSAT keeps them in the order they came and
-    // refuses a map whose order would change the messages. Every message of a feature or a table
-    // location after an empty region's refusal is a "Failed to parse location" (whose text depends
-    // only on how many came before); a row's empty region after the stream failed is its header
-    // alone, `Error: (1204.8)`, whose order with another Seq-id's `Error: (1204.6)` is the
-    // addresses'.
+    // Each Seq-id of the map in NCBI's order (`HandleRangeMap::ncbi_order`): its overlapping range,
+    // or for a circular one its two ranges, mapped (`x_map`); an empty one posts "Empty region"
+    // (refused: a memory address, or after the stream failed the object's ASN.1 text), except for
+    // a table row after the stream failed, whose post is its header alone, `Error: (1204.8)`.
+    // Where NCBI's order is that of memory addresses (Seq-ids of one `m_Packed`: `m_Info <
+    // handle.m_Info`, seq_id_handle.hpp:206, quoted at `HandleRangeMap::ncbi_order`), only such a
+    // row's order changes the messages: its empty Seq-id's post (`Error: (1204.8)` after the
+    // stream failed, "Empty region in <address>" before) and another's "Failed to parse location"
+    // (`Error: (1204.6)`) in one group are refused (`om/` cases `s_o09_tie_gi5_acc5_u` and
+    // `s_o10_tie_acc5v1_acc5v2_u`: psiblast and tblastn wrote them in different orders); any other
+    // messages of a group are the same in every order (the 1204.6 messages differ only by how many
+    // came before, an empty region of another kind is refused in every order).
     fn map_location(&mut self, map: &HandleRangeMap, event: Event) -> Result<(), Stop> {
-        if map.ambiguous() {
-            return Err(Stop::Refuse(Refusal::AmbiguousIds));
+        if HandleRangeMap::giim_repeats([map]) {
+            return Err(Stop::Refuse(Refusal::GiimIds));
         }
         let empty = |hr: &range::HandleRange| hr.overlapping().is_empty();
-        if map.map.iter().any(|(_, hr)| empty(hr)) {
-            if event != Event::Row || !self.muted {
-                return Err(self.empty_region());
-            }
-            let fails = map.map.iter().any(|(_, hr)| {
-                !empty(hr)
-                    && if hr.has_gaps() && hr.circular {
-                        hr.circular_start().is_empty() || hr.circular_end().is_empty()
-                    } else {
-                        false
-                    }
-            });
-            if fails {
+        let fails = |hr: &range::HandleRange| {
+            !empty(hr)
+                && hr.has_gaps()
+                && hr.circular
+                && (hr.circular_start().is_empty() || hr.circular_end().is_empty())
+        };
+        for group in map.ncbi_order() {
+            if event == Event::Row
+                && group.iter().any(|&at| empty(&map.map[at].1))
+                && group.iter().any(|&at| fails(&map.map[at].1))
+            {
                 return Err(Stop::Refuse(Refusal::IdOrder));
             }
-        }
-        for (handle, hr) in &map.map {
-            let range = hr.overlapping();
-            if range.is_empty() {
-                // After the stream failed (above): the header alone.
-                self.post(Severity::Error, "1204.8", b"");
-                continue;
-            }
-            if hr.has_gaps() && hr.circular {
-                self.x_map(hr.circular_start(), Some(handle.clone()))?;
-                self.x_map(hr.circular_end(), Some(handle.clone()))?;
-            } else {
-                self.x_map(range, Some(handle.clone()))?;
+            for at in group {
+                let (handle, hr) = &map.map[at];
+                let range = hr.overlapping();
+                if range.is_empty() {
+                    if event != Event::Row || !self.muted {
+                        return Err(self.empty_region());
+                    }
+                    // After the stream failed: the header alone.
+                    self.post(Severity::Error, "1204.8", b"");
+                    continue;
+                }
+                if hr.has_gaps() && hr.circular {
+                    self.x_map(hr.circular_start(), Some(handle.clone()))?;
+                    self.x_map(hr.circular_end(), Some(handle.clone()))?;
+                } else {
+                    self.x_map(range, Some(handle.clone()))?;
+                }
             }
         }
         Ok(())

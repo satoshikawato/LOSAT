@@ -8,5 +8,8 @@
   LOSAT skipped are kept (line RG item D3-1).
   A query's `annot` (feature tables, alignments, graphs, locations, Seq-tables) is indexed as NCBI's object manager
   indexes it: the PSSM is searched, with NCBI's messages and errors where NCBI writes them; the few cases whose
-  NCBI output names a memory address or depends on the machine are refused, each with its reason. A PSSM file that
+  NCBI output names a memory address or depends on the machine are refused, each with its reason. The Seq-ids of
+  the annotations are one sequence where NCBI's Seq-id index takes them for one (accessions, names, local and
+  general ids and patent numbers in any letter case; versions and releases exactly), and their messages come in
+  NCBI's order (by gi, accession and general id number). A PSSM file that
   starts with a UTF-8 byte order mark gets NCBI's "Unrecognized format for PSSM".

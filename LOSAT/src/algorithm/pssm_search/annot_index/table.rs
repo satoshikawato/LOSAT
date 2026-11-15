@@ -501,7 +501,7 @@ impl<'a> LocColumns<'a> {
             self.default_id = Some(Handle::of(single_get_id(default)?.seq_id()));
         }
         if let Some(default) = self.gi.and_then(Column::default) {
-            self.default_id = Some(Handle::Gi(single_get(default, Want::Int8)?));
+            self.default_id = Some(Handle::gi(single_get(default, Want::Int8)?));
         }
         if self.to.is_some() {
             if self.from.is_none() {
@@ -1078,7 +1078,7 @@ impl Indexer<'_> {
                     .map(|id| Handle::of(id.seq_id()));
             }
         } else if let Some(gi) = cols.gi.filter(|gi| gi.data().is_some()) {
-            handle = self.column_try_get(gi, row, Want::Int8)?.map(Handle::Gi);
+            handle = self.column_try_get(gi, row, Want::Int8)?.map(Handle::gi);
         }
         let handle = handle.or_else(|| cols.default_id.clone());
         let range = match cols.from {

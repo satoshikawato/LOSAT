@@ -4,6 +4,9 @@
 //! overlapping range.
 
 use super::view::V;
+use crate::seqid::mask_handle::{
+    mask_handle_key, mask_handle_order, mask_handle_packed, TreeHandle,
+};
 use crate::seqid::ParsedSeqId;
 
 /// `GetPositionMax()` of `TSeqPos`.
@@ -453,50 +456,32 @@ impl HandleRange {
     }
 }
 
-/// `CSeq_id_Handle`: the key under which the object manager keeps a Seq-id. A local string and
-/// a gi have NCBI's identity exactly (the local tree's `PEqualNocase` map, seq_id_tree.hpp:767; a
-/// gi is packed by its value), and so has a text Seq-id without accession and name, which is
-/// another handle each time (`Unique`); any other Seq-id is its value, and two different ones of
-/// them in one location are refused (`HandleRangeMap::ambiguous`), as NCBI's trees can take some
-/// for one (case-insensitive accessions, names, versions).
+/// `CSeq_id_Handle`: the key under which the object manager keeps a Seq-id's ranges
+/// (`CSeq_id_Handle::GetHandle`, the tree of the Seq-id's alternative). Two Seq-ids are one handle
+/// exactly when `seqid::mask_handle::mask_handle_key` gives them one key (NCBI's identity of every
+/// alternative: accessions, names, local and `general` strings, patent numbers without case,
+/// versions and releases exactly, GenBank/EMBL/DDBJ accessions alone across the three; `om/` cases
+/// `s_i*` of line RG D3-1); a text Seq-id without accession and name, which the tree finds nowhere,
+/// is a new handle at each lookup (`Unique`), and so is a `giim` Seq-id here (`Giim`: what NCBI
+/// finds for it depends on the `giim` handles alive, `HandleRangeMap::giim_repeats`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Handle {
-    Gi(i64),
-    LocalId(i32),
-    /// The string in ASCII lower case.
-    LocalStr(Vec<u8>),
-    /// A handle that no other Seq-id finds.
+    /// The handle of `mask_handle_key`, with its `m_Packed` (`mask_handle_packed`).
+    Key { key: Vec<u8>, packed: i64 },
+    /// A handle that no other lookup finds.
     Unique(u64),
-    Other(ParsedSeqId),
+    /// The lookup of a `giim` Seq-id of the number `id`.
+    Giim { id: i32, lookup: u64 },
 }
 
-/// The handles made of text Seq-ids without accession and name, numbered.
-static UNIQUE_HANDLES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// The lookups of Seq-ids that no other lookup finds, numbered.
+static LOOKUPS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1998-2011
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1186-1203 (a text Seq-id that
+// does not pack: `x_FindStrInfo` looks in `m_ByAcc` when the accession is set, else in `m_ByName`,
+// else nowhere; the new info is put in the maps of what is set, so one without accession and name
+// is never found again)
 // ```c++
-// CSeq_id_Handle CSeq_id_Local_Tree::FindOrCreate(const CSeq_id& id)
-// {
-//     const CObject_id& oid = id.GetLocal();
-//     TWriteLockGuard guard(m_TreeLock);
-//     CSeq_id_Local_Info*& info = oid.IsStr()? m_ByStr[oid.GetStr()]: m_ById[oid.GetId()];
-// ```
-// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1118-1130, 1186-1203
-// ```c++
-// CSeq_id_Textseq_Tree::x_FindStrInfo(CSeq_id::E_Choice type,
-//                                     const CTextseq_id& tid) const
-// {
-//     if ( tid.IsSetAccession() ) {
-//         return x_FindStrInfo(m_ByAcc, tid.GetAccession(), type, tid);
-//     }
-//     else if ( tid.IsSetName() ) {
-//         return x_FindStrInfo(m_ByName, tid.GetName(), type, tid);
-//     }
-//     else {
-//         return 0;
-//     }
-// }
-// ...
 //     CSeq_id_Textseq_PlainInfo* info = x_FindStrInfo(id.Which(), tid);
 //     CSeq_id_Handle::TVariant variant = 0;
 //     if ( !info ) {
@@ -510,35 +495,59 @@ static UNIQUE_HANDLES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU
 //         }
 //     }
 // ```
-// A text Seq-id without accession and name is in neither map: each `GetHandle` makes a new one
-// (NCBI BLAST+ 2.17.0, probe p4 r0261: `pir { }` in two exons of a Spliced-seg, the empty range
-// of one posts `Empty region`).
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:2926-2941, 2953-2964 (a `giim`
+// Seq-id finds the first held handle of its number whose Seq-id is NOT `Equals` to it, else makes
+// one: two equal `giim` Seq-ids are two handles, two different ones of a number one handle, unless
+// other `giim` handles of the number are alive; `om/` cases `s_i72_giim_same`, `s_i73_giim_db_diff`)
+// ```c++
+//     TIdMap::const_iterator id_it = m_IdMap.find(gid.GetId());
+//     if (id_it == m_IdMap.end())
+//         return 0;
+//     ITERATE (TGiimList, dbr_it, id_it->second) {
+//         CConstRef<CSeq_id> id = (*dbr_it)->GetSeqId();
+//         const CGiimport_id& gid2 = id->GetGiim();
+//         // Both Db and Release must be equal
+//         if ( !gid.Equals(gid2) ) {
+//             return *dbr_it;
+//         }
+//     }
+// ...
+//     CSeq_id_Info* info = x_FindInfo(gid);
+//     if ( !info ) {
+//         info = CreateInfo(id);
+//         m_IdMap[gid.GetId()].push_back(info);
+//     }
+//     return CSeq_id_Handle(info);
+// ```
 impl Handle {
     /// `CSeq_id_Handle::GetHandle(id)`.
     pub(super) fn of(id: &ParsedSeqId) -> Handle {
-        use crate::seqid::model::ObjectId;
-        match id {
-            ParsedSeqId::Gi(gi) => Handle::Gi(*gi),
-            ParsedSeqId::Local(ObjectId::Id(n)) => Handle::LocalId(*n),
-            ParsedSeqId::Local(ObjectId::Str(s)) => Handle::LocalStr(s.to_ascii_lowercase()),
-            ParsedSeqId::Genbank(t)
-            | ParsedSeqId::Embl(t)
-            | ParsedSeqId::Pir(t)
-            | ParsedSeqId::Swissprot(t)
-            | ParsedSeqId::Other(t)
-            | ParsedSeqId::Ddbj(t)
-            | ParsedSeqId::Prf(t)
-            | ParsedSeqId::Tpg(t)
-            | ParsedSeqId::Tpe(t)
-            | ParsedSeqId::Tpd(t)
-            | ParsedSeqId::Gpipe(t)
-            | ParsedSeqId::NamedAnnotTrack(t)
-                if t.accession.is_none() && t.name.is_none() =>
-            {
-                Handle::Unique(UNIQUE_HANDLES.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
-            }
-            other => Handle::Other(other.clone()),
+        let lookup = || LOOKUPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        match mask_handle_key(id) {
+            Ok(Some(key)) => Handle::Key {
+                key,
+                packed: mask_handle_packed(id),
+            },
+            Ok(None) => Handle::Unique(lookup()),
+            Err(TreeHandle::Giim { id }) => Handle::Giim {
+                id,
+                lookup: lookup(),
+            },
         }
+    }
+
+    /// `CSeq_id_Handle::GetGiHandle(gi)`.
+    pub(super) fn gi(gi: i64) -> Handle {
+        Handle::of(&ParsedSeqId::Gi(gi))
+    }
+
+    /// The handle's place in `CSeq_id_Handle::operator<` among handles of another `m_Packed`
+    /// (`mask_handle_order`); handles of one `m_Packed` follow the addresses of their infos.
+    pub(super) fn order(&self) -> u64 {
+        mask_handle_order(match self {
+            Handle::Key { packed, .. } => *packed,
+            Handle::Unique(_) | Handle::Giim { .. } => 0,
+        })
     }
 }
 
@@ -553,9 +562,8 @@ pub(super) enum Mode {
     CircularRna,
 }
 
-/// `CHandleRangeMap`: a location's ranges by Seq-id, in the order the Seq-ids came (the order of
-/// NCBI's map, by `CSeq_id_Handle`, is that of packed values and then of memory addresses; the
-/// callers do not depend on it, `annot_index` checks where it would).
+/// `CHandleRangeMap`: a location's ranges by Seq-id, in the order the Seq-ids came; NCBI's map
+/// iterates them by `CSeq_id_Handle::operator<` (`HandleRangeMap::ncbi_order`).
 #[derive(Default, Debug)]
 pub(super) struct HandleRangeMap {
     pub(super) map: Vec<(Handle, HandleRange)>,
@@ -779,14 +787,61 @@ impl HandleRangeMap {
         self.add(Handle::of(id), range, strand, state);
     }
 
-    /// Whether two different Seq-ids of the map, neither a local id nor a gi, may be one Seq-id
-    /// for NCBI's object manager (see `Handle`).
-    pub(super) fn ambiguous(&self) -> bool {
-        self.map
-            .iter()
-            .filter(|(handle, _)| matches!(handle, Handle::Other(_)))
-            .count()
-            > 1
+    /// Whether the maps `maps` hold two lookups of `giim` Seq-ids of one number: NCBI takes them
+    /// for one handle or two by the `giim` handles of that number alive at the time (`Handle`),
+    /// which come from the query's Seq-ids, the ranges mapped before and the maps that the object
+    /// manager keeps from one annotation object to the next (`x_InitFeatKeys` reuses its
+    /// `hrmaps` and `key`, seq_annot_info.cpp:726-729).
+    pub(super) fn giim_repeats<'m>(maps: impl IntoIterator<Item = &'m HandleRangeMap>) -> bool {
+        let mut numbers = Vec::new();
+        for map in maps {
+            for (handle, _) in &map.map {
+                if let Handle::Giim { id, .. } = handle {
+                    if numbers.contains(id) {
+                        return true;
+                    }
+                    numbers.push(*id);
+                }
+            }
+        }
+        false
+    }
+
+    // NCBI reference (598d8ae6): c++/include/objmgr/impl/handle_range_map.hpp:91 (the map's order
+    // is `CSeq_id_Handle`'s `operator<`)
+    // ```c++
+    //     typedef map<CSeq_id_Handle, CHandleRange> TLocMap;
+    // ```
+    // NCBI reference (598d8ae6): c++/include/objects/seq/seq_id_handle.hpp:201-207
+    // ```c++
+    //     bool operator<  (const CSeq_id_Handle& handle) const
+    //         {
+    //             // Packed (m_Packed != 0) first:
+    //             // zeroes are converted to a highest unsigned value by decrement.
+    //             TUintId p1 = INT_ID_TO(TUintId, m_Packed-1);
+    //             TUintId p2 = INT_ID_TO(TUintId, handle.m_Packed-1);
+    //             return p1 < p2 || (p1 == p2 && m_Info < handle.m_Info);
+    //         }
+    // ```
+    /// The map's entries (indexes into `map`) in NCBI's order, in groups of one `m_Packed`: the
+    /// groups in NCBI's order, the handles of a group in the order of their infos' addresses,
+    /// which LOSAT does not know (it keeps the order they came in). A gi and the packed accessions
+    /// and `general` tags are ordered by their numbers (`om/` cases `s_o*`); the handles of one
+    /// number, and every unpacked handle (local, PDB, patent, a text Seq-id with a name or a
+    /// release or whose accession does not pack, ...), are one group.
+    pub(super) fn ncbi_order(&self) -> Vec<Vec<usize>> {
+        let mut entries: Vec<usize> = (0..self.map.len()).collect();
+        entries.sort_by_key(|&at| self.map[at].0.order());
+        let mut groups: Vec<Vec<usize>> = Vec::new();
+        for at in entries {
+            match groups.last_mut() {
+                Some(group) if self.map[group[0]].0.order() == self.map[at].0.order() => {
+                    group.push(at);
+                }
+                _ => groups.push(vec![at]),
+            }
+        }
+        groups
     }
 }
 

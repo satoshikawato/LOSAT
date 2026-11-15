@@ -110,7 +110,7 @@ fn a_map_marks_the_ranges_between_seq_ids() {
         Mode::None,
     );
     assert_eq!(m.map.len(), 2);
-    assert_eq!(m.map[1].0, Handle::LocalId(1));
+    assert_eq!(m.map[1].0, Handle::of(&ParsedSeqId::Local(ObjectId::Id(1))));
     assert!(!m.map[1].1.overlapping().is_empty());
     // f38: `trans-splicing` sets no such marks.
     let m = map(
@@ -131,21 +131,20 @@ fn a_map_marks_the_ranges_between_seq_ids() {
         Mode::None,
     );
     assert!(m.map[1].1.overlapping().is_empty());
-    // A local string is NCBI's case-insensitive key; two other Seq-ids are ambiguous.
+    // A local string is NCBI's case-insensitive key, and so is an accession (r_ambiguous_ids).
     let m = map(
         "mix { int { from 0, to 5, id local str \"Q\" }, int { from 10, to 12, id local str \"q\" } }",
         Mode::None,
     );
     assert_eq!(m.map.len(), 1);
-    assert!(!m.ambiguous());
-    assert!(map(
-        "mix { int { from 0, to 5, id genbank { accession \"A\" } }, int { from 0, to 5, id embl { accession \"B\" } } }",
-        Mode::None
-    )
-    .ambiguous());
+    let m = map(
+        "mix { int { from 0, to 5, id genbank { accession \"A\" } }, int { from 0, to 5, id genbank { accession \"a\" } } }",
+        Mode::None,
+    );
+    assert_eq!(m.map.len(), 1);
     assert_eq!(
         Handle::of(&ParsedSeqId::Local(ObjectId::Str(b"Query_1".to_vec()))),
-        Handle::LocalStr(b"query_1".to_vec())
+        Handle::of(&ParsedSeqId::Local(ObjectId::Str(b"query_1".to_vec())))
     );
     // `packed-pnt` (f18): the point 4294967295 is empty; `empty` is empty; `whole` is whole.
     assert!(map(
@@ -165,4 +164,331 @@ fn a_map_marks_the_ranges_between_seq_ids() {
         Range::WHOLE
     );
     assert!(map("feat local id 1", Mode::None).map.is_empty());
+}
+
+// The Seq-id pairs of line RG D3-1's `om/` cases `s_i*` (NCBI BLAST+ 2.17.0, psiblast and tblastn:
+// a feature table row `mix { int { from 10, to 9, id Y }, int { from 0, to 5, id X } }` after the
+// stream failed posts `Error: (1204.8)` exactly when Y and X are two handles).
+#[test]
+fn seq_ids_are_one_handle_as_ncbi_trees_take_them() {
+    for (case, y, x, one) in [
+        (
+            "i01_gb_packed_case",
+            "genbank { accession \"AB123456\" }",
+            "genbank { accession \"ab123456\" }",
+            true,
+        ),
+        (
+            "i02_gb_plain_case",
+            "genbank { accession \"ABCDEFGH\" }",
+            "genbank { accession \"abcdefgh\" }",
+            true,
+        ),
+        (
+            "i03_gb_ver_absent",
+            "genbank { accession \"AB123456\", version 1 }",
+            "genbank { accession \"AB123456\" }",
+            false,
+        ),
+        (
+            "i04_gb_ver_1_2",
+            "genbank { accession \"AB123456\", version 1 }",
+            "genbank { accession \"AB123456\", version 2 }",
+            false,
+        ),
+        (
+            "i05_gb_ver_case",
+            "genbank { accession \"AB123456\", version 2 }",
+            "genbank { accession \"ab123456\", version 2 }",
+            true,
+        ),
+        (
+            "i06_gb_name_case",
+            "genbank { name \"LOCUSX\" }",
+            "genbank { name \"locusx\" }",
+            true,
+        ),
+        (
+            "i07_gb_acc_vs_accname",
+            "genbank { accession \"AB123456\" }",
+            "genbank { name \"LOCUSX\", accession \"AB123456\" }",
+            false,
+        ),
+        (
+            "i08_gb_accname_case",
+            "genbank { name \"LOCUSX\", accession \"AB123456\" }",
+            "genbank { name \"locusx\", accession \"ab123456\" }",
+            true,
+        ),
+        (
+            "i09_gb_accname_name_diff",
+            "genbank { name \"LOCUSX\", accession \"AB123456\" }",
+            "genbank { name \"LOCUSY\", accession \"AB123456\" }",
+            false,
+        ),
+        (
+            "i10_gb_name_vs_accname",
+            "genbank { name \"LOCUSX\" }",
+            "genbank { name \"LOCUSX\", accession \"AB123456\" }",
+            false,
+        ),
+        (
+            "i11_gb_embl_packed",
+            "genbank { accession \"AB123456\" }",
+            "embl { accession \"AB123456\" }",
+            true,
+        ),
+        (
+            "i12_gb_ddbj_packed_ver",
+            "genbank { accession \"AB123456\", version 1 }",
+            "ddbj { accession \"ab123456\", version 1 }",
+            true,
+        ),
+        (
+            "i13_gb_embl_plain_name",
+            "genbank { name \"N\", accession \"AB123456\" }",
+            "embl { name \"N\", accession \"AB123456\" }",
+            false,
+        ),
+        (
+            "i14_gb_embl_plain_acc",
+            "genbank { accession \"ABCDEFGH\" }",
+            "embl { accession \"ABCDEFGH\" }",
+            false,
+        ),
+        (
+            "i15_gb_release_case",
+            "genbank { accession \"AB123456\", release \"rel\" }",
+            "genbank { accession \"AB123456\", release \"REL\" }",
+            false,
+        ),
+        (
+            "i16_gb_release_same",
+            "genbank { accession \"AB123456\", release \"rel\" }",
+            "genbank { accession \"ab123456\", release \"rel\" }",
+            true,
+        ),
+        (
+            "i17_other_packed_case",
+            "other { accession \"NP_000123\" }",
+            "other { accession \"np_000123\" }",
+            true,
+        ),
+        (
+            "i18_other_ver_absent",
+            "other { accession \"NP_000123\", version 1 }",
+            "other { accession \"NP_000123\" }",
+            false,
+        ),
+        (
+            "i19_tpg_vs_gb",
+            "tpg { accession \"AB123456\" }",
+            "genbank { accession \"AB123456\" }",
+            false,
+        ),
+        (
+            "i20_sp_case",
+            "swissprot { accession \"P12345\" }",
+            "swissprot { accession \"p12345\" }",
+            true,
+        ),
+        (
+            "i21_sp_release",
+            "swissprot { accession \"P12345\", release \"reviewed\" }",
+            "swissprot { accession \"P12345\" }",
+            false,
+        ),
+        (
+            "i22_sp_name_case",
+            "swissprot { name \"ABC_HUMAN\" }",
+            "swissprot { name \"abc_human\" }",
+            true,
+        ),
+        (
+            "i23_gb_zeros_case",
+            "genbank { accession \"AB0001234\" }",
+            "genbank { accession \"ab0001234\" }",
+            true,
+        ),
+        (
+            "i24_gb_zeros_diff",
+            "genbank { accession \"AB0001234\" }",
+            "genbank { accession \"AB001234\" }",
+            false,
+        ),
+        (
+            "i25_prf_name_case",
+            "prf { name \"ABC\" }",
+            "prf { name \"abc\" }",
+            true,
+        ),
+        ("i26_pir_empty", "pir { }", "pir { }", false),
+        (
+            "i30_gen_str_case",
+            "general { db \"TESTDB\", tag str \"abc\" }",
+            "general { db \"testdb\", tag str \"ABC\" }",
+            true,
+        ),
+        (
+            "i31_gen_strpacked_case",
+            "general { db \"TESTDB\", tag str \"abc123\" }",
+            "general { db \"testdb\", tag str \"ABC123\" }",
+            true,
+        ),
+        (
+            "i32_gen_str_vs_id",
+            "general { db \"TESTDB\", tag str \"5\" }",
+            "general { db \"TESTDB\", tag id 5 }",
+            false,
+        ),
+        (
+            "i33_gen_id_db_case",
+            "general { db \"TESTDB\", tag id 5 }",
+            "general { db \"testdb\", tag id 5 }",
+            true,
+        ),
+        (
+            "i34_gen_str_zero_digits",
+            "general { db \"TESTDB\", tag str \"0123\" }",
+            "general { db \"TESTDB\", tag str \"123\" }",
+            false,
+        ),
+        (
+            "i40_local_str_case",
+            "local str \"abc\"",
+            "local str \"ABC\"",
+            true,
+        ),
+        (
+            "i41_local_str_vs_id",
+            "local str \"5\"",
+            "local id 5",
+            false,
+        ),
+        (
+            "i42_local_query_case",
+            "local str \"query_1\"",
+            "local str \"Query_1\"",
+            true,
+        ),
+        (
+            "i50_pdb_mol_case",
+            "pdb { mol \"1abc\" }",
+            "pdb { mol \"1ABC\" }",
+            true,
+        ),
+        (
+            "i51_pdb_mol_first",
+            "pdb { mol \"abcd\" }",
+            "pdb { mol \"Abcd\" }",
+            false,
+        ),
+        (
+            "i52_pdb_chain_vs_chainid",
+            "pdb { mol \"1ABC\", chain 65 }",
+            "pdb { mol \"1ABC\", chain-id \"A\" }",
+            true,
+        ),
+        (
+            "i53_pdb_chainid_case",
+            "pdb { mol \"1ABC\", chain-id \"A\" }",
+            "pdb { mol \"1ABC\", chain-id \"a\" }",
+            false,
+        ),
+        (
+            "i54_pdb_chain_default",
+            "pdb { mol \"1ABC\" }",
+            "pdb { mol \"1ABC\", chain 32 }",
+            false,
+        ),
+        (
+            "i55_pdb_rel_std",
+            "pdb { mol \"1ABC\", rel std { year 2000 } }",
+            "pdb { mol \"1ABC\" }",
+            true,
+        ),
+        (
+            "i56_pdb_rel_str",
+            "pdb { mol \"1ABC\", rel str \"x\" }",
+            "pdb { mol \"1ABC\" }",
+            false,
+        ),
+        (
+            "i60_pat_case",
+            "patent { seqid 1, cit { country \"US\", id number \"ABC123\" } }",
+            "patent { seqid 1, cit { country \"us\", id number \"abc123\" } }",
+            true,
+        ),
+        (
+            "i61_pat_number_vs_app",
+            "patent { seqid 1, cit { country \"US\", id number \"123\" } }",
+            "patent { seqid 1, cit { country \"US\", id app-number \"123\" } }",
+            false,
+        ),
+        (
+            "i62_pat_seqid",
+            "patent { seqid 1, cit { country \"US\", id number \"123\" } }",
+            "patent { seqid 2, cit { country \"US\", id number \"123\" } }",
+            false,
+        ),
+        (
+            "i63_pat_doctype",
+            "patent { seqid 1, cit { country \"US\", id number \"123\", doc-type \"x\" } }",
+            "patent { seqid 1, cit { country \"US\", id number \"123\" } }",
+            true,
+        ),
+        (
+            "i70_gi_vs_acc",
+            "gi 5",
+            "genbank { accession \"AB000005\" }",
+            false,
+        ),
+        ("i71_gibbsq_vs_gibbmt", "gibbsq 5", "gibbmt 5", false),
+    ] {
+        let m = map(
+            &format!("mix {{ int {{ from 10, to 9, id {y} }}, int {{ from 0, to 5, id {x} }} }}"),
+            Mode::None,
+        );
+        assert_eq!(m.map.len() == 1, one, "{case}");
+    }
+    // A `giim` Seq-id is a handle of its own at each lookup (what NCBI finds depends on the
+    // `giim` handles alive: `giim_repeats`).
+    let m = map(
+        "mix { int { from 0, to 5, id giim { id 5, db \"x\" } }, int { from 0, to 5, id giim { id 5, db \"y\" } }, int { from 0, to 5, id giim { id 6 } } }",
+        Mode::None,
+    );
+    assert_eq!(m.map.len(), 3);
+    assert!(HandleRangeMap::giim_repeats([&m]));
+    let m = map(
+        "mix { int { from 0, to 5, id giim { id 5 } }, int { from 0, to 5, id giim { id 6 } } }",
+        Mode::None,
+    );
+    assert!(!HandleRangeMap::giim_repeats([&m]));
+}
+
+// NCBI reference (598d8ae6): c++/include/objects/seq/seq_id_handle.hpp:201-207 (quoted at
+// `HandleRangeMap::ncbi_order`): `m_Packed - 1` as an unsigned number, then the info's address.
+#[test]
+fn a_map_iterates_its_seq_ids_by_packed_number() {
+    let m = map(
+        "mix { whole gi 7, whole local str \"Q\", whole gi 5, whole general { db \"D\", tag id 0 }, whole general { db \"D\", tag id -5 }, whole genbank { accession \"AB000003\" }, whole pdb { mol \"1ABC\" }, whole gi 3, whole genbank { accession \"AB000003\", version 1 }, whole general { db \"D\", tag str \"abc004\" }, whole gi 0, whole gi -3 }",
+        Mode::None,
+    );
+    assert_eq!(m.map.len(), 12);
+    // 3: AB000003, gi 3, AB000003.1 (one number: the addresses' order); 4: abc004; 5; 7; then the
+    // negative numbers: general -5 (packed -6), gi -3, general 0 (packed -1); unpacked last: local,
+    // PDB, gi 0.
+    assert_eq!(
+        m.ncbi_order(),
+        vec![
+            vec![5, 7, 8],
+            vec![9],
+            vec![2],
+            vec![0],
+            vec![4],
+            vec![11],
+            vec![3],
+            vec![1, 6, 10]
+        ]
+    );
 }

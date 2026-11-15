@@ -1,7 +1,11 @@
 //! When two Seq-ids are one `CSeq_id_Handle` in NCBI BLAST+ 2.17.0: the identity that
 //! `makeblastdb`'s `CMaskedRangeSet` matches a mask's Seq-id and a database sequence's Seq-ids
 //! by (`c++/src/app/blastdb/masked_range_set.{hpp,cpp}`: a `map<CSeq_id_Handle, CConstRef<CSeq_loc>>`
-//! per algorithm, filled with `CSeq_id_Handle::GetHandle(id)` and looked up the same way).
+//! per algorithm, filled with `CSeq_id_Handle::GetHandle(id)` and looked up the same way), and
+//! that the object manager keys the ranges of a PSSM query's annotations by
+//! (`algorithm::pssm_search::annot_index`, `CHandleRangeMap`; psiblast and tblastn `-in_pssm`
+//! probes of line RG D3-1, `om/` cases `s_i*` and `s_o*`, agree with the rules below and with
+//! [`mask_handle_order`]).
 //!
 //! `CSeq_id_Handle::GetHandle` is `CSeq_id_Mapper::GetHandle` = the `FindOrCreate` of the
 //! alternative's tree (seq_id_handle.cpp:113-116, seq_id_mapper.cpp:121-125); two handles are

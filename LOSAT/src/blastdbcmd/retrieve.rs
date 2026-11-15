@@ -193,11 +193,13 @@ impl<'a> Source<'a> {
 
     fn nucleotide_letters(&self, oid: u32, range: Option<(u32, u32)>) -> Result<Vec<u8>, Stop> {
         let at = self.at(oid)?;
-        let (from, to) = match range {
-            Some((from, to)) => (from as usize, to as usize + 1),
-            None => (0, self.db.nucleotide_length_at(at)?),
-        };
-        Ok(self.db.nucleotide_iupac_range_at(at, from, to)?)
+        Ok(match range {
+            Some((from, to)) => {
+                self.db
+                    .nucleotide_iupac_range_at(at, from as usize, to as usize + 1)?
+            }
+            None => self.db.nucleotide_iupac_at(at)?,
+        })
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2234-2242

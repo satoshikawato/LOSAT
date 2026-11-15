@@ -758,6 +758,14 @@ impl Volume {
         self.nucleotide_iupac_range_with(oid, ordinal, from, to, &ambiguity)
     }
 
+    /// The IUPAC letters of the whole nucleotide `oid` (volume-relative; `ordinal` its database
+    /// ordinal id): [`Volume::nucleotide_iupac_range`] of `[0, length)` with the length that
+    /// [`Volume::nucleotide_ambiguity`] reads, not read a second time.
+    pub fn nucleotide_iupac(&self, oid: u32, ordinal: u32) -> Result<Vec<u8>, SeqDbError> {
+        let ambiguity = self.nucleotide_ambiguity(oid, ordinal)?;
+        self.nucleotide_iupac_range_with(oid, ordinal, 0, ambiguity.length, &ambiguity)
+    }
+
     /// The length of nucleotide `oid` (volume-relative; `ordinal` its database ordinal id) and
     /// its decoded ambiguity runs, read once for any number of
     /// [`Volume::nucleotide_iupac_range_with`] calls on the same sequence.

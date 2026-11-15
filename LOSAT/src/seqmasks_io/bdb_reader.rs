@@ -158,12 +158,7 @@ impl MaskBdbReader {
             .unwrap_or_default();
         let title = set.bioseq_title();
         let residues = match self.molecule {
-            SeqType::Nucleotide => {
-                let length = self.db.nucleotide_length(oid).map_err(error)?;
-                self.db
-                    .nucleotide_iupac_range(oid, 0, length)
-                    .map_err(error)?
-            }
+            SeqType::Nucleotide => self.db.nucleotide_iupac(oid).map_err(error)?,
             SeqType::Protein => self
                 .db
                 .read_sequence(oid)

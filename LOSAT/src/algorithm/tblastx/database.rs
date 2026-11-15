@@ -320,6 +320,16 @@ pub(crate) struct XmlTaxa {
 /// sequence with parsed Seq-ids.
 pub(crate) type DatabaseTitles = BTreeMap<u32, ReportedHeader>;
 
+/// The final HSPs `ordered` of a query batch (report order) without those of the sequences that
+/// NCBI makes no Seq-align of (`shared::SeqAligned`): after the cut of each query's hit list to
+/// the hit list size, before `read_titles`.
+pub(crate) fn drop_unaligned(database: &TblastxDatabase, ordered: &mut Vec<TblastxHsp>) {
+    let Some(mut aligned) = shared::SeqAligned::of(&database.db) else {
+        return;
+    };
+    ordered.retain(|hsp| aligned.keeps(hsp.hit.s_idx));
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:283-293
 // ```c++
 //     m_TbackSearch.Reset(new CBlastTracebackSearch(m_QueryFactory,

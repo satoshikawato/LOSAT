@@ -885,6 +885,26 @@ impl ListedSubjects {
         Ok(listed)
     }
 
+    /// The final hit lists of the call (subjects named by rank) without the subjects that
+    /// NCBI makes no Seq-align of (`shared::SeqAligned`): right after the cut to the hit list
+    /// size, before the reads of the reported subjects.
+    pub(super) fn drop_unaligned(
+        &self,
+        database: &BlastpDatabase,
+        hit_lists: &mut [Option<BlastpHitList>],
+    ) {
+        let Some(mut aligned) = shared::SeqAligned::of(&database.db) else {
+            return;
+        };
+        for hit_list in hit_lists.iter_mut().flatten() {
+            hit_list.hsplist_array.truncate(hit_list.hsplist_count);
+            hit_list
+                .hsplist_array
+                .retain(|list| aligned.keeps(self.ordinals[list.oid as usize]));
+            hit_list.hsplist_count = hit_list.hsplist_array.len();
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:264-275
     // ```c++
     //     CRef<ILocalQueryData> qdata = m_QueryFactory->MakeLocalQueryData(m_Options);

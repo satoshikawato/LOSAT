@@ -330,6 +330,11 @@ impl KappaResultHitList {
         &mut self.lists
     }
 
+    /// The hit list with only the lists that `keep` takes, in their order.
+    pub(super) fn retain_lists(&mut self, keep: impl FnMut(&KappaResultList) -> bool) {
+        self.lists.retain(keep);
+    }
+
     pub(super) fn worst_evalue(&self) -> f64 {
         self.worst_evalue
     }

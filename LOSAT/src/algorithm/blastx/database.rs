@@ -367,6 +367,21 @@ impl ReportedSubjects {
     //                                    subj_masks,
     //                                    m_ResultType);
     // ```
+    /// The hit lists of the query batch `batches` (subjects named by ordinal) without the
+    /// subjects that NCBI makes no Seq-align of (`shared::SeqAligned`), where its traceback
+    /// makes the batch's Seq-aligns: after the cut to the hit list size (`Runtime::batch_end`),
+    /// before `read_titles`.
+    pub(crate) fn drop_unaligned(database: &BlastxDatabase, batches: &mut [BatchResults]) {
+        let Some(mut aligned) = shared::SeqAligned::of(&database.db) else {
+            return;
+        };
+        for batch in batches {
+            for lists in &mut batch.queries {
+                lists.retain(|list| u32::try_from(list.oid).map_or(true, |o| aligned.keeps(o)));
+            }
+        }
+    }
+
     /// The titles of the reported sequences of the batches `batches` (one query batch), read
     /// query by query in hit-list order where NCBI's traceback makes the batch's Seq-aligns
     /// (their Seq-ids), before the batch's prefetch: NCBI's reader error stops the run at this

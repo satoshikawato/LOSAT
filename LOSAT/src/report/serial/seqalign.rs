@@ -1851,6 +1851,10 @@ fn write_seq_align_diags<E: Encoder>(
     enc.member("segs", 3);
     enc.variant("Seq-align_segs", "std", 2);
     enc.begin_list(false);
+    // `-subject`'s mapper rewrites the empty rows only of a Seq-align with rows of letters, which
+    // gives it the sequence types (`write_empty_rows`); a subject of empty rows only keeps them
+    // (`algorithm::blastx::empty_rows::SubjectLoc::of_list`).
+    let remaps = remaps && hsps.iter().any(|hsp| !hsp.rows_empty());
     for hsp in hsps {
         let (q_from, q_to) =
             ungapped_interval(hsp.q_offset, hsp.q_end, hsp.q_frame, query.searched_length);
@@ -1908,9 +1912,10 @@ fn write_seq_align_diags<E: Encoder>(
 /// The two Seq-intervals of the Std-seg of an ungapped HSP of length 0 (BLASTX's one-hit word
 /// finder with `-window_size 0`, `algorithm::blastx::empty_rows`), whose rows start at `from`
 /// (query, subject) and end one before (`to = from - 1`, in NCBI's unsigned `TSeqPos`: a row
-/// starting at 0 ends at 4294967295). With `-subject` (`remaps`) NCBI's Seq-loc mapper rewrites
-/// the query row to one nucleotide with a fuzz (`empty_rows::mapped_query_nucleotide`); the
-/// mapper's form of a subject row starting at 0 is refused before (`empty_rows`).
+/// starting at 0 ends at 4294967295). With `-subject` (`remaps`, a Seq-align with rows of letters
+/// too) NCBI's Seq-loc mapper rewrites the query row to one nucleotide with a fuzz
+/// (`mapped_empty_query_nucleotide`); the mapper's form of a subject row starting at 0 is refused
+/// before (`algorithm::blastx::empty_rows`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1538-1559
 /// ```c++

@@ -98,10 +98,8 @@ impl DisplayAlignment {
 
     /// The alignment of a tabular row of `-subject`'s mapped alignment without scores of a
     /// subject's only HSP of length 0 (`empty_rows::MappedAlignment`): its rows of letters, no gap.
-    /// The default fields read the rows' letters (`pident`, `mismatch`): `render_queries_with`
-    /// refused an alignment without them.
     pub(crate) fn mapped(mapped: &super::empty_rows::MappedAlignment) -> Self {
-        let (qrow, srow) = mapped.rows().unwrap_or_default();
+        let (qrow, srow) = mapped.rows();
         DisplayAlignment {
             qseq: String::from_utf8_lossy(qrow).into_owned(),
             sseq: String::from_utf8_lossy(srow).into_owned(),
@@ -1307,14 +1305,20 @@ pub(super) fn render_queries_with(
     if !options.gapped && options.outfmt != 18 && SubjectLoc::of(shown) == SubjectLoc::Interval {
         // The tabular reports (`options.tabular`, the default outfmt 6 and 7) write a subject's
         // only HSP of length 0 as NCBI's formatter reads its mapped alignment.
-        let tabular = (options.tabular.is_some() || matches!(options.outfmt, 6 | 7)).then_some(
-            super::empty_rows::MappedTables {
-                queries,
-                subjects,
-                reads_letters: options.tabular.is_none_or(|spec| spec.reads_row_letters()),
-            },
-        );
+        let tabular = (options.tabular.is_some() || matches!(options.outfmt, 6 | 7))
+            .then_some(super::empty_rows::MappedTables { queries, subjects });
         super::empty_rows::refuse_mapped_without_scores(batches, options.gapped, tabular)?;
+    }
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-287 (quoted at
+    // `native::reported_batch`)
+    // `-subject`'s prefetch before the batch's reports, as `-db`'s (`native::batch_prefetch`): a
+    // subject's Seq-align whose empty rows the mapper leaves makes it write its warning.
+    if SubjectLoc::of(shown) == SubjectLoc::Interval
+        && super::native::batch_prefetch(batches, options, SubjectLoc::Interval).fails
+    {
+        stderr.write_all(&crate::algorithm::common::database::prefetch_warning(
+            options.program().lower,
+        ))?;
     }
     if options.outfmt == 0 {
         return write_pairwise(
@@ -1592,7 +1596,7 @@ pub(super) fn render_queries_with(
                         // The default fields enter NCBI's alignment block and read the query
                         // (`qaccver`, `qstart`, ...).
                         let (form, scores, mapped) = if rows_empty(&hsp.hsp) {
-                            let loc = SubjectLoc::of(shown);
+                            let loc = SubjectLoc::of(shown).of_list(list, options.gapped);
                             let shown_hsps = list
                                 .hsps
                                 .iter()

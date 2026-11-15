@@ -603,34 +603,6 @@ impl TabularSpec {
         ])
     }
 
-    /// Whether NCBI's formatter reads the letters of a row's alignment (`GetWholeAlnSeqString`):
-    /// for the rows, the identities or the positives, inside its alignment block
-    /// (`opens_counts`, with `nident` there only beside another of its fields; BLASTX's rows of
-    /// `-subject`'s mapped alignments, `blastx::empty_rows::MappedTables`).
-    ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:973-980
-    /// ```c++
-    ///     if (x_IsFieldRequested(eQuerySeq) ||
-    ///         x_IsFieldRequested(eSubjectSeq) ||
-    ///         x_IsFieldRequested(ePositives) ||
-    ///         x_IsFieldRequested(ePercentPositives) ||
-    ///         x_IsFieldRequested(eBTOP) ||
-    ///         (x_IsFieldRequested(eNumIdentical) && !kNoFetchSequence) ||
-    ///         (x_IsFieldRequested(eMismatches) && !kNoFetchSequence) ||
-    ///         (x_IsFieldRequested(ePercentIdentical) && !kNoFetchSequence)) {
-    /// ```
-    pub fn reads_row_letters(&self) -> bool {
-        self.has_any(&[
-            QuerySeq,
-            SubjectSeq,
-            Positives,
-            PercentPositives,
-            Btop,
-            Mismatches,
-            PercentIdentical,
-        ]) || (self.has(NumIdentical) && self.opens_counts(&0))
-    }
-
     /// Whether NCBI's formatter opens its alignment block for a row whose Seq-align counts
     /// `num_ident` identities (the engine's count): one of its fields, or `nident` with
     /// identities. Only the block counts the identities on the aligned sequences and sets the

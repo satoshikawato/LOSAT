@@ -1381,13 +1381,17 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                                 //         	q_start = kAlign.GetSeqStart(0) + 1;
                                 // ```
                                 // An HSP of length 0 (`empty_rows`): the Dense-seg of `-subject`'s
-                                // mapped Std-seg throws, else the empty query row's start. NCBI
-                                // catches it in `s_BlastXMLAddIteration` (`CaughtException`).
+                                // mapped Std-seg throws, else the empty query row's start (`-db`,
+                                // and the rows that `-subject`'s mapper leaves,
+                                // `SubjectLoc::of_list`). NCBI catches it in
+                                // `s_BlastXMLAddIteration` (`CaughtException`).
                                 if rows_empty(&hsp.hsp) {
-                                    return Err(CaughtException(match loc {
-                                        SubjectLoc::Interval => std_seg_lengths_not_accurate(),
-                                        SubjectLoc::Whole => row_is_empty(),
-                                    })
+                                    return Err(CaughtException(
+                                        match loc.of_list(list, options.gapped) {
+                                            SubjectLoc::Interval => std_seg_lengths_not_accurate(),
+                                            SubjectLoc::Whole => row_is_empty(),
+                                        },
+                                    )
                                     .into());
                                 }
                                 // The Seq-align's endpoints, lower first: the minus frame's
@@ -1598,6 +1602,7 @@ mod scan_tests {
             lowercase_masks: Vec::new(),
             warnings: Vec::new(),
             source: None,
+            around: None,
         }
     }
 

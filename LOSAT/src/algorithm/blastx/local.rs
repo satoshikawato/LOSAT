@@ -330,6 +330,7 @@ fn scan_xml_titles(
             query_range,
             batch_size,
             keep_whole,
+            0,
             deliver,
             &mut |_| Ok(()),
         )
@@ -367,6 +368,7 @@ fn reader_batches(
     query_range: Option<SequenceRange>,
     batch_size: usize,
     keep_whole: bool,
+    around: usize,
     deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
     warn: &mut dyn FnMut(&[u8]) -> Result<()>,
 ) -> Result<()> {
@@ -385,6 +387,7 @@ fn reader_batches(
                 // The whole letters of a record whose letter before the interval is lower
                 // case, for the chunks of a split query (`split::x_chunk_masks`).
                 let keep_whole = keep_whole || query.lower_case_before(from);
+                query.keep_around(from, to + 1, around);
                 query.cut_in_place(from, to + 1, keep_whole)
             }
             Some(RecordInterval::Empty) => query.cut_in_place(length, length, keep_whole),
@@ -612,6 +615,12 @@ fn write_run(
     let search_options = &resolved[0];
     // The archive's Bioseq of a cut record holds its whole letters (`FastaRecord::cut_in_place`).
     let keep_whole = archive.is_some();
+    // With `-subject`, the letters around each `-query_loc` interval that the Seq-loc mapper can
+    // read into a query row (`empty_rows::query_letters_around`), as the command line's reader.
+    let around = match database {
+        Some(_) => 0,
+        None => super::empty_rows::query_letters_around(search_options, subjects),
+    };
     let mut read = |deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
                     warn: &mut dyn FnMut(&[u8]) -> Result<()>|
      -> Result<()> {
@@ -621,6 +630,7 @@ fn write_run(
             query_range,
             batch_size,
             keep_whole,
+            around,
             deliver,
             warn,
         )
@@ -1310,5 +1320,6 @@ fn blastx_record(record: &fasta_reader::FastaRecord, lowercase: bool) -> Result<
         lowercase_masks,
         warnings: Vec::new(),
         source: record.source.clone(),
+        around: None,
     })
 }

@@ -623,6 +623,7 @@ impl ReportedSubjects {
                 lowercase_masks: Vec::new(),
                 warnings: Vec::new(),
                 source: None,
+                around: None,
             });
             shared::keep_source(
                 &mut reported.sources,
@@ -1120,6 +1121,7 @@ mod tests {
             lowercase_masks: Vec::new(),
             warnings: Vec::new(),
             source: None,
+            around: None,
         };
         let records = [record];
         assert_eq!(&*Subjects::Fasta(&records).encoded(0), &searched[..]);
@@ -1155,6 +1157,7 @@ mod tests {
             lowercase_masks: Vec::new(),
             warnings: Vec::new(),
             source: None,
+            around: None,
         };
         let hsp = |score: i32| Hsp {
             hsp: PreliminaryHsp {

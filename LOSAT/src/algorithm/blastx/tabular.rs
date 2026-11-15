@@ -486,25 +486,27 @@ pub(super) fn write_blastx_tabular(
                 // `qcovs` reads the query range of every HSP of the query before its first row
                 // (`GetMasterCoverage`, quoted below): with `-db` the empty query row of an HSP of
                 // length 0 throws there, after outfmt 7's lines (`empty_rows::row_is_empty`), and
-                // with `-subject` the mapped query row that wraps (`MappedRows::QueryRowWraps`);
-                // `-subject`'s other mapped query rows are not empty.
+                // with `-subject` the mapped query row that wraps (`MappedRows::QueryRowWraps`) and
+                // the empty rows that the mapper leaves (`SubjectLoc::of_list`); `-subject`'s other
+                // mapped query rows are not empty.
                 if needs.qcovs
-                    && listed.iter().any(|list| match loc {
-                        SubjectLoc::Whole => list
-                            .hsps
-                            .iter()
-                            .any(|hsp| has_seqalign(hsp, options.gapped) && rows_empty(&hsp.hsp)),
-                        SubjectLoc::Interval => matches!(
-                            subject_mapped_rows(
-                                loc,
-                                list,
-                                options.gapped,
-                                query,
-                                &subjects[list.oid]
+                    && listed
+                        .iter()
+                        .any(|list| match loc.of_list(list, options.gapped) {
+                            SubjectLoc::Whole => list.hsps.iter().any(|hsp| {
+                                has_seqalign(hsp, options.gapped) && rows_empty(&hsp.hsp)
+                            }),
+                            SubjectLoc::Interval => matches!(
+                                subject_mapped_rows(
+                                    loc,
+                                    list,
+                                    options.gapped,
+                                    query,
+                                    &subjects[list.oid]
+                                ),
+                                Some(MappedRows::QueryRowWraps)
                             ),
-                            Some(MappedRows::QueryRowWraps)
-                        ),
-                    })
+                        })
                 {
                     writer.write_all(&buf)?;
                     writer.flush()?;
@@ -522,6 +524,8 @@ pub(super) fn write_blastx_tabular(
                     }
                     let subject = &subjects[list.oid];
                     let values = subject_values(shown, subject, list.oid, &no_taxonomy);
+                    // The subject's Seq-loc as its Seq-align shows it (`SubjectLoc::of_list`).
+                    let loc = loc.of_list(list, options.gapped);
                     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:629-640
                     // ```c++
                     //        	if((check_type & eQueryCovPerSubj)) {
@@ -686,9 +690,7 @@ pub(super) fn write_blastx_tabular(
                                 num_ident: 0,
                                 q_frame: mapped.q_frame,
                                 s_frame: 0,
-                                // Without the query row's letters (`-query_loc`) the table
-                                // reads none (`refuse_mapped_without_scores`).
-                                rows: mapped.rows().filter(|_| counts_by_fields),
+                                rows: Some(mapped.rows()).filter(|_| counts_by_fields),
                                 qcovhsp: query_coverage_per_hsp(
                                     options.gapped,
                                     shown_count,

@@ -782,6 +782,7 @@ fn x_chunk_record(whole: &FastaRecord, start: usize, end: usize) -> FastaRecord 
             .source
             .as_deref()
             .map(crate::blastinput::fasta_reader::RecordSource::without_uncut),
+        around: None,
     }
 }
 
@@ -946,6 +947,7 @@ mod x_chunk_record_tests {
                 defline: b">long query".to_vec(),
                 ..RecordSource::default()
             })),
+            around: None,
         }
     }
 

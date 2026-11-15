@@ -352,9 +352,10 @@ pub(crate) enum EmptyRowsStop {
 // ```
 /// The exception at which NCBI's sorts of outfmt 0 (`-sorthits`, `-sorthsps` above 0, before the
 /// description table) stop a query's report whose hit list (`order`, the subjects' hits in
-/// `grouped`) holds an HSP with empty rows; `mapped`: `-subject`, whose Seq-loc mapper gives that
-/// HSP a query row of one nucleotide. `std::list::sort` compares every element of a list of two
-/// or more, so a comparator that reads an HSP's ranges reaches it:
+/// `grouped`) holds an HSP with empty rows; `remaps`: `-subject`, whose Seq-loc mapper gives that
+/// HSP a query row of one nucleotide in a subject with rows of letters (`mapper_rewrites`; the
+/// rows of a subject of empty rows only stay as `-db`'s). `std::list::sort` compares every
+/// element of a list of two or more, so a comparator that reads an HSP's ranges reaches it:
 /// - the subjects by percent identity (`-sorthits 3`: `GetSeqAlignSetCalcPercentIdent` makes a
 ///   Dense-seg of every HSP, `GetAlignmentLength`): `-subject`'s mapped Std-seg throws (801), the
 ///   raw empty rows of `-db` give a length of 0;
@@ -369,33 +370,52 @@ pub(crate) enum EmptyRowsStop {
 /// (`X/SURVEY_X2g_formats.md` 6).
 fn sort_stop(
     sort: super::hit_sort::ReportSort,
-    mapped: bool,
+    remaps: bool,
     order: &[u32],
     grouped: &std::collections::HashMap<u32, Vec<&PairwiseHit>>,
 ) -> Option<EmptyRowsStop> {
-    let holds = |oid: &u32| grouped[oid].iter().any(|hit| hit.rows_empty());
+    // Whether the subject holds an HSP with empty rows that the mapper rewrote (`Some(true)`),
+    // left as made (`Some(false)`), or either (`None`).
+    let holds = |oid: &u32, mapped: Option<bool>| {
+        let hits = &grouped[oid];
+        hits.iter().any(|hit| hit.rows_empty())
+            && mapped.is_none_or(|mapped| mapper_rewrites(remaps, hits) == mapped)
+    };
     let hit_stop = match sort.hits {
-        Some(3) if mapped => Some(EmptyRowsStop::StdSegLengths),
-        Some(4) if !mapped => Some(EmptyRowsStop::RowIsEmpty),
+        Some(3) => Some((EmptyRowsStop::StdSegLengths, Some(true))),
+        Some(4) => Some((EmptyRowsStop::RowIsEmpty, Some(false))),
         _ => None,
     };
-    if hit_stop.is_some() && order.len() >= 2 && order.iter().any(holds) {
-        return hit_stop;
+    if let Some((stop, mapped)) = hit_stop {
+        if order.len() >= 2 && order.iter().any(|oid| holds(oid, mapped)) {
+            return Some(stop);
+        }
     }
     let hsp_stop = match sort.hsps {
-        Some(2) if !mapped => Some(EmptyRowsStop::RowIsEmpty),
-        Some(3) if mapped => Some(EmptyRowsStop::StdSegLengths),
-        Some(4) => Some(EmptyRowsStop::RowIsEmpty),
+        Some(2) => Some((EmptyRowsStop::RowIsEmpty, Some(false))),
+        Some(3) => Some((EmptyRowsStop::StdSegLengths, Some(true))),
+        Some(4) => Some((EmptyRowsStop::RowIsEmpty, None)),
         _ => None,
     };
-    if hsp_stop.is_some()
-        && order
+    if let Some((stop, mapped)) = hsp_stop {
+        if order
             .iter()
-            .any(|oid| grouped[oid].len() >= 2 && holds(oid))
-    {
-        return hsp_stop;
+            .any(|oid| grouped[oid].len() >= 2 && holds(oid, mapped))
+        {
+            return Some(stop);
+        }
     }
     None
+}
+
+/// Whether `-subject`'s Seq-loc mapper (`remaps`) rewrote the empty rows of the subject whose
+/// hits are `hits`: only a Seq-align with rows of letters gives the mapper the sequence types,
+/// whose frames make an empty query row one nucleotide (`x_GetDstStd`,
+/// seq_align_mapper_base.cpp:1419-1446); a subject of empty rows only keeps them where the mapper
+/// does not wrap them (`algorithm::blastx::empty_rows::SubjectLoc::of_list`; where it does, BLASTX
+/// refused the report before), as `-db`'s.
+fn mapper_rewrites(remaps: bool, hits: &[&PairwiseHit]) -> bool {
+    remaps && hits.iter().any(|hit| !hit.rows_empty())
 }
 
 impl std::fmt::Display for EmptyRowsStop {
@@ -6930,7 +6950,8 @@ pub fn write_blastx_pairwise_report<W: Write>(
                 // Each HSP's alignment is made before its heading and block: the Std-seg of an HSP
                 // with empty rows that `-subject`'s Seq-loc mapper rewrote throws there
                 // (`CreateDensegFromStdseg`), before anything of the HSP (`EmptyRowsStop`).
-                let mapped_stop = |hit: &PairwiseHit| database.is_none() && hit.rows_empty();
+                let rewritten = mapper_rewrites(database.is_none(), shits);
+                let mapped_stop = |hit: &PairwiseHit| rewritten && hit.rows_empty();
                 if mapped_stop(first) {
                     writer.flush()?;
                     return Err(io::Error::other(EmptyRowsStop::StdSegLengths));

@@ -903,6 +903,11 @@ fn run_inner(
     // 	return false;
     // ```
     let mut query_stream = query_settings.stream(query_file);
+    // With `-subject`, the letters around each `-query_loc` interval that the Seq-loc mapper can
+    // read into a query row (`empty_rows::query_letters_around`): NCBI reads the subjects first.
+    if args.db.is_none() {
+        query_stream.around = super::empty_rows::query_letters_around(&options, &subjects);
+    }
     if stream_is_empty(&mut query_stream) {
         stderr.write_all(format!("Warning: [{}] Query is Empty!\n", program.lower).as_bytes())?;
         // NCBI returns before the formatter exists: no archive carries the message.
@@ -1497,6 +1502,51 @@ pub(super) fn batch_titles(
     titles.map(Some).map_err(reported_error)
 }
 
+/// What NCBI's prefetch (`BlastFormatter_PreFetchSequenceData`, quoted at `reported_batch`) does
+/// with a query batch.
+pub(super) struct BatchPrefetch {
+    /// `PRE_FETCH_SEQS_LIMIT` turns it off (`common::database::prefetch_off`).
+    pub(super) off: bool,
+    /// It throws at an empty subject row before it loads anything and writes its warning
+    /// (`empty_rows::prefetch_reads_empty_row`).
+    pub(super) fails: bool,
+}
+
+/// What NCBI's prefetch does with the query batch `results` (`BatchPrefetch`) for the format of
+/// `options`, of a report of `loc`'s subjects (`-db`'s, `reported_batch`, or `-subject`'s,
+/// `report::render_queries_with`). The batch's Seq-aligns: one for each HSP that the reports show
+/// (`has_seqalign`), one for each subject of an ungapped search; where `PRE_FETCH_SEQS_LIMIT`
+/// turns the batch's prefetch off (`shared::prefetch_off`), it reads nothing of a subject that no
+/// report reads (`asks.prefetched`). Where it reads the Seq-aligns and one has an empty subject
+/// row (a subject whose every HSP has length 0, as the mapper leaves it), it throws before it
+/// loads anything and writes its warning: the batch's subjects are then read as with the prefetch
+/// off. A gapped search has no HSP of length 0: its hit lists are not walked for that.
+pub(super) fn batch_prefetch(
+    results: &[BatchResults],
+    options: &super::args::ResolvedOptions,
+    loc: super::empty_rows::SubjectLoc,
+) -> BatchPrefetch {
+    let seq_aligns: usize = results
+        .iter()
+        .flat_map(|batch| batch.queries.iter().flatten())
+        .map(|list| {
+            crate::algorithm::common::database::subject_seq_aligns(
+                list.hsps
+                    .iter()
+                    .filter(|hsp| super::report::has_seqalign(hsp, options.gapped))
+                    .count(),
+                options.gapped,
+            )
+        })
+        .sum();
+    let off = crate::algorithm::common::database::prefetch_off(seq_aligns);
+    let fails = !off
+        && !options.gapped
+        && crate::algorithm::common::database::prefetch_reads_seq_aligns(i32::from(options.outfmt))
+        && super::empty_rows::prefetch_reads_empty_row(results, options.gapped, loc);
+    BatchPrefetch { off, fails }
+}
+
 /// The reported sequences of the query batch `results` of a `-db` search, with its hit lists
 /// renamed to ranks (`ReportedSubjects::for_batch`, `asks`), from their titles (`titles`,
 /// `batch_titles`; `None`: no sequence could be read), and what NCBI does before the reports of a
@@ -1518,34 +1568,10 @@ pub(super) fn reported_batch(
     let Some(titles) = titles else {
         return Ok(ReportedSubjects::default());
     };
-    // The batch's Seq-aligns: one for each HSP that the reports show
-    // (`has_seqalign`), one for each subject of an ungapped search. Where
-    // `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
-    // (`shared::prefetch_off`), it reads nothing of a subject that no
-    // report reads (`asks.prefetched`).
-    let seq_aligns: usize = results
-        .iter()
-        .flat_map(|batch| batch.queries.iter().flatten())
-        .map(|list| {
-            crate::algorithm::common::database::subject_seq_aligns(
-                list.hsps
-                    .iter()
-                    .filter(|hsp| super::report::has_seqalign(hsp, options.gapped))
-                    .count(),
-                options.gapped,
-            )
-        })
-        .sum();
-    let prefetch_off = crate::algorithm::common::database::prefetch_off(seq_aligns);
-    // Where the prefetch reads the Seq-aligns and one has an empty subject row (a subject whose
-    // every HSP has length 0), it throws before it loads anything and writes its warning: the
-    // batch's subjects are then read as with the prefetch off
-    // (`empty_rows::prefetch_reads_empty_row`). A gapped search has no HSP of length 0: its hit
-    // lists are not walked.
-    let prefetch_fails = !prefetch_off
-        && !options.gapped
-        && crate::algorithm::common::database::prefetch_reads_seq_aligns(i32::from(options.outfmt))
-        && super::empty_rows::prefetch_reads_empty_row(results, options.gapped);
+    let BatchPrefetch {
+        off: prefetch_off,
+        fails: prefetch_fails,
+    } = batch_prefetch(results, options, super::empty_rows::SubjectLoc::Whole);
     let unfetched = prefetch_off || prefetch_fails;
     let x_t = super::x_timing::lap();
     let reported = ReportedSubjects::for_batch(
@@ -3299,6 +3325,7 @@ mod reader_batch_tests {
             lowercase_masks: Vec::new(),
             warnings: Vec::new(),
             source: None,
+            around: None,
         }
     }
 

@@ -1168,35 +1168,6 @@ fn stats_from_edit_ops(
     (matches, mismatches, gap_opens, gap_letters, align_length)
 }
 
-/// Test if an HSP should be deleted based on percent identity and minimum hit length.
-///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:993-1001 (s_HSPTest)
-/// ```c
-/// return ((hsp->num_ident * 100.0 <
-///         align_length * hit_options->percent_identity) ||
-///         align_length < hit_options->min_hit_length) ;
-/// ```
-pub fn hsp_test(
-    num_ident: usize,
-    align_length: usize,
-    percent_identity: f64,
-    min_hit_length: usize,
-) -> bool {
-    let identity_check = if percent_identity > 0.0 {
-        (num_ident as f64 * 100.0) < (align_length as f64 * percent_identity)
-    } else {
-        false
-    };
-
-    let length_check = if min_hit_length > 0 {
-        align_length < min_hit_length
-    } else {
-        false
-    };
-
-    identity_check || length_check
-}
-
 /// Update identity/length stats and apply Blast_HSPTestIdentityAndLength filtering.
 ///
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:656-663
@@ -1286,7 +1257,12 @@ pub fn blast_hsp_test_identity_and_length(
         0.0
     };
 
-    hsp_test(matches, align_length, percent_identity, min_hit_length)
+    crate::core::blast_hits::hsp_test(
+        matches as i64,
+        align_length as i64,
+        percent_identity,
+        min_hit_length as i64,
+    )
 }
 
 /// Parameters needed for E-value and bit score recalculation after re-evaluation.

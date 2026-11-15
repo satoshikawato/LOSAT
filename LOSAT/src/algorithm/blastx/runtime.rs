@@ -1187,7 +1187,12 @@ impl PreliminarySink for Runtime<'_> {
                         ),
                         Err(_) => (0, 0),
                     };
-                    if crate::core::blast_hits::hsp_test(identity as i32, align_length, 0.0, 0) {
+                    if crate::core::blast_hits::hsp_test(
+                        identity as i64,
+                        i64::from(align_length),
+                        0.0,
+                        0,
+                    ) {
                         return None;
                     }
                     Some(Hsp {

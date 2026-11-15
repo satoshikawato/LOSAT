@@ -2622,19 +2622,6 @@ pub(super) fn full_translation_traceback_blosum62(
     )
 }
 
-// NCBI c++/src/algo/blast/core/blast_hits.c:993-1001:
-// return ((hsp->num_ident * 100.0 < align_length * percent_identity) ||
-//         align_length < hit_options->min_hit_length);
-fn blast_hsp_test(
-    num_ident: usize,
-    align_length: usize,
-    percent_identity: f64,
-    min_hit_length: i32,
-) -> bool {
-    (num_ident as f64) * 100.0 < (align_length as f64) * percent_identity
-        || (align_length as i64) < i64::from(min_hit_length)
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign_priv.h:120
 // ```c
 // #define HSP_MAX_WINDOW 11
@@ -3192,8 +3179,12 @@ fn x_traceback_in_windows<S: super::score::TbnScore>(
             if let Some(events) = identity_events.as_deref_mut() {
                 events.push((num_ident, align_length));
             }
-            let delete_hsp =
-                blast_hsp_test(num_ident, align_length, percent_identity, min_hit_length);
+            let delete_hsp = crate::core::blast_hits::hsp_test(
+                num_ident as i64,
+                align_length as i64,
+                percent_identity,
+                i64::from(min_hit_length),
+            );
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:585-605 records updated HSP offsets
             // before Blast_HSPTest and before Blast_HSPAdjustSubjectOffset.
             if let Some(events) = test_events.as_deref_mut() {
@@ -6311,27 +6302,6 @@ mod tests {
                 })
                 .collect();
             assert_eq!(actual, expected[context], "context {context}");
-        }
-    }
-    // NCBI c++/src/algo/blast/core/blast_hits.c:993-1001,1027-1032:
-    // return ((hsp->num_ident * 100.0 < align_length * percent_identity) ||
-    //         align_length < hit_options->min_hit_length);
-    // The direct API oracle checks equality, just-above equality, and length.
-    #[test]
-    fn blast_hsp_test_deletion_matches_ncbi_api() {
-        let path = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../docs/evidence/tlosan_stage_c/hsp_test_20260924/oracle.tsv"
-        );
-        for line in fs::read_to_string(path).unwrap().lines() {
-            let f: Vec<_> = line.split('\t').collect();
-            let observed = blast_hsp_test(
-                f[1].parse().unwrap(),
-                f[2].parse().unwrap(),
-                f[3].parse().unwrap(),
-                f[4].parse().unwrap(),
-            );
-            assert_eq!(observed, f[5] == "1", "{line}");
         }
     }
     // NCBI c++/src/algo/blast/core/blast_engine.c:478-552:

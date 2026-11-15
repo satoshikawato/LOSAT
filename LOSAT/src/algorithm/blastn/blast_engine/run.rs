@@ -50,7 +50,7 @@ use super::super::extension::{
     extend_hit_ungapped_exact_ncbi, type_of_word, SmallNaWord,
 };
 use super::super::filtering::{
-    blast_hsp_test_identity_and_length, hsp_test, purge_hsps_with_common_endpoints,
+    blast_hsp_test_identity_and_length, purge_hsps_with_common_endpoints,
     purge_hsps_with_common_endpoints_ex, reevaluate_hsp_with_ambiguities_gapped_ex,
     subject_best_hit, subject_best_hit_by, BestHitKey, ReevalParams,
 };
@@ -9544,8 +9544,14 @@ fn ungapped_subject_stage(
             hit.prelim_ss,
             align_length,
         );
-        // `min_hit_length` is 0 for BLASTN.
-        !ungapped::blast_hsp_test(identities, align_length, percent_identity, 0)
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:993-1000,1027-1032
+        // (`Blast_HSPTest`; `min_hit_length` is 0 for BLASTN).
+        !crate::core::blast_hits::hsp_test(
+            identities as i64,
+            align_length as i64,
+            percent_identity,
+            0,
+        )
     });
     sort_prelim_hits_by_score(hits);
     hits.retain_mut(|hit| {

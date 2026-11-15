@@ -28,9 +28,9 @@ use super::{
     adjust_blastn_offsets, adjust_subject_range, blast_get_offsets_for_gapped_alignment,
     blast_get_start_for_gapped_alignment_nucl, blastn_trace, calculate_blastn_context_statistics,
     extend_gapped_heuristic_with_traceback_with_scratch, format_gap_edit_ops_for_trace,
-    greedy_gapped_alignment_with_traceback, hsp_test, stats_from_edit_ops, x_fence,
-    BlastIntervalTree, BlastnHsp, BlastnTiming, GapAlignScratch, GreedyAlignScratch, IndexMethod,
-    PrelimHit, QueryContext, TreeHsp, XAheadScratch, XSpecTraceback,
+    greedy_gapped_alignment_with_traceback, stats_from_edit_ops, x_fence, BlastIntervalTree,
+    BlastnHsp, BlastnTiming, GapAlignScratch, GreedyAlignScratch, IndexMethod, PrelimHit,
+    QueryContext, TreeHsp, XAheadScratch, XSpecTraceback,
 };
 use crate::common::GapEditOp;
 #[cfg(all(
@@ -971,7 +971,14 @@ pub(super) fn trace_build_hsp(
         traceback_alignment_lengths.push(aln_len.min(u32::MAX as usize) as u32);
     }
 
-    if use_dp && hsp_test(matches, aln_len, percent_identity, min_hit_length) {
+    if use_dp
+        && crate::core::blast_hits::hsp_test(
+            matches as i64,
+            aln_len as i64,
+            percent_identity,
+            min_hit_length as i64,
+        )
+    {
         if let Some(timing) = timing_ref {
             BlastnTiming::record_count(&timing.traceback_deleted_identity_length_hsps, 1);
         }

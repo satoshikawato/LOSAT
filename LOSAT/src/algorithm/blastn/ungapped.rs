@@ -18,7 +18,6 @@
 //!     }
 //! ```
 
-use super::filtering::hsp_test;
 use super::ncbi_cutoffs::compute_blastn_cutoff_score_ungapped;
 use crate::stats::KarlinParams;
 
@@ -161,22 +160,6 @@ pub fn count_identities_ungapped(
         .zip(&subject[s_offset..s_offset + align_length])
         .filter(|(q, s)| q == s)
         .count()
-}
-
-/// `Blast_HSPTest`: true when the HSP is to be deleted (`-perc_identity`, minimum hit length).
-///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:993-1000, 1027-1032
-/// ```c
-/// return ((hsp->num_ident * 100.0 < align_length * hit_options->percent_identity) ||
-///         align_length < hit_options->min_hit_length) ;
-/// ```
-pub fn blast_hsp_test(
-    num_ident: usize,
-    align_length: usize,
-    percent_identity: f64,
-    min_hit_length: usize,
-) -> bool {
-    hsp_test(num_ident, align_length, percent_identity, min_hit_length)
 }
 
 /// A limit of the word cutoff's arithmetic that LOSAT refuses instead of reproducing NCBI's
@@ -395,17 +378,6 @@ mod tests {
         assert_eq!(count_identities_ungapped(&q, &s, 0, 0, 5), 3);
         assert_eq!(count_identities_ungapped(&q, &s, 3, 3, 2), 1);
         assert_eq!(count_identities_ungapped(&q, &s, 2, 2, 0), 0);
-    }
-
-    /// `Blast_HSPTest`: `num_ident * 100.0 < align_length * percent_identity` deletes; equality keeps.
-    #[test]
-    fn hsp_test_boundary() {
-        // 95 identities in 100 letters at -perc_identity 95: 9500.0 < 9500.0 is false, kept.
-        assert!(!blast_hsp_test(95, 100, 95.0, 0));
-        assert!(blast_hsp_test(94, 100, 95.0, 0));
-        assert!(!blast_hsp_test(0, 100, 0.0, 0));
-        assert!(blast_hsp_test(90, 90, 0.0, 91));
-        assert!(!blast_hsp_test(91, 91, 0.0, 91));
     }
 
     /// The word cutoff of NCBI's `BLAST_Cutoffs(.., MIN(avg, 2q) * avg, TRUE, 0)`: worked by hand

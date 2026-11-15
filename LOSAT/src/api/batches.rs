@@ -238,7 +238,7 @@ pub struct Batches<'a> {
 pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches<'a>, Error> {
     let mut start_messages = Vec::new();
     let mut start = CallStart::new(search, inputs, &mut start_messages)?;
-    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:534-548 (the PSSM's query
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:534-543 (the PSSM's query
     // searched without a `CBlastInput`, quoted at `blastp::blast_engine::search_pssm_query`)
     // A PSSM query (`Inputs::pssm`) is one batch of its own: NCBI reads no query batches then.
     let lengths: Vec<usize> = match inputs.pssm {
@@ -289,8 +289,13 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
         .map_err(|error| Error::search(&error))?;
     }
     let command = search.command(inputs)?;
-    let sizes = batch_sizes(&command, inputs, &mut start, &mut start_messages)
-        .map_err(|error| Error::search(&error))?;
+    // A PSSM query is one batch, whose size NCBI does not read (`BATCH_SIZE`; tblastn_app.cpp:
+    // 208-221 reads it for a FASTA query only).
+    let sizes = match inputs.pssm {
+        Some(_) => BatchSizes::Fixed(1),
+        None => batch_sizes(&command, inputs, &mut start, &mut start_messages)
+            .map_err(|error| Error::search(&error))?,
+    };
     let query_range = query_range_of(&command);
     let skipped = lengths
         .iter()

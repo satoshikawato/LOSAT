@@ -1960,6 +1960,19 @@ fn a_pssm_query_is_the_command_lines() {
     let (stdout, _) = case.cli(&pssm, &["-out_ascii_pssm", cli_file.to_str().unwrap()], "6");
     assert!(outcome.reports[0].bytes == stdout);
     assert!(std::fs::read(&api_file).unwrap() == std::fs::read(&cli_file).unwrap());
+    // Each format is checked as the command line checks it alone: psiblast's `-in_pssm` writes
+    // outfmt 0, 6 and 7 (`in_pssm::check_in_pssm_options`), whatever the order of the formats.
+    let search = validate(Program::Psiblast, &[]).unwrap();
+    for formats in [&["6", "10"][..], &["10", "6"], &["0", "20"]] {
+        let error =
+            run_collect(&search, Inputs::pssm_database(&pssm, &database), formats).unwrap_err();
+        assert!(
+            error
+                .message()
+                .contains("with -in_pssm is not supported by LOSAT's PSIBLAST"),
+            "{formats:?}: {error}"
+        );
+    }
     // A PSSM file the command line cannot read is its error, and so is `-query_loc` with it.
     let missing = directory.join("none.asn");
     let search = validate(Program::Psiblast, &[]).unwrap();

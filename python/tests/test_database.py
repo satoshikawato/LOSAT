@@ -104,6 +104,10 @@ def test_a_pssm_query_is_query_0_of_the_rows(case, tmp_path):
         assert row.split("\t")[0] == hsp.query_id
         assert hsp.q_idx == 0
     assert len(outcome.query_stats) == 1 and outcome.query_stats[0] is not None
+    # The file of `run_to_file` holds the same report.
+    out = tmp_path / "out.6"
+    search.run_to_file(pylosat.Pssm.from_file(Path(pssm)), inputs, outfmt="6", path=out)
+    assert out.read_bytes() == outcome.reports[0].bytes
     # One batch: NCBI reads no query batches for a PSSM query.
     batches = search.batches(pylosat.Pssm.from_file(pssm), inputs)
     assert batches.query_count == 1

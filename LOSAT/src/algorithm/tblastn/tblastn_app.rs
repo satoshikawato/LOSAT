@@ -423,7 +423,9 @@ impl TblastnArgs {
         if let Some(handle) = &archive {
             match &result {
                 Err(error) => {
-                    if let Some(lines) = super::archive::error_lines(error, false) {
+                    // The `-in_pssm` file, which NCBI opens inside `Run` too.
+                    let in_run = super::in_pssm::file_error_in_run(error);
+                    if let Some(lines) = super::archive::error_lines(error, in_run) {
                         let _ = write_error_archive(&io, handle, error, &lines, &mut stream);
                     }
                 }

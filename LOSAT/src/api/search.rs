@@ -43,21 +43,14 @@ pub const API_OWNED: &[&str] = &["query", "subject", "db", "in_pssm", "out", "ou
 const STRATEGY_FILES: &[&str] = &["export_search_strategy"];
 
 /// The options of `program`'s command line that write a file the library API does not write (the
-/// search strategy, `STRATEGY_FILES`, line RG item F1b-1): they are not in an argv that
+/// search strategy, `STRATEGY_FILES`, line RG item F1b-1; the same for every program): they are not in an argv that
 /// `validate` accepts, and `describe` leaves them out. psiblast's PSSM files (`-out_pssm`,
 /// `-out_ascii_pssm`, `-save_pssm_after_last_round`, `-save_each_pssm`) are written where the
 /// command line writes them (series Q item Q6a). The searches of records of LOSAT Web take none
 /// of them either, and tblastn's `-in_pssm` neither until line PS's PSW1
 /// (`web_adapter::records_refused_options`).
-pub(crate) fn file_options(program: Program) -> &'static [&'static str] {
-    match program {
-        Program::Blastn
-        | Program::Blastp
-        | Program::Blastx
-        | Program::Tblastx
-        | Program::Psiblast
-        | Program::Tblastn => STRATEGY_FILES,
-    }
+pub(crate) fn file_options(_program: Program) -> &'static [&'static str] {
+    STRATEGY_FILES
 }
 
 /// A program and an argv that the command line's parser accepted.
@@ -162,7 +155,7 @@ impl Search {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1240-1247
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1241-1248
     // ```c++
     //     if (!m_IsDeltaBlast) {
     //         arg_desc.SetDependency(kArgPSIInputChkPntFile,
@@ -305,7 +298,12 @@ pub fn validate(program: Program, argv: &[&str]) -> Result<Search, Error> {
         let Some(name) = option_name(key) else {
             continue;
         };
+        // `-in_pssm` is psiblast's and tblastn's input (`Inputs::pssm`); the other programs' parser
+        // knows no such option.
         if name == "in_pssm" {
+            if !matches!(program, Program::Psiblast | Program::Tblastn) {
+                continue;
+            }
             return Err(Error::Argv(format!(
                 "{key} is not accepted by the library API: a PSSM query is given as the inputs (Inputs::pssm)"
             )));
@@ -378,7 +376,6 @@ mod tests {
             "--query",
             "-subject",
             "-db",
-            "-in_pssm",
             "-out",
             "-outfmt",
             "-outfmt=6",
@@ -475,7 +472,7 @@ mod tests {
                 "{key} is not accepted by the library API: a PSSM query is given as the inputs (Inputs::pssm)"
             ))
         };
-        for program in [Program::Psiblast, Program::Tblastn, Program::Blastp] {
+        for program in [Program::Psiblast, Program::Tblastn] {
             assert_eq!(
                 validate(program, &["-in_pssm", "p.asn"]),
                 Err(refused("-in_pssm"))
@@ -483,6 +480,19 @@ mod tests {
             assert_eq!(
                 validate(program, &["--in_pssm=p.asn"]),
                 Err(refused("--in_pssm"))
+            );
+        }
+        // The other programs have no such option: the parser's message.
+        for program in [
+            Program::Blastn,
+            Program::Blastp,
+            Program::Blastx,
+            Program::Tblastx,
+        ] {
+            let error = validate(program, &["-in_pssm", "p.asn"]).unwrap_err();
+            assert!(
+                !error.message().contains("library API"),
+                "{program}: {error}"
             );
         }
         let path = std::path::Path::new("p.asn");

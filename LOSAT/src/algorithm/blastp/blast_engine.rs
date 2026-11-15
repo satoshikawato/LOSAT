@@ -6024,8 +6024,8 @@ pub fn run_local(
 /// input PSSM's files that NCBI would write back in a way LOSAT does not (`-out_pssm`,
 /// `-out_ascii_pssm`, written in round 1, which a run stopped before its search never reaches),
 /// are refused here, once the database is opened (NCBI's error of a database it cannot open comes
-/// first) and before any output; so are LOSAT's limits of the PSSM search
-/// (`check_in_pssm_options`) and the PSSM files of the rounds that LOSAT cannot write as NCBI does
+/// first) and before any output; so are LOSAT's limits of the PSSM search for each requested
+/// format (`check_in_pssm_options`) and the PSSM files of the rounds that LOSAT cannot write as NCBI does
 /// (`check_pssm_files`, checked as a FASTA query's).
 ///
 /// The query is the PSSM's Bioseq as the reports show it (`PsiSearch::query_record`); with
@@ -6058,7 +6058,15 @@ fn search_pssm_query(
             input.refuse_written_back()?;
         }
     }
-    crate::algorithm::psiblast::in_pssm::check_in_pssm_options(&resolved, psi)?;
+    let outfmts = outputs
+        .formats
+        .iter()
+        .map(|format| {
+            crate::blastinput::app::parse_formatting_string(format.outfmt)
+                .map(|choice| choice.number)
+        })
+        .collect::<Result<Vec<i32>>>()?;
+    crate::algorithm::psiblast::in_pssm::check_in_pssm_options(&resolved, psi, &outfmts)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:482-484 (the formatter's
     // `believe_query` is `-parse_deflines`, with `-in_pssm` too)
     // ```c++

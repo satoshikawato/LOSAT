@@ -86,6 +86,13 @@ FASTA files:
   subjects `x2g_s1_s.faa`, `x2g_s1z_s.faa` and `x2g_s1d_s.faa` there (pairs of the line's probe s1c, built for
   one-hit HSPs of length 0: with `x2g_s1_q.fna` one at subject offset 1 and, without the subject's first letter,
   one at offset 0; with `x2g_s1d_q.fna` two, the subject written twice), whose every HSP has length 0.
+  `x2g_p0127` is the subject `x2g_p0127_s.faa` there and `x2g_ord` the three subjects `x2g_ord.faa` (rows
+  `db.x2g.bx.of.*`, line RG T3c after X2g; titles `x2g p0127 subject` and `x2g ord subjects`, `-blastdb_version 4`):
+  `x2g_p0127_q.fna` / `x2g_p0127_s.faa` is the pair p0127 of the X2g-1 probe P1 (`p_gen.py p 150 20261116 36 300
+  12 150`), whose HSP of length 0 starts at a codon of an HSP of the query's frame +1, where NCBI's
+  query-anchored merge frees a segment it still reads; `x2g_ord.faa` holds p0127's subject, a protein that
+  matches the first 48 nucleotides of P1's p0055 query in frame +1, and p0055's subject, and `x2g_ord_q.fna` and
+  `x2g_ord_q2.fna` the two queries in both orders.
 
 - `x2f_c0384_q.fna` / `x2f_c0384_s.faa`, `x2f_c0326_q.fna` / `x2f_c0326_s.faa`: two random pairs of the line RG
   X2f survey (cases c0384 and c0326), rows `db.x2f.*`: with `-window_size 0` and a low `-threshold`, BLASTX's

@@ -574,6 +574,16 @@ pub(crate) const UNPORTED_SUBJECT_START: &str = "BLASTX -ungapped -window_size 0
 /// rewrites one (`mapper_wraps_empty_row`).
 pub(crate) const UNPORTED_SUBJECT_ALL_EMPTY: &str = "BLASTX -ungapped -window_size 0 with -subject: a subject among the hits to report whose every one-hit ungapped alignment has length 0, one at the first or second letter of its subject's searched part, of which NCBI BLAST+'s Seq-loc mapper, finding no sequence type in its rows, makes alignments without scores of nucleotides against the rest of the subject's letters (rows with an E-value of 0.0 and a bit score of -1.0, or, for two or more such alignments, more rows, an exception or an out-of-memory stop), which LOSAT does not support where the report reads the alignment";
 
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:598-606 (quoted at
+// `report::query_anchored::aln_mix::Mix::place`)
+/// The refusal of a query-anchored report (outfmt 1 to 4) whose section NCBI's merge frees a
+/// segment in (`report::pairwise::EmptyRowsStop::MergeFreesSegment`): the Dense-seg of an HSP of
+/// length 0 has no widths, so `DisplaySeqalign` merges it with the HSPs of the query's frame +1
+/// (`report::query_anchored::HspStrands::no_widths`), and one whose query row starts at a codon of
+/// one of them splits that HSP's segment at a length of 0, which replaces every reference to the
+/// segment while the merge still walks it (PD-LOSAT-NCBI-DEFECTS rule 3).
+pub(crate) const UNPORTED_ANCHORED_FREE: &str = "BLASTX -ungapped -window_size 0 with -outfmt 1 to 4: a one-hit ungapped alignment of length 0 among the alignments shown whose query row starts at the first nucleotide of a codon of an alignment in the query's reading frame +1, where NCBI BLAST+'s merge of the query-anchored alignments frees memory that it still reads (it crashed in our runs), which LOSAT does not support";
+
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:422-427,499-503
 // ```c++
 //         ITERATE( CStd_seg::TLoc, it_loc, (*it)->GetLoc()) {

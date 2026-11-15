@@ -79,10 +79,11 @@ impl Sequences for Probe {
         }
     }
 
-    fn genetic_code(&self, seq: SeqKey) -> Option<DisplayCode> {
-        Some(match seq {
-            SeqKey::Query => self.query_code,
-            SeqKey::Subject(_) => self.subject_code,
+    fn genetic_code(&self, master: bool) -> Option<DisplayCode> {
+        Some(if master {
+            self.query_code
+        } else {
+            self.subject_code
         })
     }
 }

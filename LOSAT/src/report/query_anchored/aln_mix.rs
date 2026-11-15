@@ -126,6 +126,17 @@ pub(crate) enum MixError {
     /// (`Mix::merge_match`, `Mix::build`); `super::write_section` fails with it
     /// (`NcbiException::into_io_error`).
     NcbiThrows(NcbiException),
+    /// NCBI frees a segment that it still reads: a match of length 0 (BLASTX's HSP of length 0,
+    /// `serial::seqalign::empty_row_segments`) that starts at the start of a longer segment of its
+    /// row, or inside one (whose split gives it that start), "splits" that segment at its own
+    /// length of 0 (`Mix::place`). The new segment's start on each row of the old one is the old
+    /// one's: `SetStarts()[start + 0] = seg` replaces the `CRef` in that row's map, and on a row of
+    /// the first row's strand (every row of such a segment of a BLASTX section) nothing else holds
+    /// the old segment, so the replacement on its last row frees it while `ITERATE` still walks its
+    /// `m_StartIts` (alnmerger.cpp:598-614): a read of freed memory (SIGSEGV in our runs). The
+    /// program refuses the report before its first byte (PD-LOSAT-NCBI-DEFECTS rule 3,
+    /// `super::section_frees`).
+    NcbiFreesSegment,
 }
 
 /// NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnseq.hpp:139-185
@@ -981,6 +992,32 @@ impl Mix {
                 Some(key) if key == start => {
                     let prev_seg = self.seqs[seq1].starts[&key];
                     let prev_len = self.segs[prev_seg].len;
+                    if prev_len > curr_len && curr_len == 0 {
+                        // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:598-606
+                        // ```c++
+                        //                         ITERATE (CAlnMixSegment::TStartIterators, it,
+                        //                                 prev_seg->m_StartIts) {
+                        //                             CAlnMixSeq * seq = it->first;
+                        //                             tmp_start_i = it->second;
+                        //                             if (seq->m_PositiveStrand ==
+                        //                                 seq1->m_PositiveStrand) {
+                        //                                 seq->SetStarts()[tmp_start_i->first +
+                        //                                              curr_len * seq->m_Width]
+                        //                                     = seg;
+                        // ```
+                        // A match of length 0 at a longer segment's start (`NcbiFreesSegment`):
+                        // `curr_len * seq->m_Width` is 0, so each row's `CRef` of `prev_seg` is
+                        // replaced. Only rows of the first row's strand reach this (a row of the
+                        // other strand would keep a reference).
+                        let one_strand = self.segs[prev_seg].start_its.values().all(|&(seq, _)| {
+                            self.seqs[seq].positive_strand == self.seqs[seq1].positive_strand
+                        });
+                        return Err(if one_strand {
+                            MixError::NcbiFreesSegment
+                        } else {
+                            MixError::Internal("a match of length 0 in a segment of two strands")
+                        });
+                    }
                     if prev_len > curr_len {
                         let len1 = prev_len - curr_len;
                         let seg = self.new_segment(len1);
@@ -1306,10 +1343,6 @@ impl Mix {
                 // A subject's letters alone: a candidate for that subject's pass.
                 self.seqs[matched.seq1].match_list.push(index);
                 continue;
-            }
-            if matched.len == 0 {
-                // A Dense-seg segment of no letters: BLAST's Seq-aligns have none.
-                return Err(MixError::Internal("a segment of length 0"));
             }
             self.merge_match(matched, first_refseq)?;
         }

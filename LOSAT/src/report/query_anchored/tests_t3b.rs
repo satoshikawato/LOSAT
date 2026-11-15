@@ -77,10 +77,11 @@ impl Sequences for Probe {
         out.extend(masks.iter().map(|&(from, to)| (from, to, 0)));
     }
 
-    fn genetic_code(&self, seq: SeqKey) -> Option<crate::algorithm::tblastx::report::DisplayCode> {
-        match seq {
-            SeqKey::Query => None,
-            SeqKey::Subject(_) => self.code,
+    fn genetic_code(&self, master: bool) -> Option<crate::algorithm::tblastx::report::DisplayCode> {
+        if master {
+            None
+        } else {
+            self.code
         }
     }
 }

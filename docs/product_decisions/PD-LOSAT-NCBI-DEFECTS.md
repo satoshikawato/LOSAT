@@ -88,8 +88,10 @@
   subject into the query's sequence reproduced, with the two exceptions that this merge can throw
   (the report up to the query's description table, then NCBI's error, exit 255; 2026-11-16, T3c
   fix 2, in place of fix 1's explicit rejection), rule 2; and the rule-2 rejection of a query's id
-  of 1.24 and 1.28 in BLASTX and TBLASTX; Owner-delegated, standing instruction 2026-09-29,
-  restated 2026-10-07, within rule 2 and the class of 1.10)
+  of 1.24 and 1.28 in BLASTX and TBLASTX; BLASTX's HSPs of length 0 of 1.33 in these views
+  reproduced, rule 2, with the explicit rejection of a section whose merge NCBI frees a segment in,
+  rule 3 (2026-11-16, T3c after X2g); Owner-delegated, standing instruction 2026-09-29,
+  restated 2026-10-07, within rule 2, rule 3 as 1.23 and the class of 1.10)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -612,6 +614,25 @@ here, and names the widening that PS16a made for protein queries.
   meets each and shown in lower case on those columns of every row of the subject
   (`x_FillLocList`, showalign.cpp:4291-4338; `x_OutputSeq`, :2486-2523), also on its rows of other
   HSPs, where the letters are not masked (probes `bn.lc2.f2`, `bn.t3b.lc.*`, `bx.t3c.slc.*`).
+- BLASTX `-outfmt 1` to `4` with the HSPs of length 0 of `-ungapped -window_size 0` (version 1.35,
+  2026-11-16, line RG item T3c after X2g, 1.33): the description table and the sorts stop the report
+  as in outfmt 0 (`Row is empty`, the Dense-seg's exception). Past the table, the section makes a
+  Dense-seg of every aligned HSP before its first byte and outside its `try`
+  (showalign.cpp:2002-2009): `-subject`'s mapped Std-seg throws there (`Seq_align.cpp:801`, exit
+  255). The Dense-seg of empty rows as made (`-db`, and `-subject`'s that the mapper leaves) has one
+  segment of length 0 and no widths (`Seq_align.cpp:774-934`), so `DisplaySeqalign` puts it in the
+  group of the query's frame +1 whatever its frame (showalign.cpp:2010-2041) and adds it with
+  `fPreserveRows`. Its match is merged last (score 0): at the query's own frame row of that group it
+  is a segment of length 0 that shows nothing (a frame +1 HSP at query offset 0 starts the frame +1
+  row there, and the unaligned letters fill up to the next HSP), at another nucleotide a query row
+  of that frame (`x_SetSeqFrame`) without a subject row (`x_CreateDenseg` drops the empty one).
+  The anchored views (1, 2) show no such row; the flat views (3, 4) translate it as a row after row
+  0 with BLASTX's database genetic code 0 (`CBlastOptionsLocal::SetProgram`), which throws
+  `Unable to find genetic code number 0` inside the group's `try`: the group shows its heading
+  `For reading frame +1` alone. A section of such HSPs only is an alignment of no columns
+  (`(int)GetAlnStop()` is -1): its blank line alone. LOSAT writes the same (probes
+  `T/t3/x2g/`: 1,880 cases of the X2g fixtures' inputs and of the X2g-1 probe P1's pairs, 1,662 of
+  P1's 277 pairs with such HSPs, 18 of two queries; fixture rows `db.x2g.bx.of.*`).
 
 - `losat rpsbproc`, the end of an aligned segment when a site is mapped (`MapSegSet`'s `SeqPos_t end
   = m_vecSStarts[idx] + m_vecLens[idx] - 1`, `common/basedata.cpp:1180-1250`): an `unsigned int` sum
@@ -940,6 +961,21 @@ here, and names the widening that PS16a made for protein queries.
   the prolog), so no prefix of it is NCBI's. BLASTN writes its prolog before the search, as NCBI
   does, so its refusal follows the prolog. The other sections of such a record are NCBI's
   (fixture rows `db.of1.bp.self1.*`, `db.of1.bn.selfrc.*`).
+
+- BLASTX `-outfmt 1` to `4` with `-ungapped -window_size 0` (version 1.35, 2026-11-16, line RG item
+  T3c after X2g, Owner-delegated, rule 3 as 1.23): an HSP of length 0 among the aligned subjects
+  whose query row starts at the first nucleotide of a codon of an HSP of the query's frame +1. Its
+  match (merged with that frame's HSPs, above) starts at or inside a segment of letters of that
+  row, and `x_Merge` "splits" the segment at the match's length of 0
+  (alnmerger.cpp:580-614): `SetStarts()[start + 0] = seg` replaces each row's reference to the
+  segment, whose rows are all on the query's strand, so the last one frees it while `ITERATE`
+  still walks its `m_StartIts`. NCBI reads freed memory there: SIGSEGV in every such probe (37 of
+  the 1,880 cases in each of the four views, 98 of the grid's 277 searches, the second query of
+  `x2g_ord_q2.fna`), no checkable result. LOSAT runs the same merge and refuses (exit 1) where it
+  reaches that split (`report::query_anchored::aln_mix::MixError::NcbiFreesSegment`), before the
+  first byte of the reports of the search's call (as 1.23), unless the report of a query before it
+  ends with NCBI's exception, where NCBI stops first (`pairwise::blastx_anchored_stop`; fixture rows
+  `db.x2g.bx.of.p0127.nd0.1`, `db.x2g.bx.of.ord.n1a5.1`, `db.x2g.bx.of.ord2.n1a5.3`).
 
 - RPSBLAST `-use_sw_tback` with composition-based statistics (version 1.30, 2026-11-15, line PS
   item PS11c-3, Owner-delegated, line PS `DECISIONS.md` 63): a profile with two or more

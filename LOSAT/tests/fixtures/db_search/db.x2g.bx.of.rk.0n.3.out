@@ -1,0 +1,102 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: x2g rk subjects
+           2 sequences; 28 total letters
+
+
+
+Query= f0616_q
+
+Length=56
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+f0616_top                                                             40.0    4e-10  1
+
+
+
+For reading frame +1 of query sequence:
+
+For reading frame +2 of query sequence:
+
+Query_1  23  QGTGA  37
+0        5   .F.    7
+0        8       .  8
+
+For reading frame +3 of query sequence:
+
+Query_1  6   HRTIHCKAPVHNSNLA  53
+0        12       .IIAI.       17
+0        10            .RCII.  15
+0        10  ..C.              13
+0        16     ..             17
+0        10      .             10
+0        7     .               7
+0        14           I        14
+1        8       Y.            9
+1        10      .             10
+1        10            .       10
+
+For reading frame -1 of query sequence:
+
+Query_1  47  IAIMHRCLAVNCSV  6
+0        13  .IAI.           17
+0        10      ...I        13
+0        14         I.IH     17
+0        12             .II  14
+1        5     M.EY.         9
+1        9              .    9
+1        10      .           10
+1        2      .            2
+1        3        .          3
+
+For reading frame -2 of query sequence:
+
+Query_1  49  KLLLCTGALQ*IVLWI  2
+0        12      .II.I         16
+0        13              IIA.  16
+0        11  RCII              14
+0        1      .S.            3
+1        3   RFMM              6
+1        6           ME        7
+1        9       .             9
+
+For reading frame -3 of query sequence:
+
+Query_1  54  VLNCYYAPVPCSELFC  7
+0        12     .II.           15
+0        3              T.Q.   6
+0        13  II                14
+0        12                 .  12
+0        12            .       12
+0        5               Q     5
+1        9             .H.     11
+1        8                 Y.  9
+1        9      .H             10
+1        8       .             8
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 234
+
+
+  Database: x2g rk subjects
+    Posted date:  Nov 15, 2026  2:20 AM
+  Number of letters in database: 28
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 2

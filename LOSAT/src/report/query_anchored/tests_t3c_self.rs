@@ -70,7 +70,7 @@ impl Sequences for Probe {
         }
     }
 
-    fn genetic_code(&self, _seq: SeqKey) -> Option<DisplayCode> {
+    fn genetic_code(&self, _master: bool) -> Option<DisplayCode> {
         Some(DisplayCode::new(
             &crate::utils::genetic_code::GeneticCode::try_from_id(1).expect("genetic code 1"),
         ))

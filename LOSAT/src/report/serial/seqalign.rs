@@ -516,6 +516,78 @@ pub(crate) fn translated_row_segments(
         query_minus: q_frame < 0,
         subject_minus: s_frame < 0,
         query_frame: q_frame,
+        no_widths: false,
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:779-791
+// ```c++
+//             if ((*i)->IsInt()) {
+//                 const CSeq_interval& interval = (*i)->GetInt();
+//
+//                 // determine start and len
+//                 from = interval.GetFrom();
+//                 to = interval.GetTo();
+//                 starts.push_back(from);
+//                 row_len = to - from + 1;
+//                 row_lens.push_back(row_len);
+//
+//                 int width = 0;
+//                 // try to determine/check the seg_len and width
+//                 if (!seg_len) {
+// ```
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:909-935
+// ```c++
+//     for (seg = 0; seg < ds.GetNumseg(); seg++) {
+//         if (!widths_determined[seg]) {
+//             for(row = 0; row < dim; row++) {
+//                 if (starts[seg * dim + row] >= 0) {
+//                     int width = widths[row];
+//                     if (width == 3) {
+//                         seg_lens[seg] /= 3;
+//                     } else if (width == 0) {
+//                         widths_failure = true;
+//                     }
+//                     break;
+//     ...
+//     if (widths_failure) {
+//         if (widths_success) {
+//             ...
+//         } else {
+//             ds.ResetWidths();
+//         }
+//     }
+// ```
+/// The Dense-seg that `CreateDensegFromStdseg` makes of the empty rows of a BLASTX HSP of length 0
+/// (`ungapped_rows_empty`) as the engine made them (`-db`, and `-subject`'s Seq-aligns that the
+/// Seq-loc mapper leaves, `mapper_rewrites_empty_rows`): each row `(from, from - 1)` has the length
+/// `to - from + 1` of 0 in the unsigned `TSeqPos`, so its one segment has length 0 and starts at
+/// the rows' `from`, and no width is determined (both are 0), which resets the widths
+/// (`HspStrands::no_widths`). The query row keeps the strand of its frame `query_frame`, the protein
+/// row has none (`write_empty_rows`). The rows' `from` in the records are the lower of each row's
+/// shown ends (the query's `(from + 1, from)` on a plus frame, `(from, from + 1)` on a minus frame,
+/// `blastx::report::query_endpoints`; the subject's `(from + 1, from)`), which hold the
+/// `-query_loc` and `-subject_loc` starts that `RemapToQueryLoc` and the mapper add.
+pub(crate) fn empty_row_segments(
+    hit: &crate::common::Hit,
+    query_frame: i8,
+    segments: &mut Segments,
+) -> crate::report::query_anchored::HspStrands {
+    let q_from = hit.q_start.min(hit.q_end);
+    let s_from = hit.s_start.min(hit.s_end);
+    segments.starts.clear();
+    segments.lens.clear();
+    segments.strands.clear();
+    segments.starts.extend([q_from as i32, s_from as i32]);
+    segments.lens.push(0);
+    segments
+        .strands
+        .extend([Strand::of_frame(query_frame), Strand::Unknown]);
+    crate::report::query_anchored::HspStrands {
+        query_minus: query_frame < 0,
+        subject_minus: false,
+        query_frame,
+        no_widths: true,
     }
 }
 

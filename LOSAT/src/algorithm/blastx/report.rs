@@ -1991,10 +1991,12 @@ fn write_pairwise(
     Ok(())
 }
 
-/// The error of outfmt 0's writer: its stop at an HSP of length 0 (`EmptyRowsStop`) is NCBI's
-/// exception, `Row is empty` where the sorts or the description table read the HSP's empty rows
-/// (after the query's `Length=`), `CreateDensegFromStdseg` where they or `-subject`'s alignment
-/// section make a Dense-seg of the Seq-loc mapper's rows; a write error stays.
+/// The error of outfmt 0's writer (and of outfmt 1 to 4's): its stop at an HSP of length 0
+/// (`EmptyRowsStop`) is NCBI's exception, `Row is empty` where the sorts or the description table
+/// read the HSP's empty rows (after the query's `Length=`), `CreateDensegFromStdseg` where they or
+/// `-subject`'s alignment section make a Dense-seg of the Seq-loc mapper's rows, or LOSAT's
+/// refusal of a query-anchored section whose merge NCBI frees a segment in (before the call's
+/// first byte); a write error stays.
 fn empty_rows_stop(error: std::io::Error) -> anyhow::Error {
     use crate::report::pairwise::EmptyRowsStop;
     match error
@@ -2007,6 +2009,10 @@ fn empty_rows_stop(error: std::io::Error) -> anyhow::Error {
         Some(EmptyRowsStop::StdSegLengths) => {
             NativeError::exception(&super::empty_rows::std_seg_lengths_not_accurate()).into()
         }
+        Some(EmptyRowsStop::MergeFreesSegment) => super::empty_rows::EmptyRowsRefusal(
+            super::empty_rows::UNPORTED_ANCHORED_FREE.to_string(),
+        )
+        .into(),
         None => error.into(),
     }
 }

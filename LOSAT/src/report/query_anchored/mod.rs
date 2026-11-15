@@ -79,6 +79,12 @@ pub(crate) struct HspStrands {
     /// The query's frame in its record (`s_GetStdsegMasterFrame`: 1 to 3, -1 to -3) when the query
     /// is translated (BLASTX, TBLASTX); 0 otherwise.
     pub(crate) query_frame: i8,
+    /// The Dense-seg has no widths: `CreateDensegFromStdseg` of the empty rows of a BLASTX HSP of
+    /// length 0 (`serial::seqalign::empty_row_segments`) determines none and resets them
+    /// (Seq_align.cpp:906-935). `DisplaySeqalign` puts such a Dense-seg in the first group, the
+    /// query's frame +1, whatever its frame, and adds it with `fPreserveRows` (`Hsps::groups`,
+    /// `Hsps::add_flags`).
+    pub(crate) no_widths: bool,
 }
 
 impl HspStrands {
@@ -269,11 +275,13 @@ impl Hsps {
     /// ```
     /// The query's first Std-seg holds the HSP's first letter on the query's strand: its frame is
     /// that of the HSP in the query's record (`HspStrands::query_frame`, which the program gives).
+    /// A BLASTX Dense-seg without widths (`HspStrands::no_widths`, an HSP of length 0) is in the
+    /// first group (the `else` above).
     fn groups(&self) -> [Vec<usize>; K_NUM_FRAME] {
         let mut groups: [Vec<usize>; K_NUM_FRAME] = Default::default();
         let by_frame = self.query_width == 3 || self.translate_nuc_to_nuc;
         for (index, &(_, _, strands)) in self.hsps.iter().enumerate() {
-            let group = if !by_frame {
+            let group = if !by_frame || (strands.no_widths && !self.translate_nuc_to_nuc) {
                 Some(0)
             } else {
                 match strands.query_frame {
@@ -331,9 +339,12 @@ impl Hsps {
     ///         fNegativeStrand       = 0x0002,
     /// ```
     /// `fNegativeStrand` is a merge flag: as the add flag of a BLASTX HSP in a minus query frame
-    /// (the Dense-seg's first width is 3 and its first strand minus) it is `fForceTranslation`.
+    /// (the Dense-seg's first width is 3 and its first strand minus) it is `fForceTranslation`. A
+    /// Dense-seg without widths (`HspStrands::no_widths`) is added with `fPreserveRows`.
     fn add_flags(&self, strands: HspStrands) -> AddFlags {
-        if self.translate_nuc_to_nuc || (self.query_width == 3 && strands.query_minus) {
+        if self.translate_nuc_to_nuc
+            || (self.query_width == 3 && strands.query_minus && !strands.no_widths)
+        {
             AddFlags::ForceTranslation
         } else {
             AddFlags::PreserveRows
@@ -378,10 +389,17 @@ pub(crate) trait Sequences {
     /// which `aln_vec::AlnMap::seq_string` reverse-complements or translates for a row.
     fn letters(&self, seq: SeqKey, from: u32, to: u32, out: &mut Vec<u8>);
 
-    /// The genetic code of `seq`'s translated rows (`CAlnVec::SetGenCode`: the query's
-    /// `m_MasterGeneticCode` for row 0, the database's `m_SlaveGeneticCode` for the others,
-    /// showalign.cpp:2100-2101); `None` for a sequence that is not translated.
-    fn genetic_code(&self, _seq: SeqKey) -> Option<crate::algorithm::tblastx::report::DisplayCode> {
+    /// The genetic code of a translated row (`CAlnVec::SetGenCode`, showalign.cpp:2100-2101): the
+    /// query's `m_MasterGeneticCode` for row 0 (`master`), the database's `m_SlaveGeneticCode` for
+    /// every other row, whatever its sequence (a row of the query other than row 0 too: BLASTX's
+    /// query rows of HSPs of length 0, TBLASTX's rows of a query record that is also a subject).
+    /// `None`: a code NCBI's table does not have, BLASTX's database code 0
+    /// (`CBlastOptionsLocal::SetProgram` clears it for a protein database), on which a
+    /// translation throws (`aln_vec::UnknownGeneticCode`).
+    fn genetic_code(
+        &self,
+        _master: bool,
+    ) -> Option<crate::algorithm::tblastx::report::DisplayCode> {
         None
     }
 
@@ -414,12 +432,13 @@ pub(crate) trait ReportSequences: Sync {
     fn query_masks(&self, q_idx: usize, out: &mut Vec<Mask>);
     fn subject_masks(&self, q_idx: usize, s_idx: u32, out: &mut Vec<Mask>);
 
-    /// The genetic code of the query's translated row (`Sequences::genetic_code`).
+    /// The genetic code of the query's translated row 0 (`Sequences::genetic_code`).
     fn query_genetic_code(&self) -> Option<crate::algorithm::tblastx::report::DisplayCode> {
         None
     }
 
-    /// The genetic code of the subjects' translated rows (`Sequences::genetic_code`).
+    /// The genetic code of the translated rows after row 0, the database's
+    /// (`Sequences::genetic_code`); `None` for BLASTX's code 0.
     fn subject_genetic_code(&self) -> Option<crate::algorithm::tblastx::report::DisplayCode> {
         None
     }
@@ -453,10 +472,11 @@ impl Sequences for OfQuery<'_> {
         }
     }
 
-    fn genetic_code(&self, seq: SeqKey) -> Option<crate::algorithm::tblastx::report::DisplayCode> {
-        match seq {
-            SeqKey::Query => self.sequences.query_genetic_code(),
-            SeqKey::Subject(_) => self.sequences.subject_genetic_code(),
+    fn genetic_code(&self, master: bool) -> Option<crate::algorithm::tblastx::report::DisplayCode> {
+        if master {
+            self.sequences.query_genetic_code()
+        } else {
+            self.sequences.subject_genetic_code()
         }
     }
 }
@@ -747,6 +767,10 @@ pub(crate) fn write_section<W: Write + ?Sized>(
             aln_mix::MixError::Internal(what) => internal(what),
             // `ncbi_aborts`, which the program's report asks before the query's first byte.
             aln_mix::MixError::NcbiAborts => internal("a section that NCBI BLAST+ aborts on"),
+            // `section_frees`, asked as `ncbi_aborts` is.
+            aln_mix::MixError::NcbiFreesSegment => {
+                internal("a section whose merge NCBI BLAST+ frees a segment in")
+            }
             // NCBI's exception, before the section's first byte (`Merge` comes before `out <<
             // "\n"`): the program's report ends with it (`cli::NativeError::of_writer`).
             aln_mix::MixError::NcbiThrows(exception) => exception.into_io_error(),
@@ -779,7 +803,16 @@ pub(crate) fn write_section<W: Write + ?Sized>(
         } else {
             0
         };
-        let rows = prepare_rows(&map, line_length, hsps.query_bioseq, query_frame, sequences)?;
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2092-2109
+        // (quoted at this function)
+        // A row that `x_PrepareRowData` cannot translate (`aln_vec::UnknownGeneticCode`) throws
+        // inside the `try` of the group, after its heading and before any line of it: NCBI
+        // writes nothing more of the group.
+        let rows = match prepare_rows(&map, line_length, hsps.query_bioseq, query_frame, sequences)
+        {
+            Err(error) if aln_vec::UnknownGeneticCode::is(&error) => continue,
+            rows => rows?,
+        };
         display_rows(writer, &map, view, line_length, rows, sequences)?;
     }
     Ok(())
@@ -809,6 +842,41 @@ pub(crate) fn ncbi_aborts(hsps: &Hsps) -> io::Result<bool> {
             Ok(_) => {}
             Err(aln_mix::MixError::NcbiAborts) => return Ok(true),
             Err(aln_mix::MixError::NcbiThrows(_)) => return Ok(false),
+            Err(aln_mix::MixError::NcbiFreesSegment) => {
+                return Err(internal(
+                    "a match of length 0 in a section with the query's own Bioseq",
+                ))
+            }
+            Err(aln_mix::MixError::Internal(what)) => return Err(internal(what)),
+        }
+    }
+    Ok(false)
+}
+
+/// Whether NCBI BLAST+'s merge of the section of `hsps` frees a segment that it still reads
+/// (`aln_mix::MixError::NcbiFreesSegment`): a BLASTX HSP of length 0 (`HspStrands::no_widths`, in
+/// the first group) whose query position lies in a segment of letters of its query row. The
+/// groups are merged in order, all before the section's first byte (`write_section`), so the
+/// first group's merge comes first; only a group with such an HSP is merged here. The program
+/// asks it before any byte of the call's reports, as `ncbi_aborts`, and refuses the report there
+/// (PD-LOSAT-NCBI-DEFECTS rule 3): what NCBI writes before its crash is what its stream had
+/// flushed.
+pub(crate) fn section_frees(hsps: &Hsps) -> io::Result<bool> {
+    for indices in hsps.groups().iter() {
+        if !indices
+            .iter()
+            .any(|&index| hsps.hsp(index).strands.no_widths)
+        {
+            continue;
+        }
+        match aln_mix::merge(hsps, indices) {
+            Ok(_) | Err(aln_mix::MixError::NcbiThrows(_)) => {}
+            Err(aln_mix::MixError::NcbiFreesSegment) => return Ok(true),
+            Err(aln_mix::MixError::NcbiAborts) => {
+                return Err(internal(
+                    "a section of length 0 matches that NCBI BLAST+ aborts on",
+                ))
+            }
             Err(aln_mix::MixError::Internal(what)) => return Err(internal(what)),
         }
     }
@@ -1041,7 +1109,9 @@ fn fill_loc_list(
 ///             ...
 ///             out << rowdata;
 /// ```
-/// (`j` stays below 2^31: an alignment of more than 2^30 columns would make NCBI's `int` wrap.)
+/// (`j` stays below 2^31: an alignment of more than 2^30 columns would make NCBI's `int` wrap.
+/// An alignment of no columns, the merge of BLASTX HSPs of length 0 alone, ends at `TSeqPos`
+/// 4294967295, which `(int)` makes -1: no line.)
 fn display_rows<W: Write + ?Sized>(
     writer: &mut W,
     map: &AlnMap<'_>,
@@ -1050,7 +1120,7 @@ fn display_rows<W: Write + ?Sized>(
     mut rows: RowData,
     sequences: &dyn Sequences,
 ) -> io::Result<()> {
-    let aln_stop = i64::from(map.aln_stop());
+    let aln_stop = i64::from(map.aln_stop() as i32);
     let mut prev_stop = vec![0i32; map.num_rows()];
     let mut out = Vec::new();
     let mut j = 0i64;
@@ -1680,3 +1750,5 @@ mod tests_t3b;
 mod tests_t3c;
 #[cfg(test)]
 mod tests_t3c_self;
+#[cfg(test)]
+mod tests_x2g;

@@ -13018,7 +13018,7 @@ fn search_query_batch<const UNGAPPED: bool>(
         any_valid_context,
         queries: queries_ref,
         query_contexts: query_contexts_ref,
-        setup: subject_passes::CallStatistics {
+        statistics: subject_passes::CallStatistics {
             cutoffs: &x_batch_cutoffs,
             query_eff_searchsp: query_eff_searchsp_ref,
         },

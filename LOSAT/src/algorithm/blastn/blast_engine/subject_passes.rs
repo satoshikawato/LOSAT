@@ -67,10 +67,11 @@ use rayon::prelude::*;
 /// The scratch of one worker: the gapped aligner's and the subject search's.
 type SubjectState = (GapAlignScratch, SubjectScratch);
 
-/// What one call of `search_subject` reads of the statistics: the cutoffs and the search spaces of
-/// the setup (`x_batch_cutoffs` and the setup's spaces), or, where NCBI computes the statistics of
-/// each subject, the subject's own (`SpecialStatistics::subject_statistics`), or a preliminary
-/// stage's that are not the setup's (a statistics' total of 0 or less).
+/// What one call of `search_subject` reads of the statistics (`SubjectPasses::statistics`): the
+/// cutoffs and the search spaces of the setup (`x_batch_cutoffs` and the setup's spaces), or, where
+/// NCBI computes the statistics of each subject, the subject's own
+/// (`SpecialStatistics::subject_statistics`), or a preliminary stage's that are not the setup's (a
+/// statistics' total of 0 or less).
 #[derive(Clone, Copy)]
 pub(super) struct CallStatistics<'a> {
     pub(super) cutoffs: &'a BatchCutoffs,
@@ -138,9 +139,10 @@ pub(super) struct SubjectPasses<'a> {
     pub(super) any_valid_context: bool,
     pub(super) queries: &'a [FastaRecord],
     pub(super) query_contexts: &'a [QueryContext],
-    /// The setup's cutoffs and spaces, which a subject set's subjects and a database's on the
-    /// default path read.
-    pub(super) setup: CallStatistics<'a>,
+    /// The cutoffs and spaces that `search_subject` reads: the setup's, which a subject set's
+    /// subjects and a database's on the default path read; `special_subject` searches with a copy
+    /// of the passes that holds the subject's own (or the preliminary stage's).
+    pub(super) statistics: CallStatistics<'a>,
     /// A database's statistics where they are not the setup's (`None` on the default path).
     pub(super) special: Option<&'a SpecialStatistics<'a>>,
     pub(super) timing: Option<&'a BlastnTiming>,
@@ -168,8 +170,8 @@ impl SubjectPasses<'_> {
 
     /// One subject for one stage: the preliminary search (`prelim_source` is `None`: the subject's
     /// preliminary HSPs, `lookups` its tables) or the traceback of the HSPs the preliminary stage kept
-    /// (`Some`: the subject's final HSPs). `state` is the worker's scratch, `statistics` the call's
-    /// cutoffs and spaces (`CallStatistics`). Nothing is searched without a valid context.
+    /// (`Some`: the subject's final HSPs). `state` is the worker's scratch; the cutoffs and spaces are
+    /// `self.statistics`. Nothing is searched without a valid context.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1469-1470 (the subject's
     /// preliminary search) and c++/src/algo/blast/core/blast_traceback.c:1521,1632-1633 (its traceback)
@@ -184,12 +186,16 @@ impl SubjectPasses<'_> {
         state: &mut SubjectState,
         lookups: Option<&LookupTables>,
         prelim_source: Option<&Vec<PrelimHit>>,
-        statistics: &CallStatistics<'_>,
     ) -> (Option<SubjectHits>, Vec<PrelimHit>) {
         let Self {
             any_valid_context,
             queries,
             query_contexts,
+            statistics:
+                CallStatistics {
+                    cutoffs,
+                    query_eff_searchsp,
+                },
             timing: timing_ref,
             prelim_batch,
             trace_batch,
@@ -284,12 +290,8 @@ impl SubjectPasses<'_> {
         // NCBI uses UNGAPPED params (kbp_std) for gap_trigger calculation
         // and GAPPED params (kbp_gap) for cutoff_score_max calculation
         // The values depend on the context only (the gapped calculation's branch above: gap_trigger
-        // capped by cutoff_score_max), so the batch computes them once (`SubjectPasses::setup`); the
+        // capped by cutoff_score_max), so the batch computes them once (`SubjectPasses::statistics`); the
         // statistics of each subject compute them per subject (`special_subject`).
-        let &CallStatistics {
-            cutoffs,
-            query_eff_searchsp,
-        } = statistics;
         let (cutoff_scores, hit_saving_cutoff_scores, x_dropoff_scores, reduced_cutoff_scores) =
             (&cutoffs.0, &cutoffs.1, &cutoffs.2, &cutoffs.3);
 
@@ -378,7 +380,7 @@ impl SubjectPasses<'_> {
         let traceback_stage = prelim_source.is_some() && !UNGAPPED;
         let statistics = match (special.per_subject, traceback_stage) {
             (false, false) => special.prelim,
-            (false, true) => self.setup,
+            (false, true) => self.statistics,
             (true, traceback) => {
                 let spaces: &[i64] = if traceback {
                     special.traceback_option_spaces
@@ -401,14 +403,18 @@ impl SubjectPasses<'_> {
                 CallStatistics {
                     cutoffs: &x_subject.0,
                     query_eff_searchsp: if traceback {
-                        self.setup.query_eff_searchsp
+                        self.statistics.query_eff_searchsp
                     } else {
                         &x_subject.1
                     },
                 }
             }
         };
-        self.search_subject::<UNGAPPED>(s_idx, subject, state, lookups, prelim_source, &statistics)
+        SubjectPasses {
+            statistics,
+            ..*self
+        }
+        .search_subject::<UNGAPPED>(s_idx, subject, state, lookups, prelim_source)
     }
 
     /// One pass over the subjects in subject order: the preliminary stage gives each subject's
@@ -460,7 +466,6 @@ impl SubjectPasses<'_> {
                 state,
                 lookups,
                 kept.map(|kept| &kept[s_idx]),
-                &self.setup,
             )
         };
         let num_subjects = self.subject_records().len();
@@ -587,7 +592,10 @@ impl SubjectPasses<'_> {
         // statistics of each subject (`SpecialStatistics::subject_statistics`).
         let x_subject;
         let (word_cutoffs, eff_spaces): (&Vec<i32>, &Vec<i64>) = match self.special {
-            None => (&self.setup.cutoffs.0, self.setup.query_eff_searchsp),
+            None => (
+                &self.statistics.cutoffs.0,
+                self.statistics.query_eff_searchsp,
+            ),
             Some(special) if special.per_subject => {
                 x_subject = (special.subject_statistics)(
                     subject_length,
@@ -830,7 +838,6 @@ impl SubjectPasses<'_> {
                             state,
                             Some(lookup_tables),
                             None,
-                            &self.setup,
                         )
                     };
                 match self.special {
@@ -918,7 +925,6 @@ impl SubjectPasses<'_> {
                                 state,
                                 None,
                                 Some(kept),
-                                &self.setup,
                             ),
                             Some(special) => crate::stats::setup::apart(|| {
                                 self.special_subject::<UNGAPPED>(

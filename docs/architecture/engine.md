@@ -286,8 +286,7 @@ tblastx turn it on (`SetSumStatisticsMode()` in `tblastn_options.cpp`, `blastx_o
 blastp and tblastx run the stages inside one very large function each, with a closure
 `process_subject` for one subject, which calls helpers for some stages. blastn's `search_query_batch`
 sets a batch up, then calls the passes of `subject_passes.rs` and the functions of the two stages. blastx and
-tblastn spread
-their stages over files (blastx `preliminary.rs`, `traceback.rs`, `runtime.rs`; tblastn
+tblastn spread their stages over files (blastx `preliminary.rs`, `traceback.rs`, `runtime.rs`; tblastn
 `search_init.rs`, `search_seed.rs`, `search_gapped.rs`, `stage_d_*.rs`).
 
 - **blastn** (`algorithm/blastn/blast_engine/run.rs`): `run` → `search_cli` → `search` →
@@ -319,8 +318,8 @@ kernel: a `-subject` set is encoded first and searched by `search_subjects` (bla
 loop of `run_resolved_in_pool` (blastp); a database is read in blocks by
 `database::search_blocks` (`blastn/blast_engine/database.rs`, `blastp/blast_engine/database.rs`),
 and the sequences with hits are read again for the traceback (`traceback_listed`) or the
-composition redo (`ListedSubjects`). Both paths share the per-subject kernel (blastn `search_subject`, blastp `process_subject`), the hit lists
-and the report writers. `algorithm::common::database` holds what all `-db` programs share: opening a
+composition redo (`ListedSubjects`). Both paths share the per-subject kernel (blastn `search_subject`,
+blastp `process_subject`), the hit lists and the report writers. `algorithm::common::database` holds what all `-db` programs share: opening a
 database by name, NCBI's error messages, titles, and the prefetch rule. After blastp lists the
 subjects of a `-db` search, a hit's subject index is its rank among the listed subjects, not its
 OID.

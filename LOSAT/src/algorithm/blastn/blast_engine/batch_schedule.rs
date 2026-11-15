@@ -1,7 +1,8 @@
 //! The schedule of one blastn query batch's search (`batch_schedule`): the `LOSAT_TIMING` clocks, whether
 //! the search asks for more than one thread (`requested_parallel`), the task's configuration
 //! (`configure_task`) and the traceback's speculative scheduling (the speculative greedy traceback, the
-//! look-ahead window of the helper threads). It reads the switches and the environment once per batch.
+//! look-ahead window of the helper threads). It reads `LOSAT_TIMING` and `LOSAT_DEBUG_COORDS*` once per
+//! batch and records the `LOSAT_X_AHEAD` side (not `subject_env::subject_schedule`, the schedule of the subjects).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:82-88 (the thread count of a
 //! preliminary search)
@@ -45,7 +46,7 @@ pub(super) fn batch_schedule(
     )]
     num_threads: usize,
 ) -> BatchSchedule {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:493-555
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:493-555
     // ```c
     // if (aux_struct->WordFinder) {
     //     aux_struct->WordFinder(subject, query, query_info, lookup, matrix,
@@ -53,17 +54,17 @@ pub(super) fn batch_schedule(
     //                            aux_struct->offset_pairs,
     //                            kScanSubjectOffsetArraySize,
     //                            init_hitlist, ungapped_stats);
+    // ...
     //     if (init_hitlist->total == 0) continue;
-    // }
     // ...
     // if (aux_struct->GetGappedScore) {
     //     status = aux_struct->GetGappedScore(program_number, query,
-    //             query_info, subject, gap_align, score_params, ext_params,
-    //             hit_params, word_params, init_hitlist, &hsp_list,
-    //             gapped_stats, NULL);
-    // }
+    //             query_info,
+    //             subject, gap_align, score_params, ext_params, hit_params,
+    //             word_params, init_hitlist, &hsp_list, gapped_stats, NULL);
     // ...
-    // Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
+    //     Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
+    // ...
     // Blast_HSPListSortByScore(hsp_list);
     // ```
     let timing_enabled = std::env::var_os("LOSAT_TIMING").is_some();
@@ -78,22 +79,27 @@ pub(super) fn batch_schedule(
         None
     };
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-500
     // ```c
     // while (TRUE) {
     //     status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
     //                                    dbseq_chunk_overlap);
+    //
     //     if (status == SUBJECT_SPLIT_DONE) break;
-    //     if (status == SUBJECT_SPLIT_NO_RANGE) continue;
-    //     ...
+    // ...
+    //     ASSERT(status == SUBJECT_SPLIT_OK);
+    // ...
     //     if (aux_struct->WordFinder) {
-    //         aux_struct->WordFinder(...);
+    // ...
+    //         aux_struct->WordFinder(subject, query, query_info, lookup, matrix,
+    //                                word_params, aux_struct->ewp,
+    //                                aux_struct->offset_pairs,
+    //                                kScanSubjectOffsetArraySize,
+    //                                init_hitlist, ungapped_stats);
+    // ...
     //         if (init_hitlist->total == 0) continue;
-    //     }
-    //     ...
-    // }
     // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:82-88
     // ```c
     // if (num_threads > 1) {
     //     SetNumberOfThreads(num_threads);
@@ -113,11 +119,12 @@ pub(super) fn batch_schedule(
     // Configure task-specific parameters (initial configuration)
     let config = configure_task(args);
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:509-513
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:508-511
     // ```c
-    // BLAST_GappedAlignmentWithTraceback(program_number, query,
-    //     adjusted_subject, gap_align, score_params, q_start, s_start,
-    //     query_length, adjusted_s_length, fence_hit);
+    // } else {
+    //   BLAST_GappedAlignmentWithTraceback(program_number, query,
+    //         adjusted_subject, gap_align, score_params, q_start, s_start,
+    //         query_length, adjusted_s_length,
     // ```
     // Preserve ordered debug-coordinate logging; speculative DP is otherwise pure.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:375,503-507

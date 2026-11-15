@@ -12790,7 +12790,7 @@ fn search_query_batch<const UNGAPPED: bool>(
         search_karlin: &search_karlin,
     })?;
 
-    // Pass queries for use in the closure (the lookup tables are passed by the preliminary
+    // Pass queries for `SubjectPasses` (the lookup tables are passed by the preliminary
     // stage's calls, `search_subject`'s `lookups`)
     let queries_ref = &seq_data.queries;
     let query_contexts_ref = &query_contexts;
@@ -12807,10 +12807,6 @@ fn search_query_batch<const UNGAPPED: bool>(
     //    ...
     // } BlastHSPList;
     // ```
-    // The records whose titles name the subjects in LOSAT's debug and trace lines (none for a
-    // database: its sequences are "unknown" there).
-    let trace_subject_records: &[FastaRecord] =
-        subjects.prepared().map_or(&[], |prepared| prepared.records);
     let search_karlin_ref = &search_karlin;
     let context_valid_ref = &context_valid;
     let x_dropoff_init_ref = &x_dropoff_init;
@@ -12977,12 +12973,9 @@ fn search_query_batch<const UNGAPPED: bool>(
         blastn_trace_enabled,
     };
     // The passes over the batch's subjects (`subject_passes::SubjectPasses`), built once.
-    let prepared = subjects.prepared();
     let passes = subject_passes::SubjectPasses {
         args,
         subjects,
-        prepared,
-        subject_records: trace_subject_records,
         prelim_batch: &prelim_batch,
         trace_batch: &trace_batch,
         any_valid_context,

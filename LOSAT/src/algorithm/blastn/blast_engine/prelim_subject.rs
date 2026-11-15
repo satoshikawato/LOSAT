@@ -219,11 +219,11 @@ pub(super) struct PrelimBatch<'a> {
 /// batch's lookup tables and `PrelimBatch` for the rest of the chunk's search: the values of
 /// `PrelimBatch` that the word finder reads, one load from the pointer that each chunk's word
 /// finder takes, and what follows from them for every chunk (the diagonal table's form and sizes,
-/// the word lengths, the level bound's constants). Built once per batch by
-/// `SubjectPasses::prelim_pass`, which holds the tables (the traceback drops them, `x_lut_drop.rs`;
-/// `ScanBatch::new`); shared references and `Copy` values only (`Sync`, for the subjects and the
-/// chunks on the pool). Each chunk's inputs are a reference to it and the chunk's own values (its
-/// letters, length, ranges, masks, diagonal offset and ids).
+/// the word lengths, the level bound's constants). Built once per batch by the preliminary pass
+/// (`SubjectPasses::prelim_pass`, in `prelim_into`), which holds the tables (the traceback drops
+/// them, `x_lut_drop.rs`; `ScanBatch::new`); shared references and `Copy` values only (`Sync`, for
+/// the subjects and the chunks on the pool). Each chunk's inputs are a reference to it and the
+/// chunk's own values (its letters, length, ranges, masks, diagonal offset and ids).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:493-497 (the word finder of a
 /// chunk takes pointers to the search's shared structs: the query, its contexts, the lookup table,

@@ -1,0 +1,30 @@
+
+                                          Tax BLAST report                                          
+
+Query= pdq query of the duplicated record
+
+Length=220
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                          (only common) [x]                                         
+ 7                                                                                     466   6e-174  
+
+                                     MAG uncultured thing () [x]                                     
+ 5         Uncultured thing                                                            466   6e-174  
+
+                                      TPA: tpa organism () [x]                                      
+ 4         Tpa organism                                                                466   6e-174  
+
+                                  A &amp; B &lt;x&gt; &#65; () [x]                                  
+ 3         A & B <x> A                                                                 466   6e-174  
+
+                                       Spaced   name   (sp) [x]                                     
+ 2         Spaced name                                                                 466   6e-174  
+
+                                    Bacillus sp. () [firmicutes]                                    
+ 1         Bacillus sp.                                                                466   6e-174  
+
+                                 uncultured bacterium () [bacteria]                                 
+ 0         Uncultured bacterium                                                        466   6e-174  

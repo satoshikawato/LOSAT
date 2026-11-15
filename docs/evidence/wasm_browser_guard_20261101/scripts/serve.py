@@ -2,7 +2,7 @@
 at /arm/<arm>/, with the threaded command module of each arm. Adapted from gbdraw's
 analysis/ov2369/serve.py (probes on thread faults and the main worker's memory size).
 usage: serve.py <port>"""
-import sys, mimetypes
+import os, sys, mimetypes
 from functools import partial
 from pathlib import Path
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -71,7 +71,12 @@ class Handler(SimpleHTTPRequestHandler):
         if p.startswith("/arm/"):
             _, _, arm, rest = p.split("/", 3)
             if rest == "harness.html": return self._send((H / "harness.html").read_text(), "text/html")
-            if rest.startswith("data/"): return self._send((H / rest).read_bytes(), "application/json")
+            if rest.startswith("data/"):
+                # Only files under data/: a "../" in the request path must not leave it.
+                root = os.path.realpath(H / "data")
+                f = os.path.realpath(H / rest)
+                if not f.startswith(root + os.sep): return self.send_error(404)
+                return self._send(Path(f).read_bytes(), "application/json")
             if rest == "js/workers/losat-wasi-thread-worker.js": return self._send(thread_worker(), "text/javascript")
             if rest == "js/workers/losat-threaded-worker.js": return self._send(job_worker(arm), "text/javascript")
             if rest == "wasm/losat/losat-threaded.wasm": return self._send(ARMS[arm].read_bytes(), "application/wasm")

@@ -110,12 +110,6 @@ pub(super) struct BlastpDatabase {
 }
 
 impl BlastpDatabase {
-    /// LOSAT's refusal of mixed accession tables (`shared::check_accession_tables`), with the
-    /// program's other limits.
-    pub(super) fn check_accession_tables(&self) -> Result<()> {
-        shared::check_accession_tables(&self.db, self.program)
-    }
-
     /// The OIDs of the database's ordinal ids, which name the reported sequences without
     /// parsed Seq-ids (`gnl|BL_ORD_ID|n`).
     pub(super) fn oid_map(&self) -> crate::seqdb::OidMap<'_> {
@@ -976,8 +970,14 @@ impl ListedSubjects {
         }
         let mut records = Vec::with_capacity(self.ordinals.len());
         let mut replaced_title_bytes = Vec::with_capacity(self.ordinals.len());
-        let mut taxonomy_titles = Vec::with_capacity(self.ordinals.len());
-        for ((&ordinal, encoded), title) in self.ordinals.iter().zip(&self.encoded).zip(titles) {
+        let mut sources = Vec::new();
+        for (rank, ((&ordinal, encoded), title)) in self
+            .ordinals
+            .iter()
+            .zip(&self.encoded)
+            .zip(titles)
+            .enumerate()
+        {
             let letters: Vec<u8> = encoded.aa_seq[1..=encoded.aa_len]
                 .iter()
                 .map(|&residue| ncbistdaa_to_ascii(residue) as u8)
@@ -986,7 +986,7 @@ impl ListedSubjects {
             // shows it.
             let stored = title.unwrap_or_default();
             replaced_title_bytes.push(stored.replaced_bytes);
-            taxonomy_titles.push(stored.taxonomy_title);
+            shared::keep_source(&mut sources, rank, self.ordinals.len(), stored.source);
             records.push(FastaRecord::new(
                 // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the
                 // OID (line DI-8).
@@ -1000,7 +1000,7 @@ impl ListedSubjects {
             oids: database.oid_map(),
             shown: ListedShown::Records(records),
             replaced_title_bytes,
-            taxonomy_titles,
+            sources,
             parsed: parsed.by_rank,
             program: database.program,
         })
@@ -1082,10 +1082,9 @@ pub(super) struct ListedTitles<'a> {
     /// Whether the stored title of a subject holds a byte outside ' ' ..= '~' (read as
     /// '#'), by rank (`check_reported_titles`).
     replaced_title_bytes: Vec<bool>,
-    /// Whether NCBI makes the outfmt 0 title of a subject without parsed Seq-ids from its taxid
-    /// and the taxonomy database (`shared::StoredTitle::taxonomy_title`), by rank
-    /// (`check_shown_titles`).
-    taxonomy_titles: Vec<bool>,
+    /// The sources from which NCBI makes the empty stored titles of the subjects without parsed
+    /// Seq-ids, by rank (`shared::StoredTitle::source`; empty when none has one).
+    pub(super) sources: Vec<crate::report::defline::SourceTaxname>,
     /// The subjects with parsed Seq-ids, by rank (empty when no reported subject has them;
     /// their entry of `shown` is the title of their first definition line).
     pub(super) parsed: Vec<Option<Arc<ParsedSubject>>>,
@@ -1205,18 +1204,12 @@ impl ListedTitles<'_> {
                 let Some(subject) = &self.parsed[rank] else {
                     continue;
                 };
-                if scope_of(query).has_key(&subject.query_scope_keys().own) {
-                    return Err(shared::parsed_refusal(
-                        self.oids.oid(self.listed.ordinals[rank]),
-                        &format!(
-                            "has the Seq-id {}, the id of a query read without -parse_deflines \
-                             in the query batch that reports it: NCBI BLAST+ shows that query in \
-                             its place in the query-anchored formats (outfmt 1 to 4)",
-                            String::from_utf8_lossy(&subject.alignment_fasta())
-                        ),
-                        self.program,
-                    ));
-                }
+                shared::refuse_generated_query_id(
+                    subject,
+                    self.oids.oid(self.listed.ordinals[rank]),
+                    scope_of(query),
+                    self.program,
+                )?;
             }
         }
         self.refuse_display_ids(hit_lists, scope_of, true, described)
@@ -1821,6 +1814,7 @@ impl ListedTitles<'_> {
             }
             let id = match shared::tabular_subject_id(
                 self.title(rank),
+                self.source(rank),
                 self.oids.oid(ordinal),
                 true,
                 self.program,
@@ -1897,6 +1891,7 @@ impl ListedTitles<'_> {
                 shared::library_subject(
                     &database.db,
                     self.title(rank),
+                    self.source(rank),
                     self.listed.ordinals[rank],
                     self.parsed_subject(rank),
                     self.listed.x_lengths[rank] as usize,
@@ -1910,6 +1905,12 @@ impl ListedTitles<'_> {
     /// The subject of rank `rank` when it has parsed Seq-ids.
     pub(super) fn parsed_subject(&self, rank: usize) -> Option<&ParsedSubject> {
         self.parsed.get(rank).and_then(Option::as_deref)
+    }
+
+    /// The source from which NCBI makes the empty stored title of the subject of rank `rank`
+    /// (`report::pairwise::stored_source`).
+    pub(super) fn source(&self, rank: usize) -> &crate::report::defline::SourceTaxname {
+        crate::report::pairwise::stored_source(&self.sources, rank as u32)
     }
 
     /// LOSAT's refusals of the subjects with parsed Seq-ids that the reports of the kinds asked
@@ -2032,8 +2033,8 @@ impl ListedTitles<'_> {
     /// subjects that the report shows (`shown`, by rank): a title of punctuation that
     /// NCBI's `x_CleanAndCompress` reads past the end of when it makes the title of the
     /// description table (NCBI BLAST+ 2.17.0 crashes there), as for the records of a
-    /// subject set (`check_shown_subject_titles`), and a title that NCBI makes from the
-    /// taxid and the taxonomy database (`shared::check_shown_stored_title`).
+    /// subject set (`check_shown_subject_titles`), and a title that NCBI makes from a source
+    /// that LOSAT refuses (`shared::StoredTitle::check_shown_source`).
     pub(super) fn check_shown_titles(
         &self,
         database: &BlastpDatabase,
@@ -2055,8 +2056,8 @@ impl ListedTitles<'_> {
                         || self.oids.oid(ordinal),
                         self.program,
                     )?;
-                    shared::check_shown_stored_title(
-                        self.taxonomy_titles[rank],
+                    shared::source_name(
+                        self.source(rank),
                         || self.oids.oid(ordinal),
                         self.program,
                     )?;
@@ -2114,7 +2115,7 @@ fn x_all_header_ranges(
 /// EXPERIMENT (LOSAT_X_BPQBLOCK): whether every sequence of the database has one definition line
 /// that reads, holds no byte outside ' ' ..= '~' and gives a tabular subject id as NCBI writes
 /// it, or with `pairwise` (an outfmt 0 report, which writes no tabular id) a
-/// title that the outfmt 0 report writes as NCBI and that is not empty, and with `taxids` (the batches' prefetch reads
+/// title that the outfmt 0 report writes as NCBI, and with `taxids` (the batches' prefetch reads
 /// the taxonomy database) a taxid that decodes, where no lookup of the taxonomy database can be
 /// refused. Read in `pool` over the ordinal ids; a reader error is `false` (the search of all
 /// queries then reports it where NCBI does).
@@ -2140,20 +2141,27 @@ pub(super) fn x_titles_allow_blocks(
                 deflines.len() == 1
                     && deflines[0].replaced_title_bytes == 0
                     && if pairwise {
-                        // An empty title, which NCBI makes from a named taxid
-                        // (`shared::check_shown_stored_title`; not looked up here).
-                        !crate::report::defline::bioseq_title_from_source(
-                            &deflines[0].title,
-                            &Default::default(),
-                        ) && shared::check_shown_protein_title(
+                        // The check of the search of all queries (`ListedTitles::check_shown_titles`),
+                        // which the name of an empty title's source does not change
+                        // (`check_shown_protein_title`); a lookup that LOSAT refuses is ruled out
+                        // with `taxids` (`taxdb_may_refuse`), and without `taxdb.bti` nothing is
+                        // looked up. A sequence with parsed Seq-ids is not `deflines` (`Err`): the
+                        // search of all queries checks its title from its own source
+                        // (`check_shown_parsed_subject`).
+                        shared::check_shown_protein_title(
                             &deflines[0].title,
                             || database.db.oid(ordinal),
                             database.program,
                         )
                         .is_ok()
                     } else {
-                        crate::report::defline::database_subject_id(&deflines[0].title, true)
-                            .is_ok()
+                        // A protein's word is `unnamed`, with or without the name of its source.
+                        crate::report::defline::database_subject_id(
+                            &deflines[0].title,
+                            &Default::default(),
+                            true,
+                        )
+                        .is_ok()
                     }
             }
             Err(_) => false,
@@ -4240,9 +4248,8 @@ mod tests {
         .unwrap();
         assert_eq!(allowed(&punctuation), [false, false]);
         assert_eq!(read_allowed(&punctuation), [true, true]);
-        // An empty title (line DBID H3), which outfmt 0 shows as NCBI makes it from a taxid that
-        // the taxonomy database names (`shared::check_shown_stored_title`; the taxid is not looked
-        // up here): the search of all queries refuses it where it is shown. Its tabular id is
+        // An empty title (line DBID H3), which outfmt 0 shows as NCBI makes it from the name of
+        // its taxid (`StoredTitle::source`; line RG T5): the blocks take it. Its tabular id is
         // `unnamed`.
         let bare = BlastpDatabase::open(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -4259,9 +4266,31 @@ mod tests {
             })
             .unwrap()
         });
-        assert_eq!(pairwise_allowed, [false, false]);
+        assert_eq!(pairwise_allowed, [true, true]);
         assert_eq!(allowed(&bare), [true, true]);
-        drop((missing, bad, punctuation, bare));
+        // A database with parsed Seq-ids (line DBID; RefSeq records among them, whose title made
+        // from the source is the name alone and can read past its end): its definition lines are
+        // not `SeqDb::deflines`, so the blocks never take it and the search of all queries checks
+        // each title from its own source (`check_shown_parsed_subject`).
+        let parsed = BlastpDatabase::open(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/db_search/ids/prot_v4")
+                .to_str()
+                .unwrap(),
+            &Default::default(),
+            "BLASTP",
+        )
+        .unwrap();
+        for pairwise in [false, true] {
+            let parsed_allowed = [1, 4].map(|threads| {
+                crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                    Ok(x_titles_allow_blocks(&parsed, pairwise, false, pool))
+                })
+                .unwrap()
+            });
+            assert_eq!(parsed_allowed, [false, false], "pairwise {pairwise}");
+        }
+        drop((missing, bad, punctuation, bare, parsed));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

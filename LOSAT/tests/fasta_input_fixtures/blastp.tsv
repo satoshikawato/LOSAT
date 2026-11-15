@@ -1,4 +1,4 @@
-# Frozen outputs of blastn: 2.17.0+;  Package: blast 2.17.0, build Aug 11 2025 09:46:06 for FASTA-input cases (comparison oracle only; see fasta_input_fixtures.py).
+# Frozen outputs of blastn: 2.17.0+;  Package: blast 2.17.0, build Jul  1 2025 08:59:18 for FASTA-input cases (comparison oracle only; see fasta_input_fixtures.py).
 # Only what `freeze`/`freeze-rejections` measured is stored; the row definitions (inputs, args, outfmt, threads, stdin, env, kind, tier, note) are in the script's generator.
 # `@S <n> <sha256>` lines are a table of the distinct non-empty stderr hashes. Row lines: row_id, rc, stdout sha256,
 # stderr (`-` = empty stream, else a table index n), combined `2>&1` stream (`=` = same as stdout, `~` = same as stderr, else its sha256).
@@ -89,10 +89,10 @@
 @S	84	2939ca8105552fe78b97c06c9de5bec852cb98f9f8c2e23dc7d08e0e7f496914
 @S	85	c8e9cd079ae3cf50658f0eea84ea1ee08a849f161907d4d906aa22fa321940da
 @S	86	4a1526c1fa13c14a0b01d505ba948ac297e1818326f6ede38f937a3a1d594e5c
-@S	87	8a4b3d3c61f6c0d0a4f92a9df0d85057dcbd51fb356105bdfb7ae652cdb22b70
-@S	88	2d4a179474f334fce281591e72097fc916c30937571512e0e1bb20a310603951
-@S	89	aabc892c4db9506af3f0b0a7ec64f4be2f45e6bd5ac6a7fe4eaac7f396c2a107
-@S	90	84133125c2212fad325913e94ccdb1d0e66de33a113d49ab9ef89ab2b6f3f027
+@S	87	1e436388ef00e1ee5d78f59d4f1aaaeb7d6ab82774760b13d16c16ab03637345
+@S	88	a86adf215bf50d71d0c30d74e892c7215fd145a34e546278a3c2392df28721c2
+@S	89	a4f0d56c1f23503e9a56ea28ffd7358a220b68d55bb30a49cdd228c32f51a74c
+@S	90	7a5bac0f65b6cce9cb3680b313f830a97008ee351944b53dbf81e4a9f759abea
 @S	91	2cd156861ed95c2094ab2da906aec2e5aff518a360eb68f1f4bd2113b200e14d
 @S	92	5e265fa7dca6a12eb87fe269370aaa9f16ef93d1bdae7ed73ca32a69effff21f
 @S	93	e8a1f13bfcc34b25e3753b701a41747084f93e9da05d352532741c75a4253c42
@@ -914,15 +914,15 @@ blastp.batch_late_warn_bad.two.o7	1	1b74320c83049abd9b7ace919f0938858b85825c8c1b
 blastp.batch_late_warn_bad.default.o6	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	86	~
 blastp.batch_late_warn_bad.default.o0	1	9a2668407f8f23633ad0683b5f71a7f89347f4301968b1771718651e4a16b588	86	a7d02b2cf986899afdb852aa434b91197afd1c4ecf0c7053dc8e307c4faac6fc
 blastp.arch_title_late.two.o11	1	244f2de039831d25d7da23df00fa491e6d653596b333605400f4eed6d3d80332	81	c3e073ccd0337adfc986fbbe823255124f8cdddafee413da2a1c790aee956fba
-blastp.arch_title_late.each.o11	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	87	~
+blastp.arch_title_late.each.o11	1	085a46d2960d20dffb114d65f1adac1153cc49b5d11a53e6fdf15e555879aff6	87	608910d8c071193ab11c97fd456819fb3d76e4fbfb17ea5dfd68298d8f69e331
 blastp.arch_title_late.default.o11	1	ccc5c87575a6a57fe079726d61ac78e3414cfa97f88398a7cdde58bf4ecf2e09	81	9fdb5871e5f82b1997f2dca812775c6bb1b080745d2c81e5ad8c354c99b382ae
-blastp.arch_title_first.two.o11	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	88	~
+blastp.arch_title_first.two.o11	1	b311ee35833faed25c8c643e3bd86101ef45a4f026b2153049603c37622d8546	88	5938ca1443079af896c95b667d78102337b7c45fa5391216ea29517a162a17c0
 blastp.arch_title_first.default.o11	1	ccc5c87575a6a57fe079726d61ac78e3414cfa97f88398a7cdde58bf4ecf2e09	81	9fdb5871e5f82b1997f2dca812775c6bb1b080745d2c81e5ad8c354c99b382ae
 blastp.arch_title_first.zero.o11	3	2c012da815ae88ded87ec0c8a6139554ebc481394496bf7243d1783084ea94db	67	a9fff9a38457529be82f31f1b27eac8688e6fef594f68593b8b82efd663fabbf
 blastp.arch_title_lastempty.each.o11	3	3c179b8be78fb5d3af8cc05ceac51f50a43e5b0ff68d1fd03ff560c11c39ad6c	58	96b2abcf71889bd7a8b9d486a5270a36109ef44e41d04a000e7f091344b003d2
-blastp.arch_title_lastempty.default.o11	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	89	~
+blastp.arch_title_lastempty.default.o11	0	21a5ff7833b4f552b82fdb485d03a069db8ebd29007960da90fdf9a8af30a2bc	89	bc8cacdb844b382886563e8928d435c6a473acee34501e55328d3451d6a20f88
 blastp.arch_title_s.after_error.o11	1	ccc5c87575a6a57fe079726d61ac78e3414cfa97f88398a7cdde58bf4ecf2e09	81	9fdb5871e5f82b1997f2dca812775c6bb1b080745d2c81e5ad8c354c99b382ae
-blastp.arch_title_s.clean.o11	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	90	~
+blastp.arch_title_s.clean.o11	0	8cf54a1295f1b1820b0bcb06af8639a6658a93cd926483085e820af41b6305c7	90	a84d3b9d3dfe12b99cd914a265c445bb0c27d840b7304fc5eedfa29a5334e01f
 blastp.arch_title_s.zero.o11	3	2c012da815ae88ded87ec0c8a6139554ebc481394496bf7243d1783084ea94db	67	a9fff9a38457529be82f31f1b27eac8688e6fef594f68593b8b82efd663fabbf
 blastp.xml2_title_late.each.o15	1	726710a324e5343d01855d76e4f28cc1cf91c26822bfb2fd92a5696bf5587289	81	e2bfc2a67d0f9948e78fab63643825894e7756e86da2457252a81ac7a8914d07
 blastp.xml2_title_late.each.o16	1	9f566cae88ed6fd8a38b21011e3f3d9f83cc725bfc52da74d7c67b43b6b0c6f4	81	f4bc980880f372e09821335fbe9307fba6f784514cfee3351b64d85728a0209d

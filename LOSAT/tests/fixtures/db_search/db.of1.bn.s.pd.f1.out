@@ -1,0 +1,133 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/of1/bns.fa).
+           5 sequences; 1,094 total letters
+
+
+
+Query= bnq query
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_plus plus insertion same place                                      282     3e-80
+s_pmo overlapping plus and minus                                      246     2e-69
+s_mins minus insertion                                                235     3e-66
+s_mdel minus deletion                                                 205     6e-57
+s_mins2 minus insertion same place                                    187     1e-51
+
+
+
+bnq      1    TGTATATTCGGACTTGGCCTATCCACACAAGCGGTATTGAGGTGGAACGTTAGCGTTTGG  60
+s_plus   1    ............................................................  60
+s_pmo    1    ....................TC................CG....................  60
+s_mins   192              ................................................  145
+s_mins2  122                                ..........C...................  93
+
+bnq      61   TACTGTCGGCACGTACGCCTCGTGAGGCATACAACATTTTTCGTATCCGCGAGCATAAAT  120
+s_plus   61   ............................................................  124
+                                           \                              
+                                           |                              
+                                        TAAG
+s_pmo    370  ............................................................  311
+s_pmo    61   ..G..............G..........................................  120
+s_mins   144  .....................................A......................  81
+                                          \                               
+                                          |                               
+                                       ATGG
+s_mdel   184                                          .........G..........  165
+s_mins2  92   ......................................AC..............G.....  31
+                                            \                             
+                                            |                             
+                                           CC
+
+bnq      121  GTTTCTAGCGTTTCCAGTTTTGACGGTACAtttttttttttttttttttttttttGCGGA  180
+s_plus   125  ...............................C.AACGACCAA.CA.GGGGCGGCA.....  184
+s_pmo    310  ..A............................C.AACGACCA..CA.GGGGCGGCA.....  251
+s_pmo    121  ...............................                               151
+s_mins   80   ...............................                               50
+s_mins   25                                                          .....  21
+s_mdel   164  ...................A...........C.AACGACCAA.CA.GGG------....C  111
+s_mins2  30   ...........................C..                                1
+
+bnq      181  TGATGCAGCACTCTTCAGACCGGAAGCCGTCACGCCAACTCGACGACCCTAGGATTTATA  240
+s_plus   185  ............A.............T.............                      224
+s_pmo    250  ............................................................  191
+s_mins   20   ....................                                          1
+s_mdel   110  A.CG.A..........................T....T......................  51
+
+bnq      241  TTGCACAGTTGGGGTCACACGCTGGGTGTAAGAGATATTCCGCGTGTCCC  290
+s_mdel   50   .............................................T....  1
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 297792
+
+
+Query= bnq2 second query
+
+Length=160
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_mdel minus deletion                                                 232     2e-65
+s_pmo overlapping plus and minus                                      226     9e-64
+s_plus plus insertion same place                                      195     5e-54
+s_mins minus insertion                                                168     7e-46
+s_mins2 minus insertion same place                                    77.9    1e-18
+
+
+
+bnq2     1    TCGTATCCGCGAGCATAAATGTTTCTAGCGTTTCCAGTTTTGACTGTACATCTAACGACC  60
+s_mdel   184  .........G.............................A....G...............  125
+s_pmo    330  ......................A.....................G...............  271
+s_pmo    101  ............................................G...............  160
+s_plus   105  ............................................G...............  164
+s_mins   100  ............................................G...............  41
+s_mins2  50   ..............G.............................G..C..            1
+
+bnq2     61   GATCATGGGGCGGCAGCGGATGACGCAGCACTCTTCAGACCGGAAGCCGTCACGCCAACT  120
+s_mdel   124  A...................------..........................T....T..  71
+s_pmo    270  AT.....................T....................................  211
+s_plus   165  A......................T........A.............T.............  224
+s_mins   40   A......................T................                      1
+
+bnq2     121  CGACGACCCCAGGATTTATATTGCACAGTTGGGGTCACAC  160
+s_mdel   70   .........T..............................  31
+s_pmo    210  .........T..........                      191
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 153032
+
+
+  Database: User specified sequence set (Input: tests/db_search/of1/bns.fa).
+    Posted date:  Unknown
+  Number of letters in database: 1,094
+  Number of sequences in database:  5
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

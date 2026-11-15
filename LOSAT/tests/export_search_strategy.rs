@@ -23,10 +23,11 @@
 //! threads writes NCBI's `-num_threads 1` file, DECISIONS F1b-2). A PSSM query's request with
 //! `-db` holds the PSSM as read (a PSSM of frequency ratios only without the engine's scores; the
 //! PSSM engine's error after the request), with `-subject` NCBI's "Remote PSI-BL2SEQ is not
-//! supported" after the prolog writes none (also with a subject title the requests could not
-//! hold, and before NCBI's check of the PSSM). The rows that LOSAT refuses (DECISIONS 15, 21 and 26
-//! of line RG; the PSSM members that LOSAT's reader skips, item F1b-2) check the refusal. blastp's
-//! query blocks and the `0` side of
+//! supported" after the prolog writes none (whatever the subjects' titles, and before NCBI's check
+//! of the PSSM). The rows that LOSAT refuses (DECISIONS 15 and 21 of line RG; the PSSM members that
+//! LOSAT's reader skips, item F1b-2) check the refusal. A title or a name with a byte that NCBI's
+//! serial stream replaces is written as NCBI writes it (`#` in the file, `Bad char` on standard
+//! error; the `.title.` and `.order.` rows). blastp's query blocks and the `0` side of
 //! the default-on switches that the strategy's paths cross write the same files.
 //!
 //! The cases are the rows of `tests/fixtures/strategy/cases.tsv` (its header says what the
@@ -337,20 +338,73 @@ fn blastp_query_blocks_do_not_change_the_strategy_file() {
             check(case, &[("LOSAT_X_BPQBLOCK", "0")], threads, "qblock0");
         }
     }
-    // NCBI fails when it formats the first batch in BLAST XML: the file holds the first batch's
-    // request alone, in or out of the blocks.
-    let xml = cases
-        .iter()
-        .find(|case| case.name == "blastp.sub.xmlmatrix.batches")
-        .expect("row blastp.sub.xmlmatrix.batches");
-    for block in ["1", "0"] {
-        check(
-            xml,
-            &[("LOSAT_X_BPQBLOCK", block)],
-            "1",
-            &format!("xmlqblock{block}"),
-        );
+    // NCBI fails when it formats the batch of the first query in BLAST XML, or of the second query
+    // in a `-subject` XML2 document, which holds each report back (probe K4f of line RG): the file
+    // holds the requests up to that batch's, in or out of the blocks. With blocks of one batch the
+    // XML2 run's failure comes in the second block's call, after a first call that writes the
+    // prolog and the first batch's posts alone.
+    for name in [
+        "blastp.sub.xmlmatrix.batches",
+        "blastp.sub.xmlmatrix.batches.f16",
+    ] {
+        let xml = cases
+            .iter()
+            .find(|case| case.name == name)
+            .unwrap_or_else(|| panic!("row {name}"));
+        for block in ["1", "0"] {
+            check(
+                xml,
+                &[("LOSAT_X_BPQBLOCK", block)],
+                "1",
+                &format!("xmlqblock{block}"),
+            );
+        }
     }
+    // A run that fails writes no reach file (`xreach::write_report` follows a run that ends): the
+    // same XML2 search with the matrix name NCBI's XML spells shows that these inputs take the
+    // block search, whose plan is made before any format (`x_query_block_plan`).
+    let held = cases
+        .iter()
+        .find(|case| case.name == "blastp.sub.xmlmatrix.batches.f16")
+        .expect("row blastp.sub.xmlmatrix.batches.f16");
+    let known = Case {
+        name: format!("{}.known", held.name),
+        program: held.program.clone(),
+        env: held.env.clone(),
+        args: held
+            .args
+            .iter()
+            .map(|arg| match arg.as_str() {
+                "blosum62" => "BLOSUM62".to_string(),
+                _ => arg.clone(),
+            })
+            .collect(),
+        check: held.check.clone(),
+        rc: 0,
+        pre: None,
+        expect: String::new(),
+    };
+    let dir = run_dir(&known, "xmlknown");
+    let reach = reach_support::Reach::new("strategy_bp_xml");
+    let output = run(
+        &known,
+        &dir.join("s.ss"),
+        &[("LOSAT_X_BPQBLOCK", "1"), reach.var()],
+        "1",
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let sides = reach.sides("LOSAT_X_BPQBLOCK");
+    assert!(
+        sides.0,
+        "{}: LOSAT_X_BPQBLOCK did not take the block search: {sides:?}",
+        known.name
+    );
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// The default-on switches that the strategy's paths cross, at their `0` side (the paths they
@@ -386,21 +440,27 @@ fn switches_off_write_the_same_strategy_files() {
     }
 }
 
-/// blastx and rpstblastn (BLASTX's driver) refuse a query that is not a regular file (a pipe) with
-/// the strategy, as with outfmt 11 (DECISIONS 26 of line RG): the titles of the whole input are
-/// read before the first batch. The refusal names the program (review 3 of F1b-1, R3-4).
+/// blastx and rpstblastn (BLASTX's driver) read a query that is not a regular file (a pipe) as they
+/// read the same bytes from a regular file: the strategy file, the standard output, the standard
+/// error and the exit status are the same. (The title that NCBI's stream replaces bytes of is
+/// written, as in `cases.tsv`, in both.)
 #[test]
-fn a_piped_query_is_refused() {
+fn a_piped_query_runs_as_the_regular_file() {
     use std::io::Write;
     let dir = std::env::temp_dir().join(format!("losat_strategy_pipe_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let ss = dir.join("s.ss");
     let rps = rps_databases("rps_mini", &dir);
-    let runs: [(&str, &str, &[&str], Option<&Path>); 2] = [
+    let runs: [(&str, &str, &[&str], Option<&Path>); 4] = [
         (
             "blastx",
             "tests/fasta/outfmt11/arch_bx_q.fna",
+            &["-subject", "tests/fasta/outfmt11/arch_bx_s.faa"],
+            None,
+        ),
+        (
+            "blastx",
+            "tests/fasta/strategy/title_b2_blastx.fna",
             &["-subject", "tests/fasta/outfmt11/arch_bx_s.faa"],
             None,
         ),
@@ -410,39 +470,65 @@ fn a_piped_query_is_refused() {
             &["-db", "rps_mini", "-comp_based_stats", "0"],
             Some(&rps),
         ),
+        (
+            "rpstblastn",
+            "tests/fasta/strategy/title_b2_blastx.fna",
+            &["-db", "rps_mini", "-comp_based_stats", "0"],
+            Some(&rps),
+        ),
     ];
-    for (program, query, target, blastdb) in runs {
-        let query = std::fs::read(engine().join(query)).unwrap();
-        let mut command = Command::new(BIN);
-        command
-            .current_dir(engine())
-            .args([program, "-query", "-"])
-            .args(target)
-            .args([
-                "-outfmt",
-                "6",
-                "-export_search_strategy",
-                ss.to_str().unwrap(),
-            ])
-            .env_remove("BLASTDB")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        if let Some(blastdb) = blastdb {
-            command.env("BLASTDB", blastdb);
+    for (n, (program, path, target, blastdb)) in runs.into_iter().enumerate() {
+        let query = std::fs::read(engine().join(path)).unwrap();
+        let mut results = Vec::new();
+        for piped in [false, true] {
+            let ss = dir.join(format!("s{n}_{piped}.ss"));
+            let mut command = Command::new(BIN);
+            command
+                .current_dir(engine())
+                .args([program, "-query", if piped { "-" } else { path }])
+                .args(target)
+                .args(["-outfmt", "6", "-export_search_strategy"])
+                .arg(&ss)
+                .env_remove("BLASTDB")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            for (name, _) in std::env::vars() {
+                if name.starts_with("LOSAT_X_") || name == "BATCH_SIZE" {
+                    command.env_remove(name);
+                }
+            }
+            command.env("BATCH_SIZE", "1");
+            if let Some(blastdb) = blastdb {
+                command.env("BLASTDB", blastdb);
+            }
+            let output = if piped {
+                let mut child = command.stdin(Stdio::piped()).spawn().expect("run losat");
+                child.stdin.take().unwrap().write_all(&query).unwrap();
+                child.wait_with_output().unwrap()
+            } else {
+                command.stdin(Stdio::null()).output().expect("run losat")
+            };
+            results.push((
+                std::fs::read(&ss).ok(),
+                output.stdout,
+                output.stderr,
+                output.status.code(),
+            ));
         }
-        let mut child = command.spawn().expect("run losat");
-        // The refusal may come before the whole input is read.
-        let _ = child.stdin.take().unwrap().write_all(&query);
-        let output = child.wait_with_output().unwrap();
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert_eq!(output.status.code(), Some(1), "{program}: {stderr}");
-        assert!(output.stdout.is_empty(), "{program}");
-        let expected = format!(
-            "unsupported {} query input for -export_search_strategy",
-            program.to_uppercase()
+        let (file, pipe) = (&results[0], &results[1]);
+        let stderr = String::from_utf8_lossy(&pipe.2);
+        assert!(
+            file.0.is_some(),
+            "{program} {path}: the strategy file of the regular file"
         );
-        assert!(stderr.contains(&expected), "{program}: {stderr}");
+        assert!(
+            !stderr.contains("query input"),
+            "{program} {path}: {stderr}"
+        );
+        assert_eq!(file.0, pipe.0, "{program} {path}: strategy file");
+        assert_eq!(file.1, pipe.1, "{program} {path}: standard output");
+        assert_eq!(file.2, pipe.2, "{program} {path}: standard error");
+        assert_eq!(file.3, pipe.3, "{program} {path}: exit status");
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

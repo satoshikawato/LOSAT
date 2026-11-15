@@ -1,13 +1,17 @@
-//! The preliminary search of one blastn subject's chunks, as `search_query_batch`'s
-//! `process_subject` runs it for the preliminary stage (`collect_subject_prelim`): the subject in
-//! chunks of at most `MAX_DBSEQ_LEN` letters that overlap by `DBSEQ_CHUNK_OVERLAP`
+//! The preliminary search of one blastn subject, as `search_query_batch`'s `process_subject` calls
+//! it for the preliminary stage (`prelim_subject`): the subject's lowercase masks or database masks
+//! (`-db_soft_mask`, `-db_hard_mask`) and the set-up of its chunks, then the chunk loop (`collect_subject_prelim`):
+//! the subject in chunks of at most `MAX_DBSEQ_LEN` letters that overlap by `DBSEQ_CHUNK_OVERLAP`
 //! (`SubjectSplitState::next_chunk`), each chunk searched (`prelim_chunk_hits`: its scan and
 //! ungapped extensions, by `two_stage_scan::scan_two_stage_lookup` or `na_scan::scan_na_lookup`
 //! unless a strips dispatch of `x_pair_seed.rs` takes the chunk, then its HSP list,
 //! `prelim_hsp_list.rs`) on this thread, or, with a pool of two threads or more, in batches of
-//! chunks (a batch of one chunk, or LOSAT_X_BNFEWSUBJ's serial chunks, on this thread; else the
-//! batch's chunks on the pool, a scratch per worker), and each chunk's list merged into the
-//! subject's in chunk order (`merge_prelim_hit_lists`), then the subject best-hit filter.
+//! jobs, runs of consecutive chunks of at most `MAX_DBSEQ_LEN` letters (a batch of one job, or
+//! LOSAT_X_BNFEWSUBJ's serial chunks, on this thread; else the batch's jobs on the pool, a scratch
+//! per worker, each job's chunks in order), and each chunk's list merged into the subject's in
+//! chunk order (`merge_prelim_hit_lists`), then the subject best-hit filter; then the subject's
+//! list reaped by the preliminary e-value (`reap_prelim_by_evalue`) or, in an ungapped search,
+//! finished (`finish_ungapped_prelim`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-599 (the chunk loop of
 //! `s_BlastSearchEngineOneContext`, :422-602)
@@ -32,17 +36,25 @@
 //!     *hsp_list_out_ptr = combined_hsp_list;
 //! ```
 //! NCBI searches a subject's chunks one after another (its threads take whole subjects); the pool's
-//! chunk batches are LOSAT's, and their lists are merged in chunk order as that loop merges them.
+//! chunk batches and their jobs are LOSAT's, and their lists are merged in chunk order as that loop
+//! merges them.
+//!
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-900 (the e-values and the
+//! reap of the subject's list at the end of `s_BlastSearchEngineCore`) and :1480-1542 (the finish
+//! of an ungapped search's list in `BLAST_PreliminarySearchEngine`).
 //!
 //! This module is a child of `run` for the items it keeps private (the types `SubjectChunk`,
 //! `SubjectSplitState`, `SubjectScratch`, `PrelimHit`, `QueryContext`, `QueryContextIndex`,
-//! `DiagStruct` and `BlastnTiming`; `advance_diag_table_offset`, `diag_hash_insert_window`,
-//! `merge_prelim_hit_lists`, `prelim_subject_best_hit` and the child modules of the scans and of
-//! the HSP list). Its functions are the statements of what were the closure
-//! `collect_prelim_hits_for_chunk` of `process_subject` and the chunk loop after it, in their
-//! order. What they read that is the same for every subject of a batch is `PrelimBatch`, built once
-//! per batch, and what is the same for every chunk of a subject is `PrelimSubject`, built once per
-//! subject; both are `Sync`, for the chunks on the pool.
+//! `DiagStruct`, `BlastnTiming`, `BlastnSubjectRef` and `SubjectCtx`; `advance_diag_table_offset`,
+//! `diag_hash_insert_window`, `merge_prelim_hit_lists`, `prelim_subject_best_hit`,
+//! `build_subject_seq_ranges_from_masks`, `read_db_soft_ranges`, `ungapped_subject_stage`, the
+//! e-value helpers, `database` and the child modules of the scans and of the HSP list). Its
+//! functions are the statements of `process_subject`'s preliminary side (the subject's set-up, the
+//! reap and the `-ungapped` finish), of what was its closure `collect_prelim_hits_for_chunk` and of
+//! the chunk loop, in their order. What they read that is the same for every subject of a batch is
+//! `PrelimBatch`, built once per batch; what `process_subject` read of the call is `SubjectCtx`;
+//! what is the same for every chunk of a subject is `PrelimSubject`, built once per subject.
+//! `PrelimBatch` and `PrelimSubject` are `Sync`, for the chunks on the pool.
 
 #[cfg(all(
     feature = "parallel",
@@ -55,22 +67,29 @@ use std::sync::atomic::AtomicU64;
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-use super::x_few_subj;
+use super::{x_few_subj, MAX_DBSEQ_LEN};
 
 use super::{
-    advance_diag_table_offset, diag_hash_insert_window, merge_prelim_hit_lists, na_scan,
-    prelim_hsp_list, prelim_subject_best_hit, two_stage_scan, x_diag_lv, x_pair_seed, BlastnTiming,
-    DiagStruct, GapAlignScratch, HspListSplit, PrelimHit, QueryContext, QueryContextIndex,
-    SubjectChunk, SubjectChunkStatus, SubjectScratch, SubjectSplitState, COMPRESSION_RATIO,
+    advance_diag_table_offset, build_subject_seq_ranges_from_masks,
+    calculate_blastn_context_statistics, database, diag_hash_insert_window,
+    encode_iupac_to_blastna, hsp_survives_evalue_reap, merge_prelim_hit_lists, na_scan,
+    next_subject_chunk, prelim_hsp_list, prelim_subject_best_hit, read_db_seq_ranges,
+    two_stage_scan, ungapped_subject_stage, x_diag_lv, x_pair_seed, BlastnSubjectRef, BlastnTiming,
+    ContextKarlin, DiagStruct, GapAlignScratch, HspListSplit, PrelimHit, QueryContext,
+    QueryContextIndex, SubjectChunk, SubjectChunkStatus, SubjectCtx, SubjectScratch,
+    SubjectSplitState, COMPRESSION_RATIO, DBSEQ_CHUNK_OVERLAP,
 };
 use crate::algorithm::blastn::alignment::gapped::BlastnaMatrix;
 use crate::algorithm::blastn::alignment::x_greedy_prelim::XPrelimSubject;
+use crate::algorithm::blastn::coordination::{collect_lowercase_masks, LookupTables};
 use crate::algorithm::blastn::lookup::{NaLookupTable, PvDirectLookup, TwoStageLookup};
+use crate::algorithm::blastn::x_subject_store::x_blastna_into;
+use crate::blastinput::db_mask::MaskKind;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::utils::threading::SearchPool;
 
-/// What the preliminary search of a subject's chunks reads that is the same for every subject of
-/// the batch, in groups below. Built once per batch by `search_query_batch`, before
+/// What the preliminary search of a subject reads that is the same for every subject of the batch,
+/// in groups below. Built once per batch by `search_query_batch`, before
 /// `process_subject`, with the names there; every field is a shared reference or a `Copy` value, so
 /// the struct is `Sync` for the chunks on the pool.
 ///
@@ -158,6 +177,22 @@ pub(super) struct PrelimBatch<'a> {
     pub(super) x_kind: x_few_subj::Kind,
     /// The subject best-hit filter (`-subject_besthit`).
     pub(super) subject_besthit: bool,
+    /// The subject's masks: its lowercase masks (`-lcase_masking`); with `-db_soft_mask` or
+    /// `-db_hard_mask`, the database, the algorithm whose masks a database sequence's search reads
+    /// and the kind, and the first error of those reads by ordinal id (the batch returns it after
+    /// the preliminary stage).
+    pub(super) lcase_masking: bool,
+    pub(super) db_mask: Option<(&'a database::BlastnDatabase, i32, MaskKind)>,
+    pub(super) db_mask_error: &'a std::sync::Mutex<Option<(u32, anyhow::Error)>>,
+    /// The subject's list after its chunks (the reap by the preliminary e-value, the `-ungapped`
+    /// finish): each context's letters without the query's masks, the Karlin blocks by context,
+    /// whether an e-value is rounded down from its score, the e-value threshold and the minimum
+    /// percent identity.
+    pub(super) encoded_queries_nomask: &'a [&'a [u8]],
+    pub(super) search_karlin_ref: &'a [ContextKarlin],
+    pub(super) round_down_evalue_score: bool,
+    pub(super) evalue_threshold: f64,
+    pub(super) percent_identity: f64,
     /// The diagnostics: BLEMIR_DEBUG, LOSAT_DEBUG_BLASTN, the trace lines (`blastn_trace`), the
     /// verbose lines and the debug window.
     pub(super) debug_mode: bool,
@@ -168,9 +203,8 @@ pub(super) struct PrelimBatch<'a> {
 }
 
 /// What the preliminary search of a subject's chunks reads that is the same for every chunk of the
-/// subject, in groups below. Built once per subject by `process_subject`'s preliminary call, with
-/// the names there (references and `Copy` values only, `Sync` as `PrelimBatch`); its borrows end
-/// with the call.
+/// subject, in groups below. Built once per subject by `prelim_subject`, with the names there
+/// (references and `Copy` values only, `Sync` as `PrelimBatch`); its borrows end with the call.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:425,461-469,476
 /// (`s_BlastSearchEngineOneContext`: the subject, its chunks' overlap and the backup of the subject
@@ -1035,14 +1069,100 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     chunk_prelim_hits
 }
 
+/// Whether a job of the pool's chunk batches that holds `letters` letters takes `chunk` as well:
+/// a job is a run of consecutive chunks of a subject of at most `MAX_DBSEQ_LEN` letters in all
+/// (at least one chunk), searched in order with one scratch (`collect_subject_prelim`). The job
+/// size is NCBI's chunk length: every chunk of an unmasked or soft-masked subject but its last
+/// has `MAX_DBSEQ_LEN` letters, so each is a job of its own, as before; the short chunks of a
+/// hard-masked subject (one per hard range, series NP, M4a-2b) go together, so that a subject of
+/// a few thousand letters is one job on its owner's scratch instead of a batch on the pool,
+/// whose fresh scratches per task cost more than the chunks (review F4 of M4a-2b: 78 % of the
+/// instructions of a 4-thread run of 4,000 hard-masked subjects of 1,500 letters went to
+/// `SubjectScratch::new`). No NCBI counterpart (NCBI's threads take whole subjects).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn job_takes(letters: usize, chunk: &SubjectChunk) -> bool {
+    letters + chunk.length <= MAX_DBSEQ_LEN
+}
+
+/// The next batch of a subject's chunks for the pool (`collect_subject_prelim`, `HARD`
+/// instance) and its partition into jobs: up to `max_jobs` jobs (`job_takes`), from `kept` (the
+/// chunk that would have started one more job of the batch before) and then the chunks that
+/// `next_chunk` cuts (`None`: the subject's chunks are done), into `chunks` in order, with the end
+/// of each job in `chunks` into `job_ends` (both replaced). The chunk that would start job
+/// `max_jobs + 1` goes to `kept` for the next batch. Returns whether `next_chunk` ended (no batch
+/// follows). A batch of one job is searched serially on the subject's scratch, its jobs on the
+/// pool otherwise ([`batch_jobs`]).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn next_chunk_batch(
+    chunks: &mut Vec<SubjectChunk>,
+    job_ends: &mut Vec<usize>,
+    kept: &mut Option<SubjectChunk>,
+    max_jobs: usize,
+    mut next_chunk: impl FnMut() -> Option<SubjectChunk>,
+) -> bool {
+    chunks.clear();
+    job_ends.clear();
+    let mut job_letters = 0usize;
+    loop {
+        let Some(chunk) = kept.take().or_else(&mut next_chunk) else {
+            if !chunks.is_empty() {
+                job_ends.push(chunks.len());
+            }
+            return true;
+        };
+        if chunks.is_empty() || !job_takes(job_letters, &chunk) {
+            if !chunks.is_empty() {
+                job_ends.push(chunks.len());
+            }
+            if job_ends.len() == max_jobs {
+                *kept = Some(chunk);
+                return false;
+            }
+            job_letters = 0;
+        }
+        job_letters += chunk.length;
+        chunks.push(chunk);
+    }
+}
+
+/// The jobs of a batch of `next_chunk_batch`: `chunks` cut at `job_ends`, in order.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn batch_jobs<'a>(chunks: &'a [SubjectChunk], job_ends: &[usize]) -> Vec<&'a [SubjectChunk]> {
+    let mut start = 0;
+    job_ends
+        .iter()
+        .map(|&end| {
+            let job = &chunks[start..end];
+            start = end;
+            job
+        })
+        .collect()
+}
+
 /// The preliminary search of one subject's chunks and the merge of their lists: the chunks that
 /// `split_state` cuts (`SubjectSplitState::next_chunk`, skipping a chunk without a range), each
 /// searched by `prelim_chunk_hits` with the subject's scratches on this thread, or, with a pool of
-/// two threads or more (`requested_parallel`), taken in batches of twice the pool's threads: one
-/// chunk, or the serial chunks of LOSAT_X_BNFEWSUBJ, on this thread; else the batch's chunks on the
-/// pool, a scratch per worker, their lists collected in chunk order. Each chunk's list is merged
-/// into the subject's (`merge_prelim_hit_lists`, with the chunk's offset and overlap), then the
-/// subject best-hit filter (`-subject_besthit`). Returns the subject's list.
+/// two threads or more (`requested_parallel`), taken in batches of up to twice the pool's threads
+/// jobs (`job_takes`: runs of consecutive chunks of at most `MAX_DBSEQ_LEN` letters in all;
+/// `next_chunk_batch` for a hard-masked subject's): a batch of one job, or the serial chunks of
+/// LOSAT_X_BNFEWSUBJ, on this thread; else the batch's
+/// jobs on the pool, a scratch per worker, each job's chunks in order, their lists collected in
+/// chunk order. Each chunk's list is merged into the subject's (`merge_prelim_hit_lists`, with the
+/// chunk's offset and overlap), then the subject best-hit filter (`-subject_besthit`). Returns the
+/// subject's list.
+/// `HARD`: the chunks come from the subject's hard ranges (a database sequence of a search with
+/// `-db_hard_mask`, `HardSplitState` in the worker's scratch; series NP, M4a-2b decision H1), else
+/// from `split_state` (`next_subject_chunk`); an instance of its own, so the other subjects' loops
+/// test nothing.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-483,578-593
 /// (the chunk loop of `s_BlastSearchEngineOneContext`)
@@ -1068,7 +1188,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
 ///     } /* End loop on chunks of subject sequence */
 /// ```
 /// The chunk batches on the pool have no NCBI counterpart (NCBI's threads take whole subjects).
-pub(super) fn collect_subject_prelim<const UNGAPPED: bool>(
+pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
     batch: &PrelimBatch<'_>,
     subject: &PrelimSubject<'_>,
     split_state: &mut SubjectSplitState,
@@ -1124,18 +1244,52 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool>(
             //     ...
             // }
             // ```
+            // A batch holds up to `max_in_flight` jobs. The chunks of an unmasked or soft-masked
+            // subject are jobs of one chunk each (`job_takes`: every chunk but the last has
+            // `MAX_DBSEQ_LEN` letters), so its instance takes `max_in_flight` chunks as they
+            // come; a hard-masked subject's (`HARD`) are partitioned by `next_chunk_batch`.
             let max_in_flight = num_threads.max(1) * 2;
             let mut chunk_batch: Vec<SubjectChunk> = Vec::with_capacity(max_in_flight);
+            let mut job_ends: Vec<usize> = Vec::new();
+            let mut kept: Option<SubjectChunk> = None;
             let mut done = false;
             loop {
-                chunk_batch.clear();
-                while chunk_batch.len() < max_in_flight && !done {
-                    match split_state.next_chunk(subject_masked, dbseq_chunk_overlap) {
-                        SubjectChunkStatus::Done => done = true,
-                        SubjectChunkStatus::NoRange => continue,
-                        SubjectChunkStatus::Ok(chunk) => chunk_batch.push(chunk),
+                let jobs = if HARD {
+                    done = next_chunk_batch(
+                        &mut chunk_batch,
+                        &mut job_ends,
+                        &mut kept,
+                        max_in_flight,
+                        || loop {
+                            match next_subject_chunk::<HARD>(
+                                split_state,
+                                &mut subject_scratch.db_hard_split,
+                                subject_masked,
+                                dbseq_chunk_overlap,
+                            ) {
+                                SubjectChunkStatus::Done => return None,
+                                SubjectChunkStatus::NoRange => continue,
+                                SubjectChunkStatus::Ok(chunk) => return Some(chunk),
+                            }
+                        },
+                    );
+                    job_ends.len()
+                } else {
+                    chunk_batch.clear();
+                    while chunk_batch.len() < max_in_flight && !done {
+                        match next_subject_chunk::<HARD>(
+                            split_state,
+                            &mut subject_scratch.db_hard_split,
+                            subject_masked,
+                            dbseq_chunk_overlap,
+                        ) {
+                            SubjectChunkStatus::Done => done = true,
+                            SubjectChunkStatus::NoRange => continue,
+                            SubjectChunkStatus::Ok(chunk) => chunk_batch.push(chunk),
+                        }
                     }
-                }
+                    chunk_batch.len()
+                };
                 if chunk_batch.is_empty() {
                     break;
                 }
@@ -1167,11 +1321,11 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool>(
                 crate::utils::threading::report_stage(
                     "blastn",
                     "subject_chunks",
-                    chunk_batch.len(),
-                    chunk_batch.len() > 1 && !x_serial_chunks,
+                    jobs,
+                    jobs > 1 && !x_serial_chunks,
                 );
                 let soft_ranges = split_state.soft_ranges.as_slice();
-                if chunk_batch.len() == 1 || x_serial_chunks {
+                if jobs == 1 || x_serial_chunks {
                     for chunk in chunk_batch.iter() {
                         let hits = prelim_chunk_hits::<UNGAPPED>(
                             batch,
@@ -1204,39 +1358,57 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool>(
                         subject_scratch.prelim_hits = hits;
                     }
                 } else {
+                    let new_scratches = || {
+                        (
+                            GapAlignScratch::new(),
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
+                            // ```c
+                            // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
+                            // ...
+                            // aux_struct->offset_pairs =
+                            //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
+                            // ```
+                            SubjectScratch::new(offset_array_size, window_size),
+                        )
+                    };
+                    let search_chunk =
+                        |state: &mut (GapAlignScratch, SubjectScratch), chunk: &SubjectChunk| {
+                            let (gap_scratch, subject_scratch) = state;
+                            let hits = prelim_chunk_hits::<UNGAPPED>(
+                                batch,
+                                subject,
+                                chunk,
+                                soft_ranges,
+                                gap_scratch,
+                                subject_scratch,
+                                false,
+                            );
+                            (chunk.offset, chunk.overlap, hits)
+                        };
                     let mut chunk_results: Vec<(usize, usize, Vec<PrelimHit>)> =
                         Vec::with_capacity(chunk_batch.len());
-                    chunk_batch
-                        .par_iter()
-                        .map_init(
-                            || {
-                                (
-                                    GapAlignScratch::new(),
-                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
-                                    // ```c
-                                    // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
-                                    // ...
-                                    // aux_struct->offset_pairs =
-                                    //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
-                                    // ```
-                                    SubjectScratch::new(offset_array_size, window_size),
-                                )
-                            },
-                            |state, chunk| {
-                                let (gap_scratch, subject_scratch) = state;
-                                let hits = prelim_chunk_hits::<UNGAPPED>(
-                                    batch,
-                                    subject,
-                                    chunk,
-                                    soft_ranges,
-                                    gap_scratch,
-                                    subject_scratch,
-                                    false,
-                                );
-                                (chunk.offset, chunk.overlap, hits)
-                            },
-                        )
-                        .collect_into_vec(&mut chunk_results);
+                    if HARD {
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-500
+                        // status = s_GetNextSubjectChunk(subject, &backup, ...);
+                        // Each job's chunks one after another with one scratch, as the subject's
+                        // own loop searches them.
+                        let mut job_results: Vec<Vec<(usize, usize, Vec<PrelimHit>)>> =
+                            Vec::with_capacity(jobs);
+                        batch_jobs(&chunk_batch, &job_ends)
+                            .par_iter()
+                            .map_init(new_scratches, |state, job| {
+                                job.iter()
+                                    .map(|chunk| search_chunk(state, chunk))
+                                    .collect::<Vec<_>>()
+                            })
+                            .collect_into_vec(&mut job_results);
+                        chunk_results.extend(job_results.into_iter().flatten());
+                    } else {
+                        chunk_batch
+                            .par_iter()
+                            .map_init(new_scratches, search_chunk)
+                            .collect_into_vec(&mut chunk_results);
+                    }
                     for (offset, overlap, hits) in chunk_results {
                         let _ = merge_prelim_hit_lists(
                             &mut combined_prelim_hits,
@@ -1275,7 +1447,12 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool>(
         // }
         // ```
         loop {
-            match split_state.next_chunk(subject_masked, dbseq_chunk_overlap) {
+            match next_subject_chunk::<HARD>(
+                split_state,
+                &mut subject_scratch.db_hard_split,
+                subject_masked,
+                dbseq_chunk_overlap,
+            ) {
                 SubjectChunkStatus::Done => break,
                 SubjectChunkStatus::NoRange => continue,
                 SubjectChunkStatus::Ok(chunk) => {
@@ -1323,4 +1500,617 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool>(
         }
     }
     combined_prelim_hits
+}
+
+/// The preliminary search of one subject, `process_subject`'s preliminary stage: the batch's lookup
+/// tables (the preliminary stage's calls pass them), the subject's lowercase masks
+/// (`-lcase_masking`) and the soft ranges between them, or a database sequence's soft ranges from
+/// its stored masks (`-db_soft_mask`, `read_db_soft_ranges`: a read error ends the sequence's
+/// search); the early return of a subject shorter than a word; its packed letters and their copy
+/// one per byte for the greedy aligner, and the split state of its chunks; the debug line of its
+/// cutoffs; then its chunks searched and their lists merged (`collect_subject_prelim`), the soft
+/// ranges' buffer given back to the scratch, and the subject's list reaped by the preliminary
+/// e-value (`reap_prelim_by_evalue`) or, in an ungapped search, finished
+/// (`finish_ungapped_prelim`). Returns the list that the preliminary stage gives to the collector
+/// (empty after an early return). `subject_ctx` is what `process_subject` read of the call after
+/// its early return without a valid context.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1469-1475,1480-1482,1541-1542
+/// (one subject of the loop of `BLAST_PreliminarySearchEngine`)
+/// ```c
+///       status =
+///           s_BlastSearchEngineCore(program_number, query, query_info,
+///                                   seq_arg.seq, lookup_wrap, gap_align,
+///                                   score_params, word_params, ext_params,
+///                                   hit_params, db_options, diagnostics,
+///                                   aux_struct, &hsp_list,
+///                                   interrupt_search, progress_info);
+/// ...
+///       if (hsp_list && hsp_list->hspcnt > 0) {
+///          int query_index=0; /* Used to loop over queries below. */
+///          if (!gapped_calculation) {
+/// ...
+///             Blast_HSPListGetBitScores(hsp_list, gapped_calculation, sbp);
+///          }
+/// ```
+/// `s_BlastSearchEngineCore` (:701-918) searches the subject's chunks
+/// (`s_BlastSearchEngineOneContext`), then sets the e-values of the subject's list and reaps it
+/// (:870-900).
+pub(super) fn prelim_subject<const UNGAPPED: bool>(
+    batch: &PrelimBatch<'_>,
+    subject_ctx: &SubjectCtx<'_>,
+    subject: BlastnSubjectRef<'_>,
+    lookups: Option<&LookupTables>,
+    gap_scratch: &mut GapAlignScratch,
+    subject_scratch: &mut SubjectScratch,
+) -> Vec<PrelimHit> {
+    let &PrelimBatch {
+        effective_word_size,
+        use_dp,
+        lcase_masking,
+        db_mask,
+        db_mask_error,
+        blastn_debug,
+        ..
+    } = batch;
+    let &SubjectCtx {
+        s_idx,
+        s_id,
+        s_len_full,
+        queries,
+        query_contexts,
+        cutoff_scores,
+        hit_saving_cutoff_scores,
+        x_dropoff_scores,
+        reduced_cutoff_scores,
+        timing_ref,
+        timing_enabled,
+        ..
+    } = subject_ctx;
+    // The batch's lookup tables: the preliminary stage's calls of `process_subject` pass them, the
+    // traceback's pass `None` and do not scan (LOSAT_X_BNLUTDROP, graduated; `x_lut_drop.rs`).
+    let two_stage_lookup_ref = lookups.and_then(|tables| tables.two_stage_lookup.as_ref());
+    let pv_direct_lookup_ref = lookups.and_then(|tables| tables.pv_direct_lookup.as_ref());
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:131-156
+    // ```c
+    // typedef struct BlastNaLookupTable {
+    //     ...
+    // } BlastNaLookupTable;
+    // ```
+    let na_lookup_ref = lookups.and_then(|tables| tables.na_lookup.as_ref());
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1647-1662
+    // ```c
+    // scan_range[0] = 0;  /* subject seq mask index */
+    // scan_range[1] = 0;  /* start pos of scan */
+    // scan_range[2] = subject->length - lut_word_length;
+    // if (subject->mask_type != eNoSubjMasking) {
+    //     scan_range[1] = subject->seq_ranges[0].left + word_length - lut_word_length;
+    //     scan_range[2] = subject->seq_ranges[0].right - lut_word_length;
+    // }
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/objtools/readers/fasta.cpp:856-874
+    // ```c
+    // case 'a': case 'b': case 'c': case 'd':
+    // case 'g': case 'h':
+    // ...
+    //     char_type = eCharType_MaskedNonGap;
+    //     break;
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/objtools/readers/fasta.cpp:1079-1089
+    // ```c
+    // void CFastaReader::x_OpenMask(void)
+    // {
+    //     m_MaskRangeStart = GetCurrentPos(ePosWithGapsAndSegs);
+    // }
+    // void CFastaReader::x_CloseMask(void)
+    // {
+    //     m_CurrentMask->SetPacked_int().AddInterval(...);
+    // }
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:812-826
+    // ```c
+    // if (subjects.GetMask(i).NotEmpty()) {
+    //     s_SeqLoc2MaskedSubjRanges(...);
+    //     BlastSeqBlkSetSeqRanges(..., eSoftSubjMasking);
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2550-2556
+    // ```c++
+    //         const bool use_lcase_masks = args.Exist(kArgUseLCaseMasking)
+    // 	    ? bool(args[kArgUseLCaseMasking])
+    //             : kDfltArgUseLCaseMasking;
+    //         CRef<blast::CBlastQueryVector> subjects;
+    //         m_Scope = ReadSequencesToBlast(*subj_input_stream, IsProtein(),
+    //                                        subj_range, parse_deflines,
+    //                                        use_lcase_masks, subjects, m_IsMapper);
+    // ```
+    // The lowercase masks of the subjects are those of the FASTA records of
+    // `-subject`; a database sequence has none.
+    let subject_masks = match (subject.letters, subject.store) {
+        (Some(letters), _) if lcase_masking => collect_lowercase_masks(letters),
+        (None, Some(store)) if lcase_masking => store.lowercase().to_vec(),
+        _ => Vec::new(),
+    };
+    // Unmasked, every chunk carries its range inline (`SeqRanges::Inline`) and no one reads
+    // the soft ranges, so none are made (NCBI points them at `full_range`).
+    let mut subject_masked = !subject_masks.is_empty();
+    let mut soft_ranges = if subject_masked {
+        build_subject_seq_ranges_from_masks(subject_masks.as_slice(), s_len_full)
+    } else {
+        Vec::new()
+    };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:399-405 (quoted at
+    // `SubjectScratch::db_masks`)
+    // With `-db_soft_mask` or `-db_hard_mask` every database sequence is a masked subject
+    // (its mask type is set whether or not it has masks; decision D3 of M4a-2): the
+    // complement of its stored masks (`BlastnDatabase::seq_ranges_into`), read by the
+    // preliminary stage only (the traceback scans nothing), is its soft ranges or, with
+    // `-db_hard_mask`, its hard ranges (series NP, M4a-2b decision H1).
+    // The read is out of line (`read_db_seq_ranges`, cold): a search without the options
+    // pays one test of `db_mask` per sequence and keeps its registers.
+    let db_masked = db_mask.is_some();
+    if let (true, Some((database, algo_id, kind))) = (db_masked, db_mask) {
+        match read_db_seq_ranges(
+            database,
+            algo_id,
+            kind,
+            subject.block,
+            s_idx,
+            s_len_full,
+            subject_scratch,
+            db_mask_error,
+        ) {
+            Some(ranges) => {
+                soft_ranges = ranges;
+                subject_masked = true;
+            }
+            None => return Vec::new(),
+        }
+    }
+
+    if s_len_full < effective_word_size {
+        if db_masked {
+            subject_scratch.db_soft_ranges = soft_ranges;
+            subject_scratch.db_hard_split.end();
+        }
+        return Vec::new();
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
+    // ```c
+    // if (subj_is_na) {
+    //     BlastSeqBlkSetSequence(subj, sequence.data.release(),
+    //        ((sentinels == eSentinels) ? sequence.length - 2 :
+    //         sequence.length));
+    //     ...
+    //     SBlastSequence compressed_seq =
+    //         subjects.GetBlastSequence(i, eBlastEncodingNcbi2na,
+    //                                   eNa_strand_plus, eNoSentinels);
+    //     BlastSeqBlkSetCompressedSequence(subj,
+    //                               compressed_seq.data.release());
+    // }
+    // ```
+    // The packed letters of the subject set's record (`PreparedSubjects::packed`) or the
+    // stored data of the database sequence (`BlastnSubjectRef::packed`).
+    let s_seq_packed_full = subject.packed;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4019-4025
+    // ```c
+    //             status = BLAST_GreedyGappedAlignment(
+    //                          query_tmp.sequence, subject->sequence,
+    // ...
+    //                          (Boolean) TRUE, FALSE, fence_hit);
+    // ```
+    // No NCBI counterpart: this subject's packed sequence widened to one base per byte for
+    // the preliminary greedy alignment instead: a window around each call's ungapped hit, and
+    // the whole subject once a call reads past its window (made then, shared by every chunk
+    // and worker of this subject). Off unless the search uses the greedy aligner.
+    let x_prelim_subject = XPrelimSubject::new(!use_dp, s_seq_packed_full, s_len_full);
+
+    let dbseq_chunk_overlap = DBSEQ_CHUNK_OVERLAP;
+    let mut split_state = SubjectSplitState::new(s_len_full, soft_ranges);
+
+    // BLASTN debug: Log cutoff scores for this query-subject pair
+    if blastn_debug {
+        subject_ctx.debug_cutoffs();
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-483,593-599
+    // ```c
+    //     while (TRUE) {
+    //         status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
+    //                                        dbseq_chunk_overlap);
+    //
+    //         if (status == SUBJECT_SPLIT_DONE) break;
+    //         if (status == SUBJECT_SPLIT_NO_RANGE) continue;
+    // ...
+    //     } /* End loop on chunks of subject sequence */
+    // ...
+    //     *hsp_list_out_ptr = combined_hsp_list;
+    // ```
+    // The subject's chunks searched and their lists merged (`collect_subject_prelim`), with what
+    // the search of its chunks reads, built once per subject. A database sequence of a search with
+    // `-db_hard_mask` takes its chunks from its hard ranges (`HardSplitState`, in the worker's
+    // scratch; series NP, M4a-2b decision H1) in an instance of its own, so the chunk loops of
+    // every other subject are the base's and the subject pays one test of the mask's kind (`HARD`).
+    let prelim_subject = PrelimSubject {
+        s_idx,
+        s_id,
+        s_seq_packed_full,
+        x_prelim_subject: &x_prelim_subject,
+        subject_masked,
+        dbseq_chunk_overlap,
+        two_stage_lookup_ref,
+        pv_direct_lookup_ref,
+        na_lookup_ref,
+        queries,
+        query_contexts,
+        cutoff_scores,
+        hit_saving_cutoff_scores,
+        x_dropoff_scores,
+        reduced_cutoff_scores,
+        timing_ref,
+        timing_enabled,
+    };
+    let mut combined_prelim_hits = if matches!(db_mask, Some((_, _, MaskKind::Hard))) {
+        collect_subject_prelim::<UNGAPPED, true>(
+            batch,
+            &prelim_subject,
+            &mut split_state,
+            gap_scratch,
+            subject_scratch,
+        )
+    } else {
+        collect_subject_prelim::<UNGAPPED, false>(
+            batch,
+            &prelim_subject,
+            &mut split_state,
+            gap_scratch,
+            subject_scratch,
+        )
+    };
+    // The ranges' buffers go back to the scratch for the next database sequence.
+    if db_masked {
+        subject_scratch.db_soft_ranges = std::mem::take(&mut split_state.soft_ranges);
+        subject_scratch.db_hard_split.end();
+    }
+
+    if !UNGAPPED && !combined_prelim_hits.is_empty() {
+        reap_prelim_by_evalue(batch, subject_ctx, &mut combined_prelim_hits);
+    }
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1482-1541
+    // ```c
+    //       if (hsp_list && hsp_list->hspcnt > 0) {
+    //          if (!gapped_calculation) {
+    //             status = Blast_HSPListReevaluateUngapped(program_number, hsp_list, query,
+    //                         seq_arg.seq, word_params, hit_params, query_info, sbp,
+    //                         score_params, seq_src, seq_arg.seq->gen_code_string);
+    //             ...
+    //                Blast_HSPListGetEvalues(program_number, query_info, stat_length,
+    //                                        hsp_list, gapped_calculation, FALSE, sbp, 0, 1.0);
+    //             ...
+    //         	   status = s_Blast_HSPListReapByPrelimEvalue(hsp_list, hit_params);
+    //             Blast_HSPListReapByQueryCoverage(hsp_list,hit_params->options, query_info, program_number);
+    //             Blast_HSPListGetBitScores(hsp_list, gapped_calculation, sbp);
+    // ```
+    // An ungapped (`-ungapped`) search finishes each subject's HSP list here, in the
+    // preliminary stage: the traceback only keeps what this leaves.
+    if UNGAPPED && !combined_prelim_hits.is_empty() {
+        finish_ungapped_prelim(batch, subject_ctx, subject, &mut combined_prelim_hits);
+    }
+    combined_prelim_hits
+}
+
+/// The reap of a gapped search's subject list by the preliminary e-value, after its chunks are
+/// merged: each HSP's e-value from its preliminary score, kept in the HSP, and the HSPs over the
+/// e-value threshold dropped, in place and in order.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:885-888,897-899
+/// (`s_BlastSearchEngineCore`) and :654,662-664 (`s_Blast_HSPListReapByPrelimEvalue`, :642-674)
+/// ```c
+///         Blast_HSPListGetEvalues(program_number, query_info,
+///                                          stat_length, hsp_list_out,
+///                                          score_options->gapped_calculation,
+///                                          isRPS, gap_align->sbp, 0, scale_factor);
+/// ...
+///     }else {
+///        /* Discard HSPs that don't pass the e-value test. */
+///         status = s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, hit_params);
+/// ...
+///    cutoff = hit_params->prelim_evalue;
+/// ...
+///       if (hsp->evalue > cutoff) {
+///          hsp_array[index] = Blast_HSPFree(hsp_array[index]);
+///       } else {
+/// ```
+pub(super) fn reap_prelim_by_evalue(
+    batch: &PrelimBatch<'_>,
+    subject_ctx: &SubjectCtx<'_>,
+    combined_prelim_hits: &mut Vec<PrelimHit>,
+) {
+    let &PrelimBatch {
+        search_karlin_ref,
+        round_down_evalue_score,
+        evalue_threshold,
+        ..
+    } = batch;
+    let &SubjectCtx {
+        query_eff_searchsp, ..
+    } = subject_ctx;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:885-899
+    // ```c
+    // Blast_HSPListGetEvalues(program_number, query_info,
+    //                                  stat_length, hsp_list_out,
+    //                                  score_options->gapped_calculation,
+    //                                  isRPS, gap_align->sbp, 0, scale_factor);
+    // ...
+    // status = s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, hit_params);
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:642-671
+    // ```c
+    // cutoff = hit_params->prelim_evalue;
+    // ...
+    // if (hsp->evalue > cutoff) {
+    //     hsp_array[index] = Blast_HSPFree(hsp_array[index]);
+    // }
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:868,933
+    // ```c
+    // params->prelim_evalue = options->expect_value;
+    // ```
+    // This reap happens after preliminary gapped scoring and before the
+    // traceback stream is consumed, so low preliminary scores cannot survive
+    // solely because traceback later finds a high-scoring alignment.
+    combined_prelim_hits.retain_mut(|prelim| {
+        let eff_searchsp = query_eff_searchsp
+            .get(prelim.context_idx as usize)
+            .copied()
+            .unwrap_or(0);
+        let (_, prelim_evalue) = calculate_blastn_context_statistics(
+            prelim.prelim_score,
+            &search_karlin_ref[prelim.context_idx as usize].gapped,
+            eff_searchsp,
+            round_down_evalue_score,
+        );
+        prelim.prelim_evalue = prelim_evalue;
+        hsp_survives_evalue_reap(prelim_evalue, evalue_threshold)
+    });
+}
+
+/// The finish of an ungapped (`-ungapped`) search's subject list in the preliminary stage (the
+/// traceback only keeps what it leaves): the subject again in BLASTNA without sentinel bytes (a
+/// subject set's record; a database sequence has none here, and the preliminary search's caller
+/// finishes its list, `x_ungapped_database_stage`), then each HSP re-evaluated on it with the
+/// identity test, the score sort, and the e-values with the reap (`ungapped_subject_stage`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1492-1497,1521-1526,1534-1536
+/// (`BLAST_PreliminarySearchEngine`)
+/// ```c
+///                status =
+///                   Blast_HSPListReevaluateUngapped(
+///                             program_number, hsp_list, query,
+///                             seq_arg.seq, word_params, hit_params,
+///                             query_info, sbp, score_params, seq_src,
+///                             seq_arg.seq->gen_code_string);
+/// ...
+///                } else {
+///                   Blast_HSPListGetEvalues(program_number, query_info,
+///                                           stat_length, hsp_list,
+///                                           gapped_calculation, FALSE,
+///                                           sbp, 0, 1.0);
+///                }
+/// ...
+///                }else {
+///                    status = s_Blast_HSPListReapByPrelimEvalue(hsp_list, hit_params);
+///                }
+/// ```
+/// The tab that indents line 1535 is written as spaces.
+pub(super) fn finish_ungapped_prelim(
+    batch: &PrelimBatch<'_>,
+    subject_ctx: &SubjectCtx<'_>,
+    subject: BlastnSubjectRef<'_>,
+    combined_prelim_hits: &mut Vec<PrelimHit>,
+) {
+    let &PrelimBatch {
+        encoded_queries_blastna,
+        encoded_queries_nomask,
+        score_matrix,
+        percent_identity,
+        search_karlin_ref,
+        round_down_evalue_score,
+        evalue_threshold,
+        ..
+    } = batch;
+    let &SubjectCtx {
+        query_eff_searchsp,
+        cutoff_scores,
+        ..
+    } = subject_ctx;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2645-2668
+    // ```c
+    //       	seq_arg.encoding = (kTranslateSubject ? eBlastEncodingNcbi4na : eBlastEncodingNucleotide);
+    //       	BlastSeqSrcReleaseSequence(seq_src, &seq_arg);
+    //       	if (( BLAST_SEQSRC_EXCLUDED == BlastSeqSrcGetSequence(seq_src, &seq_arg))) {
+    // ```
+    // The subject again, unpacked (BLASTNA, without sentinel bytes). A database
+    // sequence has none here: the preliminary search's caller reads it again, for
+    // the sequences that keep an HSP, and finishes the list itself
+    // (`x_ungapped_database_stage`, lazily as NCBI does).
+    let mut x_subject_vec: Vec<u8>;
+    let s_blastna: Option<&[u8]> = match (subject.blastna, subject.store, subject.letters) {
+        (Some(blastna), _, _) => Some(blastna),
+        (None, Some(store), _) => {
+            x_subject_vec = Vec::new();
+            x_blastna_into(store, &mut x_subject_vec);
+            Some(x_subject_vec.as_slice())
+        }
+        (None, None, Some(letters)) => {
+            x_subject_vec = encode_iupac_to_blastna(letters);
+            Some(x_subject_vec.as_slice())
+        }
+        (None, None, None) => None,
+    };
+    if let Some(s_blastna) = s_blastna {
+        // (`percent_identity` and the cutoffs are the values the traceback
+        // (`traceback_subject::traceback_subject`) reads too; the query coverage is reaped by the
+        // collector's caller.)
+        ungapped_subject_stage(
+            combined_prelim_hits,
+            s_blastna,
+            encoded_queries_blastna,
+            encoded_queries_nomask,
+            score_matrix,
+            cutoff_scores,
+            percent_identity,
+            |prelim| {
+                let eff_searchsp = query_eff_searchsp
+                    .get(prelim.context_idx as usize)
+                    .copied()
+                    .unwrap_or(0);
+                calculate_blastn_context_statistics(
+                    prelim.prelim_score,
+                    &search_karlin_ref[prelim.context_idx as usize].gapped,
+                    eff_searchsp,
+                    round_down_evalue_score,
+                )
+                .1
+            },
+            evalue_threshold,
+        );
+    }
+}
+
+#[cfg(all(
+    test,
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+mod tests {
+    use super::super::SeqRanges;
+    use super::*;
+
+    fn chunk(length: usize) -> SubjectChunk {
+        SubjectChunk {
+            offset: 0,
+            length,
+            seq_ranges: SeqRanges::Inline {
+                range: (0, length as i32),
+            },
+            masked: true,
+            overlap: 0,
+        }
+    }
+
+    /// The batches of `next_chunk_batch` of the chunks of `lengths` with at most `max_jobs` jobs
+    /// each: per batch the lengths of each job's chunks. Fails if a batch is empty or the chunks
+    /// come out of order, or if `next_chunk` is called after it ended.
+    fn batches(lengths: &[usize], max_jobs: usize) -> Vec<Vec<Vec<usize>>> {
+        let mut source = lengths.iter().enumerate();
+        let mut ended = false;
+        let (mut chunks, mut job_ends, mut kept) = (Vec::new(), Vec::new(), None);
+        let mut found = Vec::new();
+        let mut order = Vec::new();
+        loop {
+            let done = next_chunk_batch(&mut chunks, &mut job_ends, &mut kept, max_jobs, || {
+                assert!(!ended, "a chunk asked for after the last");
+                let next = source.next().map(|(index, &length)| SubjectChunk {
+                    offset: index,
+                    ..chunk(length)
+                });
+                ended = next.is_none();
+                next
+            });
+            if chunks.is_empty() {
+                assert!(done && kept.is_none());
+                break;
+            }
+            assert!(job_ends.len() <= max_jobs && job_ends.last() == Some(&chunks.len()));
+            order.extend(chunks.iter().map(|chunk| chunk.offset));
+            found.push(
+                batch_jobs(&chunks, &job_ends)
+                    .iter()
+                    .map(|job| job.iter().map(|chunk| chunk.length).collect())
+                    .collect(),
+            );
+            if done {
+                assert!(kept.is_none());
+                break;
+            }
+        }
+        assert_eq!(order, (0..lengths.len()).collect::<Vec<_>>());
+        found
+    }
+
+    // The batches of the pool's chunk jobs (review F4 of M4a-2b, review 2 S2 and T2): jobs are
+    // runs of consecutive chunks of at most MAX_DBSEQ_LEN letters in all, at least one chunk
+    // each, and a batch holds up to `max_jobs` of them; the chunk that would start one more job
+    // is kept for the next batch. A hard-masked subject's short chunks (chunks of no letters
+    // too) are one job, searched serially; full chunks are a job each, as are the chunks of a
+    // range over MAX_DBSEQ_LEN letters after a short one (`hard1` of
+    // `tests/blastn_db_hard_long.rs`: 1,001, 5,000,000 and 299,100 letters).
+    #[test]
+    fn chunk_batches_hold_jobs_of_at_most_ncbi_s_chunk_length() {
+        const MAX: usize = MAX_DBSEQ_LEN;
+        assert_eq!(batches(&[1000, 0, 2000], 4), [vec![vec![1000, 0, 2000]]]);
+        assert_eq!(
+            batches(&[MAX, MAX, 500_100], 8),
+            [vec![vec![MAX], vec![MAX], vec![500_100]]]
+        );
+        assert_eq!(
+            batches(&[MAX - 10, 10, 0, 1], 4),
+            [vec![vec![MAX - 10, 10, 0], vec![1]]]
+        );
+        assert_eq!(
+            batches(&[1001, MAX, 299_100], 4),
+            [vec![vec![1001], vec![MAX], vec![299_100]]]
+        );
+        assert!(batches(&[], 4).is_empty());
+        // The kept chunk: five jobs at two jobs per batch (two threads' worth of the probe `jb`
+        // of review 2 at one thread), the chunk that starts the third job of a batch opens the
+        // next one, with the chunks that join it.
+        assert_eq!(
+            batches(&[MAX, MAX, MAX - 5, 5, 3, MAX, 7], 2),
+            [
+                vec![vec![MAX], vec![MAX]],
+                vec![vec![MAX - 5, 5], vec![3]],
+                vec![vec![MAX], vec![7]],
+            ]
+        );
+        assert_eq!(
+            batches(&[2, 3, MAX, 4], 1),
+            [vec![vec![2, 3]], vec![vec![MAX]], vec![vec![4]]]
+        );
+        // Random lengths: the jobs are the greedy runs (a chunk opens a new job only when the job
+        // before cannot take it), every batch but the last is full.
+        let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = |bound: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % bound) as usize
+        };
+        for _ in 0..2000 {
+            let lengths: Vec<usize> = (0..next(30))
+                .map(|_| match next(4) {
+                    0 => MAX,
+                    1 => next(MAX as u64 + 1),
+                    _ => next(5_000),
+                })
+                .collect();
+            let max_jobs = 1 + next(6);
+            let found = batches(&lengths, max_jobs);
+            let jobs: Vec<&Vec<usize>> = found.iter().flatten().collect();
+            for (index, batch) in found.iter().enumerate() {
+                assert!(!batch.is_empty() && batch.len() <= max_jobs);
+                assert!(index + 1 == found.len() || batch.len() == max_jobs);
+            }
+            for (index, job) in jobs.iter().enumerate() {
+                let letters: usize = job.iter().sum();
+                assert!(job.len() == 1 || letters <= MAX, "{lengths:?}");
+                if let Some(following) = jobs.get(index + 1) {
+                    assert!(letters + following[0] > MAX, "{lengths:?} {max_jobs}");
+                }
+            }
+        }
+    }
 }

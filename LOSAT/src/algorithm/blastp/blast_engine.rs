@@ -5935,24 +5935,10 @@ fn search_cli(
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
     drop(query_source);
     // The refusal of a PSSM file that LOSAT cannot write as NCBI does (one of the report
-    // streams, a named pipe) comes before the first byte. (A query title with a byte that NCBI's
-    // stream replaces is written as NCBI writes it: `pssm::file_posts`.)
-    // psiblast's rounds write the files of their PSSMs too (`PsiRoundPlan::file_request`).
-    if let Some(request) = resolved.psi_pssm.as_ref().or_else(|| {
-        resolved
-            .psi_rounds
-            .as_deref()
-            .and_then(crate::algorithm::psiblast::rounds::PsiRoundPlan::file_request)
-    }) {
-        crate::algorithm::psiblast::pssm::check_pssm_files(
-            request,
-            records.len(),
-            resolved
-                .out
-                .as_deref()
-                .filter(|path| path.as_os_str() != "-"),
-        )?;
-    }
+    // streams, a named pipe) comes before the first byte (`check_psiblast_pssm_files`). (A query
+    // title with a byte that NCBI's stream replaces is written as NCBI writes it:
+    // `pssm::file_posts`.)
+    check_psiblast_pssm_files(&resolved, &records, &pssm_check_scope(&args))?;
     let reading = match end {
         QueryEnd::Input => QueryReading::End,
         QueryEnd::EofError => QueryReading::BlankLines,
@@ -6083,6 +6069,52 @@ pub fn run_local(
     )
 }
 
+/// Before the search of the FASTA queries `records`: the refusal of a PSSM file that LOSAT cannot
+/// write as NCBI does (one of the report streams, a named pipe) comes before the first byte, for the
+/// PSSM after the last round (`psi_pssm`) or those of the rounds (`PsiRoundPlan::file_request`). (A
+/// query title with a byte that NCBI's stream replaces is written as NCBI writes it,
+/// `pssm::file_posts`.) The command line's entry (`search_cli`) makes it where it has read the queries, the
+/// records' entries (`run_local_formats`, `search_database`) where it would, for records that the
+/// command line reads from a file that is not empty (no records: the file of `Query is Empty!`,
+/// before the queries are read). `scope` says which queries the check covers: the call's
+/// `records`, or the run's in the first of the library's query batches (none in the later ones).
+fn check_psiblast_pssm_files(
+    resolved: &ResolvedBlastpArgs,
+    records: &[FastaRecord],
+    scope: &crate::algorithm::psiblast::pssm::PssmCheckScope,
+) -> Result<()> {
+    use crate::algorithm::psiblast::pssm::PssmCheckScope;
+    let queries = match scope {
+        PssmCheckScope::Call => records.len(),
+        PssmCheckScope::Run { queries } => *queries,
+        PssmCheckScope::Checked => return Ok(()),
+    };
+    if let Some(request) = resolved.psi_pssm.as_ref().or_else(|| {
+        resolved
+            .psi_rounds
+            .as_deref()
+            .and_then(crate::algorithm::psiblast::rounds::PsiRoundPlan::file_request)
+    }) {
+        crate::algorithm::psiblast::pssm::check_pssm_files(
+            request,
+            queries,
+            resolved
+                .out
+                .as_deref()
+                .filter(|path| path.as_os_str() != "-"),
+        )?;
+    }
+    Ok(())
+}
+
+/// The queries that the call's checks of its PSSM files cover (`PsiblastArgs::pssm_check`).
+fn pssm_check_scope(args: &BlastpArgs) -> crate::algorithm::psiblast::pssm::PssmCheckScope {
+    args.psiblast_pssm
+        .as_ref()
+        .map(|options| options.check_scope.clone())
+        .unwrap_or_default()
+}
+
 fn run_local_formats(
     args: BlastpArgs,
     query_records: &[FastaRecord],
@@ -6131,9 +6163,13 @@ fn run_local_formats(
     // The taxonomy database of the reports, where the command line asks (`open_search_database`).
     subject_taxonomy(&args, &mut resolved, args.taxdb_setting.as_ref(), outputs)?;
     let xinclude = xinclude_format(&args, outputs)?;
+    let scope = pssm_check_scope(&args);
     let args = resolved;
     if args.app == BlastpApp::Psiblast {
         psiblast_check_subject_letters(&subjects.records)?;
+    }
+    if !query_records.is_empty() {
+        check_psiblast_pssm_files(&args, query_records, &scope)?;
     }
     search(
         args,
@@ -6211,6 +6247,9 @@ fn search_database(
     let database = open_search_database(&args, &mut resolved, list.as_ref(), &settings, outputs)?
         .ok_or_else(crate::blastinput::app::missing_subject_error)?;
     let xinclude = xinclude_format(&args, outputs)?;
+    if !query_records.is_empty() {
+        check_psiblast_pssm_files(&resolved, query_records, &pssm_check_scope(&args))?;
+    }
     search(
         resolved,
         query_records,
@@ -7604,6 +7643,12 @@ fn search(
             // (`NextRequest`), or alone, before any output.
             let span = batches.searched_span(failure.query);
             if searched_start > 0 {
+                // The first search looked the taxonomy up for the batches before (their
+                // prefetch and reports): the search again writes those texts again, from the
+                // state of a run that has looked nothing up (review 1 of line DBID mixdb2, H1).
+                if let Some(database) = database {
+                    database.restart_taxonomy();
+                }
                 search_batches(
                     args.clone(),
                     outputs,
@@ -14755,8 +14800,40 @@ fn run_call(
         .collect();
     // A database title that LOSAT does not report as NCBI does is an error before any
     // format is written.
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288 (quoted below)
+    // The first batch whose prefetch looks up a Seq-align id whose lookup fails on a file stops
+    // the run in its prefetch (`shared::batch_prefetch`, below): NCBI reads none of that batch's
+    // reports, nor any of the batches after it, so the checks of the reports are of the batches
+    // before it.
+    // The XML2 and JSON formats write the taxonomy database's texts at each `Hit`, so of their
+    // batches' prefetch only its stop is asked (`shared::batch_prefetch_stop`).
+    let xml2_prefetch = listed_titles.is_some()
+        && requested_formats
+            .first()
+            .is_some_and(|outfmt| matches!(outfmt, BlastpReport::Xml2(_)));
+    // The ranks that the prefetch of the batch of the searched queries `span` reads: psiblast's of
+    // its traceback hit lists (`psiblast_prefetched`).
+    let prefetched_ranks = |span: std::ops::Range<usize>| -> Vec<usize> {
+        match &psiblast_prefetched {
+            Some(ranks) => ranks[span].concat(),
+            None if args.app.prunes_after_traceback() => hit_lists[span]
+                .iter()
+                .flat_map(|hit_list| {
+                    database::ListedTitles::reported_ranks(std::slice::from_ref(hit_list))
+                })
+                .collect(),
+            None => database::ListedTitles::reported_ranks(&hit_lists[span]).collect(),
+        }
+    };
+    let prefetch_stop = listed_titles
+        .as_ref()
+        .filter(|_| batches_prefetch || xml2_prefetch)
+        .and_then(|titles| titles.prefetch_stop(&batch_ranges, &batch_prefetch, prefetched_ranks));
+    let reported_lists = &hit_lists[..prefetch_stop
+        .as_ref()
+        .map_or(hit_lists.len(), |span| span.start)];
     if let Some(titles) = listed_titles.as_ref() {
-        titles.check_reported_titles(&hit_lists)?;
+        titles.check_reported_titles(reported_lists)?;
         // The subjects with parsed Seq-ids that the reports asked for do not write as NCBI
         // (the formats that read a subject's Bioseq need its sequence found by its Seq-align
         // id, which a table of fields that read nothing of the subject does not; outfmt 0, 5 and
@@ -14781,7 +14858,7 @@ fn run_call(
         // the cut, where a PSSM is made; a reported subject that no PSSM reads and no format reads is
         // written as NCBI writes it (a `giim` id in rounds with `6 qseqid`, line DBID pssmrows).
         titles.check_parsed_reports(
-            &hit_lists,
+            reported_lists,
             &batch_prefetch,
             format_plans.iter().any(|outfmt| outfmt.reads_subjects()),
             format_plans.iter().any(|outfmt| match outfmt {
@@ -14846,6 +14923,22 @@ fn run_call(
     let pairwise_first = first_report
         .is_some_and(|format| blastp_pairwise_view_of(args.app, format as i32).is_some());
     if let (Some(titles), Some(database)) = (listed_titles.as_ref(), database) {
+        // Without `taxdb.bti` the prefetch of a table that reads the subjects writes nothing
+        // before it stops: the stopping batch's prefetch alone (`ListedTitles::prefetch_stop`).
+        // The XML2 and JSON formats: the stop alone (`shared::batch_prefetch_stop`), whose
+        // other subjects' loads write their texts at each `Hit`.
+        if let Some(span) = prefetch_stop.as_ref().filter(|_| xml2_prefetch) {
+            titles.batch_prefetch_stop(database, prefetched_ranks(span.clone()), span.start)?;
+        } else if let Some(span) = prefetch_stop
+            .as_ref()
+            .filter(|_| !(prefetch_taxids || psiblast_prefetched.is_some() || prefetch_only))
+        {
+            titles.batch_prefetch(
+                database,
+                database::ListedTitles::reported_ranks(&hit_lists[span.clone()]),
+                span.start,
+            )?;
+        }
         if prefetch_taxids || psiblast_prefetched.is_some() || prefetch_only {
             // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0
             // too, which the prefetch does not: the rows of a batch with hits may open the
@@ -14979,7 +15072,7 @@ fn run_call(
                             prefetch_taxids,
                             !prefetch_only,
                         )?;
-                        titles.batch_prefetch(database, prefetched)?
+                        titles.batch_prefetch(database, prefetched, batch.searched.start)?
                     }
                     None => {
                         if !prefetch_taxids {
@@ -14991,6 +15084,7 @@ fn run_call(
                         titles.batch_prefetch(
                             database,
                             database::ListedTitles::reported_ranks(lists),
+                            batch.searched.start,
                         )?
                     }
                 };

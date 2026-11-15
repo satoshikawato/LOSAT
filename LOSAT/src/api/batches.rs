@@ -211,6 +211,9 @@ pub struct Batches<'a> {
     start_messages: Vec<u8>,
     /// Whether the call is a dry run: one batch of no query, with the start's messages.
     dry_run: bool,
+    /// The run's numbers of psiblast's `-save_each_pssm` files, which go on over the batches as
+    /// over the command line's (`PsiblastArgs::pssm_versions`).
+    pssm_versions: crate::algorithm::psiblast::pssm::PssmVersions,
 }
 
 /// Searches the queries one of NCBI's query batches at a time and returns the batches as an
@@ -250,6 +253,7 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
             log,
             start_messages,
             dry_run: true,
+            pssm_versions: Default::default(),
         });
     }
     check_inputs(search, inputs)?;
@@ -297,6 +301,7 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
         start,
         start_messages,
         dry_run: false,
+        pssm_versions: Default::default(),
     })
 }
 
@@ -331,7 +336,20 @@ impl Batches<'_> {
             Commands::Blastp(args) => args.first_query_ordinal = range.start,
             Commands::Tblastn(args) => args.first_query_ordinal = range.start,
             Commands::Tblastx(args) => args.first_query_ordinal = range.start,
-            Commands::Psiblast(args) => args.first_query_ordinal = range.start,
+            Commands::Psiblast(args) => {
+                use crate::algorithm::psiblast::pssm::PssmCheckScope;
+                args.first_query_ordinal = range.start;
+                args.pssm_versions = self.pssm_versions.clone();
+                // The command line checks the PSSM files of all its queries before its first
+                // byte: the first batch checks the run's, where the command line does.
+                args.pssm_check = if self.searched_one {
+                    PssmCheckScope::Checked
+                } else {
+                    PssmCheckScope::Run {
+                        queries: self.lengths.len(),
+                    }
+                };
+            }
             // BLASTX's messages show the record's own id; rpsblast and rpstblastn are refused
             // by `Program::parse`.
             Commands::Blastx(_)

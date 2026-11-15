@@ -1,4 +1,4 @@
-//! The preliminary search of one blastn subject, as `search_query_batch`'s `process_subject` calls
+//! The preliminary search of one blastn subject, as `SubjectPasses::search_subject` calls
 //! it for the preliminary stage (`prelim_subject`): the subject's lowercase masks or database masks
 //! (`-db_soft_mask`, `-db_hard_mask`) and the set-up of its chunks, then the chunk loop (`collect_subject_prelim`):
 //! the subject in chunks of at most `MAX_DBSEQ_LEN` letters that overlap by `DBSEQ_CHUNK_OVERLAP`
@@ -49,10 +49,10 @@
 //! `diag_hash_insert_window`, `merge_prelim_hit_lists`, `prelim_subject_best_hit`,
 //! `build_subject_seq_ranges_from_masks`, `read_db_soft_ranges`, `ungapped_subject_stage`, the
 //! e-value helpers, `database` and the child modules of the scans and of the HSP list). Its
-//! functions are the statements of `process_subject`'s preliminary side (the subject's set-up, the
+//! functions are the statements of `search_subject`'s preliminary side (the subject's set-up, the
 //! reap and the `-ungapped` finish), of what was its closure `collect_prelim_hits_for_chunk` and of
 //! the chunk loop, in their order. What they read that is the same for every subject of a batch is
-//! `PrelimBatch`, built once per batch; what `process_subject` read of the call is `SubjectCtx`;
+//! `PrelimBatch`, built once per batch; what `search_subject` read of the call is `SubjectCtx`;
 //! what is the same for every chunk of a subject is `PrelimSubject`, built once per subject.
 //! `PrelimBatch` and `PrelimSubject` are `Sync`, for the chunks on the pool.
 
@@ -90,7 +90,7 @@ use crate::utils::threading::SearchPool;
 
 /// What the preliminary search of a subject reads that is the same for every subject of the batch,
 /// in groups below. Built once per batch by `search_query_batch`, before
-/// `process_subject`, with the names there; every field is a shared reference or a `Copy` value, so
+/// `search_subject`, with the names there; every field is a shared reference or a `Copy` value, so
 /// the struct is `Sync` for the chunks on the pool.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:422-432
@@ -235,12 +235,12 @@ pub(super) struct PrelimSubject<'a> {
     pub(super) x_prelim_subject: &'a XPrelimSubject<'a>,
     pub(super) subject_masked: bool,
     pub(super) dbseq_chunk_overlap: usize,
-    /// The batch's lookup tables, which the preliminary stage's calls of `process_subject` pass:
+    /// The batch's lookup tables, which the preliminary stage's calls of `search_subject` pass:
     /// the two-stage table, or the direct table or the na table.
     pub(super) two_stage_lookup_ref: Option<&'a TwoStageLookup>,
     pub(super) pv_direct_lookup_ref: Option<&'a PvDirectLookup>,
     pub(super) na_lookup_ref: Option<&'a NaLookupTable>,
-    /// The batch's values as `process_subject` reads them: the queries, their contexts, each
+    /// The batch's values as `search_subject` reads them: the queries, their contexts, each
     /// context's cutoff, hit-saving cutoff, X-dropoff and reduced cutoff, and the LOSAT_TIMING
     /// counters (`None` when timing is off).
     pub(super) queries: &'a [FastaRecord],
@@ -1602,7 +1602,7 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
     combined_prelim_hits
 }
 
-/// The preliminary search of one subject, `process_subject`'s preliminary stage: the batch's lookup
+/// The preliminary search of one subject, `search_subject`'s preliminary stage: the batch's lookup
 /// tables (the preliminary stage's calls pass them), the subject's lowercase masks
 /// (`-lcase_masking`) and the soft ranges between them, or a database sequence's soft ranges from
 /// its stored masks (`-db_soft_mask`, `read_db_soft_ranges`: a read error ends the sequence's
@@ -1612,7 +1612,7 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
 /// ranges' buffer given back to the scratch, and the subject's list reaped by the preliminary
 /// e-value (`reap_prelim_by_evalue`) or, in an ungapped search, finished
 /// (`finish_ungapped_prelim`). Returns the list that the preliminary stage gives to the collector
-/// (empty after an early return). `subject_ctx` is what `process_subject` read of the call after
+/// (empty after an early return). `subject_ctx` is what `search_subject` read of the call after
 /// its early return without a valid context.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1469-1475,1480-1482,1541-1542
@@ -1667,7 +1667,7 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
         timing_enabled,
         ..
     } = subject_ctx;
-    // The batch's lookup tables: the preliminary stage's calls of `process_subject` pass them, the
+    // The batch's lookup tables: the preliminary stage's calls of `search_subject` pass them, the
     // traceback's pass `None` and do not scan (LOSAT_X_BNLUTDROP, graduated; `x_lut_drop.rs`).
     let two_stage_lookup_ref = lookups.and_then(|tables| tables.two_stage_lookup.as_ref());
     let pv_direct_lookup_ref = lookups.and_then(|tables| tables.pv_direct_lookup.as_ref());

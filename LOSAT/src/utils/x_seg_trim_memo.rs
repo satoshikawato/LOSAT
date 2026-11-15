@@ -1,5 +1,5 @@
 //! LOSAT_X_SEGTRIMMEMO (graduated 2026-10-26, always on): the trim of a SEG segment
-//! computed once per thread for each segment's bytes, for the maskers that ask for it.
+//! computed once for each segment's bytes, for the maskers that ask for it.
 //!
 //! NCBI trims every candidate segment that `s_SegSeq` finds, by evaluating `s_GetProb` on every
 //! window of every length from the segment's length down to `max(1, length - maxtrim) + 1`:
@@ -36,28 +36,31 @@
 //!   (`split.rs`), whose segments are mostly those of the whole query (51 % of the trim work on
 //!   AP027131 x AP027133).
 //!
-//! Other maskers repeat few segments (TBLASTX d04: 2 %) and do not use it, so their threads
-//! keep no table.
+//! Other maskers repeat few segments (TBLASTX d04: 2 %) and do not use it, so their trims
+//! are not stored.
 //!
-//! This module keeps, per thread, the bytes of the segments it trimmed and their pairs. A call
-//! whose bytes and `maxtrim` equal a stored entry (the whole slice is compared; the hash only
-//! selects the slot) returns the stored pair; any other call evaluates the trim and stores it.
-//! The table grows on demand up to `X_MAX_ENTRIES` entries (or `X_MAX_ARENA` letters) and is
-//! then cleared as a whole.
+//! This module keeps, for all threads, the bytes of the segments trimmed and their pairs, in one
+//! table behind one lock. A call whose bytes and `maxtrim` equal a stored entry (the whole slice
+//! is compared; the hash only selects the slot) returns the stored pair; any other call evaluates
+//! the trim (without the lock) and stores it. A segment one thread trimmed is thus not trimmed
+//! again by another (only threads that miss it at the same moment each trim it, and a cleared
+//! table trims it again), and the threads share one copy of the table, which lasts as long as the
+//! process. The table grows on demand up to `X_MAX_ENTRIES` entries (or `X_MAX_ARENA` letters),
+//! the bounds one thread's table had, and is then cleared as a whole; one thread fills and clears
+//! it as before.
 //!
 //! No NCBI counterpart: the memo itself; it returns only values the trim computed for the same
 //! input and does not change any value NCBI computes.
 
-use std::cell::RefCell;
+use std::sync::Mutex;
 
 // No NCBI counterpart: the size bounds of the memo; they decide only which trims are evaluated
 // again and do not change any value NCBI computes.
-/// Most entries kept by one thread; the table is cleared when it would hold more. 32,768 keeps
-/// every distinct segment of the measured jobs (12,584 for TBLASTN AP027131 x AP027133, 25,507
-/// for BLASTX AP027131 x AP027133; v4-C DECISIONS 32).
+/// Most entries kept; the table is cleared when it would hold more. 32,768 keeps every distinct
+/// segment of the measured jobs (12,584 for TBLASTN AP027131 x AP027133, 25,507 for BLASTX
+/// AP027131 x AP027133; v4-C DECISIONS 32).
 const X_MAX_ENTRIES: usize = 32_768;
-/// Most letters kept by one thread (the stored segments' bytes); the table is cleared when it
-/// would hold more.
+/// Most letters kept (the stored segments' bytes); the table is cleared when it would hold more.
 const X_MAX_ARENA: usize = 1 << 20;
 /// Slots of a new table; it doubles while it is more than half full, up to twice
 /// `X_MAX_ENTRIES` (65,536 slots of 12 bytes).
@@ -83,12 +86,11 @@ struct Slot {
     rend: u8,
 }
 
-/// The stored trims of one thread.
+/// The stored trims of one table.
 struct Memo {
     slots: Vec<Slot>,
     arena: Vec<u8>,
     entries: usize,
-    hits: u64,
 }
 
 /// No NCBI counterpart: the slot hash of a segment (64-bit multiply-rotate over 8-byte words);
@@ -115,7 +117,6 @@ impl Memo {
             slots: Vec::new(),
             arena: Vec::new(),
             entries: 0,
-            hits: 0,
         }
     }
 
@@ -164,35 +165,25 @@ impl Memo {
         }
     }
 
-    /// The pair `trim()` returns for `segment`, from this table when `segment` and `maxtrim`
-    /// equal a stored entry (see `x_trimmed`).
-    fn trimmed(
-        &mut self,
-        segment: &[u8],
-        maxtrim: usize,
-        trim: impl FnOnce() -> (usize, usize),
-    ) -> (usize, usize) {
-        let (Ok(maxtrim), true) = (
-            u8::try_from(maxtrim),
-            (1..=X_MAX_SEGMENT).contains(&segment.len()),
-        ) else {
-            return trim();
-        };
+    /// The stored pair of `segment` with `maxtrim` (`hash = hash_of(segment, maxtrim)`), if any.
+    fn stored(&mut self, hash: u64, segment: &[u8], maxtrim: u8) -> Option<(u8, u8)> {
+        if self.slots.is_empty() {
+            return None;
+        }
+        let slot = self.slots[self.position(hash, segment, maxtrim)];
+        (slot.len != 0).then_some((slot.lend, slot.rend))
+    }
+
+    /// Stores the pair of `segment` with `maxtrim` unless it is stored already (another thread
+    /// may have stored the same pair since `stored` was asked).
+    fn store(&mut self, hash: u64, segment: &[u8], maxtrim: u8, (lend, rend): (u8, u8)) {
         if self.slots.is_empty() {
             self.clear();
         }
-        let hash = hash_of(segment, maxtrim);
         let mut index = self.position(hash, segment, maxtrim);
-        let slot = self.slots[index];
-        if slot.len != 0 {
-            let stored = (usize::from(slot.lend), usize::from(slot.rend));
-            self.hits += 1;
-            return stored;
+        if self.slots[index].len != 0 {
+            return;
         }
-        let fresh = trim();
-        let (Ok(lend), Ok(rend)) = (u8::try_from(fresh.0), u8::try_from(fresh.1)) else {
-            return fresh;
-        };
         if self.entries >= X_MAX_ENTRIES || self.arena.len() + segment.len() > X_MAX_ARENA {
             self.clear();
             index = self.position(hash, segment, maxtrim);
@@ -211,39 +202,98 @@ impl Memo {
             rend,
         };
         self.entries += 1;
-        fresh
     }
 }
 
+/// The table and its lock, on a cache line of its own.
+#[repr(align(64))]
+struct Shared(Mutex<Memo>);
+
+/// The segments trimmed by all threads and their (lend, rend) pairs.
+static X_MEMO: Shared = Shared(Mutex::new(Memo::new()));
+
+#[cfg(test)]
 thread_local! {
-    /// The segments this thread trimmed and their (lend, rend) pairs.
-    static X_MEMO: RefCell<Memo> = const { RefCell::new(Memo::new()) };
+    /// Memo hits of this thread so far (tests only).
+    static X_HITS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// The table, locked (a panic while it was held leaves no partial entry: an entry is written
+/// whole after its letters).
+fn x_table() -> std::sync::MutexGuard<'static, Memo> {
+    X_MEMO
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// LOSAT_X_SEGTRIMMEMO (graduated 2026-10-26): the pair `trim()` returns for `segment` (offsets of the
-/// trimmed segment within `segment`), from the per-thread memo when `segment` and `maxtrim`
-/// equal a stored entry. `trim` must be the pure trim of exactly these letters with this
-/// `maxtrim`, and must not call `x_trimmed` itself or wait on other threads' work (it runs while
-/// this thread's table is borrowed). Segments longer than `X_MAX_SEGMENT`, an empty segment and
-/// a `maxtrim` above 255 are trimmed without the memo.
+/// trimmed segment within `segment`), from the memo when `segment` and `maxtrim` equal a stored
+/// entry. `trim` must be the pure trim of exactly these letters with this `maxtrim`; it runs
+/// without the memo's lock. Segments longer than `X_MAX_SEGMENT`, an empty segment and a
+/// `maxtrim` above 255 are trimmed without the memo.
 pub(crate) fn x_trimmed(
     segment: &[u8],
     maxtrim: usize,
     trim: impl FnOnce() -> (usize, usize),
 ) -> (usize, usize) {
-    X_MEMO.with(|memo| memo.borrow_mut().trimmed(segment, maxtrim, trim))
+    x_trimmed_in(x_table, segment, maxtrim, trim)
 }
 
-/// Memo hits of this thread so far (tests only).
+/// `x_trimmed` with the table given by `table` (the table, locked).
+fn x_trimmed_in<T: std::ops::DerefMut<Target = Memo>>(
+    table: impl Fn() -> T,
+    segment: &[u8],
+    maxtrim: usize,
+    trim: impl FnOnce() -> (usize, usize),
+) -> (usize, usize) {
+    let (Ok(maxtrim), true) = (
+        u8::try_from(maxtrim),
+        (1..=X_MAX_SEGMENT).contains(&segment.len()),
+    ) else {
+        return trim();
+    };
+    let hash = hash_of(segment, maxtrim);
+    // The guard goes at the end of the statement: `trim` runs without the lock.
+    let stored = table().stored(hash, segment, maxtrim);
+    if let Some((lend, rend)) = stored {
+        #[cfg(test)]
+        X_HITS.with(|hits| hits.set(hits.get() + 1));
+        return (usize::from(lend), usize::from(rend));
+    }
+    let fresh = trim();
+    if let (Ok(lend), Ok(rend)) = (u8::try_from(fresh.0), u8::try_from(fresh.1)) {
+        table().store(hash, segment, maxtrim, (lend, rend));
+    }
+    fresh
+}
+
+/// Memo hits of this thread so far (tests only; a hit of the memo shared by all threads counts
+/// for the thread that asked).
 #[cfg(test)]
 pub(crate) fn x_hits() -> u64 {
-    X_MEMO.with(|memo| memo.borrow().hits)
+    X_HITS.with(std::cell::Cell::get)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
+
+    /// `x_trimmed` on the one table `memo`.
+    impl Memo {
+        fn trimmed(
+            &mut self,
+            segment: &[u8],
+            maxtrim: usize,
+            trim: impl FnOnce() -> (usize, usize),
+        ) -> (usize, usize) {
+            let memo = RefCell::new(std::mem::replace(self, Memo::new()));
+            let pair = x_trimmed_in(|| memo.borrow_mut(), segment, maxtrim, trim);
+            *self = memo.into_inner();
+            pair
+        }
+    }
 
     #[test]
     fn memo_returns_the_stored_pair_for_equal_bytes_and_maxtrim_only() {
@@ -276,7 +326,29 @@ mod tests {
         assert_eq!(memo.trimmed(&long, 50, trim((5, 6))), (5, 6));
         assert_eq!(memo.trimmed(&long, 50, trim((5, 6))), (5, 6));
         assert_eq!(calls.get(), 6);
-        assert_eq!(memo.hits, 1);
+    }
+
+    #[test]
+    fn trim_runs_without_the_table_and_a_stored_key_is_not_stored_twice() {
+        let memo = RefCell::new(Memo::new());
+        let a = [3u8, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5];
+        // The trim takes the table itself (a held table would make this borrow panic) and stores
+        // the same key first, as another thread that missed it at the same moment would.
+        let pair = x_trimmed_in(
+            || memo.borrow_mut(),
+            &a,
+            50,
+            || {
+                memo.borrow_mut().store(hash_of(&a, 50), &a, 50, (2, 7));
+                (2, 7)
+            },
+        );
+        assert_eq!(pair, (2, 7));
+        assert_eq!(memo.borrow().entries, 1);
+        assert_eq!(
+            x_trimmed_in(|| memo.borrow_mut(), &a, 50, || unreachable!()),
+            (2, 7)
+        );
     }
 
     #[test]

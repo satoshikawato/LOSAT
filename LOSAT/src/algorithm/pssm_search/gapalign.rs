@@ -1312,6 +1312,134 @@ pub(crate) fn pssm_gapped_alignment_with_traceback<R: PssmRows>(
     }
 }
 
+/// The rows of a PSSM as `ALIGN_EX` reads them from `query_offset = queryStart - 1`
+/// (`s_SWFindFinalEndsUsingXdrop`): its row `a_index` (from 1) is the PSSM's row `start + a_index
+/// - 1`.
+struct RowsFrom<'r, R> {
+    rows: &'r R,
+    start: usize,
+}
+
+impl<R: PssmRows> PssmRows for RowsFrom<'_, R> {
+    #[inline(always)]
+    fn row(&self, pos: usize) -> &[i32; crate::core::blast_util::BLASTAA_SIZE] {
+        self.rows.row(self.start + pos - 1)
+    }
+
+    #[inline(always)]
+    fn len(&self) -> usize {
+        self.rows.len() + 1 - self.start
+    }
+}
+
+/// The traceback of a Smith-Waterman alignment (`s_SWFindFinalEndsUsingXdrop`): its extents from
+/// the start in the query and the subject (`*queryAlignmentExtent`, `*matchAlignmentExtent`), the
+/// X-drop alignment's score and its edit script.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SwXdropTraceback {
+    pub(crate) query_extent: i32,
+    pub(crate) match_extent: i32,
+    pub(crate) score: i32,
+    pub(crate) edit_script: Vec<GapEditOp>,
+}
+
+/// `s_SWFindFinalEndsUsingXdrop` with a PSSM, as `s_NewAlignmentUsingXdrop` calls it: the forward
+/// `ALIGN_EX` from the Smith-Waterman alignment's start `(query_start, match_start)` over the
+/// rectangle that ends at `(query_end, match_end)` (both included), its X-drop doubled up to two
+/// times while the score stays below the Smith-Waterman `score`, and the edit script of the last
+/// try (`Blast_PrelimEditBlockToGapEditScript` of an empty left part). `subject` is NCBI's
+/// `subject->data - 1`: the letters after one sentinel byte.
+///
+/// NCBI's `gap_x_dropoff *= 2` overflows `Int4` above 2^30 (undefined behavior); the doubled value
+/// is kept here as its mathematical value, which saturates at `i32::MAX` without a change:
+/// `ALIGN_EX` compares it with differences of `Int4` scores only.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:844-879
+/// ```c
+///     Int4 XdropAlignScore;         /* alignment score obtained using X-dropoff
+///                                    * method rather than Smith-Waterman */
+///     Int4 doublingCount = 0;       /* number of times X-dropoff had to be
+///                                    * doubled */
+///     Int4 gap_x_dropoff_orig = gap_align->gap_x_dropoff;
+///
+///     GapPrelimEditBlockReset(gap_align->rev_prelim_tback);
+///     GapPrelimEditBlockReset(gap_align->fwd_prelim_tback);
+///     do {
+///         XdropAlignScore =
+///             ALIGN_EX(&(query->data[queryStart]) - 1,
+///                      &(subject->data[matchStart]) - 1,
+///                      queryEnd - queryStart + 1, matchEnd - matchStart + 1,
+///                      queryAlignmentExtent,
+///                      matchAlignmentExtent, gap_align->fwd_prelim_tback,
+///                      gap_align, scoringParams, queryStart - 1, FALSE, FALSE,
+///                      NULL);
+///
+///         gap_align->gap_x_dropoff *= 2;
+///         doublingCount++;
+///         if((XdropAlignScore < score) && (doublingCount < 3)) {
+///             GapPrelimEditBlockReset(gap_align->fwd_prelim_tback);
+///         }
+///     } while((XdropAlignScore < score) && (doublingCount < 3));
+///
+///     gap_align->gap_x_dropoff = gap_x_dropoff_orig;
+///     *newScore = XdropAlignScore;
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1849-1854
+/// ```c
+///     *pqueryEnd = queryStart + queryExtent;
+///     *pmatchEnd = matchStart + matchExtent;
+///
+///     editScript =
+///         Blast_PrelimEditBlockToGapEditScript(gap_align->rev_prelim_tback,
+///                                              gap_align->fwd_prelim_tback);
+/// ```
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn pssm_sw_xdrop_traceback<R: PssmRows>(
+    rows: &R,
+    subject: &[u8],
+    (query_start, query_end): (usize, usize),
+    (match_start, match_end): (usize, usize),
+    gap_open: i32,
+    gap_extend: i32,
+    x_dropoff: i32,
+    score: i32,
+    scratch: &mut PssmGapScratch,
+) -> SwXdropTraceback {
+    let rows = RowsFrom {
+        rows,
+        start: query_start,
+    };
+    let mut x_drop = x_dropoff;
+    let mut doubling_count = 0;
+    let mut fence_hit = false;
+    loop {
+        let (a_offset, b_offset, xdrop_align_score, forward) = align_ex(
+            &rows,
+            query_end - query_start + 1,
+            0,
+            subject,
+            match_start,
+            match_end - match_start + 1,
+            gap_open,
+            gap_extend,
+            x_drop,
+            false,
+            scratch,
+            &mut fence_hit,
+        );
+        x_drop = x_drop.saturating_mul(2);
+        doubling_count += 1;
+        if !(xdrop_align_score < score && doubling_count < 3) {
+            return SwXdropTraceback {
+                query_extent: a_offset as i32,
+                match_extent: b_offset as i32,
+                score: xdrop_align_score,
+                edit_script: prelim_edit_blocks_to_script(Vec::new(), forward),
+            };
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

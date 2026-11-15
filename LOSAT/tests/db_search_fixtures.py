@@ -53,10 +53,10 @@ With `--library` BIN is `examples/library_command_line`, the same search through
 failure's exit status counts as any other failure's, a row whose query the reader refuses is
 `library-input-error` when the message is the command line's (the library reads the whole query
 before it searches, so the reports of the batches before the error do not exist; so is a rejection
-row whose query has a reader error after the batch that the command line refuses), and the rows that
-write PSSM files (the PSSM kinds) or pass a PSSM file option are `library-skip`: the library API
-writes no PSSM file and refuses those options (`LIBRARY_REFUSED`). psiblast's rounds (`-num_iterations` other than
-1) run through the library as on the command line.
+row whose query has a reader error after the batch that the command line refuses), and the rows of a
+PSSM query (`-in_pssm`) are `library-skip`: the library API refuses it, its queries are records
+(`LIBRARY_REFUSED`). psiblast's rounds (`-num_iterations` other than 1) and its PSSM files (the PSSM
+kinds) run through the library as on the command line.
 The tool takes no lock; whoever runs it next to other NCBI runs holds the caller's own.
 """
 from __future__ import annotations
@@ -396,16 +396,16 @@ def status_differs(observed: int, expected: int, library: bool) -> bool:
     return (observed != 0) != (expected != 0) if library else observed != expected
 
 
-# psiblast's PSSM file options, which the library API refuses before any search
-# (`api::search::pssm_file_options`).
-LIBRARY_REFUSED = {"-out_pssm", "-out_ascii_pssm", "-save_pssm_after_last_round", "-save_each_pssm", "-in_pssm"}
+# The options that the library API refuses before any search (`api::search::file_options`): the
+# PSSM query of psiblast and tblastn.
+LIBRARY_REFUSED = {"-in_pssm"}
 
 
 def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str], library: bool = False) -> tuple[str, str]:
     files = xinclude.wants_files(row)
     pssm = xinclude.wants_pssm(row)
     # The library API refuses rpsblast and rpstblastn (`api::Program::parse`, line PS items PS11a, PS12a).
-    if library and (pssm or LIBRARY_REFUSED.intersection(search_argv(row))
+    if library and (LIBRARY_REFUSED.intersection(search_argv(row))
                     or row["program"] in ("rpsblast", "rpstblastn")):
         return "library-skip", ""
     command = [str(losat), row["program"], *search_argv(row), "-num_threads", str(threads)]

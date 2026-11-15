@@ -12,6 +12,9 @@
 //! The scans of either head take each word's run from the element the ring hands over with it
 //! (`LOSAT_X_BNRANKONCE`, strict set: a packed head's word ranked once): on in the default, which
 //! takes its side, and its `=0` (the run read again from the cell) gives the same report.
+//! The packed heads count their presence bits with x86-64's popcnt where the CPU has it
+//! (`LOSAT_X_BNPOPCNT`, strict set, a platform switch: `LOSAT_TIMING`'s `popcnt=` says which form
+//! ran); its `=0` (`count_ones`) gives the same report.
 //! Two tables: `-task blastn` (word size 11) with a query of 1.27 Mb (a 4^11-cell table, newest
 //! first, above the rule), and `-word_size 9` with a query of 9,800 letters (the 4^8-cell table
 //! that stands for NCBI's small table, in reading order, above the rule), each against a subject
@@ -31,6 +34,8 @@ const PACK_OFF: (&str, &str) = ("LOSAT_X_BNCSRPACK", "0");
 /// The run handed over by the scans' ring (`LOSAT_X_BNRANKONCE`, strict set).
 const RANK_ONCE: &str = "LOSAT_X_BNRANKONCE";
 const RANK_ONCE_OFF: (&str, &str) = ("LOSAT_X_BNRANKONCE", "0");
+/// The bit counts of the packed heads with x86-64's popcnt (`LOSAT_X_BNPOPCNT`, strict set).
+const POPCNT_OFF: (&str, &str) = ("LOSAT_X_BNPOPCNT", "0");
 const TIMING: (&str, &str) = ("LOSAT_TIMING", "1");
 
 fn fasta(name: &str) -> PathBuf {
@@ -132,7 +137,8 @@ fn search(
     (output.stdout, stderr)
 }
 
-/// `(builds, parallel)` of `[TIMING] x_bn_csr: builds=<n> parallel=<n> words=<n>` in `stderr`
+/// `(builds, parallel)` of `[TIMING] x_bn_csr: builds=<n> parallel=<n> words=<n> popcnt=<0|1>` in
+/// `stderr`
 /// (`None` without the line).
 fn csr_builds(stderr: &str) -> Option<(u64, u64)> {
     let line = stderr
@@ -147,10 +153,37 @@ fn csr_builds(stderr: &str) -> Option<(u64, u64)> {
     Some((field("builds="), field("parallel=")))
 }
 
+/// `popcnt=<0|1>` of the `[TIMING] x_bn_csr:` line in `stderr` (`None` without the line).
+fn csr_popcnt(stderr: &str) -> Option<bool> {
+    let line = stderr
+        .lines()
+        .find_map(|line| line.strip_prefix("[TIMING] x_bn_csr: "))?;
+    match line
+        .split_whitespace()
+        .find_map(|word| word.strip_prefix("popcnt="))
+    {
+        Some("1") => Some(true),
+        Some("0") => Some(false),
+        other => panic!("popcnt= {other:?} in: {line}"),
+    }
+}
+
+/// Whether this CPU has x86-64's popcnt instruction (the default form of `LOSAT_X_BNPOPCNT`).
+fn popcnt_cpu() -> bool {
+    #[cfg(target_arch = "x86_64")]
+    {
+        std::arch::is_x86_feature_detected!("popcnt")
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        false
+    }
+}
+
 /// For `query` and `extra` against `subject` as a file and as a database: the report with the
 /// switch off at one thread, then off, by default, by default with `LOSAT_TIMING` and with the
-/// packed head off (`LOSAT_X_BNCSRPACK=0`) or the ring's run off (`LOSAT_X_BNRANKONCE=0`) at 1
-/// and 4 threads, all the same bytes; the default takes the switch's side (`LOSAT_X_REACH`), the
+/// packed head off (`LOSAT_X_BNCSRPACK=0`), the ring's run off (`LOSAT_X_BNRANKONCE=0`) or popcnt
+/// off (`LOSAT_X_BNPOPCNT=0`) at 1 and 4 threads, all the same bytes; the default takes the switch's side (`LOSAT_X_REACH`), the
 /// ring's run, and the packed head's when `packed` (a newest-first table) or its reference side
 /// (the reading-order table), builds every CSR table on the pool at four threads and on the search
 /// thread at one, and writes nothing else.
@@ -187,6 +220,15 @@ fn check(dir: &TestDir, query: &Path, subject: &Path, extra: &[&str], packed: bo
                 "{what} threads {threads}: the ring's run off differs"
             );
             assert_eq!(stderr, expected_stderr, "{what} threads {threads} run off");
+            let (report, stderr) = search(query, subjects, extra, threads, &[POPCNT_OFF]);
+            assert!(
+                report == expected,
+                "{what} threads {threads}: popcnt off differs"
+            );
+            assert_eq!(
+                stderr, expected_stderr,
+                "{what} threads {threads} popcnt off"
+            );
             let (report, stderr) = search(query, subjects, extra, threads, &[PACK_OFF]);
             assert!(
                 report == expected,
@@ -200,6 +242,17 @@ fn check(dir: &TestDir, query: &Path, subject: &Path, extra: &[&str], packed: bo
             );
             let (builds, parallel) = csr_builds(&stderr)
                 .unwrap_or_else(|| panic!("{what} threads {threads}: no CSR line:\n{stderr}"));
+            assert_eq!(
+                csr_popcnt(&stderr),
+                Some(popcnt_cpu()),
+                "{what} threads {threads}: the bit counts' form"
+            );
+            let (_, stderr) = search(query, subjects, extra, threads, &[TIMING, POPCNT_OFF]);
+            assert_eq!(
+                csr_popcnt(&stderr),
+                Some(false),
+                "{what} threads {threads}: popcnt off"
+            );
             assert!(builds > 0, "{what} threads {threads}");
             let on_pool = if threads > 1 { builds } else { 0 };
             assert_eq!(parallel, on_pool, "{what} threads {threads}: pool builds");

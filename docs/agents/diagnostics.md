@@ -351,6 +351,7 @@ export LOSAT_X_BNFEWSUBJ=1
 export LOSAT_X_BNHITGROUP=1
 export LOSAT_X_BNHLGROW=1
 export LOSAT_X_BNMAPPED=1
+export LOSAT_X_BNPOPCNT=1
 export LOSAT_X_BNPVONCE=1
 export LOSAT_X_BNQPACK=1
 export LOSAT_X_BNQPARTS=1
@@ -1154,6 +1155,21 @@ Same values, faster computation:
   BlobToolKit x0.974, mlst `example.fna` / `messy.fa` x0.975 / x0.974 (`novel.fa` 0.15 s in both), ABRicate's ncbi /
   resfinder x0.983 / x0.982, ECTyper x0.993, Easyfig ex2a x0.990, the same max RSS; cycles (perf stat, node 0, 5 runs)
   x0.960-0.989 and instructions x0.982-0.992 on the same cases; callgrind of mlst's `example.fna` 3.131 G -> 3.094 G.
+- `LOSAT_X_BNPOPCNT=1` (BLASTN, the packed CSR heads of `LOSAT_X_BNCSRPACK` on x86-64 CPUs with `popcnt`, speed; in
+  the strict set from the pull request that added it, 2026-11-16 (perf/dt13-popcnt); `=0` counts with `count_ones`)
+  counts the presence bits of a packed head with x86-64's `popcnt` instruction: the rank of a word in the scans and the
+  place passes (`x_dc_csr::x_rank`), and the presence and sum passes of the table's build (`x_presence8`,
+  `x_sum_packed`). `x_dc_csr::XPop` reads the CPU (`is_x86_feature_detected!`) and the switch once and is carried by
+  value into those loops; the instruction is inline `asm!` on one register (in and out, so it waits on no other
+  register's last writer). Cause removed: the default x86-64 target has no `popcnt`, so `count_ones` was a dozen
+  instructions there (on aarch64 and in Wasm it is the target's own count, and the form is unchanged). Every count,
+  rank and report is the same. `LOSAT_TIMING`'s `[TIMING] x_bn_csr:` line ends `popcnt=1` when the instruction ran.
+  Evidence (ws, Xeon 6338; every report the same): time on one core of node 1 (timed lease, warm-up + 8 rounds, arms
+  alternating, medians) against `LOSAT_X_BNRANKONCE` alone (dev 889212747 + #1218): mlst `example.fna` / `messy.fa`
+  x0.947 / x0.944 (`novel.fa` 0.14 s in both), BlobToolKit x0.974, Easyfig ex2a x0.988, ABRicate's resfinder / ncbi
+  x0.989 / x0.992, MOB-suite x0.990, ECTyper x0.994, the same max RSS; with #1218 against that dev mlst x0.919-0.966,
+  BlobToolKit x0.951, MOB-suite x0.966, ABRicate x0.974-0.975. Callgrind of mlst's `example.fna` 3.094 G -> 2.950 G
+  (the table build's place pass 549 M -> 442 M with the instruction alone).
 - BNUNGAPCOUNT (graduated 2026-10-27, in the set from 2026-10-22; no variable; always on; the ported loops
   stay as the unit test's reference) (blastn, speed) the exact ungapped extension
   (`s_NuclUngappedExtendExact`: blastn-short and other word sizes below 11, and the exact pass after the

@@ -14,6 +14,8 @@
 //! The scan of a packed table takes each word's run from the rank its ring handed over
 //! (`LOSAT_X_BNRANKONCE`, its side where the table is CSR, the reference side on chains); its `=0`
 //! (the run read again from the cell) gives the same report.
+//! The packed heads count their presence bits with x86-64's popcnt where the CPU has it
+//! (`LOSAT_X_BNPOPCNT`); its `=0` (`count_ones`) gives the same report.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -27,6 +29,8 @@ const HIT_PREFETCH_OFF: (&str, &str) = ("LOSAT_X_MBHITPF", "0");
 /// The run handed over by the CSR scans' ring (`LOSAT_X_BNRANKONCE`, strict set).
 const RANK_ONCE: &str = "LOSAT_X_BNRANKONCE";
 const RANK_ONCE_OFF: (&str, &str) = ("LOSAT_X_BNRANKONCE", "0");
+/// The bit counts of the packed heads with x86-64's popcnt (`LOSAT_X_BNPOPCNT`, strict set).
+const POPCNT_OFF: (&str, &str) = ("LOSAT_X_BNPOPCNT", "0");
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -173,6 +177,11 @@ fn check(dir: &TestDir, copies: usize, taken: bool) {
             assert!(
                 report == expected,
                 "{what} threads {threads}: the ring's run off differs"
+            );
+            let (report, _) = search(query, subjects, threads, &[POPCNT_OFF]);
+            assert!(
+                report == expected,
+                "{what} threads {threads}: popcnt off differs"
             );
         }
     }

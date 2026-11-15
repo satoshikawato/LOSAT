@@ -5,15 +5,8 @@
 //! (`refuse_unreportable`). Each function is the statements of `run_call` at its place, in their
 //! order; `run_call` calls them once each, in that order, and its `?` passes their errors on.
 //!
-//! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288
-//! ```c++
-//!                 BlastFormatter_PreFetchSequenceData(*results, scope,
-//!                 		                            fmt_args->GetFormattedOutputChoice());
-//!                 ITERATE(CSearchResultSet, result, *results) {
-//!                     formatter.PrintOneResultSet(**result, query_batch);
-//!                 }
-//! ```
-//! NCBI prefetches each batch's subjects and then writes each query's report, whose warnings come
+//! The NCBI reference for the prefetch before the reports (`BlastFormatter_PreFetchSequenceData`, called at
+//! blastp_app.cpp:284-288) is at `prefetch_reported_subjects`. NCBI prefetches each batch's subjects and then writes each query's report, whose warnings come
 //! first; LOSAT reads, before the first byte of any format, what the reports will read, and refuses
 //! what it cannot write as NCBI does.
 //!
@@ -264,6 +257,7 @@ pub(super) fn prefetch_reported_subjects(
         //     } catch (const CException&) {
         //         sequence_data.erase();
         //         ERR_POST(Warning << "Failed to retrieve sequence " <<
+        //                  seqloc.GetInt().GetId().AsFastaString());
         // ```
         // psiblast's PSSM (`-out_pssm`, `-out_ascii_pssm`, and each round's PSSM for the next
         // round) reads the letters of each included subject by its Seq-align id, as those formats

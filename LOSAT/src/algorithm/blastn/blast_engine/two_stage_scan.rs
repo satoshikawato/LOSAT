@@ -821,13 +821,16 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                         }
                         // A word that the presence vector keeps goes to the ring out of line
                         // (`x_push_word`), so this closure is the presence test only and the
-                        // scan inlines it: a word without a hit there makes no call.
+                        // scan inlines it: a word without a hit there makes no call. A head
+                        // tested in its own bits (`$pv` false) takes every word to its ring
+                        // and keeps the push in this closure.
                         if !$pv || two_stage.has_hits(current_lut_kmer) {
-                            x_push_word(
-                                &mut ring,
-                                (kmer_start, s_range, current_lut_kmer),
-                                &mut x_on_word_csr,
-                            );
+                            let w = (kmer_start, s_range, current_lut_kmer);
+                            if $pv {
+                                x_push_word(&mut ring, w, &mut x_on_word_csr);
+                            } else {
+                                ring.push(w, |w| w.2 as usize, &mut x_on_word_csr);
+                            }
                         }
                     },
                 );
@@ -931,8 +934,9 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
 /// presence vector's test and the scan inlines it (callgrind, mlst's 225,777 alleles: the scan's
 /// closure 689 M -> 221 M instructions, the whole search 3.131 G -> 3.064 G, -2.2 %; the words the
 /// presence vector drops make no call). A head that tests each word in its own bits (`$pv` false:
-/// LOSAT_X_BNPVONCE) makes one call per word, here instead of the closure. The words, their order and
-/// every value are the same.
+/// LOSAT_X_BNPVONCE) takes every word to its ring and keeps the push in the closure, as before (out
+/// of line it made ABRicate's resfinder search 1.4 % slower: perf stat, ws node 0). The words, their
+/// order and every value are the same.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1523-1536
 /// (`s_MBScanSubject_Any`: the presence test of each word in the scan's loop, the retrieve only for

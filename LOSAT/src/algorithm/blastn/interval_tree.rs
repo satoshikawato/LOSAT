@@ -98,8 +98,15 @@ struct IntervalNode {
     midptr: i32,
     /// Index of right child (0 = none)
     rightptr: i32,
-    /// HSP stored at this node (only for leaf nodes)
-    hsp: Option<TreeHsp>,
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.h:56
+    /// ```c
+    ///     BlastHSP *hsp;          /**< The HSP contained in this region (only
+    ///                                  non-NULL for leaf nodes) */
+    /// ```
+    /// The HSP of a leaf, as 1 + its index in `BlastIntervalTree::hsps`; 0 (NULL) for internal
+    /// nodes. A node is then 28 bytes, as NCBI's (with an 8-byte pointer) is 32, instead of 64
+    /// with the HSP inside it.
+    hsp: u32,
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:359-362,398-404
     /// ```c
     ///             if (best_hsp == next_node->hsp)
@@ -117,6 +124,9 @@ struct IntervalNode {
     x_dead: bool,
 }
 
+// No NCBI counterpart: the node stays 28 bytes (memory only).
+const _: () = assert!(std::mem::size_of::<IntervalNode>() == 28);
+
 impl IntervalNode {
     fn new_internal(leftend: i32, rightend: i32) -> Self {
         Self {
@@ -125,21 +135,32 @@ impl IntervalNode {
             leftptr: 0,
             midptr: 0,
             rightptr: 0,
-            hsp: None,
+            hsp: 0,
             x_dead: false,
         }
     }
 
-    fn new_leaf(hsp: TreeHsp, query_context_offset: i32) -> Self {
+    /// `hsp` = 1 + the HSP's index in `BlastIntervalTree::hsps`.
+    fn new_leaf(hsp: u32, query_context_offset: i32) -> Self {
         Self {
             leftend: 0,
             rightend: 0,
             leftptr: query_context_offset, // NCBI stores q_start offset here for leaves
             midptr: 0,
             rightptr: 0,
-            hsp: Some(hsp),
+            hsp,
             x_dead: false,
         }
+    }
+
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:952
+    /// ```c
+    ///     while (node->hsp == NULL) {
+    /// ```
+    /// Whether the node is a leaf (`hsp != NULL`).
+    #[inline]
+    fn is_leaf(&self) -> bool {
+        self.hsp != 0
     }
 }
 
@@ -566,6 +587,15 @@ impl XTreeIndex {
 pub struct BlastIntervalTree {
     /// Array of nodes (index 0 is root for query-indexed tree)
     nodes: Vec<IntervalNode>,
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:597-599
+    /// ```c
+    ///     nodes[new_index].leftptr = query_start;
+    ///     nodes[new_index].midptr = 0;
+    ///     nodes[new_index].hsp = hsp;
+    /// ```
+    /// The HSPs the leaves point to (NCBI's leaves point to the caller's `BlastHSP`s), in the
+    /// order the leaves were made; a leaf's `hsp` is 1 + its index here.
+    hsps: Vec<TreeHsp>,
     /// Minimum subject offset
     s_min: i32,
     /// Maximum subject offset
@@ -602,6 +632,7 @@ impl BlastIntervalTree {
             // tree->num_used = 0;
             // ```
             nodes: Vec::with_capacity(100),
+            hsps: Vec::new(),
             s_min,
             s_max,
             x: XTreeIndex::new(q_min, q_max, s_min, s_max),
@@ -631,6 +662,9 @@ impl BlastIntervalTree {
         if target > self.nodes.capacity() {
             self.nodes.reserve(target - self.nodes.capacity());
         }
+        if hsp_count > self.hsps.capacity() {
+            self.hsps.reserve(hsp_count - self.hsps.len());
+        }
     }
 
     /// Reset the tree for reuse
@@ -644,6 +678,7 @@ impl BlastIntervalTree {
             self.nodes
                 .push(IntervalNode::new_internal(leftend, rightend));
         }
+        self.hsps.clear();
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:195-201
         // ```c
         //     tree->num_used = 1;
@@ -671,6 +706,7 @@ impl BlastIntervalTree {
         self.s_max = s_max;
         self.nodes.clear();
         self.nodes.push(IntervalNode::new_internal(q_min, q_max));
+        self.hsps.clear();
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:166-170
         // ```c
         //     tree->s_min = s_start;
@@ -707,6 +743,7 @@ impl BlastIntervalTree {
         self.s_max = s_max;
         self.nodes.clear();
         self.nodes.push(IntervalNode::new_internal(q_min, q_max));
+        self.hsps.clear();
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:166-170
         // ```c
         //     tree->s_min = s_start;
@@ -765,9 +802,25 @@ impl BlastIntervalTree {
 
     /// Allocate a new leaf node
     fn alloc_leaf_node(&mut self, hsp: TreeHsp, query_context_offset: i32) -> usize {
-        let node = IntervalNode::new_leaf(hsp, query_context_offset);
+        self.hsps.push(hsp);
+        let node = IntervalNode::new_leaf(self.hsps.len() as u32, query_context_offset);
         self.nodes.push(node);
         self.nodes.len() - 1
+    }
+
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:952-953
+    /// ```c
+    ///     while (node->hsp == NULL) {
+    /// ...
+    ///     return s_HSPIsContained(hsp, query_start,
+    ///                             node->hsp, node->leftptr,
+    /// ```
+    /// `node->hsp`: the HSP of a leaf, `None` (NULL) for an internal node.
+    #[inline]
+    fn leaf_hsp(&self, node: &IntervalNode) -> Option<&TreeHsp> {
+        node.hsp
+            .checked_sub(1)
+            .map(|index| &self.hsps[index as usize])
     }
 
     /// Determine whether an input HSP shares a common start- or endpoint with
@@ -906,7 +959,7 @@ impl BlastIntervalTree {
             while tmp_index != 0 {
                 let (next_idx, result) = {
                     let tmp_node = &self.nodes[tmp_index as usize];
-                    let tree_hsp = match tmp_node.hsp.as_ref() {
+                    let tree_hsp = match self.leaf_hsp(tmp_node) {
                         Some(hsp) => hsp,
                         None => break,
                     };
@@ -963,9 +1016,8 @@ impl BlastIntervalTree {
 
             // NCBI reference: blast_itree.c:385-406
             let next_node = &self.nodes[next_child_idx as usize];
-            if next_node.hsp.is_some() {
+            if let Some(tree_hsp) = self.leaf_hsp(next_node) {
                 // Reached a leaf; compare in_hsp with the alignment in the leaf
-                let tree_hsp = next_node.hsp.as_ref().unwrap();
                 let tree_q_start = next_node.leftptr;
 
                 let result = Self::hsps_have_common_endpoint(
@@ -1068,9 +1120,8 @@ impl BlastIntervalTree {
 
             // NCBI reference: blast_itree.c:480-501
             let next_node = &self.nodes[next_child_idx as usize];
-            if next_node.hsp.is_some() {
+            if let Some(tree_hsp) = self.leaf_hsp(next_node) {
                 // Reached a leaf
-                let tree_hsp = next_node.hsp.as_ref().unwrap();
                 let tree_q_start = next_node.leftptr;
 
                 let result = Self::hsps_have_common_endpoint(
@@ -1187,7 +1238,7 @@ impl BlastIntervalTree {
             if node.x_dead {
                 return None;
             }
-            let tree_hsp = node.hsp.as_ref()?;
+            let tree_hsp = self.leaf_hsp(node)?;
             Self::is_hsp_contained(
                 hsp,
                 query_start,
@@ -1314,7 +1365,8 @@ impl BlastIntervalTree {
                     self.x.ends.grow();
                 }
                 for node in &self.nodes {
-                    if let Some(leaf_hsp) = node.hsp.as_ref() {
+                    if let Some(index) = node.hsp.checked_sub(1) {
+                        let leaf_hsp = &self.hsps[index as usize];
                         let start = node.leftptr;
                         self.x.ends.insert(
                             start + leaf_hsp.query_offset,
@@ -1392,7 +1444,7 @@ impl BlastIntervalTree {
                 }
 
                 // Check if existing node is a leaf or internal
-                let old_node_is_leaf = self.nodes[leftptr as usize].hsp.is_some();
+                let old_node_is_leaf = self.nodes[leftptr as usize].is_leaf();
                 if !old_node_is_leaf {
                     // Descend to internal node
                     root_index = leftptr as usize;
@@ -1425,7 +1477,7 @@ impl BlastIntervalTree {
                 }
 
                 // Check if existing node is a leaf or internal
-                let old_node_is_leaf = self.nodes[rightptr as usize].hsp.is_some();
+                let old_node_is_leaf = self.nodes[rightptr as usize].is_leaf();
                 if !old_node_is_leaf {
                     // Descend to internal node
                     root_index = rightptr as usize;
@@ -1498,7 +1550,7 @@ impl BlastIntervalTree {
         let mid_index = self.alloc_internal_node(parent_root_index, which_half);
 
         // Get the old HSP data before we modify anything
-        let old_hsp = self.nodes[old_leaf_index].hsp.unwrap();
+        let old_hsp = *self.leaf_hsp(&self.nodes[old_leaf_index]).unwrap();
         let old_q_start = self.nodes[old_leaf_index].leftptr; // leftptr stores query_start for leaves
 
         // NCBI reference: blast_itree.c:717-720
@@ -1706,7 +1758,7 @@ impl BlastIntervalTree {
             if child == 0 {
                 return false;
             }
-            if self.nodes[child as usize].hsp.is_none() {
+            if !self.nodes[child as usize].is_leaf() {
                 root = child as usize;
                 continue;
             }
@@ -1717,7 +1769,7 @@ impl BlastIntervalTree {
         };
         // The nodes of the splits with the leaf `old`.
         let old_node = &self.nodes[old];
-        let Some(old_hsp) = old_node.hsp.as_ref() else {
+        let Some(old_hsp) = self.leaf_hsp(old_node) else {
             return false;
         };
         loop {
@@ -1872,8 +1924,7 @@ impl BlastIntervalTree {
 
             // NCBI reference: blast_itree.c:990-994
             // If this is a leaf node, check containment directly
-            if node.hsp.is_some() {
-                let tree_hsp = node.hsp.as_ref().unwrap();
+            if let Some(tree_hsp) = self.leaf_hsp(node) {
                 return Self::is_hsp_contained(
                     hsp,
                     query_start,
@@ -1933,7 +1984,7 @@ impl BlastIntervalTree {
         let node = &self.nodes[root_index];
 
         // Check if leaf node
-        if let Some(ref tree_hsp) = node.hsp {
+        if let Some(tree_hsp) = self.leaf_hsp(node) {
             // Leaf node - check containment directly
             return Self::is_hsp_contained(
                 hsp,
@@ -2036,7 +2087,7 @@ impl BlastIntervalTree {
             let node = &self.nodes[current_idx];
 
             // Check if leaf
-            if let Some(ref tree_hsp) = node.hsp {
+            if let Some(tree_hsp) = self.leaf_hsp(node) {
                 return Self::is_hsp_contained(
                     hsp,
                     query_context_offset,
@@ -2051,7 +2102,7 @@ impl BlastIntervalTree {
             let mut tmp_idx = node.midptr;
             while tmp_idx != 0 {
                 let tmp_node = &self.nodes[tmp_idx as usize];
-                if let Some(ref tree_hsp) = tmp_node.hsp {
+                if let Some(tree_hsp) = self.leaf_hsp(tmp_node) {
                     if Self::is_hsp_contained(
                         hsp,
                         query_context_offset,
@@ -2487,7 +2538,7 @@ mod tests {
                 }
                 return (NcbiInsertion::Added(t), checked);
             }
-            if t.nodes[child as usize].hsp.is_none() {
+            if !t.nodes[child as usize].is_leaf() {
                 root = child as usize;
                 continue;
             }

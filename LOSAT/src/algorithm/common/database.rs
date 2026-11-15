@@ -4981,15 +4981,65 @@ pub(crate) fn batch_prefetch<'s>(
         }
     }
     if failed_lookup.is_some() || fails {
-        text.extend_from_slice(
-            format!(
-                "Warning: [{}] Error pre-fetching sequence data\n",
-                program.to_ascii_lowercase()
-            )
-            .as_bytes(),
-        );
+        text.extend_from_slice(&prefetch_warning(program));
     }
     Ok(text)
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:778-786
+// ```c++
+//     catch (const CException& e) {
+// 	   if(s_IsUsingRemoteBlastDbDataLoader()) {
+//           ERR_POST(Warning << "Error fetching sequence data from BLAST databases at NCBI, "
+//                      "please try again later");
+// 	   }
+// 	   else {
+//           ERR_POST(Warning << "Error pre-fetching sequence data");
+// 	   }
+//    }
+// ```
+/// NCBI's warning where the prefetch of a query batch fails ([`batch_prefetch`], and BLASTX's
+/// Seq-align of empty subject rows, `blastx::empty_rows::prefetch_reads_empty_row`): the one
+/// producer of its text.
+pub(crate) fn prefetch_warning(program: &str) -> Vec<u8> {
+    format!(
+        "Warning: [{}] Error pre-fetching sequence data\n",
+        program.to_ascii_lowercase()
+    )
+    .into_bytes()
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:728-753
+// ```c++
+// s_PreFetchSeqs(const blast::CSearchResultSet& results,
+// 		       blast::CFormattingArgs::EOutputFormat format_type)
+// {
+// 	{
+// 		char * pre_fetch_limit_str = getenv("PRE_FETCH_SEQS_LIMIT");
+// 		if (pre_fetch_limit_str) {
+// 			int pre_fetch_limit = NStr::StringToInt(pre_fetch_limit_str);
+// 			if(pre_fetch_limit == 0) {
+// 				return false;
+// 			}
+// 			if(pre_fetch_limit == INT_MAX){
+// 				return true;
+// 			}
+// 			...
+// 	return s_IsPrefetchFormat(format_type);
+// ```
+/// Whether NCBI's prefetch of a query batch reads the batch's Seq-aligns (their subject ids and
+/// ranges, `s_ExtractSeqidsAndRanges`) for the first format `outfmt`: every format but the
+/// archive (outfmt 11, which the apps write without calling the prefetch) and, unless
+/// `PRE_FETCH_SEQS_LIMIT=2147483647`, the Seq-annots 8, 9 and 12 (`s_IsPrefetchFormat`, quoted at
+/// `blastx::native::reported_batch`); a batch whose prefetch is off ([`prefetch_off`]) reads
+/// nothing. Wider than [`prefetches_subjects`], which tells where the loads write the taxonomy
+/// database's texts.
+pub(crate) fn prefetch_reads_seq_aligns(outfmt: i32) -> bool {
+    match outfmt {
+        11 => false,
+        8 | 9 | 12 => prefetch_seqs_limit() == Some(i32::MAX),
+        _ => true,
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:781-784 (quoted at
@@ -5580,9 +5630,9 @@ pub(crate) fn seq_annots_prefetch(outfmt: Option<i32>) -> bool {
 /// outfmt 8, 9, 11 and 12).
 pub(crate) fn prefetches_subjects(outfmt: Option<i32>) -> bool {
     match outfmt {
-        // `s_IsPrefetchFormat` takes the query-anchored formats 1 to 4 as 0 (DECISIONS T3-4).
-        Some(0..=7 | 17) => true,
-        Some(8 | 9 | 12) => prefetch_seqs_limit() == Some(i32::MAX),
+        // `s_IsPrefetchFormat` takes the query-anchored formats 1 to 4 as 0 (DECISIONS T3-4); the
+        // limit's rule of the Seq-annots is that of the prefetch's reads.
+        Some(format @ (0..=9 | 12 | 17)) => prefetch_reads_seq_aligns(format),
         _ => false,
     }
 }

@@ -286,9 +286,10 @@ class XincludeFixtureTests(unittest.TestCase):
                 names = [xinclude.side_name(row_id, n, outfmt) for n in range(1, len(hashes) + 1)]
                 self.assertEqual(sorted(path.name for path in frozen.glob(f"{row_id}.out_*")), sorted(names), row_id)
                 self.assertEqual([xinclude.sha256((frozen / name).read_bytes()) for name in names], hashes, row_id)
+                # a run that NCBI stops (rc other than 0) writes the side files of the batches before
+                # and no master, whose list comes after the last query's file: a batch's prefetch
+                # stops (line DBID mixdb2), an exception (BLASTX's empty rows, line RG X2g: rc 255)
                 if row.get("rc", "0") != "0":
-                    # NCBI writes the master after the last query's file: a run that stops on an
-                    # exception (BLASTX's empty rows, line RG X2g: rc 255) leaves it empty
                     self.assertEqual(master, b"", row_id)
                     continue
                 # the master lists the side files by those names (13: no end of line after the last)

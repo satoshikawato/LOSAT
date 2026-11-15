@@ -653,7 +653,7 @@ pub struct SegMasker {
     downset: usize,
     upset: usize,
     /// LOSAT_X_SEGTRIMMEMO (graduated 2026-10-26): whether the fast path takes a segment's trim from the
-    /// thread's memo (`x_seg_trim_memo.rs`); set by the maskers that repeat segments.
+    /// memo shared by all threads (`x_seg_trim_memo.rs`); set by the maskers that repeat segments.
     x_trim_memo: bool,
 }
 

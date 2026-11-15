@@ -43,15 +43,15 @@
 //! `X_SHARDS` tables chosen by the segment's hash, each behind its own lock. A call whose bytes
 //! and `maxtrim` equal a stored entry (the whole slice is compared; the hash only selects the
 //! table and the slot) returns the stored pair; any other call evaluates the trim (without the
-//! lock) and stores it. A segment is thus trimmed once for the whole search instead of once per
-//! thread that meets it, and the threads share one copy of the table. Each table grows on
-//! demand up to `X_MAX_ENTRIES` entries (or `X_MAX_ARENA` letters) and is then cleared as a
+//! lock) and stores it. A segment one thread trimmed is thus not trimmed again by another (only
+//! threads that miss it at the same moment each trim it, and a cleared table trims it again), and
+//! the threads share one copy of the table, which lasts as long as the process. Each table grows
+//! on demand up to `X_MAX_ENTRIES` entries (or `X_MAX_ARENA` letters) and is then cleared as a
 //! whole; together the tables hold at most twice what one thread's table held before.
 //!
 //! No NCBI counterpart: the memo itself; it returns only values the trim computed for the same
 //! input and does not change any value NCBI computes.
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 // No NCBI counterpart: the size bounds of the memo; they decide only which trims are evaluated
@@ -218,15 +218,25 @@ fn x_shard(hash: u64) -> usize {
     (hash >> 26) as usize & (X_SHARDS - 1)
 }
 
+/// One table and its lock, on a cache line of its own (threads that take neighbouring tables do
+/// not share a line).
+#[repr(align(64))]
+struct Shard(Mutex<Memo>);
+
 /// The tables of the segments trimmed by all threads and their (lend, rend) pairs.
-static X_MEMO: [Mutex<Memo>; X_SHARDS] = [const { Mutex::new(Memo::new()) }; X_SHARDS];
-/// Memo hits so far (tests only).
-static X_HITS: AtomicU64 = AtomicU64::new(0);
+static X_MEMO: [Shard; X_SHARDS] = [const { Shard(Mutex::new(Memo::new())) }; X_SHARDS];
+
+#[cfg(test)]
+thread_local! {
+    /// Memo hits of this thread so far (tests only).
+    static X_HITS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
 
 /// The table of `hash`, locked (a panic while a table was held leaves no partial entry: an
 /// entry is written whole after its letters).
 fn x_table(hash: u64) -> std::sync::MutexGuard<'static, Memo> {
     X_MEMO[x_shard(hash)]
+        .0
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
@@ -261,7 +271,8 @@ fn x_trimmed_in<T: std::ops::DerefMut<Target = Memo>>(
     // The guard goes at the end of the statement: `trim` runs without the lock.
     let stored = table(hash).stored(hash, segment, maxtrim);
     if let Some((lend, rend)) = stored {
-        X_HITS.fetch_add(1, Ordering::Relaxed);
+        #[cfg(test)]
+        X_HITS.with(|hits| hits.set(hits.get() + 1));
         return (usize::from(lend), usize::from(rend));
     }
     let fresh = trim();
@@ -271,10 +282,11 @@ fn x_trimmed_in<T: std::ops::DerefMut<Target = Memo>>(
     fresh
 }
 
-/// Memo hits so far, of all threads (tests only).
+/// Memo hits of this thread so far (tests only; a hit of the memo shared by all threads counts
+/// for the thread that asked).
 #[cfg(test)]
 pub(crate) fn x_hits() -> u64 {
-    X_HITS.load(Ordering::Relaxed)
+    X_HITS.with(std::cell::Cell::get)
 }
 
 #[cfg(test)]
@@ -328,6 +340,29 @@ mod tests {
         assert_eq!(memo.trimmed(&long, 50, trim((5, 6))), (5, 6));
         assert_eq!(memo.trimmed(&long, 50, trim((5, 6))), (5, 6));
         assert_eq!(calls.get(), 6);
+    }
+
+    #[test]
+    fn trim_runs_without_the_table_and_a_stored_key_is_not_stored_twice() {
+        let memo = RefCell::new(Memo::new());
+        let a = [3u8, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5];
+        // The trim takes the table itself (a held table would make this borrow panic) and stores
+        // the same key first, as another thread that missed it at the same moment would.
+        let pair = x_trimmed_in(
+            |_| memo.borrow_mut(),
+            &a,
+            50,
+            || {
+                memo.borrow_mut().store(hash_of(&a, 50), &a, 50, (2, 7));
+                (2, 7)
+            },
+        );
+        assert_eq!(pair, (2, 7));
+        assert_eq!(memo.borrow().entries, 1);
+        assert_eq!(
+            x_trimmed_in(|_| memo.borrow_mut(), &a, 50, || unreachable!()),
+            (2, 7)
+        );
     }
 
     #[test]

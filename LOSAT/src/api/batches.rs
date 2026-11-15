@@ -42,6 +42,7 @@ use super::start::{CallStart, RunLog};
 use super::view::{self, QueryHits};
 use crate::algorithm::blastn::blast_engine::QueryBatchSizes;
 use crate::blastinput::app::query_batch_size;
+use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::{next_ranged_batch_end, record_interval, RecordInterval};
 use crate::cli::Commands;
 use crate::report::blast_xml::XmlStats;
@@ -187,6 +188,10 @@ impl FormatObserver for BatchObserver {
     fn rounds_converged(&mut self, query: usize) {
         self.parts.rounds_converged(query);
     }
+
+    fn pssm_query(&mut self, query: &FastaRecord) {
+        self.parts.pssm_query(query);
+    }
 }
 
 /// The search of one query batch at a time (`run_batches`). Each `next` searches one batch; a
@@ -195,7 +200,8 @@ pub struct Batches<'a> {
     search: &'a Search,
     inputs: Inputs<'a>,
     sizes: BatchSizes,
-    /// The letters of each query record, which size the batches.
+    /// The letters of each query record, which size the batches (one query of no letters for a
+    /// PSSM query, one batch).
     lengths: Vec<usize>,
     /// The query records that NCBI's reader skips (`-query_loc`).
     skipped: Vec<bool>,
@@ -232,11 +238,17 @@ pub struct Batches<'a> {
 pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches<'a>, Error> {
     let mut start_messages = Vec::new();
     let mut start = CallStart::new(search, inputs, &mut start_messages)?;
-    let lengths: Vec<usize> = inputs
-        .query
-        .iter()
-        .map(|record| record.seq().len())
-        .collect();
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:534-548 (the PSSM's query
+    // searched without a `CBlastInput`, quoted at `blastp::blast_engine::search_pssm_query`)
+    // A PSSM query (`Inputs::pssm`) is one batch of its own: NCBI reads no query batches then.
+    let lengths: Vec<usize> = match inputs.pssm {
+        Some(_) => vec![0],
+        None => inputs
+            .query
+            .iter()
+            .map(|record| record.seq().len())
+            .collect(),
+    };
     if start.dry_run() {
         let log = start.take_log();
         return Ok(Batches {
@@ -306,8 +318,8 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
 }
 
 impl Batches<'_> {
-    /// How many query records the inputs hold: with `Batch::query_indices`, how far the search
-    /// is.
+    /// How many queries the inputs hold (the records, or the one sequence of a PSSM file,
+    /// `Inputs::pssm`): with `Batch::query_indices`, how far the search is.
     pub fn query_count(&self) -> usize {
         self.lengths.len()
     }
@@ -322,9 +334,12 @@ impl Batches<'_> {
 
     /// Searches the batch `range`, as the command line's loop searches it.
     fn search_batch(&mut self, range: Range<usize>) -> Result<Batch, Error> {
-        let inputs = Inputs {
-            query: &self.inputs.query[range.clone()],
-            ..self.inputs
+        let inputs = match self.inputs.pssm {
+            Some(_) => self.inputs,
+            None => Inputs {
+                query: &self.inputs.query[range.clone()],
+                ..self.inputs
+            },
         };
         let mut command = self.search.command(inputs)?;
         let query_range = query_range_of(&command);

@@ -15,6 +15,7 @@ use super::local_blast::ReportedSubject;
 use super::program::Program;
 use super::run::{query_ordinal, records, HspRecord, QueryRounds, QueryStats};
 use crate::blastinput::seq_range::SequenceRange;
+use crate::record::FastaRecord;
 use crate::report::blast_xml::XmlStats;
 use crate::report::PairwiseHit;
 
@@ -50,6 +51,8 @@ pub(super) struct Parts {
     rounds: bool,
     /// The searched queries whose rounds converged.
     converged: Vec<usize>,
+    /// The query of a PSSM search (`FormatObserver::pssm_query`), which the inputs do not hold.
+    pssm_query: Option<FastaRecord>,
 }
 
 /// The records of a search's parts (`Parts::finish`).
@@ -72,6 +75,7 @@ impl Parts {
             parts: vec![Part::new(0, 1)],
             rounds: false,
             converged: Vec::new(),
+            pssm_query: None,
         }
     }
 
@@ -113,11 +117,18 @@ impl Parts {
         self.converged.push(query);
     }
 
+    /// `FormatObserver::pssm_query`.
+    pub(super) fn pssm_query(&mut self, query: &FastaRecord) {
+        self.pssm_query = Some(query.clone());
+    }
+
     /// The records of the parts, from the hit lists that the calls handed over (`hits`, one per
     /// call, in the order of the calls), with `index` counted from `first_index`; the statistics
     /// and rounds of each query of `inputs`, whose searched queries are `ordinals`
-    /// (`run::searched_queries`). A search that handed over no hit list has no records. The
-    /// error is a fault of the engine: a search of rounds whose hit lists are not one per round.
+    /// (`run::searched_queries`); the query of a PSSM search is the one the search reported
+    /// (`pssm_query`). A search that handed over no hit list has no records. The error is a fault
+    /// of the engine: a search of rounds whose hit lists are not one per round, a PSSM search with
+    /// hits that reported no query.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn finish(
         self,
@@ -135,6 +146,16 @@ impl Parts {
                 self.parts.len()
             ));
         }
+        let inputs = match (&self.pssm_query, inputs.pssm) {
+            (Some(query), Some(_)) => Inputs {
+                query: std::slice::from_ref(query),
+                ..inputs
+            },
+            (None, Some(_)) if hits.iter().any(|list| !list.is_empty()) => {
+                return Err("a PSSM search reported hits but not its query".to_string());
+            }
+            _ => inputs,
+        };
         let mut hsps = Vec::new();
         let mut lengths = Vec::with_capacity(self.parts.len());
         for (part, list) in self.parts.iter().zip(hits) {
@@ -154,7 +175,7 @@ impl Parts {
             lengths.push(records.len());
             hsps.append(&mut records);
         }
-        let queries = inputs.query.len();
+        let queries = inputs.query_count();
         let mut query_stats = vec![None; queries];
         let mut round_stats: Vec<Vec<Option<QueryStats>>> = vec![Vec::new(); queries];
         for part in &self.parts {

@@ -86,16 +86,6 @@ pub(super) fn check_db_gencode(code: u8) -> Result<()> {
     Ok(())
 }
 
-/// The refusal of `-in_pssm` where the queries are given as records (`run_local`,
-/// `run_local_database`: the library API refuses the option first,
-/// `api::search::file_options`, and the Web's checks, `args::check_options`).
-pub(super) fn check_records_only(args: &TblastnArgs) -> Result<()> {
-    if args.in_pssm.is_some() {
-        bail!("-in_pssm (a PSSM query) is not supported by LOSAT's TBLASTN where the queries are given as records");
-    }
-    Ok(())
-}
-
 /// LOSAT's refusals of a PSI-TBLASTN search, after NCBI's checks of the options and the opening of
 /// the database, before anything is written: NCBI's crash of `-mt_mode 1` (DECISIONS 35 Q4), the
 /// output formats other than 0 to 4, 6, 7 and 10 (item PS15b of line PS; 11 crashes NCBI).

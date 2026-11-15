@@ -9,6 +9,9 @@
 //! the CSR tables and those built on the search pool (all of them at four threads, none at one).
 //! The packed head of a newest-first table (`LOSAT_X_BNCSRPACK`, strict set) is on in the default
 //! too: its `=0` gives the same report, and the reading-order table never takes it.
+//! The scans of either head take each word's run from the element the ring hands over with it
+//! (`LOSAT_X_BNRANKONCE`, strict set: a packed head's word ranked once): on in the default, which
+//! takes its side, and its `=0` (the run read again from the cell) gives the same report.
 //! Two tables: `-task blastn` (word size 11) with a query of 1.27 Mb (a 4^11-cell table, newest
 //! first, above the rule), and `-word_size 9` with a query of 9,800 letters (the 4^8-cell table
 //! that stands for NCBI's small table, in reading order, above the rule), each against a subject
@@ -25,6 +28,9 @@ const SWITCH_OFF: (&str, &str) = ("LOSAT_X_BNCSR", "0");
 /// The packed head of a newest-first CSR table (`LOSAT_X_BNCSRPACK`, strict set).
 const PACK: &str = "LOSAT_X_BNCSRPACK";
 const PACK_OFF: (&str, &str) = ("LOSAT_X_BNCSRPACK", "0");
+/// The run handed over by the scans' ring (`LOSAT_X_BNRANKONCE`, strict set).
+const RANK_ONCE: &str = "LOSAT_X_BNRANKONCE";
+const RANK_ONCE_OFF: (&str, &str) = ("LOSAT_X_BNRANKONCE", "0");
 const TIMING: (&str, &str) = ("LOSAT_TIMING", "1");
 
 fn fasta(name: &str) -> PathBuf {
@@ -143,10 +149,11 @@ fn csr_builds(stderr: &str) -> Option<(u64, u64)> {
 
 /// For `query` and `extra` against `subject` as a file and as a database: the report with the
 /// switch off at one thread, then off, by default, by default with `LOSAT_TIMING` and with the
-/// packed head off (`LOSAT_X_BNCSRPACK=0`) at 1 and 4 threads, all the same bytes; the default takes
-/// the switch's side (`LOSAT_X_REACH`), and the packed head's when `packed` (a newest-first table)
-/// or its reference side (the reading-order table), builds every CSR table on the pool at four
-/// threads and on the search thread at one, and writes nothing else.
+/// packed head off (`LOSAT_X_BNCSRPACK=0`) or the ring's run off (`LOSAT_X_BNRANKONCE=0`) at 1
+/// and 4 threads, all the same bytes; the default takes the switch's side (`LOSAT_X_REACH`), the
+/// ring's run, and the packed head's when `packed` (a newest-first table) or its reference side
+/// (the reading-order table), builds every CSR table on the pool at four threads and on the search
+/// thread at one, and writes nothing else.
 fn check(dir: &TestDir, query: &Path, subject: &Path, extra: &[&str], packed: bool) {
     let db = database(dir, subject, "subject_db");
     for subjects in [("-subject", subject), ("-db", db.as_path())] {
@@ -170,6 +177,16 @@ fn check(dir: &TestDir, query: &Path, subject: &Path, extra: &[&str], packed: bo
                 (packed, !packed),
                 "{what} threads {threads}: packed heads"
             );
+            assert!(
+                reach.sides(RANK_ONCE).0,
+                "{what} threads {threads}: no scan with the ring's run"
+            );
+            let (report, stderr) = search(query, subjects, extra, threads, &[RANK_ONCE_OFF]);
+            assert!(
+                report == expected,
+                "{what} threads {threads}: the ring's run off differs"
+            );
+            assert_eq!(stderr, expected_stderr, "{what} threads {threads} run off");
             let (report, stderr) = search(query, subjects, extra, threads, &[PACK_OFF]);
             assert!(
                 report == expected,

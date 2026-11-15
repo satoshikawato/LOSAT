@@ -11,6 +11,9 @@
 //! That those bytes equal NCBI's is the business of the fixture suites.
 //! `-task blastn` of 50 kb against 2 Mb has a packed table of 4^11 cells, whose scan tests each
 //! word once (`LOSAT_X_BNPVONCE`); the report does not depend on that either.
+//! The scan of a packed table takes each word's run from the rank its ring handed over
+//! (`LOSAT_X_BNRANKONCE`, its side where the table is CSR, the reference side on chains); its `=0`
+//! (the run read again from the cell) gives the same report.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -21,6 +24,9 @@ const SWITCH: &str = "LOSAT_X_MBCSR";
 const SWITCH_OFF: (&str, &str) = ("LOSAT_X_MBCSR", "0");
 /// The query prefetch of the loop over the offset pairs (`LOSAT_X_MBHITPF`, strict set).
 const HIT_PREFETCH_OFF: (&str, &str) = ("LOSAT_X_MBHITPF", "0");
+/// The run handed over by the CSR scans' ring (`LOSAT_X_BNRANKONCE`, strict set).
+const RANK_ONCE: &str = "LOSAT_X_BNRANKONCE";
+const RANK_ONCE_OFF: (&str, &str) = ("LOSAT_X_BNRANKONCE", "0");
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -157,6 +163,16 @@ fn check(dir: &TestDir, copies: usize, taken: bool) {
                 reach.sides(SWITCH),
                 (taken, !taken),
                 "{what} threads {threads}: the size rule's side"
+            );
+            assert_eq!(
+                reach.sides(RANK_ONCE),
+                (taken, !taken),
+                "{what} threads {threads}: the ring's run"
+            );
+            let (report, _) = search(query, subjects, threads, &[RANK_ONCE_OFF]);
+            assert!(
+                report == expected,
+                "{what} threads {threads}: the ring's run off differs"
             );
         }
     }

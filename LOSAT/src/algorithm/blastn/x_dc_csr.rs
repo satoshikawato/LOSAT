@@ -221,14 +221,20 @@ pub(crate) trait XHead {
         Self: 'a;
     /// The 1-based query offsets of the cell's chain, in its order.
     fn run(&self, cell: usize) -> &[u32];
+    /// EXPERIMENT (LOSAT_X_BNRANKONCE): the run of the head's element `e` (`offsets[e] ..
+    /// offsets[e + 1]`): a cell of a head of one element per cell, a rank of a packed head; the
+    /// element the head's ring hands `emit` with each word (`XRing::push`).
+    fn run_at(&self, e: usize) -> &[u32];
     fn ring<T: Copy + Default>(&self) -> Self::Ring<'_, T>;
 }
 
 /// EXPERIMENT (LOSAT_X_BNCSRPACK): `Ring`'s `push` and `flush`, for a scan generic over `XHead`.
+/// EXPERIMENT (LOSAT_X_BNRANKONCE): `emit` gets each word with its run's element of the head
+/// (`XHead::run_at`), so a packed head's word is ranked once, where it enters.
 pub(crate) trait XRing<T> {
     /// `Ring::push`: whether a word left through `emit`.
-    fn push(&mut self, w: T, cell: impl Fn(&T) -> usize, emit: &mut impl FnMut(T)) -> bool;
-    fn flush(&mut self, emit: &mut impl FnMut(T));
+    fn push(&mut self, w: T, cell: impl Fn(&T) -> usize, emit: &mut impl FnMut(T, usize)) -> bool;
+    fn flush(&mut self, cell: impl Fn(&T) -> usize, emit: &mut impl FnMut(T, usize));
 }
 
 impl XHead for Csr {
@@ -237,6 +243,11 @@ impl XHead for Csr {
     #[inline(always)]
     fn run(&self, cell: usize) -> &[u32] {
         Csr::run(self, cell)
+    }
+
+    #[inline(always)]
+    fn run_at(&self, e: usize) -> &[u32] {
+        Csr::run(self, e)
     }
 
     #[inline(always)]
@@ -265,9 +276,15 @@ impl<'a> XPacked<'a> {
     #[inline(always)]
     pub(crate) fn run(self, cell: usize) -> &'a [u32] {
         match x_rank(self.bits, cell) {
-            Some(r) => &self.qs[self.offsets[r] as usize..self.offsets[r + 1] as usize],
+            Some(r) => self.run_at(r),
             None => &[],
         }
+    }
+
+    /// EXPERIMENT (LOSAT_X_BNRANKONCE): the run of the non-empty cell of rank `r`.
+    #[inline(always)]
+    pub(crate) fn run_at(self, r: usize) -> &'a [u32] {
+        &self.qs[self.offsets[r] as usize..self.offsets[r + 1] as usize]
     }
 }
 
@@ -280,6 +297,11 @@ impl XHead for XPacked<'_> {
     #[inline(always)]
     fn run(&self, cell: usize) -> &[u32] {
         XPacked::run(*self, cell)
+    }
+
+    #[inline(always)]
+    fn run_at(&self, r: usize) -> &[u32] {
+        XPacked::run_at(*self, r)
     }
 
     #[inline(always)]
@@ -917,13 +939,13 @@ impl<'a, T: Copy + Default> Ring<'a, T> {
 
 impl<T: Copy + Default> XRing<T> for Ring<'_, T> {
     #[inline(always)]
-    fn push(&mut self, w: T, cell: impl Fn(&T) -> usize, emit: &mut impl FnMut(T)) -> bool {
-        Ring::push(self, w, cell, emit)
+    fn push(&mut self, w: T, cell: impl Fn(&T) -> usize, emit: &mut impl FnMut(T, usize)) -> bool {
+        Ring::push(self, w, &cell, &mut |w| emit(w, cell(&w)))
     }
 
     #[inline(always)]
-    fn flush(&mut self, emit: &mut impl FnMut(T)) {
-        Ring::flush(self, emit)
+    fn flush(&mut self, cell: impl Fn(&T) -> usize, emit: &mut impl FnMut(T, usize)) {
+        Ring::flush(self, &mut |w| emit(w, cell(&w)))
     }
 }
 
@@ -943,7 +965,7 @@ impl<T: Copy + Default> XRing<T> for XRingPacked<'_, T> {
     /// their run prefetched, and the word `RING / 2` places back gets the first and the last line
     /// of its run prefetched, as on a head of one element per cell.
     #[inline(always)]
-    fn push(&mut self, w: T, cell: impl Fn(&T) -> usize, emit: &mut impl FnMut(T)) -> bool {
+    fn push(&mut self, w: T, cell: impl Fn(&T) -> usize, emit: &mut impl FnMut(T, usize)) -> bool {
         const MASK: usize = RING - 1;
         let Some(r) = x_rank(self.head.bits, cell(&w)) else {
             return false;
@@ -967,8 +989,13 @@ impl<T: Copy + Default> XRing<T> for XRingPacked<'_, T> {
         let leaves = self.n >= RING;
         if leaves {
             // SAFETY: `n >= RING`, so word `n - RING`, whose slot this is, was pushed and
-            // written; the `RING - 1` words pushed since then wrote other slots.
-            emit(unsafe { self.buf[slot].assume_init() });
+            // written with its rank; the `RING - 1` words pushed since then wrote other slots.
+            unsafe {
+                emit(
+                    self.buf[slot].assume_init(),
+                    self.ranks[slot].assume_init() as usize,
+                )
+            };
         }
         self.buf[slot] = MaybeUninit::new(w);
         self.ranks[slot] = MaybeUninit::new(r as u32);
@@ -977,11 +1004,16 @@ impl<T: Copy + Default> XRing<T> for XRingPacked<'_, T> {
     }
 
     /// `Ring::flush`.
-    fn flush(&mut self, emit: &mut impl FnMut(T)) {
+    fn flush(&mut self, _cell: impl Fn(&T) -> usize, emit: &mut impl FnMut(T, usize)) {
         for m in self.n.saturating_sub(RING)..self.n {
-            // SAFETY: `m < n` and `m >= n - RING`: word `m` was pushed, and no later word
-            // wrote its slot.
-            emit(unsafe { self.buf[m & (RING - 1)].assume_init() });
+            // SAFETY: `m < n` and `m >= n - RING`: word `m` was pushed with its rank, and no
+            // later word wrote its slot.
+            unsafe {
+                emit(
+                    self.buf[m & (RING - 1)].assume_init(),
+                    self.ranks[m & (RING - 1)].assume_init() as usize,
+                )
+            };
         }
         self.n = 0;
     }
@@ -1366,10 +1398,15 @@ mod tests {
         for n in [0usize, 1, 15, 16, 17, 31, 32, 33, 100] {
             let mut ring: XRingPacked<'_, (u32, usize)> = packed.ring();
             let mut out = Vec::new();
+            // LOSAT_X_BNRANKONCE: the element handed over with a word is its run's.
+            let mut emit = |w: (u32, usize), e: usize| {
+                assert_eq!(packed.run_at(e), packed.run(w.1), "word {}", w.0);
+                out.push(w.0);
+            };
             for i in 0..n {
-                ring.push((i as u32, cells[i % 5]), |w| w.1, &mut |w| out.push(w.0));
+                XRing::push(&mut ring, (i as u32, cells[i % 5]), |w| w.1, &mut emit);
             }
-            ring.flush(&mut |w| out.push(w.0));
+            XRing::flush(&mut ring, |w| w.1, &mut emit);
             let want: Vec<u32> = (0..n as u32)
                 .filter(|&i| !packed.run(cells[i as usize % 5]).is_empty())
                 .collect();
@@ -1383,6 +1420,22 @@ mod tests {
         };
         assert!(dense.x_packed().is_none());
         assert_eq!(dense.x_run_any(2), dense.run(2));
+        // LOSAT_X_BNRANKONCE: the ring of a head of one element per cell emits every word, with
+        // its cell as the element.
+        for n in [0usize, 1, 31, 32, 33, 100] {
+            let mut ring = XHead::ring::<(u32, usize)>(&dense);
+            let mut out = Vec::new();
+            let mut emit = |w: (u32, usize), e: usize| {
+                assert_eq!(e, w.1, "word {}", w.0);
+                assert_eq!(XHead::run_at(&dense, e), dense.run(w.1), "word {}", w.0);
+                out.push(w.0);
+            };
+            for i in 0..n {
+                XRing::push(&mut ring, (i as u32, i % 3), |w| w.1, &mut emit);
+            }
+            XRing::flush(&mut ring, |w| w.1, &mut emit);
+            assert_eq!(out, (0..n as u32).collect::<Vec<_>>());
+        }
     }
 
     #[test]

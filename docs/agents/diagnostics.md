@@ -1022,7 +1022,9 @@ Same values, faster computation:
   the other maskers keep no table. Until 2026-11-15 a thread kept at most 32,768 segments and 1 MiB
   of letters (table up to 768 KiB), then cleared the table; segments over 127 letters are not kept
   (line C, v4-C DECISIONS 31-34). Since 2026-11-15 all threads share one table behind one lock, with
-  the same bounds, so a segment one thread trimmed is not trimmed again by another (line EB s23).
+  the same bounds, so a segment one thread trimmed is not trimmed again by another (line EB s23-s24;
+  workstation 16 threads, 8 rounds, against the dev commit it merged: TBLASTN AP027131 x AP027133
+  0.954-0.964 of the time, BLASTX 0.968-0.980, peak memory 0.960-0.990; one thread unchanged).
   Workstation, one core or eight, 8 rounds (2026-10-19): TBLASTN AP027131 x AP027133 n1 0.924 of
   the time (pairs 0.921-0.926), n8 0.971; BLASTX AP027131 x AP027133 n1 0.927, n8 0.985 (memo on
   every masker, e91c8864); with the two maskers of this version (cc7306b2, load 12-45) n1 0.932 /

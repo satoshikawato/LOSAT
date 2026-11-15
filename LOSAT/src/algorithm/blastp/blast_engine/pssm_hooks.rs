@@ -414,6 +414,18 @@ pub(super) fn pssm_prelim(
         (args.scoring.gap_open, args.scoring.gap_extend),
         args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats,
     )?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:233-236
+    // ```c++
+    //     if (query_splitter->IsQuerySplit()) {
+    //
+    //         CRef<CSplitQueryBlk> split_query_blk = query_splitter->Split();
+    // ```
+    // A later round of a query that NCBI splits: only its chunks are searched
+    // (`search_split_query_batches`); the whole query scans no subject (its table is empty,
+    // `pssm_lookup`). The X-drops above are the PSSM's, which NCBI's traceback converts.
+    if psi.split_setup.is_some() {
+        return Ok(());
+    }
     let stats = psi_stats(run.gumbel, run.exact_search_spaces);
     // `run.prelim_evalue` is `-evalue` without the Gumbel block (`run_resolved_in_pool`,
     // blast_parameters.c:931-939).

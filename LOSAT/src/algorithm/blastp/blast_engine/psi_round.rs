@@ -411,8 +411,11 @@ fn run_queries(
                     bail!(super::INVALID_PSSM_QUERY_REFUSAL);
                 }
                 search.round_query = Some(query_now.frame.clone());
+                // A split query's next round starts again from the record (`RoundQuery::split`).
+                if split_setup.is_none() {
+                    round_query = Some(query_now);
+                }
                 search.split_setup = split_setup;
-                round_query = Some(query_now);
                 round_args.psi_search = Some(Arc::new(search));
                 round_args.comp_based_stats.mode = pssm_round_mode;
             }
@@ -544,7 +547,9 @@ fn run_queries(
 /// block: the hard masks of a round (`BlastSetUp_MaskQuery`, not with `-soft_masking true`)
 /// write X over the letters that the next round filters again, the lower-case mask is taken
 /// out of the block by round 1's filtering (`seqloc_array[context] = NULL`), and the unmasked
-/// copy that the identities read is made again only by a round that masks letters.
+/// copy that the identities read is made again only by a round that masks letters. A query that
+/// NCBI splits into chunks is the exception: its block is made again from the record in every
+/// round (`RoundQuery::split`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/query_data.cpp:52-58
 /// ```c++

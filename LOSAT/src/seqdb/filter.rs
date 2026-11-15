@@ -573,6 +573,14 @@ pub(crate) enum DeflineRule {
 }
 
 impl DeflineRule {
+    /// Whether the rule reads the Seq-ids of a line (a seqid list), not only its taxids.
+    pub(crate) fn reads_seqids(&self) -> bool {
+        matches!(
+            self,
+            DeflineRule::Seqids(_) | DeflineRule::NegativeSeqids(_)
+        )
+    }
+
     /// Whether NCBI's filtered header read keeps `defline`.
     fn keeps(&self, defline: &BlastDefline) -> bool {
         match self {
@@ -617,10 +625,7 @@ impl DeflineRule {
         let mask: Vec<bool> = set.deflines.iter().map(|d| self.keeps(d)).collect();
         if mask.iter().any(|&keep| keep) {
             Some(mask)
-        } else if matches!(
-            self,
-            DeflineRule::Seqids(_) | DeflineRule::NegativeSeqids(_)
-        ) {
+        } else if self.reads_seqids() {
             None
         } else {
             Some(vec![true; mask.len()])
@@ -3051,8 +3056,8 @@ impl SeqDb {
         let scan = self.scan_walk(&list, list.walk(false))?;
         let filter = list.with_range((0, num_oids));
         if let Some(rule) = rule.map(Arc::new) {
-            for volume in &mut self.volumes {
-                volume.set_defline_rule(Arc::clone(&rule));
+            for (volume, &start) in self.volumes.iter_mut().zip(&self.volume_starts) {
+                volume.set_defline_rule(Arc::clone(&rule), start);
             }
         }
         // `x_ScanTotals` counts the OIDs in an `int` (the volume set holds fewer than 2^31 OIDs:

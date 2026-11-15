@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Builds tests/db_search/multidb/: the databases of the rows db.mdb.* (DI-8f: -db with several names).
 
-Usage: make_multidb.py MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
+Usage: make_multidb.py [--ordsl-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
 
 The records are those of taxfilter/tfp.faa (23 protein globins) and taxfilter/tfn.fna (16 globin cDNAs); the definition
 lines (some records carry a second one) stay as they are, the taxids come from taxfilter/tfp.map and tfn.map.
@@ -20,6 +20,13 @@ lines (some records carry a second one) stay as they are, the taxids come from t
 - `al.nal`: an alias file (TITLE multidb alias of na, DBLIST na).
 - `mix_u.nal`: an alias file of `na nnp` whose FIRST_OID 9 and LAST_OID 17 keep the sequences of nnp alone (line DBID mixdb).
 - `sl.txt`: a seqid list of the first accession of na, nb, pa and pb.
+- `ov_p` / `ov_n` (line DBID ordsl): `makeblastdb -input_type blastdb` of ../taxfilter/tfu_p and tfu_n (version 5, no
+  parsed Seq-ids, four records) in two volumes of two records (`-max_file_sz` 400 and 500 bytes) under one LMDB file:
+  makeblastdb stores `gnl|BL_ORD_ID|n` with n the OID in the database and keys the accession table with it, and NCBI's
+  header reads add the volume's first OID (2) to the stored n of the second volume.
+- `sl_ord0.txt`, `sl_ord1.txt`, `sl_ord2.txt`, `sl_ord9.txt`, `sl_ord13.txt`: the seqid list `gnl|BL_ORD_ID|n`;
+  `sl_ord1.bsl` the binary list of `sl_ord1.txt` (`blastdb_aliastool -seqid_file_out`).
+  `make_multidb.py --ordsl-only MAKEBLASTDB` builds only these.
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
 """
@@ -84,6 +91,20 @@ def make_pgim(binary, tfp):
                 "-title", "multidb pgim")
 
 
+def make_ordsl(binary):
+    """Builds ov_p and ov_n and writes the ordinal-id seqid lists (line DBID ordsl)."""
+    for kind, source, base, size in (("prot", "tfu_p", "ov_p", "400"), ("nucl", "tfu_n", "ov_n", "500")):
+        makeblastdb(binary, "-in", os.path.join(SRC, source), "-input_type", "blastdb", "-dbtype", kind, "-out", base,
+                    "-blastdb_version", "5", "-max_file_sz", size, "-title", "multidb " + base)
+        os.remove(os.path.join(HERE, f"{base}.{kind[0]}js"))
+    for n in (0, 1, 2, 9, 13):
+        with open(os.path.join(HERE, f"sl_ord{n}.txt"), "w") as f:
+            f.write(f"gnl|BL_ORD_ID|{n}\n")
+    aliastool = os.path.join(os.path.dirname(binary), "blastdb_aliastool")
+    subprocess.run([aliastool, "-seqid_file_in", "sl_ord1.txt", "-seqid_file_out", "sl_ord1.bsl"], check=True, cwd=HERE,
+                   stdout=subprocess.DEVNULL)
+
+
 def main(binary):
     os.makedirs(os.path.join(HERE, "d1"), exist_ok=True)
     os.makedirs(os.path.join(HERE, "d2"), exist_ok=True)
@@ -131,4 +152,8 @@ def main(binary):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    if sys.argv[1] == "--ordsl-only":
+        make_ordsl(sys.argv[2])
+    else:
+        main(sys.argv[1])
+        make_ordsl(sys.argv[1])

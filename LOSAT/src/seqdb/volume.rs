@@ -18,10 +18,20 @@ pub struct Volume {
     index: IndexFile,
     seq: OnceLock<DbFile>,
     hdr: OnceLock<DbFile>,
-    /// The definition lines a taxid list keeps (`SeqDb::restrict_taxids`), none without one.
-    defline_rule: Option<std::sync::Arc<DeflineRule>>,
+    /// The definition lines a taxid or seqid list keeps (`SeqDb::restrict_taxids`,
+    /// `restrict_seqids`), none without one.
+    defline_rule: Option<LineRule>,
     /// The column files (`.?xa`...), opened on first use (`m_HaveColumns`).
     columns: OnceLock<Vec<Column>>,
+}
+
+/// A list's rule for the definition lines of a volume's sequences, with the volume's first OID in
+/// the database (`m_VolStart`), which NCBI adds to the tag of each `BL_ORD_ID` before the rule
+/// reads the Seq-ids (`Volume::line_mask`).
+#[derive(Debug)]
+struct LineRule {
+    rule: std::sync::Arc<DeflineRule>,
+    volume_start: u32,
 }
 
 /// File name of `base` with the three-letter extension `{p|n}{ext}`.
@@ -677,9 +687,61 @@ impl Volume {
     }
 
     /// Restricts the definition lines that the reads of this volume give to those `rule`
-    /// keeps (`SeqDb::restrict_taxids`).
-    pub(super) fn set_defline_rule(&mut self, rule: std::sync::Arc<DeflineRule>) {
-        self.defline_rule = Some(rule);
+    /// keeps (`SeqDb::restrict_taxids`, `restrict_seqids`); `volume_start` is the volume's first
+    /// OID in the database.
+    pub(super) fn set_defline_rule(
+        &mut self,
+        rule: std::sync::Arc<DeflineRule>,
+        volume_start: u32,
+    ) {
+        self.defline_rule = Some(LineRule { rule, volume_start });
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2106-2111
+    // ```c++
+    //     bool asn_changed = false;
+    //
+    //     CRef<CBlast_def_line_set> BDLS =
+    //         x_GetHdrAsn1(oid, true, & asn_changed, inpstr);
+    //
+    //     bool id_filter = x_HaveIdFilter();
+    // ```
+    // The rule reads the Seq-ids of a volume after the first with the tags of `BL_ORD_ID` made
+    // OIDs in the database (`super::adjust_ordinal_tags`): a list's `gnl|BL_ORD_ID|n` keeps a
+    // line whose stored tag plus the volume's first OID is n. The lookup that selected the OID
+    // read the stored number (the accession table of `makeblastdb -input_type blastdb`), so on
+    // a list of databases or a database of several volumes the OID it found may keep no line
+    // (line DBID ordsl, DECISIONS 55).
+    /// Which definition lines of the sequence `oid` (volume-relative), decoded as `set`, the
+    /// volume's rule keeps, as NCBI's filtered header read tests them; LOSAT's refusal
+    /// (`no_line_kept`) where a seqid rule keeps none.
+    fn line_mask(
+        &self,
+        line_rule: &LineRule,
+        oid: u32,
+        set: &crate::seqid::DeflineSet,
+    ) -> Result<Vec<bool>, SeqDbError> {
+        let adjusted;
+        let tested = if line_rule.volume_start > 0
+            && line_rule.rule.reads_seqids()
+            && super::has_ordinal_tag(set)
+        {
+            let mut copy = set.clone();
+            super::adjust_ordinal_tags(
+                &mut copy,
+                line_rule.volume_start,
+                &self.base,
+                line_rule.volume_start + oid,
+            )?;
+            adjusted = copy;
+            &adjusted
+        } else {
+            set
+        };
+        line_rule
+            .rule
+            .keep_mask(tested)
+            .ok_or_else(|| self.no_line_kept(oid))
     }
 
     /// `decoded`, the definition lines of `record` (one sequence's header), without those
@@ -691,13 +753,11 @@ impl Volume {
         path: &Path,
         decoded: Result<T, SeqDbError>,
     ) -> Result<T, SeqDbError> {
-        let Some(rule) = &self.defline_rule else {
+        let Some(line_rule) = &self.defline_rule else {
             return decoded;
         };
         let mut decoded = decoded?;
-        let keep = rule
-            .keep_mask(&decode_full(record, path)?)
-            .ok_or_else(|| self.no_line_kept(oid))?;
+        let keep = self.line_mask(line_rule, oid, &decode_full(record, path)?)?;
         decoded.retain_lines(&keep);
         Ok(decoded)
     }
@@ -737,8 +797,8 @@ impl Volume {
         path: &Path,
     ) -> Result<crate::seqid::DeflineSet, SeqDbError> {
         let mut set = decode_full(record, path)?;
-        if let Some(rule) = &self.defline_rule {
-            let keep = rule.keep_mask(&set).ok_or_else(|| self.no_line_kept(oid))?;
+        if let Some(line_rule) = &self.defline_rule {
+            let keep = self.line_mask(line_rule, oid, &set)?;
             set.retain_lines(&keep);
         }
         Ok(set)

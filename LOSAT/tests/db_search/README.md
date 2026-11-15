@@ -950,6 +950,18 @@ volume), `p_abovecut` (a range that cuts the volume above `p_dupvol`) and `n_vol
 `taxfilter/tfn` excludes nothing. `sl_gifull.txt` (`gi|1111|ref|NP_1.1|`) adds NCBI's two warnings `Ignoring extra parts
 (synonyms?) in FASTA-style ID`.
 
+Rows `db.ordsl.*` (line DBID, item ordsl): seqid lists of `gnl|BL_ORD_ID|n` (`multidb/sl_ord*.txt`, `sl_ord1.bsl`) on
+databases whose accession table holds such keys (`makeblastdb -input_type blastdb` of a database without parsed Seq-ids:
+`taxfilter/tfu_p`, `tfu_n`, and `multidb/ov_p`, `ov_n` in two volumes), placed after the first OID: behind `multidb/pa` (12
+sequences) or `multidb/na` (8), or in the second volume. The lookup reads the stored number in the accession table, and
+NCBI's filtered header read tests the line as `gnl|BL_ORD_ID|<stored number plus the volume's first OID>`
+(`CSeqDBVol::x_GetHdrAsn1` with `adjust_oids`): a positive list selects a sequence whose line it then removes, a negative
+list removes a line of a sequence it did not exclude, and NCBI leaves that sequence's hits out of the report without notice.
+LOSAT refuses as for any sequence a seqid list leaves without a line (the `losat-rejection` rows; `bp.list.6` on `pa tfu_p`,
+`bp.listb.6` with the binary list, `bp.listneg.6` and `bn.listneg.6` negative, `bp.vol.6` the second volume of `ov_p`, one
+row in each other program). The `ncbi` rows: a list whose number no key holds (`bp.none.6`, an empty database), and a
+sequence of the first volume, which keeps its line (`bp.vol0.0`, `bn.vol0.6`, `tx.vol0.6`).
+
 ## Ungapped nucleotide databases (line NP, O4a-1)
 
 `ungapped_abr` (the 33 genes of `LOSAT/tests/fixtures/blastn_regression/inputs/culling_abricate_genes.fa`, as `ungapped_abr.fna`) is built like
@@ -981,7 +993,7 @@ The rows `db.blastn.ungapped_rej.*` (outfmt 8, 11, 17 with `-ungapped`) are refu
 Rows `db.mdb.*`: `-db "a b"` searches the databases `a` and `b` as one virtual database, as NCBI's `CSeqDB` does (the `db` cell
 of a row is one argument, so a cell with spaces is a list of names). `multidb/` holds the databases and what
 `make_multidb.py MAKEBLASTDB` builds them from (makeblastdb 2.17.0; the records and taxids are those of `taxfilter/tfp.faa`,
-`tfp.map`, `tfn.fna` and `tfn.map`, definition lines kept; `.pjs` and `.njs` dropped; the whole directory is about 0.5 MB):
+`tfp.map`, `tfn.fna` and `tfn.map`, definition lines kept; `.pjs` and `.njs` dropped; the whole directory is about 0.7 MB):
 
 - `pa` / `pb`: version 5 protein, `-parse_seqids`, taxid map; records 1-12 of `tfp.faa`, and records 13-23 plus `Q00001.1`, an
   exact copy of record 2's sequence (taxid 9606), so that two databases hold an identical sequence. `p4a` / `p4b`: the same
@@ -993,6 +1005,10 @@ of a row is one argument, so a cell with spaces is a list of names). `multidb/` 
   empty title. `al.nal`: an alias file (`TITLE multidb alias of na`, `DBLIST na`). `mix_u.nal` (line DBID mixdb, written by hand): an
   alias file of `na nnp` whose `FIRST_OID 9`, `LAST_OID 17` keep the sequences of `nnp` (without the accession table) alone. `sl.txt`: a seqid list of the first
   accession of `na`, `nb`, `pa` and `pb`.
+- `ov_p` / `ov_n` (line DBID ordsl; `make_multidb.py --ordsl-only MAKEBLASTDB` builds only these): `-input_type blastdb` of
+  `../taxfilter/tfu_p` and `tfu_n` in two volumes of two records each (`-max_file_sz` 400 and 500 bytes) under one LMDB file;
+  `sl_ord0.txt`, `sl_ord1.txt`, `sl_ord2.txt`, `sl_ord9.txt`, `sl_ord13.txt`: the list `gnl|BL_ORD_ID|n`, and `sl_ord1.bsl`
+  its binary form (rows `db.ordsl.*`).
 
 The ncbi rows search `taxfilter/q.fna` (BLASTN, BLASTX, TBLASTX) or `taxfilter/q.faa` (BLASTP, TBLASTN, PSIBLAST) and cover:
 two names in outfmt 0, 5, 6, 7, 8, 11, 15 and 16 (`bn`), the other order (`bn.rev`), a name twice (`dup`), Galaxy's call with

@@ -21,7 +21,7 @@
 //!   reported sequences only (`reported_subjects`).
 //!
 //! The per-subject kernel, the hit lists and the report writers are those of the
-//! `-subject` path (`run.rs`); the opening of the database, the reader's errors and the
+//! `-subject` path (`subject_passes.rs`, a child of `run.rs`); the opening of the database, the reader's errors and the
 //! rules for the stored titles are shared with BLASTP (`algorithm::common::database`).
 
 use std::cell::RefCell;
@@ -989,10 +989,10 @@ fn block_subject<'a>(
     range: &'a BlockRange,
     i: usize,
 ) -> Result<BlastnSubjectRef<'a>> {
-    let length = block.nucleotide_len(i).map_err(search_read_error)?;
+    let (packed, length) = block.nucleotide_packed_len(i).map_err(search_read_error)?;
     Ok(BlastnSubjectRef {
         length,
-        packed: block.nucleotide_packed(i),
+        packed,
         letters: None,
         blastna: None,
         store: None,

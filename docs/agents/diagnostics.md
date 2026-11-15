@@ -1010,7 +1010,7 @@ Same values, faster computation:
 - SEGTRIMMEMO (graduated 2026-10-26, in the set from 2026-10-19; no variable; always on for the maskers that
   ask for it; the trim without the memo went with the variable) (speed) SEG's trim of a candidate segment (the
   port of `s_Trim`: about L^2 / 2 evaluations of `s_GetProb` for a segment of L letters up to
-  maxtrim + 1 = 51, about 1,275 for longer ones) is kept per thread by the segment's letters and
+  maxtrim + 1 = 51, about 1,275 for longer ones) is kept by the segment's letters and
   `maxtrim`, and a segment with the same letters takes the stored offsets instead of being trimmed
   again (`utils/x_seg_trim_memo.rs`; the histogram SEG path). The offsets are a function of those letters,
   `maxtrim` and the fixed 20-letter alphabet; the whole slice is compared, the hash only picks the
@@ -1019,9 +1019,12 @@ Same values, faster computation:
   trimmed once per query whose window covers it: AP027131 x AP027133 118,765 trims of 12,584
   distinct segments, 89 % of the trim work repeated) and BLASTX's query SEG (the chunks of a split
   query repeat the whole query's segments: 51 % of the trim work). TBLASTX d04 would repeat 2 %, and
-  the other maskers keep no table. A thread keeps at most 32,768 segments and 1 MiB of letters
-  (table up to 768 KiB), then clears the table; segments over 127 letters are not kept (line C,
-  v4-C DECISIONS 31-34).
+  the other maskers keep no table. Until 2026-11-15 a thread kept at most 32,768 segments and 1 MiB
+  of letters (table up to 768 KiB), then cleared the table; segments over 127 letters are not kept
+  (line C, v4-C DECISIONS 31-34). Since 2026-11-15 all threads share one table behind one lock, with
+  the same bounds, so a segment one thread trimmed is not trimmed again by another (line EB s23-s24;
+  workstation 16 threads, 8 rounds, against the dev commit it merged: TBLASTN AP027131 x AP027133
+  0.954-0.964 of the time, BLASTX 0.968-0.980, peak memory 0.960-0.990; one thread unchanged).
   Workstation, one core or eight, 8 rounds (2026-10-19): TBLASTN AP027131 x AP027133 n1 0.924 of
   the time (pairs 0.921-0.926), n8 0.971; BLASTX AP027131 x AP027133 n1 0.927, n8 0.985 (memo on
   every masker, e91c8864); with the two maskers of this version (cc7306b2, load 12-45) n1 0.932 /
@@ -3019,7 +3022,7 @@ Rebuilding less:
   of a query batch one at a time in OID order and one of them (the owner) hands the results to the hit lists in
   OID order while the others go on with the next subjects; a thread claims a subject only while it is fewer
   than `threads x 64` subjects past the last one handed over, so at most that many subjects' results wait
-  (`x_bnstream::search_in_order`, called from `search_query_batch` in `blastn/blast_engine/run.rs`; each
+  (`x_bnstream::search_in_order`, called from `SubjectPasses::search_subjects` in `blastn/blast_engine/subject_passes.rs`; each
   thread runs its loop as one `rayon::broadcast` job, so that a thread waiting inside a nested parallel stage
   of a search never starts a second loop, and since 2026-10-23 no subject is searched before every thread
   has started its loop: rayon runs a thread's own broadcast job inside a wait for a nested job too, so a
@@ -3641,7 +3644,7 @@ Scheduling (each value computed by one thread with the original function; order 
   when its preliminary stage ends, before its traceback (`blastn/blast_engine/x_lut_drop.rs`), where NCBI's traceback
   stage drops its table (`m_LookupTable.Reset(NULL)`, `traceback_stage.cpp:208-211`); before it graduated the tables
   lived until the batch returned. The traceback reads the HSPs that the preliminary stage kept and does not scan, and the
-  tables are passed to `process_subject` by the preliminary stage's calls only (`None` in the traceback's), so the
+  tables are passed to `search_subject` by the preliminary stage's calls only (`None` in the traceback's), so the
   compiler shows that no traceback reads them; the values taken from them before the scan (the offset array size, the
   shape of the subject search) are plain numbers. A `LOSAT_X_MBLUTKEEP` table goes back to the batch loop's keep when
   the tables drop, as at the batch's end before (zeroed and taken by the next build as before); what the traceback no

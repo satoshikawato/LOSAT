@@ -1,4 +1,4 @@
-//! The blastn traceback of one subject (`traceback_subject`, `process_subject`'s traceback stage):
+//! The blastn traceback of one subject (`traceback_subject`, `search_subject`'s traceback stage):
 //! the HSPs that the preliminary stage kept, the subject's letters in blastna, which the traceback
 //! aligns on (`traceback_subject_blastna`), then the traceback of the kept HSPs
 //! (`traceback_list::traceback_subject_hits`), or that of an ungapped (`-ungapped`) search, which
@@ -10,9 +10,9 @@
 //!
 //! This module is a child of `run` for the types it keeps private (`BlastnSubjectRef`,
 //! `SubjectCtx`, `PrelimHit`, `SubjectScratch`, `SubjectHits`, the e-value helpers).
-//! `traceback_subject` is the statements of `process_subject`'s traceback side, in their order;
+//! `traceback_subject` is the statements of `search_subject`'s traceback side, in their order;
 //! what it reads that is the same for every subject of a batch is `TraceBatch`, built once per
-//! batch, and what `process_subject` read of the call is `SubjectCtx`. The values the other two
+//! batch, and what `search_subject` read of the call is `SubjectCtx`. The values the other two
 //! functions read are the fields of `traceback_finish::TracebackCtx`, which `traceback_subject`
 //! builds.
 
@@ -30,7 +30,7 @@ use indicatif::ProgressBar;
 /// below. Built once per batch by `search_query_batch`, beside `prelim_subject::PrelimBatch`, with
 /// the names there (the types that `TracebackCtx`, `traceback_list::TraceSchedule` and
 /// `traceback_list::TraceDrive` take); every field is a shared reference or a `Copy` value, so the
-/// struct is `Sync`, as `process_subject`, which reads it, must be.
+/// struct is `Sync`, as `search_subject`, which reads it, must be.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1436-1440
 /// (`BLAST_ComputeTraceback_MT`'s parameters)
@@ -87,7 +87,7 @@ pub(super) struct TraceBatch<'a> {
     pub(super) blastn_trace_enabled: bool,
 }
 
-/// The traceback of one subject, `process_subject`'s traceback stage: the early return of a subject
+/// The traceback of one subject, `search_subject`'s traceback stage: the early return of a subject
 /// shorter than a word and the debug line of its cutoffs (each stage has its own: the preliminary
 /// stage reads a database sequence's masks before them); the HSPs that the preliminary stage kept
 /// (`kept`, copied into the list this function owns); if there are any, the subject's letters in
@@ -96,7 +96,7 @@ pub(super) struct TraceBatch<'a> {
 /// subject's bounds and the traceback of the kept HSPs with the purges and the final list
 /// (`traceback_list::traceback_subject_hits`), its debug line, and the lengths of its edit scripts
 /// and alignments and its time (LOSAT_TIMING). The hits go to `subject_hits`; the progress bar
-/// moves on by one. `subject_ctx` is what `process_subject` read of the call after its early
+/// moves on by one. `subject_ctx` is what `search_subject` read of the call after its early
 /// return without a valid context.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1526,1632-1633,1644,1691-1695,1701-1706

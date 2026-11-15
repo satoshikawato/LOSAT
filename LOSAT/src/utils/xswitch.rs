@@ -67,8 +67,8 @@ use std::ops::RangeInclusive;
 /// `LOSAT_X_TBNOIDNEXT`, `LOSAT_X_TBNOIDUNITS`, `LOSAT_X_TBNSSIDE`, `LOSAT_X_TBNBATCH`,
 /// `LOSAT_X_SEGSHARE` and `LOSAT_X_DEKKER` graduated on 2026-10-22 (see `GRADUATED`).
 /// `LOSAT_X_ERFABSORB` (Spouge's ErfC returns 2.0 below -6 without evaluating ErfImpl,
-/// `stats/spouge.rs`) and `LOSAT_X_SEGTRIMMEMO` (the SEG trim of a segment kept per thread for the
-/// maskers that repeat segments, `utils/x_seg_trim_memo.rs`) graduated on 2026-10-26: they left
+/// `stats/spouge.rs`) and `LOSAT_X_SEGTRIMMEMO` (the SEG trim of a segment kept for the maskers
+/// that repeat segments, `utils/x_seg_trim_memo.rs`) graduated on 2026-10-26: they left
 /// `STRICT_SET` and their previous code was deleted (the maskers that do not ask for the memo keep
 /// trimming every segment, a rule of the masker and not a switch).
 /// `LOSAT_X_BPCOMPOREUSE`, `LOSAT_X_BPLUT`, `LOSAT_X_BPPCOMPACT`, `LOSAT_X_BPPFREE`,

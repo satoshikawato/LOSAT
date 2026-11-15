@@ -187,31 +187,79 @@ def _stats(rows: Iterable[tuple[int, int, float, float, float] | None]) -> list[
 
 
 @dataclass(frozen=True)
+class QueryRounds:
+    """The rounds of one query: psiblast's rounds (`num_iterations` other than 1), one round for the
+    other searches."""
+
+    stats: list[QueryStats | None]
+    """The statistics of each round, round 1 first: what fixed the E-values of the HSPs of that round
+    (`Hsp.round`). The first is the query's `query_stats` entry."""
+    converged: bool
+    """Whether the rounds converged (NCBI's `Search has CONVERGED!`); false without rounds."""
+
+
+_RoundsRow = tuple[list[tuple[int, int, float, float, float] | None], bool]
+
+
+def _rounds(rows: Iterable[_RoundsRow]) -> list[QueryRounds]:
+    return [QueryRounds(_stats(stats), converged) for stats, converged in rows]
+
+
+@dataclass(frozen=True)
 class SubjectHits:
-    """The HSPs of one query against one subject."""
+    """The HSPs of one query against one subject in one round."""
 
     q_idx: int
     s_idx: int
     hsps: HspTable
+    round: int = 1
+    """The round of the HSPs (`Hsp.round`): 1 in a search without rounds."""
 
 
 @dataclass(frozen=True)
 class QueryHits:
-    """The results of one query."""
+    """The results of one query: of all its rounds, or of one (`rounds`)."""
 
     q_idx: int
     stats: QueryStats | None
+    """The query's statistics (with psiblast's rounds round 1's); in the view of one round, that
+    round's."""
     hsps: HspTable
+    round: int | None = None
+    """`None` for the HSPs of all the query's rounds, the round in the view of one round."""
+    _round_stats: list[QueryStats | None] = field(default_factory=list, repr=False)
+    """The statistics of the rounds of the view, from its first round (`rounds`)."""
 
     def subjects(self) -> list[SubjectHits]:
-        """The subjects with HSPs for this query, in the order of the hit list."""
+        """The subjects with HSPs for this query, in the order of the hit list, round after round
+        (a subject found again in a later round comes again there)."""
         return [
-            SubjectHits(self.q_idx, s_idx, hsps) for s_idx, hsps in self.hsps._subjects()
+            SubjectHits(self.q_idx, s_idx, hsps, round)
+            for s_idx, round, hsps in self.hsps._subjects()
         ]
 
     def subject(self, s_idx: int) -> SubjectHits | None:
-        """The HSPs of this query against subject `s_idx`, if it has any."""
+        """The HSPs of this query against subject `s_idx` in the first round where it has any."""
         return next((hits for hits in self.subjects() if hits.s_idx == s_idx), None)
+
+    def rounds(self) -> list[QueryHits]:
+        """The results of each round of this query, round 1 first, each with its HSPs and its
+        statistics: one for a search without rounds. The view of one round gives itself."""
+        first = 1 if self.round is None else self.round
+        return [
+            QueryHits(
+                self.q_idx, stats, self.hsps._round(first + offset), first + offset, [stats]
+            )
+            for offset, stats in enumerate(self._round_stats)
+        ]
+
+
+def _query_hits(
+    hsps: HspTable, q_idx: int, stats: QueryStats | None, rounds: QueryRounds | None
+) -> QueryHits:
+    return QueryHits(
+        q_idx, stats, hsps._query(q_idx), None, [] if rounds is None else rounds.stats
+    )
 
 
 @dataclass(frozen=True)
@@ -240,20 +288,23 @@ class Outcome:
     hsps: HspTable
     """The final hit list, one row per HSP."""
     query_stats: list[QueryStats | None] = field(repr=False)
-    """By query record; `None` for a query that has no statistics."""
+    """By query record; `None` for a query that has no statistics. With psiblast's rounds, round
+    1's (`rounds`)."""
+    rounds: list[QueryRounds] = field(repr=False)
+    """By query record: the statistics of each of its rounds and whether they converged."""
     diagnostics: str
     """What the command line writes to its standard error for this search."""
 
     def queries(self) -> list[QueryHits]:
         """The results of each query record, also of those without hits."""
         return [
-            QueryHits(q_idx, stats, self.hsps._query(q_idx))
-            for q_idx, stats in enumerate(self.query_stats)
+            _query_hits(self.hsps, q_idx, stats, rounds)
+            for q_idx, (stats, rounds) in enumerate(zip(self.query_stats, self.rounds))
         ]
 
     def query(self, q_idx: int) -> QueryHits:
         """The results of query record `q_idx`."""
-        return QueryHits(q_idx, self.query_stats[q_idx], self.hsps._query(q_idx))
+        return _query_hits(self.hsps, q_idx, self.query_stats[q_idx], self.rounds[q_idx])
 
 
 @dataclass(frozen=True)
@@ -266,14 +317,16 @@ class Batch:
     """The batch's HSPs. `q_idx` and `index` count as in the whole search."""
     query_stats: list[QueryStats | None] = field(repr=False)
     """One entry per query of `query_indices`."""
+    rounds: list[QueryRounds] = field(repr=False)
+    """One entry per query of `query_indices`, as in `Outcome.rounds`."""
     diagnostics: str
     """What the command line writes to its standard error for this batch."""
 
     def queries(self) -> list[QueryHits]:
         """The results of each query of the batch."""
         return [
-            QueryHits(q_idx, stats, self.hsps._query(q_idx))
-            for q_idx, stats in zip(self.query_indices, self.query_stats)
+            _query_hits(self.hsps, q_idx, stats, rounds)
+            for q_idx, stats, rounds in zip(self.query_indices, self.query_stats, self.rounds)
         ]
 
 
@@ -296,8 +349,8 @@ class Batches(Iterator[Batch]):
         return self
 
     def __next__(self) -> Batch:
-        start, end, hsps, stats, diagnostics = next(self._running)
-        return Batch(range(start, end), hsps, _stats(stats), diagnostics)
+        start, end, hsps, stats, rounds, diagnostics = next(self._running)
+        return Batch(range(start, end), hsps, _stats(stats), _rounds(rounds), diagnostics)
 
 
 class Search:
@@ -400,14 +453,16 @@ class Search:
         With reports the engine runs in one call, and Ctrl-C takes effect when it returns.
         """
         formats = [outfmt] if isinstance(outfmt, str) else list(outfmt)
-        reports, hsps, stats, diagnostics = _pylosat.run(
+        reports, hsps, stats, rounds, diagnostics = _pylosat.run(
             self._program,
             list(self._argv),
             _input(query, "query"),
             _subject(subject),
             formats,
         )
-        return Outcome([Report(*report) for report in reports], hsps, _stats(stats), diagnostics)
+        return Outcome(
+            [Report(*report) for report in reports], hsps, _stats(stats), _rounds(rounds), diagnostics
+        )
 
     def run_to_file(
         self,

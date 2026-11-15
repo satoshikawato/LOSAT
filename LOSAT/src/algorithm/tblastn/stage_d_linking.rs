@@ -1316,7 +1316,7 @@ mod tests {
             .collect();
         assert_eq!(early_decisions.len(), retained.len());
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3383-3427,
-        // 3525-3535; composition_adjustment/redo_alignment.c:64,1560-1582;
+        // 3525-3535; composition_adjustment/redo_alignment.c:64,1560-1580;
         // composition_adjustment/compo_heap.c:252-275,330-391,405-410:
         // if (BlastCompo_EarlyTermination(localMatch->best_evalue,
         //     redoneMatches, numQueries)) { Blast_HSPListFree(localMatch); continue; }

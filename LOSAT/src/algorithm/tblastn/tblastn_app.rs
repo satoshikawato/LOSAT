@@ -423,7 +423,9 @@ impl TblastnArgs {
         if let Some(handle) = &archive {
             match &result {
                 Err(error) => {
-                    if let Some(lines) = super::archive::error_lines(error, false) {
+                    // The `-in_pssm` file, which NCBI opens inside `Run` too.
+                    let in_run = super::in_pssm::file_error_in_run(error);
+                    if let Some(lines) = super::archive::error_lines(error, in_run) {
                         let _ = write_error_archive(&io, handle, error, &lines, &mut stream);
                     }
                 }
@@ -762,32 +764,13 @@ fn search_cli(
     // FASTA input, no `Query is Empty!` and no query batches (one search of the PSSM,
     // tblastn_app.cpp:305-327).
     if let Some(psi) = resolved.pssm.clone() {
-        // A request whose PSSM file has members that the reader skipped: refused once the database
-        // is opened (NCBI's error of a database it cannot open comes first), before any output.
-        psi.refuse_request_members("TBLASTN")?;
-        super::in_pssm::check_limits(&args, &resolved, &psi, choice.number)?;
         drop(query_input);
-        crate::blastinput::input_files::write_empty_subject_warnings_by_length(
-            subjects,
-            |index| {
-                x_subject_stores.map_or(subjects[index].seq().len(), |stores| stores[index].len())
-            },
-            "tblastn",
-            outputs.diagnostics,
-        )?;
-        crate::blastinput::app::xinclude_check_for(choice, args.out.as_deref())?;
-        // The PSSM's Bioseq as the reports show it (`PsiSearch::query_record`); with
-        // `-parse_deflines` its ids join the scope of the `-subject` records as a FASTA query's do
-        // (`IdScope::add_record`; NCBI BLAST+ 2.17.0 fails on a subject with the query's id), and
-        // the database's sequences are checked as for a FASTA query (`QueryScopes`).
-        let records =
-            vec![psi.query_record_in(args.parse_deflines, args.id_scope.as_deref(), "TBLASTN")?];
-        return search(
+        return search_pssm_query(
             &args,
             resolved,
-            1,
-            &records,
-            QueryReading::End,
+            &psi,
+            &[choice.number],
+            args.id_scope.as_deref(),
             subjects,
             subject_placements,
             x_subject_stores,
@@ -922,6 +905,65 @@ fn search_cli(
     )
 }
 
+/// tblastn `-in_pssm` (PSI-TBLASTN): the search of the PSSM's query (the file read with the
+/// options, `check_options`), from where the entries would read their FASTA queries: the command
+/// line's (`search_cli`) and those of the records (`run_local_formats`, `search_database`, the
+/// library API's `Inputs::pssm`). No FASTA input, no `Query is Empty!` and no query batches (one
+/// search of the PSSM, tblastn_app.cpp:305-327). A request whose PSSM file has members that the
+/// reader skipped is refused here, once the database is opened (NCBI's error of a database it
+/// cannot open comes first) and before any output, and so are LOSAT's limits of the PSSM search for
+/// each requested format (`outfmts`, `in_pssm::check_limits`); then the formatter's set-up of the
+/// subjects (a subject without letters) and the XInclude formats without a file, as for a FASTA
+/// query (`before_prolog`, `xinclude_checks`).
+///
+/// The query is the PSSM's Bioseq as the reports show it (`PsiSearch::query_record`); with
+/// `-parse_deflines` its ids join `scope`, the scope of the `-subject` records (`IdScope::
+/// add_record`; NCBI BLAST+ 2.17.0 fails on a subject with the query's id), and the database's
+/// sequences are checked as for a FASTA query (`QueryScopes`). The library's observer receives it
+/// (`FormatObserver::pssm_query`).
+#[allow(clippy::too_many_arguments)]
+fn search_pssm_query(
+    args: &TblastnArgs,
+    resolved: ResolvedTblastnArgs,
+    psi: &crate::algorithm::pssm_search::PsiSearch,
+    outfmts: &[i32],
+    scope: Option<&crate::seqid::id_scope::IdScope>,
+    subjects: &[FastaRecord],
+    subject_placements: &crate::blastinput::seq_range::Placements,
+    // EXPERIMENT (LOSAT_X_TBNSTORE): the subjects' letters, packed (the records keep none).
+    x_subject_stores: Option<&[crate::sequence::packed_subject::PackedNucleotide]>,
+    database: Option<&TblastnDatabase>,
+    outputs: &mut ReportOutputs<'_>,
+) -> Result<()> {
+    psi.refuse_request_members("TBLASTN")?;
+    for &outfmt in outfmts {
+        super::in_pssm::check_limits(args, &resolved, psi, outfmt)?;
+    }
+    crate::blastinput::input_files::write_empty_subject_warnings_by_length(
+        subjects,
+        |index| x_subject_stores.map_or(subjects[index].seq().len(), |stores| stores[index].len()),
+        "tblastn",
+        outputs.diagnostics,
+    )?;
+    xinclude_checks(outputs, args.out.as_deref())?;
+    let records = vec![psi.query_record_in(args.parse_deflines, scope, "TBLASTN")?];
+    if let Some(observer) = outputs.observer.as_deref_mut() {
+        observer.pssm_query(&records[0]);
+    }
+    search(
+        args,
+        resolved,
+        1,
+        &records,
+        QueryReading::End,
+        subjects,
+        subject_placements,
+        x_subject_stores,
+        database,
+        outputs,
+    )
+}
+
 /// NCBI's steps of tblastn between `Query is Empty!` and the outfmt 0 prolog that concern
 /// the subjects: the query batch size, then the formatter, which sets up the subjects and
 /// warns about each one without letters (a record without residues, or an interval that
@@ -1015,7 +1057,6 @@ pub fn run_local(
     // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
     // parser has checked it, a caller of `run_local` has not.
     super::args::TBLASTN_TASK.check(&mut args.task)?;
-    super::in_pssm::check_records_only(&args)?;
     // The host has no database files; LOSAT Web searches the records it gives.
     if args.db.is_some() {
         anyhow::bail!("-db (a database search) is not supported in the browser yet");
@@ -1036,10 +1077,11 @@ pub fn run_local(
         )
         .map(|handle| outputs.with_archive_outfmt(handle));
         if let Some(handle) = args.archive.clone() {
+            let no_query = query_records.is_empty() && args.in_pssm.is_none();
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
                 run_local_formats(args, query_records, subject_records, view)
             });
-            return outputs.finish_archive(&handle, query_records.is_empty(), result);
+            return outputs.finish_archive(&handle, no_query, result);
         }
     }
     run_local_formats(args, query_records, subject_records, outputs)
@@ -1118,7 +1160,6 @@ pub fn run_local_database(
     // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
     // parser has checked it, a caller of `run_local` has not.
     super::args::TBLASTN_TASK.check(&mut args.task)?;
-    super::in_pssm::check_records_only(&args)?;
     report_formats(outputs, args.out.as_deref())?;
     let archive_requested = outputs
         .formats
@@ -1133,10 +1174,11 @@ pub fn run_local_database(
     crate::utils::threading::validate_threads(args.num_threads)?;
     match args.archive.clone() {
         Some(handle) => {
+            let no_query = query_records.is_empty() && args.in_pssm.is_none();
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
                 search_database(args, query_records, settings, view)
             });
-            outputs.finish_archive(&handle, query_records.is_empty(), result)
+            outputs.finish_archive(&handle, no_query, result)
         }
         None => search_database(args, query_records, settings, outputs),
     }
@@ -1160,6 +1202,23 @@ fn search_database(
     let resolved = args.check_options_for_formats(&outfmts, outputs.diagnostics)?;
     let database = open_search_database(&mut args, list.as_ref(), &settings, outputs)?
         .ok_or_else(crate::blastinput::app::missing_subject_error)?;
+    // `-in_pssm` (the library API's `Inputs::pssm_database`): the query is the PSSM's. No subject
+    // record holds an id (the database's sequences are checked against the query's,
+    // `QueryScopes`).
+    if let Some(psi) = resolved.pssm.clone() {
+        return search_pssm_query(
+            &args,
+            resolved,
+            &psi,
+            &outfmts,
+            None,
+            &[],
+            &crate::blastinput::seq_range::Placements::default(),
+            None,
+            Some(&database),
+            outputs,
+        );
+    }
     if query_records.is_empty() {
         outputs
             .diagnostics
@@ -1215,17 +1274,38 @@ fn run_local_formats(
     // The taxonomy database of the reports, where the command line asks (`open_search_database`).
     let setting = args.taxdb_setting.take();
     subject_taxonomy(&mut args, setting.as_ref(), outputs)?;
+    let whole_subjects = seq_range::Placements::default();
+    let (searched_subjects, subject_placements) = match &ranged_subjects {
+        Some((cut, placements)) => (cut.as_slice(), placements),
+        None => (subject_records, &whole_subjects),
+    };
+    // `-in_pssm` (the library API's `Inputs::pssm`): the query is the PSSM's, whose ids join the
+    // scope of the subject records read (`pssm_search::scope_of_subjects`).
+    if let Some(psi) = resolved.pssm.clone() {
+        let id_scope = crate::algorithm::pssm_search::scope_of_subjects(
+            args.parse_deflines,
+            subject_records,
+            "TBLASTN",
+        )?;
+        return search_pssm_query(
+            &args,
+            resolved,
+            &psi,
+            &outfmts,
+            id_scope.as_ref(),
+            searched_subjects,
+            subject_placements,
+            None,
+            None,
+            outputs,
+        );
+    }
     if query_records.is_empty() {
         outputs
             .diagnostics
             .write_all(b"Warning: [tblastn] Query is Empty!\n")?;
         return Ok(());
     }
-    let whole_subjects = seq_range::Placements::default();
-    let (searched_subjects, subject_placements) = match &ranged_subjects {
-        Some((cut, placements)) => (cut.as_slice(), placements),
-        None => (subject_records, &whole_subjects),
-    };
     // The caller owns the records: their letters are read in place.
     let batch_size = before_prolog(searched_subjects, None, outputs.diagnostics)?;
     xinclude_checks(outputs, args.out.as_deref())?;

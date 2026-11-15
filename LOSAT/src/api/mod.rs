@@ -122,8 +122,10 @@
 //!   `-save_pssm_after_last_round` and `-save_each_pssm`) are written where the command line
 //!   writes them, with the argv's names: `-save_each_pssm` numbers them over the call, and over
 //!   the batches of [`run_batches`] as over the command line's run; a call of [`run`](run()) or
-//!   [`run_collect`] whose formats take two searches and that writes them is refused. The queries
-//!   are records, so `-in_pssm` (psiblast's and tblastn's) is refused ([`validate`]).
+//!   [`run_collect`] whose formats take two searches and that writes them is refused.
+//! - A PSSM query of psiblast and tblastn (the command line's `-in_pssm`) is an input:
+//!   [`Inputs::pssm`] and [`Inputs::pssm_database`] name the file, which the search reads; its one
+//!   query is the PSSM's sequence, query 0 of the results, in one batch of [`run_batches`].
 //! - The API writes no search strategy file either: every program refuses
 //!   `-export_search_strategy` ([`validate`]); the command line writes it.
 //! - [`run_makeblastdb`] and [`run_blastdbcmd`] are the two database programs, and

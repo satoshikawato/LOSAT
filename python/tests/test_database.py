@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 from pathlib import Path
 
 import pylosat
@@ -55,6 +56,64 @@ def test_a_database_gives_the_rows_of_its_report(case):
         fields = row.split("\t")
         assert (fields[0], fields[1]) == (hsp.query_id, hsp.subject_id)
         assert int(fields[9]) == hsp.s_end
+
+
+# Series Q item Q6b: a PSSM query (`-in_pssm` of psiblast and tblastn), against a database and
+# against records: (program, PSSM under LOSAT/tests, subject, whether it is a database).
+PSSM_QUERIES = [
+    ("psiblast", "fixtures/pssm/ps4_tk_paja.asn.gz", "db_search/paja", True),
+    ("psiblast", "fixtures/pssm/ps4_tk_paja.asn.gz", "fasta/PajaWSV.faa", False),
+    ("tblastn", "fixtures/pssm/ps7_ts1_tslice.asn.gz", "db_search/tslice", True),
+    ("tblastn", "db_search/of1/tnq1.pssm", "db_search/of1/tns.fa", False),
+]
+
+
+def pssm_file(name: str, directory: Path) -> str:
+    """The PSSM file under LOSAT/tests, a `.gz` one inflated into `directory`."""
+    path = ENGINE_TESTS / name
+    if path.suffix != ".gz":
+        return str(path)
+    inflated = directory / path.stem
+    inflated.write_bytes(gzip.decompress(path.read_bytes()))
+    return str(inflated)
+
+
+@pytest.mark.parametrize("case", PSSM_QUERIES, ids=lambda case: f"{case[0]}-{case[2]}")
+@pytest.mark.parametrize("outfmt", ["6", "0"])
+def test_a_pssm_query_gives_the_bytes_of_the_command_line(case, outfmt, losat, tmp_path):
+    program, pssm, subject, database = case
+    pssm, subject = pssm_file(pssm, tmp_path), engine_file(subject)
+    flag = "-db" if database else "-subject"
+    stdout, stderr = losat(program, "-in_pssm", pssm, flag, subject, "-outfmt", outfmt)
+    inputs = pylosat.Database(subject) if database else pylosat.Sequences.from_fasta(subject)
+    outcome = pylosat.Search(program).run(pylosat.Pssm.from_file(pssm), inputs, outfmt=outfmt)
+    assert outcome.reports[0].bytes == stdout
+    assert outcome.diagnostics == stderr.decode()
+
+
+@pytest.mark.parametrize("case", PSSM_QUERIES, ids=lambda case: f"{case[0]}-{case[2]}")
+def test_a_pssm_query_is_query_0_of_the_rows(case, tmp_path):
+    program, pssm, subject, database = case
+    pssm, subject = pssm_file(pssm, tmp_path), engine_file(subject)
+    inputs = pylosat.Database(subject) if database else pylosat.Sequences.from_fasta(subject)
+    search = pylosat.Search(program)
+    outcome = search.run(pylosat.Pssm.from_file(pssm), inputs, outfmt="6")
+    rows = outcome.reports[0].text.splitlines()
+    assert rows and len(rows) == len(outcome.hsps)
+    for row, hsp in zip(rows, outcome.hsps, strict=True):
+        assert row.split("\t")[0] == hsp.query_id
+        assert hsp.q_idx == 0
+    assert len(outcome.query_stats) == 1 and outcome.query_stats[0] is not None
+    # The file of `run_to_file` holds the same report.
+    out = tmp_path / "out.6"
+    search.run_to_file(pylosat.Pssm.from_file(Path(pssm)), inputs, outfmt="6", path=out)
+    assert out.read_bytes() == outcome.reports[0].bytes
+    # One batch: NCBI reads no query batches for a PSSM query.
+    batches = search.batches(pylosat.Pssm.from_file(pssm), inputs)
+    assert batches.query_count == 1
+    [batch] = list(batches)
+    assert batch.query_indices == range(0, 1)
+    assert len(batch.hsps) == len(outcome.hsps)
 
 
 def test_batches_of_a_database_are_the_whole_search():

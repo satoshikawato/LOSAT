@@ -106,6 +106,9 @@ pub(super) struct SubjectPasses<'a> {
     /// The sizes of the preliminary and of the final hit lists.
     pub(super) prelim_hitlist_size: usize,
     pub(super) hitlist_size: usize,
+    /// The algorithm of `-db_hard_mask`, whose masked letters the traceback and the ungapped
+    /// re-evaluation of a database sequence read as 'B' (`database::mask_hard_letters`; decision H2).
+    pub(super) db_hard_mask: Option<i32>,
 }
 
 impl SubjectPasses<'_> {
@@ -450,7 +453,7 @@ impl SubjectPasses<'_> {
         if hits.is_empty() {
             return Ok(());
         }
-        database.with_blastna(ordinal, |s_blastna| {
+        database.with_blastna(ordinal, self.db_hard_mask, |s_blastna| {
             ungapped_subject_stage(
                 hits,
                 s_blastna,
@@ -686,6 +689,7 @@ impl SubjectPasses<'_> {
                 let listed = listed_prelim_hits(prelim_lists);
                 let found = database::traceback_listed(
                     database,
+                    self.db_hard_mask,
                     parallel_pool,
                     use_parallel,
                     &listed,

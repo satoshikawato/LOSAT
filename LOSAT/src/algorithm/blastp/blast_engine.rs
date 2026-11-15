@@ -15142,7 +15142,7 @@ fn run_call(
     let xml_only_xml2 = !format_plans.contains(&BlastpReport::Xml);
     // What the BLAST archive, the tabular reports and the organism report read of the call
     // (`report_write`).
-    let view = report_write::ReportView {
+    let report_view = report_write::ReportView {
         args: &args,
         reports,
         ranges,
@@ -15262,7 +15262,7 @@ fn run_call(
                 Ok(())
             })(),
             BlastpReport::Archive => report_write::write_archive(
-                &view,
+                &report_view,
                 format,
                 &mut warnings,
                 &first_context,
@@ -15839,7 +15839,7 @@ fn run_call(
                 Ok(())
             })(),
             BlastpReport::CustomTabular(spec) => report_write::write_custom_tabular(
-                &view,
+                &report_view,
                 spec,
                 format,
                 &mut warnings,
@@ -15848,7 +15848,7 @@ fn run_call(
             ),
             BlastpReport::Text(
                 outfmt @ (OutputFormat::Tabular | OutputFormat::TabularWithComments),
-            ) => report_write::write_text(&view, outfmt, format, &mut warnings, &mut probe),
+            ) => report_write::write_text(&report_view, outfmt, format, &mut warnings, &mut probe),
             // Outfmt 0 is `BlastpReport::Pairwise` (`requested_formats`).
             BlastpReport::Text(OutputFormat::Pairwise) => Err(anyhow::anyhow!(
                 "LOSAT internal error: outfmt 0 as a BLASTP tabular report"

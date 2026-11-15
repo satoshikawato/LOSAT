@@ -59,8 +59,9 @@ use crate::utils::threading::SearchPool;
 ///     	m_SearchDb = db_adapter.GetSearchDatabase();
 ///     }
 /// ```
-/// NCBI's formatter keeps, from its construction, what its formats read of the search: the
-/// database's name, or the sequences of a subject set (bl2seq).
+/// NCBI's formatter keeps the database's name, or the sequences of a subject set (bl2seq), from
+/// its construction; the results of the search reach the formatter with each call
+/// (blastp_app.cpp:281 and :287).
 pub(super) struct ReportView<'a> {
     pub(super) args: &'a ResolvedBlastpArgs,
     pub(super) reports: &'a BlastpReports<'a>,
@@ -191,6 +192,14 @@ pub(super) fn write_archive(
 ///         if(!m_CustomDelim.empty()) {
 ///             tabinfo.SetCustomDelim(m_CustomDelim);
 ///         }
+/// ```
+///
+/// The organism report of outfmt 18 is NCBI's `CBlastFormat::x_PrintTaxReport`:
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:873-874
+/// ```c++
+/// void
+/// CBlastFormat::x_PrintTaxReport(const blast::CSearchResults& results)
 /// ```
 pub(super) fn write_custom_tabular(
     view: &ReportView<'_>,
@@ -396,21 +405,25 @@ pub(super) fn write_text(
         ..
     } = *view;
     let mut writer = format.sink.open()?;
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
-    // ```c
-    // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-    //     // Add tab in front of field, except for the first field.
-    //     if (iter != m_FieldsToShow.begin())
-    //         m_Ostream << m_FieldDelimiter;
-    //     x_PrintField(*iter);
-    // }
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1102-1107
+    // ```c++
+    //     ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+    //         // Add tab in front of field, except for the first field.
+    //         if (iter != m_FieldsToShow.begin())
+    //             m_Ostream << m_FieldDelimiter;
+    //         x_PrintField(*iter);
+    //     }
     // ```
     write_blastp_tabular_hit_lists(
         hit_lists,
         outfmt,
         &mut writer,
-        // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1295-1309
-        // AcknowledgeBlastQuery(bioseq, ..., kTabularFormat, rid);
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1306-1308
+        // ```c++
+        //     CAlignFormatUtil::AcknowledgeBlastQuery(bioseq, kLineLength, m_Ostream,
+        //                                             m_ParseLocalIds, kHtmlFormat,
+        //                                             kTabularFormat, rid);
+        // ```
         query_ids,
         query_titles,
         subject_ids,
@@ -426,8 +439,8 @@ pub(super) fn write_text(
         (args.app == BlastpApp::Psiblast)
             .then(|| reports.psi_round.map_or(1, |io| io.state.number())),
     )?;
-    // NCBI reference: ncbi-blast/c++/src/corelib/ncbidiag.cpp:4086
-    // ```c
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:4086
+    // ```c++
     //         CDiagHandler* handler = new CStreamDiagHandler(&NcbiCerr, true, kLogName_Stderr);
     // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:134-146

@@ -1,10 +1,10 @@
 //! BLASTP's BLAST archive (outfmt 11): the request options from the arguments, the archive of
 //! each query batch from the batch's report data, and the error archive.
 //!
-//! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:281-283
+//! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:280-283
 //! ```c++
-//!             if (isArchiveFormat) {
-//!                 formatter.WriteArchive(*queries, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
+//!             if (fmt_args->ArchiveFormatRequested(args)) {
+//!                 formatter.WriteArchive(*queries, *m_OptsHndl, *results,  0, m_Bah.GetMessages());
 //!                 m_Bah.ResetMessages();
 //!             } else {
 //! ```

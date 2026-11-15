@@ -494,8 +494,8 @@ impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
 
     /// The branch of `WriteEncodedChar` for a byte >= 0x80 of the US-ASCII stream of outfmt 5 /
     /// 14 / 16: the character that the UTF-8 sequence at the start of `src` decodes to
-    /// (`CUtf8::Decode`, `CUtf8::SymbolToChar`), verified and written as an ASCII byte is; the
-    /// bytes it takes, or `None` when the stream throws (`throw`).
+    /// (`CUtf8::Decode`, `CUtf8::SymbolToChar`), verified and written as an ASCII byte is, or the
+    /// stream's exception (`throw`).
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:556-572
     /// ```c++
@@ -521,17 +521,32 @@ impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
     /// US-ASCII, `SetEncoding(eEncoding_Ascii)`, blastxml_format.cpp:502, :786,
     /// blastxml2_format.cpp:721, :733.) A decoded NUL (`C0 80`) writes nothing and the string
     /// goes on.
+    ///
+    /// `src` is the rest of the string from such a byte on: each UTF-8 sequence is written so and
+    /// the ASCII bytes between them as `write_string` writes them, until the string's end, a NUL
+    /// or the throw.
     #[cold]
     #[inline(never)]
-    fn encoded_char(&mut self, src: &[u8]) -> Option<usize> {
-        match decode_to_ascii(src) {
-            Ok((character, used)) => {
-                self.write_string::<true>(&[character]);
-                Some(used)
+    fn encoded_tail(&mut self, mut src: &[u8]) {
+        loop {
+            match decode_to_ascii(src) {
+                Ok((character, used)) => {
+                    self.write_string::<true>(&[character]);
+                    src = &src[used..];
+                }
+                Err(error) => {
+                    self.throw(error);
+                    return;
+                }
             }
-            Err(error) => {
-                self.throw(error);
-                None
+            let ascii = src
+                .iter()
+                .position(|&byte| byte >= 0x80 || byte == 0)
+                .unwrap_or(src.len());
+            self.write_string::<true>(&src[..ascii]);
+            match src.get(ascii) {
+                Some(&byte) if byte >= 0x80 => src = &src[ascii..],
+                _ => return,
             }
         }
     }
@@ -599,7 +614,7 @@ impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
     /// with it the character is recorded (`replace`) and `#` written in its place; a byte >= 0x80
     /// is written as it is (the stream has no encoding). Outside it (outfmt 5 / 14 / 16) a
     /// control character is always replaced and posted, and a byte >= 0x80 starts a UTF-8
-    /// sequence (`encoded_char`), whose failure ends the string.
+    /// sequence (`encoded_tail`), whose failure ends the string.
     #[inline(always)]
     fn write_string<const REPLACE: bool>(&mut self, value: &[u8]) {
         if OBJECT && self.pending_elem {
@@ -626,11 +641,11 @@ impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
                 0x01..=0x1f => self.fail(SerialError::NonVisibleChar(byte)),
                 0x80..=0xff if OBJECT => self.out.push(byte),
                 0x80..=0xff => {
+                    // The rest of the string goes through the cold path, which leaves the loop of
+                    // an ASCII string as it was.
                     let rest = bytes.as_slice();
-                    match self.encoded_char(&value[value.len() - rest.len() - 1..]) {
-                        Some(used) => bytes = rest[used - 1..].iter(),
-                        None => return,
-                    }
+                    self.encoded_tail(&value[value.len() - rest.len() - 1..]);
+                    return;
                 }
                 _ => self.out.push(byte),
             }
@@ -1098,7 +1113,7 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
     /// message (`x_VerifyChar`, `BAD_CHAR`; `replace`): in the object mode an error here, `#`
     /// and a record in `visible_str_replacing`; in outfmt 5 / 14 / 16 always `#` and a post
     /// (`XmlPost`). A byte >= 0x80 is decoded as UTF-8 by the US-ASCII stream of outfmt 5 / 14 /
-    /// 16, which throws where it cannot write the character (`encoded_char`, `XmlThrow`); the
+    /// 16, which throws where it cannot write the character (`encoded_tail`, `XmlThrow`); the
     /// archive's stream has no encoding, so `WriteEncodedChar` takes its first branch
     /// (objostrxml.cpp:559-565) and the byte passes `x_VerifyChar` and is written as it is (the
     /// object mode). A NUL byte ends the string.

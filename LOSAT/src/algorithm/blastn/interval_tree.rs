@@ -2270,8 +2270,9 @@ mod tests {
             let mut walk = BlastIntervalTree::new(0, 2 * q_len + 1, 0, s_len + 1);
             // The walk answers while the index is dropped (as when tracing is on).
             walk.x.usable = false;
-            // The grid at its own limit, at blastp's limit under LOSAT_X_BPTREECELLS, and coarse.
-            let cells = [X_MAX_CELLS, 1 << 14, 64][(trial / 16) % 3];
+            // The grid at its own limit, at blastp's limit under LOSAT_X_BPTREECELLS, at the limit
+            // of the trees made per subject or unit (`x_grid_cells`), and coarse.
+            let cells = [X_MAX_CELLS, 1 << 14, X_GRID_MAX_CELLS_FOR_HSPS, 64][(trial / 16) % 4];
             if cells == X_MAX_CELLS {
                 indexed.reset_with_bounds(0, 2 * q_len + 1, 0, s_len + 1);
             } else {

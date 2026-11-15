@@ -119,15 +119,18 @@ impl SubjectLoc {
 /// `tabular::write_blastx_tabular`, and the default fields of outfmt 6 and 7, `report.rs`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TabularEmptyRow {
-    /// `-subject` with a field of the alignment block: `CreateDensegFromStdseg` on the mapped
-    /// Std-seg (`std_seg_lengths_not_accurate`), after the rows before it.
+    /// `-subject` with a field of the alignment block, a subject with two or more shown HSPs:
+    /// `CreateDensegFromStdseg` on the mapped Std-seg (`std_seg_lengths_not_accurate`), after the
+    /// rows before it.
     Throws,
     /// `-db`, a subject whose only shown HSP it is, with a query field: the row that leaves at the
     /// query's fields (the query's Seq-align id, `AlignQueryIds`; the scores and the subject's
     /// fields; `qcovhsp` `N/A`; every field of the alignment block at `x_ResetFields`' 0).
     Leaves,
     /// The row as of any HSP (`-db`: the empty ranges; `-subject` without a field of the
-    /// alignment block: its scores and ids, the mapped nucleotide in `qcovs` and `qcovhsp`).
+    /// alignment block: its scores and ids, the mapped nucleotide in `qcovs` and `qcovhsp`;
+    /// `-subject`, a subject's only HSP: the ids of a table that reads nothing of the alignment,
+    /// the only one that `refuse_mapped_without_scores` lets through).
     Row,
 }
 
@@ -162,7 +165,9 @@ pub(crate) enum TabularEmptyRow {
 /// tabular.cpp:900-908) and read the query (`reads_query`, `TabularSpec::reads_query`,
 /// tabular.cpp:778-800). A subject's only HSP keeps its Seq-align unsplit, with the scores on its
 /// Std-seg and none named on the Seq-align, so that `x_SetQueryCovSeqalign` reads the query
-/// row's range, which throws on `-db`'s empty row, caught by `SetFields`.
+/// row's range, which throws on `-db`'s empty row, caught by `SetFields`. With `-subject` a
+/// subject's only HSP of length 0 has a Seq-align of no row of letters, which the mapper makes
+/// into one of equal lengths (decision X2g-5, `refuse_mapped_without_scores`): no exception.
 pub(crate) fn tabular_empty_row(
     loc: SubjectLoc,
     opens_block: bool,
@@ -170,7 +175,7 @@ pub(crate) fn tabular_empty_row(
     reads_query: bool,
 ) -> TabularEmptyRow {
     match loc {
-        SubjectLoc::Interval if opens_block => TabularEmptyRow::Throws,
+        SubjectLoc::Interval if opens_block && subject_hsps > 1 => TabularEmptyRow::Throws,
         SubjectLoc::Whole if subject_hsps == 1 && reads_query => TabularEmptyRow::Leaves,
         _ => TabularEmptyRow::Row,
     }
@@ -243,6 +248,70 @@ impl AlignQueryIds {
 /// The refusal of `-subject` where a reported HSP of length 0 lies at the subject's first letter.
 pub(crate) const UNPORTED_SUBJECT_START: &str = "BLASTX -ungapped -window_size 0 with -subject: a one-hit ungapped alignment of length 0 at the first letter of its subject among the hits to report, which NCBI BLAST+'s Seq-loc mapper cuts into two alignments without scores (tabular rows of the query's Seq-align id with an E-value of 0.0 and a bit score of -1.0, or an exception, depending on the frame and the fields), which LOSAT does not support";
 
+/// The refusal of `-subject` where every reported HSP of a subject has length 0.
+pub(crate) const UNPORTED_SUBJECT_ALL_EMPTY: &str = "BLASTX -ungapped -window_size 0 with -subject: a subject among the hits to report whose every one-hit ungapped alignment has length 0, of which NCBI BLAST+'s Seq-loc mapper, finding no sequence type in its rows, makes alignments without scores of nucleotides against the rest of the subject's letters (rows with an E-value of 0.0 and a bit score of -1.0, or, for two or more such alignments, more rows, an exception or an out-of-memory stop), which LOSAT does not support where the report reads the alignment";
+
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:422-427,499-503
+// ```c++
+//         ITERATE( CStd_seg::TLoc, it_loc, (*it)->GetLoc()) {
+//             const CSeq_loc& loc = **it_loc;
+//             const CSeq_id* id = loc.GetId();
+//             int len = loc.GetTotalRange().GetLength();
+//             if (len == 0  ||  loc.IsWhole()) {
+//                 continue; // ignore unknown lengths
+//             }
+//     ...
+//         seglens.push_back(maxlen == 0 ? -1 : maxlen);
+//     }
+//     // By this point all possible sequence types should be detected and
+//     // stored in the loc-mapper.
+//     // All unknown types are treated as nucs.
+// ```
+/// Whether every Std-seg of the Seq-align of the hit list `list` (one for each HSP with a Seq-align,
+/// `report::has_seqalign`, of an ungapped search) has empty rows (`rows_empty`), and there is one:
+/// a subject whose every reported HSP has length 0. Its Seq-align has no row of letters, so
+/// `CSeq_align::GetSeqRange` finds its subject row empty (`row_is_empty`; a row of length 0 at
+/// subject offset 0 ends at `TSeqPos` 4294967295, whose open end wraps to 0: empty too), and
+/// `-subject`'s Seq-loc mapper finds neither sequence type in it.
+pub(crate) fn subject_rows_all_empty(list: &super::results::HspList, gapped: bool) -> bool {
+    let mut aligned = list
+        .hsps
+        .iter()
+        .filter(|hsp| super::report::has_seqalign(hsp, gapped))
+        .peekable();
+    !gapped && aligned.peek().is_some() && aligned.all(|hsp| rows_empty(&hsp.hsp))
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:677-679
+// ```c++
+//         ITERATE(CSeq_align_set::Tdata, aln, (*result)->GetSeqAlign()->Get()) {
+//             CConstRef<CSeq_id> subj(&(*aln)->GetSeq_id(kSubjRow));
+//             TSeqRange subj_range((*aln)->GetSeqRange(kSubjRow));
+// ```
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:226-230
+// ```c++
+//             if (rng.Empty()) {
+//                 NCBI_THROW(CSeqalignException, eInvalidAlignment,
+//                            "CSeq_align::GetSeqRange(): Row is empty");
+//             }
+//             return rng;
+// ```
+/// Whether NCBI's prefetch of the query batch `batches` (where it reads the Seq-aligns,
+/// `common::database::prefetch_reads_seq_aligns`) throws before it loads anything: a Seq-align
+/// whose subject row is empty (`subject_rows_all_empty`), where `s_ExtractSeqidsAndRanges` asks
+/// for its range. The prefetch catches it with its warning (`common::database::prefetch_warning`)
+/// and has read no subject, as a batch whose prefetch is off: the reports then read the subjects
+/// one by one.
+pub(crate) fn prefetch_reads_empty_row(
+    batches: &[super::runtime::BatchResults],
+    gapped: bool,
+) -> bool {
+    batches
+        .iter()
+        .flat_map(|batch| batch.queries.iter().flatten())
+        .any(|list| subject_rows_all_empty(list, gapped))
+}
+
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:1431-1437
 // ```c++
 //     CSeq_loc src_loc(*id, 0, len - 1);
@@ -253,29 +322,58 @@ pub(crate) const UNPORTED_SUBJECT_START: &str = "BLASTX -ungapped -window_size 0
 //     CSeq_loc_Mapper_Base mapper(src_loc, loc);
 //     return mapper.Map(align, row);
 // ```
-// No NCBI counterpart: LOSAT's refusal (decision X2g-4 of line RG). With `-subject` (also with
-// `-subject_loc`) NCBI's Seq-loc mapper maps the empty subject row `(0, 4294967295)` of an HSP of
-// length 0 at the first letter of the searched range through the interval of that range: one
-// Std-seg of the range's length and one of the rest, both without scores
-// (`X/SURVEY_X2g_formats.md` 1, 4). NCBI's formatters then write rows of the query's Seq-align
-// id, throw where they read the rest's empty or wrapped rows, or run out of memory on its
-// segment of about 2^32 letters (`BLAST ran out of memory`, exit status 4, which depends on the
-// memory limit). The organism report (outfmt 18) does not read the rows.
-/// Refuses the reports of `batches` with `-subject` (other than outfmt 18) where an HSP of length 0
-/// that they show starts at the first letter of its subject's searched range.
-pub(crate) fn refuse_mapped_at_subject_start(
+// No NCBI counterpart: LOSAT's refusals (decisions X2g-4 and X2g-5 of line RG). With `-subject`
+// (also with `-subject_loc`) NCBI's Seq-loc mapper maps two kinds of Seq-aligns of HSPs of length
+// 0 into alignments without scores (`X/SURVEY_X2g_formats.md` 1, 4; `X/x2g/REPORT_impl2.md`, ws
+// gate):
+// - X2g-4: the empty subject row `(0, 4294967295)` of an HSP of length 0 at the first letter of the
+//   searched range, mapped through the interval of that range: one Std-seg of the range's length
+//   and one of the rest. NCBI's formatters then write rows of the query's Seq-align id, throw
+//   where they read the rest's empty or wrapped rows, or run out of memory on its segment of
+//   about 2^32 letters (`BLAST ran out of memory`, exit status 4, which depends on the memory
+//   limit).
+// - X2g-5: a subject whose every HSP has length 0 (`subject_rows_all_empty`). No row of its
+//   Std-segs has letters, so the mapper finds no sequence type (both rows are taken as
+//   nucleotides, `seq_align_mapper_base.cpp:422-503`) and each segment's length stays -1: the
+//   subject row maps from its start to the end of the interval (`x_ConvertSegment`,
+//   `seq_align_mapper_base.cpp:1002-1232`, where `dr` trims the wrapped stop), so one HSP becomes
+//   an alignment of that many query nucleotides against the subject's letters, without scores
+//   (rows with an E-value of 0.0 and a bit score of -1.0, identities where a nucleotide letter
+//   equals an amino acid letter), and two or more give more rows, exceptions and, on the 4 GiB
+//   limit of the line's probes, `BLAST ran out of memory` (exit status 4).
+// The organism report (outfmt 18) does not read the rows; a table whose fields read nothing of
+// the alignment (`ids_only`, `TabularSpec::reads_no_alignment`) writes X2g-5's one alignment as
+// any other row.
+/// Refuses the reports of `batches` with `-subject` (other than outfmt 18) where every HSP that they
+/// show of a subject has length 0 (X2g-5), unless there is one such HSP and the report is a table
+/// of fields that read nothing of the alignment (`ids_only`), or where, among the shown HSPs of a
+/// subject with letters in its rows, one of length 0 starts at the first letter of the subject's
+/// searched range (X2g-4). The first refusal in the order of the hit lists.
+pub(crate) fn refuse_mapped_without_scores(
     batches: &[super::runtime::BatchResults],
     gapped: bool,
+    ids_only: bool,
 ) -> anyhow::Result<()> {
-    let found = batches
+    for list in batches
         .iter()
         .flat_map(|batch| batch.queries.iter().flatten())
-        .flat_map(|list| &list.hsps)
-        .any(|hsp| {
-            super::report::has_seqalign(hsp, gapped) && rows_empty(&hsp.hsp) && hsp.hsp.s_start == 0
-        });
-    if found {
-        return Err(EmptyRowsRefusal(UNPORTED_SUBJECT_START.to_string()).into());
+    {
+        let mut shown = list
+            .hsps
+            .iter()
+            .filter(|hsp| super::report::has_seqalign(hsp, gapped));
+        // X2g-5 first: a subject of empty rows only has no sequence type for the mapper, also
+        // where one of them lies at the first letter.
+        let refusal = if subject_rows_all_empty(list, gapped) {
+            (!ids_only || shown.nth(1).is_some()).then_some(UNPORTED_SUBJECT_ALL_EMPTY)
+        } else {
+            shown
+                .any(|hsp| rows_empty(&hsp.hsp) && hsp.hsp.s_start == 0)
+                .then_some(UNPORTED_SUBJECT_START)
+        };
+        if let Some(refusal) = refusal {
+            return Err(EmptyRowsRefusal(refusal.to_string()).into());
+        }
     }
     Ok(())
 }
@@ -303,19 +401,70 @@ mod tests {
         );
     }
 
+    fn ungapped(q_start: i32, q_end: i32) -> super::super::results::Hsp {
+        super::super::results::Hsp {
+            hsp: PreliminaryHsp {
+                context: 0,
+                frame: 1,
+                score: 5,
+                q_start,
+                q_end,
+                q_gapped_start: q_start,
+                s_start: 1,
+                s_end: 1 + q_end - q_start,
+                s_gapped_start: 1,
+            },
+            num: 1,
+            evalue: 1.4,
+            bit_score: 5.2,
+            identity: 0,
+            positive: 0,
+            edit_script: Vec::new(),
+            composition_method: 0,
+        }
+    }
+
+    // The ws gate's S1 rows (db.x2g.bx.s1.*): a subject whose every HSP has length 0 has a
+    // Seq-align of no row of letters (NCBI's prefetch writes its warning, `-subject`'s mapper
+    // finds no sequence type); one HSP of another length gives it a row of letters.
+    #[test]
+    fn a_subject_of_empty_rows_only_needs_every_hsp_of_length_0() {
+        let list = |hsps| super::super::results::HspList {
+            query_index: 0,
+            oid: 0,
+            hsps,
+            best_evalue: 1.4,
+        };
+        assert!(subject_rows_all_empty(&list(vec![ungapped(1, 1)]), false));
+        assert!(subject_rows_all_empty(
+            &list(vec![ungapped(1, 1), ungapped(4, 4)]),
+            false
+        ));
+        assert!(!subject_rows_all_empty(
+            &list(vec![ungapped(1, 1), ungapped(2, 5)]),
+            false
+        ));
+        assert!(!subject_rows_all_empty(&list(Vec::new()), false));
+        // A gapped search has no ungapped HSP of length 0.
+        assert!(!subject_rows_all_empty(&list(vec![ungapped(1, 1)]), true));
+    }
+
     // X/SURVEY_X2g_formats.md 3 (set C): -subject throws only with a field of the alignment
     // block; -db leaves at the query's fields only for a subject's only HSP with a query field.
+    // A -subject subject's only HSP of length 0 (decision X2g-5, the ws gate's S1 rows): the
+    // mapper's Std-seg of equal lengths, no exception (`6 qseqid sstrand` writes `N/A`).
     #[test]
     fn the_tabular_row_of_empty_rows_follows_the_mode_and_the_fields() {
         use TabularEmptyRow::*;
         assert_eq!(
-            tabular_empty_row(SubjectLoc::Interval, true, 1, true),
+            tabular_empty_row(SubjectLoc::Interval, true, 2, true),
             Throws
         );
         assert_eq!(
             tabular_empty_row(SubjectLoc::Interval, true, 3, false),
             Throws
         );
+        assert_eq!(tabular_empty_row(SubjectLoc::Interval, true, 1, true), Row);
         assert_eq!(tabular_empty_row(SubjectLoc::Interval, false, 1, true), Row);
         assert_eq!(tabular_empty_row(SubjectLoc::Whole, true, 1, true), Leaves);
         assert_eq!(tabular_empty_row(SubjectLoc::Whole, false, 1, true), Leaves);

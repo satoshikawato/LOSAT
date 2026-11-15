@@ -82,7 +82,10 @@ FASTA files:
   `x2g_f3147_s.faa` and `x2g_f1144_s.faa` there (cases of the line's format survey: an HSP of length 0 in frame
   -2, in frame +1 at query offset 0, at subject offset 0), `x2g_ms` the two subjects `x2g_ms.faa` (with the two
   queries `x2g_mq.fna`, the second's HSP of length 0) and `x2g_rk` the two subjects `x2g_rk.faa` (the one
-  ranked second holds the HSP of length 0 of `x2g_f0616_q.fna`).
+  ranked second holds the HSP of length 0 of `x2g_f0616_q.fna`). `x2g_s1`, `x2g_s1z` and `x2g_s1d` are the
+  subjects `x2g_s1_s.faa`, `x2g_s1z_s.faa` and `x2g_s1d_s.faa` there (pairs of the line's probe s1c, built for
+  one-hit HSPs of length 0: with `x2g_s1_q.fna` one at subject offset 1 and, without the subject's first letter,
+  one at offset 0; with `x2g_s1d_q.fna` two, the subject written twice), whose every HSP has length 0.
 
 - `x2f_c0384_q.fna` / `x2f_c0384_s.faa`, `x2f_c0326_q.fna` / `x2f_c0326_s.faa`: two random pairs of the line RG
   X2f survey (cases c0384 and c0326), rows `db.x2f.*`: with `-window_size 0` and a low `-threshold`, BLASTX's
@@ -124,6 +127,9 @@ makeblastdb also writes was deleted). Run from `LOSAT/`:
     for n in f0616:x2g_f0616_s.faa f3147:x2g_f3147_s.faa f1144:x2g_f1144_s.faa ms:x2g_ms.faa rk:x2g_rk.faa; do
         makeblastdb -in tests/fasta/outfmt0/${n#*:} -dbtype prot -out tests/db_search/x2g_${n%%:*} \
             -title "x2g ${n%%:*} subjects" -blastdb_version 4; done
+    for n in s1 s1z s1d; do
+        makeblastdb -in tests/fasta/outfmt0/x2g_${n}_s.faa -dbtype prot -out tests/db_search/x2g_$n \
+            -title "x2g $n subject" -blastdb_version 4; done
 
 `wm_s60k` (rows `db.wm.*`, line NP M2: `-window_masker_db`) is the subject `s60k.fa` of
 `LOSAT/tests/blastn_regression_fixtures.py`, with only `.nin .nsq .nhr` kept:

@@ -603,6 +603,47 @@ impl TabularSpec {
         ])
     }
 
+    /// Whether the rows read nothing of an HSP's Seq-align but its ids: every field is an id or a
+    /// length of the query or the subject, a title, the subject's taxonomy, or its frame or
+    /// strand (0 and `N/A` for a protein subject, `sframe` outside the alignment block, `sstrand`
+    /// whatever the block finds). BLASTX writes such a table of a `-subject` subject whose only
+    /// HSP has length 0 as of any HSP (`blastx::empty_rows::refuse_mapped_without_scores`,
+    /// decision X2g-5 of line RG).
+    pub fn reads_no_alignment(&self) -> bool {
+        self.fields.iter().all(|field| {
+            matches!(
+                field,
+                QuerySeqId
+                    | QueryGi
+                    | QueryAccession
+                    | QueryAccessionVersion
+                    | QueryLength
+                    | SubjectSeqId
+                    | SubjectAllSeqIds
+                    | SubjectGi
+                    | SubjectAllGis
+                    | SubjectAccession
+                    | SubjectAccessionVersion
+                    | SubjectAllAccessions
+                    | SubjectLength
+                    | SubjectFrame
+                    | SubjectStrand
+                    | SubjectTaxId
+                    | SubjectSciName
+                    | SubjectCommonName
+                    | SubjectBlastName
+                    | SubjectSuperKingdom
+                    | SubjectTaxIds
+                    | SubjectSciNames
+                    | SubjectCommonNames
+                    | SubjectBlastNames
+                    | SubjectSuperKingdoms
+                    | SubjectTitle
+                    | SubjectAllTitles
+            )
+        })
+    }
+
     /// Whether NCBI's formatter opens its alignment block for a row whose Seq-align counts
     /// `num_ident` identities (the engine's count): one of its fields, or `nident` with
     /// identities. Only the block counts the identities on the aligned sequences and sets the
@@ -1847,6 +1888,32 @@ mod tests {
             assert_eq!(*field as usize, index);
             assert_eq!(TabularField::from_name(name), Some(*field));
         }
+    }
+
+    // Line RG X2g (decision X2g-5, the ws gate's S1 probe): NCBI 2.17.0 writes a `-subject`
+    // subject whose only HSP has length 0 as dev does for these fields only.
+    #[test]
+    fn rows_of_ids_lengths_titles_and_taxonomy_read_no_alignment() {
+        let spec = |fields: &str| TabularSpec {
+            kind: TabularKind::Tabular,
+            fields: parse_fields(fields),
+            delimiter: "\t".to_string(),
+        };
+        assert!(spec("qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen sframe sstrand stitle salltitles staxid staxids sscinames").reads_no_alignment());
+        assert!(
+            spec("ssciname scomname scomnames sblastname sblastnames sskingdom sskingdoms")
+                .reads_no_alignment()
+        );
+        for field in [
+            "evalue", "bitscore", "score", "qstart", "send", "length", "pident", "nident",
+            "positive", "frames", "qframe", "qseq", "btop", "qcovs", "qcovhsp", "qcovus",
+        ] {
+            assert!(
+                !spec(&format!("qseqid {field}")).reads_no_alignment(),
+                "{field}"
+            );
+        }
+        assert!(!spec("std").reads_no_alignment());
     }
 
     // Line DBID P1: with NCBI's prefetch off, the rows read the subject's Bioseq (and look its

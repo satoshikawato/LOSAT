@@ -1537,6 +1537,14 @@ pub(super) fn reported_batch(
         })
         .sum();
     let prefetch_off = crate::algorithm::common::database::prefetch_off(seq_aligns);
+    // Where the prefetch reads the Seq-aligns and one has an empty subject row (a subject whose
+    // every HSP has length 0), it throws before it loads anything and writes its warning: the
+    // batch's subjects are then read as with the prefetch off
+    // (`empty_rows::prefetch_reads_empty_row`).
+    let prefetch_fails = !prefetch_off
+        && crate::algorithm::common::database::prefetch_reads_seq_aligns(i32::from(options.outfmt))
+        && super::empty_rows::prefetch_reads_empty_row(results, options.gapped);
+    let unfetched = prefetch_off || prefetch_fails;
     let x_t = super::x_timing::lap();
     let reported = ReportedSubjects::for_batch(
         database,
@@ -1552,8 +1560,8 @@ pub(super) fn reported_batch(
         asks.joined,
         asks.taxonomy,
         asks.words,
-        asks.prefetched && !prefetch_off,
-        prefetch_off,
+        asks.prefetched && !unfetched,
+        unfetched,
     );
     super::x_timing::run(XRun::Titles, x_t);
     let reported = reported.map_err(reported_error)?;
@@ -1602,6 +1610,9 @@ pub(super) fn reported_batch(
         outfmt => i32::from(outfmt),
     };
     let mut reported = reported;
+    if prefetch_fails {
+        diagnostics.write_all(&database.prefetch_warning())?;
+    }
     // Where the prefetch fails at a subject with parsed Seq-ids, NCBI writes its warning after
     // the taxonomy texts (`ReportedSubjects::batch_prefetch`), with or without `taxdb.bti`.
     let taxdb_found = database.taxdb_found();
@@ -1612,7 +1623,7 @@ pub(super) fn reported_batch(
         // (`ReportedSubjects::fetch_by_query`), where the format's rows read
         // their Bioseqs (`TabularSpec::subject_fetch`).
         // No prefetch; without `taxdb.bti` the reports' fetches look nothing up.
-        if prefetch_off && taxdb_found {
+        if unfetched && taxdb_found {
             let rows = options
                 .tabular
                 .map_or(crate::report::tabular::SubjectFetch::Every, |spec| {
@@ -1645,7 +1656,7 @@ pub(super) fn reported_batch(
             if options.outfmt == 5 {
                 diagnostics.write_all(&reported.take_query_fetches())?;
             }
-        } else if !prefetch_off {
+        } else if !unfetched {
             let messages = reported.batch_prefetch(database, results, options.gapped)?;
             diagnostics.write_all(&messages)?;
         }

@@ -1281,7 +1281,10 @@ pub(super) fn render_queries_with(
         None => (None, 0, None),
     };
     if !options.gapped && options.outfmt != 18 && SubjectLoc::of(shown) == SubjectLoc::Interval {
-        super::empty_rows::refuse_mapped_at_subject_start(batches, options.gapped)?;
+        let ids_only = options
+            .tabular
+            .is_some_and(|spec| spec.reads_no_alignment());
+        super::empty_rows::refuse_mapped_without_scores(batches, options.gapped, ids_only)?;
     }
     if options.outfmt == 0 {
         return write_pairwise(

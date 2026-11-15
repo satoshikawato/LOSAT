@@ -61,8 +61,8 @@
   in the query-anchored views of BLASTN and TBLASTN, line RG item T3b; Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07, within the classes of 1.23 and 1.10);
   1.29 2026-11-15 (BLASTX's ungapped one-hit HSPs of negative length and of length 0 ported, rule 4,
-  line RG item X2g, with the refusal of decision X2g-4 of that line: Owner-delegated, standing
-  instruction 2026-09-29, restated 2026-10-07)
+  line RG item X2g, with the refusals of decisions X2g-4 and X2g-5 of that line: Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -887,11 +887,19 @@ would port:
   (`Seq_align.cpp:801`) where the tabular rows, outfmt 0's alignments and the XML make a Dense-seg
   of it, that nucleotide in `qcovs`. BLAST XML, XML2 and JSON catch the exception (exit status 0,
   the message on stderr, the query's report cut or left out), outfmt 13 and 14 do not (an empty
-  side file, exit status 255). LOSAT refuses one cell (decision X2g-4): with `-subject`, such an
-  HSP at the first letter of the searched range, which the mapper cuts into two alignments
-  without scores. NCBI's output there is partly not defined (on the 4 GiB limit of the line's
-  probes `BLAST ran out of memory`, exit status 4, for a segment of about 2^32 letters), and the
-  rest comes from `CAlnVec` over alignments that the mapper makes by accident.
+  side file, exit status 255). A subject whose every HSP has length 0 has a Seq-align without a
+  row of letters: with `-db` NCBI's prefetch finds its subject row empty and writes `Error
+  pre-fetching sequence data` (every format but 8, 9, 11 and 12 unless
+  `PRE_FETCH_SEQS_LIMIT=2147483647`); LOSAT writes the same. LOSAT refuses two cells of
+  `-subject`. Decision X2g-4: such an HSP at the first letter of the searched range, which the
+  mapper cuts into two alignments without scores. Decision X2g-5: a subject whose every HSP has
+  length 0, in which the mapper finds no sequence type, so that it makes alignments without
+  scores of query nucleotides against the rest of the subject's letters (more rows, exceptions
+  and out-of-memory stops for two or more), except for a table of fields that read nothing of
+  the alignment of a subject's only HSP, which NCBI writes as any row. NCBI's output there is
+  partly not defined (on the 4 GiB limit of the line's probes `BLAST ran out of memory`, exit
+  status 4, for a segment of about 2^32 letters), and the rest comes from alignments that the
+  mapper makes by accident.
 - `-evalue` with a signed infinity or NaN (`+inf`, `-nan`, `+nan(1)`, `1e999`): NCBI's
   `CArg_Double` reads them with `strtod` and its option check (`<= 0`) lets them pass;
   NCBI searches as with the largest e-value (the cutoff stays 1, no HSP is reaped). LOSAT

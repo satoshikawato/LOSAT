@@ -12,3 +12,11 @@
   alignments without scores, which NCBI BLAST+ writes as rows of the query's Seq-align id, stops
   on with an exception or runs out of memory on, depending on the frame, the fields and its memory
   limit.
+- A subject whose every reported alignment has length 0: with `-db`, NCBI BLAST+'s warning `Error
+  pre-fetching sequence data` on standard error, as NCBI writes it (every format but 8, 9, 11 and
+  12, those too with `PRE_FETCH_SEQS_LIMIT=2147483647`). With `-subject` such a subject is refused
+  (exit status 1), except in a table of fields that read nothing of the alignment of its only one:
+  NCBI BLAST+'s Seq-loc mapper finds no sequence type in it and makes alignments without scores of
+  query nucleotides against the subject's letters (and, for two or more, more rows, exceptions or
+  an out-of-memory stop). Such a table of a subject's only alignment of length 0 at its first letter
+  is no longer refused.

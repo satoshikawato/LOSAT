@@ -147,6 +147,12 @@ impl BlastxDatabase {
         self.taxdb.found(&self.db)
     }
 
+    /// NCBI's warning of a failed prefetch, which names the run's program
+    /// (`shared::prefetch_warning`).
+    pub(crate) fn prefetch_warning(&self) -> Vec<u8> {
+        shared::prefetch_warning(self.program)
+    }
+
     /// Whether a later query batch of an XML, XML2 or JSON run could still refuse a taxonomy
     /// database name or record (`algorithm::common::database::taxdb_may_refuse`: every
     /// sequence's taxid looked up once, before the first byte). `names`: the run writes the

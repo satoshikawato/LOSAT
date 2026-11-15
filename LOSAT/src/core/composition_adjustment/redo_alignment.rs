@@ -1447,6 +1447,15 @@ fn translated_query_composition(
 //                             num_nucleotides, frame, genetic_code, ...);
 // BLAST_GetTranslation selects the strand and starts at ABS(frame)-1;
 // prot_seq[0] = NULLB; prot_seq[index_prot] = NULLB;
+// No NCBI counterpart: the bound of the window buffer a thread keeps (a buffer that grew past it
+// for a longer window is freed after that window); it decides only which windows reuse the buffer.
+const X_WINDOW_KEEP: usize = 16 << 10;
+
+thread_local! {
+    /// The letters of the last packed subject window this thread read (`SubjectNt::fetch`).
+    static X_WINDOW: Cell<Vec<u8>> = const { Cell::new(Vec::new()) };
+}
+
 fn translated_subject_window_sequence(
     subject_nt: SubjectNt<'_>,
     range: &BlastCompoSequenceRange,
@@ -1468,23 +1477,38 @@ fn translated_subject_window_sequence(
     }
     // EXPERIMENT (LOSAT_X_TBNSTORE): a packed subject gives the window's letters in upper case;
     // the strand and codon reads below do not depend on the case.
-    let mut window = Vec::new();
+    // No NCBI counterpart: the letters of a packed subject are read into this thread's window
+    // buffer (`X_WINDOW`), and the strand is translated where it lies: the minus strand's codons are
+    // read from the end and complemented, as the reverse complement's `chunks_exact(3)` would give
+    // them, without a copy of the strand.
+    let mut window = X_WINDOW.take();
     let segment = subject_nt.fetch(
         start as usize,
         (start + nucleotide_length) as usize,
         &mut window,
     );
-    let strand = if frame > 0 {
-        segment.to_vec()
-    } else {
-        crate::utils::genetic_code::revcomp(segment)
-    };
+    let skip = (frame.abs() - 1) as usize;
     let mut translated = Vec::with_capacity((range.end - range.begin) as usize + 2);
     translated.push(0);
-    for codon in strand[(frame.abs() - 1) as usize..].chunks_exact(3) {
-        translated.push(aa_char_to_ncbistdaa(genetic_code.get(codon)));
+    if frame > 0 {
+        for codon in segment[skip..].chunks_exact(3) {
+            translated.push(aa_char_to_ncbistdaa(genetic_code.get(codon)));
+        }
+    } else {
+        use crate::utils::genetic_code::complement;
+        for codon in segment[..segment.len() - skip].rchunks_exact(3) {
+            let codon = [
+                complement(codon[2]),
+                complement(codon[1]),
+                complement(codon[0]),
+            ];
+            translated.push(aa_char_to_ncbistdaa(genetic_code.get(&codon)));
+        }
     }
     translated.push(0);
+    if window.capacity() <= X_WINDOW_KEEP {
+        X_WINDOW.set(window);
+    }
     if translated.len() != (range.end - range.begin) as usize + 2 {
         bail!("NCBI translated subject window length differs");
     }
@@ -3128,6 +3152,62 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix<'seq>(
 mod tests {
     use super::BlastCompoAlignmentContext::PreliminaryHspIndex;
     use super::*;
+
+    /// The window translation reads the minus strand's codons from the end, without the strand copy:
+    /// the same letters as the reverse complement's codons (every frame, IUPAC letters of both cases,
+    /// letters and packed subjects, a window at each end of the subject).
+    #[test]
+    fn translated_window_without_strand_copy_is_the_reverse_complement_translation() {
+        let letters = b"ACGTMRSVWYHKDBNacgtmrn";
+        let mut state = 0x2545_F491_4F6C_DD1Du64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let subject: Vec<u8> = (0..600)
+            .map(|_| letters[(next() % letters.len() as u64) as usize])
+            .collect();
+        let store =
+            crate::sequence::packed_subject::PackedNucleotide::from_subject_letters(&subject)
+                .expect("subject letters");
+        let genetic_code = GeneticCode::from_id(1);
+        for context in [-3, -2, -1, 1, 2, 3] {
+            for (begin, end) in [(0, 1), (0, 10), (5, 150), (100, 199)] {
+                let range = BlastCompoSequenceRange {
+                    begin,
+                    end,
+                    context,
+                };
+                let start = if context > 0 {
+                    3 * begin
+                } else {
+                    600 - 3 * end + context + 1
+                } as usize;
+                let length = (3 * (end - begin) + context.abs() - 1) as usize;
+                let segment = &subject[start..start + length];
+                let strand = if context > 0 {
+                    segment.to_vec()
+                } else {
+                    crate::utils::genetic_code::revcomp(segment)
+                };
+                let mut expected = vec![0u8];
+                for codon in strand[(context.abs() - 1) as usize..].chunks_exact(3) {
+                    expected.push(aa_char_to_ncbistdaa(genetic_code.get(codon)));
+                }
+                expected.push(0);
+                for subject_nt in [SubjectNt::Letters(&subject), SubjectNt::Packed(&store)] {
+                    assert_eq!(
+                        translated_subject_window_sequence(subject_nt, &range, &genetic_code)
+                            .unwrap(),
+                        expected,
+                        "{range:?}"
+                    );
+                }
+            }
+        }
+    }
 
     // NCBI c++/src/algo/blast/composition_adjustment/redo_alignment.c:80,644-751;
     // c++/src/algo/blast/core/blast_kappa.c:1498-1525:

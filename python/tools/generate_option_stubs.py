@@ -28,6 +28,10 @@ TYPES = {
 
 
 def option_type(parameter: pylosat.Parameter) -> str:
+    # `Search` takes a bool for a flag and a boolean value (`_words`), whatever their parser's
+    # possible values ("true", "false").
+    if parameter.value_kind in ("flag", "boolean"):
+        return "bool"
     if parameter.choices:
         return "Literal[" + ", ".join(repr(choice) for choice in parameter.choices) + "]"
     return TYPES[parameter.value_kind]

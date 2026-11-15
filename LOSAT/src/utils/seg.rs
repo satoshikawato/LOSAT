@@ -14,6 +14,18 @@ use crate::utils::dust::MaskedInterval;
 
 use super::seg_lnfact::LNFAC;
 
+// No NCBI counterpart: the bounds of the entropy arrays a thread keeps for SEG's fast path (an
+// array that grew past `X_ENTROPY_KEEP` letters for a longer sequence is freed after it; at most
+// `X_ENTROPY_ARRAYS` are kept, one per depth of the left-part recursion); they decide only which
+// calls reuse an array.
+const X_ENTROPY_KEEP: usize = 2_048;
+const X_ENTROPY_ARRAYS: usize = 2;
+
+thread_local! {
+    /// The entropy arrays of this thread's last SEG calls (`x_entropy_array_into`), for reuse.
+    static X_ENTROPY: std::cell::Cell<Vec<Vec<f64>>> = const { std::cell::Cell::new(Vec::new()) };
+}
+
 /// Natural log of 20 (alphabet size for amino acids).
 /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:2196
 ///   const double kLn20 = 2.9957322735539909;
@@ -1387,13 +1399,14 @@ impl SegMasker {
     // The first window is counted once; each later window follows from the previous one by one removal and one
     // addition, as in `s_ShiftWin1`. The entropy of each window with at most `maxbogus` bogus letters comes from
     // the histogram.
-    /// `calculate_entropy_array` with the window kept as a count histogram.
-    fn x_entropy_array(&self, seq: &[u8], index: &[u8; 256]) -> Vec<f64> {
+    /// `calculate_entropy_array` with the window kept as a count histogram, into `h` (cleared first).
+    fn x_entropy_array_into(&self, seq: &[u8], index: &[u8; 256], h: &mut Vec<f64>) {
         let len = seq.len();
-        let mut h = vec![-1.0; len];
+        h.clear();
+        h.resize(len, -1.0);
         let window = self.window;
         if len < window {
-            return h;
+            return;
         }
         let mut counts = [0u8; 20];
         let mut bogus = 0i32;
@@ -1452,7 +1465,6 @@ impl SegMasker {
                 }
             }
         }
-        h
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1988-1992,1998-2001,2007-2008,2013-2014
@@ -1626,7 +1638,7 @@ impl SegMasker {
     // ```
     // The recursion, the left-trim handling and the order of the segments are the same as in
     // `mask_sequence_reference`; only the entropy array and the trim use the histogram.
-    /// `mask_sequence` through `x_entropy_array` and `x_trim_segment`.
+    /// `mask_sequence` through `x_entropy_array_into` and `x_trim_segment`.
     fn x_mask_sequence<const OVERLAPS: bool>(&self, seq: &[u8]) -> Vec<MaskedInterval> {
         let index = self.x_letter_index();
         let mut segs_inclusive: Vec<(usize, usize)> = Vec::new();
@@ -1639,11 +1651,13 @@ impl SegMasker {
             seq: &[u8],
             offset: usize,
             segs: &mut Vec<(usize, usize)>,
+            arrays: &mut Vec<Vec<f64>>,
         ) {
             if seq.len() < masker.window {
                 return;
             }
-            let h = masker.x_entropy_array(seq, index);
+            let mut h = arrays.pop().unwrap_or_default();
+            masker.x_entropy_array_into(seq, index, &mut h);
             let first = masker.downset;
             let last = seq.len().saturating_sub(masker.upset);
             let mut lowlim = first;
@@ -1695,6 +1709,7 @@ impl SegMasker {
                                     &seq[lend..=rend],
                                     offset + lend,
                                     &mut left_segs,
+                                    arrays,
                                 );
                                 if let Some(&head) = left_segs.first() {
                                     segs.insert(0, head);
@@ -1712,9 +1727,16 @@ impl SegMasker {
                     i += 1;
                 }
             }
+            if h.capacity() <= X_ENTROPY_KEEP && arrays.len() < X_ENTROPY_ARRAYS {
+                arrays.push(h);
+            }
         }
 
-        seg_seq(self, &index, seq, 0, &mut segs_inclusive);
+        // No NCBI counterpart: the entropy arrays come from this thread's spares (`X_ENTROPY`)
+        // instead of a new array per call; the values are written whole before they are read.
+        let mut arrays = X_ENTROPY.take();
+        seg_seq(self, &index, seq, 0, &mut segs_inclusive, &mut arrays);
+        X_ENTROPY.set(arrays);
         if OVERLAPS {
             merge_segs_inclusive(seq.len(), &mut segs_inclusive);
         }

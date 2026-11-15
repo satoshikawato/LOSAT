@@ -610,39 +610,23 @@ pub(crate) fn subject_is_query_record(
 }
 
 /// The refusal of a run whose query `record` (one record as a query and as a subject under
-/// `-parse_deflines`) has a query-anchored section that NCBI BLAST+ aborts on (`ncbi_stops`,
+/// `-parse_deflines`) has a query-anchored section that NCBI BLAST+ aborts on (`ncbi_aborts`,
 /// asked by `pairwise::section_aborts`), named as the refusal of its masks in outfmt 0 names it
 /// (`believed::refuse_shared_masks`).
 pub(crate) fn aborted_section(
     record: &crate::blastinput::fasta_reader::FastaRecord,
     program: &str,
 ) -> anyhow::Error {
-    stopped_section(record, program, NcbiStop::Aborts)
-}
-
-/// `aborted_section` for either way NCBI BLAST+ stops on the section (`NcbiStop`).
-pub(crate) fn stopped_section(
-    record: &crate::blastinput::fasta_reader::FastaRecord,
-    program: &str,
-    stop: NcbiStop,
-) -> anyhow::Error {
     let mut fasta = Vec::new();
     if let Some(ids) = record.believed() {
         crate::seqid::label::fasta(&ids.best, &mut fasta);
     }
-    let fasta = String::from_utf8_lossy(&fasta);
-    match stop {
-        NcbiStop::Aborts => anyhow::anyhow!(
-            "the record {fasta} is both a query and a subject under -parse_deflines and NCBI \
-             BLAST+ aborts on its query-anchored alignments (outfmt 1 to 4), whose merge leaves \
-             out the subject's rows; this is not supported by LOSAT's {program}"
-        ),
-        NcbiStop::Throws(what) => anyhow::anyhow!(
-            "the record {fasta} is both a query and a subject under -parse_deflines and NCBI \
-             BLAST+ stops with an error on its query-anchored alignments (outfmt 1 to 4), whose \
-             merge throws ({what}); this is not supported by LOSAT's {program}"
-        ),
-    }
+    anyhow::anyhow!(
+        "the record {} is both a query and a subject under -parse_deflines and NCBI BLAST+ aborts \
+         on its query-anchored alignments (outfmt 1 to 4), whose merge leaves out the subject's \
+         rows; this is not supported by LOSAT's {program}",
+        String::from_utf8_lossy(&fasta)
+    )
 }
 
 /// Formats 1 to 4: `eShowIdentity` (`.` for a letter equal to the query's: 1 and 3) and
@@ -739,7 +723,10 @@ fn internal(what: &str) -> io::Error {
 /// Each group's HSPs are added in order (`aln_mix::merge`; an HSP whose `Add` throws is left
 /// out) and merged; `numDistinctFrames` counts the groups with HSPs, also one whose HSPs all
 /// threw (none can: a sequence's first match never meets another strand). A group without a
-/// merged Dense-seg is skipped (`GetDenseg` throws).
+/// merged Dense-seg is skipped (`GetDenseg` throws). A merge that throws (`Merge` is outside the
+/// `try`: TBLASTX's query record that is also a subject, `aln_mix::MixError::NcbiThrows`) fails
+/// the section with NCBI's exception before its first byte, as NCBI's leaves `DisplaySeqalign`
+/// there (`NcbiException::into_io_error`).
 pub(crate) fn write_section<W: Write + ?Sized>(
     writer: &mut W,
     view: View,
@@ -758,10 +745,11 @@ pub(crate) fn write_section<W: Write + ?Sized>(
         }
         let denseg = aln_mix::merge(hsps, indices).map_err(|error| match error {
             aln_mix::MixError::Internal(what) => internal(what),
-            // `ncbi_stops`, which the program's report asks before the query's first byte.
-            aln_mix::MixError::NcbiAborts | aln_mix::MixError::NcbiThrows(_) => {
-                internal("a section that NCBI BLAST+ stops on")
-            }
+            // `ncbi_aborts`, which the program's report asks before the query's first byte.
+            aln_mix::MixError::NcbiAborts => internal("a section that NCBI BLAST+ aborts on"),
+            // NCBI's exception, before the section's first byte (`Merge` comes before `out <<
+            // "\n"`): the program's report ends with it (`cli::NativeError::of_writer`).
+            aln_mix::MixError::NcbiThrows(exception) => exception.into_io_error(),
         })?;
         if let Some(denseg) = denseg {
             merged.push((group, denseg));
@@ -800,39 +788,31 @@ pub(crate) fn write_section<W: Write + ?Sized>(
 /// The query's frame of each frame group (`k_FrameConversion` as numbers).
 const K_GROUP_FRAMES: [i8; K_NUM_FRAME] = [1, 2, 3, -1, -2, -3];
 
-/// How NCBI BLAST+ stops on a section (`ncbi_stops`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum NcbiStop {
-    /// glibc aborts it (`aln_mix::MixError::NcbiAborts`): the merge leaves out the rows of the
-    /// query's own Bioseq while segments hold them.
-    Aborts,
-    /// The merge throws, with this message (`aln_mix::MixError::NcbiThrows`).
-    Throws(&'static str),
-}
-
-/// Whether NCBI BLAST+ stops on the section of `hsps`, and how (`NcbiStop`). A program asks it
-/// before any format of the search's call is written and refuses the run there
-/// (`pairwise::blastp_section_aborts`, `pairwise::section_stops`; in a block or batch search,
-/// after the reports of the blocks before): NCBI's output before the abort or the exception is
-/// what its stream had flushed, which depends on its buffer (to a file or a pipe, the version line
-/// and the two `NcbiEndl` of `PrintProlog`, blast_format.cpp:387-395, plus each full buffer; more
-/// on a terminal), so no prefix of it is NCBI's and LOSAT writes none of the call's
-/// (PD-LOSAT-NCBI-DEFECTS rule 3). Only a section with the query's own Bioseq can get there (an
-/// ordinary subject's row takes its first match, `x_SecondRowFits`), so the others are not merged
-/// here.
-pub(crate) fn ncbi_stops(hsps: &Hsps) -> io::Result<Option<NcbiStop>> {
+/// Whether NCBI BLAST+ aborts on the section of `hsps` (`aln_mix::MixError::NcbiAborts`): its
+/// merge leaves out the rows of the query's own Bioseq while segments hold them. A program asks
+/// it before any format of the search's call is written and refuses the run there
+/// (`pairwise::blastp_section_aborts`; in a block search, after the reports of the blocks
+/// before): NCBI's output before the abort is what its stream had flushed, which depends on its
+/// buffer (to a file or a pipe, the version line and the two `NcbiEndl` of `PrintProlog`,
+/// blast_format.cpp:387-395, plus each full buffer; more on a terminal), so no prefix of it is
+/// NCBI's and LOSAT writes none of the call's. Only a section with the query's own Bioseq can get
+/// there (an ordinary subject's row takes its first match, `x_SecondRowFits`), so the others are
+/// not merged here. A merge that throws first (`aln_mix::MixError::NcbiThrows`, TBLASTX's) is not
+/// an abort: the application catches NCBI's exception and exits, its stream flushed, and
+/// `write_section` writes what NCBI writes before it and fails with it.
+pub(crate) fn ncbi_aborts(hsps: &Hsps) -> io::Result<bool> {
     if hsps.query_bioseq.is_none() || hsps.is_empty() {
-        return Ok(None);
+        return Ok(false);
     }
     for indices in hsps.groups().iter().filter(|indices| !indices.is_empty()) {
         match aln_mix::merge(hsps, indices) {
             Ok(_) => {}
-            Err(aln_mix::MixError::NcbiAborts) => return Ok(Some(NcbiStop::Aborts)),
-            Err(aln_mix::MixError::NcbiThrows(what)) => return Ok(Some(NcbiStop::Throws(what))),
+            Err(aln_mix::MixError::NcbiAborts) => return Ok(true),
+            Err(aln_mix::MixError::NcbiThrows(_)) => return Ok(false),
             Err(aln_mix::MixError::Internal(what)) => return Err(internal(what)),
         }
     }
-    Ok(None)
+    Ok(false)
 }
 
 /// `SAlnRowInfo`: what `x_PrepareRowData` makes of each row.

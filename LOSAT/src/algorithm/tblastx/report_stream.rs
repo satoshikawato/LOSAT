@@ -71,12 +71,18 @@
 //!   after the loop, `Off::LargeParsed`; blastn's reads nothing before the search since
 //!   2026-11-03 and refuses in the batch that reports the sequence). The refusals that depend on the
 //!   arguments only (the matrix, the `-seg` value) come in the first batch, where nothing of the
-//!   stream is written yet. The refusals of formats 1 to 4 are per batch (line RG T3c fix 1,
-//!   `check`): a batch's section that NCBI stops on (rule 3: NCBI's error there comes after the
-//!   batches before, without the epilog) and a `-db` sequence with the id of a query of its batch
-//!   (NCBI's scope is the batch's, `ResetScopeHistory`) come before that batch's first byte, after
-//!   the batches before. With one batch (the first batch takes every query record) nothing can
-//!   come after it, so the stream does not act and nothing is checked. LOSAT's internal
+//!   stream is written yet. Formats 1 to 4 (line RG T3c fix 1, `check`): the exception of NCBI's
+//!   merge in a query's section (a query record that is also a `-subject` record,
+//!   `query_anchored::write_section`) is NCBI's error, after the reports of the batches before and
+//!   of the batch's queries before, and the query's report up to its description table, without
+//!   the epilog, as NCBI's; the refusal of a `-db` sequence whose generated id (`lcl|Query_N`) is
+//!   that of a query of its batch (NCBI's scope is the batch's, `ResetScopeHistory`) comes before
+//!   that batch's first byte, after the batches before. Under `-parse_deflines` a `-db` sequence
+//!   with the id of a query of the run turns the stream off (`Off::Database`), so its refusal
+//!   (`common::database::refuse_reported_ids_of_queries`, in the batch that reports it) comes
+//!   before the first batch's reports. With one batch (the
+//!   first batch takes every query record) nothing can come after it, so the stream does not act
+//!   and nothing is checked. LOSAT's internal
 //!   invariant errors and panics are not argued; a write error of the output stops the run where
 //!   it happens (at the end without the stream).
 //! - what the report path writes to standard error (the query warnings) keeps its bytes and its
@@ -213,11 +219,15 @@ pub(super) fn check(
     if let report::TblastxOutputFormat::CustomTabular(_) = format {
         return Err(Off::CustomTabular);
     }
-    // Outfmt 1 to 4 are written per batch as outfmt 0 (line RG T3c fix 1): their refusals of a
-    // batch's sections (a query's own record that NCBI stops on, a `-db` sequence with the id of a
-    // query of its batch, `anchored::refuse_anchored_reports`) come before that batch's first
-    // byte, after the batches before, as NCBI's error in a later batch's format (DECISIONS T3a-7
-    // (2) of line RG, BLASTN's and BLASTP's per batch and block).
+    // Outfmt 1 to 4 are written per batch as outfmt 0 (line RG T3c fix 1): NCBI's exception of a
+    // section's merge comes where NCBI's does (`query_anchored::write_section`), and the refusal of
+    // a `-db` sequence whose generated id is that of a query of its batch
+    // (`anchored::refuse_anchored_reports`) before that batch's first byte, after the batches
+    // before, as NCBI's error in a later batch's format (DECISIONS T3a-7 (2) of line RG, BLASTN's
+    // and BLASTP's per batch and block). Under `-parse_deflines` the database check below turns
+    // the stream off for a sequence with the id of a query of the run (`database_check`), whose
+    // refusal in the batch loop (`common::database::refuse_reported_ids_of_queries`) then comes
+    // before the first batch's reports.
     if !(format.is_pairwise() || format.is_tabular()) {
         return Err(Off::Format);
     }

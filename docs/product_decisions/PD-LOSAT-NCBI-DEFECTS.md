@@ -77,10 +77,11 @@
   standing instruction 2026-09-29, restated 2026-10-07);
   1.33 2026-11-15 (the query-anchored views of BLASTX and TBLASTX, line RG item T3c: TBLASTX's
   strand drop, the spread of a subject's masks and TBLASTX's merge of a query record that is also a
-  subject into the query's sequence reproduced, rule 2; the explicit rejection of TBLASTX's section
-  that this merge throws on, rule 3, as 1.23's; and the rule-2 rejection of a query's id of 1.24 and
-  1.28 in BLASTX and TBLASTX; Owner-delegated, standing instruction 2026-09-29, restated
-  2026-10-07, within the classes of 1.23 and 1.10)
+  subject into the query's sequence reproduced, with the two exceptions that this merge can throw
+  (the report up to the query's description table, then NCBI's error, exit 255; 2026-11-16, T3c
+  fix 2, in place of fix 1's explicit rejection), rule 2; and the rule-2 rejection of a query's id
+  of 1.24 and 1.28 in BLASTX and TBLASTX; Owner-delegated, standing instruction 2026-09-29,
+  restated 2026-10-07, within rule 2 and the class of 1.10)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -578,8 +579,26 @@ here, and names the widening that PS16a made for protein queries.
   NCBI writes that section with exit 0, from the inputs alone; LOSAT writes the same
   (`report::query_anchored::aln_mix`; the review of T3c's cases `x.self.*`, `t.self.*`,
   `v.self.b1.f1`, the probes `tx.t3c.self.*`, the 13 rows `pd.self.tblastx.*` of
-  `tests/outfmt0_manifest.tsv` in formats 1 and 3; fixture rows `db.of1.tx.self.*`). Where that
-  merge throws instead, LOSAT refuses (rule 3, the TBLASTX item of the rejections below).
+  `tests/outfmt0_manifest.tsv` in formats 1 and 3; fixture rows `db.of1.tx.self.*`).
+- The same TBLASTX sections where that merge throws (version 1.33, 2026-11-16, line RG item T3c
+  fix 2, in place of fix 1's explicit rejection). The first HSP of the record with itself that the
+  merge takes (the longest, ties in their order, an HSP of the other strand included) goes to the
+  query's own row, and its walk can create a start whose segment already has that row
+  (`CAlnMixMerger::x_Merge(): Internal error: Start iterator already exists for seq2.`,
+  alnmerger.cpp:779-794, a repeat whose copies `-query_loc` and `-subject_loc` keep apart, a
+  palindrome) or join segments of the query's row into a loop that `CAlnMixSegments::Build` meets
+  (`CAlnMixSegments::Build(): Internal error: Infinite loop detected.`, alnsegments.cpp:162-169, a
+  tandem repeat). Only `Add` is in `DisplaySeqalign`'s `try`, not `Merge` (showalign.cpp:2060-2083):
+  the exception leaves the formatter before the section's first byte, and the application's
+  `CATCH_ALL` reports `Error: NCBI C++ Exception` and exits with 255, its stream flushed. So NCBI's
+  output is deterministic: the reports of the queries before (the batches before and the batch's
+  queries before), the query's heading and description table, no epilog; standard error the
+  warnings so far, then the exception (the same bytes to a file, a pipe and `-out`, with 400 queries
+  before and with `BATCH_SIZE=500`: review 2 of T3c fix 1, `T/t3/review2_t3c/probes/buf/`). LOSAT
+  runs the same merge and writes the same (`report::query_anchored::write_section` fails with
+  NCBI's exception, `cli::NativeError::of_writer`; the review's 936 cases where NCBI throws, its
+  108 `mg*` cases of both exceptions, the probes `T/t3/fix1_t3c/cases_fix1.tsv`; fixture rows
+  `db.of1.tx.throw.*`).
 - `-outfmt 1` to `4` of BLASTP, BLASTN and BLASTX (version 1.33, DECISIONS T3-6): a subject's masks
   (the `-lcase_masking` runs of a `-subject` record, BLASTN's `-db_soft_mask`) are placed on the columns of the subject's first row that
   meets each and shown in lower case on those columns of every row of the subject
@@ -902,21 +921,6 @@ here, and names the widening that PS16a made for protein queries.
   the prolog), so no prefix of it is NCBI's. BLASTN writes its prolog before the search, as NCBI
   does, so its refusal follows the prolog. The other sections of such a record are NCBI's
   (fixture rows `db.of1.bp.self1.*`, `db.of1.bn.selfrc.*`).
-- TBLASTX `-outfmt 1` to `4` (version 1.33, 2026-11-15, line RG item T3c fix 1): the same record
-  added with `fForceTranslation` is one `CAlnMixSeq` of both rows (the rule-2 item above), and
-  `x_SecondRowFits` gives the query's own row the first HSP of the record with itself that the
-  merge takes (the longest, ties in their order). When that HSP's subject positions are not all
-  starts of the query's row (no alignment of the record with itself on the same letters in that
-  frame, as with a `-query_loc` and a `-subject_loc` that keep two copies of a repeat apart), the
-  walk inserts one into the query's own segment and throws `CAlnMixMerger::x_Merge(): Internal
-  error: Start iterator already exists for seq2.` (alnmerger.cpp:779-794), which `DisplaySeqalign`
-  does not catch: `Error: NCBI C++ Exception`, exit 255 (probes `T/t3/fix1_t3c/cases_fix1.tsv`
-  `f1.rep2.*`, `f1.rep3.*`, 8 of 12 cases). LOSAT runs the same merge and refuses (exit 1,
-  `pairwise::section_stops`) before the first byte of the query batch that holds the query: after
-  TBLASTX's prolog, which it writes before the search as NCBI does, and the reports of the batches
-  before (formats 1 to 4 are written batch by batch as outfmt 0). NCBI's output before the
-  exception (its reports of the batches before, then the start of the query's) depends on its
-  buffer, so no prefix of the query's is NCBI's.
 
 - RPSBLAST `-use_sw_tback` with composition-based statistics (version 1.30, 2026-11-15, line PS
   item PS11c-3, Owner-delegated, line PS `DECISIONS.md` 63): a profile with two or more

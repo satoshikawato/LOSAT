@@ -24,7 +24,8 @@
 //! positions are placed on the query's own row or, from the second such HSP on, on its extra rows
 //! (`Mix::merge_match`), and the rows after the first of that sequence are shown as the subject
 //! (`Mix::create_denseg`). A merge that NCBI's code stops with an exception (`CAlnException`,
-//! which `DisplaySeqalign` does not catch) is `MixError::NcbiThrows`.
+//! which `DisplaySeqalign` does not catch) is `MixError::NcbiThrows`, with NCBI's exception
+//! (`X_MERGE_START_ITERATOR`, `BUILD_INFINITE_LOOP`).
 //!
 //! Strands and widths (lines RG T3b and T3c). A row's strand is set where it gets its first start.
 //! The query's (the refseq of the first pass) is plus with `fPreserveRows`
@@ -41,6 +42,64 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{AddFlags, Denseg, Hsps, SeqKey};
+use crate::ncbi_exception::{NcbiException, ThrowSite};
+
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:787-794 (quoted at
+// `Mix::merge_match`)
+// ```c++
+//                         if (start_i->second->m_StartIts.find(seq2) !=
+//                             start_i->second->m_StartIts.end()) {
+//                             // consistency check fails
+//                             NCBI_THROW(CAlnException, eMergeFailure,
+//                                        "CAlnMixMerger::x_Merge(): "
+//                                        "Internal error: "
+//                                        "Start iterator already exists for seq2.");
+//                         }
+// ```
+// NCBI BLAST+ 2.17.0 reports it as `Error: NCBI C++ Exception:\n    T0 "<build
+// tree>/src/objtools/alnmgr/alnmerger.cpp", line 790: Error: (CAlnException::eMergeFailure)
+// ncbi::objects::CAlnMixMerger::x_Merge() - CAlnMixMerger::x_Merge(): Internal error: Start
+// iterator already exists for seq2.` (exit 255; the review of line RG T3c fix 1, `T/t3/review2_t3c/
+// probes/buf/file.err`).
+/// Where `x_Merge` throws when the walk of a match's second row creates a start whose segment
+/// already has that row's start iterator (`Mix::merge_match`).
+const X_MERGE_START_ITERATOR: ThrowSite = ThrowSite {
+    file: "src/objtools/alnmgr/alnmerger.cpp",
+    line: 790,
+    kind: "CAlnException::eMergeFailure",
+    function: Some("ncbi::objects::CAlnMixMerger::x_Merge"),
+};
+
+/// The message of `X_MERGE_START_ITERATOR`.
+const X_MERGE_START_ITERATOR_MESSAGE: &str =
+    "CAlnMixMerger::x_Merge(): Internal error: Start iterator already exists for seq2.";
+
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnsegments.cpp:162-169 (quoted at
+// `Mix::build`)
+// ```c++
+//                         // If the segment is already in the set, we have infinite loop
+//                         // and must terminate it.
+//                         if (!seg_set.insert(row->GetStarts().current->second).second) {
+//                             string errstr =
+//                                 string("CAlnMixSegments::Build():")
+//                                 + " Internal error: Infinite loop detected.";
+//                             NCBI_THROW(CAlnException, eMergeFailure, errstr);
+//                         }
+// ```
+// NCBI BLAST+ 2.17.0 reports it at line 168, in `ncbi::objects::CAlnMixSegments::Build()` (exit
+// 255; the review of line RG T3c fix 1, case `mg0.sx.f1` of `T/t3/review2_t3c/cases_mg.tsv`).
+/// Where `Build` throws when the segments on the left of a refseq segment lead back to a segment
+/// already on its stack (`Mix::build`).
+const BUILD_INFINITE_LOOP: ThrowSite = ThrowSite {
+    file: "src/objtools/alnmgr/alnsegments.cpp",
+    line: 168,
+    kind: "CAlnException::eMergeFailure",
+    function: Some("ncbi::objects::CAlnMixSegments::Build"),
+};
+
+/// The message of `BUILD_INFINITE_LOOP`.
+const BUILD_INFINITE_LOOP_MESSAGE: &str =
+    "CAlnMixSegments::Build(): Internal error: Infinite loop detected.";
 
 /// An index into `Mix::seqs` (a `CAlnMixSeq`).
 type SeqIx = usize;
@@ -59,13 +118,14 @@ pub(crate) enum MixError {
     /// indexes its vectors with that row's `m_RowIdx` of -1 (`Mix::fill_unaligned_regions`).
     /// Only the query's own Bioseq gets there (`Mix::place`); the caller refuses the section.
     NcbiAborts,
-    /// NCBI's merge throws `CAlnException` (`eMergeFailure`, its message here), which
+    /// NCBI's merge throws `CAlnException` (`eMergeFailure`: this exception), which
     /// `DisplaySeqalign` does not catch (only `Add` is in its `try`, showalign.cpp:2060-2083, quoted
-    /// at `super::write_section`): the run stops with `Error: NCBI C++ Exception` (exit 255; probe
-    /// `tx.t3c.d.qid.f1` of line RG T3c). Only the query's own Bioseq added with
-    /// `fForceTranslation` gets there (`Mix::merge_match`, `Mix::build`); the caller refuses the
-    /// section, as for `NcbiAborts`.
-    NcbiThrows(&'static str),
+    /// at `super::write_section`): the exception leaves the formatter before the section's first
+    /// byte, and the application's `CATCH_ALL` ends the run with `Error: NCBI C++ Exception` (exit
+    /// 255). Only the query's own Bioseq added with `fForceTranslation` (TBLASTX) gets there
+    /// (`Mix::merge_match`, `Mix::build`); `super::write_section` fails with it
+    /// (`NcbiException::into_io_error`).
+    NcbiThrows(NcbiException),
 }
 
 /// NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnseq.hpp:139-185
@@ -1410,7 +1470,10 @@ impl Mix {
     /// query's starts: at a start that exists it joins the two segments (`this position already
     /// exists`, which is how the record's HSP with itself in the same frame folds into the query's
     /// row), and a start that does not exist throws, because the query's segment there already has
-    /// the row's start iterator (`MixError::NcbiThrows`).
+    /// the row's start iterator (`X_MERGE_START_ITERATOR`, `MixError::NcbiThrows`). A join of two
+    /// segments of the query's row (a first such HSP whose subject positions are starts of the
+    /// query's other matches, as in a tandem repeat) can leave the row's segments in a loop, which
+    /// `build` then meets (`BUILD_INFINITE_LOOP`).
     fn merge_match(&mut self, matched: MixMatch, first_refseq: bool) -> Result<(), MixError> {
         let mut seq1 = matched.seq1;
         if self.seqs[seq1].width == 3 {
@@ -1532,10 +1595,10 @@ impl Mix {
                 start2_i = Some(start);
                 let key = (self.seqs[row].seq_idx, self.seqs[row].child_idx);
                 if self.segs[seg].start_its.contains_key(&key) {
-                    return Err(MixError::NcbiThrows(
-                        "CAlnMixMerger::x_Merge(): Internal error: Start iterator already exists \
-                         for seq2.",
-                    ));
+                    return Err(MixError::NcbiThrows(NcbiException::new(
+                        X_MERGE_START_ITERATOR,
+                        X_MERGE_START_ITERATOR_MESSAGE,
+                    )));
                 }
                 self.set_start_iterator(seg, row, start);
             }
@@ -1873,10 +1936,10 @@ impl Mix {
                             if !on_stack.insert(left) {
                                 // NCBI's throw (quoted above), which only the query's own Bioseq
                                 // with `fForceTranslation` can reach (`merge_match`).
-                                return Err(MixError::NcbiThrows(
-                                    "CAlnMixSegments::Build(): Internal error: Infinite loop \
-                                     detected.",
-                                ));
+                                return Err(MixError::NcbiThrows(NcbiException::new(
+                                    BUILD_INFINITE_LOOP,
+                                    BUILD_INFINITE_LOOP_MESSAGE,
+                                )));
                             }
                             pop_seg = false;
                             break;

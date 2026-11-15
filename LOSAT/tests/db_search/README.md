@@ -1575,7 +1575,11 @@ from the T3c probes (`T/t3/scripts_t3c/gen3c.py`, a seeded generator that places
   the letters of `selfx`, then `selfx`: equal hits) and `txselfs3.fa` (`selfx`, then `ydup`). `txrep2.fa`
   (`lcl|rep2`, two copies of a 300-letter coding piece; `T/t3/fix1_t3c/in/rep2.fa`) and `txrep2b.fa` (`lcl|other1`
   before it): with `-query_loc 1-300` or a second query, and `-subject_loc 301-600`, NCBI's merge throws on its
-  sections (`tests/parse_deflines_subject.rs`).
+  sections (`Start iterator already exists for seq2`); `txmg0.fa` (`lcl|mg0`, a tandem record `A+A`) and
+  `txmg0s.fa` (`mg0`, then `lcl|mx0`, which holds `A`; review 2 of T3c fix 1, `T/t3/review2_t3c/in/mg0_*.fa`):
+  with `-subject_loc 154-303 -seg no` NCBI's `Build` throws (`Infinite loop detected`). Rows `db.of1.tx.throw.*`
+  (T3c fix 2: NCBI's report up to the query's description table, then its error, exit 255) and
+  `tests/parse_deflines_subject.rs`.
 - `bxsr.pal` and `txsr.nal`: aliases of the OIDs 2 to 4 of `bxs` and `txs`.
 
 The databases (version 4; `.pjs` and `.njs` deleted). Run from `LOSAT/`:

@@ -141,71 +141,31 @@ impl ReportSequences for AnchoredSequences<'_> {
     }
 }
 
-/// The refusals of the query-anchored formats (outfmt 1 to 4, `view`) of a TBLASTX report call,
-/// before its first byte (`run`, its final hits `hits` in report order with record coordinates and
-/// their Seq-aligns' identities `seqalign_identities`, `-sorthits` and `-sorthsps` `sort`; with the
-/// stream of `report_stream` a call is one query batch, so a refusal comes after the reports of
-/// the batches before, as NCBI's error in a later batch's format):
+/// The refusal of the query-anchored formats (outfmt 1 to 4) of a TBLASTX report call, before
+/// its first byte (`run`, its final hits `hits` in report order with record coordinates and their
+/// Seq-aligns' identities `seqalign_identities`, `-sorthits` and `-sorthsps` `sort`): with `-db`, a
+/// reported sequence that NCBI's scope finds as a query of its batch, by its Seq-align id (a
+/// generated `lcl|Query_N`) or, in a description line, by its display id
+/// (`common::database::refuse_query_ids_of_anchored_reports`, as BLASTN's, TBLASTN's and
+/// BLASTX's): NCBI shows the query in its place. With the stream of `report_stream` a call is one
+/// query batch (NCBI's scope is the batch's), so the refusal of a generated id comes after the
+/// reports of the batches before. Under `-parse_deflines` a database sequence with the id of a
+/// query of the run turns that stream off (`TblastxDatabase::reports_may_refuse`), so its refusal
+/// (`common::database::refuse_reported_ids_of_queries`, in the batch loop) comes before the first
+/// batch's reports, as outfmt 0's.
 ///
-/// - A query whose own record is one of its subjects (`-subject` read with `-parse_deflines`,
-///   `query_anchored::subject_is_query_record`) and whose section NCBI BLAST+ stops on
-///   (`pairwise::section_stops`, PD-LOSAT-NCBI-DEFECTS rule 3): TBLASTX's sections add their
-///   Dense-segs with `fForceTranslation`, so NCBI's `CAlnMix` takes the query's row and that
-///   subject's for one sequence (`query_anchored::aln_mix`), whose merge can throw. `rows_of` makes
-///   the rows of a query's hits in the final order (`report::PairwiseRows`) and `subject_titles`
-///   names the subjects, as the report's.
-/// - `-db`: a reported sequence that NCBI's scope finds as a query of its batch, by its Seq-align
-///   id (a generated `lcl|Query_N`) or, in a description line, by its display id
-///   (`common::database::refuse_query_ids_of_anchored_reports`, as BLASTN's, TBLASTN's and
-///   BLASTX's): NCBI shows the query in its place.
-#[allow(clippy::too_many_arguments)]
+/// A query whose own record is one of its `-subject` records (`-parse_deflines`) has no refusal
+/// here: its section is NCBI's (`query_anchored::aln_mix`), also where NCBI's merge throws, which
+/// ends the report after the query's description table with NCBI's exception
+/// (`query_anchored::write_section`, `cli::NativeError::of_writer`).
 pub(crate) fn refuse_anchored_reports(
     run: &super::blast_engine::TblastxReportRun<'_>,
-    view: crate::report::pairwise::PairwiseView,
     hits: &[super::blast_engine::TblastxHsp],
     seqalign_identities: Option<&[u32]>,
     sort: crate::report::hit_sort::ReportSort,
-    num_alignments: usize,
     num_descriptions: usize,
-    subject_titles: &[std::sync::Arc<[u8]>],
-    rows_of: &dyn Fn(usize) -> Vec<crate::report::pairwise::PairwiseHit>,
 ) -> anyhow::Result<()> {
     let Some(database) = run.database else {
-        for (q_idx, query) in run.queries.iter().enumerate() {
-            if query.believed().is_none_or(|ids| ids.shared.is_none()) {
-                continue;
-            }
-            let is_query = |s_idx: u32| {
-                run.subjects
-                    .get(s_idx as usize)
-                    .is_some_and(|subject| subject_is_query_record(query, subject))
-            };
-            let query_length = run.ranges.input.placements.length(q_idx, query.seq().len());
-            let rows = rows_of(q_idx);
-            let stop = crate::report::pairwise::section_stops(
-                view,
-                sort,
-                true,
-                num_alignments,
-                q_idx,
-                &rows,
-                subject_titles,
-                is_query,
-                |group| {
-                    crate::report::pairwise::tblastx_section_hsps(
-                        num_alignments,
-                        group,
-                        query_length,
-                        is_query,
-                    )
-                },
-            )?;
-            if let Some(stop) = stop {
-                return Err(crate::report::query_anchored::stopped_section(
-                    query, "TBLASTX", stop,
-                ));
-            }
-        }
         return Ok(());
     };
     let reported = database.reported;

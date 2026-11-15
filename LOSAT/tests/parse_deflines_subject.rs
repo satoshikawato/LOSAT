@@ -996,45 +996,88 @@ fn tblastx_query_anchored_writes_one_record_as_a_query_and_a_subject() {
     }
 }
 
-// Line RG T3c fix 1 (PD-LOSAT-NCBI-DEFECTS 1.33, rule 3): `txrep2.fa` is one record of two copies of a
-// coding piece. As the query (`-query_loc 1-300`, the first copy) and the subject (`-subject_loc
-// 301-600`, the second) under `-parse_deflines`, the first HSP of the record with itself that NCBI's
-// merge takes puts subject positions on the query's own row where the query has none, and `x_Merge`
-// throws `Start iterator already exists for seq2` (exit 255; probes `f1.rep2.qs.f1`, `f1.rep2.qs.f3`,
-// `f1.rep2b.b1.sl.f1` of `T/t3/fix1_t3c/cases_fix1.tsv`); its outfmt 0 is a report. LOSAT refuses
-// after its prolog, and with `BATCH_SIZE=1` (`txrep2b.fa`: another query first) after the report of
-// the first batch, as formats 1 to 4 are written batch by batch.
+/// NCBI BLAST+ 2.17.0's standard error where its merge of a query-anchored section throws at
+/// `file`, `line`, in `function`, with `message` (`CATCH_ALL`'s report, exit 255).
+fn merge_exception(file: &str, line: u32, function: &str, message: &str) -> String {
+    format!(
+        "Error: NCBI C++ Exception:\n    T0 \"/home/coremake/release_build/build/\
+         PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_\
+         1751374548/c++/compilers/unix/../../src/objtools/alnmgr/{file}\", line {line}: Error: \
+         (CAlnException::eMergeFailure) ncbi::objects::{function}() - {message}\n\n"
+    )
+}
+
+// Line RG T3c fix 2 (PD-LOSAT-NCBI-DEFECTS 1.33, rule 2): `txrep2.fa` is one record of two copies of a
+// coding piece. As the query (`-query_loc 1-300`, the first copy; or after `lcl|other1` in `txrep2b.fa`)
+// and the subject (`-subject_loc 301-600`, the second) under `-parse_deflines`, the first HSP of the
+// record with itself that NCBI's merge takes puts subject positions on the query's own row where the
+// query has none, and `x_Merge` throws `Start iterator already exists for seq2` (probes
+// `f1.rep2.qs.f1`, `f1.rep2.qs.f3`, `f1.rep2b.b1.sl.f1` of `T/t3/fix1_t3c/cases_fix1.tsv`). `txmg0.fa` is
+// a tandem record `A+A` and `txmg0s.fa` that record, then a subject holding `A` (`-subject_loc
+// 154-303 -seg no`): the merge joins segments of the query's row and `Build` throws `Infinite loop
+// detected` (review 2 of fix 1, `mg0.sx.f1`). NCBI's application catches the exception and exits with
+// 255, its stream flushed: the reports of the queries before, the query's heading and description
+// table, no epilog, and the exception on standard error. LOSAT writes the same, at 1 and 4 threads and
+// with `BATCH_SIZE=1` (formats 1 to 4 are written batch by batch); the whole bytes are the fixture rows
+// `db.of1.tx.throw.*`. Outfmt 0 of the same search is a report.
 #[test]
-fn tblastx_query_anchored_refuses_a_section_that_ncbi_s_merge_throws_on() {
-    let refusal = "the record lcl|rep2 is both a query and a subject under -parse_deflines and \
-                   NCBI BLAST+ stops with an error on its query-anchored alignments (outfmt 1 to 4), \
-                   whose merge throws (CAlnMixMerger::x_Merge(): Internal error: Start iterator \
-                   already exists for seq2.)";
+fn tblastx_query_anchored_ends_with_ncbi_s_exception_where_its_merge_throws() {
+    let start_iterator = merge_exception(
+        "alnmerger.cpp",
+        790,
+        "CAlnMixMerger::x_Merge",
+        "CAlnMixMerger::x_Merge(): Internal error: Start iterator already exists for seq2.",
+    );
+    let infinite_loop = merge_exception(
+        "alnsegments.cpp",
+        168,
+        "CAlnMixSegments::Build",
+        "CAlnMixSegments::Build(): Internal error: Infinite loop detected.",
+    );
     let of1 = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/of1");
-    for (query, batch_size, outfmt) in [
-        ("txrep2.fa", None, "0"),
-        ("txrep2.fa", None, "1"),
-        ("txrep2.fa", None, "3"),
-        ("txrep2b.fa", Some("1"), "1"),
-        ("txrep2b.fa", None, "1"),
-    ] {
+    let rep2: &[&str] = &["-subject", "txrep2.fa", "-subject_loc", "301-600"];
+    let mg0: &[&str] = &[
+        "-subject",
+        "txmg0s.fa",
+        "-subject_loc",
+        "154-303",
+        "-seg",
+        "no",
+    ];
+    // (query, subject, `-query_loc 1-300`, `BATCH_SIZE`, outfmt, NCBI's exception)
+    let cases: [(&str, &[&str], bool, Option<&str>, &str, Option<&String>); 8] = [
+        ("txrep2.fa", rep2, true, None, "0", None),
+        ("txrep2.fa", rep2, true, None, "1", Some(&start_iterator)),
+        ("txrep2.fa", rep2, true, None, "3", Some(&start_iterator)),
+        (
+            "txrep2b.fa",
+            rep2,
+            false,
+            Some("1"),
+            "1",
+            Some(&start_iterator),
+        ),
+        ("txrep2b.fa", rep2, false, None, "2", Some(&start_iterator)),
+        ("txmg0.fa", mg0, false, None, "0", None),
+        ("txmg0.fa", mg0, false, None, "1", Some(&infinite_loop)),
+        ("txmg0.fa", mg0, false, None, "4", Some(&infinite_loop)),
+    ];
+    for (query, subject, query_loc, batch_size, outfmt, exception) in cases {
+        let mut outputs = Vec::new();
         for threads in ["1", "4"] {
             let mut command = losat();
-            command.current_dir(&of1).args([
-                "tblastx",
-                "-query",
-                query,
-                "-subject",
-                "txrep2.fa",
-                "-subject_loc",
-                "301-600",
-                "-parse_deflines",
-                "-outfmt",
-                outfmt,
-                "-num_threads",
-                threads,
-            ]);
-            if query == "txrep2.fa" {
+            command
+                .current_dir(&of1)
+                .args(["tblastx", "-query", query])
+                .args(subject)
+                .args([
+                    "-parse_deflines",
+                    "-outfmt",
+                    outfmt,
+                    "-num_threads",
+                    threads,
+                ]);
+            if query_loc {
                 command.args(["-query_loc", "1-300"]);
             }
             if let Some(size) = batch_size {
@@ -1047,20 +1090,35 @@ fn tblastx_query_anchored_refuses_a_section_that_ncbi_s_merge_throws_on() {
                 String::from_utf8_lossy(&output.stderr).into_owned(),
             );
             let what = format!("{query} {batch_size:?} outfmt {outfmt} n{threads}");
-            if outfmt == "0" {
+            let Some(exception) = exception else {
                 assert_eq!(status, 0, "{what}: {stderr}");
-                assert!(stdout.contains("Query= rep2"), "{what}: {stdout}");
+                assert!(stdout.contains("Lambda"), "{what}: {stdout}");
                 continue;
-            }
-            assert_eq!(status, 1, "{what}: {stderr}");
-            assert!(stderr.contains(refusal), "{what}: {stderr}");
+            };
+            assert_eq!(status, 255, "{what}: {stderr}");
+            assert_eq!(&stderr, exception, "{what}");
             assert!(stdout.starts_with("TBLASTX 2.17.0+\n"), "{what}: {stdout}");
-            assert!(!stdout.contains("Query= rep2"), "{what}: {stdout}");
-            // The first batch's report, written before the batch that holds the record.
+            // The report ends with the query's description table, before its alignments.
+            let last = &stdout[stdout.rfind("\n\n\nQuery= ").expect("a query's report")..];
+            assert!(
+                last.contains("Sequences producing significant alignments:")
+                    && last.ends_with("\n\n")
+                    && !last.contains("Lambda")
+                    && !last.contains("For reading frame"),
+                "{what}: {stdout}"
+            );
+            // The report of `lcl|other1` before it, also in the same batch.
             assert_eq!(
                 stdout.contains("Query= other1"),
-                batch_size.is_some(),
+                query == "txrep2b.fa",
                 "{what}: {stdout}"
+            );
+            outputs.push(stdout);
+        }
+        if outputs.len() == 2 {
+            assert_eq!(
+                outputs[0], outputs[1],
+                "{query} outfmt {outfmt}: n1 and n4 differ"
             );
         }
     }

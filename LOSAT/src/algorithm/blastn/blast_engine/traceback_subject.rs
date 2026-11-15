@@ -19,8 +19,9 @@
 use super::traceback_finish::TracebackCtx;
 use super::{
     adjust_blastn_offsets, calculate_blastn_context_statistics, encode_iupac_to_blastna,
-    traceback_list, ungapped, x_blastna_into_pool, BlastnHsp, BlastnSubjectRef, ContextKarlin,
-    GapAlignScratch, PrelimHit, SubjectCtx, SubjectHits, SubjectScratch,
+    traceback_list, ungapped, x_blastna_into_pool, BlastnHsp, BlastnSubjectRef, BlastnTiming,
+    ContextKarlin, FastaRecord, GapAlignScratch, PrelimHit, QueryContext, SubjectCtx, SubjectHits,
+    SubjectScratch,
 };
 use crate::algorithm::blastn::alignment::gapped::BlastnaMatrix;
 use crate::utils::threading::SearchPool;
@@ -54,6 +55,15 @@ pub(super) struct TraceBatch<'a> {
     pub(super) query_concat_length: usize,
     pub(super) search_karlin_ref: &'a Vec<ContextKarlin>,
     pub(super) round_down_evalue_score: bool,
+    /// The queries and their contexts, each context's effective search space, cutoff and
+    /// hit-saving cutoff (`batch_setup::batch_cutoffs`), and the LOSAT_TIMING counters (`None`
+    /// when timing is off), as `PrelimBatch` holds them.
+    pub(super) queries: &'a [FastaRecord],
+    pub(super) query_contexts: &'a [QueryContext],
+    pub(super) query_eff_searchsp: &'a Vec<i64>,
+    pub(super) cutoff_scores: &'a Vec<i32>,
+    pub(super) hit_saving_cutoff_scores: &'a Vec<i32>,
+    pub(super) timing_ref: Option<&'a BlastnTiming>,
     /// The alignment: the score matrix, the reward and penalty, the gap costs, the X-dropoff of the
     /// traceback and the aligner (dynamic programming or greedy).
     pub(super) score_matrix: &'a BlastnaMatrix,
@@ -159,20 +169,19 @@ pub(super) fn traceback_subject<const UNGAPPED: bool>(
         debug_mode,
         blastn_debug,
         blastn_trace_enabled,
-    } = batch;
-    let &SubjectCtx {
-        s_idx,
-        s_id,
-        s_len_full,
         queries,
         query_contexts,
         query_eff_searchsp,
         cutoff_scores,
         hit_saving_cutoff_scores,
         timing_ref,
-        timing_enabled,
-        ..
+    } = batch;
+    let &SubjectCtx {
+        s_idx,
+        s_id,
+        s_len_full,
     } = subject_ctx;
+    let timing_enabled = timing_ref.is_some();
     // EXPERIMENT (LOSAT_X_BNTBRANGE): set when a traceback alignment met a fence.
     let x_fenced = subject.x_fenced;
     // A subject shorter than a word kept nothing (the preliminary stage returned before its
@@ -183,7 +192,7 @@ pub(super) fn traceback_subject<const UNGAPPED: bool>(
 
     // BLASTN debug: Log cutoff scores for this query-subject pair
     if blastn_debug {
-        subject_ctx.debug_cutoffs();
+        subject_ctx.debug_cutoffs(cutoff_scores);
     }
 
     let mut combined_prelim_hits: Vec<PrelimHit> = Vec::new();

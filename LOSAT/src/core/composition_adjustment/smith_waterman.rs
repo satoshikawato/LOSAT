@@ -70,6 +70,9 @@ struct SwGapInfo {
 #[derive(Debug, Default)]
 pub(crate) struct SwScratch {
     score_vector: Vec<SwGapInfo>,
+    /// For each subject position, whether a forbidden range of the row being scanned holds it
+    /// (`blocked_row`); false between rows.
+    blocked: Vec<bool>,
 }
 
 impl SwScratch {
@@ -87,7 +90,7 @@ impl SwScratch {
     ///         scoreVector[matchSeqPos].gapExists = -gapOpen;
     ///     }
     /// ```
-    fn score_vector(&mut self, length: usize, gap_open: i32) -> &mut [SwGapInfo] {
+    fn score_vector(&mut self, length: usize, gap_open: i32) -> (&mut [SwGapInfo], &mut [bool]) {
         self.score_vector.clear();
         self.score_vector.resize(
             length,
@@ -96,7 +99,23 @@ impl SwScratch {
                 gap_exists: -gap_open,
             },
         );
-        &mut self.score_vector
+        self.blocked.clear();
+        self.blocked.resize(length, false);
+        (&mut self.score_vector, &mut self.blocked)
+    }
+}
+
+/// Marks (`value` true) or clears (false) the subject positions that the forbidden ranges `ranges`
+/// of one query position hold, so that the row's cells test one flag each where NCBI's test every
+/// range (`forbidden = TRUE` where `ranges[2f] <= matchSeqPos <= ranges[2f + 1]`, quoted at
+/// `cell`): the same cells are forbidden.
+fn blocked_row(blocked: &mut [bool], ranges: &[(i32, i32)], value: bool) {
+    let last = blocked.len() as i64 - 1;
+    for &(start, end) in ranges {
+        let (start, end) = (i64::from(start).max(0), i64::from(end).min(last));
+        if start <= end {
+            blocked[start as usize..=end as usize].fill(value);
+        }
     }
 }
 
@@ -346,28 +365,17 @@ fn cmov_max(a: i32, b: i32) -> i32 {
     }
 }
 
-/// Whether a range of `ranges` (the forbidden ranges of one query position) holds subject position
-/// `match_pos`.
-#[inline(always)]
-fn forbidden_at(ranges: &[(i32, i32)], match_pos: usize) -> bool {
-    let position = match_pos as i64;
-    ranges
-        .iter()
-        .any(|&(start, end)| position >= i64::from(start) && position <= i64::from(end))
-}
-
 /// The row's score of subject letter `letter`, or `None` (`COMPO_SCORE_MIN` in the cell) where
-/// `CHECKED` and a range of `ranges` holds subject position `match_pos`. A row without ranges runs
-/// without the test (NCBI's basic scans); the letters are NCBIstdaa (below 28), so the `min` only
-/// lets the compiler drop the bound check of the row.
+/// `CHECKED` and the position is `blocked` (`blocked_row`). A row without ranges runs without the
+/// test (NCBI's basic scans); the letters are NCBIstdaa (below 28), so the `min` only lets the
+/// compiler drop the bound check of the row.
 #[inline(always)]
 fn substitution<const CHECKED: bool>(
     row: &[i32; BLASTAA_SIZE],
-    ranges: &[(i32, i32)],
-    match_pos: usize,
+    blocked: bool,
     letter: u8,
 ) -> Option<i32> {
-    if CHECKED && forbidden_at(ranges, match_pos) {
+    if CHECKED && blocked {
         None
     } else {
         Some(row[usize::from(letter).min(BLASTAA_SIZE - 1)])
@@ -380,7 +388,7 @@ fn substitution<const CHECKED: bool>(
 fn score_only_row<const CHECKED: bool>(
     subject: &[u8],
     row: &[i32; BLASTAA_SIZE],
-    ranges: &[(i32, i32)],
+    blocked: &[bool],
     score_vector: &mut [SwGapInfo],
     (gap_open, gap_extend): (i32, i32),
     mut best: i32,
@@ -390,15 +398,18 @@ fn score_only_row<const CHECKED: bool>(
     let mut new_score = 0;
     let mut prev_score_no_gap_match_seq = 0;
     let mut prev_score_gap_match_seq = -gap_open;
-    for (match_seq_pos, (&letter, column)) in
-        subject.iter().zip(score_vector.iter_mut()).enumerate()
+    for (match_seq_pos, ((&letter, column), &blocked)) in subject
+        .iter()
+        .zip(score_vector.iter_mut())
+        .zip(blocked)
+        .enumerate()
     {
         cell(
             &mut new_score,
             &mut prev_score_gap_match_seq,
             &mut prev_score_no_gap_match_seq,
             column,
-            substitution::<CHECKED>(row, ranges, match_seq_pos, letter),
+            substitution::<CHECKED>(row, blocked, letter),
             new_gap_cost,
             gap_extend,
         );
@@ -418,7 +429,7 @@ fn score_only_row<const CHECKED: bool>(
 fn find_start_row<const CHECKED: bool>(
     subject: &[u8],
     row: &[i32; BLASTAA_SIZE],
-    ranges: &[(i32, i32)],
+    blocked: &[bool],
     score_vector: &mut [SwGapInfo],
     match_end: usize,
     (gap_open, gap_extend): (i32, i32),
@@ -430,9 +441,10 @@ fn find_start_row<const CHECKED: bool>(
     let mut new_score = 0;
     let mut prev_score_no_gap_match_seq = 0;
     let mut prev_score_gap_match_seq = -gap_open;
-    for (match_seq_pos, (&letter, column)) in subject[..=match_end]
+    for (match_seq_pos, ((&letter, column), &blocked)) in subject[..=match_end]
         .iter()
         .zip(score_vector[..=match_end].iter_mut())
+        .zip(&blocked[..=match_end])
         .enumerate()
         .rev()
     {
@@ -441,7 +453,7 @@ fn find_start_row<const CHECKED: bool>(
             &mut prev_score_gap_match_seq,
             &mut prev_score_no_gap_match_seq,
             column,
-            substitution::<CHECKED>(row, ranges, match_seq_pos, letter),
+            substitution::<CHECKED>(row, blocked, letter),
             new_gap_cost,
             gap_extend,
         );
@@ -507,7 +519,7 @@ pub(crate) fn smith_waterman_score_only<'r, F>(
 where
     F: Fn(usize) -> &'r [i32; BLASTAA_SIZE],
 {
-    let score_vector = scratch.score_vector(subject.len(), gap_open);
+    let (score_vector, blocked) = scratch.score_vector(subject.len(), gap_open);
     let mut best_score = 0;
     let mut best_query_pos = 0;
     let mut best_match_seq_pos = 0;
@@ -516,9 +528,13 @@ where
         let ranges = forbidden.at(query_pos);
         let gaps = (gap_open, gap_extend);
         let found = if ranges.is_empty() {
-            score_only_row::<false>(subject, row, ranges, score_vector, gaps, best_score)
+            score_only_row::<false>(subject, row, blocked, score_vector, gaps, best_score)
         } else {
-            score_only_row::<true>(subject, row, ranges, score_vector, gaps, best_score)
+            blocked_row(blocked, ranges, true);
+            let found =
+                score_only_row::<true>(subject, row, blocked, score_vector, gaps, best_score);
+            blocked_row(blocked, ranges, false);
+            found
         };
         if let Some((score, match_seq_pos)) = found {
             best_score = score;
@@ -599,7 +615,7 @@ where
             query_start: 0,
         };
     }
-    let score_vector = scratch.score_vector(subject.len(), gap_open);
+    let (score_vector, blocked) = scratch.score_vector(subject.len(), gap_open);
     let mut best_score = 0;
     let mut best_query_pos = 0;
     let mut best_match_seq_pos = 0;
@@ -611,7 +627,7 @@ where
             find_start_row::<false>(
                 subject,
                 row,
-                ranges,
+                blocked,
                 score_vector,
                 match_end,
                 gaps,
@@ -619,16 +635,19 @@ where
                 score_in,
             )
         } else {
-            find_start_row::<true>(
+            blocked_row(blocked, ranges, true);
+            let outcome = find_start_row::<true>(
                 subject,
                 row,
-                ranges,
+                blocked,
                 score_vector,
                 match_end,
                 gaps,
                 best_score,
                 score_in,
-            )
+            );
+            blocked_row(blocked, ranges, false);
+            outcome
         };
         if let Some((score, match_seq_pos)) = found {
             best_score = score;

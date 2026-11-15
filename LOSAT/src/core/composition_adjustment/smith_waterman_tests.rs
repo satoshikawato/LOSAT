@@ -303,10 +303,12 @@ impl XorShift {
 }
 
 // The rolling row of the kernel gives the whole-matrix recurrence's score and end, with and
-// without forbidden ranges, on random rows with gaps cheap enough to be taken.
+// without forbidden ranges, on random rows with gaps cheap enough to be taken; one scratch serves
+// every case (the rows' marks of their ranges are cleared after each row).
 #[test]
 fn the_score_only_scan_equals_the_whole_matrix_recurrence() {
     let mut random = XorShift(0x5eed_1234_abcd_0001);
+    let mut scratch = SwScratch::new();
     for case in 0..400 {
         let m = random.below(12) as usize;
         let n = random.below(14) as usize;
@@ -347,7 +349,7 @@ fn the_score_only_scan_equals_the_whole_matrix_recurrence() {
             gap_open,
             gap_extend,
             &forbidden,
-            &mut SwScratch::new(),
+            &mut scratch,
         );
         assert_eq!(
             (end.score, end.match_end, end.query_end),
@@ -365,7 +367,7 @@ fn the_score_only_scan_equals_the_whole_matrix_recurrence() {
                 end.query_end,
                 end.score,
                 &forbidden,
-                &mut SwScratch::new(),
+                &mut scratch,
             );
             assert_eq!(start.score, end.score, "case {case}");
             assert!(start.query_start <= end.query_end && start.match_start <= end.match_end);

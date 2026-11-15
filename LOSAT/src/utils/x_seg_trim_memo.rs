@@ -42,11 +42,12 @@
 //! This module keeps, for all threads, the bytes of the segments trimmed and their pairs, in one
 //! table behind one lock. A call whose bytes and `maxtrim` equal a stored entry (the whole slice
 //! is compared; the hash only selects the slot) returns the stored pair; any other call evaluates
-//! the trim (without the lock) and stores it. A segment one thread trimmed is thus not trimmed again by another (only
-//! threads that miss it at the same moment each trim it, and a cleared table trims it again), and
-//! the threads share one copy of the table, which lasts as long as the process. The table grows
-//! on demand up to `X_MAX_ENTRIES` entries (or `X_MAX_ARENA` letters), the bounds one thread's
-//! table had, and is then cleared as a whole; one thread fills and clears it as before.
+//! the trim (without the lock) and stores it. A segment one thread trimmed is thus not trimmed
+//! again by another (only threads that miss it at the same moment each trim it, and a cleared
+//! table trims it again), and the threads share one copy of the table, which lasts as long as the
+//! process. The table grows on demand up to `X_MAX_ENTRIES` entries (or `X_MAX_ARENA` letters),
+//! the bounds one thread's table had, and is then cleared as a whole; one thread fills and clears
+//! it as before.
 //!
 //! No NCBI counterpart: the memo itself; it returns only values the trim computed for the same
 //! input and does not change any value NCBI computes.
@@ -219,7 +220,7 @@ thread_local! {
 
 /// The table, locked (a panic while it was held leaves no partial entry: an entry is written
 /// whole after its letters).
-fn x_table(_hash: u64) -> std::sync::MutexGuard<'static, Memo> {
+fn x_table() -> std::sync::MutexGuard<'static, Memo> {
     X_MEMO
         .0
         .lock()
@@ -239,9 +240,9 @@ pub(crate) fn x_trimmed(
     x_trimmed_in(x_table, segment, maxtrim, trim)
 }
 
-/// `x_trimmed` with the table given by `table` (the locked table for a hash).
+/// `x_trimmed` with the table given by `table` (the table, locked).
 fn x_trimmed_in<T: std::ops::DerefMut<Target = Memo>>(
-    table: impl Fn(u64) -> T,
+    table: impl Fn() -> T,
     segment: &[u8],
     maxtrim: usize,
     trim: impl FnOnce() -> (usize, usize),
@@ -254,7 +255,7 @@ fn x_trimmed_in<T: std::ops::DerefMut<Target = Memo>>(
     };
     let hash = hash_of(segment, maxtrim);
     // The guard goes at the end of the statement: `trim` runs without the lock.
-    let stored = table(hash).stored(hash, segment, maxtrim);
+    let stored = table().stored(hash, segment, maxtrim);
     if let Some((lend, rend)) = stored {
         #[cfg(test)]
         X_HITS.with(|hits| hits.set(hits.get() + 1));
@@ -262,7 +263,7 @@ fn x_trimmed_in<T: std::ops::DerefMut<Target = Memo>>(
     }
     let fresh = trim();
     if let (Ok(lend), Ok(rend)) = (u8::try_from(fresh.0), u8::try_from(fresh.1)) {
-        table(hash).store(hash, segment, maxtrim, (lend, rend));
+        table().store(hash, segment, maxtrim, (lend, rend));
     }
     fresh
 }
@@ -288,7 +289,7 @@ mod tests {
             trim: impl FnOnce() -> (usize, usize),
         ) -> (usize, usize) {
             let memo = RefCell::new(std::mem::replace(self, Memo::new()));
-            let pair = x_trimmed_in(|_| memo.borrow_mut(), segment, maxtrim, trim);
+            let pair = x_trimmed_in(|| memo.borrow_mut(), segment, maxtrim, trim);
             *self = memo.into_inner();
             pair
         }
@@ -334,7 +335,7 @@ mod tests {
         // The trim takes the table itself (a held table would make this borrow panic) and stores
         // the same key first, as another thread that missed it at the same moment would.
         let pair = x_trimmed_in(
-            |_| memo.borrow_mut(),
+            || memo.borrow_mut(),
             &a,
             50,
             || {
@@ -345,7 +346,7 @@ mod tests {
         assert_eq!(pair, (2, 7));
         assert_eq!(memo.borrow().entries, 1);
         assert_eq!(
-            x_trimmed_in(|_| memo.borrow_mut(), &a, 50, || unreachable!()),
+            x_trimmed_in(|| memo.borrow_mut(), &a, 50, || unreachable!()),
             (2, 7)
         );
     }

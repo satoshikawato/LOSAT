@@ -2,7 +2,8 @@
 //!
 //! The final hit list holds a query's HSPs together and, in them, a subject's HSPs together, as
 //! NCBI's result set holds a `CSearchResults` per query and a Seq-align set per subject, so these
-//! views are ranges of it and copy nothing.
+//! views are ranges of it and copy nothing. With psiblast's rounds a query's HSPs hold each round
+//! together, round 1 first, as NCBI formats one result set per round.
 //!
 //! NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_results.hpp:361-386
 //! ```c++
@@ -15,21 +16,26 @@
 //! ```
 #![warn(missing_docs, unused)]
 
-use super::run::{HspRecord, Outcome, QueryStats};
+use super::run::{HspRecord, Outcome, QueryRounds, QueryStats};
 
-/// The results of one query of a search.
+/// The results of one query of a search: of all its rounds, or of one (`QueryHits::rounds`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub struct QueryHits<'a> {
     /// The index of the query record in the inputs.
     pub q_idx: usize,
-    /// The query's statistics (`Outcome::query_stats`).
+    /// The query's statistics (`Outcome::query_stats`, with psiblast's rounds round 1's); in the
+    /// view of one round, that round's (`QueryRounds::stats`).
     pub stats: Option<&'a QueryStats>,
     /// The query's HSPs, in the order of the hit list. Empty for a query without hits.
     pub hsps: &'a [HspRecord],
+    /// `None` for the HSPs of all the query's rounds, the round in the view of one round.
+    pub round: Option<u32>,
+    /// The statistics of the rounds of the view, from its first round.
+    round_stats: &'a [Option<QueryStats>],
 }
 
-/// The HSPs of one query against one subject.
+/// The HSPs of one query against one subject in one round.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub struct SubjectHits<'a> {
@@ -39,6 +45,8 @@ pub struct SubjectHits<'a> {
     pub s_idx: usize,
     /// The HSPs of the pair, in the order of the hit list.
     pub hsps: &'a [HspRecord],
+    /// The round of the HSPs (`HspRecord::round`): 1 in a search without rounds.
+    pub round: u32,
 }
 
 /// The HSPs of query `q_idx` in a hit list, which is in the order of the queries.
@@ -48,35 +56,66 @@ fn hsps_of_query(hsps: &[HspRecord], q_idx: usize) -> &[HspRecord] {
     &hsps[start..end]
 }
 
-/// The results of query `q_idx` in a hit list.
+/// The results of query `q_idx` in a hit list, with its statistics and its rounds.
 pub(super) fn query_hits<'a>(
     hsps: &'a [HspRecord],
     q_idx: usize,
     stats: Option<&'a QueryStats>,
+    rounds: Option<&'a QueryRounds>,
 ) -> QueryHits<'a> {
     QueryHits {
         q_idx,
         stats,
         hsps: hsps_of_query(hsps, q_idx),
+        round: None,
+        round_stats: rounds.map_or(&[], |rounds| &rounds.stats),
     }
 }
 
 impl<'a> QueryHits<'a> {
-    /// The subjects with HSPs for this query, in the order of the hit list: the best first.
+    /// The subjects with HSPs for this query, in the order of the hit list: the best first, round
+    /// after round (a subject found again in a later round comes again there).
     pub fn subjects(&self) -> impl Iterator<Item = SubjectHits<'a>> + 'a {
         let q_idx = self.q_idx;
         self.hsps
-            .chunk_by(|left, right| left.s_idx == right.s_idx)
+            .chunk_by(|left, right| left.s_idx == right.s_idx && left.round == right.round)
             .map(move |hsps| SubjectHits {
                 q_idx,
                 s_idx: hsps[0].s_idx,
                 hsps,
+                round: hsps[0].round,
             })
     }
 
-    /// The HSPs of this query against subject `s_idx`, if it has any.
+    /// The HSPs of this query against subject `s_idx` in the first round where it has any.
     pub fn subject(&self, s_idx: usize) -> Option<SubjectHits<'a>> {
         self.subjects().find(|subject| subject.s_idx == s_idx)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1474-1476
+    // ```c++
+    //     if (itr_num != numeric_limits<unsigned int>::max()) {
+    //         m_Outfile << "Results from round " << itr_num << "\n";
+    //     }
+    // ```
+    /// The results of each round of this query, round 1 first, each with its HSPs and its
+    /// statistics (`QueryRounds::stats`): one for a search without rounds, also a round without
+    /// hits. The view of one round gives itself.
+    pub fn rounds(&self) -> impl Iterator<Item = QueryHits<'a>> + 'a {
+        let this = *self;
+        let first = self.round.unwrap_or(1);
+        (0..self.round_stats.len()).map(move |offset| {
+            let round = first + offset as u32;
+            let start = this.hsps.partition_point(|hsp| hsp.round < round);
+            let end = start + this.hsps[start..].partition_point(|hsp| hsp.round == round);
+            QueryHits {
+                q_idx: this.q_idx,
+                stats: this.round_stats[offset].as_ref(),
+                hsps: &this.hsps[start..end],
+                round: Some(round),
+                round_stats: &this.round_stats[offset..offset + 1],
+            }
+        })
     }
 }
 
@@ -87,12 +126,19 @@ impl Outcome {
         self.query_stats
             .iter()
             .enumerate()
-            .map(|(q_idx, stats)| query_hits(&self.hsps, q_idx, stats.as_ref()))
+            .map(|(q_idx, stats)| {
+                query_hits(&self.hsps, q_idx, stats.as_ref(), self.rounds.get(q_idx))
+            })
     }
 
     /// The results of query record `q_idx` of the inputs.
     pub fn query(&self, q_idx: usize) -> Option<QueryHits<'_>> {
         let stats = self.query_stats.get(q_idx)?;
-        Some(query_hits(&self.hsps, q_idx, stats.as_ref()))
+        Some(query_hits(
+            &self.hsps,
+            q_idx,
+            stats.as_ref(),
+            self.rounds.get(q_idx),
+        ))
     }
 }

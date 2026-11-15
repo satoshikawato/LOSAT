@@ -355,6 +355,7 @@ impl ArchiveBatch<'_> {
                             crate::report::tabular::PrintedIds::default(),
                             false,
                             false,
+                            false,
                         )
                         .map_err(reported_error)?,
                     };

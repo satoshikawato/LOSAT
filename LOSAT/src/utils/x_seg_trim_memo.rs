@@ -149,18 +149,32 @@ impl Memo {
     }
 
     fn clear(&mut self) {
+        if self.slots.capacity() == 0 {
+            // The table's whole room at its first use (of which only the pages used are touched):
+            // its slots and letters then grow in place, without the freed blocks of a vector that
+            // doubles (16 tables of small doubling vectors left them in the arena).
+            self.slots.reserve_exact(2 * X_MAX_ENTRIES);
+            self.arena.reserve_exact(X_MAX_ARENA);
+        }
         self.slots.clear();
         self.slots.resize(X_FIRST_SLOTS, Slot::default());
         self.arena.clear();
         self.entries = 0;
     }
 
-    /// Doubles the table and places the stored entries again.
+    /// Doubles the table in its room and places the stored entries again.
     fn grow(&mut self) {
-        let doubled = vec![Slot::default(); self.slots.len() * 2];
-        let old = std::mem::replace(&mut self.slots, doubled);
+        let old: Vec<Slot> = self
+            .slots
+            .iter()
+            .copied()
+            .filter(|slot| slot.len != 0)
+            .collect();
+        let doubled = self.slots.len() * 2;
+        self.slots.clear();
+        self.slots.resize(doubled, Slot::default());
         let mask = self.slots.len() - 1;
-        for slot in old.into_iter().filter(|slot| slot.len != 0) {
+        for slot in old {
             let start = slot.start as usize;
             let segment = &self.arena[start..start + usize::from(slot.len)];
             let mut index = (hash_of(segment, slot.maxtrim) as usize) & mask;
@@ -379,11 +393,20 @@ mod tests {
         };
         let pair = |n: usize| (n % 3, n % 5 + 3);
         let count = 3 * X_FIRST_SLOTS;
-        for n in 0..count {
+        assert_eq!(memo.trimmed(&segment(0), 50, || pair(0)), pair(0));
+        // The first use reserves the table's whole room; growth stays in it.
+        let (slots_room, letters_room) = (memo.slots.as_ptr(), memo.arena.as_ptr());
+        assert_eq!(memo.slots.capacity(), 2 * X_MAX_ENTRIES);
+        assert_eq!(memo.arena.capacity(), X_MAX_ARENA);
+        for n in 1..count {
             assert_eq!(memo.trimmed(&segment(n), 50, || pair(n)), pair(n));
         }
         assert_eq!(memo.entries, count);
         assert!(memo.slots.len() >= 2 * count);
+        assert_eq!(
+            (memo.slots.as_ptr(), memo.arena.as_ptr()),
+            (slots_room, letters_room)
+        );
         // All of them are still there after the table doubled.
         for n in 0..count {
             assert_eq!(memo.trimmed(&segment(n), 50, || unreachable!()), pair(n));

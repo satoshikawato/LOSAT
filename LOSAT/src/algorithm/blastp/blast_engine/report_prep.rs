@@ -332,10 +332,16 @@ pub(super) fn prefetch_reported_subjects(
     if let (Some(titles), Some(database)) = (listed_titles.as_ref(), database) {
         // Without `taxdb.bti` the prefetch of a table that reads the subjects writes nothing
         // before it stops: the stopping batch's prefetch alone (`ListedTitles::prefetch_stop`).
-        // The XML2 and JSON formats: the stop alone (`shared::batch_prefetch_stop`), whose
-        // other subjects' loads write their texts at each `Hit`.
+        // The XML2 and JSON formats: the stop alone (`shared::held_batch_prefetch_stop`, after the
+        // lookups of the reports of the batches before), whose other subjects' loads write their
+        // texts at each `Hit`.
         if let Some(span) = prefetch_stop.as_ref().filter(|_| xml2_prefetch) {
-            titles.batch_prefetch_stop(database, prefetched_ranks(span.clone()), span.start)?;
+            titles.batch_prefetch_stop(
+                database,
+                &hit_lists[..span.start],
+                prefetched_ranks(span.clone()),
+                span.start,
+            )?;
         } else if let Some(span) = prefetch_stop
             .as_ref()
             .filter(|_| !(prefetch_taxids || psiblast_prefetched.is_some() || prefetch_only))

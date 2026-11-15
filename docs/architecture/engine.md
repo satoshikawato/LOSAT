@@ -341,7 +341,9 @@ psiblast is blastp with a round driver (`blastp/blast_engine/psi_round.rs`, `sea
 ### The translated programs and rpsblast
 
 blastx, tblastn and tblastx follow the same stages with their own drivers: blastx in
-`blastx/native.rs`, `search.rs` and `runtime.rs` (its `batch_end` ends a query batch; the redo of
+`blastx/native.rs` (its `run_inner` runs the program; the set-up of the options, the read of
+the `-subject` file and the archive of a query batch are `native/run_parts.rs`), `search.rs` and
+`runtime.rs` (its `batch_end` ends a query batch; the redo of
 the batch's matches with composition-based statistics is `runtime/kappa_batch.rs`); tblastn in `tblastn/tblastn_app.rs` and
 `stage_d_pipeline.rs`; tblastx in `tblastx/blast_engine/run_impl.rs`, whose `search_query_batch`
 sets up a query batch with `batch_setup.rs`, `context_cutoffs.rs` and `seed_tables.rs`, runs its

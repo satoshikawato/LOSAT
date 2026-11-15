@@ -315,8 +315,8 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
     // ```
     let x_hit_prefetch = x_mb_hit_prefetch();
     // What the steps of the offset pairs of this chunk
-    // (`pair_extend::extend_offset_pairs`) read: the batch's word finder and the chunk's values,
-    // built once per chunk.
+    // (`pair_extend::extend_offset_pairs`) read besides the batch's word finder (`scan`, a
+    // parameter of their own): the chunk's values, built once per chunk.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1052-1060
     // ```c
     // s_BlastNaExtend(const BlastOffsetPair * offset_pairs, Int4 num_hits,
@@ -330,7 +330,6 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
     //                 Uint4 s_range)
     // ```
     let pair_inputs = pair_extend::PairExtendInputs {
-        scan,
         two_stage,
         small_na_word: &small_na_word,
         subject_masked,
@@ -440,6 +439,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
         // ```
         if offset_pairs_len >= OFFSET_ARRAY_SIZE {
             pair_extend::extend_offset_pairs(
+                scan,
                 &pair_inputs,
                 &mut pair_state,
                 offset_pairs,
@@ -508,6 +508,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
         // ```
         if offset_pairs_len >= offset_array_size {
             pair_extend::extend_offset_pairs(
+                scan,
                 &pair_inputs,
                 &mut pair_state,
                 offset_pairs,
@@ -571,6 +572,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                 }
                 if offset_pairs_len >= OFFSET_ARRAY_SIZE {
                     pair_extend::extend_offset_pairs(
+                        scan,
                         &pair_inputs,
                         &mut pair_state,
                         offset_pairs,
@@ -592,6 +594,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                 }
                 if offset_pairs_len >= offset_array_size {
                     pair_extend::extend_offset_pairs(
+                        scan,
                         &pair_inputs,
                         &mut pair_state,
                         offset_pairs,
@@ -662,6 +665,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                 let mut x_on_word_csr = |(kmer_start, s_range, index): (usize, usize, u64)| {
                     if offset_pairs_len >= OFFSET_ARRAY_SIZE {
                         pair_extend::extend_offset_pairs(
+                            scan,
                             &pair_inputs,
                             &mut pair_state,
                             offset_pairs,
@@ -691,6 +695,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                     }
                     if offset_pairs_len >= offset_array_size {
                         pair_extend::extend_offset_pairs(
+                            scan,
                             &pair_inputs,
                             &mut pair_state,
                             offset_pairs,
@@ -784,6 +789,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
     // ```
     if offset_pairs_len > 0 {
         pair_extend::extend_offset_pairs(
+            scan,
             &pair_inputs,
             &mut pair_state,
             offset_pairs,

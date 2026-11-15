@@ -426,6 +426,42 @@ impl XSegmentPool {
                 segment
             })
             .collect();
+        self.replace(new);
+    }
+
+    // No NCBI counterpart: buffer reuse only (item SC9i of line NP).
+    /// Keeps at most `at_most` of `segments` (a wave's) for the next wave of the same build, in place
+    /// of what the pool holds, each whole: at the length it was made with, so that the next wave
+    /// writes the pages this one touched and no mapping is cut, freed or made between the waves of a
+    /// build. A cut or freed mapping stops every thread of the process for its TLB: cut after each
+    /// wave (`keep`), BLASTX `-word_size 6` with 800 cDNAs at 32 threads made 16,318 `mremap` and
+    /// 13,784 `munmap` calls instead of dev's 71 and 2,412. The last wave's segments are cut
+    /// (`keep`).
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        allow(dead_code)
+    )]
+    fn keep_whole(&self, segments: Vec<Vec<u32>>, at_most: usize) {
+        let new: Vec<Vec<u32>> = segments
+            .into_iter()
+            .filter(|segment| segment.capacity() != 0)
+            .take(at_most)
+            .map(|mut segment| {
+                // SAFETY: a segment is made as `vec![0u32; n]` (capacity n, every entry written) and
+                // cut since only by `truncate` (`XSegmentOut::finish`), which leaves the entries past
+                // its length written, or by `keep` (`shrink_to_fit`: capacity = length).
+                unsafe { segment.set_len(segment.capacity()) };
+                segment
+            })
+            .collect();
+        self.replace(new);
+    }
+
+    /// Puts `new` in place of what the pool holds.
+    fn replace(&self, new: Vec<Vec<u32>>) {
         // The lock is held only around a move; the old segments are dropped after it.
         let old = std::mem::replace(
             &mut *self.0.lock().unwrap_or_else(PoisonError::into_inner),
@@ -751,6 +787,41 @@ struct XWords<'a> {
     power: [u32; 8],
     /// `matrix_sorted_char[c][i] * A^(word_length - 1)`: the last letter's term of a neighbor's index.
     last: [[u32; BLASTAA_SIZE]; BLASTAA_SIZE],
+    /// `matrix_sorted_char[c][i] * A^(word_length - 2)`: the term of the letter before the last, the
+    /// one that `for_each_word_in` chooses last (the parallel builder's, `x_clut_par.rs`).
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        allow(dead_code)
+    )]
+    below_last: [[u32; BLASTAA_SIZE]; BLASTAA_SIZE],
+}
+
+// No NCBI counterpart: the order of the build's work (item SC9i of line NP).
+/// What `XWords::word_start` reads of a query offset's word: the offset, `row_max` of the positions
+/// before the last (`bound`: the sum that the last letter's loop adds a letter's score to), the
+/// word's own cell (`NO_CELL` when `add_word_hits` adds none: the word reaches the threshold or is
+/// skipped), and the query's residue at the last position.
+#[cfg_attr(
+    not(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )),
+    allow(dead_code)
+)]
+#[derive(Clone, Copy, Debug)]
+struct XWordStart {
+    offset: i32,
+    bound: i32,
+    own: u32,
+    last: u8,
+}
+
+impl XWordStart {
+    /// `own` when the word has no cell of its own (a backbone has fewer than 2^32 cells).
+    const NO_CELL: u32 = u32::MAX;
 }
 
 impl<'a> XWords<'a> {
@@ -775,9 +846,17 @@ impl<'a> XWords<'a> {
             scale *= header.alphabet as u32;
         }
         let mut last = [[0u32; BLASTAA_SIZE]; BLASTAA_SIZE];
-        for (c, row) in last.iter_mut().enumerate() {
-            for (i, term) in row.iter_mut().enumerate().take(header.alphabet) {
+        let mut below_last = [[0u32; BLASTAA_SIZE]; BLASTAA_SIZE];
+        for (c, (row, below_row)) in last.iter_mut().zip(below_last.iter_mut()).enumerate() {
+            for (i, (term, below_term)) in row
+                .iter_mut()
+                .zip(below_row.iter_mut())
+                .enumerate()
+                .take(header.alphabet)
+            {
                 *term = u32::from(info.matrix_sorted_char[c][i]) * power[header.word_length - 1];
+                *below_term =
+                    u32::from(info.matrix_sorted_char[c][i]) * power[header.word_length - 2];
             }
             // `neighbors` takes the last letters as the prefix of the sorted row whose scores reach
             // the threshold; the recursion's loop stops at the first that does not, the same prefix
@@ -799,6 +878,7 @@ impl<'a> XWords<'a> {
             info,
             power,
             last,
+            below_last,
         }
     }
 
@@ -951,6 +1031,246 @@ impl<'a> XWords<'a> {
                 word,
                 score + letter_score,
                 current_pos + 1,
+                partial + u32::from(char_sorted[i]) * scale,
+                sink,
+            );
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1075-1121 and :1019-1053
+    // (`for_each_word`, `neighbors`)
+    // ```c
+    //     if (lookup->threshold == 0 || score < lookup->threshold) {
+    //         s_CompressedLookupAddUnencoded(lookup, w, query_offset);
+    //     }
+    //     ...
+    //     s_CompressedAddWordHitsCore(info, score, 0);
+    // ```
+    /// Item SC9i of line NP: the cells of `for_each_word` whose last letter (the index's most
+    /// significant digit, of weight `A^(word_length - 1)`) is in `letters`, each once, in another
+    /// order: the last letter first, only among `letters`, then the others as `neighbors` chooses
+    /// them (from position 0 to the one before the last, whose loop is the innermost, so that
+    /// consecutive cells lie `A^(word_length - 2)` apart, in different stripes of the parallel
+    /// builder as `neighbors`' consecutive cells are). Each is given less the first cell of
+    /// `letters`, `letters.start * A^(word_length - 1)` (the index in the parallel builder's wave,
+    /// `x_clut_par.rs`).
+    ///
+    /// The same cells. `neighbors` gives every compressed word `c` with `sum_i matrix[w[i]][c_i] >=
+    /// threshold` once: each position's loop runs the letters of a row sorted by score down to the
+    /// first whose score with the best of the positions after it (`row_max`) misses the threshold, so
+    /// the bound never drops a word that reaches it, and the words are the leaves of a tree of
+    /// distinct letter choices. Choosing the positions in another order gives the same set (the sum
+    /// and the bound do not depend on the order), and so does testing the last position's letters
+    /// one by one, in any order, against the same bound (the sorted loop's break only skips letters
+    /// that fail it). The word itself is appended (`threshold == 0 || self_score < threshold`) at
+    /// its index, which no neighbor has (a neighbor's sum reaches the threshold, the word's is
+    /// `self_score`).
+    ///
+    /// The order does not matter to the table. For one query offset the cells are distinct (above),
+    /// so a cell's appends are one per offset, in the order of the offsets, whatever the order of
+    /// the cells within an offset; the overflow cells an append takes depend only on its cell's count
+    /// before it (`x_takes_overflow_cell`), its rank among the cell's appends.
+    #[cfg(test)]
+    fn for_each_word_in<Q: XQueryWord + ?Sized>(
+        &self,
+        query_word: &Q,
+        letters: &std::ops::Range<u32>,
+        sink: &mut impl XSink,
+    ) {
+        if let Some(start) = self.word_start(query_word, 0) {
+            self.for_each_word_from(&start, query_word, letters, sink);
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1075-1121 (as
+    // `for_each_word`)
+    // ```c
+    //     score = 0;
+    //     for (i = 0; i < lookup->word_length; i++) {
+    //         int c = lookup->compress_table[w[i]];
+    //
+    //         if (c >= lookup->compressed_alphabet_size) /* "non-20 aa": skip it*/
+    //             return;
+    //
+    //         score += info->matrix[w[i]][c];
+    //     }
+    //     ...
+    //     if (lookup->threshold == 0 || score < lookup->threshold) {
+    //         s_CompressedLookupAddUnencoded(lookup, w, query_offset);
+    //     }
+    // ```
+    /// What `for_each_word_in` reads of the word at `offset` before its last letter's loop, the same
+    /// for every range of last letters (item SC9i of line NP: the parallel builder's first wave keeps
+    /// it for the later waves, `x_clut_par.rs`); `None` when the word has a letter outside the
+    /// alphabet (`add_word_hits` adds nothing for it).
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        allow(dead_code)
+    )]
+    #[inline]
+    fn word_start<Q: XQueryWord + ?Sized>(
+        &self,
+        query_word: &Q,
+        offset: i32,
+    ) -> Option<XWordStart> {
+        let word = query_word.letters();
+        let last = self.length_of::<Q>() - 1;
+        let mut self_score = 0i32;
+        for &residue in word {
+            let compressed = self.compress_table[residue as usize] as usize;
+            if compressed >= self.alphabet {
+                return None;
+            }
+            self_score += self.matrix[residue as usize][compressed];
+        }
+        let mut own = XWordStart::NO_CELL;
+        if self.threshold == 0 || self_score < self.threshold {
+            let (index, skip) = compute_compressed_index(
+                self.length_of::<Q>(),
+                word,
+                self.alphabet,
+                self.scaled_compress_table,
+            );
+            if skip == 0 {
+                own = index as u32;
+            }
+        }
+        let mut bound = 0i32;
+        if self.threshold != 0 {
+            for &residue in &word[..last] {
+                bound += self.info.row_max[residue as usize];
+            }
+        }
+        Some(XWordStart {
+            offset,
+            bound,
+            own,
+            last: word[last],
+        })
+    }
+
+    /// `for_each_word_in` from the word's `start` (`word_start`): the word's own cell when its last
+    /// letter (the index's most significant digit) is in `letters`, then the last position's loop
+    /// over `letters` (`neighbors`' statements) and the positions below it.
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        allow(dead_code)
+    )]
+    #[inline]
+    fn for_each_word_from<Q: XQueryWord + ?Sized>(
+        &self,
+        start: &XWordStart,
+        query_word: &Q,
+        letters: &std::ops::Range<u32>,
+        sink: &mut impl XSink,
+    ) {
+        let last = self.length_of::<Q>() - 1;
+        let last_char = start.last as usize;
+        if start.own != XWordStart::NO_CELL
+            && letters.contains(&u32::from(self.compress_table[last_char]))
+        {
+            debug_assert_eq!(
+                start.own / self.power[last],
+                u32::from(self.compress_table[last_char])
+            );
+            sink.one(start.own - letters.start * self.power[last]);
+        }
+        if self.threshold == 0 {
+            return;
+        }
+        let score = start.bound;
+        for letter in letters.clone() {
+            let letter_score = self.matrix[last_char][letter as usize];
+            if score + letter_score < self.threshold {
+                continue;
+            }
+            self.neighbors_below_last(
+                query_word,
+                score + letter_score,
+                0,
+                (letter - letters.start) * self.power[last],
+                sink,
+            );
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1019-1053 (`neighbors`)
+    // ```c
+    //     score -= info->row_max[currQueryChar];
+    //     ...
+    //     for (i = 0; i < info->compressed_alphabet_size &&
+    //            (score + rowSorted[i] >= info->threshold); i++) {
+    //         subject_word[current_pos] = charSorted[i];
+    //         s_CompressedAddWordHitsCore(info, score + rowSorted[i],
+    //                                     current_pos + 1);
+    //     }
+    // ```
+    /// `for_each_word_in`'s recursion: `neighbors` with the last letter chosen (in `partial`, the
+    /// index of the letters chosen, and in `score`, the bound of the word: the letters chosen, and
+    /// `row_max` of the positions left), its positions from `pos` to the one before the last.
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        allow(dead_code)
+    )]
+    fn neighbors_below_last<Q: XQueryWord + ?Sized>(
+        &self,
+        word: &Q,
+        mut score: i32,
+        pos: usize,
+        partial: u32,
+        sink: &mut impl XSink,
+    ) {
+        let query_word = word.letters();
+        let below_last = self.length_of::<Q>() - 2;
+        let curr_query_char = query_word[pos] as usize;
+        score -= self.info.row_max[curr_query_char];
+        let row_sorted = &self.info.matrix_sorted[curr_query_char][..self.alphabet];
+        let threshold = self.threshold;
+
+        if pos == below_last {
+            let count =
+                row_sorted.partition_point(|&letter_score| score + letter_score >= threshold);
+            sink.many(partial, &self.below_last[curr_query_char][..count]);
+            return;
+        }
+
+        let char_sorted = &self.info.matrix_sorted_char[curr_query_char];
+        let scale = self.power[pos];
+        if pos + 1 == below_last {
+            // The call for the position before the last, inline: the same statements as the branch
+            // above.
+            let next_char = query_word[below_last] as usize;
+            let next_row = &self.info.matrix_sorted[next_char][..self.alphabet];
+            let terms = &self.below_last[next_char];
+            let next_max = self.info.row_max[next_char];
+            for (i, &letter_score) in row_sorted.iter().enumerate() {
+                if score + letter_score < threshold {
+                    break;
+                }
+                let next_score = score + letter_score - next_max;
+                let count =
+                    next_row.partition_point(|&next_letter| next_score + next_letter >= threshold);
+                sink.many(partial + u32::from(char_sorted[i]) * scale, &terms[..count]);
+            }
+            return;
+        }
+        for (i, &letter_score) in row_sorted.iter().enumerate() {
+            if score + letter_score < threshold {
+                break;
+            }
+            self.neighbors_below_last(
+                word,
+                score + letter_score,
+                pos + 1,
                 partial + u32::from(char_sorted[i]) * scale,
                 sink,
             );
@@ -1643,10 +1963,16 @@ fn x_flat_pool<H: XPooledOffset>() -> std::sync::MutexGuard<'static, XFlatPool<H
 // capacity for the same reason.
 /// EXPERIMENT (LOSAT_X_BXCLUTPOOL): the capacity, in entries, of the record of a pooled bucket fill.
 const fn x_mapped_record_entries() -> usize {
+    x_mapped_entries::<u32>()
+}
+
+/// The fewest entries of type `T` that glibc maps whatever its dynamic mmap threshold (above), 0
+/// with another allocator.
+const fn x_mapped_entries<T>() -> usize {
     if cfg!(all(target_os = "linux", target_env = "gnu")) {
         // glibc's largest dynamic mmap threshold (DEFAULT_MMAP_THRESHOLD_MAX on 64-bit), and one
         // page more
-        ((32 << 20) + 4096) / std::mem::size_of::<u32>()
+        ((32 << 20) + 4096) / std::mem::size_of::<T>()
     } else {
         0
     }
@@ -4082,6 +4408,75 @@ mod tests {
     const OUTSIDE: [u8; 5] = [0, 21, 24, 25, 26];
     pub(super) const FEW_LETTERS: [u8; 4] =
         [ncbistdaa::A, ncbistdaa::L, ncbistdaa::S, ncbistdaa::K];
+
+    // Item SC9i of line NP: `for_each_word_in` gives the cells of `for_each_word` whose last letter
+    // is in the range, each once (less the range's first cell), for word sizes 5 to 7, matrices of each kind, thresholds that
+    // make few and many neighbors (and 0: the word alone), words with letters outside the
+    // compressed alphabet, and every range of letters (all, none, one, any run).
+    #[test]
+    fn word_cells_of_a_range_of_last_letters_are_the_words_cells_there() {
+        let mut rng = XorShift(0x6a09_e667_f3bc_c908);
+        let mut seen = [0usize; 3];
+        for (word_size, matrix, thresholds) in [
+            (5usize, ScoringMatrix::Blosum62, &[1100, 1930, 0][..]),
+            (6, ScoringMatrix::Blosum62, &[1300, 2100][..]),
+            (6, ScoringMatrix::Blosum45, &[1300, 2100][..]),
+            (7, ScoringMatrix::Blosum62, &[1200, 2025][..]),
+            (7, ScoringMatrix::Pam30, &[1200, 2025][..]),
+        ] {
+            let header = XHeader::new(word_size).expect("word size");
+            let scores = matrix
+                .score_matrix(header.alphabet)
+                .expect("compressed matrix");
+            let info = CompressedNeighborInfo::new(&scores, header.alphabet);
+            let alphabet = header.alphabet as u32;
+            let top = alphabet.pow(word_size as u32 - 1);
+            for &threshold in thresholds {
+                let words = XWords::new(&header, threshold, &scores, &info);
+                for round in 0..60 {
+                    let letters: &[u8] = match round % 3 {
+                        0 => &FEW_LETTERS,
+                        1 => &LETTERS,
+                        _ => &[
+                            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 21, 24, 25,
+                        ],
+                    };
+                    let word: Vec<u8> = (0..word_size)
+                        .map(|_| letters[rng.below(letters.len())])
+                        .collect();
+                    let mut all = Vec::new();
+                    words.for_each_word(&word[..], &mut all);
+                    let mut distinct = all.clone();
+                    distinct.sort_unstable();
+                    distinct.dedup();
+                    assert_eq!(distinct.len(), all.len(), "an offset appends a cell twice");
+                    let a = rng.below(alphabet as usize + 1) as u32;
+                    let b = rng.below(alphabet as usize + 1) as u32;
+                    let mut ranges = vec![0..alphabet, a..a, a.min(b)..a.max(b)];
+                    ranges.extend((0..alphabet).map(|letter| letter..letter + 1));
+                    for range in ranges {
+                        let mut want: Vec<u32> = all
+                            .iter()
+                            .copied()
+                            .filter(|cell| range.contains(&(cell / top)))
+                            .map(|cell| cell - range.start * top)
+                            .collect();
+                        let mut got = Vec::new();
+                        words.for_each_word_in(&word[..], &range, &mut got);
+                        want.sort_unstable();
+                        got.sort_unstable();
+                        assert_eq!(
+                            got, want,
+                            "{matrix:?} word {word_size} threshold {threshold} word {word:?} letters {range:?}"
+                        );
+                        seen[usize::from(!want.is_empty())
+                            + usize::from(want.len() == all.len() && !all.is_empty())] += 1;
+                    }
+                }
+            }
+        }
+        assert!(seen.iter().all(|&n| n > 100), "cases seen {seen:?}");
+    }
 
     fn flat_table(build: Option<XFlatBuild>) -> XFlatCompressedLookup {
         match build.expect("word size 5") {

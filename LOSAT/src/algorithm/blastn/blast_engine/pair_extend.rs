@@ -30,17 +30,18 @@
 //!
 //! This module is a child of `run` for the items it keeps private (the types `DiagHashTable`,
 //! `OffsetPair`, `SubjectChunk` and `UngappedHit`; `x_push_ungapped`, `mask_lookup_index`,
-//! `packed_kmer_at_seed_mask` and `X_HIT_AHEAD`). Its functions are the statements of the scan's closures that were there, in
-//! their order; the strips folds of `x_pair_seed.rs` and `x_pair_seed_disc.rs` copy those
-//! statements one by one, so their order is kept here. What the steps read that is the same for
-//! every pair of a chunk is `PairExtendInputs` (the batch's word finder, `prelim_subject::ScanBatch`,
-//! and the chunk's own values), and what they write is `PairExtendState`, both built once per
-//! chunk; what changes from pair to pair is `LutHit` and `OffDiagonal`. Nothing
-//! here runs on the pool. `word_extend_pair` and `off_diagonal_found` are `#[inline(always)]`,
-//! so the loop of `extend_offset_pairs` keeps the shape it had as a closure (callgrind, n1). The
-//! ungapped extension and the save of the initial hit are statements of that loop, whose values
-//! they read as locals: as a function of their own, the 16 values of the hit they read crossed a
-//! struct on every hit and cost `-task blastn -ungapped` 0.3 % more instructions even inlined.
+//! `packed_kmer_at_seed_mask` and `X_HIT_AHEAD`). Its functions are the statements of the scan's
+//! closures that were there, in their order; the strips folds of `x_pair_seed.rs` and
+//! `x_pair_seed_disc.rs` copy those statements one by one, so their order is kept here. What the
+//! steps read that is the same for every pair of a chunk is `PairExtendInputs` (the batch's word
+//! finder, `prelim_subject::ScanBatch`, and the chunk's own values), and what they write is
+//! `PairExtendState`, both built once per chunk; what changes from pair to pair is `LutHit` and
+//! `OffDiagonal`. Nothing here runs on the pool. `word_extend_pair` and `off_diagonal_found` are
+//! `#[inline(always)]`, so the loop of `extend_offset_pairs` keeps the shape it had as a closure
+//! (callgrind, n1). The ungapped extension and the save of the initial hit are statements of that
+//! loop, whose values they read as locals: as a function of their own, the 16 values of the hit
+//! they read crossed a struct on every hit and cost `-task blastn -ungapped` 0.3 % more
+//! instructions even inlined.
 
 use super::prelim_subject::ScanBatch;
 use super::{
@@ -51,18 +52,19 @@ use super::{
 };
 use crate::algorithm::blastn::lookup::TwoStageLookup;
 
-/// What the steps of the offset pairs of one subject chunk read that is the same for every pair: the
-/// batch's word finder (`prelim_subject::ScanBatch`, built once per batch: the word and lookup word
-/// lengths, the query with and without its sentinels, the context of a pair's query offset, the
-/// contexts and their cutoffs, X-dropoffs and reduced cutoffs, the scoring, the diagonal table's
-/// form, sizes and hash window, the window and the off-diagonal range, the level bound's constants,
-/// the diagnostics), the two-stage table, and the chunk's own values: the small-query table's word
-/// (`small_na_word`, `None` for the other tables), whether the chunk is masked, the packed subject
-/// from the chunk's start, the prefetch of the query letters of a later pair (LOSAT_X_MBHITPF), the
-/// chunk's length and the chunk (its offset in the subject), the diagonal table's offset for this
-/// chunk, whether the hash's retrieve takes the level bound of LOSAT_X_DIAGLV, and the subject's
-/// index and trace id. Built once per chunk by `two_stage_scan::scan_two_stage_lookup` before the
-/// scan, with the names there; every field is a shared reference or a `Copy` value.
+/// What the steps of the offset pairs of one subject chunk read that is the same for every pair:
+/// the batch's word finder (`prelim_subject::ScanBatch`, built once per batch: the word and lookup
+/// word lengths, the query with and without its sentinels, the context of a pair's query offset,
+/// the contexts and their cutoffs, X-dropoffs and reduced cutoffs, the scoring, the diagonal
+/// table's form, sizes and hash window, the window and the off-diagonal range, the level bound's
+/// constants, the diagnostics), the two-stage table, and the chunk's own values: the small-query
+/// table's word (`small_na_word`, `None` for the other tables), whether the chunk is masked, the
+/// packed subject from the chunk's start, the prefetch of the query letters of a later pair
+/// (LOSAT_X_MBHITPF), the chunk's length and the chunk (its offset in the subject), the diagonal
+/// table's offset for this chunk, whether the hash's retrieve takes the level bound of
+/// LOSAT_X_DIAGLV, and the subject's index and trace id. Built once per chunk by
+/// `two_stage_scan::scan_two_stage_lookup` before the scan, with the names there; every field is a
+/// shared reference or a `Copy` value.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1052-1060,1064,1081
 /// (`s_BlastNaExtend`) and :651,656,658 (`s_BlastnDiagTableExtendInitialHit`; the hash's

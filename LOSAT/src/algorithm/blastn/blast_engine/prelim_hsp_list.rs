@@ -30,14 +30,14 @@
 //! ```
 //!
 //! This module is a child of `run` for the types it keeps private (`UngappedHit`, `PrelimHit`,
-//! `SubjectChunk`, `XAheadScratch`, the sorts). Its functions are
-//! the code of `prelim_subject::prelim_chunk_hits` after the scan loop:
-//! `gapped_score_list` and `x_prelim_extend` the bodies of what were the closures `x_prelim_list`
-//! and `x_prelim_extend`, and `ungapped_hsp_list`, `sort_ungapped_hits_for_gapped` and
-//! `gapped_hsp_list` the code around them. The values they read are the fields of `GappedPrelim`
-//! (the batch's `prelim_subject::PrelimBatch` and the chunk's own) and `GappedDrive`; what the loop works on is `GappedListState`. The query group tasks of
-//! `x_qgroup_par` run `gapped_score_list`, and the look-ahead helpers `x_prelim_extend`, on the
-//! threads of the pool, so what they read is `Sync`.
+//! `SubjectChunk`, `XAheadScratch`, the sorts). Its functions are the code of
+//! `prelim_subject::prelim_chunk_hits` after the scan loop: `gapped_score_list` and
+//! `x_prelim_extend` the bodies of what were the closures `x_prelim_list` and `x_prelim_extend`,
+//! and `ungapped_hsp_list`, `sort_ungapped_hits_for_gapped` and `gapped_hsp_list` the code around
+//! them. The values they read are the fields of `GappedPrelim` (the batch's
+//! `prelim_subject::PrelimBatch` and the chunk's own) and `GappedDrive`; what the loop works on is
+//! `GappedListState`. The query group tasks of `x_qgroup_par` run `gapped_score_list`, and the
+//! look-ahead helpers `x_prelim_extend`, on the threads of the pool, so what they read is `Sync`.
 
 use super::prelim_subject::PrelimBatch;
 use super::x_greedy_prelim::XPrelimSubject;

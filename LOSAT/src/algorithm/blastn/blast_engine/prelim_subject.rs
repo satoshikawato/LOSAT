@@ -217,13 +217,13 @@ pub(super) struct PrelimBatch<'a> {
 /// What the word finder of every chunk of a batch reads (the scan, the steps of its offset pairs
 /// and the ungapped extension; `two_stage_scan.rs`, `pair_extend.rs`, `na_scan.rs`), with the
 /// batch's lookup tables and `PrelimBatch` for the rest of the chunk's search: the values of
-/// `PrelimBatch` that the word finder reads, one load from the pointer that each chunk's word finder
-/// takes, and what follows from them for every chunk (the diagonal table's form and sizes, the word
-/// lengths, the level bound's constants). Built once per batch by `SubjectPasses::prelim_pass`, which
-/// holds the tables (the traceback drops them, `x_lut_drop.rs`; `ScanBatch::new`); shared references
-/// and `Copy` values only (`Sync`, for the subjects and the chunks on the pool). Each chunk's inputs
-/// are a reference to it and the chunk's own values (its letters, length, ranges, masks, diagonal
-/// offset and ids).
+/// `PrelimBatch` that the word finder reads, one load from the pointer that each chunk's word
+/// finder takes, and what follows from them for every chunk (the diagonal table's form and sizes,
+/// the word lengths, the level bound's constants). Built once per batch by
+/// `SubjectPasses::prelim_pass`, which holds the tables (the traceback drops them, `x_lut_drop.rs`;
+/// `ScanBatch::new`); shared references and `Copy` values only (`Sync`, for the subjects and the
+/// chunks on the pool). Each chunk's inputs are a reference to it and the chunk's own values (its
+/// letters, length, ranges, masks, diagonal offset and ids).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:493-497 (the word finder of a
 /// chunk takes pointers to the search's shared structs: the query, its contexts, the lookup table,
@@ -247,8 +247,8 @@ pub(super) struct ScanBatch<'a> {
     pub(super) na_lookup_ref: Option<&'a NaLookupTable>,
     /// The query block (`PrelimBatch`'s): the context of a query offset, the contexts, the
     /// concatenated query with and without its sentinels, each context's letters, each context's
-    /// cutoff, X-dropoff and reduced cutoff, the score matrix and the score table of the approximate
-    /// extension.
+    /// cutoff, X-dropoff and reduced cutoff, the score matrix and the score table of the
+    /// approximate extension.
     pub(super) query_context_index: &'a QueryContextIndex,
     pub(super) query_contexts: &'a [QueryContext],
     pub(super) encoded_query_concat_blastna: &'a [u8],

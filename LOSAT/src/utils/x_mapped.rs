@@ -507,8 +507,8 @@ mod tests {
         }
     }
 
-    // `x_filled` (the database's block reads, C4-2 I): a buffer of the pool keeps the bytes its last
-    // user left and only the bytes past them are filled; `take` still lends an empty buffer; a
+    // `x_filled` (the database's block reads, C4-2 I): a buffer of the pool keeps the bytes its
+    // last user left and only the bytes past them are filled; `take` still lends an empty buffer; a
     // buffer below `X_MAPPED_FROM` is a new one, filled.
     #[test]
     fn pool_fills_only_past_the_kept_bytes() {

@@ -62,9 +62,9 @@ use crate::algorithm::blastn::lookup::TwoStageLookup;
 /// What the scan of one subject chunk with a two-stage table reads: the batch's word finder
 /// (`ScanBatch`, built once per batch: the query block, the cutoffs, the scoring, the word lengths,
 /// the scan step and window, the diagonal table's form and sizes, the diagnostics), its two-stage
-/// table, and the chunk's own values: the packed subject from the chunk's start, the chunk's length,
-/// ranges and whether the subject is masked, the chunk (its offset in the subject), the diagonal
-/// table's offset for this chunk, whether the hash's retrieve takes the level bound of
+/// table, and the chunk's own values: the packed subject from the chunk's start, the chunk's
+/// length, ranges and whether the subject is masked, the chunk (its offset in the subject), the
+/// diagonal table's offset for this chunk, whether the hash's retrieve takes the level bound of
 /// LOSAT_X_DIAGLV, and the subject's index and trace id (the trace lines). Built once per chunk by
 /// `prelim_chunk_hits`, after PAIRPAR declines the chunk.
 ///

@@ -634,6 +634,22 @@ fn a_seqid_rule_reads_ordinal_ids_as_oids_in_the_database() {
     with_rule(&mut db, "BL_ORD_ID:0".to_string());
     assert_eq!(db.deflines(0).unwrap()[0].bl_ord_id, 0);
     assert!(db.deflines(later).is_err());
+    // A negative list removes the line whose tag plus the volume's first OID it names.
+    let with_negative = |db: &mut SeqDb, id: String| {
+        let rule = std::sync::Arc::new(super::filter::DeflineRule::NegativeSeqids(vec![
+            id.into_bytes()
+        ]));
+        let starts = db.volume_starts.clone();
+        for (volume, start) in db.volumes.iter_mut().zip(starts) {
+            volume.set_defline_rule(rule.clone(), start);
+        }
+    };
+    with_negative(&mut db, format!("BL_ORD_ID:{later}"));
+    assert!(db.deflines(later).is_err());
+    assert_eq!(db.deflines(0).unwrap()[0].bl_ord_id, 0);
+    with_negative(&mut db, "BL_ORD_ID:0".to_string());
+    assert!(db.deflines(0).is_err());
+    assert_eq!(db.deflines(later).unwrap()[0].bl_ord_id, later);
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1774-1803 and

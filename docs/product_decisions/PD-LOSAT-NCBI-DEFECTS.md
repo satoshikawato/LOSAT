@@ -61,9 +61,9 @@
   in the query-anchored views of BLASTN and TBLASTN, line RG item T3b; Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07, within the classes of 1.23 and 1.10);
   1.29 2026-11-15 (the rejection of a sequence that a seqid list keeps while matching none of its
-  lines, of 1.6, also where a list's `gnl|BL_ORD_ID|n` reaches a sequence after a volume's first OID,
-  which NCBI's header read numbers differently from the lookup; line DBID item ordsl, Owner-delegated,
-  standing instruction 2026-09-29, restated 2026-10-07, within the class of 1.6)
+  lines, of 1.6, also where a list's `gnl|BL_ORD_ID|n` reaches a line in a volume whose first OID is
+  not 0, which NCBI's header read numbers differently from the lookup; line DBID item ordsl,
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07, within the class of 1.6)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -598,10 +598,12 @@ here, and names the widening that PS16a made for protein queries.
 - A sequence that a seqid list keeps while matching none of its definition lines (a pdb
   molecule named without its chain, a local id in other letters, a Swiss-Prot name on a
   version 4 database, a sequence whose every line has only a gi or a ti under a negative
-  list; version 1.29: a list's `gnl|BL_ORD_ID|n` that the accession table of `makeblastdb
-  -input_type blastdb` resolves by the stored number to a sequence of a later volume or
-  database of the list, whose line NCBI's header read tests with the volume's first OID
-  added, `seqdbvol.cpp:2275-2289`, and as negative list the line it removes there): NCBI's
+  list; version 1.29: a list's `gnl|BL_ORD_ID|n` that the accession table resolves by the
+  stored number, of `makeblastdb -input_type blastdb` or of a FASTA id `gnl|BL_ORD_ID|n`, to a
+  sequence in a volume whose first OID is not 0 (a later volume, or a later database of the
+  list), whose lines NCBI's header read tests with the volume's first OID added
+  (`seqdbvol.cpp:2222-2236`), and a negative list's line removed there the same way; where such
+  a sequence keeps another line, LOSAT writes the lines NCBI keeps): NCBI's
   filtered header leaves no line, `GetBioseq` returns null
   (`seqdbvol.cpp:1370-1376`) and the sequence's hits leave every report without notice
   while its length counts in the statistics. LOSAT refuses the search with the sequence

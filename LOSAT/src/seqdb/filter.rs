@@ -2775,13 +2775,15 @@ impl SeqDb {
     }
 
     /// Reads the definition lines of every included OID of a positive seqid list, so that
-    /// an OID the list keeps without a line is refused before the search (`no_line_kept`);
-    /// a negative list cannot leave a kept OID without a line short of NCBI's corner cases
-    /// of `s_CompareIdList`, which the read of the line refuses in the same words.
+    /// an OID the list keeps without a line is refused before the search (`no_line_kept`,
+    /// `Volume::check_line_kept`); a negative list leaves a kept OID without a line only where
+    /// it removes every line the lookup did not judge (lines of a gi or a ti only, NCBI's
+    /// corner cases of `s_CompareIdList`, a `BL_ORD_ID` line of a volume whose first OID is not
+    /// 0), which the read of the line refuses in the same words.
     fn check_lines_kept(&self) -> Result<(), SeqDbError> {
         for ordinal in 0..self.num_seqs {
             let at = self.locate_oid(self.oid(ordinal).get())?;
-            self.volumes[at.volume].defline_set(at.vol_oid)?;
+            self.volumes[at.volume].check_line_kept(at.vol_oid)?;
         }
         Ok(())
     }

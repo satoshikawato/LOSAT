@@ -26,11 +26,18 @@ lines (some records carry a second one) stay as they are, the taxids come from t
   header reads add the volume's first OID (2) to the stored n of the second volume.
 - `sl_ord0.txt`, `sl_ord1.txt`, `sl_ord2.txt`, `sl_ord9.txt`, `sl_ord13.txt`: the seqid list `gnl|BL_ORD_ID|n`;
   `sl_ord1.bsl` the binary list of `sl_ord1.txt` (`blastdb_aliastool -seqid_file_out`).
-  `make_multidb.py --ordsl-only MAKEBLASTDB` builds only these.
+- `pxm` / `nxm` (line DBID ordsl, review 1): version 5, `-parse_seqids`, two records named to sort after `pa` / `na`: the
+  letters of record 13 of tfp.faa (record 9 of tfn.fna) under two definition lines, `ref|NP_900003.1|` (`NM_`) and
+  `gnl|BL_ORD_ID|7`, and a random sequence (seed 20261115) under `ref|NP_900005.1|gnl|BL_ORD_ID|0`, whose tag makeblastdb
+  stores as the string "0" (a tag with a leading 0 is not made a number). `xq.faa`: that random protein as a query.
+  Lists `sl_pxm7.txt` and `sl_pxm19.txt` (`NP_900003.1` and `gnl|BL_ORD_ID|7` / `19`: 7 plus the 12 sequences of pa),
+  `sl_nxm7.txt`, `sl_ord7.txt`, `sl_ord15.txt` (7 plus the 8 of na), `sl_ord19.txt`, `sl_np5.txt` (`NP_900005.1`).
+  `make_multidb.py --ordsl-only MAKEBLASTDB` builds only these and the ones above.
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
 """
 import os
+import random
 import re
 import subprocess
 import sys
@@ -103,6 +110,27 @@ def make_ordsl(binary):
     aliastool = os.path.join(os.path.dirname(binary), "blastdb_aliastool")
     subprocess.run([aliastool, "-seqid_file_in", "sl_ord1.txt", "-seqid_file_out", "sl_ord1.bsl"], check=True, cwd=HERE,
                    stdout=subprocess.DEVNULL)
+    rng = random.Random(20261115)
+    tfp, tfn = read_fasta("tfp.faa"), read_fasta("tfn.fna")
+    for base, kind, source, prefix, alphabet, length in (("pxm", "prot", tfp[12], "NP", "ACDEFGHIKLMNPQRSTVWY", 120),
+                                                          ("nxm", "nucl", tfn[8], "NM", "ACGT", 300)):
+        letters = "".join(rng.choice(alphabet) for _ in range(length))
+        random_lines = [letters[at:at + 60] + "\n" for at in range(0, length, 60)]
+        records = [[f">ref|{prefix}_900003.1| two-line t3a\x01gnl|BL_ORD_ID|7 two-line t3b\n", source[1]],
+                   [f">ref|{prefix}_900005.1|gnl|BL_ORD_ID|0 string tag t5\n", random_lines]]
+        write_set(base, records, None)
+        makeblastdb(binary, "-in", base + ".fa", "-dbtype", kind, "-out", base, "-parse_seqids", "-blastdb_version", "5",
+                    "-title", "multidb " + base)
+        os.remove(os.path.join(HERE, f"{base}.{kind[0]}js"))
+        if kind == "prot":
+            with open(os.path.join(HERE, "xq.faa"), "w") as f:
+                f.write(">xq the random protein of pxm\n" + "".join(random_lines))
+    lists = {"sl_pxm7.txt": "NP_900003.1\ngnl|BL_ORD_ID|7\n", "sl_pxm19.txt": "NP_900003.1\ngnl|BL_ORD_ID|19\n",
+             "sl_nxm7.txt": "NM_900003.1\ngnl|BL_ORD_ID|7\n", "sl_ord7.txt": "gnl|BL_ORD_ID|7\n",
+             "sl_ord15.txt": "gnl|BL_ORD_ID|15\n", "sl_ord19.txt": "gnl|BL_ORD_ID|19\n", "sl_np5.txt": "NP_900005.1\n"}
+    for name, text in lists.items():
+        with open(os.path.join(HERE, name), "w") as f:
+            f.write(text)
 
 
 def main(binary):

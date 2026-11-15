@@ -47,7 +47,6 @@ use crate::algorithm::blastp::args::{
     BlastpCompositionMode, BlastpLookupTableType, ResolvedBlastpArgs,
 };
 use crate::algorithm::blastp::encoding::EncodedProtein;
-use crate::algorithm::blastp::x_seed_fused::XContextTable;
 use crate::algorithm::blastp::{tabular, x_query_blocks, x_seed_fused};
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bpclut_on;
 use crate::algorithm::tblastx::lookup::QueryContext;
@@ -182,8 +181,8 @@ pub(super) struct BlastpQueryMeta {
     pub(super) query_lengths: Vec<usize>,
 }
 
-/// The IDs, titles and lengths of `query_records` (`BlastpQueryMeta`), which NCBI writes in each
-/// query's preamble.
+/// The IDs, titles and lengths of `query_records` (`BlastpQueryMeta`): the titles and lengths that
+/// NCBI writes in each query's preamble, and the query IDs of the tabular formats.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1492-1495
 /// ```c++
@@ -227,6 +226,13 @@ pub(super) fn query_meta(query_records: &[FastaRecord]) -> BlastpQueryMeta {
 ///     CRef<ILocalQueryData> query_data(qf->MakeLocalQueryData(&*options));
 ///     retval->m_InternalData->m_Queries = query_data->GetSequenceBlk();
 ///     retval->m_InternalData->m_QueryInfo = query_data->GetQueryInfo();
+/// ```
+///
+/// NCBI masks the queries (SEG) later, when it makes the score block.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:158
+/// ```c++
+///     Int2 status = BLAST_MainSetUp(opts_memento->m_ProgramType,
 /// ```
 pub(super) fn query_frames_of<'a>(
     setup: &CallSetup<'_, 'a>,
@@ -434,8 +440,9 @@ pub(super) fn call_scoring(args: &ResolvedBlastpArgs) -> Result<BlastpScoring> {
     let (x_drop_gapped, x_drop_gapped_final) =
         crate::core::x_drop::gapped_x_dropoffs(x_drop_bits.0, x_drop_bits.1, gapped_params.lambda);
     // The final X-drop reaches the unscaled `ALIGN_EX` only on the ordinary traceback (mode 0,
-    // after IDENTITY's reset too; the same choice as `ordinary_traceback` below). A PSSM search
-    // converts its X-drops with the PSSM's Lambda and checks them there (`pssm_hooks::pssm_prelim`).
+    // after IDENTITY's reset too; the same choice as `ordinary_traceback` in `run_call`). A PSSM
+    // search converts its X-drops with the PSSM's Lambda and checks them there
+    // (`pssm_hooks::pssm_prelim`).
     if !args.ungapped && args.psi_search.is_none() {
         crate::core::x_drop::check_gapped_x_dropoffs(
             args.app.name(),
@@ -471,7 +478,7 @@ pub(super) struct BlastpCallLookup {
     pub(super) contexts: Vec<QueryContext>,
     pub(super) context_lookup_bounds: BlastpContextLookupBounds,
     pub(super) concatenated_query: Vec<u8>,
-    pub(super) x_context_table: XContextTable,
+    pub(super) x_context_table: x_seed_fused::XContextTable,
     pub(super) query_valid: Vec<bool>,
     pub(super) query_batch_skipped: Vec<bool>,
 }

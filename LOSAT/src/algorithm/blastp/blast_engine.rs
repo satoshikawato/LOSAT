@@ -9681,7 +9681,7 @@ fn x_bp_runtime_lookup(built: XBpLookup) -> BlastpRuntimeLookup {
 //     lookup->threshold = (Int4)opt->threshold;
 // ```
 /// The lookup table of exact blastp (`AaLookupTable`) and the query contexts of `query_frames`, as
-/// the lookup region of `run_resolved_in_pool` builds them, of the search's word size (3, 2:
+/// `call_lookup` (`blast_engine/call_setup.rs`) builds them, of the search's word size (3, 2:
 /// blastp-short and `-word_size 2`, item SC3, or 4, item SC8b). The threshold takes the x86-64
 /// conversion: `INT_MIN` for a threshold beyond `Int4` (every word). The table is filled in place,
 /// without the reference builder's chains (lookup/x_lut_direct.rs); a table of 4-letter words by
@@ -9853,7 +9853,7 @@ fn blastp_aa_lookup_on_block_spare(
 // s_CompressedLookupFinalize(lookup);
 // ```
 /// The compressed lookup table of blastp-fast (`CompressedAaLookupTable`) and the query contexts of
-/// `query_frames`, as the lookup region of `run_resolved_in_pool` builds them: `query_batches` and
+/// `query_frames`, as `call_lookup` (`blast_engine/call_setup.rs`) builds them: `query_batches` and
 /// `query_lengths` are the search's (its batches of the whole input, its records' lengths), and
 /// `x_for` says which build of a block search this is (the spare vectors it takes,
 /// `x_query_blocks::XLookupFor`; a query chunk's NCBI tables are its one table). The build of the
@@ -10293,7 +10293,7 @@ fn run_call(
         query_titles,
         query_lengths,
     } = call_setup::query_meta(query_records);
-    let setup = call_setup::CallSetup {
+    let call_in = call_setup::CallSetup {
         args: &args,
         query_records,
         subject_records,
@@ -10312,12 +10312,12 @@ fn run_call(
 
     let query_encoding_start = blastp_timing_start(timing_enabled);
     // EXPERIMENT (LOSAT_X_BPLKPAHEAD): a block's query frames, lookup table and contexts built ahead
-    // of it, during the block before it (`blast_engine/x_lookup_ahead.rs`); else encoded here and
-    // built in the lookup region below.
+    // of it, during the block before it (`blast_engine/x_lookup_ahead.rs`); else encoded by
+    // `query_frames_of` and built by `call_lookup` (`blast_engine/call_setup.rs`).
     let mut x_prebuilt = x_ahead.take_prebuilt(query_records);
     let mut x_owned_frames: Vec<Vec<QueryFrame>> = Vec::new();
     let query_frames: &[Vec<QueryFrame>] =
-        call_setup::query_frames_of(&setup, &mut x_prebuilt, &mut x_owned_frames);
+        call_setup::query_frames_of(&call_in, &mut x_prebuilt, &mut x_owned_frames);
     if let Some(timing) = timing.as_ref() {
         BlastpTiming::record_duration(&timing.query_encoding_ns, query_encoding_start);
     }
@@ -10328,7 +10328,7 @@ fn run_call(
         subjects,
         x_meta,
         subject_titles,
-    } = call_setup::call_subjects(&setup, &mut x_owned_subjects)?;
+    } = call_setup::call_subjects(&call_in, &mut x_owned_subjects)?;
     if let Some(timing) = timing.as_ref() {
         BlastpTiming::record_duration(&timing.subject_encoding_ns, subject_encoding_start);
     }
@@ -10354,7 +10354,7 @@ fn run_call(
         query_valid,
         query_batch_skipped,
     } = call_setup::call_lookup(
-        &setup,
+        &call_in,
         query_frames,
         &query_lengths,
         &mut x_prebuilt,

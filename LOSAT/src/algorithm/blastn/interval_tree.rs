@@ -247,7 +247,7 @@ const X_MAX_OVERFLOW: usize = 512;
 // No NCBI counterpart: grid cells per HSP of a tree made for a known number of HSPs and the most
 // cells such a tree gets (`x_grid_cells`); time and memory of the grid index only.
 const X_GRID_CELLS_PER_HSP: usize = 64;
-const X_GRID_MAX_CELLS_FOR_HSPS: usize = 1 << 12;
+const X_GRID_MAX_CELLS_FOR_HSPS: usize = 1 << 10;
 const _: () = assert!(X_GRID_MAX_CELLS_FOR_HSPS <= X_MAX_CELLS);
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3830-3831

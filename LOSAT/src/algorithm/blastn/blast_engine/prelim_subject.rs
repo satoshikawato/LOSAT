@@ -445,24 +445,9 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:806-833 (GetReverseNuclSequence uses ncbi4na/blastna)
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93 (IUPACNA_TO_BLASTNA)
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:148-349 (packed ncbi2na used for ungapped extension)
-
-    // NCBI reference: blast_gapalign.c:3826-3831 Blast_IntervalTreeInit
-    // Initialize interval tree for HSP containment checking
-    // Tree is indexed by query offsets (primary) and subject offsets (midpoint subtrees)
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3811-3831
-    // ```c
-    // tree = Blast_IntervalTreeInit(0, query->length+1,
-    //                               0, subject->length+1);
-    // ```
-    // query->length is the concatenated length for both strands (2*len + 1).
-    // The tree is the scratch's (`x_tree`), given this chunk's ranges.
-    let interval_tree = &mut subject_scratch.x_tree;
-    interval_tree.reset_with_bounds(
-        0,                                // q_min
-        (query_concat_length + 1) as i32, // q_max
-        0,                                // s_min
-        (s_len + 1) as i32,               // s_max
-    );
+    // The interval tree of the gapped stage is set up there, for a chunk with initial hits only
+    // (`prelim_hsp_list::gapped_hsp_list`, as `BLAST_GetGappedScore` makes its tree after its
+    // return for an empty list, blast_gapalign.c:3706-3707,3826-3831).
 
     // NCBI architecture: Collect all ungapped hits first, then process in score-descending order
     // NCBI reference: blast_gapalign.c:3824 - ASSERT(Blast_InitHitListIsSortedByScore(init_hitlist))
@@ -906,6 +891,56 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         } // end of if/else for two-stage vs original lookup
     } // end of strand loop
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:493-500
+    // ```c
+    //         if (aux_struct->WordFinder) {
+    //             aux_struct->WordFinder(subject, query, query_info, lookup, matrix,
+    //                                    word_params, aux_struct->ewp,
+    //                                    aux_struct->offset_pairs,
+    //                                    kScanSubjectOffsetArraySize,
+    //                                    init_hitlist, ungapped_stats);
+    //
+    //             if (init_hitlist->total == 0) continue;
+    //         }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1686-1689
+    // ```c
+    //     Blast_ExtendWordExit(ewp, subject->length);
+    //
+    //     Blast_UngappedStatsUpdate(ungapped_stats, total_hits, hits_extended,
+    //                               init_hitlist->total);
+    // ```
+    // A chunk without an initial hit ends here, as NCBI's chunk loop goes on to the next chunk
+    // after its word finder: the diagonal table's offset moves on (`Blast_ExtendWordExit` runs
+    // inside the word finder, before the `continue`), the saved hits counted are none, and nothing
+    // else runs for the chunk: no sort, no gapped stage and its interval tree, no HSP list, and
+    // no merge into the subject's list or best-hit filter (`collect_subject_prelim` skips both for
+    // an empty list, as NCBI's `continue` does). The empty list returned is the scratch's own
+    // buffer when the owner reuses it (`collect_subject_prelim` puts it back), as the gapped
+    // stage's empty list was. LOSAT's `-verbose` line of the gapped stage (no NCBI counterpart)
+    // is still written for the chunk, with no extension.
+    if ungapped_hits.is_empty() {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:159-176
+        // (the diagonal table's offset moves on after each chunk, as below)
+        advance_diag_table_offset(
+            &mut subject_scratch.diag_table_offset,
+            diag_window,
+            s_len,
+            use_array_indexing,
+            &mut subject_scratch.hit_level_array,
+            &mut subject_scratch.hit_len_array,
+            &mut subject_scratch.diag_hash,
+        );
+        if !UNGAPPED && verbose {
+            prelim_hsp_list::verbose_gapped_line(std::time::Duration::ZERO, 0, 0, 0);
+        }
+        return if reuse_prelim_hits {
+            std::mem::take(prelim_hits)
+        } else {
+            Vec::new()
+        };
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:560-563
     // ```c
     //         } else {
@@ -1026,7 +1061,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         },
         ungapped_hits,
         prelim_hsp_list::GappedListState {
-            interval_tree,
+            interval_tree: &mut subject_scratch.x_tree,
             gap_scratch,
             greedy_align_scratch,
             x_helper_scratch: Some(&mut subject_scratch.x_ahead_scratch),
@@ -1336,18 +1371,32 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                             subject_scratch,
                             true,
                         );
-                        let hits = merge_prelim_hit_lists(
-                            &mut combined_prelim_hits,
-                            hits,
-                            HspListSplit::Subject {
-                                offset: chunk.offset,
-                            },
-                            chunk.overlap,
-                            !UNGAPPED,
-                        );
-                        if subject_besthit {
-                            prelim_subject_best_hit(&mut combined_prelim_hits, query_lengths);
-                        }
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:500,565
+                        // ```c
+                        //             if (init_hitlist->total == 0) continue;
+                        // ...
+                        //         if (hsp_list->hspcnt == 0) continue;
+                        // ```
+                        // An empty list is neither merged nor followed by the best-hit filter
+                        // (the merge of an empty list returns at once, and the filter of an
+                        // unchanged list removes nothing).
+                        let hits = if hits.is_empty() {
+                            hits
+                        } else {
+                            let hits = merge_prelim_hit_lists(
+                                &mut combined_prelim_hits,
+                                hits,
+                                HspListSplit::Subject {
+                                    offset: chunk.offset,
+                                },
+                                chunk.overlap,
+                                !UNGAPPED,
+                            );
+                            if subject_besthit {
+                                prelim_subject_best_hit(&mut combined_prelim_hits, query_lengths);
+                            }
+                            hits
+                        };
                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
                         // ```c
                         // /* Delete if not done in last loop iteration to prevent memory leak. */
@@ -1410,6 +1459,16 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                             .collect_into_vec(&mut chunk_results);
                     }
                     for (offset, overlap, hits) in chunk_results {
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:500,565
+                        // ```c
+                        //             if (init_hitlist->total == 0) continue;
+                        // ...
+                        //         if (hsp_list->hspcnt == 0) continue;
+                        // ```
+                        // An empty list is neither merged nor followed by the best-hit filter.
+                        if hits.is_empty() {
+                            continue;
+                        }
                         let _ = merge_prelim_hit_lists(
                             &mut combined_prelim_hits,
                             hits,
@@ -1475,18 +1534,32 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                         subject_scratch,
                         true,
                     );
-                    let hits = merge_prelim_hit_lists(
-                        &mut combined_prelim_hits,
-                        hits,
-                        HspListSplit::Subject {
-                            offset: chunk.offset,
-                        },
-                        chunk.overlap,
-                        !UNGAPPED,
-                    );
-                    if subject_besthit {
-                        prelim_subject_best_hit(&mut combined_prelim_hits, query_lengths);
-                    }
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:500,565
+                    // ```c
+                    //             if (init_hitlist->total == 0) continue;
+                    // ...
+                    //         if (hsp_list->hspcnt == 0) continue;
+                    // ```
+                    // An empty list is neither merged nor followed by the best-hit filter
+                    // (the merge of an empty list returns at once, and the filter of an
+                    // unchanged list removes nothing).
+                    let hits = if hits.is_empty() {
+                        hits
+                    } else {
+                        let hits = merge_prelim_hit_lists(
+                            &mut combined_prelim_hits,
+                            hits,
+                            HspListSplit::Subject {
+                                offset: chunk.offset,
+                            },
+                            chunk.overlap,
+                            !UNGAPPED,
+                        );
+                        if subject_besthit {
+                            prelim_subject_best_hit(&mut combined_prelim_hits, query_lengths);
+                        }
+                        hits
+                    };
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
                     // ```c
                     // /* Delete if not done in last loop iteration to prevent memory leak. */

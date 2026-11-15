@@ -985,6 +985,24 @@ pub(super) fn gapped_score_list(
     (dbg_gapped_calls, dbg_containment_skipped)
 }
 
+/// No NCBI counterpart: LOSAT's `-verbose` line of a chunk's gapped stage (its time, the
+/// alignments run, the hits the tree held and the chunk's initial hits); a chunk without initial
+/// hits writes it from `prelim_subject::prelim_chunk_hits` (no stage ran: zeros). Out of line,
+/// off the chunk's path.
+#[cold]
+#[inline(never)]
+pub(super) fn verbose_gapped_line(
+    gapped_elapsed: std::time::Duration,
+    dbg_gapped_calls: usize,
+    dbg_containment_skipped: usize,
+    total_ungapped: usize,
+) {
+    eprintln!(
+        "[INFO] Gapped extension took {:?}: calls={}, skipped={}, total_ungapped={}",
+        gapped_elapsed, dbg_gapped_calls, dbg_containment_skipped, total_ungapped
+    );
+}
+
 /// What the gapped HSP list of one subject chunk (`gapped_hsp_list`) reads besides
 /// `GappedPrelim`: the query groups' counts and order (`sort_ungapped_hits_for_gapped`; the order
 /// is `None` unless the loop runs per query, LOSAT_X_QGROUPPAR), the batch's queries (their number), the
@@ -1125,6 +1143,26 @@ pub(super) fn gapped_hsp_list(
         *prelim_hits = x_hits;
         x_purged = true;
     } else {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3706-3707,3826-3831
+        // ```c
+        //    if (init_hitlist->total == 0)
+        //       return 0;
+        // ...
+        //    else {
+        //       tree = Blast_IntervalTreeInit(0, query->length+1,
+        //                                     0, subject->length+1);
+        //    }
+        // ```
+        // query->length is the concatenated length for both strands (2*len + 1). The tree is
+        // the subject scratch's (`x_tree`), given this chunk's ranges here, inside the gapped
+        // stage of a chunk with initial hits (a chunk without one returns before it,
+        // `prelim_subject::prelim_chunk_hits`); the query group tasks above set up their own.
+        interval_tree.reset_with_bounds(
+            0,                                // q_min
+            (query_concat_length + 1) as i32, // q_max
+            0,                                // s_min
+            (s_len + 1) as i32,               // s_max
+        );
         let (calls, skipped) = gapped_score_list(
             gapped,
             ungapped_hits,
@@ -1160,9 +1198,11 @@ pub(super) fn gapped_hsp_list(
         );
     }
     if verbose {
-        eprintln!(
-            "[INFO] Gapped extension took {:?}: calls={}, skipped={}, total_ungapped={}",
-            gapped_elapsed, dbg_gapped_calls, dbg_containment_skipped, total_ungapped
+        verbose_gapped_line(
+            gapped_elapsed,
+            dbg_gapped_calls,
+            dbg_containment_skipped,
+            total_ungapped,
         );
     }
 

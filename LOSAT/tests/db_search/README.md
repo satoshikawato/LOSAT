@@ -950,6 +950,25 @@ volume), `p_abovecut` (a range that cuts the volume above `p_dupvol`) and `n_vol
 `taxfilter/tfn` excludes nothing. `sl_gifull.txt` (`gi|1111|ref|NP_1.1|`) adds NCBI's two warnings `Ignoring extra parts
 (synonyms?) in FASTA-style ID`.
 
+Rows `db.ordsl.*` (line DBID, item ordsl): seqid lists that name `gnl|BL_ORD_ID|n` (`multidb/sl_ord*.txt`,
+`sl_ord1.bsl`, `sl_pxm*.txt`, `sl_nxm7.txt`) where a line with such an id lies in a volume whose first OID is not 0: a
+later database of the list (`taxfilter/tfu_p` behind `multidb/pa`, 12 sequences; `tfu_n` behind `multidb/na`, 8;
+`multidb/pxm` and `nxm` likewise) or the second volume of `multidb/ov_p` and `ov_n`. The accession tables of
+`makeblastdb -input_type blastdb` (`tfu_*`, `ov_*`) and of `-parse_seqids` FASTA ids (`pxm`, `nxm`) hold the stored
+number, which the lookup reads, while NCBI's filtered header read tests the line as `gnl|BL_ORD_ID|<stored number plus the
+volume's first OID>` (`CSeqDBVol::x_GetHdrAsn1` with `adjust_oids`). So a positive list can select a sequence whose every
+line it then removes, and a negative list can remove a line of a sequence it did not exclude; NCBI leaves such a sequence's
+hits out of the report without notice, and LOSAT refuses as for any sequence a seqid list leaves without a line (the
+`losat-rejection` rows: `bp.list.6` on `pa tfu_p`, `bp.listb.6` with the binary list, `bp.listneg.6` and `bn.listneg.6`
+negative, `bp.vol.6` the second volume of `ov_p`, one row in each other program). Where a sequence keeps another line, the
+test decides which lines NCBI writes (`bp.two.*`, `bn.two.*`: OID 12 of `pa pxm` and OID 8 of `na nxm` hold
+`ref|NP_900003.1|` / `ref|NM_900003.1|` and `gnl|BL_ORD_ID|7`, read as 19 / 15; positive and negative lists of 7 and of
+the sum, outfmt 6 with `sallseqid salltitles` and 16). `bp.tag.6` and `bp.tagq.6`: the line `gnl|BL_ORD_ID|0` of OID 13 of
+`pa pxm`, which makeblastdb stores with the string tag "0", selected by `NP_900005.1`; NCBI reads the header only for a
+sequence it reports and then throws (`GetId`, exit 255): a query that misses it (`-evalue 1e-5`) is NCBI's run, one that
+hits it (`multidb/xq.faa`) LOSAT's refusal. The other `ncbi` rows: a list whose number no key holds (`bp.none.6`, an
+empty database), and a sequence of the first volume, which keeps its line (`bp.vol0.0`, `bn.vol0.6`, `tx.vol0.6`).
+
 ## Ungapped nucleotide databases (line NP, O4a-1)
 
 `ungapped_abr` (the 33 genes of `LOSAT/tests/fixtures/blastn_regression/inputs/culling_abricate_genes.fa`, as `ungapped_abr.fna`) is built like
@@ -981,7 +1000,7 @@ The rows `db.blastn.ungapped_rej.*` (outfmt 8, 11, 17 with `-ungapped`) are refu
 Rows `db.mdb.*`: `-db "a b"` searches the databases `a` and `b` as one virtual database, as NCBI's `CSeqDB` does (the `db` cell
 of a row is one argument, so a cell with spaces is a list of names). `multidb/` holds the databases and what
 `make_multidb.py MAKEBLASTDB` builds them from (makeblastdb 2.17.0; the records and taxids are those of `taxfilter/tfp.faa`,
-`tfp.map`, `tfn.fna` and `tfn.map`, definition lines kept; `.pjs` and `.njs` dropped; the whole directory is about 0.5 MB):
+`tfp.map`, `tfn.fna` and `tfn.map`, definition lines kept; `.pjs` and `.njs` dropped; the whole directory is about 0.8 MB):
 
 - `pa` / `pb`: version 5 protein, `-parse_seqids`, taxid map; records 1-12 of `tfp.faa`, and records 13-23 plus `Q00001.1`, an
   exact copy of record 2's sequence (taxid 9606), so that two databases hold an identical sequence. `p4a` / `p4b`: the same
@@ -993,6 +1012,14 @@ of a row is one argument, so a cell with spaces is a list of names). `multidb/` 
   empty title. `al.nal`: an alias file (`TITLE multidb alias of na`, `DBLIST na`). `mix_u.nal` (line DBID mixdb, written by hand): an
   alias file of `na nnp` whose `FIRST_OID 9`, `LAST_OID 17` keep the sequences of `nnp` (without the accession table) alone. `sl.txt`: a seqid list of the first
   accession of `na`, `nb`, `pa` and `pb`.
+- `ov_p` / `ov_n` (line DBID ordsl; `make_multidb.py --ordsl-only MAKEBLASTDB` builds only these): `-input_type blastdb` of
+  `../taxfilter/tfu_p` and `tfu_n` in two volumes of two records each (`-max_file_sz` 400 and 500 bytes) under one LMDB file;
+  `sl_ord0.txt`, `sl_ord1.txt`, `sl_ord2.txt`, `sl_ord9.txt`, `sl_ord13.txt`: the list `gnl|BL_ORD_ID|n`, and `sl_ord1.bsl`
+  its binary form (rows `db.ordsl.*`).
+- `pxm` / `nxm` (line DBID ordsl): version 5 `-parse_seqids` of two records: record 13 of `tfp.faa` (record 9 of `tfn.fna`)
+  under the lines `ref|NP_900003.1|` (`NM_`) and `gnl|BL_ORD_ID|7`, and a random sequence under
+  `ref|NP_900005.1|gnl|BL_ORD_ID|0` (stored with the string tag "0"); `xq.faa`, that random protein; the lists
+  `sl_pxm7.txt`, `sl_pxm19.txt`, `sl_nxm7.txt`, `sl_ord7.txt`, `sl_ord15.txt`, `sl_ord19.txt`, `sl_np5.txt`.
 
 The ncbi rows search `taxfilter/q.fna` (BLASTN, BLASTX, TBLASTX) or `taxfilter/q.faa` (BLASTP, TBLASTN, PSIBLAST) and cover:
 two names in outfmt 0, 5, 6, 7, 8, 11, 15 and 16 (`bn`), the other order (`bn.rev`), a name twice (`dup`), Galaxy's call with
@@ -1640,3 +1667,40 @@ of data`); NCBI's search reports both as `BLAST engine error: Database memory ma
 files `zr_t2.nal`, `zr_p5.nal` and `zr_t1.nal` give `DBLIST p5 zz5` with the OID ranges 7-7 (`t2` alone, no mask
 data), 3-5 (`s3`-`s5`) and 1-6 (`s1`-`s5` and `t1`, which has mask data that `zz5`'s volume reads without the
 algorithm 11 of the list): NCBI reads masks of `zz5` only in the last.
+
+M4a-2b (`-db_hard_mask`, line NP) added `edge3` (s5's one-letter mask 1001, `edge_short.asnt`: a last mask shorter
+than the two letters before its end that the last chunk starts with, which LOSAT refuses) and four alias files that
+leave out the sequences whose mask runs to their end (`a5`'s and `k5`'s `s4`, `mask_nucl_mv`'s `m04`, OID 3): `zh_a5.nal`
+and `zh_k5.nal` (OIDs 1-3, `s1`-`s3`), `zh_mv_a.nal` (`../../seqdb/db/mask_nucl_mv`, OIDs 1-3: `m01`-`m03`) and
+`zh_mv_b.nal` (OIDs 5-8: `m05`-`m08`, the second volume):
+
+```
+makeblastdb -in subj.fna -dbtype nucl -out edge3 -title "edge masks 3" -blastdb_version 4 -mask_data edge_short.asnt
+```
+
+`edge_short.asnt` is `edge_tail.asnt` with `algo-options "edge short"` and `from 1001, to 1001`.
+
+The review fixes of M4a-2b (ad-M4a-6) added `edge4` and `edgew`. `edge4` holds two masks of `s5` with an empty mask
+at 0 first (`from 0, to 4294967295`, which makeblastdb stores as `[0, 0)`): algorithm 11 (`edge_e0tail.asnt`, then
+1000-1199: the chunk after the empty mask starts at 0 and the next mask runs to the end, refused; review F1) and 12
+(`edge_e0mid.asnt`, then 500-599: searched). `edgew` holds four sequences of 3 to 6 letters (`wb.fna`, `w3`-`w6`) whose
+mask runs to their end (`edge_wb.asnt`: 1-2, 2-3, 3-4 and 3-5), searched alone through `zw_s3.nal`, `zw_s4.nal` and
+`zw_s5.nal` (OIDs 1, 2 and 3) with the query `qw.fna` at words 4, 5 and 7 (review F2: NCBI scans every BLASTN
+subject, and its scan of the whole sequence reads a word when the sequence has at least the word's letters):
+
+```
+makeblastdb -in subj.fna -dbtype nucl -out edge4 -title "edge masks 4" -blastdb_version 4 -mask_data edge_e0tail.asnt,edge_e0mid.asnt
+makeblastdb -in wb.fna -dbtype nucl -out edgew -title "edge masks word" -blastdb_version 4 -mask_data edge_wb.asnt
+```
+
+The second review fixes of M4a-2b (ad-M4a-6, 2026-11-15) added `edge5`: last masks shorter than the letters before their
+end that the final chunk starts with, refused only where NCBI's merge after that chunk can take an alignment of an earlier
+chunk by the overlap it reads past its list of ranges (review 2 F1). Algorithm 11 (`edge_ov.asnt`: `s5`'s one-letter
+masks 300 and 302; the chunk between them scans no word) and 12 (`edge_em.asnt`: 700-701, then a mask of no letters at
+702, `from 702, to 701`) are searched; 13 (`edge_ovr.asnt`: 301 and 302; the chunk 0-301 ends after the final chunk's
+offset 300) is refused; 14 (`edge_fw.asnt`: `s4`'s mask 289; the final chunk 288-300 is scanned from 290) is searched at
+words of 11 and 28 letters and refused at blastn-short's 7:
+
+```
+makeblastdb -in subj.fna -dbtype nucl -out edge5 -title "edge masks 5" -blastdb_version 4 -mask_data edge_ov.asnt,edge_em.asnt,edge_ovr.asnt,edge_fw.asnt
+```

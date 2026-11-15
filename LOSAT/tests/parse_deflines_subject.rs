@@ -911,7 +911,7 @@ fn blastn_query_anchored_refuses_a_database_sequence_named_as_a_query() {
     }
 }
 
-// Line RG T3c (PD-LOSAT-NCBI-DEFECTS 1.29): the same database sequences for BLASTX (`bxqid`, `bxqgi`:
+// Line RG T3c (PD-LOSAT-NCBI-DEFECTS 1.30): the same database sequences for BLASTX (`bxqid`, `bxqgi`:
 // proteins) and TBLASTX (`txqid`, `txqgi`). NCBI's merge of the Seq-align id throws (exit 255, probes
 // `bx.t3c.d.qid.f1`, `tx.t3c.d.qid.f1`), and for the display id its description line shows the query's
 // title (`tx.t3c.d.qgi.f1`). Both programs write their prolog before the search, as NCBI does, so the

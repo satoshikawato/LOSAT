@@ -3032,7 +3032,10 @@ pub(crate) fn blast_adjust_scores(
 // No NCBI counterpart: the input is used only to compute a result ahead of the real call, which uses
 // it only when its own input has the same bits; it does not change any value NCBI computes.
 /// The Newton input that `blast_adjust_scores` with these arguments would pass to
-/// `optimize_target_frequencies`, if it reaches the constrained iteration.
+/// `optimize_target_frequencies`, if it reaches the constrained iteration. Its `q` (the
+/// workspace's `mat_b`) is `shared_q`, made by the first call that returns an input: a caller
+/// passes one `shared_q` per workspace, so the inputs of a batch share one copy.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn x_newton_input(
     matrix_info: &BlastMatrixInfo,
     query_composition: &BlastAminoAcidComposition,
@@ -3041,6 +3044,7 @@ pub(crate) fn x_newton_input(
     subject_length: i32,
     composition_adjust_mode: BlastCompoAdjustMode,
     workspace: &BlastCompositionWorkspace,
+    shared_q: &mut Option<super::x_newton_lanes::NewtonQ>,
 ) -> Option<super::x_newton_lanes::NewtonInput> {
     if query_composition.num_true_amino_acids == 0 || subject_composition.num_true_amino_acids == 0
     {
@@ -3096,14 +3100,17 @@ pub(crate) fn x_newton_input(
         &workspace.second_standard_freq,
         20,
     );
-    let mut q = [0.0; COMPO_NUM_TRUE_AA * COMPO_NUM_TRUE_AA];
-    for i in 0..COMPO_NUM_TRUE_AA {
-        for j in 0..COMPO_NUM_TRUE_AA {
-            q[i * COMPO_NUM_TRUE_AA + j] = workspace.mat_b[i][j];
+    let q = shared_q.get_or_insert_with(|| {
+        let mut q = [0.0; COMPO_NUM_TRUE_AA * COMPO_NUM_TRUE_AA];
+        for i in 0..COMPO_NUM_TRUE_AA {
+            for j in 0..COMPO_NUM_TRUE_AA {
+                q[i * COMPO_NUM_TRUE_AA + j] = workspace.mat_b[i][j];
+            }
         }
-    }
+        std::rc::Rc::new(q)
+    });
     Some(super::x_newton_lanes::NewtonInput {
-        q,
+        q: std::rc::Rc::clone(q),
         row: row_probs,
         col: col_probs,
         relative_entropy: desired_re,

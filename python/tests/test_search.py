@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pylosat
 import pytest
-from pylosat import ArgumentError, Search
+from conftest import fasta
+from pylosat import ArgumentError, Search, Sequences
 
 
 def test_keywords_are_the_words_of_the_command_line():
@@ -75,12 +76,60 @@ def test_psiblast_takes_no_pssm_query_here():
         Search.from_argv("psiblast", ["-in_pssm", "q.asn"])
 
 
-def test_psiblast_runs_one_round_here():
-    # Line PS, PS5a: the command line runs psiblast's rounds; the library's results have one round.
-    for rounds in ("0", "2"):
-        with pytest.raises(ArgumentError, match="its results have one round"):
-            Search.from_argv("psiblast", ["-num_iterations", rounds])
-    Search.from_argv("psiblast", ["-num_iterations", "1"])
+ROUNDS_QUERY = "outfmt0/e2e_many_query.faa"
+ROUNDS_SUBJECT = "outfmt0/e2e_many_subject.faa"
+
+
+def rounds_inputs() -> tuple[Sequences, Sequences]:
+    return Sequences.from_fasta(fasta(ROUNDS_QUERY)), Sequences.from_fasta(fasta(ROUNDS_SUBJECT))
+
+
+def test_psiblast_runs_its_rounds_here():
+    # Line RG item Q5: psiblast's rounds. NCBI 2.17.0 finds 300 subjects in round 1 and 299 in
+    # round 2, then the rounds converge.
+    search = Search("psiblast", evalue=1e-5, num_iterations=3)
+    outcome = search.run(*rounds_inputs())
+    one = Search("psiblast", evalue=1e-5).run(*rounds_inputs())
+    [rounds] = outcome.rounds
+    assert rounds.converged and not one.rounds[0].converged
+    assert len(rounds.stats) == 2 and rounds.stats[0] == outcome.query_stats[0]
+    assert rounds.stats[0] != rounds.stats[1]
+    hsps = outcome.hsps
+    assert [hsp.index for hsp in hsps] == list(range(len(hsps)))
+    assert {hsp.round for hsp in hsps} == {1, 2}
+    first = [hsp.e_value for hsp in hsps if hsp.round == 1]
+    assert first == [hsp.e_value for hsp in one.hsps]
+    # The views: each round with its HSPs and statistics, a subject once a round.
+    [view] = outcome.queries()
+    assert view.round is None and view.stats == rounds.stats[0]
+    by_round = view.rounds()
+    assert [part.round for part in by_round] == [1, 2]
+    assert [part.stats for part in by_round] == rounds.stats
+    assert sum(len(part.hsps) for part in by_round) == len(hsps)
+    assert all(hsp.round == part.round for part in by_round for hsp in part.hsps)
+    assert by_round[1].rounds() == [by_round[1]]
+    pairs = [(subject.s_idx, subject.round) for subject in view.subjects()]
+    assert len(pairs) == len(set(pairs)) and {round for _, round in pairs} == {1, 2}
+    found = view.subject(pairs[-1][0])
+    assert found is not None and found.round == 1
+    # The batches give the same records and rounds.
+    batches = list(search.batches(*rounds_inputs()))
+    assert [batch.rounds for batch in batches] == [outcome.rounds]
+    assert [hsp.round for hsp in batches[0].hsps] == [hsp.round for hsp in hsps]
+
+
+def test_psiblast_rounds_are_the_command_lines(command_line):
+    words = ["-evalue", "1e-5", "-num_iterations", "3", "-outfmt", "7"]
+    expected, _ = command_line("psiblast", fasta(ROUNDS_QUERY), fasta(ROUNDS_SUBJECT), words)
+    search = Search("psiblast", evalue=1e-5, num_iterations=3)
+    outcome = search.run(*rounds_inputs(), outfmt="7")
+    assert outcome.reports[0].bytes == expected
+    text = outcome.reports[0].bytes.decode()
+    for hsp in outcome.hsps:
+        span = outcome.reports[0].spans[hsp.index]
+        assert span is not None
+        heading = text.rindex("# Iteration: ", 0, span.start)
+        assert text[heading:].splitlines()[0] == f"# Iteration: {hsp.round}"
 
 
 def test_the_parser_refuses_as_on_the_command_line():

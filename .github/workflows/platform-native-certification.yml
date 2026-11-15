@@ -1,5 +1,11 @@
 name: Native Platform Certification
 
+# Dispatch on the branch whose head is the candidate (the workflow must also exist on the default branch
+# `main` to be dispatchable):
+#   gh workflow run platform-native-certification.yml --repo satoshikawato/LOSAT --ref <branch> -f candidate_sha=<SHA>
+# Every job checks out the dispatched commit (GITHUB_SHA); candidate_sha is only checked against it, and a
+# run whose head is not the candidate fails before any build or test step.
+
 run-name: Platform native certification ${{ inputs.candidate_sha }}
 
 on:
@@ -85,10 +91,15 @@ jobs:
         with:
           clean: false
           fetch-depth: 1
-          ref: ${{ inputs.candidate_sha }}
 
       - name: Verify exact committed candidate SHA
-        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+        run: |
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          if [[ "$GITHUB_SHA" != "$CANDIDATE_SHA" ]]; then
+            echo "::error::candidate_sha is checked, not checked out: dispatch on the branch whose head is the candidate ($CANDIDATE_SHA); $GITHUB_REF is at $GITHUB_SHA"
+            exit 1
+          fi
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
 
       - name: Initialize durable in-workspace evidence paths
         env:
@@ -411,10 +422,15 @@ jobs:
         with:
           clean: false
           fetch-depth: 1
-          ref: ${{ inputs.candidate_sha }}
 
       - name: Verify exact committed candidate SHA
-        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+        run: |
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          if [[ "$GITHUB_SHA" != "$CANDIDATE_SHA" ]]; then
+            echo "::error::candidate_sha is checked, not checked out: dispatch on the branch whose head is the candidate ($CANDIDATE_SHA); $GITHUB_REF is at $GITHUB_SHA"
+            exit 1
+          fi
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
 
       - name: Download exact Windows x64 certificate
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2

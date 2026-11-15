@@ -990,14 +990,11 @@ fn search_database(
         args.dbsize.is_some_and(|size| size > 0),
         "BLASTX",
     )?;
-    let shown = database.pairwise_database();
-    for format in &outputs.formats {
-        crate::algorithm::common::database::check_report_sums(
-            &shown,
-            crate::blastinput::app::parse_formatting_string(format.outfmt)?.number,
-            "BLASTX",
-        )?;
-    }
+    crate::algorithm::common::database::check_formats_report_sums(
+        || database.pairwise_database(),
+        outputs.formats.iter().map(|format| format.outfmt),
+        "BLASTX",
+    )?;
     for options in &mut resolved {
         options.query_range = query_range;
         options.filtered_empty = database.filtered_empty();

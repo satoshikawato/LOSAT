@@ -1600,14 +1600,11 @@ fn open_search_database(
                 args.dbsize.is_some_and(|size| size > 0),
                 "TBLASTX",
             )?;
-            let shown = database.pairwise_database();
-            for format in &outputs.formats {
-                crate::algorithm::common::database::check_report_sums(
-                    &shown,
-                    crate::blastinput::app::parse_formatting_string(format.outfmt)?.number,
-                    "TBLASTX",
-                )?;
-            }
+            crate::algorithm::common::database::check_formats_report_sums(
+                || database.pairwise_database(),
+                outputs.formats.iter().map(|format| format.outfmt),
+                "TBLASTX",
+            )?;
             Some(database)
         }
         None => None,
@@ -4715,6 +4712,20 @@ impl Drop for XEndBatch<'_> {
 /// c++/src/algo/blast/core/lookup_wrap.c:61-195 (`LookupTableWrapInit_MT`),
 /// c++/src/algo/blast/core/blast_parameters.c:279-419 (`BlastInitialWordParametersUpdate`) and
 /// c++/src/algo/blast/core/blast_setup.c:699-850 (`BLAST_CalcEffLengths`).
+/// What the rest of `process_subject` reads of the statistics after a subject's length check: the
+/// hit-saving cutoffs (`cutoff_scores`, their minimum, the word finder's `WordFinderCx`) and the
+/// effective lengths of each context, the batch's (`context_cutoffs::context_cutoffs`, made once
+/// per batch) or, where NCBI computes the statistics of each subject, the subject's own
+/// (`context_cutoffs::subject_cutoffs`). One pointer per subject, so that the default path reads
+/// the batch's as it did before the statistics of each subject.
+struct SubjectStatistics<'a> {
+    cutoff_scores: &'a [i32],
+    cutoff_score_min: i32,
+    length_adj_per_context: &'a [i64],
+    eff_searchsp_per_context: &'a [i64],
+    word_finder_cx: word_finder::WordFinderCx<'a>,
+}
+
 fn search_query_batch<S: TbxScore>(
     // The scores of the search's matrix (`scoring.rs`).
     sc: S,
@@ -5111,8 +5122,9 @@ fn search_query_batch<S: TbxScore>(
         }
     };
 
-    // What the word finder of the frame loop reads of this batch (`word_finder::WordFinderCx`);
-    // `process_subject` gives it the subject's `cutoff_scores`.
+    // What the word finder of the frame loop reads of this batch (`word_finder::WordFinderCx`),
+    // in the batch's statistics below; `process_subject` makes a copy with the subject's
+    // `cutoff_scores` where NCBI computes the statistics of each subject.
     let word_finder_cx = word_finder::WordFinderCx {
         window,
         wordsize,
@@ -5135,6 +5147,16 @@ fn search_query_batch<S: TbxScore>(
         scan_debug_range,
         x_read_failure: &x_read_failure,
     };
+    // The batch's statistics (`SubjectStatistics`); `per_subject`: NCBI computes the statistics
+    // of each subject (a database length of 0) with the preliminary stage's option spaces.
+    let batch_statistics = SubjectStatistics {
+        cutoff_scores: &cutoff_scores,
+        cutoff_score_min,
+        length_adj_per_context: &length_adj_per_context,
+        eff_searchsp_per_context: &eff_searchsp_per_context,
+        word_finder_cx,
+    };
+    let subject_option_spaces = option_spaces.as_deref().filter(|_| numbers.per_subject());
 
     let process_subject = |st: &mut WorkerState<S>, s_idx: usize| {
         // No NCBI counterpart: the clock of this subject for LOSAT_TIMING. The first local of
@@ -5228,48 +5250,43 @@ fn search_query_batch<S: TbxScore>(
         //               return status;
         //       }
         // ```
-        // Once per subject that passed the length check above: the values the rest of this
-        // closure reads are the subject's own (`context_cutoffs::subject_cutoffs`) or the batch's.
-        // An overflow of the search space fails the batch as a failed read does.
-        let x_subject_cutoffs;
-        let (cutoff_scores, cutoff_score_min, length_adj_per_context, eff_searchsp_per_context) =
-            match option_spaces.as_deref().filter(|_| numbers.per_subject()) {
-                Some(spaces) => {
-                    x_subject_cutoffs = match context_cutoffs::subject_cutoffs(
-                        contexts_ref,
-                        numbers,
-                        spaces,
-                        s_len as i64,
-                        evalue_threshold,
-                    ) {
-                        Ok(cutoffs) => cutoffs,
-                        Err(overflow) => {
-                            x_read_failure.fail(s_idx, overflow.into());
-                            emit_subject_hits(st, s_idx);
-                            return;
-                        }
-                    };
-                    (
-                        &x_subject_cutoffs.cutoff_scores,
-                        x_subject_cutoffs.cutoff_score_min,
-                        &x_subject_cutoffs.length_adj_per_context,
-                        &x_subject_cutoffs.eff_searchsp_per_context,
-                    )
-                }
-                None => (
-                    &cutoff_scores,
-                    cutoff_score_min,
-                    &length_adj_per_context,
-                    &eff_searchsp_per_context,
-                ),
-            };
-        // The frame loop's word finder saves an extension against the subject's cutoffs
-        // (`s_BlastAaWordFinder_TwoHit` reads `word_params->cutoffs`, which
-        // `BLAST_OneSubjectUpdateParameters` updated above): the batch's where they are the
-        // batch's, the subject's own with the statistics of each subject.
-        let word_finder_cx = word_finder::WordFinderCx {
-            cutoff_scores,
-            ..word_finder_cx
+        // Once per subject that passed the length check above: the statistics the rest of this
+        // closure reads (`SubjectStatistics`) are the subject's own (`context_cutoffs::
+        // subject_cutoffs`) or the batch's; the frame loop's word finder saves an extension
+        // against the subject's cutoffs (`s_BlastAaWordFinder_TwoHit` reads
+        // `word_params->cutoffs`, which `BLAST_OneSubjectUpdateParameters` updated above). An
+        // overflow of the search space fails the batch as a failed read does.
+        let x_own_cutoffs;
+        let x_own_statistics;
+        let statistics: &SubjectStatistics<'_> = match subject_option_spaces {
+            None => &batch_statistics,
+            Some(spaces) => {
+                x_own_cutoffs = match context_cutoffs::subject_cutoffs(
+                    contexts_ref,
+                    numbers,
+                    spaces,
+                    s_len as i64,
+                    evalue_threshold,
+                ) {
+                    Ok(cutoffs) => cutoffs,
+                    Err(overflow) => {
+                        x_read_failure.fail(s_idx, overflow.into());
+                        emit_subject_hits(st, s_idx);
+                        return;
+                    }
+                };
+                x_own_statistics = SubjectStatistics {
+                    cutoff_scores: &x_own_cutoffs.cutoff_scores,
+                    cutoff_score_min: x_own_cutoffs.cutoff_score_min,
+                    length_adj_per_context: &x_own_cutoffs.length_adj_per_context,
+                    eff_searchsp_per_context: &x_own_cutoffs.eff_searchsp_per_context,
+                    word_finder_cx: word_finder::WordFinderCx {
+                        cutoff_scores: &x_own_cutoffs.cutoff_scores,
+                        ..batch_statistics.word_finder_cx
+                    },
+                };
+                &x_own_statistics
+            }
         };
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:772-775
         // ```c
@@ -5324,7 +5341,7 @@ fn search_query_batch<S: TbxScore>(
                 avg_query_length,
                 subject_len_nucl,
                 link_db_length_nucl,
-                cutoff_score_min,
+                statistics.cutoff_score_min,
                 &linking_params_for_cutoff,
             ),
         };
@@ -5354,7 +5371,7 @@ fn search_query_batch<S: TbxScore>(
                 s_frames_preliminary,
                 s_frames_listed,
                 contexts_ref,
-                cutoff_scores,
+                cutoff_scores: statistics.cutoff_scores,
                 x_dropoff_per_context: &x_dropoff_per_context,
                 window,
                 wordsize,
@@ -5393,7 +5410,7 @@ fn search_query_batch<S: TbxScore>(
         // frame's chunks, scanned by the word finder (`word_finder::scan_chunk`) and merged into
         // the frame's list, which joins `combined_ungapped_hits`.
         frame_chunks::search_subject_frames(
-            &word_finder_cx,
+            &statistics.word_finder_cx,
             &frame_chunks::SubjectScan {
                 subjects,
                 x_soft_subjects,
@@ -5471,13 +5488,13 @@ fn search_query_batch<S: TbxScore>(
             linking_params: &linking_params,
             contexts_ref,
             subject_frame_bases: &subject_frame_bases,
-            length_adj_per_context,
-            eff_searchsp_per_context,
+            length_adj_per_context: statistics.length_adj_per_context,
+            eff_searchsp_per_context: statistics.eff_searchsp_per_context,
             x_link_on_pool,
         };
         let stage_args = subject_link::SubjectStageArgs {
             contexts_ref,
-            cutoff_scores,
+            cutoff_scores: statistics.cutoff_scores,
             evalue_threshold,
             timing_enabled,
             reeval_ns: &reeval_ns,
@@ -5569,7 +5586,7 @@ fn search_query_batch<S: TbxScore>(
                     stats_hsp_filtered_by_hsp_test,
                     stats_score_distribution: &mut stats_score_distribution,
                     subject_len_nucl,
-                    cutoff_score_min,
+                    cutoff_score_min: statistics.cutoff_score_min,
                 },
                 &ungapped_hits,
                 diag_enabled,

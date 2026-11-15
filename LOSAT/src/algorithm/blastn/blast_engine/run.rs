@@ -8332,14 +8332,11 @@ fn open_search_database(
                 args.dbsize.is_some_and(|size| size > 0),
                 "BLASTN",
             )?;
-            let shown = database.pairwise_database();
-            for format in &outputs.formats {
-                crate::algorithm::common::database::check_report_sums(
-                    &shown,
-                    crate::blastinput::app::parse_formatting_string(format.outfmt)?.number,
-                    "BLASTN",
-                )?;
-            }
+            crate::algorithm::common::database::check_formats_report_sums(
+                || database.pairwise_database(),
+                outputs.formats.iter().map(|format| format.outfmt),
+                "BLASTN",
+            )?;
             Some(database)
         }
         None => None,
@@ -9964,6 +9961,16 @@ impl<'a> BlastnSubjectRef<'a> {
             block: None,
         }
     }
+}
+
+/// What one call of `process_subject` (`search_query_batch`) reads of the statistics: the cutoffs
+/// and the search spaces of the setup (`x_batch_cutoffs` and the setup's spaces), or, where NCBI
+/// computes the statistics of each subject, the subject's own (`subject_statistics`), or a
+/// preliminary stage's that are not the setup's (a statistics' total of 0 or less).
+#[derive(Clone, Copy)]
+struct CallStatistics<'a> {
+    cutoffs: &'a batch_setup::BatchCutoffs,
+    query_eff_searchsp: &'a Vec<i64>,
 }
 
 /// What both stages of `process_subject` read of one call: the subject's index, trace id and
@@ -13251,6 +13258,7 @@ fn search_query_batch<const UNGAPPED: bool>(
         blastn_debug,
         blastn_trace_enabled,
     };
+    let special_statistics = per_subject || prelim_eff_searchsp.is_some();
     let process_subject = |s_idx: usize,
                            subject: BlastnSubjectRef<'_>,
                            gap_scratch: &mut GapAlignScratch,
@@ -13258,7 +13266,8 @@ fn search_query_batch<const UNGAPPED: bool>(
                            lookups: Option<&LookupTables>,
                            prelim_source: Option<&Vec<PrelimHit>>,
                            subject_hits: &mut Option<SubjectHits>,
-                           prelim_out: &mut Vec<PrelimHit>| {
+                           prelim_out: &mut Vec<PrelimHit>,
+                           statistics: &CallStatistics<'_>| {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:177-180
         // ```c
         //     int status = m_PrelimSearch->CheckInternalData();
@@ -13272,48 +13281,7 @@ fn search_query_batch<const UNGAPPED: bool>(
         }
         let queries = queries_ref;
         let query_contexts = query_contexts_ref;
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443 and
-        // c++/src/algo/blast/core/blast_traceback.c:1598-1628 (the statistics of each subject,
-        // `subject_statistics`): once per subject, the preliminary stage reads the subject's own
-        // cutoffs and spaces, the traceback (`prelim_source`) the subject's hit-saving cutoffs and
-        // the setup's spaces; otherwise the preliminary stage's and the setup's.
-        let x_subject;
-        // An ungapped search has no traceback: the values of its preliminary stage stay
-        // (blast_traceback.c:1526, `perform_traceback`).
-        let traceback_stage = prelim_source.is_some() && !UNGAPPED;
-        let (x_cutoffs, query_eff_searchsp): (&batch_setup::BatchCutoffs, &Vec<i64>) =
-            match (per_subject, traceback_stage) {
-                (false, false) => (x_prelim_cutoffs, prelim_eff_searchsp_ref),
-                (false, true) => (&x_batch_cutoffs, query_eff_searchsp_ref),
-                (true, traceback) => {
-                    let spaces = if traceback {
-                        &traceback_option_spaces
-                    } else {
-                        option_spaces
-                            .as_ref()
-                            .expect("the statistics of each subject have their option spaces")
-                    };
-                    x_subject = match subject_statistics(subject.length, spaces) {
-                        Ok(statistics) => statistics,
-                        Err(error) => {
-                            if let Ok(overflow) =
-                                error.downcast::<crate::stats::setup::SearchSpaceOverflow>()
-                            {
-                                subject_space_overflow.note(overflow);
-                            }
-                            return;
-                        }
-                    };
-                    (
-                        &x_subject.0,
-                        if traceback {
-                            query_eff_searchsp_ref
-                        } else {
-                            &x_subject.1
-                        },
-                    )
-                }
-            };
+        let (x_cutoffs, query_eff_searchsp) = (statistics.cutoffs, statistics.query_eff_searchsp);
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:493-526
         // ```c
@@ -13439,6 +13407,157 @@ fn search_query_batch<const UNGAPPED: bool>(
             );
         }
     };
+    let setup_statistics = CallStatistics {
+        cutoffs: &x_batch_cutoffs,
+        query_eff_searchsp: query_eff_searchsp_ref,
+    };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443 and
+    // c++/src/algo/blast/core/blast_traceback.c:1598-1628 (the statistics of each subject,
+    // `subject_statistics`): once per subject, the preliminary stage reads the subject's own
+    // cutoffs and spaces, the traceback (`prelim_source`) the subject's hit-saving cutoffs and
+    // the setup's spaces; otherwise the preliminary stage's and the setup's.
+    // The call of a database's subject where its statistics are not the setup's: the statistics of
+    // each subject, or a preliminary stage whose values are not the setup's (`prelim_eff_searchsp`).
+    let special_subject = |s_idx: usize,
+                           subject: BlastnSubjectRef<'_>,
+                           gap_scratch: &mut GapAlignScratch,
+                           subject_scratch: &mut SubjectScratch,
+                           lookups: Option<&LookupTables>,
+                           prelim_source: Option<&Vec<PrelimHit>>,
+                           subject_hits: &mut Option<SubjectHits>,
+                           prelim_out: &mut Vec<PrelimHit>| {
+        if !any_valid_context {
+            return;
+        }
+        let x_subject;
+        // An ungapped search has no traceback: the values of its preliminary stage stay
+        // (blast_traceback.c:1526, `perform_traceback`).
+        let traceback_stage = prelim_source.is_some() && !UNGAPPED;
+        let (x_cutoffs, query_eff_searchsp): (&batch_setup::BatchCutoffs, &Vec<i64>) =
+            match (per_subject, traceback_stage) {
+                (false, false) => (x_prelim_cutoffs, prelim_eff_searchsp_ref),
+                (false, true) => (&x_batch_cutoffs, query_eff_searchsp_ref),
+                (true, traceback) => {
+                    let spaces = if traceback {
+                        &traceback_option_spaces
+                    } else {
+                        option_spaces
+                            .as_ref()
+                            .expect("the statistics of each subject have their option spaces")
+                    };
+                    x_subject = match subject_statistics(subject.length, spaces) {
+                        Ok(statistics) => statistics,
+                        Err(error) => {
+                            if let Ok(overflow) =
+                                error.downcast::<crate::stats::setup::SearchSpaceOverflow>()
+                            {
+                                subject_space_overflow.note(overflow);
+                            }
+                            return;
+                        }
+                    };
+                    (
+                        &x_subject.0,
+                        if traceback {
+                            query_eff_searchsp_ref
+                        } else {
+                            &x_subject.1
+                        },
+                    )
+                }
+            };
+        process_subject(
+            s_idx,
+            subject,
+            gap_scratch,
+            subject_scratch,
+            lookups,
+            prelim_source,
+            subject_hits,
+            prelim_out,
+            &CallStatistics {
+                cutoffs: x_cutoffs,
+                query_eff_searchsp,
+            },
+        );
+    };
+    // A database's subject with the setup's statistics (the default path), and with others
+    // (`special_statistics`), out of line: a database's preliminary blocks take the one or the other
+    // once per call (`database_prelim_blocks!`), the traceback of its subjects with hits tests per
+    // subject (`db_process_subject`).
+    let default_db_subject = |s_idx: usize,
+                              subject: BlastnSubjectRef<'_>,
+                              gap_scratch: &mut GapAlignScratch,
+                              subject_scratch: &mut SubjectScratch,
+                              lookups: Option<&LookupTables>,
+                              prelim_source: Option<&Vec<PrelimHit>>,
+                              subject_hits: &mut Option<SubjectHits>,
+                              prelim_out: &mut Vec<PrelimHit>| {
+        process_subject(
+            s_idx,
+            subject,
+            gap_scratch,
+            subject_scratch,
+            lookups,
+            prelim_source,
+            subject_hits,
+            prelim_out,
+            &setup_statistics,
+        );
+    };
+    let special_db_subject = |s_idx: usize,
+                              subject: BlastnSubjectRef<'_>,
+                              gap_scratch: &mut GapAlignScratch,
+                              subject_scratch: &mut SubjectScratch,
+                              lookups: Option<&LookupTables>,
+                              prelim_source: Option<&Vec<PrelimHit>>,
+                              subject_hits: &mut Option<SubjectHits>,
+                              prelim_out: &mut Vec<PrelimHit>| {
+        crate::stats::setup::apart(|| {
+            special_subject(
+                s_idx,
+                subject,
+                gap_scratch,
+                subject_scratch,
+                lookups,
+                prelim_source,
+                subject_hits,
+                prelim_out,
+            )
+        });
+    };
+    let db_process_subject = |s_idx: usize,
+                              subject: BlastnSubjectRef<'_>,
+                              gap_scratch: &mut GapAlignScratch,
+                              subject_scratch: &mut SubjectScratch,
+                              lookups: Option<&LookupTables>,
+                              prelim_source: Option<&Vec<PrelimHit>>,
+                              subject_hits: &mut Option<SubjectHits>,
+                              prelim_out: &mut Vec<PrelimHit>| {
+        if special_statistics {
+            special_db_subject(
+                s_idx,
+                subject,
+                gap_scratch,
+                subject_scratch,
+                lookups,
+                prelim_source,
+                subject_hits,
+                prelim_out,
+            );
+        } else {
+            default_db_subject(
+                s_idx,
+                subject,
+                gap_scratch,
+                subject_scratch,
+                lookups,
+                prelim_source,
+                subject_hits,
+                prelim_out,
+            );
+        }
+    };
 
     // The batch's results, read after its subjects are searched.
     let batch_result = |hit_lists: Vec<Option<BlastnHitList>>,
@@ -13521,6 +13640,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                 kept.map(|kept| &kept[s_idx]),
                 &mut subject_hits,
                 &mut prelim_hits,
+                &setup_statistics,
             );
             (subject_hits, prelim_hits)
         };
@@ -13681,14 +13801,14 @@ fn search_query_batch<const UNGAPPED: bool>(
     // callback (a different closure, so that the default instance of this function holds no
     // capture of this one).
     macro_rules! ungapped_database_callback {
-        ($database:expr, $error:expr) => {
+        ($database:expr, $error:expr, $kernel:ident) => {
             |state: &mut (GapAlignScratch, SubjectScratch),
              ordinal: u32,
              subject: BlastnSubjectRef<'_>| {
                 let (gap_scratch, subject_scratch) = state;
                 let mut subject_hits: Option<SubjectHits> = None;
                 let mut prelim_hits: Vec<PrelimHit> = Vec::new();
-                process_subject(
+                $kernel(
                     ordinal as usize,
                     subject,
                     gap_scratch,
@@ -13711,6 +13831,62 @@ fn search_query_batch<const UNGAPPED: bool>(
                     return None;
                 }
                 (!prelim_hits.is_empty()).then_some(prelim_hits)
+            }
+        };
+    }
+    // A database's preliminary stage in blocks with `$kernel` for each subject (`default_db_subject`
+    // or `special_db_subject`), into `$add`.
+    macro_rules! database_prelim_blocks {
+        ($database:expr, $add:expr, $kernel:ident) => {
+            if UNGAPPED {
+                // The first error of reading a database sequence again for the ungapped
+                // re-evaluation (`BlastnDatabase::with_blastna`).
+                let x_ungapped_error: std::sync::Mutex<Option<(u32, anyhow::Error)>> =
+                    std::sync::Mutex::new(None);
+                database::search_blocks(
+                    $database,
+                    parallel_pool,
+                    use_parallel,
+                    &new_scratch,
+                    &ungapped_database_callback!($database, x_ungapped_error, $kernel),
+                    $add,
+                )
+                .and_then(|()| {
+                    match x_ungapped_error
+                        .lock()
+                        .expect("the error cell is not poisoned")
+                        .take()
+                    {
+                        Some((_, error)) => Err(error),
+                        None => Ok(()),
+                    }
+                })
+            } else {
+                database::search_blocks(
+                    $database,
+                    parallel_pool,
+                    use_parallel,
+                    &new_scratch,
+                    &|state: &mut (GapAlignScratch, SubjectScratch),
+                      ordinal: u32,
+                      subject: BlastnSubjectRef<'_>| {
+                        let (gap_scratch, subject_scratch) = state;
+                        let mut subject_hits: Option<SubjectHits> = None;
+                        let mut prelim_hits: Vec<PrelimHit> = Vec::new();
+                        $kernel(
+                            ordinal as usize,
+                            subject,
+                            gap_scratch,
+                            subject_scratch,
+                            Some(&lookup_tables),
+                            None,
+                            &mut subject_hits,
+                            &mut prelim_hits,
+                        );
+                        (!prelim_hits.is_empty()).then_some(prelim_hits)
+                    },
+                    $add,
+                )
             }
         };
     }
@@ -13760,55 +13936,10 @@ fn search_query_batch<const UNGAPPED: bool>(
                     writer.add(ordinal as usize, prelim_hits)
                 };
                 if any_valid_context {
-                    let searched = if UNGAPPED {
-                        // The first error of reading a database sequence again for the
-                        // ungapped re-evaluation (`BlastnDatabase::with_blastna`).
-                        let x_ungapped_error: std::sync::Mutex<Option<(u32, anyhow::Error)>> =
-                            std::sync::Mutex::new(None);
-                        database::search_blocks(
-                            database,
-                            parallel_pool,
-                            use_parallel,
-                            &new_scratch,
-                            &ungapped_database_callback!(database, x_ungapped_error),
-                            &mut add,
-                        )
-                        .and_then(|()| {
-                            match x_ungapped_error
-                                .lock()
-                                .expect("the error cell is not poisoned")
-                                .take()
-                            {
-                                Some((_, error)) => Err(error),
-                                None => Ok(()),
-                            }
-                        })
+                    let searched = if special_statistics {
+                        database_prelim_blocks!(database, &mut add, special_db_subject)
                     } else {
-                        database::search_blocks(
-                            database,
-                            parallel_pool,
-                            use_parallel,
-                            &new_scratch,
-                            &|state: &mut (GapAlignScratch, SubjectScratch),
-                              ordinal: u32,
-                              subject: BlastnSubjectRef<'_>| {
-                                let (gap_scratch, subject_scratch) = state;
-                                let mut subject_hits: Option<SubjectHits> = None;
-                                let mut prelim_hits: Vec<PrelimHit> = Vec::new();
-                                process_subject(
-                                    ordinal as usize,
-                                    subject,
-                                    gap_scratch,
-                                    subject_scratch,
-                                    Some(&lookup_tables),
-                                    None,
-                                    &mut subject_hits,
-                                    &mut prelim_hits,
-                                );
-                                (!prelim_hits.is_empty()).then_some(prelim_hits)
-                            },
-                            &mut add,
-                        )
+                        database_prelim_blocks!(database, &mut add, default_db_subject)
                     };
                     searched.map_err(|error| {
                         database_search_error(
@@ -13852,55 +13983,10 @@ fn search_query_batch<const UNGAPPED: bool>(
                     collector.add(ordinal as usize, prelim_hits)
                 };
                 if any_valid_context {
-                    let searched = if UNGAPPED {
-                        // The first error of reading a database sequence again for the
-                        // ungapped re-evaluation (`BlastnDatabase::with_blastna`).
-                        let x_ungapped_error: std::sync::Mutex<Option<(u32, anyhow::Error)>> =
-                            std::sync::Mutex::new(None);
-                        database::search_blocks(
-                            database,
-                            parallel_pool,
-                            use_parallel,
-                            &new_scratch,
-                            &ungapped_database_callback!(database, x_ungapped_error),
-                            &mut add,
-                        )
-                        .and_then(|()| {
-                            match x_ungapped_error
-                                .lock()
-                                .expect("the error cell is not poisoned")
-                                .take()
-                            {
-                                Some((_, error)) => Err(error),
-                                None => Ok(()),
-                            }
-                        })
+                    let searched = if special_statistics {
+                        database_prelim_blocks!(database, &mut add, special_db_subject)
                     } else {
-                        database::search_blocks(
-                            database,
-                            parallel_pool,
-                            use_parallel,
-                            &new_scratch,
-                            &|state: &mut (GapAlignScratch, SubjectScratch),
-                              ordinal: u32,
-                              subject: BlastnSubjectRef<'_>| {
-                                let (gap_scratch, subject_scratch) = state;
-                                let mut subject_hits: Option<SubjectHits> = None;
-                                let mut prelim_hits: Vec<PrelimHit> = Vec::new();
-                                process_subject(
-                                    ordinal as usize,
-                                    subject,
-                                    gap_scratch,
-                                    subject_scratch,
-                                    Some(&lookup_tables),
-                                    None,
-                                    &mut subject_hits,
-                                    &mut prelim_hits,
-                                );
-                                (!prelim_hits.is_empty()).then_some(prelim_hits)
-                            },
-                            &mut add,
-                        )
+                        database_prelim_blocks!(database, &mut add, default_db_subject)
                     };
                     searched.map_err(|error| {
                         database_search_error(
@@ -13984,7 +14070,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                     let (gap_scratch, subject_scratch) = state;
                     let mut subject_hits: Option<SubjectHits> = None;
                     let mut prelim_hits: Vec<PrelimHit> = Vec::new();
-                    process_subject(
+                    db_process_subject(
                         ordinal as usize,
                         subject,
                         gap_scratch,

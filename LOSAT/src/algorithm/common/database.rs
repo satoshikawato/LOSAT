@@ -942,7 +942,7 @@ pub(crate) fn check_report_sums(
     outfmt: i32,
     program: &str,
 ) -> Result<()> {
-    if !(0..=4).contains(&outfmt) {
+    if !prints_report_sums(outfmt) {
         return Ok(());
     }
     check_sums_of(
@@ -952,6 +952,31 @@ pub(crate) fn check_report_sums(
         outfmt,
         program,
     )
+}
+
+/// Whether the report format `outfmt` prints the database's sums (`check_report_sums`).
+fn prints_report_sums(outfmt: i32) -> bool {
+    (0..=4).contains(&outfmt)
+}
+
+/// [`check_report_sums`] for each report format of `outfmts` (`-outfmt` values), with the
+/// database's report made by `shown` once, only where a format prints its sums.
+pub(crate) fn check_formats_report_sums<'f>(
+    shown: impl FnOnce() -> PairwiseDatabase,
+    outfmts: impl IntoIterator<Item = &'f str>,
+    program: &str,
+) -> Result<()> {
+    let mut shown = Some(shown);
+    let mut made = None;
+    for outfmt in outfmts {
+        let number = crate::blastinput::app::parse_formatting_string(outfmt)?.number;
+        if !prints_report_sums(number) {
+            continue;
+        }
+        let database = made.get_or_insert_with(|| (shown.take().expect("made once"))());
+        check_report_sums(database, number, program)?;
+    }
+    Ok(())
 }
 
 /// The stored title of a database sequence, as the reports read it (`stored_title`).

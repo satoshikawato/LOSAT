@@ -711,9 +711,9 @@ fn run_inner(
                 args.dbsize.is_some_and(|size| size > 0),
                 program.upper,
             )?;
-            crate::algorithm::common::database::check_report_sums(
-                &database.pairwise_database(),
-                crate::blastinput::app::parse_formatting_string(&args.outfmt)?.number,
+            crate::algorithm::common::database::check_formats_report_sums(
+                || database.pairwise_database(),
+                [args.outfmt.as_str()],
                 program.upper,
             )?;
             Some(database)

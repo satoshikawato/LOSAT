@@ -433,14 +433,11 @@ pub(super) fn run(
             let end = error.as_ref().map_or(range.end, |(oid, _)| *oid);
             let mut kept = kept.into_iter().peekable();
             for oid in range.start..end {
-                let mut computed = match kept.next_if(|(kept_oid, _)| *kept_oid == oid) {
+                let computed = match kept.next_if(|(kept_oid, _)| *kept_oid == oid) {
                     Some((_, computed)) => computed,
                     None => SubjectComputation::empty(),
                 };
-                // The statistics of each subject (`compute_subject_any`), or the chunk's.
-                let subject_params = computed.subject_parameters.take();
-                let params_used: &[ContextParameters] = subject_params.as_deref().unwrap_or(params);
-                sink.subject_start(oid, batch, params_used, computed.prepared_link)?;
+                sink.subject_start(oid, batch, params, computed.prepared_link)?;
                 for (h, contained) in &computed.containment {
                     sink.containment(h, *contained);
                 }
@@ -448,7 +445,7 @@ pub(super) fn run(
                 if options.gapped && !raw.is_empty() {
                     sink.preliminary_purge(oid, &raw, &purged)?;
                 }
-                sink.subject(oid, &purged, batch, params_used)?;
+                sink.subject(oid, &purged, batch, params)?;
             }
             if let Some((_, error)) = error {
                 return Err(error);
@@ -821,15 +818,11 @@ pub(super) fn run_chunks(
                 let end = error.as_ref().map_or(range.end, |(oid, _)| *oid);
                 let mut kept = kept.into_iter().peekable();
                 for oid in range.start..end {
-                    let mut computed = match kept.next_if(|(kept_oid, _)| *kept_oid == oid) {
+                    let computed = match kept.next_if(|(kept_oid, _)| *kept_oid == oid) {
                         Some((_, computed)) => computed,
                         None => SubjectComputation::empty(),
                     };
-                    // The statistics of each subject (`compute_subject_any`), or the chunk's.
-                    let subject_params = computed.subject_parameters.take();
-                    let params_used: &[ContextParameters] =
-                        subject_params.as_deref().unwrap_or(params);
-                    sink.subject_start(oid, batch, params_used, computed.prepared_link)?;
+                    sink.subject_start(oid, batch, params, computed.prepared_link)?;
                     for (h, contained) in &computed.containment {
                         sink.containment(h, *contained);
                     }
@@ -837,7 +830,7 @@ pub(super) fn run_chunks(
                     if options.gapped && !raw.is_empty() {
                         sink.preliminary_purge(oid, &raw, &purged)?;
                     }
-                    sink.subject(oid, &purged, batch, params_used)?;
+                    sink.subject(oid, &purged, batch, params)?;
                 }
                 if let Some((_, error)) = error {
                     return Err(error);

@@ -261,6 +261,36 @@ struct BlastpSubjectParameters {
     cutoffs: BlastpPrelimCutoffs,
 }
 
+impl BlastpSubjectParameters {
+    /// The values the kernel reads of these statistics; the preliminary e-value of a subject's own
+    /// statistics is the options' (`-evalue`, `run_call`'s `prelim_evalue` without the
+    /// composition-based statistics' stretch).
+    fn values(&self, evalue: f64) -> BlastpPrelimValues<'_> {
+        BlastpPrelimValues {
+            word_cutoff_scores: &self.cutoffs.word_cutoff_scores,
+            hit_cutoff_scores: &self.cutoffs.hit_cutoff_scores,
+            search_spaces: &self.search_spaces,
+            prelim_evalue: evalue,
+            sum_stats: self.cutoffs.sum_stats.as_ref(),
+        }
+    }
+}
+
+/// What `run_call`'s kernel (`search_subject`) reads of the preliminary statistics: the word and
+/// hit-saving cutoffs of each context, the search spaces, the preliminary e-value and psiblast's
+/// sum statistics; the setup's (made once per call) or a subject's own
+/// (`BlastpSubjectParameters::values`). One pointer per subject, so that the default path reads
+/// the setup's as it did before the statistics of each subject.
+struct BlastpPrelimValues<'a> {
+    // References to the vectors, as the kernel's per-hit calls captured the setup's before the
+    // statistics of each subject (one pointer each).
+    word_cutoff_scores: &'a Vec<i32>,
+    hit_cutoff_scores: &'a Vec<i32>,
+    search_spaces: &'a Vec<SearchSpace>,
+    prelim_evalue: f64,
+    sum_stats: Option<&'a BlastpSumStats>,
+}
+
 struct BlastpSubjectScratch {
     offset_pairs: Vec<OffsetPair>,
     diag_array: Vec<DiagStruct>,
@@ -5763,14 +5793,11 @@ fn open_search_database(
             {
                 rps_hooks::note_strategy_sets(strategy, rps, resolved, &database)?;
             }
-            let shown = database.pairwise_database();
-            for format in &outputs.formats {
-                crate::algorithm::common::database::check_report_sums(
-                    &shown,
-                    crate::blastinput::app::parse_formatting_string(format.outfmt)?.number,
-                    args.app.name(),
-                )?;
-            }
+            crate::algorithm::common::database::check_formats_report_sums(
+                || database.pairwise_database(),
+                outputs.formats.iter().map(|format| format.outfmt),
+                args.app.name(),
+            )?;
             Some(database)
         }
         None => None,
@@ -11324,17 +11351,20 @@ fn run_call(
     // index in the set, or its ordinal id in the database.
     // The kernel runs no rayon work: with `-db` the window of `database/x_db_keep.rs` makes the
     // workers wait for the one that runs it (header: why the waits end).
-    let process_subject = |scratch: &mut BlastpSubjectScratch,
-                           s_idx: usize,
-                           subject: BlastpSubjectRef<'_>,
-                           subject_result: &mut BlastpSubjectResult| {
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1554
-        // ```c
-        // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
-        //     status = s_BlastSearchEngineCore(..., &hsp_list, ...);
-        //     status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
-        // }
-        // ```
+    let batch_values = BlastpPrelimValues {
+        word_cutoff_scores: &word_cutoff_scores,
+        hit_cutoff_scores: &hit_cutoff_scores,
+        search_spaces: preliminary_search_spaces,
+        prelim_evalue,
+        sum_stats: sum_stats.as_ref(),
+    };
+    // The kernel of one subject, with its preliminary statistics `values` (`process_subject` and
+    // `process_own_subject` below give them).
+    let search_subject = |scratch: &mut BlastpSubjectScratch,
+                          s_idx: usize,
+                          subject: BlastpSubjectRef<'_>,
+                          subject_result: &mut BlastpSubjectResult,
+                          values: &BlastpPrelimValues<'_>| {
         subject_result.reset(s_idx);
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1354,1429-1432
         // ```c
@@ -11350,48 +11380,9 @@ fn run_call(
         if subject.aa_len == 0 {
             return;
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443
-        // ```c
-        //        if (db_length == 0) {
-        //            /* This is not a database search, hence need to recalculate and save
-        //             the effective search spaces and length adjustments for all
-        //             queries based on the length of the current single subject
-        //             sequence. */
-        //            if ((status = BLAST_OneSubjectUpdateParameters(program_number,
-        //                           seq_arg.seq->length, score_options, query_info,
-        //                           sbp, hit_params, word_params,
-        //                           eff_len_params)) != 0)
-        //               return status;
-        //       }
-        // ```
-        // Once per subject, before its scan: the values the rest of this kernel reads are the
-        // subject's own (`subject_parameters`) or the setup's.
-        let x_subject_parameters;
-        let (word_cutoff_scores, hit_cutoff_scores, search_spaces, prelim_evalue, sum_stats) =
-            if per_subject {
-                x_subject_parameters = match subject_parameters(subject.aa_len) {
-                    Ok(parameters) => parameters,
-                    Err(overflow) => {
-                        subject_space_overflow.note(overflow);
-                        return;
-                    }
-                };
-                (
-                    &x_subject_parameters.cutoffs.word_cutoff_scores,
-                    &x_subject_parameters.cutoffs.hit_cutoff_scores,
-                    &x_subject_parameters.search_spaces,
-                    args.evalue,
-                    &x_subject_parameters.cutoffs.sum_stats,
-                )
-            } else {
-                (
-                    &word_cutoff_scores,
-                    &hit_cutoff_scores,
-                    preliminary_search_spaces,
-                    prelim_evalue,
-                    &sum_stats,
-                )
-            };
+        // The cutoffs that the scans' per-hit calls read, as locals.
+        let (word_cutoff_scores, hit_cutoff_scores) =
+            (values.word_cutoff_scores, values.hit_cutoff_scores);
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:112-121
         // ```c
         // (*seq_blk)->sequence_start = (Uint1 *) buffer;
@@ -12541,9 +12532,9 @@ fn run_call(
                 subject.aa_len,
                 &gapped_params,
                 gapped_gumbel.as_ref(),
-                search_spaces,
-                prelim_evalue,
-                sum_stats.as_ref().map(|sum_stats| &sum_stats.preliminary),
+                values.search_spaces,
+                values.prelim_evalue,
+                values.sum_stats.map(|sum_stats| &sum_stats.preliminary),
                 subject_result,
             );
         } else {
@@ -12575,8 +12566,8 @@ fn run_call(
                     subject.aa_len,
                     &gapped_params,
                     gapped_gumbel.as_ref(),
-                    &search_spaces[q_idx],
-                    sum_stats.as_ref().map(|sum_stats| &sum_stats.preliminary),
+                    &values.search_spaces[q_idx],
+                    values.sum_stats.map(|sum_stats| &sum_stats.preliminary),
                 );
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1523-1539
                 // ```c
@@ -12595,7 +12586,7 @@ fn run_call(
                 //     hsp_array[index] = Blast_HSPFree(hsp_array[index]);
                 // }
                 // ```
-                reap_hsplist_by_evalue(&mut compact_hsp_list, prelim_evalue);
+                reap_hsplist_by_evalue(&mut compact_hsp_list, values.prelim_evalue);
                 if !compact_hsp_list.hsps.is_empty() {
                     compact_hsp_list.hsps.shrink_to_fit();
                     subject_result
@@ -12612,6 +12603,53 @@ fn run_call(
         scratch.preliminary_hsp_counts_by_query.clear();
         scratch.preliminary_hsp_list = preliminary_hsp_list;
     };
+    // The kernel with the setup's statistics, and with the subject's own where NCBI computes the
+    // statistics of each subject (`per_subject`: only a database's blocks, which take the one or
+    // the other once per call below, so that the default path has no test per subject).
+    let process_subject = |scratch: &mut BlastpSubjectScratch,
+                           s_idx: usize,
+                           subject: BlastpSubjectRef<'_>,
+                           subject_result: &mut BlastpSubjectResult| {
+        search_subject(scratch, s_idx, subject, subject_result, &batch_values)
+    };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443
+    // ```c
+    //        if (db_length == 0) {
+    //            /* This is not a database search, hence need to recalculate and save
+    //             the effective search spaces and length adjustments for all
+    //             queries based on the length of the current single subject
+    //             sequence. */
+    //            if ((status = BLAST_OneSubjectUpdateParameters(program_number,
+    //                           seq_arg.seq->length, score_options, query_info,
+    //                           sbp, hit_params, word_params,
+    //                           eff_len_params)) != 0)
+    //               return status;
+    //       }
+    // ```
+    // Once per subject that has letters, before its scan: the kernel reads the subject's own
+    // statistics (`subject_parameters`).
+    let process_own_subject =
+        |scratch: &mut BlastpSubjectScratch,
+         s_idx: usize,
+         subject: BlastpSubjectRef<'_>,
+         subject_result: &mut BlastpSubjectResult| {
+            if subject.aa_len == 0 {
+                return search_subject(scratch, s_idx, subject, subject_result, &batch_values);
+            }
+            match subject_parameters(subject.aa_len) {
+                Ok(parameters) => search_subject(
+                    scratch,
+                    s_idx,
+                    subject,
+                    subject_result,
+                    &parameters.values(args.evalue),
+                ),
+                Err(overflow) => {
+                    subject_result.reset(s_idx);
+                    subject_space_overflow.note(overflow);
+                }
+            }
+        };
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1498
     // ```c
@@ -12868,26 +12906,37 @@ fn run_call(
         let new_scratch = || {
             BlastpSubjectScratch::new(offset_array_size, diag_array_size, window, total_query_span)
         };
-        match culling.as_mut() {
-            Some(culling) => database::search_blocks(
-                database,
-                blastp_parallel_pool,
-                window,
-                &new_scratch,
-                &process_subject,
-                culling,
-            ),
-            None => database::search_blocks(
-                database,
-                blastp_parallel_pool,
-                window,
-                &new_scratch,
-                &process_subject,
-                &mut PrelimCollector {
-                    x_compact_hit_lists: &mut x_compact_hit_lists,
-                    prelim_hitlist_size,
-                },
-            ),
+        // The blocks of the database with the kernel of the setup's statistics or of each subject's
+        // (`process_own_subject`), chosen once here.
+        macro_rules! search_database_blocks {
+            ($process_subject:expr) => {
+                match culling.as_mut() {
+                    Some(culling) => database::search_blocks(
+                        database,
+                        blastp_parallel_pool,
+                        window,
+                        &new_scratch,
+                        $process_subject,
+                        culling,
+                    ),
+                    None => database::search_blocks(
+                        database,
+                        blastp_parallel_pool,
+                        window,
+                        &new_scratch,
+                        $process_subject,
+                        &mut PrelimCollector {
+                            x_compact_hit_lists: &mut x_compact_hit_lists,
+                            prelim_hitlist_size,
+                        },
+                    ),
+                }
+            };
+        }
+        if per_subject {
+            search_database_blocks!(&process_own_subject)
+        } else {
+            search_database_blocks!(&process_subject)
         }
         .map_err(|error| {
             // A sequence file that cannot be read: NCBI's error of the batch's

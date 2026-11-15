@@ -328,6 +328,16 @@ pub(crate) fn subject_eff_lengths(
     calc_eff_lengths(query_length, db_length, num_seqs, ka, option_space, program)
 }
 
+// No NCBI counterpart: a call boundary; it computes no value NCBI computes.
+/// Calls `f`, the statistics of each subject of a subject loop (or another call whose statistics
+/// are not the setup's), in a function of its own that is never inlined, so that the loop's default
+/// path keeps its code and pays one test of a flag per subject.
+#[cold]
+#[inline(never)]
+pub(crate) fn apart<R>(f: impl FnOnce() -> R) -> R {
+    f()
+}
+
 /// The first overflow of NCBI's `Int8` search space that the statistics of a subject met in a
 /// subject loop that cannot return an error (`subject_eff_lengths`): the loop notes it, and the
 /// search returns it (LOSAT's refusal, `SearchSpaceOverflow`) after the loop.

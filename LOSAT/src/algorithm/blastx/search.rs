@@ -703,15 +703,11 @@ fn x_search_core(
                     let batch = &chunk.prepared;
                     let mut kept = results.into_iter().peekable();
                     for oid in 0..subjects.len() {
-                        let mut computed = match kept.next_if(|(kept_oid, _)| *kept_oid == oid) {
+                        let computed = match kept.next_if(|(kept_oid, _)| *kept_oid == oid) {
                             Some((_, computed)) => computed,
                             None => SubjectComputation::empty(),
                         };
-                        // The statistics of each subject (`compute_subject_any`), or the chunk's.
-                        let subject_params = computed.subject_parameters.take();
-                        let params_used: &[ContextParameters] =
-                            subject_params.as_deref().unwrap_or(&params);
-                        sink.subject_start(oid, batch, params_used, computed.prepared_link)?;
+                        sink.subject_start(oid, batch, &params, computed.prepared_link)?;
                         for (h, contained) in &computed.containment {
                             sink.containment(h, *contained);
                         }
@@ -719,7 +715,7 @@ fn x_search_core(
                         if options.gapped && !raw.is_empty() {
                             sink.preliminary_purge(oid, &raw, &purged)?;
                         }
-                        sink.subject(oid, &purged, batch, params_used)?;
+                        sink.subject(oid, &purged, batch, &params)?;
                     }
                     sink.chunk_end(chunk, is_split)?;
                 }
@@ -1084,7 +1080,7 @@ fn x_search_core(
                 super::x_timing::batch(XBatch::ScanPar, x_t);
                 let x_t_replay = super::x_timing::lap();
                 for &oid in &wave {
-                    let mut computed = if let Some(computed) = scheduled.next() {
+                    let computed = if let Some(computed) = scheduled.next() {
                         computed?
                     } else {
                         let x_t = super::x_timing::lap();
@@ -1107,11 +1103,7 @@ fn x_search_core(
                         super::x_timing::batch(XBatch::ScanInline, x_t);
                         computed?
                     };
-                    // The statistics of each subject (`compute_subject_any`), or the chunk's.
-                    let subject_params = computed.subject_parameters.take();
-                    let params_used: &[ContextParameters] =
-                        subject_params.as_deref().unwrap_or(&params);
-                    sink.subject_start(oid, batch, params_used, computed.prepared_link)?;
+                    sink.subject_start(oid, batch, &params, computed.prepared_link)?;
                     for (h, contained) in &computed.containment {
                         sink.containment(h, *contained);
                     }
@@ -1158,7 +1150,7 @@ fn x_search_core(
                     if options.gapped && !raw.is_empty() {
                         sink.preliminary_purge(oid, &raw, &purged)?;
                     }
-                    sink.subject(oid, &purged, batch, params_used)?;
+                    sink.subject(oid, &purged, batch, &params)?;
                 }
                 super::x_timing::batch(XBatch::Replay, x_t_replay);
             }
@@ -1304,9 +1296,6 @@ struct SubjectComputation {
     purged: Vec<PreliminaryHsp>,
     containment: Vec<(PreliminaryHsp, bool)>,
     prepared_link: Option<crate::core::link_hsps::LinkCutoffs>,
-    /// The parameters of the subject's own statistics (`compute_subject_any`), which the sink
-    /// reads in place of the chunk's; `None` for the chunk's.
-    subject_parameters: Option<Vec<ContextParameters>>,
 }
 
 #[cfg(feature = "parallel")]
@@ -1319,7 +1308,6 @@ impl SubjectComputation {
             purged: Vec::new(),
             containment: Vec::new(),
             prepared_link: None,
-            subject_parameters: None,
         }
     }
 
@@ -1355,7 +1343,6 @@ fn compute_subject(
     xdrop: i32,
     oid: usize,
     x_containment: bool,
-    word_cutoff_min: Option<i32>,
 ) -> Result<SubjectComputation> {
     compute_subject_with(
         super::seed::Blosum62Bx,
@@ -1368,7 +1355,6 @@ fn compute_subject(
         xdrop,
         oid,
         x_containment,
-        word_cutoff_min,
     )
 }
 
@@ -1387,7 +1373,6 @@ fn compute_subject_of(
     xdrop: i32,
     oid: usize,
     x_containment: bool,
-    word_cutoff_min: Option<i32>,
 ) -> Result<SubjectComputation> {
     compute_subject_with(
         super::seed::MatrixBx::of(options.scoring),
@@ -1400,11 +1385,15 @@ fn compute_subject_of(
         xdrop,
         oid,
         x_containment,
-        word_cutoff_min,
     )
 }
 
-/// [`compute_subject`] or [`compute_subject_of`] by the search's matrix.
+/// [`compute_subject`] or [`compute_subject_of`] by the search's matrix, with the chunk's
+/// parameters `params`, or, where NCBI computes the statistics of each subject (the batch's
+/// `subject_option_spaces`, a database length of 0), with the subject's own
+/// (`compute_own_subject`): one test of the batch per subject on the default path.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1428-1443 (quoted above
+// `search_preliminary`): the subject's own statistics before its scan.
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
 fn compute_subject_any(
@@ -1418,44 +1407,48 @@ fn compute_subject_any(
     oid: usize,
     x_containment: bool,
 ) -> Result<SubjectComputation> {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1428-1443 (quoted above
-    // `search_preliminary`): a subject that NCBI searches (BLASTX's subject is not translated: it
-    // has a residue) gets its own statistics when the database length is 0, before its scan
-    // (`parameters::subject_update`); the sink reads them too (`SubjectComputation`).
-    let (subject_parameters, word_cutoff_min) = match batch.subject_option_spaces.as_deref() {
-        Some(option_spaces) if subjects.length(oid) > 0 => {
-            let numbers = subjects.numbers()?;
-            let length = subjects.length(oid);
-            // A reader batch searched in units (`reader_batch.rs`): `cutoff_score_min` of the
-            // word parameters is the minimum over the batch's contexts (blast_parameters.c:401-416,
-            // `parameters::subject_word_cutoff_min`), which the link cutoffs read.
-            let word_cutoff_min = match batch.reader_shape.as_deref() {
-                Some(shape) if super::linking::computes_link_cutoffs(options) => {
-                    super::parameters::subject_word_cutoff_min(
-                        &shape.batch_contexts,
-                        options,
-                        numbers,
-                        length,
-                    )?
-                }
-                _ => None,
-            };
-            (
-                Some(super::parameters::subject_update(
-                    batch,
-                    params,
-                    options,
-                    numbers,
-                    length,
-                    option_spaces,
-                )?),
-                word_cutoff_min,
-            )
-        }
-        _ => (None, None),
-    };
-    let params = subject_parameters.as_deref().unwrap_or(params);
-    let mut computed = if options.scoring == crate::config::ScoringMatrix::Blosum62 {
+    if let Some(option_spaces) = batch.subject_option_spaces.as_deref() {
+        return compute_own_subject(
+            subjects,
+            batch,
+            params,
+            option_spaces,
+            options,
+            lookup,
+            diagonals,
+            xdrop,
+            oid,
+            x_containment,
+        );
+    }
+    compute_subject_scored(
+        subjects,
+        batch,
+        params,
+        options,
+        lookup,
+        diagonals,
+        xdrop,
+        oid,
+        x_containment,
+    )
+}
+
+/// [`compute_subject`] or [`compute_subject_of`] by the search's matrix.
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn compute_subject_scored(
+    subjects: Subjects<'_>,
+    batch: &PreparedQueryBatch,
+    params: &[ContextParameters],
+    options: &ResolvedOptions,
+    lookup: &BxLookup,
+    diagonals: &mut Diagonals,
+    xdrop: i32,
+    oid: usize,
+    x_containment: bool,
+) -> Result<SubjectComputation> {
+    if options.scoring == crate::config::ScoringMatrix::Blosum62 {
         compute_subject(
             subjects,
             batch,
@@ -1466,7 +1459,6 @@ fn compute_subject_any(
             xdrop,
             oid,
             x_containment,
-            word_cutoff_min,
         )
     } else {
         compute_subject_of(
@@ -1479,10 +1471,75 @@ fn compute_subject_any(
             xdrop,
             oid,
             x_containment,
-            word_cutoff_min,
         )
-    }?;
-    computed.subject_parameters = subject_parameters;
+    }
+}
+
+/// [`compute_subject_scored`] with the subject's own parameters where NCBI computes the
+/// statistics of each subject (`parameters::subject_update`, with the whole query's options'
+/// spaces `option_spaces`): a subject with residues, the one NCBI searches (blast_engine.c:1428-
+/// 1432); an empty one keeps the chunk's. The sink computes them again for the e-values of the
+/// subject's HSPs (`Runtime::subject`). Apart from the default path.
+#[cold]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn compute_own_subject(
+    subjects: Subjects<'_>,
+    batch: &PreparedQueryBatch,
+    params: &[ContextParameters],
+    option_spaces: &[i64],
+    options: &ResolvedOptions,
+    lookup: &BxLookup,
+    diagonals: &mut Diagonals,
+    xdrop: i32,
+    oid: usize,
+    x_containment: bool,
+) -> Result<SubjectComputation> {
+    let length = subjects.length(oid);
+    let own = if length > 0 {
+        Some(super::parameters::subject_update(
+            batch,
+            params,
+            options,
+            subjects.numbers()?,
+            length,
+            option_spaces,
+        )?)
+    } else {
+        None
+    };
+    let params = own.as_deref().unwrap_or(params);
+    let mut computed = compute_subject_scored(
+        subjects,
+        batch,
+        params,
+        options,
+        lookup,
+        diagonals,
+        xdrop,
+        oid,
+        x_containment,
+    )?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1448-1455 (quoted at
+    // `compute_subject_with`): a reader batch searched in units (`reader_batch.rs`) links with
+    // `cutoff_score_min` of the word parameters, the minimum over the batch's contexts
+    // (blast_parameters.c:401-416, `parameters::subject_word_cutoff_min`) at the subject's length.
+    if let (Some(shape), Some(_)) = (batch.reader_shape.as_deref(), computed.prepared_link) {
+        if length > 0 {
+            computed.prepared_link = Some(super::linking::link_cutoffs(
+                batch,
+                params,
+                length as i32,
+                subjects.total_length()?,
+                super::parameters::subject_word_cutoff_min(
+                    &shape.batch_contexts,
+                    options,
+                    subjects.numbers()?,
+                    length,
+                )?,
+            ));
+        }
+    }
     Ok(computed)
 }
 
@@ -1501,7 +1558,6 @@ fn compute_subject_with<S: super::seed::BxScoring>(
     xdrop: i32,
     oid: usize,
     x_containment: bool,
-    word_cutoff_min: Option<i32>,
 ) -> Result<SubjectComputation> {
     #[cfg(feature = "blastx-worker-probe")]
     worker_probe("start", oid);
@@ -1531,13 +1587,15 @@ fn compute_subject_with<S: super::seed::BxScoring>(
     // adoption/observer notification is replayed on the serial OID collector.
     // `db_length` is `BlastSeqSrcGetTotLen` (blast_engine.c:1407), not the statistics' total:
     // `Subjects::total_length`.
+    // With the statistics of each subject, `compute_own_subject` makes them again for a reader
+    // batch searched in units.
     let prepared_link = if super::linking::computes_link_cutoffs(options) {
         Some(super::linking::link_cutoffs(
             batch,
             params,
             subject_length as i32,
             subjects.total_length()?,
-            word_cutoff_min,
+            None,
         ))
     } else {
         None
@@ -1692,7 +1750,6 @@ fn compute_subject_with<S: super::seed::BxScoring>(
         purged,
         containment,
         prepared_link,
-        subject_parameters: None,
     })
 }
 

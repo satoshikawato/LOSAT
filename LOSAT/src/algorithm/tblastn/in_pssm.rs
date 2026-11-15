@@ -98,7 +98,7 @@ pub(super) fn check_records_only(args: &TblastnArgs) -> Result<()> {
 
 /// LOSAT's refusals of a PSI-TBLASTN search, after NCBI's checks of the options and the opening of
 /// the database, before anything is written: NCBI's crash of `-mt_mode 1` (DECISIONS 35 Q4), the
-/// output formats other than 0, 6, 7 and 10 (item PS15b of line PS; 11 crashes NCBI), and a PSSM
+/// output formats other than 0 to 4, 6, 7 and 10 (item PS15b of line PS; 11 crashes NCBI), and a PSSM
 /// query long enough for NCBI to split it.
 pub(super) fn check_limits(
     args: &TblastnArgs,
@@ -136,7 +136,10 @@ pub(super) fn check_limits(
     let searched = psi
         .stop_before_search(args.strategy.is_some(), args.db.is_some())
         .is_none();
-    if searched && !matches!(outfmt, 0 | 6 | 7 | 10) {
+    // The query-anchored formats 1 to 4 are outfmt 0's report with another alignment section
+    // (line RG T3b: NCBI 2.17.0's `-in_pssm` sections, probes `tn.t3b.pssm.*`, are those of the
+    // PSSM's query).
+    if searched && !matches!(outfmt, 0..=4 | 6 | 7 | 10) {
         bail!(
             "output format {outfmt} with -in_pssm is not supported by LOSAT's TBLASTN yet{}",
             if outfmt == 11 {

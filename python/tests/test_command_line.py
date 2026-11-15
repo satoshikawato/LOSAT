@@ -187,4 +187,4 @@ def test_the_pssm_files_are_the_command_lines(command_line, tmp_path):
     assert sorted(path.name for path in api.iterdir()) == names
     for name in names:
         assert (api / name).read_bytes() == (cli / name).read_bytes()
-    assert search.run(*inputs).reports[0].bytes == stdout
+    assert search.run(*inputs, outfmt="6").reports[0].bytes == stdout

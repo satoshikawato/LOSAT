@@ -178,4 +178,4 @@ def test_describe_is_the_engines_table():
 def test_the_option_stubs_are_those_of_the_table():
     tool = Path(__file__).resolve().parents[1] / "tools" / "generate_option_stubs.py"
     done = subprocess.run([sys.executable, str(tool), "--check"], capture_output=True)
-    assert done.returncode == 0, "run tools/generate_option_stubs.py"
+    assert done.returncode == 0, "run tools/generate_option_stubs.py\n" + done.stdout.decode()

@@ -113,30 +113,5 @@ pub(crate) fn check_in_pssm_options(args: &ResolvedBlastpArgs, psi: &Arc<PsiSear
             choice.number
         );
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:91-94
-    // ```c++
-    //     else if (Blast_ProgramIsPsiBlast(program))
-    //         retval = 10000;
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:191-196 (the
-    // chunks of a split query are set up without the PSSM)
-    // A PSSM query that NCBI splits is searched with BLOSUM62 in its preliminary stage. Sizes
-    // that NCBI cannot convert split nothing: they stop the search's query splitter, before any
-    // split (`query_batch::read_psiblast_query_batches`).
-    let Ok(sizes) = crate::algorithm::blastp::protein_query_split::protein_query_split_sizes(10000)
-    else {
-        return Ok(());
-    };
-    if crate::algorithm::blastp::protein_query_split::split_protein_batch(
-        &[psi.query.seq().len()],
-        sizes,
-    )
-    .is_some()
-    {
-        bail!(
-            "a PSSM query of {} letters, which NCBI BLAST+ splits into chunks searched without the PSSM, is not supported by LOSAT's PSIBLAST",
-            psi.query.seq().len()
-        );
-    }
     Ok(())
 }

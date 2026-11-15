@@ -2484,6 +2484,7 @@ fn x_newton_lanes_prefetch_windows<'seq>(
     ranges: &mut Vec<(XLaneRangeKey, BlastRedoRangeResult)>,
 ) -> usize {
     let mut inputs = Vec::new();
+    let mut shared_q = None;
     let mut window_index = first_window;
     while window_index < windows.len() && inputs.len() < X_LANES_PREFETCH_INPUTS {
         let window = &windows[window_index];
@@ -2556,6 +2557,7 @@ fn x_newton_lanes_prefetch_windows<'seq>(
                         range.subject.length,
                         params.compo_adjust_mode,
                         composition_workspace,
+                        &mut shared_q,
                     ) {
                         inputs.push(input);
                     }

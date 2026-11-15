@@ -140,15 +140,16 @@ pub(super) fn x_bp_db_keep() -> bool {
     crate::seqdb::x_bp_db_keep()
 }
 
-/// `read_search_block` with the bytes in `buf`; the errors name `program`.
+/// `read_search_block` with the bytes in the worker's buffer `kept` (`SeqDb::x_read_block_into`;
+/// `SequenceBlock::x_into_kept` gives it back); the errors name `program`.
 fn x_read_search_block_into(
     db: &SeqDb,
     range: BlockRange,
-    buf: Vec<u8>,
+    kept: &mut Vec<u8>,
     program: &str,
 ) -> Result<SequenceBlock> {
     let mut block = db
-        .x_read_block_into(range, buf)
+        .x_read_block_into(range, kept)
         .map_err(|error| crate::algorithm::common::database::search_read_error(error, program))?;
     prepare_search_block(&mut block, db.oid_map(), program)?;
     Ok(block)
@@ -176,7 +177,7 @@ fn x_search_block<K>(
 where
     K: Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult) + Sync,
 {
-    let block = x_read_search_block_into(db, range, std::mem::take(&mut kit.bytes), program)?;
+    let block = x_read_search_block_into(db, range, &mut kit.bytes, program)?;
     kit.scratch.prepare_independent_subject(first_diag_offset);
     let mut with_hits = Vec::new();
     let mut subject_result = BlastpSubjectResult::new(0);
@@ -195,7 +196,7 @@ where
             ));
         }
     }
-    kit.bytes = block.x_into_data();
+    block.x_into_kept(&mut kit.bytes);
     Ok(with_hits)
 }
 
@@ -498,8 +499,7 @@ where
     let mut bytes = Vec::new();
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, block_bytes) {
-        let block =
-            x_read_search_block_into(db, range, std::mem::take(&mut bytes), database.program)?;
+        let block = x_read_search_block_into(db, range, &mut bytes, database.program)?;
         for i in 0..block.len() {
             process_subject(
                 &mut scratch,
@@ -510,7 +510,7 @@ where
             sink.add(&mut subject_result);
         }
         next_ordinal = range.end_ordinal();
-        bytes = block.x_into_data();
+        block.x_into_kept(&mut bytes);
     }
     Ok(())
 }

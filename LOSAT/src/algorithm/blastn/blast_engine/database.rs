@@ -139,12 +139,65 @@ impl XWaitingBytes for u64 {
 #[cfg(test)]
 const BLASTNA_TO_IUPACNA: [u8; 16] = *b"ACGTRYMKWSBDHVN-";
 
-/// `SeqDb::read_block`, mapped with LOSAT_X_BNMAPPED.
-fn x_read_block(db: &SeqDb, range: BlockRange) -> Result<SequenceBlock, SeqDbError> {
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:375,389-392
+// ```c++
+//         len = seqdb.GetSequence(oid, &buf);
+//     ...
+//     /* For preliminary stage, even though sequence buffer points to a memory
+//        mapped location, we still need to call ReleaseSequence. This can only be
+//        guaranteed by making the engine believe tat sequence is allocated.
+//     */
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1376-1378
+// ```c
+//     if ((status =
+//        s_BlastSetUpAuxStructures(seq_src, lookup_wrap, word_params,
+//           ext_options, hit_options, query, query_info, &aux_struct)) != 0)
+// ```
+// NCBI's preliminary stage reads each sequence in place in the mapped volume (`GetFileDataPtr`,
+// seqdbvol.cpp:1817, quoted above `block_subject`), and each search thread allocates its search
+// structures once. LOSAT reads a block with one positioned read (`seqdb::file`, no mapping, so
+// that native builds and WebAssembly share the reader): each worker keeps one buffer for its
+// blocks, read again for each block, so that a block costs no allocation and only bytes the
+// buffer never held are zeroed.
+/// `SeqDb::read_block` (the preliminary stage's blocks). With LOSAT_X_BNMAPPED, into the worker's
+/// block buffer `kept` (`SeqDb::x_read_block_into`: below 1 MiB the worker's own buffer, kept from
+/// one block to the next; a block of 1 MiB or more, one long sequence, in a buffer of
+/// `utils::x_mapped::X_BYTES`); `x_done_kept_block` gives the buffer back.
+fn x_read_block(
+    db: &SeqDb,
+    range: BlockRange,
+    kept: &mut Vec<u8>,
+) -> Result<SequenceBlock, SeqDbError> {
     if super::x_bn_mapped() {
-        db.x_read_block_mapped(range)
+        db.x_read_block_into(range, kept)
     } else {
         db.read_block(range)
+    }
+}
+
+/// With LOSAT_X_BNMAPPED, gives the buffer of a block of `x_read_block` back for the worker's next
+/// block (`SequenceBlock::x_into_kept`: into `kept` below 1 MiB, else to
+/// `utils::x_mapped::X_BYTES`).
+fn x_done_kept_block(block: SequenceBlock, kept: &mut Vec<u8>) {
+    if super::x_bn_mapped() {
+        block.x_into_kept(kept);
+    }
+}
+
+/// No NCBI counterpart (where LOSAT keeps its bytes): a worker of the preliminary stage, its
+/// search scratch and its block buffer (`x_read_block`), both kept from one block to the next.
+struct XWorker<T> {
+    scratch: T,
+    kept: Vec<u8>,
+}
+
+impl<T> XWorker<T> {
+    fn new(scratch: T) -> Self {
+        Self {
+            scratch,
+            kept: Vec::new(),
+        }
     }
 }
 
@@ -157,7 +210,7 @@ fn x_read_sequence(db: &SeqDb, ordinal: u32) -> Result<SequenceBlock, SeqDbError
     }
 }
 
-/// With LOSAT_X_BNMAPPED, gives a block read by `x_read_block` or `x_read_sequence` back to
+/// With LOSAT_X_BNMAPPED, gives a sequence read by `x_read_sequence` back to
 /// `utils::x_mapped::X_BYTES`.
 fn x_done_block(block: SequenceBlock) {
     if super::x_bn_mapped() {
@@ -1143,20 +1196,26 @@ where
         let found: Vec<Result<Vec<(u32, R)>>> = pool.install(|| {
             round
                 .par_iter()
-                .map_init(new_scratch, |scratch, &range| -> Result<Vec<(u32, R)>> {
-                    let block = x_read_block(db, range).map_err(search_read_error)?;
-                    let mut kept = Vec::new();
-                    for i in 0..block.len() {
-                        let ordinal = range.first_ordinal + i as u32;
-                        if let Some(result) =
-                            search(scratch, ordinal, block_subject(&block, &range, i)?)
-                        {
-                            kept.push((ordinal, result));
+                .map_init(
+                    || XWorker::new(new_scratch()),
+                    |worker, &range| -> Result<Vec<(u32, R)>> {
+                        let block =
+                            x_read_block(db, range, &mut worker.kept).map_err(search_read_error)?;
+                        let mut kept = Vec::new();
+                        for i in 0..block.len() {
+                            let ordinal = range.first_ordinal + i as u32;
+                            if let Some(result) = search(
+                                &mut worker.scratch,
+                                ordinal,
+                                block_subject(&block, &range, i)?,
+                            ) {
+                                kept.push((ordinal, result));
+                            }
                         }
-                    }
-                    x_done_block(block);
-                    Ok(kept)
-                })
+                        x_done_kept_block(block, &mut worker.kept);
+                        Ok(kept)
+                    },
+                )
                 .collect()
         });
         // The sequences that keep nothing change no hit list, so the order of the
@@ -1232,17 +1291,21 @@ where
     ))]
     let _ = (pool, parallel, blocks_per_thread);
 
-    let mut scratch = new_scratch();
+    let mut worker = XWorker::new(new_scratch());
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, block_bytes) {
-        let block = x_read_block(db, range).map_err(search_read_error)?;
+        let block = x_read_block(db, range, &mut worker.kept).map_err(search_read_error)?;
         for i in 0..block.len() {
             let ordinal = range.first_ordinal + i as u32;
-            if let Some(result) = search(&mut scratch, ordinal, block_subject(&block, &range, i)?) {
+            if let Some(result) = search(
+                &mut worker.scratch,
+                ordinal,
+                block_subject(&block, &range, i)?,
+            ) {
                 merge(ordinal, result);
             }
         }
-        x_done_block(block);
+        x_done_kept_block(block, &mut worker.kept);
         next_ordinal = range.end_ordinal();
     }
     Ok(())

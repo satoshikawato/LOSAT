@@ -27,7 +27,10 @@
 //! and, while a `-db` stream is open, its large frames (`X_BYTES` too, `tblastn/x_db_stream.rs`),
 //! and the scratch of the ungapped hits' sort (`blastn` `X_SORT`, its own bound); a buffer that
 //! its thread keeps from one subject to the next (the ungapped hits) is mapped but not pooled,
-//! since idle copies of it would only add to those in use.
+//! since idle copies of it would only add to those in use. A worker that keeps its own buffer
+//! below `X_MAPPED_FROM` from one read to the next (the database blocks of BLASTN and BLASTP,
+//! `x_filled_kept`) takes a buffer of the pool for a longer read only and gives it back after
+//! (`x_keep`), so that it does not keep an outlier's room.
 
 /// No NCBI counterpart: the buffers from which a buffer is mapped (Linux with glibc).
 pub(crate) const X_MAPPED_FROM: usize = 1 << 20;
@@ -168,6 +171,37 @@ impl<T: Copy> XPool<T> {
         x_reserve_mapped(&mut v, additional);
         v.resize(len, fill);
         v
+    }
+
+    /// No NCBI counterpart: `x_filled(len, fill)` for a worker that keeps `kept`, its own buffer,
+    /// from one read to the next (a worker's database blocks, `seqdb::file`; `x_keep` gives the
+    /// buffer back). Below `X_MAPPED_FROM` bytes the buffer is `kept`, taken, with the elements its
+    /// last read left in it, grown to exactly `len` if it is shorter; only the elements past its
+    /// length are set to `fill`. From `X_MAPPED_FROM` bytes on (one long sequence) it is
+    /// `x_filled`'s buffer of the pool, and `kept` stays as it is, so that the worker does not
+    /// keep an outlier's room for its next reads.
+    pub(crate) fn x_filled_kept(&self, kept: &mut Vec<T>, len: usize, fill: T) -> Vec<T> {
+        let size = std::mem::size_of::<T>().max(1);
+        if len.saturating_mul(size) >= X_MAPPED_FROM && kept.capacity() < len {
+            return self.x_filled(len, fill);
+        }
+        let mut v = std::mem::take(kept);
+        if v.capacity() < len {
+            v.reserve_exact(len - v.len());
+        }
+        v.resize(len, fill);
+        v
+    }
+
+    /// No NCBI counterpart: gives back a buffer of `x_filled_kept`: one of `X_MAPPED_FROM` bytes
+    /// or more to the pool (`give`; freed where the pool keeps none), a smaller one to `kept`, so
+    /// that a worker keeps only a buffer below `X_MAPPED_FROM` bytes.
+    pub(crate) fn x_keep(&self, kept: &mut Vec<T>, mut v: Vec<T>) {
+        if v.capacity().saturating_mul(std::mem::size_of::<T>().max(1)) >= X_MAPPED_FROM {
+            self.give(&mut v);
+        } else {
+            *kept = v;
+        }
     }
 
     /// `take` among the idle buffers that touched at most twice
@@ -539,6 +573,53 @@ mod tests {
         assert_eq!(empty.is_some(), X_MAPPED_ALLOCATOR);
         assert!(empty.is_none_or(|empty| empty.is_empty()));
         assert_eq!(pool.x_filled(10, 3), vec![3u8; 10]);
+    }
+
+    // `x_filled_kept` and `x_keep` (a worker's database blocks, C4-3): below `X_MAPPED_FROM` the
+    // worker's buffer is read again, filled only past its length, grown to exactly the length
+    // asked; from `X_MAPPED_FROM` on the pool's buffer, which goes back to the pool, and the
+    // worker's buffer stays.
+    #[test]
+    fn a_kept_buffer_is_filled_only_past_its_bytes_and_outliers_go_to_the_pool() {
+        let pool: XPool<u8> = XPool::new(|| 64 << 20);
+        let mut kept: Vec<u8> = Vec::new();
+        let mut v = pool.x_filled_kept(&mut kept, 100, 0);
+        assert_eq!((v.len(), v.capacity()), (100, 100));
+        assert!(v.iter().all(|&b| b == 0));
+        v.fill(7);
+        pool.x_keep(&mut kept, v);
+        assert_eq!(kept.len(), 100);
+        let mut v = pool.x_filled_kept(&mut kept, 150, 0);
+        assert!(kept.is_empty() && kept.capacity() == 0);
+        assert_eq!((v.len(), v.capacity()), (150, 150));
+        assert!(v[..100].iter().all(|&b| b == 7) && v[100..].iter().all(|&b| b == 0));
+        v.fill(5);
+        pool.x_keep(&mut kept, v);
+        let v = pool.x_filled_kept(&mut kept, 40, 0);
+        assert_eq!((v.len(), v.capacity()), (40, 150));
+        assert!(v.iter().all(|&b| b == 5));
+        pool.x_keep(&mut kept, v);
+        let small = kept.as_ptr();
+        // One long sequence: the pool's buffer; the worker's stays.
+        let mut long = pool.x_filled_kept(&mut kept, X_MAPPED_FROM, 0);
+        assert_eq!((kept.as_ptr(), kept.len()), (small, 40));
+        assert_eq!(long.len(), X_MAPPED_FROM);
+        assert!(long.iter().all(|&b| b == 0));
+        long.fill(9);
+        let addr = long.as_ptr();
+        pool.x_keep(&mut kept, long);
+        assert_eq!((kept.as_ptr(), kept.len()), (small, 40));
+        let again = pool.x_filled_kept(&mut kept, X_MAPPED_FROM + 3, 0);
+        assert_eq!(kept.as_ptr(), small);
+        if X_MAPPED_ALLOCATOR {
+            assert_eq!(again.as_ptr(), addr);
+            assert!(again[..X_MAPPED_FROM].iter().all(|&b| b == 9));
+            assert!(again[X_MAPPED_FROM..].iter().all(|&b| b == 0));
+        } else {
+            assert!(again.iter().all(|&b| b == 0));
+        }
+        let mut again = again;
+        pool.give(&mut again);
     }
 
     // `x_take_near`, `x_disown` and `x_clear_idle`.

@@ -260,6 +260,9 @@ fn exercise(dir: &Path, name: &str, seqtype: SeqType, masks: bool, tally: &mut T
         if let Some(block) = tally.check(db.read_sequence(ordinal)) {
             read_letters(&block, seqtype, tally);
         }
+        if let Some(block) = tally.check(db.x_read_sequence_mapped(ordinal)) {
+            read_letters(&block, seqtype, tally);
+        }
         match seqtype {
             SeqType::Protein => {
                 tally.check(db.protein_length(ordinal));
@@ -302,14 +305,17 @@ fn exercise(dir: &Path, name: &str, seqtype: SeqType, masks: bool, tally: &mut T
     }
     ranges.extend(db.x_next_blocks(0, 1024, MAX_BLOCKS));
     ranges.extend(db.x_block_range(0, ordinals));
+    // A worker's buffer, read again from one block to the next.
+    let mut kept = Vec::new();
     for range in ranges {
         if let Some(block) = tally.check(db.read_block(range)) {
             read_letters(&block, seqtype, tally);
         }
-        if let Some(block) = tally.check(db.x_read_block_mapped(range)) {
+        if let Some(block) = tally.check(db.x_read_block_into(range, &mut kept)) {
             read_letters(&block, seqtype, tally);
+            block.x_into_kept(&mut kept);
         }
-        tally.check(db.x_read_block_into(range, Vec::new()));
+        tally.check(db.x_read_block_into(range, &mut Vec::new()));
         let end = range.first_ordinal.saturating_add(range.len());
         match seqtype {
             SeqType::Protein => {

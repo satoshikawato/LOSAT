@@ -19,20 +19,13 @@ use super::SeqDbError;
 pub(crate) const MAP_PAGE: u64 = 4096;
 
 /// Where `DbFile::read_range_in` puts the bytes it reads.
-enum RangeBuffer {
+enum RangeBuffer<'a> {
     /// A new buffer (`read_range`).
     New,
     /// EXPERIMENT (LOSAT_X_BNMAPPED): `x_read_range_mapped`'s buffer.
     Mapped,
-    /// EXPERIMENT (LOSAT_X_BPDBKEEP): the caller's buffer (`x_read_range_into`).
-    #[cfg(any(
-        test,
-        all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        )
-    ))]
-    Given(Vec<u8>),
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP, LOSAT_X_BNMAPPED): the worker's buffer (`x_read_range_into`).
+    Given(&'a mut Vec<u8>),
 }
 
 /// One open database file (`.pin`, `.psq`, `.phr`, ... ) read by offset.
@@ -200,30 +193,26 @@ impl DbFile {
         self.read_range_in(start, end, RangeBuffer::Mapped)
     }
 
-    /// EXPERIMENT (LOSAT_X_BPDBKEEP): `read_range` into `buf`, whose bytes it replaces (its
-    /// capacity is kept when it holds the range). No NCBI counterpart: only where the bytes are
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP, LOSAT_X_BNMAPPED): `read_range` into the buffer that a
+    /// worker keeps from one read to the next, `kept` (taken, its capacity kept when it holds the
+    /// range; a range of 1 MiB or more that it does not hold, one long sequence, goes to a buffer
+    /// of `utils::x_mapped::X_BYTES` instead and `kept` stays): `x_mapped::X_BYTES.x_filled_kept`.
+    /// The buffer goes back with `X_BYTES.x_keep`. No NCBI counterpart: only where the bytes are
     /// kept.
-    #[cfg(any(
-        test,
-        all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        )
-    ))]
     pub fn x_read_range_into(
         &self,
         start: u64,
         end: u64,
-        buf: Vec<u8>,
+        kept: &mut Vec<u8>,
     ) -> Result<Vec<u8>, SeqDbError> {
-        self.read_range_in(start, end, RangeBuffer::Given(buf))
+        self.read_range_in(start, end, RangeBuffer::Given(kept))
     }
 
     fn read_range_in(
         &self,
         start: u64,
         end: u64,
-        buffer: RangeBuffer,
+        buffer: RangeBuffer<'_>,
     ) -> Result<Vec<u8>, SeqDbError> {
         if end < start {
             return Err(SeqDbError::Format {
@@ -246,25 +235,13 @@ impl DbFile {
             path: self.path.clone(),
             message: format!("byte range {start}..{end} does not fit in memory"),
         })?;
+        // A buffer of the pool or of the worker keeps the bytes its last read left in it, and only
+        // the bytes past them are zeroed before the read writes them all.
         let mut buf = match buffer {
             RangeBuffer::New => vec![0u8; len],
-            // A buffer of the pool keeps the bytes its last read left in it, and only the bytes
-            // past them are zeroed before the read writes them all (as `Given` below).
             RangeBuffer::Mapped => crate::utils::x_mapped::X_BYTES.x_filled(len, 0u8),
-            #[cfg(any(
-                test,
-                all(
-                    feature = "parallel",
-                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-                )
-            ))]
-            RangeBuffer::Given(mut buf) => {
-                // Only the bytes past its length are filled before the read writes them all.
-                if buf.capacity() < len {
-                    buf.reserve_exact(len - buf.len());
-                }
-                buf.resize(len, 0u8);
-                buf
+            RangeBuffer::Given(kept) => {
+                crate::utils::x_mapped::X_BYTES.x_filled_kept(kept, len, 0u8)
             }
         };
         self.read_exact_at(&mut buf, start)?;

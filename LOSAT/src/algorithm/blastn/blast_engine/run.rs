@@ -3527,7 +3527,10 @@ struct UngappedHit {
 /// from 1 MiB on, so that they are returned when they are dropped instead of staying in the
 /// arena of the worker thread that freed them; the database's buffers and the sort's scratch go
 /// to shared pools (`utils::x_mapped::X_BYTES`, `X_SORT`) when they are done, so that the next
-/// thread that needs one takes it with its pages resident. The hits are not pooled: a thread
+/// thread that needs one takes it with its pages resident. A worker of the preliminary stage
+/// reads its blocks below 1 MiB into one buffer that it keeps from one block to the next, only its
+/// bytes past those of the last block zeroed (`database.rs` `x_read_block`; a block of 1 MiB or
+/// more, one long sequence, takes a buffer of the pool). The hits are not pooled: a thread
 /// keeps its scratch, and with it its hit buffer, from one subject to the next (as NCBI keeps its
 /// `init_hitlist`), so idle hit buffers in a pool only added to what was in use (Sakai x EDL933
 /// `-subject` blastn at 4 threads, max RSS 298-327 MiB with a pool of 64 MiB, 245-264 without,

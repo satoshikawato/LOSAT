@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.35
+- Version: 1.36
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -85,7 +85,12 @@
   2026-09-29, restated 2026-10-07);
   1.35 2026-11-16 (exception 13, BLASTN `-db_hard_mask` on a sequence whose first mask runs to its
   end, at a scanned word of 11 or more; the Owner's decision of 2026-11-15 「M4a Q1=B」, line NP
-  item M4a-2c)
+  item M4a-2c);
+  1.36 2026-11-16 (the refusal of 1.31 of a stopping batch whose other sequences' loads write texts
+  of the taxonomy database narrowed in the JSON and XML2 formats, outfmt 13 to 16, to the texts
+  after the lookups of the batches before, as in the other formats: a stop after a batch that
+  opened the taxonomy database is written as NCBI writes it; line DBID item mixtax,
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -785,8 +790,10 @@ masked). Line NP item M4a-2c.
   lookup in the database fails (DB contains no accession info.; NCBI BLAST+ 2.17.0's prefetch
   stops with a BLAST Database error, and where the prefetch is off its formatters fail to read
   it)`), and a stopping batch whose other sequences' loads write texts of the
-  taxonomy database or whose other lookups throw on their ids (NCBI's prefetch loads them in the
-  order of its Seq-id handles, which decides what it writes before the error).
+  taxonomy database (after the lookups of the batches before: their prefetch, or in the JSON and
+  XML2 formats their reports, since version 1.36) or whose other lookups throw on their ids
+  (NCBI's prefetch loads them in the order of its Seq-id handles, which decides what it writes
+  before the error).
   Versions 1.9 to 1.24 refused every such list before the search (line DI-8 `DECISIONS.md` 31),
   versions 1.25 to 1.30 every run whose reports or prefetch looked such a Seq-id up.
 

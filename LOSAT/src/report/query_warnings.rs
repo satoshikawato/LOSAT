@@ -362,7 +362,7 @@ pub struct HitPosts {
     /// The report made no read after its last marked `Hit` (`DocumentPosts::cut`).
     cut: bool,
     /// The exception that ends the run after these posts (`DocumentPosts::ends_run`).
-    ends_run: Option<Box<crate::report::serial::xml::XmlThrow>>,
+    ends_run: Option<Box<crate::ncbi_exception::NcbiException>>,
 }
 
 impl HitPosts {
@@ -579,8 +579,10 @@ fn write_reads(
 /// diagnostics) whatever its place among the run's formats (the first format gets them anyway, for
 /// the posts before each query): BLAST XML and the XML2 and JSON documents (the 803.7 posts and
 /// exceptions of their streams, `write_hit_posts`, and the taxonomy database's messages at their
-/// `Hit`s) and the BLAST archive (NCBI's posts, which it saves as messages). A writer that posts
-/// without warnings is LOSAT's internal error (`write_hit_posts`), not a silent loss.
+/// `Hit`s), the BLAST archive (NCBI's posts, which it saves as messages) and the Seq-annots of
+/// outfmt 8, 9 and 12 (the posts of the bytes that NCBI's stream replaces,
+/// `serial::seqalign::write_query_to`). A writer that posts without warnings is LOSAT's internal
+/// error (`write_hit_posts`), not a silent loss.
 pub fn report_posts(format: Option<crate::blastinput::app::ReportFormat>) -> bool {
     use crate::blastinput::app::ReportFormat;
     matches!(
@@ -592,6 +594,9 @@ pub fn report_posts(format: Option<crate::blastinput::app::ReportFormat>) -> boo
                 | ReportFormat::Json
                 | ReportFormat::JsonS
                 | ReportFormat::ArchiveFormat
+                | ReportFormat::AsnText
+                | ReportFormat::AsnBinary
+                | ReportFormat::JsonSeqalign
         )
     )
 }

@@ -880,55 +880,6 @@ unsafe fn count_identities_scalar(q_ptr: *const u8, s_ptr: *const u8, len: usize
     count
 }
 
-/// Test if an HSP should be deleted based on percent identity and minimum hit length.
-///
-/// This is a direct port of NCBI:
-/// - `s_HSPTest` (blast_hits.c:993-1001)
-///
-/// NCBI reference (verbatim, blast_hits.c:993-1001):
-/// ```c
-/// static Boolean s_HSPTest(const BlastHSP* hsp,
-///                          const BlastHitSavingOptions* hit_options,
-///                          Int4 align_length)
-/// {
-/// 	return ((hsp->num_ident * 100.0 <
-/// 			align_length * hit_options->percent_identity) ||
-/// 			align_length < hit_options->min_hit_length) ;
-/// }
-/// ```
-///
-/// # Arguments
-/// * `num_ident` - Number of identical residues
-/// * `align_length` - Alignment length
-/// * `percent_identity` - Percent identity threshold (0.0 = disabled)
-/// * `min_hit_length` - Minimum hit length (0 = disabled)
-///
-/// # Returns
-/// `true` if HSP should be deleted, `false` otherwise
-pub fn hsp_test(
-    num_ident: usize,
-    align_length: usize,
-    percent_identity: f64,
-    min_hit_length: usize,
-) -> bool {
-    // NCBI: (hsp->num_ident * 100.0 < align_length * hit_options->percent_identity)
-    let identity_check = if percent_identity > 0.0 {
-        (num_ident as f64 * 100.0) < (align_length as f64 * percent_identity)
-    } else {
-        false
-    };
-
-    // NCBI: align_length < hit_options->min_hit_length
-    let length_check = if min_hit_length > 0 {
-        align_length < min_hit_length
-    } else {
-        false
-    };
-
-    // NCBI: return (identity_check || length_check)
-    identity_check || length_check
-}
-
 // No NCBI counterpart: the bound tests cannot wrap (line LIB, P-S1; they wrapped in release).
 #[cfg(test)]
 mod bounds_wrap_tests {

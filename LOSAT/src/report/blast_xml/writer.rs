@@ -111,8 +111,10 @@ pub(crate) fn replaced_posts(
 /// object, the texts of the loads before it) is written to the run's diagnostics first, by the one
 /// writer of a document's posts (`report::query_warnings::write_hit_posts`), which hands this error
 /// back after them (`DocumentPosts::ends_run`).
-pub(crate) fn run_ending_exception(thrown: &XmlThrow) -> anyhow::Error {
-    crate::cli::NativeError::exception(&thrown.exception()).into()
+pub(crate) fn run_ending_exception(
+    exception: &crate::ncbi_exception::NcbiException,
+) -> anyhow::Error {
+    crate::cli::NativeError::exception(exception).into()
 }
 
 /// What a document's writer hands its caller with the bytes it wrote since the last
@@ -124,13 +126,16 @@ pub(crate) fn run_ending_exception(thrown: &XmlThrow) -> anyhow::Error {
 #[derive(Debug, Default)]
 pub struct DocumentPosts {
     pub posts: Vec<DocumentPost>,
-    /// BLAST XML (outfmt 5): the `Iteration` of the query written last threw, or one of its `Hit`s
-    /// did, so NCBI made no `Hit` after the last one marked (`HitPosts::hit`) and loaded none of
-    /// their subjects (`s_SeqAlignToXMLHit` loads a subject when it makes its `Hit`).
+    /// The query written last made no `Hit` after the last one marked (`HitPosts::hit`), so NCBI
+    /// loaded none of their subjects (`s_SeqAlignToXMLHit` loads a subject when it makes its
+    /// `Hit`): in BLAST XML (outfmt 5) its `Iteration` threw, or one of its `Hit`s did; in BLAST
+    /// XML, XML2 and JSON one of its HSPs raised an exception that the report function catches
+    /// (`CaughtException`).
     pub cut: bool,
-    /// The exception of NCBI's XML stream that ends the run after these posts: the BLAST XML
-    /// header, a 14 side file (`run_ending_exception`).
-    pub ends_run: Option<Box<XmlThrow>>,
+    /// The exception that ends the run after these posts: of NCBI's XML stream (the BLAST XML
+    /// header, a 14 side file) or of the making of a 13 or 14 side file's report
+    /// (`Xml2Document::failed`) (`run_ending_exception`).
+    pub ends_run: Option<Box<crate::ncbi_exception::NcbiException>>,
 }
 
 /// The marker error with which outfmt 5's hit level stops the program's hits of a query whose
@@ -269,6 +274,20 @@ pub trait StructuredXml {
     /// Appends the end of the document (the epilog), after the last query.
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<()>;
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:757-763
+    // ```c++
+    // 	catch(CException &e){
+    // 	    ERR_POST(Error << e.GetMsg() << e.what() );
+    // 	    return;
+    // 	}
+    // ```
+    /// The message that NCBI posts (`ERR_POST(Error << ...)`, after the program's `Error: [name] `
+    /// prefix) for a query whose report raised `exception` (`CaughtException`): the XML2 and JSON
+    /// documents' `GetMsg()` and `what()`.
+    fn caught_message(&self, exception: &crate::ncbi_exception::NcbiException) -> String {
+        format!("{}{}", exception.get_msg(), exception.what())
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:361-369
     // ```c++
     //     if (m_FormatType >= CFormattingArgs::eXml) {
@@ -393,6 +412,23 @@ impl BlastXmlWriter {
 }
 
 impl StructuredXml for BlastXmlWriter {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:745-760
+    // ```c++
+    // 	query_label = string("Q(")+NStr::NumericToString(index) +
+    // 	    string("/")+ NStr::NumericToString(data->GetNumQueries() );
+    // 	...
+    // 	catch(CException &e){
+    // 	    ERR_POST(Error << "Failed s_BlastXMLAddIteration " << query_label << e.what() );
+    // 	    return;
+    // 	}
+    // ```
+    /// BLAST XML's message: NCBI formats one query per call (blast_format.cpp:708-740), so the
+    /// label is always `Q(0/1` (without its `)`), then `what()`. The `Iteration` stays open after
+    /// the `Hit`s written before the failed one (each written alone, `Xml5Hits`).
+    fn caught_message(&self, exception: &crate::ncbi_exception::NcbiException) -> String {
+        format!("Failed s_BlastXMLAddIteration Q(0/1{}", exception.what())
+    }
+
     /// Appends the `Iteration` of one query to `out` (before it the document's header, for the
     /// first query).
     fn query<F>(
@@ -408,7 +444,7 @@ impl StructuredXml for BlastXmlWriter {
         if self.iterations == 0 {
             if let Some(thrown) = write_header(out, run, query, &mut self.posts.posts)? {
                 // No `Iteration` and no `Hit` of the query is made: the run ends after the posts.
-                self.posts.ends_run = Some(thrown);
+                self.posts.ends_run = Some(Box::new(thrown.exception()));
                 return Ok(());
             }
         }
@@ -488,6 +524,12 @@ impl StructuredXml for BlastXmlWriter {
                 self.posts.cut = true;
             }
             Err(error) => {
+                // An exception that `s_BlastXMLAddIteration` catches (`CaughtException`) leaves
+                // the `Iteration` open after the hits before it; no later `Hit` is made, nor its
+                // subject loaded.
+                if error.is::<super::CaughtException>() {
+                    self.posts.cut = true;
+                }
                 self.scratch.tail = tail;
                 return Err(error);
             }

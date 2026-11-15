@@ -97,8 +97,14 @@ pub(crate) fn position_based_mode(mode: CompositionMode) -> CompositionMode {
 /// A run that NCBI stops before the search (`PsiSearch::stop_before_search`: the search strategy's
 /// "Remote PSI-BL2SEQ" with `-subject`, NCBI's check of the PSSM, the PSSM engine's scores) writes
 /// the prolog and NCBI's error, whatever its format or query (line RG F1b-2, review 4 R5-6): these
-/// refusals of the search's results do not apply to it.
-pub(crate) fn check_in_pssm_options(args: &ResolvedBlastpArgs, psi: &Arc<PsiSearch>) -> Result<()> {
+/// refusals of the search's results do not apply to it. `outfmts` are the numbers of the requested
+/// formats: the command line's one, or each of the records' entries (the library API), checked as
+/// the command line checks it alone.
+pub(crate) fn check_in_pssm_options(
+    args: &ResolvedBlastpArgs,
+    psi: &Arc<PsiSearch>,
+    outfmts: &[i32],
+) -> Result<()> {
     if psi
         .stop_before_search(args.strategy.is_some(), args.db.is_some())
         .is_some()
@@ -106,12 +112,8 @@ pub(crate) fn check_in_pssm_options(args: &ResolvedBlastpArgs, psi: &Arc<PsiSear
         return Ok(());
     }
     // The outfmt 0, 6 and 7 reports (the others are item PS15b's).
-    let choice = crate::blastinput::app::parse_formatting_string(&args.outfmt)?;
-    if !matches!(choice.number, 0 | 6 | 7) {
-        bail!(
-            "output format {} with -in_pssm is not supported by LOSAT's PSIBLAST yet",
-            choice.number
-        );
+    if let Some(number) = outfmts.iter().find(|number| !matches!(number, 0 | 6 | 7)) {
+        bail!("output format {number} with -in_pssm is not supported by LOSAT's PSIBLAST yet");
     }
     Ok(())
 }

@@ -38,8 +38,8 @@ lists them, from the engine's own table, and the type stubs list them by program
 parser checks every option, so an option means, and fails, as it does there (`ArgumentError`).
 `pylosat.PROGRAMS` names the programs; `psiblast` runs its rounds (`num_iterations`) as on the command line.
 
-`-query`, `-subject`, `-db`, `-out` and `-outfmt` are not options here: the inputs and the formats
-are arguments of `run`. Nor is `-in_pssm`: the queries are records. psiblast's `-out_pssm` and
+`-query`, `-subject`, `-db`, `-in_pssm`, `-out` and `-outfmt` are not options here: the inputs and
+the formats are arguments of `run`. psiblast's `-out_pssm` and
 `-out_ascii_pssm` (with `-save_pssm_after_last_round` and `-save_each_pssm`) write the command line's PSSM
 files under their names; `-save_each_pssm` numbers them over the search, also over `batches`.
 
@@ -50,6 +50,11 @@ A `Sequences` is one FASTA input, and the search reads it with the command line'
 - `Sequences.from_fasta(path)`: a file, inflated when it is named `.gz`, `.bz2` or `.zst`.
 - `Sequences.from_text(text)`: FASTA text.
 - `Sequences.from_pairs([(title, sequence), ...])`: the FASTA file of those records.
+
+A PSSM takes the place of the query of psiblast and tblastn: `Pssm.from_file(path)` is
+`-in_pssm path` (psiblast's checkpoint file, as `out_pssm` writes it), read by the search as the
+command line reads it. The one query is the PSSM's sequence: `q_idx` 0, one entry of `query_stats`,
+one batch of `batches`.
 
 A BLAST database takes the place of the subject: `Database("core_nt")` is `-db core_nt`, found as
 the command line finds it (`BLASTDB`, `.ncbirc`), and the options of a database search (`taxids`,

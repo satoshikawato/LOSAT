@@ -202,12 +202,8 @@ fn search_records(
     // The errors of a `-subject` search (`native::run_inner`).
     let search_error = |error: anyhow::Error| -> anyhow::Error {
         // LOSAT's refusal, not an error of NCBI's engine, and an error that has NCBI's report
-        // already (`native::database_search_error`).
-        if error.is::<super::parameters::SearchSpaceOverflow>()
-            || error.is::<super::split::QuerySplitRefusal>()
-            || error.is::<super::preliminary::OneHitWindowRefusal>()
-            || error.is::<crate::cli::NativeError>()
-        {
+        // already (`native::search_error_as_is`).
+        if super::native::search_error_as_is(&error) {
             error
         } else {
             engine(error)
@@ -334,6 +330,7 @@ fn scan_xml_titles(
             query_range,
             batch_size,
             keep_whole,
+            0,
             deliver,
             &mut |_| Ok(()),
         )
@@ -371,6 +368,7 @@ fn reader_batches(
     query_range: Option<SequenceRange>,
     batch_size: usize,
     keep_whole: bool,
+    around: usize,
     deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
     warn: &mut dyn FnMut(&[u8]) -> Result<()>,
 ) -> Result<()> {
@@ -389,6 +387,7 @@ fn reader_batches(
                 // The whole letters of a record whose letter before the interval is lower
                 // case, for the chunks of a split query (`split::x_chunk_masks`).
                 let keep_whole = keep_whole || query.lower_case_before(from);
+                query.keep_around(from, to + 1, around);
                 query.cut_in_place(from, to + 1, keep_whole)
             }
             Some(RecordInterval::Empty) => query.cut_in_place(length, length, keep_whole),
@@ -610,6 +609,12 @@ fn write_run(
     let search_options = &resolved[0];
     // The archive's Bioseq of a cut record holds its whole letters (`FastaRecord::cut_in_place`).
     let keep_whole = archive.is_some();
+    // With `-subject`, the letters around each `-query_loc` interval that the Seq-loc mapper can
+    // read into a query row (`empty_rows::query_letters_around`), as the command line's reader.
+    let around = match database {
+        Some(_) => 0,
+        None => super::empty_rows::query_letters_around(search_options, subjects),
+    };
     let mut read = |deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
                     warn: &mut dyn FnMut(&[u8]) -> Result<()>|
      -> Result<()> {
@@ -619,6 +624,7 @@ fn write_run(
             query_range,
             batch_size,
             keep_whole,
+            around,
             deliver,
             warn,
         )
@@ -732,9 +738,15 @@ fn write_run(
         //                	    formatter.PrintOneResultSet(**result, query_batch);
         // ```
         for (index, (writer, options)) in writers.iter_mut().zip(resolved).enumerate() {
-            // The warnings of the batch's queries are written once, with the first format.
+            // The warnings of the batch's queries are written once, with the first format; NCBI's
+            // posts of the bytes that a Seq-annot's stream replaces (outfmt 8, 9; the only text
+            // that their writer writes to it, `seqalign::write_blastx_seqalign`) at every format,
+            // as the other programs write them.
             let mut quiet = io::sink();
-            let warnings: &mut dyn Write = if index == 0 {
+            let seq_annot = app::ReportFormat::from_number(i32::from(options.outfmt))
+                .and_then(crate::report::serial::SerialFormat::of)
+                .is_some();
+            let warnings: &mut dyn Write = if index == 0 || seq_annot {
                 &mut *diagnostics
             } else {
                 &mut quiet
@@ -1004,7 +1016,6 @@ fn search_database(
             crate::report::serial::seqalign::check_database(
                 serial,
                 database.name(),
-                &database.pairwise_database().definition,
                 Program::Blastx,
             )?;
         }
@@ -1305,5 +1316,6 @@ fn blastx_record(record: &fasta_reader::FastaRecord, lowercase: bool) -> Result<
         lowercase_masks,
         warnings: Vec::new(),
         source: record.source.clone(),
+        around: None,
     })
 }

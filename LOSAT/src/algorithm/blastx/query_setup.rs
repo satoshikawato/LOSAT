@@ -899,6 +899,7 @@ mod tests {
             lowercase_masks: vec![],
             warnings: vec![],
             source: None,
+            around: None,
         };
         assert_eq!(
             batch_ranges(&[record(10001), record(1), record(3)], BATCH_SIZE),
@@ -925,6 +926,7 @@ mod tests {
             lowercase_masks: vec![],
             warnings: vec![],
             source: None,
+            around: None,
         };
         let records = [
             record(100),

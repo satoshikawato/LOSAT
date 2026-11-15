@@ -260,6 +260,8 @@ impl<'a> losat::api::Inputs<'a>
 pub fn losat::api::Inputs<'a>::database(&'a [losat::api::FastaRecord], &'a str) -> Self
 pub fn losat::api::Inputs<'a>::named(self, &'a str, &'a str) -> Self
 pub fn losat::api::Inputs<'a>::new(&'a [losat::api::FastaRecord], &'a [losat::api::FastaRecord]) -> Self
+pub fn losat::api::Inputs<'a>::pssm(&'a std::path::Path, &'a [losat::api::FastaRecord]) -> Self
+pub fn losat::api::Inputs<'a>::pssm_database(&'a std::path::Path, &'a str) -> Self
 impl<'a> core::clone::Clone for losat::api::Inputs<'a>
 pub fn losat::api::Inputs<'a>::clone(&self) -> losat::api::Inputs<'a>
 impl<'a> core::fmt::Debug for losat::api::Inputs<'a>

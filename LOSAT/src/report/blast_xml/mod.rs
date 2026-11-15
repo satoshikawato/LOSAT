@@ -17,6 +17,23 @@ pub use records::{HitTaxonomy, QueryMask, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlS
 pub use subjects::{hit_ranges, SubjectNameCache, XmlSubjects, XmlTitles};
 pub use writer::{written_queries, BlastXmlWriter, DocumentPosts, StructuredXml};
 
+/// An exception of NCBI's formatters raised while one query's structured report is made, which
+/// NCBI's report function catches itself (BLAST XML's `s_BlastXMLAddIteration`, the stream forms
+/// of `BlastXML2_FormatReport` and `BlastJSON_FormatReport`): the document writes what NCBI wrote
+/// before it (`StructuredXml::query`'s output) and the program posts its message
+/// (`StructuredXml::caught_message`) and goes on. Raised by BLASTX's HSPs of length 0
+/// (`algorithm::blastx::empty_rows`).
+#[derive(Debug)]
+pub struct CaughtException(pub crate::ncbi_exception::NcbiException);
+
+impl std::fmt::Display for CaughtException {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0.get_msg())
+    }
+}
+
+impl std::error::Error for CaughtException {}
+
 /// `BlastOutput_reference` of a Gapped BLAST search (every task but megablast); the
 /// `&auml;` is NCBI's text (api/version.cpp:47-51) and is escaped again when written.
 pub const REFERENCE_GAPPED_BLAST: &str = "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.";

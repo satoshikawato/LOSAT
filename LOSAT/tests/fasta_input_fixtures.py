@@ -895,6 +895,24 @@ def extra_rows() -> list[Row]:
         fmts=(11,))
     add("arch_titlelong_first", "blastn", "megablast", "@/batchlong_title_first.nuc.fa", "@/batchlong.s.nuc.fa",
         fmts=(11,))
+    # NCBI's messages of a binary document fall where its output buffer (4096 bytes, back limit 0) has
+    # handed the document's bytes out (M4a-1b part 6; the text archive's back limit is 80): the
+    # combined stream holds them among the bytes. The Seq-annots of outfmt 8 and 9 (M4a-1b2) are one
+    # document per query, whose `-parse_deflines` subject id with a DEL byte NCBI writes as `#` in
+    # each Seq-align, with a message each.
+    for env in ("", "ARCHIVE_FORMAT=bin"):
+        suffix = ".bin" if env else ""
+        add(f"order_title_s{suffix}", "blastn", "megablast", "@/order_big.q.nuc.fa", "@/order_title.s.nuc.fa",
+            env=env, fmts=(11,))
+        add(f"order_delid_s{suffix}", "blastn", "megablast", "@/order_unit.q.nuc.fa", "@/order_delid.s.nuc.fa",
+            env=env, args="-parse_deflines", fmts=(11,))
+    add("order_delid_s", "blastn", "megablast", "@/order_unit.q.nuc.fa", "@/order_delid.s.nuc.fa",
+        args="-parse_deflines", fmts=(8, 9))
+    # BLASTP's Seq-annots (M4a-1b2): a protein subject with a `-parse_deflines` local id holding DEL
+    # (tests/db_search/seqannot/pdel.faa, whose letters repeat the query's, under lcl|p<DEL>1), written
+    # `#` in each Seq-align with NCBI's message each, among the document's bytes.
+    add("seqannot_delid_s", "blastp", "", "tests/db_search/seqannot/qp.faa", "tests/db_search/seqannot/pdel.faa",
+        args="-parse_deflines", fmts=(8, 9))
     # a subject cannot be in a later batch, but its errors and warnings come before the query's
     for program, task in ALL_PROGRAMS:
         q, s = base_pair(program)
@@ -1048,6 +1066,27 @@ def batchlong_files() -> dict[str, bytes]:
     return out
 
 
+def serial_order_files() -> dict[str, bytes]:
+    """The order of NCBI's 803.7 messages among a binary document's bytes (M4a-1b part 6): a
+    query of 20,000 nucleotides whose archive's first 4 KB go out before the `-subject` title's
+    `café`; a 200-nucleotide unit and a subject of 60 copies of it under a `-parse_deflines` local
+    id with a DEL byte, whose 60 Seq-aligns each write the id (one message each)."""
+    rng = random.Random(20261114)
+    big = "".join(rng.choice("ACGT") for _ in range(20000)).encode()
+    unit = "".join(rng.choice("ACGT") for _ in range(200)).encode()
+    subject = b"".join(unit + "".join(rng.choice("ACGT") for _ in range(80)).encode() for _ in range(60))
+
+    def render(title, seq):
+        return b">" + title + b"\n" + b"\n".join(wrap_lines(seq, 60)) + b"\n"
+
+    return {
+        "order_big.q.nuc.fa": render(b"q1 big query", big),
+        "order_title.s.nuc.fa": render("s1 café subject".encode(), big[5000:7000]),
+        "order_unit.q.nuc.fa": render(b"q1 unit", unit),
+        "order_delid.s.nuc.fa": render(b"lcl|s\x7f1 subject", subject),
+    }
+
+
 def seqid_files() -> dict[str, bytes]:
     out = {}
     for i, line in enumerate(SEQID_LINES):
@@ -1056,6 +1095,15 @@ def seqid_files() -> dict[str, bytes]:
                 c = Ctx(kind, role)
                 out[f"seqid{i}.{role}.{kind}.{EXT[kind]}"] = line + b"\n" + c.render()
     return out
+
+
+# Inputs in FIXTURES made by hand, which other fixtures read (tests/db_search/README.md, rows
+# db.archtitle.*.nosq.*): `generate` does not make them and keeps them.
+HAND_MADE = frozenset(
+    f"{stem}.{kind}.{EXT[kind]}"
+    for stem in ("batch_title_unsearched", "batch_title_unsearched_next")
+    for kind in ("nuc", "prot")
+)
 
 
 def command_generate(args) -> int:
@@ -1070,9 +1118,10 @@ def command_generate(args) -> int:
                 files[f"{name}.{role}.{kind}.{EXT[kind]}"] = v["fn"](Ctx(kind, role))
     files.update(batch_files())
     files.update(batchlong_files())
+    files.update(serial_order_files())
     files.update(seqid_files())
     for existing in FIXTURES.iterdir():
-        if existing.is_file() and existing.name not in files:
+        if existing.is_file() and existing.name not in files and existing.name not in HAND_MADE:
             existing.unlink()
     total = 0
     for name, data in files.items():

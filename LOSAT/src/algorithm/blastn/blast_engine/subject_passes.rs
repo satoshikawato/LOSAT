@@ -114,8 +114,13 @@ pub(super) struct SubjectPasses<'a> {
 }
 
 impl SubjectPasses<'_> {
-    /// The records of a subject set, whose titles name the subjects in LOSAT's debug and trace lines
-    /// (none for a database: its sequences are "unknown" there).
+    /// The records of a subject set (none for a database). Their count is the number of subjects that
+    /// `search_subjects` searches and the number of lists into which the subject set's traceback pass
+    /// groups the kept HSPs (`prelim_hits_by_subject`); their titles name the subjects in LOSAT's debug
+    /// and trace lines (a database's sequences are "unknown" there).
+    ///
+    /// No NCBI counterpart: an accessor of LOSAT's subject set; NCBI reads each subject through a
+    /// `BlastSeqSrc` (the loop of `BLAST_PreliminarySearchEngine` quoted at the head of this module).
     fn subject_records(&self) -> &[FastaRecord] {
         self.subjects
             .prepared()
@@ -510,6 +515,25 @@ impl SubjectPasses<'_> {
     /// preliminary hit lists of `prelim_hitlist_size` subjects per query. With `-culling_limit` NCBI's
     /// culling writer takes the place of the HSP collector. A database's read error is returned as it is
     /// (the caller reports it with `database_search_error`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1674-1679 (the preliminary search
+    /// of a batch in `Blast_RunPreliminarySearchWithInterrupt`, into the batch's HSP stream)
+    /// ```c
+    ///     if ((status=
+    ///         BLAST_PreliminarySearchEngine(program, query, query_info,
+    ///                                       seq_src, gap_align, score_params,
+    /// ...
+    ///                                       psi_options, db_options, hsp_stream,
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:351-357 (the stream's writer
+    /// without a filtering option: the HSP collector, `PrelimHitCollector` here; `-culling_limit` chooses
+    /// the culling writer in the body below, and NCBI's other choice, `-best_hit_*`, is not ported)
+    /// ```c
+    ///         /* Use the collector filtering algorithm as the default */
+    ///         BlastHSPCollectorParams * params =
+    /// ...
+    ///         writer_info = BlastHSPCollectorInfoNew(params);
+    /// ```
     pub(super) fn prelim_pass<const UNGAPPED: bool>(
         &self,
         split_prelim_lists: Option<PrelimHitLists>,
@@ -609,6 +633,26 @@ impl SubjectPasses<'_> {
                     // ungapped re-evaluation (`BlastnDatabase::with_blastna`).
                     let x_ungapped_error: std::sync::Mutex<Option<(u32, anyhow::Error)>> =
                         std::sync::Mutex::new(None);
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2651-2665
+                    // ```c
+                    //       	seq_arg.oid = subject_blk->oid;
+                    // ...
+                    //         seq_arg.check_oid_exclusion = TRUE;
+                    // ...
+                    //       	if (( BLAST_SEQSRC_EXCLUDED == BlastSeqSrcGetSequence(seq_src, &seq_arg))) {
+                    //       		for (index = 0; index < hspcnt; ++index) {
+                    //       			 hsp_array[index] = Blast_HSPFree(hsp_array[index]);
+                    //       		}
+                    //       		Blast_HSPListPurgeNullHSPs(hsp_list);
+                    //       		return 0;
+                    //       	}
+                    // ```
+                    // The re-evaluation's fetch of a sequence with HSPs excludes one that the
+                    // negative seqid list keeps without a line (`database::fetch_excluded`):
+                    // its HSPs are freed before the preliminary hit lists, and it is not read. A
+                    // header that the fetch cannot read ends the search (`fetch_refusal`, kept
+                    // in the error cell as a read error is).
+                    let excluded = database::fetch_excluded(database);
                     // The callback of the database's preliminary pass in an ungapped search: the search of the
                     // sequence as for a default search, then the finish of its HSP list when it has HSPs left
                     // (`x_ungapped_database_stage`). A read error goes to the cell `x_ungapped_error` (the one of the
@@ -628,9 +672,20 @@ impl SubjectPasses<'_> {
                                 Some(lookup_tables),
                                 None,
                             );
-                            if let Err(error) =
+                            let fetched = match excluded.as_ref() {
+                                Some(excluded) if !prelim_hits.is_empty() => excluded
+                                    .excludes(ordinal)
+                                    .map_err(|error| database::fetch_refusal((ordinal, error))),
+                                _ => Ok(false),
+                            };
+                            let fetched = fetched.and_then(|excluded| {
+                                if excluded {
+                                    prelim_hits.clear();
+                                    return Ok(());
+                                }
                                 self.x_ungapped_database_stage(database, ordinal, &mut prelim_hits)
-                            {
+                            });
+                            if let Err(error) = fetched {
                                 let mut first = x_ungapped_error
                                     .lock()
                                     .expect("the error cell is not poisoned");
@@ -718,7 +773,32 @@ impl SubjectPasses<'_> {
                     self.prelim_batch.use_parallel,
                 );
                 let new_scratch = || self.new_scratch();
-                let listed = listed_prelim_hits(prelim_lists);
+                let mut listed = listed_prelim_hits(prelim_lists);
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1567-1577
+                // ```c
+                //                 seq_arg.oid = batch->hsplist_array[0]->oid;
+                //                 seq_arg.encoding = encoding;
+                //                 seq_arg.check_oid_exclusion = TRUE;
+                //                 seq_arg.reset_ranges = FALSE;
+                //                 seq_arg.ranges = ranges;
+                //
+                //                 if (BlastSeqSrcGetSequence(seqsrc, &seq_arg) < 0) {
+                //                     batches->array_of_batches[i] = Blast_HSPStreamResultBatchReset(batch);
+                //                     seq_arg.ranges = BlastSeqSrcSetRangesArgFree(ranges);
+                //                     continue;
+                //                 }
+                // ```
+                // The gapped traceback's fetch excludes a listed sequence that the negative
+                // seqid list keeps without a line (`database::fetch_excluded`): the lists of
+                // every query on it leave before the final hit lists (an `-ungapped` search
+                // fetches nothing here; its re-evaluation excluded them, `prelim_pass`).
+                if !UNGAPPED {
+                    if let Some(excluded) = database::fetch_excluded(database) {
+                        excluded
+                            .retain(&mut listed, |(ordinal, _)| Some(*ordinal))
+                            .map_err(database::fetch_refusal)?;
+                    }
+                }
                 let found = database::traceback_listed(
                     database,
                     self.db_hard_mask,

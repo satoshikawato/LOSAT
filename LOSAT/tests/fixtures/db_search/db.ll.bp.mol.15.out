@@ -1,0 +1,192 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/ids/prot_v5"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "qp1 query protein one",
+          "query_len": 140,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "long1",
+                  "accession": "long1",
+                  "title": "long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word "
+                }
+              ],
+              "len": 60,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 121.324,
+                  "score": 303,
+                  "evalue": 9.33356e-42,
+                  "identity": 58,
+                  "positive": 58,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 1,
+                  "hit_to": 60,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP",
+                  "hseq": "MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP",
+                  "midline": "MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 51,
+            "db_len": 4677,
+            "hsp_len": 21,
+            "eff_space": 32249,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/ids/prot_v5"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_2",
+          "query_title": "qp2 unrelated protein",
+          "query_len": 45,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "long1",
+                  "accession": "long1",
+                  "title": "long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word "
+                }
+              ],
+              "len": 60,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 12.6974,
+                  "score": 21,
+                  "evalue": 1.48173,
+                  "identity": 3,
+                  "positive": 5,
+                  "query_from": 24,
+                  "query_to": 32,
+                  "hit_from": 1,
+                  "hit_to": 9,
+                  "align_len": 9,
+                  "gaps": 0,
+                  "qseq": "LWKEHLTFQ",
+                  "hseq": "MWMEHSVLK",
+                  "midline": "+W EH   +"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 12.6974,
+                  "score": 21,
+                  "evalue": 1.54791,
+                  "identity": 4,
+                  "positive": 4,
+                  "query_from": 33,
+                  "query_to": 39,
+                  "hit_from": 35,
+                  "hit_to": 41,
+                  "align_len": 7,
+                  "gaps": 0,
+                  "qseq": "WCNYFWT",
+                  "hseq": "WENYCWP",
+                  "midline": "W NY W "
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 51,
+            "db_len": 4677,
+            "hsp_len": 12,
+            "eff_space": 9834,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/ids/prot_v5"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_3",
+          "query_title": "qnone no hits",
+          "query_len": 36,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 51,
+            "db_len": 4677,
+            "hsp_len": 9,
+            "eff_space": 8289,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+]
+}

@@ -885,6 +885,28 @@ impl ListedSubjects {
         Ok(listed)
     }
 
+    /// The final hit lists of the call (subjects named by rank) without the subjects that
+    /// NCBI makes no Seq-align of (`shared::SeqAligned`): right after the cut to the hit list
+    /// size, before the reads of the reported subjects.
+    pub(super) fn drop_unaligned(
+        &self,
+        database: &BlastpDatabase,
+        hit_lists: &mut [Option<BlastpHitList>],
+    ) {
+        // blastp and psiblast fetch every subject of the redo or the traceback with
+        // `check_oid_exclusion` (`exclude_fetched`).
+        let Some(mut aligned) = shared::SeqAligned::of(&database.db, true) else {
+            return;
+        };
+        for hit_list in hit_lists.iter_mut().flatten() {
+            hit_list.hsplist_array.truncate(hit_list.hsplist_count);
+            aligned.retain(&mut hit_list.hsplist_array, |list| {
+                Some(self.ordinals[list.oid as usize])
+            });
+            hit_list.hsplist_count = hit_list.hsplist_array.len();
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:264-275
     // ```c++
     //     CRef<ILocalQueryData> qdata = m_QueryFactory->MakeLocalQueryData(m_Options);
@@ -1011,6 +1033,61 @@ impl ListedSubjects {
             program: database.program,
         })
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575
+// ```c
+//                     *pStatusCode = s_MatchingSequenceInitialize(
+//                             &matchingSeq,
+//                             program_number,
+//                             seqSrc,
+//                             default_db_genetic_code,
+//                             localMatch->oid,
+//                             ranges
+//                     );
+//                     if (*pStatusCode != 0) {
+//                         /*
+//                          * some sequences may have been excluded by membit filtering
+//                          * so this is not really an exception
+//                          */
+//                         *pStatusCode = 0;
+//                         goto match_loop_cleanup;
+//                     }
+// ```
+// `s_MatchingSequenceInitialize` fetches with `check_oid_exclusion` (blast_kappa.c:1378), as
+// the ordinary traceback does (blast_traceback.c:1567-1577): a subject that the negative seqid
+// list keeps without a line (`shared::FetchExcluded`) leaves the redo or the traceback before
+// it is aligned, after the early termination test of its match (which reads only the heaps,
+// where it never enters), so it takes no place in the final hit lists. LOSAT removes it from
+// the preliminary hit lists before they are listed (after the trim of `ADAPTIVE_CBS`); blastp
+// and psiblast are gapped here (`-ungapped` is refused).
+/// The preliminary hit lists of a call (subjects named by ordinal id) without the subjects
+/// that NCBI's fetches of the redo or the traceback exclude, in their order; LOSAT's refusal
+/// where a subject's header cannot be read there (`shared::FetchExcluded::refusal`).
+fn exclude_fetched(
+    database: &BlastpDatabase,
+    hit_lists: &mut [Option<BlastpHitList>],
+    x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
+) -> Result<()> {
+    let Some(excluded) = shared::FetchExcluded::of(&database.db) else {
+        return Ok(());
+    };
+    let refused = |failed| shared::FetchExcluded::refusal(failed, database.program);
+    for hit_list in hit_lists.iter_mut().flatten() {
+        hit_list.hsplist_array.truncate(hit_list.hsplist_count);
+        excluded
+            .retain(&mut hit_list.hsplist_array, |list| Some(list.oid))
+            .map_err(refused)?;
+        hit_list.hsplist_count = hit_list.hsplist_array.len();
+    }
+    for hit_list in x_compact_hit_lists.iter_mut().flatten() {
+        hit_list.hsplist_array.truncate(hit_list.hsplist_count);
+        excluded
+            .retain(&mut hit_list.hsplist_array, |list| Some(list.oid))
+            .map_err(refused)?;
+        hit_list.hsplist_count = hit_list.hsplist_array.len();
+    }
+    Ok(())
 }
 
 /// The ordinal ids of the subjects of `hit_lists` and `x_compact_hit_lists`, ascending, each once.

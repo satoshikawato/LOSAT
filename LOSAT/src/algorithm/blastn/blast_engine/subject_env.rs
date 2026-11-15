@@ -89,7 +89,6 @@ pub(super) struct SubjectSearchEnv {
     // The hit-saving options, the score matrix and table, and the ungapped X-dropoff of each
     // context.
     pub(super) percent_identity: f64,
-    pub(super) min_hit_length: usize,
     pub(super) score_matrix: BlastnaMatrix,
     pub(super) nucl_score_table: [i32; 256],
     pub(super) x_dropoff_init: Vec<i32>,
@@ -314,7 +313,6 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
     //         align_length < hit_options->min_hit_length) ;
     // ```
     let percent_identity = args.percent_identity_value();
-    let min_hit_length = args.min_hit_length;
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1052-1130 (BlastScoreBlkNuclMatrixCreate)
     let score_matrix = build_blastna_matrix(reward, penalty);
@@ -390,7 +388,6 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
         subject_besthit,
         x_qgroup_batch,
         percent_identity,
-        min_hit_length,
         score_matrix,
         nucl_score_table,
         x_dropoff_init,

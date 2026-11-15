@@ -1445,6 +1445,46 @@ fn the_pssm_files_are_the_command_lines() {
     // One format, or formats of one hit list size, search once.
     run_collect(&search, inputs, &["6", "7"]).unwrap();
     assert!(!take_files(&directory).is_empty());
+    // The command line checks the PSSM files of all its queries before its first byte (a title
+    // that the ASN.1 PSSM cannot write, here the second query's): so does the first of the
+    // batches, which are one query each; no batch stands and no file is written.
+    let mut records = std::fs::read(&query).unwrap();
+    records.extend_from_slice(b">third query \xc3\xa9\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ\n");
+    let titled = directory.join("titled.faa");
+    std::fs::write(&titled, &records).unwrap();
+    let queries = read_fasta(Program::Psiblast, Role::Query, &records).unwrap();
+    let inputs =
+        Inputs::new(&queries, &subjects).named(titled.to_str().unwrap(), subject.to_str().unwrap());
+    let options = [&["-save_pssm_after_last_round"][..], &files].concat();
+    let refused = command(env!("CARGO_BIN_EXE_losat"))
+        .arg("psiblast")
+        .arg("-query")
+        .arg(&titled)
+        .arg("-subject")
+        .arg(&subject)
+        .args(&options)
+        .output()
+        .unwrap();
+    assert!(!refused.status.success() && refused.stdout.is_empty());
+    let message = String::from_utf8(refused.stderr).unwrap();
+    assert!(
+        message.contains("which is not supported by LOSAT's PSIBLAST with -out_pssm"),
+        "{message}"
+    );
+    std::fs::remove_file(&titled).unwrap();
+    assert!(take_files(&directory).is_empty());
+    let search = validate(Program::Psiblast, &options).unwrap();
+    let mut batches = run_batches(&search, inputs).unwrap();
+    let error = batches.next().unwrap().unwrap_err();
+    assert!(message.contains(error.message()), "{error} / {message}");
+    assert!(batches.next().is_none());
+    assert!(
+        take_files(&directory).is_empty(),
+        "the batches wrote no file"
+    );
+    let error = run_collect(&search, inputs, &["6"]).unwrap_err();
+    assert!(message.contains(error.message()), "{error}");
+    assert!(take_files(&directory).is_empty());
     std::fs::remove_dir_all(&directory).unwrap();
 }
 

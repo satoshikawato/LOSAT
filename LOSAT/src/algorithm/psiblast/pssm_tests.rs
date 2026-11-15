@@ -30,6 +30,7 @@ fn options(save_last: bool, save_each: bool, ascii: Option<&str>) -> PsiblastPss
         pseudocount: 0,
         in_pssm: None,
         versions: Default::default(),
+        check_scope: Default::default(),
         rounds: None,
     }
 }
@@ -887,6 +888,24 @@ fn the_runs_numbers_go_on_over_the_calls_that_share_them() {
     write_files(&asn_request(&file, true), &[b"again\n"], &[]).unwrap();
     assert_eq!(std::fs::read(dir.join("p.asn.1")).unwrap(), b"again\n");
     assert_ne!(asn_request(&file, true), first);
+    // The check of the names before a call covers the next `queries` numbers of the run.
+    #[cfg(unix)]
+    {
+        let link = dir.join("p.asn.4");
+        std::os::unix::fs::symlink(dir.join("missing"), &link).unwrap();
+        let refusal = format!(
+            "an -out_pssm file that is a symbolic link to a missing file ({}) is not supported by LOSAT's PSIBLAST",
+            link.display()
+        );
+        assert_eq!(first.versions.next(), [4, 1]);
+        let checked = |request: &PssmRequest, queries| {
+            check_pssm_files(request, queries, None).map_err(|error| error.to_string())
+        };
+        assert_eq!(checked(&first, 1), Err(refusal.clone()));
+        let fresh = asn_request(&file, true);
+        assert_eq!(checked(&fresh, 3), Ok(()));
+        assert_eq!(checked(&fresh, 4), Err(refusal));
+    }
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

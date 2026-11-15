@@ -67,13 +67,6 @@ def test_psiblast_takes_its_pssm_files(option):
     assert Search.from_argv("psiblast", list(words)).argv == words
 
 
-def test_a_pssm_query_is_refused_here():
-    with pytest.raises(TypeError, match="in_pssm"):
-        Search("psiblast", in_pssm="p.asn")
-    with pytest.raises(ArgumentError, match="the queries are given as records"):
-        Search.from_argv("psiblast", ["-in_pssm", "p.asn"])
-
-
 def test_psiblast_takes_no_pssm_query_here():
     with pytest.raises(TypeError, match="in_pssm"):
         Search("psiblast", in_pssm="q.asn")

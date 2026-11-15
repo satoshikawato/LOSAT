@@ -36,6 +36,8 @@ pub struct PsiblastPssmOptions {
     pub in_pssm: Option<std::path::PathBuf>,
     /// The run's `-save_each_pssm` numbers (`PsiblastArgs::pssm_versions`).
     pub versions: PssmVersions,
+    /// The queries that the call's checks of its PSSM files cover (`PsiblastArgs::pssm_check`).
+    pub check_scope: PssmCheckScope,
     /// The rounds that the round driver runs (`algorithm::psiblast::rounds`): `-num_iterations`
     /// when it is not 1 (0: until convergence), or 1 with `-in_pssm` and a PSSM file (the input
     /// PSSM is written before round 1); `None` for the one search of today's call.
@@ -108,6 +110,28 @@ impl PssmVersions {
             self.ascii.load(Ordering::SeqCst),
         ]
     }
+}
+
+/// Which queries a call's checks of its PSSM files before its search cover
+/// (`blastp::blast_engine::check_psiblast_pssm_files`: the titles that the ASN.1 PSSM cannot write,
+/// `check_pssm_titles`, and the names, `check_pssm_files`). The command line reads all its queries
+/// and checks them once, before its first byte; the library's `run_batches`, whose batches are
+/// calls of their own, has its first batch make the run's check, where the command line makes it,
+/// and the later batches none (`api::batches`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum PssmCheckScope {
+    /// The call's own records (the command line, the library's `run`, `run_collect`,
+    /// `run_to_file`).
+    #[default]
+    Call,
+    /// The run's: its number of query records, and the refusal of `check_pssm_titles` of its
+    /// records, if any.
+    Run {
+        queries: usize,
+        title_refusal: Option<String>,
+    },
+    /// Checked by the run's first batch.
+    Checked,
 }
 
 /// Two `PssmVersions` are the same where their next numbers are.

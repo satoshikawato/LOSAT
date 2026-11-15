@@ -5925,7 +5925,7 @@ fn search_cli(
     let QueryRecords { records, end } = read_queries(&mut query_source);
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
     drop(query_source);
-    check_psiblast_pssm_files(&resolved, &records)?;
+    check_psiblast_pssm_files(&resolved, &records, &pssm_check_scope(&args))?;
     let reading = match end {
         QueryEnd::Input => QueryReading::End,
         QueryEnd::EofError => QueryReading::BlankLines,
@@ -6063,8 +6063,22 @@ pub fn run_local(
 /// `search`.) The command line's entry (`search_cli`) makes it where it has read the queries, the
 /// records' entries (`run_local_formats`, `search_database`) where it would, for records that the
 /// command line reads from a file that is not empty (no records: the file of `Query is Empty!`,
-/// before the queries are read).
-fn check_psiblast_pssm_files(resolved: &ResolvedBlastpArgs, records: &[FastaRecord]) -> Result<()> {
+/// before the queries are read). `scope` says which queries the check covers: the call's
+/// `records`, or the run's in the first of the library's query batches (none in the later ones).
+fn check_psiblast_pssm_files(
+    resolved: &ResolvedBlastpArgs,
+    records: &[FastaRecord],
+    scope: &crate::algorithm::psiblast::pssm::PssmCheckScope,
+) -> Result<()> {
+    use crate::algorithm::psiblast::pssm::PssmCheckScope;
+    let (queries, run_titles) = match scope {
+        PssmCheckScope::Call => (records.len(), None),
+        PssmCheckScope::Run {
+            queries,
+            title_refusal,
+        } => (*queries, Some(title_refusal)),
+        PssmCheckScope::Checked => return Ok(()),
+    };
     if let Some(request) = resolved.psi_pssm.as_ref().or_else(|| {
         resolved
             .psi_rounds
@@ -6072,11 +6086,15 @@ fn check_psiblast_pssm_files(resolved: &ResolvedBlastpArgs, records: &[FastaReco
             .and_then(crate::algorithm::psiblast::rounds::PsiRoundPlan::file_request)
     }) {
         if request.asn_path.is_some() {
-            crate::algorithm::psiblast::pssm::check_pssm_titles(records)?;
+            match run_titles {
+                None => crate::algorithm::psiblast::pssm::check_pssm_titles(records)?,
+                Some(Some(refusal)) => bail!("{refusal}"),
+                Some(None) => {}
+            }
         }
         crate::algorithm::psiblast::pssm::check_pssm_files(
             request,
-            records.len(),
+            queries,
             resolved
                 .out
                 .as_deref()
@@ -6084,6 +6102,14 @@ fn check_psiblast_pssm_files(resolved: &ResolvedBlastpArgs, records: &[FastaReco
         )?;
     }
     Ok(())
+}
+
+/// The queries that the call's checks of its PSSM files cover (`PsiblastArgs::pssm_check`).
+fn pssm_check_scope(args: &BlastpArgs) -> crate::algorithm::psiblast::pssm::PssmCheckScope {
+    args.psiblast_pssm
+        .as_ref()
+        .map(|options| options.check_scope.clone())
+        .unwrap_or_default()
 }
 
 fn run_local_formats(
@@ -6134,12 +6160,13 @@ fn run_local_formats(
     // The taxonomy database of the reports, where the command line asks (`open_search_database`).
     subject_taxonomy(&args, &mut resolved, args.taxdb_setting.as_ref(), outputs)?;
     let xinclude = xinclude_format(&args, outputs)?;
+    let scope = pssm_check_scope(&args);
     let args = resolved;
     if args.app == BlastpApp::Psiblast {
         psiblast_check_subject_letters(&subjects.records)?;
     }
     if !query_records.is_empty() {
-        check_psiblast_pssm_files(&args, query_records)?;
+        check_psiblast_pssm_files(&args, query_records, &scope)?;
     }
     search(
         args,
@@ -6218,7 +6245,7 @@ fn search_database(
         .ok_or_else(crate::blastinput::app::missing_subject_error)?;
     let xinclude = xinclude_format(&args, outputs)?;
     if !query_records.is_empty() {
-        check_psiblast_pssm_files(&resolved, query_records)?;
+        check_psiblast_pssm_files(&resolved, query_records, &pssm_check_scope(&args))?;
     }
     search(
         resolved,

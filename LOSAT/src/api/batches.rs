@@ -337,8 +337,21 @@ impl Batches<'_> {
             Commands::Tblastn(args) => args.first_query_ordinal = range.start,
             Commands::Tblastx(args) => args.first_query_ordinal = range.start,
             Commands::Psiblast(args) => {
+                use crate::algorithm::psiblast::pssm::{check_pssm_titles, PssmCheckScope};
                 args.first_query_ordinal = range.start;
                 args.pssm_versions = self.pssm_versions.clone();
+                // The command line checks the PSSM files of all its queries before its first
+                // byte: the first batch checks the run's, where the command line does.
+                args.pssm_check = if self.searched_one {
+                    PssmCheckScope::Checked
+                } else {
+                    PssmCheckScope::Run {
+                        queries: self.lengths.len(),
+                        title_refusal: check_pssm_titles(self.inputs.query)
+                            .err()
+                            .map(|error| error.to_string()),
+                    }
+                };
             }
             // BLASTX's messages show the record's own id; rpsblast and rpstblastn are refused
             // by `Program::parse`.

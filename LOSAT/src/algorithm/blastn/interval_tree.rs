@@ -243,6 +243,25 @@ pub(crate) const X_MAX_CELLS: usize = 1 << 16;
 const X_MAX_CELLS_PER_HSP: usize = 1024;
 /// With more HSPs than this in `overflow` the index is abandoned.
 const X_MAX_OVERFLOW: usize = 512;
+/// Grid cells per HSP of a tree made for a known number of HSPs (`x_tree_cells`).
+pub(crate) const X_TREE_CELLS_PER_HSP: usize = 64;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3830-3831
+// ```c
+//       tree = Blast_IntervalTreeInit(0, query->length+1,
+//                                     0, subject->length+1);
+// ```
+/// No NCBI counterpart: the grid limit (`reset_with_bounds_cells`) of a tree NCBI makes for one
+/// list of HSPs (the initial HSPs of a subject, or the HSPs a traceback starts from). The tree
+/// holds at most one HSP per HSP of the list, so its grid index gets `X_TREE_CELLS_PER_HSP` cells
+/// per HSP, at most the grid's own limit (`X_MAX_CELLS`, four bytes per cell, zeroed on the first
+/// HSP): a subject with a few HSPs no longer takes a grid of up to 256 KiB for them. The count
+/// only sizes the grid: a smaller grid lists more leaves per cell and answers the same, whatever
+/// the tree holds.
+pub(crate) fn x_tree_cells(hsps: usize) -> usize {
+    hsps.saturating_mul(X_TREE_CELLS_PER_HSP)
+        .clamp(X_TREE_CELLS_PER_HSP, X_MAX_CELLS)
+}
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:440-443,452-461
 /// ```c
@@ -587,6 +606,26 @@ impl BlastIntervalTree {
         let root = IntervalNode::new_internal(q_min, q_max);
         tree.nodes.push(root);
 
+        tree
+    }
+
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:146-170
+    /// ```c
+    /// Blast_IntervalTreeInit(Int4 q_start, Int4 q_end,
+    ///                        Int4 s_start, Int4 s_end)
+    /// ...
+    ///     tree->s_min = s_start;
+    ///     tree->s_max = s_end;
+    /// ...
+    ///     s_IntervalRootNodeInit(tree, q_start, q_end, &retval);
+    /// ```
+    /// `new` for a tree NCBI makes for one list of `hsps` HSPs: the grid index is limited to
+    /// `x_tree_cells(hsps)` cells. The tree is the same; the grid only answers the walk's
+    /// question, so its size changes the time and memory of the answer, not the answer.
+    pub fn new_for_hsps(q_min: i32, q_max: i32, s_min: i32, s_max: i32, hsps: usize) -> Self {
+        let mut tree = Self::new(q_min, q_max, s_min, s_max);
+        tree.x
+            .set_bounds_cells(q_min, q_max, s_min, s_max, x_tree_cells(hsps));
         tree
     }
 
@@ -2186,6 +2225,20 @@ mod tests {
             query_length: 1000,
             query_context_offset: 0,
             subject_frame_sign,
+        }
+    }
+
+    // No NCBI counterpart: the grid limit of a tree made for a list of HSPs (`x_tree_cells`).
+    #[test]
+    fn tree_grid_follows_the_hsps() {
+        assert_eq!(x_tree_cells(0), X_TREE_CELLS_PER_HSP);
+        assert_eq!(x_tree_cells(1), X_TREE_CELLS_PER_HSP);
+        assert_eq!(x_tree_cells(10), 10 * X_TREE_CELLS_PER_HSP);
+        assert_eq!(x_tree_cells(1 << 20), X_MAX_CELLS);
+        assert_eq!(x_tree_cells(usize::MAX), X_MAX_CELLS);
+        for hsps in [0, 3, 1 << 20] {
+            let tree = BlastIntervalTree::new_for_hsps(0, 20_001, 0, 200_001, hsps);
+            assert!(tree.x.nq * tree.x.ns <= x_tree_cells(hsps));
         }
     }
 

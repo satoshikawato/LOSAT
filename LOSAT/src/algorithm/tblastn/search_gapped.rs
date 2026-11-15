@@ -114,11 +114,12 @@ fn score_gapped_chunk<S: super::score::TbnScore, const ONE_HIT: bool>(
     // if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
     //                                   hit_options->min_diag_separation)) { ... }
     // BlastIntervalTreeAddHSP(new_hsp, tree, query_info, eQueryAndSubject);
-    let mut tree = BlastIntervalTree::new(
+    let mut tree = BlastIntervalTree::new_for_hsps(
         0,
         total_query_length + 1,
         0,
         i32::try_from(chunk.length)? + 1,
+        frame_initial.len(),
     );
     for hit in frame_initial {
         // NCBI c++/src/algo/blast/core/blast_gapalign.c:2371-2468:
@@ -3052,7 +3053,8 @@ fn x_traceback_in_windows<S: super::score::TbnScore>(
         // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info,
         //                                   hit_options->min_diag_separation)) { ... }
         // BlastIntervalTreeAddHSP(hsp, tree, query_info, eQueryAndSubject);
-        let mut tree = BlastIntervalTree::new(0, query_length + 1, 0, subject_limit);
+        let mut tree =
+            BlastIntervalTree::new_for_hsps(0, query_length + 1, 0, subject_limit, ordered.len());
         for hit in &ordered {
             // NCBI c++/src/algo/blast/core/blast_traceback.c:403-405,607-609:
             // if (... || !BlastIntervalTreeContainsHSP(tree, hsp, ...)) { ... }
@@ -3245,7 +3247,13 @@ fn x_traceback_in_windows<S: super::score::TbnScore>(
             // for (...) if (BlastIntervalTreeContainsHSP(tree, hsp, query_info,
             //        hit_options->min_diag_separation)) Blast_HSPFree(hsp);
             // else BlastIntervalTreeAddHSP(hsp, tree, query_info, eQueryAndSubject);
-            let mut final_tree = BlastIntervalTree::new(0, query_length + 1, 0, subject_limit);
+            let mut final_tree = BlastIntervalTree::new_for_hsps(
+                0,
+                query_length + 1,
+                0,
+                subject_limit,
+                results.len(),
+            );
             results.retain(|item| {
                 let hsp = &item.hsp;
                 let tree_hsp = traceback_tree_hsp(hsp, query_length);

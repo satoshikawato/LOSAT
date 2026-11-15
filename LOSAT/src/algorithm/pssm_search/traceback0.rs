@@ -374,7 +374,15 @@ pub(crate) fn trace_hsps<R: PssmRows>(
         TraceSubject::One(letters) => (letters.len() as i32 + 1, false),
         TraceSubject::Frames { tree_bound, .. } => (tree_bound, true),
     };
-    let mut tree = BlastIntervalTree::new(0, inputs.tree_query_bound, 0, tree_subject_bound);
+    // At most one tree HSP per HSP of the list; a list of unknown length gets the whole grid.
+    let list_len = hsps.size_hint().1.unwrap_or(usize::MAX);
+    let mut tree = BlastIntervalTree::new_for_hsps(
+        0,
+        inputs.tree_query_bound,
+        0,
+        tree_subject_bound,
+        list_len,
+    );
     let mut traced: Vec<Traced> = Vec::new();
     let mut stat_length = 0usize;
     for mut hsp in hsps {

@@ -119,11 +119,12 @@ pub(crate) fn ordinary_traceback_observed(
     });
     // blast_parameters.c:454-463: the final X-drop (`parameters::gapped_x_drops`).
     let xdrop = super::parameters::gapped_x_drops(options, &ka).1;
-    let mut tree = BlastIntervalTree::new(
+    let mut tree = BlastIntervalTree::new_for_hsps(
         0,
         batch.sequence_start.len() as i32,
         0,
         subject.len() as i32 + 1,
+        input.len(),
     );
     let mut scratch = GapAlignScratch::new();
     let mut output = Vec::new();

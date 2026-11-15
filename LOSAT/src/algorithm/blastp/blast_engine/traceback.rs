@@ -186,8 +186,15 @@ impl OrdinaryTraceback<'_> {
         let query_nomask = query_nomask_sequence(ctx);
         let subject_read = self.subjects.read(oid)?;
         let subject = subject_read.residues();
-        let mut tree =
-            BlastIntervalTree::new(0, self.total_query_span, 0, subject.len() as i32 + 1);
+        // At most one tree HSP per HSP of the list; a list of unknown length gets the whole grid.
+        let list_len = hsps.size_hint().1.unwrap_or(usize::MAX);
+        let mut tree = BlastIntervalTree::new_for_hsps(
+            0,
+            self.total_query_span,
+            0,
+            subject.len() as i32 + 1,
+            list_len,
+        );
         let mut traced: Vec<Traced> = Vec::new();
         for mut hsp in hsps {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:402-405

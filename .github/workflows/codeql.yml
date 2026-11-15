@@ -1,0 +1,76 @@
+name: CodeQL
+
+# Code scanning with CodeQL, for the languages of this repository: GitHub Actions workflows,
+# JavaScript/TypeScript (web/), Python (python/, scripts) and Rust (LOSAT/). It replaces GitHub's
+# CodeQL default setup (Owner, 2026-11-15: scan dev once a week and main on every push; no run on
+# pull requests, so no CI congestion). Default setup scans only the default branch, main, which
+# lags dev, where all work merges, by weeks.
+#
+# - Every push to main runs the scan on that commit.
+# - Once a week (Monday 03:00 JST) a scheduled run scans the head of dev. GitHub starts a schedule
+#   only from the file on the default branch, main, so main carries the same file as dev; the run
+#   checks out dev and files its results under refs/heads/dev and dev's commit, not main's.
+# - workflow_dispatch scans the branch it is started on.
+#
+# The categories are /language:<language>, the ones default setup used, so the alerts that exist
+# and their dismissals carry over to this workflow's results. Code scanning rejects an upload from
+# an advanced setup while default setup is on: default setup must be off.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 18 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  analyze:
+    name: analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [actions, javascript-typescript, python, rust]
+    steps:
+      - name: Check out the scanned commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # A schedule runs on main's ref; the scan is of dev. Other triggers scan their own commit.
+          ref: ${{ github.event_name == 'schedule' && 'dev' || '' }}
+          persist-credentials: false
+
+      - name: Name the scanned ref and commit
+        id: scan
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = schedule ]; then
+            echo "ref=refs/heads/dev" >> "$GITHUB_OUTPUT"
+            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          else
+            # Empty: the analysis is filed under the run's own ref and commit.
+            echo "ref=" >> "$GITHUB_OUTPUT"
+            echo "sha=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: /language:${{ matrix.language }}
+          ref: ${{ steps.scan.outputs.ref }}
+          sha: ${{ steps.scan.outputs.sha }}

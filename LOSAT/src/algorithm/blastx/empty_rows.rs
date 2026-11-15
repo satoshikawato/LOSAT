@@ -257,8 +257,8 @@ pub(crate) fn empty_row_scores(
 /// no row of letters, so the mapper takes both rows as nucleotides of one segment of unknown
 /// length and maps the subject row from its start to the end of the subject's interval
 /// (`refuse_mapped_without_scores`, `seq_align_mapper_base.cpp:422-503`, `:1002-1232`): `n`
-/// residues of the subject against `n` nucleotides of the query from the mapped nucleotide
-/// (`serial::seqalign::mapped_empty_query_nucleotide`) on the frame's strand, without scores.
+/// residues of the subject against `n` nucleotides of the query on the frame's strand
+/// (`MappedRows`), without scores.
 /// NCBI's tabular formatter reads it as any Seq-align of letters (`CreateDensegFromStdseg` finds
 /// equal lengths, width 1): the rows are the query's nucleotides (the complement on a minus
 /// strand) and the subject's residues, which it compares as letters, and past the record's last
@@ -297,9 +297,9 @@ impl MappedAlignment {
 
 /// What `-subject`'s Seq-loc mapper makes of the only shown HSP of a subject when it has length 0
 /// (`MappedAlignment`): `n` residues of the subject from the HSP's start to the end of its
-/// interval against `n` nucleotides of the query from the mapped nucleotide (in the record:
-/// `RemapToQueryLoc` moves the row there first, blast_seqalign.cpp:1634-1636), up on a plus
-/// strand and down on a minus strand.
+/// interval against `n` nucleotides of the query (in the record: `RemapToQueryLoc` moves the row
+/// there first, blast_seqalign.cpp:1634-1636), from the start of its empty row up on a plus
+/// strand, and ending two below it on a minus strand.
 pub(crate) enum MappedRows {
     /// An alignment of letters.
     Letters(MappedAlignment),
@@ -325,24 +325,40 @@ impl MappedRows {
         let n = srow.len();
         let place = query.placement();
         let searched = query.sequence.len();
-        let raw = crate::report::serial::seqalign::ungapped_interval(
-            hsp.q_start,
-            hsp.q_end,
-            hsp.frame,
-            searched as i32,
-        )
-        .0;
-        let at = usize::try_from(
-            crate::report::serial::seqalign::mapped_empty_query_nucleotide(raw, hsp.frame),
+        // The query row's start in the record: `RemapToQueryLoc` moves the row first.
+        let start = usize::try_from(
+            crate::report::serial::seqalign::ungapped_interval(
+                hsp.q_start,
+                hsp.q_end,
+                hsp.frame,
+                searched as i32,
+            )
+            .0,
         )
         .ok()?
             + place.offset;
         let plus = hsp.frame > 0;
+        // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1176-1184
+        // ```c++
+        //             else {
+        //                 // Adjust starts of all other rows.
+        //                 if (mrow.m_Start != kInvalidSeqPos) {
+        //                     if (mrow.SameStrand(aln_row)) {
+        //                         mrow.m_Start += left_shift;
+        //                     }
+        //                     else {
+        //                         mrow.m_Start +=
+        //                             seg.m_Len - mseg.m_Len - left_shift;
+        // ```
+        // The segment's length is the unknown -1 (`seglens`, :499) as an unsigned `TSeqPos`, the
+        // mapped one `n`: a plus row (the strand of the subject's unset one) keeps its start, a
+        // minus row's moves `n + 1` down, so that it ends two before its start (probes: qstart
+        // one below dev's on the minus frames of every `fix3_grid.py` case).
         let (from, to) = if plus {
-            (at, at + n.checked_sub(1)?)
+            (start, start + n.checked_sub(1)?)
         } else {
-            match (at + 1).checked_sub(n) {
-                Some(from) => (from, at),
+            match start.checked_sub(n + 1) {
+                Some(from) => (from, start - 2),
                 None => return Some(MappedRows::QueryRowWraps),
             }
         };
@@ -776,8 +792,9 @@ mod tests {
         );
         assert_eq!(plus.rows(), Some((&b"TCCC"[..], &b"TLWI"[..])));
         assert_eq!((plus.q_frame, plus.length()), (1, 4));
-        // Its minus-frame twin (frame -2): `11 8 2 5 4 CCCT TLWI ... -2`.
-        let MappedRows::Letters(minus) = mapped(&record("TATGGGCAGGGAGAA"), "GTLWI", -2) else {
+        // Its minus-frame twin (an HSP of frame -1, whose empty row starts at 12):
+        // `11 8 2 5 4 CCCT TLWI ... -2`, the row two below that start.
+        let MappedRows::Letters(minus) = mapped(&record("TATGGGCAGGGAGAA"), "GTLWI", -1) else {
             panic!("letters");
         };
         assert_eq!((minus.q_start, minus.q_end, minus.q_frame), (11, 8, -2));
@@ -791,7 +808,7 @@ mod tests {
         assert_eq!(past.rows().unwrap().0, b"TCGGCATGGCTG-");
         // x2g_s1w: the minus twin would start before the query's first nucleotide.
         assert!(matches!(
-            mapped(&record("CAGCCATGCCGAGCA"), "ETANLXXXXXXXXX", -2),
+            mapped(&record("CAGCCATGCCGAGCA"), "ETANLXXXXXXXXX", -1),
             MappedRows::QueryRowWraps
         ));
         // x2g_s1q: -query_loc 1-15 of 43 nucleotides; the row's 16th is the record's, not kept.

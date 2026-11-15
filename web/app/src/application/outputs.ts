@@ -7,7 +7,7 @@ import type { Coordinator, RunView } from './coordinator';
 import { unreadableResults } from './results';
 import { Store } from './store';
 
-export type OutputPort = Pick<Coordinator, 'readOutput' | 'checkOutput' | 'exportOutput'>;
+export type OutputPort = Pick<Coordinator, 'readOutput' | 'checkOutput' | 'exportOutput' | 'exportRunFile'>;
 
 export interface OutputState {
   /** The run and format of `text` ("<number>:<format>") once it is read; '' while it is read, or when it could not be. */
@@ -20,18 +20,33 @@ export interface OutputState {
   readonly problem: string;
 }
 
-/** Saves outputs as files (Export, "Download All"), and says why the latest one was not saved. */
+/**
+ * Saves outputs, and the files that a run made besides them (the file of `-logfile`), as files
+ * (Export, "Download All", the run's files), and says why the latest one was not saved.
+ */
 export class OutputSaver {
   /** Why the latest save was not saved; '' when it was, or when none is to be told. */
   readonly problem = new Store('');
   private saves = 0;
 
-  constructor(private readonly outputs: Pick<OutputPort, 'exportOutput'>) {}
+  constructor(private readonly outputs: Pick<OutputPort, 'exportOutput' | 'exportRunFile'>) {}
 
   /** Saves one output of a completed run. The reason shown stays until this save ends; a later save or a reset wins. */
   async save(run: RunView, format: RunOutput): Promise<void> {
     const save = ++this.saves;
     const problem = await saveOutput(this.outputs, run, format);
+    if (save === this.saves) this.set(problem);
+  }
+
+  /** Saves one file that a run made besides its outputs (RunRecord.runFiles), as `save` saves an output. */
+  async saveRunFile(run: RunView, index: number): Promise<void> {
+    const save = ++this.saves;
+    let problem = '';
+    try {
+      await this.outputs.exportRunFile(run.snapshot.runId, index);
+    } catch (error) {
+      problem = `Not saved: ${error instanceof Error ? error.message : String(error)}`;
+    }
     if (save === this.saves) this.set(problem);
   }
 

@@ -123,8 +123,9 @@ fn unsupported_formats_fail_before_searching() {
         ReaderConfig::subject("BLASTN", false, true).with_defline(true),
     );
     // NCBI ignores a custom specification with outfmt 0 (blast_args.cpp:2845-2851); a delimiter
-    // that a field uses between its entries is NCBI's error (blast_args.cpp:2753-2792).
-    for outfmt in ["1", "6 delim=; qseqid staxids", "abc"] {
+    // that a field uses between its entries is NCBI's error (blast_args.cpp:2753-2792). Outfmt 19
+    // (AIRR) is igblastn's alone (BLASTN writes 1 to 4 since line RG T3b).
+    for outfmt in ["19", "6 delim=; qseqid staxids", "abc"] {
         let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
             formats: vec![

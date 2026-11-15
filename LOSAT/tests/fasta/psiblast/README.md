@@ -67,3 +67,12 @@ The oracle is NCBI BLAST+ 2.17.0 `psiblast ... -num_threads 1`.
   `pdb|1A3N|A`, `lcl|123`, `gnl|mydb|42`, `myquery` and `ref|NP_000549.1|` (with `-parse_deflines` the PSSM's query
   takes that Seq-id); `q1_subj_q1.faa` is `q1_subj_ids.faa` after a first record `lcl|Query_1` (the letters of
   `q.faa` with W at position 71), the local id of an `-in_pssm` query (`tests/db_search/q1_sq1` is its database).
+- `q4a_skip.faa` (line RG, series Q, Q4a): a record of 10 letters, which `-query_loc 20-300` skips, before the letters
+  of `tk.faa`; `q4a_xprefix.faa`: 400 X, then the letters of `tk.faa` (with `-query_loc 401-798` the later rounds read
+  the PSSM's X columns, whose frequency ratios are 0).
+- `q4b_lc1_200.faa` (line RG, series Q, Q4b): the letters of `tk.faa` with letters 1-200 in lower case; with
+  `-lcase_masking` round 1 masks them, and NCBI's later rounds index them again (round 1's filtering takes the
+  lower-case mask out of the query's sequence block), so the later rounds find alignments in them.
+  `q4b_inv.faa`: 20 lower-case letters, then `WCYHWCYHWC`; `q4b_inv_s.faa`: two subjects with `WCYHWCYHWC`. With
+  `-lcase_masking -seg yes` round 1 masks the lower case only; round 2's SEG on those X letters masks the island too,
+  so round 2 has no Karlin-Altschul parameters (NCBI 2.17.0 psiblast crashes there, exit 139).

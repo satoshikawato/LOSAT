@@ -63,7 +63,16 @@
 //!   `x_CleanAndCompress` reads past): the blocks are searched only when no
 //!   subject's title is refused (`blast_engine.rs` `x_block_shown_titles_allowed`, with `-db`
 //!   `database::x_titles_allow_blocks`), so that none comes after the reports of the blocks
-//!   before. The other refusals are those of outfmt 6 above.
+//!   before. The other refusals are those of outfmt 6 above. Two refusals of a query's record
+//!   are made per block instead, in the call of the block that holds the query, before that
+//!   block's first byte and after the reports of the blocks before (`run_call`): outfmt 0's
+//!   refusal of the masks of a record that is both a query and a subject under `-parse_deflines`
+//!   (`believed::refuse_shared_masks`), and outfmt 1 to 4's refusal of such a record's section
+//!   that NCBI BLAST+ aborts on (`pairwise::blastp_section_aborts`; what NCBI writes before its
+//!   abort depends on its buffers). The refusals of a database sequence that NCBI shows as a
+//!   query (`ListedTitles::refuse_generated_query_ids`, `refuse_display_ids_of_queries`) sit at
+//!   the same place, but run only in the search of all queries: such a sequence has parsed
+//!   Seq-ids, whose definition lines `database::x_titles_allow_blocks` never takes.
 //! - nothing else is written to standard error while a block is searched (only the debug trace and
 //!   `LOSAT_TIMING`'s lines, which each block prints for itself).
 //!
@@ -206,13 +215,11 @@
 //!   are updated by a document in the order the documents are written, which is the order of the
 //!   blocks, so a block sees what the search of all queries has at that batch. The refusals
 //!   before the first byte are those of outfmt 8 (with `-db` the definition lines,
-//!   `database::x_titles_read_allow_blocks`: the archive reads the same Seq-ids) and the titles
-//!   and `-db` name that the archive cannot write (a byte outside `0x20..=0x7E`, `check_titles`):
-//!   the name before the search starts, the titles where the search of all queries writes the
-//!   archive of the batches NCBI completes (`run_resolved_in_pool`, after their search), so a run
-//!   with such a title takes that search and no block (`x_query_block_plan`). The errors that NCBI
-//!   turns into an error archive (`run`) come after the documents of the batches before, from
-//!   the same handle. In a call of several outputs, hit records or an observer
+//!   `database::x_titles_read_allow_blocks`: the archive reads the same Seq-ids). A string that
+//!   the archive does not write as it is (`report::archive::ArchiveEncoding::writes_text`) is
+//!   written with NCBI's posts where its document is written (`write_archive`), in a block as in
+//!   the search of all queries. The errors that NCBI turns into an error archive (`run`) come
+//!   after the documents of the batches before, from the same handle. In a call of several outputs, hit records or an observer
 //!   the plan is refused for 11 as for 15 and 16: the handle's muting and
 //!   messages with several formats were argued for the CLI's shape.
 //!
@@ -277,11 +284,30 @@
 //! (the CLI's shape) only, so `x_query_block_plan` refuses the plan when the call has several
 //! outputs, hit records or an observer; the search of all queries runs (Owner-delegated 2026-10-22).
 //!
+//! The search of all queries, which writes the reports that the block search does not take (outfmt
+//! 10, 18 and 20, custom tabular fields that read more of `-db`'s definition lines, `-query_loc`,
+//! several outputs with `-db`, a run that a check before the first block leaves to it), runs its
+//! preliminary stage in the same blocks of whole batches (`blast_engine.rs` `x_prelim_block_plan`
+//! and the block loop of `run_call`, item SC8b-2; blastp only): each block is a call of the
+//! preliminary stage only (`PrelimOnly::Block`) with its own lookup table, diagonal table and
+//! scratch, freed when it returns, and its compact hit lists move to their queries among all
+//! queries (`query_split::rebase_hit_list`: only the query's index moves, the HSPs' query
+//! coordinates are relative to their context). The argument above is the preliminary stage's: a
+//! query's preliminary hit list is the same in a block as in the search of all queries, whatever
+//! report follows. The redo, the traceback and the reports then run once over all queries, with
+//! the contexts, search spaces, cutoffs and batches of all queries, as after one table (the
+//! contexts without a table, `x_blocks_contexts`, are each builder's), so no report byte, report
+//! order or error order depends on the blocks: nothing is written before the hit lists are joined,
+//! the set-up's checks and refusals come before the first block, and a sequence file that a block
+//! cannot read is the error of the search of all queries (`preliminary_search_error`). The plan is
+//! made by the search of all queries only (`BlastpReports::x_plan_blocks`), never again inside a
+//! block (whose words would close it on a smaller most).
+//!
 //! `LOSAT_X_BPQBLOCK` is a value switch of the strict set (`utils/xswitch.rs`): a positive number
-//! of query letters (the block closes at the first batch end at or past it; with the compressed
-//! table also before a batch whose words would take the block's words past its most,
-//! `blast_engine.rs` `x_word_blocks`), 50,000 when it is not set or is not a positive number. `0`,
-//! turns the block path off.
+//! of query letters (the block closes at the first batch end at or past it; also before a batch
+//! whose words would take the block's words past its most, `blast_engine.rs` `x_word_blocks`),
+//! 50,000 when it is not set or is not a positive number. `0` turns both block paths off (the
+//! block search and the preliminary stage in blocks).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-295
 //! ```c++

@@ -196,6 +196,25 @@ pub(crate) struct Rows<'a> {
 }
 
 impl Rows<'_> {
+    /// The shown masks of query `q_idx` (`shown_query_masks`), the query's `TMaskedQueryRegions`
+    /// in record positions (the query-anchored reports, `algorithm::blastn::anchored`).
+    pub(crate) fn query_masks(&self, q_idx: usize) -> &[MaskedInterval] {
+        self.query_masks.get(q_idx).map_or(&[], Vec::as_slice)
+    }
+
+    /// The masks of the subject of the HSPs `hsps` (one subject's list of a query) that NCBI's
+    /// `GetSubjectMasks` gives with them (`subject_mask_regions`), in their order and unmerged:
+    /// the query-anchored reports place each one on the first row that meets it
+    /// (`query_anchored::fill_loc_list`). None without subject masks.
+    pub(crate) fn subject_masks(&self, hsps: &[BlastnHsp]) -> Vec<MaskedInterval> {
+        match (self.subject_masks.as_deref(), hsps.first()) {
+            (Some(subject_masks), Some(hsp)) => {
+                subject_mask_regions(&subject_masks[hsp.s_idx as usize], hsps).collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
     /// The rows of every HSP of one subject's list, appended to `hits` in the list's order.
     fn list(&self, hsp_list: &BlastnHspList, hits: &mut Vec<PairwiseHit>) -> Result<()> {
         let (queries, subjects) = (self.queries, self.subjects);
@@ -539,18 +558,24 @@ pub(crate) fn shown_query_masks(
 // the record is kept by where it would lie in the interval, and shown where it lies in the
 // record.
 fn shown_subject_masks(masks: &[MaskedInterval], hsps: &[BlastnHsp]) -> Vec<MaskedInterval> {
-    merged(
-        &masks
-            .iter()
-            .filter(|mask| {
-                mask.start < mask.end
-                    && hsps.iter().any(|hsp| {
-                        mask.start <= hsp.internal_s_end_0 && hsp.internal_s_offset_0 < mask.end
-                    })
-            })
-            .cloned()
-            .collect::<Vec<_>>(),
-    )
+    merged(&subject_mask_regions(masks, hsps).collect::<Vec<_>>())
+}
+
+/// The masks of `masks` that `GetSubjectMasks` gives with the HSPs `hsps` (`shown_subject_masks`
+/// before the merge), in their order.
+fn subject_mask_regions<'m>(
+    masks: &'m [MaskedInterval],
+    hsps: &'m [BlastnHsp],
+) -> impl Iterator<Item = MaskedInterval> + 'm {
+    masks
+        .iter()
+        .filter(|mask| {
+            mask.start < mask.end
+                && hsps.iter().any(|hsp| {
+                    mask.start <= hsp.internal_s_end_0 && hsp.internal_s_offset_0 < mask.end
+                })
+        })
+        .cloned()
 }
 
 /// The masked positions as disjoint intervals in order, for `lowercase_masked`.

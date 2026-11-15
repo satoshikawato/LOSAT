@@ -742,11 +742,6 @@ impl BlastnDatabase {
         option.resolve(&self.db, &self.name, PROGRAM, warning)
     }
 
-    /// LOSAT's refusal of mixed accession tables (`shared::check_accession_tables`).
-    pub(super) fn check_accession_tables(&self) -> Result<()> {
-        shared::check_accession_tables(&self.db, PROGRAM)
-    }
-
     /// LOSAT's refusals of the search masked with `mask` (`ResolvedMask::check_losat_limits`),
     /// whose scan reads words of `scanned_word` letters.
     pub(super) fn check_mask_limits(&self, mask: &ResolvedMask, scanned_word: usize) -> Result<()> {
@@ -1652,7 +1647,7 @@ pub(super) fn read_titles(
 /// (`reported_subjects`); outfmt 13 to 16 and the tabular reports of taxonomy fields write its
 /// taxids; the first format's batches prefetch the subjects.
 pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown {
-    let pairwise = output_formats.contains(&BlastnOutputFormat::Pairwise);
+    let pairwise = output_formats.iter().any(|format| format.is_pairwise());
     ParsedShown {
         tabular: output_formats
             .iter()
@@ -1720,6 +1715,9 @@ pub(super) struct ReportedSubjects {
     /// The sequences with parsed Seq-ids by rank (empty when none is reported): their ids and
     /// titles come from their definition lines (`report::db_subject`).
     pub(super) parsed: Vec<Option<Arc<ParsedSubject>>>,
+    /// The names of the sources from which NCBI makes the empty stored titles of the others, by
+    /// rank (`shared::StoredTitle::source`; empty when none has one).
+    pub(super) sources: Vec<crate::report::defline::SourceTaxname>,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1406-1414
@@ -1817,29 +1815,24 @@ pub(super) fn reported_subjects(
     let record = |&ordinal: &u32| -> Result<Reported> {
         let header = titles
             .get(&ordinal)
-            .with_context(|| format!("database sequence {ordinal} has no title read"))?;
-        let (title, subject) = match header {
+            .with_context(|| format!("database sequence {} has no title read", db.oid(ordinal)))?;
+        let (title, subject, source) = match header {
             ReportedHeader::Stored(stored) => {
-                shared::check_reported_title(stored.replaced_bytes, ordinal, PROGRAM)?;
+                shared::check_reported_title(stored.replaced_bytes, || db.oid(ordinal), PROGRAM)?;
                 if shown.pairwise {
-                    shared::check_shown_stored_title(stored.taxonomy_title, ordinal, PROGRAM)?;
+                    stored.check_shown_source(|| db.oid(ordinal), PROGRAM)?;
                 }
-                if shown.tabular {
-                    let oid = db.oid(ordinal);
-                    shared::check_tabular_stored_title(
-                        stored.taxonomy_title,
-                        shown.words,
-                        oid,
-                        PROGRAM,
-                    )?;
-                }
-                (stored.title.clone(), None)
+                (stored.title.clone(), None, stored.source.clone())
             }
             ReportedHeader::Parsed(subject) => {
                 let taxdb = shown.pairwise && *taxdb_found.get_or_init(|| db.taxdb_found());
                 let shown = reads.shown(shown, ordinal);
                 shared::check_reported_parsed(db, subject, shown, false, taxdb, ordinal, PROGRAM)?;
-                (subject.first_title().to_vec(), Some(Arc::clone(subject)))
+                (
+                    subject.first_title().to_vec(),
+                    Some(Arc::clone(subject)),
+                    Default::default(),
+                )
             }
         };
         let store = if letters {
@@ -1856,13 +1849,14 @@ pub(super) fn reported_subjects(
             warnings: Vec::new(),
             source: Default::default(),
         };
-        Ok((record, store, subject))
+        Ok((record, store, subject, source))
     };
     let made = x_reported_records(&ordinals, pool, &record)?;
     let mut records = Vec::with_capacity(ordinals.len());
     let mut stores = letters.then(|| Vec::with_capacity(ordinals.len()));
     let mut parsed: Vec<Option<Arc<ParsedSubject>>> = Vec::new();
-    for (rank, (record, store, subject)) in made.into_iter().enumerate() {
+    let mut sources: Vec<crate::report::defline::SourceTaxname> = Vec::new();
+    for (rank, (record, store, subject, source)) in made.into_iter().enumerate() {
         records.push(record);
         if let (Some(stores), Some(store)) = (stores.as_mut(), store) {
             stores.push(store);
@@ -1873,6 +1867,7 @@ pub(super) fn reported_subjects(
             }
             parsed[rank] = Some(subject);
         }
+        shared::keep_source(&mut sources, rank, ordinals.len(), source);
     }
     if shown.joined && !parsed.is_empty() {
         for (query, hit_list) in hit_lists.iter().enumerate() {
@@ -1889,6 +1884,7 @@ pub(super) fn reported_subjects(
                         let rank = hsp_list.oid as usize;
                         Some((ordinals[rank], parsed[rank].as_deref()?))
                     }),
+                db.oid_map(),
                 PROGRAM,
             )?;
         }
@@ -1898,6 +1894,7 @@ pub(super) fn reported_subjects(
         records,
         stores,
         parsed,
+        sources,
     })
 }
 
@@ -1928,6 +1925,7 @@ type Reported = (
     FastaRecord,
     Option<PackedNucleotide>,
     Option<Arc<ParsedSubject>>,
+    crate::report::defline::SourceTaxname,
 );
 
 // No NCBI counterpart: NCBI's formatters read the sequence of each alignment when they write it.
@@ -1980,6 +1978,7 @@ impl ReportedSubjects {
             &self.ordinals,
             oids,
             &self.parsed,
+            &self.sources,
             false,
             reads,
             PROGRAM,
@@ -1997,6 +1996,7 @@ impl ReportedSubjects {
             &self.records,
             &self.ordinals,
             &self.parsed,
+            &self.sources,
             |rank| lengths[rank],
             PROGRAM,
         ))
@@ -2890,11 +2890,11 @@ mod tests {
                 warnings: Vec::new(),
                 source: Default::default(),
             };
-            Ok((record, None, None))
+            Ok((record, None, None, Default::default()))
         };
         let ids = |made: Vec<Reported>| -> Vec<String> {
             made.into_iter()
-                .map(|(record, _, _)| record.local_id)
+                .map(|(record, _, _, _)| record.local_id)
                 .collect()
         };
         let serial = x_reported_records(&ordinals[..300], None, &record).unwrap();

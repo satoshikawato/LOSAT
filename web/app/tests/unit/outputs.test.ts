@@ -40,6 +40,13 @@ class Outputs implements OutputPort {
   exportOutput(runId: string, format: RunOutput): Promise<void> {
     return new Promise((resolve, reject) => this.exports.push({ runId, format, resolve, reject }));
   }
+
+  /** The saves of a run's files (RunRecord.runFiles), by run and index. */
+  readonly fileExports: Array<{ readonly runId: string; readonly index: number; resolve(): void; reject(error: unknown): void }> = [];
+
+  exportRunFile(runId: string, index: number): Promise<void> {
+    return new Promise((resolve, reject) => this.fileExports.push({ runId, index, resolve, reject }));
+  }
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -227,6 +234,34 @@ describe('OutputReader', () => {
 });
 
 describe('OutputSaver', () => {
+  // The file of a run's -logfile (line RG E1w-3b) is saved as an output is, and says why it is not.
+  it("saves a run's file, says why one is not saved, and the latest save wins", async () => {
+    const outputs = new Outputs();
+    const saver = new OutputSaver(outputs);
+    void saver.saveRunFile(run(1), 0);
+    expect(outputs.fileExports[0]).toMatchObject({ runId: 'r1', index: 0 });
+    outputs.fileExports[0]!.reject(new Error('the run has no such file'));
+    await settle();
+    expect(saver.problem.get()).toBe('Not saved: the run has no such file');
+    // The newer save ends first, the older one after it: the older one's failure says nothing.
+    void saver.saveRunFile(run(1), 0);
+    void saver.save(run(1), 6);
+    outputs.exports[0]!.resolve();
+    await settle();
+    expect(saver.problem.get()).toBe('');
+    outputs.fileExports[1]!.reject(new Error('x'));
+    await settle();
+    expect(saver.problem.get()).toBe('');
+    // And the other way round: a run file's save after an output's.
+    void saver.save(run(1), 0);
+    void saver.saveRunFile(run(1), 0);
+    outputs.fileExports[2]!.resolve();
+    await settle();
+    outputs.exports[1]!.reject(new Error('y'));
+    await settle();
+    expect(saver.problem.get()).toBe('');
+  });
+
   it('a save that ends after a reset says nothing: another run or format was chosen', async () => {
     const outputs = new Outputs();
     const saver = new OutputSaver(outputs);

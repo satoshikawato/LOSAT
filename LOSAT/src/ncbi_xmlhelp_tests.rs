@@ -207,8 +207,8 @@ fn a_refused_name_takes_its_dependencies() {
     );
 }
 
-// The library API and the Web engine (no application start) refuse `-xmlhelp` by name where the
-// reader takes it as a flag; as a value it is a value, and after `-h` it is not read.
+// The library API and the Web engine refuse `-xmlhelp` by name where the reader takes it as a flag
+// (the Web engine's ABI v2 runs an application start, but it does not write NCBI's XML); as a value it is a value, and after `-h` it is not read.
 #[test]
 fn the_library_refuses_xmlhelp() {
     for program in CLAP_PROGRAMS {

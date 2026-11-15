@@ -252,6 +252,240 @@ pub(crate) fn gapped_segments(
     }
 }
 
+/// The Dense-seg segments of a hit of a protein search without translation (BLASTP) whose
+/// coordinates are in its records (`Hit::q_start` and `s_start`, 1-based, after the shift to the
+/// records): `collect_seq_align_data` of the HSP at those coordinates. NCBI makes the segments in
+/// the searched letters and `RemapToQueryLoc` and `s_RemapToSubjectLoc` add the starts of the
+/// ranges to the rows: the same starts, as a protein row has no strand to remap (the query-anchored
+/// reports, `report::query_anchored`).
+pub(crate) fn protein_row_segments(hit: &crate::common::Hit, segments: &mut Segments) {
+    let record = HspRecord {
+        subject: 0,
+        q_offset: hit.q_start as i32 - 1,
+        q_end: hit.q_end as i32,
+        s_offset: hit.s_start as i32 - 1,
+        s_end: hit.s_end as i32,
+        q_frame: 0,
+        s_frame: 0,
+        score: hit.raw_score,
+        num: 0,
+        evalue: hit.e_value,
+        bit_score: hit.bit_score,
+        num_ident: hit.num_ident as i32,
+        num_positives: hit.num_positives as i32,
+        comp_adjust: 0,
+        ops: hit.gap_info.as_deref().unwrap_or(&[]),
+    };
+    // A protein row's strand is unknown: the lengths are not read.
+    collect_seq_align_data(&record, 0, 0, false, false, segments);
+}
+
+/// The Dense-seg segments of a BLASTN hit whose coordinates are in its records (`Hit::q_start` to
+/// `q_end` on the query's plus strand; `s_start` above `s_end` for a minus-strand HSP), and whether
+/// its rows' strands differ (a minus-strand HSP: the query row on the minus strand, the subject's
+/// on the plus strand). NCBI counts a minus-strand query row's starts from the end of the searched
+/// query (`s_GetAlignmentStart`: `length - curr_pos - num`, the HSP's offset in its minus-strand
+/// context) and `RemapToQueryLoc` moves them by the start of the `-query_loc` interval: the same
+/// starts as counted from the HSP's end in the record, which `collect_seq_align_data` gives with
+/// that end as the length and an offset of 0. The plus-strand subject row's starts are the
+/// record's (`s_RemapToSubjectLoc` adds the `-subject_loc` start). The query-anchored reports read
+/// them (`report::query_anchored`).
+pub(crate) fn nucleotide_row_segments(hit: &crate::common::Hit, segments: &mut Segments) -> bool {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:114-140
+    // ```c++
+    // static TSeqPos
+    // s_GetAlignmentStart(int& curr_pos, int num,
+    //         ENa_strand strand, bool translate, int length, int original_length,
+    //         short frame)
+    // {
+    //     TSeqPos retval;
+    //
+    //     if (strand == eNa_strand_minus) {
+    //
+    //         if (translate)
+    //             retval = original_length -
+    //                 CODON_LENGTH*(s_GetCurrPos(curr_pos, num) + num)
+    //                 + frame + 1;
+    //         else
+    //             retval = length - s_GetCurrPos(curr_pos, num) - num;
+    //
+    //     } else {
+    //
+    //         if (translate)
+    //             retval = frame - 1 + CODON_LENGTH*s_GetCurrPos(curr_pos, num);
+    //         else
+    //             retval = s_GetCurrPos(curr_pos, num);
+    //
+    //     }
+    //
+    //     return retval;
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1520-1534
+    // ```c++
+    // void RemapToQueryLoc(CRef<CSeq_align> sar, const CSeq_loc & query)
+    // {
+    //     _ASSERT(sar);
+    //     const int query_row = 0;
+    //
+    //     TSeqPos q_shift = 0;
+    //
+    //     if (query.IsInt()) {
+    //         q_shift = query.GetInt().GetFrom();
+    //     }
+    //
+    //     if (q_shift > 0) {
+    //         sar->OffsetRow(query_row, q_shift);
+    //     }
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1541-1547
+    // ```c++
+    // static void
+    // s_RemapToSubjectLoc(CRef<CSeq_align> & subj_aligns, const CSeq_loc& subj_loc)
+    // {
+    //     const int kSubjDimension = 1;
+    //     _ASSERT(subj_loc.IsInt() || subj_loc.IsWhole());
+    //     subj_aligns.Reset(RemapAlignToLoc(*subj_aligns, kSubjDimension, subj_loc));
+    // }
+    // ```
+    let minus = hit.query_frame < 0;
+    let (q_offset, q_end, query_length) = if minus {
+        (0, (hit.q_end + 1 - hit.q_start) as i32, hit.q_end as i32)
+    } else {
+        (hit.q_start as i32 - 1, hit.q_end as i32, 0)
+    };
+    let (s_low, s_high) = (hit.s_start.min(hit.s_end), hit.s_start.max(hit.s_end));
+    let record = HspRecord {
+        subject: 0,
+        q_offset,
+        q_end,
+        s_offset: s_low as i32 - 1,
+        s_end: s_high as i32,
+        q_frame: if minus { -1 } else { 1 },
+        s_frame: 1,
+        score: hit.raw_score,
+        num: 0,
+        evalue: hit.e_value,
+        bit_score: hit.bit_score,
+        num_ident: hit.num_ident as i32,
+        num_positives: hit.num_positives as i32,
+        comp_adjust: 0,
+        ops: hit.gap_info.as_deref().unwrap_or(&[]),
+    };
+    collect_seq_align_data(&record, query_length, 0, false, false, segments);
+    minus
+}
+
+/// The Dense-seg segments of a TBLASTN hit (`CreateDensegFromStdseg` of its Std-segs: the
+/// starts of `s_CollectSeqAlignData`, the subject's in nucleotides, and the lengths in residues)
+/// whose coordinates are in its records, the subject's in `subject_frame` of its record of
+/// `subject_length` nucleotides (`seq_range::record_frame`, the frame the report shows), and
+/// whether the rows' strands differ (a minus frame; the protein query row has none). NCBI makes
+/// them in the searched letters and the frame of the search and `s_RemapToSubjectLoc` adds the
+/// start of the `-subject_loc` interval (`RemapToQueryLoc` the query's): the same nucleotides as
+/// `s_GetAlignmentStart` counts in the record's frame (on the minus strand from the record's end,
+/// `original_length - 3 * (curr_pos + num) + frame + 1`), where the HSP's offset in that frame's
+/// residues is exact (the frame is that of the row's first nucleotide).
+pub(crate) fn translated_subject_row_segments(
+    hit: &crate::common::Hit,
+    subject_frame: i8,
+    subject_length: usize,
+    segments: &mut Segments,
+) -> bool {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:114-140
+    // ```c++
+    // static TSeqPos
+    // s_GetAlignmentStart(int& curr_pos, int num,
+    //         ENa_strand strand, bool translate, int length, int original_length,
+    //         short frame)
+    // {
+    //     TSeqPos retval;
+    //
+    //     if (strand == eNa_strand_minus) {
+    //
+    //         if (translate)
+    //             retval = original_length -
+    //                 CODON_LENGTH*(s_GetCurrPos(curr_pos, num) + num)
+    //                 + frame + 1;
+    //         else
+    //             retval = length - s_GetCurrPos(curr_pos, num) - num;
+    //
+    //     } else {
+    //
+    //         if (translate)
+    //             retval = frame - 1 + CODON_LENGTH*s_GetCurrPos(curr_pos, num);
+    //         else
+    //             retval = s_GetCurrPos(curr_pos, num);
+    //
+    //     }
+    //
+    //     return retval;
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1520-1534
+    // ```c++
+    // void RemapToQueryLoc(CRef<CSeq_align> sar, const CSeq_loc & query)
+    // {
+    //     _ASSERT(sar);
+    //     const int query_row = 0;
+    //
+    //     TSeqPos q_shift = 0;
+    //
+    //     if (query.IsInt()) {
+    //         q_shift = query.GetInt().GetFrom();
+    //     }
+    //
+    //     if (q_shift > 0) {
+    //         sar->OffsetRow(query_row, q_shift);
+    //     }
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1541-1547
+    // ```c++
+    // static void
+    // s_RemapToSubjectLoc(CRef<CSeq_align> & subj_aligns, const CSeq_loc& subj_loc)
+    // {
+    //     const int kSubjDimension = 1;
+    //     _ASSERT(subj_loc.IsInt() || subj_loc.IsWhole());
+    //     subj_aligns.Reset(RemapAlignToLoc(*subj_aligns, kSubjDimension, subj_loc));
+    // }
+    // ```
+    let frame = i32::from(subject_frame);
+    let length = subject_length as i32;
+    let (s_low, s_high) = (
+        hit.s_start.min(hit.s_end) as i32,
+        hit.s_start.max(hit.s_end) as i32,
+    );
+    // The frame's residue of the HSP's first codon: `frame - 1 + 3 * offset` is its first
+    // nucleotide on the plus strand; `length - 3 * offset + frame + 1` its end on the minus strand.
+    let s_offset = if frame > 0 {
+        (s_low - 1 - (frame - 1)) / CODON_LENGTH
+    } else {
+        (length + frame + 1 - s_high) / CODON_LENGTH
+    };
+    let residues = (s_high - s_low + 1) / CODON_LENGTH;
+    let record = HspRecord {
+        subject: 0,
+        q_offset: hit.q_start as i32 - 1,
+        q_end: hit.q_end as i32,
+        s_offset,
+        s_end: s_offset + residues,
+        q_frame: 0,
+        s_frame: subject_frame,
+        score: hit.raw_score,
+        num: 0,
+        evalue: hit.e_value,
+        bit_score: hit.bit_score,
+        num_ident: hit.num_ident as i32,
+        num_positives: hit.num_positives as i32,
+        comp_adjust: 0,
+        ops: hit.gap_info.as_deref().unwrap_or(&[]),
+    };
+    collect_seq_align_data(&record, 0, length, false, true, segments);
+    frame < 0
+}
+
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:89-100
 /// ```c++
 /// static int

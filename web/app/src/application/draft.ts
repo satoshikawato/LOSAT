@@ -24,9 +24,10 @@ import {
   type FastaParserKind,
   type InputRole,
   type ProgramId,
+  type RegistryFile,
   type SequenceKind,
 } from 'losat/domain';
-import type { EngineGateway, InputCheck, ProgramDescription } from 'losat/ports';
+import { isFileReadError, type EngineGateway, type InputCheck, type ProgramDescription, type StartInfo } from 'losat/ports';
 import {
   accessionLines,
   accessionsOnALine,
@@ -52,6 +53,7 @@ import { fastaParser, programById, PROGRAMS, sequenceKind } from '../domain/prog
 import { regionProblem, regionValue, type RegionText } from '../domain/region';
 import type { DataGateway } from '../ports/data';
 import type { AccessionFetcher, FetchResult } from '../ports/fetch';
+import { registryName, unreadableConffile } from './conffile';
 import type { EnqueueAllResult, SearchRequest } from './coordinator';
 import { SourceRace, type RaceStanding } from './source-race';
 import { SourceRefs } from './source-refs';
@@ -175,6 +177,12 @@ export interface DraftState {
   readonly counts: Readonly<Record<string, SavedCountsFile>>;
   /** The "Additional options" of each program, as typed: other options, as on a command line (`splitOptions`). */
   readonly extra: Readonly<Record<ProgramId, string>>;
+  /**
+   * The file chosen for the `-conffile` of each program's Additional options (line RG E1w-3b): the
+   * validation and the run read its bytes under the name that the argv gives. It stays in the
+   * working session, as the sources do.
+   */
+  readonly conffiles: Readonly<Partial<Record<ProgramId, File>>>;
   /** The Job Title of the next runs, as typed ('' for none); never part of the argv. */
   readonly title: string;
   readonly threads: number | 'auto';
@@ -187,12 +195,18 @@ export interface DraftState {
   readonly descriptionError?: string;
   /** The engine's `validate` of the argv that the draft makes now. */
   readonly validation: Validation;
+  /**
+   * What the engine's start read of the argv of the latest validation (`EngineGateway.start`): the
+   * name of its `-conffile`, for which the form asks for a file; undefined before it, or when the
+   * engine could not start the argv.
+   */
+  readonly start?: StartInfo;
   readonly submitting: boolean;
   readonly message?: { readonly kind: 'info' | 'error'; readonly text: string };
 }
 
 export interface DraftDeps {
-  readonly engine: Pick<EngineGateway, 'describe' | 'validate' | 'prepare'>;
+  readonly engine: Pick<EngineGateway, 'describe' | 'start' | 'validate' | 'prepare'>;
   readonly data: Pick<
     DataGateway,
     'addSource' | 'indexSource' | 'reviseDataset' | 'checkInput' | 'previewSource' | 'dropSource'
@@ -240,6 +254,8 @@ export class SearchDraft {
   private readonly race: SourceRace;
   /** The argv of the latest validation that the engine accepted (the prepare hint's argv). */
   private validArgv: readonly string[] | undefined;
+  /** The validation that runs, or the last one: the next waits for it (validateInTurn). */
+  private validationTurn: Promise<void> = Promise.resolve();
   private nextKey = 1;
 
   constructor(private readonly deps: DraftDeps) {
@@ -266,6 +282,7 @@ export class SearchDraft {
       files: Object.fromEntries(PROGRAMS.map((program) => [program.id, Object.freeze({})])) as Record<ProgramId, Readonly<Record<string, File>>>,
       counts: Object.freeze({}),
       extra: Object.fromEntries(PROGRAMS.map((program) => [program.id, ''])) as Record<ProgramId, string>,
+      conffiles: Object.freeze({}),
       title: '',
       threads: 'auto',
       fetchSource: 'fastest',
@@ -288,7 +305,8 @@ export class SearchDraft {
       if (sequenceKind(previous, role) !== sequenceKind(next, role)) this.cancelFetch(role);
     }
     const description = this.described.get(program);
-    this.set({ program, description, descriptionError: undefined, message: undefined });
+    // The engine's start of the other program's argv is not this program's (its -conffile row goes until the validation).
+    this.set({ program, description, descriptionError: undefined, message: undefined, start: undefined });
     this.loadDescription(program);
     for (const role of ROLES) {
       const parser = fastaParser(next, role);
@@ -387,6 +405,21 @@ export class SearchDraft {
   setExtra(text: string): void {
     const { program, extra } = this.state.get();
     this.set({ extra: { ...extra, [program]: text }, message: undefined });
+    this.scheduleValidation();
+  }
+
+  /**
+   * Chooses the file of the `-conffile` that the program's Additional options give (undefined lets
+   * it go): the validation and the run read it under the argv's name, whatever the file is called.
+   * The page holds the File, not its bytes: a validation reads it on an instance of the engine of its
+   * own, and "Run LOSAT" reads it once for the runs (Coordinator.enqueueAll).
+   */
+  setConffile(file: File | undefined): void {
+    const { program, conffiles } = this.state.get();
+    const next = { ...conffiles };
+    if (file === undefined) delete next[program];
+    else next[program] = file;
+    this.set({ conffiles: Object.freeze(next), message: undefined });
     this.scheduleValidation();
   }
 
@@ -907,6 +940,9 @@ export class SearchDraft {
     } catch (error) {
       return { ok: false, message: messageOf(error) };
     }
+    // The file of the argv's -conffile, which the engine's start named at the validation (idle).
+    const state = this.state.get();
+    const conffile = registryName(state.start) === undefined ? undefined : state.conffiles[program];
     const resolved = {
       query: await Promise.all(groups.query.map((group) => this.resolveGroup(group))),
       subject: await Promise.all(groups.subject.map((group) => this.resolveGroup(group))),
@@ -923,6 +959,7 @@ export class SearchDraft {
           requestedThreads: threads,
           ...(windowMasker === undefined ? {} : { windowMasker }),
           ...(kept === undefined ? {} : { windowMaskerOrigin: kept.origin }),
+          ...(conffile === undefined ? {} : { conffile }),
           ...(title.trim() === '' ? {} : { title }),
         });
       }
@@ -1227,7 +1264,20 @@ export class SearchDraft {
   private scheduleValidation(): void {
     // A validation of an older argv that is still running is not shown.
     this.nextGeneration('validate');
-    this.debounce('validate', () => this.track(this.validate()));
+    this.debounce('validate', () => this.track(this.validateInTurn()));
+  }
+
+  /**
+   * One validation at a time, the latest winning: one that comes while another runs waits for it, and
+   * then validates only if no newer change came meanwhile. So a validation with the file of -conffile,
+   * which the Data worker reads on an instance of its own, never runs beside another one that reads the
+   * file again, and none starts for an argv that is already out of date.
+   */
+  private validateInTurn(): Promise<void> {
+    const generation = this.generations.get('validate');
+    const turn = this.validationTurn.then(() => (this.generations.get('validate') === generation ? this.validate() : undefined));
+    this.validationTurn = turn.catch(() => undefined);
+    return turn;
   }
 
   private async validate(): Promise<void> {
@@ -1243,21 +1293,46 @@ export class SearchDraft {
         extra: this.extraWords(),
       });
     } catch (error) {
-      this.set({ validation: { state: 'invalid', message: messageOf(error) } });
+      // No argv, so no start of one: the -conffile row goes with the words that named the file.
+      this.set({ validation: { state: 'invalid', message: messageOf(error) }, start: undefined });
       return;
     }
     this.set({ validation: { state: 'checking' } });
     let validation: Validation;
+    let start: StartInfo | undefined;
+    let registry: ChosenRegistryFile | undefined;
     try {
-      const result = await this.deps.engine.validate(argv);
-      validation = result.ok ? { state: 'ok' } : { state: 'invalid', message: result.message };
+      // NCBI's application start first (line RG E1w-3b): the name of the registry file that the argv
+      // reads, under which the chosen file is checked. An argv that it cannot start (a version word)
+      // has the parser's message, as validate gives it.
+      const started = await this.deps.engine.start(argv);
+      // A newer change came meanwhile: its validation follows, and this one reads no file.
+      if (this.generations.get('validate') !== generation) return;
+      if (!started.ok) {
+        validation = { state: 'invalid', message: started.message };
+      } else {
+        start = started.start;
+        registry = this.registryFile(program, start);
+        const result = await this.deps.engine.validate(argv, registry);
+        validation = result.ok ? { state: 'ok' } : { state: 'invalid', message: result.message };
+      }
     } catch (error) {
-      validation = { state: 'invalid', message: messageOf(error) };
+      // The chosen file changed or went after it was chosen: the browser no longer reads it.
+      const message =
+        registry !== undefined && isFileReadError(error) ? unreadableConffile(registry.name, registry.file.name, error) : messageOf(error);
+      validation = { state: 'invalid', message };
     }
     if (this.generations.get('validate') !== generation) return;
     this.validArgv = validation.state === 'ok' ? argv : undefined;
-    this.set({ validation });
+    this.set({ validation, start });
     this.prepareEngine();
+  }
+
+  /** The registry file of the argv's `-conffile`: the chosen file under the argv's name (`registryName`); undefined without either. */
+  private registryFile(program: ProgramId, start: StartInfo): ChosenRegistryFile | undefined {
+    const name = registryName(start);
+    const file = this.state.get().conffiles[program];
+    return name === undefined || file === undefined ? undefined : { name, file };
   }
 
   /**
@@ -1401,6 +1476,11 @@ function fetchProblem(result: Exclude<FetchResult, { ok: true }>, source: FetchS
         ? `${label} asks to wait (too many requests): fetch again in a moment.`
         : `${label} answered HTTP ${result.status} for ${accession}.`;
   }
+}
+
+/** The registry file of a validation: the File chosen for `-conffile`, under the argv's name. */
+interface ChosenRegistryFile extends RegistryFile {
+  readonly file: File;
 }
 
 /** Whether the form holds inputs: a pasted text (accessions too) or a source of either role. */

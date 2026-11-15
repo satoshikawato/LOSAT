@@ -1264,13 +1264,11 @@ mod tests {
                 cutoff_small_gap: 20,
                 cutoff_big_gap: 20,
                 gap_prob: 0.5,
-                ignore_small_gaps: false,
             },
             LinkHspCutoffs {
                 cutoff_small_gap: 0,
                 cutoff_big_gap: 30,
                 gap_prob: 0.0,
-                ignore_small_gaps: true,
             },
         ];
         let cases: usize = std::env::var("LOSAT_FUZZ_CASES")
@@ -1417,13 +1415,11 @@ mod tests {
                 cutoff_small_gap: 20,
                 cutoff_big_gap: 20,
                 gap_prob: 0.5,
-                ignore_small_gaps: false,
             },
             LinkHspCutoffs {
                 cutoff_small_gap: 0,
                 cutoff_big_gap: 30,
                 gap_prob: 0.0,
-                ignore_small_gaps: true,
             },
         ]
     }

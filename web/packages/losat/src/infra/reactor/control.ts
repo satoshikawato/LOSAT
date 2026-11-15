@@ -1,17 +1,22 @@
-// `describe` and `validate` over a serial reactor (docs/web/abi_v2.md §4, §9). The Data
+// `describe`, `start` and `validate` over a serial reactor (docs/web/abi_v2.md §4, §9). The Data
 // worker answers them with its own serial instance, so that the application can check a
 // search while the Engine worker is inside a long `run` (the Engine worker's thread is
 // then busy). Validation there gives the same result as in the module that runs the
 // search: the argv of the application has no -num_threads, the only option whose
 // validation depends on the build; the Engine worker validates the argv it runs, with its
-// -num_threads, again before the search.
+// -num_threads, again before the search. A validation with the registry file of `-conffile` runs on
+// an instance of its own (line RG E1w-3b, DECISIONS E1w3b-4), opened for it from the compiled module
+// and dropped after it, as each inflation is (inflater.ts): the shared instance never holds the
+// file, so no other call of it (a scan, a check, another validation) meets the file, whose start
+// would read a file named `.ncbirc` or `<program>.ini` as the CLI reads one in its directory, and
+// the memory that the file takes goes with that instance, however large the file chosen.
 import { OUTPUT_FORMATS, type OutputFormat } from '../../domain/output-format.js';
 import type { ResolvedDefault } from '../../domain/parameters.js';
 import type { ProgramId } from '../../domain/programs.js';
-import type { EngineGateway, ParameterDescription, ProgramDescription, ValidationResult } from '../../ports/engine.js';
-import type { ReactorAbi } from './abi.js';
+import type { EngineGateway, ParameterDescription, ProgramDescription, StartResult, ValidationResult } from '../../ports/engine.js';
+import { FILE_REGISTRY, loadFile, type ReactorAbi } from './abi.js';
 
-export type EngineControl = Pick<EngineGateway, 'describe' | 'validate'>;
+export type EngineControl = Pick<EngineGateway, 'describe' | 'start' | 'validate'>;
 
 interface DescribeJson {
   readonly program: ProgramId;
@@ -91,14 +96,37 @@ export function toProgramDescription(json: unknown): ProgramDescription {
   };
 }
 
-/** EngineControl over a serial reactor that `reactor` opens (and reopens after a stop). */
-export function reactorControl(reactor: () => Promise<ReactorAbi>): EngineControl {
+/**
+ * EngineControl over a serial reactor that `reactor` opens (and reopens after a stop), the shared
+ * instance; `instantiate` opens a new instance of the serial module, which a validation with a
+ * registry file takes for itself.
+ */
+export function reactorControl(reactor: () => Promise<ReactorAbi>, instantiate: () => Promise<ReactorAbi>): EngineControl {
   return {
     async describe(program) {
       return toProgramDescription((await reactor()).describe(program));
     },
-    async validate(argv): Promise<ValidationResult> {
-      const message = (await reactor()).validate(argv);
+    async start(argv): Promise<StartResult> {
+      return (await reactor()).start(argv);
+    },
+    async validate(argv, registry): Promise<ValidationResult> {
+      let abi: ReactorAbi;
+      if (registry === undefined) abi = await reactor();
+      else {
+        // The validation's own instance, never the shared one; one that cannot be opened fails the
+        // validation with its reason. The file is read in chunks from the Blob (`loadFile`); a file
+        // that the engine cannot hold is refused with its message (`not enough memory for the registry
+        // file ...`). Nothing is released: the instance goes after the validation, with the file.
+        try {
+          abi = await instantiate();
+        } catch (error) {
+          throw new Error(`the engine could not open an instance for the file of -conffile: ${error instanceof Error ? error.message : String(error)}`, {
+            cause: error,
+          });
+        }
+        await loadFile(abi, FILE_REGISTRY, registry.name, registry.file);
+      }
+      const message = abi.validate(argv);
       return message === undefined ? { ok: true } : { ok: false, message };
     },
   };

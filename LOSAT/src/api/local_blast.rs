@@ -222,11 +222,7 @@ pub struct OutFile {
 /// Whether `OutFile` has been made.
 enum OutState {
     Unmade,
-    /// `new`: no file was at the path before (`OutFile::remove_new_empty`).
-    Made {
-        file: BufWriter<File>,
-        new: bool,
-    },
+    Made { file: BufWriter<File> },
     Failed,
 }
 
@@ -243,37 +239,20 @@ impl OutFile {
     /// Makes the file as the command line makes `-out` (`cli::create_out_file`), once.
     fn make(&mut self) -> anyhow::Result<()> {
         match self.state {
-            OutState::Unmade => {
-                let new = !self.path.exists();
-                match crate::cli::create_out_file(&self.path, self.program) {
-                    Ok(file) => {
-                        self.state = OutState::Made {
-                            file: BufWriter::new(file),
-                            new,
-                        };
-                        Ok(())
-                    }
-                    Err(error) => {
-                        self.state = OutState::Failed;
-                        Err(error)
-                    }
+            OutState::Unmade => match crate::cli::create_out_file(&self.path, self.program) {
+                Ok(file) => {
+                    self.state = OutState::Made {
+                        file: BufWriter::new(file),
+                    };
+                    Ok(())
                 }
-            }
+                Err(error) => {
+                    self.state = OutState::Failed;
+                    Err(error)
+                }
+            },
             OutState::Made { .. } => Ok(()),
             OutState::Failed => Err(anyhow::anyhow!("the -out file could not be made")),
-        }
-    }
-
-    // NCBI reference: none (LOSAT's own rule of TBLASTX's `run`, DECISIONS 24 f of line NP).
-    /// Removes the file when this search made it (no file was there) and nothing was written to
-    /// it: TBLASTX's command line does so after a title that the archive cannot hold
-    /// (`report::archive::TitleRefusal`).
-    pub(crate) fn remove_new_empty(&mut self) {
-        if let OutState::Made { file, new: true } = &mut self.state {
-            let _ = file.flush();
-            if std::fs::metadata(&self.path).is_ok_and(|meta| meta.len() == 0) {
-                let _ = std::fs::remove_file(&self.path);
-            }
         }
     }
 }
@@ -421,7 +400,9 @@ pub struct ReportedSubject {
 
 /// Reports which HSP a formatter is writing, so that a caller can relate each HSP to its
 /// bytes in every output, and the statistics of each query of the search. The written bytes do
-/// not change.
+/// not change. The query-anchored reports (outfmt 1 to 4) write one section of all of a query's
+/// HSPs merged, which has no part of one HSP or subject: they call none of the HSP and subject
+/// events.
 pub trait FormatObserver {
     /// The formatter for `ReportOutputs::formats[format]` starts the row (outfmt 6/7) or
     /// the alignment section (outfmt 0: the score lines and the alignment, without the

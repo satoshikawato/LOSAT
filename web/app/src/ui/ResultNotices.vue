@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// What the lists of the selected query do not show, and why (design §11.2): no hits, HSPs
+// What the lists of the selected query do not show, and why (design §11.2): a dry run, no hits, HSPs
 // hidden by the view filters, a hit list that reached its limit (more subjects may match;
 // it is not said that they do), and subjects whose alignments outfmt 0 does not show.
 import { computed } from 'vue';
@@ -32,7 +32,8 @@ const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(
 
 <template>
   <div class="result-notices" aria-live="polite">
-    <div v-if="reason === 'empty-query'" class="notice" data-testid="results-notice" data-kind="empty-query">
+    <p v-if="reason === 'dry-run'" class="notice" data-testid="results-notice" data-kind="dry-run">{{ NO_HSP_TEXT['dry-run'] }}</p>
+    <div v-else-if="reason === 'empty-query'" class="notice" data-testid="results-notice" data-kind="empty-query">
       <p>{{ NO_HSP_TEXT['empty-query'] }}</p>
       <pre v-if="engineWarnings !== ''" v-scroll-focus="'Warnings'" class="output" data-testid="results-notice-engine">{{ engineWarnings }}</pre>
     </div>

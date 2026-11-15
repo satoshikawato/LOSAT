@@ -2,7 +2,8 @@
 //! index does not fit 16 bits (`-word_size 4`: 20 bits), built for all the batch's tables at once,
 //! with 32-bit indices, by counting and filling on the search pool. BLASTX's table of 4-letter words
 //! is its table of one list of all the query's lookup locations (`x_build_full_wide`, item SC9 of
-//! line NP). A child module of
+//! line NP), and so are TBLASTX's full table of a batch and TBLASTN's table of 4-letter words
+//! (`backbone.rs` `x_full_wide_table`, item X2e of line RG). A child module of
 //! `x_pair_lut.rs`, whose `x_build_group` (16-bit neighbour lists) keeps building the tables of
 //! words of 2 and 3 letters.
 //!
@@ -93,7 +94,8 @@
 //! Memory: the tables, the lists T(s) of the batch's sources by stripe (2 bytes a cell of a list
 //! and 8 a block, freed when the tables are built; no memo is kept across batches: at 4 letters the
 //! lists of a batch take tens to hundreds of megabytes), the counts of step 3 (4 bytes a backbone cell and
-//! table: TBLASTX builds at most 6 tables at once, x_pair_par.rs `X_MAX_GROUPS`, BLASTX one), and
+//! table: TBLASTX's unit path builds at most 6 tables at once, x_pair_par.rs `X_MAX_GROUPS`; a full
+//! table, of BLASTX, TBLASTN or TBLASTX's reference frame loop, is one), and
 //! for a while the sources' words in step 1 (20 bytes a query word) and a range's lists as made
 //! before they are put by stripe (step 2). No chain is made: the reference builder holds the chains
 //! and the table at once.
@@ -437,6 +439,196 @@ fn x_wide_targets(
         let exact = x_wide_index(query_word, word_length);
         let at = start + out[start..].partition_point(|&w| w < exact);
         out.insert(at, exact);
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:580-582,600-604 (quoted at
+// `x_wide_neighbors`)
+// ```c
+//         for (i = 0; i < alphabet_size; i++) {
+//             if (score + row[i] >= threshold) {
+// ...
+//             s_AddWordHitsCore(info, score + row[i], current_pos + 1);
+// ```
+// No NCBI counterpart for the count itself: `x_wide_neighbors`' words, counted (the same tests,
+// the last level's letters by their number), for LOSAT's choice of the blocks' ends.
+/// The number of words `x_wide_neighbors` appends for `query_word` from `current_pos` on.
+fn x_wide_neighbor_count(
+    query_word: &[u8],
+    word_length: usize,
+    scores: &XWideScores,
+    threshold: i32,
+    score: i32,
+    current_pos: usize,
+) -> u64 {
+    let query_residue = query_word[current_pos] as usize;
+    let score = score - scores.row_max[query_residue];
+    let mut letters =
+        scores.letters_at_least(query_residue, i64::from(threshold) - i64::from(score));
+    if current_pos == word_length - 1 {
+        return u64::from(letters.count_ones());
+    }
+    let row = &scores.rows[query_residue];
+    let mut words = 0u64;
+    while letters != 0 {
+        let residue = letters.trailing_zeros() as usize;
+        letters &= letters - 1;
+        words += x_wide_neighbor_count(
+            query_word,
+            word_length,
+            scores,
+            threshold,
+            score + row[residue],
+            current_pos + 1,
+        );
+    }
+    words
+}
+
+// No NCBI counterpart: the longest word `XWideWordCount` counts (the joint builder's, 32-bit
+// indices of 5-bit letters).
+const X_WIDE_COUNT_MOST_LETTERS: usize = 6;
+
+// No NCBI counterpart: counts the cells of `x_wide_targets` without a table, for LOSAT's choice of
+// the blocks' ends (EXPERIMENT LOSAT_X_BPQBLOCK, `blastp/blast_engine.rs` `x_word_blocks`); it
+// changes no value NCBI computes.
+/// The number of cells T(s) of a query word, the appends of `s_AddWordHits` for one query offset
+/// to the lookup table (`x_wide_targets`, counted: the neighbours, and the word itself when there
+/// is no threshold or its own score is below it), for every word length of the lookup table, the
+/// direct builders' (2 and 3) and the joint builder's (4). Neither the number nor the word's own
+/// score depends on the order of its letters, so a count is kept per set of letters (`counts`, at
+/// the set's rank among the sets of `word_length` letters), and the letters of a proteome take a
+/// few tens of thousands of enumerations; as `CompressedWordCount` (compressed.rs) for the
+/// compressed table. The kept counts are shared: threads that count with one counter keep them for
+/// each other (two threads may count a set both; they keep the same count).
+pub(crate) struct XWideWordCount {
+    scores: XWideScores,
+    threshold: i32,
+    word_length: usize,
+    /// `binomial[n][k]` is C(n, k), for n below the alphabet's size plus `word_length` and k up
+    /// to `word_length`.
+    binomial: Vec<[u32; X_WIDE_COUNT_MOST_LETTERS + 1]>,
+    /// Per rank of a set of letters, its count plus 1; 0 while it is not counted.
+    counts: Box<[std::sync::atomic::AtomicU32]>,
+}
+
+impl XWideWordCount {
+    /// The counts of the table of `matrix`'s words of `word_length` letters with the threshold
+    /// `threshold` (the table's `Int4` threshold, as `blastp_aa_lookup` builds it); `None` for a
+    /// word length the joint builder's indices do not cover.
+    pub(crate) fn new(matrix: ScoringMatrix, word_length: usize, threshold: i32) -> Option<Self> {
+        if !(1..=X_WIDE_COUNT_MOST_LETTERS).contains(&word_length) || !x_wide_covers(word_length) {
+            return None;
+        }
+        let alphabet_size = LOOKUP_ALPHABET_SIZE;
+        // The row maxima of `build_lookup_from_prepared` (`XPairLutQuery::x_from_prepared`).
+        let row_max: Vec<i32> = (0..alphabet_size)
+            .map(|i| {
+                (0..alphabet_size)
+                    .map(|j| lookup_matrix_score(matrix, i, j))
+                    .max()
+                    .unwrap_or(i32::MIN)
+            })
+            .collect();
+        // A set of `word_length` of the letters, sorted, a_0 <= ... <= a_{w-1}, has the rank sum
+        // C(a_i + i, i + 1), one of C(letters + w - 1, w) (as `CompressedWordCount`).
+        let mut binomial = vec![[0u32; X_WIDE_COUNT_MOST_LETTERS + 1]; alphabet_size + word_length];
+        for n in 0..binomial.len() {
+            binomial[n][0] = 1;
+            for k in 1..=word_length.min(n) {
+                binomial[n][k] = binomial[n - 1][k - 1] + binomial[n - 1][k];
+            }
+        }
+        let sets = binomial[alphabet_size + word_length - 1][word_length] as usize;
+        Some(Self {
+            scores: XWideScores::new(matrix, &row_max),
+            threshold,
+            word_length,
+            binomial,
+            counts: (0..sets)
+                .map(|_| std::sync::atomic::AtomicU32::new(0))
+                .collect(),
+        })
+    }
+
+    /// The cells of the table's backbone (`compute_backbone_size`, as `build_lookup_from_prepared`).
+    pub(crate) fn backbone_cells(&self) -> u64 {
+        compute_backbone_size(
+            self.word_length,
+            LOOKUP_ALPHABET_SIZE,
+            ilog2(LOOKUP_ALPHABET_SIZE) + 1,
+        ) as u64
+    }
+
+    /// The rank of the set of `word`'s letters; `None` for a letter outside the alphabet.
+    fn rank(&self, word: &[u8]) -> Option<usize> {
+        let mut sorted = [0u8; X_WIDE_COUNT_MOST_LETTERS];
+        for (to, &residue) in sorted.iter_mut().zip(word) {
+            if usize::from(residue) >= LOOKUP_ALPHABET_SIZE {
+                return None;
+            }
+            *to = residue;
+        }
+        let sorted = &mut sorted[..self.word_length];
+        sorted.sort_unstable();
+        Some(
+            sorted
+                .iter()
+                .enumerate()
+                .map(|(i, &letter)| self.binomial[usize::from(letter) + i][i + 1] as usize)
+                .sum(),
+        )
+    }
+
+    /// The cells T(s) of `word` (NCBISTDAA letters, `word_length` of them); 0 for a word with a
+    /// letter outside the alphabet.
+    fn words(&self, word: &[u8]) -> u64 {
+        use std::sync::atomic::Ordering;
+        let Some(rank) = self.rank(word) else {
+            return 0;
+        };
+        let kept = &self.counts[rank];
+        match kept.load(Ordering::Relaxed) {
+            0 => {}
+            words_and_one => return u64::from(words_and_one - 1),
+        }
+        let words = self.count(word);
+        if let Some(words_and_one) = u32::try_from(words).ok().and_then(|w| w.checked_add(1)) {
+            kept.store(words_and_one, Ordering::Relaxed);
+        }
+        words
+    }
+
+    /// `words` without the kept counts: the statements of `x_wide_targets`, counted.
+    fn count(&self, word: &[u8]) -> u64 {
+        let scores = &self.scores;
+        let first = usize::from(word[0]);
+        let mut self_score = scores.rows[first][first];
+        for &residue in &word[1..self.word_length] {
+            let residue = usize::from(residue);
+            self_score += scores.rows[residue][residue];
+        }
+        let own = u64::from(self.threshold == 0 || self_score < self.threshold);
+        if self.threshold == 0 {
+            return own;
+        }
+        let mut max_score = scores.row_max[first];
+        for &residue in &word[1..self.word_length] {
+            max_score += scores.row_max[usize::from(residue)];
+        }
+        own + x_wide_neighbor_count(word, self.word_length, scores, self.threshold, max_score, 0)
+    }
+
+    /// The cells of `queries`' words (each query's NCBISTDAA letters): the most that a table whose
+    /// words are some of them appends (SEG and `-lcase_masking` only leave words out).
+    pub(crate) fn batch_words(&self, queries: &mut dyn Iterator<Item = &[u8]>) -> u64 {
+        let mut words = 0u64;
+        for query in queries {
+            for word in query.windows(self.word_length) {
+                words = words.saturating_add(self.words(word));
+            }
+        }
+        words
     }
 }
 
@@ -837,16 +1029,31 @@ impl XPairLutQuery {
         self.x_build_tables_wide_with(tables, XWideOn::Pool(pool), mapped, None, true)
     }
 
-    /// BLASTX's lookup table of 4-letter words (`-word_size 4`, item SC9 of line NP), whose backbone
-    /// index the 16-bit direct builder does not cover: the table of one list of lookup locations,
-    /// all of the query's, which is `build_lookup_from_prepared`'s table (module comment: the full
-    /// table filtered to its own locations), in `BlastAaLookupFinalize`'s layout and never
-    /// compacted (BLASTX's scans index the whole backbone), built in tasks for `parts` threads of
-    /// the pool the build runs on.
+    /// The lookup table of 4-letter words (`-word_size 4`) of BLASTX (item SC9 of line NP), TBLASTN
+    /// and TBLASTX's reference frame loop (item X2e of line RG), whose backbone index the 16-bit
+    /// direct builder does not cover: the table of one list of lookup locations, all of the query's,
+    /// which is `build_lookup_from_prepared`'s table (module comment: the full table filtered to its
+    /// own locations), in `BlastAaLookupFinalize`'s layout and never compacted (their scans index the
+    /// whole backbone), built in tasks for `parts` threads of the pool the build runs on.
     pub(crate) fn x_build_full_wide(&self, parts: usize) -> BlastAaLookupTable {
+        self.x_build_full_wide_with(XWideOn::Here(parts))
+    }
+
+    /// BLASTP's lookup table of 4-letter words (`-word_size 4`, item SC8b of line NP): the table
+    /// [`Self::x_build_full_wide`] builds, in tasks on `pool`'s threads.
+    pub(crate) fn x_build_full_wide_on(
+        &self,
+        pool: &crate::utils::threading::SearchPool<'_>,
+    ) -> BlastAaLookupTable {
+        self.x_build_full_wide_with(XWideOn::Pool(pool))
+    }
+
+    // No NCBI counterpart (scheduling only): the one table of the query's locations, its tasks on
+    // `on`.
+    /// The body of [`Self::x_build_full_wide`] and [`Self::x_build_full_wide_on`].
+    fn x_build_full_wide_with(&self, on: XWideOn<'_, '_>) -> BlastAaLookupTable {
         let tables = [self.prepared.lookup_locations.clone()];
-        let mut built =
-            self.x_build_tables_wide_with(&tables, XWideOn::Here(parts), false, None, false);
+        let mut built = self.x_build_tables_wide_with(&tables, on, false, None, false);
         debug_assert!(built.len() == 1 && built[0].rank.is_empty());
         built.pop().expect("one table").table
     }
@@ -1518,6 +1725,64 @@ mod tests {
         assert!(
             t.entries > 0 && t.in_overflow > 0 && t.compacted > 0,
             "{t:?}"
+        );
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:504-509,580-582 (cited at
+    // `x_wide_targets`). The count of `XWideWordCount` is the number of cells `x_wide_targets` lists
+    // for the word, and the same for the word's letters in another order (the kept count of their
+    // set): words of 2, 3 and 4 letters, four matrices, thresholds 0, 11 and 13 (and 1 and INT_MIN
+    // at 2 and 3 letters), with letters outside the 20 amino acids; a batch's count is the sum of
+    // its words'.
+    #[test]
+    fn wide_word_count_is_the_cells_of_the_word() {
+        let mut seed = 0x3b17_5eed_0000_0011u64;
+        let matrices = [
+            ScoringMatrix::Blosum62,
+            ScoringMatrix::Pam30,
+            ScoringMatrix::Blosum45,
+            ScoringMatrix::Pam250,
+        ];
+        for word_length in [2usize, 3, 4] {
+            for &matrix in &matrices {
+                for threshold in [0, 11, 13, 1, i32::MIN] {
+                    if word_length == 4 && (threshold == 1 || threshold == i32::MIN) {
+                        continue;
+                    }
+                    let counter = XWideWordCount::new(matrix, word_length, threshold)
+                        .expect("a counter of every word length of the standard table");
+                    let mut query = residues(&mut seed, 60);
+                    // B, Z, X, U, * and the gap letter in the words too.
+                    query.extend_from_slice(&[2, 23, 21, 24, 25, 0, 1, 2]);
+                    let mut sum = 0u64;
+                    for word in query.windows(word_length) {
+                        let mut cells = Vec::new();
+                        x_wide_targets(word, word_length, &counter.scores, threshold, &mut cells);
+                        let counted = counter.words(word);
+                        assert_eq!(
+                            counted,
+                            cells.len() as u64,
+                            "{matrix:?} word {word:?} threshold {threshold}"
+                        );
+                        let mut reversed = word.to_vec();
+                        reversed.reverse();
+                        assert_eq!(counter.words(&reversed), counted, "{word:?} reversed");
+                        assert_eq!(counter.count(&reversed), counted, "{word:?} recounted");
+                        sum += counted;
+                    }
+                    assert_eq!(
+                        counter.batch_words(&mut [&query[..]].into_iter()),
+                        sum,
+                        "{matrix:?} word length {word_length} threshold {threshold}"
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            XWideWordCount::new(ScoringMatrix::Blosum62, 4, 11)
+                .expect("counter")
+                .backbone_cells(),
+            compute_backbone_size(4, LOOKUP_ALPHABET_SIZE, X_WIDE_CHARSIZE) as u64
         );
     }
 

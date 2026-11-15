@@ -716,14 +716,26 @@ fn defaults_and_task_overrides_remain_distinct() {
         );
         crate::algorithm::blastp::blast_engine::check_options(&a).unwrap();
     }
-    // Word size 4 keeps the lookup table, which LOSAT's BLASTP implements at 2 and 3.
-    let Commands::Blastp(a) = parse("blastp", &["-word_size", "4"]).unwrap().command else {
-        panic!()
-    };
-    assert!(crate::algorithm::blastp::blast_engine::check_options(&a)
-        .unwrap_err()
-        .to_string()
-        .contains("-word_size 4 (the lookup table) is not supported by LOSAT's BLASTP"));
+    // Word size 4 keeps the lookup table with each task's threshold, and runs (item SC8b).
+    for (task, threshold) in [
+        ("blastp", 11.0),
+        ("blastp-fast", 20.0),
+        ("blastp-short", 16.0),
+    ] {
+        let Commands::Blastp(a) = parse("blastp", &["-task", task, "-word_size", "4"])
+            .unwrap()
+            .command
+        else {
+            panic!()
+        };
+        let resolved = a.resolve().unwrap();
+        assert_eq!(
+            (resolved.word_size, resolved.threshold),
+            (4, threshold),
+            "{task}"
+        );
+        crate::algorithm::blastp::blast_engine::check_options(&a).unwrap();
+    }
     // TBLASTN takes both of its tasks (tblastn-fast: the compressed lookup table).
     parse("tblastn", &["-task", "tblastn"]).unwrap();
     parse("tblastn", &["-task", "tblastn-fast"]).unwrap();
@@ -1351,11 +1363,17 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "13", None, NcbiLater("Please provide a file name for outfmt 13.")),
         (ALL, "13", Some("-"), NcbiLater("Please provide a file name for outfmt 13.")),
         (ALL, "14", None, NcbiLater("Please provide a file name for outfmt 14.")),
-        // Line OF track T (text formats): not written yet.
-        (ALL, "1", None, UNSUPPORTED),
-        (ALL, "2", None, UNSUPPORTED),
-        (ALL, "3", None, UNSUPPORTED),
-        (ALL, "4", None, UNSUPPORTED),
+        // Line RG T3 (the query-anchored formats): BLASTP (T3a), BLASTN and TBLASTN (T3b) write
+        // them, BLASTX and TBLASTX not yet.
+        (&["blastp", "blastn", "tblastn"], "1", None, Writes(QueryAnchoredIdentities)),
+        (&["blastp", "blastn", "tblastn"], "2", None, Writes(QueryAnchoredNoIdentities)),
+        (&["blastp", "blastn", "tblastn"], "3", None, Writes(FlatQueryAnchoredIdentities)),
+        (&["blastp", "blastn", "tblastn"], "4", None, Writes(FlatQueryAnchoredNoIdentities)),
+        (&["blastp", "blastn", "tblastn"], "1 qseqid", None, Writes(QueryAnchoredIdentities)),
+        (&["blastx", "tblastx"], "1", None, UNSUPPORTED),
+        (&["blastx", "tblastx"], "2", None, UNSUPPORTED),
+        (&["blastx", "tblastx"], "3", None, UNSUPPORTED),
+        (&["blastx", "tblastx"], "4", None, UNSUPPORTED),
         // Line RG T2: the organism report in every program.
         (SHARED, "18", None, Writes(TaxFormat)),
         (SHARED, "18 qseqid", None, Writes(TaxFormat)),
@@ -2033,14 +2051,15 @@ fn every_command_is_an_entry_name() {
 // `ncbi_environment::preparse`): `-logfile FILE` and `-conffile FILE` go to the argument reader
 // with their values, a last `-logfile` or `-conffile` without one is dropped. The command line's
 // application start reads them (`cli::main_entry`, `try_parse_from_start`), and so does the start
-// of each library call (`api::start`, `try_parse_from_library`, line RG item E1w-2); the Web
-// engine's parser, which runs none, refuses them (`toolkit_file_word_error`).
+// of each library call (`api::start`, `try_parse_with_own_start`, line RG item E1w-2) and of each
+// run of LOSAT Web's ABI v2 (`web_adapter::try_parse_cli`, item E1w-3a); the parser of ABI v1,
+// which runs none, refuses them (`toolkit_file_word_error`).
 #[test]
 fn toolkit_file_options_need_an_application_start() {
     let library = |program: &str, extra: &[&str]| {
         let mut argv = vec!["losat", program, "-query", "q.fa", "-subject", "s.fa"];
         argv.extend(extra);
-        crate::cli::try_parse_from_library::<Cli, _, _>(argv)
+        crate::cli::try_parse_with_own_start::<Cli, _, _>(argv)
     };
     for (program, upper) in [
         ("blastn", "BLASTN"),
@@ -2066,7 +2085,7 @@ fn toolkit_file_options_need_an_application_start() {
             let error = parse(program, words).unwrap_err().to_string();
             assert!(
                 error.contains(&format!(
-                    "the NCBI C++ Toolkit option {name} runs on the command line and in the library API of LOSAT's {upper} only: the Web engine runs no NCBI application start, which reads it"
+                    "the NCBI C++ Toolkit option {name} runs on the command line, in the library API and in the Web engine's ABI v2 of LOSAT's {upper} only: the Web engine's ABI v1 runs no NCBI application start, which reads it"
                 )),
                 "{program} {words:?}: {error}"
             );
@@ -2138,7 +2157,7 @@ fn toolkit_file_options_need_an_application_start() {
     };
     let makedb = |words: &[&'static str]| try_parse_from::<Cli, _, _>(argv(words));
     let library_makedb =
-        |words: &[&'static str]| crate::cli::try_parse_from_library::<Cli, _, _>(argv(words));
+        |words: &[&'static str]| crate::cli::try_parse_with_own_start::<Cli, _, _>(argv(words));
     for (words, name) in [
         (&["-conffile", "c.ini"][..], "-conffile"),
         (&["-dryrun"], "-dryrun"),
@@ -2147,7 +2166,7 @@ fn toolkit_file_options_need_an_application_start() {
         let error = makedb(words).unwrap_err().to_string();
         assert!(
             error.contains(&format!(
-                "the NCBI C++ Toolkit option {name} runs on the command line and in the library API of LOSAT's makeblastdb only: the Web engine runs no NCBI application start, which reads it"
+                "the NCBI C++ Toolkit option {name} runs on the command line and in the library API of LOSAT's makeblastdb only: the Web engine's ABI v1 runs no NCBI application start, which reads it"
             )),
             "{words:?}: {error}"
         );
@@ -2188,7 +2207,7 @@ fn toolkit_file_options_need_an_application_start() {
         let error = refused("-dryrun");
         assert!(
             error.contains(&format!(
-                "the NCBI C++ Toolkit option -dryrun runs on the command line of LOSAT's {upper} only: the Web engine runs no NCBI application start, which reads it"
+                "the NCBI C++ Toolkit option -dryrun runs on the command line of LOSAT's {upper} only: the Web engine's ABI v1 runs no NCBI application start, which reads it"
             )),
             "{program}: {error}"
         );

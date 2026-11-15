@@ -1,0 +1,74 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/of1/sseg.fa).
+           2 sequences; 323 total letters
+
+
+
+Query= qseg qa with a run of 20 Q
+
+Length=170
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sseg qseg with every 11th letter changed                              278     7e-102
+s_ins insertions and deletion                                         276     3e-101
+
+
+
+Query_1    1    DIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIGC  60
+Subject_1  1    .....W..........W..........W..........W..........W..........  60
+Subject_2  1    ..........................V........................K........  65
+                                                        \                   
+                                                        |                   
+                                                    WWHHW
+
+Query_1    61   FQSTQNPYFMYNYNTqqqqqqqqqqqqqqqqqqqqHSSFMSETRIRTNKHYWSRYHAPMH  120
+Subject_1  61   W..........W..........W..........W..........W..........W....  120
+Subject_2  66   ----...........--------------------.........................  103
+                                                        \                   
+                                                        |                   
+                                                       PG
+
+Query_1    121  QQFTKVNNGAEPGRQEEIRFTHGTYKKRDCALNERMFCFKCESRLSLVWD  170
+Subject_1  121  ......W..........W..........W..........W..........  170
+Subject_2  104  ..................................................  153
+
+
+Lambda      K        H        a         alpha
+   0.325    0.137    0.470    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 41292
+
+
+  Database: User specified sequence set (Input: tests/db_search/of1/sseg.fa).
+    Posted date:  Unknown
+  Number of letters in database: 323
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

@@ -250,10 +250,10 @@ pub enum Commands {
 // Translate registered canonical keys only. Consume each value once so a path
 // or a quoted filtering specification can never be interpreted as another key.
 /// Parses `argv` (`losat <program> <words>`) for a caller that runs no NCBI application start
-/// (the Web engine): the toolkit's words that the start reads (`-logfile`, `-conffile`,
-/// `-dryrun`) are refused (`toolkit_file_word_error`; makeblastdb keeps its own `-logfile`
-/// argument), and so are the versions (`version_word_error`) and `-xmlhelp`
-/// (`xml_help_refusal`).
+/// (LOSAT Web's ABI v1, and the engine's own parses of an argv): the toolkit's words that the
+/// start reads (`-logfile`, `-conffile`, `-dryrun`) are refused (`toolkit_file_word_error`;
+/// makeblastdb keeps its own `-logfile` argument), and so are the versions (`version_word_error`)
+/// and `-xmlhelp` (`xml_help_refusal`).
 pub fn try_parse_from<T, I, S>(argv: I) -> Result<T, clap::Error>
 where
     T: Parser + CommandFactory,
@@ -263,17 +263,17 @@ where
     try_parse_from_command(T::command(), argv)
 }
 
-/// `try_parse_from` for the library API, whose calls run an NCBI application start of their own
-/// (`api::start`): `-logfile`, `-conffile` and `-dryrun` are taken; the versions and `-xmlhelp`,
-/// whose texts only the command line writes, are refused (`version_word_error`,
-/// `xml_help_refusal`).
-pub(crate) fn try_parse_from_library<T, I, S>(argv: I) -> Result<T, clap::Error>
+/// `try_parse_from` for a caller whose calls run an NCBI application start of their own: the
+/// library API (`api::start`) and LOSAT Web's ABI v2 (`web_adapter::start_run`). `-logfile`,
+/// `-conffile` and `-dryrun` are taken; the versions and `-xmlhelp`, whose texts only the command
+/// line writes, are refused (`version_word_error`, `xml_help_refusal`).
+pub(crate) fn try_parse_with_own_start<T, I, S>(argv: I) -> Result<T, clap::Error>
 where
     T: Parser + CommandFactory,
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    parse_command(T::command(), argv, Reader::Library)
+    parse_command(T::command(), argv, Reader::OwnStart)
 }
 
 /// `try_parse_from` after the command line's application start `start` of the program that
@@ -310,18 +310,19 @@ where
 /// Who reads an argv (`parse_command`), which decides what NCBI's toolkit words do there.
 #[derive(Clone, Copy)]
 enum Reader<'a> {
-    /// A caller that runs no NCBI application start (the Web engine): the toolkit's words, the
-    /// versions and `-xmlhelp` are refused.
+    /// A caller that runs no NCBI application start (LOSAT Web's ABI v1): the toolkit's words,
+    /// the versions and `-xmlhelp` are refused.
     NoStart,
-    /// The library API, whose calls run a start of their own (`api::start`): `-logfile`,
-    /// `-conffile` and `-dryrun` are taken; the versions and `-xmlhelp` are refused.
-    Library,
+    /// The library API and LOSAT Web's ABI v2, whose calls run a start of their own
+    /// (`api::start`, `web_adapter::start_run`): `-logfile`, `-conffile` and `-dryrun` are taken;
+    /// the versions and `-xmlhelp` are refused.
+    OwnStart,
     /// The command line's entry with its application start: `-xmlhelp` is the request whose XML
     /// the entry prints.
     CommandLine(&'a crate::blastinput::ncbi_environment::ApplicationStart),
 }
 
-/// The reader of `try_parse_from`, `try_parse_from_library`, `try_parse_from_start` and
+/// The reader of `try_parse_from`, `try_parse_with_own_start`, `try_parse_from_start` and
 /// `try_parse_from_command`.
 fn parse_command<T, I, S>(
     command: clap::Command,
@@ -601,7 +602,7 @@ where
             let program = xml_help.unwrap_or_default();
             return Err(match reader {
                 Reader::CommandLine(_) => xml_help_request(program),
-                Reader::NoStart | Reader::Library => clap::Error::raw(
+                Reader::NoStart | Reader::OwnStart => clap::Error::raw(
                     ErrorKind::InvalidValue,
                     xml_help_refusal(&refusal_program_name(&program)),
                 ),
@@ -1168,11 +1169,12 @@ fn toolkit_word_as_written<'a>(tokens: &'a [OsString], name: &str) -> Option<&'a
 }
 
 // No NCBI counterpart: NCBI has no library API or Web engine. The application start of the
-// command line (`cli::main_entry`, `ncbi_environment::ApplicationStart`) and of each library
-// call (`api::start`) reads `-logfile` and `-conffile` before the arguments, and both end a
-// `-dryrun` after them; the Web engine runs none, so it does not take them (line RG item E1w).
+// command line (`cli::main_entry`, `ncbi_environment::ApplicationStart`), of each library call
+// (`api::start`) and of each run of LOSAT Web's ABI v2 (`web_adapter::start_run`) reads `-logfile`
+// and `-conffile` before the arguments, and each ends a `-dryrun` after them; ABI v1 runs none, so
+// it does not take them (line RG items E1w, E1w-3a).
 /// LOSAT's refusal of the toolkit option `word` (`-logfile`, `-conffile`, `-dryrun`) in
-/// `program` when the parser's caller runs no application start: the Web engine.
+/// `program` when the parser's caller runs no application start: LOSAT Web's ABI v1.
 fn toolkit_file_word_error(program: &str, word: &str) -> clap::Error {
     clap::Error::raw(
         ErrorKind::InvalidValue,
@@ -1185,13 +1187,20 @@ pub(crate) fn toolkit_file_word_refusal(program: &str, word: &str) -> String {
     let name = toolkit_option_name(word);
     let shown = refusal_program_name(program);
     let places = match library_part(program) {
+        LibraryPart::Search if WEB_V2_PROGRAMS.contains(&program) => {
+            "the command line, in the library API and in the Web engine's ABI v2"
+        }
         LibraryPart::Search | LibraryPart::Tool => "the command line and in the library API",
         LibraryPart::Absent => "the command line",
     };
     format!(
-        "the NCBI C++ Toolkit option -{name} runs on {places} of LOSAT's {shown} only: the Web engine runs no NCBI application start, which reads it"
+        "the NCBI C++ Toolkit option -{name} runs on {places} of LOSAT's {shown} only: the Web engine's ABI v1 runs no NCBI application start, which reads it"
     )
 }
+
+/// The programs that LOSAT Web's ABI v2 runs (`web/adapter/src/run.rs` `Program`, whose tests
+/// check this list), whose runs take the toolkit's words (`toolkit_file_word_refusal`).
+pub const WEB_V2_PROGRAMS: &[&str] = &["blastn", "blastp", "blastx", "tblastn", "tblastx"];
 
 /// What LOSAT's library API runs of the command line's `program`.
 enum LibraryPart {
@@ -2011,8 +2020,7 @@ impl NcbiReportBuffer {
     }
 
     /// Standard output, glibc's buffer (`NcbiStdio::cout`, line-buffered on a terminal), tied to
-    /// standard error (`tie_standard_output`), writing to `inner` (the process's standard output,
-    /// or a hold of it, `report_destination_through`).
+    /// standard error (`tie_standard_output`), writing to `inner` (the process's standard output).
     pub fn standard_output(inner: Box<dyn std::io::Write + Send>) -> Self {
         // NCBI's Windows (MSVC) and macOS (libc++, BSD stdio) builds buffer otherwise: there
         // the exit status of a failing write is unverified (this model is their Linux builds').
@@ -2145,10 +2153,6 @@ impl<W: std::io::Write + ?Sized> Insertion<'_, W> {
 /// and the hold of a library call (`held`).
 pub struct NcbiOstream<'a>(Box<dyn std::io::Write + 'a>);
 
-/// The hold of blastx's command line (`archive::ArchiveHold`), whose streams are the process's
-/// standard output and error or the `-out` file.
-type CliHold = crate::algorithm::blastx::ArchiveHold<Box<dyn std::io::Write + Send>>;
-
 impl<'a> NcbiOstream<'a> {
     fn new(stream: Box<dyn std::io::Write + 'a>) -> Self {
         NcbiOstream(stream)
@@ -2167,28 +2171,21 @@ impl<'a> NcbiOstream<'a> {
     }
 
     /// The organism report's standard output on blastx's command line: NCBI's buffer of `cout`
-    /// (`NcbiReportBuffer::standard_output`), whose writes go through the run's hold, where the run
-    /// holds its output (`hold`), to the process's standard output (`report_standard_output`).
-    /// Nothing comes before the buffer; the hold keeps what the buffer writes and releases it in
-    /// the order and with the flushes of the run without it (`ArchiveHold::release`).
-    pub(crate) fn standard_output(hold: Option<&CliHold>) -> Self {
-        Self::new(report_destination_through(None, true, through(hold)))
+    /// (`NcbiReportBuffer::standard_output`) before the process's standard output
+    /// (`report_standard_output`). Nothing comes before the buffer or between it and the device.
+    pub(crate) fn standard_output() -> Self {
+        Self::new(report_destination(None, true))
     }
 
     /// The organism report's `-out` file `file` on blastx's command line: NCBI's `basic_filebuf`
-    /// (`NcbiReportBuffer::file`), whose writes go through the run's hold (`hold`) to the file, as
-    /// `standard_output`'s.
-    pub(crate) fn file(file: std::fs::File, hold: Option<&CliHold>) -> Self {
-        Self::new(report_destination_through(
-            Some(Box::new(file)),
-            true,
-            through(hold),
-        ))
+    /// (`NcbiReportBuffer::file`) before the file, as `standard_output`'s.
+    pub(crate) fn file(file: std::fs::File) -> Self {
+        Self::new(report_destination(Some(Box::new(file)), true))
     }
 
     /// The stream of a format other than the organism report on blastx's command line
     /// (`native::run_inner`): LOSAT's buffer of 8 KiB (`BufWriter`) before `destination` (the file
-    /// or standard output, behind the hold and the held document). NCBI's buffers of these formats
+    /// or standard output, behind the held document, `blast_xml::HeldOutput`). NCBI's buffers of these formats
     /// are not modelled (the order of their texts against the report is item T8 of line RG); the
     /// organism report never gets this stream (`run_inner` chooses by the format).
     pub(crate) fn buffered(destination: Box<dyn std::io::Write + 'a>) -> Self {
@@ -2196,21 +2193,13 @@ impl<'a> NcbiOstream<'a> {
     }
 
     /// A format's stream (`sink`'s) behind the hold of a library call (`local::report_batches`,
-    /// `archive::ArchiveHold`), which passes the writes and flushes on in their order (at the
+    /// `blast_xml::HeldFormats`), which passes the writes and flushes on in their order (at the
     /// release, while it holds). The caller's writer has no stream of NCBI's (`sink`), so no buffer
     /// of NCBI's comes after the hold.
-    pub(crate) fn held(stream: crate::algorithm::blastx::HoldWriter<NcbiOstream<'a>>) -> Self {
+    pub(crate) fn held(
+        stream: crate::algorithm::blastx::HeldFormatWriter<NcbiOstream<'a>>,
+    ) -> Self {
         Self::new(Box::new(stream))
-    }
-}
-
-/// What puts a device behind blastx's command-line hold `hold` (the device itself without one).
-fn through(
-    hold: Option<&CliHold>,
-) -> impl FnOnce(Box<dyn std::io::Write + Send>) -> Box<dyn std::io::Write + Send> + '_ {
-    move |device| match hold {
-        Some(hold) => Box::new(hold.writer(device)),
-        None => device,
     }
 }
 
@@ -2243,14 +2232,13 @@ pub fn tie_standard_output() -> std::io::Result<()> {
 }
 
 /// The command line's standard error, tied to the organism report's standard output
-/// (`tie_standard_output`): the process's (`process`), or a stream of the run's standard error
-/// (`through`: blastx's hold of a run whose later batch may be refused, `archive::ArchiveHold`),
-/// so that what standard output writes before a text is written before it where the text is
-/// made. A whole message is written with one `write_all` of the stream, which `std::io::Stderr`
-/// writes under one lock of standard error, so that no other thread's message comes inside it.
-/// An empty write is no write of NCBI's to `cerr` (a query without warnings, whose `ERR_POST`
-/// NCBI does not make): it writes nothing of the report.
-pub struct CliStderr<W: std::io::Write = std::io::Stderr>(W);
+/// (`tie_standard_output`): the process's (`process`), so that what standard output writes before
+/// a text is written before it where the text is made. A whole message is written with one
+/// `write_all` of the stream, which `std::io::Stderr` writes under one lock of standard error, so
+/// that no other thread's message comes inside it. An empty write is no write of NCBI's to `cerr`
+/// (a query without warnings, whose `ERR_POST` NCBI does not make): it writes nothing of the
+/// report.
+pub struct CliStderr(std::io::Stderr);
 
 impl CliStderr {
     /// The process's standard error.
@@ -2259,14 +2247,7 @@ impl CliStderr {
     }
 }
 
-impl<W: std::io::Write> CliStderr<W> {
-    /// The run's standard error `stream`.
-    pub fn through(stream: W) -> Self {
-        CliStderr(stream)
-    }
-}
-
-impl<W: std::io::Write> std::io::Write for CliStderr<W> {
+impl std::io::Write for CliStderr {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         if buf.is_empty() {
             return Ok(0);
@@ -2298,25 +2279,11 @@ pub fn report_destination(
     file: Option<Box<dyn std::io::Write + Send>>,
     tax_report: bool,
 ) -> Box<dyn std::io::Write + Send> {
-    report_destination_through(file, tax_report, |device| device)
-}
-
-/// `report_destination` with the file or standard output behind `through` (blastx's hold of a run
-/// whose later batch may be refused, `archive::ArchiveHold`, `NcbiOstream::standard_output` and
-/// `file`): NCBI's buffer comes before it, so that what it holds is what the buffer writes, where
-/// the buffer writes it.
-fn report_destination_through(
-    file: Option<Box<dyn std::io::Write + Send>>,
-    tax_report: bool,
-    through: impl FnOnce(Box<dyn std::io::Write + Send>) -> Box<dyn std::io::Write + Send>,
-) -> Box<dyn std::io::Write + Send> {
     match (file, tax_report) {
-        (Some(file), true) => Box::new(NcbiReportBuffer::file(through(file))),
-        (Some(file), false) => through(file),
-        (None, true) => Box::new(NcbiReportBuffer::standard_output(through(
-            report_standard_output(),
-        ))),
-        (None, false) => through(report_standard_output()),
+        (Some(file), true) => Box::new(NcbiReportBuffer::file(file)),
+        (Some(file), false) => file,
+        (None, true) => Box::new(NcbiReportBuffer::standard_output(report_standard_output())),
+        (None, false) => report_standard_output(),
     }
 }
 

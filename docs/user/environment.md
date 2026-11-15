@@ -185,8 +185,10 @@ output).
 
 When the host sets `PWD`, the WASI command first changes to that directory, so relative file
 names are read from it.
-LOSAT Web gives the engine an empty environment: none of these variables applies there, and NCBI's
-configuration files are not read.
+LOSAT Web gives the engine an environment of its own: it has only the directory variable of
+`-window_masker_taxid` (see above), and none of the variables of this page applies there. The
+engine reads the registry files that the page gives it, the file of `-conffile` and a `<program>.ini`
+or `.ncbirc` given under that name, as files of the command line's working directory.
 
 ## Development variables (unsupported)
 

@@ -61,12 +61,6 @@ pub(crate) struct TblastxDatabase {
 }
 
 impl TblastxDatabase {
-    /// LOSAT's refusal of mixed accession tables (`shared::check_accession_tables`), with the
-    /// program's other limits.
-    pub(crate) fn check_accession_tables(&self) -> Result<()> {
-        shared::check_accession_tables(&self.db, PROGRAM)
-    }
-
     /// The OIDs of the database's ordinal ids, which name the reported sequences without
     /// parsed Seq-ids (`gnl|BL_ORD_ID|n`).
     pub(crate) fn oid_map(&self) -> crate::seqdb::OidMap<'_> {
@@ -529,6 +523,9 @@ pub(crate) struct ReportedSubjects {
     /// The sequences with parsed Seq-ids by rank (empty when none is reported): their ids and
     /// titles come from their definition lines (`report::db_subject`).
     pub(crate) parsed: Vec<Option<Arc<ParsedSubject>>>,
+    /// The sources from which NCBI makes the empty stored titles of the others, by rank
+    /// (`shared::StoredTitle::source`; empty when none has one).
+    pub(crate) sources: Vec<crate::report::defline::SourceTaxname>,
 }
 
 /// The Seq-aligns of the hits `ordered` (in report order) that NCBI's prefetch counts against
@@ -589,25 +586,25 @@ pub(crate) fn reported_subjects(
     let mut lengths = Vec::with_capacity(ordinals.len());
     let mut kept = Vec::new();
     let mut parsed: Vec<Option<Arc<ParsedSubject>>> = Vec::new();
+    let mut sources = Vec::new();
     for (rank, &ordinal) in ordinals.iter().enumerate() {
-        let header = titles
-            .get(&ordinal)
-            .with_context(|| format!("database sequence {ordinal} has no title read"))?;
+        let header = titles.get(&ordinal).with_context(|| {
+            format!(
+                "database sequence {} has no title read",
+                database.db.oid(ordinal)
+            )
+        })?;
         let title = match header {
             ReportedHeader::Stored(stored) => {
-                shared::check_reported_title(stored.replaced_bytes, ordinal, PROGRAM)?;
+                shared::check_reported_title(
+                    stored.replaced_bytes,
+                    || database.db.oid(ordinal),
+                    PROGRAM,
+                )?;
                 if shown.pairwise {
-                    shared::check_shown_stored_title(stored.taxonomy_title, ordinal, PROGRAM)?;
+                    stored.check_shown_source(|| database.db.oid(ordinal), PROGRAM)?;
                 }
-                if shown.tabular {
-                    let oid = database.db.oid(ordinal);
-                    shared::check_tabular_stored_title(
-                        stored.taxonomy_title,
-                        shown.words,
-                        oid,
-                        PROGRAM,
-                    )?;
-                }
+                shared::keep_source(&mut sources, rank, ordinals.len(), stored.source.clone());
                 stored.title.clone()
             }
             ReportedHeader::Parsed(subject) => {
@@ -632,15 +629,21 @@ pub(crate) fn reported_subjects(
         };
         lengths.push(match stores {
             Some(stores) => {
-                let store = stores
-                    .get(&ordinal)
-                    .with_context(|| format!("database sequence {ordinal} was not read"))?;
+                let store = stores.get(&ordinal).with_context(|| {
+                    format!(
+                        "database sequence {} was not read",
+                        database.db.oid(ordinal)
+                    )
+                })?;
                 kept.push(Arc::clone(store));
                 u32::try_from(store.len()).expect("a database sequence's length fits Int4")
             }
-            None => *read_lengths
-                .get(&ordinal)
-                .with_context(|| format!("database sequence {ordinal} was not read"))?,
+            None => *read_lengths.get(&ordinal).with_context(|| {
+                format!(
+                    "database sequence {} was not read",
+                    database.db.oid(ordinal)
+                )
+            })?,
         });
         records.push(FastaRecord {
             // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the OID
@@ -674,6 +677,7 @@ pub(crate) fn reported_subjects(
                     let subject = parsed[rank as usize].as_deref()?;
                     Some((ordinals[rank as usize], subject))
                 }),
+                database.db.oid_map(),
                 PROGRAM,
             )?;
             start = end;
@@ -685,6 +689,7 @@ pub(crate) fn reported_subjects(
         lengths,
         stores: kept,
         parsed,
+        sources,
     })
 }
 
@@ -703,6 +708,7 @@ impl ReportedSubjects {
             &self.ordinals,
             oids,
             &self.parsed,
+            &self.sources,
             false,
             reads,
             PROGRAM,
@@ -719,6 +725,7 @@ impl ReportedSubjects {
             &self.records,
             &self.ordinals,
             &self.parsed,
+            &self.sources,
             |rank| self.lengths[rank] as usize,
             PROGRAM,
         )

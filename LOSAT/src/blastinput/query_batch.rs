@@ -242,9 +242,101 @@ impl QueryScope {
         }
     }
 
+    /// The scope of query records read without `-parse_deflines`, by their generated local ids
+    /// `local_ids` (`Query_N`, without `lcl|`; `believed::generated_ids`): the keys that `add_ids_of`
+    /// keeps of such an id (`scope_keys`: a local string id in any case, as NCBI's scope finds
+    /// one).
+    pub(crate) fn of_generated_ids<'r>(local_ids: impl IntoIterator<Item = &'r str>) -> Self {
+        let mut scope = Self::default();
+        let mut keys = Vec::new();
+        for id in local_ids
+            .into_iter()
+            .flat_map(crate::blastinput::fasta_reader::believed::generated_ids)
+        {
+            keys.clear();
+            crate::seqid::defline_set::scope_keys(&id, &mut keys);
+            scope.keys.extend(keys.iter().copied());
+        }
+        scope
+    }
+
     /// Whether a query of the scope has an id with one of the keys `keys`.
     pub(crate) fn has_key(&self, keys: &[u64]) -> bool {
         keys.iter().any(|key| self.keys.contains(key))
+    }
+}
+
+/// The scopes of the query batches of one report, for the refusals of the query-anchored formats
+/// (outfmt 1 to 4; `common::database::refuse_query_ids_of_anchored_reports`), one owner for
+/// BLASTN's and TBLASTN's reports: the scope of each batch (`spans`: the query records, by index,
+/// that NCBI's formatter adds to its scope for the batch's reports) holds the generated local
+/// ids (`QueryScope::of_generated_ids`) of queries read without `-parse_deflines` (`generated`:
+/// the first query has no `believed` ids), or the ids of the queries that the reports show
+/// (`QueryScope::add_ids_of`: `-parse_deflines`, a PSSM query shown with its ids).
+pub(crate) struct AnchoredBatchScopes {
+    generated: bool,
+    spans: Vec<std::ops::Range<usize>>,
+    scopes: Vec<QueryScope>,
+    none: QueryScope,
+}
+
+impl AnchoredBatchScopes {
+    /// The scopes of the batches `spans` of the query records `records` (a span past the records
+    /// is cut to them).
+    pub(crate) fn new(records: &[FastaRecord], spans: Vec<std::ops::Range<usize>>) -> Self {
+        let generated = records
+            .first()
+            .is_none_or(|query| query.believed().is_none());
+        let scopes = spans
+            .iter()
+            .map(|span| {
+                let records = &records[span.start.min(records.len())..span.end.min(records.len())];
+                if generated {
+                    QueryScope::of_generated_ids(
+                        records.iter().map(|record| record.local_id.as_str()),
+                    )
+                } else {
+                    let mut scope = QueryScope::default();
+                    scope.add_ids_of(records.iter().filter_map(FastaRecord::believed));
+                    scope
+                }
+            })
+            .collect();
+        Self {
+            generated,
+            spans,
+            scopes,
+            none: QueryScope::default(),
+        }
+    }
+
+    /// The scopes of the batches that start at the query records `starts` (the first batch at 0
+    /// whether or not `starts` lists it; each batch ends where the next starts, the last at the
+    /// end of `records`).
+    pub(crate) fn of_starts(records: &[FastaRecord], starts: &[usize]) -> Self {
+        let mut starts: Vec<usize> = starts.to_vec();
+        if starts.first() != Some(&0) {
+            starts.insert(0, 0);
+        }
+        let spans = starts
+            .iter()
+            .enumerate()
+            .map(|(index, &start)| start..starts.get(index + 1).copied().unwrap_or(records.len()))
+            .collect();
+        Self::new(records, spans)
+    }
+
+    /// Whether the queries were read without `-parse_deflines` (their generated ids).
+    pub(crate) fn generated(&self) -> bool {
+        self.generated
+    }
+
+    /// The scope of the batch that holds the query record `query` (empty past the batches).
+    pub(crate) fn of_query(&self, query: usize) -> &QueryScope {
+        self.spans
+            .iter()
+            .position(|span| span.contains(&query))
+            .map_or(&self.none, |batch| &self.scopes[batch])
     }
 }
 
@@ -414,9 +506,9 @@ pub(crate) struct QueryScopesFrom<'a> {
     first: usize,
 }
 
-impl QueryScopesFrom<'_> {
+impl<'a> QueryScopesFrom<'a> {
     /// The scope of the call's query `query`.
-    pub(crate) fn of_query(&self, query: usize) -> &QueryScope {
+    pub(crate) fn of_query(&self, query: usize) -> &'a QueryScope {
         self.scopes.of_query(self.first + query)
     }
 }
@@ -473,6 +565,25 @@ impl QueryBatches {
             Some(_) => Some(self.searched_span(0).end),
             None => self.stop_batch.as_ref().map(|span| span.end),
         }
+    }
+
+    /// Where the searched queries end of the batch whose formatting NCBI fails for a matrix name
+    /// its BLAST XML report data does not know (`blast_xml::matrix::XmlMatrixFailure`): the
+    /// search strategy's last request (`StrategyExport::stop_after`). The batch of the run's first
+    /// searched query (as `first_request_end`), or of its second when the report is held
+    /// (`XmlMatrixFailure::SecondQueryOrEnd`: NCBI's next query of another Seq-id); `None`
+    /// when a held report fails at the run's end or the run stops before: every request that
+    /// the run makes is written (probe K/k4f: `-subject` 13-16 with one query and an empty second
+    /// batch wrote both requests and stopped with that batch's error).
+    pub(crate) fn xml_matrix_request_end(
+        &self,
+        failure: crate::report::blast_xml::matrix::XmlMatrixFailure,
+    ) -> Option<usize> {
+        let query = failure.query();
+        if query == 0 {
+            return self.first_request_end();
+        }
+        (query < self.searched_done).then(|| self.searched_span(query).end)
     }
 
     /// The searched queries of the batch of the searched query `query`.
@@ -876,6 +987,53 @@ mod tests {
         assert_eq!(batches.starts, vec![(0, 0), (2, 2), (4, 4)]);
         let starts: Vec<(usize, usize)> = (0..5).map(|q| batches.start_of(q)).collect();
         assert_eq!(starts, vec![(0, 0), (0, 0), (2, 2), (2, 2), (4, 4)]);
+    }
+
+    // Probe K4f of line RG (NCBI 2.17.0, `-matrix blosum62`): the strategy's last request is that
+    // of the batch of the run's first searched query, or of its second where the report is held;
+    // a held run of one searched query (also one that an empty batch stops) writes every request.
+    #[test]
+    fn the_xml_matrix_failure_ends_the_requests_at_its_batch() {
+        use super::QueryReading;
+        use crate::blastinput::fasta_reader::FastaRecord;
+        use crate::blastinput::seq_range::QueryInput;
+        use crate::report::blast_xml::matrix::XmlMatrixFailure;
+        let batches_of = |lengths: &[usize], batch_size: u32| {
+            let records: Vec<FastaRecord> = lengths
+                .iter()
+                .enumerate()
+                .map(|(i, &len)| FastaRecord::new(format!("q{i}"), b"", &vec![b'A'; len]))
+                .collect();
+            let input = QueryInput::whole(&records);
+            super::read_query_batches(
+                &records,
+                &records,
+                &input,
+                QueryReading::Records,
+                batch_size,
+                true,
+                None,
+            )
+        };
+        let (first, held) = (
+            XmlMatrixFailure::FirstQuery,
+            XmlMatrixFailure::SecondQueryOrEnd,
+        );
+        // Three batches of one query; one batch of three.
+        let three = batches_of(&[4, 7, 3], 1);
+        assert_eq!(three.xml_matrix_request_end(first), Some(1));
+        assert_eq!(three.xml_matrix_request_end(held), Some(2));
+        let one_batch = batches_of(&[4, 7, 3], 100);
+        assert_eq!(one_batch.xml_matrix_request_end(first), Some(3));
+        assert_eq!(one_batch.xml_matrix_request_end(held), Some(3));
+        // One query; one query and a batch without letters, which stops the run.
+        let alone = batches_of(&[4], 1);
+        assert_eq!(alone.xml_matrix_request_end(first), Some(1));
+        assert_eq!(alone.xml_matrix_request_end(held), None);
+        let stopped = batches_of(&[4, 0], 1);
+        assert!(stopped.stop.is_some() && stopped.searched_done == 1);
+        assert_eq!(stopped.xml_matrix_request_end(first), Some(1));
+        assert_eq!(stopped.xml_matrix_request_end(held), None);
     }
 
     /// The records of `fasta` read with `-parse_deflines` (BLASTP's reader).

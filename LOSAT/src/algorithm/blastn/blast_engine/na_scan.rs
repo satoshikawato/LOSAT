@@ -31,31 +31,32 @@
 //! ```
 //!
 //! This module is a child of `run` for the items it keeps private (the types `DiagHashTable`,
-//! `SubjectChunk`, `QueryContext`, `QueryContextIndex`, `UngappedHit` and `BlastnTiming`;
-//! `scan_subject_kmers_with_ranges`, `select_mb_scan_kind`, `diag_hash_insert_window`,
+//! `SubjectChunk` and `UngappedHit`; `scan_subject_kmers_with_ranges`, `select_mb_scan_kind`, `diag_hash_insert_window`,
 //! `x_push_ungapped`, `mask_lookup_index` and `packed_kmer_at_seed_mask`). Its function is the
 //! statements of the branch of `prelim_chunk_hits` that were there, in their order;
 //! the fold of LOSAT_X_PAIRPARNA (`x_pair_seed_na.rs` `fold_na_t`) copies those of one-hit mode
-//! with the diagonal hash one by one, so their order is kept here. What the scan reads that is
-//! the same for every seed of a chunk is `NaScanInputs`, and what it writes is `NaScanState`,
-//! both built once per chunk. Nothing here runs on the pool.
+//! with the diagonal hash one by one, so their order is kept here. What the scan reads is
+//! `NaScanInputs` (the batch's word finder, `prelim_subject::ScanBatch`, built once per batch, and
+//! the chunk's own values), and what it writes is `NaScanState`, both built once per chunk. Nothing here runs on the pool.
 
 use super::pair_extend;
-use super::x_diag_lv;
+use super::prelim_subject::ScanBatch;
 use super::{
     blastn_trace, diag_hash_insert_window, extend_hit_ungapped_approx_ncbi,
     extend_hit_ungapped_exact_ncbi, mask_lookup_index, packed_kmer_at_seed_mask,
     scan_subject_kmers_with_ranges, select_mb_scan_kind, type_of_word, x_push_ungapped,
-    BlastnTiming, DiagHashTable, DiagStruct, QueryContext, QueryContextIndex, SubjectChunk,
-    UngappedHit,
+    DiagHashTable, DiagStruct, SubjectChunk, UngappedHit,
 };
-use crate::algorithm::blastn::alignment::gapped::BlastnaMatrix;
-use crate::algorithm::blastn::lookup::{NaLookupTable, PvDirectLookup};
 
-/// What the scan of one subject chunk with a table that is not two-stage reads that is the same
-/// for every seed, in groups below. Built once per chunk by `prelim_chunk_hits`, after
-/// LOSAT_X_PAIRPARNA declines the chunk, with the names there; every field is a shared reference
-/// or a `Copy` value.
+/// What the scan of one subject chunk with a table that is not two-stage reads: the batch's word
+/// finder (`prelim_subject::ScanBatch`, built once per batch: the tables, the word length
+/// `safe_k`, the scan step, the query block, the cutoffs, the scoring, the diagonal table's form and
+/// sizes, the window and the off-diagonal range, the level bound's constants, the diagnostics), and
+/// the chunk's own values: the packed subject from the chunk's start, the chunk's length, ranges and
+/// whether the subject is masked, the chunk (its offset in the subject), the diagonal table's offset
+/// for this chunk, whether the hash's retrieve takes the level bound of LOSAT_X_DIAGLV, and the
+/// subject's index and trace id. Built once per chunk by `prelim_chunk_hits`, after
+/// LOSAT_X_PAIRPARNA declines the chunk, with the names there.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:964-969,985-992
 /// (`s_BlastNaExtendDirect`) and :651,656,658 (`s_BlastnDiagTableExtendInitialHit`; the hash's
@@ -85,56 +86,16 @@ use crate::algorithm::blastn::lookup::{NaLookupTable, PvDirectLookup};
 /// ```
 /// The level bound and the diagnostics have no NCBI counterpart.
 pub(super) struct NaScanInputs<'a> {
-    /// The scan: the packed subject, the chunk's length, the word length (the lookup word length
-    /// too: these tables have no word extension), the scan step, the chunk's ranges, and whether
-    /// the subject is masked.
+    pub(super) scan: &'a ScanBatch<'a>,
     pub(super) search_seq_packed: &'a [u8],
     pub(super) s_len: usize,
-    pub(super) safe_k: usize,
-    pub(super) scan_step: usize,
     pub(super) subject_seq_ranges: &'a [(i32, i32)],
     pub(super) subject_masked: bool,
-    /// The lookup table: whether it is the direct table (word sizes up to 13), else the na table.
-    pub(super) use_direct_lookup: bool,
-    pub(super) pv_direct_lookup_ref: Option<&'a PvDirectLookup>,
-    pub(super) na_lookup_ref: Option<&'a NaLookupTable>,
-    /// The seed's context: the context of a query offset, the contexts, each context's query, the
-    /// contexts' cutoffs, and the chunk (its offset in the subject).
-    pub(super) query_context_index: &'a QueryContextIndex,
-    pub(super) query_contexts: &'a [QueryContext],
-    pub(super) encoded_queries_blastna: &'a [&'a [u8]],
-    pub(super) cutoff_scores: &'a [i32],
     pub(super) chunk: &'a SubjectChunk,
-    /// The diagonal table: whether it is the array (else the hash), the array's length, mask and
-    /// size, the table's offset for this chunk, and whether the hash's retrieve takes the level
-    /// bound of LOSAT_X_DIAGLV.
-    pub(super) use_array_indexing: bool,
-    pub(super) diag_table_length: usize,
-    pub(super) diag_table_mask: isize,
-    pub(super) diag_array_size: usize,
     pub(super) diag_offset: isize,
     pub(super) x_lv_ref: bool,
-    /// The window (0: one hit) and the off-diagonal range.
-    pub(super) window_size: usize,
-    pub(super) scan_range: usize,
-    /// The ungapped extension: the X-dropoff and the reduced cutoff of each context, the score
-    /// matrix, and the score table of the approximate extension.
-    pub(super) x_dropoff_scores: &'a [i32],
-    pub(super) reduced_cutoff_scores: &'a [i32],
-    pub(super) score_matrix: &'a BlastnaMatrix,
-    pub(super) nucl_score_table: &'a [i32; 256],
-    /// The diagnostics: the switch of the debug counters, the debug window, the trace lines
-    /// (`blastn_trace`) with the subject's index and trace id, the debug window's lines with the
-    /// minimum ungapped score they print, and LOSAT_TIMING.
-    pub(super) debug_enabled: bool,
-    pub(super) debug_window: Option<(usize, usize, usize, usize)>,
-    pub(super) blastn_trace_enabled: bool,
     pub(super) s_idx: usize,
     pub(super) s_id: &'a str,
-    pub(super) debug_mode: bool,
-    pub(super) min_ungapped_score: i32,
-    pub(super) timing_enabled: bool,
-    pub(super) timing_ref: Option<&'a BlastnTiming>,
 }
 
 /// What the scan writes: the chunk's initial hits, the diagonal table (the array's levels and
@@ -212,12 +173,22 @@ pub(super) struct NaScanState<'s> {
 /// scan's callback stays a function of its own, as it was.
 pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) {
     let &NaScanInputs {
+        scan,
         search_seq_packed,
         s_len,
-        safe_k,
-        scan_step,
         subject_seq_ranges,
         subject_masked,
+        chunk,
+        diag_offset,
+        x_lv_ref,
+        s_idx,
+        s_id,
+    } = x;
+    // The batch's values, read once per chunk (the scan's callback reads them as locals, as it read
+    // the fields of `x` before they moved to the batch's word finder).
+    let &ScanBatch {
+        safe_k,
+        scan_step,
         use_direct_lookup,
         pv_direct_lookup_ref,
         na_lookup_ref,
@@ -225,13 +196,10 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
         query_contexts,
         encoded_queries_blastna,
         cutoff_scores,
-        chunk,
         use_array_indexing,
-        diag_table_length,
-        diag_table_mask,
+        diag_array_length,
+        diag_mask,
         diag_array_size,
-        diag_offset,
-        x_lv_ref,
         window_size,
         scan_range,
         x_dropoff_scores,
@@ -241,13 +209,13 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
         debug_enabled,
         debug_window,
         blastn_trace_enabled,
-        s_idx,
-        s_id,
         debug_mode,
         min_ungapped_score,
         timing_enabled,
         timing_ref,
-    } = x;
+        x_lv_seeds,
+        ..
+    } = scan;
     let ungapped_hits = &mut *state.ungapped_hits;
     let hit_level_array = &mut *state.hit_level_array;
     let hit_len_array = &mut *state.hit_len_array;
@@ -264,9 +232,9 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
     };
     let mut scan_pause_ns: u64 = 0;
     let mb_scan_kind = select_mb_scan_kind(safe_k, scan_step, subject_masked);
-    // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the level bound's constants
-    // of this chunk's seeds (`s_end` adds `safe_k`).
-    let x_lv_seeds = x_diag_lv::LvSeeds::new(window_size > 0, safe_k, window_size);
+    // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the level bound's constants of the seeds
+    // (`s_end` adds `safe_k`) are the batch's (`scan.x_lv_seeds`: the word length is `safe_k`
+    // without a two-stage table).
     scan_subject_kmers_with_ranges(
         search_seq_packed,
         s_len,
@@ -348,16 +316,6 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                 // Use pre-computed cutoff score (computed once per query-subject pair)
                 let cutoff_score = cutoff_scores[context_idx];
 
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:663-664
-                // ```c
-                // diag = s_off + diag_table->diag_array_length - q_off;
-                // real_diag = diag & diag_table->diag_mask;
-                // ```
-                let (diag_array_length, diag_mask) = if use_array_indexing {
-                    (diag_table_length as isize, diag_table_mask)
-                } else {
-                    (0isize, 0isize)
-                };
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:663-664
                 // ```c
                 // diag = s_off + diag_table->diag_array_length - q_off;

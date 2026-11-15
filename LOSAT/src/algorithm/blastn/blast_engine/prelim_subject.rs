@@ -214,26 +214,99 @@ pub(super) struct PrelimBatch<'a> {
     pub(super) debug_window: Option<(usize, usize, usize, usize)>,
 }
 
-/// What the preliminary pass of a batch reads besides `PrelimBatch`: the batch's lookup tables (the
-/// two-stage table, or the direct table or the na table), which the pass holds
-/// (`SubjectPasses::prelim_pass`; the traceback drops them, `x_lut_drop.rs`). Built once per
-/// batch by `prelim_pass` from `PrelimBatch` (`ScanBatch::new`); shared references only (`Sync`,
-/// for the subjects and the chunks on the pool).
+/// What the word finder of every chunk of a batch reads (the scan, the steps of its offset pairs
+/// and the ungapped extension; `two_stage_scan.rs`, `pair_extend.rs`, `na_scan.rs`), with the
+/// batch's lookup tables and `PrelimBatch` for the rest of the chunk's search: the values of
+/// `PrelimBatch` that the word finder reads, one load from the pointer that each chunk's word finder
+/// takes, and what follows from them for every chunk (the diagonal table's form and sizes, the word
+/// lengths, the level bound's constants). Built once per batch by `SubjectPasses::prelim_pass`, which
+/// holds the tables (the traceback drops them, `x_lut_drop.rs`; `ScanBatch::new`); shared references
+/// and `Copy` values only (`Sync`, for the subjects and the chunks on the pool). Each chunk's inputs
+/// are a reference to it and the chunk's own values (its letters, length, ranges, masks, diagonal
+/// offset and ids).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:425 (the lookup table
-/// `s_BlastSearchEngineOneContext` takes for every chunk of every subject)
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:493-497 (the word finder of a
+/// chunk takes pointers to the search's shared structs: the query, its contexts, the lookup table,
+/// the matrix and the word parameters)
 /// ```c
-///         BLAST_SequenceBlk* subject, Int4 orig_length, LookupTableWrap* lookup,
+///             aux_struct->WordFinder(subject, query, query_info, lookup, matrix,
+///                                    word_params, aux_struct->ewp,
+///                                    aux_struct->offset_pairs,
+///                                    kScanSubjectOffsetArraySize,
+///                                    init_hitlist, ungapped_stats);
 /// ```
+/// and c++/src/algo/blast/core/na_ungapped.c:1597-1608 (`BlastNaWordFinder`'s parameters, read
+/// through those pointers where they are used). The level bound, the diagnostics and the timing
+/// counters have no NCBI counterpart.
 pub(super) struct ScanBatch<'a> {
+    /// The rest of the batch's values (the gapped stage, the merges, the parallel shape).
     pub(super) batch: &'a PrelimBatch<'a>,
+    /// The batch's lookup tables: the two-stage table, or the direct table or the na table.
     pub(super) two_stage_lookup_ref: Option<&'a TwoStageLookup>,
     pub(super) pv_direct_lookup_ref: Option<&'a PvDirectLookup>,
     pub(super) na_lookup_ref: Option<&'a NaLookupTable>,
+    /// The query block (`PrelimBatch`'s): the context of a query offset, the contexts, the
+    /// concatenated query with and without its sentinels, each context's letters, each context's
+    /// cutoff, X-dropoff and reduced cutoff, the score matrix and the score table of the approximate
+    /// extension.
+    pub(super) query_context_index: &'a QueryContextIndex,
+    pub(super) query_contexts: &'a [QueryContext],
+    pub(super) encoded_query_concat_blastna: &'a [u8],
+    pub(super) encoded_query_concat_blastna_with_sentinels: &'a [u8],
+    pub(super) encoded_queries_blastna: &'a [&'a [u8]],
+    pub(super) cutoff_scores: &'a [i32],
+    pub(super) x_dropoff_scores: &'a [i32],
+    pub(super) reduced_cutoff_scores: &'a [i32],
+    pub(super) score_matrix: &'a BlastnaMatrix,
+    pub(super) nucl_score_table: &'a [i32; 256],
+    /// The words: the word size capped at 31 letters (`safe_k`, the na tables' word), the word and
+    /// lookup word lengths (the two-stage table's, else `safe_k`), the scan step, the off-diagonal
+    /// range, the window and whether it is a two-hit search, the size at which a batch of offset
+    /// pairs goes to the steps of the pairs, whether a table whose width is the word size is the
+    /// direct one, the small-query table's compressed query (empty for the other tables) and
+    /// whether its aligned one-byte form applies, and the level bound's constants of the seeds
+    /// (LOSAT_X_DIAGLV, `x_diag_lv.rs`).
+    pub(super) safe_k: usize,
+    pub(super) word_length: usize,
+    pub(super) lut_word_length: usize,
+    pub(super) scan_step: usize,
+    pub(super) scan_range: usize,
+    pub(super) window_size: usize,
+    pub(super) two_hits: bool,
+    pub(super) offset_array_size: usize,
+    pub(super) use_direct_lookup: bool,
+    pub(super) small_na_compressed_query: &'a [u8],
+    pub(super) small_na_aligned_one_byte: bool,
+    pub(super) x_lv_seeds: x_diag_lv::LvSeeds,
+    /// The diagonal table: whether it is the array (a query block of at most 8000 letters) or the
+    /// hash; the array's length and mask (`PrelimBatch`'s), the same for the steps of the pairs
+    /// (0 with the hash) and the array's size (0 with the hash); the hash's insert window of the
+    /// two-stage table's word (0 with the array) and the window as the offset's step.
+    pub(super) use_array_indexing: bool,
+    pub(super) diag_table_length: usize,
+    pub(super) diag_table_mask: isize,
+    pub(super) diag_array_length: isize,
+    pub(super) diag_mask: isize,
+    pub(super) diag_array_size: usize,
+    pub(super) diag_hash_window: i32,
+    pub(super) diag_window: i32,
+    /// The diagnostics: BLEMIR_DEBUG, LOSAT_DEBUG_BLASTN and either of them (the debug counters),
+    /// the trace lines, the debug window, any of these (`diagnostics`), the minimum ungapped score
+    /// that the debug window's lines print, and the LOSAT_TIMING counters (`None` when timing is
+    /// off).
+    pub(super) debug_mode: bool,
+    pub(super) blastn_debug: bool,
+    pub(super) debug_enabled: bool,
+    pub(super) blastn_trace_enabled: bool,
+    pub(super) debug_window: Option<(usize, usize, usize, usize)>,
+    pub(super) diagnostics: bool,
+    pub(super) min_ungapped_score: i32,
+    pub(super) timing_ref: Option<&'a BlastnTiming>,
+    pub(super) timing_enabled: bool,
 }
 
 impl<'a> ScanBatch<'a> {
-    /// The preliminary pass's values of `batch` with its lookup tables `tables`.
+    /// The word finder's values of `batch` with its lookup tables `tables`.
     pub(super) fn new(batch: &'a PrelimBatch<'a>, tables: &'a LookupTables) -> Self {
         // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:131-156
         // ```c
@@ -241,11 +314,125 @@ impl<'a> ScanBatch<'a> {
         //     ...
         // } BlastNaLookupTable;
         // ```
+        let two_stage_lookup_ref = tables.two_stage_lookup.as_ref();
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:166-233
+        // ```c
+        // const int kQueryLenForHashTable = 8000; /* For blastn, use hash table rather
+        //                                         than diag array for any query longer
+        //                                         than this */
+        // if (Blast_ProgramIsNucleotide(program_number) &&
+        //     !Blast_QueryIsPattern(program_number) &&
+        //     (query_info->contexts[query_info->last_context].query_offset +
+        //      query_info->contexts[query_info->last_context].query_length) > kQueryLenForHashTable)
+        //     p->container_type = eDiagHash;
+        // else
+        //     p->container_type = eDiagArray;
+        // ```
+        let use_array_indexing = batch.diag_container_query_length <= 8000;
+        let (diag_table_length, diag_table_mask) =
+            (batch.diag_array_length, batch.diag_mask as isize);
+        let safe_k = batch.effective_word_size.min(31);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1625-1637
+        // ```c
+        //     else if (lookup_wrap->lut_type == eMBLookupTable) {
+        //         BlastMBLookupTable *lookup =
+        //                                 (BlastMBLookupTable *) lookup_wrap->lut;
+        //         if (lookup->discontiguous) {
+        //             word_length = lookup->template_length;
+        //             lut_word_length = lookup->template_length;
+        //         } else {
+        //             word_length = lookup->word_length;
+        //             lut_word_length = lookup->lut_word_length;
+        // ```
+        let (word_length, lut_word_length) = two_stage_lookup_ref
+            .map_or((safe_k, safe_k), |table| {
+                (table.word_length(), table.lut_word_length())
+            });
+        let window_size = batch.window_size;
+        let two_hits = window_size > 0;
+        let debug_enabled = batch.debug_mode || batch.blastn_debug;
         ScanBatch {
             batch,
-            two_stage_lookup_ref: tables.two_stage_lookup.as_ref(),
+            two_stage_lookup_ref,
             pv_direct_lookup_ref: tables.pv_direct_lookup.as_ref(),
             na_lookup_ref: tables.na_lookup.as_ref(),
+            query_context_index: batch.query_context_index,
+            query_contexts: batch.query_contexts,
+            encoded_query_concat_blastna: batch.encoded_query_concat_blastna,
+            encoded_query_concat_blastna_with_sentinels: batch
+                .encoded_query_concat_blastna_with_sentinels,
+            encoded_queries_blastna: batch.encoded_queries_blastna,
+            cutoff_scores: batch.cutoff_scores,
+            x_dropoff_scores: batch.x_dropoff_scores,
+            reduced_cutoff_scores: batch.reduced_cutoff_scores,
+            score_matrix: batch.score_matrix,
+            nucl_score_table: batch.nucl_score_table,
+            safe_k,
+            word_length,
+            lut_word_length,
+            scan_step: batch.scan_step,
+            scan_range: batch.scan_range,
+            window_size,
+            two_hits,
+            offset_array_size: batch.offset_array_size,
+            use_direct_lookup: batch.use_direct_lookup,
+            small_na_compressed_query: batch.small_na_compressed_query,
+            small_na_aligned_one_byte: batch.small_na_aligned_one_byte,
+            // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the level bound's constants of the
+            // seeds (`s_end` adds the word length).
+            x_lv_seeds: x_diag_lv::LvSeeds::new(two_hits, word_length, window_size),
+            use_array_indexing,
+            diag_table_length,
+            diag_table_mask,
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:663-664
+            // ```c
+            // diag = s_off + diag_table->diag_array_length - q_off;
+            // real_diag = diag & diag_table->diag_mask;
+            // ```
+            diag_array_length: if use_array_indexing {
+                diag_table_length as isize
+            } else {
+                0
+            },
+            diag_mask: if use_array_indexing {
+                diag_table_mask
+            } else {
+                0
+            },
+            diag_array_size: if use_array_indexing {
+                diag_table_length
+            } else {
+                0
+            },
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:825-826, 939-941
+            // ```c
+            // Delta = MIN(word_params->options->scan_range, window_size - word_length);
+            // if (Delta < 0) Delta = 0;
+            // s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
+            //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
+            //                       hit_ready, s_off_pos, window_size + Delta + 1);
+            // ```
+            diag_hash_window: if use_array_indexing {
+                0
+            } else {
+                diag_hash_insert_window(window_size, batch.scan_range, word_length)
+            },
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:656-662
+            // ```c
+            // s_off_pos = s_off + diag_table->offset;
+            // ```
+            diag_window: window_size as i32,
+            debug_mode: batch.debug_mode,
+            blastn_debug: batch.blastn_debug,
+            debug_enabled,
+            blastn_trace_enabled: batch.blastn_trace_enabled,
+            debug_window: batch.debug_window,
+            diagnostics: debug_enabled
+                || batch.blastn_trace_enabled
+                || batch.debug_window.is_some(),
+            min_ungapped_score: batch.min_ungapped_score,
+            timing_ref: batch.timing_ref,
+            timing_enabled: batch.timing_ref.is_some(),
         }
     }
 }
@@ -340,60 +527,9 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     subject_scratch: &mut SubjectScratch,
     reuse_prelim_hits: bool,
 ) -> Vec<PrelimHit> {
-    let &PrelimBatch {
-        query_context_index,
-        query_concat_length,
-        diag_container_query_length,
-        encoded_query_concat_blastna,
-        encoded_query_concat_blastna_with_sentinels,
-        encoded_queries_blastna,
-        effective_word_size,
-        scan_step,
-        scan_range,
-        window_size,
-        offset_array_size,
-        use_direct_lookup,
-        small_na_compressed_query,
-        small_na_aligned_one_byte,
-        min_ungapped_score,
-        diag_array_length,
-        diag_mask,
-        score_matrix,
-        nucl_score_table,
-        reward,
-        penalty,
-        gap_open,
-        gap_extend,
-        use_dp,
-        x_drop_gapped,
-        min_diag_separation,
-        good_init_extends,
-        use_parallel,
-        num_threads,
-        parallel_pool,
-        x_qgroup_batch,
-        x_ahead_window,
-        x_greedy_spec,
-        debug_mode,
-        blastn_debug,
-        blastn_trace_enabled,
-        verbose,
-        debug_window,
-        queries,
-        query_contexts,
-        cutoff_scores,
-        hit_saving_cutoff_scores,
-        x_dropoff_scores,
-        reduced_cutoff_scores,
-        timing_ref,
-        ..
-    } = scan.batch;
-    let &ScanBatch {
-        two_stage_lookup_ref,
-        pv_direct_lookup_ref,
-        na_lookup_ref,
-        ..
-    } = scan;
+    // What every chunk of the batch reads is `scan`'s (its word finder) and `scan.batch`'s (the
+    // rest), read where it is used; what the chunk's subject gives is `subject`'s.
+    let batch = scan.batch;
     let &PrelimSubject {
         s_idx,
         s_id,
@@ -401,7 +537,6 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         x_prelim_subject,
         ..
     } = subject;
-    let timing_enabled = timing_ref.is_some();
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
     // ```c
     // /* Delete if not done in last loop iteration to prevent memory leak. */
@@ -454,7 +589,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     //     total_hits += num_hits;
     // }
     // ```
-    let debug_enabled = debug_mode || blastn_debug;
+    // (`scan.debug_enabled`: BLEMIR_DEBUG or LOSAT_DEBUG_BLASTN.)
 
     // Debug counters for this subject (only updated when debug_enabled)
     let mut dbg_total_s_positions = 0usize;
@@ -465,8 +600,6 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     let dbg_two_hit_failed = 0usize;
     let mut dbg_gapped_attempted = 0usize;
     let mut dbg_window_seeds = 0usize;
-
-    let safe_k = effective_word_size.min(31);
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:147-259
     // ```c
@@ -514,8 +647,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     // One diagonal table for the whole query block (every query and both
     // strands): `query->length` is the last context's offset plus its
     // length, `query_concat_length` here, and the diagonals use offsets in
-    // the concatenated query.
-    let (diag_table_length, diag_table_mask) = (diag_array_length, diag_mask as isize);
+    // the concatenated query (`scan.diag_table_length`, `scan.diag_table_mask`).
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:166-233
     // ```c
     // const int kQueryLenForHashTable = 8000; /* For blastn, use hash table rather
@@ -529,9 +661,8 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     // else
     //     p->container_type = eDiagArray;
     // ```
-    let use_diag_hash = diag_container_query_length > 8000;
-    let use_array_indexing = !use_diag_hash;
-    let diag_window = window_size as i32;
+    // (`scan.use_array_indexing`, set once per batch, `ScanBatch::new`.)
+    let use_array_indexing = scan.use_array_indexing;
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:786-833
     // ```c
@@ -563,11 +694,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         } else {
             subject_scratch.diag_hash.offset as isize
         };
-        let diag_array_size = if use_array_indexing {
-            diag_table_length
-        } else {
-            0
-        };
+        let diag_array_size = scan.diag_array_size;
 
         // NCBI BLAST does NOT use a separate mask array for diagonal suppression
         // NCBI only uses last_hit in hit_level_array (checked at line 753)
@@ -599,12 +726,11 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         // `na_scan::scan_na_lookup` for the other tables) skip the walk of
         // a bucket whose cells all lie below the level bound, unless diagnostics print what
         // they read.
-        let x_lv_ref = diag_hash.x_lv_on()
-            && !(debug_enabled || blastn_trace_enabled || debug_window.is_some());
+        let x_lv_ref = diag_hash.x_lv_on() && !scan.diagnostics;
         // The sides are recorded only when LOSAT_X_REACH is set (`xreach::recording`, one test for
         // the two marks of every chunk).
         if crate::utils::xreach::recording() && diag_hash.x_lv_on() {
-            crate::utils::xreach::x_reach!("LOSAT_X_DIAGLV", use_diag_hash && x_lv_ref);
+            crate::utils::xreach::x_reach!("LOSAT_X_DIAGLV", !use_array_indexing && x_lv_ref);
             // EXPERIMENT (LOSAT_X_DIAGLV2): the reference folds called below
             // (`pair_extend::extend_offset_pairs`, `na_scan::scan_na_lookup`) never read
             // the memo (the strips stage of dc-megablast records its own side).
@@ -630,7 +756,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
                     hit_level_array.fill(diag_default);
                 }
             }
-            if window_size > 0 {
+            if scan.window_size > 0 {
                 if hit_len_array.len() != diag_array_size {
                     let had_entries = !hit_len_array.is_empty();
                     hit_len_array.resize(diag_array_size, 0);
@@ -658,7 +784,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
             hit_len_array.clear();
         }
 
-        if s_len < effective_word_size {
+        if s_len < batch.effective_word_size {
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:159-176
             // ```c
             // if (ewp->diag_table->offset >= INT4_MAX / 4) {
@@ -670,7 +796,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
             // ```
             advance_diag_table_offset(
                 &mut subject_scratch.diag_table_offset,
-                diag_window,
+                scan.diag_window,
                 s_len,
                 use_array_indexing,
                 hit_level_array,
@@ -681,7 +807,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         }
 
         // TWO-STAGE LOOKUP: Use separate rolling k-mer for lut_word_length
-        if let Some(two_stage) = two_stage_lookup_ref {
+        if let Some(two_stage) = scan.two_stage_lookup_ref {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
             // ```c
             //     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
@@ -705,12 +831,12 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
             if x_pair_seed::wants(
                 two_stage.disc().is_some(),
                 use_array_indexing,
-                window_size,
-                scan_range,
-                !small_na_compressed_query.is_empty(),
-                debug_enabled || blastn_trace_enabled || debug_window.is_some(),
+                scan.window_size,
+                scan.scan_range,
+                !scan.small_na_compressed_query.is_empty(),
+                scan.diagnostics,
                 subject_masked,
-                !use_parallel && reuse_prelim_hits,
+                !batch.use_parallel && reuse_prelim_hits,
             ) && x_pair_seed::run(
                 &x_pair_seed::Inputs {
                     two_stage,
@@ -718,36 +844,37 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
                     s_len,
                     subject_seq_ranges,
                     subject_masked,
-                    scan_step,
-                    query_context_index,
-                    query_contexts,
-                    encoded_query_concat_blastna,
-                    encoded_query_concat_blastna_with_sentinels,
-                    cutoff_scores,
-                    x_dropoff_scores,
-                    reduced_cutoff_scores,
-                    score_matrix,
-                    nucl_score_table,
+                    scan_step: scan.scan_step,
+                    query_context_index: scan.query_context_index,
+                    query_contexts: scan.query_contexts,
+                    encoded_query_concat_blastna: scan.encoded_query_concat_blastna,
+                    encoded_query_concat_blastna_with_sentinels: scan
+                        .encoded_query_concat_blastna_with_sentinels,
+                    cutoff_scores: scan.cutoff_scores,
+                    x_dropoff_scores: scan.x_dropoff_scores,
+                    reduced_cutoff_scores: scan.reduced_cutoff_scores,
+                    score_matrix: scan.score_matrix,
+                    nucl_score_table: scan.nucl_score_table,
                     diag_offset,
                     diag_hash_window: diag_hash_insert_window(
-                        window_size,
-                        scan_range,
+                        scan.window_size,
+                        scan.scan_range,
                         two_stage.word_length(),
                     ),
                     use_array_indexing,
-                    window_size,
-                    scan_range,
-                    small_na_word: !small_na_compressed_query.is_empty(),
-                    diagnostics: debug_enabled || blastn_trace_enabled || debug_window.is_some(),
-                    one_subject_owner: !use_parallel && reuse_prelim_hits,
-                    timing: timing_ref,
+                    window_size: scan.window_size,
+                    scan_range: scan.scan_range,
+                    small_na_word: !scan.small_na_compressed_query.is_empty(),
+                    diagnostics: scan.diagnostics,
+                    one_subject_owner: !batch.use_parallel && reuse_prelim_hits,
+                    timing: scan.timing_ref,
                 },
                 diag_hash,
                 x_pair_seed::DiagArray {
                     levels: &mut *hit_level_array,
                     lens: &mut *hit_len_array,
-                    length: diag_table_length as isize,
-                    mask: diag_table_mask,
+                    length: scan.diag_table_length as isize,
+                    mask: scan.diag_table_mask,
                     size: diag_array_size,
                 },
                 ungapped_hits,
@@ -769,43 +896,17 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
             // chunk.
             two_stage_scan::scan_two_stage_lookup(
                 &two_stage_scan::TwoStageScanInputs {
+                    scan,
                     two_stage,
                     search_seq_packed,
                     s_len,
-                    scan_step,
                     subject_seq_ranges,
                     subject_masked,
-                    offset_array_size,
-                    small_na_compressed_query,
-                    small_na_aligned_one_byte,
-                    encoded_query_concat_blastna_with_sentinels,
-                    query_context_index,
-                    query_contexts,
-                    cutoff_scores,
                     chunk,
-                    use_array_indexing,
-                    diag_table_length,
-                    diag_table_mask,
-                    diag_array_size,
                     diag_offset,
                     x_lv_ref,
-                    window_size,
-                    scan_range,
-                    encoded_query_concat_blastna,
-                    x_dropoff_scores,
-                    reduced_cutoff_scores,
-                    score_matrix,
-                    nucl_score_table,
-                    debug_enabled,
-                    debug_mode,
-                    blastn_debug,
-                    debug_window,
-                    blastn_trace_enabled,
                     s_idx,
                     s_id,
-                    min_ungapped_score,
-                    timing_enabled,
-                    timing_ref,
                 },
                 &mut two_stage_scan::TwoStageScanState {
                     ungapped_hits: &mut *ungapped_hits,
@@ -821,7 +922,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
                 },
             );
         }
-        if two_stage_lookup_ref.is_none() {
+        if scan.two_stage_lookup_ref.is_none() {
             // Original lookup method (for non-two-stage lookup)
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
             // ```c
@@ -845,38 +946,42 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
             // would send back builds no inputs and makes no call.
             if x_pair_seed::wants_na(
                 use_array_indexing,
-                window_size,
-                scan_range,
+                scan.window_size,
+                scan.scan_range,
                 subject_masked,
-                debug_enabled || blastn_trace_enabled || debug_window.is_some(),
-                !use_parallel && reuse_prelim_hits,
+                scan.diagnostics,
+                !batch.use_parallel && reuse_prelim_hits,
             ) && x_pair_seed::run_na(
                 &x_pair_seed::NaInputs {
-                    pv_direct_lookup: pv_direct_lookup_ref,
-                    na_lookup: na_lookup_ref,
-                    use_direct_lookup,
-                    word_length: safe_k,
+                    pv_direct_lookup: scan.pv_direct_lookup_ref,
+                    na_lookup: scan.na_lookup_ref,
+                    use_direct_lookup: scan.use_direct_lookup,
+                    word_length: scan.safe_k,
                     search_seq_packed,
                     s_len,
                     subject_seq_ranges,
                     subject_masked,
-                    scan_step,
-                    query_context_index,
-                    query_contexts,
-                    encoded_queries_blastna,
-                    cutoff_scores,
-                    x_dropoff_scores,
-                    reduced_cutoff_scores,
-                    score_matrix,
-                    nucl_score_table,
+                    scan_step: scan.scan_step,
+                    query_context_index: scan.query_context_index,
+                    query_contexts: scan.query_contexts,
+                    encoded_queries_blastna: scan.encoded_queries_blastna,
+                    cutoff_scores: scan.cutoff_scores,
+                    x_dropoff_scores: scan.x_dropoff_scores,
+                    reduced_cutoff_scores: scan.reduced_cutoff_scores,
+                    score_matrix: scan.score_matrix,
+                    nucl_score_table: scan.nucl_score_table,
                     diag_offset,
-                    diag_hash_window: diag_hash_insert_window(window_size, scan_range, safe_k),
+                    diag_hash_window: diag_hash_insert_window(
+                        scan.window_size,
+                        scan.scan_range,
+                        scan.safe_k,
+                    ),
                     use_array_indexing,
-                    window_size,
-                    scan_range,
-                    diagnostics: debug_enabled || blastn_trace_enabled || debug_window.is_some(),
-                    one_subject_owner: !use_parallel && reuse_prelim_hits,
-                    timing: timing_ref,
+                    window_size: scan.window_size,
+                    scan_range: scan.scan_range,
+                    diagnostics: scan.diagnostics,
+                    one_subject_owner: !batch.use_parallel && reuse_prelim_hits,
+                    timing: scan.timing_ref,
                 },
                 diag_hash,
                 ungapped_hits,
@@ -899,41 +1004,16 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
             // chunk.
             na_scan::scan_na_lookup(
                 &na_scan::NaScanInputs {
+                    scan,
                     search_seq_packed,
                     s_len,
-                    safe_k,
-                    scan_step,
                     subject_seq_ranges,
                     subject_masked,
-                    use_direct_lookup,
-                    pv_direct_lookup_ref,
-                    na_lookup_ref,
-                    query_context_index,
-                    query_contexts,
-                    encoded_queries_blastna,
-                    cutoff_scores,
                     chunk,
-                    use_array_indexing,
-                    diag_table_length,
-                    diag_table_mask,
-                    diag_array_size,
                     diag_offset,
                     x_lv_ref,
-                    window_size,
-                    scan_range,
-                    x_dropoff_scores,
-                    reduced_cutoff_scores,
-                    score_matrix,
-                    nucl_score_table,
-                    debug_enabled,
-                    debug_window,
-                    blastn_trace_enabled,
                     s_idx,
                     s_id,
-                    debug_mode,
-                    min_ungapped_score,
-                    timing_enabled,
-                    timing_ref,
                 },
                 &mut na_scan::NaScanState {
                     ungapped_hits: &mut *ungapped_hits,
@@ -983,14 +1063,14 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         // (the diagonal table's offset moves on after each chunk, as below)
         advance_diag_table_offset(
             &mut subject_scratch.diag_table_offset,
-            diag_window,
+            scan.diag_window,
             s_len,
             use_array_indexing,
             &mut subject_scratch.hit_level_array,
             &mut subject_scratch.hit_len_array,
             &mut subject_scratch.diag_hash,
         );
-        if !UNGAPPED && verbose {
+        if !UNGAPPED && batch.verbose {
             prelim_hsp_list::verbose_gapped_line(std::time::Duration::ZERO, 0, 0, 0);
         }
         return if reuse_prelim_hits {
@@ -1012,12 +1092,12 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     // a gapped search's chunk.
     if UNGAPPED {
         let chunk_prelim_hits =
-            prelim_hsp_list::ungapped_hsp_list(ungapped_hits, chunk, good_init_extends);
+            prelim_hsp_list::ungapped_hsp_list(ungapped_hits, chunk, batch.good_init_extends);
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:159-176
         // (the diagonal table's offset moves on after each chunk, as below)
         advance_diag_table_offset(
             &mut subject_scratch.diag_table_offset,
-            diag_window,
+            scan.diag_window,
             s_len,
             use_array_indexing,
             &mut subject_scratch.hit_level_array,
@@ -1040,16 +1120,17 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     // (`prelim_hsp_list::sort_ungapped_hits_for_gapped`).
     let (x_counts, x_order, total_ungapped) = prelim_hsp_list::sort_ungapped_hits_for_gapped(
         ungapped_hits,
-        x_qgroup_batch,
+        batch.x_qgroup_batch,
         reuse_prelim_hits,
-        queries,
-        good_init_extends,
+        batch.queries,
+        batch.good_init_extends,
     );
     // No NCBI counterpart: the clock of the gapped stage, read only by LOSAT_TIMING's
     // `gapped_ns` and the `-verbose` line (`prelim_hsp_list::gapped_hsp_list`), so it is read
     // only when one of them is on (NCBI's engine reads no clock; the scan's clock is kept the same
     // way, `two_stage_scan::scan_two_stage_lookup`).
-    let gapped_start_time = (timing_ref.is_some() || verbose).then(std::time::Instant::now);
+    let gapped_start_time =
+        (batch.timing_ref.is_some() || batch.verbose).then(std::time::Instant::now);
 
     // The values the gapped preliminary loop of this chunk
     // (`prelim_hsp_list::gapped_score_list`) and one hit's extension
@@ -1071,30 +1152,30 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     // ```
     // No NCBI counterpart: the look-ahead's schedule (scheduling only).
     let gapped = prelim_hsp_list::GappedPrelim {
-        blastn_trace_enabled,
-        verbose,
+        blastn_trace_enabled: batch.blastn_trace_enabled,
+        verbose: batch.verbose,
         s_idx,
         s_id,
         x_prelim_subject,
         chunk,
         s_seq_packed,
         s_len,
-        encoded_queries_blastna,
-        query_contexts,
-        hit_saving_cutoff_scores,
-        reward,
-        penalty,
-        gap_open,
-        gap_extend,
-        score_matrix,
-        use_dp,
-        x_drop_gapped,
-        min_diag_separation,
+        encoded_queries_blastna: batch.encoded_queries_blastna,
+        query_contexts: batch.query_contexts,
+        hit_saving_cutoff_scores: batch.hit_saving_cutoff_scores,
+        reward: batch.reward,
+        penalty: batch.penalty,
+        gap_open: batch.gap_open,
+        gap_extend: batch.gap_extend,
+        score_matrix: batch.score_matrix,
+        use_dp: batch.use_dp,
+        x_drop_gapped: batch.x_drop_gapped,
+        min_diag_separation: batch.min_diag_separation,
         reuse_prelim_hits,
         total_ungapped,
-        x_ahead_window,
-        x_greedy_spec,
-        num_threads,
+        x_ahead_window: batch.x_ahead_window,
+        x_greedy_spec: batch.x_greedy_spec,
+        num_threads: batch.num_threads,
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:522-526,545,555
     // ```c
@@ -1116,10 +1197,10 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         &prelim_hsp_list::GappedDrive {
             x_counts: &x_counts,
             x_order: &x_order,
-            queries,
-            query_concat_length,
-            parallel_pool,
-            timing_ref,
+            queries: batch.queries,
+            query_concat_length: batch.query_concat_length,
+            parallel_pool: batch.parallel_pool,
+            timing_ref: batch.timing_ref,
             gapped_start_time,
         },
         ungapped_hits,
@@ -1157,7 +1238,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     let diag_hash = &mut subject_scratch.diag_hash;
     advance_diag_table_offset(
         &mut subject_scratch.diag_table_offset,
-        diag_window,
+        scan.diag_window,
         s_len,
         use_array_indexing,
         hit_level_array,

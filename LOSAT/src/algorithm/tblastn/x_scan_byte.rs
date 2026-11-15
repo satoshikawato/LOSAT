@@ -50,7 +50,7 @@
 //! ancestral variants x the yeast genome (`-db`, one thread; 1.26 G candidate words of 11.9 hits on
 //! average, 84 % of them chains, 76 % of at most 16 hits) 69 % of the search's 2.48 G mispredicted
 //! branches were in the copy, which took 31 % of the cycles at 1.1 instructions per cycle. The run
-//! covers 90 % of the chains there. A cell of up to `AA_HITS_PER_CELL` hits keeps its one store, so
+//! covers 88 % of the chains there. A cell of up to `AA_HITS_PER_CELL` hits keeps its one store, so
 //! a table whose candidates are such cells (one protein x the human genome: 99.9 % of 1.23 G
 //! candidates) runs the copy before. The pairs past a cell's hits are not part of the result, as
 //! before, and every call returns the same pairs and `s_range` (unit test
@@ -110,7 +110,7 @@ const X_MASK: usize = (1 << 15) - 1;
 
 /// EXPERIMENT (LOSAT_X_CHAINRUN): the pairs written for a chain before its hit count is read.
 const X_CHAIN_RUN: usize = 24;
-const _: () = assert!(X_CHAIN_RUN % 4 == 0 && X_CHAIN_RUN > AA_HITS_PER_CELL + 1);
+const _: () = assert!(X_CHAIN_RUN.is_multiple_of(4) && X_CHAIN_RUN > AA_HITS_PER_CELL + 1);
 
 /// EXPERIMENT (LOSAT_X_TBNSCANBYTE): offset-array entries needed after `array_size`. A cell of up
 /// to `AA_HITS_PER_CELL` hits is written as `AA_HITS_PER_CELL + 1` pairs, a chain of `n` hits as
@@ -118,7 +118,7 @@ const _: () = assert!(X_CHAIN_RUN % 4 == 0 && X_CHAIN_RUN > AA_HITS_PER_CELL + 1
 /// where its `n > AA_HITS_PER_CELL` hits fit, so its run ends at most `X_CHAIN_RUN -
 /// (AA_HITS_PER_CELL + 1)` entries after `array_size`.
 pub(crate) const X_SCAN_BYTE_SLACK: usize = X_CHAIN_RUN - (AA_HITS_PER_CELL + 1);
-const _: () = assert!(X_SCAN_BYTE_SLACK >= AA_HITS_PER_CELL + 1);
+const _: () = assert!(X_SCAN_BYTE_SLACK > AA_HITS_PER_CELL);
 
 /// A table is sparse when at most `X_SPARSE_TENTHS` tenths of its backbone cells have hits
 /// (presence bytes of 1): the plain loops then win (`XScanByte::Sparse`).

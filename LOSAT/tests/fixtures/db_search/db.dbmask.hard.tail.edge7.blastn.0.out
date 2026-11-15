@@ -1,0 +1,198 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: edge masks 7
+Masked using: 'dust', options: 'edge tail'
+           4 sequences; 2,104 total letters
+
+
+
+Query= qx1 inS q000
+
+Length=174
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+x1 a one-letter tail mask (M4a-2c probe inS u000: 916 letters, ma...  295     4e-84
+
+
+>x1 a one-letter tail mask (M4a-2c probe inS u000: 916 letters, 
+mask 915-915)
+Length=916
+
+ Score = 295 bits (326),  Expect = 4e-84
+ Identities = 169/173 (98%), Gaps = 0/173 (0%)
+ Strand=Plus/Plus
+
+Query  1    CAATTTATATTAGGCTATGGGTCAGTGCAGCCATGTACCGACTCCGTCTGCTTACCGATA  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  743  CAATTTATATTAGGCTATGGGTCAGTGCAGCCATGTACCGACTCCGTCTGCTTACCGATA  802
+
+Query  61   CCAGAGGGGATGTTAGGGTGCGTGTCCATGCCGCTTCGACAAGTACTAACCGATGTGTTC  120
+            ||||||||||| |||||| |||||||||||||||||||||||||||||||||||||||||
+Sbjct  803  CCAGAGGGGATCTTAGGGCGCGTGTCCATGCCGCTTCGACAAGTACTAACCGATGTGTTC  862
+
+Query  121  TGTATATTCGGACTAGGCCTCTCCACACAAGCGGTATTGAGGTGGAACGTTAG  173
+            |||||||||||||| ||||| ||||||||||||||||||||||||||||||||
+Sbjct  863  TGTATATTCGGACTTGGCCTATCCACACAAGCGGTATTGAGGTGGAACGTTAG  915
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 330372
+
+
+Query= qx2 inS q001
+
+Length=250
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+x2 a two-letter tail mask (M4a-2c probe inS u001: 326 letters, ma...  430     1e-124
+
+
+>x2 a two-letter tail mask (M4a-2c probe inS u001: 326 letters, 
+mask 324-325)
+Length=326
+
+ Score = 430 bits (476),  Expect = 1e-124
+ Identities = 244/248 (98%), Gaps = 0/248 (0%)
+ Strand=Plus/Plus
+
+Query  1    CCTGAACCTCTCTCCGAATGCAAAGCACCTCATATCATATAACTCTAACAGGAGCATGCA  60
+            ||||||||||||||||||||| ||||||| ||||||||||||||||||||||||||||||
+Sbjct  77   CCTGAACCTCTCTCCGAATGCTAAGCACCGCATATCATATAACTCTAACAGGAGCATGCA  136
+
+Query  61   TTATGCACCGTCCACGGGACGCAGTGTCGGCAACGTCGCGCGGTTGCTATGACTCGACCC  120
+             |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  137  ATATGCACCGTCCACGGGACGCAGTGTCGGCAACGTCGCGCGGTTGCTATGACTCGACCC  196
+
+Query  121  TCTGTTGTACAGTCTTGGCTTGAGCTATTGACCCAACTATGGCCTAAGGCCGGCATGGAC  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||
+Sbjct  197  TCTGTTGTACAGTCTTGGCTTGAGCTATTGACCCAACTATGGCCTAAGGCCGGCACGGAC  256
+
+Query  181  CGACTTGCTAGGCAAATGTGGCATTCCTCAAACGATTAACTAGCATAGCATGAAATCCCC  240
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  257  CGACTTGCTAGGCAAATGTGGCATTCCTCAAACGATTAACTAGCATAGCATGAAATCCCC  316
+
+Query  241  GTCAAACT  248
+            ||||||||
+Sbjct  317  GTCAAACT  324
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 486324
+
+
+Query= qx3 inS q002
+
+Length=302
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+x3 a three-letter tail mask (M4a-2c probe inS u002: 788 letters, ...  495     4e-144
+
+
+>x3 a three-letter tail mask (M4a-2c probe inS u002: 788 letters, 
+mask 785-787)
+Length=788
+
+ Score = 495 bits (548),  Expect = 4e-144
+ Identities = 289/299 (97%), Gaps = 0/299 (0%)
+ Strand=Plus/Plus
+
+Query  1    GTCTTAACAGATCTGGGTATAGATGGGTTGGGAGCTAGGACTTCGGTATTGTCGTCGAAC  60
+            || |||||||||||||||||||||||||||||||||||||||||||||| ||||||||||
+Sbjct  487  GTGTTAACAGATCTGGGTATAGATGGGTTGGGAGCTAGGACTTCGGTATAGTCGTCGAAC  546
+
+Query  61   AACCTGTTAGGTCTCTCGAGAGTTCCTAGGGCGGATCCCCGCCTTAACCGCTCACAATGC  120
+            |||||||||||||||||||||||||||||||||||||||||| |||||| ||||||||||
+Sbjct  547  AACCTGTTAGGTCTCTCGAGAGTTCCTAGGGCGGATCCCCGCTTTAACCTCTCACAATGC  606
+
+Query  121  TACGCGATTATGTGCAGTAGGTAGAAGCCCGTATTCCCCGATACCTGGAAACACCCAAAA  180
+            |||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||
+Sbjct  607  TACGCGATTATGTGCAATAGGTAGAAGCCCGTATTCCCCGATACCTGGAAACACCCAAAA  666
+
+Query  181  TATTCCACAAACGATGGATGGATACGCGGATCTGCACTAAGACCTCTGCCGAAATTTTTT  240
+            ||||||||||||||||| ||||||||||||||||||||||||||| ||||||| ||||||
+Sbjct  667  TATTCCACAAACGATGGGTGGATACGCGGATCTGCACTAAGACCTTTGCCGAAGTTTTTT  726
+
+Query  241  GTGATGAGACAATCGTAAAACTTGCAGCCGGAAGCATTCTGTTCCAGCCGTATTGCTGC  299
+            ||||||||||||| |||||||||||||||| ||||||||||||||||||||||||||||
+Sbjct  727  GTGATGAGACAATGGTAAAACTTGCAGCCGCAAGCATTCTGTTCCAGCCGTATTGCTGC  785
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 593028
+
+
+Query= qx4 inT q008
+
+Length=114
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+x4 a short subject with a tail mask (M4a-2c probe inT v008: 74 le...  98.7    4e-25
+
+
+>x4 a short subject with a tail mask (M4a-2c probe inT v008: 74 
+letters, mask 55-73)
+Length=74
+
+ Score = 98.7 bits (108),  Expect = 4e-25
+ Identities = 54/54 (100%), Gaps = 0/54 (0%)
+ Strand=Plus/Plus
+
+Query  21  CGCATATTCCTGGTGGCCATAGTGCTCTCCCTGGTACCCCTCTGATAGGGTATT  74
+           ||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1   CGCATATTCCTGGTGGCCATAGTGCTCTCCCTGGTACCCCTCTGATAGGGTATT  54
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 209712
+
+
+  Database: edge masks 7
+  Masked using: 'dust', options: 'edge tail'
+    Posted date:  Nov 15, 2026  3:45 PM
+  Number of letters in database: 2,104
+  Number of sequences in database:  4
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

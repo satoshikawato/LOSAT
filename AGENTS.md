@@ -108,12 +108,13 @@ authoritative, current guidance for agent behavior in LOSAT.
      as its mathematical value, NCBI's later conversions kept (version 1.26).
      Deterministic NCBI
      results, even wrong-looking ones, are reproduced, not excepted; NCBI failures without a checkable valid result
-     are explicit rejections. A sequence that a seqid list keeps without a
-     definition line (NCBI drops its hits from every report without notice)
-     is an explicit rejection too (PD-LOSAT-NCBI-DEFECTS 1.7), and so are the
-     results of a database with parsed Seq-ids that PD-LOSAT-NCBI-DEFECTS 1.10
-     lists, such as a reported sequence that NCBI's lookup by id finds as another
-     sequence and following hits whose ids NCBI takes for one sequence. Approved
+     are explicit rejections. So are the results of a database with parsed
+     Seq-ids that PD-LOSAT-NCBI-DEFECTS 1.10 lists, such as a reported sequence
+     that NCBI's lookup by id finds as another sequence and following hits whose
+     ids NCBI takes for one sequence. A sequence that a seqid list keeps without a
+     definition line is reproduced, not rejected: NCBI drops its hits at the
+     Seq-aligns (a positive list, PD-LOSAT-NCBI-DEFECTS 1.32) or where its search
+     fetches the subject again (a negative list, 1.34). Approved
      difference: a `gb`, `emb` or `dbj` id prints the stored type, where NCBI's
      process-wide id table can print the type of another id of the same prefix,
      digit count and version (maintainer, 2026-10-21, for the tabular `sseqid`

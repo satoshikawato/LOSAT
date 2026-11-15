@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.34
+- Version: 1.36
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -82,7 +82,15 @@
   1.34 2026-11-16 (the sequence that a negative seqid list keeps while removing all its lines, of
   1.6, 1.29 and 1.32, is no longer an explicit rejection: NCBI's fetches exclude it, and LOSAT
   reproduces them, rule 2; line DBID item lineless2, Owner-delegated, standing instruction
-  2026-09-29, restated 2026-10-07)
+  2026-09-29, restated 2026-10-07);
+  1.35 2026-11-16 (exception 13, BLASTN `-db_hard_mask` on a sequence whose first mask runs to its
+  end, at a scanned word of 11 or more; the Owner's decision of 2026-11-15 「M4a Q1=B」, line NP
+  item M4a-2c);
+  1.36 2026-11-16 (the refusal of 1.31 of a stopping batch whose other sequences' loads write texts
+  of the taxonomy database narrowed in the JSON and XML2 formats, outfmt 13 to 16, to the texts
+  after the lookups of the batches before, as in the other formats: a stop after a batch that
+  opened the taxonomy database is written as NCBI writes it; line DBID item mixtax,
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -552,6 +560,108 @@ here, and names the widening that PS16a made for protein queries.
     except the line that echoes the input file's name. NCBI's binary prints the same there: its compiled
     loop shows no wrap in this output, which the undefined behaviour allows.
 
+## Approved exception (BLASTN `-db_hard_mask`, a mask that runs to the end, version 1.35)
+
+Version 1.35. The Owner decided on 2026-11-15 (line NP `DECISIONS.md` 45, words 「M4a Q1=B」) question
+Q1 of M4a-2b (PR #1173): option B, the search over the range before the mask at a scanned word of 11
+or more, blastn-short keeping the refusal. Not taken: option A, refusing the shape for every task
+(it refuses searches that NCBI ends normally, such as a transcript database whose poly-A tails are
+masked). Line NP item M4a-2c.
+
+13. **`-db_hard_mask`: a chunk from the start of a sequence whose mask runs to its end.** With
+    `-db_hard_mask` NCBI cuts each database sequence at its masks into chunks
+    (`s_GetNextSubjectChunk`, `blast_engine.c:221-276`). A sequence whose first mask with letters runs
+    to its end, with at most 5,000,000 letters before it and no other mask before it than masks of no
+    letters at 0 (masked whole, or a masked tail such as a poly-A tail), gets one chunk from 0 that ends
+    at the mask, and for that chunk the test of the "no chunking" branch (`offset == 0 && residual == 0
+    && next == full_range.right`, `blast_engine.c:264-268`) holds: its `seq_ranges` are the soft
+    ranges, which `-db_hard_mask` leaves as the full range (`blast_engine.c:162`), while
+    `subject->length` is the chunk's: NCBI uses two lengths for one subject. The preliminary stage
+    reads the subject's stored letters in the mapped volume file, unmasked (`seqsrc_seqdb.cpp:326-330,
+    375`, `seqdbvol.cpp:1817`: masks reach the engine only as ranges), and the scan
+    (`na_ungapped.c:1647-1668`) and the word checks (`s_BlastNaExtend`, `s_TypeOfWord`, bounded by the
+    scan's end, `na_ungapped.c:1123, 508-554, 1683`) read them from 0 to the full length: the letters
+    under the mask are read as they are stored, nothing outside the sequence (valgrind finds no error in
+    such runs). The extensions take the chunk's length (`na_ungapped.c:165, 213-214`,
+    `blast_gapalign.c:2784, 4021`), and so does the interval tree of the gapped HSPs, `[0, a + 1]`
+    (`blast_gapalign.c:3830-3831`). Three effects follow:
+    - a word that crosses the mask's start, or lies inside the mask, is found and extended up to the
+      mask's start: NCBI reports a row that its normal chunks of the near input (the mask one letter
+      shorter) do not find, where the alignment has fewer letters before the mask than a word;
+    - the diagonal table keeps those words' ends, up to the full length past its offset
+      (`na_ungapped.c:757, 768`), while `Blast_ExtendWordExit` moves the offset on by the chunk's
+      length and the window only (`blast_extend.c:172`, called at `na_ungapped.c:1686`), so the
+      subject that the same thread searches next loses its seeds on those diagonals (`na_ungapped.c:672`).
+      Each thread has its own table (`blast_engine.c:1002, 1377`) and takes the next database
+      sequences as it asks for them (`seqdbimpl.cpp:301-395`, `prelim_stage.cpp:142-188`), so at two
+      threads and more which subject loses its hits changes from run to run;
+    - two preliminary HSPs past the tree's end with the same query range are never separated: the
+      tree's node `[l, r]` with `l > r` keeps its middle at `r` (`blast_itree.c:95, 107`), each insertion
+      splits again and doubles the node pool (`blast_itree.c:70-79`) until the allocation fails; the
+      search then stops (`blast_gapalign.c:4087-4090`, `blast_engine.c:1469-1478`) and frees the
+      subject's block (`blast_engine.c:1595`), whose sequence pointer, marked allocated although it
+      points into the mapped volume (`seqsrc_seqdb.cpp:392`, `blast_util.c:225-227`), is passed to
+      `free()`: NCBI BLAST+ 2.17.0 ends with `free(): invalid pointer`, `munmap_chunk(): invalid
+      pointer` (SIGABRT) or SIGSEGV, at blastn-short's word 7 and at words of 11 and more alike.
+    At a scanned word (the word size, or the discontiguous template's length)
+    of 11 letters or more (megablast, blastn, dc-megablast) LOSAT scans that chunk as NCBI scans every
+    other hard chunk, from its start to its end: the range before the mask, which NCBI's normal chunks
+    also search in the near input whose mask is one letter shorter. Its extensions and its diagonal
+    state take that one length, so the subjects searched after it are searched as without it, at every
+    thread count, and the search ends normally (exit 0). The traceback reads every masked
+    letter as `B`, as NCBI's traceback does (`s_SeqDBMaskSequence`, `seqdbvol.cpp:1518-1585`). Below
+    a scanned word of 11 (blastn-short's 7) LOSAT refuses such a database before it writes anything,
+    as it did for every word before version 1.35 (rule 3). `blastinput::db_mask::
+    TAIL_MASK_SEARCHED_WORD`, `algorithm::blastn::blast_engine::run::next_hard_chunk`.
+    Evidence (NCBI BLAST+ 2.17.0, each run capped; inputs, scripts and results in the line's task
+    folder, `M/m4a2b/q1` and `M/m4a2c`):
+    - The question's corpus: 300 random subjects of 300 to 2,000 letters, each with one tail mask of
+      12 letters to two thirds of the subject (200 of random letters, 100 with a masked poly-A tail),
+      and a query across the mask's start that runs to the subject's end. At words of 11 and more
+      NCBI's output of the tail mask, its output of the near input and LOSAT's are the same bytes in
+      all 900 runs. At word 7, NCBI's output of the tail mask differs from the near input's in 29 of
+      300 runs and NCBI crashes in 71.
+    - Tails of 1 to 4 letters (200 subjects, queries that match to the subject's end): LOSAT's
+      output is NCBI's own in all 600 runs at words of 11 and more. The near input's alignment reaches
+      the subject's last letter, which is not masked there, in 50, 97 and 97 of the 200 runs
+      (megablast, blastn, dc-megablast); NCBI's run of the tail mask and LOSAT's read it as `B`.
+    - Alignments with few letters before the mask (200 subjects of 30 to 150 letters whose chunk
+      before the mask holds 0 to all but 12 of their letters, queries over the whole subject; and 200
+      subjects of 300 to 2,000 letters whose queries hold 4 to 60 letters before the mask and 60 in
+      it): NCBI's output of the tail mask equals LOSAT's, the near input's, in 115, 177 and 116, and
+      in 113, 178 and 105 of the 200 runs (megablast, blastn, dc-megablast). In the others NCBI adds a
+      row from a word across the mask's start, checked against the masked letters and cut at the
+      mask's start, often shorter than the word (12 letters at megablast's 28), which its normal
+      chunks of the near input do not find; LOSAT gives the near input's rows there.
+    - The row follows the stored letters under the mask: with those letters complemented, NCBI's
+      extra row goes away (the O1 survey of M4a-2c, `M/m4a2c/O1_SURVEY.md` §3.1).
+    - The next subject: a tail-masked subject X (mask after 20 letters) followed by an unmasked Y that
+      holds the query's first 300 letters on the same diagonal (fixture `edge9`): NCBI drops Y's
+      300-letter 100 % row (E-value 5.6e-162) in 20 of 20 runs at `-num_threads 1`, 3 of 20 at 2 and 5
+      of 20 at 4 threads (two different outputs at 2 and at 4); with the near mask Y's row is in all 40
+      runs, and so it is with Y alone, Y before X, or Y's copy on the next diagonal. LOSAT prints Y's row,
+      the near input's output, in 180 of 180 runs (megablast, blastn, dc-megablast at 1, 2 and 4
+      threads, 20 runs each).
+    - A crash at words of 11 and more: two copies of the query inside a tail mask (fixture `edge10`):
+      NCBI SIGSEGV (exit 139) in megablast, blastn and dc-megablast; one copy, or the near mask, exit 0
+      and no row. LOSAT: exit 0 and the near input's output (no row) at 1 and 4 threads. Under
+      valgrind the same run shows the node pool doubling, "BLAST ran out of memory" and an invalid
+      `free()` of an address in the mapped `.nsq`, the mechanism of blastn-short's 71 crashes too.
+    - The fixture databases: NCBI crashes in each of 10 runs of edge2's algorithm 16 (s4 masked
+      whole) and edge4's 11 (the mask after an empty mask at 0) in megablast, blastn and
+      dc-megablast, and of `mask_nucl_mv`'s 11 (m04's tail) in megablast and dc-megablast; LOSAT
+      writes NCBI's bytes of the near input there.
+    Fixture rows `db.dbmask.hard.tail.*` and `db.dbmask.hard.whole.*` of
+    `LOSAT/tests/db_search_manifest/blastn.tsv`: NCBI's bytes, or with `ncbi-near:` those of NCBI's
+    run of the near input (the rows `db.dbmask.hard.near.*`; `LOSAT/tests/db_search_fixtures.py`), `edge9`'s and
+    `edge10`'s (`db.dbmask.hard.tail.edge9.6`, `db.dbmask.hard.tail.edge10.6`) among them;
+    `db.dbmask.hard.rej.tail.*.short.6` and `db.dbmask.hard.rej.whole.*.short.6`, the refusal at word 7.
+    Unit tests `the_hard_mask_shapes_follow_ncbi_s_chunks` and
+    `a_hard_masked_search_refuses_the_masks_that_ncbi_s_chunks_do_not_handle`
+    (`LOSAT/src/blastinput/db_mask_tests.rs`), `hard_masked_chunks_follow_ncbi_s_get_next_subject_chunk`
+    and `hard_mask_refusals_are_the_merges_that_ncbi_decides_past_its_list`
+    (`LOSAT/src/algorithm/blastn/blast_engine/run.rs`).
+
 ## Reproduced as NCBI (rule 2)
 
 - `losat rpsbproc`, the end of an aligned segment when a site is mapped (`MapSegSet`'s `SeqPos_t end
@@ -680,8 +790,10 @@ here, and names the widening that PS16a made for protein queries.
   lookup in the database fails (DB contains no accession info.; NCBI BLAST+ 2.17.0's prefetch
   stops with a BLAST Database error, and where the prefetch is off its formatters fail to read
   it)`), and a stopping batch whose other sequences' loads write texts of the
-  taxonomy database or whose other lookups throw on their ids (NCBI's prefetch loads them in the
-  order of its Seq-id handles, which decides what it writes before the error).
+  taxonomy database (after the lookups of the batches before: their prefetch, or in the JSON and
+  XML2 formats their reports, since version 1.36) or whose other lookups throw on their ids
+  (NCBI's prefetch loads them in the order of its Seq-id handles, which decides what it writes
+  before the error).
   Versions 1.9 to 1.24 refused every such list before the search (line DI-8 `DECISIONS.md` 31),
   versions 1.25 to 1.30 every run whose reports or prefetch looked such a Seq-id up.
 

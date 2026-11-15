@@ -314,6 +314,10 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
     let dbg_ungapped_low = &mut *state.dbg_ungapped_low;
     let dbg_gapped_attempted = &mut *state.dbg_gapped_attempted;
     let hitsfound = *offset_pairs_len;
+    // The batch's pairs (NCBI's `num_hits` first entries of `offset_pairs`): the loop's index and
+    // the prefetch's (below `hitsfound`) need no bound check per pair, and the buffer's length is
+    // not a value of the loop.
+    let offset_pairs = &offset_pairs[..hitsfound];
     // EXPERIMENT (LOSAT_X_BNEXTFIRST): with `EXT_FIRST` the word extension of a megablast
     // table's hit (whose lookup width is below the word size) comes first, as in NCBI's
     // `s_BlastNaExtend`, and a hit whose extension fails does nothing more: its context is looked

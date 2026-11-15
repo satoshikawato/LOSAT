@@ -14,9 +14,9 @@ pub enum Refusal {
     Control,
     /// `GenerateDefline` throws: `NStr::HtmlDecode` cannot guess the title's encoding
     /// (the title has a byte >= 0x80). The catches of NCBI's XML writers write the Seq-id instead
-    /// (`QueryText::id`, `SubjectNames::unknown`); LOSAT refuses it only for a record whose ids
-    /// `-parse_deflines` read and that is not shown as a local record (a query's, or a
-    /// subject's whose Seq-align id is not local).
+    /// (`QueryText::id`, `SubjectNames::unknown`); LOSAT refuses it only for a subject whose ids
+    /// `-parse_deflines` read and that is not shown as a local record (its Seq-align id is not
+    /// local).
     UnknownEncoding,
     /// `x_CleanAndCompress` reads past the end of the title (NCBI crashes there).
     ReadsPastEnd,
@@ -188,7 +188,8 @@ pub struct QueryText {
     pub title: Vec<u8>,
     pub message: Option<Vec<u8>>,
     /// The query id of the writers' catch where `GenerateDefline` throws: the Seq-loc's id as
-    /// `AsFastaString` writes it (`lcl|Query_1`); `None`: the writer's own id (`Query_1`).
+    /// `AsFastaString` writes it (`lcl|Query_1`; with `-parse_deflines` the best of the query's
+    /// ids, `gb|AB000099.1|`, `gi|4504347`); `None`: the writer's own id (`Query_1`).
     pub id: Option<Vec<u8>>,
 }
 
@@ -249,11 +250,24 @@ pub fn query_text(
     has_hits: bool,
 ) -> anyhow::Result<QueryText> {
     let mut text = match believed {
-        Some(ids) => believed_query_title(title, protein, ids).map(|title| QueryText {
-            title,
-            message: None,
-            id: None,
-        }),
+        // The catch's id of a query whose ids `-parse_deflines` read: its Seq-loc's id
+        // (`FindBestChoice` of its ids, `BelievedIds::best`) as `AsFastaString` writes it.
+        Some(ids) => match believed_query_title(title, protein, ids) {
+            Err(Refusal::UnknownEncoding) => {
+                let mut id = Vec::new();
+                crate::seqid::label::fasta(&ids.best, &mut id);
+                Ok(QueryText {
+                    title: Vec::new(),
+                    message: None,
+                    id: Some(id),
+                })
+            }
+            generated => generated.map(|title| QueryText {
+                title,
+                message: None,
+                id: None,
+            }),
+        },
         None => match xml_query_title(title, protein) {
             Err(Refusal::UnknownEncoding) => Ok(unknown_query_text(warning_id)),
             generated => generated.map(|title| QueryText {

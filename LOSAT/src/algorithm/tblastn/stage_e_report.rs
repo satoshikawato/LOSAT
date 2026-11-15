@@ -345,12 +345,20 @@ pub(super) fn render(
     };
     // The rows of subjects whose lookup fails (an empty id) where NCBI has no result
     // (`report::tabular::check_failed_lookups`), before any format is written.
-    if subject_ids.iter().any(|id| id.is_empty()) {
-        for format in outputs.formats.iter().filter(|format| shows_ids(format)) {
-            let spec = super::tabular::tabular_spec(format.outfmt);
+    let parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>] = match shown {
+        ShownSubjects::Fasta { parsed, .. } => parsed,
+        ShownSubjects::Database { reported, .. } => &reported.parsed,
+    };
+    let database = matches!(shown, ShownSubjects::Database { .. });
+    for format in outputs.formats.iter().filter(|format| shows_ids(format)) {
+        let spec = super::tabular::tabular_spec(format.outfmt);
+        if crate::algorithm::common::tabular::checks_failed_lookups(
+            spec.as_ref(),
+            &subject_ids,
+            parsed,
+        ) {
             crate::report::tabular::check_failed_lookups(
                 spec.as_ref(),
-                matches!(shown, ShownSubjects::Database { .. }),
                 hitlists.iter().map(|hitlist| {
                     hitlist
                         .lists()
@@ -358,7 +366,16 @@ pub(super) fn render(
                         .filter(|list| !list.hsps.hsps.is_empty())
                         .map(|list| list.oid as usize)
                 }),
-                |s_idx| subject_ids.get(s_idx).is_some_and(|id| id.is_empty()),
+                |s_idx| {
+                    crate::algorithm::common::tabular::subject_lookup_failure(
+                        spec.as_ref(),
+                        &subject_ids,
+                        parsed,
+                        database,
+                        false,
+                        s_idx,
+                    )
+                },
                 |s_idx| match shown {
                     ShownSubjects::Database { reported, oids, .. } => {
                         crate::report::tabular::failed_database_title(
@@ -908,9 +925,12 @@ fn tabular_subject_ids(subjects: &[FastaRecord]) -> Vec<Arc<[u8]>> {
     subjects
         .iter()
         .map(|subject| {
+            // A nucleotide record's ids are never refused (`FastaRecord::subject_tabular_id`).
             subject
                 .subject_tabular_id(false)
-                .map_or_else(|_| Arc::from(&b""[..]), Arc::from)
+                .ok()
+                .flatten()
+                .map_or_else(|| Arc::from(&b""[..]), Arc::from)
         })
         .collect()
 }

@@ -570,11 +570,21 @@ fn group_rejected(command: &mut Commands, group: &[Output]) -> bool {
 
 /// Whether the failure of one search fails the run. A failed search of a run of two
 /// searches is tolerated only when it wrote no byte of its formats and `rejected` says that
-/// the options' checks reject its hit list size (`group_rejected`); any other error (for
-/// example a thread pool that cannot start) fails the run. When the other search fails too,
-/// `run` fails with the tabular search's error.
+/// the options' checks reject its hit list size (`group_rejected`), or that it is the search of
+/// the default tabular formats alone (`extra_tabular`) that LOSAT refuses where NCBI stops at a
+/// row (`Failed::tabular_refusal`); any other error (for example a thread pool that cannot start)
+/// fails the run. When the other search fails too, `run` fails with the tabular search's error.
 fn fails_run(failed: &Failed, rejected: bool) -> bool {
     failed.wrote || !rejected
+}
+
+/// Whether `output` is one of the default tabular formats that every run writes besides the
+/// argv's own output (streams 6 and 7, `Program::formats`): each is the CLI's run of `-outfmt 6`
+/// or `7`, so where the CLI refuses those (NCBI stops at a row of a subject whose title it
+/// cannot decode, `Failed::tabular_refusal`) they fail alone and the run writes the formats that
+/// the CLI completes (`search_all`).
+fn extra_tabular(output: &Output) -> bool {
+    output.stream != STREAM_CUSTOM && matches!(output.number, 6 | 7)
 }
 
 /// Records the byte range of every HSP row (stream 6) and section (stream 0), and of
@@ -791,6 +801,13 @@ struct Failed {
     /// the streams of a failed run, but a search that wrote nothing leaves the other
     /// searches' streams as the CLI writes them.
     wrote: bool,
+    /// Whether the error is LOSAT's refusal of a tabular report at a row where NCBI has no result
+    /// (`losat::web_adapter::FailedLookupRefusal`), which only the tabular formats make
+    /// (`extra_tabular`).
+    tabular_refusal: bool,
+    /// Whether a chunk of the search's formats reached the host (`StreamWriter::sent`); the bytes
+    /// that its writers still held are dropped with them.
+    sent: bool,
 }
 
 impl Failed {
@@ -808,11 +825,18 @@ impl Failed {
             Some(native) => native.clone(),
             None => format!("Error: {error:?}\n").into_bytes(),
         };
+        let tabular_refusal = std::iter::successors(
+            Some(&**error as &(dyn std::error::Error + 'static)),
+            |error| error.source(),
+        )
+        .any(|error| error.is::<losat::web_adapter::FailedLookupRefusal>());
         Self {
             message: format!("{error:#}"),
             cli_stderr,
             native,
             wrote,
+            tabular_refusal,
+            sent: wrote,
         }
     }
 }
@@ -981,6 +1005,8 @@ fn search(
                         message: format!("the archive of outfmt {}: {error}", format.number),
                         native: None,
                         wrote: true,
+                        tabular_refusal: false,
+                        sent: true,
                     })
                 }
             }
@@ -992,7 +1018,9 @@ fn search(
         let wrote = writers
             .iter()
             .any(|writer| writer.position().load(Ordering::SeqCst) > 0);
-        return Err(Failed::new(&error, wrote));
+        let mut failed = Failed::new(&error, wrote);
+        failed.sent = writers.iter().any(StreamWriter::sent);
+        return Err(failed);
     }
     if let Some((hsp, _)) = recorder.open.iter().flatten().next() {
         recorder
@@ -1006,6 +1034,8 @@ fn search(
             message,
             native: None,
             wrote: true,
+            tabular_refusal: false,
+            sent: true,
         });
     }
     Ok(Searched {
@@ -1356,10 +1386,36 @@ fn search_all(
             } else {
                 search(command, group, query, subject, &mut scratch)
             };
+            // The default tabular formats that LOSAT refuses where NCBI stops at a row fail alone
+            // (`extra_tabular`), as the CLI's `-outfmt 6` and `7` do: their failure is a search
+            // of its own, and the group's other formats are searched again without them, as the
+            // CLI writes each of them.
+            let rest: Vec<Output> = group
+                .iter()
+                .filter(|output| !extra_tabular(output))
+                .cloned()
+                .collect();
+            let (result, scratch, rest) = match result {
+                Err(failed)
+                    if failed.tabular_refusal && !failed.sent && rest.len() < group.len() =>
+                {
+                    outcomes.push((Err(failed), scratch));
+                    if rest.is_empty() {
+                        continue;
+                    }
+                    let mut command = parse(words)?.1;
+                    give_counts(&mut command, counts.as_ref(), settings);
+                    let rejected = group_rejected(&mut command, &rest);
+                    let mut scratch = Vec::new();
+                    let result = search(command, &rest, query, subject, &mut scratch);
+                    (result, scratch, Some(rejected))
+                }
+                result => (result, scratch, None),
+            };
             // The CLI rejects an `-outfmt` whose custom delimiter a field uses: the failure of its
             // search (the tabular one) is never tolerated.
             if let Err(failed) = &result {
-                if fails_run(failed, rejected && custom_accepted) {
+                if fails_run(failed, rest.unwrap_or(rejected) && custom_accepted) {
                     posted.clone_from(&failed.native);
                     return Err(failed.message.clone());
                 }
@@ -3506,6 +3562,8 @@ mod tests {
             cli_stderr: Vec::new(),
             native: None,
             wrote,
+            tabular_refusal: false,
+            sent: wrote,
         };
         assert!(fails_run(&failed(false), false));
         assert!(fails_run(&failed(true), true));
@@ -3539,12 +3597,14 @@ mod tests {
 
     // Line RG item T7 (PD-LOSAT-NCBI-DEFECTS 1.26): a subject titled `Subject_9 bad x\x81y title`,
     // whose title NCBI's `GenerateDefline` cannot decode (a `Subject_` first word and a byte in no
-    // encoding NCBI guesses), runs as the CLI runs it: the default tabular formats, which every run
-    // writes, stop where NCBI stops (at the row's `saccver`, a null pointer), so the run fails with
-    // the CLI's refusal, after the search; BLASTX reads the title as its bytes as the other programs
-    // do (it refused it in its reader before).
+    // encoding NCBI guesses), runs as the CLI runs each format: the default tabular formats stop
+    // where NCBI stops (at the row's `saccver`, a null pointer), so streams 6 and 7 (and the HSP
+    // records of the tabular search) fail alone with the CLI's refusal on stream 3, and outfmt 0,
+    // which the CLI completes with NCBI's line in place of the alignment, is written; an argv of
+    // fields without `sacc` and `saccver` writes NCBI's catch rows on stream 4. BLASTX reads the
+    // title as its bytes as the other programs do.
     #[test]
-    fn a_subject_title_ncbi_cannot_decode_fails_as_the_cli() {
+    fn a_subject_title_ncbi_cannot_decode_fails_the_default_tabular_formats_only() {
         let protein = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
         let title = b"Subject_9 bad x\x81y title";
         for (program, query, subject) in [
@@ -3555,10 +3615,36 @@ mod tests {
             let query = [FastaRecord::new("Query_1", b"q", query)];
             let subject = [FastaRecord::new("Subject_1", title, subject)];
             let words = [program, "-query", "q", "-subject", "s"];
-            let error = run(&words, &query, &subject).unwrap_err();
+            let plain = streams(&words, &query, &subject).unwrap();
+            assert!(
+                text(&plain[&0]).contains(
+                    "Sequence with id Subject_1 no longer exists in database...alignment skipped"
+                ),
+                "{program}"
+            );
+            for stream in [1, 6, 7] {
+                assert!(
+                    plain.get(&stream).is_none_or(|bytes| bytes.is_empty()),
+                    "{program}: stream {stream}"
+                );
+            }
+            let error = text(&plain[&3]);
             assert!(
                 error.contains("subject record 1 (Subject_9)")
                     && error.contains("null pointer exception (exit 255)"),
+                "{program}: {error}"
+            );
+            let fields = [&words[..], &["-outfmt", "6 qseqid sseqid sallseqid"]].concat();
+            let custom = streams(&fields, &query, &subject).unwrap();
+            assert!(
+                text(&custom[&STREAM_CUSTOM]).starts_with("q\tUnknown\tSubject_1\n"),
+                "{program}: {}",
+                text(&custom[&STREAM_CUSTOM])
+            );
+            let stops = [&words[..], &["-outfmt", "6 qseqid sacc"]].concat();
+            let error = run(&stops, &query, &subject).unwrap_err();
+            assert!(
+                error.contains("null pointer exception"),
                 "{program}: {error}"
             );
         }

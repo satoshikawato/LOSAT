@@ -2937,12 +2937,17 @@ fn record_tabular_ids(
         let Some(subject) = subject else {
             continue;
         };
-        let [id, accession, version] = subject.tabular_ids(true).map_err(|problem| {
-            anyhow::anyhow!(
-                "the subject record {} has {problem}, which is not supported by LOSAT's {program}",
-                String::from_utf8_lossy(&subject.alignment_fasta())
-            )
-        })?;
+        // An empty id where the lookup throws (`ParsedSubject::tabular_ids`).
+        let [id, accession, version] = subject
+            .tabular_ids(true)
+            .map_err(|problem| {
+                anyhow::anyhow!(
+                    "the subject record {} has {problem}, which is not supported by LOSAT's \
+                     {program}",
+                    String::from_utf8_lossy(&subject.alignment_fasta())
+                )
+            })?
+            .unwrap_or_default();
         ids[index] = Arc::from(id);
         accessions[index] = Some([Arc::from(accession), Arc::from(version)]);
     }
@@ -2964,7 +2969,13 @@ fn record_tabular_ids(
 fn tabular_subject_id_results(subjects: &[FastaRecord]) -> Vec<Option<Arc<[u8]>>> {
     subjects
         .iter()
-        .map(|subject| subject.subject_tabular_id(true).ok().map(Arc::from))
+        .map(|subject| {
+            subject
+                .subject_tabular_id(true)
+                .ok()
+                .flatten()
+                .map(Arc::from)
+        })
         .collect()
 }
 
@@ -7734,7 +7745,7 @@ fn x_query_block_plan(
             if tabular
                 && subjects
                     .iter()
-                    .any(|subject| subject.subject_tabular_id(true).is_err())
+                    .any(|subject| !matches!(subject.subject_tabular_id(true), Ok(Some(_))))
             {
                 return None;
             }
@@ -14736,33 +14747,48 @@ fn run_call(
         } else {
             Vec::new().into()
         };
-    // The rows of subjects whose lookup fails (an empty id) where NCBI has no result
+    // The rows of subjects whose lookups fail where NCBI has no result
     // (`report::tabular::check_failed_lookups`), before any format is written.
-    if subject_ids.iter().any(|id| id.is_empty()) {
-        for outfmt in format_plans.iter().filter(|outfmt| outfmt.is_tabular()) {
-            crate::report::tabular::check_failed_lookups(
-                outfmt.tabular_spec(),
-                listed_titles.is_some(),
-                hit_lists.iter().flatten().map(|hit_list| {
-                    let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-                    hit_list.hsplist_array[..count]
-                        .iter()
-                        .filter_map(|hsp_list| hsp_list.hsps.first())
-                        .map(|hsp| hsp.s_idx as usize)
-                }),
-                |s_idx| subject_ids.get(s_idx).is_some_and(|id| id.is_empty()),
-                |s_idx| match listed_titles.as_ref() {
-                    Some(titles) => {
-                        crate::report::tabular::failed_database_title(titles.oid(s_idx))
-                    }
-                    None => crate::report::tabular::failed_record_title(
-                        s_idx,
-                        subject_records[s_idx].shown_id(),
-                    ),
-                },
-                args.app.name(),
-            )?;
+    let parsed_for_checks: &[Option<Arc<crate::report::db_subject::ParsedSubject>>] = listed_titles
+        .as_ref()
+        .map_or(records_parsed.as_slice(), |titles| &titles.parsed);
+    for outfmt in format_plans.iter().filter(|outfmt| outfmt.is_tabular()) {
+        let spec = outfmt.tabular_spec();
+        if !crate::algorithm::common::tabular::checks_failed_lookups(
+            spec,
+            &subject_ids,
+            parsed_for_checks,
+        ) {
+            continue;
         }
+        crate::report::tabular::check_failed_lookups(
+            spec,
+            hit_lists.iter().flatten().map(|hit_list| {
+                let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                hit_list.hsplist_array[..count]
+                    .iter()
+                    .filter_map(|hsp_list| hsp_list.hsps.first())
+                    .map(|hsp| hsp.s_idx as usize)
+            }),
+            |s_idx| {
+                crate::algorithm::common::tabular::subject_lookup_failure(
+                    spec,
+                    &subject_ids,
+                    parsed_for_checks,
+                    listed_titles.is_some(),
+                    true,
+                    s_idx,
+                )
+            },
+            |s_idx| match listed_titles.as_ref() {
+                Some(titles) => crate::report::tabular::failed_database_title(titles.oid(s_idx)),
+                None => crate::report::tabular::failed_record_title(
+                    s_idx,
+                    subject_records[s_idx].shown_id(),
+                ),
+            },
+            args.app.name(),
+        )?;
     }
     // The `stitle` text of the custom tabular reports by subject: the stored titles of a
     // database (the first definition line's of a sequence with parsed Seq-ids); none for the

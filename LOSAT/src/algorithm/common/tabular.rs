@@ -112,9 +112,42 @@ pub(crate) struct SubjectValues<'a> {
     titles: Option<Vec<&'a [u8]>>,
     length: usize,
     taxonomy: Cow<'a, TabularTaxonomy>,
-    /// The Seq-align id (`FailedLookup::full`, `accession`) of a subject whose lookup fails, and
-    /// whether `x_SetSubjectIds` fails too.
-    failed: Option<([Cow<'a, [u8]>; 2], bool)>,
+    /// How the lookups of a subject fail (`FailedLookup`), `None` where they do not.
+    failed: Option<FailedValues<'a>>,
+    /// The subject index (`TabularSubject::index`).
+    index: usize,
+}
+
+/// The values of `FailedLookup` that a subject's rows show where its lookups fail.
+pub(crate) struct FailedValues<'a> {
+    /// The Seq-align id as `sallseqid` and `sallacc` print it (`FailedLookup::full`,
+    /// `accession`).
+    pub(crate) align_id: [Cow<'a, [u8]>; 2],
+    /// Whether `SetSubjectId` throws (`FailedLookup::subject_id`).
+    pub(crate) subject_id: bool,
+    /// Whether `x_SetSubjectIds` throws, after the lines that `SubjectValues::all_ids` then holds
+    /// (`FailedLookup::all_ids`).
+    pub(crate) all_ids: bool,
+}
+
+impl<'a> FailedValues<'a> {
+    /// The failure of a `-subject` record or a database sequence with parsed Seq-ids whose
+    /// `SetSubjectId` throws where `subject_id` (`ParsedSubject::tabular_ids` gave none) and whose
+    /// `x_SetSubjectIds` throws where `all_ids` (`AllTabularIds::failed`), `None` where neither.
+    pub(crate) fn of_parsed(
+        subject: &ParsedSubject,
+        subject_id: bool,
+        all_ids: bool,
+    ) -> Option<Self> {
+        (subject_id || all_ids).then(|| {
+            let [full, accession] = subject.alignment_tabular_ids();
+            FailedValues {
+                align_id: [Cow::Owned(full), Cow::Owned(accession)],
+                subject_id,
+                all_ids,
+            }
+        })
+    }
 }
 
 impl SubjectValues<'_> {
@@ -140,20 +173,77 @@ impl SubjectValues<'_> {
             nucleotide: true,
             qcovs,
             qcovus,
-            lookup: match &self.failed {
-                Some(([full, accession], all_ids)) => {
-                    crate::report::tabular::SubjectLookup::Failed(
-                        crate::report::tabular::FailedLookup {
-                            full,
-                            accession,
-                            all_ids: *all_ids,
-                        },
-                    )
-                }
-                None => crate::report::tabular::SubjectLookup::Found,
-            },
+            lookup: self.lookup(),
+            index: self.index,
         }
     }
+
+    /// The lookup of the subject (`TabularSubject::lookup`).
+    pub(crate) fn lookup(&self) -> crate::report::tabular::SubjectLookup<'_> {
+        match &self.failed {
+            Some(failed) => crate::report::tabular::SubjectLookup::Failed(
+                crate::report::tabular::FailedLookup {
+                    full: &failed.align_id[0],
+                    accession: &failed.align_id[1],
+                    subject_id: failed.subject_id,
+                    all_ids: failed.all_ids.then_some(self.all_ids.as_slice()),
+                },
+            ),
+            None => crate::report::tabular::SubjectLookup::Found,
+        }
+    }
+}
+
+/// Which lookups of subject `s_idx` fail (`report::tabular::check_failed_lookups`) for a report of
+/// `spec` (`None`: the default fields): an empty id among `ids` (the reports' `saccver`, empty
+/// where `SetSubjectId` throws), and for a subject with parsed Seq-ids (`parsed`) and a report of
+/// `sall*`, also `x_SetSubjectIds` (`ParsedSubject::lookup_failure`). `database`: the subjects are
+/// a database's (the one definition line of a sequence without parsed Seq-ids throws in
+/// `x_SetSubjectIds` too, `LookupFailure::of_plain`); `protein` is their kind.
+pub(crate) fn subject_lookup_failure(
+    spec: Option<&TabularSpec>,
+    ids: &[Arc<[u8]>],
+    parsed: &[Option<Arc<ParsedSubject>>],
+    database: bool,
+    protein: bool,
+    s_idx: usize,
+) -> Option<crate::report::tabular::LookupFailure> {
+    let failed_id = ids.get(s_idx).is_some_and(|id| id.is_empty());
+    match parsed.get(s_idx).and_then(Option::as_deref) {
+        Some(subject) if spec.is_some_and(reports_all_ids) => {
+            subject.lookup_failure(protein).ok().flatten()
+        }
+        Some(_) => failed_id.then_some(crate::report::tabular::LookupFailure {
+            subject_id: true,
+            all_ids: false,
+        }),
+        None => failed_id.then(|| crate::report::tabular::LookupFailure::of_plain(database)),
+    }
+}
+
+/// Whether the report shows `sallseqid`, `sallgi` or `sallacc` (`x_SetSubjectIds` runs).
+pub(crate) fn reports_all_ids(spec: &TabularSpec) -> bool {
+    spec.has_any(&[
+        TabularField::SubjectAllSeqIds,
+        TabularField::SubjectAllGis,
+        TabularField::SubjectAllAccessions,
+    ])
+}
+
+/// Whether a tabular report of `spec` is checked for rows whose lookups fail
+/// (`report::tabular::check_failed_lookups`) where the subjects' `ids` (empty for a failed
+/// `SetSubjectId`) and `parsed` are as given: some id is empty, or a subject with parsed Seq-ids
+/// may fail in `x_SetSubjectIds` (`subject_lookup_failure`).
+pub(crate) fn checks_failed_lookups(
+    spec: Option<&TabularSpec>,
+    ids: &[Arc<[u8]>],
+    parsed: &[Option<Arc<ParsedSubject>>],
+) -> bool {
+    (ids.iter().any(|id| id.is_empty())
+        || (!parsed.is_empty()
+            && spec.is_some_and(reports_all_ids)
+            && parsed.iter().any(Option::is_some)))
+        && crate::report::tabular::may_stop_at_failed_lookup(spec)
 }
 
 impl<'a> TabularSubjects<'a> {
@@ -239,38 +329,46 @@ impl<'a> TabularSubjects<'a> {
                             String::from_utf8_lossy(&subject.alignment_fasta())
                         )
                     };
-                    let [id, accession, accession_version] =
-                        subject.tabular_ids(false).map_err(refused)?;
-                    let all_ids = if needs.all_deflines {
+                    let ids = subject.tabular_ids(false).map_err(refused)?;
+                    let all = if needs.all_deflines {
                         subject.all_tabular_ids(false).map_err(refused)?
                     } else {
-                        Vec::new()
+                        Default::default()
                     };
+                    let failed = FailedValues::of_parsed(subject, ids.is_none(), all.failed);
+                    let [id, accession, accession_version] = ids.unwrap_or_default();
                     return Ok(SubjectValues {
                         id: Cow::Owned(id),
                         accession: Cow::Owned(accession),
                         accession_version: Cow::Owned(accession_version),
                         gi: subject.tabular_gi(),
-                        all_ids,
+                        all_ids: all.ids,
                         titles: None,
                         length,
                         taxonomy: Cow::Owned(TabularTaxonomy::default()),
-                        failed: None,
+                        failed,
+                        index: s_idx,
                     });
                 }
                 let id: &[u8] = ids.get(s_idx).map_or(&b"unknown"[..], |id| id.as_ref());
                 let record = records.get(s_idx);
                 let all_ids = match record {
-                    Some(record) if needs.all_deflines => {
+                    // Only where the word is not the id, which the writer prints for none.
+                    Some(record) if needs.all_deflines && record.shown_id() != id => {
                         crate::report::tabular::DeflineIds::of_record(record.shown_id())
                     }
                     _ => Vec::new(),
                 };
-                // An empty id: `GetSeqIdList` throws (`FastaRecord::subject_tabular_id`).
+                // An empty id: `GetSeqIdList` throws in `SetSubjectId` (`FastaRecord::
+                // subject_tabular_id`); the Seq-align id is the record's local id.
                 let failed = match record {
                     Some(record) if id.is_empty() => {
                         let local = Cow::Borrowed(record.local_id.as_bytes());
-                        Some(([local.clone(), local], false))
+                        Some(FailedValues {
+                            align_id: [local.clone(), local],
+                            subject_id: true,
+                            all_ids: false,
+                        })
                     }
                     _ => None,
                 };
@@ -284,6 +382,7 @@ impl<'a> TabularSubjects<'a> {
                     length,
                     taxonomy: Cow::Owned(TabularTaxonomy::default()),
                     failed,
+                    index: s_idx,
                 })
             }
             TabularSubjects::Database {
@@ -312,19 +411,20 @@ impl<'a> TabularSubjects<'a> {
                                 program,
                             )
                         };
-                        let [id, accession, accession_version] =
-                            subject.tabular_ids(false).map_err(refused)?;
-                        let all_ids = if needs.all_deflines {
+                        let ids = subject.tabular_ids(false).map_err(refused)?;
+                        let all = if needs.all_deflines {
                             subject.all_tabular_ids(false).map_err(refused)?
                         } else {
-                            Vec::new()
+                            Default::default()
                         };
+                        let failed = FailedValues::of_parsed(subject, ids.is_none(), all.failed);
+                        let [id, accession, accession_version] = ids.unwrap_or_default();
                         Ok(SubjectValues {
                             id: Cow::Owned(id),
                             accession: Cow::Owned(accession),
                             accession_version: Cow::Owned(accession_version),
                             gi: subject.tabular_gi(),
-                            all_ids,
+                            all_ids: all.ids,
                             titles: Some(
                                 subject
                                     .deflines()
@@ -334,7 +434,8 @@ impl<'a> TabularSubjects<'a> {
                             ),
                             length,
                             taxonomy,
-                            failed: None,
+                            failed,
+                            index: s_idx,
                         })
                     }
                     // A sequence without parsed Seq-ids: the first word of its stored title (an
@@ -353,7 +454,11 @@ impl<'a> TabularSubjects<'a> {
                         let failed = accession.is_empty().then(|| {
                             let [full, accession] =
                                 crate::algorithm::common::database::failed_general_lookup(oid);
-                            ([Cow::Owned(full), Cow::Owned(accession)], true)
+                            FailedValues {
+                                align_id: [Cow::Owned(full), Cow::Owned(accession)],
+                                subject_id: true,
+                                all_ids: true,
+                            }
                         });
                         Ok(SubjectValues {
                             id: crate::algorithm::common::database::tabular_seqid(
@@ -373,6 +478,7 @@ impl<'a> TabularSubjects<'a> {
                             length,
                             taxonomy,
                             failed,
+                            index: s_idx,
                         })
                     }
                 }

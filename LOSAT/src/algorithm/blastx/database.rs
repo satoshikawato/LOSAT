@@ -333,8 +333,9 @@ pub(crate) struct ReportedSubjects {
 #[derive(Default)]
 struct ReportedTabular {
     /// The ids of each definition line of a sequence with parsed Seq-ids (`sallseqid`, `sallgi`,
-    /// `sallacc`); empty for the others, whose `sall*` are their own ids.
-    all_ids: Vec<Vec<crate::report::tabular::DeflineIds>>,
+    /// `sallacc`); empty for the others, whose `sall*` are their own ids. Where
+    /// `x_SetSubjectIds` throws, the lines before (`AllTabularIds::failed`).
+    all_ids: Vec<crate::report::db_subject::AllTabularIds>,
     /// `staxid` and `staxids` of the reported sequences.
     taxonomy: Vec<crate::report::tabular::TabularTaxonomy>,
     /// The taxonomy database's names that the rows look up (`None`: every lookup fails).
@@ -549,8 +550,9 @@ impl ReportedSubjects {
                         .tabular_ids(true)
                         .and_then(|ids| subject.check_printed_word(true, words).map(|()| ids));
                     // A table of fields that read nothing of the subject prints none of its ids.
+                    // An empty id where the lookup throws (`ParsedSubject::tabular_ids`).
                     let [id, accession, version] = match ids {
-                        Ok(ids) => ids,
+                        Ok(ids) => ids.unwrap_or_default(),
                         Err(_) if !tabular_reads => Default::default(),
                         Err(problem) => {
                             return Err(shared::parsed_refusal(
@@ -867,7 +869,7 @@ impl ReportedSubjects {
             .collect();
         let count = self.ordinals.len();
         if needs.all_deflines {
-            self.tabular.all_ids = vec![Vec::new(); count];
+            self.tabular.all_ids = vec![Default::default(); count];
         }
         if needs.taxonomy {
             self.tabular.taxonomy = vec![TabularTaxonomy::default(); count];
@@ -908,9 +910,16 @@ impl ReportedSubjects {
     }
 
     /// The ids of each definition line of the sequence of rank `rank` with parsed Seq-ids
-    /// (only after `read_tabular` with an `sall*` field; empty otherwise).
-    pub(crate) fn tabular_all_ids(&self, rank: usize) -> &[crate::report::tabular::DeflineIds] {
-        self.tabular.all_ids.get(rank).map_or(&[], Vec::as_slice)
+    /// (only after `read_tabular` with an `sall*` field; empty otherwise), and whether
+    /// `x_SetSubjectIds` throws after them (`AllTabularIds::failed`).
+    pub(crate) fn tabular_all_ids(
+        &self,
+        rank: usize,
+    ) -> (&[crate::report::tabular::DeflineIds], bool) {
+        self.tabular
+            .all_ids
+            .get(rank)
+            .map_or((&[], false), |all| (all.ids.as_slice(), all.failed))
     }
 
     /// `staxid` and `staxids` of the sequence of rank `rank` (only after `read_tabular` with a

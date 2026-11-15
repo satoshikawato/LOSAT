@@ -271,6 +271,17 @@ pub(crate) fn write_blastn_tabular(
                 -1
             };
             let subject = values.nucleotide_subject(tab.names, qcovs, qcovus);
+            // A subject whose lookups fail shows what the last found subject set
+            // (`TabularRows::last_found`), made again from its index.
+            let kept_values = match rows.last_found() {
+                Some(kept) if table.fails(&subject) => {
+                    Some(tab.subjects.values(kept, spec, PROGRAM)?)
+                }
+                _ => None,
+            };
+            let kept = kept_values
+                .as_ref()
+                .map(|values| values.nucleotide_subject(tab.names, -1, -1));
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
             // ```c++
             //        		const CBioseq_Handle& subject_bh =
@@ -327,7 +338,7 @@ pub(crate) fn write_blastn_tabular(
                     // One printed row is one HSP; the probe marks it without changing it.
                     Some(probe) => {
                         buf.clear();
-                        table.row(&mut buf, &mut rows, &query, &subject, &row);
+                        table.row(&mut buf, &mut rows, &query, &subject, kept.as_ref(), &row);
                         writer.flush()?;
                         probe.begin(hsp_index);
                         writer.write_all(&buf)?;
@@ -335,7 +346,7 @@ pub(crate) fn write_blastn_tabular(
                         probe.end(hsp_index);
                         buf.clear();
                     }
-                    None => table.row(&mut buf, &mut rows, &query, &subject, &row),
+                    None => table.row(&mut buf, &mut rows, &query, &subject, kept.as_ref(), &row),
                 }
                 hsp_index += 1;
             }

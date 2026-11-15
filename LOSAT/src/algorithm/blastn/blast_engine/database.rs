@@ -1552,6 +1552,10 @@ pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown
         tabular: output_formats
             .iter()
             .any(|format| format.tabular_reads_subject()),
+        stops_at_failed_lookup: output_formats.iter().any(|format| {
+            format.is_tabular()
+                && crate::report::tabular::may_stop_at_failed_lookup(format.tabular_spec())
+        }),
         pairwise,
         structured: output_formats
             .iter()

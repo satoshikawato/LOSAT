@@ -563,6 +563,7 @@ fn write_subject_alignments<W: Write>(
     writer: &mut W,
     probe: Option<&mut FormatProbe<'_>>,
     s_idx: u32,
+    parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     title: &[u8],
     protein: bool,
     hits: &[&PairwiseHit],
@@ -573,6 +574,7 @@ fn write_subject_alignments<W: Write>(
         writer,
         probe,
         s_idx,
+        parsed,
         title,
         protein,
         hits,
@@ -590,6 +592,7 @@ fn write_subject_alignments_part<W: Write>(
     writer: &mut W,
     mut probe: Option<&mut FormatProbe<'_>>,
     s_idx: u32,
+    parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     title: &[u8],
     protein: bool,
     hits: &[&PairwiseHit],
@@ -619,10 +622,9 @@ fn write_subject_alignments_part<W: Write>(
         }
         match heading {
             Ok(_) => write_hsp(writer, hit)?,
-            Err(super::defline::UnknownEncoding) => write_skipped_alignment(
-                writer,
-                format!("Subject_{}", u64::from(s_idx) + 1).as_bytes(),
-            )?,
+            Err(super::defline::UnknownEncoding) => {
+                write_skipped_alignment(writer, &record_skipped_id(parsed, s_idx))?
+            }
         }
         if let Some(probe) = probe.as_mut() {
             writer.flush()?;
@@ -3056,6 +3058,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
             writer,
             probe,
             s_idx,
+            self.parsed_subjects,
             &group.subject_titles[&s_idx],
             true,
             &group.subject_hits[&s_idx],
@@ -3709,6 +3712,20 @@ fn parsed_subject(
         .filter(|subject| !subject.shown_as_record())
 }
 
+/// The id of NCBI's line in place of each alignment of `-subject` record `s_idx` whose heading
+/// it cannot make (`write_subject_alignments`): `GetSeqIdString` of the Seq-align id, the local id
+/// `Subject_N` (N = `s_idx` + 1) of a record without parsed ids, else its parsed id (`parsed`:
+/// `ParsedSubject::skipped_id`, `Subject_9` of `lcl|Subject_9`).
+fn record_skipped_id(
+    parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    s_idx: u32,
+) -> Vec<u8> {
+    match parsed.get(s_idx as usize).and_then(Option::as_deref) {
+        Some(subject) => subject.skipped_id(),
+        None => format!("Subject_{}", u64::from(s_idx) + 1).into_bytes(),
+    }
+}
+
 /// The description-table label of a database sequence (before the cut to the line): the title
 /// that `GenerateDefline` makes of the stored title `title` and the source `source` of the
 /// Bioseq, which an empty title is made from (`Unknown` where NCBI's `HtmlDecode` throws), or for
@@ -4230,6 +4247,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
             writer,
             probe,
             s_idx,
+            &self.report.parsed_subjects,
             &group.subject_titles[&s_idx],
             false,
             &group.subject_hits[&s_idx],
@@ -4927,6 +4945,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
             writer,
             probe,
             s_idx,
+            &self.report.parsed_subjects,
             &group.subject_titles[&s_idx],
             false,
             &group.subject_hits[&s_idx],
@@ -6136,6 +6155,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
                 &mut writer,
                 probe.as_deref_mut(),
                 s_idx,
+                parsed_subjects,
                 &subject_titles[&s_idx],
                 false,
                 &subject_hits[&s_idx],
@@ -6662,7 +6682,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
                                 None
                             }
                             Err(super::defline::UnknownEncoding) => {
-                                Some(format!("Subject_{}", u64::from(*oid) + 1).into_bytes())
+                                Some(record_skipped_id(records_parsed, *oid))
                             }
                         }
                     }
@@ -7804,6 +7824,7 @@ mod tblastx_tests {
             &mut out,
             None,
             0,
+            &[],
             &titles[&0],
             false,
             &hits[&0],

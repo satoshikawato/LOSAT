@@ -1032,10 +1032,11 @@ impl ParsedSubject {
     /// there (the title is then not made). `Err` where NCBI's `x_CleanAndCompress` reads past the
     /// end of the title (NCBI crashes) and where NCBI may rewrite its end
     /// (`title_suffix_adjusted`).
-    fn title_word(&self, protein: bool) -> Result<Vec<u8>, &'static str> {
-        let ids = &self.target().ids;
-        if matches!(seq_id_list(ids, b"x"), std::borrow::Cow::Borrowed(_)) {
-            return Ok(Vec::new());
+    /// `Ok(None)` where `GenerateDefline` throws for that title (a title in no encoding that
+    /// `CUtf8::GuessEncoding` recognises): `GetSeqIdList` makes no ids (`lookup_failure`).
+    fn title_word(&self, protein: bool) -> Result<Option<Vec<u8>>, &'static str> {
+        if !replaces_an_id(&self.target().ids) {
+            return Ok(Some(Vec::new()));
         }
         self.generated_title_word(protein)
     }
@@ -1109,15 +1110,15 @@ impl ParsedSubject {
 
     /// The first word of the subject Bioseq's generated title (`title_word` without the check
     /// of the target's ids): `Err` also where LOSAT refuses the source of a title made from it
-    /// (`SourceTaxname::Refused`).
-    fn generated_title_word(&self, protein: bool) -> Result<Vec<u8>, &'static str> {
+    /// (`SourceTaxname::Refused`); `Ok(None)` where `GenerateDefline` throws.
+    fn generated_title_word(&self, protein: bool) -> Result<Option<Vec<u8>>, &'static str> {
         self.source.name()?;
         if self.title_suffix_adjusted(protein) {
             return Err("a title ending in ']' whose first word NCBI BLAST+ takes after it rewrites the title's end from the taxids (x_AdjustProteinTitleSuffix)");
         }
-        let defline = self
-            .bioseq_title(protein, false)
-            .map_err(|UnknownEncoding| "a title in no encoding that NCBI BLAST+ recognises")?;
+        let Ok(defline) = self.bioseq_title(protein, false) else {
+            return Ok(None);
+        };
         // A nucleotide title stops at the end of the string (approved exception 2 of
         // PD-LOSAT-NCBI-DEFECTS for BLASTN, TBLASTN and TBLASTX).
         if protein && defline.reads_past_end {
@@ -1131,24 +1132,76 @@ impl ParsedSubject {
             .iter()
             .position(|&byte| byte == b' ')
             .unwrap_or(defline.text.len());
-        Ok(defline.text[..end].to_vec())
+        Ok(Some(defline.text[..end].to_vec()))
     }
 
     /// The tabular `sseqid`, `sacc` and `saccver` (`tabular_id` of the subject Bioseq's ids after
-    /// `seq_id_list`).
-    pub fn tabular_ids(&self, protein: bool) -> Result<[Vec<u8>; 3], &'static str> {
-        let word = self.title_word(protein)?;
+    /// `seq_id_list`); `Ok(None)` where `SetSubjectId`'s `GetSeqIdList` throws (`lookup_failure`).
+    pub fn tabular_ids(&self, protein: bool) -> Result<Option<[Vec<u8>; 3]>, &'static str> {
+        let Some(word) = self.title_word(protein)? else {
+            return Ok(None);
+        };
         let ids = seq_id_list(&self.target().ids, &word);
         let field = |kind| {
             let mut out = Vec::new();
             tabular_id(&ids, kind, &mut out);
             out
         };
-        Ok([
+        Ok(Some([
             field(TabularId::Full),
             field(TabularId::Accession),
             field(TabularId::AccessionVersion),
-        ])
+        ]))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:862-869
+    // ```c++
+    //         } catch (const CException&) {
+    //             list<CRef<CSeq_id> > subject_ids;
+    //             CRef<CSeq_id> id(new CSeq_id());
+    //             id->Assign(align.GetSeq_id(1));
+    //             subject_ids.push_back(id);
+    //             SetSubjectId(subject_ids);
+    // ```
+    /// Which of NCBI's lookups of the subject's tabular ids throw (`report::tabular::FailedLookup`):
+    /// `SetSubjectId` where the subject Bioseq's ids hold one that `GetSeqIdList` replaces
+    /// (`lcl|Subject_`, `gnl|BL_ORD_ID`) and `GenerateDefline` throws, `x_SetSubjectIds` where a
+    /// definition line holds one (a `-subject` record's ids are not looked up there); `None`
+    /// where neither throws. `Err` as `tabular_ids`'.
+    pub fn lookup_failure(
+        &self,
+        protein: bool,
+    ) -> Result<Option<super::tabular::LookupFailure>, &'static str> {
+        let subject_id = replaces_an_id(&self.target().ids);
+        let all_ids = !self.record
+            && self
+                .set
+                .deflines
+                .iter()
+                .any(|defline| replaces_an_id(&defline.ids));
+        if !subject_id && !all_ids {
+            return Ok(None);
+        }
+        Ok(self
+            .generated_title_word(protein)?
+            .is_none()
+            .then_some(super::tabular::LookupFailure {
+                subject_id,
+                all_ids,
+            }))
+    }
+
+    /// The Seq-align id as `sallseqid` and `sallacc` print it (`tabular_id` of the id alone,
+    /// `eFullId` and `eAccession`): what the catch of `SetFields` pushes where a lookup throws
+    /// (`report::tabular::FailedLookup::full`, `accession`).
+    pub fn alignment_tabular_ids(&self) -> [Vec<u8>; 2] {
+        let ids = std::slice::from_ref(&self.alignment_id);
+        let field = |kind| {
+            let mut out = Vec::new();
+            tabular_id(ids, kind, &mut out);
+            out
+        };
+        [field(TabularId::Full), field(TabularId::Accession)]
     }
 
     /// The keys of the ids of queries that NCBI's scope would show for this sequence
@@ -1168,12 +1221,16 @@ impl ParsedSubject {
         })
     }
 
-    /// The `saccver` of `tabular_ids`, made once for a subject (`protein` is its database's).
+    /// The `saccver` of `tabular_ids`, made once for a subject (`protein` is its database's);
+    /// empty where the lookup throws (the programs' id lists mark a failed lookup so).
     pub fn tabular_saccver(&self, protein: bool) -> Result<std::sync::Arc<[u8]>, &'static str> {
         if let Some(saccver) = self.saccver.get() {
             return Ok(std::sync::Arc::clone(saccver));
         }
-        let [_, _, saccver] = self.tabular_ids(protein)?;
+        let saccver = self
+            .tabular_ids(protein)?
+            .map(|[_, _, saccver]| saccver)
+            .unwrap_or_default();
         Ok(std::sync::Arc::clone(
             self.saccver.get_or_init(|| std::sync::Arc::from(saccver)),
         ))
@@ -1208,40 +1265,45 @@ impl ParsedSubject {
     // ```
     /// The tabular ids of every definition line (`x_SetSubjectIds`: `sallseqid`, `sallgi`,
     /// `sallacc`), in the stored order: each line's ids after `seq_id_list` with the first word
-    /// of the subject Bioseq's title, as `tabular_ids` makes them. `Err` as `tabular_ids`'.
-    pub fn all_tabular_ids(
-        &self,
-        protein: bool,
-    ) -> Result<Vec<super::tabular::DeflineIds>, &'static str> {
+    /// of the subject Bioseq's title, as `tabular_ids` makes them. Where `GenerateDefline` throws,
+    /// the ids of the lines before the first line with an id to replace, which `x_SetSubjectIds`
+    /// pushed before it threw (`AllTabularIds::failed`). `Err` as `tabular_ids`'.
+    pub fn all_tabular_ids(&self, protein: bool) -> Result<AllTabularIds, &'static str> {
         // `GetSeqIdList` replaces the ids of each definition line, so the word is made when any
         // line has an id to replace, not only the target's.
         let replaced = !self.record
-            && self.set.deflines.iter().any(|defline| {
-                matches!(seq_id_list(&defline.ids, b"x"), std::borrow::Cow::Owned(_))
-            });
+            && self
+                .set
+                .deflines
+                .iter()
+                .any(|defline| replaces_an_id(&defline.ids));
         let word = if replaced {
             self.generated_title_word(protein)?
         } else {
-            Vec::new()
+            Some(Vec::new())
         };
-        Ok(self
-            .set
-            .deflines
-            .iter()
-            .map(|defline| {
-                let ids = seq_id_list(&defline.ids, &word);
-                let field = |kind| {
-                    let mut out = Vec::new();
-                    tabular_id(&ids, kind, &mut out);
-                    out
-                };
-                super::tabular::DeflineIds {
-                    id: field(TabularId::Full),
-                    gi: defline.gi(),
-                    accession: field(TabularId::Accession),
-                }
-            })
-            .collect())
+        let Some(word) = word else {
+            let before = self
+                .set
+                .deflines
+                .iter()
+                .take_while(|defline| !replaces_an_id(&defline.ids))
+                .map(|defline| defline_tabular_ids(defline, b""))
+                .collect();
+            return Ok(AllTabularIds {
+                ids: before,
+                failed: true,
+            });
+        };
+        Ok(AllTabularIds {
+            ids: self
+                .set
+                .deflines
+                .iter()
+                .map(|defline| defline_tabular_ids(defline, &word))
+                .collect(),
+            failed: false,
+        })
     }
 
     /// The title of the first definition line, empty for none (`stitle`; the writers show an
@@ -1432,7 +1494,7 @@ impl ParsedSubject {
 
     /// `CSeq_id::GetSeqIdString` of the Seq-align id: the id of NCBI's line in place of each
     /// alignment of a subject whose heading it cannot make (`heading_skipped_id`).
-    fn skipped_id(&self) -> Vec<u8> {
+    pub fn skipped_id(&self) -> Vec<u8> {
         let mut id = Vec::new();
         label::content(&self.alignment_id, false, &mut id);
         id
@@ -1655,6 +1717,35 @@ impl ParsedSubject {
         let mut out = Vec::new();
         label::fasta(&self.alignment_id, &mut out);
         out
+    }
+}
+
+/// The ids of every definition line of a subject (`ParsedSubject::all_tabular_ids`); where
+/// `failed`, those of the lines before the one whose `GetSeqIdList` throws.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AllTabularIds {
+    pub ids: Vec<super::tabular::DeflineIds>,
+    pub failed: bool,
+}
+
+/// Whether `GetSeqIdList` replaces one of `ids` with the first word of the generated title
+/// (`seq_id_list`: a `gnl|BL_ORD_ID` or `lcl|Subject_` id).
+fn replaces_an_id(ids: &[ParsedSeqId]) -> bool {
+    matches!(seq_id_list(ids, b"x"), std::borrow::Cow::Owned(_))
+}
+
+/// The tabular ids of one definition line after `seq_id_list` with `word`.
+fn defline_tabular_ids(defline: &BlastDefline, word: &[u8]) -> super::tabular::DeflineIds {
+    let ids = seq_id_list(&defline.ids, word);
+    let field = |kind| {
+        let mut out = Vec::new();
+        tabular_id(&ids, kind, &mut out);
+        out
+    };
+    super::tabular::DeflineIds {
+        id: field(TabularId::Full),
+        gi: defline.gi(),
+        accession: field(TabularId::Accession),
     }
 }
 
@@ -2009,7 +2100,7 @@ mod tests {
         assert!(local.tabular_saccver(true).is_err());
         assert!(local.check_tabular_ids(true).is_err());
         assert!(local.check_tabular_ids(false).is_ok());
-        let [id, _, _] = local.tabular_ids(false).unwrap();
+        let [id, _, _] = local.tabular_ids(false).unwrap().unwrap();
         let word = stored.text.split(|&byte| byte == b' ').next().unwrap();
         assert_eq!(id, word);
     }
@@ -2124,6 +2215,7 @@ mod tests {
         let ids = |first: &str| {
             subject(first)
                 .tabular_ids(true)
+                .unwrap()
                 .unwrap()
                 .map(|id| String::from_utf8(id).unwrap())
         };
@@ -2789,9 +2881,9 @@ mod tests {
         let printed = PrintedIds::of(None);
         let local = subject("Subject_1", Some(9606), named());
         assert!(local.check_printed_word(false, printed).is_ok());
-        let [id, _, _] = local.tabular_ids(false).unwrap();
+        let [id, _, _] = local.tabular_ids(false).unwrap().unwrap();
         assert_eq!(text(&id), "Uncultured");
-        let [id, _, _] = local.tabular_ids(true).unwrap();
+        let [id, _, _] = local.tabular_ids(true).unwrap().unwrap();
         assert_eq!(text(&id), "unnamed");
         assert_eq!(
             text(&local.bioseq_title(true, true).unwrap().text),
@@ -2983,12 +3075,54 @@ mod tests {
     }
     /// The subject of a `-subject` record read with `-parse_deflines` (`ParsedSubject::of_record`).
     fn record_subject(defline: &str, protein: bool) -> ParsedSubject {
+        record_subject_of(defline.as_bytes(), protein)
+    }
+
+    /// `record_subject` of a defline of any bytes.
+    fn record_subject_of(defline: &[u8], protein: bool) -> ParsedSubject {
         use crate::blastinput::fasta_reader::{read_all, FastaInputSource, ReaderConfig};
-        let fasta = format!("{defline}\n{}\n", if protein { "MKV" } else { "ACGT" });
+        let mut fasta = defline.to_vec();
+        fasta.extend_from_slice(if protein { b"\nMKV\n" } else { b"\nACGT\n" });
         let config = ReaderConfig::subject("BLASTN", protein, false).with_parse_deflines(true);
-        let mut source = FastaInputSource::from_bytes(fasta.as_bytes(), config);
+        let mut source = FastaInputSource::from_bytes(&fasta, config);
         let record = read_all(&mut source, &mut |_| Ok(())).unwrap().remove(0);
         ParsedSubject::of_record(record.believed().unwrap(), &record.title)
+    }
+
+    // NCBI BLAST+ 2.17.0 -parse_deflines -subject (probe `T/t7/review` of line RG, `C.lclS9`,
+    // `J.pS9tpa`): a parsed `lcl|Subject_9` keeps its id (`s_ReplaceLocalId` with `parse_local`),
+    // and `GetSeqIdList` puts the first word of the title generated from the rest of the defline
+    // in its place: `s7` of `TPA: s7 third ~`; where that title is in no encoding NCBI guesses the
+    // lookup throws (`sseqid` Unknown, `sall*` the Seq-align id `Subject_9`), a record's
+    // definition line is never looked up.
+    #[test]
+    fn parsed_subject_ids_of_a_title_ncbi_cannot_decode_fail_the_lookup() {
+        let decodable = record_subject(">lcl|Subject_9 TPA: s7 third ~", false);
+        assert_eq!(
+            decodable.tabular_ids(false).unwrap().unwrap()[2],
+            b"s7".to_vec()
+        );
+        let bad = record_subject_of(b">lcl|Subject_9 bad x\x81y title", false);
+        assert_eq!(bad.tabular_ids(false).unwrap(), None);
+        assert_eq!(&*bad.tabular_saccver(false).unwrap(), b"");
+        assert!(bad.check_tabular_ids(false).is_ok());
+        assert_eq!(
+            bad.lookup_failure(false).unwrap(),
+            Some(crate::report::tabular::LookupFailure {
+                subject_id: true,
+                all_ids: false,
+            })
+        );
+        assert_eq!(
+            bad.alignment_tabular_ids(),
+            [b"Subject_9".to_vec(), b"Subject_9".to_vec()]
+        );
+        assert_eq!(bad.skipped_id(), b"Subject_9");
+        let all = bad.all_tabular_ids(false).unwrap();
+        assert!(!all.failed);
+        assert_eq!(text(&all.ids[0].id), "Subject_9");
+        // A record of a decodable title has no failure.
+        assert_eq!(decodable.lookup_failure(false).unwrap(), None);
     }
 
     // NCBI BLAST+ 2.17.0 -parse_deflines -subject (probe `DI7/ws/pd_sub.py`, 2026-11-01): `sseqid`,
@@ -3047,13 +3181,13 @@ mod tests {
             ),
         ] {
             let subject = record_subject(defline, protein);
-            let shown = subject.tabular_ids(protein).unwrap();
+            let shown = subject.tabular_ids(protein).unwrap().unwrap();
             assert_eq!(
                 shown.map(|id| String::from_utf8(id).unwrap()),
                 ids,
                 "{defline}"
             );
-            let all_ids = subject.all_tabular_ids(protein).unwrap();
+            let all_ids = subject.all_tabular_ids(protein).unwrap().ids;
             assert_eq!(text(&all_ids[0].id), all, "{defline}");
             assert_eq!(subject.shown_as_record(), local, "{defline}");
             if !local {

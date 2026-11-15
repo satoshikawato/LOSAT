@@ -6344,9 +6344,12 @@ fn tabular_subject_ids(subjects: &[FastaRecord]) -> Vec<Arc<[u8]>> {
     subjects
         .iter()
         .map(|subject| {
+            // A nucleotide record's ids are never refused (`FastaRecord::subject_tabular_id`).
             subject
                 .subject_tabular_id(false)
-                .map_or_else(|_| Arc::from(&b""[..]), Arc::from)
+                .ok()
+                .flatten()
+                .map_or_else(|| Arc::from(&b""[..]), Arc::from)
         })
         .collect()
 }
@@ -6810,34 +6813,48 @@ fn post_process_hits_and_write(
     } else {
         std::borrow::Cow::Owned(Vec::new())
     };
-    // The rows of subjects whose lookup fails (an empty id) where NCBI has no result
+    // The rows of subjects whose lookups fail where NCBI has no result
     // (`report::tabular::check_failed_lookups`), before any format is written.
-    if subject_ids.iter().any(|id| id.is_empty()) {
-        let database = report.database_ordinals.zip(report.database_reader);
-        for format in output_formats.iter().filter(|format| format.is_tabular()) {
-            crate::report::tabular::check_failed_lookups(
-                format.tabular_spec(),
-                database.is_some(),
-                hit_lists.iter().flatten().map(|hit_list| {
-                    hit_list
-                        .hsplist_array
-                        .iter()
-                        .filter_map(|hsp_list| hsp_list.hsps.first())
-                        .map(|hsp| hsp.s_idx as usize)
-                }),
-                |s_idx| subject_ids.get(s_idx).is_some_and(|id| id.is_empty()),
-                |s_idx| match database {
-                    Some((ordinals, reader)) => crate::report::tabular::failed_database_title(
-                        reader.oid_map().oid(ordinals[s_idx]),
-                    ),
-                    None => crate::report::tabular::failed_record_title(
-                        s_idx,
-                        report.subjects.records()[s_idx].shown_id(),
-                    ),
-                },
-                "BLASTN",
-            )?;
+    let database = report.database_ordinals.zip(report.database_reader);
+    for format in output_formats.iter().filter(|format| format.is_tabular()) {
+        let spec = format.tabular_spec();
+        if !crate::algorithm::common::tabular::checks_failed_lookups(
+            spec,
+            &subject_ids,
+            report.database_parsed,
+        ) {
+            continue;
         }
+        crate::report::tabular::check_failed_lookups(
+            spec,
+            hit_lists.iter().flatten().map(|hit_list| {
+                hit_list
+                    .hsplist_array
+                    .iter()
+                    .filter_map(|hsp_list| hsp_list.hsps.first())
+                    .map(|hsp| hsp.s_idx as usize)
+            }),
+            |s_idx| {
+                crate::algorithm::common::tabular::subject_lookup_failure(
+                    spec,
+                    &subject_ids,
+                    report.database_parsed,
+                    database.is_some(),
+                    false,
+                    s_idx,
+                )
+            },
+            |s_idx| match database {
+                Some((ordinals, reader)) => crate::report::tabular::failed_database_title(
+                    reader.oid_map().oid(ordinals[s_idx]),
+                ),
+                None => crate::report::tabular::failed_record_title(
+                    s_idx,
+                    report.subjects.records()[s_idx].shown_id(),
+                ),
+            },
+            "BLASTN",
+        )?;
     }
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:497-498
     // ```c++

@@ -2551,17 +2551,30 @@ fn write_tblastx_outputs(
     };
     // The rows of subjects whose lookup fails (an empty id) where NCBI has no result
     // (`report::tabular::check_failed_lookups`), before any format is written.
-    if subject_ids.iter().any(|id| id.is_empty()) {
-        for format in output_formats.iter().filter(|format| format.is_tabular()) {
+    let parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>] = match &run.database {
+        Some(database) => &database.reported.parsed,
+        None => &records_parsed,
+    };
+    for format in output_formats.iter().filter(|format| format.is_tabular()) {
+        let spec = format.tabular_spec();
+        if crate::algorithm::common::tabular::checks_failed_lookups(spec, &subject_ids, parsed) {
             crate::report::tabular::check_failed_lookups(
-                format.tabular_spec(),
-                run.database.is_some(),
+                spec,
                 (0..run.queries.len()).map(|q_idx| {
                     hits.iter()
                         .filter(move |hsp| hsp.hit.q_idx as usize == q_idx)
                         .map(|hsp| hsp.hit.s_idx as usize)
                 }),
-                |s_idx| subject_ids.get(s_idx).is_some_and(|id| id.is_empty()),
+                |s_idx| {
+                    crate::algorithm::common::tabular::subject_lookup_failure(
+                        spec,
+                        &subject_ids,
+                        parsed,
+                        run.database.is_some(),
+                        false,
+                        s_idx,
+                    )
+                },
                 |s_idx| match &run.database {
                     Some(database) => crate::report::tabular::failed_database_title(
                         database.oids.oid(database.reported.ordinals[s_idx]),
@@ -3167,7 +3180,11 @@ fn report_counts<S: TbxScore>(
 /// The subject ID of the tabular formats of the subject record `subject`, `None` where
 /// `GenerateDefline` throws (`tabular_subject_ids`).
 fn subject_tabular_id(subject: &FastaRecord) -> Option<Arc<[u8]>> {
-    subject.subject_tabular_id(false).ok().map(Arc::from)
+    subject
+        .subject_tabular_id(false)
+        .ok()
+        .flatten()
+        .map(Arc::from)
 }
 
 /// The subject ID of the tabular formats of every subject, by subject index
@@ -4409,6 +4426,12 @@ impl BatchReports<'_> {
                 let pairwise_shown = formats.contains(&report::TblastxOutputFormat::Pairwise);
                 let shown = crate::algorithm::common::database::ParsedShown {
                     tabular: formats.iter().any(|format| format.tabular_reads_subject()),
+                    stops_at_failed_lookup: formats.iter().any(|format| {
+                        format.is_tabular()
+                            && crate::report::tabular::may_stop_at_failed_lookup(
+                                format.tabular_spec(),
+                            )
+                    }),
                     pairwise: pairwise_shown,
                     structured: formats.iter().any(|format| format.is_structured_xml()),
                     joined: pairwise_shown

@@ -89,6 +89,10 @@ pub use crate::api::local_blast::{
     with_run_pool, FormatObserver, FormatOutput, HspIndex, OutputSink, ReportOutputs,
 };
 pub use crate::report::blast_xml2::SideFileSink;
+/// LOSAT's refusal of a tabular report at a row where NCBI has no result (a subject whose title
+/// NCBI's `GenerateDefline` cannot decode, `report::tabular::check_failed_lookups`): only the
+/// tabular formats make it, before they write a byte.
+pub use crate::report::tabular::FailedLookupRefusal;
 pub use crate::report::PairwiseHit;
 
 // The output formats of the application layer (`blastinput/app.rs`, NCBI's CFormattingArgs):

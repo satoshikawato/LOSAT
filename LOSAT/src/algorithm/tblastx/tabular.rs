@@ -426,6 +426,15 @@ pub(super) fn write_tblastx_tabular(
             };
             // `qcovus` is inserted for BLASTN alone (`eQueryCovPerUniqSubj`): `N/A`.
             let subject = values.nucleotide_subject(names, qcovs, -1);
+            // A subject whose lookups fail shows what the last found subject set
+            // (`TabularRows::last_found`), made again from its index.
+            let kept_values = match rows.last_found() {
+                Some(kept) if table.fails(&subject) => Some(subjects.values(kept, spec, PROGRAM)?),
+                _ => None,
+            };
+            let kept = kept_values
+                .as_ref()
+                .map(|values| values.nucleotide_subject(names, -1, -1));
             let subject_record_length = i32::try_from(record_length(s_idx))?;
             for &hsp_index in group {
                 let hsp = &hits[hsp_index];
@@ -606,7 +615,14 @@ pub(super) fn write_tblastx_tabular(
                     // One printed row is one HSP; the probe marks it without changing it.
                     Some(probe) => {
                         buf.clear();
-                        table.row(&mut buf, &mut rows, &tabular_query, &subject, &row);
+                        table.row(
+                            &mut buf,
+                            &mut rows,
+                            &tabular_query,
+                            &subject,
+                            kept.as_ref(),
+                            &row,
+                        );
                         writer.flush()?;
                         probe.begin(hsp_index);
                         writer.write_all(&buf)?;
@@ -614,7 +630,14 @@ pub(super) fn write_tblastx_tabular(
                         probe.end(hsp_index);
                         buf.clear();
                     }
-                    None => table.row(&mut buf, &mut rows, &tabular_query, &subject, &row),
+                    None => table.row(
+                        &mut buf,
+                        &mut rows,
+                        &tabular_query,
+                        &subject,
+                        kept.as_ref(),
+                        &row,
+                    ),
                 }
             }
         }

@@ -556,7 +556,13 @@ fn check(
             let ids: Option<Vec<Arc<[u8]>>> = prepared
                 .records
                 .iter()
-                .map(|subject| subject.subject_tabular_id(false).ok().map(Arc::from))
+                .map(|subject| {
+                    subject
+                        .subject_tabular_id(false)
+                        .ok()
+                        .flatten()
+                        .map(Arc::from)
+                })
                 .collect();
             let pairwise = output_formats.contains(&BlastnOutputFormat::Pairwise);
             let titles = pairwise.then(|| prepared.records.iter().map(record_title).collect());

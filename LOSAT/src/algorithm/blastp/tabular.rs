@@ -42,6 +42,7 @@ use anyhow::Result;
 use super::args::BlastpApp;
 use super::blast_engine::query_rows::QueryRows;
 use super::hsp::{BlastpHitList, BlastpHsp};
+use crate::algorithm::common::tabular::FailedValues;
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::config::ScoringMatrix;
@@ -135,19 +136,45 @@ struct SubjectValues<'a> {
     titles: Option<Vec<&'a [u8]>>,
     length: usize,
     taxonomy: Cow<'a, TabularTaxonomy>,
-    /// The Seq-align id (`FailedLookup::full`, `accession`) of a subject whose lookup fails (an
-    /// empty id), and whether `x_SetSubjectIds` fails too (a database sequence).
-    failed: Option<([Cow<'a, [u8]>; 2], bool)>,
+    /// How the lookups of a subject fail (an empty id: `SetSubjectId`), `None` where they do not.
+    failed: Option<FailedValues<'a>>,
 }
 
 impl SubjectValues<'_> {
+    /// The subject of the shared writer, with the names of the taxonomy database (`None`: every
+    /// lookup fails), `qcovs` of its HSPs (-1 for `N/A`) and its subject index `index`.
+    fn subject<'s>(
+        &'s self,
+        names: Option<&'s TabularNames>,
+        qcovs: i32,
+        index: usize,
+    ) -> TabularSubject<'s> {
+        TabularSubject {
+            id: self.id,
+            accession: self.accession,
+            accession_version: self.accession_version,
+            gi: self.gi,
+            all_ids: &self.all_ids,
+            length: self.length,
+            titles: self.titles.as_deref(),
+            taxonomy: &self.taxonomy,
+            names,
+            nucleotide: false,
+            qcovs,
+            qcovus: -1,
+            lookup: self.lookup(),
+            index,
+        }
+    }
+
     /// The lookup of the subject's ids (`report::tabular::SubjectLookup`).
     fn lookup(&self) -> SubjectLookup<'_> {
         match &self.failed {
-            Some(([full, accession], all_ids)) => SubjectLookup::Failed(FailedLookup {
-                full,
-                accession,
-                all_ids: *all_ids,
+            Some(failed) => SubjectLookup::Failed(FailedLookup {
+                full: &failed.align_id[0],
+                accession: &failed.align_id[1],
+                subject_id: failed.subject_id,
+                all_ids: failed.all_ids.then_some(self.all_ids.as_slice()),
             }),
             None => SubjectLookup::Found,
         }
@@ -191,7 +218,7 @@ impl<'a> TabularSubjects<'a> {
                             Some([accession, version]) => (accession, version),
                             None => (id, id),
                         };
-                    let all_ids = if needs.all_deflines {
+                    let all = if needs.all_deflines {
                         subject.all_tabular_ids(true).map_err(|problem| {
                             anyhow::anyhow!(
                                 "the subject record {} has {problem}, which is not supported by \
@@ -201,32 +228,39 @@ impl<'a> TabularSubjects<'a> {
                             )
                         })?
                     } else {
-                        Vec::new()
+                        Default::default()
                     };
                     return Ok(SubjectValues {
                         id,
                         accession,
                         accession_version,
                         gi: subject.tabular_gi(),
-                        all_ids,
                         titles: None,
                         length: if shows_length { length(s_idx) } else { 0 },
                         taxonomy: Cow::Owned(TabularTaxonomy::default()),
-                        failed: None,
+                        failed: FailedValues::of_parsed(subject, id.is_empty(), all.failed),
+                        all_ids: all.ids,
                     });
                 }
                 // A record without a title: its `sseqid` is the first word of its generated title
                 // (`unnamed`, `report::defline::tabular_subject_id`), its `sall*` its local id.
                 let record = records.get(s_idx);
                 let all_ids = match record {
-                    Some(record) if needs.all_deflines => DeflineIds::of_record(record.shown_id()),
+                    // Only where the word is not the id, which the writer prints for none.
+                    Some(record) if needs.all_deflines && record.shown_id() != id => {
+                        DeflineIds::of_record(record.shown_id())
+                    }
                     _ => Vec::new(),
                 };
                 // An empty id: `GetSeqIdList` throws (`FastaRecord::subject_tabular_id`).
                 let failed = match record {
                     Some(record) if id.is_empty() => {
                         let local = Cow::Borrowed(record.local_id.as_bytes());
-                        Some(([local.clone(), local], false))
+                        Some(FailedValues {
+                            align_id: [local.clone(), local],
+                            subject_id: true,
+                            all_ids: false,
+                        })
                     }
                     _ => None,
                 };
@@ -268,7 +302,7 @@ impl<'a> TabularSubjects<'a> {
                     // A sequence with parsed Seq-ids: the ids of each definition line and their
                     // titles.
                     Some(subject) => {
-                        let all_ids = if needs.all_deflines {
+                        let all = if needs.all_deflines {
                             subject.all_tabular_ids(true).map_err(|problem| {
                                 crate::algorithm::common::database::parsed_refusal(
                                     oids.oid(ordinals.get(s_idx).copied().unwrap_or_default()),
@@ -277,14 +311,15 @@ impl<'a> TabularSubjects<'a> {
                                 )
                             })?
                         } else {
-                            Vec::new()
+                            Default::default()
                         };
+                        let failed = FailedValues::of_parsed(subject, id.is_empty(), all.failed);
                         Ok(SubjectValues {
                             id,
                             accession,
                             accession_version,
                             gi: subject.tabular_gi(),
-                            all_ids,
+                            all_ids: all.ids,
                             titles: Some(
                                 subject
                                     .deflines()
@@ -294,7 +329,7 @@ impl<'a> TabularSubjects<'a> {
                             ),
                             length,
                             taxonomy,
-                            failed: None,
+                            failed,
                         })
                     }
                     // A sequence without parsed Seq-ids: its one definition line's title; an empty
@@ -314,7 +349,11 @@ impl<'a> TabularSubjects<'a> {
                                 crate::algorithm::common::database::failed_general_lookup(
                                     oids.oid(ordinals.get(s_idx).copied().unwrap_or_default()),
                                 );
-                            ([Cow::Owned(full), Cow::Owned(accession)], true)
+                            FailedValues {
+                                align_id: [Cow::Owned(full), Cow::Owned(accession)],
+                                subject_id: true,
+                                all_ids: true,
+                            }
                         }),
                     }),
                 }
@@ -735,7 +774,8 @@ fn write_tabular_rows<const RPS: bool>(
             let Some(first) = hsp_list.hsps.first() else {
                 continue;
             };
-            let values = tab.subjects.values(first.s_idx as usize, spec, tab.app)?;
+            let s_idx = first.s_idx as usize;
+            let values = tab.subjects.values(s_idx, spec, tab.app)?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:595-605
             // ```c++
             //     CConstRef<CBioseq> query_bioseq = query_handle.GetCompleteBioseq();
@@ -763,21 +803,19 @@ fn write_tabular_rows<const RPS: bool>(
             } else {
                 -1
             };
-            let subject = TabularSubject {
-                id: values.id,
-                accession: values.accession,
-                accession_version: values.accession_version,
-                gi: values.gi,
-                all_ids: &values.all_ids,
-                length: values.length,
-                titles: values.titles.as_deref(),
-                taxonomy: &values.taxonomy,
-                names: tab.names,
-                nucleotide: false,
-                qcovs,
-                qcovus: -1,
-                lookup: values.lookup(),
+            let subject = values.subject(tab.names, qcovs, s_idx);
+            // A subject whose lookups fail shows what the last found subject set
+            // (`TabularRows::last_found`), made again from its index.
+            let kept_values = match table_rows.last_found() {
+                Some(kept) if table.fails(&subject) => {
+                    Some(tab.subjects.values(kept, spec, tab.app)?)
+                }
+                _ => None,
             };
+            let kept = kept_values
+                .as_ref()
+                .zip(table_rows.last_found())
+                .map(|(values, kept)| values.subject(tab.names, -1, kept));
             for hsp in &hsp_list.hsps {
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
                 // ```c++
@@ -823,7 +861,14 @@ fn write_tabular_rows<const RPS: bool>(
                     // One printed row is one HSP; the probe marks it without changing it.
                     Some(probe) => {
                         buf.clear();
-                        table.row(&mut buf, &mut table_rows, &query, &subject, &row);
+                        table.row(
+                            &mut buf,
+                            &mut table_rows,
+                            &query,
+                            &subject,
+                            kept.as_ref(),
+                            &row,
+                        );
                         writer.flush()?;
                         probe.begin(hsp_index);
                         writer.write_all(&buf)?;
@@ -831,7 +876,14 @@ fn write_tabular_rows<const RPS: bool>(
                         probe.end(hsp_index);
                         buf.clear();
                     }
-                    None => table.row(&mut buf, &mut table_rows, &query, &subject, &row),
+                    None => table.row(
+                        &mut buf,
+                        &mut table_rows,
+                        &query,
+                        &subject,
+                        kept.as_ref(),
+                        &row,
+                    ),
                 }
                 hsp_index += 1;
             }

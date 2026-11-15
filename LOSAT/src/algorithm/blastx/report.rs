@@ -1079,7 +1079,8 @@ pub(crate) struct RecordsParsed {
     pub(crate) tabular: Vec<Option<RecordTabularIds>>,
 }
 
-/// `sseqid`, `sacc` and `saccver`, and the `sall*` of a subject in `RecordsParsed`.
+/// `sseqid`, `sacc` and `saccver` (empty where the lookup throws, `ParsedSubject::tabular_ids`),
+/// and the `sall*` of a subject in `RecordsParsed`.
 pub(crate) struct RecordTabularIds {
     pub(crate) ids: [String; 3],
     pub(crate) all_ids: Vec<crate::report::tabular::DeflineIds>,
@@ -1121,12 +1122,15 @@ impl RecordsParsed {
                 let text = |bytes: Vec<u8>| String::from_utf8_lossy(&bytes).into_owned();
                 let [id, accession, version] = subject
                     .tabular_ids(true)
-                    .map_err(|problem| refused(subject, problem))?;
+                    .map_err(|problem| refused(subject, problem))?
+                    .unwrap_or_default();
+                // A record's definition line is not looked up (`AllTabularIds::failed` is false).
                 Ok(Some(RecordTabularIds {
                     ids: [text(id), text(accession), text(version)],
                     all_ids: subject
                         .all_tabular_ids(true)
-                        .map_err(|problem| refused(subject, problem))?,
+                        .map_err(|problem| refused(subject, problem))?
+                        .ids,
                 }))
             })
             .collect::<Result<_>>()?;
@@ -1156,18 +1160,41 @@ impl ShownSubjects<'_> {
         }
     }
 
-    /// Whether the lookup of subject `oid`'s tabular ids fails (`report::tabular::SubjectLookup`):
-    /// a record's `subject_tabular_id`, or a database sequence without parsed Seq-ids whose id is
-    /// empty (`TabularSubjectId::Unknown`).
-    pub(super) fn lookup_fails(&self, subject: &FastaRecord, oid: usize) -> bool {
+    /// Which lookups of subject `oid`'s tabular ids fail (`report::tabular::LookupFailure`) for a
+    /// report of `spec` (`None`: the default fields): a record's (with parsed ids, an empty
+    /// `RecordTabularIds::ids`; else `subject_tabular_id`), or a database sequence's (an empty id;
+    /// with parsed Seq-ids and a report of `sall*`, `ParsedSubject::lookup_failure`).
+    pub(super) fn lookup_failure(
+        &self,
+        spec: Option<&crate::report::tabular::TabularSpec>,
+        subject: &FastaRecord,
+        oid: usize,
+    ) -> Option<crate::report::tabular::LookupFailure> {
+        use crate::report::tabular::LookupFailure;
         match self {
             ShownSubjects::Fasta { parsed, .. } => {
-                parsed.tabular.get(oid).is_none_or(Option::is_none)
-                    && subject_tabular_id(subject).is_none()
+                let failed = match parsed.tabular.get(oid).and_then(Option::as_ref) {
+                    Some(ids) => ids.ids[2].is_empty(),
+                    None => subject_tabular_id(subject).is_none(),
+                };
+                failed.then(|| LookupFailure::of_plain(false))
             }
-            ShownSubjects::Database { reported, .. } => {
-                reported.parsed_subject(oid).is_none() && reported.tabular_ids(oid)[0].is_empty()
-            }
+            ShownSubjects::Database { reported, .. } => match reported.parsed_subject(oid) {
+                Some(parsed)
+                    if spec.is_some_and(crate::algorithm::common::tabular::reports_all_ids) =>
+                {
+                    parsed.lookup_failure(true).ok().flatten()
+                }
+                Some(_) => reported.tabular_ids(oid)[0]
+                    .is_empty()
+                    .then_some(LookupFailure {
+                        subject_id: true,
+                        all_ids: false,
+                    }),
+                None => reported.tabular_ids(oid)[0]
+                    .is_empty()
+                    .then(|| LookupFailure::of_plain(true)),
+            },
         }
     }
 
@@ -1259,10 +1286,12 @@ fn check_failed_lookups(
     shown: &ShownSubjects<'_>,
     batches: &[BatchResults],
 ) -> Result<()> {
+    if !crate::report::tabular::may_stop_at_failed_lookup(options.tabular) {
+        return Ok(());
+    }
     for batch in batches {
         crate::report::tabular::check_failed_lookups(
             options.tabular,
-            matches!(shown, ShownSubjects::Database { .. }),
             batch.queries.iter().map(|lists| {
                 lists[..lists.len().min(options.shown_lists())]
                     .iter()
@@ -1273,7 +1302,7 @@ fn check_failed_lookups(
                     })
                     .map(|list| list.oid)
             }),
-            |oid| shown.lookup_fails(&subjects[oid], oid),
+            |oid| shown.lookup_failure(options.tabular, &subjects[oid], oid),
             |oid| match shown {
                 ShownSubjects::Database { reported, .. } => {
                     crate::report::tabular::failed_database_title(reported.oid(oid))

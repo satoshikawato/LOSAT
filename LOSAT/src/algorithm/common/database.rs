@@ -2336,6 +2336,10 @@ pub(crate) struct ParsedShown {
     pub(crate) taxonomy: bool,
     /// The subject ids that the tabular formats print (`ParsedSubject::check_printed_word`).
     pub(crate) words: crate::report::tabular::PrintedIds,
+    /// Whether a tabular format can stop at a row whose subject lookups fail
+    /// (`report::tabular::may_stop_at_failed_lookup`: `sacc`, `saccver`, the default fields, a
+    /// first row's `staxid`), so that such a sequence may be refused (`reports_may_refuse`).
+    pub(crate) stops_at_failed_lookup: bool,
     /// Whether the batches' prefetch reads the subjects by their Seq-align ids (the first
     /// format's: outfmt 0, 5, 6, 7, 10, 17 and 20, with `PRE_FETCH_SEQS_LIMIT=2147483647` also the
     /// Seq-annots 8, 9 and 12, [`prefetches_subjects`]), unless `PRE_FETCH_SEQS_LIMIT` turns it
@@ -2541,7 +2545,12 @@ pub(crate) fn library_subject(
     program: &str,
 ) -> crate::api::local_blast::ReportedSubject {
     let id = match parsed {
-        Some(subject) => subject.tabular_saccver(protein).ok().map(|id| id.to_vec()),
+        // An empty `saccver`: the lookup throws; the library names it as one without parsed ids.
+        Some(subject) => subject
+            .tabular_saccver(protein)
+            .ok()
+            .filter(|id| !id.is_empty())
+            .map(|id| id.to_vec()),
         None => tabular_subject_id(title, source, db.oid(ordinal), protein, program)
             .ok()
             .filter(|id| !matches!(id, TabularSubjectId::Unknown(_)))
@@ -2672,21 +2681,20 @@ pub(crate) fn reports_may_refuse(
             Ok(ReportedHeader::Stored(stored)) => {
                 check_reported_title(stored.replaced_bytes, || db.oid(ordinal), program)
                     .map_err(|_| ReportRefusal::Headers)?;
-                // A failed lookup (`TabularSubjectId::Unknown`) is refused by some field lists
-                // (`report::tabular::failed_lookup_stop`): counted as a possible refusal.
-                if shown.tabular
-                    && !matches!(
-                        tabular_subject_id(
-                            &stored.title,
-                            &stored.source,
-                            db.oid(ordinal),
-                            protein,
-                            program,
-                        ),
-                        Ok(TabularSubjectId::Word(_) | TabularSubjectId::General(_))
-                    )
-                {
-                    return Err(ReportRefusal::Headers);
+                // A failed lookup (`TabularSubjectId::Unknown`) is refused only by the field lists
+                // that can stop at it (`report::tabular::failed_lookup_stop`).
+                if shown.tabular {
+                    match tabular_subject_id(
+                        &stored.title,
+                        &stored.source,
+                        db.oid(ordinal),
+                        protein,
+                        program,
+                    ) {
+                        Ok(TabularSubjectId::Word(_) | TabularSubjectId::General(_)) => {}
+                        Ok(TabularSubjectId::Unknown(_)) if !shown.stops_at_failed_lookup => {}
+                        _ => return Err(ReportRefusal::Headers),
+                    }
                 }
                 if shown.pairwise {
                     stored
@@ -2712,6 +2720,14 @@ pub(crate) fn reports_may_refuse(
                     program,
                 )
                 .map_err(|_| ReportRefusal::Headers)?;
+                // A sequence whose lookups fail (`ParsedSubject::lookup_failure`), where a field
+                // list can stop at it.
+                if shown.tabular
+                    && shown.stops_at_failed_lookup
+                    && !matches!(subject.lookup_failure(protein), Ok(None))
+                {
+                    return Err(ReportRefusal::Headers);
+                }
                 if let Some(queries) = queries {
                     refuse_id_of_a_query(&subject, || db.oid(ordinal), queries, program)
                         .map_err(|_| ReportRefusal::Headers)?;

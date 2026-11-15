@@ -1179,7 +1179,9 @@ pub(super) fn records(
                         let subject = &inputs.subject[s_idx];
                         subject
                             .subject_tabular_id(subject_protein)
-                            .unwrap_or_else(|_| subject.shown_id().to_vec())
+                            .ok()
+                            .flatten()
+                            .unwrap_or_else(|| subject.shown_id().to_vec())
                     }),
                     length(inputs.subject, s_idx),
                 ),

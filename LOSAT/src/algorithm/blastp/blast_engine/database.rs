@@ -1801,8 +1801,9 @@ impl ListedTitles<'_> {
             }
             let ordinal = self.listed.ordinals[rank];
             if let Some(subject) = self.parsed_subject(rank) {
+                // An empty id where the lookup throws (`ParsedSubject::tabular_ids`).
                 let [id, accession, version] = match subject.tabular_ids(true) {
-                    Ok(ids) => ids,
+                    Ok(ids) => ids.unwrap_or_default(),
                     Err(_) if !reads => Default::default(),
                     Err(problem) => {
                         return Err(shared::parsed_refusal(

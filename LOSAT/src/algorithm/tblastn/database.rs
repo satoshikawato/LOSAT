@@ -56,12 +56,6 @@ pub(super) struct TblastnDatabase {
 }
 
 impl TblastnDatabase {
-    /// LOSAT's refusal of mixed accession tables (`shared::check_accession_tables`), with the
-    /// program's other limits.
-    pub(super) fn check_accession_tables(&self) -> Result<()> {
-        shared::check_accession_tables(&self.db, PROGRAM)
-    }
-
     /// The OIDs of the database's ordinal ids, which name the reported sequences without
     /// parsed Seq-ids (`gnl|BL_ORD_ID|n`).
     pub(super) fn oid_map(&self) -> crate::seqdb::OidMap<'_> {
@@ -475,6 +469,9 @@ pub(super) struct ReportedSubjects {
     /// The sequences with parsed Seq-ids by rank (empty when none is reported): their ids and
     /// titles come from their definition lines (`report::db_subject`).
     pub(super) parsed: Vec<Option<Arc<ParsedSubject>>>,
+    /// The sources from which NCBI makes the empty stored titles of the others, by rank
+    /// (`shared::StoredTitle::source`; empty when none has one).
+    pub(super) sources: Vec<crate::report::defline::SourceTaxname>,
 }
 
 impl ReportedSubjects {
@@ -493,6 +490,7 @@ impl ReportedSubjects {
             &self.records,
             &self.ordinals,
             &self.parsed,
+            &self.sources,
             |rank| self.lengths[rank],
             PROGRAM,
         )
@@ -578,6 +576,7 @@ pub(super) fn reported_subjects(
     let mut lengths = Vec::with_capacity(ordinals.len());
     let mut kept = Vec::new();
     let mut parsed: Vec<Option<Arc<ParsedSubject>>> = Vec::new();
+    let mut sources = Vec::new();
     // Whether `taxdb.bti` is on the search path, looked up at the first sequence with parsed
     // Seq-ids that outfmt 0 shows.
     let mut taxdb_found: Option<bool> = None;
@@ -596,20 +595,9 @@ pub(super) fn reported_subjects(
                     PROGRAM,
                 )?;
                 if shown.pairwise {
-                    shared::check_shown_stored_title(
-                        stored.taxonomy_title,
-                        || database.db.oid(ordinal),
-                        PROGRAM,
-                    )?;
+                    stored.check_shown_source(|| database.db.oid(ordinal), PROGRAM)?;
                 }
-                if shown.tabular {
-                    shared::check_tabular_stored_title(
-                        stored.taxonomy_title,
-                        shown.words,
-                        || database.db.oid(ordinal),
-                        PROGRAM,
-                    )?;
-                }
+                shared::keep_source(&mut sources, rank, ordinals.len(), stored.source.clone());
                 stored.title.clone()
             }
             ReportedHeader::Parsed(subject) => {
@@ -691,6 +679,7 @@ pub(super) fn reported_subjects(
         lengths,
         stores: kept,
         parsed,
+        sources,
     })
 }
 
@@ -709,6 +698,7 @@ impl ReportedSubjects {
             &self.ordinals,
             oids,
             &self.parsed,
+            &self.sources,
             false,
             reads,
             PROGRAM,

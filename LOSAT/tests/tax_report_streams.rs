@@ -338,9 +338,10 @@ fn a_query_without_warnings_leaves_standard_output_held() {
     assert!(written == fixture("blastx_tie.stdout.txt")[..4200]);
 }
 
-/// blastx with `-export_search_strategy`, whose run holds its output while a later batch's title
-/// could still be refused (`archive::ArchiveHold`): NCBI's buffer comes before the hold and the
-/// texts go through it, so the merged stream is the run's without the option. NCBI BLAST+ 2.17.0
+/// blastx with `-export_search_strategy`, whose run held its output while a later batch's title
+/// could still be refused until line RG K4b (which writes such a title as NCBI does): the report
+/// goes through NCBI's buffer and the texts come where its tie puts them, so the merged stream is
+/// the run's without the option. NCBI BLAST+ 2.17.0
 /// (line RG T2 review 4, `T/t2/review4/probe_strategy.sh`; fix 4, `T/t2/fix4/
 /// probe_strategy_stdout.sh`), the `length` case of blastx (q2's title of 7,441 bytes): with
 /// `-out /dev/stdout` the first three texts come before the report, which the file's buffer still
@@ -348,7 +349,7 @@ fn a_query_without_warnings_leaves_standard_output_held() {
 /// written before it (the tie). 9,002 bytes, exit 0 both.
 #[cfg(unix)]
 #[test]
-fn a_held_blastx_report_is_written_where_ncbis_buffer_writes_it() {
+fn a_blastx_strategy_report_is_written_where_ncbis_buffer_writes_it() {
     for (name, options) in [
         ("blastx_strategy.out.txt", &["-out", "/dev/stdout"][..]),
         ("blastx_strategy.stdout.txt", &[][..]),
@@ -381,15 +382,16 @@ fn a_held_blastx_report_is_written_where_ncbis_buffer_writes_it() {
 
 /// The query file of review 5's probe (`T/t2/review5/probe_hold2.sh`, `in2/q_hold.fna`): q1 encodes
 /// A (the first volume of `vol2_nophr`), q2 encodes B (the second volume, whose header file is
-/// missing) and has a hyphen, q3's title is `q3 café` (`held`), which the search strategy cannot
-/// write, so the run holds its output from the start, or `q3 cafe`; written into `dir`.
+/// missing) and has a hyphen, q3's title is `q3 café` (`replaced`), whose `é` the search
+/// strategy writes as `#` with NCBI's `Bad char` posts at q3's batch (line RG K4b; before it LOSAT
+/// held the run's output for that title from the start), or `q3 cafe`; written into `dir`.
 #[cfg(unix)]
-fn hold_error_query(dir: &Path, held: bool) -> PathBuf {
+fn hold_error_query(dir: &Path, replaced: bool) -> PathBuf {
     let query = String::from_utf8(fixture("blastx_hold_error.fna")).unwrap();
     let path = dir.join("query.fna");
     std::fs::write(
         &path,
-        match held {
+        match replaced {
             true => query,
             false => query.replace("q3 café", "q3 cafe"),
         },
@@ -401,8 +403,8 @@ fn hold_error_query(dir: &Path, held: bool) -> PathBuf {
 /// Review 5's probe: blastx `-outfmt 18 -max_target_seqs 1 -export_search_strategy` of
 /// `hold_error_query` against `vol2_nophr` with `BATCH_SIZE=1`, in `dir`, at `threads` threads.
 #[cfg(unix)]
-fn hold_error_run(dir: &Path, threads: &str, held: bool) -> Command {
-    let query = hold_error_query(dir, held);
+fn hold_error_run(dir: &Path, threads: &str, replaced: bool) -> Command {
+    let query = hold_error_query(dir, replaced);
     let mut run = losat("blastx", dir, threads);
     run.args([
         "-db",
@@ -420,53 +422,52 @@ fn hold_error_run(dir: &Path, threads: &str, held: bool) -> Command {
     run
 }
 
-/// A blastx run that holds its output for `-export_search_strategy` (a later title the strategy
-/// cannot write) and ends in one of NCBI's errors: NCBI BLAST+ 2.17.0 (line RG T2 review 5, D1,
+/// A blastx run with `-export_search_strategy` and a later title whose byte the strategy replaces,
+/// which ends in one of NCBI's errors: NCBI BLAST+ 2.17.0 (line RG T2 review 5, D1,
 /// `T/t2/review5/probe_hold2.sh`, `out2/ncbi.txt`, 603 bytes, exit status 2) writes q1's report,
-/// the reader's text of batch 2 after it (`cerr`'s tie) and the database error. The hold releases
-/// the report and the texts with the run's flushes, in their order (`ArchiveHold::release`), so
-/// the held run (`q3 café`) writes the bytes of the run without a hold (`q3 cafe`) and NCBI's.
+/// the reader's text of batch 2 after it (`cerr`'s tie) and the database error, and nothing of q3
+/// (its batch is never read). The run with `q3 café` writes the bytes of the run with `q3 cafe`
+/// and NCBI's (line RG T2 held this run's output for the title; K4b writes the title as NCBI
+/// does, so nothing is held).
 #[cfg(unix)]
 #[test]
-fn a_held_blastx_run_that_ends_in_ncbis_error_writes_ncbis_order() {
+fn a_blastx_strategy_run_that_ends_in_ncbis_error_writes_ncbis_order() {
     let db = std::fs::canonicalize(manifest().join("tests/db_search")).unwrap();
     let expected = String::from_utf8(fixture("blastx_hold_error.txt"))
         .unwrap()
         .replace("{DB}", db.to_str().unwrap());
-    for held in [true, false] {
+    for replaced in [true, false] {
         for threads in ["1", "4"] {
-            let dir = scratch(&format!("blastx-hold-error-{held}-{threads}"));
-            let (bytes, exit) = merged(hold_error_run(&dir, threads, held));
+            let dir = scratch(&format!("blastx-hold-error-{replaced}-{threads}"));
+            let (bytes, exit) = merged(hold_error_run(&dir, threads, replaced));
             std::fs::remove_dir_all(&dir).unwrap();
-            assert_eq!(exit, Some(2), "held {held} at {threads} threads");
+            assert_eq!(exit, Some(2), "replaced {replaced} at {threads} threads");
             assert!(
                 bytes == expected.as_bytes(),
-                "held {held} at {threads} threads:\n{}",
+                "replaced {replaced} at {threads} threads:\n{}",
                 String::from_utf8_lossy(&bytes)
             );
         }
     }
 }
 
-/// The run of `a_held_blastx_run_that_ends_in_ncbis_error_writes_ncbis_order` with standard output
-/// a full device: NCBI BLAST+ 2.17.0 aborts where `cerr`'s tie writes q1's report (exit status 134,
-/// `terminate called after throwing an instance of 'std::__ios_failure'`, review 5's `out2/
-/// ncbi.full.err`), after the warning of `-max_target_seqs 1`. LOSAT reports the failed write with a
-/// non-zero exit status where NCBI aborts (as PD-LOSAT-CLI-NONSEARCH-DIFFERENCES's outfmt 6 and 7;
-/// `cli::NcbiReportBuffer`) and writes nothing after it: the run without a hold stops at the tie
-/// (`Error: No space left on device`, exit status 1), the held run at the release's write of the
-/// same bytes ("BLAST failed to write output", exit status 6; that the two texts differ is item T6
-/// of line RG).
+/// The run of `a_blastx_strategy_run_that_ends_in_ncbis_error_writes_ncbis_order` with standard
+/// output a full device: NCBI BLAST+ 2.17.0 aborts where `cerr`'s tie writes q1's report (exit
+/// status 134, `terminate called after throwing an instance of 'std::__ios_failure'`, review 5's
+/// `out2/ncbi.full.err`), after the warning of `-max_target_seqs 1`. LOSAT reports the failed write
+/// with a non-zero exit status where NCBI aborts (as PD-LOSAT-CLI-NONSEARCH-DIFFERENCES's outfmt 6
+/// and 7; `cli::NcbiReportBuffer`) and writes nothing after it: the run stops at the tie (`Error:
+/// No space left on device`, exit status 1), with `q3 café` as with `q3 cafe` (no hold since line
+/// RG K4b; line RG T2's held run stopped at the release's write, "BLAST failed to write output",
+/// exit status 6).
 #[cfg(target_os = "linux")]
 #[test]
-fn a_held_blastx_run_on_a_full_standard_output_reports_the_failed_write() {
+fn a_blastx_strategy_run_on_a_full_standard_output_reports_the_failed_write() {
     const WARNING: &str = "Warning: [blastx] Examining 5 or more matches is recommended\n";
-    for (held, exit, failure) in [
-        (true, 6, "BLAST failed to write output\n"),
-        (false, 1, "Error: No space left on device (os error 28)\n"),
-    ] {
-        let dir = scratch(&format!("blastx-hold-full-{held}"));
-        let output = hold_error_run(&dir, "1", held)
+    const FAILURE: &str = "Error: No space left on device (os error 28)\n";
+    for replaced in [true, false] {
+        let dir = scratch(&format!("blastx-hold-full-{replaced}"));
+        let output = hold_error_run(&dir, "1", replaced)
             .stdout(
                 std::fs::OpenOptions::new()
                     .write(true)
@@ -481,8 +482,8 @@ fn a_held_blastx_run_on_a_full_standard_output_reports_the_failed_write() {
                 output.status.code(),
                 String::from_utf8_lossy(&output.stderr)
             ),
-            (Some(exit), format!("{WARNING}{failure}").into()),
-            "held {held}"
+            (Some(1), format!("{WARNING}{FAILURE}").into()),
+            "replaced {replaced}"
         );
     }
 }

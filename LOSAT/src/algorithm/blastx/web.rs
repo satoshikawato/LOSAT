@@ -177,6 +177,9 @@ pub(crate) fn run_pair(
         path: label,
         parsed: &no_parsed,
     };
+    // The run's decision for a matrix name that NCBI's XML does not know
+    // (`blast_xml::xml_matrix_failure`): none, as ABI v1 writes outfmt 0, 6 and 7 (`v1_outfmt`).
+    let xml_matrix = super::blast_xml::xml_matrix_failure(std::slice::from_ref(&options), true);
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:784-788
     // ```c++
     //         		if(warning != kEmptyStr){
@@ -313,6 +316,7 @@ pub(crate) fn run_pair(
                                 // No document here holds a report back (`stops`).
                                 false,
                                 None,
+                                xml_matrix,
                             )?;
                             processed += queries.len();
                         }
@@ -399,6 +403,7 @@ pub(crate) fn run_pair(
                     // No document here holds a report back (`stops`).
                     false,
                     None,
+                    xml_matrix,
                 )?;
                 processed += queries.len();
                 Ok(())
@@ -435,6 +440,7 @@ pub(crate) fn run_pair(
         &shown,
         processed,
         None,
+        xml_matrix,
     )?;
     Ok(output)
 }

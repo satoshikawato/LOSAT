@@ -20,7 +20,9 @@ use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::Placements;
 use crate::report::db_subject::ParsedSubject;
-use crate::report::query_anchored::{fill_seqid, ReportSequences};
+use crate::report::query_anchored::{
+    database_label, record_label, subject_is_query_record, ReportSequences,
+};
 
 /// What the sections of a BLASTP report read (module doc).
 pub(super) struct AnchoredSequences<'a> {
@@ -40,24 +42,6 @@ pub(super) struct AnchoredSequences<'a> {
     pub(super) show_gis: bool,
     pub(super) query_masks: Option<&'a [Vec<(i32, i32)>]>,
     pub(super) subject_masks: HashMap<(u32, u32), Vec<(i32, i32)>>,
-}
-
-/// Whether the `-subject` record `subject` is query `query`'s own record: the query is one record
-/// with a subject (the same definition line and letters, `BelievedIds::shared`), and the subject
-/// has its id (any other subject with the query's id is refused before the reports).
-pub(super) fn subject_is_query_record(query: &FastaRecord, subject: &FastaRecord) -> bool {
-    match (query.believed(), subject.believed()) {
-        (Some(query), Some(subject)) => query.shared.is_some() && subject.best == query.best,
-        _ => false,
-    }
-}
-
-/// The label of a record's rows: its ids with `-parse_deflines`, else its local id.
-fn record_label(record: &FastaRecord, show_gis: bool, out: &mut Vec<u8>) {
-    match record.believed() {
-        Some(ids) => fill_seqid(&ids.ids, show_gis, out),
-        None => record.seq_id().sam_name(out),
-    }
 }
 
 /// Appends the masks `masks` as positions.
@@ -124,25 +108,12 @@ impl ReportSequences for AnchoredSequences<'_> {
     fn subject_label(&self, s_idx: u32, out: &mut Vec<u8>) {
         let s_idx = s_idx as usize;
         match self.listed_ordinals {
-            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2231-2236
-            // ```c++
-            //                 if (seqid.Which() == CSeq_id::e_General) {
-            //                     CDbtag & dbt = seqid.SetGeneral();
-            //
-            //                     if (dbt.GetDb() == "BL_ORD_ID") {
-            //                         int vol_oid = dbt.GetTag().GetId();
-            //                         dbt.SetTag().SetId(m_VolStart + vol_oid);
-            // ```
-            // A database sequence: its parsed Seq-ids, else `gnl|BL_ORD_ID|<oid>`, whose label is
-            // the tag (`GetLabel` of a `general` id, `query_anchored::fill_seqid`): its OID in the
-            // opened database, not its ordinal id where a list or an alias range leaves sequences
-            // out (`seqdb::Oid`, as `report::record::SubjectNames::Database`; review 3 of T3a, D2).
-            Some((ordinals, oids)) => match self.parsed.get(s_idx).and_then(Option::as_deref) {
-                Some(parsed) => parsed.anchored_label(out),
-                None => {
-                    out.extend_from_slice(oids.oid(ordinals[s_idx]).get().to_string().as_bytes())
-                }
-            },
+            // A database sequence: its parsed Seq-ids, else its OID (`database_label`).
+            Some((ordinals, oids)) => database_label(
+                self.parsed.get(s_idx).and_then(Option::as_deref),
+                oids.oid(ordinals[s_idx]),
+                out,
+            ),
             None => record_label(&self.subject_records[s_idx], self.show_gis, out),
         }
     }
@@ -158,21 +129,4 @@ impl ReportSequences for AnchoredSequences<'_> {
             push_masks(masks, out);
         }
     }
-}
-
-/// The refusal of a run whose query `record` (one record as a query and as a subject under
-/// `-parse_deflines`) has a query-anchored section that NCBI BLAST+ aborts on
-/// (`pairwise::blastp_section_aborts`), named as the refusal of its masks in outfmt 0 names it
-/// (`believed::refuse_shared_masks`).
-pub(super) fn aborted_section(record: &FastaRecord, program: &str) -> anyhow::Error {
-    let mut fasta = Vec::new();
-    if let Some(ids) = record.believed() {
-        crate::seqid::label::fasta(&ids.best, &mut fasta);
-    }
-    anyhow::anyhow!(
-        "the record {} is both a query and a subject under -parse_deflines and NCBI BLAST+ aborts \
-         on its query-anchored alignments (outfmt 1 to 4), whose merge leaves out the subject's \
-         rows; this is not supported by LOSAT's {program}",
-        String::from_utf8_lossy(&fasta)
-    )
 }

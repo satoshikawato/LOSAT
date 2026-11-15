@@ -1363,16 +1363,17 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "13", None, NcbiLater("Please provide a file name for outfmt 13.")),
         (ALL, "13", Some("-"), NcbiLater("Please provide a file name for outfmt 13.")),
         (ALL, "14", None, NcbiLater("Please provide a file name for outfmt 14.")),
-        // Line RG T3 (the query-anchored formats): BLASTP writes them (T3a), the others not yet.
-        (&["blastp"], "1", None, Writes(QueryAnchoredIdentities)),
-        (&["blastp"], "2", None, Writes(QueryAnchoredNoIdentities)),
-        (&["blastp"], "3", None, Writes(FlatQueryAnchoredIdentities)),
-        (&["blastp"], "4", None, Writes(FlatQueryAnchoredNoIdentities)),
-        (&["blastp"], "1 qseqid", None, Writes(QueryAnchoredIdentities)),
-        (&["blastn", "blastx", "tblastn", "tblastx"], "1", None, UNSUPPORTED),
-        (&["blastn", "blastx", "tblastn", "tblastx"], "2", None, UNSUPPORTED),
-        (&["blastn", "blastx", "tblastn", "tblastx"], "3", None, UNSUPPORTED),
-        (&["blastn", "blastx", "tblastn", "tblastx"], "4", None, UNSUPPORTED),
+        // Line RG T3 (the query-anchored formats): BLASTP (T3a), BLASTN and TBLASTN (T3b) write
+        // them, BLASTX and TBLASTX not yet.
+        (&["blastp", "blastn", "tblastn"], "1", None, Writes(QueryAnchoredIdentities)),
+        (&["blastp", "blastn", "tblastn"], "2", None, Writes(QueryAnchoredNoIdentities)),
+        (&["blastp", "blastn", "tblastn"], "3", None, Writes(FlatQueryAnchoredIdentities)),
+        (&["blastp", "blastn", "tblastn"], "4", None, Writes(FlatQueryAnchoredNoIdentities)),
+        (&["blastp", "blastn", "tblastn"], "1 qseqid", None, Writes(QueryAnchoredIdentities)),
+        (&["blastx", "tblastx"], "1", None, UNSUPPORTED),
+        (&["blastx", "tblastx"], "2", None, UNSUPPORTED),
+        (&["blastx", "tblastx"], "3", None, UNSUPPORTED),
+        (&["blastx", "tblastx"], "4", None, UNSUPPORTED),
         // Line RG T2: the organism report in every program.
         (SHARED, "18", None, Writes(TaxFormat)),
         (SHARED, "18 qseqid", None, Writes(TaxFormat)),
@@ -1628,8 +1629,8 @@ fn unported_ncbi_options_are_rejected_explicitly() {
 // `blastinput::db_mask::DbMaskArgs`)
 // BLASTN's `-db_soft_mask` and `-db_hard_mask` (series NP, M4a-2): strings, each excluding the
 // other, `-subject` and `-subject_loc` (conflicts of LOSAT's parser, where NCBI prints its usage;
-// probes o04, o05, o06 of the M4a-2 survey); the run refuses a search that `-db_hard_mask` masks
-// (`RUN_REFUSALS`).
+// probes o04, o05, o06 of the M4a-2 survey); `-db_hard_mask` is not a refusal of the run
+// (`RUN_REFUSALS`, series NP, M4a-2b).
 #[test]
 fn blastn_takes_the_database_masks() {
     let blastn = |words: &[&str]| {
@@ -1666,9 +1667,9 @@ fn blastn_takes_the_database_masks() {
             "{words:?}"
         );
     }
-    assert!(crate::cli::run_refusal("BLASTN", "db_hard_mask").contains(
-        "-db_hard_mask (hard masking of the database sequences) is not supported by LOSAT's BLASTN"
-    ));
+    assert!(!crate::cli::RUN_REFUSALS
+        .iter()
+        .any(|&(program, name, _)| program == "blastn" && name == "db_hard_mask"));
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2191-2199

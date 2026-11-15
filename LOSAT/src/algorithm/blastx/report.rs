@@ -1172,7 +1172,8 @@ impl ShownSubjects<'_> {
 /// The reports of one query batch, the `queries_before` queries of the batches before it written
 /// already. `stops`: the run stops after this batch (a later batch fails before its search), so
 /// a document that holds each report back never writes the last query's
-/// (`blast_xml::written_queries`).
+/// (`blast_xml::written_queries`). `xml_matrix`: where the run's XML formats fail for a matrix
+/// name NCBI's XML does not know (`blast_xml::xml_matrix_failure`, decided once for the run).
 pub(crate) fn render_queries(
     writer: &mut crate::cli::NcbiOstream<'_>,
     stderr: &mut dyn Write,
@@ -1184,6 +1185,7 @@ pub(crate) fn render_queries(
     queries_before: usize,
     stops: bool,
     xml2: Option<&mut super::blast_xml::RunXml2>,
+    xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
 ) -> Result<()> {
     render_queries_with(
         writer,
@@ -1196,6 +1198,7 @@ pub(crate) fn render_queries(
         queries_before,
         stops,
         xml2,
+        xml_matrix,
         None,
     )
 }
@@ -1243,6 +1246,7 @@ pub(super) fn render_queries_with(
     queries_before: usize,
     stops: bool,
     xml2: Option<&mut super::blast_xml::RunXml2>,
+    xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
     local: Option<LocalReport<'_, '_>>,
 ) -> Result<()> {
     sort_lists(batches);
@@ -1280,12 +1284,24 @@ pub(super) fn render_queries_with(
             subjects,
             shown,
             batches,
+            queries_before,
             stops,
+            xml_matrix,
         );
     }
     if let Some(xml2) = xml2 {
         return super::blast_xml::write_blastx_xml(
-            writer, stderr, xml2, options, queries, subjects, shown, batches, stops,
+            writer,
+            stderr,
+            xml2,
+            options,
+            queries,
+            subjects,
+            shown,
+            batches,
+            queries_before,
+            stops,
+            xml_matrix,
         );
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
@@ -1668,6 +1684,7 @@ fn write_pairwise(
                 Some(subject) => {
                     let label = crate::report::pairwise::database_description_label(
                         b"",
+                        &crate::report::defline::UNNAMED_SOURCE,
                         Some(subject),
                         true,
                     );
@@ -1682,7 +1699,12 @@ fn write_pairwise(
         ShownSubjects::Fasta { .. } => None,
         ShownSubjects::Database {
             pairwise, reported, ..
-        } => Some((*pairwise, reported.stored_titles(), reported.parsed())),
+        } => Some((
+            *pairwise,
+            reported.stored_titles(),
+            reported.parsed(),
+            reported.sources(),
+        )),
     };
     let records_parsed = match shown {
         ShownSubjects::Fasta { parsed, .. } => parsed.subjects.as_slice(),
@@ -2019,7 +2041,18 @@ pub(crate) fn write_epilog(
     shown: &ShownSubjects<'_>,
     queries: usize,
     xml2: Option<&mut super::blast_xml::RunXml2>,
+    xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
 ) -> Result<()> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2204-2212 (quoted at
+    // `blast_xml::matrix::XmlMatrixFailure`)
+    // A run of one query whose XML2 or JSON report is held makes its report data in
+    // `PrintEpilog`: a matrix name that NCBI's XML does not know fails there, before the epilog
+    // (`xml_matrix`, the run's `blast_xml::xml_matrix_failure`; the XML formats of the run).
+    if matches!(options.outfmt, 5 | 13..=16)
+        && xml_matrix.is_some_and(|failure| failure.fails_at_end(queries))
+    {
+        return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
+    }
     if options.outfmt == 0 {
         crate::report::pairwise::write_blastx_epilog(
             writer,

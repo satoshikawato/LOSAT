@@ -617,7 +617,10 @@ fn pdb_or_patent_title(ids: &BioseqFacts) -> Vec<u8> {
 ///         }
 /// ```
 /// A local ID is written `lcl|` and its text (`CSeq_id::WriteAsFasta`, Seq_id.cpp:2164-2196,
-/// `CObject_id::AsString`, Object_id.cpp:202-210).
+/// `CObject_id::AsString`, Object_id.cpp:202-210). Of `lcl|` and the text, `lcl|Subject_` is
+/// found where the text starts with `Subject_` or holds it all: the `lcl|` before the text takes
+/// part in no other match.
+#[inline]
 pub fn tabular_subject_id(
     local_id: &[u8],
     title: &[u8],
@@ -629,9 +632,7 @@ pub fn tabular_subject_id(
     } else {
         replaced
     };
-    let mut fasta = b"lcl|".to_vec();
-    fasta.extend_from_slice(replaced);
-    if contains(&fasta, b"lcl|Subject_") {
+    if replaced.starts_with(b"Subject_") || contains(replaced, b"lcl|Subject_") {
         let defline = generate_defline(title, protein, false)?.text;
         let token = first_word(&defline);
         if !token.is_empty() {
@@ -1962,6 +1963,28 @@ mod tests {
                 assert_eq!(made.as_deref(), heading, "{case} protein={protein} heading");
                 let tabular = tabular_subject_id(b"Subject_1", &title, protein).ok();
                 assert_eq!(tabular.as_deref(), id, "{case} protein={protein} sseqid");
+            }
+        }
+    }
+
+    #[test]
+    fn subject_ids_take_the_generated_word_where_lcl_subject_is_found() {
+        // `lcl|Subject_` of `lcl|` and the word: at its start (the word starts with `Subject_`)
+        // or inside the word, whose generated title drops the last period; nowhere else.
+        for (title, id) in [
+            ("Subject_4.", "Subject_4"),
+            ("xlcl|Subject_4.", "xlcl|Subject_4"),
+            ("lcl|Subject_4.", "lcl|Subject_4"),
+            ("xSubject_4.", "xSubject_4."),
+            ("Subject4.", "Subject4."),
+            ("cl|Subject_4.", "cl|Subject_4."),
+        ] {
+            for protein in [false, true] {
+                assert_eq!(
+                    tabular_subject_id(b"Subject_1", title.as_bytes(), protein).as_deref(),
+                    Ok(id.as_bytes()),
+                    "{title} protein={protein}"
+                );
             }
         }
     }

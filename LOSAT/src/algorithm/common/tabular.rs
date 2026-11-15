@@ -230,6 +230,14 @@ pub(crate) fn reports_all_ids(spec: &TabularSpec) -> bool {
     ])
 }
 
+/// Whether the lookups of some subject can fail, so that a tabular report may need the check of
+/// `checks_failed_lookups`: an empty id among `ids` (`SetSubjectId` throws), or subjects with
+/// parsed Seq-ids (`parsed` is empty when none has them).
+#[inline]
+pub(crate) fn lookups_may_fail(ids: &[Arc<[u8]>], parsed: &[Option<Arc<ParsedSubject>>]) -> bool {
+    !parsed.is_empty() || ids.iter().any(|id| id.is_empty())
+}
+
 /// Whether a tabular report of `spec` is checked for rows whose lookups fail
 /// (`report::tabular::check_failed_lookups`) where the subjects' `ids` (empty for a failed
 /// `SetSubjectId`) and `parsed` are as given: some id is empty, or a subject with parsed Seq-ids

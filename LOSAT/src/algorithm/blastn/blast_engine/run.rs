@@ -6354,6 +6354,63 @@ fn tabular_subject_ids(subjects: &[FastaRecord]) -> Vec<Arc<[u8]>> {
         .collect()
 }
 
+/// The check of the rows of `hit_lists` whose subjects' lookups fail where NCBI has no result
+/// (`report::tabular::check_failed_lookups`), for each tabular format of `output_formats`, before
+/// any format is written; `subject_ids` are the formats' subject ids (`tabular_subject_ids`, or a
+/// database's). Out of line and called only for a tabular format whose subjects' lookups may fail
+/// (`common::tabular::lookups_may_fail`), so that the other reports do not change for it (no NCBI
+/// counterpart: code placement only).
+#[inline(never)]
+fn check_tabular_lookups(
+    output_formats: &[BlastnOutputFormat],
+    hit_lists: &[Option<BlastnHitList>],
+    subject_ids: &[Arc<[u8]>],
+    report: &BlastnReportInputs<'_>,
+) -> Result<()> {
+    let database = report.database_ordinals.zip(report.database_reader);
+    for format in output_formats.iter().filter(|format| format.is_tabular()) {
+        let spec = format.tabular_spec();
+        if !crate::algorithm::common::tabular::checks_failed_lookups(
+            spec,
+            subject_ids,
+            report.database_parsed,
+        ) {
+            continue;
+        }
+        crate::report::tabular::check_failed_lookups(
+            spec,
+            hit_lists.iter().flatten().map(|hit_list| {
+                hit_list
+                    .hsplist_array
+                    .iter()
+                    .filter_map(|hsp_list| hsp_list.hsps.first())
+                    .map(|hsp| hsp.s_idx as usize)
+            }),
+            |s_idx| {
+                crate::algorithm::common::tabular::subject_lookup_failure(
+                    spec,
+                    subject_ids,
+                    report.database_parsed,
+                    database.is_some(),
+                    false,
+                    s_idx,
+                )
+            },
+            |s_idx| match database {
+                Some((ordinals, reader)) => crate::report::tabular::failed_database_title(
+                    reader.oid_map().oid(ordinals[s_idx]),
+                ),
+                None => crate::report::tabular::failed_record_title(
+                    s_idx,
+                    report.subjects.records()[s_idx].shown_id(),
+                ),
+            },
+            "BLASTN",
+        )?;
+    }
+    Ok(())
+}
+
 /// The end of the traceback for the final hit list of one query (`hit_list`, of a query of
 /// `query_len` letters, the length of each of its contexts): the HSP lists cut to
 /// `max_hsps_per_subject`, their HSPs below `query_cov_hsp_perc` percent of the query
@@ -6798,10 +6855,8 @@ fn post_process_hits_and_write(
     };
     // EXPERIMENT (LOSAT_X_RPTSTREAM): a subject set's ids made once for every batch where LOSAT
     // refuses none of them (`x_rpt_stream::SubjectCache`), so they are the ids made here.
-    let subject_ids: std::borrow::Cow<'_, [Arc<[u8]>]> = if output_formats
-        .iter()
-        .any(|format| format.is_tabular())
-    {
+    let tabular = output_formats.iter().any(|format| format.is_tabular());
+    let subject_ids: std::borrow::Cow<'_, [Arc<[u8]>]> = if tabular {
         match (
             report.database_subject_ids,
             report.subject_cache.and_then(|cache| cache.ids.as_deref()),
@@ -6813,48 +6868,12 @@ fn post_process_hits_and_write(
     } else {
         std::borrow::Cow::Owned(Vec::new())
     };
-    // The rows of subjects whose lookups fail where NCBI has no result
-    // (`report::tabular::check_failed_lookups`), before any format is written.
-    let database = report.database_ordinals.zip(report.database_reader);
-    for format in output_formats.iter().filter(|format| format.is_tabular()) {
-        let spec = format.tabular_spec();
-        if !crate::algorithm::common::tabular::checks_failed_lookups(
-            spec,
-            &subject_ids,
-            report.database_parsed,
-        ) {
-            continue;
-        }
-        crate::report::tabular::check_failed_lookups(
-            spec,
-            hit_lists.iter().flatten().map(|hit_list| {
-                hit_list
-                    .hsplist_array
-                    .iter()
-                    .filter_map(|hsp_list| hsp_list.hsps.first())
-                    .map(|hsp| hsp.s_idx as usize)
-            }),
-            |s_idx| {
-                crate::algorithm::common::tabular::subject_lookup_failure(
-                    spec,
-                    &subject_ids,
-                    report.database_parsed,
-                    database.is_some(),
-                    false,
-                    s_idx,
-                )
-            },
-            |s_idx| match database {
-                Some((ordinals, reader)) => crate::report::tabular::failed_database_title(
-                    reader.oid_map().oid(ordinals[s_idx]),
-                ),
-                None => crate::report::tabular::failed_record_title(
-                    s_idx,
-                    report.subjects.records()[s_idx].shown_id(),
-                ),
-            },
-            "BLASTN",
-        )?;
+    // The rows of subjects whose lookups fail where NCBI has no result, before any format is
+    // written.
+    if tabular
+        && crate::algorithm::common::tabular::lookups_may_fail(&subject_ids, report.database_parsed)
+    {
+        check_tabular_lookups(output_formats, &hit_lists, &subject_ids, report)?;
     }
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:497-498
     // ```c++

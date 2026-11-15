@@ -202,6 +202,14 @@ impl TabularField {
         &FIELDS[self as usize]
     }
 
+    /// The field's bit in a set of fields (`TabularSpec::has_any`): every field is one of the
+    /// `FIELDS`, by its index (`fields_follow_ncbis_rules`).
+    #[inline]
+    const fn bit(self) -> u64 {
+        const _: () = assert!(FIELDS.len() <= u64::BITS as usize);
+        1 << self as u32
+    }
+
     /// The `-outfmt` name (outfmt 20's header line).
     pub fn name(self) -> &'static str {
         self.entry().0
@@ -523,8 +531,13 @@ impl TabularSpec {
         self.fields.contains(&field)
     }
 
+    /// Whether any of `fields` is among the spec's fields: one pass over the spec's fields, each
+    /// tested against the set of `fields` (`TabularField::bit`), instead of one pass for each of
+    /// `fields` (no NCBI counterpart: code placement only).
+    #[inline]
     pub(crate) fn has_any(&self, fields: &[TabularField]) -> bool {
-        fields.iter().any(|field| self.has(*field))
+        let set = fields.iter().fold(0, |set, field| set | field.bit());
+        self.fields.iter().any(|field| set & field.bit() != 0)
     }
 
     /// Whether NCBI's formatter opens its alignment block for a row whose Seq-align counts
@@ -1876,7 +1889,10 @@ impl TabularWriter<'_> {
         out.push(b'\n');
     }
 
-    /// The row of a subject whose lookup does not fail.
+    /// The row of a subject whose lookup does not fail. Inline in its one caller (`row`), so that
+    /// such a row costs no call more than before the rows whose lookups fail (no NCBI
+    /// counterpart: code placement only).
+    #[inline(always)]
     fn found_row(
         &self,
         out: &mut Vec<u8>,

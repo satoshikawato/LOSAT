@@ -274,8 +274,8 @@ pub(super) fn render(
     }
     let hitlists: &[KappaResultHitList] = hitlists;
     // BLAST XML (outfmt 5, and the XML2 and JSON documents of 15 and 16): its texts are made,
-    // and what NCBI cannot write is refused, before any format writes (`-out` is already
-    // created, empty, as NCBI's).
+    // and a title that NCBI crashes on (`names::Refusal`) is refused, before any format writes
+    // (`-out` is already created, empty, as NCBI's).
     //
     // NCBI writes the XML2 and JSON documents' start before the search (`PrintProlog`) and
     // fails for a matrix of its formatting table's that it does not know when it makes a report's

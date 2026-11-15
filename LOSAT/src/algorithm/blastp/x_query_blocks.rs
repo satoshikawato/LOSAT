@@ -145,11 +145,11 @@
 //!   flag (the last block), as outfmt 7's count does; the run values (program, version,
 //!   `BlastOutput_db`, matrix, gap costs, filter, `db-num`, `db-len`, kappa, lambda, entropy) are
 //!   fixed inputs; `hsp-len`, `eff-space`, the masks and the message are the query's own. The
-//!   writer refuses what NCBI cannot write (a byte >= 0x80 or a control byte in a name, a title it
-//!   cannot guess the encoding of or reads past the end of) before its first byte, which in a later
-//!   block would come after the earlier blocks' bytes. So the block search is taken only when
-//!   none is refused, checked with the writer's own functions before the first block: the database
-//!   name and every query's definition line and message id (`x_block_xml_run_allowed`), every
+//!   writer refuses a title that NCBI crashes on (`names::Refusal::ReadsPastEnd`) before its first
+//!   byte, which in a later block would come after the earlier blocks' bytes; every other byte
+//!   (>= 0x80, a control byte) NCBI's stream writes or fails at by itself, the same in a block. So
+//!   the block search is taken only when none is refused, checked with the writer's own functions
+//!   before the first block: every query's definition line (`x_block_xml_run_allowed`), every
 //!   `-subject` record's names (`x_block_xml_subjects_allowed`; conservative, the writer refuses
 //!   only a subject with hits), and with `-db` the definition lines as for outfmt 8
 //!   (`database::x_titles_read_allow_blocks`). Otherwise the search of all queries refuses where

@@ -81,12 +81,159 @@ pub struct SubjectReads {
     queries: Vec<QueryReads>,
 }
 
-/// The texts of one query's reads (`SubjectReads`): `(subject, text)` in the order of the
-/// reads, a subject named as the report's writer names it (its index in the hit lists).
-pub type QueryReads = Vec<(u32, Vec<u8>)>;
+/// The reads of one query's report (`SubjectReads`), in the order of the reads.
+pub type QueryReads = Vec<SubjectRead>;
+
+/// One read of a query's report: the subject as the report's writer names it (its index in the
+/// hit lists), the text that its load writes in the program's model, and, in a run whose lookups
+/// can write a text, what the load looks up (`ReadLoad`; then every read has an entry, with or
+/// without a text of its own).
+#[derive(Clone, Debug)]
+pub struct SubjectRead {
+    pub subject: u32,
+    pub text: Vec<u8>,
+    pub load: Option<ReadLoad>,
+}
+
+impl SubjectRead {
+    /// A read of `subject` whose text is `text`, without the facts of its load (the tests of the
+    /// writers).
+    #[cfg(test)]
+    pub fn of_text(subject: u32, text: &[u8]) -> Self {
+        Self {
+            subject,
+            text: text.to_vec(),
+            load: None,
+        }
+    }
+
+    /// The text of this read where it happens: the texts of the loads left out before that this
+    /// load makes ([`ReadLoad::placed`]) around the model's own.
+    fn placed(&self) -> Vec<u8> {
+        match &self.load {
+            Some(load) => load.placed(&self.text),
+            None => self.text.clone(),
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1440-1466 (quoted at
+// `TaxdbRun::load`): a load asks the taxonomy database for a taxid that its volume's cache does
+// not hold, and the run's first ask opens it (the static `CTaxDBFileInfo` of `GetTaxNames`).
+/// What the load of a read's subject looks up, as far as it decides the texts: NCBI's lookups write
+/// the texts of opening the taxonomy database at the run's first ask, and the offset error at a
+/// volume's first lookup of the taxid whose record begins past the end of `taxdb.btd`
+/// (`TaxDb::offset_error_taxid`; a volume whose cache would ask again is refused,
+/// `TaxdbRun::cache_collision`), nothing else. The model of the reads gives each text to the load
+/// that makes the ask, assuming every load it models happens; a load that NCBI does not make (a
+/// BLAST XML `Iteration` or `Hit` that the stream leaves out, `ReadCursor::cut`) leaves its texts
+/// to NCBI's next load that makes the same ask (`LoadTexts`).
+#[derive(Clone, Debug)]
+pub struct ReadLoad {
+    /// The run's texts of the loads left out (shared by every read of the run).
+    pub texts: std::sync::Arc<LoadTexts>,
+    /// The volume of the loaded blob.
+    pub volume: u32,
+    /// Whether the load looks a positive taxid up (so it makes the run's first ask, where no load
+    /// before it asked).
+    pub looks_up: bool,
+    /// Whether the load looks up the taxid of the offset error.
+    pub offset: bool,
+    /// The bytes of the model's text that are the texts of opening (its start).
+    pub opening: usize,
+}
+
+impl ReadLoad {
+    /// The text that this load writes where it happens, `own` being the model's: before it the
+    /// texts of opening that a load left out (`left_out`) placed, where this load looks a taxid
+    /// up, and after it the offset error that a load of the same volume left out, where this load
+    /// looks that taxid up (the texts of a load are those of opening, then those of its lookups).
+    /// They are NCBI's texts of this load: the asks that the left-out load made in the model are
+    /// this load's first.
+    pub fn placed(&self, own: &[u8]) -> Vec<u8> {
+        self.with_left_out(own.to_vec()).0
+    }
+
+    /// `placed` for the model's read of this load (`common::database::subject_read_texts`, a
+    /// batch modelled after a report that left loads out): its text, whose texts of opening are
+    /// then those placed before its own.
+    pub fn place(&mut self, own: Vec<u8>) -> Vec<u8> {
+        let (text, opening) = self.with_left_out(own);
+        self.opening = opening;
+        text
+    }
+
+    /// The text of `placed` and the length of its texts of opening.
+    fn with_left_out(&self, own: Vec<u8>) -> (Vec<u8>, usize) {
+        let mut pending = self.texts.pending.lock().expect("the texts of the loads");
+        if pending.opening.is_empty() && pending.offsets.is_empty() {
+            return (own, self.opening);
+        }
+        let mut text = Vec::new();
+        if self.looks_up {
+            text.append(&mut pending.opening);
+        }
+        let opening = text.len() + self.opening;
+        text.extend(own);
+        if self.offset {
+            if let Some(at) = pending
+                .offsets
+                .iter()
+                .position(|(volume, _)| *volume == self.volume)
+            {
+                text.extend(pending.offsets.remove(at).1);
+            }
+        }
+        (text, opening)
+    }
+
+    /// NCBI does not make this load, whose text in the model is `text`: its texts of opening and
+    /// its offset error go to the next load that makes those asks (`placed`).
+    pub fn left_out(&self, text: &[u8]) {
+        let (opening, offset) = text.split_at(self.opening.min(text.len()));
+        let mut pending = self.texts.pending.lock().expect("the texts of the loads");
+        if !opening.is_empty() {
+            pending.opening.extend_from_slice(opening);
+        }
+        if !offset.is_empty() {
+            match pending
+                .offsets
+                .iter_mut()
+                .find(|(volume, _)| *volume == self.volume)
+            {
+                Some((_, texts)) => texts.extend_from_slice(offset),
+                None => pending.offsets.push((self.volume, offset.to_vec())),
+            }
+        }
+    }
+}
+
+/// The texts of the loads of a run that NCBI does not make (`ReadLoad::left_out`), until the load
+/// that makes their asks (`ReadLoad::placed`): a load of a later read of the report, of a later
+/// batch's reads, or a later batch's prefetch (`common::database::subject_read_texts`). A text
+/// that no later load asks for is never written. One per run (`TaxdbRun`).
+#[derive(Debug, Default)]
+pub struct LoadTexts {
+    pending: std::sync::Mutex<PendingTexts>,
+}
+
+impl LoadTexts {
+    /// No text left out (`TaxdbRun::restart`: the batches are searched again).
+    pub fn clear(&self) {
+        *self.pending.lock().expect("the texts of the loads") = PendingTexts::default();
+    }
+}
+
+#[derive(Debug, Default)]
+struct PendingTexts {
+    /// The texts of opening the taxonomy database (empty: none left out).
+    opening: Vec<u8>,
+    /// By volume, its offset error.
+    offsets: Vec<(u32, Vec<u8>)>,
+}
 
 impl SubjectReads {
-    /// Sets the texts of query `query`'s reads.
+    /// Sets the reads of query `query`.
     pub fn set(&mut self, query: usize, reads: QueryReads) {
         if reads.is_empty() {
             return;
@@ -113,26 +260,21 @@ pub fn reads_by_rank(reads: &[QueryReads], ordinals: &[u32]) -> Vec<QueryReads> 
         .map(|query| {
             query
                 .iter()
-                .filter_map(|(ordinal, text)| {
-                    let rank = ordinals.binary_search(ordinal).ok()?;
-                    Some((rank as u32, text.clone()))
+                .filter_map(|read| {
+                    let rank = ordinals.binary_search(&read.subject).ok()?;
+                    Some(SubjectRead {
+                        subject: rank as u32,
+                        ..read.clone()
+                    })
                 })
                 .collect()
         })
         .collect()
 }
 
-/// The texts of query `query`'s reads in `reads`, in order.
-fn reads_of(reads: &[QueryReads], query: usize) -> &[(u32, Vec<u8>)] {
+/// The reads of query `query` in `reads`, in order.
+fn reads_of(reads: &[QueryReads], query: usize) -> &[SubjectRead] {
     reads.get(query).map_or(&[], Vec::as_slice)
-}
-
-/// Every text of the reads of the queries `queries` in `reads`, in order.
-pub fn read_texts(reads: &[QueryReads], queries: std::ops::Range<usize>) -> Vec<u8> {
-    queries
-        .flat_map(|query| reads_of(reads, query))
-        .flat_map(|(_, text)| text.iter().copied())
-        .collect()
 }
 
 /// A report writer's call where NCBI reads a subject (`QueryWarnings::subject_read`): the
@@ -147,55 +289,41 @@ pub fn no_subject_reads<W>(_subject: u32, _writer: &mut W) -> io::Result<()> {
 }
 
 /// The writing of the texts of `SubjectReads` where the reports read the subjects: every text
-/// of the queries below `query` is written, and the first `next` of query `query`'s.
+/// of the queries below `query` is written, and the first `next` of query `query`'s. A read
+/// writes its text where it happens (`SubjectRead::placed`), with the texts that the loads NCBI
+/// does not make left to it (`cut`).
 pub struct ReadCursor<'a> {
     reads: &'a [QueryReads],
     query: usize,
     next: usize,
-    /// The texts of reads that a report left out (`cut`): each is written at the next read of
-    /// its subject that a later report makes, or never.
-    moved: Vec<(u32, Vec<u8>)>,
     /// The run ended at an exception of NCBI's XML stream (`end_run`): no text is written after.
     ended: bool,
 }
 
 impl<'a> ReadCursor<'a> {
-    /// The cursor of `reads` (by query index), or `None` where no read writes a text.
+    /// The cursor of `reads` (by query index), or `None` where no query has a read.
     pub fn new(reads: &'a [QueryReads]) -> Option<Self> {
-        Self::carrying(reads, Vec::new())
+        reads
+            .iter()
+            .any(|query| !query.is_empty())
+            .then_some(ReadCursor {
+                reads,
+                query: 0,
+                next: 0,
+                ended: false,
+            })
     }
 
-    /// `new`, with the texts that the reports before `reads` left out (`take_moved`, a writer
-    /// that makes a cursor per query: BLASTX).
-    pub fn carrying(reads: &'a [QueryReads], moved: Vec<(u32, Vec<u8>)>) -> Option<Self> {
-        (!moved.is_empty() || reads.iter().any(|query| !query.is_empty())).then_some(ReadCursor {
-            reads,
-            query: 0,
-            next: 0,
-            moved,
-            ended: false,
-        })
-    }
-
-    /// The texts that the reports left out and no later read wrote yet (`cut`), for the cursor of
-    /// the next reports (`carrying`).
-    pub fn take_moved(&mut self) -> Vec<(u32, Vec<u8>)> {
-        std::mem::take(&mut self.moved)
-    }
-
-    /// Whether the report of query `query` reads a subject that writes a text (its own, or one an
-    /// earlier report left out, `cut`).
+    /// Whether the report of query `query` reads a subject that may write a text.
     pub fn has_texts(&self, query: usize) -> bool {
-        !self.ended && (!reads_of(self.reads, query).is_empty() || !self.moved.is_empty())
+        !self.ended && !reads_of(self.reads, query).is_empty()
     }
 
     /// The report of query `query` reads subject `subject` here (a tabular row that reads it,
     /// its description line, its alignment's heading, its BLAST XML `Hit`): the texts of the
     /// query's reads up to its first are written to `sink`, after the report written so far
-    /// (`report`) is flushed, unless they are written already. A subject whose reads write no
-    /// text, or that the query's report read before, writes nothing. A text that an earlier
-    /// report left out (`cut`) comes with the first read of its subject after it, before that
-    /// read's own text.
+    /// (`report`) is flushed, unless they are written already. A subject that the query's report
+    /// read before, or that is not among its reads, writes nothing.
     pub fn subject_read(
         &mut self,
         query: usize,
@@ -206,31 +334,19 @@ impl<'a> ReadCursor<'a> {
         if query < self.query || self.ended {
             return Ok(());
         }
-        let moved = self
-            .moved
-            .iter()
-            .position(|(read, _)| *read == subject)
-            .map(|at| self.moved.remove(at).1);
         let from = if query == self.query { self.next } else { 0 };
         let reads = reads_of(self.reads, query);
-        let found = reads
+        let Some(found) = reads
             .get(from..)
-            .and_then(|rest| rest.iter().position(|(read, _)| *read == subject));
-        if found.is_none() && moved.is_none() {
+            .and_then(|rest| rest.iter().position(|read| read.subject == subject))
+        else {
             return Ok(());
-        }
+        };
         let mut text = self.unwritten_before(query);
-        match found {
-            Some(found) => {
-                for (_, read) in &reads[from..from + found] {
-                    text.extend_from_slice(read);
-                }
-                text.extend(moved.unwrap_or_default());
-                text.extend_from_slice(&reads[from + found].1);
-                self.next = from + found + 1;
-            }
-            None => text.extend(moved.unwrap_or_default()),
+        for read in &reads[from..=from + found] {
+            text.extend(read.placed());
         }
+        self.next = from + found + 1;
         write_after(report, sink, &text)
     }
 
@@ -244,10 +360,10 @@ impl<'a> ReadCursor<'a> {
     /// The report of query `query` made no read after the ones written (BLAST XML: its `Iteration`
     /// threw, or one of its `Hit`s did, `blast_xml::DocumentPosts::cut`): NCBI loads a subject
     /// when it makes its `Hit` (`s_SeqAlignToXMLHit`), so the query's later reads do not happen.
-    /// Their texts (the first load of a blob, which NCBI makes later) move to the next read of
-    /// their subjects (`subject_read`); one that no later report reads is never written. The texts
-    /// of the queries before it that their reports did not place are written first, to `sink`
-    /// after `report` is flushed (`before_query`).
+    /// Their texts go to NCBI's next loads that make the same asks (`ReadLoad::left_out`); one
+    /// that no later load asks for is never written. The texts of the queries before it that
+    /// their reports did not place are written first, to `sink` after `report` is flushed
+    /// (`before_query`).
     pub fn cut(
         &mut self,
         query: usize,
@@ -259,7 +375,11 @@ impl<'a> ReadCursor<'a> {
         }
         self.before_query(query, report, sink)?;
         let reads = reads_of(self.reads, query);
-        self.moved.extend(reads.iter().skip(self.next).cloned());
+        for read in &reads[self.next.min(reads.len())..] {
+            if let Some(load) = &read.load {
+                load.left_out(&read.text);
+            }
+        }
         self.next = reads.len();
         Ok(())
     }
@@ -268,7 +388,6 @@ impl<'a> ReadCursor<'a> {
     /// NCBI loads nothing after it, so no text not written yet is written.
     pub fn end_run(&mut self) {
         self.ended = true;
-        self.moved.clear();
     }
 
     /// Writes to `sink` the texts of the reads of the queries below `query` that their reports
@@ -296,17 +415,21 @@ impl<'a> ReadCursor<'a> {
         self.unwritten_before(queries)
     }
 
-    /// The texts not written yet of the queries below `query`, which count as written after
-    /// this; the cursor moves to the start of `query`'s.
+    /// The texts not written yet of the queries below `query`, which count as written (their
+    /// loads as made) after this; the cursor moves to the start of `query`'s.
     fn unwritten_before(&mut self, query: usize) -> Vec<u8> {
         if query <= self.query {
             return Vec::new();
         }
         let mut text = Vec::new();
-        for (_, read) in reads_of(self.reads, self.query).iter().skip(self.next) {
-            text.extend_from_slice(read);
+        for read in reads_of(self.reads, self.query).iter().skip(self.next) {
+            text.extend(read.placed());
         }
-        text.extend(read_texts(self.reads, self.query + 1..query));
+        for later in self.query + 1..query {
+            for read in reads_of(self.reads, later) {
+                text.extend(read.placed());
+            }
+        }
         (self.query, self.next) = (query, 0);
         text
     }
@@ -1208,12 +1331,12 @@ mod tests {
     fn the_texts_of_the_reads_follow_the_report_up_to_each_read() {
         let reads: Vec<QueryReads> = vec![
             vec![
-                (5, b"A\n".to_vec()),
-                (7, b"B\n".to_vec()),
-                (8, b"C\n".to_vec()),
+                SubjectRead::of_text(5, b"A\n"),
+                SubjectRead::of_text(7, b"B\n"),
+                SubjectRead::of_text(8, b"C\n"),
             ],
-            vec![(3, b"D\n".to_vec())],
-            vec![(4, b"E\n".to_vec())],
+            vec![SubjectRead::of_text(3, b"D\n")],
+            vec![SubjectRead::of_text(4, b"E\n")],
         ];
         let before: Vec<Posts> = [b"W0\n", b"W1\n", b"W2\n"]
             .map(|lines| Posts::of_lines(lines.to_vec()))
@@ -1264,7 +1387,7 @@ mod tests {
         assert_eq!(text, "{0}\n,\nT1\nT3\n{1}\n");
         // BLAST XML: each `Hit` loads its subject at its own start; a query whose model's reads
         // write texts marks every `Hit`, and a `Hit`'s read comes before the texts made there.
-        let reads: Vec<QueryReads> = vec![vec![(5, b"A\n".to_vec())]];
+        let reads: Vec<QueryReads> = vec![vec![SubjectRead::of_text(5, b"A\n")]];
         let log = Log::default();
         let (mut report, mut sink) = (log.clone(), log.clone());
         let mut warnings = QueryWarnings::of_posts(&[], None, &mut sink).with_subject_reads(&reads);
@@ -1290,46 +1413,95 @@ mod tests {
         assert_eq!(alone, b"<H5><H6>");
     }
 
+    /// A read with what its load looks up (`ReadLoad`), the run's texts `texts`.
+    fn loaded(
+        texts: &std::sync::Arc<LoadTexts>,
+        subject: u32,
+        text: &[u8],
+        (volume, offset, opening): (u32, bool, usize),
+    ) -> SubjectRead {
+        SubjectRead {
+            subject,
+            text: text.to_vec(),
+            load: Some(ReadLoad {
+                texts: std::sync::Arc::clone(texts),
+                volume,
+                looks_up: true,
+                offset,
+                opening,
+            }),
+        }
+    }
+
     /// A BLAST XML report that made no `Hit` after its last mark (`DocumentPosts::cut`: its
-    /// `Iteration` or a `Hit` threw) loads none of its later subjects: their texts move to the next
-    /// read of the same subject (NCBI 2.17.0, review 1 of K4h M2, `q3w.faa` with
-    /// `PRE_FETCH_SEQS_LIMIT=1`: the offset error at query 3's `Hit`, not after query 2's post),
-    /// a text no later report reads is never written, and a run that NCBI's XML stream ends writes
-    /// no text after its posts.
+    /// `Iteration` or a `Hit` threw) loads none of its later subjects: the texts of their loads go
+    /// to NCBI's next load that makes the same ask, of whichever subject (NCBI 2.17.0, review 1 of
+    /// K4h M2, `q3w.faa` with `PRE_FETCH_SEQS_LIMIT=1`: the offset error at query 3's `Hit`, not
+    /// after query 2's post; agent3 probes m2.*): the texts of opening at the next load that looks
+    /// a taxid up, a volume's offset error at its next load that looks that taxid up. A text that
+    /// no later load asks for is never written, and a run that NCBI's XML stream ends writes no
+    /// text after its posts.
     #[test]
-    fn a_cut_report_moves_its_later_texts_to_the_next_read() {
+    fn a_cut_report_leaves_its_texts_to_the_next_load_that_asks() {
+        let texts = std::sync::Arc::new(LoadTexts::default());
+        // Query 0 reads 5 (the run's first ask: the texts of opening, then volume 0's offset
+        // error) and 6 (volume 1's offset error); query 1 reads 9 (volume 1, the offset taxid)
+        // and 6 again; query 2 reads 7 (volume 0, another taxid).
         let reads: Vec<QueryReads> = vec![
-            vec![(5, b"A\n".to_vec()), (6, b"B\n".to_vec())],
-            vec![(9, b"N\n".to_vec())],
-            Vec::new(),
+            vec![
+                loaded(&texts, 5, b"O\nE0\n", (0, true, 2)),
+                loaded(&texts, 6, b"E1\n", (1, true, 0)),
+            ],
+            vec![
+                loaded(&texts, 9, b"", (1, true, 0)),
+                loaded(&texts, 6, b"", (1, true, 0)),
+            ],
+            vec![loaded(&texts, 7, b"", (0, false, 0))],
         ];
+        // Query 0 reads 5, then a `Hit` throws: 6's offset error goes to 9's load.
         let log = Log::default();
         let (mut report, mut sink) = (log.clone(), log.clone());
         let mut cursor = ReadCursor::new(&reads).unwrap();
-        // Query 0 reads subject 5, then its report is cut: 6's text moves.
         cursor.subject_read(0, 5, &mut report, &mut sink).unwrap();
         cursor.cut(0, &mut report, &mut sink).unwrap();
         cursor.before_query(1, &mut report, &mut sink).unwrap();
-        // Query 1's `Iteration` throws before any `Hit`: its text moves too.
-        cursor.cut(1, &mut report, &mut sink).unwrap();
-        cursor.before_query(2, &mut report, &mut sink).unwrap();
-        assert!(cursor.has_texts(2));
-        report.write_all(b"<Q2>").unwrap();
-        cursor.subject_read(2, 6, &mut report, &mut sink).unwrap();
-        cursor.subject_read(2, 6, &mut report, &mut sink).unwrap();
+        assert!(cursor.has_texts(1));
+        report.write_all(b"<Q1>").unwrap();
+        cursor.subject_read(1, 9, &mut report, &mut sink).unwrap();
+        cursor.subject_read(1, 6, &mut report, &mut sink).unwrap();
         report.write_all(b"<H6>").unwrap();
-        // Subject 9 is never read again: N is never written.
-        let rest = cursor.unwritten();
-        assert!(rest.is_empty());
         let text = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
-        assert_eq!(text, "A\n<Q2>B\n<H6>");
+        assert_eq!(text, "O\nE0\n<Q1>E1\n<H6>");
+        // Query 0's `Iteration` throws: its texts of opening and volume 1's offset error go to 9's
+        // load, volume 0's offset error waits for a load that looks its taxid up (7 does not).
+        let log = Log::default();
+        let (mut report, mut sink) = (log.clone(), log.clone());
+        let mut cursor = ReadCursor::new(&reads).unwrap();
+        cursor.cut(0, &mut report, &mut sink).unwrap();
+        report.write_all(b"<Q1>").unwrap();
+        cursor.subject_read(1, 9, &mut report, &mut sink).unwrap();
+        cursor.before_query(2, &mut report, &mut sink).unwrap();
+        cursor.subject_read(2, 7, &mut report, &mut sink).unwrap();
+        assert!(cursor.unwritten().is_empty());
+        let text = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
+        assert_eq!(text, "<Q1>O\nE1\n");
+        // A batch modelled after that report: its first read of volume 0 that looks the taxid up
+        // makes volume 0's ask, whose text then counts as its own (cut again, it moves again).
+        let mut load = reads[0][0].load.clone().unwrap();
+        load.opening = 0;
+        assert_eq!(load.place(b"X\n".to_vec()), b"X\nE0\n");
+        assert_eq!(load.opening, 0);
+        load.left_out(b"X\nE0\n");
+        let next = loaded(&texts, 8, b"", (0, true, 0));
+        assert_eq!(next.placed(), b"X\nE0\n");
+        texts.clear();
         // The end of the run: nothing after it.
         let log = Log::default();
         let (mut report, mut sink) = (log.clone(), log.clone());
         let mut cursor = ReadCursor::new(&reads).unwrap();
         cursor.cut(0, &mut report, &mut sink).unwrap();
         cursor.end_run();
-        cursor.subject_read(1, 5, &mut report, &mut sink).unwrap();
+        cursor.subject_read(1, 9, &mut report, &mut sink).unwrap();
         cursor.before_query(2, &mut report, &mut sink).unwrap();
         assert!(cursor.unwritten().is_empty() && !cursor.has_texts(1));
         assert!(log.0.lock().unwrap().is_empty());

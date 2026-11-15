@@ -3837,6 +3837,9 @@ pub(crate) struct TaxdbRun {
     /// The texts of opening the database when the rows of a tabular report opened it, kept for
     /// those rows ([`TaxdbRun::open_for_rows`], [`tabular_names`]).
     rows_open: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    /// The texts of the loads that the model of the reads placed where NCBI makes no load
+    /// ([`TaxdbRun::load_texts`], `report::query_warnings::LoadTexts`).
+    load_texts: std::sync::Arc<crate::report::query_warnings::LoadTexts>,
 }
 
 /// What the lookups of a run's taxonomy database can write ([`TaxdbRun::prefetch_texts`]).
@@ -3844,6 +3847,8 @@ pub(crate) struct TaxdbRun {
 struct PrefetchTexts {
     /// The positive taxid whose lookup writes the offset error (`TaxDb::offset_error_taxid`).
     offset_error_taxid: Option<i32>,
+    /// Whether opening the database writes texts (`TaxDb::open_messages`).
+    opening: bool,
 }
 
 /// `CSeqDBVol::m_TaxCache(256)`: the slots of a volume's taxonomy cache.
@@ -4090,6 +4095,7 @@ impl TaxdbRun {
         *self.lazy.lock().expect("the taxonomy database") = None;
         *self.volume_lookups.lock().expect("the volume lookups") = VolumeLookups::default();
         self.rows_open.lock().expect("the rows' texts").clear();
+        self.load_texts.clear();
     }
 
     /// [`SeqDb::taxdb_found`] of the run's database, asked once: the search path is not
@@ -4103,16 +4109,13 @@ impl TaxdbRun {
         *self.texts.get_or_init(|| {
             let refused = PrefetchTexts {
                 offset_error_taxid: None,
+                opening: false,
             };
             if !self.found(db) {
-                return PrefetchTexts {
-                    offset_error_taxid: None,
-                };
+                return refused;
             }
             let Some(search_path) = db.search_path() else {
-                return PrefetchTexts {
-                    offset_error_taxid: None,
-                };
+                return refused;
             };
             let Ok(taxdb) = crate::seqdb::taxdb::TaxDb::open(search_path) else {
                 return refused;
@@ -4124,6 +4127,7 @@ impl TaxdbRun {
             let taxid = taxid.filter(|&taxid| taxid > 0);
             PrefetchTexts {
                 offset_error_taxid: taxid,
+                opening: !taxdb.open_messages().is_empty(),
             }
         })
     }
@@ -4273,6 +4277,45 @@ impl TaxdbRun {
             }
         }
         Ok(answers)
+    }
+
+    /// The run's texts of the loads that NCBI does not make (`report::query_warnings::LoadTexts`),
+    /// where its lookups can write a text (the offset error, or texts of opening the database):
+    /// the model then records what each read's load looks up (`subject_read_texts`).
+    fn load_texts(
+        &self,
+        db: &SeqDb,
+    ) -> Option<std::sync::Arc<crate::report::query_warnings::LoadTexts>> {
+        let texts = self.prefetch_texts(db);
+        (texts.offset_error_taxid.is_some() || texts.opening)
+            .then(|| std::sync::Arc::clone(&self.load_texts))
+    }
+
+    /// [`TaxdbRun::volume_lookups_of`] of a load, with the length of the start of its text that
+    /// is the texts of opening the database (the run's first ask writes them before its own,
+    /// `LazyTaxDb::names`; the only text of a lookup is the offset error).
+    fn load_text(
+        &self,
+        db: &SeqDb,
+        taxdb: &crate::seqdb::taxdb::LazyTaxDb,
+        ordinal: u32,
+        lookups: &[i32],
+        lower: &str,
+        program: &str,
+    ) -> Result<(Vec<u8>, usize)> {
+        let mut text = String::new();
+        let mut opening = 0;
+        for (_, messages) in self.load(db, taxdb, ordinal, lookups, program)? {
+            for line in messages {
+                let opens = line != crate::seqdb::taxdb::MSG_OFFSET_ERROR;
+                text.push_str(&crate::seqdb::taxdb::err_post_line(lower, &line));
+                text.push('\n');
+                if opens {
+                    opening = text.len();
+                }
+            }
+        }
+        Ok((text.into_bytes(), opening))
     }
 
     /// [`TaxdbRun::load`] of the sequence `ordinal`, its texts appended to `text` as `ERR_POST`
@@ -4809,7 +4852,7 @@ pub(crate) fn prefetch_messages<'s>(
         false,
         program,
     )?;
-    Ok(reads.into_iter().flat_map(|(_, text)| text).collect())
+    Ok(reads.into_iter().flat_map(|read| read.text).collect())
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:819-838
@@ -4827,18 +4870,29 @@ pub(crate) fn prefetch_messages<'s>(
 /// [`prefetch_messages`] of `subjects`, each `(key, ordinal, parsed Seq-ids)`, by subject: the
 /// text that the first read of each subject writes, with the subject's `key` (the name a report
 /// writer gives it), in the order of `subjects`; a subject whose read writes nothing has no
-/// entry. A query's report whose batch's prefetch is off writes each where it reads the subject
+/// entry, unless the run's lookups can write a text (`TaxdbRun::load_texts`): then each read
+/// that loads a blob has one, with what its load looks up (`ReadLoad`), and its text holds the
+/// texts that loads NCBI did not make left to it (a BLAST XML report that the stream cut,
+/// `report::query_warnings::ReadCursor::cut`, before this batch). A query's report whose batch's
+/// prefetch is off writes each where it reads the subject
 /// (`report::query_warnings::SubjectReads`). `rows_open`: the report's rows look the plural
 /// names up (taxid 0 too, `TaxdbRun::open_for_rows`), each row after it loads its subject, so
 /// the first row opens the taxonomy database after the first subject's read, where that read
 /// did not.
-pub(crate) fn subject_read_texts<'s, K>(
+pub(crate) fn subject_read_texts<'s>(
     db: &SeqDb,
     run: &TaxdbRun,
-    subjects: impl IntoIterator<Item = (K, u32, Option<&'s crate::report::db_subject::ParsedSubject>)>,
+    subjects: impl IntoIterator<
+        Item = (
+            u32,
+            u32,
+            Option<&'s crate::report::db_subject::ParsedSubject>,
+        ),
+    >,
     rows_open: bool,
     program: &str,
-) -> Result<Vec<(K, Vec<u8>)>> {
+) -> Result<crate::report::query_warnings::QueryReads> {
+    use crate::report::query_warnings::{ReadLoad, SubjectRead};
     if !run.found(db) {
         return Ok(Vec::new());
     }
@@ -4848,6 +4902,8 @@ pub(crate) fn subject_read_texts<'s, K>(
     run.refuse_cache_collision(db, program)?;
     let taxdb = run.taxdb(search_path);
     let lower = program.to_ascii_lowercase();
+    let texts = run.load_texts(db);
+    let offset_taxid = run.prefetch_texts(db).offset_error_taxid;
     let mut reads = Vec::new();
     let mut fetched: std::collections::HashSet<u32> = Default::default();
     for (key, ordinal, parsed) in subjects {
@@ -4871,10 +4927,32 @@ pub(crate) fn subject_read_texts<'s, K>(
         };
         if let Some(blob) = blob {
             let lookups = blob_taxids(db, ordinal, parsed, blob, program)?;
-            let mut text = String::new();
-            run.volume_lookups_of(db, &taxdb, blob, &lookups, &lower, &mut text, program)?;
-            if !text.is_empty() {
-                reads.push((key, text.into_bytes()));
+            let (text, opening) = run.load_text(db, &taxdb, blob, &lookups, &lower, program)?;
+            match &texts {
+                Some(texts) => {
+                    let mut load = ReadLoad {
+                        texts: std::sync::Arc::clone(texts),
+                        volume: db
+                            .volume_index(blob)
+                            .map_err(|error| database_error(error, program))?
+                            as u32,
+                        looks_up: !lookups.is_empty(),
+                        offset: offset_taxid.is_some_and(|taxid| lookups.contains(&taxid)),
+                        opening,
+                    };
+                    let text = load.place(text);
+                    reads.push(SubjectRead {
+                        subject: key,
+                        text,
+                        load: Some(load),
+                    });
+                }
+                None if !text.is_empty() => reads.push(SubjectRead {
+                    subject: key,
+                    text,
+                    load: None,
+                }),
+                None => {}
             }
         }
         if first && rows_open {
@@ -5817,11 +5895,11 @@ pub(crate) fn taxdb_may_refuse(db: &SeqDb) -> bool {
 }
 
 /// The taxonomy side of [`taxdb_may_refuse`]: `Some(false)` when no lookup of any taxid can be
-/// refused ([`crate::seqdb::taxdb::TaxDb::any_lookup_may_refuse`], which no scientific name
-/// refuses: NCBI's streams write them); `Some(true)` when one can; `None` when the taxonomy
+/// refused ([`crate::seqdb::taxdb::TaxDb::any_lookup_may_refuse`]; no scientific name is
+/// refused: NCBI's streams write them); `Some(true)` when one can; `None` when the taxonomy
 /// database cannot be opened or read, which only the lookups of the database's taxids can answer.
 fn taxdb_side(taxdb: &crate::seqdb::taxdb::LazyTaxDb) -> Option<bool> {
-    taxdb.any_lookup_may_refuse(&|_| false).ok()
+    taxdb.any_lookup_may_refuse().ok()
 }
 
 /// The database side of [`taxdb_may_refuse`]: whether the lookup of the first definition line's

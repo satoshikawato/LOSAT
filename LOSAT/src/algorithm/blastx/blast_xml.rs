@@ -1144,9 +1144,10 @@ pub(super) fn xml_matrix_failure(
 /// `queries_before` queries of the batches before it) through `document` (BLAST XML, or the XML2
 /// / JSON documents) to `writer`: the document's header before the first query of the run, each
 /// query's Iteration or report, and nothing else; the end of the document is `write_epilog`'s.
-/// Everything NCBI cannot write is refused before this call's first byte, for the reports that
-/// the document writes: the query titles and messages, the titles of the subjects with hits
-/// (and, with a hold, the whole run's bytes stay in memory, `HeldOutput`). A run that stops after
+/// What LOSAT refuses is refused before this call's first byte, for the reports that the document
+/// writes: a query title or a title of a subject with hits that NCBI crashes on
+/// (`names::Refusal`; with a hold, the whole run's bytes stay in memory, `HeldOutput`); every
+/// other byte NCBI's stream writes or fails at by itself (`report::serial::xml`). A run that stops after
 /// this batch (`stops`) never writes the `-subject` report of its last query, which NCBI holds
 /// back (`written_queries`). NCBI's messages about the taxonomy database go to `diagnostics` at
 /// the first `Hit` that needs them.
@@ -1209,7 +1210,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         program: "blastx",
         version: concat!("BLASTX ", crate::ncbi_blast_version!()),
         reference: REFERENCE_GAPPED_BLAST,
-        db_name: db_name.as_bytes(),
+        db_name: &db_name,
         matrix: Some(&options.matrix),
         expect: options.evalue,
         gap_open: options.gap_open,
@@ -1264,8 +1265,6 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     // The rows of one HSP at a time, reused.
     let (mut qrow, mut srow): (Vec<u8>, Vec<u8>) = (Vec::new(), Vec::new());
     let mut texts = texts.iter();
-    // The texts of the reads that a cut report left out (`ReadCursor::take_moved`).
-    let mut moved = Vec::new();
     for batch in batches {
         for (qidx, lists) in batch.queries.iter().enumerate() {
             let query = &queries[batch.query_ordinal + qidx];
@@ -1307,10 +1306,9 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
             };
             // The texts of the subjects that the query's report reads one by one, written where
             // NCBI loads the subject of each `Hit` (`HitSink::position`, `ReadCursor`).
-            let mut reads = crate::report::query_warnings::ReadCursor::carrying(
-                std::slice::from_ref(shown.query_reads(batch.query_ordinal + qidx)),
-                std::mem::take(&mut moved),
-            );
+            let mut reads = crate::report::query_warnings::ReadCursor::new(std::slice::from_ref(
+                shown.query_reads(batch.query_ordinal + qidx),
+            ));
             // What NCBI posts where it loads the subject of each `Hit` (`HitPosts`): those texts
             // and the taxonomy database's messages.
             let mut posts = crate::report::query_warnings::HitPosts::new(reads.is_some());
@@ -1466,10 +1464,9 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 diagnostics.flush()?;
             }
             // A text whose read no `Hit` placed comes after the query's report; one that a cut
-            // report left out goes to the next query's reads (`ReadCursor::cut`).
+            // report left out goes to NCBI's next load that makes its ask (`ReadCursor::cut`).
             if let Some(reads) = reads.as_mut() {
                 reads.before_query(1, &mut *writer, &mut *diagnostics)?;
-                moved = reads.take_moved();
             }
             buf.clear();
         }

@@ -7321,11 +7321,7 @@ fn post_process_hits_and_write(
                     } else {
                         crate::report::blast_xml::REFERENCE_GAPPED_BLAST
                     },
-                    db_name: if is_database {
-                        subject_title.as_bytes()
-                    } else {
-                        b""
-                    },
+                    db_name: if is_database { subject_title } else { "" },
                     matrix: None,
                     expect: report.expect,
                     gap_open: report.gap_open,
@@ -11348,9 +11344,9 @@ fn prolog_before_search(sink: &OutputSink<'_>) -> bool {
 /// report, from `write_pairwise_prologs`) and not before the search: the outfmt 0 prolog of a
 /// file sink (`prolog_before_search`), and the start of the XML2 and JSON documents of outfmt
 /// 16 and 15 for every sink. NCBI writes that start before the search too (`PrintProlog`), but
-/// LOSAT's refusals of what NCBI could write (a title outside US-ASCII, DECISIONS 20) come
-/// after the search and before the first byte, so the start is written with the first report, or
-/// by the path of an NCBI error that stops the run before one.
+/// LOSAT's refusals of the reports (a title that NCBI crashes on, `names::Refusal`, DECISIONS
+/// 20 as K4h left it) come after the search and before the first byte, so the start is written
+/// with the first report, or by the path of an NCBI error that stops the run before one.
 ///
 /// Outfmt 20's line of the field names comes with the first report too (or from
 /// `write_pairwise_prologs` for a run that stops before one), after LOSAT's refusals of the

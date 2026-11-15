@@ -126,7 +126,7 @@ const INVALID_ONLY_15: &str = r####"{
 }
 "####;
 
-fn run<'a>(matrix: Option<&'a FormattingMatrix>, db_name: &'static [u8]) -> XmlRun<'a> {
+fn run<'a>(matrix: Option<&'a FormattingMatrix>, db_name: &'static str) -> XmlRun<'a> {
     XmlRun {
         program: "blastp",
         version: "BLASTP 2.17.0+",
@@ -174,7 +174,7 @@ fn invalid_message() -> Vec<u8> {
 
 fn document(kind: Xml2Kind, target: Xml2Target, finish: bool) -> String {
     let message = invalid_message();
-    let run = run(None, b"");
+    let run = run(None, "");
     let mut writer = Xml2Writer::new(kind, params(target));
     let mut out = Vec::new();
     writer
@@ -217,7 +217,7 @@ fn an_unsearched_query_lists_no_masks() {
         (Xml2Kind::Single16, INVALID_ONLY_16),
         (Xml2Kind::Single15, INVALID_ONLY_15),
     ] {
-        let run = run(None, b"");
+        let run = run(None, "");
         let mut writer = Xml2Writer::new(kind, params(Xml2Target::Subjects(2)));
         let mut out = Vec::new();
         let query = XmlQuery {
@@ -522,9 +522,9 @@ fn one_hsp_named(
     let run = run(
         Some(&matrix),
         if target == Xml2Target::Database {
-            b"db/sprot"
+            "db/sprot"
         } else {
-            b""
+            ""
         },
     );
     let mut writer = Xml2Writer::new(kind, params(target));
@@ -648,7 +648,7 @@ fn query_masking_lists_the_plus_regions_and_a_nucleotide_row_is_masked_in_lower_
 /// regions of the query (frame 0) are applied to the nucleotide row in lower case, and the
 /// scores come from `reward_penalty`.
 fn blastn_document(kind: Xml2Kind, minus: bool) -> String {
-    let mut run = run(None, b"");
+    let mut run = run(None, "");
     run.program = "blastn";
     run.version = "BLASTN 2.17.0+";
     run.matrix = None;
@@ -1178,7 +1178,7 @@ fn many_hits_16(
     message: Option<&[u8]>,
 ) -> (Vec<u8>, Vec<crate::report::blast_xml::writer::DocumentPost>) {
     let matrix = FormattingMatrix::new("BLOSUM62").unwrap();
-    let run = run(Some(&matrix), b"db/sprot");
+    let run = run(Some(&matrix), "db/sprot");
     let mut writer = Xml2Writer::new(Xml2Kind::Single16, params(Xml2Target::Database));
     let query = XmlQuery {
         id: b"Query_1",

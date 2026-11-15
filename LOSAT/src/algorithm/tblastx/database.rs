@@ -246,8 +246,8 @@ impl TblastxDatabase {
     /// The Blast-def-line taxid of each reported sequence by rank (`reported`: the ordinal id of
     /// each rank and the sequences with parsed Seq-ids; every rank is reported, a rank is made
     /// from a hit) and what the taxonomy database says about it, for the XML2 and JSON formats
-    /// (`common::database::read_reported_taxonomy`: the taxid, `sciname`, the taxonomy
-    /// database's refusals and the non-ASCII refusal come before any byte).
+    /// (`common::database::read_reported_taxonomy`: the taxid, `sciname`, and the taxonomy
+    /// database's refusals before any byte).
     pub(crate) fn read_taxids(&self, reported: &ReportedSubjects) -> Result<XmlTaxa> {
         let ranks: std::collections::BTreeSet<usize> = (0..reported.ordinals.len()).collect();
         let (taxids, taxonomy, parsed_taxonomy, notes) = shared::read_reported_taxonomy(

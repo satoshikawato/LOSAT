@@ -692,8 +692,8 @@ impl ReportedSubjects {
                 .filter(|(_, (_, title))| title.is_some())
                 .map(|(rank, _)| rank)
                 .collect();
-            // A scientific name NCBI cannot write, or a taxonomy database LOSAT cannot read as NCBI
-            // does, is LOSAT's refusal of the XML2 document (a run that holds its output drops it).
+            // A taxonomy database LOSAT cannot read as NCBI does is LOSAT's refusal of the XML2
+            // document (a run that holds its output drops it).
             (
                 reported.taxids,
                 reported.taxonomy,
@@ -871,7 +871,7 @@ impl ReportedSubjects {
                 if places {
                     self.query_reads.insert(ordinal, reads);
                 } else {
-                    let messages = reads.into_iter().flat_map(|(_, text)| text).collect();
+                    let messages = reads.into_iter().flat_map(|read| read.text).collect();
                     self.query_fetches.insert(ordinal, messages);
                 }
             }

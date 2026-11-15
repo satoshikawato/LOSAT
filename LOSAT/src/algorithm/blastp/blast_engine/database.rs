@@ -1461,7 +1461,7 @@ impl ListedTitles<'_> {
         database: &BlastpDatabase,
         ranks: impl IntoIterator<Item = usize>,
         rows_open: bool,
-    ) -> Result<Vec<(u32, Vec<u8>)>> {
+    ) -> Result<crate::report::query_warnings::QueryReads> {
         shared::subject_read_texts(
             &database.db,
             &database.taxdb,
@@ -2380,8 +2380,9 @@ pub(super) fn x_titles_allow_blocks(
 // These reports show no tabular id and no outfmt 0 title, so of the failures that
 // `x_titles_allow_blocks` rules out only those of the definition lines' reading remain: NCBI's
 // reader error (`HeaderReadError`), more than one definition line, and a stored title with a byte
-// outside ' ' ..= '~' (`ListedSubjects::read_titles`, `ListedTitles::check_reported_titles`; for
-// outfmt 5 that range is what `names::check_text` passes). A new function, so that
+// outside ' ' ..= '~' (`ListedSubjects::read_titles`, `ListedTitles::check_reported_titles`;
+// outfmt 5's stream writes such a title as NCBI's does, so there the check only keeps such a
+// database off the block search). A new function, so that
 // `x_titles_allow_blocks` and the per-definition-line code of the outfmt 0, 6 and 7 path stay as
 // they are.
 // No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
@@ -2441,8 +2442,8 @@ pub(super) fn x_titles_read_allow_blocks(
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the block search of outfmt 15 and 16. Besides what outfmt 5
 // reads (`x_titles_read_allow_blocks`) they read, for each subject with hits, the Blast-def-line
 // taxid (`SeqDb::defline_taxids`, a decode apart from the titles') and, when `taxdb.bti` is on the
-// search path, the taxonomy database (`shared::read_reported_taxonomy`): its opening, the lookup of
-// the taxid, and a scientific name that NCBI's stream can write (`names::check_text`). The search
+// search path, the taxonomy database (`shared::read_reported_taxonomy`): its opening and the lookup
+// of the taxid (a scientific name of any bytes is written as NCBI's stream writes it). The search
 // of all queries makes those refusals before its first byte; a block would make them after the
 // earlier blocks' bytes. So the block search is taken only where none can fail for any subject
 // of the database: every sequence's taxid reads, and `shared::taxdb_may_refuse` (OF5b, the one

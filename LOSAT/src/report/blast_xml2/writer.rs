@@ -221,15 +221,9 @@ where
         // (`seqdb::alias::report_names`): quotes kept, one space between names.
         Xml2Target::Database => {
             enc.variant("Target", "db", 0);
-            // The `-db` argument is UTF-8 (LOSAT refuses other file names), so its bytes reach
-            // the stream as they are; the stream writes or throws on them.
-            let names = match std::str::from_utf8(run.db_name) {
-                Ok(name) => crate::seqdb::alias::report_names(name)
-                    .join(" ")
-                    .into_bytes(),
-                Err(_) => run.db_name.to_vec(),
-            };
-            enc.visible_str(&names);
+            // The names' bytes reach the stream as they are; the stream writes or throws on them.
+            let names = crate::seqdb::alias::report_names(run.db_name).join(" ");
+            enc.visible_str(names.as_bytes());
             enc.end_variant();
         }
         Xml2Target::Subjects(count) => match &params.subject_names {

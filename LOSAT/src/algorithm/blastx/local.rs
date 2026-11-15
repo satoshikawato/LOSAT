@@ -292,8 +292,9 @@ struct RunReports<'a> {
     xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
 }
 
-/// BLAST XML and the XML2 and JSON documents refuse a query title that NCBI cannot write before
-/// the first byte, in the reports that they write; a `-subject` XML2 or JSON document never writes
+/// BLAST XML and the XML2 and JSON documents refuse a query title that NCBI crashes on
+/// (`names::Refusal`) before the first byte, in the reports that they write; a `-subject` XML2 or
+/// JSON document never writes
 /// the last query of a run that stops at a later batch (`blast_xml::scan_queries`, on the records
 /// in memory, read into the search's reader batches as the command line's `prescan_queries` reads
 /// the file, and at the same place: before the subjects' warnings). With outfmt 5 among the

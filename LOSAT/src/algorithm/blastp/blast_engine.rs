@@ -15163,7 +15163,7 @@ fn run_call(
                         program: "blastp",
                         version: &version,
                         reference: crate::report::blast_xml::REFERENCE_GAPPED_BLAST,
-                        db_name: db_name.as_deref().unwrap_or("").as_bytes(),
+                        db_name: db_name.as_deref().unwrap_or(""),
                         matrix: Some(&args.matrix_name),
                         expect: args.evalue,
                         gap_open: args.scoring.gap_open,

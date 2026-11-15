@@ -236,7 +236,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         program: "tblastx",
         version: concat!("TBLASTX ", crate::ncbi_blast_version!()),
         reference: REFERENCE_GAPPED_BLAST,
-        db_name: db_name.as_bytes(),
+        db_name,
         matrix: Some(matrix),
         expect: args.evalue,
         gap_open,

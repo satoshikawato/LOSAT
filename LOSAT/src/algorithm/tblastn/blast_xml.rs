@@ -427,7 +427,7 @@ impl PreparedXml {
             program: "tblastn",
             version: concat!("TBLASTN ", crate::ncbi_blast_version!()),
             reference: REFERENCE_GAPPED_BLAST,
-            db_name: self.db_name.as_bytes(),
+            db_name: &self.db_name,
             matrix: Some(&self.matrix_name),
             expect: self.values.expect,
             gap_open: self.gap_open,

@@ -26,8 +26,7 @@ pub(crate) struct TranslatedChunk {
 // backup->offset = backup->next;
 // while (backup->next < backup->full_range.right) { s_GetNextSubjectChunk(...); }
 pub(crate) fn unmasked_translated_chunks(frame_length: usize) -> Vec<TranslatedChunk> {
-    const MAX_DBSEQ_LEN: usize = 5_000_000;
-    const DBSEQ_CHUNK_OVERLAP: usize = 100;
+    use crate::core::subject_split::{DBSEQ_CHUNK_OVERLAP, MAX_DBSEQ_LEN};
     let mut chunks = Vec::new();
     let mut offset = 0;
     while offset < frame_length {

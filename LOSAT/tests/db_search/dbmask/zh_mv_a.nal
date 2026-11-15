@@ -1,0 +1,7 @@
+#
+# Alias file of mask_nucl_mv without m04 (OID 3, series NP, M4a-2b): m01-m03
+#
+TITLE masked nucleotide in volumes, m01-m03
+DBLIST ../../seqdb/db/mask_nucl_mv
+FIRST_OID 1
+LAST_OID 3

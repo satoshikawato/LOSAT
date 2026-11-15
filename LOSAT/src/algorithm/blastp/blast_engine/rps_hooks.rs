@@ -727,13 +727,14 @@ fn failed_batch_error(run: &RpsSearchRun<'_>, batch: usize, error: anyhow::Error
     .into()
 }
 
-/// `MAX_DBSEQ_LEN`: the longest subject (here a user query) that NCBI's engine searches whole.
-///
-/// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:54
-/// ```c
-/// #define MAX_DBSEQ_LEN 5000000
-/// ```
-const MAX_DBSEQ_LEN: usize = 5_000_000;
+// `MAX_DBSEQ_LEN`: the longest subject (here a user query) that NCBI's engine searches whole (the
+// one copy of the macro).
+//
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:54
+// ```c
+// #define MAX_DBSEQ_LEN 5000000
+// ```
+use crate::core::subject_split::MAX_DBSEQ_LEN;
 
 #[cfg(test)]
 mod tests {

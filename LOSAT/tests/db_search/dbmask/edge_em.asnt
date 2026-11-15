@@ -1,0 +1,22 @@
+Blast-db-mask-info ::= {
+  algo-id 2,
+  algo-program dust,
+  algo-options "edge em",
+  masks {
+    masks {
+      packed-int {
+        {
+          from 700,
+          to 701,
+          id local id 5
+        },
+        {
+          from 702,
+          to 701,
+          id local id 5
+        }
+      }
+    },
+    more FALSE
+  }
+}

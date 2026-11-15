@@ -3033,8 +3033,8 @@ pub(crate) fn blast_adjust_scores(
 // it only when its own input has the same bits; it does not change any value NCBI computes.
 /// The Newton input that `blast_adjust_scores` with these arguments would pass to
 /// `optimize_target_frequencies`, if it reaches the constrained iteration. Its `q` (the
-/// workspace's `mat_b`) is `shared_q`, made on the first input: a caller passes one `shared_q`
-/// per workspace, so the inputs of a batch share one copy.
+/// workspace's `mat_b`) is `shared_q`, made by the first call that returns an input: a caller
+/// passes one `shared_q` per workspace, so the inputs of a batch share one copy.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn x_newton_input(
     matrix_info: &BlastMatrixInfo,
@@ -3044,7 +3044,7 @@ pub(crate) fn x_newton_input(
     subject_length: i32,
     composition_adjust_mode: BlastCompoAdjustMode,
     workspace: &BlastCompositionWorkspace,
-    shared_q: &mut Option<std::rc::Rc<[f64; COMPO_NUM_TRUE_AA * COMPO_NUM_TRUE_AA]>>,
+    shared_q: &mut Option<super::x_newton_lanes::NewtonQ>,
 ) -> Option<super::x_newton_lanes::NewtonInput> {
     if query_composition.num_true_amino_acids == 0 || subject_composition.num_true_amino_acids == 0
     {

@@ -171,12 +171,16 @@ pub(crate) fn print_stats() {
 // ```
 // The arguments of this call that determine its result (`q = mat_b`, `row_probs`, `col_probs`,
 // `desired_re` with `desired_re > 0.0`).
+/// The `q` of the inputs of one batch: one copy of the workspace's `mat_b`, shared by them.
+pub(crate) type NewtonQ = std::rc::Rc<[f64; NN]>;
+
 /// Input of one relative-entropy-constrained problem (alphabet of 20). `q` is shared: the inputs
-/// that `x_newton_input` makes for one batch hold one copy of the workspace's `mat_b` (3,200 bytes)
-/// instead of one each (EB s22: a batch of 64 inputs was 225 KiB, kept per thread until taken).
+/// that `x_newton_input` makes for one batch hold one copy of the workspace's `mat_b` instead of
+/// one each (EB s22: an input was 3,528 bytes, so a batch of 33 to 64 inputs was a vector of
+/// 225,792 bytes, kept per thread until its results were taken; now 336 bytes an input).
 #[derive(Clone)]
 pub(crate) struct NewtonInput {
-    pub(crate) q: std::rc::Rc<[f64; NN]>,
+    pub(crate) q: NewtonQ,
     pub(crate) row: [f64; N],
     pub(crate) col: [f64; N],
     pub(crate) relative_entropy: f64,

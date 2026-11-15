@@ -346,6 +346,7 @@ export LOSAT_X_BNDBSMALL=1
 export LOSAT_X_BNDBSTREAM=1
 export LOSAT_X_BNDBWIDE=1
 export LOSAT_X_BNDCONE=1
+export LOSAT_X_BNEXTFIRST=1
 export LOSAT_X_BNFEWSUBJ=1
 export LOSAT_X_BNHITGROUP=1
 export LOSAT_X_BNHLGROW=1
@@ -1548,6 +1549,23 @@ Rebuilding less:
   on the 31,168 / 1,775 cDNAs x0.726 / x0.732 (peak RSS +13 MiB on the 31,168, the four slots' strips), by default at
   4 threads x1.001 / x0.999; megablast at one thread x0.9997 with the switch at `0` x0.9996 (the layout difference
   above is gone in this binary), 16 threads unchanged.
+- `LOSAT_X_BNEXTFIRST=1` (BLASTN, a megablast-type table whose lookup width is below the word size: `-task megablast`
+  and `-word_size` 12 or more, `-task blastn` with a lookup width of 9 or 10; speed; in the strict set from the pull
+  request that added it (perf/bn-ext-first, 2026-11-16); `=0` keeps the order before) extends each
+  lookup hit to its word before it looks up the hit's query context (`pair_extend::extend_offset_pairs`, its form
+  `EXT_FIRST`), as NCBI's `s_BlastNaExtend` does (the context is looked up in `s_BlastnDiag*ExtendInitialHit`, for a word
+  that was found). The extension reads neither the context nor its bounds (the query's sentinels end it), so the same
+  hits extend to the same words; a hit whose word is not found does nothing more. The order before looked up the context,
+  its cutoff and the diagonal of every hit first. Not for a table whose width is the word size (`-task blastn`'s 11 of 11:
+  nothing to extend), the small-query table (its extension takes the context's bounds), nor with LOSAT_DEBUG_BLASTN, the
+  debug window or blastn traces, which print or count a hit before its extension (`x_reach!` marks the form per batch).
+  Evidence (workstation, Xeon 6338, one thread; the base = dev 9f630198e; every report identical): instructions
+  (perf stat) MOB-suite's megablast 112.3 G -> 101.8 G (cycles x0.926), mlst's search (`example.fna` against the 225,777
+  pubMLST alleles, word 32, lookup width 12) 3.33 G -> 3.02 G (x0.971), ABRicate (width 11 of 11, the form before)
+  x0.998-0.999, Easyfig's `-task blastn` x0.999; time (a timed lease of 8 cores, both arms alternating, warm-up + 5
+  rounds, medians) mlst x0.930-0.935, MOB-suite x0.931, SISTR x0.963, BlobToolKit x0.959, ABRicate's 9 DBs x0.972-1.010,
+  geometric mean of 23 downstream-tool cases x0.983; the same max RSS (mlst `messy.fa` 49.9-50.4 MB in all three of dev,
+  the new binary and its `=0`). Callgrind of mlst's search: the steps of the pairs 708 M -> 489 M instructions.
 - `LOSAT_X_BNFEWSUBJ=1` (BLASTN `-subject`, every task whose seed stage has strips (PAIRPAR,
   `LOSAT_X_PAIRPARDISC`, `LOSAT_X_PAIRPARDISCARR`), speed; in the strict set from the pull request that added it
   (perf/bn-few-subj, evidence at the end of this entry): on unless it is `0`;

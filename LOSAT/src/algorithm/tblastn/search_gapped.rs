@@ -47,6 +47,26 @@ pub(super) struct TracebackOwnedHsp {
     pub edit_script: Vec<GapEditOp>,
 }
 
+// No NCBI counterpart: grid cells per initial HSP of a unit's tree and the most cells it gets
+// (`x_unit_tree_cells`); memory of the grid index only.
+const X_UNIT_TREE_CELLS_PER_HSP: usize = 64;
+const X_UNIT_TREE_MAX_CELLS: usize = 1 << 14;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3830-3831
+// ```c
+//       tree = Blast_IntervalTreeInit(0, query->length+1,
+//                                     0, subject->length+1);
+// ```
+/// No NCBI counterpart: the grid limit (`reset_with_bounds_cells`) of the tree NCBI makes for each
+/// unit: `X_UNIT_TREE_CELLS_PER_HSP` cells per initial HSP (the tree holds at most one HSP per
+/// initial HSP), at most `X_UNIT_TREE_MAX_CELLS`. A smaller grid lists more leaves per cell and
+/// answers the same.
+fn x_unit_tree_cells(initial: usize) -> usize {
+    initial
+        .saturating_mul(X_UNIT_TREE_CELLS_PER_HSP)
+        .clamp(X_UNIT_TREE_CELLS_PER_HSP, X_UNIT_TREE_MAX_CELLS)
+}
+
 // NCBI c++/src/algo/blast/core/blast_engine.c:478-552:
 // BlastInitHitListReset(init_hitlist); WordFinder(..., init_hitlist, ...);
 // GetGappedScore(..., init_hitlist, &hsp_list, ...);
@@ -119,6 +139,13 @@ fn score_gapped_chunk<S: super::score::TbnScore, const ONE_HIT: bool>(
         total_query_length + 1,
         0,
         i32::try_from(chunk.length)? + 1,
+    );
+    tree.reset_with_bounds_cells(
+        0,
+        total_query_length + 1,
+        0,
+        i32::try_from(chunk.length)? + 1,
+        x_unit_tree_cells(frame_initial.len()),
     );
     for hit in frame_initial {
         // NCBI c++/src/algo/blast/core/blast_gapalign.c:2371-2468:

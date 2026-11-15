@@ -546,6 +546,15 @@ survey probe of T7 (its `gen.py`): `nq.fna`, `pq.faa` and their two-query forms 
 `Subject_5 a &amp; b,`, `TPA: s7 third ~`), each as `.fna` and `.faa`. The alias files `t5/nt7_bf`, `t5/pt7_bf` (the
 sequence of taxid 100009, whose name has 0x81, then 100001) and `t5/nt7_fb`, `t5/pt7_fb` (the other order) are
 `make_t5.py`'s.
+The rows `db.t7.b.*`, `db.t7.c.*`, `db.t7.p.*` and `db.t7.j.*` (the T7 fix of the review's probe
+`T/t7/review`, its `mkin.py`) add `-parse_deflines` subject sets `lclS9` (`lcl|Subject_9 bad x\x81y title`),
+`lclS9g` (that record, then `lcl|s2 good two`) and `pS9tpa` (`lcl|Subject_9 TPA: s7 third ~`), the queries
+`qpd_local` (`qbad x\x81y title`), `qpd_gb` (`gb|AB000099.1| qbad ...`), `qpd_lcl` (`lcl|Query_1 qbad ...`), `qpd_gi`
+(`gi|4504347|ref|NP_000549.1| qbad ...`) and `qpd_refgi` (`ref|NP_000549.1|gi|4504347| qbad ...`), each as `.fna` and
+`.faa`, and the version 5 databases `t7/nlcls9`, `t7/plcls9` (one definition line `lcl|Subject_9`), `t7/ns9gb`,
+`t7/ps9gb` (`lcl|Subject_9`, then `gb|AB000001.1|`) and `t7/ngbs9`, `t7/pgbs9` (the other order), each with an empty
+title and the taxid 100009 of `../seqdb/taxdb/t5`, written by NCBI's `makeblastdb -parse_seqids -blastdb_version 5
+-taxid_map` 2.17.0 from the letters of `t7/bg.fna` and `t7/bg.faa`.
 
 A title of punctuation without parsed Seq-ids (line DBID tabfields; rows `db.id.tf.*.punct.*`): `make_ids.py
 --tabfields-only` writes `ids/ppunct_np` (version 4, without `-parse_seqids`) from `ids/ppunct.faa`, whose first title

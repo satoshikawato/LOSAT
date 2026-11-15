@@ -5925,29 +5925,7 @@ fn search_cli(
     let QueryRecords { records, end } = read_queries(&mut query_source);
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
     drop(query_source);
-    // The refusal of a title that psiblast's ASN.1 PSSM cannot write comes before the first
-    // byte, and so does that of a PSSM file that LOSAT cannot write as NCBI does (one of the
-    // report streams, a named pipe). (The titles of the archive are checked with the query
-    // batches, `search`.)
-    // psiblast's rounds write the files of their PSSMs too (`PsiRoundPlan::file_request`).
-    if let Some(request) = resolved.psi_pssm.as_ref().or_else(|| {
-        resolved
-            .psi_rounds
-            .as_deref()
-            .and_then(crate::algorithm::psiblast::rounds::PsiRoundPlan::file_request)
-    }) {
-        if request.asn_path.is_some() {
-            crate::algorithm::psiblast::pssm::check_pssm_titles(&records)?;
-        }
-        crate::algorithm::psiblast::pssm::check_pssm_files(
-            request,
-            records.len(),
-            resolved
-                .out
-                .as_deref()
-                .filter(|path| path.as_os_str() != "-"),
-        )?;
-    }
+    check_psiblast_pssm_files(&resolved, &records, &pssm_check_scope(&args))?;
     let reading = match end {
         QueryEnd::Input => QueryReading::End,
         QueryEnd::EofError => QueryReading::BlankLines,
@@ -6078,6 +6056,62 @@ pub fn run_local(
     )
 }
 
+/// Before the search of the FASTA queries `records`: the refusal of a title that psiblast's ASN.1 PSSM cannot write comes before the first byte, and
+/// so does that of a PSSM file that LOSAT cannot write as NCBI does (one of the report streams, a
+/// named pipe), for the PSSM after the last round (`psi_pssm`) or those of the rounds
+/// (`PsiRoundPlan::file_request`). (The titles of the archive are checked with the query batches,
+/// `search`.) The command line's entry (`search_cli`) makes it where it has read the queries, the
+/// records' entries (`run_local_formats`, `search_database`) where it would, for records that the
+/// command line reads from a file that is not empty (no records: the file of `Query is Empty!`,
+/// before the queries are read). `scope` says which queries the check covers: the call's
+/// `records`, or the run's in the first of the library's query batches (none in the later ones).
+fn check_psiblast_pssm_files(
+    resolved: &ResolvedBlastpArgs,
+    records: &[FastaRecord],
+    scope: &crate::algorithm::psiblast::pssm::PssmCheckScope,
+) -> Result<()> {
+    use crate::algorithm::psiblast::pssm::PssmCheckScope;
+    let (queries, run_titles) = match scope {
+        PssmCheckScope::Call => (records.len(), None),
+        PssmCheckScope::Run {
+            queries,
+            title_refusal,
+        } => (*queries, Some(title_refusal)),
+        PssmCheckScope::Checked => return Ok(()),
+    };
+    if let Some(request) = resolved.psi_pssm.as_ref().or_else(|| {
+        resolved
+            .psi_rounds
+            .as_deref()
+            .and_then(crate::algorithm::psiblast::rounds::PsiRoundPlan::file_request)
+    }) {
+        if request.asn_path.is_some() {
+            match run_titles {
+                None => crate::algorithm::psiblast::pssm::check_pssm_titles(records)?,
+                Some(Some(refusal)) => bail!("{refusal}"),
+                Some(None) => {}
+            }
+        }
+        crate::algorithm::psiblast::pssm::check_pssm_files(
+            request,
+            queries,
+            resolved
+                .out
+                .as_deref()
+                .filter(|path| path.as_os_str() != "-"),
+        )?;
+    }
+    Ok(())
+}
+
+/// The queries that the call's checks of its PSSM files cover (`PsiblastArgs::pssm_check`).
+fn pssm_check_scope(args: &BlastpArgs) -> crate::algorithm::psiblast::pssm::PssmCheckScope {
+    args.psiblast_pssm
+        .as_ref()
+        .map(|options| options.check_scope.clone())
+        .unwrap_or_default()
+}
+
 fn run_local_formats(
     args: BlastpArgs,
     query_records: &[FastaRecord],
@@ -6126,9 +6160,13 @@ fn run_local_formats(
     // The taxonomy database of the reports, where the command line asks (`open_search_database`).
     subject_taxonomy(&args, &mut resolved, args.taxdb_setting.as_ref(), outputs)?;
     let xinclude = xinclude_format(&args, outputs)?;
+    let scope = pssm_check_scope(&args);
     let args = resolved;
     if args.app == BlastpApp::Psiblast {
         psiblast_check_subject_letters(&subjects.records)?;
+    }
+    if !query_records.is_empty() {
+        check_psiblast_pssm_files(&args, query_records, &scope)?;
     }
     search(
         args,
@@ -6206,6 +6244,9 @@ fn search_database(
     let database = open_search_database(&args, &mut resolved, list.as_ref(), &settings, outputs)?
         .ok_or_else(crate::blastinput::app::missing_subject_error)?;
     let xinclude = xinclude_format(&args, outputs)?;
+    if !query_records.is_empty() {
+        check_psiblast_pssm_files(&resolved, query_records, &pssm_check_scope(&args))?;
+    }
     search(
         resolved,
         query_records,

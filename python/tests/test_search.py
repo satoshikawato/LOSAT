@@ -60,13 +60,11 @@ def test_what_is_not_an_option_here_is_refused(option):
 
 
 @pytest.mark.parametrize("option", ["out_pssm", "out_ascii_pssm", "save_pssm_after_last_round", "save_each_pssm"])
-def test_psiblast_writes_no_pssm_file_here(option):
+def test_psiblast_takes_its_pssm_files(option):
     takes_a_file = option in ("out_pssm", "out_ascii_pssm")
-    with pytest.raises(TypeError, match=option):
-        Search("psiblast", **{option: "p.txt" if takes_a_file else True})
-    words = [f"-{option}", "p.txt"] if takes_a_file else [f"-{option}"]
-    with pytest.raises(ArgumentError, match="writes no PSSM file"):
-        Search.from_argv("psiblast", words)
+    words = (f"-{option}", "p.txt") if takes_a_file else (f"-{option}",)
+    assert Search("psiblast", **{option: "p.txt" if takes_a_file else True}).argv == words
+    assert Search.from_argv("psiblast", list(words)).argv == words
 
 
 def test_psiblast_takes_no_pssm_query_here():
@@ -173,4 +171,4 @@ def test_describe_is_the_engines_table():
 def test_the_option_stubs_are_those_of_the_table():
     tool = Path(__file__).resolve().parents[1] / "tools" / "generate_option_stubs.py"
     done = subprocess.run([sys.executable, str(tool), "--check"], capture_output=True)
-    assert done.returncode == 0, "run tools/generate_option_stubs.py"
+    assert done.returncode == 0, "run tools/generate_option_stubs.py\n" + done.stdout.decode()

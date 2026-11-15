@@ -358,7 +358,8 @@ class Search:
 
     Each keyword is an option of the command line without its dash: `evalue=1e-5` is
     `-evalue 1e-5`. `describe` lists them. `-query`, `-subject`, `-db`, `-out` and `-outfmt` are
-    not options here, nor are psiblast's PSSM files (the library writes none). The search itself
+    not options here, nor is `-in_pssm` (the queries are records); psiblast's PSSM files
+    (`out_pssm`, `out_ascii_pssm`) are written where the command line writes them. The search itself
     is `run`, `batches` or `run_to_file`. The NCBI C++ Toolkit's `-logfile`, `-conffile` and
     `-dryrun` work as on the command line (`from_argv`): each search opens the file of `-logfile`
     and loads the file of `-conffile`, and `dry_run` tells a search that searches nothing.

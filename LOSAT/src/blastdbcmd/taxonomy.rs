@@ -461,9 +461,11 @@ pub(super) fn tax_info(db: &SeqDb, args: &Args, diag: &mut Diag, out: &mut Ostre
                 diag.err_post(message);
             }
             // A lookup whose result NCBI reads past its mapping of taxdb.btd is refused where
-            // the line writes it: names of no defined result, a kingdom past the mapping.
+            // the line writes it: names of no defined result, a kingdom past the mapping. Taxid
+            // 0's line writes `N/A` whatever its lookup gives (NCBI's `ZERO_TAX_ID` test above).
             let lookup = lookup.and_then(|lookup| match lookup {
-                TaxLookup::PastMapping(past) if taxid != 0 => Err(past.error("names")),
+                lookup if taxid == 0 => Ok(lookup),
+                TaxLookup::PastMapping(past) => Err(past.error("names")),
                 TaxLookup::Named(names) if need_kingdom => match &names.super_kingdom {
                     Err(past) => Err(past.error("super kingdom")),
                     Ok(_) => Ok(TaxLookup::Named(names)),

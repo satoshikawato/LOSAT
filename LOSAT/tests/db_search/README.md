@@ -539,7 +539,11 @@ of its 4,096-byte page), after its third tab (68..5,000: its names inside the ma
 (4,096..5,000). NCBI reads memory past its mapping there; with them on the search path the databases serve the rows
 `db_t5b_*_past_page_*` of the maskers, the blastdbcmd cases `T5B601`-`T5B608`, the rows `db.t5b.*` of
 `../db_search_manifest/blastp.tsv` and `blastn.tsv`, and the refusals of `../taxdb_tool_texts.rs` (a name written from
-past the mapping).
+past the mapping). Fix 3 adds `t5b/taxdb/zero_kingdom_past_page` (an entry of taxid 0 whose record runs past the
+mapping after its third tab: the blastdbcmd cases `T5B609`-`T5B610`, `-tax_info` writes `N/A` for taxid 0) and
+`t5b/taxdb/dup_last_btd_empty` (an empty `taxdb.btd` with good's index and its last taxid again after it: the search
+for that taxid reads a record, so no lookup writes the offset error, and NCBI faults at the first lookup that reads a
+record; the rows `db.t5b.de.*` of the six programs, LOSAT's refusals).
 
 A title of punctuation without parsed Seq-ids (line DBID tabfields; rows `db.id.tf.*.punct.*`): `make_ids.py
 --tabfields-only` writes `ids/ppunct_np` (version 4, without `-parse_seqids`) from `ids/ppunct.faa`, whose first title

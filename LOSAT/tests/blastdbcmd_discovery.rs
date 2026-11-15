@@ -253,6 +253,12 @@ const CASES: &[Case] = &[
     ("T5B606", Some("../db_search/t5b/taxdb/names_past_page"), false, &["-db", "../db_search/t5b/nmv", "-entry", "AB410002.1,AB410011.1"], 0),
     ("T5B607", Some("../db_search/t5b/taxdb/names_past_page"), false, &["-db", "../db_search/t5b/nmv", "-entry", "all", "-outfmt", "%a %T"], 0),
     ("T5B608", Some("../db_search/t5b/taxdb/names_past_page"), false, &["-db", "../db_search/t5b/nmv", "-entry_batch", "../db_search/t5b/batch.txt"], 0),
+    // Line RG item T5b fix 3: `zero_kingdom_past_page` (make_t5b.py --taxdb), whose record of taxid 0
+    // runs past NCBI's mapping of taxdb.btd after its third tab: `-tax_info` writes `N/A` for taxid 0
+    // whatever its lookup reads (blastdbcmd.cpp:711-718), also in a format with the super kingdom.
+    // NCBI BLAST+ 2.17.0 (local oracle), 2026-11-15, the T5b fix 3 subagent of ad-RG-T5-5.
+    ("T5B609", Some("../db_search/t5b/taxdb/zero_kingdom_past_page"), false, &["-db", "../db_search/t5b/nmv", "-tax_info", "-outfmt", "%T|%K"], 0),
+    ("T5B610", Some("../db_search/t5b/taxdb/zero_kingdom_past_page"), false, &["-db", "../db_search/t5b/nmv", "-tax_info", "-outfmt", "%f"], 0),
 ];
 
 /// The probe's cases that LOSAT refuses (one line naming LOSAT's BLASTDBCMD, exit status 1,

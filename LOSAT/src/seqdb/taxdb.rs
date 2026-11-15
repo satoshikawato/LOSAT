@@ -873,21 +873,15 @@ impl LazyTaxDb {
         self.open_into(messages)?.lookup(tax_id, messages)
     }
 
-    /// [`TaxDb::offset_error_taxid`] of the lazily opened database (this opens it, dropping the
-    /// texts of opening: ask it after the run's first lookup).
-    pub fn offset_error_taxid(&self) -> Result<Option<i32>, SeqDbError> {
-        self.open_into(&mut Vec::new())?.offset_error_taxid()
+    /// The lazily opened database (this opens it, dropping the texts of opening: ask it after the
+    /// run's first lookup). An open that was refused is the same error on every call.
+    pub fn database(&self) -> Result<&TaxDb, SeqDbError> {
+        self.open_into(&mut Vec::new())
     }
 
     /// [`TaxDb::entry_count`] of the lazily opened database (this opens it).
     pub fn entry_count(&self) -> Result<u64, SeqDbError> {
         Ok(self.open_into(&mut Vec::new())?.entry_count())
-    }
-
-    /// [`TaxDb::maps_null`] of the lazily opened database (this opens it, dropping the texts of
-    /// opening: ask it after the run's first lookup).
-    pub fn maps_null(&self) -> Result<bool, SeqDbError> {
-        Ok(self.open_into(&mut Vec::new())?.maps_null())
     }
 
     /// [`TaxDb::any_lookup_faults`] of the lazily opened database (this opens it). An open that

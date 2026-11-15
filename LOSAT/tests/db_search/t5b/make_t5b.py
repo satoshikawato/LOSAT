@@ -22,7 +22,13 @@ databases of line RG item T5b's fix 2 in `tests/db_search/t5b/taxdb/`, the `taxd
 `kingdom_past_page`, where 10090's offset is 5,000, so that the record of 9606 runs from 68 to 5,000,
 past the mapping after its third tab (its names inside it, its kingdom not); `names_past_page`,
 where 9606's offset is 4,096 and 10090's 5,000, so that the record of 9606 lies wholly past the
-mapping (NCBI looks for its tabs in memory past it).
+mapping (NCBI looks for its tabs in memory past it). Fix 3 adds `zero_kingdom_past_page`, an entry
+of taxid 0 at 147 before 562 at 5,000, so that taxid 0's record runs past the mapping after its
+third tab (blastdbcmd `-tax_info` writes `N/A` for taxid 0 whatever its lookup reads), and
+`dup_last_btd_empty`, an empty `taxdb.btd` (NCBI maps it as a null pointer) with good's index and
+its last taxid 99990 again at 266, so that the search for 99990 ends on the entry before the last
+one and reads a record (220..266): no lookup writes the offset error and the first that reads a
+record faults (the searches' prefetch of a subject with taxid 9606 or 99990).
 
 Python 3 standard library only; makeblastdb is NCBI's (the comparison oracle builds the inputs).
 """
@@ -59,26 +65,35 @@ def letters(path):
         return "".join(line.strip() for line in f if not line.startswith(">"))
 
 
-# The index of `tests/seqdb/taxdb/good` (taxid, offset into its taxdb.btd), and the offsets each
-# variant changes.
+# The index of `tests/seqdb/taxdb/good` (taxid, offset into its taxdb.btd), and for each variant the
+# offsets it changes or adds (the index sorted by taxid), the entries it appends after them, and
+# whether its taxdb.btd is good's (else empty).
 GOOD_INDEX = [(562, 0), (7777, 41), (9606, 68), (10090, 105), (12908, 147), (32630, 196), (99990, 220)]
 TAXDB_VARIANTS = {
-    "kingdom_past_page": {10090: 5000},
-    "names_past_page": {9606: 4096, 10090: 5000},
+    "kingdom_past_page": ({10090: 5000}, [], True),
+    "names_past_page": ({9606: 4096, 10090: 5000}, [], True),
+    "zero_kingdom_past_page": ({0: 147, 562: 5000}, [], True),
+    "dup_last_btd_empty": ({}, [(99990, 266)], False),
 }
 
 
 def taxdb_variants():
     good = os.path.join("tests", "seqdb", "taxdb", "good")
-    for name, offsets in TAXDB_VARIANTS.items():
+    for name, (offsets, appended, good_btd) in TAXDB_VARIANTS.items():
         out = os.path.join("tests", "db_search", "t5b", "taxdb", name)
         os.makedirs(out, exist_ok=True)
-        index = struct.pack(">II", 0x8739, len(GOOD_INDEX)) + bytes(16)
-        for taxid, offset in GOOD_INDEX:
-            index += struct.pack(">II", taxid, offsets.get(taxid, offset))
+        entries = dict(GOOD_INDEX)
+        entries.update(offsets)
+        entries = sorted(entries.items()) + appended
+        index = struct.pack(">II", 0x8739, len(entries)) + bytes(16)
+        for taxid, offset in entries:
+            index += struct.pack(">II", taxid, offset)
         with open(os.path.join(out, "taxdb.bti"), "wb") as f:
             f.write(index)
-        shutil.copyfile(os.path.join(good, "taxdb.btd"), os.path.join(out, "taxdb.btd"))
+        if good_btd:
+            shutil.copyfile(os.path.join(good, "taxdb.btd"), os.path.join(out, "taxdb.btd"))
+        else:
+            open(os.path.join(out, "taxdb.btd"), "wb").close()
 
 
 def main():

@@ -3022,13 +3022,33 @@ pub(crate) struct TaxdbRun {
 }
 
 /// What the lookups of a run's taxonomy database can write ([`TaxdbRun::prefetch_texts`]).
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct PrefetchTexts {
     /// The positive taxid whose lookup writes the offset error (`TaxDb::offset_error_taxid`).
     offset_error_taxid: Option<i32>,
     /// Whether a lookup can fault: NCBI maps an empty `taxdb.btd` as a null pointer
     /// (`TaxDb::maps_null`).
     maps_null: bool,
+}
+
+impl PrefetchTexts {
+    /// What the lookups of the opened taxonomy database `taxdb` can write: the one producer for
+    /// the search's loads ([`TaxdbRun::prefetch_texts`]) and the readers' ([`TaxdbRun::bioseq_loads`]).
+    /// A lookup of the last entry's taxid that fails writes no offset error, and the null mapping
+    /// is the file's whatever that lookup gives: with an empty `taxdb.btd` its failure is NCBI's
+    /// fault reading a record (an index whose search for that taxid ends on another entry), which
+    /// the run's loads meet at their first lookup that reads one ([`TaxdbRun::volume_load`]).
+    fn of(taxdb: &crate::seqdb::taxdb::TaxDb) -> Self {
+        PrefetchTexts {
+            // `x_GetTaxonomy` looks a positive taxid up only.
+            offset_error_taxid: taxdb
+                .offset_error_taxid()
+                .ok()
+                .flatten()
+                .filter(|&taxid| taxid > 0),
+            maps_null: taxdb.maps_null(),
+        }
+    }
 }
 
 /// `CSeqDBVol::m_TaxCache(256)`: the slots of a volume's taxonomy cache.
@@ -3274,32 +3294,21 @@ impl TaxdbRun {
         *self.found.get_or_init(|| db.taxdb_found())
     }
 
-    /// [`PrefetchTexts`] of the run, read once.
+    /// [`PrefetchTexts`] of the run, read once ([`PrefetchTexts::of`]): none without `taxdb.bti`
+    /// on the search path.
     fn prefetch_texts(&self, db: &SeqDb) -> PrefetchTexts {
         *self.texts.get_or_init(|| {
-            let none = PrefetchTexts {
-                offset_error_taxid: None,
-                maps_null: false,
-            };
             if !self.found(db) {
-                return none;
+                return PrefetchTexts::default();
             }
             let Some(search_path) = db.search_path() else {
-                return none;
+                return PrefetchTexts::default();
             };
             // A database that does not open fails at the run's first lookup, through its handle.
             let Ok(taxdb) = crate::seqdb::taxdb::TaxDb::open(search_path) else {
-                return none;
+                return PrefetchTexts::default();
             };
-            let Ok(taxid) = taxdb.offset_error_taxid() else {
-                return none;
-            };
-            // `x_GetTaxonomy` looks a positive taxid up only.
-            let taxid = taxid.filter(|&taxid| taxid > 0);
-            PrefetchTexts {
-                offset_error_taxid: taxid,
-                maps_null: taxdb.maps_null(),
-            }
+            PrefetchTexts::of(&taxdb)
         })
     }
 
@@ -3616,14 +3625,7 @@ impl TaxdbRun {
                 // second open, as the search's prefetch makes before its first lookup).
                 let taxdb = self.lazy_taxdb(search_path);
                 open = taxdb.open()?;
-                let prefetch = PrefetchTexts {
-                    offset_error_taxid: taxdb
-                        .offset_error_taxid()
-                        .ok()
-                        .flatten()
-                        .filter(|&taxid| taxid > 0),
-                    maps_null: taxdb.maps_null()?,
-                };
+                let prefetch = PrefetchTexts::of(taxdb.database()?);
                 let _ = self.texts.set(prefetch);
                 (taxdb, prefetch)
             }
@@ -4226,19 +4228,20 @@ pub(crate) fn subject_read_texts<'s, K>(
 /// The texts of the taxonomy database where psiblast's PSSM of a query whose batch reads one by
 /// one reads the sequence `blob` by a Seq-align id, the lookups of its load `lookups` (the
 /// positive taxids in `x_GetTaxonomy`'s order, [`blob_taxids`]; `ListedTitles::pssm_load_texts`),
-/// which NCBI writes there, after the query's report: the run's record of the volume lookups
-/// ([`TaxdbRun::load`], as [`prefetch_messages`] for the reports' reads) asks the taxonomy
-/// database at the volume's first lookup of a taxid (the texts of opening with the run's first)
-/// and where a lookup of the offset error's taxid misses its slot of the volume's 256-slot cache,
-/// which keeps the taxid across the run's queries and rounds. The PSSM's reads come in the order of
-/// its Seq-aligns, so the first load of a sequence in the run writes NCBI's texts, a taxid of the
-/// slot looked up between two lookups of that taxid included. NCBI's scope does not keep what a
-/// query loaded for its later rounds or queries (`ResetScopeHistory` after each query; review 4 of
-/// line DBID pssmread: a second query or round loads a sequence again after 40 other included
-/// subjects and not after none): a sequence loaded before (the query's report, an earlier query or
-/// round) is loaded again or not, which LOSAT does not model, so such a read is refused where the
-/// two give other texts (the slot then holds another taxid) and else writes nothing. The lookups are the run's from then on. Empty without `taxdb.bti` on the search
-/// path.
+/// which NCBI writes there, after the query's report: the run's loads ([`TaxdbRun::load`], as
+/// [`prefetch_messages`] for the reports' reads) write the texts of opening with the run's first
+/// lookup and ask the taxonomy database where a lookup of the offset error's taxid misses its slot
+/// of the volume's 256-slot cache, which keeps the taxid across the run's queries and rounds, and,
+/// where `taxdb.btd` is mapped as a null pointer, at every lookup of another taxid
+/// ([`TaxdbRun::volume_load`]). The PSSM's reads come in the order of its Seq-aligns, so the first
+/// load of a sequence in the run writes NCBI's texts, a taxid of the slot looked up between two
+/// lookups of that taxid included. NCBI's scope does not keep what a query loaded for its later
+/// rounds or queries (`ResetScopeHistory` after each query; review 4 of line DBID pssmread: a second
+/// query or round loads a sequence again after 40 other included subjects and not after none): a
+/// sequence loaded before (the query's report, an earlier query or round) is loaded again or not,
+/// which LOSAT does not model, so such a read is refused where the two give other texts (the slot
+/// then holds another taxid) and else writes nothing. The lookups are the run's from then on. Empty
+/// without `taxdb.bti` on the search path.
 pub(crate) fn pssm_load_texts(
     db: &SeqDb,
     run: &TaxdbRun,
@@ -6178,6 +6181,49 @@ mod taxdb_prepass_tests {
             run.lookup(&db, 9606, &mut Vec::new()),
             Ok(crate::seqdb::taxdb::TaxLookup::Named(_))
         ));
+        std::fs::remove_dir_all(&cwd).unwrap();
+    }
+
+    /// `PrefetchTexts::of`, the one producer of what a run's lookups can write, for the search's
+    /// prefetch and the readers' first load alike: `tests/db_search/t5b/taxdb/dup_last_btd_empty`
+    /// (make_t5b.py), an empty taxdb.btd whose index holds its last taxid 99990 twice, so that the
+    /// lookup of 99990 ends on the entry before the last one and reads a record (NCBI's fault,
+    /// no offset error). Both runs refuse at their first lookup that reads a record, where NCBI
+    /// 2.17.0 faults (SIGSEGV in all six search programs, probe of line RG T5b review 2).
+    #[test]
+    fn the_search_and_the_readers_refuse_a_null_mapping_whose_last_lookup_faults() {
+        let cwd = empty_cwd("null_map_last_faults");
+        let taxdb = root().join("db_search/t5b/taxdb/dup_last_btd_empty");
+        let db = db_search("t5b/pmv", Some(&taxdb), &cwd);
+        let want = PrefetchTexts {
+            offset_error_taxid: None,
+            maps_null: true,
+        };
+        let search = TaxdbRun::default();
+        // The database stores parsed Seq-ids: each subject with its parsed definition lines.
+        let parsed = parsed_subjects(&db);
+        let all = (0..db.num_seqs()).map(|ordinal| (ordinal, Some(&parsed[ordinal as usize])));
+        let refusal = prefetch_messages(&db, &search, all, "BLASTP").unwrap_err();
+        assert!(
+            refusal
+                .to_string()
+                .contains("reaches past the mapped end of the file (0 bytes)"),
+            "{refusal}"
+        );
+        assert_eq!(search.texts.get(), Some(&want));
+        let readers = TaxdbRun::sequential();
+        let mut first_refused = None;
+        for oid in 0..db.num_seqs() {
+            let set = db.defline_set(oid).unwrap();
+            if let Err(error) = readers.bioseq_texts(&db, oid, &set, None) {
+                assert!(matches!(error, SeqDbError::Unsupported { .. }), "{error}");
+                first_refused = Some(oid);
+                break;
+            }
+        }
+        // The OIDs 0 and 1 have no taxid; OID 2 is 9606, whose record (68..105) faults.
+        assert_eq!(first_refused, Some(2));
+        assert_eq!(readers.texts.get(), Some(&want));
         std::fs::remove_dir_all(&cwd).unwrap();
     }
 

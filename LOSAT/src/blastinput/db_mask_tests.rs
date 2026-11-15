@@ -361,9 +361,9 @@ fn a_hard_masked_search_refuses_the_masks_that_ncbi_s_chunks_do_not_handle() {
         error.starts_with("-db_hard_mask: the sequence of OID 3 (volume ")
             && error.contains(
                 "a5) has a mask, [0, 300), running to its end after the chunk from its start, for \
-                 which NCBI BLAST+ 2.17.0 scans the masked letters past that chunk (it reads past \
-                 its buffer: at a word of fewer than 11 letters, rows that differ from a near \
-                 input's, or a corrupt heap)"
+                 which NCBI BLAST+ 2.17.0 scans the masked letters past that chunk while it \
+                 extends within the chunk (at a word of fewer than 11 letters: rows that differ \
+                 from a near input's, or a crash)"
             )
             && error.ends_with("LOSAT's BLASTN does not search such a database with -db_hard_mask"),
         "{error}"

@@ -28,7 +28,7 @@ LOSAT/tests/db_search (README.md there says how they were built).
   bytes, exit status and hash columns of the `ncbi` row ROW_ID, NCBI's run of a near input (the same search with
   the mask one letter shorter), where NCBI's own run of the row reaches an approved NCBI defect
   (PD-LOSAT-NCBI-DEFECTS exception 13: `-db_hard_mask` with a mask that runs to the end, on which NCBI BLAST+
-  2.17.0 crashes or reads masked letters). The row has no frozen files of its own; `freeze` does not run NCBI
+  2.17.0 crashes, adds rows from the masked letters or drops seeds of the next subject). The row has no frozen files of its own; `freeze` does not run NCBI
   for it and copies ROW_ID's columns (`near_row_id`).
 - kind `losat-rejection`: LOSAT must exit with `rc`, write nothing to stdout, and its stderr must
   contain the text that follows `expect: ` in the `covers` cell (up to the end of the cell or a

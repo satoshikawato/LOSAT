@@ -1681,3 +1681,16 @@ makeblastdb -in tl.fna -dbtype nucl -out edge7 -title "edge masks 7" -blastdb_ve
 makeblastdb -in ts.fna -dbtype nucl -out edge8 -title "edge masks 8" -blastdb_version 4 -mask_data edge_ts.asnt,edge_tsn.asnt
 makeblastdb -in ../../seqdb/mask_nucl.fna -dbtype nucl -out mvn -title "mask_nucl_mv dust near" -blastdb_version 4 -mask_data mvn_dust.asnt
 ```
+
+The O1 follow-up of M4a-2c (2026-11-15, `M/m4a2c/O1_SURVEY.md` of line NP) added `edge9` and `edge10`, from the survey's
+probes `co` and `rp`. `edge9` (`tc.fna`, query `q9.fna`) holds `c1` (620 letters, mask 20-619 in `edge_tc.asnt`, algorithm
+11; 20-618 in `edge_tcn.asnt`, 12) and then `c2` (no mask), which holds the query's first 300 letters on the diagonal of
+`c1`'s masked copy: NCBI's search of `c1`'s tail drops `c2`'s row in the following subject (always at one thread, in some
+runs at two and four). `edge10` (`tr.fna`, query `q10.fna`) holds `r1` (900 letters) with two copies of the query inside the
+mask 20-899 (`edge_tr.asnt`, 11; 20-898 in `edge_trn.asnt`, 12), on which NCBI's interval tree runs out of memory and NCBI
+crashes at words of 11 and more. The rows of their algorithm 11 expect NCBI's output of algorithm 12 (`ncbi-near:`):
+
+```
+makeblastdb -in tc.fna -dbtype nucl -out edge9 -title "edge masks 9" -blastdb_version 4 -mask_data edge_tc.asnt,edge_tcn.asnt
+makeblastdb -in tr.fna -dbtype nucl -out edge10 -title "edge masks 10" -blastdb_version 4 -mask_data edge_tr.asnt,edge_trn.asnt
+```

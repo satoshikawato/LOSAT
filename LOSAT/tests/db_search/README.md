@@ -1440,7 +1440,8 @@ initial words' cutoff reads the hit-saving cutoff before the lowering: a build w
 them; `-xdrop_gap_final 15` keeps the traceback from joining the parts). Frozen with the local NCBI BLAST+ 2.17.0 release
 build (2026-11-14 and 2026-11-15). `l0txr.nal` is `LENGTH 0` over `../txrand` (rows `db.cnt.l0txr.*`: tblastx at
 `-num_threads 1`, whose frame loop saves the two-hit extensions against each subject's word cutoffs, not the setup's, which
-are 1 for a database length of 0; review 6 R6-M1 of D1a-3). Frozen with the local NCBI BLAST+ 2.17.0 release build
+are 1 for a database length of 0; review 6 R6-M1 of D1a-3; `db.cnt.l0txr.tx.w0`: the one-hit word finder of `-window_size 0`
+the same, review 8 R8-S1). Frozen with the local NCBI BLAST+ 2.17.0 release build
 (2026-11-15). `l0paja.pal` is `LENGTH 0` over `../paja` (`DBLIST ../paja`; rows `db.cnt.l0paja.*` with `bpqb5.faa` and
 `-evalue 0.01`: blastp's preliminary stage in blocks (outfmt 10) and its block search (outfmt 6, blastp and psiblast's one
 round), each block's call with the statistics of each subject; a build whose blocks take the setup's statistics prints 130

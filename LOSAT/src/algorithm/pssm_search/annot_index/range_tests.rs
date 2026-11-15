@@ -2,7 +2,7 @@
 //! object manager's index reads them (line RG D3-1 `om/SPEC.md` §5.8).
 
 use super::super::view::V;
-use super::{Handle, HandleRange, HandleRangeMap, Mode, Range, MAX, UNKNOWN};
+use super::{GiimHandle, GiimTree, Handle, HandleRange, HandleRangeMap, Mode, Range, MAX, UNKNOWN};
 use crate::report::serial::asn_types::{read_document, table::named, Value};
 use crate::seqid::model::ObjectId;
 use crate::seqid::ParsedSeqId;
@@ -95,9 +95,14 @@ fn location(text: &str) -> Value {
     value.unwrap()
 }
 
+/// The map of the location `text`, as the first annotation object of a run with a database.
 fn map(text: &str, mode: Mode) -> HandleRangeMap {
+    map_in(text, mode, &mut GiimTree::default())
+}
+
+fn map_in(text: &str, mode: Mode, giim: &mut GiimTree) -> HandleRangeMap {
     let value = location(text);
-    HandleRangeMap::of_location(V::new(named::SEQ_LOC, &value), mode)
+    HandleRangeMap::of_location(V::new(named::SEQ_LOC, &value), mode, giim)
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/handle_range_map.cpp:91-205, 249-281 (quoted at
@@ -110,7 +115,13 @@ fn a_map_marks_the_ranges_between_seq_ids() {
         Mode::None,
     );
     assert_eq!(m.map.len(), 2);
-    assert_eq!(m.map[1].0, Handle::of(&ParsedSeqId::Local(ObjectId::Id(1))));
+    assert_eq!(
+        m.map[1].0,
+        Handle::of(
+            &ParsedSeqId::Local(ObjectId::Id(1)),
+            &mut GiimTree::default()
+        )
+    );
     assert!(!m.map[1].1.overlapping().is_empty());
     // f38: `trans-splicing` sets no such marks.
     let m = map(
@@ -143,8 +154,14 @@ fn a_map_marks_the_ranges_between_seq_ids() {
     );
     assert_eq!(m.map.len(), 1);
     assert_eq!(
-        Handle::of(&ParsedSeqId::Local(ObjectId::Str(b"Query_1".to_vec()))),
-        Handle::of(&ParsedSeqId::Local(ObjectId::Str(b"query_1".to_vec())))
+        Handle::of(
+            &ParsedSeqId::Local(ObjectId::Str(b"Query_1".to_vec())),
+            &mut GiimTree::default()
+        ),
+        Handle::of(
+            &ParsedSeqId::Local(ObjectId::Str(b"query_1".to_vec())),
+            &mut GiimTree::default()
+        )
     );
     // `packed-pnt` (f18): the point 4294967295 is empty; `empty` is empty; `whole` is whole.
     assert!(map(
@@ -451,19 +468,6 @@ fn seq_ids_are_one_handle_as_ncbi_trees_take_them() {
         );
         assert_eq!(m.map.len() == 1, one, "{case}");
     }
-    // A `giim` Seq-id is a handle of its own at each lookup (what NCBI finds depends on the
-    // `giim` handles alive: `giim_repeats`).
-    let m = map(
-        "mix { int { from 0, to 5, id giim { id 5, db \"x\" } }, int { from 0, to 5, id giim { id 5, db \"y\" } }, int { from 0, to 5, id giim { id 6 } } }",
-        Mode::None,
-    );
-    assert_eq!(m.map.len(), 3);
-    assert!(HandleRangeMap::giim_repeats([&m]));
-    let m = map(
-        "mix { int { from 0, to 5, id giim { id 5 } }, int { from 0, to 5, id giim { id 6 } } }",
-        Mode::None,
-    );
-    assert!(!HandleRangeMap::giim_repeats([&m]));
 }
 
 // NCBI reference (598d8ae6): c++/include/objects/seq/seq_id_handle.hpp:201-207 (quoted at
@@ -478,8 +482,19 @@ fn a_map_iterates_its_seq_ids_by_packed_number() {
     // 3: AB000003, gi 3, AB000003.1 (one number: the addresses' order); 4: abc004; 5; 7; then the
     // negative numbers: general -5 (packed -6), gi -3, general 0 (packed -1); unpacked last: local,
     // PDB, gi 0.
+    let at = |entry: &(Handle, HandleRange)| {
+        m.map
+            .iter()
+            .position(|other| std::ptr::eq(other, entry))
+            .unwrap()
+    };
+    let order: Vec<Vec<usize>> = m
+        .ncbi_order()
+        .into_iter()
+        .map(|group| group.into_iter().map(at).collect())
+        .collect();
     assert_eq!(
-        m.ncbi_order(),
+        order,
         vec![
             vec![5, 7, 8],
             vec![9],
@@ -491,4 +506,93 @@ fn a_map_iterates_its_seq_ids_by_packed_number() {
             vec![1, 6, 10]
         ]
     );
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:2926-2964 (quoted at `Handle`):
+// the `om/` cases `s_i72`, `s_i73` and review 2's `id13`, `g1`-`g5` (NCBI BLAST+ 2.17.0).
+#[test]
+fn giim_handles_follow_ncbis_inverted_tree() {
+    let pair = |y: &str, x: &str| {
+        format!("mix {{ int {{ from 10, to 9, id {y} }}, int {{ from 0, to 5, id {x} }} }}")
+    };
+    // Equal Seq-ids: two handles; different ones of a number: one; the first made decides.
+    assert_eq!(
+        map(&pair("giim { id 5 }", "giim { id 5 }"), Mode::None)
+            .map
+            .len(),
+        2
+    );
+    assert_eq!(
+        map(
+            &pair("giim { id 5 }", "giim { id 5, db \"x\" }"),
+            Mode::None
+        )
+        .map
+        .len(),
+        1
+    );
+    let m = map(
+        "mix { int { from 0, to 5, id giim { id 5, db \"x\" } }, int { from 0, to 5, id giim { id 5, db \"y\" } }, int { from 0, to 5, id giim { id 5, db \"x\" } }, int { from 0, to 5, id giim { id 6 } } }",
+        Mode::None,
+    );
+    // (5, x) makes the first handle, (5, y) finds it, the second (5, x) makes another.
+    assert_eq!(m.map.len(), 3);
+    assert!(!HandleRangeMap::giim_repeats([&m]));
+    // The query's Seq-id (5, "q") holds the first handle for the whole run: (5, "q") gets a new
+    // handle, any other value of 5 the query's.
+    let query = [crate::seqid::ParsedSeqId::Giim(
+        crate::seqid::model::GiimportId {
+            id: 5,
+            db: Some(b"q".to_vec()),
+            release: None,
+        },
+    )];
+    let mut giim = GiimTree::new(&query, false);
+    let m = map_in(
+        &pair("giim { id 5, db \"q\" }", "giim { id 5 }"),
+        Mode::None,
+        &mut giim,
+    );
+    assert_eq!(m.map.len(), 2);
+    let m = map_in(
+        &pair("giim { id 5 }", "giim { id 5, db \"x\" }"),
+        Mode::None,
+        &mut giim,
+    );
+    assert_eq!(m.map.len(), 1);
+    // A number an earlier object looked up, and every number of a `-subject` run, is not followed:
+    // two of its lookups in one map are refused.
+    let mut giim = GiimTree::default();
+    map_in(
+        "int { from 0, to 5, id giim { id 5 } }",
+        Mode::None,
+        &mut giim,
+    );
+    giim.end_object();
+    let m = map_in(
+        &pair("giim { id 5 }", "giim { id 5, db \"x\" }"),
+        Mode::None,
+        &mut giim,
+    );
+    assert!(m.map.iter().all(|(handle, _)| matches!(
+        handle,
+        Handle::Giim {
+            handle: GiimHandle::Unknown(_),
+            ..
+        }
+    )));
+    assert!(HandleRangeMap::giim_repeats([&m]));
+    let mut giim = GiimTree::new(&[], true);
+    let m = map_in(
+        &pair("giim { id 5 }", "giim { id 5 }"),
+        Mode::None,
+        &mut giim,
+    );
+    assert!(HandleRangeMap::giim_repeats([&m]));
+    let m = map_in(
+        "int { from 0, to 5, id giim { id 7 } }",
+        Mode::None,
+        &mut giim,
+    );
+    assert!(!HandleRangeMap::giim_repeats([&m]));
 }

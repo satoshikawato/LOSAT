@@ -151,6 +151,9 @@ impl CallStart {
         inputs: Inputs<'_>,
         diagnostics: &mut dyn Write,
     ) -> Result<CallStart, Error> {
+        // The call is a run of its own: NCBI's application of it starts with a diagnostic stream
+        // that no earlier run in the process failed.
+        crate::ncbi_exception::begin_main_diag_run();
         let program = search.program().name();
         let mut call = CallStart {
             program,
@@ -342,6 +345,8 @@ pub fn begin_with<S: AsRef<OsStr> + Clone>(
     diagnostics: &mut dyn Write,
 ) -> Result<CallerStart, String> {
     use crate::blastinput::ncbi_environment::{preparse, Preparsed};
+    // A run of its own (LOSAT Web's): a diagnostic stream that no earlier run failed.
+    crate::ncbi_exception::begin_main_diag_run();
     let follows = run_messages_follow_log(start.program());
     let mut opened =
         open_with(start, words, files, diagnostics).map_err(|error| error.message().to_string())?;

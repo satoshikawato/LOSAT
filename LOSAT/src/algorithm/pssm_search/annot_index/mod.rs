@@ -27,11 +27,12 @@ mod range;
 mod table;
 mod view;
 
-use range::{Handle, HandleRangeMap, Mode, Range};
+use range::{GiimTree, Handle, HandleRangeMap, Mode, Range};
 use view::V;
 
 use crate::ncbi_exception::{post_line_in, NcbiException, Severity};
 use crate::report::serial::asn_types::{table::named, Value};
+use crate::seqid::ParsedSeqId;
 
 /// What NCBI's object manager made of the query's annotations: its messages (standard error) in
 /// order, whether its last left the main thread's diagnostic stream failed, and the exception
@@ -76,8 +77,10 @@ pub(crate) enum Refusal {
     /// Two Seq-ids of one table row's location with different messages whose order is that of
     /// memory addresses (one `m_Packed`).
     IdOrder,
-    /// Two `giim` Seq-ids of one number in one location (or one discontinuous alignment), which
-    /// NCBI takes for one Seq-id or two by the `giim` Seq-ids it holds at the time.
+    /// Two `giim` handles of one number in one location (or one discontinuous alignment), one of
+    /// whose Seq-ids NCBI finds among `giim` handles whose life LOSAT does not follow (an earlier
+    /// annotation's, a Seq-table column's, a Std-seg iterator's, a `-subject` run's subjects':
+    /// `range::GiimTree`).
     GiimIds,
     /// A feature table of more rows than `table::ROWS_LIMIT`.
     TableRows,
@@ -100,7 +103,7 @@ impl Refusal {
             Refusal::ScaledOverflow => "a PSSM query whose annot has a Seq-table int-scaled column whose values leave Int8 (a signed overflow in NCBI's object manager)",
             Refusal::FieldIdOverflow => "a PSSM query whose annot has a Seq-table column field-id below -2147483638 (a signed overflow in NCBI's object manager)",
             Refusal::IdOrder => "a PSSM query whose annot has a Seq-table row location whose Seq-ids get different messages and have no different gi, accession or general id numbers (NCBI's object manager writes them in the order of memory addresses)",
-            Refusal::GiimIds => "a PSSM query whose annot has a location with two giim Seq-ids of one id number (NCBI's object manager takes them for one Seq-id or two depending on the giim Seq-ids it holds at that time)",
+            Refusal::GiimIds => "a PSSM query whose annot has a location with two giim Seq-ids of one id number after an earlier annotation, a Seq-table column or a Std-seg looked that number up, or with -subject (NCBI's object manager takes them for one Seq-id or two depending on the giim Seq-ids it holds at that time)",
             Refusal::TableRows => "a PSSM query whose annot has a feature Seq-table of more than 10000000 rows (NCBI's object manager runs out of memory depending on the machine)",
             Refusal::StdDim => "a PSSM query whose annot has a Std-seg dim above 1000000 (NCBI's object manager allocates its rows depending on the machine's memory)",
         }
@@ -153,16 +156,25 @@ pub(super) struct Indexer<'p> {
     posts: Vec<u8>,
     muted: bool,
     caches: table::Caches,
+    /// NCBI's `giim` Seq-id tree (`range::GiimTree`).
+    giim: GiimTree,
 }
 
 /// The object manager's index of the annotations `annots` (`Seq-annot` values) of the query of a
-/// PSSM read by `program` (`psiblast`, `tblastn`: the diagnostic prefix), or LOSAT's refusal.
-pub(crate) fn index_annots(program: &str, annots: &[Value]) -> Result<AnnotOutcome, Refusal> {
+/// PSSM read by `program` (`psiblast`, `tblastn`: the diagnostic prefix), whose Seq-ids are
+/// `query_ids`, in a run with `-subject` sequences (`subjects`) or a database, or LOSAT's refusal.
+pub(crate) fn index_annots(
+    program: &str,
+    annots: &[Value],
+    query_ids: &[ParsedSeqId],
+    subjects: bool,
+) -> Result<AnnotOutcome, Refusal> {
     let mut ix = Indexer {
         program,
         posts: Vec::new(),
         muted: false,
         caches: table::Caches::default(),
+        giim: GiimTree::new(query_ids, subjects),
     };
     let annots: Vec<V<'_>> = annots
         .iter()
@@ -273,9 +285,10 @@ impl Indexer<'_> {
                 }
                 Some(("graph", graphs)) => {
                     for graph in graphs.items() {
-                        let loc = graph.get("loc").expect("mandatory");
-                        let map = HandleRangeMap::of_location(loc, Mode::None);
+                        let loc = graph.field("loc");
+                        let map = HandleRangeMap::of_location(loc, Mode::None, &mut self.giim);
                         self.refuse_empty(std::slice::from_ref(&map), Event::Graph)?;
+                        self.giim.end_object();
                     }
                 }
                 Some(("locs", locs)) => self.index_locs(*annot, *locs)?,
@@ -345,9 +358,10 @@ impl Indexer<'_> {
             .into_iter()
             .flatten()
         {
-            let map = HandleRangeMap::of_location(loc, mode);
+            let map = HandleRangeMap::of_location(loc, mode, &mut self.giim);
             self.map_location(&map, Event::Feature)?;
         }
+        self.giim.end_object();
         Ok(())
     }
 
@@ -431,6 +445,7 @@ impl Indexer<'_> {
                 self.refuse_empty(std::slice::from_ref(map), Event::Align)?;
             }
         }
+        self.giim.end_object();
         Ok(())
     }
 
@@ -479,8 +494,9 @@ impl Indexer<'_> {
                 .map(|(_, region)| region)
         });
         if let Some(region) = region {
-            let map = HandleRangeMap::of_location(region, Mode::None);
+            let map = HandleRangeMap::of_location(region, Mode::None, &mut self.giim);
             self.refuse_empty(std::slice::from_ref(&map), Event::Locs)?;
+            self.giim.end_object();
         }
         Ok(())
     }
@@ -547,13 +563,12 @@ impl Indexer<'_> {
         };
         for group in map.ncbi_order() {
             if event == Event::Row
-                && group.iter().any(|&at| empty(&map.map[at].1))
-                && group.iter().any(|&at| fails(&map.map[at].1))
+                && group.iter().any(|(_, hr)| empty(hr))
+                && group.iter().any(|(_, hr)| fails(hr))
             {
                 return Err(Stop::Refuse(Refusal::IdOrder));
             }
-            for at in group {
-                let (handle, hr) = &map.map[at];
+            for (handle, hr) in group {
                 let range = hr.overlapping();
                 if range.is_empty() {
                     if event != Event::Row || !self.muted {

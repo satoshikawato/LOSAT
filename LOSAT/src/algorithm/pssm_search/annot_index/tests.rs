@@ -17,7 +17,7 @@ fn index(annots: &[&str]) -> Result<AnnotOutcome, Refusal> {
             value.unwrap_or_else(|error| panic!("{text}: {error:?}"))
         })
         .collect();
-    index_annots("psiblast", &values)
+    index_annots("psiblast", &values, &[], false)
 }
 
 /// The messages of an index that goes on.
@@ -360,14 +360,21 @@ fn refusals_name_their_condition() {
         refused(&[&format!("{{ data align {{ {{ type global, dim 2, segs std {{ {{ dim 1000001, loc {{ int {{ from 0, to 5, id {Q1} }} }} }} }} }} }} }}")]),
         Refusal::StdDim
     );
-    // s_i72: two equal `giim` Seq-ids (NCBI: two handles here, one if another `giim` Seq-id of
-    // the number were held); s_i73: two different ones (NCBI: one handle here).
-    for db in ["x", "y"] {
-        assert_eq!(
-            refused(&[&table(1, &format!("{{ header {{ field-id location }}, data loc {{ mix {{ int {{ from 10, to 9, id giim {{ id 5, db \"x\" }} }}, int {{ from 0, to 5, id giim {{ id 5, db \"{db}\" }} }} }} }} }}"))]),
-            Refusal::GiimIds
-        );
-    }
+    // s_i72 unmuted: two equal `giim` Seq-ids are two handles, the reversed one an empty region;
+    // s_i73: two different ones of a number are one handle. s_i74: after a feature that looked up
+    // giim 5 (its handle lives on, as LOSAT does not follow), the two are refused.
+    let giim_row = |db: &str| {
+        table(1, &format!("{{ header {{ field-id location }}, data loc {{ mix {{ int {{ from 10, to 9, id giim {{ id 5, db \"x\" }} }}, int {{ from 0, to 5, id giim {{ id 5, db \"{db}\" }} }} }} }} }}"))
+    };
+    assert_eq!(refused(&[&giim_row("x")]), Refusal::EmptyRegion);
+    assert_eq!(posts(&[&giim_row("y")]), "");
+    assert_eq!(
+        refused(&[
+            "{ data ftable { { data comment NULL, location int { from 0, to 5, id giim { id 5 } } } } }",
+            &giim_row("y")
+        ]),
+        Refusal::GiimIds
+    );
     for refusal in [
         Refusal::EmptyRegion,
         Refusal::MutedDump,
@@ -527,4 +534,26 @@ fn table_row_messages_follow_the_handle_order() {
         });
         assert_eq!(outcome, expected.map(str::to_string), "{case}");
     }
+}
+
+// The `bm/` probes p01, p03, p02 of line RG D3-1 (NCBI BLAST+ 2.17.0): the size of a bit-bvector
+// is its `size` member, which NCBI reads without decoding BitMagic's data (an int-delta over a
+// bit-bvector of size 0 has no value at row 0; an extra fuzz column is only asked `IsSet`); the
+// first value read decodes it (refused).
+#[test]
+fn a_bit_bvector_decodes_only_for_a_value() {
+    let bad = "'02018000000100020005040000000C'H";
+    let id = format!("{{ header {{ field-id location-id }}, default id {Q1} }}");
+    assert_eq!(
+        posts(&[&table(1, &format!("{id}, {{ header {{ field-id location-from }}, data int-delta bit-bvector {{ size 0, data {bad} }} }}"))]),
+        ""
+    );
+    assert_eq!(
+        posts(&[&table(1, &format!("{id}, {{ header {{ field-id location-from }}, data int {{ 3 }} }}, {{ header {{ field-id location-fuzz-from-lim }}, data bit-bvector {{ size 5, data {bad} }} }}"))]),
+        ""
+    );
+    assert_eq!(
+        index(&[&table(1, &format!("{id}, {{ header {{ field-id location-from }}, data int-delta bit-bvector {{ size 1, data {bad} }} }}"))]).unwrap_err(),
+        Refusal::BitVector
+    );
 }

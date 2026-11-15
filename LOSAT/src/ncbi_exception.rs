@@ -582,23 +582,75 @@ pub(crate) fn post_line_in(
 // thread is lost: its post prints the header alone, and `CATCH_ALL`'s `LOG_POST` (no header) its
 // line feed (NCBI BLAST+ 2.17.0, line RG D3-1 `om/` cases k01-k06 and `om/mute/` e01-e16: the query
 // warning line, the taxonomy database warning, the engine error, with 1 to 4 threads).
-static MAIN_DIAG_FAILBIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+// The flag is NCBI's for one run (one application, one main thread). LOSAT's runs in one process
+// (the library's calls, LOSAT Web's runs) each begin a stream of their own (`begin_main_diag_run`,
+// at the command line's `cli::main_entry`, `api::start::CallStart::new` and
+// `api::start::begin_with`): a run never finds the stream failed by an earlier one.
+static MAIN_DIAG: MainDiag = MainDiag::new();
 
-/// Whether the diagnostic stream of NCBI's main thread has failed (`ERR_POST_X(6, "Failed to parse
-/// location of " << s.rdbuf() ...)` of the object manager, `algorithm::pssm_search::annot_index`):
-/// the run's later posts print their header only (`post_line`) and `CATCH_ALL` its line feeds
-/// (`cli::catch_all_text`). False unless a psiblast or tblastn `-in_pssm` run posted it. One flag
-/// for the process, as NCBI's is for its one run: only the command line reaches it (one run per
-/// process; the library API and LOSAT Web refuse `-in_pssm`, `api::search`), so no run finds it
-/// set by another.
-pub(crate) fn main_diag_failbit() -> bool {
-    MAIN_DIAG_FAILBIT.load(std::sync::atomic::Ordering::Relaxed)
+/// The main thread's diagnostic stream of the runs of the process: the number of the run going on,
+/// and the number of the run whose stream failed (0: none).
+pub(crate) struct MainDiag {
+    run: std::sync::atomic::AtomicU64,
+    failed: std::sync::atomic::AtomicU64,
 }
 
-/// Marks NCBI's main-thread diagnostic stream failed for the rest of the process
+impl MainDiag {
+    pub(crate) const fn new() -> MainDiag {
+        MainDiag {
+            run: std::sync::atomic::AtomicU64::new(1),
+            failed: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
+    /// A run begins, with a stream that has not failed.
+    pub(crate) fn begin_run(&self) {
+        self.run.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// The number of the run going on.
+    pub(crate) fn run(&self) -> u64 {
+        self.run.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// The stream of the run going on fails.
+    pub(crate) fn fail(&self) {
+        self.failed
+            .store(self.run(), std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether the stream of the run going on has failed.
+    pub(crate) fn failed(&self) -> bool {
+        self.failed.load(std::sync::atomic::Ordering::Relaxed) == self.run()
+    }
+}
+
+/// Whether the diagnostic stream of NCBI's main thread has failed in this run (`ERR_POST_X(6,
+/// "Failed to parse location of " << s.rdbuf() ...)` of the object manager,
+/// `algorithm::pssm_search::annot_index`): the run's later posts print their header only
+/// (`post_line`) and `CATCH_ALL` its line feeds (`cli::catch_all_text`). False unless a psiblast
+/// or tblastn `-in_pssm` run posted it (the library API and LOSAT Web refuse `-in_pssm`,
+/// `api::search`).
+pub(crate) fn main_diag_failbit() -> bool {
+    MAIN_DIAG.failed()
+}
+
+/// Marks NCBI's main-thread diagnostic stream failed for the rest of the run
 /// (`main_diag_failbit`); called where the run writes the post that fails it.
 pub(crate) fn set_main_diag_failbit() {
-    MAIN_DIAG_FAILBIT.store(true, std::sync::atomic::Ordering::Relaxed);
+    MAIN_DIAG.fail();
+}
+
+/// A run begins (the command line's, a library call's, a LOSAT Web run's): NCBI's application of
+/// that run starts with a diagnostic stream that has not failed.
+pub(crate) fn begin_main_diag_run() {
+    MAIN_DIAG.begin_run();
+}
+
+/// The number of the run going on (tests of the run entries).
+#[cfg(test)]
+pub(crate) fn main_diag_run() -> u64 {
+    MAIN_DIAG.run()
 }
 
 // NCBI reference (598d8ae6): c++/include/corelib/ncbidiag.hpp:550-551, 564-567
@@ -645,6 +697,20 @@ pub fn err_post_x_bytes(err_code: u32, err_subcode: u32, message: &[u8]) -> Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // A second run in the process (a library call, a LOSAT Web run) does not find the stream
+    // failed by the run before it.
+    #[test]
+    fn a_new_run_has_a_diagnostic_stream_of_its_own() {
+        let diag = MainDiag::new();
+        assert!(!diag.failed());
+        diag.fail();
+        assert!(diag.failed());
+        diag.begin_run();
+        assert!(!diag.failed());
+        diag.fail();
+        assert!(diag.failed());
+    }
 
     // makeblastdb 2.17.0 (the official Linux x64 release) with `MAX_LMDB_TXN_ENTRY=-1x` and two
     // sequences (probe of 2026-11-08, case txn_endptr_2seq): a report with the position.

@@ -28,6 +28,14 @@ impl<'a> V<'a> {
         self.value.member(index).map(|value| V::new(ty, value))
     }
 
+    /// The mandatory member `name` of the SEQUENCE (`Get<Member>()`), which the reader has set.
+    pub(super) fn field(self, name: &str) -> V<'a> {
+        match self.get(name) {
+            Some(value) => value,
+            None => not_in_table("a mandatory member", self.value),
+        }
+    }
+
     /// The variant of the CHOICE: its name (`SelectionName(Which())`) and value.
     pub(super) fn choice(self) -> (&'static str, V<'a>) {
         match self.value {
@@ -35,7 +43,7 @@ impl<'a> V<'a> {
                 let variant = &members(self.ty)[usize::from(*index)];
                 (variant.name(), V::new(variant.ty, value))
             }
-            other => unreachable!("a CHOICE of the table, not {other:?}"),
+            other => not_in_table("a CHOICE", other),
         }
     }
 
@@ -43,7 +51,7 @@ impl<'a> V<'a> {
     pub(super) fn items(self) -> impl Iterator<Item = V<'a>> + 'a {
         let element = match resolved(self.ty).kind {
             Kind::List { element, .. } => element,
-            ref other => unreachable!("a list of the table, not {other:?}"),
+            ref other => not_in_table("a list", other),
         };
         let values: &'a [Value] = match self.value {
             Value::List(values) => values,
@@ -57,7 +65,7 @@ impl<'a> V<'a> {
     pub(super) fn item(self, index: usize) -> Option<V<'a>> {
         let element = match resolved(self.ty).kind {
             Kind::List { element, .. } => element,
-            ref other => unreachable!("a list of the table, not {other:?}"),
+            ref other => not_in_table("a list", other),
         };
         match self.value {
             Value::List(values) => values.get(index).map(|value| V::new(element, value)),
@@ -73,7 +81,7 @@ impl<'a> V<'a> {
             Value::Ints(values) => values.len(),
             Value::Reals(values) => values.len(),
             Value::Octets(bytes) => bytes.len(),
-            other => unreachable!("a list of the table, not {other:?}"),
+            other => not_in_table("a list", other),
         }
     }
 
@@ -82,7 +90,7 @@ impl<'a> V<'a> {
         match self.value {
             Value::Int(n) => *n,
             Value::Enum(n) => i64::from(*n),
-            other => unreachable!("an INTEGER of the table, not {other:?}"),
+            other => not_in_table("an INTEGER", other),
         }
     }
 
@@ -95,17 +103,31 @@ impl<'a> V<'a> {
             Value::List(values) => values.get(index).map(|value| match value {
                 Value::Int(n) => *n,
                 Value::Enum(n) => i64::from(*n),
-                other => unreachable!("an INTEGER of the table, not {other:?}"),
+                other => not_in_table("an INTEGER", other),
             }),
-            other => unreachable!("a list of INTEGER of the table, not {other:?}"),
+            other => not_in_table("a list of INTEGER", other),
         }
+    }
+
+    /// The element `index` of a SEQUENCE OF INTEGER or of ENUMERATED that the caller's sizes
+    /// hold.
+    pub(super) fn int_in(self, index: usize) -> i64 {
+        match self.int_at(index) {
+            Some(value) => value,
+            None => not_in_table("an element", self.value),
+        }
+    }
+
+    /// The elements of a SEQUENCE OF INTEGER or of ENUMERATED in order.
+    pub(super) fn ints(self) -> impl Iterator<Item = i64> + 'a {
+        (0..self.len()).map(move |index| self.int_in(index))
     }
 
     /// The string's bytes.
     pub(super) fn str(self) -> &'a [u8] {
         match self.value {
             Value::Str(bytes) => bytes,
-            other => unreachable!("a string of the table, not {other:?}"),
+            other => not_in_table("a string", other),
         }
     }
 
@@ -113,7 +135,7 @@ impl<'a> V<'a> {
     pub(super) fn octets(self) -> &'a [u8] {
         match self.value {
             Value::Octets(bytes) => bytes,
-            other => unreachable!("an OCTET STRING of the table, not {other:?}"),
+            other => not_in_table("an OCTET STRING", other),
         }
     }
 
@@ -121,7 +143,15 @@ impl<'a> V<'a> {
     pub(super) fn seq_id(self) -> &'a ParsedSeqId {
         match self.value {
             Value::SeqId(id) => id,
-            other => unreachable!("a Seq-id of the table, not {other:?}"),
+            other => not_in_table("a Seq-id", other),
         }
     }
+}
+
+/// A value that the type table does not give its member (the reader's values follow the table):
+/// one panic site for every getter.
+#[cold]
+#[inline(never)]
+fn not_in_table(what: &str, value: &dyn std::fmt::Debug) -> ! {
+    unreachable!("{what} of the table, not {value:?}")
 }

@@ -10,6 +10,7 @@
   indexes it: the PSSM is searched, with NCBI's messages and errors where NCBI writes them; the few cases whose
   NCBI output names a memory address or depends on the machine are refused, each with its reason. The Seq-ids of
   the annotations are one sequence where NCBI's Seq-id index takes them for one (accessions, names, local and
-  general ids and patent numbers in any letter case; versions and releases exactly), and their messages come in
-  NCBI's order (by gi, accession and general id number). A PSSM file that
+  general ids and patent numbers in any letter case; versions and releases exactly; `giim` ids as NCBI's index of
+  them takes them), and their messages come in NCBI's order (by gi, accession and general id number). A Seq-table
+  bit-bvector column whose size alone is read (an int-delta over it, an extra fuzz column) is no longer refused. A PSSM file that
   starts with a UTF-8 byte order mark gets NCBI's "Unrecognized format for PSSM".

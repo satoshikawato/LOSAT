@@ -606,10 +606,13 @@ pub(crate) fn psi_search_and_object(
     // addresses, crashes, undefined behaviour) is refused here, before any output; `ids` and an
     // empty `annot` give nothing.
     let annot = match query.annot.as_deref() {
-        Some(annots) if !annots.is_empty() => {
-            super::annot_index::index_annots(&reader.program.to_ascii_lowercase(), annots)
-                .map_err(|refusal| reader.refuse(refusal.text()))?
-        }
+        Some(annots) if !annots.is_empty() => super::annot_index::index_annots(
+            &reader.program.to_ascii_lowercase(),
+            annots,
+            &query.ids,
+            !reader.database,
+        )
+        .map_err(|refusal| reader.refuse(refusal.text()))?,
         _ => super::annot_index::AnnotOutcome::default(),
     };
     let defline_reads_annot = defline_reads_annot(query);

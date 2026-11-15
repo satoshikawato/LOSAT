@@ -22,6 +22,7 @@ fn indexer() -> Indexer<'static> {
         posts: Vec::new(),
         muted: false,
         caches: Caches::default(),
+        giim: Default::default(),
     }
 }
 

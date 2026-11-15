@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use super::range::{Handle, HandleRangeMap, Mode, Range};
+use super::range::{GiimTree, Handle, HandleRangeMap, Mode, Range};
 use super::view::V;
 use super::{Event, Indexer, Refusal, Stop};
 use crate::ncbi_exception::{NcbiException, Severity, ThrowSite};
@@ -190,7 +190,7 @@ pub(super) struct Column<'a>(V<'a>);
 
 impl<'a> Column<'a> {
     fn header(self) -> V<'a> {
-        self.0.get("header").expect("mandatory")
+        self.0.field("header")
     }
     fn field_id(self) -> Option<i32> {
         self.header().get("field-id").map(|id| id.int() as i32)
@@ -468,7 +468,7 @@ impl<'a> LocColumns<'a> {
     //     }
     // }
     // ```
-    fn parse_defaults(&mut self) -> Result<(), Stop> {
+    fn parse_defaults(&mut self, giim: &mut GiimTree) -> Result<(), Stop> {
         if !self.is_set {
             return Ok(());
         }
@@ -498,7 +498,12 @@ impl<'a> LocColumns<'a> {
             return fail(477, format!("Conflicting {} columns", self.name));
         }
         if let Some(default) = self.id.and_then(Column::default) {
-            self.default_id = Some(Handle::of(single_get_id(default)?.seq_id()));
+            // The default handle lives as long as the table: LOSAT does not follow it (a `giim`
+            // Seq-id's, `GiimTree`).
+            self.default_id = Some(Handle::of_unfollowed(
+                single_get_id(default)?.seq_id(),
+                giim,
+            ));
         }
         if let Some(default) = self.gi.and_then(Column::default) {
             self.default_id = Some(Handle::gi(single_get(default, Want::Int8)?));
@@ -554,7 +559,7 @@ pub(super) struct TableInfo<'a> {
 // ```
 // `e_MaxChoice` is 23 (SeqFeatData_.hpp:174), `eSubtype_max` 106 (SeqFeatData.hpp:237).
 fn is_good_feat_table(table: V<'_>) -> bool {
-    let feat_type = table.get("feat-type").expect("mandatory").int();
+    let feat_type = table.field("feat-type").int();
     if !(1..23).contains(&feat_type) {
         return false;
     }
@@ -697,7 +702,7 @@ impl Indexer<'_> {
         let is_feat = is_good_feat_table(table);
         let mut info = TableInfo {
             is_feat,
-            num_rows: table.get("num-rows").expect("mandatory").int() as i32,
+            num_rows: table.field("num-rows").int() as i32,
             table_loc: None,
             sorted: false,
             loc: LocColumns::new("loc", 0),
@@ -706,7 +711,7 @@ impl Indexer<'_> {
             disabled: None,
         };
         let mut sorted_max: u32 = 0;
-        for column in table.get("columns").expect("mandatory").items() {
+        for column in table.field("columns").items() {
             let column = Column(column);
             if column.field_name() == Some(b"Seq-table location") {
                 if info.table_loc.is_some() {
@@ -826,8 +831,8 @@ impl Indexer<'_> {
             }
         }
         if is_feat {
-            info.loc.parse_defaults()?;
-            info.product.parse_defaults()?;
+            info.loc.parse_defaults(&mut self.giim)?;
+            info.product.parse_defaults(&mut self.giim)?;
         }
         info.sorted = info.is_sorted(sorted_max);
         // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:486-498 (`x_InitFeatTable`)
@@ -935,8 +940,9 @@ impl Indexer<'_> {
     pub(super) fn index_table(&mut self, info: &TableInfo<'_>) -> Result<(), Stop> {
         if !info.is_feat {
             if let Some(loc) = info.table_loc {
-                let map = HandleRangeMap::of_location(loc, Mode::None);
+                let map = HandleRangeMap::of_location(loc, Mode::None, &mut self.giim);
                 self.map_location(&map, Event::TableLocation)?;
+                self.giim.end_object();
             }
             return Ok(());
         }
@@ -944,7 +950,9 @@ impl Indexer<'_> {
             // `x_IsSorted` holds: the table location is an `int`.
             let (_, interval) = info.table_loc.expect("sorted").choice();
             let (id, range, _) = super::range::interval_parts(interval);
-            return self.x_map(range, Some(Handle::of(id)));
+            let handle = Handle::of(id, &mut self.giim);
+            self.giim.end_object();
+            return self.x_map(range, Some(handle));
         }
         for row in 0..info.num_rows.max(0) as u64 {
             // NCBI reference (598d8ae6): c++/include/objmgr/impl/seq_table_info.hpp:92-96,241-246
@@ -981,12 +989,14 @@ impl Indexer<'_> {
                     let Some(loc) = self.column_seq_loc(column, row)? else {
                         return Err(self.null_pointer());
                     };
-                    let map = HandleRangeMap::of_location(loc, Mode::None);
+                    let map = HandleRangeMap::of_location(loc, Mode::None, &mut self.giim);
                     self.map_location(&map, Event::Row)?;
                 } else {
                     let (id, range) = self.table_key(cols, row)?;
                     self.x_map(range, id)?;
                 }
+                // NCBI's row map is made for each location (seq_annot_info.cpp:1119-1150).
+                self.giim.end_object();
             }
         }
         Ok(())
@@ -1075,7 +1085,7 @@ impl Indexer<'_> {
             if id.data().is_some() {
                 handle = self
                     .column_seq_id(id, row)?
-                    .map(|id| Handle::of(id.seq_id()));
+                    .map(|id| Handle::of(id.seq_id(), &mut self.giim));
             }
         } else if let Some(gi) = cols.gi.filter(|gi| gi.data().is_some()) {
             handle = self.column_try_get(gi, row, Want::Int8)?.map(Handle::gi);
@@ -1166,8 +1176,8 @@ impl TableInfo<'_> {
         let Some(("int", interval)) = self.table_loc.map(V::choice) else {
             return false;
         };
-        let from = interval.get("from").expect("mandatory").int() as u32;
-        let to = interval.get("to").expect("mandatory").int() as u32;
+        let from = interval.field("from").int() as u32;
+        let to = interval.field("to").int() as u32;
         let length = if to >= from {
             (to - from).wrapping_add(1)
         } else {
@@ -1266,7 +1276,7 @@ impl Indexer<'_> {
             }
         }
         if let Some(data) = column.data() {
-            if index < multi_size(data)? {
+            if index < multi_size(data) {
                 return Ok(true);
             }
         }
@@ -1444,18 +1454,18 @@ impl Indexer<'_> {
                 .map(|&byte| i64::from(byte as i8)),
             "int2" | "int" | "int8" => element(value),
             "int-delta" => {
-                if row >= multi_size(value)? {
+                if row >= multi_size(value) {
                     return Ok(None);
                 }
                 Some(self.delta_sum(value, row)?)
             }
             "int-scaled" => {
-                let inner = value.get("data").expect("mandatory");
+                let inner = value.field("data");
                 let Some(v) = self.x_try_get_int8(inner, row, "Int8")? else {
                     return Ok(None);
                 };
-                let mul = value.get("mul").expect("mandatory").int() as i32;
-                let add = value.get("add").expect("mandatory").int() as i32;
+                let mul = value.field("mul").int() as i32;
+                let add = value.field("add").int() as i32;
                 let Some(scaled) = v
                     .checked_mul(i64::from(mul))
                     .and_then(|v| v.checked_add(i64::from(add)))
@@ -1576,7 +1586,7 @@ impl Indexer<'_> {
     fn delta_sum(&mut self, deltas: V<'_>, row: u64) -> Result<i64, Stop> {
         const BLOCK: u64 = 128;
         let key = address(deltas);
-        let size = multi_size(deltas)?;
+        let size = multi_size(deltas);
         let int4 = int_size(deltas)? <= 4;
         let want = if int4 { Want::Int4 } else { Want::Int8 };
         let end = ((row / BLOCK + 1) * BLOCK).min(size);
@@ -1592,7 +1602,7 @@ impl Indexer<'_> {
                 }
                 sums.push(sum);
             }
-            Ok(sums[row as usize])
+            Ok(sums.get(row as usize).copied().unwrap_or_default())
         })();
         self.caches.int_delta.insert(key, sums);
         result
@@ -1656,17 +1666,14 @@ impl Indexer<'_> {
                 while count > 0 {
                     let half = count >> 1;
                     let middle = first + half;
-                    if (value.int_at(middle).expect("in the list") as u64) < row {
+                    if (value.int_in(middle) as u64) < row {
                         first = middle + 1;
                         count = count - half - 1;
                     } else {
                         count = half;
                     }
                 }
-                Ok(
-                    (first < len && value.int_at(first).expect("in the list") as u64 == row)
-                        .then_some(first as u64),
-                )
+                Ok((first < len && value.int_in(first) as u64 == row).then_some(first as u64))
             }
             "indexes-delta" => {
                 let key = address(value);
@@ -1674,21 +1681,22 @@ impl Indexer<'_> {
                     let mut sum = 0u64;
                     (0..value.len())
                         .map(|i| {
-                            sum = sum.wrapping_add(value.int_at(i).expect("in the list") as u64);
+                            sum = sum.wrapping_add(value.int_in(i) as u64);
                             sum
                         })
                         .collect()
                 });
                 let at = sums.partition_point(|&sum| sum < row);
-                Ok((at < sums.len() && sums[at] == row).then_some(at as u64))
+                Ok((sums.get(at) == Some(&row)).then_some(at as u64))
             }
             "bit-set" => {
                 let bytes = value.octets();
-                let Some(byte_index) = usize::try_from(row / 8).ok().filter(|&i| i < bytes.len())
+                let Some((byte_index, &byte)) = usize::try_from(row / 8)
+                    .ok()
+                    .and_then(|i| bytes.get(i).map(|byte| (i, byte)))
                 else {
                     return Ok(None);
                 };
-                let byte = bytes[byte_index];
                 let bit_index = (row % 8) as u32;
                 if (u32::from(byte) << bit_index) & 0x80 == 0 {
                     return Ok(None);
@@ -1704,7 +1712,8 @@ impl Indexer<'_> {
                         .collect()
                 });
                 let in_byte = (u32::from(byte) >> (8 - bit_index)).count_ones();
-                Ok(Some(before[byte_index] + u64::from(in_byte)))
+                let before = before.get(byte_index).copied().unwrap_or_default();
+                Ok(Some(before + u64::from(in_byte)))
             }
             _ => Err(Stop::Refuse(Refusal::BitVector)),
         }
@@ -1740,17 +1749,26 @@ impl Indexer<'_> {
 //     return 0;
 // }
 // ```
-// The size of a bit-bvector is BitMagic's (refused with its values).
-fn multi_size(data: V<'_>) -> Result<u64, Stop> {
+// NCBI reference (598d8ae6): c++/include/objects/seqtable/BVector_data_.hpp:76, 97 (the generated
+// getter of `BVector-data.size`, `unsigned` by seqtable.def:38-39)
+// ```c++
+//     typedef unsigned TSize;
+//     ...
+//     TSize GetSize(void) const;
+// ```
+// The size of a bit-bvector is its `size` member (a Uint4), read without decoding BitMagic's data
+// (`bm/` probes p01, p03: NCBI is silent where only the size is asked); only a value decodes
+// (`x_try_get_int8`, `sparse_index_at`, refused).
+fn multi_size(data: V<'_>) -> u64 {
     let (variant, value) = data.choice();
-    Ok(match variant {
-        "common-string" | "common-bytes" => value.get("indexes").expect("mandatory").len() as u64,
+    match variant {
+        "common-string" | "common-bytes" => value.field("indexes").len() as u64,
         "bit" => value.octets().len() as u64 * 8,
-        "bit-bvector" => return Err(Stop::Refuse(Refusal::BitVector)),
-        "int-delta" => multi_size(value)?,
-        "int-scaled" | "real-scaled" => multi_size(value.get("data").expect("mandatory"))?,
+        "bit-bvector" => value.field("size").int() as u32 as u64,
+        "int-delta" => multi_size(value),
+        "int-scaled" | "real-scaled" => multi_size(value.field("data")),
         _ => value.len() as u64,
-    })
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_multi_data.cpp:363-385

@@ -95,6 +95,18 @@ fn the_dry_run_and_the_start_are_the_argv_s_words() {
     }
 }
 
+// Line RG D3-1 review 2 N1: every library call is a run of its own, whose posts no earlier run's
+// failed diagnostic stream mutes (`ncbi_exception::main_diag_failbit`, which only a command
+// line's `-in_pssm` run sets).
+#[test]
+fn a_call_begins_a_diagnostic_stream_of_its_own() {
+    let mut diagnostics = Vec::<u8>::new();
+    let search = validate(Program::Blastp, &["-evalue", "1"]).unwrap();
+    let before = crate::ncbi_exception::main_diag_run();
+    CallStart::new(&search, Inputs::new(&[], &[]), &mut diagnostics).unwrap();
+    assert!(crate::ncbi_exception::main_diag_run() > before);
+}
+
 // No NCBI counterpart: the library's contract (`api`): a search of records without `-logfile`,
 // `-conffile` and `-dryrun` reads no NCBI setting, so its call makes no start at its beginning.
 #[test]

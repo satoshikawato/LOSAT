@@ -43,7 +43,9 @@ lines (some records carry a second one) stay as they are, the taxids come from t
   `make_multidb.py --mixdb2-only MAKEBLASTDB` builds only `put` and these.
 - `nut` (line DBID mixtax): version 5 nucleotide without `-parse_seqids`, the records of nnp.fa with taxid 9606
   (`-taxid`): `put`'s counterpart for the nucleotide programs, whose loads look the taxonomy up in a list with `na`.
-  `make_multidb.py --mixtax-only MAKEBLASTDB` builds only `nut`.
+  `mix2_qc.faa` and `mix2_qcx.fna` (line DBID mixtax): the first query of mix2_q.faa and mix2_qx.fna, then one whose
+  letters are those of ../taxfilter/q.faa followed by `qp1` (back-translated in the second), which hits both `pa` and
+  `put`. `make_multidb.py --mixtax-only MAKEBLASTDB` builds only `nut` and these.
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
 """
@@ -189,10 +191,28 @@ def make_mixdb2(binary):
 
 
 def make_mixtax(binary):
-    """Builds nut (line DBID mixtax)."""
+    """Builds nut and writes the queries mix2_qc.faa and mix2_qcx.fna (line DBID mixtax)."""
     makeblastdb(binary, "-in", "nnp.fa", "-dbtype", "nucl", "-out", "nut", "-blastdb_version", "5", "-taxid", "9606",
                 "-title", "multidb nut")
     os.remove(os.path.join(HERE, "nut.njs"))
+
+    def records(name):
+        out = []
+        for header, lines in read_fasta_path(os.path.join(HERE, name)):
+            out.append((header.rstrip("\n"), "".join(line.strip() for line in lines)))
+        return out
+
+    (u_header, qp1), _ = records("mix2_q.faa")
+    (ux_header, qp1_x), _ = records("mix2_qx.fna")
+    globin = records(os.path.join(SRC, "q.faa"))[0][1]
+    globin_x = records(os.path.join(SRC, "q.fna"))[0][1]
+    for name, pair in (
+            ("mix2_qc.faa", [(u_header, qp1), (">mix2_c the letters of taxfilter/q.faa, then qp1", globin + qp1)]),
+            ("mix2_qcx.fna", [(ux_header, qp1_x),
+                              (">mix2_c the letters of taxfilter/q.fna, then qp1 back-translated", globin_x + qp1_x)])):
+        with open(os.path.join(HERE, name), "w") as f:
+            for header, seq in pair:
+                f.write(header + "\n" + "\n".join(seq[at:at + 60] for at in range(0, len(seq), 60)) + "\n")
 
 
 def main(binary):

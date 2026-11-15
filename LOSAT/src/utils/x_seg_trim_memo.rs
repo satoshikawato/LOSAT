@@ -46,7 +46,7 @@
 //! lock) and stores it. A segment is thus trimmed once for the whole search instead of once per
 //! thread that meets it, and the threads share one copy of the table. Each table grows on
 //! demand up to `X_MAX_ENTRIES` entries (or `X_MAX_ARENA` letters) and is then cleared as a
-//! whole; together the tables hold at most what one thread's table held before.
+//! whole; together the tables hold at most twice what one thread's table held before.
 //!
 //! No NCBI counterpart: the memo itself; it returns only values the trim computed for the same
 //! input and does not change any value NCBI computes.
@@ -57,17 +57,19 @@ use std::sync::Mutex;
 // No NCBI counterpart: the size bounds of the memo; they decide only which trims are evaluated
 // again and do not change any value NCBI computes.
 /// Tables of the memo; a segment's table is chosen by its hash (`x_shard`).
-const X_SHARDS: usize = 64;
-/// Most entries kept by one table; the table is cleared when it would hold more. The 32,768 of
-/// all tables keep every distinct segment of the measured jobs (12,584 for TBLASTN AP027131 x
-/// AP027133, 25,507 for BLASTX AP027131 x AP027133; v4-C DECISIONS 32).
-const X_MAX_ENTRIES: usize = 32_768 / X_SHARDS;
+const X_SHARDS: usize = 16;
+/// Most entries kept by one table; the table is cleared when it would hold more. The 65,536 of
+/// all tables (twice what one thread's table held before they were shared) keep every distinct
+/// segment of the measured jobs (12,584 for TBLASTN AP027131 x AP027133, 25,507 for BLASTX
+/// AP027131 x AP027133; v4-C DECISIONS 32) with room for the hash's uneven split.
+const X_MAX_ENTRIES: usize = 65_536 / X_SHARDS;
 /// Most letters kept by one table (the stored segments' bytes); the table is cleared when it
-/// would hold more.
-const X_MAX_ARENA: usize = (1 << 20) / X_SHARDS;
+/// would hold more (2 MiB for all tables).
+const X_MAX_ARENA: usize = (2 << 20) / X_SHARDS;
 /// Slots of a new table; it doubles while it is more than half full, up to twice
-/// `X_MAX_ENTRIES` (1,024 slots of 12 bytes).
-const X_FIRST_SLOTS: usize = 16;
+/// `X_MAX_ENTRIES` (8,192 slots of 12 bytes). The first tables of all shards take the 1,024
+/// slots one thread's first table took.
+const X_FIRST_SLOTS: usize = 1_024 / X_SHARDS;
 /// Longest segment stored: the fast trim's own bound. Longer segments are trimmed every time.
 const X_MAX_SEGMENT: usize = crate::utils::seg::X_TRIM_MAX;
 const _: () = assert!(

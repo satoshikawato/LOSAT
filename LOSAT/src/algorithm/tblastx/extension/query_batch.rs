@@ -119,25 +119,46 @@ impl<'a> QueryBatch<'a> {
         max_score: i32,
         x_drop: i32,
     ) {
-        let start = self.contexts[ctx].frame_base as usize;
+        let contexts = self.contexts;
+        let start = contexts[ctx].frame_base as usize;
         let n = s_next.min(start);
         let (mut score, max_score, x_drop) =
             (i64::from(score), i64::from(max_score), i64::from(x_drop));
-        // The context that holds the position or lies before it.
-        let mut k = ctx;
-        for step in 1..=n {
-            let p = start - step;
-            while k > 0 && p < self.contexts[k].frame_base as usize {
-                k -= 1;
+        // Context by context down from `ctx`: the NULLBs between the walk's position and the
+        // context's letters, then its letters from the last one (each run in a loop of its own).
+        let (mut step, mut k) = (0usize, ctx);
+        while step < n && k > 0 {
+            k -= 1;
+            let context = &contexts[k];
+            let len = context.aa_len;
+            let nullbs = (start - step)
+                .saturating_sub(context.frame_base as usize + len)
+                .min(n - step);
+            for _ in 0..nullbs {
+                score += i64::from(sc.score(NULLB, s_seq[s_next - 1 - step]));
+                step += 1;
+                if score > max_score {
+                    self.refuse();
+                    return;
+                }
+                if max_score - score >= x_drop {
+                    return;
+                }
             }
-            score += i64::from(sc.score(self.letter(k, p), s_seq[s_next - step]));
-            if score > max_score {
-                self.refuse();
-                return;
+            let take = len.min(n - step);
+            let letters = &context.aa_seq[1 + len - take..1 + len];
+            let subject = &s_seq[s_next - step - take..s_next - step];
+            for (&q, &s) in letters.iter().rev().zip(subject.iter().rev()) {
+                score += i64::from(sc.score(q, s));
+                if score > max_score {
+                    self.refuse();
+                    return;
+                }
+                if max_score - score >= x_drop {
+                    return;
+                }
             }
-            if max_score - score >= x_drop {
-                return;
-            }
+            step += take;
         }
     }
 
@@ -181,45 +202,54 @@ impl<'a> QueryBatch<'a> {
         max_score: i32,
         x_drop: i32,
     ) -> usize {
-        let start = self.contexts[ctx].frame_base as usize + q_at;
-        let batch_end = self
-            .contexts
+        let contexts = self.contexts;
+        let start = contexts[ctx].frame_base as usize + q_at;
+        let batch_end = contexts
             .last()
             .map_or(start, |last| last.frame_base as usize + last.aa_len);
         // NCBI's `n` of a walk that starts past the batch's end is negative: no step.
         let n = (s_seq.len() - s_at).min(batch_end.saturating_sub(start));
         let (mut score, max_score, x_drop) =
             (i64::from(score), i64::from(max_score), i64::from(x_drop));
-        // The context that holds the position or lies after it.
-        let mut k = ctx;
-        for step in 0..n {
-            let p = start + step;
-            while k + 1 < self.contexts.len()
-                && p >= self.contexts[k].frame_base as usize + self.contexts[k].aa_len
-            {
-                k += 1;
+        // Context by context up from `ctx`: the NULLBs before the next context's letters, then its
+        // letters (from the walk's position in it; each run in a loop of its own).
+        let (mut step, mut k) = (0usize, ctx);
+        while step < n && k + 1 < contexts.len() {
+            k += 1;
+            let context = &contexts[k];
+            let first = context.frame_base as usize;
+            if start + step >= first + context.aa_len {
+                continue;
             }
-            score += i64::from(sc.score(self.letter(k, p), s_seq[s_at + step]));
-            if score > max_score {
-                self.refuse();
-                return j + step;
+            let nullbs = first.saturating_sub(start + step).min(n - step);
+            for _ in 0..nullbs {
+                score += i64::from(sc.score(NULLB, s_seq[s_at + step]));
+                if score > max_score {
+                    self.refuse();
+                    return j + step;
+                }
+                if score <= 0 || max_score - score >= x_drop {
+                    return j + step;
+                }
+                step += 1;
             }
-            if score <= 0 || max_score - score >= x_drop {
-                return j + step;
+            let off = (start + step).saturating_sub(first);
+            let take = (context.aa_len - off).min(n - step);
+            let letters = &context.aa_seq[1 + off..1 + off + take];
+            let subject = &s_seq[s_at + step..s_at + step + take];
+            for (i, (&q, &s)) in letters.iter().zip(subject).enumerate() {
+                score += i64::from(sc.score(q, s));
+                if score > max_score {
+                    self.refuse();
+                    return j + step + i;
+                }
+                if score <= 0 || max_score - score >= x_drop {
+                    return j + step + i;
+                }
             }
+            step += take;
         }
         j + n
-    }
-
-    /// The batch's byte at offset `p`, which lies in context `k` or next to it: its letter, or the
-    /// NULLB between it and its neighbour.
-    #[inline]
-    fn letter(&self, k: usize, p: usize) -> u8 {
-        let context = &self.contexts[k];
-        match p.checked_sub(context.frame_base as usize) {
-            Some(off) if off < context.aa_len => context.aa_seq[1 + off],
-            _ => NULLB,
-        }
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2384-2392

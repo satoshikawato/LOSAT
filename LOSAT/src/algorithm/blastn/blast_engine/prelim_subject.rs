@@ -52,9 +52,10 @@
 //! functions are the statements of `search_subject`'s preliminary side (the subject's set-up, the
 //! reap and the `-ungapped` finish), of what was its closure `collect_prelim_hits_for_chunk` and of
 //! the chunk loop, in their order. What they read that is the same for every subject of a batch is
-//! `PrelimBatch`, built once per batch; what `search_subject` read of the call is `SubjectCtx`;
-//! what is the same for every chunk of a subject is `PrelimSubject`, built once per subject.
-//! `PrelimBatch` and `PrelimSubject` are `Sync`, for the chunks on the pool.
+//! `PrelimBatch`, built once per batch, and, with the batch's lookup tables, `ScanBatch`, built
+//! once per preliminary pass; what `search_subject` read of the call is `SubjectCtx`; what is the
+//! same for every chunk of a subject is `PrelimSubject`, built once per subject. `PrelimBatch`,
+//! `ScanBatch` and `PrelimSubject` are `Sync`, for the chunks on the pool.
 
 #[cfg(all(
     feature = "parallel",
@@ -120,6 +121,17 @@ pub(super) struct PrelimBatch<'a> {
     pub(super) encoded_query_concat_blastna_with_sentinels: &'a [u8],
     pub(super) encoded_queries_blastna: &'a [&'a [u8]],
     pub(super) query_lengths: &'a [usize],
+    /// The queries and their contexts, each context's effective search space, cutoff, hit-saving
+    /// cutoff, X-dropoff and reduced cutoff (`batch_setup::batch_cutoffs`: they depend on the
+    /// context only), and the LOSAT_TIMING counters (`None` when timing is off).
+    pub(super) queries: &'a [FastaRecord],
+    pub(super) query_contexts: &'a [QueryContext],
+    pub(super) query_eff_searchsp: &'a [i64],
+    pub(super) cutoff_scores: &'a [i32],
+    pub(super) hit_saving_cutoff_scores: &'a [i32],
+    pub(super) x_dropoff_scores: &'a [i32],
+    pub(super) reduced_cutoff_scores: &'a [i32],
+    pub(super) timing_ref: Option<&'a BlastnTiming>,
     /// The word finder: the word size, the scan step, the off-diagonal range, the window (0: one
     /// hit), the size at which a batch of offset pairs goes to the steps of the pairs, whether a
     /// table whose width is the word size is the direct one, the small-query table's compressed
@@ -202,9 +214,46 @@ pub(super) struct PrelimBatch<'a> {
     pub(super) debug_window: Option<(usize, usize, usize, usize)>,
 }
 
+/// What the preliminary pass of a batch reads besides `PrelimBatch`: the batch's lookup tables (the
+/// two-stage table, or the direct table or the na table), which the pass holds
+/// (`SubjectPasses::prelim_pass`; the traceback drops them, `x_lut_drop.rs`). Built once per
+/// batch by `prelim_pass` from `PrelimBatch` (`ScanBatch::new`); shared references only (`Sync`,
+/// for the subjects and the chunks on the pool).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:425 (the lookup table
+/// `s_BlastSearchEngineOneContext` takes for every chunk of every subject)
+/// ```c
+///         BLAST_SequenceBlk* subject, Int4 orig_length, LookupTableWrap* lookup,
+/// ```
+pub(super) struct ScanBatch<'a> {
+    pub(super) batch: &'a PrelimBatch<'a>,
+    pub(super) two_stage_lookup_ref: Option<&'a TwoStageLookup>,
+    pub(super) pv_direct_lookup_ref: Option<&'a PvDirectLookup>,
+    pub(super) na_lookup_ref: Option<&'a NaLookupTable>,
+}
+
+impl<'a> ScanBatch<'a> {
+    /// The preliminary pass's values of `batch` with its lookup tables `tables`.
+    pub(super) fn new(batch: &'a PrelimBatch<'a>, tables: &'a LookupTables) -> Self {
+        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:131-156
+        // ```c
+        // typedef struct BlastNaLookupTable {
+        //     ...
+        // } BlastNaLookupTable;
+        // ```
+        ScanBatch {
+            batch,
+            two_stage_lookup_ref: tables.two_stage_lookup.as_ref(),
+            pv_direct_lookup_ref: tables.pv_direct_lookup.as_ref(),
+            na_lookup_ref: tables.na_lookup.as_ref(),
+        }
+    }
+}
+
 /// What the preliminary search of a subject's chunks reads that is the same for every chunk of the
 /// subject, in groups below. Built once per subject by `prelim_subject`, with the names there
 /// (references and `Copy` values only, `Sync` as `PrelimBatch`); its borrows end with the call.
+/// What is the same for every subject is read from `ScanBatch` and `PrelimBatch`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:425,461-469,476
 /// (`s_BlastSearchEngineOneContext`: the subject, its chunks' overlap and the backup of the subject
@@ -224,7 +273,7 @@ pub(super) struct PrelimBatch<'a> {
 /// ...
 ///     s_BackupSubject(subject, &backup);
 /// ```
-/// The trace id, the one-byte letters and the timing counters have no NCBI counterpart.
+/// The trace id and the one-byte letters have no NCBI counterpart.
 pub(super) struct PrelimSubject<'a> {
     /// The subject: its index in the batch, its trace id (made only for the debug and trace lines),
     /// its packed letters, its letters one per byte for the greedy aligner (`XPrelimSubject`),
@@ -235,22 +284,6 @@ pub(super) struct PrelimSubject<'a> {
     pub(super) x_prelim_subject: &'a XPrelimSubject<'a>,
     pub(super) subject_masked: bool,
     pub(super) dbseq_chunk_overlap: usize,
-    /// The batch's lookup tables, which the preliminary stage's calls of `search_subject` pass:
-    /// the two-stage table, or the direct table or the na table.
-    pub(super) two_stage_lookup_ref: Option<&'a TwoStageLookup>,
-    pub(super) pv_direct_lookup_ref: Option<&'a PvDirectLookup>,
-    pub(super) na_lookup_ref: Option<&'a NaLookupTable>,
-    /// The batch's values as `search_subject` reads them: the queries, their contexts, each
-    /// context's cutoff, hit-saving cutoff, X-dropoff and reduced cutoff, and the LOSAT_TIMING
-    /// counters (`None` when timing is off).
-    pub(super) queries: &'a [FastaRecord],
-    pub(super) query_contexts: &'a [QueryContext],
-    pub(super) cutoff_scores: &'a [i32],
-    pub(super) hit_saving_cutoff_scores: &'a [i32],
-    pub(super) x_dropoff_scores: &'a [i32],
-    pub(super) reduced_cutoff_scores: &'a [i32],
-    pub(super) timing_ref: Option<&'a BlastnTiming>,
-    pub(super) timing_enabled: bool,
 }
 
 /// The search of one chunk of a subject (one turn of the chunk loop): the chunk's ranges and packed
@@ -299,7 +332,7 @@ pub(super) struct PrelimSubject<'a> {
 ///         }
 /// ```
 pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
-    batch: &PrelimBatch<'_>,
+    scan: &ScanBatch<'_>,
     subject: &PrelimSubject<'_>,
     chunk: &SubjectChunk,
     soft_ranges: &[(i32, i32)],
@@ -346,16 +379,6 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         blastn_trace_enabled,
         verbose,
         debug_window,
-        ..
-    } = batch;
-    let &PrelimSubject {
-        s_idx,
-        s_id,
-        s_seq_packed_full,
-        x_prelim_subject,
-        two_stage_lookup_ref,
-        pv_direct_lookup_ref,
-        na_lookup_ref,
         queries,
         query_contexts,
         cutoff_scores,
@@ -363,9 +386,22 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         x_dropoff_scores,
         reduced_cutoff_scores,
         timing_ref,
-        timing_enabled,
+        ..
+    } = scan.batch;
+    let &ScanBatch {
+        two_stage_lookup_ref,
+        pv_direct_lookup_ref,
+        na_lookup_ref,
+        ..
+    } = scan;
+    let &PrelimSubject {
+        s_idx,
+        s_id,
+        s_seq_packed_full,
+        x_prelim_subject,
         ..
     } = subject;
+    let timing_enabled = timing_ref.is_some();
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
     // ```c
     // /* Delete if not done in last loop iteration to prevent memory leak. */
@@ -1251,12 +1287,13 @@ fn batch_jobs<'a>(chunks: &'a [SubjectChunk], job_ends: &[usize]) -> Vec<&'a [Su
 /// ```
 /// The chunk batches on the pool have no NCBI counterpart (NCBI's threads take whole subjects).
 pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
-    batch: &PrelimBatch<'_>,
+    scan: &ScanBatch<'_>,
     subject: &PrelimSubject<'_>,
     split_state: &mut SubjectSplitState,
     gap_scratch: &mut GapAlignScratch,
     subject_scratch: &mut SubjectScratch,
 ) -> Vec<PrelimHit> {
+    let batch = scan.batch;
     let &PrelimBatch {
         requested_parallel,
         subject_besthit,
@@ -1390,7 +1427,7 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                 if jobs == 1 || x_serial_chunks {
                     for chunk in chunk_batch.iter() {
                         let hits = prelim_chunk_hits::<UNGAPPED>(
-                            batch,
+                            scan,
                             subject,
                             chunk,
                             soft_ranges,
@@ -1451,7 +1488,7 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                         |state: &mut (GapAlignScratch, SubjectScratch), chunk: &SubjectChunk| {
                             let (gap_scratch, subject_scratch) = state;
                             let hits = prelim_chunk_hits::<UNGAPPED>(
-                                batch,
+                                scan,
                                 subject,
                                 chunk,
                                 soft_ranges,
@@ -1553,7 +1590,7 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                     crate::utils::threading::report_stage("blastn", "subject_chunks", 1, false);
                     let soft_ranges = split_state.soft_ranges.as_slice();
                     let hits = prelim_chunk_hits::<UNGAPPED>(
-                        batch,
+                        scan,
                         subject,
                         &chunk,
                         soft_ranges,
@@ -1602,8 +1639,8 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
     combined_prelim_hits
 }
 
-/// The preliminary search of one subject, `search_subject`'s preliminary stage: the batch's lookup
-/// tables (the preliminary stage's calls pass them), the subject's lowercase masks
+/// The preliminary search of one subject, `search_subject`'s preliminary stage (`scan`: the batch's
+/// values and lookup tables, which the preliminary pass passes): the subject's lowercase masks
 /// (`-lcase_masking`) and the soft ranges between them, or a database sequence's soft ranges from
 /// its stored masks (`-db_soft_mask`, `read_db_soft_ranges`: a read error ends the sequence's
 /// search); the early return of a subject shorter than a word; its packed letters and their copy
@@ -1637,13 +1674,13 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
 /// (`s_BlastSearchEngineOneContext`), then sets the e-values of the subject's list and reaps it
 /// (:870-900).
 pub(super) fn prelim_subject<const UNGAPPED: bool>(
-    batch: &PrelimBatch<'_>,
+    scan: &ScanBatch<'_>,
     subject_ctx: &SubjectCtx<'_>,
     subject: BlastnSubjectRef<'_>,
-    lookups: Option<&LookupTables>,
     gap_scratch: &mut GapAlignScratch,
     subject_scratch: &mut SubjectScratch,
 ) -> Vec<PrelimHit> {
+    let batch = scan.batch;
     let &PrelimBatch {
         effective_word_size,
         use_dp,
@@ -1651,33 +1688,14 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
         db_mask,
         db_mask_error,
         blastn_debug,
+        cutoff_scores,
         ..
     } = batch;
     let &SubjectCtx {
         s_idx,
         s_id,
         s_len_full,
-        queries,
-        query_contexts,
-        cutoff_scores,
-        hit_saving_cutoff_scores,
-        x_dropoff_scores,
-        reduced_cutoff_scores,
-        timing_ref,
-        timing_enabled,
-        ..
     } = subject_ctx;
-    // The batch's lookup tables: the preliminary stage's calls of `search_subject` pass them, the
-    // traceback's pass `None` and do not scan (LOSAT_X_BNLUTDROP, graduated; `x_lut_drop.rs`).
-    let two_stage_lookup_ref = lookups.and_then(|tables| tables.two_stage_lookup.as_ref());
-    let pv_direct_lookup_ref = lookups.and_then(|tables| tables.pv_direct_lookup.as_ref());
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:131-156
-    // ```c
-    // typedef struct BlastNaLookupTable {
-    //     ...
-    // } BlastNaLookupTable;
-    // ```
-    let na_lookup_ref = lookups.and_then(|tables| tables.na_lookup.as_ref());
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1647-1662
     // ```c
@@ -1812,7 +1830,7 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
 
     // BLASTN debug: Log cutoff scores for this query-subject pair
     if blastn_debug {
-        subject_ctx.debug_cutoffs();
+        subject_ctx.debug_cutoffs(cutoff_scores);
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-483,593-599
@@ -1829,7 +1847,8 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
     //     *hsp_list_out_ptr = combined_hsp_list;
     // ```
     // The subject's chunks searched and their lists merged (`collect_subject_prelim`), with what
-    // the search of its chunks reads, built once per subject. A database sequence of a search with
+    // the search of its chunks reads of the subject, built once per subject (what is the same for
+    // every subject is `scan`'s, built once per batch). A database sequence of a search with
     // `-db_hard_mask` takes its chunks from its hard ranges (`HardSplitState`, in the worker's
     // scratch; series NP, M4a-2b decision H1) in an instance of its own, so the chunk loops of
     // every other subject are the base's and the subject pays one test of the mask's kind (`HARD`).
@@ -1840,21 +1859,10 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
         x_prelim_subject: &x_prelim_subject,
         subject_masked,
         dbseq_chunk_overlap,
-        two_stage_lookup_ref,
-        pv_direct_lookup_ref,
-        na_lookup_ref,
-        queries,
-        query_contexts,
-        cutoff_scores,
-        hit_saving_cutoff_scores,
-        x_dropoff_scores,
-        reduced_cutoff_scores,
-        timing_ref,
-        timing_enabled,
     };
     let mut combined_prelim_hits = if matches!(db_mask, Some((_, _, MaskKind::Hard))) {
         collect_subject_prelim::<UNGAPPED, true>(
-            batch,
+            scan,
             &prelim_subject,
             &mut split_state,
             gap_scratch,
@@ -1862,7 +1870,7 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
         )
     } else {
         collect_subject_prelim::<UNGAPPED, false>(
-            batch,
+            scan,
             &prelim_subject,
             &mut split_state,
             gap_scratch,
@@ -1876,7 +1884,7 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
     }
 
     if !UNGAPPED && !combined_prelim_hits.is_empty() {
-        reap_prelim_by_evalue(batch, subject_ctx, &mut combined_prelim_hits);
+        reap_prelim_by_evalue(batch, &mut combined_prelim_hits);
     }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1482-1541
     // ```c
@@ -1896,7 +1904,7 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
     // An ungapped (`-ungapped`) search finishes each subject's HSP list here, in the
     // preliminary stage: the traceback only keeps what this leaves.
     if UNGAPPED && !combined_prelim_hits.is_empty() {
-        finish_ungapped_prelim(batch, subject_ctx, subject, &mut combined_prelim_hits);
+        finish_ungapped_prelim(batch, subject, &mut combined_prelim_hits);
     }
     combined_prelim_hits
 }
@@ -1925,18 +1933,15 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
 /// ```
 pub(super) fn reap_prelim_by_evalue(
     batch: &PrelimBatch<'_>,
-    subject_ctx: &SubjectCtx<'_>,
     combined_prelim_hits: &mut Vec<PrelimHit>,
 ) {
     let &PrelimBatch {
+        query_eff_searchsp,
         search_karlin_ref,
         round_down_evalue_score,
         evalue_threshold,
         ..
     } = batch;
-    let &SubjectCtx {
-        query_eff_searchsp, ..
-    } = subject_ctx;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:885-899
     // ```c
     // Blast_HSPListGetEvalues(program_number, query_info,
@@ -2007,7 +2012,6 @@ pub(super) fn reap_prelim_by_evalue(
 /// The tab that indents line 1535 is written as spaces.
 pub(super) fn finish_ungapped_prelim(
     batch: &PrelimBatch<'_>,
-    subject_ctx: &SubjectCtx<'_>,
     subject: BlastnSubjectRef<'_>,
     combined_prelim_hits: &mut Vec<PrelimHit>,
 ) {
@@ -2019,13 +2023,10 @@ pub(super) fn finish_ungapped_prelim(
         search_karlin_ref,
         round_down_evalue_score,
         evalue_threshold,
-        ..
-    } = batch;
-    let &SubjectCtx {
         query_eff_searchsp,
         cutoff_scores,
         ..
-    } = subject_ctx;
+    } = batch;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2645-2668
     // ```c
     //       	seq_arg.encoding = (kTranslateSubject ? eBlastEncodingNcbi4na : eBlastEncodingNucleotide);

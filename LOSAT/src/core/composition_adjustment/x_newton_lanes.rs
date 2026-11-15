@@ -66,6 +66,7 @@ use super::adjust_scores::{
 use super::x_newton_exact::{
     factor_literal, ln_one, optimize_target_frequencies_exact, structure_ok, Factor, Wparts,
 };
+use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::ops::{Index, IndexMut};
@@ -1009,9 +1010,9 @@ impl LaneSlots {
 // `hand_over_at` above zero, when the queue is empty and at most `hand_over_at` lanes hold one.
 /// Returns (rounds, rounds × lanes that held a problem).
 #[inline(always)]
-fn solve_lanes_body<V: LaneVec>(
+fn solve_lanes_body<V: LaneVec, O: BorrowMut<NewtonOutput>>(
     inputs: &[NewtonInput],
-    outputs: &mut [NewtonOutput],
+    outputs: &mut [O],
     st: &mut LaneState<V>,
     lanes: &mut LaneSlots,
     next: &mut usize,
@@ -1227,7 +1228,7 @@ fn solve_lanes_body<V: LaneVec>(
                 let converged = its[l] <= K_COMPO_ADJUST_ITERATION_LIMIT
                     && lane_rnorm <= K_COMPO_ADJUST_ERR_TOLERANCE
                     && st.z[M - 1][l] < 1.0;
-                let output = &mut outputs[s];
+                let output: &mut NewtonOutput = outputs[s].borrow_mut();
                 output.status = if converged { 0 } else { 1 };
                 for k in 0..NN {
                     output.x[k] = st.x[k][l];
@@ -1256,9 +1257,9 @@ fn solve_lanes_body<V: LaneVec>(
 // The four-lane loop over a whole batch (no lane holds a problem, the queue at its start).
 /// Returns (rounds, rounds × lanes that held a problem).
 #[inline(always)]
-fn solve_lanes4_body(
+fn solve_lanes4_body<O: BorrowMut<NewtonOutput>>(
     inputs: &[NewtonInput],
-    outputs: &mut [NewtonOutput],
+    outputs: &mut [O],
     st: &mut LaneState<F4>,
 ) -> (u64, u64) {
     let mut lanes = LaneSlots::empty();
@@ -1278,9 +1279,9 @@ fn solve_lanes4_body(
 // with their `its` and first-round flag) and finish there. Each problem keeps its operations.
 /// Returns [eight-lane rounds, their busy lane rounds, four-lane rounds, their busy lane rounds].
 #[inline(always)]
-fn solve_lanes8_body(
+fn solve_lanes8_body<O: BorrowMut<NewtonOutput>>(
     inputs: &[NewtonInput],
-    outputs: &mut [NewtonOutput],
+    outputs: &mut [O],
     st8: &mut LaneState<F8>,
     st4: &mut LaneState<F4>,
     hand_over_at: usize,
@@ -1314,9 +1315,9 @@ fn solve_lanes8_body(
 // IEEE-754 operations as the body without the feature; it does not change any value NCBI computes.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
-unsafe fn solve_lanes_avx2(
+unsafe fn solve_lanes_avx2<O: BorrowMut<NewtonOutput>>(
     inputs: &[NewtonInput],
-    outputs: &mut [NewtonOutput],
+    outputs: &mut [O],
     st: &mut LaneState<F4>,
 ) -> (u64, u64) {
     solve_lanes4_body(inputs, outputs, st)
@@ -1328,9 +1329,9 @@ unsafe fn solve_lanes_avx2(
 // ```
 // No NCBI counterpart: the lane body without target features (Wasm, other targets,
 // LOSAT_X_NEWTONEXACT_LEVEL=0); it does not change any value NCBI computes.
-fn solve_lanes_plain(
+fn solve_lanes_plain<O: BorrowMut<NewtonOutput>>(
     inputs: &[NewtonInput],
-    outputs: &mut [NewtonOutput],
+    outputs: &mut [O],
     st: &mut LaneState<F4>,
 ) -> (u64, u64) {
     solve_lanes4_body(inputs, outputs, st)
@@ -1345,9 +1346,9 @@ fn solve_lanes_plain(
 // (the eight lanes run on aarch64). It does not change any value NCBI computes.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
-unsafe fn solve_lanes8_avx2(
+unsafe fn solve_lanes8_avx2<O: BorrowMut<NewtonOutput>>(
     inputs: &[NewtonInput],
-    outputs: &mut [NewtonOutput],
+    outputs: &mut [O],
     st8: &mut LaneState<F8>,
     st4: &mut LaneState<F4>,
     hand_over_at: usize,
@@ -1361,9 +1362,9 @@ unsafe fn solve_lanes8_avx2(
 // ```
 // No NCBI counterpart: the eight-lane loop without target features (aarch64 NEON through the
 // baseline target; other targets in the unit tests); it does not change any value NCBI computes.
-fn solve_lanes8_plain(
+fn solve_lanes8_plain<O: BorrowMut<NewtonOutput>>(
     inputs: &[NewtonInput],
-    outputs: &mut [NewtonOutput],
+    outputs: &mut [O],
     st8: &mut LaneState<F8>,
     st4: &mut LaneState<F4>,
     hand_over_at: usize,
@@ -1385,7 +1386,7 @@ fn solve_lanes8_plain(
 // Batches of fewer than `MIN_LANE_BATCH` problems use `x_newton_exact` (same results); with
 // aarch64, batches of `MIN_LANE8_BATCH` or more use eight lanes.
 /// Solves `inputs[i]` into `outputs[i]`.
-pub(crate) fn solve_batch(inputs: &[NewtonInput], outputs: &mut [NewtonOutput]) {
+pub(crate) fn solve_batch<O: BorrowMut<NewtonOutput>>(inputs: &[NewtonInput], outputs: &mut [O]) {
     let lanes8 = if eight_lanes() {
         Some(HAND_OVER_LANES)
     } else {
@@ -1407,7 +1408,11 @@ pub(crate) fn solve_batch(inputs: &[NewtonInput], outputs: &mut [NewtonOutput]) 
 // `solve_batch` with the width given: `lanes8` is `None` for four lanes, `Some(hand_over_at)` for
 // eight lanes on batches of `MIN_LANE8_BATCH` or more (see `solve_lanes8_body`).
 /// Solves `inputs[i]` into `outputs[i]`.
-fn solve_batch_with(inputs: &[NewtonInput], outputs: &mut [NewtonOutput], lanes8: Option<usize>) {
+fn solve_batch_with<O: BorrowMut<NewtonOutput>>(
+    inputs: &[NewtonInput],
+    outputs: &mut [O],
+    lanes8: Option<usize>,
+) {
     assert_eq!(inputs.len(), outputs.len());
     if let Some(hand_over_at) = lanes8 {
         if inputs.len() >= MIN_LANE8_BATCH {
@@ -1417,6 +1422,7 @@ fn solve_batch_with(inputs: &[NewtonInput], outputs: &mut [NewtonOutput], lanes8
     }
     if inputs.len() < MIN_LANE_BATCH {
         for (input, output) in inputs.iter().zip(outputs.iter_mut()) {
+            let output: &mut NewtonOutput = output.borrow_mut();
             output.status = optimize_target_frequencies_exact(
                 &mut output.x,
                 &input.q[..],
@@ -1463,7 +1469,11 @@ thread_local! {
 // ```
 // An eight-lane batch (`solve_lanes8_body`), AVX2 or plain as the four-lane batches.
 /// Solves `inputs[i]` into `outputs[i]` on eight lanes.
-fn solve_batch8(inputs: &[NewtonInput], outputs: &mut [NewtonOutput], hand_over_at: usize) {
+fn solve_batch8<O: BorrowMut<NewtonOutput>>(
+    inputs: &[NewtonInput],
+    outputs: &mut [O],
+    hand_over_at: usize,
+) {
     LANES8_STATES.with(|states| {
         let mut states = states.borrow_mut();
         let (st8, st4) = states.get_or_insert_with(|| (new_lane_state(), new_lane_state()));
@@ -1504,12 +1514,16 @@ thread_local! {
 }
 
 // No NCBI counterpart: the results of this thread's last prefetch as it solved them
-// (LOSAT_X_NEWTONBATCH): `taken` marks the ones taken, `next` is the first one not taken and `left`
-// counts the ones not taken. It does not change any value NCBI computes.
+// (LOSAT_X_NEWTONBATCH), one box each; a result taken is freed at once (`None`), `next` is the first
+// one not taken and `left` counts the ones not taken. It does not change any value NCBI computes.
+/// One box per result, not one vector for the batch: each prefetch made a new block of n x 3,208
+/// bytes (n = 33 to 64 for TBLASTN), which seldom fitted the free space the thread's earlier
+/// blocks left and so pushed the top of its glibc arena (line EB s26 C26 / C28: the largest top
+/// push of TBLASTN at 32 threads, twice as large with half the inputs per prefetch); a box fits the
+/// space the boxes taken before it left.
 struct KeptBatch {
     inputs: Vec<NewtonInput>,
-    outputs: Vec<NewtonOutput>,
-    taken: Vec<bool>,
+    outputs: Vec<Option<Box<NewtonOutput>>>,
     next: usize,
     left: usize,
 }
@@ -1536,9 +1550,9 @@ pub(crate) fn prefetch(inputs: Vec<NewtonInput>) {
 /// results not taken are not asked for again; with `drop` they are dropped before this batch is
 /// solved, without it they stay until the store holds `STORE_CAPACITY` results. A dropped result
 /// asked for after all would be solved by the caller with the same bits (`take` returns `None`).
-/// With `drop` and `batch` the results stay in the vectors they were solved in (one batch a
-/// thread) instead of one box each in the store: no copy, so the caller's inputs, the outputs and
-/// the boxes are never held at once. The batch keeps every result of a prefetch; the store keeps
+/// With `drop` and `batch` the results stay in the boxes they were solved in (one batch a
+/// thread) instead of being copied into the store: no copy, so the caller's inputs, the outputs and
+/// the store's boxes are never held at once; each box is freed when its result is taken. The batch keeps every result of a prefetch; the store keeps
 /// the last `STORE_CAPACITY` of one that solves more (then more of them are taken from the batch,
 /// with the same bits).
 #[inline]
@@ -1558,7 +1572,9 @@ fn x_prefetch(inputs: Vec<NewtonInput>, drop: bool, batch: bool) {
     if inputs.is_empty() {
         return;
     }
-    let mut outputs = vec![NewtonOutput::new(); inputs.len()];
+    let mut outputs: Vec<Box<NewtonOutput>> = (0..inputs.len())
+        .map(|_| Box::new(NewtonOutput::new()))
+        .collect();
     solve_batch(&inputs, &mut outputs);
     PREFETCHED.fetch_add(inputs.len() as u64, Ordering::Relaxed);
     if drop && batch {
@@ -1567,8 +1583,7 @@ fn x_prefetch(inputs: Vec<NewtonInput>, drop: bool, batch: bool) {
         BATCH.with(|kept| {
             *kept.borrow_mut() = Some(KeptBatch {
                 inputs,
-                outputs,
-                taken: vec![false; n],
+                outputs: outputs.into_iter().map(Some).collect(),
                 next: 0,
                 left: n,
             });
@@ -1624,16 +1639,18 @@ fn x_take_batch(
         let mut kept = kept.borrow_mut();
         let batch = kept.as_mut()?;
         let i = (batch.next..batch.inputs.len()).find(|&i| {
-            !batch.taken[i] && x_same_input(&batch.inputs[i], q, row, col, relative_entropy)
+            batch.outputs[i].is_some()
+                && x_same_input(&batch.inputs[i], q, row, col, relative_entropy)
         })?;
-        x.copy_from_slice(&batch.outputs[i].x);
-        let status = batch.outputs[i].status;
-        batch.taken[i] = true;
+        let output = batch.outputs[i].take()?;
+        x.copy_from_slice(&output.x);
+        let status = output.status;
+        drop(output);
         batch.left -= 1;
         let last = batch.left == 0;
         if !last {
             // a result not taken is left at `next` or after it
-            while batch.taken[batch.next] {
+            while batch.outputs[batch.next].is_none() {
                 batch.next += 1;
             }
         }

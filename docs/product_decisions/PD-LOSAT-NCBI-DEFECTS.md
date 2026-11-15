@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.29
+- Version: 1.32
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -63,7 +63,18 @@
   1.29 2026-11-15 (the rejection of a sequence that a seqid list keeps while matching none of its
   lines, of 1.6, also where a list's `gnl|BL_ORD_ID|n` reaches a line in a volume whose first OID is
   not 0, which NCBI's header read numbers differently from the lookup; line DBID item ordsl,
-  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07, within the class of 1.6)
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07, within the class of 1.6);
+  1.30 2026-11-15 (the explicit rejection of RPSBLAST's Smith-Waterman redo that NCBI repeats
+  without end, rule 3, line PS item PS11c-3; Owner-delegated, line PS `DECISIONS.md` 63);
+  1.31 2026-11-15 (the stop of a batch's prefetch at a Seq-id that a version 5 list without the
+  accession table in one of its databases cannot look up is written as NCBI writes it; the
+  refusal of 1.25 narrowed to the prefetch off and to the orders of loads that LOSAT does not
+  model; line DBID item mixdb2, Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07);
+  1.32 2026-11-15 (the sequence that a positive seqid list keeps while matching none of its lines,
+  of 1.6 and 1.29, is no longer an explicit rejection: NCBI's result is deterministic, and LOSAT
+  reproduces it, rule 2; a negative list's stays refused; line DBID item lineless, Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -555,6 +566,23 @@ here, and names the widening that PS16a made for protein queries.
   the volume do not count; two or more volumes never do) (line DI-8 `DECISIONS.md` 18; line
   DBID item gisl, 2026-11-15).
 
+- A sequence that a positive seqid list (`-seqidlist`) keeps while matching none of its
+  definition lines (a pdb molecule named without its chain, a local id in other letters, a
+  Swiss-Prot name on a version 4 database, a list's `gnl|BL_ORD_ID|n` that the accession table
+  resolves by the stored number to a sequence in a volume whose first OID is not 0, whose lines
+  NCBI's header read tests with the volume's first OID added, `seqdbvol.cpp:2222-2236`, of 1.29):
+  the sequence is searched and its length counts in the statistics, but NCBI's filtered header
+  leaves it no Seq-id, and `BlastHitList2SeqAlign_OMF` makes no Seq-align of its hits
+  (`blast_seqalign.cpp:1582-1586`; the post is at the `Info` level and not printed). The hits leave
+  every report, the prefetch, the taxonomy lookups and psiblast's PSSM without a word, after they
+  took their places in the hit list before the cut to `-max_target_seqs` (psiblast's Seq-aligns are
+  made of the longer preliminary hit list, so its cut comes after: they take none there). Versions
+  1.6 and 1.29 made this an explicit rejection; version 1.32 reproduces it in the six search
+  programs, each of which drops such hit lists where NCBI makes the Seq-aligns
+  (`SeqDb::keeps_line`, `algorithm::common::database::SeqAligned`; line DBID item lineless, probe of
+  1,375 runs: 6 programs, 15 lists of the five kinds, 20 formats, `-max_target_seqs` 1 and 3, a
+  query without hits). A read of such a sequence's lines still refuses, and no report reaches it.
+
 - `CHUNK_SIZE=1000` without `BATCH_SIZE`: the batch size becomes 0, NCBI prints the
   outfmt 0 prolog and then `BLAST engine error: Empty CBlastQueryVector`, exit 3.
 - `-max_target_seqs` from 2^30 to 2^31-51: the preliminary hit list size
@@ -595,24 +623,18 @@ here, and names the widening that PS16a made for protein queries.
   `CCoreException`; LOSAT rejects "a query chunk without a query" (round-3 audit: 27
   oracle cases, the reason holds in all).
 
-- A sequence that a seqid list keeps while matching none of its definition lines (a pdb
-  molecule named without its chain, a local id in other letters, a Swiss-Prot name on a
-  version 4 database, a sequence whose every line has only a gi or a ti under a negative
-  list; version 1.29: a list's `gnl|BL_ORD_ID|n` that the accession table resolves by the
-  stored number, of `makeblastdb -input_type blastdb` or of a FASTA id `gnl|BL_ORD_ID|n`, to a
-  sequence in a volume whose first OID is not 0 (a later volume, or a later database of the
-  list), whose lines NCBI's header read tests with the volume's first OID added
-  (`seqdbvol.cpp:2222-2236`), and a negative list's line removed there the same way; where such
-  a sequence keeps another line, LOSAT writes the lines NCBI keeps): NCBI's
-  filtered header leaves no line, `GetBioseq` returns null
-  (`seqdbvol.cpp:1370-1376`) and the sequence's hits leave every report without notice
-  while its length counts in the statistics. LOSAT refuses the search with the sequence
-  named (`the seqid list keeps sequence N of the volume but none of its definition lines, and
-  NCBI leaves its hits out of the report without notice`): a positive list before the
-  search, a negative list when such a sequence is to be reported (version 1.6, line DI-8
-  `DECISIONS.md` 17 and 22). The result is deterministic, but it loses hits without a
-  word, which no report can show; a user who wants NCBI's report names the chain or the
-  stored id.
+- A sequence that a negative seqid list (`-negative_seqidlist`) keeps while removing every one
+  of its definition lines (a sequence whose every line has only a gi or a ti, which
+  `CSeqDBNegativeList::FindId` does not match by type; a `BL_ORD_ID` line of a volume whose first
+  OID is not 0, of 1.29): NCBI's id set of the list is not blank (`CSeqDBImpl::x_InitIdSet`,
+  seqdbimpl.cpp:1909-1946), so the subject fetches of the traceback, the composition-based redo
+  and the ungapped re-evaluation of a nucleotide subject exclude it
+  (`seqsrc_seqdb.cpp:302-313`): it counts in the statistics and in the preliminary hit list, and
+  takes no place in the final one. LOSAT does not model those fetches yet and refuses the search
+  when such a sequence is to be reported (`the seqid list keeps sequence N of the volume but none
+  of its definition lines, and NCBI leaves its hits out of the report without notice`; versions
+  1.6 and 1.29, line DI-8 `DECISIONS.md` 17 and 22; version 1.32 kept it for the negative list
+  alone, line DBID item lineless).
 
 - A version 5 database list (several names in `-db`, or the `DBLIST` of an alias file) that
   mixes databases with and without the accession table (`acc2oid`) of `makeblastdb
@@ -622,17 +644,27 @@ here, and names the widening that PS16a made for protein queries.
   `CSeqDBLMDBSet::AccessionToOids`); a hit whose Seq-id it looks up as a string (an accession, a
   name, a giim; not a gi, not `gnl|BL_ORD_ID|n`) then stops the run with `BLAST Database error:
   DB contains no accession info.` (exit 2), after the outfmt 0 header and the earlier batches. Where `PRE_FETCH_SEQS_LIMIT` turns the prefetch off, the reports write
-  `Unknown` for such a hit, and then the outfmt 0 alignments stop with that error, the tabular
-  formats crash (`CCoreException`, exit 255) and the JSON and XML2 documents end with its trace.
+  `Unknown` for such a hit, and then outfmt 0 to 4, 13, 14 and 17 stop with that error, outfmt 6
+  crashes (`CCoreException`, exit 255), the JSON and XML2 documents 15 and 16 end with its trace
+  (exit 0), and 5, 7, 10 and 18 go on (exit 0).
   Without such a hit (a `gnl|BL_ORD_ID|n` of a database without parsed Seq-ids, or of one made
   with `-input_type blastdb`, needs no accession table), and for the Seq-annots and the archive,
   NCBI runs to the end (the Seq-annots too stop where `PRE_FETCH_SEQS_LIMIT=2147483647` prefetches
   for them); `-seqidlist` and `-negative_seqidlist` of accessions stop it up front with the same
   error. LOSAT searches such a list as NCBI does (line DBID item mixdb, probe of 4,080 runs:
-  6 programs, 20 formats, the prefetch on and off, 17 lists and alias files) and refuses a run
-  whose reports or prefetch look a parsed Seq-id up in a file without the table (`... whose
-  lookup in the database fails (DB contains no accession info.; NCBI BLAST+ 2.17.0 stops)`).
-  Versions 1.9 to 1.24 refused every such list before the search (line DI-8 `DECISIONS.md` 31).
+  6 programs, 20 formats, the prefetch on and off, 17 lists and alias files) and, where the
+  batch's prefetch is on, stops as NCBI does: the prologs and the reports of the batches before
+  (without the epilog, in every format that prefetches, the JSON and XML2 documents and side
+  files too), the batch's reader messages and the error (line DBID item mixdb2, probe of 4,800
+  runs; psiblast's PSSM drops such a sequence's letters with `Failed to retrieve sequence`, as
+  NCBI's). It refuses a run where the reports read such a Seq-id with the prefetch off (`... whose
+  lookup in the database fails (DB contains no accession info.; NCBI BLAST+ 2.17.0's prefetch
+  stops with a BLAST Database error, and where the prefetch is off its formatters fail to read
+  it)`), and a stopping batch whose other sequences' loads write texts of the
+  taxonomy database or whose other lookups throw on their ids (NCBI's prefetch loads them in the
+  order of its Seq-id handles, which decides what it writes before the error).
+  Versions 1.9 to 1.24 refused every such list before the search (line DI-8 `DECISIONS.md` 31),
+  versions 1.25 to 1.30 every run whose reports or prefetch looked such a Seq-id up.
 
 - A negative seqid list that excludes a sequence (every id of its `.nos`/`.pos` record
   listed) of a volume that the database does not hold, while the database holds other
@@ -830,6 +862,23 @@ here, and names the widening that PS16a made for protein queries.
   the prolog), so no prefix of it is NCBI's. BLASTN writes its prolog before the search, as NCBI
   does, so its refusal follows the prolog. The other sections of such a record are NCBI's
   (fixture rows `db.of1.bp.self1.*`, `db.of1.bn.selfrc.*`).
+
+- RPSBLAST `-use_sw_tback` with composition-based statistics (version 1.30, 2026-11-15, line PS
+  item PS11c-3, Owner-delegated, line PS `DECISIONS.md` 63): a profile with two or more
+  preliminary HSPs when the e-value of a score of 0 passes `-evalue` (the query's search space
+  times the profile's K below it: a large `-evalue` or a small `-searchsp`) and the profile's first
+  position, after the composition adjustment, scores the query's first letter (after SEG) above 0.
+  `Blast_RedoOneMatchSmithWaterman`'s loop (`redo_alignment.c:1438-1529`) then makes every
+  positive alignment and comes to a round of score 0 whose alignment is that one cell, at (0, 0)
+  (`smith_waterman.c:276-341, 437-446`, `blast_kappa.c:844-879`); its range changes no score the
+  next scan sees, so every round is the same, and the loop leaves only when an allocation fails
+  (after memory runs out, or by the OOM killer): no checkable result. LOSAT refuses (exit 1, "a
+  profile whose Smith-Waterman redo (-use_sw_tback) does not end in NCBI BLAST+ 2.17.0 ... is not
+  supported by LOSAT's RPSBLAST") after the profile's first Smith-Waterman scan (the composition
+  adjustment and the significance test of that scan's score come first), where its other refusals
+  of a profile in the RPS traceback come. Where that cell scores 0 or less, NCBI's redo fails at the round of score 0
+  and drops the profile, which LOSAT reproduces (rule 2; fixture rows `db.rps.rej.swendless` and
+  `db.rps.mini.sw.zero.6`).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

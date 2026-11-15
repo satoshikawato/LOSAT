@@ -21,7 +21,7 @@
 //!   reported sequences only (`reported_subjects`).
 //!
 //! The per-subject kernel, the hit lists and the report writers are those of the
-//! `-subject` path (`run.rs`); the opening of the database, the reader's errors and the
+//! `-subject` path (`subject_passes.rs`, a child of `run.rs`); the opening of the database, the reader's errors and the
 //! rules for the stored titles are shared with BLASTP (`algorithm::common::database`).
 
 use std::cell::RefCell;
@@ -648,8 +648,44 @@ impl BlastnDatabase {
         titles: &DatabaseTitles,
         hit_lists: &[Option<BlastnHitList>],
         gapped: bool,
+        query: usize,
     ) -> Result<Vec<u8>> {
-        let subjects = hit_lists
+        shared::batch_prefetch(
+            &self.db,
+            &self.taxdb,
+            Self::prefetch_subjects(titles, hit_lists, gapped),
+            PROGRAM,
+            query,
+        )
+    }
+
+    /// The stop of NCBI's prefetch of the query batch whose final hit lists are `hit_lists` and
+    /// whose first query is `query`, for the XML2 and JSON formats, which write the taxonomy
+    /// texts at each `Hit` (`shared::batch_prefetch_stop`).
+    pub(super) fn batch_prefetch_stop(
+        &self,
+        titles: &DatabaseTitles,
+        hit_lists: &[Option<BlastnHitList>],
+        gapped: bool,
+        query: usize,
+    ) -> Result<()> {
+        shared::batch_prefetch_stop(
+            &self.db,
+            &self.taxdb,
+            Self::prefetch_subjects(titles, hit_lists, gapped),
+            PROGRAM,
+            query,
+        )
+    }
+
+    /// The sequences that the prefetch of the query batch whose final hit lists are `hit_lists`
+    /// reads (`batch_prefetch`).
+    fn prefetch_subjects<'s>(
+        titles: &'s DatabaseTitles,
+        hit_lists: &'s [Option<BlastnHitList>],
+        gapped: bool,
+    ) -> impl Iterator<Item = shared::PrefetchSubject<'s>> + 's {
+        hit_lists
             .iter()
             .flatten()
             .flat_map(|hit_list| {
@@ -657,7 +693,7 @@ impl BlastnDatabase {
                 &hit_list.hsplist_array[..count]
             })
             .filter(|hsp_list| !hsp_list.hsps.is_empty())
-            .map(|hsp_list| {
+            .map(move |hsp_list| {
                 let parsed = match titles.get(&hsp_list.oid) {
                     Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
                     _ => None,
@@ -672,8 +708,7 @@ impl BlastnDatabase {
                     parsed,
                     flipped,
                 }
-            });
-        shared::batch_prefetch(&self.db, &self.taxdb, subjects, PROGRAM)
+            })
     }
 
     /// The `-db` value as NCBI keeps it (outfmt 7's `# Database:` line).
@@ -1575,6 +1610,20 @@ pub(super) fn x_tb_range_print_summary() {
 /// so far name, by ordinal id (`read_titles`): the stored title, or the definition lines of a
 /// sequence with parsed Seq-ids.
 pub(super) type DatabaseTitles = BTreeMap<u32, ReportedHeader>;
+
+/// The final hit lists `hit_lists` of a query batch without the sequences that NCBI makes no
+/// Seq-align of (`shared::SeqAligned`): after their cut to the hit list size, before
+/// `read_titles`.
+pub(super) fn drop_unaligned(database: &BlastnDatabase, hit_lists: &mut [Option<BlastnHitList>]) {
+    let Some(mut aligned) = shared::SeqAligned::of(&database.db) else {
+        return;
+    };
+    for hit_list in hit_lists.iter_mut().flatten() {
+        hit_list.hsplist_array.truncate(hit_list.hsplist_count);
+        aligned.retain(&mut hit_list.hsplist_array, |list| Some(list.oid));
+        hit_list.hsplist_count = hit_list.hsplist_array.len();
+    }
+}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:264-275
 // ```c++

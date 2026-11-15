@@ -935,9 +935,12 @@ fn search(
                 ordinals = searched_queries(args.query_loc.as_deref(), query);
                 run_local_blastp(args, query, subject, "", "", &mut outputs)
             }
+            // The host has no PSSM files: `-in_pssm` is refused as by `validate`
+            // (`check_tblastn_options`), before the search.
             Commands::Tblastn(args) => {
                 ordinals = searched_queries(args.query_loc.as_deref(), query);
-                run_local_tblastn(args, query, subject, &mut outputs)
+                losat::web_adapter::refuse_tblastn_pssm_query(&args)
+                    .and_then(|()| run_local_tblastn(args, query, subject, &mut outputs))
             }
             Commands::Blastn(args) => {
                 ordinals = searched_queries(args.query_loc.as_deref(), query);

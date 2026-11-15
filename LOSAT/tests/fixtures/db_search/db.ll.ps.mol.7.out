@@ -1,0 +1,39 @@
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: qp1 query protein one
+# Database: tests/db_search/ids/prot_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+qp1	long1	96.667	60	2	0	1	60	1	60	9.33e-42	121
+# PSIBLAST 2.17.0+
+# Iteration: 2
+# Query: qp1 query protein one
+# Database: tests/db_search/ids/prot_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+qp1	long1	96.667	60	2	0	1	60	1	60	1.50e-38	113
+
+Search has CONVERGED!
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: qp2 unrelated protein
+# Database: tests/db_search/ids/prot_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+qp2	long1	33.333	9	6	0	24	32	1	9	1.5	12.7
+qp2	long1	57.143	7	3	0	33	39	35	41	1.5	12.7
+# PSIBLAST 2.17.0+
+# Iteration: 2
+# Query: qp2 unrelated protein
+# Database: tests/db_search/ids/prot_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+qp2	long1	66.667	6	2	0	33	38	35	40	0.80	13.4
+
+Search has CONVERGED!
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: qnone no hits
+# Database: tests/db_search/ids/prot_v5
+# 0 hits found
+# BLAST processed 5 queries

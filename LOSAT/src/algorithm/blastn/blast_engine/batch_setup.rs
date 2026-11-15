@@ -449,7 +449,7 @@ pub(super) fn batch_cutoffs<const UNGAPPED: bool>(
     // ```
     // NCBI updates these per subject (`BlastInitialWordParametersUpdate`); LOSAT's values do not
     // depend on the subject, so they are computed once for the batch instead of in every subject
-    // (`process_subject`): the cutoff scores, the hit-saving cutoff scores, the X-dropoffs and the
+    // (`search_subject`): the cutoff scores, the hit-saving cutoff scores, the X-dropoffs and the
     // reduced cutoff scores of each context.
     // The subject length that NCBI's word cutoff of an ungapped search takes: the average
     // length of the subjects (a `-subject` set's `(Uint4)(total / count)`, a database's

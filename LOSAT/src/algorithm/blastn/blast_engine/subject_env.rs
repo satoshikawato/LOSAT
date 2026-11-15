@@ -1,7 +1,7 @@
 //! The values of a batch's subject search that `search_query_batch` sets before its subjects: the
 //! progress bar and the hit list sizes, the diagnostic flags, the scoring and X-dropoffs of the
 //! extensions, the schedule of the subjects on the search pool (`subject_schedule`), and the
-//! hit-saving options. `process_subject` and the tail of `search_query_batch` read them.
+//! hit-saving options. `SubjectPasses` (`subject_passes.rs`) and `search_query_batch` read them.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1334-1607
 //! (`BLAST_PreliminarySearchEngine`, the set-up before its subject loop);
@@ -15,7 +15,7 @@
 //! This module is a child of `run` for the types and modules it keeps private (`SubjectSource`,
 //! `x_few_subj`, `x_pair_seed`, `x_qgroup_par`). The functions are statements of
 //! `search_query_batch` moved here in their order (the borrows that `search_query_batch` makes for
-//! `process_subject` between them stay there); what they read is a struct of references or `Copy`
+//! `SubjectPasses` between them stay there); what they read is a struct of references or `Copy`
 //! values, and what they make is what `search_query_batch` then reads under the same names.
 
 use super::{
@@ -49,9 +49,9 @@ pub(super) struct SubjectEnvInputs<'a> {
     pub(super) search_karlin: &'a [ContextKarlin],
 }
 
-/// The values of the batch's subject search that `process_subject` and the tail of
+/// The values of the batch's subject search that `SubjectPasses` and
 /// `search_query_batch` read, which `search_query_batch` destructures into locals of the same
-/// names; `process_subject`'s two stages read the ones they need through
+/// names; `search_subject`'s two stages read the ones they need through
 /// `prelim_subject::PrelimBatch` and `traceback_subject::TraceBatch`, built once per batch.
 pub(super) struct SubjectSearchEnv {
     pub(super) progress_bar: Option<ProgressBar>,

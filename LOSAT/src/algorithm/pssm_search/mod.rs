@@ -188,6 +188,34 @@ impl PssmQueryStop {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:537
+// ```c++
+// 		scope->AddTopLevelSeqEntry(pssm->SetQuery());
+// ```
+// NCBI's scope holds the subjects that its reader read, then the PSSM's Bioseq; the command line
+// reads its `-subject` records in the scope that the query joins (`IdScope`), while the records'
+// entries (the library API) get records read in a scope of their own (`api::read_inputs`).
+/// The scope of the ids of `subjects` (read under `-parse_deflines` in another scope) that the
+/// query of a PSSM search joins in the records' entries, as the command line's query joins the
+/// scope it read its subjects in (`PsiSearch::query_record_in`); `None` without
+/// `-parse_deflines`. The subjects' marks are not kept: the PSSM's query has none, so a subject
+/// with one of its ids is refused whatever its mark (`IdScope::add_record`), as on the command
+/// line.
+pub(crate) fn scope_of_subjects(
+    parse_deflines: bool,
+    subjects: &[FastaRecord],
+    program: &str,
+) -> anyhow::Result<Option<crate::seqid::id_scope::IdScope>> {
+    if !parse_deflines {
+        return Ok(None);
+    }
+    let scope = crate::seqid::id_scope::IdScope::default();
+    for believed in subjects.iter().filter_map(FastaRecord::believed) {
+        scope.add_record(&believed.ids, None, "subject", program)?;
+    }
+    Ok(Some(scope))
+}
+
 impl PsiSearch {
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:338-340 and
     // c++/src/app/blast/tblastn_app.cpp:307,324 (the request, then the search object)

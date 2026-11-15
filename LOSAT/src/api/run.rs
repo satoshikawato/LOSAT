@@ -552,6 +552,10 @@ impl FormatObserver for RangeRecorder {
     fn rounds_converged(&mut self, query: usize) {
         self.parts.rounds_converged(query);
     }
+
+    fn pssm_query(&mut self, query: &FastaRecord) {
+        self.parts.pssm_query(query);
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:146-155
@@ -954,7 +958,33 @@ fn searches(
         check_archive_inputs(search.program(), inputs)?;
     }
     let command = search.command(inputs)?;
-    Ok((search_groups(&command, &numbers), num_threads(&command)))
+    let groups = search_groups(&command, &numbers);
+    if groups.len() > 1 {
+        if let Some(option) = pssm_file_option(&command) {
+            return Err(Error::Argv(format!(
+                "{option} is not accepted by the library API with formats of two hit list sizes, which take two searches: the PSSM files are one search's; search those formats in calls of their own"
+            )));
+        }
+    }
+    Ok((groups, num_threads(&command)))
+}
+
+// No NCBI counterpart: the command line writes one format per run, so one search writes its PSSM
+// files; the library's call of formats of two hit list sizes searches twice (`search_groups`).
+/// The PSSM file option (`-out_pssm`, else `-out_ascii_pssm`) of a psiblast search that can write
+/// one (`PsiblastPssmOptions::writes_files`).
+fn pssm_file_option(command: &Commands) -> Option<&'static str> {
+    let Commands::Psiblast(args) = command else {
+        return None;
+    };
+    let options = args.clone().into_blastp_args().ok()?.psiblast_pssm?;
+    options.writes_files().then(|| {
+        if options.out_pssm.is_some() {
+            "-out_pssm"
+        } else {
+            "-out_ascii_pssm"
+        }
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:286-288
@@ -1351,13 +1381,13 @@ pub fn run_collect(
                 })
                 .collect(),
             hsps: Vec::new(),
-            query_stats: vec![None; inputs.query.len()],
+            query_stats: vec![None; inputs.query_count()],
             rounds: vec![
                 QueryRounds {
                     stats: vec![None],
                     converged: false,
                 };
-                inputs.query.len()
+                inputs.query_count()
             ],
             diagnostics,
         });

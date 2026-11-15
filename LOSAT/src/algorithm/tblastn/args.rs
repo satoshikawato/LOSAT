@@ -1032,6 +1032,17 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
     })
 }
 
+// No NCBI counterpart: LOSAT Web's host has no file system.
+/// The browser's refusal of `-in_pssm` (a PSSM query): the host has no PSSM files (line PS, item
+/// PSW1). The Web's checks of the options (`check_options`) and its runs (the adapter's `run`,
+/// before `run_local`) make it; the library API's records take the option (`api::Inputs::pssm`).
+pub fn refuse_browser_pssm_query(args: &TblastnArgs) -> Result<()> {
+    if args.in_pssm.is_some() {
+        anyhow::bail!("-in_pssm (a PSSM query) is not supported in the browser yet");
+    }
+    Ok(())
+}
+
 /// The checks of the options alone, without the inputs (the `validate` of web ABI v2):
 /// NCBI's processing of the options (`TblastnArgs::check_options`) and LOSAT's limits.
 pub fn check_options(args: &TblastnArgs) -> Result<()> {
@@ -1039,10 +1050,7 @@ pub fn check_options(args: &TblastnArgs) -> Result<()> {
     if args.db.is_some() {
         anyhow::bail!("-db (a database search) is not supported in the browser yet");
     }
-    // The host has no PSSM files either (line PS, item PSW1).
-    if args.in_pssm.is_some() {
-        anyhow::bail!("-in_pssm (a PSSM query) is not supported in the browser yet");
-    }
+    refuse_browser_pssm_query(args)?;
     let resolved = args.resolve()?;
     search_settings(&resolved)?;
     // Without the inputs: IDENTITY with the compressed lookup table, which the search refuses where

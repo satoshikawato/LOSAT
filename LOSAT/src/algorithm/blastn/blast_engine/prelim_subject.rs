@@ -660,8 +660,19 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
             // discontiguous table, `x_pair_seed_disc.rs`) with the subject scan in strips
             // and the pairs folded by this thread in the scan order; `continue` ends the
             // one-iteration strand loop. Otherwise `two_stage_scan::scan_two_stage_lookup`
-            // runs.
-            if x_pair_seed::run(
+            // runs. `x_pair_seed::wants` asks `run`'s tests of a contiguous table first, so a
+            // chunk that `run` would send back (every chunk of a database search) builds no
+            // inputs and makes no call.
+            if x_pair_seed::wants(
+                two_stage.disc().is_some(),
+                use_array_indexing,
+                window_size,
+                scan_range,
+                !small_na_compressed_query.is_empty(),
+                debug_enabled || blastn_trace_enabled || debug_window.is_some(),
+                subject_masked,
+                !use_parallel && reuse_prelim_hits,
+            ) && x_pair_seed::run(
                 &x_pair_seed::Inputs {
                     two_stage,
                     search_seq_packed,
@@ -791,7 +802,16 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
             // one-hit diagonal-hash scope only) with the subject scan in strips on the pool
             // threads and the pairs folded in the scan order; `continue` ends the
             // one-iteration strand loop. Otherwise `na_scan::scan_na_lookup` runs.
-            if x_pair_seed::run_na(
+            // `x_pair_seed::wants_na` asks `run_na`'s tests first, so a chunk that `run_na`
+            // would send back builds no inputs and makes no call.
+            if x_pair_seed::wants_na(
+                use_array_indexing,
+                window_size,
+                scan_range,
+                subject_masked,
+                debug_enabled || blastn_trace_enabled || debug_window.is_some(),
+                !use_parallel && reuse_prelim_hits,
+            ) && x_pair_seed::run_na(
                 &x_pair_seed::NaInputs {
                     pv_direct_lookup: pv_direct_lookup_ref,
                     na_lookup: na_lookup_ref,

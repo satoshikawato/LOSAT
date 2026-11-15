@@ -14,13 +14,15 @@
   limit.
 - A subject whose every reported alignment has length 0: with `-db`, NCBI BLAST+'s warning `Error
   pre-fetching sequence data` on standard error, as NCBI writes it (every format but 8, 9, 11 and
-  12; 8, 9 and 12 too with `PRE_FETCH_SEQS_LIMIT=2147483647`; the archive never). With `-subject`,
-  NCBI BLAST+'s Seq-loc mapper finds no sequence type in such a subject and makes alignments
+  12; 8, 9 and 12 too with `PRE_FETCH_SEQS_LIMIT=2147483647`; the archive never). With `-subject`
+  the same output where every such alignment lies past the second letter of the searched part of
+  the subject, which NCBI BLAST+'s Seq-loc mapper leaves as they are. Where one lies at its first or
+  second letter, the mapper finds no sequence type in such a subject and makes alignments
   without scores of query nucleotides against the rest of the subject's letters: the tabular
   reports (outfmt 6, 7, 10 and 20) of a subject's only such alignment now show NCBI BLAST+'s row
   of it (its coordinates, letters and counts, an E-value of 0.0 and a bit score of -1.0; where
   its query row would start before the query's first nucleotide, the row of the query's Seq-align
-  id or the exception that NCBI BLAST+ gives), where LOSAT wrote the alignment of length 0. LOSAT refuses (exit status 1) the other formats of such
-  a subject, two or more such alignments (NCBI BLAST+ writes more rows, stops with an exception
-  or runs out of memory), and a table that reads the letters of a query nucleotide outside its
-  `-query_loc` interval.
+  id or the exception that NCBI BLAST+ gives; the query's letters outside a `-query_loc` interval
+  too), where LOSAT wrote the alignment of length 0. LOSAT refuses (exit status 1) the other
+  formats of such a subject and two or more such alignments (NCBI BLAST+ writes more rows, stops
+  with an exception or runs out of memory).

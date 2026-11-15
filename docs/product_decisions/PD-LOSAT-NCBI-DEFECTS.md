@@ -904,8 +904,14 @@ would port:
   letters: with `-db` NCBI's prefetch finds its subject row empty and writes `Error pre-fetching
   sequence data` (every format but 8, 9, 11 and 12; 8, 9 and 12 too with
   `PRE_FETCH_SEQS_LIMIT=2147483647`; the archive is never prefetched); LOSAT writes the same. With
-  `-subject` the mapper finds no sequence type in such a subject, takes both rows as nucleotides
-  and maps the subject row to the end of its interval: one HSP becomes an alignment without scores
+  `-subject` the mapper finds no sequence type in such a subject and takes both rows as
+  nucleotides; the stop of an empty row's segment, of the unknown length -1, is `start + m_Len - 1`
+  in the unsigned `TSeqPos` (`seq_align_mapper_base.cpp:1067-1068`), which wraps only for an HSP
+  at the first or second letter of the searched range (counted from a `-subject_loc` interval's
+  start). Further in, the mapper keeps the segment's length -1 and its scores, the Seq-align stays
+  as made, and `-subject` gives `-db`'s output, the prefetch's warning too; LOSAT writes it with
+  `-db`'s port. Where it wraps, the mapper maps the subject row to the end of its interval: one HSP
+  becomes an alignment without scores
   of the rest of the subject's letters against as many query nucleotides (from the start of the
   empty query row up, or on a minus strand ending two below it, as the mapper moves the other rows
   of a segment of unknown length; an E-value of 0.0, a bit score of -1.0, a score of -1; identities
@@ -913,18 +919,18 @@ would port:
   last nucleotide the gap character; a minus-strand row that would start before the query's first
   nucleotide wraps, and NCBI then writes the caught row of the query's Seq-align id, `Row is empty`
   for `qcovs` or the Dense-seg's exception). LOSAT writes the tabular rows (outfmt 6, 7, 10, 20) of
-  that alignment as NCBI does (decision X2g-7). LOSAT refuses the rest of `-subject`'s mapped
-  alignments. Decision X2g-4: an HSP of length 0 at the first letter of the searched range of a
-  subject with other HSPs, which the mapper cuts into two alignments without scores. Decision
-  X2g-5: a subject whose every HSP has length 0, in every format but the tables and outfmt 18, and
-  in the tables where it has two or more (more rows, exceptions and out-of-memory stops). NCBI's
+  that alignment as NCBI does (decision X2g-7), reading the query record's letters outside a
+  `-query_loc` interval where the row does (the cut keeps the longest subject interval's letters and
+  one more on each side). LOSAT refuses the rest of `-subject`'s mapped alignments. Decision X2g-4:
+  an HSP of length 0 at the first letter of the searched range of a subject with other HSPs, which
+  the mapper cuts into two alignments without scores (the mapper knows such a subject as a protein
+  and counts its start in nucleotides, three per letter, so its stop wraps at the first letter
+  only). Decision X2g-5: a subject whose every HSP has length 0, one of them at the first or second
+  letter of the searched range, in every format but the tables and outfmt 18, and in the tables
+  where it has two or more (more rows, exceptions and out-of-memory stops). NCBI's
   output there is partly not defined (on the 4 GiB limit of the line's probes `BLAST ran out of
   memory`, exit status 4, for a segment of about 2^32 letters), and the rest comes from alignments
-  that the mapper makes by accident. Known differences: a table of a subject's only HSP of length 0
-  whose mapped query row reads the query's letters outside its `-query_loc` interval (letters LOSAT
-  does not keep) is refused where its fields read the rows' letters (`qseq`, `sseq`, `btop`,
-  `nident`, `pident`, `mismatch`, `positive`, `ppos`); where those letters give no identity, NCBI's
-  `nident`, `pident` and `ppos` can equal what LOSAT wrote before this item.
+  that the mapper makes by accident.
 - `-evalue` with a signed infinity or NaN (`+inf`, `-nan`, `+nan(1)`, `1e999`): NCBI's
   `CArg_Double` reads them with `strtod` and its option check (`<= 0`) lets them pass;
   NCBI searches as with the largest e-value (the cutoff stays 1, no HSP is reaped). LOSAT

@@ -97,7 +97,8 @@ fn search_program(program: &str, words: &[String]) -> Result<(), Error> {
             ))
         }
         (Some(query), None) => query,
-        (None, _) if dry_run || pssm.is_some() => "",
+        (None, Some(_)) => "",
+        (None, None) if dry_run => "",
         (None, None) => return Err(Error::Argv("-query is required".to_string())),
     };
     let read = |role, name: &str| match dry_run {

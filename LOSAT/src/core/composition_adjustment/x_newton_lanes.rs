@@ -87,6 +87,10 @@ const LANES: usize = 4;
 const MIN_LANE_BATCH: usize = 3;
 const STORE_CAPACITY: usize = 512;
 const NO_PROBLEM: usize = usize::MAX;
+// No NCBI counterpart: most output slots the spare vector of a thread keeps between batches
+// (`x_spare_outputs`; a TBLASTN prefetch solves 32 inputs and the last window's, BLASTP's a group
+// of matches); it does not change any value NCBI computes.
+const SPARE_OUTPUTS: usize = 64;
 // No NCBI counterpart: the eight-lane width (aarch64), the smallest batch that uses
 // it, and the number of lanes with a problem at or below which an eight-lane batch whose queue is
 // empty moves to four lanes; they do not change any value NCBI computes.
@@ -1520,6 +1524,22 @@ thread_local! {
     static BATCH: RefCell<Option<KeptBatch>> = const { RefCell::new(None) };
 }
 
+// No NCBI counterpart: the output vector of this thread's last batch, emptied, for the next batch
+// (`x_spare_outputs`); it does not change any value NCBI computes.
+thread_local! {
+    static SPARE: RefCell<Vec<NewtonOutput>> = const { RefCell::new(Vec::new()) };
+}
+
+// No NCBI counterpart: keeps the output vector of a batch that goes for this thread's next batch,
+// emptied and with room for at most `SPARE_OUTPUTS` outputs: a thread solves batches one after
+// another, so the next batch's outputs reuse the allocation instead of a new one of the same size
+// after other allocations took the freed one apart. It does not change any value NCBI computes.
+fn x_spare_outputs(mut outputs: Vec<NewtonOutput>) {
+    outputs.clear();
+    outputs.shrink_to(SPARE_OUTPUTS);
+    SPARE.with(|spare| *spare.borrow_mut() = outputs);
+}
+
 // No NCBI counterpart: solves a batch of inputs gathered ahead of their calls and keeps the results
 // for `take`; it does not change any value NCBI computes.
 /// Solves `inputs` and keeps the results for this thread's calls.
@@ -1552,13 +1572,16 @@ fn x_prefetch(inputs: Vec<NewtonInput>, drop: bool, batch: bool) {
         BATCH.with(|kept| {
             if let Some(old) = kept.borrow_mut().take() {
                 DROPPED.fetch_add(old.left as u64, Ordering::Relaxed);
+                x_spare_outputs(old.outputs);
             }
         });
     }
     if inputs.is_empty() {
         return;
     }
-    let mut outputs = vec![NewtonOutput::new(); inputs.len()];
+    // The spare vector of this thread's last batch (empty if none), in the place of a new one.
+    let mut outputs = SPARE.with(|spare| std::mem::take(&mut *spare.borrow_mut()));
+    outputs.resize(inputs.len(), NewtonOutput::new());
     solve_batch(&inputs, &mut outputs);
     PREFETCHED.fetch_add(inputs.len() as u64, Ordering::Relaxed);
     if drop && batch {
@@ -1638,7 +1661,9 @@ fn x_take_batch(
             }
         }
         if last {
-            *kept = None;
+            if let Some(done) = kept.take() {
+                x_spare_outputs(done.outputs);
+            }
         }
         Some(status)
     })

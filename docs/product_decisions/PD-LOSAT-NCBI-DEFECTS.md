@@ -65,8 +65,9 @@
   not 0, which NCBI's header read numbers differently from the lookup; line DBID item ordsl,
   Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07, within the class of 1.6)
   1.30 2026-11-15 (BLASTX's ungapped one-hit HSPs of negative length and of length 0 ported, rule 4,
-  line RG item X2g, with the refusals of decisions X2g-4 and X2g-5 of that line: Owner-delegated,
-  standing instruction 2026-09-29, restated 2026-10-07)
+  line RG item X2g, with the refusals of decisions X2g-4 and X2g-5 of that line and the tables of
+  X2g-5's one alignment ported by X2g-7: Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -892,24 +893,37 @@ would port:
   4294967295, `CSeq_align::GetSeqRange`'s `Row is empty` (`Seq_align.cpp:227`, exit status 255)
   where `qcovs` and outfmt 0's description table read the rows, and a block without rows past
   that table, and the same exception where outfmt 0's `-sorthits` and `-sorthsps` sorts read them
-  (`SortSeqalignForSortableFormat`). With `-subject` NCBI's Seq-loc mapper rewrites the query row to one nucleotide with
-  a fuzz (`seq_align_mapper_base.cpp:1535-1557`): `CreateDensegFromStdseg`'s exception
-  (`Seq_align.cpp:801`) where the tabular rows, outfmt 0's alignments and the XML make a Dense-seg
-  of it, that nucleotide in `qcovs`. BLAST XML, XML2 and JSON catch the exception (exit status 0,
-  the message on stderr, the query's report cut or left out), outfmt 13 and 14 do not (an empty
-  side file, exit status 255). A subject whose every HSP has length 0 has a Seq-align without a
-  row of letters: with `-db` NCBI's prefetch finds its subject row empty and writes `Error
-  pre-fetching sequence data` (every format but 8, 9, 11 and 12 unless
-  `PRE_FETCH_SEQS_LIMIT=2147483647`); LOSAT writes the same. LOSAT refuses two cells of
-  `-subject`. Decision X2g-4: such an HSP at the first letter of the searched range, which the
-  mapper cuts into two alignments without scores. Decision X2g-5: a subject whose every HSP has
-  length 0, in which the mapper finds no sequence type, so that it makes alignments without
-  scores of query nucleotides against the rest of the subject's letters (more rows, exceptions
-  and out-of-memory stops for two or more), except for a table of fields that read nothing of
-  the alignment of a subject's only HSP, which NCBI writes as any row. NCBI's output there is
-  partly not defined (on the 4 GiB limit of the line's probes `BLAST ran out of memory`, exit
-  status 4, for a segment of about 2^32 letters), and the rest comes from alignments that the
-  mapper makes by accident.
+  (`SortSeqalignForSortableFormat`: `-sorthits 4`, `-sorthsps 2` and `4`). With `-subject` NCBI's
+  Seq-loc mapper rewrites the query row to one nucleotide with a fuzz
+  (`seq_align_mapper_base.cpp:1538-1559`): `CreateDensegFromStdseg`'s exception
+  (`Seq_align.cpp:801`) where the tabular rows, outfmt 0's alignments and sorts (`-sorthits 3`,
+  `-sorthsps 3`; `-sorthsps 4` gives 227 as with `-db`) and the XML make a Dense-seg of it, that
+  nucleotide in `qcovs`. BLAST XML, XML2 and JSON catch the exception (exit status 0, the message
+  on stderr, the query's report cut or left out), outfmt 13 and 14 do not (an empty side file,
+  exit status 255). A subject whose every HSP has length 0 has a Seq-align without a row of
+  letters: with `-db` NCBI's prefetch finds its subject row empty and writes `Error pre-fetching
+  sequence data` (every format but 8, 9, 11 and 12; 8, 9 and 12 too with
+  `PRE_FETCH_SEQS_LIMIT=2147483647`; the archive is never prefetched); LOSAT writes the same. With
+  `-subject` the mapper finds no sequence type in such a subject, takes both rows as nucleotides
+  and maps the subject row to the end of its interval: one HSP becomes an alignment without
+  scores of the rest of the subject's letters against as many query nucleotides from the mapped
+  one (an E-value of 0.0, a bit score of -1.0, a score of -1; identities where a nucleotide
+  letter equals an amino acid letter, positives by the matrix; past the query's last nucleotide
+  the gap character; a minus-strand row that would start before the query's first nucleotide
+  wraps, and NCBI then writes the caught row of the query's Seq-align id, `Row is empty` for
+  `qcovs` or the Dense-seg's exception). LOSAT writes the tabular rows (outfmt 6, 7, 10, 20) of that alignment as NCBI does
+  (decision X2g-7). LOSAT refuses the rest of `-subject`'s mapped alignments. Decision X2g-4: an
+  HSP of length 0 at the first letter of the searched range of a subject with other HSPs, which
+  the mapper cuts into two alignments without scores. Decision X2g-5: a subject whose every HSP
+  has length 0, in every format but the tables and outfmt 18, and in the tables where it has two
+  or more (more rows, exceptions and out-of-memory stops). NCBI's output there is partly not
+  defined (on the 4 GiB limit of the line's probes `BLAST ran out of memory`, exit status 4, for a
+  segment of about 2^32 letters), and the rest comes from alignments that the mapper makes by
+  accident. Known differences: a table of a subject's only HSP of length 0 whose mapped query row
+  reads the query's letters outside its `-query_loc` interval (letters LOSAT does not keep) is
+  refused where its fields read the rows' letters (`qseq`, `sseq`, `btop`, `nident`, `pident`,
+  `mismatch`, `positive`, `ppos`); where those letters give no identity, NCBI's `nident`,
+  `pident` and `ppos` can equal what LOSAT wrote before this item.
 - `-evalue` with a signed infinity or NaN (`+inf`, `-nan`, `+nan(1)`, `1e999`): NCBI's
   `CArg_Double` reads them with `strtod` and its option check (`<= 0`) lets them pass;
   NCBI searches as with the largest e-value (the cutoff stays 1, no HSP is reaped). LOSAT

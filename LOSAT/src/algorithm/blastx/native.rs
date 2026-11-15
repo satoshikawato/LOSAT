@@ -1540,8 +1540,10 @@ pub(super) fn reported_batch(
     // Where the prefetch reads the Seq-aligns and one has an empty subject row (a subject whose
     // every HSP has length 0), it throws before it loads anything and writes its warning: the
     // batch's subjects are then read as with the prefetch off
-    // (`empty_rows::prefetch_reads_empty_row`).
+    // (`empty_rows::prefetch_reads_empty_row`). A gapped search has no HSP of length 0: its hit
+    // lists are not walked.
     let prefetch_fails = !prefetch_off
+        && !options.gapped
         && crate::algorithm::common::database::prefetch_reads_seq_aligns(i32::from(options.outfmt))
         && super::empty_rows::prefetch_reads_empty_row(results, options.gapped);
     let unfetched = prefetch_off || prefetch_fails;

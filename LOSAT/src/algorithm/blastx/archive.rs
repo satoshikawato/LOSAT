@@ -449,7 +449,7 @@ pub(crate) fn write_blastx_archive(
     // and makes alignments without scores of a subject whose every HSP has length 0, which LOSAT
     // does not write (`empty_rows::refuse_mapped_without_scores`).
     if run.remaps_subjects() && !run.gapped {
-        super::empty_rows::refuse_mapped_without_scores(call.batch.batches, run.gapped, false)?;
+        super::empty_rows::refuse_mapped_without_scores(call.batch.batches, run.gapped, None)?;
     }
     with_batch(&call.batch, |batch| {
         let mut aligns = BlastxAligns {

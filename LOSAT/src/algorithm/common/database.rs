@@ -5445,9 +5445,9 @@ pub(crate) fn seq_annots_prefetch(outfmt: Option<i32>) -> bool {
 /// outfmt 8, 9, 11 and 12).
 pub(crate) fn prefetches_subjects(outfmt: Option<i32>) -> bool {
     match outfmt {
-        // `s_IsPrefetchFormat` takes the query-anchored formats 1 to 4 as 0 (DECISIONS T3-4).
-        Some(0..=7 | 17) => true,
-        Some(8 | 9 | 12) => prefetch_seqs_limit() == Some(i32::MAX),
+        // `s_IsPrefetchFormat` takes the query-anchored formats 1 to 4 as 0 (DECISIONS T3-4); the
+        // limit's rule of the Seq-annots is that of the prefetch's reads.
+        Some(format @ (0..=9 | 12 | 17)) => prefetch_reads_seq_aligns(format),
         _ => false,
     }
 }

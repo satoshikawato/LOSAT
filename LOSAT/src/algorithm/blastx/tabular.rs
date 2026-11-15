@@ -41,8 +41,8 @@ use anyhow::Result;
 
 use super::args::ResolvedOptions;
 use super::empty_rows::{
-    row_is_empty, rows_empty, std_seg_lengths_not_accurate, tabular_empty_row, AlignQueryIds,
-    SubjectLoc, TabularEmptyRow,
+    empty_row_scores, row_is_empty, rows_empty, std_seg_lengths_not_accurate, subject_mapped_rows,
+    tabular_empty_row, AlignQueryIds, EmptyRowsRefusal, MappedRows, SubjectLoc, TabularEmptyRow,
 };
 use super::input::FastaRecord;
 use super::report::{
@@ -485,14 +485,25 @@ pub(super) fn write_blastx_tabular(
                 // ```
                 // `qcovs` reads the query range of every HSP of the query before its first row
                 // (`GetMasterCoverage`, quoted below): with `-db` the empty query row of an HSP of
-                // length 0 throws there, after outfmt 7's lines (`empty_rows::row_is_empty`).
-                // `-subject`'s mapped query rows are not empty.
+                // length 0 throws there, after outfmt 7's lines (`empty_rows::row_is_empty`), and
+                // with `-subject` the mapped query row that wraps (`MappedRows::QueryRowWraps`);
+                // `-subject`'s other mapped query rows are not empty.
                 if needs.qcovs
-                    && loc == SubjectLoc::Whole
-                    && listed.iter().any(|list| {
-                        list.hsps
+                    && listed.iter().any(|list| match loc {
+                        SubjectLoc::Whole => list
+                            .hsps
                             .iter()
-                            .any(|hsp| has_seqalign(hsp, options.gapped) && rows_empty(&hsp.hsp))
+                            .any(|hsp| has_seqalign(hsp, options.gapped) && rows_empty(&hsp.hsp)),
+                        SubjectLoc::Interval => matches!(
+                            subject_mapped_rows(
+                                loc,
+                                list,
+                                options.gapped,
+                                query,
+                                &subjects[list.oid]
+                            ),
+                            Some(MappedRows::QueryRowWraps)
+                        ),
                     })
                 {
                     writer.write_all(&buf)?;
@@ -532,10 +543,24 @@ pub(super) fn write_blastx_tabular(
                     // The HSPs of one subject are one group of `InsertSubjectScores` (a hit list
                     // holds a subject once): the union of their query intervals in the record's
                     // nucleotides, in percent of the query's length.
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1541-1547
+                    // ```c++
+                    //     subj_aligns.Reset(RemapAlignToLoc(*subj_aligns, kSubjDimension, subj_loc));
+                    // ```
+                    // A `-subject` subject whose only shown HSP has length 0: the mapper's rows
+                    // without scores (`empty_rows::MappedRows`, which `render_queries_with` let
+                    // through).
+                    let mapped = (shown_count == 1)
+                        .then(|| subject_mapped_rows(loc, list, options.gapped, query, subject))
+                        .flatten();
                     let qcovs = if needs.qcovs {
                         query_ranges.clear();
                         query_ranges.extend(shown_hsps().map(|hsp| {
                             let raw = &hsp.hsp;
+                            if let Some(MappedRows::Letters(mapped)) = &mapped {
+                                let (start, end) = (mapped.q_start as u64, mapped.q_end as u64);
+                                return (start.min(end) - 1, start.max(end) - 1);
+                            }
                             // The one nucleotide of `-subject`'s mapped empty row
                             // (`seqalign::mapped_empty_query_nucleotide`); `-db` stopped above.
                             if rows_empty(raw) {
@@ -616,9 +641,15 @@ pub(super) fn write_blastx_tabular(
                                 spec.opens_counts(&hsp.identity),
                                 shown_count,
                                 spec.reads_query(),
+                                matches!(mapped, Some(MappedRows::QueryRowWraps)),
                             )
                         } else {
                             TabularEmptyRow::Row
+                        };
+                        let (evalue, bit_score, score) = if empty {
+                            empty_row_scores(loc, shown_count, hsp)
+                        } else {
+                            (hsp.evalue, hsp.bit_score, raw.score)
                         };
                         if form == TabularEmptyRow::Throws {
                             writer.write_all(&buf)?;
@@ -629,7 +660,46 @@ pub(super) fn write_blastx_tabular(
                         }
                         let a;
                         let catch_ids;
-                        let (row, row_query, row_subject) = if form == TabularEmptyRow::Leaves {
+                        let (row, row_query, row_subject) = if form == TabularEmptyRow::Mapped {
+                            // `render_queries_with` refused the subjects whose alignment LOSAT
+                            // does not map (`empty_rows::refuse_mapped_without_scores`).
+                            let Some(MappedRows::Letters(mapped)) = &mapped else {
+                                return Err(EmptyRowsRefusal(
+                                    super::empty_rows::UNPORTED_SUBJECT_ALL_EMPTY.to_string(),
+                                )
+                                .into());
+                            };
+                            // No scores (`empty_row_scores`), and the identities of `nident`
+                            // outside the alignment block `x_ResetFields`' 0 (`GetAlnScores`
+                            // finds no `num_ident`); inside it every count is of the rows' letters.
+                            let row = TabularHsp {
+                                q_start: mapped.q_start,
+                                q_end: mapped.q_end,
+                                s_start: mapped.s_start,
+                                s_end: mapped.s_end,
+                                evalue,
+                                bit_score,
+                                score,
+                                length: mapped.length(),
+                                gap_opens: 0,
+                                gaps: 0,
+                                num_ident: 0,
+                                q_frame: mapped.q_frame,
+                                s_frame: 0,
+                                // Without the query row's letters (`-query_loc`) the table
+                                // reads none (`refuse_mapped_without_scores`).
+                                rows: mapped.rows().filter(|_| counts_by_fields),
+                                qcovhsp: query_coverage_per_hsp(
+                                    options.gapped,
+                                    shown_count,
+                                    0,
+                                    mapped.length() as i32,
+                                    searched_length,
+                                    query_length,
+                                ),
+                            };
+                            (row, tabular_query, tabular_subject)
+                        } else if form == TabularEmptyRow::Leaves {
                             // `slen` is 0 without a subject field that reads its Bioseq
                             // (`TabularSpec::reads_subject_bioseq`).
                             let row = TabularHsp {
@@ -637,9 +707,9 @@ pub(super) fn write_blastx_tabular(
                                 q_end: 0,
                                 s_start: 0,
                                 s_end: 0,
-                                evalue: hsp.evalue,
-                                bit_score: hsp.bit_score,
-                                score: raw.score,
+                                evalue,
+                                bit_score,
+                                score,
                                 length: 0,
                                 gap_opens: 0,
                                 gaps: 0,
@@ -679,9 +749,9 @@ pub(super) fn write_blastx_tabular(
                                 q_end: i64::from(a.qend),
                                 s_start: i64::from(a.sstart),
                                 s_end: i64::from(a.send),
-                                evalue: hsp.evalue,
-                                bit_score: hsp.bit_score,
-                                score: raw.score,
+                                evalue,
+                                bit_score,
+                                score,
                                 length: a.qseq.len(),
                                 gap_opens: a.gap_opens,
                                 gaps: a.gaps,

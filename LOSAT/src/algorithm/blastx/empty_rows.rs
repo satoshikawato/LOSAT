@@ -119,19 +119,22 @@ impl SubjectLoc {
 /// `tabular::write_blastx_tabular`, and the default fields of outfmt 6 and 7, `report.rs`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TabularEmptyRow {
-    /// `-subject` with a field of the alignment block, a subject with two or more shown HSPs:
-    /// `CreateDensegFromStdseg` on the mapped Std-seg (`std_seg_lengths_not_accurate`), after the
-    /// rows before it.
+    /// `-subject` with a field of the alignment block, a subject with two or more shown HSPs (or
+    /// the mapped rows of a subject's only HSP whose query row wraps, `MappedRows::QueryRowWraps`,
+    /// without a query field): `CreateDensegFromStdseg` on the mapped Std-seg
+    /// (`std_seg_lengths_not_accurate`), after the rows before it.
     Throws,
-    /// `-db`, a subject whose only shown HSP it is, with a query field: the row that leaves at the
-    /// query's fields (the query's Seq-align id, `AlignQueryIds`; the scores and the subject's
-    /// fields; `qcovhsp` `N/A`; every field of the alignment block at `x_ResetFields`' 0).
+    /// `-db`, a subject whose only shown HSP it is, with a query field (or `-subject`'s mapped
+    /// rows whose query row wraps): the row that leaves at the query's fields (the query's
+    /// Seq-align id, `AlignQueryIds`; the scores, `empty_row_scores`, and the subject's fields;
+    /// `qcovhsp` `N/A`; every field of the alignment block at `x_ResetFields`' 0).
     Leaves,
     /// The row as of any HSP (`-db`: the empty ranges; `-subject` without a field of the
-    /// alignment block: its scores and ids, the mapped nucleotide in `qcovs` and `qcovhsp`;
-    /// `-subject`, a subject's only HSP: the ids of a table that reads nothing of the alignment,
-    /// the only one that `refuse_mapped_without_scores` lets through).
+    /// alignment block: its scores and ids, the mapped nucleotide in `qcovs` and `qcovhsp`).
     Row,
+    /// `-subject`, a subject whose only shown HSP it is: the row of the Seq-loc mapper's
+    /// alignment without scores (`MappedAlignment`, decision X2g-7 of line RG).
+    Mapped,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:737-746
@@ -167,17 +170,257 @@ pub(crate) enum TabularEmptyRow {
 /// Std-seg and none named on the Seq-align, so that `x_SetQueryCovSeqalign` reads the query
 /// row's range, which throws on `-db`'s empty row, caught by `SetFields`. With `-subject` a
 /// subject's only HSP of length 0 has a Seq-align of no row of letters, which the mapper makes
-/// into one of equal lengths (decision X2g-5, `refuse_mapped_without_scores`): no exception.
+/// into an alignment of letters without scores (`MappedRows`), unless its query row wraps
+/// (`query_row_wraps`): then the query row is empty as `-db`'s, and its length not the subject
+/// row's.
 pub(crate) fn tabular_empty_row(
     loc: SubjectLoc,
     opens_block: bool,
     subject_hsps: usize,
     reads_query: bool,
+    query_row_wraps: bool,
 ) -> TabularEmptyRow {
     match loc {
-        SubjectLoc::Interval if opens_block && subject_hsps > 1 => TabularEmptyRow::Throws,
+        SubjectLoc::Interval if subject_hsps == 1 && !query_row_wraps => TabularEmptyRow::Mapped,
+        SubjectLoc::Interval if subject_hsps == 1 && reads_query => TabularEmptyRow::Leaves,
+        SubjectLoc::Interval if opens_block => TabularEmptyRow::Throws,
         SubjectLoc::Whole if subject_hsps == 1 && reads_query => TabularEmptyRow::Leaves,
         _ => TabularEmptyRow::Row,
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:820-833
+// ```c++
+//     bool hasScore = false;
+//     score = -1;
+//     bits = -1;
+//     evalue = -1;
+//     sum_n = -1;
+//     num_ident = -1;
+//     comp_adj_method = 0;
+//
+//     //look for scores at seqalign level first
+//     hasScore = s_GetBlastScore(aln.GetScore(), score, bits, evalue,
+//                                sum_n, num_ident, use_this_gi, comp_adj_method);
+//
+//     //look at the seg level
+//     if(!hasScore){
+// ```
+/// The scores (`evalue`, `bitscore`, `score`) of the tabular row of an HSP of length 0 of a
+/// subject with `subject_hsps` shown HSPs: the HSP's, but `-subject`'s mapped rows of a subject's
+/// only HSP have none (`MappedRows`), which `GetAlnScores` reads as -1 each (an E-value of -1
+/// shows as `0.0`).
+pub(crate) fn empty_row_scores(
+    loc: SubjectLoc,
+    subject_hsps: usize,
+    hsp: &super::results::Hsp,
+) -> (f64, f64, i32) {
+    if loc == SubjectLoc::Interval && subject_hsps == 1 {
+        (-1.0, -1.0, -1)
+    } else {
+        (hsp.evalue, hsp.bit_score, hsp.hsp.score)
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:279-297
+// ```c++
+//             if (start >= 0) {
+//                 stop = start + len - 1;
+//
+//                 // add regular sequence to buffer
+//                 GetSeqString(buff, row, start, stop);
+//                 TSeqPos buf_len = min<TSeqPos>(TSeqPos(buff.size()), seg_len);
+//                 buffer += buff;
+//                 if (buf_len < seg_len) {
+//                     // Not enough chars in the sequence, add gap
+//                     buf_len = seg_len - buf_len;
+//                     char fill_ch;
+//
+//                     if (seg < left_seg  ||  seg > right_seg) {
+//                         fill_ch = GetEndChar();
+//                     } else {
+//                         fill_ch = GetGapChar(row);
+//                     }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1034-1043
+// ```c++
+//         if (kTranslated && ds.GetSeqStrand(kQueryRow) == eNa_strand_minus) {
+//             q_start = alnVec->GetSeqStop(kQueryRow) + 1;
+//             q_end = alnVec->GetSeqStart(kQueryRow) + 1;
+//         } else {
+//             q_start = alnVec->GetSeqStart(kQueryRow) + 1;
+//             q_end = alnVec->GetSeqStop(kQueryRow) + 1;
+//         }
+// ```
+/// The alignment that `-subject`'s Seq-loc mapper makes of the only shown HSP of a subject when
+/// it has length 0 (decision X2g-5 of line RG; its tabular rows ported by X2g-7). The Std-seg has
+/// no row of letters, so the mapper takes both rows as nucleotides of one segment of unknown
+/// length and maps the subject row from its start to the end of the subject's interval
+/// (`refuse_mapped_without_scores`, `seq_align_mapper_base.cpp:422-503`, `:1002-1232`): `n`
+/// residues of the subject against `n` nucleotides of the query from the mapped nucleotide
+/// (`serial::seqalign::mapped_empty_query_nucleotide`) on the frame's strand, without scores.
+/// NCBI's tabular formatter reads it as any Seq-align of letters (`CreateDensegFromStdseg` finds
+/// equal lengths, width 1): the rows are the query's nucleotides (the complement on a minus
+/// strand) and the subject's residues, which it compares as letters, and past the record's last
+/// nucleotide the query row has the gap character (`alnvec.cpp:279-297`). Probes (ws, NCBI BLAST+
+/// 2.17.0): `X/x2g/fix3` (`fix3_grid.py`), the base `c01241_q c01241_s 25.000 4 3 0 4 7 2 5 0.0
+/// -1.0`, the minus twin `0.000 4 4 0 11 8 2 5`.
+pub(crate) struct MappedAlignment {
+    /// `qstart` and `qend` in the record (1-based; above `qend` on a minus strand).
+    pub(crate) q_start: i64,
+    pub(crate) q_end: i64,
+    /// `sstart` and `send` in the record.
+    pub(crate) s_start: i64,
+    pub(crate) s_end: i64,
+    /// `qframe`: `GetFrame` of `qstart` in the record (`seq_range::record_frame`).
+    pub(crate) q_frame: i32,
+    /// The rows (`GetWholeAlnSeqString`), of `n` letters each; no query row where it reads
+    /// letters of a query record cut to `-query_loc` that its cut did not keep
+    /// (`input::FastaRecord::cut_in_place`): letters LOSAT does not have.
+    pub(crate) qrow: Option<Vec<u8>>,
+    pub(crate) srow: Vec<u8>,
+}
+
+impl MappedAlignment {
+    /// The alignment's length, also the query row's span in nucleotides, `qcovs`' and
+    /// `qcovhsp`'s count (`x_SetQueryCovSeqalign` reads `GetSeqStop(0) - GetSeqStart(0)`), past
+    /// the record's end too.
+    pub(crate) fn length(&self) -> usize {
+        self.srow.len()
+    }
+
+    /// The rows, where LOSAT has the query row's letters.
+    pub(crate) fn rows(&self) -> Option<(&[u8], &[u8])> {
+        Some((self.qrow.as_deref()?, &self.srow))
+    }
+}
+
+/// What `-subject`'s Seq-loc mapper makes of the only shown HSP of a subject when it has length 0
+/// (`MappedAlignment`): `n` residues of the subject from the HSP's start to the end of its
+/// interval against `n` nucleotides of the query from the mapped nucleotide (in the record:
+/// `RemapToQueryLoc` moves the row there first, blast_seqalign.cpp:1634-1636), up on a plus
+/// strand and down on a minus strand.
+pub(crate) enum MappedRows {
+    /// An alignment of letters.
+    Letters(MappedAlignment),
+    /// A minus strand's row that would start before the record's first nucleotide: its start, an
+    /// unsigned `TSeqPos`, wraps, so NCBI's formatters find the query row empty as `-db`'s
+    /// (`row_is_empty` where they read its range: `qcovs`, the query's fields), and its length
+    /// not the subject row's (`std_seg_lengths_not_accurate` where they make a Dense-seg of it).
+    /// Probes: `fix3_oob.py`'s minus-strand pairs.
+    QueryRowWraps,
+}
+
+impl MappedRows {
+    /// The mapped rows of the HSP `hsp` of length 0 of the query `query` and the subject
+    /// `subject` (cut to their `-query_loc` / `-subject_loc` intervals); `None` for an HSP past
+    /// its subject's end, which the engine does not report.
+    pub(crate) fn of(
+        hsp: &PreliminaryHsp,
+        query: &super::input::FastaRecord,
+        subject: &super::input::FastaRecord,
+    ) -> Option<Self> {
+        let s_from = usize::try_from(hsp.s_start).ok()?;
+        let srow = subject.sequence.get(s_from..)?.to_vec();
+        let n = srow.len();
+        let place = query.placement();
+        let searched = query.sequence.len();
+        let raw = crate::report::serial::seqalign::ungapped_interval(
+            hsp.q_start,
+            hsp.q_end,
+            hsp.frame,
+            searched as i32,
+        )
+        .0;
+        let at = usize::try_from(
+            crate::report::serial::seqalign::mapped_empty_query_nucleotide(raw, hsp.frame),
+        )
+        .ok()?
+            + place.offset;
+        let plus = hsp.frame > 0;
+        let (from, to) = if plus {
+            (at, at + n.checked_sub(1)?)
+        } else {
+            match (at + 1).checked_sub(n) {
+                Some(from) => (from, at),
+                None => return Some(MappedRows::QueryRowWraps),
+            }
+        };
+        // The record's letters: the searched ones, or the whole record that a cut kept (lower case
+        // where it was masked); the gap character past its end.
+        let whole = query
+            .source
+            .as_deref()
+            .and_then(|source| source.uncut.as_deref());
+        let letter = |at: usize| -> Option<u8> {
+            if at >= place.length {
+                return Some(b'-');
+            }
+            match whole {
+                Some(whole) => whole.get(at).map(u8::to_ascii_uppercase),
+                None => at
+                    .checked_sub(place.offset)
+                    .and_then(|at| query.sequence.get(at).copied()),
+            }
+        };
+        let qrow = if plus {
+            (from..=to).map(letter).collect::<Option<Vec<u8>>>()
+        } else {
+            (from..=to)
+                .rev()
+                .map(|at| letter(at).map(complement_iupacna))
+                .collect::<Option<Vec<u8>>>()
+        };
+        let (q_start, q_end) = if plus { (from, to) } else { (to, from) };
+        let s_offset = subject.placement().offset;
+        Some(MappedRows::Letters(MappedAlignment {
+            q_start: q_start as i64 + 1,
+            q_end: q_end as i64 + 1,
+            s_start: (s_offset + s_from) as i64 + 1,
+            s_end: (s_offset + s_from + n) as i64,
+            q_frame: crate::blastinput::seq_range::record_frame(plus, q_start, place.length),
+            qrow,
+            srow,
+        }))
+    }
+}
+
+/// The mapped rows (`MappedRows`) of the hit list `list` of the query `query` against the subject
+/// `subject` of a report of `loc`'s subjects: a `-subject` subject whose only shown HSP has
+/// length 0; `None` for every other list, and where LOSAT does not have the letters
+/// (`MappedRows::of`, which `refuse_mapped_without_scores` refused before the report).
+pub(crate) fn subject_mapped_rows(
+    loc: SubjectLoc,
+    list: &super::results::HspList,
+    gapped: bool,
+    query: &super::input::FastaRecord,
+    subject: &super::input::FastaRecord,
+) -> Option<MappedRows> {
+    if loc != SubjectLoc::Interval || !subject_rows_all_empty(list, gapped) {
+        return None;
+    }
+    let mut shown = list
+        .hsps
+        .iter()
+        .filter(|hsp| super::report::has_seqalign(hsp, gapped));
+    let only = shown.next()?;
+    if shown.next().is_some() {
+        return None;
+    }
+    MappedRows::of(&only.hsp, query, subject)
+}
+
+/// The complement of an IUPAC nucleotide letter (or `-`), as NCBI reads a minus strand: the
+/// reversed bits of its `ncbi4na` value (`blastx::report::display_query_residue`).
+fn complement_iupacna(letter: u8) -> u8 {
+    const IUPACNA: &[u8; 16] = b"-ACMGRSVTWYHKDBN";
+    match IUPACNA.iter().position(|&c| c == letter) {
+        Some(mask) => {
+            let mask = mask as u8;
+            IUPACNA[(((mask & 1) << 3) | ((mask & 2) << 1) | ((mask & 4) >> 1) | ((mask & 8) >> 3))
+                as usize]
+        }
+        None => letter,
     }
 }
 
@@ -341,38 +584,67 @@ pub(crate) fn prefetch_reads_empty_row(
 //   (rows with an E-value of 0.0 and a bit score of -1.0, identities where a nucleotide letter
 //   equals an amino acid letter), and two or more give more rows, exceptions and, on the 4 GiB
 //   limit of the line's probes, `BLAST ran out of memory` (exit status 4).
-// The organism report (outfmt 18) does not read the rows; a table whose fields read nothing of
-// the alignment (`ids_only`, `TabularSpec::reads_no_alignment`) writes X2g-5's one alignment as
-// any other row.
+// The organism report (outfmt 18) does not read the rows; the tabular reports write X2g-5's one
+// alignment as NCBI's formatter reads it (`MappedAlignment`, decision X2g-7).
+/// The tabular reports of a `-subject` run (`refuse_mapped_without_scores`): the queries and
+/// subjects of their rows, and whether the rows read the alignment's letters
+/// (`TabularSpec::reads_row_letters`; the default fields' `pident` and `mismatch` do).
+#[derive(Clone, Copy)]
+pub(crate) struct MappedTables<'a> {
+    pub(crate) queries: &'a [super::input::FastaRecord],
+    pub(crate) subjects: &'a [super::input::FastaRecord],
+    pub(crate) reads_letters: bool,
+}
+
 /// Refuses the reports of `batches` with `-subject` (other than outfmt 18) where every HSP that they
-/// show of a subject has length 0 (X2g-5), unless there is one such HSP and the report is a table
-/// of fields that read nothing of the alignment (`ids_only`), or where, among the shown HSPs of a
-/// subject with letters in its rows, one of length 0 starts at the first letter of the subject's
-/// searched range (X2g-4). The first refusal in the order of the hit lists.
+/// show of a subject has length 0 (X2g-5), unless there is one such HSP, the report is a table
+/// (`tabular`) and LOSAT has the letters of its mapped rows that the table reads
+/// (`MappedRows::of`), or where, among the shown HSPs of a subject with letters in its rows,
+/// one of length 0 starts at the first letter of the subject's searched range (X2g-4). The first
+/// refusal in the order of the hit lists.
 pub(crate) fn refuse_mapped_without_scores(
     batches: &[super::runtime::BatchResults],
     gapped: bool,
-    ids_only: bool,
+    tabular: Option<MappedTables<'_>>,
 ) -> anyhow::Result<()> {
-    for list in batches
-        .iter()
-        .flat_map(|batch| batch.queries.iter().flatten())
-    {
-        let mut shown = list
-            .hsps
+    for batch in batches {
+        for (qidx, list) in batch
+            .queries
             .iter()
-            .filter(|hsp| super::report::has_seqalign(hsp, gapped));
-        // X2g-5 first: a subject of empty rows only has no sequence type for the mapper, also
-        // where one of them lies at the first letter.
-        let refusal = if subject_rows_all_empty(list, gapped) {
-            (!ids_only || shown.nth(1).is_some()).then_some(UNPORTED_SUBJECT_ALL_EMPTY)
-        } else {
-            shown
-                .any(|hsp| rows_empty(&hsp.hsp) && hsp.hsp.s_start == 0)
-                .then_some(UNPORTED_SUBJECT_START)
-        };
-        if let Some(refusal) = refusal {
-            return Err(EmptyRowsRefusal(refusal.to_string()).into());
+            .enumerate()
+            .flat_map(|(qidx, lists)| lists.iter().map(move |list| (qidx, list)))
+        {
+            let mut shown = list
+                .hsps
+                .iter()
+                .filter(|hsp| super::report::has_seqalign(hsp, gapped));
+            // X2g-5 first: a subject of empty rows only has no sequence type for the mapper, also
+            // where one of them lies at the first letter.
+            let refusal = if subject_rows_all_empty(list, gapped) {
+                let first = shown.next().expect("a shown HSP");
+                let written = shown.next().is_none()
+                    && tabular.is_some_and(|tables| {
+                        match MappedRows::of(
+                            &first.hsp,
+                            &tables.queries[batch.query_ordinal + qidx],
+                            &tables.subjects[list.oid],
+                        ) {
+                            Some(MappedRows::Letters(mapped)) => {
+                                mapped.qrow.is_some() || !tables.reads_letters
+                            }
+                            Some(MappedRows::QueryRowWraps) => true,
+                            None => false,
+                        }
+                    });
+                (!written).then_some(UNPORTED_SUBJECT_ALL_EMPTY)
+            } else {
+                shown
+                    .any(|hsp| rows_empty(&hsp.hsp) && hsp.hsp.s_start == 0)
+                    .then_some(UNPORTED_SUBJECT_START)
+            };
+            if let Some(refusal) = refusal {
+                return Err(EmptyRowsRefusal(refusal.to_string()).into());
+            }
         }
     }
     Ok(())
@@ -451,25 +723,93 @@ mod tests {
 
     // X/SURVEY_X2g_formats.md 3 (set C): -subject throws only with a field of the alignment
     // block; -db leaves at the query's fields only for a subject's only HSP with a query field.
-    // A -subject subject's only HSP of length 0 (decision X2g-5, the ws gate's S1 rows): the
-    // mapper's Std-seg of equal lengths, no exception (`6 qseqid sstrand` writes `N/A`).
+    // A -subject subject's only HSP of length 0 (decisions X2g-5 and X2g-7): the mapper's
+    // alignment of letters, no exception.
     #[test]
     fn the_tabular_row_of_empty_rows_follows_the_mode_and_the_fields() {
+        use SubjectLoc::{Interval, Whole};
         use TabularEmptyRow::*;
+        assert_eq!(tabular_empty_row(Interval, true, 2, true, false), Throws);
+        assert_eq!(tabular_empty_row(Interval, true, 3, false, false), Throws);
+        assert_eq!(tabular_empty_row(Interval, false, 2, true, false), Row);
+        assert_eq!(tabular_empty_row(Interval, true, 1, true, false), Mapped);
+        assert_eq!(tabular_empty_row(Interval, false, 1, false, false), Mapped);
+        // The mapped query row wraps (fix3_oob.py's minus-strand pairs): as `-db`'s empty row
+        // with a query field, else the Dense-seg's 801 with a field of the block.
+        assert_eq!(tabular_empty_row(Interval, true, 1, true, true), Leaves);
+        assert_eq!(tabular_empty_row(Interval, true, 1, false, true), Throws);
+        assert_eq!(tabular_empty_row(Interval, false, 1, false, true), Row);
+        assert_eq!(tabular_empty_row(Whole, true, 1, true, false), Leaves);
+        assert_eq!(tabular_empty_row(Whole, false, 1, true, false), Leaves);
+        assert_eq!(tabular_empty_row(Whole, true, 2, true, false), Row);
+        assert_eq!(tabular_empty_row(Whole, true, 1, false, false), Row);
+    }
+
+    fn record(sequence: &str) -> super::super::input::FastaRecord {
+        super::super::input::FastaRecord {
+            internal_id: "Query_1".to_string(),
+            title: String::new(),
+            sequence: sequence.as_bytes().to_vec(),
+            lowercase_masks: Vec::new(),
+            warnings: Vec::new(),
+            source: None,
+        }
+    }
+
+    fn mapped(query: &super::super::input::FastaRecord, subject: &str, frame: i8) -> MappedRows {
+        let mut hsp = ungapped(1, 1).hsp;
+        hsp.frame = frame;
+        MappedRows::of(&hsp, query, &record(subject)).expect("an HSP inside its subject")
+    }
+
+    // Decision X2g-7, NCBI BLAST+ 2.17.0 on ws (`X/x2g/fix3`, fix3_grid.py): the rows of the
+    // mapped alignment of a subject's only HSP of length 0 at query offset 1 and subject offset 1.
+    #[test]
+    fn the_mapped_rows_are_ncbis() {
+        // x2g_s1 (c01241, frame 1): `c01241_q c01241_s 4 7 2 5 4 TCCC TLWI ... 1`.
+        let MappedRows::Letters(plus) = mapped(&record("TTCTCCCTGCCCATA"), "GTLWI", 1) else {
+            panic!("letters");
+        };
         assert_eq!(
-            tabular_empty_row(SubjectLoc::Interval, true, 2, true),
-            Throws
+            (plus.q_start, plus.q_end, plus.s_start, plus.s_end),
+            (4, 7, 2, 5)
         );
-        assert_eq!(
-            tabular_empty_row(SubjectLoc::Interval, true, 3, false),
-            Throws
-        );
-        assert_eq!(tabular_empty_row(SubjectLoc::Interval, true, 1, true), Row);
-        assert_eq!(tabular_empty_row(SubjectLoc::Interval, false, 1, true), Row);
-        assert_eq!(tabular_empty_row(SubjectLoc::Whole, true, 1, true), Leaves);
-        assert_eq!(tabular_empty_row(SubjectLoc::Whole, false, 1, true), Leaves);
-        assert_eq!(tabular_empty_row(SubjectLoc::Whole, true, 2, true), Row);
-        assert_eq!(tabular_empty_row(SubjectLoc::Whole, true, 1, false), Row);
+        assert_eq!(plus.rows(), Some((&b"TCCC"[..], &b"TLWI"[..])));
+        assert_eq!((plus.q_frame, plus.length()), (1, 4));
+        // Its minus-frame twin (frame -2): `11 8 2 5 4 CCCT TLWI ... -2`.
+        let MappedRows::Letters(minus) = mapped(&record("TATGGGCAGGGAGAA"), "GTLWI", -2) else {
+            panic!("letters");
+        };
+        assert_eq!((minus.q_start, minus.q_end, minus.q_frame), (11, 8, -2));
+        assert_eq!(minus.rows(), Some((&b"CCCT"[..], &b"TLWI"[..])));
+        // x2g_s1o (o00016): one nucleotide past the query's end, the gap character.
+        let MappedRows::Letters(past) = mapped(&record("TGCTCGGCATGGCTG"), "ETANLXXXXXXXXX", 1)
+        else {
+            panic!("letters");
+        };
+        assert_eq!((past.q_start, past.q_end, past.length()), (4, 16, 13));
+        assert_eq!(past.rows().unwrap().0, b"TCGGCATGGCTG-");
+        // x2g_s1w: the minus twin would start before the query's first nucleotide.
+        assert!(matches!(
+            mapped(&record("CAGCCATGCCGAGCA"), "ETANLXXXXXXXXX", -2),
+            MappedRows::QueryRowWraps
+        ));
+        // x2g_s1q: -query_loc 1-15 of 43 nucleotides; the row's 16th is the record's, not kept.
+        let mut cut = record("TGCTCGGCATGGCTGACGTACGTACGTACGTACGTACGTACGT");
+        cut.cut_in_place(0, 15, false);
+        let MappedRows::Letters(unread) = mapped(&cut, "ETANLXXXXXXXXX", 1) else {
+            panic!("letters");
+        };
+        assert_eq!((unread.q_start, unread.q_end), (4, 16));
+        assert_eq!(unread.rows(), None);
+        let mut kept = record("TGCTCGGCATGGCTGACGTACGTACGTACGTACGTACGTACGT");
+        kept.cut_in_place(0, 15, true);
+        let MappedRows::Letters(read) = mapped(&kept, "ETANLXXXXXXXXX", 1) else {
+            panic!("letters");
+        };
+        assert_eq!(read.rows().unwrap().0, b"TCGGCATGGCTGA");
+        assert_eq!(complement_iupacna(b'R'), b'Y');
+        assert_eq!(complement_iupacna(b'N'), b'N');
     }
 
     // X/SURVEY_X2g_formats.md 1: p0095 (frame -1, raw query row (119, 118)) maps to 118..118;

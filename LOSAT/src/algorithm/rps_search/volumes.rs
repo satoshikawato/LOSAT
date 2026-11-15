@@ -7,7 +7,7 @@
 use anyhow::{bail, Result};
 
 use crate::algorithm::blastp::hsp::BlastpHitList;
-use crate::seqdb::rps::{RpsOpenError, RpsVolumeFault, RpsVolumeFiles};
+use crate::seqdb::rps::{canonical_volume_path, RpsOpenError, RpsVolumeFault, RpsVolumeFiles};
 
 /// NCBI's own errors of a volume's files, which its search of a query batch raises (`BLAST
 /// engine error`, exit status 3).
@@ -198,6 +198,10 @@ pub(crate) struct RpsVolumeSetup {
     program: &'static str,
     window: i32,
     first_costs: Option<(String, i32, i32)>,
+    /// The volumes (`canonical_volume_path`) whose cells `check` or `open` found not grouped by
+    /// bucket and regrouped (`RpsVolumeFiles::is_regrouped`; series PR, item PS12m): `reopen`
+    /// regroups them again without reading every hit.
+    regrouped: std::collections::BTreeSet<String>,
 }
 
 impl RpsVolumeSetup {
@@ -206,6 +210,7 @@ impl RpsVolumeSetup {
             program,
             window,
             first_costs: None,
+            regrouped: std::collections::BTreeSet::new(),
         }
     }
 
@@ -288,7 +293,10 @@ impl RpsVolumeSetup {
         let opened = if check_hits {
             RpsVolumeFiles::open_for(volume.base(), &lengths, self.program)
         } else {
-            RpsVolumeFiles::open_checked(volume.base(), &lengths, self.program)
+            let regroup = self
+                .regrouped
+                .contains(&canonical_volume_path(volume.base()));
+            RpsVolumeFiles::open_checked(volume.base(), &lengths, self.program, regroup)
         };
         let mut files = match opened {
             Ok(files) => files,
@@ -320,6 +328,9 @@ impl RpsVolumeSetup {
 
     /// LOSAT's refusals of what NCBI's search does not reproducibly run on the volume's files.
     fn check_files(&mut self, volume: &Volume, files: &RpsVolumeFiles) -> Result<()> {
+        if files.is_regrouped() {
+            self.regrouped.insert(canonical_volume_path(volume.base()));
+        }
         let aux = &files.aux;
         if aux.matrix != "BLOSUM62" || aux.gap_open != 11 || aux.gap_extend != 1 {
             bail!(

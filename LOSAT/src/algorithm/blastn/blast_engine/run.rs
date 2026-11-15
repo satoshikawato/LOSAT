@@ -79,7 +79,7 @@ use super::super::tracing as blastn_trace;
 use super::super::ungapped;
 use crate::blastinput::app::{self as app, Program};
 use crate::core::blast_hits::reap_by_query_coverage;
-use crate::report::record::{QueryNames, SubjectNames};
+use crate::report::record::QueryNames;
 // EXPERIMENT (LOSAT_X_BNSTORE): the subjects' letters read from the records or from packed subjects.
 use super::super::x_subject_store::{
     x_blastna_into_pool, x_bnstore, x_read_subject_stores, SubjectLetters,
@@ -341,6 +341,15 @@ mod context_statistics;
 // so that it uses the private types and modules of this file).
 #[path = "subject_env.rs"]
 mod subject_env;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:750-755 (the SAM branch of
+// `CBlastFormat::x_PrintStructuredReport`); the refusals of the query-anchored reports have no NCBI
+// counterpart.
+// Two parts of `post_process_hits_and_write`, the refusals of outfmt 1 to 4 and the SAM writer, and the
+// subjects' names that the Seq-align, archive and SAM writers take (a child module, so that it uses
+// the private types of this file).
+#[path = "report_write.rs"]
+mod report_write;
 
 /// EXPERIMENT (LOSAT_X_QPREPPAR): the summary line `main` prints at exit. No NCBI
 /// counterpart: it prints counters and changes no value NCBI computes.
@@ -6960,112 +6969,15 @@ fn post_process_hits_and_write(
         } else {
             std::borrow::Cow::Owned(Vec::new())
         };
-    // The query-anchored formats (outfmt 1 to 4, line RG T3b), before any format of the call is
-    // written, as BLASTP's (`blast_engine::run_call`): a query whose own record is one of the
-    // subjects (`-subject`, `-parse_deflines`) and whose section NCBI BLAST+ aborts on
-    // (`pairwise::section_aborts`, PD-LOSAT-NCBI-DEFECTS rule 3), and a reported database sequence
-    // that NCBI's scope finds as a query of its batch, by its Seq-align id (a generated
-    // `lcl|Query_N`) or, in a description line, by its display id
-    // (`common::database::refuse_query_ids_of_anchored_reports`): NCBI shows the query in its
-    // place. NCBI's bytes before an abort depend on its buffers, so LOSAT writes none of the call's.
-    let anchored_view = output_formats.iter().find_map(|format| match format {
-        BlastnOutputFormat::Pairwise(view)
-            if *view != crate::report::pairwise::PairwiseView::Pairwise =>
-        {
-            Some(*view)
-        }
-        _ => None,
-    });
-    if let Some(view) = anchored_view {
-        let sort = report.formatting.report_sort();
-        let rows_of_query = |q_idx: usize| -> Result<std::borrow::Cow<'_, [PairwiseHit]>> {
-            Ok(match pairwise_hits.as_deref() {
-                Some(hits) => std::borrow::Cow::Borrowed(hits.as_slice()),
-                None => std::borrow::Cow::Owned(rows_of(q_idx..q_idx + 1)?),
-            })
-        };
-        if report.database_reader.is_none() {
-            for (q_idx, record) in report.queries.iter().enumerate() {
-                if record.believed().is_none_or(|ids| ids.shared.is_none()) {
-                    continue;
-                }
-                let is_query = |s_idx: u32| {
-                    report
-                        .subjects
-                        .records()
-                        .get(s_idx as usize)
-                        .is_some_and(|subject| {
-                            crate::report::query_anchored::subject_is_query_record(record, subject)
-                        })
-                };
-                let rows = rows_of_query(q_idx)?;
-                let aborts = crate::report::pairwise::section_aborts(
-                    view,
-                    sort,
-                    report.num_alignments,
-                    q_idx,
-                    &rows,
-                    &subject_titles,
-                    is_query,
-                    |group| {
-                        crate::report::pairwise::blastn_section_hsps(
-                            report.num_alignments,
-                            group,
-                            is_query,
-                        )
-                    },
-                )?;
-                if aborts {
-                    return Err(crate::report::query_anchored::aborted_section(
-                        record, "BLASTN",
-                    ));
-                }
-            }
-        }
-        if let (Some(ordinals), Some(reader)) = (report.database_ordinals, report.database_reader) {
-            let batches = crate::blastinput::query_batch::AnchoredBatchScopes::new(
-                report.queries,
-                if report.batch_spans.is_empty() {
-                    vec![0..report.queries.len()]
-                } else {
-                    report.batch_spans.to_vec()
-                },
-            );
-            let oids = reader.oid_map();
-            crate::algorithm::common::database::refuse_query_ids_of_anchored_reports(
-                hit_lists.len(),
-                |q_idx| {
-                    hit_lists[q_idx]
-                        .iter()
-                        .flat_map(|hit_list| &hit_list.hsplist_array)
-                        .filter_map(|list| list.hsps.first().map(|hsp| hsp.s_idx))
-                        .collect()
-                },
-                |q_idx| {
-                    let rows = rows_of_query(q_idx)?;
-                    Ok(crate::report::pairwise::blastp_described_subjects(
-                        view.report_sort(sort),
-                        false,
-                        report.num_descriptions,
-                        q_idx,
-                        &rows,
-                        |previous, s_idx| {
-                            crate::report::db_subject::rank_joins_as_copy(
-                                report.database_parsed,
-                                previous as usize,
-                                s_idx as usize,
-                            )
-                        },
-                    ))
-                },
-                report.database_parsed,
-                |rank| oids.oid(ordinals[rank as usize]),
-                |q_idx| batches.of_query(q_idx),
-                batches.generated(),
-                "BLASTN",
-            )?;
-        }
-    }
+    // The query-anchored formats (outfmt 1 to 4) refuse the call before any format of it is written.
+    report_write::refuse_anchored_reports(
+        output_formats,
+        report,
+        &hit_lists,
+        pairwise_hits.as_deref().map(Vec::as_slice),
+        &subject_titles,
+        &rows_of,
+    )?;
     let observer = &mut outputs.observer;
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
     // ```c++
@@ -7227,19 +7139,7 @@ fn post_process_hits_and_write(
             //         }
             // ```
             // The Seq-annot of each query with alignments (`seqalign`).
-            let subjects = match (
-                report.database_ordinals,
-                report.database,
-                report.database_reader,
-            ) {
-                (Some(ordinals), Some(database), Some(reader)) => SubjectNames::Database {
-                    ordinals,
-                    oids: reader.oid_map(),
-                    title: &database.definition,
-                    parsed: report.database_parsed,
-                },
-                _ => SubjectNames::Records(report.subjects.records()),
-            };
+            let subjects = report_write::subject_names_of(report);
             write_blastn_seqalign(
                 serial,
                 &hit_lists,
@@ -7258,19 +7158,7 @@ fn post_process_hits_and_write(
             let handle = report
                 .archive
                 .expect("a BLAST archive request has its handle");
-            let subjects = match (
-                report.database_ordinals,
-                report.database,
-                report.database_reader,
-            ) {
-                (Some(ordinals), Some(database), Some(reader)) => SubjectNames::Database {
-                    ordinals,
-                    oids: reader.oid_map(),
-                    title: &database.definition,
-                    parsed: report.database_parsed,
-                },
-                _ => SubjectNames::Records(report.subjects.records()),
-            };
+            let subjects = report_write::subject_names_of(report);
             let call = archive::ArchiveCall {
                 handle,
                 batches: call_batches(report, query_lengths, &unsearched),
@@ -7287,102 +7175,14 @@ fn post_process_hits_and_write(
                 &mut writer,
             )?;
         } else if let BlastnOutputFormat::Sam(_) = output_format {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:750-755
-            // ```c++
-            //     if (m_FormatType == CFormattingArgs::eSAM) {
-            //         if (results.HasAlignments()) {
-            //             m_SamFormatter->Print(*results.GetSeqAlign());
-            //         }
-            //         return;
-            //     }
-            // ```
-            // The queries' records are added to the run's document, which NCBI writes when its
-            // formatter is destroyed (`SamDocument::finish`): after the last call, or in a call
-            // that is the run's only one.
-            let target = sam[format_index]
-                .as_mut()
-                .expect("a SAM document is made for outfmt 17");
-            if let Some(warnings) = format_warnings.as_mut() {
-                for q_idx in 0..hit_lists.len() {
-                    warnings.before_query(q_idx, &mut writer)?;
-                }
-            }
-            let names = QueryNames {
-                records: report.queries,
-                searched_lengths: query_lengths,
-                placements: &report.ranges.queries.placements,
-            };
-            match (
-                report.database_ordinals,
-                report.database,
-                report.database_reader,
-            ) {
-                (Some(ordinals), Some(database), Some(reader)) => {
-                    // A database's sequences are searched whole; the lengths come from its
-                    // index (no letters).
-                    let lengths = reader.sam_lengths(ordinals)?;
-                    let cache = database::SamLetterCache::default();
-                    let letters_of = |rank: usize, from: usize, to: usize| {
-                        reader.sam_letters(&cache, ordinals[rank], from, to)
-                    };
-                    super::super::sam::add_blastn_sam(
-                        target.document,
-                        &hit_lists,
-                        &names,
-                        report.queries_before,
-                        SubjectNames::Database {
-                            ordinals,
-                            oids: reader.oid_map(),
-                            title: &database.definition,
-                            parsed: report.database_parsed,
-                        },
-                        report.ranges.subjects.placements,
-                        &super::super::sam::SubjectLengths {
-                            searched: &|rank| lengths[rank],
-                            whole: &|rank| lengths[rank],
-                        },
-                        &mut super::super::sam::BlastnSamLetters {
-                            queries: report.queries,
-                            query_placements: &report.ranges.queries.placements,
-                            subjects: super::super::sam::SubjectSource::Database(&letters_of),
-                        },
-                    )?;
-                }
-                _ => {
-                    // The records as read with `-subject_loc` (never packed), else the
-                    // searched ones: the letters are asked for in record coordinates.
-                    let whole_records = match report.ranges.subjects.records {
-                        Some(records) => SubjectLetters::new(records, None),
-                        None => report.subjects,
-                    };
-                    super::super::sam::add_blastn_sam(
-                        target.document,
-                        &hit_lists,
-                        &names,
-                        report.queries_before,
-                        SubjectNames::Records(report.subjects.records()),
-                        report.ranges.subjects.placements,
-                        &super::super::sam::SubjectLengths {
-                            searched: &|s_idx| report.subjects.len(s_idx),
-                            whole: &|s_idx| {
-                                report
-                                    .ranges
-                                    .subjects
-                                    .placements
-                                    .length(s_idx, report.subjects.len(s_idx))
-                            },
-                        },
-                        &mut super::super::sam::BlastnSamLetters {
-                            queries: report.queries,
-                            query_placements: &report.ranges.queries.placements,
-                            subjects: super::super::sam::SubjectSource::Records(whole_records),
-                        },
-                    )?;
-                }
-            }
-            if target.finish {
-                target.document.finish(&mut writer)?;
-            }
+            report_write::write_sam(
+                &mut sam[format_index],
+                report,
+                &hit_lists,
+                query_lengths,
+                format_warnings.as_mut(),
+                &mut writer,
+            )?;
         } else if output_format.is_structured_xml() {
             // The XML2 / JSON documents of outfmt 15 and 16 take the path of outfmt 5: the same
             // per-query records, written by another writer.

@@ -43,8 +43,9 @@ use crate::seqdb::{SeqDb, SeqType};
 /// whole check from the stream (`x_db_stream`) and the tests.
 const PROGRAM: &str = "BLASTX";
 
-/// The longest subject BLASTX searches in one piece (NCBI's `MAX_DBSEQ_LEN`).
-pub(super) const MAX_DBSEQ_LEN: usize = 5_000_000;
+// The longest subject BLASTX searches in one piece (NCBI's `MAX_DBSEQ_LEN`, blast_gapalign.h:54;
+// the one copy of the macro).
+pub(super) use crate::core::subject_split::MAX_DBSEQ_LEN;
 
 /// Sequences whose lengths `BlastxDatabase::x_open_stream` reads with one read of the index (64 KiB
 /// of offsets). No NCBI counterpart; the size changes nothing but the number of reads.

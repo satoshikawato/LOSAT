@@ -44,6 +44,15 @@ pub enum VolumeHeader {
     Parsed(crate::seqid::DeflineSet),
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:302-323 (quoted at
+// `Volume::nucleotide_length_bounds`)
+/// `GetSeqLengthExact`'s length of a nucleotide whose packed bases start at `start` and whose
+/// ambiguity data start at `amb_start` (`start < amb_start`), the last byte of its bases being
+/// `last`: the whole bytes times four plus the count in the last byte's low two bits.
+fn packed_length(start: u64, amb_start: u64, last: u8) -> u64 {
+    (amb_start - start - 1) * 4 + u64::from(last & 3)
+}
+
 impl Volume {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:104-109
     // ```c++
@@ -788,6 +797,61 @@ impl Volume {
         Ok((start, amb_start, next))
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:302-323
+    // ```c++
+    // int CSeqDBVol::GetSeqLengthExact(int oid) const
+    // {
+    //     ...
+    //     m_Idx->GetSeqStartEnd(oid, start_offset, end_offset);
+    //     ...
+    //     int whole_bytes = int(end_offset - start_offset - 1);
+    //
+    //     // The last byte is partially full; the last two bits of
+    //     // the last byte store the number of nucleotides in the
+    //     // last byte (0 to 3).
+    //
+    //     char amb_char = 0;
+    //     m_Seq->ReadBytes(& amb_char, end_offset - 1, end_offset);
+    //
+    //     int remainder = amb_char & 3;
+    //     return (whole_bytes * 4) + remainder;
+    // }
+    // ```
+    /// The lengths that the index alone gives for the nucleotides `first..end` (volume-relative),
+    /// one read of each offset array for the range: `GetSeqLengthExact`'s whole bytes times four
+    /// plus 0 and plus 3 (the count that the last byte holds), so the length that
+    /// [`Volume::nucleotide_length`] reads lies between them; `None` for a sequence whose length
+    /// that read would not give (offsets out of order, past the end of the sequence file, or a
+    /// length that may pass a signed 32-bit length), where `nucleotide_length` reports the error.
+    /// No read of the sequence file. For the masks' walk of `-db_hard_mask` (`SeqDb::
+    /// first_searched_masks`, review 2 S4 of M4a-2b), which reads the last byte only where the
+    /// refusal differs within the bounds.
+    pub fn nucleotide_length_bounds(
+        &self,
+        first: u32,
+        end: u32,
+    ) -> Result<Vec<Option<(usize, usize)>>, SeqDbError> {
+        self.check_range(first, end)?;
+        let seq = self.index.sequence_offsets(first, end)?;
+        let amb = self.index.ambiguity_offsets(first, end)?;
+        let file_len = self.seq_file()?.len();
+        Ok(seq
+            .iter()
+            .zip(&amb)
+            .map(|(&start, &amb_start)| {
+                let (start, amb_start) = (u64::from(start), u64::from(amb_start));
+                if amb_start <= start || amb_start > file_len {
+                    return None;
+                }
+                let high = packed_length(start, amb_start, 3);
+                (high <= i32::MAX as u64)
+                    .then(|| (packed_length(start, amb_start, 0) as usize, high as usize))
+            })
+            .collect())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:302-323 (quoted
+    // at `nucleotide_length_bounds`)
     /// The length in bases of nucleotide `oid` (volume-relative; `named` its OID in the database,
     /// which the messages name), from the last byte of its packed bases only.
     pub fn nucleotide_length(&self, oid: u32, named: u32) -> Result<usize, SeqDbError> {
@@ -803,7 +867,7 @@ impl Volume {
             });
         }
         let last = file.read_range(amb_start - 1, amb_start)?;
-        let length = (amb_start - start - 1) * 4 + u64::from(last[0] & 3);
+        let length = packed_length(start, amb_start, last[0]);
         if length > i32::MAX as u64 {
             return Err(SeqDbError::Format {
                 path: file.path().to_path_buf(),

@@ -560,6 +560,15 @@ title that `GenerateDefline` makes has no first word (a title of spaces, a prefi
 `t5/nclean` and `t5/nall`, whose empty titles of a taxid that the taxonomy database does not name (or without one)
 give no word either.
 
+Taxids in other encodings (fix 2 of line RG item T5c; rows `db.t5.taxid.*`, blastdbcmd cases `T519`-`T524`, segmasker
+and dustmasker rows `db_t5c_taxid_*`): `t5/make_t5.py NCBI_BIN --taxid-only` writes the version 4 databases
+`t5/ptx_<name>` and `t5/ntx_<name>` (without `-parse_seqids`, `-taxid 9606`, two records with the letters of
+`ids/pdup.faa` and `ids/ndup.fna`) and rewrites the `taxid [2]` of the first record (and the header offsets of the
+index): `app42` (the application INTEGER tag `0x42`) and `sx9` (nine content bytes, seven of them sign extension),
+which NCBI's `ReadInt4` reads as 9606, and `big5` (2^31 in five bytes), on which NCBI fails (`eOverflow`: `TTaxId` is
+an `int`) wherever it reads the header: exit 255 in the reports of the record (LOSAT's `losat-rejection` rows, exit 1),
+`Error: [blastdbcmd] error while reading taxid` (exit 1). Probe: `remaining-gaps-20261112/T/taxid_t5c.md`.
+
 A title of punctuation without parsed Seq-ids (line DBID tabfields; rows `db.id.tf.*.punct.*`): `make_ids.py
 --tabfields-only` writes `ids/ppunct_np` (version 4, without `-parse_seqids`) from `ids/ppunct.faa`, whose first title
 `, ,` NCBI's `x_CleanAndCompress` reads past the end of where it makes the tabular id of a protein; the query

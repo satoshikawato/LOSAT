@@ -18,9 +18,9 @@ use std::path::Path;
 
 use super::SeqDbError;
 use crate::seqid::ber::{
-    fix_visible_chars, replaced_bytes, taxid_value, BerError, Reader, DEFLINE_LAST_MEMBER,
-    DEFLINE_SEQID, DEFLINE_TAXID, DEFLINE_TITLE, TAG_CONTEXT_CONSTRUCTED, TAG_NUMBER_MASK,
-    TAG_SEQUENCE,
+    fix_visible_chars, int_list, replaced_bytes, BerError, Reader, DEFLINE_LAST_MEMBER,
+    DEFLINE_MEMBERS, DEFLINE_SEQID, DEFLINE_TAXID, DEFLINE_TITLE, TAG_CONTEXT_CONSTRUCTED,
+    TAG_NUMBER_MASK, TAG_SEQUENCE,
 };
 use crate::seqid::DeflineSet;
 
@@ -36,8 +36,8 @@ pub struct Defline {
     /// (`fix_visible_chars`). NCBI posts an error message for each of them every
     /// time it reads the definition line; makeblastdb stores none.
     pub replaced_title_bytes: usize,
-    /// `taxid` of the definition line, 0 unless `decode_defline_taxids` read it (a value
-    /// above `i32::MAX`, which makeblastdb does not write, reads as `i32::MAX`).
+    /// `taxid` of the definition line (NCBI's `TTaxId`, an `int`), 0 when the line has none or
+    /// the decode did not read it (`decode_deflines_as` without `want_taxid`).
     pub taxid: i32,
 }
 
@@ -203,12 +203,21 @@ fn decode_defline(
                 }
                 ber.close(member_end, "the Seq-id list")?;
             }
-            // The taxid is read only when asked for (`decode_defline_taxids`).
+            // With `want_taxid` the record is read as NCBI's `x_GetHdrAsn1` reads it (the whole
+            // `Blast-def-line-set`, seqdbvol.cpp:2208-2218): the taxid as a `TTaxId` (an `int`),
+            // memberships, links and other-info as lists of `int` (not kept; `Blast_def_line_.hpp`,
+            // generated from blastdb.asn:32-47), so that a value NCBI cannot read fails here.
             DEFLINE_TAXID if want_taxid => {
-                taxid = taxid_value(ber.integer()?);
+                taxid = ber.int()?;
                 ber.close(member_end, "the taxid")?;
             }
-            // taxid, memberships, links, other-info: not used by LOSAT.
+            _ if want_taxid => {
+                let name = DEFLINE_MEMBERS[usize::from(member)];
+                int_list(ber, name)?;
+                ber.close(member_end, name)?;
+            }
+            // Without it (the check of a volume's first header, `Volume::stored_deflines`, of a
+            // sequence that NCBI may never read): taxid, memberships, links, other-info skipped.
             _ => {
                 while !ber.at_end(member_end)? {
                     ber.skip_value(0)?;
@@ -294,16 +303,15 @@ fn decode_ordinal_id(ber: &mut Reader<'_>) -> Result<u32, HeaderError> {
         return Err(HeaderError::ParsedSeqIds);
     }
     let id_end = ber.open()?;
-    let id = ber.integer()?;
+    // `Object-id.id` is an `int` (`CObject_id::TId`).
+    let id = ber.int()?;
     ber.close(id_end, "Object-id.id")?;
     ber.close(tag_end, "Dbtag.tag")?;
     ber.close(dbtag_end, "Dbtag")?;
     ber.close(choice_end, "Seq-id")?;
 
-    match u32::try_from(id) {
-        Ok(ordinal) if ordinal <= i32::MAX as u32 => Ok(ordinal),
-        _ => Err(ber
-            .error(format!("BL_ORD_ID {id} is not a valid ordinal id"))
-            .into()),
-    }
+    u32::try_from(id).map_err(|_| {
+        ber.error(format!("BL_ORD_ID {id} is not a valid ordinal id"))
+            .into()
+    })
 }

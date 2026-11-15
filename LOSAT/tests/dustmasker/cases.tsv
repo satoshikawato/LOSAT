@@ -298,6 +298,9 @@ db_t5_interval	-infmt blastdb -in ../db_search/t5/nclean -outfmt interval -conff
 db_t5_acclist	-infmt blastdb -in ../db_search/t5/nclean -outfmt acclist -conffile conf/t5.ini
 db_t5_fasta_ps	-infmt blastdb -in ../db_search/t5/npall -outfmt fasta -parse_seqids -conffile conf/t5.ini
 db_t5_maskinfo	-infmt blastdb -in ../db_search/t5/nclean -outfmt maskinfo_asn1_text -conffile conf/t5.ini
+# Taxids of other encodings (fix 2 of line RG item T5c): ../db_search/t5/ntx_app42 and ntx_sx9 (make_t5.py --taxid-only), whose first record's taxid NCBI's ReadInt4 reads as makeblastdb's (the application INTEGER tag 0x42, nine content bytes of sign extension). NCBI BLAST+ 2.17.0 (local oracle), 2026-11-15, T5c fix 2.
+db_t5c_taxid_app42	-infmt blastdb -in ../db_search/t5/ntx_app42
+db_t5c_taxid_sx9	-infmt blastdb -in ../db_search/t5/ntx_sx9
 id_del_seqloc_txt	-in in/id_del.fa -outfmt seqloc_asn1_text -parse_seqids
 id_del_seqloc_bin	-in in/id_del.fa -outfmt seqloc_asn1_bin -parse_seqids
 id_del_maskinfo_txt	-in in/id_del.fa -outfmt maskinfo_asn1_text -parse_seqids

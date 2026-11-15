@@ -43,9 +43,19 @@ title has no first word, so that NCBI keeps the sequence's own `gnl|BL_ORD_ID|n`
 source (taxid 77777, which no taxonomy database here names); `  MAG:  ` and `chi, partial [ ]` give a
 word.
 
+With `--taxid-only` (`python3 tests/db_search/t5/make_t5.py NCBI_BIN --taxid-only`, fix 2 of line
+RG item T5c) it writes only the version 4 databases `ptx_<name>` and `ntx_<name>` of TAXID_ENCODINGS
+without `-parse_seqids` (`-taxid 9606`; two records, the letters of `pdup.faa` / `ndup.fna`): the
+`taxid [2]` of the first record (OID 0) holds another encoding than makeblastdb's `02 02 25 86`
+(the record and the header offsets of the index rewritten): the application INTEGER tag `0x42`
+and nine content bytes of sign extension, which NCBI's `ReadInt4` reads as 9606, and 2^31 in five
+bytes, which it fails on (`eOverflow`, `TTaxId` is an `int`) wherever it reads the header (probe
+`remaining-gaps-20261112/T/taxid_t5c.md` of line RG).
+
 Python 3 standard library only; makeblastdb is NCBI's (the comparison oracle builds the inputs).
 """
 import os
+import struct
 import subprocess
 import sys
 
@@ -171,6 +181,94 @@ WORD_STORED = {
     77777: ["MAG: (plastid) [ ]", " ", "TPA:", "chi, partial [ ]", "  MAG:  "],
     None: ["MAG: (plastid) [ ]", " ", "chi, partial [ ]"],
 }
+
+
+# The inner bytes of the taxid `[2]` of the first record of `ptx_<name>` and `ntx_<name>` (fix 2 of
+# line RG item T5c); makeblastdb writes `02 02 25 86` (INTEGER 9606).
+TAXID_ENCODINGS = {
+    # The application INTEGER tag, which NCBI's ExpectIntegerTag takes as the INTEGER tag.
+    "app42": "42022586",
+    # Nine content bytes, the first seven sign extension, which ReadStdSigned skips.
+    "sx9": "0209" + "00" * 7 + "2586",
+    # 2^31 in five bytes: outside an int, NCBI's "overflow error".
+    "big5": "02050080000000",
+}
+TAXID_TITLES = ["patched record, its taxid in another encoding", "plain record as makeblastdb writes it"]
+
+
+def tlv_end(data, at):
+    """The end of the BER value at `at` (indefinite constructed values walked)."""
+    at += 1
+    first = data[at]
+    at += 1
+    if first == 0x80:
+        while data[at:at + 2] != b"\x00\x00":
+            at = tlv_end(data, at)
+        return at + 2
+    if first < 0x80:
+        return at + first
+    count = first - 0x80
+    return at + count + int.from_bytes(data[at:at + count], "big")
+
+
+def with_taxid(record, inner):
+    """`record` (a `Blast-def-line-set` of one line, as makeblastdb writes it) with the inner bytes of
+    its indefinite `taxid [2]` replaced by `inner`."""
+    assert record[:4] == b"\x30\x80\x30\x80", record[:4].hex()
+    at = 4
+    while record[at] != 0xA2:
+        at = tlv_end(record, at)
+    end = tlv_end(record, at)
+    assert record[at:at + 2] == b"\xa2\x80" and record[end - 2:end] == b"\x00\x00", record[at:end].hex()
+    return record[:at + 2] + bytes.fromhex(inner) + record[end - 2:]
+
+
+def patch_first_taxid(base, ext, inner):
+    """Rewrites the header file of the version 4 database `base` with the first record's taxid
+    `inner` (`with_taxid`) and the header offsets of its index file."""
+    index = bytearray(open(f"{base}.{ext}in", "rb").read())
+    version, = struct.unpack(">I", index[0:4])
+    assert version == 4, version
+    at = 8
+    for _ in range(2):  # title, date
+        at += 4 + struct.unpack(">I", index[at:at + 4])[0]
+    count, = struct.unpack(">I", index[at:at + 4])
+    at += 4 + 8 + 4  # count, total length, longest sequence
+    offsets = list(struct.unpack(f">{count + 1}I", index[at:at + 4 * (count + 1)]))
+    headers = open(f"{base}.{ext}hr", "rb").read()
+    records = [headers[offsets[k]:offsets[k + 1]] for k in range(count)]
+    records[0] = with_taxid(records[0], inner)
+    offsets = [0]
+    for record in records:
+        offsets.append(offsets[-1] + len(record))
+    index[at:at + 4 * (count + 1)] = struct.pack(f">{count + 1}I", *offsets)
+    open(f"{base}.{ext}hr", "wb").write(b"".join(records))
+    open(f"{base}.{ext}in", "wb").write(bytes(index))
+
+
+def taxid_main(ncbi_bin):
+    here = os.path.join("tests", "db_search", "t5")
+    work = os.path.join(here, "work")
+    os.makedirs(work, exist_ok=True)
+    env = {"PATH": "/usr/bin:/bin", "HOME": os.path.abspath(work), "BLAST_USAGE_REPORT": "false"}
+    for kind, dbtype, ext, source in (("p", "prot", "p", "pdup.faa"), ("n", "nucl", "n", "ndup.fna")):
+        seq = letters(os.path.join("tests", "db_search", "ids", source))
+        fasta = os.path.join(work, f"{kind}tx.fa")
+        with open(fasta, "w") as f:
+            for title in TAXID_TITLES:
+                f.write(">" + title + "\n" + seq + "\n")
+        for name, inner in TAXID_ENCODINGS.items():
+            out = os.path.join(here, f"{kind}tx_{name}")
+            subprocess.run([os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", dbtype,
+                            "-blastdb_version", "4", "-taxid", "9606", "-title", f"{kind}tx_{name}",
+                            "-out", out], check=True, stdout=subprocess.DEVNULL, env=env)
+            # makeblastdb's version 4 JSON metadata file is not read by a search.
+            if os.path.exists(f"{out}.{ext}js"):
+                os.remove(f"{out}.{ext}js")
+            patch_first_taxid(out, ext, inner)
+    for name in os.listdir(work):
+        os.remove(os.path.join(work, name))
+    os.rmdir(work)
 
 
 def stored_main(ncbi_bin, prefix, stored):
@@ -360,5 +458,7 @@ if __name__ == "__main__":
         suffix_main(sys.argv[1])
     elif "--word-only" in sys.argv[2:]:
         stored_main(sys.argv[1], "pword", WORD_STORED)
+    elif "--taxid-only" in sys.argv[2:]:
+        taxid_main(sys.argv[1])
     else:
         main()

@@ -32,7 +32,7 @@ pub struct BlastDefline {
     pub ids: Vec<ParsedSeqId>,
     /// The number of bytes of the Seq-id strings that read as '#'.
     pub replaced_id_bytes: usize,
-    /// `taxid`, as `seqid::ber::taxid_value` reads it.
+    /// `taxid` (NCBI's `TTaxId`, an `int`; `seqid::ber::Reader::int`).
     pub taxid: Option<i32>,
     pub memberships: Option<Vec<i32>>,
     /// `links`: further taxids of the definition line (`GetTaxIds`).

@@ -1140,6 +1140,20 @@ Same values, faster computation:
   (megablast's 4^12 cells, 4 MiB of bits) keeps the presence vector in front. Evidence (ws, one core of node 0, eight rounds, against the
   previous `dev` in the same run): ABRicate's ncbi DB x its assembly x0.950, Sakai draft 200 contigs x the same DB x0.973,
   ECTyper x0.979, Easyfig ex2a x0.996; megablast instructions x1.00000; the same reports, the same memory.
+- `LOSAT_X_BNRANKONCE=1` (BLASTN, the serial scan and the strip scan of a contiguous table laid out as CSR, either
+  head (`LOSAT_X_BNCSR`, `LOSAT_X_MBCSR`, `LOSAT_X_BNCSRPACK`), speed; in the strict set from the pull request that added
+  it, 2026-11-16 (perf/dt13-rank); `=0` reads each word's run again from its cell) takes each word's run from the head
+  element that the scans' ring hands over with it (`x_dc_csr::XRing::push` and `flush`, `XHead::run_at`): the rank of a
+  packed head's word, which the ring computed where the word entered it (to prefetch the word's offsets), or the cell of
+  a head of one element per cell. Cause removed: the scans' `emit` read the run through `XHead::run(cell)`, which ranked
+  a packed head's word a second time (its presence bit tested and the bits below it counted again; a dozen instructions
+  on the default x86-64 target, `LOSAT_X_BNPOPCNT`). The words, their runs and order and every value are the same; a
+  head of one element per cell does the same work in either form. `x_reach!` marks the CSR scans (own side) and the
+  scans of tables with chains (reference side) once per scan call. Evidence (ws, base dev d9527a7da; every report the
+  same): time on one core of node 1 (timed lease, both arms alternating, warm-up + 8 rounds, medians) MOB-suite x0.974,
+  BlobToolKit x0.974, mlst `example.fna` / `messy.fa` x0.975 / x0.974 (`novel.fa` 0.15 s in both), ABRicate's ncbi /
+  resfinder x0.983 / x0.982, ECTyper x0.993, Easyfig ex2a x0.990, the same max RSS; cycles (perf stat, node 0, 5 runs)
+  x0.960-0.989 and instructions x0.982-0.992 on the same cases; callgrind of mlst's `example.fna` 3.131 G -> 3.094 G.
 - BNUNGAPCOUNT (graduated 2026-10-27, in the set from 2026-10-22; no variable; always on; the ported loops
   stay as the unit test's reference) (blastn, speed) the exact ungapped extension
   (`s_NuclUngappedExtendExact`: blastn-short and other word sizes below 11, and the exact pass after the

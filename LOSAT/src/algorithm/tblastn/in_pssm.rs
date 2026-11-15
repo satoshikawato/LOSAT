@@ -98,8 +98,7 @@ pub(super) fn check_records_only(args: &TblastnArgs) -> Result<()> {
 
 /// LOSAT's refusals of a PSI-TBLASTN search, after NCBI's checks of the options and the opening of
 /// the database, before anything is written: NCBI's crash of `-mt_mode 1` (DECISIONS 35 Q4), the
-/// output formats other than 0 to 4, 6, 7 and 10 (item PS15b of line PS; 11 crashes NCBI), and a PSSM
-/// query long enough for NCBI to split it.
+/// output formats other than 0 to 4, 6, 7 and 10 (item PS15b of line PS; 11 crashes NCBI).
 pub(super) fn check_limits(
     args: &TblastnArgs,
     resolved: &ResolvedTblastnArgs,
@@ -147,32 +146,6 @@ pub(super) fn check_limits(
             } else {
                 ""
             }
-        );
-    }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:91-94
-    // ```c++
-    //     else if (Blast_ProgramIsPsiBlast(program))
-    //         retval = 10000;
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:191-196 (the
-    // chunks of a split query are set up without the PSSM)
-    // A PSSM query that NCBI splits is searched with the matrix in its preliminary stage, as
-    // psiblast's (`algorithm::psiblast::in_pssm::check_in_pssm_options`). Sizes that NCBI cannot
-    // convert split nothing: they stop the search's query splitter, before any split
-    // (`query_batch::read_query_batches`).
-    if !searched {
-        return Ok(());
-    }
-    let Ok(sizes) = crate::algorithm::blastp::protein_query_split::protein_query_split_sizes(10000)
-    else {
-        return Ok(());
-    };
-    let length = psi.query.seq().len();
-    if crate::algorithm::blastp::protein_query_split::split_protein_batch(&[length], sizes)
-        .is_some()
-    {
-        bail!(
-            "a PSSM query of {length} letters, which NCBI BLAST+ splits into chunks searched without the PSSM, is not supported by LOSAT's TBLASTN"
         );
     }
     Ok(())

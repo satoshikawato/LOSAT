@@ -942,6 +942,7 @@ pub(crate) fn psi_search_and_object(
         warning_title: Some(warning_title),
         request,
         round_query: None,
+        split_setup: None,
     };
     // The title's refusals (above), for a run whose reports NCBI writes (line RG F1b-2, review 4
     // R5-6: with `-export_search_strategy -subject`, an invalid PSSM or the PSSM engine's error, NCBI

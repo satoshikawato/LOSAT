@@ -502,7 +502,11 @@ built-in value; a block also ends before a batch whose lookup-table words would 
 most of a block, NCBI's largest table or for the standard table at least 2^22 words, so a block of
 `-word_size 4` holds one batch or a few; the search of all queries, which writes the reports that
 the block search does not take, runs its preliminary stage in the same blocks, each with its own
-lookup table, and joins their hit lists before the redo and the reports, item SC8b-2).
+lookup table, and joins their hit lists before the redo and the reports, item SC8b-2). With
+`-word_size 4` the blocks take x1.07-1.36 of the time of one table (each block scans every subject
+again) for 66-96 % less memory, all of it below NCBI's, and the default word size 3 is faster
+(x0.60-0.74); the Owner accepted that exchange on 2026-11-15 (Ready for review on pull request
+#1165, which named that as the answer).
 
 `LOSAT_X_SEEDBUCKET` was in the block of the round 3-4 set and was left out when the set became
 the default: it numbered the lookup hits of one chunk scan in a 32-bit counter, exact only up to
@@ -6947,7 +6951,11 @@ Scheduling (each value computed by one thread with the original function; order 
   stripes passes touch each append about twice as often): at 4 threads, with 3 units on 4 threads and little idle,
   word size 5 and blastx-fast ran 2-4 % slower than dev. Its tasks' scratch, mapped there for word size 5, is in the
   pool threads' arenas again as in dev (mapped, every build faulted its pages again: blastp-fast -db at 8 threads
-  +12,000 page faults, +0.05 s of system time and x1.02 of the wall time).
+  +12,000 page faults, +0.05 s of system time and x1.02 of the wall time). Three cells of SC9d stayed up to 0.8 % slower
+  than dev (BLOSUM45 word size 5 at one thread x1.008-1.017 with 25 % less memory, blastx-fast at one thread and
+  800 cDNAs at 4 threads x1.000-1.008, +0.2 % instructions: the cost of the general form of the parts); the Owner
+  accepted them as an exception to the rule that a memory fix costs no time on 2026-11-15 (Ready for review on pull
+  request #1159, which named that as the answer).
 - `LOSAT_X_BXCTXONCE=1` (BLASTX, speed and memory; in the strict set from the pull request that added it: on unless
   `=0` or `LOSAT_X_DEFAULT=0`; acts where the `LOSAT_X_BXDIAG` fused loop runs): the fused loop's context table of a
   query batch (`XContextTable`, the binary search's index at every query offset) is made once per lookup table and

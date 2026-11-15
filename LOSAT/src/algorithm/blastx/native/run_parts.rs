@@ -3,13 +3,8 @@
 //! the search strategy (`RunSetup::open`), the read of the `-subject` file (`read_subjects`), and
 //! the BLAST archive of one query batch (`ArchiveBatch::write`, outfmt 11).
 //!
-//! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3584-3585
-//! (`CBlastAppArgs::SetOptions`, whose argument handlers process the options and read the
-//! `-subject` file)
-//! ```c++
-//! CRef<CBlastOptionsHandle>
-//! CBlastAppArgs::SetOptions(const CArgs& args)
-//! ```
+//! The NCBI reference for the set-up of the options (`CBlastAppArgs::SetOptions`, whose argument
+//! handlers process the options and read the `-subject` file) is at `RunSetup::open`.
 //!
 //! This module is a child of `native` for the functions of that file it calls (`reported_error`,
 //! `archive_error`, `subject_input_error`, `reader_warning`, `batch_titles`, `ReportedAsks`). Each
@@ -134,13 +129,12 @@ impl RunSetup {
         strategy_slot.clone_from(&strategy);
         // Preserve explicit product refusals; defer supported semantic failures
         // until subject and standard query/output streams have been extracted.
-        let mut resolution = args.resolve();
-        if resolution
-            .as_ref()
-            .is_err_and(|e| e.downcast_ref::<SemanticOptionsError>().is_none())
-        {
-            return resolution.map(|_| unreachable!());
-        }
+        let mut resolution = match args.resolve() {
+            Err(error) if error.downcast_ref::<SemanticOptionsError>().is_none() => {
+                return Err(error)
+            }
+            resolution => resolution,
+        };
         // An ungapped search's `-matrix` that NCBI's tables do not have is looked for as a file when
         // NCBI sets up a query batch (`ApplicationSettings::matrix_file`): the first batch is refused
         // then (`query_setup::matrix_error_message`), and a run without a batch reads no file.

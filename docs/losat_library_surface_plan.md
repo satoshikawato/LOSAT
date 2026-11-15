@@ -473,7 +473,7 @@ BLASTX の `-parse_deflines` は `-subject` でも使えるようにした（`bl
 
 ### 13.4 `psiblast`（PR `feature/library-api-psiblast`）
 
-`Program::Psiblast`。LOSAT の `psiblast` は第 1 ラウンド（PSSM の無い検索）で、blastp の engine を使う（`algorithm::psiblast`）。API の `run_local` は `PsiblastArgs::into_blastp_args` のあとで blastp の入口を呼ぶ。形式の拒否は要求された形式ごとに行う（`PsiblastArgs::check_outfmt`、`-num_iterations` の拒否は CLI のまま）。バッチは 1 query ずつ（`psiblast_app.cpp:468`）。
+`Program::Psiblast`。LOSAT の `psiblast` は第 1 ラウンド（PSSM の無い検索）で、blastp の engine を使う（`algorithm::psiblast`）。API の `run_local` は `PsiblastArgs::into_blastp_args` のあとで blastp の入口を呼ぶ。形式の拒否は要求された形式ごとに行う（`PsiblastArgs::check_outfmt`）。`-num_iterations` が 1 以外の round は線 RG の Q5 で開けた（round の driver が round ごとに 1 回の検索を呼び、`FormatObserver::round_begin` と `rounds_converged` を受けた `api::parts` が `HspRecord::round`、`Outcome::rounds`・`Batch::rounds`（`QueryRounds`: round ごとの統計と収束）、`QueryHits::rounds` にする）。バッチは 1 query ずつ（`psiblast_app.cpp:468`）。
 
 検証：`db_search_fixtures.py check --library --program psiblast` の 83 行（64 行が全バイト一致、19 行が拒否の文言）と、`check_losat.py --programs psiblast` の 12 行が全部一致。`library_api.rs` は `-subject` と `-db` の検索を CLI と比べる。
 

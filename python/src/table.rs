@@ -124,6 +124,7 @@ pub fn of_records(hsps: &[HspRecord]) -> RecordBatch {
         ("q_idx", ints(hsps, |hsp| hsp.q_idx), false),
         ("s_idx", ints(hsps, |hsp| hsp.s_idx), false),
         ("rank", ints(hsps, |hsp| hsp.rank), false),
+        ("round", ints(hsps, |hsp| hsp.round as usize), false),
     ])
     .expect("the columns have one length")
 }
@@ -151,7 +152,7 @@ fn value_error(error: ArrowError) -> PyErr {
 }
 
 /// The sorted positions where the values of a sorted column change, as `(value, start, end)`.
-fn runs(values: &[i64]) -> impl Iterator<Item = (i64, usize, usize)> + '_ {
+fn runs<T: PartialEq + Copy>(values: &[T]) -> impl Iterator<Item = (T, usize, usize)> + '_ {
     let mut start = 0;
     values
         .chunk_by(|left, right| left == right)
@@ -284,11 +285,25 @@ impl HspTable {
         self.rows(start, end)
     }
 
-    /// `(s_idx, rows)` of each subject of a query's rows, in their order.
-    fn _subjects(&self) -> Vec<(i64, Self)> {
-        runs(self.sorted_ints("s_idx"))
-            .map(|(s_idx, start, end)| (s_idx, self.rows(start, end)))
+    /// `(s_idx, round, rows)` of each subject of a query's rows in each round, in their order.
+    fn _subjects(&self) -> Vec<(i64, i64, Self)> {
+        let keys: Vec<(i64, i64)> = self
+            .sorted_ints("s_idx")
+            .iter()
+            .copied()
+            .zip(self.sorted_ints("round").iter().copied())
+            .collect();
+        runs(&keys)
+            .map(|((s_idx, round), start, end)| (s_idx, round, self.rows(start, end)))
             .collect()
+    }
+
+    /// The rows of round `round` of a query's rows, which hold each round together in order.
+    fn _round(&self, round: i64) -> Self {
+        let values = self.sorted_ints("round");
+        let start = values.partition_point(|&value| value < round);
+        let end = values.partition_point(|&value| value <= round);
+        self.rows(start, end)
     }
 }
 
@@ -389,6 +404,11 @@ impl Hsp {
     #[getter]
     fn rank(&self) -> i64 {
         self.int("rank")
+    }
+
+    #[getter]
+    fn round(&self) -> i64 {
+        self.int("round")
     }
 
     #[getter]

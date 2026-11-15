@@ -1,5 +1,7 @@
 pub mod dust;
 pub mod entry_names;
+// NCBI reference (598d8ae6): c++/src/util/format_guess.cpp (`CFormatGuess`, quoted in the module).
+pub(crate) mod format_guess;
 pub mod genetic_code;
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:252-262 (`CRpsMmappedFile`,
 // quoted in the module).

@@ -37,6 +37,7 @@ impl<R: Read> SequenceSource for FastaSource<R> {
         Ok(record.map(|record| Record {
             ids: record.ids,
             title: record.title,
+            taxname: None,
             iupac: record.letters,
         }))
     }

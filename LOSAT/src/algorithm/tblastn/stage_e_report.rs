@@ -99,6 +99,15 @@ impl ShownSubjects<'_> {
             Self::Database { reported, .. } => &reported.parsed,
         }
     }
+
+    /// The sources from which NCBI makes the empty stored titles of the reported database
+    /// sequences, by rank (empty for the records of a subject set, and where none has one).
+    pub(super) fn subject_sources(&self) -> &[crate::report::defline::SourceTaxname] {
+        match self {
+            Self::Fasta { .. } => &[],
+            Self::Database { reported, .. } => &reported.sources,
+        }
+    }
 }
 
 impl<'a> ShownSubjects<'a> {
@@ -170,6 +179,27 @@ pub(super) fn reads_subject_letters<'a>(
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:121, :196 (quoted at
+// `blast_xml2::reports_held`)
+/// Where TBLASTN's run of the formats `formats` stops for a matrix name `matrix_name` that NCBI's
+/// BLAST XML report data does not know (`blast_xml::matrix::xml_formatting_failure`), with the
+/// facts of the search: no database (`-subject`, `m_IsBl2Seq`) and `-in_pssm` (PSI-TBLASTN,
+/// `m_IsIterative`). The one decision behind the search strategy's last request
+/// (`tblastn_app::search`) and the error of `render`.
+pub(super) fn xml_matrix_failure(
+    formats: &[crate::api::local_blast::FormatOutput<'_>],
+    matrix_name: &str,
+    database: bool,
+    pssm: bool,
+) -> Option<crate::report::blast_xml::matrix::XmlMatrixFailure> {
+    crate::report::blast_xml::matrix::xml_formatting_failure(
+        formats.iter().map(|format| format.outfmt),
+        matrix_name,
+        !database,
+        pssm,
+    )
+}
+
 /// The ranges of a search as the reports use them: where the searched letters of each
 /// query and subject lie in its record (`-query_loc`, `-subject_loc`), and whether the
 /// reports end with the epilog (a search that stops at a query batch writes none).
@@ -203,7 +233,7 @@ pub(super) fn render(
     // locut the locut): BLAST XML's `Parameters_filter`.
     seg_filter: Option<(i32, f64, f64)>,
     mask_lowercase: bool,
-    query_warning_lines: &[Vec<u8>],
+    query_posts: &[crate::report::diag_log::Posts],
     // The texts of the subjects that each query's report reads one by one (its batch's prefetch
     // off), by query, which the first format's writer places where it reads them
     // (`QueryWarnings::subject_read`).
@@ -243,14 +273,25 @@ pub(super) fn render(
     // created, empty, as NCBI's).
     //
     // NCBI writes the XML2 and JSON documents' start before the search (`PrintProlog`) and
-    // fails for a matrix of its formatting table's that it does not know when it makes the
-    // first report's data: the start alone is written then (probe `tblastn_sub_lcmatrix`).
-    // (The search strategy's file holds the first batch's request alone: `search` stops the
-    // requests after it with the same decision, `StrategyExport::stop_after`.)
-    if crate::report::blast_xml::matrix::xml_formatting_fails(
-        outputs.formats.iter().map(|format| format.outfmt),
+    // fails for a matrix of its formatting table's that it does not know when it makes a report's
+    // data (`xml_matrix_failure`): that of the run's first query, or of its second where the
+    // report is held (`XmlMatrixFailure::SecondQueryOrEnd`: NCBI's next query of another Seq-id,
+    // the second as LOSAT refuses two queries of one id before any output), in the batch of that
+    // query, or for a run of one query whose report is held
+    // in `PrintEpilog` (blast_format.cpp:2204-2212, quoted at
+    // `blast_xml::matrix::XmlMatrixFailure`) unless the run stops before (`ranges.epilog`; the
+    // caller writes that stop). The start alone is written then (probe `tblastn_sub_lcmatrix`),
+    // and the posts of the queries up to the failing one: the reader's messages of their batches
+    // and NCBI's posts of the bytes replaced in the batches' search strategy requests.
+    // (The search strategy's file holds the requests up to the failing batch's: `search` stops
+    // the requests after it with the same decision, `StrategyExport::stop_after`.)
+    if let Some(failure) = xml_matrix_failure(
+        &outputs.formats,
         matrix_name,
-    ) && !query_records.is_empty()
+        matches!(shown, ShownSubjects::Database { .. }),
+        pssm.is_some(),
+    )
+    .filter(|_| !query_records.is_empty())
     {
         for format in outputs.formats.iter_mut() {
             if let Some(kind) = xml2_kind(format.outfmt) {
@@ -259,7 +300,20 @@ pub(super) fn render(
                 writer.flush()?;
             }
         }
-        return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
+        let failing = (failure.query() < query_records.len()).then(|| failure.query());
+        for posts in query_posts
+            .iter()
+            .take(failing.map_or(query_records.len(), |query| query + 1))
+        {
+            posts.write(
+                &mut *outputs.diagnostics,
+                archive.map(|render| render.handle),
+            )?;
+        }
+        if failing.is_some() || (ranges.epilog && failure.fails_at_end(query_records.len())) {
+            return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
+        }
+        return Ok(());
     }
     let xml_is_xml2 = outputs
         .formats
@@ -357,7 +411,7 @@ pub(super) fn render(
     // The warnings of each query are written before its report, once, with the first
     // format (`QueryWarnings`); the taxonomy database's messages of XML2 and JSON go to the
     // diagnostics at every format.
-    let mut warning_lines = Some(query_warning_lines);
+    let mut warning_lines = Some(query_posts);
     let observer = &mut outputs.observer;
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
     // ```c++
@@ -419,8 +473,9 @@ pub(super) fn render(
                 .is_some_and(crate::report::tabular::TabularSpec::looks_up_every_taxid))
         .then(|| {
             let first = warning_lines.take();
-            let warnings = crate::report::query_warnings::QueryWarnings::new(
+            let warnings = crate::report::query_warnings::QueryWarnings::of_posts(
                 first.unwrap_or(&[]),
+                archive.map(|render| render.handle),
                 &mut *outputs.diagnostics,
             );
             // The first format's writer also writes the texts of the subjects that the reports
@@ -581,7 +636,9 @@ pub(super) fn render(
                     render.handle,
                     render,
                     &archive_data(),
-                    warnings.as_mut(),
+                    warnings
+                        .as_mut()
+                        .expect("the BLAST archive writes its posts to the diagnostics"),
                     &mut writer,
                 )?
             }
@@ -1313,6 +1370,7 @@ fn write_pairwise(
         query_batch_skipped,
         &subject_titles,
         shown.parsed_subjects(),
+        shown.subject_sources(),
         &report,
         shown.pairwise_database(),
         probe,

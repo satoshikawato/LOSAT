@@ -832,6 +832,7 @@ fn write_blastx_tax_report(
                 .stored_titles()
                 .get(s_idx)
                 .map_or(&[][..], |title| title),
+            source: crate::report::pairwise::stored_source(reported.sources(), s_idx as u32),
             taxid: reported
                 .tabular_taxonomy(s_idx)
                 .map_or_else(|| reported.taxid(s_idx), |taxonomy| taxonomy.taxid),
@@ -846,15 +847,7 @@ fn write_blastx_tax_report(
         ShownSubjects::Database { reported, .. } => reported.tabular_names(),
         ShownSubjects::Fasta { .. } => subject_names.as_ref(),
     };
-    let report = report_batch(
-        &tax_queries,
-        parsed,
-        plain,
-        true,
-        options.taxdb_found,
-        names,
-        program,
-    )?;
+    let report = report_batch(&tax_queries, parsed, plain, true, names, program)?;
     let mut q_idx = 0;
     for batch in batches {
         for qidx in 0..batch.queries.len() {

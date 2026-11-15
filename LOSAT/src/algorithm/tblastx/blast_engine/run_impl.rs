@@ -9,6 +9,7 @@ use crate::algorithm::tblastx::database::DatabaseTitles;
 use crate::algorithm::tblastx::hit_collector::HitCollector;
 use crate::algorithm::tblastx::subjects::{SubjectSetNumbers, Subjects, SubjectsUnreadable};
 use crate::blastinput::report_counts::ReportCounts;
+use crate::report::diag_log::Posts;
 use crate::report::tabular::SubjectFetch;
 use std::sync::Arc;
 
@@ -1056,8 +1057,7 @@ pub fn run(
         crate::blastinput::app::Program::Tblastx,
         args.out.as_deref(),
     )?;
-    // The BLAST archive (outfmt 11): its request, and the refusals of what LOSAT cannot write,
-    // before anything is read or written.
+    // The BLAST archive (outfmt 11): its request, before anything is read or written.
     // The error archives follow the `-outfmt` text (`writes_error_archive`).
     // The run's options handle, which its archive and its search strategy share.
     let options = crate::report::archive::OptionsHandle::default();
@@ -1065,13 +1065,12 @@ pub fn run(
         &args,
         format == Some(crate::blastinput::app::ReportFormat::ArchiveFormat),
         &options,
-    )?
+    )
     .map(|handle| handle.with_outfmt_text(&args.outfmt));
-    // The search strategy's request, with the refusals of the archive's, and the archive's
-    // options handle.
+    // The search strategy's request, with the archive's options handle.
     args.strategy = strategy_file
         .map(|file| {
-            crate::report::archive::strategy::StrategyExport::for_run(
+            anyhow::Ok(crate::report::archive::strategy::StrategyExport::for_run(
                 file,
                 super::super::archive::option_inputs(&args),
                 choice.number,
@@ -1081,9 +1080,8 @@ pub fn run(
                     num_alignments: args.num_alignments,
                 },
                 args.database_name(),
-                "TBLASTX",
                 &options,
-            )
+            ))
         })
         .transpose()?;
     let archive = args.archive.clone();
@@ -1158,13 +1156,7 @@ pub fn run(
             return Err(error);
         }
     };
-    // Whether this run creates `-out` (a Q3 refusal removes a file it created for nothing).
-    let out_is_new = args
-        .out
-        .as_deref()
-        .is_some_and(|path| path.as_os_str() != "-" && !path.exists());
     let out_file = open_out_file(&args)?;
-    let out_path = args.out.clone();
     let pairwise = format == Some(crate::blastinput::app::ReportFormat::Pairwise);
     // LOSAT's reports read the format number that NCBI reads: the number and the custom fields,
     // or the value as given when it has a delimiter, which `normalized` drops and the custom
@@ -1177,6 +1169,7 @@ pub fn run(
     // The organism report's `-out` file is written as NCBI's buffer writes it.
     let tax_report = format == Some(crate::blastinput::app::ReportFormat::TaxFormat);
     let mut stream = crate::cli::ReportStream::of_cli(out_file, tax_report);
+    let strategy = args.strategy.clone();
     let result = {
         let mut outputs =
             ReportOutputs::single(&outfmt, OutputSink::Writer(&mut stream), &mut *diagnostics);
@@ -1191,6 +1184,8 @@ pub fn run(
             settings,
         )
     };
+    // A post of the search strategy left unwritten is LOSAT's internal error (`end_run`).
+    let result = crate::report::archive::strategy::end_run(strategy.as_ref(), result);
     // NCBI writes an error archive after the archives of the batches before when the
     // application stops with one of its own errors, and when the run ends with messages that
     // no archive carried (`PrintErrorArchive` after its `CATCH_ALL`, whatever the status).
@@ -1215,21 +1210,6 @@ pub fn run(
     }
     // What was written before an error (such as the outfmt 0 prolog) stays in the file.
     let flushed = std::io::Write::flush(&mut stream);
-    // A title that the archive cannot hold is refused where NCBI would write its Bioseq, which
-    // is known only after the search. When the file was not there and nothing was written to it,
-    // no empty file is left behind (the other programs create `-out` before their option checks,
-    // as NCBI does, and leave it empty: DECISIONS 24 f of line NP, series SM).
-    let write_failed = stream.failed;
-    drop(stream);
-    if out_is_new
-        && matches!(&result, Err(error) if error.downcast_ref::<crate::report::archive::TitleRefusal>().is_some())
-    {
-        if let Some(path) = out_path.as_deref() {
-            if std::fs::metadata(path).is_ok_and(|meta| meta.len() == 0) {
-                let _ = std::fs::remove_file(path);
-            }
-        }
-    }
     // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.hpp:252-255
     // ```c
     //     catch (const std::ios::failure&) {                                      \
@@ -1240,7 +1220,7 @@ pub fn run(
     // The outfmt 0 formatter's stream throws when a write fails (blast_format.cpp:118-119).
     // For outfmt 6/7 NCBI aborts instead, and LOSAT reports the error
     // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES).
-    if write_failed && (pairwise || tax_report) {
+    if stream.failed && (pairwise || tax_report) {
         return Err(crate::cli::NativeError {
             exit: 6,
             message: "BLAST failed to write output\n".to_string(),
@@ -1843,8 +1823,8 @@ pub fn run_local(
     // `run_local`), with LOSAT's refusals; `check_ncbi_options` and `search` check the formats
     // again, after `-out` is opened, as on the command line.
     report_formats(outputs, args.out.as_deref())?;
-    // The BLAST archive (outfmt 11) among the formats: its request, the refusals of what LOSAT
-    // cannot write, and a diagnostics stream that saves the messages. The records' deflines are
+    // The BLAST archive (outfmt 11) among the formats: its request and a diagnostics stream that
+    // saves the messages. The records' deflines are
     // those the caller's reader kept; records without one get `>` and their title.
     let archive_requested = outputs
         .formats
@@ -1855,7 +1835,7 @@ pub fn run_local(
             &args,
             true,
             &crate::report::archive::OptionsHandle::default(),
-        )?
+        )
         .map(|handle| outputs.with_archive_outfmt(handle));
         if let Some(handle) = args.archive.clone() {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
@@ -1935,7 +1915,7 @@ pub fn run_local_database(
         &args,
         archive_requested,
         &crate::report::archive::OptionsHandle::default(),
-    )?
+    )
     .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads)?;
     match args.archive.clone() {
@@ -2265,9 +2245,10 @@ pub(crate) struct TblastxReportRun<'a> {
     /// A list kept no sequence of the database: the messages of the queries of the searched
     /// batches have `EMPTY_DATABASE_MESSAGE` (`SeqDb::filtered_empty`).
     pub filtered_empty: bool,
-    /// The warnings written before each query's report (`QueryWarnings`): the reader's
-    /// messages of the query's batch (before its first query) and the query's own.
-    pub warnings: &'a [Vec<u8>],
+    /// The posts written before each query's report (`QueryWarnings`): the reader's messages of
+    /// the query's batch and NCBI's posts of the bytes replaced in its search strategy request
+    /// (before its first query), and the query's own warnings.
+    pub warnings: &'a [Posts],
     /// The texts of the subjects that each query's report reads one by one (its batch's
     /// prefetch off), by query, which the first format's writer places where it reads them
     /// (`QueryWarnings::subject_read`).
@@ -2638,17 +2619,22 @@ fn write_tblastx_outputs(
             .as_deref_mut()
             .map(|observer| FormatProbe::new(observer, format_index));
         // So do the warnings of the formatters of a tabular field list that shows a taxonomy
-        // name (`x_CheckTaxDB`, `tabular`).
+        // name (`x_CheckTaxDB`, `tabular`), and NCBI's posts of the bytes that the archive's
+        // stream replaces (`write_tblastx_archives`).
         let mut warnings = (warning_lines.is_some()
-            || matches!(output_format, report::TblastxOutputFormat::Xml2(_))
+            || matches!(
+                output_format,
+                report::TblastxOutputFormat::Xml2(_) | report::TblastxOutputFormat::Archive
+            )
             || matches!(
                 output_format,
                 report::TblastxOutputFormat::CustomTabular(spec) if spec.looks_up_every_taxid()
             ))
         .then(|| {
             let first = warning_lines.take();
-            let warnings = crate::report::query_warnings::QueryWarnings::new(
+            let warnings = crate::report::query_warnings::QueryWarnings::of_posts(
                 first.unwrap_or(&[]),
+                run.args.archive.as_ref(),
                 &mut *outputs.diagnostics,
             );
             // The first format's writer also writes the texts of the subjects that the reports
@@ -2726,6 +2712,10 @@ fn write_tblastx_outputs(
                     parsed_subjects: match &run.database {
                         Some(database) => database.reported.parsed.clone(),
                         None => records_parsed.clone(),
+                    },
+                    subject_sources: match &run.database {
+                        Some(database) => database.reported.sources.clone(),
+                        None => Vec::new(),
                     },
                 };
                 // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:166-168
@@ -2882,7 +2872,9 @@ fn write_tblastx_outputs(
                 crate::algorithm::tblastx::archive::write_tblastx_archives(
                     handle,
                     &archive_data(run, &hits, &engine_counts, &subjects),
-                    warnings.as_mut(),
+                    warnings
+                        .as_mut()
+                        .expect("the BLAST archive writes its posts to the diagnostics"),
                     &mut writer,
                 )?
             }
@@ -2979,9 +2971,9 @@ fn write_tblastx_outputs(
         handle.set_muted(false);
     }
     // Without an output format the warnings are written all at once.
-    if let Some(lines) = warning_lines {
-        for query_warnings in lines {
-            outputs.diagnostics.write_all(query_warnings)?;
+    if let Some(posts) = warning_lines {
+        for query_posts in posts {
+            query_posts.write(&mut *outputs.diagnostics, run.args.archive.as_ref())?;
         }
     }
     Ok(())
@@ -3565,8 +3557,8 @@ fn run_batch_loop(
     let query_records = query_runs.records;
     let input = query_runs.input;
     let mut done = SearchedBatches::default();
-    // The warnings written before each query's report (`QueryWarnings`).
-    let mut warnings: Vec<Vec<u8>> = vec![Vec::new(); query_records.len()];
+    // The posts written before each query's report (`QueryWarnings`).
+    let mut warnings: Vec<Posts> = vec![Posts::new(); query_records.len()];
     // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`), added as the
     // loop reads the batches. A streamed run has none that refuses (`report_stream::check`).
     // With outfmt 5 against a database, every query's ids from the start (`with_whole_run_of`).
@@ -3653,6 +3645,9 @@ fn run_batch_loop(
                 _ => SubjectFetch::Every,
             }
         });
+    // Where the run's BLAST XML family formats fail for a matrix name that NCBI's XML does not
+    // know (`BatchReports::xml_matrix_failure`; `None` for a name it knows).
+    let xml_matrix_failure = reports.xml_matrix_failure(outputs);
     // The search strategy's requests of the batches (`-export_search_strategy`), with every
     // `-subject` record.
     let requests = args.strategy.as_ref().map(|_| {
@@ -3690,10 +3685,14 @@ fn run_batch_loop(
         // `CFastaReader` writes its messages about a batch's queries (their lines and
         // titles) when it reads them, after the report of the batch before: before the
         // report of the batch's first query (`QueryWarnings`). Skipped records are read too.
-        let batch_warnings: Vec<u8> = query_runs.input_records[input_start..input_end]
-            .iter()
-            .flat_map(|record| record.warnings.iter().copied())
-            .collect();
+        // NCBI's posts of the bytes replaced in the batch's search strategy request follow them
+        // (below), so every error of the batch writes both.
+        let mut batch_warnings = Posts::of_lines(
+            query_runs.input_records[input_start..input_end]
+                .iter()
+                .flat_map(|record| record.warnings.iter().copied())
+                .collect(),
+        );
         // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input.cpp:146-152
         // ```c
         //         try { q.Reset(m_Source->GetNextSequence(scope)); }
@@ -3716,7 +3715,7 @@ fn run_batch_loop(
             } = std::mem::replace(&mut reading, QueryReading::End)
             {
                 reports.write_before_failed_batch(outputs, done, &warnings)?;
-                outputs.diagnostics.write_all(&batch_warnings)?;
+                batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
                 outputs.diagnostics.write_all(&error_warnings)?;
                 return Err(error.into_app_error());
             }
@@ -3733,7 +3732,7 @@ fn run_batch_loop(
         // batch (its records' messages).
         if start == end {
             reports.write_before_failed_batch(outputs, done, &warnings)?;
-            outputs.diagnostics.write_all(&batch_warnings)?;
+            batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
             return Err(crate::cli::NativeError {
                 exit: 3,
                 message: "BLAST engine error: Empty CBlastQueryVector\n".to_string(),
@@ -3750,7 +3749,8 @@ fn run_batch_loop(
         // The batch's search strategy request (`-export_search_strategy`): once its query factory
         // is made, before its set-up and search, so every error of the batch from here on follows
         // it (the file is apart from the reports). Its `EffectiveSearchSpace` option is the one
-        // the batch before left (`note_searched` below).
+        // the batch before left (`note_searched` below). NCBI's posts of the bytes replaced in it
+        // follow the reader's messages of the batch (`batch_warnings`).
         if let (Some(strategy), Some(requests)) = (args.strategy.as_ref(), requests.as_ref()) {
             requests.write(
                 strategy,
@@ -3758,6 +3758,7 @@ fn run_batch_loop(
                 &query_records[start..end],
                 input.placements.get(start),
             )?;
+            batch_warnings.append(&strategy.take_all_posts());
         }
         // The query splitter reads its environment variables for every batch, before the
         // queries are set up (`check_query_split_environment`); the first batch meets an
@@ -3765,7 +3766,7 @@ fn run_batch_loop(
         if input_start == 0 {
             if let Err(error) = crate::blastinput::app::check_query_split_environment(true, true) {
                 reports.write_before_failed_batch(outputs, done, &warnings)?;
-                outputs.diagnostics.write_all(&batch_warnings)?;
+                batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
                 return Err(error);
             }
         }
@@ -3829,7 +3830,7 @@ fn run_batch_loop(
                 .all(|record| record.seq().len() < CODON_LENGTH)
         {
             reports.write_before_failed_batch(outputs, done, &warnings)?;
-            outputs.diagnostics.write_all(&batch_warnings)?;
+            batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
             let mut message = String::from("BLAST engine error: ");
             for _ in 0..no_data_queries {
                 message.push_str("Warning: ");
@@ -3865,7 +3866,7 @@ fn run_batch_loop(
         // (`CSearchMessage::operator<`, blast_types.hpp:295-304).
         if args.scoring_matrix() == TblastxMatrix::Unknown {
             reports.write_before_failed_batch(outputs, done, &warnings)?;
-            outputs.diagnostics.write_all(&batch_warnings)?;
+            batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
             let mut message = String::from("BLAST engine error: ");
             for record in batch_queries {
                 message.push_str("Error: Unknown error code -1 ");
@@ -3878,28 +3879,7 @@ fn run_batch_loop(
             message.push('\n');
             return Err(crate::cli::NativeError { exit: 3, message }.into());
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218 (the
-        // BLAST XML report data of the first query that NCBI formats: the matrix of its
-        // formatting table, found by the name as typed with `strcmp`)
-        // ```c++
-        //     else {
-        //         string prog_name = Blast_ProgramNameFromType(
-        //                                            m_Options.GetProgramType());
-        //         if (prog_name != "blastn" && prog_name != "megablast") {
-        //             NCBI_THROW(blast::CBlastException, eInvalidArgument,
-        //                         "unsupported score matrix");
-        // ```
-        // NCBI searches the first batch and writes nothing of it (the XML2 and JSON documents
-        // only their start, `PrintProlog`); the search does not change the output.
-        if crate::report::blast_xml::matrix::xml_formatting_fails(
-            outputs.formats.iter().map(|format| format.outfmt),
-            args.matrix_name(),
-        ) {
-            reports.write_before_failed_batch(outputs, done, &warnings)?;
-            outputs.diagnostics.write_all(&batch_warnings)?;
-            return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
-        }
-        warnings[start].extend_from_slice(&batch_warnings);
+        warnings[start].append(&batch_warnings);
         let batch = match take(start..end) {
             Ok(batch) => {
                 // LOSAT_TIMING: the batch's block, kept in its result by a search of the pipe
@@ -3936,7 +3916,7 @@ fn run_batch_loop(
                 let read_error =
                     error.downcast::<crate::algorithm::common::database::PreliminaryReadError>()?;
                 reports.write_before_failed_batch(outputs, done, &warnings)?;
-                outputs.diagnostics.write_all(&batch_warnings)?;
+                batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
                 return Err(crate::blastinput::app::engine_error(read_error.0));
             }
             Err(error) => match error.downcast::<ErrorAfterBatchReports>() {
@@ -3955,7 +3935,7 @@ fn run_batch_loop(
                 // before its search), then the error, which skips `PrintEpilog`.
                 Ok(ErrorAfterBatchReports(error)) => {
                     reports.write_before_failed_batch(outputs, done, &warnings)?;
-                    outputs.diagnostics.write_all(&batch_warnings)?;
+                    batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
                     return Err(error);
                 }
                 Err(error) => return Err(error),
@@ -3992,7 +3972,7 @@ fn run_batch_loop(
                 match error.downcast::<crate::algorithm::common::database::HeaderReadError>() {
                     Ok(failure) => {
                         reports.write_before_failed_batch(outputs, done, &warnings)?;
-                        outputs.diagnostics.write_all(&batch_warnings)?;
+                        batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
                         return Err(failure.error);
                     }
                     Err(error) => return Err(error),
@@ -4017,7 +3997,7 @@ fn run_batch_loop(
             crate::blastinput::app::check_prefetch_environment(outputs.only_archive())
         {
             reports.write_before_failed_batch(outputs, done, &warnings)?;
-            outputs.diagnostics.write_all(&batch_warnings)?;
+            batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
             return Err(error);
         }
         if let ShownSubjects::Database { database, .. } = &subjects.shown {
@@ -4063,7 +4043,7 @@ fn run_batch_loop(
                         .downcast::<crate::algorithm::common::database::PreliminaryReadError>(
                     )?;
                     reports.write_before_failed_batch(outputs, done, &warnings)?;
-                    outputs.diagnostics.write_all(&batch_warnings)?;
+                    batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
                     return Err(crate::blastinput::app::engine_error(read_error.0));
                 }
             }
@@ -4192,9 +4172,41 @@ fn run_batch_loop(
                     if plural_names && !ordered.is_empty() {
                         database.open_for_tabular_rows()?;
                     }
-                    warnings[start].extend(messages);
+                    warnings[start].lines(&messages);
                 }
             }
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218 (the
+        // BLAST XML report data of a query that NCBI formats: the matrix of its formatting table,
+        // found by the name as typed with `strcmp`)
+        // ```c++
+        //     else {
+        //         string prog_name = Blast_ProgramNameFromType(
+        //                                            m_Options.GetProgramType());
+        //         if (prog_name != "blastn" && prog_name != "megablast") {
+        //             NCBI_THROW(blast::CBlastException, eInvalidArgument,
+        //                         "unsupported score matrix");
+        // ```
+        // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:197-205 (quoted above: the
+        // batch's prefetch, then `PrintOneResultSet` of each of its results)
+        // NCBI fails where it formats the batch of the run's first searched query, or of its
+        // second where the report is held (`BatchReports::xml_matrix_failure`;
+        // `XmlMatrixFailure::SecondQueryOrEnd`: NCBI's next query of another Seq-id, the second as
+        // LOSAT refuses two queries of one id first, above): after the batch's
+        // search, the read of its titles (and LOSAT's refusal of two queries of one id, above) and
+        // its prefetch, whose errors come first. It writes nothing of the batch's reports or of
+        // the batches' before (the XML2 and JSON documents only their start, `PrintProlog`): the
+        // reader messages and posts of the batches before (`write_before_failed_batch`), then
+        // those of this batch up to the failing query, with its prefetch's messages. A run of one
+        // searched query whose report is held fails after the loop. TBLASTX writes each batch's
+        // search strategy request at the batch's start (above), so no request follows the
+        // failing batch's.
+        if let Some(failure) = xml_matrix_failure.filter(|failure| failure.fails_in(start..end)) {
+            reports.write_before_failed_batch(outputs, done, &warnings)?;
+            for posts in &warnings[start..=failure.query()] {
+                posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+            }
+            return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
         }
         // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1450-1452
         // ```c
@@ -4239,7 +4251,7 @@ fn run_batch_loop(
             if reports.filtered_empty && batch.searched {
                 messages.push(crate::report::query_warnings::EMPTY_DATABASE_MESSAGE.to_string());
             }
-            warnings[index].extend(crate::report::query_warnings::query_warning(
+            warnings[index].lines(&crate::report::query_warnings::query_warning(
                 "tblastx",
                 reports.args.first_query_ordinal + input.ordinal(index),
                 query,
@@ -4247,7 +4259,7 @@ fn run_batch_loop(
             ));
         }
         for (offset, messages) in query_fetches.into_iter().enumerate() {
-            warnings[start + offset].extend(messages);
+            warnings[start + offset].lines(&messages);
         }
         if stream {
             // The batch's reports, written now, as NCBI's loop prints a batch's result sets
@@ -4265,7 +4277,7 @@ fn run_batch_loop(
             reports.stores.borrow_mut().clear();
             reports.lengths.borrow_mut().clear();
             for query_warnings in &mut warnings[start..end] {
-                *query_warnings = Vec::new();
+                *query_warnings = Posts::new();
             }
         } else {
             // The batch numbers its queries from 0.
@@ -4279,6 +4291,16 @@ fn run_batch_loop(
             done.spans.push(start..end);
         }
         input_start = input_end;
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2204-2212 (quoted at
+    // `blast_xml::matrix::XmlMatrixFailure`: `PrintEpilog` makes the held report of the run's one
+    // query)
+    // A run of one searched query whose report is held fails at its end, instead of the epilog,
+    // after what the batch loop wrote before a failing batch (the prologs, the batches' reader
+    // messages and posts).
+    if xml_matrix_failure.is_some_and(|failure| failure.fails_at_end(done.searched.len())) {
+        reports.write_before_failed_batch(outputs, done, &warnings)?;
+        return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
     }
     reports.write(outputs, done, &warnings, true)
 }
@@ -4343,7 +4365,7 @@ impl BatchReports<'_> {
         &self,
         outputs: &mut ReportOutputs<'_>,
         done: SearchedBatches,
-        warnings: &[Vec<u8>],
+        warnings: &[Posts],
         epilog: bool,
     ) -> Result<()> {
         // Diagnostic (LOSAT_TIMING): the report for the common line (utils/xtiming.rs); written
@@ -4376,18 +4398,6 @@ impl BatchReports<'_> {
             };
             &batch_runs
         };
-        // The BLAST archive (outfmt 11) writes the Bioseq of every query of the batches NCBI
-        // completes and, with `-subject`, of every subject in each archive: a title it cannot
-        // write is refused before the first byte, exactly where NCBI would write that Bioseq.
-        // NCBI writes none of them when no batch is completed (an error archive or nothing).
-        // (The search strategy's requests check their titles where they are written,
-        // `run_batch_loop`.)
-        if self.args.archive.is_some() && !reported.is_empty() {
-            super::super::archive::check_titles(queries, "query")?;
-            if let ShownSubjects::Fasta { records, .. } = self.subjects {
-                super::super::archive::check_titles(records, "subject")?;
-            }
-        }
         let mut hits = done.hits;
         // `-db`: the reported sequences by rank (their records hold the stored titles, their
         // letters are read from the stored codes).
@@ -4574,11 +4584,19 @@ impl BatchReports<'_> {
         &self,
         outputs: &mut ReportOutputs<'_>,
         done: SearchedBatches,
-        warnings: &[Vec<u8>],
+        warnings: &[Posts],
     ) -> Result<()> {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2389 (quoted
+        // at `blast_xml::matrix::XmlMatrixFailure`)
+        // With a matrix name that NCBI's XML does not know, the batches before a failing batch
+        // wrote no report: the XML formats are not streamed (`report_stream`), and their queries
+        // come before the failing query (`xml_matrix_failure`), the one query of a run whose
+        // report is held, which NCBI never writes. What they wrote is their reader messages and
+        // posts, after the prologs.
+        let xml_matrix_failed = self.xml_matrix_failure(outputs).is_some();
         if self.queries_written.get() > 0 {
             Ok(())
-        } else if done.searched.is_empty() {
+        } else if done.searched.is_empty() || xml_matrix_failed {
             write_pairwise_prologs(outputs, self.args, self.subjects, false)?;
             // The XML2 and JSON documents start with their prolog too, and outfmt 20 with its line
             // of the field names (and its formatter's warning, `tabular::write_tabular_prolog`).
@@ -4603,10 +4621,31 @@ impl BatchReports<'_> {
                     _ => {}
                 }
             }
+            for posts in &warnings[..done.searched.len()] {
+                posts.write(&mut *outputs.diagnostics, self.args.archive.as_ref())?;
+            }
             Ok(())
         } else {
             self.write(outputs, done, warnings, false)
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:121 (quoted at
+    // `blast_xml2::reports_held`)
+    /// Where the run of the formats of `outputs` stops for a matrix name that NCBI's BLAST XML
+    /// report data does not know (`blast_xml::matrix::xml_formatting_failure`), with the facts of
+    /// the search: subject records (`-subject`, `m_IsBl2Seq`); TBLASTX does not iterate. The one
+    /// decision of the batch loop's error (`run_batch_loop`).
+    fn xml_matrix_failure(
+        &self,
+        outputs: &ReportOutputs<'_>,
+    ) -> Option<crate::report::blast_xml::matrix::XmlMatrixFailure> {
+        crate::report::blast_xml::matrix::xml_formatting_failure(
+            outputs.formats.iter().map(|format| format.outfmt),
+            self.args.matrix_name(),
+            matches!(self.subjects, ShownSubjects::Fasta { .. }),
+            false,
+        )
     }
 }
 
@@ -4644,14 +4683,6 @@ impl Drop for XEndBatch<'_> {
     fn drop(&mut self) {
         self.0.end_batch(self.1);
     }
-}
-
-// No NCBI counterpart: a call boundary; it computes no value NCBI computes.
-/// Calls `f` in a function of its own that is never inlined, so that a closure that calls it
-/// (`search_query_batch`'s chunk scan for `-window_size 0`) does not take `f`'s code.
-#[inline(never)]
-fn x_out_of_line<R>(f: impl FnOnce() -> R) -> R {
-    f()
 }
 
 /// Searches one query batch against the subjects and returns its hits and query statistics: the
@@ -5077,6 +5108,8 @@ fn search_query_batch<S: TbxScore>(
         x_scan_bf,
         offset_array_size,
         tbx_sent,
+        scan_debug_range,
+        x_read_failure: &x_read_failure,
     };
 
     let process_subject = |st: &mut WorkerState<S>, s_idx: usize| {
@@ -5091,7 +5124,7 @@ fn search_query_batch<S: TbxScore>(
                 XCloseUnits(batch, s_idx),
             )
         });
-        // The scores of the search's matrix, an argument of the closures below.
+        // The scores of the search's matrix, an argument of the frame loop below.
         let sc = st.sc;
         // EXPERIMENT (LOSAT_X_TBXPIPE): this subject's part of the batch's seed-stage end, ended at
         // dispatch point 5 (`subject_link::end_subject_seed_stage`) with the subject's HSPs, or
@@ -5275,809 +5308,41 @@ fn search_query_batch<S: TbxScore>(
             "the reference frame loop would run without the worker's diagonal table (subject {s_idx})"
         );
 
-        for (s_f_idx, s_frame) in s_frames_preliminary.iter().enumerate() {
-            // NCBI: Diagonal state is NOT reset between subject frames.
-            // NCBI shares ewp (diag_table) across all 6 subject frame iterations.
-            // Reference: blast_engine.c:805-855
-            // The per-subject reset (above, line ~1646) matches NCBI's Blast_ExtendWordNew calloc.
-            // Blast_ExtendWordExit at the end of each subject chunk increments diag_offset.
-
-            let subject_full = &s_frame.aa_seq;
-            // NCBI subject->sequence points past the leading NULLB sentinel, so offsets
-            // are 0-based from the first residue; see blast_engine.c:811-812 and
-            // blast_util.c:112-116.
-            let subject_all = &subject_full[1..subject_full.len() - 1];
-            let s_aa_len = s_frame.aa_len;
-
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:804-855
-            // ```c
-            // for (context=first_context; context<=last_context; context++) {
-            //    subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
-            //    subject->sequence = translation_buffer + frame_offsets[context] + 1;
-            //    subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
-            //    status = s_BlastSearchEngineOneContext(..., &hsp_list_for_chunks, ...);
-            //    Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax);
-            // }
-            // ```
-            let mut frame_ungapped_hits: Vec<UngappedHit> = Vec::new();
-            let mut split_state = SubjectSplitState::new(s_aa_len);
-            let max_dbseq_len = tblastx_max_dbseq_len_for_run();
-            // `-lcase_masking`: the scan ranges of this frame's chunks, `None` for a subject
-            // without lower-case letters.
-            let x_soft_calls = if x_soft_subjects {
-                x_soft_subject_calls(subjects, s_idx, s_frame, s_frames_preliminary)
-            } else {
-                None
-            };
-
-            // What the word finder reads of this subject and frame (`word_finder::FrameCx`).
-            let frame_cx = word_finder::FrameCx {
+        // The frame loop of the subject (`frame_chunks::search_subject_frames`): each preliminary
+        // frame's chunks, scanned by the word finder (`word_finder::scan_chunk`) and merged into
+        // the frame's list, which joins `combined_ungapped_hits`.
+        frame_chunks::search_subject_frames(
+            &word_finder_cx,
+            &frame_chunks::SubjectScan {
+                subjects,
+                x_soft_subjects,
+                use_serial_scan_chunks,
+                use_parallel_chunks,
+                num_threads,
+                #[cfg(all(
+                    feature = "parallel",
+                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+                ))]
+                offset_pairs_len,
                 lookup_ref,
                 s_idx,
                 s_len,
+                s_frames_preliminary,
                 s_frames_listed,
                 is_long_sequence,
                 collect_hsp_saving_stats,
-                s_f_idx,
-                s_frame,
-                subject_full,
-                subject_all,
-            };
-
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-516
-            // ```c
-            // while (scan_range[1] <= scan_range[2]) {
-            // ...
-            //     for (i = 0; i < hits; ++i) {
-            //         Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-            //         Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-            // ...
-            //         diag_coord = (query_offset - subject_offset) & diag_mask;
-            // ```
-            // This closure is the reference loop (only renamed from scan_chunk): the port of the C loop above.
-            // The dispatcher `scan_chunk` below chooses between it and `scan_chunk_bucketed`.
-            // The chunk's start, the scan calls, the per-hit body and the chunk's end are the
-            // `word_finder` functions the two share.
-            let scan_chunk_plain = |chunk: SubjectChunk,
-                                    offset_pairs: &mut [OffsetPair],
-                                    diag_array: &mut [DiagStruct],
-                                    diag_offset: &mut i32,
-                                    scan_chunk_size: Option<usize>,
-                                    sc: S|
-             -> TblastxChunkScanResult {
-                // The chunk's letters and its empty lists; a chunk shorter than a word ends here
-                // (`word_finder::begin_chunk_scan`).
-                let word_finder::ChunkStart {
-                    mut init_hsps,
-                    mut stats,
-                    subject,
-                    subject_sent,
-                } = match word_finder::begin_chunk_scan(
-                    &word_finder_cx,
-                    &frame_cx,
-                    chunk,
-                    diag_array,
-                    diag_offset,
-                ) {
-                    Ok(start) => start,
-                    Err(short) => return short,
-                };
-
-                // NCBI subject seq_ranges are used by s_DetermineScanningOffsets (masksubj.inl).
-                // With no subject masking, the range is [0, subject->length].
-                // References: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:509-511,
-                // ncbi-blast/c++/src/algo/blast/core/masksubj.inl:43-58
-                let base_seq_ranges: [(i32, i32); 1] = [(0, chunk.length as i32)];
-                // `-lcase_masking`: this chunk's ranges, whole (`x_soft_chunk`).
-                let x_soft = x_soft_calls
-                    .as_ref()
-                    .map(|calls| x_soft_chunk(calls, &chunk));
-                if let Some(None) = x_soft {
-                    return TblastxChunkScanResult {
-                        chunk,
-                        hits: Vec::new(),
-                        stats,
-                    };
-                }
-                let x_soft = x_soft.flatten();
-                let x_scan_letters = x_soft_scan_letters(x_soft, subject, subject_full, &chunk);
-                let scan_interiors = tblastx_scan_interiors(
-                    chunk.length,
-                    if x_soft.is_some() {
-                        None
-                    } else {
-                        scan_chunk_size
-                    },
-                );
-                let mut previous_seed_s_off: Option<u32> = None;
-                // What a hit reads of this chunk (`word_finder::ChunkCx`), once per chunk: the
-                // diagonal offset does not change during the chunk's scan.
-                let chunk_cx = word_finder::ChunkCx {
-                    chunk,
-                    subject,
-                    subject_sent,
-                    diag_offset: *diag_offset,
-                    sc,
-                };
-                for (interior_start, interior_end) in scan_interiors.into_iter() {
-                    let seq_ranges = match x_soft {
-                        Some(ranges) => ranges.to_vec(),
-                        None => clip_tblastx_seq_ranges_for_scan_interior(
-                            &base_seq_ranges,
-                            interior_start,
-                            interior_end,
-                            wordsize as usize,
-                            subject.len(),
-                        ),
-                    };
-                    if seq_ranges.is_empty() {
-                        continue;
-                    }
-                    // [C] scan_range[0] = 0;
-                    // [C] scan_range[1] = subject->seq_ranges[0].left;
-                    // [C] scan_range[2] = subject->seq_ranges[0].right - wordsize;
-                    let mut scan_range: [i32; 3] = [0, seq_ranges[0].0, seq_ranges[0].1 - wordsize];
-                    // [C] if (scan_range[2] < scan_range[1]) scan_range[2] = scan_range[1];
-                    // (aa_ungapped.c:499-500: only a masked subject's first range can be so short.)
-                    // A first range on the last letter of a chunk's frame has no word within the
-                    // frame and its NULLB: NCBI reads the next frame's letter there, and such a
-                    // word, the only one of the chunk, can only set a `last_hit` that the next
-                    // chunk's diagonal offset hides, so it is not scanned.
-                    if x_soft.is_some() && scan_range[2] < scan_range[1] {
-                        scan_range[2] = scan_range[1];
-                        if scan_range[1] + wordsize > x_scan_letters.len() as i32 {
-                            scan_range[2] = scan_range[1] - 1;
-                        }
-                    }
-
-                    // [C] while (scan_range[1] <= scan_range[2])
-                    while scan_range[1] <= scan_range[2] {
-                        let prev_scan_left = scan_range[1];
-                        // One scan call (`word_finder::scan_next_hits`); `None` ends the scan.
-                        let Some(hits) = word_finder::scan_next_hits(
-                            &word_finder_cx,
-                            &frame_cx,
-                            x_scan_letters,
-                            &seq_ranges,
-                            offset_pairs,
-                            &mut scan_range,
-                            prev_scan_left,
-                        ) else {
-                            break;
-                        };
-
-                        // [C] for (i = 0; i < hits; ++i)
-                        // OPTIMIZATION: Use raw pointers to eliminate bounds checking in hot loop
-                        let offset_pairs_ptr = offset_pairs.as_ptr();
-
-                        for i in 0..hits as usize {
-                            // SAFETY: i < hits, and hits <= offset_array_size (checked by scan)
-                            let pair = unsafe { &*offset_pairs_ptr.add(i) };
-                            let query_offset = pair.q_off;
-                            let subject_offset = pair.s_off;
-                            debug_assert!(
-                            previous_seed_s_off
-                                .map(|prev| subject_offset >= prev)
-                                .unwrap_or(true),
-                            "TBLASTX scan chunks must replay seeds in nondecreasing subject offset order"
-                        );
-                            previous_seed_s_off = Some(subject_offset);
-
-                            // Debug: dump scan output around a target subject offset.
-                            // The scan output is produced by s_BlastAaScanSubject.
-                            // Reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:83-123
-                            if let Some((lo, hi)) = scan_debug_range {
-                                // NCBI offsets are Uint4; cast for debug range comparison only.
-                                // Reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:141-150
-                                let subject_offset_i32 =
-                                    subject_offset as i32 + chunk.offset as i32;
-                                if subject_offset_i32 >= lo && subject_offset_i32 <= hi {
-                                    eprintln!(
-                                        "[DEBUG SCAN_OFF] s_f_idx={} s_off={} local_s_off={} q_off={} scan_range=[{},{}] chunk_offset={} diag_offset={}",
-                                        s_f_idx,
-                                        subject_offset_i32,
-                                        subject_offset,
-                                        query_offset,
-                                        prev_scan_left,
-                                        scan_range[1],
-                                        chunk.offset,
-                                        diag_offset
-                                    );
-                                }
-                            }
-
-                            // The two-hit test and extension of the hit
-                            // (`word_finder::two_hit_one_hit`); the HSP it returns is saved.
-                            if let Some(init) = word_finder::two_hit_one_hit(
-                                &word_finder_cx,
-                                &frame_cx,
-                                &chunk_cx,
-                                diag_array,
-                                &mut stats,
-                                query_offset,
-                                subject_offset,
-                            ) {
-                                init_hsps.push(init);
-                            }
-                        }
-                    }
-                }
-
-                // The chunk's end (`word_finder::finish_chunk_scan`): the diagonal offset advanced
-                // past the chunk, the init HSPs sorted by score and converted to the chunk's HSP
-                // list.
-                word_finder::finish_chunk_scan(
-                    &word_finder_cx,
-                    &frame_cx,
-                    chunk,
-                    init_hsps,
-                    stats,
-                    diag_array,
-                    diag_offset,
-                )
-            };
-
-            // EXPERIMENT (SEEDBUCKET, graduated on 2026-10-22: no variable): `scan_chunk_plain`
-            // above is the reference loop.  This variant appends the hits of every scan call to
-            // per-diagonal-range buckets and runs the same per-hit body
-            // (`word_finder::two_hit_one_hit`, which `scan_chunk_plain` runs per hit) bucket by
-            // bucket, then puts the saved HSPs back into scan order.  See `x_seed_bucket`.
-            //
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-516
-            // ```c
-            // while (scan_range[1] <= scan_range[2]) {
-            // ...
-            //     for (i = 0; i < hits; ++i) {
-            //         Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-            //         Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-            // ...
-            //         diag_coord = (query_offset - subject_offset) & diag_mask;
-            // ```
-            // This variant ports the same C loop with one change of order: the hits of a scan call are
-            // grouped by range of diag_coord and processed range by range (see x_seed_bucket.rs).
-            // The order of the hits within one diagonal, and so every diagonal cell state, is as in C.
-            let scan_chunk_bucketed = |chunk: SubjectChunk,
-                                       offset_pairs: &mut [OffsetPair],
-                                       diag_array: &mut [DiagStruct],
-                                       diag_offset: &mut i32,
-                                       scan_chunk_size: Option<usize>,
-                                       sc: S|
-             -> TblastxChunkScanResult {
-                // The chunk's letters and its empty lists; a chunk shorter than a word ends here
-                // (`word_finder::begin_chunk_scan`).
-                let word_finder::ChunkStart {
-                    mut init_hsps,
-                    mut stats,
-                    subject,
-                    subject_sent,
-                } = match word_finder::begin_chunk_scan(
-                    &word_finder_cx,
-                    &frame_cx,
-                    chunk,
-                    diag_array,
-                    diag_offset,
-                ) {
-                    Ok(start) => start,
-                    Err(short) => return short,
-                };
-
-                // NCBI subject seq_ranges are used by s_DetermineScanningOffsets (masksubj.inl).
-                // With no subject masking, the range is [0, subject->length].
-                // References: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:509-511,
-                // ncbi-blast/c++/src/algo/blast/core/masksubj.inl:43-58
-                let base_seq_ranges: [(i32, i32); 1] = [(0, chunk.length as i32)];
-                let scan_interiors = tblastx_scan_interiors(chunk.length, scan_chunk_size);
-                let mut buckets = crate::algorithm::tblastx::x_seed_bucket::SeedBuckets::new(
-                    diag_array_size as u32,
-                    diag_mask as u32,
-                );
-                let x_bucket_budget = crate::algorithm::tblastx::x_seed_bucket::budget();
-                // Per-flush positions of the HSPs the current flush has saved.
-                let mut seq_keys: Vec<u32> = Vec::new();
-                // What a hit reads of this chunk (`word_finder::ChunkCx`), once per chunk: the
-                // diagonal offset does not change during the chunk's scan.
-                let chunk_cx = word_finder::ChunkCx {
-                    chunk,
-                    subject,
-                    subject_sent,
-                    diag_offset: *diag_offset,
-                    sc,
-                };
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-516,588-591
-                // ```c
-                // for (i = 0; i < hits; ++i) {
-                //     Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-                //     Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-                // ...
-                //     diag_coord = (query_offset - subject_offset) & diag_mask;
-                // ...
-                //     if (score >= cutoffs->cutoff_score)
-                //         BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
-                //                          query_offset, subject_offset, hsp_len,
-                //                          score);
-                // ```
-                // One flush: the buffered hits go through the per-hit body of `scan_chunk_plain`
-                // (`word_finder::two_hit_one_hit`) bucket by bucket, then the HSPs this flush saved
-                // (the tail of `init_hsps`, each with `seq`, the hit's position within the flush)
-                // are put back into scan order, the order in which the C loop saves them. The body
-                // reads and writes only diag_array[diag_coord], the sequences and the matrix, so
-                // applying it bucket by bucket gives each diagonal the same sequence of states. The
-                // flushes follow each other in scan order, so `init_hsps` is in scan order after
-                // every flush. The macro is expanded at the two flushes below (each its own
-                // instance of `SeedBuckets::flush`).
-                macro_rules! x_flush {
-                    () => {{
-                        let x_flush_start = init_hsps.len();
-                        buckets.flush(|query_offset, subject_offset, seq| {
-                            if let Some(init) = word_finder::two_hit_one_hit(
-                                &word_finder_cx,
-                                &frame_cx,
-                                &chunk_cx,
-                                diag_array,
-                                &mut stats,
-                                query_offset,
-                                subject_offset,
-                            ) {
-                                init_hsps.push(init);
-                                seq_keys.push(seq);
-                            }
-                        });
-                        crate::algorithm::tblastx::x_seed_bucket::restore_flush_order(
-                            &mut init_hsps,
-                            x_flush_start,
-                            &mut seq_keys,
-                        );
-                    }};
-                }
-                for (interior_start, interior_end) in scan_interiors.into_iter() {
-                    let seq_ranges = clip_tblastx_seq_ranges_for_scan_interior(
-                        &base_seq_ranges,
-                        interior_start,
-                        interior_end,
-                        wordsize as usize,
-                        subject.len(),
-                    );
-                    if seq_ranges.is_empty() {
-                        continue;
-                    }
-                    // [C] scan_range[0] = 0;
-                    // [C] scan_range[1] = subject->seq_ranges[0].left;
-                    // [C] scan_range[2] = subject->seq_ranges[0].right - wordsize;
-                    let mut scan_range: [i32; 3] = [0, seq_ranges[0].0, seq_ranges[0].1 - wordsize];
-
-                    // [C] while (scan_range[1] <= scan_range[2])
-                    while scan_range[1] <= scan_range[2] {
-                        let prev_scan_left = scan_range[1];
-                        // One scan call (`word_finder::scan_next_hits`); `None` ends the scan.
-                        let Some(hits) = word_finder::scan_next_hits(
-                            &word_finder_cx,
-                            &frame_cx,
-                            subject,
-                            &seq_ranges,
-                            offset_pairs,
-                            &mut scan_range,
-                            prev_scan_left,
-                        ) else {
-                            break;
-                        };
-
-                        // [C] for (i = 0; i < hits; ++i)
-                        // The hits of this scan call are appended to the buckets and
-                        // processed, bucket by bucket, when the buffer is full.
-                        //
-                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-516
-                        // ```c
-                        // for (i = 0; i < hits; ++i) {
-                        //     Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-                        //     Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-                        // ...
-                        //     diag_coord = (query_offset - subject_offset) & diag_mask;
-                        // ```
-                        // The C loop processes each offset pair here. This loop only appends the pairs to buckets,
-                        // in scan order (a buffered hit keeps its position, which is used to restore that order).
-                        let offset_pairs_ptr = offset_pairs.as_ptr();
-                        for i in 0..hits as usize {
-                            // SAFETY: i < hits, and hits <= offset_array_size (checked by scan)
-                            let pair = unsafe { &*offset_pairs_ptr.add(i) };
-                            buckets.push(pair.q_off, pair.s_off);
-                        }
-                        if buckets.flush_due(x_bucket_budget) {
-                            // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-516
-                            // ```c
-                            // Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-                            // Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-                            // ...
-                            // diag_coord = (query_offset - subject_offset) & diag_mask;
-                            // ```
-                            // The buffered hits are processed when the budget is reached (a bucket at a time).
-                            x_flush!();
-                        }
-                    }
-                }
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-516
-                // ```c
-                // Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-                // Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-                // ...
-                // diag_coord = (query_offset - subject_offset) & diag_mask;
-                // ```
-                // The remaining hits are processed at the end of the subject chunk.
-                x_flush!();
-                // The saved HSPs are in scan order here, as in C: every flush restored its own. The
-                // score sort of `word_finder::finish_chunk_scan` (sort_init_hsps_by_score_ncbi,
-                // with its NCBI reference) is stable, so the order of comparator-equal HSPs
-                // matters.
-
-                // The chunk's end (`word_finder::finish_chunk_scan`): the diagonal offset advanced
-                // past the chunk, the init HSPs sorted by score and converted to the chunk's HSP
-                // list.
-                word_finder::finish_chunk_scan(
-                    &word_finder_cx,
-                    &frame_cx,
-                    chunk,
-                    init_hsps,
-                    stats,
-                    diag_array,
-                    diag_offset,
-                )
-            };
-
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:760-807
-            // ```c
-            //     scan_range[0] = 0;
-            //     scan_range[1] = subject->seq_ranges[0].left;
-            //     scan_range[2] = subject->seq_ranges[0].right - wordsize;
-            //
-            //     while (scan_range[1] <= scan_range[2]) {
-            //         /* scan the subject sequence for hits */
-            //         hits = scansub(lookup_wrap, subject,
-            //                        offset_pairs, array_size, scan_range);
-            //
-            //         totalhits += hits;
-            //         /* for each hit, */
-            //         for (i = 0; i < hits; ++i) {
-            //             Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-            //             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-            //             diag_coord = (subject_offset - query_offset) & diag_mask;
-            //             diff = subject_offset -
-            //                 (diag_array[diag_coord].last_hit - diag_offset);
-            //
-            //             /* do an extension, but only if we have not already extended this
-            //                far */
-            //             if (diff >= 0) {
-            //                 Int4 curr_context = BSearchContextInfo(query_offset,
-            //                                                        query_info);
-            //                 BlastUngappedCutoffs *cutoffs = word_params->cutoffs +
-            //                                                         curr_context;
-            //                 score = s_BlastAaExtendOneHit(matrix, subject, query,
-            //                                               subject_offset, query_offset,
-            //                                               cutoffs->x_dropoff,
-            //                                               &hsp_q, &hsp_s, &hsp_len,
-            //                                               wordsize, use_pssm, &s_last_off);
-            //
-            //                 /* if the hsp meets the score threshold, report it */
-            //                 if (score >= cutoffs->cutoff_score) {
-            //                     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
-            //                                      query_offset, subject_offset, hsp_len,
-            //                                      score);
-            //                 }
-            //                 diag_array[diag_coord].last_hit =
-            //                     s_last_off - (wordsize - 1) + diag_offset;
-            //                 ++hits_extended;
-            //             }
-            //         }                       /* end for */
-            //     }                           /* end while */
-            //
-            //     /* increment the offset in the diagonal array (no windows used) */
-            //     Blast_ExtendWordExit(ewp, subject->length);
-            // ```
-            // `s_BlastAaWordFinder_OneHit` (`-window_size 0`: `BlastAaWordFinder` takes it when the
-            // diagonal table has no `multiple_hits`, aa_ungapped.c:214-224) on one chunk of a frame:
-            // the scan of `scan_chunk_plain` without the clamp of a short first range (that loop
-            // then never starts: no `scansub` call, no hit), the diagonal `s - q`, no flag, and
-            // `last_hit` set after every extension, also one below the cutoff. The extension is
-            // `s_BlastAaExtendOneHit` with the search's scores (`extension::extend_hit_one_hit`, on
-            // the two-hit extension's walks), on the context's letters and the chunk's, as the
-            // two-hit extensions read them. The
-            // unit path and `scan_chunk_bucketed` are two-hit only: a batch of window 0 is a
-            // `reference_loop` one for `x_pair_par::decide`, and `scan_chunk` takes this closure
-            // for every chunk.
-            let scan_chunk_one_hit = |chunk: SubjectChunk,
-                                      offset_pairs: &mut [OffsetPair],
-                                      diag_array: &mut [DiagStruct],
-                                      diag_offset: &mut i32,
-                                      scan_chunk_size: Option<usize>,
-                                      sc: S|
-             -> TblastxChunkScanResult {
-                let mut init_hsps: Vec<InitHSP> = Vec::new();
-                let stats = TblastxChunkScanStats::default();
-                let chunk_end = chunk.offset.saturating_add(chunk.length);
-                let subject = &subject_all[chunk.offset..chunk_end];
-                if subject.len() < wordsize as usize {
-                    // As `scan_chunk_plain` (aa_ungapped.c:760-764: `scan_range[2] <
-                    // scan_range[1]`, no scan; blast_extend.c:167-173).
-                    advance_tblastx_diag_offset(diag_offset, diag_array, window, chunk.length);
-                    return TblastxChunkScanResult {
-                        chunk,
-                        hits: Vec::new(),
-                        stats,
-                    };
-                }
-                // The scan ranges of `scan_chunk_plain` (masksubj.inl:43-58; `-lcase_masking`:
-                // `x_soft_chunk`, and a chunk without ranges is not searched).
-                let base_seq_ranges: [(i32, i32); 1] = [(0, chunk.length as i32)];
-                let x_soft = x_soft_calls
-                    .as_ref()
-                    .map(|calls| x_soft_chunk(calls, &chunk));
-                if let Some(None) = x_soft {
-                    return TblastxChunkScanResult {
-                        chunk,
-                        hits: Vec::new(),
-                        stats,
-                    };
-                }
-                let x_soft = x_soft.flatten();
-                let x_scan_letters = x_soft_scan_letters(x_soft, subject, subject_full, &chunk);
-                let scan_interiors = tblastx_scan_interiors(
-                    chunk.length,
-                    if x_soft.is_some() {
-                        None
-                    } else {
-                        scan_chunk_size
-                    },
-                );
-                let wordsize_usize = wordsize as usize;
-                for (interior_start, interior_end) in scan_interiors.into_iter() {
-                    let seq_ranges = match x_soft {
-                        Some(ranges) => ranges.to_vec(),
-                        None => clip_tblastx_seq_ranges_for_scan_interior(
-                            &base_seq_ranges,
-                            interior_start,
-                            interior_end,
-                            wordsize_usize,
-                            subject.len(),
-                        ),
-                    };
-                    if seq_ranges.is_empty() {
-                        continue;
-                    }
-                    // [C] scan_range[1] = subject->seq_ranges[0].left;
-                    // [C] scan_range[2] = subject->seq_ranges[0].right - wordsize;
-                    let mut scan_range: [i32; 3] = [0, seq_ranges[0].0, seq_ranges[0].1 - wordsize];
-                    // [C] while (scan_range[1] <= scan_range[2])
-                    while scan_range[1] <= scan_range[2] {
-                        let prev_scan_left = scan_range[1];
-                        // [C] hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
-                        let hits = crate::algorithm::tblastx::x_scan_bf::x_scan_subject(
-                            x_scan_bf,
-                            lookup_ref,
-                            x_scan_letters,
-                            &seq_ranges,
-                            offset_pairs,
-                            offset_array_size,
-                            &mut scan_range,
-                        );
-                        if hits == 0 && scan_range[1] == prev_scan_left {
-                            // The guard of `scan_chunk_plain`.
-                            break;
-                        }
-                        // [C] for (i = 0; i < hits; ++i)
-                        for pair in &offset_pairs[..hits as usize] {
-                            let query_offset = pair.q_off;
-                            let subject_offset = pair.s_off;
-                            // [C] diag_coord = (subject_offset - query_offset) & diag_mask;
-                            // (Uint4 offsets: the difference wraps.)
-                            let diag_coord = (subject_offset.wrapping_sub(query_offset)
-                                & (diag_mask as u32))
-                                as usize;
-                            let diag_entry = &mut diag_array[diag_coord];
-                            // [C] diff = subject_offset -
-                            // [C]     (diag_array[diag_coord].last_hit - diag_offset);
-                            // (Uint4 minus Int4 in unsigned arithmetic, read as the Int4 `diff`.)
-                            let diff = subject_offset.wrapping_sub(
-                                diag_entry.last_hit().wrapping_sub(*diag_offset) as u32,
-                            ) as i32;
-                            // [C] if (diff >= 0)
-                            if diff < 0 {
-                                continue;
-                            }
-                            // [C] curr_context = BSearchContextInfo(query_offset, query_info);
-                            let ctx_idx = lookup_ref.get_context_idx(query_offset as i32);
-                            let ctx = &contexts_ref[ctx_idx];
-                            let q_raw = query_offset.wrapping_sub(ctx.frame_base as u32) as usize;
-                            // The context's letters (`query->sequence` from the context's offset,
-                            // blast_query_info.c:311-315), as the two-hit extensions read them.
-                            let query = &ctx.aa_seq[1..ctx.aa_seq.len() - 1];
-                            // [C] score = s_BlastAaExtendOneHit(matrix, subject, query, ...);
-                            let Some(hit) =
-                                crate::algorithm::tblastx::extension::extend_hit_one_hit(
-                                    sc,
-                                    query,
-                                    subject,
-                                    q_raw,
-                                    subject_offset as usize,
-                                    x_dropoff_per_context[ctx_idx],
-                                )
-                            else {
-                                // A word past the letters, which the scan does not give.
-                                x_read_failure.fail(
-                                    s_idx,
-                                    anyhow::anyhow!(
-                                        "TBLASTX -window_size 0: the word at query offset {} and subject offset {} is past the letters (internal error)",
-                                        query_offset,
-                                        subject_offset
-                                    ),
-                                );
-                                continue;
-                            };
-                            // [C] if (score >= cutoffs->cutoff_score)
-                            // [C]     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
-                            // [C]                      query_offset, subject_offset, hsp_len, score);
-                            if hit.score >= cutoff_scores[ctx_idx] {
-                                // NCBI reference (598d8ae6):
-                                // c++/src/algo/blast/core/aa_ungapped.c:1054,1083
-                                // ```c
-                                //     init_hit_width = q_right_off - q_left_off + 1;
-                                // ...
-                                //     *hsp_len = left_disp + right_disp + init_hit_width;
-                                // ```
-                                // A word whose running sum is reset after its best part (a low
-                                // -threshold allows it) gives a length of 0 or less, saved as any
-                                // other: its ends are at or before its starts, and below 0 near a
-                                // frame's start. NCBI links it with the others and its
-                                // re-evaluation deletes it; LOSAT keeps its `Int4` ends up to the
-                                // first linking call and drops it there (`chaining.rs`, the impl
-                                // of `UngappedHit`; `subject_link::link_subject_hits_int4`).
-                                let hsp_q_absolute = ctx.frame_base + hit.q_start;
-                                init_hsps.push(InitHSP {
-                                    q_start_absolute: hsp_q_absolute,
-                                    q_end_absolute: hsp_q_absolute + hit.length,
-                                    s_start: hit.s_start,
-                                    s_end: hit.s_start + hit.length,
-                                    q_seed_absolute: query_offset as i32,
-                                    s_seed: subject_offset as i32,
-                                    score: hit.score,
-                                    ctx_idx,
-                                    s_f_idx,
-                                    q_idx: ctx.q_idx,
-                                    s_idx: s_idx as u32,
-                                    q_frame: ctx.frame,
-                                    s_frame: s_frame.frame,
-                                    q_orig_len: ctx.orig_len,
-                                    s_orig_len: s_len,
-                                });
-                            }
-                            // [C] diag_array[diag_coord].last_hit =
-                            // [C]     s_last_off - (wordsize - 1) + diag_offset;
-                            diag_entry.set_last_hit(hit.s_last_off - (wordsize - 1) + *diag_offset);
-                        }
-                    }
-                }
-                // [C] Blast_ExtendWordExit(ewp, subject->length);
-                advance_tblastx_diag_offset(diag_offset, diag_array, window, chunk.length);
-                // aa_ungapped.c:232 `Blast_InitHitListSortByScore`, then the conversion of
-                // `scan_chunk_plain` (blast_engine.c:561-584).
-                // The list keeps NCBI's `Int4` ends of an HSP of length 0 or less
-                // (`get_ungapped_hsp_list_int4`, `adjust_tblastx_chunk_subject_offsets`).
-                sort_init_hsps_by_score_ncbi(&mut init_hsps);
-                let mut hits = if init_hsps.is_empty() {
-                    Vec::new()
-                } else {
-                    get_ungapped_hsp_list_int4(init_hsps, contexts_ref, s_frames_listed)
-                };
-                adjust_tblastx_chunk_subject_offsets(&mut hits, chunk.offset);
-                TblastxChunkScanResult { chunk, hits, stats }
-            };
-
-            // EXPERIMENT (SEEDBUCKET): the scan order (`scan_chunk_plain`) or the bucketed order
-            // (`scan_chunk_bucketed`, only for tables of at least LOSAT_X_SEEDBUCKET_MIN_CELLS
-            // cells).
-            //
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-516
-            // ```c
-            // while (scan_range[1] <= scan_range[2]) {
-            // ...
-            //     for (i = 0; i < hits; ++i) {
-            //         Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-            //         Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-            // ...
-            //         diag_coord = (query_offset - subject_offset) & diag_mask;
-            // ```
-            // Dispatch point of SEEDBUCKET: `scan_chunk_plain` (the port of the C loop), or
-            // `scan_chunk_bucketed` for a table of at least the minimum cells. A traced or debugged
-            // run always uses `scan_chunk_plain`.
-            let scan_chunk = |chunk: SubjectChunk,
-                              offset_pairs: &mut [OffsetPair],
-                              diag_array: &mut [DiagStruct],
-                              diag_offset: &mut i32,
-                              scan_chunk_size: Option<usize>,
-                              sc: S|
-             -> TblastxChunkScanResult {
-                // The one-hit word finder (`-window_size 0`) has a loop of its own, compiled out of
-                // line (`x_out_of_line`) so that this closure keeps the two-hit scan's code.
-                if window == 0 {
-                    return x_out_of_line(|| {
-                        scan_chunk_one_hit(
-                            chunk,
-                            offset_pairs,
-                            diag_array,
-                            diag_offset,
-                            scan_chunk_size,
-                            sc,
-                        )
-                    });
-                }
-                // The debug/trace paths exist only in the reference loop.
-                let x_debugging = scan_debug_range.is_some() || trace_hsp_target().is_some();
-                if crate::algorithm::tblastx::x_seed_bucket::bucketed(diag_array.len())
-                    && !x_debugging
-                    && x_soft_calls.is_none()
-                {
-                    scan_chunk_bucketed(
-                        chunk,
-                        offset_pairs,
-                        diag_array,
-                        diag_offset,
-                        scan_chunk_size,
-                        sc,
-                    )
-                } else {
-                    scan_chunk_plain(
-                        chunk,
-                        offset_pairs,
-                        diag_array,
-                        diag_offset,
-                        scan_chunk_size,
-                        sc,
-                    )
-                }
-            };
-
-            // The chunks of this frame, each scanned by `scan_chunk` and merged into the frame's
-            // list (`frame_chunks::search_frame_chunks`).
-            frame_chunks::search_frame_chunks(
-                &frame_chunks::ChunkDrive {
-                    use_serial_scan_chunks,
-                    use_parallel_chunks,
-                    num_threads,
-                    max_dbseq_len,
-                    #[cfg(all(
-                        feature = "parallel",
-                        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-                    ))]
-                    window,
-                    #[cfg(all(
-                        feature = "parallel",
-                        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-                    ))]
-                    diag_array_size,
-                    #[cfg(all(
-                        feature = "parallel",
-                        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-                    ))]
-                    offset_pairs_len,
-                },
-                &mut split_state,
-                offset_pairs,
-                diag_array,
-                &mut diag_offset,
-                frame_chunks::ChunkSums {
-                    frame_ungapped_hits: &mut frame_ungapped_hits,
-                    stats_hsp_saved: &mut stats_hsp_saved,
-                    stats_hsp_filtered_by_cutoff: &mut stats_hsp_filtered_by_cutoff,
-                    stats_score_distribution: &mut stats_score_distribution,
-                    one_hit: (window == 0).then_some(OneHitChunkMerge {
-                        failure: &x_read_failure,
-                        s_idx,
-                    }),
-                },
-                &scan_chunk,
-                sc,
-            );
-
-            // The frame's list joins the subject's (`frame_chunks::append_frame_hits`).
-            frame_chunks::append_frame_hits(&mut combined_ungapped_hits, frame_ungapped_hits);
-        } // End of subject frame loop
+            },
+            offset_pairs,
+            diag_array,
+            &mut diag_offset,
+            frame_chunks::SubjectSums {
+                stats_hsp_saved: &mut stats_hsp_saved,
+                stats_hsp_filtered_by_cutoff: &mut stats_hsp_filtered_by_cutoff,
+                stats_score_distribution: &mut stats_score_distribution,
+                combined_ungapped_hits: &mut combined_ungapped_hits,
+            },
+            sc,
+        );
         x_lap.lap(XStage::FrameLoop);
 
         // Dispatch point 5 of the seed release, the batch pipe's seed-stage end and the helped

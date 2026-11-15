@@ -125,7 +125,7 @@ impl XmlRefusal {
 /// XML stream cannot write (`XmlRefusal`), a reported database sequence with parsed Seq-ids
 /// (`ParsedRefusal`), or a taxonomy database name or record (`TaxonomyRefusal`). After any other
 /// error the run writes what it holds, the bytes of the batches before it, as the run without a
-/// hold does (the command line's `HeldOutput`; a library call's `archive::ArchiveHold`).
+/// hold does (the command line's `HeldOutput`; a library call's `HeldFormats`).
 pub(super) fn drops_held_document(error: &anyhow::Error) -> bool {
     error.is::<XmlRefusal>()
         || error.is::<crate::algorithm::common::database::ParsedRefusal>()
@@ -530,7 +530,7 @@ impl Drop for HeldState {
 /// refusal found while the batches are reported drops them, so that the run leaves no side file
 /// (design OF5 4.4); any other error ends the run with the side files of the earlier reports
 /// written (`SideState::drop`), as NCBI leaves them. The hold of the command line's document
-/// (`HeldOutput`) and of a library call's formats (`archive::ArchiveHold`) lead it.
+/// (`HeldOutput`) and of a library call's formats (`HeldFormats`) lead it.
 #[derive(Clone)]
 pub(super) struct HeldSideFiles(Arc<Mutex<SideState>>);
 
@@ -680,6 +680,212 @@ impl SideFiles for HeldSideFiles {
     }
 }
 
+/// No NCBI counterpart: the output streams of a library call in which a later batch may still be
+/// refused by a BLAST XML, XML2 or JSON document (`local::report_batches`), held in the order in
+/// which they are written: each write and each flush keeps its stream's index (`writer`,
+/// `HeldWrite`), so that `release` makes them in that order, as the run would have made them
+/// without the hold (the reports of every format, as a stream that they all go to reads them from
+/// NCBI; a buffered stream's bytes reach their device before the text written after them on
+/// another stream), and `discard` drops them. Outside `hold` the writes pass through. The side
+/// files of an outfmt 13 or 14 document of the run follow it (`side_files`): held, written before
+/// the streams and dropped as they are.
+pub(super) struct HeldFormats<S: Write>(std::sync::Arc<std::sync::Mutex<FormatsState<S>>>);
+
+struct FormatsState<S> {
+    holding: bool,
+    discarded: bool,
+    sinks: Vec<S>,
+    held: Vec<HeldWrite>,
+    /// The side files of the run's outfmt 13 and 14 documents.
+    sides: Vec<HeldSideFiles>,
+}
+
+/// What one stream of a `HeldFormats` was given while held, between the writes of the others:
+/// `bytes`, then a flush where `flushed` (the writes of one stream with no flush between them
+/// are one `HeldWrite`).
+struct HeldWrite {
+    sink: usize,
+    bytes: Vec<u8>,
+    flushed: bool,
+}
+
+/// A stream of a `HeldFormats`.
+pub(crate) struct HeldFormatWriter<S: Write> {
+    hold: HeldFormats<S>,
+    sink: usize,
+}
+
+impl<S: Write> Clone for HeldFormats<S> {
+    fn clone(&self) -> Self {
+        HeldFormats(self.0.clone())
+    }
+}
+
+impl<S: Write> HeldFormats<S> {
+    pub(crate) fn new() -> Self {
+        HeldFormats(std::sync::Arc::new(std::sync::Mutex::new(FormatsState {
+            holding: false,
+            discarded: false,
+            sinks: Vec::new(),
+            held: Vec::new(),
+            sides: Vec::new(),
+        })))
+    }
+
+    fn state(&self) -> std::sync::MutexGuard<'_, FormatsState<S>> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// A stream that writes to `sink`.
+    pub(crate) fn writer(&self, sink: S) -> HeldFormatWriter<S> {
+        let mut state = self.state();
+        state.sinks.push(sink);
+        HeldFormatWriter {
+            hold: self.clone(),
+            sink: state.sinks.len() - 1,
+        }
+    }
+
+    /// The side files `files` of an outfmt 13 or 14 document of the run, which follow this hold
+    /// (`blast_xml::HeldSideFiles`): the command line holds its document's side files the same way
+    /// (`blast_xml::HeldOutput`).
+    pub(crate) fn side_files(
+        &self,
+        files: crate::report::blast_xml2::RunSideFiles,
+    ) -> crate::report::blast_xml2::RunSideFiles {
+        let side = HeldSideFiles::new(files);
+        let mut state = self.state();
+        if state.discarded {
+            side.discard();
+        } else if state.holding {
+            side.hold();
+        }
+        state.sides.push(side.clone());
+        Box::new(side)
+    }
+
+    /// Keeps everything written from now on.
+    pub(crate) fn hold(&self) {
+        let mut state = self.state();
+        state.holding = true;
+        for side in &state.sides {
+            side.hold();
+        }
+    }
+
+    /// Writes what is held and passes the writes on again: the side files first (in order), then
+    /// the streams' writes and flushes in their order, as the run without the hold made them. A
+    /// side file that cannot be opened stops the run there, as NCBI's does (`Cannot open output
+    /// file`, exit status 1): the side files before it stay, and the streams and the side files of
+    /// the later documents get nothing of what was held. A write or flush of a stream that fails
+    /// stops the release there with its error (as the run would have stopped at it), and nothing
+    /// held after it is written then or later.
+    pub(crate) fn release(&self) -> Result<()> {
+        let mut state = self.state();
+        state.holding = false;
+        let held = std::mem::take(&mut state.held);
+        if state.discarded {
+            return Ok(());
+        }
+        for (index, side) in state.sides.iter().enumerate() {
+            if let Err(error) = side.release() {
+                // Nothing more of what was held is written: neither the streams, nor the side
+                // files of the documents after this one.
+                for later in &state.sides[index + 1..] {
+                    later.discard();
+                }
+                state.discarded = true;
+                return Err(error);
+            }
+        }
+        for HeldWrite {
+            sink,
+            bytes,
+            flushed,
+        } in held
+        {
+            let sink = &mut state.sinks[sink];
+            let written =
+                sink.write_all(&bytes)
+                    .and_then(|()| if flushed { sink.flush() } else { Ok(()) });
+            if let Err(error) = written {
+                state.discarded = true;
+                return Err(super::native::output_error(error));
+            }
+        }
+        Ok(())
+    }
+
+    /// Drops what is held and everything written after.
+    pub(crate) fn discard(&self) {
+        let mut state = self.state();
+        state.discarded = true;
+        state.held.clear();
+        for side in &state.sides {
+            side.discard();
+        }
+    }
+
+    /// The end of a run that stopped with `error` and held its output for its BLAST XML, XML2 or
+    /// JSON documents: dropped after one of the refusals that such a hold is for
+    /// (`blast_xml::drops_held_document`), written after any other error (the bytes of the batches
+    /// before it, as the run without a hold writes them, a write that fails then being the run's
+    /// error in place of `error`: the run without the hold stopped there, before it), as the
+    /// command line's document (`blast_xml::HeldOutput`).
+    pub(crate) fn end_document_with(&self, error: &anyhow::Error) -> Result<()> {
+        if drops_held_document(error) {
+            self.discard();
+            Ok(())
+        } else {
+            self.release()
+        }
+    }
+}
+
+impl<S: Write> Write for HeldFormatWriter<S> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let mut state = self.hold.state();
+        if state.discarded {
+            return Ok(bytes.len());
+        }
+        if state.holding {
+            match state.held.last_mut() {
+                Some(held) if held.sink == self.sink && !held.flushed => {
+                    held.bytes.extend_from_slice(bytes)
+                }
+                _ => state.held.push(HeldWrite {
+                    sink: self.sink,
+                    bytes: bytes.to_vec(),
+                    flushed: false,
+                }),
+            }
+            return Ok(bytes.len());
+        }
+        state.sinks[self.sink].write(bytes)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        let mut state = self.hold.state();
+        if state.discarded {
+            return Ok(());
+        }
+        if state.holding {
+            match state.held.last_mut() {
+                Some(held) if held.sink == self.sink => held.flushed = true,
+                _ => state.held.push(HeldWrite {
+                    sink: self.sink,
+                    bytes: Vec::new(),
+                    flushed: true,
+                }),
+            }
+            return Ok(());
+        }
+        state.sinks[self.sink].flush()
+    }
+}
+
 /// The `QueryText` of a query, refused as the writer refuses it. `search_skipped`: NCBI did not
 /// search the query's batch (its message then carries the query's id, made of its title).
 fn query_text(
@@ -726,7 +932,7 @@ pub(super) struct QueryScan {
 /// the search stops at it): nothing is checked. Under `-parse_deflines` (`query_scopes`, without a
 /// batch yet) the read adds each batch to the scopes of the queries (`QueryScopes::add_batch_ids`),
 /// so that LOSAT's refusal of two queries of one scope with one id comes before the first byte; the
-/// search then reads them from `QueryScan::query_scopes`.
+/// search then reads them from `QueryScan::query_scopes`. `checks_titles`: as `scan_queries`.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn prescan_queries(
     file: std::fs::File,
@@ -736,6 +942,7 @@ pub(super) fn prescan_queries(
     batch_size: usize,
     range: Option<&crate::blastinput::seq_range::SequenceRange>,
     holds_back: bool,
+    checks_titles: bool,
     mut query_scopes: Option<crate::blastinput::query_batch::QueryScopes>,
 ) -> Result<QueryScan> {
     if batch_size == 0 {
@@ -744,7 +951,7 @@ pub(super) fn prescan_queries(
     let mut stream = settings.stream_before_search(file);
     let mut delivered = 0usize;
     let mut refusal = None;
-    let mut scan = scan_queries(options, holds_back, &mut |deliver| {
+    let mut scan = scan_queries(options, holds_back, checks_titles, &mut |deliver| {
         super::input::read_fasta_stream_batches(
             &mut stream,
             false,
@@ -789,10 +996,12 @@ pub(super) fn prescan_queries(
 /// (`archive::written_batch`, which `options` decide). A document that holds each report back
 /// until the next query's arrives (`holds_back`: a `-subject` XML2 or JSON document) never writes
 /// the last query of the batches before such a stop: that query is checked only when the next
-/// batch is written or `read` ends without an error.
+/// batch is written or `read` ends without an error. Without `checks_titles` (a run whose XML
+/// format fails for its matrix name before any report, `xml_matrix_failure`) no title is checked.
 pub(super) fn scan_queries(
     options: &ResolvedOptions,
     holds_back: bool,
+    checks_titles: bool,
     read: &mut dyn FnMut(&mut dyn FnMut(&[FastaRecord]) -> Result<()>) -> Result<()>,
 ) -> Result<QueryScan> {
     let mut scan = QueryScan::default();
@@ -803,6 +1012,12 @@ pub(super) fn scan_queries(
     let scanned = read(&mut |batch| {
         if !super::archive::written_batch(batch, options) {
             anyhow::bail!("NCBI stops the run at this batch");
+        }
+        // A run whose XML format fails for its matrix name writes no report, and no title
+        // (`xml_matrix_failure`): its batches are read for their scopes alone.
+        if !checks_titles {
+            written += batch.len();
+            return Ok(());
         }
         // The next batch is written: so is the report held before it.
         if let Some((check, may_be_refused)) = held.take() {
@@ -912,15 +1127,42 @@ pub(super) fn xml2_writer(
     Xml2Writer::with_document(Xml2Document::with_files(kind, delayed, files), params)
 }
 
-/// Writes the documents of every query of `batches` (one query batch) through `document` (BLAST
-/// XML, or the XML2 / JSON documents) to `writer`: the document's header before the first query
-/// of the run, each query's Iteration or report, and nothing else; the end of the document is
-/// `write_epilog`'s. Everything NCBI cannot write is refused before this call's first byte, for
-/// the reports that the document writes: the query titles and messages, the titles of the
-/// subjects with hits (and, with a hold, the whole run's bytes stay in memory, `HeldOutput`). A
-/// run that stops after this batch (`stops`) never writes the `-subject` report of its last
-/// query, which NCBI holds back (`written_queries`). NCBI's messages about the taxonomy database
-/// go to `diagnostics` at the first `Hit` that needs them.
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:121 (quoted at
+// `blast_xml2::reports_held`)
+/// Where BLASTX's run of the formats `formats` (the command line's one, or the library's) stops
+/// for a matrix name that NCBI's BLAST XML report data does not know
+/// (`blast_xml::matrix::xml_formatting_failure`; the first of the formats to fail stops the run),
+/// with the fact of the search: subject records (`subject_set`: `-subject`, `m_IsBl2Seq`); BLASTX
+/// does not iterate. Decided once for the run and given to the batch whose report fails
+/// (`write_blastx_xml`), to the end of a run of one query (`report::write_epilog`) and to the
+/// reads of the titles before the search, which then check no title (`native::run_inner`,
+/// `local::scan_xml_titles`).
+pub(super) fn xml_matrix_failure(
+    formats: &[ResolvedOptions],
+    subject_set: bool,
+) -> Option<crate::report::blast_xml::matrix::XmlMatrixFailure> {
+    let outfmts: Vec<String> = formats
+        .iter()
+        .map(|options| options.outfmt.to_string())
+        .collect();
+    crate::report::blast_xml::matrix::xml_formatting_failure(
+        outfmts.iter().map(String::as_str),
+        &formats.first()?.matrix,
+        subject_set,
+        false,
+    )
+}
+
+/// Writes the documents of every query of `batches` (one query batch, after the
+/// `queries_before` queries of the batches before it) through `document` (BLAST XML, or the XML2
+/// / JSON documents) to `writer`: the document's header before the first query of the run, each
+/// query's Iteration or report, and nothing else; the end of the document is `write_epilog`'s.
+/// Everything NCBI cannot write is refused before this call's first byte, for the reports that
+/// the document writes: the query titles and messages, the titles of the subjects with hits
+/// (and, with a hold, the whole run's bytes stay in memory, `HeldOutput`). A run that stops after
+/// this batch (`stops`) never writes the `-subject` report of its last query, which NCBI holds
+/// back (`written_queries`). NCBI's messages about the taxonomy database go to `diagnostics` at
+/// the first `Hit` that needs them.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn write_blastx_xml<W: StructuredXml>(
     writer: &mut impl Write,
@@ -931,7 +1173,9 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     subjects: &[FastaRecord],
     shown: &ShownSubjects<'_>,
     batches: &[BatchResults],
+    queries_before: usize,
     stops: bool,
+    xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
 ) -> Result<()> {
     let gapped_karlin = gapped_karlin(options);
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218
@@ -943,11 +1187,22 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     //             NCBI_THROW(blast::CBlastException, eInvalidArgument,
     //                         "unsupported score matrix");
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2389 (quoted at
+    // `blast_xml::matrix::XmlMatrixFailure`)
     // The formatting table is found by the name as typed (`strcmp`): a lower-case name stops the
-    // report data of the first query (`BLAST engine error:`, exit 3), before any byte of it.
-    // (`native::report_error` writes it as NCBI's engine error.)
+    // report data of the run's first query, or of its second where the report is held
+    // (`XmlMatrixFailure::SecondQueryOrEnd`: NCBI's next query of another Seq-id, the second as
+    // LOSAT refuses two queries of one id before any output; `xml_matrix`, the run's
+    // `xml_matrix_failure`), in the batch of that query (`BLAST engine
+    // error:`, exit 3), before any byte of the reports; a batch before it writes nothing (its
+    // reader messages and request posts are the batch loop's).
     let Some(positives) = FormattingMatrix::new(&options.matrix) else {
-        anyhow::bail!("unsupported score matrix");
+        let failure =
+            xml_matrix.context("LOSAT internal error: no run decision for an XML matrix")?;
+        if failure.fails_in(queries_before..queries_before + queries.len()) {
+            return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
+        }
+        return Ok(());
     };
     let (db_name, db_num, db_len) = match shown {
         ShownSubjects::Fasta { .. } => (String::new(), 0, 0),
@@ -1350,7 +1605,7 @@ mod scan_tests {
     /// error) or at the end of the queries.
     fn scan(batches: &[Vec<FastaRecord>], stops: bool, holds_back: bool) -> Result<QueryScan> {
         let options = super::super::stage_c_tests::options();
-        scan_queries(&options, holds_back, &mut |deliver| {
+        scan_queries(&options, holds_back, true, &mut |deliver| {
             for batch in batches {
                 deliver(batch)?;
             }
@@ -1392,6 +1647,16 @@ mod scan_tests {
         assert!(refused(scan(&[vec![bad(), plain()]], true, true)));
         // A run that stops at its first batch writes nothing.
         let found = scan(&[], true, true).unwrap();
+        assert_eq!(found.stops_after, None);
+        assert!(!found.messages_may_be_refused);
+        // A run whose XML format fails for its matrix name writes no report and no title
+        // (`xml_matrix_failure`, probe K4f of line RG): its batches are read, no title is checked.
+        let options = super::super::stage_c_tests::options();
+        let found = scan_queries(&options, false, false, &mut |deliver| {
+            deliver(&[bad(), plain()])?;
+            deliver(&[bad()])
+        })
+        .unwrap();
         assert_eq!(found.stops_after, None);
         assert!(!found.messages_may_be_refused);
     }
@@ -1657,5 +1922,269 @@ mod held_side_files_tests {
         );
         drop((held, side));
         std::fs::remove_dir_all(dir).ok();
+    }
+}
+
+#[cfg(test)]
+mod held_formats_tests {
+    //! `HeldFormats`: what a run that held its output writes when it ends (`end_document_with`:
+    //! the XML, XML2 and JSON documents), and the side files of outfmt 13 and 14 that follow it
+    //! (`side_files`).
+    use super::*;
+    use crate::cli::NativeError;
+    use crate::report::blast_xml2::SideFiles;
+    use crate::seqdb::SeqDbError;
+    use std::sync::{Arc, Mutex};
+
+    /// A stream that the test reads after the hold wrote to it.
+    #[derive(Clone, Default)]
+    struct Shared(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Shared {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Shared {
+        fn text(&self) -> String {
+            String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
+        }
+    }
+
+    /// Side files that record each file as `<n>:<bytes>;`.
+    struct Recorded(Shared);
+
+    impl SideFiles for Recorded {
+        fn create(&mut self, _n: u32) -> std::io::Result<Box<dyn Write + '_>> {
+            Err(std::io::Error::other("a run writes through write_file"))
+        }
+
+        fn listed(&self, n: u32) -> Vec<u8> {
+            format!("f{n}").into_bytes()
+        }
+
+        fn write_file(&mut self, n: u32, report: &[u8]) -> Result<()> {
+            write!(self.0, "{n}:{};", String::from_utf8_lossy(report))?;
+            Ok(())
+        }
+    }
+
+    /// A run that holds two streams and its side files, wrote `a1 b1 a2` and two side files, and
+    /// has not ended.
+    fn held_run() -> (HeldFormats<Shared>, [Shared; 3]) {
+        let (a, b, files) = (Shared::default(), Shared::default(), Shared::default());
+        let hold = HeldFormats::new();
+        let (mut first, mut second) = (hold.writer(a.clone()), hold.writer(b.clone()));
+        hold.hold();
+        let mut side = hold.side_files(Box::new(Recorded(files.clone())));
+        first.write_all(b"a1 ").unwrap();
+        side.write_file(1, b"one").unwrap();
+        second.write_all(b"b1 ").unwrap();
+        first.write_all(b"a2 ").unwrap();
+        side.write_file(2, b"two").unwrap();
+        assert_eq!(side.listed(2), b"f2");
+        for stream in [&a, &b, &files] {
+            assert_eq!(stream.text(), "", "nothing passes a hold");
+        }
+        (hold, [a, b, files])
+    }
+
+    fn written(streams: &[Shared; 3]) -> [String; 3] {
+        [streams[0].text(), streams[1].text(), streams[2].text()]
+    }
+
+    const ALL: [&str; 3] = ["a1 a2 ", "b1 ", "1:one;2:two;"];
+    const NOTHING: [&str; 3] = ["", "", ""];
+
+    fn ncbis_error() -> anyhow::Error {
+        NativeError {
+            exit: 3,
+            message: "BLAST engine error: Warning: Sequence contains no data\n".into(),
+        }
+        .into()
+    }
+
+    /// A refusal of the taxonomy database as the XML2 and JSON documents meet it (`XmlRefusal`,
+    /// made of the reader's `TaxonomyRefusal`, which outfmt 5's prefetch returns as it is).
+    fn document_refusal() -> anyhow::Error {
+        super::super::blast_xml::XmlRefusal::of_taxonomy(
+            crate::algorithm::common::database::taxdb_error_for_tests(SeqDbError::Unsupported {
+                path: "taxdb.btd".into(),
+                message: "the taxonomy record of taxid 9606 reaches past the mapped end".into(),
+            }),
+        )
+    }
+
+    #[test]
+    fn a_release_writes_the_side_files_and_every_stream_in_order() {
+        let (hold, streams) = held_run();
+        hold.release().unwrap();
+        assert_eq!(written(&streams), ALL);
+    }
+
+    /// NCBI's error of a side file that it cannot open (`CArgException`, exit status 1): no
+    /// error archive follows it (`error_lines`), and NCBI wrote the bytes before it all the same.
+    fn side_file_error() -> anyhow::Error {
+        crate::report::blast_xml2::framing::side_file_open_error()
+    }
+
+    #[test]
+    fn the_documents_hold_drops_after_their_refusal_and_writes_after_any_other_error() {
+        let (hold, streams) = held_run();
+        hold.end_document_with(&document_refusal()).unwrap();
+        assert_eq!(written(&streams), NOTHING);
+        // The taxonomy database's refusal of the prefetch (outfmt 5) is one of them.
+        let (hold, streams) = held_run();
+        let prefetch =
+            crate::algorithm::common::database::taxdb_error_for_tests(SeqDbError::Unsupported {
+                path: "taxdb.btd".into(),
+                message: "the taxonomy record of taxid 9606 reaches past the mapped end".into(),
+            });
+        hold.end_document_with(&prefetch).unwrap();
+        assert_eq!(written(&streams), NOTHING);
+        for other in [
+            ncbis_error(),
+            side_file_error(),
+            anyhow::anyhow!("taxdb.btd: Input/output error; this database is not supported"),
+        ] {
+            let (hold, streams) = held_run();
+            hold.end_document_with(&other).unwrap();
+            assert_eq!(written(&streams), ALL, "{other}");
+        }
+    }
+
+    /// Side files whose every file cannot be opened.
+    struct Blocked;
+
+    impl SideFiles for Blocked {
+        fn create(&mut self, _n: u32) -> std::io::Result<Box<dyn Write + '_>> {
+            Err(std::io::Error::other("blocked"))
+        }
+
+        fn listed(&self, _n: u32) -> Vec<u8> {
+            Vec::new()
+        }
+    }
+
+    /// The side files of one document cannot be opened at the release (they could when their
+    /// reports were made): NCBI's error ends the run, and neither the streams nor the side files
+    /// of the document after it get what was held, then or when the run's writers are dropped.
+    #[test]
+    fn a_side_file_error_at_the_release_writes_nothing_after_it() {
+        let (a, files) = (Shared::default(), Shared::default());
+        let hold = HeldFormats::new();
+        let mut stream = hold.writer(a.clone());
+        hold.hold();
+        let mut first = hold.side_files(Box::new(Recorded(files.clone())));
+        let mut blocked = hold.side_files(Box::new(Blocked));
+        let mut last = hold.side_files(Box::new(Recorded(files.clone())));
+        stream.write_all(b"a1 ").unwrap();
+        first.write_file(1, b"one").unwrap();
+        blocked.write_file(1, b"x").unwrap();
+        last.write_file(1, b"late").unwrap();
+        let error = hold.release().unwrap_err();
+        let native = error.downcast_ref::<NativeError>().expect("NCBI's error");
+        assert_eq!(
+            native.message,
+            "Command line argument error: Cannot open output file\n"
+        );
+        drop((first, blocked, last, stream, hold));
+        assert_eq!([a.text(), files.text()], ["", "1:one;"].map(String::from));
+    }
+
+    /// A stream that fails every write (a full device).
+    struct Full;
+
+    impl Write for Full {
+        fn write(&mut self, _bytes: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("no space left"))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// Two formats' streams, one behind a buffer (`std::io::BufWriter`) and one unbuffered, both
+    /// read from one pipe (`log`), given `report 1` and a flush, the text `text 1`, `report 2`
+    /// without a flush and `text 2`, through a hold that holds (`held`) or not: the pipe after the
+    /// last text and at the end.
+    fn through_one_pipe(held: bool) -> [String; 2] {
+        let log = Shared::default();
+        let hold: HeldFormats<Box<dyn Write + Send>> = HeldFormats::new();
+        let mut buffered = hold.writer(Box::new(std::io::BufWriter::new(log.clone())));
+        let mut unbuffered = hold.writer(Box::new(log.clone()));
+        if held {
+            hold.hold();
+        }
+        buffered.write_all(b"report 1 ").unwrap();
+        buffered.flush().unwrap();
+        unbuffered.write_all(b"text 1 ").unwrap();
+        buffered.write_all(b"report 2 ").unwrap();
+        unbuffered.write_all(b"text 2 ").unwrap();
+        if held {
+            hold.release().unwrap();
+        }
+        let after_texts = log.text();
+        drop((buffered, unbuffered, hold));
+        [after_texts, log.text()]
+    }
+
+    /// The release makes the writes and flushes of the run in their order (line RG T2 review 5
+    /// D1): a buffered stream's bytes flushed before a text on another stream reach the pipe
+    /// before it, those not flushed stay in its buffer, as without the hold.
+    #[test]
+    fn a_release_writes_and_flushes_as_the_run_without_the_hold() {
+        let unheld = through_one_pipe(false);
+        assert_eq!(
+            unheld,
+            [
+                "report 1 text 1 text 2 ",
+                "report 1 text 1 text 2 report 2 "
+            ]
+        );
+        assert_eq!(through_one_pipe(true), unheld);
+    }
+
+    /// A write of the release that fails stops it there: nothing held after it is written, then
+    /// or later, and the run ends with it in place of its own error (`end_document_with`: "BLAST
+    /// failed to write output", exit status 6).
+    #[test]
+    fn a_failing_write_of_the_release_ends_the_run() {
+        let log = Shared::default();
+        let hold: HeldFormats<Box<dyn Write + Send>> = HeldFormats::new();
+        let mut full = hold.writer(Box::new(Full));
+        let mut other = hold.writer(Box::new(log.clone()));
+        hold.hold();
+        other.write_all(b"text 0 ").unwrap();
+        full.write_all(b"report 1 ").unwrap();
+        full.flush().unwrap();
+        other.write_all(b"text 1 ").unwrap();
+        let error = hold.end_document_with(&ncbis_error()).unwrap_err();
+        let native = error.downcast_ref::<NativeError>().expect("NCBI's error");
+        assert_eq!(
+            (native.exit, native.message.as_str()),
+            (6, "BLAST failed to write output\n")
+        );
+        other.write_all(b"text 2 ").unwrap();
+        assert_eq!(log.text(), "text 0 ");
+    }
+
+    #[test]
+    fn after_a_discard_nothing_more_is_written() {
+        let (hold, streams) = held_run();
+        let mut late = hold.writer(streams[0].clone());
+        let mut side = hold.side_files(Box::new(Recorded(streams[2].clone())));
+        hold.discard();
+        late.write_all(b"late").unwrap();
+        side.write_file(3, b"three").unwrap();
+        hold.release().unwrap();
+        assert_eq!(written(&streams), NOTHING);
     }
 }

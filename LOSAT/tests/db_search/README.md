@@ -515,16 +515,41 @@ without a title) and `ids/psubjb_a`, `ids/psubjb_t` (`psubjb.faa`, lcl|Subject_2
 9606, one database). NCBI generates the title of the copy it fetches, from its taxids where the taxonomy database names them,
 only in outfmt 0 and for the tabular word that replaces a `lcl|Subject_` id: LOSAT writes the other formats
 (`pdupe_at` and `ndupe_at` with `tests/seqdb/taxdb/good`, `psubj_at`, whose word is `unnamed` either way) and refuses
-those two where the word is printed (`psubjb_at`, whose word is taken after NCBI rewrites the end of the title), also
-for `nsubj_t` alone with the taxonomy database (NCBI's word is `Homo`, the organism's; not with `6 salltitles`, which
-prints no id).
+those two where the word is printed (`psubjb_at`, whose word is taken after NCBI rewrites the end of the title). Of
+`nsubj_t` alone with the taxonomy database LOSAT writes NCBI's word `Homo`, the organism's (line RG item T5; refused
+before).
 
 An empty title without parsed Seq-ids (line DBID H3; rows `db.id.bare.*`): `make_ids.py --emptytitle-only` writes
 `ids/nbare_t` and `ids/pbare_t` (`nbare.fna` and `pbare.faa`, the letters of `ndup.fna` and `pdup.faa` under `>` alone,
 without `-parse_seqids`, taxid 9606). The Bioseq that NCBI's formatters fetch has a source for the taxid, so outfmt 0
 makes the title from it where the taxonomy database names the taxid (`tests/seqdb/taxdb/good`: `unnamed protein
-product [Homo sapiens]`, `Homo sapiens`): LOSAT refuses that outfmt 0 and writes it without a taxonomy database or with
-`no_btd`, and the other formats (XML shows the stored title, the tabular id of a protein is `unnamed` either way).
+product [Homo sapiens]`, `Homo sapiens`), as LOSAT makes it (line RG item T5; refused before), and without a
+taxonomy database or with `no_btd` the title of a Bioseq without a name; the other formats show the stored title (XML)
+or the first word of the made one (the tabular id of a protein is `unnamed` either way).
+
+Titles made from the taxonomy database's names (line RG item T5; rows `db.t5.*`): `t5/make_t5.py` (run from `LOSAT/`
+with the directory of NCBI's makeblastdb) writes the taxonomy database `../seqdb/taxdb/t5` (`t5.tsv`: `uncultured
+bacterium`, `Bacillus sp.`, `  Spaced   name  `, `A &amp; B &lt;x&gt; &#65;`, `TPA: tpa organism`, `MAG uncultured
+thing`, a name with the byte 0x81, which NCBI cannot decode, and an empty scientific name) and in `t5/` one version 4
+database of one sequence without a title per taxid (`n_<taxid>`, `p_<taxid>`, the letters of `ids/ndup.fna` and
+`ids/pdup.faa`; 77777 is not in the taxonomy database), without `-parse_seqids`, and `np_<taxid>`, `pp_<taxid>` with
+it (`gb|AB0000nn.1|`), with the alias files `nall`, `pall` (every taxid), `nclean`, `pclean` (no name NCBI cannot
+decode), `ntab` (the named taxids: an empty nucleotide title has no subject id) and `npall`, `ppall`. NCBI makes each
+title from the name (`CDeflineGenerator`: a nucleotide's name without white space at its ends and its first letter
+upper-cased, a protein's `unnamed protein product [name]`; the heading drops a `TPA:` or `MAG` prefix, the description
+keeps it). The same databases serve `blastdbcmd -long_seqids` (`../blastdbcmd_discovery.rs`, cases `T501`-`T507`) and
+`dustmasker` and `segmasker` (`-conffile conf/t5.ini`, rows `db_t5_*`). `t5/make_t5.py NCBI_BIN --mix-only` writes
+the version 5 databases `t5/nmix` and `t5/pmix` (rows `db.t5.mix.*`, blastdbcmd cases `T508`-`T514`): with
+`-parse_seqids` and a `-taxid_map` of `t5.tsv`'s taxids, one sequence per record, records of two definition lines
+(taxids 100001 and 100002; the first without a taxid; the first untitled and the second titled; the other way round)
+and one line of each Seq-id kind whose title NCBI makes from the source (`tpg`, `emb`, `gi` for `-show_gis`, `pdb`
+without and with a chain, `lcl|Subject_1`, `gnl`; in `pmix` also `sp`, `ref|NP_`, `ref|WP_`), and the version 4
+database `t5/psuffix` (blastdbcmd only) of one record whose first line, without a taxid, has a title ending in
+`, partial [Bacillus sp.]` (the search programs refuse its outfmt 0 heading, `ParsedSubject::title_suffix_adjusted`).
+The title is made from the Bioseq's first source, the first
+positive taxid in `x_GetTaxDefline`'s order of the lines that the taxid list keeps (`-taxids 100002` and
+`-negative_taxids 100001` with `-no_taxid_expansion`, which NCBI applies to a version 5 database only), with
+`blastdbcmd -target_only` the target's line first and the others after it.
 
 A title of punctuation without parsed Seq-ids (line DBID tabfields; rows `db.id.tf.*.punct.*`): `make_ids.py
 --tabfields-only` writes `ids/ppunct_np` (version 4, without `-parse_seqids`) from `ids/ppunct.faa`, whose first title
@@ -900,7 +925,9 @@ Rows `db.sl.*`: `-seqidlist` and `-negative_seqidlist` with `-db`, five programs
   `sl_tfn.txt` (four local ids across tfn's two volumes), `sl_prot.txt` and `sl_nucl.txt` (every Seq-id form of
   `ids/prot_v5` and `ids/nucl_v5`: tpg, RefSeq and Swiss-Prot without versions, a pdb chain, local ids, a general id as
   `db:tag`, a versionless accession of an OID of several definition lines, a gi that NCBI drops), `sl_gi.txt` (gi ids only:
-  NCBI's `Empty seqid list` warning and no restriction on a version 5 database, no OID on a version 4 one),
+  NCBI's `Empty seqid list` warning on a version 5 database; as a positive list no restriction where one volume is reached
+  through a path of alias files without a range that cuts it, else no OID: rows `db.gisl.*`; as a negative one no
+  restriction; on a version 4 database no OID as a positive list),
   `sl_comment.txt` (no id: no list), `sl_none.txt` (ids no database has: NCBI searches an empty database, LOSAT refuses),
   `sl_empty.txt` (0 bytes: NCBI's `Failed to map seqidlist file ` error);
 - binary lists in the format of `blastdb_aliastool -seqid_file_out` (NUL, file size, count, title, date, database length
@@ -921,6 +948,20 @@ NCBI 2.17.0) has no accession table: a seqid list on it is NCBI's `BLAST Databas
 
 A list file that is not on the search path (NCBI: `Error: NCBI C++ Exception: ... To be memory mapped the file must
 exist: ''`, exit 255, with the path of NCBI's build tree) is checked by `src/cli_v2_tests.rs`, not by a row.
+
+Rows `db.gisl.*` (line DBID, item gisl): `-seqidlist seqidlist/sl_gi.txt` (a positive list) on version 5 databases of one
+and of two volumes, and on the alias files of `aliaskeys/` over one volume. NCBI's `x_ApplyUserGiList` clears every OID of
+the list that lost every id, and the search finds an empty database (each query's `Filtering resulted in an empty
+database.`), unless its OID bit set is the special all-set one, which a copy of one volume's special set makes (the `-db`
+names reach one volume, and at least one path of alias files to it crosses no range that cuts it): the clearing writes into
+a stale array, and the whole database is searched. So `taxfilter/tfp`, `taxfilter/tfn.00` (one volume of `tfn`),
+`aliaskeys/p_r123` (the range of the whole volume), `p_twice`, `p_dupvol`, `p_chain` (an alias of `p_dupvol`), `p_above`
+(the whole range above `p_dupvol`), `p_cover` and `p_coverr` (`p_r123` and `p_range` in both orders), `p_arrcov` (`p_union`,
+a bit array, then `p_r123`) are searched whole; `taxfilter/tfn` (two volumes), the two databases `taxfilter/tfp
+ids/prot_v5`, `aliaskeys/p_range`, `p_union`, `p_halves` (`p_lo` and `p_hi`, ranges 1-11 and 12-23 whose union is the
+volume), `p_abovecut` (a range that cuts the volume above `p_dupvol`) and `n_vol1` are searched empty. The negative list on
+`taxfilter/tfn` excludes nothing. `sl_gifull.txt` (`gi|1111|ref|NP_1.1|`) adds NCBI's two warnings `Ignoring extra parts
+(synonyms?) in FASTA-style ID`.
 
 ## Ungapped nucleotide databases (line NP, O4a-1)
 
@@ -1312,7 +1353,8 @@ in an empty database.` and a search that goes on, `p_nseq4g`: NCBI's `int` of 42
 `FIRST_OID` / `LAST_OID` ranges (`p_range`, `p_nest` and `p_rin`: nested ranges ANDed, `p_union`: two alias files over one
 volume ORed, `p_twice`: an alias file and the volume itself, `p_dupvol`: one volume twice in a `DBLIST`, `p_first0`, `p_last2`,
 `p_empty`, `p_beyond`, `p_r312` and `p_r312s` with `-taxids` and `-negative_taxids`, `p_range` with `-seqidlist`, `n_range`,
-`n_mv`: the global OIDs 9-13 of the two volumes, `n_vol1`: the second volume alone). The ncbi rows were frozen with NCBI
+`n_mv`: the global OIDs 9-13 of the two volumes, `n_vol1`: the second volume alone; `p_lo`, `p_hi`, `p_halves`, `p_cover`,
+`p_coverr`, `p_arrcov`, `p_chain`, `p_above` and `p_abovecut` for the rows `db.gisl.*`). The ncbi rows were frozen with NCBI
 BLAST+ 2.17.0 on the workstation (`env_blast`; two rows checked against the release build on the developer machine, the same
 bytes); the `db.ak.bp.err.*` rows (NCBI's `CStringException` texts, exit 255, which carry the path of NCBI's build tree:
 `p_bad_nseq`, `p_bad_first`, `p_bad_min`, `p_bad_stlen`, `p_bad_two` without and with `-taxids`) with the release build on the

@@ -1363,16 +1363,17 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "13", None, NcbiLater("Please provide a file name for outfmt 13.")),
         (ALL, "13", Some("-"), NcbiLater("Please provide a file name for outfmt 13.")),
         (ALL, "14", None, NcbiLater("Please provide a file name for outfmt 14.")),
-        // Line RG T3 (the query-anchored formats): BLASTP writes them (T3a), the others not yet.
-        (&["blastp"], "1", None, Writes(QueryAnchoredIdentities)),
-        (&["blastp"], "2", None, Writes(QueryAnchoredNoIdentities)),
-        (&["blastp"], "3", None, Writes(FlatQueryAnchoredIdentities)),
-        (&["blastp"], "4", None, Writes(FlatQueryAnchoredNoIdentities)),
-        (&["blastp"], "1 qseqid", None, Writes(QueryAnchoredIdentities)),
-        (&["blastn", "blastx", "tblastn", "tblastx"], "1", None, UNSUPPORTED),
-        (&["blastn", "blastx", "tblastn", "tblastx"], "2", None, UNSUPPORTED),
-        (&["blastn", "blastx", "tblastn", "tblastx"], "3", None, UNSUPPORTED),
-        (&["blastn", "blastx", "tblastn", "tblastx"], "4", None, UNSUPPORTED),
+        // Line RG T3 (the query-anchored formats): BLASTP (T3a), BLASTN and TBLASTN (T3b) write
+        // them, BLASTX and TBLASTX not yet.
+        (&["blastp", "blastn", "tblastn"], "1", None, Writes(QueryAnchoredIdentities)),
+        (&["blastp", "blastn", "tblastn"], "2", None, Writes(QueryAnchoredNoIdentities)),
+        (&["blastp", "blastn", "tblastn"], "3", None, Writes(FlatQueryAnchoredIdentities)),
+        (&["blastp", "blastn", "tblastn"], "4", None, Writes(FlatQueryAnchoredNoIdentities)),
+        (&["blastp", "blastn", "tblastn"], "1 qseqid", None, Writes(QueryAnchoredIdentities)),
+        (&["blastx", "tblastx"], "1", None, UNSUPPORTED),
+        (&["blastx", "tblastx"], "2", None, UNSUPPORTED),
+        (&["blastx", "tblastx"], "3", None, UNSUPPORTED),
+        (&["blastx", "tblastx"], "4", None, UNSUPPORTED),
         // Line RG T2: the organism report in every program.
         (SHARED, "18", None, Writes(TaxFormat)),
         (SHARED, "18 qseqid", None, Writes(TaxFormat)),

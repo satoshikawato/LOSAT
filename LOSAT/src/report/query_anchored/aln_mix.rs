@@ -12,12 +12,18 @@
 //! Not ported, because these flags never reach them: `fTruncateOverlaps` (the planes and the rest
 //! of `x_SecondRowFits`), `fAllowTranslocation`, `fGapJoin` (`x_ConsolidateGaps`), `fCalcScore`,
 //! `fSortSeqsByScore` and `fSortInputByScore` (the chain scores), `fRemoveLeadTrailGaps`, and the
-//! scope-less identification by Seq-id. Not ported in this part (line RG T3a: BLASTP): the minus
-//! strands (`m_PositiveStrand` false, `m_StrandsDiffer`, `fNegativeStrand`) and the widths of 3
-//! (`x_SetSeqFrame`, `fForceTranslation` and its strand check, alnmatch.cpp:191-205): the input
-//! type (`super::Segment`) has neither, so every row is a plus-strand row of width 1, which is
-//! what NCBI's merge makes of a BLASTP Seq-align (no strands, no widths). The branches that need
-//! another strand are named where they would be.
+//! scope-less identification by Seq-id.
+//!
+//! Strands and widths (line RG T3b: BLASTN, TBLASTN). The query, added with `fPreserveRows`, is
+//! always a plus-strand row (`!(m_MergeFlags & fNegativeStrand)`); a subject's row takes the
+//! strand of its first match, the other strand where the HSP's strands differ
+//! (`m_StrandsDiffer`: a minus-strand BLASTN HSP, whose Dense-seg has the query on the minus
+//! strand, or a TBLASTN HSP in a minus frame), so the merge's branches for rows of the other
+//! strand run. A section whose query is a protein and whose subjects are nucleotides (TBLASTN:
+//! `m_ContainsAA && m_ContainsNA`) has subject rows of width 3 in their frames (`x_SetSeqFrame`).
+//! Not ported in this part (line RG T3c: BLASTX, TBLASTX): `fNegativeStrand` (a minus-strand
+//! translated query), a translated query and `fForceTranslation` with its strand check
+//! (alnmatch.cpp:191-205): the input (`super::Hsps`) has no query strand and no query width.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -62,11 +68,16 @@ pub(crate) enum MixError {
 ///     TMatchList            m_MatchList;
 ///     ...
 /// ```
-/// `m_PositiveStrand` is always true and `m_Width` always 1 here (module doc); `m_Score`,
-/// `m_ChainScore` and `m_StrandScore` sort and check nothing under these flags.
+/// `m_Score`, `m_ChainScore` and `m_StrandScore` sort and check nothing under these flags.
 struct MixSeq {
     /// `m_BioseqHandle`: the sequence (`x_IdentifyAlnMixSeq`).
     key: SeqKey,
+    /// `m_PositiveStrand`.
+    positive_strand: bool,
+    /// `m_Width`: 3 for a nucleotide subject of a protein query, else 1.
+    width: u32,
+    /// `m_Frame`: the frame (`start % 3`) of a row of width 3 (`x_SetSeqFrame`), -1 until set.
+    frame: i32,
     /// `m_DsCnt`: the Dense-segs that hold the sequence.
     ds_cnt: u32,
     seq_idx: i32,
@@ -88,9 +99,12 @@ impl MixSeq {
     fn new(key: SeqKey) -> Self {
         // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:353-375 (`CAlnMixSeq()`:
         // `m_DsCnt(0)`, `m_ExtraRow(0)`, `m_DsIdx(0)`, `m_SeqIdx(-1)`, `m_ChildIdx(0)`,
-        // `m_RowIdx(-1)`, `m_PositiveStrand(true)`, `m_Width(1)`)
+        // `m_RowIdx(-1)`, `m_PositiveStrand(true)`, `m_Width(1)`, `m_Frame(-1)`)
         Self {
             key,
+            positive_strand: true,
+            width: 1,
+            frame: -1,
             ds_cnt: 0,
             seq_idx: -1,
             child_idx: 0,
@@ -116,6 +130,8 @@ struct MixMatch {
     len: u32,
     ds_idx: u32,
     score: i32,
+    /// `m_StrandsDiffer`: the HSP's rows are on different strands (a match of two rows).
+    strands_differ: bool,
 }
 
 /// `CAlnMixSegment`: `m_StartIts` keyed as `SSeqComp` orders it, by the row's
@@ -143,6 +159,9 @@ struct Mix {
     rows: Vec<SeqIx>,
     /// `m_Segments` (`Build`).
     segments: Vec<SegIx>,
+    /// The query is a protein and the subjects are nucleotides (`m_ContainsAA && m_ContainsNA`,
+    /// TBLASTN): the subjects' rows have a width of 3 (`super::Hsps::translated_subjects`).
+    translated_subjects: bool,
 }
 
 /// The first key of `map` (`begin()`), `None` (`end()`) when it is empty.
@@ -154,6 +173,11 @@ fn begin(map: &BTreeMap<u32, SegIx>) -> It {
 fn next(map: &BTreeMap<u32, SegIx>, it: It) -> It {
     let key = it?;
     map.range(key + 1..).next().map(|(&key, _)| key)
+}
+
+/// The last key of `map` (`--end()`), `None` when it is empty.
+fn last(map: &BTreeMap<u32, SegIx>) -> It {
+    map.keys().next_back().copied()
 }
 
 /// `--it` (`it` is not `begin()`): from `end()` the last key.
@@ -251,6 +275,10 @@ impl Mix {
     ///     }
     /// }
     /// ```
+    /// `strand1` and `strand2` are the rows' strands in the Dense-seg (`strands_exist` holds for
+    /// BLAST's Dense-segs and `CreateDensegFromStdseg`'s): `Hsp::strands_differ` (a match of one row
+    /// has `m_StrandsDiffer` false).
+    ///
     /// `SeqKey::Query` is only row 0 and `SeqKey::Subject` only row 1. A subject that is the
     /// query's own Bioseq (`query_bioseq`) is the query's `CAlnMixSeq` in NCBI, so its row 1 takes
     /// the `while (row_index != row)` branch: an `m_AnotherRow` that is a sequence of its own in
@@ -316,7 +344,16 @@ impl Mix {
     ///                             match->m_Start2 = start2;
     ///                             match->m_Len = len;
     ///                             match->m_DsIdx = int(m_DsCnt);
-    ///                             ...
+    ///                             match->m_StrandsDiffer = false;
+    ///                             if (strands_exist) {
+    ///                                 if ((strand1 == eNa_strand_minus  &&
+    ///                                      strand2 != eNa_strand_minus)  ||
+    ///                                     (strand1 != eNa_strand_minus  &&
+    ///                                      strand2 == eNa_strand_minus)) {
+    ///
+    ///                                     match->m_StrandsDiffer = true;
+    ///                                 }
+    ///                             }
     ///                             match->m_Score = score;
     ///                             ...
     ///                             m_Matches.push_back(match);
@@ -344,7 +381,8 @@ impl Mix {
     ///         seg_off += ds.GetDim();
     ///     }
     /// ```
-    fn add(&mut self, subject: u32, segments: &[super::Segment], query_bioseq: Option<u32>) {
+    fn add(&mut self, hsp: super::Hsp<'_>, query_bioseq: Option<u32>) {
+        let (subject, segments) = (hsp.subject, hsp.segments);
         self.ds_cnt += 1;
         let mut ds_seq = [0; 2];
         for (row, key) in [SeqKey::Query, SeqKey::Subject(subject)]
@@ -352,6 +390,19 @@ impl Mix {
             .enumerate()
         {
             let seq = self.identify(key);
+            // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:157-160
+            // ```c++
+            //         // Set the width
+            //         if (ds.IsSetWidths()) {
+            //             aln_seq->m_Width = ds.GetWidths()[row];
+            //         }
+            // ```
+            // (The widths of a TBLASTN Dense-seg, `CreateDensegFromStdseg` of its Std-segs, are 1
+            // for the protein query and 3 for the nucleotide subject; `x_Merge` sets the same,
+            // alnmerger.cpp:138-145, `m_IsAA ? 1 : 3`.)
+            if self.translated_subjects {
+                self.seqs[seq].width = if row == 0 { 1 } else { 3 };
+            }
             if self.seqs[seq].row_idx == -1 {
                 self.seqs[seq].row_idx = row as i32;
                 if row == 1 && query_bioseq == Some(subject) {
@@ -374,6 +425,7 @@ impl Mix {
                     len,
                     ds_idx: self.ds_cnt,
                     score: len as i32,
+                    strands_differ: hsp.strands_differ,
                 }),
                 (Some(start1), None) => self.matches.push(MixMatch {
                     seq1: ds_seq[0],
@@ -383,6 +435,7 @@ impl Mix {
                     len,
                     ds_idx: self.ds_cnt,
                     score: 0,
+                    strands_differ: false,
                 }),
                 (None, Some(start1)) => self.matches.push(MixMatch {
                     seq1: ds_seq[1],
@@ -392,6 +445,7 @@ impl Mix {
                     len,
                     ds_idx: self.ds_cnt,
                     score: 0,
+                    strands_differ: false,
                 }),
                 (None, None) => {}
             }
@@ -610,11 +664,34 @@ impl Mix {
     ///                 }
     ///             }
     /// ```
-    /// Every row is on the plus strand (module doc), so `seq->m_PositiveStrand ==
-    /// seq1->m_PositiveStrand` holds and its `else` branches (a row of the other strand) are not
-    /// ported; the width is 1. `hi_start_i` is only read as "done" (`end()` or not) here: its value
-    /// starts the second row's walk only when the strands differ. The `m_DsIdx` of a segment is
-    /// read only by the truncation (`fTruncateOverlaps`), which these flags leave out.
+    /// The `else` branches of the two splits (a row of the other strand than `seq1`, whose letters
+    /// run the other way: the first part of the segment is its end):
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:550-557 (the look back)
+    /// ```c++
+    ///                             } else {
+    ///                                 seq->SetStarts()
+    ///                                     [tmp_start_i->first + len2 * seq->m_Width]
+    ///                                     = prev_seg;
+    ///                                 seq->SetStarts()[tmp_start_i->first] = seg;
+    ///                                 seg->SetStartIterator(seq, tmp_start_i);
+    ///                                 if (tmp_start_i != seq->SetStarts().end()) {
+    ///                                     prev_seg->SetStartIterator(seq, ++tmp_start_i);
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:614-621 (the overlap loop)
+    /// ```c++
+    ///                             } else{
+    ///                                 seq->SetStarts()[tmp_start_i->first +
+    ///                                              len1 * seq->m_Width]
+    ///                                     = prev_seg;
+    ///                                 seq->SetStarts()[tmp_start_i->first] = seg;
+    ///                                 seg->SetStartIterator(seq, tmp_start_i);
+    ///                                 if (tmp_start_i != seq->SetStarts().end()) {
+    ///                                     prev_seg->SetStartIterator(seq, ++tmp_start_i);
+    /// ```
+    /// Returns `(lo_start_i, hi_start_i)`: the first and the last segment of the match on `seq1`,
+    /// where the second row's walk starts (`hi_start_i` when the strands differ). The `m_DsIdx` of
+    /// a segment is read only by the truncation (`fTruncateOverlaps`), which these flags leave out.
     ///
     /// The first match placed on `seq1` (the query's first, the longest segment of all, ties in
     /// the order of `Add`) sets the `m_DsIdx` of its second row `seq2` to its Dense-seg. For an
@@ -633,24 +710,28 @@ impl Mix {
         seq1: SeqIx,
         seq2: Option<SeqIx>,
         matched: &MixMatch,
-    ) -> Result<It, MixError> {
+    ) -> Result<(It, It), MixError> {
         let (start1, len) = (matched.start1, matched.len);
+        let width1 = self.seqs[seq1].width;
         let mut curr_len = len;
         let mut start_i: It = None;
         let mut lo_start_i: It;
-        let mut done = false;
+        let mut hi_start_i: It = None;
         if self.seqs[seq1].starts.is_empty() {
+            // `seq1->m_PositiveStrand = ! (m_MergeFlags & fNegativeStrand);` (alnmerger.cpp:
+            // 483-489, quoted above; `fNegativeStrand` is not set here, module doc).
+            self.seqs[seq1].positive_strand = true;
             let seg = self.new_segment(len);
             self.seqs[seq1].starts.insert(start1, seg);
             self.set_start_iterator(seg, seq1, start1);
             lo_start_i = Some(start1);
+            hi_start_i = Some(start1);
             // `if (m_MergeFlags & fQuerySeqMergeOnly) { seq2->m_DsIdx = match->m_DsIdx; }`
             // (alnmerger.cpp:499-501, quoted above).
             let seq2 = seq2.ok_or(MixError::Internal(
                 "the first match of a row has no second row",
             ))?;
             self.seqs[seq2].ds_idx = matched.ds_idx;
-            done = true;
         } else {
             let starts = &self.seqs[seq1].starts;
             start_i = lower_bound(starts, start1);
@@ -661,12 +742,12 @@ impl Mix {
             if start_i != lo_start_i {
                 let lo_key = lo_start_i.expect("a start before the match's");
                 let prev_seg = self.seqs[seq1].starts[&lo_key];
-                if lo_key + self.segs[prev_seg].len > start1 {
-                    let len1 = start1 - lo_key;
+                if lo_key + self.segs[prev_seg].len * width1 > start1 {
+                    let len1 = (start1 - lo_key) / width1;
                     let len2 = self.segs[prev_seg].len - len1;
                     let seg = self.new_segment(len2);
                     self.seqs[seq1].starts.insert(start1, seg);
-                    self.split_rows(prev_seg, seg, len1);
+                    self.split_rows(seq1, prev_seg, seg, len1, len2);
                     self.segs[prev_seg].len = len1;
                     if start_i != begin(&self.seqs[seq1].starts) {
                         start_i = prev(&self.seqs[seq1].starts, start_i);
@@ -678,21 +759,22 @@ impl Mix {
             }
         }
         let mut start = start1;
-        while !done {
+        while hi_start_i.is_none() {
             match start_i {
                 Some(key) if key == start => {
                     let prev_seg = self.seqs[seq1].starts[&key];
                     let prev_len = self.segs[prev_seg].len;
                     if prev_len > curr_len {
-                        let seg = self.new_segment(prev_len - curr_len);
-                        start += curr_len;
+                        let len1 = prev_len - curr_len;
+                        let seg = self.new_segment(len1);
+                        start += curr_len * width1;
                         self.segs[prev_seg].len = curr_len;
-                        self.split_rows(prev_seg, seg, curr_len);
-                        done = true;
+                        self.split_rows(seq1, prev_seg, seg, curr_len, len1);
+                        hi_start_i = start_i;
                     } else if curr_len == prev_len {
-                        done = true;
+                        hi_start_i = start_i;
                     } else {
-                        start += prev_len;
+                        start += prev_len * width1;
                         curr_len -= prev_len;
                         start_i = next(&self.seqs[seq1].starts, start_i);
                     }
@@ -707,15 +789,17 @@ impl Mix {
                     }
                     let tmp_key = tmp_start_i.expect("the new start");
                     let seg_len = match start_i {
-                        Some(key) if start + curr_len > key => key - start,
+                        Some(key) if start + curr_len * width1 > key => (key - start) / width1,
                         _ => {
-                            done = true;
+                            // `hi_start_i = start_i; if (hi_start_i != starts.begin())
+                            // hi_start_i--;`: the new start, which is before `start_i`.
+                            hi_start_i = Some(tmp_key);
                             curr_len
                         }
                     };
                     self.set_start_iterator(seg, seq1, tmp_key);
                     self.segs[seg].len = seg_len;
-                    start += seg_len;
+                    start += seg_len * width1;
                     curr_len -= seg_len;
                     let starts = &self.seqs[seq1].starts;
                     if lo_start_i == start_i && lo_start_i != begin(starts) {
@@ -724,18 +808,32 @@ impl Mix {
                 }
             }
         }
-        Ok(lo_start_i)
+        Ok((lo_start_i, hi_start_i))
     }
 
-    /// The rows of `prev_seg` cut after `len1` of its letters: the rest of each row starts a
-    /// segment `seg` (the `create rows info` loops of `place`, plus strand).
-    fn split_rows(&mut self, prev_seg: SegIx, seg: SegIx, len1: u32) {
+    /// The rows of `prev_seg` cut after `len1` of its letters (its first `len1` stay in
+    /// `prev_seg`, the `len2` after them go to `seg`): the `create rows info` loops of `place`. A
+    /// row of `seq1`'s strand starts `seg` after its first `len1` letters; a row of the other
+    /// strand, whose letters run the other way, starts `prev_seg` after its first `len2` and `seg`
+    /// at the old start.
+    fn split_rows(&mut self, seq1: SeqIx, prev_seg: SegIx, seg: SegIx, len1: u32, len2: u32) {
+        let plus1 = self.seqs[seq1].positive_strand;
         let rows: Vec<(SeqIx, u32)> = self.segs[prev_seg].start_its.values().copied().collect();
         for (seq, tmp_start) in rows {
-            let at = tmp_start + len1;
-            self.seqs[seq].starts.insert(at, seg);
-            let after = next(&self.seqs[seq].starts, Some(tmp_start)).expect("the new start");
-            self.set_start_iterator(seg, seq, after);
+            let width = self.seqs[seq].width;
+            if self.seqs[seq].positive_strand == plus1 {
+                let at = tmp_start + len1 * width;
+                self.seqs[seq].starts.insert(at, seg);
+                let after = next(&self.seqs[seq].starts, Some(tmp_start)).expect("the new start");
+                self.set_start_iterator(seg, seq, after);
+            } else {
+                let at = tmp_start + len2 * width;
+                self.seqs[seq].starts.insert(at, prev_seg);
+                self.seqs[seq].starts.insert(tmp_start, seg);
+                self.set_start_iterator(seg, seq, tmp_start);
+                let after = next(&self.seqs[seq].starts, Some(tmp_start)).expect("the new start");
+                self.set_start_iterator(prev_seg, seq, after);
+            }
         }
     }
 
@@ -1081,7 +1179,9 @@ impl Mix {
     ///                         start2_i++;
     ///                     }
     ///                     if (match->m_StrandsDiffer) {
-    ///                         ...
+    ///                         if (start_i != starts.begin()) {
+    ///                             start_i--;
+    ///                         }
     ///                     } else {
     ///                         if (start_i != starts.end()) {
     ///                             start_i++;
@@ -1090,11 +1190,19 @@ impl Mix {
     ///                 }
     ///             }
     /// ```
+    /// A width-3 refseq (a TBLASTN subject's row in a later pass, its insertions) first goes to the
+    /// row of its frame (alnmerger.cpp:335-349, `x_SetSeqFrame(match, match->m_AlnSeq1)`), from
+    /// which the proper row is looked for. Every row of a TBLASTN HSP has its frame (`start % 3`
+    /// of each of its segments is the same), so that row is at or before the HSP's own.
+    ///
     /// The row of an HSP holds its own aligned segments alone, which never share a subject
     /// position: the walk never meets a position of the row (`this position already exists`,
     /// which joins two segments; raised as an error if it did).
     fn merge_match(&mut self, matched: MixMatch, first_refseq: bool) -> Result<(), MixError> {
         let mut seq1 = matched.seq1;
+        if self.seqs[seq1].width == 3 {
+            seq1 = self.set_seq_frame(seq1, matched.start1, matched.ds_idx);
+        }
         if !first_refseq {
             loop {
                 if self.seqs[seq1].ds_idx == matched.ds_idx {
@@ -1108,18 +1216,24 @@ impl Mix {
         }
         let mut seq2 = matched.seq2;
         let mut fits = true;
-        if let Some(row) = seq2 {
+        if let Some(mut row) = seq2 {
             self.seqs[row].ref_by = Some(self.order[0]);
+            if self.seqs[row].width == 3 {
+                row = self.set_seq_frame(row, matched.start2, matched.ds_idx);
+            }
             fits = self.second_row_fits(row, matched.ds_idx);
+            seq2 = Some(row);
         }
-        let lo_start_i = self.place(seq1, seq2, &matched)?;
-        let Some(mut row) = seq2.take() else {
+        let (lo_start_i, hi_start_i) = self.place(seq1, seq2, &matched)?;
+        let Some(mut row) = seq2 else {
             return Ok(());
         };
         while !fits {
             match self.seqs[row].extra_row {
                 None => {
                     let mut extra = MixSeq::new(self.seqs[row].key);
+                    extra.width = self.seqs[row].width;
+                    extra.frame = (matched.start2 % 3) as i32;
                     extra.seq_idx = self.seqs[row].seq_idx;
                     extra.child_idx = self.seqs[row].child_idx + 1;
                     extra.ds_idx = matched.ds_idx;
@@ -1136,10 +1250,22 @@ impl Mix {
                 }
             }
         }
+        if self.seqs[row].starts.is_empty() {
+            self.seqs[row].positive_strand = if self.seqs[seq1].positive_strand {
+                !matched.strands_differ
+            } else {
+                matched.strands_differ
+            };
+        }
+        let width2 = self.seqs[row].width;
         let mut start = matched.start2;
         let mut start2_i = lower_bound(&self.seqs[row].starts, matched.start2);
-        let mut start_i = lo_start_i;
-        while start < matched.start2 + matched.len {
+        let mut start_i = if matched.strands_differ {
+            hi_start_i
+        } else {
+            lo_start_i
+        };
+        while start < matched.start2 + matched.len * width2 {
             let seg = self.seqs[seq1].starts[&start_i.expect("a segment of the first row")];
             if start2_i == Some(start) {
                 return Err(MixError::Internal(
@@ -1153,11 +1279,90 @@ impl Mix {
                 return Err(MixError::Internal("start iterator already exists for seq2"));
             }
             self.set_start_iterator(seg, row, start);
-            start += self.segs[seg].len;
+            start += self.segs[seg].len * width2;
             start2_i = next(&self.seqs[row].starts, start2_i);
-            start_i = next(&self.seqs[seq1].starts, start_i);
+            let starts = &self.seqs[seq1].starts;
+            if matched.strands_differ {
+                if start_i != begin(starts) {
+                    start_i = prev(starts, start_i);
+                }
+            } else {
+                start_i = next(starts, start_i);
+            }
         }
         Ok(())
+    }
+
+    /// `x_SetSeqFrame`: the row of `seq`'s chain (`m_ExtraRow`) in the frame `start % 3` of a
+    /// match at `start` of Dense-seg `ds_idx`: `seq` itself while it has no start (it takes that
+    /// frame), else the first row of the chain in that frame, else a new row at the chain's end.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:1269-1302
+    /// ```c++
+    /// void
+    /// CAlnMixMerger::x_SetSeqFrame(CAlnMixMatch* match, CAlnMixSeq*& seq)
+    /// {
+    ///     unsigned frame;
+    ///     if (seq == match->m_AlnSeq1) {
+    ///         frame = match->m_Start1 % 3;
+    ///     } else {
+    ///         frame = match->m_Start2 % 3;
+    ///     }
+    ///     if (seq->GetStarts().empty()) {
+    ///         seq->m_Frame = frame;
+    ///     } else {
+    ///         while ((unsigned)seq->m_Frame != frame) {
+    ///             if (!seq->m_ExtraRow) {
+    ///                 // create an extra frame
+    ///                 CRef<CAlnMixSeq> new_seq (new CAlnMixSeq);
+    ///                 new_seq->m_BioseqHandle = seq->m_BioseqHandle;
+    ///                 new_seq->m_SeqId = seq->m_SeqId;
+    ///                 new_seq->m_PositiveStrand = seq->m_PositiveStrand;
+    ///                 new_seq->m_Width = seq->m_Width;
+    ///                 new_seq->m_Frame = frame;
+    ///                 new_seq->m_SeqIdx = seq->m_SeqIdx;
+    ///                 new_seq->m_ChildIdx = seq->m_ChildIdx + 1;
+    ///                 if (m_MergeFlags & fQuerySeqMergeOnly) {
+    ///                     new_seq->m_DsIdx = match->m_DsIdx;
+    ///                 }
+    ///                 m_ExtraRows.push_back(new_seq);
+    ///                 new_seq->m_ExtraRowIdx = seq->m_ExtraRowIdx + 1;
+    ///                 seq = seq->m_ExtraRow = new_seq;
+    ///                 break;
+    ///             }
+    ///             seq = seq->m_ExtraRow;
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    /// (`match` is the merge's copy of the match, alnmerger.cpp:417-422: the row it moves to is
+    /// that copy's `m_AlnSeq2`.)
+    fn set_seq_frame(&mut self, mut seq: SeqIx, start: u32, ds_idx: u32) -> SeqIx {
+        let frame = (start % 3) as i32;
+        if self.seqs[seq].starts.is_empty() {
+            self.seqs[seq].frame = frame;
+            return seq;
+        }
+        while self.seqs[seq].frame != frame {
+            match self.seqs[seq].extra_row {
+                None => {
+                    let mut new_seq = MixSeq::new(self.seqs[seq].key);
+                    new_seq.positive_strand = self.seqs[seq].positive_strand;
+                    new_seq.width = self.seqs[seq].width;
+                    new_seq.frame = frame;
+                    new_seq.seq_idx = self.seqs[seq].seq_idx;
+                    new_seq.child_idx = self.seqs[seq].child_idx + 1;
+                    new_seq.ds_idx = ds_idx;
+                    self.seqs.push(new_seq);
+                    let new_seq = self.seqs.len() - 1;
+                    self.extra_rows.push(new_seq);
+                    self.seqs[seq].extra_row = Some(new_seq);
+                    return new_seq;
+                }
+                Some(extra) => seq = extra,
+            }
+        }
+        seq
     }
 
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:266-283
@@ -1338,16 +1543,40 @@ impl Mix {
     ///                 row->SetStarts().current = row->GetStarts().begin();
     ///             } else {
     /// ```
-    /// `InitExtraRowsStartIts` sets the same of every extra row (`m_ExtraRows`), also of one that
-    /// `BuildRows` left out with the sequence of its first row (`MixError::NcbiAborts`).
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:286-296
+    /// ```c++
+    ///             if (row->m_PositiveStrand) {
+    ///                 row->SetStarts().current = row->GetStarts().begin();
+    ///             } else {
+    ///                 row->SetStarts().current = row->GetStarts().end();
+    ///                 row->SetStarts().current--;
+    ///             }
+    ///         } else {
+    ///             row->SetStarts().current = row->GetStarts().end();
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnsegments.cpp:216-224
+    /// ```c++
+    ///                         if (row->m_PositiveStrand) {
+    ///                             row->SetStarts().current++;
+    ///                         } else {
+    ///                             if (row->SetStarts().current == row->GetStarts().begin()) {
+    ///                                 row->SetStarts().current = row->GetStarts().end();
+    ///                             } else {
+    ///                                 row->SetStarts().current--;
+    ///                             }
+    ///                         }
+    /// ```
+    /// A minus-strand row is read from its last start down. `InitExtraRowsStartIts` sets the same
+    /// of every extra row (`m_ExtraRows`), also of one that `BuildRows` left out with the sequence
+    /// of its first row (`MixError::NcbiAborts`).
     fn build(&mut self) -> Result<(), MixError> {
         for index in 0..self.rows.len() {
             let row = self.rows[index];
-            self.seqs[row].current = begin(&self.seqs[row].starts);
+            self.seqs[row].current = self.first_current(row);
         }
         for index in 0..self.extra_rows.len() {
             let row = self.extra_rows[index];
-            self.seqs[row].current = begin(&self.seqs[row].starts);
+            self.seqs[row].current = self.first_current(row);
         }
         let mut gapped: Vec<SegIx> = Vec::new();
         let mut refseq_it = 0;
@@ -1397,8 +1626,14 @@ impl Mix {
                         .map(|&(row, _)| row)
                         .collect();
                     for row in rows {
-                        let current = self.seqs[row].current;
-                        self.seqs[row].current = next(&self.seqs[row].starts, current);
+                        let (current, starts) = (self.seqs[row].current, &self.seqs[row].starts);
+                        self.seqs[row].current = if self.seqs[row].positive_strand {
+                            next(starts, current)
+                        } else if current == begin(starts) {
+                            None
+                        } else {
+                            prev(starts, current)
+                        };
                     }
                     stack.pop();
                     if !stack.is_empty() {
@@ -1421,6 +1656,17 @@ impl Mix {
             orig_refseq = false;
         }
         Ok(())
+    }
+
+    /// The first start of `row` that `Build` reads (`InitRowsStartIts`): its first, or the last
+    /// of a minus-strand row; `None` (`end()`) for a row without starts.
+    fn first_current(&self, row: SeqIx) -> It {
+        let starts = &self.seqs[row].starts;
+        if self.seqs[row].positive_strand {
+            begin(starts)
+        } else {
+            last(starts)
+        }
     }
 
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnsegments.cpp:438-523
@@ -1554,9 +1800,15 @@ impl Mix {
                     let rows: Vec<(SeqIx, u32)> =
                         self.segs[orig].start_its.values().copied().collect();
                     for (seq, orig_start) in rows {
+                        let (plus, width) = (self.seqs[seq].positive_strand, self.seqs[seq].width);
                         let mut len_so_far = 0;
                         for (_, &seg) in len_map.range(..=orig_len) {
-                            let this_start = orig_start + len_so_far;
+                            let offset = if plus {
+                                len_so_far
+                            } else {
+                                orig_len - len_so_far - self.segs[seg].len
+                            };
+                            let this_start = orig_start + offset * width;
                             self.seqs[seq].starts.insert(this_start, seg);
                             self.set_start_iterator(seg, seq, this_start);
                             len_so_far += self.segs[seg].len;
@@ -1606,7 +1858,8 @@ impl Mix {
     ///                         new_start = prev_start + prev_len * width;
     ///                         seg->m_Len = (start - new_start) / width;
     ///                     } else {
-    ///                         ...
+    ///                         new_start = start_plus_len;
+    ///                         seg->m_Len = (prev_start - new_start) / width;
     ///                     }
     ///                     row->SetStarts()[new_start] = seg;
     ///                     CAlnMixStarts::iterator start_i =
@@ -1626,7 +1879,9 @@ impl Mix {
     ///         seg_i++;
     ///     }
     /// ```
-    /// The fill of a row's stretch goes before the segment being read, whose own rows are then
+    /// The new segment's start iterator (`--start_i`, or `++start_i` on the minus strand) is its own
+    /// start: no start of the row lies between it and the segment being read. The fill of a row's
+    /// stretch goes before the segment being read, whose own rows are then
     /// still read from it (`seg_i` points to it again after the insertion).
     ///
     /// A row that `BuildRows` left out keeps the `m_RowIdx` of -1 of `CAlnMixSeq()`: the extra
@@ -1648,15 +1903,23 @@ impl Mix {
                     return Err(MixError::NcbiAborts);
                 };
                 let (prev_start, prev_len) = (starts[rowidx], lens[rowidx]);
-                if prev_start >= 0 {
-                    let new_start = prev_start as u32 + prev_len;
-                    if new_start < start {
-                        let seg = self.new_segment(start - new_start);
-                        self.seqs[row].starts.insert(new_start, seg);
-                        self.set_start_iterator(seg, row, new_start);
-                        self.segments.insert(seg_i, seg);
-                        seg_i += 1;
-                    }
+                let (plus, width) = (self.seqs[row].positive_strand, self.seqs[row].width);
+                let prev_start_plus_len = (prev_start as u32).wrapping_add(prev_len * width);
+                let start_plus_len = start + len * width;
+                if prev_start >= 0
+                    && (plus && prev_start_plus_len < start
+                        || !plus && start_plus_len < prev_start as u32)
+                {
+                    let (new_start, seg_len) = if plus {
+                        (prev_start_plus_len, (start - prev_start_plus_len) / width)
+                    } else {
+                        (start_plus_len, (prev_start as u32 - start_plus_len) / width)
+                    };
+                    let seg = self.new_segment(seg_len);
+                    self.seqs[row].starts.insert(new_start, seg);
+                    self.set_start_iterator(seg, row, new_start);
+                    self.segments.insert(seg_i, seg);
+                    seg_i += 1;
                 }
                 starts[rowidx] = i64::from(start);
                 lens[rowidx] = len;
@@ -1713,7 +1976,30 @@ impl Mix {
     ///             ids.erase(ids.begin()+row);
     ///             ...
     /// ```
-    /// The strands are all plus and the widths are not set (module doc). Every row of a segment
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:1215-1240
+    /// ```c++
+    ///         // strands
+    ///         numrow = 0;
+    ///         ITERATE(TSeqs, row_i, m_Rows) {
+    ///             if ((*row_i)->m_PositiveStrand) {
+    ///                 strands[offset + numrow] = eNa_strand_plus;
+    ///             }
+    ///             numrow++;
+    ///         }
+    ///         ...
+    ///     // widths
+    ///     CDense_seg::TWidths*  widths = NULL;
+    ///     if ((m_AlnMixMatches->m_ContainsNA  &&  m_AlnMixMatches->m_ContainsAA)  ||
+    ///         (m_AlnMixMatches->m_AddFlags & CAlnMixMatches::fForceTranslation)) {
+    ///         widths = &m_DS->SetWidths();
+    ///         widths->resize(numrows);
+    ///         numrow = 0;
+    ///         ITERATE (TSeqs, row_i, m_Rows) {
+    ///             (*widths)[numrow++] = (*row_i)->m_Width;
+    ///         }
+    ///     }
+    /// ```
+    /// A row's strand is the same in every segment (kept once per row). Every row of a segment
     /// has a row index here (`fill_unaligned_regions` stops at one without).
     fn create_denseg(&self) -> Result<Denseg, MixError> {
         let numrows = self.rows.len();
@@ -1734,6 +2020,17 @@ impl Mix {
             .iter()
             .map(|&row| self.seqs[self.rows[row]].key)
             .collect();
+        let plus: Vec<bool> = keep
+            .iter()
+            .map(|&row| self.seqs[self.rows[row]].positive_strand)
+            .collect();
+        let widths: Vec<u32> = if self.translated_subjects {
+            keep.iter()
+                .map(|&row| self.seqs[self.rows[row]].width)
+                .collect()
+        } else {
+            Vec::new()
+        };
         let starts = if keep.len() == numrows {
             starts
         } else {
@@ -1742,7 +2039,13 @@ impl Mix {
                 .map(|(seg, row)| starts[seg * numrows + row])
                 .collect()
         };
-        Ok(Denseg { ids, lens, starts })
+        Ok(Denseg {
+            ids,
+            lens,
+            starts,
+            plus,
+            widths,
+        })
     }
 }
 
@@ -1759,9 +2062,10 @@ pub(crate) fn merge(hsps: &Hsps) -> Result<Denseg, MixError> {
         extra_rows: Vec::new(),
         rows: Vec::new(),
         segments: Vec::new(),
+        translated_subjects: hsps.translated_subjects,
     };
-    for (subject, segments) in hsps.iter() {
-        mix.add(subject, segments, hsps.query_bioseq);
+    for hsp in hsps.iter() {
+        mix.add(hsp, hsps.query_bioseq);
     }
     // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:89-98
     // ```c++

@@ -1,0 +1,115 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: translated subjects of the query-anchored rows with Seq-ids
+           4 sequences; 1,661 total letters
+
+
+
+Query= tnq protein query
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+t_mins_llocal                                                         189     3e-67
+gi|525252|gb|AB000101.1|  t_pm with gi                                138     2e-46
+ref|NM_000102.1|t_fr                                                  133     5e-45
+t_code_lcode                                                          128     1e-43
+
+
+
+Query_1      1    AYTHGMRFCPKVKQQCTFYCMEQDNVTQVMVCSFKTEDFSTHGTIWKHCMWKCWDTSFPT  60
+t_mins_l     369                      ...........D..................G.........  250
+525252       1    ...........................E...RP...........F.............K.  180
+NM_000102.1  167                                               ..............Y  211
+NM_000102.1  1    .........F........M....M.........D.....................       165
+NM_000102.1  241                                    RRARYTVRLAV..R.VPALPH.V..   167
+t_code_l     1              ....I..........*.I..R........Y......R.I...R..R....  150
+
+Query_1      61   SKSHCVTCTSqqqqqqqqqqqqqqqqeqFSANDWFCRWRFCFKGWLINPDVPCPTKVRVD  120
+t_mins_l     249  K.........FKTLPGDHIHL.RIAV..............................G..Y  61
+                   \                                                          
+                   |                                                          
+                  PRH
+525252       541  ...R......SKTLPGDHHHL.RIAV.............G.............R......  362
+525252       181  ..........                                                    210
+NM_000102.1  212  ..........SKTLPGDHIHL.RIAV............D....................N  391
+t_code_l     151  ..R.......SKSLPGDHIHL.RIAV.....T.TR..*.R.T.*........R.*.....  330
+
+Query_1      121  TYLNCGCCEVWDKEITESDAQNYIHEANAE  150
+t_mins_l     60   ....................            1
+525252       361  .................V............  272
+NM_000102.1  392  ..........                      421
+
+
+Lambda      K        H        a         alpha
+   0.326    0.135    0.513    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 56625
+
+
+Query= tnq2 second
+
+Length=110
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+t_mins_llocal                                                         170     1e-60
+ref|NM_000102.1|t_fr                                                  150     2e-52
+gi|525252|gb|AB000101.1|  t_pm with gi                                120     3e-40
+t_code_lcode                                                          114     8e-39
+
+
+
+Query_2      1    VCSFKTEDFSTFGTIWKHCMWKCWDTSFDTSKSHCATCTSEKTLYGDHIILQRIAVSVFS  60
+t_mins_l     339  .D.........H........G.......P.K....V....F...P....H......EQ..  151
+                                                 \                            
+                                                 |                            
+                                               PRH
+NM_000102.1  167                 .............PY.....V....S...P....H......EQ..  301
+NM_000102.1  91   ...D.......H.............                                     165
+NM_000102.1  241      RRARYTVRLAV..R.V                                          194
+525252       541                                ...R.V....S...P...HH......EQ..  452
+525252       91   .RP........H..F.............K......V....S...P....             237
+t_code_l     64    ........Y.H....R.I...R..R..P...R..V....S.S.P....H......EQ..  240
+
+Query_2      61   ANDWRCRWRFCFKSWLINPYVPCPTKVRVDTYLNCGCCEVTGKVITESKA  110
+t_mins_l     150  ....F........G.....D......G..Y..........WD.E....D.  1
+NM_000102.1  302  ....F...D....G.....D.........N..........            421
+525252       451  ....F....G...G.....D...R................WD.E...VD.  302
+t_code_l     241  .T.T...*.R.T.*.....D..R.*.....                      330
+
+
+Lambda      K        H        a         alpha
+   0.327    0.135    0.505    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 40920
+
+
+  Database: translated subjects of the query-anchored rows with Seq-ids
+    Posted date:  Nov 15, 2026  2:47 AM
+  Number of letters in database: 1,661
+  Number of sequences in database:  4
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

@@ -1474,6 +1474,50 @@ The databases (version 4; `.pjs` deleted). Run from `LOSAT/`:
     makeblastdb -in tests/db_search/of1/dispref.fa -dbtype prot -out tests/db_search/of1/dispref \
         -title "a database sequence whose display id is not its local id" -parse_seqids -blastdb_version 4
     rm tests/db_search/of1/*.pjs
+
+BLASTN and TBLASTN inputs of the query-anchored rows (rows `db.of1.bn.*` and `db.of1.tn.*`, line RG T3b), in
+`of1/`, from the T3b probes (`T/t3/scripts_t3b/gen3b.py`, a seeded generator; `tnq1.pssm` from NCBI's
+`psiblast -query tnq.fa(first record) -db <six mutated copies> -num_iterations 2 -out_pssm`):
+
+- `bnq.fa`: two nucleotide queries, `bnq` (300 letters with a run of 25 T that DUST masks) and `bnq2`; `bns.fa`:
+  `s_pmo` (a plus-strand and a minus-strand HSP over the query's 61-160), `s_mins` and `s_mins2` (minus-strand
+  copies with insertions of 4 and 2 letters at one query column), `s_mdel` (a minus-strand deletion), `s_plus`
+  (a plus-strand insertion at the same column); `bnslc.fa`: a subject whose first 40 letters are lower case
+  (`-lcase_masking`: the mask shows on the columns of its first row, also in its minus-strand row);
+  `bnids.fa`: the subjects of `bns.fa` under `gi|...|gb|`, `ref|`, `lcl|` and `gnl|` ids.
+- `bself.fa` (copies of a 80-letter stretch: the second with a 5-letter insertion, the third ungapped and
+  mutated; `-query_loc 1-80 -subject_loc 81-325 -parse_deflines`, NCBI aborts) and `bselfrc.fa` (a record with an
+  inverted repeat and a lower-case run; with itself under `-parse_deflines` its rows of both strands).
+- `bnqid.fa` (`lcl|Query_1`) and `bnqgi.fa` (`gi|777|lcl|Query_1`): database sequences named as the first query
+  read without `-parse_deflines`, which BLASTN refuses in outfmt 1 to 4 after its prolog
+  (`tests/parse_deflines_subject.rs`).
+- `tnq.fa`: two protein queries (`tnq` with 16 Q that SEG masks); `tns.fa`: `t_pm` (a plus and a minus frame over
+  the query's 61-80), `t_fr` (two plus frames over 46-55), `t_ins`, `t_mins` (insertions on a plus and a minus
+  frame), `t_mdel`, `t_code` (codons that genetic code 2 translates otherwise: AGA, AGG, ATA, TGA);
+  `tnsids.fa`: four of them under parsed ids; `tnqid.fa` (`lcl|Query_1`) and `tnqgi.fa` (`gi|778|lcl|Query_1`):
+  the refusals `db.of1.tn.qid.reject` and `db.of1.tn.qgi.reject` (NCBI's merge reads the protein query as the
+  sequence's nucleotides; its description line shows the query's title).
+- `bnsr.nal`: an alias of the OIDs 2 to 4 of `bns` (rows labelled by OID).
+
+The databases (version 4; `.njs` deleted). Run from `LOSAT/`:
+
+    makeblastdb -in tests/db_search/of1/bns.fa -dbtype nucl -out tests/db_search/of1/bns \
+        -title "nucleotide subjects of the query-anchored rows" -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/bnids.fa -dbtype nucl -out tests/db_search/of1/bnids \
+        -title "nucleotide subjects of the query-anchored rows with Seq-ids" -parse_seqids -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/bnqid.fa -dbtype nucl -out tests/db_search/of1/bnqid \
+        -title "a nucleotide database sequence under the id of a query" -parse_seqids -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/bnqgi.fa -dbtype nucl -out tests/db_search/of1/bnqgi \
+        -title "a nucleotide database sequence whose display id is a query id" -parse_seqids -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/tns.fa -dbtype nucl -out tests/db_search/of1/tns \
+        -title "translated subjects of the query-anchored rows" -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/tnsids.fa -dbtype nucl -out tests/db_search/of1/tnsids \
+        -title "translated subjects of the query-anchored rows with Seq-ids" -parse_seqids -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/tnqid.fa -dbtype nucl -out tests/db_search/of1/tnqid \
+        -title "a translated database sequence under the id of a query" -parse_seqids -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/tnqgi.fa -dbtype nucl -out tests/db_search/of1/tnqgi \
+        -title "a translated database sequence whose display id is a query id" -parse_seqids -blastdb_version 4
+    rm tests/db_search/of1/*.njs
 ## `dbmask/`: database masks of BLASTN searches (line NP, series M, M4a-2a)
 
 Rows `db.dbmask.*` (`-db_soft_mask`, `-db_hard_mask`). The inputs are the probe inputs of the M4a-2 survey

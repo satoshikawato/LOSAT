@@ -1699,7 +1699,7 @@ fn write_std_segs<E: Encoder>(
 ///     }
 /// ```
 /// (The subject's interval, :1363-1377, is the same with `subject_length`.)
-fn ungapped_interval(offset: i32, end: i32, frame: i8, length: i32) -> (i32, i32) {
+pub(crate) fn ungapped_interval(offset: i32, end: i32, frame: i8, length: i32) -> (i32, i32) {
     let frame = i32::from(frame);
     if frame == 0 {
         (offset, end - 1)
@@ -1713,6 +1713,88 @@ fn ungapped_interval(offset: i32, end: i32, frame: i8, length: i32) -> (i32, i32
             length - CODON_LENGTH * end + frame + 1,
             length - CODON_LENGTH * offset + frame,
         )
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:226-230
+// ```c++
+//             if (rng.Empty()) {
+//                 NCBI_THROW(CSeqalignException, eInvalidAlignment,
+//                            "CSeq_align::GetSeqRange(): Row is empty");
+//             }
+//             return rng;
+// ```
+/// Whether the Std-seg rows of an ungapped HSP from `offset` to `end` (exclusive, in its frame's
+/// letters) are empty: an HSP of length 0, whose rows `ungapped_interval` ends one before they
+/// start (`CRange(from, from - 1)` is empty, so `CSeq_align::GetSeqRange` throws on them).
+/// BLASTX's one-hit word finder with `-window_size 0` reports such HSPs
+/// (`algorithm::blastx::empty_rows`); every other reported HSP has rows of its letters. The one
+/// predicate of every writer (`HspRecord::rows_empty`, `PairwiseHit::rows_empty`,
+/// `empty_rows::rows_empty`).
+#[inline]
+pub(crate) fn ungapped_rows_empty(offset: i64, end: i64) -> bool {
+    end == offset
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:453-460
+// ```c++
+//         // Two different lengths were found. Try to guess sequence types.
+//         if (minlen != 0  &&  maxlen != 0) {
+//             if (minlen*3 != maxlen) {
+//                 NCBI_THROW(CAnnotMapperException, eBadAlignment,
+//                     "Inconsistent seq-loc lengths in std-seg rows");
+//             }
+//             // Found both nucs and prots - make the second pass and
+//             // store widths for all sequences.
+// ```
+/// Whether `-subject`'s Seq-loc mapper (`remaps`, `RunRecord::remaps_subjects`) rewrites the
+/// empty rows of a Seq-align whose Std-segs' rows are empty or not (`rows_empty`, one per Std-seg)
+/// into the query nucleotide of `write_empty_rows` (`mapped_empty_query_nucleotide`): it learns
+/// the sequence types from a Std-seg with rows of letters only (`x_Init`'s first pass, above;
+/// an empty row's length 0 is skipped). A Seq-align of empty rows only gets no type and keeps its
+/// rows where their stop does not wrap (`algorithm::blastx::empty_rows::SubjectLoc::of_list`;
+/// where it does, BLASTX refused the report before). The one rule of the pairwise report
+/// (`pairwise::mapper_rewrites`) and the Seq-aligns (`write_seq_align_diags`).
+pub(crate) fn mapper_rewrites_empty_rows(
+    remaps: bool,
+    mut rows_empty: impl Iterator<Item = bool>,
+) -> bool {
+    remaps && rows_empty.any(|empty| !empty)
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1538-1559
+// ```c++
+//                         if ( start_frame ) {
+//                             if (start >= start_frame) {
+//                                 // Add 1 or 2 bases to match complete codon.
+//                                 loc->SetInt().SetFuzz_from().SetAlt().push_back(start);
+//                                 start -= start_frame;
+//                             }
+//                             ...
+//                         if ( stop_frame ) {
+//                             loc->SetInt().SetFuzz_to().SetAlt().push_back(stop - 1);
+//                             stop += stop_frame;
+//                         }
+//                     }
+//                 }
+//
+//                 loc->SetInt().SetFrom(start);
+//                 // len may be 0 after dividing by width, check it before
+//                 // decrementing stop.
+//                 loc->SetInt().SetTo(stop > start ? stop - 1 : stop);
+// ```
+/// The query row of the Std-seg that `-subject`'s Seq-loc mapper makes of an HSP of length 0
+/// (`ungapped_rows_empty`) at a subject offset above 0, whose raw query row starts at `from`
+/// (`ungapped_interval`, in the searched letters): the one nucleotide `from` on a plus frame,
+/// `from - 1` on a minus frame (the mapper takes the frames from the empty protein row and pads
+/// the nucleotide row to codons, `x_GetDstStd`); the subject row stays empty. Probes: c0054 and
+/// P1's p0017, p0077, p0095, p0106 (`X/SURVEY_X2g_formats.md` 1). The one owner of that row
+/// (`write_empty_rows`, BLASTX's `qcovs`).
+pub(crate) fn mapped_empty_query_nucleotide(from: i32, frame: i8) -> i32 {
+    if frame > 0 {
+        from
+    } else {
+        from - 1
     }
 }
 
@@ -1784,6 +1866,7 @@ fn write_seq_align_diags<E: Encoder>(
     query: &QueryRecord<'_>,
     subject: &SubjectRecord<'_>,
     hsps: &[HspRecord<'_>],
+    remaps: bool,
     after_each: &mut impl FnMut(&mut E),
 ) {
     enc.element();
@@ -1794,6 +1877,7 @@ fn write_seq_align_diags<E: Encoder>(
     enc.member("segs", 3);
     enc.variant("Seq-align_segs", "std", 2);
     enc.begin_list(false);
+    let remaps = mapper_rewrites_empty_rows(remaps, hsps.iter().map(HspRecord::rows_empty));
     for hsp in hsps {
         let (q_from, q_to) =
             ungapped_interval(hsp.q_offset, hsp.q_end, hsp.q_frame, query.searched_length);
@@ -1804,22 +1888,33 @@ fn write_seq_align_diags<E: Encoder>(
             subject.searched_length,
         );
         begin_std_seg(enc, &query.id, &subject.id);
-        enc.element();
-        write_seq_interval(
-            enc,
-            &query.id,
-            q_from + query.offset,
-            q_to + query.offset,
-            Strand::of_frame(hsp.q_frame),
-        );
-        enc.element();
-        write_seq_interval(
-            enc,
-            &subject.id,
-            s_from + subject.offset,
-            s_to + subject.offset,
-            Strand::of_frame(hsp.s_frame),
-        );
+        if hsp.rows_empty() {
+            write_empty_rows(
+                enc,
+                query,
+                subject,
+                hsp,
+                remaps,
+                (q_from + query.offset, s_from + subject.offset),
+            );
+        } else {
+            enc.element();
+            write_seq_interval(
+                enc,
+                &query.id,
+                q_from + query.offset,
+                q_to + query.offset,
+                Strand::of_frame(hsp.q_frame),
+            );
+            enc.element();
+            write_seq_interval(
+                enc,
+                &subject.id,
+                s_from + subject.offset,
+                s_to + subject.offset,
+                Strand::of_frame(hsp.s_frame),
+            );
+        }
         end_std_seg_locs(enc);
         enc.member("scores", 3);
         enc.begin_list(true);
@@ -1835,6 +1930,141 @@ fn write_seq_align_diags<E: Encoder>(
     enc.end_member();
     write_use_this_seqid(enc, subject.use_this_seqid);
     enc.end_sequence();
+}
+
+/// The two Seq-intervals of the Std-seg of an ungapped HSP of length 0 (BLASTX's one-hit word
+/// finder with `-window_size 0`, `algorithm::blastx::empty_rows`), whose rows start at `from`
+/// (query, subject) and end one before (`to = from - 1`, in NCBI's unsigned `TSeqPos`: a row
+/// starting at 0 ends at 4294967295). With `-subject` (`remaps`, a Seq-align with rows of letters
+/// too) NCBI's Seq-loc mapper rewrites the query row to one nucleotide with a fuzz
+/// (`mapped_empty_query_nucleotide`); the mapper's form of a subject row starting at 0 is refused
+/// before (`algorithm::blastx::empty_rows`).
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1538-1559
+/// ```c++
+///                         if ( start_frame ) {
+///                             if (start >= start_frame) {
+///                                 // Add 1 or 2 bases to match complete codon.
+///                                 loc->SetInt().SetFuzz_from().SetAlt().push_back(start);
+///                                 start -= start_frame;
+///                             }
+///                             else {
+///                                 // Skip the first incomplete codon.
+///                                 start += 3 - start_frame;
+///                             }
+///                         }
+///                         if ( stop_frame ) {
+///                             loc->SetInt().SetFuzz_to().SetAlt().push_back(stop - 1);
+///                             stop += stop_frame;
+///                         }
+///                     }
+///                 }
+///
+///                 loc->SetInt().SetFrom(start);
+///                 // len may be 0 after dividing by width, check it before
+///                 // decrementing stop.
+///                 loc->SetInt().SetTo(stop > start ? stop - 1 : stop);
+/// ```
+/// Probes (`X/SURVEY_X2g_formats.md` 1): a plus frame gives the query row `(Q, Q)` with
+/// `fuzz-to alt {Q-2}`, a minus frame `(Q-1, Q-1)` with `fuzz-from alt {Q}`
+/// (`mapped_empty_query_nucleotide`); the subject row stays.
+#[cold]
+#[inline(never)]
+fn write_empty_rows<E: Encoder>(
+    enc: &mut E,
+    query: &QueryRecord<'_>,
+    subject: &SubjectRecord<'_>,
+    hsp: &HspRecord<'_>,
+    remaps: bool,
+    (q_from, s_from): (i32, i32),
+) {
+    let q_strand = Strand::of_frame(hsp.q_frame);
+    let q_from = q_from as u32;
+    enc.element();
+    if remaps {
+        let at = mapped_empty_query_nucleotide(q_from as i32, hsp.q_frame) as u32;
+        let fuzz = if hsp.q_frame > 0 {
+            (None, Some(q_from.wrapping_sub(2)))
+        } else {
+            (Some(q_from), None)
+        };
+        write_seq_interval_pos(enc, &query.id, (at, at), q_strand, fuzz);
+    } else {
+        write_seq_interval_pos(
+            enc,
+            &query.id,
+            (q_from, q_from.wrapping_sub(1)),
+            q_strand,
+            (None, None),
+        );
+    }
+    let s_from = s_from as u32;
+    enc.element();
+    write_seq_interval_pos(
+        enc,
+        &subject.id,
+        (s_from, s_from.wrapping_sub(1)),
+        Strand::of_frame(hsp.s_frame),
+        (None, None),
+    );
+}
+
+/// A Seq-interval whose `from` and `to` are NCBI's unsigned `TSeqPos`, with the `alt` fuzzes
+/// `fuzz` (`fuzz-from`, `fuzz-to`) of the Seq-loc mapper (`write_empty_rows`).
+///
+/// NCBI reference (598d8ae6): c++/src/objects/general/general.asn:106-120
+/// ```text
+/// Int-fuzz ::= CHOICE {
+///     p-m INTEGER ,                    -- plus or minus fixed amount
+///     ...
+///     alt SET OF INTEGER }             -- set of alternatives for the integer
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:93-99
+/// ```text
+/// Seq-interval ::= SEQUENCE {
+///     from INTEGER ,
+///     to INTEGER ,
+///     strand Na-strand OPTIONAL ,
+///     id Seq-id ,    -- WARNING: this used to be optional
+///     fuzz-from Int-fuzz OPTIONAL ,
+///     fuzz-to Int-fuzz OPTIONAL }
+/// ```
+fn write_seq_interval_pos<E: Encoder>(
+    enc: &mut E,
+    id: &SeqId<'_>,
+    (from, to): (u32, u32),
+    strand: Strand,
+    fuzz: (Option<u32>, Option<u32>),
+) {
+    enc.variant("Seq-loc", "int", 3);
+    enc.begin_sequence("Seq-interval");
+    enc.member("from", 0);
+    enc.big_int(i64::from(from));
+    enc.end_member();
+    enc.member("to", 1);
+    enc.big_int(i64::from(to));
+    enc.end_member();
+    enc.member("strand", 2);
+    enc.begin_named("Na-strand");
+    enc.enumerated(strand.name(), strand.value());
+    enc.end_named();
+    enc.end_member();
+    enc.member("id", 3);
+    id.write(enc);
+    enc.end_member();
+    for (name, tag, alt) in [("fuzz-from", 4, fuzz.0), ("fuzz-to", 5, fuzz.1)] {
+        let Some(alt) = alt else { continue };
+        enc.member(name, tag);
+        enc.variant("Int-fuzz", "alt", 4);
+        enc.begin_list(true);
+        enc.element();
+        enc.big_int(i64::from(alt));
+        enc.end_list();
+        enc.end_variant();
+        enc.end_member();
+    }
+    enc.end_sequence();
+    enc.end_variant();
 }
 
 /// The `ext` of a Seq-align under a positive list (`seqids`, `SubjectRecord::use_this_seqid`):
@@ -2079,6 +2309,7 @@ pub(crate) fn write_seq_aligns<E: Encoder>(
                 query,
                 &subjects[list[0].subject as usize],
                 list,
+                run.remaps_subjects(),
                 &mut after_each,
             );
             after_each(enc);

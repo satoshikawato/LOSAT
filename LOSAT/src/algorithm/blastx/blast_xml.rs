@@ -63,6 +63,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use anyhow::{ensure, Context, Result};
 
 use super::args::ResolvedOptions;
+use super::empty_rows::{row_is_empty, rows_empty, std_seg_lengths_not_accurate, SubjectLoc};
 use super::input::FastaRecord;
 use super::report::{
     display_query_residue, has_seqalign, query_endpoints, reported, ShownSubjects,
@@ -76,6 +77,7 @@ use crate::report::blast_xml::hsp::translation_frame;
 use crate::report::blast_xml::matrix::FormattingMatrix;
 use crate::report::blast_xml::names::{self, QueryText};
 use crate::report::blast_xml::subjects::SubjectNames;
+use crate::report::blast_xml::CaughtException;
 use crate::report::blast_xml::{
     filter, hit_ranges, written_queries, BlastXmlWriter, QueryMask, StructuredXml, XmlHit, XmlHsp,
     XmlQuery, XmlRun, XmlStats, REFERENCE_GAPPED_BLAST,
@@ -1264,6 +1266,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
             }
         }
     }
+    let loc = SubjectLoc::of(shown);
     let code = crate::utils::genetic_code::GeneticCode::from_id(options.query_gencode);
     let no_notes = TaxdbNotes::default();
     let mut taxdb_printer = match shown {
@@ -1279,10 +1282,24 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         for (qidx, lists) in batch.queries.iter().enumerate() {
             let query = &queries[batch.query_ordinal + qidx];
             let Some(text) = texts.next() else {
-                // The held report that is never written (`written_queries`).
-                document.unwritten(&mut buf)?;
+                // The held report that is never written (`written_queries`); the one held before
+                // it is written, or fails (`CaughtException`: its message follows).
+                let post = match document.unwritten(&mut buf) {
+                    Ok(()) => None,
+                    Err(error) => match error.downcast::<CaughtException>() {
+                        Ok(CaughtException(exception)) => {
+                            Some(caught_post(&document.caught_message(&exception)))
+                        }
+                        Err(error) => return Err(error),
+                    },
+                };
                 writer.write_all(&buf)?;
                 buf.clear();
+                if let Some(post) = post {
+                    writer.flush()?;
+                    diagnostics.write_all(post.as_bytes())?;
+                    diagnostics.flush()?;
+                }
                 break;
             };
             let length = query.sequence.len();
@@ -1353,6 +1370,30 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                                 .iter()
                                 .filter(|hsp| has_seqalign(hsp, options.gapped))
                             {
+                                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:173-175
+                                // ```c++
+                                //         const bool kTranslated = kAlign.GetSegs().IsStd();
+                                //         if (kTranslated) {
+                                //             CRef<CSeq_align> densegAln = kAlign.CreateDensegFromStdseg();
+                                // ```
+                                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:243
+                                // ```c++
+                                //         	q_start = kAlign.GetSeqStart(0) + 1;
+                                // ```
+                                // An HSP of length 0 (`empty_rows`): the Dense-seg of `-subject`'s
+                                // mapped Std-seg throws, else the empty query row's start (`-db`,
+                                // and the rows that `-subject`'s mapper leaves,
+                                // `SubjectLoc::of_list`). NCBI catches it in
+                                // `s_BlastXMLAddIteration` (`CaughtException`).
+                                if rows_empty(&hsp.hsp) {
+                                    return Err(CaughtException(
+                                        match loc.of_list(list, options.gapped) {
+                                            SubjectLoc::Interval => std_seg_lengths_not_accurate(),
+                                            SubjectLoc::Whole => row_is_empty(),
+                                        },
+                                    )
+                                    .into());
+                                }
                                 // The Seq-align's endpoints, lower first: the minus frame's
                                 // outfmt 6 order is not the XML's.
                                 let (query_from, query_to) =
@@ -1393,8 +1434,34 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 }
                 Ok(())
             });
-            // A failed query leaves its partial bytes in `buf`, which the error return drops.
-            written?;
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:745-760
+            // ```c++
+            // 	query_label = string("Q(")+NStr::NumericToString(index) +
+            // 	    string("/")+ NStr::NumericToString(data->GetNumQueries() );
+            // 	try{
+            //         s_BlastXMLAddIteration(bxmlout, data->GetAlignment(index), *seqloc,
+            //         ...
+            // 	}
+            // 	catch(CException &e){
+            // 	    ERR_POST(Error << "Failed s_BlastXMLAddIteration " << query_label << e.what() );
+            // 	    return;
+            // 	}
+            // ```
+            // A query whose HSP throws (`CaughtException`): BLAST XML leaves its `Iteration`
+            // open after the `Hit`s before (each written as it is made), the XML2 and JSON
+            // documents leave its report out (`Xml2Document::report`; for `-subject`, whose
+            // report is held, where the next query's arrives); the document's message follows
+            // and the next query is written. Another failed query leaves its partial bytes in
+            // `buf`, which the error return drops.
+            let caught = match written {
+                Ok(()) => None,
+                Err(error) => match error.downcast::<CaughtException>() {
+                    Ok(CaughtException(exception)) => {
+                        Some(caught_post(&document.caught_message(&exception)))
+                    }
+                    Err(error) => return Err(error),
+                },
+            };
             posts.write(
                 &buf,
                 &mut *writer,
@@ -1404,6 +1471,11 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                     None => Ok(()),
                 },
             )?;
+            if let Some(post) = caught {
+                writer.flush()?;
+                diagnostics.write_all(post.as_bytes())?;
+                diagnostics.flush()?;
+            }
             // A text whose read no `Hit` placed comes after the query's report.
             if let Some(reads) = reads.as_mut() {
                 reads.before_query(1, &mut *writer, &mut *diagnostics)?;
@@ -1419,16 +1491,41 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
 /// writer: it writes the report held back by a `-subject` run and the document's end.
 pub(super) fn write_xml_epilog(
     writer: &mut impl Write,
+    diagnostics: &mut dyn Write,
     queries: usize,
     xml2: Option<&mut RunXml2>,
 ) -> Result<()> {
     let mut buf = Vec::new();
-    match xml2 {
-        Some(xml2) => xml2.finish(&mut buf)?,
-        None => BlastXmlWriter::new(queries).finish(&mut buf)?,
+    let finished = match xml2 {
+        Some(xml2) => xml2.finish(&mut buf).map_err(|error| {
+            // The held report of a `-subject` run that fails (`CaughtException`): its message,
+            // then the end of the document.
+            match error.downcast::<CaughtException>() {
+                Ok(CaughtException(exception)) => Ok(caught_post(&xml2.caught_message(&exception))),
+                Err(error) => Err(error),
+            }
+        }),
+        None => BlastXmlWriter::new(queries).finish(&mut buf).map_err(Err),
+    };
+    let post = match finished {
+        Ok(()) => None,
+        Err(Ok(post)) => Some(post),
+        Err(Err(error)) => return Err(error),
+    };
+    if let Some(post) = post {
+        writer.flush()?;
+        diagnostics.write_all(post.as_bytes())?;
+        diagnostics.flush()?;
     }
     writer.write_all(&buf)?;
     Ok(())
+}
+
+/// NCBI's post (`ERR_POST(Error << message)`) of a structured report's caught exception
+/// (`CaughtException`, `StructuredXml::caught_message`), as BLASTX writes it: `Error: [blastx] `,
+/// the message (which ends with the `what()` text's end of line) and the post's end of line.
+fn caught_post(message: &str) -> String {
+    format!("Error: [blastx] {message}\n")
 }
 
 #[cfg(test)]
@@ -1505,6 +1602,7 @@ mod scan_tests {
             lowercase_masks: Vec::new(),
             warnings: Vec::new(),
             source: None,
+            around: None,
         }
     }
 

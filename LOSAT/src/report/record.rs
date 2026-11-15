@@ -121,6 +121,17 @@ pub struct QueryRecord<'a> {
     pub offset: i32,
 }
 
+impl HspRecord<'_> {
+    /// Whether the HSP's Std-seg rows are empty (an ungapped HSP of length 0,
+    /// `serial::seqalign::ungapped_rows_empty`).
+    pub fn rows_empty(&self) -> bool {
+        super::serial::seqalign::ungapped_rows_empty(
+            i64::from(self.q_offset),
+            i64::from(self.q_end),
+        )
+    }
+}
+
 /// A subject with HSPs, as the Seq-aligns name and measure it.
 #[derive(Clone, Copy, Debug)]
 pub struct SubjectRecord<'a> {

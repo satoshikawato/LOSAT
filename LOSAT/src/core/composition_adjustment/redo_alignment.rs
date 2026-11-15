@@ -2429,7 +2429,7 @@ fn x_take_lane_range(
 
 // No NCBI counterpart: number of Newton inputs gathered per TBLASTN prefetch (at least); it does not
 // change any value NCBI computes.
-const X_LANES_PREFETCH_INPUTS: usize = 32;
+const X_LANES_PREFETCH_INPUTS: usize = 128;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1176-1198
 // ```c

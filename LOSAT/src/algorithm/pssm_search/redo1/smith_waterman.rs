@@ -50,7 +50,7 @@ use crate::core::composition_adjustment::adjust_scores::read_aa_composition;
 use crate::core::composition_adjustment::compo_scale::{pssm_composition_based_stats, SwRedo};
 use crate::core::composition_adjustment::redo_alignment::EMatrixAdjustRule;
 use crate::core::composition_adjustment::smith_waterman::{
-    smith_waterman_find_start, smith_waterman_score_only, ForbiddenRanges, SwScratch,
+    row_column, smith_waterman_find_start, smith_waterman_score_only, ForbiddenRanges, SwScratch,
 };
 
 /// What the Smith-Waterman redo keeps from one match to the next: the forbidden ranges (NCBI's
@@ -458,9 +458,7 @@ impl RedoMatch<'_> {
             {
                 // `ALIGN_EX`'s cell (1, 1): `pssm[0]` (`query_offset = queryStart - 1`) against
                 // `B[1]`, the subject's first letter (`sw.subject[1]`; the sentinel when it has none).
-                let first_cell = rows
-                    .first()
-                    .map_or(0, |row| row[usize::from(sw.subject[1])]);
+                let first_cell = rows.first().map_or(0, |row| row[row_column(sw.subject[1])]);
                 return if first_cell > 0 {
                     Err(SwEndless)
                 } else {

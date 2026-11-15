@@ -73,18 +73,31 @@ pub(crate) struct SwScratch {
     /// For each subject position, whether a forbidden range of the row being scanned holds it
     /// (`blocked_row`); false between rows.
     blocked: Vec<bool>,
-    /// The subject's letters, each at most `BLASTAA_SIZE - 1` (`padded_row`).
+    /// The subject's letters as the scans read them (`row_column`, `padded_row`).
     letters: Vec<u8>,
+}
+
+/// The column of a score row that subject letter `letter` reads, in the scans (`SwScratch::scan`)
+/// and in the redo's test of the first cell (`redo1::smith_waterman`): the letter. The letters
+/// are NCBIstdaa, below `BLASTAA_SIZE` (the query's encoding, masked letters as X), which a debug
+/// build checks, so that an encoding change fails the tests; a release build keeps the read
+/// inside the row (at its last column) where NCBI would read past its row.
+#[inline(always)]
+pub(crate) fn row_column(letter: u8) -> usize {
+    debug_assert!(
+        usize::from(letter) < BLASTAA_SIZE,
+        "subject letter {letter} is not NCBIstdaa"
+    );
+    usize::from(letter).min(BLASTAA_SIZE - 1)
 }
 
 /// The slots of a row as the scans read it (`padded_row`): a power of two above `BLASTAA_SIZE`.
 const ROW_SLOTS: usize = 32;
 
 /// A score row as the scans read it: the row's `BLASTAA_SIZE` scores, then zeros. The scans read
-/// it at `letter & (ROW_SLOTS - 1)` for letters that `SwScratch::scan` brought to at most
-/// `BLASTAA_SIZE - 1` (NCBIstdaa letters are below 28, and a letter above reads the last score,
-/// as before), so the mask changes no letter and lets the compiler drop the bound check; the row
-/// is a local array, which frees the register of its address in the cell loop.
+/// it at `letter & (ROW_SLOTS - 1)` for letters that `SwScratch::scan` took through `row_column`
+/// (below `BLASTAA_SIZE`), so the mask changes no letter and lets the compiler drop the bound
+/// check; the row is a local array, which frees the register of its address in the cell loop.
 #[inline(always)]
 fn padded_row(row: &[i32; BLASTAA_SIZE]) -> [i32; ROW_SLOTS] {
     let mut padded = [0; ROW_SLOTS];
@@ -123,11 +136,9 @@ impl SwScratch {
         self.blocked.clear();
         self.blocked.resize(length, false);
         self.letters.clear();
-        self.letters.extend(
-            subject
-                .iter()
-                .map(|&letter| letter.min(BLASTAA_SIZE as u8 - 1)),
-        );
+        // `row_column` is below `BLASTAA_SIZE`, so the cast keeps it.
+        self.letters
+            .extend(subject.iter().map(|&letter| row_column(letter) as u8));
         (&self.letters, &mut self.score_vector, &mut self.blocked)
     }
 }

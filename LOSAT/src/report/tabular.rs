@@ -1677,13 +1677,28 @@ fn push_coverage(out: &mut Vec<u8>, value: i32) {
 ///                     btop_string += m_SubjectSeq[i];
 /// ```
 /// The rows' end gaps are spaces (`push_alignment_row`), so an end-gap column is the pair of a
-/// letter and a space.
+/// letter and a space. Rows without end gaps (every alignment but some Smith-Waterman redos')
+/// take the columns as they are; `end_gap_span` stops at each row's first letter from each end.
 pub fn write_btop(out: &mut Vec<u8>, qrow: &[u8], srow: &[u8]) {
     let (q_span, s_span) = (end_gap_span(qrow, |_| false), end_gap_span(srow, |_| false));
+    let columns = qrow.iter().copied().zip(srow.iter().copied());
+    if q_span == (0, qrow.len()) && s_span == (0, srow.len()) {
+        write_btop_columns(out, columns);
+    } else {
+        write_btop_columns(
+            out,
+            columns
+                .enumerate()
+                .map(|(column, (q, s))| (end_char(q, column, q_span), end_char(s, column, s_span))),
+        );
+    }
+}
+
+/// `write_btop` of the column pairs `columns` (query letter, subject letter).
+#[inline(always)]
+fn write_btop_columns(out: &mut Vec<u8>, columns: impl Iterator<Item = (u8, u8)>) {
     let mut matches = 0usize;
-    for (column, (&q, &s)) in qrow.iter().zip(srow).enumerate() {
-        let q = end_char(q, column, q_span);
-        let s = end_char(s, column, s_span);
+    for (q, s) in columns {
         if q == s {
             matches += 1;
         } else {

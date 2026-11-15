@@ -834,7 +834,8 @@ here, and names the widening that PS16a made for protein queries.
   next scan sees, so every round is the same, and the loop leaves only when an allocation fails
   (after memory runs out, or by the OOM killer): no checkable result. LOSAT refuses (exit 1, "a
   profile whose Smith-Waterman redo (-use_sw_tback) does not end in NCBI BLAST+ 2.17.0 ... is not
-  supported by LOSAT's RPSBLAST") as soon as the profile's redo starts, where its other refusals
+  supported by LOSAT's RPSBLAST") after the profile's first Smith-Waterman scan (the composition
+  adjustment and the significance test of that scan's score come first), where its other refusals
   of a profile in the RPS traceback come. Where that cell scores 0 or less, NCBI's redo fails at the round of score 0
   and drops the profile, which LOSAT reproduces (rule 2; fixture rows `db.rps.rej.swendless` and
   `db.rps.mini.sw.zero.6`).

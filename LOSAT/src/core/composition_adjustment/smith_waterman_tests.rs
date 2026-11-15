@@ -400,3 +400,19 @@ fn the_conditional_move_is_the_maximum() {
         }
     }
 }
+
+// The scans read a letter's own column; a letter past NCBIstdaa fails a debug build (the tests),
+// so an encoding change cannot read another column than NCBI's in silence.
+#[test]
+fn letters_read_their_own_column() {
+    for letter in 0..BLASTAA_SIZE as u8 {
+        assert_eq!(row_column(letter), usize::from(letter));
+    }
+}
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "is not NCBIstdaa")]
+fn a_letter_past_ncbistdaa_fails_a_debug_build() {
+    row_column(BLASTAA_SIZE as u8);
+}

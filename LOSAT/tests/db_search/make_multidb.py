@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Builds tests/db_search/multidb/: the databases of the rows db.mdb.* (DI-8f: -db with several names).
 
-Usage: make_multidb.py [--ordsl-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
+Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
 
 The records are those of taxfilter/tfp.faa (23 protein globins) and taxfilter/tfn.fna (16 globin cDNAs); the definition
 lines (some records carry a second one) stay as they are, the taxids come from taxfilter/tfp.map and tfn.map.
@@ -41,6 +41,9 @@ lines (some records carry a second one) stay as they are, the taxids come from t
   q.fna): `qp1` of ../ids/ids_q.faa (noacc_v5, put), the same back-translated (one codon per amino acid), the
   `FBtr0083245` record of nnp.fa (glob1), and the longest ORF of that record (153 aa).
   `make_multidb.py --mixdb2-only MAKEBLASTDB` builds only `put` and these.
+- `nut` (line DBID mixtax): version 5 nucleotide without `-parse_seqids`, the records of nnp.fa with taxid 9606
+  (`-taxid`): `put`'s counterpart for the nucleotide programs, whose loads look the taxonomy up in a list with `na`.
+  `make_multidb.py --mixtax-only MAKEBLASTDB` builds only `nut`.
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
 """
@@ -185,6 +188,13 @@ def make_mixdb2(binary):
                 f.write(header + "\n" + "\n".join(seq[at:at + 60] for at in range(0, len(seq), 60)) + "\n")
 
 
+def make_mixtax(binary):
+    """Builds nut (line DBID mixtax)."""
+    makeblastdb(binary, "-in", "nnp.fa", "-dbtype", "nucl", "-out", "nut", "-blastdb_version", "5", "-taxid", "9606",
+                "-title", "multidb nut")
+    os.remove(os.path.join(HERE, "nut.njs"))
+
+
 def main(binary):
     os.makedirs(os.path.join(HERE, "d1"), exist_ok=True)
     os.makedirs(os.path.join(HERE, "d2"), exist_ok=True)
@@ -236,7 +246,10 @@ if __name__ == "__main__":
         make_ordsl(sys.argv[2])
     elif sys.argv[1] == "--mixdb2-only":
         make_mixdb2(sys.argv[2])
+    elif sys.argv[1] == "--mixtax-only":
+        make_mixtax(sys.argv[2])
     else:
         main(sys.argv[1])
         make_ordsl(sys.argv[1])
         make_mixdb2(sys.argv[1])
+        make_mixtax(sys.argv[1])

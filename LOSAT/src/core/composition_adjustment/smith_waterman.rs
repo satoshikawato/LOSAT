@@ -364,35 +364,13 @@ fn cell(
     *new_score = score;
 }
 
-/// The larger of `a` and `b` by a conditional move on x86-64. The cell's maxima depend on the
-/// scores, so a branch for them is mispredicted about every other cell: LLVM's x86 back end
-/// turns these maxima into branches in this loop (its conversion of conditional moves, whatever
-/// the source's form), which made the scans about 2.4 times slower than NCBI's on the same rows
-/// (NCBI's build keeps conditional moves and `pmaxsd`; PS11c-3 review S5). Other targets take
-/// `max`. The value is `max(a, b)` on every target.
+/// The larger of `a` and `b`, as a select marked unpredictable (`select_unpredictable`): the
+/// cell's maxima depend on the scores, so a branch for them is mispredicted about every other
+/// cell, and the mark keeps LLVM's x86 back end from turning them into branches (TRIAL, PS11c-3
+/// fix round 2).
 #[inline(always)]
 fn cmov_max(a: i32, b: i32) -> i32 {
-    #[cfg(target_arch = "x86_64")]
-    {
-        let mut larger = a;
-        // SAFETY: two instructions on the two registers given (`cmp`, then `cmovl`: `larger`
-        // takes `b` where `larger < b`, signed); no memory or stack is touched, and the flags
-        // that `cmp` sets are clobbered as `asm!` assumes by default.
-        unsafe {
-            core::arch::asm!(
-                "cmp {larger:e}, {b:e}",
-                "cmovl {larger:e}, {b:e}",
-                larger = inout(reg) larger,
-                b = in(reg) b,
-                options(pure, nomem, nostack),
-            );
-        }
-        larger
-    }
-    #[cfg(not(target_arch = "x86_64"))]
-    {
-        a.max(b)
-    }
+    core::hint::select_unpredictable(a < b, b, a)
 }
 
 /// The row's score of subject letter `letter`, or `None` (`COMPO_SCORE_MIN` in the cell) where

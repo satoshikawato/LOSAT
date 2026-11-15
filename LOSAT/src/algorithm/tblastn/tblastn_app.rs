@@ -2090,6 +2090,47 @@ fn search(
             word_cutoff_min: 0,
             prelim_evalue: 0.0,
         });
+        // Whether the first format prefetches the subjects of each batch (outfmt 10 and 20 as the
+        // tabular 6 and 7, below).
+        let first_number = outputs
+            .formats
+            .first()
+            .map(|format| super::stage_e_report::format_number(format.outfmt));
+        let first_prefetches = first_number.is_some_and(|number| {
+            crate::algorithm::common::database::prefetches_subjects(Some(match number {
+                10 | 18 | 20 => 6,
+                number => number,
+            }))
+        });
+        // The XML2 and JSON formats (13 to 16), whose prefetch NCBI runs too but which write the
+        // taxonomy texts at each `Hit`: of the prefetch only its stop
+        // (`shared::batch_prefetch_stop`).
+        let first_xml2 = first_number.is_some_and(|number| matches!(number, 13..=16));
+        // A batch whose prefetch loads a subject whose lookup fails on a file stops the run in
+        // its prefetch (`database::prefetch_stop`): as a batch that a database file failed, it is
+        // not reported, nor are the batches after it; its error is made after the prefetches of
+        // the batches before (below), which look the taxonomy up first.
+        let prefetch_stop = if database.is_some() && (first_prefetches || first_xml2) {
+            let spans: Vec<std::ops::Range<usize>> = query_input
+                .batches(batch_size)
+                .into_iter()
+                .map(|batch| batch.searched)
+                .filter(|searched| !searched.is_empty() && searched.end <= results.len())
+                .collect();
+            super::database::prefetch_stop(&titles, &results, &spans).filter(|(span, _)| {
+                failed
+                    .as_ref()
+                    .is_none_or(|(range, _)| span.start < range.start)
+            })
+        } else {
+            None
+        };
+        if let Some((span, _)) = &prefetch_stop {
+            failed = Some((
+                span.clone(),
+                anyhow::anyhow!("the prefetch of the batch stops (its error is made below)"),
+            ));
+        }
         // A batch that a database file failed is not reported, nor are the batches after it.
         let queries = match &failed {
             Some((range, _)) => {
@@ -2263,15 +2304,7 @@ fn search(
             // after those messages (`TblastnDatabase::batch_prefetch`), with or without
             // `taxdb.bti`.
             let taxdb_found = database.taxdb_found();
-            if outputs.formats.first().is_some_and(|format| {
-                crate::algorithm::common::database::prefetches_subjects(Some(
-                    match super::stage_e_report::format_number(format.outfmt) {
-                        10 | 18 | 20 => 6,
-                        number => number,
-                    },
-                ))
-            }) && (taxdb_found || database.parsed_seqids())
-            {
+            if first_prefetches && (taxdb_found || database.parsed_seqids()) {
                 // A custom tabular report with a plural name looks every taxid of its rows up,
                 // taxid 0 too, which the prefetch does not: the rows of a batch with hits may open
                 // the taxonomy database before a later batch's prefetch
@@ -2373,7 +2406,7 @@ fn search(
                     if seq_aligns == 0 {
                         continue;
                     }
-                    let messages = database.batch_prefetch(reported, hitlists)?;
+                    let messages = database.batch_prefetch(reported, hitlists, span.start)?;
                     rows_open(hitlists)?;
                     if messages.is_empty() {
                         continue;
@@ -2381,6 +2414,15 @@ fn search(
                     let reader = batches.warnings[span.start].len();
                     query_warning_lines[span.start].splice(reader..reader, messages);
                 }
+            }
+        }
+        // The stopping batch's prefetch, after those of the batches before: NCBI's error, or
+        // LOSAT's refusal before any byte.
+        if let (Some((span, subjects)), Some(database)) = (prefetch_stop, database) {
+            let error = database.prefetch_stop_error(&subjects, span.start, first_xml2);
+            match error.downcast::<crate::algorithm::common::database::HeaderReadError>() {
+                Ok(failure) => failed = Some((span, failure.error)),
+                Err(error) => return Err(error),
             }
         }
         // `-db`, XML2 and JSON: the taxid of each reported sequence, and what the taxonomy

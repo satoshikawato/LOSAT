@@ -464,6 +464,9 @@ impl ReportedSubjects {
     /// (`shared::prefetches_subjects`, and the batch's Seq-aligns do not outnumber a positive
     /// `PRE_FETCH_SEQS_LIMIT`, `shared::prefetch_off`), which where no report reads their Bioseqs
     /// refuses what it cannot read as NCBI does (`shared::check_prefetched_parsed`).
+    /// `prefetch_runs`: whether the batch's prefetch runs (`prefetched`, or the XML2 and JSON
+    /// formats, whose taxonomy texts come at each `Hit`), which stops the run where it reads a
+    /// subject whose lookup fails on a file with NCBI's exception (`shared::batch_prefetch_stop`).
     /// `one_by_one`: whether the batch's prefetch is off, so that its reports read the subjects
     /// one by one (`shared::ParsedShown::one_by_one`).
     #[allow(clippy::too_many_arguments)]
@@ -482,6 +485,7 @@ impl ReportedSubjects {
         taxonomy: bool,
         words: crate::report::tabular::PrintedIds,
         prefetched: bool,
+        prefetch_runs: bool,
         one_by_one: bool,
     ) -> Result<Self> {
         let BatchTitles {
@@ -489,7 +493,14 @@ impl ReportedSubjects {
             parsed,
             mut sources,
         } = titles;
-        if joined && !parsed.is_empty() {
+        // A batch whose prefetch looks up a Seq-align id whose lookup fails on a file stops the
+        // run there (`shared::batch_prefetch`), before any of its reports: none of their checks
+        // and reads is made.
+        let reports = !(prefetch_runs
+            && parsed
+                .values()
+                .any(|subject| subject.prefetch_stops().is_some()));
+        if reports && joined && !parsed.is_empty() {
             for batch in batches.iter() {
                 for (qidx, lists) in batch.queries.iter().enumerate() {
                     shared::refuse_joined_hits(
@@ -514,7 +525,7 @@ impl ReportedSubjects {
             let shown = title.is_some();
             let title = title.clone().unwrap_or_else(|| Arc::from(&b""[..]));
             let source = sources.remove(&oid).unwrap_or_default();
-            if pairwise && shown && !parsed.contains_key(&oid) {
+            if reports && pairwise && shown && !parsed.contains_key(&oid) {
                 shared::check_shown_protein_title(
                     &title,
                     || database.db.oid(ordinal),
@@ -524,11 +535,12 @@ impl ReportedSubjects {
             if let Some(subject) = parsed.get(&oid) {
                 // The formats that read the subject's Bioseq; the Seq-annots and the archive
                 // write its Seq-align id alone.
-                if tabular_reads || pairwise || structured || taxids || taxonomy {
+                let reads = tabular_reads || pairwise || structured || taxids || taxonomy;
+                if reports && reads {
                     subject.fetched(taxonomy, one_by_one).map_err(|reason| {
                         shared::parsed_refusal(database.db.oid(ordinal), &reason, database.program)
                     })?;
-                } else if prefetched {
+                } else if reports && prefetched {
                     shared::check_prefetched_parsed(
                         &database.db,
                         subject,
@@ -536,7 +548,7 @@ impl ReportedSubjects {
                         database.program,
                     )?;
                 }
-                if pairwise {
+                if reports && pairwise {
                     shared::check_shown_parsed_subject(
                         subject,
                         true,
@@ -552,7 +564,7 @@ impl ReportedSubjects {
                     // A table of fields that read nothing of the subject prints none of its ids.
                     let [id, accession, version] = match ids {
                         Ok(ids) => ids,
-                        Err(_) if !tabular_reads => Default::default(),
+                        Err(_) if !tabular_reads || !reports => Default::default(),
                         Err(problem) => {
                             return Err(shared::parsed_refusal(
                                 database.db.oid(ordinal),
@@ -577,7 +589,7 @@ impl ReportedSubjects {
             } else if tabular {
                 // An unreported subject's id is never written, nor an id of a table of fields
                 // that read nothing of the subject.
-                let id = if shown && tabular_reads {
+                let id = if reports && shown && tabular_reads {
                     let oid = database.db.oid(ordinal);
                     Some(shared::tabular_subject_id(
                         &title,
@@ -642,7 +654,7 @@ impl ReportedSubjects {
                 }
             }
         }
-        if taxids {
+        if reports && taxids {
             // The taxid of each reported sequence, read apart from the titles for the XML2 and
             // JSON formats only (`algorithm::common::database::read_reported_taxonomy`); the
             // sequences with a title are the reported ones.
@@ -683,23 +695,60 @@ impl ReportedSubjects {
     /// no text, and nothing read. A taxonomy database that LOSAT cannot read as NCBI does is
     /// refused (`shared::TaxonomyRefusal`); a header whose taxid does not decode is the reader's
     /// error.
+    ///
+    /// A subject whose lookup fails on a file stops the run there (`shared::batch_prefetch`):
+    /// BLASTX writes each batch's reports before it searches the next, so the error names the
+    /// batch's first query as 0 (`native::reported_error` takes the error alone).
     pub(crate) fn batch_prefetch(
         &self,
         database: &BlastxDatabase,
         batches: &[BatchResults],
         gapped: bool,
     ) -> Result<Vec<u8>> {
-        let subjects = batches
+        shared::batch_prefetch(
+            &database.db,
+            &database.taxdb,
+            self.prefetch_subjects(batches, gapped),
+            database.program,
+            0,
+        )
+    }
+
+    /// The stop of NCBI's prefetch of the query batch whose hit lists are `batches`, for the XML2
+    /// and JSON formats, which write the taxonomy texts at each `Hit`
+    /// (`shared::batch_prefetch_stop`; the error's query as in `batch_prefetch`).
+    pub(crate) fn batch_prefetch_stop(
+        &self,
+        database: &BlastxDatabase,
+        batches: &[BatchResults],
+        gapped: bool,
+    ) -> Result<()> {
+        shared::batch_prefetch_stop(
+            &database.db,
+            &database.taxdb,
+            self.prefetch_subjects(batches, gapped),
+            database.program,
+            0,
+        )
+    }
+
+    /// The sequences that the prefetch of the query batch whose hit lists are `batches` reads: of
+    /// the lists that the reports show (`report::reported`).
+    fn prefetch_subjects<'s>(
+        &'s self,
+        batches: &'s [BatchResults],
+        gapped: bool,
+    ) -> impl Iterator<Item = shared::PrefetchSubject<'s>> + 's {
+        batches
             .iter()
             .flat_map(|batch| batch.queries.iter().flatten())
-            .filter(|list| super::report::reported(list, gapped))
+            .filter(move |list| super::report::reported(list, gapped))
             .map(|list| {
                 shared::PrefetchSubject::unflipped(
                     self.ordinals[list.oid],
                     self.parsed_subject(list.oid),
                 )
-            });
-        shared::batch_prefetch(&database.db, &database.taxdb, subjects, database.program)
+            })
     }
 
     /// NCBI's messages about the taxonomy database where `PRE_FETCH_SEQS_LIMIT` turns the
@@ -1233,6 +1282,7 @@ mod tests {
                 crate::report::tabular::PrintedIds::default(),
                 false,
                 false,
+                false,
             )
             .unwrap();
             let messages = reported.batch_prefetch(database, &batches, true);
@@ -1298,6 +1348,7 @@ mod tests {
                 false,
                 false,
                 crate::report::tabular::PrintedIds::default(),
+                false,
                 false,
                 false,
             )

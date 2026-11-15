@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Builds tests/db_search/multidb/: the databases of the rows db.mdb.* (DI-8f: -db with several names).
 
-Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
+Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only | --loadord-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
 
 The records are those of taxfilter/tfp.faa (23 protein globins) and taxfilter/tfn.fna (16 globin cDNAs); the definition
 lines (some records carry a second one) stay as they are, the taxids come from taxfilter/tfp.map and tfn.map.
@@ -51,6 +51,15 @@ lines (some records carry a second one) stay as they are, the taxids come from t
   letters of ../taxfilter/q.faa or q.fna followed by `qp2` (back-translated in the nucleotide files), which hits `pa` or
   `na`, `put` or `nut` and the volume `putl` or `nutl` that the first query does not.
   `make_multidb.py --mixtax-only MAKEBLASTDB` builds only `nut`, `putl`, `nutl` and these.
+- `ldp` and `ldpn` (line DBID loadord): version 5, `-parse_seqids`, taxid 9606: `ref|NP_000002.1|` (`NM_`) with the letters
+  of ../taxfilter/q.faa (q.fna), then `ref|NP_000900.1|` (`NM_`) with random letters (seed 20261116). Beside a database
+  without the accession table, NCBI's prefetch loads the batch's Seq-align ids in the order of their Seq-id handles,
+  `gnl|BL_ORD_ID|n` by n (0 last of the numbers) and the accession by its number 2, and stops at the accession's lookup:
+  `lda` (`ldan`) holds `qp1` of ../ids/ids_q.faa (the glob1 record `FBtr0083245` of nnp.fa) alone, at OID 0 in a list with
+  `ldp` (`ldpn`), which loads after the stop; `ldb` (`ldbn`) a random sequence and then that one, at OID 1, which loads
+  before it; `ldu` (`ldun`) that one alone, sorted after `ldp` (`ldpn`), at OID 2: the same packed number 2, which NCBI
+  orders by the address of the handles. Without `-parse_seqids`, taxid 9606 (`-taxid`), so that their loads open the
+  taxonomy database. `make_multidb.py --loadord-only MAKEBLASTDB` builds only these.
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
 """
@@ -240,6 +249,40 @@ def make_mixtax(binary):
                 f.write(header + "\n" + "\n".join(seq[at:at + 60] for at in range(0, len(seq), 60)) + "\n")
 
 
+def make_loadord(binary):
+    """Builds ldp, lda, ldb, ldu and their nucleotide counterparts ldpn, ldan, ldbn, ldun (line DBID loadord)."""
+    rng = random.Random(20261116)
+
+    def letters(path, pick=lambda header: True):
+        return next("".join(line.strip() for line in lines) for header, lines in read_fasta_path(path) if pick(header))
+
+    def random_letters(alphabet, length):
+        return "".join(rng.choice(alphabet) for _ in range(length))
+
+    qp1 = letters(os.path.join(os.path.dirname(HERE), "ids", "ids_q.faa"))
+    glob1 = letters(os.path.join(HERE, "nnp.fa"), lambda header: header.split()[0] == ">FBtr0083245")
+    for kind, suffix, prefix, globin, unparsed, alphabet, length in (
+            ("prot", "", "NP", letters(os.path.join(SRC, "q.faa")), qp1, "ACDEFGHIKLMNPQRSTVWY", 120),
+            ("nucl", "n", "NM", letters(os.path.join(SRC, "q.fna")), glob1, "ACGT", 360)):
+        sets = {
+            "ldp": [(f">ref|{prefix}_000002.1| loadord packed number 2", globin),
+                    (f">ref|{prefix}_000900.1| loadord random letters", random_letters(alphabet, length))],
+            "lda": [(">loadord the unparsed hit at OID 0", unparsed)],
+            "ldb": [(">loadord random letters", random_letters(alphabet, length)),
+                    (">loadord the unparsed hit at OID 1", unparsed)],
+            "ldu": [(">loadord the unparsed hit at OID 2", unparsed)],
+        }
+        for base, records in sets.items():
+            name = base + suffix
+            with open(os.path.join(HERE, name + ".fa"), "w") as f:
+                for header, seq in records:
+                    f.write(header + "\n" + "\n".join(seq[at:at + 60] for at in range(0, len(seq), 60)) + "\n")
+            parse = ["-parse_seqids"] if base == "ldp" else []
+            makeblastdb(binary, "-in", name + ".fa", "-dbtype", kind, "-out", name, *parse, "-blastdb_version", "5",
+                        "-taxid", "9606", "-title", "multidb " + name)
+            os.remove(os.path.join(HERE, name + (".pjs" if kind == "prot" else ".njs")))
+
+
 def main(binary):
     os.makedirs(os.path.join(HERE, "d1"), exist_ok=True)
     os.makedirs(os.path.join(HERE, "d2"), exist_ok=True)
@@ -293,8 +336,11 @@ if __name__ == "__main__":
         make_mixdb2(sys.argv[2])
     elif sys.argv[1] == "--mixtax-only":
         make_mixtax(sys.argv[2])
+    elif sys.argv[1] == "--loadord-only":
+        make_loadord(sys.argv[2])
     else:
         main(sys.argv[1])
         make_ordsl(sys.argv[1])
         make_mixdb2(sys.argv[1])
         make_mixtax(sys.argv[1])
+        make_loadord(sys.argv[1])

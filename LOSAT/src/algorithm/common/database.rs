@@ -4981,8 +4981,9 @@ pub(crate) fn pssm_load_texts(
 // that NCBI's Seq-id mapper packs (GIs, accessions of a prefix and digits, the text tag's
 // `gnl|BL_ORD_ID|0`) by their packed value, then the others by the address of each id's
 // `CSeq_id_Info` (review 1 of line DBID pfwarn, M1: `gb|FFF00093.1|` loads before the text tag,
-// `lcl|zzz` never), which LOSAT does not model. A lookup that throws on its id there ends the
-// loads, so which subjects were loaded before it is not known here; the throw is caught with
+// `lcl|zzz` never), which LOSAT models only where a lookup stops the run ([`load_before_stop`]).
+// A lookup that throws on its id there ends the loads, and the subjects after it are read by the
+// reports, so which subjects were loaded before it is not known here; the throw is caught with
 // `Error pre-fetching sequence data` (`ERR_POST`, on standard error, after the texts of the
 // loads before). A lookup that fails on a file is a `CSeqDBException`, which the prefetch
 // rethrows (`FoundInstead::Failed`, refused where it is read). A minus-strand Seq-align of a subject
@@ -5031,11 +5032,12 @@ impl<'s> PrefetchSubject<'s> {
 /// (`ParsedSubject::prefetch_stops`: a list of version 5 databases with and without the accession
 /// table) stops the run there: `Err` with a [`HeaderReadError`] of the batch's first query `query`
 /// (the searched queries of the call) whose error is NCBI's `BLAST Database error: <message>`
-/// (exit status 2). Each program writes then what NCBI wrote before: the prologs, the reports of
-/// the batches before (without the epilog) and the batch's reader messages. That batch is
-/// refused where the other subjects' loads write a text, which NCBI writes before the error or
-/// not as the order of the loads decides, and where another subject's lookup throws on its id
-/// (the prefetch catches that one and ends its loads, so whether it stops is that order's too).
+/// (exit status 2), after the texts of the loads that NCBI's prefetch makes before it in the order
+/// of the batch's Seq-id handles ([`load_before_stop`]). Each program writes then what NCBI wrote
+/// before: the prologs, the reports of the batches before (without the epilog) and the batch's
+/// reader messages. That batch is refused where a load whose order to the stop LOSAT does not know
+/// writes a text, and where another subject's lookup throws on its id and may come before it (the
+/// prefetch catches that one and ends its loads).
 pub(crate) fn batch_prefetch<'s>(
     db: &SeqDb,
     run: &TaxdbRun,
@@ -5180,8 +5182,8 @@ pub(crate) fn prefetch_reads_seq_aligns(outfmt: i32) -> bool {
 /// those batches, and the open of the taxonomy database at their first taxid) and nothing of this
 /// batch: BLASTX's own run, which writes each batch's reports before it searches the next; the
 /// programs that write those reports after the stop ask [`held_batch_prefetch_stop`]. As in
-/// [`batch_prefetch`], the batch is refused where the other subjects' loads write a text after
-/// those lookups.
+/// [`batch_prefetch`], the texts of the loads before the stop after those lookups come before the
+/// error, and the batch is refused where a load whose order LOSAT does not know writes a text.
 pub(crate) fn batch_prefetch_stop<'s>(
     db: &SeqDb,
     run: &TaxdbRun,

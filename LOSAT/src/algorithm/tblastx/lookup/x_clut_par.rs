@@ -824,10 +824,17 @@ fn x_reuse<T: Copy + Default>(spare: Vec<T>, len: usize) -> (Vec<T>, bool) {
 
 // No NCBI counterpart: how a pass's items reach the pool's threads (LOSAT_X_BPLKPFLAT). Scheduling
 // only: each item is made once, by the same call, and its result is stored at its index.
-/// The results of `item(scratch, i)` for i in 0..items, in order, made by `threads` tasks (at most
-/// one per item or extra task) spawned in one `rayon::scope` of the current pool: each task keeps one
-/// `scratch` (`init`) and takes the next index from one counter until none is left; the indices past
-/// the items run `extra(i - items)`, `extras` of them.
+/// The results of `item(scratch, i)` for i in 0..items, in order, made by up to `threads` tasks (at
+/// most one per item or extra task) in one `rayon::scope` of the current pool: the calling thread and
+/// the tasks it spawns each keep one `scratch` (`init`) and take the next index from one counter
+/// until none is left; the indices past the items run `extra(i - items)`, `extras` of them.
+///
+/// The calling thread then waits for the items the spawned tasks took (item SC9i of line NP) by
+/// spinning, not in the scope's wait, which runs other jobs of the pool meanwhile: a job taken there
+/// (a subject of another search) held the pass's end, by a few milliseconds each time, until it was
+/// done. The wait cannot deadlock: an item runs no job of the pool (no nested parallel work) and
+/// depends on nothing but its inputs, so every item taken ends; a task spawned and not yet started
+/// takes no item (the counter is spent) and the scope's wait runs it at once.
 fn x_one_latch_pass<S, R: Send + Sync>(
     threads: usize,
     items: usize,
@@ -840,24 +847,43 @@ fn x_one_latch_pass<S, R: Send + Sync>(
     let results: Vec<OnceLock<R>> = (0..items).map(|_| OnceLock::new()).collect();
     if total > 0 {
         let next = AtomicUsize::new(0);
-        let (results, next, init, item, extra) = (&results, &next, &init, &item, &extra);
+        let ended = AtomicUsize::new(0);
+        let (results, next, ended, init, item, extra) =
+            (&results, &next, &ended, &init, &item, &extra);
+        let take_items = move || {
+            if next.load(Ordering::Relaxed) >= total {
+                return;
+            }
+            let mut scratch = init();
+            loop {
+                let index = next.fetch_add(1, Ordering::Relaxed);
+                if index >= total {
+                    break;
+                }
+                // Counts the item as ended also when it unwinds, so that the calling thread's wait
+                // ends and the scope passes the panic on.
+                let _ended = XItemEnded(ended);
+                if index < items {
+                    let stored = results[index].set(item(&mut scratch, index)).is_ok();
+                    assert!(stored, "item {index} taken twice");
+                } else {
+                    extra(index - items);
+                }
+            }
+        };
         rayon::scope(|scope| {
-            for _ in 0..threads.clamp(1, total) {
-                scope.spawn(move |_| {
-                    let mut scratch = init();
-                    loop {
-                        let index = next.fetch_add(1, Ordering::Relaxed);
-                        if index >= total {
-                            break;
-                        }
-                        if index < items {
-                            let stored = results[index].set(item(&mut scratch, index)).is_ok();
-                            assert!(stored, "item {index} taken twice");
-                        } else {
-                            extra(index - items);
-                        }
-                    }
-                });
+            for _ in 1..threads.clamp(1, total) {
+                scope.spawn(move |_| take_items());
+            }
+            take_items();
+            let mut idle = 0u32;
+            while ended.load(Ordering::Acquire) < total {
+                idle = idle.saturating_add(1);
+                if idle < 128 {
+                    std::hint::spin_loop();
+                } else {
+                    std::thread::yield_now();
+                }
             }
         });
     }
@@ -865,6 +891,16 @@ fn x_one_latch_pass<S, R: Send + Sync>(
         .into_iter()
         .map(|result| result.into_inner().expect("every item taken"))
         .collect()
+}
+
+// No NCBI counterpart: scheduling only (item SC9i of line NP, `x_one_latch_pass`).
+/// Counts one item of a one-latch pass as ended when dropped.
+struct XItemEnded<'a>(&'a AtomicUsize);
+
+impl Drop for XItemEnded<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_add(1, Ordering::Release);
+    }
 }
 
 // No NCBI counterpart: scheduling only (line NP, SC9e).

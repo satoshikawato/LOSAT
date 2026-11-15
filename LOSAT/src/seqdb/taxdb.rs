@@ -48,7 +48,7 @@
 //! inside, the kingdom never ([`TaxNames::super_kingdom`]); where no third tab
 //! is inside, whether the lookup finds names at all is not defined
 //! ([`TaxLookup::PastMapping`]). The callers refuse only what they write of it
-//! (PD-LOSAT-NCBI-DEFECTS, the known difference of line RG item T5b). Lookups
+//! (PD-LOSAT-NCBI-DEFECTS, rule 3 and approved exception 13). Lookups
 //! that read no record (a taxid outside the index, a record that ends before it
 //! begins, the offset error of the last entry) give NCBI's result.
 //!

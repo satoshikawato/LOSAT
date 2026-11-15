@@ -33,9 +33,9 @@
   1.18 2026-11-14 (the explicit rejections of TBLASTN's one-hit gapped start past NCBI's buffers
   and of the endless split it can cause, rule 3, line RG item X2);
   1.26 2026-11-15 (the explicit rejections of a taxonomy record read past NCBI's mapping of
-  `taxdb.btd`, rule 3, and the known difference where NCBI may fault there, line RG item T5b;
-  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after dev's
-  1.25)
+  `taxdb.btd`, rule 3, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07, and
+  exception 13, LOSAT's output where NCBI may fault there, which the Owner decided on 2026-11-15;
+  line RG item T5b; numbered after dev's 1.25 and exception 12)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -575,21 +575,29 @@ file. LOSAT refuses (exit 1, one line naming its program) only:
   measured NCBI 2.17.0 writing 4,835 bytes and more of other mappings as the kingdom of such a
   record (`-tax_info -outfmt "%T|%K|%B"`), the same in two runs.
 
-## Known difference awaiting the maintainer (line RG item T5b, version 1.26)
+## Approved exception (a taxonomy record past NCBI's mapping of `taxdb.btd`, version 1.26)
 
-Where NCBI reads such a record past its mapping and the output writes nothing of the bytes there
-(the lookups of `GetBioseq`, whose names the maskers' and blastdbcmd's output do not write, a
-stored title, the names before a third tab inside the mapping, the searches' prefetch), LOSAT writes
-what NCBI writes when it completes, which is the result of the same run with a `taxdb.btd` that
-holds those bytes (rule 1's valid result). Whether NCBI completes depends on its memory map, not
-on the input: in the review of line RG item T5b, a record of a 266-byte `taxdb.btd` that ends at
-5,000 bytes completed in `dustmasker`, `segmasker` and `blastdbcmd`, one that ends at 9,000 or
-20,000 bytes in `blastdbcmd -tax_info`, and one that ends at 1 MiB faulted (SIGSEGV) in
-`dustmasker` and `blastdbcmd`. LOSAT writes the output in all of them. This was LOSAT's behaviour
-for the maskers' and blastdbcmd's loads before line RG item T5b (dev), and is now its behaviour in
-the searches as well. It is not an approved exception: the maintainer decides whether it becomes
-rule 1's exception or rule 3's rejection (refusing every lookup of such a record, which also
-refuses runs that NCBI completes with the same bytes).
+Version 1.26. The Owner decided on 2026-11-15 (line RG `DECISIONS.md` T5b-6, Q1 = A, words
+「RG-T Q1=A」) the question of line RG item T5b's fix 2: LOSAT keeps writing NCBI's completed output
+here, as rule 1's approved exception, against rule 3's rejection of every lookup of such a record,
+which would also refuse runs that NCBI completes with the same bytes (44 runs of the item's probes).
+Numbered after dev's exception 12.
+
+13. **A record that NCBI reads past its mapping where the output writes nothing of the bytes
+    there.** Where NCBI reads such a record past its mapping and the output writes nothing of the
+    bytes there (the lookups of `GetBioseq`, whose names the maskers' and blastdbcmd's output do
+    not write, a stored title, the names before a third tab inside the mapping, the searches'
+    prefetch), LOSAT writes what NCBI writes when it completes, which is the result of the same run
+    with a `taxdb.btd` that holds those bytes (rule 1's valid result). Whether NCBI completes
+    depends on its memory map, not on the input: in the review of line RG item T5b, a record of a
+    266-byte `taxdb.btd` that ends at 5,000 bytes completed in `dustmasker`, `segmasker` and
+    `blastdbcmd`, one that ends at 9,000 or 20,000 bytes in `blastdbcmd -tax_info`, and one that
+    ends at 1 MiB faulted (SIGSEGV) in `dustmasker` and `blastdbcmd`. LOSAT writes the output in
+    all of them, as in the 20 of the item's 115 search runs and 2 of its 32 tool runs where NCBI
+    faulted.
+    This was LOSAT's behaviour for the maskers' and blastdbcmd's loads before line RG item T5b
+    (dev), and is now its behaviour in the searches as well. What the output writes from past the
+    mapping stays refused (the rejections above).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

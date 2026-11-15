@@ -756,10 +756,19 @@ impl Volume {
             .ok_or_else(|| self.no_line_kept(oid))
     }
 
-    /// Whether the volume's rule is a positive seqid list's (`SeqDb::drops_lineless_hits`).
-    pub(super) fn has_positive_seqid_rule(&self) -> bool {
+    /// Whether the volume's rule is a seqid list's, positive or negative
+    /// (`SeqDb::drops_lineless_hits`).
+    pub(super) fn has_seqid_rule(&self) -> bool {
+        self.defline_rule
+            .as_ref()
+            .is_some_and(|line_rule| line_rule.rule.reads_seqids())
+    }
+
+    /// Whether the volume's rule is a negative seqid list's with at least one id
+    /// (`SeqDb::excludes_lineless_at_fetch`).
+    pub(super) fn has_negative_seqid_ids(&self) -> bool {
         self.defline_rule.as_ref().is_some_and(|line_rule| {
-            matches!(*line_rule.rule, super::filter::DeflineRule::Seqids(_))
+            matches!(&*line_rule.rule, super::filter::DeflineRule::NegativeSeqids(ids) if !ids.is_empty())
         })
     }
 

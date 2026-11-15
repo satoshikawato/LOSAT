@@ -977,9 +977,10 @@ later database of the list (`taxfilter/tfu_p` behind `multidb/pa`, 12 sequences;
 number, which the lookup reads, while NCBI's filtered header read tests the line as `gnl|BL_ORD_ID|<stored number plus the
 volume's first OID>` (`CSeqDBVol::x_GetHdrAsn1` with `adjust_oids`). So a positive list can select a sequence whose every
 line it then removes, and a negative list can remove a line of a sequence it did not exclude; NCBI leaves such a sequence's
-hits out of the report without notice, and LOSAT refuses as for any sequence a seqid list leaves without a line (the
-`losat-rejection` rows: `bp.list.6` on `pa tfu_p`, `bp.listb.6` with the binary list, `bp.listneg.6` and `bn.listneg.6`
-negative, `bp.vol.6` the second volume of `ov_p`, one row in each other program). Where a sequence keeps another line, the
+hits out of the report without notice (a positive list's at the Seq-aligns, line DBID item lineless; a negative list's at
+the fetches of the traceback, the redo and the ungapped re-evaluation, item lineless2), and so does LOSAT (`bp.list.6` on
+`pa tfu_p`, `bp.listb.6` with the binary list, `bp.listneg.6` and `bn.listneg.6` negative, `bp.vol.6` the second volume of
+`ov_p`, one row in each other program; LOSAT refused them before). Where a sequence keeps another line, the
 test decides which lines NCBI writes (`bp.two.*`, `bn.two.*`: OID 12 of `pa pxm` and OID 8 of `na nxm` hold
 `ref|NP_900003.1|` / `ref|NM_900003.1|` and `gnl|BL_ORD_ID|7`, read as 19 / 15; positive and negative lists of 7 and of
 the sum, outfmt 6 with `sallseqid salltitles` and 16). `bp.tag.6` and `bp.tagq.6`: the line `gnl|BL_ORD_ID|0` of OID 13 of
@@ -987,6 +988,20 @@ the sum, outfmt 6 with `sallseqid salltitles` and 16). `bp.tag.6` and `bp.tagq.6
 sequence it reports and then throws (`GetId`, exit 255): a query that misses it (`-evalue 1e-5`) is NCBI's run, one that
 hits it (`multidb/xq.faa`) LOSAT's refusal. The other `ncbi` rows: a list whose number no key holds (`bp.none.6`, an
 empty database), and a sequence of the first volume, which keeps its line (`bp.vol0.0`, `bn.vol0.6`, `tx.vol0.6`).
+
+`ll2/`: rows `db.ll2.*` (line DBID, item lineless2). `ll2/make_ll2.py` (its docstring has the usage and the records)
+writes `ll2/prot_v4`, `prot_v5`, `nucl_v4` and `nucl_v5` with `makeblastdb -parse_seqids`: 14 subjects made from one query
+with 0, 2, 4, ... substitutions (distinct ranks, one equal pair), of which the only line of r0 (the query itself), r2a
+(the first of the pair) and r6 has a gi (version 4) or a ti (version 5). A `-negative_seqidlist` (`ll2/neg.txt`: r12's
+accession, which the OID mask removes, and an id no database holds) keeps those three sequences and removes their lines;
+NCBI's fetches with `check_oid_exclusion` exclude them, so they count in the statistics and take no place in the final
+hit lists (`.m1.`: r1 is the best row; `db.ll2.tx.m10.6`, `db.ll2.bn.ug.m10.6` and `db.ll2.bn.ug.m1.6`: an ungapped
+search of a nucleotide database never holds them in its preliminary hit list), except a protein subject of an ungapped
+search (`db.ll2.bx.ug.*`), which takes its place before the cut and leaves at the Seq-aligns. `ll2/neggi.txt` (a gi) is a non-empty id set on version 4 and an empty list on version 5. `ll2/prot_v4bad` and
+`nucl_v4bad` (`make_ll2.py --damaged-only`) damage the header of OID 8 (r7, which keeps its line): under `neg.txt`
+NCBI's fetch reads it although r7 is not reported at `-max_target_seqs 3`, and the search fails (exit 255 in the
+traceback, 3 in the ungapped re-evaluation); LOSAT refuses (the `losat-rejection` rows `db.ll2.*.bad.6`).
+Queries: `ll2/q.faa`, `q.fna` (the query and its codons), `q2.faa`, `q2.fna` (the same and its first part).
 
 ## Ungapped nucleotide databases (line NP, O4a-1)
 

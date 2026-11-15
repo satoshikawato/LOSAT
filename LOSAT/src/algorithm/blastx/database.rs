@@ -489,7 +489,14 @@ impl ReportedSubjects {
             parsed,
             mut sources,
         } = titles;
-        if joined && !parsed.is_empty() {
+        // A batch whose prefetch looks up a Seq-align id whose lookup fails on a file stops the
+        // run there (`shared::batch_prefetch`), before any of its reports: none of their checks
+        // and reads is made.
+        let reports = !(prefetched
+            && parsed
+                .values()
+                .any(|subject| subject.prefetch_stops().is_some()));
+        if reports && joined && !parsed.is_empty() {
             for batch in batches.iter() {
                 for (qidx, lists) in batch.queries.iter().enumerate() {
                     shared::refuse_joined_hits(
@@ -514,7 +521,7 @@ impl ReportedSubjects {
             let shown = title.is_some();
             let title = title.clone().unwrap_or_else(|| Arc::from(&b""[..]));
             let source = sources.remove(&oid).unwrap_or_default();
-            if pairwise && shown && !parsed.contains_key(&oid) {
+            if reports && pairwise && shown && !parsed.contains_key(&oid) {
                 shared::check_shown_protein_title(
                     &title,
                     || database.db.oid(ordinal),
@@ -524,11 +531,12 @@ impl ReportedSubjects {
             if let Some(subject) = parsed.get(&oid) {
                 // The formats that read the subject's Bioseq; the Seq-annots and the archive
                 // write its Seq-align id alone.
-                if tabular_reads || pairwise || structured || taxids || taxonomy {
+                let reads = tabular_reads || pairwise || structured || taxids || taxonomy;
+                if reports && reads {
                     subject.fetched(taxonomy, one_by_one).map_err(|reason| {
                         shared::parsed_refusal(database.db.oid(ordinal), &reason, database.program)
                     })?;
-                } else if prefetched {
+                } else if reports && prefetched {
                     shared::check_prefetched_parsed(
                         &database.db,
                         subject,
@@ -536,7 +544,7 @@ impl ReportedSubjects {
                         database.program,
                     )?;
                 }
-                if pairwise {
+                if reports && pairwise {
                     shared::check_shown_parsed_subject(
                         subject,
                         true,
@@ -552,7 +560,7 @@ impl ReportedSubjects {
                     // A table of fields that read nothing of the subject prints none of its ids.
                     let [id, accession, version] = match ids {
                         Ok(ids) => ids,
-                        Err(_) if !tabular_reads => Default::default(),
+                        Err(_) if !tabular_reads || !reports => Default::default(),
                         Err(problem) => {
                             return Err(shared::parsed_refusal(
                                 database.db.oid(ordinal),
@@ -577,7 +585,7 @@ impl ReportedSubjects {
             } else if tabular {
                 // An unreported subject's id is never written, nor an id of a table of fields
                 // that read nothing of the subject.
-                let id = if shown && tabular_reads {
+                let id = if reports && shown && tabular_reads {
                     let oid = database.db.oid(ordinal);
                     Some(shared::tabular_subject_id(
                         &title,
@@ -642,7 +650,7 @@ impl ReportedSubjects {
                 }
             }
         }
-        if taxids {
+        if reports && taxids {
             // The taxid of each reported sequence, read apart from the titles for the XML2 and
             // JSON formats only (`algorithm::common::database::read_reported_taxonomy`); the
             // sequences with a title are the reported ones.
@@ -688,6 +696,7 @@ impl ReportedSubjects {
         database: &BlastxDatabase,
         batches: &[BatchResults],
         gapped: bool,
+        query: usize,
     ) -> Result<Vec<u8>> {
         let subjects = batches
             .iter()
@@ -699,7 +708,13 @@ impl ReportedSubjects {
                     self.parsed_subject(list.oid),
                 )
             });
-        shared::batch_prefetch(&database.db, &database.taxdb, subjects, database.program)
+        shared::batch_prefetch(
+            &database.db,
+            &database.taxdb,
+            subjects,
+            database.program,
+            query,
+        )
     }
 
     /// NCBI's messages about the taxonomy database where `PRE_FETCH_SEQS_LIMIT` turns the
@@ -1230,7 +1245,7 @@ mod tests {
                 false,
             )
             .unwrap();
-            let messages = reported.batch_prefetch(database, &batches, true);
+            let messages = reported.batch_prefetch(database, &batches, true, 0);
             String::from_utf8(messages.unwrap()).unwrap()
         };
         let database = open_with_taxdb("x16_taxid_99990", Some("offset_last_past_end"), &cwd);

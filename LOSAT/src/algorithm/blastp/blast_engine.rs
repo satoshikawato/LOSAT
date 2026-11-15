@@ -14750,8 +14750,28 @@ fn run_call(
         .collect();
     // A database title that LOSAT does not report as NCBI does is an error before any
     // format is written.
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288 (quoted below)
+    // The first batch whose prefetch looks up a Seq-align id whose lookup fails on a file stops
+    // the run in its prefetch (`shared::batch_prefetch`, below): NCBI reads none of that batch's
+    // reports, nor any of the batches after it, so the checks of the reports are of the batches
+    // before it.
+    let prefetch_stop =
+        listed_titles
+            .as_ref()
+            .filter(|_| batches_prefetch)
+            .and_then(|titles| {
+                titles.prefetch_stop(&batch_ranges, &batch_prefetch, |span| {
+                    match &psiblast_prefetched {
+                        Some(ranks) => ranks[span].concat(),
+                        None => database::ListedTitles::reported_ranks(&hit_lists[span]).collect(),
+                    }
+                })
+            });
+    let reported_lists = &hit_lists[..prefetch_stop
+        .as_ref()
+        .map_or(hit_lists.len(), |span| span.start)];
     if let Some(titles) = listed_titles.as_ref() {
-        titles.check_reported_titles(&hit_lists)?;
+        titles.check_reported_titles(reported_lists)?;
         // The subjects with parsed Seq-ids that the reports asked for do not write as NCBI
         // (the formats that read a subject's Bioseq need its sequence found by its Seq-align
         // id, which a table of fields that read nothing of the subject does not; outfmt 0, 5 and
@@ -14776,7 +14796,7 @@ fn run_call(
         // the cut, where a PSSM is made; a reported subject that no PSSM reads and no format reads is
         // written as NCBI writes it (a `giim` id in rounds with `6 qseqid`, line DBID pssmrows).
         titles.check_parsed_reports(
-            &hit_lists,
+            reported_lists,
             &batch_prefetch,
             format_plans.iter().any(|outfmt| outfmt.reads_subjects()),
             format_plans.iter().any(|outfmt| match outfmt {
@@ -14841,6 +14861,18 @@ fn run_call(
     let pairwise_first = first_report
         .is_some_and(|format| blastp_pairwise_view_of(args.app, format as i32).is_some());
     if let (Some(titles), Some(database)) = (listed_titles.as_ref(), database) {
+        // Without `taxdb.bti` the prefetch of a table that reads the subjects writes nothing
+        // before it stops: the stopping batch's prefetch alone (`ListedTitles::prefetch_stop`).
+        if let Some(span) = prefetch_stop
+            .as_ref()
+            .filter(|_| !(prefetch_taxids || psiblast_prefetched.is_some() || prefetch_only))
+        {
+            titles.batch_prefetch(
+                database,
+                database::ListedTitles::reported_ranks(&hit_lists[span.clone()]),
+                span.start,
+            )?;
+        }
         if prefetch_taxids || psiblast_prefetched.is_some() || prefetch_only {
             // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0
             // too, which the prefetch does not: the rows of a batch with hits may open the
@@ -14974,7 +15006,7 @@ fn run_call(
                             prefetch_taxids,
                             !prefetch_only,
                         )?;
-                        titles.batch_prefetch(database, prefetched)?
+                        titles.batch_prefetch(database, prefetched, batch.searched.start)?
                     }
                     None => {
                         if !prefetch_taxids {
@@ -14986,6 +15018,7 @@ fn run_call(
                         titles.batch_prefetch(
                             database,
                             database::ListedTitles::reported_ranks(lists),
+                            batch.searched.start,
                         )?
                     }
                 };

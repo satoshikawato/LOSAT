@@ -1394,13 +1394,42 @@ impl ListedTitles<'_> {
         )
     }
 
+    /// The searched queries of the first batch of `batches` (each batch's searched queries, in
+    /// order) whose prefetch is on (`prefetch`) and reads a subject whose lookup fails on a file
+    /// with NCBI's exception (`ParsedSubject::prefetch_stops`): NCBI's prefetch stops the run
+    /// there (`shared::batch_prefetch`), before that batch's reports and those of the batches
+    /// after it. `ranks` gives the ranks that a batch's prefetch reads, by its searched queries.
+    pub(super) fn prefetch_stop<I: IntoIterator<Item = usize>>(
+        &self,
+        batches: &[std::ops::Range<usize>],
+        prefetch: &shared::BatchPrefetch,
+        ranks: impl Fn(std::ops::Range<usize>) -> I,
+    ) -> Option<std::ops::Range<usize>> {
+        if self.parsed.is_empty() {
+            return None;
+        }
+        batches
+            .iter()
+            .find(|span| {
+                !span.is_empty()
+                    && !prefetch.reads_one_by_one(span.start)
+                    && ranks((*span).clone()).into_iter().any(|rank| {
+                        self.parsed_subject(rank)
+                            .is_some_and(|subject| subject.prefetch_stops().is_some())
+                    })
+            })
+            .cloned()
+    }
+
     /// NCBI's prefetch of a query batch's subjects of ranks `ranks` on standard error
     /// (`shared::batch_prefetch`): the taxonomy texts of `prefetch_messages`, then the warning
-    /// where the prefetch fails at a subject whose lookup fails (a protein has no strand).
+    /// where the prefetch fails at a subject whose lookup fails (a protein has no strand); the
+    /// stop of the batch whose first query is `query` (`shared::batch_prefetch`).
     pub(super) fn batch_prefetch(
         &self,
         database: &BlastpDatabase,
         ranks: impl IntoIterator<Item = usize>,
+        query: usize,
     ) -> Result<Vec<u8>> {
         shared::batch_prefetch(
             &database.db,
@@ -1412,6 +1441,7 @@ impl ListedTitles<'_> {
                 )
             }),
             self.program,
+            query,
         )
     }
 
@@ -1422,9 +1452,11 @@ impl ListedTitles<'_> {
     /// nowhere is left out (the prefetch reads nothing for it). Such a failure is refused where
     /// the reports read the subjects they show (`reads`): the prefetch then leaves those after
     /// it unloaded, which NCBI's formatters read one by one (its scope can match an id of a
-    /// sequence read before weakly, as with the prefetch off). A lookup that fails on a file
-    /// (NCBI stops) and another sequence that NCBI can read for one and whose definition lines
-    /// do not hold its Seq-align id (NCBI stops) are refused. With `taxids`
+    /// sequence read before weakly, as with the prefetch off). One whose lookup fails on a file
+    /// with NCBI's exception (`ParsedSubject::prefetch_stops`) is kept: the batch's prefetch stops
+    /// there (`shared::batch_prefetch`). A lookup that fails on a file with LOSAT's error and
+    /// another sequence that NCBI can read for one and whose definition lines do not hold its
+    /// Seq-align id (NCBI stops) are refused. With `taxids`
     /// (`taxdb.bti` on the search path), one for which the prefetch reads another sequence that
     /// the lookup gives first is kept (`batch_prefetch` looks that sequence's taxids up), and one
     /// for which it can read either of two (`Prefetched::Another`) is refused where the taxonomy
@@ -1444,7 +1476,7 @@ impl ListedTitles<'_> {
                 kept.push(rank);
                 continue;
             };
-            if subject.prefetch_fails() && !reads {
+            if (subject.prefetch_fails() && !reads) || subject.prefetch_stops().is_some() {
                 kept.push(rank);
                 continue;
             }
@@ -1558,6 +1590,16 @@ impl ListedTitles<'_> {
                     continue;
                 };
                 let ordinal = self.listed.ordinals[rank];
+                // A lookup that fails on a file with NCBI's exception (a list of version 5
+                // databases with and without the accession table): the read catches it, so the
+                // PSSM reads no letters (`Failed to retrieve sequence`) and loads nothing.
+                if subject.prefetch_stops().is_some() {
+                    reads.read.insert(rank, None);
+                    if any_loads {
+                        reads.other_blobs.insert(rank, None);
+                    }
+                    continue;
+                }
                 // Also another holder of the id whose Bioseq the scope gets where it read it
                 // before (`shared::ScopeBioseq::instead`).
                 if let Err(reason) = subject.pssm_read(batch_reads.one_by_one(rank as u32)) {

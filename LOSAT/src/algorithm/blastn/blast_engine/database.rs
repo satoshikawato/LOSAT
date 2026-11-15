@@ -648,6 +648,7 @@ impl BlastnDatabase {
         titles: &DatabaseTitles,
         hit_lists: &[Option<BlastnHitList>],
         gapped: bool,
+        query: usize,
     ) -> Result<Vec<u8>> {
         let subjects = hit_lists
             .iter()
@@ -673,7 +674,7 @@ impl BlastnDatabase {
                     flipped,
                 }
             });
-        shared::batch_prefetch(&self.db, &self.taxdb, subjects, PROGRAM)
+        shared::batch_prefetch(&self.db, &self.taxdb, subjects, PROGRAM, query)
     }
 
     /// The `-db` value as NCBI keeps it (outfmt 7's `# Database:` line).

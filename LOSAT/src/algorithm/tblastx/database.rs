@@ -488,6 +488,7 @@ pub(crate) fn batch_prefetch(
     database: &TblastxDatabase,
     ordered: &[TblastxHsp],
     titles: &DatabaseTitles,
+    query: usize,
 ) -> Result<Vec<u8>> {
     let mut previous = None;
     let subjects = ordered.iter().map(|hsp| {
@@ -505,7 +506,7 @@ pub(crate) fn batch_prefetch(
             flipped,
         }
     });
-    shared::batch_prefetch(&database.db, &database.taxdb, subjects, PROGRAM)
+    shared::batch_prefetch(&database.db, &database.taxdb, subjects, PROGRAM, query)
 }
 
 /// The database sequences that the reports show, by rank (`reported_subjects`).

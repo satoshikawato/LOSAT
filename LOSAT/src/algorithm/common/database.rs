@@ -724,9 +724,10 @@ impl std::error::Error for PreliminaryReadError {}
 
 /// A reader error of NCBI's own while the definition lines of the final hit lists are
 /// read (`stored_title`), or while rpsblast's traceback of a batch reads a profile volume's
-/// sequence file (`rps_hooks::failed_batch_error`): `query` is the query whose hit list reached
-/// it (rpsblast: the batch's first query). NCBI fails that query's batch, after the reports of
-/// the batches before.
+/// sequence file (`rps_hooks::failed_batch_error`), or where a batch's prefetch looks up a
+/// Seq-align id whose lookup fails on a file (`batch_prefetch`): `query` is the query whose hit
+/// list reached it (rpsblast and the prefetch: the batch's first query). NCBI fails that query's
+/// batch, after the reports of the batches before.
 #[derive(Debug)]
 pub(crate) struct HeaderReadError {
     pub(crate) query: usize,
@@ -1533,9 +1534,10 @@ impl<'a> HeaderReader<'a> {
         }
         let failed = |error: SeqDbError| {
             (
-                Some(FoundInstead::Failed(
-                    error.ncbi_message().unwrap_or_else(|| error.to_string()),
-                )),
+                Some(FoundInstead::Failed(match error.ncbi_message() {
+                    Some(message) => crate::report::db_subject::LookupFailure::ncbi(message),
+                    None => crate::report::db_subject::LookupFailure::losat(error.to_string()),
+                })),
                 None,
                 None,
             )
@@ -4848,12 +4850,34 @@ impl<'s> PrefetchSubject<'s> {
 /// a text is refused: LOSAT does not model which of them NCBI loads before the failure. The caller
 /// writes the text where the batch's prefetch messages go, after the reader's messages of the
 /// batch and before the warnings of its first query.
+///
+/// A subject whose lookup fails on a file of the database with NCBI's own exception
+/// (`ParsedSubject::prefetch_stops`: a list of version 5 databases with and without the accession
+/// table) stops the run there: `Err` with a [`HeaderReadError`] of the batch's first query `query`
+/// (the searched queries of the call) whose error is NCBI's `BLAST Database error: <message>`
+/// (exit status 2). Each program writes then what NCBI wrote before: the prologs, the reports of
+/// the batches before (without the epilog) and the batch's reader messages. That batch is
+/// refused where the other subjects' loads write a text, which NCBI writes before the error or
+/// not as the order of the loads decides, and where another subject's lookup throws on its id
+/// (the prefetch catches that one and ends its loads, so whether it stops is that order's too).
 pub(crate) fn batch_prefetch<'s>(
     db: &SeqDb,
     run: &TaxdbRun,
     subjects: impl IntoIterator<Item = PrefetchSubject<'s>>,
     program: &str,
+    query: usize,
 ) -> Result<Vec<u8>> {
+    let subjects: Vec<PrefetchSubject<'s>> = subjects.into_iter().collect();
+    if let Some((ordinal, message)) = subjects.iter().find_map(|subject| {
+        subject
+            .parsed
+            .and_then(crate::report::db_subject::ParsedSubject::prefetch_stops)
+            .map(|message| (subject.ordinal, message))
+    }) {
+        return Err(prefetch_stop(
+            db, run, &subjects, program, query, ordinal, message,
+        ));
+    }
     let mut failed_lookup: Option<(u32, String)> = None;
     let mut fails = false;
     let mut uncertain: Option<(u32, String)> = None;
@@ -4917,6 +4941,64 @@ pub(crate) fn batch_prefetch<'s>(
         );
     }
     Ok(text)
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:781-784 (quoted at
+// `ParsedSubject::prefetched`)
+// ```c++
+//    } catch (const CSeqDBException& e) {
+//        throw;
+//    }
+// ```
+/// The end of a batch's prefetch at the subject `ordinal` whose lookup fails on a file with NCBI's
+/// `message` ([`batch_prefetch`]): the [`HeaderReadError`] of `query` with NCBI's `BLAST Database
+/// error`, or LOSAT's refusal where what NCBI writes before it depends on the order of the loads.
+fn prefetch_stop(
+    db: &SeqDb,
+    run: &TaxdbRun,
+    subjects: &[PrefetchSubject<'_>],
+    program: &str,
+    query: usize,
+    ordinal: u32,
+    message: &str,
+) -> anyhow::Error {
+    let refuse = |what: &str| {
+        parsed_refusal(
+            db.oid(ordinal),
+            &format!(
+                "has a Seq-align id whose lookup in the database fails ({message}), where NCBI BLAST+ 2.17.0's prefetch loads the batch's subjects in an order that LOSAT does not reproduce: {what}"
+            ),
+            program,
+        )
+    };
+    if subjects
+        .iter()
+        .any(|subject| subject.parsed.is_some_and(|parsed| parsed.prefetch_fails()))
+    {
+        return refuse("another subject of the batch has an id whose lookup throws, which the prefetch catches and which ends its loads");
+    }
+    let others = subjects.iter().filter(|subject| {
+        subject
+            .parsed
+            .is_none_or(|parsed| parsed.prefetch_stops().is_none())
+    });
+    match prefetch_messages(
+        db,
+        run,
+        others.map(|subject| (subject.ordinal, subject.parsed)),
+        program,
+    ) {
+        Ok(text) if text.is_empty() => anyhow::Error::new(HeaderReadError {
+            query,
+            error: NativeError {
+                exit: 2,
+                message: format!("BLAST Database error: {message}\n"),
+            }
+            .into(),
+        }),
+        Ok(_) => refuse("the taxonomy database's texts of the other subjects of the batch, which the prefetch may load before or not at all, are not known"),
+        Err(error) => error,
+    }
 }
 
 /// The volume of `db` that holds the taxid `last` and another positive taxid of the same slot of
@@ -6071,7 +6153,7 @@ mod taxdb_prepass_tests {
                 parsed: Some(&*subject),
                 flipped,
             };
-            batch_prefetch(&db, &run, [subject], "TBLASTX").unwrap()
+            batch_prefetch(&db, &run, [subject], "TBLASTX", 0).unwrap()
         };
         assert_eq!(prefetch(false), b"");
         assert_eq!(prefetch(true), warning);
@@ -6119,6 +6201,7 @@ mod taxdb_prepass_tests {
                     flipped: false,
                 }],
                 "BLASTN",
+                0,
             );
             assert_eq!(text(alone.unwrap()), warning);
             // With the other subject, whose load writes the offset error before the failed
@@ -6139,6 +6222,7 @@ mod taxdb_prepass_tests {
                     },
                 ],
                 "BLASTN",
+                0,
             );
             match taxdb {
                 None => assert_eq!(text(both.unwrap()), warning),
@@ -6163,6 +6247,7 @@ mod taxdb_prepass_tests {
                         flipped: false,
                     }],
                     "BLASTN",
+                    0,
                 );
                 assert_eq!(text(first.unwrap()), offset);
                 let later = batch_prefetch(
@@ -6181,6 +6266,7 @@ mod taxdb_prepass_tests {
                         },
                     ],
                     "BLASTN",
+                    0,
                 );
                 assert_eq!(text(later.unwrap()), warning);
             }
@@ -6211,6 +6297,7 @@ mod taxdb_prepass_tests {
                 },
             ],
             "BLASTN",
+            0,
         );
         assert_eq!(text(prefetch.unwrap()), format!("{offset}{warning}"));
         let run = TaxdbRun::default();
@@ -6223,6 +6310,7 @@ mod taxdb_prepass_tests {
                 flipped: false,
             }],
             "BLASTN",
+            0,
         );
         assert_eq!(text(plus.unwrap()), "");
         std::fs::remove_dir_all(&cwd).unwrap();

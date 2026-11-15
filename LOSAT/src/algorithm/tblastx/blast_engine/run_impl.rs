@@ -4166,11 +4166,29 @@ fn run_batch_loop(
                         }
                     }
                 } else if !ordered.is_empty() {
-                    let messages = super::super::database::batch_prefetch(
+                    let prefetch = super::super::database::batch_prefetch(
                         database,
                         ordered,
                         &reports.titles.borrow(),
-                    )?;
+                        start,
+                    );
+                    // A lookup that fails on a file stops the run in the prefetch
+                    // (`shared::batch_prefetch`): after the reports of the batches before and
+                    // this batch's reader messages, as a header file that NCBI cannot read.
+                    let messages = match prefetch {
+                        Ok(messages) => messages,
+                        Err(error) => match error
+                            .downcast::<crate::algorithm::common::database::HeaderReadError>()
+                        {
+                            Ok(failure) => {
+                                reports.write_before_failed_batch(outputs, done, &warnings)?;
+                                batch_warnings
+                                    .write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+                                return Err(failure.error);
+                            }
+                            Err(error) => return Err(error),
+                        },
+                    };
                     if plural_names && !ordered.is_empty() {
                         database.open_for_tabular_rows()?;
                     }

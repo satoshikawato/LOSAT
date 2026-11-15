@@ -1638,7 +1638,11 @@ pub(super) fn reported_batch(
                 diagnostics.write_all(&reported.take_query_fetches())?;
             }
         } else if !prefetch_off {
-            let messages = reported.batch_prefetch(database, results, options.gapped)?;
+            // A lookup that fails on a file stops the run here, after the reports of the
+            // batches before and this batch's reader messages (`shared::batch_prefetch`).
+            let messages = reported
+                .batch_prefetch(database, results, options.gapped, 0)
+                .map_err(reported_error)?;
             diagnostics.write_all(&messages)?;
         }
     }

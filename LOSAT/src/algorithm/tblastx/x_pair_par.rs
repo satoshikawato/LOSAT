@@ -78,9 +78,15 @@
 //!      s, so all c hits come first). Words do not span the sentinel, so the first c+1 hit is at
 //!      least `wordsize` + 1 letters after the last c hit (`diff >= wordsize`). With flag 0,
 //!      either diff >= window, or `query_offset - diff` lies in context c, the context check fails
-//!      (aa_ungapped.c:566-573) and `last_hit = s + D`. With flag 1, the c extension stopped at the
-//!      end of context c (the query slice ends there; NCBI: the sentinel scores BLAST_SCORE_MIN),
-//!      so `s_last_off - (wordsize - 1) < s` of the first c+1 hit and the hit resets the cell.
+//!      (aa_ungapped.c:566-573) and `last_hit = s + D`. With flag 1, the c extension's right walk
+//!      stopped at the NULLB after context c (NCBI's walk runs on the batch, and so does the units'
+//!      through `XHitCtx::query_batch`, extension/query_batch.rs; the NULLB's BLAST_SCORE_MIN ends
+//!      every walk of an X-drop of at most 32,768), so `s_last_off - (wordsize - 1) < s` of the
+//!      first c+1 hit and the hit resets the cell. A walk of a larger X-drop that passes the NULLB
+//!      without a new best writes a `last_hit` past it, which masks the c+1 hits under it in the
+//!      reference's cell, and in the unit's cell when c+1 is in the unit's group; a unit of another
+//!      group starts that cell fresh and extends them (not reproduced: line RG item X2c leaves the
+//!      choice to the maintainer).
 //!    - masked aliasing: raw diagonals d > d' share a reference cell when d - d' = m 2^k. Both
 //!      exist only if s_len >= slack + 2. Then for any hit (q, s) on d and (q', s') on d',
 //!      s' - s = m 2^k - (q - q') >= slack + 3: the cell sees all hits of d, then all of d', with
@@ -1443,6 +1449,9 @@ pub(super) struct XSubject<'a> {
     pub wordsize: i32,
     pub s_idx: usize,
     pub s_len: usize,
+    /// The search's failure: an extension that LOSAT refuses fails the search at this subject
+    /// (extension/query_batch.rs).
+    pub failure: &'a crate::algorithm::tblastx::subjects::XReadFailure,
 }
 
 /// One unit-context group: its contexts' lookup entries and their query-offset bounds.
@@ -1790,6 +1799,9 @@ struct XHitCtx<'a, M: TbxScore = Blosum62Score> {
     /// The search's matrix (`-matrix`; no data for BLOSUM62's instance): another matrix's
     /// extensions take its table walks (`extend_hit_two_hit_with`).
     sc: M,
+    /// The batch's contexts as the extensions read them past a context's ends, and the search's
+    /// failure (extension/query_batch.rs).
+    query_batch: QueryBatch<'a>,
 }
 
 /// Which branch of the two-hit test a hit took (tests read it; the unit loop ignores it).
@@ -3064,6 +3076,7 @@ impl<M: TbxScore> XPairPar<M> {
             s_idx: inp.s_idx,
             s_len: inp.s_len,
             sc: self.sc,
+            query_batch: QueryBatch::new(inp.contexts, inp.failure, inp.s_idx),
         };
 
         let base_seq_ranges: [(i32, i32); 1] = [(0, chunk.length as i32)];
@@ -3405,11 +3418,15 @@ fn x_hit<S: XInitSink, P: XProbe, M: TbxScore, const SENT: usize>(
         // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): with `SENT` the walks the sentinels stop, of
         // `SENT`-letter words.
         // Another matrix's extension takes its table walks (`extend_hit_two_hit_with`).
+        // NCBI's walks run on the query batch: past the context's ends they go on into it
+        // (extension/query_batch.rs; aa_ungapped.c:841, 897).
+        let in_batch = h.query_batch.at(ctx_idx);
         let (hsp_q_u, hsp_qe_u, hsp_s_u, _hsp_se_u, score, right_extend, s_last_off_u) =
             if !M::BLOSUM62 && SENT == 0 {
                 extend_hit_two_hit_with(
                     h.sc,
                     query,
+                    in_batch,
                     h.subject,
                     (last_hit + wordsize) as usize,
                     subject_offset as usize,
@@ -3420,6 +3437,7 @@ fn x_hit<S: XInitSink, P: XProbe, M: TbxScore, const SENT: usize>(
             } else if SENT == 0 {
                 extend_hit_two_hit_fitting(
                     query,
+                    in_batch,
                     h.subject,
                     (last_hit + wordsize) as usize,
                     subject_offset as usize,
@@ -3435,6 +3453,7 @@ fn x_hit<S: XInitSink, P: XProbe, M: TbxScore, const SENT: usize>(
                 unsafe {
                     h.sc.sent_two_hit_of::<SENT>(
                         query_full,
+                        in_batch,
                         h.subject_sent,
                         (last_hit + wordsize) as usize,
                         subject_offset as usize,
@@ -3899,6 +3918,7 @@ mod tests {
             let subject = &s_frame.aa_seq[1..s_frame.aa_seq.len() - 1];
             let mut init_hsps = Vec::new();
             if subject.len() >= wordsize as usize {
+                let failure = crate::algorithm::tblastx::subjects::XReadFailure::new();
                 let h = XHitCtx {
                     diag_offset: *diag_offset,
                     window,
@@ -3914,6 +3934,7 @@ mod tests {
                     s_idx: 0,
                     s_len: 999,
                     sc,
+                    query_batch: QueryBatch::new(contexts, &failure, 0),
                 };
                 let seq_ranges = [(0, subject.len() as i32)];
                 let mut scan_range = [0, 0, subject.len() as i32 - wordsize];
@@ -4045,6 +4066,7 @@ mod tests {
             wordsize: 3,
             s_idx: 0,
             s_len: 999,
+            failure: &crate::algorithm::tblastx::subjects::XReadFailure::new(),
         };
         let units = unit_lists(&pp, &inp);
         assert_eq!(
@@ -4398,6 +4420,7 @@ mod tests {
                 wordsize: 3,
                 s_idx: 0,
                 s_len: 999,
+                failure: &crate::algorithm::tblastx::subjects::XReadFailure::new(),
             };
             let pp = XPairPar {
                 groups: build_groups(&lookup, &contexts, X_MAX_GROUPS),
@@ -4534,6 +4557,7 @@ mod tests {
                 wordsize: 3,
                 s_idx: 0,
                 s_len: 999,
+                failure: &crate::algorithm::tblastx::subjects::XReadFailure::new(),
             };
             let plain = XPairPar {
                 groups: build_groups(&lookup, &contexts, X_MAX_GROUPS),
@@ -5615,6 +5639,7 @@ mod tests {
         s_frames: Vec<QueryFrame>,
         cutoff_scores: Vec<i32>,
         x_dropoff_per_context: Vec<i32>,
+        failure: crate::algorithm::tblastx::subjects::XReadFailure,
     }
 
     impl CompactCase {
@@ -5660,6 +5685,7 @@ mod tests {
                 x_dropoff_per_context: vec![16; contexts.len()],
                 contexts,
                 s_frames,
+                failure: crate::algorithm::tblastx::subjects::XReadFailure::new(),
             }
         }
 
@@ -5674,6 +5700,7 @@ mod tests {
                 wordsize: 3,
                 s_idx: 7,
                 s_len: 4_321,
+                failure: &self.failure,
             }
         }
     }
@@ -5977,6 +6004,7 @@ mod tests {
             wordsize: 3,
             s_idx: 3,
             s_len: 38,
+            failure: &crate::algorithm::tblastx::subjects::XReadFailure::new(),
         };
         for (ctx_idx, f) in [(0usize, 0usize), (65_535, 1), (65_536, 0), (70_000, 1)] {
             let ctx = &contexts[ctx_idx];
@@ -6179,6 +6207,7 @@ mod tests {
             x_dropoff_per_context: vec![16; contexts.len()],
             contexts,
             s_frames: vec![frame(2, &aa(&subject)), frame(-1, &aa(&shifted))],
+            failure: crate::algorithm::tblastx::subjects::XReadFailure::new(),
         }
     }
 
@@ -6588,6 +6617,7 @@ mod tests {
                 wordsize: word as i32,
                 s_idx: 0,
                 s_len: 999,
+                failure: &crate::algorithm::tblastx::subjects::XReadFailure::new(),
             };
             // Masked unit tables in about half of the cases (ratio 1: every unit whose unmasked
             // table is at least the masked one's size).

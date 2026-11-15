@@ -27,8 +27,8 @@ use super::{
     sort_init_hsps_by_score_ncbi, tblastx_scan_interiors, trace_hsp_target,
     trace_init_hsp_if_match, trace_match_target, x_soft_chunk, x_soft_scan_letters,
     x_tbx_sent_subject, AtomicOrdering, AtomicU64, DiagStruct, DiagnosticCounters, HashSet,
-    InitHSP, Instant, OffsetPair, QueryContext, QueryFrame, SubjectChunk, TblastxChunkScanResult,
-    TblastxChunkScanStats, TbxScore, TranslatedChunk, UngappedHit,
+    InitHSP, Instant, OffsetPair, QueryBatch, QueryContext, QueryFrame, SubjectChunk,
+    TblastxChunkScanResult, TblastxChunkScanStats, TbxScore, TranslatedChunk, UngappedHit,
 };
 use crate::algorithm::tblastx::lookup::BlastAaLookupTable;
 use crate::algorithm::tblastx::subjects::XReadFailure;
@@ -77,7 +77,8 @@ pub(super) struct WordFinderCx<'a> {
 /// `collect_hsp_saving_stats`), and the frame (`s_f_idx`, `s_frame`, its letters with and without
 /// the sentinels, and its `-lcase_masking` chunks with their ranges, `None` without lower-case
 /// letters). It also carries the batch's `WordFinderCx` (`cx`), which the four chunk scans read
-/// through it.
+/// through it, and the query batch as the subject's extensions read it (`query_batch`: the walks go
+/// on past a context's ends, and a search they refuse fails at this subject).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805-812 (the subject frame of
 /// the frame loop of `s_BlastSearchEngineCore`).
@@ -102,6 +103,7 @@ pub(super) struct FrameCx<'a> {
     pub(super) subject_full: &'a [u8],
     pub(super) subject_all: &'a [u8],
     pub(super) x_soft_calls: Option<&'a [(TranslatedChunk, Vec<(i32, i32)>)]>,
+    pub(super) query_batch: QueryBatch<'a>,
 }
 
 /// The chunk's values a hit reads, made once per chunk by each two-hit scan before its scan: the
@@ -501,11 +503,15 @@ pub(super) fn two_hit_one_hit<S: TbxScore>(
         } else {
             None
         };
+        // NCBI's walks run on the query batch (`query`, `query_offset`): past the context's ends
+        // they go on into it (extension/query_batch.rs; aa_ungapped.c:841, 897).
+        let in_batch = frame.query_batch.at(ctx_idx);
         let (hsp_q_u, hsp_qe_u, hsp_s_u, _hsp_se_u, score, right_extend, s_last_off_u) =
             if !subject_sent {
                 extend_hit_two_hit_with(
                     sc,
                     query,
+                    in_batch,
                     subject,
                     (last_hit + wordsize) as usize,
                     subject_offset as usize,
@@ -523,6 +529,7 @@ pub(super) fn two_hit_one_hit<S: TbxScore>(
                 unsafe {
                     sc.sent_two_hit(
                         query_full,
+                        in_batch,
                         subject_full,
                         (last_hit + wordsize) as usize,
                         subject_offset as usize,
@@ -1382,9 +1389,12 @@ fn scan_chunk_one_hit<S: TbxScore>(
                 // blast_query_info.c:311-315), as the two-hit extensions read them.
                 let query = &ctx.aa_seq[1..ctx.aa_seq.len() - 1];
                 // [C] score = s_BlastAaExtendOneHit(matrix, subject, query, ...);
+                // The walks go on into the query batch past the context's ends, as NCBI's do
+                // (extension/query_batch.rs; aa_ungapped.c:841, 897).
                 let Some(hit) = crate::algorithm::tblastx::extension::extend_hit_one_hit(
                     sc,
                     query,
+                    frame.query_batch.at(ctx_idx),
                     subject,
                     q_raw,
                     subject_offset as usize,

@@ -87,7 +87,7 @@ pub(crate) use super::diagnostics::{
     diagnostics_enabled, print_summary as print_diagnostics_summary, DiagnosticCounters,
 };
 pub(crate) use super::extension::{
-    convert_coords, extend_hit_two_hit_fitting, extend_hit_two_hit_with,
+    convert_coords, extend_hit_two_hit_fitting, extend_hit_two_hit_with, QueryBatch,
 };
 // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): extension/x_two_hit_fast.rs.
 pub(crate) use super::extension::{x_tbx_sent_contexts, x_tbx_sent_subject};

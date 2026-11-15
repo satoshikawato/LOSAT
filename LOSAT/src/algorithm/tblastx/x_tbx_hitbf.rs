@@ -913,6 +913,7 @@ mod tests {
                 wordsize: 3,
                 s_idx: 0,
                 s_len: 999,
+                failure: &crate::algorithm::tblastx::subjects::XReadFailure::new(),
             };
             let mut scratch = XScratch::new(false);
             for (f, s_frame) in s_frames.iter().enumerate() {

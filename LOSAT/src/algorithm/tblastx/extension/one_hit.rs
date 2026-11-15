@@ -2,6 +2,7 @@
 //!
 //! Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c
 
+use super::query_batch::InBatch;
 use super::two_hit::{extend_left_ungapped, extend_right_ungapped};
 use crate::algorithm::tblastx::scoring::TbxScore;
 
@@ -60,11 +61,13 @@ pub(crate) struct OneHit {
 /// `q_seq` and a chunk's `s_seq`, from the word at `q_off` and `s_off`; `None` if the word does not
 /// fit in both. `init_hit_width` is taken from the last reset of the running sum, so the length is 0
 /// or negative when the sum is reset after its best part. The left and right walks are the two-hit
-/// extension's (`s_BlastAaExtendLeft` and `s_BlastAaExtendRight`), which stop at the slices' ends
-/// where NCBI stops at the contexts' and the frames' NULLB (BLAST_SCORE_MIN).
+/// extension's (`s_BlastAaExtendLeft` and `s_BlastAaExtendRight`): they stop at the subject
+/// slice's ends, and at the context's ends they go on into the query batch `qb` as NCBI's walks do
+/// (query_batch.rs).
 pub(crate) fn extend_hit_one_hit<S: TbxScore>(
     sc: S,
     q_seq: &[u8],
+    qb: InBatch<'_>,
     s_seq: &[u8],
     q_off: usize,
     s_off: usize,
@@ -93,11 +96,12 @@ pub(crate) fn extend_hit_one_hit<S: TbxScore>(
     let s_right_off = q_right_off + s_off - q_off;
     // `extend_left_ungapped` walks from the letter before the offsets it is given.
     let (left_score, left_disp) =
-        extend_left_ungapped(sc, q_seq, s_seq, q_left_off, s_left_off, score, x_drop);
+        extend_left_ungapped(sc, q_seq, qb, s_seq, q_left_off, s_left_off, score, x_drop);
     // `last` is the walk's `i` at its end: `*s_last_off = s_off + i`.
     let (total_score, right_disp, last) = extend_right_ungapped(
         sc,
         q_seq,
+        qb,
         s_seq,
         q_right_off + 1,
         s_right_off + 1,

@@ -5377,6 +5377,7 @@ fn search_query_batch<S: TbxScore>(
                 x_board_batch: &x_board_batch,
                 x_seed_end,
                 x_pair_lut_is_stub,
+                x_read_failure: &x_read_failure,
             },
             x_units_stage,
             &mut x_lap,

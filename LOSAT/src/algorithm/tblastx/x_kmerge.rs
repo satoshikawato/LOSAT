@@ -691,6 +691,7 @@ mod tests {
                     wordsize: 3,
                     s_idx: 0,
                     s_len: 0,
+                    failure: &crate::algorithm::tblastx::subjects::XReadFailure::new(),
                 };
                 let unit = XExpand {
                     f: 0,
@@ -731,6 +732,7 @@ mod tests {
             wordsize: 3,
             s_idx: 0,
             s_len: 0,
+            failure: &crate::algorithm::tblastx::subjects::XReadFailure::new(),
         };
         let unit = XExpand {
             f: 0,

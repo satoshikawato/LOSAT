@@ -3,6 +3,9 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c
 
 use crate::algorithm::tblastx::scoring::{Blosum62Score, TbxScore};
+// Where the context's letters lie in the query batch: NCBI's walks go on past the context's ends
+// (query_batch.rs).
+use super::query_batch::InBatch;
 // The table walks of the two-hit extension (x_two_hit_fast.rs).
 use super::x_two_hit_fast;
 
@@ -18,6 +21,7 @@ use super::x_two_hit_fast;
 fn extend_left_ungapped_scalar<S: TbxScore>(
     sc: S,
     q_seq: &[u8],
+    qb: InBatch<'_>,
     s_seq: &[u8],
     q_off: usize,
     s_off: usize,
@@ -48,6 +52,12 @@ fn extend_left_ungapped_scalar<S: TbxScore>(
         }
         i += 1;
     }
+    // NCBI's `n = MIN(s_off, q_off)` counts the batch's letters before the walk (aa_ungapped.c:897):
+    // a walk that read the context's first letter without a break, where the subject has letters
+    // left, goes on before the context (query_batch.rs).
+    if i == max_left && q_off < s_off {
+        qb.left_past_start(sc, s_seq, s_off - q_off, score, max_score, x_drop);
+    }
 
     (max_score, left_disp)
 }
@@ -77,6 +87,7 @@ fn extend_left_ungapped_scalar<S: TbxScore>(
 unsafe fn extend_left_ungapped_simd128<S: TbxScore>(
     sc: S,
     q_seq: &[u8],
+    qb: InBatch<'_>,
     s_seq: &[u8],
     q_off: usize,
     s_off: usize,
@@ -155,6 +166,11 @@ unsafe fn extend_left_ungapped_simd128<S: TbxScore>(
         }
         i += 1;
     }
+    // As in `extend_left_ungapped_scalar` (aa_ungapped.c:897): the block loop returns at a break,
+    // so `i == max_left` is a walk that read the context's first letter without one.
+    if i == max_left && q_off < s_off {
+        qb.left_past_start(sc, s_seq, s_off - q_off, score, max_score, x_drop);
+    }
 
     (max_score, left_disp)
 }
@@ -163,6 +179,7 @@ unsafe fn extend_left_ungapped_simd128<S: TbxScore>(
 pub(super) fn extend_left_ungapped<S: TbxScore>(
     sc: S,
     q_seq: &[u8],
+    qb: InBatch<'_>,
     s_seq: &[u8],
     q_off: usize,
     s_off: usize,
@@ -187,7 +204,7 @@ pub(super) fn extend_left_ungapped<S: TbxScore>(
         // exact scalar NCBI control flow available for native-vs-Wasm parity
         // isolation while leaving production SIMD builds unchanged.
         unsafe {
-            extend_left_ungapped_simd128(sc, q_seq, s_seq, q_off, s_off, initial_score, x_drop)
+            extend_left_ungapped_simd128(sc, q_seq, qb, s_seq, q_off, s_off, initial_score, x_drop)
         }
     }
     #[cfg(not(all(
@@ -196,7 +213,7 @@ pub(super) fn extend_left_ungapped<S: TbxScore>(
         not(feature = "tblastx-wasm-scalar")
     )))]
     {
-        extend_left_ungapped_scalar(sc, q_seq, s_seq, q_off, s_off, initial_score, x_drop)
+        extend_left_ungapped_scalar(sc, q_seq, qb, s_seq, q_off, s_off, initial_score, x_drop)
     }
 }
 
@@ -210,6 +227,7 @@ pub(super) fn extend_left_ungapped<S: TbxScore>(
 fn extend_right_ungapped_scalar<S: TbxScore>(
     sc: S,
     q_seq: &[u8],
+    qb: InBatch<'_>,
     s_seq: &[u8],
     q_start: usize,
     s_start: usize,
@@ -242,6 +260,24 @@ fn extend_right_ungapped_scalar<S: TbxScore>(
         }
         j += 1;
     }
+    // NCBI's `n = MIN(subject->length - s_off, query->length - q_off)` counts the batch's letters
+    // after the walk (aa_ungapped.c:841): a walk that read the context's last letter without a
+    // break, where the subject has letters left, goes on after the context (query_batch.rs), and
+    // its count is NCBI's `i` there (`*s_last_off = s_off + i`). The one-hit extension can start
+    // the walk one past the context's end (`extend_hit_one_hit`): NCBI's walk starts on the next
+    // context's first letter there.
+    if q_start + j >= q_limit && s_start + j < s_limit {
+        j = qb.right_past_end(
+            sc,
+            s_seq,
+            s_start + j,
+            q_start + j,
+            j,
+            score,
+            max_score,
+            x_drop,
+        );
+    }
 
     (max_score, right_disp, j)
 }
@@ -267,6 +303,7 @@ fn extend_right_ungapped_scalar<S: TbxScore>(
 unsafe fn extend_right_ungapped_simd128<S: TbxScore>(
     sc: S,
     q_seq: &[u8],
+    qb: InBatch<'_>,
     s_seq: &[u8],
     q_start: usize,
     s_start: usize,
@@ -277,7 +314,11 @@ unsafe fn extend_right_ungapped_simd128<S: TbxScore>(
 
     let q_limit = q_seq.len();
     let s_limit = s_seq.len();
-    let n = (q_limit - q_start).min(s_limit - s_start);
+    // The one-hit extension can start the walk one past either slice's end (`extend_hit_one_hit`):
+    // no step there, as in the scalar walk's loop test.
+    let n = q_limit
+        .saturating_sub(q_start)
+        .min(s_limit.saturating_sub(s_start));
 
     let mut score = initial_score;
     let mut max_score = initial_score;
@@ -346,6 +387,20 @@ unsafe fn extend_right_ungapped_simd128<S: TbxScore>(
         }
         j += 1;
     }
+    // As in `extend_right_ungapped_scalar` (aa_ungapped.c:841): the block loop returns at a break,
+    // so `j == n` is a walk that read the context's last letter, or the subject's, without one.
+    if q_start + j >= q_limit && s_start + j < s_limit {
+        j = qb.right_past_end(
+            sc,
+            s_seq,
+            s_start + j,
+            q_start + j,
+            j,
+            score,
+            max_score,
+            x_drop,
+        );
+    }
 
     (max_score, right_disp, j)
 }
@@ -354,6 +409,7 @@ unsafe fn extend_right_ungapped_simd128<S: TbxScore>(
 pub(super) fn extend_right_ungapped<S: TbxScore>(
     sc: S,
     q_seq: &[u8],
+    qb: InBatch<'_>,
     s_seq: &[u8],
     q_start: usize,
     s_start: usize,
@@ -378,7 +434,16 @@ pub(super) fn extend_right_ungapped<S: TbxScore>(
         // exact scalar NCBI control flow available for native-vs-Wasm parity
         // isolation while leaving production SIMD builds unchanged.
         unsafe {
-            extend_right_ungapped_simd128(sc, q_seq, s_seq, q_start, s_start, initial_score, x_drop)
+            extend_right_ungapped_simd128(
+                sc,
+                q_seq,
+                qb,
+                s_seq,
+                q_start,
+                s_start,
+                initial_score,
+                x_drop,
+            )
         }
     }
     #[cfg(not(all(
@@ -387,7 +452,16 @@ pub(super) fn extend_right_ungapped<S: TbxScore>(
         not(feature = "tblastx-wasm-scalar")
     )))]
     {
-        extend_right_ungapped_scalar(sc, q_seq, s_seq, q_start, s_start, initial_score, x_drop)
+        extend_right_ungapped_scalar(
+            sc,
+            q_seq,
+            qb,
+            s_seq,
+            q_start,
+            s_start,
+            initial_score,
+            x_drop,
+        )
     }
 }
 
@@ -400,6 +474,7 @@ pub(super) fn extend_right_ungapped<S: TbxScore>(
 #[inline]
 pub(crate) fn extend_hit_two_hit_fitting(
     q_seq: &[u8],
+    qb: InBatch<'_>,
     s_seq: &[u8],
     s_left_off: usize,
     s_right_off: usize,
@@ -417,6 +492,7 @@ pub(crate) fn extend_hit_two_hit_fitting(
     extend_hit_two_hit_reference(
         Blosum62Score,
         q_seq,
+        qb,
         s_seq,
         s_left_off,
         s_right_off,
@@ -435,6 +511,7 @@ pub(crate) fn extend_hit_two_hit_fitting(
 pub(crate) fn extend_hit_two_hit_with<S: TbxScore>(
     sc: S,
     q_seq: &[u8],
+    qb: InBatch<'_>,
     s_seq: &[u8],
     s_left_off: usize,
     s_right_off: usize,
@@ -445,6 +522,7 @@ pub(crate) fn extend_hit_two_hit_with<S: TbxScore>(
     if S::BLOSUM62 {
         return extend_hit_two_hit_fitting(
             q_seq,
+            qb,
             s_seq,
             s_left_off,
             s_right_off,
@@ -463,6 +541,7 @@ pub(crate) fn extend_hit_two_hit_with<S: TbxScore>(
     extend_hit_two_hit_reference(
         sc,
         q_seq,
+        qb,
         s_seq,
         s_left_off,
         s_right_off,
@@ -484,6 +563,7 @@ pub(crate) fn extend_hit_two_hit_with<S: TbxScore>(
 #[inline(always)]
 pub(crate) unsafe fn extend_hit_two_hit_sent(
     q_full: &[u8],
+    qb: InBatch<'_>,
     s_full: &[u8],
     s_left_off: usize,
     s_right_off: usize,
@@ -497,6 +577,7 @@ pub(crate) unsafe fn extend_hit_two_hit_sent(
         Some(r) => r,
         None => extend_hit_two_hit_sent_refused(
             q_full,
+            qb,
             s_full,
             s_left_off,
             s_right_off,
@@ -514,6 +595,7 @@ pub(crate) unsafe fn extend_hit_two_hit_sent(
 #[inline(never)]
 fn extend_hit_two_hit_sent_refused(
     q_full: &[u8],
+    qb: InBatch<'_>,
     s_full: &[u8],
     s_left_off: usize,
     s_right_off: usize,
@@ -522,6 +604,7 @@ fn extend_hit_two_hit_sent_refused(
 ) -> (usize, usize, usize, usize, i32, bool, usize) {
     extend_hit_two_hit_fitting(
         &q_full[1..q_full.len() - 1],
+        qb,
         &s_full[1..s_full.len() - 1],
         s_left_off,
         s_right_off,
@@ -536,6 +619,9 @@ fn extend_hit_two_hit_sent_refused(
 pub(super) fn extend_hit_two_hit_reference<S: TbxScore>(
     sc: S,
     q_seq: &[u8],
+    // Where `q_seq` lies in the query batch: the walks go on past its ends as NCBI's do on the
+    // batch (aa_ungapped.c:841, 897; query_batch.rs).
+    qb: InBatch<'_>,
     s_seq: &[u8],
     s_left_off: usize,  // Position of first hit (L) in subject
     s_right_off: usize, // Position of second hit (R) in subject
@@ -590,7 +676,7 @@ pub(super) fn extend_hit_two_hit_reference<S: TbxScore>(
     // Stop codons have very negative scores in BLOSUM62 (-4 to -5), so X-drop handles them.
     // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:886-921
     let (left_score, left_disp) =
-        extend_left_ungapped(sc, q_seq, s_seq, q_right_off, s_right_off, 0, x_drop);
+        extend_left_ungapped(sc, q_seq, qb, s_seq, q_right_off, s_right_off, 0, x_drop);
 
     // Check if left extension reached the first hit
     // The distance from R to L is (s_right_off - s_left_off)
@@ -614,6 +700,7 @@ pub(super) fn extend_hit_two_hit_reference<S: TbxScore>(
         let (new_max_score, new_right_disp, j) = extend_right_ungapped(
             sc,
             q_seq,
+            qb,
             s_seq,
             q_right_off,
             s_right_off,
@@ -689,7 +776,9 @@ pub(super) fn extend_hit_two_hit_reference<S: TbxScore>(
 // with the search's scores and word length, for the statistics of the unit path
 // (tblastx/x_unit_probe.rs). It repeats the call's scalar loops (the same sums and the same stops,
 // aa_ungapped.c:846-866 and 886-921) and counts their steps; the search never calls it. The test
-// below checks that it returns what the call returns.
+// below checks that it returns what the call returns. It counts the cells of the context alone
+// (`InBatch::ALONE`): a walk that goes on into the query batch past the context's ends (a raw
+// X-drop above 32,768) takes more cells and may end elsewhere than it counts.
 /// What one call of `extend_hit_two_hit_reference` scored, and its result.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct XTwoHitCells {
@@ -705,8 +794,9 @@ pub(crate) struct XTwoHitCells {
     pub(crate) result: (usize, usize, usize, usize, i32, bool, usize),
 }
 
-/// The cells of `extend_hit_two_hit_reference(sc, q_seq, s_seq, s_left_off, s_right_off,
-/// q_right_off, x_drop, false)`: the scores of `sc` and its word length (`TbxScore::word`).
+/// The cells of `extend_hit_two_hit_reference(sc, q_seq, InBatch::ALONE, s_seq, s_left_off,
+/// s_right_off, q_right_off, x_drop, false)`: the scores of `sc` and its word length
+/// (`TbxScore::word`).
 pub(crate) fn x_two_hit_cells<S: TbxScore>(
     sc: S,
     q_seq: &[u8],
@@ -822,12 +912,29 @@ mod x_cells_tests {
             let (cells, result) = match sc {
                 None => (
                     x_two_hit_cells(Blosum62Score, &q, &s, s_left, s_right, q_right, x_drop),
-                    extend_hit_two_hit_fitting(&q, &s, s_left, s_right, q_right, x_drop, false),
+                    extend_hit_two_hit_fitting(
+                        &q,
+                        InBatch::ALONE,
+                        &s,
+                        s_left,
+                        s_right,
+                        q_right,
+                        x_drop,
+                        false,
+                    ),
                 ),
                 Some(sc) => (
                     x_two_hit_cells(sc, &q, &s, s_left, s_right, q_right, x_drop),
                     extend_hit_two_hit_reference(
-                        sc, &q, &s, s_left, s_right, q_right, x_drop, false,
+                        sc,
+                        &q,
+                        InBatch::ALONE,
+                        &s,
+                        s_left,
+                        s_right,
+                        q_right,
+                        x_drop,
+                        false,
                     ),
                 ),
             };

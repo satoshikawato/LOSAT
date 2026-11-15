@@ -317,7 +317,7 @@ pub(crate) struct XReadFailure {
 }
 
 impl XReadFailure {
-    pub(crate) fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {
             first: AtomicUsize::new(usize::MAX),
             failed: Mutex::new(None),

@@ -1,0 +1,177 @@
+//! TBLASTX's ungapped extensions past the end of a query frame (`tblastx::extension::QueryBatch`):
+//! the searches that LOSAT refuses because such an extension scores higher in the next frame of the
+//! query batch (PD-LOSAT-NCBI-DEFECTS, rule 3), at 1, 4 and 8 threads. The searches where it does
+//! not, which NCBI BLAST+ 2.17.0 reports as LOSAT does, are rows `x2c.tblastx.*` of
+//! `tests/outfmt0_manifest.tsv`.
+//!
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:841 and :897
+//! ```c
+//!     n = MIN(subject->length - s_off, query->length - q_off);
+//! ...
+//!     n = MIN(s_off, q_off);
+//! ```
+//! The walks count the letters of the whole query batch, so they read the NULLB between two frames
+//! (BLAST_SCORE_MIN) and go on into the next frame while the X-drop allows it. Where they score
+//! higher there, NCBI keeps the HSP in the seed's frame with query offsets outside it
+//! (`s_AdjustInitialHSPOffsets`, blast_gapalign.c:2384-2392, whose `ASSERT(q_start >= 0)` is not in
+//! release builds). The inputs (`tests/fasta/outfmt0/x2c_*`, written by line RG's `gen_x2c.py`):
+//! - `d7k` (`-matrix PAM250 -threshold 999 -seg no -xdrop_ungap 20000 -evalue 1e-20`): frame 1 of
+//!   the query ends with 7,000 letters of F, I and L, frame 2 starts with 40 letters of W, C and H
+//!   (P); the subject's frame 1 holds the 7,000 letters mapped to Y, V and M, a G and P. P's seed
+//!   extends left over the NULLB into frame 1 (+35,000 there). NCBI drops that HSP from its report
+//!   (139 rows; LOSAT's dev build had 140, P/P among them), 0.19 s.
+//! - `e7k` (the same options): the same from frame -1 back into frame 3. NCBI reports the HSP as
+//!   `0.000 7040 7040 0 42245 21126 1 21120 0.0 11314` (`-outfmt "6 std ..."`): a query start of
+//!   42,245 in a query of 21,122 bases, no identities.
+//! - `g48` (`-seg no -threshold 999 -xdrop_ungap 20000 -evalue 1e-20`): frame 1 ends with 4,800
+//!   letters of W C H P Y F N D G, frame 2 starts with another 4,800; the subject holds both, one G
+//!   apart. The right walk of the first passes the NULLB with 35,000 and gains past it: NCBI reports
+//!   `49.995 9601 4801 0 14404 43206 1 28803 0.0 17110`, a query end of 43,206 in a query of 28,803.
+//! - `d7k` with `-window_size 0`: the one-hit word finder's extension, the same refusal.
+
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+
+/// The refusal's message on standard error.
+const REFUSAL: &str = "Error: an ungapped extension that passes the end of a query frame into \
+the frame next to it in the query batch and scores higher there";
+
+fn manifest_path(relative: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join(relative)
+}
+
+/// `losat tblastx` from LOSAT/ on `tests/fasta/outfmt0/x2c_<case>_{q,s}.fna` with no `LOSAT_*`
+/// variable but `LOSAT_BLASTX_WORKER_LOG` (a binary built with the `blastx-worker-probe` feature
+/// needs that file name once a search has more than one thread; it selects nothing) and none of the
+/// other variables that change a search (the list of `tests/blastn_window_masker.rs`).
+fn tblastx(case: &str, args: &[&str], threads: u32) -> Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
+    for (name, _) in std::env::vars_os() {
+        let text = name.to_string_lossy();
+        if text.starts_with("LOSAT_")
+            || text.starts_with("NCBI")
+            || matches!(
+                text.as_ref(),
+                "BATCH_SIZE"
+                    | "CHUNK_SIZE"
+                    | "OVERLAP_CHUNK_SIZE"
+                    | "RAYON_NUM_THREADS"
+                    | "BLASTDB"
+                    | "ARCHIVE_FORMAT"
+                    | "WINDOW_MASKER_PATH"
+                    | "BLAST_USAGE_REPORT"
+                    | "BL2SEQ_LEGACY"
+                    | "CTOOLKIT_COMPATIBLE"
+                    | "OLD_FSC"
+                    | "ADAPTIVE_CBS"
+                    | "PRE_FETCH_SEQS_LIMIT"
+            )
+        {
+            command.env_remove(name);
+        }
+    }
+    let log = std::env::temp_dir().join(format!(
+        "losat_tblastx_query_batch_{}_{case}_{threads}.log",
+        std::process::id()
+    ));
+    let output = command
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("LOSAT_BLASTX_WORKER_LOG", &log)
+        .arg("tblastx")
+        .arg("-query")
+        .arg(manifest_path(&format!(
+            "tests/fasta/outfmt0/x2c_{case}_q.fna"
+        )))
+        .arg("-subject")
+        .arg(manifest_path(&format!(
+            "tests/fasta/outfmt0/x2c_{case}_s.fna"
+        )))
+        .args(args)
+        .args(["-outfmt", "6", "-num_threads", &threads.to_string()])
+        .output()
+        .expect("run LOSAT");
+    let _ = std::fs::remove_file(&log);
+    output
+}
+
+/// The search of `case` with `args` is refused at 1, 4 and 8 threads: exit status 1, no report, the
+/// refusal's message.
+fn refused(case: &str, args: &[&str]) {
+    for threads in [1, 4, 8] {
+        let output = tblastx(case, args, threads);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(
+            output.status.code(),
+            Some(1),
+            "{case} threads {threads}: {stderr}"
+        );
+        assert!(
+            output.stdout.is_empty(),
+            "{case} threads {threads}: no report"
+        );
+        assert!(
+            stderr.starts_with(REFUSAL)
+                && stderr.ends_with("is not supported by LOSAT's TBLASTX\n"),
+            "{case} threads {threads}: {stderr}"
+        );
+        assert_eq!(
+            stderr.lines().count(),
+            1,
+            "{case} threads {threads}: {stderr}"
+        );
+    }
+}
+
+const PAM250_LEFT: [&str; 10] = [
+    "-matrix",
+    "PAM250",
+    "-threshold",
+    "999",
+    "-seg",
+    "no",
+    "-xdrop_ungap",
+    "20000",
+    "-evalue",
+    "1e-20",
+];
+
+/// `d7k`: a left walk from frame 2 that gains in frame 1.
+#[test]
+fn a_left_walk_that_gains_in_the_previous_frame_is_refused() {
+    refused("d7k", &PAM250_LEFT);
+}
+
+/// `e7k`: a left walk from frame -1 that gains in frame 3.
+#[test]
+fn a_left_walk_from_a_minus_frame_that_gains_in_frame_3_is_refused() {
+    refused("e7k", &PAM250_LEFT);
+}
+
+/// `g48`: a right walk from frame 1 that gains in frame 2.
+#[test]
+fn a_right_walk_that_gains_in_the_next_frame_is_refused() {
+    refused(
+        "g48",
+        &[
+            "-threshold",
+            "999",
+            "-seg",
+            "no",
+            "-xdrop_ungap",
+            "20000",
+            "-evalue",
+            "1e-20",
+        ],
+    );
+}
+
+/// `d7k` with the one-hit word finder (`-window_size 0`).
+#[test]
+fn a_one_hit_extension_that_gains_in_the_previous_frame_is_refused() {
+    let args: Vec<&str> = PAM250_LEFT
+        .iter()
+        .copied()
+        .chain(["-window_size", "0"])
+        .collect();
+    refused("d7k", &args);
+}

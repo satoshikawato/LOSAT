@@ -32,7 +32,7 @@
 
 use super::extension::{
     extend_hit_two_hit_sent, extend_hit_two_hit_with, matrix_walk_table, two_hit_in, two_hit_in2,
-    two_hit_in4, two_hit_sent_in, MatrixWalkTable, TwoHit,
+    two_hit_in4, two_hit_sent_in, InBatch, MatrixWalkTable, TwoHit,
 };
 use crate::config::ScoringMatrix;
 use crate::utils::matrix::{blosum62_score, protein_score, BLASTAA_SIZE};
@@ -71,8 +71,8 @@ pub(crate) trait TbxScore: Copy + Send + Sync {
         false
     }
 
-    /// `extend_hit_two_hit_with(self, &q_full[1..q_full.len() - 1], &s_full[1..s_full.len() - 1],
-    /// .., false)` with the walks the sentinels stop.
+    /// `extend_hit_two_hit_with(self, &q_full[1..q_full.len() - 1], qb, &s_full[1..s_full.len() -
+    /// 1], .., false)` with the walks the sentinels stop.
     ///
     /// SAFETY: `self.x_sent_walks()`, `q_full` is a context buffer `sent_contexts` accepted and
     /// `s_full` a frame buffer `sent_subject` accepted; the word at `q_right_off` and
@@ -82,6 +82,7 @@ pub(crate) trait TbxScore: Copy + Send + Sync {
     unsafe fn sent_two_hit(
         self,
         q_full: &[u8],
+        qb: InBatch<'_>,
         s_full: &[u8],
         s_left_off: usize,
         s_right_off: usize,
@@ -91,6 +92,7 @@ pub(crate) trait TbxScore: Copy + Send + Sync {
         extend_hit_two_hit_with(
             self,
             &q_full[1..q_full.len() - 1],
+            qb,
             &s_full[1..s_full.len() - 1],
             s_left_off,
             s_right_off,
@@ -111,6 +113,7 @@ pub(crate) trait TbxScore: Copy + Send + Sync {
     unsafe fn sent_two_hit_of<const W: usize>(
         self,
         q_full: &[u8],
+        qb: InBatch<'_>,
         s_full: &[u8],
         s_left_off: usize,
         s_right_off: usize,
@@ -121,7 +124,17 @@ pub(crate) trait TbxScore: Copy + Send + Sync {
         // assert in the arm of SENT = 3).
         debug_assert_eq!(W, self.word());
         // SAFETY: the caller's.
-        unsafe { self.sent_two_hit(q_full, s_full, s_left_off, s_right_off, q_right_off, x_drop) }
+        unsafe {
+            self.sent_two_hit(
+                q_full,
+                qb,
+                s_full,
+                s_left_off,
+                s_right_off,
+                q_right_off,
+                x_drop,
+            )
+        }
     }
 
     /// `extend_hit_two_hit_reference(self, ..)` (debug output off) from the table walks of
@@ -168,6 +181,7 @@ impl TbxScore for Blosum62Score {
     unsafe fn sent_two_hit(
         self,
         q_full: &[u8],
+        qb: InBatch<'_>,
         s_full: &[u8],
         s_left_off: usize,
         s_right_off: usize,
@@ -176,7 +190,15 @@ impl TbxScore for Blosum62Score {
     ) -> TwoHit {
         // SAFETY: the caller's.
         unsafe {
-            extend_hit_two_hit_sent(q_full, s_full, s_left_off, s_right_off, q_right_off, x_drop)
+            extend_hit_two_hit_sent(
+                q_full,
+                qb,
+                s_full,
+                s_left_off,
+                s_right_off,
+                q_right_off,
+                x_drop,
+            )
         }
     }
 }
@@ -293,6 +315,7 @@ impl TbxScore for MatrixScore<'_> {
     unsafe fn sent_two_hit(
         self,
         q_full: &[u8],
+        qb: InBatch<'_>,
         s_full: &[u8],
         s_left_off: usize,
         s_right_off: usize,
@@ -341,6 +364,7 @@ impl TbxScore for MatrixScore<'_> {
             None => x_matrix_sent_refused(
                 self,
                 q_full,
+                qb,
                 s_full,
                 s_left_off,
                 s_right_off,
@@ -357,6 +381,7 @@ impl TbxScore for MatrixScore<'_> {
     unsafe fn sent_two_hit_of<const W: usize>(
         self,
         q_full: &[u8],
+        qb: InBatch<'_>,
         s_full: &[u8],
         s_left_off: usize,
         s_right_off: usize,
@@ -403,6 +428,7 @@ impl TbxScore for MatrixScore<'_> {
             None => x_matrix_sent_refused(
                 self,
                 q_full,
+                qb,
                 s_full,
                 s_left_off,
                 s_right_off,
@@ -476,6 +502,7 @@ impl TbxScore for MatrixScore<'_> {
 fn x_matrix_sent_refused(
     sc: MatrixScore<'_>,
     q_full: &[u8],
+    qb: InBatch<'_>,
     s_full: &[u8],
     s_left_off: usize,
     s_right_off: usize,
@@ -485,6 +512,7 @@ fn x_matrix_sent_refused(
     extend_hit_two_hit_with(
         sc,
         &q_full[1..q_full.len() - 1],
+        qb,
         &s_full[1..s_full.len() - 1],
         s_left_off,
         s_right_off,

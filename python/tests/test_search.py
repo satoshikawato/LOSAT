@@ -8,7 +8,7 @@ from pathlib import Path
 import pylosat
 import pytest
 from conftest import fasta
-from pylosat import ArgumentError, Search, Sequences
+from pylosat import ArgumentError, Pssm, Search, Sequences
 
 
 def test_keywords_are_the_words_of_the_command_line():
@@ -67,11 +67,17 @@ def test_psiblast_takes_its_pssm_files(option):
     assert Search.from_argv("psiblast", list(words)).argv == words
 
 
-def test_psiblast_takes_no_pssm_query_here():
-    with pytest.raises(TypeError, match="in_pssm"):
-        Search("psiblast", in_pssm="q.asn")
-    with pytest.raises(ArgumentError, match="the queries are given as records"):
-        Search.from_argv("psiblast", ["-in_pssm", "q.asn"])
+def test_a_pssm_query_is_an_input_not_an_option():
+    # Series Q item Q6b: the PSSM query is `Pssm`, which the search gives as `-in_pssm`.
+    for program in ("psiblast", "tblastn"):
+        with pytest.raises(TypeError, match="in_pssm"):
+            Search(program, in_pssm="q.asn")
+        with pytest.raises(ArgumentError, match="a PSSM query is given as the inputs"):
+            Search.from_argv(program, ["-in_pssm", "q.asn"])
+    with pytest.raises(TypeError, match="or a Pssm"):
+        Search("psiblast").run("q.asn", Sequences.from_text(">s\nMKT\n"))
+    with pytest.raises(ArgumentError, match="psiblast and tblastn, not by blastp"):
+        Search("blastp").run(Pssm.from_file("q.asn"), Sequences.from_text(">s\nMKT\n"))
 
 
 ROUNDS_QUERY = "outfmt0/e2e_many_query.faa"

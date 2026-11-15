@@ -1767,6 +1767,263 @@ fn a_database_search_is_the_command_lines() {
     }
 }
 
+/// A PSSM query (series Q item Q6b): `Inputs::pssm` and `Inputs::pssm_database`, the command
+/// line's `-in_pssm` of psiblast and tblastn (PSI-TBLASTN), against records and a database. The
+/// whole set of PSSM queries through the API is `tests/db_search_fixtures.py check --library`.
+struct PssmCase {
+    program: Program,
+    /// Under `tests/`; `.gz` is inflated into a file of its own first (the harness does the same).
+    pssm: &'static str,
+    /// Under `tests/`: a FASTA subject set (`-subject`), or a database (`-db`).
+    subject: &'static str,
+    database: bool,
+    options: &'static [&'static str],
+}
+
+const PSSM_CASES: &[PssmCase] = &[
+    PssmCase {
+        program: Program::Psiblast,
+        pssm: "fixtures/pssm/ps4_tk_paja.asn.gz",
+        subject: "fasta/PajaWSV.faa",
+        database: false,
+        options: &[],
+    },
+    PssmCase {
+        program: Program::Psiblast,
+        pssm: "fixtures/pssm/ps4_tk_paja.asn.gz",
+        subject: "db_search/paja",
+        database: true,
+        options: &[],
+    },
+    // The rounds of a PSSM query (`-in_pssm` with `-num_iterations`, item PS5b of line PS).
+    PssmCase {
+        program: Program::Psiblast,
+        pssm: "fixtures/pssm/ps4_tk_paja.asn.gz",
+        subject: "db_search/paja",
+        database: true,
+        options: &["-num_iterations", "3"],
+    },
+    PssmCase {
+        program: Program::Tblastn,
+        pssm: "db_search/of1/tnq1.pssm",
+        subject: "db_search/of1/tns.fa",
+        database: false,
+        options: &[],
+    },
+    PssmCase {
+        program: Program::Tblastn,
+        pssm: "fixtures/pssm/ps7_ts1_tslice.asn.gz",
+        subject: "db_search/tslice",
+        database: true,
+        options: &[],
+    },
+];
+
+impl PssmCase {
+    /// The PSSM file as the command line reads it: the fixture, or its inflated copy in `directory`.
+    fn file(&self, directory: &Path) -> PathBuf {
+        let path = PathBuf::from(engine_tests(self.pssm));
+        if !self.pssm.ends_with(".gz") {
+            return path;
+        }
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(
+            &mut flate2::read::GzDecoder::new(std::fs::read(&path).unwrap().as_slice()),
+            &mut bytes,
+        )
+        .unwrap();
+        let inflated = directory.join(path.file_stem().unwrap());
+        std::fs::write(&inflated, bytes).unwrap();
+        inflated
+    }
+
+    /// The command line's report for one `-outfmt`, and its standard error.
+    fn cli(&self, pssm: &Path, extra: &[&str], outfmt: &str) -> (Vec<u8>, Vec<u8>) {
+        let output = command(env!("CARGO_BIN_EXE_losat"))
+            .arg(self.program.name())
+            .arg("-in_pssm")
+            .arg(pssm)
+            .arg(if self.database { "-db" } else { "-subject" })
+            .arg(engine_tests(self.subject))
+            .args(self.options)
+            .args(extra)
+            .arg("-outfmt")
+            .arg(outfmt)
+            .output()
+            .expect("run the command line");
+        assert!(
+            output.status.success(),
+            "{} {} -outfmt {outfmt}: {}",
+            self.program,
+            self.pssm,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        (output.stdout, output.stderr)
+    }
+}
+
+#[test]
+fn a_pssm_query_is_the_command_lines() {
+    let directory = temp_path("pssm_query");
+    std::fs::create_dir_all(&directory).unwrap();
+    for case in PSSM_CASES {
+        let context = format!(
+            "{} {} {} {:?}",
+            case.program, case.pssm, case.subject, case.options
+        );
+        let pssm = case.file(&directory);
+        let search = validate(case.program, case.options).unwrap();
+        let subject = engine_tests(case.subject);
+        let subjects = match case.database {
+            true => Vec::new(),
+            false => read_fasta(
+                case.program,
+                Role::Subject,
+                &std::fs::read(&subject).unwrap(),
+            )
+            .unwrap(),
+        };
+        let inputs = match case.database {
+            true => Inputs::pssm_database(&pssm, &subject),
+            false => Inputs::pssm(&pssm, &subjects).named("ignored", &subject),
+        };
+        let formats = ["6", "0", "7", COLUMNS];
+        let outcome = run_collect(&search, inputs, &formats)
+            .unwrap_or_else(|error| panic!("{context}: {error}"));
+        for (report, outfmt) in outcome.reports.iter().zip(formats) {
+            let (stdout, stderr) = case.cli(&pssm, &[], outfmt);
+            assert!(report.bytes == stdout, "{context} -outfmt {outfmt}");
+            if outfmt == "6" {
+                assert_eq!(
+                    outcome.diagnostics, stderr,
+                    "{context}: the diagnostics are the command line's"
+                );
+            }
+        }
+        // One query, the PSSM's: query 0, with its statistics and rounds.
+        assert!(!outcome.hsps.is_empty(), "{context}");
+        assert!(outcome.hsps.iter().all(|hsp| hsp.q_idx == 0), "{context}");
+        assert_eq!(outcome.query_stats.len(), 1, "{context}");
+        assert!(outcome.query_stats[0].is_some(), "{context}");
+        assert_eq!(outcome.rounds.len(), 1, "{context}");
+        let rounds = outcome.hsps.iter().map(|hsp| hsp.round).max().unwrap();
+        assert_eq!(outcome.rounds[0].stats.len() as u32, rounds, "{context}");
+        if case.options.contains(&"-num_iterations") {
+            assert!(rounds > 1, "{context}");
+        }
+        let table = &outcome.reports[3].bytes;
+        let rows = rows(table);
+        assert_eq!(rows.len(), outcome.hsps.len(), "{context}");
+        for (hsp, row) in outcome.hsps.iter().zip(rows) {
+            check_columns(&context, hsp, &table[row]);
+            assert!(outcome.reports[0].spans[hsp.index].is_some(), "{context}");
+        }
+        // One batch, the same records: NCBI reads no query batches for a PSSM query.
+        let batches = run_batches(&search, inputs).unwrap();
+        assert_eq!(batches.query_count(), 1, "{context}");
+        let batches: Vec<_> = batches.map(Result::unwrap).collect();
+        assert_eq!(batches.len(), 1, "{context}");
+        assert_eq!(batches[0].query_indices, 0..1, "{context}");
+        assert_eq!(batches[0].hsps, outcome.hsps, "{context}");
+        assert_eq!(batches[0].query_stats, outcome.query_stats, "{context}");
+        assert_eq!(batches[0].rounds, outcome.rounds, "{context}");
+        // The writer of `run` and the file of `run_to_file` hold the same bytes.
+        let mut written = Vec::new();
+        let mut diagnostics = Vec::new();
+        run(
+            &search,
+            inputs,
+            &mut [("6", &mut written)],
+            &mut diagnostics,
+        )
+        .unwrap();
+        assert!(written == outcome.reports[0].bytes, "{context}");
+        let out = directory.join("out.6");
+        run_to_file(&search, inputs, "6", &out, &mut Vec::new()).unwrap();
+        assert!(
+            std::fs::read(&out).unwrap() == outcome.reports[0].bytes,
+            "{context}"
+        );
+    }
+    // The rounds of a PSSM query write the command line's PSSM files.
+    let case = &PSSM_CASES[2];
+    let pssm = case.file(&directory);
+    let (api_file, cli_file) = (directory.join("api.txt"), directory.join("cli.txt"));
+    let options = [
+        case.options,
+        &["-out_ascii_pssm", api_file.to_str().unwrap()],
+    ]
+    .concat();
+    let search = validate(case.program, &options).unwrap();
+    let database = engine_tests(case.subject);
+    let outcome = run_collect(&search, Inputs::pssm_database(&pssm, &database), &["6"]).unwrap();
+    let (stdout, _) = case.cli(&pssm, &["-out_ascii_pssm", cli_file.to_str().unwrap()], "6");
+    assert!(outcome.reports[0].bytes == stdout);
+    assert!(std::fs::read(&api_file).unwrap() == std::fs::read(&cli_file).unwrap());
+    // Each format is checked as the command line checks it alone: psiblast's `-in_pssm` writes
+    // outfmt 0, 6 and 7 (`in_pssm::check_in_pssm_options`), whatever the order of the formats.
+    let search = validate(Program::Psiblast, &[]).unwrap();
+    for formats in [&["6", "10"][..], &["10", "6"], &["0", "20"]] {
+        let error =
+            run_collect(&search, Inputs::pssm_database(&pssm, &database), formats).unwrap_err();
+        assert!(
+            error
+                .message()
+                .contains("with -in_pssm is not supported by LOSAT's PSIBLAST"),
+            "{formats:?}: {error}"
+        );
+    }
+    // A PSSM file the command line cannot read is its error, and so is `-query_loc` with it.
+    let missing = directory.join("none.asn");
+    let search = validate(Program::Psiblast, &[]).unwrap();
+    let subjects = read_fasta(
+        Program::Psiblast,
+        Role::Subject,
+        &std::fs::read(fixture("PajaWSV.faa")).unwrap(),
+    )
+    .unwrap();
+    let error = run_collect(&search, Inputs::pssm(&missing, &subjects), &["6"]).unwrap_err();
+    let output = command(env!("CARGO_BIN_EXE_losat"))
+        .args(["psiblast", "-in_pssm"])
+        .arg(&missing)
+        .arg("-subject")
+        .arg(fixture("PajaWSV.faa"))
+        .args(["-outfmt", "6"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(
+        error.message().trim_end(),
+        String::from_utf8_lossy(&output.stderr).trim_end(),
+        "{error}"
+    );
+    let ranged = validate(Program::Tblastn, &["-query_loc", "1-10"]).unwrap();
+    assert!(matches!(
+        run_collect(&ranged, Inputs::pssm(&missing, &[]), &["6"]),
+        Err(Error::Argv(_))
+    ));
+    // Under `-parse_deflines` a subject record with the PSSM query's id is refused, as on the
+    // command line (the fixtures `db.ps.q1b.rej.subj.pd`, `db.tbn.inpssm.q1b.rej.subj.pd`): the
+    // records of `read_inputs` were read in a scope of their own.
+    for (program, subject) in [
+        (Program::Psiblast, "fasta/psiblast/q1_subj_ids.faa"),
+        (Program::Tblastn, "fasta/psiblast/q1b_gi_nt.fna"),
+    ] {
+        let search = validate(program, &["-parse_deflines"]).unwrap();
+        let (_, subjects) =
+            read_inputs(&search, b"", &std::fs::read(engine_tests(subject)).unwrap()).unwrap();
+        let pssm = PathBuf::from(engine_tests("fixtures/pssm/q1b_gi.asn"));
+        let error = run_collect(&search, Inputs::pssm(&pssm, &subjects), &["6"]).unwrap_err();
+        assert!(
+            error
+                .message()
+                .contains("a query and a subject record have the Seq-id gi|4504347"),
+            "{program}: {error}"
+        );
+    }
+    std::fs::remove_dir_all(&directory).unwrap();
+}
+
 /// Each round's `Gapped` Karlin-Altschul values (lambda, K, H) and effective search space in
 /// psiblast's pairwise report of one query, round 1 first.
 fn round_footers(report: &str) -> Vec<([f64; 3], i64)> {
@@ -2208,7 +2465,13 @@ fn a_database_made_through_the_library_is_read_and_searched_through_it() {
 fn the_api_owns_the_inputs_and_the_outputs() {
     for owned in API_OWNED {
         let flag = format!("-{owned}");
-        let error = validate(Program::Blastp, &[&flag, "x"]).unwrap_err();
+        // `-in_pssm` is psiblast's and tblastn's (`Inputs::pssm`); blastp's parser knows no such
+        // option.
+        let program = match *owned {
+            "in_pssm" => Program::Psiblast,
+            _ => Program::Blastp,
+        };
+        let error = validate(program, &[&flag, "x"]).unwrap_err();
         assert!(matches!(error, Error::Argv(_)), "{flag}: {error}");
         assert!(error.message().starts_with(&flag), "{flag}: {error}");
         for program in Program::ALL {

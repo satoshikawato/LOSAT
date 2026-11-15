@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.32
+- Version: 1.33
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -70,8 +70,12 @@
   accession table in one of its databases cannot look up is written as NCBI writes it; the
   refusal of 1.25 narrowed to the prefetch off and to the orders of loads that LOSAT does not
   model; line DBID item mixdb2, Owner-delegated, standing instruction 2026-09-29, restated
-  2026-10-07)
-  1.32 2026-11-15 (the query-anchored views of BLASTX and TBLASTX, line RG item T3c: TBLASTX's
+  2026-10-07);
+  1.32 2026-11-15 (the sequence that a positive seqid list keeps while matching none of its lines,
+  of 1.6 and 1.29, is no longer an explicit rejection: NCBI's result is deterministic, and LOSAT
+  reproduces it, rule 2; a negative list's stays refused; line DBID item lineless, Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07);
+  1.33 2026-11-15 (the query-anchored views of BLASTX and TBLASTX, line RG item T3c: TBLASTX's
   strand drop, the spread of a subject's masks and TBLASTX's merge of a query record that is also a
   subject into the query's sequence reproduced, rule 2; the explicit rejection of TBLASTX's section
   that this merge throws on, rule 3, as 1.23's; and the rule-2 rejection of a query's id of 1.24 and
@@ -548,7 +552,7 @@ here, and names the widening that PS16a made for protein queries.
 
 ## Reproduced as NCBI (rule 2)
 
-- TBLASTX `-outfmt 1` to `4` (the query-anchored views; version 1.32, 2026-11-15, line RG item T3c,
+- TBLASTX `-outfmt 1` to `4` (the query-anchored views; version 1.33, 2026-11-15, line RG item T3c,
   DECISIONS T3-6): NCBI adds TBLASTX's HSPs of each query frame with `CAlnMix::fForceTranslation`
   (`eTranslateNucToNucAlignment`, showalign.cpp:2058-2063), whose `CAlnMixMatches::Add` throws
   "Unable to mix strands when forcing translation!" for an HSP whose subject strand differs from
@@ -561,7 +565,7 @@ here, and names the widening that PS16a made for protein queries.
   `Add` reads as `fForceTranslation` (`alnmix.hpp:77,102`): their query rows run from high to low, and
   none is left out (a protein row has no strand).
 - TBLASTX `-outfmt 1` to `4` of a query record that is also a `-subject` record under
-  `-parse_deflines` (version 1.32, line RG item T3c fix 1): without `fPreserveRows`
+  `-parse_deflines` (version 1.33, line RG item T3c fix 1): without `fPreserveRows`
   (`fForceTranslation`, showalign.cpp:2058-2063) `CAlnMixSequences::Add` makes no other row for the
   record's subject row (alnseq.cpp:173-196), so both rows of its HSPs with itself are the query's one
   `CAlnMixSeq`. No sequence then holds as many Dense-segs as the mix (alnmerger.cpp:108-127: no
@@ -576,7 +580,7 @@ here, and names the widening that PS16a made for protein queries.
   `v.self.b1.f1`, the probes `tx.t3c.self.*`, the 13 rows `pd.self.tblastx.*` of
   `tests/outfmt0_manifest.tsv` in formats 1 and 3; fixture rows `db.of1.tx.self.*`). Where that
   merge throws instead, LOSAT refuses (rule 3, the TBLASTX item of the rejections below).
-- `-outfmt 1` to `4` of BLASTP, BLASTN and BLASTX (version 1.32, DECISIONS T3-6): a subject's masks
+- `-outfmt 1` to `4` of BLASTP, BLASTN and BLASTX (version 1.33, DECISIONS T3-6): a subject's masks
   (the `-lcase_masking` runs of a `-subject` record, BLASTN's `-db_soft_mask`) are placed on the columns of the subject's first row that
   meets each and shown in lower case on those columns of every row of the subject
   (`x_FillLocList`, showalign.cpp:4291-4338; `x_OutputSeq`, :2486-2523), also on its rows of other
@@ -601,6 +605,23 @@ here, and names the widening that PS16a made for protein queries.
   to it crosses no `FIRST_OID`-`LAST_OID` range that cuts the volume (two ranges whose union is
   the volume do not count; two or more volumes never do) (line DI-8 `DECISIONS.md` 18; line
   DBID item gisl, 2026-11-15).
+
+- A sequence that a positive seqid list (`-seqidlist`) keeps while matching none of its
+  definition lines (a pdb molecule named without its chain, a local id in other letters, a
+  Swiss-Prot name on a version 4 database, a list's `gnl|BL_ORD_ID|n` that the accession table
+  resolves by the stored number to a sequence in a volume whose first OID is not 0, whose lines
+  NCBI's header read tests with the volume's first OID added, `seqdbvol.cpp:2222-2236`, of 1.29):
+  the sequence is searched and its length counts in the statistics, but NCBI's filtered header
+  leaves it no Seq-id, and `BlastHitList2SeqAlign_OMF` makes no Seq-align of its hits
+  (`blast_seqalign.cpp:1582-1586`; the post is at the `Info` level and not printed). The hits leave
+  every report, the prefetch, the taxonomy lookups and psiblast's PSSM without a word, after they
+  took their places in the hit list before the cut to `-max_target_seqs` (psiblast's Seq-aligns are
+  made of the longer preliminary hit list, so its cut comes after: they take none there). Versions
+  1.6 and 1.29 made this an explicit rejection; version 1.32 reproduces it in the six search
+  programs, each of which drops such hit lists where NCBI makes the Seq-aligns
+  (`SeqDb::keeps_line`, `algorithm::common::database::SeqAligned`; line DBID item lineless, probe of
+  1,375 runs: 6 programs, 15 lists of the five kinds, 20 formats, `-max_target_seqs` 1 and 3, a
+  query without hits). A read of such a sequence's lines still refuses, and no report reaches it.
 
 - `CHUNK_SIZE=1000` without `BATCH_SIZE`: the batch size becomes 0, NCBI prints the
   outfmt 0 prolog and then `BLAST engine error: Empty CBlastQueryVector`, exit 3.
@@ -642,24 +663,18 @@ here, and names the widening that PS16a made for protein queries.
   `CCoreException`; LOSAT rejects "a query chunk without a query" (round-3 audit: 27
   oracle cases, the reason holds in all).
 
-- A sequence that a seqid list keeps while matching none of its definition lines (a pdb
-  molecule named without its chain, a local id in other letters, a Swiss-Prot name on a
-  version 4 database, a sequence whose every line has only a gi or a ti under a negative
-  list; version 1.29: a list's `gnl|BL_ORD_ID|n` that the accession table resolves by the
-  stored number, of `makeblastdb -input_type blastdb` or of a FASTA id `gnl|BL_ORD_ID|n`, to a
-  sequence in a volume whose first OID is not 0 (a later volume, or a later database of the
-  list), whose lines NCBI's header read tests with the volume's first OID added
-  (`seqdbvol.cpp:2222-2236`), and a negative list's line removed there the same way; where such
-  a sequence keeps another line, LOSAT writes the lines NCBI keeps): NCBI's
-  filtered header leaves no line, `GetBioseq` returns null
-  (`seqdbvol.cpp:1370-1376`) and the sequence's hits leave every report without notice
-  while its length counts in the statistics. LOSAT refuses the search with the sequence
-  named (`the seqid list keeps sequence N of the volume but none of its definition lines, and
-  NCBI leaves its hits out of the report without notice`): a positive list before the
-  search, a negative list when such a sequence is to be reported (version 1.6, line DI-8
-  `DECISIONS.md` 17 and 22). The result is deterministic, but it loses hits without a
-  word, which no report can show; a user who wants NCBI's report names the chain or the
-  stored id.
+- A sequence that a negative seqid list (`-negative_seqidlist`) keeps while removing every one
+  of its definition lines (a sequence whose every line has only a gi or a ti, which
+  `CSeqDBNegativeList::FindId` does not match by type; a `BL_ORD_ID` line of a volume whose first
+  OID is not 0, of 1.29): NCBI's id set of the list is not blank (`CSeqDBImpl::x_InitIdSet`,
+  seqdbimpl.cpp:1909-1946), so the subject fetches of the traceback, the composition-based redo
+  and the ungapped re-evaluation of a nucleotide subject exclude it
+  (`seqsrc_seqdb.cpp:302-313`): it counts in the statistics and in the preliminary hit list, and
+  takes no place in the final one. LOSAT does not model those fetches yet and refuses the search
+  when such a sequence is to be reported (`the seqid list keeps sequence N of the volume but none
+  of its definition lines, and NCBI leaves its hits out of the report without notice`; versions
+  1.6 and 1.29, line DI-8 `DECISIONS.md` 17 and 22; version 1.32 kept it for the negative list
+  alone, line DBID item lineless).
 
 - A version 5 database list (several names in `-db`, or the `DBLIST` of an alias file) that
   mixes databases with and without the accession table (`acc2oid`) of `makeblastdb
@@ -887,7 +902,7 @@ here, and names the widening that PS16a made for protein queries.
   the prolog), so no prefix of it is NCBI's. BLASTN writes its prolog before the search, as NCBI
   does, so its refusal follows the prolog. The other sections of such a record are NCBI's
   (fixture rows `db.of1.bp.self1.*`, `db.of1.bn.selfrc.*`).
-- TBLASTX `-outfmt 1` to `4` (version 1.32, 2026-11-15, line RG item T3c fix 1): the same record
+- TBLASTX `-outfmt 1` to `4` (version 1.33, 2026-11-15, line RG item T3c fix 1): the same record
   added with `fForceTranslation` is one `CAlnMixSeq` of both rows (the rule-2 item above), and
   `x_SecondRowFits` gives the query's own row the first HSP of the record with itself that the
   merge takes (the longest, ties in their order). When that HSP's subject positions are not all
@@ -940,7 +955,7 @@ would port:
   subject.
 - A reported sequence with the id, or the display id of its description line (outfmt 0 to 4 of
   BLASTP, PSIBLAST and RPSBLAST, 1 to 4 of BLASTN and TBLASTN since version 1.28, of BLASTX and
-  TBLASTX since version 1.32), of a query read with `-parse_deflines` in the query batch that
+  TBLASTX since version 1.33), of a query read with `-parse_deflines` in the query batch that
   reports it (with outfmt 5, in any batch), and in outfmt 1 to 4 of BLASTP, BLASTN, BLASTX, TBLASTN
   and TBLASTX with the id or display id `lcl|Query_N` of a query read without it (TBLASTN's merge
   then reads the protein query's letters as nucleotides, probe `tn.t3b.d.qid.f1`; BLASTX's and

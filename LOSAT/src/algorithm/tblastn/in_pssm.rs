@@ -86,14 +86,25 @@ pub(super) fn check_db_gencode(code: u8) -> Result<()> {
     Ok(())
 }
 
-/// The refusal of `-in_pssm` where the queries are given as records (`run_local`,
-/// `run_local_database`: the library API refuses the option first,
-/// `api::search::file_options`, and the Web's checks, `args::check_options`).
-pub(super) fn check_records_only(args: &TblastnArgs) -> Result<()> {
-    if args.in_pssm.is_some() {
-        bail!("-in_pssm (a PSSM query) is not supported by LOSAT's TBLASTN where the queries are given as records");
-    }
-    Ok(())
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1338-1340
+// ```c++
+//     if (args.Exist(kArgPSIInputChkPntFile) && args[kArgPSIInputChkPntFile]) {
+//         CNcbiIstream& in = args[kArgPSIInputChkPntFile].AsInputFile();
+//         _ASSERT(m_Pssm.Empty());
+// ```
+/// Whether `error` is NCBI's error of a `-in_pssm` file that cannot be opened (`cli::inaccessible`),
+/// which NCBI raises inside `Run`: the options' handler opens the file there, so its `CATCH_ALL`
+/// writes the error archive of outfmt 11 for it (NCBI BLAST+ 2.17.0, `-in_pssm` of a missing file
+/// with `-subject` and with `-db`), as for the files that `archive::error_lines` takes as the
+/// subjects' (`subject_file`).
+pub(super) fn file_error_in_run(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<crate::cli::NativeError>()
+        .is_some_and(|native| {
+            native
+                .message
+                .starts_with("Command line argument error: Argument \"in_pssm\".")
+        })
 }
 
 /// LOSAT's refusals of a PSI-TBLASTN search, after NCBI's checks of the options and the opening of

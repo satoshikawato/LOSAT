@@ -3996,7 +3996,7 @@ fn run_batch_loop(
             return Err(crate::cli::NativeError { exit: 3, message }.into());
         }
         warnings[start].append(&batch_warnings);
-        let batch = match take(start..end) {
+        let mut batch = match take(start..end) {
             Ok(batch) => {
                 // LOSAT_TIMING: the batch's block, kept in its result by a search of the pipe
                 // (LOSAT_X_TBXPIPE), in the batch order.
@@ -4077,6 +4077,7 @@ fn run_batch_loop(
         // prefetch is off (below), by query of the batch.
         let mut query_fetches: Vec<Vec<u8>> = Vec::new();
         if let ShownSubjects::Database { database, .. } = &subjects.shown {
+            super::super::database::drop_unaligned(database, &mut batch.hits);
             let ordered = batch.hits.as_slice();
             let read = super::super::database::read_titles(
                 database,

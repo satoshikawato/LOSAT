@@ -986,7 +986,11 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         queries,
         good_init_extends,
     );
-    let gapped_start_time = std::time::Instant::now();
+    // No NCBI counterpart: the clock of the gapped stage, read only by LOSAT_TIMING's
+    // `gapped_ns` and the `-verbose` line (`prelim_hsp_list::gapped_hsp_list`), so it is read
+    // only when one of them is on (NCBI's engine reads no clock; the scan's clock is kept the same
+    // way, `two_stage_scan::scan_two_stage_lookup`).
+    let gapped_start_time = (timing_ref.is_some() || verbose).then(std::time::Instant::now);
 
     // The values the gapped preliminary loop of this chunk
     // (`prelim_hsp_list::gapped_score_list`) and one hit's extension

@@ -1008,7 +1008,7 @@ pub(super) fn verbose_gapped_line(
 /// is `None` unless the loop runs per query, LOSAT_X_QGROUPPAR), the batch's queries (their number), the
 /// length that bounds a query group task's interval tree (the concatenated queries; the chunk's is
 /// `GappedPrelim::s_len`), the pool, the LOSAT_TIMING counters and the start of the gapped stage's
-/// clock.
+/// clock (`None` unless LOSAT_TIMING or `-verbose` reads it).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3830-3831
 /// ```c
@@ -1026,7 +1026,7 @@ pub(super) struct GappedDrive<'d> {
     pub(super) parallel_pool: &'d SearchPool<'d>,
     /// `LOSAT_TIMING` counters, `None` when timing is off.
     pub(super) timing_ref: Option<&'d BlastnTiming>,
-    pub(super) gapped_start_time: std::time::Instant,
+    pub(super) gapped_start_time: Option<std::time::Instant>,
 }
 
 /// The gapped HSP list of one subject chunk, from its initial hits in score order: the gapped loop
@@ -1178,8 +1178,11 @@ pub(super) fn gapped_hsp_list(
         dbg_containment_skipped = skipped;
     }
 
-    // DEBUG: Log gapped extension stats
-    let gapped_elapsed = gapped_start_time.elapsed();
+    // DEBUG: Log gapped extension stats (the clock is read only when LOSAT_TIMING or `-verbose`
+    // is on, `prelim_subject::prelim_chunk_hits`).
+    let gapped_elapsed = gapped_start_time
+        .map(|start| start.elapsed())
+        .unwrap_or_default();
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3917-3922
     // ```c
     // if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,

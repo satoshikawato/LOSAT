@@ -64,11 +64,14 @@ pub(super) enum SeqalignSubjects<'a> {
 }
 
 /// Writes the documents of every query of `batches` to `writer`. A structured format writes
-/// none of a query's own warnings (`ReportFormat::writes_query_warnings`), so nothing goes
-/// to standard error here.
+/// none of a query's own warnings (`ReportFormat::writes_query_warnings`); what goes to
+/// `stderr` here are NCBI's posts of the bytes that its stream replaces in a query's document
+/// (`write_query_to`).
+#[allow(clippy::too_many_arguments)]
 pub(super) fn write_blastx_seqalign(
     format: SerialFormat,
     writer: &mut impl Write,
+    stderr: &mut dyn Write,
     gapped: bool,
     queries: &[FastaRecord],
     subjects: &[FastaRecord],
@@ -109,6 +112,7 @@ pub(super) fn write_blastx_seqalign(
                 &hsp_records,
                 &mut buf,
                 writer,
+                &mut *stderr,
             )?;
         }
     }

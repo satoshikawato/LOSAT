@@ -582,8 +582,8 @@ fn integers_are_decimal() {
     }
 }
 
-/// LOSAT's refusals of a database for the Seq-annot formats (`check_database`): a database
-/// named `n/a` or `SRA` (any case), and for the ASN.1 text and binary a title byte outside 0x20..0x7E.
+/// LOSAT's refusal of a database for the Seq-annot formats (`check_database`): a database named
+/// `n/a` or `SRA` (any case), whatever its title.
 #[test]
 fn databases_that_ncbi_describes_otherwise_are_refused() {
     use super::seqalign::check_database;
@@ -593,7 +593,7 @@ fn databases_that_ncbi_describes_otherwise_are_refused() {
             SerialFormat::AsnBinary,
             SerialFormat::Json,
         ] {
-            let error = check_database(format, name, b"title", Program::Blastn).unwrap_err();
+            let error = check_database(format, name, Program::Blastn).unwrap_err();
             assert!(
                 error
                     .to_string()
@@ -602,33 +602,140 @@ fn databases_that_ncbi_describes_otherwise_are_refused() {
             );
         }
     }
-    assert!(check_database(SerialFormat::AsnText, "db/x", b"a\tb", Program::Blastp).is_err());
-    assert!(check_database(SerialFormat::AsnText, "db/x", b"\xc3\xa9", Program::Blastp).is_err());
-    assert!(check_database(SerialFormat::AsnBinary, "db/x", b"a\tb", Program::Blastp).is_err());
-    assert!(check_database(
-        SerialFormat::AsnBinary,
-        "db/x",
-        b"\xc3\xa9",
-        Program::Blastp
-    )
-    .is_err());
-    assert!(check_database(
-        SerialFormat::AsnBinary,
-        "db/x",
-        b"plain title",
-        Program::Blastp
-    )
-    .is_ok());
-    for title in [&b"a\tb"[..], b"\xc3\xa9", b"plain title"] {
-        assert!(check_database(SerialFormat::Json, "db/x", title, Program::Blastp).is_ok());
-    }
-    assert!(check_database(
+    for format in [
         SerialFormat::AsnText,
-        "db/nash",
-        b"fixture/sprot.fa",
-        Program::Blastp
-    )
-    .is_ok());
+        SerialFormat::AsnBinary,
+        SerialFormat::Json,
+    ] {
+        assert!(check_database(format, "db/x", Program::Blastp).is_ok());
+        assert!(check_database(format, "db/nash", Program::Blastp).is_ok());
+    }
+}
+
+/// One stream that a test's report and diagnostics both write to (`2>&1`).
+#[derive(Clone, Default)]
+struct Combined(std::rc::Rc<std::cell::RefCell<Vec<u8>>>);
+
+impl std::io::Write for Combined {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.borrow_mut().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// The documents of `blastp_db_documents` written by `write_query_to` with the database title
+/// `title`: the report alone, the posts alone, and both in one stream.
+fn blastp_db_documents_posted(format: SerialFormat, title: &[u8]) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+    let run = RunRecord {
+        program: Program::Blastp,
+        db_title: Some(title),
+        gapped: true,
+    };
+    let subjects = [
+        subject(SeqId::BlOrdId(crate::seqdb::Oid::of_unrestricted(0)), 137),
+        subject(SeqId::BlOrdId(crate::seqdb::Oid::of_unrestricted(1)), 150),
+    ];
+    let hsps = [
+        hsp(
+            0,
+            (0, 0),
+            (0, 0),
+            652,
+            5.30325651018409e-94,
+            255.758355778158,
+            (125, 130, 2),
+            &BP_Q1_HSP1,
+        ),
+        hsp(
+            1,
+            (1, 1),
+            (0, 0),
+            477,
+            2.8220561436493e-67,
+            188.348429992622,
+            (100, 110, 2),
+            &BP_Q1_HSP2,
+        ),
+    ];
+    let write = |writer: &mut dyn std::io::Write, diagnostics: &mut dyn std::io::Write| {
+        let mut buf = Vec::new();
+        for id in ["Query_1", "Query_2"] {
+            super::write_query_to(
+                format,
+                &run,
+                &query(id, 140),
+                &subjects,
+                &hsps,
+                &mut buf,
+                writer,
+                diagnostics,
+            )
+            .unwrap();
+        }
+    };
+    let (mut report, mut posts) = (Vec::new(), Vec::new());
+    write(&mut report, &mut posts);
+    let combined = Combined::default();
+    write(&mut combined.clone(), &mut combined.clone());
+    let both = combined.0.borrow().clone();
+    (report, posts, both)
+}
+
+/// A database title with bytes outside 0x20..0x7E in the ASN.1 text and binary Seq-annots: `#`
+/// for each, and NCBI's post of each byte of each query's document, whose position counts from
+/// that document's start (one object stream per document), with the program's prefix; a short
+/// document is still in NCBI's buffer when it posts, so the posts come before its bytes
+/// (NCBI 2.17.0, `blastn -db` of a title `t\xe9tle db`: `Bad char [0xE9] in string at line 25`,
+/// `byte 197`, before each document). The JSON stream posts nothing (it escapes the bytes below
+/// 0x20 and writes these as they are).
+#[test]
+fn a_database_title_outside_the_visible_range_is_written_with_ncbis_posts() {
+    let title = b"caf\xc3\xa9 \x7f";
+    let shown = b"caf## #";
+    for format in [SerialFormat::AsnText, SerialFormat::AsnBinary] {
+        let (report, posts, both) = blastp_db_documents_posted(format, title);
+        // The report is the plain writer's with `#` in place of each such byte.
+        let (plain, no_posts, _) = blastp_db_documents_posted(format, shown);
+        assert!(no_posts.is_empty());
+        assert_same_bytes(&report, &plain);
+        let document = &plain[..plain.len() / 2];
+        let at = document
+            .windows(shown.len())
+            .position(|window| window == shown)
+            .unwrap();
+        let position = |offset: usize| match format {
+            SerialFormat::AsnText => format!(
+                "line {}",
+                1 + document[..at].iter().filter(|&&byte| byte == b'\n').count()
+            ),
+            _ => format!("byte {}", at + offset),
+        };
+        let mut post = Vec::new();
+        for (byte, offset) in [(0xC3u8, 3), (0xA9, 4), (0x7F, 6)] {
+            post.extend_from_slice(
+                format!(
+                    "Error: (803.7) [blastp] Seq-annot.desc.E.user.data.E.label.str\nBad char [0x{byte:X}] in string at {}\n",
+                    position(offset)
+                )
+                .as_bytes(),
+            );
+            post.extend_from_slice(title);
+            post.push(b'\n');
+        }
+        assert_eq!(posts, [&post[..], &post[..]].concat());
+        // The two documents differ only in the query's id (`Query_1`, `Query_2`).
+        assert_eq!(
+            both,
+            [&post[..], document, &post[..], &plain[document.len()..]].concat(),
+            "{format:?}"
+        );
+    }
+    let (report, posts, _) = blastp_db_documents_posted(SerialFormat::Json, title);
+    assert!(posts.is_empty());
+    assert!(report.windows(title.len()).any(|window| window == title));
 }
 
 /// The mapper of a `-subject` search's remap leaves out a first and a last Std-seg with a gap

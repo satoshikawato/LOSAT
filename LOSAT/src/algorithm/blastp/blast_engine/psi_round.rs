@@ -166,6 +166,23 @@ pub(super) fn search_rounds(
     Ok(())
 }
 
+/// `SavePssmToFile` of a round's PSSM `current` (quoted at `algorithm::psiblast::pssm::PssmFiles`):
+/// NCBI's posts of the bytes that its stream replaces in the ASN.1 text come as it writes the file
+/// (`pssm::file_posts`), after what the run wrote before; then the files (`RoundFiles::write`).
+fn write_round_pssm(
+    args: &ResolvedBlastpArgs,
+    files: &mut RoundFiles,
+    current: &QueryPssm,
+    outputs: &mut ReportOutputs<'_>,
+) -> Result<()> {
+    if !current.asn_posts.is_empty() {
+        crate::algorithm::psiblast::pssm::file_posts(args.app.ncbi_name(), &current.asn_posts)
+            .write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+        outputs.diagnostics.flush()?;
+    }
+    files.write(current.asn.as_deref(), current.ascii.as_deref())
+}
+
 /// The composition-based mode of the options' reader (`in_pssm::setup_messages`).
 fn app_mode(mode: BlastpCompositionMode) -> CompositionMode {
     match mode {
@@ -322,9 +339,7 @@ fn run_queries(
         while state.go() {
             let round = state.number();
             match (&pssm, input_files.as_mut()) {
-                (Some(current), _) => {
-                    files.write(current.asn.as_deref(), current.ascii.as_deref())?
-                }
+                (Some(current), _) => write_round_pssm(args, &mut files, current, outputs)?,
                 (None, Some((asn, ascii))) if round == 1 => {
                     // NCBI's prolog comes before the rounds (`PrintProlog`), so before a file
                     // that cannot be written stops the run here.
@@ -526,9 +541,7 @@ fn run_queries(
         // ASCII PSSM is round 1's (`m_AncillaryData` is still the input PSSM's).
         if plan.save_last {
             match (&pssm, &plan.input, &input_files, searched_input) {
-                (Some(current), _, _, _) => {
-                    files.write(current.asn.as_deref(), current.ascii.as_deref())?
-                }
+                (Some(current), _, _, _) => write_round_pssm(args, &mut files, current, outputs)?,
                 (None, Some(input), Some((_, ascii)), Some((ungapped, gapped))) => {
                     let asn = input.written_back(&plan.request, ungapped, gapped)?;
                     files.write(asn.as_deref(), ascii.as_deref())?;

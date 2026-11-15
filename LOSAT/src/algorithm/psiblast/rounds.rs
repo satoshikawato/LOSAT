@@ -98,8 +98,8 @@ impl PsiRoundPlan {
         })
     }
 
-    /// The PSSM files of the run, for the checks before the search (`check_pssm_titles`,
-    /// `check_pssm_files`); `None` without `-out_pssm` and `-out_ascii_pssm`.
+    /// The PSSM files of the run, for the check before the search (`check_pssm_files`); `None`
+    /// without `-out_pssm` and `-out_ascii_pssm`.
     pub(crate) fn file_request(&self) -> Option<&PssmRequest> {
         (self.request.asn_path.is_some() || self.request.ascii_path.is_some())
             .then_some(&self.request)

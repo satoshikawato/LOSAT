@@ -5783,69 +5783,16 @@ fn search_cli(
     }
     // psiblast `-in_pssm`: the query is the PSSM's (read with the options, `check_options`);
     // NCBI reads no query input (psiblast_app.cpp:452-471). LOSAT's limits of the PSSM search
-    // come when the options are processed and the subjects set up.
+    // come when the options are processed and the subjects set up (`search_pssm_query`).
     if let Some(psi) = resolved.psi_search.clone() {
-        // A request whose PSSM file has members that the reader skipped, and the input PSSM's files
-        // that NCBI would write back in a way LOSAT does not (`-out_pssm`, `-out_ascii_pssm`, written
-        // in round 1, which a run stopped before its search never reaches): refused once the
-        // database is opened (NCBI's error of a database it cannot open comes first), before any
-        // output.
-        psi.refuse_request_members(args.app.name())?;
-        if psi
-            .stop_before_search(resolved.strategy.is_some(), database.is_some())
-            .is_none()
-        {
-            if let Some(input) = resolved
-                .psi_rounds
-                .as_deref()
-                .and_then(|plan| plan.input.as_ref())
-            {
-                input.refuse_written_back()?;
-            }
-        }
-        crate::algorithm::psiblast::in_pssm::check_in_pssm_options(&resolved, &psi)?;
-        // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:482-484 (the formatter's
-        // `believe_query` is `-parse_deflines`, with `-in_pssm` too)
-        // ```c++
-        //         CBlastFormat formatter(opt, *db_adapter,
-        //                                fmt_args->GetFormattedOutputChoice(),
-        //                                query_opts->GetParseDeflines(),
-        // ```
-        // With `-parse_deflines` the reports believe the PSSM query's local Seq-id as they believe
-        // a FASTA query's (NCBI BLAST+ 2.17.0: `Query= Query_1 <title>`, `qseqid` `Query_1`); its
-        // other ids they show without it (`PsiSearch::query_record`). The ids the reports show
-        // join the search's scope as a FASTA query's do: NCBI shows a subject or a database
-        // sequence with one of them as the PSSM's query (its title and letters), refused as for a
-        // FASTA query (`IdScope::add_record` of the `-subject` records that `-parse_deflines`
-        // reads; the database's, `query_batch::QueryScopes`).
-        let records = vec![psi.query_record_in(
-            resolved.parse_deflines,
-            args.id_scope.as_deref(),
-            args.app.name(),
-        )?];
-        // The PSSM files of `-in_pssm`'s rounds (item PS5b), checked as a FASTA query's below.
-        if let Some(request) = resolved
-            .psi_rounds
-            .as_deref()
-            .and_then(crate::algorithm::psiblast::rounds::PsiRoundPlan::file_request)
-        {
-            crate::algorithm::psiblast::pssm::check_pssm_files(
-                request,
-                records.len(),
-                resolved
-                    .out
-                    .as_deref()
-                    .filter(|path| path.as_os_str() != "-"),
-            )?;
-        }
         let choice_to_standard_output = resolved
             .out
             .as_deref()
             .is_none_or(|path| path.as_os_str() == "-");
-        return search(
+        return search_pssm_query(
             resolved,
-            &records,
-            QueryReading::End,
+            &psi,
+            args.id_scope.as_deref(),
             subjects,
             database.as_ref(),
             "",
@@ -6033,6 +5980,7 @@ pub fn run_local(
         )
         .map(|handle| outputs.with_archive_outfmt(handle));
         if let Some(handle) = args.archive.clone() {
+            let no_query = query_records.is_empty() && !pssm_query(&args);
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
                 run_local_formats(
                     args,
@@ -6043,7 +5991,7 @@ pub fn run_local(
                     view,
                 )
             });
-            return outputs.finish_archive(&handle, query_records.is_empty(), result);
+            return outputs.finish_archive(&handle, no_query, result);
         }
     }
     run_local_formats(
@@ -6054,6 +6002,123 @@ pub fn run_local(
         subject_label,
         outputs,
     )
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:534-543
+// ```c++
+//         } else {
+// 		_ASSERT(pssm->HasQuery());
+// 		_ASSERT(pssm->GetQuery().IsSeq());  // single query only!
+// 		scope->AddTopLevelSeqEntry(pssm->SetQuery());
+//
+// 		CRef<CSeq_loc> sl(new CSeq_loc());
+// 		sl->SetWhole().Assign(*pssm->GetQuery().GetSeq().GetFirstId());
+//
+// 		CRef<CBlastSearchQuery> q(new CBlastSearchQuery(*sl, *scope));
+// 		CRef<CBlastQueryVector> query(new CBlastQueryVector());
+// ```
+/// psiblast `-in_pssm`: the search of the PSSM's query (the file read with the options,
+/// `check_options`), from where the entries would read their FASTA queries: the command line's
+/// (`search_cli`) and those of the records (`run_local_formats`, `search_database`, the library
+/// API's `Inputs::pssm`). A request whose PSSM file has members that the reader skipped, and the
+/// input PSSM's files that NCBI would write back in a way LOSAT does not (`-out_pssm`,
+/// `-out_ascii_pssm`, written in round 1, which a run stopped before its search never reaches),
+/// are refused here, once the database is opened (NCBI's error of a database it cannot open comes
+/// first) and before any output; so are LOSAT's limits of the PSSM search for each requested
+/// format (`check_in_pssm_options`) and the PSSM files of the rounds that LOSAT cannot write as NCBI does
+/// (`check_pssm_files`, checked as a FASTA query's).
+///
+/// The query is the PSSM's Bioseq as the reports show it (`PsiSearch::query_record`); with
+/// `-parse_deflines` its ids join `scope`, the scope of the `-subject` records (`IdScope::
+/// add_record`: NCBI shows a subject with one of them as the query, which LOSAT refuses as for a
+/// FASTA query). The library's observer receives it (`FormatObserver::pssm_query`). One search,
+/// no query batches.
+#[allow(clippy::too_many_arguments)]
+fn search_pssm_query(
+    resolved: ResolvedBlastpArgs,
+    psi: &std::sync::Arc<crate::algorithm::pssm_search::PsiSearch>,
+    scope: Option<&crate::seqid::id_scope::IdScope>,
+    subjects: &SubjectSet<'_>,
+    database: Option<&database::BlastpDatabase>,
+    subject_label: &str,
+    outputs: &mut ReportOutputs<'_>,
+    xinclude: Option<&crate::blastinput::app::FormatChoice>,
+) -> Result<()> {
+    let program = resolved.app.name();
+    psi.refuse_request_members(program)?;
+    if psi
+        .stop_before_search(resolved.strategy.is_some(), database.is_some())
+        .is_none()
+    {
+        if let Some(input) = resolved
+            .psi_rounds
+            .as_deref()
+            .and_then(|plan| plan.input.as_ref())
+        {
+            input.refuse_written_back()?;
+        }
+    }
+    let outfmts = outputs
+        .formats
+        .iter()
+        .map(|format| {
+            crate::blastinput::app::parse_formatting_string(format.outfmt)
+                .map(|choice| choice.number)
+        })
+        .collect::<Result<Vec<i32>>>()?;
+    crate::algorithm::psiblast::in_pssm::check_in_pssm_options(&resolved, psi, &outfmts)?;
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:482-484 (the formatter's
+    // `believe_query` is `-parse_deflines`, with `-in_pssm` too)
+    // ```c++
+    //         CBlastFormat formatter(opt, *db_adapter,
+    //                                fmt_args->GetFormattedOutputChoice(),
+    //                                query_opts->GetParseDeflines(),
+    // ```
+    // With `-parse_deflines` the reports believe the PSSM query's local Seq-id as they believe
+    // a FASTA query's (NCBI BLAST+ 2.17.0: `Query= Query_1 <title>`, `qseqid` `Query_1`); its
+    // other ids they show without it (`PsiSearch::query_record`). The ids the reports show
+    // join the search's scope as a FASTA query's do: NCBI shows a subject or a database
+    // sequence with one of them as the PSSM's query (its title and letters), refused as for a
+    // FASTA query (`IdScope::add_record` of the `-subject` records that `-parse_deflines`
+    // reads; the database's, `query_batch::QueryScopes`).
+    let records = vec![psi.query_record_in(resolved.parse_deflines, scope, program)?];
+    // The PSSM files of `-in_pssm`'s rounds (item PS5b), checked as a FASTA query's
+    // (`check_psiblast_pssm_files`).
+    if let Some(request) = resolved
+        .psi_rounds
+        .as_deref()
+        .and_then(crate::algorithm::psiblast::rounds::PsiRoundPlan::file_request)
+    {
+        crate::algorithm::psiblast::pssm::check_pssm_files(
+            request,
+            records.len(),
+            resolved
+                .out
+                .as_deref()
+                .filter(|path| path.as_os_str() != "-"),
+        )?;
+    }
+    if let Some(observer) = outputs.observer.as_deref_mut() {
+        observer.pssm_query(&records[0]);
+    }
+    search(
+        resolved,
+        &records,
+        QueryReading::End,
+        subjects,
+        database,
+        subject_label,
+        outputs,
+        xinclude,
+    )
+}
+
+/// Whether the query of `args` is a PSSM (psiblast's `-in_pssm`): a run of the records' entries
+/// with no query record then has a query (`ReportOutputs::finish_archive`).
+fn pssm_query(args: &BlastpArgs) -> bool {
+    args.psiblast_pssm
+        .as_ref()
+        .is_some_and(|options| options.in_pssm.is_some())
 }
 
 /// Before the search of the FASTA queries `records`: the refusal of a title that psiblast's ASN.1 PSSM cannot write comes before the first byte, and
@@ -6165,6 +6230,25 @@ fn run_local_formats(
     if args.app == BlastpApp::Psiblast {
         psiblast_check_subject_letters(&subjects.records)?;
     }
+    // psiblast `-in_pssm` (the library API's `Inputs::pssm`): the query is the PSSM's, whose ids
+    // join the scope of the subject records read (`PsiSearch::scope_of_subjects`).
+    if let Some(psi) = args.psi_search.clone() {
+        let id_scope = crate::algorithm::pssm_search::scope_of_subjects(
+            args.parse_deflines,
+            subject_records,
+            args.app.name(),
+        )?;
+        return search_pssm_query(
+            args,
+            &psi,
+            id_scope.as_ref(),
+            &subjects,
+            None,
+            subject_label,
+            outputs,
+            xinclude.as_ref(),
+        );
+    }
     if !query_records.is_empty() {
         check_psiblast_pssm_files(&args, query_records, &scope)?;
     }
@@ -6218,10 +6302,11 @@ pub fn run_local_database(
     crate::utils::threading::validate_threads(args.num_threads)?;
     match args.archive.clone() {
         Some(handle) => {
+            let no_query = query_records.is_empty() && !pssm_query(&args);
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
                 search_database(args, query_records, settings, view)
             });
-            outputs.finish_archive(&handle, query_records.is_empty(), result)
+            outputs.finish_archive(&handle, no_query, result)
         }
         None => search_database(args, query_records, settings, outputs),
     }
@@ -6244,6 +6329,25 @@ fn search_database(
     let database = open_search_database(&args, &mut resolved, list.as_ref(), &settings, outputs)?
         .ok_or_else(crate::blastinput::app::missing_subject_error)?;
     let xinclude = xinclude_format(&args, outputs)?;
+    let no_subjects = SubjectSet {
+        records: std::borrow::Cow::Borrowed(&[]),
+        placements: seq_range::Placements::default(),
+    };
+    // psiblast `-in_pssm` (the library API's `Inputs::pssm_database`): the query is the PSSM's. No
+    // subject record holds an id (the database's sequences are checked against the query's,
+    // `query_batch::QueryScopes`).
+    if let Some(psi) = resolved.psi_search.clone() {
+        return search_pssm_query(
+            resolved,
+            &psi,
+            None,
+            &no_subjects,
+            Some(&database),
+            "",
+            outputs,
+            xinclude.as_ref(),
+        );
+    }
     if !query_records.is_empty() {
         check_psiblast_pssm_files(&resolved, query_records, &pssm_check_scope(&args))?;
     }
@@ -6251,10 +6355,7 @@ fn search_database(
         resolved,
         query_records,
         QueryReading::Records,
-        &SubjectSet {
-            records: std::borrow::Cow::Borrowed(&[]),
-            placements: seq_range::Placements::default(),
-        },
+        &no_subjects,
         Some(&database),
         "",
         outputs,

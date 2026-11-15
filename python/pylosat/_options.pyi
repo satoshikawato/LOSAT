@@ -589,3 +589,12 @@ class PsiblastOptions(TypedDict, total=False):
     """Pseudo-count value used when constructing PSSM"""
     inclusion_ethresh: float
     """E-value inclusion threshold for pairwise alignments"""
+    out_pssm: str
+    """File name to store checkpoint file"""
+    out_ascii_pssm: str
+    """File name to store ASCII version of PSSM"""
+    save_pssm_after_last_round: bool
+    """Save PSSM after the last database search"""
+    save_each_pssm: bool
+    """Save PSSM after each iteration (file name is given in -save_pssm or -save_ascii_pssm
+    options)"""

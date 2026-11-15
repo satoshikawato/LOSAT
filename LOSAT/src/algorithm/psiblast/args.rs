@@ -479,6 +479,11 @@ pub struct PsiblastArgs {
     /// that starts there (`api::run_batches`). 0 on the command line.
     #[arg(skip)]
     pub first_query_ordinal: usize,
+    /// The run's numbers of the files of `-save_each_pssm` (`pssm::PssmVersions`, NCBI's
+    /// `CAutoOutputFileReset` of the run): a command line's run makes them; the library's query
+    /// batches, each a call of its own, share the run's (`api::batches`).
+    #[arg(skip)]
+    pub pssm_versions: crate::algorithm::psiblast::pssm::PssmVersions,
 }
 
 impl PsiblastArgs {
@@ -580,6 +585,7 @@ impl PsiblastArgs {
                 pseudocount: self.pseudocount,
                 rounds,
                 in_pssm: self.in_pssm,
+                versions: self.pssm_versions,
             }),
             // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:502
             // ```c++

@@ -1313,6 +1313,141 @@ fn a_report_in_a_file_has_its_side_files_as_on_the_command_line() {
     std::fs::remove_dir_all(&directory).unwrap();
 }
 
+// Series Q item Q6a: psiblast's PSSM files are written where the command line writes them, with
+// its names: `-save_each_pssm` numbers them over the run, also over `run_batches`' batches of one
+// query each (NCBI's `CAutoOutputFileReset`, made once per run, blast_args.cpp:1304-1318). Two
+// queries (each makes a PSSM), with rounds and with the PSSM after the last round.
+#[test]
+fn the_pssm_files_are_the_command_lines() {
+    let directory = temp_path("pssm");
+    std::fs::create_dir_all(&directory).unwrap();
+    let (query, subject) = (fixture("psiblast/q4c_tk_pol.faa"), fixture("PajaWSV.faa"));
+    let queries = read_fasta(
+        Program::Psiblast,
+        Role::Query,
+        &std::fs::read(&query).unwrap(),
+    )
+    .unwrap();
+    let subjects = read_fasta(
+        Program::Psiblast,
+        Role::Subject,
+        &std::fs::read(&subject).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(queries.len(), 2);
+    let inputs =
+        Inputs::new(&queries, &subjects).named(query.to_str().unwrap(), subject.to_str().unwrap());
+    let (asn, ascii) = (directory.join("p.asn"), directory.join("p.txt"));
+    let files = [
+        "-out_pssm",
+        asn.to_str().unwrap(),
+        "-out_ascii_pssm",
+        ascii.to_str().unwrap(),
+    ];
+    for options in [
+        &["-num_iterations", "2", "-save_each_pssm"][..],
+        &["-num_iterations", "2"],
+        &["-save_pssm_after_last_round", "-save_each_pssm"],
+        &[
+            "-num_iterations",
+            "3",
+            "-save_pssm_after_last_round",
+            "-save_each_pssm",
+        ],
+    ] {
+        let options: Vec<&str> = options.iter().chain(&files).copied().collect();
+        let context = options[..options.len() - 4].join(" ");
+        let out = directory.join("report.out");
+        let status = command(env!("CARGO_BIN_EXE_losat"))
+            .arg("psiblast")
+            .arg("-query")
+            .arg(&query)
+            .arg("-subject")
+            .arg(&subject)
+            .args(&options)
+            .args(["-outfmt", "6", "-out"])
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert!(status.status.success(), "{context}");
+        let report = std::fs::read(&out).unwrap();
+        std::fs::remove_file(&out).unwrap();
+        let frozen = take_files(&directory);
+        let names: Vec<&str> = frozen.iter().map(|file| file.0.as_str()).collect();
+        if options.contains(&"-save_each_pssm") {
+            assert!(
+                names.contains(&"p.asn.2") && names.contains(&"p.txt.2"),
+                "{context}: {names:?}"
+            );
+        } else {
+            assert_eq!(names, ["p.asn", "p.txt"], "{context}");
+        }
+        let search = validate(Program::Psiblast, &options).unwrap();
+        let collected = run_collect(&search, inputs, &["6"]).unwrap();
+        assert_eq!(collected.reports[0].bytes, report, "{context}: run_collect");
+        assert!(
+            take_files(&directory) == frozen,
+            "{context}: run_collect's files"
+        );
+        let mut written = Vec::new();
+        run(
+            &search,
+            inputs,
+            &mut [("6", &mut written)],
+            &mut std::io::sink(),
+        )
+        .unwrap();
+        assert_eq!(written, report, "{context}: run");
+        assert!(take_files(&directory) == frozen, "{context}: run's files");
+        run_to_file(&search, inputs, "6", &out, &mut std::io::sink()).unwrap();
+        assert_eq!(
+            std::fs::read(&out).unwrap(),
+            report,
+            "{context}: run_to_file"
+        );
+        std::fs::remove_file(&out).unwrap();
+        assert!(
+            take_files(&directory) == frozen,
+            "{context}: run_to_file's files"
+        );
+        let batches: Vec<_> = run_batches(&search, inputs)
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(batches.len(), 2, "{context}: one query per batch");
+        assert_eq!(
+            batches.iter().map(|batch| batch.hsps.len()).sum::<usize>(),
+            collected.hsps.len(),
+            "{context}"
+        );
+        assert!(
+            take_files(&directory) == frozen,
+            "{context}: the batches' files"
+        );
+    }
+    // A call whose formats take two searches (`-num_descriptions` with a report and a table) would
+    // write the files of two searches: refused before any search.
+    let search = validate(
+        Program::Psiblast,
+        &[
+            &["-num_iterations", "2", "-num_descriptions", "5"][..],
+            &files,
+        ]
+        .concat(),
+    )
+    .unwrap();
+    let error = run_collect(&search, inputs, &["0", "6"]).unwrap_err();
+    assert!(
+        matches!(&error, Error::Argv(message) if message.starts_with("-out_pssm is not accepted by the library API with formats of two hit list sizes")),
+        "{error}"
+    );
+    assert!(take_files(&directory).is_empty());
+    // One format, or formats of one hit list size, search once.
+    run_collect(&search, inputs, &["6", "7"]).unwrap();
+    assert!(!take_files(&directory).is_empty());
+    std::fs::remove_dir_all(&directory).unwrap();
+}
+
 #[test]
 fn the_writers_of_a_run_receive_the_reports_of_the_collected_run() {
     for case in [&CASES[0], &CASES[1], &CASES[WARNINGS_CASE]] {

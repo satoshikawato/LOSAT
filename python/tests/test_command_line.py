@@ -165,3 +165,26 @@ def test_a_missing_conffile_is_ncbi_s_critical_post(tmp_path):
     conffile.write_text("[BLAST]\n")
     loaded = Search.from_argv("blastp", ["-conffile", str(conffile)]).run(*inputs, outfmt="6")
     assert loaded.reports == Search("blastp").run(*inputs, outfmt="6").reports
+
+
+def test_the_pssm_files_are_the_command_lines(command_line, tmp_path):
+    # Series Q item Q6a: psiblast's PSSM files are written where the command line writes them;
+    # `-save_each_pssm` numbers them over the batches (one query each) as over the command line's
+    # run.
+    query, subject = fasta("psiblast/q4c_tk_pol.faa"), fasta("PajaWSV.faa")
+    cli, api = tmp_path / "cli", tmp_path / "api"
+    cli.mkdir()
+    api.mkdir()
+    words = ["-num_iterations", "2", "-save_each_pssm", "-out_ascii_pssm", str(cli / "p.txt")]
+    stdout, _ = command_line("psiblast", query, subject, [*words, "-outfmt", "6"])
+    search = Search(
+        "psiblast", num_iterations=2, save_each_pssm=True, out_ascii_pssm=str(api / "p.txt")
+    )
+    inputs = Sequences.from_fasta(query), Sequences.from_fasta(subject)
+    assert len(list(search.batches(*inputs))) == 2
+    names = sorted(path.name for path in cli.iterdir())
+    assert names == ["p.txt.1", "p.txt.2"]
+    assert sorted(path.name for path in api.iterdir()) == names
+    for name in names:
+        assert (api / name).read_bytes() == (cli / name).read_bytes()
+    assert search.run(*inputs).reports[0].bytes == stdout

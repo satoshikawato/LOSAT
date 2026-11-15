@@ -60,13 +60,18 @@ def test_what_is_not_an_option_here_is_refused(option):
 
 
 @pytest.mark.parametrize("option", ["out_pssm", "out_ascii_pssm", "save_pssm_after_last_round", "save_each_pssm"])
-def test_psiblast_writes_no_pssm_file_here(option):
+def test_psiblast_takes_its_pssm_files(option):
     takes_a_file = option in ("out_pssm", "out_ascii_pssm")
-    with pytest.raises(TypeError, match=option):
-        Search("psiblast", **{option: "p.txt" if takes_a_file else True})
-    words = [f"-{option}", "p.txt"] if takes_a_file else [f"-{option}"]
-    with pytest.raises(ArgumentError, match="writes no PSSM file"):
-        Search.from_argv("psiblast", words)
+    words = (f"-{option}", "p.txt") if takes_a_file else (f"-{option}",)
+    assert Search("psiblast", **{option: "p.txt" if takes_a_file else True}).argv == words
+    assert Search.from_argv("psiblast", list(words)).argv == words
+
+
+def test_a_pssm_query_is_refused_here():
+    with pytest.raises(TypeError, match="in_pssm"):
+        Search("psiblast", in_pssm="p.asn")
+    with pytest.raises(ArgumentError, match="the queries are given as records"):
+        Search.from_argv("psiblast", ["-in_pssm", "p.asn"])
 
 
 def test_psiblast_takes_no_pssm_query_here():

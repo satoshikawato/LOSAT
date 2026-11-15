@@ -34,6 +34,8 @@ pub struct PsiblastPssmOptions {
     pub pseudocount: i32,
     /// `-in_pssm`: the query as a PSSM file (`algorithm::psiblast::in_pssm`).
     pub in_pssm: Option<std::path::PathBuf>,
+    /// The run's `-save_each_pssm` numbers (`PsiblastArgs::pssm_versions`).
+    pub versions: PssmVersions,
     /// The rounds that the round driver runs (`algorithm::psiblast::rounds`): `-num_iterations`
     /// when it is not 1 (0: until convergence), or 1 with `-in_pssm` and a PSSM file (the input
     /// PSSM is written before round 1); `None` for the one search of today's call.
@@ -51,9 +53,86 @@ pub struct PssmRequest {
     pub save_each: bool,
     /// `-pseudocount` (`PSIBlastOptions::pseudo_count`).
     pub pseudocount: i32,
+    /// The run's numbers of the files of `-save_each_pssm` (`PssmVersions`).
+    pub versions: PssmVersions,
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1304-1318
+// ```c++
+//         const bool kSaveAllPssms
+//             = args.Exist(kArgSaveAllPssms) && args[kArgSaveAllPssms];
+//         if (args.Exist(kArgPSIOutputChkPntFile) &&
+//             args[kArgPSIOutputChkPntFile]) {
+//             m_CheckPointOutput.Reset
+//                 (new CAutoOutputFileReset
+//                  (args[kArgPSIOutputChkPntFile].AsString(), kSaveAllPssms));
+//         }
+//         const bool kSaveAsciiPssm = args[kArgAsciiPssmOutputFile];
+//         if (kSaveAsciiPssm) {
+//             m_AsciiMatrixOutput.Reset
+//                 (new CAutoOutputFileReset
+//                  (args[kArgAsciiPssmOutputFile].AsString(), kSaveAllPssms));
+//         }
+// ```
+/// The next number of each of a run's two PSSM streams under `-save_each_pssm`
+/// (`CAutoOutputFileReset::m_Version` of `-out_pssm`'s and of `-out_ascii_pssm`'s, from 1). NCBI's
+/// argument object makes the two streams once per run, so their numbers go on over the run's
+/// queries and rounds. The clones of one `PssmVersions` share its numbers: the library's
+/// `run_batches`, whose query batches are calls of their own, gives every batch the run's
+/// (`api::batches`); a command line's run has one.
+#[derive(Debug, Clone)]
+pub struct PssmVersions {
+    asn: Version,
+    ascii: Version,
+}
+
+/// The next number of one PSSM stream, shared by the clones of its `PssmVersions`.
+type Version = std::sync::Arc<std::sync::atomic::AtomicU32>;
+
+impl Default for PssmVersions {
+    fn default() -> Self {
+        let first = || Version::new(std::sync::atomic::AtomicU32::new(1));
+        Self {
+            asn: first(),
+            ascii: first(),
+        }
+    }
+}
+
+impl PssmVersions {
+    /// The next numbers of the two streams.
+    fn next(&self) -> [u32; 2] {
+        use std::sync::atomic::Ordering;
+        [
+            self.asn.load(Ordering::SeqCst),
+            self.ascii.load(Ordering::SeqCst),
+        ]
+    }
+}
+
+/// Two `PssmVersions` are the same where their next numbers are.
+impl PartialEq for PssmVersions {
+    fn eq(&self, other: &Self) -> bool {
+        self.next() == other.next()
+    }
+}
+
+impl Eq for PssmVersions {}
+
 impl PssmRequest {
+    /// The run's streams of `-out_pssm` and of `-out_ascii_pssm` (`CAutoOutputFileReset`), each
+    /// where it is requested: with `-save_each_pssm` they number their files with the run's
+    /// numbers (`versions`).
+    pub(crate) fn streams(&self) -> [Option<OutputFileReset>; 2] {
+        let stream = |path: Option<&str>, version: &Version| {
+            path.map(|path| OutputFileReset::new(path, self.save_each.then(|| version.clone())))
+        };
+        [
+            stream(self.asn_path.as_deref(), &self.versions.asn),
+            stream(self.ascii_path.as_deref(), &self.versions.ascii),
+        ]
+    }
+
     /// The diagnostics the engine computes (`PSIDiagnosticsRequestNewEx(SaveAsciiPssm())`).
     pub(crate) fn diagnostics(&self) -> PsiDiagnosticsRequest {
         PsiDiagnosticsRequest::new_ex(self.ascii_path.is_some())
@@ -132,7 +211,19 @@ impl PsiblastPssmOptions {
             ascii_path: self.out_ascii_pssm.clone(),
             save_each: self.save_each_pssm,
             pseudocount: self.pseudocount,
+            versions: self.versions.clone(),
         })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-248 (quoted at
+    // `in_pssm_files`: the loop writes the PSSM of each round at its start, the input PSSM of
+    // `-in_pssm` in round 1)
+    /// Whether the run can write a PSSM file: the PSSM after the last round (`request`), or one
+    /// of the rounds' (`rounds`: at the start of each round after the first, and with `-in_pssm`
+    /// before round 1).
+    pub(crate) fn writes_files(&self) -> bool {
+        self.request().is_some()
+            || (self.rounds.is_some() && (self.out_pssm.is_some() || self.out_ascii_pssm.is_some()))
     }
 }
 
@@ -1387,29 +1478,30 @@ pub(crate) fn check_pssm_titles(
 #[derive(Debug)]
 pub(crate) struct OutputFileReset {
     file_name: String,
-    version: u32,
+    /// `m_Version`: `None` for version 0 (no `-save_each_pssm`), else the run's number of the
+    /// stream (`PssmVersions`).
+    version: Option<Version>,
 }
 
 impl OutputFileReset {
-    pub(crate) fn new(file_name: &str, use_versions: bool) -> Self {
+    fn new(file_name: &str, version: Option<Version>) -> Self {
         Self {
             file_name: file_name.to_string(),
-            version: u32::from(use_versions),
+            version,
         }
     }
 
-    /// `GetStream`'s file: `F`, or `F.<version>` (the version counts the writes).
+    /// `GetStream`'s file: `F`, or `F.<version>` (the version counts the run's writes).
     pub(crate) fn next_file(&mut self) -> PssmFile {
-        if self.version == 0 {
+        let Some(version) = self.version.as_ref() else {
             return PssmFile {
                 path: std::path::PathBuf::from(&self.file_name),
                 replaced: true,
             };
-        }
-        let path = std::path::PathBuf::from(format!("{}.{}", self.file_name, self.version));
-        self.version += 1;
+        };
+        let number = version.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         PssmFile {
-            path,
+            path: std::path::PathBuf::from(format!("{}.{number}", self.file_name)),
             replaced: false,
         }
     }
@@ -1741,11 +1833,10 @@ enum Staged {
 
 impl PssmFiles {
     pub(crate) fn new(request: &PssmRequest) -> Self {
-        let stream =
-            |path: Option<&str>| path.map(|path| OutputFileReset::new(path, request.save_each));
+        let [asn, ascii] = request.streams();
         Self {
-            asn: stream(request.asn_path.as_deref()),
-            ascii: stream(request.ascii_path.as_deref()),
+            asn,
+            ascii,
             pending: Vec::new(),
             last_replaced: None,
             staging_count: 0,
@@ -2030,8 +2121,9 @@ fn unsupported_target(path: &std::path::Path, kind: &str) -> anyhow::Error {
 /// query's files after its report through streams of their own, so a PSSM file that is also the
 /// standard output, the standard error or the `-out` file gets its bytes among the reports' in an
 /// order that their buffers make, which LOSAT does not reproduce (it writes the PSSM files after
-/// all reports). Every name the run can write is checked: `F`, or with `-save_each_pssm` `F.1` to
-/// `F.<number of queries>`; a name that does not exist cannot be one of those streams. The same
+/// all reports). Every name the run can write is checked: `F`, or with `-save_each_pssm` the next
+/// `<number of queries>` names `F.N` of the run (`PssmVersions`: from `F.1` but in the library's
+/// later query batches); a name that does not exist cannot be one of those streams. The same
 /// file is the same device and inode (`metadata` follows `/dev/stdout` to the stream's file),
 /// or for a character device the same device number (`/dev/null` excepted: no order of its bytes
 /// shows); without inode numbers, the same canonical path as `-out`, or one of the names of the
@@ -2043,15 +2135,18 @@ pub(crate) fn check_pssm_files(
     out: Option<&std::path::Path>,
 ) -> Result<()> {
     let check = PssmFileCheck::new(out);
-    for (option, path) in [
+    for ((option, path), first) in [
         ("-out_pssm", request.asn_path.as_deref()),
         ("-out_ascii_pssm", request.ascii_path.as_deref()),
-    ] {
+    ]
+    .into_iter()
+    .zip(request.versions.next())
+    {
         let Some(path) = path else {
             continue;
         };
         let names: Vec<std::path::PathBuf> = if request.save_each {
-            (1..=queries)
+            (first..first.saturating_add(u32::try_from(queries).unwrap_or(u32::MAX)))
                 .map(|n| std::path::PathBuf::from(format!("{path}.{n}")))
                 .collect()
         } else {

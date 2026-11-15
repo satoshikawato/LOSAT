@@ -29,6 +29,7 @@ fn options(save_last: bool, save_each: bool, ascii: Option<&str>) -> PsiblastPss
         out_ascii_pssm: ascii.map(str::to_string),
         pseudocount: 0,
         in_pssm: None,
+        versions: Default::default(),
         rounds: None,
     }
 }
@@ -87,6 +88,7 @@ fn only_the_last_rounds_pssm_with_a_pssm_file_is_a_request() {
             ascii_path: Some("-".to_string()),
             save_each: true,
             pseudocount: 0,
+            versions: Default::default(),
         }
     );
     assert_eq!(request.diagnostics(), PsiDiagnosticsRequest::new_ex(true));
@@ -498,6 +500,7 @@ fn pssm_request(pseudocount: i32) -> PssmRequest {
         ascii_path: Some("-".to_string()),
         save_each: false,
         pseudocount,
+        versions: Default::default(),
     }
 }
 
@@ -601,6 +604,7 @@ fn a_pssm_query_read_with_parse_deflines_has_its_seq_align_id() {
         ascii_path: None,
         save_each: false,
         pseudocount: 0,
+        versions: Default::default(),
     };
     for (defline, id) in [
         ("gi|123|gb|AAA1.1| t", "        gi 123\n"),
@@ -741,6 +745,7 @@ fn request(path: &std::path::Path, save_each: bool) -> PssmRequest {
         ascii_path: Some(path.to_str().unwrap().to_string()),
         save_each,
         pseudocount: 0,
+        versions: Default::default(),
     }
 }
 
@@ -750,6 +755,7 @@ fn asn_request(path: &std::path::Path, save_each: bool) -> PssmRequest {
         ascii_path: None,
         save_each,
         pseudocount: 0,
+        versions: Default::default(),
     }
 }
 
@@ -855,6 +861,32 @@ fn staged_asn_files_change_no_target_before_the_commit() {
     assert_eq!(names(&dir), ["p.asn", "p.asn.1", "p.asn.2"]);
     assert_eq!(std::fs::read(dir.join("p.asn.1")).unwrap(), b"pssm 1\n");
     assert_eq!(std::fs::read(dir.join("p.asn.2")).unwrap(), b"pssm 2\n");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1304-1318 (quoted at
+// `PssmVersions`): the two streams are made once per run, so `-save_each_pssm` numbers the files
+// over the run. Two calls whose requests share one `PssmVersions` (the library's query batches)
+// number their files as one call; a request of its own starts again at 1. The check of the names
+// before a call starts at the run's next number.
+#[test]
+fn the_runs_numbers_go_on_over_the_calls_that_share_them() {
+    let dir = scratch("versions");
+    let file = dir.join("p.asn");
+    let first = asn_request(&file, true);
+    let second = PssmRequest {
+        versions: first.versions.clone(),
+        ..asn_request(&file, true)
+    };
+    write_files(&first, &[b"pssm 1\n", b"pssm 2\n"], &[]).unwrap();
+    assert_eq!(second.versions.next(), [3, 1]);
+    assert_eq!(second, first);
+    write_files(&second, &[b"pssm 3\n"], &[]).unwrap();
+    assert_eq!(names(&dir), ["p.asn.1", "p.asn.2", "p.asn.3"]);
+    assert_eq!(std::fs::read(dir.join("p.asn.3")).unwrap(), b"pssm 3\n");
+    write_files(&asn_request(&file, true), &[b"again\n"], &[]).unwrap();
+    assert_eq!(std::fs::read(dir.join("p.asn.1")).unwrap(), b"again\n");
+    assert_ne!(asn_request(&file, true), first);
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

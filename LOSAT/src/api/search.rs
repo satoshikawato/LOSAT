@@ -35,22 +35,14 @@ use crate::cli::{Cli, Commands};
 /// (arguments of `run_collect`, `run` and `run_to_file`).
 pub const API_OWNED: &[&str] = &["query", "subject", "db", "out", "outfmt"];
 
-// No NCBI counterpart: NCBI has no library API. LOSAT's library runs psiblast one query per call
-// (`api::batches`, `psiblast_app.cpp:468`), so the numbers of `-save_each_pssm`'s files (`F.1`,
-// `F.2`, ...; `CAutoOutputFileReset`) would start again at each call, and a PSSM file is an output
-// outside those the API owns (`API_OWNED`): a file the caller did not give. The command line
-// writes them (`algorithm::psiblast::pssm`).
-/// psiblast's options that write a PSSM file, which the library API refuses, and `-in_pssm`, the
-/// query as a PSSM file (its queries are records; line PS, DECISIONS 11, as 8 and 10); and its
-/// search strategy file (`STRATEGY_FILES`, line RG item F1b-1).
-const PSIBLAST_FILES: &[&str] = &[
-    "out_pssm",
-    "out_ascii_pssm",
-    "save_pssm_after_last_round",
-    "save_each_pssm",
-    "in_pssm",
-    "export_search_strategy",
-];
+// No NCBI counterpart: NCBI has no library API. `-in_pssm` reads the query from a PSSM file, where
+// the library's queries are records (line PS, DECISIONS 11).
+/// The options of psiblast and tblastn that the library API refuses: `-in_pssm`, the query as a
+/// PSSM file (psiblast's, and tblastn's PSI-TBLASTN, line PS item PS7), and the search strategy
+/// file (`STRATEGY_FILES`, line RG item F1b-1). psiblast's PSSM files (`-out_pssm`,
+/// `-out_ascii_pssm`, `-save_pssm_after_last_round`, `-save_each_pssm`) are written where the
+/// command line writes them (series Q item Q6a).
+const PSSM_QUERY_FILES: &[&str] = &["in_pssm", "export_search_strategy"];
 
 // No NCBI counterpart: the search strategy file (`-export_search_strategy`,
 // `report::archive::strategy`) is an output outside those the API owns too: a file the caller
@@ -58,20 +50,15 @@ const PSIBLAST_FILES: &[&str] = &[
 /// The options that write the search strategy file (line RG-F1).
 const STRATEGY_FILES: &[&str] = &["export_search_strategy"];
 
-/// tblastn's `-in_pssm` (PSI-TBLASTN, line PS item PS7), refused for the same reason as psiblast's,
-/// and its search strategy file.
-const TBLASTN_FILES: &[&str] = &["in_pssm", "export_search_strategy"];
-
-/// The options of `program`'s command line that write a file the library API does not write (a
-/// PSSM, `PSIBLAST_FILES`, or the search strategy, `STRATEGY_FILES`) or read the query from one: they
-/// are not in an argv that `validate` accepts, and `describe` leaves them out.
+/// The options of `program`'s command line that write a file the library API does not write (the
+/// search strategy, `STRATEGY_FILES`) or read the query from one (`-in_pssm`, `PSSM_QUERY_FILES`):
+/// they are not in an argv that `validate` accepts, and `describe` leaves them out.
 /// The searches of records of LOSAT Web take none of them either (the browser refuses `-in_pssm`
 /// until line PS's PSW1), and its `describe` leaves them out through the same list
 /// (`web_adapter::records_refused_options`).
 pub(crate) fn file_options(program: Program) -> &'static [&'static str] {
     match program {
-        Program::Psiblast => PSIBLAST_FILES,
-        Program::Tblastn => TBLASTN_FILES,
+        Program::Psiblast | Program::Tblastn => PSSM_QUERY_FILES,
         Program::Blastn | Program::Blastp | Program::Blastx | Program::Tblastx => STRATEGY_FILES,
     }
 }
@@ -236,13 +223,9 @@ fn parse(
                     "{key} is not accepted by the library API: the queries are given as records"
                 )));
             }
-            if STRATEGY_FILES.contains(&name) {
-                return Err(Error::Argv(format!(
-                    "{key} is not accepted by the library API: the library API writes no search strategy file"
-                )));
-            }
+            debug_assert!(STRATEGY_FILES.contains(&name));
             return Err(Error::Argv(format!(
-                "{key} is not accepted by the library API: the library API writes no PSSM file"
+                "{key} is not accepted by the library API: the library API writes no search strategy file"
             )));
         }
     }
@@ -289,9 +272,11 @@ fn parse_words(
 /// option means, and fails, exactly as there; the error is the parser's message.
 ///
 /// The library API sets the inputs and the outputs itself, so `-query`, `-subject`, `-db`,
-/// `-out` and `-outfmt` are refused (`API_OWNED`). It writes no PSSM file, so psiblast's
-/// `-out_pssm`, `-out_ascii_pssm`, `-save_pssm_after_last_round` and `-save_each_pssm` are refused too, here
-/// and by every search, and no search strategy file (`-export_search_strategy`). The checks of the options that the command line makes before it
+/// `-out` and `-outfmt` are refused (`API_OWNED`), and so is `-in_pssm` of psiblast and tblastn
+/// (the queries are records), here and by every search. It writes no search strategy file
+/// (`-export_search_strategy` is refused too). psiblast's PSSM files (`-out_pssm`,
+/// `-out_ascii_pssm`, with `-save_pssm_after_last_round` and `-save_each_pssm`) are written by
+/// every search where the command line writes them, with its names. The checks of the options that the command line makes before it
 /// searches (ranges, scoring, the hit list size of each format) come with `run` and
 /// `run_collect`, which know the formats and the inputs, and report them with the command line's
 /// messages.
@@ -388,13 +373,6 @@ mod tests {
         validate(Program::Blastp, &["-matrix", "BLOSUM62"]).unwrap();
     }
 
-    /// The refusal of psiblast's PSSM files, with the word as the caller wrote it.
-    fn writes_no_pssm_file(key: &str) -> Error {
-        Error::Argv(format!(
-            "{key} is not accepted by the library API: the library API writes no PSSM file"
-        ))
-    }
-
     #[test]
     fn the_search_strategy_file_is_refused_by_validate() {
         for program in [
@@ -403,6 +381,7 @@ mod tests {
             Program::Blastx,
             Program::Tblastn,
             Program::Tblastx,
+            Program::Psiblast,
         ] {
             for argv in [
                 &["-export_search_strategy", "s.asn"][..],
@@ -422,62 +401,69 @@ mod tests {
         }
     }
 
+    // Series Q item Q6a: psiblast's PSSM files go to the parser as on the command line, and the
+    // search writes them (`tests/library_api.rs`).
     #[test]
-    fn psiblast_pssm_files_are_refused_by_validate() {
+    fn psiblast_pssm_files_are_the_command_lines_options() {
         for argv in [
             &["-out_ascii_pssm", "p.txt"][..],
             &["-out_ascii_pssm=p.txt"],
             &["-out_pssm", "p.asn"],
-            &["-evalue", "1", "-save_pssm_after_last_round"],
-            &["-save_each_pssm"],
+            &[
+                "-evalue",
+                "1",
+                "-save_pssm_after_last_round",
+                "-out_pssm",
+                "p.asn",
+            ],
+            &["-save_each_pssm", "-out_ascii_pssm", "p.txt"],
         ] {
-            // The command line takes each of them.
-            let words = ["losat", "psiblast", "-query", "q", "-subject", "s"];
-            crate::cli::try_parse_from::<Cli, _, _>(words.iter().chain(argv)).unwrap();
-            let refused = argv.iter().find(|word| word.contains("pssm")).unwrap();
-            assert_eq!(
-                validate(Program::Psiblast, argv),
-                Err(writes_no_pssm_file(key(refused))),
-                "{argv:?}"
-            );
+            let search = validate(Program::Psiblast, argv).unwrap();
+            let query =
+                crate::api::read_fasta(Program::Psiblast, Role::Query, b">q\nMKT\n").unwrap();
+            match search.command(Inputs::new(&query, &query)).unwrap() {
+                Commands::Psiblast(args) => assert!(
+                    args.out_pssm.is_some() || args.out_ascii_pssm.is_some(),
+                    "{argv:?}"
+                ),
+                other => panic!("{other:?}"),
+            }
         }
-        // The first of them is named.
-        assert_eq!(
-            validate(
-                Program::Psiblast,
-                &[
-                    "-save_each_pssm",
-                    "-out_ascii_pssm",
-                    "-save_pssm_after_last_round"
-                ]
-            ),
-            Err(writes_no_pssm_file("-save_each_pssm"))
-        );
-        // As the options the API owns, before the parser (which takes one dash only).
-        assert_eq!(
-            validate(Program::Psiblast, &["--save_each_pssm"]),
-            Err(writes_no_pssm_file("--save_each_pssm"))
-        );
-        validate(Program::Psiblast, &["-pseudocount", "2"]).unwrap();
+        // NCBI's check of the options comes with the search, as on the command line
+        // (`PsiblastPssmOptions::check`).
+        validate(Program::Psiblast, &["-save_each_pssm"]).unwrap();
+        // The parser takes one dash only.
+        let error = validate(Program::Psiblast, &["--save_each_pssm"]).unwrap_err();
+        assert!(!error.message().contains("library API"), "{error}");
         // blastp has no such option: the parser's message.
         let error = validate(Program::Blastp, &["-save_each_pssm"]).unwrap_err();
         assert!(!error.message().contains("PSSM"), "{error}");
     }
 
     #[test]
-    fn psiblast_pssm_files_are_refused_by_every_search_before_it_runs() {
+    fn a_pssm_query_is_refused_by_validate_and_every_search_before_it_runs() {
+        let refused = |key: &str| {
+            Error::Argv(format!(
+                "{key} is not accepted by the library API: the queries are given as records"
+            ))
+        };
+        for program in [Program::Psiblast, Program::Tblastn] {
+            assert_eq!(
+                validate(program, &["-in_pssm", "p.asn"]),
+                Err(refused("-in_pssm"))
+            );
+            assert_eq!(
+                validate(program, &["--in_pssm=p.asn"]),
+                Err(refused("--in_pssm"))
+            );
+        }
         // `validate` makes every `Search`; this one is made without it, so the search's own
         // refusal (`Search::command`) is what stops it.
         let search = Search {
             program: Program::Psiblast,
-            argv: vec![
-                "-save_pssm_after_last_round".to_string(),
-                "-out_ascii_pssm".to_string(),
-                "p.txt".to_string(),
-            ],
+            argv: vec!["-in_pssm".to_string(), "p.asn".to_string()],
             out: None,
         };
-        let refused = writes_no_pssm_file("-save_pssm_after_last_round");
         let query = crate::api::read_fasta(
             Program::Psiblast,
             Role::Query,
@@ -485,31 +471,23 @@ mod tests {
         )
         .unwrap();
         let inputs = Inputs::new(&query, &query).named("q.faa", "s.faa");
-        assert_eq!(search.command(inputs).unwrap_err(), refused);
+        assert_eq!(search.command(inputs).unwrap_err(), refused("-in_pssm"));
         assert_eq!(
             crate::api::run_collect(&search, inputs, &["6"]).unwrap_err(),
-            refused
+            refused("-in_pssm")
         );
         let mut report = Vec::new();
         let mut diagnostics = Vec::new();
         assert_eq!(
             crate::api::run(&search, inputs, &mut [("6", &mut report)], &mut diagnostics)
                 .unwrap_err(),
-            refused
+            refused("-in_pssm")
         );
         assert!(report.is_empty() && diagnostics.is_empty());
         assert_eq!(
             crate::api::run_batches(&search, inputs).err(),
-            Some(refused.clone())
+            Some(refused("-in_pssm"))
         );
-        let path =
-            std::env::temp_dir().join(format!("losat-api-pssm-refusal-{}.out", std::process::id()));
-        assert_eq!(
-            crate::api::run_to_file(&search, inputs, "6", &path, &mut diagnostics).unwrap_err(),
-            refused
-        );
-        assert!(!path.exists());
-        assert!(!std::path::Path::new("p.txt").exists());
     }
 
     // Line RG item Q5: psiblast's rounds (`-num_iterations` other than 1) run in the library too;

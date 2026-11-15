@@ -1680,11 +1680,17 @@ fn psiblast_rounds_carry_their_round_and_its_statistics() {
         for (stats, (printed, space)) in rounds.stats.iter().zip(&footers) {
             let stats = stats.unwrap();
             assert_eq!(stats.eff_space, *space, "{context}");
-            for (value, printed) in [stats.lambda, stats.kappa, stats.entropy].iter().zip(printed) {
+            for (value, printed) in [stats.lambda, stats.kappa, stats.entropy]
+                .iter()
+                .zip(printed)
+            {
                 assert!(prints_as(*value, *printed), "{context}: {value} {printed}");
             }
         }
-        assert_ne!(rounds.stats[0], rounds.stats[1], "{context}: a PSSM's own values");
+        assert_ne!(
+            rounds.stats[0], rounds.stats[1],
+            "{context}: a PSSM's own values"
+        );
         // Every row of outfmt 7 lies in its round's part of the report.
         let commented = &outcome.reports[1];
         let text = String::from_utf8(commented.bytes.clone()).unwrap();

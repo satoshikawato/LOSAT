@@ -499,12 +499,13 @@ impl FormatObserver for RangeRecorder {
         }
         let end = self.position(format);
         let part = self.parts.current();
-        let stored = store(&mut self.spans[part][format], hsp, start..end).and_then(|()| {
-            match self.heading[format].clone() {
-                Some(heading) => store(&mut self.headings[part][format], hsp, heading),
-                None => Ok(()),
-            }
-        });
+        let stored =
+            store(&mut self.spans[part][format], hsp, start..end).and_then(|()| {
+                match self.heading[format].clone() {
+                    Some(heading) => store(&mut self.headings[part][format], hsp, heading),
+                    None => Ok(()),
+                }
+            });
         if let Err(fault) = stored {
             self.fault(fault);
         }
@@ -531,7 +532,8 @@ impl FormatObserver for RangeRecorder {
     fn round_begin(&mut self, query: usize, round: u32) {
         self.parts.round_begin(query, round);
         let reports = self.positions.len();
-        self.spans.resize(self.parts.current() + 1, vec![Vec::new(); reports]);
+        self.spans
+            .resize(self.parts.current() + 1, vec![Vec::new(); reports]);
         self.headings
             .resize(self.parts.current() + 1, vec![Vec::new(); reports]);
     }

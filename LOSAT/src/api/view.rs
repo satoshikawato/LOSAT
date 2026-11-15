@@ -123,12 +123,9 @@ impl Outcome {
     /// The results of each query record of the inputs, in their order, also of those without
     /// hits.
     pub fn queries(&self) -> impl Iterator<Item = QueryHits<'_>> + '_ {
-        self.query_stats
-            .iter()
-            .enumerate()
-            .map(|(q_idx, stats)| {
-                query_hits(&self.hsps, q_idx, stats.as_ref(), self.rounds.get(q_idx))
-            })
+        self.query_stats.iter().enumerate().map(|(q_idx, stats)| {
+            query_hits(&self.hsps, q_idx, stats.as_ref(), self.rounds.get(q_idx))
+        })
     }
 
     /// The results of query record `q_idx` of the inputs.

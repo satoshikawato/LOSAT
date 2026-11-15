@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.28
+- Version: 1.29
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -57,7 +57,10 @@
   1.27 2026-11-15 (the rule-2 item of a seqid list of gi ids only narrowed to what NCBI's runs
   show: a positive list keeps every sequence only where NCBI's OID bit set is its special
   all-set one, and none elsewhere, line DBID item gisl, Owner-delegated);
-  1.28 2026-11-15 (BLASTX's ungapped one-hit HSPs of negative length and of length 0 ported, rule 4,
+  1.28 2026-11-15 (the explicit rejection of 1.23 and the rule-2 rejection of a query's id of 1.24
+  in the query-anchored views of BLASTN and TBLASTN, line RG item T3b; Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07, within the classes of 1.23 and 1.10);
+  1.29 2026-11-15 (BLASTX's ungapped one-hit HSPs of negative length and of length 0 ported, rule 4,
   line RG item X2g, with the refusal of decision X2g-4 of that line: Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
@@ -801,8 +804,9 @@ here, and names the widening that PS16a made for protein queries.
   lengths, a density that may be negative or raised by a negative length, an HSP of length 0
   that absorbs another and becomes positive).
 
-- BLASTP `-outfmt 1` to `4` (the query-anchored views; version 1.23, 2026-11-14, line RG item T3a,
-  Owner-delegated): a query read with `-parse_deflines` that is also a subject (one record, the
+- BLASTP and BLASTN `-outfmt 1` to `4` (the query-anchored views; version 1.23, 2026-11-14, line RG
+  item T3a, Owner-delegated; BLASTN version 1.28, 2026-11-15, line RG item T3b, probes
+  `bn.t3b.bself*`): a query read with `-parse_deflines` that is also a subject (one record, the
   same definition line and letters) is the query's own Bioseq for NCBI's `CAlnMix`, whose `Add`
   presets that subject's row to the HSP added first (`alnseq.cpp:165-186`). The first match that
   `x_Merge` places on the query (the longest aligned segment) sets that row to its own HSP
@@ -816,8 +820,9 @@ here, and names the widening that PS16a made for protein queries.
   search of many queries the first byte of the query's block, after the reports of the blocks
   before (as outfmt 0's refusal of such a record's masks). NCBI's output before the abort is what
   its stream had flushed, which depends on its buffer (to a file or a pipe, the version line of
-  the prolog), so no prefix of it is NCBI's. The other sections of such a record are NCBI's
-  (fixture rows `db.of1.bp.self1.*`).
+  the prolog), so no prefix of it is NCBI's. BLASTN writes its prolog before the search, as NCBI
+  does, so its refusal follows the prolog. The other sections of such a record are NCBI's
+  (fixture rows `db.of1.bp.self1.*`, `db.of1.bn.selfrc.*`).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 
@@ -838,9 +843,11 @@ would port:
   and `qcovus` as one subject's, and PSIBLAST's cut to `-max_target_seqs` counts them as one
   subject.
 - A reported sequence with the id, or the display id of its description line (outfmt 0 to 4 of
-  BLASTP, PSIBLAST and RPSBLAST), of a query read with `-parse_deflines` in the query batch that
-  reports it (with outfmt 5, in any batch), and in outfmt 1 to 4 of BLASTP with the id or display
-  id `lcl|Query_N` of a query read without it: NCBI shows the query's title and letters for the
+  BLASTP, PSIBLAST and RPSBLAST, 1 to 4 of BLASTN and TBLASTN since version 1.28), of a query read
+  with `-parse_deflines` in the query batch that reports it (with outfmt 5, in any batch), and in
+  outfmt 1 to 4 of BLASTP, BLASTN and TBLASTN with the id or display id `lcl|Query_N` of a query
+  read without it (TBLASTN's merge then reads the protein query's letters as nucleotides, probe
+  `tn.t3b.d.qid.f1`): NCBI shows the query's title and letters for the
   id (its second lookup, by the display id, the query's title in that line).
 - A stored title or Seq-id with a byte outside ' ' to '~': NCBI prints `#` and an error message
   each time it reads the definition line.
@@ -858,7 +865,7 @@ would port:
   order) and deletes them in its re-evaluation (a
   length of 0 or less scores 0, below every cutoff), so they are never reported. The X2 build
   refused these searches; LOSAT now gives NCBI's output (the rule-3 merge case above aside).
-- BLASTX `-ungapped -window_size 0` with a low `-threshold` (version 1.28, 2026-11-15, line RG item
+- BLASTX `-ungapped -window_size 0` with a low `-threshold` (version 1.29, 2026-11-15, line RG item
   X2g): the same HSPs of the one-hit word finder. NCBI links them with the others in the first
   `BLAST_LinkHsps` and reaps them by their E-values; `Blast_HSPListReevaluateUngapped` does not
   rescore them (the subject is a protein) and deletes those of negative length in `Blast_HSPTest`

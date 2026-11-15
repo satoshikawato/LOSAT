@@ -580,7 +580,6 @@ pub(crate) fn psi_search_and_object(
             &reader.program.to_ascii_lowercase(),
             annots,
             &query.ids,
-            !reader.database,
         )
         .map_err(|refusal| reader.refuse(refusal.text()))?,
         _ => super::annot_index::AnnotOutcome::default(),

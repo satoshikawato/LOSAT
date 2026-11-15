@@ -477,19 +477,8 @@ pub(super) enum Handle {
     Key { key: Vec<u8>, packed: i64 },
     /// A handle that no other lookup finds.
     Unique(u64),
-    /// A `giim` handle of the number `id`.
-    Giim { id: i32, handle: GiimHandle },
-}
-
-/// The handle of a `giim` lookup (`GiimTree`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum GiimHandle {
-    /// The info NCBI's tree gives the lookup (numbered): lookups of one info are one handle.
-    Known(u64),
-    /// A lookup whose handle depends on `giim` handles whose life LOSAT does not follow
-    /// (numbered by the lookup: one handle per lookup, `HandleRangeMap::giim_repeats` refuses a
-    /// map where that decides anything).
-    Unknown(u64),
+    /// A `giim` handle of the number `id`: the info (numbered) that NCBI's tree gives it.
+    Giim { id: i32, info: u64 },
 }
 
 /// The lookups and infos of Seq-ids that no other lookup finds, numbered.
@@ -556,19 +545,26 @@ impl Handle {
                 };
                 Handle::Giim {
                     id: number,
-                    handle: giim.find_or_create(value),
+                    info: giim.find_or_create(value, Holder::Object),
                 }
             }
         }
     }
 
-    /// `CSeq_id_Handle::GetHandle(id)` of a lookup whose `giim` handles LOSAT does not follow
-    /// (`GiimTree::forget`).
-    pub(super) fn of_unfollowed(id: &ParsedSeqId, giim: &mut GiimTree) -> Handle {
+    /// `CSeq_id_Handle::GetHandle(id)` of a handle that lives as long as the run (a Seq-table
+    /// column's default, `CSeqTableLocColumns::m_DefaultIdHandle`).
+    pub(super) fn of_run(id: &ParsedSeqId, giim: &mut GiimTree) -> Handle {
+        let handle = Handle::of(id, giim);
+        giim.mapped(&handle);
+        giim.end_object();
+        handle
+    }
+
+    /// The lookup of `id` by a `CSeq_loc_CI` (its handle lives until `GiimTree::end_iterator`).
+    pub(super) fn look_up_in_iterator(id: &ParsedSeqId, giim: &mut GiimTree) {
         if let ParsedSeqId::Giim(value) = id {
-            giim.forget(value.id);
+            giim.find_or_create(value, Holder::Iterator);
         }
-        Handle::of(id, giim)
     }
 
     /// `CSeq_id_Handle::GetGiHandle(gi)`.
@@ -614,82 +610,153 @@ impl Handle {
 //         x_SetAnnot();
 //     }
 // ```
-/// NCBI's `giim` tree (`CSeq_id_Giim_Tree`, quoted at `Handle`) during the index. A lookup gets
-/// the first live handle of its number whose Seq-id is not `Equals` to it, else a new handle; so
-/// the live handles of a number are all made of one value (the first's), a lookup of another value
-/// gets the first handle, and a lookup of that value a new one. What is live: the query's Seq-ids
-/// (for the whole run, made first: `held`), and within one annotation object every handle its
-/// maps took (NCBI builds all of an object's maps before it maps them). Which handles of an
-/// earlier object are still alive (its mapped ranges, the `key` and `hrmaps` that
-/// `x_InitFeatKeys` keeps from one feature to the next, seq_annot_info.cpp:726-729), and the
-/// Seq-ids of the subjects of a `-subject` run (read before the PSSM, blast_args.cpp:2547-2557),
-/// LOSAT does not follow: a number looked up by an earlier object, by a Seq-table's columns or a
-/// Std-seg's location iterator, and every number in a `-subject` run, is `Unknown`.
+/// NCBI's `giim` tree (`CSeq_id_Giim_Tree`, quoted at `Handle`) during the index: its live
+/// handles, in the order made, with what holds each. A lookup gets the first live handle of its
+/// number whose Seq-id is not `Equals` to it, else a new handle; a handle leaves the tree when the
+/// last thing holding it goes. What holds a handle, as NCBI's object manager keeps it:
+/// - the run: the query's Seq-ids (looked up first), a Seq-table column's default
+///   (`m_DefaultIdHandle`, phase C), and every handle mapped into the index (`x_Map`: the TSE's
+///   annotation maps and the object index keep its key);
+/// - the annotation object being indexed: the maps of a feature (location and product, built
+///   before they are mapped), a graph, an alignment (all its rows; a `disc` all its parts), a
+///   location set, a table location, a table row's location or product map;
+/// - a Seq-table's `key` (`x_InitFeatTableKeys`, seq_annot_info.cpp:1087, 1164): a simple row's handle
+///   (`SetTableKeyAndIndex`) until the next row puts another one there;
+/// - a `CSeq_loc_CI` of a Std-seg location (Seq_loc.cpp:1420-1425), until it goes.
+///
+/// The other `key` and `hrmaps` that NCBI keeps from one object to the next
+/// (seq_annot_info.cpp:726-729, annot_object.cpp:429-444) only hold handles of non-empty ranges,
+/// which are mapped (an empty one is LOSAT's refusal, `Indexer::map_location`). The subjects of a
+/// `-subject` run hold no `giim` Seq-id: LOSAT refuses a record with one
+/// (`blastinput::fasta_reader::believed::refused_id`), as it refuses a PSSM query with one.
 #[derive(Debug, Default)]
 pub(super) struct GiimTree {
-    /// A `-subject` run: every lookup is `Unknown`.
-    blind: bool,
-    /// The first handle of each number the query's Seq-ids hold, with the Seq-id it was made of.
-    held: Vec<(GiimportId, u64)>,
-    /// The numbers whose live handles LOSAT does not know.
-    unknown: Vec<i32>,
-    /// The handles made in the current annotation object, in the order made.
-    object: Vec<(GiimportId, u64)>,
+    live: Vec<GiimEntry>,
+}
+
+/// A live `giim` handle: the Seq-id it was made of, its info's number, and what holds it.
+#[derive(Debug)]
+struct GiimEntry {
+    value: GiimportId,
+    info: u64,
+    run: bool,
+    object: bool,
+    key: bool,
+    iterator: bool,
+}
+
+impl GiimEntry {
+    fn hold(&mut self, holder: Holder) {
+        match holder {
+            Holder::Object => self.object = true,
+            Holder::Iterator => self.iterator = true,
+        }
+    }
+}
+
+/// What a lookup's handle is held by.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Holder {
+    /// The annotation object's maps.
+    Object,
+    /// A `CSeq_loc_CI`.
+    Iterator,
 }
 
 impl GiimTree {
-    /// The tree when the annotations are indexed: after the query's Seq-ids `query_ids`, in a run
-    /// with `-subject` sequences or not.
-    pub(super) fn new(query_ids: &[ParsedSeqId], subjects: bool) -> GiimTree {
-        let mut tree = GiimTree {
-            blind: subjects,
-            ..GiimTree::default()
-        };
+    /// The tree when the annotations are indexed: after the query's Seq-ids `query_ids`.
+    pub(super) fn new(query_ids: &[ParsedSeqId]) -> GiimTree {
+        let mut tree = GiimTree::default();
         for id in query_ids {
-            if let ParsedSeqId::Giim(value) = id {
-                if !tree.held.iter().any(|(first, _)| first.id == value.id) {
-                    tree.held.push((value.clone(), next_lookup()));
-                }
-            }
+            let handle = Handle::of(id, &mut tree);
+            tree.mapped(&handle);
         }
+        tree.end_object();
         tree
     }
 
-    /// `CSeq_id_Giim_Tree::FindOrCreate(id)`.
-    fn find_or_create(&mut self, value: &GiimportId) -> GiimHandle {
-        if self.blind || self.unknown.contains(&value.id) {
-            return GiimHandle::Unknown(next_lookup());
-        }
-        if let Some((first, info)) = self.held.iter().find(|(first, _)| first.id == value.id) {
-            return GiimHandle::Known(if first != value { *info } else { next_lookup() });
-        }
-        match self
-            .object
-            .iter()
-            .find(|(made, _)| made.id == value.id && made != value)
+    /// `CSeq_id_Giim_Tree::FindOrCreate(id)`, the handle held by `holder`: its info.
+    fn find_or_create(&mut self, value: &GiimportId, holder: Holder) -> u64 {
+        if let Some(entry) = self
+            .live
+            .iter_mut()
+            .find(|entry| entry.value.id == value.id && entry.value != *value)
         {
-            Some((_, info)) => GiimHandle::Known(*info),
-            None => {
-                let info = next_lookup();
-                self.object.push((value.clone(), info));
-                GiimHandle::Known(info)
+            entry.hold(holder);
+            return entry.info;
+        }
+        let mut entry = GiimEntry {
+            value: value.clone(),
+            info: next_lookup(),
+            run: false,
+            object: false,
+            key: false,
+            iterator: false,
+        };
+        entry.hold(holder);
+        let info = entry.info;
+        self.live.push(entry);
+        info
+    }
+
+    fn entry(&mut self, handle: &Handle) -> Option<&mut GiimEntry> {
+        let Handle::Giim { info, .. } = handle else {
+            return None;
+        };
+        self.live.iter_mut().find(|entry| entry.info == *info)
+    }
+
+    /// `handle` is mapped into the index (`x_Map` of a non-empty range): it lives with the run.
+    pub(super) fn mapped(&mut self, handle: &Handle) {
+        if let Some(entry) = self.entry(handle) {
+            entry.run = true;
+        }
+    }
+
+    /// Every handle of the maps `maps` is mapped (an object whose ranges are all non-empty).
+    pub(super) fn mapped_all<'m>(&mut self, maps: impl IntoIterator<Item = &'m HandleRangeMap>) {
+        for map in maps {
+            for (handle, _) in &map.map {
+                self.mapped(handle);
             }
         }
     }
 
-    /// The handles of the number `id` are no longer followed (a lookup of NCBI's that LOSAT does
-    /// not make, or whose handle's life it does not know).
-    fn forget(&mut self, id: i32) {
-        if !self.unknown.contains(&id) && !self.held.iter().any(|(first, _)| first.id == id) {
-            self.unknown.push(id);
+    /// The Seq-table's `key` takes `handle` (`None`: a handle that lives anyway, or none).
+    pub(super) fn set_key(&mut self, handle: Option<&Handle>) {
+        for entry in &mut self.live {
+            entry.key = false;
         }
+        if let Some(entry) = handle.and_then(|handle| self.entry(handle)) {
+            entry.key = true;
+        }
+        self.prune();
     }
 
-    /// The end of an annotation object: the handles it made may live on or not.
+    /// The end of an annotation object: its maps go.
     pub(super) fn end_object(&mut self) {
-        for (made, _) in std::mem::take(&mut self.object) {
-            self.forget(made.id);
+        for entry in &mut self.live {
+            entry.object = false;
         }
+        self.prune();
+    }
+
+    /// The end of a Seq-table's index: its `key` goes.
+    pub(super) fn end_table(&mut self) {
+        self.set_key(None);
+    }
+
+    /// The end of a `CSeq_loc_CI`.
+    pub(super) fn end_iterator(&mut self) {
+        for entry in &mut self.live {
+            entry.iterator = false;
+        }
+        self.prune();
+    }
+
+    fn prune(&mut self) {
+        self.live
+            .retain(|entry| entry.run || entry.object || entry.key || entry.iterator);
     }
 }
 
@@ -966,26 +1033,6 @@ impl HandleRangeMap {
         let (id, range, strand) = point_parts(point);
         let handle = Handle::of(id, state.giim);
         self.add(handle, range, strand, state);
-    }
-
-    /// Whether the maps `maps` hold two `giim` handles of one number, one of them `Unknown`: NCBI
-    /// takes their Seq-ids for one handle or two by `giim` handles whose life LOSAT does not
-    /// follow (`GiimTree`).
-    pub(super) fn giim_repeats<'m>(maps: impl IntoIterator<Item = &'m HandleRangeMap>) -> bool {
-        let mut handles: Vec<(i32, GiimHandle)> = Vec::new();
-        for map in maps {
-            for (handle, _) in &map.map {
-                if let Handle::Giim { id, handle } = handle {
-                    if !handles.contains(&(*id, *handle)) {
-                        handles.push((*id, *handle));
-                    }
-                }
-            }
-        }
-        handles.iter().any(|&(id, handle)| {
-            matches!(handle, GiimHandle::Unknown(_))
-                && handles.iter().filter(|&&(other, _)| other == id).count() > 1
-        })
     }
 
     // NCBI reference (598d8ae6): c++/include/objmgr/impl/handle_range_map.hpp:91 (the map's order

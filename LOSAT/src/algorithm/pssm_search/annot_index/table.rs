@@ -498,12 +498,8 @@ impl<'a> LocColumns<'a> {
             return fail(477, format!("Conflicting {} columns", self.name));
         }
         if let Some(default) = self.id.and_then(Column::default) {
-            // The default handle lives as long as the table: LOSAT does not follow it (a `giim`
-            // Seq-id's, `GiimTree`).
-            self.default_id = Some(Handle::of_unfollowed(
-                single_get_id(default)?.seq_id(),
-                giim,
-            ));
+            // The default handle lives as long as the table (the run).
+            self.default_id = Some(Handle::of_run(single_get_id(default)?.seq_id(), giim));
         }
         if let Some(default) = self.gi.and_then(Column::default) {
             self.default_id = Some(Handle::gi(single_get(default, Want::Int8)?));
@@ -952,9 +948,14 @@ impl Indexer<'_> {
             // `x_IsSorted` holds: the table location is an `int`.
             let (_, interval) = info.table_loc.expect("sorted").choice();
             let (id, range, _) = super::range::interval_parts(interval);
+            // `key.m_Handle` holds the handle (mapped, unless the range is empty) until the table
+            // has been indexed.
             let handle = Handle::of(id, &mut self.giim);
+            let mapped = self.x_map(range, Some(handle.clone()));
+            self.giim.set_key(Some(&handle));
             self.giim.end_object();
-            return self.x_map(range, Some(handle));
+            self.giim.end_table();
+            return mapped;
         }
         for row in 0..info.num_rows.max(0) as u64 {
             // NCBI reference (598d8ae6): c++/include/objmgr/impl/seq_table_info.hpp:92-96,241-246
@@ -993,14 +994,21 @@ impl Indexer<'_> {
                     };
                     let map = HandleRangeMap::of_location(loc, Mode::None, &mut self.giim);
                     self.map_location(&map, Event::Row)?;
+                    // `key.m_Handle` takes each handle of a non-empty range (mapped).
+                    if map.map.iter().any(|(_, hr)| !hr.overlapping().is_empty()) {
+                        self.giim.set_key(None);
+                    }
                 } else {
                     let (id, range) = self.table_key(cols, row)?;
-                    self.x_map(range, id)?;
+                    self.x_map(range, id.clone())?;
+                    // `SetTableKeyAndIndex` puts the row's handle in `key.m_Handle`.
+                    self.giim.set_key(id.as_ref());
                 }
-                // NCBI's row map is made for each location (seq_annot_info.cpp:1119-1150).
+                // NCBI's row map is made for each location (seq_annot_info.cpp:1130).
                 self.giim.end_object();
             }
         }
+        self.giim.end_table();
         Ok(())
     }
 

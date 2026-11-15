@@ -2,7 +2,7 @@
 //! object manager's index reads them (line RG D3-1 `om/SPEC.md` §5.8).
 
 use super::super::view::V;
-use super::{GiimHandle, GiimTree, Handle, HandleRange, HandleRangeMap, Mode, Range, MAX, UNKNOWN};
+use super::{GiimTree, Handle, HandleRange, HandleRangeMap, Mode, Range, MAX, UNKNOWN};
 use crate::report::serial::asn_types::{read_document, table::named, Value};
 use crate::seqid::model::ObjectId;
 use crate::seqid::ParsedSeqId;
@@ -537,7 +537,6 @@ fn giim_handles_follow_ncbis_inverted_tree() {
     );
     // (5, x) makes the first handle, (5, y) finds it, the second (5, x) makes another.
     assert_eq!(m.map.len(), 3);
-    assert!(!HandleRangeMap::giim_repeats([&m]));
     // The query's Seq-id (5, "q") holds the first handle for the whole run: (5, "q") gets a new
     // handle, any other value of 5 the query's.
     let query = [crate::seqid::ParsedSeqId::Giim(
@@ -547,7 +546,7 @@ fn giim_handles_follow_ncbis_inverted_tree() {
             release: None,
         },
     )];
-    let mut giim = GiimTree::new(&query, false);
+    let mut giim = GiimTree::new(&query);
     let m = map_in(
         &pair("giim { id 5, db \"q\" }", "giim { id 5 }"),
         Mode::None,
@@ -560,39 +559,89 @@ fn giim_handles_follow_ncbis_inverted_tree() {
         &mut giim,
     );
     assert_eq!(m.map.len(), 1);
-    // A number an earlier object looked up, and every number of a `-subject` run, is not followed:
-    // two of its lookups in one map are refused.
-    let mut giim = GiimTree::default();
-    map_in(
-        "int { from 0, to 5, id giim { id 5 } }",
-        Mode::None,
-        &mut giim,
-    );
-    giim.end_object();
+    // An earlier object's mapped handle lives on (review 3 gq4, gq5; om s_i74); an unmapped one
+    // goes with its object.
+    let earlier = |mapped: bool| {
+        let mut giim = GiimTree::default();
+        let m = map_in(
+            "int { from 1, to 2, id giim { id 5 } }",
+            Mode::None,
+            &mut giim,
+        );
+        if mapped {
+            giim.mapped_all([&m]);
+        }
+        giim.end_object();
+        giim
+    };
+    let mut giim = earlier(true);
     let m = map_in(
         &pair("giim { id 5 }", "giim { id 5, db \"x\" }"),
         Mode::None,
         &mut giim,
     );
-    assert!(m.map.iter().all(|(handle, _)| matches!(
-        handle,
-        Handle::Giim {
-            handle: GiimHandle::Unknown(_),
-            ..
-        }
-    )));
-    assert!(HandleRangeMap::giim_repeats([&m]));
-    let mut giim = GiimTree::new(&[], true);
+    assert_eq!(m.map.len(), 2);
+    let m = map_in(
+        &pair("giim { id 5, db \"x\" }", "giim { id 5, db \"y\" }"),
+        Mode::None,
+        &mut giim,
+    );
+    assert_eq!(m.map.len(), 1);
+    let mut giim = earlier(false);
+    let m = map_in(
+        &pair("giim { id 5 }", "giim { id 5, db \"x\" }"),
+        Mode::None,
+        &mut giim,
+    );
+    assert_eq!(m.map.len(), 1);
+    // A Seq-table's `key` keeps a simple row's handle until the next one (om s_i77); a location
+    // iterator's handle is held until it goes (om s_i79).
+    let mut giim = GiimTree::default();
+    let key = Handle::of(
+        &crate::seqid::ParsedSeqId::Giim(crate::seqid::model::GiimportId {
+            id: 5,
+            db: Some(b"x".to_vec()),
+            release: None,
+        }),
+        &mut giim,
+    );
+    giim.set_key(Some(&key));
+    giim.end_object();
     let m = map_in(
         &pair("giim { id 5 }", "giim { id 5 }"),
         Mode::None,
         &mut giim,
     );
-    assert!(HandleRangeMap::giim_repeats([&m]));
+    assert_eq!(m.map.len(), 1);
+    giim.end_object();
+    giim.end_table();
     let m = map_in(
-        "int { from 0, to 5, id giim { id 7 } }",
+        &pair("giim { id 5 }", "giim { id 5 }"),
         Mode::None,
         &mut giim,
     );
-    assert!(!HandleRangeMap::giim_repeats([&m]));
+    assert_eq!(m.map.len(), 2);
+    let mut giim = GiimTree::default();
+    Handle::look_up_in_iterator(
+        &crate::seqid::ParsedSeqId::Giim(crate::seqid::model::GiimportId {
+            id: 5,
+            db: Some(b"x".to_vec()),
+            release: None,
+        }),
+        &mut giim,
+    );
+    let m = map_in(
+        &pair("giim { id 5 }", "giim { id 5 }"),
+        Mode::None,
+        &mut giim,
+    );
+    assert_eq!(m.map.len(), 1);
+    giim.end_iterator();
+    giim.end_object();
+    let m = map_in(
+        &pair("giim { id 5 }", "giim { id 5 }"),
+        Mode::None,
+        &mut giim,
+    );
+    assert_eq!(m.map.len(), 2);
 }

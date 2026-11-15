@@ -313,10 +313,11 @@ fn std_seg(giim: &mut GiimTree, rows: &mut Vec<HandleRangeMap>, seg: V<'_>) -> R
         // The iterator's ranges are made when it is constructed (`x_ProcessLocation` of the whole
         // location), so a `feat` anywhere stops before any row.
         let mut ranges = Vec::new();
-        loc_ci_ranges(loc, &mut ranges)?;
+        let mut lookups = Vec::new();
+        loc_ci_ranges(loc, &mut ranges, &mut lookups)?;
         // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:1420-1425 (the iterator
-        // looks up the handle of every part when it is made, and `AddRange(id, ...)` again: the
-        // `giim` handles of the iterator's lookups live until it goes, which LOSAT does not follow)
+        // looks up the handle of every part when it is made, and `AddRange(id, ...)` looks it up
+        // again; the iterator's handles go with it, after the location's rows)
         // ```c++
         // void CSeq_loc_CI_Impl::x_SetId(SSeq_loc_CI_RangeInfo& info,
         //                                const CSeq_id& id)
@@ -325,10 +326,14 @@ fn std_seg(giim: &mut GiimTree, rows: &mut Vec<HandleRangeMap>, seg: V<'_>) -> R
         //     info.m_IdHandle = CSeq_id_Handle::GetHandle(id);
         // }
         // ```
+        for id in lookups {
+            Handle::look_up_in_iterator(id, giim);
+        }
         for (row, (id, range, strand)) in ranges.into_iter().enumerate() {
             grow(rows, row + 1);
-            row_map(rows, row).add_handle(Handle::of_unfollowed(id, giim), range, strand, giim);
+            row_map(rows, row).add_range(id, range, strand, giim);
         }
+        giim.end_iterator();
     }
     Ok(())
 }
@@ -351,36 +356,46 @@ fn std_seg(giim: &mut GiimTree, rows: &mut Vec<HandleRangeMap>, seg: V<'_>) -> R
 // `null`, `empty` (and not set) skipped, `whole` the whole range, `int`, `pnt`, `packed-int`,
 // `packed-pnt` (one id and strand), `mix`, `equiv` (every part), `bond` (a, then b), and the
 // exception above for any other)
-/// The ranges of `CSeq_loc_CI(loc)`: Seq-id, range and strand (`unknown` when not set).
+/// The ranges of `CSeq_loc_CI(loc)`: Seq-id, range and strand (`unknown` when not set); and the
+/// Seq-ids its construction looks up (`x_SetId`: one for each part, one for a `packed-pnt`).
 fn loc_ci_ranges<'a>(
     loc: V<'a>,
     out: &mut Vec<(&'a crate::seqid::ParsedSeqId, Range, Strand)>,
+    lookups: &mut Vec<&'a crate::seqid::ParsedSeqId>,
 ) -> Result<(), Stop> {
     let (variant, value) = loc.choice();
+    let mut push = |part: (&'a crate::seqid::ParsedSeqId, Range, Strand)| {
+        lookups.push(part.0);
+        out.push(part);
+    };
     match variant {
         "null" | "empty" => {}
-        "whole" => out.push((value.seq_id(), Range::WHOLE, UNKNOWN)),
-        "int" => out.push(interval_parts(value)),
-        "pnt" => out.push(point_parts(value)),
-        "packed-int" => out.extend(value.items().map(interval_parts)),
+        "whole" => push((value.seq_id(), Range::WHOLE, UNKNOWN)),
+        "int" => push(interval_parts(value)),
+        "pnt" => push(point_parts(value)),
+        "packed-int" => {
+            for part in value.items().map(interval_parts) {
+                push(part);
+            }
+        }
         "packed-pnt" => {
             let id = value.field("id").seq_id();
             let strand = value.get("strand").map_or(UNKNOWN, V::int);
-            let points = value.field("points");
-            for index in 0..points.len() {
-                let point = at(points, index) as u32;
+            lookups.push(id);
+            for point in value.field("points").ints() {
+                let point = point as u32;
                 out.push((id, Range::new(point, point), strand));
             }
         }
         "mix" | "equiv" => {
             for part in value.items() {
-                loc_ci_ranges(part, out)?;
+                loc_ci_ranges(part, out, lookups)?;
             }
         }
         "bond" => {
-            out.push(point_parts(value.field("a")));
+            push(point_parts(value.field("a")));
             if let Some(b) = value.get("b") {
-                out.push(point_parts(b));
+                push(point_parts(b));
             }
         }
         other => {

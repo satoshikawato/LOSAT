@@ -80,11 +80,6 @@ pub(crate) enum Refusal {
     /// Two Seq-ids of one table row's location with different messages whose order is that of
     /// memory addresses (one `m_Packed`).
     IdOrder,
-    /// Two `giim` handles of one number in one location (or one discontinuous alignment), one of
-    /// whose Seq-ids NCBI finds among `giim` handles whose life LOSAT does not follow (an earlier
-    /// annotation's, a Seq-table column's, a Std-seg iterator's, a `-subject` run's subjects':
-    /// `range::GiimTree`).
-    GiimIds,
     /// A feature table of more rows than `table::ROWS_LIMIT`.
     TableRows,
     /// A Std-seg `dim` above `align::STD_DIM_LIMIT`.
@@ -106,7 +101,6 @@ impl Refusal {
             Refusal::ScaledOverflow => "a PSSM query whose annot has a Seq-table int-scaled column whose values leave Int8 (a signed overflow in NCBI's object manager)",
             Refusal::FieldIdOverflow => "a PSSM query whose annot has a Seq-table column field-id below -2147483638 (a signed overflow in NCBI's object manager)",
             Refusal::IdOrder => "a PSSM query whose annot has a Seq-table row location whose Seq-ids get different messages and have no different gi, accession or general id numbers (NCBI's object manager writes them in the order of memory addresses)",
-            Refusal::GiimIds => "a PSSM query whose annot has a location with two giim Seq-ids of one id number after an earlier annotation, a Seq-table column or a Std-seg looked that number up, or with -subject (NCBI's object manager takes them for one Seq-id or two depending on the giim Seq-ids it holds at that time)",
             Refusal::TableRows => "a PSSM query whose annot has a feature Seq-table of more than 10000000 rows (NCBI's object manager runs out of memory depending on the machine)",
             Refusal::StdDim => "a PSSM query whose annot has a Std-seg dim above 1000000 (NCBI's object manager allocates its rows depending on the machine's memory)",
         }
@@ -165,19 +159,18 @@ pub(super) struct Indexer<'p> {
 
 /// The object manager's index of the annotations `annots` (`Seq-annot` values) of the query of a
 /// PSSM read by `program` (`psiblast`, `tblastn`: the diagnostic prefix), whose Seq-ids are
-/// `query_ids`, in a run with `-subject` sequences (`subjects`) or a database, or LOSAT's refusal.
+/// `query_ids`, or LOSAT's refusal.
 pub(crate) fn index_annots(
     program: &str,
     annots: &[Value],
     query_ids: &[ParsedSeqId],
-    subjects: bool,
 ) -> Result<AnnotOutcome, Refusal> {
     let mut ix = Indexer {
         program,
         posts: Posts::new(),
         muted: false,
         caches: table::Caches::default(),
-        giim: GiimTree::new(query_ids, subjects),
+        giim: GiimTree::new(query_ids),
     };
     let annots: Vec<V<'_>> = annots
         .iter()
@@ -426,9 +419,6 @@ impl Indexer<'_> {
                 align::process_align(self, &mut rows, sub)?;
                 all.push(rows);
             }
-            if HandleRangeMap::giim_repeats(all.iter().flatten()) {
-                return Err(Stop::Refuse(Refusal::GiimIds));
-            }
             let mut total: Vec<(&Handle, Range)> = Vec::new();
             for map in all.iter().flatten() {
                 for (handle, hr) in &map.map {
@@ -442,6 +432,7 @@ impl Indexer<'_> {
             if total.iter().any(|(_, range)| range.is_empty()) {
                 return Err(self.empty_region());
             }
+            self.giim.mapped_all(all.iter().flatten());
         } else {
             let mut rows = Vec::new();
             align::process_align(self, &mut rows, align)?;
@@ -510,14 +501,12 @@ impl Indexer<'_> {
     /// Seq-ids.
     fn refuse_empty(&mut self, maps: &[HandleRangeMap], event: Event) -> Result<(), Stop> {
         debug_assert!(matches!(event, Event::Graph | Event::Align | Event::Locs));
-        if HandleRangeMap::giim_repeats(maps) {
-            return Err(Stop::Refuse(Refusal::GiimIds));
-        }
         let empty =
             |map: &HandleRangeMap| map.map.iter().any(|(_, hr)| hr.overlapping().is_empty());
         if maps.iter().any(empty) {
             return Err(self.empty_region());
         }
+        self.giim.mapped_all(maps);
         Ok(())
     }
 
@@ -555,9 +544,6 @@ impl Indexer<'_> {
     // messages of a group are the same in every order (the 1204.6 messages differ only by how many
     // came before, an empty region of another kind is refused in every order).
     fn map_location(&mut self, map: &HandleRangeMap, event: Event) -> Result<(), Stop> {
-        if HandleRangeMap::giim_repeats([map]) {
-            return Err(Stop::Refuse(Refusal::GiimIds));
-        }
         let empty = |hr: &range::HandleRange| hr.overlapping().is_empty();
         let fails = |hr: &range::HandleRange| {
             !empty(hr)
@@ -619,9 +605,10 @@ impl Indexer<'_> {
             self.muted = true;
             return Ok(());
         }
-        if handle.is_none() {
+        let Some(handle) = handle else {
             return Err(self.null_pointer());
-        }
+        };
+        self.giim.mapped(&handle);
         Ok(())
     }
 }

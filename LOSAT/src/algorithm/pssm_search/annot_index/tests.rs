@@ -17,7 +17,7 @@ fn index(annots: &[&str]) -> Result<AnnotOutcome, Refusal> {
             value.unwrap_or_else(|error| panic!("{text}: {error:?}"))
         })
         .collect();
-    index_annots("psiblast", &values, &[], false)
+    index_annots("psiblast", &values, &[])
 }
 
 /// The messages of an index that goes on.
@@ -361,19 +361,19 @@ fn refusals_name_their_condition() {
         Refusal::StdDim
     );
     // s_i72 unmuted: two equal `giim` Seq-ids are two handles, the reversed one an empty region;
-    // s_i73: two different ones of a number are one handle. s_i74: after a feature that looked up
-    // giim 5 (its handle lives on, as LOSAT does not follow), the two are refused.
+    // s_i73: two different ones of a number are one handle. After a feature that mapped giim 5
+    // (its handle lives on), (5, "x") and (5, "y") both find that handle: one.
     let giim_row = |db: &str| {
         table(1, &format!("{{ header {{ field-id location }}, data loc {{ mix {{ int {{ from 10, to 9, id giim {{ id 5, db \"x\" }} }}, int {{ from 0, to 5, id giim {{ id 5, db \"{db}\" }} }} }} }} }}"))
     };
     assert_eq!(refused(&[&giim_row("x")]), Refusal::EmptyRegion);
     assert_eq!(posts(&[&giim_row("y")]), "");
     assert_eq!(
-        refused(&[
+        posts(&[
             "{ data ftable { { data comment NULL, location int { from 0, to 5, id giim { id 5 } } } } }",
             &giim_row("y")
         ]),
-        Refusal::GiimIds
+        ""
     );
     for refusal in [
         Refusal::EmptyRegion,
@@ -386,7 +386,6 @@ fn refusals_name_their_condition() {
         Refusal::ScaledOverflow,
         Refusal::FieldIdOverflow,
         Refusal::IdOrder,
-        Refusal::GiimIds,
         Refusal::TableRows,
         Refusal::StdDim,
     ] {
@@ -468,9 +467,11 @@ fn seq_ids_that_ncbi_takes_for_one_share_their_ranges() {
         .unwrap_err(),
         Refusal::EmptyRegion
     );
+    // A Std-seg's location iterator looks giim 5 up once more; its handle goes with it, so the
+    // second part's (5, "x") finds the row's handle of (5): one handle, the union not empty.
     assert_eq!(
-        index(&[&disc("giim { id 5 }", "giim { id 5, db \"x\" }")]).unwrap_err(),
-        Refusal::GiimIds
+        posts(&[&disc("giim { id 5 }", "giim { id 5, db \"x\" }")]),
+        ""
     );
     let patent = |country: &str, number: &str| {
         format!("patent {{ seqid 1, cit {{ country \"{country}\", id number \"{number}\" }} }}")
@@ -555,5 +556,55 @@ fn a_bit_bvector_decodes_only_for_a_value() {
     assert_eq!(
         index(&[&table(1, &format!("{id}, {{ header {{ field-id location-from }}, data int-delta bit-bvector {{ size 1, data {bad} }} }}"))]).unwrap_err(),
         Refusal::BitVector
+    );
+}
+
+// The live `giim` handles across annotation objects (NCBI BLAST+ 2.17.0: review 3's gq4-gq6, `om/`
+// cases s_i77-s_i80): a mapped handle lives on, a Seq-table column's default is made in phase C,
+// a simple row's handle stays in the table's `key`, a Std-seg's location iterator holds its own.
+#[test]
+fn giim_handles_live_as_ncbis_object_manager_keeps_them() {
+    let (g5, gx) = ("giim { id 5 }", "giim { id 5, db \"x\" }");
+    let f31 = |a: &str, b: &str| {
+        format!("{{ data ftable {{ {{ data comment NULL, location mix {{ int {{ from 0, to 5, strand minus, id {a} }}, int {{ from 10, to 9, strand minus, id {b} }} }} }} }} }}")
+    };
+    let early = |id: &str| {
+        format!("{{ data ftable {{ {{ data comment NULL, location int {{ from 1, to 2, id {id} }} }} }} }}")
+    };
+    assert_eq!(posts(&[&early(gx), &f31(g5, g5)]), FAILED);
+    assert_eq!(
+        index(&[&early(g5), &f31(gx, g5)]).unwrap_err(),
+        Refusal::EmptyRegion
+    );
+    assert_eq!(
+        index(&[&format!("{{ data ftable {{ {{ data comment NULL, product int {{ from 1, to 2, id {gx} }}, location mix {{ int {{ from 0, to 5, strand minus, id {g5} }}, int {{ from 10, to 9, strand minus, id {g5} }} }} }} }} }}")]).unwrap_err(),
+        Refusal::EmptyRegion
+    );
+    assert_eq!(
+        posts(&[
+            &f31(g5, g5),
+            &table(
+                0,
+                &format!("{{ header {{ field-id location-id }}, default id {gx} }}")
+            )
+        ]),
+        FAILED
+    );
+    assert_eq!(
+        posts(&[&table(1, &format!("{{ header {{ field-id location-id }}, data id {{ {gx} }} }}, {{ header {{ field-id location-from }}, data int {{ 9 }} }}, {{ header {{ field-id location-to }}, data int {{ 4 }} }}, {{ header {{ field-id product }}, data loc {{ mix {{ int {{ from 0, to 5, strand minus, id {g5} }}, int {{ from 10, to 9, strand minus, id {g5} }} }} }} }}"))]),
+        format!("{FAILED}Error: (1204.6) [psiblast] \n")
+    );
+    let std = |locs: &str| {
+        format!("{{ data align {{ {{ type global, dim 2, segs std {{ {{ dim 2, loc {{ {locs} }} }} }} }} }} }}")
+    };
+    assert_eq!(
+        index(&[&std(&format!("mix {{ int {{ from 10, to 9, id {gx} }}, int {{ from 0, to 5, id {g5} }} }}, int {{ from 0, to 5, id {g5} }}"))]).unwrap_err(),
+        Refusal::EmptyRegion
+    );
+    assert_eq!(
+        posts(&[&std(&format!(
+            "int {{ from 10, to 9, id {gx} }}, int {{ from 0, to 5, id {g5} }}"
+        ))]),
+        ""
     );
 }

@@ -898,9 +898,9 @@ impl ListedSubjects {
         };
         for hit_list in hit_lists.iter_mut().flatten() {
             hit_list.hsplist_array.truncate(hit_list.hsplist_count);
-            hit_list
-                .hsplist_array
-                .retain(|list| aligned.keeps(self.ordinals[list.oid as usize]));
+            aligned.retain(&mut hit_list.hsplist_array, |list| {
+                Some(self.ordinals[list.oid as usize])
+            });
             hit_list.hsplist_count = hit_list.hsplist_array.len();
         }
     }

@@ -436,7 +436,7 @@ pub(super) fn drop_unaligned(database: &TblastnDatabase, hitlists: &mut [KappaRe
         return;
     };
     for hitlist in hitlists {
-        hitlist.retain_lists(|list| u32::try_from(list.oid).map_or(true, |o| aligned.keeps(o)));
+        hitlist.with_lists_mut(|lists| aligned.retain(lists, |list| u32::try_from(list.oid).ok()));
     }
 }
 

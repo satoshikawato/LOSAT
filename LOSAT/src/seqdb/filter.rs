@@ -2821,7 +2821,7 @@ impl SeqDb {
     /// Whether NCBI turns a hit on `ordinal` into a Seq-align: false where the database's seqid
     /// list keeps the sequence but none of its definition lines; the reader's error where a
     /// tag cannot be read as NCBI's header read adjusts it. True without a seqid list (a
-    /// taxid list keeps every line of a sequence it keeps).
+    /// taxid list keeps at least one line of each sequence it keeps).
     pub fn keeps_line(&self, ordinal: u32) -> Result<bool, SeqDbError> {
         if self.filter.is_none() {
             return Ok(true);

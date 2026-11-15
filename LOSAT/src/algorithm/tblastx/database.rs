@@ -327,7 +327,7 @@ pub(crate) fn drop_unaligned(database: &TblastxDatabase, ordered: &mut Vec<Tblas
     let Some(mut aligned) = shared::SeqAligned::of(&database.db) else {
         return;
     };
-    ordered.retain(|hsp| aligned.keeps(hsp.hit.s_idx));
+    aligned.retain(ordered, |hsp| Some(hsp.hit.s_idx));
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:283-293

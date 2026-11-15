@@ -1164,10 +1164,12 @@ Same values, faster computation:
   register's last writer). Cause removed: the default x86-64 target has no `popcnt`, so `count_ones` was a dozen
   instructions there (on aarch64 and in Wasm it is the target's own count, and the form is unchanged). Every count,
   rank and report is the same. `LOSAT_TIMING`'s `[TIMING] x_bn_csr:` line ends `popcnt=1` when the instruction ran.
-  Evidence (ws, base dev bc182b374, with `LOSAT_X_BNRANKONCE`; every report the same): cycles (perf stat, one core of
-  node 0, 5 runs, against the dev arm) mlst x0.902-0.951, BlobToolKit x0.922, MOB-suite x0.913, ABRicate's ncbi /
-  resfinder x0.975 / x0.968, instructions x0.933-0.981; callgrind of mlst's `example.fna` 3.131 G -> 2.950 G (the
-  table build's place pass 549 M -> 442 M with the instruction alone).
+  Evidence (ws, Xeon 6338; every report the same): time on one core of node 1 (timed lease, warm-up + 8 rounds, arms
+  alternating, medians) against `LOSAT_X_BNRANKONCE` alone (dev 889212747 + #1218): mlst `example.fna` / `messy.fa`
+  x0.947 / x0.944 (`novel.fa` 0.14 s in both), BlobToolKit x0.974, Easyfig ex2a x0.988, ABRicate's resfinder / ncbi
+  x0.989 / x0.992, MOB-suite x0.990, ECTyper x0.994, the same max RSS; with #1218 against that dev mlst x0.919-0.966,
+  BlobToolKit x0.951, MOB-suite x0.966, ABRicate x0.974-0.975. Callgrind of mlst's `example.fna` 3.094 G -> 2.950 G
+  (the table build's place pass 549 M -> 442 M with the instruction alone).
 - BNUNGAPCOUNT (graduated 2026-10-27, in the set from 2026-10-22; no variable; always on; the ported loops
   stay as the unit test's reference) (blastn, speed) the exact ungapped extension
   (`s_NuclUngappedExtendExact`: blastn-short and other word sizes below 11, and the exact pass after the

@@ -178,7 +178,7 @@ impl Search {
     /// `run_to_file` (`Search::writing_to`). An option can hold for one kind of input only
     /// (`-subject_loc` excludes `-db`, `-seqidlist` excludes `-subject`, `-query_loc` excludes
     /// `-in_pssm`), so this can fail with the parser's message where `validate`, which knows no
-    /// inputs, could not. A PSSM query is psiblast's and tblastn's only.
+    /// inputs, could not. A PSSM query is psiblast's and tblastn's only, and a file (not `-`).
     pub(crate) fn command(&self, inputs: Inputs<'_>) -> Result<Commands, Error> {
         let subject_flag = if inputs.database { DATABASE } else { SUBJECT };
         let query = match inputs.pssm {
@@ -188,6 +188,14 @@ impl Search {
                         "a PSSM query (Inputs::pssm) is searched by psiblast and tblastn, not by {}",
                         self.program.name()
                     )));
+                }
+                // `-in_pssm -` reads the command line's standard input, which the library does
+                // not read (`run_to_file` does not write it either).
+                if path.as_os_str() == "-" {
+                    return Err(Error::Argv(
+                        "Inputs::pssm reads a file: `-` is the command line's standard input"
+                            .to_string(),
+                    ));
                 }
                 (PSSM, path.as_os_str())
             }
@@ -498,6 +506,12 @@ mod tests {
                 "{program}: {error}"
             );
         }
+        let search = validate(Program::Psiblast, &[]).unwrap();
+        let standard_input = std::path::Path::new("-");
+        assert!(matches!(
+            search.command(Inputs::pssm(standard_input, &[])),
+            Err(Error::Argv(message)) if message.contains("standard input")
+        ));
         let search = validate(Program::Blastp, &[]).unwrap();
         assert_eq!(
             search.command(Inputs::pssm(path, &[])).unwrap_err(),

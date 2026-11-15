@@ -326,9 +326,10 @@ impl<'a> Inputs<'a> {
     // ```
     /// The query of the PSSM file `path` (psiblast's checkpoint file, as `-out_pssm` writes it)
     /// against the subject records: the command line's `-in_pssm path` of psiblast and of tblastn
-    /// (PSI-TBLASTN), in place of `-query`. The search reads the file as
-    /// the command line reads it, with its messages and errors; the one query is the PSSM's
-    /// sequence (query 0 of the results, `HspRecord::query_id` as the reports show it).
+    /// (PSI-TBLASTN), in place of `-query`. The search reads the file as the command line reads
+    /// it, with its messages and errors (not `-`, the command line's standard input); the one
+    /// query is the PSSM's sequence (query 0 of the results, `HspRecord::query_id` as the reports
+    /// show it).
     pub fn pssm(path: &'a std::path::Path, subject: &'a [FastaRecord]) -> Self {
         Self {
             pssm: Some(path),

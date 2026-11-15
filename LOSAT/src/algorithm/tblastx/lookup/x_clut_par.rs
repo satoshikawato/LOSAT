@@ -1081,34 +1081,40 @@ impl XGang {
                         .wait(slot)
                         .unwrap_or_else(PoisonError::into_inner);
                 }
-                if slot.closed {
-                    return;
-                }
                 seen = slot.generation;
                 match slot.take {
                     Some(take) => {
                         self.inside.fetch_add(1, Ordering::AcqRel);
-                        take
+                        (take, slot.closed)
                     }
                     // The pass closed before this helper came.
+                    None if slot.closed => return,
                     None => continue,
                 }
             };
-            // Leaves the pass also when an item unwinds, so that the caller's wait ends and the
-            // scope passes the panic on.
-            let _left = XGangLeave(self, &self.inside);
-            // SAFETY: the helper joined the pass while it was open (above, under the lock), and
-            // `XGang::pass` keeps the loop alive until `inside` is 0.
-            unsafe { (*take.0)() };
+            let (take, last) = take;
+            {
+                // Leaves the pass also when an item unwinds, so that the caller's wait ends and the
+                // scope passes the panic on.
+                let _left = XGangLeave(self, &self.inside);
+                // SAFETY: the helper joined the pass while it was open (above, under the lock), and
+                // `XGang::pass` keeps the loop alive until `inside` is 0.
+                unsafe { (*take.0)() };
+            }
+            if last {
+                return;
+            }
         }
     }
 
     /// `x_one_latch_pass` without its extra tasks, on the caller and the gang's helpers: the
     /// results of `item(scratch, i)` for i in 0..items, in order, each task with its own `scratch`
-    /// (`init`).
+    /// (`init`). After the `last` pass the helpers end at once (they wait for no next pass, and the
+    /// end does not wake them).
     fn pass<S, R: Send + Sync>(
         &self,
         items: usize,
+        last: bool,
         init: impl Fn() -> S + Sync,
         item: impl Fn(&mut S, usize) -> R + Sync,
     ) -> Vec<R> {
@@ -1139,6 +1145,7 @@ impl XGang {
                 let mut slot = self.lock();
                 slot.generation += 1;
                 slot.take = Some(take);
+                slot.closed |= last;
                 self.generation.store(slot.generation, Ordering::Release);
             }
             let _open = XGangPassOpen(self);
@@ -1416,10 +1423,8 @@ fn x_chunk_appends(
         }
         !too_large.load(Ordering::Relaxed)
     };
-    let mut visit = |start: &XWordStart, word: &[u8]| {
-        let offset = start.offset;
-        let before = targets.len();
-        words.for_each_word_from(start, word, &wave.letters, targets);
+    // The bookkeeping after an offset's appends (`targets[before..]`); `false` past `max_appends`.
+    let mut after = |offset: i32, before: usize, targets: &mut Vec<u32>| {
         let appends = targets.len() - before;
         if appends != 0 {
             per_offset.push((offset, appends as u32));
@@ -1438,25 +1443,39 @@ fn x_chunk_appends(
         true
     };
     match starts {
-        XStarts::Kept(kept_starts) => {
-            for start in kept_starts {
-                let at = start.offset as usize;
-                if !visit(start, &query[at..at + words.word_length]) {
-                    break;
-                }
-            }
+        // One wave: every cell, in `add_word_hits`' order.
+        XStarts::Make => {
+            x_for_each_offset(words.word_length, query, &chunk.pieces, |offset, word| {
+                let before = targets.len();
+                words.for_each_word(word, targets);
+                after(offset, before, targets)
+            });
         }
-        XStarts::Make | XStarts::Keep => {
-            let keep = matches!(starts, XStarts::Keep);
+        XStarts::Keep => {
             x_for_each_offset(words.word_length, query, &chunk.pieces, |offset, word| {
                 let Some(start) = words.word_start(word, offset) else {
                     return true;
                 };
-                if keep {
-                    kept.push(start);
-                }
-                visit(&start, word)
+                kept.push(start);
+                let before = targets.len();
+                words.for_each_word_from(&start, word, &wave.letters, targets);
+                after(offset, before, targets)
             });
+        }
+        XStarts::Kept(kept_starts) => {
+            for start in kept_starts {
+                let at = start.offset as usize;
+                let before = targets.len();
+                words.for_each_word_from(
+                    start,
+                    &query[at..at + words.word_length],
+                    &wave.letters,
+                    targets,
+                );
+                if !after(start.offset, before, targets) {
+                    break;
+                }
+            }
         }
     }
     if !report(unreported) {
@@ -1474,7 +1493,11 @@ fn x_chunk_appends(
 /// Where `x_chunk_appends` takes the words' starts (`XWords::word_start`) of a chunk's offsets.
 #[derive(Clone, Copy)]
 enum XStarts<'a> {
-    /// From the query (a build of one wave).
+    /// None: a build of one wave, whose appends are `XWords::for_each_word`'s (every cell of an
+    /// offset in `add_word_hits`' order: a wave of fewer letters chooses its last letter first, and
+    /// testing each of the alphabet's letters against the bound one by one missed the branch
+    /// predictor's guess often: blastp-fast +4.7 % of the wall time at 8 threads with +0.4 % of the
+    /// instructions).
     Make,
     /// From the query, and kept for the later waves (the first of more than one wave).
     Keep,
@@ -2244,6 +2267,7 @@ fn x_wave_appends(
         ),
         XPasses::Gang(gang) => gang.pass(
             chunks.len(),
+            false,
             || XAppendsScratch::new(&registry, appends_segment, segments),
             chunk_appends,
         ),
@@ -2492,6 +2516,8 @@ fn x_flat_stripes_on<S: CompressedScores, H: XQueryOffset>(
                 });
                 base += stripe_total as u32;
             }
+            // The last pass of the gang (its helpers end after it).
+            let last = wave_index + 1 == waves;
             let wave_counts: Vec<XStripeCounts> = match (gang, fill) {
                 (None, _) => parts
                     .into_par_iter()
@@ -2502,14 +2528,26 @@ fn x_flat_stripes_on<S: CompressedScores, H: XQueryOffset>(
                         .into_iter()
                         .map(|part| Mutex::new(Some(part)))
                         .collect();
-                    gang.pass(parts.len(), XFillScratch::default, |scratch, stripe| {
-                        let part = parts[stripe]
-                            .lock()
-                            .unwrap_or_else(PoisonError::into_inner)
-                            .take()
-                            .expect("each stripe taken once");
-                        x_stripe_fill(part, ranges.len(), &chunks, &appends, need_cells, scratch)
-                    })
+                    gang.pass(
+                        parts.len(),
+                        last,
+                        XFillScratch::default,
+                        |scratch, stripe| {
+                            let part = parts[stripe]
+                                .lock()
+                                .unwrap_or_else(PoisonError::into_inner)
+                                .take()
+                                .expect("each stripe taken once");
+                            x_stripe_fill(
+                                part,
+                                ranges.len(),
+                                &chunks,
+                                &appends,
+                                need_cells,
+                                scratch,
+                            )
+                        },
+                    )
                 }
                 (Some(gang), false) => {
                     // Each stripe's part, taken by the task that takes its index.
@@ -2519,6 +2557,7 @@ fn x_flat_stripes_on<S: CompressedScores, H: XQueryOffset>(
                         .collect();
                     gang.pass(
                         parts.len(),
+                        last,
                         || (),
                         |_, stripe| {
                             let part = parts[stripe]
@@ -2720,6 +2759,7 @@ mod tests {
                                 (0..items).map(|_| AtomicUsize::new(0)).collect();
                             let results = gang.pass(
                                 items,
+                                pass == 6,
                                 || 0usize,
                                 |taken, index| {
                                     *taken += 1;
@@ -2746,9 +2786,10 @@ mod tests {
                 let outcome = std::panic::catch_unwind(|| {
                     in_pool(threads, || {
                         x_with_gang(threads, |gang| {
-                            let first = gang.pass(64, || (), |_, index| index);
+                            let first = gang.pass(64, false, || (), |_, index| index);
                             let second = gang.pass(
                                 64,
+                                bad != 7,
                                 || (),
                                 |_, index| {
                                     assert_ne!(index, bad, "item {bad} fails");

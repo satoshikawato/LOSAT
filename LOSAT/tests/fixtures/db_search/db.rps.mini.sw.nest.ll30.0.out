@@ -1,0 +1,142 @@
+RPSBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: rps_mini
+           3 sequences; 560 total letters
+
+
+
+Query= nest_101
+
+Length=380
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  312     2e-111
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 312 bits (800),  Expect = 2e-111, Method: Composition-based stats.
+ Identities = 190/190 (100%), Positives = 190/190 (100%), Gaps = 0/190 (0%)
+
+Query  96   MQLILSHHLTMAGRVELVTGPMFAGKSTYL  125
+            MQLILSHHLTMAGRVELVTGPMFAGKSTYL
+Sbjct  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYL  30
+
+Query  126  KNIYQQENGGNKHCLFVKHSLETRYGCGTG  155
+            KNIYQQENGGNKHCLFVKHSLETRYGCGTG
+Sbjct  31   KNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+
+Query  156  TIVTHAGEVIEGCTTVSSIKELISVLPEVV  185
+            TIVTHAGEVIEGCTTVSSIKELISVLPEVV
+Sbjct  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVV  90
+
+Query  186  DVILIDEGQFFTDLVLVNRLADKGKRIVIA  215
+            DVILIDEGQFFTDLVLVNRLADKGKRIVIA
+Sbjct  91   DVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+
+Query  216  ALDGTSDQQMFSPIHKLLPYTNSIVKLASK  245
+            ALDGTSDQQMFSPIHKLLPYTNSIVKLASK
+Sbjct  121  ALDGTSDQQMFSPIHKLLPYTNSIVKLASK  150
+
+Query  246  CMICKIDTKEAPFTVRFGNDNDNNVICVGG  275
+            CMICKIDTKEAPFTVRFGNDNDNNVICVGG
+Sbjct  151  CMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+
+Query  276  AEMYAAACRD  285
+            AEMYAAACRD
+Sbjct  181  AEMYAAACRD  190
+
+
+ Score = 271 bits (694),  Expect = 2e-95, Method: Composition-based stats.
+ Identities = 190/285 (67%), Positives = 190/285 (67%), Gaps = 95/285 (33%)
+
+Query  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYL  30
+                                          
+
+Query  31   KNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+                                          
+
+Query  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVV  90
+                                          
+
+Query  91   DVILIMQLILSHHLTMAGRVELVTGPMFAG  120
+                 MQLILSHHLTMAGRVELVTGPMFAG
+Sbjct  1         MQLILSHHLTMAGRVELVTGPMFAG  25
+
+Query  121  KSTYLKNIYQQENGGNKHCLFVKHSLETRY  150
+            KSTYLKNIYQQENGGNKHCLFVKHSLETRY
+Sbjct  26   KSTYLKNIYQQENGGNKHCLFVKHSLETRY  55
+
+Query  151  GCGTGTIVTHAGEVIEGCTTVSSIKELISV  180
+            GCGTGTIVTHAGEVIEGCTTVSSIKELISV
+Sbjct  56   GCGTGTIVTHAGEVIEGCTTVSSIKELISV  85
+
+Query  181  LPEVVDVILIDEGQFFTDLVLVNRLADKGK  210
+            LPEVVDVILIDEGQFFTDLVLVNRLADKGK
+Sbjct  86   LPEVVDVILIDEGQFFTDLVLVNRLADKGK  115
+
+Query  211  RIVIAALDGTSDQQMFSPIHKLLPYTNSIV  240
+            RIVIAALDGTSDQQMFSPIHKLLPYTNSIV
+Sbjct  116  RIVIAALDGTSDQQMFSPIHKLLPYTNSIV  145
+
+Query  241  KLASKCMICKIDTKEAPFTVRFGNDNDNNV  270
+            KLASKCMICKIDTKEAPFTVRFGNDNDNNV
+Sbjct  146  KLASKCMICKIDTKEAPFTVRFGNDNDNNV  175
+
+Query  271  ICVGGAEMYAAACRD  285
+            ICVGGAEMYAAACRD
+Sbjct  176  ICVGGAEMYAAACRD  190
+
+
+ Score = 158 bits (399),  Expect = 4e-51, Method: Composition-based stats.
+ Identities = 94/94 (100%), Positives = 94/94 (100%), Gaps = 0/94 (0%)
+
+Query  287  EGQFFTDLVLVNRLADKGKRIVIAALDGTS  316
+            EGQFFTDLVLVNRLADKGKRIVIAALDGTS
+Sbjct  97   EGQFFTDLVLVNRLADKGKRIVIAALDGTS  126
+
+Query  317  DQQMFSPIHKLLPYTNSIVKLASKCMICKI  346
+            DQQMFSPIHKLLPYTNSIVKLASKCMICKI
+Sbjct  127  DQQMFSPIHKLLPYTNSIVKLASKCMICKI  156
+
+Query  347  DTKEAPFTVRFGNDNDNNVICVGGAEMYAA  376
+            DTKEAPFTVRFGNDNDNNVICVGGAEMYAA
+Sbjct  157  DTKEAPFTVRFGNDNDNNVICVGGAEMYAA  186
+
+Query  377  ACRD  380
+            ACRD
+Sbjct  187  ACRD  190
+
+
+
+Lambda      K        H        a         alpha
+   0.322    0.137    0.405    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0512    0.140     1.90     42.6     43.6 
+
+Effective search space used: 161472
+
+
+  Database: rps_mini
+    Posted date:  Nov 7, 2026  10:01 PM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40

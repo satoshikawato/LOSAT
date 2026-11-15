@@ -1,0 +1,46 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/x2g_s1u_s.faa).
+           1 sequences; 7 total letters
+
+
+
+Query= c00556_q
+
+Length=16
+
+
+> c00556_s
+Length=7
+
+ Score =  4.2 bits (3),  Expect = 3.7
+ Identities = 0/0 (100%), Positives = 0/0 (100%), Gaps = 0/0 (100%)
+
+
+
+Lambda      K        H
+   0.302    0.131    0.308 
+
+
+Effective search space used: 35
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/x2g_s1u_s.faa).
+    Posted date:  Unknown
+  Number of letters in database: 7
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 2

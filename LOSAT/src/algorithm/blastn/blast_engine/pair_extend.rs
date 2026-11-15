@@ -44,6 +44,7 @@
 //! -ungapped` 0.3 % more instructions even inlined.
 
 use super::prelim_subject::ScanBatch;
+use super::x_bn_ext_first;
 use super::{
     blastn_trace, extend_hit_ungapped_approx_ncbi, extend_hit_ungapped_exact_ncbi,
     mask_lookup_index, packed_kmer_at_seed_mask, type_of_word, x_dc_csr, x_push_ungapped,
@@ -188,7 +189,52 @@ pub(super) struct PairExtendState<'s> {
 /// No `#[inline]`: as a closure of `collect_prelim_hits_for_chunk` (now
 /// `prelim_subject::prelim_chunk_hits`) the steps were an out-of-line function already (the scan
 /// calls them from 11 places).
+/// EXPERIMENT (LOSAT_X_BNEXTFIRST): the steps in one of two forms, chosen here once per batch
+/// (`extend_pairs_in`'s `EXT_FIRST`): a lookup hit's word extension before its context, for a
+/// megablast table whose lookup width is below the word size (a word to extend) and none of the
+/// diagnostics that print or count a hit before its extension; else the order before the switch.
 pub(super) fn extend_offset_pairs(
+    scan: &ScanBatch<'_>,
+    x: &PairExtendInputs<'_>,
+    state: &mut PairExtendState<'_>,
+    offset_pairs: &[OffsetPair],
+    offset_pairs_len: &mut usize,
+    scan_pause_ns: &mut u64,
+    track_scan_pause: bool,
+) {
+    let ext_first = x_bn_ext_first() && {
+        let form = x.small_na_word.is_none()
+            && scan.word_length > scan.lut_word_length
+            && !(scan.debug_enabled || scan.blastn_trace_enabled || scan.debug_window.is_some());
+        crate::utils::xreach::x_reach!("LOSAT_X_BNEXTFIRST", form);
+        form
+    };
+    if ext_first {
+        extend_pairs_in::<true>(
+            scan,
+            x,
+            state,
+            offset_pairs,
+            offset_pairs_len,
+            scan_pause_ns,
+            track_scan_pause,
+        );
+    } else {
+        extend_pairs_in::<false>(
+            scan,
+            x,
+            state,
+            offset_pairs,
+            offset_pairs_len,
+            scan_pause_ns,
+            track_scan_pause,
+        );
+    }
+}
+
+/// `extend_offset_pairs` in the form `EXT_FIRST` (LOSAT_X_BNEXTFIRST, there).
+#[inline(always)]
+fn extend_pairs_in<const EXT_FIRST: bool>(
     scan: &ScanBatch<'_>,
     x: &PairExtendInputs<'_>,
     state: &mut PairExtendState<'_>,
@@ -268,6 +314,28 @@ pub(super) fn extend_offset_pairs(
     let dbg_ungapped_low = &mut *state.dbg_ungapped_low;
     let dbg_gapped_attempted = &mut *state.dbg_gapped_attempted;
     let hitsfound = *offset_pairs_len;
+    // EXPERIMENT (LOSAT_X_BNEXTFIRST): with `EXT_FIRST` the word extension of a megablast
+    // table's hit (whose lookup width is below the word size) comes first, as in NCBI's
+    // `s_BlastNaExtend`, and a hit whose extension fails does nothing more: its context is looked
+    // up only once its word is found. The extension reads neither the context nor its bounds
+    // (`word_extend_pair`: the query's sentinels stop it), so it gives the same words. The
+    // small-query table's extension takes the context's bounds and keeps the order before the
+    // switch, and so do the diagnostics that print or count a hit before its extension.
+    //
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1093-1121
+    // (`s_BlastNaExtend`; the context is looked up later, in `s_BlastnDiagHashExtendInitialHit`
+    // and `s_BlastnDiagTableExtendInitialHit`, :730-733, for a word that was found)
+    // ```c
+    //     for (; index < num_hits; ++index) {
+    //         Int4 s_offset = offset_pairs[index].qs_offsets.s_off;
+    //         Int4 q_offset = offset_pairs[index].qs_offsets.q_off;
+    // ...
+    //         for (; ext_left < MIN(ext_to, s_offset); ++ext_left) {
+    // ...
+    //             if (ext_left + ext_right < ext_to)
+    //                 continue;
+    //         }
+    // ```
     for idx in 0..hitsfound {
         // EXPERIMENT (LOSAT_X_MBHITPF): the query's letters of a hit
         // `X_HIT_AHEAD` places on.
@@ -282,6 +350,30 @@ pub(super) fn extend_offset_pairs(
         let q_off0 = pair.q_off;
         let kmer_start = pair.s_off;
         let s_range = pair.s_range;
+        // EXPERIMENT (LOSAT_X_BNEXTFIRST): the word, before the context (the subject's bound of
+        // the check below first, as there).
+        let x_word = if EXT_FIRST {
+            if kmer_start + lut_word_length > s_len {
+                continue;
+            }
+            let Some(found) = word_extend_pair(
+                &word,
+                LutHit {
+                    q_off0,
+                    kmer_start,
+                    q_context_start: 0,
+                    q_context_end: 0,
+                    s_range,
+                },
+                dbg_left_ext_iters,
+                dbg_right_ext_iters,
+            ) else {
+                continue;
+            };
+            Some(found)
+        } else {
+            None
+        };
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:730-733
         // ```c
         // Int4 context = BSearchContextInfo(q_off, query_info);
@@ -391,18 +483,22 @@ pub(super) fn extend_offset_pairs(
         // NCBI reference: na_ungapped.c:1081-1140
         // For two-stage lookup, verify word_length match BEFORE ungapped extension
         // This is done by left+right extension from the lut_word_length match position
-        let Some((q_ext_start, s_ext_start, word_ext_left, word_ext_right)) = word_extend_pair(
-            &word,
-            LutHit {
-                q_off0,
-                kmer_start,
-                q_context_start,
-                q_context_end,
-                s_range,
-            },
-            dbg_left_ext_iters,
-            dbg_right_ext_iters,
-        ) else {
+        let Some((q_ext_start, s_ext_start, word_ext_left, word_ext_right)) =
+            x_word.or_else(|| {
+                word_extend_pair(
+                    &word,
+                    LutHit {
+                        q_off0,
+                        kmer_start,
+                        q_context_start,
+                        q_context_end,
+                        s_range,
+                    },
+                    dbg_left_ext_iters,
+                    dbg_right_ext_iters,
+                )
+            })
+        else {
             continue;
         };
 

@@ -527,7 +527,7 @@ impl Indexer<'_> {
     // (refused: a memory address, or after the stream failed the object's ASN.1 text), except for
     // a table row after the stream failed, whose post is its header alone, `Error: (1204.8)`.
     // Where NCBI's order is that of memory addresses (Seq-ids of one `m_Packed`: `m_Info <
-    // handle.m_Info`, seq_id_handle.hpp:206, quoted at `HandleRangeMap::ncbi_order`), only such a
+    // handle.m_Info`, seq_id_handle.hpp:207, quoted at `HandleRangeMap::ncbi_order`), only such a
     // row's order changes the messages: its empty Seq-id's post (`Error: (1204.8)` after the
     // stream failed, "Empty region in <address>" before) and another's "Failed to parse location"
     // (`Error: (1204.6)`) in one group are refused (`om/` cases `s_o09_tie_gi5_acc5_u` and

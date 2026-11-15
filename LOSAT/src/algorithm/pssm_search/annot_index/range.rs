@@ -480,7 +480,7 @@ static LOOKUPS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1186-1203 (a text Seq-id that
 // does not pack: `x_FindStrInfo` looks in `m_ByAcc` when the accession is set, else in `m_ByName`,
 // else nowhere; the new info is put in the maps of what is set, so one without accession and name
-// is never found again)
+// is never found again: probe p4 r0261, `om/` case `s_i26_pir_empty`)
 // ```c++
 //     CSeq_id_Textseq_PlainInfo* info = x_FindStrInfo(id.Which(), tid);
 //     CSeq_id_Handle::TVariant variant = 0;

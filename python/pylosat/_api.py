@@ -227,8 +227,8 @@ class QueryHits:
     hsps: HspTable
     round: int | None = None
     """`None` for the HSPs of all the query's rounds, the round in the view of one round."""
-    round_stats: list[QueryStats | None] = field(default_factory=list, repr=False)
-    """The statistics of the rounds of the view, from its first round."""
+    _round_stats: list[QueryStats | None] = field(default_factory=list, repr=False)
+    """The statistics of the rounds of the view, from its first round (`rounds`)."""
 
     def subjects(self) -> list[SubjectHits]:
         """The subjects with HSPs for this query, in the order of the hit list, round after round
@@ -250,7 +250,7 @@ class QueryHits:
             QueryHits(
                 self.q_idx, stats, self.hsps._round(first + offset), first + offset, [stats]
             )
-            for offset, stats in enumerate(self.round_stats)
+            for offset, stats in enumerate(self._round_stats)
         ]
 
 

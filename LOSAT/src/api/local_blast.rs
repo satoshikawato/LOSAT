@@ -522,16 +522,16 @@ pub trait FormatObserver {
     /// numbers start again at 0. A search without rounds never calls it.
     fn round_begin(&mut self, _query: usize, _round: u32) {}
 
-    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:525-527
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:525-528
     // ```c++
     //                 if (converged && !fmt_args->HasStructuredOutputFormat() &&
     //                 	fmt_args->GetFormattedOutputChoice() != CFormattingArgs::eArchiveFormat) {
     //                 	out_stream << NcbiEndl << "Search has CONVERGED!" << NcbiEndl;
     //             	}
     // ```
-    /// The rounds of the searched query `query` converged (NCBI's `HasConverged`): its last
-    /// round found no sequence that the rounds before had not found. It comes after the query's
-    /// last round, whatever the formats.
+    /// The rounds of the searched query `query` converged (NCBI's `HasConverged`): every subject
+    /// below `-inclusion_ethresh` in its last round was below it in the round before too. It
+    /// comes after the query's last round, whatever the formats.
     fn rounds_converged(&mut self, _query: usize) {}
 }
 

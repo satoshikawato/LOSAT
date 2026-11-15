@@ -71,7 +71,7 @@ first: `qaccver saccver pident length mismatch gapopen qstart qend sstart send e
 `outcome.queries()` and `QueryHits.subjects()` group the rows by query and by subject. Everything
 that a search returns can be pickled, so a process pool can return it.
 
-psiblast's rounds follow one another in the table, round 1 first: `hsp.round` (the `round` column)
+psiblast's rounds of each query follow one another in the table, round 1 first: `hsp.round` (the `round` column)
 is the round that found the HSP, 1 in the other searches. `outcome.rounds[q]` holds the statistics of
 each round of query `q` and whether its rounds converged (`Search has CONVERGED!`), and
 `QueryHits.rounds()` gives each round's HSPs with its statistics.

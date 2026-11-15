@@ -1488,6 +1488,14 @@ const DATABASE_CASES: &[DatabaseCase] = &[
         db: "db_search/paja",
         options: &["-num_iterations", "3"],
     },
+    // psiblast's rounds of the second query record: `-query_loc` starts past the end of the first
+    // (10 letters), which NCBI's reader skips (the fixture `db.ps.it.qloc.skip.6`).
+    DatabaseCase {
+        program: Program::Psiblast,
+        query: "fasta/psiblast/q4a_skip.faa",
+        db: "db_search/paja",
+        options: &["-num_iterations", "2", "-query_loc", "20-300"],
+    },
 ];
 
 fn engine_tests(name: &str) -> String {
@@ -1702,6 +1710,40 @@ fn psiblast_rounds_carry_their_round_and_its_statistics() {
             assert_eq!(round, format!("# Iteration: {}", hsp.round), "{context}");
         }
     }
+}
+
+// Line RG item Q5: the rounds of a query after a record that `-query_loc` skips are the second
+// record's, in the whole search and in its batches.
+#[test]
+fn psiblast_rounds_after_a_skipped_record_are_the_next_records() {
+    let case = &DATABASE_CASES[9];
+    let (_, records, search) = case.read();
+    let db = engine_tests(case.db);
+    let inputs = Inputs::database(&records, &db);
+    let outcome = run_collect(&search, inputs, &["7"]).unwrap();
+    assert_eq!(outcome.rounds.len(), 2);
+    assert_eq!(outcome.query_stats[0], None);
+    assert_eq!(outcome.rounds[0].stats, [None]);
+    assert!(!outcome.rounds[0].converged);
+    assert_eq!(outcome.rounds[1].stats.len(), 2);
+    assert_eq!(outcome.rounds[1].stats[0], outcome.query_stats[1]);
+    assert!(outcome.hsps.iter().all(|hsp| hsp.q_idx == 1));
+    assert!(outcome.hsps.iter().any(|hsp| hsp.round == 2));
+    let text = String::from_utf8(outcome.reports[0].bytes.clone()).unwrap();
+    for hsp in &outcome.hsps {
+        let row = outcome.reports[0].spans[hsp.index].clone().unwrap();
+        let heading = text[..row.start].rfind("# Iteration: ").unwrap();
+        let round = text[heading..].lines().next().unwrap();
+        assert_eq!(round, format!("# Iteration: {}", hsp.round));
+    }
+    let (mut hsps, mut rounds) = (Vec::new(), Vec::new());
+    for batch in run_batches(&search, inputs).unwrap() {
+        let batch = batch.unwrap();
+        hsps.extend(batch.hsps);
+        rounds.extend(batch.rounds);
+    }
+    assert!(hsps == outcome.hsps, "the batches' records");
+    assert_eq!(rounds, outcome.rounds, "the batches' rounds");
 }
 
 #[test]

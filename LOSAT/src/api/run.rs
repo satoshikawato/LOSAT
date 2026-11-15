@@ -297,16 +297,22 @@ impl QueryStats {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_iteration.cpp:67-92
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_iteration.cpp:76-91
 // ```c++
-// bool
-// CPsiBlastIterationState::HasConverged()
-// {
-//     // For an object that hasn't been 'advanced' or one that only has performed
-//     // one iteration (i.e.: called Advance() once), it doesn't make sense to
-//     // have converged
-//     if (m_IterationsDone <= 1) {
-//         return false;
+//     // if the most current list of ids is empty, that means that no new
+//     // sequences were found and therefore we have converged.
+//     if ( !m_PreviousData.empty() && m_CurrentData.empty() ) {
+//         return true;
+//     }
+//
+//     // Element by element comparison: has every element in the current Seq-id
+//     // list been found in the previous iterations?
+//     bool retval = true;
+//     ITERATE(TSeqIds, current_id, m_CurrentData) {
+//         if (m_PreviousData.find(*current_id) == m_PreviousData.end()) {
+//             retval = false;
+//             break;
+//         }
 //     }
 // ```
 // NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_results.hpp:211-215
@@ -328,8 +334,10 @@ pub struct QueryRounds {
     /// HSPs of that round (`HspRecord::round`). The first is `Outcome::query_stats`'s; a search
     /// without rounds, and a query that was not searched, have that one only.
     pub stats: Vec<Option<QueryStats>>,
-    /// Whether the query's rounds converged (NCBI's `Search has CONVERGED!`): its last round
-    /// found no sequence that the rounds before had not found. False without rounds.
+    /// Whether the query's rounds converged (NCBI's `Search has CONVERGED!`, `HasConverged`):
+    /// after two rounds or more, every subject below `-inclusion_ethresh` in the last round was
+    /// below it in the round before too (`algorithm::psiblast::rounds::IterationState`). False
+    /// without rounds.
     pub converged: bool,
 }
 
@@ -531,6 +539,9 @@ impl FormatObserver for RangeRecorder {
 
     fn round_begin(&mut self, query: usize, round: u32) {
         self.parts.round_begin(query, round);
+        // A round's report starts its subjects' headings again.
+        self.heading_start.fill(None);
+        self.heading.fill(None);
         let reports = self.positions.len();
         self.spans
             .resize(self.parts.current() + 1, vec![Vec::new(); reports]);
@@ -878,8 +889,8 @@ pub(super) fn run_local(
 //                 } else {
 //                     psiblast.Reset(new CPsiBlast(query_factory, db_adapter, psi_opts));
 // ```
-/// blastp's arguments for psiblast's first round (`algorithm::psiblast`), after LOSAT's refusals
-/// of each requested format.
+/// blastp's arguments for psiblast's search and its rounds (`algorithm::psiblast`,
+/// `PsiblastArgs::into_blastp_args`), after LOSAT's refusals of each requested format.
 fn psiblast_args(
     args: crate::algorithm::psiblast::PsiblastArgs,
     outputs: &ReportOutputs<'_>,

@@ -709,22 +709,23 @@ fn queries_without_hits_at_the_edges_of_blocks() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-// Refusals that the block search could meet in a later block, with a name outside US-ASCII:
+// Refusals that the block search could meet in a later block, with the one title that NCBI cannot
+// make (`>, ,`: `x_CleanAndCompress` reads past its end):
 // - outfmt 5, 15 and 16, a query title in the last record (the last block): the search of all
 //   queries refuses before it writes a byte, so the blocks are not used and the run fails as
 //   without them (outfmt 8, 9 and 12 write no title and are searched in blocks);
-// - outfmt 5, 15 and 16, a `-subject` title on a subject with hits: refused the same way, as is the
-//   `>, ,` title; on a subject without hits both complete, and the blocks are not used either (the
-//   check names every subject);
+// - outfmt 5, 15 and 16, a `-subject` title on a subject with hits: refused the same way;
 // - outfmt 8, 9 and 12 take the same subjects in blocks.
+// A title with a byte >= 0x80 on a subject without hits is no refusal (NCBI writes it when a hit
+// reaches it, and none does): the document is the ordinary one and the blocks write it.
 // One case per path (CI time; the checks' thread counts are unit tests in `x_query_blocks.rs`):
 // the query title with outfmt 5 and 16 (the checks before the first block, `blast_engine.rs`
 // `search`, read the queries' names for either XML family, `x_block_xml_run_allowed`); the
 // `-subject` titles, which one check reads for both families (`x_block_xml_subjects_allowed`), with
-// outfmt 5 on the subject with hits and the XML2 formats on the subject without hits (16) and on
-// the `>, ,` title (15); outfmt 9 with the query title and 8 with a subject title.
+// outfmt 5 and 15 on the subject with hits and the XML2 formats on the subject without hits (16);
+// outfmt 9 with the query title and 8 with a subject title.
 #[test]
-fn xml_names_that_ncbi_cannot_write_leave_the_search_of_all_queries() {
+fn xml_titles_that_ncbi_cannot_make_leave_the_search_of_all_queries() {
     let dir = std::env::temp_dir().join(format!("losat-bpqblockfmt-names-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let query = queries(&dir);
@@ -732,17 +733,14 @@ fn xml_names_that_ncbi_cannot_write_leave_the_search_of_all_queries() {
     let subject = [OsStr::new("-subject"), fasta.as_os_str()];
     // (a) the last query's title.
     let mut records = query_records();
-    let (header, rest) = records[3].split_once('\n').unwrap();
-    records[3] = format!(
-        "{}caf\u{e9}\n{rest}",
-        &header[..header.find(' ').unwrap() + 1]
-    );
-    let cafe_query = write_file(&dir, "queries_cafe.faa", &records.concat());
+    let (_, rest) = records[3].split_once('\n').unwrap();
+    records[3] = format!(">, ,\n{rest}");
+    let punctuation_query = write_file(&dir, "queries_punctuation.faa", &records.concat());
     for (spec, threads) in [("5", 1), ("16", 4)] {
         let fmt = outfmt(spec);
         let what = format!("a query title, outfmt {spec}, threads {threads}");
         let reference = blastp(
-            &cafe_query,
+            &punctuation_query,
             &subject,
             threads,
             &[BATCH, SWITCH_OFF],
@@ -750,7 +748,7 @@ fn xml_names_that_ncbi_cannot_write_leave_the_search_of_all_queries() {
         );
         assert!(!reference.success && reference.stdout.is_empty(), "{what}");
         let run = blastp(
-            &cafe_query,
+            &punctuation_query,
             &subject,
             threads,
             &[BATCH, ("LOSAT_X_BPQBLOCK", "1")],
@@ -762,21 +760,21 @@ fn xml_names_that_ncbi_cannot_write_leave_the_search_of_all_queries() {
     let fmt = outfmt(spec);
     let what = format!("a query title, outfmt {spec}, threads {threads}");
     let reference = blastp(
-        &cafe_query,
+        &punctuation_query,
         &subject,
         threads,
         &[BATCH, SWITCH_OFF],
         &os(&fmt),
     );
     let run = blastp(
-        &cafe_query,
+        &punctuation_query,
         &subject,
         threads,
         &[BATCH, ("LOSAT_X_BPQBLOCK", "1")],
         &os(&fmt),
     );
     assert_same(&run, &reference, true, &what);
-    // (b), (c), (d): subjects with a title outside US-ASCII.
+    // (b), (c), (d): subjects with a title that NCBI cannot make, and one with a title it writes.
     let rows = blastp(&query, &subject, 1, &[BATCH, SWITCH_OFF], &os(&outfmt("6")));
     let rows = String::from_utf8(rows.stdout).unwrap();
     let (hit, _) = subject_first_hit_late(&query, &rows);
@@ -787,11 +785,6 @@ fn xml_names_that_ncbi_cannot_write_leave_the_search_of_all_queries() {
         .unwrap()
         .to_string();
     let mut state = 0x1234_5678_9abc_def1u64;
-    let with_hit = write_file(
-        &dir,
-        "subjects_hit.faa",
-        &subjects.replacen(&defline, &format!(">{hit} caf\u{e9}"), 1),
-    );
     let without_hit = write_file(
         &dir,
         "subjects_nohit.faa",
@@ -807,14 +800,7 @@ fn xml_names_that_ncbi_cannot_write_leave_the_search_of_all_queries() {
     );
     // (subject file, name, whether the XML report completes, its (outfmt, threads), the
     // Seq-annot (outfmt, threads))
-    let cases: [(&PathBuf, &str, bool, Runs, Runs); 3] = [
-        (
-            &with_hit,
-            "a title on a subject with hits",
-            false,
-            &[("5", 4)],
-            &[("8", 1)],
-        ),
+    let cases: [(&PathBuf, &str, bool, Runs, Runs); 2] = [
         (
             &without_hit,
             "a title on a subject without hits",
@@ -822,7 +808,13 @@ fn xml_names_that_ncbi_cannot_write_leave_the_search_of_all_queries() {
             &[("16", 1)],
             &[],
         ),
-        (&punctuation, "the >, , title", false, &[("15", 4)], &[]),
+        (
+            &punctuation,
+            "the >, , title on a subject with hits",
+            false,
+            &[("5", 4), ("15", 4)],
+            &[("8", 1)],
+        ),
     ];
     for (file, name, xml_succeeds, xml, seqalign) in cases {
         let subject = [OsStr::new("-subject"), file.as_os_str()];
@@ -848,7 +840,8 @@ fn xml_names_that_ncbi_cannot_write_leave_the_search_of_all_queries() {
                 &[BATCH, ("LOSAT_X_BPQBLOCK", "1")],
                 &os(&fmt),
             );
-            assert_same_outcome(&run, &reference, false, &what);
+            // A title NCBI writes is no reason to leave the blocks; the refused one is.
+            assert_same_outcome(&run, &reference, xml_succeeds, &what);
         }
         for &(spec, threads) in seqalign {
             let fmt = outfmt(spec);
@@ -965,14 +958,13 @@ fn a_database_title_outside_the_printable_range_leaves_the_search_of_all_queries
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-// outfmt 5 with a `-db` path in a directory whose name is outside US-ASCII: the database name is
-// written as `BlastOutput_db`, which NCBI cannot write, so the search of all queries refuses before
-// its first byte; the block search is not used and the run ends the same way (outfmt 16 too; outfmt
-// 8 writes no name and is searched in blocks). One case per path (CI time); the check's thread
-// counts are unit tests in `x_query_blocks.rs`.
+// outfmt 5, 16 and 8 with a `-db` path in a directory whose name is outside US-ASCII: the database
+// name is written as `BlastOutput_db` (NCBI's XML stream cannot write the byte: outfmt 5 writes
+// nothing and exits 255, outfmt 16 is cut at the name), which the blocks write as the search of all
+// queries does. One case per path (CI time).
 #[cfg(unix)]
 #[test]
-fn a_database_name_outside_us_ascii_leaves_the_search_of_all_queries() {
+fn a_database_name_outside_us_ascii_is_written_by_the_blocks_as_by_the_search_of_all_queries() {
     let dir = std::env::temp_dir().join(format!("losat-bpqblockfmt-dbn-{}", std::process::id()));
     let named = dir.join("d\u{e9}");
     std::fs::create_dir_all(&named).unwrap();
@@ -996,9 +988,7 @@ fn a_database_name_outside_us_ascii_leaves_the_search_of_all_queries() {
     // A database of these queries' subjects under an ASCII name takes the blocks with outfmt 5
     // (the `-db` case of
     // `outfmt_5_8_9_12_15_16_blocks_write_the_report_of_the_search_of_all_queries`) and 16
-    // (`a_punctuation_database_title_stops_outfmt_6_blocks_but_not_the_others`), so the checks
-    // before the first block (`blast_engine.rs` `search`) reach the name check, and the run leaves
-    // the blocks there, not before.
+    // (`a_punctuation_database_title_stops_outfmt_6_blocks_but_not_the_others`), and so does this one.
     for (spec, threads) in [("5", 4), ("16", 1), ("8", 4)] {
         let fmt = outfmt(spec);
         let what = format!("outfmt {spec} threads {threads}");
@@ -1010,7 +1000,8 @@ fn a_database_name_outside_us_ascii_leaves_the_search_of_all_queries() {
             &[BATCH, ("LOSAT_X_BPQBLOCK", "1")],
             &os(&fmt),
         );
-        if spec != "8" {
+        if spec == "5" {
+            // The header fails (rc 255 in NCBI): nothing is written, and no search is made.
             assert!(!reference.success && reference.stdout.is_empty(), "{what}");
             assert_same_outcome(&run, &reference, false, &what);
         } else {
@@ -1198,11 +1189,12 @@ fn a_punctuation_database_title_stops_outfmt_6_blocks_but_not_the_others() {
 // Outfmt 15 and 16 with `-db` taxids (`tests/db_search/paja_taxid`: taxid 10090 in every definition
 // line but BDT63547.1's 9606, a subject that only the second NCBI query batch of `bpqb_q.faa` hits)
 // and a taxonomy database on `BLASTDB`. The taxonomy database's refusals come before the first byte
-// in the search of all queries, so a name NCBI cannot write for 9606 (which a later block would
-// refuse after the first block's bytes) and an unreadable `taxdb.btd` leave the block search; its
+// in the search of all queries, so an unreadable `taxdb.btd` leaves the block search; its
 // messages on standard error (the open, the volume's lookup once per taxid, each `Hit`'s lookup) are
-// written by the blocks as by the search of all queries, at the `Hit` that first needs them. At one
-// and four threads: the check's pass over the headers runs on the pool (at both in `database.rs`
+// written by the blocks as by the search of all queries, at the `Hit` that first needs them. A
+// scientific name of 9606 with bytes >= 0x80 is no refusal: outfmt 15 copies it, outfmt 16 is cut at
+// it with NCBI's post (`Frame type= eFrameNamed`), and the blocks write the same bytes. At one and
+// four threads: the check's pass over the headers runs on the pool (at both in `database.rs`
 // `titles_and_taxids_in_one_pass_give_the_answers_of_the_two_checks`), `taxdb_may_refuse` takes no
 // pool.
 #[test]
@@ -1213,8 +1205,8 @@ fn taxonomy_names_for_outfmt_15_and_16_keep_the_bytes_and_the_refusals() {
     let subject = [OsStr::new("-db"), db.as_os_str()];
     let extra = ["-max_target_seqs", "2", "-max_hsps", "1", "-evalue", "0.1"];
     let taxdb = |variant: &str| manifest_dir.join("tests/seqdb").join(variant);
-    // The conservative fallback: the same queries without BDT62609.1, the one query that hits
-    // BDT63547.1 (taxid 9606), so that no subject with hits carries 9606.
+    // The same queries without BDT62609.1, the one query that hits BDT63547.1 (taxid 9606), so that
+    // no subject with hits carries 9606.
     let dir = std::env::temp_dir().join(format!("losat-bpqblockxml2-tax-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let text = std::fs::read_to_string(&query).unwrap();
@@ -1235,18 +1227,16 @@ fn taxonomy_names_for_outfmt_15_and_16_keep_the_bytes_and_the_refusals() {
     let cases = [
         (None, true, false, false),
         (Some("taxdb/good"), true, false, false),
-        // 9606's scientific name has UTF-8 bytes: refused, before the first byte.
-        (Some("taxdb/high_bytes_utf8"), false, false, false),
+        // 9606's scientific name has UTF-8 bytes: written as NCBI's streams write it (outfmt 16 is
+        // cut at the name, with NCBI's post on standard error).
+        (Some("taxdb/high_bytes_utf8"), true, false, false),
         // An empty `taxdb.btd`: refused.
         (Some("taxdb/btd_empty"), false, false, false),
         // Messages only: the magic number (once, at the first `Hit`), and 10090's offset past the
         // end of the file (the volume's lookup once for the whole run, each `Hit`'s lookup).
         (Some("taxdb/bad_magic"), true, true, false),
         (Some("taxdb_xml2/last_10090_past_end"), true, true, false),
-        // 9606's name cannot be written, but no subject with hits has it: the search of all
-        // queries completes. The block search checks every taxid of the database, so it is not
-        // taken (the check is conservative; a narrowing of it to the subjects with hits would
-        // need the hits of the blocks to come first).
+        // 9606's name has UTF-8 bytes, but no subject with hits has it: nothing is cut.
         (Some("taxdb/high_bytes_utf8"), true, false, true),
     ];
     for spec in ["15", "16"] {
@@ -1255,9 +1245,11 @@ fn taxonomy_names_for_outfmt_15_and_16_keep_the_bytes_and_the_refusals() {
         for threads in THREADS {
             for (variant, completes, messages, reduced) in cases {
                 let query = if reduced { &query_without_9606 } else { &query };
-                // The block search is taken where the search of all queries completes and the
-                // conservative check passes.
-                let blocks = completes && !reduced;
+                // The block search is taken where the search of all queries completes.
+                let blocks = completes;
+                // NCBI's post of the XML2 document cut at 9606's name.
+                let messages = messages
+                    || (variant == Some("taxdb/high_bytes_utf8") && !reduced && spec == "16");
                 let what = format!(
                     "outfmt {spec}, taxdb {variant:?}, reduced {reduced}, threads {threads}"
                 );
@@ -1612,10 +1604,11 @@ fn outfmt_13_and_14_with_subject_hold_a_report_across_blocks() {
 }
 
 // Outfmt 13 and 14 with taxids and a taxonomy database: the names in the side files and the
-// messages on standard error are those of the search of all queries; a database that the search of
-// all queries refuses (9606's name has UTF-8 bytes) leaves the blocks and fails before any file.
-// Both formats are run (names render differently in JSON and XML), at one thread; the default run
-// writes the blocks' files (a refused database leaves the blocks).
+// messages on standard error are those of the search of all queries; 9606's name with UTF-8 bytes
+// is copied by the JSON side file and cuts the XML2 one (outfmt 14: NCBI's exception on standard
+// error, exit status 255, the master file empty), the same with the blocks. Both formats are run
+// (names render differently in JSON and XML), at one thread; the default run writes the blocks'
+// files.
 #[test]
 fn outfmt_13_and_14_with_taxids_and_a_taxonomy_database_keep_the_files_and_messages() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -1630,11 +1623,14 @@ fn outfmt_13_and_14_with_taxids_and_a_taxonomy_database_keep_the_files_and_messa
         (Some("taxdb/good"), true, false),
         (Some("taxdb/bad_magic"), true, true),
         (Some("taxdb_xml2/last_10090_past_end"), true, true),
-        (Some("taxdb/high_bytes_utf8"), false, false),
+        (Some("taxdb/high_bytes_utf8"), true, false),
     ];
     for spec in ["13", "14"] {
         for threads in ONE_THREAD {
             for (variant, completes, messages) in cases {
+                // The XML2 side file that holds 9606's name is cut: NCBI exits 255 there.
+                let cut = variant == Some("taxdb/high_bytes_utf8") && spec == "14";
+                let completes = completes && !cut;
                 let what = format!("outfmt {spec}, taxdb {variant:?}, threads {threads}");
                 let blastdb = variant
                     .map(|variant| manifest_dir.join("tests/seqdb").join(variant))
@@ -1675,14 +1671,11 @@ fn outfmt_13_and_14_with_taxids_and_a_taxonomy_database_keep_the_files_and_messa
                     assert_same_files(&blocks, &reference, Some(true), &what);
                     assert_eq!(blocks.0.searches, 2, "{what}: blocks");
                 } else {
-                    // The refused database leaves the blocks (the check is made before the first
-                    // block), so that no side file is written.
+                    // The cut side file: the files up to it, the master empty; the blocks write
+                    // the same.
                     let blocks = run(&[], "blocks");
-                    assert_same_files(&blocks, &reference, Some(false), &what);
-                    assert!(
-                        reference.1.values().all(Vec::is_empty),
-                        "{what}: the refused run wrote a file"
-                    );
+                    assert_same_files(&blocks, &reference, None, &what);
+                    assert!(reference.1.len() < 31, "{what}: the run stopped");
                 }
             }
         }

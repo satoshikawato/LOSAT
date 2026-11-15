@@ -1657,3 +1657,27 @@ words of 11 and 28 letters and refused at blastn-short's 7:
 ```
 makeblastdb -in subj.fna -dbtype nucl -out edge5 -title "edge masks 5" -blastdb_version 4 -mask_data edge_ov.asnt,edge_em.asnt,edge_ovr.asnt,edge_fw.asnt
 ```
+
+M4a-2c (line NP, 2026-11-15; PD-LOSAT-NCBI-DEFECTS exception 13: with `-db_hard_mask`, a sequence whose first mask
+runs to its end is searched before the mask at a scanned word of 11 or more) added four databases. `edge6` holds the
+near inputs of the rows on which NCBI BLAST+ 2.17.0 crashes: algorithm 11 (`edge_whole4n.asnt`) is `edge2`'s 16 with
+`s4`'s mask one letter shorter (0-298), 12 (`edge_e0tailn.asnt`) is `edge4`'s 11 with the mask after the empty one one
+letter shorter (1000-1198). `mvn` holds `../../seqdb/mask_nucl.fna` with `mask_nucl_mv`'s dust (algorithm 11, from
+`../../seqdb/expected/mask_nucl_mv.masks.tsv`) and `m04`'s mask one letter shorter (`mvn_dust.asnt`: 300-388, one
+volume; a search's numbers and rows are those of the two volumes). `edge7` (`tl.fna`, queries `q7.fna`) holds four
+sequences of the M4a-2c probes with tail masks (`edge_tl.asnt`, algorithm 11): `x1`-`x3` of 916, 326 and 788 letters
+whose last 1, 2 and 3 letters are masked (queries that match to the end: the traceback reads the whole mask as `B`, so
+no alignment reaches the last letter, while in the near input of `edge_tln.asnt`, algorithm 12, each mask one letter
+shorter and `x1` unmasked, the alignments reach it) and `x4`, a short subject (74 letters, mask 55-73). `edge8`
+(`ts.fna`, queries `q8.fna`) holds `y1` (37 letters, mask 12-36) and `y2` (1877 letters, mask 1682-1876) whose
+queries hold only 12 and 17 letters before the masks, where NCBI's scan past the chunk finds words across the masks'
+start (`edge_ts.asnt`, algorithm 11) that its normal chunks of the near input (`edge_tsn.asnt`, 12) do not: the rows
+of `edge8`'s 11 expect the near input's output (`ncbi-near:` in the manifest). The masks of `edge7` and `edge8` name
+the sequences by number (`local id N`), as the other edge files do:
+
+```
+makeblastdb -in subj.fna -dbtype nucl -out edge6 -title "edge masks 6" -blastdb_version 4 -mask_data edge_whole4n.asnt,edge_e0tailn.asnt
+makeblastdb -in tl.fna -dbtype nucl -out edge7 -title "edge masks 7" -blastdb_version 4 -mask_data edge_tl.asnt,edge_tln.asnt
+makeblastdb -in ts.fna -dbtype nucl -out edge8 -title "edge masks 8" -blastdb_version 4 -mask_data edge_ts.asnt,edge_tsn.asnt
+makeblastdb -in ../../seqdb/mask_nucl.fna -dbtype nucl -out mvn -title "mask_nucl_mv dust near" -blastdb_version 4 -mask_data mvn_dust.asnt
+```

@@ -1,0 +1,156 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastn",
+      service "megablast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q5"
+                  }
+                }
+              },
+              title "q5"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 1000,
+              seq-data ncbi2na 'C10AB473A85687D4A77C6914A3534602A0223ED9981B44
+9E4AE760DC0737494AA712CEA39939BF27626689D320908FC4D180C205ACBD05A4EE2E5AA80649
+4BBAE9D8C9102EDD98AEAB017F2A1C69AC57394C73950018FA8431173B7B0F454095188B30A485
+F79990299C9FF960EBEDEBFEA77B18BDBACCFCA77F931F939EFC11F9895BD7CDC851833371F23E
+D1EFA8EB4F635DFA3FA27D52DF00C5F2CC27A8B98536E54B4A9C3E3922B6A85AC5F66F1A9457F8
+E364AAE7658F4C6F97F9094932C3CC1C84667EB0E68E54F05FAB6C403440766057625D4BEA5E5F
+BBC952A5EB3EEDBF67BE2A1BFA77DB3C0C7C3E1821B8492794758ECA618F1F18'H
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/dbmask/edge2",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean TRUE
+        },
+        {
+          name "DustFiltering",
+          value boolean FALSE
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 7175725
+        }
+      },
+      program-options {
+        {
+          name "DbFilteringAlgorithmId",
+          value integer 14
+        },
+        {
+          name "SubjectMaskingType",
+          value integer 2
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 843
+          },
+          {
+            id str "blast_score",
+            value int 843
+          },
+          {
+            id str "e_value",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "bit_score",
+            value real { 155784595115454, 10, -11 }
+          },
+          {
+            id str "num_ident",
+            value int 881
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 905, 10, -1 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            general {
+              db "BL_ORD_ID",
+              tag id 4
+            }
+          },
+          starts {
+            0,
+            100
+          },
+          lens {
+            900
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 133270576282382, 10, -14 },
+        k { 620991117264207, 10, -15 },
+        h { 112409184650114, 10, -14 },
+        gapped FALSE
+      },
+      {
+        lambda { 128, 10, -2 },
+        k { 46, 10, -2 },
+        h { 85, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 7175725",
+      "Effective search space used: 7175725",
+      "Length adjustment: 15"
+    }
+  }
+}

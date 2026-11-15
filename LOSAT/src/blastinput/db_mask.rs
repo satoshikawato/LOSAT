@@ -455,8 +455,9 @@ impl ResolvedMask {
     /// checks; `program` names the program), before anything is written: the databases whose masks
     /// NCBI reads from undefined or reversed data (`SeqDb::check_search_masks`; decision D5 of
     /// M4a-2), then with `-db_hard_mask` the first searched sequence whose masks NCBI's chunks
-    /// do not handle (`HardMaskShape`; series NP, M4a-2b decisions H3-H5), for a search whose scan
-    /// reads words of `scanned_word` letters (`HardMaskShape::of`).
+    /// do not handle (`HardMaskShape`; series NP, M4a-2b decisions H3-H5, and M4a-2c: a mask that
+    /// runs to the end only below `TAIL_MASK_SEARCHED_WORD`), for a search whose scan reads words
+    /// of `scanned_word` letters (`HardMaskShape::of`).
     pub fn check_losat_limits(&self, db: &SeqDb, program: &str, scanned_word: usize) -> Result<()> {
         db.check_search_masks(self.id)
             .map_err(|error| crate::algorithm::common::database::database_error(error, program))?;
@@ -529,13 +530,15 @@ mod db_mask_tests;
 /// (`s_GetNextSubjectChunk`, blast_engine.c:221-310) give no result that LOSAT can check for them.
 /// The shapes are read off the chunks themselves (`core::subject_split::HardSplitState`, the
 /// chunker that the search runs; review S1 of M4a-2b), except `Unsorted`, a check of the stored
-/// masks. The answer of Owner question Q1 for the first shape (an approved NCBI defect instead of
-/// the refusal) removes `TailMask` here and changes the chunks of the "no chunking" branch.
+/// masks. The first shape is refused only at a scanned word below [`TAIL_MASK_SEARCHED_WORD`]
+/// (blastn-short): at that word and above LOSAT searches it over the chunk before the mask, an
+/// approved NCBI defect (series NP, M4a-2c; the Owner's answer of 2026-11-15 to question Q1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HardMaskShape {
     /// The mask `[start, end)` runs to the subject's end after a chunk from the subject's start
     /// (only empty masks at 0 before it), which takes NCBI's "no chunking" branch and so scans
-    /// the full range past the chunk, in a subject that the scan reads a word of.
+    /// the full range past the chunk, in a subject that the scan reads a word of, at a scanned
+    /// word below [`TAIL_MASK_SEARCHED_WORD`].
     TailMask { start: u32, end: u32 },
     /// A mask that ends before it starts, or that starts before the end of the mask before it.
     Unsorted {
@@ -550,6 +553,32 @@ pub enum HardMaskShape {
     /// mask.
     ShortLastMask { start: u32, end: u32 },
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:264-268 (quoted at
+// `core::subject_split::HardSplitState::next_chunk`)
+// ```c
+//     /* if no chunking is performed */
+//     if (backup->offset == 0 && residual == 0 && backup->next == backup->full_range.right) {
+//         subject->seq_ranges = backup->soft_ranges;
+//         subject->num_seq_ranges = backup->num_soft_ranges;
+//         return SUBJECT_SPLIT_OK;
+//     }
+// ```
+/// The shortest scanned word (the word size, or the discontiguous template's length) at which
+/// `-db_hard_mask` searches a sequence of the shape [`HardMaskShape::TailMask`] instead of refusing
+/// it: over the chunk before the mask alone, scanned from its start as NCBI scans its other hard
+/// chunks (`core::subject_split::HardSplitState::next_chunk`). An approved NCBI defect
+/// (PD-LOSAT-NCBI-DEFECTS exception 13, version 1.30; the Owner's decision of 2026-11-15, 「M4a
+/// Q1=B」; series NP, M4a-2c): NCBI BLAST+ 2.17.0 takes the "no chunking" branch for that chunk
+/// and scans the masked letters past it with the chunk's length (its soft ranges are the full
+/// range, blast_engine.c:162-164), reading past its buffer. In the 900 runs of the Owner's
+/// question at words of 11 and more (megablast, blastn, dc-megablast) its output was the same as
+/// for the input with the mask one letter shorter, which its normal chunks search, while at
+/// blastn-short's 7 it differed in 29 of 300 runs and crashed in 71, so the refusal stays below
+/// this word. LOSAT's traceback reads the whole mask as `B`, as NCBI's does; where NCBI crashes,
+/// or adds a row from a word across the mask's start (an alignment with fewer letters before the
+/// mask than a word: M4a-2c's probes), LOSAT gives the near input's rows (the exception's text).
+pub const TAIL_MASK_SEARCHED_WORD: usize = 11;
 
 impl HardMaskShape {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276 and 579-584
@@ -660,7 +689,9 @@ impl HardMaskShape {
     ///   the full range `[0, length)` past the chunk, which reads a word when `length >=
     ///   scanned_word` (`min_subj_seq_length` is 1 for BLASTN, so every subject is scanned):
     ///   NCBI reads seeds past the chunk (§7.1: rows of the input with the mask one letter
-    ///   shorter, or a corrupt heap);
+    ///   shorter, or a corrupt heap), refused at a `scanned_word` below
+    ///   [`TAIL_MASK_SEARCHED_WORD`] (at that word and above LOSAT scans the chunk alone, the
+    ///   approved NCBI defect; the chunk is the sequence's last, so the next rule never reads it);
     /// - the final chunk, after which NCBI reads the overlap one range past the list (another
     ///   sequence's mask end, or unset memory, §7.3), where that overlap can decide a merge: the
     ///   final chunk scans a word (else its list is empty and NCBI goes on to the next chunk
@@ -734,7 +765,11 @@ impl HardMaskShape {
             }
             let scans = scans_word(&chunk);
             // The chunk's range ends where the mask of the same index starts.
-            if chunk.full_range && chunk.length < length && scans {
+            if chunk.full_range
+                && chunk.length < length
+                && scans
+                && scanned_word < TAIL_MASK_SEARCHED_WORD
+            {
                 let (start, end) = masks[chunk.range];
                 return Some(HardMaskShape::TailMask { start, end });
             }
@@ -755,7 +790,8 @@ impl HardMaskShape {
             HardMaskShape::TailMask { start, end } => format!(
                 "has a mask, [{start}, {end}), running to its end after the chunk from its start, \
                  for which NCBI BLAST+ 2.17.0 scans the masked letters past that chunk (it reads \
-                 past its buffer: rows of a near input, or a corrupt heap)"
+                 past its buffer: at a word of fewer than {TAIL_MASK_SEARCHED_WORD} letters, rows \
+                 that differ from a near input's, or a corrupt heap)"
             ),
             HardMaskShape::Unsorted { before, mask } => format!(
                 "has masks out of order ([{}, {}) after [{}, {})), whose hard masking NCBI BLAST+ \

@@ -337,10 +337,11 @@ fn the_archive_writes_the_key_of_a_name_or_the_id() {
 // A search with `-db_hard_mask` is refused, before anything is written, at the first searched
 // sequence whose masks NCBI's hard chunks do not handle (series NP, M4a-2b decisions H3-H5): a5's
 // s4 (OID 3) is masked whole ([0, 300): the "no chunking" branch scans the full range of a chunk
-// of no letters); edge1's algorithm 11 holds s5's masks out of order, 12 overlapping ones; 13
-// (adjacent masks: a hard range of no letters), 14 (masks at both ends) and 15 (one-letter masks)
-// are searched; edge2's 14 (a tail mask) and 16 (s4 masked whole, OID 3 before s5) are refused.
-// `-db_soft_mask` keeps every shape.
+// of no letters), refused at blastn-short's word 7 and searched at 11 and more (M4a-2c,
+// `TAIL_MASK_SEARCHED_WORD`); edge1's algorithm 11 holds s5's masks out of order, 12 overlapping
+// ones, at every word; 13 (adjacent masks: a hard range of no letters), 14 (masks at both ends)
+// and 15 (one-letter masks) are searched; edge2's 14 (a tail mask) and 16 (s4 masked whole, OID 3
+// before s5) are refused at 7 and searched at 11. `-db_soft_mask` keeps every shape.
 #[test]
 fn a_hard_masked_search_refuses_the_masks_that_ncbi_s_chunks_do_not_handle() {
     let mask = |kind, id| ResolvedMask {
@@ -349,51 +350,62 @@ fn a_hard_masked_search_refuses_the_masks_that_ncbi_s_chunks_do_not_handle() {
         key: None,
         shown: Vec::new(),
     };
-    let refusal = |db: &SeqDb, id| {
+    let refusal = |db: &SeqDb, id, word| {
         mask(MaskKind::Hard, id)
-            .check_losat_limits(db, "BLASTN", 11)
+            .check_losat_limits(db, "BLASTN", word)
             .map_err(|error| error.to_string())
     };
     let (a5, _) = open(&[dbmask("a5")]);
-    let error = refusal(&a5, 11).unwrap_err();
+    let error = refusal(&a5, 11, 7).unwrap_err();
     assert!(
         error.starts_with("-db_hard_mask: the sequence of OID 3 (volume ")
             && error.contains(
                 "a5) has a mask, [0, 300), running to its end after the chunk from its start, for \
-                 which NCBI BLAST+ 2.17.0 scans the masked letters past that chunk"
+                 which NCBI BLAST+ 2.17.0 scans the masked letters past that chunk (it reads past \
+                 its buffer: at a word of fewer than 11 letters, rows that differ from a near \
+                 input's, or a corrupt heap)"
             )
             && error.ends_with("LOSAT's BLASTN does not search such a database with -db_hard_mask"),
         "{error}"
     );
+    assert!(refusal(&a5, 11, 10).is_err());
+    for word in [11, 16, 28] {
+        refusal(&a5, 11, word).unwrap();
+    }
     mask(MaskKind::Soft, 11)
-        .check_losat_limits(&a5, "BLASTN", 11)
+        .check_losat_limits(&a5, "BLASTN", 7)
         .unwrap();
     let (edge1, _) = open(&[dbmask("edge1")]);
-    let error = refusal(&edge1, 11).unwrap_err();
-    assert!(
-        error.contains("OID 4 ")
-            && error.contains("has masks out of order ([100, 200) after [600, 700))"),
-        "{error}"
-    );
-    let error = refusal(&edge1, 12).unwrap_err();
-    assert!(error.contains("([200, 400) after [100, 300))"), "{error}");
+    for word in [7, 11] {
+        let error = refusal(&edge1, 11, word).unwrap_err();
+        assert!(
+            error.contains("OID 4 ")
+                && error.contains("has masks out of order ([100, 200) after [600, 700))"),
+            "{error}"
+        );
+        let error = refusal(&edge1, 12, word).unwrap_err();
+        assert!(error.contains("([200, 400) after [100, 300))"), "{error}");
+    }
     for id in [13, 14, 15] {
-        refusal(&edge1, id).unwrap();
+        refusal(&edge1, id, 11).unwrap();
     }
     let (edge2, _) = open(&[dbmask("edge2")]);
-    let error = refusal(&edge2, 14).unwrap_err();
+    let error = refusal(&edge2, 14, 7).unwrap_err();
     assert!(
         error.contains("OID 4 ") && error.contains("[1000, 1200), running to its end"),
         "{error}"
     );
-    let error = refusal(&edge2, 16).unwrap_err();
+    let error = refusal(&edge2, 16, 7).unwrap_err();
     assert!(
         error.contains("OID 3 ") && error.contains("[0, 300), running"),
         "{error}"
     );
+    for id in [14, 15, 16] {
+        refusal(&edge2, id, 11).unwrap();
+    }
     for id in 11..=16 {
         mask(MaskKind::Soft, id)
-            .check_losat_limits(&edge2, "BLASTN", 11)
+            .check_losat_limits(&edge2, "BLASTN", 7)
             .unwrap();
     }
 }
@@ -401,7 +413,8 @@ fn a_hard_masked_search_refuses_the_masks_that_ncbi_s_chunks_do_not_handle() {
 // The shapes of `HardMaskShape::of`, read off the chunks (blast_engine.c:221-276, 579-584, 1354,
 // 1368-1370; na_ungapped.c:1647-1668): a mask that runs to the end after the chunk from 0 (empty
 // masks at 0 or at the end around it; the first range at or below MAX_DBSEQ_LEN), in a subject of
-// a word or more (`min_subj_seq_length` is 1 for BLASTN: 4 letters at word 4, review F2); masks
+// a word or more (`min_subj_seq_length` is 1 for BLASTN: 4 letters at word 4, review F2), at a
+// word below `TAIL_MASK_SEARCHED_WORD` (series NP, M4a-2c: searched from 11 on); masks
 // that go back; a last mask after which the final chunk starts before the end of an earlier chunk
 // of another range, both chunks scanning a word (masksubj.inl:43-58; blast_engine.c:500, 565;
 // blast_hits.c:2873-2911, 2956: NCBI's merge then takes the earlier chunk's HSPs by the overlap it
@@ -412,34 +425,51 @@ fn a_hard_masked_search_refuses_the_masks_that_ncbi_s_chunks_do_not_handle() {
 #[test]
 fn the_hard_mask_shapes_follow_ncbi_s_chunks() {
     use std::cell::Cell;
-    let shape = |masks: &[(u32, u32)], length: usize| {
+    let shape_at = |masks: &[(u32, u32)], length: usize, word: usize| {
         let reads = Cell::new(0);
         let read = || {
             reads.set(reads.get() + 1);
             Some(length)
         };
         (
-            HardMaskShape::of(masks, None, &read, 11).unwrap(),
+            HardMaskShape::of(masks, None, &read, word).unwrap(),
             reads.get(),
         )
     };
+    let shape = |masks: &[(u32, u32)], length: usize| shape_at(masks, length, 11);
     let tail = |start, end| Some(HardMaskShape::TailMask { start, end });
-    assert_eq!(shape(&[(100, 300)], 300), (tail(100, 300), 1));
-    assert_eq!(shape(&[(0, 300)], 300), (tail(0, 300), 1));
-    assert_eq!(shape(&[(100, 300), (300, 300)], 300), (tail(100, 300), 1));
-    // Empty masks at 0 before it (review F1): the chunk after them starts at 0 as well.
-    assert_eq!(shape(&[(0, 0), (1000, 1200)], 1200), (tail(1000, 1200), 1));
-    assert_eq!(
-        shape(&[(0, 0), (0, 0), (0, 1200)], 1200),
-        (tail(0, 1200), 1)
-    );
-    assert_eq!(shape(&[(0, 0)], 1200), (None, 1));
-    assert_eq!(
-        shape(&[(5_000_000, 6_000_000)], 6_000_000),
-        (tail(5_000_000, 6_000_000), 1)
-    );
+    // A mask that runs to the end after the chunk from 0 is refused below the word
+    // `TAIL_MASK_SEARCHED_WORD` (blastn-short's 7) and searched from it on (series NP, M4a-2c);
+    // the length is read all the same.
+    let tails: [(&[(u32, u32)], usize, Option<HardMaskShape>); 7] = [
+        (&[(100, 300)], 300, tail(100, 300)),
+        (&[(0, 300)], 300, tail(0, 300)),
+        (&[(100, 300), (300, 300)], 300, tail(100, 300)),
+        // Empty masks at 0 before it (review F1): the chunk after them starts at 0 as well.
+        (&[(0, 0), (1000, 1200)], 1200, tail(1000, 1200)),
+        (&[(0, 0), (0, 0), (0, 1200)], 1200, tail(0, 1200)),
+        (
+            &[(5_000_000, 6_000_000)],
+            6_000_000,
+            tail(5_000_000, 6_000_000),
+        ),
+        // The shortest subject the scan of the full range reads a word of at 11.
+        (&[(5, 11)], 11, tail(5, 11)),
+    ];
+    for (masks, length, refused) in tails {
+        assert_eq!(shape_at(masks, length, 7), (refused, 1), "{masks:?}");
+        assert_eq!(
+            shape_at(masks, length, TAIL_MASK_SEARCHED_WORD - 1),
+            (refused, 1),
+            "{masks:?}"
+        );
+        for word in [TAIL_MASK_SEARCHED_WORD, 16, 28] {
+            assert_eq!(shape_at(masks, length, word), (None, 1), "{masks:?} {word}");
+        }
+    }
+    assert_eq!(shape_at(&[(0, 0)], 1200, 7), (None, 1));
     // Above MAX_DBSEQ_LEN the first chunk is a full chunk: NCBI chunks it as any other.
-    assert_eq!(shape(&[(5_000_001, 6_000_000)], 6_000_000), (None, 1));
+    assert_eq!(shape_at(&[(5_000_001, 6_000_000)], 6_000_000, 7), (None, 1));
     // An empty mask at the end, a mask before the end, two masks.
     assert_eq!(shape(&[(300, 300)], 300), (None, 1));
     assert_eq!(shape(&[(100, 299)], 300), (None, 1));
@@ -487,8 +517,8 @@ fn the_hard_mask_shapes_follow_ncbi_s_chunks() {
         Ok(short(1001, 1002))
     );
     // A subject that the scan reads no word of: shorter than the word.
-    assert_eq!(shape(&[(0, 10)], 10), (None, 1));
-    assert_eq!(shape(&[(5, 11)], 11), (tail(5, 11), 1));
+    assert_eq!(shape_at(&[(0, 6)], 6, 7), (None, 1));
+    assert_eq!(shape_at(&[(0, 7)], 7, 7), (tail(0, 7), 1));
     assert_eq!(HardMaskShape::of(&[(0, 4)], None, &|| Some(4), 5), Ok(None));
     assert_eq!(
         HardMaskShape::of(&[(2, 4)], None, &|| Some(4), 4),
@@ -507,22 +537,30 @@ fn the_hard_mask_shapes_follow_ncbi_s_chunks() {
     // The bounds of the length that the index gives (review 2 S4): the length is read only where
     // the shape differs between them (a mask that runs to the end, here at 300 or at 1201 of
     // 1200-1203), not where it is the same at all four (none, or a refusal read off the chunks).
-    let bounded = |masks: &[(u32, u32)], bounds: (usize, usize), length: usize| {
+    let bounded_at = |masks: &[(u32, u32)], bounds: (usize, usize), length: usize, word| {
         let reads = Cell::new(0);
         let read = || {
             reads.set(reads.get() + 1);
             Some(length)
         };
         (
-            HardMaskShape::of(masks, Some(bounds), &read, 11).unwrap(),
+            HardMaskShape::of(masks, Some(bounds), &read, word).unwrap(),
             reads.get(),
         )
     };
-    assert_eq!(bounded(&[(100, 300)], (300, 303), 300), (tail(100, 300), 1));
+    let bounded = |masks: &[(u32, u32)], bounds: (usize, usize), length: usize| {
+        bounded_at(masks, bounds, length, 11)
+    };
     assert_eq!(
-        bounded(&[(1000, 1201)], (1200, 1203), 1201),
+        bounded_at(&[(100, 300)], (300, 303), 300, 7),
+        (tail(100, 300), 1)
+    );
+    assert_eq!(bounded(&[(100, 300)], (300, 303), 300), (None, 1));
+    assert_eq!(
+        bounded_at(&[(1000, 1201)], (1200, 1203), 1201, 7),
         (tail(1000, 1201), 1)
     );
+    assert_eq!(bounded(&[(1000, 1201)], (1200, 1203), 1201), (None, 1));
     assert_eq!(bounded(&[(100, 200)], (1200, 1203), 1201), (None, 0));
     assert_eq!(
         bounded(&[(1001, 1002)], (1200, 1203), 1202),

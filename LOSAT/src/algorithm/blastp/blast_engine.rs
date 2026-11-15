@@ -9272,11 +9272,13 @@ fn search_split_query_batches(
         // it; NCBI's `size_t` chunk ranges then wrap (split_query_cxx.cpp:145-171).
         anyhow::ensure!(
             !sizes.negative_chunk_size(),
-            "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped, which is not supported by LOSAT's BLASTP"
+            "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped, which is not supported by LOSAT's {}",
+            args.app.name()
         );
         anyhow::ensure!(
             !protein_chunk_would_be_split(&chunks, sizes),
-            "an OVERLAP_CHUNK_SIZE so close to CHUNK_SIZE that NCBI BLAST+ would split a query chunk again (it then stops with a null reference) is not supported by LOSAT's BLASTP"
+            "an OVERLAP_CHUNK_SIZE so close to CHUNK_SIZE that NCBI BLAST+ would split a query chunk again (it then stops with a null reference) is not supported by LOSAT's {}",
+            args.app.name()
         );
         let mut merged: Vec<Option<BlastpHitList>> = (0..range.len()).map(|_| None).collect();
         // The batch's `query_info->contexts[c].eff_searchsp` (one context per query).
@@ -9291,7 +9293,8 @@ fn search_split_query_batches(
             // CBlastQueryVector"); `split_protein_batch` makes none.
             anyhow::ensure!(
                 !chunk.queries.is_empty(),
-                "a query chunk without a query is not supported by LOSAT's BLASTP"
+                "a query chunk without a query is not supported by LOSAT's {}",
+                args.app.name()
             );
             let parts: Vec<FastaRecord> = chunk
                 .queries

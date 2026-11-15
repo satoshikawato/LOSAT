@@ -69,7 +69,9 @@
 //! words and leaves it, unchanged and in order, `RING` words later; a word entering prefetches
 //! `offsets[cell]`, and the word `RING / 2` places back reads its two offsets and prefetches
 //! the first and the last cache line of its run (x86_64 only; elsewhere the ring only delays
-//! the words). The words, and so every pair and its order, are the scan's own.
+//! the words). The words, and so every pair and its order, are the scan's own. A ring is made
+//! for each chunk a scan reads, so its slots start uninitialised (no 0.8-0.9 KB zero fill per
+//! chunk): a slot is read only after a word was written to it (`Ring::push`).
 //!
 //! With LOSAT_TIMING `main` prints `[TIMING] disc_lookup_csr: builds=<CSR tables> parallel=<on a
 //! pool> words=<their words>` (the build times are in `[TIMING] disc_lookup_build`, the CSR's in
@@ -80,6 +82,7 @@ use super::{build_unmasked_ranges, DiscWords, PvArrayType, BLAST2NA_MASK, PV_ARR
 use super::{disc_longest_chain, fill_disc_mb_tables, DiscTables};
 use crate::algorithm::blastn::disc_lookup::compute_discontiguous_index;
 use std::collections::HashMap;
+use std::mem::MaybeUninit;
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -282,8 +285,8 @@ impl XHead for XPacked<'_> {
     #[inline(always)]
     fn ring<T: Copy + Default>(&self) -> XRingPacked<'_, T> {
         XRingPacked {
-            buf: [T::default(); RING],
-            ranks: [0; RING],
+            buf: [MaybeUninit::uninit(); RING],
+            ranks: [MaybeUninit::uninit(); RING],
             n: 0,
             head: *self,
         }
@@ -843,7 +846,9 @@ pub(crate) const RING: usize = 32;
 /// No NCBI counterpart (scheduling only): the FIFO of a CSR scan's words (module comment). A
 /// word is any `Copy` value whose cell `push` gets from `cell`.
 pub(crate) struct Ring<'a, T: Copy> {
-    buf: [T; RING],
+    /// Slot `m & (RING - 1)` holds the `m`-th word pushed while it is one of the last `RING` of
+    /// the `n` words pushed; a slot no word has reached is uninitialised (never read).
+    buf: [MaybeUninit<T>; RING],
     n: usize,
     offsets: &'a [u32],
     qs: &'a [u32],
@@ -852,7 +857,7 @@ pub(crate) struct Ring<'a, T: Copy> {
 impl<'a, T: Copy + Default> Ring<'a, T> {
     pub(crate) fn new(csr: &'a Csr) -> Self {
         Self {
-            buf: [T::default(); RING],
+            buf: [MaybeUninit::uninit(); RING],
             n: 0,
             offsets: csr.offsets(),
             qs: csr.qs(),
@@ -873,7 +878,9 @@ impl<'a, T: Copy + Default> Ring<'a, T> {
         let offsets = self.offsets;
         prefetch(offsets.as_ptr().wrapping_add(cell(&w)));
         if self.n >= RING / 2 {
-            let c = cell(&self.buf[(self.n - RING / 2) & MASK]);
+            // SAFETY: `n >= RING / 2`, so word `n - RING / 2` was pushed and its slot written;
+            // the `RING / 2 - 1` words pushed since then wrote other slots.
+            let c = cell(unsafe { self.buf[(self.n - RING / 2) & MASK].assume_init_ref() });
             let a = offsets[c] as usize;
             let b = offsets[c + 1] as usize;
             if b > a {
@@ -888,9 +895,11 @@ impl<'a, T: Copy + Default> Ring<'a, T> {
         let slot = self.n & MASK;
         let leaves = self.n >= RING;
         if leaves {
-            emit(self.buf[slot]);
+            // SAFETY: `n >= RING`, so word `n - RING`, whose slot this is, was pushed and
+            // written; the `RING - 1` words pushed since then wrote other slots.
+            emit(unsafe { self.buf[slot].assume_init() });
         }
-        self.buf[slot] = w;
+        self.buf[slot] = MaybeUninit::new(w);
         self.n += 1;
         leaves
     }
@@ -898,7 +907,9 @@ impl<'a, T: Copy + Default> Ring<'a, T> {
     /// The words still in the FIFO leave through `emit`, in order.
     pub(crate) fn flush(&mut self, emit: &mut impl FnMut(T)) {
         for m in self.n.saturating_sub(RING)..self.n {
-            emit(self.buf[m & (RING - 1)]);
+            // SAFETY: `m < n` and `m >= n - RING`: word `m` was pushed, and no later word
+            // wrote its slot.
+            emit(unsafe { self.buf[m & (RING - 1)].assume_init() });
         }
         self.n = 0;
     }
@@ -919,8 +930,9 @@ impl<T: Copy + Default> XRing<T> for Ring<'_, T> {
 /// No NCBI counterpart (scheduling only): EXPERIMENT (LOSAT_X_BNCSRPACK) `Ring` over a packed head
 /// (`XPacked`), with the rank of each word in `buf`.
 pub(crate) struct XRingPacked<'a, T: Copy> {
-    buf: [T; RING],
-    ranks: [u32; RING],
+    /// `Ring::buf`, and the rank of each word in the same slot (uninitialised until written).
+    buf: [MaybeUninit<T>; RING],
+    ranks: [MaybeUninit<u32>; RING],
     n: usize,
     head: XPacked<'a>,
 }
@@ -939,7 +951,9 @@ impl<T: Copy + Default> XRing<T> for XRingPacked<'_, T> {
         let offsets = self.head.offsets;
         prefetch(offsets.as_ptr().wrapping_add(r));
         if self.n >= RING / 2 {
-            let k = self.ranks[(self.n - RING / 2) & MASK] as usize;
+            // SAFETY: `n >= RING / 2`, so word `n - RING / 2` was pushed and its slot written;
+            // the `RING / 2 - 1` words pushed since then wrote other slots.
+            let k = unsafe { self.ranks[(self.n - RING / 2) & MASK].assume_init() } as usize;
             let a = offsets[k] as usize;
             let b = offsets[k + 1] as usize;
             let pa = self.head.qs.as_ptr().wrapping_add(a);
@@ -952,10 +966,12 @@ impl<T: Copy + Default> XRing<T> for XRingPacked<'_, T> {
         let slot = self.n & MASK;
         let leaves = self.n >= RING;
         if leaves {
-            emit(self.buf[slot]);
+            // SAFETY: `n >= RING`, so word `n - RING`, whose slot this is, was pushed and
+            // written; the `RING - 1` words pushed since then wrote other slots.
+            emit(unsafe { self.buf[slot].assume_init() });
         }
-        self.buf[slot] = w;
-        self.ranks[slot] = r as u32;
+        self.buf[slot] = MaybeUninit::new(w);
+        self.ranks[slot] = MaybeUninit::new(r as u32);
         self.n += 1;
         leaves
     }
@@ -963,7 +979,9 @@ impl<T: Copy + Default> XRing<T> for XRingPacked<'_, T> {
     /// `Ring::flush`.
     fn flush(&mut self, emit: &mut impl FnMut(T)) {
         for m in self.n.saturating_sub(RING)..self.n {
-            emit(self.buf[m & (RING - 1)]);
+            // SAFETY: `m < n` and `m >= n - RING`: word `m` was pushed, and no later word
+            // wrote its slot.
+            emit(unsafe { self.buf[m & (RING - 1)].assume_init() });
         }
         self.n = 0;
     }

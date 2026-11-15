@@ -101,11 +101,27 @@ pub(super) fn pssm_lookup(
         .psi_search
         .as_deref()
         .expect("the lookup table of a PSSM search");
-    let (lookup_segments, contexts) = psi_query(args, query_frames);
-    let lookup_segments: Vec<(i64, i64)> = lookup_segments
-        .iter()
-        .map(|&(left, right)| (i64::from(left), i64::from(right)))
-        .collect();
+    let (lookup_segments, mut contexts) = psi_query(args, query_frames);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-215 (quoted above:
+    // no lookup table for a split query)
+    // A later round of a query that NCBI splits: its chunks search without the PSSM
+    // (`search_split_query_batches`), so the PSSM's table indexes no word, and the round reads
+    // `kbp_std` of its set-up's query (`PsiSearch::split_setup`), whose validity the round driver
+    // checked.
+    let lookup_segments: Vec<(i64, i64)> = match psi.split_setup.as_ref() {
+        Some(setup) => {
+            let (_, setup_contexts) = psi_query(args, &[vec![setup.clone()]]);
+            for (context, setup) in contexts.iter_mut().zip(setup_contexts) {
+                context.karlin_params = setup.karlin_params;
+                context.is_valid = setup.is_valid;
+            }
+            Vec::new()
+        }
+        None => lookup_segments
+            .iter()
+            .map(|&(left, right)| (i64::from(left), i64::from(right)))
+            .collect(),
+    };
     let table = build_pssm_lookup_in(
         &psi.pssm,
         args.word_size,
@@ -398,6 +414,18 @@ pub(super) fn pssm_prelim(
         (args.scoring.gap_open, args.scoring.gap_extend),
         args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats,
     )?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:233-236
+    // ```c++
+    //     if (query_splitter->IsQuerySplit()) {
+    //
+    //         CRef<CSplitQueryBlk> split_query_blk = query_splitter->Split();
+    // ```
+    // A later round of a query that NCBI splits: only its chunks are searched
+    // (`search_split_query_batches`); the whole query scans no subject (its table is empty,
+    // `pssm_lookup`). The X-drops above are the PSSM's, which NCBI's traceback converts.
+    if psi.split_setup.is_some() {
+        return Ok(());
+    }
     let stats = psi_stats(run.gumbel, run.exact_search_spaces);
     // `run.prelim_evalue` is `-evalue` without the Gumbel block (`run_resolved_in_pool`,
     // blast_parameters.c:931-939).

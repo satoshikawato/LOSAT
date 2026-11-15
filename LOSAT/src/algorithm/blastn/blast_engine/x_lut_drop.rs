@@ -23,8 +23,8 @@
 //! the batch's peak was in the traceback: the 64 MiB hashtable, the chains (`next_pos`, 4 bytes a
 //! position of both strands, 42 MiB) and the traceback's 21 MiB (plan v4 line MF, `REPORT.md`
 //! §2.3). Now the batch drops them where NCBI's traceback stage drops its table: the
-//! `-subject` and `-db` traceback reads the kept HSPs (`process_subject` with the preliminary
-//! hits, which goes past the scan), and the lookup tables are passed to `process_subject` by the
+//! `-subject` and `-db` traceback reads the kept HSPs (`search_subject` with the preliminary
+//! hits, which goes past the scan), and the lookup tables are passed to `search_subject` by the
 //! preliminary stage's calls only (`None` in the traceback's), so the compiler proves that no
 //! traceback reads them. A LOSAT_X_MBLUTKEEP table goes back to the batch loop's keep when the
 //! tables drop (`x_mb_lut_keep.rs`), as at the end of the batch before: the keep is zeroed and

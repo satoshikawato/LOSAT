@@ -115,9 +115,8 @@ pub use crate::blastinput::fasta_reader::{
 };
 pub use crate::blastinput::input_files::is_blank;
 
-/// The options of `program`'s command line that a search of records does not take: the PSSM
-/// files (psiblast's, and tblastn's `-in_pssm`, the query as a PSSM file) and the search strategy
-/// file. The library API refuses
+/// The options of `program`'s command line that a search of records does not take: tblastn's
+/// `-in_pssm` (the query as a PSSM file) and the search strategy file. The library API refuses
 /// them and its `describe` leaves them out (`api::search::file_options`, the one list); the
 /// browser refuses `-in_pssm` (`tblastn::check_options`, until line PS's PSW1), and the adapter's
 /// `describe` leaves them out.

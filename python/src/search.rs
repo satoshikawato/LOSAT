@@ -123,6 +123,17 @@ fn stats_rows(stats: &[Option<api::QueryStats>]) -> Vec<Option<StatsRow>> {
         .collect()
 }
 
+/// The rounds of a query, as `QueryRounds` of `_api.py` takes them: each round's statistics and
+/// whether the rounds converged.
+type RoundsRow = (Vec<Option<StatsRow>>, bool);
+
+fn rounds_rows(rounds: &[api::QueryRounds]) -> Vec<RoundsRow> {
+    rounds
+        .iter()
+        .map(|rounds| (stats_rows(&rounds.stats), rounds.converged))
+        .collect()
+}
+
 /// The text of what the command line writes to its standard error.
 fn diagnostics_text(diagnostics: &[u8]) -> String {
     String::from_utf8_lossy(diagnostics).into_owned()
@@ -141,7 +152,7 @@ fn slices<'py>(
     PyList::new(py, slices)
 }
 
-/// `(reports, hsps, query stats, diagnostics)` of a search, which `_api.py` turns into an
+/// `(reports, hsps, query stats, rounds, diagnostics)` of a search, which `_api.py` turns into an
 /// `Outcome`. The reports need one call of the engine (`run_collect`). Without reports the
 /// search runs one query batch at a time, which gives the same records (`run_batches`), and a
 /// signal stops it between two batches.
@@ -184,6 +195,7 @@ pub fn run<'py>(
         reports,
         HspTable::new(table),
         stats_rows(&outcome.query_stats),
+        rounds_rows(&outcome.rounds),
         diagnostics_text(&outcome.diagnostics),
     )
         .into_pyobject(py)
@@ -299,6 +311,7 @@ fn run_typed<'py>(py: Python<'py>, loaded: &Loaded) -> PyResult<Bound<'py, PyTup
     let mut batches = api::run_batches(&loaded.search, loaded.inputs()).map_err(exception)?;
     let mut hsps: Vec<HspRecord> = Vec::new();
     let mut stats = Vec::new();
+    let mut rounds = Vec::new();
     let mut diagnostics = Vec::new();
     loop {
         py.check_signals()?;
@@ -308,6 +321,7 @@ fn run_typed<'py>(py: Python<'py>, loaded: &Loaded) -> PyResult<Bound<'py, PyTup
         let mut batch = batch.map_err(exception)?;
         hsps.append(&mut batch.hsps);
         stats.append(&mut batch.query_stats);
+        rounds.append(&mut batch.rounds);
         diagnostics.append(&mut batch.diagnostics);
     }
     let table = py.detach(|| of_records(&hsps));
@@ -316,6 +330,7 @@ fn run_typed<'py>(py: Python<'py>, loaded: &Loaded) -> PyResult<Bound<'py, PyTup
         reports,
         HspTable::new(table),
         stats_rows(&stats),
+        rounds_rows(&rounds),
         diagnostics_text(&diagnostics),
     )
         .into_pyobject(py)
@@ -334,8 +349,15 @@ self_cell!(
     }
 );
 
-/// `(first query, end of the queries, hsps, query stats, diagnostics)` of a batch.
-type BatchRow = (usize, usize, RecordBatch, Vec<Option<StatsRow>>, String);
+/// `(first query, end of the queries, hsps, query stats, rounds, diagnostics)` of a batch.
+type BatchRow = (
+    usize,
+    usize,
+    RecordBatch,
+    Vec<Option<StatsRow>>,
+    Vec<RoundsRow>,
+    String,
+);
 
 /// The search of one query batch at a time. Each `next` searches a batch with the GIL released;
 /// dropping the object stops the search, and a signal stops it before the next batch.
@@ -392,8 +414,8 @@ impl Batches {
             .transpose()
             .map_err(exception)?;
         batch
-            .map(|(start, end, table, stats, diagnostics)| {
-                (start, end, HspTable::new(table), stats, diagnostics).into_pyobject(py)
+            .map(|(start, end, table, stats, rounds, diagnostics)| {
+                (start, end, HspTable::new(table), stats, rounds, diagnostics).into_pyobject(py)
             })
             .transpose()
     }
@@ -405,6 +427,7 @@ fn batch_row(batch: api::Batch) -> BatchRow {
         batch.query_indices.end,
         of_records(&batch.hsps),
         stats_rows(&batch.query_stats),
+        rounds_rows(&batch.rounds),
         diagnostics_text(&batch.diagnostics),
     )
 }

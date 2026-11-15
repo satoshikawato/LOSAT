@@ -235,7 +235,7 @@ blastn.db.dbmask.soft11	blastn	-	-query tests/db_search/dbmask/q1.fna -db tests/
 blastn.db.dbmask.key	blastn	-	-query tests/db_search/dbmask/q1.fna -db tests/db_search/dbmask/k5 -db_soft_mask mydust -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 blastn.db.dbmask.name	blastn	-	-query tests/db_search/dbmask/q1.fna -db tests/db_search/dbmask/a5 -db_soft_mask dust -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 blastn.db.dbmask.f11	blastn	-	-query tests/db_search/dbmask/q1.fna -db tests/db_search/dbmask/a5 -db_soft_mask +11 -outfmt 11 -export_search_strategy {ss}	ncbi	0	-	-
-blastn.db.dbmask.hard	blastn	-	-query tests/db_search/dbmask/q1.fna -db tests/db_search/dbmask/k5 -db_hard_mask mydust -outfmt 6 -export_search_strategy {ss}	refuse	1	-	-db_hard_mask (hard masking of the database sequences) is not supported by LOSAT's BLASTN
+blastn.db.dbmask.hard	blastn	-	-query tests/db_search/dbmask/q1.fna -db tests/db_search/dbmask/zh_k5 -db_hard_mask mydust -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 blastn.db.dbmask.name.cafe	blastn	-	-query tests/db_search/dbmask/q1.fna -db tests/db_search/dbmask/a5 -db_soft_mask café -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 blastn.db.dbmask.name.cafe.f11	blastn	-	-query tests/db_search/dbmask/q1.fna -db tests/db_search/dbmask/a5 -db_soft_mask café -outfmt 11 -export_search_strategy {ss}	ncbi	0	-	-
 blastn.sub.lcase.qloc.minus	blastn	-	-query tests/fasta/outfmt11/arch_lcout.fna -subject tests/fasta/outfmt11/arch_s.fna -lcase_masking -query_loc 10-100 -strand minus -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
@@ -358,6 +358,7 @@ rpsblast.q40.ssp	rpsblast	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/q40.faa 
 rpsblast.q40.opts	rpsblast	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/q40.faa -db rps_mini -evalue 1e-2 -seg yes -soft_masking true -xdrop_ungap 10 -xdrop_gap 20 -xdrop_gap_final 30 -window_size 30 -max_hsps 2 -max_target_seqs 3 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 rpsblast.q40.mt1	rpsblast	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/q40.faa -db rps_mini -mt_mode 1 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 rpsblast.mask.lcm	rpsblast	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/mask.faa -db rps_mini -lcase_masking -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+rpsblast.mask.sw	rpsblast	BLASTDB={rps:rps_mini}	-query tests/fasta/rps/mask.faa -db rps_mini -use_sw_tback -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 rpsblast.allx.b10	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=10	-query tests/fasta/strategy/rps_allx_tk.faa -db rps_mini -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 rpsblast.nofreq	rpsblast	BLASTDB={rps:rps_mini-freq}	-query tests/fasta/rps/q40.faa -db rps_mini -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 rpsblast.noaux	rpsblast	BLASTDB={rps:rps_mini-aux}	-query tests/fasta/rps/q40.faa -db rps_mini -outfmt 6 -export_search_strategy {ss}	ncbi	3	-	-

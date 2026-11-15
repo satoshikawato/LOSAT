@@ -16,6 +16,9 @@
 # - auto-merge.yml turns on auto-merge for these pull requests as for every other one (Owner
 #   2026-11-05): a cargo pull request merges once the web/adapter commit above makes web.yml pass.
 # - cooldown: a release is considered 7 days after it was published.
+# - minimatch: web/package.json `overrides` pins minimatch 11.0.5 for every copy in the npm lock
+#   (GHSA-g3hv-75wg-m249; package.json cannot hold a comment). @typescript-eslint/typescript-estree
+#   (via typescript-eslint 8.72.1) still requires ^10. Remove the override once it accepts minimatch 11.
 version: 2
 updates:
   - package-ecosystem: cargo

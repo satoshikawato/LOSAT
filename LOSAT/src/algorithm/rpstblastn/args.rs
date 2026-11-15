@@ -225,6 +225,9 @@ impl RpstblastnArgs {
                 x_drop_gapped_bits: self.xdrop_gap,
                 x_drop_final_bits: self.xdrop_gap_final,
                 sum_stats: self.sum_stats == Some(true),
+                // rpstblastn's `-use_sw_tback` with composition-based statistics is refused
+                // (`TranslatedRpsSearch::check_options`); without them NCBI does not read it.
+                use_sw_tback: false,
             },
             ungapped: self.ungapped,
             use_sw_tback: self.use_sw_tback,

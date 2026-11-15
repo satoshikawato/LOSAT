@@ -1124,7 +1124,12 @@ struct PreparedLookupQuery {
 // ...
 // tail = BlastSeqLocNew((tail ? &tail : complement_mask), left, right);
 // ```
-fn build_lookup_segments_for_context(
+/// The lookup segments of one protein context at `query_offset` of `query_length` letters whose
+/// filtering locations are `seg_masks` (half-open, letter offsets of the context): NCBI's
+/// complement of the masks, as inclusive ranges, without the empty intervals NCBI makes where a
+/// mask reaches an end (no word lies in them). Blastp's query preparation and the lookup table of
+/// tblastn's PSSM query (`tblastn::in_pssm::lookup_table`) take it.
+pub(crate) fn build_lookup_segments_for_context(
     query_offset: i32,
     query_length: usize,
     seg_masks: &[(usize, usize)],
@@ -3078,6 +3083,35 @@ mod tests {
     use crate::config::ScoringMatrix;
     use crate::stats::lookup_protein_params_ungapped;
     use crate::utils::matrix::{blosum62_score, ncbistdaa, BLASTAA_SIZE};
+
+    // NCBI blast_filter.c:1032-1114: the complement of the masks of one context, without the
+    // empty intervals at the ends.
+    #[test]
+    fn lookup_segments_are_the_complement_of_the_masks() {
+        assert_eq!(build_lookup_segments_for_context(0, 10, &[]), vec![(0, 9)]);
+        assert_eq!(
+            build_lookup_segments_for_context(0, 10, &[(2, 4)]),
+            vec![(0, 1), (4, 9)]
+        );
+        assert_eq!(
+            build_lookup_segments_for_context(0, 10, &[(0, 3)]),
+            vec![(3, 9)]
+        );
+        assert_eq!(
+            build_lookup_segments_for_context(0, 10, &[(6, 10)]),
+            vec![(0, 5)]
+        );
+        assert_eq!(
+            build_lookup_segments_for_context(0, 12, &[(0, 2), (5, 7), (9, 12)]),
+            vec![(2, 4), (7, 8)]
+        );
+        assert_eq!(
+            build_lookup_segments_for_context(4, 10, &[(2, 4)]),
+            vec![(4, 5), (8, 13)]
+        );
+        assert!(build_lookup_segments_for_context(0, 5, &[(0, 5)]).is_empty());
+        assert!(build_lookup_segments_for_context(0, 0, &[]).is_empty());
+    }
 
     // No NCBI counterpart (LOSAT_X_BPDBKEEP): the unthresholded arena cuts its slabs and long chains
     // from one region while it has room (one region per 32 MiB on 64-bit glibc, else one per

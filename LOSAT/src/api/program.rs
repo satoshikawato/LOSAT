@@ -31,8 +31,9 @@ pub enum Program {
     Tblastn,
     /// Translated nucleotide query against translated nucleotide subjects.
     Tblastx,
-    /// Protein query against protein subjects: LOSAT runs psiblast's first round, which searches
-    /// each query with blastp's engine, before any PSSM exists.
+    /// Protein query against protein subjects: psiblast's rounds (`-num_iterations`), round 1
+    /// the search of each query with blastp's engine before any PSSM exists, each later round
+    /// the search of the PSSM made from the round before.
     Psiblast,
 }
 
@@ -105,7 +106,7 @@ impl Program {
         use crate::blastinput::app::Program as Engine;
         match self {
             Program::Blastn => Engine::Blastn,
-            // psiblast's first round is blastp's search (`algorithm::psiblast`).
+            // psiblast's rounds run on blastp's engine (`algorithm::psiblast`).
             Program::Blastp | Program::Psiblast => Engine::Blastp,
             Program::Blastx => Engine::Blastx,
             Program::Tblastn => Engine::Tblastn,

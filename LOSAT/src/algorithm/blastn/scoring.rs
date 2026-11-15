@@ -332,11 +332,11 @@ pub fn check_greedy_gap_costs(args: &BlastnArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// NCBI reference: c++/include/algo/blast/core/blast_hits.h:192
-/// ```c
-/// #define DBSEQ_CHUNK_OVERLAP 100
-/// ```
-const DBSEQ_CHUNK_OVERLAP: usize = 100;
+// NCBI reference: c++/include/algo/blast/core/blast_hits.h:192
+// ```c
+// #define DBSEQ_CHUNK_OVERLAP 100
+// ```
+use crate::core::subject_split::DBSEQ_CHUNK_OVERLAP;
 
 /// The largest gap cost that LOSAT's BLASTN accepts with greedy extension.
 const MAX_GREEDY_GAP_COST: i32 = 32767;

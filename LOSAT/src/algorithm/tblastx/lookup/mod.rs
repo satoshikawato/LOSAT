@@ -22,6 +22,8 @@ pub mod compressed;
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 pub(crate) use backbone::x_prepare_blosum62_lookup_query_in_pool;
+// The complement of a protein context's masks (blastp's query preparation; tblastn's PSSM table).
+pub(crate) use backbone::build_lookup_segments_for_context;
 // TBLASTN's query set setup on the batch's pool (`tblastn/stage_d_pipeline.rs`); no NCBI
 // counterpart for the re-export itself.
 #[cfg(all(

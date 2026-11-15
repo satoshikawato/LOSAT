@@ -364,13 +364,39 @@ fn cell(
     *new_score = score;
 }
 
-/// The larger of `a` and `b`, as a select marked unpredictable (`select_unpredictable`): the
-/// cell's maxima depend on the scores, so a branch for them is mispredicted about every other
-/// cell, and the mark keeps LLVM's x86 back end from turning them into branches (TRIAL, PS11c-3
-/// fix round 2).
+/// The larger of `a` and `b` by a conditional move on x86-64. The cell's maxima depend on the
+/// scores, so a branch for them is mispredicted about every other cell, and LLVM's x86 back end
+/// turns some of them into branches in this loop whatever the source's form: `max` and `if`
+/// (the review's build took 1.1 to 1.9 times NCBI's time, PS11c-3 review S5), and also
+/// `core::hint::select_unpredictable(a < b, b, a)`, built from which the gap along the row and
+/// the maximum with 0 still became `jg` and `jle`, and the scans took 2.6 to 3.6 times as long
+/// as with this `asm!` (PS11c-3 fix round 2, ws, 3 rounds: q40 x rps_mini `-evalue 1000` 18.7 s
+/// against 7.0 s, NCBI 23.2 s; rpstest_le 67.7 s against 18.9 s, NCBI 24.7 s; WSSV x prof_rps
+/// 21.5 s against 6.3 s, NCBI 6.5 s). NCBI's build keeps conditional moves and `pmaxsd`. Other
+/// targets take `max`. The value is `max(a, b)` on every target.
 #[inline(always)]
 fn cmov_max(a: i32, b: i32) -> i32 {
-    core::hint::select_unpredictable(a < b, b, a)
+    #[cfg(target_arch = "x86_64")]
+    {
+        let mut larger = a;
+        // SAFETY: two instructions on the two registers given (`cmp`, then `cmovl`: `larger`
+        // takes `b` where `larger < b`, signed); no memory or stack is touched, and the flags
+        // that `cmp` sets are clobbered as `asm!` assumes by default.
+        unsafe {
+            core::arch::asm!(
+                "cmp {larger:e}, {b:e}",
+                "cmovl {larger:e}, {b:e}",
+                larger = inout(reg) larger,
+                b = in(reg) b,
+                options(pure, nomem, nostack),
+            );
+        }
+        larger
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        a.max(b)
+    }
 }
 
 /// The row's score of subject letter `letter`, or `None` (`COMPO_SCORE_MIN` in the cell) where

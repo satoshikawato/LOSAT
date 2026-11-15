@@ -585,22 +585,6 @@ impl RedoMatch<'_> {
         subject: &[u8],
     ) -> Option<(BlastpHspList, i32, f64)> {
         let alignments = self.redo_one_match(run, hsps, subject);
-        self.finish::<XDropRedo>(run, oid, hsps, subject, alignments)
-    }
-
-    /// The steps of a redo after its window's alignments `alignments` (the list's head first):
-    /// `s_HSPListFromDistinctAlignments`, `s_HitlistReapContained`, `s_HitlistEvaluateAndPurge`,
-    /// and for a list whose best e-value passes `-evalue`, `s_HSPListNormalizeScores` and
-    /// `s_ComputeNumIdentities` (quoted at `redo_match`), for the redo `C` (`RedoInstance`: the
-    /// X-drop redo's and the Smith-Waterman redo's instances, each with one caller).
-    pub(super) fn finish<C: RedoInstance>(
-        &self,
-        run: &RedoRun<'_>,
-        oid: u32,
-        hsps: &[BlastpPreliminaryHsp],
-        subject: &[u8],
-        alignments: Vec<Align>,
-    ) -> Option<(BlastpHspList, i32, f64)> {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:321-354
         // ```c
         //     for (align = *alignments;  NULL != align;  align = align->next) {
@@ -620,7 +604,7 @@ impl RedoMatch<'_> {
             .collect();
         redone.sort_by(|a, b| score_compare(&a.align, &b.align));
         if redone.len() > 1 {
-            reap_contained::<C>(&mut redone);
+            reap_contained::<XDropRedo>(&mut redone);
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:410-446
         // ```c
@@ -649,7 +633,7 @@ impl RedoMatch<'_> {
         let query_length = self.query_length;
         let subject_length = subject.len() as i32;
         let best_evalue = match &self.link {
-            Some(link) => link_redone::<C>(&mut redone, link, run, subject_length)?,
+            Some(link) => link_redone(&mut redone, link, run, subject_length)?,
             None => {
                 let mut best_evalue = i32::MAX as f64;
                 for hsp in &mut redone {
@@ -1073,7 +1057,7 @@ impl RedoMatch<'_> {
 ///             hsp_list->best_evalue = hsp_list->hsp_array[index]->evalue;
 ///     }
 /// ```
-fn link_redone<C: RedoInstance>(
+fn link_redone(
     redone: &mut Vec<Redone>,
     link: &RedoLink,
     run: &RedoRun<'_>,

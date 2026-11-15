@@ -165,6 +165,33 @@ fn several_hsps_give_several_alignments() {
     assert_eq!(heap.n, 0);
 }
 
+// `evaluate` is a copy of `redo_match`'s steps after the window (DECISIONS 63 of line PS): the X-drop
+// redo's alignments through it give `redo_match`'s list.
+#[test]
+fn the_evaluation_is_the_x_drop_redos() {
+    let consensus = encode(PROFILE);
+    let info = info_of(&consensus);
+    let subject = two_copies();
+    let n = consensus.len() as i32;
+    for hsps in [
+        vec![
+            hsp((0, n), (10, 10 + n), 300),
+            hsp((0, n), (n + 24, 2 * n + 24), 250),
+        ],
+        vec![hsp((0, n), (n + 24, 2 * n + 24), 250)],
+        vec![hsp((0, 30), (10, 40), 90), hsp((20, n), (30, 10 + n), 120)],
+    ] {
+        for (search_space, expect) in [(20_000, 10.0), (20_000, 1e-60), (1_000_000_000_000, 10.0)] {
+            let matching = redo_match(&info, consensus.len(), search_space, expect);
+            let mut run = run_of(&consensus);
+            let alignments = matching.redo_one_match(&mut run, &hsps, &subject);
+            let copied = matching.evaluate(&run, 7, &hsps, &subject, alignments);
+            let original = matching.redo_match(&mut run_of(&consensus), 7, &hsps, &subject);
+            assert_eq!(format!("{copied:?}"), format!("{original:?}"));
+        }
+    }
+}
+
 // One preliminary HSP: the redo stops after its first alignment (`window->hspcnt > 1`).
 #[test]
 fn one_hsp_gives_one_alignment() {

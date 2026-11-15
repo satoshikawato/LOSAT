@@ -293,24 +293,33 @@ fn cell(
     new_gap_cost: i32,
     gap_extend: i32,
 ) {
-    // NCBI's `if (a > b) b = a` and `if (s < t) s = t` are the maxima of integers: written as
-    // `max`, which the compiler keeps free of branches (the scores make the comparisons
-    // unpredictable).
-    *prev_score_gap_match_seq =
-        (*prev_score_gap_match_seq - gap_extend).max(*new_score - new_gap_cost);
-    let continue_gap_score = (column.gap_exists - gap_extend).max(column.no_gap - new_gap_cost);
+    // NCBI's `if (a > b) b = a` and `if (s < t) s = t` are the maxima of integers, chosen without
+    // a branch (`max_unpredictable`): the scores make the comparisons unpredictable.
+    *prev_score_gap_match_seq = max_unpredictable(
+        *prev_score_gap_match_seq - gap_extend,
+        *new_score - new_gap_cost,
+    );
+    let continue_gap_score =
+        max_unpredictable(column.gap_exists - gap_extend, column.no_gap - new_gap_cost);
     let diagonal = match substitution {
         None => COMPO_SCORE_MIN,
         Some(substitution) => *prev_score_no_gap_match_seq + substitution,
     };
-    let score = diagonal
-        .max(0)
-        .max(*prev_score_gap_match_seq)
-        .max(continue_gap_score);
+    let score = max_unpredictable(
+        max_unpredictable(max_unpredictable(diagonal, 0), *prev_score_gap_match_seq),
+        continue_gap_score,
+    );
     *prev_score_no_gap_match_seq = column.no_gap;
     column.no_gap = score;
     column.gap_exists = continue_gap_score;
     *new_score = score;
+}
+
+/// The larger of `a` and `b`, selected without a branch (`select_unpredictable`: the compiler keeps
+/// a conditional move where it would guess a branch).
+#[inline(always)]
+fn max_unpredictable(a: i32, b: i32) -> i32 {
+    std::hint::select_unpredictable(a < b, b, a)
 }
 
 /// Whether a range of `ranges` (the forbidden ranges of one query position) holds subject position

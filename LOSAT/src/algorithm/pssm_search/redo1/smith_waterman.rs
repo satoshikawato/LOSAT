@@ -33,15 +33,19 @@
 //!                                         &LambdaRatio
 //!                                 );
 //! ```
-//! The steps after it are the X-drop redo's (`RedoMatch::finish`, blast_kappa.c:3654-3707 quoted
-//! at `RedoMatch::redo_match`). The steps the two redos share run as this redo's instance
+//! The steps after it are the X-drop redo's (blast_kappa.c:3654-3707, quoted at
+//! `RedoMatch::redo_match`). The functions the two redos share run as this redo's instance
 //! (`compo_scale::SwRedo`), so that the X-drop redo's instance keeps one caller and psiblast's
-//! machine code (DECISIONS 11 and 63 of line PS).
+//! machine code (DECISIONS 11 and 63 of line PS); the evaluation is a copy (`evaluate`).
 
-use super::{preliminary_test_near_identical, Align, RedoMatch, RedoRun, SCALING_FACTOR};
+use super::{
+    blast_nint, preliminary_test_near_identical, reap_contained, score_compare, Align, RedoMatch,
+    RedoRun, Redone, SCALING_FACTOR,
+};
 use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
 use crate::algorithm::blastp::hsp::{BlastCompoHeap, BlastpHspList};
 use crate::algorithm::pssm_search::gapalign::pssm_sw_xdrop_traceback;
+use crate::algorithm::pssm_search::traceback0::final_hsp;
 use crate::core::composition_adjustment::adjust_scores::read_aa_composition;
 use crate::core::composition_adjustment::compo_scale::{pssm_composition_based_stats, SwRedo};
 use crate::core::composition_adjustment::redo_alignment::EMatrixAdjustRule;
@@ -129,7 +133,7 @@ impl RedoMatch<'_> {
         else {
             return Ok(None);
         };
-        Ok(self.finish::<SwRedo>(run, oid, hsps, subject, alignments))
+        Ok(self.evaluate(run, oid, hsps, subject, alignments))
     }
 
     /// `Blast_RedoOneMatchSmithWaterman` for the one window of a protein query and subject (the
@@ -533,6 +537,97 @@ impl RedoMatch<'_> {
         }
         alignments.reverse();
         Ok(Some(alignments))
+    }
+
+    /// The steps of the redo after the window's alignments: `s_HSPListFromDistinctAlignments`,
+    /// `s_HitlistReapContained`, `s_HitlistEvaluateAndPurge` and, for a list whose best e-value
+    /// passes `-evalue`, `s_HSPListNormalizeScores` and `s_ComputeNumIdentities`; `RedoMatch::
+    /// redo_match`'s without sum statistics (its quotes give NCBI's lines). These lines are a copy
+    /// of `redo_match`'s, which keeps them in its body (moved into a function shared by both redos
+    /// they changed psiblast's machine code; line PS `DECISIONS.md` 63); the test
+    /// `the_evaluation_is_the_x_drop_redos` holds the two together.
+    fn evaluate(
+        &self,
+        run: &RedoRun<'_>,
+        oid: u32,
+        hsps: &[BlastpPreliminaryHsp],
+        subject: &[u8],
+        alignments: Vec<Align>,
+    ) -> Option<(BlastpHspList, i32, f64)> {
+        let mut redone: Vec<Redone> = alignments
+            .into_iter()
+            .map(|align| Redone {
+                align,
+                e_value: 0.0,
+                num: 1,
+            })
+            .collect();
+        redone.sort_by(|a, b| score_compare(&a.align, &b.align));
+        if redone.len() > 1 {
+            reap_contained::<SwRedo>(&mut redone);
+        }
+        let subject_length = subject.len() as i32;
+        let (m, n) = if self.rps_roles {
+            (subject_length, self.query_length)
+        } else {
+            (self.query_length, subject_length)
+        };
+        let mut best_evalue = i32::MAX as f64;
+        for hsp in &mut redone {
+            hsp.e_value = self.stats.e_value(hsp.align.score, &run.karlin, m, n);
+            best_evalue = best_evalue.min(hsp.e_value);
+        }
+        redone.retain(|hsp| hsp.e_value <= self.expect_value);
+        let first = redone.first()?;
+        let best_score = first.align.score;
+        let template = &hsps[0];
+        let mut hsp_list = BlastpHspList {
+            oid,
+            query_index: template.q_idx,
+            hsps: Vec::with_capacity(redone.len()),
+            best_evalue,
+        };
+        for Redone {
+            align,
+            e_value,
+            num,
+        } in redone
+        {
+            let score = blast_nint(align.score as f64 / SCALING_FACTOR);
+            let traced = BlastpPreliminaryHsp {
+                query_start: align.query_start,
+                query_end: align.query_end,
+                subject_start: align.match_start,
+                subject_end: align.match_end,
+                gapped_query_start: align.query_start,
+                gapped_subject_start: align.match_start,
+                raw_score: score,
+                query_context: template.q_idx as i32,
+                query_frame: template.query_frame,
+                subject_frame: 0,
+                query_length: template.query_length,
+                q_idx: template.q_idx,
+                s_idx: template.s_idx,
+            };
+            let mut hsp = final_hsp(
+                &traced,
+                align.edit_script,
+                run.query_nomask,
+                subject,
+                self.matrix,
+            );
+            hsp.e_value = e_value;
+            hsp.num = num;
+            hsp.bit_score = (score as f64 * run.karlin.lambda * SCALING_FACTOR - run.log_k)
+                / std::f64::consts::LN_2;
+            hsp.comp_adjustment_method = match align.rule {
+                EMatrixAdjustRule::DontAdjustMatrix => 0,
+                EMatrixAdjustRule::CompoScaleOldMatrix => 1,
+                _ => 2,
+            };
+            hsp_list.hsps.push(hsp);
+        }
+        Some((hsp_list, best_score, best_evalue))
     }
 }
 

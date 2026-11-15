@@ -5254,11 +5254,176 @@ fn stopping_subject<'s>(
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3346-3366
+// ```c++
+// CScope_Impl::TBioseqHandles CScope_Impl::GetBioseqHandles(const TIds& ids)
+// {
+//     CSortedSeq_ids sorted_seq_ids(ids);
+//     TIds sorted_ids;
+//     sorted_seq_ids.GetSortedIds(sorted_ids);
+//
+//     TBioseqHandles ret;
+//     size_t count = sorted_ids.size();
+//     ret.resize(count);
+//     if ( count > 200 ) {
+//         // split batch into smaller pieces to avoid problems with GC
+//         for ( size_t pos = 0; pos < count; ) {
+//             size_t cnt = count - pos;
+//             if ( cnt > 150 ) cnt = 100;
+//             x_GetBioseqHandlesSorted(sorted_ids, pos, cnt, ret);
+//             pos += cnt;
+//         }
+//     }
+//     else {
+//         x_GetBioseqHandlesSorted(sorted_ids, 0, count, ret);
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:2014-2026
+// ```c++
+//         ITERATE(TSeqMatchMap, match, match_map) {
+//             _ASSERT( !match->second );
+//             current_tse_sets.insert(
+//                 CDataLoader::TTSE_LockSets::value_type(
+//                 match->first, CDataLoader::TTSE_LockSet()));
+//             if ( ++current_tse_sets_size >= limit_blobs_request ) {
+//                 s_GetBlobs(m_Loader, tse_sets, current_tse_sets);
+//                 current_tse_sets_size = 0;
+//             }
+//         }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:389-396
+// ```c++
+//     CConstRef<CSeq_id> seqid = idh.GetSeqId();
+//
+//     int oid = -1;
+//
+//     if (! m_BlastDb->SeqidToOid(*seqid, oid)) {
+//         _TRACE("FAILED to find '" << seqid->AsFastaString() << "'");
+//         return -1;
+//     }
+// ```
+// The prefetch's `GetBioseqHandles` (`LoadSequencesToScope`, quoted at `check_prefetched_parsed`)
+// loads the distinct Seq-align ids of a batch of at most 200 of them in one map of Seq-id handles
+// (`x_GetBioseqHandlesSorted`, scope_impl.cpp:3280-3299; `CDataLoader::GetBlobs`, quoted above
+// `PrefetchSubject`): by `m_Packed - 1` as an unsigned number (`seqid::mask_handle`), then by the
+// address of the handle's info. Each load asks the BLAST database for the id's OID first, so the
+// first id in that order whose lookup fails with NCBI's exception ends the loads, and the loads
+// before it have written their texts (probe of line DBID loadord, `R/loadord/logs/probe.tsv`:
+// `gnl|BL_ORD_ID|1` and `|2` load before `ref|NP_000003.1|`, `|4` to `|7` never, `|3` either way from
+// run to run; every packed id before `pdb|1ABC|A`, `sp|P00007.1|NAME_X` and `lcl|abc`). More ids
+// are sorted by `CSeq_id::CompareOrdered` first and loaded in pieces of 100 (the probe's 201 ids:
+// the first 100 `gnl|BL_ORD_ID|n` before `dbj|AB000001.1|`, which the 200 load after it), an
+// order that LOSAT does not model.
+/// Whether NCBI's prefetch of a batch that stops ([`prefetch_stop`]) loads one of the batch's
+/// other subjects before the first lookup that stops it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LoadBeforeStop {
+    Yes,
+    No,
+    /// LOSAT does not know, with the reason.
+    Unknown(&'static str),
+}
+
+/// The most distinct Seq-align ids that NCBI's prefetch loads in one map of Seq-id handles
+/// (`CScope_Impl::GetBioseqHandles`, quoted at [`load_before_stop`]).
+const PREFETCH_ONE_MAP_IDS: usize = 200;
+
+/// The key of the Seq-id handle of the Seq-align id of `subject` in NCBI's map of a batch's loads:
+/// its position among handles of different `m_Packed` (`seqid::mask_handle::mask_handle_order`)
+/// and its identity (`mask_handle_key`; `None` where no pure function knows it: a new handle for
+/// each Seq-id, or a giim id). A sequence without parsed Seq-ids is `gnl|BL_ORD_ID|<OID>`.
+fn prefetch_load_key(db: &SeqDb, subject: &PrefetchSubject<'_>) -> (u64, Option<Vec<u8>>) {
+    use crate::seqid::mask_handle::{mask_handle_key, mask_handle_order, mask_handle_packed};
+    let ordinal_id;
+    let id = match subject.parsed {
+        Some(parsed) => parsed.alignment_id(),
+        None => {
+            ordinal_id = crate::seqid::ParsedSeqId::General(crate::seqid::model::Dbtag {
+                db: b"BL_ORD_ID".to_vec(),
+                tag: crate::seqid::model::ObjectId::Id(db.oid(subject.ordinal).get() as i32),
+            });
+            &ordinal_id
+        }
+    };
+    (
+        mask_handle_order(mask_handle_packed(id)),
+        mask_handle_key(id).ok().flatten(),
+    )
+}
+
+/// [`LoadBeforeStop`] of each of `subjects` (a stopping batch's reported sequences, in any order,
+/// a sequence possibly more than once) in NCBI's order of the loads (quoted above
+/// [`LoadBeforeStop`]): `No` for the subjects whose lookups stop it
+/// (`ParsedSubject::prefetch_stops`), which load nothing; for the others, by their handle's place
+/// to the first of those. Unknown: a handle with the same `m_Packed` as that one (both unpacked
+/// included), whose order is its info's address; a Seq-align id that another subject has too; and
+/// every subject of a batch of more than [`PREFETCH_ONE_MAP_IDS`] distinct Seq-align ids.
+fn load_before_stop(db: &SeqDb, subjects: &[PrefetchSubject<'_>]) -> Vec<LoadBeforeStop> {
+    let stops = |subject: &PrefetchSubject<'_>| {
+        subject
+            .parsed
+            .is_some_and(|parsed| parsed.prefetch_stops().is_some())
+    };
+    let keys: Vec<(u64, Option<Vec<u8>>)> = subjects
+        .iter()
+        .map(|subject| prefetch_load_key(db, subject))
+        .collect();
+    let mut ordinals = std::collections::HashSet::new();
+    let mut handles: std::collections::HashMap<&[u8], u32> = Default::default();
+    let mut shared = std::collections::HashSet::new();
+    let mut ids = 0;
+    for (subject, (_, handle)) in subjects.iter().zip(&keys) {
+        if !ordinals.insert(subject.ordinal) {
+            continue;
+        }
+        match handle {
+            Some(handle) => match handles.entry(handle) {
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(subject.ordinal);
+                    ids += 1;
+                }
+                std::collections::hash_map::Entry::Occupied(entry) => {
+                    shared.insert(*entry.get());
+                    shared.insert(subject.ordinal);
+                }
+            },
+            None => ids += 1,
+        }
+    }
+    let first_stop = subjects
+        .iter()
+        .zip(&keys)
+        .filter(|(subject, _)| stops(subject))
+        .map(|(_, (order, _))| *order)
+        .min()
+        .expect("a stopping batch has a stopping subject");
+    subjects
+        .iter()
+        .zip(&keys)
+        .map(|(subject, (order, _))| {
+            if stops(subject) {
+                LoadBeforeStop::No
+            } else if ids > PREFETCH_ONE_MAP_IDS {
+                LoadBeforeStop::Unknown("the batch has more than 200 Seq-align ids, which NCBI's prefetch loads in pieces of 100 in the order of CSeq_id::CompareOrdered")
+            } else if shared.contains(&subject.ordinal) {
+                LoadBeforeStop::Unknown("another subject of the batch has the same Seq-align id")
+            } else if *order < first_stop {
+                LoadBeforeStop::Yes
+            } else if *order > first_stop {
+                LoadBeforeStop::No
+            } else {
+                LoadBeforeStop::Unknown("its Seq-id handle has the same packed number as the stopping one's (or neither is packed), which NCBI orders by their address")
+            }
+        })
+        .collect()
+}
+
 /// The end of a batch's prefetch at the subject `stopping` (ordinal id, definition lines) whose
 /// lookup fails on a file with NCBI's exception ([`batch_prefetch`], [`batch_prefetch_stop`]),
-/// after the lookups that `run` records: the [`HeaderReadError`] of `query` with NCBI's `BLAST
-/// Database error`, or LOSAT's refusal where what NCBI writes before it depends on the order of
-/// the loads.
+/// after the lookups that `run` records: the [`HeaderReadError`] of `query` with the texts of
+/// the loads before the first stopping lookup in NCBI's order ([`load_before_stop`]) and NCBI's
+/// `BLAST Database error`, or LOSAT's refusal where what NCBI writes before it depends on an
+/// order that LOSAT does not know.
 fn prefetch_stop(
     db: &SeqDb,
     run: &TaxdbRun,
@@ -5281,40 +5446,63 @@ fn prefetch_stop(
             program,
         )
     };
-    if subjects
+    let before = load_before_stop(db, subjects);
+    if subjects.iter().zip(&before).any(|(subject, before)| {
+        *before != LoadBeforeStop::No
+            && subject.parsed.is_some_and(|parsed| parsed.prefetch_fails())
+    }) {
+        return refuse("another of them has an id whose lookup throws, which the prefetch catches and which ends its loads, and which may come before it");
+    }
+    // The loads before the stop, then those whose order LOSAT does not know. The bytes of a set of
+    // loads do not depend on their order ([`prefetch_messages`]: a text comes with the run's first
+    // open of the taxonomy database or where a lookup asks it, a volume's first lookup of a taxid,
+    // and the lookup of the offset error's taxid that misses its slot needs another taxid of the
+    // slot, which `TaxdbRun::cache_collision` refuses), so where those of unknown order write
+    // nothing after the others, no part of them writes anything before the stop.
+    let mut unknown = None;
+    let loads = subjects
         .iter()
-        .any(|subject| subject.parsed.is_some_and(|parsed| parsed.prefetch_fails()))
-    {
-        return refuse("another of them has an id whose lookup throws, which the prefetch catches and which ends its loads");
-    }
-    let others = subjects.iter().filter(|subject| {
-        subject
-            .parsed
-            .is_none_or(|parsed| parsed.prefetch_stops().is_none())
-    });
-    // A text of a load comes with the run's first open of the taxonomy database or where a lookup
-    // asks it (a volume's first lookup of a taxid, and a lookup of the offset error's taxid that
-    // misses its slot, which needs another taxid of the slot: `TaxdbRun::cache_collision` refuses
-    // such a run): where the other subjects' loads after `run`'s lookups write none, none of them
-    // writes one before the stop in any order, nor in any part of them.
-    let texts = prefetch_messages(
-        db,
-        run,
-        others.map(|subject| (subject.ordinal, subject.parsed)),
-        program,
-    );
-    match texts {
-        Ok(text) if text.is_empty() => anyhow::Error::new(HeaderReadError {
-            query,
-            error: NativeError {
-                exit: 2,
-                message: format!("BLAST Database error: {message}\n"),
+        .zip(&before)
+        .filter(|(_, before)| **before == LoadBeforeStop::Yes)
+        .chain(
+            subjects
+                .iter()
+                .zip(&before)
+                .filter(|(_, before)| matches!(before, LoadBeforeStop::Unknown(_))),
+        )
+        .map(|(subject, before)| {
+            let why = match before {
+                LoadBeforeStop::Unknown(why) => Some(*why),
+                _ => None,
+            };
+            (why, subject.ordinal, subject.parsed)
+        });
+    let reads = match subject_read_texts(db, run, loads, false, program) {
+        Ok(reads) => reads,
+        Err(error) => return error,
+    };
+    let mut text = String::new();
+    for (why, read) in reads {
+        match why {
+            Some(why) => {
+                unknown.get_or_insert(why);
             }
-            .into(),
-        }),
-        Ok(_) => refuse("their loads make the taxonomy database write a text"),
-        Err(error) => error,
+            None => text.push_str(&String::from_utf8_lossy(&read)),
+        }
     }
+    if let Some(why) = unknown {
+        return refuse(&format!(
+            "the load of one of them, whose order to it is not known ({why}), makes the taxonomy database write a text"
+        ));
+    }
+    anyhow::Error::new(HeaderReadError {
+        query,
+        error: NativeError {
+            exit: 2,
+            message: format!("{text}BLAST Database error: {message}\n"),
+        }
+        .into(),
+    })
 }
 
 /// The volume of `db` that holds the taxid `last` and another positive taxid of the same slot of
@@ -6703,10 +6891,11 @@ mod taxdb_prepass_tests {
             // A sequence of tfu_n (the last volume by name): its load looks its taxid up.
             let other = db.num_seqs() - 1;
             assert!(parsed[other as usize].is_none());
-            let opens = !prefetch_messages(&db, &TaxdbRun::default(), [(other, None)], "BLASTN")
-                .unwrap()
-                .is_empty();
-            assert_eq!(opens, taxdb.is_some());
+            let open = String::from_utf8(
+                prefetch_messages(&db, &TaxdbRun::default(), [(other, None)], "BLASTN").unwrap(),
+            )
+            .unwrap();
+            assert_eq!(!open.is_empty(), taxdb.is_some());
             let both = || [subject(stop, &parsed[stop as usize]), subject(other, &None)];
             // The stopping subject alone: NCBI's error, of the batch's first query.
             let run = TaxdbRun::default();
@@ -6719,8 +6908,15 @@ mod taxdb_prepass_tests {
                 stopped(batch_prefetch_stop(&db, &run, alone, "BLASTN", 3)),
                 (3, error.clone())
             );
-            // With another subject whose load writes the texts of opening the taxonomy database,
-            // before the stop or not as NCBI's order of the loads decides: refused.
+            // With another subject whose load writes the texts of opening the taxonomy database:
+            // its `gnl|BL_ORD_ID|n` (packed) loads before the stopping `lcl|` id (not packed) in
+            // NCBI's order, so its texts come before the error.
+            let stop_id = parsed[stop as usize].as_ref().unwrap().alignment_id();
+            assert_eq!(
+                crate::seqid::mask_handle::mask_handle_packed(stop_id),
+                0,
+                "{stop_id:?}"
+            );
             let run = TaxdbRun::default();
             match taxdb {
                 None => {
@@ -6745,21 +6941,14 @@ mod taxdb_prepass_tests {
                     );
                 }
                 Some(_) => {
-                    // Each in a run that has looked nothing up: a refused prefetch has recorded
+                    // Each in a run that has looked nothing up: a stopped prefetch has recorded
                     // its loads in its run.
-                    for refused in [
+                    for stop in [
                         batch_prefetch(&db, &TaxdbRun::default(), both(), "BLASTN", 0).map(drop),
                         batch_prefetch_stop(&db, &TaxdbRun::default(), both(), "BLASTN", 0),
                         held_batch_prefetch_stop(&db, std::iter::empty(), both(), "BLASTN", 0),
                     ] {
-                        let refused = refused.unwrap_err();
-                        assert!(!refused.is::<HeaderReadError>());
-                        assert!(
-                            refused
-                                .to_string()
-                                .contains("in an order that LOSAT does not reproduce"),
-                            "{refused}"
-                        );
+                        assert_eq!(stopped(stop), (0, format!("{open}{error}")));
                     }
                     // A batch after one whose prefetch opened it and looked the other subject up
                     // (the formats whose prefetch writes the texts, `batch_prefetch`): its load

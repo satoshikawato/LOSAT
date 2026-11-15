@@ -527,8 +527,9 @@ fn check_columns(context: &str, hsp: &HspRecord, row: &[u8]) {
         number(15),
         "{context}: score of {row}"
     );
-    // The reports cut these to a few digits (`report::tabular`).
-    let bits: f64 = fields[16].parse().unwrap();
+    // The reports cut these to a few digits (`report::tabular`); a bit score in (99.9, 100) is
+    // NCBI's ` 99` (`report::outfmt6::format_bitscore_ncbi`).
+    let bits: f64 = fields[16].trim_start().parse().unwrap();
     assert!(
         (hsp.bit_score - bits).abs() <= 1.0 + hsp.bit_score / 1000.0,
         "{context}: bitscore of {row}: {}",

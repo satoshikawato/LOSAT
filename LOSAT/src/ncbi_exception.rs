@@ -587,7 +587,10 @@ static MAIN_DIAG_FAILBIT: std::sync::atomic::AtomicBool = std::sync::atomic::Ato
 /// Whether the diagnostic stream of NCBI's main thread has failed (`ERR_POST_X(6, "Failed to parse
 /// location of " << s.rdbuf() ...)` of the object manager, `algorithm::pssm_search::annot_index`):
 /// the run's later posts print their header only (`post_line`) and `CATCH_ALL` its line feeds
-/// (`cli::catch_all_text`). False unless a psiblast or tblastn `-in_pssm` run posted it.
+/// (`cli::catch_all_text`). False unless a psiblast or tblastn `-in_pssm` run posted it. One flag
+/// for the process, as NCBI's is for its one run: only the command line reaches it (one run per
+/// process; the library API and LOSAT Web refuse `-in_pssm`, `api::search`), so no run finds it
+/// set by another.
 pub(crate) fn main_diag_failbit() -> bool {
     MAIN_DIAG_FAILBIT.load(std::sync::atomic::Ordering::Relaxed)
 }

@@ -758,7 +758,7 @@ impl TypedReader<'_> {
         let mut values = Vec::new();
         let mut block_start = true;
         while self.r.next_element(&mut block_start)? {
-            if let Value::Int(value) = self.integer(storage, skip)? {
+            if let Some(value) = self.integer_number(storage, skip)? {
                 values.push(store(value));
             }
         }
@@ -770,7 +770,7 @@ impl TypedReader<'_> {
         let mut values = Vec::new();
         let mut block_start = true;
         while self.r.next_element(&mut block_start)? {
-            if let Value::Real(value) = self.real(skip)? {
+            if let Some(value) = self.real_number(skip)? {
                 values.push(value);
             }
         }
@@ -906,9 +906,17 @@ impl TypedReader<'_> {
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1780-1808 (the skips of every size:
     // `SkipSNumber` for the signed ones, `SkipUNumber` for the unsigned ones)
     fn integer(&mut self, storage: Storage, skip: bool) -> R<Value> {
+        Ok(self
+            .integer_number(storage, skip)?
+            .map_or(Value::Null, Value::Int))
+    }
+
+    /// `integer`'s number (`None` when skipped), for the lists that keep the numbers (no `Value`
+    /// to make and drop for each element).
+    fn integer_number(&mut self, storage: Storage, skip: bool) -> R<Option<i64>> {
         if skip {
             self.skip_number(storage != Storage::Uint4)?;
-            return Ok(Value::Null);
+            return Ok(None);
         }
         let value = match storage {
             Storage::Int4 => i64::from(self.int4()?),
@@ -922,7 +930,7 @@ impl TypedReader<'_> {
                 i64::from(value)
             }
         };
-        Ok(Value::Int(value))
+        Ok(Some(value))
     }
 
     /// `SkipSNumber` (`signed`) and `SkipUNumber`: an optional sign (`+` only for the unsigned)
@@ -1084,10 +1092,15 @@ impl TypedReader<'_> {
     // }
     // ```
     fn real(&mut self, skip: bool) -> R<Value> {
+        Ok(self.real_number(skip)?.map_or(Value::Null, Value::Real))
+    }
+
+    /// `real`'s number (`None` when skipped), for the lists that keep the numbers.
+    fn real_number(&mut self, skip: bool) -> R<Option<f64>> {
         if skip {
             if self.r.skip_white_space()? != b'{' {
                 self.r.scan_end_of_id(true)?;
-                return Ok(Value::Null);
+                return Ok(None);
             }
             self.r.pos += 1;
             self.skip_number(true)?;
@@ -1101,10 +1114,10 @@ impl TypedReader<'_> {
                     "illegal REAL base (must be 2 or 10)".into(),
                 ));
             }
-            return Ok(Value::Null);
+            return Ok(None);
         }
         if let Some(word) = self.r.real_word()? {
-            return Ok(Value::Real(word));
+            return Ok(Some(word));
         }
         let (mantissa, is_negative) = self.r.real_mantissa()?;
         self.r.expect(b',')?;
@@ -1113,7 +1126,7 @@ impl TypedReader<'_> {
         let exp = self.int4()?;
         self.r.expect(b'}')?;
         real_of_parts(mantissa, is_negative, base, exp)
-            .map(Value::Real)
+            .map(Some)
             .ok_or_else(|| ReadError::Serial("illegal REAL base (must be 2 or 10)".into()))
     }
 

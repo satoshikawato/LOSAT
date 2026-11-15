@@ -6,5 +6,7 @@
   exception report (exit status 255); a byte outside the visible ASCII range is read as `#` with NCBI's message (the
   search goes on, as NCBI's), and so are the messages of a `Variation-ref`'s deprecated members. The members that
   LOSAT skipped are kept (line RG item D3-1).
-  A query whose `annot` holds data that NCBI's object manager indexes (feature tables, alignments, graphs,
-  locations, Seq-tables: NCBI posts messages naming memory addresses, or stops) is refused.
+  A query's `annot` (feature tables, alignments, graphs, locations, Seq-tables) is indexed as NCBI's object manager
+  indexes it: the PSSM is searched, with NCBI's messages and errors where NCBI writes them; the few cases whose
+  NCBI output names a memory address or depends on the machine are refused, each with its reason. A PSSM file that
+  starts with a UTF-8 byte order mark gets NCBI's "Unrecognized format for PSSM".

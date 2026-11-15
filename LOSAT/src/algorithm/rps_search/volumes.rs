@@ -214,6 +214,18 @@ impl RpsVolumeSetup {
         }
     }
 
+    /// The set-up that knows the volumes found not grouped by bucket (`regrouped`) by an earlier
+    /// set-up of the run.
+    pub(crate) fn with_regrouped(mut self, regrouped: std::collections::BTreeSet<String>) -> Self {
+        self.regrouped = regrouped;
+        self
+    }
+
+    /// The volumes whose cells `check` or `open` found not grouped by bucket and regrouped.
+    pub(crate) fn regrouped(&self) -> &std::collections::BTreeSet<String> {
+        &self.regrouped
+    }
+
     /// The files of `volume` (with its frequency ratios when `cbs`, composition-based
     /// statistics) after LOSAT's checks (`check`): `Ok(Err(error))` is NCBI's own error of the
     /// files, which the caller reports where NCBI's search raises it; `Err` is LOSAT's refusal.

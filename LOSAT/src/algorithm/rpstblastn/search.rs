@@ -76,6 +76,10 @@ pub(crate) struct TranslatedRpsSearch {
     /// the search strategy's requests (`handle_sets`); set by `for_database` of a run that writes
     /// one.
     pub(crate) costs: Option<(String, i32, i32)>,
+    /// The volumes (`canonical_volume_path`) whose cells `for_database` found not grouped by
+    /// bucket and regrouped (`RpsVolumeSetup::regrouped`; series PR, item PS12m): the run's set-up
+    /// regroups them again when it maps them for a batch.
+    pub(crate) regrouped: std::collections::BTreeSet<String>,
 }
 
 impl RpsTblastnSearch for TranslatedRpsSearch {
@@ -107,6 +111,7 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         Ok(Arc::new(Self {
             several_volumes: volumes.order.len() > 1,
             costs: strategy.then(|| setup.costs(volumes.first())).flatten(),
+            regrouped: setup.regrouped().clone(),
             ..self.clone()
         }))
     }
@@ -129,7 +134,8 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         let processed = std::cell::Cell::new(0usize);
         let diagnostics = std::cell::RefCell::new(diagnostics);
         let volumes = RpsVolumeSet::of(database.x_seqdb());
-        let setup = RpsVolumeSetup::new(PROGRAM, options.window_size);
+        let setup = RpsVolumeSetup::new(PROGRAM, options.window_size)
+            .with_regrouped(self.regrouped.clone());
         let lengths = database_lengths(database);
         // `-num_threads 0`: one thread for each volume (NCBI's "auto", as rpsblast's).
         let threads = if self.search.auto_threads {
@@ -1210,6 +1216,7 @@ mod tests {
             comp_based_stats: "0".to_string(),
             several_volumes: false,
             costs: None,
+            regrouped: Default::default(),
         };
         assert!(search.check_options().is_ok());
         search.search.sum_stats = true;
@@ -1430,6 +1437,7 @@ mod tests {
             comp_based_stats: "0".to_string(),
             several_volumes: true,
             costs: None,
+            regrouped: Default::default(),
         };
         search.search.x_drop_gapped_bits = Some(1e9);
         let n_only = [record("n", &[b'N'; 210])];
@@ -1471,6 +1479,7 @@ mod tests {
             comp_based_stats: "0".to_string(),
             several_volumes: false,
             costs: None,
+            regrouped: Default::default(),
         };
         search.search.x_drop_ungapped_bits = Some(9e6);
         let repeat = b"TGGTGTTGC".repeat(20);

@@ -56,7 +56,19 @@ use std::path::Path;
 use anyhow::Result;
 
 use super::files::{run_side_files, SideFileSink};
-use crate::report::serial::xml::XML2_ROOT_ATTRIBUTES;
+use crate::report::blast_xml::writer::{run_ending_exception, DocumentPost};
+use crate::report::serial::xml::{XmlThrow, XML2_ROOT_ATTRIBUTES};
+
+/// What a report's writer hands the framing with the report's bytes (`Xml2Document::report`):
+/// what NCBI posts while it writes the report (`DocumentPost`, at offsets of the report), and the
+/// exception of a 14 side file, which ends the run when the report is written (blastxml2_format.cpp:
+/// 768-778 has no `catch`; outfmt 16's report catches its exception and posts it,
+/// `report::blast_xml2::writer`).
+#[derive(Clone, Debug, Default)]
+pub struct MadeReport {
+    pub posts: Vec<DocumentPost>,
+    pub ends_run: Option<Box<XmlThrow>>,
+}
 
 /// Which of NCBI's four document forms a run writes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -236,8 +248,11 @@ pub struct Xml2Document<F: SideFiles = NoSideFiles> {
     /// A `-subject` run (`m_IsBl2Seq`): a report is written when the next one arrives.
     delayed: bool,
     pending: Vec<u8>,
+    pending_made: MadeReport,
     has_pending: bool,
     files: F,
+    /// The posts of the reports written to the output buffers since `take_posts`.
+    posts: Vec<DocumentPost>,
 }
 
 impl Xml2Document<NoSideFiles> {
@@ -272,6 +287,7 @@ pub struct Xml2Carry {
     written: u32,
     started: bool,
     pending: Vec<u8>,
+    pending_made: MadeReport,
     has_pending: bool,
 }
 
@@ -283,6 +299,7 @@ impl<F: SideFiles> Xml2Document<F> {
             written: std::mem::take(&mut self.written),
             started: std::mem::take(&mut self.started),
             pending: std::mem::take(&mut self.pending),
+            pending_made: std::mem::take(&mut self.pending_made),
             has_pending: std::mem::take(&mut self.has_pending),
         }
     }
@@ -294,7 +311,14 @@ impl<F: SideFiles> Xml2Document<F> {
         self.written = carry.written;
         self.started = carry.started;
         self.pending = carry.pending;
+        self.pending_made = carry.pending_made;
         self.has_pending = carry.has_pending;
+    }
+
+    /// The posts of the reports written since the last call, at offsets of the output buffers of
+    /// the calls that wrote them (`StructuredXml::take_posts`).
+    pub fn take_posts(&mut self) -> Vec<DocumentPost> {
+        std::mem::take(&mut self.posts)
     }
 
     pub fn with_files(kind: Xml2Kind, delayed: bool, files: F) -> Self {
@@ -304,8 +328,10 @@ impl<F: SideFiles> Xml2Document<F> {
             started: false,
             delayed,
             pending: Vec::new(),
+            pending_made: MadeReport::default(),
             has_pending: false,
             files,
+            posts: Vec::new(),
         }
     }
 
@@ -345,13 +371,15 @@ impl<F: SideFiles> Xml2Document<F> {
     /// framing appends that report to `out`; `report` is left empty. NCBI writes the separator
     /// (`x_WriteXML2`, blast_format.cpp:2337-2342) before `s_FillBlastOutput` loads the report's
     /// subjects, and writes the report after those loads: what they post comes between the two.
-    /// For a `-subject` run the report is held and the one held before it is written. A failure of `make` returns it with the framing's bytes in `out` (the caller
-    /// truncates `out`) and the document's count of reports unchanged.
+    /// For a `-subject` run the report is held and the one held before it is written, with what
+    /// `make` handed with it (`MadeReport`: its posts come when it is written, after what the
+    /// call posted before). A failure of `make` returns it with the framing's bytes in `out` (the
+    /// caller truncates `out`) and the document's count of reports unchanged.
     pub fn report(
         &mut self,
         report: &mut Vec<u8>,
         out: &mut Vec<u8>,
-        make: impl FnOnce(usize, &mut Vec<u8>) -> Result<()>,
+        make: impl FnOnce(usize, &mut Vec<u8>) -> Result<MadeReport>,
     ) -> Result<()> {
         self.prolog(out);
         // The report written now: this one, or for a `-subject` run the one held before it.
@@ -359,20 +387,24 @@ impl<F: SideFiles> Xml2Document<F> {
             self.separator(out);
         }
         report.clear();
-        if let Err(error) = make(out.len(), report) {
-            report.clear();
-            return Err(error);
-        }
+        let mut made = match make(out.len(), report) {
+            Ok(made) => made,
+            Err(error) => {
+                report.clear();
+                return Err(error);
+            }
+        };
         if self.delayed {
             // The report just made is held; the one held before it is written now.
             let had_pending = std::mem::replace(&mut self.has_pending, true);
             std::mem::swap(report, &mut self.pending);
+            std::mem::swap(&mut made, &mut self.pending_made);
             if !had_pending {
                 report.clear();
                 return Ok(());
             }
         }
-        let result = self.write(report, out);
+        let result = self.write(report, made, out);
         report.clear();
         result
     }
@@ -392,8 +424,9 @@ impl<F: SideFiles> Xml2Document<F> {
             return Ok(());
         }
         let pending = std::mem::take(&mut self.pending);
+        let made = std::mem::take(&mut self.pending_made);
         self.separator(out);
-        self.write(&pending, out)
+        self.write(&pending, made, out)
     }
 
     /// `x_WriteXML2`'s separator of outfmt 15's reports: `,\n` before every report but the first.
@@ -404,9 +437,23 @@ impl<F: SideFiles> Xml2Document<F> {
     }
 
     /// `x_WriteXML2`: one report into the stream (after its separator, `separator`) or its own
-    /// file.
-    fn write(&mut self, report: &[u8], out: &mut Vec<u8>) -> Result<()> {
+    /// file, its posts after the bytes of the output before them (a side file's after the output
+    /// so far). A side file whose report threw is written up to the failing byte, and the
+    /// exception ends the run (`run_ending_exception`; the master file stays empty).
+    fn write(&mut self, report: &[u8], made: MadeReport, out: &mut Vec<u8>) -> Result<()> {
         self.written += 1;
+        let at = if self.kind.is_files() { 0 } else { 1 };
+        let base = out.len();
+        let MadeReport { posts, ends_run } = made;
+        if let Some(thrown) = ends_run {
+            self.files.write_file(self.written, report)?;
+            return Err(run_ending_exception(&posts, &thrown));
+        }
+        self.posts
+            .extend(posts.into_iter().map(|post| DocumentPost {
+                at: base + at * post.at,
+                text: post.text,
+            }));
         match self.kind {
             Xml2Kind::Single16 | Xml2Kind::Single15 => out.extend_from_slice(report),
             Xml2Kind::Files14 | Xml2Kind::Files13 => {
@@ -431,8 +478,9 @@ impl<F: SideFiles> Xml2Document<F> {
         self.prolog(out);
         if std::mem::replace(&mut self.has_pending, false) {
             let pending = std::mem::take(&mut self.pending);
+            let made = std::mem::take(&mut self.pending_made);
             self.separator(out);
-            self.write(&pending, out)?;
+            self.write(&pending, made, out)?;
         }
         match self.kind {
             Xml2Kind::Single16 => out.extend_from_slice(TAIL16),

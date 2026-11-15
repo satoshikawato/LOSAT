@@ -7193,8 +7193,8 @@ fn search(
     // outfmt 0, 5, 6 and 7 with `taxdb.bti` on the search path also the taxids that each batch's
     // prefetch reads and looks up, read in the block search's pool before the first block), and
     // with outfmt 0 and `-subject` only when no subject's title is refused where the report shows
-    // it (`x_block_shown_titles_allowed`), with outfmt 5, 15 and 16 only when the names of the
-    // database, the queries and the subjects can be written (`x_query_blocks.rs`
+    // it (`x_block_shown_titles_allowed`), with outfmt 5, 15 and 16 only when no title of the
+    // queries and the subjects is refused (`names::Refusal`; `x_query_blocks.rs`
     // `x_block_xml_*_allowed`).
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218 (the BLAST
     // XML report data of the first result NCBI formats: the matrix of its formatting table,
@@ -7268,8 +7268,8 @@ fn search(
                 // found also the taxids and lookups of the batches' prefetch), with outfmt 0 and
                 // `-subject` the
                 // subjects' titles (`x_block_shown_titles_allowed`), and with outfmt 5 the
-                // subjects' names (`x_block_xml_subjects_allowed`, `-subject`) and the database
-                // name and queries' names (`x_block_xml_run_allowed`); with several outputs, the
+                // subjects' names (`x_block_xml_subjects_allowed`, `-subject`) and the queries'
+                // titles (`x_block_xml_run_allowed`); with several outputs, the
                 // checks of every kind of report among them.
                 // A plan of one block of letters whose standard table's words pass the most
                 // (`x_aa_one_block_splits`) is split here; one block stays the search of all queries.
@@ -7335,7 +7335,7 @@ fn search(
                     // Outfmt 5 whose batches read the taxids: the check of outfmt 15 and 16.
                     // The prefetch asks for no scientific name.
                     (Some(database), XBlockReport::Xml) if x_prefetch_taxids(x_kind) => {
-                        database::x_titles_taxids_allow_blocks(database, false, pool)
+                        database::x_titles_taxids_allow_blocks(database, pool)
                     }
                     // Outfmt 8, 9, 12 and 5 write no tabular id: only the definition lines' reading
                     // and bytes can fail (`x_titles_read_allow_blocks`).
@@ -7346,7 +7346,7 @@ fn search(
                     // database's name of it, in the same pass over the headers
                     // (`x_titles_taxids_allow_blocks`).
                     (Some(database), XBlockReport::Xml2) => {
-                        database::x_titles_taxids_allow_blocks(database, true, pool)
+                        database::x_titles_taxids_allow_blocks(database, pool)
                     }
                     (Some(database), _) => database::x_titles_allow_blocks(
                         database,
@@ -7371,15 +7371,10 @@ fn search(
                     super::x_query_blocks::x_reach_block_search(false);
                     return Ok(false);
                 }
-                // EXPERIMENT (LOSAT_X_BPQBLOCK): the XML report's refusals
-                // of the database name and of the queries' names, which it makes before its first
-                // byte.
+                // EXPERIMENT (LOSAT_X_BPQBLOCK): the XML report's refusals of the queries'
+                // titles (`names::Refusal`), which it makes before its first byte.
                 if x_kinds.iter().any(|x_kind| x_kind.is_xml())
-                    && !super::x_query_blocks::x_block_xml_run_allowed(
-                        database.map_or("", |database| database.name()),
-                        query_records,
-                        pool,
-                    )
+                    && !super::x_query_blocks::x_block_xml_run_allowed(query_records, pool)
                 {
                     super::x_query_blocks::x_reach_block_search(false);
                     return Ok(false);
@@ -15385,7 +15380,10 @@ fn run_call(
         // read one by one (`subject_reads`).
         let first_lines = warning_lines.take();
         let mut warnings = (first_lines.is_some()
-            || matches!(outfmt, BlastpReport::Xml2(_) | BlastpReport::Archive)
+            || matches!(
+                outfmt,
+                BlastpReport::Xml | BlastpReport::Xml2(_) | BlastpReport::Archive
+            )
             || matches!(
                 outfmt,
                 BlastpReport::CustomTabular(spec)

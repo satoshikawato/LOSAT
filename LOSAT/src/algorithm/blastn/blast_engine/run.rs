@@ -7025,7 +7025,7 @@ fn post_process_hits_and_write(
         let mut format_warnings = (warning_lines.is_some()
             || matches!(
                 output_format,
-                BlastnOutputFormat::Xml2(_) | BlastnOutputFormat::Archive
+                BlastnOutputFormat::Xml | BlastnOutputFormat::Xml2(_) | BlastnOutputFormat::Archive
             )
             || output_format
                 .tabular_spec()

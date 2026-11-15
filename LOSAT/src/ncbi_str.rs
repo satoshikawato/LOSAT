@@ -25,6 +25,7 @@
 
 mod data_size;
 mod double;
+pub(crate) mod utf8;
 
 pub use data_size::string_to_uint8_data_size;
 pub(crate) use double::{

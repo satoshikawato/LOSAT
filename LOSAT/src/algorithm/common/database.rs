@@ -4204,8 +4204,8 @@ fn slot_refusal(
     )
 }
 
-/// LOSAT's refusal of a taxonomy database name or record (`read_reported_taxonomy`): a scientific
-/// name NCBI's XML stream cannot write, or a record NCBI reads from unmapped memory. A run that
+/// LOSAT's refusal of a taxonomy database record (`read_reported_taxonomy`): a record NCBI reads
+/// from unmapped memory. A run that
 /// holds its XML2 or JSON document drops it on this error and no other (BLASTX,
 /// `XmlRefusal::of_taxonomy`); the other errors of the lookups (a read error of a file) are not
 /// refusals, and the held document is written as NCBI writes what it has.
@@ -4335,19 +4335,10 @@ pub(crate) fn read_reported_taxonomy(
             let found = taxdb
                 .names(taxid, &mut messages)
                 .map_err(|error| taxdb_error(error, program))?;
+            // The scientific name reaches NCBI's stream as it is (raw bytes of `taxdb.btd`): the
+            // XML stream writes or throws on them (`report::serial::xml`), JSON writes them.
             let answer = match found {
-                Some(names) => {
-                    crate::report::blast_xml::names::check_text(&names.scientific_name).map_err(
-                        |refusal| {
-                            anyhow::Error::new(TaxonomyRefusal(
-                                refusal
-                                    .error(program, "a taxonomy database scientific name")
-                                    .to_string(),
-                            ))
-                        },
-                    )?;
-                    HitTaxonomy::Named(names.scientific_name)
-                }
+                Some(names) => HitTaxonomy::Named(names.scientific_name),
                 None => HitTaxonomy::NotFound(messages),
             };
             slot.insert(answer);
@@ -5414,12 +5405,10 @@ const TAXDB_ENTRIES_PER_SEQUENCE: u64 = 2;
 /// a larger database is held without reading it.
 const PREPASS_DB_SEQUENCES_MAX: u64 = 1 << 22;
 
-/// Whether [`read_reported_taxonomy`] (`names`) or [`prefetch_messages`] (not `names`) could
-/// refuse for some sequence of the database, which a run that writes its batches one by one
-/// cannot take back (OF5b BLASTX, DECISIONS 32): with `names` a scientific name NCBI's XML
-/// stream cannot write (the XML2 and JSON formats write the names; the prefetch of outfmt 0, 5,
-/// 6, 7 and 17 asks for none), and in both a record past the last mapped page of `taxdb.btd`,
-/// or a header or the taxonomy database that cannot be read. A superset of what a search
+/// Whether [`read_reported_taxonomy`] or [`prefetch_messages`] could refuse for some sequence of
+/// the database, which a run that writes its batches one by one cannot take back (OF5b BLASTX,
+/// DECISIONS 32): a record past the last mapped page of `taxdb.btd`, or a header or the taxonomy
+/// database that cannot be read. A superset of what a search
 /// reports: limits (`-gilist`, `-taxidlist`) and the hits themselves are ignored. `false`
 /// without `taxdb.bti` on the search path and for a database without taxids. The refusal of
 /// NCBI's cache (`TaxdbRun::cache_collision`) is not asked here: it is a property of the run
@@ -5447,7 +5436,7 @@ const PREPASS_DB_SEQUENCES_MAX: u64 = 1 << 22;
 /// possibly many batches after this call): the run can then refuse after bytes were written.
 /// NCBI reads the two files at its first lookup too, and a replaced file gives it a mixed
 /// result as well; this is not guarded (DECISIONS 32).
-pub(crate) fn taxdb_may_refuse(db: &SeqDb, names: bool) -> bool {
+pub(crate) fn taxdb_may_refuse(db: &SeqDb) -> bool {
     use crate::seqdb::taxdb::LazyTaxDb;
     if !db.taxdb_found() {
         return false;
@@ -5463,37 +5452,31 @@ pub(crate) fn taxdb_may_refuse(db: &SeqDb, names: bool) -> bool {
         .entry_count()
         .is_ok_and(|entries| entries <= TAXDB_ENTRIES_PER_SEQUENCE * sequences);
     if taxdb_first {
-        if taxdb_side(&taxdb, names) == Some(false) {
+        if taxdb_side(&taxdb) == Some(false) {
             return false;
         }
         if sequences > PREPASS_DB_SEQUENCES_MAX {
             return true;
         }
     }
-    database_side(db, &taxdb, names)
+    database_side(db, &taxdb)
 }
 
 /// The taxonomy side of [`taxdb_may_refuse`]: `Some(false)` when no lookup of any taxid can be
-/// refused or, with `names`, give a scientific name that `names::check_text` refuses
-/// ([`crate::seqdb::taxdb::TaxDb::any_lookup_may_refuse`]); `Some(true)` when one can; `None` when
-/// the taxonomy database cannot be opened or read, which only the lookups of the database's taxids
-/// can answer.
-fn taxdb_side(taxdb: &crate::seqdb::taxdb::LazyTaxDb, names: bool) -> Option<bool> {
-    taxdb
-        .any_lookup_may_refuse(&|name| {
-            names && crate::report::blast_xml::names::check_text(name).is_err()
-        })
-        .ok()
+/// refused ([`crate::seqdb::taxdb::TaxDb::any_lookup_may_refuse`], which no scientific name
+/// refuses: NCBI's streams write them); `Some(true)` when one can; `None` when the taxonomy
+/// database cannot be opened or read, which only the lookups of the database's taxids can answer.
+fn taxdb_side(taxdb: &crate::seqdb::taxdb::LazyTaxDb) -> Option<bool> {
+    taxdb.any_lookup_may_refuse(&|_| false).ok()
 }
 
 /// The database side of [`taxdb_may_refuse`]: whether the lookup of the first definition line's
 /// taxid of some sequence would be refused, looking each distinct non-zero taxid up with the
-/// `names` + `names::check_text` code `read_reported_taxonomy` uses (`names::check_text` only
-/// with `names`). The headers are read in
+/// `names` code `read_reported_taxonomy` uses. The headers are read in
 /// ranges of [`crate::seqdb::HEADER_RANGE_SEQS`] sequences, one read per MiB
 /// ([`SeqDb::visit_defline_taxids`]). A header that cannot be read answers `true`. Memory: the
 /// distinct taxids, nothing per sequence.
-fn database_side(db: &SeqDb, taxdb: &crate::seqdb::taxdb::LazyTaxDb, names: bool) -> bool {
+fn database_side(db: &SeqDb, taxdb: &crate::seqdb::taxdb::LazyTaxDb) -> bool {
     let mut seen: std::collections::HashSet<i32> = Default::default();
     let mut refused = false;
     for range in db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS) {
@@ -5508,15 +5491,7 @@ fn database_side(db: &SeqDb, taxdb: &crate::seqdb::taxdb::LazyTaxDb, names: bool
                 return true;
             }
             let mut messages = Vec::new();
-            refused = match taxdb.names(taxid, &mut messages) {
-                Err(_) => true,
-                Ok(Some(found)) => {
-                    names
-                        && crate::report::blast_xml::names::check_text(&found.scientific_name)
-                            .is_err()
-                }
-                Ok(None) => false,
-            };
+            refused = taxdb.names(taxid, &mut messages).is_err();
             !refused
         });
         if !whole {
@@ -6463,27 +6438,16 @@ mod taxdb_prepass_tests {
     }
 
     #[test]
-    fn names_that_can_be_written_do_not_hold() {
+    fn scientific_names_never_hold() {
+        // Names with bytes >= 0x80 (`high_bytes_utf8`: 9606 has one; `high_bytes_latin1`: 10090's
+        // common name and kingdom): NCBI's streams write them (outfmt 16 throws at its own
+        // level, `report::serial::xml`), so nothing is refused.
         for name in ["sprot_tax", "sprot_mixtax"] {
-            let db = database(name, Some(&variant("good")));
-            assert!(db.taxdb_found());
-            assert!(!taxdb_may_refuse(&db, true), "{name}");
-        }
-        // 10090 has a common name and a kingdom with bytes >= 0x80 in this taxonomy database,
-        // which XML2 does not write: only the scientific name is checked.
-        let db = database("sprot_mixtax", Some(&variant("high_bytes_latin1")));
-        assert!(!taxdb_may_refuse(&db, true));
-    }
-
-    #[test]
-    fn a_name_that_cannot_be_written_holds_whether_or_not_the_taxid_is_reported() {
-        // sprot_tax: 9606 is the taxid of both sequences. sprot_mixtax: 9606 belongs to the
-        // third sequence only, which a search for the first two never reports.
-        for name in ["sprot_tax", "sprot_mixtax"] {
-            let db = database(name, Some(&variant("high_bytes_utf8")));
-            assert!(taxdb_may_refuse(&db, true), "{name}");
-            // The prefetch asks for no name: nothing it looks up can be refused.
-            assert!(!taxdb_may_refuse(&db, false), "{name}");
+            for taxonomy in ["good", "high_bytes_utf8", "high_bytes_latin1"] {
+                let db = database(name, Some(&variant(taxonomy)));
+                assert!(db.taxdb_found());
+                assert!(!taxdb_may_refuse(&db), "{name} {taxonomy}");
+            }
         }
     }
 
@@ -6498,14 +6462,9 @@ mod taxdb_prepass_tests {
         let at = 24 + 8 * 4 + 4;
         index[at..at + 4].copy_from_slice(&5000u32.to_be_bytes());
         std::fs::write(dir.join("taxdb.bti"), &index).unwrap();
-        for names in [true, false] {
-            assert!(taxdb_may_refuse(
-                &database("sprot_mixtax", Some(&dir)),
-                names
-            ));
-            // 9606 (entry 2) is fine: the database with that taxid alone does not hold.
-            assert!(!taxdb_may_refuse(&database("sprot_tax", Some(&dir)), names));
-        }
+        assert!(taxdb_may_refuse(&database("sprot_mixtax", Some(&dir))));
+        // 9606 (entry 2) is fine: the database with that taxid alone does not hold.
+        assert!(!taxdb_may_refuse(&database("sprot_tax", Some(&dir))));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -6514,10 +6473,10 @@ mod taxdb_prepass_tests {
         // No `taxdb.bti` on the search path: the formats write no name.
         let db = database("sprot_mixtax", None);
         assert!(!db.taxdb_found());
-        assert!(!taxdb_may_refuse(&db, true));
+        assert!(!taxdb_may_refuse(&db));
         // NCBI turns a wrong magic number into a message and N/A (`expected.tsv`).
         let db = database("sprot_mixtax", Some(&variant("bad_magic")));
-        assert!(!taxdb_may_refuse(&db, true));
+        assert!(!taxdb_may_refuse(&db));
     }
 
     #[test]
@@ -6526,7 +6485,7 @@ mod taxdb_prepass_tests {
         for (taxonomy, expected) in [
             ("good", Some(false)),
             ("high_bytes_latin1", Some(false)),
-            ("high_bytes_utf8", Some(true)),
+            ("high_bytes_utf8", Some(false)),
             ("offset_next_past_end", Some(true)),
             ("bad_magic", Some(false)),
             // Not checked: whatever the pass says, the answer is the database side's.
@@ -6535,32 +6494,25 @@ mod taxdb_prepass_tests {
             for name in ["sprot", "sprot_tax", "sprot_mixtax"] {
                 let db = database(name, Some(&variant(taxonomy)));
                 let taxdb = LazyTaxDb::new(db.search_path().unwrap().clone());
-                for names in [true, false] {
-                    let side = taxdb_side(&taxdb, names);
-                    if let Some(side) = side {
-                        // The taxonomy side is a superset of the database side.
-                        assert!(
-                            side || !database_side(&db, &taxdb, names),
-                            "{taxonomy} {name}"
-                        );
-                        if !side {
-                            assert!(!taxdb_may_refuse(&db, names), "{taxonomy} {name}");
-                        }
+                let side = taxdb_side(&taxdb);
+                if let Some(side) = side {
+                    // The taxonomy side is a superset of the database side.
+                    assert!(side || !database_side(&db, &taxdb), "{taxonomy} {name}");
+                    if !side {
+                        assert!(!taxdb_may_refuse(&db), "{taxonomy} {name}");
                     }
-                    // Without the names only the record past the end refuses.
-                    if name == "sprot_mixtax" && expected.is_some() {
-                        let expected = expected
-                            .map(|refused| refused && (names || taxonomy != "high_bytes_utf8"));
-                        assert_eq!(side, expected, "{taxonomy} {names}");
-                    }
-                    // The database side alone and the dispatch give one answer.
-                    let alone = LazyTaxDb::new(db.search_path().unwrap().clone());
-                    assert_eq!(
-                        taxdb_may_refuse(&db, names),
-                        database_side(&db, &alone, names),
-                        "{taxonomy} {name} {names}"
-                    );
                 }
+                // Only the record past the end refuses.
+                if name == "sprot_mixtax" && expected.is_some() {
+                    assert_eq!(side, expected, "{taxonomy}");
+                }
+                // The database side alone and the dispatch give one answer.
+                let alone = LazyTaxDb::new(db.search_path().unwrap().clone());
+                assert_eq!(
+                    taxdb_may_refuse(&db),
+                    database_side(&db, &alone),
+                    "{taxonomy} {name}"
+                );
             }
         }
     }
@@ -6581,7 +6533,7 @@ mod taxdb_prepass_tests {
         let entries = taxdb.entry_count().unwrap();
         for _ in 0..3 {
             let start = std::time::Instant::now();
-            let answer = taxdb_side(&taxdb, true);
+            let answer = taxdb_side(&taxdb);
             eprintln!(
                 "real taxdb: {entries} entries, taxonomy side {answer:?} in {:?}",
                 start.elapsed()
@@ -6897,6 +6849,6 @@ mod taxdb_prepass_tests {
     fn a_database_without_taxids_does_not_hold() {
         let db = database("sprot", Some(&variant("high_bytes_utf8")));
         assert!(db.taxdb_found());
-        assert!(!taxdb_may_refuse(&db, true));
+        assert!(!taxdb_may_refuse(&db));
     }
 }

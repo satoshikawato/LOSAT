@@ -258,7 +258,7 @@ fn subject_names(
             ),
         }
         .map_err(|refusal| refuse(refusal, "a subject title")),
-        ShownSubjects::Database { reported, .. } => match reported.parsed_subject(s_idx) {
+        ShownSubjects::Database { reported, .. } => Ok(match reported.parsed_subject(s_idx) {
             Some(parsed) => SubjectNames::of_parsed(parsed, reported.parsed_taxonomy(s_idx)),
             None => SubjectNames::of_database_sequence(
                 reported.oid(s_idx),
@@ -267,8 +267,7 @@ fn subject_names(
                 reported.taxid(s_idx),
                 reported.taxonomy(s_idx),
             ),
-        }
-        .map_err(|refusal| refuse(refusal, "a database title")),
+        }),
     }
 }
 
@@ -894,6 +893,7 @@ fn query_text(
 ) -> Result<QueryText> {
     names::query_text(
         PROGRAM,
+        query.internal_id.as_bytes(),
         query.warning_id(),
         query.believed(),
         query.title.as_bytes(),
@@ -907,9 +907,6 @@ fn query_text(
 /// What the read of the queries before the search found (`scan_queries`).
 #[derive(Default)]
 pub(super) struct QueryScan {
-    /// Some query that the documents write would be refused if NCBI had not searched its batch
-    /// (a title that only its message cannot carry): the run then holds the document.
-    pub messages_may_be_refused: bool,
     /// The run stops at a batch after this many queries of the batches before it (a reader
     /// error, or a batch that NCBI fails at its set-up): the report of the last of them is never
     /// written where the document holds it back (`written_queries`). `None` when the run reads
@@ -1003,10 +1000,10 @@ pub(super) fn scan_queries(
     read: &mut dyn FnMut(&mut dyn FnMut(&[FastaRecord]) -> Result<()>) -> Result<()>,
 ) -> Result<QueryScan> {
     let mut scan = QueryScan::default();
-    // The queries of the batches that the run writes, and the checks of the last of them while
-    // the document holds its report back: its refusal, and whether its message may be refused.
+    // The queries of the batches that the run writes, and the check of the last of them while
+    // the document holds its report back.
     let mut written = 0usize;
-    let mut held: Option<(Result<()>, bool)> = None;
+    let mut held: Option<Result<()>> = None;
     let scanned = read(&mut |batch| {
         if !super::archive::written_batch(batch, options) {
             anyhow::bail!("NCBI stops the run at this batch");
@@ -1018,18 +1015,15 @@ pub(super) fn scan_queries(
             return Ok(());
         }
         // The next batch is written: so is the report held before it.
-        if let Some((check, may_be_refused)) = held.take() {
+        if let Some(check) = held.take() {
             check?;
-            scan.messages_may_be_refused |= may_be_refused;
         }
         for (index, query) in batch.iter().enumerate() {
             let check = query_text(query, false, false, true).map(drop);
-            let may_be_refused = query_text(query, true, false, true).is_err();
             if holds_back && index + 1 == batch.len() {
-                held = Some((check, may_be_refused));
+                held = Some(check);
             } else {
                 check?;
-                scan.messages_may_be_refused |= may_be_refused;
             }
         }
         written += batch.len();
@@ -1039,9 +1033,8 @@ pub(super) fn scan_queries(
         Err(error) if error.is::<XmlRefusal>() => Err(error),
         // The end of the queries: the epilog writes the held report.
         Ok(()) => {
-            if let Some((check, may_be_refused)) = held {
+            if let Some(check) = held {
                 check?;
-                scan.messages_may_be_refused |= may_be_refused;
             }
             Ok(scan)
         }
@@ -1062,12 +1055,6 @@ pub(super) fn subjects_may_be_refused(subjects: &[FastaRecord]) -> bool {
         )
         .is_err()
     })
-}
-
-/// Refuses a `-db` name that NCBI's XML stream cannot write (a byte outside US-ASCII); the
-/// run checks it before the search, as the Seq-annot formats check theirs.
-pub(super) fn check_database_name(name: &str) -> Result<()> {
-    names::check_database_name(PROGRAM, name).map_err(|error| XmlRefusal(error.to_string()).into())
 }
 
 /// The document of outfmt 13, 14, 15 or 16 for `outfmt` (`None` for any other format).
@@ -1210,7 +1197,6 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
             i64::try_from(pairwise.total_letters)?,
         ),
     };
-    check_database_name(&db_name)?;
     let filter = filter::filter_string(
         None,
         options.seg.filter_options(),
@@ -1281,7 +1267,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
             let Some(text) = texts.next() else {
                 // The held report that is never written (`written_queries`).
                 document.unwritten(&mut buf)?;
-                writer.write_all(&buf)?;
+                write_with_posts(&buf, document.take_posts(), writer, diagnostics)?;
                 buf.clear();
                 break;
             };
@@ -1291,7 +1277,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
             let place = query.placement();
             let masks = query_masks(batch, qidx, query);
             let xml_query = XmlQuery {
-                id: query.internal_id.as_bytes(),
+                id: text.query_id(query.internal_id.as_bytes()),
                 title: &text.title,
                 len: i32::try_from(length)?,
                 stats: query_stats(batch, qidx, options.gapped, &gapped_karlin),
@@ -1395,6 +1381,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
             });
             // A failed query leaves its partial bytes in `buf`, which the error return drops.
             written?;
+            posts.document(document.take_posts());
             posts.write(
                 &buf,
                 &mut *writer,
@@ -1421,14 +1408,35 @@ pub(super) fn write_xml_epilog(
     writer: &mut impl Write,
     queries: usize,
     xml2: Option<&mut RunXml2>,
+    diagnostics: &mut dyn Write,
 ) -> Result<()> {
     let mut buf = Vec::new();
-    match xml2 {
-        Some(xml2) => xml2.finish(&mut buf)?,
-        None => BlastXmlWriter::new(queries).finish(&mut buf)?,
-    }
-    writer.write_all(&buf)?;
+    let posts = match xml2 {
+        Some(xml2) => {
+            xml2.finish(&mut buf)?;
+            xml2.take_posts()
+        }
+        None => {
+            BlastXmlWriter::new(queries).finish(&mut buf)?;
+            Vec::new()
+        }
+    };
+    write_with_posts(&buf, posts, writer, diagnostics)?;
     Ok(())
+}
+
+/// Writes `buf`, a part of the document that holds no `Hit` (a held report and the document's
+/// end), with what the document's writer posted while it wrote it (`StructuredXml::take_posts`),
+/// each to `diagnostics` after the bytes before it.
+fn write_with_posts(
+    buf: &[u8],
+    posts: Vec<crate::report::blast_xml::DocumentPost>,
+    writer: &mut dyn Write,
+    diagnostics: &mut dyn Write,
+) -> io::Result<()> {
+    let mut hits = crate::report::query_warnings::HitPosts::default();
+    hits.document(posts);
+    hits.write(buf, writer, diagnostics, |_, _, _| Ok(()))
 }
 
 #[cfg(test)]
@@ -1526,7 +1534,7 @@ mod scan_tests {
     #[test]
     fn the_last_query_before_a_stop_is_checked_only_where_its_report_is_written() {
         let plain = || record("plain", 300);
-        let bad = || record("caf\u{e9}", 300);
+        let bad = || record(", ,", 300);
         let refused = |scanned: Result<QueryScan>| {
             scanned.err().is_some_and(|error| error.is::<XmlRefusal>())
         };
@@ -1546,7 +1554,7 @@ mod scan_tests {
         )));
         // A later batch that NCBI fails at its set-up (no valid context, a query without
         // letters) stops the run before it, as a reader error does; its records are not read.
-        let empty = [vec![plain(), bad()], vec![record("caf\u{e9}", 0)]];
+        let empty = [vec![plain(), bad()], vec![record(", ,", 0)]];
         let found = scan(&empty, false, true).unwrap();
         assert_eq!(found.stops_after, Some(2));
         assert!(refused(scan(&empty, false, false)));
@@ -1555,7 +1563,6 @@ mod scan_tests {
         // A run that stops at its first batch writes nothing.
         let found = scan(&[], true, true).unwrap();
         assert_eq!(found.stops_after, None);
-        assert!(!found.messages_may_be_refused);
         // A run whose XML format fails for its matrix name writes no report and no title
         // (`xml_matrix_failure`, probe K4f of line RG): its batches are read, no title is checked.
         let options = super::super::stage_c_tests::options();
@@ -1565,7 +1572,6 @@ mod scan_tests {
         })
         .unwrap();
         assert_eq!(found.stops_after, None);
-        assert!(!found.messages_may_be_refused);
     }
 }
 

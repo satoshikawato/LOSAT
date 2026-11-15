@@ -1425,18 +1425,6 @@ fn search(
         database.check_statistics_count()?;
     }
     let pairwise_database = database.map(TblastnDatabase::pairwise_database);
-    // BLAST XML (5, and the XML2 documents of 16 and 15) cannot carry a database name outside
-    // US-ASCII (NCBI's stream throws): refused before the search, and before anything is
-    // written.
-    if let Some(database) = database {
-        if outputs
-            .formats
-            .iter()
-            .any(|format| super::stage_e_report::is_structured_xml(format.outfmt))
-        {
-            crate::report::blast_xml::names::check_database_name("TBLASTN", database.name())?;
-        }
-    }
     let subject_path = match database {
         Some(_) => None,
         None => Some(

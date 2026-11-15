@@ -2182,7 +2182,7 @@ pub(super) fn x_titles_allow_blocks(
         };
         if crate::seqdb::x_bp_db_keep() {
             return x_all_header_ranges(db, pool, allowed_range)
-                && !(taxids && shared::taxdb_may_refuse(db, false));
+                && !(taxids && shared::taxdb_may_refuse(db));
         }
         let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
         #[cfg(all(
@@ -2202,7 +2202,7 @@ pub(super) fn x_titles_allow_blocks(
             let _ = pool;
             ranges.iter().all(allowed_range)
         };
-        return titles && !(taxids && shared::taxdb_may_refuse(db, false));
+        return titles && !(taxids && shared::taxdb_may_refuse(db));
     }
     let allowed = |ordinal: u32| -> bool { allowed_deflines(ordinal, db.deflines(ordinal)) };
     #[cfg(all(
@@ -2225,7 +2225,7 @@ pub(super) fn x_titles_allow_blocks(
     )))]
     let titles = (0..db.num_seqs()).all(allowed);
     // One sequence at a time (`LOSAT_X_DBIDXREAD=0`): the taxids after the titles.
-    titles && (!taxids || x_taxids_allow_blocks(database, false, pool))
+    titles && (!taxids || x_taxids_allow_blocks(database, pool))
 }
 
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the block search of outfmt 8, 9, 12 and 5.
@@ -2313,20 +2313,17 @@ pub(super) fn x_titles_read_allow_blocks(
 /// EXPERIMENT (LOSAT_X_BPQBLOCK): `x_titles_read_allow_blocks` and `x_taxids_allow_blocks`
 /// in one pass over the headers: whether every sequence of the database has one definition line
 /// that reads and holds no byte outside ' ' ..= '~', its taxid reads, and no lookup of the
-/// taxonomy database can be refused (`shared::taxdb_may_refuse`; with `names`, the outfmt 15 and
-/// 16 that write the scientific names, also no name that their writer refuses; without, outfmt
-/// 5's prefetch). Read in `pool`; a failure is `false`. It writes nothing and changes no state of
+/// taxonomy database can be refused (`shared::taxdb_may_refuse`). Read in `pool`; a failure is
+/// `false`. It writes nothing and changes no state of
 /// the run. With `LOSAT_X_DBIDXREAD=0` the two checks run one after the other, one sequence at a
 /// time.
 pub(super) fn x_titles_taxids_allow_blocks(
     database: &BlastpDatabase,
-    names: bool,
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> bool {
     let db = &database.db;
     if crate::seqdb::x_dbidxread() == crate::seqdb::XDbIdxRead::Off {
-        return x_titles_read_allow_blocks(database, pool)
-            && x_taxids_allow_blocks(database, names, pool);
+        return x_titles_read_allow_blocks(database, pool) && x_taxids_allow_blocks(database, pool);
     }
     let readable_range = |range: &BlockRange| -> bool {
         db.visit_deflines_taxids(*range, |_ordinal, deflines| match deflines {
@@ -2337,8 +2334,7 @@ pub(super) fn x_titles_taxids_allow_blocks(
         })
     };
     if crate::seqdb::x_bp_db_keep() {
-        return x_all_header_ranges(db, pool, readable_range)
-            && !shared::taxdb_may_refuse(db, names);
+        return x_all_header_ranges(db, pool, readable_range) && !shared::taxdb_may_refuse(db);
     }
     let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
     #[cfg(all(
@@ -2358,16 +2354,15 @@ pub(super) fn x_titles_taxids_allow_blocks(
         let _ = pool;
         ranges.iter().all(readable_range)
     };
-    readable && !shared::taxdb_may_refuse(db, names)
+    readable && !shared::taxdb_may_refuse(db)
 }
 
 /// EXPERIMENT (LOSAT_X_BPQBLOCK): whether every sequence's taxid reads and no lookup of the
-/// taxonomy database can be refused (`shared::taxdb_may_refuse` with `names`, which is `false`
-/// where `taxdb.bti` is not found). One sequence at a time (`LOSAT_X_DBIDXREAD=0`); see
+/// taxonomy database can be refused (`shared::taxdb_may_refuse`, which is `false` where
+/// `taxdb.bti` is not found). One sequence at a time (`LOSAT_X_DBIDXREAD=0`); see
 /// `x_titles_taxids_allow_blocks`.
 fn x_taxids_allow_blocks(
     database: &BlastpDatabase,
-    names: bool,
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> bool {
     let db = &database.db;
@@ -2390,7 +2385,7 @@ fn x_taxids_allow_blocks(
         let _ = pool;
         (0..count).all(reads)
     };
-    all_read && !shared::taxdb_may_refuse(db, names)
+    all_read && !shared::taxdb_may_refuse(db)
 }
 
 #[cfg(test)]
@@ -4139,16 +4134,14 @@ mod tests {
         for (database, readable) in &databases {
             for threads in [1, 4, 8, 16] {
                 crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
-                    for names in [true, false] {
-                        let two = x_titles_read_allow_blocks(database, pool)
-                            && x_taxids_allow_blocks(database, names, pool);
-                        assert_eq!(two, *readable);
-                        assert_eq!(
-                            x_titles_taxids_allow_blocks(database, names, pool),
-                            two,
-                            "threads {threads}"
-                        );
-                    }
+                    let two = x_titles_read_allow_blocks(database, pool)
+                        && x_taxids_allow_blocks(database, pool);
+                    assert_eq!(two, *readable);
+                    assert_eq!(
+                        x_titles_taxids_allow_blocks(database, pool),
+                        two,
+                        "threads {threads}"
+                    );
                     Ok(())
                 })
                 .unwrap();
@@ -4336,7 +4329,7 @@ mod tests {
                     for pairwise in [false, true] {
                         let titles = x_titles_allow_blocks(&database, pairwise, false, pool);
                         assert!(titles, "{taxdb:?} threads {threads}");
-                        let two = titles && x_taxids_allow_blocks(&database, false, pool);
+                        let two = titles && x_taxids_allow_blocks(&database, pool);
                         assert_eq!(two, !refused, "{taxdb:?} threads {threads}");
                         assert_eq!(
                             x_titles_allow_blocks(&database, pairwise, true, pool),

@@ -106,6 +106,9 @@ pub struct XmlHit<'a> {
     /// The `HitDescr` list of a database sequence with parsed Seq-ids (`SubjectNames::
     /// descriptions`; empty for the others).
     pub descriptions: &'a [crate::report::db_subject::HitDescription],
+    /// `GenerateDefline` threw for the `-subject` record (`SubjectNames::defline_thrown`):
+    /// outfmt 5's `Hit_len` is 0.
+    pub defline_thrown: bool,
 }
 
 impl<'a> XmlHit<'a> {
@@ -119,6 +122,7 @@ impl<'a> XmlHit<'a> {
             taxid: names.taxid,
             taxonomy: &names.taxonomy,
             descriptions: &names.descriptions,
+            defline_thrown: names.defline_thrown,
         }
     }
 }

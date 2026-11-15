@@ -564,6 +564,7 @@ pub(super) fn render(
         // name (`x_CheckTaxDB`, `tabular`).
         let mut warnings = (warning_lines.is_some()
             || xml2_kind(format.outfmt).is_some()
+            || format_number(format.outfmt) == 5
             || format_number(format.outfmt) == ARCHIVE_FORMAT
             || custom_tabular
                 .as_ref()

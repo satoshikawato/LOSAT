@@ -2072,12 +2072,12 @@ pub(crate) fn write_epilog(
         //     if (m_FormatType == CFormattingArgs::eXml) {
         //         m_Outfile << m_BlastXMLIncremental->m_SerialXmlEnd << endl;
         // ```
-        super::blast_xml::write_xml_epilog(writer, queries, None)?;
+        super::blast_xml::write_xml_epilog(writer, queries, None, &mut *diagnostics)?;
     } else if xml2.is_some() {
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2203-2219 and
         // :2419-2423, :2440-2445: the report a `-subject` run holds back, then the end of the
         // document.
-        super::blast_xml::write_xml_epilog(writer, queries, xml2)?;
+        super::blast_xml::write_xml_epilog(writer, queries, xml2, &mut *diagnostics)?;
     } else if options.outfmt == 7 {
         // The warning of the epilog's formatter, for a field list that shows a plural name of
         // the taxonomy database without `taxdb.bti` (`tabular::write_epilog_warning`).

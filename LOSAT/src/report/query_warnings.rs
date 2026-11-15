@@ -253,6 +253,7 @@ pub fn write_marked(
         marks: reads.to_vec(),
         ends: vec![0; reads.len()],
         texts: Vec::new(),
+        document: Vec::new(),
     };
     write_hit_posts(report, &posts, query, writer, warnings)
 }
@@ -274,6 +275,9 @@ pub struct HitPosts {
     /// By marked `Hit`: the end of its texts in `texts`.
     ends: Vec<usize>,
     texts: Vec<u8>,
+    /// What the document's writer posted while it wrote the report
+    /// (`StructuredXml::take_posts`), at offsets of the report, in order.
+    document: Vec<crate::report::blast_xml::writer::DocumentPost>,
 }
 
 impl HitPosts {
@@ -303,9 +307,17 @@ impl HitPosts {
         Ok(())
     }
 
+    /// Adds what the document's writer posted while it wrote the report (`DocumentPost`, at
+    /// offsets of the report): each comes after the report's bytes before it, and after a `Hit`'s
+    /// texts at the same place (NCBI loads a subject before it writes the `Hit`).
+    pub fn document(&mut self, posts: Vec<crate::report::blast_xml::writer::DocumentPost>) {
+        self.document.extend(posts);
+    }
+
     /// Writes `report`, the query's output, to `writer`, and at each marked `Hit`, after the
     /// bytes before it: `read` of its subject (the model's text, to `sink`; `writer` is the
-    /// report) and the texts the writer made there, to `sink` after `writer` is flushed.
+    /// report) and the texts the writer made there, to `sink` after `writer` is flushed; the
+    /// document's posts (`document`) likewise at their places.
     pub fn write(
         &self,
         report: &[u8],
@@ -314,15 +326,45 @@ impl HitPosts {
         mut read: impl FnMut(u32, &mut dyn Write, &mut dyn Write) -> io::Result<()>,
     ) -> io::Result<()> {
         let (mut index, mut from) = (0, 0);
-        write_at_marks(report, &self.marks, writer, |subject, writer| {
+        let mut document = self.document.iter().peekable();
+        let mut written = 0;
+        for &(at, subject) in &self.marks {
+            while let Some(post) = document.next_if(|post| post.at < at) {
+                writer.write_all(&report[written..post.at])?;
+                written = post.at;
+                write_after(writer, &mut *sink, &post.text)?;
+            }
+            writer.write_all(&report[written..at])?;
+            written = at;
             read(subject, writer, &mut *sink)?;
             let end = self.ends[index];
             index += 1;
             let texts = &self.texts[from..end];
             from = end;
-            write_after(writer, &mut *sink, texts)
-        })
+            write_after(writer, &mut *sink, texts)?;
+        }
+        for post in document {
+            writer.write_all(&report[written..post.at])?;
+            written = post.at;
+            write_after(writer, &mut *sink, &post.text)?;
+        }
+        writer.write_all(&report[written..])
     }
+}
+
+/// Writes `report`, a part of a structured document that holds no `Hit` of its own (the end of the
+/// document, a held report written there), with what the document's writer posted while it wrote
+/// it (`StructuredXml::take_posts`), each after the bytes before it, to the warnings' sink; without
+/// warnings, the report alone.
+pub fn write_document_posts(
+    report: &[u8],
+    posts: Vec<crate::report::blast_xml::writer::DocumentPost>,
+    writer: &mut dyn Write,
+    warnings: Option<&mut QueryWarnings<'_>>,
+) -> io::Result<()> {
+    let mut hits = HitPosts::default();
+    hits.document(posts);
+    write_hit_posts(report, &hits, 0, writer, warnings)
 }
 
 /// Writes query `query`'s structured report `report` with the posts of its `Hit`s
@@ -349,23 +391,6 @@ pub fn write_hit_posts(
             None => Ok(()),
         },
     )
-}
-
-/// Writes `report`, a buffer, to `writer` with `read` of each subject at its place `marks` (the
-/// buffer's length where the serial writer reads it, and the subject), after the bytes before it.
-pub fn write_at_marks(
-    report: &[u8],
-    marks: &[(usize, u32)],
-    writer: &mut dyn Write,
-    mut read: impl FnMut(u32, &mut dyn Write) -> io::Result<()>,
-) -> io::Result<()> {
-    let mut written = 0;
-    for &(at, subject) in marks {
-        writer.write_all(&report[written..at])?;
-        written = at;
-        read(subject, writer)?;
-    }
-    writer.write_all(&report[written..])
 }
 
 /// Writes `text` to `sink` after `report` is flushed (nothing for an empty text).

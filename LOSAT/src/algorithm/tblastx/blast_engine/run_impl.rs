@@ -1648,17 +1648,6 @@ fn open_search_database(
             }
         }
     }
-    // The BLAST XML (outfmt 5, and the XML2 and JSON documents of 16 and 15) cannot write a
-    // `-db` name outside US-ASCII: refused before the search (`names::check_database_name`).
-    if let Some(database) = database.as_ref() {
-        if outputs
-            .formats
-            .iter()
-            .any(|format| report::output_format(format.outfmt).is_structured_xml())
-        {
-            crate::report::blast_xml::names::check_database_name("TBLASTX", database.name())?;
-        }
-    }
     Ok(database)
 }
 
@@ -2624,7 +2613,9 @@ fn write_tblastx_outputs(
         let mut warnings = (warning_lines.is_some()
             || matches!(
                 output_format,
-                report::TblastxOutputFormat::Xml2(_) | report::TblastxOutputFormat::Archive
+                report::TblastxOutputFormat::Xml
+                    | report::TblastxOutputFormat::Xml2(_)
+                    | report::TblastxOutputFormat::Archive
             )
             || matches!(
                 output_format,

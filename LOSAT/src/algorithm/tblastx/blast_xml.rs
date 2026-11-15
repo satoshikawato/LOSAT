@@ -198,7 +198,6 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         ),
         None => ("", 0, 0),
     };
-    names::check_database_name(PROGRAM, db_name)?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2206-2208 (XML2
     // and JSON) and :2242-2243 (BLAST XML)
     // ```c++
@@ -280,6 +279,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         .map(|(q_idx, query)| {
             names::query_text(
                 PROGRAM,
+                query.local_id.as_bytes(),
                 query.warning_id(),
                 query.believed(),
                 query.title(),
@@ -339,7 +339,12 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         if q_idx == reports {
             // The held report that is never written (`written_queries`).
             document.unwritten(&mut buf)?;
-            writer.write_all(&buf)?;
+            crate::report::query_warnings::write_document_posts(
+                &buf,
+                document.take_posts(),
+                writer,
+                warnings.as_deref_mut(),
+            )?;
             buf.clear();
             break;
         }
@@ -359,7 +364,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
             );
         }
         let xml_query = XmlQuery {
-            id: query.local_id.as_bytes(),
+            id: text.query_id(query.local_id.as_bytes()),
             title: &text.title,
             len: i32::try_from(searched_length)?,
             stats: query_stats(&run.query_stats[q_idx], run.numbers),
@@ -466,6 +471,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         });
         // A failed query leaves its partial bytes in `buf`, which the error return drops.
         written?;
+        posts.document(document.take_posts());
         crate::report::query_warnings::write_hit_posts(
             &buf,
             &posts,
@@ -477,7 +483,12 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     }
     if run.epilog {
         document.finish(&mut buf)?;
-        writer.write_all(&buf)?;
+        crate::report::query_warnings::write_document_posts(
+            &buf,
+            document.take_posts(),
+            writer,
+            warnings,
+        )?;
     }
     Ok(())
 }

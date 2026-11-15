@@ -186,10 +186,13 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         (e.exit == 1 && e.message.starts_with("Command line argument error"))
             || (e.exit == 6 && e.message == "BLAST failed to write output\n")
             || (e.exit == 3 && e.message.starts_with("BLAST engine error: "))
+            || e.exit == 255
     }) {
         // An outfmt 13 or 14 side file NCBI cannot open (`CArgException`, exit status 1), or a
         // write to one that fails (`framing::side_file_write_error`), or NCBI's engine error made
-        // already (`blast_xml::matrix::unsupported_score_matrix`).
+        // already (`blast_xml::matrix::unsupported_score_matrix`), or an exception of NCBI's XML
+        // stream that ends the run (`CATCH_ALL`'s `CException`, exit status 255:
+        // `blast_xml::writer::run_ending_exception`).
         error
     } else if error.downcast_ref::<report::TabularFlushError>().is_some() {
         NativeError{exit:-6,message:"terminate called after throwing an instance of 'std::__ios_failure'\n  what():  basic_ios::clear: iostream error\n".into()}.into()
@@ -760,11 +763,6 @@ fn run_inner(
             Program::Blastx,
         )?;
     }
-    // LOSAT's refusal of a database name that BLAST XML (outfmt 5, 15 and 16) cannot write,
-    // before the search (`blast_xml::check_database_name`).
-    if let (Some(database), true) = (database.as_ref(), structured_xml) {
-        super::blast_xml::check_database_name(database.name())?;
-    }
     // How the search reads the query file (`-parse_deflines`, its ids, `-strand`), which the
     // reads of the file before the search share (`QueryStreamSettings`).
     let query_settings = QueryStreamSettings {
@@ -861,14 +859,11 @@ fn run_inner(
         // subject with parsed Seq-ids (`BlastxDatabase::later_batch_may_refuse`; outfmt 5 looks
         // the batch's subjects up in its prefetch, `ReportedSubjects::batch_prefetch`, DBID item
         // T, and asks no scientific name) holds its document too.
-        let prefetch = prefetches_subjects(Some(choice.number));
         let database_may_refuse = database
             .as_ref()
-            .is_some_and(|database| database.later_batch_may_refuse(!prefetch));
+            .is_some_and(|database| database.later_batch_may_refuse());
         if xml_matrix.is_none()
-            && (scan.messages_may_be_refused
-                || database_may_refuse
-                || super::blast_xml::subjects_may_be_refused(&subjects))
+            && (database_may_refuse || super::blast_xml::subjects_may_be_refused(&subjects))
         {
             held.hold();
         }

@@ -1,20 +1,12 @@
 //! The names outfmt 5 writes: the query and subject definition lines, the `Iteration_message`,
-//! and the refusal of what NCBI cannot write (DESIGN_OF4 1.5, 2.2, 2.3).
+//! and the refusal of what NCBI crashes on (DESIGN_OF4 1.5, 2.2, 2.3). NCBI's XML stream writes
+//! every other text itself, a byte >= 0x80 or a control byte included (`report::serial::xml`).
 
 use crate::report::defline::generate_defline;
 
-/// NCBI's `-outfmt 5` cannot write the text (or crashes making it); LOSAT refuses the search.
+/// NCBI's `-outfmt 5` crashes making the text; LOSAT refuses the search.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Refusal {
-    /// A byte >= 0x80: the US-ASCII stream throws (`CUtf8::SymbolToChar`, corelib/ncbistr.cpp:
-    /// 6900-6903): rc 255 for the first query's header, a failed Iteration or Hit otherwise.
-    NonAscii,
-    /// A control byte (0x01-0x1F other than TAB, LF, CR), which NCBI's stream replaces by `#`
-    /// with an error message.
-    Control,
-    /// `GenerateDefline` throws: `NStr::HtmlDecode` cannot guess the title's encoding
-    /// (the title has a byte >= 0x80).
-    UnknownEncoding,
     /// `x_CleanAndCompress` reads past the end of the title (NCBI crashes there).
     ReadsPastEnd,
 }
@@ -31,43 +23,25 @@ impl Refusal {
     /// The reason, as the end of "a query title with ..." in a message.
     pub fn describe(self) -> &'static str {
         match self {
-            Refusal::NonAscii => "a character outside the US-ASCII range (which the XML output of NCBI BLAST+ cannot write)",
-            Refusal::Control => "a control character (which NCBI BLAST+ replaces by '#' with an error message in the XML output)",
-            Refusal::UnknownEncoding => "an encoding that NCBI BLAST+ cannot guess",
-            Refusal::ReadsPastEnd => "punctuation that NCBI BLAST+ 2.17.0 crashes on when it makes the definition line",
+            Refusal::ReadsPastEnd => {
+                "punctuation that NCBI BLAST+ 2.17.0 crashes on when it makes the definition line"
+            }
         }
     }
-}
-
-/// Whether `text` can be written by NCBI's XML stream: no byte >= 0x80, and no control byte
-/// other than TAB, LF and CR.
-pub fn check_text(text: &[u8]) -> Result<(), Refusal> {
-    for &byte in text {
-        if byte >= 0x80 {
-            return Err(Refusal::NonAscii);
-        }
-        if byte < 0x20 && !matches!(byte, 0x09 | 0x0a | 0x0d) {
-            return Err(Refusal::Control);
-        }
-    }
-    Ok(())
-}
-
-/// Refuses a `-db` name that NCBI's XML stream cannot write (a byte outside US-ASCII); each
-/// program checks it before its search.
-pub fn check_database_name(program: &str, name: &str) -> anyhow::Result<()> {
-    check_text(name.as_bytes()).map_err(|refusal| refusal.error(program, "a database name"))
 }
 
 /// `CDeflineGenerator().GenerateDefline(bh)` of a record with the FASTA title `title` (no
-/// flags), checked for what the XML stream can write.
-fn generated(title: &[u8], protein: bool) -> Result<Vec<u8>, Refusal> {
-    let defline = generate_defline(title, protein, false).map_err(|_| Refusal::UnknownEncoding)?;
+/// flags): the definition line, or `None` where it throws (`NStr::HtmlDecode` cannot guess the
+/// title's encoding, `report::defline::UnknownEncoding`), which NCBI's XML writers catch
+/// (`QueryText::id`, `SubjectNames::of_unknown`).
+fn generated(title: &[u8], protein: bool) -> Result<Option<Vec<u8>>, Refusal> {
+    let Ok(defline) = generate_defline(title, protein, false) else {
+        return Ok(None);
+    };
     if defline.reads_past_end {
         return Err(Refusal::ReadsPastEnd);
     }
-    check_text(&defline.text)?;
-    Ok(defline.text)
+    Ok(Some(defline.text))
 }
 
 /// What outfmt 5 writes for an empty query or subject title (blastxml_format.cpp:557-565);
@@ -76,8 +50,9 @@ pub const NO_DEFINITION_LINE: &[u8] = b"No definition line";
 
 /// The definition line of a query as generated (`GenerateDefline`, blastxml_format.cpp:
 /// 557-565; blastxml2_format.cpp:590-592): empty for an empty nucleotide title, which
-/// `Iteration_query-def` replaces by `No definition line` and `Search_query-title` omits.
-pub fn xml_query_title(title: &[u8], protein: bool) -> Result<Vec<u8>, Refusal> {
+/// `Iteration_query-def` replaces by `No definition line` and `Search_query-title` omits; `None`
+/// where `GenerateDefline` throws.
+pub fn xml_query_title(title: &[u8], protein: bool) -> Result<Option<Vec<u8>>, Refusal> {
     generated(title, protein)
 }
 
@@ -87,15 +62,34 @@ fn believed_query_title(
     title: &[u8],
     protein: bool,
     believed: &crate::blastinput::fasta_reader::believed::BelievedIds,
-) -> Result<Vec<u8>, Refusal> {
+) -> Result<Option<Vec<u8>>, Refusal> {
     let ids = crate::report::db_subject::bioseq_facts(&believed.ids);
-    let defline = crate::report::defline::generate_bioseq_defline(title, protein, false, &ids)
-        .map_err(|_| Refusal::UnknownEncoding)?;
+    let Ok(defline) = crate::report::defline::generate_bioseq_defline(title, protein, false, &ids)
+    else {
+        return Ok(None);
+    };
     if defline.reads_past_end {
         return Err(Refusal::ReadsPastEnd);
     }
-    check_text(&defline.text)?;
-    Ok(defline.text)
+    Ok(Some(defline.text))
+}
+
+/// `kSeqId.AsFastaString()` of a query or `-subject` record: `lcl|` and the local id, or the
+/// FASTA form of the best id that `-parse_deflines` read; what NCBI's XML writers name a record
+/// whose `GenerateDefline` threw.
+pub fn fasta_id(
+    local_id: &[u8],
+    believed: Option<&crate::blastinput::fasta_reader::believed::BelievedIds>,
+) -> Vec<u8> {
+    let mut out = Vec::new();
+    match believed {
+        Some(ids) => crate::seqid::label::fasta(&ids.best, &mut out),
+        None => {
+            out.extend_from_slice(b"lcl|");
+            out.extend_from_slice(local_id);
+        }
+    }
+    out
 }
 
 /// The `Hit_id` and the title of a `-subject` record: the first word of the generated
@@ -106,22 +100,17 @@ pub fn xml_subject_names(
     local_id: &[u8],
     title: &[u8],
     protein: bool,
-) -> Result<(Vec<u8>, Vec<u8>), Refusal> {
-    let text = generated(title, protein)?;
+) -> Result<Option<(Vec<u8>, Vec<u8>)>, Refusal> {
+    let Some(text) = generated(title, protein)? else {
+        return Ok(None);
+    };
     let word = text.split(|&byte| byte == b' ').next().unwrap_or(&[]);
     let id = if word.is_empty() {
         local_id.to_vec()
     } else {
         word.to_vec()
     };
-    Ok((id, text))
-}
-
-/// The title of a `-db` sequence: the stored title as stored (showdefline.cpp:265-303 reads
-/// the Blast-def-line's title).
-pub fn xml_db_title(stored_title: &[u8]) -> Result<Vec<u8>, Refusal> {
-    check_text(stored_title)?;
-    Ok(stored_title.to_vec())
+    Ok(Some((id, text)))
 }
 
 /// The `Iteration_message` of a query (data4xmlformat.cpp:156-169), or `None` when empty.
@@ -179,18 +168,47 @@ pub fn xml_message(query_id: &[u8], warnings: &[String], has_hits: bool) -> Opti
     (!message.is_empty()).then_some(message)
 }
 
-/// The title and message of a query, made and checked before the document is written.
+/// The title and message of a query, made before the document is written.
 pub struct QueryText {
-    /// The generated title (`xml_query_title`).
+    /// The generated title (`xml_query_title`; empty where `GenerateDefline` threw).
     pub title: Vec<u8>,
     pub message: Option<Vec<u8>>,
+    /// Where `GenerateDefline` threw: the query's id that NCBI's catch writes in place of the
+    /// record's (`kSeqId.AsFastaString()`, `fasta_id`), with no title (outfmt 5: `No
+    /// definition line`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:552-563
+    /// ```c++
+    ///     try {
+    ///         CBioseq_Handle bh = scope->GetBioseqHandle(kSeqId);
+    ///         ...
+    ///         query_def = sequence::CDeflineGenerator().GenerateDefline(bh);
+    ///     } catch (const CException&) {
+    ///         one_query_iter->SetQuery_ID(kSeqId.AsFastaString());
+    ///     };
+    ///
+    ///     if (query_def == NcbiEmptyString)
+    ///         query_def = "No definition line";
+    /// ```
+    /// (The header, blastxml_format.cpp:700-711, and XML2's `Search`, blastxml2_format.cpp:
+    /// 585-595, catch it the same way.)
+    pub id: Option<Vec<u8>>,
+}
+
+impl QueryText {
+    /// The query's id in the document: `record_id`, or the one NCBI's catch writes (`id`).
+    pub fn query_id<'a>(&'a self, record_id: &'a [u8]) -> &'a [u8] {
+        self.id.as_deref().unwrap_or(record_id)
+    }
 }
 
 /// The `QueryText` of one query (`program` names the program in a refusal): its record's
-/// `warning_id` (`FastaRecord::warning_id`: `Query_N` without `-parse_deflines`) and FASTA `title`,
-/// the query's warning messages and whether it has Seq-aligns.
+/// `local_id`, `warning_id` (`FastaRecord::warning_id`: `Query_N` without `-parse_deflines`) and
+/// FASTA `title`, the query's warning messages and whether it has Seq-aligns.
+#[allow(clippy::too_many_arguments)]
 pub fn query_text(
     program: &str,
+    local_id: &[u8],
     warning_id: &[u8],
     believed: Option<&crate::blastinput::fasta_reader::believed::BelievedIds>,
     title: &[u8],
@@ -203,14 +221,19 @@ pub fn query_text(
         None => xml_query_title(title, protein),
     }
     .map_err(|refusal| refusal.error(program, "a query title"))?;
-    let id = crate::report::query_warnings::warning_query_id(warning_id, title);
-    let message = xml_message(&id, warnings, has_hits);
-    if let Some(message) = &message {
-        check_text(message).map_err(|refusal| refusal.error(program, "a query title"))?;
-    }
-    Ok(QueryText {
-        title: generated,
-        message,
+    let message_id = crate::report::query_warnings::warning_query_id(warning_id, title);
+    let message = xml_message(&message_id, warnings, has_hits);
+    Ok(match generated {
+        Some(title) => QueryText {
+            title,
+            message,
+            id: None,
+        },
+        None => QueryText {
+            title: Vec::new(),
+            message,
+            id: Some(fasta_id(local_id, believed)),
+        },
     })
 }
 
@@ -229,6 +252,7 @@ pub fn query_texts(
         .map(|(q_idx, record)| {
             query_text(
                 program,
+                record.local_id.as_bytes(),
                 record.warning_id(),
                 record.believed(),
                 &record.title,
@@ -277,64 +301,95 @@ mod tests {
         // blastp_sub_titles (DESIGN_OF4 2.2, 2.3)
         assert_eq!(
             xml_query_title(b"q1 title ending with periods...", true).unwrap(),
-            b"q1 title ending with periods"
+            Some(b"q1 title ending with periods".to_vec())
         );
         assert_eq!(
             xml_query_title(b"TPA: q3 prefixed", true).unwrap(),
-            b"q3 prefixed"
+            Some(b"q3 prefixed".to_vec())
         );
         assert_eq!(
             xml_query_title(b"q4  double  space ,  comma ;", true).unwrap(),
-            b"q4 double space, comma"
+            Some(b"q4 double space, comma".to_vec())
         );
         assert_eq!(
             xml_query_title(b"", true).unwrap(),
-            b"unnamed protein product"
+            Some(b"unnamed protein product".to_vec())
         );
         // an empty nucleotide title stays empty: outfmt 5 writes `No definition line` for it,
         // XML2 omits the member
-        assert_eq!(xml_query_title(b"", false).unwrap(), b"");
-        let (id, def) = xml_subject_names(b"Subject_1", b"s1 subj ending.", true).unwrap();
+        assert_eq!(xml_query_title(b"", false).unwrap(), Some(Vec::new()));
+        let (id, def) = xml_subject_names(b"Subject_1", b"s1 subj ending.", true)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             (id.as_slice(), def.as_slice()),
             (&b"s1"[..], &b"s1 subj ending"[..])
         );
-        let (id, def) = xml_subject_names(b"Subject_2", b"s2 &amp; <y> \"q\"", true).unwrap();
+        let (id, def) = xml_subject_names(b"Subject_2", b"s2 &amp; <y> \"q\"", true)
+            .unwrap()
+            .unwrap();
         assert_eq!(id, b"s2");
         // decoded; the encoder escapes it again
         assert_eq!(def, b"s2 & <y> \"q\"");
-        let (id, def) = xml_subject_names(b"Subject_4", b"TPA: s4 tpa", true).unwrap();
+        let (id, def) = xml_subject_names(b"Subject_4", b"TPA: s4 tpa", true)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             (id.as_slice(), def.as_slice()),
             (&b"s4"[..], &b"s4 tpa"[..])
         );
         // an empty protein title: `unnamed`; an empty nucleotide title: the local ID
-        let (id, def) = xml_subject_names(b"Subject_5", b"", true).unwrap();
+        let (id, def) = xml_subject_names(b"Subject_5", b"", true).unwrap().unwrap();
         assert_eq!(
             (id.as_slice(), def.as_slice()),
             (&b"unnamed"[..], &b"unnamed protein product"[..])
         );
-        let (id, def) = xml_subject_names(b"Subject_1", b"", false).unwrap();
+        let (id, def) = xml_subject_names(b"Subject_1", b"", false)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             (id.as_slice(), def.as_slice()),
             (&b"Subject_1"[..], &b""[..])
         );
-        // -db: the stored title as stored
-        assert_eq!(
-            xml_db_title(b"s1 subj ending.").unwrap(),
-            b"s1 subj ending."
-        );
-        assert_eq!(xml_db_title(b"TPA: s4 tpa").unwrap(), b"TPA: s4 tpa");
-        assert_eq!(xml_db_title(b"").unwrap(), b"");
     }
 
     #[test]
-    fn what_ncbi_cannot_write_is_refused() {
-        assert!(xml_query_title("caf\u{e9}".as_bytes(), true).is_err());
-        assert!(xml_query_title(b"caf\xe9", true).is_err());
-        assert_eq!(xml_query_title(b"a\x01b", true), Err(Refusal::Control));
-        assert!(xml_subject_names(b"Subject_1", "\u{e9}".as_bytes(), true).is_err());
-        assert_eq!(xml_db_title("\u{e9}".as_bytes()), Err(Refusal::NonAscii));
-        assert_eq!(check_text(b"tab\there\n"), Ok(()));
+    fn titles_ncbi_cannot_decode_are_its_catch_and_the_rest_reaches_the_stream() {
+        // K4h probe q.mq classes: valid UTF-8 and Latin-1 titles are written by the stream
+        // (which throws there), an undecidable encoding is NCBI's catch (`None`). A last byte
+        // >= 0x80 is dropped by `x_CleanAndCompress` (u2end: `q33 one\xc3`).
+        assert_eq!(
+            xml_query_title("caf\u{e9} x".as_bytes(), true).unwrap(),
+            Some("caf\u{e9} x".as_bytes().to_vec())
+        );
+        assert_eq!(
+            xml_query_title("caf\u{e9}".as_bytes(), true).unwrap(),
+            Some(b"caf\xc3".to_vec())
+        );
+        assert_eq!(
+            xml_query_title(b"q6 a\xe9b z", true).unwrap(),
+            Some(b"q6 a\xc3\xa9b z".to_vec())
+        );
+        assert_eq!(xml_query_title(b"q9 a\x81b z", true).unwrap(), None);
+        assert_eq!(
+            xml_subject_names(b"Subject_8", b"s8 a\x81b z", true),
+            Ok(None)
+        );
+        assert_eq!(fasta_id(b"Query_9", None), b"lcl|Query_9");
+        let text = query_text(
+            "BLASTP",
+            b"Query_9",
+            b"Query_9",
+            None,
+            b"q9 a\x81b z",
+            true,
+            &[],
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            (text.title.as_slice(), text.query_id(b"Query_9")),
+            (&b""[..], &b"lcl|Query_9"[..])
+        );
     }
 }

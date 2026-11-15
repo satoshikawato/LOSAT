@@ -19,7 +19,7 @@ fn put<F: SideFiles>(
 ) -> anyhow::Result<()> {
     doc.report(&mut Vec::new(), out, |_, made| {
         made.extend_from_slice(report);
-        Ok(())
+        Ok(crate::report::blast_xml2::framing::MadeReport::default())
     })
 }
 
@@ -361,7 +361,7 @@ fn a_report_is_made_after_the_bytes_written_before_it() {
             doc.report(&mut Vec::new(), &mut out, |at, made| {
                 start = at;
                 made.extend_from_slice(format!("{{{n}}}\n").as_bytes());
-                Ok(())
+                Ok(crate::report::blast_xml2::framing::MadeReport::default())
             })
             .unwrap();
             befores.push(String::from_utf8(out[..start].to_vec()).unwrap());
@@ -561,6 +561,7 @@ fn one_hsp_named(
                     taxid,
                     taxonomy,
                     descriptions: &[],
+                    defline_thrown: false,
                 },
                 |hsps| {
                     hsps.hsp(&XmlHsp {
@@ -683,6 +684,7 @@ fn blastn_document(kind: Xml2Kind, minus: bool) -> String {
                     taxid: 0,
                     taxonomy: crate::report::blast_xml::records::UNNAMED,
                     descriptions: &[],
+                    defline_thrown: false,
                 },
                 |hsps| {
                     hsps.hsp(&XmlHsp {
@@ -1165,4 +1167,143 @@ fn side_files_on_the_file_system_are_truncated_and_numbered() {
     assert!(error.downcast_ref::<crate::cli::NativeError>().is_some());
     assert_eq!(std::fs::read(dir.join("p.out_1.xml")).unwrap(), b"one\n");
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// A 16 document of one `-db` query with `hits` hits titled `hits_title` (the last one `last_title`)
+/// and the message `message`, with the posts of its writer (`StructuredXml::take_posts`).
+fn many_hits_16(
+    hits: usize,
+    hits_title: &[u8],
+    last_title: &[u8],
+    message: Option<&[u8]>,
+) -> (Vec<u8>, Vec<crate::report::blast_xml::DocumentPost>) {
+    let matrix = FormattingMatrix::new("BLOSUM62").unwrap();
+    let run = run(Some(&matrix), b"db/sprot");
+    let mut writer = Xml2Writer::new(Xml2Kind::Single16, params(Xml2Target::Database));
+    let query = XmlQuery {
+        id: b"Query_1",
+        title: b"q1",
+        len: 12,
+        stats: XmlStats::NONE,
+        message,
+        searched: true,
+        masks: &[],
+    };
+    let mut out = Vec::new();
+    writer.start(&mut out);
+    let mut posts = writer.take_posts();
+    let base = out.len();
+    writer
+        .query(&run, &query, &mut out, |sink| {
+            for n in 0..hits {
+                let title = if n + 1 == hits {
+                    last_title
+                } else {
+                    hits_title
+                };
+                sink.hit(
+                    &XmlHit {
+                        id: b"gnl|BL_ORD_ID|3",
+                        title,
+                        accession: b"3",
+                        len: 20,
+                        taxid: 0,
+                        taxonomy: crate::report::blast_xml::records::UNNAMED,
+                        descriptions: &[],
+                        defline_thrown: false,
+                    },
+                    |hsps| {
+                        hsps.hsp(&XmlHsp {
+                            score: 21,
+                            bit_score: 12.697412345,
+                            evalue: 1.515236,
+                            query_from: 3,
+                            query_to: 8,
+                            hit_from: 5,
+                            hit_to: 10,
+                            query_frame: 0,
+                            hit_frame: 0,
+                            qrow: b"WCNYFW",
+                            srow: b"WENYCW",
+                            ops: None,
+                            query_first: 2,
+                            query_step: 1,
+                        })
+                    },
+                )?;
+            }
+            Ok(())
+        })
+        .unwrap();
+    posts.extend(writer.take_posts());
+    assert!(posts.iter().all(|post| post.at >= base));
+    writer.finish(&mut out).unwrap();
+    posts.extend(writer.take_posts());
+    (out, posts)
+}
+
+#[test]
+fn every_text_of_a_report_that_is_no_string_element_is_a_number() {
+    // `is_string_element` decides how NCBI's buffer writes an element's text
+    // (`out_buffer::xml_written_at`): the elements it leaves out hold numbers only.
+    let (out, _) = many_hits_16(2, b"s1 title", b"s1 title", Some(b"Query_1 m"));
+    let text = String::from_utf8(out).unwrap();
+    let mut checked = 0;
+    for line in text.lines().chain(INVALID_ONLY_16.lines()) {
+        let line = line.trim_start();
+        let Some(rest) = line.strip_prefix('<') else {
+            continue;
+        };
+        let Some((tag, rest)) = rest.split_once('>') else {
+            continue;
+        };
+        let Some((value, _)) = rest.split_once("</") else {
+            continue;
+        };
+        if !super::writer::is_string_element(tag.as_bytes()) {
+            assert!(value.parse::<f64>().is_ok(), "{tag}: {value}");
+            checked += 1;
+        }
+    }
+    assert!(checked > 20, "{checked}");
+}
+
+#[test]
+fn a_16_report_posts_its_control_characters_and_its_exception_as_ncbi_writes_them() {
+    // A control character: `#`, the post after the bytes NCBI's buffer had written (the report's
+    // start until 4 KiB of it fill the buffer; K4h probe t.c01: `...description.sciname` line 39).
+    let (out, posts) = many_hits_16(1, b"\x01s1 a", b"\x01s1 a", None);
+    assert_eq!(posts.len(), 1);
+    // The report starts after the document's start (`PrintProlog`).
+    let report_start = super::framing::header16().len();
+    assert_eq!(posts[0].at, report_start);
+    let post = String::from_utf8(posts[0].text.clone()).unwrap();
+    assert!(
+        post.starts_with("Error: (803.7) [blastp] BlastOutput2.report.results.search.hits.description.title\nBad char [0x1] in string at line "),
+        "{post}"
+    );
+    assert!(String::from_utf8_lossy(&out).contains("<title>#s1 a</title>"));
+    // The same character in a message after many hits: NCBI's buffer has written some of the
+    // report by then (whole buffers less the byte it keeps back).
+    let (out, posts) = many_hits_16(40, b"s1 title", b"s1 title", Some(b"\x01Query_1"));
+    assert_eq!(posts.len(), 1);
+    let written = posts[0].at - report_start;
+    let message = out.windows(9).position(|w| w == b"<message>").unwrap();
+    assert!(
+        written > 4000 && report_start + written < message,
+        "{written}"
+    );
+    // An exception: the report is cut at the failing byte, the post follows it, the document
+    // goes on with its end.
+    let (out, posts) = many_hits_16(3, b"s1 title", b"s1 a\xc3\xa9b", None);
+    assert_eq!(posts.len(), 1);
+    let cut = out.len() - b"</BlastXML2>\n".len();
+    assert!(out[..cut].ends_with(b"<title>s1 a"));
+    assert_eq!(posts[0].at, cut);
+    let post = String::from_utf8(posts[0].text.clone()).unwrap();
+    assert!(post.starts_with("Error: [blastp]  Frame type= eFrameNamed, Object type= BlastOutput2NCBI C++ Exception:\n"), "{post}");
+    assert!(
+        post.ends_with("Object type= BlastOutput2 (m_Pos = 0)\n\n"),
+        "{post}"
+    );
 }

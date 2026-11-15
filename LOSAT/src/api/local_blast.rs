@@ -11,6 +11,7 @@ use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::path::Path;
 
+use crate::record::FastaRecord;
 use crate::report::blast_xml::XmlStats;
 use crate::report::PairwiseHit;
 
@@ -502,6 +503,23 @@ pub trait FormatObserver {
     /// names, by that index. The call comes once, with `ReportOutputs::hits` only (the program
     /// does not make these values otherwise).
     fn database_subjects(&mut self, _subjects: Vec<ReportedSubject>) {}
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:537-543
+    // ```c++
+    // 		scope->AddTopLevelSeqEntry(pssm->SetQuery());
+    //
+    // 		CRef<CSeq_loc> sl(new CSeq_loc());
+    // 		sl->SetWhole().Assign(*pssm->GetQuery().GetSeq().GetFirstId());
+    //
+    // 		CRef<CBlastSearchQuery> q(new CBlastSearchQuery(*sl, *scope));
+    // 		CRef<CBlastQueryVector> query(new CBlastQueryVector());
+    // ```
+    // A PSSM search's query is the PSSM's Bioseq, which the inputs do not hold
+    // (`api::Inputs::pssm`): the search reads it with the options.
+    /// The query of a PSSM search (psiblast's and tblastn's `-in_pssm`): the record of the PSSM's
+    /// sequence as the reports show it, the query 0 of the hit lists. The call comes once, before
+    /// the search's queries (`queries_begin`), and only for a PSSM query.
+    fn pssm_query(&mut self, _query: &FastaRecord) {}
 
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:250-285
     // ```c++

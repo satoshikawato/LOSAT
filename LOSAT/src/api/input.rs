@@ -258,10 +258,12 @@ pub fn read_inputs(
 ///
 /// The records come from [`read_fasta`] with the search's program and the input's role, or
 /// from [`FastaRecord::new`]. A database subject comes from [`Inputs::database`]: the engine
-/// opens it by its name, as the command line opens `-db`.
+/// opens it by its name, as the command line opens `-db`. A PSSM query of psiblast and tblastn
+/// comes from [`Inputs::pssm`] and [`Inputs::pssm_database`]: the engine reads the file, as the
+/// command line reads `-in_pssm`.
 #[derive(Debug, Clone, Copy)]
 pub struct Inputs<'a> {
-    /// The query records (`-query`).
+    /// The query records (`-query`); none for a PSSM query (`pssm`).
     pub(crate) query: &'a [FastaRecord],
     /// The subject records (`-subject`); none for a database.
     pub(crate) subject: &'a [FastaRecord],
@@ -273,6 +275,8 @@ pub struct Inputs<'a> {
     pub(crate) subject_name: &'a str,
     /// Whether the subject is the database `subject_name` (`-db`).
     pub(crate) database: bool,
+    /// The PSSM file whose sequence is the one query (`-in_pssm`), in place of query records.
+    pub(crate) pssm: Option<&'a std::path::Path>,
 }
 
 impl<'a> Inputs<'a> {
@@ -284,6 +288,7 @@ impl<'a> Inputs<'a> {
             query_name: "query",
             subject_name: "subject",
             database: false,
+            pssm: None,
         }
     }
 
@@ -305,11 +310,52 @@ impl<'a> Inputs<'a> {
             query_name: "query",
             subject_name: name,
             database: true,
+            pssm: None,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1338-1340
+    // ```c++
+    //     if (args.Exist(kArgPSIInputChkPntFile) && args[kArgPSIInputChkPntFile]) {
+    //         CNcbiIstream& in = args[kArgPSIInputChkPntFile].AsInputFile();
+    //         _ASSERT(m_Pssm.Empty());
+    // ```
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:450
+    // ```c++
+    //         CRef<CPssmWithParameters> pssm = m_CmdLineArgs->GetInputPssm();
+    // ```
+    /// The query of the PSSM file `path` (psiblast's checkpoint file, as `-out_pssm` writes it)
+    /// against the subject records: the command line's `-in_pssm path` of psiblast and of tblastn
+    /// (PSI-TBLASTN), in place of `-query`. The search reads the file as the command line reads
+    /// it, with its messages and errors (not `-`, the command line's standard input); the one
+    /// query is the PSSM's sequence (query 0 of the results, `HspRecord::query_id` as the reports
+    /// show it).
+    pub fn pssm(path: &'a std::path::Path, subject: &'a [FastaRecord]) -> Self {
+        Self {
+            pssm: Some(path),
+            ..Self::new(&[], subject)
+        }
+    }
+
+    /// The query of the PSSM file `path` against the BLAST database `name`: the command line's
+    /// `-in_pssm path -db name` (`Inputs::pssm`, `Inputs::database`).
+    pub fn pssm_database(path: &'a std::path::Path, name: &'a str) -> Self {
+        Self {
+            pssm: Some(path),
+            ..Self::database(&[], name)
+        }
+    }
+
+    /// The number of queries: the records, or the one sequence of a PSSM file.
+    pub(crate) fn query_count(&self) -> usize {
+        match self.pssm {
+            Some(_) => 1,
+            None => self.query.len(),
         }
     }
 
     /// The same inputs, shown with these names (the file names of a command line whose output
-    /// the search is to reproduce). A database keeps its name.
+    /// the search is to reproduce). A database keeps its name, a PSSM query its file.
     pub fn named(self, query_name: &'a str, subject_name: &'a str) -> Self {
         Self {
             query_name,

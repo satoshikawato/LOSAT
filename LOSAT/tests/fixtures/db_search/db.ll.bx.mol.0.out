@@ -1,0 +1,114 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: prot_v5 (parsed Seq-ids)
+           51 sequences; 4,677 total letters
+
+
+
+Query= qn1 query protein one, back-translated
+
+Length=420
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+long1 long title word long title word long title word long title ...  121     1e-41
+
+
+>long1 long title word long title word long title word long title word 
+long title word long title word long title word long title 
+word long title word long title word long title word long 
+title word long title word long title word long title word long 
+title word long title word long title word long title word 
+long title word 
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-41, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 32249
+
+
+Query= qn2 unrelated protein, back-translated
+
+Length=135
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+long1 long title word long title word long title word long title ...  12.7    1.7  
+
+
+>long1 long title word long title word long title word long title word 
+long title word long title word long title word long title 
+word long title word long title word long title word long 
+title word long title word long title word long title word long 
+title word long title word long title word long title word 
+long title word 
+Length=60
+
+ Score = 12.7 bits (21),  Expect = 1.7, Method: Compositional matrix adjust.
+ Identities = 4/7 (57%), Positives = 4/7 (57%), Gaps = 0/7 (0%)
+ Frame = +1
+
+Query  97   WCNYFWT  117
+            W NY W 
+Sbjct  35   WENYCWP  41
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 9834
+
+
+Query= qnnone no hits
+
+Length=80
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+  Database: prot_v5 (parsed Seq-ids)
+    Posted date:  Oct 26, 2026  9:07 PM
+  Number of letters in database: 4,677
+  Number of sequences in database:  51
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

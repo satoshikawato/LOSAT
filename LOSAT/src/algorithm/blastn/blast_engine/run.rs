@@ -10776,6 +10776,7 @@ fn run_in_pool(
                     );
                 }
             }
+            database::drop_unaligned(database, &mut batch_hit_lists);
             if let Err(error) = database::read_titles(database, &batch_hit_lists, &mut titles) {
                 let error = match error.downcast::<database::HeaderReadError>() {
                     Ok(failure) => failure.error,

@@ -1296,13 +1296,14 @@ fn reported_error(error: anyhow::Error) -> anyhow::Error {
 
 /// The titles of the reported sequences of the query batch `results` of a `-db` search
 /// (`ReportedSubjects::read_titles`, for the reports that `asks` names), read where
-/// NCBI's traceback makes the batch's Seq-aligns, before the batch's prefetch: NCBI's reader error
+/// NCBI's traceback makes the batch's Seq-aligns, before the batch's prefetch, after the hit lists
+/// of no Seq-align leave `results` (`ReportedSubjects::drop_unaligned`): NCBI's reader error
 /// stops the run at this batch, with no epilog. `None` where the database's sequences could not be
 /// read (the batch's search failed with that error).
 pub(super) fn batch_titles(
     database: &BlastxDatabase,
     search_subjects: Subjects<'_>,
-    results: &[BatchResults],
+    results: &mut [BatchResults],
     gapped: bool,
     asks: ReportedAsks,
 ) -> Result<Option<super::database::BatchTitles>> {
@@ -1310,6 +1311,7 @@ pub(super) fn batch_titles(
     if matches!(search_subjects, Subjects::Unreadable) {
         return Ok(None);
     }
+    ReportedSubjects::drop_unaligned(database, results);
     let x_t = super::x_timing::lap();
     let titles = ReportedSubjects::read_titles(database, results, gapped, asks.pairwise);
     super::x_timing::run(XRun::Titles, x_t);

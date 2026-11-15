@@ -428,6 +428,18 @@ pub(super) fn reads_subject(list: &KappaResultList, rows: SubjectFetch) -> bool 
 /// sequence with parsed Seq-ids.
 pub(super) type DatabaseTitles = BTreeMap<u32, ReportedHeader>;
 
+/// The final hit lists `hitlists` of a query batch without the sequences that NCBI makes no
+/// Seq-align of (`shared::SeqAligned`): after their cut to the hit list size, before
+/// `read_titles`.
+pub(super) fn drop_unaligned(database: &TblastnDatabase, hitlists: &mut [KappaResultHitList]) {
+    let Some(mut aligned) = shared::SeqAligned::of(&database.db) else {
+        return;
+    };
+    for hitlist in hitlists {
+        hitlist.with_lists_mut(|lists| aligned.retain(lists, |list| u32::try_from(list.oid).ok()));
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:283-293
 // ```c++
 //     m_TbackSearch.Reset(new CBlastTracebackSearch(m_QueryFactory,

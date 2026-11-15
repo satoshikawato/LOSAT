@@ -960,6 +960,48 @@ impl ReportedHeader {
     }
 }
 
+/// NCBI's Seq-aligns of the final hit lists of a database search (line DBID item lineless):
+/// a hit on a sequence that the database's positive seqid list keeps without any of its
+/// definition lines gets none (`SeqDb::keeps_line`, blast_seqalign.cpp:1582-1586), so it leaves every
+/// report, the prefetch, the taxonomy lookups and psiblast's PSSM, while it was searched, took
+/// its place in the hit list before the cut to `-max_target_seqs` and counts in the
+/// statistics. Each program drops such hit lists right after that cut, before the reads of
+/// the reported sequences; a check reads each sequence's header once (one check per query
+/// batch or search call; the reads of the reports decode the kept ones again).
+pub(crate) struct SeqAligned<'a> {
+    db: &'a SeqDb,
+    kept: std::collections::HashMap<u32, bool>,
+}
+
+impl<'a> SeqAligned<'a> {
+    /// The check of `db`'s hits; `None` where no positive seqid list removes lines (no hit is
+    /// dropped here: `SeqDb::drops_lineless_hits`).
+    pub(crate) fn of(db: &'a SeqDb) -> Option<Self> {
+        db.drops_lineless_hits().then(|| SeqAligned {
+            db,
+            kept: std::collections::HashMap::new(),
+        })
+    }
+
+    /// Whether a hit on `ordinal` gets a Seq-align. A header that cannot be read as NCBI's
+    /// header read adjusts it counts as kept: the reads of the reports then give its error, as
+    /// before (NCBI's `GetSeqIDs` fails at the same Seq-align).
+    fn keeps(&mut self, ordinal: u32) -> bool {
+        let db = self.db;
+        *self
+            .kept
+            .entry(ordinal)
+            .or_insert_with(|| db.keeps_line(ordinal).unwrap_or(true))
+    }
+
+    /// `items` (hit lists, or the HSPs of a batch) without those on a subject that gets no
+    /// Seq-align, in their order; `ordinal` names an item's subject (`None`: no database
+    /// ordinal, kept).
+    pub(crate) fn retain<T>(&mut self, items: &mut Vec<T>, ordinal: impl Fn(&T) -> Option<u32>) {
+        items.retain(|item| ordinal(item).is_none_or(|ordinal| self.keeps(ordinal)));
+    }
+}
+
 /// The reader of the headers of a search's reported database sequences (`read_header`): the
 /// database, with NCBI's lookup of the Seq-align ids of those with parsed Seq-ids
 /// (`SeqDb::seqid_lookup`), made at the first of them and kept for the reader's other reads.

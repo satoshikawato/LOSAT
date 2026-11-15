@@ -38,6 +38,14 @@ impl Source {
 /// An input and the name that the reports show for it.
 type NamedSource = (Source, String);
 
+/// The query of a search: a FASTA input and its name, or a PSSM file (`-in_pssm` of psiblast and
+/// tblastn, `api::Inputs::pssm`), which the search reads.
+#[derive(FromPyObject)]
+pub enum NamedQuery {
+    Fasta(NamedSource),
+    Pssm(PathBuf),
+}
+
 /// The subject of a search: a FASTA input and its name, or no input and the name of a database.
 type NamedSubject = (Option<Source>, String);
 
@@ -50,6 +58,8 @@ pub fn checked(program: &str, argv: &[String]) -> Result<Search, api::Error> {
 /// A checked search and its records.
 pub struct Loaded {
     search: Search,
+    /// The PSSM file of a PSSM query; the query records are then none.
+    pssm: Option<PathBuf>,
     query: Vec<FastaRecord>,
     subject: Vec<FastaRecord>,
     query_name: String,
@@ -62,15 +72,20 @@ impl Loaded {
     fn read(
         program: &str,
         argv: &[String],
-        (query, query_name): NamedSource,
+        query: NamedQuery,
         (subject, subject_name): NamedSubject,
     ) -> Result<Self, api::Error> {
         let search = checked(program, argv)?;
         let database = subject.is_none();
+        let (query, query_name, pssm) = match query {
+            NamedQuery::Fasta((query, query_name)) => (Some(query), query_name, None),
+            NamedQuery::Pssm(path) => (None, String::new(), Some(path)),
+        };
         // A dry run reads no record, as the command line's does not (`Search::dry_run`).
         if search.dry_run() {
             return Ok(Self {
                 search,
+                pssm,
                 query: Vec::new(),
                 subject: Vec::new(),
                 query_name,
@@ -78,7 +93,11 @@ impl Loaded {
                 database,
             });
         }
-        let query_bytes = query.bytes(Role::Query)?;
+        // A PSSM query is read by the search, as the command line's `-in_pssm`.
+        let query_bytes = match &query {
+            Some(query) => query.bytes(Role::Query)?,
+            None => Cow::Borrowed(&[][..]),
+        };
         let subject_bytes = match &subject {
             Some(subject) => subject.bytes(Role::Subject)?,
             None => Cow::Borrowed(&[][..]),
@@ -86,6 +105,7 @@ impl Loaded {
         let (query, subject) = api::read_inputs(&search, &query_bytes, &subject_bytes)?;
         Ok(Self {
             search,
+            pssm,
             query,
             subject,
             query_name,
@@ -95,9 +115,11 @@ impl Loaded {
     }
 
     fn inputs(&self) -> Inputs<'_> {
-        let inputs = match self.database {
-            true => Inputs::database(&self.query, &self.subject_name),
-            false => Inputs::new(&self.query, &self.subject),
+        let inputs = match (self.database, self.pssm.as_deref()) {
+            (true, Some(pssm)) => Inputs::pssm_database(pssm, &self.subject_name),
+            (false, Some(pssm)) => Inputs::pssm(pssm, &self.subject),
+            (true, None) => Inputs::database(&self.query, &self.subject_name),
+            (false, None) => Inputs::new(&self.query, &self.subject),
         };
         inputs.named(&self.query_name, &self.subject_name)
     }
@@ -161,7 +183,7 @@ pub fn run<'py>(
     py: Python<'py>,
     program: &str,
     argv: Vec<String>,
-    query: NamedSource,
+    query: NamedQuery,
     subject: NamedSubject,
     formats: Vec<String>,
 ) -> PyResult<Bound<'py, PyTuple>> {
@@ -209,7 +231,7 @@ pub fn run_to_file(
     py: Python<'_>,
     program: &str,
     argv: Vec<String>,
-    query: NamedSource,
+    query: NamedQuery,
     subject: NamedSubject,
     outfmt: &str,
     path: PathBuf,
@@ -374,7 +396,7 @@ impl Batches {
         py: Python<'_>,
         program: &str,
         argv: Vec<String>,
-        query: NamedSource,
+        query: NamedQuery,
         subject: NamedSubject,
     ) -> PyResult<Self> {
         let running = py
@@ -392,7 +414,7 @@ impl Batches {
         })
     }
 
-    /// How many query records the inputs hold.
+    /// How many queries the inputs hold: the records, or the one sequence of a PSSM file.
     #[getter]
     fn query_count(&self) -> usize {
         self.query_count

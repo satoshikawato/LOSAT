@@ -90,8 +90,8 @@ pub struct Description {
     pub program: Program,
     /// The options that an argv of the library API may hold, in the order of the command
     /// line's help: every option of the program but those the API sets itself (`-query`,
-    /// `-subject`, `-db`, `-out`, `-outfmt`; `search::API_OWNED`), the PSSM query (`-in_pssm`) and
-    /// the search strategy file, which it refuses (`search::file_options`).
+    /// `-subject`, `-db`, `-in_pssm`, `-out`, `-outfmt`; `search::API_OWNED`) and the search
+    /// strategy file, which it refuses (`search::file_options`).
     pub parameters: Vec<Parameter>,
     /// The values that `-query_gencode` accepts; empty for a program without the option.
     pub query_gencodes: Vec<u32>,

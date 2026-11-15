@@ -1010,7 +1010,6 @@ fn search_database(
             crate::report::serial::seqalign::check_database(
                 serial,
                 database.name(),
-                &database.pairwise_database().definition,
                 Program::Blastx,
             )?;
         }

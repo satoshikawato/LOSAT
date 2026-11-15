@@ -3544,7 +3544,16 @@ fn psiblast_pssms(
         let mut warnings = crate::algorithm::psiblast::pssm::PssmReadMessages::default();
         keys.unread_warnings(args.app.ncbi_name(), &unread, &mut warnings);
         files.add_read_warnings(query, warnings);
-        let made = made.and_then(|pssm| files.add(pssm.asn.as_deref(), pssm.ascii));
+        // NCBI's posts of the bytes replaced in the file come as it is written, after the
+        // PSSM's read messages (`PssmFiles::take_read_warnings`).
+        let made = made.and_then(|pssm| {
+            files.add(pssm.asn.as_deref(), pssm.ascii)?;
+            files.add_file_posts(
+                query,
+                crate::algorithm::psiblast::pssm::file_posts(args.app.ncbi_name(), &pssm.asn_posts),
+            );
+            Ok(())
+        });
         if let Err(error) = made {
             return Err(PssmStop {
                 query,
@@ -5707,7 +5716,7 @@ fn open_search_database(
             outputs,
         )?;
     }
-    // LOSAT's refusals of a database for the Seq-annot formats, before the search
+    // LOSAT's refusal of a database name for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
     if let Some(database) = database.as_ref() {
         for format in &outputs.formats {
@@ -5718,7 +5727,6 @@ fn open_search_database(
                 crate::report::serial::seqalign::check_database(
                     serial,
                     database.name(),
-                    &database.pairwise_database().definition,
                     crate::blastinput::app::Program::Blastp,
                 )?;
             }
@@ -5925,10 +5933,9 @@ fn search_cli(
     let QueryRecords { records, end } = read_queries(&mut query_source);
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
     drop(query_source);
-    // The refusal of a title that psiblast's ASN.1 PSSM cannot write comes before the first
-    // byte, and so does that of a PSSM file that LOSAT cannot write as NCBI does (one of the
-    // report streams, a named pipe). (The titles of the archive are checked with the query
-    // batches, `search`.)
+    // The refusal of a PSSM file that LOSAT cannot write as NCBI does (one of the report
+    // streams, a named pipe) comes before the first byte. (A query title with a byte that NCBI's
+    // stream replaces is written as NCBI writes it: `pssm::file_posts`.)
     // psiblast's rounds write the files of their PSSMs too (`PsiRoundPlan::file_request`).
     if let Some(request) = resolved.psi_pssm.as_ref().or_else(|| {
         resolved
@@ -5936,9 +5943,6 @@ fn search_cli(
             .as_deref()
             .and_then(crate::algorithm::psiblast::rounds::PsiRoundPlan::file_request)
     }) {
-        if request.asn_path.is_some() {
-            crate::algorithm::psiblast::pssm::check_pssm_titles(&records)?;
-        }
         crate::algorithm::psiblast::pssm::check_pssm_files(
             request,
             records.len(),
@@ -15219,35 +15223,35 @@ fn run_call(
         .as_ref()
         .map_or(&[][..], |titles| &titles.sources);
     // The warnings are written once, with the first format (`QueryWarnings`).
-    // NCBI makes each query's PSSM after the query's report (`psiblast_pssms`): the warnings of
-    // its reads come before the next query's warnings, and the last query's after its report,
-    // before the epilog (psiblast_app.cpp:304-308 and 562, `PrintEpilog`; review 2 of line DBID
-    // pssmread, H4), where the first format's writer puts them
+    // NCBI makes each query's PSSM after the query's report and writes its file then
+    // (`psiblast_pssms`): the warnings of its reads and the posts of the file's write
+    // (`PssmFiles::take_read_warnings`) come before the next query's warnings, and the last
+    // query's after its report, before the epilog (psiblast_app.cpp:304-308, 319-321 and 562,
+    // `PrintEpilog`; review 2 of line DBID pssmread, H4), where the first format's writer puts them
     // (`QueryWarnings::after_last_query`; the others have no epilog: after the reports).
-    let mut pssm_read_warnings_after = Vec::new();
-    // The bytes of those warnings at the start of each query's lines, before the reader's messages
-    // of its batch (`query_posts` below).
-    let mut pssm_reads_before: Vec<usize> = Vec::new();
+    let mut pssm_posts_after = crate::report::diag_log::Posts::new();
+    // Those posts at the start of each query's posts, before the reader's messages of its batch
+    // (`query_posts` below).
+    let mut pssm_posts_before: Vec<crate::report::diag_log::Posts> = Vec::new();
     if let Some(files) = psiblast_pssms.as_mut() {
         let queries = query_warning_lines.len();
-        for (query, warnings) in files.take_read_warnings() {
-            match query_warning_lines.get_mut(query + 1) {
-                Some(next) => {
-                    if pssm_reads_before.len() <= query + 1 {
-                        pssm_reads_before.resize(query + 2, 0);
-                    }
-                    pssm_reads_before[query + 1] += warnings.len();
-                    next.splice(0..0, warnings);
-                }
-                None if format_plans
-                    .first()
-                    .is_some_and(|outfmt| outfmt.writes_after_last_query()) =>
-                {
-                    query_warning_lines.resize(queries + 1, Vec::new());
-                    query_warning_lines[queries].extend(warnings);
-                }
-                None => pssm_read_warnings_after.extend(warnings),
+        for (query, posts) in files.take_read_warnings() {
+            let before = if query + 1 < queries {
+                query + 1
+            } else if format_plans
+                .first()
+                .is_some_and(|outfmt| outfmt.writes_after_last_query())
+            {
+                query_warning_lines.resize(queries + 1, Vec::new());
+                queries
+            } else {
+                pssm_posts_after.append(&posts);
+                continue;
+            };
+            if pssm_posts_before.len() <= before {
+                pssm_posts_before.resize(before + 1, crate::report::diag_log::Posts::new());
             }
+            pssm_posts_before[before].append(&posts);
         }
     }
     // Each requested format prints the same final result without searching again.
@@ -15348,16 +15352,19 @@ fn run_call(
     // strategy request of each of the call's batches follow the reader's messages of the batch
     // (after psiblast's warnings of the PSSM reads of the query before), in its first query
     // (`query_warnings::query_posts`).
-    let query_posts = crate::report::query_warnings::query_posts(
+    let mut query_posts = crate::report::query_warnings::query_posts(
         query_warning_lines,
         reports
             .call_requests
             .map_or_else(Vec::new, CallRequests::take_posts),
-        |query| {
-            pssm_reads_before.get(query).copied().unwrap_or(0)
-                + reports.reader_warnings.get(query).map_or(0, Vec::len)
-        },
+        |query| reports.reader_warnings.get(query).map_or(0, Vec::len),
     );
+    for (query, mut posts) in pssm_posts_before.into_iter().enumerate() {
+        if let Some(after) = query_posts.get_mut(query).filter(|_| !posts.is_empty()) {
+            posts.append(after);
+            *after = posts;
+        }
+    }
     let mut warning_lines: Option<&[crate::report::diag_log::Posts]> = Some(&query_posts);
     // Every structured format of the call is XML2 or JSON: none writes the report that a
     // `-subject` document holds back (`blast_xml::write_blastp_xml`).
@@ -15380,12 +15387,16 @@ fn run_call(
         let side_sink = format.sink.side_files().cloned();
         // The taxonomy database's messages of XML2 and JSON, and of the organism report's
         // lookups, go to the diagnostics at every format, and the archive saves the warnings of
-        // its batches' queries.
+        // its batches' queries; so do the Seq-annots' posts of the bytes that NCBI's stream
+        // replaces (`seqalign::write_query_to`).
         // The first format's writer also writes the texts of the subjects that the reports
         // read one by one (`subject_reads`).
         let first_lines = warning_lines.take();
         let mut warnings = (first_lines.is_some()
-            || matches!(outfmt, BlastpReport::Xml2(_) | BlastpReport::Archive)
+            || matches!(
+                outfmt,
+                BlastpReport::Xml2(_) | BlastpReport::Archive | BlastpReport::Seqalign(_)
+            )
             || matches!(
                 outfmt,
                 BlastpReport::CustomTabular(spec)
@@ -15445,7 +15456,9 @@ fn run_call(
                     ranges.subject_placements,
                     &engine_counts,
                     &mut writer,
-                    warnings.as_mut(),
+                    warnings
+                        .as_mut()
+                        .expect("a Seq-annot writes its posts to the diagnostics"),
                 )?;
                 // Flushed when written, as the other reports are (a later batch's stop
                 // messages follow it).
@@ -16304,7 +16317,7 @@ fn run_call(
     // formatting and writing of every report, after the search. No NCBI counterpart.
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, output_format_start);
     output_result?;
-    outputs.diagnostics.write_all(&pssm_read_warnings_after)?;
+    pssm_posts_after.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:319-321
     // ```c++
     //        if (m_CmdLineArgs->GetSaveLastPssm()) {

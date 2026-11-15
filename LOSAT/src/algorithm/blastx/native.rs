@@ -746,19 +746,14 @@ fn run_inner(
             )),
         )?,
     }
-    // LOSAT's refusals of a database for the Seq-annot formats, before the search
+    // LOSAT's refusal of a database name for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
     if let (Some(database), Some(serial)) = (
         database.as_ref(),
         app::ReportFormat::from_number(choice.number)
             .and_then(crate::report::serial::SerialFormat::of),
     ) {
-        crate::report::serial::seqalign::check_database(
-            serial,
-            database.name(),
-            &database.pairwise_database().definition,
-            Program::Blastx,
-        )?;
+        crate::report::serial::seqalign::check_database(serial, database.name(), Program::Blastx)?;
     }
     // LOSAT's refusal of a database name that BLAST XML (outfmt 5, 15 and 16) cannot write,
     // before the search (`blast_xml::check_database_name`).

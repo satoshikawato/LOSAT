@@ -561,10 +561,11 @@ pub(super) fn render(
         // (`tabular::tabular_spec`); `None` for the default 6 and 7.
         let custom_tabular = super::tabular::tabular_spec(format.outfmt);
         // So do the warnings of the formatters of a tabular field list that shows a taxonomy
-        // name (`x_CheckTaxDB`, `tabular`).
+        // name (`x_CheckTaxDB`, `tabular`), and the Seq-annots' posts of the bytes that NCBI's
+        // stream replaces (`seqalign::write_query_to`).
         let mut warnings = (warning_lines.is_some()
             || xml2_kind(format.outfmt).is_some()
-            || format_number(format.outfmt) == ARCHIVE_FORMAT
+            || matches!(format_number(format.outfmt), 8 | 9 | 12 | ARCHIVE_FORMAT)
             || custom_tabular
                 .as_ref()
                 .is_some_and(crate::report::tabular::TabularSpec::looks_up_every_taxid))
@@ -724,7 +725,9 @@ pub(super) fn render(
                 shown,
                 hitlists,
                 ranges,
-                warnings.as_mut(),
+                warnings
+                    .as_mut()
+                    .expect("a Seq-annot writes its posts to the diagnostics"),
             )?,
             // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:295
             // ```c++

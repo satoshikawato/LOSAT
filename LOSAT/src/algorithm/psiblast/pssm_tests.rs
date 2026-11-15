@@ -1146,14 +1146,82 @@ fn a_querys_read_messages_keep_the_order_of_the_queries() {
         .add_load_texts([(0, b"text q1\n".to_vec())]);
     // An entry made for texts that are not there is not written.
     let _ = files.read_messages(3);
+    // The posts of a file's write come after the query's read messages; a query with posts only
+    // has them alone, in the order of the queries.
+    let posts = |text: &str| {
+        let mut posts = crate::report::diag_log::Posts::new();
+        posts.post(crate::report::diag_log::ERROR, text.as_bytes().to_vec());
+        posts
+    };
+    files.add_file_posts(1, posts("post q1\nline 2\n"));
+    files.add_file_posts(2, crate::report::diag_log::Posts::new());
+    files.add_file_posts(4, posts("post q4\n"));
+    let mut q1 = crate::report::diag_log::Posts::of_lines(b"text q1\nwarn q1\n".to_vec());
+    q1.append(&posts("post q1\nline 2\n"));
     assert_eq!(
         files.take_read_warnings(),
         vec![
-            (0, b"text q0\n".to_vec()),
-            (1, b"text q1\nwarn q1\n".to_vec())
+            (
+                0,
+                crate::report::diag_log::Posts::of_lines(b"text q0\n".to_vec())
+            ),
+            (1, q1),
+            (4, posts("post q4\n")),
         ]
     );
     assert!(files.take_read_warnings().is_empty());
     drop(files);
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// psiblast's PSSM file with a query title outside the visible ASCII range: NCBI's ASN.1 text
+/// stream writes `#` for each such byte and posts error 803.7 with the member, the line and the
+/// whole title (NCBI 2.17.0, `psiblast -query qps.faa -out_pssm o.asn
+/// -save_pssm_after_last_round`, title `YP_009220551.1 t\xe9tle`: `Error: (803.7) [psiblast]
+/// PssmWithParameters.pssm.query.seq.descr.E.title` / `Bad char [0xE9] in string at line 12`); a
+/// title without one writes no post and the same bytes as `asn_text`.
+#[test]
+fn a_pssm_title_outside_the_visible_range_is_written_with_ncbis_posts() {
+    use crate::report::serial::pssm::{asn_text, asn_text_posting};
+    let value = |title: &[u8]| PssmWithParameters {
+        pssm: Pssm {
+            is_protein: None,
+            identifier: None,
+            num_rows: 1,
+            num_columns: 1,
+            row_labels: None,
+            by_row: None,
+            query: Some(PssmQuery {
+                ids: vec![crate::seqid::ParsedSeqId::Local(ObjectId::Str(
+                    b"Query_1".to_vec(),
+                ))],
+                titles: Some(vec![title.to_vec()]),
+                inst: SeqInst {
+                    repr: ("raw", 2),
+                    mol: ("aa", 3),
+                    length: Some(1),
+                    seq_data: None,
+                },
+            }),
+            intermediate_data: None,
+            final_data: None,
+        },
+        params: None,
+    };
+    let (plain, none) = asn_text_posting(&value(b"t#tle")).unwrap();
+    assert!(none.is_empty());
+    assert_eq!(plain, asn_text(&value(b"t#tle")).unwrap());
+    let (bytes, replaced) = asn_text_posting(&value(b"t\xe9tle")).unwrap();
+    assert_eq!(bytes, plain);
+    let at = plain
+        .windows(5)
+        .position(|window| window == b"t#tle")
+        .unwrap();
+    let line = 1 + plain[..at].iter().filter(|&&byte| byte == b'\n').count();
+    let mut want = format!(
+        "Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.descr.E.title\nBad char [0xE9] in string at line {line}\n"
+    )
+    .into_bytes();
+    want.extend_from_slice(b"t\xe9tle\n");
+    assert_eq!(file_posts("psiblast", &replaced).text(), want);
 }

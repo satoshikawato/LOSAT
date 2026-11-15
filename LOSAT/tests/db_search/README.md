@@ -1593,3 +1593,12 @@ of data`); NCBI's search reports both as `BLAST engine error: Database memory ma
 files `zr_t2.nal`, `zr_p5.nal` and `zr_t1.nal` give `DBLIST p5 zz5` with the OID ranges 7-7 (`t2` alone, no mask
 data), 3-5 (`s3`-`s5`) and 1-6 (`s1`-`s5` and `t1`, which has mask data that `zz5`'s volume reads without the
 algorithm 11 of the list): NCBI reads masks of `zz5` only in the last.
+
+## A database title outside the visible ASCII range (M4a-1b part 5, M4a-1b2)
+
+`title_bad` (version 4, nucleotide): the records of `tests/fasta/outfmt11/arch_s.fna` and `arch_tbn_s.fna`, built by NCBI
+BLAST+ 2.17.0 `makeblastdb -dbtype nucl -blastdb_version 4 -title "café db <DEL>"` (the title holds the bytes 0xC3 0xA9 and
+0x7F). The rows `db.dbtitle.*` (BLASTN and TBLASTN, outfmt 8 and 9) write the title into each query's Seq-annot (`desc` user
+object `Blast Database Title`) with `#` for each such byte, and NCBI posts `Error: (803.7) [blastn]
+Seq-annot.desc.E.user.data.E.label.str` / `Bad char [0xC3] in string at line N` (outfmt 9: `at byte N`) / the title for each
+byte of each query's document.

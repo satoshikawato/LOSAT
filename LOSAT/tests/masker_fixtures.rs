@@ -427,7 +427,25 @@ fn convert2blastmask_posts_where_ncbi_does_in_one_file() {
         example_binary("library_command_line"),
     ] {
         let (ran, differ) = merged_rows_that_differ(&binary, "convert2blastmask");
-        assert!(ran >= 3, "{ran} rows with a merged stream");
+        assert!(ran >= 5, "{ran} rows with a merged stream");
+        assert!(
+            differ.is_empty(),
+            "{}: rows whose merged stream differs from NCBI's: {differ:?}",
+            binary.display()
+        );
+    }
+}
+
+/// dustmasker's `seqloc_*` and `maskinfo_*` documents of a sequence whose id NCBI's stream writes
+/// with `#` in each of its 300 Seq-locs (`order_*`): each post among the document's bytes.
+#[test]
+fn dustmasker_posts_where_ncbi_does_in_one_file() {
+    for binary in [
+        PathBuf::from(env!("CARGO_BIN_EXE_losat")),
+        example_binary("library_command_line"),
+    ] {
+        let (ran, differ) = merged_rows_that_differ(&binary, "dustmasker");
+        assert!(ran >= 4, "{ran} rows with a merged stream");
         assert!(
             differ.is_empty(),
             "{}: rows whose merged stream differs from NCBI's: {differ:?}",

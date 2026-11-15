@@ -7021,11 +7021,14 @@ fn post_process_hits_and_write(
         // The taxonomy database's messages of XML2 and JSON go to the diagnostics at every
         // format.
         // So do those of the formatters of a tabular field list that shows a taxonomy name
-        // (`x_CheckTaxDB`, `algorithm::blastn::tabular`).
+        // (`x_CheckTaxDB`, `algorithm::blastn::tabular`), and the Seq-annots' posts of the bytes
+        // that NCBI's stream replaces (`seqalign::write_query_to`).
         let mut format_warnings = (warning_lines.is_some()
             || matches!(
                 output_format,
-                BlastnOutputFormat::Xml2(_) | BlastnOutputFormat::Archive
+                BlastnOutputFormat::Xml2(_)
+                    | BlastnOutputFormat::Archive
+                    | BlastnOutputFormat::Seqalign(_)
             )
             || output_format
                 .tabular_spec()
@@ -7163,7 +7166,9 @@ fn post_process_hits_and_write(
                 subjects,
                 report.ranges.subjects.placements,
                 &mut writer,
-                format_warnings.as_mut(),
+                format_warnings
+                    .as_mut()
+                    .expect("a Seq-annot writes its posts to the diagnostics"),
             )?;
         } else if output_format == BlastnOutputFormat::Archive {
             // The BLAST archive (outfmt 11): one document per query batch of the call.
@@ -8270,14 +8275,13 @@ fn open_search_database(
             output_formats,
         )?,
     }
-    // LOSAT's refusals of a database for the Seq-annot formats, before the search
+    // LOSAT's refusal of a database name for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
     if let Some(database) = database.as_ref() {
         for serial in output_formats.iter().filter_map(|format| format.serial()) {
             crate::report::serial::seqalign::check_database(
                 serial,
                 database.name(),
-                &database.pairwise_database().definition,
                 Program::Blastn,
             )?;
         }

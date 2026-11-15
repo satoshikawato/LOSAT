@@ -367,6 +367,24 @@ impl Program {
         }
     }
 
+    /// The prefix of the application's diagnostics (`[blastn] ...`), which its `Run` sets.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:126
+    /// ```c++
+    /// 	SetDiagPostPrefix("blastn");
+    /// ```
+    /// (blastp_app.cpp:126, blastx_app.cpp:128, tblastn_app.cpp:121 and tblastx_app.cpp:100 set
+    /// `blastp`, `blastx`, `tblastn` and `tblastx`.)
+    pub fn post_prefix(self) -> &'static str {
+        match self {
+            Program::Blastn => "blastn",
+            Program::Blastp => "blastp",
+            Program::Blastx => "blastx",
+            Program::Tblastn => "tblastn",
+            Program::Tblastx => "tblastx",
+        }
+    }
+
     /// Whether NCBI's formatting arguments of the program have `eIsSAM` (blastn only).
     pub fn is_sam(self) -> bool {
         self == Program::Blastn

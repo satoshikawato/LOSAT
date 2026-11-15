@@ -409,13 +409,14 @@ fn sort_stop(
 }
 
 /// Whether `-subject`'s Seq-loc mapper (`remaps`) rewrote the empty rows of the subject whose
-/// hits are `hits`: only a Seq-align with rows of letters gives the mapper the sequence types,
-/// whose frames make an empty query row one nucleotide (`x_GetDstStd`,
-/// seq_align_mapper_base.cpp:1419-1446); a subject of empty rows only keeps them where the mapper
-/// does not wrap them (`algorithm::blastx::empty_rows::SubjectLoc::of_list`; where it does, BLASTX
-/// refused the report before), as `-db`'s.
+/// hits are `hits` (`serial::seqalign::mapper_rewrites_empty_rows`, whose frames make an empty
+/// query row one nucleotide, `x_GetDstStd`, seq_align_mapper_base.cpp:1419-1446); otherwise they
+/// stay as `-db`'s.
 fn mapper_rewrites(remaps: bool, hits: &[&PairwiseHit]) -> bool {
-    remaps && hits.iter().any(|hit| !hit.rows_empty())
+    super::serial::seqalign::mapper_rewrites_empty_rows(
+        remaps,
+        hits.iter().map(|hit| hit.rows_empty()),
+    )
 }
 
 impl std::fmt::Display for EmptyRowsStop {
@@ -1733,7 +1734,10 @@ fn meets(span: (usize, usize), start: usize, end: usize) -> bool {
 /// inner gap is `-`. `residue_dash(column)` says whether a `-` of the row is a residue (a gap
 /// stored in the sequence). Only a Smith-Waterman alignment has end gaps (rpsblast's
 /// `-use_sw_tback`: `ALIGN_EX` runs from the Smith-Waterman start over a rectangle whose best path
-/// may start with a gap); an X-drop alignment starts and ends with a substitution.
+/// may start with a gap); an X-drop alignment starts and ends with a substitution. The `-` that
+/// fills a segment past a sequence's end is the gap character (alnvec.cpp:279-297): `-subject`'s
+/// mapped row of BLASTX, which the tables write as it is (`tabular::TabularHsp::end_gaps`) and
+/// outfmt 0 refuses (decision X2g-5 of line RG).
 pub(crate) fn end_gap_span<T: Copy + PartialEq + From<u8>>(
     row: &[T],
     residue_dash: impl Fn(usize) -> bool,

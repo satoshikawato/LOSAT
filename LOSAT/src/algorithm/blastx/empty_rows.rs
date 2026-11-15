@@ -566,8 +566,9 @@ impl AlignQueryIds {
     }
 }
 
-/// The refusal of `-subject` where a reported HSP of length 0 lies at the subject's first letter.
-pub(crate) const UNPORTED_SUBJECT_START: &str = "BLASTX -ungapped -window_size 0 with -subject: a one-hit ungapped alignment of length 0 at the first letter of its subject among the hits to report, which NCBI BLAST+'s Seq-loc mapper cuts into two alignments without scores (tabular rows of the query's Seq-align id with an E-value of 0.0 and a bit score of -1.0, or an exception, depending on the frame and the fields), which LOSAT does not support";
+/// The refusal of `-subject` where a reported HSP of length 0 lies at the first letter of the
+/// searched part of a subject with HSPs of letters (decision X2g-4, `mapper_wraps_empty_row`).
+pub(crate) const UNPORTED_SUBJECT_START: &str = "BLASTX -ungapped -window_size 0 with -subject: a one-hit ungapped alignment of length 0 at the first letter of the searched part of a subject with alignments of letters among the hits to report, which NCBI BLAST+'s Seq-loc mapper cuts into two alignments without scores (tabular rows of the query's Seq-align id with an E-value of 0.0 and a bit score of -1.0, or an exception, depending on the frame and the fields), which LOSAT does not support";
 
 /// The refusal of `-subject` where every reported HSP of a subject has length 0 and the mapper
 /// rewrites one (`mapper_wraps_empty_row`).
@@ -639,15 +640,30 @@ pub(crate) fn prefetch_reads_empty_row(
         })
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1352-1358
+// ```c++
+//        query_loc->SetInt().SetFrom(CODON_LENGTH*(hsp->query.offset) +
+//                                    hsp->query.frame - 1);
+//        query_loc->SetInt().SetTo(CODON_LENGTH*(hsp->query.end) +
+//                                  hsp->query.frame - 2);
+//     } else {
+//        query_loc->SetInt().SetFrom(query_length -
+//            CODON_LENGTH*(hsp->query.end) + hsp->query.frame + 1);
+// ```
 /// The letters on each side of a `-query_loc` interval that a query record cut to it keeps
 /// (`input::FastaRecord::keep_around`) for `-subject`'s Seq-loc mapper (`MappedRows::of`), in a
 /// search of `options` against the subjects `subjects` (each cut to its `-subject_loc` interval):
-/// a mapped query row has as many nucleotides as its subject has letters from the HSP on, so it
-/// ends at most the longest subject's letters past the interval's end and starts, on a minus
-/// strand, at most one more before its start. NCBI's scope holds the whole record. 0 where no
-/// row is mapped: a query searched whole, and a search that reports no HSP of length 0 (gapped,
-/// or the two-hit word finder of a `-window_size` above 0: `s_BlastAaExtendOneHit` alone makes
-/// them, aa_ungapped.c:1054).
+/// a mapped query row has as many nucleotides, `n`, as its subject has letters from the HSP on
+/// (at most the longest subject's, `L`). Its empty row starts in the interval, or just past its
+/// last nucleotide for an HSP at the end of a plus frame (`from` above). A plus row runs up from
+/// that start: at most `L` letters past the interval. A minus row ends two below it, as the mapper moves its start
+/// `n + 1` down (`seg.m_Len - mseg.m_Len`, the unknown length -1 as `TSeqPos`:
+/// seq_align_mapper_base.cpp:1175-1183, in `MappedRows::of`): at most `L + 1` letters before the
+/// interval, for an HSP at the end of its minus frame (its `from` is the interval's first
+/// nucleotide) and the first letter of the longest subject. NCBI's scope holds the whole record.
+/// 0 where no row is mapped: a query searched whole, and a search that reports no HSP of length
+/// 0 (gapped, or the two-hit word finder of a `-window_size` above 0: `s_BlastAaExtendOneHit`
+/// alone makes them, aa_ungapped.c:1054).
 pub(crate) fn query_letters_around(
     options: &super::args::ResolvedOptions,
     subjects: &[super::input::FastaRecord],
@@ -937,6 +953,24 @@ mod tests {
             Some(b"TTTAGGGTACGT".to_vec())
         );
         assert_eq!(minus_cut.record_letter(12), None);
+        // The farthest a minus row reads before the interval (review 5 N3): an HSP at the end of
+        // frame -1 of `-query_loc 7-9` (its empty row starts at the interval's first nucleotide)
+        // and at the first letter of a subject of 5 letters reads from 6 (5 + 1) letters before
+        // the interval: `query_letters_around`'s one more than the subject's letters.
+        let farthest = |around: usize| {
+            let mut cut = record("ACGTACGGGTT");
+            cut.keep_around(6, 9, around);
+            cut.cut_in_place(6, 9, false);
+            let mut hsp = ungapped(1, 1).hsp;
+            (hsp.frame, hsp.s_start, hsp.s_end) = (-1, 0, 0);
+            MappedRows::of(&hsp, &cut, &record("GTLWI"))
+        };
+        let Some(MappedRows::Letters(far)) = farthest(6) else {
+            panic!("letters");
+        };
+        assert_eq!((far.q_start, far.q_end, far.length()), (5, 1, 5));
+        assert_eq!(far.rows().0, b"TACGT");
+        assert!(farthest(5).is_none());
     }
 
     // Review 4 M1 (ws, NCBI BLAST+ 2.17.0, `X/x2g/rev4`): `x_ConvertSegment`'s stop wraps, and the

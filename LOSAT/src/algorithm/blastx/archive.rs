@@ -445,9 +445,10 @@ pub(crate) fn write_blastx_archive(
         },
         gapped: call.batch.options.gapped,
     };
-    // `-subject`'s Seq-loc mapper cuts an HSP of length 0 at its subject's first letter in two,
-    // and makes alignments without scores of a subject whose every HSP has length 0, which LOSAT
-    // does not write (`empty_rows::refuse_mapped_without_scores`).
+    // `-subject`'s Seq-loc mapper cuts an HSP of length 0 at the first letter of the searched part
+    // of a subject with HSPs of letters in two, and makes alignments without scores of a subject
+    // whose every HSP has length 0 where it rewrites one, which LOSAT does not write
+    // (`empty_rows::refuse_mapped_without_scores`).
     if run.remaps_subjects() && !run.gapped {
         super::empty_rows::refuse_mapped_without_scores(call.batch.batches, run.gapped, None)?;
     }

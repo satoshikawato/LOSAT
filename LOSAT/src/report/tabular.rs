@@ -1213,10 +1213,12 @@ pub struct TabularHsp<'a> {
     /// residues), when `TabularNeeds::rows`.
     pub rows: Option<(&'a [u8], &'a [u8])>,
     /// Whether a `-` that begins or ends a row of `rows` is an end gap (`end_gap_span`), which NCBI
-    /// shows as its end character, a space (`push_alignment_row`): as rpsblast's Smith-Waterman
-    /// alignments need. BLASTX has none, and the `-` at the end of its mapped rows of `-subject`
-    /// past a query's end is the gap character inside a segment (alnvec.cpp:279-297,
-    /// `blastx::empty_rows::MappedAlignment`): `false` there.
+    /// shows as its end character, a space (`push_alignment_row`), as in the Smith-Waterman
+    /// alignments of rpsblast's `-use_sw_tback`. NCBI decides by where the `-` comes from
+    /// (alnvec.cpp:279-297): a gap segment outside the row's aligned segments is the end
+    /// character, a fill of a segment that has a start is the gap character. `true` for every
+    /// alignment of the engines; `false` only for `-subject`'s mapped row of BLASTX
+    /// (`blastx::empty_rows::MappedAlignment`), whose `-` past the query's end fills its segment.
     pub end_gaps: bool,
     /// `qcovhsp` (the integer of NCBI's `hsp_percent_coverage`).
     pub qcovhsp: i32,
@@ -1764,8 +1766,8 @@ fn push_coverage(out: &mut Vec<u8>, value: i32) {
 /// ```
 /// The rows' end gaps are spaces (`push_alignment_row`), so an end-gap column is the pair of a
 /// letter and a space. Rows without end gaps (every alignment but some Smith-Waterman redos', and
-/// rows whose `-` are never end gaps, `end_gaps` false: `TabularHsp::end_gaps`) take the columns
-/// as they are; `end_gap_span` stops at each row's first letter from each end.
+/// rows whose `-` fill a segment, `end_gaps` false: `TabularHsp::end_gaps`) take the columns as
+/// they are; `end_gap_span` stops at each row's first letter from each end.
 pub fn write_btop(out: &mut Vec<u8>, qrow: &[u8], srow: &[u8], end_gaps: bool) {
     let columns = qrow.iter().copied().zip(srow.iter().copied());
     if !end_gaps {
@@ -2456,7 +2458,7 @@ mod tests {
         out.clear();
         write_btop(&mut out, b"AC-DKK", b"ACGD--", true);
         assert_eq!(out, b"2-G1K K ");
-        // Rows whose `-` are never end gaps (BLASTX's mapped row past a query's end, db.x2g.bx.s1o.subj.6w
+        // Rows whose `-` fill a segment (BLASTX's mapped row past a query's end, db.x2g.bx.s1o.subj.6w
         // and .10: NCBI's `TCGGCATGGCTG-` and BTOP `...-X`).
         out.clear();
         push_alignment_row(&mut out, b"TCG-", false);

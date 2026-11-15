@@ -956,7 +956,7 @@ would port:
   that alignment as NCBI does (decision X2g-7), reading the query record's letters outside a
   `-query_loc` interval where the row does (the cut keeps the longest subject interval's letters and
   one more on each side). LOSAT refuses the rest of `-subject`'s mapped alignments. Decision X2g-4:
-  an HSP of length 0 at the first letter of the searched range of a subject with other HSPs, which
+  an HSP of length 0 at the first letter of the searched range of a subject with HSPs of letters, which
   the mapper cuts into two alignments without scores (the mapper knows such a subject as a protein
   and counts its start in nucleotides, three per letter, so its stop wraps at the first letter
   only). Decision X2g-5: a subject whose every HSP has length 0, one of them at the first or second

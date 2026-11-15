@@ -7,11 +7,11 @@
   (exit status 255) after the rows before it where NCBI's formatters stop (outfmt 0, `qcovs`, the
   tabular rows with `-subject`), the cut document and the error message of BLAST XML, XML2 and JSON,
   and the Seq-aligns of outfmt 8, 9, 11 and 12. LOSAT no longer crashes when such an alignment
-  touches a lower-case or SEG mask. With `-subject`, an alignment of length 0 at the subject's first
-  letter is refused (an error, exit status 1): NCBI BLAST+'s Seq-loc mapper cuts it into two
-  alignments without scores, which NCBI BLAST+ writes as rows of the query's Seq-align id, stops
-  on with an exception or runs out of memory on, depending on the frame, the fields and its memory
-  limit.
+  touches a lower-case or SEG mask. With `-subject`, an alignment of length 0 at the first letter
+  of the searched part of a subject with alignments of letters is refused (an error, exit
+  status 1): NCBI BLAST+'s Seq-loc mapper cuts it into two alignments without scores, which NCBI
+  BLAST+ writes as rows of the query's Seq-align id, stops on with an exception or runs out of
+  memory on, depending on the frame, the fields and its memory limit.
 - A subject whose every reported alignment has length 0: with `-db`, NCBI BLAST+'s warning `Error
   pre-fetching sequence data` on standard error, as NCBI writes it (every format but 8, 9, 11 and
   12; 8, 9 and 12 too with `PRE_FETCH_SEQS_LIMIT=2147483647`; the archive never). With `-subject`

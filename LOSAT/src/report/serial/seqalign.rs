@@ -1736,6 +1736,32 @@ pub(crate) fn ungapped_rows_empty(offset: i64, end: i64) -> bool {
     end == offset
 }
 
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:453-460
+// ```c++
+//         // Two different lengths were found. Try to guess sequence types.
+//         if (minlen != 0  &&  maxlen != 0) {
+//             if (minlen*3 != maxlen) {
+//                 NCBI_THROW(CAnnotMapperException, eBadAlignment,
+//                     "Inconsistent seq-loc lengths in std-seg rows");
+//             }
+//             // Found both nucs and prots - make the second pass and
+//             // store widths for all sequences.
+// ```
+/// Whether `-subject`'s Seq-loc mapper (`remaps`, `RunRecord::remaps_subjects`) rewrites the
+/// empty rows of a Seq-align whose Std-segs' rows are empty or not (`rows_empty`, one per Std-seg)
+/// into the query nucleotide of `write_empty_rows` (`mapped_empty_query_nucleotide`): it learns
+/// the sequence types from a Std-seg with rows of letters only (`x_Init`'s first pass, above;
+/// an empty row's length 0 is skipped). A Seq-align of empty rows only gets no type and keeps its
+/// rows where their stop does not wrap (`algorithm::blastx::empty_rows::SubjectLoc::of_list`;
+/// where it does, BLASTX refused the report before). The one rule of the pairwise report
+/// (`pairwise::mapper_rewrites`) and the Seq-aligns (`write_seq_align_diags`).
+pub(crate) fn mapper_rewrites_empty_rows(
+    remaps: bool,
+    mut rows_empty: impl Iterator<Item = bool>,
+) -> bool {
+    remaps && rows_empty.any(|empty| !empty)
+}
+
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1538-1559
 // ```c++
 //                         if ( start_frame ) {
@@ -1851,10 +1877,7 @@ fn write_seq_align_diags<E: Encoder>(
     enc.member("segs", 3);
     enc.variant("Seq-align_segs", "std", 2);
     enc.begin_list(false);
-    // `-subject`'s mapper rewrites the empty rows only of a Seq-align with rows of letters, which
-    // gives it the sequence types (`write_empty_rows`); a subject of empty rows only keeps them
-    // (`algorithm::blastx::empty_rows::SubjectLoc::of_list`).
-    let remaps = remaps && hsps.iter().any(|hsp| !hsp.rows_empty());
+    let remaps = mapper_rewrites_empty_rows(remaps, hsps.iter().map(HspRecord::rows_empty));
     for hsp in hsps {
         let (q_from, q_to) =
             ungapped_interval(hsp.q_offset, hsp.q_end, hsp.q_frame, query.searched_length);

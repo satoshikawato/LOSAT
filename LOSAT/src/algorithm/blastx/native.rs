@@ -182,6 +182,7 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
     if error.is::<super::blast_xml::XmlRefusal>()
         || crate::report::pairwise::is_total_score_refusal(&error)
         || error.is::<crate::report::tax_report::TaxReportRefusal>()
+        || error.is::<crate::algorithm::common::database::FetchRefusal>()
     {
         // LOSAT's refusal of a title NCBI's XML cannot write, of a `-sorthits` table whose
         // last total NCBI pads without end (`TotalScoreRefusal`, an `io::Error` of the report's
@@ -1523,6 +1524,7 @@ pub(super) fn database_search_error(
     if error.is::<super::parameters::SearchSpaceOverflow>()
         || error.is::<super::split::QuerySplitRefusal>()
         || error.is::<super::preliminary::OneHitWindowRefusal>()
+        || error.is::<crate::algorithm::common::database::FetchRefusal>()
         || error.is::<NativeError>()
     {
         return error;

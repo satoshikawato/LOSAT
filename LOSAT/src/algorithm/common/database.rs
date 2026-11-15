@@ -1056,18 +1056,35 @@ impl<'a> FetchExcluded<'a> {
     }
 
     /// LOSAT's refusal (in `program`'s name) of a search whose fetch of `ordinal` cannot read
-    /// its header (`error`), where NCBI's search fails.
+    /// its header (`error`), where NCBI's search fails (`FetchRefusal`).
     pub(crate) fn refusal((ordinal, error): (u32, SeqDbError), program: &str) -> anyhow::Error {
-        refusal(
-            &format!(
-                "under the negative seqid list NCBI reads the definition lines of each sequence \
-                 that its search aligns again, and those of sequence {ordinal} cannot be read \
-                 ({error})"
-            ),
-            program,
+        FetchRefusal(
+            refusal(
+                &format!(
+                    "under the negative seqid list NCBI reads the definition lines of each \
+                     sequence that its search aligns again, and those of sequence {ordinal} \
+                     cannot be read ({error})"
+                ),
+                program,
+            )
+            .to_string(),
         )
+        .into()
     }
 }
+
+/// LOSAT's refusal of `FetchExcluded::refusal`, a type of its own so that a program that
+/// reports the other errors of its search as NCBI's engine errors passes it on as it is.
+#[derive(Debug)]
+pub(crate) struct FetchRefusal(String);
+
+impl std::fmt::Display for FetchRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for FetchRefusal {}
 
 /// NCBI's Seq-aligns of the final hit lists of a database search (line DBID item lineless):
 /// a hit on a sequence that the database's seqid list keeps without any of its definition

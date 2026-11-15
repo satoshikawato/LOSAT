@@ -141,8 +141,8 @@ fn a_list_that_keeps_a_sequence_without_a_definition_line_reports_the_others() {
 /// `ll2/prot_v5`: the only line of r0, the best hit, has a ti, so the negative list keeps the
 /// sequence and removes its line. NCBI's id set holds the list's ids, and the traceback's and
 /// the redo's fetches exclude r0 before the final hit list, so the cut to 1 keeps r1
-/// (`BAA100002.1`; line DBID item lineless2). blastx `-ungapped` reads no protein subject again:
-/// r0 takes the one place and leaves at the Seq-aligns, so no row is left.
+/// (`BAA100002.1`; line DBID item lineless2; blastx `-ungapped`, which reads no protein subject
+/// again, is the row `db.ll2.bx.ug.m1.6`).
 #[test]
 fn a_negative_list_excludes_a_sequence_without_a_line_before_the_cut() {
     let list = "tests/db_search/ll2/neg.txt";
@@ -158,12 +158,6 @@ fn a_negative_list_excludes_a_sequence_without_a_line_before_the_cut() {
             "tests/db_search/ll2/q.faa",
             &["-comp_based_stats", "0"][..],
             &["BAA100002.1"][..],
-        ),
-        (
-            "blastx",
-            "tests/db_search/ll2/q.fna",
-            &["-ungapped", "-comp_based_stats", "0"][..],
-            &[][..],
         ),
     ] {
         let mut argv = vec!["-negative_seqidlist", list, "-max_target_seqs", "1"];

@@ -282,11 +282,9 @@ impl BlastpSubjectParameters {
 /// (`BlastpSubjectParameters::values`). One pointer per subject, so that the default path reads
 /// the setup's as it did before the statistics of each subject.
 struct BlastpPrelimValues<'a> {
-    // References to the vectors, as the kernel's per-hit calls captured the setup's before the
-    // statistics of each subject (one pointer each).
-    word_cutoff_scores: &'a Vec<i32>,
-    hit_cutoff_scores: &'a Vec<i32>,
-    search_spaces: &'a Vec<SearchSpace>,
+    word_cutoff_scores: &'a [i32],
+    hit_cutoff_scores: &'a [i32],
+    search_spaces: &'a [SearchSpace],
     prelim_evalue: f64,
     sum_stats: Option<&'a BlastpSumStats>,
 }

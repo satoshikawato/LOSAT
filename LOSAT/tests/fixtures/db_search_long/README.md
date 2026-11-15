@@ -30,3 +30,18 @@ blastn -query vq.fna -db vols -db_soft_mask 11 -task blastn-short -evalue 1e-5 -
 
 NCBI's rows at `-num_threads 8` are the same. Without `-db_soft_mask` NCBI finds 24, 24, 115 and 24 rows (masked: 14, 14,
 94 and 24): the queries over a first mask with 10 letters on each side lose their seeds.
+
+`dbmask_hard_long.<task>.6.out`: NCBI BLAST+ 2.17.0's rows (`-outfmt "6 std nident"`) of `tests/blastn_db_hard_long.rs`
+(series NP, M4a-2b, review T3 of ad-M4a-6): `-db_hard_mask` on two sequences longer than NCBI's chunk, `hard1` (5,300,000
+letters, the one-letter mask 1001: its last stretch is cut into a full chunk and a final chunk, review F3) and `hard2`
+(5,400,000 letters, masks 1,000-1,099 and 5,100,002-5,100,049), and `hard3` (3,000 letters, adjacent, one-letter and
+three-letter masks and a mask that runs to its end after them), searched at 1 and 4 threads. The test writes `hl.fna`,
+`hl_masks.asnt` and `hlq.fna`; `DBMASK_HARD_LONG_DIR=<dir>` keeps them. Frozen with:
+
+```
+makeblastdb -in hl.fna -dbtype nucl -out hl -mask_data hl_masks.asnt
+blastn -query hlq.fna -db hl -db_hard_mask 11 -task megablast -outfmt "6 std nident" -num_threads 1 > dbmask_hard_long.megablast.6.out
+blastn -query hlq.fna -db hl -db_hard_mask 11 -task dc-megablast -outfmt "6 std nident" -num_threads 1 > dbmask_hard_long.dc-megablast.6.out
+blastn -query hlq.fna -db hl -db_hard_mask 11 -task blastn -outfmt "6 std nident" -num_threads 1 > dbmask_hard_long.blastn.6.out
+blastn -query hlq.fna -db hl -db_hard_mask 11 -task blastn-short -evalue 1e-5 -outfmt "6 std nident" -num_threads 1 > dbmask_hard_long.blastn-short.6.out
+```

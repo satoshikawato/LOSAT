@@ -1554,7 +1554,7 @@ pub(super) fn read_titles(
 /// (`reported_subjects`); outfmt 13 to 16 and the tabular reports of taxonomy fields write its
 /// taxids; the first format's batches prefetch the subjects.
 pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown {
-    let pairwise = output_formats.contains(&BlastnOutputFormat::Pairwise);
+    let pairwise = output_formats.iter().any(|format| format.is_pairwise());
     ParsedShown {
         tabular: output_formats
             .iter()

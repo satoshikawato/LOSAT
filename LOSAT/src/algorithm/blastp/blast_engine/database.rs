@@ -1194,18 +1194,12 @@ impl ListedTitles<'_> {
                 let Some(subject) = &self.parsed[rank] else {
                     continue;
                 };
-                if scope_of(query).has_key(&subject.query_scope_keys().own) {
-                    return Err(shared::parsed_refusal(
-                        self.oids.oid(self.listed.ordinals[rank]),
-                        &format!(
-                            "has the Seq-id {}, the id of a query read without -parse_deflines \
-                             in the query batch that reports it: NCBI BLAST+ shows that query in \
-                             its place in the query-anchored formats (outfmt 1 to 4)",
-                            String::from_utf8_lossy(&subject.alignment_fasta())
-                        ),
-                        self.program,
-                    ));
-                }
+                shared::refuse_generated_query_id(
+                    subject,
+                    self.oids.oid(self.listed.ordinals[rank]),
+                    scope_of(query),
+                    self.program,
+                )?;
             }
         }
         self.refuse_display_ids(hit_lists, scope_of, true, described)

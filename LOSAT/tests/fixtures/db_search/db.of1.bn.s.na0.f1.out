@@ -1,0 +1,72 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/of1/bns.fa).
+           5 sequences; 1,094 total letters
+
+
+
+Query= bnq query
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_plus plus insertion same place                                      282     3e-80
+s_pmo overlapping plus and minus                                      246     2e-69
+s_mins minus insertion                                                235     3e-66
+s_mdel minus deletion                                                 205     6e-57
+s_mins2 minus insertion same place                                    187     1e-51
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 297792
+
+
+Query= bnq2 second query
+
+Length=160
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_mdel minus deletion                                                 232     2e-65
+s_pmo overlapping plus and minus                                      226     9e-64
+s_plus plus insertion same place                                      195     5e-54
+s_mins minus insertion                                                168     7e-46
+s_mins2 minus insertion same place                                    77.9    1e-18
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 153032
+
+
+  Database: User specified sequence set (Input: tests/db_search/of1/bns.fa).
+    Posted date:  Unknown
+  Number of letters in database: 1,094
+  Number of sequences in database:  5
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

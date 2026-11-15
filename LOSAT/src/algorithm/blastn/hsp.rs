@@ -24,10 +24,13 @@ use super::tracing as blastn_trace;
 //                         CConstRef<blast::CBlastQueryVector> queries,
 //                         unsigned int itr_num
 // ```
-// The pairwise report (outfmt 0) is the non-tabular branch of the same formatter.
+// The pairwise report (outfmt 0) is the non-tabular branch of the same formatter, as are the
+// query-anchored formats 1 to 4, which differ from it only in their alignment section
+// (`report::pairwise::PairwiseView`, `report::query_anchored`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlastnOutputFormat {
-    Pairwise,
+    /// Outfmt 0 to 4: the pairwise report with outfmt 0's alignments or a query-anchored section.
+    Pairwise(crate::report::pairwise::PairwiseView),
     Tabular,
     TabularWithComments,
     /// The tabular reports with a field list or a delimiter (outfmt 6 and 7 other than the
@@ -101,11 +104,13 @@ impl BlastnOutputFormat {
         if let Some(spec) = crate::report::tabular::TabularSpec::of(format, choice) {
             return Ok(BlastnOutputFormat::CustomTabular(spec.intern()));
         }
+        if let Some(view) = crate::report::pairwise::PairwiseView::of(format) {
+            return Ok(BlastnOutputFormat::Pairwise(view));
+        }
         match format {
             ReportFormat::Sam => Ok(BlastnOutputFormat::Sam(crate::report::sam::SamSpec::parse(
                 &choice.spec,
             ))),
-            ReportFormat::Pairwise => Ok(BlastnOutputFormat::Pairwise),
             ReportFormat::Tabular => Ok(BlastnOutputFormat::Tabular),
             ReportFormat::TabularWithComments => Ok(BlastnOutputFormat::TabularWithComments),
             ReportFormat::Xml => Ok(BlastnOutputFormat::Xml),
@@ -166,7 +171,7 @@ impl BlastnOutputFormat {
     /// query warnings.
     pub(crate) fn prefetches_subjects(self) -> bool {
         crate::algorithm::common::database::prefetches_subjects(match self {
-            BlastnOutputFormat::Pairwise => Some(0),
+            BlastnOutputFormat::Pairwise(view) => Some(view.outfmt()),
             BlastnOutputFormat::Xml => Some(5),
             BlastnOutputFormat::Tabular => Some(6),
             BlastnOutputFormat::TabularWithComments => Some(7),
@@ -183,6 +188,12 @@ impl BlastnOutputFormat {
             // (`TaxdbPrinter`).
             BlastnOutputFormat::Archive | BlastnOutputFormat::Xml2(_) => None,
         })
+    }
+
+    /// Whether the format is the pairwise report of outfmt 0 to 4 (`Pairwise`): the same prolog,
+    /// query headers, description tables, footers and epilog, and the same reads of the subjects.
+    pub(crate) fn is_pairwise(self) -> bool {
+        matches!(self, BlastnOutputFormat::Pairwise(_))
     }
 
     /// Whether the format is one of the tabular formats (outfmt 6, 7, 10 and 20), which read the
@@ -225,7 +236,7 @@ impl BlastnOutputFormat {
             | BlastnOutputFormat::Seqalign(_) => false,
             BlastnOutputFormat::CustomTabular(spec) => spec.needs().rows,
             BlastnOutputFormat::Sam(spec) => spec.sequence && spec.subject_as_reference,
-            BlastnOutputFormat::Pairwise
+            BlastnOutputFormat::Pairwise(_)
             | BlastnOutputFormat::Xml
             | BlastnOutputFormat::Xml2(_)
             | BlastnOutputFormat::Archive => true,

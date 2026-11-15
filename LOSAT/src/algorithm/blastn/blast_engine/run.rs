@@ -6002,6 +6002,8 @@ struct BlastnReportInputs<'a> {
     /// Whether NCBI's epilog (`PrintEpilog`: the outfmt 0 footer, outfmt 7's last line)
     /// follows the reports; an error in a later batch skips it.
     epilog: bool,
+    /// `-show_gis` (the labels of the query-anchored sections, outfmt 1 to 4).
+    show_gis: bool,
     /// Whether the outfmt 0 report starts with the prolog, which is otherwise written
     /// before the search (`write_pairwise_prologs`).
     prolog: bool,
@@ -6735,7 +6737,7 @@ fn post_process_hits_and_write(
     // the searched letters, from which the shown rows are read.
     shift_to_records(&mut hit_lists, report.ranges);
     let wants_rows =
-        outputs.hits.is_some() || output_formats.contains(&BlastnOutputFormat::Pairwise);
+        outputs.hits.is_some() || output_formats.iter().any(|format| format.is_pairwise());
     // EXPERIMENT (LOSAT_X_RPTSTREAM): the same masks, made once for every batch.
     let subject_masks = (wants_rows && report.lcase_masking).then(|| {
         // The records as read with `-subject_loc` (never packed), else the searched ones.
@@ -6836,7 +6838,7 @@ fn post_process_hits_and_write(
     // over the whole report) read every query's rows: those are made once, before any format
     // is written.
     let pairwise_hits = if outputs.hits.is_some()
-        || (outputs.observer.is_some() && output_formats.contains(&BlastnOutputFormat::Pairwise))
+        || (outputs.observer.is_some() && output_formats.iter().any(|format| format.is_pairwise()))
     {
         Some(Arc::new(rows_of(0..hit_lists.len())?))
     } else {
@@ -6852,7 +6854,7 @@ fn post_process_hits_and_write(
     }
     // Built before any format is written, so that a report that cannot be made fails the
     // run without output.
-    let pairwise_data = if output_formats.contains(&BlastnOutputFormat::Pairwise) {
+    let pairwise_data = if output_formats.iter().any(|format| format.is_pairwise()) {
         Some(blastn_pairwise_report(
             report,
             unsearched.clone(),
@@ -6893,7 +6895,7 @@ fn post_process_hits_and_write(
     // (`report::defline::generate_defline`), by subject index.
     // EXPERIMENT (LOSAT_X_RPTSTREAM): the same titles, made once for every batch.
     let subject_titles: std::borrow::Cow<'_, [Arc<[u8]>]> =
-        if output_formats.contains(&BlastnOutputFormat::Pairwise) {
+        if output_formats.iter().any(|format| format.is_pairwise()) {
             match report
                 .subject_cache
                 .and_then(|cache| cache.titles.as_deref())
@@ -6904,6 +6906,112 @@ fn post_process_hits_and_write(
         } else {
             std::borrow::Cow::Owned(Vec::new())
         };
+    // The query-anchored formats (outfmt 1 to 4, line RG T3b), before any format of the call is
+    // written, as BLASTP's (`blast_engine::run_call`): a query whose own record is one of the
+    // subjects (`-subject`, `-parse_deflines`) and whose section NCBI BLAST+ aborts on
+    // (`pairwise::section_aborts`, PD-LOSAT-NCBI-DEFECTS rule 3), and a reported database sequence
+    // that NCBI's scope finds as a query of its batch, by its Seq-align id (a generated
+    // `lcl|Query_N`) or, in a description line, by its display id
+    // (`common::database::refuse_query_ids_of_anchored_reports`): NCBI shows the query in its
+    // place. NCBI's bytes before an abort depend on its buffers, so LOSAT writes none of the call's.
+    let anchored_view = output_formats.iter().find_map(|format| match format {
+        BlastnOutputFormat::Pairwise(view)
+            if *view != crate::report::pairwise::PairwiseView::Pairwise =>
+        {
+            Some(*view)
+        }
+        _ => None,
+    });
+    if let Some(view) = anchored_view {
+        let sort = report.formatting.report_sort();
+        let rows_of_query = |q_idx: usize| -> Result<std::borrow::Cow<'_, [PairwiseHit]>> {
+            Ok(match pairwise_hits.as_deref() {
+                Some(hits) => std::borrow::Cow::Borrowed(hits.as_slice()),
+                None => std::borrow::Cow::Owned(rows_of(q_idx..q_idx + 1)?),
+            })
+        };
+        if report.database_reader.is_none() {
+            for (q_idx, record) in report.queries.iter().enumerate() {
+                if record.believed().is_none_or(|ids| ids.shared.is_none()) {
+                    continue;
+                }
+                let is_query = |s_idx: u32| {
+                    report
+                        .subjects
+                        .records()
+                        .get(s_idx as usize)
+                        .is_some_and(|subject| {
+                            crate::report::query_anchored::subject_is_query_record(record, subject)
+                        })
+                };
+                let rows = rows_of_query(q_idx)?;
+                let aborts = crate::report::pairwise::section_aborts(
+                    view,
+                    sort,
+                    report.num_alignments,
+                    q_idx,
+                    &rows,
+                    &subject_titles,
+                    is_query,
+                    |group| {
+                        crate::report::pairwise::blastn_section_hsps(
+                            report.num_alignments,
+                            group,
+                            is_query,
+                        )
+                    },
+                )?;
+                if aborts {
+                    return Err(crate::report::query_anchored::aborted_section(
+                        record, "BLASTN",
+                    ));
+                }
+            }
+        }
+        if let (Some(ordinals), Some(reader)) = (report.database_ordinals, report.database_reader) {
+            let batches = crate::blastinput::query_batch::AnchoredBatchScopes::new(
+                report.queries,
+                if report.batch_spans.is_empty() {
+                    vec![0..report.queries.len()]
+                } else {
+                    report.batch_spans.to_vec()
+                },
+            );
+            let oids = reader.oid_map();
+            crate::algorithm::common::database::refuse_query_ids_of_anchored_reports(
+                hit_lists.len(),
+                |q_idx| {
+                    hit_lists[q_idx]
+                        .iter()
+                        .flat_map(|hit_list| &hit_list.hsplist_array)
+                        .filter_map(|list| list.hsps.first().map(|hsp| hsp.s_idx))
+                        .collect()
+                },
+                |q_idx| {
+                    let rows = rows_of_query(q_idx)?;
+                    Ok(crate::report::pairwise::blastp_described_subjects(
+                        view.report_sort(sort),
+                        false,
+                        report.num_descriptions,
+                        q_idx,
+                        &rows,
+                        |previous, s_idx| {
+                            crate::report::db_subject::rank_joins_as_copy(
+                                report.database_parsed,
+                                previous as usize,
+                                s_idx as usize,
+                            )
+                        },
+                    ))
+                },
+                report.database_parsed,
+                |rank| oids.oid(ordinals[rank as usize]),
+                |q_idx| batches.of_query(q_idx),
+                batches.generated(),
+                "BLASTN",
+            )?;
+        }
+    }
     let observer = &mut outputs.observer;
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
     // ```c++
@@ -6978,7 +7086,7 @@ fn post_process_hits_and_write(
         //     : m_FormatType(format_type), ..., m_Outfile(outfile),
         // ```
         let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
-        if output_format == BlastnOutputFormat::Pairwise {
+        if let BlastnOutputFormat::Pairwise(view) = output_format {
             let (queries, pairwise_report) = pairwise_data
                 .as_ref()
                 .expect("the pairwise report data is built for outfmt 0");
@@ -6992,9 +7100,30 @@ fn post_process_hits_and_write(
                 program: "blastn".to_string(),
                 show_frame: false,
                 line_length: report.formatting.line_length(),
-                sort: report.formatting.report_sort(),
+                // `-sorthits` for every view, `-sorthsps` for outfmt 0 only (NCBI's warning for the
+                // others, `PairwiseView::report_sort`).
+                sort: view.report_sort(report.formatting.report_sort()),
+                view,
                 ..PairwiseConfig::default()
             };
+            // The sequences of the query-anchored sections of outfmt 1 to 4 (line RG T3b).
+            let anchored = (view != crate::report::pairwise::PairwiseView::Pairwise).then(|| {
+                crate::algorithm::blastn::anchored::AnchoredSequences {
+                    queries: report.queries,
+                    query_placements: &report.ranges.queries.placements,
+                    subjects: report.subjects,
+                    subject_placements: report.ranges.subjects.placements,
+                    parsed: report.database_parsed,
+                    listed_ordinals: report
+                        .database_ordinals
+                        .zip(report.database_reader.map(|reader| reader.oid_map())),
+                    show_gis: report.show_gis,
+                    rows: rows
+                        .as_ref()
+                        .expect("the rows' inputs are made for outfmt 0 to 4"),
+                    hit_lists: &hit_lists,
+                }
+            });
             let mut write = |hits: &[PairwiseHit], range: std::ops::Range<usize>| {
                 write_blastn_pairwise_report(
                     hits,
@@ -7007,6 +7136,9 @@ fn post_process_hits_and_write(
                     probe.as_mut(),
                     format_warnings.as_mut(),
                     report.x_pairwise_pool,
+                    anchored.as_ref().map(|sequences| {
+                        sequences as &dyn crate::report::query_anchored::ReportSequences
+                    }),
                 )
             };
             match pairwise_hits.as_deref() {
@@ -7852,7 +7984,7 @@ pub fn run(
     // end of file).
     let out_file = open_out_file(&args)?;
     let outfmt = args.outfmt.clone();
-    let pairwise = output_formats.contains(&BlastnOutputFormat::Pairwise);
+    let pairwise = output_formats.iter().any(|format| format.is_pairwise());
     let tax_report = output_formats.iter().any(|format| {
         format
             .tabular_spec()
@@ -10930,10 +11062,11 @@ fn run_in_pool(
                     .and_then(crate::api::local_blast::FormatOutput::report_format);
                 let places = first_report
                     .is_some_and(crate::blastinput::app::ReportFormat::places_subject_reads);
-                // The pairwise report reads its subjects in the order of its `-sorthits`.
-                let pairwise = (first_report
-                    == Some(crate::blastinput::app::ReportFormat::Pairwise))
-                .then(|| args.formatting.report_sort());
+                // The pairwise report (outfmt 0 to 4) reads its subjects in the order of its
+                // `-sorthits`.
+                let pairwise = first_report
+                    .and_then(crate::report::pairwise::PairwiseView::of)
+                    .map(|view| view.report_sort(args.formatting.report_sort()));
                 let query_fetch = |query: usize,
                                    shown: &[Option<BlastnHitList>],
                                    reads: &mut [QueryReads]|
@@ -11315,7 +11448,7 @@ fn prolog_before_search(sink: &OutputSink<'_>) -> bool {
 /// can refuse never writes, comes before the search (`tabular::write_tabular_prolog_warning`).
 fn prolog_with_report(format: &FormatOutput<'_>, output_format: BlastnOutputFormat) -> bool {
     match output_format {
-        BlastnOutputFormat::Pairwise => !prolog_before_search(&format.sink),
+        BlastnOutputFormat::Pairwise(_) => !prolog_before_search(&format.sink),
         BlastnOutputFormat::Xml2(_) => true,
         BlastnOutputFormat::CustomTabular(spec) => {
             spec.kind == crate::report::tabular::TabularKind::CsvWithHeader
@@ -11353,7 +11486,7 @@ fn write_pairwise_prologs(
             )?;
         }
         let writes_prolog = match output_format {
-            BlastnOutputFormat::Pairwise => prolog_before_search(&format.sink) == before_search,
+            BlastnOutputFormat::Pairwise(_) => prolog_before_search(&format.sink) == before_search,
             BlastnOutputFormat::Xml2(_) => !before_search,
             BlastnOutputFormat::CustomTabular(_) => {
                 !before_search && prolog_with_report(format, output_format)
@@ -11375,7 +11508,7 @@ fn write_format_prolog(
     megablast: bool,
     shown: &ShownSubjects,
 ) -> Result<()> {
-    if output_format == BlastnOutputFormat::Pairwise {
+    if output_format.is_pairwise() {
         let mut writer = format.sink.open()?;
         write_blastn_pairwise_prolog(
             &mut writer,
@@ -11551,7 +11684,13 @@ fn write_reports_untimed(
     mut written: x_rpt_stream::Written<'_>,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Result<()> {
-    if args.parse_deflines && output_formats.contains(&BlastnOutputFormat::Pairwise) {
+    // Outfmt 0 only: the query-anchored sections (outfmt 1 to 4) draw these masks as NCBI does
+    // (`query_anchored::fill_loc_list`).
+    if args.parse_deflines
+        && output_formats.contains(&BlastnOutputFormat::Pairwise(
+            crate::report::pairwise::PairwiseView::Pairwise,
+        ))
+    {
         crate::blastinput::fasta_reader::believed::refuse_shared_masks(
             query_records,
             |query| {
@@ -11605,7 +11744,7 @@ fn write_reports_untimed(
         SubjectSource::Prepared(_) => None,
         SubjectSource::Database(database) => {
             let letters = outputs.hits.is_some()
-                || output_formats.contains(&BlastnOutputFormat::Pairwise)
+                || output_formats.iter().any(|format| format.is_pairwise())
                 || output_formats
                     .iter()
                     .any(|format| format.is_structured_xml())
@@ -11702,7 +11841,7 @@ fn write_reports_untimed(
                 .map(|record| (record.believed(), record.title.as_slice())),
             args.show_gis,
             false,
-            output_formats.contains(&BlastnOutputFormat::Pairwise),
+            output_formats.iter().any(|format| format.is_pairwise()),
             "BLASTN",
         )?
     } else {
@@ -11765,12 +11904,13 @@ fn write_reports_untimed(
             .map_or(&[][..], |reported| reported.sources.as_slice()),
         finished_hit_lists: reported.is_some(),
         epilog,
+        show_gis: args.show_gis,
         prolog: outputs
             .formats
             .iter()
             .zip(output_formats)
             .any(|(format, &output_format)| {
-                output_format == BlastnOutputFormat::Pairwise && !prolog_before_search(&format.sink)
+                output_format.is_pairwise() && !prolog_before_search(&format.sink)
             }),
         queries_before: written.queries,
         subject_cache: written.subjects,
@@ -15336,9 +15476,15 @@ mod tests {
                 "{outfmt}"
             );
         }
+        // Line RG T3b: the query-anchored formats 1 to 4, outfmt 0's report with another section.
         assert_eq!(
-            cli_output_formats("1", file).unwrap_err().to_string(),
-            "output format 1 is not supported by LOSAT's BLASTN"
+            cli_output_formats("1", file).unwrap(),
+            [BlastnOutputFormat::Pairwise(
+                crate::report::pairwise::PairwiseView::QueryAnchored {
+                    identity: true,
+                    anchored: true
+                }
+            )]
         );
         // Outfmt 18, the organism report (line RG T2), rides the custom tabular report's hit
         // lists; NCBI keeps no field list for it.
@@ -15370,7 +15516,9 @@ mod tests {
         );
         assert_eq!(
             cli_output_formats("0 qaccver", None).unwrap(),
-            [BlastnOutputFormat::Pairwise]
+            [BlastnOutputFormat::Pairwise(
+                crate::report::pairwise::PairwiseView::Pairwise
+            )]
         );
         // A field list, a delimiter, and outfmt 10 and 20 are the custom tabular report (line CLI
         // C2); the default 6 and 7 (`std` with a tab) keep their own writers.
@@ -15450,7 +15598,7 @@ mod tests {
         assert_eq!(
             parse_output_formats([("0", None), ("6", None), ("07", None)]).unwrap(),
             [
-                BlastnOutputFormat::Pairwise,
+                BlastnOutputFormat::Pairwise(crate::report::pairwise::PairwiseView::Pairwise),
                 BlastnOutputFormat::Tabular,
                 BlastnOutputFormat::TabularWithComments
             ]

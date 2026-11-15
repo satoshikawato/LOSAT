@@ -1,0 +1,93 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/of1/bns.fa).
+           5 sequences; 1,094 total letters
+
+
+
+Query= bnq query
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_plus plus insertion same place                                      282     3e-80
+s_pmo overlapping plus and minus                                      246     2e-69
+
+
+
+Query_1    1    TGTATATTCGGACTTGGCCTATCCACACAAGCGGTATTGAGGTGGAACGTTAGCGTTTGG  60
+Subject_5  1    ............................................................  60
+Subject_1  1    ....................TC................CG....................  60
+
+Query_1    61   TACTGTCGGCACGTACGCCTCGTGAGGCATACAACATTTTTCGTATCCGCGAGCATAAAT  120
+Subject_5  61   ............................................................  124
+                                             \                              
+                                             |                              
+                                          TAAG
+Subject_1  61   ..G..............G..........................................  120
+
+Query_1    121  GTTTCTAGCGTTTCCAGTTTTGACGGTACAtttttttttttttttttttttttttGCGGA  180
+Subject_5  125  ...............................C.AACGACCAA.CA.GGGGCGGCA.....  184
+Subject_1  121  ...............................                               151
+
+Query_1    181  TGATGCAGCACTCTTCAGACCGGAAGCCGTCACGCCAACT  220
+Subject_5  185  ............A.............T.............  224
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 297792
+
+
+Query= bnq2 second query
+
+Length=160
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_plus plus insertion same place                                      195     5e-54
+s_pmo overlapping plus and minus                                      104     7e-27
+
+
+
+Query_2    1    TCGTATCCGCGAGCATAAATGTTTCTAGCGTTTCCAGTTTTGACTGTACATCTAACGACC  60
+Subject_5  105  ............................................G...............  164
+Subject_1  101  ............................................G...............  160
+
+Query_2    61   GATCATGGGGCGGCAGCGGATGACGCAGCACTCTTCAGACCGGAAGCCGTCACGCCAACT  120
+Subject_5  165  A......................T........A.............T.............  224
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 153032
+
+
+  Database: User specified sequence set (Input: tests/db_search/of1/bns.fa).
+    Posted date:  Unknown
+  Number of letters in database: 1,094
+  Number of sequences in database:  5
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

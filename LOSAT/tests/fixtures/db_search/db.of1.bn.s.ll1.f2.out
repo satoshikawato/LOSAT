@@ -1,0 +1,592 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/of1/bns.fa).
+           5 sequences; 1,094 total letters
+
+
+
+Query= bnq query
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_pmo overlapping plus and minus                                      73.4    2e-18
+s_plus plus insertion same place                                      61.7    2e-14
+s_mins2 minus insertion same place                                    61.7    2e-14
+s_mins minus insertion                                                57.2    2e-13
+
+
+
+Query_1    61   T  61
+Subject_1  370  T  370
+Subject_1  61   T  61
+Subject_5  61   T  61
+Subject_4  92   T  92
+Subject_2  144  T  144
+
+Query_1    62   A  62
+Subject_1  369  A  369
+Subject_1  62   A  62
+Subject_5  62   A  62
+Subject_4  91   A  91
+Subject_2  143  A  143
+
+Query_1    63   C  63
+Subject_1  368  C  368
+Subject_1  63   G  63
+Subject_5  63   C  63
+Subject_4  90   C  90
+Subject_2  142  C  142
+
+Query_1    64   T  64
+Subject_1  367  T  367
+Subject_1  64   T  64
+Subject_5  64   T  64
+Subject_4  89   T  89
+Subject_2  141  T  141
+
+Query_1    65   G  65
+Subject_1  366  G  366
+Subject_1  65   G  65
+Subject_5  65   G  65
+Subject_4  88   G  88
+Subject_2  140  G  140
+
+Query_1    66   T  66
+Subject_1  365  T  365
+Subject_1  66   T  66
+Subject_5  66   T  66
+Subject_4  87   T  87
+Subject_2  139  T  139
+
+Query_1    67   C  67
+Subject_1  364  C  364
+Subject_1  67   C  67
+Subject_5  67   C  67
+Subject_4  86   C  86
+Subject_2  138  C  138
+
+Query_1    68   G  68
+Subject_1  363  G  363
+Subject_1  68   G  68
+Subject_5  68   G  68
+Subject_4  85   G  85
+Subject_2  137  G  137
+
+Query_1    69   G  69
+Subject_1  362  G  362
+Subject_1  69   G  69
+Subject_5  69   G  69
+Subject_4  84   G  84
+Subject_2  136  G  136
+
+Query_1    70   C  70
+Subject_1  361  C  361
+Subject_1  70   C  70
+Subject_5  70   C  70
+Subject_4  83   C  83
+Subject_2  135  C  135
+
+Query_1    71   A  71
+Subject_1  360  A  360
+Subject_1  71   A  71
+Subject_5  71   A  71
+Subject_4  82   A  82
+Subject_2  134  A  134
+
+Query_1    72   C  72
+Subject_1  359  C  359
+Subject_1  72   C  72
+Subject_5  72   C  72
+Subject_4  81   C  81
+Subject_2  133  C  133
+
+Query_1    73   G  73
+Subject_1  358  G  358
+Subject_1  73   G  73
+Subject_5  73   G  73
+Subject_4  80   G  80
+Subject_2  132  G  132
+
+Query_1    74   T  74
+Subject_1  357  T  357
+Subject_1  74   T  74
+Subject_5  74   T  74
+Subject_4  79   T  79
+Subject_2  131  T  131
+
+Query_1    75   A  75
+Subject_1  356  A  356
+Subject_1  75   A  75
+Subject_5  75   A  75
+Subject_4  78   A  78
+Subject_2  130  A  130
+
+Query_1    76   C  76
+Subject_1  355  C  355
+Subject_1  76   C  76
+Subject_5  76   C  76
+Subject_4  77   C  77
+Subject_2  129  C  129
+
+Query_1    77   G  77
+Subject_1  354  G  354
+Subject_1  77   G  77
+Subject_5  77   G  77
+Subject_4  76   G  76
+Subject_2  128  G  128
+
+Query_1    78   C  78
+Subject_1  353  C  353
+Subject_1  78   G  78
+Subject_5  78   C  78
+Subject_4  75   C  75
+Subject_2  127  C  127
+
+Query_1    79   C  79
+Subject_1  352  C  352
+Subject_1  79   C  79
+Subject_5  79   C  79
+Subject_4  74   C  74
+Subject_2  126  C  126
+
+Query_1    80   T  80
+Subject_1  351  T  351
+Subject_1  80   T  80
+Subject_5  80   T  80
+Subject_4  73   T  73
+Subject_2  125  T  125
+
+Query_1    81   C  81
+Subject_1  350  C  350
+Subject_1  81   C  81
+Subject_5  81   C  81
+Subject_4  72   C  72
+Subject_2  124  C  124
+
+Query_1    82   G  82
+Subject_1  349  G  349
+Subject_1  82   G  82
+Subject_5  82   G  82
+Subject_4  71   G  71
+Subject_2  123  G  123
+
+Query_1    83   T  83
+Subject_1  348  T  348
+Subject_1  83   T  83
+Subject_5  83   T  83
+Subject_4  70   T  70
+Subject_2  122  T  122
+
+Query_1    84   G  84
+Subject_1  347  G  347
+Subject_1  84   G  84
+Subject_5  84   G  84
+Subject_4  69   G  69
+Subject_2  121  G  121
+
+Query_1    85   A  85
+Subject_1  346  A  346
+Subject_1  85   A  85
+Subject_5  85   A  85
+Subject_4  68   A  68
+Subject_2  120  A  120
+
+Query_1    86   G  86
+Subject_1  345  G  345
+Subject_1  86   G  86
+Subject_5  86   G  86
+Subject_4  67   G  67
+Subject_2  119  G  119
+
+Query_1    87   G  87
+Subject_1  344  G  344
+Subject_1  87   G  87
+Subject_5  87   G  87
+Subject_4  66   G  66
+Subject_2  118  G  118
+
+Query_1    88   C  88
+Subject_1  343  C  343
+Subject_1  88   C  88
+Subject_5  88   C  88
+Subject_4  65   C  65
+Subject_2  117  C  117
+
+Query_1    89   A  89
+Subject_1  342  A  342
+Subject_1  89   A  89
+Subject_5  89   A  89
+Subject_4  64   A  64
+Subject_2  112  A  112
+                \
+                |
+                ATGG
+
+Query_1    90   T  90
+Subject_1  341  T  341
+Subject_1  90   T  90
+Subject_5  94   T  94
+                \
+                |
+                TAAG
+Subject_4  63   T  63
+Subject_2  111  T  111
+
+Query_1    91   A  91
+Subject_1  340  A  340
+Subject_1  91   A  91
+Subject_5  95   A  95
+Subject_4  60   A  60
+                \
+                |
+                CC
+Subject_2  110  A  110
+
+Query_1    92   C  92
+Subject_1  339  C  339
+Subject_1  92   C  92
+Subject_5  96   C  96
+Subject_4  59   C  59
+Subject_2  109  C  109
+
+Query_1    93   A  93
+Subject_1  338  A  338
+Subject_1  93   A  93
+Subject_5  97   A  97
+Subject_4  58   A  58
+Subject_2  108  A  108
+
+Query_1    94   A  94
+Subject_1  337  A  337
+Subject_1  94   A  94
+Subject_5  98   A  98
+Subject_4  57   A  57
+Subject_2  107  A  107
+
+Query_1    95   C  95
+Subject_1  336  C  336
+Subject_1  95   C  95
+Subject_5  99   C  99
+Subject_4  56   C  56
+Subject_2  106  C  106
+
+Query_1    96   A  96
+Subject_1  335  A  335
+Subject_1  96   A  96
+Subject_5  100  A  100
+Subject_4  55   A  55
+Subject_2  105  A  105
+
+Query_1    97   T  97
+Subject_1  334  T  334
+Subject_1  97   T  97
+Subject_5  101  T  101
+Subject_4  54   T  54
+Subject_2  104  T  104
+
+Query_1    98   T  98
+Subject_1  333  T  333
+Subject_1  98   T  98
+Subject_5  102  T  102
+Subject_4  53   T  53
+Subject_2  103  A  103
+
+Query_1    99   T  99
+Subject_1  332  T  332
+Subject_1  99   T  99
+Subject_5  103  T  103
+Subject_2  102  T  102
+
+Query_1    100  T  100
+Subject_1  331  T  331
+Subject_1  100  T  100
+Subject_5  104  T  104
+Subject_2  101  T  101
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 31320
+
+
+Query= bnq2 second query
+
+Length=160
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_mins minus insertion                                                67.1    4e-16
+s_pmo overlapping plus and minus                                      65.3    1e-15
+s_plus plus insertion same place                                      62.6    4e-15
+s_mdel minus deletion                                                 45.5    1e-09
+
+
+
+Query_2    62   A  62
+Subject_2  39   A  39
+Subject_5  166  A  166
+Subject_3  123  A  123
+
+Query_2    63   T  63
+Subject_2  38   T  38
+Subject_1  268  T  268
+Subject_5  167  T  167
+Subject_3  122  T  122
+
+Query_2    64   C  64
+Subject_2  37   C  37
+Subject_1  267  C  267
+Subject_5  168  C  168
+Subject_3  121  C  121
+
+Query_2    65   A  65
+Subject_2  36   A  36
+Subject_1  266  A  266
+Subject_5  169  A  169
+Subject_3  120  A  120
+
+Query_2    66   T  66
+Subject_2  35   T  35
+Subject_1  265  T  265
+Subject_5  170  T  170
+Subject_3  119  T  119
+
+Query_2    67   G  67
+Subject_2  34   G  34
+Subject_1  264  G  264
+Subject_5  171  G  171
+Subject_3  118  G  118
+
+Query_2    68   G  68
+Subject_2  33   G  33
+Subject_1  263  G  263
+Subject_5  172  G  172
+Subject_3  117  G  117
+
+Query_2    69   G  69
+Subject_2  32   G  32
+Subject_1  262  G  262
+Subject_5  173  G  173
+Subject_3  116  G  116
+
+Query_2    70   G  70
+Subject_2  31   G  31
+Subject_1  261  G  261
+Subject_5  174  G  174
+Subject_3  115  G  115
+
+Query_2    71   C  71
+Subject_2  30   C  30
+Subject_1  260  C  260
+Subject_5  175  C  175
+Subject_3  114  C  114
+
+Query_2    72   G  72
+Subject_2  29   G  29
+Subject_1  259  G  259
+Subject_5  176  G  176
+Subject_3  113  G  113
+
+Query_2    73   G  73
+Subject_2  28   G  28
+Subject_1  258  G  258
+Subject_5  177  G  177
+Subject_3  112  G  112
+
+Query_2    74   C  74
+Subject_2  27   C  27
+Subject_1  257  C  257
+Subject_5  178  C  178
+Subject_3  111  C  111
+
+Query_2    75   A  75
+Subject_2  26   A  26
+Subject_1  256  A  256
+Subject_5  179  A  179
+Subject_3  110  A  110
+
+Query_2    76   G  76
+Subject_2  25   G  25
+Subject_1  255  G  255
+Subject_5  180  G  180
+Subject_3  109  G  109
+
+Query_2    77   C  77
+Subject_2  24   C  24
+Subject_1  254  C  254
+Subject_5  181  C  181
+Subject_3  108  C  108
+
+Query_2    78   G  78
+Subject_2  23   G  23
+Subject_1  253  G  253
+Subject_5  182  G  182
+Subject_3  107  G  107
+
+Query_2    79   G  79
+Subject_2  22   G  22
+Subject_1  252  G  252
+Subject_5  183  G  183
+Subject_3  106  G  106
+
+Query_2    80   A  80
+Subject_2  21   A  21
+Subject_1  251  A  251
+Subject_5  184  A  184
+Subject_3  105  A  105
+
+Query_2    81   T  81
+Subject_2  20   T  20
+Subject_1  250  T  250
+Subject_5  185  T  185
+Subject_3       -  
+
+Query_2    82   G  82
+Subject_2  19   G  19
+Subject_1  249  G  249
+Subject_5  186  G  186
+Subject_3       -  
+
+Query_2    83   A  83
+Subject_2  18   A  18
+Subject_1  248  A  248
+Subject_5  187  A  187
+Subject_3       -  
+
+Query_2    84   C  84
+Subject_2  17   T  17
+Subject_1  247  T  247
+Subject_5  188  T  188
+Subject_3       -  
+
+Query_2    85   G  85
+Subject_2  16   G  16
+Subject_1  246  G  246
+Subject_5  189  G  189
+Subject_3       -  
+
+Query_2    86   C  86
+Subject_2  15   C  15
+Subject_1  245  C  245
+Subject_5  190  C  190
+Subject_3       -  
+
+Query_2    87   A  87
+Subject_2  14   A  14
+Subject_1  244  A  244
+Subject_5  191  A  191
+Subject_3  104  A  104
+
+Query_2    88   G  88
+Subject_2  13   G  13
+Subject_1  243  G  243
+Subject_5  192  G  192
+Subject_3  103  G  103
+
+Query_2    89   C  89
+Subject_2  12   C  12
+Subject_1  242  C  242
+Subject_5  193  C  193
+Subject_3  102  C  102
+
+Query_2    90   A  90
+Subject_2  11   A  11
+Subject_1  241  A  241
+Subject_5  194  A  194
+Subject_3  101  A  101
+
+Query_2    91   C  91
+Subject_2  10   C  10
+Subject_1  240  C  240
+Subject_5  195  C  195
+Subject_3  100  C  100
+
+Query_2    92   T  92
+Subject_2  9    T  9
+Subject_1  239  T  239
+Subject_5  196  T  196
+Subject_3  99   T  99
+
+Query_2    93   C  93
+Subject_2  8    C  8
+Subject_1  238  C  238
+Subject_5  197  A  197
+Subject_3  98   C  98
+
+Query_2    94   T  94
+Subject_2  7    T  7
+Subject_1  237  T  237
+Subject_5  198  T  198
+Subject_3  97   T  97
+
+Query_2    95   T  95
+Subject_2  6    T  6
+Subject_1  236  T  236
+Subject_5  199  T  199
+Subject_3  96   T  96
+
+Query_2    96   C  96
+Subject_2  5    C  5
+Subject_1  235  C  235
+Subject_5  200  C  200
+Subject_3  95   C  95
+
+Query_2    97   A  97
+Subject_2  4    A  4
+Subject_1  234  A  234
+Subject_5  201  A  201
+Subject_3  94   A  94
+
+Query_2    98   G  98
+Subject_2  3    G  3
+Subject_1  233  G  233
+Subject_5  202  G  202
+Subject_3  93   G  93
+
+Query_2    99   A  99
+Subject_2  2    A  2
+Subject_1  232  A  232
+Subject_5  203  A  203
+Subject_3  92   A  92
+
+Query_2    100  C  100
+Subject_2  1    C  1
+Subject_1  231  C  231
+Subject_5  204  C  204
+Subject_3  91   C  91
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 31320
+
+
+  Database: User specified sequence set (Input: tests/db_search/of1/bns.fa).
+    Posted date:  Unknown
+  Number of letters in database: 1,094
+  Number of sequences in database:  5
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

@@ -1,0 +1,88 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/of1/bnslc.fa).
+           1 sequences; 300 total letters
+
+
+
+Query= bnq query
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_lc lowercase start                                                  208     1e-58
+
+
+
+Query_1    1    TGTATATTCGGACTTGGCCTATCCACACAAGCGGTATTGAGGTGGAACGTTAGCGTTTGG  60
+Subject_1  1    ............................................................  60
+Subject_1  300                                          ....................  281
+
+Query_1    61   TACTGTCGGCACGTACGCCTCGTGAGGCATACAACATTTTTCGTATCCGCGAGCATAAAT  120
+Subject_1  61   ...................C.......A................................  120
+Subject_1  280  .................T..........................................  221
+
+Query_1    121  GTTTCTAGCGTTTCCAGTTTTGACGGTACAtttttttttttttttttttttttttGCGGA  180
+Subject_1  220  ....................G..........                               190
+Subject_1  165                                                         .....  161
+
+Query_1    181  TGATGCAGCACTCTTCAGAC  200
+Subject_1  160  .......A............  141
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 83521
+
+
+Query= bnq2 second query
+
+Length=160
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_lc lowercase start                                                  159     1e-43
+
+
+
+Query_2    1    TCGTATCCGCGAGCATAAATGTTTCTAGCGTTTCCAGTTTTGACTGTACATCTAACGACC  60
+Subject_1  240  ........................................G...G...............  181
+Subject_1  101  ....................                                          120
+
+Query_2    61   GATCATGGGGCGGCAGCGGATGACGCAGCACTCTTCAGAC  100
+Subject_1  180  A......................T...A............  141
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 43500
+
+
+  Database: User specified sequence set (Input: tests/db_search/of1/bnslc.fa).
+    Posted date:  Unknown
+  Number of letters in database: 300
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

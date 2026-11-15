@@ -35,26 +35,12 @@ pub(crate) const BLOCK_ENTRIES: usize = 1024;
 /// = 131,072 rows. No NCBI counterpart: a memory bound (NCBI keeps every bucket of a scan, a
 /// volume of CDD 162 to 355 of them, 4,000,000 hits at most); the order of the hits that the word
 /// finder reads is NCBI's whatever the number (`RpsBuckets::fill_group`). A volume of at most 64
-/// buckets is one group. Series PR, item PS12m: 128 buckets hold 472 MB at 32 threads on
-/// mg5k_100 x CDD, 64 361 MB (n32), and 32 passes cost 1 % more instructions than 64.
+/// buckets is one group. Series PR, item PS12m (mg5k_100 x CDD, 32 threads): groups of 128
+/// buckets hold 472 MB, of 64 361 MB; groups of 32 cost 1 % more instructions than 64.
 pub(crate) const RPS_GROUP_BUCKETS: usize = 64;
 
 /// A word of the backbone is a `u16` (`ScanWords`).
 const _: () = assert!(crate::seqdb::rps::RPS_BACKBONE_SIZE <= 1 << 16);
-
-/// A software prefetch of the cache line of `target` (none where the target has no such
-/// instruction): it never faults and changes nothing the program can observe.
-#[inline(always)]
-fn prefetch<T>(target: &T) {
-    // SAFETY: `_mm_prefetch` needs only SSE, which every x86_64 target has, and never faults.
-    #[cfg(target_arch = "x86_64")]
-    unsafe {
-        use core::arch::x86_64::{_mm_prefetch, _MM_HINT_T0};
-        _mm_prefetch(std::ptr::from_ref(target).cast::<i8>(), _MM_HINT_T0);
-    }
-    #[cfg(not(target_arch = "x86_64"))]
-    let _ = target;
-}
 
 /// One block of a bucket's entries.
 type Block = Box<[u32; BLOCK_ENTRIES]>;
@@ -269,9 +255,9 @@ impl RpsBuckets {
     /// bucket receives exactly the hits NCBI's holds, in its order, and the word finder reads the
     /// same hits in the same order.
     ///
-    /// A word without a hit in the group costs one compare (`next_q`). The words' cells and
-    /// overflow runs of the next words are prefetched: the scan's words are read in turn, each from
-    /// a different place of the table.
+    /// A word without a hit in the group costs one compare (`next_q`). (A software prefetch of the
+    /// next words' cells and overflow runs gained at most 0.8 % of the time at one thread and
+    /// nothing at eight in the timed A/B of PS12m, and was left out.)
     pub(crate) fn fill_group(&mut self, table: &RpsTable<'_>, group: usize) -> RpsReadCursor {
         let cursor = self.open_group(group);
         // The first concatenated position past the group (the last group takes every hit).
@@ -284,16 +270,6 @@ impl RpsBuckets {
         let mut words = std::mem::take(&mut self.words);
         let count = words.len();
         for i in 0..count {
-            if let Some(&ahead) = words.word.get(i + 8) {
-                prefetch(&table.cells[ahead as usize]);
-            }
-            if let Some(&ahead) = words.word.get(i + 4) {
-                let cell = &table.cells[ahead as usize];
-                let taken = words.taken[i + 4] as usize;
-                if words.next_q[i + 4] < g1_q && cell[0] > RPS_HITS_PER_CELL && taken > 0 {
-                    prefetch(&table.overflow[cell[2] as usize / 4 + taken - 1]);
-                }
-            }
             if words.next_q[i] >= g1_q {
                 continue;
             }

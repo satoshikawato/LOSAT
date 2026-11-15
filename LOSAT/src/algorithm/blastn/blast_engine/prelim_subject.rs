@@ -254,15 +254,16 @@ pub(super) struct PrelimSubject<'a> {
 }
 
 /// The search of one chunk of a subject (one turn of the chunk loop): the chunk's ranges and packed
-/// letters, the debug counters, the interval tree, the diagonal table (array or hash) set up for
-/// the chunk, then the word finder: for a two-stage table the strips dispatch of PAIRPAR
-/// (`x_pair_seed::run`) or the scan (`two_stage_scan::scan_two_stage_lookup`), for the other tables
-/// the dispatch of LOSAT_X_PAIRPARNA (`x_pair_seed::run_na`) or the scan
-/// (`na_scan::scan_na_lookup`); then the chunk's HSP list, of an ungapped search from its initial
-/// hits (`prelim_hsp_list::ungapped_hsp_list`), else from the initial hits sorted
-/// (`prelim_hsp_list::sort_ungapped_hits_for_gapped`) by the gapped loop with its purge and sort
-/// (`prelim_hsp_list::gapped_hsp_list`); and the diagonal table's offset moved on. The list is in
-/// the subject's coordinates. `reuse_prelim_hits` is set for the owner's serial calls (not a chunk
+/// letters, the debug counters, the diagonal table (array or hash) set up for the chunk, then the
+/// word finder: for a two-stage table the strips dispatch of PAIRPAR (`x_pair_seed::run`) or the
+/// scan (`two_stage_scan::scan_two_stage_lookup`), for the other tables the dispatch of
+/// LOSAT_X_PAIRPARNA (`x_pair_seed::run_na`) or the scan (`na_scan::scan_na_lookup`). A chunk
+/// without an initial hit ends there with an empty list, after its diagonal table's offset moved
+/// on (NCBI's `continue` after the word finder, below). Otherwise the chunk's HSP list, of an
+/// ungapped search from its initial hits (`prelim_hsp_list::ungapped_hsp_list`), else from the
+/// initial hits sorted (`prelim_hsp_list::sort_ungapped_hits_for_gapped`) by the gapped loop with
+/// its interval tree, purge and sort (`prelim_hsp_list::gapped_hsp_list`); and the diagonal
+/// table's offset moved on. The list is in the subject's coordinates. `reuse_prelim_hits` is set for the owner's serial calls (not a chunk
 /// of a batch on the pool); the scratches are the subject's, or the pool worker's.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:487-500,522-527,555,560-563

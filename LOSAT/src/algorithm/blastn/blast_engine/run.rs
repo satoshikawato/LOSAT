@@ -7023,10 +7023,7 @@ fn post_process_hits_and_write(
         // So do those of the formatters of a tabular field list that shows a taxonomy name
         // (`x_CheckTaxDB`, `algorithm::blastn::tabular`).
         let mut format_warnings = (warning_lines.is_some()
-            || matches!(
-                output_format,
-                BlastnOutputFormat::Xml | BlastnOutputFormat::Xml2(_) | BlastnOutputFormat::Archive
-            )
+            || crate::report::query_warnings::report_posts(format.report_format())
             || output_format
                 .tabular_spec()
                 .is_some_and(|spec| spec.looks_up_every_taxid()))

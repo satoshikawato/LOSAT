@@ -1176,7 +1176,7 @@ fn many_hits_16(
     hits_title: &[u8],
     last_title: &[u8],
     message: Option<&[u8]>,
-) -> (Vec<u8>, Vec<crate::report::blast_xml::DocumentPost>) {
+) -> (Vec<u8>, Vec<crate::report::blast_xml::writer::DocumentPost>) {
     let matrix = FormattingMatrix::new("BLOSUM62").unwrap();
     let run = run(Some(&matrix), b"db/sprot");
     let mut writer = Xml2Writer::new(Xml2Kind::Single16, params(Xml2Target::Database));
@@ -1191,7 +1191,7 @@ fn many_hits_16(
     };
     let mut out = Vec::new();
     writer.start(&mut out);
-    let mut posts = writer.take_posts();
+    let mut posts = writer.take_posts().posts;
     let base = out.len();
     writer
         .query(&run, &query, &mut out, |sink| {
@@ -1235,10 +1235,10 @@ fn many_hits_16(
             Ok(())
         })
         .unwrap();
-    posts.extend(writer.take_posts());
+    posts.extend(writer.take_posts().posts);
     assert!(posts.iter().all(|post| post.at >= base));
     writer.finish(&mut out).unwrap();
-    posts.extend(writer.take_posts());
+    posts.extend(writer.take_posts().posts);
     (out, posts)
 }
 

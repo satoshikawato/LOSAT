@@ -56,7 +56,7 @@ use std::path::Path;
 use anyhow::Result;
 
 use super::files::{run_side_files, SideFileSink};
-use crate::report::blast_xml::writer::{run_ending_exception, DocumentPost};
+use crate::report::blast_xml::writer::{DocumentPost, DocumentPosts};
 use crate::report::serial::xml::{XmlThrow, XML2_ROOT_ATTRIBUTES};
 
 /// What a report's writer hands the framing with the report's bytes (`Xml2Document::report`):
@@ -251,8 +251,9 @@ pub struct Xml2Document<F: SideFiles = NoSideFiles> {
     pending_made: MadeReport,
     has_pending: bool,
     files: F,
-    /// The posts of the reports written to the output buffers since `take_posts`.
-    posts: Vec<DocumentPost>,
+    /// The posts of the reports written to the output buffers since `take_posts`, and the
+    /// exception of a 14 side file that ends the run after them.
+    posts: DocumentPosts,
 }
 
 impl Xml2Document<NoSideFiles> {
@@ -316,8 +317,9 @@ impl<F: SideFiles> Xml2Document<F> {
     }
 
     /// The posts of the reports written since the last call, at offsets of the output buffers of
-    /// the calls that wrote them (`StructuredXml::take_posts`).
-    pub fn take_posts(&mut self) -> Vec<DocumentPost> {
+    /// the calls that wrote them, and the exception that ends the run after them
+    /// (`StructuredXml::take_posts`).
+    pub fn take_posts(&mut self) -> DocumentPosts {
         std::mem::take(&mut self.posts)
     }
 
@@ -331,7 +333,7 @@ impl<F: SideFiles> Xml2Document<F> {
             pending_made: MadeReport::default(),
             has_pending: false,
             files,
-            posts: Vec::new(),
+            posts: DocumentPosts::default(),
         }
     }
 
@@ -439,21 +441,30 @@ impl<F: SideFiles> Xml2Document<F> {
     /// `x_WriteXML2`: one report into the stream (after its separator, `separator`) or its own
     /// file, its posts after the bytes of the output before them (a side file's after the output
     /// so far). A side file whose report threw is written up to the failing byte, and the
-    /// exception ends the run (`run_ending_exception`; the master file stays empty).
+    /// exception ends the run after the report's posts (`DocumentPosts::ends_run`, handed back by
+    /// the writer of the posts; the master file stays empty: `epilog` writes no end).
     fn write(&mut self, report: &[u8], made: MadeReport, out: &mut Vec<u8>) -> Result<()> {
         self.written += 1;
         let at = if self.kind.is_files() { 0 } else { 1 };
         let base = out.len();
         let MadeReport { posts, ends_run } = made;
-        if let Some(thrown) = ends_run {
-            self.files.write_file(self.written, report)?;
-            return Err(run_ending_exception(&posts, &thrown));
-        }
         self.posts
+            .posts
             .extend(posts.into_iter().map(|post| DocumentPost {
                 at: base + at * post.at,
                 text: post.text,
             }));
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:775-776
+        // ```c++
+        // 		s_FillBlastOutput(bxmlout, data);
+        // 		s_WriteXML2Object(bxmlout, &out_stream);
+        // ```
+        // The subjects' loads (`s_FillBlastOutput`) and the posts come before the exception.
+        if let Some(thrown) = ends_run {
+            self.files.write_file(self.written, report)?;
+            self.posts.ends_run = Some(thrown);
+            return Ok(());
+        }
         match self.kind {
             Xml2Kind::Single16 | Xml2Kind::Single15 => out.extend_from_slice(report),
             Xml2Kind::Files14 | Xml2Kind::Files13 => {
@@ -481,6 +492,16 @@ impl<F: SideFiles> Xml2Document<F> {
             let made = std::mem::take(&mut self.pending_made);
             self.separator(out);
             self.write(&pending, made, out)?;
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:775-776
+            // ```c++
+            // 		s_FillBlastOutput(bxmlout, data);
+            // 		s_WriteXML2Object(bxmlout, &out_stream);
+            // ```
+            // No `catch`: the held report's exception leaves `PrintEpilog` before the document's
+            // end (the master file stays empty).
+            if self.posts.ends_run.is_some() {
+                return Ok(());
+            }
         }
         match self.kind {
             Xml2Kind::Single16 => out.extend_from_slice(TAIL16),

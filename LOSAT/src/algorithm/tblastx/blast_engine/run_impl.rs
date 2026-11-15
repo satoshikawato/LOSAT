@@ -2613,12 +2613,7 @@ fn write_tblastx_outputs(
         // name (`x_CheckTaxDB`, `tabular`), and NCBI's posts of the bytes that the archive's
         // stream replaces (`write_tblastx_archives`).
         let mut warnings = (warning_lines.is_some()
-            || matches!(
-                output_format,
-                report::TblastxOutputFormat::Xml
-                    | report::TblastxOutputFormat::Xml2(_)
-                    | report::TblastxOutputFormat::Archive
-            )
+            || crate::report::query_warnings::report_posts(format.report_format())
             || matches!(
                 output_format,
                 report::TblastxOutputFormat::CustomTabular(spec) if spec.looks_up_every_taxid()

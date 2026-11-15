@@ -483,3 +483,71 @@ fn the_translation_frame_is_the_records_not_the_searched_intervals() {
     assert_eq!(translation_frame(false, 10, 98, 100), -3);
     assert_eq!(translation_frame(false, 10, 97, 100), -1);
 }
+
+/// The header of the first query (BLAST XML) that throws (NCBI 2.17.0, K4f probe
+/// `blastp.db.f5.none.b3`: the posts, then `Error: NCBI C++ Exception:`, exit 255) writes nothing
+/// and makes no `Hit`; its 803.7 post goes to the diagnostics before the exception, which the
+/// writer of the posts hands back alone (a library caller gets the post on its sink, review 1 of
+/// K4h L5), and an `Iteration` that throws later cuts its query's loads.
+#[test]
+fn a_header_exception_comes_back_after_its_posts() {
+    let matrix = FormattingMatrix::new("BLOSUM62").unwrap();
+    let run = run(&matrix);
+    let query = |title: &'static [u8]| XmlQuery {
+        id: b"Query_1",
+        title,
+        len: 32,
+        stats: STATS,
+        message: None,
+        searched: true,
+        masks: &[],
+    };
+    let mut writer = BlastXmlWriter::new(0);
+    let mut out = Vec::new();
+    let mut hits_made = false;
+    writer
+        .query(&run, &query(b"q\x01 caf\xe9"), &mut out, |_| {
+            hits_made = true;
+            Ok(())
+        })
+        .unwrap();
+    assert!(out.is_empty() && !hits_made);
+    let mut posts = crate::report::query_warnings::HitPosts::default();
+    posts.document(writer.take_posts());
+    let mut diagnostics = Vec::new();
+    let error = crate::report::query_warnings::write_posts_to(
+        &out,
+        &posts,
+        0,
+        &mut Vec::new(),
+        &mut diagnostics,
+        None,
+    )
+    .unwrap_err();
+    let native = error.downcast_ref::<crate::cli::NativeError>().unwrap();
+    assert_eq!(native.exit, 255);
+    assert!(
+        native.message.starts_with("Error: NCBI C++ Exception:\n"),
+        "{}",
+        native.message
+    );
+    let diagnostics = String::from_utf8_lossy(&diagnostics);
+    assert!(
+        diagnostics.starts_with("Error: (803.7) [blastp] BlastOutput.query-def\n"),
+        "{diagnostics}"
+    );
+    // A later query's `Iteration` that throws: the run goes on, its loads are cut.
+    let mut writer = BlastXmlWriter::new(0);
+    let mut out = Vec::new();
+    writer
+        .query(&run, &query(b"plain"), &mut out, |_| Ok(()))
+        .unwrap();
+    assert!(!writer.take_posts().cut);
+    writer
+        .query(&run, &query(b"caf\xe9"), &mut out, |_| {
+            panic!("no `Hit` of a thrown `Iteration`")
+        })
+        .unwrap();
+    let posts = writer.take_posts();
+    assert!(posts.cut && posts.ends_run.is_none() && posts.posts.len() == 1);
+}

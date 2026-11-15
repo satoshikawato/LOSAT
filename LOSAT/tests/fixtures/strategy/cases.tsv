@@ -441,3 +441,21 @@ tblastn.db.in_pssm.nonsq	tblastn	-	-in_pssm tests/fixtures/db_search/db.ps.asn.r
 tblastn.db.in_pssm.empty	tblastn	-	-in_pssm tests/fixtures/db_search/db.ps.asn.rnd.6.asn -db tests/db_search/aliaskeys/e_nF -outfmt 6 -export_search_strategy {ss}	ncbi	2	-	-
 psiblast.pssm.outpssm.comment.nodb	psiblast	-	-in_pssm tests/fasta/strategy/pssm_comment.asn -db tests/db_search/none -out_pssm {ss}.pssm -outfmt 6	ncbi	2	-	-
 tblastn.db.in_pssm.empty.kungneg	tblastn	-	-in_pssm tests/fasta/strategy/pssm_kungneg.asn -db tests/db_search/aliaskeys/e_nF -outfmt 6 -export_search_strategy {ss}	ncbi	2	-	-
+blastp.db.xmlend.first.f5.batches	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/xmlend_first_blastp.faa -db tests/db_search/arch_sprot -outfmt 5 -export_search_strategy {ss}	ncbi	255	-	-
+blastp.sub.xmlend.first.f5.batches	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/xmlend_first_blastp.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -outfmt 5 -export_search_strategy {ss}	ncbi	255	-	-
+blastp.db.xmlend.first.f14.batches	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/xmlend_first_blastp.faa -db tests/db_search/arch_sprot -outfmt 14 -out {ss}.x14 -export_search_strategy {ss}	ncbi	255	-	-
+blastp.sub.xmlend.first.f14.batches	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/xmlend_first_blastp.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -outfmt 14 -out {ss}.x14 -export_search_strategy {ss}	ncbi	255	-	-
+blastp.db.xmlend.second.f14.batches	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/xmlend_second_blastp.faa -db tests/db_search/arch_sprot -outfmt 14 -out {ss}.x14 -export_search_strategy {ss}	ncbi	255	-	-
+blastp.sub.xmlend.second.f14.batches	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/xmlend_second_blastp.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -outfmt 14 -out {ss}.x14 -export_search_strategy {ss}	ncbi	255	-	-
+blastn.db.xmlend.first.f5.batches	blastn	BATCH_SIZE=1	-query tests/fasta/strategy/xmlend_first_blastn.fna -db tests/db_search/arch_snucl -outfmt 5 -export_search_strategy {ss}	ncbi	255	-	-
+blastn.sub.xmlend.first.f5.batches	blastn	BATCH_SIZE=1	-query tests/fasta/strategy/xmlend_first_blastn.fna -subject tests/fasta/outfmt11/arch_s.fna -outfmt 5 -export_search_strategy {ss}	ncbi	255	-	-
+blastn.db.xmlend.first.f14.batches	blastn	BATCH_SIZE=1	-query tests/fasta/strategy/xmlend_first_blastn.fna -db tests/db_search/arch_snucl -outfmt 14 -out {ss}.x14 -export_search_strategy {ss}	ncbi	255	-	-
+blastn.sub.xmlend.first.f14.batches	blastn	BATCH_SIZE=1	-query tests/fasta/strategy/xmlend_first_blastn.fna -subject tests/fasta/outfmt11/arch_s.fna -outfmt 14 -out {ss}.x14 -export_search_strategy {ss}	ncbi	255	-	-
+blastn.db.xmlend.second.f14.batches	blastn	BATCH_SIZE=1	-query tests/fasta/strategy/xmlend_second_blastn.fna -db tests/db_search/arch_snucl -outfmt 14 -out {ss}.x14 -export_search_strategy {ss}	ncbi	255	-	-
+blastn.sub.xmlend.second.f14.batches	blastn	BATCH_SIZE=1	-query tests/fasta/strategy/xmlend_second_blastn.fna -subject tests/fasta/outfmt11/arch_s.fna -outfmt 14 -out {ss}.x14 -export_search_strategy {ss}	ncbi	255	-	-
+tblastn.db.xmlend.first.f5.batches	tblastn	BATCH_SIZE=1	-query tests/fasta/strategy/xmlend_first_tblastn.faa -db tests/db_search/arch_tbn_snucl -outfmt 5 -export_search_strategy {ss}	ncbi	255	-	-
+tblastn.sub.xmlend.first.f14.batches	tblastn	BATCH_SIZE=1	-query tests/fasta/strategy/xmlend_first_tblastn.faa -subject tests/fasta/outfmt11/arch_tbn_s.fna -outfmt 14 -out {ss}.x14 -export_search_strategy {ss}	ncbi	255	-	-
+tblastn.db.xmlend.second.f14.batches	tblastn	BATCH_SIZE=1	-query tests/fasta/strategy/xmlend_second_tblastn.faa -db tests/db_search/arch_tbn_snucl -outfmt 14 -out {ss}.x14 -export_search_strategy {ss}	ncbi	255	-	-
+tblastx.db.xmlend.first.f5.batches	tblastx	BATCH_SIZE=1	-query tests/fasta/strategy/xmlend_first_tblastx.fna -db tests/db_search/arch_tbx_snucl -outfmt 5 -export_search_strategy {ss}	ncbi	255	-	-
+tblastx.sub.xmlend.first.f14.batches	tblastx	BATCH_SIZE=1	-query tests/fasta/strategy/xmlend_first_tblastx.fna -subject tests/fasta/outfmt11/arch_tbx_s.fna -outfmt 14 -out {ss}.x14 -export_search_strategy {ss}	ncbi	255	-	-
+tblastx.db.xmlend.second.f14.batches	tblastx	BATCH_SIZE=1	-query tests/fasta/strategy/xmlend_second_tblastx.fna -db tests/db_search/arch_tbx_snucl -outfmt 14 -out {ss}.x14 -export_search_strategy {ss}	ncbi	255	-	-

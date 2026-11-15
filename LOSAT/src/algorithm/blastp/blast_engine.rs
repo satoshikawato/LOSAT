@@ -15525,10 +15525,7 @@ fn run_call(
         // read one by one (`subject_reads`).
         let first_lines = warning_lines.take();
         let mut warnings = (first_lines.is_some()
-            || matches!(
-                outfmt,
-                BlastpReport::Xml | BlastpReport::Xml2(_) | BlastpReport::Archive
-            )
+            || crate::report::query_warnings::report_posts(format.report_format())
             || matches!(
                 outfmt,
                 BlastpReport::CustomTabular(spec)

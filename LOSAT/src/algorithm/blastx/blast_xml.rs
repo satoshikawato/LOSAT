@@ -1261,6 +1261,8 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     // The rows of one HSP at a time, reused.
     let (mut qrow, mut srow): (Vec<u8>, Vec<u8>) = (Vec::new(), Vec::new());
     let mut texts = texts.iter();
+    // The texts of the reads that a cut report left out (`ReadCursor::take_moved`).
+    let mut moved = Vec::new();
     for batch in batches {
         for (qidx, lists) in batch.queries.iter().enumerate() {
             let query = &queries[batch.query_ordinal + qidx];
@@ -1288,9 +1290,10 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
             };
             // The texts of the subjects that the query's report reads one by one, written where
             // NCBI loads the subject of each `Hit` (`HitSink::position`, `ReadCursor`).
-            let mut reads = crate::report::query_warnings::ReadCursor::new(std::slice::from_ref(
-                shown.query_reads(batch.query_ordinal + qidx),
-            ));
+            let mut reads = crate::report::query_warnings::ReadCursor::carrying(
+                std::slice::from_ref(shown.query_reads(batch.query_ordinal + qidx)),
+                std::mem::take(&mut moved),
+            );
             // What NCBI posts where it loads the subject of each `Hit` (`HitPosts`): those texts
             // and the taxonomy database's messages.
             let mut posts = crate::report::query_warnings::HitPosts::new(reads.is_some());
@@ -1382,18 +1385,19 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
             // A failed query leaves its partial bytes in `buf`, which the error return drops.
             written?;
             posts.document(document.take_posts());
-            posts.write(
+            crate::report::query_warnings::write_posts_to(
                 &buf,
+                &posts,
+                0,
                 &mut *writer,
                 &mut *diagnostics,
-                |subject, writer, sink| match reads.as_mut() {
-                    Some(reads) => reads.subject_read(0, subject, writer, sink),
-                    None => Ok(()),
-                },
+                reads.as_mut(),
             )?;
-            // A text whose read no `Hit` placed comes after the query's report.
+            // A text whose read no `Hit` placed comes after the query's report; one that a cut
+            // report left out goes to the next query's reads (`ReadCursor::cut`).
             if let Some(reads) = reads.as_mut() {
                 reads.before_query(1, &mut *writer, &mut *diagnostics)?;
+                moved = reads.take_moved();
             }
             buf.clear();
         }
@@ -1418,25 +1422,24 @@ pub(super) fn write_xml_epilog(
         }
         None => {
             BlastXmlWriter::new(queries).finish(&mut buf)?;
-            Vec::new()
+            crate::report::blast_xml::DocumentPosts::default()
         }
     };
-    write_with_posts(&buf, posts, writer, diagnostics)?;
-    Ok(())
+    write_with_posts(&buf, posts, writer, diagnostics)
 }
 
 /// Writes `buf`, a part of the document that holds no `Hit` (a held report and the document's
 /// end), with what the document's writer posted while it wrote it (`StructuredXml::take_posts`),
-/// each to `diagnostics` after the bytes before it.
+/// each to `diagnostics` after the bytes before it (`query_warnings::write_posts_to`).
 fn write_with_posts(
     buf: &[u8],
-    posts: Vec<crate::report::blast_xml::DocumentPost>,
+    posts: crate::report::blast_xml::DocumentPosts,
     writer: &mut dyn Write,
     diagnostics: &mut dyn Write,
-) -> io::Result<()> {
+) -> Result<()> {
     let mut hits = crate::report::query_warnings::HitPosts::default();
     hits.document(posts);
-    hits.write(buf, writer, diagnostics, |_, _, _| Ok(()))
+    crate::report::query_warnings::write_posts_to(buf, &hits, 0, writer, diagnostics, None)
 }
 
 #[cfg(test)]

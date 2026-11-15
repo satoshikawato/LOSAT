@@ -641,7 +641,7 @@ impl<F: SideFiles> StructuredXml for Xml2Writer<F> {
             })
     }
 
-    fn take_posts(&mut self) -> Vec<DocumentPost> {
+    fn take_posts(&mut self) -> crate::report::blast_xml::DocumentPosts {
         self.document.take_posts()
     }
 

@@ -52,12 +52,47 @@ enum Post {
     Lines(Vec<u8>),
     /// One post of `severity` (`WARNING`, `ERROR`, `CRITICAL`) with its text.
     Whole { severity: i32, text: Vec<u8> },
+    /// The place of a search strategy request (`Posts::request`): writing it marks it reached.
+    Request(RequestMark),
 }
+
+/// Where NCBI writes the search strategy request of the batch whose first query (the run's) is
+/// `first` (`StrategyExport::write_with`), among the posts of the batch's start.
+#[derive(Clone, Debug)]
+struct RequestMark {
+    export: crate::report::archive::strategy::StrategyExport,
+    first: usize,
+}
+
+impl PartialEq for RequestMark {
+    fn eq(&self, other: &Self) -> bool {
+        self.first == other.first && self.export.same(&other.export)
+    }
+}
+
+impl Eq for RequestMark {}
 
 impl Posts {
     /// No post.
     pub const fn new() -> Self {
         Self(Vec::new())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-282
+    // ```c++
+    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
+    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+    //
+    //             SaveSearchStrategy(args, m_CmdLineArgs, queries, m_OptsHndl);
+    // ```
+    /// The place where NCBI writes the search strategy request of `export`'s batch whose first
+    /// query (the run's) is `first`: writing these posts there (`write`) marks the requests through
+    /// that batch as NCBI's (`StrategyExport::release_through`; those after the last place reached
+    /// are cut from the file when NCBI's error ends the run). It shows nothing on the diagnostics
+    /// (`has_text`).
+    pub fn request(export: crate::report::archive::strategy::StrategyExport, first: usize) -> Self {
+        Self(vec![Post::Request(RequestMark { export, first })])
     }
 
     /// The posts of `lines`, each line a warning.
@@ -93,14 +128,19 @@ impl Posts {
         for post in &other.0 {
             match post {
                 Post::Lines(lines) => self.lines(lines),
-                Post::Whole { .. } => self.0.push(post.clone()),
+                Post::Whole { .. } | Post::Request(_) => self.0.push(post.clone()),
             }
         }
     }
 
-    /// Whether there is no post.
+    /// Whether there is no post (and no request mark, `request`).
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+
+    /// Whether a post shows text on the diagnostics (a request mark alone shows none).
+    pub fn has_text(&self) -> bool {
+        self.0.iter().any(|post| !matches!(post, Post::Request(_)))
     }
 
     /// What standard error shows of the posts.
@@ -112,6 +152,7 @@ impl Posts {
                 Post::Lines(bytes) | Post::Whole { text: bytes, .. } => {
                     text.extend_from_slice(bytes)
                 }
+                Post::Request(_) => {}
             }
         }
         text
@@ -119,7 +160,8 @@ impl Posts {
 
     /// Writes the posts to `diagnostics`, the stream of the run's diagnostics: the lines as they
     /// are, and with the BLAST archive (`archive`, whose handle saves what that stream writes)
-    /// each whole post saved as one message (`ArchiveHandle::write_post`).
+    /// each whole post saved as one message (`ArchiveHandle::write_post`); a request mark marks its
+    /// search strategy requests reached (`request`).
     pub fn write(
         &self,
         diagnostics: &mut dyn std::io::Write,
@@ -127,6 +169,7 @@ impl Posts {
     ) -> std::io::Result<()> {
         for post in &self.0 {
             match (post, archive) {
+                (Post::Request(mark), _) => mark.export.release_through(mark.first)?,
                 (Post::Whole { severity, text }, Some(handle)) => {
                     handle.write_post(diagnostics, *severity, text)?
                 }

@@ -563,9 +563,7 @@ pub(super) fn render(
         // So do the warnings of the formatters of a tabular field list that shows a taxonomy
         // name (`x_CheckTaxDB`, `tabular`).
         let mut warnings = (warning_lines.is_some()
-            || xml2_kind(format.outfmt).is_some()
-            || format_number(format.outfmt) == 5
-            || format_number(format.outfmt) == ARCHIVE_FORMAT
+            || crate::report::query_warnings::report_posts(format.report_format())
             || custom_tabular
                 .as_ref()
                 .is_some_and(crate::report::tabular::TabularSpec::looks_up_every_taxid))

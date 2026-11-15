@@ -99,18 +99,38 @@ pub(crate) fn replaced_posts(
         .collect()
 }
 
-/// An exception of NCBI's XML stream that ends the run (`CATCH_ALL`, blast_app_util.hpp:248-250:
-/// `Error: `, `what()`, exit status 255; `cli::NativeError::exception`), after `before`, the
-/// posts that came before it.
-pub(crate) fn run_ending_exception(before: &[DocumentPost], thrown: &XmlThrow) -> anyhow::Error {
-    let mut error = crate::cli::NativeError::exception(&thrown.exception());
-    let mut message = String::new();
-    for post in before {
-        message.push_str(&String::from_utf8_lossy(&post.text));
-    }
-    message.push_str(&error.message);
-    error.message = message;
-    error.into()
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
+// ```c++
+//     catch (const CException& e) {                                           \
+//         LOG_POST(Error << "Error: " << e.what());                           \
+//         exit_code = BLAST_UNKNOWN_ERROR;                                    \
+//     }                                                                       \
+// ```
+/// An exception of NCBI's XML stream that ends the run (`CATCH_ALL`: `Error: `, `what()`, exit
+/// status 255; `cli::NativeError::exception`). What NCBI posted before it (the 803.7 posts of the
+/// object, the texts of the loads before it) is written to the run's diagnostics first, by the one
+/// writer of a document's posts (`report::query_warnings::write_hit_posts`), which hands this error
+/// back after them (`DocumentPosts::ends_run`).
+pub(crate) fn run_ending_exception(thrown: &XmlThrow) -> anyhow::Error {
+    crate::cli::NativeError::exception(&thrown.exception()).into()
+}
+
+/// What a document's writer hands its caller with the bytes it wrote since the last
+/// `StructuredXml::take_posts`: its posts (`DocumentPost`, at offsets of the output buffers of the
+/// calls that wrote them), whether a query's report left out the loads of its later subjects, and
+/// an exception that ends the run once the posts are written. The caller writes them through
+/// `report::query_warnings::write_hit_posts` (or `write_document_posts`), the one place that
+/// writes a document's posts and hands the run's end back.
+#[derive(Debug, Default)]
+pub struct DocumentPosts {
+    pub posts: Vec<DocumentPost>,
+    /// BLAST XML (outfmt 5): the `Iteration` of the query written last threw, or one of its `Hit`s
+    /// did, so NCBI made no `Hit` after the last one marked (`HitPosts::hit`) and loaded none of
+    /// their subjects (`s_SeqAlignToXMLHit` loads a subject when it makes its `Hit`).
+    pub cut: bool,
+    /// The exception of NCBI's XML stream that ends the run after these posts: the BLAST XML
+    /// header, a 14 side file (`run_ending_exception`).
+    pub ends_run: Option<Box<XmlThrow>>,
 }
 
 /// The marker error with which outfmt 5's hit level stops the program's hits of a query whose
@@ -154,14 +174,14 @@ fn iteration_post(at: usize, program: &str, thrown: &XmlThrow) -> DocumentPost {
 /// The `BlastOutput` object through `</BlastOutput_param>`, filled from the first formatted
 /// query (`BlastXML_FormatReport`, blastxml_format.cpp:679-720), then `\n<BlastOutput_iterations>`.
 /// NCBI serializes it into a string first, outside any `try` (blastxml_format.cpp:724-733): its
-/// posts come before it, and an exception ends the run with nothing of it written
-/// (`run_ending_exception`).
+/// posts come before it, and an exception ends the run with nothing of it written: the exception
+/// is returned (`Ok(Some)`, `DocumentPosts::ends_run`), after the posts.
 fn write_header(
     out: &mut Vec<u8>,
     run: &XmlRun<'_>,
     first: &XmlQuery<'_>,
     posts: &mut Vec<DocumentPost>,
-) -> Result<()> {
+) -> Result<Option<Box<XmlThrow>>> {
     let start = out.len();
     let mut enc = XmlEncoder::document(out, "NCBI-BlastOutput");
     enc.begin_document("BlastOutput");
@@ -177,16 +197,16 @@ fn write_header(
     enc.raw(b"\n<BlastOutput_iterations>");
     let header_posts = enc.take_posts();
     let thrown = enc.take_thrown();
-    if let Some(error) = enc.error() {
-        out.truncate(start);
-        let before = replaced_posts(header_posts, run.program, |_| start);
-        return Err(match thrown {
-            Some(thrown) => run_ending_exception(&before, &thrown),
-            None => error.into(),
-        });
-    }
+    let error = enc.error();
     posts.extend(replaced_posts(header_posts, run.program, |_| start));
-    Ok(())
+    if let Some(error) = error {
+        out.truncate(start);
+        return match thrown {
+            Some(thrown) => Ok(Some(thrown)),
+            None => Err(error.into()),
+        };
+    }
+    Ok(None)
 }
 
 /// `Statistics` (`s_BlastXMLGetStatistics`, blastxml_format.cpp:628-650).
@@ -287,10 +307,12 @@ pub trait StructuredXml {
     }
 
     /// What NCBI posted while the calls since the last `take_posts` wrote to their `out`
-    /// (`DocumentPost`, at offsets of that buffer), in order; the caller writes each after the
-    /// bytes before it (`report::query_warnings::write_hit_posts`, `write_with_posts`).
-    fn take_posts(&mut self) -> Vec<DocumentPost> {
-        Vec::new()
+    /// (`DocumentPost`, at offsets of that buffer), in order, with the cut of the last query's
+    /// loads and the exception that ends the run (`DocumentPosts`); the caller writes each post
+    /// after the bytes before it (`report::query_warnings::write_hit_posts`), which hands the
+    /// run's end back.
+    fn take_posts(&mut self) -> DocumentPosts {
+        DocumentPosts::default()
     }
 }
 
@@ -355,7 +377,7 @@ pub trait HspWrite {
 pub struct BlastXmlWriter {
     iterations: u32,
     scratch: Scratch,
-    posts: Vec<DocumentPost>,
+    posts: DocumentPosts,
 }
 
 impl BlastXmlWriter {
@@ -365,7 +387,7 @@ impl BlastXmlWriter {
         Self {
             iterations: queries_before as u32,
             scratch: Scratch::default(),
-            posts: Vec::new(),
+            posts: DocumentPosts::default(),
         }
     }
 }
@@ -384,7 +406,11 @@ impl StructuredXml for BlastXmlWriter {
         F: FnOnce(&mut HitSink<'_>) -> Result<()>,
     {
         if self.iterations == 0 {
-            write_header(out, run, query, &mut self.posts)?;
+            if let Some(thrown) = write_header(out, run, query, &mut self.posts.posts)? {
+                // No `Iteration` and no `Hit` of the query is made: the run ends after the posts.
+                self.posts.ends_run = Some(thrown);
+                return Ok(());
+            }
         }
         self.iterations += 1;
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:572-589
@@ -423,13 +449,18 @@ impl StructuredXml for BlastXmlWriter {
         let thrown = enc.take_thrown();
         let error = enc.error();
         self.posts
+            .posts
             .extend(replaced_posts(iteration_posts, run.program, |_| start));
         if let Some(error) = error {
             out.truncate(start);
             let Some(thrown) = thrown else {
                 return Err(error.into());
             };
-            self.posts.push(iteration_post(start, run.program, &thrown));
+            self.posts
+                .posts
+                .push(iteration_post(start, run.program, &thrown));
+            // No `Hit` of the query is made, so none of its subjects is loaded.
+            self.posts.cut = true;
             self.scratch.tail = tail;
             return Ok(());
         }
@@ -441,7 +472,7 @@ impl StructuredXml for BlastXmlWriter {
             masks: query.masks,
             out: &mut *out,
             scratch: &mut self.scratch,
-            posts: &mut self.posts,
+            posts: &mut self.posts.posts,
             hits: 0,
         };
         let result = hits(&mut HitSink::new(&mut writer));
@@ -451,8 +482,11 @@ impl StructuredXml for BlastXmlWriter {
                 out.extend_from_slice(&tail);
             }
             // A `Hit` threw: the `Iteration` ends after the hits before it (no
-            // `</Iteration_hits>`, no tail), and the run goes on.
-            Err(error) if error.downcast_ref::<IterationThrew>().is_some() => {}
+            // `</Iteration_hits>`, no tail), no later `Hit` is made (nor its subject loaded), and
+            // the run goes on.
+            Err(error) if error.downcast_ref::<IterationThrew>().is_some() => {
+                self.posts.cut = true;
+            }
             Err(error) => {
                 self.scratch.tail = tail;
                 return Err(error);
@@ -462,7 +496,7 @@ impl StructuredXml for BlastXmlWriter {
         Ok(())
     }
 
-    fn take_posts(&mut self) -> Vec<DocumentPost> {
+    fn take_posts(&mut self) -> DocumentPosts {
         std::mem::take(&mut self.posts)
     }
 

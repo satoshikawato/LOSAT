@@ -6,3 +6,8 @@
   first query end the run with exit status 255, a later outfmt 5 query's iteration is left out). A title whose
   encoding NCBI cannot guess is written as NCBI's reports write it (`lcl|Query_N`, `No definition line`,
   `Unknown`).
+- When such a report ends the run (`14`, outfmt 5's first query), the `-export_search_strategy` file holds the
+  requests NCBI wrote, up to the query batch of that report, and the taxonomy database's messages of that report
+  come before the error, as in NCBI; with the prefetch off (`PRE_FETCH_SEQS_LIMIT`), the messages of the subjects
+  of an outfmt 5 iteration that is left out or cut come where NCBI loads those subjects later, or not at all.
+  A library or Web caller gets these messages on its diagnostics, not in the error's text.

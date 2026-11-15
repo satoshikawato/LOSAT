@@ -93,8 +93,10 @@ python LOSAT/tests/audit_tblastx_v010.py \
 
 ## Artifact Gate
 
-Run `.github/workflows/release-readiness.yml` manually with the exact committed
-candidate SHA. Leave `run_integrated_certification` false unless the post-merge
+Run `.github/workflows/release-readiness.yml` manually on the branch whose head is
+the exact committed candidate SHA (`--ref <branch> -f candidate_sha=<SHA>`; the
+workflow checks out the dispatched commit and fails early when it is not the
+candidate). Leave `run_integrated_certification` false unless the post-merge
 gate identifies an output-affecting runtime/build/contract change after the
 certified lineage.
 

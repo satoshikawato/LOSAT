@@ -4026,10 +4026,12 @@ mod tests {
 
     #[test]
     fn a_negative_list_with_ids_excludes_its_lineless_sequences_at_the_fetches() {
-        // prot_v4's sequence 14 has one line, whose only id is `gi|1414`: a negative seqid list
-        // keeps the sequence (none of its ids is listed) but removes the line (a negative list
-        // keeps a line with an id that is neither a gi nor a ti nor listed). NCBI's id set holds
-        // the list's ids, so its fetches with `check_oid_exclusion` exclude the sequence.
+        // A negative seqid list keeps a line with an id that is neither a gi nor a ti nor listed.
+        // prot_v4's sequences 14 (`gi|1414`) and 28 (`gnl|ti|123`) have one line, with a gi or a
+        // ti only, and the one line of sequence 11, `ref|XP_000011.2|`, is the list's
+        // `XP_000011`: the list keeps the three sequences (NCBI 2.17.0's statistics count all 53
+        // under it) and removes their lines. NCBI's id set holds the list's ids, so its fetches
+        // with `check_oid_exclusion` exclude them.
         let mut db = ids_db("prot_v4", SeqType::Protein);
         db.restrict(
             &DbList::Seqids(list_of(b"XP_000011\n", true)),
@@ -4041,7 +4043,7 @@ mod tests {
         let lineless: Vec<u32> = (0..db.num_seqs() as u32)
             .filter(|&ordinal| !db.keeps_line(ordinal).unwrap())
             .collect();
-        assert_eq!(lineless.len(), 1, "{lineless:?}");
+        assert_eq!(lineless, [11, 14, 28]);
         // A positive list leaves NCBI's id set blank: its sequences without a line are not
         // excluded at the fetches, and leave at the Seq-aligns.
         let mut positive = ids_db("prot_v5", SeqType::Protein);

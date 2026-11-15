@@ -73,6 +73,23 @@ pub(crate) struct SwScratch {
     /// For each subject position, whether a forbidden range of the row being scanned holds it
     /// (`blocked_row`); false between rows.
     blocked: Vec<bool>,
+    /// The subject's letters, each at most `BLASTAA_SIZE - 1` (`padded_row`).
+    letters: Vec<u8>,
+}
+
+/// The slots of a row as the scans read it (`padded_row`): a power of two above `BLASTAA_SIZE`.
+const ROW_SLOTS: usize = 32;
+
+/// A score row as the scans read it: the row's `BLASTAA_SIZE` scores, then zeros. The scans read
+/// it at `letter & (ROW_SLOTS - 1)` for letters that `SwScratch::scan` brought to at most
+/// `BLASTAA_SIZE - 1` (NCBIstdaa letters are below 28, and a letter above reads the last score,
+/// as before), so the mask changes no letter and lets the compiler drop the bound check; the row
+/// is a local array, which frees the register of its address in the cell loop.
+#[inline(always)]
+fn padded_row(row: &[i32; BLASTAA_SIZE]) -> [i32; ROW_SLOTS] {
+    let mut padded = [0; ROW_SLOTS];
+    padded[..BLASTAA_SIZE].copy_from_slice(row);
+    padded
 }
 
 impl SwScratch {
@@ -90,7 +107,11 @@ impl SwScratch {
     ///         scoreVector[matchSeqPos].gapExists = -gapOpen;
     ///     }
     /// ```
-    fn score_vector(&mut self, length: usize, gap_open: i32) -> (&mut [SwGapInfo], &mut [bool]) {
+    ///
+    /// With it the subject's letters as the scans read them (`padded_row`) and the cleared marks
+    /// of the forbidden ranges (`blocked_row`).
+    fn scan(&mut self, subject: &[u8], gap_open: i32) -> SwScan<'_> {
+        let length = subject.len();
         self.score_vector.clear();
         self.score_vector.resize(
             length,
@@ -101,9 +122,18 @@ impl SwScratch {
         );
         self.blocked.clear();
         self.blocked.resize(length, false);
-        (&mut self.score_vector, &mut self.blocked)
+        self.letters.clear();
+        self.letters.extend(
+            subject
+                .iter()
+                .map(|&letter| letter.min(BLASTAA_SIZE as u8 - 1)),
+        );
+        (&self.letters, &mut self.score_vector, &mut self.blocked)
     }
 }
+
+/// The subject's letters, the columns and the marks of one scan (`SwScratch::scan`).
+type SwScan<'a> = (&'a [u8], &'a mut [SwGapInfo], &'a mut [bool]);
 
 /// Marks (`value` true) or clears (false) the subject positions that the forbidden ranges `ranges`
 /// of one query position hold, so that the row's cells test one flag each where NCBI's test every
@@ -367,18 +397,17 @@ fn cmov_max(a: i32, b: i32) -> i32 {
 
 /// The row's score of subject letter `letter`, or `None` (`COMPO_SCORE_MIN` in the cell) where
 /// `CHECKED` and the position is `blocked` (`blocked_row`). A row without ranges runs without the
-/// test (NCBI's basic scans); the letters are NCBIstdaa (below 28), so the `min` only lets the
-/// compiler drop the bound check of the row.
+/// test (NCBI's basic scans); `row` and `letter` are as `padded_row` says.
 #[inline(always)]
 fn substitution<const CHECKED: bool>(
-    row: &[i32; BLASTAA_SIZE],
+    row: &[i32; ROW_SLOTS],
     blocked: bool,
     letter: u8,
 ) -> Option<i32> {
     if CHECKED && blocked {
         None
     } else {
-        Some(row[usize::from(letter).min(BLASTAA_SIZE - 1)])
+        Some(row[usize::from(letter) & (ROW_SLOTS - 1)])
     }
 }
 
@@ -387,7 +416,7 @@ fn substitution<const CHECKED: bool>(
 #[inline(always)]
 fn score_only_row<const CHECKED: bool>(
     subject: &[u8],
-    row: &[i32; BLASTAA_SIZE],
+    row: &[i32; ROW_SLOTS],
     blocked: &[bool],
     score_vector: &mut [SwGapInfo],
     (gap_open, gap_extend): (i32, i32),
@@ -428,7 +457,7 @@ fn score_only_row<const CHECKED: bool>(
 #[allow(clippy::too_many_arguments)]
 fn find_start_row<const CHECKED: bool>(
     subject: &[u8],
-    row: &[i32; BLASTAA_SIZE],
+    row: &[i32; ROW_SLOTS],
     blocked: &[bool],
     score_vector: &mut [SwGapInfo],
     match_end: usize,
@@ -519,12 +548,12 @@ pub(crate) fn smith_waterman_score_only<'r, F>(
 where
     F: Fn(usize) -> &'r [i32; BLASTAA_SIZE],
 {
-    let (score_vector, blocked) = scratch.score_vector(subject.len(), gap_open);
+    let (subject, score_vector, blocked) = scratch.scan(subject, gap_open);
     let mut best_score = 0;
     let mut best_query_pos = 0;
     let mut best_match_seq_pos = 0;
     for query_pos in 0..query_length {
-        let row = rows(query_pos);
+        let row = &padded_row(rows(query_pos));
         let ranges = forbidden.at(query_pos);
         let gaps = (gap_open, gap_extend);
         let found = if ranges.is_empty() {
@@ -615,12 +644,12 @@ where
             query_start: 0,
         };
     }
-    let (score_vector, blocked) = scratch.score_vector(subject.len(), gap_open);
+    let (subject, score_vector, blocked) = scratch.scan(subject, gap_open);
     let mut best_score = 0;
     let mut best_query_pos = 0;
     let mut best_match_seq_pos = 0;
     for query_pos in (0..=query_end).rev() {
-        let row = rows(query_pos);
+        let row = &padded_row(rows(query_pos));
         let ranges = forbidden.at(query_pos);
         let gaps = (gap_open, gap_extend);
         let (found, reached) = if ranges.is_empty() {

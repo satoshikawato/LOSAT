@@ -330,6 +330,11 @@ impl KappaResultHitList {
         &mut self.lists
     }
 
+    /// The hit list after `cut` removes lists from it (`database::drop_unaligned`).
+    pub(super) fn with_lists_mut(&mut self, cut: impl FnOnce(&mut Vec<KappaResultList>)) {
+        cut(&mut self.lists);
+    }
+
     pub(super) fn worst_evalue(&self) -> f64 {
         self.worst_evalue
     }

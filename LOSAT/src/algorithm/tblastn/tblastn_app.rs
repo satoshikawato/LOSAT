@@ -2094,6 +2094,7 @@ fn search(
             // makes the batch's Seq-aligns (`database::read_titles`); a header file that NCBI
             // cannot read fails this batch, after the reports of the batches before.
             if let Some(database) = database {
+                super::database::drop_unaligned(database, &mut batch_results);
                 if let Err(error) =
                     super::database::read_titles(database, &batch_results, range.start, &mut titles)
                 {

@@ -3498,7 +3498,6 @@ fn finish_local_mode0_no_sum_stats(
                 scoring.gap_extend,
                 final_xdrop,
                 0.0,
-                0,
                 profile.seg,
                 profile.soft_masking,
                 profile.mask_lowercase,

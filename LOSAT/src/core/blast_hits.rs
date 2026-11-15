@@ -3,16 +3,26 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c
 //!
 //! The filters of `s_FilterBlastResults` that every program shares (`-max_hsps`,
-//! `-qcov_hsp_perc`), and `Blast_HSPTest` on NCBI's `Int4` alignment length.
+//! `-qcov_hsp_perc`), and `Blast_HSPTest` (NCBI's `Int4` counts, widened to `i64`).
 
 /// Whether an HSP fails NCBI's percent identity or minimal hit length test (`Blast_HSPTest`,
-/// `s_HSPTest`: the HSP is deleted), on NCBI's `Int4` alignment length, which is negative for an
-/// ungapped HSP whose end lies before its start (the one-hit word finder's HSPs of length below 0
+/// `s_HSPTest`: the HSP is deleted), for every program. The counts are NCBI's `Int4`s widened to
+/// `i64`, so that the programs that count in `usize` pass their lengths unchanged (every `Int4`
+/// is the same `i64` and the same `double`). The alignment length is negative for an ungapped
+/// HSP whose end lies before its start (BLASTX's one-hit word finder's HSPs of length below 0
 /// with `-window_size 0`, `aa_ungapped.c:1054,1083`): `align_length < min_hit_length` holds
 /// there for every `min_hit_length` of 0 or more. The identity test multiplies the length by
-/// `percent_identity` in `double`, as NCBI does.
+/// `percent_identity` in `double`, as NCBI does. Neither test needs a guard for its disabled
+/// value: with `-perc_identity` 0 (NCBI's range is 0 to 100, `blast_args.cpp:188-192`) and the
+/// `min_hit_length` of 0 that NCBI's applications always leave (`calloc`, no option), both are
+/// false for every length of 0 or more.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:993-1000,1027-1032
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1446
+/// ```c
+///    *options = (BlastHitSavingOptions*) calloc(1, sizeof(BlastHitSavingOptions));
+/// ```
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:993-1001,1027-1032
 /// ```c
 /// static Boolean s_HSPTest(const BlastHSP* hsp,
 ///                          const BlastHitSavingOptions* hit_options,
@@ -32,12 +42,13 @@
 /// }
 /// ```
 pub fn hsp_test(
-    num_ident: i32,
-    align_length: i32,
+    num_ident: i64,
+    align_length: i64,
     percent_identity: f64,
-    min_hit_length: i32,
+    min_hit_length: i64,
 ) -> bool {
-    f64::from(num_ident) * 100.0 < f64::from(align_length) * percent_identity
+    // The counts are lengths of sequences in memory: far below 2^53, exact in `f64`.
+    num_ident as f64 * 100.0 < align_length as f64 * percent_identity
         || align_length < min_hit_length
 }
 
@@ -202,12 +213,50 @@ mod tests {
         }
         assert!(!hsp_test(0, 0, 0.0, 0));
         assert!(!hsp_test(3, 7, 0.0, 0));
+        // `-perc_identity -0` (in NCBI's range): `0.0 < -0.0` and `500.0 < -0.0` are false.
+        assert!(!hsp_test(0, 5, -0.0, 0));
+        assert!(!hsp_test(5, 5, -0.0, 0));
         // The identity test: 3 of 7 is 42.9 %, below 50 and not below 40.
         assert!(hsp_test(3, 7, 50.0, 0));
         assert!(!hsp_test(3, 7, 40.0, 0));
         // The minimal hit length.
         assert!(hsp_test(7, 7, 0.0, 8));
         assert!(!hsp_test(7, 7, 0.0, 7));
+    }
+
+    /// NCBI's C API (`Blast_HSPTest` called directly on the pinned NCBI build) on the
+    /// boundaries: identity equal to the limit kept and just below deleted, the length test,
+    /// and the empty HSP at the default options.
+    #[test]
+    fn hsp_test_matches_the_ncbi_api_oracle() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/tlosan_stage_c/hsp_test_20260924/oracle.tsv"
+        );
+        let oracle = std::fs::read_to_string(path).unwrap();
+        for line in oracle.lines() {
+            let f: Vec<_> = line.split('\t').collect();
+            let observed = hsp_test(
+                f[1].parse().unwrap(),
+                f[2].parse().unwrap(),
+                f[3].parse().unwrap(),
+                f[4].parse().unwrap(),
+            );
+            assert_eq!(observed, f[5] == "1", "{line}");
+        }
+        assert_eq!(oracle.lines().count(), 6);
+    }
+
+    /// No NCBI counterpart: NCBI's `Int4` cannot hold these counts. The `usize` counts of
+    /// BLASTN, TBLASTN and TBLASTX are NCBI's `Int4` widened to `i64`: a length past `Int4` is
+    /// tested as itself, not capped.
+    #[test]
+    fn hsp_test_takes_lengths_past_int4() {
+        let long = i64::from(i32::MAX) + 10;
+        assert!(!hsp_test(long, long, 100.0, 0));
+        assert!(hsp_test(long - 1, long, 100.0, 0));
+        assert!(!hsp_test(0, long, 0.0, long));
+        assert!(hsp_test(0, long - 1, 0.0, long));
     }
 
     #[test]

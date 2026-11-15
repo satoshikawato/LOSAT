@@ -1058,8 +1058,10 @@ impl XGang {
     /// A helper: joins each pass posted until the gang is closed.
     fn serve(&self) {
         {
+            // After the end, or after the last pass has closed; a helper that comes while the last
+            // pass is open joins it.
             let slot = self.lock();
-            if slot.closed {
+            if slot.closed && slot.take.is_none() {
                 return;
             }
             self.alive.fetch_add(1, Ordering::AcqRel);
@@ -2805,6 +2807,46 @@ mod tests {
                     "threads {threads}: item {bad}'s panic passed on"
                 );
             }
+        }
+    }
+
+    // Item SC9i of line NP: helpers that start after a gang's last pass is posted join it while it
+    // is open (a build of one wave has only that pass): the caller's first item waits until another
+    // thread has made one (a minute at most).
+    #[test]
+    fn helpers_join_a_gangs_last_pass_while_it_is_open() {
+        for threads in [2usize, 4] {
+            let others = AtomicUsize::new(0);
+            let joined = in_pool(threads, || {
+                let caller = std::thread::current().id();
+                x_with_gang(threads, |gang| {
+                    let made = gang.pass(
+                        64,
+                        true,
+                        || (),
+                        |_, index| {
+                            if std::thread::current().id() != caller {
+                                others.fetch_add(1, Ordering::AcqRel);
+                            } else if index == 0 {
+                                let deadline =
+                                    std::time::Instant::now() + std::time::Duration::from_secs(60);
+                                while others.load(Ordering::Acquire) == 0
+                                    && std::time::Instant::now() < deadline
+                                {
+                                    std::thread::yield_now();
+                                }
+                            }
+                            index
+                        },
+                    );
+                    assert_eq!(made, (0..64).collect::<Vec<_>>());
+                    others.load(Ordering::Acquire) > 0
+                })
+            });
+            assert!(
+                joined,
+                "threads {threads}: no helper made an item of the last pass"
+            );
         }
     }
 

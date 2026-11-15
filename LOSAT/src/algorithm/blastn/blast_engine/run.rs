@@ -6,21 +6,6 @@
 use crate::api::local_blast::{FormatOutput, FormatProbe, OutputSink, ReportOutputs};
 use crate::common::GapEditOp;
 use anyhow::{Context, Result};
-// NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
-// ```c
-// CMTArgs(...)
-// {
-// #ifdef NCBI_NO_THREADS
-//     m_NumThreads = CThreadable::kMinNumThreads;
-//     m_MTMode = eNotSupported;
-// #endif
-// }
-// ```
-#[cfg(all(
-    feature = "parallel",
-    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-))]
-use rayon::prelude::*;
 use std::sync::Arc;
 
 use crate::config::NuclScoringSpec;
@@ -56,8 +41,8 @@ use super::super::args::{BlastnArgs, QueryStrand};
 use super::super::blast_extend::DiagStruct;
 use super::super::coordination::{
     chunk_query_masks, configure_task, finalize_task_config, prepare_sequence_data, query_masks,
-    reverse_mask_intervals, subject_metadata_from_records, subject_trace_id, LookupTables,
-    QueryLetters, SequenceData, SubjectMetadata,
+    reverse_mask_intervals, subject_metadata_from_records, LookupTables, QueryLetters,
+    SequenceData, SubjectMetadata,
 };
 use super::super::disc_lookup::{choose_disc_scan_subject, disc_word_scan_subject};
 use super::super::extension::{
@@ -281,6 +266,22 @@ mod traceback_finish;
 // ungapped search (a child module, so that it uses the private types of this file).
 #[path = "traceback_subject.rs"]
 mod traceback_subject;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1427 (the loop of
+// `BLAST_PreliminarySearchEngine` on the subjects) and c++/src/algo/blast/core/blast_traceback.c:1521
+// (the loop of `BLAST_ComputeTraceback_MT` on the subjects' batches).
+// The search of one subject by stage, the passes over a batch's subjects (a subject set's in subject
+// order, a database's by blocks), the preliminary pass and the traceback pass (a child module, so that
+// it uses the private types of this file).
+#[path = "subject_passes.rs"]
+mod subject_passes;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:82-88 (the thread count of a
+// preliminary search).
+// The batch's clocks, thread request, task configuration and speculative traceback rules (a child
+// module, so that it uses the private types of this file).
+#[path = "batch_schedule.rs"]
+mod batch_schedule;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:375-605 (the loop of
 // `Blast_TracebackFromHSPList`, from the start of one HSP's traceback to its insertion in the tree).
@@ -5868,7 +5869,7 @@ fn blastn_timing_text(
 // Blast_HitListUpdate(results->hitlist_array[index],
 //                     hsp_list_array[index]);
 // ```
-/// A subject's final HSPs (`process_subject`'s traceback).
+/// A subject's final HSPs (`SubjectPasses::search_subject`'s traceback).
 #[derive(Debug)]
 enum SubjectHits {
     /// The HSPs of every query in one list, in any order.
@@ -9876,7 +9877,7 @@ impl ShownSubjects {
     }
 }
 
-/// One subject as the per-subject kernel (`process_subject` of `search_query_batch`)
+/// One subject as the per-subject kernel (`SubjectPasses::search_subject`)
 /// reads it: a record of a subject set, or a sequence of a database.
 ///
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
@@ -9949,8 +9950,8 @@ impl<'a> BlastnSubjectRef<'a> {
     }
 }
 
-/// What both stages of `process_subject` read of one call: the subject's index, trace id and
-/// length, and the batch's values as `process_subject` binds them (the queries, their contexts, the
+/// What both stages of `search_subject` read of one call: the subject's index, trace id and
+/// length, and the batch's values as `search_subject` binds them (the queries, their contexts, the
 /// effective search spaces, each context's cutoff, hit-saving cutoff, X-dropoff and reduced cutoff,
 /// and the LOSAT_TIMING counters, `None` when timing is off). Built once per call, after its early
 /// return without a valid context, for `prelim_subject::prelim_subject` or
@@ -9986,7 +9987,7 @@ struct SubjectCtx<'a> {
 }
 
 impl SubjectCtx<'_> {
-    /// LOSAT_DEBUG_BLASTN: the subject's cutoffs, printed by each stage of `process_subject` before
+    /// LOSAT_DEBUG_BLASTN: the subject's cutoffs, printed by each stage of `search_subject` before
     /// it searches the subject (`prelim_subject::prelim_subject`,
     /// `traceback_subject::traceback_subject`). No NCBI counterpart (a LOSAT diagnostic line).
     fn debug_cutoffs(&self) {
@@ -12267,136 +12268,18 @@ fn search_query_batch<const UNGAPPED: bool>(
     // (*thread)->Run(); (*thread)->Join(&result);
     let num_threads = parallel_pool.threads();
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:493-555
-    // ```c
-    // if (aux_struct->WordFinder) {
-    //     aux_struct->WordFinder(subject, query, query_info, lookup, matrix,
-    //                            word_params, aux_struct->ewp,
-    //                            aux_struct->offset_pairs,
-    //                            kScanSubjectOffsetArraySize,
-    //                            init_hitlist, ungapped_stats);
-    //     if (init_hitlist->total == 0) continue;
-    // }
-    // ...
-    // if (aux_struct->GetGappedScore) {
-    //     status = aux_struct->GetGappedScore(program_number, query,
-    //             query_info, subject, gap_align, score_params, ext_params,
-    //             hit_params, word_params, init_hitlist, &hsp_list,
-    //             gapped_stats, NULL);
-    // }
-    // ...
-    // Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
-    // Blast_HSPListSortByScore(hsp_list);
-    // ```
-    let timing_enabled = std::env::var_os("LOSAT_TIMING").is_some();
-    let t_total = if timing_enabled {
-        Some(std::time::Instant::now())
-    } else {
-        None
-    };
-    let timing = if timing_enabled {
-        Some(Arc::new(BlastnTiming::new()))
-    } else {
-        None
-    };
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
-    // ```c
-    // while (TRUE) {
-    //     status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-    //                                    dbseq_chunk_overlap);
-    //     if (status == SUBJECT_SPLIT_DONE) break;
-    //     if (status == SUBJECT_SPLIT_NO_RANGE) continue;
-    //     ...
-    //     if (aux_struct->WordFinder) {
-    //         aux_struct->WordFinder(...);
-    //         if (init_hitlist->total == 0) continue;
-    //     }
-    //     ...
-    // }
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
-    // ```c
-    // if (num_threads > 1) {
-    //     SetNumberOfThreads(num_threads);
-    // }
-    // ```
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    let requested_parallel = num_threads > 1;
-    #[cfg(any(
-        not(feature = "parallel"),
-        all(target_arch = "wasm32", not(feature = "wasm-threads"))
-    ))]
-    let requested_parallel = false;
-
-    // Configure task-specific parameters (initial configuration)
-    let mut config = configure_task(args);
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:509-513
-    // ```c
-    // BLAST_GappedAlignmentWithTraceback(program_number, query,
-    //     adjusted_subject, gap_align, score_params, q_start, s_start,
-    //     query_length, adjusted_s_length, fence_hit);
-    // ```
-    // Preserve ordered debug-coordinate logging; speculative DP is otherwise pure.
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:375,503-507
-    // ```c
-    //    for (index=0; index < num_initial_hsps; index++) {
-    // ...
-    //         } else if (kGreedyTraceback) {
-    //             BLAST_GreedyGappedAlignment(query, adjusted_subject,
-    //                 query_length, adjusted_s_length, gap_align,
-    //                 score_params, q_start, s_start, FALSE, TRUE,
-    //                 fence_hit);
-    // ```
-    // The dynamic-programming traceback and, in a parallel search, the greedy traceback of megablast
-    // (the call above) are scheduled ahead of the ordered loop (the rule of `LOSAT_X_GREEDYSPEC`,
-    // kept as its `x_reach!` key). The ordered loop still tests the tree and adds to it in the NCBI
-    // order. This is scheduling only.
-    // No NCBI counterpart: the same scheduling for the greedy
-    // traceback of megablast. A greedy alignment is a function of its
-    // arguments only: every cell it reads from its scratch was written
-    // earlier in the same call, and a larger `max_dist` left by an earlier
-    // call only saves retries.
-    let x_greedy_spec = requested_parallel && !config.use_dp;
-    let speculative_traceback = requested_parallel
-        && (config.use_dp || x_greedy_spec)
-        && std::env::var_os("LOSAT_DEBUG_COORDS").is_none()
-        && std::env::var_os("LOSAT_DEBUG_COORDS_START").is_none();
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3850,3918-3919
-    // ```c
-    //    for (index=0; index<init_hitlist->total; index++)
-    // ...
-    //       if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
-    //                                         hit_options->min_diag_separation))
-    // ```
-    // Look-ahead for the preliminary loop (`prelim_hsp_list::gapped_score_list`) and the traceback
-    // loop (`Blast_TracebackFromHSPList`, next block). The helper threads only evaluate the
-    // alignment call of an index ahead of the loop. The loops, their tree tests and their tree
-    // insertions stay on the calling thread in the NCBI order.
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:375,404-405
-    // ```c
-    //    for (index=0; index < num_initial_hsps; index++) {
-    // ...
-    //           !BlastIntervalTreeContainsHSP(tree, hsp, query_info,
-    //                                hit_options->min_diag_separation)) {
-    // ```
-    // The same for the loop of `Blast_TracebackFromHSPList`.
-    // No NCBI counterpart: the other threads of the pool
-    // evaluate the gapped alignments of the two ordered loops (preliminary
-    // and traceback) ahead of the loop; see utils/xahead.rs. Same conditions
-    // as the speculative traceback above.
-    let x_ahead_window = if speculative_traceback {
-        Some(crate::utils::xahead::WINDOW)
-    } else {
-        None
-    };
-    if x_ahead_window.is_none() {
-        crate::utils::xreach::x_reach!("LOSAT_X_AHEAD", false);
-    }
+    // The batch's schedule (`batch_schedule::batch_schedule`): the `LOSAT_TIMING` clocks, the thread request,
+    // the task's configuration and the speculative traceback's rules.
+    let batch_schedule::BatchSchedule {
+        timing_enabled,
+        t_total,
+        timing,
+        requested_parallel,
+        mut config,
+        x_greedy_spec,
+        speculative_traceback,
+        x_ahead_window,
+    } = batch_schedule::batch_schedule(args, num_threads);
     // Read sequences
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
     // ```c
@@ -12928,8 +12811,8 @@ fn search_query_batch<const UNGAPPED: bool>(
         search_karlin: &search_karlin,
     })?;
 
-    // Pass queries for use in the closure (the lookup tables are passed by the preliminary
-    // stage's calls, `process_subject`'s `lookups`)
+    // Pass queries for `SubjectPasses` (the lookup tables are passed by the preliminary
+    // stage's calls, `search_subject`'s `lookups`)
     let queries_ref = &seq_data.queries;
     let query_contexts_ref = &query_contexts;
     let query_eff_searchsp_ref = &query_eff_searchsp;
@@ -12945,10 +12828,6 @@ fn search_query_batch<const UNGAPPED: bool>(
     //    ...
     // } BlastHSPList;
     // ```
-    // The records whose titles name the subjects in LOSAT's debug and trace lines (none for a
-    // database: its sequences are "unknown" there).
-    let trace_subject_records: &[FastaRecord] =
-        subjects.prepared().map_or(&[], |prepared| prepared.records);
     let search_karlin_ref = &search_karlin;
     let context_valid_ref = &context_valid;
     let x_dropoff_init_ref = &x_dropoff_init;
@@ -13003,7 +12882,7 @@ fn search_query_batch<const UNGAPPED: bool>(
     // A database search with `-db_soft_mask` or `-db_hard_mask` (the formatter's `ResolvedMask`):
     // the database, the algorithm whose masks every database sequence's preliminary search reads
     // (`BlastnDatabase::seq_ranges_into`) and the kind, and the first error of those reads by
-    // ordinal id, which the batch returns after the preliminary stage (`process_subject` returns
+    // ordinal id, which the batch returns after the preliminary stage (`search_subject` returns
     // nothing).
     let db_mask: Option<(
         &database::BlastnDatabase,
@@ -13114,156 +12993,21 @@ fn search_query_batch<const UNGAPPED: bool>(
         blastn_debug,
         blastn_trace_enabled,
     };
-    let process_subject = |s_idx: usize,
-                           subject: BlastnSubjectRef<'_>,
-                           gap_scratch: &mut GapAlignScratch,
-                           subject_scratch: &mut SubjectScratch,
-                           lookups: Option<&LookupTables>,
-                           prelim_source: Option<&Vec<PrelimHit>>,
-                           subject_hits: &mut Option<SubjectHits>,
-                           prelim_out: &mut Vec<PrelimHit>| {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:177-180
-        // ```c
-        //     int status = m_PrelimSearch->CheckInternalData();
-        //     if (status != 0)
-        //     {
-        //          // Search was not run, but we send back an empty CSearchResultSet.
-        // ```
-        // With no valid context, NCBI does not search.
-        if !any_valid_context {
-            return;
-        }
-        let queries = queries_ref;
-        let query_contexts = query_contexts_ref;
-        let query_eff_searchsp = query_eff_searchsp_ref;
-
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:493-526
-        // ```c
-        // if (aux_struct->WordFinder) {
-        //     aux_struct->WordFinder(subject, query, query_info, lookup, matrix,
-        //                            word_params, aux_struct->ewp,
-        //                            aux_struct->offset_pairs,
-        //                            kScanSubjectOffsetArraySize,
-        //                            init_hitlist, ungapped_stats);
-        //     if (init_hitlist->total == 0) continue;
-        // }
-        // if (aux_struct->GetGappedScore) {
-        //     status = aux_struct->GetGappedScore(program_number, query,
-        //             query_info, subject, gap_align, score_params, ext_params,
-        //             hit_params, word_params, init_hitlist, &hsp_list,
-        //             gapped_stats, NULL);
-        // }
-        // ```
-        let timing_ref = timing.as_deref();
-        let timing_enabled = timing_ref.is_some();
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
-        // ```c
-        // hsp_list = Blast_HSPListFree(hsp_list);
-        // BlastInitHitListReset(init_hitlist);
-        // ```
-        let s_len_full = subject.length;
-        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
-        // ```c
-        // typedef struct BlastHSPList {
-        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to. */
-        //    BlastHSP** hsp_array;
-        //    Int4 hspcnt;
-        //    ...
-        // } BlastHSPList;
-        // ```
-        // Made only for the debug and trace lines, which alone read it.
-        let s_id_trace = if blastn_debug || blastn_trace_enabled {
-            trace_subject_records.get(s_idx).map_or_else(
-                || "unknown".to_string(),
-                |record| subject_trace_id(record.title()),
-            )
-        } else {
-            String::new()
-        };
-        let s_id = s_id_trace.as_str();
-
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:336-377
-        // ```c
-        // if (!gapped_calculation || sbp->matrix_only_scoring) {
-        //     double cutoff_e = s_GetCutoffEvalue(program_number);
-        //     Int4 query_length = query_info->contexts[context].query_length;
-        //     if (program_number == eBlastTypeBlastn ||
-        //         program_number == eBlastTypeMapping)
-        //         query_length *= 2;
-        //     BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp,
-        //                   MIN((Uint8)subj_length,
-        //                       (Uint8)query_length) * ((Uint8)subj_length),
-        //                   TRUE, gap_decay_rate);
-        // } else {
-        //     new_cutoff = gap_trigger;
-        // }
-        // new_cutoff = MIN(new_cutoff,
-        //                  hit_params->cutoffs[context].cutoff_score_max);
-        // curr_cutoffs->cutoff_score = new_cutoff;
-        // ```
-        // NCBI uses UNGAPPED params (kbp_std) for gap_trigger calculation
-        // and GAPPED params (kbp_gap) for cutoff_score_max calculation
-        // The values depend on the context only (the gapped calculation's branch above: gap_trigger
-        // capped by cutoff_score_max), so the batch computes them once (`x_batch_cutoffs`).
-        let (cutoff_scores, hit_saving_cutoff_scores, x_dropoff_scores, reduced_cutoff_scores) = (
-            &x_batch_cutoffs.0,
-            &x_batch_cutoffs.1,
-            &x_batch_cutoffs.2,
-            &x_batch_cutoffs.3,
-        );
-
-        // What both stages read of this call (`SubjectCtx`).
-        let subject_ctx = SubjectCtx {
-            s_idx,
-            s_id,
-            s_len_full,
-            queries,
-            query_contexts,
-            query_eff_searchsp,
-            cutoff_scores,
-            hit_saving_cutoff_scores,
-            x_dropoff_scores,
-            reduced_cutoff_scores,
-            timing_ref,
-            timing_enabled,
-        };
-        if let Some(kept) = prelim_source {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1521,1632-1633
-            // ```c
-            //         for (i = 0; i < batches->num_batches; i++) {
-            // ...
-            //             /* process all the hits to this subject sequence, one list at a time */
-            //             for (hsplist_itr = 0; hsplist_itr < batch->num_hsplists; hsplist_itr++) {
-            // ```
-            // The traceback of the HSPs that the preliminary stage kept
-            // (`traceback_subject::traceback_subject`).
-            traceback_subject::traceback_subject::<UNGAPPED>(
-                &trace_batch,
-                &subject_ctx,
-                subject,
-                kept,
-                gap_scratch,
-                subject_scratch,
-                subject_hits,
-            );
-        } else {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1469-1470
-            // ```c
-            //       status =
-            //           s_BlastSearchEngineCore(program_number, query, query_info,
-            // ```
-            // The preliminary search of the subject (`prelim_subject::prelim_subject`).
-            // The preliminary stage gives the subject's HSPs to the collector (`search_subjects`).
-            *prelim_out = prelim_subject::prelim_subject::<UNGAPPED>(
-                &prelim_batch,
-                &subject_ctx,
-                subject,
-                lookups,
-                gap_scratch,
-                subject_scratch,
-            );
-        }
+    // The passes over the batch's subjects (`subject_passes::SubjectPasses`), built once.
+    let passes = subject_passes::SubjectPasses {
+        args,
+        subjects,
+        prelim_batch: &prelim_batch,
+        trace_batch: &trace_batch,
+        any_valid_context,
+        queries: queries_ref,
+        query_contexts: query_contexts_ref,
+        query_eff_searchsp: query_eff_searchsp_ref,
+        batch_cutoffs: &x_batch_cutoffs,
+        timing: timing.as_deref(),
+        prelim_hitlist_size,
+        hitlist_size,
+        db_hard_mask,
     };
 
     // The batch's results, read after its subjects are searched.
@@ -13278,451 +13022,19 @@ fn search_query_batch<const UNGAPPED: bool>(
         query_eff_searchsp: query_eff_searchsp.clone(),
         timing: String::new(),
     };
-    // The records of a subject set and their letters (none for a database, which has
-    // drivers of its own below).
-    let prepared_ref = subjects.prepared();
-    let subject_records_ref: &[FastaRecord] = prepared_ref.map_or(&[], |prepared| prepared.records);
-    let prepared_subject = |s_idx: usize| {
-        prepared_ref
-            .expect("the subjects of a subject set")
-            .subject(s_idx)
-    };
-    // One pass over the subjects in subject order: the preliminary stage gives each subject's
-    // preliminary HSPs (`kept` is `None`), the traceback saves the final HSPs of the kept
-    // preliminary HSPs in the final hit lists of `hitlist_size` subjects
-    // (`Blast_HSPResultsInsertHSPList`).
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1427
-    // ```c
-    // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-    //        != BLAST_SEQSRC_EOF) {
-    //    if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
-    //        continue;
-    //    }
-    // }
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:1700-1707
-    // ```c
-    //                 batch->hsplist_array[hsplist_itr] = NULL;
-    //                 if (hsp_list->hspcnt == 0) {
-    //                     hsp_list = Blast_HSPListFree(hsp_list);
-    //                 }
-    //                 else {
-    //                     Blast_HSPResultsInsertHSPList(thread_data->tld[tid]->results, hsp_list,
-    //                                   hit_params->options->hitlist_size);
-    //                 }
-    // ```
-    // Each subject's results go to `sink` in OID order, which fills the hit lists as NCBI's
-    // `Blast_HitListUpdate` does, one HSP list at a time. One thread hands each subject over as
-    // soon as it is searched, so only the HSPs the hit lists keep stay in memory. Two or more
-    // threads search all subjects of the batch and then hand them over, or, with
-    // `LOSAT_X_BNSTREAM`, hand each subject over in OID order while they search the next ones.
-    let search_subjects = |kept: Option<&[Vec<PrelimHit>]>,
-                           lookups: Option<&LookupTables>,
-                           sink: &mut (dyn FnMut(usize, Option<SubjectHits>, Vec<PrelimHit>)
-                                     + Send)| {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
-        // ```c
-        // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
-        // ...
-        // aux_struct->offset_pairs =
-        //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
-        // ```
-        let new_state = || {
-            (
-                GapAlignScratch::new(),
-                SubjectScratch::new(offset_array_size, window_size),
+    // The preliminary pass over the subjects (`SubjectPasses::prelim_pass`); its error is the database's
+    // read error as it is, reported before the masks' read errors below.
+    let prelim_lists = passes
+        .prelim_pass::<UNGAPPED>(split_prelim_lists, &lookup_tables)
+        .map_err(|error| {
+            database_search_error(
+                error,
+                first_batch,
+                reborrow_outputs(&mut outputs),
+                megablast,
+                &shown,
             )
-        };
-        let search_one = |state: &mut (GapAlignScratch, SubjectScratch), s_idx: usize| {
-            let (gap_scratch, subject_scratch) = state;
-            let mut subject_hits: Option<SubjectHits> = None;
-            let mut prelim_hits: Vec<PrelimHit> = Vec::new();
-            process_subject(
-                s_idx,
-                prepared_subject(s_idx),
-                gap_scratch,
-                subject_scratch,
-                lookups,
-                kept.map(|kept| &kept[s_idx]),
-                &mut subject_hits,
-                &mut prelim_hits,
-            );
-            (subject_hits, prelim_hits)
-        };
-        let num_subjects = subject_records_ref.len();
-        if use_parallel {
-            #[cfg(all(
-                feature = "parallel",
-                any(not(target_arch = "wasm32"), feature = "wasm-threads")
-            ))]
-            {
-                if x_bnstream() {
-                    crate::utils::xreach::x_reach!("LOSAT_X_BNSTREAM", true);
-                    let threads = parallel_pool.threads().max(1);
-                    let window = threads * X_BNSTREAM_SUBJECTS_PER_THREAD;
-                    parallel_pool.install(|| {
-                        x_bnstream::search_in_order(
-                            num_subjects,
-                            window,
-                            false,
-                            &new_state,
-                            &search_one,
-                            &mut |s_idx, (hits, prelim)| sink(s_idx, hits, prelim),
-                        )
-                    });
-                } else {
-                    let results: Vec<(Option<SubjectHits>, Vec<PrelimHit>)> = parallel_pool
-                        .install(|| {
-                            (0..num_subjects)
-                                .into_par_iter()
-                                .map_init(new_state, search_one)
-                                .collect()
-                        });
-                    for (s_idx, (hits, prelim)) in results.into_iter().enumerate() {
-                        sink(s_idx, hits, prelim);
-                    }
-                }
-            }
-            #[cfg(any(
-                not(feature = "parallel"),
-                all(target_arch = "wasm32", not(feature = "wasm-threads"))
-            ))]
-            {
-                unreachable!("use_parallel is false when parallel threads are disabled");
-            }
-        } else {
-            if x_bnstream() {
-                crate::utils::xreach::x_reach!("LOSAT_X_BNSTREAM", false);
-            }
-            let mut state = new_state();
-            for s_idx in 0..num_subjects {
-                let (hits, prelim) = search_one(&mut state, s_idx);
-                sink(s_idx, hits, prelim);
-            }
-        }
-    };
-
-    // NCBI's preliminary stage keeps, for each query, the preliminary HSPs of at most
-    // `prelim_hitlist_size` subjects (a split batch merges those of its query chunks), and
-    // its traceback reads only those.
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1674-1783
-    // ```c
-    // BLAST_PreliminarySearchEngine(program_number, query, query_info,
-    //    seq_src, gap_align, score_params, lookup_wrap, word_options,
-    //    ext_params, hit_params, eff_len_params, psi_options,
-    //    db_options, hsp_stream, diagnostics, interrupt_search,
-    //    progress_info);
-    // ...
-    // BLAST_ComputeTraceback(program_number, hsp_stream, query, query_info,
-    //    seq_src, gap_align, score_params, ext_params, hit_params,
-    //    eff_len_params, db_options, psi_options, rps_info, pattern_blk,
-    //    results, interrupt_search, progress_info);
-    // ```
-    // A database has its own drivers of the two passes (`database::search_blocks`,
-    // `database::traceback_listed`), with a scratch per worker made as the subject set's
-    // parallel pass makes them.
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
-    // ```c
-    // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
-    // ...
-    // aux_struct->offset_pairs =
-    //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
-    // ```
-    let new_scratch = || {
-        (
-            GapAlignScratch::new(),
-            SubjectScratch::new(offset_array_size, window_size),
-        )
-    };
-    // An ungapped (`-ungapped`) search only (the other instance never calls them): the steps of
-    // NCBI's preliminary stage that finish a subject's HSP list and that `process_subject` leaves
-    // to its caller. The reap by the query coverage is made as the HSPs are given to the
-    // collector (it takes nothing of the subject). A database sequence is read again, unpacked
-    // (BLASTNA), when its HSP list is not empty only, and re-evaluated there.
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1482
-    // ```c
-    //           if (hsp_list && hsp_list->hspcnt > 0) {
-    //              ...  Blast_HSPListReevaluateUngapped(hsp_list, query, subject, ...
-    // ```
-    let x_ungapped_query_coverage = |hits: &mut Vec<PrelimHit>| {
-        ungapped_reap_query_coverage(hits, args.qcov_hsp_perc.unwrap_or(0.0), |context_idx| {
-            query_contexts_ref[context_idx].len
-        });
-    };
-    let x_ungapped_database_stage =
-        |database: &database::BlastnDatabase, ordinal: u32, hits: &mut Vec<PrelimHit>| {
-            if hits.is_empty() {
-                return Ok(());
-            }
-            database.with_blastna(ordinal, db_hard_mask, |s_blastna| {
-                ungapped_subject_stage(
-                    hits,
-                    s_blastna,
-                    encoded_queries_blastna.as_slice(),
-                    encoded_queries_nomask,
-                    &score_matrix,
-                    &x_batch_cutoffs.0,
-                    percent_identity,
-                    |prelim| {
-                        let eff_searchsp = query_eff_searchsp_ref
-                            .get(prelim.context_idx as usize)
-                            .copied()
-                            .unwrap_or(0);
-                        calculate_blastn_context_statistics(
-                            prelim.prelim_score,
-                            &search_karlin_ref[prelim.context_idx as usize].gapped,
-                            eff_searchsp,
-                            round_down_evalue_score,
-                        )
-                        .1
-                    },
-                    evalue_threshold,
-                );
-                x_ungapped_query_coverage(hits);
-            })
-        };
-    // The callback of the database's preliminary pass in an ungapped search: the search of the
-    // sequence as for a default search, then the finish of its HSP list when it has HSPs left
-    // (`x_ungapped_database_stage`). A read error goes to the cell `$error` (the one of the
-    // smallest ordinal stays) and the sequence has no HSPs. The default search has its own
-    // callback (a different closure, so that the default instance of this function holds no
-    // capture of this one).
-    macro_rules! ungapped_database_callback {
-        ($database:expr, $error:expr) => {
-            |state: &mut (GapAlignScratch, SubjectScratch),
-             ordinal: u32,
-             subject: BlastnSubjectRef<'_>| {
-                let (gap_scratch, subject_scratch) = state;
-                let mut subject_hits: Option<SubjectHits> = None;
-                let mut prelim_hits: Vec<PrelimHit> = Vec::new();
-                process_subject(
-                    ordinal as usize,
-                    subject,
-                    gap_scratch,
-                    subject_scratch,
-                    Some(&lookup_tables),
-                    None,
-                    &mut subject_hits,
-                    &mut prelim_hits,
-                );
-                if let Err(error) = x_ungapped_database_stage($database, ordinal, &mut prelim_hits)
-                {
-                    let mut first = $error.lock().expect("the error cell is not poisoned");
-                    if first
-                        .as_ref()
-                        .is_none_or(|(smallest, _)| ordinal < *smallest)
-                    {
-                        *first = Some((ordinal, error));
-                    }
-                    return None;
-                }
-                (!prelim_hits.is_empty()).then_some(prelim_hits)
-            }
-        };
-    }
-    let prelim_lists = match split_prelim_lists {
-        Some(lists) => lists,
-        None => match subjects {
-            // `-culling_limit`: NCBI's culling writer takes the place of the HSP collector
-            // (`BlastHSPWriter` of `CreateHspWriter`), for a batch and for a query chunk alike
-            // (a chunk's queries are its parts, so the lengths are the chunk's). Chosen once;
-            // the default arms below are unchanged.
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/api/setup_factory.cpp:318-342
-            // ```c
-            //     else if (filt_opts) {
-            //         if (filt_opts->best_hit && (filt_opts->best_hit_stage & ePrelimSearch))
-            //         ...
-            //         else if (filt_opts->culling_opts &&
-            //                  (filt_opts->culling_stage & ePrelimSearch))
-            //         {
-            // ```
-            SubjectSource::Prepared(_) if args.culling_limit_value() > 0 => {
-                let mut writer = culling::PrelimCulling::new(
-                    &query_lengths,
-                    prelim_hitlist_size,
-                    args.culling_limit_value(),
-                );
-                if UNGAPPED {
-                    search_subjects(None, Some(&lookup_tables), &mut |oid, _, mut prelim| {
-                        x_ungapped_query_coverage(&mut prelim);
-                        writer.add(oid, prelim)
-                    });
-                } else {
-                    search_subjects(None, Some(&lookup_tables), &mut |oid, _, prelim| {
-                        writer.add(oid, prelim)
-                    });
-                }
-                writer.finish()
-            }
-            SubjectSource::Database(database) if args.culling_limit_value() > 0 => {
-                // The same drivers as the default arm below, with the culling writer as the
-                // sink (a second instance of `database::search_blocks`).
-                let mut writer = culling::PrelimCulling::new(
-                    &query_lengths,
-                    prelim_hitlist_size,
-                    args.culling_limit_value(),
-                );
-                let mut add = |ordinal: u32, prelim_hits: Vec<PrelimHit>| {
-                    writer.add(ordinal as usize, prelim_hits)
-                };
-                if any_valid_context {
-                    let searched = if UNGAPPED {
-                        // The first error of reading a database sequence again for the
-                        // ungapped re-evaluation (`BlastnDatabase::with_blastna`).
-                        let x_ungapped_error: std::sync::Mutex<Option<(u32, anyhow::Error)>> =
-                            std::sync::Mutex::new(None);
-                        database::search_blocks(
-                            database,
-                            parallel_pool,
-                            use_parallel,
-                            &new_scratch,
-                            &ungapped_database_callback!(database, x_ungapped_error),
-                            &mut add,
-                        )
-                        .and_then(|()| {
-                            match x_ungapped_error
-                                .lock()
-                                .expect("the error cell is not poisoned")
-                                .take()
-                            {
-                                Some((_, error)) => Err(error),
-                                None => Ok(()),
-                            }
-                        })
-                    } else {
-                        database::search_blocks(
-                            database,
-                            parallel_pool,
-                            use_parallel,
-                            &new_scratch,
-                            &|state: &mut (GapAlignScratch, SubjectScratch),
-                              ordinal: u32,
-                              subject: BlastnSubjectRef<'_>| {
-                                let (gap_scratch, subject_scratch) = state;
-                                let mut subject_hits: Option<SubjectHits> = None;
-                                let mut prelim_hits: Vec<PrelimHit> = Vec::new();
-                                process_subject(
-                                    ordinal as usize,
-                                    subject,
-                                    gap_scratch,
-                                    subject_scratch,
-                                    Some(&lookup_tables),
-                                    None,
-                                    &mut subject_hits,
-                                    &mut prelim_hits,
-                                );
-                                (!prelim_hits.is_empty()).then_some(prelim_hits)
-                            },
-                            &mut add,
-                        )
-                    };
-                    searched.map_err(|error| {
-                        database_search_error(
-                            error,
-                            first_batch,
-                            reborrow_outputs(&mut outputs),
-                            megablast,
-                            &shown,
-                        )
-                    })?;
-                }
-                writer.finish()
-            }
-            SubjectSource::Prepared(_) => {
-                let mut collector = PrelimHitCollector::new(queries_ref.len(), prelim_hitlist_size);
-                if UNGAPPED {
-                    search_subjects(None, Some(&lookup_tables), &mut |oid, _, mut prelim| {
-                        x_ungapped_query_coverage(&mut prelim);
-                        collector.add(oid, prelim)
-                    });
-                } else {
-                    search_subjects(None, Some(&lookup_tables), &mut |oid, _, prelim| {
-                        collector.add(oid, prelim)
-                    });
-                }
-                collector.hit_lists
-            }
-            SubjectSource::Database(database) => {
-                // The subjects come one at a time in the order of their ordinal ids
-                // (`database::search_blocks`), as the subject set's come in OID order.
-                let mut collector = PrelimHitCollector::new(queries_ref.len(), prelim_hitlist_size);
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:177-180
-                // ```c
-                //     int status = m_PrelimSearch->CheckInternalData();
-                //     if (status != 0)
-                //     {
-                //          // Search was not run, but we send back an empty CSearchResultSet.
-                // ```
-                // With no valid context NCBI does not search, and reads no sequence.
-                let mut add = |ordinal: u32, prelim_hits: Vec<PrelimHit>| {
-                    collector.add(ordinal as usize, prelim_hits)
-                };
-                if any_valid_context {
-                    let searched = if UNGAPPED {
-                        // The first error of reading a database sequence again for the
-                        // ungapped re-evaluation (`BlastnDatabase::with_blastna`).
-                        let x_ungapped_error: std::sync::Mutex<Option<(u32, anyhow::Error)>> =
-                            std::sync::Mutex::new(None);
-                        database::search_blocks(
-                            database,
-                            parallel_pool,
-                            use_parallel,
-                            &new_scratch,
-                            &ungapped_database_callback!(database, x_ungapped_error),
-                            &mut add,
-                        )
-                        .and_then(|()| {
-                            match x_ungapped_error
-                                .lock()
-                                .expect("the error cell is not poisoned")
-                                .take()
-                            {
-                                Some((_, error)) => Err(error),
-                                None => Ok(()),
-                            }
-                        })
-                    } else {
-                        database::search_blocks(
-                            database,
-                            parallel_pool,
-                            use_parallel,
-                            &new_scratch,
-                            &|state: &mut (GapAlignScratch, SubjectScratch),
-                              ordinal: u32,
-                              subject: BlastnSubjectRef<'_>| {
-                                let (gap_scratch, subject_scratch) = state;
-                                let mut subject_hits: Option<SubjectHits> = None;
-                                let mut prelim_hits: Vec<PrelimHit> = Vec::new();
-                                process_subject(
-                                    ordinal as usize,
-                                    subject,
-                                    gap_scratch,
-                                    subject_scratch,
-                                    Some(&lookup_tables),
-                                    None,
-                                    &mut subject_hits,
-                                    &mut prelim_hits,
-                                );
-                                (!prelim_hits.is_empty()).then_some(prelim_hits)
-                            },
-                            &mut add,
-                        )
-                    };
-                    searched.map_err(|error| {
-                        database_search_error(
-                            error,
-                            first_batch,
-                            reborrow_outputs(&mut outputs),
-                            megablast,
-                            &shown,
-                        )
-                    })?;
-                }
-                collector.hit_lists
-            }
-        },
-    };
+        })?;
     // The first error of the database masks' reads (`db_mask_error`), as the preliminary stage's
     // read errors are reported (`database_search_error`).
     let db_mask_error = db_mask_error
@@ -13760,79 +13072,18 @@ fn search_query_batch<const UNGAPPED: bool>(
     // touched pages (Sakai x EDL933 `-subject` blastn: 11.4 MiB); the next batch's first sort maps
     // one again.
     X_SORT.x_clear_idle();
-    let hit_lists = match subjects {
-        SubjectSource::Prepared(_) => {
-            let kept = prelim_hits_by_subject(prelim_lists, subject_records_ref.len());
-            let mut hit_lists: Vec<Option<BlastnHitList>> = Vec::with_capacity(queries_ref.len());
-            hit_lists.resize_with(queries_ref.len(), || None);
-            search_subjects(Some(&kept), None, &mut |_, hits, _| {
-                if let Some(hits) = hits {
-                    update_hitlists_with_subject_hits(&mut hit_lists, hits, hitlist_size);
-                }
-            });
-            hit_lists
-        }
-        SubjectSource::Database(database) => {
-            let listed = listed_prelim_hits(prelim_lists);
-            let found = database::traceback_listed(
-                database,
-                db_hard_mask,
-                parallel_pool,
-                use_parallel,
-                &listed,
-                &new_scratch,
-                &|state: &mut (GapAlignScratch, SubjectScratch),
-                  ordinal: u32,
-                  subject: BlastnSubjectRef<'_>,
-                  kept: &Vec<PrelimHit>| {
-                    let (gap_scratch, subject_scratch) = state;
-                    let mut subject_hits: Option<SubjectHits> = None;
-                    let mut prelim_hits: Vec<PrelimHit> = Vec::new();
-                    process_subject(
-                        ordinal as usize,
-                        subject,
-                        gap_scratch,
-                        subject_scratch,
-                        None,
-                        Some(kept),
-                        &mut subject_hits,
-                        &mut prelim_hits,
-                    );
-                    // Every listed sequence's lists are kept until the last one is traced
-                    // (`found` below), so each keeps only its length (`SubjectHits::fit`). A
-                    // subject set's lists go to the hit lists at once (`search_subjects` above),
-                    // whose copies and `update_hitlists_with_subject_hits` hold their counts.
-                    if let Some(hits) = subject_hits.as_mut() {
-                        hits.fit();
-                    }
-                    subject_hits
-                },
-                &|kept: &Vec<PrelimHit>| {
-                    kept.iter()
-                        .map(|hit| (hit.prelim_ss, hit.prelim_se))
-                        .collect()
-                },
+    // The traceback pass over the subjects (`SubjectPasses::traceback_pass`).
+    let hit_lists = passes
+        .traceback_pass::<UNGAPPED>(prelim_lists)
+        .map_err(|error| {
+            database_search_error(
+                error,
+                first_batch,
+                reborrow_outputs(&mut outputs),
+                megablast,
+                &shown,
             )
-            .map_err(|error| {
-                database_search_error(
-                    error,
-                    first_batch,
-                    reborrow_outputs(&mut outputs),
-                    megablast,
-                    &shown,
-                )
-            })?;
-            // The final HSPs of the listed sequences in the order of their ordinal ids, as
-            // the subject set's traceback saves those of its subjects
-            // (`Blast_HSPResultsInsertHSPList`, `search_subjects`).
-            let mut hit_lists: Vec<Option<BlastnHitList>> = Vec::with_capacity(queries_ref.len());
-            hit_lists.resize_with(queries_ref.len(), || None);
-            for hits in found {
-                update_hitlists_with_subject_hits(&mut hit_lists, hits, hitlist_size);
-            }
-            hit_lists
-        }
-    };
+        })?;
 
     if let Some(bar) = progress_bar.as_ref() {
         bar.finish();
@@ -15048,6 +14299,7 @@ mod tests {
     #[test]
     fn speculative_traceback_preserves_ordered_gapped_hsps() {
         use clap::Parser;
+        use rayon::prelude::*;
         #[derive(Parser)]
         struct Options {
             #[command(flatten)]

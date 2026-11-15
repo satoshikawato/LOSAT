@@ -3019,7 +3019,7 @@ Rebuilding less:
   of a query batch one at a time in OID order and one of them (the owner) hands the results to the hit lists in
   OID order while the others go on with the next subjects; a thread claims a subject only while it is fewer
   than `threads x 64` subjects past the last one handed over, so at most that many subjects' results wait
-  (`x_bnstream::search_in_order`, called from `search_query_batch` in `blastn/blast_engine/run.rs`; each
+  (`x_bnstream::search_in_order`, called from `SubjectPasses::search_subjects` in `blastn/blast_engine/subject_passes.rs`; each
   thread runs its loop as one `rayon::broadcast` job, so that a thread waiting inside a nested parallel stage
   of a search never starts a second loop, and since 2026-10-23 no subject is searched before every thread
   has started its loop: rayon runs a thread's own broadcast job inside a wait for a nested job too, so a
@@ -3641,7 +3641,7 @@ Scheduling (each value computed by one thread with the original function; order 
   when its preliminary stage ends, before its traceback (`blastn/blast_engine/x_lut_drop.rs`), where NCBI's traceback
   stage drops its table (`m_LookupTable.Reset(NULL)`, `traceback_stage.cpp:208-211`); before it graduated the tables
   lived until the batch returned. The traceback reads the HSPs that the preliminary stage kept and does not scan, and the
-  tables are passed to `process_subject` by the preliminary stage's calls only (`None` in the traceback's), so the
+  tables are passed to `search_subject` by the preliminary stage's calls only (`None` in the traceback's), so the
   compiler shows that no traceback reads them; the values taken from them before the scan (the offset array size, the
   shape of the subject search) are plain numbers. A `LOSAT_X_MBLUTKEEP` table goes back to the batch loop's keep when
   the tables drop, as at the batch's end before (zeroed and taken by the next build as before); what the traceback no

@@ -199,6 +199,7 @@ FIELDS = {
     "q_idx": "q_idx",
     "s_idx": "s_idx",
     "rank": "rank",
+    "round": "round",
 }
 
 

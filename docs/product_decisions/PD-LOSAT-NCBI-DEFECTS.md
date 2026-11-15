@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.29
+- Version: 1.30
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -60,7 +60,11 @@
   1.28 2026-11-15 (the explicit rejection of 1.23 and the rule-2 rejection of a query's id of 1.24
   in the query-anchored views of BLASTN and TBLASTN, line RG item T3b; Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07, within the classes of 1.23 and 1.10);
-  1.29 2026-11-15 (the explicit rejection of RPSBLAST's Smith-Waterman redo that NCBI repeats
+  1.29 2026-11-15 (the rejection of a sequence that a seqid list keeps while matching none of its
+  lines, of 1.6, also where a list's `gnl|BL_ORD_ID|n` reaches a line in a volume whose first OID is
+  not 0, which NCBI's header read numbers differently from the lookup; line DBID item ordsl,
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07, within the class of 1.6)
+  1.30 2026-11-15 (the explicit rejection of RPSBLAST's Smith-Waterman redo that NCBI repeats
   without end, rule 3, line PS item PS11c-3; Owner-delegated, line PS `DECISIONS.md` 63)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
@@ -596,7 +600,13 @@ here, and names the widening that PS16a made for protein queries.
 - A sequence that a seqid list keeps while matching none of its definition lines (a pdb
   molecule named without its chain, a local id in other letters, a Swiss-Prot name on a
   version 4 database, a sequence whose every line has only a gi or a ti under a negative
-  list): NCBI's filtered header leaves no line, `GetBioseq` returns null
+  list; version 1.29: a list's `gnl|BL_ORD_ID|n` that the accession table resolves by the
+  stored number, of `makeblastdb -input_type blastdb` or of a FASTA id `gnl|BL_ORD_ID|n`, to a
+  sequence in a volume whose first OID is not 0 (a later volume, or a later database of the
+  list), whose lines NCBI's header read tests with the volume's first OID added
+  (`seqdbvol.cpp:2222-2236`), and a negative list's line removed there the same way; where such
+  a sequence keeps another line, LOSAT writes the lines NCBI keeps): NCBI's
+  filtered header leaves no line, `GetBioseq` returns null
   (`seqdbvol.cpp:1370-1376`) and the sequence's hits leave every report without notice
   while its length counts in the statistics. LOSAT refuses the search with the sequence
   named (`the seqid list keeps sequence N of the volume but none of its definition lines, and
@@ -823,7 +833,7 @@ here, and names the widening that PS16a made for protein queries.
   does, so its refusal follows the prolog. The other sections of such a record are NCBI's
   (fixture rows `db.of1.bp.self1.*`, `db.of1.bn.selfrc.*`).
 
-- RPSBLAST `-use_sw_tback` with composition-based statistics (version 1.29, 2026-11-15, line PS
+- RPSBLAST `-use_sw_tback` with composition-based statistics (version 1.30, 2026-11-15, line PS
   item PS11c-3, Owner-delegated, line PS `DECISIONS.md` 63): a profile with two or more
   preliminary HSPs when the e-value of a score of 0 passes `-evalue` (the query's search space
   times the profile's K below it: a large `-evalue` or a small `-searchsp`) and the profile's first

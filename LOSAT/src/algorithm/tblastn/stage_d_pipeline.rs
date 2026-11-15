@@ -1332,7 +1332,16 @@ fn run_local_search_with_pool(
     let protein_split =
         crate::algorithm::blastp::protein_query_split::protein_query_split_sizes(20000)?;
     let batch_lengths: Vec<usize> = queries.iter().map(Vec::len).collect();
-    let preliminary_hitlists = match split_protein_batch(&batch_lengths, protein_split) {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:122-129 (quoted at
+    // `blastp::blast_engine::psi_round::run_queries`)
+    // A PSSM query (`-in_pssm`: `CPsiBlast` searches the PSSM's query through a
+    // `CObjMgrFree_QueryFactory`, psiblast_impl.cpp:115-119) is never split; the sizes above are
+    // still read, as NCBI's query splitter reads them first.
+    let split = match profile.pssm {
+        Some(_) => None,
+        None => split_protein_batch(&batch_lengths, protein_split),
+    };
+    let preliminary_hitlists = match split {
         None => run_preliminary_subjects(
             &PreliminaryInputs {
                 queries: &query_refs,

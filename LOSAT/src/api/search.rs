@@ -246,20 +246,7 @@ fn parse(
             )));
         }
     }
-    let command = parse_words(program, argv, inputs, out)?;
-    // No NCBI counterpart: NCBI has no library API. psiblast's rounds (`-num_iterations` other
-    // than 1) run on the command line (`algorithm::psiblast::rounds`); the library's results
-    // (`QueryHits`, the hit records and the observer's events) have no round, so the library
-    // runs one round only (line PS, DECISIONS 15).
-    if let Commands::Psiblast(args) = &command {
-        if args.num_iterations != 1 {
-            return Err(Error::Argv(format!(
-                "-num_iterations {} is not accepted by the library API: its results have one round (the command line runs psiblast's rounds)",
-                args.num_iterations
-            )));
-        }
-    }
-    Ok(command)
+    parse_words(program, argv, inputs, out)
 }
 
 /// Parses the argv with the command line's parser, as `losat <program> -query <query>
@@ -525,25 +512,10 @@ mod tests {
         assert!(!std::path::Path::new("p.txt").exists());
     }
 
-    // Line PS, PS5a (DECISIONS 15): psiblast's rounds run on the command line only; the library's
-    // results have one round, so `validate` and every search refuse `-num_iterations` other than 1.
+    // Line RG item Q5: psiblast's rounds (`-num_iterations` other than 1) run in the library too;
+    // the records carry their round (`HspRecord::round`, `Outcome::rounds`).
     #[test]
-    fn psiblast_rounds_are_refused_by_validate_and_every_search() {
-        for rounds in ["0", "2"] {
-            let error = validate(Program::Psiblast, &["-num_iterations", rounds]).unwrap_err();
-            assert_eq!(
-                error,
-                Error::Argv(format!(
-                    "-num_iterations {rounds} is not accepted by the library API: its results have one round (the command line runs psiblast's rounds)"
-                ))
-            );
-        }
-        validate(Program::Psiblast, &["-num_iterations", "1"]).unwrap();
-        let search = Search {
-            program: Program::Psiblast,
-            argv: vec!["-num_iterations".to_string(), "3".to_string()],
-            out: None,
-        };
+    fn psiblast_rounds_are_accepted_by_validate_and_every_search() {
         let query = crate::api::read_fasta(
             Program::Psiblast,
             Role::Query,
@@ -551,9 +523,13 @@ mod tests {
         )
         .unwrap();
         let inputs = Inputs::new(&query, &query).named("q.faa", "s.faa");
-        assert!(
-            matches!(search.command(inputs), Err(Error::Argv(message)) if message.starts_with("-num_iterations 3 "))
-        );
+        for (rounds, number) in [("0", 0), ("1", 1), ("3", 3)] {
+            let search = validate(Program::Psiblast, &["-num_iterations", rounds]).unwrap();
+            match search.command(inputs).unwrap() {
+                Commands::Psiblast(args) => assert_eq!(args.num_iterations, number),
+                other => panic!("{other:?}"),
+            }
+        }
     }
 
     // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:79-87

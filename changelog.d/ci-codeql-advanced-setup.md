@@ -1,0 +1,1 @@
+- CI: CodeQL runs as an advanced setup (`.github/workflows/codeql.yml`) instead of GitHub's default setup: dev is scanned once a week and main on every push, with no run on pull requests. Default setup scanned only main, which lags dev by weeks. The categories stay `/language:<language>`, so existing alerts and their dismissals carry over.

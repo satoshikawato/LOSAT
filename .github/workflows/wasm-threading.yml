@@ -1,5 +1,9 @@
 name: WASI threading integration
 
+# Runs the commit of the dispatch (or of the calling workflow). A non-blank candidate_sha is only checked
+# against that commit (a dispatch of another commit's SHA fails before any build step); to run a
+# candidate, dispatch on the branch whose head is the candidate.
+
 on:
   workflow_call:
     inputs:
@@ -12,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       candidate_sha:
-        description: Candidate commit (blank uses the selected branch)
+        description: Candidate commit to assert (blank = no check; the run is the selected branch's head, which must equal it)
         type: string
         default: ''
       include_serial_compatibility:
@@ -29,10 +33,17 @@ jobs:
     timeout-minutes: 360
     env:
       INCLUDE_SERIAL_COMPATIBILITY: ${{ inputs.include_serial_compatibility }}
+      CANDIDATE_SHA: ${{ inputs.candidate_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.candidate_sha || github.sha }}
+      # A blank candidate_sha asserts nothing; a given one must be the commit that runs (the caller's
+      # commit in a workflow_call).
+      - name: Verify exact committed candidate SHA
+        run: |
+          if [[ -n "$CANDIDATE_SHA" && "$GITHUB_SHA" != "$CANDIDATE_SHA" ]]; then
+            echo "::error::candidate_sha is checked, not checked out: dispatch on the branch whose head is the candidate ($CANDIDATE_SHA); $GITHUB_REF is at $GITHUB_SHA"
+            exit 1
+          fi
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: 1.92.0

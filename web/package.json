@@ -5,5 +5,8 @@
   "workspaces": [
     "packages/losat",
     "app"
-  ]
+  ],
+  "overrides": {
+    "minimatch": "11.0.5"
+  }
 }

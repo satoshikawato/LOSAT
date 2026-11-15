@@ -50,7 +50,7 @@ pub(super) struct TracebackOwnedHsp {
 // No NCBI counterpart: grid cells per initial HSP of a unit's tree and the most cells it gets
 // (`x_unit_tree_cells`); memory of the grid index only.
 const X_UNIT_TREE_CELLS_PER_HSP: usize = 64;
-const X_UNIT_TREE_MAX_CELLS: usize = 1 << 14;
+const X_UNIT_TREE_MAX_CELLS: usize = 1 << 12;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3830-3831
 // ```c

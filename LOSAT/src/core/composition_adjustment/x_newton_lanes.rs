@@ -2068,7 +2068,10 @@ mod tests {
             let status = take(&mut x, &p.q[..], &p.row, &p.col, p.relative_entropy);
             assert_eq!(status, Some(want[i].status));
             assert!(same_bits(&x, &want[i].x));
-            assert_eq!(take(&mut x, &p.q[..], &p.row, &p.col, p.relative_entropy), None);
+            assert_eq!(
+                take(&mut x, &p.q[..], &p.row, &p.col, p.relative_entropy),
+                None
+            );
         }
     }
 

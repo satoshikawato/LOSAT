@@ -412,6 +412,7 @@ export LOSAT_X_BXTASKRES=1
 export LOSAT_X_BXUNGAPSENT=1
 export LOSAT_X_BXUNITCAP=8
 export LOSAT_X_BXW4CAP=1
+export LOSAT_X_CHAINRUN=1
 export LOSAT_X_DBIDXREAD=1
 export LOSAT_X_DCCSR=1
 export LOSAT_X_DCSEEDLEAN=1
@@ -5621,6 +5622,31 @@ Scheduling (each value computed by one thread with the original function; order 
   threads x0.953 / x0.955 / x0.956 / x0.958 (8 of 8, 12 of 12 each faster; instructions x0.9987; `=0` x0.9992 /
   x1.0005 / x1.0002 / x0.9998); AP027131 `-subject` at 1 / 16 / 32 x0.991 / x0.995 / x0.990 (12, 7, 8 of 12 faster;
   `=0` x1.0001 / x1.0007 / x1.0000).
+- `LOSAT_X_CHAINRUN=1` tblastn, blastx (speed; in the strict set from the pull request that added it, 2026-11-16;
+  `=0` turns it off; `tblastn/x_scan_byte.rs` `write_avx2`, `copy_avx2_run`, `X_CHAIN_RUN`): the AVX2 copy of the scan on
+  presence bytes (`LOSAT_X_TBNSCANBYTE`'s units, BLASTX's direct loop under `LOSAT_X_BXSCANBYTE`) writes the first 24
+  pairs of a cell of more than 3 hits (an overflow chain) as one run of six 32-byte stores, without reading the cell's
+  hit count, when the overflow array holds 24 query offsets from the chain's start, and loops four pairs at a time only
+  past them; a chain nearer the array's end, a cell of up to 3 hits (one store), the plain loops and CPUs without AVX2
+  copy as before. Cause removed: the copy's loop over a chain ended at the cell's hit count, which changes from candidate
+  to candidate, so its last test was a mispredicted branch for most chains. BUSCO's eukaryota ancestral variants x the
+  yeast genome (`-db`, one thread; 1.26 G candidate words, 11.9 hits each on average, 84 % chains, 88 % of the chains of at
+  most 24 hits): 69 % of the search's 2.48 G mispredicted branches were in the copy, which took 31 % of the cycles at 1.1
+  instructions per cycle, while L2 misses stalled 0.5 % of the cycles (a prefetch of the cells and chains 8-16 candidates
+  ahead gained nothing). The pairs past a cell's hits are not part of the result, as before; the offset arrays have 20
+  entries of slack instead of 4. The pairs and the `s_range` of every call are NCBI's (unit tests
+  `x_scan_byte_equals_ncbi_scan_on_random_subjects`, with chains past 24 hits and chains too near the overflow array's
+  end for a run, and `the_last_overflow_chain_is_copied_exactly`, both forms of the AVX2 copy against NCBI's scan;
+  `tests/tblastn_scan_byte.rs` `the_chain_runs_change_no_report`: the report of `=0` at one and four threads, and
+  `runs=` in the `[X_STATS] TBNSCANBYTE` line counts the scan calls that took the runs; `tests/blastx_scan_byte.rs`: the
+  direct loop without the runs gives the same reports). Where: the AVX2 copy (platform).
+  Measured 2026-11-16 on the workstation (2x Xeon Gold 6338, node 1, one core, `-num_threads 1`, against dev 275442da2
+  built in a tree path of the same length, 4 timed rounds after a warm-up, arms alternating; every output the same bytes;
+  `tool-speed-20261115/results/c1/ab_crun.tsv`): BUSCO scer x0.856 (78.63 -> 67.31 s, max RSS x0.972), BUSCO test
+  x0.933, Kaptive protein exact / fragmented x0.886 / x0.890 (max RSS x0.985 / x1.015), Unicycler x0.875, 40 BUSCO
+  proteins x yeast x0.859; one protein x the human genome (99.9 % of 1.23 G candidates of up to 3 hits) x0.999
+  (0.993-1.020), one BUSCO protein x yeast, nf-core and Galaxy tblastn rows x1.000. None of the six BLASTX rows of the
+  downstream-tool set takes the direct loop (`LOSAT_X_REACH`: no `LOSAT_X_BXSCANBYTE` side), so they are unchanged.
 - `LOSAT_X_TBNSCANRESUME=1` tblastn (memory; in the strict set from the pull request that added it, 2026-10-29;
   `=0` turns it off; `tblastn/x_scan_byte.rs` `XScanHeld`, `x_scan_one_range_held`, `tblastn/search_seed.rs`
   `x_scan_unit`, `OFFSET_ARRAY_SIZE`): a unit scanned on presence bytes (`LOSAT_X_TBNSCANBYTE`) keeps the block of

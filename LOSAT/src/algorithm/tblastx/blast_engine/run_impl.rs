@@ -1637,7 +1637,7 @@ fn open_search_database(
             outputs,
         )?,
     }
-    // LOSAT's refusals of a database for the Seq-annot formats, before the search
+    // LOSAT's refusal of a database name for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
     if let Some(database) = database.as_ref() {
         for format in &outputs.formats {
@@ -1647,7 +1647,6 @@ fn open_search_database(
                 crate::report::serial::seqalign::check_database(
                     serial,
                     database.name(),
-                    &database.pairwise_database().definition,
                     crate::blastinput::app::Program::Tblastx,
                 )?;
             }
@@ -2679,11 +2678,14 @@ fn write_tblastx_outputs(
             .map(|observer| FormatProbe::new(observer, format_index));
         // So do the warnings of the formatters of a tabular field list that shows a taxonomy
         // name (`x_CheckTaxDB`, `tabular`), and NCBI's posts of the bytes that the archive's
-        // stream replaces (`write_tblastx_archives`).
+        // and the Seq-annots' streams replace (`write_tblastx_archives`,
+        // `seqalign::write_query_to`).
         let mut warnings = (warning_lines.is_some()
             || matches!(
                 output_format,
-                report::TblastxOutputFormat::Xml2(_) | report::TblastxOutputFormat::Archive
+                report::TblastxOutputFormat::Xml2(_)
+                    | report::TblastxOutputFormat::Archive
+                    | report::TblastxOutputFormat::Seqalign(_)
             )
             || matches!(
                 output_format,
@@ -2924,7 +2926,9 @@ fn write_tblastx_outputs(
                         },
                     },
                     run.subject_letters,
-                    warnings.as_mut(),
+                    warnings
+                        .as_mut()
+                        .expect("a Seq-annot writes its posts to the diagnostics"),
                 )?
             }
             // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:198
@@ -4184,6 +4188,7 @@ fn run_batch_loop(
             {
                 if let Err(error) = super::super::database::batch_prefetch_stop(
                     database,
+                    &done.hits,
                     ordered,
                     &reports.titles.borrow(),
                     start,

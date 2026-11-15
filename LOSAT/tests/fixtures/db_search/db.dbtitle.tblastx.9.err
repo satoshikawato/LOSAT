@@ -1,0 +1,18 @@
+Error: (803.7) [tblastx] Seq-annot.desc.E.user.data.E.label.str
+Bad char [0xC3] in string at byte 200
+café db 
+Error: (803.7) [tblastx] Seq-annot.desc.E.user.data.E.label.str
+Bad char [0xA9] in string at byte 201
+café db 
+Error: (803.7) [tblastx] Seq-annot.desc.E.user.data.E.label.str
+Bad char [0x7F] in string at byte 206
+café db 
+Error: (803.7) [tblastx] Seq-annot.desc.E.user.data.E.label.str
+Bad char [0xC3] in string at byte 200
+café db 
+Error: (803.7) [tblastx] Seq-annot.desc.E.user.data.E.label.str
+Bad char [0xA9] in string at byte 201
+café db 
+Error: (803.7) [tblastx] Seq-annot.desc.E.user.data.E.label.str
+Bad char [0x7F] in string at byte 206
+café db 

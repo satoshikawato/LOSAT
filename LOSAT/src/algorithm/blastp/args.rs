@@ -95,13 +95,16 @@ pub enum BlastpApp {
 
 impl BlastpApp {
     /// The program's name in NCBI's messages (`Warning: [psiblast] ...`) and reports
-    /// (`# PSIBLAST 2.17.0+` in upper case).
+    /// (`# PSIBLAST 2.17.0+` in upper case): its application's name
+    /// (`options::RequestKind::application`, the one table of the names).
     pub fn ncbi_name(self) -> &'static str {
+        use crate::report::archive::options::RequestKind;
         match self {
-            BlastpApp::Blastp => "blastp",
-            BlastpApp::Psiblast => "psiblast",
-            BlastpApp::Rpsblast => "rpsblast",
+            BlastpApp::Blastp => RequestKind::Blastp,
+            BlastpApp::Psiblast => RequestKind::Psiblast,
+            BlastpApp::Rpsblast => RequestKind::Rpsblast,
         }
+        .application()
     }
 
     /// Whether the app's Seq-aligns come from traceback hit lists longer than `max_target_seqs`

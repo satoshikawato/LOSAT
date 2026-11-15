@@ -1,0 +1,38 @@
+Blast-db-mask-info ::= {
+  algo-id 2,
+  algo-program dust,
+  algo-options "edge tail",
+  masks {
+    masks {
+      packed-int {
+        {
+          from 915,
+          to 915,
+          id local id 1
+        }
+      },
+      packed-int {
+        {
+          from 324,
+          to 325,
+          id local id 2
+        }
+      },
+      packed-int {
+        {
+          from 785,
+          to 787,
+          id local id 3
+        }
+      },
+      packed-int {
+        {
+          from 55,
+          to 73,
+          id local id 4
+        }
+      }
+    },
+    more FALSE
+  }
+}

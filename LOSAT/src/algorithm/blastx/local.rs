@@ -746,9 +746,15 @@ fn write_run(
         //                	    formatter.PrintOneResultSet(**result, query_batch);
         // ```
         for (index, (writer, options)) in writers.iter_mut().zip(resolved).enumerate() {
-            // The warnings of the batch's queries are written once, with the first format.
+            // The warnings of the batch's queries are written once, with the first format; NCBI's
+            // posts of the bytes that a Seq-annot's stream replaces (outfmt 8, 9; the only text
+            // that their writer writes to it, `seqalign::write_blastx_seqalign`) at every format,
+            // as the other programs write them.
             let mut quiet = io::sink();
-            let warnings: &mut dyn Write = if index == 0 {
+            let seq_annot = app::ReportFormat::from_number(i32::from(options.outfmt))
+                .and_then(crate::report::serial::SerialFormat::of)
+                .is_some();
+            let warnings: &mut dyn Write = if index == 0 || seq_annot {
                 &mut *diagnostics
             } else {
                 &mut quiet
@@ -1018,7 +1024,6 @@ fn search_database(
             crate::report::serial::seqalign::check_database(
                 serial,
                 database.name(),
-                &database.pairwise_database().definition,
                 Program::Blastx,
             )?;
         }

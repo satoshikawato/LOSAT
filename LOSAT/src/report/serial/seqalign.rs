@@ -62,7 +62,7 @@ use crate::report::seqid::SeqId;
 
 use super::asn_ber::AsnBinaryEncoder;
 use super::asn_text::AsnTextEncoder;
-use super::encoder::{Encoder, SerialError};
+use super::encoder::{Encoder, ReplacedChar, SerialError, Traced};
 use super::json::JsonEncoder;
 
 /// The serialized formats of a Seq-annot of Seq-aligns.
@@ -1085,7 +1085,8 @@ fn write_user_object<E: Encoder>(enc: &mut E, type_str: &[u8], label: &[u8], dat
 ///    	retval->AddUserObject(*blast_db_info);
 /// ```
 /// A `-subject` search has no database name (`n/a`). A `-db` named `n/a` or `SRA` is
-/// refused by the programs (`check_database`), so its title is written.
+/// refused by the programs (`check_database`), so its title is written (a byte that NCBI's
+/// ASN.1 text or binary stream replaces is written as `#` with NCBI's post, `write_query_to`).
 fn write_desc<E: Encoder>(enc: &mut E, run: &RunRecord<'_>) {
     enc.member("desc", 3);
     enc.begin_list(true);
@@ -1113,62 +1114,15 @@ fn write_desc<E: Encoder>(enc: &mut E, run: &RunRecord<'_>) {
     enc.end_member();
 }
 
-/// LOSAT's refusals of a database search (`-db name`, title `title`: NCBI's
-/// `m_DbInfo.front().definition`, `PairwiseDatabase::definition`) for a Seq-annot format,
-/// made before the search:
-/// - a database named `n/a` or `SRA` (compared without case), for which NCBI writes another
-///   third user object (`CreateSeqAnnotFromSeqAlignSet` above);
-/// - for the ASN.1 text, a title with a byte outside 0x20..0x7E, which NCBI's stream
-///   replaces by `#` with an error message on standard error (the default
-///   `eFNP_ReplaceAndWarn`).
-///
-/// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:268-279
-/// ```c++
-/// NCBI_PARAM_ENUM_ARRAY(EFixNonPrint, SERIAL, WRONG_CHARS_WRITE)
-/// {
-///     {"SKIP",               eFNP_Skip},
-///     ...
-/// };
-/// NCBI_PARAM_ENUM_DECL(EFixNonPrint, SERIAL, WRONG_CHARS_WRITE);
-/// NCBI_PARAM_ENUM_DEF(EFixNonPrint, SERIAL, WRONG_CHARS_WRITE, eFNP_ReplaceAndWarn);
-/// ```
-/// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1855-1871
-/// ```c++
-/// char ReplaceVisibleChar(char c, EFixNonPrint fix_method,
-///     const CObjectStack* io, const CTempString& str, char subst)
-/// {
-///     ...
-///     if ( fix_method != eFNP_Replace ) {
-///         string message;
-///         if (io != NULL) {
-///             message += io->GetStackTrace() + "\n";
-///         }
-///         message += "Bad char [0x" +
-///                    NStr::NumericToString((unsigned char)c,0,16)+
-///                    "] in string";
-/// ```
-pub fn check_database(
-    format: SerialFormat,
-    name: &str,
-    title: &[u8],
-    program: Program,
-) -> anyhow::Result<()> {
-    let number = match format {
-        SerialFormat::AsnText => 8,
-        SerialFormat::AsnBinary => 9,
-        SerialFormat::Json => 12,
-    };
+/// LOSAT's refusal of a database search (`-db name`) for a Seq-annot format, made before the
+/// search: a database named `n/a` or `SRA` (compared without case), for which NCBI writes another
+/// third user object (`CreateSeqAnnotFromSeqAlignSet` above). The title of any other database is
+/// written as NCBI writes it, also with a byte that NCBI's stream replaces (`write_query_to`).
+pub fn check_database(format: SerialFormat, name: &str, program: Program) -> anyhow::Result<()> {
     if name.eq_ignore_ascii_case("n/a") || name.eq_ignore_ascii_case("SRA") {
         anyhow::bail!(
-            "a database named \"{name}\" (which NCBI BLAST+ describes as no database or as SRA in output format {number}) is not supported by LOSAT's {}",
-            program.name()
-        );
-    }
-    if matches!(format, SerialFormat::AsnText | SerialFormat::AsnBinary)
-        && title.iter().any(|byte| !(0x20..=0x7e).contains(byte))
-    {
-        anyhow::bail!(
-            "a database title with a character outside the visible ASCII range (which NCBI BLAST+ replaces by '#' with an error message in output format {number}) is not supported by LOSAT's {}",
+            "a database named \"{name}\" (which NCBI BLAST+ describes as no database or as SRA in output format {}) is not supported by LOSAT's {}",
+            format.outfmt(),
             program.name()
         );
     }
@@ -2563,7 +2517,23 @@ pub fn write_query(
 }
 
 /// Writes the document of one query to `writer` through `buf`, which is cleared first: what
-/// `write_query` makes, or nothing when the query has no Seq-align.
+/// `write_query` makes, or nothing when the query has no Seq-align. A document with a string byte
+/// that NCBI's ASN.1 text or binary stream writes as `#` with an error message (the default
+/// `eFNP_ReplaceAndWarn`: a database title, a `-parse_deflines` local id with DEL, ...) is
+/// written again through `Traced` (`write_query_posting`), with NCBI's posts of those bytes on
+/// `diagnostics`; a document without one is written as before.
+///
+/// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:268-279
+/// ```c++
+/// NCBI_PARAM_ENUM_ARRAY(EFixNonPrint, SERIAL, WRONG_CHARS_WRITE)
+/// {
+///     {"SKIP",               eFNP_Skip},
+///     ...
+/// };
+/// NCBI_PARAM_ENUM_DECL(EFixNonPrint, SERIAL, WRONG_CHARS_WRITE);
+/// NCBI_PARAM_ENUM_DEF(EFixNonPrint, SERIAL, WRONG_CHARS_WRITE, eFNP_ReplaceAndWarn);
+/// ```
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn write_query_to(
     format: SerialFormat,
     run: &RunRecord<'_>,
@@ -2572,25 +2542,146 @@ pub(crate) fn write_query_to(
     hsps: &[HspRecord<'_>],
     buf: &mut Vec<u8>,
     writer: &mut dyn Write,
+    diagnostics: &mut dyn Write,
 ) -> anyhow::Result<()> {
     buf.clear();
-    if write_query(format, run, query, subjects, hsps, buf)? {
-        writer.write_all(buf)?;
+    match write_query(format, run, query, subjects, hsps, buf) {
+        Ok(true) => writer.write_all(buf)?,
+        Ok(false) => {}
+        Err(SeqAlignError::Serial(SerialError::NonVisibleChar(byte))) => {
+            let document = QueryDocument {
+                run,
+                query,
+                subjects,
+                hsps,
+            };
+            write_query_posting(format, byte, &document, buf, writer, diagnostics)?;
+        }
+        Err(error) => return Err(error.into()),
     }
     Ok(())
 }
 
+/// The records of one query's Seq-annot.
+struct QueryDocument<'r, 'a> {
+    run: &'r RunRecord<'a>,
+    query: &'r QueryRecord<'a>,
+    subjects: &'r [SubjectRecord<'a>],
+    hsps: &'r [HspRecord<'a>],
+}
+
+/// `write_query_to` of a document that the plain encoder of `format` stopped on (the byte `byte`,
+/// `NonVisibleChar`): written again through `Traced` into `buf`, and handed to `writer` with
+/// NCBI's post of each replaced byte (`ReplacedChar::post` with the application's prefix,
+/// `options::RequestKind::application`, the one table of the applications' names) on
+/// `diagnostics` where NCBI posts it: after the bytes of the document
+/// that NCBI's buffer (`COStreamBuffer`, `out_buffer`) had written to its output by then, the
+/// output flushed (`cerr` is tied to `cout`; `Traced::flush_to`). NCBI writes each query's
+/// Seq-annot with an object stream of its own (`m_Outfile << MSerial_AsnText << *annot`, quoted at
+/// the module), so the positions (`line N`, `byte N`) and the buffer start again with each query's
+/// document. The JSON stream escapes such a byte (objostrjson.cpp:731-760), so its encoder never
+/// stops on one.
+///
+/// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:413-444
+/// ```c++
+/// void CObjectOStreamAsn::WriteString(const char* ptr, size_t length)
+/// {
+///     m_Output.PutChar('"');
+///     CTempString original(ptr, length);
+///     size_t valid=0;
+///     while ( length > 0 ) {
+///         char c = *ptr;
+///         if ( x_FixCharsMethod() != eFNP_Allow ) {
+///             if ( !GoodVisibleChar(c) ) {
+///                 if (valid == 0) {
+/// #if SERIAL_ALLOW_UTF8_IN_VISIBLESTRING_ON_WRITING
+///                     valid = CUtf8::EvaluateSymbolLength(CTempString(ptr,length));
+/// #endif
+///                     if (valid == 0) {
+///                         c = ReplaceVisibleChar(c, x_FixCharsMethod(), this, original, x_FixCharsSubst());
+///                     }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:843-861
+/// ```c++
+///     if ( type == eStringTypeVisible && x_FixCharsMethod() != eFNP_Allow ) {
+///         size_t done = 0;
+///         for ( size_t i = 0; i < length; ++i ) {
+///             char c = str[i];
+///             if ( !GoodVisibleChar(c) ) {
+///                 ...
+///                 if ( i > done ) {
+///                     WriteBytes(str.data() + done, i - done);
+///                 }
+///                 c = ReplaceVisibleChar(c, x_FixCharsMethod(), this, str, x_FixCharsSubst());
+///                 if (c != 0) {
+///                     WriteByte(c);
+///                 }
+/// ```
+#[cold]
+#[inline(never)]
+fn write_query_posting(
+    format: SerialFormat,
+    byte: u8,
+    document: &QueryDocument<'_, '_>,
+    buf: &mut Vec<u8>,
+    writer: &mut dyn Write,
+    diagnostics: &mut dyn Write,
+) -> anyhow::Result<()> {
+    buf.clear();
+    let prefix =
+        crate::report::archive::options::RequestKind::from(document.run.program).application();
+    let post = |replaced: &ReplacedChar| {
+        diagnostics.write_all(&replaced.post(Some(prefix)))?;
+        diagnostics.flush()
+    };
+    match format {
+        SerialFormat::AsnText => write_traced(
+            Traced::new(AsnTextEncoder::new(buf), 0).posting(post),
+            document,
+            writer,
+        ),
+        SerialFormat::AsnBinary => write_traced(
+            Traced::new(AsnBinaryEncoder::new(buf), 0).posting(post),
+            document,
+            writer,
+        ),
+        SerialFormat::Json => Err(SeqAlignError::Serial(SerialError::NonVisibleChar(byte)).into()),
+    }
+}
+
+/// The document written through `enc` (`Traced` with its post function) and handed to `writer`
+/// with the posts; nothing on an error of the encoder.
+fn write_traced<E: Encoder>(
+    mut enc: E,
+    document: &QueryDocument<'_, '_>,
+    writer: &mut dyn Write,
+) -> anyhow::Result<()> {
+    write_seq_annot(
+        &mut enc,
+        document.run,
+        document.query,
+        document.subjects,
+        document.hsps,
+    );
+    if let Some(error) = enc.error() {
+        return Err(SeqAlignError::Serial(error).into());
+    }
+    enc.flush_to(writer, true)?;
+    Ok(())
+}
+
 /// Writes the documents of every query of `hit_lists` (indexed by query) to `writer`, each
-/// query's warnings before it. `records` fills the subject and HSP records of the hit list of
-/// query `q_idx` (replacing their contents) for `write_query_to`; a query without a hit list
-/// writes nothing but its warnings.
+/// query's warnings before it and NCBI's posts of the bytes that its stream replaces in the query's
+/// document after them (`write_query_to`, on the warnings' sink). `records` fills the subject and
+/// HSP records of the hit list of query `q_idx` (replacing their contents) for `write_query_to`; a
+/// query without a hit list writes nothing but its warnings.
 pub(crate) fn write_hit_list_seqaligns<'a, L>(
     format: SerialFormat,
     run: &RunRecord<'_>,
     hit_lists: &'a [Option<L>],
     queries: &QueryNames<'_>,
     writer: &mut dyn Write,
-    mut warnings: Option<&mut QueryWarnings<'_>>,
+    warnings: &mut QueryWarnings<'_>,
     mut records: impl FnMut(usize, &'a L, &mut Vec<SubjectRecord<'a>>, &mut Vec<HspRecord<'a>>),
 ) -> anyhow::Result<()> {
     let mut subject_records: Vec<SubjectRecord<'a>> = Vec::new();
@@ -2598,9 +2689,7 @@ pub(crate) fn write_hit_list_seqaligns<'a, L>(
     let mut buf: Vec<u8> = Vec::new();
     for (q_idx, hit_list) in hit_lists.iter().enumerate() {
         // The query's warnings come before its document (`QueryWarnings`).
-        if let Some(warnings) = warnings.as_deref_mut() {
-            warnings.before_query(q_idx, &mut *writer)?;
-        }
+        warnings.before_query(q_idx, &mut *writer)?;
         let Some(hit_list) = hit_list else {
             continue;
         };
@@ -2613,6 +2702,7 @@ pub(crate) fn write_hit_list_seqaligns<'a, L>(
             &hsp_records,
             &mut buf,
             &mut *writer,
+            &mut *warnings.sink,
         )?;
     }
     Ok(())

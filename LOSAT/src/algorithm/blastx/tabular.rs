@@ -691,6 +691,8 @@ pub(super) fn write_blastx_tabular(
                                 q_frame: mapped.q_frame,
                                 s_frame: 0,
                                 rows: Some(mapped.rows()).filter(|_| counts_by_fields),
+                                // BLASTX has no Smith-Waterman alignment (`TabularHsp::end_gaps`).
+                                end_gaps: false,
                                 qcovhsp: query_coverage_per_hsp(
                                     options.gapped,
                                     shown_count,
@@ -719,6 +721,7 @@ pub(super) fn write_blastx_tabular(
                                 q_frame: 0,
                                 s_frame: 0,
                                 rows: None,
+                                end_gaps: false,
                                 qcovhsp: -1,
                             };
                             catch_ids = AlignQueryIds::of(query);
@@ -761,6 +764,7 @@ pub(super) fn write_blastx_tabular(
                                 q_frame: i32::from(a.frame),
                                 s_frame: 0,
                                 rows,
+                                end_gaps: false,
                                 qcovhsp: query_coverage_per_hsp(
                                     options.gapped,
                                     shown_count,

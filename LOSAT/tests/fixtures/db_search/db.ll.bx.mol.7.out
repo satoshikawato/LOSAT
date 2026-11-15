@@ -1,0 +1,17 @@
+# BLASTX 2.17.0+
+# Query: qn1 query protein one, back-translated
+# Database: tests/db_search/ids/prot_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+qn1	long1	96.667	60	2	0	1	180	1	60	1.04e-41	121
+# BLASTX 2.17.0+
+# Query: qn2 unrelated protein, back-translated
+# Database: tests/db_search/ids/prot_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+qn2	long1	57.143	7	3	0	97	117	35	41	1.7	12.7
+# BLASTX 2.17.0+
+# Query: qnnone no hits
+# Database: tests/db_search/ids/prot_v5
+# 0 hits found
+# BLAST processed 3 queries

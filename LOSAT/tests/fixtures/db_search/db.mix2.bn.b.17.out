@@ -1,0 +1,4 @@
+@HD	VN:1.2	SO:coordinate	GO:reference
+@SQ	SN:Query_1	LN:1043
+@PG	ID:0	VN:2.17.0+	CL:/home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastn -db tests/db_search/multidb/na tests/db_search/multidb/nnp -query tests/db_search/multidb/mix2_q.fna -evalue 1e-10 -outfmt 17 -num_threads 1 	PN:blastn
+BL_ORD_ID:13	0	Query_1	1	255	1043M	*	0	0	*	*	AS:i:1043	EV:f:0	NM:i:0	PI:f:100.00	BS:f:1927.18

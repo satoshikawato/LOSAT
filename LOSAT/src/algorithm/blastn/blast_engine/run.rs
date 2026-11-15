@@ -10702,41 +10702,12 @@ fn run_in_pool(
                 return Err(error);
             }
         }
-        // The taxonomy database's messages of each query's own fetches, where the batch's
-        // prefetch is off (below), by query of the batch.
-        let mut query_fetches: Vec<Vec<u8>> = Vec::new();
-        if let SubjectSource::Database(database) = source {
-            let hitlist_size = args.report_counts.hitlist_size;
-            for (q_idx, hit_list) in batch_hit_lists.iter_mut().enumerate() {
-                if let Some(hit_list) = hit_list {
-                    finish_query_hit_list(
-                        hit_list,
-                        lengths[start + q_idx],
-                        hitlist_size,
-                        args.max_hsps_per_subject.unwrap_or(0),
-                        args.qcov_hsp_perc.unwrap_or(0.0),
-                        args.subject_besthit,
-                        args.culling_limit_value(),
-                        args.ungapped,
-                    );
-                }
-            }
-            if let Err(error) = database::read_titles(database, &batch_hit_lists, &mut titles) {
-                let error = match error.downcast::<database::HeaderReadError>() {
-                    Ok(failure) => failure.error,
-                    // LOSAT's refusal: the warnings of the batches read so far, as for the
-                    // other errors of a batch (below).
-                    // EXPERIMENT (LOSAT_X_RPTSTREAM): those of the batches before were
-                    // written with their reports, which the refusal follows (`x_rpt_stream`);
-                    // the off path writes no report here.
-                    Err(error) => {
-                        let written = if stream.acting() { start } else { 0 };
-                        for query_warnings in &warnings[written..=start] {
-                            query_warnings.write(&mut *outputs.diagnostics, archive)?;
-                        }
-                        return Err(error);
-                    }
-                };
+        // NCBI fails a batch where it reads a header file that it cannot read (`read_titles`)
+        // or where its prefetch looks up a Seq-align id whose lookup fails on a file
+        // (`database::batch_prefetch`), after the prologs, the reports of the batches before
+        // (without the epilog) and the batch's reader messages: `error` is NCBI's.
+        macro_rules! fail_batch {
+            ($error:expr) => {{
                 // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were
                 // written when the loop took them.
                 let before = |outputs: &mut ReportOutputs<'_>| {
@@ -10772,7 +10743,45 @@ fn run_in_pool(
                     before(outputs)?;
                 }
                 warnings[start].write(&mut *outputs.diagnostics, archive)?;
-                return Err(error);
+                return Err($error);
+            }};
+        }
+        // The taxonomy database's messages of each query's own fetches, where the batch's
+        // prefetch is off (below), by query of the batch.
+        let mut query_fetches: Vec<Vec<u8>> = Vec::new();
+        if let SubjectSource::Database(database) = source {
+            let hitlist_size = args.report_counts.hitlist_size;
+            for (q_idx, hit_list) in batch_hit_lists.iter_mut().enumerate() {
+                if let Some(hit_list) = hit_list {
+                    finish_query_hit_list(
+                        hit_list,
+                        lengths[start + q_idx],
+                        hitlist_size,
+                        args.max_hsps_per_subject.unwrap_or(0),
+                        args.qcov_hsp_perc.unwrap_or(0.0),
+                        args.subject_besthit,
+                        args.culling_limit_value(),
+                        args.ungapped,
+                    );
+                }
+            }
+            if let Err(error) = database::read_titles(database, &batch_hit_lists, &mut titles) {
+                let error = match error.downcast::<database::HeaderReadError>() {
+                    Ok(failure) => failure.error,
+                    // LOSAT's refusal: the warnings of the batches read so far, as for the
+                    // other errors of a batch (below).
+                    // EXPERIMENT (LOSAT_X_RPTSTREAM): those of the batches before were
+                    // written with their reports, which the refusal follows (`x_rpt_stream`);
+                    // the off path writes no report here.
+                    Err(error) => {
+                        let written = if stream.acting() { start } else { 0 };
+                        for query_warnings in &warnings[written..=start] {
+                            query_warnings.write(&mut *outputs.diagnostics, archive)?;
+                        }
+                        return Err(error);
+                    }
+                };
+                fail_batch!(error);
             }
         }
         // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:304-309
@@ -10883,7 +10892,7 @@ fn run_in_pool(
             // after those messages (`BlastnDatabase::batch_prefetch`), with or without
             // `taxdb.bti`.
             let taxdb_found = database.taxdb_found();
-            if output_formats
+            let prefetch = if output_formats
                 .first()
                 .is_some_and(|format| format.prefetches_subjects())
                 && (taxdb_found || database.parsed_seqids())
@@ -10995,21 +11004,46 @@ fn run_in_pool(
                     rows_open(&batch_hit_lists).map(|()| Vec::new())
                 } else {
                     database
-                        .batch_prefetch(&titles, &batch_hit_lists, !args.ungapped)
+                        .batch_prefetch(&titles, &batch_hit_lists, !args.ungapped, start)
                         .and_then(|messages| {
                             rows_open(&batch_hit_lists)?;
                             Ok(messages)
                         })
                 };
-                match prefetch {
-                    Ok(messages) => warnings[start].lines(&messages),
-                    Err(error) => {
-                        let written = if stream.acting() { start } else { 0 };
-                        for query_warnings in &warnings[written..=start] {
-                            query_warnings.write(&mut *outputs.diagnostics, archive)?;
-                        }
-                        return Err(error);
+                Some(prefetch)
+            } else if output_formats
+                .first()
+                .is_some_and(|format| format.xml2_kind().is_some())
+                && database.parsed_seqids()
+            {
+                // The XML2 and JSON formats write the taxonomy texts at each `Hit`: of the
+                // batch's prefetch (where it is on and loads a sequence) only its stop
+                // (`BlastnDatabase::batch_prefetch_stop`).
+                let seq_aligns = database::seq_aligns_of(&batch_hit_lists, !args.ungapped);
+                (seq_aligns > 0 && !crate::algorithm::common::database::prefetch_off(seq_aligns))
+                    .then(|| {
+                        database
+                            .batch_prefetch_stop(&titles, &batch_hit_lists, !args.ungapped, start)
+                            .map(|()| Vec::new())
+                    })
+            } else {
+                None
+            };
+            match prefetch {
+                None => {}
+                Some(Ok(messages)) => warnings[start].lines(&messages),
+                Some(Err(error)) if error.is::<database::HeaderReadError>() => {
+                    let failure = error
+                        .downcast::<database::HeaderReadError>()
+                        .expect("the error was checked to be a HeaderReadError");
+                    fail_batch!(failure.error);
+                }
+                Some(Err(error)) => {
+                    let written = if stream.acting() { start } else { 0 };
+                    for query_warnings in &warnings[written..=start] {
+                        query_warnings.write(&mut *outputs.diagnostics, archive)?;
                     }
+                    return Err(error);
                 }
             }
         }

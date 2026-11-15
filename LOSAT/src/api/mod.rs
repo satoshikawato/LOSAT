@@ -118,9 +118,12 @@
 //!   (`-num_iterations`) and the formats it writes: the reports hold every round as the command
 //!   line writes them, each HSP record its round ([`HspRecord::round`]) and each query the
 //!   statistics of each round and whether its rounds converged ([`QueryRounds`],
-//!   [`QueryHits::rounds`]). The API writes no PSSM file, so it refuses `-out_pssm`,
-//!   `-out_ascii_pssm`, `-save_pssm_after_last_round`, `-save_each_pssm` and `-in_pssm`
-//!   ([`validate`]).
+//!   [`QueryHits::rounds`]). Its PSSM files (`-out_pssm`, `-out_ascii_pssm`, with
+//!   `-save_pssm_after_last_round` and `-save_each_pssm`) are written where the command line
+//!   writes them, with the argv's names: `-save_each_pssm` numbers them over the call, and over
+//!   the batches of [`run_batches`] as over the command line's run; a call of [`run`](run()) or
+//!   [`run_collect`] whose formats take two searches and that writes them is refused. The queries
+//!   are records, so `-in_pssm` (psiblast's and tblastn's) is refused ([`validate`]).
 //! - The API writes no search strategy file either: every program refuses
 //!   `-export_search_strategy` ([`validate`]); the command line writes it.
 //! - [`run_makeblastdb`] and [`run_blastdbcmd`] are the two database programs, and

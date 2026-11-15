@@ -305,7 +305,9 @@ tblastn spread their stages over files (blastx `preliminary.rs`, `traceback.rs`,
   block, or once per query and round of psiblast. Its
   `process_subject` does the preliminary search; the traceback, the composition redo and the report
   follow in the same function (the warning lines of the queries, the checks and the prefetch of the
-  reported subjects and the refusals before any format is written are in `blast_engine/report_prep.rs`).
+  reported subjects and the refusals before any format is written are in `blast_engine/report_prep.rs`;
+  the BLAST archive, the tabular reports and the organism report are in
+  `blast_engine/report_write.rs`).
 - **Long queries.** Both re-enter their batch function for NCBI's query chunks (`SplitQuery_GetChunkSize`,
   `CQuerySplitter`): blastn through `search_query_chunks`, blastp through
   `search_split_query_batches`. Only the preliminary stage runs per chunk; the chunks' hit lists are

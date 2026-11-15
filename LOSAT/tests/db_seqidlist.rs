@@ -113,10 +113,11 @@ fn a_list_file_off_the_search_path_is_ncbis_memory_map_error() {
 
 /// A list naming the PDB molecule `3ABC` selects the OID of `lcl|Subject_29|pdb|3ABC|C` of
 /// `ids/prot_v5` through the lookup table but matches none of its definition lines (NCBI's
-/// `FindId` asks for `3ABC_C`): NCBI counts the sequence and leaves its hits out of every
-/// report; LOSAT refuses the search before it (DECISIONS 17).
+/// `FindId` asks for `3ABC_C`): NCBI searches the sequence and counts it, and makes no Seq-align
+/// of its hits, which leave every report without a word (line DBID item lineless; DI-8
+/// DECISIONS 17 had refused the list). LOSAT writes the rows of the other listed sequence only.
 #[test]
-fn a_list_that_keeps_a_sequence_without_a_definition_line_is_refused() {
+fn a_list_that_keeps_a_sequence_without_a_definition_line_reports_the_others() {
     let dir = std::env::temp_dir().join(format!("losat-di8b-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     let list = dir.join("mol.txt");
@@ -129,13 +130,12 @@ fn a_list_that_keeps_a_sequence_without_a_definition_line_is_refused() {
     );
     fs::remove_dir_all(&dir).ok();
     let err = String::from_utf8_lossy(&err);
-    assert_eq!(rc, 1, "{err}");
-    assert!(out.is_empty());
-    assert!(
-        err.contains("but none of its definition lines, and NCBI leaves its hits out of the report without notice")
-            && err.contains("this database is not supported by LOSAT's BLASTP"),
-        "{err}"
-    );
+    assert_eq!(rc, 0, "{err}");
+    let out = String::from_utf8_lossy(&out);
+    assert!(!out.is_empty() && !err.contains("LOSAT"), "{err}");
+    for row in out.lines() {
+        assert_eq!(row.split('\t').nth(1), Some("DAA10001.1"), "{row}");
+    }
 }
 
 /// The programs with their taxonomy fixtures.

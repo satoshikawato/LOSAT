@@ -1611,6 +1611,20 @@ pub(super) fn x_tb_range_print_summary() {
 /// sequence with parsed Seq-ids.
 pub(super) type DatabaseTitles = BTreeMap<u32, ReportedHeader>;
 
+/// The final hit lists `hit_lists` of a query batch without the sequences that NCBI makes no
+/// Seq-align of (`shared::SeqAligned`): after their cut to the hit list size, before
+/// `read_titles`.
+pub(super) fn drop_unaligned(database: &BlastnDatabase, hit_lists: &mut [Option<BlastnHitList>]) {
+    let Some(mut aligned) = shared::SeqAligned::of(&database.db) else {
+        return;
+    };
+    for hit_list in hit_lists.iter_mut().flatten() {
+        hit_list.hsplist_array.truncate(hit_list.hsplist_count);
+        aligned.retain(&mut hit_list.hsplist_array, |list| Some(list.oid));
+        hit_list.hsplist_count = hit_list.hsplist_array.len();
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:264-275
 // ```c++
 //     CRef<ILocalQueryData> qdata = m_QueryFactory->MakeLocalQueryData(m_Options);

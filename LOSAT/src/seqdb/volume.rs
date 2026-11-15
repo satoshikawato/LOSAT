@@ -756,23 +756,32 @@ impl Volume {
             .ok_or_else(|| self.no_line_kept(oid))
     }
 
-    /// LOSAT's check before the search that the volume's rule keeps a line of the sequence `oid`
-    /// (volume-relative; `SeqDb::check_lines_kept`): `no_line_kept` where a seqid rule keeps
-    /// none. A tag that NCBI's read cannot adjust passes here: NCBI reads the header only for a
-    /// sequence it reports, and LOSAT's read for the report then gives the error.
-    pub(super) fn check_line_kept(&self, oid: u32) -> Result<(), SeqDbError> {
-        let Some(line_rule) = &self.defline_rule else {
-            return Ok(());
+    /// Whether the volume's rule is a positive seqid list's (`SeqDb::drops_lineless_hits`).
+    pub(super) fn has_positive_seqid_rule(&self) -> bool {
+        self.defline_rule.as_ref().is_some_and(|line_rule| {
+            matches!(*line_rule.rule, super::filter::DeflineRule::Seqids(_))
+        })
+    }
+
+    /// Whether the volume's rule keeps a line of the sequence `oid` (volume-relative;
+    /// `SeqDb::keeps_line`): false only where a seqid rule keeps none; the reader's error for a
+    /// tag that NCBI's read cannot adjust (NCBI's `GetSeqIDs` of the Seq-align throws there).
+    pub(super) fn keeps_line(&self, oid: u32) -> Result<bool, SeqDbError> {
+        let Some(line_rule) = self
+            .defline_rule
+            .as_ref()
+            .filter(|line_rule| line_rule.rule.reads_seqids())
+        else {
+            return Ok(true);
         };
         let record = self.header_bytes(oid)?;
         let set = decode_full(
             &record,
             &with_extension(&self.base, self.index.seqtype, "hr"),
         )?;
-        match Self::rule_mask(line_rule, &set) {
-            Ok(None) => Err(self.no_line_kept(oid)),
-            Ok(Some(_)) | Err(_) => Ok(()),
-        }
+        Self::rule_mask(line_rule, &set)
+            .map(|mask| mask.is_some())
+            .map_err(|error| error.error(&self.base, line_rule.volume_start + oid))
     }
 
     /// `decoded`, the definition lines of `record` (one sequence's header), without those

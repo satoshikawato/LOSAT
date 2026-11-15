@@ -564,7 +564,9 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         // they read.
         let x_lv_ref = diag_hash.x_lv_on()
             && !(debug_enabled || blastn_trace_enabled || debug_window.is_some());
-        if diag_hash.x_lv_on() {
+        // The sides are recorded only when LOSAT_X_REACH is set (`xreach::recording`, one test for
+        // the two marks of every chunk).
+        if crate::utils::xreach::recording() && diag_hash.x_lv_on() {
             crate::utils::xreach::x_reach!("LOSAT_X_DIAGLV", use_diag_hash && x_lv_ref);
             // EXPERIMENT (LOSAT_X_DIAGLV2): the reference folds called below
             // (`pair_extend::extend_offset_pairs`, `na_scan::scan_na_lookup`) never read

@@ -101,9 +101,18 @@ pub struct PsiSearch {
     pub(crate) request: Option<PssmQueryRequest>,
     /// The query that a later round of psiblast searches (`blast_engine::psi_round::RoundQuery`):
     /// the letters that the rounds before masked (X), filtered again without the lower-case mask
-    /// that round 1 took; `None` for a query's first round, whose query frame is its record's
+    /// that round 1 took; round 1's query for a query that NCBI splits into chunks
+    /// (`split_setup`); `None` for a query's first round, whose query frame is its record's
     /// (`blast_engine::blastp_query_frames`).
     pub(crate) round_query: Option<crate::algorithm::tblastx::translation::QueryFrame>,
+    /// A later round of a FASTA query that NCBI splits into chunks: the query of the round's
+    /// set-up, whose `kbp_std` the round reads (`blast_engine::pssm_hooks::pssm_lookup`): the
+    /// query that the round before searched, filtered again as `RoundQuery::next` filters it.
+    /// The round's chunks search without the PSSM, and its traceback reads `round_query`, which
+    /// NCBI's preliminary stage makes again from the record after the chunks
+    /// (`blast_engine::psi_round::RoundQuery::split`). `None` otherwise: a query that NCBI does
+    /// not split, and a PSSM query (`-in_pssm`), which NCBI never splits.
+    pub(crate) split_setup: Option<crate::algorithm::tblastx::translation::QueryFrame>,
 }
 
 /// The PSSM of `-in_pssm` as NCBI's application read it (before `CPsiBlastImpl` computes the
@@ -469,6 +478,7 @@ impl PsiSearch {
             warning_title: None,
             request: None,
             round_query: None,
+            split_setup: None,
         }
     }
 }

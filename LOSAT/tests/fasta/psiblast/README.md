@@ -76,3 +76,5 @@ The oracle is NCBI BLAST+ 2.17.0 `psiblast ... -num_threads 1`.
   `q4b_inv.faa`: 20 lower-case letters, then `WCYHWCYHWC`; `q4b_inv_s.faa`: two subjects with `WCYHWCYHWC`. With
   `-lcase_masking -seg yes` round 1 masks the lower case only; round 2's SEG on those X letters masks the island too,
   so round 2 has no Karlin-Altschul parameters (NCBI 2.17.0 psiblast crashes there, exit 139).
+- `q4c_tk_pol.faa` (line RG, series Q, Q4c): `tk.faa` then `pol.faa`; with `CHUNK_SIZE=1000` NCBI splits only the second
+  query (rows `db.ps.it.split.two.*`).

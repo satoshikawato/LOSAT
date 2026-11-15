@@ -36,7 +36,7 @@ run keeps its wheels for 7 days.
 lists them, from the engine's own table, and the type stubs list them by program.
 `Search.from_argv("blastn", ["-evalue", "1e-5"])` takes the words themselves. The command line's
 parser checks every option, so an option means, and fails, as it does there (`ArgumentError`).
-`pylosat.PROGRAMS` names the programs; `psiblast` is its first round, as on the command line.
+`pylosat.PROGRAMS` names the programs; `psiblast` runs its rounds (`num_iterations`) as on the command line.
 
 `-query`, `-subject`, `-db`, `-out` and `-outfmt` are not options here: the inputs and the formats
 are arguments of `run`. Nor are psiblast's `-out_pssm`, `-out_ascii_pssm`, `-save_pssm_after_last_round`
@@ -70,6 +70,11 @@ first: `qaccver saccver pident length mismatch gapopen qstart qend sstart send e
 `hsps[i]` is an `Hsp` with the field names of LOSAT's Rust API (`bit_score`, `e_value`, `q_start`).
 `outcome.queries()` and `QueryHits.subjects()` group the rows by query and by subject. Everything
 that a search returns can be pickled, so a process pool can return it.
+
+psiblast's rounds of each query follow one another in the table, round 1 first: `hsp.round` (the `round` column)
+is the round that found the HSP, 1 in the other searches. `outcome.rounds[q]` holds the statistics of
+each round of query `q` and whether its rounds converged (`Search has CONVERGED!`), and
+`QueryHits.rounds()` gives each round's HSPs with its statistics.
 
 The numbers are the engine's, not rounded. Text to show comes from a report: `report.spans[hsp.index]`
 is the slice of `report.bytes` that holds the row or section of an HSP.

@@ -1,0 +1,1 @@
+- Evidence scripts: the local test servers of `docs/evidence/wasm_browser_guard_20261101` and `docs/evidence/wasm_oob_20261101` serve only files under their `data/` directory; a `../` in a request path could read any file the user could (CodeQL py/path-injection).

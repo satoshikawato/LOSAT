@@ -9,6 +9,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import tarfile
@@ -1122,6 +1123,28 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("node LOSAT/tests/wasi_shared_memory.js guard", workflow)
         self.assertIn("--binary .tmp/release-readiness/threaded-guarded/losat.wasm", workflow)
         self.assertIn("--unguarded-binary LOSAT/target/wasm32-wasip1-threads/release/losat.wasm", workflow)
+
+
+    def test_dispatch_workflows_check_out_the_dispatched_commit(self) -> None:
+        """candidate_sha is an assertion, never a checkout ref (CodeQL actions/cache-poisoning)."""
+        workflows = REPO_ROOT / ".github" / "workflows"
+        for path in sorted(workflows.glob("*.yml")):
+            self.assertNotRegex(
+                path.read_text(encoding="utf-8"),
+                r"(?m)^\s*ref:\s*\$\{\{\s*inputs\.",
+                f"{path.name} checks out an input ref",
+            )
+        message = "::error::candidate_sha is checked, not checked out: dispatch on the branch whose head is the candidate"
+        for name in (
+            "release-readiness-v020.yml",
+            "release-readiness.yml",
+            "platform-native-certification.yml",
+            "wasm-threading.yml",
+        ):
+            workflow = (workflows / name).read_text(encoding="utf-8")
+            checkouts = len(re.findall(r"uses: actions/checkout@", workflow))
+            self.assertGreater(checkouts, 0, name)
+            self.assertEqual(workflow.count(message), checkouts, f"{name}: one check per checkout")
 
 
 if __name__ == "__main__":

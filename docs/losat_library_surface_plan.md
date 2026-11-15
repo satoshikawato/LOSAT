@@ -473,9 +473,11 @@ BLASTX の `-parse_deflines` は `-subject` でも使えるようにした（`bl
 
 ### 13.4 `psiblast`（PR `feature/library-api-psiblast`）
 
-`Program::Psiblast`。LOSAT の `psiblast` は第 1 ラウンド（PSSM の無い検索）で、blastp の engine を使う（`algorithm::psiblast`）。API の `run_local` は `PsiblastArgs::into_blastp_args` のあとで blastp の入口を呼ぶ。形式の拒否は要求された形式ごとに行う（`PsiblastArgs::check_outfmt`、`-num_iterations` の拒否は CLI のまま）。バッチは 1 query ずつ（`psiblast_app.cpp:468`）。
+`Program::Psiblast`。LOSAT の `psiblast` は第 1 ラウンド（PSSM の無い検索）で、blastp の engine を使う（`algorithm::psiblast`）。API の `run_local` は `PsiblastArgs::into_blastp_args` のあとで blastp の入口を呼ぶ。形式の拒否は要求された形式ごとに行う（`PsiblastArgs::check_outfmt`）。`-num_iterations` が 1 以外の round は線 RG の Q5 で開けた（round の driver が round ごとに 1 回の検索を呼び、`FormatObserver::round_begin` と `rounds_converged` を受けた `api::parts` が `HspRecord::round`、`Outcome::rounds`・`Batch::rounds`（`QueryRounds`: round ごとの統計と収束）、`QueryHits::rounds` にする）。バッチは 1 query ずつ（`psiblast_app.cpp:468`）。
 
 検証：`db_search_fixtures.py check --library --program psiblast` の 83 行（64 行が全バイト一致、19 行が拒否の文言）と、`check_losat.py --programs psiblast` の 12 行が全部一致。`library_api.rs` は `-subject` と `-db` の検索を CLI と比べる。
+
+線 RG の Q5 の検証：`library_api.rs` の round の case（`-subject` と `-db`、2 query の batch、`-query_loc` が飛ばす record の後の query）が、round 1 = `-num_iterations 1` の検索、round ごとの統計 = その round の pairwise の報告が印字する値、outfmt 7 の各行がその `# Iteration: N` の下にあることを見る。`db_search_fixtures.py check --library` は round の 242 行（234 行が全バイト一致、8 行が拒否の文言）を n1 と n4 で通す（残りの round の 92 行は PSSM の file の行で `library-skip`）。
 
 線 PS の PS2 で CLI は ASCII の PSSM を、PS3 で ASN.1 の PSSM（`-out_pssm`）を書くようになったが、API は PSSM の file を書かない。`-out_pssm`、`-out_ascii_pssm`、`-save_pssm_after_last_round`、`-save_each_pssm` は `validate` と各検索が通る `search::parse` で断り、`describe` は出さない（1 query ずつの呼び出しでは `-save_each_pssm` の番号が呼び出しごとに戻り、PSSM は API が持つ出力の外の file）。`db_search_fixtures.py check --library` は PSSM の行（`pssm`、`pssm-asn`、`pssm-both` の種類）と、この 4 つを渡す行（NCBI の options error の 2 行など）を、`check_losat.py --library` は PSSM の種類の行を `library-skip` にする。
 

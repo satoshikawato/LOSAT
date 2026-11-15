@@ -16,4 +16,7 @@
   starts with a UTF-8 byte order mark gets NCBI's "Unrecognized format for PSSM". With tblastn `-outfmt 11`, a PSSM
   that NCBI cannot read (`Error: vector::reserve` too) or whose annotations stop NCBI's object manager gets NCBI's
   error archive, each of the reader's and the object manager's messages saved whole with its severity; such a stop
-  is no longer refused in tblastn's formats and in psiblast's `-outfmt 10` and `20`.
+  is no longer refused in tblastn's formats, in psiblast's `-outfmt 10` and `20` and for the query's titles. The
+  library API's PSSM query (`Inputs::pssm`) ends as the command line's run: a PSSM file that NCBI ends without a word
+  gives a call without an error, and an error after the object manager's `Failed to parse location of` message has
+  the command line's text (its line feed).

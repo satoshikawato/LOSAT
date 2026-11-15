@@ -2800,8 +2800,10 @@ fn composition_matrix_adjust(
         pseudocounts,
     );
 
-    let mut x = vec![0.0; COMPO_NUM_TRUE_AA * COMPO_NUM_TRUE_AA];
-    let mut q = vec![0.0; COMPO_NUM_TRUE_AA * COMPO_NUM_TRUE_AA];
+    // No NCBI counterpart: the storage of x and q (NCBI uses its record's matrices); both have the
+    // fixed 20 x 20 size, so they live on the stack instead of two heap blocks per adjusted match.
+    let mut x = [0.0f64; COMPO_NUM_TRUE_AA * COMPO_NUM_TRUE_AA];
+    let mut q = [0.0f64; COMPO_NUM_TRUE_AA * COMPO_NUM_TRUE_AA];
     for i in 0..COMPO_NUM_TRUE_AA {
         for j in 0..COMPO_NUM_TRUE_AA {
             q[i * COMPO_NUM_TRUE_AA + j] = workspace.mat_b[i][j];

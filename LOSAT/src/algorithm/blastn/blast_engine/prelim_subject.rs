@@ -1152,30 +1152,15 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     // ```
     // No NCBI counterpart: the look-ahead's schedule (scheduling only).
     let gapped = prelim_hsp_list::GappedPrelim {
-        blastn_trace_enabled: batch.blastn_trace_enabled,
-        verbose: batch.verbose,
+        batch,
         s_idx,
         s_id,
         x_prelim_subject,
         chunk,
         s_seq_packed,
         s_len,
-        encoded_queries_blastna: batch.encoded_queries_blastna,
-        query_contexts: batch.query_contexts,
-        hit_saving_cutoff_scores: batch.hit_saving_cutoff_scores,
-        reward: batch.reward,
-        penalty: batch.penalty,
-        gap_open: batch.gap_open,
-        gap_extend: batch.gap_extend,
-        score_matrix: batch.score_matrix,
-        use_dp: batch.use_dp,
-        x_drop_gapped: batch.x_drop_gapped,
-        min_diag_separation: batch.min_diag_separation,
         reuse_prelim_hits,
         total_ungapped,
-        x_ahead_window: batch.x_ahead_window,
-        x_greedy_spec: batch.x_greedy_spec,
-        num_threads: batch.num_threads,
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:522-526,545,555
     // ```c
@@ -1197,10 +1182,6 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         &prelim_hsp_list::GappedDrive {
             x_counts: &x_counts,
             x_order: &x_order,
-            queries: batch.queries,
-            query_concat_length: batch.query_concat_length,
-            parallel_pool: batch.parallel_pool,
-            timing_ref: batch.timing_ref,
             gapped_start_time,
         },
         ungapped_hits,

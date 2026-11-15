@@ -172,10 +172,11 @@ impl Csr {
     /// per cell, every discontiguous table's among them, as without the switch.
     #[inline(always)]
     pub(crate) fn x_packed(&self) -> Option<XPacked<'_>> {
-        (!self.x_bits.is_empty()).then_some(XPacked {
+        (!self.x_bits.is_empty()).then(|| XPacked {
             bits: &self.x_bits,
             offsets: &self.offsets,
             qs: &self.qs,
+            pop: XPop::get(),
         })
     }
 
@@ -263,6 +264,8 @@ pub(crate) struct XPacked<'a> {
     bits: &'a [u64],
     offsets: &'a [u32],
     qs: &'a [u32],
+    /// EXPERIMENT (LOSAT_X_BNPOPCNT): the form of the counts of its ranks.
+    pop: XPop,
 }
 
 impl<'a> XPacked<'a> {
@@ -275,7 +278,7 @@ impl<'a> XPacked<'a> {
     /// `Csr::run` of a packed head: an empty cell has no element of it.
     #[inline(always)]
     pub(crate) fn run(self, cell: usize) -> &'a [u32] {
-        match x_rank(self.bits, cell) {
+        match x_rank(self.bits, cell, self.pop) {
             Some(r) => self.run_at(r),
             None => &[],
         }
@@ -315,18 +318,83 @@ impl XHead for XPacked<'_> {
     }
 }
 
+/// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNPOPCNT, in the strict set: on unless it is `0`) how
+/// the packed heads count presence bits (`x_rank`, `x_presence8`, `x_sum_packed`): with x86-64's
+/// `popcnt` instruction where the CPU has it, else with `count_ones`. The default x86-64 target has
+/// no `popcnt`, so there `count_ones` is a dozen instructions; on aarch64 and in Wasm it is the
+/// target's own count. Both forms count the same bits. Read once per table build or scan (`get`)
+/// and carried by value, so the hot loops test a flag in a register.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct XPop(bool);
+
+impl XPop {
+    /// The form of this run: `popcnt` when the switch is on and the CPU has it.
+    #[inline]
+    pub(crate) fn get() -> Self {
+        static ON: OnceLock<bool> = OnceLock::new();
+        XPop(*ON.get_or_init(|| {
+            Self::x_cpu() && crate::utils::xswitch::on("LOSAT_X_BNPOPCNT")
+        }))
+    }
+
+    /// Whether this CPU has the `popcnt` instruction.
+    fn x_cpu() -> bool {
+        #[cfg(target_arch = "x86_64")]
+        {
+            std::arch::is_x86_feature_detected!("popcnt")
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            false
+        }
+    }
+
+    /// Whether the counts use the `popcnt` instruction (`LOSAT_TIMING`'s `x_bn_csr` line).
+    pub(crate) fn x_instruction(self) -> bool {
+        self.0
+    }
+
+    /// The forms this CPU can run (`count_ones`, then `popcnt` if it has it), for the tests.
+    #[cfg(test)]
+    pub(super) fn x_forms() -> Vec<XPop> {
+        let mut forms = vec![XPop(false)];
+        if Self::x_cpu() {
+            forms.push(XPop(true));
+        }
+        forms
+    }
+
+    /// The number of bits set in `w`.
+    #[inline(always)]
+    pub(crate) fn ones(self, w: u64) -> usize {
+        #[cfg(target_arch = "x86_64")]
+        if self.0 {
+            let mut n = w;
+            // SAFETY: `self.0` holds only where the CPU has `popcnt` (`get`, `x_forms`). The
+            // instruction reads and writes one register (the same one: no false dependency on
+            // another register's last writer), no memory and no stack.
+            unsafe {
+                std::arch::asm!("popcnt {n}, {n}", n = inout(reg) n, options(pure, nomem, nostack))
+            };
+            return n as usize;
+        }
+        w.count_ones() as usize
+    }
+}
+
 /// No NCBI counterpart (layout only): EXPERIMENT (LOSAT_X_BNCSRPACK) the element of a packed head
 /// that holds `cell`'s run start (the number of non-empty cells before it), or `None` when the cell
-/// is empty. `bits`: two words per 64 cells, the presence bits and the rank of the first.
+/// is empty. `bits`: two words per 64 cells, the presence bits and the rank of the first. The bits
+/// below the cell's are counted in the form `pop` (LOSAT_X_BNPOPCNT).
 #[inline(always)]
-pub(super) fn x_rank(bits: &[u64], cell: usize) -> Option<usize> {
+pub(super) fn x_rank(bits: &[u64], cell: usize, pop: XPop) -> Option<usize> {
     let j = (cell >> 6) << 1;
     let w = bits[j];
     let m = 1u64 << (cell & 63);
     if w & m == 0 {
         return None;
     }
-    Some(bits[j + 1] as usize + (w & (m - 1)).count_ones() as usize)
+    Some(bits[j + 1] as usize + pop.ones(w & (m - 1)))
 }
 
 /// No NCBI counterpart (layout only): EXPERIMENT (LOSAT_X_BNCSRPACK) the presence bits of 64 cells
@@ -376,15 +444,21 @@ fn x_count_more(more: &mut HashMap<u32, u32>, cell: usize) {
 /// `2 j` gets those of the cells `64 j ..`; returns the number of non-empty cells of the blocks.
 ///
 /// SAFETY: `cnt` holds the blocks' cells and `bits` their words, which no other thread uses
-/// meanwhile.
-pub(super) unsafe fn x_presence8(bits: *mut u64, cnt: *const u8, b0: usize, b1: usize) -> usize {
+/// meanwhile. The bits are counted in the form `pop` (LOSAT_X_BNPOPCNT).
+pub(super) unsafe fn x_presence8(
+    bits: *mut u64,
+    cnt: *const u8,
+    b0: usize,
+    b1: usize,
+    pop: XPop,
+) -> usize {
     let mut n = 0;
     for j in b0..b1 {
         // SAFETY: the caller's; the 64 counts of block `j`.
         let w = x_nonzero_bits(unsafe { &*(cnt.add(j << 6) as *const [u8; 64]) });
         // SAFETY: the caller's.
         unsafe { *bits.add(2 * j) = w };
-        n += w.count_ones() as usize;
+        n += pop.ones(w);
     }
     n
 }
@@ -432,6 +506,7 @@ pub(super) unsafe fn x_rank_counts8(
 /// presence-vector words and counters get what `sum_cells` gives them over the same cells: the
 /// presence bits of each 32 cells OR-ed into word `c >> pv_array_bts` (if it is below `pv_len`),
 /// and each counter `c >> 11` the run's growth over its 2048 cells minus their non-empty cells.
+/// The non-empty cells of a block are counted in the form `xpop` (LOSAT_X_BNPOPCNT).
 ///
 /// SAFETY: as `sum_cells`, for the cells of the blocks and the ranks of their non-empty cells.
 #[inline(always)]
@@ -446,13 +521,14 @@ pub(super) unsafe fn x_sum_packed(
     b0: usize,
     b1: usize,
     pv_array_bts: usize,
+    xpop: XPop,
 ) -> u32 {
     debug_assert!(b0.is_multiple_of(32) && pv_array_bts >= 5);
     let (mut end, mut pop, mut h0) = (base, 0u32, base);
     for j in b0..b1 {
         let w = bits[2 * j];
         let r0 = bits[2 * j + 1] as usize;
-        let k = w.count_ones() as usize;
+        let k = xpop.ones(w);
         for r in r0..r0 + k {
             // SAFETY: rank `r` is of a non-empty cell of the blocks.
             unsafe {
@@ -967,7 +1043,7 @@ impl<T: Copy + Default> XRing<T> for XRingPacked<'_, T> {
     #[inline(always)]
     fn push(&mut self, w: T, cell: impl Fn(&T) -> usize, emit: &mut impl FnMut(T, usize)) -> bool {
         const MASK: usize = RING - 1;
-        let Some(r) = x_rank(self.head.bits, cell(&w)) else {
+        let Some(r) = x_rank(self.head.bits, cell(&w), self.head.pop) else {
             return false;
         };
         let offsets = self.head.offsets;
@@ -1335,42 +1411,79 @@ mod tests {
                 unsafe { x_count8(cnt.as_mut_ptr(), &mut more, cell) };
             }
         }
-        let mut bits = vec![0u64; cells >> 5];
-        let mut starts = vec![0u32; cells];
-        // SAFETY: 64 blocks of 64 cells: `cells` counts, `2 x 64` words, `cells` ranks at most.
-        let (present, r) = unsafe {
-            let present = x_presence8(bits.as_mut_ptr(), cnt.as_ptr(), 0, 32)
-                + x_presence8(bits.as_mut_ptr(), cnt.as_ptr(), 32, 64);
-            let r = x_rank_counts8(
-                bits.as_mut_ptr(),
-                cnt.as_ptr(),
-                &more,
-                starts.as_mut_ptr(),
-                0,
-                32,
-                0,
-            );
-            let r = x_rank_counts8(
-                bits.as_mut_ptr(),
-                cnt.as_ptr(),
-                &more,
-                starts.as_mut_ptr(),
-                32,
-                64,
-                r,
-            );
-            (present, r)
-        };
-        assert_eq!(present, want.iter().filter(|&&w| w > 0).count());
-        assert_eq!(r, present);
-        let mut rank = 0usize;
-        for (cell, &w) in want.iter().enumerate() {
-            if w == 0 {
-                assert_eq!(x_rank(&bits, cell), None, "cell {cell}");
-            } else {
-                assert_eq!(x_rank(&bits, cell), Some(rank), "cell {cell}");
-                assert_eq!(starts[rank], w, "cell {cell}");
-                rank += 1;
+        // LOSAT_X_BNPOPCNT: in each form this CPU runs.
+        for pop in XPop::x_forms() {
+            let mut bits = vec![0u64; cells >> 5];
+            let mut starts = vec![0u32; cells];
+            // SAFETY: 64 blocks of 64 cells: `cells` counts, `2 x 64` words, `cells` ranks at most.
+            let (present, r) = unsafe {
+                let present = x_presence8(bits.as_mut_ptr(), cnt.as_ptr(), 0, 32, pop)
+                    + x_presence8(bits.as_mut_ptr(), cnt.as_ptr(), 32, 64, pop);
+                let r = x_rank_counts8(
+                    bits.as_mut_ptr(),
+                    cnt.as_ptr(),
+                    &more,
+                    starts.as_mut_ptr(),
+                    0,
+                    32,
+                    0,
+                );
+                let r = x_rank_counts8(
+                    bits.as_mut_ptr(),
+                    cnt.as_ptr(),
+                    &more,
+                    starts.as_mut_ptr(),
+                    32,
+                    64,
+                    r,
+                );
+                (present, r)
+            };
+            assert_eq!(present, want.iter().filter(|&&w| w > 0).count());
+            assert_eq!(r, present);
+            let mut rank = 0usize;
+            for (cell, &w) in want.iter().enumerate() {
+                if w == 0 {
+                    assert_eq!(x_rank(&bits, cell, pop), None, "cell {cell} {pop:?}");
+                } else {
+                    assert_eq!(x_rank(&bits, cell, pop), Some(rank), "cell {cell} {pop:?}");
+                    assert_eq!(starts[rank], w, "cell {cell} {pop:?}");
+                    rank += 1;
+                }
+            }
+        }
+    }
+
+    // LOSAT_X_BNPOPCNT: both forms count the same bits of random and edge words, and rank every
+    // cell of random presence bits alike (the `popcnt` form where this CPU has it).
+    #[test]
+    fn both_counts_give_the_same_ranks() {
+        let forms = XPop::x_forms();
+        let mut x = 0x2545_F491_4F6C_DD1Du64;
+        let mut words = vec![0u64, 1, u64::MAX, 1 << 63, u64::MAX >> 1, 0x5555_5555_5555_5555];
+        for _ in 0..10_000 {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            words.push(x);
+            words.push(x & (x >> 3) & (x >> 5));
+        }
+        for &w in &words {
+            for &pop in &forms {
+                assert_eq!(pop.ones(w), w.count_ones() as usize, "{w:#x} {pop:?}");
+            }
+        }
+        let mut bits = Vec::new();
+        let mut before = 0u64;
+        for &w in &words[..2048] {
+            bits.push(w);
+            bits.push(before);
+            before += u64::from(w.count_ones());
+        }
+        for cell in 0..(bits.len() / 2) * 64 {
+            let want = x_rank(&bits, cell, XPop(false));
+            for &pop in &forms {
+                assert_eq!(x_rank(&bits, cell, pop), want, "cell {cell} {pop:?}");
             }
         }
     }

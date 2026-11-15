@@ -1446,8 +1446,10 @@ fn csr_on_pool(
     // below run on the counts of its ranks instead of its cells.
     if super::x_bn_csr::x_packed(words.ascending_cells) {
         use super::x_dc_csr::{
-            x_assemble_packed, x_count8, x_presence8, x_rank, x_rank_counts8, x_sum_packed,
+            x_assemble_packed, x_count8, x_presence8, x_rank, x_rank_counts8, x_sum_packed, XPop,
         };
+        // EXPERIMENT (LOSAT_X_BNPOPCNT): the form of the bit counts, read once per build.
+        let pop = XPop::get();
         let blocks = cells >> 6;
         let mut bits = vec![0u64; 2 * blocks];
         // The non-empty cells are at most the cells and the words (bounded by the positions).
@@ -1532,7 +1534,7 @@ fn csr_on_pool(
                     }
                     bar.wait();
                 }
-                let mine = x_presence8(bb.ptr, cb.ptr, b0, b1);
+                let mine = x_presence8(bb.ptr, cb.ptr, b0, b1, pop);
                 own_p.set(o, mine as u64);
                 bar.wait();
                 let p0: u64 = (0..o).map(|p| own_p.get(p)).sum();
@@ -1542,7 +1544,8 @@ fn csr_on_pool(
                 bar.wait();
                 let bits_r: &[u64] = std::slice::from_raw_parts(bb.ptr as *const u64, bb.len);
                 let rank = |cell: u32| {
-                    x_rank(bits_r, cell as usize).expect("BNCSRPACK: a word of an empty cell")
+                    x_rank(bits_r, cell as usize, pop)
+                        .expect("BNCSRPACK: a word of an empty cell")
                 };
                 let base: u64 = (0..o).map(|p| own_w.get(p)).sum();
                 if c0 < c1 {
@@ -1556,6 +1559,7 @@ fn csr_on_pool(
                         b0,
                         b1,
                         pv_array_bts,
+                        pop,
                     );
                 }
                 for c in 0..chunks {

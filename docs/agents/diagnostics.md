@@ -1021,10 +1021,8 @@ Same values, faster computation:
   query repeat the whole query's segments: 51 % of the trim work). TBLASTX d04 would repeat 2 %, and
   the other maskers keep no table. Until 2026-11-15 a thread kept at most 32,768 segments and 1 MiB
   of letters (table up to 768 KiB), then cleared the table; segments over 127 letters are not kept
-  (line C, v4-C DECISIONS 31-34). Since 2026-11-15 all threads share one memo of 16 tables chosen by
-  the segment's hash, each behind its own lock and cleared at 4,096 segments or 128 KiB of letters
-  (65,536 segments and 2 MiB for all), so a segment one thread trimmed is not trimmed again by
-  another (line EB s23).
+  (line C, v4-C DECISIONS 31-34). Since 2026-11-15 all threads share one table behind one lock, with
+  the same bounds, so a segment one thread trimmed is not trimmed again by another (line EB s23).
   Workstation, one core or eight, 8 rounds (2026-10-19): TBLASTN AP027131 x AP027133 n1 0.924 of
   the time (pairs 0.921-0.926), n8 0.971; BLASTX AP027131 x AP027133 n1 0.927, n8 0.985 (memo on
   every masker, e91c8864); with the two maskers of this version (cc7306b2, load 12-45) n1 0.932 /

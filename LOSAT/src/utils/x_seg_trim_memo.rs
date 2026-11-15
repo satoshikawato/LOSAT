@@ -39,15 +39,14 @@
 //! Other maskers repeat few segments (TBLASTX d04: 2 %) and do not use it, so their trims
 //! are not stored.
 //!
-//! This module keeps, for all threads, the bytes of the segments trimmed and their pairs, in
-//! `X_SHARDS` tables chosen by the segment's hash, each behind its own lock. A call whose bytes
-//! and `maxtrim` equal a stored entry (the whole slice is compared; the hash only selects the
-//! table and the slot) returns the stored pair; any other call evaluates the trim (without the
-//! lock) and stores it. A segment one thread trimmed is thus not trimmed again by another (only
+//! This module keeps, for all threads, the bytes of the segments trimmed and their pairs, in one
+//! table behind one lock. A call whose bytes and `maxtrim` equal a stored entry (the whole slice
+//! is compared; the hash only selects the slot) returns the stored pair; any other call evaluates
+//! the trim (without the lock) and stores it. A segment one thread trimmed is thus not trimmed again by another (only
 //! threads that miss it at the same moment each trim it, and a cleared table trims it again), and
-//! the threads share one copy of the table, which lasts as long as the process. Each table grows
-//! on demand up to `X_MAX_ENTRIES` entries (or `X_MAX_ARENA` letters) and is then cleared as a
-//! whole; together the tables hold at most twice what one thread's table held before.
+//! the threads share one copy of the table, which lasts as long as the process. The table grows
+//! on demand up to `X_MAX_ENTRIES` entries (or `X_MAX_ARENA` letters), the bounds one thread's
+//! table had, and is then cleared as a whole; one thread fills and clears it as before.
 //!
 //! No NCBI counterpart: the memo itself; it returns only values the trim computed for the same
 //! input and does not change any value NCBI computes.
@@ -56,26 +55,20 @@ use std::sync::Mutex;
 
 // No NCBI counterpart: the size bounds of the memo; they decide only which trims are evaluated
 // again and do not change any value NCBI computes.
-/// Tables of the memo; a segment's table is chosen by its hash (`x_shard`).
-const X_SHARDS: usize = 16;
-/// Most entries kept by one table; the table is cleared when it would hold more. The 65,536 of
-/// all tables (twice what one thread's table held before they were shared) keep every distinct
+/// Most entries kept; the table is cleared when it would hold more. 32,768 keeps every distinct
 /// segment of the measured jobs (12,584 for TBLASTN AP027131 x AP027133, 25,507 for BLASTX
-/// AP027131 x AP027133; v4-C DECISIONS 32) with room for the hash's uneven split.
-const X_MAX_ENTRIES: usize = 65_536 / X_SHARDS;
-/// Most letters kept by one table (the stored segments' bytes); the table is cleared when it
-/// would hold more (2 MiB for all tables).
-const X_MAX_ARENA: usize = (2 << 20) / X_SHARDS;
+/// AP027131 x AP027133; v4-C DECISIONS 32).
+const X_MAX_ENTRIES: usize = 32_768;
+/// Most letters kept (the stored segments' bytes); the table is cleared when it would hold more.
+const X_MAX_ARENA: usize = 1 << 20;
 /// Slots of a new table; it doubles while it is more than half full, up to twice
-/// `X_MAX_ENTRIES` (8,192 slots of 12 bytes). The first tables of all shards take the 1,024
-/// slots one thread's first table took.
-const X_FIRST_SLOTS: usize = 1_024 / X_SHARDS;
+/// `X_MAX_ENTRIES` (65,536 slots of 12 bytes).
+const X_FIRST_SLOTS: usize = 1_024;
 /// Longest segment stored: the fast trim's own bound. Longer segments are trimmed every time.
 const X_MAX_SEGMENT: usize = crate::utils::seg::X_TRIM_MAX;
 const _: () = assert!(
     X_MAX_SEGMENT <= u8::MAX as usize
         && X_FIRST_SLOTS.is_power_of_two()
-        && X_SHARDS.is_power_of_two()
         && X_MAX_ARENA <= u32::MAX as usize
 );
 
@@ -149,32 +142,18 @@ impl Memo {
     }
 
     fn clear(&mut self) {
-        if self.slots.capacity() == 0 {
-            // The table's whole room at its first use (of which only the pages used are touched):
-            // its slots and letters then grow in place, without the freed blocks of a vector that
-            // doubles (16 tables of small doubling vectors left them in the arena).
-            self.slots.reserve_exact(2 * X_MAX_ENTRIES);
-            self.arena.reserve_exact(X_MAX_ARENA);
-        }
         self.slots.clear();
         self.slots.resize(X_FIRST_SLOTS, Slot::default());
         self.arena.clear();
         self.entries = 0;
     }
 
-    /// Doubles the table in its room and places the stored entries again.
+    /// Doubles the table and places the stored entries again.
     fn grow(&mut self) {
-        let old: Vec<Slot> = self
-            .slots
-            .iter()
-            .copied()
-            .filter(|slot| slot.len != 0)
-            .collect();
-        let doubled = self.slots.len() * 2;
-        self.slots.clear();
-        self.slots.resize(doubled, Slot::default());
+        let doubled = vec![Slot::default(); self.slots.len() * 2];
+        let old = std::mem::replace(&mut self.slots, doubled);
         let mask = self.slots.len() - 1;
-        for slot in old {
+        for slot in old.into_iter().filter(|slot| slot.len != 0) {
             let start = slot.start as usize;
             let segment = &self.arena[start..start + usize::from(slot.len)];
             let mut index = (hash_of(segment, slot.maxtrim) as usize) & mask;
@@ -225,20 +204,12 @@ impl Memo {
     }
 }
 
-/// No NCBI counterpart: the table of a segment's hash (bits below the slot tag, above the slot
-/// index of a full table); it only places entries and does not change any value NCBI computes.
-#[inline]
-fn x_shard(hash: u64) -> usize {
-    (hash >> 26) as usize & (X_SHARDS - 1)
-}
-
-/// One table and its lock, on a cache line of its own (threads that take neighbouring tables do
-/// not share a line).
+/// The table and its lock, on a cache line of its own.
 #[repr(align(64))]
-struct Shard(Mutex<Memo>);
+struct Shared(Mutex<Memo>);
 
-/// The tables of the segments trimmed by all threads and their (lend, rend) pairs.
-static X_MEMO: [Shard; X_SHARDS] = [const { Shard(Mutex::new(Memo::new())) }; X_SHARDS];
+/// The segments trimmed by all threads and their (lend, rend) pairs.
+static X_MEMO: Shared = Shared(Mutex::new(Memo::new()));
 
 #[cfg(test)]
 thread_local! {
@@ -246,10 +217,10 @@ thread_local! {
     static X_HITS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
-/// The table of `hash`, locked (a panic while a table was held leaves no partial entry: an
-/// entry is written whole after its letters).
-fn x_table(hash: u64) -> std::sync::MutexGuard<'static, Memo> {
-    X_MEMO[x_shard(hash)]
+/// The table, locked (a panic while it was held leaves no partial entry: an entry is written
+/// whole after its letters).
+fn x_table(_hash: u64) -> std::sync::MutexGuard<'static, Memo> {
+    X_MEMO
         .0
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -268,7 +239,7 @@ pub(crate) fn x_trimmed(
     x_trimmed_in(x_table, segment, maxtrim, trim)
 }
 
-/// `x_trimmed` with the tables given by `table` (the locked table of a hash).
+/// `x_trimmed` with the table given by `table` (the locked table for a hash).
 fn x_trimmed_in<T: std::ops::DerefMut<Target = Memo>>(
     table: impl Fn(u64) -> T,
     segment: &[u8],
@@ -393,20 +364,11 @@ mod tests {
         };
         let pair = |n: usize| (n % 3, n % 5 + 3);
         let count = 3 * X_FIRST_SLOTS;
-        assert_eq!(memo.trimmed(&segment(0), 50, || pair(0)), pair(0));
-        // The first use reserves the table's whole room; growth stays in it.
-        let (slots_room, letters_room) = (memo.slots.as_ptr(), memo.arena.as_ptr());
-        assert_eq!(memo.slots.capacity(), 2 * X_MAX_ENTRIES);
-        assert_eq!(memo.arena.capacity(), X_MAX_ARENA);
-        for n in 1..count {
+        for n in 0..count {
             assert_eq!(memo.trimmed(&segment(n), 50, || pair(n)), pair(n));
         }
         assert_eq!(memo.entries, count);
         assert!(memo.slots.len() >= 2 * count);
-        assert_eq!(
-            (memo.slots.as_ptr(), memo.arena.as_ptr()),
-            (slots_room, letters_room)
-        );
         // All of them are still there after the table doubled.
         for n in 0..count {
             assert_eq!(memo.trimmed(&segment(n), 50, || unreachable!()), pair(n));

@@ -3,8 +3,9 @@
 //! `scan_chunk_bucketed` (SEEDBUCKET's order of the same hits). Each starts the chunk with
 //! `begin_chunk_scan` and ends it with `finish_chunk_scan`; the two two-hit scans scan with
 //! `scan_next_hits` and run the two-hit test and extension of each hit with `two_hit_one_hit`. They
-//! read the batch's values (`WordFinderCx`), the subject frame's (`FrameCx`) and the chunk's
-//! (`ChunkCx`).
+//! read the subject's values (`WordFinderCx`: the batch's, with the subject's own `cutoff_scores`
+//! where NCBI computes the statistics of each subject), the subject frame's (`FrameCx`) and the
+//! chunk's (`ChunkCx`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:440-619
 //! (`s_BlastAaWordFinder_TwoHit`: the scan :502-507, the hit loop :509-608, `Blast_ExtendWordExit`
@@ -40,10 +41,11 @@ use crate::algorithm::tblastx::subjects::XReadFailure;
 /// the query contexts with their cutoffs and X-drops, the scan's LOSAT_X_TBXSCANBF (`x_scan_bf`)
 /// and offset-array size, LOSAT_X_TBXUNGAPSENT (`tbx_sent`), LOSAT_DEBUG_SCAN_SOFF's range
 /// (`scan_debug_range`), and the search's failure (`x_read_failure`, where the one-hit word finder
-/// reports an error). `Sync`: every worker's `process_subject` reads it, and copies it once per
-/// subject with that subject's `cutoff_scores` (the batch's, or the subject's own with the
-/// statistics of each subject: `context_cutoffs::subject_cutoffs`), which the frame loop's two-hit
-/// and one-hit word finders save their extensions against.
+/// reports an error). `Sync`: every worker's `process_subject` reads it (`SubjectStatistics::
+/// word_finder_cx`), and where NCBI computes the statistics of each subject copies it once per
+/// subject with that subject's own `cutoff_scores` (`context_cutoffs::subject_cutoffs`); the frame
+/// loop's two-hit and one-hit word finders save their extensions against the `cutoff_scores` of
+/// the one they are given (`FrameCx::cx`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:473-493 (what
 /// `s_BlastAaWordFinder_TwoHit` reads of the diagonal table and the lookup table) and :575 (the
@@ -84,7 +86,8 @@ pub(super) struct WordFinderCx<'a> {
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805-812 (the subject frame of
 /// the frame loop of `s_BlastSearchEngineCore`).
 pub(super) struct FrameCx<'a> {
-    // The chunk scans take only the frame and read the batch's values through this field, a
+    // The chunk scans take only the frame and read the subject's values (`WordFinderCx`: the
+    // batch's, or their copy with the subject's own `cutoff_scores`) through this field, a
     // pointer loaded from the frame, as the closures they were made from read `word_finder_cx`
     // through their captures. Given as a parameter of its own (`&WordFinderCx`, which LLVM knows
     // nothing writes during the call), its fields were held in registers across the scan loops,
@@ -802,7 +805,8 @@ fn scan_chunk_plain<S: TbxScore>(
     scan_chunk_size: Option<usize>,
     sc: S,
 ) -> TblastxChunkScanResult {
-    // The batch's values through the frame (`FrameCx::cx`).
+    // The subject's values through the frame (`FrameCx::cx`: the batch's, or their copy with the
+    // subject's own `cutoff_scores`, `WordFinderCx`).
     let cx = frame.cx;
     let &WordFinderCx {
         wordsize,
@@ -1011,7 +1015,8 @@ fn scan_chunk_bucketed<S: TbxScore>(
     scan_chunk_size: Option<usize>,
     sc: S,
 ) -> TblastxChunkScanResult {
-    // The batch's values through the frame (`FrameCx::cx`).
+    // The subject's values through the frame (`FrameCx::cx`: the batch's, or their copy with the
+    // subject's own `cutoff_scores`, `WordFinderCx`).
     let cx = frame.cx;
     let &WordFinderCx {
         wordsize,
@@ -1265,7 +1270,8 @@ fn scan_chunk_one_hit<S: TbxScore>(
     scan_chunk_size: Option<usize>,
     sc: S,
 ) -> TblastxChunkScanResult {
-    // The batch's values through the frame (`FrameCx::cx`).
+    // The subject's values through the frame (`FrameCx::cx`: the batch's, or their copy with the
+    // subject's own `cutoff_scores`, `WordFinderCx`).
     let cx = frame.cx;
     let &WordFinderCx {
         wordsize,
@@ -1501,7 +1507,8 @@ pub(super) fn scan_chunk<S: TbxScore>(
     scan_chunk_size: Option<usize>,
     sc: S,
 ) -> TblastxChunkScanResult {
-    // The batch's values through the frame (`FrameCx::cx`).
+    // The subject's values through the frame (`FrameCx::cx`: the batch's, or their copy with the
+    // subject's own `cutoff_scores`, `WordFinderCx`).
     let cx = frame.cx;
     let &WordFinderCx {
         window,

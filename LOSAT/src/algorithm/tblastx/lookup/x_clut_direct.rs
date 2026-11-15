@@ -1033,14 +1033,22 @@ impl<'a> XWords<'a> {
             }
             self_score += self.matrix[residue as usize][compressed];
         }
-        if self.threshold == 0 || self_score < self.threshold {
+        // The word's own cell, when its last letter (the index's most significant digit) is in
+        // `letters`.
+        if (self.threshold == 0 || self_score < self.threshold)
+            && letters.contains(&u32::from(self.compress_table[word[last] as usize]))
+        {
             let (index, skip) = compute_compressed_index(
                 self.length_of::<Q>(),
                 word,
                 self.alphabet,
                 self.scaled_compress_table,
             );
-            if skip == 0 && letters.contains(&(index as u32 / self.power[last])) {
+            debug_assert_eq!(
+                index as u32 / self.power[last],
+                u32::from(self.compress_table[word[last] as usize])
+            );
+            if skip == 0 {
                 sink.one(index as u32 - letters.start * self.power[last]);
             }
         }

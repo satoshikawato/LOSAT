@@ -1762,14 +1762,11 @@ fn x_flat_appends_on<S: CompressedScores, H: XQueryOffset>(
     };
     let waves = header.alphabet.div_ceil(wave_letters);
     // The stripes of a wave of `wave_letters` letters (the backbone with one wave).
-    let wave_size = if waves == 1 {
-        backbone_size
-    } else {
-        wave_letters * x_top_cells(&header)
-    };
+    // The stripes of the one-wave build, whatever the waves (a wave has its share of them): more,
+    // narrower stripes per wave cost each wave's stripes and pieces a fixed part each.
     let shift = cuts.stripe_shift.unwrap_or_else(|| {
-        let per_wave = (X_PARTS_PER_THREAD * threads).min(X_MAX_PARTS / chunks.len().max(1));
-        x_stripe_shift(wave_size, per_wave, largest_pv_shift)
+        let stripes = (X_PARTS_PER_THREAD * threads).min(X_MAX_PARTS / chunks.len().max(1));
+        x_stripe_shift(backbone_size, stripes, largest_pv_shift)
     });
     assert!(
         (largest_pv_shift..=X_MAX_STRIPE_SHIFT).contains(&shift),

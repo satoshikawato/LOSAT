@@ -2237,7 +2237,8 @@ struct QueryDocument<'r, 'a> {
 /// `write_query_to` of a document that the plain encoder of `format` stopped on (the byte `byte`,
 /// `NonVisibleChar`): written again through `Traced` into `buf`, and handed to `writer` with
 /// NCBI's post of each replaced byte (`ReplacedChar::post` with the application's prefix,
-/// `Program::post_prefix`) on `diagnostics` where NCBI posts it: after the bytes of the document
+/// `options::RequestKind::application`, the one table of the applications' names) on
+/// `diagnostics` where NCBI posts it: after the bytes of the document
 /// that NCBI's buffer (`COStreamBuffer`, `out_buffer`) had written to its output by then, the
 /// output flushed (`cerr` is tied to `cout`; `Traced::flush_to`). NCBI writes each query's
 /// Seq-annot with an object stream of its own (`m_Outfile << MSerial_AsnText << *annot`, quoted at
@@ -2291,7 +2292,8 @@ fn write_query_posting(
     diagnostics: &mut dyn Write,
 ) -> anyhow::Result<()> {
     buf.clear();
-    let prefix = document.run.program.post_prefix();
+    let prefix =
+        crate::report::archive::options::RequestKind::from(document.run.program).application();
     let post = |replaced: &ReplacedChar| {
         diagnostics.write_all(&replaced.post(Some(prefix)))?;
         diagnostics.flush()

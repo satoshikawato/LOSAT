@@ -908,6 +908,11 @@ def extra_rows() -> list[Row]:
             env=env, args="-parse_deflines", fmts=(11,))
     add("order_delid_s", "blastn", "megablast", "@/order_unit.q.nuc.fa", "@/order_delid.s.nuc.fa",
         args="-parse_deflines", fmts=(8, 9))
+    # BLASTP's Seq-annots (M4a-1b2): a protein subject with a `-parse_deflines` local id holding DEL
+    # (tests/db_search/seqannot/pdel.faa, whose letters repeat the query's, under lcl|p<DEL>1), written
+    # `#` in each Seq-align with NCBI's message each, among the document's bytes.
+    add("seqannot_delid_s", "blastp", "", "tests/db_search/seqannot/qp.faa", "tests/db_search/seqannot/pdel.faa",
+        args="-parse_deflines", fmts=(8, 9))
     # a subject cannot be in a later batch, but its errors and warnings come before the query's
     for program, task in ALL_PROGRAMS:
         q, s = base_pair(program)

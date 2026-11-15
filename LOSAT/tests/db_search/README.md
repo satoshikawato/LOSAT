@@ -1666,3 +1666,12 @@ BLAST+ 2.17.0 `makeblastdb -dbtype nucl -blastdb_version 4 -title "café db <DEL
 object `Blast Database Title`) with `#` for each such byte, and NCBI posts `Error: (803.7) [blastn]
 Seq-annot.desc.E.user.data.E.label.str` / `Bad char [0xC3] in string at line N` (outfmt 9: `at byte N`) / the title for each
 byte of each query's document.
+
+`seqannot/` (M4a-1b2): `tdel` (version 5, `-parse_seqids`: `subj_del.fa`, one sequence of 16,800 nucleotides, 84 copies of a
+200-nucleotide unit, whose id `lcl|s<DEL>1` makeblastdb stores as `s#1`) and `pbad` (version 4, `pdel.faa`, the protein of
+`subj_del.fa`'s first frame, 5,600 letters), both built by NCBI BLAST+ 2.17.0 makeblastdb with `-title "café db <DEL>"`
+(`-dbtype nucl -parse_seqids -blastdb_version 5`, `-dbtype prot -blastdb_version 4`); `q2n_del.fa` holds the unit and its
+reverse complement as `lcl|q<DEL>1` and `lcl|q<DEL>2`, and `qp.faa` the protein of the unit's first frame (stops as `X`).
+The rows `db.dbtitle.blastn.qdel.8` and `db.dbtitle.blastx.qdel.9` write the title and, with `-parse_deflines`, the query ids
+with `#` and NCBI's 803.7 message for each byte; fasta_input's `blastp.seqannot_delid_s.*` searches `qp.faa` against
+`pdel.faa` (`-subject -parse_deflines`, its id `lcl|p<DEL>1`).

@@ -3545,14 +3545,15 @@ fn psiblast_pssms(
         keys.unread_warnings(args.app.ncbi_name(), &unread, &mut warnings);
         files.add_read_warnings(query, warnings);
         // NCBI's posts of the bytes replaced in the file come as it is written, after the
-        // PSSM's read messages (`PssmFiles::take_read_warnings`).
+        // PSSM's read messages (`PssmFiles::take_read_warnings`), and before a write fault of the
+        // file, which NCBI meets at the first flush of its 4 KiB buffer (`PssmFiles::add`), as the
+        // rounds write them (`psi_round::write_round_pssm`).
         let made = made.and_then(|pssm| {
-            files.add(pssm.asn.as_deref(), pssm.ascii)?;
             files.add_file_posts(
                 query,
                 crate::algorithm::psiblast::pssm::file_posts(args.app.ncbi_name(), &pssm.asn_posts),
             );
-            Ok(())
+            files.add(pssm.asn.as_deref(), pssm.ascii)
         });
         if let Err(error) = made {
             return Err(PssmStop {

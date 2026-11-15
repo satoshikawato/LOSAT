@@ -2618,7 +2618,6 @@ pub(super) fn full_translation_traceback_blosum62(
         gap_extend,
         x_drop_final,
         0.0,
-        0,
     )
 }
 
@@ -2712,7 +2711,6 @@ fn full_translation_traceback_with_matrix(
     gap_extend: i32,
     x_drop_final: i32,
     percent_identity: f64,
-    min_hit_length: i32,
 ) -> Result<Vec<(GappedHsp, bool)>> {
     full_translation_traceback_with_matrix_and_events(
         query,
@@ -2724,7 +2722,6 @@ fn full_translation_traceback_with_matrix(
         gap_extend,
         x_drop_final,
         percent_identity,
-        min_hit_length,
         None,
         None,
         None,
@@ -2749,7 +2746,6 @@ fn full_translation_traceback_with_matrix_and_events(
     gap_extend: i32,
     x_drop_final: i32,
     percent_identity: f64,
-    min_hit_length: i32,
     seg: Option<&SegParams>,
     test_events: Option<&mut Vec<(bool, usize, usize, usize, usize, usize)>>,
     start_events: Option<&mut Vec<(bool, i32, i32, i32, i32, i32, i32)>>,
@@ -2766,7 +2762,6 @@ fn full_translation_traceback_with_matrix_and_events(
         gap_extend,
         x_drop_final,
         percent_identity,
-        min_hit_length,
         seg,
         false,
         false,
@@ -2794,7 +2789,6 @@ fn full_translation_traceback_with_matrix_and_events_with_mask_mode(
     gap_extend: i32,
     x_drop_final: i32,
     percent_identity: f64,
-    min_hit_length: i32,
     seg: Option<&SegParams>,
     soft_masking: bool,
     mask_lowercase: bool,
@@ -2824,7 +2818,6 @@ fn full_translation_traceback_with_matrix_and_events_with_mask_mode(
             gap_extend,
             x_drop_final,
             percent_identity,
-            min_hit_length,
             seg,
             soft_masking,
             mask_lowercase,
@@ -2856,7 +2849,6 @@ pub(super) fn full_translation_traceback_with_matrix_and_events_with_mask_mode_o
     gap_extend: i32,
     x_drop_final: i32,
     percent_identity: f64,
-    min_hit_length: i32,
     seg: Option<&SegParams>,
     soft_masking: bool,
     mask_lowercase: bool,
@@ -2875,7 +2867,6 @@ pub(super) fn full_translation_traceback_with_matrix_and_events_with_mask_mode_o
         gap_extend,
         x_drop_final,
         percent_identity,
-        min_hit_length,
         seg,
         soft_masking,
         mask_lowercase,
@@ -2931,7 +2922,6 @@ pub(super) fn x_pssm_traceback_owned(
         gap_extend,
         x_drop_final,
         0.0,
-        0,
         seg,
         soft_masking,
         mask_lowercase,
@@ -2960,7 +2950,6 @@ fn x_traceback_in_windows<S: super::score::TbnScore>(
     gap_extend: i32,
     x_drop_final: i32,
     percent_identity: f64,
-    min_hit_length: i32,
     seg: Option<&SegParams>,
     soft_masking: bool,
     mask_lowercase: bool,
@@ -3179,11 +3168,12 @@ fn x_traceback_in_windows<S: super::score::TbnScore>(
             if let Some(events) = identity_events.as_deref_mut() {
                 events.push((num_ident, align_length));
             }
+            // NCBI's `min_hit_length` is always 0 (`core::blast_hits::hsp_test`).
             let delete_hsp = crate::core::blast_hits::hsp_test(
                 num_ident as i64,
                 align_length as i64,
                 percent_identity,
-                i64::from(min_hit_length),
+                0,
             );
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:585-605 records updated HSP offsets
             // before Blast_HSPTest and before Blast_HSPAdjustSubjectOffset.
@@ -4596,7 +4586,6 @@ mod tests {
                 1,
                 64,
                 100.0,
-                0,
                 None,
                 Some(&mut events),
                 None,
@@ -4805,7 +4794,6 @@ mod tests {
                 1,
                 64,
                 0.0,
-                0,
                 None,
                 None,
                 Some(&mut starts),
@@ -5367,7 +5355,6 @@ mod tests {
                             1,
                             64,
                             0.0,
-                            0,
                             None,
                             false,
                             false,
@@ -5570,7 +5557,6 @@ mod tests {
                                 1,
                                 64,
                                 0.0,
-                                0,
                                 None,
                                 false,
                                 false,
@@ -6276,7 +6262,6 @@ mod tests {
                 2,
                 88,
                 0.0,
-                0,
                 None,
                 None,
                 None,
@@ -7182,7 +7167,6 @@ mod tests {
             1,
             64,
             0.0,
-            0,
             Some(&seg),
             None,
             None,
@@ -7202,7 +7186,6 @@ mod tests {
             1,
             64,
             0.0,
-            0,
         )
         .unwrap();
         assert_eq!(unmasked_result[0].0.score, 746);
@@ -7345,7 +7328,6 @@ mod tests {
             1,
             64,
             0.0,
-            0,
             Some(&seg),
             true,
             false,
@@ -7510,7 +7492,6 @@ mod tests {
             1,
             64,
             0.0,
-            0,
             None,
             false,
             true,
@@ -7665,7 +7646,6 @@ mod tests {
             1,
             64,
             0.0,
-            0,
             None,
             true,
             true,
@@ -7809,7 +7789,6 @@ mod tests {
             1,
             64,
             0.0,
-            0,
             Some(&seg),
             false,
             true,
@@ -7958,7 +7937,6 @@ mod tests {
             1,
             64,
             0.0,
-            0,
             Some(&seg),
             true,
             true,

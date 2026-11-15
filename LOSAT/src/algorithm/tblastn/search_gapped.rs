@@ -5,7 +5,9 @@ use super::search_init::InitHsp;
 use super::search_seed::encode_tblastn_lookup_query;
 #[cfg(test)]
 use super::search_seed::Seed;
-use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
+use crate::algorithm::blastn::interval_tree::{
+    x_grid_cells, BlastIntervalTree, IndexMethod, TreeHsp,
+};
 use crate::algorithm::blastp::encoding::encode_protein_query_frame_with_seg;
 use crate::algorithm::blastp::gapalign::{protein_identities_from_edit_ops, GapAlignScratch};
 use crate::algorithm::common::translated_chunks::TranslatedChunk;
@@ -119,6 +121,13 @@ fn score_gapped_chunk<S: super::score::TbnScore, const ONE_HIT: bool>(
         total_query_length + 1,
         0,
         i32::try_from(chunk.length)? + 1,
+    );
+    tree.reset_with_bounds_cells(
+        0,
+        total_query_length + 1,
+        0,
+        i32::try_from(chunk.length)? + 1,
+        x_grid_cells(frame_initial.len()),
     );
     for hit in frame_initial {
         // NCBI c++/src/algo/blast/core/blast_gapalign.c:2371-2468:

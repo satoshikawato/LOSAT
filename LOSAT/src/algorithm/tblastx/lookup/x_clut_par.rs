@@ -2604,8 +2604,9 @@ fn x_flat_stripes_on<S: CompressedScores, H: XQueryOffset>(
             // to `wave_total`) and each wrote every slot of its own (`x_stripe_build`, `x_stripe_fill`).
             unsafe { hits.set_len(hits_base + wave_total) };
             // Item SC2d-2: at most as many segments as threads kept for the next build
-            // (`XSegmentPool`); item SC9i: and for the next wave.
+            // (`XSegmentPool`); item SC9i: and whole for the next wave (`XSegmentPool::keep_whole`).
             match wave_segments {
+                Some(pool) if wave_index + 1 < waves => pool.keep_whole(appends.segments, threads),
                 Some(pool) => pool.keep(appends.segments, threads),
                 None => drop(appends),
             }
@@ -4662,5 +4663,19 @@ mod tests {
         // A later build's segments replace the ones it did not take.
         pool.keep(vec![vec![5u32; 3]], 2);
         assert_eq!(lengths(&pool), [3]);
+
+        // Item SC9i: between the waves of a build the segments are kept whole (at most 2): each at
+        // the length it was made with, its blocks and entries the same.
+        let mut made = vec![7u32; 12];
+        made[..4].fill(8);
+        made.truncate(4);
+        let whole = (made.as_ptr() as usize, made.capacity());
+        pool.keep_whole(vec![Vec::new(), made, vec![9u32; 5], vec![6u32; 2]], 2);
+        let kept = pool.0.lock().unwrap();
+        assert_eq!(kept.len(), 2);
+        assert_eq!((kept[0].as_ptr() as usize, kept[0].len()), whole);
+        assert_eq!(kept[0][..4], [8; 4]);
+        assert_eq!(kept[0][4..], [7; 8]);
+        assert_eq!(kept[1], [9; 5]);
     }
 }

@@ -426,6 +426,42 @@ impl XSegmentPool {
                 segment
             })
             .collect();
+        self.replace(new);
+    }
+
+    // No NCBI counterpart: buffer reuse only (item SC9i of line NP).
+    /// Keeps at most `at_most` of `segments` (a wave's) for the next wave of the same build, in place
+    /// of what the pool holds, each whole: at the length it was made with, so that the next wave
+    /// writes the pages this one touched and no mapping is cut, freed or made between the waves of a
+    /// build. A cut or freed mapping stops every thread of the process for its TLB: cut after each
+    /// wave (`keep`), BLASTX `-word_size 6` with 800 cDNAs at 32 threads made 16,318 `mremap` and
+    /// 13,784 `munmap` calls instead of dev's 71 and 2,412. The last wave's segments are cut
+    /// (`keep`).
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        allow(dead_code)
+    )]
+    fn keep_whole(&self, segments: Vec<Vec<u32>>, at_most: usize) {
+        let new: Vec<Vec<u32>> = segments
+            .into_iter()
+            .filter(|segment| segment.capacity() != 0)
+            .take(at_most)
+            .map(|mut segment| {
+                // SAFETY: a segment is made as `vec![0u32; n]` (capacity n, every entry written) and
+                // cut since only by `truncate` (`XSegmentOut::finish`), which leaves the entries past
+                // its length written, or by `keep` (`shrink_to_fit`: capacity = length).
+                unsafe { segment.set_len(segment.capacity()) };
+                segment
+            })
+            .collect();
+        self.replace(new);
+    }
+
+    /// Puts `new` in place of what the pool holds.
+    fn replace(&self, new: Vec<Vec<u32>>) {
         // The lock is held only around a move; the old segments are dropped after it.
         let old = std::mem::replace(
             &mut *self.0.lock().unwrap_or_else(PoisonError::into_inner),

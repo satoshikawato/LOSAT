@@ -134,7 +134,7 @@ fn unsupported_formats_fail_before_searching() {
     let subjects = subjects(&inputs.subject.0);
     // A delimiter that a field separates its entries with is NCBI's error
     // (blast_args.cpp:2753-2792, `s_ValidateCustomDelim`).
-    for outfmt in ["2", "6 delim=; qseqid staxids", "abc"] {
+    for outfmt in ["17", "6 delim=; qseqid staxids", "abc"] {
         let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
             formats: vec![

@@ -1,7 +1,8 @@
 //! NCBI's `CAlnMix` (`objtools/alnmgr`) for the flags of the query-anchored reports: `Add` with
-//! `fPreserveRows`, `Merge` with `fMinGap | fQuerySeqMergeOnly | fFillUnalignedRegions`
-//! (showalign.cpp:2058-2083, quoted at `super::write_section`), on Dense-segs of two rows whose
-//! first row is the query. The result is the merged Dense-seg of `x_CreateDenseg`.
+//! `fPreserveRows` or `fForceTranslation` (`super::AddFlags`), `Merge` with `fMinGap |
+//! fQuerySeqMergeOnly | fFillUnalignedRegions` (showalign.cpp:2058-2083, quoted at
+//! `super::write_section`), on Dense-segs of two rows whose first row is the query. The result is
+//! the merged Dense-seg of `x_CreateDenseg`.
 //!
 //! Ported: `CAlnMixSequences::Add` (alnseq.cpp:105-196), `CAlnMixMatches::Add` (alnmatch.cpp:
 //! 97-275), `CAlnMixMerger::x_Merge` (alnmerger.cpp:101-830), `x_SecondRowFits` up to its
@@ -12,22 +13,26 @@
 //! Not ported, because these flags never reach them: `fTruncateOverlaps` (the planes and the rest
 //! of `x_SecondRowFits`), `fAllowTranslocation`, `fGapJoin` (`x_ConsolidateGaps`), `fCalcScore`,
 //! `fSortSeqsByScore` and `fSortInputByScore` (the chain scores), `fRemoveLeadTrailGaps`, and the
-//! scope-less identification by Seq-id.
+//! scope-less identification by Seq-id. Not ported either: a Dense-seg added with
+//! `fForceTranslation` whose two rows are one Bioseq (TBLASTX's query read as a subject under
+//! `-parse_deflines`), which makes one `CAlnMixSeq` of both rows; the programs refuse it before
+//! the reports (`MixError::Internal` here).
 //!
-//! Strands and widths (line RG T3b: BLASTN, TBLASTN). The query, added with `fPreserveRows`, is
-//! always a plus-strand row (`!(m_MergeFlags & fNegativeStrand)`); a subject's row takes the
-//! strand of its first match, the other strand where the HSP's strands differ
-//! (`m_StrandsDiffer`: a minus-strand BLASTN HSP, whose Dense-seg has the query on the minus
-//! strand, or a TBLASTN HSP in a minus frame), so the merge's branches for rows of the other
-//! strand run. A section whose query is a protein and whose subjects are nucleotides (TBLASTN:
-//! `m_ContainsAA && m_ContainsNA`) has subject rows of width 3 in their frames (`x_SetSeqFrame`).
-//! Not ported in this part (line RG T3c: BLASTX, TBLASTX): `fNegativeStrand` (a minus-strand
-//! translated query), a translated query and `fForceTranslation` with its strand check
-//! (alnmatch.cpp:191-205): the input (`super::Hsps`) has no query strand and no query width.
+//! Strands and widths (lines RG T3b and T3c). A row's strand is set where it gets its first start.
+//! The query's (the refseq of the first pass) is plus with `fPreserveRows`
+//! (`!(m_MergeFlags & fNegativeStrand)`: no merge flag has it) and, with `fForceTranslation`, the
+//! sign of its strand score (the sum of its matches' lengths, negative on the minus strand), so a
+//! BLASTX or TBLASTX query of a minus frame has a minus-strand row. A subject's row takes the
+//! query's strand, or the other where the HSP's strands differ (`m_StrandsDiffer`), so the merge's
+//! branches for rows of the other strand run. A nucleotide sequence translated against proteins
+//! (BLASTX's query, TBLASTN's subjects, TBLASTX's both: `m_ContainsAA && m_ContainsNA`, or
+//! `fForceTranslation`) has rows of width 3 in their frames (`x_SetSeqFrame`). With
+//! `fForceTranslation` an HSP whose strand on a sequence differs from the sequence's strand score
+//! so far is left out (`CAlnMixMatches::Add` throws, `Mix::add`).
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{Denseg, Hsps, SeqKey};
+use super::{AddFlags, Denseg, Hsps, SeqKey};
 
 /// An index into `Mix::seqs` (a `CAlnMixSeq`).
 type SeqIx = usize;
@@ -68,14 +73,17 @@ pub(crate) enum MixError {
 ///     TMatchList            m_MatchList;
 ///     ...
 /// ```
-/// `m_Score`, `m_ChainScore` and `m_StrandScore` sort and check nothing under these flags.
+/// `m_Score` and `m_ChainScore` sort and check nothing under these flags.
 struct MixSeq {
     /// `m_BioseqHandle`: the sequence (`x_IdentifyAlnMixSeq`).
     key: SeqKey,
     /// `m_PositiveStrand`.
     positive_strand: bool,
-    /// `m_Width`: 3 for a nucleotide subject of a protein query, else 1.
+    /// `m_Width`: 3 for a nucleotide sequence translated against proteins, else 1.
     width: u32,
+    /// `m_StrandScore`: the lengths of the sequence's matches added so far, negative on the minus
+    /// strand (`Mix::add`).
+    strand_score: i64,
     /// `m_Frame`: the frame (`start % 3`) of a row of width 3 (`x_SetSeqFrame`), -1 until set.
     frame: i32,
     /// `m_DsCnt`: the Dense-segs that hold the sequence.
@@ -98,12 +106,13 @@ struct MixSeq {
 impl MixSeq {
     fn new(key: SeqKey) -> Self {
         // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:353-375 (`CAlnMixSeq()`:
-        // `m_DsCnt(0)`, `m_ExtraRow(0)`, `m_DsIdx(0)`, `m_SeqIdx(-1)`, `m_ChildIdx(0)`,
-        // `m_RowIdx(-1)`, `m_PositiveStrand(true)`, `m_Width(1)`, `m_Frame(-1)`)
+        // `m_DsCnt(0)`, `m_StrandScore(0)`, `m_ExtraRow(0)`, `m_DsIdx(0)`, `m_SeqIdx(-1)`,
+        // `m_ChildIdx(0)`, `m_RowIdx(-1)`, `m_PositiveStrand(true)`, `m_Width(1)`, `m_Frame(-1)`)
         Self {
             key,
             positive_strand: true,
             width: 1,
+            strand_score: 0,
             frame: -1,
             ds_cnt: 0,
             seq_idx: -1,
@@ -159,9 +168,12 @@ struct Mix {
     rows: Vec<SeqIx>,
     /// `m_Segments` (`Build`).
     segments: Vec<SegIx>,
-    /// The query is a protein and the subjects are nucleotides (`m_ContainsAA && m_ContainsNA`,
-    /// TBLASTN): the subjects' rows have a width of 3 (`super::Hsps::translated_subjects`).
-    translated_subjects: bool,
+    /// The widths of the query's and of the subjects' rows (`super::Hsps`).
+    query_width: u32,
+    subject_width: u32,
+    /// `m_AlnMixMatches->m_AddFlags`: the flags of the last `Add`, which the merge reads (all the
+    /// Dense-segs of a frame group are added with one flag).
+    add_flags: AddFlags,
 }
 
 /// The first key of `map` (`begin()`), `None` (`end()`) when it is empty.
@@ -381,9 +393,84 @@ impl Mix {
     ///         seg_off += ds.GetDim();
     ///     }
     /// ```
-    fn add(&mut self, hsp: super::Hsp<'_>, query_bioseq: Option<u32>) {
+    ///
+    /// With `fForceTranslation` (`flags`) the rows are not preserved (no `m_AnotherRow`), and each
+    /// match of two rows first compares its strands with the strand scores of its sequences: a
+    /// strand that differs from a sequence's score so far throws, which `DisplaySeqalign` catches
+    /// and skips the Seq-align (showalign.cpp:2073-2076). The throw comes after `m_DsCnt++` of the
+    /// sequences and of the matches and after the matches of the Dense-seg's segments before it (a
+    /// BLAST HSP's first segment holds both rows, so there are none): the Dense-seg still counts
+    /// (`m_DsCnt`, the `m_DsIdx` of the later ones), its matches before the throw stay, and none of
+    /// the throwing segment's scores are added. Returns whether the Dense-seg was added whole
+    /// (false: left out).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmatch.cpp:150-210
+    /// ```c++
+    ///                         // determine the strand
+    ///                         ENa_strand strand1 = eNa_strand_plus;
+    ///                         ENa_strand strand2 = eNa_strand_plus;
+    ///                         if (strands_exist) {
+    ///                             if (ds.GetStrands()[seg_off + row1]
+    ///                                 == eNa_strand_minus) {
+    ///                                 strand1 = eNa_strand_minus;
+    ///                             }
+    ///                             if (ds.GetStrands()[seg_off + row2]
+    ///                                 == eNa_strand_minus) {
+    ///                                 strand2 = eNa_strand_minus;
+    ///                             }
+    ///                         }
+    ///                         ...
+    ///                         // in case of fForceTranslation,
+    ///                         // check if strands are not mixed by
+    ///                         // comparing current strand to the prevailing one
+    ///                         if (flags & fForceTranslation  &&
+    ///                             (aln_seq1->m_StrandScore > 0  &&
+    ///                              strand1 == eNa_strand_minus ||
+    ///                              aln_seq1->m_StrandScore < 0  &&
+    ///                              strand1 != eNa_strand_minus ||
+    ///                              aln_seq2->m_StrandScore > 0  &&
+    ///                              strand2 == eNa_strand_minus ||
+    ///                              aln_seq2->m_StrandScore < 0  &&
+    ///                              strand2 != eNa_strand_minus)) {
+    ///                             NCBI_THROW(CAlnException, eMergeFailure,
+    ///                                        "CAlnMixMatches::Add(): "
+    ///                                        "Unable to mix strands when "
+    ///                                        "forcing translation!");
+    ///                         }
+    ///
+    ///                         // add to the prevailing strand
+    ///                         aln_seq1->m_StrandScore += (strand1 == eNa_strand_minus ?
+    ///                                                     - score : score);
+    ///                         aln_seq2->m_StrandScore += (strand2 == eNa_strand_minus ?
+    ///                                                     - score : score);
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2073-2076
+    /// ```c++
+    ///                 } catch (const CException& e){
+    ///                     _TRACE("Warning: " << e.what());
+    ///                     continue;
+    ///                 }
+    /// ```
+    /// So a TBLASTX subject's HSP of the other strand than the subject's first HSP in the same query
+    /// frame is not shown in formats 1 to 4, where the description table and outfmt 0 show it (a
+    /// deterministic result of NCBI BLAST+ 2.17.0, written as it is: PD-LOSAT-NCBI-DEFECTS rule 2,
+    /// DECISIONS T3-6). A BLASTX HSP of a minus query frame (`fNegativeStrand`) never throws: its
+    /// query is minus in every HSP of the group and a protein row has no strand.
+    fn add(
+        &mut self,
+        hsp: super::Hsp<'_>,
+        flags: AddFlags,
+        query_bioseq: Option<u32>,
+    ) -> Result<bool, MixError> {
         let (subject, segments) = (hsp.subject, hsp.segments);
+        let preserve_rows = flags == AddFlags::PreserveRows;
+        if !preserve_rows && query_bioseq == Some(subject) {
+            return Err(MixError::Internal(
+                "the query's own Bioseq added with fForceTranslation",
+            ));
+        }
         self.ds_cnt += 1;
+        self.add_flags = flags;
         let mut ds_seq = [0; 2];
         for (row, key) in [SeqKey::Query, SeqKey::Subject(subject)]
             .into_iter()
@@ -397,13 +484,17 @@ impl Mix {
             //             aln_seq->m_Width = ds.GetWidths()[row];
             //         }
             // ```
-            // (The widths of a TBLASTN Dense-seg, `CreateDensegFromStdseg` of its Std-segs, are 1
-            // for the protein query and 3 for the nucleotide subject; `x_Merge` sets the same,
-            // alnmerger.cpp:138-145, `m_IsAA ? 1 : 3`.)
-            if self.translated_subjects {
-                self.seqs[seq].width = if row == 0 { 1 } else { 3 };
-            }
-            if self.seqs[seq].row_idx == -1 {
+            // (The widths of `CreateDensegFromStdseg`'s Dense-seg of a TBLASTN or BLASTX HSP: 1 for
+            // the protein row, 3 for the nucleotide row; of a TBLASTX HSP none, which
+            // `x_ExtendDSWithWidths` sets to 3 for `fForceTranslation`, alnmix.cpp:133-143,
+            // 218-220; `x_Merge` sets the same, alnmerger.cpp:138-145, `m_IsAA ? 1 : 3`. A
+            // Dense-seg of two untranslated rows has none: 1.)
+            self.seqs[seq].width = if row == 0 {
+                self.query_width
+            } else {
+                self.subject_width
+            };
+            if preserve_rows && self.seqs[seq].row_idx == -1 {
                 self.seqs[seq].row_idx = row as i32;
                 if row == 1 && query_bioseq == Some(subject) {
                     // The query's `m_AnotherRow`.
@@ -414,19 +505,40 @@ impl Mix {
             self.seqs[seq].ds_cnt += 1;
             ds_seq[row] = seq;
         }
+        let (minus1, minus2) = (hsp.strands.query_minus, hsp.strands.subject_minus);
         for segment in segments {
             let len = segment.len;
             match (segment.query, segment.subject) {
-                (Some(start1), Some(start2)) => self.matches.push(MixMatch {
-                    seq1: ds_seq[0],
-                    start1,
-                    seq2: Some(ds_seq[1]),
-                    start2,
-                    len,
-                    ds_idx: self.ds_cnt,
-                    score: len as i32,
-                    strands_differ: hsp.strands_differ,
-                }),
+                (Some(start1), Some(start2)) => {
+                    if !preserve_rows {
+                        let mixed =
+                            |score: i64, minus: bool| score > 0 && minus || score < 0 && !minus;
+                        if mixed(self.seqs[ds_seq[0]].strand_score, minus1)
+                            || mixed(self.seqs[ds_seq[1]].strand_score, minus2)
+                        {
+                            return Ok(false);
+                        }
+                    }
+                    let signed = |minus: bool| {
+                        if minus {
+                            -i64::from(len)
+                        } else {
+                            i64::from(len)
+                        }
+                    };
+                    self.seqs[ds_seq[0]].strand_score += signed(minus1);
+                    self.seqs[ds_seq[1]].strand_score += signed(minus2);
+                    self.matches.push(MixMatch {
+                        seq1: ds_seq[0],
+                        start1,
+                        seq2: Some(ds_seq[1]),
+                        start2,
+                        len,
+                        ds_idx: self.ds_cnt,
+                        score: len as i32,
+                        strands_differ: hsp.strands.differ(),
+                    })
+                }
                 (Some(start1), None) => self.matches.push(MixMatch {
                     seq1: ds_seq[0],
                     start1,
@@ -450,6 +562,7 @@ impl Mix {
                 (None, None) => {}
             }
         }
+        Ok(true)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:835-860
@@ -718,9 +831,13 @@ impl Mix {
         let mut lo_start_i: It;
         let mut hi_start_i: It = None;
         if self.seqs[seq1].starts.is_empty() {
-            // `seq1->m_PositiveStrand = ! (m_MergeFlags & fNegativeStrand);` (alnmerger.cpp:
-            // 483-489, quoted above; `fNegativeStrand` is not set here, module doc).
-            self.seqs[seq1].positive_strand = true;
+            // alnmerger.cpp:483-489, quoted above: the sign of the strand score with
+            // `fForceTranslation`, else `! (m_MergeFlags & fNegativeStrand)`, which no merge flag
+            // here has (module doc).
+            self.seqs[seq1].positive_strand = match self.add_flags {
+                AddFlags::ForceTranslation => self.seqs[seq1].strand_score >= 0,
+                AddFlags::PreserveRows => true,
+            };
             let seg = self.new_segment(len);
             self.seqs[seq1].starts.insert(start1, seg);
             self.set_start_iterator(seg, seq1, start1);
@@ -2024,7 +2141,7 @@ impl Mix {
             .iter()
             .map(|&row| self.seqs[self.rows[row]].positive_strand)
             .collect();
-        let widths: Vec<u32> = if self.translated_subjects {
+        let widths: Vec<u32> = if self.query_width == 3 || self.subject_width == 3 {
             keep.iter()
                 .map(|&row| self.seqs[self.rows[row]].width)
                 .collect()
@@ -2049,9 +2166,11 @@ impl Mix {
     }
 }
 
-/// The merged Dense-seg of one query's HSPs (`CAlnMix::Add` of each with `fPreserveRows`, then
-/// `Merge(fMinGap | fQuerySeqMergeOnly | fFillUnalignedRegions)` and `GetDenseg`).
-pub(crate) fn merge(hsps: &Hsps) -> Result<Denseg, MixError> {
+/// The merged Dense-seg of the HSPs `group` of a query's section (one frame group, in order):
+/// `CAlnMix::Add` of each with the group's flag (`Hsps::add_flags`), then `Merge(fMinGap |
+/// fQuerySeqMergeOnly | fFillUnalignedRegions)` and `GetDenseg`; `None` when every `Add` threw
+/// (`hasAln` is false: no merge, and `GetDenseg` throws for the group).
+pub(crate) fn merge(hsps: &Hsps, group: &[usize]) -> Result<Option<Denseg>, MixError> {
     let mut mix = Mix {
         seqs: Vec::new(),
         order: Vec::new(),
@@ -2062,25 +2181,21 @@ pub(crate) fn merge(hsps: &Hsps) -> Result<Denseg, MixError> {
         extra_rows: Vec::new(),
         rows: Vec::new(),
         segments: Vec::new(),
-        translated_subjects: hsps.translated_subjects,
+        query_width: hsps.query_width,
+        subject_width: hsps.subject_width,
+        add_flags: AddFlags::PreserveRows,
     };
-    for hsp in hsps.iter() {
-        mix.add(hsp, hsps.query_bioseq);
+    let mut has_aln = false;
+    for &index in group {
+        let hsp = hsps.hsp(index);
+        has_aln |= mix.add(hsp, hsps.add_flags(hsp.strands), hsps.query_bioseq)?;
     }
-    // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:89-98
-    // ```c++
-    //     if ( !m_DsCnt ) {
-    //         NCBI_THROW(CAlnException, eMergeFailure,
-    //                    "CAlnMixMerger::Merge(): "
-    //                    "No alignments were added for merging.");
-    //     }
-    // ```
-    if mix.ds_cnt == 0 {
-        return Err(MixError::Internal("no alignments were added for merging"));
+    if !has_aln {
+        return Ok(None);
     }
     mix.merge()?;
     mix.build_rows();
     mix.build()?;
     mix.fill_unaligned_regions()?;
-    mix.create_denseg()
+    mix.create_denseg().map(Some)
 }

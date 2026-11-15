@@ -509,10 +509,6 @@ mod tests {
                 "output format 5 is not supported by LOSAT's RPSTBLASTN",
             ),
             (
-                &["-outfmt", "1"],
-                "output format 1 is not supported by LOSAT's RPSTBLASTN",
-            ),
-            (
                 &["-outfmt", "11"],
                 "output format 11 is not supported by LOSAT's RPSTBLASTN",
             ),
@@ -547,10 +543,15 @@ mod tests {
         .into_blastx_args()
         .unwrap();
         assert_eq!((args.searchsp, args.dbsize), (Some(1000), Some(5000)));
-        // The formats LOSAT writes, a custom field list and NCBI's own error of 17 (BLASTX's).
-        // 13 and 14 to the standard output go on to NCBI's error too (BLASTX's).
+        // The formats LOSAT writes (1 to 4 through BLASTX's report, line RG item T3c), a custom
+        // field list and NCBI's own error of 17 (BLASTX's). 13 and 14 to the standard output go on
+        // to NCBI's error too (BLASTX's).
         for outfmt in [
             "0",
+            "1",
+            "2",
+            "3",
+            "4",
             "6",
             "7",
             "10",

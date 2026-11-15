@@ -450,16 +450,21 @@ impl RpsblastArgs {
 }
 
 /// The refusal of an `-outfmt` that NCBI's RPS programs run and LOSAT's `program` (RPSBLAST,
-/// RPSTBLASTN) does not write yet (item PS15a): every format but 0, 6, 7 and 10. Outfmt 17 goes on
-/// to NCBI's own error (`formatting_handler_check`), and with `xinclude_to_ncbi` outfmt 13 and 14
-/// too (to the standard output: NCBI's "Please provide a file name", `app::xinclude_check_for`).
+/// RPSTBLASTN) does not write yet (item PS15a): every format but 0, 6, 7 and 10, and RPSTBLASTN's
+/// query-anchored formats 1 to 4, which BLASTX's report writes for it (line RG item T3c). Outfmt
+/// 17 goes on to NCBI's own error (`formatting_handler_check`), and with `xinclude_to_ncbi` outfmt
+/// 13 and 14 too (to the standard output: NCBI's "Please provide a file name",
+/// `app::xinclude_check_for`).
 pub(crate) fn check_rps_outfmt(outfmt: &str, program: &str, xinclude_to_ncbi: bool) -> Result<()> {
     use crate::blastinput::app::ReportFormat;
     let choice = crate::blastinput::app::parse_formatting_string(outfmt)?;
     if let Some(format) = ReportFormat::from_number(choice.number) {
         let ncbi_error =
             xinclude_to_ncbi && matches!(format, ReportFormat::Json | ReportFormat::Xml2);
+        let query_anchored =
+            program == "RPSTBLASTN" && crate::report::pairwise::PairwiseView::of(format).is_some();
         if !ncbi_error
+            && !query_anchored
             && !matches!(
                 format,
                 ReportFormat::Pairwise

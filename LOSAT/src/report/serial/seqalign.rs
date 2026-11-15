@@ -290,7 +290,10 @@ pub(crate) fn protein_row_segments(hit: &crate::common::Hit, segments: &mut Segm
 /// that end as the length and an offset of 0. The plus-strand subject row's starts are the
 /// record's (`s_RemapToSubjectLoc` adds the `-subject_loc` start). The query-anchored reports read
 /// them (`report::query_anchored`).
-pub(crate) fn nucleotide_row_segments(hit: &crate::common::Hit, segments: &mut Segments) -> bool {
+pub(crate) fn nucleotide_row_segments(
+    hit: &crate::common::Hit,
+    segments: &mut Segments,
+) -> crate::report::query_anchored::HspStrands {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:114-140
     // ```c++
     // static TSeqPos
@@ -374,25 +377,31 @@ pub(crate) fn nucleotide_row_segments(hit: &crate::common::Hit, segments: &mut S
         ops: hit.gap_info.as_deref().unwrap_or(&[]),
     };
     collect_seq_align_data(&record, query_length, 0, false, false, segments);
-    minus
+    crate::report::query_anchored::HspStrands {
+        query_minus: minus,
+        ..Default::default()
+    }
 }
 
-/// The Dense-seg segments of a TBLASTN hit (`CreateDensegFromStdseg` of its Std-segs: the
-/// starts of `s_CollectSeqAlignData`, the subject's in nucleotides, and the lengths in residues)
-/// whose coordinates are in its records, the subject's in `subject_frame` of its record of
-/// `subject_length` nucleotides (`seq_range::record_frame`, the frame the report shows), and
-/// whether the rows' strands differ (a minus frame; the protein query row has none). NCBI makes
-/// them in the searched letters and the frame of the search and `s_RemapToSubjectLoc` adds the
-/// start of the `-subject_loc` interval (`RemapToQueryLoc` the query's): the same nucleotides as
-/// `s_GetAlignmentStart` counts in the record's frame (on the minus strand from the record's end,
-/// `original_length - 3 * (curr_pos + num) + frame + 1`), where the HSP's offset in that frame's
-/// residues is exact (the frame is that of the row's first nucleotide).
-pub(crate) fn translated_subject_row_segments(
+/// The Dense-seg segments of a hit of a translated search (`CreateDensegFromStdseg` of its
+/// Std-segs: the starts of `s_CollectSeqAlignData`, a translated row's in nucleotides, and the
+/// lengths in residues) whose coordinates are in its records, and its rows' strands and query
+/// frame. A translated row is given by its frame in its record and the record's length in
+/// nucleotides (`seq_range::record_frame`, the frame the report shows): the query's of BLASTX and
+/// TBLASTX (`query`), the subject's of TBLASTN and TBLASTX (`subject`); an untranslated row is a
+/// protein's (`None`), whose positions are the hit's. NCBI makes them in the searched letters and
+/// the frame of the search and `RemapToQueryLoc` / `s_RemapToSubjectLoc` add the starts of the
+/// `-query_loc` / `-subject_loc` intervals: the same nucleotides as `s_GetAlignmentStart` counts
+/// in the record's frame (on the minus strand from the record's end, `original_length - 3 *
+/// (curr_pos + num) + frame + 1`), where the HSP's offset in that frame's residues is exact (the
+/// frame is that of the row's first nucleotide). A row of a minus frame is on the minus strand
+/// (`s_Frame2Strand`); the query frame is the query's group (`query_anchored::Hsps`).
+pub(crate) fn translated_row_segments(
     hit: &crate::common::Hit,
-    subject_frame: i8,
-    subject_length: usize,
+    query: Option<(i8, usize)>,
+    subject: Option<(i8, usize)>,
     segments: &mut Segments,
-) -> bool {
+) -> crate::report::query_anchored::HspStrands {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:114-140
     // ```c++
     // static TSeqPos
@@ -451,28 +460,41 @@ pub(crate) fn translated_subject_row_segments(
     //     subj_aligns.Reset(RemapAlignToLoc(*subj_aligns, kSubjDimension, subj_loc));
     // }
     // ```
-    let frame = i32::from(subject_frame);
-    let length = subject_length as i32;
-    let (s_low, s_high) = (
-        hit.s_start.min(hit.s_end) as i32,
-        hit.s_start.max(hit.s_end) as i32,
-    );
-    // The frame's residue of the HSP's first codon: `frame - 1 + 3 * offset` is its first
-    // nucleotide on the plus strand; `length - 3 * offset + frame + 1` its end on the minus strand.
-    let s_offset = if frame > 0 {
-        (s_low - 1 - (frame - 1)) / CODON_LENGTH
-    } else {
-        (length + frame + 1 - s_high) / CODON_LENGTH
+    // A row's offset and end in its frame's residues (`HspRecord::q_offset`, `q_end`): the
+    // residue of the HSP's first codon is `(start - (frame - 1)) / 3` on the plus strand, where
+    // `frame - 1 + 3 * offset` is its first nucleotide, and `(length + frame + 1 - high) / 3` on
+    // the minus strand, where `length - 3 * offset + frame + 1` is its end; an untranslated row's
+    // positions are its residues.
+    let row = |start: usize, end: usize, translated: Option<(i8, usize)>| {
+        let (low, high) = (start.min(end) as i32, start.max(end) as i32);
+        match translated {
+            Some((frame, length)) => {
+                let (frame, length) = (i32::from(frame), length as i32);
+                let offset = if frame > 0 {
+                    (low - 1 - (frame - 1)) / CODON_LENGTH
+                } else {
+                    (length + frame + 1 - high) / CODON_LENGTH
+                };
+                (
+                    offset,
+                    offset + (high - low + 1) / CODON_LENGTH,
+                    frame as i8,
+                    length,
+                )
+            }
+            None => (low - 1, high, 0, 0),
+        }
     };
-    let residues = (s_high - s_low + 1) / CODON_LENGTH;
+    let (q_offset, q_end, q_frame, query_length) = row(hit.q_start, hit.q_end, query);
+    let (s_offset, s_end, s_frame, subject_length) = row(hit.s_start, hit.s_end, subject);
     let record = HspRecord {
         subject: 0,
-        q_offset: hit.q_start as i32 - 1,
-        q_end: hit.q_end as i32,
+        q_offset,
+        q_end,
         s_offset,
-        s_end: s_offset + residues,
-        q_frame: 0,
-        s_frame: subject_frame,
+        s_end,
+        q_frame,
+        s_frame,
         score: hit.raw_score,
         num: 0,
         evalue: hit.e_value,
@@ -482,8 +504,19 @@ pub(crate) fn translated_subject_row_segments(
         comp_adjust: 0,
         ops: hit.gap_info.as_deref().unwrap_or(&[]),
     };
-    collect_seq_align_data(&record, 0, length, false, true, segments);
-    frame < 0
+    collect_seq_align_data(
+        &record,
+        query_length,
+        subject_length,
+        query.is_some(),
+        subject.is_some(),
+        segments,
+    );
+    crate::report::query_anchored::HspStrands {
+        query_minus: q_frame < 0,
+        subject_minus: s_frame < 0,
+        query_frame: q_frame,
+    }
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:89-100

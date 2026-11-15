@@ -2732,17 +2732,20 @@ struct BlastpSections<'a> {
 
 /// The HSPs of a query-anchored section (outfmt 1 to 4), added to `hsps`: the first
 /// `num_alignments` subjects of the query's sorted hits (`QueryGroup::aligned`), each with all its
-/// HSPs in their order. An HSP's Dense-seg is its Seq-align's, which `segments_of` makes and tells
-/// whether its rows' strands differ (`seqalign::protein_row_segments`,
-/// `nucleotide_row_segments`, `translated_subject_row_segments`); the subjects shown in one hit
-/// (copies of a database record, `joins`) are the hit's subject, one Bioseq for NCBI's scope;
-/// `is_query` tells the subject that is the query's own Bioseq.
+/// HSPs in their order. An HSP's Dense-seg is its Seq-align's, which `segments_of` makes and gives
+/// its rows' strands and query frame of (`seqalign::protein_row_segments`,
+/// `nucleotide_row_segments`, `translated_row_segments`); the subjects shown in one hit (copies of
+/// a database record, `joins`) are the hit's subject, one Bioseq for NCBI's scope; `is_query`
+/// tells the subject that is the query's own Bioseq.
 fn section_hsps(
     mut hsps: super::query_anchored::Hsps,
     num_alignments: usize,
     group: &super::x_pairwise_par::QueryGroup<'_>,
     is_query: impl Fn(u32) -> bool,
-    mut segments_of: impl FnMut(&PairwiseHit, &mut super::serial::seqalign::Segments) -> bool,
+    mut segments_of: impl FnMut(
+        &PairwiseHit,
+        &mut super::serial::seqalign::Segments,
+    ) -> super::query_anchored::HspStrands,
 ) -> super::query_anchored::Hsps {
     let mut segments = super::serial::seqalign::Segments::default();
     for &s_idx in group.aligned(num_alignments) {
@@ -2750,15 +2753,8 @@ fn section_hsps(
             hsps.set_query_bioseq(s_idx);
         }
         for hit in &group.subject_hits[&s_idx] {
-            let strands_differ = segments_of(hit, &mut segments);
-            hsps.push_dense_seg(
-                s_idx,
-                segments.starts(),
-                segments.lens(),
-                0,
-                0,
-                strands_differ,
-            );
+            let strands = segments_of(hit, &mut segments);
+            hsps.push_dense_seg(s_idx, segments.starts(), segments.lens(), 0, 0, strands);
         }
     }
     hsps
@@ -2777,7 +2773,7 @@ fn blastp_section_hsps(
         is_query,
         |hit, segments| {
             super::serial::seqalign::protein_row_segments(&hit.hit, segments);
-            false
+            super::query_anchored::HspStrands::default()
         },
     )
 }
@@ -2797,8 +2793,30 @@ pub(crate) fn blastn_section_hsps(
     )
 }
 
+/// `section_hsps` of a BLASTX section (`seqalign::translated_row_segments`: a nucleotide query row
+/// of width 3 in the hit's frame of the query's record, a protein subject row).
+fn blastx_section_hsps(
+    num_alignments: usize,
+    group: &super::x_pairwise_par::QueryGroup<'_>,
+) -> super::query_anchored::Hsps {
+    section_hsps(
+        super::query_anchored::Hsps::of_translated_query(),
+        num_alignments,
+        group,
+        |_| false,
+        |hit, segments| {
+            super::serial::seqalign::translated_row_segments(
+                &hit.hit,
+                Some((hit.query_frame.unwrap_or(1), hit.hit.query_length)),
+                None,
+                segments,
+            )
+        },
+    )
+}
+
 /// Whether NCBI BLAST+ aborts on the query-anchored section (`view`) of query `q_idx` of a
-/// BLASTP `-subject` search (`section_aborts` of `blastp_section_hsps`).
+/// BLASTP `-subject` search (`section_aborts` of `blastp_section_aborts`).
 pub(crate) fn blastp_section_aborts(
     view: PairwiseView,
     sort: super::hit_sort::ReportSort,
@@ -4816,6 +4834,9 @@ pub fn write_tblastx_pairwise_report<W: Write>(
     probe: Option<&mut FormatProbe<'_>>,
     warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
+    // The sequences of the query-anchored sections (outfmt 1 to 4, `config.view`; `None` for
+    // outfmt 0).
+    anchored: Option<&dyn super::query_anchored::ReportSequences>,
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
@@ -4849,6 +4870,7 @@ pub fn write_tblastx_pairwise_report<W: Write>(
             queries,
             report,
             database,
+            anchored,
         },
         query_range.start,
         &hits_by_query,
@@ -4876,6 +4898,8 @@ struct TblastxSections<'a> {
     queries: &'a [TblastxPairwiseQuery],
     report: &'a TblastxPairwiseReport,
     database: Option<&'a PairwiseDatabase>,
+    /// The sequences of the query-anchored sections (outfmt 1 to 4; `None` for outfmt 0).
+    anchored: Option<&'a dyn super::query_anchored::ReportSequences>,
 }
 
 impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
@@ -5007,6 +5031,48 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
             part,
             write_hsp,
         )
+    }
+
+    fn merges_alignments(&self) -> bool {
+        self.config.view != PairwiseView::Pairwise
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1550-1552
+    // ```c++
+    //     CSeq_align_set copy_aln_set;
+    //     CBlastFormatUtil::PruneSeqalign(*aln_set, copy_aln_set, m_NumAlignments);
+    // ```
+    /// The query-anchored section of the query's aligned subjects: Dense-segs of two translated
+    /// nucleotide rows in their frames of their records (`seqalign::translated_row_segments`),
+    /// grouped by the query's frame and added with `fForceTranslation`
+    /// (`eTranslateNucToNucAlignment`, `Hsps::of_translated_nucleotides`).
+    fn alignments<W: Write>(
+        &self,
+        writer: &mut W,
+        q_idx: usize,
+        group: &super::x_pairwise_par::QueryGroup<'_>,
+    ) -> io::Result<()> {
+        // The query record's length (`Length=`), also with `-query_loc`.
+        let query_length = self.queries[q_idx].query_length;
+        write_anchored_section(writer, self.config, self.anchored, q_idx, |_| {
+            section_hsps(
+                super::query_anchored::Hsps::of_translated_nucleotides(),
+                self.report.num_alignments,
+                group,
+                |_| false,
+                |hit, segments| {
+                    super::serial::seqalign::translated_row_segments(
+                        &hit.hit,
+                        Some((hit.query_frame.unwrap_or(1), query_length)),
+                        Some((
+                            hit.subject_frame.unwrap_or(1),
+                            hit.subject_length.unwrap_or(0),
+                        )),
+                        segments,
+                    )
+                },
+            )
+        })
     }
 
     fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()> {
@@ -6286,7 +6352,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
     //     CBlastFormatUtil::PruneSeqalign(*aln_set, copy_aln_set, m_NumAlignments);
     // ```
     /// The query-anchored section of the query's aligned subjects: Dense-segs of a protein query
-    /// row and a translated nucleotide subject row (`seqalign::translated_subject_row_segments`).
+    /// row and a translated nucleotide subject row (`seqalign::translated_row_segments`).
     fn alignments<W: Write>(
         &self,
         writer: &mut W,
@@ -6300,10 +6366,13 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
                 group,
                 |_| false,
                 |hit, segments| {
-                    super::serial::seqalign::translated_subject_row_segments(
+                    super::serial::seqalign::translated_row_segments(
                         &hit.hit,
-                        hit.subject_frame.unwrap_or(1),
-                        hit.subject_length.unwrap_or(0),
+                        None,
+                        Some((
+                            hit.subject_frame.unwrap_or(1),
+                            hit.subject_length.unwrap_or(0),
+                        )),
                         segments,
                     )
                 },
@@ -6668,6 +6737,9 @@ pub fn write_blastx_pairwise_report<W: Write>(
     records_parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     mut probe: Option<&mut FormatProbe<'_>>,
     first_hsp: HspIndex,
+    // The sequences of the query-anchored sections (outfmt 1 to 4, `config.view`; `None` for
+    // outfmt 0).
+    anchored: Option<&dyn super::query_anchored::ReportSequences>,
 ) -> io::Result<()> {
     let mut writer = io::BufWriter::new(writer);
     // `hits[i]` is HSP `first_hsp + i` of the run's hit list (LOSAT Web's `run_local` writes a run
@@ -6754,7 +6826,29 @@ pub fn write_blastx_pairwise_report<W: Write>(
                 },
             )?;
             writeln!(writer)?;
-            for oid in order.iter().take(options.num_alignments) {
+            if config.view != PairwiseView::Pairwise {
+                // The query-anchored section (outfmt 1 to 4) of the first `num_alignments`
+                // subjects, after the merge has read each of them (`x_pairwise_par::write`'s
+                // order of the reads, showalign.cpp:1998-2003); none without one.
+                let aligned = group.aligned(options.num_alignments);
+                if !aligned.is_empty() {
+                    for &s_idx in aligned {
+                        if let Some(reads) = reads.as_mut() {
+                            reads.subject_read(qidx, s_idx, &mut writer, &mut *stderr)?;
+                        }
+                    }
+                    write_anchored_section(&mut writer, config, anchored, qidx, |_| {
+                        blastx_section_hsps(options.num_alignments, &group)
+                    })?;
+                }
+            }
+            // Outfmt 0's alignments of the same subjects, one by one.
+            let pairwise_alignments = if config.view == PairwiseView::Pairwise {
+                options.num_alignments
+            } else {
+                0
+            };
+            for oid in order.iter().take(pairwise_alignments) {
                 if let Some(reads) = reads.as_mut() {
                     reads.subject_read(qidx, *oid, &mut writer, &mut *stderr)?;
                 }
@@ -7427,6 +7521,7 @@ mod tblastx_tests {
                             &mut diagnostics,
                         )),
                         x_pool,
+                        None,
                     )
                     .unwrap();
                     (written, diagnostics)

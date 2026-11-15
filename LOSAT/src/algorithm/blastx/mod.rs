@@ -453,6 +453,7 @@ mod culling;
 pub mod report;
 // NCBI c++/src/algo/blast/api/blast_seqalign.cpp:1549-1649 (BlastHitList2SeqAlign_OMF): the
 // Seq-aligns of each query's final hit list (outfmt 8, 12).
+mod anchored;
 mod archive;
 // The streams of a library call's hold, which the report streams of `cli::NcbiOstream` name.
 pub(crate) use blast_xml::HeldFormatWriter;

@@ -19,7 +19,8 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::Placements;
 use crate::report::db_subject::ParsedSubject;
 use crate::report::query_anchored::{
-    database_label, query_record_letters, record_label, subject_is_query_record, ReportSequences,
+    database_label, query_record_letters, record_label, subject_is_query_record, Mask,
+    ReportSequences,
 };
 
 /// What the sections of a BLASTN report read (module doc).
@@ -42,12 +43,12 @@ pub(crate) struct AnchoredSequences<'a> {
 }
 
 /// Appends the half-open masks `masks` as inclusive positions.
-fn push_masks(masks: &[crate::utils::dust::MaskedInterval], out: &mut Vec<(u32, u32)>) {
+fn push_masks(masks: &[crate::utils::dust::MaskedInterval], out: &mut Vec<Mask>) {
     out.extend(
         masks
             .iter()
             .filter(|mask| mask.start < mask.end)
-            .map(|mask| (mask.start as u32, mask.end as u32 - 1)),
+            .map(|mask| (mask.start as u32, mask.end as u32 - 1, 0)),
     );
 }
 
@@ -100,11 +101,11 @@ impl ReportSequences for AnchoredSequences<'_> {
         }
     }
 
-    fn query_masks(&self, q_idx: usize, out: &mut Vec<(u32, u32)>) {
+    fn query_masks(&self, q_idx: usize, out: &mut Vec<Mask>) {
         push_masks(self.rows.query_masks(q_idx), out);
     }
 
-    fn subject_masks(&self, q_idx: usize, s_idx: u32, out: &mut Vec<(u32, u32)>) {
+    fn subject_masks(&self, q_idx: usize, s_idx: u32, out: &mut Vec<Mask>) {
         let Some(hit_list) = self.hit_lists.get(q_idx).and_then(Option::as_ref) else {
             return;
         };

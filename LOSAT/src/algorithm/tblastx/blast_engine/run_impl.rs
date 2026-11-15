@@ -1157,7 +1157,10 @@ pub fn run(
         }
     };
     let out_file = open_out_file(&args)?;
-    let pairwise = format == Some(crate::blastinput::app::ReportFormat::Pairwise);
+    // Outfmt 0 to 4 (the query-anchored formats write through the same formatter).
+    let pairwise = format
+        .and_then(crate::report::pairwise::PairwiseView::of)
+        .is_some();
     // LOSAT's reports read the format number that NCBI reads: the number and the custom fields,
     // or the value as given when it has a delimiter, which `normalized` drops and the custom
     // tabular report reads (`report::output_format`, which parses it again as NCBI does).
@@ -2343,7 +2346,7 @@ fn write_pairwise_prologs(
     before_search: bool,
 ) -> Result<()> {
     for format in outputs.formats.iter_mut() {
-        if report::output_format(format.outfmt) == report::TblastxOutputFormat::Pairwise
+        if report::output_format(format.outfmt).is_pairwise()
             && prolog_before_search(&format.sink) == before_search
         {
             let mut writer = format.sink.open()?;
@@ -2454,7 +2457,13 @@ fn write_tblastx_outputs(
         .iter()
         .map(|format| report::output_format(format.outfmt))
         .collect();
-    if args.parse_deflines && output_formats.contains(&report::TblastxOutputFormat::Pairwise) {
+    // Outfmt 0's refusal (formats 1 to 4 refuse a section that holds a query's own record,
+    // `refuse_query_records_in_sections`).
+    if args.parse_deflines
+        && output_formats.contains(&report::TblastxOutputFormat::Pairwise(
+            crate::report::pairwise::PairwiseView::Pairwise,
+        ))
+    {
         crate::blastinput::fasta_reader::believed::refuse_shared_masks(
             run.queries,
             |query| {
@@ -2474,7 +2483,7 @@ fn write_tblastx_outputs(
                 .map(|record| (record.believed(), record.title.as_slice())),
             args.show_gis,
             false,
-            output_formats.contains(&report::TblastxOutputFormat::Pairwise),
+            output_formats.iter().any(|format| format.is_pairwise()),
             "TBLASTX",
         )?
     } else {
@@ -2561,15 +2570,63 @@ fn write_tblastx_outputs(
     // ```
     // The outfmt 0 descriptions and headings are made from the subjects' title bytes
     // (`report::defline::generate_defline`), by subject index, as BLASTN's.
-    let subject_titles: Vec<Arc<[u8]>> =
-        if output_formats.contains(&report::TblastxOutputFormat::Pairwise) {
-            run.subjects
-                .iter()
-                .map(|subject| Arc::from(subject.title.as_slice()))
-                .collect()
-        } else {
-            Vec::new()
-        };
+    let subject_titles: Vec<Arc<[u8]>> = if output_formats.iter().any(|format| format.is_pairwise())
+    {
+        run.subjects
+            .iter()
+            .map(|subject| Arc::from(subject.title.as_slice()))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    // The query-anchored formats (outfmt 1 to 4, line RG T3c): their refusals before any format
+    // is written (`anchored::refuse_anchored_reports`), and the sequences of their sections, made
+    // once.
+    let anchored_view = output_formats.iter().find_map(|format| match format {
+        report::TblastxOutputFormat::Pairwise(view)
+            if *view != crate::report::pairwise::PairwiseView::Pairwise =>
+        {
+            Some(*view)
+        }
+        _ => None,
+    });
+    let anchored = match anchored_view {
+        Some(view) => {
+            super::super::anchored::refuse_anchored_reports(
+                run,
+                &hits,
+                seqalign_identities.as_deref(),
+                view.report_sort(args.formatting.report_sort()),
+                args.report_counts.num_alignments,
+                args.report_counts.num_descriptions,
+            )?;
+            Some(super::super::anchored::AnchoredSequences {
+                queries: run.queries,
+                query_placements: &run.ranges.input.placements,
+                subjects: run.subjects,
+                subject_letters: run.subject_letters,
+                subject_placements: run.ranges.subject_placements,
+                database: run.database,
+                show_gis: args.show_gis,
+                query_masks: run
+                    .query_stats
+                    .iter()
+                    .zip(run.queries)
+                    .enumerate()
+                    .map(|(q_idx, (stats, query))| {
+                        report::query_frame_masks(
+                            stats,
+                            query.seq().len(),
+                            run.ranges.input.placements.offset(q_idx),
+                        )
+                    })
+                    .collect(),
+                query_code: report::DisplayCode::new(&query_code),
+                db_code: report::DisplayCode::new(&db_code),
+            })
+        }
+        None => None,
+    };
     let database = match &run.database {
         Some(database) => database.name.to_string(),
         None => tblastx_database_name(args),
@@ -2654,7 +2711,7 @@ fn write_tblastx_outputs(
         let side_sink = format.sink.side_files().cloned();
         let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
         match output_format {
-            report::TblastxOutputFormat::Pairwise => {
+            report::TblastxOutputFormat::Pairwise(view) => {
                 let queries: Vec<crate::report::pairwise::TblastxPairwiseQuery> = run
                     .queries
                     .iter()
@@ -2728,7 +2785,10 @@ fn write_tblastx_outputs(
                     program: "tblastx".to_string(),
                     protein_matrix: matrix,
                     line_length: args.formatting.line_length(),
-                    sort: args.formatting.report_sort(),
+                    // `-sorthits` for every view, `-sorthsps` for outfmt 0 only (NCBI's warning
+                    // for the others, `PairwiseView::report_sort`).
+                    sort: view.report_sort(args.formatting.report_sort()),
+                    view,
                     ..crate::report::pairwise::PairwiseConfig::default()
                 };
                 let mut write = |rows: &[crate::report::pairwise::PairwiseHit],
@@ -2745,6 +2805,9 @@ fn write_tblastx_outputs(
                         probe.as_mut(),
                         warnings.as_mut(),
                         run.x_pairwise_pool,
+                        anchored.as_ref().map(|sequences| {
+                            sequences as &dyn crate::report::query_anchored::ReportSequences
+                        }),
                     )
                 };
                 match pairwise.as_deref() {
@@ -2931,6 +2994,10 @@ fn write_tblastx_outputs(
                     probe.as_mut(),
                 )?
             }
+            // Refused before the search (`TblastxOutputFormat::Unsupported`).
+            report::TblastxOutputFormat::Unsupported => {
+                anyhow::bail!("LOSAT internal error: an output format that TBLASTX does not write")
+            }
             report::TblastxOutputFormat::Tabular
             | report::TblastxOutputFormat::TabularWithComments => match run.x_pool {
                 // EXPERIMENT (LOSAT_X_TBXRPTPAR): the rows formatted on the pool; with the format
@@ -2999,7 +3066,7 @@ fn rows_up_front(
     output_formats: &[report::TblastxOutputFormat],
 ) -> bool {
     outputs.hits.is_some()
-        || (output_formats.contains(&report::TblastxOutputFormat::Pairwise)
+        || (output_formats.iter().any(|format| format.is_pairwise())
             && (outputs.observer.is_some()
                 || run.ranges.input.placements.ranged()
                 || run.ranges.subject_placements.ranged()))
@@ -3060,8 +3127,7 @@ fn report_counts<S: TbxScore>(
     // The rows of outfmt 0 and of the caller's hit records keep the engine's identities, read
     // before the display counts replace them, when the report reads them.
     let seqalign_identities = (run.args.formatting.report_sort().reads_hsp_scores()
-        && (outputs.hits.is_some()
-            || output_formats.contains(&report::TblastxOutputFormat::Pairwise)))
+        && (outputs.hits.is_some() || output_formats.iter().any(|format| format.is_pairwise())))
     .then(|| report::seqalign_identities(hits));
     // The display counts are read by the outfmt 0, 6 and 7 reports and the caller's hit
     // records only.
@@ -3619,9 +3685,10 @@ fn run_batch_loop(
         .and_then(crate::api::local_blast::FormatOutput::report_format);
     let places_reads =
         first_report.is_some_and(crate::blastinput::app::ReportFormat::places_subject_reads);
-    // The pairwise report reads its subjects in the order of its `-sorthits`.
-    let pairwise = (first_report == Some(crate::blastinput::app::ReportFormat::Pairwise))
-        .then(|| args.formatting.report_sort());
+    // The pairwise report (outfmt 0 to 4) reads its subjects in the order of its `-sorthits`.
+    let pairwise = first_report
+        .and_then(crate::report::pairwise::PairwiseView::of)
+        .map(|view| view.report_sort(args.formatting.report_sort()));
     // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0 too,
     // which the prefetch does not: the rows of a batch with hits may open the taxonomy database
     // before a later batch's prefetch (`TaxdbRun::open_for_rows`).
@@ -4419,7 +4486,7 @@ impl BatchReports<'_> {
                     .iter()
                     .map(|format| report::output_format(format.outfmt))
                     .collect();
-                let pairwise_shown = formats.contains(&report::TblastxOutputFormat::Pairwise);
+                let pairwise_shown = formats.iter().any(|format| format.is_pairwise());
                 let shown = crate::algorithm::common::database::ParsedShown {
                     tabular: formats.iter().any(|format| format.tabular_reads_subject()),
                     pairwise: pairwise_shown,

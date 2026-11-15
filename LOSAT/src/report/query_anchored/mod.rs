@@ -29,14 +29,18 @@
 //!     }
 //! ```
 //!
-//! What BLASTP's, BLASTN's and TBLASTN's Seq-aligns reach (lines RG T3a and T3b), all in NCBI's
-//! first frame group: Dense-segs of two rows (BLASTN's minus-strand HSPs with the query on the
-//! minus strand; the Dense-diag of an ungapped BLASTN HSP, `CreateDensegFromDendiag`, is the
-//! Dense-seg of its one segment), and TBLASTN's Std-segs as `CreateDensegFromStdseg` makes them
-//! (a protein query row of width 1, a nucleotide subject row of width 3 in its frame). The frame
-//! groups of a translated query (`For reading frame ...`, `s_GetStdsegMasterFrame`),
-//! `fNegativeStrand` and `fForceTranslation` (BLASTX, TBLASTX: line RG T3c) are not written here:
-//! the input (`Hsps`) has no query strand and no query width.
+//! What the programs' Seq-aligns reach (lines RG T3a, T3b and T3c): Dense-segs of two rows
+//! (BLASTN's minus-strand HSPs with the query on the minus strand; the Dense-diag of an ungapped
+//! BLASTN HSP, `CreateDensegFromDendiag`, is the Dense-seg of its one segment), and the Std-segs
+//! of the translated programs as `CreateDensegFromStdseg` makes them: TBLASTN's (a protein query
+//! row of width 1, a nucleotide subject row of width 3 in its frame), BLASTX's (a nucleotide query
+//! row of width 3, a protein subject row) and TBLASTX's (no widths: two nucleotide rows of the same
+//! length, which `CAlnMix::Add` with `fForceTranslation` gives widths of 3, `x_ExtendDSWithWidths`).
+//! A translated query's HSPs go into six groups by the query's frame (`s_GetStdsegMasterFrame`),
+//! each merged and written on its own, under `For reading frame <f> of query sequence:` when more
+//! than one group has HSPs (`write_section`). BLASTN's, BLASTP's and TBLASTN's are all in the
+//! first group, added with `fPreserveRows`; TBLASTX's with `fForceTranslation`, and BLASTX's of a
+//! minus frame with `fNegativeStrand`, which `Add` reads as `fForceTranslation` (`AddFlags`).
 
 mod aln_mix;
 mod aln_vec;
@@ -64,37 +68,95 @@ pub(crate) struct Segment {
     pub(crate) len: u32,
 }
 
-/// One HSP of a section (`Hsps::iter`): its subject's key, its Dense-seg's segments, and whether
-/// its rows are on different strands (`m_StrandsDiffer`: a minus-strand BLASTN HSP, whose query
-/// row is on the minus strand, or a TBLASTN HSP in a minus frame).
+/// The strands of an HSP's Dense-seg rows and the query's frame (`Hsps::push_dense_seg`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct HspStrands {
+    /// The query's row is on the minus strand: a minus-strand BLASTN HSP (`s_CollectSeqAlignData`
+    /// puts the query on the minus strand), a BLASTX or TBLASTX HSP in a minus query frame.
+    pub(crate) query_minus: bool,
+    /// The subject's row is on the minus strand: a TBLASTN or TBLASTX HSP in a minus subject frame.
+    pub(crate) subject_minus: bool,
+    /// The query's frame in its record (`s_GetStdsegMasterFrame`: 1 to 3, -1 to -3) when the query
+    /// is translated (BLASTX, TBLASTX); 0 otherwise.
+    pub(crate) query_frame: i8,
+}
+
+impl HspStrands {
+    /// `m_StrandsDiffer` of the HSP's matches (alnmatch.cpp:241-251, quoted at `aln_mix::Mix::add`):
+    /// one row on the minus strand and the other not (a protein row has no strand, read as plus).
+    pub(crate) fn differ(self) -> bool {
+        self.query_minus != self.subject_minus
+    }
+}
+
+/// One HSP of a section (`Hsps::iter`): its subject's key, its Dense-seg's segments and its rows'
+/// strands.
 #[derive(Clone, Copy)]
 pub(crate) struct Hsp<'a> {
     pub(crate) subject: u32,
     pub(crate) segments: &'a [Segment],
-    pub(crate) strands_differ: bool,
+    pub(crate) strands: HspStrands,
 }
 
 /// The HSPs of one query's section in the order of its Seq-align set after the sort and the
 /// prune of the report (`PruneSeqalign`): each with its subject's key and its segments.
-#[derive(Default)]
 pub(crate) struct Hsps {
     segments: Vec<Segment>,
-    /// Each HSP's subject, the end of its segments in `segments` and `Hsp::strands_differ`.
-    hsps: Vec<(u32, usize, bool)>,
+    /// Each HSP's subject, the end of its segments in `segments` and `Hsp::strands`.
+    hsps: Vec<(u32, usize, HspStrands)>,
     /// The subject that is the query's own Bioseq (one record read as the query and as a subject
     /// with `-parse_deflines`), which `CAlnMix::Add` keeps on its own row (`fPreserveRows`).
     query_bioseq: Option<u32>,
-    /// The query is a protein and the subjects are nucleotides (TBLASTN): the subjects' rows have
-    /// a width of 3, their starts are nucleotides and the segments' lengths residues.
-    translated_subjects: bool,
+    /// The width of the query's row and of the subjects' rows: 3 for a nucleotide sequence
+    /// translated against proteins (BLASTX's query, TBLASTN's subjects, TBLASTX's both), whose
+    /// starts are nucleotides and whose segments' lengths are residues; else 1.
+    query_width: u32,
+    subject_width: u32,
+    /// TBLASTX (`eTranslateNucToNucAlignment`, blast_format.cpp:651): the HSPs go into the groups of
+    /// their query frames and are added with `fForceTranslation`.
+    translate_nuc_to_nuc: bool,
+}
+
+impl Default for Hsps {
+    /// The HSPs of a section of untranslated rows (BLASTP, BLASTN).
+    fn default() -> Self {
+        Self {
+            segments: Vec::new(),
+            hsps: Vec::new(),
+            query_bioseq: None,
+            query_width: 1,
+            subject_width: 1,
+            translate_nuc_to_nuc: false,
+        }
+    }
 }
 
 impl Hsps {
     /// The HSPs of a section whose subjects are nucleotides translated against a protein query
-    /// (`translated_subjects`).
+    /// (TBLASTN).
     pub(crate) fn of_translated_subjects() -> Self {
         Self {
-            translated_subjects: true,
+            subject_width: 3,
+            ..Self::default()
+        }
+    }
+
+    /// The HSPs of a section whose query is a nucleotide sequence translated against protein
+    /// subjects (BLASTX): grouped by the query's frame.
+    pub(crate) fn of_translated_query() -> Self {
+        Self {
+            query_width: 3,
+            ..Self::default()
+        }
+    }
+
+    /// The HSPs of a section of nucleotide sequences translated on both sides (TBLASTX): grouped by
+    /// the query's frame and added with `fForceTranslation`.
+    pub(crate) fn of_translated_nucleotides() -> Self {
+        Self {
+            query_width: 3,
+            subject_width: 3,
+            translate_nuc_to_nuc: true,
             ..Self::default()
         }
     }
@@ -106,8 +168,7 @@ impl Hsps {
     /// Adds an HSP of subject `subject`, its Dense-seg's `starts` (two per segment, the query's
     /// then the subject's, `-1` for a gap, `report::serial::seqalign::Segments::starts`) and
     /// `lens`, each start moved by `query_offset` and `subject_offset` (the remaps of the
-    /// ranges, `RemapToQueryLoc` and `s_RemapToSubjectLoc`), and `strands_differ`
-    /// (`Hsp::strands_differ`).
+    /// ranges, `RemapToQueryLoc` and `s_RemapToSubjectLoc`), and its rows' `strands`.
     pub(crate) fn push_dense_seg(
         &mut self,
         subject: u32,
@@ -115,7 +176,7 @@ impl Hsps {
         lens: &[i32],
         query_offset: u32,
         subject_offset: u32,
-        strands_differ: bool,
+        strands: HspStrands,
     ) {
         let position = |start: i32, offset: u32| (start >= 0).then(|| start as u32 + offset);
         self.segments.extend(
@@ -128,8 +189,7 @@ impl Hsps {
                     len: len as u32,
                 }),
         );
-        self.hsps
-            .push((subject, self.segments.len(), strands_differ));
+        self.hsps.push((subject, self.segments.len(), strands));
     }
 
     /// Marks subject `subject` as the query's own Bioseq (`query_bioseq`).
@@ -137,21 +197,165 @@ impl Hsps {
         self.query_bioseq = Some(subject);
     }
 
-    /// The HSPs, in order.
-    fn iter(&self) -> impl Iterator<Item = Hsp<'_>> {
-        let mut start = 0;
-        self.hsps
-            .iter()
-            .map(move |&(subject, end, strands_differ)| {
-                let segments = &self.segments[start..end];
-                start = end;
-                Hsp {
-                    subject,
-                    segments,
-                    strands_differ,
-                }
-            })
+    /// HSP `index`.
+    fn hsp(&self, index: usize) -> Hsp<'_> {
+        let (subject, end, strands) = self.hsps[index];
+        let start = index.checked_sub(1).map_or(0, |before| self.hsps[before].1);
+        Hsp {
+            subject,
+            segments: &self.segments[start..end],
+            strands,
+        }
     }
+
+    /// The HSPs of each frame group, by index (`k_FrameConversion`: +1, +2, +3, -1, -2, -3): the
+    /// group of the query's frame when the query is translated (BLASTX: the Dense-seg's first
+    /// width is 3; TBLASTX: `eTranslateNucToNucAlignment`), else the first group.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2010-2041
+    /// ```c++
+    ///                 if((*alnIter)->GetSegs().Which() == CSeq_align::C_Segs::e_Std) {
+    ///                     CTypeConstIterator<CStd_seg> ss = ConstBegin(**alnIter);
+    ///                     CRef<CSeq_align> convertedDs =
+    ///                         (*alnIter)->CreateDensegFromStdseg();
+    ///                     if((convertedDs->GetSegs().GetDenseg().IsSetWidths()
+    ///                         && convertedDs->GetSegs().GetDenseg().GetWidths()[0] == 3)
+    ///                        || m_AlignOption & eTranslateNucToNucAlignment){
+    ///                         //only do this for translated master
+    ///                         int frame = s_GetStdsegMasterFrame(*ss, m_Scope);
+    ///                         switch(frame){
+    ///                         case 1:
+    ///                             alnVector[0]->Set().push_back(convertedDs);
+    ///                             break;
+    ///                         ...
+    ///                         case -3:
+    ///                             alnVector[5]->Set().push_back(convertedDs);
+    ///                             break;
+    ///                         default:
+    ///                             break;
+    ///                         }
+    ///                     }
+    ///                     else {
+    ///                         alnVector[0]->Set().push_back(convertedDs);
+    ///                     }
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:411-450
+    /// ```c++
+    /// static int s_GetFrame (int start, ENa_strand strand, const CSeq_id& id,
+    ///                        CScope& sp)
+    /// {
+    ///     int frame = 0;
+    ///     if (strand == eNa_strand_plus) {
+    ///         frame = (start % 3) + 1;
+    ///     } else if (strand == eNa_strand_minus) {
+    ///         frame = -(((int)sp.GetBioseqHandle(id).GetBioseqLength() - start - 1)
+    ///                   % 3 + 1);
+    ///
+    ///     }
+    ///     return frame;
+    /// }
+    /// ...
+    /// static int s_GetStdsegMasterFrame(const CStd_seg& ss, CScope& scope)
+    /// {
+    ///     const CRef<CSeq_loc> slc = ss.GetLoc().front();
+    ///     ENa_strand strand = GetStrand(*slc);
+    ///     int frame = s_GetFrame(strand ==  eNa_strand_plus ?
+    ///                            GetStart(*slc, &scope) : GetStop(*slc, &scope),
+    ///                            strand ==  eNa_strand_plus ?
+    ///                            eNa_strand_plus : eNa_strand_minus,
+    ///                            *(ss.GetIds().front()), scope);
+    ///     return frame;
+    /// }
+    /// ```
+    /// The query's first Std-seg holds the HSP's first letter on the query's strand: its frame is
+    /// that of the HSP in the query's record (`HspStrands::query_frame`, which the program gives).
+    fn groups(&self) -> [Vec<usize>; K_NUM_FRAME] {
+        let mut groups: [Vec<usize>; K_NUM_FRAME] = Default::default();
+        let by_frame = self.query_width == 3 || self.translate_nuc_to_nuc;
+        for (index, &(_, _, strands)) in self.hsps.iter().enumerate() {
+            let group = if !by_frame {
+                Some(0)
+            } else {
+                match strands.query_frame {
+                    1 => Some(0),
+                    2 => Some(1),
+                    3 => Some(2),
+                    -1 => Some(3),
+                    -2 => Some(4),
+                    -3 => Some(5),
+                    _ => None,
+                }
+            };
+            if let Some(group) = group {
+                groups[group].push(index);
+            }
+        }
+        groups
+    }
+
+    /// The flag that `DisplaySeqalign` adds HSP `strands`' Dense-seg with.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2062-2072
+    /// ```c++
+    ///                     if (m_AlignOption & eTranslateNucToNucAlignment) {
+    ///                         mix[i]->Add(*ds, CAlnMix::fForceTranslation);
+    ///                     } else {
+    ///                         if (ds->IsSetWidths() &&
+    ///                             ds->GetWidths()[0] == 3 &&
+    ///                             ds->IsSetStrands() &&
+    ///                             ds->GetStrands().front()==eNa_strand_minus){
+    ///                             mix[i]->Add(*ds, CAlnMix::fNegativeStrand);
+    ///                         } else {
+    ///                             mix[i]->Add(*ds, CAlnMix::fPreserveRows);
+    ///                         }
+    ///                     }
+    /// ```
+    /// NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnmix.hpp:74-103
+    /// ```c++
+    ///     enum EAddFlags {
+    ///         // Determine score of each aligned segment in the process of mixing
+    ///         // (only makes sense if scope was provided at construction time)
+    ///         fCalcScore            = 0x01,
+    ///
+    ///         // Force translation of nucleotide rows
+    ///         // This will result in an output Dense-seg that has Widths,
+    ///         // no matter if the whole alignment consists of nucleotides only.
+    ///         fForceTranslation     = 0x02,
+    ///
+    ///         // Used for mapping sequence to itself
+    ///         fPreserveRows         = 0x04
+    ///     };
+    ///     ...
+    ///     enum EMergeFlags {
+    ///         fGen2EST              = 0x0001, // otherwise Nucl2Nucl
+    ///         fNegativeStrand       = 0x0002,
+    /// ```
+    /// `fNegativeStrand` is a merge flag: as the add flag of a BLASTX HSP in a minus query frame
+    /// (the Dense-seg's first width is 3 and its first strand minus) it is `fForceTranslation`.
+    fn add_flags(&self, strands: HspStrands) -> AddFlags {
+        if self.translate_nuc_to_nuc || (self.query_width == 3 && strands.query_minus) {
+            AddFlags::ForceTranslation
+        } else {
+            AddFlags::PreserveRows
+        }
+    }
+}
+
+/// `k_NumFrame`, the frame groups of a section (showalign.cpp:85-86).
+const K_NUM_FRAME: usize = 6;
+
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:86
+/// ```c++
+/// static const char* k_FrameConversion[k_NumFrame] = {"+1", "+2", "+3", "-1", "-2", "-3"};
+/// ```
+const K_FRAME_CONVERSION: [&str; K_NUM_FRAME] = ["+1", "+2", "+3", "-1", "-2", "-3"];
+
+/// The add flags that `DisplaySeqalign` gives `CAlnMix::Add` (`Hsps::add_flags`): `fPreserveRows`
+/// (0x04), or `fForceTranslation` (0x02, also as the value of the merge flag `fNegativeStrand`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AddFlags {
+    PreserveRows,
+    ForceTranslation,
 }
 
 /// The merged Dense-seg of a section (`x_CreateDenseg`): the sequence of each row (the query
@@ -185,9 +389,17 @@ pub(crate) trait Sequences {
     fn label(&self, seq: SeqKey, out: &mut Vec<u8>);
 
     /// Appends the masks of `seq`: the query's `TMaskedQueryRegions`, a subject's of
-    /// `GetSubjectMasks` (inclusive, 0-based, in the records; all of frame 0).
-    fn masks(&self, seq: SeqKey, out: &mut Vec<(u32, u32)>);
+    /// `GetSubjectMasks` (inclusive, 0-based, in the records), each with its frame (`Mask`).
+    fn masks(&self, seq: SeqKey, out: &mut Vec<Mask>);
 }
+
+/// A mask (`CSeqLocInfo`): its first and last position (inclusive, 0-based, in the record) and its
+/// frame (`GetFrame`). A translated query's masks have the frame of the context they were made in
+/// (`BLAST_ContextToFrame`: 1 to 3, -1 to -3, counted in the searched letters,
+/// `Blast_GetSeqLocInfoVector`, blast_aux.cpp:930-959); every other mask has none
+/// (`CSeqLocInfo::eFrameNotSet`, 0: BLASTN's query masks, blast_aux.cpp:892; a protein query's
+/// context frame 0; the subjects' masks, seqinfosrc_seqvec.cpp:142, seqinfosrc_seqdb.cpp:118).
+pub(crate) type Mask = (u32, u32, i8);
 
 /// What a program's report gives the sections of its queries: [`Sequences`] by the query's and
 /// the subjects' indices in the report (a subject's masks are those of its HSP list with the
@@ -199,8 +411,13 @@ pub(crate) trait ReportSequences: Sync {
     fn subject_letters(&self, s_idx: u32, from: u32, to: u32, out: &mut Vec<u8>);
     fn query_label(&self, q_idx: usize, out: &mut Vec<u8>);
     fn subject_label(&self, s_idx: u32, out: &mut Vec<u8>);
-    fn query_masks(&self, q_idx: usize, out: &mut Vec<(u32, u32)>);
-    fn subject_masks(&self, q_idx: usize, s_idx: u32, out: &mut Vec<(u32, u32)>);
+    fn query_masks(&self, q_idx: usize, out: &mut Vec<Mask>);
+    fn subject_masks(&self, q_idx: usize, s_idx: u32, out: &mut Vec<Mask>);
+
+    /// The genetic code of the query's translated row (`Sequences::genetic_code`).
+    fn query_genetic_code(&self) -> Option<crate::algorithm::tblastx::report::DisplayCode> {
+        None
+    }
 
     /// The genetic code of the subjects' translated rows (`Sequences::genetic_code`).
     fn subject_genetic_code(&self) -> Option<crate::algorithm::tblastx::report::DisplayCode> {
@@ -229,7 +446,7 @@ impl Sequences for OfQuery<'_> {
         }
     }
 
-    fn masks(&self, seq: SeqKey, out: &mut Vec<(u32, u32)>) {
+    fn masks(&self, seq: SeqKey, out: &mut Vec<Mask>) {
         match seq {
             SeqKey::Query => self.sequences.query_masks(self.q_idx, out),
             SeqKey::Subject(s_idx) => self.sequences.subject_masks(self.q_idx, s_idx, out),
@@ -238,7 +455,7 @@ impl Sequences for OfQuery<'_> {
 
     fn genetic_code(&self, seq: SeqKey) -> Option<crate::algorithm::tblastx::report::DisplayCode> {
         match seq {
-            SeqKey::Query => None,
+            SeqKey::Query => self.sequences.query_genetic_code(),
             SeqKey::Subject(_) => self.sequences.subject_genetic_code(),
         }
     }
@@ -336,9 +553,20 @@ pub(crate) fn record_label(
     show_gis: bool,
     out: &mut Vec<u8>,
 ) {
-    match record.believed() {
+    seq_id_label(record.believed(), record.seq_id(), show_gis, out);
+}
+
+/// `record_label` of a record whose `-parse_deflines` Seq-ids are `believed` (`None` without the
+/// option) and whose Seq-id is `seq_id` (BLASTX's records, which have their own type).
+pub(crate) fn seq_id_label(
+    believed: Option<&crate::blastinput::fasta_reader::believed::BelievedIds>,
+    seq_id: crate::report::seqid::SeqId<'_>,
+    show_gis: bool,
+    out: &mut Vec<u8>,
+) {
+    match believed {
         Some(ids) => fill_seqid(&ids.ids, show_gis, out),
-        None => record.seq_id().sam_name(out),
+        None => seq_id.sam_name(out),
     }
 }
 
@@ -492,9 +720,10 @@ fn internal(what: &str) -> io::Error {
 ///             }
 ///         }
 /// ```
-/// Every HSP here is a Dense-seg of the first group, added with `fPreserveRows` (which throws
-/// nothing for it); the other groups are empty, so `GetDenseg` throws for them and they are
-/// skipped, and no frame line is written.
+/// Each group's HSPs are added in order (`aln_mix::merge`; an HSP whose `Add` throws is left
+/// out) and merged; `numDistinctFrames` counts the groups with HSPs, also one whose HSPs all
+/// threw (none can: a sequence's first match never meets another strand). A group without a
+/// merged Dense-seg is skipped (`GetDenseg` throws).
 pub(crate) fn write_section<W: Write + ?Sized>(
     writer: &mut W,
     view: View,
@@ -505,25 +734,53 @@ pub(crate) fn write_section<W: Write + ?Sized>(
     if hsps.is_empty() {
         return Ok(());
     }
-    let denseg = aln_mix::merge(hsps).map_err(|error| match error {
-        aln_mix::MixError::Internal(what) => internal(what),
-        // `ncbi_aborts`, which the program's report asks before the query's first byte.
-        aln_mix::MixError::NcbiAborts => internal("a section that NCBI BLAST+ aborts on"),
-    })?;
-    writer.write_all(b"\n")?;
-    let mut map = AlnMap::new(&denseg).map_err(internal)?;
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1206-1208
-    // ```c++
-    //     if(m_AlignOption & eMasterAnchored){
-    //         m_AV->SetAnchor(0);
-    //     }
-    // ```
-    if view.anchored {
-        map.set_anchor(0).map_err(internal)?;
+    let groups = hsps.groups();
+    let mut merged = Vec::new();
+    for (group, indices) in groups.iter().enumerate() {
+        if indices.is_empty() {
+            continue;
+        }
+        let denseg = aln_mix::merge(hsps, indices).map_err(|error| match error {
+            aln_mix::MixError::Internal(what) => internal(what),
+            // `ncbi_aborts`, which the program's report asks before the query's first byte.
+            aln_mix::MixError::NcbiAborts => internal("a section that NCBI BLAST+ aborts on"),
+        })?;
+        if let Some(denseg) = denseg {
+            merged.push((group, denseg));
+        }
     }
-    let rows = prepare_rows(&map, line_length, hsps.query_bioseq, sequences)?;
-    display_rows(writer, &map, view, line_length, rows, sequences)
+    let num_distinct_frames = groups.iter().filter(|indices| !indices.is_empty()).count();
+    writer.write_all(b"\n")?;
+    for (group, denseg) in &merged {
+        let mut map = AlnMap::new(denseg).map_err(internal)?;
+        if num_distinct_frames > 1 {
+            writer.write_all(b"For reading frame ")?;
+            writer.write_all(K_FRAME_CONVERSION[*group].as_bytes())?;
+            writer.write_all(b" of query sequence:\n\n")?;
+        }
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1206-1208
+        // ```c++
+        //     if(m_AlignOption & eMasterAnchored){
+        //         m_AV->SetAnchor(0);
+        //     }
+        // ```
+        if view.anchored {
+            map.set_anchor(0).map_err(internal)?;
+        }
+        // The query's row (row 0) has the frame of its group (`frame[row]`, `prepare_rows`).
+        let query_frame = if hsps.query_width == 3 {
+            K_GROUP_FRAMES[*group]
+        } else {
+            0
+        };
+        let rows = prepare_rows(&map, line_length, hsps.query_bioseq, query_frame, sequences)?;
+        display_rows(writer, &map, view, line_length, rows, sequences)?;
+    }
+    Ok(())
 }
+
+/// The query's frame of each frame group (`k_FrameConversion` as numbers).
+const K_GROUP_FRAMES: [i8; K_NUM_FRAME] = [1, 2, 3, -1, -2, -3];
 
 /// Whether NCBI BLAST+ aborts on the section of `hsps` (`aln_mix::MixError::NcbiAborts`): its
 /// merge leaves out the rows of the query's own Bioseq while segments hold them. A program asks
@@ -539,11 +796,14 @@ pub(crate) fn ncbi_aborts(hsps: &Hsps) -> io::Result<bool> {
     if hsps.query_bioseq.is_none() || hsps.is_empty() {
         return Ok(false);
     }
-    match aln_mix::merge(hsps) {
-        Ok(_) => Ok(false),
-        Err(aln_mix::MixError::NcbiAborts) => Ok(true),
-        Err(aln_mix::MixError::Internal(what)) => Err(internal(what)),
+    for indices in hsps.groups().iter().filter(|indices| !indices.is_empty()) {
+        match aln_mix::merge(hsps, indices) {
+            Ok(_) => {}
+            Err(aln_mix::MixError::NcbiAborts) => return Ok(true),
+            Err(aln_mix::MixError::Internal(what)) => return Err(internal(what)),
+        }
     }
+    Ok(false)
 }
 
 /// `SAlnRowInfo`: what `x_PrepareRowData` makes of each row.
@@ -552,10 +812,12 @@ struct RowData {
     strings: Vec<aln_vec::RowString>,
     labels: Vec<Vec<u8>>,
     row_rng: Vec<(i64, i64)>,
-    /// `masked_regions`: each row's masks as alignment ranges, by the row's sequence (`masks`);
-    /// `None` for a row of width 3, whose frame no mask has (`frame[row]`, `x_OutputSeq`).
-    masked: Vec<Option<usize>>,
-    masks: Vec<Vec<(i64, i64)>>,
+    /// `masked_regions` and `frame`: each row's masks as alignment ranges with their frames, by
+    /// the row's sequence (`masks`), and the frame of the row, whose masks it shows
+    /// (`x_OutputSeq`); `None` for a subject's row of width 3, whose frame no mask of a subject
+    /// has.
+    masked: Vec<Option<(usize, i8)>>,
+    masks: Vec<Vec<(i64, i64, i8)>>,
     max_id_len: usize,
     max_start_len: usize,
 }
@@ -596,11 +858,11 @@ struct RowData {
 ///     }
 ///     return frame;
 /// ```
-/// A row of width 3 has a frame of 1 to 3 or -1 to -3, every other row 0. The masks of the query
-/// and of the subjects have none (`CSeqLocInfo::eFrameNotSet`, 0: blast_aux.cpp:892 for BLASTN's,
-/// the context's frame 0 of a protein query, seqinfosrc_seqvec.cpp:142 and seqinfosrc_seqdb.cpp:
-/// 118 for the subjects'), so `x_OutputSeq` (`locFrame == frame`) shows none on a row of width 3
-/// (a TBLASTN subject's).
+/// A row of width 3 has a frame of 1 to 3 or -1 to -3, every other row 0. The query's row of a
+/// translated query (BLASTX, TBLASTX) has the frame of its group (`query_frame`: its first and
+/// last positions are those of the group's HSPs, all in that frame of the record), and shows the
+/// query's masks of that frame. The subjects' masks have none (`Mask`), so `x_OutputSeq`
+/// (`locFrame == frame`) shows none on a subject's row of width 3 (TBLASTN's, TBLASTX's).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1366-1370
 /// ```c++
@@ -616,6 +878,7 @@ fn prepare_rows(
     map: &AlnMap<'_>,
     line_length: usize,
     query_bioseq: Option<u32>,
+    query_frame: i8,
     sequences: &dyn Sequences,
 ) -> io::Result<RowData> {
     let num_rows = map.num_rows();
@@ -644,8 +907,8 @@ fn prepare_rows(
         data.labels.push(label);
         let max_cood = map.seq_start(row).max(map.seq_stop(row));
         data.max_start_len = data.max_start_len.max(max_cood.to_string().len());
-        // The rows of one sequence have one list (`x_FillLocList` of its masks), which only its
-        // rows of frame 0 show.
+        // The rows of one sequence have one list (`x_FillLocList` of its masks), whose masks of
+        // the row's frame a row shows.
         let index = *lists.entry(key).or_insert_with(|| {
             intervals.clear();
             sequences.masks(key, &mut intervals);
@@ -653,7 +916,12 @@ fn prepare_rows(
                 .push(fill_loc_list(map, key, query_bioseq, &intervals));
             data.masks.len() - 1
         });
-        data.masked.push((map.width(row) == 1).then_some(index));
+        let frame = if row == 0 {
+            Some(query_frame)
+        } else {
+            (map.width(row) == 1).then_some(0)
+        };
+        data.masked.push(frame.map(|frame| (index, frame)));
     }
     Ok(data)
 }
@@ -718,8 +986,8 @@ fn fill_loc_list(
     map: &AlnMap<'_>,
     key: SeqKey,
     query_bioseq: Option<u32>,
-    masks: &[(u32, u32)],
-) -> Vec<(i64, i64)> {
+    masks: &[Mask],
+) -> Vec<(i64, i64, i8)> {
     let own = |row_key: SeqKey| match query_bioseq {
         Some(subject) => {
             let one = |key: SeqKey| key == SeqKey::Query || key == SeqKey::Subject(subject);
@@ -728,7 +996,7 @@ fn fill_loc_list(
         None => row_key == key,
     };
     let mut list = Vec::new();
-    for &(from, to) in masks {
+    for &(from, to, frame) in masks {
         for row in 0..map.num_rows() {
             if own(map.seq_key(row)) && map.seq_start(row) <= to && from <= map.seq_stop(row) {
                 let (first, last) = if map.is_positive_strand(row) {
@@ -739,6 +1007,7 @@ fn fill_loc_list(
                 list.push((
                     i64::from(map.aln_pos_from_seq_pos(row, first)),
                     i64::from(map.aln_pos_from_seq_pos(row, last)),
+                    frame,
                 ));
                 break;
             }
@@ -1002,7 +1271,7 @@ fn display_sequence_line(
         &rows.sequence[row],
         j as usize,
         actual_line_len,
-        rows.masked[row].map_or(&[][..], |index| &rows.masks[index]),
+        rows.masked[row].map(|(index, frame)| (&rows.masks[index][..], frame)),
     );
     add_space(out, 2);
     if !empty {
@@ -1039,13 +1308,21 @@ fn display_sequence_line(
 ///                         actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
 ///                     }
 /// ```
-/// (The row's masks are those of its own sequence, all of frame 0: none on a row of width 3,
-/// `prepare_rows`.)
-fn output_seq(out: &mut Vec<u8>, sequence: &[u8], start: usize, len: usize, masks: &[(i64, i64)]) {
+/// (The row's masks are those of its own sequence with its frame, `prepare_rows`.)
+fn output_seq(
+    out: &mut Vec<u8>,
+    sequence: &[u8],
+    start: usize,
+    len: usize,
+    masks: Option<(&[(i64, i64, i8)], i8)>,
+) {
     let end = (start + len).min(sequence.len());
     let first = out.len();
     out.extend_from_slice(&sequence[start.min(end)..end]);
-    for &(from, to) in masks {
+    let Some((masks, row_frame)) = masks else {
+        return;
+    };
+    for &(from, to, _) in masks.iter().filter(|&&(_, _, frame)| frame == row_frame) {
         let lo = from.max(start as i64);
         let hi = to.min(start as i64 + len as i64 - 1);
         let mut column = lo;
@@ -1390,3 +1667,5 @@ fn adjust_insert(
 mod tests;
 #[cfg(test)]
 mod tests_t3b;
+#[cfg(test)]
+mod tests_t3c;

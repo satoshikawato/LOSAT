@@ -139,7 +139,11 @@ fn refuse(refusal: names::Refusal, what: &str) -> anyhow::Error {
 /// context's nucleotide intervals moved into the record (`seq_range::record_mask`: other than an
 /// empty one and the whole interval), with the context's frame, which counts from the ends of the
 /// searched letters (`-query_loc`).
-fn query_masks(batch: &BatchResults, qidx: usize, query: &FastaRecord) -> Vec<QueryMask> {
+pub(super) fn query_masks(
+    batch: &BatchResults,
+    qidx: usize,
+    query: &FastaRecord,
+) -> Vec<QueryMask> {
     let (length, offset) = (query.sequence.len(), query.placement().offset);
     let mut masks = Vec::new();
     for context in &batch.prepared.contexts[qidx * 6..qidx * 6 + 6] {

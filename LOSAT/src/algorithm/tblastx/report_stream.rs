@@ -208,7 +208,12 @@ pub(super) fn check(
     if let report::TblastxOutputFormat::CustomTabular(_) = format {
         return Err(Off::CustomTabular);
     }
-    if !(format == report::TblastxOutputFormat::Pairwise || format.is_tabular()) {
+    // Outfmt 1 to 4 keep the one report call too (as TBLASTN's): their refusals (a query's own
+    // record or id in a section, `report_runs`) come before the first byte.
+    if !(format
+        == report::TblastxOutputFormat::Pairwise(crate::report::pairwise::PairwiseView::Pairwise)
+        || format.is_tabular())
+    {
         return Err(Off::Format);
     }
     if writes_debug_output() {
@@ -296,7 +301,7 @@ fn database_check(
     if database.parsed_beyond(max_parsed) {
         return Err(Off::LargeParsed);
     }
-    let pairwise = format == report::TblastxOutputFormat::Pairwise;
+    let pairwise = format.is_pairwise();
     let shown = crate::algorithm::common::database::ParsedShown {
         tabular: format.tabular_reads_subject(),
         pairwise,
@@ -359,7 +364,7 @@ mod tests {
         };
         let formats = [
             report::TblastxOutputFormat::Tabular,
-            report::TblastxOutputFormat::Pairwise,
+            report::TblastxOutputFormat::Pairwise(crate::report::pairwise::PairwiseView::Pairwise),
         ];
         let answers = |pool: &SearchPool<'_>| {
             ["nucl_v5", "nrefuse_v5"].map(|name| {

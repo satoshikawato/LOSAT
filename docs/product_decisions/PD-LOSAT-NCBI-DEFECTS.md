@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.28
+- Version: 1.29
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -59,7 +59,11 @@
   all-set one, and none elsewhere, line DBID item gisl, Owner-delegated);
   1.28 2026-11-15 (the explicit rejection of 1.23 and the rule-2 rejection of a query's id of 1.24
   in the query-anchored views of BLASTN and TBLASTN, line RG item T3b; Owner-delegated, standing
-  instruction 2026-09-29, restated 2026-10-07, within the classes of 1.23 and 1.10)
+  instruction 2026-09-29, restated 2026-10-07, within the classes of 1.23 and 1.10);
+  1.29 2026-11-15 (the query-anchored views of BLASTX and TBLASTX, line RG item T3c: TBLASTX's
+  strand drop and the spread of a subject's masks reproduced, rule 2, and the rule-2 rejection of a
+  query's id of 1.24 and 1.28 in BLASTX and TBLASTX; Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07, within the class of 1.10)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -531,6 +535,24 @@ here, and names the widening that PS16a made for protein queries.
 
 ## Reproduced as NCBI (rule 2)
 
+- TBLASTX `-outfmt 1` to `4` (the query-anchored views; version 1.29, 2026-11-15, line RG item T3c,
+  DECISIONS T3-6): NCBI adds TBLASTX's HSPs of each query frame with `CAlnMix::fForceTranslation`
+  (`eTranslateNucToNucAlignment`, showalign.cpp:2058-2063), whose `CAlnMixMatches::Add` throws
+  "Unable to mix strands when forcing translation!" for an HSP whose subject strand differs from
+  the sign of the subject's strand score so far, the strand of its first HSP in that frame
+  (`alnmatch.cpp:191-205`); `DisplaySeqalign` catches it and leaves the HSP out of the section
+  (`showalign.cpp:2073-2076`), while the description table and outfmt 0 show it. The throw comes
+  after `m_DsCnt++`, so the HSPs after it keep their numbers. LOSAT leaves the same HSPs out
+  (`report::query_anchored::aln_mix`; probes `tx.s.f1`, `tx.t3c.s.f1`; fixture rows
+  `db.of1.tx.s.f*`). BLASTX's HSPs of a minus query frame are added with `fNegativeStrand`, which
+  `Add` reads as `fForceTranslation` (`alnmix.hpp:77,102`): their query rows run from high to low, and
+  none is left out (a protein row has no strand).
+- `-outfmt 1` to `4` of BLASTP, BLASTN and BLASTX (version 1.29, DECISIONS T3-6): a subject's masks
+  (the `-lcase_masking` runs of a `-subject` record, BLASTN's `-db_soft_mask`) are placed on the columns of the subject's first row that
+  meets each and shown in lower case on those columns of every row of the subject
+  (`x_FillLocList`, showalign.cpp:4291-4338; `x_OutputSeq`, :2486-2523), also on its rows of other
+  HSPs, where the letters are not masked (probes `bn.lc2.f2`, `bn.t3b.lc.*`, `bx.t3c.slc.*`).
+
 - `losat rpsbproc`, the end of an aligned segment when a site is mapped (`MapSegSet`'s `SeqPos_t end
   = m_vecSStarts[idx] + m_vecLens[idx] - 1`, `common/basedata.cpp:1180-1250`): an `unsigned int` sum
   stored in an `int`, which wraps for a segment that passes model position 2^31 - 1, so the sites
@@ -840,11 +862,13 @@ would port:
   and `qcovus` as one subject's, and PSIBLAST's cut to `-max_target_seqs` counts them as one
   subject.
 - A reported sequence with the id, or the display id of its description line (outfmt 0 to 4 of
-  BLASTP, PSIBLAST and RPSBLAST, 1 to 4 of BLASTN and TBLASTN since version 1.28), of a query read
-  with `-parse_deflines` in the query batch that reports it (with outfmt 5, in any batch), and in
-  outfmt 1 to 4 of BLASTP, BLASTN and TBLASTN with the id or display id `lcl|Query_N` of a query
-  read without it (TBLASTN's merge then reads the protein query's letters as nucleotides, probe
-  `tn.t3b.d.qid.f1`): NCBI shows the query's title and letters for the
+  BLASTP, PSIBLAST and RPSBLAST, 1 to 4 of BLASTN and TBLASTN since version 1.28, of BLASTX and
+  TBLASTX since version 1.29), of a query read with `-parse_deflines` in the query batch that
+  reports it (with outfmt 5, in any batch), and in outfmt 1 to 4 of BLASTP, BLASTN, BLASTX, TBLASTN
+  and TBLASTX with the id or display id `lcl|Query_N` of a query read without it (TBLASTN's merge
+  then reads the protein query's letters as nucleotides, probe `tn.t3b.d.qid.f1`; BLASTX's and
+  TBLASTX's merges of the query's rows with the sequence's throw, exit 255, probes
+  `bx.t3c.d.qid.f1`, `tx.t3c.d.qid.f1`): NCBI shows the query's title and letters for the
   id (its second lookup, by the display id, the query's title in that line).
 - A stored title or Seq-id with a byte outside ' ' to '~': NCBI prints `#` and an error message
   each time it reads the definition line.

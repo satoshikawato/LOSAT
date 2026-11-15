@@ -176,11 +176,14 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
     if error.is::<super::blast_xml::XmlRefusal>()
         || crate::report::pairwise::is_total_score_refusal(&error)
         || error.is::<crate::report::tax_report::TaxReportRefusal>()
+        || error.is::<crate::algorithm::common::database::ParsedRefusal>()
     {
         // LOSAT's refusal of a title NCBI's XML cannot write, of a `-sorthits` table whose
         // last total NCBI pads without end (`TotalScoreRefusal`, an `io::Error` of the report's
-        // writes), or of an organism report (outfmt 18, made before its first byte): not an
-        // error of NCBI's engine or of its output stream.
+        // writes), of an organism report (outfmt 18, made before its first byte), or of a
+        // database sequence that a query-anchored report (outfmt 1 to 4) would show as a query
+        // (`ParsedRefusal`, `report::write_pairwise`): not an error of NCBI's engine or of its
+        // output stream.
         error
     } else if error.downcast_ref::<NativeError>().is_some_and(|e| {
         (e.exit == 1 && e.message.starts_with("Command line argument error"))
@@ -538,7 +541,8 @@ fn run_inner(
     // and of the search strategy and the lower case of outfmt 0's Sbjct rows (`x_soft_subject::x_masked_subject_rows`, records
     // with lower case only) read the whole record.
     if let Some(range) = &subject_range {
-        let shows_lower_case = args.lcase_masking && choice.number == 0;
+        // Outfmt 0 to 4: the rows of outfmt 0 and the query-anchored sections (1 to 4).
+        let shows_lower_case = args.lcase_masking && (0..=4).contains(&choice.number);
         for record in &mut subjects {
             let (from, to_exclusive) =
                 crate::blastinput::seq_range::record_cut(range, record.sequence.len())?;
@@ -983,7 +987,7 @@ fn run_inner(
     let pairwise_database = database.as_ref().map(BlastxDatabase::pairwise_database);
     let no_reported = ReportedSubjects::default();
     let records_parsed = if args.parse_deflines {
-        report::RecordsParsed::of(&subjects, args.show_gis, options.outfmt == 0)?
+        report::RecordsParsed::of(&subjects, args.show_gis, options.pairwise_view().is_some())?
     } else {
         report::RecordsParsed::default()
     };
@@ -1402,10 +1406,10 @@ impl ReportedAsks {
                     options.tabular,
                     crate::blastinput::app::Program::Blastx,
                 ),
-            pairwise: options.outfmt == 0,
+            pairwise: options.pairwise_view().is_some(),
             structured: matches!(options.outfmt, 5 | 13..=16),
             taxids: matches!(options.outfmt, 13..=16),
-            joined: matches!(options.outfmt, 0 | 5 | 13..=16)
+            joined: matches!(options.outfmt, 0..=5 | 13..=16)
                 || options
                     .tabular
                     .is_some_and(|spec| spec.needs().joins_subjects()),
@@ -1622,9 +1626,11 @@ pub(super) fn reported_batch(
             let rows_open = options
                 .tabular
                 .is_some_and(|spec| spec.looks_up_every_taxid());
-            // The pairwise report reads its subjects in the order of its `-sorthits`.
-            let pairwise =
-                (first_report == Some(ReportFormat::Pairwise)).then(|| options.report_sort());
+            // The pairwise report (outfmt 0 to 4) reads its subjects in the order of its
+            // `-sorthits`.
+            let pairwise = first_report
+                .and_then(crate::report::pairwise::PairwiseView::of)
+                .map(|view| view.report_sort(options.report_sort()));
             reported.fetch_by_query(
                 database,
                 results,
@@ -3237,6 +3243,7 @@ mod archive_error_tests {
                 &[],
                 None,
                 0,
+                None,
             )
             .map(|()| out)
         };

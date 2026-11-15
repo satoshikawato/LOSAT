@@ -910,3 +910,96 @@ fn blastn_query_anchored_refuses_a_database_sequence_named_as_a_query() {
         }
     }
 }
+
+// Line RG T3c (PD-LOSAT-NCBI-DEFECTS 1.29): the same database sequences for BLASTX (`bxqid`, `bxqgi`:
+// proteins) and TBLASTX (`txqid`, `txqgi`). NCBI's merge of the Seq-align id throws (exit 255, probes
+// `bx.t3c.d.qid.f1`, `tx.t3c.d.qid.f1`), and for the display id its description line shows the query's
+// title (`tx.t3c.d.qgi.f1`). Both programs write their prolog before the search, as NCBI does, so the
+// refusal follows it.
+#[test]
+fn blastx_and_tblastx_query_anchored_refuse_a_database_sequence_named_as_a_query() {
+    for (program, prefix, version) in [
+        ("blastx", "bx", "BLASTX 2.17.0+\n"),
+        ("tblastx", "tx", "TBLASTX 2.17.0+\n"),
+    ] {
+        let query = format!("{prefix}q.fa");
+        for (db, refusal) in [
+            (
+                format!("{prefix}qid"),
+                "database sequence 0 has the Seq-id lcl|Query_1, the id of a query (generated, or \
+                 the PSSM's) in the query batch that reports it",
+            ),
+            (
+                format!("{prefix}qgi"),
+                "database sequence 0 has the display id lcl|Query_1 (the id of its description \
+                 line)",
+            ),
+        ] {
+            for outfmt in ["0", "1", "3"] {
+                let (status, stdout, stderr) =
+                    of1_run(&[program, "-query", &query, "-db", &db, "-outfmt", outfmt]);
+                if outfmt == "0" {
+                    assert_eq!(status, 0, "{program} {db} outfmt 0: {stderr}");
+                    continue;
+                }
+                assert_eq!(status, 1, "{program} {db} outfmt {outfmt}: {stderr}");
+                assert!(
+                    stderr.contains(refusal),
+                    "{program} {db} outfmt {outfmt}: {stderr}"
+                );
+                assert!(
+                    stdout.starts_with(version) && !stdout.contains("Query="),
+                    "{program} {db} outfmt {outfmt}: {stdout}"
+                );
+            }
+        }
+    }
+}
+
+// Line RG T3c: `txself.fa` is one record read as the query and as the subject under
+// `-parse_deflines`. TBLASTX's formats 1 to 4 add their Dense-segs with `fForceTranslation`, not
+// `fPreserveRows`, so NCBI's `CAlnMix` takes the query's row and the record's subject rows for one
+// sequence and folds the record's HSPs with itself into the query row (probes `tx.t3c.self.f1` to
+// `f4`, exit 0): not ported. LOSAT refuses after its prolog; outfmt 0 is a report, and so is a
+// section without alignments (`-num_alignments 0`).
+#[test]
+fn tblastx_query_anchored_refuses_one_record_as_a_query_and_a_subject() {
+    let refusal =
+        "the record lcl|txself is both a query and a subject under -parse_deflines, and in \
+                   the query-anchored formats (outfmt 1 to 4) NCBI BLAST+ merges its query row and \
+                   its subject rows of TBLASTX into one sequence";
+    for (outfmt, extra) in [("0", None), ("1", None), ("4", None), ("1", Some("0"))] {
+        for threads in ["1", "4"] {
+            let mut args = vec![
+                "tblastx",
+                "-query",
+                "txself.fa",
+                "-subject",
+                "txself.fa",
+                "-parse_deflines",
+                "-outfmt",
+                outfmt,
+                "-num_threads",
+                threads,
+            ];
+            if let Some(alignments) = extra {
+                args.extend(["-num_alignments", alignments]);
+            }
+            let (status, stdout, stderr) = of1_run(&args);
+            if outfmt == "0" || extra.is_some() {
+                assert_eq!(status, 0, "outfmt {outfmt} {extra:?} n{threads}: {stderr}");
+                assert!(stdout.contains("Query= txself"), "n{threads}: {stdout}");
+                continue;
+            }
+            assert_eq!(status, 1, "outfmt {outfmt} n{threads}: {stderr}");
+            assert!(
+                stderr.contains(refusal),
+                "outfmt {outfmt} n{threads}: {stderr}"
+            );
+            assert!(
+                stdout.starts_with("TBLASTX 2.17.0+\n") && !stdout.contains("Query="),
+                "outfmt {outfmt} n{threads}: {stdout}"
+            );
+        }
+    }
+}

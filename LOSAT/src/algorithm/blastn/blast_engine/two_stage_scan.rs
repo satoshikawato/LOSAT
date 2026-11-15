@@ -652,14 +652,17 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
         // so the scan of a head of one element per cell is the one without the
         // switch.
         // EXPERIMENT (LOSAT_X_BNPVONCE): a packed head's presence bits hold one bit
-        // per cell, so its scan (`$pv` false) tests the word there only, not first
-        // in the coarser presence vector, whose bit stands for several cells; for
-        // a head whose bits fit the cache (`x_bn_pv_once`).
+        // per cell, so its scan tests the word there only (`XPacked::x_present`), not
+        // first in the coarser presence vector, whose bit stands for several cells;
+        // for a head whose bits fit the cache (`x_bn_pv_once`).
+        // `x_scan_csr!(head, |k| test)`: the scan of `head` whose per-word closure
+        // takes a word `k` to the ring when `test` holds.
         // The trait's methods are called in two of the three scans below only, so
         // it is imported here and not in the macro's body.
         use x_dc_csr::XRing as _;
+        let pv_view = two_stage.x_pv_view();
         macro_rules! x_scan_csr {
-            ($head:expr, $pv:expr) => {{
+            ($head:expr, |$k:ident| $has:expr) => {{
                 use x_dc_csr::XHead;
                 let head = $head;
                 let mut x_on_word_csr = |(kmer_start, s_range, index): (usize, usize, u64)| {
@@ -708,10 +711,9 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                 let mut ring = head.ring::<(usize, usize, u64)>();
                 let mb_scan_kind = select_mb_scan_kind(lut_word_length, scan_step, subject_masked);
                 // The per-word closure holds what it reads by value (`move`: the debug switch,
-                // the presence vector and its shift) and the places it writes as its own
-                // references, so the scan keeps them in registers across the calls instead of
-                // reading them again through references for every word.
-                let pv_view = two_stage.x_pv_view();
+                // the presence vector and its shift, or the packed head) and the places it
+                // writes as its own references, so the scan keeps them in registers across the
+                // calls instead of reading them again through references for every word.
                 let ring_ref = &mut ring;
                 let emit = &mut x_on_word_csr;
                 let total_s_positions = &mut *dbg_total_s_positions;
@@ -730,8 +732,9 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                         }
                         // A word goes to the ring out of line (`x_push_word`), so this closure
                         // is the presence test and that call only and the scan inlines it: a
-                        // word without a hit in the presence vector makes no call.
-                        if !$pv || pv_view.has_hits(current_lut_kmer) {
+                        // word the test drops makes no call.
+                        let $k = current_lut_kmer;
+                        if $has {
                             x_push_word(
                                 &mut *ring_ref,
                                 kmer_start,
@@ -746,9 +749,11 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
             }};
         }
         match csr.x_packed() {
-            Some(packed) if x_bn_pv_once(&packed) => x_scan_csr!(packed, false),
-            Some(packed) => x_scan_csr!(packed, true),
-            None => x_scan_csr!(csr, true),
+            Some(packed) if x_bn_pv_once(&packed) => {
+                x_scan_csr!(packed, |k| packed.x_present(k as usize))
+            }
+            Some(packed) => x_scan_csr!(packed, |k| pv_view.has_hits(k)),
+            None => x_scan_csr!(csr, |k| pv_view.has_hits(k)),
         }
     } else {
         let mb_scan_kind = select_mb_scan_kind(lut_word_length, scan_step, subject_masked);
@@ -843,8 +848,9 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
 /// the closure is the presence vector's test and this call, and the scan inlines it (callgrind,
 /// mlst's 225,777 alleles: the scan's closure 689 M -> 221 M instructions, the whole search
 /// 3.131 G -> 3.064 G, -2.2 %): a word the presence vector drops makes no call. A head that tests
-/// each word in its own bits (`$pv` false: LOSAT_X_BNPVONCE) makes this one call per word instead
-/// of the closure's. The words, their order and every value are the same.
+/// each word in its own bits (LOSAT_X_BNPVONCE) tests its presence bit there first
+/// (`XPacked::x_present`), so a word without hits makes no call either (ABRicate's resfinder:
+/// 84 % of 21.4 M words). The words, their order and every value are the same.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1523-1536
 /// (`s_MBScanSubject_Any`: the presence test of each word in the scan's loop, the retrieve only for

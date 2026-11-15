@@ -261,6 +261,13 @@ impl<'a> XPacked<'a> {
         std::mem::size_of_val(self.bits)
     }
 
+    /// Whether `cell` has a run: its presence bit, `x_rank`'s test without the count. For a scan
+    /// that drops a word without hits before it calls out (`two_stage_scan`'s `x_scan_csr!`).
+    #[inline(always)]
+    pub(crate) fn x_present(self, cell: usize) -> bool {
+        self.bits[(cell >> 6) << 1] & (1u64 << (cell & 63)) != 0
+    }
+
     /// `Csr::run` of a packed head: an empty cell has no element of it.
     #[inline(always)]
     pub(crate) fn run(self, cell: usize) -> &'a [u32] {

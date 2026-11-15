@@ -130,7 +130,7 @@ fn push_btop(hsps: &mut Hsps, subject: u32, qstart: u32, sstart: u32, btop: &str
         }
         index += run as usize;
     }
-    hsps.push_dense_seg(subject, &starts, &lens, 0, 0);
+    hsps.push_dense_seg(subject, &starts, &lens, 0, 0, false);
 }
 
 /// The section of the HSPs `rows` (subject index, qstart, sstart, BTOP) in format `format`.

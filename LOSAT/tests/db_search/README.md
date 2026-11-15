@@ -912,7 +912,9 @@ Rows `db.sl.*`: `-seqidlist` and `-negative_seqidlist` with `-db`, five programs
   `sl_tfn.txt` (four local ids across tfn's two volumes), `sl_prot.txt` and `sl_nucl.txt` (every Seq-id form of
   `ids/prot_v5` and `ids/nucl_v5`: tpg, RefSeq and Swiss-Prot without versions, a pdb chain, local ids, a general id as
   `db:tag`, a versionless accession of an OID of several definition lines, a gi that NCBI drops), `sl_gi.txt` (gi ids only:
-  NCBI's `Empty seqid list` warning and no restriction on a version 5 database, no OID on a version 4 one),
+  NCBI's `Empty seqid list` warning on a version 5 database; as a positive list no restriction where one volume is reached
+  through a path of alias files without a range that cuts it, else no OID: rows `db.gisl.*`; as a negative one no
+  restriction; on a version 4 database no OID as a positive list),
   `sl_comment.txt` (no id: no list), `sl_none.txt` (ids no database has: NCBI searches an empty database, LOSAT refuses),
   `sl_empty.txt` (0 bytes: NCBI's `Failed to map seqidlist file ` error);
 - binary lists in the format of `blastdb_aliastool -seqid_file_out` (NUL, file size, count, title, date, database length
@@ -933,6 +935,20 @@ NCBI 2.17.0) has no accession table: a seqid list on it is NCBI's `BLAST Databas
 
 A list file that is not on the search path (NCBI: `Error: NCBI C++ Exception: ... To be memory mapped the file must
 exist: ''`, exit 255, with the path of NCBI's build tree) is checked by `src/cli_v2_tests.rs`, not by a row.
+
+Rows `db.gisl.*` (line DBID, item gisl): `-seqidlist seqidlist/sl_gi.txt` (a positive list) on version 5 databases of one
+and of two volumes, and on the alias files of `aliaskeys/` over one volume. NCBI's `x_ApplyUserGiList` clears every OID of
+the list that lost every id, and the search finds an empty database (each query's `Filtering resulted in an empty
+database.`), unless its OID bit set is the special all-set one, which a copy of one volume's special set makes (the `-db`
+names reach one volume, and at least one path of alias files to it crosses no range that cuts it): the clearing writes into
+a stale array, and the whole database is searched. So `taxfilter/tfp`, `taxfilter/tfn.00` (one volume of `tfn`),
+`aliaskeys/p_r123` (the range of the whole volume), `p_twice`, `p_dupvol`, `p_chain` (an alias of `p_dupvol`), `p_above`
+(the whole range above `p_dupvol`), `p_cover` and `p_coverr` (`p_r123` and `p_range` in both orders), `p_arrcov` (`p_union`,
+a bit array, then `p_r123`) are searched whole; `taxfilter/tfn` (two volumes), the two databases `taxfilter/tfp
+ids/prot_v5`, `aliaskeys/p_range`, `p_union`, `p_halves` (`p_lo` and `p_hi`, ranges 1-11 and 12-23 whose union is the
+volume), `p_abovecut` (a range that cuts the volume above `p_dupvol`) and `n_vol1` are searched empty. The negative list on
+`taxfilter/tfn` excludes nothing. `sl_gifull.txt` (`gi|1111|ref|NP_1.1|`) adds NCBI's two warnings `Ignoring extra parts
+(synonyms?) in FASTA-style ID`.
 
 ## Ungapped nucleotide databases (line NP, O4a-1)
 
@@ -1324,7 +1340,8 @@ in an empty database.` and a search that goes on, `p_nseq4g`: NCBI's `int` of 42
 `FIRST_OID` / `LAST_OID` ranges (`p_range`, `p_nest` and `p_rin`: nested ranges ANDed, `p_union`: two alias files over one
 volume ORed, `p_twice`: an alias file and the volume itself, `p_dupvol`: one volume twice in a `DBLIST`, `p_first0`, `p_last2`,
 `p_empty`, `p_beyond`, `p_r312` and `p_r312s` with `-taxids` and `-negative_taxids`, `p_range` with `-seqidlist`, `n_range`,
-`n_mv`: the global OIDs 9-13 of the two volumes, `n_vol1`: the second volume alone). The ncbi rows were frozen with NCBI
+`n_mv`: the global OIDs 9-13 of the two volumes, `n_vol1`: the second volume alone; `p_lo`, `p_hi`, `p_halves`, `p_cover`,
+`p_coverr`, `p_arrcov`, `p_chain`, `p_above` and `p_abovecut` for the rows `db.gisl.*`). The ncbi rows were frozen with NCBI
 BLAST+ 2.17.0 on the workstation (`env_blast`; two rows checked against the release build on the developer machine, the same
 bytes); the `db.ak.bp.err.*` rows (NCBI's `CStringException` texts, exit 255, which carry the path of NCBI's build tree:
 `p_bad_nseq`, `p_bad_first`, `p_bad_min`, `p_bad_stlen`, `p_bad_two` without and with `-taxids`) with the release build on the
@@ -1457,6 +1474,50 @@ The databases (version 4; `.pjs` deleted). Run from `LOSAT/`:
     makeblastdb -in tests/db_search/of1/dispref.fa -dbtype prot -out tests/db_search/of1/dispref \
         -title "a database sequence whose display id is not its local id" -parse_seqids -blastdb_version 4
     rm tests/db_search/of1/*.pjs
+
+BLASTN and TBLASTN inputs of the query-anchored rows (rows `db.of1.bn.*` and `db.of1.tn.*`, line RG T3b), in
+`of1/`, from the T3b probes (`T/t3/scripts_t3b/gen3b.py`, a seeded generator; `tnq1.pssm` from NCBI's
+`psiblast -query tnq.fa(first record) -db <six mutated copies> -num_iterations 2 -out_pssm`):
+
+- `bnq.fa`: two nucleotide queries, `bnq` (300 letters with a run of 25 T that DUST masks) and `bnq2`; `bns.fa`:
+  `s_pmo` (a plus-strand and a minus-strand HSP over the query's 61-160), `s_mins` and `s_mins2` (minus-strand
+  copies with insertions of 4 and 2 letters at one query column), `s_mdel` (a minus-strand deletion), `s_plus`
+  (a plus-strand insertion at the same column); `bnslc.fa`: a subject whose first 40 letters are lower case
+  (`-lcase_masking`: the mask shows on the columns of its first row, also in its minus-strand row);
+  `bnids.fa`: the subjects of `bns.fa` under `gi|...|gb|`, `ref|`, `lcl|` and `gnl|` ids.
+- `bself.fa` (copies of a 80-letter stretch: the second with a 5-letter insertion, the third ungapped and
+  mutated; `-query_loc 1-80 -subject_loc 81-325 -parse_deflines`, NCBI aborts) and `bselfrc.fa` (a record with an
+  inverted repeat and a lower-case run; with itself under `-parse_deflines` its rows of both strands).
+- `bnqid.fa` (`lcl|Query_1`) and `bnqgi.fa` (`gi|777|lcl|Query_1`): database sequences named as the first query
+  read without `-parse_deflines`, which BLASTN refuses in outfmt 1 to 4 after its prolog
+  (`tests/parse_deflines_subject.rs`).
+- `tnq.fa`: two protein queries (`tnq` with 16 Q that SEG masks); `tns.fa`: `t_pm` (a plus and a minus frame over
+  the query's 61-80), `t_fr` (two plus frames over 46-55), `t_ins`, `t_mins` (insertions on a plus and a minus
+  frame), `t_mdel`, `t_code` (codons that genetic code 2 translates otherwise: AGA, AGG, ATA, TGA);
+  `tnsids.fa`: four of them under parsed ids; `tnqid.fa` (`lcl|Query_1`) and `tnqgi.fa` (`gi|778|lcl|Query_1`):
+  the refusals `db.of1.tn.qid.reject` and `db.of1.tn.qgi.reject` (NCBI's merge reads the protein query as the
+  sequence's nucleotides; its description line shows the query's title).
+- `bnsr.nal`: an alias of the OIDs 2 to 4 of `bns` (rows labelled by OID).
+
+The databases (version 4; `.njs` deleted). Run from `LOSAT/`:
+
+    makeblastdb -in tests/db_search/of1/bns.fa -dbtype nucl -out tests/db_search/of1/bns \
+        -title "nucleotide subjects of the query-anchored rows" -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/bnids.fa -dbtype nucl -out tests/db_search/of1/bnids \
+        -title "nucleotide subjects of the query-anchored rows with Seq-ids" -parse_seqids -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/bnqid.fa -dbtype nucl -out tests/db_search/of1/bnqid \
+        -title "a nucleotide database sequence under the id of a query" -parse_seqids -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/bnqgi.fa -dbtype nucl -out tests/db_search/of1/bnqgi \
+        -title "a nucleotide database sequence whose display id is a query id" -parse_seqids -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/tns.fa -dbtype nucl -out tests/db_search/of1/tns \
+        -title "translated subjects of the query-anchored rows" -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/tnsids.fa -dbtype nucl -out tests/db_search/of1/tnsids \
+        -title "translated subjects of the query-anchored rows with Seq-ids" -parse_seqids -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/tnqid.fa -dbtype nucl -out tests/db_search/of1/tnqid \
+        -title "a translated database sequence under the id of a query" -parse_seqids -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/tnqgi.fa -dbtype nucl -out tests/db_search/of1/tnqgi \
+        -title "a translated database sequence whose display id is a query id" -parse_seqids -blastdb_version 4
+    rm tests/db_search/of1/*.njs
 ## `dbmask/`: database masks of BLASTN searches (line NP, series M, M4a-2a)
 
 Rows `db.dbmask.*` (`-db_soft_mask`, `-db_hard_mask`). The inputs are the probe inputs of the M4a-2 survey

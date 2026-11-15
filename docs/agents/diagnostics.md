@@ -136,7 +136,10 @@ LOSAT_X_NEWTONEXACT_PROF
 - `LOSAT_DEBUG_SCAN_SOFF=<int>` (diagnostic build) tblastx scan debug center subject offset.
 - `LOSAT_DEBUG_SCAN_WINDOW=<int>` (diagnostic build) tblastx scan debug window size.
 - `LOSAT_DEBUG_BLASTP_TRACE_HSP="[qidx,sidx,]qstart,qend,sstart,send"` (diagnostic build) trace one
-  BLASTP HSP through the composition-based redo (4 or 6 comma-separated fields).
+  BLASTP HSP through the composition-based redo (4 or 6 comma-separated fields). `qidx` counts the
+  searched queries of the call: all of them in the search of all queries, also where its preliminary
+  stage runs in blocks (`LOSAT_X_BPQBLOCK`, item SC8b-2); a block of the block search counts from its
+  own first query.
 - `LOSAT_DEBUG_BLASTP_WSSV=1` (diagnostic build) print the redo's `[BLASTP_WSSV]` line for the one HSP
   q 78-789 x s 0-665.
 - `LOSAT_TIMING=1` timing breakdown. Every search program prints one line last, after its own lines
@@ -301,7 +304,8 @@ their variables mean
   in `BPDIAG`'s AVX2 batch; `BPMASKED` only with `BPDEFER`'s deferred calls, on tables of at least `BPMASKEDMIN` hits per used cell; `BPGAP` runs the
   vector alignment only with AVX2, BMI1 and LZCNT (else the reference function); `BPGAP16` acts only
   in `BPGAP`'s vector alignment, where its costs fit 16 bits; `BPQBLOCK` takes the block path only for one output of outfmt 0, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15 or 16, or a
-  `run_local` call with several outputs, the hit records or an observer, with more than one block (see its entry);
+  `run_local` call with several outputs, the hit records or an observer, with more than one block, and blastp's search of all queries
+  (the other reports, `-query_loc`) runs its preliminary stage in the same blocks (see its entry);
   `BNSTREAM` only in blastn's `-subject` search at 2 or more threads;
   `TBXNEXT` only in TBLASTX's parallel subject loop (2 or more threads, several subjects; native
   builds and the threaded Wasm module); `TBXBOARD` in native builds with 2 or more threads (every batch: one
@@ -496,7 +500,9 @@ masked unit diagonal table a unit takes for its size alone at eight threads or m
 more, built-in 50,000: query letters per block; a value that is not a positive number is the
 built-in value; a block also ends before a batch whose lookup-table words would take it past the
 most of a block, NCBI's largest table or for the standard table at least 2^22 words, so a block of
-`-word_size 4` holds one batch or a few).
+`-word_size 4` holds one batch or a few; the search of all queries, which writes the reports that
+the block search does not take, runs its preliminary stage in the same blocks, each with its own
+lookup table, and joins their hit lists before the redo and the reports, item SC8b-2).
 
 `LOSAT_X_SEEDBUCKET` was in the block of the round 3-4 set and was left out when the set became
 the default: it numbered the lookup hits of one chunk scan in a 32-bit counter, exact only up to
@@ -5885,7 +5891,7 @@ Scheduling (each value computed by one thread with the original function; order 
   16 batches at 8 threads 0.99-1.00.
 - `LOSAT_X_TBXSCANBF=1` TBLASTX (speed; in the strict set since 2026-10-17, on by default; `=0` turns
   it off; `tblastx/x_scan_bf.rs`): the lookup scans of the unit path
-  (`x_pair_par.rs`) and of the reference frame loop (`blast_engine/run_impl.rs`) walk the subject
+  (`x_pair_par.rs`) and of the reference frame loop (`blast_engine/word_finder.rs`) walk the subject
   ranges as NCBI's `s_BlastAaScanSubject` (`blast_aascan.c:48-131`) does and scan each range with
   the branch-free loop of tblastn (TBNSCANBF, graduated; `tblastx/x_aascan_bf.rs` `x_scan_one_range_bf`), passing
   on the room the earlier ranges of the call left, so every call returns NCBI's pairs and scan range

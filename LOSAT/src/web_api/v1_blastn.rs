@@ -21,7 +21,9 @@ fn v1_output_format(spec: &str) -> Result<BlastnOutputFormat> {
         anyhow::bail!("unsupported BLASTN custom outfmt specification: {spec:?}");
     }
     match format {
-        "0" => Ok(BlastnOutputFormat::Pairwise),
+        "0" => Ok(BlastnOutputFormat::Pairwise(
+            crate::report::pairwise::PairwiseView::Pairwise,
+        )),
         "6" => Ok(BlastnOutputFormat::Tabular),
         "7" => Ok(BlastnOutputFormat::TabularWithComments),
         _ => anyhow::bail!("unsupported BLASTN output format: {format}"),
@@ -46,7 +48,7 @@ pub(super) fn run_web_pair(
     // formats that it had (6 and 7) and rejects outfmt 0 with the error that it gave
     // before the engine implemented outfmt 0.
     let outfmt = match v1_output_format(&outfmt)? {
-        BlastnOutputFormat::Pairwise => anyhow::bail!("unsupported BLASTN output format: 0"),
+        BlastnOutputFormat::Pairwise(_) => anyhow::bail!("unsupported BLASTN output format: 0"),
         BlastnOutputFormat::Tabular => "6".to_string(),
         BlastnOutputFormat::TabularWithComments => "7".to_string(),
         // `v1_output_format` reads 0, 6 and 7 only (no field list).

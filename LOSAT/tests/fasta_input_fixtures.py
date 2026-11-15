@@ -841,8 +841,8 @@ def extra_rows() -> list[Row]:
     # outfmt 11's titles (line NP, series SM): the archive of each batch that NCBI completes holds
     # the batch's queries and every `-subject` record; the batch that stops the run (here record 6's
     # CheckDataLine error, a last batch without letters, a batch size of 0) writes neither, and the
-    # error archive holds no sequence. A title the archive cannot write is LOSAT's refusal
-    # (`losat-rejection`) where NCBI writes it, and NCBI's output where NCBI does not.
+    # error archive holds no sequence. A title that the serial stream replaces bytes of (`café`) is
+    # written as NCBI writes it: `#` for each byte in the archive and a `Bad char` report on stderr.
     arch_sizes = {"nuc": ("100", "200"), "prot": ("50", "100")}
     for program, task in ALL_PROGRAMS:
         if task == "blastn":
@@ -852,25 +852,21 @@ def extra_rows() -> list[Row]:
         each, two = arch_sizes[kind]
         bad_s = f"@/batch_title.s.{'prot' if program == 'blastp' else 'nuc'}.{EXT['prot' if program == 'blastp' else 'nuc']}"
         file = lambda name: f"@/{name}.{kind}.{EXT[kind]}"
-        refused = "losat-rejection"
         add("arch_title_late.two", program, task, file("batch_title_late"), s, env=f"BATCH_SIZE={two}", fmts=(11,))
-        add("arch_title_late.each", program, task, file("batch_title_late"), s, env=f"BATCH_SIZE={each}", fmts=(11,),
-            kind=refused)
+        add("arch_title_late.each", program, task, file("batch_title_late"), s, env=f"BATCH_SIZE={each}", fmts=(11,))
         add("arch_title_late.default", program, task, file("batch_title_late"), s, fmts=(11,))
-        add("arch_title_first.two", program, task, file("batch_title_first"), s, env=f"BATCH_SIZE={two}", fmts=(11,),
-            kind=refused)
+        add("arch_title_first.two", program, task, file("batch_title_first"), s, env=f"BATCH_SIZE={two}", fmts=(11,))
         add("arch_title_first.default", program, task, file("batch_title_first"), s, fmts=(11,))
         # BLASTN's batch size 0 is the mixer's (its first batch, 5,000 letters, holds every record up to
         # record 6's error); the others' first batch is empty.
         add("arch_title_first.zero", program, task, file("batch_title_first"), s, env="BATCH_SIZE=0", fmts=(11,))
         add("arch_title_lastempty.each", program, task, file("batch_title_lastempty"), s, env=f"BATCH_SIZE={each}",
             fmts=(11,))
-        add("arch_title_lastempty.default", program, task, file("batch_title_lastempty"), s, fmts=(11,), kind=refused)
+        add("arch_title_lastempty.default", program, task, file("batch_title_lastempty"), s, fmts=(11,))
         add("arch_title_s.after_error", program, task, file("batch_late_bad"), bad_s, fmts=(11,))
-        add("arch_title_s.clean", program, task, file("batch_clean"), bad_s, fmts=(11,), kind=refused)
+        add("arch_title_s.clean", program, task, file("batch_clean"), bad_s, fmts=(11,))
         # (BLASTN's mixer completes the batch, whose archive holds the subjects.)
-        add("arch_title_s.zero", program, task, file("batch_clean"), bad_s, env="BATCH_SIZE=0", fmts=(11,),
-            kind=refused if program == "blastn" else "ncbi")
+        add("arch_title_s.zero", program, task, file("batch_clean"), bad_s, env="BATCH_SIZE=0", fmts=(11,))
     # outfmt 15 and 16 of a `-subject` search (line NP, series SM): NCBI writes a query's report when
     # the next query's results arrive, or in the epilog; a run that a later batch stops (record 6's
     # CheckDataLine error) never writes the last query of the batches before it, so the title of
@@ -898,7 +894,7 @@ def extra_rows() -> list[Row]:
     add("arch_titlelong_late", "blastn", "megablast", "@/batchlong_title_late.nuc.fa", "@/batchlong.s.nuc.fa",
         fmts=(11,))
     add("arch_titlelong_first", "blastn", "megablast", "@/batchlong_title_first.nuc.fa", "@/batchlong.s.nuc.fa",
-        fmts=(11,), kind="losat-rejection")
+        fmts=(11,))
     # a subject cannot be in a later batch, but its errors and warnings come before the query's
     for program, task in ALL_PROGRAMS:
         q, s = base_pair(program)

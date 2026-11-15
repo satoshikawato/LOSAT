@@ -332,9 +332,7 @@ impl XPop {
     #[inline]
     pub(crate) fn get() -> Self {
         static ON: OnceLock<bool> = OnceLock::new();
-        XPop(*ON.get_or_init(|| {
-            Self::x_cpu() && crate::utils::xswitch::on("LOSAT_X_BNPOPCNT")
-        }))
+        XPop(*ON.get_or_init(|| Self::x_cpu() && crate::utils::xswitch::on("LOSAT_X_BNPOPCNT")))
     }
 
     /// Whether this CPU has the `popcnt` instruction.
@@ -1460,7 +1458,14 @@ mod tests {
     fn both_counts_give_the_same_ranks() {
         let forms = XPop::x_forms();
         let mut x = 0x2545_F491_4F6C_DD1Du64;
-        let mut words = vec![0u64, 1, u64::MAX, 1 << 63, u64::MAX >> 1, 0x5555_5555_5555_5555];
+        let mut words = vec![
+            0u64,
+            1,
+            u64::MAX,
+            1 << 63,
+            u64::MAX >> 1,
+            0x5555_5555_5555_5555,
+        ];
         for _ in 0..10_000 {
             x ^= x << 13;
             x ^= x >> 7;

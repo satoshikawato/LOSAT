@@ -158,7 +158,10 @@ fn csr_popcnt(stderr: &str) -> Option<bool> {
     let line = stderr
         .lines()
         .find_map(|line| line.strip_prefix("[TIMING] x_bn_csr: "))?;
-    match line.split_whitespace().find_map(|word| word.strip_prefix("popcnt=")) {
+    match line
+        .split_whitespace()
+        .find_map(|word| word.strip_prefix("popcnt="))
+    {
         Some("1") => Some(true),
         Some("0") => Some(false),
         other => panic!("popcnt= {other:?} in: {line}"),
@@ -222,7 +225,10 @@ fn check(dir: &TestDir, query: &Path, subject: &Path, extra: &[&str], packed: bo
                 report == expected,
                 "{what} threads {threads}: popcnt off differs"
             );
-            assert_eq!(stderr, expected_stderr, "{what} threads {threads} popcnt off");
+            assert_eq!(
+                stderr, expected_stderr,
+                "{what} threads {threads} popcnt off"
+            );
             let (report, stderr) = search(query, subjects, extra, threads, &[PACK_OFF]);
             assert!(
                 report == expected,

@@ -1544,8 +1544,7 @@ fn csr_on_pool(
                 bar.wait();
                 let bits_r: &[u64] = std::slice::from_raw_parts(bb.ptr as *const u64, bb.len);
                 let rank = |cell: u32| {
-                    x_rank(bits_r, cell as usize, pop)
-                        .expect("BNCSRPACK: a word of an empty cell")
+                    x_rank(bits_r, cell as usize, pop).expect("BNCSRPACK: a word of an empty cell")
                 };
                 let base: u64 = (0..o).map(|p| own_w.get(p)).sum();
                 if c0 < c1 {

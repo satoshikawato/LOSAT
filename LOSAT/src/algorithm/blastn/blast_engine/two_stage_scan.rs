@@ -40,33 +40,37 @@
 //! the same batches, in the same order).
 //!
 //! This module is a child of `run` for the items it keeps private (the types `DiagHashTable`,
-//! `OffsetPair`, `SubjectChunk`, `QueryContext`, `QueryContextIndex`, `UngappedHit` and
-//! `BlastnTiming`; `scan_subject_kmers_with_ranges`, `scan_subject_disc_words_with_ranges`,
-//! `select_mb_scan_kind`, `diag_hash_insert_window`, `x_mb_hit_prefetch`, `x_bn_pv_once` and
-//! `OFFSET_ARRAY_SIZE`). Its function is the statements of the branch of
+//! `OffsetPair`, `SubjectChunk` and `UngappedHit`; `scan_subject_kmers_with_ranges`,
+//! `scan_subject_disc_words_with_ranges`, `select_mb_scan_kind`, `x_mb_hit_prefetch`,
+//! `x_bn_pv_once` and `OFFSET_ARRAY_SIZE`). Its function is the statements of the branch of
 //! `prelim_chunk_hits` that were there, in their order; the strips scans of PAIRPAR
 //! (`x_pair_seed.rs` `scan_strip`, `x_pair_seed_disc.rs` `scan_strip_disc`) walk the lookup hits
-//! in the order `on_word` does. What the scan reads that is the same for every word of a chunk is
-//! `TwoStageScanInputs`, and what it writes is `TwoStageScanState`, both built once per chunk.
-//! Nothing here runs on the pool.
+//! in the order `on_word` does. What the scan reads is `TwoStageScanInputs` (the batch's word
+//! finder, `prelim_subject::ScanBatch`, built once per batch, and the chunk's own values), and
+//! what it writes is `TwoStageScanState`, both built once per chunk. Nothing here runs on the
+//! pool.
 
 use super::pair_extend;
-use super::x_diag_lv;
+use super::prelim_subject::ScanBatch;
 use super::{
-    diag_hash_insert_window, scan_subject_disc_words_with_ranges, scan_subject_kmers_with_ranges,
-    select_mb_scan_kind, x_bn_pv_once, x_dc_csr, x_mb_hit_prefetch, BlastnTiming, DiagHashTable,
-    DiagStruct, OffsetPair, QueryContext, QueryContextIndex, SmallNaWord, SubjectChunk,
-    UngappedHit, OFFSET_ARRAY_SIZE,
+    scan_subject_disc_words_with_ranges, scan_subject_kmers_with_ranges, select_mb_scan_kind,
+    x_bn_pv_once, x_dc_csr, x_mb_hit_prefetch, DiagHashTable, DiagStruct, OffsetPair, SmallNaWord,
+    SubjectChunk, UngappedHit, OFFSET_ARRAY_SIZE,
 };
-use crate::algorithm::blastn::alignment::gapped::BlastnaMatrix;
 use crate::algorithm::blastn::lookup::TwoStageLookup;
 
-/// What the scan of one subject chunk with a two-stage table reads that is the same for every
-/// word, in groups below. Built once per chunk by `prelim_chunk_hits`, after PAIRPAR
-/// declines the chunk, with the names there; every field is a shared reference or a `Copy` value.
+/// What the scan of one subject chunk with a two-stage table reads: the batch's word finder
+/// (`ScanBatch`, built once per batch: the query block, the cutoffs, the scoring, the word lengths,
+/// the scan step and window, the diagonal table's form and sizes, the diagnostics), its two-stage
+/// table, and the chunk's own values: the packed subject from the chunk's start, the chunk's
+/// length, ranges and whether the subject is masked, the chunk (its offset in the subject), the
+/// diagonal table's offset for this chunk, whether the hash's retrieve takes the level bound of
+/// LOSAT_X_DIAGLV, and the subject's index and trace id (the trace lines). Built once per chunk by
+/// `prelim_chunk_hits`, after PAIRPAR declines the chunk.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1597-1602,1625-1634
-/// (`BlastNaWordFinder`) and c++/src/algo/blast/core/blast_engine.c:451 (the batch's size)
+/// (`BlastNaWordFinder`, whose parameters are pointers to the search's shared structs and the
+/// chunk) and c++/src/algo/blast/core/blast_engine.c:451 (the batch's size)
 /// ```c
 /// Int2 BlastNaWordFinder(BLAST_SequenceBlk * subject,
 ///                        BLAST_SequenceBlk * query,
@@ -89,61 +93,17 @@ use crate::algorithm::blastn::lookup::TwoStageLookup;
 /// ```
 /// The level bound and the diagnostics have no NCBI counterpart.
 pub(super) struct TwoStageScanInputs<'a> {
-    /// The table and its scan: the two-stage table, the packed subject, the chunk's length, the
-    /// scan step, the chunk's ranges, whether the subject is masked, and the size at which a batch
-    /// of offset pairs goes to the steps of the pairs (`OFFSET_ARRAY_SIZE` and the table's longest
-    /// chain).
+    pub(super) scan: &'a ScanBatch<'a>,
     pub(super) two_stage: &'a TwoStageLookup,
     pub(super) search_seq_packed: &'a [u8],
     pub(super) s_len: usize,
-    pub(super) scan_step: usize,
     pub(super) subject_seq_ranges: &'a [(i32, i32)],
     pub(super) subject_masked: bool,
-    pub(super) offset_array_size: usize,
-    /// The word extension of the small-query table: its compressed query (empty for the other
-    /// tables), whether its aligned one-byte form applies, and the query with its sentinels.
-    pub(super) small_na_compressed_query: &'a [u8],
-    pub(super) small_na_aligned_one_byte: bool,
-    pub(super) encoded_query_concat_blastna_with_sentinels: &'a [u8],
-    /// The pair's context: the context of a query offset, the contexts, their cutoffs, and the
-    /// chunk (its offset in the subject).
-    pub(super) query_context_index: &'a QueryContextIndex,
-    pub(super) query_contexts: &'a [QueryContext],
-    pub(super) cutoff_scores: &'a [i32],
     pub(super) chunk: &'a SubjectChunk,
-    /// The diagonal table: whether it is the array (else the hash), the array's length, mask and
-    /// size, the table's offset for this chunk, and whether the hash's retrieve takes the level
-    /// bound of LOSAT_X_DIAGLV.
-    pub(super) use_array_indexing: bool,
-    pub(super) diag_table_length: usize,
-    pub(super) diag_table_mask: isize,
-    pub(super) diag_array_size: usize,
     pub(super) diag_offset: isize,
     pub(super) x_lv_ref: bool,
-    /// The window (0: one hit) and the off-diagonal range.
-    pub(super) window_size: usize,
-    pub(super) scan_range: usize,
-    /// The ungapped extension: the concatenated query, the X-dropoff and the reduced cutoff of each
-    /// context, the score matrix, and the score table of the approximate extension.
-    pub(super) encoded_query_concat_blastna: &'a [u8],
-    pub(super) x_dropoff_scores: &'a [i32],
-    pub(super) reduced_cutoff_scores: &'a [i32],
-    pub(super) score_matrix: &'a BlastnaMatrix,
-    pub(super) nucl_score_table: &'a [i32; 256],
-    /// The diagnostics: the switch of the debug counters, BLEMIR_DEBUG and LOSAT_DEBUG_BLASTN (the
-    /// warning on a long chain and the `[PERF]` line), the debug window, the trace lines
-    /// (`blastn_trace`) with the subject's index and trace id, the debug window's lines with the
-    /// minimum ungapped score they print, and LOSAT_TIMING.
-    pub(super) debug_enabled: bool,
-    pub(super) debug_mode: bool,
-    pub(super) blastn_debug: bool,
-    pub(super) debug_window: Option<(usize, usize, usize, usize)>,
-    pub(super) blastn_trace_enabled: bool,
     pub(super) s_idx: usize,
     pub(super) s_id: &'a str,
-    pub(super) min_ungapped_score: i32,
-    pub(super) timing_enabled: bool,
-    pub(super) timing_ref: Option<&'a BlastnTiming>,
 }
 
 /// What the scan writes: the chunk's initial hits, the diagonal table (the array's levels and
@@ -229,44 +189,33 @@ pub(super) struct TwoStageScanState<'s> {
 #[inline(always)]
 pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoStageScanState<'_>) {
     let &TwoStageScanInputs {
+        scan,
         two_stage,
         search_seq_packed,
         s_len,
-        scan_step,
         subject_seq_ranges,
         subject_masked,
-        offset_array_size,
-        small_na_compressed_query,
-        small_na_aligned_one_byte,
-        encoded_query_concat_blastna_with_sentinels,
-        query_context_index,
-        query_contexts,
-        cutoff_scores,
         chunk,
-        use_array_indexing,
-        diag_table_length,
-        diag_table_mask,
-        diag_array_size,
         diag_offset,
         x_lv_ref,
-        window_size,
-        scan_range,
+        s_idx,
+        s_id,
+    } = x;
+    // What the scan reads of the batch's word finder (the steps of the pairs read the rest there).
+    let &ScanBatch {
+        scan_step,
+        offset_array_size,
+        small_na_compressed_query,
         encoded_query_concat_blastna,
-        x_dropoff_scores,
-        reduced_cutoff_scores,
-        score_matrix,
-        nucl_score_table,
+        word_length,
+        lut_word_length,
         debug_enabled,
         debug_mode,
         blastn_debug,
-        debug_window,
-        blastn_trace_enabled,
-        s_idx,
-        s_id,
-        min_ungapped_score,
         timing_enabled,
         timing_ref,
-    } = x;
+        ..
+    } = scan;
     let ungapped_hits = &mut *state.ungapped_hits;
     let hit_level_array = &mut *state.hit_level_array;
     let hit_len_array = &mut *state.hit_len_array;
@@ -276,9 +225,8 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
     let dbg_window_seeds = &mut *state.dbg_window_seeds;
     let dbg_ungapped_low = &mut *state.dbg_ungapped_low;
     let dbg_gapped_attempted = &mut *state.dbg_gapped_attempted;
-    // For two-stage lookup, use lut_word_length (8) for scanning
-    let lut_word_length = two_stage.lut_word_length();
-    let word_length = two_stage.word_length();
+    // For two-stage lookup, use lut_word_length (8) for scanning (`scan.lut_word_length` and
+    // `scan.word_length` are the table's, `ScanBatch::new`).
     // NCBI's small-query table always keeps `masked_locations`, so
     // `s_TypeOfWord` checks the lookup words of every word hit (the
     // compressed query reads ambiguity codes as bases, and the lookup
@@ -303,35 +251,9 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
         lut_word_length,
     });
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:663-664
-    // ```c
-    // diag = s_off + diag_table->diag_array_length - q_off;
-    // real_diag = diag & diag_table->diag_mask;
-    // ```
-    let (diag_array_length, diag_mask) = if use_array_indexing {
-        (diag_table_length as isize, diag_table_mask)
-    } else {
-        (0isize, 0isize)
-    };
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:825-826, 939-941
-    // ```c
-    // Delta = MIN(word_params->options->scan_range, window_size - word_length);
-    // if (Delta < 0) Delta = 0;
-    // s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
-    //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
-    //                       hit_ready, s_off_pos, window_size + Delta + 1);
-    // ```
-    let diag_hash_window = if !use_array_indexing {
-        diag_hash_insert_window(window_size, scan_range, word_length)
-    } else {
-        0
-    };
-
-    let two_hits = window_size > 0;
-    // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the level bound's constants
-    // of this chunk's seeds.
-    let x_lv_seeds = x_diag_lv::LvSeeds::new(two_hits, word_length, window_size);
+    // The diagonal table's length and mask for the steps of the pairs (0 with the hash), the
+    // hash's insert window and the level bound's constants (LOSAT_X_DIAGLV) are the batch's
+    // (`ScanBatch::new`).
 
     // DEBUG: Count loop iterations
     let mut dbg_left_ext_iters = 0usize;
@@ -393,7 +315,8 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
     // ```
     let x_hit_prefetch = x_mb_hit_prefetch();
     // What the steps of the offset pairs of this chunk
-    // (`pair_extend::extend_offset_pairs`) read, built once per chunk.
+    // (`pair_extend::extend_offset_pairs`) read besides the batch's word finder (`scan`, a
+    // parameter of their own): the chunk's values, built once per chunk.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1052-1060
     // ```c
     // s_BlastNaExtend(const BlastOffsetPair * offset_pairs, Int4 num_hits,
@@ -407,45 +330,17 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
     //                 Uint4 s_range)
     // ```
     let pair_inputs = pair_extend::PairExtendInputs {
+        two_stage,
         small_na_word: &small_na_word,
-        small_na_aligned_one_byte,
         subject_masked,
-        word_length,
-        lut_word_length,
         search_seq_packed,
-        encoded_query_concat_blastna_with_sentinels,
-        debug_enabled,
         x_hit_prefetch,
-        query_context_index,
-        query_contexts,
-        cutoff_scores,
         s_len,
         chunk,
-        debug_window,
-        use_array_indexing,
-        diag_array_length,
-        diag_mask,
-        diag_array_size,
         diag_offset,
         x_lv_ref,
-        x_lv_seeds,
-        two_stage,
-        two_hits,
-        window_size,
-        scan_range,
-        diag_hash_window,
-        encoded_query_concat_blastna,
-        x_dropoff_scores,
-        reduced_cutoff_scores,
-        score_matrix,
-        nucl_score_table,
-        blastn_trace_enabled,
         s_idx,
         s_id,
-        debug_mode,
-        min_ungapped_score,
-        timing_enabled,
-        timing_ref,
     };
     // What the steps of the offset pairs of this chunk write, held by the scan's
     // callbacks for the whole scan.
@@ -544,6 +439,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
         // ```
         if offset_pairs_len >= OFFSET_ARRAY_SIZE {
             pair_extend::extend_offset_pairs(
+                scan,
                 &pair_inputs,
                 &mut pair_state,
                 offset_pairs,
@@ -612,6 +508,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
         // ```
         if offset_pairs_len >= offset_array_size {
             pair_extend::extend_offset_pairs(
+                scan,
                 &pair_inputs,
                 &mut pair_state,
                 offset_pairs,
@@ -675,6 +572,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                 }
                 if offset_pairs_len >= OFFSET_ARRAY_SIZE {
                     pair_extend::extend_offset_pairs(
+                        scan,
                         &pair_inputs,
                         &mut pair_state,
                         offset_pairs,
@@ -696,6 +594,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                 }
                 if offset_pairs_len >= offset_array_size {
                     pair_extend::extend_offset_pairs(
+                        scan,
                         &pair_inputs,
                         &mut pair_state,
                         offset_pairs,
@@ -766,6 +665,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                 let mut x_on_word_csr = |(kmer_start, s_range, index): (usize, usize, u64)| {
                     if offset_pairs_len >= OFFSET_ARRAY_SIZE {
                         pair_extend::extend_offset_pairs(
+                            scan,
                             &pair_inputs,
                             &mut pair_state,
                             offset_pairs,
@@ -795,6 +695,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                     }
                     if offset_pairs_len >= offset_array_size {
                         pair_extend::extend_offset_pairs(
+                            scan,
                             &pair_inputs,
                             &mut pair_state,
                             offset_pairs,
@@ -888,6 +789,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
     // ```
     if offset_pairs_len > 0 {
         pair_extend::extend_offset_pairs(
+            scan,
             &pair_inputs,
             &mut pair_state,
             offset_pairs,

@@ -247,12 +247,9 @@ impl DbFile {
         })?;
         let mut buf = match buffer {
             RangeBuffer::New => vec![0u8; len],
-            RangeBuffer::Mapped => {
-                let mut buf = Vec::new();
-                crate::utils::x_mapped::X_BYTES.reserve(&mut buf, len);
-                buf.resize(len, 0u8);
-                buf
-            }
+            // A buffer of the pool keeps the bytes its last read left in it, and only the bytes
+            // past them are zeroed before the read writes them all (as `Given` below).
+            RangeBuffer::Mapped => crate::utils::x_mapped::X_BYTES.x_filled(len, 0u8),
             #[cfg(any(
                 test,
                 all(

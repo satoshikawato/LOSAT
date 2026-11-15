@@ -279,6 +279,33 @@ pub(super) fn x_masked_subject_rows(hits: &mut [PairwiseHit], subjects: &[FastaR
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1588-1600
+// ```c++
+//         // Union subject sequence ranges
+//         vector <TSeqRange> ranges;
+//         for (int i=0; i<hsp_list->hspcnt; i++) {
+//             const BlastHSP* hsp = hsp_list->hsp_array[i];
+//             TSeqRange rg;
+//             rg.SetFrom(hsp->subject.offset);
+//             rg.SetTo(hsp->subject.end);
+//             ranges.push_back(rg);
+//         }
+//
+//         // Extract subject masks
+//         TMaskedSubjRegions masks;
+//         if (!ranges.empty() && seqinfo_src->GetMasks(kOid, ranges, masks)) {
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqinfosrc_seqvec.cpp:115-122
+// ```c++
+//     for (size_t ir=0; ir< target_ranges.size(); ir++) {
+//         if (target_ranges[ir] != TSeqRange::GetEmpty() &&
+//            loc.IntersectingWith(target_ranges[ir])) {
+//            CRef<CSeqLocInfo> sli(new CSeqLocInfo(interval, frame));
+//            retval.push_back(sli);
+//            return;
+//         }
+//     }
+// ```
 /// The subject masks of each query's hits (`GetSubjectMasks` of the query's results, by (query,
 /// subject)): the lower-case runs of the subject's record (record coordinates, inclusive) that
 /// meet the closed range `[offset, end]` of one of the query's HSPs with it in the searched letters

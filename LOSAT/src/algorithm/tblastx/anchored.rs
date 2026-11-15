@@ -14,13 +14,45 @@
 //!   as outfmt 0's rows show them), which a group's query row shows where they have its frame.
 //!   The subjects' masks have no frame (`CSeqLocInfo::eFrameNotSet`), and a subject's row of
 //!   width 3 has one, so NCBI shows none of them (`query_anchored::prepare_rows`): none are read.
+//!
+//! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1547-1548,1579-1584
+//! (`CBlastFormat::PrintOneResultSet`, formats 0 to 4)
+//! ```c++
+//!     TMaskedQueryRegions masklocs;
+//!     results.GetMaskedQueryRegions(masklocs);
+//!     ...
+//!     display.SetMasterGeneticCode(m_QueryGenCode);
+//!     display.SetSlaveGeneticCode(m_DbGenCode);
+//!     display.SetSeqLocChar(CDisplaySeqalign::eLowerCase);
+//!     TSeqLocInfoVector subj_masks;
+//!     results.GetSubjectMasks(subj_masks);
+//!     display.SetSubjectMasks(subj_masks);
+//! ```
+//! NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2100-2101
+//! ```c++
+//!                 avRef->SetGenCode(m_SlaveGeneticCode);
+//!                 avRef->SetGenCode(m_MasterGeneticCode, 0);
+//! ```
+//! NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1244-1251
+//! ```c++
+//!     // Mask locations for queries (first elem) and subjects (all other rows)
+//!     vector<TSAlnSeqlocInfoList> masked_regions(rowNum);
+//!     x_FillLocList(masked_regions[0], m_Seqloc);
+//!
+//!     for (int row = 1; row < rowNum; row++) {
+//!         const CSeq_id& id = m_AV->GetSeqId(row);
+//!         x_FillLocList(masked_regions[row], &m_SubjectMasks[id]);
+//!     }
+//! ```
+//! (`x_FillSeqid`, the labels: showalign.cpp:4545-4572, quoted at `query_anchored::fill_seqid`.)
 
 use super::blast_engine::ReportDatabase;
 use super::report::{DisplayCode, SubjectLetters};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::Placements;
 use crate::report::query_anchored::{
-    database_label, query_record_letters, record_label, Mask, ReportSequences,
+    database_label, query_record_letters, record_label, subject_is_query_record, Mask,
+    ReportSequences,
 };
 
 /// What the sections of a TBLASTX report read (module doc).
@@ -41,10 +73,16 @@ pub(crate) struct AnchoredSequences<'a> {
 }
 
 impl ReportSequences for AnchoredSequences<'_> {
-    /// A query's own record as a subject is refused before the reports
-    /// (`report::refuse_query_records_in_sections`).
-    fn subject_is_query(&self, _q_idx: usize, _s_idx: u32) -> bool {
-        false
+    /// A `-subject` record read with `-parse_deflines` that is the query's record
+    /// (`subject_is_query_record`, as BLASTN's): its HSPs with the query are one `CAlnMixSeq` of
+    /// both rows (`query_anchored::aln_mix`, `fForceTranslation`). A database sequence with the
+    /// query's id is refused before the reports (`refuse_anchored_reports`).
+    fn subject_is_query(&self, q_idx: usize, s_idx: u32) -> bool {
+        self.database.is_none()
+            && match (self.queries.get(q_idx), self.subjects.get(s_idx as usize)) {
+                (Some(query), Some(subject)) => subject_is_query_record(query, subject),
+                _ => false,
+            }
     }
 
     fn query_letters(&self, q_idx: usize, from: u32, to: u32, out: &mut Vec<u8>) {
@@ -105,14 +143,17 @@ impl ReportSequences for AnchoredSequences<'_> {
 
 /// The refusals of the query-anchored formats (outfmt 1 to 4, `view`) of a TBLASTX report call,
 /// before its first byte (`run`, its final hits `hits` in report order with record coordinates and
-/// their Seq-aligns' identities `seqalign_identities`, `-sorthits` and `-sorthsps` `sort`):
+/// their Seq-aligns' identities `seqalign_identities`, `-sorthits` and `-sorthsps` `sort`; with the
+/// stream of `report_stream` a call is one query batch, so a refusal comes after the reports of
+/// the batches before, as NCBI's error in a later batch's format):
 ///
 /// - A query whose own record is one of its subjects (`-subject` read with `-parse_deflines`,
-///   `query_anchored::subject_is_query_record`), with alignments to show (`-num_alignments`):
-///   TBLASTX's sections add their Dense-segs with `fForceTranslation` (not `fPreserveRows`), so
-///   NCBI's `CAlnMix` takes the query's row and that subject's for one sequence and merges them
-///   (`aln_mix`: not ported). The refusal takes every query that reports its own record, also one
-///   whose record lies past the first `-num_alignments` subjects.
+///   `query_anchored::subject_is_query_record`) and whose section NCBI BLAST+ stops on
+///   (`pairwise::section_stops`, PD-LOSAT-NCBI-DEFECTS rule 3): TBLASTX's sections add their
+///   Dense-segs with `fForceTranslation`, so NCBI's `CAlnMix` takes the query's row and that
+///   subject's for one sequence (`query_anchored::aln_mix`), whose merge can throw. `rows_of` makes
+///   the rows of a query's hits in the final order (`report::PairwiseRows`) and `subject_titles`
+///   names the subjects, as the report's.
 /// - `-db`: a reported sequence that NCBI's scope finds as a query of its batch, by its Seq-align
 ///   id (a generated `lcl|Query_N`) or, in a description line, by its display id
 ///   (`common::database::refuse_query_ids_of_anchored_reports`, as BLASTN's, TBLASTN's and
@@ -120,38 +161,50 @@ impl ReportSequences for AnchoredSequences<'_> {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn refuse_anchored_reports(
     run: &super::blast_engine::TblastxReportRun<'_>,
+    view: crate::report::pairwise::PairwiseView,
     hits: &[super::blast_engine::TblastxHsp],
     seqalign_identities: Option<&[u32]>,
     sort: crate::report::hit_sort::ReportSort,
     num_alignments: usize,
     num_descriptions: usize,
+    subject_titles: &[std::sync::Arc<[u8]>],
+    rows_of: &dyn Fn(usize) -> Vec<crate::report::pairwise::PairwiseHit>,
 ) -> anyhow::Result<()> {
     let Some(database) = run.database else {
-        if num_alignments == 0 {
-            return Ok(());
-        }
-        if let Some(hsp) = hits.iter().find(|hsp| {
-            match (
-                run.queries.get(hsp.hit.q_idx as usize),
-                run.subjects.get(hsp.hit.s_idx as usize),
-            ) {
-                (Some(query), Some(subject)) => {
-                    crate::report::query_anchored::subject_is_query_record(query, subject)
-                }
-                _ => false,
+        for (q_idx, query) in run.queries.iter().enumerate() {
+            if query.believed().is_none_or(|ids| ids.shared.is_none()) {
+                continue;
             }
-        }) {
-            let mut fasta = Vec::new();
-            if let Some(ids) = run.queries[hsp.hit.q_idx as usize].believed() {
-                crate::seqid::label::fasta(&ids.best, &mut fasta);
+            let is_query = |s_idx: u32| {
+                run.subjects
+                    .get(s_idx as usize)
+                    .is_some_and(|subject| subject_is_query_record(query, subject))
+            };
+            let query_length = run.ranges.input.placements.length(q_idx, query.seq().len());
+            let rows = rows_of(q_idx);
+            let stop = crate::report::pairwise::section_stops(
+                view,
+                sort,
+                true,
+                num_alignments,
+                q_idx,
+                &rows,
+                subject_titles,
+                is_query,
+                |group| {
+                    crate::report::pairwise::tblastx_section_hsps(
+                        num_alignments,
+                        group,
+                        query_length,
+                        is_query,
+                    )
+                },
+            )?;
+            if let Some(stop) = stop {
+                return Err(crate::report::query_anchored::stopped_section(
+                    query, "TBLASTX", stop,
+                ));
             }
-            anyhow::bail!(
-                "the record {} is both a query and a subject under -parse_deflines, and in the \
-                 query-anchored formats (outfmt 1 to 4) NCBI BLAST+ merges its query row and its \
-                 subject rows of TBLASTX into one sequence; this is not supported by LOSAT's \
-                 TBLASTX",
-                String::from_utf8_lossy(&fasta)
-            );
         }
         return Ok(());
     };

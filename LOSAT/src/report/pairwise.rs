@@ -2930,6 +2930,34 @@ fn blastx_section_hsps(
     )
 }
 
+/// `section_hsps` of a TBLASTX section (`seqalign::translated_row_segments`: two translated
+/// nucleotide rows in their frames of their records, the query's of record length
+/// `query_length`), `is_query` the subject that is the query's own Bioseq.
+pub(crate) fn tblastx_section_hsps(
+    num_alignments: usize,
+    group: &super::x_pairwise_par::QueryGroup<'_>,
+    query_length: usize,
+    is_query: impl Fn(u32) -> bool,
+) -> super::query_anchored::Hsps {
+    section_hsps(
+        super::query_anchored::Hsps::of_translated_nucleotides(),
+        num_alignments,
+        group,
+        is_query,
+        |hit, segments| {
+            super::serial::seqalign::translated_row_segments(
+                &hit.hit,
+                Some((hit.query_frame.unwrap_or(1), query_length)),
+                Some((
+                    hit.subject_frame.unwrap_or(1),
+                    hit.subject_length.unwrap_or(0),
+                )),
+                segments,
+            )
+        },
+    )
+}
+
 /// Whether NCBI BLAST+ aborts on the query-anchored section (`view`) of query `q_idx` of a
 /// BLASTP `-subject` search (`section_aborts` of `blastp_section_aborts`).
 pub(crate) fn blastp_section_aborts(
@@ -2954,7 +2982,7 @@ pub(crate) fn blastp_section_aborts(
 }
 
 /// Whether NCBI BLAST+ aborts on the query-anchored section (`view`) of query `q_idx` of a
-/// `-subject` search (`query_anchored::ncbi_aborts`), `rows` the rows of its hits in the final
+/// `-subject` search (`query_anchored::ncbi_stops`), `rows` the rows of its hits in the final
 /// order: the section of the report (`QuerySections::alignments`), whose group is sorted by
 /// `sort` (`PairwiseView::report_sort`), whose aligned subjects are the first `num_alignments`
 /// and whose HSPs `hsps_of` makes from it (the program's `section_hsps`). Asked before any format of the
@@ -2974,26 +3002,55 @@ pub(crate) fn section_aborts(
     is_query: impl Fn(u32) -> bool,
     hsps_of: impl FnOnce(&super::x_pairwise_par::QueryGroup<'_>) -> super::query_anchored::Hsps,
 ) -> io::Result<bool> {
+    Ok(section_stops(
+        view,
+        sort,
+        false,
+        num_alignments,
+        q_idx,
+        rows,
+        subject_titles,
+        is_query,
+        hsps_of,
+    )?
+    .is_some())
+}
+
+/// `section_aborts` with how NCBI BLAST+ stops (`query_anchored::ncbi_stops`), for a report
+/// whose group is sorted as TBLASTX's (`tblastx`, `QueryGroup::sorted`) or not.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn section_stops(
+    view: PairwiseView,
+    sort: super::hit_sort::ReportSort,
+    tblastx: bool,
+    num_alignments: usize,
+    q_idx: usize,
+    rows: &[PairwiseHit],
+    subject_titles: &[Arc<[u8]>],
+    is_query: impl Fn(u32) -> bool,
+    hsps_of: impl FnOnce(&super::x_pairwise_par::QueryGroup<'_>) -> super::query_anchored::Hsps,
+) -> io::Result<Option<super::query_anchored::NcbiStop>> {
     if view == PairwiseView::Pairwise {
-        return Ok(false);
+        return Ok(None);
     }
     let Some(group) = blastp_report_group(
         view.report_sort(sort),
+        tblastx,
         q_idx,
         rows,
         subject_titles,
         |_, _| false,
     ) else {
-        return Ok(false);
+        return Ok(None);
     };
     if !group
         .aligned(num_alignments)
         .iter()
         .any(|&s_idx| is_query(s_idx))
     {
-        return Ok(false);
+        return Ok(None);
     }
-    super::query_anchored::ncbi_aborts(&hsps_of(&group))
+    super::query_anchored::ncbi_stops(&hsps_of(&group))
 }
 
 /// The group of query `q_idx` of a report (`QueryGroup::sorted`, which `for_sections` also
@@ -3003,6 +3060,7 @@ pub(crate) fn section_aborts(
 /// query without hits.
 fn blastp_report_group<'h>(
     sort: super::hit_sort::ReportSort,
+    tblastx: bool,
     q_idx: usize,
     rows: &'h [PairwiseHit],
     subject_titles: &[Arc<[u8]>],
@@ -3013,7 +3071,7 @@ fn blastp_report_group<'h>(
         .enumerate()
         .filter(|(_, hit)| hit.hit.q_idx as usize == q_idx)
         .collect();
-    super::x_pairwise_par::QueryGroup::sorted(&query_hits, subject_titles, joins, sort, false)
+    super::x_pairwise_par::QueryGroup::sorted(&query_hits, subject_titles, joins, sort, tblastx)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:686-700
@@ -3044,7 +3102,7 @@ pub(crate) fn blastp_described_subjects(
     rows: &[PairwiseHit],
     joins: impl Fn(u32, u32) -> bool,
 ) -> Vec<u32> {
-    let Some(group) = blastp_report_group(sort, q_idx, rows, &[], joins) else {
+    let Some(group) = blastp_report_group(sort, false, q_idx, rows, &[], joins) else {
         return Vec::new();
     };
     if !two_part {
@@ -5169,24 +5227,10 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
     ) -> io::Result<()> {
         // The query record's length (`Length=`), also with `-query_loc`.
         let query_length = self.queries[q_idx].query_length;
-        write_anchored_section(writer, self.config, self.anchored, q_idx, |_| {
-            section_hsps(
-                super::query_anchored::Hsps::of_translated_nucleotides(),
-                self.report.num_alignments,
-                group,
-                |_| false,
-                |hit, segments| {
-                    super::serial::seqalign::translated_row_segments(
-                        &hit.hit,
-                        Some((hit.query_frame.unwrap_or(1), query_length)),
-                        Some((
-                            hit.subject_frame.unwrap_or(1),
-                            hit.subject_length.unwrap_or(0),
-                        )),
-                        segments,
-                    )
-                },
-            )
+        write_anchored_section(writer, self.config, self.anchored, q_idx, |sequences| {
+            tblastx_section_hsps(self.report.num_alignments, group, query_length, |s_idx| {
+                sequences.subject_is_query(q_idx, s_idx)
+            })
         })
     }
 

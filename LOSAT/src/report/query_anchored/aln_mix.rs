@@ -13,10 +13,18 @@
 //! Not ported, because these flags never reach them: `fTruncateOverlaps` (the planes and the rest
 //! of `x_SecondRowFits`), `fAllowTranslocation`, `fGapJoin` (`x_ConsolidateGaps`), `fCalcScore`,
 //! `fSortSeqsByScore` and `fSortInputByScore` (the chain scores), `fRemoveLeadTrailGaps`, and the
-//! scope-less identification by Seq-id. Not ported either: a Dense-seg added with
-//! `fForceTranslation` whose two rows are one Bioseq (TBLASTX's query read as a subject under
-//! `-parse_deflines`), which makes one `CAlnMixSeq` of both rows; the programs refuse it before
-//! the reports (`MixError::Internal` here).
+//! scope-less identification by Seq-id.
+//!
+//! One Bioseq on both rows (line RG T3c fix 1). A subject that is the query's own Bioseq
+//! (`Hsps::set_query_bioseq`: one record read as the query and as a subject under
+//! `-parse_deflines`) is, with `fPreserveRows` (BLASTP, BLASTN), the query's `m_AnotherRow`: a
+//! sequence of its own. With `fForceTranslation` (TBLASTX) `Add` makes no other row, so the HSP's
+//! two rows are the query's one `CAlnMixSeq` (`Mix::add`): no sequence is then in every Dense-seg
+//! as often as the mix has Dense-segs (no single refseq, `Mix::merge`), the record's subject
+//! positions are placed on the query's own row or, from the second such HSP on, on its extra rows
+//! (`Mix::merge_match`), and the rows after the first of that sequence are shown as the subject
+//! (`Mix::create_denseg`). A merge that NCBI's code stops with an exception (`CAlnException`,
+//! which `DisplaySeqalign` does not catch) is `MixError::NcbiThrows`.
 //!
 //! Strands and widths (lines RG T3b and T3c). A row's strand is set where it gets its first start.
 //! The query's (the refseq of the first pass) is plus with `fPreserveRows`
@@ -51,6 +59,13 @@ pub(crate) enum MixError {
     /// indexes its vectors with that row's `m_RowIdx` of -1 (`Mix::fill_unaligned_regions`).
     /// Only the query's own Bioseq gets there (`Mix::place`); the caller refuses the section.
     NcbiAborts,
+    /// NCBI's merge throws `CAlnException` (`eMergeFailure`, its message here), which
+    /// `DisplaySeqalign` does not catch (only `Add` is in its `try`, showalign.cpp:2060-2083, quoted
+    /// at `super::write_section`): the run stops with `Error: NCBI C++ Exception` (exit 255; probe
+    /// `tx.t3c.d.qid.f1` of line RG T3c). Only the query's own Bioseq added with
+    /// `fForceTranslation` gets there (`Mix::merge_match`, `Mix::build`); the caller refuses the
+    /// section, as for `NcbiAborts`.
+    NcbiThrows(&'static str),
 }
 
 /// NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnseq.hpp:139-185
@@ -174,6 +189,10 @@ struct Mix {
     /// `m_AlnMixMatches->m_AddFlags`: the flags of the last `Add`, which the merge reads (all the
     /// Dense-segs of a frame group are added with one flag).
     add_flags: AddFlags,
+    /// The subject that is the query's own Bioseq (`super::Hsps::set_query_bioseq`).
+    query_bioseq: Option<u32>,
+    /// `m_SingleRefseq` (`Mix::merge`; `m_IndependentDSs` is false for every section, there).
+    single_refseq: bool,
 }
 
 /// The first key of `map` (`begin()`), `None` (`end()`) when it is empty.
@@ -456,26 +475,25 @@ impl Mix {
     /// deterministic result of NCBI BLAST+ 2.17.0, written as it is: PD-LOSAT-NCBI-DEFECTS rule 2,
     /// DECISIONS T3-6). A BLASTX HSP of a minus query frame (`fNegativeStrand`) never throws: its
     /// query is minus in every HSP of the group and a protein row has no strand.
-    fn add(
-        &mut self,
-        hsp: super::Hsp<'_>,
-        flags: AddFlags,
-        query_bioseq: Option<u32>,
-    ) -> Result<bool, MixError> {
+    ///
+    /// A TBLASTX HSP of the query with its own Bioseq (`query_bioseq`, added with
+    /// `fForceTranslation`): without `fPreserveRows` the `while (row_index != row)` branch quoted
+    /// above is not taken, so both rows are the query's `CAlnMixSeq` (`x_IdentifyAlnMixSeq` finds the
+    /// one Bioseq handle): its `m_DsCnt` counts both rows, and the strand check reads its one strand
+    /// score for both rows before either is added to it.
+    fn add(&mut self, hsp: super::Hsp<'_>, flags: AddFlags) -> Result<bool, MixError> {
         let (subject, segments) = (hsp.subject, hsp.segments);
         let preserve_rows = flags == AddFlags::PreserveRows;
-        if !preserve_rows && query_bioseq == Some(subject) {
-            return Err(MixError::Internal(
-                "the query's own Bioseq added with fForceTranslation",
-            ));
-        }
+        let query_bioseq = self.query_bioseq;
+        let subject_key = if !preserve_rows && query_bioseq == Some(subject) {
+            SeqKey::Query
+        } else {
+            SeqKey::Subject(subject)
+        };
         self.ds_cnt += 1;
         self.add_flags = flags;
         let mut ds_seq = [0; 2];
-        for (row, key) in [SeqKey::Query, SeqKey::Subject(subject)]
-            .into_iter()
-            .enumerate()
-        {
+        for (row, key) in [SeqKey::Query, subject_key].into_iter().enumerate() {
             let seq = self.identify(key);
             // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:157-160
             // ```c++
@@ -486,9 +504,31 @@ impl Mix {
             // ```
             // (The widths of `CreateDensegFromStdseg`'s Dense-seg of a TBLASTN or BLASTX HSP: 1 for
             // the protein row, 3 for the nucleotide row; of a TBLASTX HSP none, which
-            // `x_ExtendDSWithWidths` sets to 3 for `fForceTranslation`, alnmix.cpp:133-143,
-            // 218-220; `x_Merge` sets the same, alnmerger.cpp:138-145, `m_IsAA ? 1 : 3`. A
-            // Dense-seg of two untranslated rows has none: 1.)
+            // `x_ExtendDSWithWidths` sets to 3 for `fForceTranslation`, its lengths in residues;
+            // `x_Merge` sets the same, alnmerger.cpp:138-145, `m_IsAA ? 1 : 3`. A Dense-seg of
+            // two untranslated rows has none: 1.)
+            // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmix.cpp:133-143
+            // ```c++
+            //     // translate (extend with widths) the dense-seg if necessary
+            //     if (flags & fForceTranslation  && !dsp->IsSetWidths()) {
+            //         if ( !m_Scope ) {
+            //             ...
+            //         } else {
+            //             m_InputDSs.push_back(x_ExtendDSWithWidths(*dsp));
+            //             dsp = m_InputDSs.back();
+            //         }
+            // ```
+            // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmix.cpp:198-220
+            // ```c++
+            //     if (contains_NA) {
+            //         // fix the lengths
+            //         ...
+            //                 new_lens[numseg] = lens[numseg] / 3;
+            //         ...
+            //     // add the widths
+            //     CDense_seg::TWidths&  new_widths  = new_ds->SetWidths();
+            //     new_widths.resize(ds.GetDim(), contains_NA ? 3 : 1);
+            // ```
             self.seqs[seq].width = if row == 0 {
                 self.query_width
             } else {
@@ -991,9 +1031,11 @@ impl Mix {
     ///         }
     ///     }}
     /// ```
-    /// The query is the first sequence and in every Dense-seg: it is the refseq, the single one,
-    /// and the Dense-segs are not independent (the branches that read `m_SingleRefseq` and
-    /// `m_IndependentDSs` then do nothing).
+    /// The query is the first sequence and in every Dense-seg: it is the single refseq, unless a
+    /// TBLASTX HSP of the query's own Bioseq counted it twice (`Mix::add`); then no sequence is
+    /// the single refseq and the query, first in `m_Seqs`, stays the refseq of the first pass. Its
+    /// `m_DsCnt` is above 1 whenever the mix has more than one Dense-seg (and also with one
+    /// Dense-seg of its own Bioseq), so the Dense-segs are never independent.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:160-252
     /// ```c++
@@ -1079,7 +1121,29 @@ impl Mix {
     /// The query's pass takes every match in score order; a match of a subject's letters alone
     /// (an insertion) goes to that subject's `m_MatchList`, which the next passes take, one
     /// subject at a time in the order of `m_Seqs`. `m_AlnSeq2` is never the refseq: the query is
-    /// always `m_AlnSeq1`, and a subject's matches in its list have no second row.
+    /// always `m_AlnSeq1`, and a subject's matches in its list have no second row. A match of the
+    /// query with its own Bioseq (`m_AlnSeq1 == m_AlnSeq2`) is the query's in the first pass, where
+    /// the `m_AlnSeq1 == refseq` branch takes it; its second increment of `match_list_i` belongs
+    /// to the later passes, which a mix without a single refseq never reaches (TBLASTX's HSPs
+    /// have no gaps, so no match of one row).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:470-481
+    /// ```c++
+    ///                 if ( !m_IndependentDSs ) {
+    ///                     // Stop the algorithm after merging with respect to the first refseq.
+    ///                     // Clear all MatchLists and exit
+    ///                     if ( !(m_SingleRefseq  ||  first_refseq) ) {
+    ///                         NON_CONST_ITERATE (TSeqs, it, m_Seqs){
+    ///                             if ( !((*it)->m_MatchList.empty()) ) {
+    ///                                 (*it)->m_MatchList.clear();
+    ///                             }
+    ///                         }
+    ///                         break;
+    ///                     }
+    ///                 }
+    /// ```
+    /// (In the `!starts.size()` branch of a later pass: not reached, as above; an internal error
+    /// if it were.)
     fn merge(&mut self) -> Result<(), MixError> {
         // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmix.cpp:279-284
         // ```c++
@@ -1098,9 +1162,24 @@ impl Mix {
         // (A stable sort of indices: `sort_by_key` keeps equal scores in input order.)
         let mut order: Vec<usize> = (0..self.matches.len()).collect();
         order.sort_by_key(|&index| std::cmp::Reverse(self.matches[index].score));
-        if self.order.first().map(|&seq| self.seqs[seq].key) != Some(SeqKey::Query)
-            || self.seqs[self.order[0]].ds_cnt != self.ds_cnt
-        {
+        // `Find the refseq (if such exists)`, quoted above.
+        // (`m_IndependentDSs`, false here, is left out.)
+        self.single_refseq = false;
+        let mut first = true;
+        for index in 0..self.order.len() {
+            if self.seqs[self.order[index]].ds_cnt == self.ds_cnt {
+                self.single_refseq = true;
+                if !first {
+                    let refseq = self.order.remove(index);
+                    self.order.insert(0, refseq);
+                }
+                break;
+            }
+            first = false;
+        }
+        if self.order.first().map(|&seq| self.seqs[seq].key) != Some(SeqKey::Query) {
+            // The query is in every Dense-seg, so no other sequence is in all of them more
+            // often than it.
             return Err(MixError::Internal(
                 "the query is not the refseq of the merge",
             ));
@@ -1142,6 +1221,13 @@ impl Mix {
                 }
                 if self.seqs[refseq].match_list.is_empty() {
                     break;
+                }
+                if !self.single_refseq {
+                    // A match of one row in a mix of the query's own Bioseq added with
+                    // `fForceTranslation`: TBLASTX's HSPs have none (the doc above).
+                    return Err(MixError::Internal(
+                        "a later pass of a merge without a single refseq",
+                    ));
                 }
                 first_refseq = false;
                 match_list = self.seqs[refseq].match_list.clone();
@@ -1312,9 +1398,19 @@ impl Mix {
     /// which the proper row is looked for. Every row of a TBLASTN HSP has its frame (`start % 3`
     /// of each of its segments is the same), so that row is at or before the HSP's own.
     ///
-    /// The row of an HSP holds its own aligned segments alone, which never share a subject
-    /// position: the walk never meets a position of the row (`this position already exists`,
-    /// which joins two segments; raised as an error if it did).
+    /// The row of an ordinary subject's HSP holds that HSP's aligned segments alone, which never
+    /// share a subject position: there the walk never meets a position of the row.
+    ///
+    /// The query's own Bioseq added with `fForceTranslation` (TBLASTX, `Mix::add`): a match of
+    /// such an HSP has the query's sequence on both sides. `x_SetSeqFrame` of the second row
+    /// compares the row with the match's first row (`seq == match->m_AlnSeq1`, both the query's
+    /// row of the group's frame) and takes the frame of the query's start, so the second row is
+    /// the query's own row; `x_SecondRowFits` gives it the first such HSP (its `m_DsIdx`) and
+    /// every later one a new extra row of the query. The first one's walk runs on the row of the
+    /// query's starts: at a start that exists it joins the two segments (`this position already
+    /// exists`, which is how the record's HSP with itself in the same frame folds into the query's
+    /// row), and a start that does not exist throws, because the query's segment there already has
+    /// the row's start iterator (`MixError::NcbiThrows`).
     fn merge_match(&mut self, matched: MixMatch, first_refseq: bool) -> Result<(), MixError> {
         let mut seq1 = matched.seq1;
         if self.seqs[seq1].width == 3 {
@@ -1336,7 +1432,15 @@ impl Mix {
         if let Some(mut row) = seq2 {
             self.seqs[row].ref_by = Some(self.order[0]);
             if self.seqs[row].width == 3 {
-                row = self.set_seq_frame(row, matched.start2, matched.ds_idx);
+                // `frame = (seq == match->m_AlnSeq1 ? m_Start1 : m_Start2) % 3` (alnmerger.cpp:
+                // 1272-1276, quoted at `set_seq_frame`): the query's start where the second row
+                // is the first row's sequence (its own Bioseq, `Mix::add`).
+                let start = if row == seq1 {
+                    matched.start1
+                } else {
+                    matched.start2
+                };
+                row = self.set_seq_frame(row, start, matched.ds_idx);
             }
             fits = self.second_row_fits(row, matched.ds_idx);
             seq2 = Some(row);
@@ -1383,19 +1487,58 @@ impl Mix {
             lo_start_i
         };
         while start < matched.start2 + matched.len * width2 {
-            let seg = self.seqs[seq1].starts[&start_i.expect("a segment of the first row")];
+            // `start_i` stays on the first row's segments of the match (their lengths add up to
+            // the match's); `end()` here would be NCBI's dereference of `end()`.
+            let seg = self.seqs[seq1].starts[&start_i.ok_or(MixError::Internal(
+                "the second row's walk passed the first row's segments",
+            ))?];
             if start2_i == Some(start) {
-                return Err(MixError::Internal(
-                    "a subject row's position is already placed",
-                ));
+                // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:753-771
+                // ```c++
+                //                     if (start2_i != starts2.end() &&
+                //                         start2_i->first == start) {
+                //                         // this position already exists
+                //
+                //                         if (start2_i->second != start_i->second) {
+                //                             // merge the two segments
+                //
+                //                             // store the seg in a CRef to delay its deletion
+                //                             // until after the iteration on it is finished
+                //                             CRef<CAlnMixSegment> tmp_seg(start2_i->second);
+                //
+                //                             ITERATE (CAlnMixSegment::TStartIterators,
+                //                                      it,
+                //                                      tmp_seg->m_StartIts) {
+                //                                 CAlnMixSeq * tmp_seq = it->first;
+                //                                 tmp_start_i = it->second;
+                //                                 tmp_start_i->second = start_i->second;
+                //                                 start_i->second->SetStartIterator(tmp_seq, tmp_start_i);
+                //                             }
+                // ```
+                // (Only a row of the query's own Bioseq has the start: the query's row, whose
+                // walk meets the starts of the query's matches. The segment left without rows
+                // is in no list.)
+                let existing = self.seqs[row].starts[&start];
+                if existing != seg {
+                    let rows: Vec<(SeqIx, u32)> =
+                        self.segs[existing].start_its.values().copied().collect();
+                    for (tmp_seq, at) in rows {
+                        self.seqs[tmp_seq].starts.insert(at, seg);
+                        self.set_start_iterator(seg, tmp_seq, at);
+                    }
+                }
+            } else {
+                self.seqs[row].starts.insert(start, seg);
+                start2_i = Some(start);
+                let key = (self.seqs[row].seq_idx, self.seqs[row].child_idx);
+                if self.segs[seg].start_its.contains_key(&key) {
+                    return Err(MixError::NcbiThrows(
+                        "CAlnMixMerger::x_Merge(): Internal error: Start iterator already exists \
+                         for seq2.",
+                    ));
+                }
+                self.set_start_iterator(seg, row, start);
             }
-            self.seqs[row].starts.insert(start, seg);
-            start2_i = Some(start);
-            let key = (self.seqs[row].seq_idx, self.seqs[row].child_idx);
-            if self.segs[seg].start_its.contains_key(&key) {
-                return Err(MixError::Internal("start iterator already exists for seq2"));
-            }
-            self.set_start_iterator(seg, row, start);
             start += self.segs[seg].len * width2;
             start2_i = next(&self.seqs[row].starts, start2_i);
             let starts = &self.seqs[seq1].starts;
@@ -1728,7 +1871,12 @@ impl Mix {
                                 .ok_or(MixError::Internal("a row's segments ended early"))?];
                             stack.push(left);
                             if !on_stack.insert(left) {
-                                return Err(MixError::Internal("infinite loop detected"));
+                                // NCBI's throw (quoted above), which only the query's own Bioseq
+                                // with `fForceTranslation` can reach (`merge_match`).
+                                return Err(MixError::NcbiThrows(
+                                    "CAlnMixSegments::Build(): Internal error: Infinite loop \
+                                     detected.",
+                                ));
                             }
                             pop_seg = false;
                             break;
@@ -2133,9 +2281,20 @@ impl Mix {
             }
         }
         let keep: Vec<usize> = (0..numrows).filter(|&row| !row_empty[row]).collect();
+        // The rows of the query's own Bioseq after the first (`fForceTranslation`, `Mix::add`)
+        // hold the record's subject positions: shown as that subject (its letters, label and
+        // genetic code: `CAlnVec::SetGenCode` gives `m_SlaveGeneticCode` to every row but row 0,
+        // showalign.cpp:2100-2101, quoted at `super::write_section`). The query's first row is
+        // row 0: it is the first sequence and has starts.
         let ids: Vec<SeqKey> = keep
             .iter()
-            .map(|&row| self.seqs[self.rows[row]].key)
+            .enumerate()
+            .map(
+                |(index, &row)| match (self.seqs[self.rows[row]].key, self.query_bioseq) {
+                    (SeqKey::Query, Some(subject)) if index > 0 => SeqKey::Subject(subject),
+                    (key, _) => key,
+                },
+            )
             .collect();
         let plus: Vec<bool> = keep
             .iter()
@@ -2184,11 +2343,13 @@ pub(crate) fn merge(hsps: &Hsps, group: &[usize]) -> Result<Option<Denseg>, MixE
         query_width: hsps.query_width,
         subject_width: hsps.subject_width,
         add_flags: AddFlags::PreserveRows,
+        query_bioseq: hsps.query_bioseq,
+        single_refseq: true,
     };
     let mut has_aln = false;
     for &index in group {
         let hsp = hsps.hsp(index);
-        has_aln |= mix.add(hsp, hsps.add_flags(hsp.strands), hsps.query_bioseq)?;
+        has_aln |= mix.add(hsp, hsps.add_flags(hsp.strands))?;
     }
     if !has_aln {
         return Ok(None);

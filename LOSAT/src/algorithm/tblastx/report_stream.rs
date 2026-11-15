@@ -39,7 +39,8 @@
 //!   list, record, statistics and warnings, the subjects and the options. The writers write the
 //!   queries in order, so the reports of consecutive batches written one after the other are the
 //!   reports of all of them (outfmt 0 writes a window of queries at a time already, ID4t fix
-//!   2a).
+//!   2a). Formats 1 to 4 are outfmt 0 with another alignment section, made from the query's
+//!   aligned hits and records alone (`report::query_anchored`).
 //! - a database's reported sequences are numbered by rank among the sequences that the lists of
 //!   the call name (`database::reported_subjects`); the rank only indexes the call's records,
 //!   titles and ids, and every comparison is already made (the lists are final), so a rank among
@@ -70,7 +71,11 @@
 //!   after the loop, `Off::LargeParsed`; blastn's reads nothing before the search since
 //!   2026-11-03 and refuses in the batch that reports the sequence). The refusals that depend on the
 //!   arguments only (the matrix, the `-seg` value) come in the first batch, where nothing of the
-//!   stream is written yet. With one batch (the first batch takes every query record) nothing can
+//!   stream is written yet. The refusals of formats 1 to 4 are per batch (line RG T3c fix 1,
+//!   `check`): a batch's section that NCBI stops on (rule 3: NCBI's error there comes after the
+//!   batches before, without the epilog) and a `-db` sequence with the id of a query of its batch
+//!   (NCBI's scope is the batch's, `ResetScopeHistory`) come before that batch's first byte, after
+//!   the batches before. With one batch (the first batch takes every query record) nothing can
 //!   come after it, so the stream does not act and nothing is checked. LOSAT's internal
 //!   invariant errors and panics are not argued; a write error of the output stops the run where
 //!   it happens (at the end without the stream).
@@ -83,7 +88,7 @@
 //! Off (the reports after the loop): outputs other than one format of the command line or ABI v1
 //! (the hit records and the format observer of the Web adapter, whose HSP numbers count over the
 //! whole search; a file sink, created when its report is written; two or more formats, which the
-//! library API allows on one stream); formats other than 0, 6 and 7 (the BLAST XML documents,
+//! library API allows on one stream); formats other than 0 to 4, 6 and 7 (the BLAST XML documents,
 //! the Seq-annots and the archive, whose framing and refusals are not argued here); the tabular
 //! reports with a field list or a delimiter and outfmt 10 and 20 (`Off::CustomTabular`: their
 //! refusals of a subject, a name of the taxonomy database or a definition line's ids, must come
@@ -115,7 +120,7 @@ pub(super) enum Off {
     OneBatch,
     /// Hit records, a format observer, a file sink, or two or more formats.
     Outputs,
-    /// A format other than 0, 6 and 7.
+    /// A format other than 0 to 4, 6 and 7.
     Format,
     /// A tabular report with a field list or a delimiter, or outfmt 10 or 20
     /// (`TblastxOutputFormat::CustomTabular`), which is written after the loop (the module
@@ -208,12 +213,12 @@ pub(super) fn check(
     if let report::TblastxOutputFormat::CustomTabular(_) = format {
         return Err(Off::CustomTabular);
     }
-    // Outfmt 1 to 4 keep the one report call too (as TBLASTN's): their refusals (a query's own
-    // record or id in a section, `report_runs`) come before the first byte.
-    if !(format
-        == report::TblastxOutputFormat::Pairwise(crate::report::pairwise::PairwiseView::Pairwise)
-        || format.is_tabular())
-    {
+    // Outfmt 1 to 4 are written per batch as outfmt 0 (line RG T3c fix 1): their refusals of a
+    // batch's sections (a query's own record that NCBI stops on, a `-db` sequence with the id of a
+    // query of its batch, `anchored::refuse_anchored_reports`) come before that batch's first
+    // byte, after the batches before, as NCBI's error in a later batch's format (DECISIONS T3a-7
+    // (2) of line RG, BLASTN's and BLASTP's per batch and block).
+    if !(format.is_pairwise() || format.is_tabular()) {
         return Err(Off::Format);
     }
     if writes_debug_output() {
@@ -285,7 +290,7 @@ pub(super) fn check(
     }
 }
 
-/// The `-db` part of `check` for the report `format` (0, 6 or 7): a database with parsed Seq-ids
+/// The `-db` part of `check` for the report `format` (0 to 4, 6 or 7): a database with parsed Seq-ids
 /// of more than `max_parsed` sequences in its volumes is not read (`Off::LargeParsed`, NCBI's
 /// `nt` and `core_nt` with `common::database::PARSED_CHECK_SEQUENCES_MAX`: the reports after the
 /// loop, as blastn's), a run whose prefetch NCBI's taxonomy cache refuses is not streamed

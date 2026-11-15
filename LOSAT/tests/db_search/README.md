@@ -1567,8 +1567,15 @@ from the T3c probes (`T/t3/scripts_t3c/gen3c.py`, a seeded generator that places
   the +2 piece: the plus HSPs are left out), `tx_c` (the -1 piece on the subject's plus strand and the -3 piece on its
   minus strand), `tx_two` (two plus frames over the +1 piece), `tx_far` (weak); `txsids.fa`: the same under parsed
   ids; `txqid.fa` (`lcl|Query_1`) and `txqgi.fa` (`gi|781|lcl|Query_1`): refused as `bxqid`, `bxqgi`;
-  `txself.fa`: one record with repeats on both strands, which TBLASTX refuses as a query and a subject under
-  `-parse_deflines` in formats 1 to 4 (`tests/parse_deflines_subject.rs`).
+  `txself.fa`: one record with repeats on both strands, read as a query and a subject under `-parse_deflines`
+  (`tests/parse_deflines_subject.rs`). From the review of T3c (`T/t3/review_t3c/in/t_self*.fa`), rows
+  `db.of1.tx.self.*` (line RG T3c fix 1: TBLASTX's sections of a query record that is also a subject, which NCBI's
+  `CAlnMix` folds into the query's row): `txselfq.fa` (`lcl|selfx`, 453 letters), `txselfq2.fa` (`lcl|other1`
+  before `lcl|selfx`), `txselfs.fa` (`lcl|ydup`, two copies of `selfx`, then `selfx`), `txselfs2.fa` (`lcl|ycopy`,
+  the letters of `selfx`, then `selfx`: equal hits) and `txselfs3.fa` (`selfx`, then `ydup`). `txrep2.fa`
+  (`lcl|rep2`, two copies of a 300-letter coding piece; `T/t3/fix1_t3c/in/rep2.fa`) and `txrep2b.fa` (`lcl|other1`
+  before it): with `-query_loc 1-300` or a second query, and `-subject_loc 301-600`, NCBI's merge throws on its
+  sections (`tests/parse_deflines_subject.rs`).
 - `bxsr.pal` and `txsr.nal`: aliases of the OIDs 2 to 4 of `bxs` and `txs`.
 
 The databases (version 4; `.pjs` and `.njs` deleted). Run from `LOSAT/`:

@@ -1,0 +1,74 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/of1/txself.fa).
+           1 sequences; 421 total letters
+
+
+
+Query= txself self record with repeats on both strands
+
+Length=421
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+txself self record with repeats on both strands                       127     5e-35  1
+
+
+
+For reading frame +1 of query sequence:
+
+txself  1    KTAAPEWSALLVCIIAHDMQKLNHTWFSHGTEIKKDDGYETSHVAPG*LT  150
+txself  285  R.S...........................H......APQW.          410
+txself  387  .DD..Q..                                            410
+
+For reading frame +2 of query sequence:
+
+txself  2    RLRLLNGRRY*FV*LRTICKS*IIPGSVMGPKSRKMTATKHLT*HRDS*  148
+txself  301       ...HSSSALS.M..R.L..L..R.DTR*.RT.              396
+
+For reading frame +3 of query sequence:
+
+txself  3    DCGS*MVGAISLYNCARYAKVKSYLVQSWDRNQER*RLRNISRSTGIVD  149
+txself  302       ...TPR.HYR.*..EA*....LA.T.DK.                 388
+
+For reading frame -1 of query sequence:
+
+txself  148  STIPVLREMFRSRHLS*FRSHD*TRYDLTFAYRAQLYKLIAPTIQEPQS  2
+txself  378                    .V.AR.K..*AS..H.R*CRRGV...R      298
+
+For reading frame -2 of query sequence:
+
+txself  150  CQLSRCYVRCFVAVIFLDFGPMTEPGMI*LLHIVRNYTN**RRPFRSRSL  1
+txself  395               .VL.YLVS.R..S..K....M.DNADEEC...       300
+
+For reading frame -3 of query sequence:
+
+txself  149  VNYPGAT*DVS*PSSFLISVP*LNQV*FNFCISCAIIQTNSADHSGAAV  3
+txself  394               ...F..C.CE...*LS.......M..R.......L.  287
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 4864
+
+
+  Database: User specified sequence set (Input: tests/db_search/of1/txself.fa).
+    Posted date:  Unknown
+  Number of letters in database: 421
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

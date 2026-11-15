@@ -956,21 +956,18 @@ fn blastx_and_tblastx_query_anchored_refuse_a_database_sequence_named_as_a_query
     }
 }
 
-// Line RG T3c: `txself.fa` is one record read as the query and as the subject under
+// Line RG T3c fix 1: `txself.fa` is one record read as the query and as the subject under
 // `-parse_deflines`. TBLASTX's formats 1 to 4 add their Dense-segs with `fForceTranslation`, not
 // `fPreserveRows`, so NCBI's `CAlnMix` takes the query's row and the record's subject rows for one
 // sequence and folds the record's HSPs with itself into the query row (probes `tx.t3c.self.f1` to
-// `f4`, exit 0): not ported. LOSAT refuses after its prolog; outfmt 0 is a report, and so is a
-// section without alignments (`-num_alignments 0`).
+// `f4`, exit 0; `report::query_anchored::aln_mix`): LOSAT writes the report, the same at 1 and 4
+// threads (its bytes are NCBI's: rows `db.of1.tx.self.*` of the fixtures).
 #[test]
-fn tblastx_query_anchored_refuses_one_record_as_a_query_and_a_subject() {
-    let refusal =
-        "the record lcl|txself is both a query and a subject under -parse_deflines, and in \
-                   the query-anchored formats (outfmt 1 to 4) NCBI BLAST+ merges its query row and \
-                   its subject rows of TBLASTX into one sequence";
-    for (outfmt, extra) in [("0", None), ("1", None), ("4", None), ("1", Some("0"))] {
+fn tblastx_query_anchored_writes_one_record_as_a_query_and_a_subject() {
+    for outfmt in ["0", "1", "4"] {
+        let mut outputs = Vec::new();
         for threads in ["1", "4"] {
-            let mut args = vec![
+            let (status, stdout, stderr) = of1_run(&[
                 "tblastx",
                 "-query",
                 "txself.fa",
@@ -981,24 +978,89 @@ fn tblastx_query_anchored_refuses_one_record_as_a_query_and_a_subject() {
                 outfmt,
                 "-num_threads",
                 threads,
-            ];
-            if let Some(alignments) = extra {
-                args.extend(["-num_alignments", alignments]);
+            ]);
+            assert_eq!(status, 0, "outfmt {outfmt} n{threads}: {stderr}");
+            assert!(
+                stdout.contains("Query= txself"),
+                "outfmt {outfmt} n{threads}: {stdout}"
+            );
+            if outfmt != "0" {
+                assert!(
+                    stdout.contains("For reading frame +1 of query sequence:"),
+                    "outfmt {outfmt} n{threads}: {stdout}"
+                );
             }
-            let (status, stdout, stderr) = of1_run(&args);
-            if outfmt == "0" || extra.is_some() {
-                assert_eq!(status, 0, "outfmt {outfmt} {extra:?} n{threads}: {stderr}");
-                assert!(stdout.contains("Query= txself"), "n{threads}: {stdout}");
+            outputs.push(stdout);
+        }
+        assert_eq!(outputs[0], outputs[1], "outfmt {outfmt}: n1 and n4 differ");
+    }
+}
+
+// Line RG T3c fix 1 (PD-LOSAT-NCBI-DEFECTS 1.32, rule 3): `txrep2.fa` is one record of two copies of a
+// coding piece. As the query (`-query_loc 1-300`, the first copy) and the subject (`-subject_loc
+// 301-600`, the second) under `-parse_deflines`, the first HSP of the record with itself that NCBI's
+// merge takes puts subject positions on the query's own row where the query has none, and `x_Merge`
+// throws `Start iterator already exists for seq2` (exit 255; probes `f1.rep2.qs.f1`, `f1.rep2.qs.f3`,
+// `f1.rep2b.b1.sl.f1` of `T/t3/fix1_t3c/cases_fix1.tsv`); its outfmt 0 is a report. LOSAT refuses
+// after its prolog, and with `BATCH_SIZE=1` (`txrep2b.fa`: another query first) after the report of
+// the first batch, as formats 1 to 4 are written batch by batch.
+#[test]
+fn tblastx_query_anchored_refuses_a_section_that_ncbi_s_merge_throws_on() {
+    let refusal = "the record lcl|rep2 is both a query and a subject under -parse_deflines and \
+                   NCBI BLAST+ stops with an error on its query-anchored alignments (outfmt 1 to 4), \
+                   whose merge throws (CAlnMixMerger::x_Merge(): Internal error: Start iterator \
+                   already exists for seq2.)";
+    let of1 = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/of1");
+    for (query, batch_size, outfmt) in [
+        ("txrep2.fa", None, "0"),
+        ("txrep2.fa", None, "1"),
+        ("txrep2.fa", None, "3"),
+        ("txrep2b.fa", Some("1"), "1"),
+        ("txrep2b.fa", None, "1"),
+    ] {
+        for threads in ["1", "4"] {
+            let mut command = losat();
+            command.current_dir(&of1).args([
+                "tblastx",
+                "-query",
+                query,
+                "-subject",
+                "txrep2.fa",
+                "-subject_loc",
+                "301-600",
+                "-parse_deflines",
+                "-outfmt",
+                outfmt,
+                "-num_threads",
+                threads,
+            ]);
+            if query == "txrep2.fa" {
+                command.args(["-query_loc", "1-300"]);
+            }
+            if let Some(size) = batch_size {
+                command.env("BATCH_SIZE", size);
+            }
+            let output = command.output().unwrap();
+            let (status, stdout, stderr) = (
+                output.status.code().unwrap_or(-1),
+                String::from_utf8(output.stdout).unwrap(),
+                String::from_utf8_lossy(&output.stderr).into_owned(),
+            );
+            let what = format!("{query} {batch_size:?} outfmt {outfmt} n{threads}");
+            if outfmt == "0" {
+                assert_eq!(status, 0, "{what}: {stderr}");
+                assert!(stdout.contains("Query= rep2"), "{what}: {stdout}");
                 continue;
             }
-            assert_eq!(status, 1, "outfmt {outfmt} n{threads}: {stderr}");
-            assert!(
-                stderr.contains(refusal),
-                "outfmt {outfmt} n{threads}: {stderr}"
-            );
-            assert!(
-                stdout.starts_with("TBLASTX 2.17.0+\n") && !stdout.contains("Query="),
-                "outfmt {outfmt} n{threads}: {stdout}"
+            assert_eq!(status, 1, "{what}: {stderr}");
+            assert!(stderr.contains(refusal), "{what}: {stderr}");
+            assert!(stdout.starts_with("TBLASTX 2.17.0+\n"), "{what}: {stdout}");
+            assert!(!stdout.contains("Query= rep2"), "{what}: {stdout}");
+            // The first batch's report, written before the batch that holds the record.
+            assert_eq!(
+                stdout.contains("Query= other1"),
+                batch_size.is_some(),
+                "{what}: {stdout}"
             );
         }
     }

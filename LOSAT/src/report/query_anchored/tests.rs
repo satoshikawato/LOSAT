@@ -796,7 +796,7 @@ fn self_section(name: &str, rows: &[(u32, u32, u32, &str)], format: u8) -> Strin
         push_btop(&mut hsps, subject, qstart, sstart, btop);
     }
     hsps.set_query_bioseq(0);
-    assert!(!ncbi_aborts(&hsps).expect("the merge"));
+    assert_eq!(ncbi_stops(&hsps).expect("the merge"), None);
     let view = View {
         identity: matches!(format, 1 | 3),
         anchored: matches!(format, 1 | 2),
@@ -937,7 +937,7 @@ lo24  281  ........P........MQ...G.E...M.R.........E........SEL..  335
 // sets the subject's row to its HSP and goes to an extra row; q1-30 goes to a second one, so the
 // subject's row keeps no start, `BuildRows` leaves it and its extra rows out, and NCBI writes before
 // its vectors in `FillUnalignedRegions` (exit 134, `double free or corruption (out)`). LOSAT refuses
-// the query (`ncbi_aborts`) and never writes such a section (an internal error, not a panic).
+// the query (`ncbi_stops`) and never writes such a section (an internal error, not a panic).
 #[test]
 fn the_query_s_own_bioseq_without_a_start_is_where_ncbi_aborts() {
     let rows: &[(u32, u32, u32, &str)] = &[(0, 1, 1, "30"), (0, 111, 111, "40")];
@@ -947,9 +947,12 @@ fn the_query_s_own_bioseq_without_a_start_is_where_ncbi_aborts() {
         push_btop(&mut hsps, subject, qstart, sstart, btop);
     }
     // The same HSPs of an ordinary subject merge.
-    assert!(!ncbi_aborts(&hsps).expect("the merge"));
+    assert_eq!(ncbi_stops(&hsps).expect("the merge"), None);
     hsps.set_query_bioseq(0);
-    assert!(ncbi_aborts(&hsps).expect("the merge"));
+    assert_eq!(
+        ncbi_stops(&hsps).expect("the merge"),
+        Some(NcbiStop::Aborts)
+    );
     let mut out = Vec::new();
     let error = write_section(
         &mut out,

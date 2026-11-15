@@ -2459,8 +2459,9 @@ fn write_tblastx_outputs(
         .iter()
         .map(|format| report::output_format(format.outfmt))
         .collect();
-    // Outfmt 0's refusal (formats 1 to 4 refuse a section that holds a query's own record,
-    // `refuse_query_records_in_sections`).
+    // Outfmt 0's refusal (formats 1 to 4 write a query's own record in its section,
+    // `query_anchored::aln_mix`, and refuse only one that NCBI stops on,
+    // `anchored::refuse_anchored_reports`).
     if args.parse_deflines
         && output_formats.contains(&report::TblastxOutputFormat::Pairwise(
             crate::report::pairwise::PairwiseView::Pairwise,
@@ -2582,8 +2583,8 @@ fn write_tblastx_outputs(
         Vec::new()
     };
     // The query-anchored formats (outfmt 1 to 4, line RG T3c): their refusals before any format
-    // is written (`anchored::refuse_anchored_reports`), and the sequences of their sections, made
-    // once.
+    // of the call is written (`anchored::refuse_anchored_reports`), and the sequences of their
+    // sections, made once.
     let anchored_view = output_formats.iter().find_map(|format| match format {
         report::TblastxOutputFormat::Pairwise(view)
             if *view != crate::report::pairwise::PairwiseView::Pairwise =>
@@ -2594,13 +2595,51 @@ fn write_tblastx_outputs(
     });
     let anchored = match anchored_view {
         Some(view) => {
+            // The rows of one query's hits, as the report reads them: those made up front, or
+            // made here as a window's are (only for a query whose own record is a subject).
+            let rows_of = |q_idx: usize| -> Vec<crate::report::pairwise::PairwiseHit> {
+                let from = hits.partition_point(|hsp| (hsp.hit.q_idx as usize) < q_idx);
+                let to = hits.partition_point(|hsp| (hsp.hit.q_idx as usize) <= q_idx);
+                if let Some(rows) = pairwise.as_deref() {
+                    return rows[from..to.max(from)].to_vec();
+                }
+                let shown = report::PairwiseRows::new(
+                    run.queries,
+                    run.subjects,
+                    run.subject_letters,
+                    run.query_stats,
+                    &query_code,
+                    &db_code,
+                    &run.ranges.input.placements,
+                    run.ranges.subject_placements,
+                );
+                let mut buffer = Vec::new();
+                let mut rows: Vec<_> = (from..to.max(from))
+                    .map(|index| {
+                        shown.hit(
+                            &hits[index],
+                            seqalign_identities
+                                .as_deref()
+                                .map(|identities| identities[index]),
+                            &mut buffer,
+                        )
+                    })
+                    .collect();
+                if matrix != ScoringMatrix::Blosum62 {
+                    report::set_row_positives(&mut rows, matrix);
+                }
+                rows
+            };
             super::super::anchored::refuse_anchored_reports(
                 run,
+                view,
                 &hits,
                 seqalign_identities.as_deref(),
                 view.report_sort(args.formatting.report_sort()),
                 args.report_counts.num_alignments,
                 args.report_counts.num_descriptions,
+                &subject_titles,
+                &rows_of,
             )?;
             Some(super::super::anchored::AnchoredSequences {
                 queries: run.queries,

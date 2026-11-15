@@ -5227,12 +5227,14 @@ fn reports_record<'s>(
     program: &str,
 ) -> Result<TaxdbRun> {
     let mut seen = std::collections::HashSet::new();
-    let (ordinals, parsed): (Vec<u32>, Vec<Option<&crate::report::db_subject::ParsedSubject>>) =
-        reported
-            .into_iter()
-            .filter(|subject| seen.insert(subject.ordinal))
-            .map(|subject| (subject.ordinal, subject.parsed))
-            .unzip();
+    let (ordinals, parsed): (
+        Vec<u32>,
+        Vec<Option<&crate::report::db_subject::ParsedSubject>>,
+    ) = reported
+        .into_iter()
+        .filter(|subject| seen.insert(subject.ordinal))
+        .map(|subject| (subject.ordinal, subject.parsed))
+        .unzip();
     let ranks = (0..ordinals.len()).collect();
     let run = TaxdbRun::default();
     read_reported_taxonomy(db, &run, &ordinals, &ranks, &parsed, program)?;
@@ -6743,9 +6745,12 @@ mod taxdb_prepass_tests {
                     );
                 }
                 Some(_) => {
+                    // Each in a run that has looked nothing up: a refused prefetch has recorded
+                    // its loads in its run.
                     for refused in [
-                        batch_prefetch(&db, &run, both(), "BLASTN", 0).map(drop),
-                        batch_prefetch_stop(&db, &run, both(), "BLASTN", 0),
+                        batch_prefetch(&db, &TaxdbRun::default(), both(), "BLASTN", 0).map(drop),
+                        batch_prefetch_stop(&db, &TaxdbRun::default(), both(), "BLASTN", 0),
+                        held_batch_prefetch_stop(&db, std::iter::empty(), both(), "BLASTN", 0),
                     ] {
                         let refused = refused.unwrap_err();
                         assert!(!refused.is::<HeaderReadError>());
@@ -6772,8 +6777,7 @@ mod taxdb_prepass_tests {
                     // The same after a batch whose XML2 or JSON reports looked it up: in the run
                     // that holds their lookups (BLASTX, `batch_prefetch_stop`), and in the record
                     // made where the batch stops of the subjects that the batches before report
-                    // (`held_batch_prefetch_stop`); with no batch before, the texts of opening
-                    // come with the load, before the stop or not: refused.
+                    // (`held_batch_prefetch_stop`; with no batch before, refused above).
                     let run = TaxdbRun::default();
                     read_reported_taxonomy(
                         &db,
@@ -6797,11 +6801,6 @@ mod taxdb_prepass_tests {
                             1
                         )),
                         (1, error.clone())
-                    );
-                    assert!(
-                        !held_batch_prefetch_stop(&db, std::iter::empty(), both(), "BLASTN", 1)
-                            .unwrap_err()
-                            .is::<HeaderReadError>()
                     );
                 }
             }

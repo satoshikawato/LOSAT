@@ -1541,7 +1541,10 @@ impl ListedTitles<'_> {
         query: usize,
     ) -> Result<()> {
         let subject = |rank: usize| {
-            shared::PrefetchSubject::unflipped(self.listed.ordinals[rank], self.parsed_subject(rank))
+            shared::PrefetchSubject::unflipped(
+                self.listed.ordinals[rank],
+                self.parsed_subject(rank),
+            )
         };
         shared::held_batch_prefetch_stop(
             &database.db,

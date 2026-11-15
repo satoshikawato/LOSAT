@@ -45,7 +45,12 @@ lines (some records carry a second one) stay as they are, the taxids come from t
   (`-taxid`): `put`'s counterpart for the nucleotide programs, whose loads look the taxonomy up in a list with `na`.
   `mix2_qc.faa` and `mix2_qcx.fna` (line DBID mixtax): the first query of mix2_q.faa and mix2_qx.fna, then one whose
   letters are those of ../taxfilter/q.faa followed by `qp1` (back-translated in the second), which hits both `pa` and
-  `put`. `make_multidb.py --mixtax-only MAKEBLASTDB` builds only `nut` and these.
+  `put`. `putl` and `nutl` (line DBID mixtax, review 1 L2): `qp2` of ../ids/ids_q.faa (back-translated in `nutl`) with
+  taxid 99990, the last entry of ../../seqdb/taxdb/<variant>, without the table; `mix2_ql.faa`, `mix2_qlx.fna`,
+  `mix2_ql.fna` and `mix2_qlt.faa`: the first query of mix2_q.faa, mix2_qx.fna, mix2_q.fna and mix2_qt.faa, then the
+  letters of ../taxfilter/q.faa or q.fna followed by `qp2` (back-translated in the nucleotide files), which hits `pa` or
+  `na`, `put` or `nut` and the volume `putl` or `nutl` that the first query does not.
+  `make_multidb.py --mixtax-only MAKEBLASTDB` builds only `nut`, `putl`, `nutl` and these.
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
 """
@@ -191,7 +196,7 @@ def make_mixdb2(binary):
 
 
 def make_mixtax(binary):
-    """Builds nut and writes the queries mix2_qc.faa and mix2_qcx.fna (line DBID mixtax)."""
+    """Builds nut, putl and nutl and writes the queries mix2_qc*.f* and mix2_ql*.f* (line DBID mixtax)."""
     makeblastdb(binary, "-in", "nnp.fa", "-dbtype", "nucl", "-out", "nut", "-blastdb_version", "5", "-taxid", "9606",
                 "-title", "multidb nut")
     os.remove(os.path.join(HERE, "nut.njs"))
@@ -204,12 +209,32 @@ def make_mixtax(binary):
 
     (u_header, qp1), _ = records("mix2_q.faa")
     (ux_header, qp1_x), _ = records("mix2_qx.fna")
+    (un_header, glob1), _ = records("mix2_q.fna")
+    (ut_header, orf), _ = records("mix2_qt.faa")
     globin = records(os.path.join(SRC, "q.faa"))[0][1]
     globin_x = records(os.path.join(SRC, "q.fna"))[0][1]
+    qp2 = records(os.path.join(os.path.dirname(HERE), "ids", "ids_q.faa"))[1][1]
+    codon = {"A": "GCT", "R": "CGT", "N": "AAC", "D": "GAC", "C": "TGC", "Q": "CAG", "E": "GAA", "G": "GGT", "H": "CAC",
+             "I": "ATC", "L": "CTG", "K": "AAA", "M": "ATG", "F": "TTC", "P": "CCG", "S": "TCT", "T": "ACC", "W": "TGG",
+             "Y": "TAC", "V": "GTT"}
+    qp2_x = "".join(codon[a] for a in qp2)
+    for name, kind, header, seq in (("putl", "prot", ">qp2 unrelated protein", qp2),
+                                    ("nutl", "nucl", ">qp2_x unrelated protein back-translated", qp2_x)):
+        with open(os.path.join(HERE, name + ".fa"), "w") as f:
+            f.write(header + "\n" + "\n".join(seq[at:at + 60] for at in range(0, len(seq), 60)) + "\n")
+        makeblastdb(binary, "-in", name + ".fa", "-dbtype", kind, "-out", name, "-blastdb_version", "5", "-taxid",
+                    "99990", "-title", "multidb " + name)
+        os.remove(os.path.join(HERE, name + (".pjs" if kind == "prot" else ".njs")))
     for name, pair in (
             ("mix2_qc.faa", [(u_header, qp1), (">mix2_c the letters of taxfilter/q.faa, then qp1", globin + qp1)]),
             ("mix2_qcx.fna", [(ux_header, qp1_x),
-                              (">mix2_c the letters of taxfilter/q.fna, then qp1 back-translated", globin_x + qp1_x)])):
+                              (">mix2_c the letters of taxfilter/q.fna, then qp1 back-translated", globin_x + qp1_x)]),
+            ("mix2_ql.faa", [(u_header, qp1), (">mix2_l the letters of taxfilter/q.faa, then qp2", globin + qp2)]),
+            ("mix2_qlx.fna", [(ux_header, qp1_x),
+                              (">mix2_l the letters of taxfilter/q.fna, then qp2 back-translated", globin_x + qp2_x)]),
+            ("mix2_ql.fna", [(un_header, glob1),
+                             (">mix2_l the letters of taxfilter/q.fna, then qp2 back-translated", globin_x + qp2_x)]),
+            ("mix2_qlt.faa", [(ut_header, orf), (">mix2_l the letters of taxfilter/q.faa, then qp2", globin + qp2)])):
         with open(os.path.join(HERE, name), "w") as f:
             for header, seq in pair:
                 f.write(header + "\n" + "\n".join(seq[at:at + 60] for at in range(0, len(seq), 60)) + "\n")

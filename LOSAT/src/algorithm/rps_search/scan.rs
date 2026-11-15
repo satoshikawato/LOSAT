@@ -860,12 +860,13 @@ mod tests {
     }
 
     // M1 of PS12s: a scan whose query offsets cross a segment of 2^21 gives every hit back whole,
-    // bucket by bucket in the order of the scan, as NCBI's pairs, whatever the groups (PS12m).
+    // bucket by bucket in the order of the scan, as NCBI's pairs, whatever the groups (PS12m; the
+    // cells list their hits by bucket, as a table made by makeprofiledb does).
     #[test]
     fn a_scan_across_a_segment_reads_the_query_offsets_whole() {
         let mut table = Table::new();
-        table.set(word([1, 2, 3]), &[4100, 10]);
-        table.set(word([2, 3, 1]), &[20, 2060, 30, 2050, 5000]);
+        table.set(word([1, 2, 3]), &[10, 4100]);
+        table.set(word([2, 3, 1]), &[20, 30, 2050, 2060, 5000]);
         let boundary = 1usize << SEGMENT_SHIFT;
         let mut subject = vec![20u8; boundary + 8];
         for start in [boundary - 4, boundary - 1, boundary + 2] {
@@ -878,9 +879,9 @@ mod tests {
                 | (usize::from(subject[s + 1]) << 5)
                 | usize::from(subject[s + 2]);
             let entries: &[i32] = if w == word([1, 2, 3]) {
-                &[4100, 10]
+                &[10, 4100]
             } else if w == word([2, 3, 1]) {
-                &[20, 2060, 30, 2050, 5000]
+                &[20, 30, 2050, 2060, 5000]
             } else {
                 &[]
             };

@@ -110,6 +110,12 @@ pub(super) struct BlastpDatabase {
 }
 
 impl BlastpDatabase {
+    /// The taxonomy database's lookups back to a run's start (`shared::TaxdbRun::restart`), for
+    /// the search again of the batches before a failed one.
+    pub(super) fn restart_taxonomy(&self) {
+        self.taxdb.restart();
+    }
+
     /// The OIDs of the database's ordinal ids, which name the reported sequences without
     /// parsed Seq-ids (`gnl|BL_ORD_ID|n`).
     pub(super) fn oid_map(&self) -> crate::seqdb::OidMap<'_> {
@@ -1432,6 +1438,29 @@ impl ListedTitles<'_> {
         query: usize,
     ) -> Result<Vec<u8>> {
         shared::batch_prefetch(
+            &database.db,
+            &database.taxdb,
+            ranks.into_iter().map(|rank| {
+                shared::PrefetchSubject::unflipped(
+                    self.listed.ordinals[rank],
+                    self.parsed_subject(rank),
+                )
+            }),
+            self.program,
+            query,
+        )
+    }
+
+    /// The stop of NCBI's prefetch of a query batch's subjects of ranks `ranks` whose first query
+    /// is `query`, for the XML2 and JSON formats, which write the taxonomy texts at each `Hit`
+    /// (`shared::batch_prefetch_stop`).
+    pub(super) fn batch_prefetch_stop(
+        &self,
+        database: &BlastpDatabase,
+        ranks: impl IntoIterator<Item = usize>,
+        query: usize,
+    ) -> Result<()> {
+        shared::batch_prefetch_stop(
             &database.db,
             &database.taxdb,
             ranks.into_iter().map(|rank| {

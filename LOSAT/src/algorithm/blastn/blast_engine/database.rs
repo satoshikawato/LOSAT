@@ -650,7 +650,42 @@ impl BlastnDatabase {
         gapped: bool,
         query: usize,
     ) -> Result<Vec<u8>> {
-        let subjects = hit_lists
+        shared::batch_prefetch(
+            &self.db,
+            &self.taxdb,
+            Self::prefetch_subjects(titles, hit_lists, gapped),
+            PROGRAM,
+            query,
+        )
+    }
+
+    /// The stop of NCBI's prefetch of the query batch whose final hit lists are `hit_lists` and
+    /// whose first query is `query`, for the XML2 and JSON formats, which write the taxonomy
+    /// texts at each `Hit` (`shared::batch_prefetch_stop`).
+    pub(super) fn batch_prefetch_stop(
+        &self,
+        titles: &DatabaseTitles,
+        hit_lists: &[Option<BlastnHitList>],
+        gapped: bool,
+        query: usize,
+    ) -> Result<()> {
+        shared::batch_prefetch_stop(
+            &self.db,
+            &self.taxdb,
+            Self::prefetch_subjects(titles, hit_lists, gapped),
+            PROGRAM,
+            query,
+        )
+    }
+
+    /// The sequences that the prefetch of the query batch whose final hit lists are `hit_lists`
+    /// reads (`batch_prefetch`).
+    fn prefetch_subjects<'s>(
+        titles: &'s DatabaseTitles,
+        hit_lists: &'s [Option<BlastnHitList>],
+        gapped: bool,
+    ) -> impl Iterator<Item = shared::PrefetchSubject<'s>> + 's {
+        hit_lists
             .iter()
             .flatten()
             .flat_map(|hit_list| {
@@ -658,7 +693,7 @@ impl BlastnDatabase {
                 &hit_list.hsplist_array[..count]
             })
             .filter(|hsp_list| !hsp_list.hsps.is_empty())
-            .map(|hsp_list| {
+            .map(move |hsp_list| {
                 let parsed = match titles.get(&hsp_list.oid) {
                     Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
                     _ => None,
@@ -673,8 +708,7 @@ impl BlastnDatabase {
                     parsed,
                     flipped,
                 }
-            });
-        shared::batch_prefetch(&self.db, &self.taxdb, subjects, PROGRAM, query)
+            })
     }
 
     /// The `-db` value as NCBI keeps it (outfmt 7's `# Database:` line).

@@ -3919,6 +3919,18 @@ impl VolumeLookups {
 }
 
 impl TaxdbRun {
+    /// Back to the state of a run that has looked nothing up, for a search of the batches before
+    /// again (BLASTP's `HeaderReadError`: a later batch failed, and the batches before it are
+    /// searched again alone): their prefetch and reports write the texts of opening the database
+    /// and of each volume's first lookups again, as the first pass made them, before the error.
+    /// What does not depend on the lookups (`found`, the texts the database can write, the
+    /// refusal of its cache) is kept.
+    pub(crate) fn restart(&self) {
+        *self.lazy.lock().expect("the taxonomy database") = None;
+        *self.volume_lookups.lock().expect("the volume lookups") = VolumeLookups::default();
+        self.rows_open.lock().expect("the rows' texts").clear();
+    }
+
     /// [`SeqDb::taxdb_found`] of the run's database, asked once: the search path is not
     /// looked through again for each batch.
     pub(crate) fn found(&self, db: &SeqDb) -> bool {
@@ -4868,14 +4880,9 @@ pub(crate) fn batch_prefetch<'s>(
     query: usize,
 ) -> Result<Vec<u8>> {
     let subjects: Vec<PrefetchSubject<'s>> = subjects.into_iter().collect();
-    if let Some((ordinal, message)) = subjects.iter().find_map(|subject| {
-        subject
-            .parsed
-            .and_then(crate::report::db_subject::ParsedSubject::prefetch_stops)
-            .map(|message| (subject.ordinal, message))
-    }) {
+    if let Some(stopping) = stopping_subject(&subjects) {
         return Err(prefetch_stop(
-            db, run, &subjects, program, query, ordinal, message,
+            db, run, &subjects, program, query, stopping, false,
         ));
     }
     let mut failed_lookup: Option<(u32, String)> = None;
@@ -4950,8 +4957,48 @@ pub(crate) fn batch_prefetch<'s>(
 //        throw;
 //    }
 // ```
-/// The end of a batch's prefetch at the subject `ordinal` whose lookup fails on a file with NCBI's
-/// `message` ([`batch_prefetch`]): the [`HeaderReadError`] of `query` with NCBI's `BLAST Database
+/// The stop of NCBI's prefetch of one query batch's reported subjects `subjects` for a first
+/// format that writes the taxonomy database's texts at each `Hit` (`TaxdbPrinter`: the XML2 and
+/// JSON formats, outfmt 13 to 16, which NCBI's `s_IsPrefetchFormat`, quoted at
+/// [`prefetch_messages`], prefetches for and [`prefetches_subjects`] leaves out) and a batch whose
+/// prefetch is on (`PRE_FETCH_SEQS_LIMIT`, [`prefetch_off`]): `Err` as
+/// in [`batch_prefetch`] where a subject's lookup fails on a file with NCBI's exception, else
+/// `Ok` (the batch's other loads and their texts are the formats' own, at each `Hit`). The batch
+/// is refused where the other subjects' loads, before the stop or not as their order decides, can
+/// write a text in a run that has looked nothing up (the `Hit`s of the batches before looked the
+/// taxonomy up in an order that LOSAT does not keep).
+pub(crate) fn batch_prefetch_stop<'s>(
+    db: &SeqDb,
+    run: &TaxdbRun,
+    subjects: impl IntoIterator<Item = PrefetchSubject<'s>>,
+    program: &str,
+    query: usize,
+) -> Result<()> {
+    let subjects: Vec<PrefetchSubject<'s>> = subjects.into_iter().collect();
+    match stopping_subject(&subjects) {
+        Some(stopping) => Err(prefetch_stop(
+            db, run, &subjects, program, query, stopping, true,
+        )),
+        None => Ok(()),
+    }
+}
+
+/// The first of `subjects` whose lookup fails on a file with NCBI's exception
+/// (`ParsedSubject::prefetch_stops`), with its definition lines.
+fn stopping_subject<'s>(
+    subjects: &[PrefetchSubject<'s>],
+) -> Option<(u32, &'s crate::report::db_subject::ParsedSubject)> {
+    subjects.iter().find_map(|subject| {
+        subject
+            .parsed
+            .filter(|parsed| parsed.prefetch_stops().is_some())
+            .map(|parsed| (subject.ordinal, parsed))
+    })
+}
+
+/// The end of a batch's prefetch at the subject `stopping` (ordinal id, definition lines) whose
+/// lookup fails on a file with NCBI's exception ([`batch_prefetch`], with `at_hits`
+/// [`batch_prefetch_stop`]): the [`HeaderReadError`] of `query` with NCBI's `BLAST Database
 /// error`, or LOSAT's refusal where what NCBI writes before it depends on the order of the loads.
 fn prefetch_stop(
     db: &SeqDb,
@@ -4959,14 +5006,19 @@ fn prefetch_stop(
     subjects: &[PrefetchSubject<'_>],
     program: &str,
     query: usize,
-    ordinal: u32,
-    message: &str,
+    stopping: (u32, &crate::report::db_subject::ParsedSubject),
+    at_hits: bool,
 ) -> anyhow::Error {
+    let (ordinal, parsed) = stopping;
+    let message = parsed
+        .prefetch_stops()
+        .expect("the stopping subject's lookup fails with NCBI's exception");
     let refuse = |what: &str| {
         parsed_refusal(
             db.oid(ordinal),
             &format!(
-                "has a Seq-align id whose lookup in the database fails ({message}), where NCBI BLAST+ 2.17.0's prefetch loads the batch's subjects in an order that LOSAT does not reproduce: {what}"
+                "has the Seq-align id {}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0's prefetch stops with a BLAST Database error), in a batch whose other subjects that prefetch loads before it or not, in an order that LOSAT does not reproduce: {what}",
+                String::from_utf8_lossy(&parsed.alignment_fasta())
             ),
             program,
         )
@@ -4975,19 +5027,25 @@ fn prefetch_stop(
         .iter()
         .any(|subject| subject.parsed.is_some_and(|parsed| parsed.prefetch_fails()))
     {
-        return refuse("another subject of the batch has an id whose lookup throws, which the prefetch catches and which ends its loads");
+        return refuse("another of them has an id whose lookup throws, which the prefetch catches and which ends its loads");
     }
     let others = subjects.iter().filter(|subject| {
         subject
             .parsed
             .is_none_or(|parsed| parsed.prefetch_stops().is_none())
     });
-    match prefetch_messages(
+    // The XML2 and JSON formats looked the taxonomy up at the `Hit`s of the batches before,
+    // which LOSAT does not keep in NCBI's order: the texts of the other subjects' loads are those
+    // of a run that has looked nothing up. A text comes only with a first open or a first lookup
+    // of a taxid in a volume, so none there is none whatever was looked up before.
+    let fresh = TaxdbRun::default();
+    let texts = prefetch_messages(
         db,
-        run,
+        if at_hits { &fresh } else { run },
         others.map(|subject| (subject.ordinal, subject.parsed)),
         program,
-    ) {
+    );
+    match texts {
         Ok(text) if text.is_empty() => anyhow::Error::new(HeaderReadError {
             query,
             error: NativeError {
@@ -4996,7 +5054,8 @@ fn prefetch_stop(
             }
             .into(),
         }),
-        Ok(_) => refuse("the taxonomy database's texts of the other subjects of the batch, which the prefetch may load before or not at all, are not known"),
+        Ok(_) if at_hits => refuse("their loads can make the taxonomy database write a text, which also depends on the taxonomy lookups of the XML2 and JSON reports of the batches before"),
+        Ok(_) => refuse("their loads make the taxonomy database write a text"),
         Err(error) => error,
     }
 }
@@ -5165,7 +5224,9 @@ pub(crate) fn check_prefetched_parsed(
     ordinal: u32,
     program: &str,
 ) -> Result<()> {
-    if subject.prefetch_fails() {
+    // A lookup that throws on the id is the prefetch's warning, one that fails on a file with
+    // NCBI's exception its stop (`batch_prefetch`).
+    if subject.prefetch_fails() || subject.prefetch_stops().is_some() {
         return Ok(());
     }
     match prefetch_reads(db, ordinal, subject, false, program)? {
@@ -6313,6 +6374,192 @@ mod taxdb_prepass_tests {
             0,
         );
         assert_eq!(text(plus.unwrap()), "");
+        std::fs::remove_dir_all(&cwd).unwrap();
+    }
+
+    #[test]
+    fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
+        // Line DBID mixdb2: `multidb/na` (-parse_seqids) beside `multidb/nnp` (no accession
+        // table), whose parsed Seq-ids' lookups fail with NCBI's `DB contains no accession
+        // info.`, and `taxfilter/tfu_n` (-input_type blastdb: the table of its ordinal ids; taxids
+        // 7955 and 9606), whose loads look the taxonomy up.
+        let cwd = std::env::temp_dir().join(format!(
+            "losat-prefetch-stop-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&cwd).unwrap();
+        let open = |names: &[&str], taxdb: Option<&Path>| {
+            let search = SearchPath::new(&cwd, taxdb.map(Path::as_os_str), None).unwrap();
+            let list: Vec<String> = names
+                .iter()
+                .map(|name| root().join(name).to_str().unwrap().to_owned())
+                .collect();
+            SeqDb::open_in(&list.join(" "), SeqType::Nucleotide, &search).unwrap()
+        };
+        let headers_of =
+            |db: &SeqDb| -> Vec<Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>> {
+                let headers = HeaderReader::new(db);
+                (0..db.num_seqs())
+                    .map(
+                        |ordinal| match read_header(&headers, ordinal, 0, "BLASTN").unwrap() {
+                            ReportedHeader::Parsed(subject) => Some(subject),
+                            _ => None,
+                        },
+                    )
+                    .collect()
+            };
+        fn subject(
+            ordinal: u32,
+            parsed: &Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>,
+        ) -> PrefetchSubject<'_> {
+            PrefetchSubject {
+                ordinal,
+                parsed: parsed.as_deref(),
+                flipped: false,
+            }
+        }
+        let stopped = |result: Result<()>| -> (usize, String) {
+            let failure = result.unwrap_err().downcast::<HeaderReadError>().unwrap();
+            let native = failure.error.downcast::<NativeError>().unwrap();
+            assert_eq!(native.exit, 2);
+            (failure.query, native.message)
+        };
+        let error = "BLAST Database error: DB contains no accession info.\n".to_owned();
+        let names = [
+            "db_search/multidb/na",
+            "db_search/multidb/nnp",
+            "db_search/taxfilter/tfu_n",
+        ];
+        let bad_magic = root().join("seqdb/taxdb/bad_magic");
+        for taxdb in [None, Some(bad_magic.as_path())] {
+            let db = open(&names, taxdb);
+            let parsed = headers_of(&db);
+            let stop = parsed
+                .iter()
+                .position(|header| {
+                    header
+                        .as_ref()
+                        .is_some_and(|s| s.prefetch_stops().is_some())
+                })
+                .unwrap() as u32;
+            // A sequence of tfu_n (the last volume by name): its load looks its taxid up.
+            let other = db.num_seqs() - 1;
+            assert!(parsed[other as usize].is_none());
+            let opens = !prefetch_messages(&db, &TaxdbRun::default(), [(other, None)], "BLASTN")
+                .unwrap()
+                .is_empty();
+            assert_eq!(opens, taxdb.is_some());
+            let both = || [subject(stop, &parsed[stop as usize]), subject(other, &None)];
+            // The stopping subject alone: NCBI's error, of the batch's first query.
+            let run = TaxdbRun::default();
+            let alone = [subject(stop, &parsed[stop as usize])];
+            assert_eq!(
+                stopped(batch_prefetch(&db, &run, alone, "BLASTN", 3).map(drop)),
+                (3, error.clone())
+            );
+            assert_eq!(
+                stopped(batch_prefetch_stop(&db, &run, alone, "BLASTN", 3)),
+                (3, error.clone())
+            );
+            // With another subject whose load writes the texts of opening the taxonomy database,
+            // before the stop or not as NCBI's order of the loads decides: refused.
+            let run = TaxdbRun::default();
+            match taxdb {
+                None => {
+                    assert_eq!(
+                        stopped(batch_prefetch(&db, &run, both(), "BLASTN", 0).map(drop)).1,
+                        error
+                    );
+                    assert_eq!(
+                        stopped(batch_prefetch_stop(&db, &run, both(), "BLASTN", 0)).1,
+                        error
+                    );
+                }
+                Some(_) => {
+                    for refused in [
+                        batch_prefetch(&db, &run, both(), "BLASTN", 0).map(drop),
+                        batch_prefetch_stop(&db, &run, both(), "BLASTN", 0),
+                    ] {
+                        let refused = refused.unwrap_err();
+                        assert!(!refused.is::<HeaderReadError>());
+                        assert!(
+                            refused
+                                .to_string()
+                                .contains("in an order that LOSAT does not reproduce"),
+                            "{refused}"
+                        );
+                    }
+                    // A batch after the one whose prefetch opened it: the formats whose prefetch
+                    // writes the texts (`batch_prefetch`) know that it writes none now; the XML2
+                    // and JSON formats, whose `Hit`s looked the taxonomy up in LOSAT's order, are
+                    // asked as a run that looked nothing up (`batch_prefetch_stop`).
+                    let run = TaxdbRun::default();
+                    assert!(
+                        !batch_prefetch(&db, &run, [subject(other, &None)], "BLASTN", 0)
+                            .unwrap()
+                            .is_empty()
+                    );
+                    assert_eq!(
+                        stopped(batch_prefetch(&db, &run, both(), "BLASTN", 1).map(drop)),
+                        (1, error.clone())
+                    );
+                    assert!(!batch_prefetch_stop(&db, &run, both(), "BLASTN", 1)
+                        .unwrap_err()
+                        .is::<HeaderReadError>());
+                }
+            }
+            // No stopping subject: nothing for the XML2 and JSON formats.
+            batch_prefetch_stop(&db, &run, [subject(other, &None)], "BLASTN", 0).unwrap();
+        }
+        // Another subject whose lookup throws on its id, which the prefetch catches and which ends
+        // its loads: whether the stop comes first is the order's, refused. (A text tag of
+        // `ids/ntag_t5` is the second volume beside `multidb/nnp`, which the ordinal-tag rule of
+        // line DBID ordsl refuses first: the throw is set on a copy of the stopping subject.)
+        let db = open(&names[..2], None);
+        let parsed = headers_of(&db);
+        let stop = parsed
+            .iter()
+            .position(|header| {
+                header
+                    .as_ref()
+                    .is_some_and(|s| s.prefetch_stops().is_some())
+            })
+            .unwrap();
+        let throws = Some(std::sync::Arc::new(
+            (**parsed[stop].as_ref().unwrap())
+                .clone()
+                .found_instead(Some(crate::report::db_subject::FoundInstead::ThrowsOnId(
+                    "Invalid choice selection".into(),
+                ))),
+        ));
+        assert!(throws.as_ref().unwrap().prefetch_fails());
+        let run = TaxdbRun::default();
+        let other = parsed.len() as u32 - 1;
+        for refused in [
+            batch_prefetch(
+                &db,
+                &run,
+                [subject(stop as u32, &parsed[stop]), subject(other, &throws)],
+                "BLASTN",
+                0,
+            )
+            .map(drop),
+            batch_prefetch_stop(
+                &db,
+                &run,
+                [subject(other, &throws), subject(stop as u32, &parsed[stop])],
+                "BLASTN",
+                0,
+            ),
+        ] {
+            let refused = refused.unwrap_err();
+            assert!(!refused.is::<HeaderReadError>());
+            assert!(
+                refused.to_string().contains("whose lookup throws"),
+                "{refused}"
+            );
+        }
         std::fs::remove_dir_all(&cwd).unwrap();
     }
 

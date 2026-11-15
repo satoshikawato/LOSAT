@@ -11072,7 +11072,7 @@ fn run_in_pool(
             // after those messages (`BlastnDatabase::batch_prefetch`), with or without
             // `taxdb.bti`.
             let taxdb_found = database.taxdb_found();
-            if output_formats
+            let prefetch = if output_formats
                 .first()
                 .is_some_and(|format| format.prefetches_subjects())
                 && (taxdb_found || database.parsed_seqids())
@@ -11190,21 +11190,40 @@ fn run_in_pool(
                             Ok(messages)
                         })
                 };
-                match prefetch {
-                    Ok(messages) => warnings[start].lines(&messages),
-                    Err(error) if error.is::<database::HeaderReadError>() => {
-                        let failure = error
-                            .downcast::<database::HeaderReadError>()
-                            .expect("the error was checked to be a HeaderReadError");
-                        fail_batch!(failure.error);
+                Some(prefetch)
+            } else if output_formats
+                .first()
+                .is_some_and(|format| format.xml2_kind().is_some())
+                && database.parsed_seqids()
+            {
+                // The XML2 and JSON formats write the taxonomy texts at each `Hit`: of the
+                // batch's prefetch (where it is on and loads a sequence) only its stop
+                // (`BlastnDatabase::batch_prefetch_stop`).
+                let seq_aligns = database::seq_aligns_of(&batch_hit_lists, !args.ungapped);
+                (seq_aligns > 0 && !crate::algorithm::common::database::prefetch_off(seq_aligns))
+                    .then(|| {
+                        database
+                            .batch_prefetch_stop(&titles, &batch_hit_lists, !args.ungapped, start)
+                            .map(|()| Vec::new())
+                    })
+            } else {
+                None
+            };
+            match prefetch {
+                None => {}
+                Some(Ok(messages)) => warnings[start].lines(&messages),
+                Some(Err(error)) if error.is::<database::HeaderReadError>() => {
+                    let failure = error
+                        .downcast::<database::HeaderReadError>()
+                        .expect("the error was checked to be a HeaderReadError");
+                    fail_batch!(failure.error);
+                }
+                Some(Err(error)) => {
+                    let written = if stream.acting() { start } else { 0 };
+                    for query_warnings in &warnings[written..=start] {
+                        query_warnings.write(&mut *outputs.diagnostics, archive)?;
                     }
-                    Err(error) => {
-                        let written = if stream.acting() { start } else { 0 };
-                        for query_warnings in &warnings[written..=start] {
-                            query_warnings.write(&mut *outputs.diagnostics, archive)?;
-                        }
-                        return Err(error);
-                    }
+                    return Err(error);
                 }
             }
         }

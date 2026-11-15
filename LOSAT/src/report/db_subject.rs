@@ -214,6 +214,12 @@ pub struct LookupFailure {
 }
 
 impl LookupFailure {
+    /// What NCBI does where it reads a subject whose lookup fails on a file: its prefetch rethrows
+    /// the `CSeqDBException` (`BLAST Database error`, exit status 2); where `PRE_FETCH_SEQS_LIMIT`
+    /// turns the prefetch off, its formatters catch it and write `Unknown`, then stop or not as
+    /// the format decides (DECISIONS 53 (1) of line DBID).
+    pub const NCBI_READS: &'static str = "NCBI BLAST+ 2.17.0's prefetch stops with a BLAST Database error, and where the prefetch is off its formatters fail to read it";
+
     /// NCBI's own message.
     pub fn ncbi(message: impl Into<String>) -> Self {
         Self {
@@ -752,7 +758,8 @@ impl ParsedSubject {
                 "has the Seq-align id {id}, for which LOSAT cannot list the sequences that hold it in another letter case ({message}): where such a sequence is also reported, NCBI BLAST+ 2.17.0 can write its names and letters for it"
             ),
             FoundInstead::Failed(failure) => format!(
-                "has the Seq-align id {id}, whose lookup in the database fails ({failure}; NCBI BLAST+ 2.17.0 stops)"
+                "has the Seq-align id {id}, whose lookup in the database fails ({failure}; {})",
+                LookupFailure::NCBI_READS
             ),
             FoundInstead::ThrowsOnId(message) => format!(
                 "has the Seq-align id {id}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0 stops)"
@@ -815,9 +822,10 @@ impl ParsedSubject {
                 "has the Seq-align id {}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0's prefetch writes Error pre-fetching sequence data, and a report that reads it stops)",
                 String::from_utf8_lossy(&self.alignment_fasta())
             )),
-            Some(FoundInstead::Failed(message)) => Prefetched::Failed(format!(
-                "has the Seq-align id {}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0's prefetch stops with a BLAST Database error)",
-                String::from_utf8_lossy(&self.alignment_fasta())
+            Some(FoundInstead::Failed(failure)) => Prefetched::Failed(format!(
+                "has the Seq-align id {}, whose lookup in the database fails ({failure}; {})",
+                String::from_utf8_lossy(&self.alignment_fasta()),
+                LookupFailure::NCBI_READS
             )),
             Some(FoundInstead::Sequence(other)) => Prefetched::Another {
                 other: Some(*other),

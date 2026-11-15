@@ -354,27 +354,24 @@ impl TblastnDatabase {
 
     /// The stop of the prefetch of the batch whose first query is `query` and whose reported
     /// subjects are `subjects` (`prefetch_stop`): NCBI's error (a `shared::HeaderReadError`), or
-    /// LOSAT's refusal (`shared::batch_prefetch`), after the prefetches of the batches before.
+    /// LOSAT's refusal (`shared::batch_prefetch`; `at_hits`, the XML2 and JSON formats, which
+    /// write the taxonomy texts at each `Hit`: `shared::batch_prefetch_stop`), after the
+    /// prefetches of the batches before.
     pub(super) fn prefetch_stop_error(
         &self,
         subjects: &[(u32, Option<Arc<ParsedSubject>>)],
         query: usize,
+        at_hits: bool,
     ) -> anyhow::Error {
-        let prefetch = shared::batch_prefetch(
-            &self.db,
-            &self.taxdb,
-            subjects.iter().map(|(ordinal, parsed)| {
-                shared::PrefetchSubject::unflipped(*ordinal, parsed.as_deref())
-            }),
-            PROGRAM,
-            query,
-        );
-        match prefetch {
-            Err(error) => error,
-            Ok(_) => anyhow::anyhow!(
-                "the prefetch of a batch with a lookup that fails on a file did not stop"
-            ),
-        }
+        let subjects = subjects.iter().map(|(ordinal, parsed)| {
+            shared::PrefetchSubject::unflipped(*ordinal, parsed.as_deref())
+        });
+        let stopped = if at_hits {
+            shared::batch_prefetch_stop(&self.db, &self.taxdb, subjects, PROGRAM, query).err()
+        } else {
+            shared::batch_prefetch(&self.db, &self.taxdb, subjects, PROGRAM, query).err()
+        };
+        stopped.expect("`prefetch_stop` found a subject whose lookup stops the batch's prefetch")
     }
 
     /// NCBI's prefetch of the query batch whose final hit lists are `hitlists` (subjects named by

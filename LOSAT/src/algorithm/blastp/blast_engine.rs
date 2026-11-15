@@ -7599,6 +7599,12 @@ fn search(
             // (`NextRequest`), or alone, before any output.
             let span = batches.searched_span(failure.query);
             if searched_start > 0 {
+                // The first search looked the taxonomy up for the batches before (their
+                // prefetch and reports): the search again writes those texts again, from the
+                // state of a run that has looked nothing up (review 1 of line DBID mixdb2, H1).
+                if let Some(database) = database {
+                    database.restart_taxonomy();
+                }
                 search_batches(
                     args.clone(),
                     outputs,
@@ -14755,18 +14761,30 @@ fn run_call(
     // the run in its prefetch (`shared::batch_prefetch`, below): NCBI reads none of that batch's
     // reports, nor any of the batches after it, so the checks of the reports are of the batches
     // before it.
-    let prefetch_stop =
-        listed_titles
-            .as_ref()
-            .filter(|_| batches_prefetch)
-            .and_then(|titles| {
-                titles.prefetch_stop(&batch_ranges, &batch_prefetch, |span| {
-                    match &psiblast_prefetched {
-                        Some(ranks) => ranks[span].concat(),
-                        None => database::ListedTitles::reported_ranks(&hit_lists[span]).collect(),
-                    }
+    // The XML2 and JSON formats write the taxonomy database's texts at each `Hit`, so of their
+    // batches' prefetch only its stop is asked (`shared::batch_prefetch_stop`).
+    let xml2_prefetch = listed_titles.is_some()
+        && requested_formats
+            .first()
+            .is_some_and(|outfmt| matches!(outfmt, BlastpReport::Xml2(_)));
+    // The ranks that the prefetch of the batch of the searched queries `span` reads: psiblast's of
+    // its traceback hit lists (`psiblast_prefetched`).
+    let prefetched_ranks = |span: std::ops::Range<usize>| -> Vec<usize> {
+        match &psiblast_prefetched {
+            Some(ranks) => ranks[span].concat(),
+            None if args.app.prunes_after_traceback() => hit_lists[span]
+                .iter()
+                .flat_map(|hit_list| {
+                    database::ListedTitles::reported_ranks(std::slice::from_ref(hit_list))
                 })
-            });
+                .collect(),
+            None => database::ListedTitles::reported_ranks(&hit_lists[span]).collect(),
+        }
+    };
+    let prefetch_stop = listed_titles
+        .as_ref()
+        .filter(|_| batches_prefetch || xml2_prefetch)
+        .and_then(|titles| titles.prefetch_stop(&batch_ranges, &batch_prefetch, prefetched_ranks));
     let reported_lists = &hit_lists[..prefetch_stop
         .as_ref()
         .map_or(hit_lists.len(), |span| span.start)];
@@ -14863,7 +14881,11 @@ fn run_call(
     if let (Some(titles), Some(database)) = (listed_titles.as_ref(), database) {
         // Without `taxdb.bti` the prefetch of a table that reads the subjects writes nothing
         // before it stops: the stopping batch's prefetch alone (`ListedTitles::prefetch_stop`).
-        if let Some(span) = prefetch_stop
+        // The XML2 and JSON formats: the stop alone (`shared::batch_prefetch_stop`), whose
+        // other subjects' loads write their texts at each `Hit`.
+        if let Some(span) = prefetch_stop.as_ref().filter(|_| xml2_prefetch) {
+            titles.batch_prefetch_stop(database, prefetched_ranks(span.clone()), span.start)?;
+        } else if let Some(span) = prefetch_stop
             .as_ref()
             .filter(|_| !(prefetch_taxids || psiblast_prefetched.is_some() || prefetch_only))
         {

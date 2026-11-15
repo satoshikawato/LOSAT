@@ -3613,6 +3613,14 @@ fn run_batch_loop(
         .formats
         .first()
         .is_some_and(|format| report::output_format(format.outfmt).prefetches_subjects());
+    // The XML2 and JSON formats, whose prefetch NCBI runs too but which write the taxonomy texts
+    // at each `Hit`: of the prefetch only its stop (`database::batch_prefetch_stop`).
+    let xml2_prefetch = outputs.formats.first().is_some_and(|format| {
+        matches!(
+            report::output_format(format.outfmt),
+            report::TblastxOutputFormat::Xml2(_)
+        )
+    });
     // Whether the first format writes the texts of the subjects that a query's report reads one
     // by one where it reads each (`ReportFormat::places_subject_reads`).
     let first_report = outputs
@@ -4076,6 +4084,38 @@ fn run_batch_loop(
             // Where the prefetch fails at a subject with parsed Seq-ids, NCBI writes its warning
             // after those messages (`database::batch_prefetch`), with or without `taxdb.bti`.
             let taxdb_found = database.taxdb_found();
+            // A lookup that fails on a file stops the run in the prefetch
+            // (`shared::batch_prefetch`): after the reports of the batches before and this
+            // batch's reader messages, as a header file that NCBI cannot read.
+            macro_rules! prefetch_failed {
+                ($error:expr) => {{
+                    match $error.downcast::<crate::algorithm::common::database::HeaderReadError>() {
+                        Ok(failure) => {
+                            reports.write_before_failed_batch(outputs, done, &warnings)?;
+                            batch_warnings
+                                .write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+                            return Err(failure.error);
+                        }
+                        Err(error) => return Err(error),
+                    }
+                }};
+            }
+            if xml2_prefetch
+                && database.parsed_seqids()
+                && !ordered.is_empty()
+                && !crate::algorithm::common::database::prefetch_off(
+                    super::super::database::seq_aligns_of(ordered),
+                )
+            {
+                if let Err(error) = super::super::database::batch_prefetch_stop(
+                    database,
+                    ordered,
+                    &reports.titles.borrow(),
+                    start,
+                ) {
+                    prefetch_failed!(error);
+                }
+            }
             if prefetches && (taxdb_found || database.parsed_seqids()) {
                 // The batch's Seq-aligns (`database::seq_aligns_of`).
                 let seq_aligns = super::super::database::seq_aligns_of(ordered);
@@ -4172,22 +4212,9 @@ fn run_batch_loop(
                         &reports.titles.borrow(),
                         start,
                     );
-                    // A lookup that fails on a file stops the run in the prefetch
-                    // (`shared::batch_prefetch`): after the reports of the batches before and
-                    // this batch's reader messages, as a header file that NCBI cannot read.
                     let messages = match prefetch {
                         Ok(messages) => messages,
-                        Err(error) => match error
-                            .downcast::<crate::algorithm::common::database::HeaderReadError>()
-                        {
-                            Ok(failure) => {
-                                reports.write_before_failed_batch(outputs, done, &warnings)?;
-                                batch_warnings
-                                    .write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-                                return Err(failure.error);
-                            }
-                            Err(error) => return Err(error),
-                        },
+                        Err(error) => prefetch_failed!(error),
                     };
                     if plural_names && !ordered.is_empty() {
                         database.open_for_tabular_rows()?;

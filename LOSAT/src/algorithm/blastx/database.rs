@@ -464,6 +464,9 @@ impl ReportedSubjects {
     /// (`shared::prefetches_subjects`, and the batch's Seq-aligns do not outnumber a positive
     /// `PRE_FETCH_SEQS_LIMIT`, `shared::prefetch_off`), which where no report reads their Bioseqs
     /// refuses what it cannot read as NCBI does (`shared::check_prefetched_parsed`).
+    /// `prefetch_runs`: whether the batch's prefetch runs (`prefetched`, or the XML2 and JSON
+    /// formats, whose taxonomy texts come at each `Hit`), which stops the run where it reads a
+    /// subject whose lookup fails on a file with NCBI's exception (`shared::batch_prefetch_stop`).
     /// `one_by_one`: whether the batch's prefetch is off, so that its reports read the subjects
     /// one by one (`shared::ParsedShown::one_by_one`).
     #[allow(clippy::too_many_arguments)]
@@ -482,6 +485,7 @@ impl ReportedSubjects {
         taxonomy: bool,
         words: crate::report::tabular::PrintedIds,
         prefetched: bool,
+        prefetch_runs: bool,
         one_by_one: bool,
     ) -> Result<Self> {
         let BatchTitles {
@@ -492,7 +496,7 @@ impl ReportedSubjects {
         // A batch whose prefetch looks up a Seq-align id whose lookup fails on a file stops the
         // run there (`shared::batch_prefetch`), before any of its reports: none of their checks
         // and reads is made.
-        let reports = !(prefetched
+        let reports = !(prefetch_runs
             && parsed
                 .values()
                 .any(|subject| subject.prefetch_stops().is_some()));
@@ -691,30 +695,60 @@ impl ReportedSubjects {
     /// no text, and nothing read. A taxonomy database that LOSAT cannot read as NCBI does is
     /// refused (`shared::TaxonomyRefusal`); a header whose taxid does not decode is the reader's
     /// error.
+    ///
+    /// A subject whose lookup fails on a file stops the run there (`shared::batch_prefetch`):
+    /// BLASTX writes each batch's reports before it searches the next, so the error names the
+    /// batch's first query as 0 (`native::reported_error` takes the error alone).
     pub(crate) fn batch_prefetch(
         &self,
         database: &BlastxDatabase,
         batches: &[BatchResults],
         gapped: bool,
-        query: usize,
     ) -> Result<Vec<u8>> {
-        let subjects = batches
+        shared::batch_prefetch(
+            &database.db,
+            &database.taxdb,
+            self.prefetch_subjects(batches, gapped),
+            database.program,
+            0,
+        )
+    }
+
+    /// The stop of NCBI's prefetch of the query batch whose hit lists are `batches`, for the XML2
+    /// and JSON formats, which write the taxonomy texts at each `Hit`
+    /// (`shared::batch_prefetch_stop`; the error's query as in `batch_prefetch`).
+    pub(crate) fn batch_prefetch_stop(
+        &self,
+        database: &BlastxDatabase,
+        batches: &[BatchResults],
+        gapped: bool,
+    ) -> Result<()> {
+        shared::batch_prefetch_stop(
+            &database.db,
+            &database.taxdb,
+            self.prefetch_subjects(batches, gapped),
+            database.program,
+            0,
+        )
+    }
+
+    /// The sequences that the prefetch of the query batch whose hit lists are `batches` reads: of
+    /// the lists that the reports show (`report::reported`).
+    fn prefetch_subjects<'s>(
+        &'s self,
+        batches: &'s [BatchResults],
+        gapped: bool,
+    ) -> impl Iterator<Item = shared::PrefetchSubject<'s>> + 's {
+        batches
             .iter()
             .flat_map(|batch| batch.queries.iter().flatten())
-            .filter(|list| super::report::reported(list, gapped))
+            .filter(move |list| super::report::reported(list, gapped))
             .map(|list| {
                 shared::PrefetchSubject::unflipped(
                     self.ordinals[list.oid],
                     self.parsed_subject(list.oid),
                 )
-            });
-        shared::batch_prefetch(
-            &database.db,
-            &database.taxdb,
-            subjects,
-            database.program,
-            query,
-        )
+            })
     }
 
     /// NCBI's messages about the taxonomy database where `PRE_FETCH_SEQS_LIMIT` turns the
@@ -1243,9 +1277,10 @@ mod tests {
                 crate::report::tabular::PrintedIds::default(),
                 false,
                 false,
+                false,
             )
             .unwrap();
-            let messages = reported.batch_prefetch(database, &batches, true, 0);
+            let messages = reported.batch_prefetch(database, &batches, true);
             String::from_utf8(messages.unwrap()).unwrap()
         };
         let database = open_with_taxdb("x16_taxid_99990", Some("offset_last_past_end"), &cwd);
@@ -1308,6 +1343,7 @@ mod tests {
                 false,
                 false,
                 crate::report::tabular::PrintedIds::default(),
+                false,
                 false,
                 false,
             )

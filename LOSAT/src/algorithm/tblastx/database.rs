@@ -490,8 +490,41 @@ pub(crate) fn batch_prefetch(
     titles: &DatabaseTitles,
     query: usize,
 ) -> Result<Vec<u8>> {
+    shared::batch_prefetch(
+        &database.db,
+        &database.taxdb,
+        prefetch_subjects(ordered, titles),
+        PROGRAM,
+        query,
+    )
+}
+
+/// The stop of NCBI's prefetch of the query batch whose reported hits are `ordered` and whose
+/// first query is `query`, for the XML2 and JSON formats, which write the taxonomy texts at each
+/// `Hit` (`shared::batch_prefetch_stop`).
+pub(crate) fn batch_prefetch_stop(
+    database: &TblastxDatabase,
+    ordered: &[TblastxHsp],
+    titles: &DatabaseTitles,
+    query: usize,
+) -> Result<()> {
+    shared::batch_prefetch_stop(
+        &database.db,
+        &database.taxdb,
+        prefetch_subjects(ordered, titles),
+        PROGRAM,
+        query,
+    )
+}
+
+/// The sequences that the prefetch of the query batch whose reported hits are `ordered` reads
+/// ([`batch_prefetch`]).
+fn prefetch_subjects<'s>(
+    ordered: &'s [TblastxHsp],
+    titles: &'s DatabaseTitles,
+) -> impl Iterator<Item = shared::PrefetchSubject<'s>> + 's {
     let mut previous = None;
-    let subjects = ordered.iter().map(|hsp| {
+    ordered.iter().map(move |hsp| {
         let ordinal = hsp.hit.s_idx;
         let parsed = match titles.get(&ordinal) {
             Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
@@ -505,8 +538,7 @@ pub(crate) fn batch_prefetch(
             parsed,
             flipped,
         }
-    });
-    shared::batch_prefetch(&database.db, &database.taxdb, subjects, PROGRAM, query)
+    })
 }
 
 /// The database sequences that the reports show, by rank (`reported_subjects`).

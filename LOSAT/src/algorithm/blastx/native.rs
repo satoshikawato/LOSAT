@@ -1132,6 +1132,7 @@ fn run_inner(
                                 crate::report::tabular::PrintedIds::default(),
                                 false,
                                 false,
+                                false,
                             )
                             .map_err(reported_error)?,
                         };
@@ -1387,6 +1388,10 @@ pub(super) struct ReportedAsks {
     taxonomy: bool,
     words: crate::report::tabular::PrintedIds,
     prefetched: bool,
+    /// Whether the batches' prefetch runs where it is on (`prefetched`, or the XML2 and JSON
+    /// formats 13 to 16, which write the taxonomy texts at each `Hit`): a subject whose lookup
+    /// fails on a file stops the run in it (`shared::batch_prefetch`, `batch_prefetch_stop`).
+    prefetch_runs: bool,
 }
 
 impl ReportedAsks {
@@ -1421,6 +1426,11 @@ impl ReportedAsks {
                 10 | 18 | 20 => 6,
                 outfmt => i32::from(outfmt),
             })) && !crate::algorithm::common::database::prefetch_always_off(),
+            prefetch_runs: (prefetches_subjects(Some(match options.outfmt {
+                10 | 18 | 20 => 6,
+                outfmt => i32::from(outfmt),
+            })) || matches!(options.outfmt, 13..=16))
+                && !crate::algorithm::common::database::prefetch_always_off(),
         }
     }
 
@@ -1434,6 +1444,9 @@ impl ReportedAsks {
         asks.prefetched = options
             .first()
             .is_some_and(|options| Self::of(options).prefetched);
+        asks.prefetch_runs = options
+            .first()
+            .is_some_and(|options| Self::of(options).prefetch_runs);
         asks
     }
 
@@ -1449,6 +1462,7 @@ impl ReportedAsks {
             taxonomy: self.taxonomy || other.taxonomy,
             words: self.words.or(other.words),
             prefetched: self.prefetched || other.prefetched,
+            prefetch_runs: self.prefetch_runs || other.prefetch_runs,
         }
     }
 }
@@ -1545,6 +1559,7 @@ pub(super) fn reported_batch(
         asks.taxonomy,
         asks.words,
         asks.prefetched && !prefetch_off,
+        asks.prefetch_runs && !prefetch_off,
         prefetch_off,
     );
     super::x_timing::run(XRun::Titles, x_t);
@@ -1641,10 +1656,16 @@ pub(super) fn reported_batch(
             // A lookup that fails on a file stops the run here, after the reports of the
             // batches before and this batch's reader messages (`shared::batch_prefetch`).
             let messages = reported
-                .batch_prefetch(database, results, options.gapped, 0)
+                .batch_prefetch(database, results, options.gapped)
                 .map_err(reported_error)?;
             diagnostics.write_all(&messages)?;
         }
+    } else if asks.prefetch_runs && !prefetch_off && database.parsed_seqids() {
+        // The XML2 and JSON formats write the taxonomy texts at each `Hit`: of the batch's
+        // prefetch only its stop (`ReportedSubjects::batch_prefetch_stop`).
+        reported
+            .batch_prefetch_stop(database, results, options.gapped)
+            .map_err(reported_error)?;
     }
     // The values of a custom tabular field list that reads more of the
     // definition lines than the default report (`sall*`) or the taxonomy

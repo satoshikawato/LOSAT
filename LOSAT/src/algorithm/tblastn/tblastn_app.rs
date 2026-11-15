@@ -2092,19 +2092,25 @@ fn search(
         });
         // Whether the first format prefetches the subjects of each batch (outfmt 10 and 20 as the
         // tabular 6 and 7, below).
-        let first_prefetches = outputs.formats.first().is_some_and(|format| {
-            crate::algorithm::common::database::prefetches_subjects(Some(
-                match super::stage_e_report::format_number(format.outfmt) {
-                    10 | 18 | 20 => 6,
-                    number => number,
-                },
-            ))
+        let first_number = outputs
+            .formats
+            .first()
+            .map(|format| super::stage_e_report::format_number(format.outfmt));
+        let first_prefetches = first_number.is_some_and(|number| {
+            crate::algorithm::common::database::prefetches_subjects(Some(match number {
+                10 | 18 | 20 => 6,
+                number => number,
+            }))
         });
+        // The XML2 and JSON formats (13 to 16), whose prefetch NCBI runs too but which write the
+        // taxonomy texts at each `Hit`: of the prefetch only its stop
+        // (`shared::batch_prefetch_stop`).
+        let first_xml2 = first_number.is_some_and(|number| matches!(number, 13..=16));
         // A batch whose prefetch loads a subject whose lookup fails on a file stops the run in
         // its prefetch (`database::prefetch_stop`): as a batch that a database file failed, it is
         // not reported, nor are the batches after it; its error is made after the prefetches of
         // the batches before (below), which look the taxonomy up first.
-        let prefetch_stop = if database.is_some() && first_prefetches {
+        let prefetch_stop = if database.is_some() && (first_prefetches || first_xml2) {
             let spans: Vec<std::ops::Range<usize>> = query_input
                 .batches(batch_size)
                 .into_iter()
@@ -2413,7 +2419,7 @@ fn search(
         // The stopping batch's prefetch, after those of the batches before: NCBI's error, or
         // LOSAT's refusal before any byte.
         if let (Some((span, subjects)), Some(database)) = (prefetch_stop, database) {
-            let error = database.prefetch_stop_error(&subjects, span.start);
+            let error = database.prefetch_stop_error(&subjects, span.start, first_xml2);
             match error.downcast::<crate::algorithm::common::database::HeaderReadError>() {
                 Ok(failure) => failed = Some((span, failure.error)),
                 Err(error) => return Err(error),

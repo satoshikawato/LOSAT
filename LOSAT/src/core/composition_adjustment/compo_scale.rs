@@ -57,6 +57,23 @@ use crate::utils::matrix::{ncbistdaa, BLASTAA_SIZE};
 /// `COMPO_SCORE_MIN` (composition_constants.h:43: `#define COMPO_SCORE_MIN INT2_MIN`).
 pub(crate) const COMPO_SCORE_MIN: i32 = i16::MIN as i32;
 
+/// Which redo runs the steps that the X-drop redo and the Smith-Waterman redo share (this
+/// module's scaling, `RedoMatch`'s subject range, reap and evaluation): one source, one instance
+/// for each, so that each instance has one caller and stays inlined where it is, as before the
+/// second redo (line PS `DECISIONS.md` 11 and 63; series PR, item PS11c-3). `XDropRedo` is
+/// psiblast's and RPS-BLAST's redo (`Blast_RedoOneMatch`), `SwRedo` RPS-BLAST's `-use_sw_tback`
+/// (`Blast_RedoOneMatchSmithWaterman`).
+pub(crate) trait RedoInstance {}
+
+/// The X-drop redo (`RedoInstance`).
+pub(crate) enum XDropRedo {}
+
+/// The Smith-Waterman redo (`RedoInstance`).
+pub(crate) enum SwRedo {}
+
+impl RedoInstance for XDropRedo {}
+impl RedoInstance for SwRedo {}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:43-54
 // ```c
 // /**positions of true characters in protein alphabet*/
@@ -248,7 +265,7 @@ pub(crate) struct ScoreProbs {
 ///     *obs_min = minScore;
 ///     *obs_max = maxScore;
 /// ```
-pub(crate) fn score_range(rows: &[[i32; BLASTAA_SIZE]]) -> (i32, i32) {
+pub(crate) fn score_range<C: RedoInstance>(rows: &[[i32; BLASTAA_SIZE]]) -> (i32, i32) {
     let (mut min_score, mut max_score) = (0, 0);
     for row in rows {
         for &jcol in &TRUE_CHAR_POSITIONS {
@@ -286,11 +303,11 @@ pub(crate) fn score_range(rows: &[[i32; BLASTAA_SIZE]]) -> (i32, i32) {
 ///         }
 ///     }
 /// ```
-pub(crate) fn pssm_score_probs(
+pub(crate) fn pssm_score_probs<C: RedoInstance>(
     matrix: &[[i32; BLASTAA_SIZE]],
     subject_prob: &[f64; BLASTAA_SIZE],
 ) -> ScoreProbs {
-    let (obs_min, obs_max) = score_range(matrix);
+    let (obs_min, obs_max) = score_range::<C>(matrix);
     let mut probs = vec![0.0; (obs_max - obs_min + 1) as usize];
     let one_pos_frac = 1.0 / (matrix.len() as f64);
     for row in matrix {
@@ -310,7 +327,7 @@ pub(crate) fn pssm_score_probs(
 /// The lambda ratio of `Blast_CompositionBasedStats`: the Lambda of the score probabilities
 /// (`s_CalcLambda`, started from `ungapped_lambda`) over `ungapped_lambda`, at most 1 without the
 /// composition p-value (`pValueAdjustment` 0, psiblast's case) and at least 0.5.
-pub(crate) fn lambda_ratio(
+pub(crate) fn lambda_ratio<C: RedoInstance>(
     probs: ScoreProbs,
     ungapped_lambda: f64,
     p_value_adjustment: bool,
@@ -334,7 +351,7 @@ pub(crate) fn lambda_ratio(
 ///                 matrix[i][j] = log(matrix[i][j])/Lambda;
 ///             }
 /// ```
-fn freq_ratio_to_score(ratio: f64, lambda: f64) -> f64 {
+fn freq_ratio_to_score<C: RedoInstance>(ratio: f64, lambda: f64) -> f64 {
     if ratio == 0.0 {
         COMPO_SCORE_MIN as f64
     } else {
@@ -357,7 +374,7 @@ fn freq_ratio_to_score(ratio: f64, lambda: f64) -> f64 {
 /// ...
 ///     return MIN( s_CalcAvgScore(M, alphsize, incM, probs), kMaximumXscore);
 /// ```
-fn calc_x_score(row: &[f64; BLASTAA_SIZE], probs: &[f64; BLASTAA_SIZE]) -> f64 {
+fn calc_x_score<C: RedoInstance>(row: &[f64; BLASTAA_SIZE], probs: &[f64; BLASTAA_SIZE]) -> f64 {
     let mut score_ix = 0.0;
     for j in 0..BLASTAA_SIZE {
         if TRUE_AMINO_ACID[j] {
@@ -383,7 +400,7 @@ fn calc_x_score(row: &[f64; BLASTAA_SIZE], probs: &[f64; BLASTAA_SIZE]) -> f64 {
 ///                 matrix[p][c] = Nint(floatScoreMatrix[p][c]);
 ///             }
 /// ```
-pub(crate) fn round_score(score: f64) -> i32 {
+pub(crate) fn round_score<C: RedoInstance>(score: f64) -> i32 {
     if score < i32::MIN as f64 {
         i32::MIN
     } else {
@@ -413,7 +430,7 @@ pub(crate) fn round_score(score: f64) -> i32 {
 ///         matrix[p][eStopChar] = start_matrix[p][eStopChar];
 ///     }
 /// ```
-pub(crate) fn scale_pssm(
+pub(crate) fn scale_pssm<C: RedoInstance>(
     matrix: &mut [[i32; BLASTAA_SIZE]],
     start_freq_ratios: &[[f64; BLASTAA_SIZE]],
     start_matrix: &[[i32; BLASTAA_SIZE]],
@@ -423,14 +440,14 @@ pub(crate) fn scale_pssm(
     for ((out, ratios), start) in matrix.iter_mut().zip(start_freq_ratios).zip(start_matrix) {
         let mut row = [0.0; BLASTAA_SIZE];
         for (score, &ratio) in row.iter_mut().zip(ratios) {
-            *score = freq_ratio_to_score(ratio, lambda);
+            *score = freq_ratio_to_score::<C>(ratio, lambda);
         }
-        let x_score = calc_x_score(&row, col_prob);
+        let x_score = calc_x_score::<C>(&row, col_prob);
         row[ncbistdaa::X as usize] = x_score;
         row[ncbistdaa::U as usize] = row[ncbistdaa::C as usize];
         row[ncbistdaa::O as usize] = x_score;
         for (cell, &score) in out.iter_mut().zip(&row) {
-            *cell = round_score(score);
+            *cell = round_score::<C>(score);
         }
         out[ncbistdaa::STOP as usize] = start[ncbistdaa::STOP as usize];
     }
@@ -439,16 +456,16 @@ pub(crate) fn scale_pssm(
 /// `Blast_CompositionBasedStats` for a PSSM (`positionBased`, no composition p-value): `matrix`
 /// becomes the PSSM of `info` scaled for a subject of the letter probabilities `subject_prob`;
 /// returns the lambda ratio (`LambdaRatio`).
-pub(crate) fn pssm_composition_based_stats(
+pub(crate) fn pssm_composition_based_stats<C: RedoInstance>(
     matrix: &mut [[i32; BLASTAA_SIZE]],
     info: &PosMatrixInfo,
     subject_prob: &[f64; BLASTAA_SIZE],
 ) -> f64 {
-    let probs = pssm_score_probs(&info.start_matrix, subject_prob);
-    let ratio = lambda_ratio(probs, info.ungapped_lambda, false);
+    let probs = pssm_score_probs::<C>(&info.start_matrix, subject_prob);
+    let ratio = lambda_ratio::<C>(probs, info.ungapped_lambda, false);
     // The ratio is at least 0.5 (`LambdaRatioLowerBound`), so NCBI's `*LambdaRatio > 0` holds.
     let scaled_lambda = info.ungapped_lambda / ratio;
-    scale_pssm(
+    scale_pssm::<C>(
         matrix,
         &info.start_freq_ratios,
         &info.start_matrix,
@@ -489,18 +506,21 @@ mod tests {
         row[3] = -7;
         // Not a true amino acid: not read.
         row[21] = -100;
-        assert_eq!(score_range(&[row]), (-7, 5));
-        assert_eq!(score_range(&[[2; BLASTAA_SIZE]]), (0, 2));
+        assert_eq!(score_range::<XDropRedo>(&[row]), (-7, 5));
+        assert_eq!(score_range::<XDropRedo>(&[[2; BLASTAA_SIZE]]), (0, 2));
     }
 
     // `s_RoundScoreMatrix`: `Nint` rounds half away from zero; below `INT_MIN` is `INT_MIN`.
     #[test]
     fn scores_round_as_ncbis_nint() {
-        assert_eq!(round_score(2.5), 3);
-        assert_eq!(round_score(-2.5), -3);
-        assert_eq!(round_score(-2.49), -2);
-        assert_eq!(round_score(COMPO_SCORE_MIN as f64), COMPO_SCORE_MIN);
-        assert_eq!(round_score(-1.0e12), i32::MIN);
+        assert_eq!(round_score::<XDropRedo>(2.5), 3);
+        assert_eq!(round_score::<XDropRedo>(-2.5), -3);
+        assert_eq!(round_score::<XDropRedo>(-2.49), -2);
+        assert_eq!(
+            round_score::<XDropRedo>(COMPO_SCORE_MIN as f64),
+            COMPO_SCORE_MIN
+        );
+        assert_eq!(round_score::<XDropRedo>(-1.0e12), i32::MIN);
     }
 
     // `s_ScalePSSM` on one hand-checked row: ratio 0 gives `COMPO_SCORE_MIN`, X and O the
@@ -517,7 +537,7 @@ mod tests {
         probs[1] = 0.5;
         probs[3] = 0.5;
         let mut matrix = [[0; BLASTAA_SIZE]];
-        scale_pssm(&mut matrix, &[ratios], &[start], &probs, 0.5);
+        scale_pssm::<XDropRedo>(&mut matrix, &[ratios], &[start], &probs, 0.5);
         let row = matrix[0];
         assert_eq!(row[0], COMPO_SCORE_MIN);
         assert_eq!(row[1], 2);

@@ -267,7 +267,7 @@ pub(super) fn kappa_query_batches(
     // (BlastCompo_EarlyTermination) are those of the queries of its batch. `redone_matches`
     // holds the heaps of all batches; this is each query's batch as a range of it. A query
     // outside every batch is not searched and stands alone.
-    let mut kappa_query_batches: Vec<std::ops::Range<usize>> =
+    let mut kappa_query_batches: Vec<Range<usize>> =
         (0..query_count).map(|q_idx| q_idx..q_idx + 1).collect();
     for batch in query_batches {
         for q_idx in batch.searched.clone() {
@@ -361,10 +361,13 @@ pub(super) enum RedoPath {
 
 /// The plan of the redo: the path that runs (`RedoPath`), chosen in the order in which the
 /// paths are tried (the windows, the matches of one query, the queries, else the one-thread
-/// loop), and the reach records of the switches that the choice reads, in their order
-/// (`LOSAT_X_BPREDOPAR`, the graduated SEGSHARE and NEWTONLANES, `LOSAT_X_BPSEGWIN`). Between the
-/// first record and the others it expands the compact lists that the windows would have expanded,
-/// where they could run (`x_win_expand`) but do not.
+/// loop), and the reach records of the sides that the chosen path takes, in their order
+/// (`LOSAT_X_BPREDOPAR`'s read switch, the graduated SEGSHARE and NEWTONLANES,
+/// `LOSAT_X_BPSEGWIN`). Between the first record and the others it expands the compact lists that
+/// the windows would have expanded, where they could run (`x_win_expand`) but do not.
+///
+/// NCBI chooses only the number of threads of its one loop (`actual_num_threads`); it has no
+/// counterpart of the choice among LOSAT's paths, each of which gives the output of the one loop.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3079-3082
 /// ```c
@@ -552,8 +555,9 @@ pub(super) fn plan_redo_and_expand_lists<P>(
     // Graduated 2026-10-22 (was `LOSAT_X_SEGSHARE`): the query-parallel redo and the windows of
     // `x_redo_par` share the masked ranges; the match-parallel redo shares none, and the
     // one-thread loop shares none.
-    // The serial and the query-parallel redo loops solve the first Newton problems of the next
-    // `X_NEWTON_LANES_MATCHES` matches ahead (Newton lanes); the match-parallel redo solves none.
+    // The one-thread (`one_thread_redo`) and the query-parallel redo loops solve the first Newton
+    // problems of the next `X_NEWTON_LANES_MATCHES` matches ahead (Newton lanes); the
+    // match-parallel redo solves none.
     // With `-comp_based_stats 0` no redo runs, so neither side is reached.
     if !ordinary_traceback {
         crate::utils::xreach::x_reach!(
@@ -1202,17 +1206,27 @@ where
 /// list freed after its redo (counted in `x_prelim_freed`). It is the only path of a build without
 /// threads, and the path of a search where no parallel path is chosen.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2938-2942,2957-2959
+/// NCBI's blastp traceback calls `Blast_RedoAlignmentCore_MT` with the search's thread count (at
+/// least 1):
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1488,1492-1494
 /// ```c
-///  *  Recompute alignments for each match found by the gapped BLAST
-///  *  algorithm.  Single-thread adapter to Blast_RedoAlignmentCore_MT.
-///  */
-/// Int2
-/// Blast_RedoAlignmentCore(EBlastProgramType program_number,
+///     } else if (ext_params->options->compositionBasedStats > 0 ||
+///                ext_params->options->eTbackExt == eSmithWatermanTbck) {
+///         Uint4 num_threads = MAX(1, thread_data->num_elems);
 /// ...
-///     return Blast_RedoAlignmentCore_MT(
-///             program_number,
-///             1,                  /* number of threads */
+///         retval =
+///                 Blast_RedoAlignmentCore_MT(program_number,
+///                         num_threads,
+/// ```
+///
+/// With one thread its parallel region runs on the calling thread, as this loop does:
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3429-3431
+/// ```c
+/// #pragma omp parallel \
+///     default(none) num_threads(actual_num_threads) \
+///     if(actual_num_threads>1) \
 /// ```
 pub(super) fn one_thread_redo<P>(
     redo: &RedoInputs<'_, P>,

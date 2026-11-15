@@ -12730,7 +12730,7 @@ fn run_call(
     }
     // The redo reads lists of full HSPs. With more than one thread its parallel paths read the
     // lists of all queries, so all are expanded here (but for the windows of the redo below); the
-    // one-thread loop below expands each query's list when it reaches it.
+    // one-thread loop (`redo_run::one_thread_redo`) expands each query's list when it reaches it.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -12743,7 +12743,7 @@ fn run_call(
     let x_compact_expand_all = false;
     // Where the redo in windows (LOSAT_X_BPREDOPAR) may run,
     // its windows expand the compact lists as they reach them (`x_redo_par.rs`); where it does not
-    // run, every list is expanded below before the other paths.
+    // run, every list is expanded in `redo_run::plan_redo_and_expand_lists` before the other paths.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")

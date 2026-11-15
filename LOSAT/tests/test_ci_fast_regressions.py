@@ -135,13 +135,24 @@ class DbSearchFixtureTests(unittest.TestCase):
         self.assertEqual(set(fast.DB_SEARCH_PROGRAMS), set(db_fixtures.PROGRAMS))
         self.assertTrue(set(fast.DB_SEARCH_PROGRAMS) <= set(fast.PROGRAMS))
         self.assertEqual(len({r["row_id"] for r in rows}), len(rows))
+        by_id = {r["row_id"]: r for r in rows}
         for r in rows:
             if r["kind"] != "ncbi":
                 continue
-            data = (db_fixtures.FROZEN / f"{r['row_id']}.out").read_bytes()
+            # A row that expects a near input's NCBI run (`ncbi-near:`) reads that row's files and has its columns.
+            near = db_fixtures.near_row_id(r)
+            if near:
+                source = by_id[near]
+                self.assertEqual((source["kind"], db_fixtures.near_row_id(source), source["outfmt"]),
+                                 ("ncbi", None, r["outfmt"]), r["row_id"])
+                self.assertEqual([source[k] for k in ("rc", "stdout_sha256", "stdout_bytes", "stderr_sha256")],
+                                 [r[k] for k in ("rc", "stdout_sha256", "stdout_bytes", "stderr_sha256")], r["row_id"])
+                self.assertFalse((db_fixtures.FROZEN / f"{r['row_id']}.out").exists(), r["row_id"])
+            frozen = db_fixtures.frozen_id(r)
+            data = (db_fixtures.FROZEN / f"{frozen}.out").read_bytes()
             self.assertEqual(db_fixtures.sha256(data), r["stdout_sha256"], r["row_id"])
             self.assertEqual(str(len(data)), r["stdout_bytes"], r["row_id"])
-            err = db_fixtures.FROZEN / f"{r['row_id']}.err"
+            err = db_fixtures.FROZEN / f"{frozen}.err"
             self.assertEqual(db_fixtures.sha256(err.read_bytes()) if err.exists() else "", r["stderr_sha256"], r["row_id"])
 
 

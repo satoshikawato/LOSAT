@@ -50,7 +50,7 @@ use super::super::extension::{
     extend_hit_ungapped_exact_ncbi, type_of_word, SmallNaWord,
 };
 use super::super::filtering::{
-    blast_hsp_test_identity_and_length, hsp_test, purge_hsps_with_common_endpoints,
+    blast_hsp_test_identity_and_length, purge_hsps_with_common_endpoints,
     purge_hsps_with_common_endpoints_ex, reevaluate_hsp_with_ambiguities_gapped_ex,
     subject_best_hit, subject_best_hit_by, BestHitKey, ReevalParams,
 };
@@ -3567,6 +3567,15 @@ fn x_bn_pv_once(head: &x_dc_csr::XPacked<'_>) -> bool {
 }
 const X_PV_ONCE_MAX_BITS: usize = 1 << 20;
 
+/// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNEXTFIRST, in the strict set: on unless it is `0`)
+/// `pair_extend::extend_offset_pairs` extends a megablast table's lookup hit to its word before it
+/// looks up the hit's context, so a hit whose word is not found costs only its extension, as in
+/// NCBI's `s_BlastNaExtend`, where the table's lookup width is below the word size. The words and
+/// every value are the same.
+pub(super) fn x_bn_ext_first() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNEXTFIRST"))
+}
 /// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNTBRANGE) the traceback of a database search decodes
 /// a sequence of at least `x_tb_range_min` bases in the ranges of its HSPs only, as NCBI's partial
 /// fetch does (`database::traceback_listed`).
@@ -9535,8 +9544,14 @@ fn ungapped_subject_stage(
             hit.prelim_ss,
             align_length,
         );
-        // `min_hit_length` is 0 for BLASTN.
-        !ungapped::blast_hsp_test(identities, align_length, percent_identity, 0)
+        // `Blast_HSPTest` (quoted above); NCBI's `min_hit_length` is always 0
+        // (`core::blast_hits::hsp_test`).
+        !crate::core::blast_hits::hsp_test(
+            identities as i64,
+            align_length as i64,
+            percent_identity,
+            0,
+        )
     });
     sort_prelim_hits_by_score(hits);
     hits.retain_mut(|hit| {
@@ -12627,7 +12642,6 @@ fn search_query_batch<const UNGAPPED: bool>(
         subject_besthit,
         x_qgroup_batch,
         percent_identity,
-        min_hit_length,
         score_matrix,
         nucl_score_table,
         x_dropoff_init,
@@ -12814,7 +12828,6 @@ fn search_query_batch<const UNGAPPED: bool>(
         x_drop_final,
         use_dp,
         percent_identity,
-        min_hit_length,
         min_diag_separation,
         evalue_threshold,
         speculative_traceback,

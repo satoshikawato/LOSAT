@@ -100,8 +100,7 @@ pub(crate) use super::ncbi_cutoffs::{
     x_drop_raw_score, BLAST_GAP_DECAY_RATE,
 };
 pub(crate) use super::reevaluate::{
-    get_num_identities_and_positives_ungapped, hsp_test,
-    reevaluate_ungapped_hit_ncbi_translated_with,
+    get_num_identities_and_positives_ungapped, reevaluate_ungapped_hit_ncbi_translated_with,
 };
 pub(crate) use super::report;
 pub(crate) use super::scoring::{Blosum62Score, MatrixScores, TbxScore};
@@ -461,8 +460,13 @@ pub(crate) fn reevaluate_ungapped_hsp_list<S: TbxScore>(
         //         align_length < hit_options->min_hit_length) ;
         // ```
         let percent_identity = 0.0;
-        let min_hit_length = 0usize;
-        if hsp_test(num_ident, new_len, percent_identity, min_hit_length) {
+        let min_hit_length = 0;
+        if crate::core::blast_hits::hsp_test(
+            num_ident as i64,
+            new_len as i64,
+            percent_identity,
+            min_hit_length,
+        ) {
             continue;
         }
 

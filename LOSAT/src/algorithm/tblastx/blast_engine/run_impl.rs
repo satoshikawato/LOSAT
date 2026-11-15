@@ -5194,10 +5194,52 @@ fn search_query_batch<S: TbxScore>(
         None
     };
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2651-2665
+    // ```c
+    //       	seq_arg.oid = subject_blk->oid;
+    // ...
+    //         seq_arg.check_oid_exclusion = TRUE;
+    // ...
+    //       	if (( BLAST_SEQSRC_EXCLUDED == BlastSeqSrcGetSequence(seq_src, &seq_arg))) {
+    //       		for (index = 0; index < hspcnt; ++index) {
+    //       			 hsp_array[index] = Blast_HSPFree(hsp_array[index]);
+    //       		}
+    //       		Blast_HSPListPurgeNullHSPs(hsp_list);
+    //       		return 0;
+    //       	}
+    // ```
+    // The re-evaluation's fetch of a subject with HSPs excludes one that the negative seqid
+    // list keeps without a line (`FetchExcluded`): its HSPs are freed before the hit lists and
+    // the culling writer (`emit_subject_hits`), one check for the batch.
+    let fetch_excluded = subjects
+        .seqdb()
+        .and_then(crate::algorithm::common::database::FetchExcluded::of);
     // One message per subject of the loop, with its final HSPs or none, so that the collector
     // reaches every OID (`HitCollector::push`): `st.hits` holds the subject's HSPs until here.
     let emit_subject_hits = |st: &mut WorkerState<S>, s_idx: usize| {
-        let hits = std::mem::take(&mut st.hits);
+        let mut hits = std::mem::take(&mut st.hits);
+        if let (false, Some(excluded), Ok(ordinal)) = (
+            hits.is_empty(),
+            fetch_excluded.as_ref(),
+            u32::try_from(s_idx),
+        ) {
+            match excluded.excludes(ordinal) {
+                Ok(false) => {}
+                Ok(true) => hits.clear(),
+                Err(error) => {
+                    // A header that the fetch cannot read ends NCBI's search: the batch fails
+                    // with LOSAT's refusal, as a subject whose read failed fails it.
+                    hits.clear();
+                    x_read_failure.fail(
+                        s_idx,
+                        crate::algorithm::common::database::FetchExcluded::refusal(
+                            (ordinal, error),
+                            "TBLASTX",
+                        ),
+                    );
+                }
+            }
+        }
         if let Some(tx) = &st.tx {
             tx.send((s_idx, hits)).unwrap();
         } else {

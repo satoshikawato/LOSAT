@@ -183,22 +183,30 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         || crate::report::pairwise::is_total_score_refusal(&error)
         || error.is::<crate::report::tax_report::TaxReportRefusal>()
         || error.is::<crate::algorithm::common::database::ParsedRefusal>()
+        || error.is::<super::empty_rows::EmptyRowsRefusal>()
+        || error.is::<crate::algorithm::common::database::FetchRefusal>()
     {
         // LOSAT's refusal of a title NCBI's XML cannot write, of a `-sorthits` table whose
         // last total NCBI pads without end (`TotalScoreRefusal`, an `io::Error` of the report's
         // writes), of an organism report (outfmt 18, made before its first byte), or of a
         // database sequence that a query-anchored report (outfmt 1 to 4) would show as a query
-        // (`ParsedRefusal`, `report::write_pairwise`): not an error of NCBI's engine or of its
-        // output stream.
+        // (`ParsedRefusal`, `report::write_pairwise`), or of a report of an ungapped HSP of
+        // length 0 in a form LOSAT does not write (`empty_rows::EmptyRowsRefusal`): not an error
+        // of NCBI's engine or of its output stream.
         error
     } else if error.downcast_ref::<NativeError>().is_some_and(|e| {
         (e.exit == 1 && e.message.starts_with("Command line argument error"))
             || (e.exit == 6 && e.message == "BLAST failed to write output\n")
             || (e.exit == 3 && e.message.starts_with("BLAST engine error: "))
+            || e.exit == 255
     }) {
-        // An outfmt 13 or 14 side file NCBI cannot open (`CArgException`, exit status 1), or a
-        // write to one that fails (`framing::side_file_write_error`), or NCBI's engine error made
-        // already (`blast_xml::matrix::unsupported_score_matrix`).
+        // An outfmt 13 or 14 side file NCBI cannot open (`CArgException`, exit status 1), a
+        // write to one that fails (`framing::side_file_write_error`), NCBI's engine error made
+        // already (`blast_xml::matrix::unsupported_score_matrix`), or any exception of NCBI's
+        // that a report raises and that ends the program through `CATCH_ALL`'s `CException`
+        // branch (`NativeError::exception`, exit status 255, blast_app_util.hpp:247-250; such as
+        // the formatters' exceptions on an ungapped HSP of length 0, `empty_rows`), which is not
+        // an engine error.
         error
     } else if error.downcast_ref::<report::TabularFlushError>().is_some() {
         NativeError{exit:-6,message:"terminate called after throwing an instance of 'std::__ios_failure'\n  what():  basic_ios::clear: iostream error\n".into()}.into()
@@ -777,6 +785,11 @@ fn run_inner(
     // 	return false;
     // ```
     let mut query_stream = query_settings.stream(query_file);
+    // With `-subject`, the letters around each `-query_loc` interval that the Seq-loc mapper can
+    // read into a query row (`empty_rows::query_letters_around`): NCBI reads the subjects first.
+    if args.db.is_none() {
+        query_stream.around = super::empty_rows::query_letters_around(&options, &subjects);
+    }
     if stream_is_empty(&mut query_stream) {
         stderr.write_all(format!("Warning: [{}] Query is Empty!\n", program.lower).as_bytes())?;
         // NCBI returns before the formatter exists: no archive carries the message.
@@ -1315,11 +1328,56 @@ pub(super) fn batch_titles(
     if matches!(search_subjects, Subjects::Unreadable) {
         return Ok(None);
     }
-    ReportedSubjects::drop_unaligned(database, results);
+    ReportedSubjects::drop_unaligned(database, results, gapped);
     let x_t = super::x_timing::lap();
     let titles = ReportedSubjects::read_titles(database, results, gapped, asks.pairwise);
     super::x_timing::run(XRun::Titles, x_t);
     titles.map(Some).map_err(reported_error)
+}
+
+/// What NCBI's prefetch (`BlastFormatter_PreFetchSequenceData`, quoted at `reported_batch`) does
+/// with a query batch.
+pub(super) struct BatchPrefetch {
+    /// `PRE_FETCH_SEQS_LIMIT` turns it off (`common::database::prefetch_off`).
+    pub(super) off: bool,
+    /// It throws at an empty subject row before it loads anything and writes its warning
+    /// (`empty_rows::prefetch_reads_empty_row`).
+    pub(super) fails: bool,
+}
+
+/// What NCBI's prefetch does with the query batch `results` (`BatchPrefetch`) for the format of
+/// `options`, of a report of `loc`'s subjects (`-db`'s, `reported_batch`, or `-subject`'s,
+/// `report::render_queries_with`). The batch's Seq-aligns: one for each HSP that the reports show
+/// (`has_seqalign`), one for each subject of an ungapped search; where `PRE_FETCH_SEQS_LIMIT`
+/// turns the batch's prefetch off (`shared::prefetch_off`), it reads nothing of a subject that no
+/// report reads (`asks.prefetched`). Where it reads the Seq-aligns and one has an empty subject
+/// row (a subject whose every HSP has length 0, as the mapper leaves it), it throws before it
+/// loads anything and writes its warning: the batch's subjects are then read as with the prefetch
+/// off. A gapped search has no HSP of length 0: its hit lists are not walked for that.
+pub(super) fn batch_prefetch(
+    results: &[BatchResults],
+    options: &super::args::ResolvedOptions,
+    loc: super::empty_rows::SubjectLoc,
+) -> BatchPrefetch {
+    let seq_aligns: usize = results
+        .iter()
+        .flat_map(|batch| batch.queries.iter().flatten())
+        .map(|list| {
+            crate::algorithm::common::database::subject_seq_aligns(
+                list.hsps
+                    .iter()
+                    .filter(|hsp| super::report::has_seqalign(hsp, options.gapped))
+                    .count(),
+                options.gapped,
+            )
+        })
+        .sum();
+    let off = crate::algorithm::common::database::prefetch_off(seq_aligns);
+    let fails = !off
+        && !options.gapped
+        && crate::algorithm::common::database::prefetch_reads_seq_aligns(i32::from(options.outfmt))
+        && super::empty_rows::prefetch_reads_empty_row(results, options.gapped, loc);
+    BatchPrefetch { off, fails }
 }
 
 /// The reported sequences of the query batch `results` of a `-db` search, with its hit lists
@@ -1343,25 +1401,11 @@ pub(super) fn reported_batch(
     let Some(titles) = titles else {
         return Ok(ReportedSubjects::default());
     };
-    // The batch's Seq-aligns: one for each HSP that the reports show
-    // (`has_seqalign`), one for each subject of an ungapped search. Where
-    // `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
-    // (`shared::prefetch_off`), it reads nothing of a subject that no
-    // report reads (`asks.prefetched`).
-    let seq_aligns: usize = results
-        .iter()
-        .flat_map(|batch| batch.queries.iter().flatten())
-        .map(|list| {
-            crate::algorithm::common::database::subject_seq_aligns(
-                list.hsps
-                    .iter()
-                    .filter(|hsp| super::report::has_seqalign(hsp, options.gapped))
-                    .count(),
-                options.gapped,
-            )
-        })
-        .sum();
-    let prefetch_off = crate::algorithm::common::database::prefetch_off(seq_aligns);
+    let BatchPrefetch {
+        off: prefetch_off,
+        fails: prefetch_fails,
+    } = batch_prefetch(results, options, super::empty_rows::SubjectLoc::Whole);
+    let unfetched = prefetch_off || prefetch_fails;
     let x_t = super::x_timing::lap();
     let reported = ReportedSubjects::for_batch(
         database,
@@ -1377,9 +1421,9 @@ pub(super) fn reported_batch(
         asks.joined,
         asks.taxonomy,
         asks.words,
-        asks.prefetched && !prefetch_off,
-        asks.prefetch_runs && !prefetch_off,
-        prefetch_off,
+        asks.prefetched && !unfetched,
+        asks.prefetch_runs && !unfetched,
+        unfetched,
     );
     super::x_timing::run(XRun::Titles, x_t);
     let reported = reported.map_err(reported_error)?;
@@ -1428,6 +1472,9 @@ pub(super) fn reported_batch(
         outfmt => i32::from(outfmt),
     };
     let mut reported = reported;
+    if prefetch_fails {
+        diagnostics.write_all(&database.prefetch_warning())?;
+    }
     // Where the prefetch fails at a subject with parsed Seq-ids, NCBI writes its warning after
     // the taxonomy texts (`ReportedSubjects::batch_prefetch`), with or without `taxdb.bti`.
     let taxdb_found = database.taxdb_found();
@@ -1438,7 +1485,7 @@ pub(super) fn reported_batch(
         // (`ReportedSubjects::fetch_by_query`), where the format's rows read
         // their Bioseqs (`TabularSpec::subject_fetch`).
         // No prefetch; without `taxdb.bti` the reports' fetches look nothing up.
-        if prefetch_off && taxdb_found {
+        if unfetched && taxdb_found {
             let rows = options
                 .tabular
                 .map_or(crate::report::tabular::SubjectFetch::Every, |spec| {
@@ -1473,7 +1520,7 @@ pub(super) fn reported_batch(
             if options.outfmt == 5 {
                 diagnostics.write_all(&reported.take_query_fetches())?;
             }
-        } else if !prefetch_off {
+        } else if !unfetched {
             // A lookup that fails on a file stops the run here, after the reports of the
             // batches before and this batch's reader messages (`shared::batch_prefetch`).
             let messages = reported
@@ -1481,7 +1528,7 @@ pub(super) fn reported_batch(
                 .map_err(reported_error)?;
             diagnostics.write_all(&messages)?;
         }
-    } else if asks.prefetch_runs && !prefetch_off && database.parsed_seqids() {
+    } else if asks.prefetch_runs && !unfetched && database.parsed_seqids() {
         // The XML2 and JSON formats write the taxonomy texts at each `Hit`: of the batch's
         // prefetch only its stop (`ReportedSubjects::batch_prefetch_stop`).
         reported
@@ -1497,6 +1544,18 @@ pub(super) fn reported_batch(
         reported.read_tabular(database, spec, results, options.gapped)?;
     }
     Ok(reported)
+}
+
+/// Whether an error of a search ends the run as it is: LOSAT's refusal, not an error of NCBI's
+/// engine, or an error that has NCBI's report already (the exception of a query split size that
+/// NCBI cannot convert, `split::split_sizes`). The one list of both callers
+/// (`database_search_error`, `local::search_records`).
+pub(super) fn search_error_as_is(error: &anyhow::Error) -> bool {
+    error.is::<super::parameters::SearchSpaceOverflow>()
+        || error.is::<super::split::QuerySplitRefusal>()
+        || error.is::<super::preliminary::OneHitWindowRefusal>()
+        || error.is::<crate::algorithm::common::database::FetchRefusal>()
+        || error.is::<NativeError>()
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:226-227
@@ -1524,13 +1583,7 @@ pub(super) fn database_search_error(
         }
         Err(error) => error,
     };
-    // LOSAT's refusal, not an error of NCBI's engine, and an error that has NCBI's report
-    // already (the exception of a query split size that NCBI cannot convert, `split::split_sizes`).
-    if error.is::<super::parameters::SearchSpaceOverflow>()
-        || error.is::<super::split::QuerySplitRefusal>()
-        || error.is::<super::preliminary::OneHitWindowRefusal>()
-        || error.is::<NativeError>()
-    {
+    if search_error_as_is(&error) {
         return error;
     }
     if error.is::<UnreadableSubjects>() {
@@ -3120,6 +3173,7 @@ mod reader_batch_tests {
             lowercase_masks: Vec::new(),
             warnings: Vec::new(),
             source: None,
+            around: None,
         }
     }
 

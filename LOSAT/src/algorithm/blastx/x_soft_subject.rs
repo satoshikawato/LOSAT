@@ -569,6 +569,7 @@ mod tests {
             lowercase_masks: runs.to_vec(),
             warnings: Vec::new(),
             source: None,
+            around: None,
         }
     }
 

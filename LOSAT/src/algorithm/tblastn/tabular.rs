@@ -570,6 +570,7 @@ pub(super) fn write_tblastn_tabular(
                     rows: rows_read.then_some((qrow.as_bytes(), srow.as_bytes())),
                     // `Blast_HSPGetQueryCoverage` of the HSP's context, which has the searched
                     // length (blast_seqalign.cpp:1222-1225, `hsp_percent_coverage`).
+                    end_gaps: true,
                     qcovhsp: hsp_coverage(hsp.q_end - hsp.q_start, i32::try_from(searched_length)?),
                 };
                 match probe.as_deref_mut() {

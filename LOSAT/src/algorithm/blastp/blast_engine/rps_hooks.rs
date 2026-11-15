@@ -36,7 +36,7 @@ use crate::algorithm::rps_search::volumes::{
     RpsVolumeSet, RpsVolumeSetup,
 };
 use crate::algorithm::tblastx::lookup::{
-    prepare_blosum62_lookup_query_for_word_size, BlastAaLookupTable, QueryContext,
+    prepare_blosum62_lookup_query_for_word_size, QueryContext,
 };
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::stats::{BlastGumbelBlk, KarlinParams};
@@ -207,22 +207,7 @@ pub(super) fn rps_contexts(
 ) -> (BlastpRuntimeLookup, Vec<QueryContext>) {
     let (_, _, contexts) =
         prepare_blosum62_lookup_query_for_word_size(query_frames, args.word_size, false);
-    let table = BlastAaLookupTable {
-        backbone: Vec::new(),
-        overflow: Vec::new(),
-        pv: Vec::new(),
-        frame_bases: Vec::new(),
-        num_contexts: 0,
-        query_length: 0,
-        word_length: args.word_size as i32,
-        alphabet_size: crate::core::blast_util::BLASTAA_SIZE as i32,
-        charsize: 5,
-        mask: 0,
-        longest_chain: 0,
-        threshold: 0,
-        row_max: Vec::new(),
-    };
-    (BlastpRuntimeLookup::Aa(table), contexts)
+    (super::empty_aa_lookup(args.word_size), contexts)
 }
 
 /// The per-run values of the search that `run_resolved_in_pool` computed for blastp.
@@ -754,13 +739,14 @@ fn failed_batch_error(run: &RpsSearchRun<'_>, batch: usize, error: anyhow::Error
     .into()
 }
 
-/// `MAX_DBSEQ_LEN`: the longest subject (here a user query) that NCBI's engine searches whole.
-///
-/// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:54
-/// ```c
-/// #define MAX_DBSEQ_LEN 5000000
-/// ```
-const MAX_DBSEQ_LEN: usize = 5_000_000;
+// `MAX_DBSEQ_LEN`: the longest subject (here a user query) that NCBI's engine searches whole (the
+// one copy of the macro).
+//
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:54
+// ```c
+// #define MAX_DBSEQ_LEN 5000000
+// ```
+use crate::core::subject_split::MAX_DBSEQ_LEN;
 
 #[cfg(test)]
 mod tests {

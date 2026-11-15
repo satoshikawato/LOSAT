@@ -44,7 +44,7 @@ fn load(sites: &[(&str, &str, &str)]) -> CddData {
     data
 }
 
-fn mapped(pairs: &[(i32, i32)]) -> Vec<ResiduePos> {
+fn mapped(pairs: &[(i64, i64)]) -> Vec<ResiduePos> {
     pairs
         .iter()
         .map(|&(curr, ori)| ResiduePos { curr, ori })

@@ -30,7 +30,7 @@
 //!
 //! The switch is read once; it is in the strict set (`utils/xswitch.rs`: on by default, `=0`
 //! turns it off). It acts on the scans of the unit path (`x_pair_par.rs`)
-//! and of the reference frame loop (`blast_engine/run_impl.rs`).
+//! and of the reference frame loop (`blast_engine/word_finder.rs`).
 
 use super::blast_aascan::{determine_scanning_offsets, s_blast_aa_scan_subject, BlastOffsetPair};
 use super::lookup::{

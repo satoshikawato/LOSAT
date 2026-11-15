@@ -9,6 +9,7 @@ table of arguments. tests/test_search.py checks that the file is what this scrip
 
 from __future__ import annotations
 
+import difflib
 import sys
 import textwrap
 from pathlib import Path
@@ -27,6 +28,10 @@ TYPES = {
 
 
 def option_type(parameter: pylosat.Parameter) -> str:
+    # `Search` takes a bool for a flag and a boolean value (`_words`), whatever their parser's
+    # possible values ("true", "false").
+    if parameter.value_kind in ("flag", "boolean"):
+        return "bool"
     if parameter.choices:
         return "Literal[" + ", ".join(repr(choice) for choice in parameter.choices) + "]"
     return TYPES[parameter.value_kind]
@@ -59,7 +64,19 @@ def stubs() -> str:
 def main() -> int:
     text = stubs()
     if "--check" in sys.argv[1:]:
-        return 0 if TARGET.read_text(encoding="utf-8") == text else 1
+        written = TARGET.read_text(encoding="utf-8")
+        if written == text:
+            return 0
+        # The difference, so that a check without a local build of the binding says what to change.
+        sys.stdout.writelines(
+            difflib.unified_diff(
+                written.splitlines(keepends=True),
+                text.splitlines(keepends=True),
+                str(TARGET.name),
+                "generated",
+            )
+        )
+        return 1
     TARGET.write_text(text, encoding="utf-8")
     return 0
 

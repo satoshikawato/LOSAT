@@ -149,7 +149,7 @@ pub fn parse(words: &[&str]) -> Result<(Program, Commands), String> {
 /// `delim=`), add an output of their own, the third value returned (docs/web/abi_v2.md §7). The
 /// rule reads the words, not the fields they make, so that the application reads it from the argv
 /// alike: `6 std` adds an output with the bytes of outfmt 6. 0 with words adds none (the CLI writes
-/// outfmt 0); BLASTP's 1 to 4 add one without the words. The output of outfmt 13 and 14 is a
+/// outfmt 0); BLASTP's, BLASTN's and TBLASTN's 1 to 4 add one without the words. The output of outfmt 13 and 14 is a
 /// ZIP archive of the master file and the side files (`search`). The arguments come back with
 /// `-outfmt` at the CLI's default, `0`: the engine is given the formats of each search
 /// (`ReportOutputs`), and the checks of the arguments alone (`check_options`) read the formats
@@ -232,9 +232,10 @@ fn read_outfmt(
     let custom = match choice.number {
         0 => None,
         6 | 7 => words_follow.then_some(outfmt),
-        // BLASTP's query-anchored formats (the others' are rejected above) without the words
-        // after the number, which the CLI drops (`FormatChoice::normalized`) and the engine's
-        // library refuses after 0 to 4, as a field list.
+        // The query-anchored formats of BLASTP, BLASTN and TBLASTN (BLASTX's and TBLASTX's are
+        // rejected above) without the words after the number, which the CLI drops
+        // (`FormatChoice::normalized`) and the engine's library refuses after 0 to 4, as a field
+        // list.
         1..=4 => Some(choice.normalized()),
         _ => Some(outfmt),
     };
@@ -958,9 +959,12 @@ fn search(
                 ordinals = searched_queries(args.query_loc.as_deref(), query);
                 run_local_blastp(args, query, subject, "", "", &mut outputs)
             }
+            // The host has no PSSM files: `-in_pssm` is refused as by `validate`
+            // (`check_tblastn_options`), before the search.
             Commands::Tblastn(args) => {
                 ordinals = searched_queries(args.query_loc.as_deref(), query);
-                run_local_tblastn(args, query, subject, &mut outputs)
+                losat::web_adapter::refuse_tblastn_pssm_query(&args)
+                    .and_then(|()| run_local_tblastn(args, query, subject, &mut outputs))
             }
             Commands::Blastn(args) => {
                 ordinals = searched_queries(args.query_loc.as_deref(), query);
@@ -2114,10 +2118,11 @@ mod tests {
                 let words = [program, "-query", "q", "-subject", "s", "-outfmt", outfmt];
                 assert_eq!(validate(&words), Ok(()), "{program} {outfmt:?}");
             }
-            // BLASTP writes the query-anchored formats 1 to 4 (line RG T3a), each an output of its
-            // own without the words after the number, which the CLI drops; the other programs
-            // reject them as the CLI does (below).
-            let anchored: &[(&str, &str)] = if program == "blastp" {
+            // BLASTP (line RG T3a), BLASTN and TBLASTN (T3b) write the query-anchored formats 1 to
+            // 4, each an output of its own without the words after the number, which the CLI
+            // drops; BLASTX and TBLASTX reject them as the CLI does (below).
+            let writes_anchored = matches!(program, "blastp" | "blastn" | "tblastn");
+            let anchored: &[(&str, &str)] = if writes_anchored {
                 &[
                     ("1", "1"),
                     ("2", "2"),
@@ -2142,7 +2147,7 @@ mod tests {
             }
             // What the CLI rejects, with its message.
             let engine = engine_program(Program::parse(program).unwrap());
-            let rejected: &[&str] = if program == "blastp" {
+            let rejected: &[&str] = if writes_anchored {
                 &["abc", "99", "6\tqseqid"]
             } else {
                 &["abc", "99", "1", "4", "6\tqseqid"]
@@ -3595,7 +3600,7 @@ mod tests {
     // A coding sequence of the protein of `q_idx_is_the_registered_index`.
     const CODING: &[u8] = b"ATGAAAACCGCGTATATTGCGAAACAGCGTCAGATTAGCTTTGTGAAAAGCCATTTTAGCCGTCAGCTGGAAGAACGTCTGGGCCTGATTGAAGTGCAGGCGCCGATTCTGAGCCGTGTGGGCGATGGCACCCAGGATAACCTGAGCGGCGCGGAAAAAGCGGTGCAGGTGAAAGTGAAAGCGCTGCCGGATGCGCAG";
 
-    // Line RG item T7 (PD-LOSAT-NCBI-DEFECTS 1.26): a subject titled `Subject_9 bad x\x81y title`,
+    // Line RG item T7 (PD-LOSAT-NCBI-DEFECTS 1.35): a subject titled `Subject_9 bad x\x81y title`,
     // whose title NCBI's `GenerateDefline` cannot decode (a `Subject_` first word and a byte in no
     // encoding NCBI guesses), runs as the CLI runs each format: the default tabular formats stop
     // where NCBI stops (at the row's `saccver`, a null pointer), so streams 6 and 7 (and the HSP

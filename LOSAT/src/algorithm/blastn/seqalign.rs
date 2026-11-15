@@ -88,7 +88,7 @@ use crate::report::record::{HspRecord, QueryNames, RunRecord, SubjectNames, Subj
 use crate::report::serial::{write_hit_list_seqaligns, SerialFormat};
 
 /// Writes the documents of every query of `hit_lists` (indexed by query) to `writer`, each
-/// query's warnings before it.
+/// query's warnings before it (`write_hit_list_seqaligns`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_blastn_seqalign(
     format: SerialFormat,
@@ -97,7 +97,7 @@ pub(crate) fn write_blastn_seqalign(
     subjects: SubjectNames<'_>,
     subject_placements: &Placements,
     writer: &mut dyn Write,
-    warnings: Option<&mut QueryWarnings<'_>>,
+    warnings: &mut QueryWarnings<'_>,
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastn,

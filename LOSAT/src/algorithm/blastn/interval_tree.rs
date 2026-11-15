@@ -238,11 +238,35 @@ struct XCellEntry {
 // they do not change any value NCBI computes. Past a limit the index is dropped and the
 // tree walk answers.
 /// Grid cells at most (the per-cell heads take four bytes each).
-pub(crate) const X_MAX_CELLS: usize = 1 << 16;
+const X_MAX_CELLS: usize = 1 << 16;
 /// An HSP whose box overlaps more cells than this is kept in `overflow`.
 const X_MAX_CELLS_PER_HSP: usize = 1024;
 /// With more HSPs than this in `overflow` the index is abandoned.
 const X_MAX_OVERFLOW: usize = 512;
+
+// No NCBI counterpart: grid cells per HSP of a tree made for a known number of HSPs and the most
+// cells such a tree gets (`x_grid_cells`); time and memory of the grid index only.
+const X_GRID_CELLS_PER_HSP: usize = 64;
+const X_GRID_MAX_CELLS_FOR_HSPS: usize = 1 << 12;
+const _: () = assert!(X_GRID_MAX_CELLS_FOR_HSPS <= X_MAX_CELLS);
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3830-3831
+// ```c
+//       tree = Blast_IntervalTreeInit(0, query->length+1,
+//                                     0, subject->length+1);
+// ```
+/// No NCBI counterpart: the grid limit (`BlastIntervalTree::reset_with_bounds_cells`) of a tree
+/// that holds at most one HSP per initial HSP, as the tree NCBI makes for each subject (BLASTX) or
+/// unit (TBLASTN) does: `X_GRID_CELLS_PER_HSP` cells per initial HSP, at most
+/// `X_GRID_MAX_CELLS_FOR_HSPS` (four bytes per cell, zeroed on the first HSP). Such a tree is made
+/// and dropped by each thread for each subject or unit; a grid of up to 256 KiB each time set how
+/// far each thread's glibc arena grew. The count only sizes the grid: a smaller grid lists more
+/// leaves per cell and answers the same, whatever the tree holds.
+pub(crate) fn x_grid_cells(initial_hsps: usize) -> usize {
+    initial_hsps
+        .saturating_mul(X_GRID_CELLS_PER_HSP)
+        .clamp(X_GRID_CELLS_PER_HSP, X_GRID_MAX_CELLS_FOR_HSPS)
+}
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:440-443,452-461
 /// ```c
@@ -2168,6 +2192,17 @@ impl BlastIntervalTree {
 mod tests {
     use super::*;
 
+    // No NCBI counterpart: the grid limit of a tree made for a known number of HSPs
+    // (`x_grid_cells`).
+    #[test]
+    fn grid_follows_the_initial_hsps() {
+        assert_eq!(x_grid_cells(0), X_GRID_CELLS_PER_HSP);
+        assert_eq!(x_grid_cells(1), X_GRID_CELLS_PER_HSP);
+        assert_eq!(x_grid_cells(10), 10 * X_GRID_CELLS_PER_HSP);
+        assert_eq!(x_grid_cells(1 << 20), X_GRID_MAX_CELLS_FOR_HSPS);
+        assert_eq!(x_grid_cells(usize::MAX), X_GRID_MAX_CELLS_FOR_HSPS);
+    }
+
     fn make_tree_hsp(
         query_offset: i32,
         query_end: i32,
@@ -2235,8 +2270,9 @@ mod tests {
             let mut walk = BlastIntervalTree::new(0, 2 * q_len + 1, 0, s_len + 1);
             // The walk answers while the index is dropped (as when tracing is on).
             walk.x.usable = false;
-            // The grid at its own limit, at blastp's limit under LOSAT_X_BPTREECELLS, and coarse.
-            let cells = [X_MAX_CELLS, 1 << 14, 64][(trial / 16) % 3];
+            // The grid at its own limit, at blastp's limit under LOSAT_X_BPTREECELLS, at the limit
+            // of the trees made per subject or unit (`x_grid_cells`), and coarse.
+            let cells = [X_MAX_CELLS, 1 << 14, X_GRID_MAX_CELLS_FOR_HSPS, 64][(trial / 16) % 4];
             if cells == X_MAX_CELLS {
                 indexed.reset_with_bounds(0, 2 * q_len + 1, 0, s_len + 1);
             } else {

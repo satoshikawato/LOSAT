@@ -1,0 +1,5 @@
+Warning: [blastn] To obtain better run time performance, please run blastdb_aliastool -seqid_file_in <INPUT_FILE_NAME> -seqid_file_out <OUT_FILE_NAME> and use <OUT_FILE_NAME> as the argument to -seqidlist
+Warning: (1306.10) [blastn] Ignoring extra parts (synonyms?) in FASTA-style ID gi|1111|ref|NP_1.1|
+Warning: (1306.10) [blastn] Ignoring extra parts (synonyms?) in FASTA-style ID gi|1111|ref|NP_1.1|
+Warning: [blastn] Empty seqid list
+Warning: [blastn] Query_1 ENST00000320868.9.. : Filtering resulted in an empty database. 

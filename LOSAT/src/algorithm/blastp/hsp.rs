@@ -196,6 +196,18 @@ pub(crate) trait HitListHsp {
     /// The length of the query (or query part, or searched range) the HSP was found in:
     /// `contexts[hsp->context].query_length`.
     fn query_length(&self) -> usize;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:518-522 (quoted in
+    // full at `query_split::merge_query_chunk`)
+    // ```c
+    //                hsp->context = context_list[local_context];
+    //                hsp->query.offset += offset_list[local_context];
+    //                hsp->query.end += offset_list[local_context];
+    //                hsp->query.gapped_start += offset_list[local_context];
+    // ```
+    /// Moves the HSP to query `q_idx` (a blastp query has one context, its index), whose letters
+    /// start `offset` letters before the HSP's query coordinates, of `query_length` letters
+    /// (`query_split::rebase_hit_list`).
+    fn move_to_query(&mut self, q_idx: u32, offset: i32, query_length: usize);
 }
 
 impl HitListHsp for BlastpHsp {
@@ -214,6 +226,15 @@ impl HitListHsp for BlastpHsp {
     #[inline]
     fn query_length(&self) -> usize {
         self.query_length
+    }
+    #[inline]
+    fn move_to_query(&mut self, q_idx: u32, offset: i32, query_length: usize) {
+        self.query_context = q_idx as i32;
+        self.q_idx = q_idx;
+        self.query_length = query_length;
+        self.q_start += offset as usize;
+        self.q_end += offset as usize;
+        self.gapped_q_start += offset;
     }
 }
 

@@ -813,3 +813,100 @@ fn blastp_query_anchored_abort_is_refused_in_the_block_that_reports_it() {
         );
     }
 }
+
+/// A run of `losat ARGS` in the fixture directory `tests/db_search/of1`: the exit status, the
+/// standard output and the standard error.
+fn of1_run(args: &[&str]) -> (i32, String, String) {
+    let of1 = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/of1");
+    let output = losat().current_dir(&of1).args(args).output().unwrap();
+    (
+        output.status.code().unwrap_or(-1),
+        String::from_utf8(output.stdout).unwrap(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
+// Line RG T3b (PD-LOSAT-NCBI-DEFECTS 1.23, 1.28): `bself.fa` is a record whose second copy of its first
+// 80 letters (5 letters inserted in the middle) aligns best and whose ungapped third copy holds the
+// longest segment. With the record as the query (`-query_loc 1-80`) and the subject (`-subject_loc
+// 81-325`) under `-parse_deflines`, NCBI BLAST+ 2.17.0's merge of formats 1 to 4 leaves the record's
+// subject rows out and aborts (`double free or corruption (out)`, exit 134; probes `bn.t3b.bself.f1` to
+// `f4`); its outfmt 0 is a report. BLASTN writes its prolog before the search, as NCBI does, so the
+// refusal follows the prolog.
+#[test]
+fn blastn_query_anchored_abort_is_refused_after_the_prolog() {
+    let refusal = "the record lcl|bself is both a query and a subject under -parse_deflines and \
+                   NCBI BLAST+ aborts on its query-anchored alignments";
+    for outfmt in ["0", "1", "4"] {
+        for threads in ["1", "4"] {
+            let (status, stdout, stderr) = of1_run(&[
+                "blastn",
+                "-task",
+                "blastn",
+                "-query",
+                "bself.fa",
+                "-subject",
+                "bself.fa",
+                "-parse_deflines",
+                "-query_loc",
+                "1-80",
+                "-subject_loc",
+                "81-325",
+                "-outfmt",
+                outfmt,
+                "-num_threads",
+                threads,
+            ]);
+            if outfmt == "0" {
+                assert_eq!(status, 0, "outfmt 0 n{threads}: {stderr}");
+                assert!(stdout.contains("Query= bself"), "n{threads}: {stdout}");
+                continue;
+            }
+            assert_eq!(status, 1, "outfmt {outfmt} n{threads}: {stderr}");
+            assert!(
+                stderr.contains(refusal),
+                "outfmt {outfmt} n{threads}: {stderr}"
+            );
+            assert!(
+                stdout.starts_with("BLASTN 2.17.0+\n") && !stdout.contains("Query="),
+                "outfmt {outfmt} n{threads}: {stdout}"
+            );
+        }
+    }
+}
+
+// Line RG T3b (PD-LOSAT-NCBI-DEFECTS 1.28): a database sequence whose Seq-align id (`bnqid`:
+// `lcl|Query_1`) or display id (`bnqgi`: `gi|777|lcl|Query_1`) is the id NCBI BLAST+ gives the first
+// query read without `-parse_deflines`: NCBI's formats 1 to 4 show that query's title in its
+// description line (and its letters in the rows of the Seq-align id; probes `bn.t3b.d.qid.f1`,
+// `bn.t3b.d.qgi.f1`). BLASTN refuses them after its prolog; outfmt 0 is line RG item X7's.
+#[test]
+fn blastn_query_anchored_refuses_a_database_sequence_named_as_a_query() {
+    for (db, refusal) in [
+        (
+            "bnqid",
+            "database sequence 0 has the Seq-id lcl|Query_1, the id of a query (generated, or the \
+             PSSM's) in the query batch that reports it",
+        ),
+        (
+            "bnqgi",
+            "database sequence 0 has the display id lcl|Query_1 (the id of its description line)",
+        ),
+    ] {
+        for outfmt in ["0", "1", "3"] {
+            let (status, stdout, stderr) = of1_run(&[
+                "blastn", "-task", "blastn", "-query", "bnq.fa", "-db", db, "-outfmt", outfmt,
+            ]);
+            if outfmt == "0" {
+                assert_eq!(status, 0, "{db} outfmt 0: {stderr}");
+                continue;
+            }
+            assert_eq!(status, 1, "{db} outfmt {outfmt}: {stderr}");
+            assert!(stderr.contains(refusal), "{db} outfmt {outfmt}: {stderr}");
+            assert!(
+                stdout.starts_with("BLASTN 2.17.0+\n") && !stdout.contains("Query="),
+                "{db} outfmt {outfmt}: {stdout}"
+            );
+        }
+    }
+}

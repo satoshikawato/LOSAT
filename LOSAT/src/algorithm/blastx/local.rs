@@ -174,6 +174,7 @@ fn search_records(
     }
     // The letters of a reader batch (`native::run_inner`).
     let batch_size = app::query_batch_size(BATCH_SIZE as u32)? as usize;
+    let xml_matrix = super::blast_xml::xml_matrix_failure(&resolved, true);
     let xml_scan = scan_xml_titles(
         &resolved,
         query_records,
@@ -182,6 +183,7 @@ fn search_records(
         batch_size,
         archive.is_some(),
         true,
+        xml_matrix,
     )?;
     write_empty_subject_warnings(&subjects, &mut **diagnostics)?;
     // The environment of a search of subject records, after the subjects' warnings
@@ -200,12 +202,8 @@ fn search_records(
     // The errors of a `-subject` search (`native::run_inner`).
     let search_error = |error: anyhow::Error| -> anyhow::Error {
         // LOSAT's refusal, not an error of NCBI's engine, and an error that has NCBI's report
-        // already (`native::database_search_error`).
-        if error.is::<super::parameters::SearchSpaceOverflow>()
-            || error.is::<super::split::QuerySplitRefusal>()
-            || error.is::<super::preliminary::OneHitWindowRefusal>()
-            || error.is::<crate::cli::NativeError>()
-        {
+        // already (`native::search_error_as_is`).
+        if super::native::search_error_as_is(&error) {
             error
         } else {
             engine(error)
@@ -229,6 +227,7 @@ fn search_records(
             out: args.out.as_deref(),
             search_error: &search_error,
             xml_scan,
+            xml_matrix,
         },
         outputs,
     )
@@ -288,6 +287,9 @@ struct RunReports<'a> {
     /// The read of the queries before the search of BLAST XML and the XML2 and JSON documents
     /// (`scan_xml_titles`).
     xml_scan: super::blast_xml::QueryScan,
+    /// Where the run's XML formats fail for a matrix name that NCBI's XML does not know
+    /// (`blast_xml::xml_matrix_failure`, decided once for the run).
+    xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
 }
 
 /// BLAST XML and the XML2 and JSON documents refuse a query title that NCBI cannot write before
@@ -306,23 +308,29 @@ fn scan_xml_titles(
     batch_size: usize,
     keep_whole: bool,
     subject_set: bool,
+    xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
 ) -> Result<super::blast_xml::QueryScan> {
     let structured: Vec<u8> = resolved
         .iter()
         .map(|options| options.outfmt)
         .filter(|outfmt| matches!(outfmt, 5 | 13..=16))
         .collect();
-    if structured.is_empty() || batch_size == 0 {
+    // A matrix name that NCBI's BLAST XML report data does not know fails the report data before
+    // any report is written (`xml_matrix`, the run's `blast_xml::xml_matrix_failure`): no title is
+    // checked. (The scopes of `-parse_deflines` are read ahead apart, `report_batches`.)
+    if structured.is_empty() || batch_size == 0 || xml_matrix.is_some() {
         return Ok(super::blast_xml::QueryScan::default());
     }
-    let holds_back = subject_set && !structured.contains(&5);
-    super::blast_xml::scan_queries(&resolved[0], holds_back, &mut |deliver| {
+    let holds_back =
+        crate::report::blast_xml2::reports_held(subject_set, false) && !structured.contains(&5);
+    super::blast_xml::scan_queries(&resolved[0], holds_back, true, &mut |deliver| {
         reader_batches(
             query_records,
             lowercase,
             query_range,
             batch_size,
             keep_whole,
+            0,
             deliver,
             &mut |_| Ok(()),
         )
@@ -360,6 +368,7 @@ fn reader_batches(
     query_range: Option<SequenceRange>,
     batch_size: usize,
     keep_whole: bool,
+    around: usize,
     deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
     warn: &mut dyn FnMut(&[u8]) -> Result<()>,
 ) -> Result<()> {
@@ -378,6 +387,7 @@ fn reader_batches(
                 // The whole letters of a record whose letter before the interval is lower
                 // case, for the chunks of a split query (`split::x_chunk_masks`).
                 let keep_whole = keep_whole || query.lower_case_before(from);
+                query.keep_around(from, to + 1, around);
                 query.cut_in_place(from, to + 1, keep_whole)
             }
             Some(RecordInterval::Empty) => query.cut_in_place(length, length, keep_whole),
@@ -548,6 +558,7 @@ fn write_run(
         archive,
         search_error,
         ref xml_scan,
+        xml_matrix,
         ..
     } = run;
     // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`): with `-subject`
@@ -604,6 +615,12 @@ fn write_run(
     let search_options = &resolved[0];
     // The archive's Bioseq of a cut record holds its whole letters (`FastaRecord::cut_in_place`).
     let keep_whole = archive.is_some();
+    // With `-subject`, the letters around each `-query_loc` interval that the Seq-loc mapper can
+    // read into a query row (`empty_rows::query_letters_around`), as the command line's reader.
+    let around = match database {
+        Some(_) => 0,
+        None => super::empty_rows::query_letters_around(search_options, subjects),
+    };
     let mut read = |deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
                     warn: &mut dyn FnMut(&[u8]) -> Result<()>|
      -> Result<()> {
@@ -613,6 +630,7 @@ fn write_run(
             query_range,
             batch_size,
             keep_whole,
+            around,
             deliver,
             warn,
         )
@@ -726,9 +744,15 @@ fn write_run(
         //                	    formatter.PrintOneResultSet(**result, query_batch);
         // ```
         for (index, (writer, options)) in writers.iter_mut().zip(resolved).enumerate() {
-            // The warnings of the batch's queries are written once, with the first format.
+            // The warnings of the batch's queries are written once, with the first format; NCBI's
+            // posts of the bytes that a Seq-annot's stream replaces (outfmt 8, 9; the only text
+            // that their writer writes to it, `seqalign::write_blastx_seqalign`) at every format,
+            // as the other programs write them.
             let mut quiet = io::sink();
-            let warnings: &mut dyn Write = if index == 0 {
+            let seq_annot = app::ReportFormat::from_number(i32::from(options.outfmt))
+                .and_then(crate::report::serial::SerialFormat::of)
+                .is_some();
+            let warnings: &mut dyn Write = if index == 0 || seq_annot {
                 &mut *diagnostics
             } else {
                 &mut quiet
@@ -794,6 +818,7 @@ fn write_run(
                 queries_before,
                 xml_scan.stops_after == Some(queries_before + queries.len()),
                 documents[index].as_mut(),
+                xml_matrix,
                 Some(LocalReport {
                     probe: probe.as_mut(),
                     first_hsp,
@@ -866,6 +891,7 @@ fn write_run(
             &shown,
             processed,
             documents[index].as_mut(),
+            xml_matrix,
         )
         .map_err(report_error)?;
         writer.flush().map_err(output_error)?;
@@ -996,7 +1022,6 @@ fn search_database(
             crate::report::serial::seqalign::check_database(
                 serial,
                 database.name(),
-                &database.pairwise_database().definition,
                 Program::Blastx,
             )?;
         }
@@ -1039,6 +1064,7 @@ fn search_database(
     let search_error = |error: anyhow::Error| -> anyhow::Error {
         database_search_error(error, stream.as_ref(), &unreadable)
     };
+    let xml_matrix = super::blast_xml::xml_matrix_failure(&resolved, false);
     let xml_scan = scan_xml_titles(
         &resolved,
         query_records,
@@ -1047,6 +1073,7 @@ fn search_database(
         batch_size,
         archive.is_some(),
         false,
+        xml_matrix,
     )?;
     report_batches(
         &RunReports {
@@ -1069,6 +1096,7 @@ fn search_database(
             out: args.out.as_deref(),
             search_error: &search_error,
             xml_scan,
+            xml_matrix,
         },
         outputs,
     )
@@ -1297,5 +1325,6 @@ fn blastx_record(record: &fasta_reader::FastaRecord, lowercase: bool) -> Result<
         lowercase_masks,
         warnings: Vec::new(),
         source: record.source.clone(),
+        around: None,
     })
 }

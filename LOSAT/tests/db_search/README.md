@@ -75,6 +75,17 @@ FASTA files:
 - `q3b_long.faa` (rows `db.ps.q3b.long.*` and `db.oldfsc.blastp.split.6`): one protein of 21,000 random letters (a fixed
   pseudo-random generator) with `LOSAT/tests/fasta/psiblast/tk.faa` planted at 500, 9,800, 14,000 and 20,500 (cut at the
   end), a query that NCBI splits into chunks of 10,000 that overlap by 100.
+- The database `x2g_c0054` (rows `db.x2g.*`, line RG item X2g) is the subject
+  `LOSAT/tests/fasta/outfmt0/x2g_c0054_s.faa` (70 random letters, case c0054 of the line's survey; its query is
+  `x2g_c0054_q.fna` there): with `-ungapped -window_size 0` and a low `-threshold`, the search reports one-hit
+  ungapped HSPs of length 0. `x2g_f0616`, `x2g_f3147` and `x2g_f1144` are the subjects `x2g_f0616_s.faa`,
+  `x2g_f3147_s.faa` and `x2g_f1144_s.faa` there (cases of the line's format survey: an HSP of length 0 in frame
+  -2, in frame +1 at query offset 0, at subject offset 0), `x2g_ms` the two subjects `x2g_ms.faa` (with the two
+  queries `x2g_mq.fna`, the second's HSP of length 0) and `x2g_rk` the two subjects `x2g_rk.faa` (the one
+  ranked second holds the HSP of length 0 of `x2g_f0616_q.fna`). `x2g_s1`, `x2g_s1z` and `x2g_s1d` are the
+  subjects `x2g_s1_s.faa`, `x2g_s1z_s.faa` and `x2g_s1d_s.faa` there (pairs of the line's probe s1c, built for
+  one-hit HSPs of length 0: with `x2g_s1_q.fna` one at subject offset 1 and, without the subject's first letter,
+  one at offset 0; with `x2g_s1d_q.fna` two, the subject written twice), whose every HSP has length 0.
 
 - `x2f_c0384_q.fna` / `x2f_c0384_s.faa`, `x2f_c0326_q.fna` / `x2f_c0326_s.faa`: two random pairs of the line RG
   X2f survey (cases c0384 and c0326), rows `db.x2f.*`: with `-window_size 0` and a low `-threshold`, BLASTX's
@@ -111,6 +122,14 @@ makeblastdb also writes was deleted). Run from `LOSAT/`:
         -title "a filler, then x2f_s1" -blastdb_version 4
     makeblastdb -in tests/db_search/x2f_page.faa -dbtype prot -out tests/db_search/x2f_page \
         -title "a filler of 4,075 letters, then x2f_s1" -blastdb_version 4
+    makeblastdb -in tests/fasta/outfmt0/x2g_c0054_s.faa -dbtype prot -out tests/db_search/x2g_c0054 \
+        -title "x2g c0054 subject" -blastdb_version 4
+    for n in f0616:x2g_f0616_s.faa f3147:x2g_f3147_s.faa f1144:x2g_f1144_s.faa ms:x2g_ms.faa rk:x2g_rk.faa; do
+        makeblastdb -in tests/fasta/outfmt0/${n#*:} -dbtype prot -out tests/db_search/x2g_${n%%:*} \
+            -title "x2g ${n%%:*} subjects" -blastdb_version 4; done
+    for n in s1 s1z s1d; do
+        makeblastdb -in tests/fasta/outfmt0/x2g_${n}_s.faa -dbtype prot -out tests/db_search/x2g_$n \
+            -title "x2g $n subject" -blastdb_version 4; done
 
 `wm_s60k` (rows `db.wm.*`, line NP M2: `-window_masker_db`) is the subject `s60k.fa` of
 `LOSAT/tests/blastn_regression_fixtures.py`, with only `.nin .nsq .nhr` kept:
@@ -930,7 +949,9 @@ Rows `db.sl.*`: `-seqidlist` and `-negative_seqidlist` with `-db`, five programs
   `sl_tfn.txt` (four local ids across tfn's two volumes), `sl_prot.txt` and `sl_nucl.txt` (every Seq-id form of
   `ids/prot_v5` and `ids/nucl_v5`: tpg, RefSeq and Swiss-Prot without versions, a pdb chain, local ids, a general id as
   `db:tag`, a versionless accession of an OID of several definition lines, a gi that NCBI drops), `sl_gi.txt` (gi ids only:
-  NCBI's `Empty seqid list` warning and no restriction on a version 5 database, no OID on a version 4 one),
+  NCBI's `Empty seqid list` warning on a version 5 database; as a positive list no restriction where one volume is reached
+  through a path of alias files without a range that cuts it, else no OID: rows `db.gisl.*`; as a negative one no
+  restriction; on a version 4 database no OID as a positive list),
   `sl_comment.txt` (no id: no list), `sl_none.txt` (ids no database has: NCBI searches an empty database, LOSAT refuses),
   `sl_empty.txt` (0 bytes: NCBI's `Failed to map seqidlist file ` error);
 - binary lists in the format of `blastdb_aliastool -seqid_file_out` (NUL, file size, count, title, date, database length
@@ -951,6 +972,54 @@ NCBI 2.17.0) has no accession table: a seqid list on it is NCBI's `BLAST Databas
 
 A list file that is not on the search path (NCBI: `Error: NCBI C++ Exception: ... To be memory mapped the file must
 exist: ''`, exit 255, with the path of NCBI's build tree) is checked by `src/cli_v2_tests.rs`, not by a row.
+
+Rows `db.gisl.*` (line DBID, item gisl): `-seqidlist seqidlist/sl_gi.txt` (a positive list) on version 5 databases of one
+and of two volumes, and on the alias files of `aliaskeys/` over one volume. NCBI's `x_ApplyUserGiList` clears every OID of
+the list that lost every id, and the search finds an empty database (each query's `Filtering resulted in an empty
+database.`), unless its OID bit set is the special all-set one, which a copy of one volume's special set makes (the `-db`
+names reach one volume, and at least one path of alias files to it crosses no range that cuts it): the clearing writes into
+a stale array, and the whole database is searched. So `taxfilter/tfp`, `taxfilter/tfn.00` (one volume of `tfn`),
+`aliaskeys/p_r123` (the range of the whole volume), `p_twice`, `p_dupvol`, `p_chain` (an alias of `p_dupvol`), `p_above`
+(the whole range above `p_dupvol`), `p_cover` and `p_coverr` (`p_r123` and `p_range` in both orders), `p_arrcov` (`p_union`,
+a bit array, then `p_r123`) are searched whole; `taxfilter/tfn` (two volumes), the two databases `taxfilter/tfp
+ids/prot_v5`, `aliaskeys/p_range`, `p_union`, `p_halves` (`p_lo` and `p_hi`, ranges 1-11 and 12-23 whose union is the
+volume), `p_abovecut` (a range that cuts the volume above `p_dupvol`) and `n_vol1` are searched empty. The negative list on
+`taxfilter/tfn` excludes nothing. `sl_gifull.txt` (`gi|1111|ref|NP_1.1|`) adds NCBI's two warnings `Ignoring extra parts
+(synonyms?) in FASTA-style ID`.
+
+Rows `db.ordsl.*` (line DBID, item ordsl): seqid lists that name `gnl|BL_ORD_ID|n` (`multidb/sl_ord*.txt`,
+`sl_ord1.bsl`, `sl_pxm*.txt`, `sl_nxm7.txt`) where a line with such an id lies in a volume whose first OID is not 0: a
+later database of the list (`taxfilter/tfu_p` behind `multidb/pa`, 12 sequences; `tfu_n` behind `multidb/na`, 8;
+`multidb/pxm` and `nxm` likewise) or the second volume of `multidb/ov_p` and `ov_n`. The accession tables of
+`makeblastdb -input_type blastdb` (`tfu_*`, `ov_*`) and of `-parse_seqids` FASTA ids (`pxm`, `nxm`) hold the stored
+number, which the lookup reads, while NCBI's filtered header read tests the line as `gnl|BL_ORD_ID|<stored number plus the
+volume's first OID>` (`CSeqDBVol::x_GetHdrAsn1` with `adjust_oids`). So a positive list can select a sequence whose every
+line it then removes, and a negative list can remove a line of a sequence it did not exclude; NCBI leaves such a sequence's
+hits out of the report without notice (a positive list's at the Seq-aligns, line DBID item lineless; a negative list's at
+the fetches of the traceback, the redo and the ungapped re-evaluation, item lineless2), and so does LOSAT (`bp.list.6` on
+`pa tfu_p`, `bp.listb.6` with the binary list, `bp.listneg.6` and `bn.listneg.6` negative, `bp.vol.6` the second volume of
+`ov_p`, one row in each other program; LOSAT refused them before). Where a sequence keeps another line, the
+test decides which lines NCBI writes (`bp.two.*`, `bn.two.*`: OID 12 of `pa pxm` and OID 8 of `na nxm` hold
+`ref|NP_900003.1|` / `ref|NM_900003.1|` and `gnl|BL_ORD_ID|7`, read as 19 / 15; positive and negative lists of 7 and of
+the sum, outfmt 6 with `sallseqid salltitles` and 16). `bp.tag.6` and `bp.tagq.6`: the line `gnl|BL_ORD_ID|0` of OID 13 of
+`pa pxm`, which makeblastdb stores with the string tag "0", selected by `NP_900005.1`; NCBI reads the header only for a
+sequence it reports and then throws (`GetId`, exit 255): a query that misses it (`-evalue 1e-5`) is NCBI's run, one that
+hits it (`multidb/xq.faa`) LOSAT's refusal. The other `ncbi` rows: a list whose number no key holds (`bp.none.6`, an
+empty database), and a sequence of the first volume, which keeps its line (`bp.vol0.0`, `bn.vol0.6`, `tx.vol0.6`).
+
+`ll2/`: rows `db.ll2.*` (line DBID, item lineless2). `ll2/make_ll2.py` (its docstring has the usage and the records)
+writes `ll2/prot_v4`, `prot_v5`, `nucl_v4` and `nucl_v5` with `makeblastdb -parse_seqids`: 14 subjects made from one query
+with 0, 2, 4, ... substitutions (distinct ranks, one equal pair), of which the only line of r0 (the query itself), r2a
+(the first of the pair) and r6 has a gi (version 4) or a ti (version 5). A `-negative_seqidlist` (`ll2/neg.txt`: r12's
+accession, which the OID mask removes, and an id no database holds) keeps those three sequences and removes their lines;
+NCBI's fetches with `check_oid_exclusion` exclude them, so they count in the statistics and take no place in the final
+hit lists (`.m1.`: r1 is the best row; `db.ll2.tx.m10.6`, `db.ll2.bn.ug.m10.6` and `db.ll2.bn.ug.m1.6`: an ungapped
+search of a nucleotide database never holds them in its preliminary hit list), except a protein subject of an ungapped
+search (`db.ll2.bx.ug.*`), which takes its place before the cut and leaves at the Seq-aligns. `ll2/neggi.txt` (a gi) is a non-empty id set on version 4 and an empty list on version 5. `ll2/prot_v4bad` and
+`nucl_v4bad` (`make_ll2.py --damaged-only`) damage the header of OID 8 (r7, which keeps its line): under `neg.txt`
+NCBI's fetch reads it although r7 is not reported at `-max_target_seqs 3`, and the search fails (exit 255 in the
+traceback, 3 in the ungapped re-evaluation); LOSAT refuses (the `losat-rejection` rows `db.ll2.*.bad.6`).
+Queries: `ll2/q.faa`, `q.fna` (the query and its codons), `q2.faa`, `q2.fna` (the same and its first part).
 
 ## Ungapped nucleotide databases (line NP, O4a-1)
 
@@ -983,7 +1052,7 @@ The rows `db.blastn.ungapped_rej.*` (outfmt 8, 11, 17 with `-ungapped`) are refu
 Rows `db.mdb.*`: `-db "a b"` searches the databases `a` and `b` as one virtual database, as NCBI's `CSeqDB` does (the `db` cell
 of a row is one argument, so a cell with spaces is a list of names). `multidb/` holds the databases and what
 `make_multidb.py MAKEBLASTDB` builds them from (makeblastdb 2.17.0; the records and taxids are those of `taxfilter/tfp.faa`,
-`tfp.map`, `tfn.fna` and `tfn.map`, definition lines kept; `.pjs` and `.njs` dropped; the whole directory is about 0.5 MB):
+`tfp.map`, `tfn.fna` and `tfn.map`, definition lines kept; `.pjs` and `.njs` dropped; the whole directory is about 0.8 MB):
 
 - `pa` / `pb`: version 5 protein, `-parse_seqids`, taxid map; records 1-12 of `tfp.faa`, and records 13-23 plus `Q00001.1`, an
   exact copy of record 2's sequence (taxid 9606), so that two databases hold an identical sequence. `p4a` / `p4b`: the same
@@ -995,6 +1064,14 @@ of a row is one argument, so a cell with spaces is a list of names). `multidb/` 
   empty title. `al.nal`: an alias file (`TITLE multidb alias of na`, `DBLIST na`). `mix_u.nal` (line DBID mixdb, written by hand): an
   alias file of `na nnp` whose `FIRST_OID 9`, `LAST_OID 17` keep the sequences of `nnp` (without the accession table) alone. `sl.txt`: a seqid list of the first
   accession of `na`, `nb`, `pa` and `pb`.
+- `ov_p` / `ov_n` (line DBID ordsl; `make_multidb.py --ordsl-only MAKEBLASTDB` builds only these): `-input_type blastdb` of
+  `../taxfilter/tfu_p` and `tfu_n` in two volumes of two records each (`-max_file_sz` 400 and 500 bytes) under one LMDB file;
+  `sl_ord0.txt`, `sl_ord1.txt`, `sl_ord2.txt`, `sl_ord9.txt`, `sl_ord13.txt`: the list `gnl|BL_ORD_ID|n`, and `sl_ord1.bsl`
+  its binary form (rows `db.ordsl.*`).
+- `pxm` / `nxm` (line DBID ordsl): version 5 `-parse_seqids` of two records: record 13 of `tfp.faa` (record 9 of `tfn.fna`)
+  under the lines `ref|NP_900003.1|` (`NM_`) and `gnl|BL_ORD_ID|7`, and a random sequence under
+  `ref|NP_900005.1|gnl|BL_ORD_ID|0` (stored with the string tag "0"); `xq.faa`, that random protein; the lists
+  `sl_pxm7.txt`, `sl_pxm19.txt`, `sl_nxm7.txt`, `sl_ord7.txt`, `sl_ord15.txt`, `sl_ord19.txt`, `sl_np5.txt`.
 
 The ncbi rows search `taxfilter/q.fna` (BLASTN, BLASTX, TBLASTX) or `taxfilter/q.faa` (BLASTP, TBLASTN, PSIBLAST) and cover:
 two names in outfmt 0, 5, 6, 7, 8, 11, 15 and 16 (`bn`), the other order (`bn.rev`), a name twice (`dup`), Galaxy's call with
@@ -1342,7 +1419,8 @@ in an empty database.` and a search that goes on, `p_nseq4g`: NCBI's `int` of 42
 `FIRST_OID` / `LAST_OID` ranges (`p_range`, `p_nest` and `p_rin`: nested ranges ANDed, `p_union`: two alias files over one
 volume ORed, `p_twice`: an alias file and the volume itself, `p_dupvol`: one volume twice in a `DBLIST`, `p_first0`, `p_last2`,
 `p_empty`, `p_beyond`, `p_r312` and `p_r312s` with `-taxids` and `-negative_taxids`, `p_range` with `-seqidlist`, `n_range`,
-`n_mv`: the global OIDs 9-13 of the two volumes, `n_vol1`: the second volume alone). The ncbi rows were frozen with NCBI
+`n_mv`: the global OIDs 9-13 of the two volumes, `n_vol1`: the second volume alone; `p_lo`, `p_hi`, `p_halves`, `p_cover`,
+`p_coverr`, `p_arrcov`, `p_chain`, `p_above` and `p_abovecut` for the rows `db.gisl.*`). The ncbi rows were frozen with NCBI
 BLAST+ 2.17.0 on the workstation (`env_blast`; two rows checked against the release build on the developer machine, the same
 bytes); the `db.ak.bp.err.*` rows (NCBI's `CStringException` texts, exit 255, which carry the path of NCBI's build tree:
 `p_bad_nseq`, `p_bad_first`, `p_bad_min`, `p_bad_stlen`, `p_bad_two` without and with `-taxids`) with the release build on the
@@ -1475,6 +1553,50 @@ The databases (version 4; `.pjs` deleted). Run from `LOSAT/`:
     makeblastdb -in tests/db_search/of1/dispref.fa -dbtype prot -out tests/db_search/of1/dispref \
         -title "a database sequence whose display id is not its local id" -parse_seqids -blastdb_version 4
     rm tests/db_search/of1/*.pjs
+
+BLASTN and TBLASTN inputs of the query-anchored rows (rows `db.of1.bn.*` and `db.of1.tn.*`, line RG T3b), in
+`of1/`, from the T3b probes (`T/t3/scripts_t3b/gen3b.py`, a seeded generator; `tnq1.pssm` from NCBI's
+`psiblast -query tnq.fa(first record) -db <six mutated copies> -num_iterations 2 -out_pssm`):
+
+- `bnq.fa`: two nucleotide queries, `bnq` (300 letters with a run of 25 T that DUST masks) and `bnq2`; `bns.fa`:
+  `s_pmo` (a plus-strand and a minus-strand HSP over the query's 61-160), `s_mins` and `s_mins2` (minus-strand
+  copies with insertions of 4 and 2 letters at one query column), `s_mdel` (a minus-strand deletion), `s_plus`
+  (a plus-strand insertion at the same column); `bnslc.fa`: a subject whose first 40 letters are lower case
+  (`-lcase_masking`: the mask shows on the columns of its first row, also in its minus-strand row);
+  `bnids.fa`: the subjects of `bns.fa` under `gi|...|gb|`, `ref|`, `lcl|` and `gnl|` ids.
+- `bself.fa` (copies of a 80-letter stretch: the second with a 5-letter insertion, the third ungapped and
+  mutated; `-query_loc 1-80 -subject_loc 81-325 -parse_deflines`, NCBI aborts) and `bselfrc.fa` (a record with an
+  inverted repeat and a lower-case run; with itself under `-parse_deflines` its rows of both strands).
+- `bnqid.fa` (`lcl|Query_1`) and `bnqgi.fa` (`gi|777|lcl|Query_1`): database sequences named as the first query
+  read without `-parse_deflines`, which BLASTN refuses in outfmt 1 to 4 after its prolog
+  (`tests/parse_deflines_subject.rs`).
+- `tnq.fa`: two protein queries (`tnq` with 16 Q that SEG masks); `tns.fa`: `t_pm` (a plus and a minus frame over
+  the query's 61-80), `t_fr` (two plus frames over 46-55), `t_ins`, `t_mins` (insertions on a plus and a minus
+  frame), `t_mdel`, `t_code` (codons that genetic code 2 translates otherwise: AGA, AGG, ATA, TGA);
+  `tnsids.fa`: four of them under parsed ids; `tnqid.fa` (`lcl|Query_1`) and `tnqgi.fa` (`gi|778|lcl|Query_1`):
+  the refusals `db.of1.tn.qid.reject` and `db.of1.tn.qgi.reject` (NCBI's merge reads the protein query as the
+  sequence's nucleotides; its description line shows the query's title).
+- `bnsr.nal`: an alias of the OIDs 2 to 4 of `bns` (rows labelled by OID).
+
+The databases (version 4; `.njs` deleted). Run from `LOSAT/`:
+
+    makeblastdb -in tests/db_search/of1/bns.fa -dbtype nucl -out tests/db_search/of1/bns \
+        -title "nucleotide subjects of the query-anchored rows" -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/bnids.fa -dbtype nucl -out tests/db_search/of1/bnids \
+        -title "nucleotide subjects of the query-anchored rows with Seq-ids" -parse_seqids -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/bnqid.fa -dbtype nucl -out tests/db_search/of1/bnqid \
+        -title "a nucleotide database sequence under the id of a query" -parse_seqids -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/bnqgi.fa -dbtype nucl -out tests/db_search/of1/bnqgi \
+        -title "a nucleotide database sequence whose display id is a query id" -parse_seqids -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/tns.fa -dbtype nucl -out tests/db_search/of1/tns \
+        -title "translated subjects of the query-anchored rows" -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/tnsids.fa -dbtype nucl -out tests/db_search/of1/tnsids \
+        -title "translated subjects of the query-anchored rows with Seq-ids" -parse_seqids -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/tnqid.fa -dbtype nucl -out tests/db_search/of1/tnqid \
+        -title "a translated database sequence under the id of a query" -parse_seqids -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/tnqgi.fa -dbtype nucl -out tests/db_search/of1/tnqgi \
+        -title "a translated database sequence whose display id is a query id" -parse_seqids -blastdb_version 4
+    rm tests/db_search/of1/*.njs
 ## `dbmask/`: database masks of BLASTN searches (line NP, series M, M4a-2a)
 
 Rows `db.dbmask.*` (`-db_soft_mask`, `-db_hard_mask`). The inputs are the probe inputs of the M4a-2 survey
@@ -1550,3 +1672,58 @@ of data`); NCBI's search reports both as `BLAST engine error: Database memory ma
 files `zr_t2.nal`, `zr_p5.nal` and `zr_t1.nal` give `DBLIST p5 zz5` with the OID ranges 7-7 (`t2` alone, no mask
 data), 3-5 (`s3`-`s5`) and 1-6 (`s1`-`s5` and `t1`, which has mask data that `zz5`'s volume reads without the
 algorithm 11 of the list): NCBI reads masks of `zz5` only in the last.
+
+M4a-2b (`-db_hard_mask`, line NP) added `edge3` (s5's one-letter mask 1001, `edge_short.asnt`: a last mask shorter
+than the two letters before its end that the last chunk starts with, which LOSAT refuses) and four alias files that
+leave out the sequences whose mask runs to their end (`a5`'s and `k5`'s `s4`, `mask_nucl_mv`'s `m04`, OID 3): `zh_a5.nal`
+and `zh_k5.nal` (OIDs 1-3, `s1`-`s3`), `zh_mv_a.nal` (`../../seqdb/db/mask_nucl_mv`, OIDs 1-3: `m01`-`m03`) and
+`zh_mv_b.nal` (OIDs 5-8: `m05`-`m08`, the second volume):
+
+```
+makeblastdb -in subj.fna -dbtype nucl -out edge3 -title "edge masks 3" -blastdb_version 4 -mask_data edge_short.asnt
+```
+
+`edge_short.asnt` is `edge_tail.asnt` with `algo-options "edge short"` and `from 1001, to 1001`.
+
+The review fixes of M4a-2b (ad-M4a-6) added `edge4` and `edgew`. `edge4` holds two masks of `s5` with an empty mask
+at 0 first (`from 0, to 4294967295`, which makeblastdb stores as `[0, 0)`): algorithm 11 (`edge_e0tail.asnt`, then
+1000-1199: the chunk after the empty mask starts at 0 and the next mask runs to the end, refused; review F1) and 12
+(`edge_e0mid.asnt`, then 500-599: searched). `edgew` holds four sequences of 3 to 6 letters (`wb.fna`, `w3`-`w6`) whose
+mask runs to their end (`edge_wb.asnt`: 1-2, 2-3, 3-4 and 3-5), searched alone through `zw_s3.nal`, `zw_s4.nal` and
+`zw_s5.nal` (OIDs 1, 2 and 3) with the query `qw.fna` at words 4, 5 and 7 (review F2: NCBI scans every BLASTN
+subject, and its scan of the whole sequence reads a word when the sequence has at least the word's letters):
+
+```
+makeblastdb -in subj.fna -dbtype nucl -out edge4 -title "edge masks 4" -blastdb_version 4 -mask_data edge_e0tail.asnt,edge_e0mid.asnt
+makeblastdb -in wb.fna -dbtype nucl -out edgew -title "edge masks word" -blastdb_version 4 -mask_data edge_wb.asnt
+```
+
+The second review fixes of M4a-2b (ad-M4a-6, 2026-11-15) added `edge5`: last masks shorter than the letters before their
+end that the final chunk starts with, refused only where NCBI's merge after that chunk can take an alignment of an earlier
+chunk by the overlap it reads past its list of ranges (review 2 F1). Algorithm 11 (`edge_ov.asnt`: `s5`'s one-letter
+masks 300 and 302; the chunk between them scans no word) and 12 (`edge_em.asnt`: 700-701, then a mask of no letters at
+702, `from 702, to 701`) are searched; 13 (`edge_ovr.asnt`: 301 and 302; the chunk 0-301 ends after the final chunk's
+offset 300) is refused; 14 (`edge_fw.asnt`: `s4`'s mask 289; the final chunk 288-300 is scanned from 290) is searched at
+words of 11 and 28 letters and refused at blastn-short's 7:
+
+```
+makeblastdb -in subj.fna -dbtype nucl -out edge5 -title "edge masks 5" -blastdb_version 4 -mask_data edge_ov.asnt,edge_em.asnt,edge_ovr.asnt,edge_fw.asnt
+```
+
+## A database title outside the visible ASCII range (M4a-1b part 5, M4a-1b2)
+
+`title_bad` (version 4, nucleotide): the records of `tests/fasta/outfmt11/arch_s.fna` and `arch_tbn_s.fna`, built by NCBI
+BLAST+ 2.17.0 `makeblastdb -dbtype nucl -blastdb_version 4 -title "café db <DEL>"` (the title holds the bytes 0xC3 0xA9 and
+0x7F). The rows `db.dbtitle.*` (BLASTN and TBLASTN, outfmt 8 and 9) write the title into each query's Seq-annot (`desc` user
+object `Blast Database Title`) with `#` for each such byte, and NCBI posts `Error: (803.7) [blastn]
+Seq-annot.desc.E.user.data.E.label.str` / `Bad char [0xC3] in string at line N` (outfmt 9: `at byte N`) / the title for each
+byte of each query's document.
+
+`seqannot/` (M4a-1b2): `tdel` (version 5, `-parse_seqids`: `subj_del.fa`, one sequence of 16,800 nucleotides, 84 copies of a
+200-nucleotide unit, whose id `lcl|s<DEL>1` makeblastdb stores as `s#1`) and `pbad` (version 4, `pdel.faa`, the protein of
+`subj_del.fa`'s first frame, 5,600 letters), both built by NCBI BLAST+ 2.17.0 makeblastdb with `-title "café db <DEL>"`
+(`-dbtype nucl -parse_seqids -blastdb_version 5`, `-dbtype prot -blastdb_version 4`); `q2n_del.fa` holds the unit and its
+reverse complement as `lcl|q<DEL>1` and `lcl|q<DEL>2`, and `qp.faa` the protein of the unit's first frame (stops as `X`).
+The rows `db.dbtitle.blastn.qdel.8` and `db.dbtitle.blastx.qdel.9` write the title and, with `-parse_deflines`, the query ids
+with `#` and NCBI's 803.7 message for each byte; fasta_input's `blastp.seqannot_delid_s.*` searches `qp.faa` against
+`pdel.faa` (`-subject -parse_deflines`, its id `lcl|p<DEL>1`).

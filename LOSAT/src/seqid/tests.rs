@@ -305,6 +305,7 @@ fn tabular_row(set: &DeflineSet, protein: bool) -> Option<Vec<String>> {
         q_frame: 0,
         s_frame: 0,
         rows: None,
+        end_gaps: true,
         qcovhsp: 100,
     };
     let mut out = Vec::new();

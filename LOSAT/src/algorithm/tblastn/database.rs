@@ -352,14 +352,37 @@ impl TblastnDatabase {
         shared::subject_read_texts(&self.db, &self.taxdb, subjects, rows_open, PROGRAM)
     }
 
+    /// The stop of the prefetch of the batch whose first query is `query` and whose reported
+    /// subjects are `subjects` (`prefetch_stop`): NCBI's error (a `shared::HeaderReadError`), or
+    /// LOSAT's refusal (`shared::batch_prefetch`; `at_hits`, the XML2 and JSON formats, which
+    /// write the taxonomy texts at each `Hit`: `shared::batch_prefetch_stop`), after the
+    /// prefetches of the batches before.
+    pub(super) fn prefetch_stop_error(
+        &self,
+        subjects: &[(u32, Option<Arc<ParsedSubject>>)],
+        query: usize,
+        at_hits: bool,
+    ) -> anyhow::Error {
+        let subjects = subjects.iter().map(|(ordinal, parsed)| {
+            shared::PrefetchSubject::unflipped(*ordinal, parsed.as_deref())
+        });
+        let stopped = if at_hits {
+            shared::batch_prefetch_stop(&self.db, &self.taxdb, subjects, PROGRAM, query).err()
+        } else {
+            shared::batch_prefetch(&self.db, &self.taxdb, subjects, PROGRAM, query).err()
+        };
+        stopped.expect("`prefetch_stop` found a subject whose lookup stops the batch's prefetch")
+    }
+
     /// NCBI's prefetch of the query batch whose final hit lists are `hitlists` (subjects named by
     /// rank, `reported_subjects`) on standard error (`shared::batch_prefetch`): the taxonomy
     /// texts of the sequences with HSPs in them, then the warning where the prefetch fails at a
-    /// subject whose lookup fails (the protein query has no strand).
+    /// subject whose lookup fails (the protein query has no strand); the stop of the batch whose first query is `query`.
     pub(super) fn batch_prefetch(
         &self,
         reported: &ReportedSubjects,
         hitlists: &[KappaResultHitList],
+        query: usize,
     ) -> Result<Vec<u8>> {
         let subjects = hitlists
             .iter()
@@ -372,7 +395,7 @@ impl TblastnDatabase {
                     reported.parsed_subject(rank),
                 )
             });
-        shared::batch_prefetch(&self.db, &self.taxdb, subjects, PROGRAM)
+        shared::batch_prefetch(&self.db, &self.taxdb, subjects, PROGRAM, query)
     }
 
     /// The database read where it is searched by `threads` threads, after the checks of
@@ -404,6 +427,27 @@ pub(super) fn reads_subject(list: &KappaResultList, rows: SubjectFetch) -> bool 
 /// so far name, by ordinal id (`read_titles`): the stored title, or the definition lines of a
 /// sequence with parsed Seq-ids.
 pub(super) type DatabaseTitles = BTreeMap<u32, ReportedHeader>;
+
+/// NCBI's fetches with `check_oid_exclusion` of the redo and the traceback of a search of
+/// `database` (`shared::FetchExcluded`; `None` where they exclude nothing): the subjects they
+/// exclude leave the preliminary hit lists (`LocalStageDProfile::fetch_excluded`).
+pub(super) fn fetch_excluded(database: &TblastnDatabase) -> Option<shared::FetchExcluded<'_>> {
+    shared::FetchExcluded::of(&database.db)
+}
+
+/// The final hit lists `hitlists` of a query batch without the sequences that NCBI makes no
+/// Seq-align of (`shared::SeqAligned`): after their cut to the hit list size, before
+/// `read_titles`.
+pub(super) fn drop_unaligned(database: &TblastnDatabase, hitlists: &mut [KappaResultHitList]) {
+    // tblastn is gapped (`-ungapped` is refused): the redo or the traceback fetched every
+    // subject with `check_oid_exclusion` (`fetch_excluded`).
+    let Some(mut aligned) = shared::SeqAligned::of(&database.db, true) else {
+        return;
+    };
+    for hitlist in hitlists {
+        hitlist.with_lists_mut(|lists| aligned.retain(lists, |list| u32::try_from(list.oid).ok()));
+    }
+}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:283-293
 // ```c++
@@ -506,6 +550,63 @@ impl ReportedSubjects {
             SubjectLetters::Packed(&self.stores)
         }
     }
+}
+
+/// The first of the query batches `batches` (the searched queries of each) of the final hit lists
+/// `hitlists` (subjects named by ordinal id, before `reported_subjects`) whose prefetch is on (its
+/// Seq-aligns of a nonzero score do not outnumber a positive `PRE_FETCH_SEQS_LIMIT`,
+/// `shared::prefetch_off`) and loads a subject whose lookup fails on a file with NCBI's exception
+/// (`ParsedSubject::prefetch_stops`), with the subjects that batch reports (ordinal id, and the
+/// definition lines of one with parsed Seq-ids, `titles`): NCBI's prefetch stops the run there
+/// (`shared::batch_prefetch`), before that batch's reports. The caller asks it where the first
+/// format prefetches.
+pub(super) fn prefetch_stop(
+    titles: &DatabaseTitles,
+    hitlists: &[KappaResultHitList],
+    batches: &[std::ops::Range<usize>],
+) -> Option<(
+    std::ops::Range<usize>,
+    Vec<(u32, Option<Arc<ParsedSubject>>)>,
+)> {
+    // The report drops the HSPs of score 0 first (`reported_subjects`).
+    let scored = |list: &KappaResultList| {
+        list.hsps
+            .hsps
+            .iter()
+            .filter(|linked| linked.hsp.score != 0)
+            .count()
+    };
+    batches.iter().find_map(|span| {
+        let lists = || {
+            hitlists
+                .get(span.clone())
+                .into_iter()
+                .flatten()
+                .flat_map(KappaResultHitList::lists)
+        };
+        if shared::prefetch_off(lists().map(scored).sum()) {
+            return None;
+        }
+        let subjects: Vec<(u32, Option<Arc<ParsedSubject>>)> = lists()
+            .filter(|list| scored(list) > 0)
+            .filter_map(|list| u32::try_from(list.oid).ok())
+            .map(|ordinal| {
+                let parsed = match titles.get(&ordinal) {
+                    Some(ReportedHeader::Parsed(subject)) => Some(Arc::clone(subject)),
+                    _ => None,
+                };
+                (ordinal, parsed)
+            })
+            .collect();
+        subjects
+            .iter()
+            .any(|(_, parsed)| {
+                parsed
+                    .as_ref()
+                    .is_some_and(|subject| subject.prefetch_stops().is_some())
+            })
+            .then(|| (span.clone(), subjects))
+    })
 }
 
 /// The Seq-aligns of the results `hitlists` that NCBI's prefetch counts against

@@ -150,6 +150,20 @@ pub trait StructuredXml {
     /// Appends the end of the document (the epilog), after the last query.
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<()>;
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:757-763
+    // ```c++
+    // 	catch(CException &e){
+    // 	    ERR_POST(Error << e.GetMsg() << e.what() );
+    // 	    return;
+    // 	}
+    // ```
+    /// The message that NCBI posts (`ERR_POST(Error << ...)`, after the program's `Error: [name] `
+    /// prefix) for a query whose report raised `exception` (`CaughtException`): the XML2 and JSON
+    /// documents' `GetMsg()` and `what()`.
+    fn caught_message(&self, exception: &crate::ncbi_exception::NcbiException) -> String {
+        format!("{}{}", exception.get_msg(), exception.what())
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:361-369
     // ```c++
     //     if (m_FormatType >= CFormattingArgs::eXml) {
@@ -263,6 +277,23 @@ impl BlastXmlWriter {
 }
 
 impl StructuredXml for BlastXmlWriter {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:745-760
+    // ```c++
+    // 	query_label = string("Q(")+NStr::NumericToString(index) +
+    // 	    string("/")+ NStr::NumericToString(data->GetNumQueries() );
+    // 	...
+    // 	catch(CException &e){
+    // 	    ERR_POST(Error << "Failed s_BlastXMLAddIteration " << query_label << e.what() );
+    // 	    return;
+    // 	}
+    // ```
+    /// BLAST XML's message: NCBI formats one query per call (blast_format.cpp:708-740), so the
+    /// label is always `Q(0/1` (without its `)`), then `what()`. The `Iteration` stays open after
+    /// the `Hit`s written before the failed one (each written alone, `Xml5Hits`).
+    fn caught_message(&self, exception: &crate::ncbi_exception::NcbiException) -> String {
+        format!("Failed s_BlastXMLAddIteration Q(0/1{}", exception.what())
+    }
+
     /// Appends the `Iteration` of one query to `out` (before it the document's header, for the
     /// first query).
     fn query<F>(

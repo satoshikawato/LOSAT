@@ -91,6 +91,10 @@ pub(super) struct BlastpTabular<'a> {
     pub taxdb_found: bool,
     /// The names of the taxonomy database that the rows look up (`None`: every lookup fails).
     pub names: Option<&'a TabularNames>,
+    /// The Seq-aligns' `num_ident` of the HSPs whose counts the reports' recount replaced
+    /// (`recount_shown_identities`): NCBI's formatter opens its alignment block, and reads the
+    /// subject for `nident`, on the Seq-align's count (`TabularSpec::opens_counts`).
+    pub engine_counts: &'a super::seqalign::EngineCounts,
 }
 
 /// The subjects as the report shows them, by subject index (a subject set) or rank (the
@@ -770,7 +774,7 @@ fn write_tabular_rows<const RPS: bool>(
         let mut row_index = 0usize;
         // The query's (or round's) formatter (`TabularRows`).
         let mut table_rows = TabularRows::default();
-        for hsp_list in reported(hit_list) {
+        for (list_index, hsp_list) in reported(hit_list).enumerate() {
             let Some(first) = hsp_list.hsps.first() else {
                 continue;
             };
@@ -816,7 +820,13 @@ fn write_tabular_rows<const RPS: bool>(
                 .as_ref()
                 .zip(table_rows.last_found())
                 .map(|(values, kept)| values.subject(tab.names, -1, kept));
-            for hsp in &hsp_list.hsps {
+            for (index_in_list, hsp) in hsp_list.hsps.iter().enumerate() {
+                // The Seq-align's `num_ident` (the engine's count where the reports' recount
+                // replaced it, `BlastpTabular::engine_counts`).
+                let seqalign_num_ident = tab.engine_counts.num_ident(
+                    (q_idx as u32, list_index as u32, index_in_list as u32),
+                    hsp.num_ident,
+                );
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
                 // ```c++
                 //        		const CBioseq_Handle& subject_bh =
@@ -826,7 +836,7 @@ fn write_tabular_rows<const RPS: bool>(
                 // prefetch it: the texts of its taxonomy lookups follow the rows before it
                 // (`QueryWarnings::subject_read`), before those of the row's own lookups.
                 if let Some(warnings) = warnings.as_deref_mut() {
-                    if warnings.reads_with_texts(q_idx) && fetch.reads(hsp.num_ident) {
+                    if warnings.reads_with_texts(q_idx) && fetch.reads(seqalign_num_ident) {
                         writer.write_all(&buf)?;
                         buf.clear();
                         warnings.subject_read(q_idx, hsp.s_idx, &mut *writer)?;
@@ -851,12 +861,17 @@ fn write_tabular_rows<const RPS: bool>(
                 let rows = match query_rows {
                     // rpsblast's identities: the rows inside NCBI's alignment block only (`nident`
                     // alone opens it on the engine's count, `needs_rows`).
-                    Some(_) if RPS && !spec.opens_counts(&hsp.num_ident) => None,
+                    Some(_) if RPS && !spec.opens_counts(&seqalign_num_ident) => None,
                     Some(rows) => Some(hsp_rows(rows, row_index, hsp)?),
                     None => None,
                 };
                 row_index += 1;
-                let row = tabular_hsp(hsp, searched_length, rows);
+                let mut row = tabular_hsp(hsp, searched_length, rows);
+                // Outside NCBI's alignment block `nident` is the 0 of `x_ResetFields`: with
+                // `nident` the block stays closed only on a Seq-align count of 0, which is that 0.
+                if !spec.opens_counts(&seqalign_num_ident) {
+                    row.num_ident = seqalign_num_ident;
+                }
                 match probe.as_deref_mut() {
                     // One printed row is one HSP; the probe marks it without changing it.
                     Some(probe) => {
@@ -983,6 +998,7 @@ fn tabular_hsp<'r>(
         s_frame: 1,
         rows,
         // `Blast_HSPGetQueryCoverage` of the HSP's context, which has the searched length.
+        end_gaps: true,
         qcovhsp: hsp_coverage((hsp.q_end - hsp.q_start + 1) as i32, searched_length as i32),
     }
 }
@@ -1085,6 +1101,7 @@ mod tests {
             epilog: Some(2),
             taxdb_found: false,
             names: None,
+            engine_counts: &crate::algorithm::blastp::seqalign::EngineCounts::default(),
         };
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let before = [crate::report::diag_log::Posts::of_lines(

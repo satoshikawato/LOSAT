@@ -268,6 +268,17 @@ impl DisplayCode {
         };
         table[(base(0) << 8) | (base(1) << 4) | base(2)]
     }
+
+    /// `CAlnVec::TranslateNAToAA` of the codons of `nucleotides` (IUPAC letters, whole codons), or
+    /// of their reverse complement's when `minus` (the letters of a minus-strand row,
+    /// `CAlnVec::GetSeqString`): `residue` of each codon (the query-anchored reports,
+    /// `report::query_anchored`).
+    pub(crate) fn translate(&self, nucleotides: &[u8], minus: bool, out: &mut Vec<u8>) {
+        let frame = if minus { -1 } else { 1 };
+        out.extend(
+            (0..nucleotides.len() / 3).map(|offset| self.residue(nucleotides, frame, offset)),
+        );
+    }
 }
 
 // NCBI reference: c++/src/objtools/alnmgr/alnvec.hpp:292-302

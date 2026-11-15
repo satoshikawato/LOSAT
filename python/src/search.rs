@@ -38,6 +38,14 @@ impl Source {
 /// An input and the name that the reports show for it.
 type NamedSource = (Source, String);
 
+/// The query of a search: a FASTA input and its name, or a PSSM file (`-in_pssm` of psiblast and
+/// tblastn, `api::Inputs::pssm`), which the search reads.
+#[derive(FromPyObject)]
+pub enum NamedQuery {
+    Fasta(NamedSource),
+    Pssm(PathBuf),
+}
+
 /// The subject of a search: a FASTA input and its name, or no input and the name of a database.
 type NamedSubject = (Option<Source>, String);
 
@@ -50,6 +58,8 @@ pub fn checked(program: &str, argv: &[String]) -> Result<Search, api::Error> {
 /// A checked search and its records.
 pub struct Loaded {
     search: Search,
+    /// The PSSM file of a PSSM query; the query records are then none.
+    pssm: Option<PathBuf>,
     query: Vec<FastaRecord>,
     subject: Vec<FastaRecord>,
     query_name: String,
@@ -62,15 +72,20 @@ impl Loaded {
     fn read(
         program: &str,
         argv: &[String],
-        (query, query_name): NamedSource,
+        query: NamedQuery,
         (subject, subject_name): NamedSubject,
     ) -> Result<Self, api::Error> {
         let search = checked(program, argv)?;
         let database = subject.is_none();
+        let (query, query_name, pssm) = match query {
+            NamedQuery::Fasta((query, query_name)) => (Some(query), query_name, None),
+            NamedQuery::Pssm(path) => (None, String::new(), Some(path)),
+        };
         // A dry run reads no record, as the command line's does not (`Search::dry_run`).
         if search.dry_run() {
             return Ok(Self {
                 search,
+                pssm,
                 query: Vec::new(),
                 subject: Vec::new(),
                 query_name,
@@ -78,7 +93,11 @@ impl Loaded {
                 database,
             });
         }
-        let query_bytes = query.bytes(Role::Query)?;
+        // A PSSM query is read by the search, as the command line's `-in_pssm`.
+        let query_bytes = match &query {
+            Some(query) => query.bytes(Role::Query)?,
+            None => Cow::Borrowed(&[][..]),
+        };
         let subject_bytes = match &subject {
             Some(subject) => subject.bytes(Role::Subject)?,
             None => Cow::Borrowed(&[][..]),
@@ -86,6 +105,7 @@ impl Loaded {
         let (query, subject) = api::read_inputs(&search, &query_bytes, &subject_bytes)?;
         Ok(Self {
             search,
+            pssm,
             query,
             subject,
             query_name,
@@ -95,9 +115,11 @@ impl Loaded {
     }
 
     fn inputs(&self) -> Inputs<'_> {
-        let inputs = match self.database {
-            true => Inputs::database(&self.query, &self.subject_name),
-            false => Inputs::new(&self.query, &self.subject),
+        let inputs = match (self.database, self.pssm.as_deref()) {
+            (true, Some(pssm)) => Inputs::pssm_database(pssm, &self.subject_name),
+            (false, Some(pssm)) => Inputs::pssm(pssm, &self.subject),
+            (true, None) => Inputs::database(&self.query, &self.subject_name),
+            (false, None) => Inputs::new(&self.query, &self.subject),
         };
         inputs.named(&self.query_name, &self.subject_name)
     }
@@ -123,6 +145,17 @@ fn stats_rows(stats: &[Option<api::QueryStats>]) -> Vec<Option<StatsRow>> {
         .collect()
 }
 
+/// The rounds of a query, as `QueryRounds` of `_api.py` takes them: each round's statistics and
+/// whether the rounds converged.
+type RoundsRow = (Vec<Option<StatsRow>>, bool);
+
+fn rounds_rows(rounds: &[api::QueryRounds]) -> Vec<RoundsRow> {
+    rounds
+        .iter()
+        .map(|rounds| (stats_rows(&rounds.stats), rounds.converged))
+        .collect()
+}
+
 /// The text of what the command line writes to its standard error.
 fn diagnostics_text(diagnostics: &[u8]) -> String {
     String::from_utf8_lossy(diagnostics).into_owned()
@@ -141,7 +174,7 @@ fn slices<'py>(
     PyList::new(py, slices)
 }
 
-/// `(reports, hsps, query stats, diagnostics)` of a search, which `_api.py` turns into an
+/// `(reports, hsps, query stats, rounds, diagnostics)` of a search, which `_api.py` turns into an
 /// `Outcome`. The reports need one call of the engine (`run_collect`). Without reports the
 /// search runs one query batch at a time, which gives the same records (`run_batches`), and a
 /// signal stops it between two batches.
@@ -150,7 +183,7 @@ pub fn run<'py>(
     py: Python<'py>,
     program: &str,
     argv: Vec<String>,
-    query: NamedSource,
+    query: NamedQuery,
     subject: NamedSubject,
     formats: Vec<String>,
 ) -> PyResult<Bound<'py, PyTuple>> {
@@ -184,6 +217,7 @@ pub fn run<'py>(
         reports,
         HspTable::new(table),
         stats_rows(&outcome.query_stats),
+        rounds_rows(&outcome.rounds),
         diagnostics_text(&outcome.diagnostics),
     )
         .into_pyobject(py)
@@ -197,7 +231,7 @@ pub fn run_to_file(
     py: Python<'_>,
     program: &str,
     argv: Vec<String>,
-    query: NamedSource,
+    query: NamedQuery,
     subject: NamedSubject,
     outfmt: &str,
     path: PathBuf,
@@ -299,6 +333,7 @@ fn run_typed<'py>(py: Python<'py>, loaded: &Loaded) -> PyResult<Bound<'py, PyTup
     let mut batches = api::run_batches(&loaded.search, loaded.inputs()).map_err(exception)?;
     let mut hsps: Vec<HspRecord> = Vec::new();
     let mut stats = Vec::new();
+    let mut rounds = Vec::new();
     let mut diagnostics = Vec::new();
     loop {
         py.check_signals()?;
@@ -308,6 +343,7 @@ fn run_typed<'py>(py: Python<'py>, loaded: &Loaded) -> PyResult<Bound<'py, PyTup
         let mut batch = batch.map_err(exception)?;
         hsps.append(&mut batch.hsps);
         stats.append(&mut batch.query_stats);
+        rounds.append(&mut batch.rounds);
         diagnostics.append(&mut batch.diagnostics);
     }
     let table = py.detach(|| of_records(&hsps));
@@ -316,6 +352,7 @@ fn run_typed<'py>(py: Python<'py>, loaded: &Loaded) -> PyResult<Bound<'py, PyTup
         reports,
         HspTable::new(table),
         stats_rows(&stats),
+        rounds_rows(&rounds),
         diagnostics_text(&diagnostics),
     )
         .into_pyobject(py)
@@ -334,8 +371,15 @@ self_cell!(
     }
 );
 
-/// `(first query, end of the queries, hsps, query stats, diagnostics)` of a batch.
-type BatchRow = (usize, usize, RecordBatch, Vec<Option<StatsRow>>, String);
+/// `(first query, end of the queries, hsps, query stats, rounds, diagnostics)` of a batch.
+type BatchRow = (
+    usize,
+    usize,
+    RecordBatch,
+    Vec<Option<StatsRow>>,
+    Vec<RoundsRow>,
+    String,
+);
 
 /// The search of one query batch at a time. Each `next` searches a batch with the GIL released;
 /// dropping the object stops the search, and a signal stops it before the next batch.
@@ -352,7 +396,7 @@ impl Batches {
         py: Python<'_>,
         program: &str,
         argv: Vec<String>,
-        query: NamedSource,
+        query: NamedQuery,
         subject: NamedSubject,
     ) -> PyResult<Self> {
         let running = py
@@ -370,7 +414,7 @@ impl Batches {
         })
     }
 
-    /// How many query records the inputs hold.
+    /// How many queries the inputs hold: the records, or the one sequence of a PSSM file.
     #[getter]
     fn query_count(&self) -> usize {
         self.query_count
@@ -392,8 +436,8 @@ impl Batches {
             .transpose()
             .map_err(exception)?;
         batch
-            .map(|(start, end, table, stats, diagnostics)| {
-                (start, end, HspTable::new(table), stats, diagnostics).into_pyobject(py)
+            .map(|(start, end, table, stats, rounds, diagnostics)| {
+                (start, end, HspTable::new(table), stats, rounds, diagnostics).into_pyobject(py)
             })
             .transpose()
     }
@@ -405,6 +449,7 @@ fn batch_row(batch: api::Batch) -> BatchRow {
         batch.query_indices.end,
         of_records(&batch.hsps),
         stats_rows(&batch.query_stats),
+        rounds_rows(&batch.rounds),
         diagnostics_text(&batch.diagnostics),
     )
 }

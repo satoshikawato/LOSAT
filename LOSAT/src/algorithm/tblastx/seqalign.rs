@@ -148,9 +148,10 @@ pub(crate) fn query_records_of<'a>(
     Ok(())
 }
 
-/// Writes the documents of every query to `writer`, each query's warnings before it. `hits`
-/// is the final list in report order and `engine` its engine counts by HSP index
-/// (`report::engine_counts`).
+/// Writes the documents of every query to `writer`, each query's warnings before it and NCBI's
+/// posts of the bytes that its stream replaces in the query's document after them (on the
+/// warnings' sink, `write_query_to`). `hits` is the final list in report order and `engine` its
+/// engine counts by HSP index (`report::engine_counts`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_tblastx_seqalign(
     format: SerialFormat,
@@ -161,7 +162,7 @@ pub(crate) fn write_tblastx_seqalign(
     query_placements: &Placements,
     subjects: &SeqalignSubjects<'_>,
     subject_letters: SubjectLetters<'_>,
-    mut warnings: Option<&mut QueryWarnings<'_>>,
+    warnings: &mut QueryWarnings<'_>,
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Tblastx,
@@ -177,9 +178,7 @@ pub(crate) fn write_tblastx_seqalign(
     let mut next = 0usize;
     for (q_idx, query) in queries.iter().enumerate() {
         // The query's warnings come before its document (`QueryWarnings`).
-        if let Some(warnings) = warnings.as_deref_mut() {
-            warnings.before_query(q_idx, &mut *writer)?;
-        }
+        warnings.before_query(q_idx, &mut *writer)?;
         let start = next;
         while next < hits.len() && hits[next].hit.q_idx as usize == q_idx {
             next += 1;
@@ -205,6 +204,7 @@ pub(crate) fn write_tblastx_seqalign(
             &hsp_records,
             &mut buf,
             &mut *writer,
+            &mut *warnings.sink,
         )?;
     }
     debug_assert_eq!(next, hits.len(), "the final list is in query order");

@@ -3,20 +3,12 @@
 //! archive and SAM writers take.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:750-755 (the SAM branch of
-//! `CBlastFormat::x_PrintStructuredReport`)
-//! ```c++
-//!     else if (m_FormatType == CFormattingArgs::eSAM) {
-//!         if(results.HasAlignments()) {
-//!             m_SamFormatter->Print(*(results.GetSeqAlign()));
-//!         }
-//!         return;
-//!     }
-//! ```
-//! The refusals have no NCBI counterpart (see `refuse_anchored_reports`).
+//! `CBlastFormat::x_PrintStructuredReport`, quoted in `write_sam`). The refusals have no NCBI
+//! counterpart (see `refuse_anchored_reports`).
 //!
-//! This module is a child of `run` for the types it keeps private (`BlastnReportInputs`,
-//! `SamTarget`, `database`). The functions are the statements of `post_process_hits_and_write`'s
-//! branches, in their order; what they read is what the branch read of the call.
+//! This module is a child of `run` for what `run` keeps private (the types `BlastnReportInputs` and
+//! `SamTarget`, the module `database`). Each function holds the statements of one part of
+//! `post_process_hits_and_write`, in their order, and reads what that part read.
 
 use super::{
     database, BlastnHitList, BlastnOutputFormat, BlastnReportInputs, SamTarget, SubjectLetters,
@@ -154,7 +146,8 @@ pub(super) fn refuse_anchored_reports(
 
 /// Adds the queries of the call to the run's SAM document (outfmt 17) and, in the call that ends the
 /// run, writes it. The posts of the queries (`before_query`) come first, then the document is filled,
-/// then `finish`. The NCBI reference is the first comment of the body.
+/// then `finish`. Its NCBI counterpart, the SAM branch of
+/// `CBlastFormat::x_PrintStructuredReport`, is quoted at the top of the body.
 pub(super) fn write_sam(
     sam_target: &mut Option<SamTarget<'_>>,
     report: &BlastnReportInputs<'_>,
@@ -261,7 +254,8 @@ pub(super) fn write_sam(
 /// database's ordinals with its OID map, definition and parsed ids, else the subject records.
 ///
 /// No NCBI counterpart: NCBI reads the subjects' names from the Seq-align ids and the database alone;
-/// this is the one place where LOSAT picks which of its two sources a call has.
+/// this is where the Seq-align, archive and SAM database writers pick which of LOSAT's two
+/// sources a call has (the SAM writer's subject-set arm names the records directly).
 pub(super) fn subject_names_of<'a>(report: &'a BlastnReportInputs<'_>) -> SubjectNames<'a> {
     match (
         report.database_ordinals,

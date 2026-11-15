@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<BlastXML2
+    xmlns="http://www.ncbi.nlm.nih.gov"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+    xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd"
+>
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastn</program>
+      <version>BLASTN 2.17.0+</version>
+      <reference>Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000), &quot;A greedy algorithm for aligning DNA sequences&quot;, J Comput Biol 2000; 7(1-2):203-14.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/multidb/na tests/db_search/multidb/nut</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <expect>1e-10</expect>
+          <sc-match>1</sc-match>
+          <sc-mismatch>-2</sc-mismatch>
+          <gap-open>0</gap-open>
+          <gap-extend>0</gap-extend>
+          <filter>L;m;</filter>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_1</query-id>
+              <query-title>mix2_u glob1 of multidb/nnp (no accession table)</query-title>
+              <query-len>1043</query-len>
+              <query-masking>
+                <Range>
+                  <from>890</from>
+                  <to>924</to>
+                </Range>
+              </query-masking>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|13</id>
+                    </HitDescr>
+                  </description>
+                  <len>1043</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>1927.18</bit-score>
+                      <score>1043</score>
+                      <evalue>0</evalue>
+                      <identity>1043</identity>
+                      <query-from>1</query-from>
+                      <query-to>1043</query-to>
+                      <query-strand>Plus</query-strand>
+                      <hit-from>1</hit-from>
+                      <hit-to>1043</hit-to>
+                      <hit-strand>Plus</hit-strand>
+                      <align-len>1043</align-len>
+                      <gaps>0</gaps>
+                      <qseq>GTAGCTTCGTTTGCTGCGTTTATTTTGTGTCAGTTGTTGTTGCCGCTCGGAAGTCTTTTATAAAGGCCAGTCGGGCTAGAAATTCTATTCAGTTCAAATATTAACGGCGTCGTGTGCAGTTGCCTGGCATTTGATATAAACTCCTAAAAGCCATTAAGAGAGGGCCGAACGCTTATAGAGAGCTATAGAGTGAAAGCTGAGAAGAACCAAAACGGAGCATAAACATGAACAGCGATGAGGTGCAACTGATCAAGAAGACCTGGGAAATCCCCGTGGCAACACCAACAGATTCTGGAGCGGCGATACTGACGCAGTTTTTCAACCGCTTTCCGTCCAACTTGGAGAAGTTCCCCTTCCGCGATGTTCCTTTGGAGGAGCTAAGTGGAAATGCTCGCTTCCGAGCACATGCCGGCAGAATCATAAGGGTCTTTGACGAGTCCATCCAGGTCCTGGGCCAGGATGGCGATCTGGAGAAGCTGGACGAGATCTGGACCAAAATTGCCGTTAGTCACATTCCGCGGACCGTTTCCAAGGAGTCTTACAACCAACTGAAAGGAGTTATCCTGGATGTGCTGACAGCTGCCTGCAGTCTGGACGAGAGTCAAGCGGCCACGTGGGCCAAGCTGGTGGACCATGTCTACGGAATCATCTTCAAGGCGATCGACGACGACGGCAACGCCAAGTAGATGAGGCAGCTGGAGGTGGAGATGCAACCGAATCCGCGGAAGGATGCAACTGATGCCAGCCGGTGGCACTTGCAACACATGCACAGCTTATGTAGTTCTAAGTAATTGATAAATGTTAGCTATTCTCGTTTTGTAATAATGAATGCGAATGTCCAAAACAAAAATACACACACAGTGAAAACTTATGTCTGCGTAGAGCTACTGacacacgcgcacaccccacacacatacacccgcacTTGCATTGCTCTGTAAAGCTTTAACCCATTGTCAGCCTTAAGCACTTGATAGCAAACAATACATGGAATCAGCAAAGGAGAAATAAGAAAGCTTATAAATAAAATCCAGTTTGAAAGC</qseq>
+                      <hseq>GTAGCTTCGTTTGCTGCGTTTATTTTGTGTCAGTTGTTGTTGCCGCTCGGAAGTCTTTTATAAAGGCCAGTCGGGCTAGAAATTCTATTCAGTTCAAATATTAACGGCGTCGTGTGCAGTTGCCTGGCATTTGATATAAACTCCTAAAAGCCATTAAGAGAGGGCCGAACGCTTATAGAGAGCTATAGAGTGAAAGCTGAGAAGAACCAAAACGGAGCATAAACATGAACAGCGATGAGGTGCAACTGATCAAGAAGACCTGGGAAATCCCCGTGGCAACACCAACAGATTCTGGAGCGGCGATACTGACGCAGTTTTTCAACCGCTTTCCGTCCAACTTGGAGAAGTTCCCCTTCCGCGATGTTCCTTTGGAGGAGCTAAGTGGAAATGCTCGCTTCCGAGCACATGCCGGCAGAATCATAAGGGTCTTTGACGAGTCCATCCAGGTCCTGGGCCAGGATGGCGATCTGGAGAAGCTGGACGAGATCTGGACCAAAATTGCCGTTAGTCACATTCCGCGGACCGTTTCCAAGGAGTCTTACAACCAACTGAAAGGAGTTATCCTGGATGTGCTGACAGCTGCCTGCAGTCTGGACGAGAGTCAAGCGGCCACGTGGGCCAAGCTGGTGGACCATGTCTACGGAATCATCTTCAAGGCGATCGACGACGACGGCAACGCCAAGTAGATGAGGCAGCTGGAGGTGGAGATGCAACCGAATCCGCGGAAGGATGCAACTGATGCCAGCCGGTGGCACTTGCAACACATGCACAGCTTATGTAGTTCTAAGTAATTGATAAATGTTAGCTATTCTCGTTTTGTAATAATGAATGCGAATGTCCAAAACAAAAATACACACACAGTGAAAACTTATGTCTGCGTAGAGCTACTGACACACGCGCACACCCCACACACATACACCCGCACTTGCATTGCTCTGTAAAGCTTTAACCCATTGTCAGCCTTAAGCACTTGATAGCAAACAATACATGGAATCAGCAAAGGAGAAATAAGAAAGCTTATAAATAAAATCCAGTTTGAAAGC</hseq>
+                      <midline>|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <db-num>17</db-num>
+                  <db-len>11514</db-len>
+                  <hsp-len>16</hsp-len>
+                  <eff-space>11545534</eff-space>
+                  <kappa>0.46</kappa>
+                  <lambda>1.28</lambda>
+                  <entropy>0.85</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>

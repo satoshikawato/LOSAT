@@ -11033,7 +11033,13 @@ fn run_in_pool(
                 (seq_aligns > 0 && !crate::algorithm::common::database::prefetch_off(seq_aligns))
                     .then(|| {
                         database
-                            .batch_prefetch_stop(&titles, &batch_hit_lists, !args.ungapped, start)
+                            .batch_prefetch_stop(
+                                &titles,
+                                &hit_lists,
+                                &batch_hit_lists,
+                                !args.ungapped,
+                                start,
+                            )
                             .map(|()| Vec::new())
                     })
             } else {

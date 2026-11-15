@@ -184,7 +184,7 @@ use crate::utils::threading::SearchPool;
 use rayon::prelude::*;
 use std::mem::MaybeUninit;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
-use std::sync::{Mutex, OnceLock, PoisonError};
+use std::sync::{Condvar, Mutex, OnceLock, PoisonError};
 
 // No NCBI counterpart: how the build is divided among the pool's threads. Scheduling only.
 /// The fewest stripes per thread: many small stripes, so that the tasks of the stripes pass end
@@ -829,12 +829,14 @@ fn x_reuse<T: Copy + Default>(spare: Vec<T>, len: usize) -> (Vec<T>, bool) {
 /// the tasks it spawns each keep one `scratch` (`init`) and take the next index from one counter
 /// until none is left; the indices past the items run `extra(i - items)`, `extras` of them.
 ///
-/// The calling thread then waits for the items the spawned tasks took (item SC9i of line NP) by
-/// spinning, not in the scope's wait, which runs other jobs of the pool meanwhile: a job taken there
-/// (a subject of another search) held the pass's end, by a few milliseconds each time, until it was
-/// done. The wait cannot deadlock: an item runs no job of the pool (no nested parallel work) and
-/// depends on nothing but its inputs, so every item taken ends; a task spawned and not yet started
-/// takes no item (the counter is spent) and the scope's wait runs it at once.
+/// The calling thread then waits for the items the spawned tasks took (item SC9i of line NP), not in
+/// the scope's wait, which runs other jobs of the pool meanwhile: a job taken there (a subject of
+/// another search) held the pass's end, by a few milliseconds each time, until it was done. It spins
+/// a little (`X_PASS_END_SPINS`; an item left is short) and then sleeps until the task that ends the
+/// last item wakes it, so that a pool of more threads than cores does not spin. The wait cannot
+/// deadlock: an item runs no job of the pool (no nested parallel work) and depends on nothing but its
+/// inputs, so every item taken ends; a task spawned and not yet started takes no item (the counter
+/// is spent) and the scope's wait runs it at once.
 fn x_one_latch_pass<S, R: Send + Sync>(
     threads: usize,
     items: usize,
@@ -847,7 +849,12 @@ fn x_one_latch_pass<S, R: Send + Sync>(
     let results: Vec<OnceLock<R>> = (0..items).map(|_| OnceLock::new()).collect();
     if total > 0 {
         let next = AtomicUsize::new(0);
-        let ended = AtomicUsize::new(0);
+        let ended = XPassEnd {
+            items: AtomicUsize::new(0),
+            total,
+            sleeping: Mutex::new(()),
+            woken: Condvar::new(),
+        };
         let (results, next, ended, init, item, extra) =
             (&results, &next, &ended, &init, &item, &extra);
         let take_items = move || {
@@ -876,15 +883,7 @@ fn x_one_latch_pass<S, R: Send + Sync>(
                 scope.spawn(move |_| take_items());
             }
             take_items();
-            let mut idle = 0u32;
-            while ended.load(Ordering::Acquire) < total {
-                idle = idle.saturating_add(1);
-                if idle < 128 {
-                    std::hint::spin_loop();
-                } else {
-                    std::thread::yield_now();
-                }
-            }
+            ended.wait();
         });
     }
     results
@@ -894,12 +893,53 @@ fn x_one_latch_pass<S, R: Send + Sync>(
 }
 
 // No NCBI counterpart: scheduling only (item SC9i of line NP, `x_one_latch_pass`).
+/// How long the caller of a one-latch pass spins for the items left before it sleeps.
+const X_PASS_END_SPINS: u32 = 1 << 12;
+
+// No NCBI counterpart: scheduling only (item SC9i of line NP, `x_one_latch_pass`).
+/// The end of a one-latch pass: the items ended, of `total`; the caller sleeps on `woken` (under
+/// `sleeping`) until the task that ends the last one wakes it.
+struct XPassEnd {
+    items: AtomicUsize,
+    total: usize,
+    sleeping: Mutex<()>,
+    woken: Condvar,
+}
+
+impl XPassEnd {
+    /// Counts one more item as ended; the last one wakes the caller (under the lock, so that the
+    /// caller, which tests the count under it before it sleeps, cannot miss it).
+    fn end_one(&self) {
+        if self.items.fetch_add(1, Ordering::AcqRel) + 1 == self.total {
+            let _sleeping = self.sleeping.lock().unwrap_or_else(PoisonError::into_inner);
+            self.woken.notify_all();
+        }
+    }
+
+    /// Returns once every item has ended.
+    fn wait(&self) {
+        for _ in 0..X_PASS_END_SPINS {
+            if self.items.load(Ordering::Acquire) >= self.total {
+                return;
+            }
+            std::hint::spin_loop();
+        }
+        let mut sleeping = self.sleeping.lock().unwrap_or_else(PoisonError::into_inner);
+        while self.items.load(Ordering::Acquire) < self.total {
+            sleeping = self
+                .woken
+                .wait(sleeping)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+    }
+}
+
 /// Counts one item of a one-latch pass as ended when dropped.
-struct XItemEnded<'a>(&'a AtomicUsize);
+struct XItemEnded<'a>(&'a XPassEnd);
 
 impl Drop for XItemEnded<'_> {
     fn drop(&mut self) {
-        self.0.fetch_add(1, Ordering::Release);
+        self.0.end_one();
     }
 }
 
@@ -2259,6 +2299,59 @@ fn x_flat_stripes_on<S: CompressedScores, H: XQueryOffset>(
 mod tests {
     use super::super::tests::{queries, XorShift, FEW_LETTERS, LETTERS};
     use super::*;
+
+    // Item SC9i of line NP: a one-latch pass makes every item once, in order, at any thread count,
+    // and an item that panics on a spawned task or on the calling thread ends the pass with its
+    // panic instead of leaving the caller waiting.
+    #[test]
+    fn one_latch_pass_makes_each_item_once_and_passes_a_panic_on() {
+        for threads in [1usize, 2, 3, 8] {
+            for (items, extras) in [(0usize, 0usize), (1, 0), (5, 3), (200, 17)] {
+                let extra_runs: Vec<AtomicUsize> =
+                    (0..extras).map(|_| AtomicUsize::new(0)).collect();
+                let made = in_pool(threads, || {
+                    x_one_latch_pass(
+                        threads,
+                        items,
+                        extras,
+                        || 0usize,
+                        |taken, index| {
+                            *taken += 1;
+                            index * 3
+                        },
+                        |index| {
+                            extra_runs[index].fetch_add(1, Ordering::Relaxed);
+                        },
+                    )
+                });
+                assert_eq!(made, (0..items).map(|index| index * 3).collect::<Vec<_>>());
+                assert!(extra_runs
+                    .iter()
+                    .all(|runs| runs.load(Ordering::Relaxed) == 1));
+            }
+            for bad in [0usize, 7, 63] {
+                let outcome = std::panic::catch_unwind(|| {
+                    in_pool(threads, || {
+                        x_one_latch_pass(
+                            threads,
+                            64,
+                            0,
+                            || (),
+                            |_, index| {
+                                assert_ne!(index, bad, "item {bad} fails");
+                                index
+                            },
+                            |_| {},
+                        )
+                    })
+                });
+                assert!(
+                    outcome.is_err(),
+                    "threads {threads}: item {bad}'s panic passed on"
+                );
+            }
+        }
+    }
 
     // Item SC9i of line NP: the overflow cells read from a cell's count are those its appends take
     // one by one (the serial count pass's statement).

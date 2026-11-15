@@ -2107,8 +2107,8 @@ impl PssmFiles {
 }
 
 impl Drop for PssmFiles {
-    // Out of line: it runs where the blastp engine's function that holds the files
-    // (`run_resolved_in_pool`) returns.
+    // Out of line: it runs where the function that holds the files returns (`run_call`, or
+    // `report_prep::report_values` on an error after the files are staged).
     #[cold]
     #[inline(never)]
     fn drop(&mut self) {

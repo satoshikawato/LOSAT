@@ -1,7 +1,7 @@
 //! What a BLASTP call does with its final hits before any format is written (`run_call`, after
-//! the rows of the reports): the warning lines of each query (`query_warning_lines`), the checks
-//! of the reported subjects and each query batch's prefetch of them
-//! (`prefetch_reported_subjects`), and the refusals of what LOSAT does not report as NCBI does
+//! the rows of the reports, for the functions named here): the warning lines of each query
+//! (`query_warning_lines`), the checks of the reported subjects and each query batch's prefetch of
+//! them (`prefetch_reported_subjects`), and the refusals of what LOSAT does not report as NCBI does
 //! (`refuse_unreportable`). Each function is the statements of `run_call` at its place, in their
 //! order; `run_call` calls them once each, in that order, and its `?` passes their errors on.
 //!
@@ -46,8 +46,8 @@ use crate::blastinput::seq_range::RangedBatch;
 use crate::report::pairwise::PairwiseHit;
 use crate::report::query_warnings::SubjectReads;
 
-/// What the three functions of this module read of `run_call`: each field is `run_call`'s value of
-/// the same name, by reference where it is not `Copy` (`outputs` for its formats only;
+/// What the three functions of this module that run after the rows of the reports read of
+/// `run_call`: each field is `run_call`'s value of the same name, by reference where it is not `Copy` (`outputs` for its formats only;
 /// `subject_records` and `subject_titles` are those that the reports show, a database's listed
 /// subjects' or the subject set's; `format_plans` is the requested formats). The values that
 /// `run_call` makes for the prefetch (`batches_prefetch` to `batch_prefetch`) and for the PSSMs
@@ -785,7 +785,9 @@ pub(super) struct ReportSetup<'a> {
 /// 	CScope::TBioseqHandles bhs = scope->GetBioseqHandles(ids);
 /// ```
 /// NCBI loads the subjects of the Seq-aligns into the formatter's scope, from which its reports
-/// read them.
+/// read them. It loads them there when it prefetches (blast_app_util.cpp:764-772), after its read
+/// of `PRE_FETCH_SEQS_LIMIT`, and otherwise when a report reads each subject; LOSAT reads them
+/// here for every format.
 pub(super) fn read_shown_residues(
     setup: &ReportSetup<'_>,
     outputs: &ReportOutputs<'_>,
@@ -849,9 +851,9 @@ pub(super) fn read_shown_residues(
 
 /// NCBI's read of `PRE_FETCH_SEQS_LIMIT` before the first batch's reports
 /// (`app::check_prefetch_environment`): where NCBI cannot convert its value, what NCBI writes
-/// before it stops is written to `outputs` (the first batch's search strategy request, the outfmt
-/// 0 prolog, the batch's reader messages and the posts of that request), and NCBI's error is
-/// returned.
+/// before it stops is written (the first batch's search strategy request to the strategy file,
+/// `CallRequests::end_at`; the outfmt 0 prolog, the batch's reader messages and the posts of that
+/// request to `outputs`), and NCBI's error is returned.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:732-734
 /// ```c++
@@ -880,10 +882,10 @@ pub(super) fn refuse_prefetch_environment(
     //                 		                            fmt_args->GetFormattedOutputChoice());
     // ```
     // The prefetch before a batch's reports reads `PRE_FETCH_SEQS_LIMIT`, after the batch's search
-    // and the read of its definition lines (above): a value that NCBI cannot convert stops the
+    // and the read of its definition lines (in `run_call`): a value that NCBI cannot convert stops the
     // first batch here, after the outfmt 0 prolog and the messages of its records, before any of
     // its reports (`app::check_prefetch_environment`; the first call of a run that writes reports
-    // meets it: not a chunk's search, which returned above). psiblast's iterations fetch ahead
+    // meets it: not a chunk's search, which returned earlier in `run_call`). psiblast's iterations fetch ahead
     // before they choose the archive, rpsblast's and blastp's write the archive without it.
     let archive_alone = outputs.only_archive() && args.app != BlastpApp::Psiblast;
     if let Err(error) = crate::blastinput::app::check_prefetch_environment(archive_alone) {
@@ -1036,7 +1038,7 @@ pub(super) fn report_values(
         _ => None,
     };
     // Whether the batches prefetch the subjects of a database, and whether that looks their
-    // taxids up (`prefetch_messages`, below).
+    // taxids up (`prefetch_reported_subjects`'s `prefetch_messages`).
     let batches_prefetch = listed_titles.is_some()
         && requested_formats
             .first()
@@ -1096,8 +1098,9 @@ pub(super) fn report_values(
     // ```
     // psiblast's PSSM is made from the Seq-aligns of the round's results, before the
     // formatter's cut; its files are staged here (`psiblast_pssms`) and written after the
-    // reports (below `output_result`). A refusal between here and the reports (the database
-    // titles below) or a report write error drops them: no PSSM file has changed (`PssmFiles`).
+    // reports (`run_call`'s `output_result`). A refusal between here and the reports
+    // (`refuse_unreportable` in `run_call`) or a report write error drops them: no PSSM file has
+    // changed (`PssmFiles`).
     // Whether each query's batch prefetches (`shared::BatchPrefetch`), by the Seq-aligns of its
     // results, one for each HSP (psiblast's before the cut, as `psiblast_hits_found` below): a
     // batch whose prefetch is off reads its subjects one by one, for the PSSM too. The rounds of

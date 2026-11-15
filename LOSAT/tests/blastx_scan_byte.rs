@@ -313,6 +313,13 @@ fn the_scan_on_presence_bytes_gives_the_reports_of_the_scans_before() {
                     blastx(&args, &[DIRECT, SPARSE]),
                     Some((sparse, !sparse)),
                 ),
+                // The AVX2 copy without its chain runs (`LOSAT_X_CHAINRUN=0`; the direct arm has
+                // them where the CPU has AVX2).
+                (
+                    "direct, no chain runs",
+                    blastx(&args, &[DIRECT, ("LOSAT_X_CHAINRUN", "0")]),
+                    Some(default_sides(sparse)),
+                ),
                 // The default: the fused loop where it pays (AVX2), the direct loop elsewhere.
                 ("default", blastx(&args, &[]), None),
             ] {

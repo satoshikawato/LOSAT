@@ -279,8 +279,9 @@ pub(crate) fn x_kept_presence(mode: XScanByte, kept: &Option<(Arc<[u8]>, bool)>)
 }
 
 // No NCBI counterpart: LOSAT_X_STATS counters; they do not change any value NCBI computes.
-/// Units scanned by `x_scan_one_range_byte` and their scan calls (`[0]`, `[1]`).
-static COUNTS: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
+/// Units scanned by `x_scan_one_range_byte`, their scan calls, and the calls whose AVX2 copy wrote
+/// chains as runs (`[0]`, `[1]`, `[2]`; LOSAT_X_CHAINRUN).
+static COUNTS: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
 
 /// EXPERIMENT (LOSAT_X_TBNSCANBYTE): counts one unit and its `calls` for the
 /// `[X_STATS] TBNSCANBYTE` line (`LOSAT_X_STATS` set).
@@ -288,6 +289,9 @@ pub(super) fn x_count_unit(calls: u64) {
     if crate::algorithm::tblastx::x_aascan_bf::x_stats() {
         COUNTS[0].fetch_add(1, Ordering::Relaxed);
         COUNTS[1].fetch_add(calls, Ordering::Relaxed);
+        if x_scan_byte() == (XScanByte::On { avx2: true }) && x_chain_run() {
+            COUNTS[2].fetch_add(calls, Ordering::Relaxed);
+        }
     }
 }
 
@@ -295,11 +299,11 @@ pub(super) fn x_count_unit(calls: u64) {
 /// path scanned any unit this way.
 // No NCBI counterpart: prints the counters above; it does not change any value NCBI computes.
 pub fn print_summary() {
-    let [units, calls] = COUNTS.each_ref().map(|c| c.load(Ordering::Relaxed));
+    let [units, calls, runs] = COUNTS.each_ref().map(|c| c.load(Ordering::Relaxed));
     let mode = x_scan_byte_if_read();
     if units > 0 {
         let avx2 = matches!(mode, Some(XScanByte::On { avx2: true }));
-        eprintln!("[X_STATS] TBNSCANBYTE units={units} calls={calls} avx2={avx2}");
+        eprintln!("[X_STATS] TBNSCANBYTE units={units} calls={calls} avx2={avx2} runs={runs}");
     }
 }
 

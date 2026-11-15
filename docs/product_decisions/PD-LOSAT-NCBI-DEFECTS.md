@@ -422,22 +422,32 @@ asks the maintainer to accept it, as the PRs of versions 1.5 and 1.13 did.
   it, in no encoding that `CUtf8::GuessEncoding` recognises (not UTF-8, with a byte 0x81, 0x8D,
   0x8F, 0x90 or 0x9D; `NStr::HtmlDecode` throws, `ncbistr.cpp:4528-4534`). The tabular formats
   ask it where `CShowBlastDefline::GetSeqIdList` replaces an id (`showdefline.cpp:218-242`): a
-  `-subject` record whose title's first word starts with `Subject_` (`SetSubjectId`, for `sseqid`,
-  `sgi`, `sacc` or `saccver`) and a database sequence without parsed Seq-ids (`SetSubjectId`, and
-  `x_SetSubjectIds` for `sallseqid`, `sallgi` or `sallacc`). The catch of `SetFields`
+  `-subject` record whose title's first word starts with `Subject_`, or read with
+  `-parse_deflines` with the id `lcl|Subject_N` (NCBI keeps the parsed local id and generates the
+  title from the rest of the defline: `s7` for `>lcl|Subject_9 TPA: s7 third ~`) (`SetSubjectId`,
+  for `sseqid`, `sgi`, `sacc` or `saccver`), and a database sequence without parsed Seq-ids or
+  with an `lcl|Subject_N` id (`SetSubjectId` where the subject Bioseq's ids hold it, and
+  `x_SetSubjectIds` for `sallseqid`, `sallgi` or `sallacc`, which pushes the ids of the
+  definition lines before the first that holds it). The catch of `SetFields`
   (`tabular.cpp:862-875`) adds the Seq-align id to the `sall*` lists of the rows before
-  (`SetSubjectId(list)`, `tabular.cpp:1374-1378`; after `x_SetSubjectIds` cleared them where that
-  threw) and returns: the row prints `Unknown` for `sseqid`, 0 for `sgi`, the scores, the query's
+  (`SetSubjectId(list)`, `tabular.cpp:1374-1378`; after `x_SetSubjectIds` cleared them and pushed
+  those lines where that threw) and returns: the row prints `Unknown` for `sseqid`, 0 for `sgi`, the scores, the query's
   ids, `qcovs`, `qcovus` and `qcovhsp`, `qlen` where a query id field or `qcovhsp` is asked (else
-  0), `slen` 0 (where `x_SetSubjectIds` threw, the length), the zeros of `x_ResetFields`
+  0), `slen` 0 (where only `x_SetSubjectIds` threw, the length and the subject's own `sseqid`,
+  `sgi`, `sacc`, `saccver`), the zeros of `x_ResetFields`
   (`pident` 0.000, `ppos` 0.00, `frames` 0/0, `sstrand` N/A, empty letters and BTOP), and the titles
   and taxonomy of the last row of the query's (or psiblast round's) report that found its subject
   (`N/A` before one). In XML the catches write the Seq-id: outfmt 5 `Hit_id` `lcl|Subject_N`,
   `Hit_def` and `Hit_accession` `Unknown`, `Hit_len` 0 (`blastxml_format.cpp:398-407`), a query's
-  `lcl|Query_N` and `No definition line` (`:550-566`); XML2 and JSON a `HitDescr` with the id
-  alone and the sequence's length (`blastxml2_format.cpp:410-415`), a query's id without a title
-  (`:584-596`). Outfmt 0, 11 and 18 were NCBI's before (`Unknown`, the line in place of each
-  alignment). BLASTX reads such a title as its bytes, as the other programs do.
+  Seq-loc id (`lcl|Query_N`; with `-parse_deflines` the best of its ids, `lcl|qbad`,
+  `gb|AB000099.1|`, `gi|4504347` of `gi|4504347|ref|NP_000549.1|`) and `No definition line`
+  (`:550-566`); XML2 and JSON a `HitDescr` with the id alone and the sequence's length
+  (`blastxml2_format.cpp:410-415`), a query's id without a title (`:584-596`). Outfmt 0, 11 and 18
+  were NCBI's before (`Unknown`, the line in place of each alignment), but for a `-parse_deflines`
+  record with an `lcl|Subject_N` id, whose line names the Seq-align id (`Subject_9`, LOSAT wrote
+  `Subject_1`). BLASTX reads such a title as its bytes, as the other programs do. LOSAT Web writes
+  each format as the CLI writes it alone: where the default tabular formats stop (rule 3 below),
+  streams 6 and 7 fail alone and outfmt 0 is written (`docs/web/abi_v2.md` §7).
 - Defects without an effect on the output that LOSAT follows: the negative `Int4`
   offset of `BlastGetStartForGappedAlignmentNucl`, the out-of-range read of
   `hard_ranges[1]` for the last subject chunk, the out-of-range `double` to `Int4`

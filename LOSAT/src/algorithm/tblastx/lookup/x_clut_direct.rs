@@ -751,8 +751,8 @@ struct XWords<'a> {
     power: [u32; 8],
     /// `matrix_sorted_char[c][i] * A^(word_length - 1)`: the last letter's term of a neighbor's index.
     last: [[u32; BLASTAA_SIZE]; BLASTAA_SIZE],
-    /// `matrix_sorted_char[c][i]`: the first letter's term of a neighbor's index (`A^0`), the term
-    /// that `for_each_word_in` chooses last (the parallel builder's, `x_clut_par.rs`).
+    /// `matrix_sorted_char[c][i] * A^(word_length - 2)`: the term of the letter before the last, the
+    /// one that `for_each_word_in` chooses last (the parallel builder's, `x_clut_par.rs`).
     #[cfg_attr(
         not(all(
             feature = "parallel",
@@ -760,7 +760,7 @@ struct XWords<'a> {
         )),
         allow(dead_code)
     )]
-    first: [[u32; BLASTAA_SIZE]; BLASTAA_SIZE],
+    below_last: [[u32; BLASTAA_SIZE]; BLASTAA_SIZE],
 }
 
 impl<'a> XWords<'a> {
@@ -785,16 +785,17 @@ impl<'a> XWords<'a> {
             scale *= header.alphabet as u32;
         }
         let mut last = [[0u32; BLASTAA_SIZE]; BLASTAA_SIZE];
-        let mut first = [[0u32; BLASTAA_SIZE]; BLASTAA_SIZE];
-        for (c, (row, first_row)) in last.iter_mut().zip(first.iter_mut()).enumerate() {
-            for (i, (term, first_term)) in row
+        let mut below_last = [[0u32; BLASTAA_SIZE]; BLASTAA_SIZE];
+        for (c, (row, below_row)) in last.iter_mut().zip(below_last.iter_mut()).enumerate() {
+            for (i, (term, below_term)) in row
                 .iter_mut()
-                .zip(first_row.iter_mut())
+                .zip(below_row.iter_mut())
                 .enumerate()
                 .take(header.alphabet)
             {
                 *term = u32::from(info.matrix_sorted_char[c][i]) * power[header.word_length - 1];
-                *first_term = u32::from(info.matrix_sorted_char[c][i]);
+                *below_term =
+                    u32::from(info.matrix_sorted_char[c][i]) * power[header.word_length - 2];
             }
             // `neighbors` takes the last letters as the prefix of the sorted row whose scores reach
             // the threshold; the recursion's loop stops at the first that does not, the same prefix
@@ -816,7 +817,7 @@ impl<'a> XWords<'a> {
             info,
             power,
             last,
-            first,
+            below_last,
         }
     }
 
@@ -986,9 +987,12 @@ impl<'a> XWords<'a> {
     // ```
     /// Item SC9i of line NP: the cells of `for_each_word` whose last letter (the index's most
     /// significant digit, of weight `A^(word_length - 1)`) is in `letters`, each once, in another
-    /// order: the neighbors' letters chosen from the last position to the first, the last one only
-    /// among `letters`. Each is given less the first cell of `letters`, `letters.start * A^(word_length
-    /// - 1)` (the index in the parallel builder's wave, `x_clut_par.rs`).
+    /// order: the last letter first, only among `letters`, then the others as `neighbors` chooses
+    /// them (from position 0 to the one before the last, whose loop is the innermost, so that
+    /// consecutive cells lie `A^(word_length - 2)` apart, in different stripes of the parallel
+    /// builder as `neighbors`' consecutive cells are). Each is given less the first cell of
+    /// `letters`, `letters.start * A^(word_length - 1)` (the index in the parallel builder's wave,
+    /// `x_clut_par.rs`).
     ///
     /// The same cells. `neighbors` gives every compressed word `c` with `sum_i matrix[w[i]][c_i] >=
     /// threshold` once: each position's loop runs the letters of a row sorted by score down to the
@@ -1054,10 +1058,10 @@ impl<'a> XWords<'a> {
             if score + letter_score < self.threshold {
                 continue;
             }
-            self.neighbors_from_last(
+            self.neighbors_below_last(
                 query_word,
                 score + letter_score,
-                last - 1,
+                0,
                 (letter - letters.start) * self.power[last],
                 sink,
             );
@@ -1075,9 +1079,9 @@ impl<'a> XWords<'a> {
     //                                     current_pos + 1);
     //     }
     // ```
-    /// `for_each_word_in`'s recursion: the letter of position `pos` (from the next to last down to
-    /// 0), with `partial` the index of the letters chosen above it and `score` the bound of the word
-    /// (the letters chosen, and `row_max` of the positions left).
+    /// `for_each_word_in`'s recursion: `neighbors` with the last letter chosen (in `partial`, the
+    /// index of the letters chosen, and in `score`, the bound of the word: the letters chosen, and
+    /// `row_max` of the positions left), its positions from `pos` to the one before the last.
     #[cfg_attr(
         not(all(
             feature = "parallel",
@@ -1085,7 +1089,7 @@ impl<'a> XWords<'a> {
         )),
         allow(dead_code)
     )]
-    fn neighbors_from_last<Q: XQueryWord + ?Sized>(
+    fn neighbors_below_last<Q: XQueryWord + ?Sized>(
         &self,
         word: &Q,
         mut score: i32,
@@ -1094,34 +1098,36 @@ impl<'a> XWords<'a> {
         sink: &mut impl XSink,
     ) {
         let query_word = word.letters();
+        let below_last = self.length_of::<Q>() - 2;
         let curr_query_char = query_word[pos] as usize;
         score -= self.info.row_max[curr_query_char];
         let row_sorted = &self.info.matrix_sorted[curr_query_char][..self.alphabet];
         let threshold = self.threshold;
 
-        if pos == 0 {
+        if pos == below_last {
             let count =
                 row_sorted.partition_point(|&letter_score| score + letter_score >= threshold);
-            sink.many(partial, &self.first[curr_query_char][..count]);
+            sink.many(partial, &self.below_last[curr_query_char][..count]);
             return;
         }
 
         let char_sorted = &self.info.matrix_sorted_char[curr_query_char];
         let scale = self.power[pos];
-        if pos == 1 {
-            // The call for position 0, inline: the same statements as the branch above.
-            let first_char = query_word[0] as usize;
-            let first_row = &self.info.matrix_sorted[first_char][..self.alphabet];
-            let first = &self.first[first_char];
-            let first_max = self.info.row_max[first_char];
+        if pos + 1 == below_last {
+            // The call for the position before the last, inline: the same statements as the branch
+            // above.
+            let next_char = query_word[below_last] as usize;
+            let next_row = &self.info.matrix_sorted[next_char][..self.alphabet];
+            let terms = &self.below_last[next_char];
+            let next_max = self.info.row_max[next_char];
             for (i, &letter_score) in row_sorted.iter().enumerate() {
                 if score + letter_score < threshold {
                     break;
                 }
-                let next_score = score + letter_score - first_max;
+                let next_score = score + letter_score - next_max;
                 let count =
-                    first_row.partition_point(|&first_score| next_score + first_score >= threshold);
-                sink.many(partial + u32::from(char_sorted[i]) * scale, &first[..count]);
+                    next_row.partition_point(|&next_letter| next_score + next_letter >= threshold);
+                sink.many(partial + u32::from(char_sorted[i]) * scale, &terms[..count]);
             }
             return;
         }
@@ -1129,10 +1135,10 @@ impl<'a> XWords<'a> {
             if score + letter_score < threshold {
                 break;
             }
-            self.neighbors_from_last(
+            self.neighbors_below_last(
                 word,
                 score + letter_score,
-                pos - 1,
+                pos + 1,
                 partial + u32::from(char_sorted[i]) * scale,
                 sink,
             );

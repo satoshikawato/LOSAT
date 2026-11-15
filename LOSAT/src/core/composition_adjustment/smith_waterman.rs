@@ -293,24 +293,57 @@ fn cell(
     new_gap_cost: i32,
     gap_extend: i32,
 ) {
-    // NCBI's `if (a > b) b = a` and `if (s < t) s = t` are maxima of integers, so the order of
-    // the cell's three alternatives does not change its score; the gap along the row, which the
-    // cell before computes, comes last (the other terms are ready before it).
-    *prev_score_gap_match_seq =
-        (*prev_score_gap_match_seq - gap_extend).max(*new_score - new_gap_cost);
-    let continue_gap_score = (column.gap_exists - gap_extend).max(column.no_gap - new_gap_cost);
+    // NCBI's `if (a > b) b = a` and `if (s < t) s = t` are maxima of integers (`cmov_max`), so
+    // the order of the cell's alternatives does not change its score; the gap along the row,
+    // which the cell before computes, comes last (the other terms are ready before it).
+    *prev_score_gap_match_seq = cmov_max(
+        *prev_score_gap_match_seq - gap_extend,
+        *new_score - new_gap_cost,
+    );
+    let continue_gap_score = cmov_max(column.gap_exists - gap_extend, column.no_gap - new_gap_cost);
     let diagonal = match substitution {
         None => COMPO_SCORE_MIN,
         Some(substitution) => *prev_score_no_gap_match_seq + substitution,
     };
-    let score = diagonal
-        .max(0)
-        .max(continue_gap_score)
-        .max(*prev_score_gap_match_seq);
+    let score = cmov_max(
+        cmov_max(cmov_max(diagonal, 0), continue_gap_score),
+        *prev_score_gap_match_seq,
+    );
     *prev_score_no_gap_match_seq = column.no_gap;
     column.no_gap = score;
     column.gap_exists = continue_gap_score;
     *new_score = score;
+}
+
+/// The larger of `a` and `b` by a conditional move on x86-64. The cell's maxima depend on the
+/// scores, so a branch for them is mispredicted about every other cell: LLVM's x86 back end
+/// turns these maxima into branches in this loop (its conversion of conditional moves, whatever
+/// the source's form), which made the scans about 2.4 times slower than NCBI's on the same rows
+/// (NCBI's build keeps conditional moves and `pmaxsd`; PS11c-3 review S5). Other targets take
+/// `max`. The value is `max(a, b)` on every target.
+#[inline(always)]
+fn cmov_max(a: i32, b: i32) -> i32 {
+    #[cfg(target_arch = "x86_64")]
+    {
+        let mut larger = a;
+        // SAFETY: two instructions on the two registers given (`cmp`, then `cmovl`: `larger`
+        // takes `b` where `larger < b`, signed); no memory or stack is touched, and the flags
+        // that `cmp` sets are clobbered as `asm!` assumes by default.
+        unsafe {
+            core::arch::asm!(
+                "cmp {larger:e}, {b:e}",
+                "cmovl {larger:e}, {b:e}",
+                larger = inout(reg) larger,
+                b = in(reg) b,
+                options(pure, nomem, nostack),
+            );
+        }
+        larger
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        a.max(b)
+    }
 }
 
 /// Whether a range of `ranges` (the forbidden ranges of one query position) holds subject position

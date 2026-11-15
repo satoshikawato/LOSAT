@@ -376,3 +376,25 @@ fn the_score_only_scan_equals_the_whole_matrix_recurrence() {
         }
     }
 }
+
+// `cmov_max` is `max` (a conditional move on x86-64), at the ends of the range too.
+#[test]
+fn the_conditional_move_is_the_maximum() {
+    let values = [
+        i32::MIN,
+        i32::MIN + 1,
+        -32768,
+        -385,
+        -1,
+        0,
+        1,
+        384,
+        i32::MAX - 1,
+        i32::MAX,
+    ];
+    for &a in &values {
+        for &b in &values {
+            assert_eq!(cmov_max(a, b), a.max(b), "{a} {b}");
+        }
+    }
+}

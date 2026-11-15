@@ -1193,6 +1193,11 @@ fn write_alignment_with_sequences<W: Write>(
     let mut query_row = RowCursor::new(hit.q_start as isize, 1, 1, line_len);
     let mut subject_row = RowCursor::new(hit.s_start as isize, subject_step, 1, line_len);
     let mut offset = 0;
+    // The rows' end gaps (`end_gap_span`; the subject's gaps stored as residues are residues).
+    let query_span = end_gap_span(&q_chars, |_| false);
+    let subject_span = end_gap_span(&s_chars, |column| {
+        subject_stored_gaps.binary_search(&(column as u32)).is_ok()
+    });
 
     while offset < q_chars.len() {
         let end = (offset + line_len).min(q_chars.len());
@@ -1233,26 +1238,52 @@ fn write_alignment_with_sequences<W: Write>(
             })
             .collect();
 
-        write_sequence_row(
-            writer,
-            "Query",
-            &mut query_row,
-            &q_chars[offset..end],
-            0,
-            max_start_len,
-            |writer| write_chars(writer, &q_chars[offset..end]),
-        )?;
-        write_spaces(writer, max_id_len + 2 + max_start_len + 2)?;
-        writeln!(writer, "{}", middle)?;
-        write_sequence_row(
-            writer,
-            "Sbjct",
-            &mut subject_row,
-            &s_chars[offset..end],
-            stored_gaps_between(subject_stored_gaps, offset, end),
-            max_start_len,
-            |writer| write_chars(writer, &s_chars[offset..end]),
-        )?;
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1497-1502,1535-1538
+        // ```c++
+        //     for (int row=0; row<rowNum; row++) {
+        //         bool hasSequence = true;
+        //         if (!(m_AlignOption & eShowGapOnlyLines)) {
+        //             hasSequence = curRange.IntersectingWith(alnRoInfo->rowRng[row]);
+        //         }
+        //         //only output rows that have sequence
+        //         if (hasSequence){
+        //     ...
+        //             //display middle line for pairwise
+        //             if (row == 0 && ((m_AlignOption & eShowMiddleLine)) && !(m_AlignOption&eMergeAlign)) {
+        //                 x_DisplayMiddLine(alnRoInfo, row,out);
+        //             }
+        // ```
+        // A row is written in a chunk that meets its columns between its end gaps
+        // (`rowRng = m_AV->GetSeqAlnRange(row)`, showalign.cpp:1272), the middle line with the
+        // query's; a chunk without the row still counts as one (`j > 0` of the next).
+        if meets(query_span, offset, end) {
+            write_sequence_row(
+                writer,
+                "Query",
+                &mut query_row,
+                &q_chars[offset..end],
+                0,
+                max_start_len,
+                |writer| write_row_chars(writer, &q_chars, offset..end, query_span),
+            )?;
+            write_spaces(writer, max_id_len + 2 + max_start_len + 2)?;
+            writeln!(writer, "{}", middle)?;
+        } else {
+            query_row.first = false;
+        }
+        if meets(subject_span, offset, end) {
+            write_sequence_row(
+                writer,
+                "Sbjct",
+                &mut subject_row,
+                &s_chars[offset..end],
+                stored_gaps_between(subject_stored_gaps, offset, end),
+                max_start_len,
+                |writer| write_row_chars(writer, &s_chars, offset..end, subject_span),
+            )?;
+        } else {
+            subject_row.first = false;
+        }
         writeln!(writer)?;
 
         offset = end;
@@ -1491,6 +1522,90 @@ fn write_chars<W: Write>(writer: &mut W, letters: &[char]) -> io::Result<()> {
         write!(writer, "{letter}")?;
     }
     Ok(())
+}
+
+/// Writes the columns `columns` of the row `row` kept as `char`s, its end gaps (the columns
+/// outside `span`, `end_gap_span`) as NCBI's end character, a space.
+fn write_row_chars<W: Write>(
+    writer: &mut W,
+    row: &[char],
+    columns: std::ops::Range<usize>,
+    span: (usize, usize),
+) -> io::Result<()> {
+    if span.0 <= columns.start && columns.end <= span.1 {
+        return write_chars(writer, &row[columns]);
+    }
+    for column in columns {
+        let letter = if column < span.0 || column >= span.1 {
+            ' '
+        } else {
+            row[column]
+        };
+        write!(writer, "{letter}")?;
+    }
+    Ok(())
+}
+
+/// Whether the chunk of columns `start..end` meets the columns `span` of a row between its end
+/// gaps (NCBI's `curRange.IntersectingWith(rowRng[row])`).
+fn meets(span: (usize, usize), start: usize, end: usize) -> bool {
+    start < span.1 && span.0 < end
+}
+
+// NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnvec.hpp:386-393
+// ```c++
+// inline
+// CSeqVector::TResidue CAlnVec::GetEndChar() const
+// {
+//     if (IsSetEndChar()) {
+//         return m_EndChar;
+//     } else {
+//         return ' ';
+//     }
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:362-370 (`GetWholeAlnSeqString`)
+// ```c++
+//                 if (seg < left_seg  ||  seg > right_seg) {
+//                     fill_ch = GetEndChar();
+//                 } else {
+//                     fill_ch = GetGapChar(row);
+//                 }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1209-1216
+// ```c++
+//     m_AV->SetGapChar('-');
+//
+//     if (m_AlignOption & eShowEndGaps) {
+//         m_AV->SetEndChar('-');
+//     }
+//     else {
+//         m_AV->SetEndChar(' ');
+//     }
+// ```
+// (`eShowEndGaps` is set by the query-anchored views only, blast_format.cpp:1754-1758; the
+// tabular writer sets the gap character alone, tabular.cpp:982-986.)
+/// The columns `lo..hi` of a row of a pairwise alignment between its end gaps: its columns before
+/// its first residue and after its last, which NCBI's alignment strings fill with the end
+/// character (a space in the pairwise view and in the tabular `qseq`, `sseq` and `btop`) where an
+/// inner gap is `-`. `residue_dash(column)` says whether a `-` of the row is a residue (a gap
+/// stored in the sequence). Only a Smith-Waterman alignment has end gaps (rpsblast's
+/// `-use_sw_tback`: `ALIGN_EX` runs from the Smith-Waterman start over a rectangle whose best path
+/// may start with a gap); an X-drop alignment starts and ends with a substitution.
+pub(crate) fn end_gap_span<T: Copy + PartialEq + From<u8>>(
+    row: &[T],
+    residue_dash: impl Fn(usize) -> bool,
+) -> (usize, usize) {
+    let gap = T::from(b'-');
+    let end_gap = |column: usize| row[column] == gap && !residue_dash(column);
+    let lo = (0..row.len())
+        .find(|&column| !end_gap(column))
+        .unwrap_or(row.len());
+    let hi = (lo..row.len())
+        .rev()
+        .find(|&column| !end_gap(column))
+        .map_or(lo, |column| column + 1);
+    (lo, hi)
 }
 
 /// The number of the sorted columns `stored_gaps` in `start..end`.
@@ -7380,6 +7495,98 @@ mod tblastx_tests {
         ] {
             assert_eq!(cpp_default_double(value), text, "{value}");
         }
+    }
+
+    /// The rows of a protein alignment `query` x `subject` (`-` gaps) from (`q_start`, `s_start`).
+    fn rows_hit(query: &str, subject: &str, q_start: usize, s_start: usize) -> Hit {
+        let residues = |row: &str| row.bytes().filter(|&b| b != b'-').count();
+        Hit {
+            identity: 0.0,
+            length: query.len(),
+            mismatch: 0,
+            gapopen: 1,
+            q_start,
+            q_end: q_start + residues(query) - 1,
+            s_start,
+            s_end: s_start + residues(subject) - 1,
+            e_value: 1e-10,
+            bit_score: 50.0,
+            num_ident: 0,
+            query_frame: 0,
+            query_length: 0,
+            q_idx: 0,
+            s_idx: 0,
+            raw_score: 100,
+            sort_query_offset: 0,
+            sort_query_end: 0,
+            sort_subject_offset: 0,
+            sort_subject_end: 0,
+            has_sort_offsets: false,
+            gap_info: None,
+            num_positives: 0,
+        }
+    }
+
+    fn rows_text(
+        query: &str,
+        subject: &str,
+        q_start: usize,
+        s_start: usize,
+        line: usize,
+    ) -> String {
+        let hit = rows_hit(query, subject, q_start, s_start);
+        let config = PairwiseConfig {
+            line_length: line,
+            program: "rpsblast".to_string(),
+            ..PairwiseConfig::default()
+        };
+        let mut out = Vec::new();
+        write_alignment_with_sequences(&mut out, &hit, query, subject, &[], &config).unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
+    // showalign.cpp:1209-1216 and 1497-1502 (quoted at `end_gap_span` and
+    // `write_alignment_with_sequences`): a row's end gaps are spaces, a chunk without the row's
+    // letters leaves the row out (the Query row with its middle line), and the next chunk's row
+    // shows its first residue's number.
+    #[test]
+    fn end_gaps_are_spaces_and_rows_without_letters_are_left_out() {
+        let middle = |letters: &str| format!("{}{letters}\n", " ".repeat(10));
+        // The subject starts with six end gaps: the first chunk has no Sbjct line, the second
+        // starts it at its residue 1 after two spaces.
+        let text = rows_text("MKVLWAALLV", "------AALL", 1, 1, 4);
+        let expected = [
+            "Query  1  MKVL  4\n".to_string(),
+            middle("    "),
+            "\n".to_string(),
+            "Query  5  WAAL  8\n".to_string(),
+            middle("  A "),
+            "Sbjct  1    AA  2\n\n".to_string(),
+            "Query  9  LV  10\n".to_string(),
+            middle("L+"),
+            "Sbjct  3  LL  4\n\n".to_string(),
+        ]
+        .concat();
+        assert_eq!(text, expected);
+        // The query starts with three end gaps.
+        let text = rows_text("---KVLW", "MQLKVLW", 7, 1, 60);
+        let expected = [
+            "Query  7     KVLW  10\n".to_string(),
+            middle("   KVLW"),
+            "Sbjct  1  MQLKVLW  7\n\n".to_string(),
+        ]
+        .concat();
+        assert_eq!(text, expected);
+        // A query chunk of end gaps only: no Query line and no middle line.
+        let text = rows_text("----KVLW", "MQLWKVLW", 1, 1, 4);
+        let expected = [
+            "Sbjct  1  MQLW  4\n\n".to_string(),
+            "Query  1  KVLW  4\n".to_string(),
+            middle("KVLW"),
+            "Sbjct  5  KVLW  8\n\n".to_string(),
+        ]
+        .concat();
+        assert_eq!(text, expected);
     }
 
     fn tblastx_hit(sum_n: i32) -> PairwiseHit {

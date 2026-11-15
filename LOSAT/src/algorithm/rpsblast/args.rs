@@ -51,8 +51,9 @@ use crate::blastinput::value_parsers::*;
 // blastp's driver (`BlastpApp::Rpsblast`) and the RPS engine (`algorithm::rps_search`).
 // Composition-based statistics (modes 1 to 3, the default 1) run the redo of `rps_search::redo`
 // with the database's frequency ratios, or without them where the database has none (NCBI then
-// searches with mode 0); the arguments that LOSAT does not run yet (`-use_sw_tback`, PS11c-3;
-// `-html`, PS15a) are refused by the parser (`cli.rs` `is_unported_rpsblast_arg`).
+// searches with mode 0), and with `-use_sw_tback` NCBI's Smith-Waterman redo (PS11c-3); the
+// argument that LOSAT does not run yet (`-html`, PS15a) is refused by the parser (`cli.rs`
+// `is_unported_rpsblast_arg`).
 #[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]
 pub struct RpsblastArgs {
@@ -182,6 +183,33 @@ pub struct RpsblastArgs {
     /// (`rps_hooks::rps_search`), after NCBI's errors of the options, the database and the files.
     #[arg(long = "sum_stats", value_name = "bool_value", value_parser = ncbi_boolean, help = "Use sum statistics")]
     pub sum_stats: Option<bool>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:804-806
+    // ```c++
+    //     arg_desc.AddFlag(kArgUseSWTraceback,
+    //                      "Compute locally optimal Smith-Waterman alignments?",
+    //                      true);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:879-885 and 892-899
+    // ```c++
+    //         opt.SetCompositionBasedStats(compo_mode);
+    //         ...
+    //         opt.SetSmithWatermanMode(smith_waterman_value);
+    //     ...
+    //     if (args[kArgCompBasedStats]) {
+    //         ...
+    //         s_SetCompositionBasedStats(opt,
+    //                                    args[kArgCompBasedStats].AsString(),
+    //                                    args[kArgUseSWTraceback],
+    //                                    ungapped.get());
+    // ```
+    /// `-use_sw_tback`: the composition-based redo (modes 1 to 3) is NCBI's Smith-Waterman redo
+    /// (`RpsSearch::use_sw_tback`); without composition-based statistics it changes nothing.
+    #[arg(
+        long = "use_sw_tback",
+        default_value_t = false,
+        help = "Compute locally optimal Smith-Waterman alignments?"
+    )]
+    pub use_sw_tback: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:332-342
     // ```c++
     //         arg_desc.AddDefaultKey(kArgSegFiltering, "SEG_options",
@@ -415,6 +443,7 @@ impl RpsblastArgs {
                 x_drop_gapped_bits: self.xdrop_gap,
                 x_drop_final_bits: self.xdrop_gap_final,
                 sum_stats: self.sum_stats == Some(true),
+                use_sw_tback: self.use_sw_tback,
             }),
         })
     }
@@ -438,6 +467,7 @@ impl RpsblastArgs {
         inputs.soft_masking = self.soft_masking;
         inputs.seg = self.seg.as_deref().and_then(seg_filter);
         inputs.comp_based_stats = i32::from(rps_composition_mode(&self.comp_based_stats));
+        inputs.use_sw_tback = self.use_sw_tback;
         inputs
     }
 
@@ -570,13 +600,11 @@ mod tests {
                 "{extra:?}: {error}"
             );
         }
-        for name in ["use_sw_tback", "html"] {
-            let error = parse(&[&format!("-{name}"), "1"]).unwrap_err();
-            assert!(
-                error.contains(&format!("-{name} is not supported by LOSAT's RPSBLAST")),
-                "{name}: {error}"
-            );
-        }
+        let error = parse(&["-html", "1"]).unwrap_err();
+        assert!(
+            error.contains("-html is not supported by LOSAT's RPSBLAST"),
+            "{error}"
+        );
         assert!(parse(&["-subject", "s.faa"]).is_err());
         assert!(parse(&["-mt_mode", "2"]).is_err());
     }

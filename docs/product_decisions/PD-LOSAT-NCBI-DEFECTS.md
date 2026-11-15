@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.30
+- Version: 1.31
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -64,7 +64,9 @@
   lines, of 1.6, also where a list's `gnl|BL_ORD_ID|n` reaches a line in a volume whose first OID is
   not 0, which NCBI's header read numbers differently from the lookup; line DBID item ordsl,
   Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07, within the class of 1.6);
-  1.30 2026-11-15 (the query-anchored views of BLASTX and TBLASTX, line RG item T3c: TBLASTX's
+  1.30 2026-11-15 (the explicit rejection of RPSBLAST's Smith-Waterman redo that NCBI repeats
+  without end, rule 3, line PS item PS11c-3; Owner-delegated, line PS `DECISIONS.md` 63);
+  1.31 2026-11-15 (the query-anchored views of BLASTX and TBLASTX, line RG item T3c: TBLASTX's
   strand drop and the spread of a subject's masks reproduced, rule 2, and the rule-2 rejection of a
   query's id of 1.24 and 1.28 in BLASTX and TBLASTX; Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07, within the class of 1.10)
@@ -539,7 +541,7 @@ here, and names the widening that PS16a made for protein queries.
 
 ## Reproduced as NCBI (rule 2)
 
-- TBLASTX `-outfmt 1` to `4` (the query-anchored views; version 1.30, 2026-11-15, line RG item T3c,
+- TBLASTX `-outfmt 1` to `4` (the query-anchored views; version 1.31, 2026-11-15, line RG item T3c,
   DECISIONS T3-6): NCBI adds TBLASTX's HSPs of each query frame with `CAlnMix::fForceTranslation`
   (`eTranslateNucToNucAlignment`, showalign.cpp:2058-2063), whose `CAlnMixMatches::Add` throws
   "Unable to mix strands when forcing translation!" for an HSP whose subject strand differs from
@@ -551,7 +553,7 @@ here, and names the widening that PS16a made for protein queries.
   `db.of1.tx.s.f*`). BLASTX's HSPs of a minus query frame are added with `fNegativeStrand`, which
   `Add` reads as `fForceTranslation` (`alnmix.hpp:77,102`): their query rows run from high to low, and
   none is left out (a protein row has no strand).
-- `-outfmt 1` to `4` of BLASTP, BLASTN and BLASTX (version 1.30, DECISIONS T3-6): a subject's masks
+- `-outfmt 1` to `4` of BLASTP, BLASTN and BLASTX (version 1.31, DECISIONS T3-6): a subject's masks
   (the `-lcase_masking` runs of a `-subject` record, BLASTN's `-db_soft_mask`) are placed on the columns of the subject's first row that
   meets each and shown in lower case on those columns of every row of the subject
   (`x_FillLocList`, showalign.cpp:4291-4338; `x_OutputSeq`, :2486-2523), also on its rows of other
@@ -853,6 +855,23 @@ here, and names the widening that PS16a made for protein queries.
   does, so its refusal follows the prolog. The other sections of such a record are NCBI's
   (fixture rows `db.of1.bp.self1.*`, `db.of1.bn.selfrc.*`).
 
+- RPSBLAST `-use_sw_tback` with composition-based statistics (version 1.30, 2026-11-15, line PS
+  item PS11c-3, Owner-delegated, line PS `DECISIONS.md` 63): a profile with two or more
+  preliminary HSPs when the e-value of a score of 0 passes `-evalue` (the query's search space
+  times the profile's K below it: a large `-evalue` or a small `-searchsp`) and the profile's first
+  position, after the composition adjustment, scores the query's first letter (after SEG) above 0.
+  `Blast_RedoOneMatchSmithWaterman`'s loop (`redo_alignment.c:1438-1529`) then makes every
+  positive alignment and comes to a round of score 0 whose alignment is that one cell, at (0, 0)
+  (`smith_waterman.c:276-341, 437-446`, `blast_kappa.c:844-879`); its range changes no score the
+  next scan sees, so every round is the same, and the loop leaves only when an allocation fails
+  (after memory runs out, or by the OOM killer): no checkable result. LOSAT refuses (exit 1, "a
+  profile whose Smith-Waterman redo (-use_sw_tback) does not end in NCBI BLAST+ 2.17.0 ... is not
+  supported by LOSAT's RPSBLAST") after the profile's first Smith-Waterman scan (the composition
+  adjustment and the significance test of that scan's score come first), where its other refusals
+  of a profile in the RPS traceback come. Where that cell scores 0 or less, NCBI's redo fails at the round of score 0
+  and drops the profile, which LOSAT reproduces (rule 2; fixture rows `db.rps.rej.swendless` and
+  `db.rps.mini.sw.zero.6`).
+
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 
 On a database with parsed Seq-ids NCBI gives these results without failing, and they look wrong
@@ -873,7 +892,7 @@ would port:
   subject.
 - A reported sequence with the id, or the display id of its description line (outfmt 0 to 4 of
   BLASTP, PSIBLAST and RPSBLAST, 1 to 4 of BLASTN and TBLASTN since version 1.28, of BLASTX and
-  TBLASTX since version 1.30), of a query read with `-parse_deflines` in the query batch that
+  TBLASTX since version 1.31), of a query read with `-parse_deflines` in the query batch that
   reports it (with outfmt 5, in any batch), and in outfmt 1 to 4 of BLASTP, BLASTN, BLASTX, TBLASTN
   and TBLASTX with the id or display id `lcl|Query_N` of a query read without it (TBLASTN's merge
   then reads the protein query's letters as nucleotides, probe `tn.t3b.d.qid.f1`; BLASTX's and

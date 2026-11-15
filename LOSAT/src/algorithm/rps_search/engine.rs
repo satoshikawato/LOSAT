@@ -70,6 +70,11 @@ pub struct RpsSearch {
     pub(crate) x_drop_final_bits: Option<f64>,
     /// `-sum_stats true`, refused where the search starts (`rps_hooks::rps_search`).
     pub(crate) sum_stats: bool,
+    /// `-use_sw_tback` (rpsblast): the redo of composition-based statistics 1 to 3 is NCBI's
+    /// Smith-Waterman redo (`RpsRedoParams::smith_waterman`); without them NCBI's traceback does
+    /// not read it. rpstblastn leaves it false (it refuses `-use_sw_tback` with them,
+    /// `TranslatedRpsSearch::check_options`).
+    pub(crate) use_sw_tback: bool,
 }
 
 /// The contexts of a translated query.
@@ -636,6 +641,7 @@ impl RpsRun<'_> {
                 gap_open: files.aux.gap_open,
                 gap_extend: files.aux.gap_extend,
                 x_drop_final_bits: self.x_drop_final_bits,
+                smith_waterman: self.options.use_sw_tback,
             }),
         };
         let prelim_karlin = KarlinParams {

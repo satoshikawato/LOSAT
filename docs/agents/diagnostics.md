@@ -6959,6 +6959,25 @@ Scheduling (each value computed by one thread with the original function; order 
   800 cDNAs at 4 threads x1.000-1.008, +0.2 % instructions: the cost of the general form of the parts); the Owner
   accepted them as an exception to the rule that a memory fix costs no time on 2026-11-15 (Ready for review on pull
   request #1159, which named that as the answer).
+  Item SC9i of line NP cuts the build of the tables of word sizes 6 and 7 into waves by the cells' last letter (the
+  index's most significant digit: 8 waves of 2 letters for word size 6, 10 of 1 for word size 7; one wave for word
+  size 5, blastp-fast and a build ahead of its block), each wave's appends sorted by stripe and filled before the next
+  wave's are made, so that the packed appends held at once are one wave's (4 bytes per hit; for word size 7 they were
+  twice the table's hits). The table is the same: a wave's appends are the serial order's for its cells
+  (`XWords::for_each_word_in`; the first wave keeps each offset's word start for the later ones, `XWordStart`), the
+  overflow cells are counted from each cell's number of appends (`x_overflow_cells_of`, recounted only where a stripe
+  crosses a count range, and with one wave only when a table's appends can pass the capacity), and the waves' stripes
+  partition the backbone in order. Each costs that it removed had a measured cause: the passes after the first run on
+  one gang of helpers per build (`XGang`; each pass in a scope of its own woke the idle pool threads, which stole
+  search jobs and held the pass's end), and a one-wave build's single stripes pass is a one-latch pass (on the gang,
+  blastp-fast's peak RssAnon at 8 threads was +3.4 MB over 30 rounds); a one-wave build lists its words in
+  `add_word_hits`' order (picking the last letter first mispredicted a branch per letter, blastp-fast x1.047); the
+  segments of packed appends pass whole from one wave to the next (`XSegmentPool::keep_whole`; cut and freed after
+  every wave, word size 6 with 800 cDNAs at 32 threads made 16,318 `mremap` and 13,784 `munmap` calls instead of 71
+  and 2,412, each stopping every thread for its TLB: x1.05-1.12 of dev's time with the same instructions). ws node 1
+  against dev 6a0a8719a: 50 cDNAs x scer_pep word size 7 at 8/16/32 threads 381-428 MB instead of 675-766 MB (NCBI
+  434-435 MB), word size 6 286-299 MB instead of 395-514 MB (NCBI 367-369 MB), x0.79-0.93 of the time; 800 cDNAs
+  x0.87-0.96 with 0.45-0.79 of the memory (medians); blastp-fast and blastx-fast as dev.
 - `LOSAT_X_BXCTXONCE=1` (BLASTX, speed and memory; in the strict set from the pull request that added it: on unless
   `=0` or `LOSAT_X_DEFAULT=0`; acts where the `LOSAT_X_BXDIAG` fused loop runs): the fused loop's context table of a
   query batch (`XContextTable`, the binary search's index at every query offset) is made once per lookup table and

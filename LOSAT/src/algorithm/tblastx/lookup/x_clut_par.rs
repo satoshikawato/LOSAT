@@ -173,10 +173,11 @@
 //!   order), counted in every wave where there is more than one (a range's appends are known only at
 //!   the end), and tested once at the end as above. With one wave they are summed only when a
 //!   table's appends pass the capacity (`need_cells`; an append takes at most one cell).
-//! - the passes after the first (each wave's stripes and the next wave's appends) run on one gang of
-//!   the pool's threads per build (`XGang`): helpers spawned once take each pass's items and wait
-//!   between passes, so that a pass does not wake the pool's idle threads again (scheduling only:
-//!   each item is made once, by the same call).
+//! - with more than one wave the passes after the first (each wave's stripes and the next wave's
+//!   appends) run on one gang of the pool's threads per build (`XGang`): helpers spawned once take
+//!   each pass's items and wait between passes, so that a pass does not wake the pool's idle threads
+//!   again (scheduling only: each item is made once, by the same call). A build of one wave has one
+//!   pass after its first (its stripes), a one-latch pass of its own (`XPasses::latched`).
 //! - the PV array is set by the stripes only with one wave (its stripes are whole PV words from cell
 //!   0); otherwise it is made from the starts as above.
 //!
@@ -783,6 +784,28 @@ enum XPasses<'a> {
     /// Item SC9i of line NP: one-latch passes on a gang's helpers (`XGang::pass`), without extra
     /// tasks (the later waves' appends).
     Gang(&'a XGang),
+}
+
+impl XPasses<'_> {
+    // No NCBI counterpart: scheduling only (item SC9i of line NP).
+    /// A pass of `items` without extra tasks, the results of `item(scratch, i)` in order: on the gang's
+    /// helpers (`XGang::pass`, `last`: the gang's last pass), else a one-latch pass of its own
+    /// (`x_one_latch_pass`; the Rayon passes' stripes are `par_iter`'s, their callers').
+    fn latched<S, R: Send + Sync>(
+        self,
+        threads: usize,
+        items: usize,
+        last: bool,
+        init: impl Fn() -> S + Sync,
+        item: impl Fn(&mut S, usize) -> R + Sync,
+    ) -> Vec<R> {
+        match self {
+            XPasses::Gang(gang) => gang.pass(items, last, init, item),
+            XPasses::OneLatch(_) | XPasses::Rayon => {
+                x_one_latch_pass(threads, items, 0, init, item, |_| {})
+            }
+        }
+    }
 }
 
 impl<H> XFlatSpare<H> {
@@ -2444,18 +2467,20 @@ fn x_flat_stripes_on<S: CompressedScores, H: XQueryOffset>(
     let mut first_wave = Some((appends, stripe_hits));
     // The hits of the waves before.
     let mut hits_base = 0usize;
-    // The waves' stripes and later appends, the one-latch passes on a gang of the pool's threads
-    // (`XGang`, item SC9i of line NP); `false` when the appends pass `max_appends`.
-    let mut wave_passes = |gang: Option<&XGang>| -> bool {
+    // The waves' stripes and later appends (`passes`: with more than one wave the one-latch passes are
+    // on a gang of the pool's threads, `XGang`, item SC9i of line NP); `false` when the appends pass
+    // `max_appends`.
+    let mut wave_passes = |passes: XPasses<'_>| -> bool {
         for wave_index in 0..waves {
             let wave = x_wave(wave_index, wave_letters, &header, shift);
             let (appends, stripe_hits) = match first_wave.take() {
                 Some(first) => first,
                 None => {
                     let words = words.as_ref().expect("the words of the later waves");
-                    let passes = match gang {
-                        Some(gang) => XPasses::Gang(gang),
-                        None => XPasses::Rayon,
+                    // The extra tasks (if any) ran in the first wave's appends pass.
+                    let passes = match passes {
+                        XPasses::OneLatch(_) => XPasses::OneLatch(None),
+                        passes => passes,
                     };
                     let Some((made, made_hits, _)) = x_wave_appends(
                         words,
@@ -2520,17 +2545,18 @@ fn x_flat_stripes_on<S: CompressedScores, H: XQueryOffset>(
             }
             // The last pass of the gang (its helpers end after it).
             let last = wave_index + 1 == waves;
-            let wave_counts: Vec<XStripeCounts> = match (gang, fill) {
-                (None, _) => parts
+            let wave_counts: Vec<XStripeCounts> = match (passes, fill) {
+                (XPasses::Rayon, _) => parts
                     .into_par_iter()
                     .map(|part| x_stripe_build(part, ranges.len(), &chunks, &appends, need_cells))
                     .collect(),
-                (Some(gang), true) => {
+                (latched, true) => {
                     let parts: Vec<Mutex<Option<XStripe<'_, H>>>> = parts
                         .into_iter()
                         .map(|part| Mutex::new(Some(part)))
                         .collect();
-                    gang.pass(
+                    latched.latched(
+                        threads,
                         parts.len(),
                         last,
                         XFillScratch::default,
@@ -2551,13 +2577,14 @@ fn x_flat_stripes_on<S: CompressedScores, H: XQueryOffset>(
                         },
                     )
                 }
-                (Some(gang), false) => {
+                (latched, false) => {
                     // Each stripe's part, taken by the task that takes its index.
                     let parts: Vec<Mutex<Option<XStripe<'_, H>>>> = parts
                         .into_iter()
                         .map(|part| Mutex::new(Some(part)))
                         .collect();
-                    gang.pass(
+                    latched.latched(
+                        threads,
                         parts.len(),
                         last,
                         || (),
@@ -2586,10 +2613,14 @@ fn x_flat_stripes_on<S: CompressedScores, H: XQueryOffset>(
         }
         true
     };
-    let fits = if one_latch {
-        x_with_gang(threads, |gang| wave_passes(Some(gang)))
-    } else {
-        wave_passes(None)
+    // The gang serves a run of passes (its helpers wait between them). A build of one wave has one pass
+    // after its first (its stripes), a one-latch pass of its own as each single pass is: a gang around
+    // it held the pool's threads across the build (blastp-fast's maximum RssAnon at 8 threads +3.4 MB
+    // over 30 rounds, item SC9i of line NP).
+    let fits = match (one_latch, waves > 1) {
+        (true, true) => x_with_gang(threads, |gang| wave_passes(XPasses::Gang(gang))),
+        (true, false) => wave_passes(XPasses::OneLatch(None)),
+        (false, _) => wave_passes(XPasses::Rayon),
     };
     if !fits {
         return Some(XFlatBuild::TooLarge);

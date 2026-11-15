@@ -63,10 +63,9 @@ pub(super) struct TraceBatch<'a> {
     pub(super) gap_extend: i32,
     pub(super) x_drop_final: i32,
     pub(super) use_dp: bool,
-    /// The hit-saving options: the minimum percent identity and length, the interval tree's
-    /// diagonal separation and the e-value threshold.
+    /// The hit-saving options: the minimum percent identity, the interval tree's diagonal
+    /// separation and the e-value threshold.
     pub(super) percent_identity: f64,
-    pub(super) min_hit_length: usize,
     pub(super) min_diag_separation: i32,
     pub(super) evalue_threshold: f64,
     /// The schedule on the pool: whether the speculative batches may run, the rule of
@@ -148,7 +147,6 @@ pub(super) fn traceback_subject<const UNGAPPED: bool>(
         x_drop_final,
         use_dp,
         percent_identity,
-        min_hit_length,
         min_diag_separation,
         evalue_threshold,
         speculative_traceback,
@@ -245,7 +243,6 @@ pub(super) fn traceback_subject<const UNGAPPED: bool>(
         score_matrix,
         use_dp,
         percent_identity,
-        min_hit_length,
         min_diag_separation,
         evalue_threshold,
     };

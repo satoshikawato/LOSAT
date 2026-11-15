@@ -1,7 +1,8 @@
 //! The steps of NCBI's ungapped blastn (`-ungapped`) that run on a subject's HSP list after its
 //! word finding and ungapped extension: the re-evaluation with ambiguity codes, the identity count
-//! and `Blast_HSPTest`, and the word cutoff of the batch. Pure functions; the engine
-//! (`blast_engine/run.rs`) calls them for its `UNGAPPED` instance of `search_query_batch`.
+//! and the word cutoff of the batch (`Blast_HSPTest` is `core::blast_hits::hsp_test`). Pure
+//! functions; the engine (`blast_engine/run.rs`) calls them for its `UNGAPPED` instance of
+//! `search_query_batch`.
 //!
 //! NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1482-1541
 //! ```c

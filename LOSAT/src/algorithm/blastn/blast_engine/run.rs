@@ -9544,8 +9544,8 @@ fn ungapped_subject_stage(
             hit.prelim_ss,
             align_length,
         );
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:993-1000,1027-1032
-        // (`Blast_HSPTest`; `min_hit_length` is 0 for BLASTN).
+        // `Blast_HSPTest` (quoted above); NCBI's `min_hit_length` is always 0
+        // (`core::blast_hits::hsp_test`).
         !crate::core::blast_hits::hsp_test(
             identities as i64,
             align_length as i64,
@@ -12642,7 +12642,6 @@ fn search_query_batch<const UNGAPPED: bool>(
         subject_besthit,
         x_qgroup_batch,
         percent_identity,
-        min_hit_length,
         score_matrix,
         nucl_score_table,
         x_dropoff_init,
@@ -12829,7 +12828,6 @@ fn search_query_batch<const UNGAPPED: bool>(
         x_drop_final,
         use_dp,
         percent_identity,
-        min_hit_length,
         min_diag_separation,
         evalue_threshold,
         speculative_traceback,

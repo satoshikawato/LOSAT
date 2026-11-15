@@ -1193,7 +1193,6 @@ pub fn blast_hsp_test_identity_and_length(
     q_seq: &[u8],
     s_seq: &[u8],
     percent_identity: f64,
-    min_hit_length: usize,
 ) -> bool {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:758-765
     // ```c
@@ -1257,12 +1256,8 @@ pub fn blast_hsp_test_identity_and_length(
         0.0
     };
 
-    crate::core::blast_hits::hsp_test(
-        matches as i64,
-        align_length as i64,
-        percent_identity,
-        min_hit_length as i64,
-    )
+    // `Blast_HSPTest`; NCBI's `min_hit_length` is always 0 (`core::blast_hits::hsp_test`).
+    crate::core::blast_hits::hsp_test(matches as i64, align_length as i64, percent_identity, 0)
 }
 
 /// Parameters needed for E-value and bit score recalculation after re-evaluation.

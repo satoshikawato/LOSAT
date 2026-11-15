@@ -828,7 +828,6 @@ pub(super) fn trace_build_hsp(
         x_drop_final: x_drop_trace,
         use_dp,
         percent_identity,
-        min_hit_length,
         ..
     } = traceback_ctx;
     let &TraceHsp {
@@ -971,13 +970,9 @@ pub(super) fn trace_build_hsp(
         traceback_alignment_lengths.push(aln_len.min(u32::MAX as usize) as u32);
     }
 
+    // `Blast_HSPTest`; NCBI's `min_hit_length` is always 0 (`core::blast_hits::hsp_test`).
     if use_dp
-        && crate::core::blast_hits::hsp_test(
-            matches as i64,
-            aln_len as i64,
-            percent_identity,
-            min_hit_length as i64,
-        )
+        && crate::core::blast_hits::hsp_test(matches as i64, aln_len as i64, percent_identity, 0)
     {
         if let Some(timing) = timing_ref {
             BlastnTiming::record_count(&timing.traceback_deleted_identity_length_hsps, 1);

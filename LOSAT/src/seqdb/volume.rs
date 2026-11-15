@@ -564,32 +564,36 @@ impl Volume {
     // }
     // ```
     /// The encoded `Blast-def-line-set` of the sequence `oid` (volume-relative).
+    #[cfg(test)]
     pub fn header_bytes(&self, oid: u32) -> Result<Vec<u8>, SeqDbError> {
+        self.header_record(oid).map(|(record, _)| record)
+    }
+
+    /// The encoded `Blast-def-line-set` of the sequence `oid` (volume-relative) and the path of
+    /// the header file, which the messages of its decode name: the open file's own, not a name
+    /// built again for each record.
+    fn header_record(&self, oid: u32) -> Result<(Vec<u8>, &Path), SeqDbError> {
         self.check_range(oid, oid.saturating_add(1))?;
         let (start, end) = self.index.header_range(oid)?;
-        self.hdr_file()?.read_range(start, end)
+        let file = self.hdr_file()?;
+        Ok((file.read_range(start, end)?, file.path()))
     }
 
     /// The header of the sequence `oid` (volume-relative) from one read of its record
     /// (`SeqDb::read_header`).
     pub fn header(&self, oid: u32) -> Result<VolumeHeader, SeqDbError> {
-        let record = self.header_bytes(oid)?;
-        self.decode_header(
-            oid,
-            &record,
-            &with_extension(&self.base, self.index.seqtype, "hr"),
-        )
+        let (record, path) = self.header_record(oid)?;
+        self.decode_header(oid, &record, path)
     }
 
     /// The `taxid` of each definition line of the sequence `oid` (volume-relative), 0 for none.
     pub fn defline_taxids(&self, oid: u32) -> Result<Vec<i32>, SeqDbError> {
-        let record = self.header_bytes(oid)?;
-        let path = with_extension(&self.base, self.index.seqtype, "hr");
+        let (record, path) = self.header_record(oid)?;
         self.kept_lines(
             oid,
             &record,
-            &path,
-            decode_defline_taxids(&record, &path, oid),
+            path,
+            decode_defline_taxids(&record, path, oid),
         )
     }
 
@@ -597,12 +601,8 @@ impl Volume {
     /// every Seq-id (`header::decode_full`); a `general` id `BL_ORD_ID` keeps its
     /// volume-relative tag.
     pub fn defline_set(&self, oid: u32) -> Result<crate::seqid::DeflineSet, SeqDbError> {
-        let record = self.header_bytes(oid)?;
-        self.decode_kept_set(
-            oid,
-            &record,
-            &with_extension(&self.base, self.index.seqtype, "hr"),
-        )
+        let (record, path) = self.header_record(oid)?;
+        self.decode_kept_set(oid, &record, path)
     }
 
     /// Restricts the definition lines that the reads of this volume give to those `rule`
@@ -683,21 +683,19 @@ impl Volume {
     /// not applied (`SeqDb::has_parsed_seqids`, which checks the stored first header of each
     /// volume).
     pub(super) fn stored_deflines(&self, oid: u32) -> Result<Vec<Defline>, SeqDbError> {
-        let record = self.header_bytes(oid)?;
-        let path = with_extension(&self.base, self.index.seqtype, "hr");
-        decode_deflines_as(&record, &path, oid, false)
+        let (record, path) = self.header_record(oid)?;
+        decode_deflines_as(&record, path, oid, false)
     }
 
     /// `deflines`, with the `taxid` of each definition line decoded when `want_taxid` (the
     /// decode of `defline_taxids`, which also gives the titles).
     pub fn deflines_as(&self, oid: u32, want_taxid: bool) -> Result<Vec<Defline>, SeqDbError> {
-        let record = self.header_bytes(oid)?;
-        let path = with_extension(&self.base, self.index.seqtype, "hr");
+        let (record, path) = self.header_record(oid)?;
         self.kept_lines(
             oid,
             &record,
-            &path,
-            decode_deflines_as(&record, &path, oid, want_taxid),
+            path,
+            decode_deflines_as(&record, path, oid, want_taxid),
         )
     }
 

@@ -304,7 +304,8 @@ tblastn spread their stages over files (blastx `preliminary.rs`, `traceback.rs`,
   query's preliminary hit list does not depend on the other queries of its batch), once per query
   block, or once per query and round of psiblast. Its
   `process_subject` does the preliminary search; the traceback, the composition redo and the report
-  follow in the same function.
+  follow in the same function (the warning lines of the queries, the checks and the prefetch of the
+  reported subjects and the refusals before any format is written are in `blast_engine/report_prep.rs`).
 - **Long queries.** Both re-enter their batch function for NCBI's query chunks (`SplitQuery_GetChunkSize`,
   `CQuerySplitter`): blastn through `search_query_chunks`, blastp through
   `search_split_query_batches`. Only the preliminary stage runs per chunk; the chunks' hit lists are
@@ -341,7 +342,9 @@ psiblast is blastp with a round driver (`blastp/blast_engine/psi_round.rs`, `sea
 ### The translated programs and rpsblast
 
 blastx, tblastn and tblastx follow the same stages with their own drivers: blastx in
-`blastx/native.rs`, `search.rs` and `runtime.rs` (its `batch_end` ends a query batch; the redo of
+`blastx/native.rs` (its `run_inner` runs the program; the set-up of the options, the read of
+the `-subject` file and the archive of a query batch are `native/run_parts.rs`), `search.rs` and
+`runtime.rs` (its `batch_end` ends a query batch; the redo of
 the batch's matches with composition-based statistics is `runtime/kappa_batch.rs`); tblastn in `tblastn/tblastn_app.rs` and
 `stage_d_pipeline.rs`; tblastx in `tblastx/blast_engine/run_impl.rs`, whose `search_query_batch`
 sets up a query batch with `batch_setup.rs`, `context_cutoffs.rs` and `seed_tables.rs`, runs its

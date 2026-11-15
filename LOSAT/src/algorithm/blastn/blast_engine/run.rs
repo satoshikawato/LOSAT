@@ -3565,6 +3565,15 @@ fn x_bn_pv_once(head: &x_dc_csr::XPacked<'_>) -> bool {
 }
 const X_PV_ONCE_MAX_BITS: usize = 1 << 20;
 
+/// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNEXTFIRST, in the strict set: on unless it is `0`)
+/// `pair_extend::extend_offset_pairs` extends a megablast table's lookup hit to its word before it
+/// looks up the hit's context, so a hit whose word is not found costs only its extension, as in
+/// NCBI's `s_BlastNaExtend`, where the table's lookup width is below the word size. The words and
+/// every value are the same.
+pub(super) fn x_bn_ext_first() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNEXTFIRST"))
+}
 /// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNTBRANGE) the traceback of a database search decodes
 /// a sequence of at least `x_tb_range_min` bases in the ranges of its HSPs only, as NCBI's partial
 /// fetch does (`database::traceback_listed`).
@@ -10765,6 +10774,7 @@ fn run_in_pool(
                     );
                 }
             }
+            database::drop_unaligned(database, &mut batch_hit_lists);
             if let Err(error) = database::read_titles(database, &batch_hit_lists, &mut titles) {
                 let error = match error.downcast::<database::HeaderReadError>() {
                     Ok(failure) => failure.error,

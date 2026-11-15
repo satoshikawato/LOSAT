@@ -552,6 +552,10 @@ impl FormatObserver for RangeRecorder {
     fn rounds_converged(&mut self, query: usize) {
         self.parts.rounds_converged(query);
     }
+
+    fn pssm_query(&mut self, query: &FastaRecord) {
+        self.parts.pssm_query(query);
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:146-155
@@ -1377,13 +1381,13 @@ pub fn run_collect(
                 })
                 .collect(),
             hsps: Vec::new(),
-            query_stats: vec![None; inputs.query.len()],
+            query_stats: vec![None; inputs.query_count()],
             rounds: vec![
                 QueryRounds {
                     stats: vec![None],
                     converged: false,
                 };
-                inputs.query.len()
+                inputs.query_count()
             ],
             diagnostics,
         });

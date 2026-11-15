@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.32
+- Version: 1.34
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -71,7 +71,15 @@
   refusal of 1.25 narrowed to the prefetch off and to the orders of loads that LOSAT does not
   model; line DBID item mixdb2, Owner-delegated, standing instruction 2026-09-29, restated
   2026-10-07);
-  1.32 2026-11-15 (exception 13, BLASTN `-db_hard_mask` on a sequence whose first mask runs to its
+  1.32 2026-11-15 (the sequence that a positive seqid list keeps while matching none of its lines,
+  of 1.6 and 1.29, is no longer an explicit rejection: NCBI's result is deterministic, and LOSAT
+  reproduces it, rule 2; a negative list's stays refused; line DBID item lineless, Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07);
+  1.33 2026-11-15 (BLASTX's ungapped one-hit HSPs of negative length and of length 0 ported, rule 4,
+  line RG item X2g, with the refusals of decisions X2g-4 and X2g-5 of that line and the tables of
+  X2g-5's one alignment ported by X2g-7: Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07);
+  1.34 2026-11-16 (exception 13, BLASTN `-db_hard_mask` on a sequence whose first mask runs to its
   end, at a scanned word of 11 or more; the Owner's decision of 2026-11-15 「M4a Q1=B」, line NP
   item M4a-2c)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
@@ -543,9 +551,9 @@ here, and names the widening that PS16a made for protein queries.
     except the line that echoes the input file's name. NCBI's binary prints the same there: its compiled
     loop shows no wrap in this output, which the undefined behaviour allows.
 
-## Approved exception (BLASTN `-db_hard_mask`, a mask that runs to the end, version 1.32)
+## Approved exception (BLASTN `-db_hard_mask`, a mask that runs to the end, version 1.34)
 
-Version 1.32. The Owner decided on 2026-11-15 (line NP `DECISIONS.md` 45, words 「M4a Q1=B」) question
+Version 1.34. The Owner decided on 2026-11-15 (line NP `DECISIONS.md` 45, words 「M4a Q1=B」) question
 Q1 of M4a-2b (PR #1173): option B, the search over the range before the mask at a scanned word of 11
 or more, blastn-short keeping the refusal. Not taken: option A, refusing the shape for every task
 (it refuses searches that NCBI ends normally, such as a transcript database whose poly-A tails are
@@ -594,7 +602,7 @@ masked). Line NP item M4a-2c.
     thread count, and the search ends normally (exit 0). The traceback reads every masked
     letter as `B`, as NCBI's traceback does (`s_SeqDBMaskSequence`, `seqdbvol.cpp:1518-1585`). Below
     a scanned word of 11 (blastn-short's 7) LOSAT refuses such a database before it writes anything,
-    as it did for every word before version 1.32 (rule 3). `blastinput::db_mask::
+    as it did for every word before version 1.34 (rule 3). `blastinput::db_mask::
     TAIL_MASK_SEARCHED_WORD`, `algorithm::blastn::blast_engine::run::next_hard_chunk`.
     Evidence (NCBI BLAST+ 2.17.0, each run capped; inputs, scripts and results in the line's task
     folder, `M/m4a2b/q1` and `M/m4a2c`):
@@ -667,6 +675,23 @@ masked). Line NP item M4a-2c.
   the volume do not count; two or more volumes never do) (line DI-8 `DECISIONS.md` 18; line
   DBID item gisl, 2026-11-15).
 
+- A sequence that a positive seqid list (`-seqidlist`) keeps while matching none of its
+  definition lines (a pdb molecule named without its chain, a local id in other letters, a
+  Swiss-Prot name on a version 4 database, a list's `gnl|BL_ORD_ID|n` that the accession table
+  resolves by the stored number to a sequence in a volume whose first OID is not 0, whose lines
+  NCBI's header read tests with the volume's first OID added, `seqdbvol.cpp:2222-2236`, of 1.29):
+  the sequence is searched and its length counts in the statistics, but NCBI's filtered header
+  leaves it no Seq-id, and `BlastHitList2SeqAlign_OMF` makes no Seq-align of its hits
+  (`blast_seqalign.cpp:1582-1586`; the post is at the `Info` level and not printed). The hits leave
+  every report, the prefetch, the taxonomy lookups and psiblast's PSSM without a word, after they
+  took their places in the hit list before the cut to `-max_target_seqs` (psiblast's Seq-aligns are
+  made of the longer preliminary hit list, so its cut comes after: they take none there). Versions
+  1.6 and 1.29 made this an explicit rejection; version 1.32 reproduces it in the six search
+  programs, each of which drops such hit lists where NCBI makes the Seq-aligns
+  (`SeqDb::keeps_line`, `algorithm::common::database::SeqAligned`; line DBID item lineless, probe of
+  1,375 runs: 6 programs, 15 lists of the five kinds, 20 formats, `-max_target_seqs` 1 and 3, a
+  query without hits). A read of such a sequence's lines still refuses, and no report reaches it.
+
 - `CHUNK_SIZE=1000` without `BATCH_SIZE`: the batch size becomes 0, NCBI prints the
   outfmt 0 prolog and then `BLAST engine error: Empty CBlastQueryVector`, exit 3.
 - `-max_target_seqs` from 2^30 to 2^31-51: the preliminary hit list size
@@ -707,24 +732,18 @@ masked). Line NP item M4a-2c.
   `CCoreException`; LOSAT rejects "a query chunk without a query" (round-3 audit: 27
   oracle cases, the reason holds in all).
 
-- A sequence that a seqid list keeps while matching none of its definition lines (a pdb
-  molecule named without its chain, a local id in other letters, a Swiss-Prot name on a
-  version 4 database, a sequence whose every line has only a gi or a ti under a negative
-  list; version 1.29: a list's `gnl|BL_ORD_ID|n` that the accession table resolves by the
-  stored number, of `makeblastdb -input_type blastdb` or of a FASTA id `gnl|BL_ORD_ID|n`, to a
-  sequence in a volume whose first OID is not 0 (a later volume, or a later database of the
-  list), whose lines NCBI's header read tests with the volume's first OID added
-  (`seqdbvol.cpp:2222-2236`), and a negative list's line removed there the same way; where such
-  a sequence keeps another line, LOSAT writes the lines NCBI keeps): NCBI's
-  filtered header leaves no line, `GetBioseq` returns null
-  (`seqdbvol.cpp:1370-1376`) and the sequence's hits leave every report without notice
-  while its length counts in the statistics. LOSAT refuses the search with the sequence
-  named (`the seqid list keeps sequence N of the volume but none of its definition lines, and
-  NCBI leaves its hits out of the report without notice`): a positive list before the
-  search, a negative list when such a sequence is to be reported (version 1.6, line DI-8
-  `DECISIONS.md` 17 and 22). The result is deterministic, but it loses hits without a
-  word, which no report can show; a user who wants NCBI's report names the chain or the
-  stored id.
+- A sequence that a negative seqid list (`-negative_seqidlist`) keeps while removing every one
+  of its definition lines (a sequence whose every line has only a gi or a ti, which
+  `CSeqDBNegativeList::FindId` does not match by type; a `BL_ORD_ID` line of a volume whose first
+  OID is not 0, of 1.29): NCBI's id set of the list is not blank (`CSeqDBImpl::x_InitIdSet`,
+  seqdbimpl.cpp:1909-1946), so the subject fetches of the traceback, the composition-based redo
+  and the ungapped re-evaluation of a nucleotide subject exclude it
+  (`seqsrc_seqdb.cpp:302-313`): it counts in the statistics and in the preliminary hit list, and
+  takes no place in the final one. LOSAT does not model those fetches yet and refuses the search
+  when such a sequence is to be reported (`the seqid list keeps sequence N of the volume but none
+  of its definition lines, and NCBI leaves its hits out of the report without notice`; versions
+  1.6 and 1.29, line DI-8 `DECISIONS.md` 17 and 22; version 1.32 kept it for the negative list
+  alone, line DBID item lineless).
 
 - A version 5 database list (several names in `-db`, or the `DBLIST` of an alias file) that
   mixes databases with and without the accession table (`acc2oid`) of `makeblastdb
@@ -1011,6 +1030,61 @@ would port:
   order) and deletes them in its re-evaluation (a
   length of 0 or less scores 0, below every cutoff), so they are never reported. The X2 build
   refused these searches; LOSAT now gives NCBI's output (the rule-3 merge case above aside).
+- BLASTX `-ungapped -window_size 0` with a low `-threshold` (version 1.33, 2026-11-15, line RG item
+  X2g): the same HSPs of the one-hit word finder. NCBI links them with the others in the first
+  `BLAST_LinkHsps` and reaps them by their E-values; `Blast_HSPListReevaluateUngapped` does not
+  rescore them (the subject is a protein) and deletes those of negative length in `Blast_HSPTest`
+  (`blast_hits.c:993-1000,2719`: the alignment length is below `min_hit_length`, which is 0), so
+  they are never reported. `Blast_HSPListSubjectBestHit` (`-subject_besthit`) sees them too
+  (`blast_hits.c:2569`). LOSAT panicked on these searches and now gives NCBI's output. No merge
+  divides by a sum of lengths of 0 here: NCBI never splits the query of an ungapped search
+  (`split_query_cxx.cpp:60-61`), and LOSAT refuses subjects that NCBI would search in chunks.
+  Those of length 0 are kept and reported; their Std-seg rows end one before they start
+  (`x_UngappedHSPToStdSeg`). LOSAT now writes them as NCBI's formatters do. With `-db` the
+  Seq-aligns stay as made: tabular rows of empty ranges (a subject whose only HSP it is shows the
+  query's Seq-align id and fields at 0: `x_SetQueryCovSeqalign` throws on the empty row and
+  `SetFields` leaves before its alignment block), Seq-aligns whose empty rows end at `TSeqPos`
+  4294967295, `CSeq_align::GetSeqRange`'s `Row is empty` (`Seq_align.cpp:227`, exit status 255)
+  where `qcovs` and outfmt 0's description table read the rows, and a block without rows past
+  that table, and the same exception where outfmt 0's `-sorthits` and `-sorthsps` sorts read them
+  (`SortSeqalignForSortableFormat`: `-sorthits 4`, `-sorthsps 2` and `4`). With `-subject` NCBI's
+  Seq-loc mapper rewrites the query row to one nucleotide with a fuzz
+  (`seq_align_mapper_base.cpp:1538-1559`): `CreateDensegFromStdseg`'s exception
+  (`Seq_align.cpp:801`) where the tabular rows, outfmt 0's alignments and sorts (`-sorthits 3`,
+  `-sorthsps 3`; `-sorthsps 4` gives 227 as with `-db`) and the XML make a Dense-seg of it, that
+  nucleotide in `qcovs`. BLAST XML, XML2 and JSON catch the exception (exit status 0, the message
+  on stderr, the query's report cut or left out), outfmt 13 and 14 do not (an empty side file,
+  exit status 255). A subject whose every HSP has length 0 has a Seq-align without a row of
+  letters: with `-db` NCBI's prefetch finds its subject row empty and writes `Error pre-fetching
+  sequence data` (every format but 8, 9, 11 and 12; 8, 9 and 12 too with
+  `PRE_FETCH_SEQS_LIMIT=2147483647`; the archive is never prefetched); LOSAT writes the same. With
+  `-subject` the mapper finds no sequence type in such a subject and takes both rows as
+  nucleotides; the stop of an empty row's segment, of the unknown length -1, is `start + m_Len - 1`
+  in the unsigned `TSeqPos` (`seq_align_mapper_base.cpp:1067-1068`), which wraps only for an HSP
+  at the first or second letter of the searched range (counted from a `-subject_loc` interval's
+  start). Further in, the mapper keeps the segment's length -1 and its scores, the Seq-align stays
+  as made, and `-subject` gives `-db`'s output, the prefetch's warning too; LOSAT writes it with
+  `-db`'s port. Where it wraps, the mapper maps the subject row to the end of its interval: one HSP
+  becomes an alignment without scores
+  of the rest of the subject's letters against as many query nucleotides (from the start of the
+  empty query row up, or on a minus strand ending two below it, as the mapper moves the other rows
+  of a segment of unknown length; an E-value of 0.0, a bit score of -1.0, a score of -1; identities
+  where a nucleotide letter equals an amino acid letter, positives by the matrix; past the query's
+  last nucleotide the gap character; a minus-strand row that would start before the query's first
+  nucleotide wraps, and NCBI then writes the caught row of the query's Seq-align id, `Row is empty`
+  for `qcovs` or the Dense-seg's exception). LOSAT writes the tabular rows (outfmt 6, 7, 10, 20) of
+  that alignment as NCBI does (decision X2g-7), reading the query record's letters outside a
+  `-query_loc` interval where the row does (the cut keeps the longest subject interval's letters and
+  one more on each side). LOSAT refuses the rest of `-subject`'s mapped alignments. Decision X2g-4:
+  an HSP of length 0 at the first letter of the searched range of a subject with HSPs of letters, which
+  the mapper cuts into two alignments without scores (the mapper knows such a subject as a protein
+  and counts its start in nucleotides, three per letter, so its stop wraps at the first letter
+  only). Decision X2g-5: a subject whose every HSP has length 0, one of them at the first or second
+  letter of the searched range, in every format but the tables and outfmt 18, and in the tables
+  where it has two or more (more rows, exceptions and out-of-memory stops). NCBI's
+  output there is partly not defined (on the 4 GiB limit of the line's probes `BLAST ran out of
+  memory`, exit status 4, for a segment of about 2^32 letters), and the rest comes from alignments
+  that the mapper makes by accident.
 - `-evalue` with a signed infinity or NaN (`+inf`, `-nan`, `+nan(1)`, `1e999`): NCBI's
   `CArg_Double` reads them with `strtod` and its option check (`<= 0`) lets them pass;
   NCBI searches as with the largest e-value (the cutoff stays 1, no HSP is reaped). LOSAT

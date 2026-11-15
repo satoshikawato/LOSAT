@@ -907,6 +907,7 @@ fn tabular_hsp<'r>(
         s_frame: 1,
         rows,
         // `Blast_HSPGetQueryCoverage` of the HSP's context, which has the searched length.
+        end_gaps: true,
         qcovhsp: hsp_coverage((hsp.q_end - hsp.q_start + 1) as i32, searched_length as i32),
     }
 }

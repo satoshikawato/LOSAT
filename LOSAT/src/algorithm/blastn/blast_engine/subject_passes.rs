@@ -114,8 +114,13 @@ pub(super) struct SubjectPasses<'a> {
 }
 
 impl SubjectPasses<'_> {
-    /// The records of a subject set, whose titles name the subjects in LOSAT's debug and trace lines
-    /// (none for a database: its sequences are "unknown" there).
+    /// The records of a subject set (none for a database). Their count is the number of subjects that
+    /// `search_subjects` searches and the number of lists into which the subject set's traceback pass
+    /// groups the kept HSPs (`prelim_hits_by_subject`); their titles name the subjects in LOSAT's debug
+    /// and trace lines (a database's sequences are "unknown" there).
+    ///
+    /// No NCBI counterpart: an accessor of LOSAT's subject set; NCBI reads each subject through a
+    /// `BlastSeqSrc` (the loop of `BLAST_PreliminarySearchEngine` quoted at the head of this module).
     fn subject_records(&self) -> &[FastaRecord] {
         self.subjects
             .prepared()
@@ -510,6 +515,25 @@ impl SubjectPasses<'_> {
     /// preliminary hit lists of `prelim_hitlist_size` subjects per query. With `-culling_limit` NCBI's
     /// culling writer takes the place of the HSP collector. A database's read error is returned as it is
     /// (the caller reports it with `database_search_error`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1674-1679 (the preliminary search
+    /// of a batch in `Blast_RunPreliminarySearchWithInterrupt`, into the batch's HSP stream)
+    /// ```c
+    ///     if ((status=
+    ///         BLAST_PreliminarySearchEngine(program, query, query_info,
+    ///                                       seq_src, gap_align, score_params,
+    /// ...
+    ///                                       psi_options, db_options, hsp_stream,
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:351-357 (the stream's writer
+    /// without a filtering option: the HSP collector, `PrelimHitCollector` here; `-culling_limit` chooses
+    /// the culling writer in the body below, and NCBI's other choice, `-best_hit_*`, is not ported)
+    /// ```c
+    ///         /* Use the collector filtering algorithm as the default */
+    ///         BlastHSPCollectorParams * params =
+    /// ...
+    ///         writer_info = BlastHSPCollectorInfoNew(params);
+    /// ```
     pub(super) fn prelim_pass<const UNGAPPED: bool>(
         &self,
         split_prelim_lists: Option<PrelimHitLists>,

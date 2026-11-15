@@ -1,0 +1,193 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/x2g_s1u2_s.faa).
+           2 sequences; 17 total letters
+
+
+
+Query= c00556_q
+
+Length=16
+
+
+> lt_s
+Length=10
+
+ Score = 12.9 bits (23),  Expect = 0.022
+ Identities = 5/5 (100%), Positives = 5/5 (100%), Gaps = 0/5 (0%)
+ Frame = +1
+
+Query  1   DSLEL  15
+           DSLEL
+Sbjct  1   DSLEL  5
+
+
+ Score = 12.9 bits (23),  Expect = 0.022
+ Identities = 5/5 (100%), Positives = 5/5 (100%), Gaps = 0/5 (0%)
+ Frame = +1
+
+Query  1   DSLEL  15
+           DSLEL
+Sbjct  6   DSLEL  10
+
+
+ Score =  6.8 bits (9),  Expect = 1.5
+ Identities = 2/2 (100%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+ Frame = -2
+
+Query  12  LE  7
+           LE
+Sbjct  3   LE  4
+
+
+ Score =  6.8 bits (9),  Expect = 1.5
+ Identities = 2/2 (100%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+ Frame = -2
+
+Query  12  LE  7
+           LE
+Sbjct  8   LE  9
+
+
+ Score =  5.3 bits (5),  Expect = 4.4
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = -1
+
+Query  16  E  14
+           E
+Sbjct  4   E  4
+
+
+ Score =  5.1 bits (4),  Expect = 5.1
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = -3
+
+Query  14  S  12
+           S
+Sbjct  2   S  2
+
+
+ Score =  5.1 bits (4),  Expect = 5.1
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = -3
+
+Query  14  S  12
+           S
+Sbjct  7   S  7
+
+
+ Score =  4.9 bits (4),  Expect = 5.8
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = +2
+
+Query  11  S  13
+           S
+Sbjct  2   S  2
+
+
+ Score =  4.9 bits (4),  Expect = 5.8
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = +2
+
+Query  11  S  13
+           S
+Sbjct  7   S  7
+
+
+ Score =  4.7 bits (4),  Expect(2) = 6.0
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = +3
+
+Query  3  L  5
+          L
+Sbjct  5  L  5
+
+
+ Score =  4.9 bits (4),  Expect(2) = 6.0
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = +2
+
+Query  8  S  10
+          S
+Sbjct  7  S  7
+
+
+ Score =  6.2 bits (7),  Expect = 2.3
+ Identities = 2/3 (67%), Positives = 2/3 (67%), Gaps = 0/3 (0%)
+ Frame = -3
+
+Query  11  SRE  3
+           S E
+Sbjct  2   SLE  4
+
+
+ Score =  6.2 bits (7),  Expect = 2.3
+ Identities = 2/3 (67%), Positives = 2/3 (67%), Gaps = 0/3 (0%)
+ Frame = -3
+
+Query  11  SRE  3
+           S E
+Sbjct  7   SLE  9
+
+
+ Score =  5.5 bits (6),  Expect = 3.7
+ Identities = 1/2 (50%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+ Frame = +1
+
+Query  7   LE  12
+           L+
+Sbjct  5   LD  6
+
+
+ Score =  6.4 bits (8),  Expect = 2.1
+ Identities = 1/5 (20%), Positives = 4/5 (80%), Gaps = 0/5 (0%)
+ Frame = -2
+
+Query  15  KLEGV  1
+           +L+ +
+Sbjct  4   ELDSL  8
+
+
+ Score =  4.2 bits (3),  Expect = 9.6
+ Identities = 0/3 (0%), Positives = 2/3 (67%), Gaps = 0/3 (0%)
+ Frame = -2
+
+Query  9  EGV  1
+          + +
+Sbjct  1  DSL  3
+
+
+> c00556_s
+Length=7
+
+ Score =  4.2 bits (3),  Expect = 9.0
+ Identities = 0/0 (100%), Positives = 0/0 (100%), Gaps = 0/0 (100%)
+
+
+
+Lambda      K        H
+   0.302    0.131    0.308 
+
+
+Effective search space used: 85
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/x2g_s1u2_s.faa).
+    Posted date:  Unknown
+  Number of letters in database: 17
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 2

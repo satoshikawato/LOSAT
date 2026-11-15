@@ -568,7 +568,7 @@ pub enum HardMaskShape {
 /// `-db_hard_mask` searches a sequence of the shape [`HardMaskShape::TailMask`] instead of refusing
 /// it: over the chunk before the mask alone, scanned from its start as NCBI scans its other hard
 /// chunks (`core::subject_split::HardSplitState::next_chunk`). An approved NCBI defect
-/// (PD-LOSAT-NCBI-DEFECTS exception 13, version 1.32; the Owner's decision of 2026-11-15, 「M4a
+/// (PD-LOSAT-NCBI-DEFECTS exception 13, version 1.34; the Owner's decision of 2026-11-15, 「M4a
 /// Q1=B」; series NP, M4a-2c): NCBI BLAST+ 2.17.0 takes the "no chunking" branch for that chunk,
 /// so it scans the subject's stored letters over the full range (its soft ranges,
 /// blast_engine.c:162-164), the masked ones included, while its extensions and its interval tree

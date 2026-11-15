@@ -148,6 +148,12 @@ impl BlastxDatabase {
         self.taxdb.found(&self.db)
     }
 
+    /// NCBI's warning of a failed prefetch, which names the run's program
+    /// (`shared::prefetch_warning`).
+    pub(crate) fn prefetch_warning(&self) -> Vec<u8> {
+        shared::prefetch_warning(self.program)
+    }
+
     /// Whether a later query batch of an XML, XML2 or JSON run could still refuse a taxonomy
     /// database name or record (`algorithm::common::database::taxdb_may_refuse`: every
     /// sequence's taxid looked up once, before the first byte). `names`: the run writes the
@@ -352,6 +358,21 @@ pub(crate) struct BatchTitles {
 }
 
 impl ReportedSubjects {
+    /// The hit lists of the query batch `batches` (subjects named by ordinal) without the
+    /// subjects that NCBI makes no Seq-align of (`shared::SeqAligned`), where its traceback
+    /// makes the batch's Seq-aligns: after the cut to the hit list size (`Runtime::batch_end`),
+    /// before `read_titles`.
+    pub(crate) fn drop_unaligned(database: &BlastxDatabase, batches: &mut [BatchResults]) {
+        let Some(mut aligned) = shared::SeqAligned::of(&database.db) else {
+            return;
+        };
+        for batch in batches {
+            for lists in &mut batch.queries {
+                aligned.retain(lists, |list| u32::try_from(list.oid).ok());
+            }
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:264-275
     // ```c++
     //     CRef<ILocalQueryData> qdata = m_QueryFactory->MakeLocalQueryData(m_Options);
@@ -629,6 +650,7 @@ impl ReportedSubjects {
                 lowercase_masks: Vec::new(),
                 warnings: Vec::new(),
                 source: None,
+                around: None,
             });
             shared::keep_source(
                 &mut reported.sources,
@@ -1163,6 +1185,7 @@ mod tests {
             lowercase_masks: Vec::new(),
             warnings: Vec::new(),
             source: None,
+            around: None,
         };
         let records = [record];
         assert_eq!(&*Subjects::Fasta(&records).encoded(0), &searched[..]);
@@ -1198,6 +1221,7 @@ mod tests {
             lowercase_masks: Vec::new(),
             warnings: Vec::new(),
             source: None,
+            around: None,
         };
         let hsp = |score: i32| Hsp {
             hsp: PreliminaryHsp {

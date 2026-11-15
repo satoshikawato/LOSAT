@@ -429,6 +429,11 @@ fn run_queries(
                     .and_then(|psi| psi.query_seq_loc_id().cloned()),
                 outcome: std::sync::Mutex::new(None),
             };
+            // The library's records of the round (`FormatObserver::round_begin`): the call's hit
+            // list and HSP numbers are the round's.
+            if let Some(observer) = outputs.observer.as_deref_mut() {
+                observer.round_begin(query, round);
+            }
             // The reader's messages of the batch come with its first round.
             let reader_warnings: &[Vec<u8>] = if round == 1 {
                 &batches.warnings[query..query + 1]
@@ -532,6 +537,9 @@ fn run_queries(
             }
         }
         if state.has_converged() {
+            if let Some(observer) = outputs.observer.as_deref_mut() {
+                observer.rounds_converged(query);
+            }
             write_converged(outputs)?;
         }
     }

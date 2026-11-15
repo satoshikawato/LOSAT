@@ -6,11 +6,12 @@ name: CodeQL
 # pull requests, so no CI congestion). Default setup scans only the default branch, main, which
 # lags dev, where all work merges, by weeks.
 #
-# - Every push to main runs the scan on that commit.
-# - Once a week (Monday 03:00 JST) a scheduled run scans the head of dev. GitHub starts a schedule
-#   only from the file on the default branch, main, so main carries the same file as dev; the run
-#   checks out dev and files its results under refs/heads/dev and dev's commit, not main's.
-# - workflow_dispatch scans the branch it is started on.
+# - Every push to main runs the scan on that commit. A merge made by github-actions[bot] (auto-merge
+#   with the default token, as for the promotion pull request) starts no push run, so:
+# - once a week (Monday 03:00 JST) a scheduled run scans the heads of dev and of main. GitHub starts
+#   a schedule only from the file on the default branch, main, so main carries the same file as dev;
+#   each scan checks out its branch and files its results under that branch and its commit.
+# - workflow_dispatch does what the schedule does (main and dev), for a scan between Mondays.
 #
 # The categories are /language:<language>, the ones default setup used, so the alerts that exist
 # and their dismissals carry over to this workflow's results. Code scanning rejects an upload from
@@ -31,7 +32,7 @@ concurrency:
 
 jobs:
   analyze:
-    name: analyze (${{ matrix.language }})
+    name: analyze (${{ matrix.language }}${{ matrix.branch && format(', {0}', matrix.branch) || '' }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -42,19 +43,22 @@ jobs:
       fail-fast: false
       matrix:
         language: [actions, javascript-typescript, python, rust]
+        # A push scans its own commit (''); the schedule and workflow_dispatch scan main and dev.
+        branch: ${{ github.event_name == 'push' && fromJSON('[""]') || fromJSON('["main", "dev"]') }}
     steps:
       - name: Check out the scanned commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # A schedule runs on main's ref; the scan is of dev. Other triggers scan their own commit.
-          ref: ${{ github.event_name == 'schedule' && 'dev' || '' }}
+          ref: ${{ matrix.branch }}
           persist-credentials: false
 
       - name: Name the scanned ref and commit
         id: scan
+        env:
+          BRANCH: ${{ matrix.branch }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" = schedule ]; then
-            echo "ref=refs/heads/dev" >> "$GITHUB_OUTPUT"
+          if [ -n "$BRANCH" ]; then
+            echo "ref=refs/heads/$BRANCH" >> "$GITHUB_OUTPUT"
             echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           else
             # Empty: the analysis is filed under the run's own ref and commit.

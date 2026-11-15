@@ -114,9 +114,13 @@
 //! - Outfmt 13 and 14 write side files next to their report, so they come through
 //!   [`run_to_file`] only; a report in memory has no place for them (the in-memory search under
 //!   the API, `local_blast`, takes a receiver of them, `OutputSink::Files`, which LOSAT Web gives).
-//! - [`Program::Psiblast`] is the search of LOSAT's `psiblast`: its first round, and the formats
-//!   it writes. The API writes no PSSM file, so it refuses `-out_pssm`, `-out_ascii_pssm`,
-//!   `-save_pssm_after_last_round` and `-save_each_pssm` ([`validate`]).
+//! - [`Program::Psiblast`] is the search of LOSAT's `psiblast`, with its rounds
+//!   (`-num_iterations`) and the formats it writes: the reports hold every round as the command
+//!   line writes them, each HSP record its round ([`HspRecord::round`]) and each query the
+//!   statistics of each round and whether its rounds converged ([`QueryRounds`],
+//!   [`QueryHits::rounds`]). The API writes no PSSM file, so it refuses `-out_pssm`,
+//!   `-out_ascii_pssm`, `-save_pssm_after_last_round`, `-save_each_pssm` and `-in_pssm`
+//!   ([`validate`]).
 //! - The API writes no search strategy file either: every program refuses
 //!   `-export_search_strategy` ([`validate`]); the command line writes it.
 //! - [`run_makeblastdb`] and [`run_blastdbcmd`] are the two database programs, and
@@ -133,7 +137,7 @@
 //! - The options: [`validate`], [`Search`], [`API_OWNED`]
 //! - The search: [`run_collect`], [`run`](run()), [`run_to_file`], [`run_batches`]
 //! - The results: [`Outcome`], [`Batches`], [`Batch`], [`Report`], [`HspRecord`], [`QueryStats`],
-//!   [`Strand`], [`QueryHits`], [`SubjectHits`]
+//!   [`QueryRounds`], [`Strand`], [`QueryHits`], [`SubjectHits`]
 //! - The tools: [`run_makeblastdb`], [`run_blastdbcmd`], [`run_dustmasker`], [`run_segmasker`],
 //!   [`run_convert2blastmask`]
 //! - The failures: [`Error`]
@@ -143,6 +147,7 @@ mod batches;
 mod describe;
 mod error;
 mod input;
+mod parts;
 // The shared local search entry of the command line and the web ABIs: each program's `run_local`
 // and the routing of its outputs. It speaks the engine's types, so it stays outside the API.
 pub(crate) mod local_blast;
@@ -159,7 +164,9 @@ pub use describe::{describe, Description, Parameter, ValueKind};
 pub use error::Error;
 pub use input::{read_fasta, read_input_file, read_inputs, Inputs, Role};
 pub use program::Program;
-pub use run::{run, run_collect, run_to_file, HspRecord, Outcome, QueryStats, Report, Strand};
+pub use run::{
+    run, run_collect, run_to_file, HspRecord, Outcome, QueryRounds, QueryStats, Report, Strand,
+};
 pub(crate) use search::file_options;
 pub use search::{validate, Search, API_OWNED};
 pub use tools::{

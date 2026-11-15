@@ -25,7 +25,10 @@ class Hsp:
         """0-based index of the subject record; of a database, the sequence's ordinal id."""
     @property
     def rank(self) -> int:
-        """0-based position among the HSPs of its query."""
+        """0-based position among the HSPs of its query in its round."""
+    @property
+    def round(self) -> int:
+        """psiblast's round that found the HSP (1-based); 1 in a search without rounds."""
     @property
     def query_id(self) -> str:
         """`qaccver`."""
@@ -130,7 +133,8 @@ class HspTable:
     def __iter__(self) -> Iterator[Hsp]: ...
     def __arrow_c_stream__(self, requested_schema: object | None = None) -> object: ...
     def _query(self, q_idx: int) -> HspTable: ...
-    def _subjects(self) -> list[tuple[int, HspTable]]: ...
+    def _subjects(self) -> list[tuple[int, int, HspTable]]: ...
+    def _round(self, round: int) -> HspTable: ...
 
 class Batches:
     def __new__(
@@ -145,7 +149,14 @@ class Batches:
     def __iter__(self) -> Batches: ...
     def __next__(
         self,
-    ) -> tuple[int, int, HspTable, list[tuple[int, int, float, float, float] | None], str]: ...
+    ) -> tuple[
+        int,
+        int,
+        HspTable,
+        list[tuple[int, int, float, float, float] | None],
+        list[tuple[list[tuple[int, int, float, float, float] | None], bool]],
+        str,
+    ]: ...
 
 def describe(
     program: str,
@@ -162,6 +173,7 @@ def run(
     list[tuple[str, bytes, list[slice | None], list[slice | None]]],
     HspTable,
     list[tuple[int, int, float, float, float] | None],
+    list[tuple[list[tuple[int, int, float, float, float] | None], bool]],
     str,
 ]: ...
 def run_to_file(

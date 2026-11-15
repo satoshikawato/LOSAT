@@ -653,7 +653,7 @@ pub struct SegMasker {
     downset: usize,
     upset: usize,
     /// LOSAT_X_SEGTRIMMEMO (graduated 2026-10-26): whether the fast path takes a segment's trim from the
-    /// thread's memo (`x_seg_trim_memo.rs`); set by the maskers that repeat segments.
+    /// memo shared by all threads (`x_seg_trim_memo.rs`); set by the maskers that repeat segments.
     x_trim_memo: bool,
 }
 
@@ -681,7 +681,7 @@ impl SegMasker {
     }
 
     /// LOSAT_X_SEGTRIMMEMO (graduated 2026-10-26): the masker that takes the trim of a segment it (or
-    /// another such masker on this thread) trimmed before from the thread's memo. For maskers
+    /// another such masker, on any thread) trimmed before from the memo. For maskers
     /// that see the same segments again (TBLASTN's redo windows, BLASTX's query and its chunks);
     /// the result is the same either way.
     // No NCBI counterpart: chooses where a trim result comes from; it does not change any value
@@ -1664,8 +1664,8 @@ impl SegMasker {
                     // ```
                     // LOSAT_X_SEGTRIMMEMO (graduated 2026-10-26, always on): the trim's offsets
                     // within the segment are a function of its letters and `maxtrim`
-                    // (x_seg_trim_memo.rs); for a masker that asks for it, a segment this thread
-                    // trimmed before takes the stored offsets.
+                    // (x_seg_trim_memo.rs); for a masker that asks for it, a segment trimmed
+                    // before (by any thread) takes the stored offsets.
                     (leftend, rightend) =
                         if masker.x_trim_memo && leftend <= rightend && rightend < seq.len() {
                             let base = leftend;

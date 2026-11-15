@@ -71,6 +71,7 @@ struct PssmNeighbors<'a, R: PssmRows> {
 ///     lookup->alphabet_size = BLASTAA_SIZE;
 ///     lookup->threshold = (Int4)opt->threshold;
 /// ```
+#[cfg(test)]
 pub(crate) fn build_pssm_lookup<R: PssmRows>(
     rows: &R,
     word_length: usize,
@@ -81,8 +82,10 @@ pub(crate) fn build_pssm_lookup<R: PssmRows>(
 
 /// `build_pssm_lookup` over the lookup segments `locations` (NCBI's `lookup_segments`, inclusive
 /// `[left, right]` ranges of query offsets; one with `left > right` adds no word): the
-/// complement of the query's filtering locations (tblastn `-in_pssm`, whose SEG masks keep words
-/// out of the table, `algorithm::tblastn::in_pssm`).
+/// complement of the query's filtering locations, whose masks (`-seg`, `-lcase_masking`, also
+/// with `-soft_masking true`) keep words out of the table: psiblast's PSSM searches
+/// (`blastp::blast_engine::pssm_hooks::pssm_lookup`, blastp's lookup segments) and tblastn
+/// `-in_pssm` (`algorithm::tblastn::in_pssm`).
 pub(crate) fn build_pssm_lookup_in<R: PssmRows>(
     rows: &R,
     word_length: usize,

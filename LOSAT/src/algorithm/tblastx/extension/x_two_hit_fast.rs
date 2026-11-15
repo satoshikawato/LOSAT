@@ -88,7 +88,8 @@
 //!   before the switch, and with the walks of the search's word length (3, or 2 for the other
 //!   matrices' instance; `TbxScore::sent_two_hit_of`). The units of the other hit loop
 //!   (`LOSAT_X_TBXHITBF=0`, the probes of `LOSAT_TIMING` and `LOSAT_X_STATS`) take `two_hit`.
-//!   The reference frame loops (run_impl.rs) choose at every call.
+//!   The reference frame loops (`blast_engine/word_finder.rs`: `begin_chunk_scan` sets
+//!   `subject_sent` per chunk, `two_hit_one_hit` reads it) choose at every call.
 //! * Where. A query context's buffer is `[0, residues.., 0]` and a subject frame's too
 //!   (`translation.rs`, NCBI's NULLB at each end, blast_util.c:438-453); the callers' sequences are
 //!   the residues. A subject frame of more than `MAX_DBSEQ_LEN` (5,000,000) residues is searched in

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Builds tests/db_search/multidb/: the databases of the rows db.mdb.* (DI-8f: -db with several names).
 
-Usage: make_multidb.py MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
+Usage: make_multidb.py [--ordsl-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
 
 The records are those of taxfilter/tfp.faa (23 protein globins) and taxfilter/tfn.fna (16 globin cDNAs); the definition
 lines (some records carry a second one) stay as they are, the taxids come from taxfilter/tfp.map and tfn.map.
@@ -20,10 +20,32 @@ lines (some records carry a second one) stay as they are, the taxids come from t
 - `al.nal`: an alias file (TITLE multidb alias of na, DBLIST na).
 - `mix_u.nal`: an alias file of `na nnp` whose FIRST_OID 9 and LAST_OID 17 keep the sequences of nnp alone (line DBID mixdb).
 - `sl.txt`: a seqid list of the first accession of na, nb, pa and pb.
+- `ov_p` / `ov_n` (line DBID ordsl): `makeblastdb -input_type blastdb` of ../taxfilter/tfu_p and tfu_n (version 5, no
+  parsed Seq-ids, four records) in two volumes of two records (`-max_file_sz` 400 and 500 bytes) under one LMDB file:
+  makeblastdb stores `gnl|BL_ORD_ID|n` with n the OID in the database and keys the accession table with it, and NCBI's
+  header reads add the volume's first OID (2) to the stored n of the second volume.
+- `sl_ord0.txt`, `sl_ord1.txt`, `sl_ord2.txt`, `sl_ord9.txt`, `sl_ord13.txt`: the seqid list `gnl|BL_ORD_ID|n`;
+  `sl_ord1.bsl` the binary list of `sl_ord1.txt` (`blastdb_aliastool -seqid_file_out`).
+- `pxm` / `nxm` (line DBID ordsl, review 1): version 5, `-parse_seqids`, two records named to sort after `pa` / `na`: the
+  letters of record 13 of tfp.faa (record 9 of tfn.fna) under two definition lines, `ref|NP_900003.1|` (`NM_`) and
+  `gnl|BL_ORD_ID|7`, and a random sequence (seed 20261115) under `ref|NP_900005.1|gnl|BL_ORD_ID|0`, whose tag makeblastdb
+  stores as the string "0" (a tag with a leading 0 is not made a number). `xq.faa`: that random protein as a query.
+  Lists `sl_pxm7.txt` and `sl_pxm19.txt` (`NP_900003.1` and `gnl|BL_ORD_ID|7` / `19`: 7 plus the 12 sequences of pa),
+  `sl_nxm7.txt`, `sl_ord7.txt`, `sl_ord15.txt` (7 plus the 8 of na), `sl_ord19.txt`, `sl_np5.txt` (`NP_900005.1`).
+  `make_multidb.py --ordsl-only MAKEBLASTDB` builds only these and the ones above.
+- `put` (line DBID mixdb2, review 1 H1): version 5 protein without `-parse_seqids`, the three proteins of
+  ../ids/ids_q.faa (those of ../ids/noacc_v5) with taxid 9606 (`-taxid`), so that its loads look the taxonomy up in a
+  list with `pa`.
+- `mix2_q.faa`, `mix2_qx.fna`, `mix2_q.fna`, `mix2_qt.faa` (line DBID mixdb2): two queries each, the first of which
+  hits only a database without the accession table (`-evalue 1e-10`), the second the parsed one (../taxfilter/q.faa or
+  q.fna): `qp1` of ../ids/ids_q.faa (noacc_v5, put), the same back-translated (one codon per amino acid), the
+  `FBtr0083245` record of nnp.fa (glob1), and the longest ORF of that record (153 aa).
+  `make_multidb.py --mixdb2-only MAKEBLASTDB` builds only `put` and these.
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
 """
 import os
+import random
 import re
 import subprocess
 import sys
@@ -37,8 +59,12 @@ def makeblastdb(binary, *args):
 
 
 def read_fasta(name):
+    return read_fasta_path(os.path.join(SRC, name))
+
+
+def read_fasta_path(path):
     records = []
-    with open(os.path.join(SRC, name)) as f:
+    with open(path) as f:
         for line in f:
             if line.startswith(">"):
                 records.append([line, []])
@@ -82,6 +108,81 @@ def make_pgim(binary, tfp):
     write_set("pgim", records, None)
     makeblastdb(binary, "-in", "pgim.fa", "-dbtype", "prot", "-out", "pgim", "-parse_seqids", "-blastdb_version", "5",
                 "-title", "multidb pgim")
+
+
+def make_ordsl(binary):
+    """Builds ov_p and ov_n and writes the ordinal-id seqid lists (line DBID ordsl)."""
+    for kind, source, base, size in (("prot", "tfu_p", "ov_p", "400"), ("nucl", "tfu_n", "ov_n", "500")):
+        makeblastdb(binary, "-in", os.path.join(SRC, source), "-input_type", "blastdb", "-dbtype", kind, "-out", base,
+                    "-blastdb_version", "5", "-max_file_sz", size, "-title", "multidb " + base)
+        os.remove(os.path.join(HERE, f"{base}.{kind[0]}js"))
+    for n in (0, 1, 2, 9, 13):
+        with open(os.path.join(HERE, f"sl_ord{n}.txt"), "w") as f:
+            f.write(f"gnl|BL_ORD_ID|{n}\n")
+    aliastool = os.path.join(os.path.dirname(binary), "blastdb_aliastool")
+    subprocess.run([aliastool, "-seqid_file_in", "sl_ord1.txt", "-seqid_file_out", "sl_ord1.bsl"], check=True, cwd=HERE,
+                   stdout=subprocess.DEVNULL)
+    rng = random.Random(20261115)
+    tfp, tfn = read_fasta("tfp.faa"), read_fasta("tfn.fna")
+    for base, kind, source, prefix, alphabet, length in (("pxm", "prot", tfp[12], "NP", "ACDEFGHIKLMNPQRSTVWY", 120),
+                                                          ("nxm", "nucl", tfn[8], "NM", "ACGT", 300)):
+        letters = "".join(rng.choice(alphabet) for _ in range(length))
+        random_lines = [letters[at:at + 60] + "\n" for at in range(0, length, 60)]
+        records = [[f">ref|{prefix}_900003.1| two-line t3a\x01gnl|BL_ORD_ID|7 two-line t3b\n", source[1]],
+                   [f">ref|{prefix}_900005.1|gnl|BL_ORD_ID|0 string tag t5\n", random_lines]]
+        write_set(base, records, None)
+        makeblastdb(binary, "-in", base + ".fa", "-dbtype", kind, "-out", base, "-parse_seqids", "-blastdb_version", "5",
+                    "-title", "multidb " + base)
+        os.remove(os.path.join(HERE, f"{base}.{kind[0]}js"))
+        if kind == "prot":
+            with open(os.path.join(HERE, "xq.faa"), "w") as f:
+                f.write(">xq the random protein of pxm\n" + "".join(random_lines))
+    lists = {"sl_pxm7.txt": "NP_900003.1\ngnl|BL_ORD_ID|7\n", "sl_pxm19.txt": "NP_900003.1\ngnl|BL_ORD_ID|19\n",
+             "sl_nxm7.txt": "NM_900003.1\ngnl|BL_ORD_ID|7\n", "sl_ord7.txt": "gnl|BL_ORD_ID|7\n",
+             "sl_ord15.txt": "gnl|BL_ORD_ID|15\n", "sl_ord19.txt": "gnl|BL_ORD_ID|19\n", "sl_np5.txt": "NP_900005.1\n"}
+    for name, text in lists.items():
+        with open(os.path.join(HERE, name), "w") as f:
+            f.write(text)
+
+
+def make_mixdb2(binary):
+    """Builds put and writes the queries mix2_q*.f* (line DBID mixdb2)."""
+    ids_q = os.path.join(os.path.dirname(HERE), "ids", "ids_q.faa")
+    makeblastdb(binary, "-in", ids_q, "-dbtype", "prot", "-out", "put", "-blastdb_version", "5", "-taxid", "9606",
+                "-title", "multidb put")
+    os.remove(os.path.join(HERE, "put.pjs"))
+
+    def letters(path, index=0):
+        header, lines = read_fasta_path(path)[index]
+        return header.rstrip("\n"), "".join(line.strip() for line in lines)
+
+    qp1 = letters(ids_q)[1]
+    glob1 = next("".join(line.strip() for line in lines) for header, lines in read_fasta_path(os.path.join(HERE, "nnp.fa"))
+                 if header.split()[0] == ">FBtr0083245")
+    bases = "TCAG"
+    amino = "FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG"
+    code = {a + b + c: amino[16 * i + 4 * j + k] for i, a in enumerate(bases) for j, b in enumerate(bases)
+            for k, c in enumerate(bases)}
+    orf = ""
+    for frame in range(3):
+        protein = "".join(code.get(glob1[at:at + 3], "X") for at in range(frame, len(glob1) - 2, 3))
+        for piece in protein.split("*"):
+            start = piece.find("M")
+            if start >= 0 and len(piece) - start > len(orf):
+                orf = piece[start:]
+    codon = {"A": "GCT", "R": "CGT", "N": "AAC", "D": "GAC", "C": "TGC", "Q": "CAG", "E": "GAA", "G": "GGT", "H": "CAC",
+             "I": "ATC", "L": "CTG", "K": "AAA", "M": "ATG", "F": "TTC", "P": "CCG", "S": "TCT", "T": "ACC", "W": "TGG",
+             "Y": "TAC", "V": "GTT"}
+    protein_q, nucleotide_q = letters(os.path.join(SRC, "q.faa")), letters(os.path.join(SRC, "q.fna"))
+    for name, records in (
+            ("mix2_q.faa", [(">mix2_u qp1 of ids/noacc_v5 (no accession table)", qp1), protein_q]),
+            ("mix2_qx.fna", [(">mix2_u qp1 of ids/noacc_v5 back-translated", "".join(codon[a] for a in qp1)),
+                             nucleotide_q]),
+            ("mix2_q.fna", [(">mix2_u glob1 of multidb/nnp (no accession table)", glob1), nucleotide_q]),
+            ("mix2_qt.faa", [(">mix2_u the glob1 ORF of multidb/nnp", orf), protein_q])):
+        with open(os.path.join(HERE, name), "w") as f:
+            for header, seq in records:
+                f.write(header + "\n" + "\n".join(seq[at:at + 60] for at in range(0, len(seq), 60)) + "\n")
 
 
 def main(binary):
@@ -131,4 +232,11 @@ def main(binary):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    if sys.argv[1] == "--ordsl-only":
+        make_ordsl(sys.argv[2])
+    elif sys.argv[1] == "--mixdb2-only":
+        make_mixdb2(sys.argv[2])
+    else:
+        main(sys.argv[1])
+        make_ordsl(sys.argv[1])
+        make_mixdb2(sys.argv[1])

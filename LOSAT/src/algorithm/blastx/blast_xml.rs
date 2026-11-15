@@ -930,7 +930,7 @@ pub(super) struct QueryScan {
 /// the search stops at it): nothing is checked. Under `-parse_deflines` (`query_scopes`, without a
 /// batch yet) the read adds each batch to the scopes of the queries (`QueryScopes::add_batch_ids`),
 /// so that LOSAT's refusal of two queries of one scope with one id comes before the first byte; the
-/// search then reads them from `QueryScan::query_scopes`.
+/// search then reads them from `QueryScan::query_scopes`. `checks_titles`: as `scan_queries`.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn prescan_queries(
     file: std::fs::File,
@@ -940,6 +940,7 @@ pub(super) fn prescan_queries(
     batch_size: usize,
     range: Option<&crate::blastinput::seq_range::SequenceRange>,
     holds_back: bool,
+    checks_titles: bool,
     mut query_scopes: Option<crate::blastinput::query_batch::QueryScopes>,
 ) -> Result<QueryScan> {
     if batch_size == 0 {
@@ -948,7 +949,7 @@ pub(super) fn prescan_queries(
     let mut stream = settings.stream_before_search(file);
     let mut delivered = 0usize;
     let mut refusal = None;
-    let mut scan = scan_queries(options, holds_back, &mut |deliver| {
+    let mut scan = scan_queries(options, holds_back, checks_titles, &mut |deliver| {
         super::input::read_fasta_stream_batches(
             &mut stream,
             false,
@@ -993,10 +994,12 @@ pub(super) fn prescan_queries(
 /// (`archive::written_batch`, which `options` decide). A document that holds each report back
 /// until the next query's arrives (`holds_back`: a `-subject` XML2 or JSON document) never writes
 /// the last query of the batches before such a stop: that query is checked only when the next
-/// batch is written or `read` ends without an error.
+/// batch is written or `read` ends without an error. Without `checks_titles` (a run whose XML
+/// format fails for its matrix name before any report, `xml_matrix_failure`) no title is checked.
 pub(super) fn scan_queries(
     options: &ResolvedOptions,
     holds_back: bool,
+    checks_titles: bool,
     read: &mut dyn FnMut(&mut dyn FnMut(&[FastaRecord]) -> Result<()>) -> Result<()>,
 ) -> Result<QueryScan> {
     let mut scan = QueryScan::default();
@@ -1007,6 +1010,12 @@ pub(super) fn scan_queries(
     let scanned = read(&mut |batch| {
         if !super::archive::written_batch(batch, options) {
             anyhow::bail!("NCBI stops the run at this batch");
+        }
+        // A run whose XML format fails for its matrix name writes no report, and no title
+        // (`xml_matrix_failure`): its batches are read for their scopes alone.
+        if !checks_titles {
+            written += batch.len();
+            return Ok(());
         }
         // The next batch is written: so is the report held before it.
         if let Some((check, may_be_refused)) = held.take() {
@@ -1116,15 +1125,42 @@ pub(super) fn xml2_writer(
     Xml2Writer::with_document(Xml2Document::with_files(kind, delayed, files), params)
 }
 
-/// Writes the documents of every query of `batches` (one query batch) through `document` (BLAST
-/// XML, or the XML2 / JSON documents) to `writer`: the document's header before the first query
-/// of the run, each query's Iteration or report, and nothing else; the end of the document is
-/// `write_epilog`'s. Everything NCBI cannot write is refused before this call's first byte, for
-/// the reports that the document writes: the query titles and messages, the titles of the
-/// subjects with hits (and, with a hold, the whole run's bytes stay in memory, `HeldOutput`). A
-/// run that stops after this batch (`stops`) never writes the `-subject` report of its last
-/// query, which NCBI holds back (`written_queries`). NCBI's messages about the taxonomy database
-/// go to `diagnostics` at the first `Hit` that needs them.
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:121 (quoted at
+// `blast_xml2::reports_held`)
+/// Where BLASTX's run of the formats `formats` (the command line's one, or the library's) stops
+/// for a matrix name that NCBI's BLAST XML report data does not know
+/// (`blast_xml::matrix::xml_formatting_failure`; the first of the formats to fail stops the run),
+/// with the fact of the search: subject records (`subject_set`: `-subject`, `m_IsBl2Seq`); BLASTX
+/// does not iterate. Decided once for the run and given to the batch whose report fails
+/// (`write_blastx_xml`), to the end of a run of one query (`report::write_epilog`) and to the
+/// reads of the titles before the search, which then check no title (`native::run_inner`,
+/// `local::scan_xml_titles`).
+pub(super) fn xml_matrix_failure(
+    formats: &[ResolvedOptions],
+    subject_set: bool,
+) -> Option<crate::report::blast_xml::matrix::XmlMatrixFailure> {
+    let outfmts: Vec<String> = formats
+        .iter()
+        .map(|options| options.outfmt.to_string())
+        .collect();
+    crate::report::blast_xml::matrix::xml_formatting_failure(
+        outfmts.iter().map(String::as_str),
+        &formats.first()?.matrix,
+        subject_set,
+        false,
+    )
+}
+
+/// Writes the documents of every query of `batches` (one query batch, after the
+/// `queries_before` queries of the batches before it) through `document` (BLAST XML, or the XML2
+/// / JSON documents) to `writer`: the document's header before the first query of the run, each
+/// query's Iteration or report, and nothing else; the end of the document is `write_epilog`'s.
+/// Everything NCBI cannot write is refused before this call's first byte, for the reports that
+/// the document writes: the query titles and messages, the titles of the subjects with hits
+/// (and, with a hold, the whole run's bytes stay in memory, `HeldOutput`). A run that stops after
+/// this batch (`stops`) never writes the `-subject` report of its last query, which NCBI holds
+/// back (`written_queries`). NCBI's messages about the taxonomy database go to `diagnostics` at
+/// the first `Hit` that needs them.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn write_blastx_xml<W: StructuredXml>(
     writer: &mut impl Write,
@@ -1135,7 +1171,9 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     subjects: &[FastaRecord],
     shown: &ShownSubjects<'_>,
     batches: &[BatchResults],
+    queries_before: usize,
     stops: bool,
+    xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
 ) -> Result<()> {
     let gapped_karlin = gapped_karlin(options);
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218
@@ -1147,11 +1185,22 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     //             NCBI_THROW(blast::CBlastException, eInvalidArgument,
     //                         "unsupported score matrix");
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2389 (quoted at
+    // `blast_xml::matrix::XmlMatrixFailure`)
     // The formatting table is found by the name as typed (`strcmp`): a lower-case name stops the
-    // report data of the first query (`BLAST engine error:`, exit 3), before any byte of it.
-    // (`native::report_error` writes it as NCBI's engine error.)
+    // report data of the run's first query, or of its second where the report is held
+    // (`XmlMatrixFailure::SecondQueryOrEnd`: NCBI's next query of another Seq-id, the second as
+    // LOSAT refuses two queries of one id before any output; `xml_matrix`, the run's
+    // `xml_matrix_failure`), in the batch of that query (`BLAST engine
+    // error:`, exit 3), before any byte of the reports; a batch before it writes nothing (its
+    // reader messages and request posts are the batch loop's).
     let Some(positives) = FormattingMatrix::new(&options.matrix) else {
-        anyhow::bail!("unsupported score matrix");
+        let failure =
+            xml_matrix.context("LOSAT internal error: no run decision for an XML matrix")?;
+        if failure.fails_in(queries_before..queries_before + queries.len()) {
+            return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
+        }
+        return Ok(());
     };
     let (db_name, db_num, db_len) = match shown {
         ShownSubjects::Fasta { .. } => (String::new(), 0, 0),
@@ -1463,7 +1512,7 @@ mod scan_tests {
     /// error) or at the end of the queries.
     fn scan(batches: &[Vec<FastaRecord>], stops: bool, holds_back: bool) -> Result<QueryScan> {
         let options = super::super::stage_c_tests::options();
-        scan_queries(&options, holds_back, &mut |deliver| {
+        scan_queries(&options, holds_back, true, &mut |deliver| {
             for batch in batches {
                 deliver(batch)?;
             }
@@ -1505,6 +1554,16 @@ mod scan_tests {
         assert!(refused(scan(&[vec![bad(), plain()]], true, true)));
         // A run that stops at its first batch writes nothing.
         let found = scan(&[], true, true).unwrap();
+        assert_eq!(found.stops_after, None);
+        assert!(!found.messages_may_be_refused);
+        // A run whose XML format fails for its matrix name writes no report and no title
+        // (`xml_matrix_failure`, probe K4f of line RG): its batches are read, no title is checked.
+        let options = super::super::stage_c_tests::options();
+        let found = scan_queries(&options, false, false, &mut |deliver| {
+            deliver(&[bad(), plain()])?;
+            deliver(&[bad()])
+        })
+        .unwrap();
         assert_eq!(found.stops_after, None);
         assert!(!found.messages_may_be_refused);
     }

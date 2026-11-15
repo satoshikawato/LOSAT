@@ -1,0 +1,1 @@
+- CI: the weekly CodeQL run (and a manual workflow_dispatch run) scans main as well as dev. A merge made by github-actions[bot] (auto-merge with the default token, as for the promotion pull request) starts no push run, so main's scan on push did not happen for those merges.

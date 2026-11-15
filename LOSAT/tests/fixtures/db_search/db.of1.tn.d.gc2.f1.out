@@ -1,0 +1,132 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: translated subjects of the query-anchored rows
+           6 sequences; 2,345 total letters
+
+
+
+Query= tnq protein query
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+t_mins minus insertion                                                187     1e-66
+t_ins plus insertion                                                  170     5e-60
+t_mdel minus deletion                                                 166     4e-58
+t_pm both strands                                                     130     2e-43
+t_fr two frames                                                       129     2e-43
+t_code alt codons                                                     122     4e-41
+
+
+
+Query_1  1    AYTHGMRFCPKVKQQCTFYCMEQDNVTQVMVCSFKTEDFSTHGTIWKHCMWKCWDTSFPT  60
+3        369                      ...........D..................G.........  250
+2        1    ...V................A.......................M......N........  192
+                                                      \                   
+                                                      |                   
+                                                   WWHW
+4        342  ......*............................V..........W...------....  181
+0        1    ......*....................E...RP...........F.............K.  180
+1        167                                               ..............Y  211
+1        1    .........F........M....M.........D..........M..........       165
+5        1              ....M..........W.M..*........Y......*.M...*..*....  150
+
+Query_1  61   SKSHCVTCTSqqqqqqqqqqqqqqqqeqFSANDWFCRWRFCFKGWLINPDVPCPTKVRVD  120
+3        249  K.........FKTLPGDHIHL.RIAV..............................G..Y  61
+               \                                                          
+               |                                                          
+              PRH
+2        193  ....I.....SKTLPGDHIHL.*IAV........................            342
+4        180  ...P......SKTLPGDHIHL.RIAV.......Q..Q.........MP.........*..  1
+0        541  ...*......SKTLPGDHHHL.*IAV............*G.............R......  362
+0        181  ..........                                                    210
+1        212  ..........SKTLPGDHIHL.RMAV............D..................*.N  391
+5        151  ..*.......SKSLPGDHIHL.*MAV.....T.T*.*..*.T.W........*.W..*..  330
+
+Query_1  121  TYLNCGCCEVWDKEITESDAQNYIHEANAE  150
+3        60   ..............M.....            1
+0        361  .................V............  272
+1        392  ..........                      421
+
+
+Lambda      K        H        a         alpha
+   0.326    0.135    0.513    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 76137
+
+
+Query= tnq2 second
+
+Length=110
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+t_mins minus insertion                                                169     4e-60
+t_fr two frames                                                       145     2e-50
+t_ins plus insertion                                                  126     2e-43
+t_mdel minus deletion                                                 121     2e-41
+t_pm both strands                                                     111     2e-36
+t_code alt codons                                                     105     8e-35
+
+
+
+Query_2  1    VCSFKTEDFSTFGTIWKHCMWKCWDTSFDTSKSHCATCTSEKTLYGDHIILQRIAVSVFS  60
+3        339  .D.........H........G.......P.K....V....F...P....H......EQ..  151
+                                             \                            
+                                             |                            
+                                           PRH
+1        167                 .............PY.....V....S...P....H...M..EQ..  301
+1        91   ...D.......H..M..........ME                                   171
+2        91   ...........H..M......N......P.....IV....S...P....H..*...EQ..  282
+                        \                                                 
+                        |                                                 
+                     WWHW
+4        252  .....V.....H....W...------..P....P.V....S...P....H......EQ..  91
+0        541                                ...*.V....S...P...HH..*...EQ..  452
+0        91   .RP........H..F.............K......V....S...P....             237
+5        64    ........Y.H....*.M...*..*..P...*..V....S.S.P....H..*M..EQ..  240
+5        206                     ..SPGKLLLEVQVTQ.LLLVGKDLSHLF..M            114
+
+Query_2  61   ANDWRCRWRFCFKSWLINPYVPCPTKVRVDTYLNCGCCEVTGKVITESKA  110
+3        150  ....F........G.....D......G..Y..........WD.EM...D.  1
+1        302  ....F...D....G.....D.......*.N..........            421
+2        283  ....F........G.....                                 339
+4        90   ...QF.Q......G..MP.D.......*..                      1
+0        451  ....F...*G...G.....D...R................WD.E...VD.  302
+5        241  .T.T*.*..*.T.W.....D..*.W..*..                      330
+
+
+Lambda      K        H        a         alpha
+   0.327    0.135    0.505    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 54782
+
+
+  Database: translated subjects of the query-anchored rows
+    Posted date:  Nov 15, 2026  2:47 AM
+  Number of letters in database: 2,345
+  Number of sequences in database:  6
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

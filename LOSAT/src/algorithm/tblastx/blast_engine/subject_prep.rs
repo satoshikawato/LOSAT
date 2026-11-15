@@ -237,9 +237,9 @@ pub(super) fn run_unit_path<'a, S: TbxScore>(
         }
     };
     // EXPERIMENT (PAIRLUT): with the direct group tables the batch's `lookup` is a
-    // stub without entries, so a scan of it by the frame loop of `process_subject` would find no
-    // hit. The unit path above must have taken the subject (empty frame slice); anything else
-    // stops the run here.
+    // stub without entries, so a scan of it by the frame loop
+    // (`frame_chunks::search_subject_frames`) would find no hit. The unit path above must have
+    // taken the subject (empty frame slice); anything else stops the run here.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:503-505
     // ```c

@@ -315,7 +315,7 @@ def classify(header: str, stack) -> tuple[str, str]:
         elif c == ")":
             depth -= 1
     before = h[:first].rstrip()
-    m = re.search(r"((?:[A-Za-z_~][A-Za-z0-9_]*\s*(?:<[^<>]*>)?\s*::\s*)*(?:operator\s*\S+|~?[A-Za-z_][A-Za-z0-9_]*))$", before)
+    m = re.search(r"((?:[A-Za-z_~][A-Za-z0-9_]*(?:\s*<[^<>]*>)?\s*::\s*)*(?:operator\s*\S+|~?[A-Za-z_][A-Za-z0-9_]*))$", before)
     if not m:
         return "inner", ""
     name = re.sub(r"\s+", "", m.group(1))

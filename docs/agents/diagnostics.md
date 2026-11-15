@@ -136,7 +136,10 @@ LOSAT_X_NEWTONEXACT_PROF
 - `LOSAT_DEBUG_SCAN_SOFF=<int>` (diagnostic build) tblastx scan debug center subject offset.
 - `LOSAT_DEBUG_SCAN_WINDOW=<int>` (diagnostic build) tblastx scan debug window size.
 - `LOSAT_DEBUG_BLASTP_TRACE_HSP="[qidx,sidx,]qstart,qend,sstart,send"` (diagnostic build) trace one
-  BLASTP HSP through the composition-based redo (4 or 6 comma-separated fields).
+  BLASTP HSP through the composition-based redo (4 or 6 comma-separated fields). `qidx` counts the
+  searched queries of the call: all of them in the search of all queries, also where its preliminary
+  stage runs in blocks (`LOSAT_X_BPQBLOCK`, item SC8b-2); a block of the block search counts from its
+  own first query.
 - `LOSAT_DEBUG_BLASTP_WSSV=1` (diagnostic build) print the redo's `[BLASTP_WSSV]` line for the one HSP
   q 78-789 x s 0-665.
 - `LOSAT_TIMING=1` timing breakdown. Every search program prints one line last, after its own lines
@@ -301,7 +304,8 @@ their variables mean
   in `BPDIAG`'s AVX2 batch; `BPMASKED` only with `BPDEFER`'s deferred calls, on tables of at least `BPMASKEDMIN` hits per used cell; `BPGAP` runs the
   vector alignment only with AVX2, BMI1 and LZCNT (else the reference function); `BPGAP16` acts only
   in `BPGAP`'s vector alignment, where its costs fit 16 bits; `BPQBLOCK` takes the block path only for one output of outfmt 0, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15 or 16, or a
-  `run_local` call with several outputs, the hit records or an observer, with more than one block (see its entry);
+  `run_local` call with several outputs, the hit records or an observer, with more than one block, and blastp's search of all queries
+  (the other reports, `-query_loc`) runs its preliminary stage in the same blocks (see its entry);
   `BNSTREAM` only in blastn's `-subject` search at 2 or more threads;
   `TBXNEXT` only in TBLASTX's parallel subject loop (2 or more threads, several subjects; native
   builds and the threaded Wasm module); `TBXBOARD` in native builds with 2 or more threads (every batch: one
@@ -496,7 +500,9 @@ masked unit diagonal table a unit takes for its size alone at eight threads or m
 more, built-in 50,000: query letters per block; a value that is not a positive number is the
 built-in value; a block also ends before a batch whose lookup-table words would take it past the
 most of a block, NCBI's largest table or for the standard table at least 2^22 words, so a block of
-`-word_size 4` holds one batch or a few).
+`-word_size 4` holds one batch or a few; the search of all queries, which writes the reports that
+the block search does not take, runs its preliminary stage in the same blocks, each with its own
+lookup table, and joins their hit lists before the redo and the reports, item SC8b-2).
 
 `LOSAT_X_SEEDBUCKET` was in the block of the round 3-4 set and was left out when the set became
 the default: it numbered the lookup hits of one chunk scan in a 32-bit counter, exact only up to
@@ -1004,7 +1010,7 @@ Same values, faster computation:
 - SEGTRIMMEMO (graduated 2026-10-26, in the set from 2026-10-19; no variable; always on for the maskers that
   ask for it; the trim without the memo went with the variable) (speed) SEG's trim of a candidate segment (the
   port of `s_Trim`: about L^2 / 2 evaluations of `s_GetProb` for a segment of L letters up to
-  maxtrim + 1 = 51, about 1,275 for longer ones) is kept per thread by the segment's letters and
+  maxtrim + 1 = 51, about 1,275 for longer ones) is kept by the segment's letters and
   `maxtrim`, and a segment with the same letters takes the stored offsets instead of being trimmed
   again (`utils/x_seg_trim_memo.rs`; the histogram SEG path). The offsets are a function of those letters,
   `maxtrim` and the fixed 20-letter alphabet; the whole slice is compared, the hash only picks the
@@ -1013,9 +1019,12 @@ Same values, faster computation:
   trimmed once per query whose window covers it: AP027131 x AP027133 118,765 trims of 12,584
   distinct segments, 89 % of the trim work repeated) and BLASTX's query SEG (the chunks of a split
   query repeat the whole query's segments: 51 % of the trim work). TBLASTX d04 would repeat 2 %, and
-  the other maskers keep no table. A thread keeps at most 32,768 segments and 1 MiB of letters
-  (table up to 768 KiB), then clears the table; segments over 127 letters are not kept (line C,
-  v4-C DECISIONS 31-34).
+  the other maskers keep no table. Until 2026-11-15 a thread kept at most 32,768 segments and 1 MiB
+  of letters (table up to 768 KiB), then cleared the table; segments over 127 letters are not kept
+  (line C, v4-C DECISIONS 31-34). Since 2026-11-15 all threads share one table behind one lock, with
+  the same bounds, so a segment one thread trimmed is not trimmed again by another (line EB s23-s24;
+  workstation 16 threads, 8 rounds, against the dev commit it merged: TBLASTN AP027131 x AP027133
+  0.954-0.964 of the time, BLASTX 0.968-0.980, peak memory 0.960-0.990; one thread unchanged).
   Workstation, one core or eight, 8 rounds (2026-10-19): TBLASTN AP027131 x AP027133 n1 0.924 of
   the time (pairs 0.921-0.926), n8 0.971; BLASTX AP027131 x AP027133 n1 0.927, n8 0.985 (memo on
   every masker, e91c8864); with the two maskers of this version (cc7306b2, load 12-45) n1 0.932 /
@@ -3013,7 +3022,7 @@ Rebuilding less:
   of a query batch one at a time in OID order and one of them (the owner) hands the results to the hit lists in
   OID order while the others go on with the next subjects; a thread claims a subject only while it is fewer
   than `threads x 64` subjects past the last one handed over, so at most that many subjects' results wait
-  (`x_bnstream::search_in_order`, called from `search_query_batch` in `blastn/blast_engine/run.rs`; each
+  (`x_bnstream::search_in_order`, called from `SubjectPasses::search_subjects` in `blastn/blast_engine/subject_passes.rs`; each
   thread runs its loop as one `rayon::broadcast` job, so that a thread waiting inside a nested parallel stage
   of a search never starts a second loop, and since 2026-10-23 no subject is searched before every thread
   has started its loop: rayon runs a thread's own broadcast job inside a wait for a nested job too, so a
@@ -3635,7 +3644,7 @@ Scheduling (each value computed by one thread with the original function; order 
   when its preliminary stage ends, before its traceback (`blastn/blast_engine/x_lut_drop.rs`), where NCBI's traceback
   stage drops its table (`m_LookupTable.Reset(NULL)`, `traceback_stage.cpp:208-211`); before it graduated the tables
   lived until the batch returned. The traceback reads the HSPs that the preliminary stage kept and does not scan, and the
-  tables are passed to `process_subject` by the preliminary stage's calls only (`None` in the traceback's), so the
+  tables are passed to `search_subject` by the preliminary stage's calls only (`None` in the traceback's), so the
   compiler shows that no traceback reads them; the values taken from them before the scan (the offset array size, the
   shape of the subject search) are plain numbers. A `LOSAT_X_MBLUTKEEP` table goes back to the batch loop's keep when
   the tables drop, as at the batch's end before (zeroed and taken by the next build as before); what the traceback no
@@ -5885,7 +5894,7 @@ Scheduling (each value computed by one thread with the original function; order 
   16 batches at 8 threads 0.99-1.00.
 - `LOSAT_X_TBXSCANBF=1` TBLASTX (speed; in the strict set since 2026-10-17, on by default; `=0` turns
   it off; `tblastx/x_scan_bf.rs`): the lookup scans of the unit path
-  (`x_pair_par.rs`) and of the reference frame loop (`blast_engine/run_impl.rs`) walk the subject
+  (`x_pair_par.rs`) and of the reference frame loop (`blast_engine/word_finder.rs`) walk the subject
   ranges as NCBI's `s_BlastAaScanSubject` (`blast_aascan.c:48-131`) does and scan each range with
   the branch-free loop of tblastn (TBNSCANBF, graduated; `tblastx/x_aascan_bf.rs` `x_scan_one_range_bf`), passing
   on the room the earlier ranges of the call left, so every call returns NCBI's pairs and scan range
@@ -6841,6 +6850,11 @@ Scheduling (each value computed by one thread with the original function; order 
   default path and blastp-fast / tblastn-fast at 1 and 8 threads: instructions x1.0000-1.0005, cycles within the
   null arm). The table equals `x_buckets_on`'s with its offsets narrowed (unit tests
   `pooled_flat_tables_equal_the_unpooled_ones_on_kept_vectors`, `blastx_tables_take_u16_offsets_up_to_their_letters`).
+  Since line NP SC9d / SC9e (2026-11-14) the tables built in parts (`LOSAT_X_BXBUILDPAR`) take their vectors
+  from the same pool, and the pool keeps only vectors that a pool thread's arena would keep: on Linux with
+  glibc a vector of more than its largest mmap threshold (32 MiB) is left to its table and returned to the system
+  when the table is dropped (word size 7's tables, 40 MB of starts each, had stayed resident between builds: 800
+  cDNAs x scer_pep at 8 threads 1.41-1.46 GB of maximum RSS with them in the pool, 1.06-1.15 GB without the pool).
 - `LOSAT_X_BXENDMEM=1` (BLASTX, memory; in the strict set from the pull request that added it, 2026-11-01: on unless
   `=0` or `LOSAT_X_DEFAULT=0`): at the end of a query batch, no table of word hashes per context for the
   near-identical test of composition-based statistics (8 bytes per letter of six frames: 84 MiB for a 5.6 Mb query)
@@ -6923,8 +6937,20 @@ Scheduling (each value computed by one thread with the original function; order 
   the same table slot for slot, `blastx_tables_built_in_parts_are_the_one_part_tables`). Its build was 131 of 138
   thread-seconds of 800 cDNAs x scer_pep at word size 6 and 8 threads. Workstation node 1 against dev 51f974c26:
   word size 6 at 8 / 16 / 32 threads x0.41 / x0.29 / x0.21 of the time with 78 / 82 / 74 % of the memory, word
-  size 7 x0.36 / x0.25 / x0.18, BLOSUM45 word size 6 at 8 threads x0.34. Word 5's bucket fill (pooled `u16`
-  vectors) stays on the unit's thread: built in parts it took x0.61 of the time but +62 % of the maximum RSS.
+  size 7 x0.36 / x0.25 / x0.18, BLOSUM45 word size 6 at 8 threads x0.34. Since line NP SC9d (2026-11-14) the
+  stripes write the table's `u16` offsets into a set of vectors that `LOSAT_X_BXCLUTPOOL`'s pool lends, and the pool
+  keeps only vectors an arena would keep (a vector above glibc's largest mmap threshold is returned to the system
+  when its table is dropped: kept, word size 7's 40 MB of starts per table stayed resident between builds). Word
+  size 5's table (and BLASTX's other matrices' at word size 5) is built in parts by the bucket fill itself since
+  line NP SC9e (2026-11-14; `tblastx/lookup/x_clut_direct.rs` `x_bx_buckets_with`): the query offsets in order cut
+  into ceil(threads / K) runs, each run's appends into chunks of its own; a bucket's appends are its runs' in run
+  order, and ranges of whole buckets are laid out and filled by the pool's tasks, so the work is the one-thread
+  fill's but for a pass over each bucket's runs (unit test `blastx_bucket_fill_in_parts_is_the_one_part_fill`).
+  The parallel flat builder in its place (SC9d's first form) took about 6 % more instructions (its appends and
+  stripes passes touch each append about twice as often): at 4 threads, with 3 units on 4 threads and little idle,
+  word size 5 and blastx-fast ran 2-4 % slower than dev. Its tasks' scratch, mapped there for word size 5, is in the
+  pool threads' arenas again as in dev (mapped, every build faulted its pages again: blastp-fast -db at 8 threads
+  +12,000 page faults, +0.05 s of system time and x1.02 of the wall time).
 - `LOSAT_X_BXCTXONCE=1` (BLASTX, speed and memory; in the strict set from the pull request that added it: on unless
   `=0` or `LOSAT_X_DEFAULT=0`; acts where the `LOSAT_X_BXDIAG` fused loop runs): the fused loop's context table of a
   query batch (`XContextTable`, the binary search's index at every query offset) is made once per lookup table and

@@ -21,8 +21,8 @@
 //!
 //! This module is a child of `run` for the types it keeps private (`PrelimHit`, `XAheadScratch`,
 //! `BlastnTiming`, `SubjectHits`). `trace_hsp_list` is the body of what was the closure
-//! `x_trace_list` of `search_query_batch`'s `process_subject`, and `traceback_subject_hits` the
-//! code of `process_subject` that called it. The values they read are fields of
+//! `x_trace_list` of `SubjectPasses::search_subject`, and `traceback_subject_hits` the
+//! code of `search_subject` that called it. The values they read are fields of
 //! `traceback_finish::TracebackCtx` (the search's and the subject's), of `TraceSchedule` (what
 //! schedules the loop on the pool) and of `TraceDrive`; what the loop works on is
 //! `TraceListState`. The steps of one HSP are in `traceback_hsp`. The query group tasks of
@@ -67,8 +67,8 @@ pub(super) struct TraceSchedule<'a> {
 /// batches (`None` for a query group task, which uses neither), the list the HSPs go to, and the
 /// lengths of their edit scripts and alignments (LOSAT_TIMING). The owner's tree, greedy scratch,
 /// scratch lists and `hits` come from the subject's scratch (`SubjectScratch`), its gap scratch
-/// and length lists from `process_subject`; a query group task's tree and scratch come from its
-/// state, its lists from the task.
+/// and length lists from `traceback_subject::traceback_subject`; a query group task's tree and
+/// scratch come from its state, its lists from the task.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:509-512,600-601
 /// ```c

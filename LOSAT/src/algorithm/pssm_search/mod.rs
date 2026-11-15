@@ -108,6 +108,20 @@ pub struct PsiSearch {
     /// Whether NCBI's definition line of the query, which its XML and JSON reports make, reads
     /// the query's annotations (`in_pssm::defline_reads_annot`).
     pub(crate) defline_reads_annot: bool,
+    /// The query that a later round of psiblast searches (`blast_engine::psi_round::RoundQuery`):
+    /// the letters that the rounds before masked (X), filtered again without the lower-case mask
+    /// that round 1 took; round 1's query for a query that NCBI splits into chunks
+    /// (`split_setup`); `None` for a query's first round, whose query frame is its record's
+    /// (`blast_engine::blastp_query_frames`).
+    pub(crate) round_query: Option<crate::algorithm::tblastx::translation::QueryFrame>,
+    /// A later round of a FASTA query that NCBI splits into chunks: the query of the round's
+    /// set-up, whose `kbp_std` the round reads (`blast_engine::pssm_hooks::pssm_lookup`): the
+    /// query that the round before searched, filtered again as `RoundQuery::next` filters it.
+    /// The round's chunks search without the PSSM, and its traceback reads `round_query`, which
+    /// NCBI's preliminary stage makes again from the record after the chunks
+    /// (`blast_engine::psi_round::RoundQuery::split`). `None` otherwise: a query that NCBI does
+    /// not split, and a PSSM query (`-in_pssm`), which NCBI never splits.
+    pub(crate) split_setup: Option<crate::algorithm::tblastx::translation::QueryFrame>,
 }
 
 /// The PSSM of `-in_pssm` as NCBI's application read it (before `CPsiBlastImpl` computes the
@@ -181,6 +195,34 @@ impl PssmQueryStop {
     pub(crate) fn after_request(&self) -> bool {
         matches!(self, PssmQueryStop::Scores(_))
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:537
+// ```c++
+// 		scope->AddTopLevelSeqEntry(pssm->SetQuery());
+// ```
+// NCBI's scope holds the subjects that its reader read, then the PSSM's Bioseq; the command line
+// reads its `-subject` records in the scope that the query joins (`IdScope`), while the records'
+// entries (the library API) get records read in a scope of their own (`api::read_inputs`).
+/// The scope of the ids of `subjects` (read under `-parse_deflines` in another scope) that the
+/// query of a PSSM search joins in the records' entries, as the command line's query joins the
+/// scope it read its subjects in (`PsiSearch::query_record_in`); `None` without
+/// `-parse_deflines`. The subjects' marks are not kept: the PSSM's query has none, so a subject
+/// with one of its ids is refused whatever its mark (`IdScope::add_record`), as on the command
+/// line.
+pub(crate) fn scope_of_subjects(
+    parse_deflines: bool,
+    subjects: &[FastaRecord],
+    program: &str,
+) -> anyhow::Result<Option<crate::seqid::id_scope::IdScope>> {
+    if !parse_deflines {
+        return Ok(None);
+    }
+    let scope = crate::seqid::id_scope::IdScope::default();
+    for believed in subjects.iter().filter_map(FastaRecord::believed) {
+        scope.add_record(&believed.ids, None, "subject", program)?;
+    }
+    Ok(Some(scope))
 }
 
 impl PsiSearch {
@@ -473,6 +515,8 @@ impl PsiSearch {
             request: None,
             annot: annot_index::AnnotOutcome::default(),
             defline_reads_annot: false,
+            round_query: None,
+            split_setup: None,
         }
     }
 

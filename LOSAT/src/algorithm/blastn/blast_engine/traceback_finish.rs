@@ -9,7 +9,7 @@
 //!
 //! This module is a child of `run` for the types it keeps private (`BlastnTiming`, the e-value
 //! helpers). The two functions are the bodies of what were two closures of
-//! `search_query_batch`'s `process_subject`; the values those closures captured are among the
+//! `SubjectPasses::search_subject`; the values those closures captured are among the
 //! fields of `TracebackCtx`, which `traceback_hsp`, `traceback_list` and `traceback_subject` share,
 //! and which pool threads read (the query group tasks of `x_qgroup_par`, the look-ahead helpers,
 //! and the speculative batch's jobs).
@@ -25,8 +25,8 @@ use crate::algorithm::blastn::alignment::gapped::BlastnaMatrix;
 
 /// The values of one subject's search that its traceback reads: these two steps, the traceback
 /// loop (`traceback_list`), the traceback of one HSP (`traceback_hsp`) and the subject's side
-/// (`traceback_subject`). Built once per `process_subject` call of the traceback, once the
-/// subject's blastna letters are made; every field is a shared reference or a `Copy` value
+/// (`traceback_subject`). Built once per subject by `traceback_subject::traceback_subject`, once
+/// the subject's blastna letters are made; every field is a shared reference or a `Copy` value
 /// (mostly the types the closures captured), so the struct is `Sync` for the query group tasks,
 /// the look-ahead helpers and the speculative batch's jobs on the pool.
 pub(super) struct TracebackCtx<'a> {

@@ -479,6 +479,16 @@ pub struct PsiblastArgs {
     /// that starts there (`api::run_batches`). 0 on the command line.
     #[arg(skip)]
     pub first_query_ordinal: usize,
+    /// The run's numbers of the files of `-save_each_pssm` (`pssm::PssmVersions`, NCBI's
+    /// `CAutoOutputFileReset` of the run): a command line's run makes them; the library's query
+    /// batches, each a call of its own, share the run's (`api::batches`).
+    #[arg(skip)]
+    pub pssm_versions: crate::algorithm::psiblast::pssm::PssmVersions,
+    /// The queries that the checks of the PSSM files before the search cover
+    /// (`pssm::PssmCheckScope`): the call's on the command line; the run's in the first of the
+    /// library's query batches, none in the later ones (`api::batches`).
+    #[arg(skip)]
+    pub pssm_check: crate::algorithm::psiblast::pssm::PssmCheckScope,
 }
 
 impl PsiblastArgs {
@@ -580,6 +590,8 @@ impl PsiblastArgs {
                 pseudocount: self.pseudocount,
                 rounds,
                 in_pssm: self.in_pssm,
+                versions: self.pssm_versions,
+                check_scope: self.pssm_check,
             }),
             // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:502
             // ```c++
@@ -805,17 +817,23 @@ mod tests {
             "the rounds of a range run"
         );
         assert!(ranged.query_range.is_some(), "the range reaches the rounds");
-        let error = parse(&["-num_iterations", "3", "-seg", "yes"])
-            .unwrap()
-            .into_blastp_args()
-            .unwrap()
-            .resolve()
-            .unwrap_err()
-            .to_string();
-        assert!(
-            error.contains("-seg and -soft_masking true with -num_iterations 3"),
-            "{error}"
-        );
+        for masks in [
+            &["-seg", "yes"][..],
+            &["-soft_masking", "true"],
+            &["-seg", "yes", "-soft_masking", "true"],
+        ] {
+            let masked = parse(&[&["-num_iterations", "3"][..], masks].concat())
+                .unwrap()
+                .into_blastp_args()
+                .unwrap()
+                .resolve()
+                .unwrap();
+            assert_eq!(
+                masked.psi_rounds.as_ref().map(|plan| plan.num_iterations),
+                Some(3),
+                "the rounds of a masked query run ({masks:?})"
+            );
+        }
         for format in ["1", "3", "5", "8", "11", "13", "15", "16", "18"] {
             let error = parse(&["-outfmt", format])
                 .unwrap()

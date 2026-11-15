@@ -97,56 +97,28 @@ pub(crate) fn position_based_mode(mode: CompositionMode) -> CompositionMode {
 /// A run that NCBI stops before the search (`PsiSearch::stop_before_search`: the search strategy's
 /// "Remote PSI-BL2SEQ" with `-subject`, NCBI's check of the PSSM, the PSSM engine's scores) writes
 /// the prolog and NCBI's error, whatever its format or query (line RG F1b-2, review 4 R5-6): these
-/// refusals of the search's results do not apply to it.
-pub(crate) fn check_in_pssm_options(args: &ResolvedBlastpArgs, psi: &Arc<PsiSearch>) -> Result<()> {
+/// refusals of the search's results do not apply to it. `outfmts` are the numbers of the requested
+/// formats: the command line's one, or each of the records' entries (the library API), checked as
+/// the command line checks it alone.
+pub(crate) fn check_in_pssm_options(
+    args: &ResolvedBlastpArgs,
+    psi: &Arc<PsiSearch>,
+    outfmts: &[i32],
+) -> Result<()> {
     // The XML and JSON query definition of a query whose annotations NCBI reads for it
-    // (`in_pssm::refuse_annot_defline`), in every run.
-    let number = crate::blastinput::app::parse_formatting_string(&args.outfmt)?.number;
-    crate::algorithm::pssm_search::in_pssm::refuse_annot_defline(psi, number, "PSIBLAST")?;
+    // (`in_pssm::refuse_annot_defline`), in every run and for each requested format.
+    for &number in outfmts {
+        crate::algorithm::pssm_search::in_pssm::refuse_annot_defline(psi, number, "PSIBLAST")?;
+    }
     if psi
         .stop_before_search(args.strategy.is_some(), args.db.is_some())
         .is_some()
     {
         return Ok(());
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:191-198 (the SEG mask
-    // of the query, then `PsiBlastSetupScoreBlock`)
-    // The query's SEG mask changes the PSSM search's hits (DESIGN_ps4 §1.6).
-    if args.seg.params().is_some() || args.soft_masking {
-        bail!("-seg and -soft_masking true with -in_pssm are not supported by LOSAT's PSIBLAST");
-    }
     // The outfmt 0, 6 and 7 reports (the others are item PS15b's).
-    let choice = crate::blastinput::app::parse_formatting_string(&args.outfmt)?;
-    if !matches!(choice.number, 0 | 6 | 7) {
-        bail!(
-            "output format {} with -in_pssm is not supported by LOSAT's PSIBLAST yet",
-            choice.number
-        );
-    }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:91-94
-    // ```c++
-    //     else if (Blast_ProgramIsPsiBlast(program))
-    //         retval = 10000;
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:191-196 (the
-    // chunks of a split query are set up without the PSSM)
-    // A PSSM query that NCBI splits is searched with BLOSUM62 in its preliminary stage. Sizes
-    // that NCBI cannot convert split nothing: they stop the search's query splitter, before any
-    // split (`query_batch::read_psiblast_query_batches`).
-    let Ok(sizes) = crate::algorithm::blastp::protein_query_split::protein_query_split_sizes(10000)
-    else {
-        return Ok(());
-    };
-    if crate::algorithm::blastp::protein_query_split::split_protein_batch(
-        &[psi.query.seq().len()],
-        sizes,
-    )
-    .is_some()
-    {
-        bail!(
-            "a PSSM query of {} letters, which NCBI BLAST+ splits into chunks searched without the PSSM, is not supported by LOSAT's PSIBLAST",
-            psi.query.seq().len()
-        );
+    if let Some(number) = outfmts.iter().find(|number| !matches!(number, 0 | 6 | 7)) {
+        bail!("output format {number} with -in_pssm is not supported by LOSAT's PSIBLAST yet");
     }
     Ok(())
 }

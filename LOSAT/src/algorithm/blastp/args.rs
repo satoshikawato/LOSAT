@@ -1375,20 +1375,6 @@ impl BlastpArgs {
             }
             None => None,
         };
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:186-214 (quoted at
-        // `blast_engine::pssm_hooks`: the query's SEG mask, then `PsiBlastSetupScoreBlock` and
-        // the lookup table of the PSSM)
-        // A later round's PSSM search takes no query mask in its lookup table (DESIGN_ps4 §1.6),
-        // which LOSAT's PSSM lookup table does not model, as for `-in_pssm` (whose own refusal
-        // comes with its others, `in_pssm::check_in_pssm_options`).
-        if let Some(plan) = psi_rounds.as_ref().filter(|_| psi_search.is_none()) {
-            if options.seg.params().is_some() || soft_masking {
-                bail!(
-                    "-seg and -soft_masking true with -num_iterations {} are not supported by LOSAT's PSIBLAST",
-                    plan.num_iterations
-                );
-            }
-        }
         let mut resolved = ResolvedBlastpArgs {
             query: self.query.clone(),
             subject: self.subject.clone().unwrap_or_default(),

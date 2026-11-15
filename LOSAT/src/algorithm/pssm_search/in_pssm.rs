@@ -67,6 +67,10 @@ pub(crate) const NCBISTDAA_TO_AMINOACID: &[u8; BLASTAA_SIZE] = b"-ABCDEFGHIKLMNP
 /// `BLAST_SCORE_MAX` (`INT2_MAX`, blast_stat.h:122): the largest score of one letter pair.
 const BLAST_SCORE_MAX: i32 = i16::MAX as i32;
 
+/// No NCBI counterpart: LOSAT's bound on the sum of a PSSM's columns' largest positive scores
+/// (`read_in_pssm`'s range rule), half of `Int4`'s range as NCBI's `MININT`.
+const PSSM_SCORE_SUM_LIMIT: i64 = 1 << 30;
+
 /// What `-in_pssm` makes of the file: the `switch` on `CFormatGuess().Format(in)` and the first steps of the
 /// reader it picks.
 #[derive(Debug)]
@@ -799,8 +803,8 @@ pub(crate) fn psi_search_and_object(
     // ```
     // NCBI copies the scores into the matrix without a check and adds them in `Int4` (a score of
     // 40,000 runs; one near `INT4_MAX` would overflow, undefined behaviour). LOSAT keeps the scores
-    // to one letter's range, so that the sums of a query that is not split (under 19,800 letters)
-    // stay inside `i32`: a range rule of LOSAT's, not an NCBI error.
+    // to one letter's range and the sums of a search below 2^30 (below): range rules of LOSAT's,
+    // not NCBI errors.
     if validation_error.is_none() {
         if let Some(score) = scores
             .iter()
@@ -823,6 +827,26 @@ pub(crate) fn psi_search_and_object(
     } else {
         Vec::new()
     };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:58
+    // ```c
+    // #define MININT INT4_MIN/2
+    // ```
+    // An alignment adds each column's score at most once, so its score and the ungapped and gapped
+    // sums before it stay below the sum of the columns' largest positive scores. LOSAT refuses a
+    // PSSM whose sum reaches 2^30 (where NCBI's `Int4` sums can reach `MININT`'s distance from 0 and
+    // overflow, undefined behaviour): every PSSM of fewer than 19,800 columns passes, and a PSSM of
+    // NCBI's engine (scores of a few tens) up to millions of columns.
+    if validation_error.is_none() {
+        let sum: i64 = rows
+            .iter()
+            .map(|column| i64::from(column.iter().copied().max().unwrap_or(0).max(0)))
+            .sum();
+        if sum >= PSSM_SCORE_SUM_LIMIT {
+            return Err(reader.refuse(format!(
+                "a PSSM whose columns' largest scores add up to {sum} (2^30 or more, where NCBI BLAST+'s Int4 sums can overflow),"
+            )));
+        }
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:264-284
     // ```c++
     //     if ( !pssm_asn.GetPssm().CanGetIntermediateData() ||
@@ -965,6 +989,8 @@ pub(crate) fn psi_search_and_object(
         request,
         annot,
         defline_reads_annot,
+        round_query: None,
+        split_setup: None,
     };
     // The title's refusals (above), for a run whose reports NCBI writes (line RG F1b-2, review 4
     // R5-6: with `-export_search_strategy -subject`, an invalid PSSM or the PSSM engine's error, NCBI
@@ -1760,6 +1786,36 @@ mod tests {
             "db_search/db.ps.asn.rnd.6.asn",
         ))
         .unwrap()
+    }
+
+    // The review of Q4c, S1: the columns' largest scores of a PSSM must add up to less than 2^30,
+    // NCBI's `MININT` margin (`Int4` sums past it can overflow); with every score `INT2_MAX`,
+    // 32,769 columns pass (2^30 - 1) and 32,770 are refused.
+    #[test]
+    fn a_pssm_whose_scores_can_add_up_to_2_30_is_refused() {
+        use crate::report::serial::pssm::SeqData;
+        let with_columns = |columns: usize| {
+            let mut pssm = rnd();
+            pssm.pssm.num_columns = columns as i32;
+            pssm.pssm.intermediate_data = None;
+            pssm.pssm.final_data.as_mut().unwrap().scores = vec![i32::from(i16::MAX); 28 * columns];
+            let inst = &mut pssm.pssm.query.as_mut().unwrap().inst;
+            inst.length = Some(columns as u32);
+            match inst.seq_data.as_mut().unwrap() {
+                SeqData::Iupacaa(letters)
+                | SeqData::Ncbieaa(letters)
+                | SeqData::Ncbistdaa(letters) => {
+                    *letters = vec![letters[0]; columns];
+                }
+            }
+            psi_search_of(pssm)
+        };
+        assert!(with_columns(32_769).is_ok());
+        let error = with_columns(32_770).unwrap_err().to_string();
+        assert!(
+            error.contains("largest scores add up to 1073774590"),
+            "{error}"
+        );
     }
 
     // The review of PS4a, S1: titles that NCBI's Query= line and its tabular query id read

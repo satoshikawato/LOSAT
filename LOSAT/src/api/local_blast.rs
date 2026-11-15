@@ -11,6 +11,7 @@ use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::path::Path;
 
+use crate::record::FastaRecord;
 use crate::report::blast_xml::XmlStats;
 use crate::report::PairwiseHit;
 
@@ -502,6 +503,54 @@ pub trait FormatObserver {
     /// names, by that index. The call comes once, with `ReportOutputs::hits` only (the program
     /// does not make these values otherwise).
     fn database_subjects(&mut self, _subjects: Vec<ReportedSubject>) {}
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:537-543
+    // ```c++
+    // 		scope->AddTopLevelSeqEntry(pssm->SetQuery());
+    //
+    // 		CRef<CSeq_loc> sl(new CSeq_loc());
+    // 		sl->SetWhole().Assign(*pssm->GetQuery().GetSeq().GetFirstId());
+    //
+    // 		CRef<CBlastSearchQuery> q(new CBlastSearchQuery(*sl, *scope));
+    // 		CRef<CBlastQueryVector> query(new CBlastQueryVector());
+    // ```
+    // A PSSM search's query is the PSSM's Bioseq, which the inputs do not hold
+    // (`api::Inputs::pssm`): the search reads it with the options.
+    /// The query of a PSSM search (psiblast's and tblastn's `-in_pssm`): the record of the PSSM's
+    /// sequence as the reports show it, the query 0 of the hit lists. The call comes once, before
+    /// the search's queries (`queries_begin`), and only for a PSSM query.
+    fn pssm_query(&mut self, _query: &FastaRecord) {}
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:250-285
+    // ```c++
+    //                 CRef<CSearchResultSet> results;
+    //                 ...
+    //                    results = psiblast->Run();
+    //                    ...
+    // 	                      formatter.PrintOneResultSet(**result, query,
+    // 	                                                itr.GetIterationNumber(),
+    // 	                                                itr.GetPreviouslyFoundSeqIds());
+    // ```
+    // NCBI's psiblast searches one query per round and formats each round's result set; LOSAT's
+    // round driver makes one search call per round of a query (`blastp::blast_engine::psi_round`).
+    /// psiblast's round driver starts round `round` (1-based, NCBI's `GetIterationNumber`) of the
+    /// searched query `query` (the index that `Hit::q_idx` counts in a search without rounds):
+    /// the next hit list (`ReportOutputs::hits`), its HSP events, `query_stats` (whose `q_idx` is
+    /// 0, the round's only query) and `database_subjects` belong to that round, and its HSP
+    /// numbers start again at 0. A search without rounds never calls it.
+    fn round_begin(&mut self, _query: usize, _round: u32) {}
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:525-528
+    // ```c++
+    //                 if (converged && !fmt_args->HasStructuredOutputFormat() &&
+    //                 	fmt_args->GetFormattedOutputChoice() != CFormattingArgs::eArchiveFormat) {
+    //                 	out_stream << NcbiEndl << "Search has CONVERGED!" << NcbiEndl;
+    //             	}
+    // ```
+    /// The rounds of the searched query `query` converged (NCBI's `HasConverged`): every subject
+    /// below `-inclusion_ethresh` in its last round was below it in the round before too. It
+    /// comes after the query's last round, whatever the formats.
+    fn rounds_converged(&mut self, _query: usize) {}
 }
 
 // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1970-1973

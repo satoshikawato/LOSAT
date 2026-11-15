@@ -1525,7 +1525,7 @@ fn mask_translated_subject_seg(translation: &mut [u8]) -> Result<bool> {
     let data_len = translation.len() - 1;
     let data = &mut translation[1..data_len];
     // LOSAT_X_SEGTRIMMEMO (graduated 2026-10-26): the windows of one subject overlap from query to query, so
-    // this masker takes the trim of a segment trimmed before on this thread from its memo.
+    // this masker takes the trim of a segment trimmed before (on any thread) from the memo.
     let masker = SegMasker::with_params(&SegParams::new(10, 1.8, 2.1)).x_with_trim_memo();
     let intervals = masker.mask_sequence(data);
     for interval in &intervals {
@@ -2484,6 +2484,7 @@ fn x_newton_lanes_prefetch_windows<'seq>(
     ranges: &mut Vec<(XLaneRangeKey, BlastRedoRangeResult)>,
 ) -> usize {
     let mut inputs = Vec::new();
+    let mut shared_q = None;
     let mut window_index = first_window;
     while window_index < windows.len() && inputs.len() < X_LANES_PREFETCH_INPUTS {
         let window = &windows[window_index];
@@ -2556,6 +2557,7 @@ fn x_newton_lanes_prefetch_windows<'seq>(
                         range.subject.length,
                         params.compo_adjust_mode,
                         composition_workspace,
+                        &mut shared_q,
                     ) {
                         inputs.push(input);
                     }

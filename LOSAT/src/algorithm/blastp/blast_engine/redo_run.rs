@@ -1,8 +1,8 @@
 //! The composition-based redo of a BLASTP call's matches (`run_call`, after the choice of the
 //! ordinary traceback): the parameters of each query's redo (`RedoParamsBuilder`, which
 //! `run_call`'s `build_redo_align_params` calls), and the redo's three parallel paths, which read
-//! `RedoRun`: the windows of `LOSAT_X_BPREDOPAR` (`x_windows_redo`), the matches of one query on
-//! the pool (`match_parallel_redo`) and the queries on the pool (`query_parallel_redo`). Each path
+//! `ParallelRedo`: the windows of `LOSAT_X_BPREDOPAR` (`x_windows_redo`), the matches of one query
+//! on the pool (`match_parallel_redo`) and the queries on the pool (`query_parallel_redo`). Each path
 //! is the statements of `run_call` at its place; `run_call` calls the one that its plan of the
 //! redo chose, and its `?` passes the path's errors on. The plan and the one-thread loop stay in
 //! `run_call`.
@@ -16,10 +16,11 @@
 //! Blast_RedoAlignmentCore_MT(EBlastProgramType program_number,
 //! ```
 //!
-//! This module is a child of `blast_engine` for the private items of that file it reads (the
-//! functions of the redo's parameters from `blastp_local_scaling_factor` to
-//! `blastp_redo_cutoff_score`, `blastp_use_matrix_workspace`,
-//! `preliminary_hit_from_local_match_hsp`, `query_nomask_sequence`, `X_NEWTON_LANES_MATCHES`) and
+//! This module is a child of `blast_engine` for the private items of that file it reads: the six
+//! `blastp_*` functions that `build` calls (`blastp_local_scaling_factor`,
+//! `blastp_compo_adjust_mode`, `blastp_redo_matrix`, `blastp_redo_near_identical_cutoff`,
+//! `blastp_redo_x_dropoff`, `blastp_redo_cutoff_score`), `blastp_use_matrix_workspace`,
+//! `preliminary_hit_from_local_match_hsp`, `query_nomask_sequence`, `X_NEWTON_LANES_MATCHES`, and
 //! five of its imports that only this module reads (`build_matrix_info`,
 //! `BlastCompoGappingParams`, `BlastRedoAlignParams`, `BlastpPostprocessResult`, `BLASTAA_SIZE`).
 
@@ -67,10 +68,11 @@ use {
 };
 
 /// What the parameters of a query's redo are made of (`build`): each field is `run_call`'s value
-/// of the same name, by reference where it is not `Copy`, and the start matrix that the
+/// of the same name (`Copy` scalars by value, the rest by reference, so that the moved body reads
+/// them as it did in `run_call`), and the start matrix that the
 /// parameters of every query share, made at the first `build`.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2401-2406
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2401-2407
 /// ```c
 /// /**
 ///  * Read the parameters required for the Blast_RedoOneMatch* functions from
@@ -78,6 +80,7 @@ use {
 ///  * object representing these parameters.
 ///  */
 /// static Blast_RedoAlignParams *
+/// s_GetAlignParams(BlastKappa_GappingParamsContext * context,
 /// ```
 pub(super) struct RedoParamsBuilder<'a> {
     pub(super) args: &'a ResolvedBlastpArgs,
@@ -224,7 +227,8 @@ impl RedoParamsBuilder<'_> {
 }
 
 /// What the redo's three parallel paths read of `run_call`: each field is `run_call`'s value of
-/// the same name, by reference where it is not `Copy` (`subjects` are the redo's subjects,
+/// the same name (the `Copy` scalars by value, the rest by reference, so that the moved bodies read
+/// them as they did in `run_call`; `subjects` are the redo's subjects,
 /// `build_redo_align_params` makes the parameters of a query's redo with `RedoParamsBuilder`, and
 /// `x_redo_par_search` is what the windows read). The paths' threads read these values, as NCBI's
 /// threads share those of its parallel region.
@@ -250,7 +254,7 @@ impl RedoParamsBuilder<'_> {
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-pub(super) struct RedoRun<'a, P> {
+pub(super) struct ParallelRedo<'a, P> {
     pub(super) args: &'a ResolvedBlastpArgs,
     pub(super) blastp_parallel_pool: &'a SearchPool<'a>,
     pub(super) needs: ReportNeeds,
@@ -285,7 +289,7 @@ pub(super) struct RedoRun<'a, P> {
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 pub(super) fn x_windows_redo<P>(
-    redo: &RedoRun<'_, P>,
+    redo: &ParallelRedo<'_, P>,
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
     x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     redone_matches: &mut [BlastCompoHeap],
@@ -294,13 +298,13 @@ pub(super) fn x_windows_redo<P>(
 where
     P: Fn(usize) -> Result<BlastRedoAlignParams> + Sync,
 {
-    let RedoRun {
+    let ParallelRedo {
         x_redo_par_search,
         x_win_expand,
         ..
     } = *redo;
-    // The parallel paths read the expanded lists of all queries (above), or the windows
-    // expand the compact lists as they reach them.
+    // The parallel paths read the expanded lists of all queries (`run_call` expands them before
+    // the paths), or the windows expand the compact lists as they reach them.
     debug_assert!(x_win_expand || x_compact_hit_lists.iter().all(Option::is_none));
     let released = x_redo_par::x_redo_par_run(
         x_redo_par_search,
@@ -312,9 +316,9 @@ where
     Ok(())
 }
 
-/// The redo of the matches of one query on the pool (`kappa_match_parallel_query_index`): each work
-/// unit redoes a match with its own scratch, and the early termination test and the heap
-/// insertions are replayed after them in stream order.
+/// The redo of the matches of one query on the pool (`kappa_match_parallel_query_index`): the matches
+/// are redone on the pool, each work unit with its own scratch, and the early termination test and
+/// the heap insertions are replayed after them in stream order.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3511-3511
 /// ```c
@@ -325,14 +329,14 @@ where
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 pub(super) fn match_parallel_redo<P>(
-    redo: &RedoRun<'_, P>,
+    redo: &ParallelRedo<'_, P>,
     preliminary_hit_lists: &[Option<BlastpHitList>],
     redone_matches: &mut [BlastCompoHeap],
 ) -> Result<()>
 where
     P: Fn(usize) -> Result<BlastRedoAlignParams> + Sync,
 {
-    let RedoRun {
+    let ParallelRedo {
         args,
         blastp_parallel_pool,
         needs,
@@ -499,24 +503,31 @@ where
 /// heap; the last query of a batch of several keeps its results, whose early termination test and
 /// heap insertions are replayed after the queries in stream order, with the heaps of its batch.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3505-3506
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3282-3283,3288-3291
 /// ```c
-///                 numContexts          = numContexts_tld[tid];
-///                 numQueries           = numQueries_tld[tid];
+///         redoneMatches_tld[i] =
+///                 (BlastCompo_Heap*) calloc(numQueries, sizeof(BlastCompo_Heap));
+/// ...
+///         for (query_index = 0; query_index < numQueries; query_index++) {
+///             status_code =
+///                 BlastCompo_HeapInitialize(&redoneMatches_tld[i][query_index],
+///                                           hitParams->options->hitlist_size,
 /// ```
+/// NCBI's threads split the matches, each thread with its own heaps; LOSAT runs the queries on the
+/// pool, each query with its own heap.
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 pub(super) fn query_parallel_redo<P>(
-    redo: &RedoRun<'_, P>,
+    redo: &ParallelRedo<'_, P>,
     preliminary_hit_lists: &[Option<BlastpHitList>],
     redone_matches: &mut [BlastCompoHeap],
 ) -> Result<()>
 where
     P: Fn(usize) -> Result<BlastRedoAlignParams> + Sync,
 {
-    let RedoRun {
+    let ParallelRedo {
         args,
         blastp_parallel_pool,
         needs,
@@ -568,7 +579,7 @@ where
     // Dispatch point: NCBI SEGs the subject range inside the per-match loop (omp for over
     // matches). Here the masked ranges are kept in one store for all queries, as the serial
     // redo already does. Reuse of an identical result only.
-    // One store of masked subject ranges for all queries, as in the serial redo below.
+    // One store of masked subject ranges for all queries, as in `run_call`'s one-thread loop.
     let x_shared_ranges = Some(std::sync::Arc::new(
         crate::algorithm::blastp::kappa::XSharedSubjectRanges::new(),
     ));
@@ -603,7 +614,7 @@ where
     // }
     // ```
     // The test reads the heaps of the queries of the batch (`kappa_query_batches`). The
-    // one-thread loop below redoes the queries in order, so when it tests a match of one
+    // `run_call`'s one-thread loop redoes the queries in order, so when it tests a match of one
     // query, the heaps of the queries of its batch before it are complete and those of
     // the queries after it are as BlastCompo_HeapInitialize left them: not filled to the
     // cutoff (`use_parallel_kappa_redo`), which makes the test FALSE. The queries are
@@ -811,7 +822,7 @@ where
     //                                         &discarded_aligns
     //                                 );
     // ```
-    // The last query of each batch of several: the steps of the one-thread loop below
+    // The last query of each batch of several: the steps of `run_call`'s one-thread loop
     // in stream order, with the heaps of the batch and the results redone above.
     for (q_idx, kept_for_replay) in kept_queries {
         let batch = kappa_query_batches[q_idx].clone();

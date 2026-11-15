@@ -13402,12 +13402,12 @@ fn run_call(
     if super::kappa::x_bp_seg_win().is_some() && !x_redo_par_on && !ordinary_traceback {
         crate::utils::xreach::x_reach!("LOSAT_X_BPSEGWIN", false);
     }
-    // What the redo's parallel paths below read (`redo_run::RedoRun`).
+    // What the redo's parallel paths below read (`redo_run::ParallelRedo`).
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    let redo = redo_run::RedoRun {
+    let redo = redo_run::ParallelRedo {
         args: &args,
         blastp_parallel_pool,
         needs,

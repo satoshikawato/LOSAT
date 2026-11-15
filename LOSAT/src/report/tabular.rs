@@ -2013,7 +2013,7 @@ impl TabularWriter<'_> {
 
     /// A field of `subject` that a row whose lookup fails keeps from the last row that found its
     /// subject (`kept_by_failed_row`: the taxonomy and the titles), with the row's names `names`.
-    #[inline]
+    #[inline(always)]
     fn subject_field(
         &self,
         out: &mut Vec<u8>,
@@ -2167,7 +2167,7 @@ impl TabularWriter<'_> {
 
 /// `sallseqid`, `sallgi` or `sallacc` (`field`) of `subject` as its row prints them: the ids of
 /// its definition lines joined by `;`, or a subject's own ids where it has none.
-#[inline]
+#[inline(always)]
 fn push_all_ids(out: &mut Vec<u8>, field: TabularField, subject: &TabularSubject<'_>) {
     if subject.all_ids.is_empty() {
         match field {
@@ -2185,7 +2185,7 @@ fn push_all_ids(out: &mut Vec<u8>, field: TabularField, subject: &TabularSubject
 }
 
 /// The id of one definition line that `sallseqid`, `sallgi` or `sallacc` (`field`) prints.
-#[inline]
+#[inline(always)]
 fn push_defline_id(out: &mut Vec<u8>, field: TabularField, ids: &DeflineIds) {
     match field {
         SubjectAllSeqIds => out.extend_from_slice(&ids.id),
@@ -2239,7 +2239,7 @@ struct RowNames<'a> {
 }
 
 impl<'a> RowNames<'a> {
-    #[inline]
+    #[inline(always)]
     fn of(spec: &TabularSpec, subject: &TabularSubject<'a>) -> Self {
         let mut names = RowNames::default();
         let lookup = |taxid: i32| subject.names.and_then(|names| names.get(taxid));

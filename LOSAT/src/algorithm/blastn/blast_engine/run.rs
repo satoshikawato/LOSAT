@@ -9770,11 +9770,10 @@ impl<'a> BlastnSubjectRef<'a> {
 }
 
 /// What both stages of `search_subject` read of one call: the subject's index, trace id and
-/// length, and the batch's values as `search_subject` binds them (the queries, their contexts, the
-/// effective search spaces, each context's cutoff, hit-saving cutoff, X-dropoff and reduced cutoff,
-/// and the LOSAT_TIMING counters, `None` when timing is off). Built once per call, after its early
-/// return without a valid context, for `prelim_subject::prelim_subject` or
-/// `traceback_subject::traceback_subject`; shared references and `Copy` values only.
+/// length. Built once per call, after its early return without a valid context, for
+/// `prelim_subject::prelim_subject` or `traceback_subject::traceback_subject`; the batch's values
+/// (the queries, their contexts, the effective search spaces, the cutoffs, the LOSAT_TIMING
+/// counters) are read from the stage's batch (`PrelimBatch`, `TraceBatch`), built once per batch.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1412-1413,1446
 /// (`BLAST_PreliminarySearchEngine`'s loop on the subjects)
@@ -9789,30 +9788,21 @@ impl<'a> BlastnSubjectRef<'a> {
 /// ```c
 ///         for (i = 0; i < batches->num_batches; i++) {
 /// ```
-/// The trace id and the timing counters have no NCBI counterpart.
+/// The trace id has no NCBI counterpart.
 struct SubjectCtx<'a> {
     s_idx: usize,
     s_id: &'a str,
     s_len_full: usize,
-    queries: &'a [FastaRecord],
-    query_contexts: &'a [QueryContext],
-    query_eff_searchsp: &'a Vec<i64>,
-    cutoff_scores: &'a Vec<i32>,
-    hit_saving_cutoff_scores: &'a Vec<i32>,
-    x_dropoff_scores: &'a Vec<i32>,
-    reduced_cutoff_scores: &'a Vec<i32>,
-    timing_ref: Option<&'a BlastnTiming>,
-    timing_enabled: bool,
 }
 
 impl SubjectCtx<'_> {
-    /// LOSAT_DEBUG_BLASTN: the subject's cutoffs, printed by each stage of `search_subject` before
-    /// it searches the subject (`prelim_subject::prelim_subject`,
+    /// LOSAT_DEBUG_BLASTN: the subject's cutoffs (the batch's `cutoff_scores`), printed by each
+    /// stage of `search_subject` before it searches the subject (`prelim_subject::prelim_subject`,
     /// `traceback_subject::traceback_subject`). No NCBI counterpart (a LOSAT diagnostic line).
-    fn debug_cutoffs(&self) {
+    fn debug_cutoffs(&self, cutoff_scores: &[i32]) {
         eprintln!(
             "[BLASTN_DEBUG] Subject {} (len={}): cutoff_scores={:?}",
-            self.s_id, self.s_len_full, self.cutoff_scores
+            self.s_id, self.s_len_full, cutoff_scores
         );
     }
 }
@@ -12664,8 +12654,8 @@ fn search_query_batch<const UNGAPPED: bool>(
         search_karlin: &search_karlin,
     })?;
 
-    // Pass queries for `SubjectPasses` (the lookup tables are passed by the preliminary
-    // stage's calls, `search_subject`'s `lookups`)
+    // The queries and their contexts for `PrelimBatch` and `TraceBatch` (the lookup tables are
+    // the preliminary pass's, `SubjectPasses::prelim_pass`)
     let queries_ref = &seq_data.queries;
     let query_contexts_ref = &query_contexts;
     let query_eff_searchsp_ref = &query_eff_searchsp;
@@ -12685,7 +12675,36 @@ fn search_query_batch<const UNGAPPED: bool>(
     let context_valid_ref = &context_valid;
     let x_dropoff_init_ref = &x_dropoff_init;
 
-    // The cutoffs of every context of the batch (`batch_setup::batch_cutoffs`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:348-374
+    // ```c
+    // if (!gapped_calculation || sbp->matrix_only_scoring) {
+    //    double cutoff_e = s_GetCutoffEvalue(program_number);
+    //    Int4 query_length = query_info->contexts[context].query_length;
+    //
+    // ...
+    //       query_length *= 2;
+    // ...
+    //    kbp = kbp_array[context];
+    // ...
+    //    BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp,
+    //                  MIN((Uint8)subj_length,
+    //                      (Uint8)query_length)*((Uint8)subj_length),
+    //                  TRUE, gap_decay_rate);
+    // ...
+    // } else {
+    //    new_cutoff = gap_trigger;
+    // }
+    // new_cutoff *= (Int4)sbp->scale_factor;
+    // new_cutoff = MIN(new_cutoff,
+    // ...
+    // curr_cutoffs->cutoff_score = new_cutoff;
+    // ```
+    // NCBI uses UNGAPPED params (kbp_std) for gap_trigger calculation
+    // and GAPPED params (kbp_gap) for cutoff_score_max calculation
+    // The cutoffs of every context of the batch (`batch_setup::batch_cutoffs`): they depend on
+    // the context only (the gapped calculation's branch above: gap_trigger capped by
+    // cutoff_score_max), so the batch computes them once, and both stages read them from their
+    // batch (`PrelimBatch`, `TraceBatch`).
     let x_batch_cutoffs = batch_setup::batch_cutoffs::<UNGAPPED>(&batch_setup::CutoffInputs {
         subjects,
         db_len_total: seq_data.db_len_total,
@@ -12761,6 +12780,14 @@ fn search_query_batch<const UNGAPPED: bool>(
         encoded_query_concat_blastna_with_sentinels,
         encoded_queries_blastna: &encoded_queries_blastna,
         query_lengths: &query_lengths,
+        queries: queries_ref,
+        query_contexts: query_contexts_ref,
+        query_eff_searchsp: query_eff_searchsp_ref,
+        cutoff_scores: &x_batch_cutoffs.0,
+        hit_saving_cutoff_scores: &x_batch_cutoffs.1,
+        x_dropoff_scores: &x_batch_cutoffs.2,
+        reduced_cutoff_scores: &x_batch_cutoffs.3,
+        timing_ref: timing.as_deref(),
         effective_word_size,
         scan_step,
         scan_range,
@@ -12824,6 +12851,12 @@ fn search_query_batch<const UNGAPPED: bool>(
         query_concat_length,
         search_karlin_ref,
         round_down_evalue_score,
+        queries: queries_ref,
+        query_contexts: query_contexts_ref,
+        query_eff_searchsp: query_eff_searchsp_ref,
+        cutoff_scores: &x_batch_cutoffs.0,
+        hit_saving_cutoff_scores: &x_batch_cutoffs.1,
+        timing_ref: timing.as_deref(),
         score_matrix: &score_matrix,
         reward,
         penalty,
@@ -12852,11 +12885,6 @@ fn search_query_batch<const UNGAPPED: bool>(
         prelim_batch: &prelim_batch,
         trace_batch: &trace_batch,
         any_valid_context,
-        queries: queries_ref,
-        query_contexts: query_contexts_ref,
-        query_eff_searchsp: query_eff_searchsp_ref,
-        batch_cutoffs: &x_batch_cutoffs,
-        timing: timing.as_deref(),
         prelim_hitlist_size,
         hitlist_size,
         db_hard_mask,

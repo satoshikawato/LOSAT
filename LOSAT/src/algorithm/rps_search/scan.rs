@@ -980,7 +980,7 @@ mod tests {
         for a in 1..=4u8 {
             for b in 1..=4u8 {
                 for c in 1..=4u8 {
-                    if lcg(state) % 2 == 0 {
+                    if lcg(state).is_multiple_of(2) {
                         continue;
                     }
                     let mut len = [1usize, 2, 3, 4, 50, 3, 4, 2, 6_000][lcg(state) as usize % 9];

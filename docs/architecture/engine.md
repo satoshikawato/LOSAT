@@ -273,7 +273,7 @@ flowchart LR
 | traceback | `Blast_TracebackFromHSPList`, `BLAST_GappedAlignmentWithTraceback` | `search_subject` (`subject_passes.rs`, its second call per subject) calls `traceback_subject` (`traceback_subject.rs`), which calls `traceback_subject_hits` (`traceback_list.rs`): the loop over a list of kept HSPs (`trace_hsp_list`), then the purges and the final list (`traceback_finish.rs`); the steps of one HSP are in `traceback_hsp.rs`, the subject's letters and the `-ungapped` traceback in `traceback_subject.rs` | `traceback::OrdinaryTraceback` |
 | composition-based statistics | `Blast_RedoAlignmentCore_MT` (`blast_kappa.c`) | none | `kappa::postprocess_preliminary_hits` (default `-comp_based_stats 2`) |
 | filter, sort | `s_FilterBlastResults`, `Blast_HSPResultsSortByEvalue` | `finish_query_hit_list` | `culling::cull_traceback`, `sort_by_evalue` |
-| report | `CBlastFormat::PrintOneResultSet` | `write_reports` → `post_process_hits_and_write` (`run.rs`; the refusals of the query-anchored reports of outfmt 1 to 4 and the SAM writer are in `report_write.rs`) | the `match outfmt` at the end of `run_resolved_in_pool` |
+| report | `CBlastFormat::PrintOneResultSet` | `write_reports` → `post_process_hits_and_write` (`run.rs`; the refusals of the query-anchored reports of outfmt 1 to 4 and the SAM writer are in `report_write.rs`) | the `match outfmt` at the end of `run_call` (its Archive, CustomTabular and Text arms are in `blast_engine/report_write.rs`) |
 
 Neither blastn nor blastp links HSPs or uses sum statistics: NCBI's option handles start with
 sum statistics off (`api/blast_options_local_priv.cpp`), only those of tblastn, blastx and
@@ -305,7 +305,9 @@ tblastn spread their stages over files (blastx `preliminary.rs`, `traceback.rs`,
   block, or once per query and round of psiblast. Its
   `process_subject` does the preliminary search; the traceback, the composition redo and the report
   follow in the same function (the warning lines of the queries, the checks and the prefetch of the
-  reported subjects and the refusals before any format is written are in `blast_engine/report_prep.rs`).
+  reported subjects and the refusals before any format is written are in `blast_engine/report_prep.rs`;
+  the BLAST archive, the tabular reports and the organism report are in
+  `blast_engine/report_write.rs`).
 - **Long queries.** Both re-enter their batch function for NCBI's query chunks (`SplitQuery_GetChunkSize`,
   `CQuerySplitter`): blastn through `search_query_chunks`, blastp through
   `search_split_query_batches`. Only the preliminary stage runs per chunk; the chunks' hit lists are

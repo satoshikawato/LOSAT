@@ -50,7 +50,7 @@ use super::super::extension::{
     extend_hit_ungapped_exact_ncbi, type_of_word, SmallNaWord,
 };
 use super::super::filtering::{
-    blast_hsp_test_identity_and_length, hsp_test, purge_hsps_with_common_endpoints,
+    blast_hsp_test_identity_and_length, purge_hsps_with_common_endpoints,
     purge_hsps_with_common_endpoints_ex, reevaluate_hsp_with_ambiguities_gapped_ex,
     subject_best_hit, subject_best_hit_by, BestHitKey, ReevalParams,
 };
@@ -7028,11 +7028,14 @@ fn post_process_hits_and_write(
         // The taxonomy database's messages of XML2 and JSON go to the diagnostics at every
         // format.
         // So do those of the formatters of a tabular field list that shows a taxonomy name
-        // (`x_CheckTaxDB`, `algorithm::blastn::tabular`).
+        // (`x_CheckTaxDB`, `algorithm::blastn::tabular`), and the Seq-annots' posts of the bytes
+        // that NCBI's stream replaces (`seqalign::write_query_to`).
         let mut format_warnings = (warning_lines.is_some()
             || matches!(
                 output_format,
-                BlastnOutputFormat::Xml2(_) | BlastnOutputFormat::Archive
+                BlastnOutputFormat::Xml2(_)
+                    | BlastnOutputFormat::Archive
+                    | BlastnOutputFormat::Seqalign(_)
             )
             || output_format
                 .tabular_spec()
@@ -7158,7 +7161,9 @@ fn post_process_hits_and_write(
                 subjects,
                 report.ranges.subjects.placements,
                 &mut writer,
-                format_warnings.as_mut(),
+                format_warnings
+                    .as_mut()
+                    .expect("a Seq-annot writes its posts to the diagnostics"),
             )?;
         } else if output_format == BlastnOutputFormat::Archive {
             // The BLAST archive (outfmt 11): one document per query batch of the call.
@@ -8165,14 +8170,13 @@ fn open_search_database(
             output_formats,
         )?,
     }
-    // LOSAT's refusals of a database for the Seq-annot formats, before the search
+    // LOSAT's refusal of a database name for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
     if let Some(database) = database.as_ref() {
         for serial in output_formats.iter().filter_map(|format| format.serial()) {
             crate::report::serial::seqalign::check_database(
                 serial,
                 database.name(),
-                &database.pairwise_database().definition,
                 Program::Blastn,
             )?;
         }
@@ -9542,8 +9546,14 @@ fn ungapped_subject_stage(
             hit.prelim_ss,
             align_length,
         );
-        // `min_hit_length` is 0 for BLASTN.
-        !ungapped::blast_hsp_test(identities, align_length, percent_identity, 0)
+        // `Blast_HSPTest` (quoted above); NCBI's `min_hit_length` is always 0
+        // (`core::blast_hits::hsp_test`).
+        !crate::core::blast_hits::hsp_test(
+            identities as i64,
+            align_length as i64,
+            percent_identity,
+            0,
+        )
     });
     sort_prelim_hits_by_score(hits);
     hits.retain_mut(|hit| {
@@ -12635,7 +12645,6 @@ fn search_query_batch<const UNGAPPED: bool>(
         subject_besthit,
         x_qgroup_batch,
         percent_identity,
-        min_hit_length,
         score_matrix,
         nucl_score_table,
         x_dropoff_init,
@@ -12822,7 +12831,6 @@ fn search_query_batch<const UNGAPPED: bool>(
         x_drop_final,
         use_dp,
         percent_identity,
-        min_hit_length,
         min_diag_separation,
         evalue_threshold,
         speculative_traceback,

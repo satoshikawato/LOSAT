@@ -1187,7 +1187,12 @@ impl PreliminarySink for Runtime<'_> {
                         ),
                         Err(_) => (0, 0),
                     };
-                    if crate::core::blast_hits::hsp_test(identity as i32, align_length, 0.0, 0) {
+                    if crate::core::blast_hits::hsp_test(
+                        identity as i64,
+                        i64::from(align_length),
+                        0.0,
+                        0,
+                    ) {
                         return None;
                     }
                     Some(Hsp {
@@ -1526,6 +1531,29 @@ impl PreliminarySink for Runtime<'_> {
             stream.close_cbs_observed(self.observer, hitlist_size);
         } else {
             stream.close_observed(self.observer);
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575 and
+        // blast_traceback.c:1567-1577 (quoted at `blastp::blast_engine::database::exclude_fetched`)
+        // The redo's and the traceback's fetches (`check_oid_exclusion`) exclude a subject that the
+        // negative seqid list keeps without a line (`FetchExcluded`): its lists leave the closed
+        // stream before the redo or the traceback reads it. An ungapped search fetches no protein
+        // subject; its such hits leave at the Seq-aligns (`ReportedSubjects::drop_unaligned`).
+        // A header that the fetch cannot read ends NCBI's search: LOSAT's refusal
+        // (`FetchExcluded::refusal`).
+        if self.options.gapped {
+            if let Some(excluded) = self
+                .subjects
+                .seqdb()
+                .and_then(crate::algorithm::common::database::FetchExcluded::of)
+            {
+                stream
+                    .retain_closed(|lists| {
+                        excluded.retain(lists, |list| u32::try_from(list.oid).ok())
+                    })
+                    .map_err(|failed| {
+                        crate::algorithm::common::database::FetchExcluded::refusal(failed, "BLASTX")
+                    })?;
+            }
         }
         self.observer.restored(batch, &full);
 

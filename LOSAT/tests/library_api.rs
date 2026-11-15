@@ -1445,46 +1445,95 @@ fn the_pssm_files_are_the_command_lines() {
     // One format, or formats of one hit list size, search once.
     run_collect(&search, inputs, &["6", "7"]).unwrap();
     assert!(!take_files(&directory).is_empty());
-    // The command line checks the PSSM files of all its queries before its first byte (a title
-    // that the ASN.1 PSSM cannot write, here the second query's): so does the first of the
-    // batches, which are one query each; no batch stands and no file is written.
+    // A query title that the ASN.1 PSSM cannot write as it is (here the third query's `é`, two
+    // bytes outside the visible ASCII range): NCBI writes each such byte as `#` and posts error
+    // 803.7 for it as it writes the file, once per file written, and ends with status 0
+    // (objostrasn.cpp:413-444; psiblast_app.cpp:385-407 `SavePssmToFile`; NCBI BLAST+ 2.17.0's
+    // standard error for this command, line NP M4a-1b2). Nothing is refused: the library's calls,
+    // and its batches of one query each, write the command line's files and give its posts where
+    // the library gives its diagnostics.
     let mut records = std::fs::read(&query).unwrap();
     records.extend_from_slice(b">third query \xc3\xa9\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ\n");
-    let titled = directory.join("titled.faa");
+    let titled = temp_path("titled.faa");
     std::fs::write(&titled, &records).unwrap();
     let queries = read_fasta(Program::Psiblast, Role::Query, &records).unwrap();
+    assert_eq!(queries.len(), 3);
     let inputs =
         Inputs::new(&queries, &subjects).named(titled.to_str().unwrap(), subject.to_str().unwrap());
     let options = [&["-save_pssm_after_last_round"][..], &files].concat();
-    let refused = command(env!("CARGO_BIN_EXE_losat"))
+    let written = command(env!("CARGO_BIN_EXE_losat"))
         .arg("psiblast")
         .arg("-query")
         .arg(&titled)
         .arg("-subject")
         .arg(&subject)
         .args(&options)
+        .args(["-outfmt", "6"])
         .output()
         .unwrap();
-    assert!(!refused.status.success() && refused.stdout.is_empty());
-    let message = String::from_utf8(refused.stderr).unwrap();
-    assert!(
-        message.contains("which is not supported by LOSAT's PSIBLAST with -out_pssm"),
-        "{message}"
-    );
     std::fs::remove_file(&titled).unwrap();
-    assert!(take_files(&directory).is_empty());
-    let search = validate(Program::Psiblast, &options).unwrap();
-    let mut batches = run_batches(&search, inputs).unwrap();
-    let error = batches.next().unwrap().unwrap_err();
-    assert!(message.contains(error.message()), "{error} / {message}");
-    assert!(batches.next().is_none());
-    assert!(
-        take_files(&directory).is_empty(),
-        "the batches wrote no file"
+    assert!(written.status.success(), "{written:?}");
+    let posts: Vec<u8> = [0xc3u8, 0xa9]
+        .iter()
+        .flat_map(|byte| {
+            let mut post = format!(
+                "Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.descr.E.title\nBad char [0x{byte:02X}] in string at line 12\n"
+            )
+            .into_bytes();
+            post.extend_from_slice(b"third query \xc3\xa9\n");
+            post
+        })
+        .collect();
+    assert_eq!(
+        String::from_utf8_lossy(&written.stderr),
+        String::from_utf8_lossy(&posts),
+        "the command line's posts"
     );
-    let error = run_collect(&search, inputs, &["6"]).unwrap_err();
-    assert!(message.contains(error.message()), "{error}");
-    assert!(take_files(&directory).is_empty());
+    // Without `-save_each_pssm` each query's PSSM replaces the file of the query before: the
+    // files left are the third query's.
+    let frozen = take_files(&directory);
+    let names: Vec<&str> = frozen.iter().map(|file| file.0.as_str()).collect();
+    assert_eq!(names, ["p.asn", "p.txt"]);
+    let asn = String::from_utf8(frozen[0].1.clone()).unwrap();
+    assert!(asn.contains("        title \"third query ##\""), "{asn}");
+    let search = validate(Program::Psiblast, &options).unwrap();
+    let collected = run_collect(&search, inputs, &["6"]).unwrap();
+    assert_eq!(collected.reports[0].bytes, written.stdout, "run_collect");
+    assert_eq!(collected.diagnostics, posts, "run_collect's posts");
+    assert!(take_files(&directory) == frozen, "run_collect's files");
+    let (mut report, mut diagnostics) = (Vec::new(), Vec::new());
+    run(&search, inputs, &mut [("6", &mut report)], &mut diagnostics).unwrap();
+    assert_eq!(report, written.stdout, "run");
+    assert_eq!(diagnostics, posts, "run's posts");
+    assert!(take_files(&directory) == frozen, "run's files");
+    let out = temp_path("titled.out");
+    let mut diagnostics = Vec::new();
+    run_to_file(&search, inputs, "6", &out, &mut diagnostics).unwrap();
+    assert_eq!(std::fs::read(&out).unwrap(), written.stdout, "run_to_file");
+    std::fs::remove_file(&out).unwrap();
+    assert_eq!(diagnostics, posts, "run_to_file's posts");
+    assert!(take_files(&directory) == frozen, "run_to_file's files");
+    // The posts come with the batch of the query whose file NCBI writes then.
+    let batches: Vec<_> = run_batches(&search, inputs)
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(batches.len(), 3, "one query per batch");
+    let batch_posts: Vec<&[u8]> = batches
+        .iter()
+        .map(|batch| batch.diagnostics.as_slice())
+        .collect();
+    let none: &[u8] = &[];
+    assert_eq!(
+        batch_posts,
+        [none, none, posts.as_slice()],
+        "the batches' posts"
+    );
+    assert_eq!(
+        batches.iter().map(|batch| batch.hsps.len()).sum::<usize>(),
+        collected.hsps.len()
+    );
+    assert!(take_files(&directory) == frozen, "the batches' files");
     std::fs::remove_dir_all(&directory).unwrap();
 }
 

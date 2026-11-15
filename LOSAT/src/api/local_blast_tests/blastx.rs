@@ -454,6 +454,52 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
     );
 }
 
+/// NCBI's posts of the bytes that a Seq-annot's stream replaces (outfmt 8 and 9: a `-parse_deflines`
+/// subject id with DEL, `#` in every Seq-align) reach the diagnostics at every format of one search,
+/// as a run of each format alone writes them, not only at the first format (review F1 of line NP
+/// M4a-1b2; NCBI 2.17.0 `blastx -subject -parse_deflines -outfmt 8`: `Error: (803.7) [blastx]
+/// Seq-annot.data.align.E.segs.std.E.ids.E.local.str` / `Bad char [0x7F] in string at line N`).
+#[test]
+fn every_seq_annot_format_posts_the_bytes_its_stream_replaces() {
+    // The unit of tests/db_search/seqannot/q2n_del.fa and the protein of its repeats.
+    let query_path = temp_path("blastx_seqannot_query.fna");
+    let subject_path = temp_path("blastx_seqannot_subject.faa");
+    let crate_dir = crate_dir();
+    let query = std::fs::read(crate_dir.join("tests/db_search/seqannot/q2n_del.fa")).unwrap();
+    let first = query[1..].iter().position(|&byte| byte == b'>').unwrap() + 1;
+    std::fs::write(&query_path, &query[..first]).unwrap();
+    std::fs::copy(
+        crate_dir.join("tests/db_search/seqannot/pdel.faa"),
+        &subject_path,
+    )
+    .unwrap();
+    let inputs = Inputs::new(&query_path, &subject_path);
+    let queries = reader_records(
+        &query_path,
+        ReaderConfig::query("BLASTX", false, true).with_parse_deflines(true),
+    );
+    let subjects = reader_records(
+        &subject_path,
+        ReaderConfig::subject("BLASTX", true, true).with_parse_deflines(true),
+    );
+    let run = |formats: &[&str]| {
+        let (result, outputs, diagnostics) =
+            try_run(&inputs, &queries, &subjects, formats, &["-parse_deflines"]);
+        result.expect("searched");
+        (outputs, diagnostics)
+    };
+    let (text, text_posts) = run(&["8"]);
+    let (binary, binary_posts) = run(&["9"]);
+    let (both, both_posts) = run(&["8", "9"]);
+    let has = |posts: &[u8], what: &[u8]| posts.windows(what.len()).any(|window| window == what);
+    assert!(has(&text_posts, b"Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str\nBad char [0x7F] in string at line "));
+    assert!(has(&binary_posts, b"Bad char [0x7F] in string at byte "));
+    assert_eq!(both, [text[0].clone(), binary[0].clone()]);
+    assert_eq!(both_posts, [text_posts, binary_posts].concat());
+    let _ = std::fs::remove_file(&query_path);
+    let _ = std::fs::remove_file(&subject_path);
+}
+
 /// A query whose first batch ends on its first record only when the batch counts the whole record:
 /// 10,050 letters (9,950 in the range `101-20000`), then 200 (100 in the range) and 50 (skipped).
 /// Counting the cut letters would put the first two in one batch and leave the third alone, an

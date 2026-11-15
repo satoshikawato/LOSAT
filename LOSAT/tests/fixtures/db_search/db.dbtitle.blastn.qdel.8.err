@@ -1,0 +1,378 @@
+Error: (803.7) [blastn] Seq-annot.desc.E.user.data.E.label.str
+Bad char [0xC3] in string at line 25
+café db 
+Error: (803.7) [blastn] Seq-annot.desc.E.user.data.E.label.str
+Bad char [0xA9] in string at line 25
+café db 
+Error: (803.7) [blastn] Seq-annot.desc.E.user.data.E.label.str
+Bad char [0x7F] in string at line 25
+café db 
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 65
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 114
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 163
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 212
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 261
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 310
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 359
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 408
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 457
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 506
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 555
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 604
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 653
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 702
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 751
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 800
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 849
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 898
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 947
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 996
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1045
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1094
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1143
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1192
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1241
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1290
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1339
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1388
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1437
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1486
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1535
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1584
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1633
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1682
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1731
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1780
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1829
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1878
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1927
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1976
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2025
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2074
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2123
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2172
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2221
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2270
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2319
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2368
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2417
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2466
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2515
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2564
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2613
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2662
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2711
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2760
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2809
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2858
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2907
+q1
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2956
+q1
+Error: (803.7) [blastn] Seq-annot.desc.E.user.data.E.label.str
+Bad char [0xC3] in string at line 25
+café db 
+Error: (803.7) [blastn] Seq-annot.desc.E.user.data.E.label.str
+Bad char [0xA9] in string at line 25
+café db 
+Error: (803.7) [blastn] Seq-annot.desc.E.user.data.E.label.str
+Bad char [0x7F] in string at line 25
+café db 
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 65
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 114
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 163
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 212
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 261
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 310
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 359
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 408
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 457
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 506
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 555
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 604
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 653
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 702
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 751
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 800
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 849
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 898
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 947
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 996
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1045
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1094
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1143
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1192
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1241
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1290
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1339
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1388
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1437
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1486
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1535
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1584
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1633
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1682
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1731
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1780
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1829
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1878
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1927
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 1976
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2025
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2074
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2123
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2172
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2221
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2270
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2319
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2368
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2417
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2466
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2515
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2564
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2613
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2662
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2711
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2760
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2809
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2858
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2907
+q2
+Error: (803.7) [blastn] Seq-annot.data.align.E.segs.denseg.ids.E.local.str
+Bad char [0x7F] in string at line 2956
+q2

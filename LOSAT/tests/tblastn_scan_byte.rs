@@ -24,8 +24,10 @@
 //! WebAssembly, as before on aarch64; `=2` takes the plain loops on any CPU for every table and
 //! `=3` for sparse tables only. It is off with `=0`;
 //! it acts in the unit path, which every search takes. These tests compare the reports and read the
-//! `[X_STATS] TBNSCANBYTE units= calls= avx2=` line (`LOSAT_X_STATS=1`), the
-//! `[X_STATS] TBNSCANBF` line of the branch-free scan before it.
+//! `[X_STATS] TBNSCANBYTE units= calls= avx2= runs=` line (`LOSAT_X_STATS=1`), the
+//! `[X_STATS] TBNSCANBF` line of the branch-free scan before it. `LOSAT_X_CHAINRUN` (in the strict
+//! set) writes a chain's first pairs as one run in the AVX2 copy; `runs=` counts the scan calls
+//! whose copy did, and `the_chain_runs_change_no_report` compares it with `=0`.
 //!
 //! The queries are the first protein of `tests/fasta/PemoMJNVA.faa` (few candidate words, a sparse
 //! table) and all 115 of them (four query batches, no sparse table; the offset array fills, so the
@@ -143,6 +145,7 @@ fn avx2() -> bool {
 }
 
 const OFF: (&str, &str) = ("LOSAT_X_TBNSCANBYTE", "0");
+const CHAINRUN_OFF: (&str, &str) = ("LOSAT_X_CHAINRUN", "0");
 const PLAIN: (&str, &str) = ("LOSAT_X_TBNSCANBYTE", "2");
 const SPARSE: (&str, &str) = ("LOSAT_X_TBNSCANBYTE", "3");
 const RESUME_OFF: (&str, &str) = ("LOSAT_X_TBNSCANRESUME", "0");
@@ -232,6 +235,48 @@ fn the_report_and_the_scan_calls_are_those_of_the_scan_before() {
                 [byte, !byte],
                 "{query:?} {variables:?}"
             );
+        }
+    }
+}
+
+// NCBI reference: c++/src/algo/blast/core/blast_aascan.c:99-115 (the copy of a cell's hits). The
+// AVX2 copy writes the first `X_CHAIN_RUN` pairs of a chain as one run (`LOSAT_X_CHAINRUN`, on by
+// default; the unit test `x_scan_byte_equals_ncbi_scan_on_random_subjects` compares its calls with
+// NCBI's scan and with the copy before): every search gives the report of `=0`, at one and four
+// threads, with the same scan calls; with AVX2 every call of the default took the runs
+// (`runs=` = `calls=`), with `=0` none, and without AVX2 nothing changes.
+#[test]
+fn the_chain_runs_change_no_report() {
+    for query in queries() {
+        let (expected, stderr) = tblastn(query, 1, &[CHAINRUN_OFF]);
+        assert!(
+            !expected.is_empty(),
+            "{query:?}: the search must report hits"
+        );
+        let off = byte_scans(&stderr).map(|(counts, _)| counts);
+        let runs_off = line_fields(&stderr, "[X_STATS] TBNSCANBYTE ", ["runs"]);
+        assert!(
+            runs_off.is_none_or(|[runs]| runs == 0),
+            "{query:?}: =0 wrote runs"
+        );
+        for threads in [1, 4] {
+            let (report, stderr) = tblastn(query, threads, &[]);
+            assert!(
+                report == expected,
+                "{query:?}: {threads} threads: LOSAT_X_CHAINRUN changed the report"
+            );
+            let on = byte_scans(&stderr).map(|(counts, _)| counts);
+            if threads == 1 {
+                assert_eq!(on, off, "{query:?}: the same scan units and calls");
+            }
+            let runs = line_fields(&stderr, "[X_STATS] TBNSCANBYTE ", ["runs"]);
+            if avx2() {
+                let [_, calls] = on.expect("a TBNSCANBYTE line with AVX2");
+                assert_eq!(runs, Some([calls]), "{query:?}: every call took the runs");
+                assert!(calls > 0, "{query:?}");
+            } else {
+                assert!(runs.is_none_or(|[runs]| runs == 0), "{query:?}: no AVX2");
+            }
         }
     }
 }

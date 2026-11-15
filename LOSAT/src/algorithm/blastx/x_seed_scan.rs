@@ -109,8 +109,8 @@
 //! letters at once, the candidates listed from one byte per index, the hits of a block copied with
 //! one capacity test. It returns the pairs and `scan_range` values of
 //! `s_blast_aa_scan_subject_one_range` on every call, so the loop above reads the same pairs; it
-//! writes up to `X_SCAN_BYTE_SLACK` pairs past `array_size` (one more than the branch-free scan), which
-//! the per-thread buffer holds and nothing reads. The presence bytes (32 KB) are built the first
+//! writes up to `X_SCAN_BYTE_SLACK` pairs past `array_size` (more than the branch-free scan, for
+//! the chain runs of LOSAT_X_CHAINRUN), which the per-thread buffer holds and nothing reads. The presence bytes (32 KB) are built the first
 //! time the direct loop scans with the table and kept with it (`XKeptPresence` in
 //! `Lookup::Standard`), so they go with the table and no other table can see them. The switch
 //! takes the CPU policy of LOSAT_X_TBNSCANBYTE (`x_mode`): on unless it is `0`, the AVX2 forms

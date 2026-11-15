@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.34
+- Version: 1.35
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -79,7 +79,11 @@
   line RG item X2g, with the refusals of decisions X2g-4 and X2g-5 of that line and the tables of
   X2g-5's one alignment ported by X2g-7: Owner-delegated, standing instruction 2026-09-29, restated
   2026-10-07);
-  1.34 2026-11-16 (exception 13, BLASTN `-db_hard_mask` on a sequence whose first mask runs to its
+  1.34 2026-11-16 (the sequence that a negative seqid list keeps while removing all its lines, of
+  1.6, 1.29 and 1.32, is no longer an explicit rejection: NCBI's fetches exclude it, and LOSAT
+  reproduces them, rule 2; line DBID item lineless2, Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07);
+  1.35 2026-11-16 (exception 13, BLASTN `-db_hard_mask` on a sequence whose first mask runs to its
   end, at a scanned word of 11 or more; the Owner's decision of 2026-11-15 「M4a Q1=B」, line NP
   item M4a-2c)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
@@ -551,9 +555,9 @@ here, and names the widening that PS16a made for protein queries.
     except the line that echoes the input file's name. NCBI's binary prints the same there: its compiled
     loop shows no wrap in this output, which the undefined behaviour allows.
 
-## Approved exception (BLASTN `-db_hard_mask`, a mask that runs to the end, version 1.34)
+## Approved exception (BLASTN `-db_hard_mask`, a mask that runs to the end, version 1.35)
 
-Version 1.34. The Owner decided on 2026-11-15 (line NP `DECISIONS.md` 45, words 「M4a Q1=B」) question
+Version 1.35. The Owner decided on 2026-11-15 (line NP `DECISIONS.md` 45, words 「M4a Q1=B」) question
 Q1 of M4a-2b (PR #1173): option B, the search over the range before the mask at a scanned word of 11
 or more, blastn-short keeping the refusal. Not taken: option A, refusing the shape for every task
 (it refuses searches that NCBI ends normally, such as a transcript database whose poly-A tails are
@@ -602,7 +606,7 @@ masked). Line NP item M4a-2c.
     thread count, and the search ends normally (exit 0). The traceback reads every masked
     letter as `B`, as NCBI's traceback does (`s_SeqDBMaskSequence`, `seqdbvol.cpp:1518-1585`). Below
     a scanned word of 11 (blastn-short's 7) LOSAT refuses such a database before it writes anything,
-    as it did for every word before version 1.34 (rule 3). `blastinput::db_mask::
+    as it did for every word before version 1.35 (rule 3). `blastinput::db_mask::
     TAIL_MASK_SEARCHED_WORD`, `algorithm::blastn::blast_engine::run::next_hard_chunk`.
     Evidence (NCBI BLAST+ 2.17.0, each run capped; inputs, scripts and results in the line's task
     folder, `M/m4a2b/q1` and `M/m4a2c`):
@@ -692,6 +696,30 @@ masked). Line NP item M4a-2c.
   1,375 runs: 6 programs, 15 lists of the five kinds, 20 formats, `-max_target_seqs` 1 and 3, a
   query without hits). A read of such a sequence's lines still refuses, and no report reaches it.
 
+- A sequence that a negative seqid list (`-negative_seqidlist`) keeps while removing every one
+  of its definition lines (a sequence whose every line has only a gi or a ti, which
+  `CSeqDBNegativeList::FindId` does not match by type; a `BL_ORD_ID` line of a volume whose first
+  OID is not 0, of 1.29): NCBI's id set of the list is not blank (`CSeqDBImpl::x_InitIdSet`,
+  seqdbimpl.cpp:1909-1946; on a version 5 database, the ids left after the gis are dropped), so
+  the subject fetches with `check_oid_exclusion` (`seqsrc_seqdb.cpp:302-313`) exclude it: the
+  gapped traceback's (blast_traceback.c:1567-1577), the composition-based redo's
+  (blast_kappa.c:1378, 3560-3575) and the ungapped re-evaluation's of a nucleotide subject
+  (blast_hits.c:2651-2665). The sequence is searched and counts in the statistics; a gapped
+  search's preliminary hit list holds it, and it takes no place in the final one; an ungapped
+  search of a nucleotide database frees its HSPs before the preliminary hit list. A protein
+  subject of an ungapped search (blastx `-ungapped`) is fetched by none of them and leaves at the
+  Seq-aligns, as a positive list's does. Versions 1.6, 1.29 and 1.32 made this an explicit
+  rejection; version 1.34 reproduces it in the six search programs, each of which removes such
+  subjects where NCBI fetches them (`SeqDb::excludes_lineless_at_fetch`,
+  `algorithm::common::database::FetchExcluded`; line DBID item lineless2). Under such a list
+  NCBI's fetch reads the header of every subject it fetches, so a header that cannot be read
+  (a damaged record, a `BL_ORD_ID` line with a string tag in a later volume) ends NCBI's search
+  there (exit 255 in the traceback, `BLAST engine error` in the ungapped re-evaluation) even
+  where the subject is not reported; LOSAT refuses such a search at the same place. The
+  composition-based redo fetches only the matches that its early termination test leaves, and
+  LOSAT checks every subject of the preliminary hit lists, so it may refuse such a search where
+  NCBI ends it without reading that header.
+
 - `CHUNK_SIZE=1000` without `BATCH_SIZE`: the batch size becomes 0, NCBI prints the
   outfmt 0 prolog and then `BLAST engine error: Empty CBlastQueryVector`, exit 3.
 - `-max_target_seqs` from 2^30 to 2^31-51: the preliminary hit list size
@@ -731,19 +759,6 @@ masked). Line NP item M4a-2c.
   (`split_query_cxx.cpp:872-880`) or the chunk's search stops with a null-pointer
   `CCoreException`; LOSAT rejects "a query chunk without a query" (round-3 audit: 27
   oracle cases, the reason holds in all).
-
-- A sequence that a negative seqid list (`-negative_seqidlist`) keeps while removing every one
-  of its definition lines (a sequence whose every line has only a gi or a ti, which
-  `CSeqDBNegativeList::FindId` does not match by type; a `BL_ORD_ID` line of a volume whose first
-  OID is not 0, of 1.29): NCBI's id set of the list is not blank (`CSeqDBImpl::x_InitIdSet`,
-  seqdbimpl.cpp:1909-1946), so the subject fetches of the traceback, the composition-based redo
-  and the ungapped re-evaluation of a nucleotide subject exclude it
-  (`seqsrc_seqdb.cpp:302-313`): it counts in the statistics and in the preliminary hit list, and
-  takes no place in the final one. LOSAT does not model those fetches yet and refuses the search
-  when such a sequence is to be reported (`the seqid list keeps sequence N of the volume but none
-  of its definition lines, and NCBI leaves its hits out of the report without notice`; versions
-  1.6 and 1.29, line DI-8 `DECISIONS.md` 17 and 22; version 1.32 kept it for the negative list
-  alone, line DBID item lineless).
 
 - A version 5 database list (several names in `-db`, or the `DBLIST` of an alias file) that
   mixes databases with and without the accession table (`acc2oid`) of `makeblastdb

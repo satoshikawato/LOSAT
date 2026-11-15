@@ -324,7 +324,9 @@ pub(crate) type DatabaseTitles = BTreeMap<u32, ReportedHeader>;
 /// NCBI makes no Seq-align of (`shared::SeqAligned`): after the cut of each query's hit list to
 /// the hit list size, before `read_titles`.
 pub(crate) fn drop_unaligned(database: &TblastxDatabase, ordered: &mut Vec<TblastxHsp>) {
-    let Some(mut aligned) = shared::SeqAligned::of(&database.db) else {
+    // tblastx fetches every subject with HSPs with `check_oid_exclusion` (the ungapped
+    // re-evaluation of a nucleotide subject: `run_impl::search_query_batch`).
+    let Some(mut aligned) = shared::SeqAligned::of(&database.db, true) else {
         return;
     };
     aligned.retain(ordered, |hsp| Some(hsp.hit.s_idx));

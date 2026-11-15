@@ -249,7 +249,7 @@ impl Runtime<'_> {
                     .collect();
                 x_timing::end(XEnd::KappaSpec, x_t);
             }
-            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1560-1582
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1560-1580
             // ```c++
             // BlastCompo_EarlyTermination(double evalue,
             //                             BlastCompo_Heap significantMatches[],

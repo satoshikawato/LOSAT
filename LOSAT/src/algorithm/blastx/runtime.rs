@@ -20,6 +20,10 @@ use super::{
 };
 use crate::core::blast_hits::{reap_by_query_coverage, trim_by_max_hsps};
 use anyhow::Result;
+// The redo of a batch's matches with composition-based statistics (a child module, so that it uses
+// the private types of this file).
+mod kappa_batch;
+use kappa_batch::KappaBatch;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1763-1777
 // ```c++
 //     if(hit_params->options->query_cov_hsp_perc > 0 || hit_params->options->max_hsps_per_subject > 0 ||
@@ -575,10 +579,6 @@ pub(crate) fn search_internal_observed<'a>(
     })?;
     Ok(pipeline.output)
 }
-// The redo of a batch's matches with composition-based statistics (a child module, so that it uses
-// the private types of this file).
-mod kappa_batch;
-use kappa_batch::KappaBatch;
 struct Runtime<'a> {
     ungapped_link_state: Option<crate::core::link_hsps::LinkCutoffs>,
     observer: &'a mut dyn RuntimeObserver,

@@ -76,7 +76,6 @@ fn score_gapped_chunk<S: super::score::TbnScore, const ONE_HIT: bool>(
     scratch: &mut S::Scratch,
     score: S,
     one_hit: Option<&XOneHitBuffers<'_>>,
-    trees: &XUnitTreePool,
 ) -> Result<Vec<(usize, GappedHsp)>> {
     let mut results = Vec::new();
     debug_assert_eq!(subject_sequence.len(), chunk.length);
@@ -115,9 +114,7 @@ fn score_gapped_chunk<S: super::score::TbnScore, const ONE_HIT: bool>(
     // if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
     //                                   hit_options->min_diag_separation)) { ... }
     // BlastIntervalTreeAddHSP(new_hsp, tree, query_info, eQueryAndSubject);
-    // The tree is one of the batch's (`XUnitTreePool`), reset to these ranges as
-    // `Blast_IntervalTreeInit` makes a new one.
-    let mut tree = trees.take(
+    let mut tree = BlastIntervalTree::new(
         0,
         total_query_length + 1,
         0,
@@ -894,8 +891,6 @@ pub(super) struct XQuerySide {
     /// EXPERIMENT (LOSAT_X_TBNUNITXLATE): the buffers of the units of the batch's plans without
     /// residues.
     unit_residues: XUnitResiduesPool,
-    /// The interval trees of the batch's units (`XUnitTreePool`).
-    unit_trees: XUnitTreePool,
 }
 
 // No NCBI counterpart: the methods below create the shared query-side state and build its frames
@@ -909,7 +904,6 @@ impl XQuerySide {
             lookup: OnceLock::new(),
             compressed: Default::default(),
             unit_residues: XUnitResiduesPool::new(),
-            unit_trees: XUnitTreePool::new(),
         }
     }
 
@@ -1112,78 +1106,6 @@ impl Drop for XUnitResidues<'_> {
         let residues = std::mem::take(&mut self.1);
         if residues.capacity() > 0 {
             self.0.idle().push(residues);
-        }
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3827-3834
-// ```c
-//     tree = Blast_IntervalTreeInit(0, query->length+1, 0, subject->length+1);
-// ```
-// NCBI makes a tree for each subject chunk (`BLAST_GetGappedScore`) and frees it at the end. Here
-// the units of a query batch share their trees: a unit takes an idle tree, reset to its ranges
-// (`reset_with_bounds`, as `Blast_IntervalTreeInit` sets up a new one), or a new one, and gives
-// it back when it ends; the trees go with the batch's query-side state at the end of its
-// preliminary stage. A new tree per unit grew its nodes by doubling and filled its grid of up to
-// 65,536 cells again; the blocks it freed stayed in the arenas of the threads (line EB s22:
-// TBLASTN AP027131 x AP027133 -subject at 32 threads, 6.9 MiB). It does not change any value NCBI
-// computes.
-/// The idle interval trees of the units of one query batch (`XQuerySide`), shared by its threads.
-pub(super) struct XUnitTreePool {
-    idle: std::sync::Mutex<Vec<BlastIntervalTree>>,
-}
-
-// No NCBI counterpart: the pool above; it computes no value NCBI computes.
-impl XUnitTreePool {
-    pub(super) fn new() -> Self {
-        Self {
-            idle: std::sync::Mutex::new(Vec::new()),
-        }
-    }
-
-    /// An empty tree for these ranges: an idle one reset to them, or a new one.
-    fn take(&self, q_min: i32, q_max: i32, s_min: i32, s_max: i32) -> XUnitTree<'_> {
-        let idle = self
-            .idle
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .pop();
-        let tree = match idle {
-            Some(mut tree) => {
-                tree.reset_with_bounds(q_min, q_max, s_min, s_max);
-                tree
-            }
-            None => BlastIntervalTree::new(q_min, q_max, s_min, s_max),
-        };
-        XUnitTree(self, Some(tree))
-    }
-}
-
-// No NCBI counterpart: a unit's hold on a tree of the pool (above), given back when the unit ends,
-// also when it fails; it computes no value NCBI computes.
-struct XUnitTree<'a>(&'a XUnitTreePool, Option<BlastIntervalTree>);
-
-impl std::ops::Deref for XUnitTree<'_> {
-    type Target = BlastIntervalTree;
-    fn deref(&self) -> &BlastIntervalTree {
-        self.1.as_ref().expect("tree held until dropped")
-    }
-}
-
-impl std::ops::DerefMut for XUnitTree<'_> {
-    fn deref_mut(&mut self) -> &mut BlastIntervalTree {
-        self.1.as_mut().expect("tree held until dropped")
-    }
-}
-
-impl Drop for XUnitTree<'_> {
-    fn drop(&mut self) {
-        if let Some(tree) = self.1.take() {
-            self.0
-                .idle
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push(tree);
         }
     }
 }
@@ -1495,7 +1417,6 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
             scratch,
             score,
             x_one_hit.as_ref(),
-            &x_query_side.unit_trees,
         )?;
         #[cfg(test)]
         let gapped = probe_gapped(unit, frame.frame, chunk.offset, gapped)?;
@@ -3469,7 +3390,6 @@ mod tests {
             &mut GapAlignScratch::new(),
             super::super::score::MatrixScore,
             Some(&buffers),
-            &XUnitTreePool::new(),
         )
         .unwrap();
         assert_eq!(
@@ -3507,7 +3427,6 @@ mod tests {
             &mut GapAlignScratch::new(),
             super::super::score::MatrixScore,
             None,
-            &XUnitTreePool::new(),
         )
         .unwrap_err();
         assert!(error.to_string().contains("internal error"), "{error}");
@@ -3785,7 +3704,6 @@ mod tests {
                 &mut GapAlignScratch::new(),
                 super::super::score::MatrixScore,
                 Some(&buffers),
-                &XUnitTreePool::new(),
             )
         };
         // Each alone is NCBI's HSP past the chunk.

@@ -165,12 +165,63 @@ impl NaInputs<'_> {
 /// No NCBI counterpart: whether a chunk is in the scope of this module (see the module
 /// comment).
 fn in_scope(x: &NaInputs<'_>) -> bool {
-    !x.use_array_indexing
-        && x.window_size == 0
-        && x.scan_range == 0
-        && !x.subject_masked
-        && !x.diagnostics
-        && x.one_subject_owner
+    scope(
+        x.use_array_indexing,
+        x.window_size,
+        x.scan_range,
+        x.subject_masked,
+        x.diagnostics,
+        x.one_subject_owner,
+    )
+}
+
+/// No NCBI counterpart: the test of `in_scope` on the values of `NaInputs` (their names).
+#[inline(always)]
+fn scope(
+    use_array_indexing: bool,
+    window_size: usize,
+    scan_range: usize,
+    subject_masked: bool,
+    diagnostics: bool,
+    one_subject_owner: bool,
+) -> bool {
+    !use_array_indexing
+        && window_size == 0
+        && scan_range == 0
+        && !subject_masked
+        && !diagnostics
+        && one_subject_owner
+}
+
+/// No NCBI counterpart (scheduling only): whether `prelim_subject::prelim_chunk_hits` calls `run`
+/// for a chunk with these inputs (the names of `NaInputs`), asked before it builds `NaInputs`:
+/// `run`'s tests (the switch, `scope` and a pool of two threads or more), so a chunk that `run`
+/// would send back at once costs neither the inputs nor the call. Such a chunk records the
+/// reference side of LOSAT_X_PAIRPARNA here (while the switch is on), as `run` recorded it.
+#[inline(always)]
+pub(in super::super) fn wants(
+    use_array_indexing: bool,
+    window_size: usize,
+    scan_range: usize,
+    subject_masked: bool,
+    diagnostics: bool,
+    one_subject_owner: bool,
+) -> bool {
+    if !on() {
+        return false;
+    }
+    let wanted = scope(
+        use_array_indexing,
+        window_size,
+        scan_range,
+        subject_masked,
+        diagnostics,
+        one_subject_owner,
+    ) && pool_threads().is_some();
+    if !wanted {
+        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARNA", false);
+    }
+    wanted
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:193-207

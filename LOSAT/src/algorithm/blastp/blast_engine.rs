@@ -6626,7 +6626,7 @@ fn psiblast_stop_at_invalid_query(
         _ if read_stop => read_failure
             .expect("the first read's failure")
             .error(args.app.name()),
-        // A PSSM query (`-in_pssm`, never split: `check_in_pssm_options`) whose letters give no
+        // A PSSM query (`-in_pssm`, never split: `search_split_query_batches`) whose letters give no
         // Karlin-Altschul parameters: NCBI's psiblast crashes (2.17.0, exit 139) where
         // `PsiBlastSetupScoreBlock` reads the `kbp_psi` block that `Blast_ScoreBlkKbpUngappedCalc`
         // did not make (psiblast_aux_priv.cpp:89-107, blast_stat.c:2783-2799).
@@ -9247,6 +9247,18 @@ fn search_split_query_batches(
     if args.rps_search.is_some() {
         return Ok(());
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:122-129 (quoted at
+    // `psi_round::run_queries`: a query factory that is not `CObjMgr_QueryFactory` makes one
+    // chunk)
+    // A PSSM search splits only a later round of a FASTA query (`PsiSearch::split_setup`); a PSSM
+    // query (`-in_pssm`, `CObjMgrFree_QueryFactory`) is never split.
+    if args
+        .psi_search
+        .as_deref()
+        .is_some_and(|psi| psi.split_setup.is_none())
+    {
+        return Ok(());
+    }
     let sizes = protein_query_split_sizes(10000)?;
     let batch_size = args.query_batch_size()?;
     // The batches count whole records (`seq_range::QueryInput::batches`); a batch is
@@ -9258,17 +9270,28 @@ fn search_split_query_batches(
         .filter(|searched| !searched.is_empty())
     {
         let Some(chunks) = split_protein_batch(&query_lengths[range.clone()], sizes) else {
+            // A later round that the round driver split (`psi_round::run_queries`, the same
+            // lengths and sizes) has no PSSM words to search: its chunks must run here.
+            anyhow::ensure!(
+                args.psi_search
+                    .as_deref()
+                    .is_none_or(|psi| psi.split_setup.is_none()),
+                "internal error of LOSAT's {}: a later round set up as split has no query chunk",
+                args.app.name()
+            );
             continue;
         };
         // A negative CHUNK_SIZE splits a batch only with a negative OVERLAP_CHUNK_SIZE below
         // it; NCBI's `size_t` chunk ranges then wrap (split_query_cxx.cpp:145-171).
         anyhow::ensure!(
             !sizes.negative_chunk_size(),
-            "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped, which is not supported by LOSAT's BLASTP"
+            "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped, which is not supported by LOSAT's {}",
+            args.app.name()
         );
         anyhow::ensure!(
             !protein_chunk_would_be_split(&chunks, sizes),
-            "an OVERLAP_CHUNK_SIZE so close to CHUNK_SIZE that NCBI BLAST+ would split a query chunk again (it then stops with a null reference) is not supported by LOSAT's BLASTP"
+            "an OVERLAP_CHUNK_SIZE so close to CHUNK_SIZE that NCBI BLAST+ would split a query chunk again (it then stops with a null reference) is not supported by LOSAT's {}",
+            args.app.name()
         );
         let mut merged: Vec<Option<BlastpHitList>> = (0..range.len()).map(|_| None).collect();
         // The batch's `query_info->contexts[c].eff_searchsp` (one context per query).
@@ -9283,7 +9306,8 @@ fn search_split_query_batches(
             // CBlastQueryVector"); `split_protein_batch` makes none.
             anyhow::ensure!(
                 !chunk.queries.is_empty(),
-                "a query chunk without a query is not supported by LOSAT's BLASTP"
+                "a query chunk without a query is not supported by LOSAT's {}",
+                args.app.name()
             );
             let parts: Vec<FastaRecord> = chunk
                 .queries
@@ -9314,8 +9338,21 @@ fn search_split_query_batches(
                 .collect();
             let mut chunk_lists = Vec::new();
             let part_input = seq_range::QueryInput::whole(&parts);
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:191-196
+            // ```c++
+            //     CRef<SBlastSetupData> setup_data =
+            //         BlastSetupPreliminarySearchEx(
+            //                 qf, options,
+            //                 CRef<objects::CPssmWithParameters>(),
+            //                 seqsrc, num_threads);
+            // ```
+            // A chunk is set up without the PSSM: a split later round's chunks are searched as
+            // round 1's, with the round's options (its composition-based statistics mode and
+            // search spaces).
+            let mut chunk_args = args.clone();
+            chunk_args.psi_search = None;
             let searched = run_resolved_in_pool(
-                args.clone(),
+                chunk_args,
                 &parts,
                 subject_source,
                 "",
@@ -15267,8 +15304,20 @@ fn run_call(
     //             m_LengthAdjustment = ctx->length_adjustment;
     //             break;
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:123-125
+    // ```c
+    //     /* Set gapped Blast_KarlinBlk* alias */
+    //     sbp->kbp_gap = Blast_QueryIsPssm(program) ?
+    //         sbp->kbp_gap_psi : sbp->kbp_gap_std;
+    // ```
     // The statistics of each query: what the XML reports print and what the observer receives.
+    // A PSSM's search (psiblast's later rounds, `-in_pssm`) reads the PSSM's gapped block there,
+    // as its E-values and the pairwise report's `Gapped` line do (`PsiSearch::gapped_karlin`).
     let query_stats = || -> Vec<crate::report::blast_xml::XmlStats> {
+        let gapped = args
+            .psi_search
+            .as_deref()
+            .map_or(gapped_params, |psi| psi.gapped_karlin(&gapped_params));
         (0..query_records.len())
             .map(|q_idx| {
                 if !query_valid[q_idx] {
@@ -15278,9 +15327,9 @@ fn run_call(
                     hsp_len: search_spaces[q_idx].length_adjustment as i32,
                     eff_space: exact_search_spaces[q_idx]
                         .unwrap_or(search_spaces[q_idx].effective_space.round() as i64),
-                    kappa: gapped_params.k,
-                    lambda: gapped_params.lambda,
-                    entropy: gapped_params.h,
+                    kappa: gapped.k,
+                    lambda: gapped.lambda,
+                    entropy: gapped.h,
                 }
             })
             .collect()

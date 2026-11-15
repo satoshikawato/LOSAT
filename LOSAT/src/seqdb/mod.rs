@@ -2342,38 +2342,8 @@ impl SeqDb {
         oid: u32,
         mut set: DeflineSet,
     ) -> Result<DeflineSet, SeqDbError> {
-        let volume_start = self.volume_starts[volume];
-        if volume_start == 0 {
-            return Ok(set);
-        }
-        for id in set
-            .deflines
-            .iter_mut()
-            .flat_map(|defline| defline.ids.iter_mut())
-        {
-            let ParsedSeqId::General(dbtag) = id else {
-                continue;
-            };
-            if dbtag.db != b"BL_ORD_ID" {
-                continue;
-            }
-            let format = |message: String| SeqDbError::Format {
-                path: self.volumes[volume].base().to_path_buf(),
-                message,
-            };
-            // `GetId` of a string tag throws in NCBI (an invalid CHOICE selection).
-            let ObjectId::Id(tag) = dbtag.tag else {
-                return Err(format(format!(
-                    "BL_ORD_ID of sequence {oid} has a string tag"
-                )));
-            };
-            let Ok(adjusted) = i32::try_from(i64::from(volume_start) + i64::from(tag)) else {
-                return Err(format(format!(
-                    "BL_ORD_ID of sequence {oid} passes a signed 32-bit id"
-                )));
-            };
-            dbtag.tag = ObjectId::Id(adjusted);
-        }
+        adjust_ordinal_tags(&mut set, self.volume_starts[volume])
+            .map_err(|error| error.error(self.volumes[volume].base(), oid))?;
         Ok(set)
     }
 
@@ -2687,6 +2657,100 @@ pub enum SequenceHeader {
     Ordinal(Vec<OrdinalDefline>),
     /// A record with parsed Seq-ids (`SeqDb::defline_set`).
     Parsed(DeflineSet),
+}
+
+/// Whether a definition line of `set` holds a `general` id `BL_ORD_ID`, whose tag NCBI's
+/// header reads of a volume after the first change (`adjust_ordinal_tags`).
+pub(super) fn has_ordinal_tag(set: &DeflineSet) -> bool {
+    set.deflines
+        .iter()
+        .flat_map(|defline| &defline.ids)
+        .any(|id| matches!(id, ParsedSeqId::General(dbtag) if dbtag.db == b"BL_ORD_ID"))
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2222-2236
+// ```c++
+//     if (adjust_oids && bdls.NotEmpty() && m_VolStart) {
+//         NON_CONST_ITERATE(list< CRef<CBlast_def_line> >, dl, bdls->Set()) {
+//             if (! (**dl).CanGetSeqid()) {
+//                 continue;
+//             }
+//
+//             NON_CONST_ITERATE(list< CRef<CSeq_id> >, id, (*dl)->SetSeqid()) {
+//                 CSeq_id & seqid = **id;
+//
+//                 if (seqid.Which() == CSeq_id::e_General) {
+//                     CDbtag & dbt = seqid.SetGeneral();
+//
+//                     if (dbt.GetDb() == "BL_ORD_ID") {
+//                         int vol_oid = dbt.GetTag().GetId();
+//                         dbt.SetTag().SetId(m_VolStart + vol_oid);
+// ```
+// The overload with a stream (seqdbvol.cpp:2275-2289, for `GetSeqIDs`) does the same. The filtered
+// header read (`x_GetFilteredHeader`, seqdbvol.cpp:1992-1993 for `GetBioseq`, 2108-2109 for
+// `GetSeqIDs`) asks for this change before a list's rule reads the Seq-ids (`Volume::line_mask`),
+// as `GetHdr` does for the reports.
+/// `set`, the definition lines of a sequence of a volume whose first OID is `volume_start`, with
+/// the tag of each `general` id `BL_ORD_ID` made the stored tag plus `volume_start` (`x_GetHdrAsn1`
+/// with `adjust_oids`): the OID in the database where makeblastdb stored the number in the volume.
+/// Fails where NCBI's `GetId` throws (a string tag) and where the sum passes a signed 32-bit id
+/// (`OrdinalTagError`), with `set` then partly changed.
+pub(super) fn adjust_ordinal_tags(
+    set: &mut DeflineSet,
+    volume_start: u32,
+) -> Result<(), OrdinalTagError> {
+    if volume_start == 0 {
+        return Ok(());
+    }
+    for id in set
+        .deflines
+        .iter_mut()
+        .flat_map(|defline| defline.ids.iter_mut())
+    {
+        let ParsedSeqId::General(dbtag) = id else {
+            continue;
+        };
+        if dbtag.db != b"BL_ORD_ID" {
+            continue;
+        }
+        // `GetId` of a string tag throws in NCBI (an invalid CHOICE selection). makeblastdb
+        // -parse_seqids stores a FASTA tag with a leading 0 (`gnl|BL_ORD_ID|0`) as a string.
+        let ObjectId::Id(tag) = dbtag.tag else {
+            return Err(OrdinalTagError::StringTag);
+        };
+        let Ok(adjusted) = i32::try_from(i64::from(volume_start) + i64::from(tag)) else {
+            return Err(OrdinalTagError::PastSigned32);
+        };
+        dbtag.tag = ObjectId::Id(adjusted);
+    }
+    Ok(())
+}
+
+/// A `BL_ORD_ID` tag that NCBI's header read of a volume after the first cannot make an OID in
+/// the database (`adjust_ordinal_tags`). NCBI makes that read only for a sequence it reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum OrdinalTagError {
+    /// A string tag: NCBI's `GetId` throws.
+    StringTag,
+    /// The stored tag plus the volume's first OID passes `i32::MAX`.
+    PastSigned32,
+}
+
+impl OrdinalTagError {
+    /// The reader's error for the sequence `oid` (its OID in the database, which the message
+    /// names) of the volume `path`.
+    pub(super) fn error(self, path: &Path, oid: u32) -> SeqDbError {
+        let message = match self {
+            OrdinalTagError::StringTag => format!("BL_ORD_ID of sequence {oid} has a string tag"),
+            OrdinalTagError::PastSigned32 => {
+                format!("BL_ORD_ID of sequence {oid} passes a signed 32-bit id")
+            }
+        };
+        SeqDbError::Format {
+            path: path.to_path_buf(),
+            message,
+        }
+    }
 }
 
 /// A definition line with its database-wide `BL_ORD_ID`.

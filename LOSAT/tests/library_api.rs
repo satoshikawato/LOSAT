@@ -93,7 +93,19 @@ const CASES: &[Case] = &[
         options: &["-evalue", "1e-5"],
         formats: &["6", "0", "7"],
     },
+    // psiblast's rounds (line RG item Q5): NCBI 2.17.0 finds 300 subjects in round 1 and 299 in
+    // round 2, then writes `Search has CONVERGED!`.
+    Case {
+        program: Program::Psiblast,
+        query: "outfmt0/e2e_many_query.faa",
+        subject: "outfmt0/e2e_many_subject.faa",
+        options: &["-evalue", "1e-5", "-num_iterations", "3"],
+        formats: &["6", "0", "7"],
+    },
 ];
+
+/// The psiblast rounds case above.
+const ROUNDS_CASE: usize = 8;
 
 /// The warnings case above.
 const WARNINGS_CASE: usize = 6;
@@ -190,12 +202,18 @@ fn api(case: &Case, query: &Path, subject: &Path, extra: &[&str]) -> Outcome {
         .unwrap_or_else(|error| panic!("{} {:?}: {error}", case.program, case.options))
 }
 
-/// The line ranges of a tabular report: one per row.
+/// The line ranges of a tabular report: one per row (not the comments of outfmt 7, nor the empty
+/// line and `Search has CONVERGED!` that psiblast writes after a query's rounds converged).
 fn rows(report: &[u8]) -> Vec<std::ops::Range<usize>> {
     let mut rows = Vec::new();
     let mut start = 0;
     for (at, &byte) in report.iter().enumerate() {
-        if byte == b'\n' && !report[start..at].starts_with(b"#") {
+        let line = &report[start..at];
+        if byte == b'\n'
+            && !line.starts_with(b"#")
+            && !line.is_empty()
+            && line != b"Search has CONVERGED!"
+        {
             rows.push(start..at + 1);
         }
         if byte == b'\n' {
@@ -509,8 +527,9 @@ fn check_columns(context: &str, hsp: &HspRecord, row: &[u8]) {
         number(15),
         "{context}: score of {row}"
     );
-    // The reports cut these to a few digits (`report::tabular`).
-    let bits: f64 = fields[16].parse().unwrap();
+    // The reports cut these to a few digits (`report::tabular`); a bit score in (99.9, 100) is
+    // NCBI's ` 99` (`report::outfmt6::format_bitscore_ncbi`).
+    let bits: f64 = fields[16].trim_start().parse().unwrap();
     assert!(
         (hsp.bit_score - bits).abs() <= 1.0 + hsp.bit_score / 1000.0,
         "{context}: bitscore of {row}: {}",
@@ -873,7 +892,8 @@ fn check_batches(case: &Case, query_bytes: &[u8], subject_bytes: &[u8]) -> usize
     let search = validate(case.program, case.options).unwrap();
     let batches = run_batches(&search, Inputs::new(&queries, &subjects)).unwrap();
     assert_eq!(batches.query_count(), queries.len(), "{context}");
-    let (mut hsps, mut stats, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut hsps, mut stats, mut rounds, mut diagnostics) =
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut count = 0;
     for batch in batches {
         let batch = batch.unwrap_or_else(|error| panic!("{context}: {error}"));
@@ -883,6 +903,7 @@ fn check_batches(case: &Case, query_bytes: &[u8], subject_bytes: &[u8]) -> usize
             batch.query_indices.len(),
             "{context}"
         );
+        assert_eq!(batch.rounds.len(), batch.query_indices.len(), "{context}");
         // The views of a batch number the queries as the inputs do.
         for (query, view) in batch.query_indices.clone().zip(batch.queries()) {
             assert_eq!(view.q_idx, query, "{context}");
@@ -890,12 +911,14 @@ fn check_batches(case: &Case, query_bytes: &[u8], subject_bytes: &[u8]) -> usize
         }
         hsps.extend(batch.hsps);
         stats.extend(batch.query_stats);
+        rounds.extend(batch.rounds);
         diagnostics.extend(batch.diagnostics);
         count += 1;
     }
     assert_eq!(stats.len(), queries.len(), "{context}: every query");
     assert!(hsps == whole.hsps, "{context}: the records");
     assert_eq!(stats, whole.query_stats, "{context}: the statistics");
+    assert_eq!(rounds, whole.rounds, "{context}: the rounds");
     assert_eq!(
         String::from_utf8_lossy(&diagnostics),
         String::from_utf8_lossy(&whole.diagnostics),
@@ -932,6 +955,8 @@ fn the_batches_one_after_the_other_are_the_whole_search() {
         (&CASES[3], 200),
         (&CASES[4], 100),
         (&CASES[5], 2),
+        // Two queries of two rounds each: a batch per query, its rounds in it.
+        (&CASES[ROUNDS_CASE], 2),
     ] {
         let once = std::fs::read(fixture(case.query)).expect("query fixture");
         let subject_bytes = std::fs::read(fixture(case.subject)).expect("subject fixture");
@@ -1005,6 +1030,7 @@ fn the_views_hold_each_query_and_each_pair_together() {
         assert_eq!(outcome.queries().count(), outcome.query_stats.len());
         let mut seen = 0;
         let mut pairs = std::collections::HashSet::new();
+        let mut first_rounds = std::collections::HashSet::new();
         for (q_idx, query) in outcome.queries().enumerate() {
             assert_eq!(query.q_idx, q_idx, "{context}");
             assert_eq!(
@@ -1012,17 +1038,42 @@ fn the_views_hold_each_query_and_each_pair_together() {
                 outcome.query_stats[q_idx].as_ref(),
                 "{context}"
             );
+            assert_eq!(query.round, None, "{context}");
             assert_eq!(outcome.query(q_idx), Some(query), "{context}");
             for subject in query.subjects() {
-                // A pair is one run of the hit list: it comes once.
-                assert!(pairs.insert((q_idx, subject.s_idx)), "{context}");
-                assert_eq!(query.subject(subject.s_idx), Some(subject), "{context}");
+                // A pair is one run of the hit list in each round: it comes once a round.
+                assert!(
+                    pairs.insert((q_idx, subject.s_idx, subject.round)),
+                    "{context}"
+                );
+                if first_rounds.insert((q_idx, subject.s_idx)) {
+                    assert_eq!(query.subject(subject.s_idx), Some(subject), "{context}");
+                }
                 for hsp in subject.hsps {
-                    assert_eq!((hsp.q_idx, hsp.s_idx), (q_idx, subject.s_idx), "{context}");
+                    assert_eq!(
+                        (hsp.q_idx, hsp.s_idx, hsp.round),
+                        (q_idx, subject.s_idx, subject.round),
+                        "{context}"
+                    );
                     assert_eq!(hsp.index, seen, "{context}: in the order of the hit list");
                     seen += 1;
                 }
             }
+            // The rounds of the query: its HSPs round by round, each with its statistics.
+            let rounds = &outcome.rounds[q_idx];
+            assert_eq!(rounds.stats[0], outcome.query_stats[q_idx], "{context}");
+            let views: Vec<_> = query.rounds().collect();
+            assert_eq!(views.len(), rounds.stats.len(), "{context}");
+            let mut held = Vec::new();
+            for (offset, view) in views.iter().enumerate() {
+                let round = offset as u32 + 1;
+                assert_eq!(view.round, Some(round), "{context}");
+                assert_eq!(view.stats, rounds.stats[offset].as_ref(), "{context}");
+                assert!(view.hsps.iter().all(|hsp| hsp.round == round), "{context}");
+                assert_eq!(view.rounds().collect::<Vec<_>>(), [*view], "{context}");
+                held.extend_from_slice(view.hsps);
+            }
+            assert!(held == query.hsps, "{context}: the rounds hold every HSP");
         }
         assert_eq!(seen, outcome.hsps.len(), "{context}: every HSP");
         assert_eq!(outcome.query(outcome.query_stats.len()), None);
@@ -1429,6 +1480,22 @@ const DATABASE_CASES: &[DatabaseCase] = &[
         db: "db_search/paja",
         options: &[],
     },
+    // psiblast's rounds: 9 subjects in round 1, 5 in round 2, converged (the fixture
+    // `db.ps.it.it3.tk.7`); each round's hit list ranks its own subjects.
+    DatabaseCase {
+        program: Program::Psiblast,
+        query: "fasta/psiblast/tk.faa",
+        db: "db_search/paja",
+        options: &["-num_iterations", "3"],
+    },
+    // psiblast's rounds of the second query record: `-query_loc` starts past the end of the first
+    // (10 letters), which NCBI's reader skips (the fixture `db.ps.it.qloc.skip.6`).
+    DatabaseCase {
+        program: Program::Psiblast,
+        query: "fasta/psiblast/q4a_skip.faa",
+        db: "db_search/paja",
+        options: &["-num_iterations", "2", "-query_loc", "20-300"],
+    },
 ];
 
 fn engine_tests(name: &str) -> String {
@@ -1525,6 +1592,160 @@ fn a_database_search_is_the_command_lines() {
     }
 }
 
+/// Each round's `Gapped` Karlin-Altschul values (lambda, K, H) and effective search space in
+/// psiblast's pairwise report of one query, round 1 first.
+fn round_footers(report: &str) -> Vec<([f64; 3], i64)> {
+    let lines: Vec<&str> = report.lines().collect();
+    let mut footers = Vec::new();
+    for (at, line) in lines.iter().enumerate() {
+        if *line == "Gapped" {
+            let values: Vec<f64> = lines[at + 2]
+                .split_whitespace()
+                .take(3)
+                .map(|value| value.parse().unwrap())
+                .collect();
+            let space = lines[at + 4..]
+                .iter()
+                .find_map(|line| line.strip_prefix("Effective search space used: "))
+                .unwrap()
+                .parse()
+                .unwrap();
+            footers.push(([values[0], values[1], values[2]], space));
+        }
+    }
+    footers
+}
+
+/// Whether `value` prints as `printed` with NCBI's three significant digits.
+fn prints_as(value: f64, printed: f64) -> bool {
+    (value - printed).abs() <= 0.0051 * printed.abs()
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1474-1476
+// ```c++
+//     if (itr_num != numeric_limits<unsigned int>::max()) {
+//         m_Outfile << "Results from round " << itr_num << "\n";
+//     }
+// ```
+// Line RG item Q5: psiblast's rounds in the library: the records carry their round, the rounds of
+// a query hold each round's statistics (those its pairwise report prints) and its convergence, and
+// round 1 is the search of `-num_iterations 1`.
+#[test]
+fn psiblast_rounds_carry_their_round_and_its_statistics() {
+    let one_round = &CASES[ROUNDS_CASE - 1];
+    let rounds_case = &CASES[ROUNDS_CASE];
+    let query_bytes = std::fs::read(fixture(rounds_case.query)).unwrap();
+    let subject_bytes = std::fs::read(fixture(rounds_case.subject)).unwrap();
+    let searches = [
+        (
+            "subject",
+            search_case(one_round, &query_bytes, &subject_bytes, &["0", "7"]),
+            search_case(rounds_case, &query_bytes, &subject_bytes, &["0", "7"]),
+        ),
+        {
+            let [one, rounds] = [&DATABASE_CASES[7], &DATABASE_CASES[8]].map(|case| {
+                assert_eq!(case.program, Program::Psiblast);
+                let (_, records, search) = case.read();
+                let db = engine_tests(case.db);
+                run_collect(&search, Inputs::database(&records, &db), &["0", "7"]).unwrap()
+            });
+            ("database", one, rounds)
+        },
+    ];
+    for (context, one, outcome) in searches {
+        // One query of two rounds: round 1 is the one-round search.
+        assert_eq!(outcome.rounds.len(), 1, "{context}");
+        let rounds = &outcome.rounds[0];
+        assert_eq!(rounds.stats.len(), 2, "{context}");
+        assert!(rounds.converged, "{context}");
+        assert!(!one.rounds[0].converged, "{context}");
+        assert_eq!(one.rounds[0].stats, [one.query_stats[0]], "{context}");
+        assert_eq!(outcome.query_stats, one.query_stats, "{context}");
+        assert_eq!(rounds.stats[0], outcome.query_stats[0], "{context}");
+        let first: Vec<HspRecord> = outcome
+            .hsps
+            .iter()
+            .filter(|hsp| hsp.round == 1)
+            .cloned()
+            .collect();
+        assert!(first == one.hsps, "{context}: round 1");
+        let second = outcome.hsps.len() - first.len();
+        assert!(second > 0, "{context}: round 2");
+        // Round 2 follows round 1; each round ranks its own HSPs.
+        for (index, hsp) in outcome.hsps.iter().enumerate() {
+            assert_eq!(hsp.index, index, "{context}");
+            let (round, rank) = if index < first.len() {
+                (1, index)
+            } else {
+                (2, index - first.len())
+            };
+            assert_eq!((hsp.round, hsp.rank), (round, rank), "{context}");
+        }
+        // The statistics of each round are those that its pairwise report prints.
+        let pairwise = String::from_utf8(outcome.reports[0].bytes.clone()).unwrap();
+        assert!(pairwise.contains("\nSearch has CONVERGED!\n"), "{context}");
+        let footers = round_footers(&pairwise);
+        assert_eq!(footers.len(), 2, "{context}");
+        for (stats, (printed, space)) in rounds.stats.iter().zip(&footers) {
+            let stats = stats.unwrap();
+            assert_eq!(stats.eff_space, *space, "{context}");
+            for (value, printed) in [stats.lambda, stats.kappa, stats.entropy]
+                .iter()
+                .zip(printed)
+            {
+                assert!(prints_as(*value, *printed), "{context}: {value} {printed}");
+            }
+        }
+        assert_ne!(
+            rounds.stats[0], rounds.stats[1],
+            "{context}: a PSSM's own values"
+        );
+        // Every row of outfmt 7 lies in its round's part of the report.
+        let commented = &outcome.reports[1];
+        let text = String::from_utf8(commented.bytes.clone()).unwrap();
+        for hsp in &outcome.hsps {
+            let row = commented.spans[hsp.index].clone().unwrap();
+            let heading = text[..row.start].rfind("# Iteration: ").unwrap();
+            let round = text[heading..].lines().next().unwrap();
+            assert_eq!(round, format!("# Iteration: {}", hsp.round), "{context}");
+        }
+    }
+}
+
+// Line RG item Q5: the rounds of a query after a record that `-query_loc` skips are the second
+// record's, in the whole search and in its batches.
+#[test]
+fn psiblast_rounds_after_a_skipped_record_are_the_next_records() {
+    let case = &DATABASE_CASES[9];
+    let (_, records, search) = case.read();
+    let db = engine_tests(case.db);
+    let inputs = Inputs::database(&records, &db);
+    let outcome = run_collect(&search, inputs, &["7"]).unwrap();
+    assert_eq!(outcome.rounds.len(), 2);
+    assert_eq!(outcome.query_stats[0], None);
+    assert_eq!(outcome.rounds[0].stats, [None]);
+    assert!(!outcome.rounds[0].converged);
+    assert_eq!(outcome.rounds[1].stats.len(), 2);
+    assert_eq!(outcome.rounds[1].stats[0], outcome.query_stats[1]);
+    assert!(outcome.hsps.iter().all(|hsp| hsp.q_idx == 1));
+    assert!(outcome.hsps.iter().any(|hsp| hsp.round == 2));
+    let text = String::from_utf8(outcome.reports[0].bytes.clone()).unwrap();
+    for hsp in &outcome.hsps {
+        let row = outcome.reports[0].spans[hsp.index].clone().unwrap();
+        let heading = text[..row.start].rfind("# Iteration: ").unwrap();
+        let round = text[heading..].lines().next().unwrap();
+        assert_eq!(round, format!("# Iteration: {}", hsp.round));
+    }
+    let (mut hsps, mut rounds) = (Vec::new(), Vec::new());
+    for batch in run_batches(&search, inputs).unwrap() {
+        let batch = batch.unwrap();
+        hsps.extend(batch.hsps);
+        rounds.extend(batch.rounds);
+    }
+    assert!(hsps == outcome.hsps, "the batches' records");
+    assert_eq!(rounds, outcome.rounds, "the batches' rounds");
+}
+
 #[test]
 fn a_database_record_is_the_database_ordinal_id_in_every_batch() {
     for case in DATABASE_CASES {
@@ -1554,12 +1775,13 @@ fn a_database_record_is_the_database_ordinal_id_in_every_batch() {
         let whole = run_collect(&search, inputs, &["6"]).unwrap();
         let batches = run_batches(&search, inputs).unwrap();
         assert_eq!(batches.query_count(), repeated.len(), "{context}");
-        let (mut hsps, mut stats, mut diagnostics, mut count) =
-            (Vec::new(), Vec::new(), Vec::new(), 0);
+        let (mut hsps, mut stats, mut rounds, mut diagnostics, mut count) =
+            (Vec::new(), Vec::new(), Vec::new(), Vec::new(), 0);
         for batch in batches {
             let batch = batch.unwrap_or_else(|error| panic!("{context}: {error}"));
             hsps.extend(batch.hsps);
             stats.extend(batch.query_stats);
+            rounds.extend(batch.rounds);
             diagnostics.extend(batch.diagnostics);
             count += 1;
         }
@@ -1569,6 +1791,7 @@ fn a_database_record_is_the_database_ordinal_id_in_every_batch() {
         );
         assert!(hsps == whole.hsps, "{context}: the records");
         assert_eq!(stats, whole.query_stats, "{context}: the statistics");
+        assert_eq!(rounds, whole.rounds, "{context}: the rounds");
         assert_eq!(diagnostics, whole.diagnostics, "{context}: the diagnostics");
     }
 }

@@ -13,7 +13,9 @@
 //! `GLIBC_TUNABLES` run; v4-MF t3, v4-D12 s15).
 //!
 //! With the switch, each worker of the pool keeps one scratch and one block buffer for the whole
-//! stage, the one-thread loop reads every block into one buffer, and the check of
+//! stage (below 1 MiB: a block of 1 MiB or more, a protein of a million residues or more, takes a
+//! buffer of `utils::x_mapped::X_BYTES` and gives it back, `SeqDb::x_read_block_into`, as BLASTN's
+//! blocks), the one-thread loop reads every block into one buffer, and the check of
 //! `IndexFile::open` reads 64 KiB at a time (`seqdb/index.rs`). The workers take the blocks one at
 //! a time in ordinal order (the block and the one-thread order's diagonal offset of its first
 //! sequence, under one lock) and put each block's results into a window of slots (`XWindowSize`);

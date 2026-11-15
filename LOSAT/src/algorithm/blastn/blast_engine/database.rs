@@ -139,7 +139,7 @@ impl XWaitingBytes for u64 {
 #[cfg(test)]
 const BLASTNA_TO_IUPACNA: [u8; 16] = *b"ACGTRYMKWSBDHVN-";
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:375,389-392
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:375,388-391
 // ```c++
 //         len = seqdb.GetSequence(oid, &buf);
 //     ...
@@ -158,12 +158,13 @@ const BLASTNA_TO_IUPACNA: [u8; 16] = *b"ACGTRYMKWSBDHVN-";
 // seqdbvol.cpp:1817, quoted above `block_subject`), and each search thread allocates its search
 // structures once. LOSAT reads a block with one positioned read (`seqdb::file`, no mapping, so
 // that native builds and WebAssembly share the reader): each worker keeps one buffer for its
-// blocks, read again for each block, so that a block costs no allocation and only bytes the
-// buffer never held are zeroed.
+// blocks, read again for each block. It is allocated once per worker and grows only for a larger
+// block, and only its bytes past the last block's length are zeroed.
 /// `SeqDb::read_block` (the preliminary stage's blocks). With LOSAT_X_BNMAPPED, into the worker's
 /// block buffer `kept` (`SeqDb::x_read_block_into`: below 1 MiB the worker's own buffer, kept from
-/// one block to the next; a block of 1 MiB or more, one long sequence, in a buffer of
-/// `utils::x_mapped::X_BYTES`); `x_done_kept_block` gives the buffer back.
+/// one block to the next; a block of 1 MiB or more, a long sequence or at one thread a block of
+/// exactly 1 MiB, in a buffer of `utils::x_mapped::X_BYTES`); `x_done_kept_block` gives the
+/// buffer back.
 fn x_read_block(
     db: &SeqDb,
     range: BlockRange,
@@ -185,18 +186,27 @@ fn x_done_kept_block(block: SequenceBlock, kept: &mut Vec<u8>) {
     }
 }
 
-/// No NCBI counterpart (where LOSAT keeps its bytes): a worker of the preliminary stage, its
-/// search scratch and its block buffer (`x_read_block`), both kept from one block to the next.
+/// No NCBI counterpart (where LOSAT keeps its bytes): a worker of the parallel preliminary stage
+/// (the rounds' `map_init`, `x_db_stream.rs`'s window), its search scratch and its block buffer
+/// (`x_read_block`), both kept from one block to the next.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 struct XWorker<T> {
     scratch: T,
-    kept: Vec<u8>,
+    bytes: Vec<u8>,
 }
 
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 impl<T> XWorker<T> {
     fn new(scratch: T) -> Self {
         Self {
             scratch,
-            kept: Vec::new(),
+            bytes: Vec::new(),
         }
     }
 }
@@ -1199,8 +1209,8 @@ where
                 .map_init(
                     || XWorker::new(new_scratch()),
                     |worker, &range| -> Result<Vec<(u32, R)>> {
-                        let block =
-                            x_read_block(db, range, &mut worker.kept).map_err(search_read_error)?;
+                        let block = x_read_block(db, range, &mut worker.bytes)
+                            .map_err(search_read_error)?;
                         let mut kept = Vec::new();
                         for i in 0..block.len() {
                             let ordinal = range.first_ordinal + i as u32;
@@ -1212,7 +1222,7 @@ where
                                 kept.push((ordinal, result));
                             }
                         }
-                        x_done_kept_block(block, &mut worker.kept);
+                        x_done_kept_block(block, &mut worker.bytes);
                         Ok(kept)
                     },
                 )
@@ -1291,21 +1301,19 @@ where
     ))]
     let _ = (pool, parallel, blocks_per_thread);
 
-    let mut worker = XWorker::new(new_scratch());
+    let mut scratch = new_scratch();
+    // The block buffer, kept from one block to the next (`x_read_block`).
+    let mut bytes = Vec::new();
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, block_bytes) {
-        let block = x_read_block(db, range, &mut worker.kept).map_err(search_read_error)?;
+        let block = x_read_block(db, range, &mut bytes).map_err(search_read_error)?;
         for i in 0..block.len() {
             let ordinal = range.first_ordinal + i as u32;
-            if let Some(result) = search(
-                &mut worker.scratch,
-                ordinal,
-                block_subject(&block, &range, i)?,
-            ) {
+            if let Some(result) = search(&mut scratch, ordinal, block_subject(&block, &range, i)?) {
                 merge(ordinal, result);
             }
         }
-        x_done_kept_block(block, &mut worker.kept);
+        x_done_kept_block(block, &mut bytes);
         next_ordinal = range.end_ordinal();
     }
     Ok(())

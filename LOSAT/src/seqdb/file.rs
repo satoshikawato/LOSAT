@@ -195,8 +195,8 @@ impl DbFile {
 
     /// EXPERIMENT (LOSAT_X_BPDBKEEP, LOSAT_X_BNMAPPED): `read_range` into the buffer that a
     /// worker keeps from one read to the next, `kept` (taken, its capacity kept when it holds the
-    /// range; a range of 1 MiB or more that it does not hold, one long sequence, goes to a buffer
-    /// of `utils::x_mapped::X_BYTES` instead and `kept` stays): `x_mapped::X_BYTES.x_filled_kept`.
+    /// range; a range of 1 MiB or more that it does not hold goes to a buffer of
+    /// `utils::x_mapped::X_BYTES` instead and `kept` stays): `x_mapped::X_BYTES.x_filled_kept`.
     /// The buffer goes back with `X_BYTES.x_keep`. No NCBI counterpart: only where the bytes are
     /// kept.
     pub fn x_read_range_into(

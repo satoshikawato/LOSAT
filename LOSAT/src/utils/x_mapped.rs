@@ -23,7 +23,8 @@
 //! arena keeps its free space for that thread only; the pool lends it to any thread, so the
 //! resident buffers are those in use at the busiest moment, plus at most the pool's idle bound
 //! of idle ones. Only buffers that are done after every subject use a pool: BLASTN's database
-//! reads and BLASTNA letters (`X_BYTES`, idle bound `x_pool_idle_bytes`), TBLASTN's `-db` reads
+//! reads and BLASTNA letters (`X_BYTES`, idle bound `x_pool_idle_bytes`), BLASTP's database blocks
+//! of `X_MAPPED_FROM` bytes or more (`X_BYTES` too), TBLASTN's `-db` reads
 //! and, while a `-db` stream is open, its large frames (`X_BYTES` too, `tblastn/x_db_stream.rs`),
 //! and the scratch of the ungapped hits' sort (`blastn` `X_SORT`, its own bound); a buffer that
 //! its thread keeps from one subject to the next (the ungapped hits) is mapped but not pooled,
@@ -177,9 +178,9 @@ impl<T: Copy> XPool<T> {
     /// from one read to the next (a worker's database blocks, `seqdb::file`; `x_keep` gives the
     /// buffer back). Below `X_MAPPED_FROM` bytes the buffer is `kept`, taken, with the elements its
     /// last read left in it, grown to exactly `len` if it is shorter; only the elements past its
-    /// length are set to `fill`. From `X_MAPPED_FROM` bytes on (one long sequence) it is
-    /// `x_filled`'s buffer of the pool, and `kept` stays as it is, so that the worker does not
-    /// keep an outlier's room for its next reads.
+    /// length are set to `fill`. From `X_MAPPED_FROM` bytes on, when `kept` does not hold `len`
+    /// (it never does after `x_keep`), it is `x_filled`'s buffer of the pool, and `kept` stays as
+    /// it is, so that the worker does not keep an outlier's room for its next reads.
     pub(crate) fn x_filled_kept(&self, kept: &mut Vec<T>, len: usize, fill: T) -> Vec<T> {
         let size = std::mem::size_of::<T>().max(1);
         if len.saturating_mul(size) >= X_MAPPED_FROM && kept.capacity() < len {
@@ -331,7 +332,10 @@ impl<T: Copy> XPool<T> {
 }
 
 /// No NCBI counterpart: the pool of byte buffers: BLASTN's database reads and BLASTNA letters
-/// (LOSAT_X_BNMAPPED), TBLASTN's `-db` reads and large frames.
+/// (LOSAT_X_BNMAPPED; the preliminary stage's blocks from `X_MAPPED_FROM` bytes on), BLASTP's
+/// database blocks from `X_MAPPED_FROM` bytes on (LOSAT_X_BPDBKEEP, a protein of a million
+/// residues or more; the pool keeps its idle buffers to the end of the process, as BLASTN's),
+/// TBLASTN's `-db` reads and large frames.
 pub(crate) static X_BYTES: XPool<u8> = XPool::new(x_pool_idle_bytes);
 
 /// No NCBI counterpart: the elements sorted at a time with `sort_by` before they are merged in

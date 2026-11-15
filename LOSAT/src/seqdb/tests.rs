@@ -192,8 +192,10 @@ fn check_sequence(block: &SequenceBlock, i: usize, letters: &[u8], what: &str) {
 }
 
 /// Reads the whole database in blocks of at most `max_bytes` and checks every
-/// sequence against `entries`.
-fn check_database(db: &SeqDb, entries: &[Entry], max_bytes: u64, name: &str) {
+/// sequence against `entries`. Each block is read a second time into `kept`, a worker's buffer
+/// read again from one block to the next (`x_read_block_into`, LOSAT_X_BPDBKEEP and
+/// LOSAT_X_BNMAPPED), whose sequences must be the same.
+fn check_database(db: &SeqDb, entries: &[Entry], max_bytes: u64, name: &str, kept: &mut Vec<u8>) {
     assert_eq!(db.num_seqs() as usize, entries.len(), "{name}: sequences");
     let mut next = 0u32;
     let mut blocks = 0;
@@ -216,13 +218,19 @@ fn check_database(db: &SeqDb, entries: &[Entry], max_bytes: u64, name: &str) {
         let block = db.read_block(range).expect("read block");
         assert_eq!(block.len(), range.len() as usize);
         assert_eq!(block.first_ordinal(), next);
+        let given = db
+            .x_read_block_into(range, kept)
+            .expect("read block into kept");
+        assert_eq!(given.len(), block.len());
         for i in 0..block.len() {
             let entry = &entries[next as usize + i];
             let what = format!("{name} ordinal {}", entry.ordinal);
             assert_eq!(entry.ordinal as usize, next as usize + i);
             assert_eq!(entry.seq.len(), entry.length, "{what}: NCBI length");
             check_sequence(&block, i, &entry.seq, &what);
+            check_sequence(&given, i, &entry.seq, &format!("{what}, kept buffer"));
         }
+        given.x_into_kept(kept);
         next = range.end_ordinal();
         blocks += 1;
     }
@@ -395,8 +403,12 @@ fn check_against_ncbi(name: &str, seqtype: SeqType) -> (SeqDb, Vec<Entry>) {
     assert_eq!(db.seqtype(), seqtype);
     let entries = expected_entries(name);
     check_info(&db, name);
-    for max_bytes in [0, 64, 400, 1 << 20] {
-        check_database(&db, &entries, max_bytes, name);
+    // The kept buffer starts with three other bytes; it grows for the blocks that hold more than
+    // any before them (one sequence, then the whole database) and keeps its length past the next
+    // block after the whole database.
+    let mut kept = vec![0xA5u8; 3];
+    for max_bytes in [0, 64, 400, 1 << 20, 0] {
+        check_database(&db, &entries, max_bytes, name, &mut kept);
     }
     check_deflines_and_single_reads(&db, &entries, name);
     if seqtype == SeqType::Nucleotide {

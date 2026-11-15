@@ -2116,7 +2116,7 @@ impl SeqDb {
 
     /// EXPERIMENT (LOSAT_X_BPDBKEEP, LOSAT_X_BNMAPPED): `read_block` with the bytes in the
     /// buffer that a worker keeps from one block to the next, `kept` (`Volume::x_read_block_into`;
-    /// a block of 1 MiB or more, one long sequence, in a buffer of `utils::x_mapped::X_BYTES`);
+    /// a block of 1 MiB or more that `kept` does not hold, in a buffer of `utils::x_mapped::X_BYTES`);
     /// `SequenceBlock::x_into_kept` gives the buffer back.
     pub fn x_read_block_into(
         &self,

@@ -1,0 +1,24 @@
+Blast-db-mask-info ::= {
+  algo-id 2,
+  algo-program dust,
+  algo-options "edge tail short near",
+  masks {
+    masks {
+      packed-int {
+        {
+          from 12,
+          to 35,
+          id local id 1
+        }
+      },
+      packed-int {
+        {
+          from 1682,
+          to 1875,
+          id local id 2
+        }
+      }
+    },
+    more FALSE
+  }
+}

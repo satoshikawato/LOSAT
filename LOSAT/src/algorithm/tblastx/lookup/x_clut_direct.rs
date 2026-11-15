@@ -987,7 +987,8 @@ impl<'a> XWords<'a> {
     /// Item SC9i of line NP: the cells of `for_each_word` whose last letter (the index's most
     /// significant digit, of weight `A^(word_length - 1)`) is in `letters`, each once, in another
     /// order: the neighbors' letters chosen from the last position to the first, the last one only
-    /// among `letters`.
+    /// among `letters`. Each is given less the first cell of `letters`, `letters.start * A^(word_length
+    /// - 1)` (the index in the parallel builder's wave, `x_clut_par.rs`).
     ///
     /// The same cells. `neighbors` gives every compressed word `c` with `sum_i matrix[w[i]][c_i] >=
     /// threshold` once: each position's loop runs the letters of a row sorted by score down to the
@@ -1036,7 +1037,7 @@ impl<'a> XWords<'a> {
                 self.scaled_compress_table,
             );
             if skip == 0 && letters.contains(&(index as u32 / self.power[last])) {
-                sink.one(index as u32);
+                sink.one(index as u32 - letters.start * self.power[last]);
             }
         }
         if self.threshold == 0 {
@@ -1057,7 +1058,7 @@ impl<'a> XWords<'a> {
                 query_word,
                 score + letter_score,
                 last - 1,
-                letter * self.power[last],
+                (letter - letters.start) * self.power[last],
                 sink,
             );
         }
@@ -4271,7 +4272,7 @@ mod tests {
         [ncbistdaa::A, ncbistdaa::L, ncbistdaa::S, ncbistdaa::K];
 
     // Item SC9i of line NP: `for_each_word_in` gives the cells of `for_each_word` whose last letter
-    // is in the range, each once, for word sizes 5 to 7, matrices of each kind, thresholds that
+    // is in the range, each once (less the range's first cell), for word sizes 5 to 7, matrices of each kind, thresholds that
     // make few and many neighbors (and 0: the word alone), words with letters outside the
     // compressed alphabet, and every range of letters (all, none, one, any run).
     #[test]
@@ -4320,6 +4321,7 @@ mod tests {
                             .iter()
                             .copied()
                             .filter(|cell| range.contains(&(cell / top)))
+                            .map(|cell| cell - range.start * top)
                             .collect();
                         let mut got = Vec::new();
                         words.for_each_word_in(&word[..], &range, &mut got);

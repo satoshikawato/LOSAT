@@ -45,8 +45,14 @@
 //! - count (per stripe): each cell's count n (the serial count), and per count range the overflow
 //!   cells of the reference's table of all batches that its appends take: an append that finds the
 //!   count c takes one when `x_takes_overflow_cell(c)`, the serial count pass's statement, with c its
-//!   rank, the count before it in the serial order. Summed over the stripes, a range's cells are
-//!   those the serial pass counts for it (`st.cells - cells_before` at the range's end).
+//!   rank, the count before it in the serial order. So the appends to a cell that holds n offsets at
+//!   some point of the serial order have taken `x_overflow_cells_of(n)` cells by then (item SC9i of
+//!   line NP: read from the counts, not counted append by append): a stripe's parts are read in
+//!   chunk order, which holds the count ranges in order, and where they pass from one range to the
+//!   next (`x_next_count_range`) the cells of the counts so far less those at the range before's
+//!   start are that range's; the last range's are those of the final counts (at the layout) less
+//!   those at its start. Summed over the stripes, a range's cells are those the serial pass counts
+//!   for it (`st.cells - cells_before` at the range's end).
 //! - layout (per stripe): the cells' starts are the counts' prefix sums from the stripe's first hit,
 //!   so the serial starts; the longest chain and the count of non-empty cells are functions of the
 //!   counts. The PV shift (`finalize`: `PV_ARRAY_BTS`, or more when at most 1 % of the cells are not
@@ -136,9 +142,7 @@
 //! is the same: the stripe reads its parts of the chunks once, in chunk order, into a copy while it
 //! counts the cells (the copy holds the cells' appends in the serial order, chunk by chunk, each
 //! packed as in its chunk), then lays out and fills from the copy as `x_stripe_build` does, the
-//! copy's part of chunk c taking chunk c's first offset. The overflow cells are counted only when
-//! some table's appends pass the capacity: an append takes at most one, so otherwise no table's test
-//! can refuse it, and each stripe's counts of them are left 0.
+//! copy's part of chunk c taking chunk c's first offset.
 //!
 //! Waves (item SC9i of line NP): the backbone's cells are cut by their last letter (the index's
 //! most significant digit, weight `A^(word_length - 1)`) into waves of `x_wave_letters` letters
@@ -149,8 +153,8 @@
 //! of the table's (4 bytes per hit; for `-word_size 7` they were twice the table's hits, 182 MB of a
 //! 50-cDNA query batch at its end). The table is the same:
 //! - a wave's appends are the chunks' appends to its cells, in order (`XWords::for_each_word_in`
-//!   gives the cells of `for_each_word` whose last letter is in a range, each once; the offsets of
-//!   a chunk in order). They differ from the one-wave build's only in their order within one query
+//!   gives the cells of `for_each_word` whose last letter is in a range, each once, less the wave's
+//!   first cell; the offsets of a chunk in order). They differ from the one-wave build's only in their order within one query
 //!   offset, and an offset appends each cell at most once (`for_each_word_in`), so each cell's
 //!   appends, read by stripe as above, are its offsets in the serial order: the count, layout, fill
 //!   and scan order of each stripe are those above.
@@ -239,6 +243,38 @@ const X_MAX_STRIPE_SHIFT: usize = 16;
 /// 15^5 + 1 cells, 8 waves of 2 letters (1,518,750 cells) for word size 6's 15^6 + 1, 10 of one
 /// letter (10^6 cells) for word size 7's 10^7 + 1.
 const X_WAVE_CELLS: usize = 1 << 20;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:800-806,825-836
+// (`x_takes_overflow_cell`)
+// ```c
+//     case 5:
+//         ...
+//         CompressedOverflowCell * new_cell = s_CompressedListGetNewCell(lookup);
+//     ...
+//         Int4 cell_index = (num_entries -3) & COMPRESSED_HITS_CELL_MASK ;
+//
+//         if (cell_index == 0 ) { /* can't be empty => it's full  */
+// ```
+/// The overflow cells that the appends to a cell take in the reference's table when the cell ends
+/// with `n` offsets: the appends that find the counts 0..n, of which the one that finds 5 and each
+/// that finds 3 more than a multiple of 4 past it take one (`x_takes_overflow_cell`): none for at
+/// most 5 offsets, else n / 4.
+#[inline(always)]
+fn x_overflow_cells_of(n: u32) -> usize {
+    const _: () = assert!(COMPRESSED_HITS_PER_BACKBONE_CELL == 4 && COMPRESSED_HITS_CELL_MASK == 3);
+    if n > COMPRESSED_HITS_PER_BACKBONE_CELL as u32 + 1 {
+        n as usize / (COMPRESSED_HITS_CELL_MASK + 1)
+    } else {
+        0
+    }
+}
+
+// No NCBI counterpart: the overflow cells of the counts so far (`x_overflow_cells_of`), read where a
+// stripe's appends pass from one count range to the next (module header).
+/// The overflow cells that the appends counted in `counts` take.
+fn x_overflow_cells_in(counts: &[u32]) -> usize {
+    counts.iter().map(|&n| x_overflow_cells_of(n)).sum()
+}
 
 /// A contiguous run of the query offsets of one count range.
 struct XChunk {
@@ -1074,7 +1110,8 @@ fn x_chunk_appends(
 // value NCBI computes.
 /// The appends `targets` of the offsets `per_offset` (each offset with its number of appends, in
 /// order; offsets of a chunk whose first offset is `base`), sorted by stripe, stably (counting sort),
-/// into a range of the task's segment `out`.
+/// into a range of the task's segment `out`. A target is its cell less the wave's first cell
+/// (`XWords::for_each_word_in`).
 fn x_sorted_piece(
     targets: &[u32],
     per_offset: &[(i32, u32)],
@@ -1083,12 +1120,11 @@ fn x_sorted_piece(
     wave: &XWave,
     out: &mut XSegmentOut<'_>,
 ) -> XChunkAppends {
-    // The wave's stripes, from its first cell (the targets lie in its cells).
+    // The wave's stripes, from its first cell (the targets lie in its cells, from it).
     let stripes = wave.stripes;
-    let first = wave.cells.start;
     let mut stripe_starts = vec![0u32; stripes + 1];
     for &index in targets {
-        stripe_starts[((index - first) >> shift) as usize + 1] += 1;
+        stripe_starts[(index >> shift) as usize + 1] += 1;
     }
     for j in 0..stripes {
         stripe_starts[j + 1] += stripe_starts[j];
@@ -1103,8 +1139,8 @@ fn x_sorted_piece(
         let delta = (query_offset - base) as u32;
         let end = at + appends as usize;
         for &index in &targets[at..end] {
-            let cursor = &mut cursors[((index - first) >> shift) as usize];
-            packed[*cursor as usize] = ((index - first) & mask) << 16 | delta;
+            let cursor = &mut cursors[(index >> shift) as usize];
+            packed[*cursor as usize] = (index & mask) << 16 | delta;
             *cursor += 1;
         }
         at = end;
@@ -1149,8 +1185,7 @@ struct XStripeCounts {
     nonempty: usize,
     longest: u32,
     /// The overflow cells of the reference's table of all batches that each count range's appends
-    /// to the stripe's cells take (0 where `x_stripe_fill` does not count them: no table's appends
-    /// pass the capacity).
+    /// to the stripe's cells take.
     cells: Vec<usize>,
 }
 
@@ -1197,23 +1232,33 @@ fn x_stripe_build<H: XQueryOffset>(
         })
     };
 
-    // Count: each cell's appends in the serial order; the overflow cells they take.
+    // Count: each cell's appends in the serial order; the overflow cells of the count ranges before
+    // the last (module header).
     let mut counts = vec![0u32; starts.len()];
     let mut cells = vec![0usize; ranges];
+    let mut range = None;
+    let mut cells_before = 0usize;
     for (chunk, part) in parts() {
-        let mut taken = 0usize;
-        for &packed in part {
-            let count = &mut counts[(packed >> 16) as usize];
-            taken += usize::from(x_takes_overflow_cell(*count));
-            *count += 1;
+        if part.is_empty() {
+            continue;
         }
-        cells[chunk.range] += taken;
+        x_next_count_range(
+            &mut range,
+            chunk.range,
+            &counts,
+            &mut cells,
+            &mut cells_before,
+        );
+        for &packed in part {
+            counts[(packed >> 16) as usize] += 1;
+        }
     }
 
     // Layout: the starts (from the stripe's first hit) and the PV bits; each count becomes its
-    // cell's cursor, the cell's first slot in the stripe's hits.
+    // cell's cursor, the cell's first slot in the stripe's hits. The overflow cells of the counts.
     let mut nonempty = 0usize;
     let mut longest = 0u32;
+    let mut taken = 0usize;
     let mut total = base;
     let mut slot = 0u32;
     for (cell, (start, cursor)) in starts.iter_mut().zip(counts.iter_mut()).enumerate() {
@@ -1222,6 +1267,7 @@ fn x_stripe_build<H: XQueryOffset>(
         if count > 0 {
             nonempty += 1;
             longest = longest.max(count);
+            taken += x_overflow_cells_of(count);
             if !pv.is_empty() {
                 // `compressed_pv_set` on the stripe's words (PV shift `PV_ARRAY_BTS`; the stripe
                 // starts a word).
@@ -1231,6 +1277,9 @@ fn x_stripe_build<H: XQueryOffset>(
         *cursor = slot;
         total += count;
         slot += count;
+    }
+    if let Some(range) = range {
+        cells[range] += taken - cells_before;
     }
 
     // Fill: the serial fill on the stripe's cells, the appends in order, each at its cell's cursor.
@@ -1264,6 +1313,29 @@ fn x_stripe_build<H: XQueryOffset>(
     }
 }
 
+// No NCBI counterpart: where the overflow cells of the serial count pass are summed per count range
+// (module header).
+/// A stripe's count passes from the appends of `range` (`None`: none yet) to those of `next`, a
+/// count range not before it: the overflow cells that the counts so far take, less those of the
+/// ranges before (`cells_before`), are `range`'s.
+fn x_next_count_range(
+    range: &mut Option<usize>,
+    next: usize,
+    counts: &[u32],
+    cells: &mut [usize],
+    cells_before: &mut usize,
+) {
+    match *range {
+        Some(current) if current != next => {
+            let so_far = x_overflow_cells_in(counts);
+            cells[current] += so_far - *cells_before;
+            *cells_before = so_far;
+        }
+        _ => {}
+    }
+    *range = Some(next);
+}
+
 /// LOSAT_X_BPSTRIPEFILL: a thread's scratch for `x_stripe_fill`: the copy of the stripe's parts,
 /// the cells' counts (then cursors), the cells of more than 5 offsets.
 type XFillScratch = (Vec<u32>, Vec<u32>, Vec<u32>);
@@ -1276,14 +1348,13 @@ type XFillScratch = (Vec<u32>, Vec<u32>, Vec<u32>);
 // ```
 /// LOSAT_X_BPSTRIPEFILL: `x_stripe_build` with the stripe's parts of the chunks read once, in chunk
 /// order, into a copy while the cells are counted; the layout and the fill from the copy (module
-/// header). The overflow cells are counted only with `need_cells`.
+/// header).
 #[allow(clippy::too_many_arguments)]
 fn x_stripe_fill<H: XQueryOffset>(
     part: XStripe<'_, H>,
     ranges: usize,
     chunks: &[XChunk],
     appends: &XAppends,
-    need_cells: bool,
     scratch: &mut XFillScratch,
 ) -> XStripeCounts {
     let XStripe {
@@ -1303,31 +1374,35 @@ fn x_stripe_fill<H: XQueryOffset>(
         piece.stripe_starts[local] as usize..piece.stripe_starts[local + 1] as usize
     };
 
-    // Count: each cell's appends in the serial order; the overflow cells they take.
+    // Count: each cell's appends in the serial order; the overflow cells of the count ranges before
+    // the last, as `x_stripe_build`'s.
     let mut cells = vec![0usize; ranges];
+    let mut range = None;
+    let mut cells_before = 0usize;
     for (piece, packed) in appends.iter() {
         let chunk = &chunks[piece.chunk];
         let part = &packed[part_of(piece)];
-        if need_cells {
-            let mut taken = 0usize;
-            copy.extend(part.iter().map(|&packed| {
-                let count = &mut counts[(packed >> 16) as usize];
-                taken += usize::from(x_takes_overflow_cell(*count));
-                *count += 1;
-                packed
-            }));
-            cells[chunk.range] += taken;
-        } else {
-            copy.extend(part.iter().map(|&packed| {
-                counts[(packed >> 16) as usize] += 1;
-                packed
-            }));
+        if part.is_empty() {
+            continue;
         }
+        x_next_count_range(
+            &mut range,
+            chunk.range,
+            counts,
+            &mut cells,
+            &mut cells_before,
+        );
+        copy.extend(part.iter().map(|&packed| {
+            counts[(packed >> 16) as usize] += 1;
+            packed
+        }));
     }
 
-    // Layout, as `x_stripe_build`'s; the cells of more than 5 offsets noted.
+    // Layout, as `x_stripe_build`'s; the cells of more than 5 offsets (those that take overflow
+    // cells) noted.
     let mut nonempty = 0usize;
     let mut longest = 0u32;
+    let mut taken = 0usize;
     let mut slot = 0u32;
     overflowed.clear();
     for (cell, (start, cursor)) in starts.iter_mut().zip(counts.iter_mut()).enumerate() {
@@ -1341,10 +1416,14 @@ fn x_stripe_fill<H: XQueryOffset>(
             }
             if count > COMPRESSED_HITS_PER_BACKBONE_CELL as u32 + 1 {
                 overflowed.push(cell as u32);
+                taken += x_overflow_cells_of(count);
             }
         }
         *cursor = slot;
         slot += count;
+    }
+    if let Some(range) = range {
+        cells[range] += taken - cells_before;
     }
 
     // Fill: the serial fill on the stripe's cells, the appends in order, each at its cell's cursor;
@@ -1992,22 +2071,6 @@ fn x_flat_stripes_on<S: CompressedScores, H: XQueryOffset>(
                 .map(|part| x_stripe_build(part, ranges.len(), &chunks, &appends))
                 .collect(),
             (true, true) => {
-                // No NCBI counterpart: whether the stripes count the overflow cells that the
-                // capacity test below reads (module header); it changes no value NCBI computes. An
-                // append takes at most one: when no table's appends pass the capacity, no table's
-                // test can refuse it. With more waves a range's appends are known only at the end,
-                // so the stripes count them.
-                let mut range_appends = vec![0usize; ranges.len()];
-                for piece in &appends.pieces {
-                    range_appends[chunks[piece.chunk].range] += piece.len;
-                }
-                let need_cells = waves > 1
-                    || ranges
-                        .iter()
-                        .zip(&range_appends)
-                        .any(|((_, is_table), &range_total)| {
-                            *is_table && range_total > overflow_cell_capacity
-                        });
                 let parts: Vec<Mutex<Option<XStripe<'_, H>>>> = parts
                     .into_iter()
                     .map(|part| Mutex::new(Some(part)))
@@ -2023,7 +2086,7 @@ fn x_flat_stripes_on<S: CompressedScores, H: XQueryOffset>(
                             .unwrap_or_else(PoisonError::into_inner)
                             .take()
                             .expect("each stripe taken once");
-                        x_stripe_fill(part, ranges.len(), &chunks, &appends, need_cells, scratch)
+                        x_stripe_fill(part, ranges.len(), &chunks, &appends, scratch)
                     },
                     |_| {},
                 )
@@ -2160,6 +2223,19 @@ fn x_flat_stripes_on<S: CompressedScores, H: XQueryOffset>(
 mod tests {
     use super::super::tests::{queries, XorShift, FEW_LETTERS, LETTERS};
     use super::*;
+
+    // Item SC9i of line NP: the overflow cells read from a cell's count are those its appends take
+    // one by one (the serial count pass's statement).
+    #[test]
+    fn overflow_cells_of_a_count_are_those_its_appends_take() {
+        let mut taken = 0usize;
+        for n in 0..10_000u32 {
+            assert_eq!(x_overflow_cells_of(n), taken, "n {n}");
+            taken += usize::from(x_takes_overflow_cell(n));
+        }
+        let counts = [0u32, 1, 5, 6, 7, 8, 11, 12, 40];
+        assert_eq!(x_overflow_cells_in(&counts), 1 + 1 + 2 + 2 + 3 + 10);
+    }
 
     fn in_pool<R: Send>(threads: usize, work: impl FnOnce() -> R + Send) -> R {
         rayon::ThreadPoolBuilder::new()

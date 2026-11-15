@@ -254,15 +254,16 @@ pub(super) struct PrelimSubject<'a> {
 }
 
 /// The search of one chunk of a subject (one turn of the chunk loop): the chunk's ranges and packed
-/// letters, the debug counters, the interval tree, the diagonal table (array or hash) set up for
-/// the chunk, then the word finder: for a two-stage table the strips dispatch of PAIRPAR
-/// (`x_pair_seed::run`) or the scan (`two_stage_scan::scan_two_stage_lookup`), for the other tables
-/// the dispatch of LOSAT_X_PAIRPARNA (`x_pair_seed::run_na`) or the scan
-/// (`na_scan::scan_na_lookup`); then the chunk's HSP list, of an ungapped search from its initial
-/// hits (`prelim_hsp_list::ungapped_hsp_list`), else from the initial hits sorted
-/// (`prelim_hsp_list::sort_ungapped_hits_for_gapped`) by the gapped loop with its purge and sort
-/// (`prelim_hsp_list::gapped_hsp_list`); and the diagonal table's offset moved on. The list is in
-/// the subject's coordinates. `reuse_prelim_hits` is set for the owner's serial calls (not a chunk
+/// letters, the debug counters, the diagonal table (array or hash) set up for the chunk, then the
+/// word finder: for a two-stage table the strips dispatch of PAIRPAR (`x_pair_seed::run`) or the
+/// scan (`two_stage_scan::scan_two_stage_lookup`), for the other tables the dispatch of
+/// LOSAT_X_PAIRPARNA (`x_pair_seed::run_na`) or the scan (`na_scan::scan_na_lookup`). A chunk
+/// without an initial hit ends there with an empty list, after its diagonal table's offset moved
+/// on (NCBI's `continue` after the word finder, below). Otherwise the chunk's HSP list, of an
+/// ungapped search from its initial hits (`prelim_hsp_list::ungapped_hsp_list`), else from the
+/// initial hits sorted (`prelim_hsp_list::sort_ungapped_hits_for_gapped`) by the gapped loop with
+/// its interval tree, purge and sort (`prelim_hsp_list::gapped_hsp_list`); and the diagonal
+/// table's offset moved on. The list is in the subject's coordinates. `reuse_prelim_hits` is set for the owner's serial calls (not a chunk
 /// of a batch on the pool); the scratches are the subject's, or the pool worker's.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:487-500,522-527,555,560-563
@@ -445,24 +446,9 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:806-833 (GetReverseNuclSequence uses ncbi4na/blastna)
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93 (IUPACNA_TO_BLASTNA)
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:148-349 (packed ncbi2na used for ungapped extension)
-
-    // NCBI reference: blast_gapalign.c:3826-3831 Blast_IntervalTreeInit
-    // Initialize interval tree for HSP containment checking
-    // Tree is indexed by query offsets (primary) and subject offsets (midpoint subtrees)
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3811-3831
-    // ```c
-    // tree = Blast_IntervalTreeInit(0, query->length+1,
-    //                               0, subject->length+1);
-    // ```
-    // query->length is the concatenated length for both strands (2*len + 1).
-    // The tree is the scratch's (`x_tree`), given this chunk's ranges.
-    let interval_tree = &mut subject_scratch.x_tree;
-    interval_tree.reset_with_bounds(
-        0,                                // q_min
-        (query_concat_length + 1) as i32, // q_max
-        0,                                // s_min
-        (s_len + 1) as i32,               // s_max
-    );
+    // The interval tree of the gapped stage is set up there, for a chunk with initial hits only
+    // (`prelim_hsp_list::gapped_hsp_list`, as `BLAST_GetGappedScore` makes its tree after its
+    // return for an empty list, blast_gapalign.c:3706-3707,3826-3831).
 
     // NCBI architecture: Collect all ungapped hits first, then process in score-descending order
     // NCBI reference: blast_gapalign.c:3824 - ASSERT(Blast_InitHitListIsSortedByScore(init_hitlist))
@@ -579,7 +565,9 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         // they read.
         let x_lv_ref = diag_hash.x_lv_on()
             && !(debug_enabled || blastn_trace_enabled || debug_window.is_some());
-        if diag_hash.x_lv_on() {
+        // The sides are recorded only when LOSAT_X_REACH is set (`xreach::recording`, one test for
+        // the two marks of every chunk).
+        if crate::utils::xreach::recording() && diag_hash.x_lv_on() {
             crate::utils::xreach::x_reach!("LOSAT_X_DIAGLV", use_diag_hash && x_lv_ref);
             // EXPERIMENT (LOSAT_X_DIAGLV2): the reference folds called below
             // (`pair_extend::extend_offset_pairs`, `na_scan::scan_na_lookup`) never read
@@ -675,8 +663,19 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
             // discontiguous table, `x_pair_seed_disc.rs`) with the subject scan in strips
             // and the pairs folded by this thread in the scan order; `continue` ends the
             // one-iteration strand loop. Otherwise `two_stage_scan::scan_two_stage_lookup`
-            // runs.
-            if x_pair_seed::run(
+            // runs. `x_pair_seed::wants` asks `run`'s tests of a contiguous table first, so a
+            // chunk that `run` would send back (every chunk of a database search) builds no
+            // inputs and makes no call.
+            if x_pair_seed::wants(
+                two_stage.disc().is_some(),
+                use_array_indexing,
+                window_size,
+                scan_range,
+                !small_na_compressed_query.is_empty(),
+                debug_enabled || blastn_trace_enabled || debug_window.is_some(),
+                subject_masked,
+                !use_parallel && reuse_prelim_hits,
+            ) && x_pair_seed::run(
                 &x_pair_seed::Inputs {
                     two_stage,
                     search_seq_packed,
@@ -806,7 +805,16 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
             // one-hit diagonal-hash scope only) with the subject scan in strips on the pool
             // threads and the pairs folded in the scan order; `continue` ends the
             // one-iteration strand loop. Otherwise `na_scan::scan_na_lookup` runs.
-            if x_pair_seed::run_na(
+            // `x_pair_seed::wants_na` asks `run_na`'s tests first, so a chunk that `run_na`
+            // would send back builds no inputs and makes no call.
+            if x_pair_seed::wants_na(
+                use_array_indexing,
+                window_size,
+                scan_range,
+                subject_masked,
+                debug_enabled || blastn_trace_enabled || debug_window.is_some(),
+                !use_parallel && reuse_prelim_hits,
+            ) && x_pair_seed::run_na(
                 &x_pair_seed::NaInputs {
                     pv_direct_lookup: pv_direct_lookup_ref,
                     na_lookup: na_lookup_ref,
@@ -906,6 +914,56 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         } // end of if/else for two-stage vs original lookup
     } // end of strand loop
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:493-500
+    // ```c
+    //         if (aux_struct->WordFinder) {
+    //             aux_struct->WordFinder(subject, query, query_info, lookup, matrix,
+    //                                    word_params, aux_struct->ewp,
+    //                                    aux_struct->offset_pairs,
+    //                                    kScanSubjectOffsetArraySize,
+    //                                    init_hitlist, ungapped_stats);
+    //
+    //             if (init_hitlist->total == 0) continue;
+    //         }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1686-1689
+    // ```c
+    //     Blast_ExtendWordExit(ewp, subject->length);
+    //
+    //     Blast_UngappedStatsUpdate(ungapped_stats, total_hits, hits_extended,
+    //                               init_hitlist->total);
+    // ```
+    // A chunk without an initial hit ends here, as NCBI's chunk loop goes on to the next chunk
+    // after its word finder: the diagonal table's offset moves on (`Blast_ExtendWordExit` runs
+    // inside the word finder, before the `continue`), the saved hits counted are none, and nothing
+    // else runs for the chunk: no sort, no gapped stage and its interval tree, no HSP list, and
+    // no merge into the subject's list or best-hit filter (`collect_subject_prelim` skips both for
+    // an empty list, as NCBI's `continue` does). The empty list returned is the scratch's own
+    // buffer when the owner reuses it (`collect_subject_prelim` puts it back), as the gapped
+    // stage's empty list was. LOSAT's `-verbose` line of the gapped stage (no NCBI counterpart)
+    // is still written for the chunk, with no extension.
+    if ungapped_hits.is_empty() {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:159-176
+        // (the diagonal table's offset moves on after each chunk, as below)
+        advance_diag_table_offset(
+            &mut subject_scratch.diag_table_offset,
+            diag_window,
+            s_len,
+            use_array_indexing,
+            &mut subject_scratch.hit_level_array,
+            &mut subject_scratch.hit_len_array,
+            &mut subject_scratch.diag_hash,
+        );
+        if !UNGAPPED && verbose {
+            prelim_hsp_list::verbose_gapped_line(std::time::Duration::ZERO, 0, 0, 0);
+        }
+        return if reuse_prelim_hits {
+            std::mem::take(prelim_hits)
+        } else {
+            Vec::new()
+        };
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:560-563
     // ```c
     //         } else {
@@ -951,7 +1009,11 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         queries,
         good_init_extends,
     );
-    let gapped_start_time = std::time::Instant::now();
+    // No NCBI counterpart: the clock of the gapped stage, read only by LOSAT_TIMING's
+    // `gapped_ns` and the `-verbose` line (`prelim_hsp_list::gapped_hsp_list`), so it is read
+    // only when one of them is on (NCBI's engine reads no clock; the scan's clock is kept the same
+    // way, `two_stage_scan::scan_two_stage_lookup`).
+    let gapped_start_time = (timing_ref.is_some() || verbose).then(std::time::Instant::now);
 
     // The values the gapped preliminary loop of this chunk
     // (`prelim_hsp_list::gapped_score_list`) and one hit's extension
@@ -1026,7 +1088,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         },
         ungapped_hits,
         prelim_hsp_list::GappedListState {
-            interval_tree,
+            interval_tree: &mut subject_scratch.x_tree,
             gap_scratch,
             greedy_align_scratch,
             x_helper_scratch: Some(&mut subject_scratch.x_ahead_scratch),
@@ -1336,18 +1398,32 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                             subject_scratch,
                             true,
                         );
-                        let hits = merge_prelim_hit_lists(
-                            &mut combined_prelim_hits,
-                            hits,
-                            HspListSplit::Subject {
-                                offset: chunk.offset,
-                            },
-                            chunk.overlap,
-                            !UNGAPPED,
-                        );
-                        if subject_besthit {
-                            prelim_subject_best_hit(&mut combined_prelim_hits, query_lengths);
-                        }
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:500,565
+                        // ```c
+                        //             if (init_hitlist->total == 0) continue;
+                        // ...
+                        //         if (hsp_list->hspcnt == 0) continue;
+                        // ```
+                        // An empty list is neither merged nor followed by the best-hit filter
+                        // (the merge of an empty list returns at once, and the filter of an
+                        // unchanged list removes nothing).
+                        let hits = if hits.is_empty() {
+                            hits
+                        } else {
+                            let hits = merge_prelim_hit_lists(
+                                &mut combined_prelim_hits,
+                                hits,
+                                HspListSplit::Subject {
+                                    offset: chunk.offset,
+                                },
+                                chunk.overlap,
+                                !UNGAPPED,
+                            );
+                            if subject_besthit {
+                                prelim_subject_best_hit(&mut combined_prelim_hits, query_lengths);
+                            }
+                            hits
+                        };
                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
                         // ```c
                         // /* Delete if not done in last loop iteration to prevent memory leak. */
@@ -1410,6 +1486,16 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                             .collect_into_vec(&mut chunk_results);
                     }
                     for (offset, overlap, hits) in chunk_results {
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:500,565
+                        // ```c
+                        //             if (init_hitlist->total == 0) continue;
+                        // ...
+                        //         if (hsp_list->hspcnt == 0) continue;
+                        // ```
+                        // An empty list is neither merged nor followed by the best-hit filter.
+                        if hits.is_empty() {
+                            continue;
+                        }
                         let _ = merge_prelim_hit_lists(
                             &mut combined_prelim_hits,
                             hits,
@@ -1475,18 +1561,32 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                         subject_scratch,
                         true,
                     );
-                    let hits = merge_prelim_hit_lists(
-                        &mut combined_prelim_hits,
-                        hits,
-                        HspListSplit::Subject {
-                            offset: chunk.offset,
-                        },
-                        chunk.overlap,
-                        !UNGAPPED,
-                    );
-                    if subject_besthit {
-                        prelim_subject_best_hit(&mut combined_prelim_hits, query_lengths);
-                    }
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:500,565
+                    // ```c
+                    //             if (init_hitlist->total == 0) continue;
+                    // ...
+                    //         if (hsp_list->hspcnt == 0) continue;
+                    // ```
+                    // An empty list is neither merged nor followed by the best-hit filter
+                    // (the merge of an empty list returns at once, and the filter of an
+                    // unchanged list removes nothing).
+                    let hits = if hits.is_empty() {
+                        hits
+                    } else {
+                        let hits = merge_prelim_hit_lists(
+                            &mut combined_prelim_hits,
+                            hits,
+                            HspListSplit::Subject {
+                                offset: chunk.offset,
+                            },
+                            chunk.overlap,
+                            !UNGAPPED,
+                        );
+                        if subject_besthit {
+                            prelim_subject_best_hit(&mut combined_prelim_hits, query_lengths);
+                        }
+                        hits
+                    };
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
                     // ```c
                     // /* Delete if not done in last loop iteration to prevent memory leak. */

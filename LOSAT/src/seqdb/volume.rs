@@ -1626,6 +1626,25 @@ impl SequenceBlock {
     /// Length of nucleotide `i` in bases. A length above NCBI's signed
     /// 32-bit `int` is a format error.
     pub fn nucleotide_len(&self, i: usize) -> Result<usize, SeqDbError> {
+        self.nucleotide_packed_len(i).map(|(_, length)| length)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1833-1840
+    // ```c++
+    //         int whole_bytes = int(end_offset - start_offset - 1);
+    //
+    //         char last_char = (*buffer)[whole_bytes];
+    //
+    //         int remainder = last_char & 3;
+    //         length = (whole_bytes * 4) + remainder;
+    //     }
+    //
+    //     return length;
+    // ```
+    // NCBI's `x_GetSequence` returns the data (`*buffer`) and the length from one pair of
+    // offsets; a database search reads both for every sequence (`blastn` `block_subject`).
+    /// `nucleotide_packed(i)` and `nucleotide_len(i)`, from one read of the block's offsets.
+    pub fn nucleotide_packed_len(&self, i: usize) -> Result<(&[u8], usize), SeqDbError> {
         let packed = self.nucleotide_packed(i);
         let whole_bytes = packed.len() - 1;
         let remainder = u64::from(packed[whole_bytes] & 3);
@@ -1633,7 +1652,7 @@ impl SequenceBlock {
         if length > i32::MAX as u64 {
             return Err(self.format(i, "the sequence is longer than a signed 32-bit length"));
         }
-        Ok(length as usize)
+        Ok((packed, length as usize))
     }
 
     /// The ambiguity data of nucleotide `i` as stored (empty when the

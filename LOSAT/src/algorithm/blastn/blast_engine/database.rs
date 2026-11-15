@@ -954,10 +954,10 @@ fn block_subject<'a>(
     range: &'a BlockRange,
     i: usize,
 ) -> Result<BlastnSubjectRef<'a>> {
-    let length = block.nucleotide_len(i).map_err(search_read_error)?;
+    let (packed, length) = block.nucleotide_packed_len(i).map_err(search_read_error)?;
     Ok(BlastnSubjectRef {
         length,
-        packed: block.nucleotide_packed(i),
+        packed,
         letters: None,
         blastna: None,
         store: None,

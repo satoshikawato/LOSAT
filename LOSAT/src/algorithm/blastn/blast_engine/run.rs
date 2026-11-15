@@ -605,7 +605,10 @@ enum SeqRanges {
 }
 
 impl SeqRanges {
-    #[inline]
+    /// The chunk's ranges: the one range, the subject's soft ranges, or a cut of them
+    /// (`cut_soft_ranges`). The first two are what every chunk of an unmasked subject reads, so
+    /// they are taken where the chunk is searched; the cut stays a call.
+    #[inline(always)]
     fn as_slice<'a>(
         &'a self,
         soft_ranges: &'a [(i32, i32)],
@@ -616,51 +619,69 @@ impl SeqRanges {
         match self {
             SeqRanges::Inline { range } => std::slice::from_ref(range),
             SeqRanges::SoftRangesFull => soft_ranges,
-            SeqRanges::SoftRangesSlice { start_idx, count } => {
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:184-198
-                // ```c
-                // if (backup->allocated >= num_seq_ranges) return;
-                // if (backup->allocated) {
-                //     sfree(subject->seq_ranges);
-                // }
-                // backup->allocated = num_seq_ranges;
-                // subject->seq_ranges = (SSeqRange *) calloc(backup->allocated,
-                //                                sizeof(SSeqRange));
-                // ```
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:298-307
-                // ```c
-                // for (i=0; i<len; i++) {
-                //     subject->seq_ranges[i].left = backup->soft_ranges[i+start].left - backup->offset;
-                //     subject->seq_ranges[i].right = backup->soft_ranges[i+start].right - backup->offset;
-                // }
-                // if (subject->seq_ranges[0].left < 0)
-                //     subject->seq_ranges[0].left = 0;
-                // if (subject->seq_ranges[len-1].right > subject->length)
-                //     subject->seq_ranges[len-1].right = subject->length;
-                // ```
-                let start = *start_idx;
-                let count = *count;
-                scratch.clear();
-                if scratch.capacity() < count {
-                    scratch.reserve(count.saturating_sub(scratch.capacity()));
-                }
-                let end_idx = start.saturating_add(count);
-                for &(left, right) in soft_ranges[start..end_idx].iter() {
-                    scratch.push((left - chunk_offset, right - chunk_offset));
-                }
-                if let Some(first) = scratch.first_mut() {
-                    if first.0 < 0 {
-                        first.0 = 0;
-                    }
-                }
-                if let Some(last) = scratch.last_mut() {
-                    if last.1 > chunk_length {
-                        last.1 = chunk_length;
-                    }
-                }
-                scratch.as_slice()
+            SeqRanges::SoftRangesSlice { start_idx, count } => Self::cut_soft_ranges(
+                soft_ranges,
+                scratch,
+                *start_idx,
+                *count,
+                chunk_offset,
+                chunk_length,
+            ),
+        }
+    }
+
+    /// The soft ranges `start_idx..start_idx + count` of the subject in the chunk's coordinates,
+    /// clipped to the chunk, in `scratch`.
+    #[inline(never)]
+    fn cut_soft_ranges<'a>(
+        soft_ranges: &[(i32, i32)],
+        scratch: &'a mut Vec<(i32, i32)>,
+        start_idx: usize,
+        count: usize,
+        chunk_offset: i32,
+        chunk_length: i32,
+    ) -> &'a [(i32, i32)] {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:184-198
+        // ```c
+        // if (backup->allocated >= num_seq_ranges) return;
+        // if (backup->allocated) {
+        //     sfree(subject->seq_ranges);
+        // }
+        // backup->allocated = num_seq_ranges;
+        // subject->seq_ranges = (SSeqRange *) calloc(backup->allocated,
+        //                                sizeof(SSeqRange));
+        // ```
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:298-307
+        // ```c
+        // for (i=0; i<len; i++) {
+        //     subject->seq_ranges[i].left = backup->soft_ranges[i+start].left - backup->offset;
+        //     subject->seq_ranges[i].right = backup->soft_ranges[i+start].right - backup->offset;
+        // }
+        // if (subject->seq_ranges[0].left < 0)
+        //     subject->seq_ranges[0].left = 0;
+        // if (subject->seq_ranges[len-1].right > subject->length)
+        //     subject->seq_ranges[len-1].right = subject->length;
+        // ```
+        let start = start_idx;
+        scratch.clear();
+        if scratch.capacity() < count {
+            scratch.reserve(count.saturating_sub(scratch.capacity()));
+        }
+        let end_idx = start.saturating_add(count);
+        for &(left, right) in soft_ranges[start..end_idx].iter() {
+            scratch.push((left - chunk_offset, right - chunk_offset));
+        }
+        if let Some(first) = scratch.first_mut() {
+            if first.0 < 0 {
+                first.0 = 0;
             }
         }
+        if let Some(last) = scratch.last_mut() {
+            if last.1 > chunk_length {
+                last.1 = chunk_length;
+            }
+        }
+        scratch.as_slice()
     }
 }
 

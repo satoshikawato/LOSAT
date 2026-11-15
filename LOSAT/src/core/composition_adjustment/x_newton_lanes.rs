@@ -171,10 +171,12 @@ pub(crate) fn print_stats() {
 // ```
 // The arguments of this call that determine its result (`q = mat_b`, `row_probs`, `col_probs`,
 // `desired_re` with `desired_re > 0.0`).
-/// Input of one relative-entropy-constrained problem (alphabet of 20).
+/// Input of one relative-entropy-constrained problem (alphabet of 20). `q` is shared: the inputs
+/// that `x_newton_input` makes for one batch hold one copy of the workspace's `mat_b` (3,200 bytes)
+/// instead of one each (EB s22: a batch of 64 inputs was 225 KiB, kept per thread until taken).
 #[derive(Clone)]
 pub(crate) struct NewtonInput {
-    pub(crate) q: [f64; NN],
+    pub(crate) q: std::rc::Rc<[f64; NN]>,
     pub(crate) row: [f64; N],
     pub(crate) col: [f64; N],
     pub(crate) relative_entropy: f64,
@@ -1413,7 +1415,7 @@ fn solve_batch_with(inputs: &[NewtonInput], outputs: &mut [NewtonOutput], lanes8
         for (input, output) in inputs.iter().zip(outputs.iter_mut()) {
             output.status = optimize_target_frequencies_exact(
                 &mut output.x,
-                &input.q,
+                &input.q[..],
                 &input.row,
                 &input.col,
                 input.relative_entropy,
@@ -1653,7 +1655,7 @@ fn x_same_input(
     input.relative_entropy.to_bits() == relative_entropy.to_bits()
         && same_bits(&input.col, col)
         && same_bits(&input.row, row)
-        && same_bits(&input.q, q)
+        && same_bits(&input.q[..], q)
 }
 
 // No NCBI counterpart: bitwise equality of two f64 slices.
@@ -1694,7 +1696,7 @@ pub(crate) fn take(
             entry.input.relative_entropy.to_bits() == relative_entropy.to_bits()
                 && same_bits(&entry.input.col, col)
                 && same_bits(&entry.input.row, row)
-                && same_bits(&entry.input.q, q)
+                && same_bits(&entry.input.q[..], q)
         });
         match position {
             Some(position) => {
@@ -1747,6 +1749,7 @@ mod tests {
         let matrix_info = build_matrix_info(ScoringMatrix::Blosum62, 0.3176).unwrap();
         let workspace = BlastCompositionWorkspace::new_blosum62();
         let mut problems = Vec::new();
+        let mut shared_q = None;
         let mut attempts = 0;
         while problems.len() < 40 && attempts < 400 {
             attempts += 1;
@@ -1793,6 +1796,7 @@ mod tests {
                 sequences[1].len() as i32,
                 mode,
                 &workspace,
+                &mut shared_q,
             ) {
                 problems.push(input);
             }
@@ -1802,21 +1806,22 @@ mod tests {
             "realistic problems: {}",
             problems.len()
         );
-        let blosum_q = problems[0].q;
+        let blosum_q = problems[0].q.clone();
         // Random joint distributions, compositions and relative entropies.
         for case in 0..24 {
             let mut input = problems[case % problems.len()].clone();
             if case % 2 == 0 {
                 let mut total = 0.0;
-                for v in input.q.iter_mut() {
+                let q = std::rc::Rc::make_mut(&mut input.q);
+                for v in q.iter_mut() {
                     *v = 1.0e-4 + xorshift(&mut state).powi(2);
                     total += *v;
                 }
-                for v in input.q.iter_mut() {
+                for v in q.iter_mut() {
                     *v /= total;
                 }
             } else {
-                input.q = blosum_q;
+                input.q = blosum_q.clone();
             }
             let (mut sr, mut sc) = (0.0, 0.0);
             for k in 0..N {
@@ -1859,7 +1864,7 @@ mod tests {
                 let mut exact = NewtonOutput::new();
                 exact.status = optimize_target_frequencies_exact(
                     &mut exact.x,
-                    &input.q,
+                    &input.q[..],
                     &input.row,
                     &input.col,
                     input.relative_entropy,
@@ -1867,7 +1872,7 @@ mod tests {
                 let mut reference = NewtonOutput::new();
                 reference.status = x_optimize_reference_for_test(
                     &mut reference.x,
-                    &input.q,
+                    &input.q[..],
                     &input.row,
                     &input.col,
                     input.relative_entropy,
@@ -2056,14 +2061,14 @@ mod tests {
         // A different relative entropy (one ulp) misses.
         let p = &problems[2];
         let re = f64::from_bits(p.relative_entropy.to_bits() + 1);
-        assert_eq!(take(&mut x, &p.q, &p.row, &p.col, re), None);
+        assert_eq!(take(&mut x, &p.q[..], &p.row, &p.col, re), None);
         // Exact inputs hit once each, in any order.
         for i in [3usize, 0, 4, 1, 2] {
             let p = &problems[i];
-            let status = take(&mut x, &p.q, &p.row, &p.col, p.relative_entropy);
+            let status = take(&mut x, &p.q[..], &p.row, &p.col, p.relative_entropy);
             assert_eq!(status, Some(want[i].status));
             assert!(same_bits(&x, &want[i].x));
-            assert_eq!(take(&mut x, &p.q, &p.row, &p.col, p.relative_entropy), None);
+            assert_eq!(take(&mut x, &p.q[..], &p.row, &p.col, p.relative_entropy), None);
         }
     }
 
@@ -2076,7 +2081,7 @@ mod tests {
         let mut x = [0.0f64; NN];
         let take_at = |x: &mut [f64; NN], i: usize| {
             let p = &problems[i];
-            take(x, &p.q, &p.row, &p.col, p.relative_entropy)
+            take(x, &p.q[..], &p.row, &p.col, p.relative_entropy)
         };
         // the same calls with the switch (`drop`) and with `=0`, in this process, with the results
         // kept as their batch (LOSAT_X_NEWTONBATCH, only with `drop`) or stored one by one
@@ -2149,7 +2154,7 @@ mod tests {
         let mut x = [0.0f64; NN];
         let take_at = |x: &mut [f64; NN], i: usize| {
             let p = &inputs[i];
-            take(x, &p.q, &p.row, &p.col, p.relative_entropy)
+            take(x, &p.q[..], &p.row, &p.col, p.relative_entropy)
         };
         x_prefetch(Vec::new(), true, true);
         x_prefetch(inputs.clone(), true, true);
@@ -2213,7 +2218,7 @@ mod tests {
                     for (input, output) in inputs.iter().zip(exact.iter_mut()) {
                         output.status = optimize_target_frequencies_exact(
                             &mut output.x,
-                            &input.q,
+                            &input.q[..],
                             &input.row,
                             &input.col,
                             input.relative_entropy,

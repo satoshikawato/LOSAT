@@ -1486,21 +1486,27 @@ impl PreliminarySink for Runtime<'_> {
         } else {
             stream.close_observed(self.observer);
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3556-3576 and
-        // blast_traceback.c:1567-1576 (quoted at `blastp::blast_engine::database::exclude_fetched`)
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575 and
+        // blast_traceback.c:1567-1577 (quoted at `blastp::blast_engine::database::exclude_fetched`)
         // The redo's and the traceback's fetches (`check_oid_exclusion`) exclude a subject that the
         // negative seqid list keeps without a line (`FetchExcluded`): its lists leave the closed
         // stream before the redo or the traceback reads it. An ungapped search fetches no protein
         // subject; its such hits leave at the Seq-aligns (`ReportedSubjects::drop_unaligned`).
+        // A header that the fetch cannot read ends NCBI's search: LOSAT's refusal
+        // (`FetchExcluded::refusal`).
         if self.options.gapped {
             if let Some(excluded) = self
                 .subjects
                 .seqdb()
                 .and_then(crate::algorithm::common::database::FetchExcluded::of)
             {
-                stream.retain_closed(|list| {
-                    u32::try_from(list.oid).map_or(true, |ordinal| !excluded.excludes(ordinal))
-                });
+                stream
+                    .retain_closed(|lists| {
+                        excluded.retain(lists, |list| u32::try_from(list.oid).ok())
+                    })
+                    .map_err(|failed| {
+                        crate::algorithm::common::database::FetchExcluded::refusal(failed, "BLASTX")
+                    })?;
             }
         }
         self.observer.restored(batch, &full);

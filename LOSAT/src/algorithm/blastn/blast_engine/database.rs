@@ -1620,6 +1620,12 @@ pub(super) fn fetch_excluded(database: &BlastnDatabase) -> Option<shared::FetchE
     shared::FetchExcluded::of(&database.db)
 }
 
+/// LOSAT's refusal of a search whose fetch with `check_oid_exclusion` cannot read the header
+/// of a subject (`shared::FetchExcluded::refusal`), where NCBI's search fails.
+pub(super) fn fetch_refusal(failed: (u32, crate::seqdb::SeqDbError)) -> anyhow::Error {
+    shared::FetchExcluded::refusal(failed, PROGRAM)
+}
+
 /// The final hit lists `hit_lists` of a query batch without the sequences that NCBI makes no
 /// Seq-align of (`shared::SeqAligned`): after their cut to the hit list size, before
 /// `read_titles`.

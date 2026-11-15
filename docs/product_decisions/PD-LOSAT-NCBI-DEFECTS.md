@@ -593,16 +593,23 @@ here, and names the widening that PS16a made for protein queries.
   OID is not 0, of 1.29): NCBI's id set of the list is not blank (`CSeqDBImpl::x_InitIdSet`,
   seqdbimpl.cpp:1909-1946; on a version 5 database, the ids left after the gis are dropped), so
   the subject fetches with `check_oid_exclusion` (`seqsrc_seqdb.cpp:302-313`) exclude it: the
-  gapped traceback's (blast_traceback.c:1567-1576), the composition-based redo's
-  (blast_kappa.c:1378, 3556-3576) and the ungapped re-evaluation's of a nucleotide subject
-  (blast_hits.c:2650-2662). The sequence is searched and counts in the statistics; a gapped
+  gapped traceback's (blast_traceback.c:1567-1577), the composition-based redo's
+  (blast_kappa.c:1378, 3560-3575) and the ungapped re-evaluation's of a nucleotide subject
+  (blast_hits.c:2651-2665). The sequence is searched and counts in the statistics; a gapped
   search's preliminary hit list holds it, and it takes no place in the final one; an ungapped
   search of a nucleotide database frees its HSPs before the preliminary hit list. A protein
   subject of an ungapped search (blastx `-ungapped`) is fetched by none of them and leaves at the
   Seq-aligns, as a positive list's does. Versions 1.6, 1.29 and 1.32 made this an explicit
   rejection; version 1.33 reproduces it in the six search programs, each of which removes such
   subjects where NCBI fetches them (`SeqDb::excludes_lineless_at_fetch`,
-  `algorithm::common::database::FetchExcluded`; line DBID item lineless2).
+  `algorithm::common::database::FetchExcluded`; line DBID item lineless2). Under such a list
+  NCBI's fetch reads the header of every subject it fetches, so a header that cannot be read
+  (a damaged record, a `BL_ORD_ID` line with a string tag in a later volume) ends NCBI's search
+  there (exit 255 in the traceback, `BLAST engine error` in the ungapped re-evaluation) even
+  where the subject is not reported; LOSAT refuses such a search at the same place. The
+  composition-based redo fetches only the matches that its early termination test leaves, and
+  LOSAT checks every subject of the preliminary hit lists, so it may refuse such a search where
+  NCBI ends it without reading that header.
 
 - `CHUNK_SIZE=1000` without `BATCH_SIZE`: the batch size becomes 0, NCBI prints the
   outfmt 0 prolog and then `BLAST engine error: Empty CBlastQueryVector`, exit 3.

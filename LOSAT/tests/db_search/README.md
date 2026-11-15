@@ -976,9 +976,12 @@ with 0, 2, 4, ... substitutions (distinct ranks, one equal pair), of which the o
 (the first of the pair) and r6 has a gi (version 4) or a ti (version 5). A `-negative_seqidlist` (`ll2/neg.txt`: r12's
 accession, which the OID mask removes, and an id no database holds) keeps those three sequences and removes their lines;
 NCBI's fetches with `check_oid_exclusion` exclude them, so they count in the statistics and take no place in the final
-hit lists (`.m1.`: r1 is the best row; `.m10.` and `.ug.m10.`: an ungapped search of a nucleotide database never holds
-them in its preliminary hit list), except a protein subject of an ungapped search (`db.ll2.bx.ug.*`), which leaves at
-the Seq-aligns after the cut. `ll2/neggi.txt` (a gi) is a non-empty id set on version 4 and an empty list on version 5.
+hit lists (`.m1.`: r1 is the best row; `db.ll2.tx.m10.6`, `db.ll2.bn.ug.m10.6` and `db.ll2.bn.ug.m1.6`: an ungapped
+search of a nucleotide database never holds them in its preliminary hit list), except a protein subject of an ungapped
+search (`db.ll2.bx.ug.*`), which takes its place before the cut and leaves at the Seq-aligns. `ll2/neggi.txt` (a gi) is a non-empty id set on version 4 and an empty list on version 5. `ll2/prot_v4bad` and
+`nucl_v4bad` (`make_ll2.py --damaged-only`) damage the header of OID 8 (r7, which keeps its line): under `neg.txt`
+NCBI's fetch reads it although r7 is not reported at `-max_target_seqs 3`, and the search fails (exit 255 in the
+traceback, 3 in the ungapped re-evaluation); LOSAT refuses (the `losat-rejection` rows `db.ll2.*.bad.6`).
 Queries: `ll2/q.faa`, `q.fna` (the query and its codons), `q2.faa`, `q2.fna` (the same and its first part).
 
 ## Ungapped nucleotide databases (line NP, O4a-1)

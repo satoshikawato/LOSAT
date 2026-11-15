@@ -30,13 +30,15 @@ pub(in crate::algorithm::blastp::blast_engine) enum XShownResidues {
 impl ListedSubjects {
     /// The ordinal ids of the subjects of `hit_lists` and `x_compact_hit_lists` (the lists not
     /// expanded yet, `x_prelim_compact.rs`) and their lengths, read from the index, without a copy
-    /// of the residues; the subjects of both are renamed to their ranks.
+    /// of the residues; the subjects of both are renamed to their ranks. The subjects that NCBI's
+    /// fetches of the redo or the traceback exclude leave both lists first (`exclude_fetched`; a
+    /// header that the fetch cannot read is LOSAT's refusal).
     pub(in crate::algorithm::blastp::blast_engine) fn x_list(
         database: &BlastpDatabase,
         hit_lists: &mut [Option<BlastpHitList>],
         x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     ) -> Result<Self> {
-        super::exclude_fetched(database, hit_lists, x_compact_hit_lists);
+        super::exclude_fetched(database, hit_lists, x_compact_hit_lists)?;
         let ordinals = listed_ordinals(hit_lists, x_compact_hit_lists);
         let x_lengths = ordinals
             .iter()

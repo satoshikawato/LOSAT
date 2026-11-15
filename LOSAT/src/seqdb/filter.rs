@@ -2811,8 +2811,8 @@ impl SeqDb {
     //     }
     // ```
     // The fetches of the gapped traceback (blast_traceback.c:1567-1573), of the
-    // composition-based redo (blast_kappa.c:1378, a match skipped at 3560-3570) and of the
-    // ungapped re-evaluation of a nucleotide subject (blast_hits.c:2645-2662, the subject's
+    // composition-based redo (blast_kappa.c:1378, a match skipped at 3560-3575) and of the
+    // ungapped re-evaluation of a nucleotide subject (blast_hits.c:2651-2665, the subject's
     // HSPs freed) ask for this check.
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1929-1943
     // ```c++

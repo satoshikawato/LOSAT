@@ -633,7 +633,7 @@ impl SubjectPasses<'_> {
                     // ungapped re-evaluation (`BlastnDatabase::with_blastna`).
                     let x_ungapped_error: std::sync::Mutex<Option<(u32, anyhow::Error)>> =
                         std::sync::Mutex::new(None);
-                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2650-2662
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2651-2665
                     // ```c
                     //       	seq_arg.oid = subject_blk->oid;
                     // ...
@@ -649,7 +649,9 @@ impl SubjectPasses<'_> {
                     // ```
                     // The re-evaluation's fetch of a sequence with HSPs excludes one that the
                     // negative seqid list keeps without a line (`database::fetch_excluded`):
-                    // its HSPs are freed before the preliminary hit lists, and it is not read.
+                    // its HSPs are freed before the preliminary hit lists, and it is not read. A
+                    // header that the fetch cannot read ends the search (`fetch_refusal`, kept
+                    // in the error cell as a read error is).
                     let excluded = database::fetch_excluded(database);
                     // The callback of the database's preliminary pass in an ungapped search: the search of the
                     // sequence as for a default search, then the finish of its HSP list when it has HSPs left
@@ -670,16 +672,20 @@ impl SubjectPasses<'_> {
                                 Some(lookup_tables),
                                 None,
                             );
-                            if !prelim_hits.is_empty()
-                                && excluded
-                                    .as_ref()
-                                    .is_some_and(|excluded| excluded.excludes(ordinal))
-                            {
-                                return None;
-                            }
-                            if let Err(error) =
+                            let fetched = match excluded.as_ref() {
+                                Some(excluded) if !prelim_hits.is_empty() => excluded
+                                    .excludes(ordinal)
+                                    .map_err(|error| database::fetch_refusal((ordinal, error))),
+                                _ => Ok(false),
+                            };
+                            let fetched = fetched.and_then(|excluded| {
+                                if excluded {
+                                    prelim_hits.clear();
+                                    return Ok(());
+                                }
                                 self.x_ungapped_database_stage(database, ordinal, &mut prelim_hits)
-                            {
+                            });
+                            if let Err(error) = fetched {
                                 let mut first = x_ungapped_error
                                     .lock()
                                     .expect("the error cell is not poisoned");
@@ -768,7 +774,7 @@ impl SubjectPasses<'_> {
                 );
                 let new_scratch = || self.new_scratch();
                 let mut listed = listed_prelim_hits(prelim_lists);
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1567-1576
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1567-1577
                 // ```c
                 //                 seq_arg.oid = batch->hsplist_array[0]->oid;
                 //                 seq_arg.encoding = encoding;
@@ -788,7 +794,9 @@ impl SubjectPasses<'_> {
                 // fetches nothing here; its re-evaluation excluded them, `prelim_pass`).
                 if !UNGAPPED {
                     if let Some(excluded) = database::fetch_excluded(database) {
-                        excluded.retain(&mut listed, |(ordinal, _)| Some(*ordinal));
+                        excluded
+                            .retain(&mut listed, |(ordinal, _)| Some(*ordinal))
+                            .map_err(database::fetch_refusal)?;
                     }
                 }
                 let found = database::traceback_listed(

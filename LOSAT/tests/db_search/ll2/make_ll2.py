@@ -13,8 +13,38 @@ Queries: `q.faa`, `q.fna` (the query and its codons), `q2.faa`, `q2.fna` (the sa
 residues, 300 bases). The databases are written with the creation date in their index files, so the frozen
 outputs need the committed files, not a new run of this script.
 
-usage: make_ll2.py --ncbi-bin DIR [--out LOSAT/tests/db_search/ll2]"""
-import os, random, subprocess, sys
+`prot_v4bad` and `nucl_v4bad`: copies of the version 4 databases whose header of OID 8 (r7, which keeps its line)
+starts with a wrong byte: under the negative list NCBI's fetch reads that header and the search fails although r7 is
+not reported at `-max_target_seqs 3`; LOSAT refuses it (rows `db.ll2.*.bad.6`). `--damaged-only` writes these two from
+the committed version 4 files.
+
+usage: make_ll2.py --ncbi-bin DIR [--out LOSAT/tests/db_search/ll2] | make_ll2.py --damaged-only [--out DIR]"""
+import os, random, shutil, struct, subprocess, sys
+
+
+def damage(d):
+    """`prot_v4bad`, `nucl_v4bad`: the version 4 databases of `d` with the first byte of OID 8's header changed."""
+    for base, ext in (("prot_v4", "p"), ("nucl_v4", "n")):
+        bad = base + "bad"
+        for suffix in ("in", "hr", "sq", "si", "sd", "ni", "nd", "og", "js"):
+            if os.path.exists(f"{d}/{base}.{ext}{suffix}"):
+                shutil.copy(f"{d}/{base}.{ext}{suffix}", f"{d}/{bad}.{ext}{suffix}")
+        pin = open(f"{d}/{bad}.{ext}in", "rb").read()
+        at = 8
+        at += 4 + struct.unpack(">I", pin[at:at + 4])[0]
+        at += 4 + struct.unpack(">I", pin[at:at + 4])[0]
+        n = struct.unpack(">I", pin[at:at + 4])[0]
+        at += 4 + 8 + 4
+        offsets = struct.unpack(f">{n + 1}I", pin[at:at + 4 * (n + 1)])
+        phr = bytearray(open(f"{d}/{bad}.{ext}hr", "rb").read())
+        assert phr[offsets[8]] == 0x30
+        phr[offsets[8]] = 0x31
+        open(f"{d}/{bad}.{ext}hr", "wb").write(bytes(phr))
+
+
+if sys.argv[1:2] == ["--damaged-only"]:
+    damage(sys.argv[3] if sys.argv[2:3] == ["--out"] else os.path.dirname(os.path.abspath(__file__)))
+    sys.exit(0)
 args = sys.argv[1:]
 if len(args) < 2 or args[0] != "--ncbi-bin":
     sys.exit(__doc__)
@@ -82,4 +112,5 @@ for ext in ("faa", "fna"):
     n = 100 if ext == "faa" else 300
     with open(f"{D}/q2.{ext}", "w") as f:
         f.write(f">{lines[0][1:].split()[0]} query\n{lines[1]}\n>{lines[0][1:].split()[0]}2 query part\n{lines[1][:n]}\n")
+damage(D)
 print("ok", oid_order)

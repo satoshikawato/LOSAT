@@ -5120,7 +5120,7 @@ fn search_query_batch<S: TbxScore>(
         None
     };
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2650-2662
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2651-2665
     // ```c
     //       	seq_arg.oid = subject_blk->oid;
     // ...
@@ -5144,12 +5144,27 @@ fn search_query_batch<S: TbxScore>(
     // reaches every OID (`HitCollector::push`): `st.hits` holds the subject's HSPs until here.
     let emit_subject_hits = |st: &mut WorkerState<S>, s_idx: usize| {
         let mut hits = std::mem::take(&mut st.hits);
-        if !hits.is_empty()
-            && fetch_excluded.as_ref().is_some_and(|excluded| {
-                u32::try_from(s_idx).is_ok_and(|ordinal| excluded.excludes(ordinal))
-            })
-        {
-            hits.clear();
+        if let (false, Some(excluded), Ok(ordinal)) = (
+            hits.is_empty(),
+            fetch_excluded.as_ref(),
+            u32::try_from(s_idx),
+        ) {
+            match excluded.excludes(ordinal) {
+                Ok(false) => {}
+                Ok(true) => hits.clear(),
+                Err(error) => {
+                    // A header that the fetch cannot read ends NCBI's search: the batch fails
+                    // with LOSAT's refusal, as a subject whose read failed fails it.
+                    hits.clear();
+                    x_read_failure.fail(
+                        s_idx,
+                        crate::algorithm::common::database::FetchExcluded::refusal(
+                            (ordinal, error),
+                            "TBLASTX",
+                        ),
+                    );
+                }
+            }
         }
         if let Some(tx) = &st.tx {
             tx.send((s_idx, hits)).unwrap();

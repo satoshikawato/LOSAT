@@ -1420,16 +1420,20 @@ fn run_local_search_with_pool(
             })
         })
         .collect();
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3556-3576 and
-    // blast_traceback.c:1567-1576 (quoted at `blastp::blast_engine::database::exclude_fetched`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575 and
+    // blast_traceback.c:1567-1577 (quoted at `blastp::blast_engine::database::exclude_fetched`)
     // The redo's and the traceback's fetches (`check_oid_exclusion`) exclude a subject that the
     // negative seqid list keeps without a line: its lists leave here, after the trim of
     // `ADAPTIVE_CBS`, before the redo or the traceback (tblastn is gapped: `-ungapped` is
     // refused).
     if let Some(excluded) = profile.fetch_excluded {
-        excluded.retain(&mut preliminary_lists, |(_, oid, _)| {
-            u32::try_from(*oid).ok()
-        });
+        excluded
+            .retain(&mut preliminary_lists, |(_, oid, _)| {
+                u32::try_from(*oid).ok()
+            })
+            .map_err(|failed| {
+                crate::algorithm::common::database::FetchExcluded::refusal(failed, "TBLASTN")
+            })?;
     }
     // NCBI c++/src/algo/blast/core/blast_hspstream.c:91-96,158-204,
     // 569-610: the ordinary traceback stream sorts HSP lists by decreasing

@@ -1,0 +1,1 @@
+- BLASTN's megablast scans read each subject word's three or four bytes with one test of the subject's length, and the scan of a CSR table keeps the presence vector and the debug switch in its own per-word state instead of reading them through the table for every word: mlst's search runs 3.2 % fewer instructions and ABRicate's 0.8 % fewer. Reports do not change.

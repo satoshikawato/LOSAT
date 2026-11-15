@@ -87,6 +87,7 @@ impl PsiRoundPlan {
             ascii_path: options.out_ascii_pssm.clone(),
             save_each: options.save_each_pssm,
             pseudocount: options.pseudocount,
+            versions: options.versions.clone(),
         };
         let input = file.map(|file| super::in_pssm_files::rounds_input(file, &request));
         Some(Self {
@@ -430,11 +431,10 @@ pub(crate) struct RoundFiles {
 
 impl RoundFiles {
     pub(crate) fn new(request: &PssmRequest, out: Option<&std::path::Path>) -> Self {
-        let stream =
-            |path: Option<&str>| path.map(|path| OutputFileReset::new(path, request.save_each));
+        let [asn, ascii] = request.streams();
         Self {
-            asn: stream(request.asn_path.as_deref()),
-            ascii: stream(request.ascii_path.as_deref()),
+            asn,
+            ascii,
             check: PssmFileCheck::new(out),
         }
     }

@@ -862,6 +862,7 @@ mod tests {
                 lowercase_masks: Vec::new(),
                 warnings: Vec::new(),
                 source: None,
+                around: None,
             })
             .collect()
     }

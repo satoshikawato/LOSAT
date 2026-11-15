@@ -21,8 +21,8 @@
 //!
 //! This module is a child of `run` for the types it keeps private (`PrelimHit`, `XAheadScratch`,
 //! `BlastnTiming`, `SubjectHits`). `trace_hsp_list` is the body of what was the closure
-//! `x_trace_list` of `search_query_batch`'s `process_subject`, and `traceback_subject_hits` the
-//! code of `process_subject` that called it. The values they read are fields of
+//! `x_trace_list` of `SubjectPasses::search_subject`, and `traceback_subject_hits` the
+//! code of `search_subject` that called it. The values they read are fields of
 //! `traceback_finish::TracebackCtx` (the search's and the subject's), of `TraceSchedule` (what
 //! schedules the loop on the pool) and of `TraceDrive`; what the loop works on is
 //! `TraceListState`. The steps of one HSP are in `traceback_hsp`. The query group tasks of

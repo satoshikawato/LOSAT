@@ -1,0 +1,962 @@
+//! The subject passes of one blastn query batch (`SubjectPasses`): the search of one subject by stage
+//! (`search_subject`, which was the closure `process_subject` of `search_query_batch`), the pass over a
+//! subject set's subjects in subject order (`search_subjects`, serial, on the pool, or with
+//! `LOSAT_X_BNSTREAM`), the preliminary pass (`prelim_pass`: a subject set or a database, into the HSP
+//! collector or, with `-culling_limit`, NCBI's culling writer, with the `-ungapped` finish of each
+//! subject's list) and the traceback pass (`traceback_pass`).
+//!
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1427 (the loop of
+//! `BLAST_PreliminarySearchEngine` on the subjects)
+//! ```c
+//!     itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+//!     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+//!            != BLAST_SEQSRC_EOF) {
+//!        if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+//!            continue;
+//!        }
+//! ```
+//! and c++/src/algo/blast/core/blast_traceback.c:1521-1523 (the loop of `BLAST_ComputeTraceback_MT`
+//! on the subjects' batches)
+//! ```c
+//!         for (i = 0; i < batches->num_batches; i++) {
+//! ```
+//!
+//! This module is a child of `run` for the types it keeps private (`SubjectSource`,
+//! `PreparedSubjects`, `PrelimHit`, `SubjectHits`, `SubjectScratch`, `SubjectCtx`, the hit-list
+//! helpers, `database`). Its methods are the statements that `search_query_batch` held between the
+//! batch's set-up and its result, in their order; what they read of the batch is `SubjectPasses`, built
+//! once per batch beside `prelim_subject::PrelimBatch` and `traceback_subject::TraceBatch`.
+
+use super::batch_setup::BatchCutoffs;
+use super::calculate_blastn_context_statistics;
+use super::prelim_subject::{self, PrelimBatch};
+use super::traceback_subject::{self, TraceBatch};
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+use super::X_BNSTREAM_SUBJECTS_PER_THREAD;
+use super::{
+    culling, database, listed_prelim_hits, prelim_hits_by_subject, ungapped_reap_query_coverage,
+    ungapped_subject_stage, update_hitlists_with_subject_hits, x_bnstream, BlastnArgs,
+    BlastnHitList, BlastnSubjectRef, BlastnTiming, FastaRecord, GapAlignScratch, LookupTables,
+    PrelimHit, PrelimHitCollector, PrelimHitLists, QueryContext, SubjectCtx, SubjectHits,
+    SubjectScratch, SubjectSource,
+};
+use crate::algorithm::blastn::coordination::subject_trace_id;
+use anyhow::Result;
+
+// NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1290-1298
+// ```c
+//     CMTArgs(size_t default_num_threads = CThreadable::kMinNumThreads, EMTMode mt_mode = eNotSupported) :
+//         m_NumThreads(default_num_threads), m_MTMode(mt_mode)
+//     {
+// #ifdef NCBI_NO_THREADS
+//         // No threads can be set in NON-MT mode
+//         m_NumThreads = CThreadable::kMinNumThreads;
+//         m_MTMode = eNotSupported;
+// #endif
+//     }
+// ```
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+use rayon::prelude::*;
+
+/// The scratch of one worker: the gapped aligner's and the subject search's.
+type SubjectState = (GapAlignScratch, SubjectScratch);
+
+/// What one call of `search_subject` reads of the statistics: the cutoffs and the search spaces of
+/// the setup (`x_batch_cutoffs` and the setup's spaces), or, where NCBI computes the statistics of
+/// each subject, the subject's own (`SpecialStatistics::subject_statistics`), or a preliminary
+/// stage's that are not the setup's (a statistics' total of 0 or less).
+#[derive(Clone, Copy)]
+pub(super) struct CallStatistics<'a> {
+    pub(super) cutoffs: &'a BatchCutoffs,
+    pub(super) query_eff_searchsp: &'a Vec<i64>,
+}
+
+/// The statistics of one subject (`search_query_batch`'s `subject_statistics`): each context's
+/// cutoffs and effective search space for the subject's length with the given option spaces.
+pub(super) type SubjectStatisticsFn<'a> =
+    dyn Fn(usize, &[i64]) -> Result<(BatchCutoffs, Vec<i64>)> + Sync + 'a;
+
+/// What a database's subjects read where their statistics are not the setup's: the statistics of
+/// each subject (`per_subject`, `DbStatistics::per_subject`), or a preliminary stage whose values
+/// are not the setup's (`prelim`). Built once per batch by `search_query_batch`.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443 and
+/// c++/src/algo/blast/core/blast_traceback.c:1598-1628 (quoted at `stats::setup::subject_eff_lengths`):
+/// once per subject, the preliminary stage reads the subject's own cutoffs and spaces, the
+/// traceback the subject's hit-saving cutoffs and the setup's spaces.
+pub(super) struct SpecialStatistics<'a> {
+    pub(super) per_subject: bool,
+    /// The preliminary stage's cutoffs and spaces (the setup's where they do not differ).
+    pub(super) prelim: CallStatistics<'a>,
+    /// The preliminary stage's option spaces (`Some` with the statistics of each subject).
+    pub(super) option_spaces: Option<&'a Vec<i64>>,
+    /// The traceback's own option spaces (`-searchsp`, which the memento gives it back).
+    pub(super) traceback_option_spaces: &'a [i64],
+    pub(super) subject_statistics: &'a SubjectStatisticsFn<'a>,
+    /// The first overflow of a subject's search space, which the batch returns after its passes.
+    pub(super) subject_space_overflow: &'a crate::stats::setup::SubjectSpaceOverflow,
+}
+
+/// What the passes over a batch's subjects read of the batch, built once by `search_query_batch`
+/// (shared references and `Copy` values, so the struct is `Sync`: the passes run on the pool).
+///
+/// NCBI's preliminary stage keeps, for each query, the preliminary HSPs of at most
+/// `prelim_hitlist_size` subjects (a split batch merges those of its query chunks), and
+/// its traceback reads only those.
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1675-1681,1782-1786
+/// ```c
+/// BLAST_PreliminarySearchEngine(program, query, query_info,
+///                               seq_src, gap_align, score_params,
+///                               lookup_wrap, word_options,
+///                               ext_params, hit_params, eff_len_params,
+///                               psi_options, db_options, hsp_stream,
+///                               local_diagnostics, interrupt_search,
+///                               progress_info)) != 0) {
+/// ...
+/// BLAST_ComputeTraceback(program_number, hsp_stream, query, query_info,
+///                        seq_src, gap_align, score_params, ext_params,
+///                        hit_params, eff_len_params, db_options,
+///                        psi_options, rps_info, pattern_blk, results,
+///                        interrupt_search, progress_info))
+/// ```
+/// A database has its own drivers of the two passes (`database::search_blocks`,
+/// `database::traceback_listed`), with a scratch per worker made as the subject set's
+/// parallel pass makes them.
+pub(super) struct SubjectPasses<'a> {
+    pub(super) args: &'a BlastnArgs,
+    /// The subject set or the database.
+    pub(super) subjects: SubjectSource<'a>,
+    /// The values the preliminary and the traceback stage read (`search_subject` dispatches).
+    pub(super) prelim_batch: &'a PrelimBatch<'a>,
+    pub(super) trace_batch: &'a TraceBatch<'a>,
+    pub(super) any_valid_context: bool,
+    pub(super) queries: &'a [FastaRecord],
+    pub(super) query_contexts: &'a [QueryContext],
+    /// The setup's cutoffs and spaces, which a subject set's subjects and a database's on the
+    /// default path read.
+    pub(super) setup: CallStatistics<'a>,
+    /// A database's statistics where they are not the setup's (`None` on the default path).
+    pub(super) special: Option<&'a SpecialStatistics<'a>>,
+    pub(super) timing: Option<&'a BlastnTiming>,
+    /// The sizes of the preliminary and of the final hit lists.
+    pub(super) prelim_hitlist_size: usize,
+    pub(super) hitlist_size: usize,
+    /// The algorithm of `-db_hard_mask`, whose masked letters the traceback and the ungapped
+    /// re-evaluation of a database sequence read as 'B' (`database::mask_hard_letters`; decision H2).
+    pub(super) db_hard_mask: Option<i32>,
+}
+
+impl SubjectPasses<'_> {
+    /// The records of a subject set (none for a database). Their count is the number of subjects that
+    /// `search_subjects` searches and the number of lists into which the subject set's traceback pass
+    /// groups the kept HSPs (`prelim_hits_by_subject`); their titles name the subjects in LOSAT's debug
+    /// and trace lines (a database's sequences are "unknown" there).
+    ///
+    /// No NCBI counterpart: an accessor of LOSAT's subject set; NCBI reads each subject through a
+    /// `BlastSeqSrc` (the loop of `BLAST_PreliminarySearchEngine` quoted at the head of this module).
+    fn subject_records(&self) -> &[FastaRecord] {
+        self.subjects
+            .prepared()
+            .map_or(&[], |prepared| prepared.records)
+    }
+
+    /// One subject for one stage: the preliminary search (`prelim_source` is `None`: the subject's
+    /// preliminary HSPs, `lookups` its tables) or the traceback of the HSPs the preliminary stage kept
+    /// (`Some`: the subject's final HSPs). `state` is the worker's scratch, `statistics` the call's
+    /// cutoffs and spaces (`CallStatistics`). Nothing is searched without a valid context.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1469-1470 (the subject's
+    /// preliminary search) and c++/src/algo/blast/core/blast_traceback.c:1521,1632-1633 (its traceback)
+    /// ```c
+    ///       status =
+    ///           s_BlastSearchEngineCore(program_number, query, query_info,
+    /// ```
+    fn search_subject<const UNGAPPED: bool>(
+        &self,
+        s_idx: usize,
+        subject: BlastnSubjectRef<'_>,
+        state: &mut SubjectState,
+        lookups: Option<&LookupTables>,
+        prelim_source: Option<&Vec<PrelimHit>>,
+        statistics: &CallStatistics<'_>,
+    ) -> (Option<SubjectHits>, Vec<PrelimHit>) {
+        let Self {
+            any_valid_context,
+            queries,
+            query_contexts,
+            timing: timing_ref,
+            prelim_batch,
+            trace_batch,
+            ..
+        } = *self;
+        let (blastn_debug, blastn_trace_enabled) =
+            (prelim_batch.blastn_debug, prelim_batch.blastn_trace_enabled);
+        let (gap_scratch, subject_scratch) = state;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
+        // ```c
+        //     int status = m_PrelimSearch->CheckInternalData();
+        //     if (status != 0)
+        //     {
+        //          // Search was not run, but we send back an empty CSearchResultSet.
+        // ```
+        // With no valid context, NCBI does not search.
+        if !any_valid_context {
+            return (None, Vec::new());
+        }
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:493-526
+        // ```c
+        // if (aux_struct->WordFinder) {
+        //     aux_struct->WordFinder(subject, query, query_info, lookup, matrix,
+        //                            word_params, aux_struct->ewp,
+        //                            aux_struct->offset_pairs,
+        //                            kScanSubjectOffsetArraySize,
+        //                            init_hitlist, ungapped_stats);
+        // ...
+        //     if (init_hitlist->total == 0) continue;
+        // ...
+        // if (aux_struct->GetGappedScore) {
+        //     status = aux_struct->GetGappedScore(program_number, query,
+        //             query_info,
+        //             subject, gap_align, score_params, ext_params, hit_params,
+        //             word_params, init_hitlist, &hsp_list, gapped_stats, NULL);
+        // ```
+        let timing_enabled = timing_ref.is_some();
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:488-491
+        // ```c
+        // hsp_list = Blast_HSPListFree(hsp_list);
+        // ...
+        // BlastInitHitListReset(init_hitlist);
+        // ```
+        let s_len_full = subject.length;
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:153-166
+        // ```c
+        // typedef struct BlastHSPList {
+        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
+        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
+        //                         Set to 0 if not applicable */
+        //    BlastHSP** hsp_array; /**< Array of pointers to individual HSPs */
+        //    Int4 hspcnt; /**< Number of HSPs saved */
+        // ...
+        // } BlastHSPList;
+        // ```
+        // Made only for the debug and trace lines, which alone read it.
+        let s_id_trace = if blastn_debug || blastn_trace_enabled {
+            self.subject_records().get(s_idx).map_or_else(
+                || "unknown".to_string(),
+                |record| subject_trace_id(record.title()),
+            )
+        } else {
+            String::new()
+        };
+        let s_id = s_id_trace.as_str();
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:348-374
+        // ```c
+        // if (!gapped_calculation || sbp->matrix_only_scoring) {
+        //    double cutoff_e = s_GetCutoffEvalue(program_number);
+        //    Int4 query_length = query_info->contexts[context].query_length;
+        //
+        // ...
+        //       query_length *= 2;
+        // ...
+        //    kbp = kbp_array[context];
+        // ...
+        //    BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp,
+        //                  MIN((Uint8)subj_length,
+        //                      (Uint8)query_length)*((Uint8)subj_length),
+        //                  TRUE, gap_decay_rate);
+        // ...
+        // } else {
+        //    new_cutoff = gap_trigger;
+        // }
+        // new_cutoff *= (Int4)sbp->scale_factor;
+        // new_cutoff = MIN(new_cutoff,
+        // ...
+        // curr_cutoffs->cutoff_score = new_cutoff;
+        // ```
+        // NCBI uses UNGAPPED params (kbp_std) for gap_trigger calculation
+        // and GAPPED params (kbp_gap) for cutoff_score_max calculation
+        // The values depend on the context only (the gapped calculation's branch above: gap_trigger
+        // capped by cutoff_score_max), so the batch computes them once (`SubjectPasses::setup`); the
+        // statistics of each subject compute them per subject (`special_subject`).
+        let &CallStatistics {
+            cutoffs,
+            query_eff_searchsp,
+        } = statistics;
+        let (cutoff_scores, hit_saving_cutoff_scores, x_dropoff_scores, reduced_cutoff_scores) =
+            (&cutoffs.0, &cutoffs.1, &cutoffs.2, &cutoffs.3);
+
+        // What both stages read of this call (`SubjectCtx`).
+        let subject_ctx = SubjectCtx {
+            s_idx,
+            s_id,
+            s_len_full,
+            queries,
+            query_contexts,
+            query_eff_searchsp,
+            cutoff_scores,
+            hit_saving_cutoff_scores,
+            x_dropoff_scores,
+            reduced_cutoff_scores,
+            timing_ref,
+            timing_enabled,
+        };
+        if let Some(kept) = prelim_source {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1521,1632-1633
+            // ```c
+            //         for (i = 0; i < batches->num_batches; i++) {
+            // ...
+            //             /* process all the hits to this subject sequence, one list at a time */
+            //             for (hsplist_itr = 0; hsplist_itr < batch->num_hsplists; hsplist_itr++) {
+            // ```
+            // The traceback of the HSPs that the preliminary stage kept
+            // (`traceback_subject::traceback_subject`).
+            let mut subject_hits: Option<SubjectHits> = None;
+            traceback_subject::traceback_subject::<UNGAPPED>(
+                trace_batch,
+                &subject_ctx,
+                subject,
+                kept,
+                gap_scratch,
+                subject_scratch,
+                &mut subject_hits,
+            );
+            (subject_hits, Vec::new())
+        } else {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1469-1470
+            // ```c
+            //       status =
+            //           s_BlastSearchEngineCore(program_number, query, query_info,
+            // ```
+            // The preliminary search of the subject (`prelim_subject::prelim_subject`).
+            // The preliminary stage gives the subject's HSPs to the collector (`search_subjects`).
+            (
+                None,
+                prelim_subject::prelim_subject::<UNGAPPED>(
+                    prelim_batch,
+                    &subject_ctx,
+                    subject,
+                    lookups,
+                    gap_scratch,
+                    subject_scratch,
+                ),
+            )
+        }
+    }
+
+    /// `search_subject` with statistics that are not the setup's (`special`): the subject's own with
+    /// the statistics of each subject (the preliminary stage's option spaces, or the traceback's,
+    /// whose e-values read the setup's spaces), else the preliminary stage's (`prelim`) or, in the
+    /// traceback, the setup's. An overflow of the subject's search space is noted
+    /// (`subject_space_overflow`) and the subject has no HSPs. The callers call it apart
+    /// (`stats::setup::apart`), so that the default path keeps its code.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443 and
+    /// c++/src/algo/blast/core/blast_traceback.c:1598-1628 (quoted at `stats::setup::subject_eff_lengths`)
+    fn special_subject<const UNGAPPED: bool>(
+        &self,
+        s_idx: usize,
+        subject: BlastnSubjectRef<'_>,
+        state: &mut SubjectState,
+        lookups: Option<&LookupTables>,
+        prelim_source: Option<&Vec<PrelimHit>>,
+        special: &SpecialStatistics<'_>,
+    ) -> (Option<SubjectHits>, Vec<PrelimHit>) {
+        if !self.any_valid_context {
+            return (None, Vec::new());
+        }
+        let x_subject;
+        // An ungapped search has no traceback: the values of its preliminary stage stay
+        // (blast_traceback.c:1526, `perform_traceback`).
+        let traceback_stage = prelim_source.is_some() && !UNGAPPED;
+        let statistics = match (special.per_subject, traceback_stage) {
+            (false, false) => special.prelim,
+            (false, true) => self.setup,
+            (true, traceback) => {
+                let spaces: &[i64] = if traceback {
+                    special.traceback_option_spaces
+                } else {
+                    special
+                        .option_spaces
+                        .expect("the statistics of each subject have their option spaces")
+                };
+                x_subject = match (special.subject_statistics)(subject.length, spaces) {
+                    Ok(statistics) => statistics,
+                    Err(error) => {
+                        if let Ok(overflow) =
+                            error.downcast::<crate::stats::setup::SearchSpaceOverflow>()
+                        {
+                            special.subject_space_overflow.note(overflow);
+                        }
+                        return (None, Vec::new());
+                    }
+                };
+                CallStatistics {
+                    cutoffs: &x_subject.0,
+                    query_eff_searchsp: if traceback {
+                        self.setup.query_eff_searchsp
+                    } else {
+                        &x_subject.1
+                    },
+                }
+            }
+        };
+        self.search_subject::<UNGAPPED>(s_idx, subject, state, lookups, prelim_source, &statistics)
+    }
+
+    /// One pass over the subjects in subject order: the preliminary stage gives each subject's
+    /// preliminary HSPs (`kept` is `None`), the traceback saves the final HSPs of the kept
+    /// preliminary HSPs in the final hit lists of `hitlist_size` subjects
+    /// (`Blast_HSPResultsInsertHSPList`).
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1427
+    /// ```c
+    /// itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+    /// ...
+    /// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+    ///        != BLAST_SEQSRC_EOF) {
+    /// ...
+    ///    if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+    ///        continue;
+    ///    }
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1700-1707
+    /// ```c
+    ///                 batch->hsplist_array[hsplist_itr] = NULL;
+    ///                 if (hsp_list->hspcnt == 0) {
+    ///                     hsp_list = Blast_HSPListFree(hsp_list);
+    ///                 }
+    ///                 else {
+    ///                     Blast_HSPResultsInsertHSPList(thread_data->tld[tid]->results, hsp_list,
+    ///                                   hit_params->options->hitlist_size);
+    ///                 }
+    /// ```
+    /// Each subject's results go to `sink` in OID order, which fills the hit lists as NCBI's
+    /// `Blast_HitListUpdate` does, one HSP list at a time. One thread hands each subject over as
+    /// soon as it is searched, so only the HSPs the hit lists keep stay in memory. Two or more
+    /// threads search all subjects of the batch and then hand them over, or, with
+    /// `LOSAT_X_BNSTREAM`, hand each subject over in OID order while they search the next ones.
+    fn search_subjects<const UNGAPPED: bool>(
+        &self,
+        kept: Option<&[Vec<PrelimHit>]>,
+        lookups: Option<&LookupTables>,
+        sink: &mut (dyn FnMut(usize, Option<SubjectHits>, Vec<PrelimHit>) + Send),
+    ) {
+        let use_parallel = self.prelim_batch.use_parallel;
+        let new_state = || self.new_scratch();
+        let search_one = |state: &mut SubjectState, s_idx: usize| {
+            self.search_subject::<UNGAPPED>(
+                s_idx,
+                self.subjects
+                    .prepared()
+                    .expect("the subjects of a subject set")
+                    .subject(s_idx),
+                state,
+                lookups,
+                kept.map(|kept| &kept[s_idx]),
+                &self.setup,
+            )
+        };
+        let num_subjects = self.subject_records().len();
+        if use_parallel {
+            #[cfg(all(
+                feature = "parallel",
+                any(not(target_arch = "wasm32"), feature = "wasm-threads")
+            ))]
+            {
+                if x_bnstream() {
+                    crate::utils::xreach::x_reach!("LOSAT_X_BNSTREAM", true);
+                    let threads = self.prelim_batch.parallel_pool.threads().max(1);
+                    let window = threads * X_BNSTREAM_SUBJECTS_PER_THREAD;
+                    self.prelim_batch.parallel_pool.install(|| {
+                        x_bnstream::search_in_order(
+                            num_subjects,
+                            window,
+                            false,
+                            &new_state,
+                            &search_one,
+                            &mut |s_idx, (hits, prelim)| sink(s_idx, hits, prelim),
+                        )
+                    });
+                } else {
+                    let results: Vec<(Option<SubjectHits>, Vec<PrelimHit>)> =
+                        self.prelim_batch.parallel_pool.install(|| {
+                            (0..num_subjects)
+                                .into_par_iter()
+                                .map_init(new_state, search_one)
+                                .collect()
+                        });
+                    for (s_idx, (hits, prelim)) in results.into_iter().enumerate() {
+                        sink(s_idx, hits, prelim);
+                    }
+                }
+            }
+            #[cfg(any(
+                not(feature = "parallel"),
+                all(target_arch = "wasm32", not(feature = "wasm-threads"))
+            ))]
+            {
+                unreachable!("use_parallel is false when parallel threads are disabled");
+            }
+        } else {
+            if x_bnstream() {
+                crate::utils::xreach::x_reach!("LOSAT_X_BNSTREAM", false);
+            }
+            let mut state = new_state();
+            for s_idx in 0..num_subjects {
+                let (hits, prelim) = search_one(&mut state, s_idx);
+                sink(s_idx, hits, prelim);
+            }
+        }
+    }
+
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:991-1041
+    /// ```c
+    /// Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
+    /// ...
+    /// aux_struct->offset_pairs =
+    ///   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
+    /// ```
+    fn new_scratch(&self) -> SubjectState {
+        (
+            GapAlignScratch::new(),
+            SubjectScratch::new(
+                self.prelim_batch.offset_array_size,
+                self.prelim_batch.window_size,
+            ),
+        )
+    }
+
+    /// An ungapped (`-ungapped`) search only (the other instance never calls it): the reap of a subject's
+    /// HSP list by the query coverage, made as the HSPs are given to the collector (it takes nothing of
+    /// the subject), the last step of the finish that NCBI's preliminary stage makes of an ungapped list.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1538
+    /// ```c
+    ///            Blast_HSPListReapByQueryCoverage(hsp_list,hit_params->options, query_info, program_number);
+    /// ```
+    fn x_ungapped_query_coverage(&self, hits: &mut Vec<PrelimHit>) {
+        ungapped_reap_query_coverage(
+            hits,
+            self.args.qcov_hsp_perc.unwrap_or(0.0),
+            |context_idx| self.query_contexts[context_idx].len,
+        );
+    }
+
+    /// The finish of a database sequence's HSP list in an `-ungapped` search (the other instance never
+    /// calls it): the sequence is read again, unpacked (BLASTNA), when its HSP list is not empty only, and
+    /// re-evaluated there.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1480,1490-1493
+    /// ```c
+    /// if (hsp_list && hsp_list->hspcnt > 0) {
+    /// ...
+    ///       /* The following must be performed for any ungapped
+    ///          search with a nucleotide database. */
+    ///          status =
+    ///             Blast_HSPListReevaluateUngapped(
+    /// ```
+    fn x_ungapped_database_stage(
+        &self,
+        database: &database::BlastnDatabase,
+        ordinal: u32,
+        subject_length: usize,
+        hits: &mut Vec<PrelimHit>,
+    ) -> Result<()> {
+        let &PrelimBatch {
+            encoded_queries_blastna,
+            encoded_queries_nomask,
+            score_matrix,
+            search_karlin_ref,
+            round_down_evalue_score,
+            evalue_threshold,
+            percent_identity,
+            ..
+        } = self.prelim_batch;
+        if hits.is_empty() {
+            return Ok(());
+        }
+        // The preliminary stage's word cutoffs and spaces (`Blast_HSPListReevaluateUngapped` and the
+        // e-values of an ungapped search, blast_engine.c:1492-1497): the subject's own with the
+        // statistics of each subject (`SpecialStatistics::subject_statistics`).
+        let x_subject;
+        let (word_cutoffs, eff_spaces): (&Vec<i32>, &Vec<i64>) = match self.special {
+            None => (&self.setup.cutoffs.0, self.setup.query_eff_searchsp),
+            Some(special) if special.per_subject => {
+                x_subject = (special.subject_statistics)(
+                    subject_length,
+                    special
+                        .option_spaces
+                        .expect("the statistics of each subject have their option spaces"),
+                )?;
+                (&x_subject.0 .0, &x_subject.1)
+            }
+            Some(special) => (&special.prelim.cutoffs.0, special.prelim.query_eff_searchsp),
+        };
+        database.with_blastna(ordinal, self.db_hard_mask, |s_blastna| {
+            ungapped_subject_stage(
+                hits,
+                s_blastna,
+                encoded_queries_blastna,
+                encoded_queries_nomask,
+                score_matrix,
+                word_cutoffs,
+                percent_identity,
+                |prelim| {
+                    let eff_searchsp = eff_spaces
+                        .get(prelim.context_idx as usize)
+                        .copied()
+                        .unwrap_or(0);
+                    calculate_blastn_context_statistics(
+                        prelim.prelim_score,
+                        &search_karlin_ref[prelim.context_idx as usize].gapped,
+                        eff_searchsp,
+                        round_down_evalue_score,
+                    )
+                    .1
+                },
+                evalue_threshold,
+            );
+            self.x_ungapped_query_coverage(hits);
+        })
+    }
+
+    /// The preliminary pass of the batch: the lists of `split_prelim_lists` (a split batch's query chunks
+    /// searched before), else the HSPs of every subject, in the order of their ordinal ids, into the
+    /// preliminary hit lists of `prelim_hitlist_size` subjects per query. With `-culling_limit` NCBI's
+    /// culling writer takes the place of the HSP collector. A database's read error is returned as it is
+    /// (the caller reports it with `database_search_error`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1674-1679 (the preliminary search
+    /// of a batch in `Blast_RunPreliminarySearchWithInterrupt`, into the batch's HSP stream)
+    /// ```c
+    ///     if ((status=
+    ///         BLAST_PreliminarySearchEngine(program, query, query_info,
+    ///                                       seq_src, gap_align, score_params,
+    /// ...
+    ///                                       psi_options, db_options, hsp_stream,
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:351-357 (the stream's writer
+    /// without a filtering option: the HSP collector, `PrelimHitCollector` here; `-culling_limit` chooses
+    /// the culling writer in the body below, and NCBI's other choice, `-best_hit_*`, is not ported)
+    /// ```c
+    ///         /* Use the collector filtering algorithm as the default */
+    ///         BlastHSPCollectorParams * params =
+    /// ...
+    ///         writer_info = BlastHSPCollectorInfoNew(params);
+    /// ```
+    pub(super) fn prelim_pass<const UNGAPPED: bool>(
+        &self,
+        split_prelim_lists: Option<PrelimHitLists>,
+        lookup_tables: &LookupTables,
+    ) -> Result<PrelimHitLists> {
+        if let Some(lists) = split_prelim_lists {
+            return Ok(lists);
+        }
+        // `-culling_limit`: NCBI's culling writer takes the place of the HSP collector
+        // (`BlastHSPWriter` of `CreateHspWriter`), for a batch and for a query chunk alike
+        // (a chunk's queries are its parts, so the lengths are the chunk's). Chosen once;
+        // the default `else` arm below is unchanged.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:318-342
+        // ```c
+        //     else if (filt_opts) {
+        //         if (filt_opts->best_hit && (filt_opts->best_hit_stage & ePrelimSearch))
+        //         ...
+        //         else if (filt_opts->culling_opts &&
+        //                  (filt_opts->culling_stage & ePrelimSearch))
+        //         {
+        // ```
+        if self.args.culling_limit_value() > 0 {
+            let mut writer = culling::PrelimCulling::new(
+                self.prelim_batch.query_lengths,
+                self.prelim_hitlist_size,
+                self.args.culling_limit_value(),
+            );
+            self.prelim_into::<UNGAPPED, _>(lookup_tables, &mut |oid, prelim| {
+                writer.add(oid, prelim)
+            })?;
+            Ok(writer.finish())
+        } else {
+            let mut collector =
+                PrelimHitCollector::new(self.queries.len(), self.prelim_hitlist_size);
+            self.prelim_into::<UNGAPPED, _>(lookup_tables, &mut |oid, prelim| {
+                collector.add(oid, prelim)
+            })?;
+            Ok(collector.hit_lists)
+        }
+    }
+
+    /// The preliminary search of every subject, each subject's HSPs (with `-ungapped`, finished) given to
+    /// `sink` in the order of the subjects' ids: a subject set's by `search_subjects`, a database's by
+    /// `database::search_blocks` (one instance of it for each sink, each `UNGAPPED` and each kernel: the
+    /// setup's statistics or the others, `special_subject`, chosen once per call). The subject set's
+    /// and the database's drivers are the same for the HSP collector and the culling writer.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1413 (the loop on the subjects,
+    /// which `search_subjects` and `database::search_blocks` replace)
+    /// ```c
+    /// itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+    /// ...
+    /// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+    ///        != BLAST_SEQSRC_EOF) {
+    /// ```
+    fn prelim_into<const UNGAPPED: bool, M: FnMut(usize, Vec<PrelimHit>) + Send>(
+        &self,
+        lookup_tables: &LookupTables,
+        sink: &mut M,
+    ) -> Result<()> {
+        match self.subjects {
+            SubjectSource::Prepared(_) => {
+                self.search_subjects::<UNGAPPED>(
+                    None,
+                    Some(lookup_tables),
+                    &mut |oid, _, mut prelim| {
+                        if UNGAPPED {
+                            self.x_ungapped_query_coverage(&mut prelim);
+                        }
+                        sink(oid, prelim)
+                    },
+                );
+                Ok(())
+            }
+            SubjectSource::Database(database) => {
+                // The subjects come one at a time in the order of their ordinal ids
+                // (`database::search_blocks`), as the subject set's come in OID order.
+                // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
+                // ```c
+                //     int status = m_PrelimSearch->CheckInternalData();
+                //     if (status != 0)
+                //     {
+                //          // Search was not run, but we send back an empty CSearchResultSet.
+                // ```
+                // With no valid context NCBI does not search, and reads no sequence.
+                if !self.any_valid_context {
+                    return Ok(());
+                }
+                let mut add =
+                    |ordinal: u32, prelim_hits: Vec<PrelimHit>| sink(ordinal as usize, prelim_hits);
+                let (parallel_pool, use_parallel) = (
+                    self.prelim_batch.parallel_pool,
+                    self.prelim_batch.use_parallel,
+                );
+                let new_scratch = || self.new_scratch();
+                // The database's blocks with `$kernel` for each subject: the setup's statistics
+                // (`default_kernel`), or the others apart (`special_kernel`), chosen once per call.
+                macro_rules! database_prelim_blocks {
+                    ($kernel:ident, $add:expr) => {
+                        if UNGAPPED {
+                            // The first error of reading a database sequence again for the
+                            // ungapped re-evaluation (`BlastnDatabase::with_blastna`).
+                            let x_ungapped_error: std::sync::Mutex<Option<(u32, anyhow::Error)>> =
+                                std::sync::Mutex::new(None);
+                            // The callback of the database's preliminary pass in an ungapped
+                            // search: the search of the sequence as for a default search, then
+                            // the finish of its HSP list when it has HSPs left
+                            // (`x_ungapped_database_stage`). A read error goes to the cell
+                            // `x_ungapped_error` (the one of the smallest ordinal stays) and the
+                            // sequence has no HSPs. The default search has its own callback (the
+                            // default branch has its own closure, so that the default instance of
+                            // this function holds no capture of this one).
+                            database::search_blocks(
+                                database,
+                                parallel_pool,
+                                use_parallel,
+                                &new_scratch,
+                                &|state: &mut SubjectState,
+                                  ordinal: u32,
+                                  subject: BlastnSubjectRef<'_>| {
+                                    let (_, mut prelim_hits) =
+                                        $kernel(ordinal as usize, subject, state);
+                                    if let Err(error) = self.x_ungapped_database_stage(
+                                        database,
+                                        ordinal,
+                                        subject.length,
+                                        &mut prelim_hits,
+                                    ) {
+                                        let mut first = x_ungapped_error
+                                            .lock()
+                                            .expect("the error cell is not poisoned");
+                                        if first
+                                            .as_ref()
+                                            .is_none_or(|(smallest, _)| ordinal < *smallest)
+                                        {
+                                            *first = Some((ordinal, error));
+                                        }
+                                        return None;
+                                    }
+                                    (!prelim_hits.is_empty()).then_some(prelim_hits)
+                                },
+                                $add,
+                            )
+                            .and_then(|()| {
+                                match x_ungapped_error
+                                    .lock()
+                                    .expect("the error cell is not poisoned")
+                                    .take()
+                                {
+                                    Some((_, error)) => Err(error),
+                                    None => Ok(()),
+                                }
+                            })
+                        } else {
+                            database::search_blocks(
+                                database,
+                                parallel_pool,
+                                use_parallel,
+                                &new_scratch,
+                                &|state: &mut SubjectState,
+                                  ordinal: u32,
+                                  subject: BlastnSubjectRef<'_>| {
+                                    let (_, prelim_hits) =
+                                        $kernel(ordinal as usize, subject, state);
+                                    (!prelim_hits.is_empty()).then_some(prelim_hits)
+                                },
+                                $add,
+                            )
+                        }
+                    };
+                }
+                let default_kernel =
+                    |s_idx: usize, subject: BlastnSubjectRef<'_>, state: &mut SubjectState| {
+                        self.search_subject::<UNGAPPED>(
+                            s_idx,
+                            subject,
+                            state,
+                            Some(lookup_tables),
+                            None,
+                            &self.setup,
+                        )
+                    };
+                match self.special {
+                    None => database_prelim_blocks!(default_kernel, &mut add),
+                    Some(special) => {
+                        let special_kernel =
+                            |s_idx: usize,
+                             subject: BlastnSubjectRef<'_>,
+                             state: &mut SubjectState| {
+                                crate::stats::setup::apart(|| {
+                                    self.special_subject::<UNGAPPED>(
+                                        s_idx,
+                                        subject,
+                                        state,
+                                        Some(lookup_tables),
+                                        None,
+                                        special,
+                                    )
+                                })
+                            };
+                        database_prelim_blocks!(special_kernel, &mut add)
+                    }
+                }
+            }
+        }
+    }
+
+    /// The traceback pass of the batch: the final HSPs of the HSPs the preliminary pass kept
+    /// (`prelim_lists`), in the final hit lists of `hitlist_size` subjects per query. A database's read
+    /// error is returned as it is (the caller reports it with `database_search_error`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1700-1707
+    /// ```c
+    ///                 batch->hsplist_array[hsplist_itr] = NULL;
+    ///                 if (hsp_list->hspcnt == 0) {
+    ///                     hsp_list = Blast_HSPListFree(hsp_list);
+    ///                 }
+    ///                 else {
+    ///                     Blast_HSPResultsInsertHSPList(thread_data->tld[tid]->results, hsp_list,
+    ///                                   hit_params->options->hitlist_size);
+    ///                 }
+    /// ```
+    pub(super) fn traceback_pass<const UNGAPPED: bool>(
+        &self,
+        prelim_lists: PrelimHitLists,
+    ) -> Result<Vec<Option<BlastnHitList>>> {
+        let (queries_ref, hitlist_size) = (self.queries, self.hitlist_size);
+        match self.subjects {
+            SubjectSource::Prepared(_) => {
+                let kept = prelim_hits_by_subject(prelim_lists, self.subject_records().len());
+                let mut hit_lists: Vec<Option<BlastnHitList>> =
+                    Vec::with_capacity(queries_ref.len());
+                hit_lists.resize_with(queries_ref.len(), || None);
+                self.search_subjects::<UNGAPPED>(Some(&kept), None, &mut |_, hits, _| {
+                    if let Some(hits) = hits {
+                        update_hitlists_with_subject_hits(&mut hit_lists, hits, hitlist_size);
+                    }
+                });
+                Ok(hit_lists)
+            }
+            SubjectSource::Database(database) => {
+                let (parallel_pool, use_parallel) = (
+                    self.prelim_batch.parallel_pool,
+                    self.prelim_batch.use_parallel,
+                );
+                let new_scratch = || self.new_scratch();
+                let listed = listed_prelim_hits(prelim_lists);
+                let found = database::traceback_listed(
+                    database,
+                    self.db_hard_mask,
+                    parallel_pool,
+                    use_parallel,
+                    &listed,
+                    &new_scratch,
+                    &|state: &mut SubjectState,
+                      ordinal: u32,
+                      subject: BlastnSubjectRef<'_>,
+                      kept: &Vec<PrelimHit>| {
+                        // One test per listed subject (a subject with HSPs): the setup's statistics,
+                        // or the others apart (`special_subject`).
+                        let (mut subject_hits, _) = match self.special {
+                            None => self.search_subject::<UNGAPPED>(
+                                ordinal as usize,
+                                subject,
+                                state,
+                                None,
+                                Some(kept),
+                                &self.setup,
+                            ),
+                            Some(special) => crate::stats::setup::apart(|| {
+                                self.special_subject::<UNGAPPED>(
+                                    ordinal as usize,
+                                    subject,
+                                    state,
+                                    None,
+                                    Some(kept),
+                                    special,
+                                )
+                            }),
+                        };
+                        // Every listed sequence's lists are kept until the last one is traced
+                        // (`found` below), so each keeps only its length (`SubjectHits::fit`). A
+                        // subject set's lists go to the hit lists at once (`search_subjects` above),
+                        // whose copies and `update_hitlists_with_subject_hits` hold their counts.
+                        if let Some(hits) = subject_hits.as_mut() {
+                            hits.fit();
+                        }
+                        subject_hits
+                    },
+                    &|kept: &Vec<PrelimHit>| {
+                        kept.iter()
+                            .map(|hit| (hit.prelim_ss, hit.prelim_se))
+                            .collect()
+                    },
+                )?;
+                // The final HSPs of the listed sequences in the order of their ordinal ids, as
+                // the subject set's traceback saves those of its subjects
+                // (`Blast_HSPResultsInsertHSPList`, `search_subjects`).
+                let mut hit_lists: Vec<Option<BlastnHitList>> =
+                    Vec::with_capacity(queries_ref.len());
+                hit_lists.resize_with(queries_ref.len(), || None);
+                for hits in found {
+                    update_hitlists_with_subject_hits(&mut hit_lists, hits, hitlist_size);
+                }
+                Ok(hit_lists)
+            }
+        }
+    }
+}

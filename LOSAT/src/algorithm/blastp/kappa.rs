@@ -2223,6 +2223,7 @@ pub(crate) fn x_newton_lanes_prefetch_matches(
     }
     let query_info = &query_workspace.redo_query_info;
     let mut inputs = Vec::new();
+    let mut shared_q = None;
     for local_match in local_matches {
         if local_match.hsps.is_empty()
             || blast_compo_early_termination(local_match.best_evalue, heaps)
@@ -2288,6 +2289,7 @@ pub(crate) fn x_newton_lanes_prefetch_matches(
             range.subject.length,
             redo_align_params.compo_adjust_mode,
             composition_workspace,
+            &mut shared_q,
         ) {
             inputs.push(input);
         }

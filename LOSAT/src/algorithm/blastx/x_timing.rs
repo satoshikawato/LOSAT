@@ -60,11 +60,12 @@
 //!   `batch_end` is the end of the batch (`runtime::Runtime::batch_end`); `sum` is the whole
 //!   batch, so `sum` minus the stages is what lies between them.
 //! - `[TIMING] blastx_batch_end_<mode>: init .. read .. kappa_spec .. kappa_serial .. loop ..
-//!   finish .. (matches=N reused=N serial=N)`: inside `batch_end`. `init` is up to the
-//!   composition state, `read` takes the matches from the stream, `loop` is the in-order loop
-//!   over the matches, of which `kappa_spec` is the parallel redo made ahead (2+ threads)
-//!   and `kappa_serial` the redo of the matches done in the loop itself; `finish` is from the
-//!   heaps to the batch's results (hit lists, culling, sorting, the copy of the batch).
+//!   finish .. (matches=N reused=N serial=N)`: `init` and `finish` in `batch_end`, the others
+//!   in its composition-based redo (`runtime::kappa_batch`, `Runtime::kappa_redo_batch`).
+//!   `init` is up to the composition state, `read` takes the matches from the stream, `loop` is
+//!   the in-order loop over the matches, of which `kappa_spec` is the parallel redo made ahead
+//!   (2+ threads) and `kappa_serial` the redo of the matches done in the loop itself; `finish` is
+//!   from the heaps to the batch's results (hit lists, culling, sorting, the copy of the batch).
 //!   `matches` counts the matches, `reused` those whose redo was made ahead and `serial` those
 //!   redone in the loop.
 //! - `[TIMING] blastx_diag: mode=.. subjects=N cells=N batched_hits=N candidates=N`: with
@@ -160,8 +161,9 @@ pub(crate) enum Batch {
 }
 const BATCH_LEN: usize = Batch::Sum as usize + 1;
 
-// No NCBI counterpart: names of the intervals of `batch_end`.
-/// The intervals and counts of `runtime::Runtime::batch_end`.
+// No NCBI counterpart: names of the intervals of `batch_end` and of its composition-based redo.
+/// The intervals and counts of `runtime::Runtime::batch_end` and of its composition-based redo
+/// (`runtime::kappa_batch`).
 #[derive(Clone, Copy)]
 pub(crate) enum End {
     Init,

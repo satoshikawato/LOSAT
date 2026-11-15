@@ -130,6 +130,7 @@ pub losat::api::Batch::diagnostics: alloc::vec::Vec<u8>
 pub losat::api::Batch::hsps: alloc::vec::Vec<losat::api::HspRecord>
 pub losat::api::Batch::query_indices: core::ops::range::Range<usize>
 pub losat::api::Batch::query_stats: alloc::vec::Vec<core::option::Option<losat::api::QueryStats>>
+pub losat::api::Batch::rounds: alloc::vec::Vec<losat::api::QueryRounds>
 impl losat::api::Batch
 pub fn losat::api::Batch::queries(&self) -> impl core::iter::traits::iterator::Iterator<Item = losat::api::QueryHits<'_>> + '_
 impl core::clone::Clone for losat::api::Batch
@@ -226,6 +227,7 @@ pub losat::api::HspRecord::query_length: usize
 pub losat::api::HspRecord::query_strand: core::option::Option<losat::api::Strand>
 pub losat::api::HspRecord::rank: usize
 pub losat::api::HspRecord::raw_score: i32
+pub losat::api::HspRecord::round: u32
 pub losat::api::HspRecord::s_end: usize
 pub losat::api::HspRecord::s_idx: usize
 pub losat::api::HspRecord::s_start: usize
@@ -258,6 +260,8 @@ impl<'a> losat::api::Inputs<'a>
 pub fn losat::api::Inputs<'a>::database(&'a [losat::api::FastaRecord], &'a str) -> Self
 pub fn losat::api::Inputs<'a>::named(self, &'a str, &'a str) -> Self
 pub fn losat::api::Inputs<'a>::new(&'a [losat::api::FastaRecord], &'a [losat::api::FastaRecord]) -> Self
+pub fn losat::api::Inputs<'a>::pssm(&'a std::path::Path, &'a [losat::api::FastaRecord]) -> Self
+pub fn losat::api::Inputs<'a>::pssm_database(&'a std::path::Path, &'a str) -> Self
 impl<'a> core::clone::Clone for losat::api::Inputs<'a>
 pub fn losat::api::Inputs<'a>::clone(&self) -> losat::api::Inputs<'a>
 impl<'a> core::fmt::Debug for losat::api::Inputs<'a>
@@ -275,6 +279,7 @@ pub losat::api::Outcome::diagnostics: alloc::vec::Vec<u8>
 pub losat::api::Outcome::hsps: alloc::vec::Vec<losat::api::HspRecord>
 pub losat::api::Outcome::query_stats: alloc::vec::Vec<core::option::Option<losat::api::QueryStats>>
 pub losat::api::Outcome::reports: alloc::vec::Vec<losat::api::Report>
+pub losat::api::Outcome::rounds: alloc::vec::Vec<losat::api::QueryRounds>
 impl losat::api::Outcome
 pub fn losat::api::Outcome::queries(&self) -> impl core::iter::traits::iterator::Iterator<Item = losat::api::QueryHits<'_>> + '_
 pub fn losat::api::Outcome::query(&self, usize) -> core::option::Option<losat::api::QueryHits<'_>>
@@ -317,8 +322,10 @@ impl core::panic::unwind_safe::UnwindSafe for losat::api::Parameter
 #[non_exhaustive] pub struct losat::api::QueryHits<'a>
 pub losat::api::QueryHits::hsps: &'a [losat::api::HspRecord]
 pub losat::api::QueryHits::q_idx: usize
+pub losat::api::QueryHits::round: core::option::Option<u32>
 pub losat::api::QueryHits::stats: core::option::Option<&'a losat::api::QueryStats>
 impl<'a> losat::api::QueryHits<'a>
+pub fn losat::api::QueryHits<'a>::rounds(&self) -> impl core::iter::traits::iterator::Iterator<Item = losat::api::QueryHits<'a>> + 'a
 pub fn losat::api::QueryHits<'a>::subject(&self, usize) -> core::option::Option<losat::api::SubjectHits<'a>>
 pub fn losat::api::QueryHits<'a>::subjects(&self) -> impl core::iter::traits::iterator::Iterator<Item = losat::api::SubjectHits<'a>> + 'a
 impl<'a> core::clone::Clone for losat::api::QueryHits<'a>
@@ -336,6 +343,23 @@ impl<'a> core::marker::Unpin for losat::api::QueryHits<'a>
 impl<'a> core::marker::UnsafeUnpin for losat::api::QueryHits<'a>
 impl<'a> core::panic::unwind_safe::RefUnwindSafe for losat::api::QueryHits<'a>
 impl<'a> core::panic::unwind_safe::UnwindSafe for losat::api::QueryHits<'a>
+#[non_exhaustive] pub struct losat::api::QueryRounds
+pub losat::api::QueryRounds::converged: bool
+pub losat::api::QueryRounds::stats: alloc::vec::Vec<core::option::Option<losat::api::QueryStats>>
+impl core::clone::Clone for losat::api::QueryRounds
+pub fn losat::api::QueryRounds::clone(&self) -> losat::api::QueryRounds
+impl core::cmp::PartialEq for losat::api::QueryRounds
+pub fn losat::api::QueryRounds::eq(&self, &losat::api::QueryRounds) -> bool
+impl core::fmt::Debug for losat::api::QueryRounds
+pub fn losat::api::QueryRounds::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for losat::api::QueryRounds
+impl core::marker::Freeze for losat::api::QueryRounds
+impl core::marker::Send for losat::api::QueryRounds
+impl core::marker::Sync for losat::api::QueryRounds
+impl core::marker::Unpin for losat::api::QueryRounds
+impl core::marker::UnsafeUnpin for losat::api::QueryRounds
+impl core::panic::unwind_safe::RefUnwindSafe for losat::api::QueryRounds
+impl core::panic::unwind_safe::UnwindSafe for losat::api::QueryRounds
 #[non_exhaustive] pub struct losat::api::QueryStats
 pub losat::api::QueryStats::eff_space: i64
 pub losat::api::QueryStats::entropy: f64
@@ -400,6 +424,7 @@ impl core::panic::unwind_safe::UnwindSafe for losat::api::Search
 #[non_exhaustive] pub struct losat::api::SubjectHits<'a>
 pub losat::api::SubjectHits::hsps: &'a [losat::api::HspRecord]
 pub losat::api::SubjectHits::q_idx: usize
+pub losat::api::SubjectHits::round: u32
 pub losat::api::SubjectHits::s_idx: usize
 impl<'a> core::clone::Clone for losat::api::SubjectHits<'a>
 pub fn losat::api::SubjectHits<'a>::clone(&self) -> losat::api::SubjectHits<'a>

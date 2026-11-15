@@ -881,7 +881,13 @@ pub(crate) fn subject_besthit(hsps: &mut Vec<Hsp>) -> Vec<Hsp> {
         }
         let a = &hsps[i].hsp;
         let begin = (a.q_start - 3).max(0);
-        let end = a.q_end + 3;
+        // `if (e < 0) e = hsp_array[i]->query.end;` (blast_hits.c:2569): only the end of an
+        // HSP of length -4 or less near the start of its context (the one-hit word finder with
+        // `-window_size 0`, aa_ungapped.c:1054,1083) lies below -3.
+        let mut end = a.q_end + 3;
+        if end < 0 {
+            end = a.q_end;
+        }
         for j in i + 1..hsps.len() {
             let b = &hsps[j].hsp;
             if !removed[j] && a.context == b.context && b.q_start >= begin && b.q_end <= end {
@@ -2273,7 +2279,7 @@ impl CompoHeap {
         Some(entry)
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1560-1582
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1560-1580
     // ```c++
     // BlastCompo_EarlyTermination(double evalue,
     //                             BlastCompo_Heap significantMatches[],
@@ -2539,5 +2545,60 @@ mod boundary_tests {
             }
         }
         assert_eq!(actual, expected);
+    }
+}
+
+#[cfg(test)]
+mod negative_length_tests {
+    use super::*;
+
+    fn hsp(context: usize, score: i32, q_start: i32, length: i32) -> Hsp {
+        Hsp {
+            hsp: PreliminaryHsp {
+                context,
+                frame: 1,
+                score,
+                q_start,
+                q_end: q_start + length,
+                q_gapped_start: q_start,
+                s_start: 5,
+                s_end: 5 + length,
+                s_gapped_start: 5,
+            },
+            num: 1,
+            evalue: 1.0,
+            bit_score: 0.0,
+            identity: 0,
+            positive: 0,
+            edit_script: Vec::new(),
+            composition_method: 0,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2566-2569
+    // ```c
+    //       o = hsp_array[i]->query.offset - range_diff;
+    //       e = hsp_array[i]->query.end + range_diff;
+    //       if (o < 0) o = 0;
+    //       if (e < 0) e = hsp_array[i]->query.end;
+    // ```
+    /// An HSP of length -4 at the start of its context ends at -4: its end + 3 is below 0, so
+    /// NCBI's range ends at -4 itself and keeps a weaker HSP ending at -2 (an end + 3 of -1
+    /// would remove it), and removes one that ends at -4 or before.
+    #[test]
+    fn subject_besthit_keeps_the_end_below_minus_three() {
+        let mut hsps = vec![hsp(0, 9, 0, -4), hsp(0, 5, 1, -3), hsp(0, 4, 0, -5)];
+        let removed = subject_besthit(&mut hsps);
+        assert_eq!(removed.len(), 1);
+        assert_eq!((removed[0].hsp.q_start, removed[0].hsp.q_end), (0, -5));
+        assert_eq!(
+            hsps.iter()
+                .map(|h| (h.hsp.q_start, h.hsp.q_end))
+                .collect::<Vec<_>>(),
+            vec![(0, -4), (1, -2)]
+        );
+        // An end + 3 of 0 or more is the range's end, as before.
+        let mut hsps = vec![hsp(0, 9, 0, -3), hsp(0, 5, 1, -2)];
+        assert_eq!(subject_besthit(&mut hsps).len(), 1);
     }
 }

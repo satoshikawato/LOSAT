@@ -605,11 +605,51 @@ fn the_first_header_check_reads_the_stored_lines() {
     let rule = std::sync::Arc::new(super::filter::DeflineRule::Seqids(vec![
         b"NOSUCH_1".to_vec()
     ]));
-    for volume in &mut db.volumes {
-        volume.set_defline_rule(rule.clone());
+    for (volume, &start) in db.volumes.iter_mut().zip(&db.volume_starts) {
+        volume.set_defline_rule(rule.clone(), start);
     }
     assert!(db.deflines(0).is_err());
     assert!(!db.has_parsed_seqids().unwrap());
+}
+
+#[test]
+fn a_seqid_rule_reads_ordinal_ids_as_oids_in_the_database() {
+    // Line DBID ordsl: NCBI's filtered header read adds the volume's first OID to the tag of each
+    // `BL_ORD_ID` before the list's rule reads the Seq-ids (`x_GetHdrAsn1` with `adjust_oids`),
+    // so a list's `gnl|BL_ORD_ID|n` keeps the line of OID n, not that of the n-th sequence of a
+    // later volume (prot_mv: six volumes, each record's stored tag its number in the volume).
+    let mut db = SeqDb::open(&db_name("prot_mv"), SeqType::Protein).unwrap();
+    let later = db.volume_starts[1];
+    assert!(later > 0);
+    let with_rule = |db: &mut SeqDb, id: String| {
+        let rule = std::sync::Arc::new(super::filter::DeflineRule::Seqids(vec![id.into_bytes()]));
+        let starts = db.volume_starts.clone();
+        for (volume, start) in db.volumes.iter_mut().zip(starts) {
+            volume.set_defline_rule(rule.clone(), start);
+        }
+    };
+    with_rule(&mut db, format!("BL_ORD_ID:{later}"));
+    assert_eq!(db.deflines(later).unwrap()[0].bl_ord_id, later);
+    assert!(db.deflines(0).is_err());
+    with_rule(&mut db, "BL_ORD_ID:0".to_string());
+    assert_eq!(db.deflines(0).unwrap()[0].bl_ord_id, 0);
+    assert!(db.deflines(later).is_err());
+    // A negative list removes the line whose tag plus the volume's first OID it names.
+    let with_negative = |db: &mut SeqDb, id: String| {
+        let rule = std::sync::Arc::new(super::filter::DeflineRule::NegativeSeqids(vec![
+            id.into_bytes()
+        ]));
+        let starts = db.volume_starts.clone();
+        for (volume, start) in db.volumes.iter_mut().zip(starts) {
+            volume.set_defline_rule(rule.clone(), start);
+        }
+    };
+    with_negative(&mut db, format!("BL_ORD_ID:{later}"));
+    assert!(db.deflines(later).is_err());
+    assert_eq!(db.deflines(0).unwrap()[0].bl_ord_id, 0);
+    with_negative(&mut db, "BL_ORD_ID:0".to_string());
+    assert!(db.deflines(0).is_err());
+    assert_eq!(db.deflines(later).unwrap()[0].bl_ord_id, later);
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1774-1803 and

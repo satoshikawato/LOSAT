@@ -2465,7 +2465,13 @@ fn a_database_made_through_the_library_is_read_and_searched_through_it() {
 fn the_api_owns_the_inputs_and_the_outputs() {
     for owned in API_OWNED {
         let flag = format!("-{owned}");
-        let error = validate(Program::Blastp, &[&flag, "x"]).unwrap_err();
+        // `-in_pssm` is psiblast's and tblastn's (`Inputs::pssm`); blastp's parser knows no such
+        // option.
+        let program = match *owned {
+            "in_pssm" => Program::Psiblast,
+            _ => Program::Blastp,
+        };
+        let error = validate(program, &[&flag, "x"]).unwrap_err();
         assert!(matches!(error, Error::Argv(_)), "{flag}: {error}");
         assert!(error.message().starts_with(&flag), "{flag}: {error}");
         for program in Program::ALL {

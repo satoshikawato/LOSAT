@@ -56,7 +56,8 @@ before it searches, so the reports of the batches before the error do not exist;
 row whose query has a reader error after the batch that the command line refuses). psiblast's rounds
 (`-num_iterations` other than 1), its PSSM files (the PSSM kinds) and the PSSM queries of psiblast
 and tblastn (`-in_pssm`, the library's `Inputs::pssm`) run through the library as on the command line;
-the rows of rpsblast and rpstblastn are `library-skip` (the library API has no such program).
+the rows of rpsblast and rpstblastn (the library API has no such program) and those that give both
+`-query` and `-in_pssm` (the library's query is one or the other) are `library-skip`.
 The tool takes no lock; whoever runs it next to other NCBI runs holds the caller's own.
 """
 from __future__ import annotations
@@ -400,7 +401,11 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     files = xinclude.wants_files(row)
     pssm = xinclude.wants_pssm(row)
     # The library API refuses rpsblast and rpstblastn (`api::Program::parse`, line PS items PS11a, PS12a).
-    if library and row["program"] in ("rpsblast", "rpstblastn"):
+    # Its query is records or a PSSM file (`Inputs::new`, `Inputs::pssm`), never both: a row that gives
+    # the command line `-query` and `-in_pssm` (the parser's exclusion) has no library call.
+    argv = search_argv(row)
+    if library and (row["program"] in ("rpsblast", "rpstblastn")
+                    or ("-query" in argv and "-in_pssm" in argv)):
         return "library-skip", ""
     command = [str(losat), row["program"], *search_argv(row), "-num_threads", str(threads)]
     db_dir = inflate_rps(row["db"]) if rps_cell(row["db"]) is not None else None

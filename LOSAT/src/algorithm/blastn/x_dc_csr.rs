@@ -66,10 +66,13 @@
 //! `TwoStageLookup::contains_hit` and `count_hits` where the table has no chains.
 //!
 //! The scans of a CSR table read their words through `Ring`: each word enters a FIFO of `RING`
-//! words and leaves it, unchanged and in order, `RING` words later; a word entering prefetches
-//! `offsets[cell]`, and the word `RING / 2` places back reads its two offsets and prefetches
-//! the first and the last cache line of its run (x86_64 only; elsewhere the ring only delays
-//! the words). The words, and so every pair and its order, are the scan's own. A ring is made
+//! words and leaves it, unchanged and in order, `RING` words later. Every `GROUP` words, the
+//! group that just entered gets its `offsets[cell]` brought in, and the group `RING / 2` places
+//! back reads its offsets and gets the first and the last cache line of each run brought in
+//! (`x_ahead`: a prefetch on x86_64; on wasm32, which has no prefetch instruction, a load whose
+//! value is dropped, so the group's misses are waited for together and not one after another
+//! where `emit` reads them; elsewhere nothing). The words, and so every pair and its order, are
+//! the scan's own. A ring is made
 //! for each chunk a scan reads, so its slots start uninitialised (no 0.8-0.9 KB zero fill per
 //! chunk): a slot is read only after a word was written to it (`Ring::push`).
 //!
@@ -964,8 +967,11 @@ impl SpinBarrier {
 pub(crate) const RING: usize = 32;
 
 /// No NCBI counterpart (scheduling only): the words of a scan's FIFO get their lines brought in
-/// in groups of this many (module comment).
-pub(crate) const GROUP: usize = 8;
+/// in groups of this many (module comment). Where `x_ahead` is a prefetch (x86_64), which does
+/// not hold the core, each word as it enters (one word per group; 8 per group cost dc-megablast
+/// 1.4 % more cycles there); where it is a load (wasm32), 8 words together, so their misses are
+/// waited for at once.
+pub(crate) const GROUP: usize = if cfg!(target_arch = "wasm32") { 8 } else { 1 };
 
 /// No NCBI counterpart (scheduling only): the FIFO of a CSR scan's words (module comment). A
 /// word is any `Copy` value whose cell `push` gets from `cell`.
@@ -989,9 +995,9 @@ impl<'a, T: Copy + Default> Ring<'a, T> {
     }
 
     /// The word `w` enters, and the word `RING` places back leaves through `emit`; whether one
-    /// left (none while fewer than `RING` words came before). Every `GROUP` words, the group that
-    /// just entered gets its `offsets` elements brought in (`x_ahead`), and the group `RING / 2`
-    /// places back the first and the last line of each of their runs (module comment).
+    /// left (none while fewer than `RING` words came before). When `w` ends a group of `GROUP`
+    /// words, first the group gets its `offsets` elements brought in (`x_ahead`), and the group
+    /// `RING / 2` places back the first and the last line of each of their runs (module comment).
     #[inline(always)]
     pub(crate) fn push(
         &mut self,
@@ -1000,23 +1006,21 @@ impl<'a, T: Copy + Default> Ring<'a, T> {
         emit: &mut impl FnMut(T),
     ) -> bool {
         const MASK: usize = RING - 1;
-        let slot = self.n & MASK;
-        let leaves = self.n >= RING;
-        // SAFETY: `n >= RING`, so word `n - RING`, whose slot this is, was pushed and written;
-        // the `RING - 1` words pushed since then wrote other slots.
-        let out = leaves.then(|| unsafe { self.buf[slot].assume_init() });
-        self.buf[slot] = MaybeUninit::new(w);
-        self.n += 1;
-        if self.n % GROUP == 0 {
-            let (n, offsets, qs) = (self.n, self.offsets, self.qs);
-            for m in n - GROUP..n {
-                // SAFETY: `m < n` and `m >= n - GROUP > n - RING`: word `m` was pushed, and no
+        let n = self.n;
+        if (n + 1) % GROUP == 0 {
+            let (offsets, qs) = (self.offsets, self.qs);
+            for m in n + 1 - GROUP..n {
+                // SAFETY: `m < n` and `m > n - GROUP >= n - RING`: word `m` was pushed, and no
                 // later word wrote its slot.
-                x_ahead(offsets, cell(unsafe { self.buf[m & MASK].assume_init_ref() }));
+                x_ahead(
+                    offsets,
+                    cell(unsafe { self.buf[m & MASK].assume_init_ref() }),
+                );
             }
-            if n >= RING / 2 + GROUP {
-                for m in n - RING / 2 - GROUP..n - RING / 2 {
-                    // SAFETY: as above (`m >= n - RING / 2 - GROUP > n - RING`).
+            x_ahead(offsets, cell(&w));
+            if n + 1 >= RING / 2 + GROUP {
+                for m in n + 1 - RING / 2 - GROUP..n + 1 - RING / 2 {
+                    // SAFETY: as above (`m >= n + 1 - RING / 2 - GROUP > n - RING`).
                     let c = cell(unsafe { self.buf[m & MASK].assume_init_ref() });
                     let a = offsets[c] as usize;
                     let b = offsets[c + 1] as usize;
@@ -1031,9 +1035,15 @@ impl<'a, T: Copy + Default> Ring<'a, T> {
                 }
             }
         }
-        if let Some(o) = out {
-            emit(o);
+        let slot = n & MASK;
+        let leaves = n >= RING;
+        if leaves {
+            // SAFETY: `n >= RING`, so word `n - RING`, whose slot this is, was pushed and
+            // written; the `RING - 1` words pushed since then wrote other slots.
+            emit(unsafe { self.buf[slot].assume_init() });
         }
+        self.buf[slot] = MaybeUninit::new(w);
+        self.n = n + 1;
         leaves
     }
 
@@ -1081,25 +1091,19 @@ impl<T: Copy + Default> XRing<T> for XRingPacked<'_, T> {
         let Some(r) = x_rank(self.head.bits, cell(&w), self.head.pop) else {
             return false;
         };
-        let slot = self.n & MASK;
-        let leaves = self.n >= RING;
-        // SAFETY: `n >= RING`, so word `n - RING`, whose slot this is, was pushed and written
-        // with its rank; the `RING - 1` words pushed since then wrote other slots.
-        let out = leaves
-            .then(|| unsafe { (self.buf[slot].assume_init(), self.ranks[slot].assume_init()) });
-        self.buf[slot] = MaybeUninit::new(w);
-        self.ranks[slot] = MaybeUninit::new(r as u32);
-        self.n += 1;
-        if self.n % GROUP == 0 {
-            let (n, offsets, qs) = (self.n, self.head.offsets, self.head.qs);
-            for m in n - GROUP..n {
-                // SAFETY: `m < n` and `m >= n - GROUP > n - RING`: word `m` was pushed with its
+        let n = self.n;
+        if (n + 1) % GROUP == 0 {
+            let (offsets, qs) = (self.head.offsets, self.head.qs);
+            for m in n + 1 - GROUP..n {
+                // SAFETY: `m < n` and `m > n - GROUP >= n - RING`: word `m` was pushed with its
                 // rank, and no later word wrote its slot.
-                x_ahead(offsets, unsafe { self.ranks[m & MASK].assume_init() } as usize);
+                x_ahead(offsets, unsafe { self.ranks[m & MASK].assume_init() }
+                    as usize);
             }
-            if n >= RING / 2 + GROUP {
-                for m in n - RING / 2 - GROUP..n - RING / 2 {
-                    // SAFETY: as above (`m >= n - RING / 2 - GROUP > n - RING`).
+            x_ahead(offsets, r);
+            if n + 1 >= RING / 2 + GROUP {
+                for m in n + 1 - RING / 2 - GROUP..n + 1 - RING / 2 {
+                    // SAFETY: as above (`m >= n + 1 - RING / 2 - GROUP > n - RING`).
                     let k = unsafe { self.ranks[m & MASK].assume_init() } as usize;
                     let a = offsets[k] as usize;
                     let b = offsets[k + 1] as usize;
@@ -1113,9 +1117,21 @@ impl<T: Copy + Default> XRing<T> for XRingPacked<'_, T> {
                 }
             }
         }
-        if let Some((o, k)) = out {
-            emit(o, k as usize);
+        let slot = n & MASK;
+        let leaves = n >= RING;
+        if leaves {
+            // SAFETY: `n >= RING`, so word `n - RING`, whose slot this is, was pushed and
+            // written with its rank; the `RING - 1` words pushed since then wrote other slots.
+            unsafe {
+                emit(
+                    self.buf[slot].assume_init(),
+                    self.ranks[slot].assume_init() as usize,
+                )
+            };
         }
+        self.buf[slot] = MaybeUninit::new(w);
+        self.ranks[slot] = MaybeUninit::new(r as u32);
+        self.n = n + 1;
         leaves
     }
 
@@ -1135,7 +1151,8 @@ impl<T: Copy + Default> XRing<T> for XRingPacked<'_, T> {
     }
 }
 
-const _: () = assert!(RING.is_power_of_two() && RING >= 2 * GROUP && RING % GROUP == 0);
+const _: () =
+    assert!(RING.is_power_of_two() && RING >= 2 * GROUP && RING % GROUP == 0 && GROUP >= 1);
 const _: () = assert!(PV_ARRAY_MASK == 31);
 
 /// No NCBI counterpart: the check of the unit tests of a table built with both layouts: the CSR

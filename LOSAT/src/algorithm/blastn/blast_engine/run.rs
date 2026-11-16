@@ -3574,6 +3574,20 @@ pub(super) fn x_bn_ext_first() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNEXTFIRST"))
 }
+
+/// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNRANKONCE, in the strict set: on unless it is `0`)
+/// the scans of a contiguous table laid out as CSR take each word's run from the element of the
+/// head that the ring hands over with the word (`x_dc_csr::XRing`): a word of a packed head is
+/// ranked once, where it enters the ring, not again where it leaves. The words, their runs and
+/// every value are the same. Recorded (`LOSAT_X_REACH`) where a scan chooses the table's form.
+pub(super) fn x_bn_rank_once(csr: bool) -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let on = *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNRANKONCE"));
+    if on {
+        crate::utils::xreach::x_reach!("LOSAT_X_BNRANKONCE", csr);
+    }
+    on && csr
+}
 /// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNTBRANGE) the traceback of a database search decodes
 /// a sequence of at least `x_tb_range_min` bases in the ranges of its HSPs only, as NCBI's partial
 /// fetch does (`database::traceback_listed`).
@@ -11033,7 +11047,13 @@ fn run_in_pool(
                 (seq_aligns > 0 && !crate::algorithm::common::database::prefetch_off(seq_aligns))
                     .then(|| {
                         database
-                            .batch_prefetch_stop(&titles, &batch_hit_lists, !args.ungapped, start)
+                            .batch_prefetch_stop(
+                                &titles,
+                                &hit_lists,
+                                &batch_hit_lists,
+                                !args.ungapped,
+                                start,
+                            )
                             .map(|()| Vec::new())
                     })
             } else {

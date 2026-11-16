@@ -302,11 +302,14 @@ tblastn spread their stages over files (blastx `preliminary.rs`, `traceback.rs`,
 - **blastp** (`algorithm/blastp/blast_engine.rs`): `run` → `search_cli` → `search` →
   `run_resolved_in_pool`, once for the queries of every batch that NCBI does not split (a blastp
   query's preliminary hit list does not depend on the other queries of its batch), once per query
-  block, or once per query and round of psiblast. Its
-  `process_subject` does the preliminary search; the traceback, the composition redo (its parameters and its
-  parallel paths are in `blast_engine/redo_run.rs`) and the report
-  follow in the same function (the warning lines of the queries, the checks and the prefetch of the
-  reported subjects and the refusals before any format is written are in `blast_engine/report_prep.rs`;
+  block, or once per query and round of psiblast. It calls `run_call`, whose
+  `process_subject` does the preliminary search; the traceback, the composition redo (its parameters, its
+  plan and all its paths are in `blast_engine/redo_run.rs`) and the report
+  follow in `run_call` (the warning lines of the queries, the checks and the prefetch of the
+  reported subjects and the refusals before any format is written, and before them the residues that
+  the reports read, the check of the prefetch environment, the subjects that the reports show, what
+  the reports read of the final hit lists' Seq-aligns (psiblast's PSSMs and cut among it) and the
+  labels of the reports, are in `blast_engine/report_prep.rs`;
   the BLAST archive, the tabular reports and the organism report are in
   `blast_engine/report_write.rs`).
 - **Long queries.** Both re-enter their batch function for NCBI's query chunks (`SplitQuery_GetChunkSize`,

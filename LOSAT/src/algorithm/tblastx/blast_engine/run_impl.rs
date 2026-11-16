@@ -4114,6 +4114,7 @@ fn run_batch_loop(
             {
                 if let Err(error) = super::super::database::batch_prefetch_stop(
                     database,
+                    &done.hits,
                     ordered,
                     &reports.titles.borrow(),
                     start,

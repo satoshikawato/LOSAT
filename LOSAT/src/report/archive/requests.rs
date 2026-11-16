@@ -333,6 +333,17 @@ mod tests {
         }
     }
 
+    impl crate::report::archive::strategy::StrategySink for Sink {
+        fn truncate(&mut self, len: u64) -> std::io::Result<()> {
+            self.0.lock().unwrap().truncate(len as usize);
+            Ok(())
+        }
+
+        fn can_cut(&self) -> bool {
+            true
+        }
+    }
+
     fn export() -> (StrategyExport, Sink) {
         let sink = Sink::default();
         let export = StrategyExport::new(
@@ -357,7 +368,13 @@ mod tests {
         let (strategy, sink) = export();
         requests.write(&strategy, 0, &good, None).unwrap();
         strategy.note_searched(0..1, None).unwrap();
-        assert!(strategy.take_posts(usize::MAX).is_empty());
+        // A request without a replaced byte: its mark alone, which shows nothing.
+        let marks = strategy.take_posts(usize::MAX);
+        assert_eq!(marks.len(), 1);
+        assert!(!marks[0].1.has_text());
+        let mut nothing = Vec::new();
+        marks[0].1.write(&mut nothing, None).unwrap();
+        assert!(nothing.is_empty());
         let handle = crate::report::archive::ArchiveHandle::new(
             crate::report::archive::ArchiveEncoding::Text,
             crate::report::archive::ArchiveRequest {

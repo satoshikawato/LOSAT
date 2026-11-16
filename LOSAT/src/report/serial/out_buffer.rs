@@ -721,6 +721,71 @@ impl OutBuffer {
     }
 }
 
+/// The bytes of `document`, a document of NCBI's XML stream in its standard-XML mode without a
+/// file header (a `BlastOutput2` of outfmt 16), that NCBI's buffer had written to its output at
+/// each offset of `posts` (ascending): the stream's calls taken back from the document's bytes
+/// as `encoder::Traced` would give them, a run of tags as `Piece::Markup` and the text of an
+/// element as `Piece::Str` where `is_string` says so of the element's tag, else as a number. The
+/// XML writers of outfmt 16 make their reports without `Traced` (`report::blast_xml2::writer`),
+/// and only a report with a replaced control character asks this.
+pub(crate) fn xml_written_at(
+    document: &[u8],
+    posts: &[usize],
+    is_string: impl Fn(&[u8]) -> bool,
+) -> Vec<u64> {
+    let mut buffer = OutBuffer::new(Stream::Xml);
+    let mut written = Vec::with_capacity(posts.len());
+    let mut next_post = 0;
+    let mut i = 0;
+    let mut tag: &[u8] = &[];
+    while i < document.len() && written.len() < posts.len() {
+        let start = i;
+        // The tags (ends of line with their indentation, opening and closing tags).
+        loop {
+            match document.get(i) {
+                Some(b'\n') => {
+                    i += 1;
+                    i += document[i..].iter().take_while(|&&b| b == b' ').count();
+                }
+                Some(b'<') => {
+                    let end = document[i..]
+                        .iter()
+                        .position(|&b| b == b'>')
+                        .map_or(document.len(), |at| i + at + 1);
+                    if document.get(i + 1) != Some(&b'/') {
+                        tag = &document[i + 1..end.saturating_sub(1).max(i + 1)];
+                    }
+                    i = end;
+                }
+                _ => break,
+            }
+        }
+        let text_end = document[i..]
+            .iter()
+            .position(|&b| b == b'<')
+            .map_or(document.len(), |at| i + at);
+        let piece = if text_end == i {
+            Piece::Markup
+        } else if is_string(tag) {
+            Piece::Str
+        } else {
+            Piece::Number
+        };
+        let mut here = Vec::new();
+        while next_post < posts.len() && posts[next_post] < text_end.max(i + 1) {
+            here.push(posts[next_post] - start);
+            next_post += 1;
+        }
+        buffer.put(piece, &document[start..text_end], &here, &mut written);
+        i = text_end.max(i);
+        if i == start {
+            break;
+        }
+    }
+    written.resize(posts.len(), buffer.written());
+    written
+}
+
 #[cfg(test)]
 mod tests {
     use super::{OutBuffer, Piece, Stream};

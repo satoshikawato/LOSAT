@@ -1,7 +1,9 @@
-//! The refusal of a title that the XML2 and JSON documents (outfmt 13 to 16) cannot write as NCBI
-//! does (`report::blast_xml::names`: a byte outside US-ASCII or a control byte) looks only at the
-//! reports that NCBI BLAST+ 2.17.0 writes, on whole runs of the binary of each search program with
-//! `-subject` and of the library API (line NP, series SM).
+//! The refusal of a title that NCBI BLAST+ 2.17.0 cannot make (`report::blast_xml::names`: punctuation
+//! alone, such as `, ,`, on which `x_CleanAndCompress` reads past the end of the string) looks only at the
+//! reports that NCBI writes, on whole runs of the binary of each search program with `-subject` and of the
+//! library API (line NP, series SM). A title with a byte >= 0x80 or a control byte is written as NCBI writes
+//! it (the rows `db.xb.*` of `tests/db_search_manifest/`); when NCBI never writes the report it is in, it is
+//! not written either, and the run ends as NCBI's.
 //!
 //! NCBI writes a `-subject` search's report of a query when the next query's results arrive, or
 //! in the epilog (`m_IsBl2Seq`, blast_format.cpp:2362-2404, 2206-2219). A run that a later batch
@@ -14,8 +16,9 @@
 //!
 //! The query files (`tests/fixtures/fasta_input/`): `batch_title_late` (record 5 has `café` in its
 //! title, record 6 a data line that NCBI's reader refuses) and `batch_title_first` (`café` on
-//! record 1, the same error). A nucleotide record has 180 letters and a protein record 60:
-//! `BATCH_SIZE=100` (50) makes a batch of each record, 200 (100) of two.
+//! record 1, the same error); the tests that need a title that LOSAT refuses write them with `, ,`
+//! as the title of that record (`with_title`). A nucleotide record has 180 letters and a protein
+//! record 60: `BATCH_SIZE=100` (50) makes a batch of each record, 200 (100) of two.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -202,7 +205,7 @@ fn not_refused(what: &str, run: &Run, outfmt: &str, status: i32, error: &str, wr
     assert_eq!(reports(run, outfmt), written, "{what}: reports");
 }
 
-/// A title that NCBI writes: LOSAT refuses it before the first byte.
+/// A title that NCBI would write (and cannot make): LOSAT refuses it before the first byte.
 fn refused(what: &str, run: &Run) {
     assert_eq!(run.status, Some(1), "{what}: status, stderr {}", run.stderr);
     assert!(
@@ -230,12 +233,25 @@ fn the_title_of_the_report_that_ncbi_holds_back_and_never_writes_is_not_refused(
             extension(subject_kind)
         ));
         let late = file("batch_title_late", query_kind);
-        let first = file("batch_title_first", query_kind);
+        // Record 1's title cannot be made: its report is written when record 2's results arrive.
+        let first = with_title(
+            &dir.0,
+            &format!("{program}.first"),
+            &file("batch_title_first", query_kind),
+            0,
+        );
+        // Record 2's title (the second subject of `batch_title.s` as a query), a later record.
+        let later = with_title(
+            &dir.0,
+            &format!("{program}.later"),
+            &file("batch_title.s", query_kind),
+            1,
+        );
         let queries = Records::of(query_kind);
         let last = write(
             &dir.0,
             &format!("{program}.last"),
-            &format!(">qa plain\n{}\n>qb caf\u{e9}\n{}\n", queries.a, queries.b),
+            &format!(">qa plain\n{}\n>{PUNCTUATION}\n{}\n", queries.a, queries.b),
         );
         for outfmt in ["13", "14", "15", "16"] {
             for threads in ["1", "4"] {
@@ -258,13 +274,7 @@ fn the_title_of_the_report_that_ncbi_holds_back_and_never_writes_is_not_refused(
                 // Without an error: record 2's report (`batch_title.s` read as the query) is
                 // written when record 3's results arrive, and the last record's in the epilog.
                 let result = run(
-                    search(
-                        program,
-                        &file("batch_title.s", query_kind),
-                        &subject,
-                        &[("BATCH_SIZE", each)],
-                        threads,
-                    ),
+                    search(program, &later, &subject, &[("BATCH_SIZE", each)], threads),
                     outfmt,
                     &dir.0,
                 );
@@ -362,6 +372,34 @@ fn write(dir: &Path, name: &str, text: &str) -> PathBuf {
     path
 }
 
+/// The title that NCBI cannot make (`x_CleanAndCompress` reads past its end): the one title that
+/// LOSAT refuses.
+const PUNCTUATION: &str = ", ,";
+
+/// `fixture` with the defline of its record number `record` (0-based) replaced by `>, ,`.
+fn with_title(dir: &Path, name: &str, fixture: &Path, record: usize) -> PathBuf {
+    let text = std::fs::read_to_string(fixture).expect("read the fixture");
+    let mut seen = 0;
+    let lines: Vec<String> = text
+        .lines()
+        .map(|line| {
+            if line.starts_with('>') {
+                seen += 1;
+                if seen == record + 1 {
+                    return format!(">{PUNCTUATION}");
+                }
+            }
+            line.to_string()
+        })
+        .collect();
+    assert!(
+        seen > record,
+        "{} has no record {record}",
+        fixture.display()
+    );
+    write(dir, name, &(lines.join("\n") + "\n"))
+}
+
 #[test]
 fn a_subject_title_that_only_the_held_report_shows_is_not_refused() {
     let dir = TempDir::new("subject");
@@ -373,6 +411,15 @@ fn a_subject_title_that_only_the_held_report_shows_is_not_refused() {
             &dir.0,
             &format!("{program}.s"),
             &format!(">s1 plain\n{}\n>s2 caf\u{e9}\n{}\n", subjects.a, subjects.b),
+        );
+        // The same subjects with a title that NCBI cannot make, for the report that is written.
+        let punctuation_subject = write(
+            &dir.0,
+            &format!("{program}.sp"),
+            &format!(
+                ">s1 plain\n{}\n>{PUNCTUATION}\n{}\n",
+                subjects.a, subjects.b
+            ),
         );
         let held = write(
             &dir.0,
@@ -398,7 +445,7 @@ fn a_subject_title_that_only_the_held_report_shows_is_not_refused() {
                 let mut command = search(
                     program,
                     &written,
-                    &subject,
+                    &punctuation_subject,
                     &[("BATCH_SIZE", each)],
                     threads,
                 );
@@ -471,7 +518,7 @@ fn the_title_before_a_last_batch_without_letters_is_not_refused() {
 /// command line. Its refusals look at the same reports and come before the first byte (BLASTX's
 /// library wrote the start of the document, or the reports of the batches before, first).
 #[test]
-fn the_library_refuses_only_the_titles_that_ncbi_writes_before_the_first_byte() {
+fn the_library_refuses_only_the_titles_that_ncbi_would_write_before_the_first_byte() {
     let example = example_binary("library_command_line");
     let dir = TempDir::new("library");
     for (program, query_kind, subject_kind) in PROGRAMS {
@@ -492,7 +539,10 @@ fn the_library_refuses_only_the_titles_that_ncbi_writes_before_the_first_byte() 
         let bad_subject = write(
             &dir.0,
             &format!("{program}.s"),
-            &format!(">s1 plain\n{}\n>s2 caf\u{e9}\n{}\n", subjects.a, subjects.b),
+            &format!(
+                ">s1 plain\n{}\n>{PUNCTUATION}\n{}\n",
+                subjects.a, subjects.b
+            ),
         );
         let clean = write(
             &dir.0,
@@ -523,10 +573,13 @@ fn the_library_refuses_only_the_titles_that_ncbi_writes_before_the_first_byte() 
                 1,
             );
             // The second batch's title, written in the epilog.
-            refused(
-                &what("second batch"),
-                &library(&file("batch_title.s", query_kind), &base, outfmt),
+            let later = with_title(
+                &dir.0,
+                &format!("{program}.later"),
+                &file("batch_title.s", query_kind),
+                1,
             );
+            refused(&what("second batch"), &library(&later, &base, outfmt));
             // A subject's title, shown by query b's report.
             refused(&what("subject"), &library(&clean, &bad_subject, outfmt));
         }
@@ -535,7 +588,8 @@ fn the_library_refuses_only_the_titles_that_ncbi_writes_before_the_first_byte() 
 
 /// The library API takes several formats in one call. Outfmt 5 writes the report that a
 /// `-subject` XML2 or JSON document holds back, so with outfmt 5 among the formats that report's
-/// title is refused before either format writes a byte; with outfmt 16 alone it is not.
+/// title (here the one that NCBI cannot make) is refused before either format writes a byte; with
+/// outfmt 16 alone it is not.
 /// (BLASTP's default batches of 10,000 letters make a batch of each 10,000-residue query; the
 /// last batch has no letters, which NCBI fails.)
 #[test]
@@ -543,7 +597,7 @@ fn a_library_call_with_outfmt_5_refuses_the_held_title_before_any_format_writes(
     use losat::api::{read_inputs, run, validate, Inputs, Program};
     let proteins = random_proteins(3, 10_000);
     let query = format!(
-        ">qa plain\n{}\n>qb caf\u{e9}\n{}\n>qc no letters\n",
+        ">qa plain\n{}\n>{PUNCTUATION}\n{}\n>qc no letters\n",
         proteins[0], proteins[1]
     );
     let subject = format!(">s1 plain\n{}\n", &proteins[0][..300]);

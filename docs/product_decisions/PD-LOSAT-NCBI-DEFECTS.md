@@ -766,7 +766,12 @@ masked). Line NP item M4a-2c.
   LOSAT Web is the CLI's run of its format: where the default tabular formats stop (rule 3 below)
   and the argv asks for another format, streams 6 and 7 fail alone and the others are written in
   the same search; with the argv's own `-outfmt 6` or `7` the run fails, as the CLI's
-  (`docs/web/abi_v2.md` §7).
+  (`docs/web/abi_v2.md` §7). That holds for these checks of the formats. A Web run still fails
+  as a whole, where the CLI completes the argv's format, in two more cases: (a) a format fails in
+  the middle of its report, `-sorthits` with a description total above 99999 bits in outfmt 0
+  (all programs), or an NCBI error of outfmt 0 alone such as BLASTX `Row is empty`; dev had both;
+  (b) a stream that the Web adds fails alone after it sent a chunk (BLASTX, a later query batch
+  with an undecodable `Subject_` title). These are current limits.
 - Defects without an effect on the output that LOSAT follows: the negative `Int4`
   offset of `BlastGetStartForGappedAlignmentNucl`, the out-of-range read of
   `hard_ranges[1]` for the last subject chunk, the out-of-range `double` to `Int4`

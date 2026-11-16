@@ -796,7 +796,7 @@ fn restricted_fast(
                 )
             }
         } else {
-            restricted_rows::<false>(
+            restricted_rows::<false, COL32>(
                 query,
                 query_base,
                 subject,
@@ -812,7 +812,7 @@ fn restricted_fast(
         #[cfg(not(target_arch = "x86_64"))]
         let wide = {
             let _ = rows;
-            restricted_rows::<false>(
+            restricted_rows::<false, COL32>(
                 query,
                 query_base,
                 subject,
@@ -855,7 +855,7 @@ unsafe fn restricted_rows_avx2(
     p: &XParams,
     sc: &mut XRestrictedScratch,
 ) -> Option<(usize, usize, i32)> {
-    restricted_rows::<true>(
+    restricted_rows::<true, COL32_AVX2>(
         query,
         query_base,
         subject,
@@ -893,9 +893,10 @@ unsafe fn restricted_rows_avx2(
 // ```
 /// Row 0 and the row loop of `s_RestrictedGappedAlign` (`AVX2`: the vector rows; the caller
 /// guarantees the CPU features and has sized the arrays of `sc` for the cells the band reaches:
-/// `len2`, or with LOSAT_X_BPGAPBAND the letters `col` holds, `fill_col`).
+/// `len2`, or with LOSAT_X_BPGAPBAND the letters `col` holds, `fill_col`). `COL`: the instance of
+/// `fill_col` of these rows (`COL32_AVX2` for the vector rows, `COL32` for the scalar ones).
 #[inline(always)]
-fn restricted_rows<const AVX2: bool>(
+fn restricted_rows<const AVX2: bool, const COL: u8>(
     query: &[u8],
     query_base: usize,
     subject: &[u8],
@@ -956,7 +957,7 @@ fn restricted_rows<const AVX2: bool>(
         let need = (band.b_size + 9).min(col_cap);
         if col_ready < need {
             let upto = (need + 56).min(col_cap);
-            if !fill_col::<COL32>(col, col_ready, upto, subject, subject_base, len2, reverse) {
+            if !fill_col::<COL>(col, col_ready, upto, subject, subject_base, len2, reverse) {
                 return None;
             }
             col_ready = upto;
@@ -1148,6 +1149,8 @@ fn band_grow16(
 // computes.
 const COL32: u8 = 0;
 #[cfg(target_arch = "x86_64")]
+const COL32_AVX2: u8 = 3;
+#[cfg(target_arch = "x86_64")]
 const COL16: u8 = 1;
 #[cfg(any(
     target_arch = "x86_64",
@@ -1172,11 +1175,13 @@ const COL16_W128: u8 = 2;
 /// c]`, the indices that function computes); the others go through that function. False: a
 /// letter code of 28 or more (not taken).
 ///
-/// `ROWS`: one instance per row kernel (`COL32`: the 32-bit rows, `COL16`: the AVX2 sixteen-bit
-/// rows, `COL16_W128`: the 128-bit sixteen-bit rows), each with one caller. Shared by the first two,
-/// fat LTO kept it out of line, which changed the machine code of the 32-bit rows that
-/// `LOSAT_X_BPGAP16=0` runs; they keep the code of the build before the switch, and the AVX2 rows
-/// keep theirs with the 128-bit rows' own instance.
+/// `ROWS`: one instance per row kernel (`COL32_AVX2`: the AVX2 32-bit rows, `COL32`: the scalar
+/// 32-bit rows, `COL16`: the AVX2 sixteen-bit rows, `COL16_W128`: the 128-bit sixteen-bit rows),
+/// each with one caller, so that fat LTO inlines each into its rows. Shared by the 32-bit and the
+/// sixteen-bit rows, it was kept out of line, which changed the machine code of the 32-bit rows
+/// that `LOSAT_X_BPGAP16=0` runs; shared by the AVX2 and the scalar 32-bit rows, it was kept out of
+/// line once `restricted_fast` took the 128-bit rows. With one instance each, the AVX2 rows keep
+/// the machine code of the build before LOSAT_X_BPGAP128.
 fn fill_col<const ROWS: u8>(
     col: &mut [u8],
     from: usize,

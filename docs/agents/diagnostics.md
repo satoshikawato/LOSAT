@@ -6235,7 +6235,9 @@ Scheduling (each value computed by one thread with the original function; order 
   (costs past `fits16`, which no matrix and gap cost pair blastp supports is, or a best score past
   `limit16`, about 32,700) the reference function runs, as before the switch, and so it does with
   `LOSAT_X_BPGAP16=0`. The AVX2 rows are not changed: only the choice (`x_rows`, `restricted_fast`)
-  is new, and `fill_col` has an instance of its own for the 128-bit rows. Tests: lib tests
+  is new, and `fill_col` has one instance per row kernel (the AVX2 and the scalar 32-bit rows too:
+  with one shared instance fat LTO kept it out of line once `restricted_fast` took the 128-bit
+  rows, which changed `restricted_rows_avx2`). Tests: lib tests
   `x_bpgap128_rows_match_the_reference_and_the_avx2_rows` (rows of 1 to 40 cells, every column
   phase, X-drop 0 to 4,096, gap costs from 0, ties, long related pairs; the result of the
   reference and of the AVX2 sixteen-bit rows), `x_bpgap128_layer_operations_match_their_definitions`,

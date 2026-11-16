@@ -3683,8 +3683,8 @@ mod tests {
         let title = b"Subject_9 bad x\x81y title";
         let refusal = "subject record 1 (Subject_9)";
         for (program, query, subject) in [
-            ("blastn", CODING, &CODING[..]),
-            ("tblastx", CODING, &CODING[..]),
+            ("blastn", CODING, CODING),
+            ("tblastx", CODING, CODING),
             ("blastx", CODING, &protein[..]),
         ] {
             let query = [FastaRecord::new("Query_1", b"q", query)];
@@ -3986,12 +3986,12 @@ mod tests {
         for n in 0..7u64 {
             let letters = random_nucleotides(50_000, n + 1);
             query.push(FastaRecord::new(
-                &format!("Query_{}", n + 1),
+                format!("Query_{}", n + 1),
                 format!("q{n}").as_bytes(),
                 &letters,
             ));
             subject.push(FastaRecord::new(
-                &format!("Subject_{}", n + 1),
+                format!("Subject_{}", n + 1),
                 format!("s{n}").as_bytes(),
                 &letters,
             ));
@@ -4151,7 +4151,7 @@ mod tests {
         let mut query: Vec<FastaRecord> = (0..103)
             .map(|n| {
                 FastaRecord::new(
-                    &format!("Query_{}", n + 1),
+                    format!("Query_{}", n + 1),
                     format!("q{n}").as_bytes(),
                     &CODING[..99],
                 )
@@ -4161,7 +4161,7 @@ mod tests {
         let mut subject: Vec<FastaRecord> = (0..320)
             .map(|n| {
                 FastaRecord::new(
-                    &format!("Subject_{}", n + 1),
+                    format!("Subject_{}", n + 1),
                     format!("s{n}").as_bytes(),
                     protein,
                 )

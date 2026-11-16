@@ -55,7 +55,7 @@ pub(crate) fn x_offset_pairs_len(array_size: i32) -> usize {
     // EXPERIMENT (LOSAT_X_TBXSCANBYTE): the scan on presence bytes writes up to
     // `X_SCAN_BYTE_SLACK` entries past `array_size`.
     let slack = if x_tbx_scan_byte().on() {
-        slack.max(crate::algorithm::tblastn::x_scan_byte::X_SCAN_BYTE_SLACK)
+        slack.max(crate::algorithm::tblastx::x_scan_byte::X_SCAN_BYTE_SLACK)
     } else {
         slack
     };
@@ -65,10 +65,10 @@ pub(crate) fn x_offset_pairs_len(array_size: i32) -> usize {
 // No NCBI counterpart: reads LOSAT_X_TBXSCANBYTE once (a switch of the strict set) and detects AVX2.
 /// EXPERIMENT (LOSAT_X_TBXSCANBYTE): how the unit path scans a group table of the full backbone
 /// (the tables NCBI's loop scanned): tblastn's scan on presence bytes (`x_scan_byte::x_mode`).
-pub(crate) fn x_tbx_scan_byte() -> crate::algorithm::tblastn::x_scan_byte::XScanByte {
-    static MODE: std::sync::OnceLock<crate::algorithm::tblastn::x_scan_byte::XScanByte> =
+pub(crate) fn x_tbx_scan_byte() -> crate::algorithm::tblastx::x_scan_byte::XScanByte {
+    static MODE: std::sync::OnceLock<crate::algorithm::tblastx::x_scan_byte::XScanByte> =
         std::sync::OnceLock::new();
-    *MODE.get_or_init(|| crate::algorithm::tblastn::x_scan_byte::x_mode("LOSAT_X_TBXSCANBYTE"))
+    *MODE.get_or_init(|| crate::algorithm::tblastx::x_scan_byte::x_mode("LOSAT_X_TBXSCANBYTE"))
 }
 
 // No NCBI counterpart: the presence bytes of a table, made once per table.
@@ -79,8 +79,8 @@ pub(crate) fn x_tbx_presence(lookup: &BlastAaLookupTable) -> Option<std::sync::A
     if !mode.on() {
         return None;
     }
-    let kept = crate::algorithm::tblastn::x_scan_byte::x_table_presence(lookup);
-    let keep = crate::algorithm::tblastn::x_scan_byte::x_kept_presence(mode, &kept).is_some();
+    let kept = crate::algorithm::tblastx::x_scan_byte::x_table_presence(lookup);
+    let keep = crate::algorithm::tblastx::x_scan_byte::x_kept_presence(mode, &kept).is_some();
     let taken = kept.filter(|_| keep).map(|(bytes, _)| bytes);
     crate::utils::xreach::x_reach!("LOSAT_X_TBXSCANBYTE", taken.is_some());
     taken
@@ -114,7 +114,7 @@ pub(crate) fn x_scan_subject_byte(
     let mut totalhits: i32 = 0;
     while determine_scanning_offsets(seq_ranges, word_length, word_length, s_range) {
         let s_last = s_range[2];
-        totalhits += crate::algorithm::tblastn::x_scan_byte::x_scan_one_range_byte(
+        totalhits += crate::algorithm::tblastx::x_scan_byte::x_scan_one_range_byte(
             mode,
             lookup,
             presence,
@@ -544,7 +544,7 @@ mod tests {
         array_size: usize,
         scan: &mut dyn FnMut(&mut [BlastOffsetPair], i32, &mut [i32; 3]) -> i32,
     ) -> Vec<(Vec<(u32, u32)>, [i32; 3])> {
-        let slack = X_SCAN_BF_SLACK.max(crate::algorithm::tblastn::x_scan_byte::X_SCAN_BYTE_SLACK);
+        let slack = X_SCAN_BF_SLACK.max(crate::algorithm::tblastx::x_scan_byte::X_SCAN_BYTE_SLACK);
         let mut pairs = vec![BlastOffsetPair::default(); array_size + slack];
         let mut scan_range = [0, seq_ranges[0].0, seq_ranges[0].1 - word_length];
         let mut out = Vec::new();
@@ -589,7 +589,7 @@ mod tests {
             let rank = x_compact(&mut compact);
             assert!(compact.backbone.len() < lookup.backbone.len());
             // LOSAT_X_TBXSCANBYTE: the scan on presence bytes, on any table that `fits`.
-            let presence = crate::algorithm::tblastn::x_scan_byte::x_table_presence(&lookup)
+            let presence = crate::algorithm::tblastx::x_scan_byte::x_table_presence(&lookup)
                 .filter(|_| x_tbx_scan_byte().on())
                 .map(|(bytes, _)| bytes);
             let longest = lookup.longest_chain.max(1) as usize;

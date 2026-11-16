@@ -388,14 +388,14 @@ fn the_two_hit_walks_go_on_into_the_batch_as_ncbis_do() {
         let s_left = s_right.saturating_sub(rng.below(20) as usize);
         let x_drop = X_DROPS[rng.below(X_DROPS.len() as u64) as usize];
         let failure = XReadFailure::new();
-        let batch = QueryBatch::new(&contexts, &failure, 7);
+        let batch = QueryBatch::new(&contexts, &failure);
         let letters = &contexts[ctx].aa_seq[1..1 + len];
         macro_rules! run {
             ($sc:expr) => {{
                 let got = extend_hit_two_hit_reference(
                     $sc,
                     letters,
-                    batch.at(ctx),
+                    batch.at(ctx, 7),
                     &subject,
                     s_left,
                     s_right,
@@ -486,14 +486,14 @@ fn the_one_hit_walks_go_on_into_the_batch_as_ncbis_do() {
         let s_off = subject_offset(&mut rng, &subject, fb + q_word, from);
         let x_drop = X_DROPS[rng.below(X_DROPS.len() as u64) as usize];
         let failure = XReadFailure::new();
-        let batch = QueryBatch::new(&contexts, &failure, 3);
+        let batch = QueryBatch::new(&contexts, &failure);
         let letters = &contexts[ctx].aa_seq[1..1 + len];
         macro_rules! run {
             ($sc:expr) => {{
                 let got = extend_hit_one_hit(
                     $sc,
                     letters,
-                    batch.at(ctx),
+                    batch.at(ctx, 7),
                     &subject,
                     q_word,
                     s_off,
@@ -628,7 +628,7 @@ fn the_walks_past_a_context_end_case_by_case() {
     // context 1's start meets five 1s before the NULLB's place (3) and mismatches before them.
     let contexts = contexts_of(&[vec![1; 12], vec![2, 2, 2, 2, 3, 3, 3]], &[1]);
     let subject: Vec<u8> = [vec![4; 7], vec![1; 5], vec![3], vec![2, 2, 2, 2]].concat();
-    let batch = QueryBatch::new(&contexts, &failure, 0);
+    let batch = QueryBatch::new(&contexts, &failure);
     let letters1 = &contexts[1].aa_seq[1..8];
     // From the word 2 2 2 at context 1's start the left walk (9,000) passes the NULLB with an
     // X-drop of 40,000 and of 1,000,000 and runs to the subject's start without a new best: the
@@ -648,7 +648,7 @@ fn the_walks_past_a_context_end_case_by_case() {
         let got = extend_hit_two_hit_reference(
             Big,
             letters1,
-            batch.at(1),
+            batch.at(1, 7),
             &subject,
             13,
             13,
@@ -665,7 +665,7 @@ fn the_walks_past_a_context_end_case_by_case() {
     let _ = extend_hit_two_hit_reference(
         Big,
         letters1,
-        batch.at(1),
+        batch.at(1, 7),
         &subject,
         13,
         13,
@@ -692,8 +692,17 @@ fn the_walks_past_a_context_end_case_by_case() {
         40_000,
         false,
     );
-    let got =
-        extend_hit_two_hit_reference(Big, letters0, batch.at(0), &subject, 0, 0, 0, 40_000, false);
+    let got = extend_hit_two_hit_reference(
+        Big,
+        letters0,
+        batch.at(0, 7),
+        &subject,
+        0,
+        0,
+        0,
+        40_000,
+        false,
+    );
     assert_eq!(alone.6, 12);
     assert_eq!(
         got,
@@ -701,8 +710,17 @@ fn the_walks_past_a_context_end_case_by_case() {
     );
     assert!(failure.take().is_none());
     // An X-drop of 32,768 stops it at the NULLB, as alone.
-    let got =
-        extend_hit_two_hit_reference(Big, letters0, batch.at(0), &subject, 0, 0, 0, 32_768, false);
+    let got = extend_hit_two_hit_reference(
+        Big,
+        letters0,
+        batch.at(0, 7),
+        &subject,
+        0,
+        0,
+        0,
+        32_768,
+        false,
+    );
     let alone = extend_hit_two_hit_reference(
         Big,
         letters0,
@@ -718,21 +736,30 @@ fn the_walks_past_a_context_end_case_by_case() {
     // Twelve letters 2 in context 1 make the right walk score higher past the NULLB: refused.
     let contexts = contexts_of(&[vec![1; 12], vec![2; 12]], &[1]);
     let subject: Vec<u8> = [vec![1; 12], vec![3], vec![2; 12]].concat();
-    let batch = QueryBatch::new(&contexts, &failure, 0);
+    let batch = QueryBatch::new(&contexts, &failure);
     let letters0 = &contexts[0].aa_seq[1..13];
-    let _ =
-        extend_hit_two_hit_reference(Big, letters0, batch.at(0), &subject, 0, 0, 0, 40_000, false);
+    let _ = extend_hit_two_hit_reference(
+        Big,
+        letters0,
+        batch.at(0, 7),
+        &subject,
+        0,
+        0,
+        0,
+        40_000,
+        false,
+    );
     assert!(failure.take().is_some());
     // Three NULLBs (a gap the batches never have): the walk pays three times, and 12 letters of
     // context 0 do not make up for them from context 2's start (36,000 < 3 x 32,768).
     let contexts = contexts_of(&[vec![1; 12], vec![2, 2, 2, 2]], &[3]);
     let subject: Vec<u8> = [vec![1; 12], vec![3, 3, 3], vec![2, 2, 2, 2]].concat();
-    let batch = QueryBatch::new(&contexts, &failure, 0);
+    let batch = QueryBatch::new(&contexts, &failure);
     let letters1 = &contexts[1].aa_seq[1..5];
     let _ = extend_hit_two_hit_reference(
         Big,
         letters1,
-        batch.at(1),
+        batch.at(1, 7),
         &subject,
         15,
         15,
@@ -744,12 +771,12 @@ fn the_walks_past_a_context_end_case_by_case() {
     // ... while 40 letters do.
     let contexts = contexts_of(&[vec![1; 40], vec![2, 2, 2, 2]], &[3]);
     let subject: Vec<u8> = [vec![1; 40], vec![3, 3, 3], vec![2, 2, 2, 2]].concat();
-    let batch = QueryBatch::new(&contexts, &failure, 0);
+    let batch = QueryBatch::new(&contexts, &failure);
     let letters1 = &contexts[1].aa_seq[1..5];
     let _ = extend_hit_two_hit_reference(
         Big,
         letters1,
-        batch.at(1),
+        batch.at(1, 7),
         &subject,
         43,
         43,
@@ -761,12 +788,12 @@ fn the_walks_past_a_context_end_case_by_case() {
     // The batch's first context's left end and its last context's right end are the batch's ends.
     let contexts = contexts_of(&[vec![2; 12]], &[1]);
     let subject: Vec<u8> = [vec![2; 30], vec![2; 12], vec![2; 30]].concat();
-    let batch = QueryBatch::new(&contexts, &failure, 0);
+    let batch = QueryBatch::new(&contexts, &failure);
     let letters0 = &contexts[0].aa_seq[1..13];
     let got = extend_hit_two_hit_reference(
         Big,
         letters0,
-        batch.at(0),
+        batch.at(0, 7),
         &subject,
         30,
         30,

@@ -5211,6 +5211,7 @@ fn search_query_batch<S: TbxScore>(
         tbx_sent,
         scan_debug_range,
         x_read_failure: &x_read_failure,
+        query_batch: QueryBatch::new(contexts_ref, &x_read_failure),
     };
 
     let process_subject = |st: &mut WorkerState<S>, s_idx: usize| {

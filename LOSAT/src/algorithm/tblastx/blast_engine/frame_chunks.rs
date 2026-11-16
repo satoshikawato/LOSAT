@@ -19,8 +19,8 @@ use super::{
     merge_tblastx_subject_chunk_hits, sort_ungapped_hits_by_score_ncbi,
     tblastx_max_dbseq_len_for_run, tblastx_scan_chunk_size_for_run,
     ungapped_hits_is_sorted_by_score_ncbi, x_soft_subject_calls, DiagStruct, OffsetPair,
-    OneHitChunkMerge, QueryBatch, QueryFrame, SubjectChunk, SubjectChunkStatus, SubjectSplitState,
-    Subjects, TblastxChunkScanResult, TbxScore, UngappedHit, DBSEQ_CHUNK_OVERLAP,
+    OneHitChunkMerge, QueryFrame, SubjectChunk, SubjectChunkStatus, SubjectSplitState, Subjects,
+    TblastxChunkScanResult, TbxScore, UngappedHit, DBSEQ_CHUNK_OVERLAP,
     TWO_HIT_CHUNK_MERGE_IS_DEFINED,
 };
 use crate::algorithm::tblastx::lookup::BlastAaLookupTable;
@@ -186,9 +186,6 @@ pub(super) fn search_subject_frames<S: TbxScore>(
             subject_full,
             subject_all,
             x_soft_calls: x_soft_calls.as_deref(),
-            // The batch's contexts as the subject's extensions read them; a search they refuse
-            // fails at this subject (`XReadFailure`).
-            query_batch: QueryBatch::new(cx.contexts_ref, x_read_failure, s_idx),
         };
 
         // The word finder of a chunk (`word_finder::scan_chunk`), which the chunk driver calls.

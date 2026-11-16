@@ -1471,7 +1471,7 @@ impl<'a> XSubject<'a> {
     /// The query batch as this subject's extensions read it (extension/query_batch.rs).
     #[inline(always)]
     fn query_batch(&self) -> QueryBatch<'a> {
-        QueryBatch::noting(self.contexts, self.failure, self.passed, self.s_idx)
+        QueryBatch::noting(self.contexts, self.failure, self.passed)
     }
 }
 
@@ -3654,7 +3654,7 @@ fn x_hit<S: XInitSink, P: XProbe, M: TbxScore, const SENT: usize>(
         // Another matrix's extension takes its table walks (`extend_hit_two_hit_with`).
         // NCBI's walks run on the query batch: past the context's ends they go on into it
         // (extension/query_batch.rs; aa_ungapped.c:841, 897).
-        let in_batch = h.query_batch.at(ctx_idx);
+        let in_batch = h.query_batch.at(ctx_idx, h.s_idx);
         let (hsp_q_u, hsp_qe_u, hsp_s_u, _hsp_se_u, score, right_extend, s_last_off_u) =
             if !M::BLOSUM62 && SENT == 0 {
                 extend_hit_two_hit_with(
@@ -4168,7 +4168,7 @@ mod tests {
                     s_idx: 0,
                     s_len: 999,
                     sc,
-                    query_batch: QueryBatch::new(contexts, &failure, 0),
+                    query_batch: QueryBatch::new(contexts, &failure),
                 };
                 let seq_ranges = [(0, subject.len() as i32)];
                 let mut scan_range = [0, 0, subject.len() as i32 - wordsize];

@@ -199,7 +199,7 @@ unsafe fn resolve<M: TbxScore, const SENT: usize>(
     let query_full = &ctx.aa_seq;
     // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): as in `x_hit`; another matrix's extension as in `x_hit`.
     // The walks go on into the query batch past the context's ends, as in `x_hit`.
-    let in_batch = h.query_batch.at(c.ctx_idx as usize);
+    let in_batch = h.query_batch.at(c.ctx_idx as usize, h.s_idx);
     let (hsp_q_u, hsp_qe_u, hsp_s_u, _hsp_se_u, score, right_extend, s_last_off_u) =
         if !M::BLOSUM62 && SENT == 0 {
             extend_hit_two_hit_with(
@@ -1063,7 +1063,7 @@ mod tests {
                 s_idx: 7,
                 s_len: 999,
                 sc: Blosum62Score,
-                query_batch: QueryBatch::new(&contexts, &failure, 7),
+                query_batch: QueryBatch::new(&contexts, &failure),
             };
             let n = 1 + rng.below(BATCH as u64) as usize;
             let mut b = XPendBatch {

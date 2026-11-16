@@ -74,26 +74,23 @@ const NULLB: u8 = 0;
 /// direct table; test `the_nullb_scores_blast_score_min_against_every_byte`).
 const NULLB_SCORE: i32 = BLAST_SCORE_MIN;
 
-/// The query batch of one subject's search, as its two-hit and one-hit extensions read it: the
-/// batch's contexts, and where the search reports an extension that LOSAT refuses.
+/// The query batch of a search, as its two-hit and one-hit extensions read it: the batch's
+/// contexts, and where the search reports an extension that LOSAT refuses. The searches make it
+/// once per batch (or per subject on the unit path, `noting`); an extension reads it through
+/// `QueryBatch::at`, with its subject.
 pub(crate) struct QueryBatch<'a> {
     contexts: &'a [QueryContext],
     failure: &'a XReadFailure,
     /// The unit path's note of a right walk that went on past a NULLB (`QueryBatch::noting`;
     /// x_pair_par.rs, `x_units_in_order`), or None.
     passed: Option<&'a AtomicBool>,
-    s_idx: usize,
 }
 
 impl<'a> QueryBatch<'a> {
-    /// The batch's `contexts` (in the order of their `frame_base`), for the search of subject
-    /// `s_idx`, whose refusal goes to `failure`.
-    pub(crate) fn new(
-        contexts: &'a [QueryContext],
-        failure: &'a XReadFailure,
-        s_idx: usize,
-    ) -> Self {
-        Self::noting(contexts, failure, None, s_idx)
+    /// The batch's `contexts` (in the order of their `frame_base`), whose searches refuse into
+    /// `failure`.
+    pub(crate) fn new(contexts: &'a [QueryContext], failure: &'a XReadFailure) -> Self {
+        Self::noting(contexts, failure, None)
     }
 
     /// As `new`, and where `passed` is given, every right walk that goes on past a NULLB sets it.
@@ -101,22 +98,21 @@ impl<'a> QueryBatch<'a> {
         contexts: &'a [QueryContext],
         failure: &'a XReadFailure,
         passed: Option<&'a AtomicBool>,
-        s_idx: usize,
     ) -> Self {
         Self {
             contexts,
             failure,
             passed,
-            s_idx,
         }
     }
 
-    /// Context `ctx` of the batch, as an extension in it reads the batch.
+    /// Context `ctx` of the batch, as an extension in it against subject `s_idx` reads the batch.
     #[inline(always)]
-    pub(crate) fn at(&'a self, ctx: usize) -> InBatch<'a> {
+    pub(crate) fn at(&'a self, ctx: usize, s_idx: usize) -> InBatch<'a> {
         InBatch {
             batch: Some(self),
             ctx,
+            s_idx,
         }
     }
 
@@ -149,6 +145,7 @@ impl<'a> QueryBatch<'a> {
     fn walk_left<S: TbxScore>(
         &self,
         ctx: usize,
+        s_idx: usize,
         sc: S,
         s_seq: &[u8],
         s_next: usize,
@@ -175,7 +172,7 @@ impl<'a> QueryBatch<'a> {
                 score += i64::from(sc.score(NULLB, s_seq[s_next - 1 - step]));
                 step += 1;
                 if score > max_score {
-                    self.refuse();
+                    self.refuse(s_idx);
                     return;
                 }
                 if max_score - score >= x_drop {
@@ -188,7 +185,7 @@ impl<'a> QueryBatch<'a> {
             for (&q, &s) in letters.iter().rev().zip(subject.iter().rev()) {
                 score += i64::from(sc.score(q, s));
                 if score > max_score {
-                    self.refuse();
+                    self.refuse(s_idx);
                     return;
                 }
                 if max_score - score >= x_drop {
@@ -232,6 +229,7 @@ impl<'a> QueryBatch<'a> {
     fn walk_right<S: TbxScore>(
         &self,
         ctx: usize,
+        s_idx: usize,
         sc: S,
         s_seq: &[u8],
         s_at: usize,
@@ -241,7 +239,9 @@ impl<'a> QueryBatch<'a> {
         max_score: i32,
         x_drop: i32,
     ) -> usize {
-        let i = self.walk_right_steps(ctx, sc, s_seq, s_at, q_at, j, score, max_score, x_drop);
+        let i = self.walk_right_steps(
+            ctx, s_idx, sc, s_seq, s_at, q_at, j, score, max_score, x_drop,
+        );
         if let (Some(passed), true) = (self.passed, i > j) {
             passed.store(true, Ordering::Relaxed);
         }
@@ -253,6 +253,7 @@ impl<'a> QueryBatch<'a> {
     fn walk_right_steps<S: TbxScore>(
         &self,
         ctx: usize,
+        s_idx: usize,
         sc: S,
         s_seq: &[u8],
         s_at: usize,
@@ -285,7 +286,7 @@ impl<'a> QueryBatch<'a> {
             for _ in 0..nullbs {
                 score += i64::from(sc.score(NULLB, s_seq[s_at + step]));
                 if score > max_score {
-                    self.refuse();
+                    self.refuse(s_idx);
                     return j + step;
                 }
                 if score <= 0 || max_score - score >= x_drop {
@@ -300,7 +301,7 @@ impl<'a> QueryBatch<'a> {
             for (i, (&q, &s)) in letters.iter().zip(subject).enumerate() {
                 score += i64::from(sc.score(q, s));
                 if score > max_score {
-                    self.refuse();
+                    self.refuse(s_idx);
                     return j + step + i;
                 }
                 if score <= 0 || max_score - score >= x_drop {
@@ -329,9 +330,9 @@ impl<'a> QueryBatch<'a> {
     // outside it (a start before it fails the debug-only assertion above; an end past it is not
     // tested), and NCBI's later steps report query coordinates past the query or no alignment
     // (PD-LOSAT-NCBI-DEFECTS, rule 3, the Owner's decision of 2026-11-16).
-    /// Refuses the search of this subject (and so the query batch's search).
-    fn refuse(&self) {
-        self.failure.fail(self.s_idx, refusal());
+    /// Refuses the search of subject `s_idx` (and so the query batch's search).
+    fn refuse(&self, s_idx: usize) {
+        self.failure.fail(s_idx, refusal());
     }
 }
 
@@ -358,6 +359,8 @@ pub(crate) fn refusal() -> anyhow::Error {
 pub(crate) struct InBatch<'a> {
     batch: Option<&'a QueryBatch<'a>>,
     ctx: usize,
+    /// The subject, whose search a refusal fails.
+    s_idx: usize,
 }
 
 impl InBatch<'static> {
@@ -368,6 +371,7 @@ impl InBatch<'static> {
     pub(crate) const ALONE: Self = Self {
         batch: None,
         ctx: 0,
+        s_idx: 0,
     };
 }
 
@@ -393,7 +397,16 @@ impl InBatch<'_> {
         match self.batch {
             Some(batch) => {
                 if q_off < s_off && self.ctx > 0 {
-                    batch.walk_left(self.ctx, sc, s_seq, s_off - q_off, score, max_score, x_drop);
+                    batch.walk_left(
+                        self.ctx,
+                        self.s_idx,
+                        sc,
+                        s_seq,
+                        s_off - q_off,
+                        score,
+                        max_score,
+                        x_drop,
+                    );
                 }
                 false
             }
@@ -426,7 +439,9 @@ impl InBatch<'_> {
     ) -> (usize, bool) {
         match self.batch {
             Some(batch) if s_at < s_seq.len() => (
-                batch.walk_right(self.ctx, sc, s_seq, s_at, q_at, j, score, max_score, x_drop),
+                batch.walk_right(
+                    self.ctx, self.s_idx, sc, s_seq, s_at, q_at, j, score, max_score, x_drop,
+                ),
                 false,
             ),
             Some(_) => (j, false),

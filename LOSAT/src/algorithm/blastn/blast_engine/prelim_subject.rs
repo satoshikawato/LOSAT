@@ -51,9 +51,9 @@
 //! e-value helpers, `database` and the child modules of the scans and of the HSP list). Its
 //! functions are the statements of `search_subject`'s preliminary side (the subject's set-up, the
 //! reap and the `-ungapped` finish), of what was its closure `collect_prelim_hits_for_chunk` and of
-//! the chunk loop, in their order. What they read that is the same for every subject of a batch is
-//! `PrelimBatch`, built once per batch, and, with the batch's lookup tables, `ScanBatch`, built
-//! once per preliminary pass; what `search_subject` read of the call is `SubjectCtx`; what is the
+//! the chunk loop, in their order. What they read of a batch is `PrelimBatch` and, with the batch's
+//! lookup tables, `ScanBatch` (the batch's, or `special_subject`'s copies with the statistics of
+//! each subject); what `search_subject` read of the call is `SubjectCtx`; what is the
 //! same for every chunk of a subject is `PrelimSubject`, built once per subject. `PrelimBatch`,
 //! `ScanBatch` and `PrelimSubject` are `Sync`, for the chunks on the pool.
 
@@ -445,7 +445,7 @@ impl<'a> ScanBatch<'a> {
 /// What the preliminary search of a subject's chunks reads that is the same for every chunk of the
 /// subject, in groups below. Built once per subject by `prelim_subject`, with the names there
 /// (references and `Copy` values only, `Sync` as `PrelimBatch`); its borrows end with the call.
-/// What is the same for every subject is read from `ScanBatch` and `PrelimBatch`.
+/// What it reads of the batch comes from `ScanBatch` and `PrelimBatch` (or their copies).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:425,461-469,476
 /// (`s_BlastSearchEngineOneContext`: the subject, its chunks' overlap and the backup of the subject
@@ -1914,8 +1914,8 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
     //     *hsp_list_out_ptr = combined_hsp_list;
     // ```
     // The subject's chunks searched and their lists merged (`collect_subject_prelim`), with what
-    // the search of its chunks reads of the subject, built once per subject (what is the same for
-    // every subject is `scan`'s, built once per batch). A database sequence of a search with
+    // the search of its chunks reads of the subject, built once per subject (what it reads of the
+    // batch is `scan`'s, or `special_subject`'s copy's). A database sequence of a search with
     // `-db_hard_mask` takes its chunks from its hard ranges (`HardSplitState`, in the worker's
     // scratch; series NP, M4a-2b decision H1) in an instance of its own, so the chunk loops of
     // every other subject are the base's and the subject pays one test of the mask's kind (`HARD`).

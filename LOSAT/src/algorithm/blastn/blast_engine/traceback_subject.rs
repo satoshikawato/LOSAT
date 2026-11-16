@@ -11,10 +11,10 @@
 //! This module is a child of `run` for the types it keeps private (`BlastnSubjectRef`,
 //! `SubjectCtx`, `PrelimHit`, `SubjectScratch`, `SubjectHits`, the e-value helpers).
 //! `traceback_subject` is the statements of `search_subject`'s traceback side, in their order;
-//! what it reads that is the same for every subject of a batch is `TraceBatch`, built once per
-//! batch, and what `search_subject` read of the call is `SubjectCtx`. The values the other two
-//! functions read are the fields of `traceback_finish::TracebackCtx`, which `traceback_subject`
-//! builds.
+//! what it reads of a batch is `TraceBatch` (or `special_subject`'s copy with the statistics of
+//! each subject), and what `search_subject` read of the call is `SubjectCtx`. The values the
+//! other two functions read are the fields of `traceback_finish::TracebackCtx`, which
+//! `traceback_subject` builds.
 
 use super::traceback_finish::TracebackCtx;
 use super::{

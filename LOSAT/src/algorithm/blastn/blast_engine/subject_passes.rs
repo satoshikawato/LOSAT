@@ -24,8 +24,8 @@
 //! This module is a child of `run` for the types it keeps private (`SubjectSource`,
 //! `PreparedSubjects`, `PrelimHit`, `SubjectHits`, `SubjectScratch`, `SubjectCtx`, the hit-list
 //! helpers, `database`). Its methods are the statements that `search_query_batch` held between the
-//! batch's set-up and its result, in their order; what they read of the batch is `SubjectPasses`, built
-//! once per batch beside `prelim_subject::PrelimBatch` and `traceback_subject::TraceBatch`.
+//! batch's set-up and its result, in their order; what they read of the batch is `SubjectPasses`,
+//! `PrelimBatch` and `TraceBatch`, made once per batch (per subject: `special_subject`'s copies).
 
 use super::batch_setup::BatchCutoffs;
 use super::calculate_blastn_context_statistics;
@@ -234,7 +234,7 @@ impl SubjectPasses<'_> {
         let s_id = s_id_trace.as_str();
 
         // What both stages read of this call (`SubjectCtx`; the batch's values are the stage's
-        // batch's, built once per batch).
+        // batch's: the batch's own, or `special_subject`'s copy).
         let subject_ctx = SubjectCtx {
             s_idx,
             s_id,

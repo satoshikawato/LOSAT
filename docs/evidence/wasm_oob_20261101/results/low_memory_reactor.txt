@@ -1,0 +1,6 @@
+blastn -task blastn status 0 rows 7307 cell 1115 pages 1115 deepest_stack 25392 below16 00000000000000000000000000000000 
+blastn -task megablast status 0 rows 54 cell 1290 pages 1290 deepest_stack 25392 below16 00000000000000000000000000000000 
+blastn -task dc-megablast status -1 rows 0 cell 1290 pages 1290 deepest_stack 25392 below16 00000000000000000000000000000000 unsupported blastn task for web API: dc-megablast
+blastp  status 0 rows 7532 cell 1290 pages 1290 deepest_stack 166016 below16 00000000000000000000000000000000 
+tblastn  status -1 rows 0 cell 1290 pages 1290 deepest_stack 166016 below16 00000000000000000000000000000000 unsupported LOSAT program: tblastn
+blastx  status 0 rows 840 cell 1290 pages 1290 deepest_stack 166016 below16 00000000000000000000000000000000 

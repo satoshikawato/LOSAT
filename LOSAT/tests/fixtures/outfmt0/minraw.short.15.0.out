@@ -1,0 +1,142 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt11/arch_s.fna).
+           2 sequences; 965 total letters
+
+
+
+Query= qn1 query nucleotide one
+
+Length=480
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sn1 subject nucleotide alpha                                          589     2e-172
+sn2 subject nucleotide beta reverse                                   359     3e-103
+
+
+> sn1 subject nucleotide alpha
+Length=488
+
+ Score = 589 bits (297),  Expect = 2e-172
+ Identities = 394/425 (93%), Gaps = 6/425 (1%)
+ Strand=Plus/Plus
+
+Query  31   ATGTGGATGGAACACTCCGTGCTAAAAGCAAATTTTGCCGTGCTTCGTAAAGTGATGGAC  90
+            |||||||||||||||||||||||| |||||| ||||||||||||||||||||||||||||
+Sbjct  46   ATGTGGATGGAACACTCCGTGCTAGAAGCAATTTTTGCCGTGCTTCGTAAAGTGATGGAC  105
+
+Query  91   GACCCGAAAATACGGGATGGGCCCATGGCTGTAATGAAGGGCTGGGAGAACTATTGCTGG  150
+            ||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||
+Sbjct  106  GACCCGAAAATACGGGATGGGCCCATGGCTGCAATGAAGGGCTGGGAGAACTATTGCTGG  165
+
+Query  151  CCCGCGAATATGAGCTGGAAAGTCCTTATGAAGTATGAGTTTTCCTCCGATATCCACCCT  210
+            ||||||||||| |||||||||||||||||||||| |||||||||||||||||||||||||
+Sbjct  166  CCCGCGAATATAAGCTGGAAAGTCCTTATGAAGTTTGAGTTTTCCTCCGATATCCACCCT  225
+
+Query  211  TGCAATTTATGGATTTGCTGGATCCCTAAGGAGATGGCAACCCCAGGATGGTGGAAGACG  270
+            ||||||||||| ||||||||    |||||||| ||||||| |||||||| || |||||||
+Sbjct  226  TGCAATTTATGCATTTGCTG----CCTAAGGATATGGCAAACCCAGGATTGTCGAAGACG  281
+
+Query  271  GATACGTTGCATATGGCAGAAATGGGTCTGTGGATGCATAAGTATCCCAAGTGTATGTGT  330
+            ||||||||||||| | ||| |||||||||||||| ||||||| ||| |||| ||||||||
+Sbjct  282  GATACGTTGCATAGGTCAGCAATGGGTCTGTGGAGGCATAAGCATCTCAAGGGTATGTGT  341
+
+Query  331  GTAA--TGGTGAGATTCACAGATCAATCTCTCCGGCATTGGAAAATTAACCATGACGCTA  388
+            ||||  |||||||| ||||||||||||||||||||||||| |||  ||||||||||||||
+Sbjct  342  GTAACGTGGTGAGAATCACAGATCAATCTCTCCGGCATTGCAAACCTAACCATGACGCTA  401
+
+Query  389  ACTTTGAGAAACTTAAGATCTTCCACTACATGGTGGGTCATGGGAGAACAGCATCTGAGG  448
+            |||  |||||| |||||||||||||| |||||||||||||||||||||||||||||||||
+Sbjct  402  ACTGCGAGAAATTTAAGATCTTCCACAACATGGTGGGTCATGGGAGAACAGCATCTGAGG  461
+
+Query  449  GCAAC  453
+            |||||
+Sbjct  462  GCAAC  466
+
+
+> sn2 subject nucleotide beta reverse
+Length=477
+
+ Score = 359 bits (181),  Expect = 3e-103
+ Identities = 359/418 (86%), Gaps = 9/418 (2%)
+ Strand=Plus/Minus
+
+Query  36   GATGGAACACTCCGTGCTAAAAGCAAATTTTGCCGTGCTTCGTAAAGTGATGGACGACCC  95
+            ||||||||||||||||||||||||||||||||||| |||| || ||||||||||||| ||
+Sbjct  452  GATGGAACACTCCGTGCTAAAAGCAAATTTTGCCGGGCTTAGTGAAGTGATGGACGATCC  393
+
+Query  96   GAAAATACGGGATGGGCCCATGGCTGTAATGAAGGGCTGGGAGAACTATTGCTGGCCCGC  155
+             ||||||| | ||||||| ||||||||||||||||||  |||| ||||||||  ||||||
+Sbjct  392  CAAAATACAGTATGGGCCAATGGCTGTAATGAAGGGCATGGAGCACTATTGCCCGCCCGC  333
+
+Query  156  GAATATGAGCTGGAAAGTCCTTATG---AAGTATGAGTTTTCCTCCGATATCCACCCTTG  212
+             ||| ||||||||||||||| ||||   |  | || |||||| |||||||||||| ||||
+Sbjct  332  TAATCTGAGCTGGAAAGTCCGTATGTTTAGTTTTGGGTTTTCATCCGATATCCACGCTTG  273
+
+Query  213  CAATTTATGGATTTGCTGGATCCCTAAGGAGATGGCAACCCCAGGATGGTGGAAGACGGA  272
+            |||||| ||| |||||| |||||||||| ||||||||  |||||||| | ||||| || |
+Sbjct  272  CAATTTGTGGCTTTGCTCGATCCCTAAGTAGATGGCACTCCCAGGATTGGGGAAGTCGAA  213
+
+Query  273  TACGTTGCATATGGCAGAAATGGGTCTGTGGATGCATAAGTATCCCAAGTGTATGTGTGT  332
+            ||||| |       ||||||  |||| |||||||||||||||||||||||||| ||||||
+Sbjct  212  TACGTGGT------CAGAAAACGGTCCGTGGATGCATAAGTATCCCAAGTGTAAGTGTGT  159
+
+Query  333  AATGGTGAGATTCACAGATCAATCTCTCCGGCATTGGAAAATTAACCATGACGCTAACTT  392
+            |  |||| |||||||| || | |||||| |||| |||||||||| |||||||||||||| 
+Sbjct  158  ACAGGTGTGATTCACAAATTACTCTCTCTGGCAATGGAAAATTAGCCATGACGCTAACTG  99
+
+Query  393  TGAGAAACTTAAGATCTTCCACTACATGGTGGGTCATGGGAGAACAGCATCTGAGGGC  450
+            |||||||||||||||| |||||||||||||||||||||||||||||||| ||||||||
+Sbjct  98   TGAGAAACTTAAGATCCTCCACTACATGGTGGGTCATGGGAGAACAGCAGCTGAGGGC  41
+
+
+
+Lambda      K        H
+    1.37    0.711     1.31 
+
+Gapped
+Lambda      K        H
+    1.37    0.711     1.31 
+
+Effective search space used: 446037
+
+
+Query= qn2 unrelated nucleotide (no hits expected)
+
+Length=90
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.37    0.711     1.31 
+
+Gapped
+Lambda      K        H
+    1.37    0.711     1.31 
+
+Effective search space used: 77818
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt11/arch_s.fna).
+    Posted date:  Unknown
+  Number of letters in database: 965
+  Number of sequences in database:  2
+
+
+
+Matrix: blastn matrix 1 -3
+Gap Penalties: Existence: 5, Extension: 2

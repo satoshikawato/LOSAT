@@ -1,0 +1,41 @@
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase [White spot syndrome virus] with O
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 9 hits found
+YP_009220601.1	BDT63550.1	41.489	188	101	3	10	191	4	188	1.88e-38	130
+YP_009220601.1	BDT63500.1	28.378	74	35	4	177	244	374	435	2.2	23.1
+YP_009220601.1	BDT63566.1	40.909	22	13	0	227	248	273	294	3.6	22.3
+YP_009220601.1	BDT63554.1	30.000	40	28	0	15	54	173	212	3.7	22.3
+YP_009220601.1	BDT63572.1	28.571	35	23	1	261	293	82	116	3.9	21.9
+YP_009220601.1	BDT63556.1	24.242	66	49	1	55	119	1808	1873	4.1	22.3
+YP_009220601.1	BDT63523.1	44.828	29	11	1	201	224	484	512	5.2	21.9
+YP_009220601.1	BDT63528.1	66.667	12	4	0	305	316	100	111	5.5	21.9
+YP_009220601.1	BDT63529.1	31.429	35	20	1	264	298	291	321	8.8	21.2
+# PSIBLAST 2.17.0+
+# Iteration: 2
+# Query: YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase [White spot syndrome virus] with O
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 5 hits found
+YP_009220601.1	BDT63550.1	41.489	188	101	3	10	191	4	188	5.66e-100	289
+YP_009220601.1	BDT63556.1	23.944	71	51	2	46	113	1797	1867	0.53	25.4
+YP_009220601.1	BDT63501.1	38.095	21	11	1	140	160	379	397	3.9	22.3
+YP_009220601.1	BDT63528.1	66.667	12	4	0	305	316	100	111	6.5	21.5
+YP_009220601.1	BDT63523.1	44.828	29	11	1	201	224	484	512	7.9	21.5
+# PSIBLAST 2.17.0+
+# Iteration: 3
+# Query: YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase [White spot syndrome virus] with O
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 6 hits found
+YP_009220601.1	BDT63550.1	41.489	188	101	3	10	191	4	188	1.20e-94	275
+YP_009220601.1	BDT63556.1	23.944	71	51	2	46	113	1797	1867	2.30e-22	92.8
+YP_009220601.1	BDT63501.1	38.095	21	11	1	140	160	379	397	3.7	22.3
+YP_009220601.1	BDT63528.1	66.667	12	4	0	305	316	100	111	6.5	21.5
+YP_009220601.1	BDT63523.1	44.828	29	11	1	201	224	484	512	7.8	21.5
+YP_009220601.1	BDT63570.1	25.806	31	23	0	77	107	796	826	7.8	21.5
+
+Search has CONVERGED!
+# BLAST processed 3 queries

@@ -4,7 +4,7 @@
 //! TBLASTX is an ungapped search, so NCBI makes one `diags` Seq-align per subject of a query's
 //! final hit list (`BLASTUngappedHspListToSeqAlign`), one Std-seg per HSP with the HSP's scores,
 //! subject by subject in hit-list order, each subject's HSPs sorted by e-value. The final list
-//! (`report_order`) holds the HSPs in that order, query by query, one run of HSPs per subject
+//! (`hit_collector.rs`) holds the HSPs in that order, query by query, one run of HSPs per subject
 //! (the order of the tabular rows).
 //!
 //! What NCBI's `BlastHSP` holds, from LOSAT's `TblastxHsp`:
@@ -71,6 +71,8 @@ pub(crate) enum SeqalignSubjects<'a> {
     },
     Database {
         ordinals: &'a [u32],
+        /// The OID of each ordinal id, which names a sequence without parsed Seq-ids.
+        oids: crate::seqdb::OidMap<'a>,
         title: &'a [u8],
         parsed: &'a [Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
     },
@@ -101,20 +103,28 @@ pub(crate) fn query_records_of<'a>(
                     records,
                     placements,
                 } => SubjectRecord {
-                    id: SeqId::Local(&records[s_idx].local_id),
+                    id: records[s_idx].seq_id(),
                     searched_length: i32::try_from(subject_letters.length(s_idx))?,
                     offset: i32::try_from(placements.offset(s_idx))?,
+                    use_this_seqid: &[],
                 },
                 SeqalignSubjects::Database {
-                    ordinals, parsed, ..
-                } => SubjectRecord {
-                    id: match parsed.get(s_idx).and_then(Option::as_deref) {
-                        Some(subject) => SeqId::Db(subject.alignment_id()),
-                        None => SeqId::BlOrdId(ordinals[s_idx]),
-                    },
-                    searched_length: i32::try_from(subject_letters.length(s_idx))?,
-                    offset: 0,
-                },
+                    ordinals,
+                    oids,
+                    parsed,
+                    ..
+                } => {
+                    let subject = parsed.get(s_idx).and_then(Option::as_deref);
+                    SubjectRecord {
+                        id: match subject {
+                            Some(subject) => SeqId::Db(subject.alignment_id()),
+                            None => SeqId::BlOrdId(oids.oid(ordinals[s_idx])),
+                        },
+                        searched_length: i32::try_from(subject_letters.length(s_idx))?,
+                        offset: 0,
+                        use_this_seqid: crate::report::db_subject::use_this_seqid(subject),
+                    }
+                }
             });
         }
         hsp_records.push(HspRecord {
@@ -138,9 +148,10 @@ pub(crate) fn query_records_of<'a>(
     Ok(())
 }
 
-/// Writes the documents of every query to `writer`, each query's warnings before it. `hits`
-/// is the final list in report order and `engine` its engine counts by HSP index
-/// (`report::engine_counts`).
+/// Writes the documents of every query to `writer`, each query's warnings before it and NCBI's
+/// posts of the bytes that its stream replaces in the query's document after them (on the
+/// warnings' sink, `write_query_to`). `hits` is the final list in report order and `engine` its
+/// engine counts by HSP index (`report::engine_counts`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_tblastx_seqalign(
     format: SerialFormat,
@@ -151,7 +162,7 @@ pub(crate) fn write_tblastx_seqalign(
     query_placements: &Placements,
     subjects: &SeqalignSubjects<'_>,
     subject_letters: SubjectLetters<'_>,
-    mut warnings: Option<&mut QueryWarnings<'_>>,
+    warnings: &mut QueryWarnings<'_>,
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Tblastx,
@@ -167,9 +178,7 @@ pub(crate) fn write_tblastx_seqalign(
     let mut next = 0usize;
     for (q_idx, query) in queries.iter().enumerate() {
         // The query's warnings come before its document (`QueryWarnings`).
-        if let Some(warnings) = warnings.as_deref_mut() {
-            warnings.before_query(q_idx, &mut *writer)?;
-        }
+        warnings.before_query(q_idx, &mut *writer)?;
         let start = next;
         while next < hits.len() && hits[next].hit.q_idx as usize == q_idx {
             next += 1;
@@ -183,7 +192,7 @@ pub(crate) fn write_tblastx_seqalign(
             &mut hsp_records,
         )?;
         let query_record = QueryRecord {
-            id: SeqId::Local(&query.local_id),
+            id: query.seq_id(),
             searched_length: i32::try_from(query.seq().len())?,
             offset: i32::try_from(query_placements.offset(q_idx))?,
         };
@@ -195,6 +204,7 @@ pub(crate) fn write_tblastx_seqalign(
             &hsp_records,
             &mut buf,
             &mut *writer,
+            &mut *warnings.sink,
         )?;
     }
     debug_assert_eq!(next, hits.len(), "the final list is in query order");

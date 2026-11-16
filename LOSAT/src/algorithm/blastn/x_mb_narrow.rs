@@ -52,7 +52,8 @@
 //! Where (`plan`): a contiguous table of 4^12 cells (the megablast task's table for queries of about
 //! 300,000 table entries or more), newest first (not the blastn task's re-threaded order), without
 //! database word counts or `BLEMIR_DEBUG`, with fewer than 2^24 elements of `next_pos` and queries
-//! whose offsets ascend without overlap (as the callers place them). Elsewhere the 4-byte table is
+//! whose offsets ascend without overlap (as the callers place them), unless LOSAT_X_MBCSR lays the
+//! table out as CSR first (`x_bn_csr::plan`, tried before this plan). Elsewhere the 4-byte table is
 //! built as before; the fills of the smaller tables are not changed, nor are their readers' paths:
 //! a 3-byte table leaves `hashtable` empty, so the readers find it behind the bounds check of the
 //! head that the CSR tables of LOSAT_X_BNCSR already take.
@@ -176,6 +177,16 @@ impl Narrow {
         }
     }
 
+    /// EXPERIMENT (LOSAT_X_SEEDPIECE): `each` from the chain's element `from` (not 0) on.
+    #[inline(always)]
+    pub(super) fn each_from(&self, from: u32, mut callback: impl FnMut(u32)) {
+        let mut q_off = from;
+        while q_off != 0 {
+            callback(q_off);
+            q_off = get(&self.chain, q_off as usize);
+        }
+    }
+
     /// `contains_hit`: whether the chain of `cell` holds `q_off_1` (the whole chain is walked,
     /// as the 4-byte table's test does).
     #[inline(always)]
@@ -198,7 +209,11 @@ impl Narrow {
     }
 
     /// Tests only: the words of the heads.
-    #[cfg(test)]
+    #[cfg(all(
+        test,
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     pub(super) fn heads(&self) -> &[u32] {
         &self.heads
     }
@@ -278,6 +293,7 @@ pub(super) fn set_spill(words: &mut [u32], i: usize, value: u32) {
 }
 
 /// The address of element `i` of the words at `base` (for a prefetch; nothing is read).
+#[cfg(target_arch = "x86_64")]
 #[inline(always)]
 pub(super) fn at(base: *const u32, i: usize) -> *const i8 {
     base.cast::<i8>().wrapping_add(3 * i)

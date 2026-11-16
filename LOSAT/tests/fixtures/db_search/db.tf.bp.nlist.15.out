@@ -1,0 +1,629 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/taxfilter/tfp"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Homo sapiens] >P69906.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan paniscus] >P69907.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan troglodytes]",
+          "query_len": 142,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "sp|P01972.1|",
+                  "accession": "P01972",
+                  "title": "RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus virginianus virginianus]",
+                  "taxid": 9875
+                }
+              ],
+              "len": 142,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 286.96,
+                  "score": 733,
+                  "evalue": 2.88499e-105,
+                  "identity": 142,
+                  "positive": 142,
+                  "query_from": 1,
+                  "query_to": 142,
+                  "hit_from": 1,
+                  "hit_to": 142,
+                  "align_len": 142,
+                  "gaps": 0,
+                  "qseq": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "hseq": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "midline": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "sp|P01979.1|",
+                  "accession": "P01979",
+                  "title": "RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Ornithorhynchus anatinus]",
+                  "taxid": 9258
+                }
+              ],
+              "len": 141,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 282.337,
+                  "score": 721,
+                  "evalue": 1.54872e-103,
+                  "identity": 140,
+                  "positive": 141,
+                  "query_from": 2,
+                  "query_to": 142,
+                  "hit_from": 1,
+                  "hit_to": 141,
+                  "align_len": 141,
+                  "gaps": 0,
+                  "qseq": "VLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "hseq": "VLSPADKTNVKAAWGKVGAHAGDYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "midline": "VLSPADKTNVKAAWGKVGAHAG+YGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR"
+                }
+              ]
+            },
+            {
+              "num": 3,
+              "description": [
+                {
+                  "id": "sp|Q7LZC3.1|",
+                  "accession": "Q7LZC3",
+                  "title": "RecName: Full=Hemoglobin subunit alpha-A; AltName: Full=Alpha-A-globin; AltName: Full=Hemoglobin alpha-A chain [Streptopelia orientalis]",
+                  "taxid": 36243
+                }
+              ],
+              "len": 142,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 281.567,
+                  "score": 719,
+                  "evalue": 3.45483e-103,
+                  "identity": 140,
+                  "positive": 141,
+                  "query_from": 1,
+                  "query_to": 142,
+                  "hit_from": 1,
+                  "hit_to": 142,
+                  "align_len": 142,
+                  "gaps": 0,
+                  "qseq": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "hseq": "MVLSPADKTNVKAAWGKVGAHAGDYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHHPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "midline": "MVLSPADKTNVKAAWGKVGAHAG+YGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAH PAEFTPAVHASLDKFLASVSTVLTSKYR"
+                }
+              ]
+            },
+            {
+              "num": 4,
+              "description": [
+                {
+                  "id": "sp|P01986.2|",
+                  "accession": "P01986",
+                  "title": "RecName: Full=Hemoglobin subunit alpha-A; AltName: Full=Alpha-A-globin; AltName: Full=Hemoglobin alpha-A chain [Anas platyrhynchos]",
+                  "taxid": 8839
+                }
+              ],
+              "len": 142,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 278.87,
+                  "score": 712,
+                  "evalue": 4.81266e-102,
+                  "identity": 138,
+                  "positive": 139,
+                  "query_from": 1,
+                  "query_to": 142,
+                  "hit_from": 1,
+                  "hit_to": 142,
+                  "align_len": 142,
+                  "gaps": 0,
+                  "qseq": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "hseq": "MVLSPADKSNVKAAWGKVGGHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTLAVGHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "midline": "MVLSPADK+NVKAAWGKVG HAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALT AV HVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR"
+                }
+              ]
+            },
+            {
+              "num": 5,
+              "description": [
+                {
+                  "id": "sp|P01942.2|",
+                  "accession": "P01942",
+                  "title": "RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Mus musculus]",
+                  "taxid": 10090
+                }
+              ],
+              "len": 142,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 253.062,
+                  "score": 645,
+                  "evalue": 7.68522e-92,
+                  "identity": 122,
+                  "positive": 131,
+                  "query_from": 1,
+                  "query_to": 142,
+                  "hit_from": 1,
+                  "hit_to": 142,
+                  "align_len": 142,
+                  "gaps": 0,
+                  "qseq": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "hseq": "MVLSGEDKSNIKAAWGKIGGHGAEYGAEALERMFASFPTTKTYFPHFDVSHGSAQVKGHGKKVADALASAAGHLDDLPGALSALSDLHAHKLRVDPVNFKLLSHCLLVTLASHHPADFTPAVHASLDKFLASVSTVLTSKYR",
+                  "midline": "MVLS  DK+N+KAAWGK+G H  EYGAEALERMF SFPTTKTYFPHFD+SHGSAQVKGHGKKVADAL +A  H+DD+P ALSALSDLHAHKLRVDPVNFKLLSHCLLVTLA+H PA+FTPAVHASLDKFLASVSTVLTSKYR"
+                }
+              ]
+            },
+            {
+              "num": 6,
+              "description": [
+                {
+                  "id": "sp|P01966.2|",
+                  "accession": "P01966",
+                  "title": "RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Bos taurus]",
+                  "taxid": 9913
+                }
+              ],
+              "len": 142,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 252.292,
+                  "score": 643,
+                  "evalue": 1.34481e-91,
+                  "identity": 125,
+                  "positive": 131,
+                  "query_from": 1,
+                  "query_to": 142,
+                  "hit_from": 1,
+                  "hit_to": 142,
+                  "align_len": 142,
+                  "gaps": 0,
+                  "qseq": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "hseq": "MVLSAADKGNVKAAWGKVGGHAAEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGAKVAAALTKAVEHLDDLPGALSELSDLHAHKLRVDPVNFKLLSHSLLVTLASHLPSDFTPAVHASLDKFLANVSTVLTSKYR",
+                  "midline": "MVLS ADK NVKAAWGKVG HA EYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG KVA ALT AV H+DD+P ALS LSDLHAHKLRVDPVNFKLLSH LLVTLA+HLP++FTPAVHASLDKFLA+VSTVLTSKYR"
+                }
+              ]
+            },
+            {
+              "num": 7,
+              "description": [
+                {
+                  "id": "sp|P07405.1|",
+                  "accession": "P07405",
+                  "title": "RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Felis catus]",
+                  "taxid": 9685
+                }
+              ],
+              "len": 141,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 251.136,
+                  "score": 640,
+                  "evalue": 3.56794e-91,
+                  "identity": 120,
+                  "positive": 130,
+                  "query_from": 2,
+                  "query_to": 142,
+                  "hit_from": 1,
+                  "hit_to": 141,
+                  "align_len": 141,
+                  "gaps": 0,
+                  "qseq": "VLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "hseq": "VLSAADKSNVKACWGKIGSHAGEYGAEALERTFCSFPTTKTYFPHFDLSHGSAQVKAHGQKVADALTQAVAHMDDLPTAMSALSDLHAYKLRVDPVNFKFLSHCLLVTLACHHPAEFTPAVHASLDKFFSAVSTVLTSKYR",
+                  "midline": "VLS ADK+NVKA WGK+G+HAGEYGAEALER F SFPTTKTYFPHFDLSHGSAQVK HG+KVADALT AVAH+DD+P A+SALSDLHA+KLRVDPVNFK LSHCLLVTLA H PAEFTPAVHASLDKF ++VSTVLTSKYR"
+                }
+              ]
+            },
+            {
+              "num": 8,
+              "description": [
+                {
+                  "id": "sp|P60529.1|",
+                  "accession": "P60529",
+                  "title": "RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Canis lupus familiaris]",
+                  "taxid": 9615
+                }
+              ],
+              "len": 141,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 243.047,
+                  "score": 619,
+                  "evalue": 5.93195e-88,
+                  "identity": 118,
+                  "positive": 127,
+                  "query_from": 2,
+                  "query_to": 142,
+                  "hit_from": 1,
+                  "hit_to": 141,
+                  "align_len": 141,
+                  "gaps": 0,
+                  "qseq": "VLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "hseq": "VLSPADKTNIKSTWDKIGGHAGDYGGEALDRTFQSFPTTKTYFPHFDLSPGSAQVKAHGKKVADALTTAVAHLDDLPGALSALSDLHAYKLRVDPVNFKLLSHCLLVTLACHHPTEFTPAVHASLDKFFAAVSTVLTSKYR",
+                  "midline": "VLSPADKTN+K+ W K+G HAG+YG EAL+R F SFPTTKTYFPHFDLS GSAQVK HGKKVADALT AVAH+DD+P ALSALSDLHA+KLRVDPVNFKLLSHCLLVTLA H P EFTPAVHASLDKF A+VSTVLTSKYR"
+                }
+              ]
+            },
+            {
+              "num": 9,
+              "description": [
+                {
+                  "id": "sp|P01946.3|",
+                  "accession": "P01946",
+                  "title": "RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; AltName: Full=Hemoglobin alpha-1/2 chain; Contains: RecName: Full=Hemopressin [Rattus norvegicus]",
+                  "taxid": 10116
+                }
+              ],
+              "len": 142,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 209.149,
+                  "score": 531,
+                  "evalue": 1.76358e-74,
+                  "identity": 111,
+                  "positive": 120,
+                  "query_from": 1,
+                  "query_to": 142,
+                  "hit_from": 1,
+                  "hit_to": 142,
+                  "align_len": 142,
+                  "gaps": 0,
+                  "qseq": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "hseq": "MVLSADDKTNIKNCWGKIGGHGGEYGEEALQRMFAAFPTTKTYFSHIDVSPGSAQVKAHGKKVADALAKAADHVEDLPGALSTLSDLHAHKLRVDPVNFKFLSHCLLVTLACHHPGDFTPAMHASLDKFLASVSTVLTSKYR",
+                  "midline": "MVLS  DKTN+K  WGK+G H GEYG EAL+RMF +FPTTKTYF H D+S GSAQVK HGKKVADAL  A  HV+D+P ALS LSDLHAHKLRVDPVNFK LSHCLLVTLA H P +FTPA+HASLDKFLASVSTVLTSKYR"
+                }
+              ]
+            },
+            {
+              "num": 10,
+              "description": [
+                {
+                  "id": "sp|P01994.2|",
+                  "accession": "P01994",
+                  "title": "RecName: Full=Hemoglobin subunit alpha-A; AltName: Full=Alpha-A-globin; AltName: Full=Hemoglobin alpha-A chain [Gallus gallus]",
+                  "taxid": 9031
+                }
+              ],
+              "len": 142,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 207.994,
+                  "score": 528,
+                  "evalue": 4.38041e-74,
+                  "identity": 100,
+                  "positive": 110,
+                  "query_from": 1,
+                  "query_to": 142,
+                  "hit_from": 1,
+                  "hit_to": 142,
+                  "align_len": 142,
+                  "gaps": 0,
+                  "qseq": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "hseq": "MVLSAADKNNVKGIFTKIAGHAEEYGAETLERMFTTYPPTKTYFPHFDLSHGSAQIKGHGKKVVAALIEAANHIDDIAGTLSKLSDLHAHKLRVDPVNFKLLGQCFLVVVAIHHPAALTPEVHASLDKFLCAVGTVLTAKYR",
+                  "midline": "MVLS ADK NVK  + K+  HA EYGAE LERMF ++P TKTYFPHFDLSHGSAQ+KGHGKKV  AL  A  H+DD+   LS LSDLHAHKLRVDPVNFKLL  C LV +A H PA  TP VHASLDKFL +V TVLT+KYR"
+                }
+              ]
+            },
+            {
+              "num": 11,
+              "description": [
+                {
+                  "id": "sp|P01999.2|",
+                  "accession": "P01999",
+                  "title": "RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain [Alligator mississippiensis]",
+                  "taxid": 8496
+                }
+              ],
+              "len": 142,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 205.297,
+                  "score": 521,
+                  "evalue": 4.88392e-73,
+                  "identity": 95,
+                  "positive": 110,
+                  "query_from": 1,
+                  "query_to": 142,
+                  "hit_from": 1,
+                  "hit_to": 142,
+                  "align_len": 142,
+                  "gaps": 0,
+                  "qseq": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "hseq": "MVLSMEDKSNVKAIWGKASGHLEEYGAEALERMFCAYPQTKIYFPHFDMSHNSAQIRAHGKKVFSALHEAVNHIDDLPGALCRLSELHAHSLRVDPVNFKFLAHCVLVVFAIHHPSALSPEIHASLDKFLCAVSAVLTSKYR",
+                  "midline": "MVLS  DK+NVKA WGK   H  EYGAEALERMF ++P TK YFPHFD+SH SAQ++ HGKKV  AL  AV H+DD+P AL  LS+LHAH LRVDPVNFK L+HC+LV  A H P+  +P +HASLDKFL +VS VLTSKYR"
+                }
+              ]
+            },
+            {
+              "num": 12,
+              "description": [
+                {
+                  "id": "sp|P83135.2|",
+                  "accession": "P83135",
+                  "title": "RecName: Full=Hemoglobin subunit alpha-A; AltName: Full=Alpha-A-globin; AltName: Full=Hemoglobin alpha-A chain [Chelonoidis niger]",
+                  "taxid": 66189
+                }
+              ],
+              "len": 142,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 195.667,
+                  "score": 496,
+                  "evalue": 3.69522e-69,
+                  "identity": 91,
+                  "positive": 108,
+                  "query_from": 1,
+                  "query_to": 142,
+                  "hit_from": 1,
+                  "hit_to": 142,
+                  "align_len": 142,
+                  "gaps": 0,
+                  "qseq": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "hseq": "MVLTAGDKANVKTVWSKVGSHLEEYGSETLERLFIVYPSTKTYFPHFDLHHDSAQVRAHGRKVLSALGEAVNHIDDIPGALSKLSDLHAQTLRVDPVNFKLLNLCFVVVVGRHHPTILTPEVHVSLDKFLSAVATALTSKYR",
+                  "midline": "MVL+  DK NVK  W KVG+H  EYG+E LER+F+ +P+TKTYFPHFDL H SAQV+ HG+KV  AL  AV H+DD+P ALS LSDLHA  LRVDPVNFKLL+ C +V +  H P   TP VH SLDKFL++V+T LTSKYR"
+                }
+              ]
+            },
+            {
+              "num": 13,
+              "description": [
+                {
+                  "id": "sp|P06638.2|",
+                  "accession": "P06638",
+                  "title": "RecName: Full=Hemoglobin subunit alpha-5; AltName: Full=Alpha-5-globin; AltName: Full=Alpha-T5; AltName: Full=Hemoglobin alpha-5 chain [Xenopus laevis]",
+                  "taxid": 8355
+                }
+              ],
+              "len": 142,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 185.652,
+                  "score": 470,
+                  "evalue": 3.32156e-65,
+                  "identity": 90,
+                  "positive": 104,
+                  "query_from": 1,
+                  "query_to": 142,
+                  "hit_from": 1,
+                  "hit_to": 142,
+                  "align_len": 142,
+                  "gaps": 0,
+                  "qseq": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "hseq": "MTFSSAEKAAIASLWGKVSGHTDEIGAEALERLFLSYPQTKTYFSHFDLSHGSKDLRSHGGKVVKAIGNAATHIDDIPHALSALSDLHAFKLKVDPGNFKLLSHAIQVTLAIHFPAEFNADAQAAWDKFLAVVSAVLVSKYR",
+                  "midline": "M  S A+K  + + WGKV  H  E GAEALER+FLS+P TKTYF HFDLSHGS  ++ HG KV  A+ NA  H+DD+P+ALSALSDLHA KL+VDP NFKLLSH + VTLA H PAEF     A+ DKFLA VS VL SKYR"
+                }
+              ]
+            },
+            {
+              "num": 14,
+              "description": [
+                {
+                  "id": "sp|Q9PRL9.1|",
+                  "accession": "Q9PRL9",
+                  "title": "RecName: Full=Hemoglobin subunit alpha-1; AltName: Full=Alpha-1-globin; AltName: Full=Hemoglobin alpha-1 chain; AltName: Full=Hemoglobin alpha-I chain [Naja naja]",
+                  "taxid": 35670
+                }
+              ],
+              "len": 141,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 173.711,
+                  "score": 439,
+                  "evalue": 1.95758e-60,
+                  "identity": 87,
+                  "positive": 102,
+                  "query_from": 2,
+                  "query_to": 142,
+                  "hit_from": 1,
+                  "hit_to": 141,
+                  "align_len": 141,
+                  "gaps": 0,
+                  "qseq": "VLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "hseq": "VLTDEDKARVRASWVPVGKNAELYGSETLTRMFAAHPTTKTYFPHFDLSPGSNNLRAHGKKVIDAITEAVNNLDDVAGTLSKLSDLHAQKLRVDPVNFKLLAHCLLVTIAAHNGGVLKPEVIVSLDKFLGDLSKDLVSKYR",
+                  "midline": "VL+  DK  V+A+W  VG +A  YG+E L RMF + PTTKTYFPHFDLS GS  ++ HGKKV DA+T AV ++DD+   LS LSDLHA KLRVDPVNFKLL+HCLLVT+AAH      P V  SLDKFL  +S  L SKYR"
+                }
+              ]
+            },
+            {
+              "num": 15,
+              "description": [
+                {
+                  "id": "sp|P06467.2|",
+                  "accession": "P06467",
+                  "title": "RecName: Full=Hemoglobin subunit zeta; AltName: Full=Alpha-like embryonic globin chain x; AltName: Full=Hemoglobin zeta chain; AltName: Full=Zeta-globin [Mus musculus]",
+                  "taxid": 10090
+                }
+              ],
+              "len": 142,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 173.326,
+                  "score": 438,
+                  "evalue": 2.3045e-60,
+                  "identity": 78,
+                  "positive": 105,
+                  "query_from": 1,
+                  "query_to": 142,
+                  "hit_from": 1,
+                  "hit_to": 142,
+                  "align_len": 142,
+                  "gaps": 0,
+                  "qseq": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "hseq": "MSLMKNERAIIMSMWEKMAAQAEPIGTETLERLFCSYPQTKTYFPHFDLHHGSQQLRAHGFKIMTAVGDAVKSIDNLSSALTKLSELHAYILRVDPVNFKLLSHCLLVTMAARFPADFTPEVHEAWDKFMSILSSILTEKYR",
+                  "midline": "M L   ++  + + W K+ A A   G E LER+F S+P TKTYFPHFDL HGS Q++ HG K+  A+ +AV  +D++ +AL+ LS+LHA+ LRVDPVNFKLLSHCLLVT+AA  PA+FTP VH + DKF++ +S++LT KYR"
+                }
+              ]
+            },
+            {
+              "num": 16,
+              "description": [
+                {
+                  "id": "sp|P11748.1|",
+                  "accession": "P11748",
+                  "title": "RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain [Thunnus thynnus]",
+                  "taxid": 8237
+                }
+              ],
+              "len": 143,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 155.992,
+                  "score": 393,
+                  "evalue": 1.46824e-53,
+                  "identity": 78,
+                  "positive": 94,
+                  "query_from": 3,
+                  "query_to": 142,
+                  "hit_from": 3,
+                  "hit_to": 143,
+                  "align_len": 141,
+                  "gaps": 1,
+                  "qseq": "LSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHF-DLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "hseq": "LSDKDKSTVKALWGKISKSADAIGADALGRMLAVYPQTKTYFSHWPDMSPGSGPVKAHGKKVMGGVALAVTKIDDLTTGLGDLSELHAFKMRVDPSNFKILSHCILVVVAKMFPKEFTPDAHVSLDKFLASVALALAERYR",
+                  "midline": "LS  DK+ VKA WGK+   A   GA+AL RM   +P TKTYF H+ D+S GS  VK HGKKV   +  AV  +DD+   L  LS+LHA K+RVDP NFK+LSHC+LV +A   P EFTP  H SLDKFLASV+  L  +YR"
+                }
+              ]
+            },
+            {
+              "num": 17,
+              "description": [
+                {
+                  "id": "sp|P02018.1|",
+                  "accession": "P02018",
+                  "title": "RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain [Carassius auratus]",
+                  "taxid": 7957
+                }
+              ],
+              "len": 142,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 154.066,
+                  "score": 388,
+                  "evalue": 9.54237e-53,
+                  "identity": 75,
+                  "positive": 98,
+                  "query_from": 3,
+                  "query_to": 142,
+                  "hit_from": 2,
+                  "hit_to": 142,
+                  "align_len": 141,
+                  "gaps": 1,
+                  "qseq": "LSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHF-DLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "hseq": "LSDKDKAVVKALWAKIGSRADEIGAEALGRMLTVYPQTKTYFSHWSDLSPGSGPVKKHGKTIMGAVGDAVSKIDDLVGALSALSELHAFKLRIDPANFKILAHNVIVVIGMLFPGDFTPEVHMSVDKFFQNLALALSEKYR",
+                  "midline": "LS  DK  VKA W K+G+ A E GAEAL RM   +P TKTYF H+ DLS GS  VK HGK +  A+ +AV+ +DD+  ALSALS+LHA KLR+DP NFK+L+H ++V +    P +FTP VH S+DKF  +++  L+ KYR"
+                }
+              ]
+            },
+            {
+              "num": 18,
+              "description": [
+                {
+                  "id": "sp|Q90487.3|",
+                  "accession": "Q90487",
+                  "title": "RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin aa1; AltName: Full=Hemoglobin alpha chain [Danio rerio]",
+                  "taxid": 7955
+                }
+              ],
+              "len": 143,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 152.91,
+                  "score": 385,
+                  "evalue": 3.10251e-52,
+                  "identity": 76,
+                  "positive": 97,
+                  "query_from": 1,
+                  "query_to": 142,
+                  "hit_from": 1,
+                  "hit_to": 143,
+                  "align_len": 143,
+                  "gaps": 1,
+                  "qseq": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHF-DLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "hseq": "MSLSDTDKAVVKAIWAKISPKADEIGAEALARMLTVYPQTKTYFSHWADLSPGSGPVKKHGKTIMGAVGEAISKIDDLVGGLAALSELHAFKLRVDPANFKILSHNVIVVIAMLFPADFTPEVHVSVDKFFNNLALALSEKYR",
+                  "midline": "M LS  DK  VKA W K+   A E GAEAL RM   +P TKTYF H+ DLS GS  VK HGK +  A+  A++ +DD+   L+ALS+LHA KLRVDP NFK+LSH ++V +A   PA+FTP VH S+DKF  +++  L+ KYR"
+                }
+              ]
+            },
+            {
+              "num": 19,
+              "description": [
+                {
+                  "id": "sp|P11251.2|",
+                  "accession": "P11251",
+                  "title": "RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain [Salmo salar]",
+                  "taxid": 8030
+                }
+              ],
+              "len": 143,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 150.599,
+                  "score": 379,
+                  "evalue": 2.17185e-51,
+                  "identity": 82,
+                  "positive": 100,
+                  "query_from": 1,
+                  "query_to": 142,
+                  "hit_from": 1,
+                  "hit_to": 143,
+                  "align_len": 143,
+                  "gaps": 1,
+                  "qseq": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHF-DLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "hseq": "MSLTARDKSVVNAFWGKIKGKADVVGAEALGRMLTAYPQTKTYFSHWADLSPGSAPVKKHGGVIMGAIGNAVGLMDDLVGGMSGLSDLHAFKLRVDPGNFKILSHNILVTLAIHFPADFTPEVHIAVDKFLAALSAALADKYR",
+                  "midline": "M L+  DK+ V A WGK+   A   GAEAL RM  ++P TKTYF H+ DLS GSA VK HG  +  A+ NAV  +DD+   +S LSDLHA KLRVDP NFK+LSH +LVTLA H PA+FTP VH ++DKFLA++S  L  KYR"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 23,
+            "db_len": 3263,
+            "hsp_len": 34,
+            "eff_space": 221508,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+]
+}

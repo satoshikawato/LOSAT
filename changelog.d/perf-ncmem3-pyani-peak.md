@@ -1,0 +1,1 @@
+- BLASTN: the ungapped hits of a subject, and the scratch of their sort by score, take 44 bytes per hit instead of 72, which lowers the memory of searches with many hits per subject (pyani's ANIb, genome fragments x a genome: a peak of about 70 MiB less per query batch). Reports do not change.

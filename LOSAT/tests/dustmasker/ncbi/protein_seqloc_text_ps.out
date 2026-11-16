@@ -1,0 +1,22 @@
+Seq-loc ::= int {
+  from 0,
+  to 59,
+  id local str "prot1"
+}
+Seq-loc ::= packed-int {
+  {
+    from 199,
+    to 279,
+    id local str "nuc2"
+  },
+  {
+    from 430,
+    to 480,
+    id local str "nuc2"
+  },
+  {
+    from 578,
+    to 670,
+    id local str "nuc2"
+  }
+}

@@ -10,6 +10,14 @@ use std::path::{Path, PathBuf};
 
 use super::SeqDbError;
 
+/// The memory page of NCBI's mapping of a database file: 4 KiB, the page of the oracle platform
+/// (Linux x86-64) and the smallest of the systems NCBI BLAST+ runs on. NCBI maps a file whole
+/// from offset 0, and the system fills the part of the last page after the end of the file with
+/// zeros (POSIX `mmap`), so NCBI reads zero bytes there (`taxdb.btd` past its end,
+/// `Volume::protein_mapped_bytes_after`). A larger page only gives NCBI more zeros to read past
+/// the file, where LOSAT then refuses or reads none.
+pub(crate) const MAP_PAGE: u64 = 4096;
+
 /// Where `DbFile::read_range_in` puts the bytes it reads.
 enum RangeBuffer {
     /// A new buffer (`read_range`).
@@ -17,6 +25,13 @@ enum RangeBuffer {
     /// EXPERIMENT (LOSAT_X_BNMAPPED): `x_read_range_mapped`'s buffer.
     Mapped,
     /// EXPERIMENT (LOSAT_X_BPDBKEEP): the caller's buffer (`x_read_range_into`).
+    #[cfg(any(
+        test,
+        all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )
+    ))]
     Given(Vec<u8>),
 }
 
@@ -178,8 +193,9 @@ impl DbFile {
     }
 
     /// EXPERIMENT (LOSAT_X_BNMAPPED): `read_range` into a buffer taken from or sized
-    /// by `utils::x_mapped::X_BYTES.reserve` (a mapped buffer from 1 MiB on, given back with
-    /// `x_mapped::X_BYTES.give`). No NCBI counterpart: only where the bytes are kept.
+    /// by `utils::x_mapped::X_BYTES.x_filled` (a mapped buffer from 1 MiB on, given back with
+    /// `x_mapped::X_BYTES.give`; a buffer of the pool is zeroed only past the bytes it holds).
+    /// No NCBI counterpart: only where the bytes are kept.
     pub fn x_read_range_mapped(&self, start: u64, end: u64) -> Result<Vec<u8>, SeqDbError> {
         self.read_range_in(start, end, RangeBuffer::Mapped)
     }
@@ -187,6 +203,13 @@ impl DbFile {
     /// EXPERIMENT (LOSAT_X_BPDBKEEP): `read_range` into `buf`, whose bytes it replaces (its
     /// capacity is kept when it holds the range). No NCBI counterpart: only where the bytes are
     /// kept.
+    #[cfg(any(
+        test,
+        all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )
+    ))]
     pub fn x_read_range_into(
         &self,
         start: u64,
@@ -225,12 +248,16 @@ impl DbFile {
         })?;
         let mut buf = match buffer {
             RangeBuffer::New => vec![0u8; len],
-            RangeBuffer::Mapped => {
-                let mut buf = Vec::new();
-                crate::utils::x_mapped::X_BYTES.reserve(&mut buf, len);
-                buf.resize(len, 0u8);
-                buf
-            }
+            // A buffer of the pool keeps the bytes its last read left in it, and only the bytes
+            // past them are zeroed before the read writes them all (as `Given` below).
+            RangeBuffer::Mapped => crate::utils::x_mapped::X_BYTES.x_filled(len, 0u8),
+            #[cfg(any(
+                test,
+                all(
+                    feature = "parallel",
+                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+                )
+            ))]
             RangeBuffer::Given(mut buf) => {
                 // Only the bytes past its length are filled before the read writes them all.
                 if buf.capacity() < len {
@@ -244,7 +271,7 @@ impl DbFile {
         Ok(buf)
     }
 
-    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the checks of `read_range(start, end)` before its buffer
+    /// The checks of `read_range(start, end)` before its buffer
     /// is allocated, with the same errors in the same order, without the read.
     pub fn x_check_range(&self, start: u64, end: u64) -> Result<(), SeqDbError> {
         if end < start {

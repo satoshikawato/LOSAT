@@ -1,0 +1,8 @@
+maturin==1.16.0
+mypy==2.4.1
+pandas==3.1.1
+polars==2.1.0
+pyarrow==26.0.1
+pytest==9.2.0
+pytest-timeout==2.4.0
+typing_extensions==4.16.0

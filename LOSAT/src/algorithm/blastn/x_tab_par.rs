@@ -13,14 +13,13 @@
 //! after another, on the thread of the application's loop. `write_output_blastn_hitlists_to_writer`
 //! (`hsp.rs`) does the same on the thread of `run_in_pool`'s batch loop, while the other threads of
 //! the search's pool wait: 31,168 cDNAs against 3 Mb with `-task blastn` (1.02 M rows, 90 query
-//! batches written one at a time by LOSAT_X_RPTSTREAM, LOSAT_X_QBATCHPAR=0) spent 0.88 s in the
+//! batches written one at a time by LOSAT_X_RPTSTREAM, no query-batch slots) spent 0.88 s in the
 //! report calls at 8, 16 and 32 threads alike (ws, 2026-10-24), 87 % of it in the rows
 //! (`write_hit_fields_bytes`, local perf).
 //!
 //! What the switch changes (read once per process, `mode`), when the caller gives a pool of two
-//! threads or more (`pool`: the search's pool while no LOSAT_X_QBATCHPAR slot exists), there is no
-//! format observer (`FormatProbe`, which flushes around every row; the Web adapter) and the
-//! BLASTN trace is off (`tracing::enabled`; it logs rows in the serial order): the rows are cut
+//! threads or more (`pool`: the search's pool), there is no format observer (`FormatProbe`, which
+//! flushes around every row; the Web adapter) and the BLASTN trace is off (`tracing::enabled`; it logs rows in the serial order): the rows are cut
 //! into pieces (`Piece`) of at most `PIECE_ROWS` rows of one query, the first piece of each query
 //! with its outfmt 7 header (a query without rows is one piece of no row); the pieces are taken in
 //! windows of at least `ROWS_PER_THREAD` rows per thread of the pool (a piece of no row counts as
@@ -41,9 +40,8 @@
 //! so a failed write is one of the writer's, which stops the report as before.
 //!
 //! Off (the serial writer): the switch off (`LOSAT_X_BNTABPAR=0`); no pool or one of one thread
-//! (`-num_threads 1`, builds without the `parallel` feature, Wasm without threads); while
-//! LOSAT_X_QBATCHPAR slots exist (their pools would share the CPUs; their reports already overlap
-//! the other slots' searches); a format observer; the BLASTN trace.
+//! (`-num_threads 1`, builds without the `parallel` feature, Wasm without threads); a format
+//! observer; the BLASTN trace.
 //!
 //! Memory: the formatted rows of one window (`ROWS_PER_THREAD` x threads rows plus one piece,
 //! about 6 MiB at 32 threads with the ~100-byte rows of the cDNA input), also for one query of
@@ -112,7 +110,7 @@ pub(crate) fn write_output<W: Write>(
     hit_lists: &[Option<BlastnHitList>],
     writer: &mut W,
     query_ids: &[Arc<[u8]>],
-    subject_ids: &[Arc<[u8]>],
+    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     output_format: BlastnOutputFormat,
     query_titles: &[Arc<[u8]>],
     subject_title: &str,
@@ -177,7 +175,7 @@ struct Piece {
 struct Pieces<'a> {
     hit_lists: &'a [Option<BlastnHitList>],
     query_ids: &'a [Arc<[u8]>],
-    subject_ids: &'a [Arc<[u8]>],
+    subject_ids: &'a [crate::algorithm::common::tabular::SubjectId],
     /// Header bytes of a query's first piece (0 for outfmt 6).
     header_bytes: usize,
     q_idx: usize,
@@ -198,7 +196,7 @@ impl Iterator for Pieces<'_> {
         let id_bytes = |s_idx: u32| {
             self.subject_ids
                 .get(s_idx as usize)
-                .map_or(7, |id| id.len())
+                .map_or(7, |id| id.as_deref().map_or(0, <[u8]>::len))
         };
         let query_bytes = self.query_ids.get(q_idx).map_or(7, |id| id.len()) + ROW_BYTES;
         let (list, hsp, header) = (self.list, self.hsp, self.header);
@@ -243,7 +241,7 @@ fn write_on_pool<W: Write>(
     hit_lists: &[Option<BlastnHitList>],
     writer: &mut W,
     query_ids: &[Arc<[u8]>],
-    subject_ids: &[Arc<[u8]>],
+    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     output_format: BlastnOutputFormat,
     query_titles: &[Arc<[u8]>],
     subject_title: &str,
@@ -266,7 +264,18 @@ fn write_on_pool<W: Write>(
         hsp: 0,
         header: true,
     };
-    let format = |piece: &Piece| -> io::Result<Vec<u8>> {
+    // The queries whose reports read subjects that write texts: their pieces mark where the
+    // serial writer reads each subject (its first row), and the texts are written there
+    // (`QueryWarnings::subject_read`).
+    let marked: Vec<bool> = (0..hit_lists.len())
+        .map(|q_idx| {
+            warnings
+                .as_deref()
+                .is_some_and(|warnings| warnings.reads_with_texts(q_idx))
+        })
+        .collect();
+    let format = |piece: &Piece| -> io::Result<(Vec<u8>, Vec<(usize, u32)>)> {
+        let mut reads = Vec::new();
         let hit_list = hit_lists[piece.q_idx].as_ref();
         let title = query_titles.get(piece.q_idx).map_or(0, |title| title.len());
         let mut buffer = Vec::with_capacity(piece.bytes + if piece.header { title } else { 0 });
@@ -288,6 +297,9 @@ fn write_on_pool<W: Write>(
         while rows > 0 {
             let hsps = &lists[list].hsps;
             let take = (hsps.len() - hsp).min(rows);
+            if hsp == 0 && take > 0 && marked[piece.q_idx] {
+                reads.push((buffer.len(), lists[list].oid));
+            }
             write_hsp_rows(
                 &mut buffer,
                 &hsps[hsp..hsp + take],
@@ -301,7 +313,7 @@ fn write_on_pool<W: Write>(
             list += 1;
             hsp = 0;
         }
-        Ok(buffer)
+        Ok((buffer, reads))
     };
     loop {
         let mut window = Vec::new();
@@ -325,7 +337,14 @@ fn write_on_pool<W: Write>(
                     warnings.before_query(piece.q_idx, &mut *writer)?;
                 }
             }
-            writer.write_all(&buffer?)?;
+            let (buffer, reads) = buffer?;
+            crate::report::query_warnings::write_marked(
+                &buffer,
+                &reads,
+                piece.q_idx,
+                &mut *writer,
+                warnings.as_deref_mut(),
+            )?;
         }
     }
     write_tabular_epilog(writer, output_format, epilog)
@@ -470,25 +489,27 @@ mod tests {
     struct Case {
         hit_lists: Vec<Option<BlastnHitList>>,
         query_ids: Vec<Arc<[u8]>>,
-        subject_ids: Vec<Arc<[u8]>>,
+        subject_ids: Vec<crate::algorithm::common::tabular::SubjectId>,
         query_titles: Vec<Arc<[u8]>>,
         unsearched: Vec<bool>,
-        warnings: Vec<Vec<u8>>,
+        warnings: Vec<crate::report::diag_log::Posts>,
     }
 
     fn case(rng: &mut Rng, queries: usize, max_rows: u64) -> Case {
         Case {
             hit_lists: hit_lists(rng, queries, max_rows),
             query_ids: ids("query_", queries),
-            subject_ids: ids("lcl|subject_", 3),
+            subject_ids: ids("lcl|subject_", 3).into_iter().map(Some).collect(),
             query_titles: ids("query title ", queries),
             unsearched: (0..queries).map(|_| rng.below(9) == 0).collect(),
             warnings: (0..queries)
                 .map(|q| {
                     if rng.below(5) == 0 {
-                        format!("Warning: [blastn] Query_{q} warning\n").into_bytes()
+                        crate::report::diag_log::Posts::of_lines(
+                            format!("Warning: [blastn] Query_{q} warning\n").into_bytes(),
+                        )
                     } else {
-                        Vec::new()
+                        crate::report::diag_log::Posts::new()
                     }
                 })
                 .collect(),
@@ -551,10 +572,7 @@ mod tests {
             log: log.clone(),
             sink: true,
         };
-        let mut warnings = QueryWarnings {
-            before: &case.warnings,
-            sink: &mut sink,
-        };
+        let mut warnings = QueryWarnings::of_posts(&case.warnings, None, &mut sink);
         let args = (
             &case.hit_lists[..],
             &case.query_ids[..],
@@ -591,6 +609,8 @@ mod tests {
             ),
         }
         .unwrap();
+        // The warnings end (`QueryWarnings`'s drop writes any read's text not placed) before the
+        // sink is read.
         drop(warnings);
         drop((report, sink));
         Arc::try_unwrap(log).unwrap().into_inner().unwrap()

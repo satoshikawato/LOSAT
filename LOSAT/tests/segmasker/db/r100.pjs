@@ -1,0 +1,22 @@
+{
+  "version": "1.2",
+  "dbname": "r100",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "in/dbsrc.fa",
+  "number-of-letters": 123,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-13T09:01:00",
+  "number-of-volumes": 1,
+  "bytes-total": 37336,
+  "bytes-to-cache": 230,
+  "files": [
+    "r100.pdb",
+    "r100.phr",
+    "r100.pin",
+    "r100.pot",
+    "r100.psq",
+    "r100.ptf",
+    "r100.pto"
+  ]
+}

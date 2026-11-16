@@ -7,11 +7,23 @@
 use std::io::{Read, Write};
 use std::path::Path;
 
-use super::fasta_source::{FastaBioseqSource, Warn};
+use super::bioseq::{Bioseq, PastSeqPos};
+use super::deflines;
+use super::dir_entry;
+use super::fasta_source::reader::past_seq_pos_refusal;
+use super::fasta_source::{FastaBioseqSource, SourceErrorKind, Warn};
+use super::mask_data::range_set::address_order_refusal;
+use super::mask_data::{ranges_are_empty, MaskedRangeSet};
+use super::platform::Platform;
+use super::taxid_set::TaxIdSet;
 use super::time::LocalTime;
-use super::writer::WriteDb;
+use super::writer::{DbVersion, Indices, WriteDb};
 use super::WriteDbError;
+use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::seqdb::{SeqDbError, SeqType};
+use crate::seqid::model::ObjectId;
+use crate::seqid::rank::{best_rank_score, find_best};
+use crate::seqid::ParsedSeqId;
 
 /// `CBuildDatabase` for a FASTA input without parsed Seq-ids.
 pub struct BuildDatabase<'a> {
@@ -19,6 +31,19 @@ pub struct BuildDatabase<'a> {
     log: &'a mut dyn Write,
     output_db: WriteDb,
     output_dbname: String,
+    /// `m_ParseIDs` (`-parse_seqids`).
+    parse_ids: bool,
+    /// `m_Taxids` (`SetTaxids`).
+    taxids: TaxIdSet,
+    /// `m_MaskData`: the masked ranges of the sequences, when makeblastdb read mask data
+    /// (`SetMaskDataSource`).
+    mask_data: Option<MaskedRangeSet>,
+    /// `m_FoundMatchingMasks`.
+    found_matching_masks: bool,
+    /// LOSAT's refusal of the first sequence whose masks NCBI writes in the order of memory
+    /// addresses (`mask_data::range_set`). It is raised by `end_build` only when the build would
+    /// otherwise succeed, so that every error of NCBI that comes later in the run comes first.
+    address_order: Option<WriteDbError>,
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:852-927
@@ -58,7 +83,7 @@ pub struct BuildDatabase<'a> {
 // ```
 /// `CDirEntry::NormalizePath` of an absolute Unix path, without following
 /// links: `.` and empty components go, `..` takes its parent with it.
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "wasi")))]
 fn normalize_absolute_path(path: &str) -> String {
     let current = path.trim_end_matches('/');
     if current.is_empty() {
@@ -406,6 +431,84 @@ fn create_path(dir: &str) -> bool {
 //         *dir = (pos == NPOS) ? kEmptyStr : path.substr(0, pos+1);
 //     }
 // ```
+// The directory is the part of `dbname` up to its last separator, after the
+// trailing separators of `dbname` are dropped: `-out sub/` names the
+// database `sub` of the current directory and makes no directory.
+// `d.GetName()` is what follows the last separator of the directory's path
+// as it was given (`..` for `nodir/..`), and `d.Exists()` is true for a
+// directory, also through a link.
+//
+// `CreatePath` makes the normalized path, but `CheckAccess` then tests the
+// path as it was given: with `-out nodir/../db` and no `nodir`, the current
+// directory "is created" (it exists), `nodir/..` does not resolve, and
+// makeblastdb stops with the write-permission message.
+//
+// On Unix LOSAT asks the question of `euidaccess(path, W_OK)` (`check_access_write`): a
+// path that does not resolve and a directory that exists and cannot be written to (by
+// its mode, an ACL, a read-only file system) both stop it here, before the log. On
+// Windows NCBI reads the effective rights of the directory's ACL
+// (`CWinSecurity::GetFilePermissions`), which LOSAT does not: it stops here only for a
+// path that does not resolve, and for a directory it cannot write to it goes on, writes
+// the log header and fails when it creates the first file of the first volume, with the
+// system's message for that file and the same exit status 255.
+// The library is built with `-DNCBI_MODULE=BLASTDB` (Makefile.writedb.lib:15), so the
+// report names the function `BLASTDB::ncbi::CBuildDatabase::CreateDirectories`; the error code
+// `eOutputFileError` has no name of its own (`CMultisourceException::GetErrCodeString` names
+// `eArg` only, multisource_util.hpp:66-72) and prints as `eInvalid`.
+// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/multisource_util.hpp:65-72
+// ```c++
+//     /// Get a message describing the exception.
+//     virtual const char* GetErrCodeString() const override
+//     {
+//         switch ( GetErrCode() ) {
+//         case eArg: return "eArgErr";
+//         default:   return CException::GetErrCodeString();
+//         }
+//     }
+// ```
+const CREATE_PATH_FAILED: ThrowSite = create_directories_site(1063);
+/// `s_FixBioseqDeltas`' throw for a protein delta (`CBuildDatabase::past_seq_pos`).
+const PROTEIN_DELTA: ThrowSite = ThrowSite {
+    file: "src/objtools/blast/seqdb_writer/build_db.cpp",
+    line: 303,
+    kind: "CMultisourceException::eArgErr",
+    function: Some("BLASTDB::ncbi::s_FixBioseqDeltas"),
+};
+const NO_WRITE_ACCESS: ThrowSite = create_directories_site(1069);
+
+/// A throw of `CMultisourceException` (`eOutputFileError`) at `line` of build_db.cpp.
+const fn create_directories_site(line: u32) -> ThrowSite {
+    ThrowSite {
+        file: "src/objtools/blast/seqdb_writer/build_db.cpp",
+        line,
+        kind: "CMultisourceException::eInvalid",
+        function: Some("BLASTDB::ncbi::CBuildDatabase::CreateDirectories"),
+    }
+}
+
+/// `CBuildDatabase::CreateDirectories`.
+fn create_directories(dbname: &str) -> Result<(), WriteDbError> {
+    let dir_entry = dir_entry_path(dbname);
+    let Some(at) = dir_entry.rfind(is_any_separator) else {
+        return Ok(());
+    };
+    let d = dir_entry_path(&dir_entry[..=at]);
+    let name = d.rfind(is_any_separator).map_or(d, |at| &d[at + 1..]);
+    if !Path::new(d).is_dir() && !create_path(d) {
+        return Err(WriteDbError::Exception(NcbiException::new(
+            CREATE_PATH_FAILED,
+            format!("Failed to create directory '{name}'"),
+        )));
+    }
+    if !check_access_write(d) {
+        return Err(WriteDbError::Exception(NcbiException::new(
+            NO_WRITE_ACCESS,
+            format!("You do not have write permissions on '{name}'"),
+        )));
+    }
+    Ok(())
+}
+
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:1735-1748
 // ```c++
 //     const char* path = GetPath().c_str();
@@ -423,46 +526,35 @@ fn create_path(dir: &str) -> bool {
 //     }
 //     return true;
 // ```
-// The directory is the part of `dbname` up to its last separator, after the
-// trailing separators of `dbname` are dropped: `-out sub/` names the
-// database `sub` of the current directory and makes no directory.
-// `d.GetName()` is what follows the last separator of the directory's path
-// as it was given (`..` for `nodir/..`), and `d.Exists()` is true for a
-// directory, also through a link.
-//
-// `CreatePath` makes the normalized path, but `CheckAccess` then tests the
-// path as it was given: with `-out nodir/../db` and no `nodir`, the current
-// directory "is created" (it exists), `nodir/..` does not resolve, and
-// makeblastdb stops with the write-permission message. LOSAT reproduces that
-// part of `CheckAccess`: a path that does not resolve.
-//
-// Not reproduced: the test of the write permission itself (`euidaccess`
-// with `W_OK`). The standard library has no call that asks for it, and a
-// trial file would touch the directory. A directory that exists and cannot
-// be written to therefore does not stop LOSAT here, before the log, with
-// "You do not have write permissions on ..."; LOSAT goes on, writes the log
-// header, removes what it can of an existing database (nothing, in such a
-// directory), and fails when it creates the first file of the first volume,
-// with the system's message for that file and the same exit status 255.
-/// `CBuildDatabase::CreateDirectories`.
-fn create_directories(dbname: &str) -> Result<(), WriteDbError> {
-    let dir_entry = dir_entry_path(dbname);
-    let Some(at) = dir_entry.rfind(is_any_separator) else {
-        return Ok(());
-    };
-    let d = dir_entry_path(&dir_entry[..=at]);
-    let name = d.rfind(is_any_separator).map_or(d, |at| &d[at + 1..]);
-    if !Path::new(d).is_dir() && !create_path(d) {
-        return Err(WriteDbError::Other(format!(
-            "Failed to create directory '{name}'"
-        )));
-    }
-    if std::fs::metadata(d).is_err() {
-        return Err(WriteDbError::Other(format!(
-            "You do not have write permissions on '{name}'"
-        )));
-    }
-    Ok(())
+/// `CDirEntry::CheckAccess(fWrite)` of the path as it was given: `euidaccess(path,
+/// F_OK | W_OK)`. glibc's `euidaccess` calls `access(path, mode)` when the process's real
+/// and effective user and group ids are equal, and LOSAT makes that call (`F_OK` is 0).
+/// For a set-user-ID or set-group-ID process glibc compares the mode bits with the
+/// effective ids instead; `access` asks with the real ids there.
+#[cfg(unix)]
+fn check_access_write(path: &str) -> bool {
+    rustix::fs::access(path, rustix::fs::Access::WRITE_OK).is_ok()
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:1722-1732
+// ```c++
+// #if defined(NCBI_OS_MSWIN)
+//     // Try to get effective access rights on this file object for
+//     // the current process owner.
+//     ACCESS_MASK mask = 0;
+//     if ( CWinSecurity::GetFilePermissions(GetPath(), &mask) ) {
+//         TMode perm = ( (mask & FILE_READ_DATA  ? fRead    : 0) |
+//                        (mask & FILE_WRITE_DATA ? fWrite   : 0) |
+//                        (mask & FILE_EXECUTE    ? fExecute : 0) );
+//         return (access_mode & perm) > 0;
+//      }
+//      return false;
+// ```
+/// `CDirEntry::CheckAccess(fWrite)` without the rights of the ACL (see
+/// `create_directories`): only whether the path resolves.
+#[cfg(not(unix))]
+fn check_access_write(path: &str) -> bool {
+    std::fs::metadata(path).is_ok()
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:2629-2641
@@ -496,7 +588,7 @@ fn create_directories(dbname: &str) -> Result<(), WriteDbError> {
 // ```
 /// `SeqDB_GetFileExtensions(is_protein, extn, eBDB_Version4)` without the
 /// letter of the molecule.
-const VOLUME_EXTENSIONS: [&str; 20] = [
+pub(crate) const VOLUME_EXTENSIONS: [&str; 20] = [
     "al", "in", "hr", "sq", "ni", "nd", "si", "sd", "pi", "pd", "js", "aa", "ab", "ac", "og", "hi",
     "hd", "ti", "td", "xm",
 ];
@@ -579,17 +671,18 @@ const LMDB_EXTENSIONS: [&str; 7] = ["db", "os", "ot", "tf", "to", "db-lock", "tf
 //
 // * `dbpath` is one database name. NCBI's reader splits the name at spaces
 //   and double quotes, so for an output path with such a character (a
-//   directory `my data`) the call above throws, nothing is removed, the new
-//   files are written beside the old ones (an old alias file then hides the
-//   new database), and makeblastdb ends with exit status 2 when it opens its
-//   result. LOSAT removes the existing database of that path and the build
-//   ends with status 0.
+//   directory `my data`) the call above throws: only the LMDB files removed
+//   before it are gone, the volume files stay, the new files are written over
+//   or beside them (an old alias file then hides the new database), and
+//   makeblastdb ends with exit status 2 when it opens its result. LOSAT
+//   removes the whole existing database of that path and the build ends with
+//   status 0.
 // * The volumes that an alias file names are those in the alias file's own
 //   directory. NCBI takes a volume of the same name in the current directory
 //   first, and so removes files that do not belong to the database being
 //   replaced.
-/// `DeleteBlastDb`: removes the files of the database `dbpath`; `true` when
-/// a file was removed.
+/// `DeleteBlastDb`: removes the files of the database `dbpath` (and a directory
+/// of one of their names, with its contents); `true` when one was removed.
 fn delete_blast_db(dbpath: &str, is_protein: bool) -> Result<bool, WriteDbError> {
     let letter = if is_protein { 'p' } else { 'n' };
     let seqtype = if is_protein {
@@ -609,9 +702,12 @@ fn delete_blast_db(dbpath: &str, is_protein: bool) -> Result<bool, WriteDbError>
         Err(_) => (Vec::new(), Vec::new()),
     };
 
+    // `CFile(fname).Remove()` is `CDirEntry::Remove(eRecursive)` (`super::dir_entry`): a
+    // directory of the name is removed with its contents, a symbolic link is removed and its
+    // target kept.
     let mut num_files_removed = 0;
     let mut remove = |name: &str| {
-        let removed = std::fs::remove_file(name).is_ok();
+        let removed = dir_entry::remove(Path::new(name));
         num_files_removed += u32::from(removed);
         removed
     };
@@ -619,13 +715,11 @@ fn delete_blast_db(dbpath: &str, is_protein: bool) -> Result<bool, WriteDbError>
         if !remove(&format!("{dbpath}.{letter}{lmdb}")) {
             let mut index = 0u32;
             // The removals of the volume files are not counted by NCBI.
-            while std::fs::remove_file(format!(
+            while dir_entry::remove(Path::new(&format!(
                 "{dbpath}.{}{}.{letter}{lmdb}",
                 index / 10,
                 index % 10
-            ))
-            .is_ok()
-            {
+            ))) {
                 index += 1;
             }
         }
@@ -688,14 +782,25 @@ impl<'a> BuildDatabase<'a> {
     // {
     //     m_LogFile << "Keep MBits: " << (keep_mbits ? "T" : "F") << endl;
     // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1094
+    // ```c++
+    //       m_ParseIDs     (((indexing & CWriteDB::eFullIndex) != 0 ? true : false)),
+    // ```
     /// The constructor, then `SetMembBits(no_bits, true)` as makeblastdb
-    /// calls it. `now` is the time of the build.
+    /// calls it. `now` is the time of the build, `version` the format version
+    /// (`dbver`), `platform` the platform whose makeblastdb the files follow,
+    /// `indices` `indexing` (`eFullIndex` for `-parse_seqids`, `eAddHash` for
+    /// `-hash_index`).
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         dbname: &str,
         title: &str,
         is_protein: bool,
         log: &'a mut dyn Write,
         now: &LocalTime,
+        version: DbVersion,
+        platform: Platform,
+        indices: Indices,
     ) -> Result<Self, WriteDbError> {
         create_directories(dbname)?;
         let output_dbname = create_absolute_path(dbname);
@@ -715,22 +820,179 @@ impl<'a> BuildDatabase<'a> {
             );
         }
         let _ = writeln!(log, "Keep MBits: T");
-        // The limit of 1000*1000*1000 that the constructor sets
-        // (build_db.cpp:1200) is replaced by makeblastdb before a sequence
-        // is added.
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1119-1132
+        // ```c++
+        //     m_OutputDb.Reset(new CWriteDB(output_dbname,
+        //                                   seqtype,
+        //                                   title,
+        //                                   indexing,
+        //                                   m_ParseIDs,
+        //                                   m_LongIDs,
+        //                                   use_gi_mask,
+        //                                   dbver,
+        //                                   limit_defline,
+        //                                   oid_masks));
+        //
+        //     // Standard 1 GB limit
+        //
+        //     m_OutputDb->SetMaxFileSize(1000*1000*1000);
+        // ```
+        // The limit of 1000*1000*1000 that the constructor sets is replaced
+        // by makeblastdb before a sequence is added.
         let output_db = WriteDb::new(
             &output_dbname,
             is_protein,
             title.as_bytes(),
             now.index_date().as_bytes(),
             1000 * 1000 * 1000,
+            version,
+            platform,
+            indices,
         );
+        let mut output_db = output_db;
+        output_db.set_column_date_fallback(now.log_time().as_bytes());
         Ok(Self {
             is_protein,
             log,
             output_db,
             output_dbname,
+            parse_ids: indices.full,
+            taxids: TaxIdSet::default(),
+            mask_data: None,
+            found_matching_masks: false,
+            address_order: None,
         })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1216-1219
+    // ```c++
+    // void CBuildDatabase::SetTaxids(CTaxIdSet & taxids)
+    // {
+    //     m_Taxids.Reset(& taxids);
+    // }
+    // ```
+    /// `SetTaxids`: the taxids of `-taxid` or `-taxid_map`.
+    pub fn set_taxids(&mut self, taxids: TaxIdSet) {
+        self.taxids = taxids;
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1211-1213
+    // ```c++
+    //     if (!m_Taxids->HasEverFixedId()) {
+    //         ERR_POST(Error << "No sequences matched any of the taxids provided.");
+    //     }
+    // ```
+    /// The message of `~CBuildDatabase` about the taxids: `Some` when `-taxid_map` matched no
+    /// sequence.
+    pub fn taxid_message(&self) -> Option<&'static str> {
+        (!self.taxids.has_ever_fixed_id())
+            .then_some("Error: [makeblastdb] No sequences matched any of the taxids provided.")
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1583-1594
+    // ```c++
+    // int
+    // CBuildDatabase::RegisterMaskingAlgorithm(EBlast_filter_program program,
+    //                                          const string        & options,
+    //                                          const string        & name)
+    // {
+    //     return m_OutputDb->RegisterMaskAlgorithm(program, options, name);
+    // }
+    // ```
+    /// `RegisterMaskingAlgorithm(program, options, name)`: see
+    /// [`WriteDb::register_mask_algorithm`].
+    pub fn register_masking_algorithm(
+        &mut self,
+        program: i32,
+        options: &[u8],
+        name: &[u8],
+    ) -> Result<i32, WriteDbError> {
+        self.output_db
+            .register_mask_algorithm(program, options, name)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1596-1607
+    // ```c++
+    // int
+    // CBuildDatabase::RegisterMaskingAlgorithm(const string        & program,
+    //                                          const string        & description,
+    //                                          const string        & options)
+    // {
+    //     return m_OutputDb->RegisterMaskAlgorithm(program, description, options);
+    // }
+    // ```
+    // The first argument of this overload is the id of `-mask_id` (the call
+    // in makeblastdb.cpp:966 passes `id_list[i], desc_list[i], opts`).
+    /// `RegisterMaskingAlgorithm(id, description, options)`: see
+    /// [`WriteDb::register_mask_algorithm_id`].
+    pub fn register_masking_algorithm_id(
+        &mut self,
+        id: &[u8],
+        description: &[u8],
+        options: &[u8],
+    ) -> Result<i32, WriteDbError> {
+        self.output_db
+            .register_mask_algorithm_id(id, description, options)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1609-1612
+    // ```c++
+    // void CBuildDatabase::SetMaskDataSource(IMaskDataSource & ranges)
+    // {
+    //     m_MaskData.Reset(& ranges);
+    // }
+    // ```
+    // The masks are looked up by the Seq-ids of each sequence (`bs->GetId()`): with
+    // `-parse_seqids` the parsed ids, else its `local id` (`add_masks_for_seq_id`).
+    /// `SetMaskDataSource`: the masked ranges of the sequences. makeblastdb calls it when it
+    /// reads the first mask list that has masks, with an empty set, and goes on inserting into
+    /// it through [`Self::mask_data_source_mut`] (`process_mask_data` does the same); every
+    /// insert comes before the first sequence is added.
+    pub fn set_mask_data_source(&mut self, ranges: MaskedRangeSet) {
+        self.mask_data = Some(ranges);
+    }
+
+    /// The set that `set_mask_data_source` handed over, to insert into.
+    pub fn mask_data_source_mut(&mut self) -> Option<&mut MaskedRangeSet> {
+        self.mask_data.as_mut()
+    }
+
+    /// `m_FoundMatchingMasks`: whether a sequence has been given mask data.
+    #[cfg(test)]
+    pub fn found_matching_masks(&self) -> bool {
+        self.found_matching_masks
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1204-1210
+    // ```c++
+    // CBuildDatabase::~CBuildDatabase()
+    // {
+    //     if (m_MaskData.NotEmpty() && !m_FoundMatchingMasks) {
+    //         ERR_POST(Error << "No sequences matched any of the masks provided.\n"
+    //                        << "Please ensure that the -parse_seqids option is used "
+    //                        << "in the\nfiltering program as well as makeblastdb.");
+    //     }
+    // ```
+    // The message is posted when the `CBuildDatabase` is destroyed: in makeblastdb, when the
+    // application object goes (`m_DB` is a member), so after the log of `EndBuild`, after the
+    // exception message of a failed build and after the metadata file. The caller of LOSAT's
+    // build calls this at that point.
+    /// The destructor's diagnostic: `warn` gets the message (without its final newline)
+    /// when mask data were read and no sequence matched.
+    pub fn post_destruction_diagnostics(&self, warn: Warn<'_>) {
+        if self.mask_data.is_some() && !self.found_matching_masks {
+            warn(
+                b"Error: [makeblastdb] No sequences matched any of the masks provided.\n\
+                  Please ensure that the -parse_seqids option is used in the\n\
+                  filtering program as well as makeblastdb.",
+            );
+        }
+    }
+
+    /// Test hook: see [`WriteDb::set_column_date`].
+    #[cfg(test)]
+    pub(crate) fn set_column_date(&mut self, index: usize, date: &[u8]) {
+        self.output_db.set_column_date(index, date);
     }
 
     /// `GetOutputDbName`: the absolute name of the database.
@@ -741,6 +1003,11 @@ impl<'a> BuildDatabase<'a> {
     /// The log stream (`m_LogFile`).
     pub fn log(&mut self) -> &mut dyn Write {
         self.log
+    }
+
+    /// The database being written (`m_OutputDb`).
+    pub fn output_db(&self) -> &WriteDb {
+        &self.output_db
     }
 
     /// `SetMaxFileSize`.
@@ -799,7 +1066,8 @@ impl<'a> BuildDatabase<'a> {
     //     return found;
     // ```
     // The FASTA source applies `s_FixBioseqDeltas` before it hands a
-    // sequence over; its errors arrive as errors of the source.
+    // sequence over; its errors arrive as errors of the source. A record past
+    // NCBI's 32-bit length comes without data and meets it here (`past_seq_pos`).
     /// `AddSequences(IBioseqSource &)`: `true` when a sequence was added.
     fn add_sequences<R: Read>(
         &mut self,
@@ -809,14 +1077,21 @@ impl<'a> BuildDatabase<'a> {
         let mut found = false;
         let start = std::time::Instant::now();
         let mut count = 0u64;
-        while let Some(bioseq) = source.next_bioseq(warn).map_err(|error| {
-            if error.out_of_memory {
-                WriteDbError::OutOfMemory
-            } else {
-                WriteDbError::Creation(error.message)
-            }
+        while let Some(mut bioseq) = source.next_bioseq(warn).map_err(|error| match error.kind {
+            SourceErrorKind::Creation => WriteDbError::Creation(error.message),
+            SourceErrorKind::OutOfMemory => WriteDbError::OutOfMemory,
         })? {
-            let bioseq_id = format!("lcl|{}", bioseq.local_id);
+            let bioseq_id = bioseq.first_id_fasta();
+            if let Some(parsed) = bioseq.parsed.as_mut() {
+                if let Some(gi) = deflines::large_gi_to_skip(&parsed.ids, &mut *warn) {
+                    let _ = writeln!(
+                        self.log,
+                        "Ignoring gi '{gi}' as it has value larger then 4294967295"
+                    );
+                    continue;
+                }
+                deflines::localize_other_molecule(&mut parsed.ids, self.is_protein, &mut *warn);
+            }
             if bioseq.is_aa != self.is_protein {
                 continue;
             }
@@ -828,10 +1103,65 @@ impl<'a> BuildDatabase<'a> {
             }
             let mut added = false;
             if bioseq.length != 0 {
-                self.output_db.extract_bioseq_deflines(&bioseq);
-                if bioseq.seq_data.is_some() {
-                    self.output_db.add_sequence(bioseq)?;
-                    added = true;
+                if self.parse_ids {
+                    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:473-477,497
+                    // ```c++
+                    //     CRef<CBlast_def_line_set> headers =
+                    //         CWriteDB::ExtractBioseqDeflines(*bs, m_ParseIDs, m_LongIDs,
+                    //                 m_ScanBioseq4CFastaReaderUsrObjct);
+                    //
+                    //     x_EditHeaders(headers);
+                    //     ...
+                    //     m_OutputDb->SetDeflines(*headers);
+                    // ```
+                    // `x_EditHeaders` sets the taxids (`FixTaxId`); its other edits do
+                    // nothing for makeblastdb's FASTA input (no GIs removed, no
+                    // membership bits or leaf taxids given).
+                    let mut headers = deflines::extract_bioseq_deflines(&bioseq, &mut *warn);
+                    self.output_db.post_extracted_deflines(&headers);
+                    self.taxids.fix_tax_id(&mut headers);
+                    if let Some(past) = bioseq.past_seq_pos {
+                        return Err(self.past_seq_pos(past, &bioseq, &bioseq_id, &mut *warn));
+                    }
+                    if bioseq.seq_data.is_some() {
+                        // `bs->GetId()`: the ids after `AddSequences`' edit of the ones of the
+                        // other molecule type (`localize_other_molecule`, above).
+                        let ids = self
+                            .mask_data
+                            .is_some()
+                            .then(|| bioseq.parsed.as_ref().map(|parsed| parsed.ids.clone()))
+                            .flatten();
+                        self.output_db.add_sequence(bioseq)?;
+                        self.output_db.set_deflines(headers);
+                        added = true;
+                        if let Some(ids) = ids {
+                            self.add_masks_for_seq_id(&ids, &bioseq_id)?;
+                        }
+                    }
+                } else {
+                    // The definition line without `-parse_seqids` gets the global taxid
+                    // of `-taxid` (or 0); `-taxid_map` requires `-parse_seqids`.
+                    self.output_db.extract_bioseq_deflines(&bioseq);
+                    if let Some(past) = bioseq.past_seq_pos {
+                        return Err(self.past_seq_pos(past, &bioseq, &bioseq_id, &mut *warn));
+                    }
+                    if bioseq.seq_data.is_some() {
+                        // `bs->GetId()` is the `local id N` that `CFastaReader` numbers the
+                        // sequences by (`CSeqIdGenerator::GenerateID` without a prefix); a
+                        // number that is no `int` matches none.
+                        let ids: Vec<ParsedSeqId> = self
+                            .mask_data
+                            .is_some()
+                            .then(|| bioseq.local_id.parse::<i32>().ok())
+                            .flatten()
+                            .map(|number| ParsedSeqId::Local(ObjectId::Id(number)))
+                            .into_iter()
+                            .collect();
+                        self.output_db.add_sequence(bioseq)?;
+                        self.output_db.set_taxid(self.taxids.global_taxid());
+                        added = true;
+                        self.add_masks_for_seq_id(&ids, &bioseq_id)?;
+                    }
                 }
             }
             // The serializer posts its diagnostics while the sequence is
@@ -856,6 +1186,56 @@ impl<'a> BuildDatabase<'a> {
             );
         }
         Ok(found)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:446-466
+    // ```c++
+    // void
+    // CBuildDatabase::x_AddMasksForSeqId(const list< CRef<CSeq_id> >& ids)
+    // {
+    //     if (m_MaskData.Empty()) {
+    //         return;
+    //     }
+    //
+    //     const CMaskedRangesVector& rng = m_MaskData->GetRanges(ids);
+    //     if (rng.empty()) {
+    //         return;
+    //     }
+    //
+    //     vector <TGi> gis;
+    //     ITERATE(list< CRef<CSeq_id> >, id, ids) {
+    //         if ((*id)->IsGi()) {
+    //             gis.push_back((*id)->GetGi());
+    //         }
+    //     }
+    //     m_OutputDb->SetMaskData(rng, gis);
+    //     m_FoundMatchingMasks = true;
+    // }
+    // ```
+    // The Seq-ids are `bs->GetId()`: the parsed ids of a sequence with `-parse_seqids`, its
+    // `local id` without it. A sequence with no 31-bit local id has none.
+    //
+    // Where NCBI's order of the ranges is the memory addresses', LOSAT's order is written, so that
+    // `SetMaskData`'s checks of all the algorithms and the rest of the build run as in NCBI; the
+    // first such sequence is kept (`sequence`: its first Seq-id) for `end_build`.
+    fn add_masks_for_seq_id(
+        &mut self,
+        ids: &[ParsedSeqId],
+        sequence: &str,
+    ) -> Result<(), WriteDbError> {
+        let Some(mask_data) = self.mask_data.as_mut() else {
+            return Ok(());
+        };
+        let found = mask_data.get_ranges(ids);
+        if ranges_are_empty(found.ranges) {
+            return Ok(());
+        }
+        self.output_db.set_mask_data(found.ranges)?;
+        self.found_matching_masks = true;
+        if let (None, Some(seq_ids)) = (&self.address_order, &found.address_ordered) {
+            self.address_order = Some(address_order_refusal(seq_ids, sequence));
+        }
+        Ok(())
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1403-1420
@@ -886,7 +1266,8 @@ impl<'a> BuildDatabase<'a> {
         fasta_file: R,
         warn: Warn<'_>,
     ) -> Result<(), WriteDbError> {
-        let mut source = FastaBioseqSource::new(fasta_file, self.is_protein);
+        let mut source =
+            FastaBioseqSource::with_parse_ids(fasta_file, self.is_protein, self.parse_ids);
         let result = match self.add_sequences(&mut source, &mut *warn) {
             Ok(true) => Ok(()),
             Ok(false) => Err(WriteDbError::Creation("No sequences added".to_string())),
@@ -897,6 +1278,53 @@ impl<'a> BuildDatabase<'a> {
             let _ = self.end_build(true, warn);
         }
         result
+    }
+
+    /// `s_FixBioseqDeltas` on a record past NCBI's 32-bit length (`Bioseq::past_seq_pos`),
+    /// after the definition lines (`x_EditAndAddBioseq`), whose diagnostics come first.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:297-304
+    /// ```c++
+    ///     if (bs->GetInst().CanGetMol() &&
+    ///         !CSeq_inst::IsNa(bs->GetInst().GetMol())) {
+    ///         CConstRef<CSeq_id> id = FindBestChoice(bs->GetId(), CSeq_id::BestRank);
+    ///         CNcbiOstrstream oss;
+    ///         oss << id->AsFastaString() << ": Protein delta sequences are not supported.";
+    ///         string msg = CNcbiOstrstreamToString(oss);
+    ///         NCBI_THROW(CMultisourceException, eArg, msg);
+    ///     }
+    /// ```
+    #[cold]
+    fn past_seq_pos(
+        &mut self,
+        past: PastSeqPos,
+        bioseq: &Bioseq,
+        bioseq_id: &str,
+        warn: Warn<'_>,
+    ) -> WriteDbError {
+        self.post_diagnostics(warn);
+        match past {
+            PastSeqPos::ProteinDelta => {
+                let best_id = match &bioseq.parsed {
+                    Some(parsed) => {
+                        let mut out = Vec::new();
+                        if let Some(id) = find_best(&parsed.ids, best_rank_score) {
+                            crate::seqid::label::fasta(id, &mut out);
+                        }
+                        String::from_utf8_lossy(&out).into_owned()
+                    }
+                    None => format!("lcl|{}", bioseq.local_id),
+                };
+                WriteDbError::Exception(NcbiException::new(
+                    PROTEIN_DELTA,
+                    format!("{best_id}: Protein delta sequences are not supported."),
+                ))
+            }
+            PastSeqPos::Refused { length } => WriteDbError::Other(format!(
+                "{} is not supported by LOSAT's makeblastdb",
+                past_seq_pos_refusal(bioseq_id, length)
+            )),
+        }
     }
 
     /// Hands the diagnostics that the writer posted since the last call to
@@ -961,16 +1389,33 @@ impl<'a> BuildDatabase<'a> {
     // that `x_EndBuild` writes to the log. `warn` gets them at that point, so
     // that the log and the messages keep makeblastdb's order when both
     // streams have one destination.
+    //
+    // A `Close` that threw leaves files open: they are removed open (their later writes go to
+    // the removed files), and the writer's destructors run after the removal
+    // (`WriteDb::destroy_after_failed_close`).
+    //
+    // LOSAT's refusal of masks whose order NCBI takes from memory addresses (`address_order`)
+    // comes here, when the build would otherwise succeed: after a close that did not fail, in an
+    // `EndBuild` without `erase`. It ends the build as an error of NCBI's build ends it
+    // (`EndBuild(true)` in `AddFasta`, build_db.cpp:1415-1417): the files that `ListFiles` names
+    // are removed, which leaves what NCBI leaves after its error at the last sequence (nothing in
+    // version 4; the `.nos`, `.not`, `.ntf` and `.nto` files in version 5). The other refusal
+    // raised inside the build, `mask_data`'s column that is created too late, comes from
+    // `SetMaskData` inside `AddFasta` and so ends the build in the same way. A build that ends
+    // with an error (`erase`, a failed close) reports that error and drops the refusal: NCBI's
+    // order never reaches a file there.
     /// `EndBuild`: closes the database; with `erase`, or when closing fails,
     /// removes its files. `Ok(false)` when no volume was created. `warn`
-    /// takes the diagnostics of the close.
+    /// takes the diagnostics of the close. A pending refusal of LOSAT (`address_order`) is
+    /// raised after a close without `erase` that did not fail, with the files removed.
     pub fn end_build(&mut self, erase: bool, warn: Warn<'_>) -> Result<bool, WriteDbError> {
         let close_error = self.output_db.close().err();
         self.post_diagnostics(warn);
-        let erase = erase || close_error.is_some();
-        if erase {
-            self.output_db.abandon();
-        }
+        let refusal = self
+            .address_order
+            .take()
+            .filter(|_| !erase && close_error.is_none());
+        let erase = erase || close_error.is_some() || refusal.is_some();
         let vols = self.output_db.list_volumes();
         let files = self.output_db.list_files();
         let _ = writeln!(self.log);
@@ -979,19 +1424,32 @@ impl<'a> BuildDatabase<'a> {
             let _ = writeln!(self.log, "No volumes were created.");
             success = false;
         } else if erase {
+            // `CFile(*iterf).Remove()`: `CDirEntry::Remove(eRecursive)`.
             for file in &files {
-                let _ = std::fs::remove_file(file);
+                let _ = dir_entry::remove(Path::new(file));
             }
         }
         let _ = writeln!(self.log);
+        if let Some(refusal) = refusal {
+            return Err(refusal);
+        }
+        if close_error.is_some() {
+            self.output_db.destroy_after_failed_close();
+        }
+        // `NCBI_RETHROW(*close_exception, CWriteDBException, eArgErr, close_exception->GetMsg())`:
+        // an exception of the close becomes a creation error with its message only (no report).
         match close_error {
             Some(
                 WriteDbError::Creation(message)
                 | WriteDbError::Options(message)
+                | WriteDbError::Database(message)
                 | WriteDbError::Other(message),
             ) => Err(WriteDbError::Creation(message)),
-            // LOSAT's own errors (a file that could not be written or
-            // renamed) and a failed allocation keep their kind.
+            Some(WriteDbError::Exception(e)) => {
+                Err(WriteDbError::Creation(e.get_msg().to_string()))
+            }
+            // A creation error whose text is not UTF-8, an error of a write of LMDB's
+            // data file (`Io`) and a failed allocation keep their kind.
             Some(error) => Err(error),
             None => Ok(success),
         }
@@ -1002,7 +1460,7 @@ impl<'a> BuildDatabase<'a> {
 mod tests {
     use super::*;
 
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "wasi")))]
     #[test]
     fn absolute_paths_are_normalized_as_ncbi_does() {
         assert_eq!(normalize_absolute_path("/a//b/./c/../d/"), "/a/b/d");

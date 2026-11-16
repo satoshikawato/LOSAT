@@ -10,6 +10,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod temp_support;
+use temp_support::{worker_log_if_unset, TempFile};
+
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 
 fn fixture(name: &str) -> PathBuf {
@@ -77,7 +80,7 @@ fn search(
     queries: &Queries,
     threads: u32,
     vars: &[(&str, &str)],
-) -> (Vec<u8>, String) {
+) -> (Vec<u8>, String, Option<TempFile>) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
@@ -89,12 +92,7 @@ fn search(
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat-newtonlanes8-worker.log"),
-        );
-    }
+    let log = worker_log_if_unset(&mut command, "newton_lanes8_default_worker");
     let output = command
         .arg(program)
         .arg("-query")
@@ -111,7 +109,7 @@ fn search(
         output.status.success(),
         "{program} {vars:?} threads {threads}: {stderr}"
     );
-    (output.stdout, stderr)
+    (output.stdout, stderr, log)
 }
 
 /// The number after `key=` on the standard-error line that starts with `prefix`, or `None` if
@@ -134,10 +132,10 @@ fn the_default_takes_eight_lane_batches_on_aarch64_only() {
     const LANES8: &str = "[X_STATS] NEWTONLANES8 ";
     for case in CASES {
         let queries = Queries::new(case, "stats");
-        let (expected, expected_stderr) = search(case, &queries, 1, &[]);
+        let (expected, expected_stderr, _log) = search(case, &queries, 1, &[]);
         assert!(!expected.is_empty(), "{case:?}: no hits");
         assert_eq!(expected_stderr, "", "{case:?}");
-        let (report, stderr) = search(case, &queries, 1, &[STATS]);
+        let (report, stderr, _log) = search(case, &queries, 1, &[STATS]);
         assert_eq!(report, expected, "{case:?}");
         let batches = counter(&stderr, LANES, "batches")
             .unwrap_or_else(|| panic!("{case:?}: no lanes line:\n{stderr}"));

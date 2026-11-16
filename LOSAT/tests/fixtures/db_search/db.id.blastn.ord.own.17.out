@@ -1,0 +1,4 @@
+@HD	VN:1.2	SO:coordinate	GO:reference
+@SQ	SN:Query_1	LN:660
+@PG	ID:0	VN:2.17.0+	CL:/home/kawato/micromamba/bin/blastn -db tests/db_search/ids/nord_v5 -query tests/db_search/ids/nord_q1.fna -outfmt 17 -num_threads 1 	PN:blastn
+BL_ORD_ID:1	0	Query_1	1	255	660M	*	0	0	*	*	AS:i:660	EV:f:0	NM:i:0	PI:f:100.00	BS:f:1219.91

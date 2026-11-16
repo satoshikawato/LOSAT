@@ -1,0 +1,96 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: n5l
+           2 sequences; 1,400 total letters
+
+
+
+Query= P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName:
+Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains:
+RecName: Full=Hemopressin [Homo sapiens] >P69906.2 RecName:
+Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName:
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin
+[Pan paniscus] >P69907.2 RecName: Full=Hemoglobin subunit alpha;
+AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain;
+Contains: RecName: Full=Hemopressin [Pan troglodytes]
+
+Length=142
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+nonly alone                                                           15.0    1.6  
+nloc1 local line                                                      15.0    1.6  
+
+
+>nonly alone
+Length=600
+
+ Score = 15.0 bits (27),  Expect = 1.6, Method: Compositional matrix adjust.
+ Identities = 6/8 (75%), Positives = 6/8 (75%), Gaps = 0/8 (0%)
+ Frame = +1
+
+Query  114  LPAEFTPA  121
+            LPAE  PA
+Sbjct  376  LPAEEAPA  399
+
+
+ Score = 13.9 bits (24),  Expect = 4.5, Method: Compositional matrix adjust.
+ Identities = 5/9 (56%), Positives = 6/9 (67%), Gaps = 0/9 (0%)
+ Frame = +1
+
+Query  16   GKVGAHAGE  24
+            G V AH G+
+Sbjct  145  GGVTAHLGD  171
+
+
+>NL000001.1 gb line
+Length=800
+
+ Score = 15.0 bits (27),  Expect = 1.6, Method: Compositional matrix adjust.
+ Identities = 6/8 (75%), Positives = 6/8 (75%), Gaps = 0/8 (0%)
+ Frame = +2
+
+Query  114  LPAEFTPA  121
+            LPAE  PA
+Sbjct  476  LPAEEAPA  499
+
+
+ Score = 13.9 bits (24),  Expect = 4.6, Method: Compositional matrix adjust.
+ Identities = 5/9 (56%), Positives = 6/9 (67%), Gaps = 0/9 (0%)
+ Frame = +2
+
+Query  16   GKVGAHAGE  24
+            G V AH G+
+Sbjct  245  GGVTAHLGD  271
+
+
+
+Lambda      K        H        a         alpha
+   0.319    0.130    0.385    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 49442
+
+
+  Database: n5l
+    Posted date:  Oct 31, 2026  9:49 PM
+  Number of letters in database: 1,400
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

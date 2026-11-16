@@ -11,12 +11,12 @@ changes follow the root [`AGENTS.md`](../../AGENTS.md).
 | `src/lib.rs` | the exports |
 | `src/run.rs` | argv parsing (`validate`) and `run`: one `run_local` call writes every supported format, the HSP records and the diagnostics |
 | `src/store.rs` | registered inputs (`register`, `release`) |
-| `src/scan.rs` | the index scan (`scan_*`), reproducing `bio::io::fasta` |
+| `src/scan.rs` | the index scan (`scan_*`), reproducing NCBI's reader |
 | `src/describe.rs` | `describe`, generated from the engine's clap definitions |
 | `src/emit.rs`, `src/json.rs` | output streams to the host, JSON |
 | `tests/scan_properties.rs` | property tests of the scan against the parser |
 | `tests/v_abi.js` | V-ABI: both reactors under Node, compared with the native CLI |
-| `tools/check_build_identity.py` | build identity with the certified engine builds (plan TD-6) |
+| `tools/check_build_identity.py` | build identity with LOSAT's command-WASI release builds (plan TD-6) |
 | `tools/build_reactors.py` | builds both reactors and records their identity |
 | `tools/v_abi_cases.py` | the V-ABI searches (quick for CI, full for gate records) |
 | `tools/run_v_abi_parallel.py` | runs `tests/v_abi.js` over a case list in parallel parts and merges the results |
@@ -37,7 +37,11 @@ node web/adapter/tests/v_abi.js --native LOSAT/target/release/losat \
 ```
 
 The full V-ABI suite (`--suite full`) uses the recorded input spellings of the
-regression cases and needs the Gate A lexical root described in
+Gate A regression cases and needs the Gate A lexical root described in
 [`docs/evidence/losat_web_e1a/README.md`](../../docs/evidence/losat_web_e1a/README.md).
+Its TBLASTN Stage G searches run from the repository root with the run root of
+`LOSAT/tests/frozen_paths.py` and carry `frozen_prefix`, with which `v_abi.js` puts
+the frozen path prefix back into an output before comparing its frozen hash (the
+one replacement of a checkout-path prefix, Owner 2026-11-05).
 Its genome-scale TBLASTX searches take a long time in one serial reactor, so gate records
 run it with `tools/run_v_abi_parallel.py` (same options as `v_abi.js`, plus `--jobs`).

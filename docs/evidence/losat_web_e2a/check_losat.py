@@ -13,6 +13,13 @@ first differing line of a difference, and exits 1 on any difference.
 A row whose `files` column is `xinclude` (outfmt 13 or 14) runs with `-out <tmp>/<fixture_id>.out`;
 its master file must equal <fixture_id>.out, each side file <fixture_id>.out_<n>.json|xml, their
 number the frozen number, and standard output must be empty (LOSAT/tests/xinclude_fixtures.py).
+A psiblast row whose `files` column is `pssm` runs with `-out_ascii_pssm <tmp>/<fixture_id>.pssm`
+(`pssm-asn`: `-out_pssm <tmp>/<fixture_id>.asn`; `pssm-both`: both); its report is compared as usual,
+and the PSSM files it writes must be those of `side_sha256` byte for byte (none when it is empty):
+the frozen ones, or in the kinds `pssm-asn` and `pssm-both` a file over 64 KB by its SHA-256 alone. With `--library` LOSAT is `examples/library_command_line`, the
+same search through the library API, which writes the PSSM files, runs psiblast's rounds and
+searches a PSSM query (`-in_pssm`, a query cell `pssm-gz:` or `pssm:`; the library's `Inputs::pssm`)
+as the command line.
 
 A row with the contract `approved_db_gencode_deviation` (AGENTS.md's approved TBLASTX
 exception: LOSAT's local search applies a non-default -db_gencode to the subject) is
@@ -21,7 +28,7 @@ outside the lines that name the database (`normalize_database_lines`); its line 
 `exception` and how many lines differ from NCBI's local search (<fixture_id>.out).
 
 Usage: check_losat.py --losat LOSAT [--programs blastn,blastp,tblastn,tblastx,blastx,psiblast] [--threads N]
-       [--only PREFIX]
+       [--only PREFIX] [--library]
 """
 from __future__ import annotations
 
@@ -78,6 +85,8 @@ def main() -> int:
     parser.add_argument("--programs", default="blastn,blastp,tblastn,tblastx,blastx,psiblast")
     parser.add_argument("--threads", type=int)
     parser.add_argument("--only", default="")
+    parser.add_argument("--library", action="store_true",
+                        help="--losat is examples/library_command_line (the search through the library API)")
     args = parser.parse_args()
     programs = set(args.programs.split(","))
     differing = []
@@ -87,9 +96,13 @@ def main() -> int:
         threads = ["-num_threads", str(args.threads)] if args.threads else []
         command = [str(args.losat.resolve()), row["program"], *search_argv(row), *threads]
         files = xinclude.wants_files(row)
+        pssm = xinclude.wants_pssm(row)
         if files:
             written = xinclude.run_with_files(command, row["fixture_id"], outfmt(row), cwd=ENGINE)
             run = written.run
+        elif pssm:
+            pssms = xinclude.run_with_pssm(command, row["fixture_id"], xinclude.files_kind(row), cwd=ENGINE)
+            run = pssms.run
         else:
             run = subprocess.run(command, cwd=ENGINE, capture_output=True)
         expected_err_path = FIXTURES / f"{row['fixture_id']}.err"
@@ -116,6 +129,8 @@ def main() -> int:
             problems.append("stdout " + first_difference(expected_out, run.stdout))
         if run.returncode == 0 and run.stderr != expected_err:
             problems.append("stderr " + first_difference(expected_err, run.stderr))
+        if pssm:
+            problems += xinclude.pssm_problems(pssms, row, FIXTURES, first_difference)
         if problems:
             differing.append(row["fixture_id"])
         status = "DIFF" if problems else "same"

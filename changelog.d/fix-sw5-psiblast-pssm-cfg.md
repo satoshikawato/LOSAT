@@ -1,0 +1,1 @@
+- Tests: `tests/psiblast_pssm_files.rs` compiles again on Windows and macOS. Its standard-input test (`-in_pssm -`, #906) runs on every platform, so the helpers it uses (`scratch`, `path`, the binary's path, `Path` and `Command`) are no longer limited to Linux; the tests that write to `/dev/full` or `/dev/stdout` stay Linux-only. No output changes.

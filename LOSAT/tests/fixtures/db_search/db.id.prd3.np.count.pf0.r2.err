@@ -1,0 +1,2 @@
+Error: [psiblast] SeqDB: Taxid metadata indicates (8) entries but file has room for (7).
+Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence properties and unconditional composition-based score adjustment is not supported with PSSMs, resetting to default value of standard composition-based statistics 

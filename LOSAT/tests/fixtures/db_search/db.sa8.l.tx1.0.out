@@ -1,0 +1,79 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: n5l
+           2 sequences; 1,400 total letters
+
+
+
+Query= qnn
+
+Length=1120
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+nloc1 local line                                                      325     4e-93  1
+nonly alone                                                           247     1e-69  1
+
+
+>NL000001.1 gb line
+Length=800
+
+ Score = 325 bits (703),  Expect = 4e-93
+ Identities = 133/133 (100%), Positives = 133/133 (100%), Gaps = 0/133 (0%)
+ Frame = +1/+1
+
+Query  1    SLIMAQIERWRQA*HMQVER*QEAACCFADEWRTGE*CLGNCLMEGDNYWKR*LIPHNVA  180
+            SLIMAQIERWRQA*HMQVER*QEAACCFADEWRTGE*CLGNCLMEGDNYWKR*LIPHNVA
+Sbjct  1    SLIMAQIERWRQA*HMQVER*QEAACCFADEWRTGE*CLGNCLMEGDNYWKR*LIPHNVA  180
+
+Query  181  STKRGTLGPLAIGCAQMGLASRWGNGSPRRRSLAGLRG*PATLELRHGPDSYGRQQWGIL  360
+            STKRGTLGPLAIGCAQMGLASRWGNGSPRRRSLAGLRG*PATLELRHGPDSYGRQQWGIL
+Sbjct  181  STKRGTLGPLAIGCAQMGLASRWGNGSPRRRSLAGLRG*PATLELRHGPDSYGRQQWGIL  360
+
+Query  361  HNGRKPDAAMXRV  399
+            HNGRKPDAAMXRV
+Sbjct  361  HNGRKPDAAMXRV  399
+
+
+>nonly alone
+Length=600
+
+ Score = 247 bits (533),  Expect = 1e-69
+ Identities = 99/100 (99%), Positives = 100/100 (100%), Gaps = 0/100 (0%)
+ Frame = -3/-3
+
+Query  401  YTRXMAASGLRPLCNIPHCCLP*ESGPCLSSSVAGHPLRPARDRRLGEPLPHLLANPIWA  222
+            +TRXMAASGLRPLCNIPHCCLP*ESGPCLSSSVAGHPLRPARDRRLGEPLPHLLANPIWA
+Sbjct  301  HTRXMAASGLRPLCNIPHCCLP*ESGPCLSSSVAGHPLRPARDRRLGEPLPHLLANPIWA  122
+
+Query  221  HPMARGPKVPLFVLATLCGISYRFQ*LSPSIRQFPRHYSP  102
+            HPMARGPKVPLFVLATLCGISYRFQ*LSPSIRQFPRHYSP
+Sbjct  121  HPMARGPKVPLFVLATLCGISYRFQ*LSPSIRQFPRHYSP  2
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 149600
+
+
+  Database: n5l
+    Posted date:  Oct 31, 2026  9:49 PM
+  Number of letters in database: 1,400
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

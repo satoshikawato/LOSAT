@@ -79,7 +79,7 @@ fn record(path: &Path, id: &str) -> String {
         .collect()
 }
 
-/// The query windows, and the proteome's database made by `losat makedb`.
+/// The query windows, and the proteome's database made by `losat makeblastdb`.
 fn inputs(dir: &TestDir) -> (PathBuf, String) {
     let protein = record(&fasta("MejoMJNV.faa"), "BDT62816.1");
     assert_eq!(protein.len(), 6_729);
@@ -92,15 +92,15 @@ fn inputs(dir: &TestDir) -> (PathBuf, String) {
     std::fs::write(&query, windows).expect("write the windows");
     let db = dir.0.join("proteome").to_str().unwrap().to_string();
     let output = losat()
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(fasta("MejoMJNV.faa"))
         .args(["-dbtype", "prot", "-out", &db])
         .output()
-        .expect("run losat makedb");
+        .expect("run losat makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     (query, db)

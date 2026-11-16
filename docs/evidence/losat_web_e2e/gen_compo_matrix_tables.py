@@ -97,6 +97,7 @@ def generate(src: Path) -> str:
         "/// joint and background probabilities of its `Compo_FrequencyData`.",
         "#[derive(Debug)]",
         "pub struct CompoMatrixData {",
+        "    #[cfg(test)]",
         "    pub name: &'static str,",
         "    pub freq_ratios: &'static [[f64; 28]; 28],",
         "    pub joint_probs: &'static [[f64; 20]; 20],",
@@ -130,7 +131,7 @@ def generate(src: Path) -> str:
     out.append("/// ```")
     out.append(f"pub static COMPO_MATRIX_DATA: [CompoMatrixData; {len(names)}] = [")
     for name in names:
-        out.append(f"    CompoMatrixData {{ name: \"{name}\", freq_ratios: &{name}_FREQ_RATIOS, "
+        out.append(f"    CompoMatrixData {{ #[cfg(test)] name: \"{name}\", freq_ratios: &{name}_FREQ_RATIOS, "
                    f"joint_probs: &{name}_JOINT_PROBS, background: &{name}_BG }},")
     out.append("];")
     return "\n".join(out) + "\n"

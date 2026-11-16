@@ -1,0 +1,2 @@
+Error: (CStringException::eConvert) Cannot convert string 'abc' to Uint8 (m_Pos = 0)
+Error: (106.16) Application's execution failed (CStringException::eConvert) Cannot convert string 'abc' to Uint8 (m_Pos = 0)

@@ -1,0 +1,21 @@
+{
+  "version": "1.2",
+  "dbname": "nz_reppo",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "nz reppo",
+  "number-of-letters": 245,
+  "number-of-sequences": 4,
+  "last-updated": "2026-11-06T23:47:00",
+  "number-of-volumes": 1,
+  "bytes-total": 853,
+  "bytes-to-cache": 354,
+  "files": [
+    "nz_reppo.phr",
+    "nz_reppo.pin",
+    "nz_reppo.pog",
+    "nz_reppo.psd",
+    "nz_reppo.psi",
+    "nz_reppo.psq"
+  ]
+}

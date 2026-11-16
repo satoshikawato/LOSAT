@@ -153,8 +153,10 @@ pub trait SamLetters {
 }
 
 /// No letters (the specification has no `SQ`).
+#[cfg(test)]
 pub struct NoLetters;
 
+#[cfg(test)]
 impl SamLetters for NoLetters {
     fn letters(&mut self, _: SamRow, _: usize, _: usize, _: usize, _: &mut Vec<u8>) -> Result<()> {
         Ok(())
@@ -741,8 +743,8 @@ mod tests {
         for plain in ["sq", "foo SQ,SR", "std", "SQSR", "S R"] {
             assert_eq!(parse(plain), SamSpec::default(), "{plain}");
         }
-        assert_eq!(parse("foo SQ").sequence, true);
-        assert_eq!(parse("SQ  SQ").subject_as_reference, false);
+        assert!(parse("foo SQ").sequence);
+        assert!(!parse("SQ  SQ").subject_as_reference);
     }
 
     #[test]
@@ -780,6 +782,7 @@ mod tests {
                 id: SeqId::Local("Subject_1"),
                 searched_length: 100,
                 offset: 0,
+                use_this_seqid: &[],
             }),
             key: 0,
             index: 0,
@@ -935,6 +938,7 @@ mod tests {
                 id: SeqId::Local(id),
                 searched_length: 100,
                 offset: 0,
+                use_this_seqid: &[],
             }),
             key: index as u64,
             index,

@@ -1,0 +1,32 @@
+Seq-loc ::= int {
+  from 72,
+  to 91,
+  id local id 1
+}
+Seq-loc ::= packed-int {
+  {
+    from 20,
+    to 35,
+    id local id 2
+  },
+  {
+    from 66,
+    to 77,
+    id local id 2
+  }
+}
+Seq-loc ::= int {
+  from 15,
+  to 31,
+  id local id 3
+}
+Seq-loc ::= int {
+  from 23,
+  to 41,
+  id local id 4
+}
+Seq-loc ::= int {
+  from 76,
+  to 93,
+  id local id 5
+}

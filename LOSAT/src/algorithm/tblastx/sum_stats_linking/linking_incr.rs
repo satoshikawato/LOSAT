@@ -203,7 +203,7 @@
 //! # Index 1 (large gaps, link_hsps.c:771-896)
 //!
 //! The candidates of H are the remaining HSPs before H with qo > qe(H) and
-//! so > se(H). Every pass sweeps the remaining HSPs with score > cutoff[1] by
+//! so > se(H). Every pass sweeps the remaining HSPs with score > `cutoff[1]` by
 //! decreasing `q_end_trim`: every candidate of H has qe >= qo > qe(H), so it
 //! has its value of this pass before H is visited, as in NCBI's list-order
 //! loop. "qo > qe(H)" is then a prefix of the HSPs by decreasing qo, which the
@@ -229,7 +229,7 @@
 //! The tree returns the largest candidate whatever its sum, NCBI the largest
 //! one above its start value: 0, or `sum - 1` of the previous choice. They
 //! agree because every candidate in the tree has a positive sum (an HSP with
-//! score > cutoff[1] has a sum of at least score - cutoff[1] > 0, the sums
+//! score > `cutoff[1]` has a sum of at least score - `cutoff[1]` > 0, the sums
 //! being exact), and the previous choice, when it remains, is itself a
 //! candidate above `sum - 1` ("What a search returns").
 //!
@@ -255,7 +255,7 @@
 //! add-back is clamped to the range of the key, which does not change what the
 //! kernel selects:
 //!
-//! - Only best[index] receives an add-back, and between two passes no other
+//! - Only `best[index]` receives an add-back, and between two passes no other
 //!   value grows. A value reaches the top only while its HSP is the maximum;
 //!   it then stays above every other value until the HSP is removed or the
 //!   next pass writes its pass value back, so no two values are at the top.
@@ -858,6 +858,7 @@ fn verify_pass(
 // n * 2^32 < 2^63). The u64 key when the group fits it, else the u128 key (module documentation,
 // "Sums"); both run the same kernel.
 /// Links one group with the u64 key when it fits, else with the u128 key.
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn link_hsp_group_incr_with(
     mut group_hits: Vec<UngappedHit>,
@@ -1006,7 +1007,7 @@ fn link_group<'g, K: LinkKey>(
 
     let c = [cutoffs.cutoff_small_gap, cutoffs.cutoff_big_gap];
     let gap_prob = cutoffs.gap_prob;
-    let ignore_small_gaps = cutoffs.ignore_small_gaps;
+    let ignore_small_gaps = cutoffs.ignore_small_gaps();
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:545-550
     // ```c
@@ -1398,17 +1399,17 @@ impl<K: LinkKey> LinkRounds<'_, K> {
             &mut fen[..],
         );
         let [sum0, sum1] = sum;
-        let mut sum = [&mut sum0[..], &mut sum1[..]];
+        let sum = [&mut sum0[..], &mut sum1[..]];
         let [xsum0, xsum1] = xsum;
-        let mut xsum = [&mut xsum0[..], &mut xsum1[..]];
+        let xsum = [&mut xsum0[..], &mut xsum1[..]];
         let [num0, num1] = num;
-        let mut num = [&mut num0[..], &mut num1[..]];
+        let num = [&mut num0[..], &mut num1[..]];
         let [link0, link1] = link;
-        let mut link = [&mut link0[..], &mut link1[..]];
+        let link = [&mut link0[..], &mut link1[..]];
         let [queued0, queued1] = queued;
-        let mut queued = [&mut queued0[..], &mut queued1[..]];
+        let queued = [&mut queued0[..], &mut queued1[..]];
         let [changed0, changed1] = sum_changed;
-        let mut sum_changed = [&mut changed0[..], &mut changed1[..]];
+        let sum_changed = [&mut changed0[..], &mut changed1[..]];
 
         stats.rounds += 1;
         let mut best: [Option<usize>; 2] = [None, None];
@@ -1799,18 +1800,8 @@ impl<K: LinkKey> LinkRounds<'_, K> {
             sum_changed_list.clear();
 
             if options.verify {
-                let (expected, expected_indeg) = verify_pass(
-                    &alive,
-                    &score,
-                    &qo,
-                    &so,
-                    &qe,
-                    &se,
-                    &sl,
-                    &lk,
-                    c,
-                    ignore_small_gaps,
-                );
+                let (expected, expected_indeg) =
+                    verify_pass(alive, score, qo, so, qe, se, sl, lk, c, ignore_small_gaps);
                 let mut cur = active_head;
                 while cur != NONE {
                     let i = cur as usize;
@@ -1871,11 +1862,15 @@ impl<K: LinkKey> LinkRounds<'_, K> {
             if let Some(bi) = best[0] {
                 addback(tree, 0, bi, stats);
                 addback_hsps.push(bi as u32);
-                let k = num[0][bi] as usize;
-                let divisor = gap_decay_divisor(gap_decay_rate, k);
+                // NCBI's Int2 count: a wrapped (negative) count is not "> 1" (link_hsps.c:918).
+                // BLAST_GapDecayDivisor takes it as an unsigned and raises the rate to the Int4
+                // `nsegs - 1`; `as usize` sign-extends and gap_decay_divisor truncates
+                // `num_segments - 1` to the same i32.
+                let k = num[0][bi];
+                let divisor = gap_decay_divisor(gap_decay_rate, k as usize);
                 prob[0] = small_gap_sum_e(
                     WINDOW_SIZE,
-                    k as i16,
+                    k,
                     xsum[0][bi],
                     eff_query_len as i32,
                     eff_subject_len as i32,
@@ -1891,10 +1886,10 @@ impl<K: LinkKey> LinkRounds<'_, K> {
                 }
             }
             if let Some(bi) = best[1] {
-                let k = num[1][bi] as usize;
-                let divisor = gap_decay_divisor(gap_decay_rate, k);
+                let k = num[1][bi];
+                let divisor = gap_decay_divisor(gap_decay_rate, k as usize);
                 prob[1] = ncbi_large_gap_sum_e(
-                    k as i16,
+                    k,
                     xsum[1][bi],
                     eff_query_len as i32,
                     eff_subject_len as i32,
@@ -1921,27 +1916,20 @@ impl<K: LinkKey> LinkRounds<'_, K> {
             // ...
             // ordering_method = eLinkLargeGaps;
             // ```
-            // Only large gaps are considered when cutoff[0] == 0.
+            // Only large gaps are considered when cutoff[0] == 0, and their E-value is not
+            // divided by `1 - gap_prob`.
             addback(tree, 1, bi, stats);
             addback_hsps.push(bi as u32);
-            let k = num[1][bi] as usize;
-            let divisor = gap_decay_divisor(gap_decay_rate, k);
+            let k = num[1][bi];
+            let divisor = gap_decay_divisor(gap_decay_rate, k as usize);
             prob[1] = ncbi_large_gap_sum_e(
-                k as i16,
+                k,
                 xsum[1][bi],
                 eff_query_len as i32,
                 eff_subject_len as i32,
                 eff_search_space,
                 divisor,
             );
-            if k > 1 {
-                let denom = 1.0 - gap_prob;
-                if denom == 0.0 || (prob[1] / denom) > int4_max {
-                    prob[1] = int4_max;
-                } else {
-                    prob[1] /= denom;
-                }
-            }
         }
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:936-937

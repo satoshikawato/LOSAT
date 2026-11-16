@@ -2,8 +2,8 @@
 //! `src/algorithm/tblastn/search_init.rs`, `x_tbn_ungap`) on whole searches.
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): on unless it is `0`.
-//! It acts on every word finder whose matrix is BLOSUM62 (tblastn's default); another `-matrix`
-//! keeps the reference extension.
+//! It acts on every word finder: BLOSUM62 (tblastn's default) takes its own table, another
+//! `-matrix` the walks with that matrix's table (`x_ungapped_fast::matrix_table`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1088-1096
 //! ```c
@@ -118,15 +118,14 @@ impl Drop for Inputs {
     }
 }
 
-/// BLOSUM62 takes the byte-table walks (at 1 and 2 threads) and BLOSUM45 the reference (at 1
-/// thread: the switch does not change its path); the default's report is `=0`'s, and `=0` records
-/// no side.
+/// BLOSUM62 (at 1 and 2 threads) and BLOSUM45 (at 1 thread, with its own table) take the
+/// byte-table walks; the default's report is `=0`'s, and `=0` records no side.
 #[test]
 fn the_byte_table_walks_give_the_same_report() {
     let inputs = Inputs::new("same");
     for (matrix, side, threads) in [
         ("BLOSUM62", (true, false), &[1, 2][..]),
-        ("BLOSUM45", (false, true), &[1][..]),
+        ("BLOSUM45", (true, false), &[1][..]),
     ] {
         for &threads in threads {
             let (off, off_side) = inputs.tblastn(matrix, threads, &[OFF]);

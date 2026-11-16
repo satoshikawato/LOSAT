@@ -1,0 +1,50 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/x_tie1.xml
+#Output data file:	(stdout)
+#Annotation data at:	data
+#E-Value cutoff:	0.01
+#Redundancy:	Full
+#Data requested:	Domain hits
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	RPSBLAST 2.17.0+	Cdd	BLOSUM62	1e-13
+QUERY	Query_1	Peptide	2339	NP_416485.5 inverse autotransporter adhesin [Escherichia coli str. K-12 substr. MG1655]
+DOMAINS
+1	Query_1	Non-specific	468908	1	1010	0	998.167	NF040978	Ve_IatC_Nterm	-	-
+1	Query_1	Specific	492229	124	400	6.56886e-136	426.365	pfam11924	IAT_beta	-	-
+1	Query_1	Specific	214751	1438	1532	3.1321e-20	87.382	smart00634	BID_1	-	474048
+1	Query_1	Specific	214751	1023	1117	8.78427e-20	86.2264	smart00634	BID_1	-	474048
+1	Query_1	Specific	214751	1541	1635	4.74652e-18	81.2188	smart00634	BID_1	-	474048
+1	Query_1	Non-specific	514892	822	913	2.7853e-17	78.8399	pfam02369	Big_1	-	-
+1	Query_1	Specific	514892	1128	1221	4.89829e-17	78.4547	pfam02369	Big_1	-	-
+1	Query_1	Specific	214751	720	812	1.09033e-16	77.3668	smart00634	BID_1	-	474048
+1	Query_1	Specific	214751	1127	1217	2.7762e-16	76.2112	smart00634	BID_1	-	474048
+1	Query_1	Non-specific	214751	821	910	3.5759e-16	75.826	smart00634	BID_1	-	474048
+1	Query_1	Non-specific	214751	919	1013	6.0495e-16	75.0556	smart00634	BID_1	-	474048
+1	Query_1	Specific	514892	1440	1535	6.27618e-16	74.9879	pfam02369	Big_1	-	-
+1	Query_1	Specific	514892	1024	1121	2.05853e-15	73.8323	pfam02369	Big_1	-	-
+1	Query_1	Specific	514892	1944	2034	2.52557e-15	73.4471	pfam02369	Big_1	-	-
+1	Query_1	Specific	514892	1542	1639	2.62587e-15	73.4471	pfam02369	Big_1	-	-
+1	Query_1	Specific	214751	1745	1833	1.79259e-14	70.8184	smart00634	BID_1	-	474048
+1	Query_1	Specific	214751	1941	2031	3.15371e-14	70.4332	smart00634	BID_1	-	474048
+1	Query_1	Specific	214751	1339	1429	3.15371e-14	70.4332	smart00634	BID_1	-	474048
+1	Query_1	Specific	214751	1228	1328	3.86951e-14	70.048	smart00634	BID_1	-	474048
+ENDDOMAINS
+ENDQUERY
+ENDSESSION	1
+ENDDATA

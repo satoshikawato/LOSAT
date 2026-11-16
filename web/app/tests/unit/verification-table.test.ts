@@ -19,7 +19,7 @@ function grammar(program: string): OptionGrammar {
   };
 }
 
-const PROGRAMS = ['blastn', 'blastp', 'tblastn', 'tblastx'] as const;
+const PROGRAMS = ['blastn', 'blastp', 'blastx', 'tblastn', 'tblastx'] as const;
 const table = generateVerificationTable(repository);
 const formatsOf = (program: (typeof PROGRAMS)[number], words: string[]) => {
   const key = optionKey([program, ...words], grammar(program));
@@ -27,7 +27,7 @@ const formatsOf = (program: (typeof PROGRAMS)[number], words: string[]) => {
 };
 
 describe('verification table', () => {
-  it('lists the four programs of the engine and the NCBI version', () => {
+  it('lists the five programs of the engine and the NCBI version', () => {
     expect(table.ncbi).toBe('2.17.0');
     expect(Object.keys(table.programs).sort()).toEqual([...PROGRAMS]);
   });
@@ -37,16 +37,28 @@ describe('verification table', () => {
       const browser = table.programs[program]?.browser;
       expect(browser?.formats, program).toEqual([0, 6, 7]);
       expect(browser?.paths, program).toEqual(['serial', 'threaded']);
-      expect(browser?.threads, program).toEqual([1, 2, 4]);
+      // V-BR runs every count that Auto and the Threads list can choose (WA-RS-03).
+      expect(browser?.threads, program).toEqual(Array.from({ length: 32 }, (_, i) => i + 1));
       expect(browser?.browsers, program).toEqual(expect.arrayContaining(['Chromium', 'Firefox', 'WebKit']));
     }
   });
 
-  it('has the default options of every program compared for the formats of the records', () => {
-    for (const program of ['blastp', 'tblastn', 'tblastx'] as const) expect(formatsOf(program, []), program).toEqual([0, 6, 7]);
-    // No record of the sources compares the default BLASTN options in outfmt 7: the BLASTN
-    // gate manifest (LOSAT/tests/blastn_parity_manifest.tsv) is not one of them.
-    expect(formatsOf('blastn', [])).toEqual([0, 6]);
+  it('has the default options of every program and task compared in outfmt 0, 6 and 7', () => {
+    // A run with the defaults is Supported (WA-RS-03): the outfmt 7 rows of the default BLASTN
+    // task (megablast), of default BLASTX and of tblastn-fast are the def7.* rows of outfmt0_manifest.tsv;
+    // blastp-short's are score.blastp.short.def.* (series SC, SC3).
+    for (const program of PROGRAMS) expect(formatsOf(program, []), program).toEqual([0, 6, 7]);
+    const tasks = [
+      ['blastn', 'megablast'],
+      ['blastn', 'blastn'],
+      ['blastn', 'dc-megablast'],
+      ['blastn', 'blastn-short'],
+      ['blastp', 'blastp-fast'],
+      ['blastp', 'blastp-short'],
+      ['blastx', 'blastx-fast'],
+      ['tblastn', 'tblastn-fast'],
+    ] as const;
+    for (const [program, task] of tasks) expect(formatsOf(program, ['-task', task]), `${program} -task ${task}`).toEqual([0, 6, 7]);
   });
 
   it('has the options of the regression fixtures and the approved exception', () => {
@@ -60,6 +72,10 @@ describe('verification table', () => {
     const ranged = keys.filter((key) => key.includes('"-query_loc"'));
     expect(ranged.length).toBeGreaterThan(0);
     for (const key of ranged) expect(key).toContain(`["-query_loc","${RANGE_VALUE}"]`);
+    // BLASTX's ranges with the default options (line SX, DW-39): sxd.blastx.qloc.*, sloc.0, qsloc.7.
+    expect(formatsOf('blastx', ['-query_loc', '1001-3000'])).toEqual([0, 6, 7]);
+    expect(formatsOf('blastx', ['-subject_loc', '10-70'])).toContain(0);
+    expect(formatsOf('blastx', ['-query_loc', '1-9', '-subject_loc', '2-5'])).toEqual([7]);
   });
 
   it('keeps nothing outside the inputs, outputs and threads in a key', () => {

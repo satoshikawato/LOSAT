@@ -23,7 +23,9 @@ use crate::common::{GapEditOp, Hit};
 pub(crate) struct BlastpHsp {
     pub identity: f64,
     pub length: usize,
-    pub mismatch: usize,
+    /// The columns less the identities and the gaps (`Hit::mismatch`), fewer than none when
+    /// stored gap characters of the subject face gaps of the query.
+    pub mismatch: i64,
     pub gapopen: usize,
     pub q_start: usize,
     pub q_end: usize,
@@ -53,6 +55,16 @@ pub(crate) struct BlastpHsp {
     /// statistics) or 2 (compositional matrix adjustment), set from the redone
     /// alignment's matrix adjustment rule (`kappa.rs`).
     pub comp_adjustment_method: u8,
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:135-138
+    // ```c
+    //    Int4 num;             /**< How many HSP's are linked together for sum
+    //                               statistics evaluation? If unset (0), this HSP is
+    //                               not part of a linked set, i.e. value 0 is treated
+    //                               the same way as 1. */
+    // ```
+    /// The size of the HSP's linked set with sum statistics (psiblast's `-sum_stats true`,
+    /// `core::link_hsps`), 1 otherwise; the report's `Expect(num)` above 1.
+    pub num: i32,
 }
 
 impl BlastpHsp {
@@ -117,6 +129,7 @@ impl BlastpHsp {
             gap_info,
             num_positives,
             comp_adjustment_method: 0,
+            num: 1,
         }
     }
 
@@ -183,6 +196,18 @@ pub(crate) trait HitListHsp {
     /// The length of the query (or query part, or searched range) the HSP was found in:
     /// `contexts[hsp->context].query_length`.
     fn query_length(&self) -> usize;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:518-522 (quoted in
+    // full at `query_split::merge_query_chunk`)
+    // ```c
+    //                hsp->context = context_list[local_context];
+    //                hsp->query.offset += offset_list[local_context];
+    //                hsp->query.end += offset_list[local_context];
+    //                hsp->query.gapped_start += offset_list[local_context];
+    // ```
+    /// Moves the HSP to query `q_idx` (a blastp query has one context, its index), whose letters
+    /// start `offset` letters before the HSP's query coordinates, of `query_length` letters
+    /// (`query_split::rebase_hit_list`).
+    fn move_to_query(&mut self, q_idx: u32, offset: i32, query_length: usize);
 }
 
 impl HitListHsp for BlastpHsp {
@@ -201,6 +226,15 @@ impl HitListHsp for BlastpHsp {
     #[inline]
     fn query_length(&self) -> usize {
         self.query_length
+    }
+    #[inline]
+    fn move_to_query(&mut self, q_idx: u32, offset: i32, query_length: usize) {
+        self.query_context = q_idx as i32;
+        self.q_idx = q_idx;
+        self.query_length = query_length;
+        self.q_start += offset as usize;
+        self.q_end += offset as usize;
+        self.gapped_q_start += offset;
     }
 }
 
@@ -299,7 +333,6 @@ impl Default for BlastCompoHeapRecord {
 #[derive(Debug, Clone)]
 pub(crate) struct BlastCompoHeap {
     pub n: usize,
-    pub capacity: usize,
     pub heap_threshold: usize,
     pub ecutoff: f64,
     pub worst_evalue: f64,
@@ -310,12 +343,10 @@ pub(crate) struct BlastCompoHeap {
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:50-57
 // ```c
 // #define HEAP_INITIAL_CAPACITY 100
-// #define HEAP_RESIZE_FACTOR 1.5
-// #define HEAP_MIN_RESIZE 100
 // ```
+// (`HEAP_RESIZE_FACTOR` 1.5 and `HEAP_MIN_RESIZE` 100 size the C array's growth; the `Vec` grows
+// by itself.)
 const COMPO_HEAP_INITIAL_CAPACITY: usize = 100;
-const COMPO_HEAP_MIN_RESIZE: usize = 100;
-const COMPO_HEAP_RESIZE_FACTOR: f64 = 1.5;
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:53-54
 // ```c
@@ -447,6 +478,7 @@ fn compo_heapify_up(heap_array: &mut [BlastCompoHeapRecord], mut i: usize) {
 //    return result;
 // }
 // ```
+#[cfg(test)]
 pub(crate) fn score_compare_hits(a: &Hit, b: &Hit) -> Ordering {
     let (a_q_offset, a_q_end) = (a.q_start.saturating_sub(1), a.q_end);
     let (b_q_offset, b_q_end) = (b.q_start.saturating_sub(1), b.q_end);
@@ -556,7 +588,7 @@ pub(crate) fn evalue_compare_hsps<H: HitListHsp>(a: &H, b: &H) -> Ordering {
 //     }
 // }
 // ```
-pub(crate) fn sort_hsplist_by_score(list: &mut BlastpHspList) {
+pub(crate) fn sort_hsplist_by_score<H: HitListHsp>(list: &mut BlastpHspList<H>) {
     if list.hsps.len() <= 1 {
         return;
     }
@@ -590,6 +622,66 @@ pub(crate) fn sort_hsplist_by_score(list: &mut BlastpHspList) {
 //     ...
 // }
 // ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1760-1811 (quoted at
+// `core::link_hsps`)
+/// An HSP that takes its linked set's values from the linking (`BLAST_LinkHsps`).
+pub(crate) trait LinkedHspValues: HitListHsp {
+    fn take_linked(&mut self, linked: &crate::core::link_hsps::LinkedHsp);
+}
+
+impl LinkedHspValues for BlastpHsp {
+    #[inline]
+    fn take_linked(&mut self, linked: &crate::core::link_hsps::LinkedHsp) {
+        self.e_value = linked.evalue;
+        self.num = linked.num;
+    }
+}
+
+impl LinkedHspValues for crate::algorithm::blastp::x_prelim_compact::XPrelimHsp {
+    /// The preliminary HSP keeps no set size: every later linking starts from 1
+    /// (`BLAST_LinkHsps`, link_hsps.c:1774-1776), and nothing reads it before.
+    #[inline]
+    fn take_linked(&mut self, linked: &crate::core::link_hsps::LinkedHsp) {
+        self.e_value = linked.evalue;
+    }
+}
+
+/// `BLAST_LinkHsps` on a subject's list of one query (psiblast's `-sum_stats true`): every HSP takes
+/// its linked set's e-value and size (`LinkedHspValues`), in the list the linking builds, which is
+/// then sorted by score, and the best e-value is updated. `context` is the query's
+/// (`core::link_hsps::LinkContext`); `subject_length` the subject's length in letters.
+pub(crate) fn link_hsp_list<H: LinkedHspValues>(
+    list: &mut BlastpHspList<H>,
+    context: crate::core::link_hsps::LinkContext,
+    subject_length: i32,
+    params: &crate::core::link_hsps::EvenGapLinkParams,
+) {
+    if list.hsps.is_empty() {
+        return;
+    }
+    crate::core::link_hsps::link_in_place(
+        &mut list.hsps,
+        // `BlastHSP`'s 0-based offsets and exclusive ends (`HitListHsp::offsets`: 1-based starts).
+        |hsp| {
+            let (q_start, q_end, s_start, s_end) = hsp.offsets();
+            crate::core::link_hsps::LinkHsp {
+                context: 0,
+                query_offset: q_start as i32 - 1,
+                query_end: q_end as i32,
+                subject_offset: s_start.min(s_end) as i32 - 1,
+                subject_end: s_start.max(s_end) as i32,
+                score: hsp.raw_score(),
+            }
+        },
+        |_| context,
+        subject_length,
+        params,
+        |hsp, linked| hsp.take_linked(linked),
+    );
+    sort_hsplist_by_score(list);
+    update_best_evalue(list);
+}
+
 pub(crate) fn sort_hsplist_by_evalue<H: HitListHsp>(list: &mut BlastpHspList<H>) {
     if list.hsps.len() > 1 {
         let mut index = 0usize;
@@ -812,7 +904,6 @@ impl BlastCompoHeap {
         array.push(BlastCompoHeapRecord::default());
         Self {
             n: 0,
-            capacity,
             heap_threshold,
             ecutoff,
             worst_evalue: 0.0,
@@ -862,10 +953,12 @@ impl BlastCompoHeap {
         if self.heap_array.is_none() {
             self.convert_to_heap();
         }
-        let mut record = BlastCompoHeapRecord::default();
-        record.best_evalue = evalue;
-        record.best_score = score;
-        record.subject_index = subject_index;
+        let record = BlastCompoHeapRecord {
+            best_evalue: evalue,
+            best_score: score,
+            subject_index,
+            ..Default::default()
+        };
         let heap_array = self
             .heap_array
             .as_ref()
@@ -1228,6 +1321,35 @@ impl<H: HitListHsp> BlastpHitList<H> {
         self.purge();
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:827-857
+    // (`core::blast_hspstream`)
+    // ```c
+    //     	  if (MIN_BUF_SZ + 100 < hit_list->hsplist_count) {
+    //         	  int max_index = hit_list->hsplist_count -1;
+    // ...
+    //         	  Blast_HitListSortByEvalue(hit_list);
+    // ...
+    //         			  s_TrimHitList(hit_list, i);
+    // ```
+    /// `BlastHSPCBSStreamClose`'s trim of this query's preliminary hit list (`ADAPTIVE_CBS`;
+    /// BLASTP's, PSIBLAST's and RPSBLAST's lists): sorted by E-value and cut where the E-values
+    /// pass the limit, when it holds enough lists.
+    pub(crate) fn cbs_close_trim(&mut self, hitlist_size: usize) {
+        use crate::core::blast_hspstream::{cbs_trim_count, cbs_trim_sorts};
+        let count = self.hsplist_count;
+        if !cbs_trim_sorts(count, hitlist_size) {
+            return;
+        }
+        self.sort_by_evalue();
+        let lists = &self.hsplist_array;
+        if let Some(keep) = cbs_trim_count(count, self.hsplist_count, hitlist_size, |i| {
+            lists[i].best_evalue
+        }) {
+            self.hsplist_array.truncate(keep);
+            self.hsplist_count = keep;
+        }
+    }
+
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3314-3326
     // ```c
     //    index1 = 0;
@@ -1282,6 +1404,7 @@ impl<H: HitListHsp> BlastpHitList<H> {
 //    ...
 // }
 // ```
+#[cfg(test)]
 pub(crate) fn purge_hits_with_common_endpoints(hits: Vec<Hit>) -> Vec<Hit> {
     let (hits, _) = purge_hits_with_common_endpoints_ex(hits, true);
     hits
@@ -1766,6 +1889,7 @@ fn purge_hits_for_subject_ex(hits: Vec<Hit>, purge: bool) -> (Vec<Hit>, usize) {
 //    return hsp_count;
 // }
 // ```
+#[cfg(test)]
 fn purge_hits_for_subject_ex_with_stats(
     hits: Vec<Hit>,
     purge: bool,
@@ -1876,31 +2000,45 @@ fn purge_hits_for_subject_ex_impl<const TRACK_STATS: bool>(
     (hits, extra_start, stats)
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-180
-// ```c
-// typedef struct BlastHSPList { ... } BlastHSPList;
-// typedef struct BlastHitList { ... } BlastHitList;
-// ```
-pub(crate) fn collect_hits_from_hit_lists(hit_lists: &[Option<BlastpHitList>]) -> Vec<Hit> {
-    collect_hits_and_methods_from_hit_lists(hit_lists)
-        .into_iter()
-        .map(|(hit, _)| hit)
-        .collect()
-}
-
 /// `collect_hits_from_hit_lists` with each HSP's `comp_adjustment_method`, which the
-/// outfmt 0 report prints (showalign.cpp:3600-3603).
+/// outfmt 0 report prints (showalign.cpp:3600-3603), and its Seq-align's `num_ident`
+/// (`PairwiseHit::seqalign_num_ident`): the engine's identities that `engine_counts` keeps
+/// where the display recount replaced them, else the HSP's. `first_query` is the index of the
+/// query of `hit_lists[0]` (the keys of `engine_counts` count the queries from the run's first).
 pub(crate) fn collect_hits_and_methods_from_hit_lists(
     hit_lists: &[Option<BlastpHitList>],
-) -> Vec<(Hit, u8)> {
-    let mut hits = Vec::new();
-    for hit_list_opt in hit_lists {
+    first_query: usize,
+    engine_counts: &super::seqalign::EngineCounts,
+) -> Vec<(Hit, u8, usize, i32)> {
+    let reported = |hit_list: &BlastpHitList| {
+        hit_list
+            .hsplist_array
+            .iter()
+            .take(hit_list.hsplist_count)
+            .map(|hsp_list| hsp_list.hsps.len())
+            .sum::<usize>()
+    };
+    let mut hits = Vec::with_capacity(hit_lists.iter().flatten().map(reported).sum());
+    for (q_offset, hit_list_opt) in hit_lists.iter().enumerate() {
         let Some(hit_list) = hit_list_opt else {
             continue;
         };
-        for hsp_list in hit_list.hsplist_array.iter().take(hit_list.hsplist_count) {
-            for hsp in &hsp_list.hsps {
-                hits.push((hsp.clone().into_hit(), hsp.comp_adjustment_method));
+        let q_idx = (first_query + q_offset) as u32;
+        for (list_index, hsp_list) in hit_list
+            .hsplist_array
+            .iter()
+            .take(hit_list.hsplist_count)
+            .enumerate()
+        {
+            for (hsp_index, hsp) in hsp_list.hsps.iter().enumerate() {
+                let seqalign_num_ident = engine_counts
+                    .num_ident((q_idx, list_index as u32, hsp_index as u32), hsp.num_ident);
+                hits.push((
+                    hsp.clone().into_hit(),
+                    hsp.comp_adjustment_method,
+                    seqalign_num_ident,
+                    hsp.num,
+                ));
             }
         }
     }
@@ -2060,6 +2198,39 @@ mod tests {
                 .collect(),
             best_evalue: 0.0,
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1199-1203 (quoted at
+    // `PairwiseHit::seqalign_num_ident`): each collected HSP carries its Seq-align's `num_ident`,
+    // the engine's identities, which `EngineCounts` keeps where the display recount replaced
+    // them; its keys count the queries from the run's first, also for a window of queries.
+    #[test]
+    fn collected_hits_carry_the_seqalign_identities() {
+        let hit_lists: Vec<Option<BlastpHitList>> = (0..2)
+            .map(|_| {
+                let mut list = hsp_list_of(
+                    0,
+                    &[(100, 1, 50, 1, 50, 1e-20), (90, 60, 99, 60, 99, 1e-10)],
+                );
+                for (hsp, identities) in list.hsps.iter_mut().zip([40, 30]) {
+                    hsp.num_ident = identities;
+                }
+                let mut hit_list = BlastpHitList::new(10);
+                hit_list.update(list);
+                Some(hit_list)
+            })
+            .collect();
+        let mut engine_counts = super::super::seqalign::EngineCounts::default();
+        engine_counts.save((1, 0, 1), (28, 35));
+        let counts = |first: usize, end: usize| -> Vec<(usize, usize)> {
+            collect_hits_and_methods_from_hit_lists(&hit_lists[first..end], first, &engine_counts)
+                .iter()
+                .map(|(hit, _, seqalign_num_ident, _)| (hit.num_ident, *seqalign_num_ident))
+                .collect()
+        };
+        assert_eq!(counts(0, 1), [(40, 40), (30, 30)]);
+        assert_eq!(counts(1, 2), [(40, 40), (30, 28)]);
+        assert_eq!(counts(0, 2), [(40, 40), (30, 30), (40, 40), (30, 28)]);
     }
 
     fn hsp_order(list: &BlastpHspList) -> Vec<(i32, usize, usize)> {

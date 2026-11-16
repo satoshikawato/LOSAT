@@ -1,0 +1,28 @@
+<!doctype html><meta charset="utf-8"><title>ov2369</title>
+<script type="module">
+import { runLosatPairsParallel } from './js/services/losat.js';
+window.runPass = async ({ dataUrl, concurrency, totalThreadBudget, threadsPerJob, execution }) => {
+  const data = await (await fetch(dataUrl)).json();
+  const probes = []; const warns = [];
+  const ch = new BroadcastChannel('ov2369-probe'); ch.onmessage = (e) => probes.push(e.data);
+  const warn = console.warn; console.warn = (...a) => { warns.push(a.join(' ')); warn(...a); };
+  const seq = {}; const jobs = data.jobs.map((d, i) => {
+    seq[`q${i}`] = d.queryFasta; seq[`s${i}`] = d.subjectFasta;
+    return { ...d.job, querySequenceKey: `q${i}`, subjectSequenceKey: `s${i}`, __index: i };
+  });
+  const t0 = performance.now(); let err = null, results = [];
+  const times = {};
+  try {
+    results = await runLosatPairsParallel(jobs, { sequences: seq, executionMode: execution || 'threaded', concurrency, totalThreadBudget, threadsPerJob });
+  } catch (e) { err = String(e?.message || e); }
+  const ms = performance.now() - t0;
+  await new Promise((r) => setTimeout(r, 300)); ch.close(); console.warn = warn;
+  const hash = async (t) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t)))).map((b) => b.toString(16).padStart(2, '0')).join('');
+  const sorted = async (t) => hash(t.split('\n').sort().join('\n'));
+  window.__texts = results.map((r) => r?.text || '');
+  const out = [];
+  for (const r of results) out.push({ index: r.__index, pairIndex: r.pairIndex, sha: await hash(r.text || ''), sortedSha: await sorted(r.text || ''), len: (r.text || '').length });
+  return { ms, err, warns, probes, out };
+};
+window.__ready = true;
+</script>

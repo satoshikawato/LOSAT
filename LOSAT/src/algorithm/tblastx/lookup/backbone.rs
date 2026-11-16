@@ -4,9 +4,11 @@
 
 use super::super::diagnostics::diagnostics_enabled;
 use super::super::translation::QueryFrame;
+#[cfg(test)]
+use super::encode_kmer_3;
 use super::{
-    compute_backbone_size, compute_mask, compute_unmasked_intervals, encode_kmer_3, ilog2, pv_set,
-    QueryContext, LOOKUP_ALPHABET_SIZE, LOOKUP_WORD_LENGTH, PV_ARRAY_BTS,
+    compute_backbone_size, compute_mask, ilog2, pv_set, QueryContext, LOOKUP_ALPHABET_SIZE,
+    LOOKUP_WORD_LENGTH, PV_ARRAY_BTS,
 };
 use crate::config::ScoringMatrix;
 use crate::stats::karlin_calc::{
@@ -31,12 +33,22 @@ pub(crate) use x_lut_direct::XAaSpares;
 // EXPERIMENT (LOSAT_X_BPLK16): the table of a blastp block, `u16` hits or `Int4` hits
 // (x_lut_direct.rs); no NCBI counterpart for the re-export itself.
 pub(crate) use x_lut_direct::XBpLookup;
-// The comparison of two tables, for the unit tests (x_lut_direct.rs).
-#[cfg(test)]
+// BLASTP's table of 4-letter words (`-word_size 4`, item SC8b of line NP) from the joint builder
+// (x_lut_direct.rs); no NCBI counterpart for the re-export itself.
+pub(crate) use x_lut_direct::x_bp_build_wide_lookup;
+// The comparison of two tables (x_lut_direct.rs), for blastp's unit tests with `parallel`
+// threads (blast_engine/x_lookup_ahead.rs).
+#[cfg(all(
+    test,
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 pub(crate) use x_lut_direct::{x_assert_same_table_as, x_same_table};
-// LOSAT_X_BXLUTPOOL: the BLASTX table's vectors given back for the next build (LOSAT_X_BXPOOLN1:
+// The BLASTX table's vectors given back for the next build (LOSAT_X_BXPOOLN1:
 // by searches of two threads or more).
-pub(crate) use x_lut_direct::{x_bx_pooled_for, x_give_back_pooled};
+pub(crate) use x_lut_direct::{
+    x_bx_pooled_for, x_give_back_pooled, x_give_back_pooled16, x_hits_per_cell_hundredths, XBxTable,
+};
 // EXPERIMENT (PAIRLUT): the direct builder of the TBLASTX unit
 // path's group tables (x_pair_lut.rs, a child module of x_lut_direct.rs), used by
 // tblastx/x_pair_par.rs.
@@ -57,7 +69,7 @@ fn blosum62_ideal_karlin_params() -> KarlinParams {
 
 // NCBI c++/src/algo/blast/core/blast_stat.c:1506-1528:
 // for each finite matrix score, update sbp->loscore and sbp->hiscore.
-fn matrix_score_bounds(matrix: ScoringMatrix) -> (i32, i32) {
+pub(crate) fn matrix_score_bounds(matrix: ScoringMatrix) -> (i32, i32) {
     let mut low = i32::MAX;
     let mut high = i32::MIN;
     for query in 0..LOOKUP_ALPHABET_SIZE {
@@ -93,7 +105,46 @@ fn ideal_karlin_params_for_matrix(matrix: ScoringMatrix, bounds: (i32, i32)) -> 
         .expect("standard protein matrix ideal Karlin parameters must be computable")
 }
 
-/// NCBI AaLookupBackboneCell - EXACT port
+/// The ideal Karlin block of `matrix` (`kbp_ideal`) with the score range that the profile
+/// lookup's query preparation gives it (`x_lookup_table_for_profile`): BLOSUM62's -4..11, the
+/// range of the matrix's scores otherwise. The composition redo of TBLASTN (`stage_d_kappa_params.rs`)
+/// and of BLASTP with another matrix than BLOSUM62 (`run_resolved_in_pool`) takes its ungapped
+/// lambda.
+pub(crate) fn ideal_karlin_params_of(matrix: ScoringMatrix) -> KarlinParams {
+    let bounds = if matrix == ScoringMatrix::Blosum62 {
+        (-4, 11)
+    } else {
+        matrix_score_bounds(matrix)
+    };
+    ideal_karlin_params_for_matrix(matrix, bounds)
+}
+
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:53-64
+// ```c
+// typedef struct AaLookupBackboneCell {
+//     Int4 num_used;       /**< number of hits stored for this cell */
+//
+//     union {
+//       Int4 overflow_cursor; /**< integer offset into the overflow array
+//                               where the list of hits for this cell begins */
+//       Int4 entries[AA_HITS_PER_CELL];  /**< if the number of hits for this
+//                                             cell is AA_HITS_PER_CELL or less,
+//                                             the hits are all stored directly in
+//                                             the cell */
+//     } payload;  /**< union that specifies either entries stored right on
+//                      the backbone if fewer than AA_HITS_PER_CELL are
+//                      present or a pointer to where the hits are stored
+//                      (off-backbone). */
+// } AaLookupBackboneCell;
+// ```
+/// NCBI AaLookupBackboneCell. A cell of more than `AA_HITS_PER_CELL` hits keeps the cursor of its
+/// run in the overflow array in `entries[0]` (low 32 bits) and `entries[1]` (high 32 bits), read
+/// and written only by [`BackboneCell::cursor`], [`BackboneCell::set_cursor`] and
+/// [`XCell::x_cursor_at`]. NCBI's cursor and its count of overflow entries are `Int4`, which a
+/// table of 2^31 overflow entries or more overflows (signed overflow; NCBI BLAST+ 2.17.0 crashes):
+/// an 8 GiB overflow array, for example `-threshold 3e9`, whose `Int4` `INT_MIN` makes every word
+/// a neighbour of every position. LOSAT's cursor holds any position of the array, in the cell's
+/// 16 bytes as before.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct BackboneCell {
@@ -110,12 +161,57 @@ impl Default for BackboneCell {
     }
 }
 
+// A position of the overflow array (a `usize`) fits the 64 bits of a cell's cursor.
+const _: () = assert!(usize::BITS <= 64);
+
+impl BackboneCell {
+    /// The cursor of a cell of more than `AA_HITS_PER_CELL` hits: where its run starts in the
+    /// overflow array.
+    #[inline(always)]
+    pub fn cursor(&self) -> usize {
+        // SAFETY: `self` is a cell.
+        unsafe { Self::x_cursor_of(self) }
+    }
+
+    /// The cursor of the cell at `cell` (`cursor`), as one 8-byte load of `entries[0..2]`: the
+    /// scans read it once per cell of more than `AA_HITS_PER_CELL` hits, where two loads and
+    /// their merge cost 3 % of TBLASTX's subject scan (callgrind).
+    ///
+    /// # Safety
+    /// `cell` must point to a cell that nothing writes meanwhile.
+    #[inline(always)]
+    unsafe fn x_cursor_of(cell: *const Self) -> usize {
+        // SAFETY: (caller) `entries[0..2]` are 8 bytes of the cell; the read is unaligned.
+        let both = unsafe {
+            std::ptr::addr_of!((*cell).entries)
+                .cast::<u64>()
+                .read_unaligned()
+        };
+        // `entries[0]` is the low half on a little-endian target, the high half otherwise.
+        (if cfg!(target_endian = "little") {
+            both
+        } else {
+            both.rotate_left(32)
+        }) as usize
+    }
+
+    /// Sets the cursor of a cell of more than `AA_HITS_PER_CELL` hits (`entries[0]` and
+    /// `entries[1]`; a cursor below 2^31 writes `entries[0]` as NCBI's `Int4` and 0).
+    #[inline(always)]
+    pub fn set_cursor(&mut self, cursor: usize) {
+        let cursor = cursor as u64;
+        self.entries[0] = cursor as u32 as i32;
+        self.entries[1] = (cursor >> 32) as u32 as i32;
+    }
+}
+
 // No NCBI counterpart (LOSAT_X_BPLK16): NCBI's AaLookupBackboneCell holds Int4 offsets and counts.
 // A blastp block's lookup query is at most about 50,000 letters (LOSAT_X_BPQBLOCK), so a query
 // offset and a cell's hit count fit 16 bits and the cell takes 8 bytes instead of 16. The trait
 // `XCell` is what the table's builder (x_lut_direct.rs) and the scan of the fused loop
-// (blastp/x_seed_fused.rs) need of a cell; `BackboneCell` implements it with exactly the reads the
-// code had before, so the tables of every other program stay what they were.
+// (blastp/x_seed_fused.rs) need of a cell; `BackboneCell` implements it with the reads of
+// `BackboneCell` itself (its cursor over two entries, P-S2), so the tables of every other program
+// stay what they were.
 /// EXPERIMENT (LOSAT_X_BPLK16): a hit (a query offset) stored in a lookup cell or in the overflow
 /// array: `i32` as NCBI's `Int4`, or `u16`.
 pub trait XHit: Copy + Default + Send + Sync + 'static {
@@ -126,11 +222,36 @@ pub trait XHit: Copy + Default + Send + Sync + 'static {
     /// offset above 65,535.
     fn x_store(dst: &mut [Self], src: &[i32]);
 
+    /// `q` stored at `dst` without a check (a `u16` hit is checked in debug builds): the store of
+    /// the partitioned build's fill (`x_lut_direct.rs` `XDisjointOut::put`), whose offsets were
+    /// checked against the query's length when the width was chosen.
+    ///
+    /// # Safety
+    /// `dst` must point to a hit that nothing else reads or writes meanwhile, and a `u16` hit's `q`
+    /// must be at most 65,535.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    unsafe fn x_write(dst: *mut Self, q: i32);
+
+    /// `src` stored at `dst` without a check, as [`Self::x_write`] stores one offset (a `memcpy`
+    /// for `i32`).
+    ///
+    /// # Safety
+    /// As [`Self::x_write`], for the `src.len()` hits from `dst`.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    unsafe fn x_copy(dst: *mut Self, src: &[i32]);
+
     /// The hit at `p` read with one volatile load (not taken out of a vector register by the
     /// compiler, `x_cell_avx2_defer_masked`).
     ///
     /// # Safety
     /// `p` must point to a hit.
+    #[cfg(target_arch = "x86_64")]
     unsafe fn x_read_volatile(p: *const Self) -> i32;
 
     /// Eight hits from `p` as eight `i32` lanes: one `vmovdqu` for `i32`, one `vpmovzxwd ymm, m128`
@@ -168,6 +289,27 @@ impl XHit for i32 {
     }
 
     #[inline(always)]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    unsafe fn x_write(dst: *mut Self, q: i32) {
+        // SAFETY: (caller) `dst` points to a hit nothing else touches.
+        unsafe { dst.write(q) }
+    }
+
+    #[inline(always)]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    unsafe fn x_copy(dst: *mut Self, src: &[i32]) {
+        // SAFETY: (caller) `dst..dst + src.len()` are hits nothing else touches.
+        unsafe { std::ptr::copy_nonoverlapping(src.as_ptr(), dst, src.len()) }
+    }
+
+    #[inline(always)]
+    #[cfg(target_arch = "x86_64")]
     unsafe fn x_read_volatile(p: *const Self) -> i32 {
         // SAFETY: (caller) `p` points to a hit.
         unsafe { std::ptr::read_volatile(p) }
@@ -206,6 +348,33 @@ impl XHit for u16 {
     }
 
     #[inline(always)]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    unsafe fn x_write(dst: *mut Self, q: i32) {
+        debug_assert!(
+            u16::try_from(q).is_ok(),
+            "a query offset of a u16 lookup table fits 16 bits: {q}"
+        );
+        // SAFETY: (caller) `dst` points to a hit nothing else touches.
+        unsafe { dst.write(q as u16) }
+    }
+
+    #[inline(always)]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    unsafe fn x_copy(dst: *mut Self, src: &[i32]) {
+        for (k, &q) in src.iter().enumerate() {
+            // SAFETY: (caller) `dst..dst + src.len()` are hits nothing else touches.
+            unsafe { Self::x_write(dst.add(k), q) };
+        }
+    }
+
+    #[inline(always)]
+    #[cfg(target_arch = "x86_64")]
     unsafe fn x_read_volatile(p: *const Self) -> i32 {
         // SAFETY: (caller) `p` points to a hit.
         i32::from(unsafe { std::ptr::read_volatile(p) })
@@ -276,8 +445,36 @@ pub trait XCell: Copy + Default + Send + Sync + 'static {
     /// Sets the cursor of a cell with more than `AA_HITS_PER_CELL` hits.
     fn set_cursor(&mut self, cursor: usize);
 
+    /// The cursor of a cell with more than `AA_HITS_PER_CELL` hits (`set_cursor`).
+    fn cursor(&self) -> usize;
+
+    /// The cursor of the cell at `cell`, read without making a reference to the cell (the
+    /// partitioned build's tasks write other cells' entries meanwhile).
+    ///
+    /// # Safety
+    /// `cell` must point to a cell of a backbone that nothing writes meanwhile.
+    #[cfg(any(
+        test,
+        all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )
+    ))]
+    unsafe fn x_cursor_at(cell: *const Self) -> usize;
+
     /// The cell's own entries (a cell with at most `AA_HITS_PER_CELL` hits is written here).
     fn entries_mut(&mut self) -> &mut [Self::Hit];
+
+    /// The first of the cell's own entries, as a pointer taken without making a reference to the
+    /// cell (the partitioned build's tasks write different cells' entries through it).
+    ///
+    /// # Safety
+    /// `cell` must point to a cell of a backbone.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    unsafe fn x_entries_ptr(cell: *mut Self) -> *mut Self::Hit;
 }
 
 impl XCell for BackboneCell {
@@ -309,7 +506,7 @@ impl XCell for BackboneCell {
         if numhits <= AA_HITS_PER_CELL {
             &self.entries[..numhits]
         } else {
-            let cursor = self.entries[0] as usize;
+            let cursor = self.cursor();
             &overflow[cursor..cursor + numhits]
         }
     }
@@ -321,12 +518,40 @@ impl XCell for BackboneCell {
 
     #[inline(always)]
     fn set_cursor(&mut self, cursor: usize) {
-        self.entries[0] = cursor as i32;
+        BackboneCell::set_cursor(self, cursor);
+    }
+
+    #[inline(always)]
+    fn cursor(&self) -> usize {
+        BackboneCell::cursor(self)
+    }
+
+    #[inline(always)]
+    #[cfg(any(
+        test,
+        all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )
+    ))]
+    unsafe fn x_cursor_at(cell: *const Self) -> usize {
+        // SAFETY: (caller) `cell` points to a cell that nothing writes meanwhile.
+        unsafe { BackboneCell::x_cursor_of(cell) }
     }
 
     #[inline(always)]
     fn entries_mut(&mut self) -> &mut [i32] {
         &mut self.entries
+    }
+
+    #[inline(always)]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    unsafe fn x_entries_ptr(cell: *mut Self) -> *mut i32 {
+        // SAFETY: (caller) `cell` points to a cell.
+        unsafe { std::ptr::addr_of_mut!((*cell).entries) }.cast::<i32>()
     }
 }
 
@@ -345,12 +570,16 @@ const _: () = assert!(std::mem::size_of::<BackboneCell16>() == 8);
 
 impl XCell for BackboneCell16 {
     type Hit = u16;
-    // A 16-byte load at a cell's entries (2 bytes into the cell) ends 10 bytes past the cell's
-    // end at most.
-    const PAD_CELLS: usize = 2;
-    // A 16-byte load at the start of an overflow hit list of at least one hit ends 7 hits past
-    // its end at most.
-    const PAD_HITS: usize = 8;
+    // The farthest read past a list is BLASTX's cross staging (`x_cross_cell`,
+    // blastp/x_seed_fused.rs): three 16-byte loads (`XHit::x_load_tail`) at the list's start and
+    // 16 and 32 bytes on from it, which end 48 bytes from the start whatever the list's length.
+    // For a cell's own entries (2 bytes into the cell) that is 50 bytes from the cell's start, 42
+    // past its end: 6 cells of 8 bytes.
+    const PAD_CELLS: usize = 6;
+    // A list in the overflow array is staged in pieces of 24 hits from its start, and its last
+    // piece (1 to 24 hits left) reads up to 23 hits past its end: 24 hits. Every other cell test
+    // reads 8 hits at most.
+    const PAD_HITS: usize = 24;
 
     #[inline(always)]
     fn count(&self) -> usize {
@@ -363,9 +592,28 @@ impl XCell for BackboneCell16 {
         if numhits <= AA_HITS_PER_CELL {
             &self.entries[..numhits]
         } else {
-            let cursor = usize::from(self.entries[0]) | usize::from(self.entries[1]) << 16;
+            let cursor = self.cursor();
             &overflow[cursor..cursor + numhits]
         }
+    }
+
+    #[inline(always)]
+    fn cursor(&self) -> usize {
+        usize::from(self.entries[0]) | usize::from(self.entries[1]) << 16
+    }
+
+    #[inline(always)]
+    #[cfg(any(
+        test,
+        all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )
+    ))]
+    unsafe fn x_cursor_at(cell: *const Self) -> usize {
+        // SAFETY: (caller) `cell` points to a cell that nothing writes meanwhile.
+        let [low, high, _] = unsafe { std::ptr::addr_of!((*cell).entries).read() };
+        usize::from(low) | usize::from(high) << 16
     }
 
     #[inline(always)]
@@ -384,6 +632,16 @@ impl XCell for BackboneCell16 {
     #[inline(always)]
     fn entries_mut(&mut self) -> &mut [u16] {
         &mut self.entries
+    }
+
+    #[inline(always)]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    unsafe fn x_entries_ptr(cell: *mut Self) -> *mut u16 {
+        // SAFETY: (caller) `cell` points to a cell.
+        unsafe { std::ptr::addr_of_mut!((*cell).entries) }.cast::<u16>()
     }
 }
 
@@ -460,19 +718,12 @@ impl<C: XCell> BlastAaLookupTable<C> {
 }
 
 impl BlastAaLookupTable {
+    /// The hits of cell `index`: its own entries, or its run of `overflow` (`XCell::hits`).
+    /// Bounds-checked: an `index` past the backbone, or a cell whose count or cursor does not fit
+    /// the table (the fields are `pub`), panics instead of reading outside it.
     #[inline(always)]
     pub fn get_hits(&self, index: usize) -> &[i32] {
-        let cell = unsafe { self.backbone.get_unchecked(index) };
-        let num = cell.num_used as usize;
-        if num == 0 {
-            return &[];
-        }
-        if num <= AA_HITS_PER_CELL {
-            unsafe { std::slice::from_raw_parts(cell.entries.as_ptr(), num) }
-        } else {
-            let cursor = cell.entries[0] as usize;
-            unsafe { std::slice::from_raw_parts(self.overflow.as_ptr().add(cursor), num) }
-        }
+        self.backbone[index].hits(&self.overflow)
     }
 }
 
@@ -534,7 +785,7 @@ struct XChainArena {
     remaining: usize,
     /// Blocks chains have left, by size class (`1 << class` ints).
     free: Vec<Vec<std::ptr::NonNull<i32>>>,
-    /// Slabs of `SLAB_INTS` kept by `x_reset` for the next build (`LOSAT_X_BXLUTPOOL`).
+    /// Slabs of `SLAB_INTS` kept by `x_reset` for the next build (the pooled build).
     spare: Vec<Box<[i32]>>,
     /// EXPERIMENT (LOSAT_X_BPDBKEEP): every allocation is made by `x_allocate_unthresholded`.
     x_unthresholded: bool,
@@ -561,7 +812,7 @@ impl XChainArena {
         }
     }
 
-    // No NCBI counterpart (buffer reuse, `LOSAT_X_BXLUTPOOL`): every block given up at once, the
+    // No NCBI counterpart (buffer reuse, the pooled build): every block given up at once, the
     // slabs kept.
     fn x_reset(&mut self) {
         for slab in self.slabs.drain(..) {
@@ -797,7 +1048,7 @@ impl LookupBackboneChains {
         Self { cells, arena }
     }
 
-    // No NCBI counterpart (buffer reuse, LOSAT_X_BXLUTPOOL): as `new(backbone_size)`, on this
+    // No NCBI counterpart (buffer reuse, the pooled build): as `new(backbone_size)`, on this
     // backbone's vectors and slabs.
     fn x_reset(&mut self, backbone_size: usize) {
         self.cells.clear();
@@ -873,7 +1124,12 @@ struct PreparedLookupQuery {
 // ...
 // tail = BlastSeqLocNew((tail ? &tail : complement_mask), left, right);
 // ```
-fn build_lookup_segments_for_context(
+/// The lookup segments of one protein context at `query_offset` of `query_length` letters whose
+/// filtering locations are `seg_masks` (half-open, letter offsets of the context): NCBI's
+/// complement of the masks, as inclusive ranges, without the empty intervals NCBI makes where a
+/// mask reaches an end (no word lies in them). Blastp's query preparation and the lookup table of
+/// tblastn's PSSM query (`tblastn::in_pssm::lookup_table`) take it.
+pub(crate) fn build_lookup_segments_for_context(
     query_offset: i32,
     query_length: usize,
     seg_masks: &[(usize, usize)],
@@ -1062,6 +1318,111 @@ pub(crate) fn x_lookup_contexts_for_profile(
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2797 (see
+// `x_lookup_contexts_for_profile`)
+// ```c
+// loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
+// ```
+/// `x_lookup_contexts_for_profile`'s contexts when the diagnostics are on: those of the compressed
+/// lookup table (word sizes 5 to 7), which the diagnostics, counting the standard table's words,
+/// do not build. Cold, so that `x_lookup_contexts_for_profile` keeps its code.
+#[cold]
+#[inline(never)]
+pub(crate) fn x_compressed_contexts_for_profile(
+    queries: &[Vec<QueryFrame>],
+    check_ideal: bool,
+    matrix: ScoringMatrix,
+    word_length: usize,
+) -> Vec<QueryContext> {
+    let bounds = if matrix == ScoringMatrix::Blosum62 {
+        (-4, 11)
+    } else {
+        matrix_score_bounds(matrix)
+    };
+    prepare_lookup_query(
+        queries,
+        ideal_karlin_params_for_matrix(matrix, bounds),
+        &compute_std_aa_composition(),
+        word_length,
+        check_ideal,
+        matrix,
+        bounds,
+    )
+    .contexts
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2803 (cited at
+// `x_context_karlin`)
+// NCBI computes the contexts' Karlin blocks one after the other; each reads only its own context's
+// letters (`x_context_karlin`), so computing them on several threads gives each context the same
+// block (as `x_prepare_blosum62_lookup_query_in_pool`). Scheduling only.
+/// `x_lookup_contexts_for_profile` with the contexts' Karlin blocks computed on `pool`'s threads;
+/// the same contexts.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(crate) fn x_lookup_contexts_for_profile_in_pool(
+    queries: &[Vec<QueryFrame>],
+    check_ideal: bool,
+    matrix: ScoringMatrix,
+    word_length: usize,
+    pool: &crate::utils::threading::SearchPool<'_>,
+) -> Option<Vec<QueryContext>> {
+    use rayon::prelude::*;
+    if diagnostics_enabled() {
+        return None;
+    }
+    let bounds = if matrix == ScoringMatrix::Blosum62 {
+        (-4, 11)
+    } else {
+        matrix_score_bounds(matrix)
+    };
+    let ideal_params = ideal_karlin_params_for_matrix(matrix, bounds);
+    let std_comp = compute_std_aa_composition();
+    let mut contexts = x_prepare_lookup_query(
+        queries,
+        ideal_params,
+        &std_comp,
+        word_length,
+        check_ideal,
+        matrix,
+        bounds,
+        false,
+    )
+    .contexts;
+    // The frames in the order of the contexts (`x_prepare_lookup_query`'s loops).
+    let frames: Vec<&QueryFrame> = queries.iter().flatten().collect();
+    let karlin: Vec<(bool, KarlinParams)> = pool.install(|| {
+        frames
+            .par_iter()
+            .map(|frame| {
+                x_context_karlin(frame, &std_comp, bounds, matrix, check_ideal, ideal_params)
+            })
+            .collect()
+    });
+    assert_eq!(karlin.len(), contexts.len());
+    for (context, (is_valid, karlin_params)) in contexts.iter_mut().zip(karlin) {
+        context.is_valid = is_valid;
+        context.karlin_params = karlin_params;
+    }
+    Some(contexts)
+}
+
+// No NCBI counterpart: `x_lookup_table_for_profile_in` without a pool (one thread).
+/// The table `build_ncbi_lookup_for_profile` returns, for a caller that drops
+/// the contexts (graduated 2026-10-22, was `LOSAT_X_LUTSPLIT`). The
+/// per-context Karlin parameters are the only part of the preparation the
+/// table does not read; they are left out.
+pub(crate) fn x_lookup_table_for_profile(
+    queries: &[Vec<QueryFrame>],
+    threshold: i32,
+    matrix: ScoringMatrix,
+    word_length: usize,
+) -> BlastAaLookupTable {
+    x_lookup_table_for_profile_in(queries, threshold, matrix, word_length, None)
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:93-97
 // ```c
 // BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
@@ -1074,15 +1435,14 @@ pub(crate) fn x_lookup_contexts_for_profile(
 // threshold; it reads no Karlin parameter. This function skips the Karlin computation and builds
 // the same table (the contexts it fills carry default Karlin parameters, which the table build
 // does not read).
-/// The table `build_ncbi_lookup_for_profile` returns, for a caller that drops
-/// the contexts (graduated 2026-10-22, was `LOSAT_X_LUTSPLIT`). The
-/// per-context Karlin parameters are the only part of the preparation the
-/// table does not read; they are left out.
-pub(crate) fn x_lookup_table_for_profile(
+/// `x_lookup_table_for_profile`, the lean build's lists made on `pool`'s threads when it has two or
+/// more (`x_lut_direct::x_build_lean_in`); the same table.
+pub(crate) fn x_lookup_table_for_profile_in(
     queries: &[Vec<QueryFrame>],
     threshold: i32,
     matrix: ScoringMatrix,
     word_length: usize,
+    pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> BlastAaLookupTable {
     let bounds = if matrix == ScoringMatrix::Blosum62 {
         (-4, 11)
@@ -1099,7 +1459,115 @@ pub(crate) fn x_lookup_table_for_profile(
         bounds,
         false,
     );
+    // Dispatch point (LOSAT_X_TBNLUTLEAN, in the strict set): the same table without chains, every
+    // temporary freed by the build (`x_lut_direct::x_build_lean`; 4-letter words, whose backbone
+    // index is wider than its 16 bits: the joint builder, `x_full_wide_table`, on `pool`'s threads
+    // when it has two or more, as the lean build's lists; item X2e of line RG); in diagnostics
+    // mode, whose prints read the chains, and with `=0`, the chain builder.
+    let prepared = if x_tbn_lut_lean() {
+        match x_table_without_chains(prepared, threshold, matrix, word_length, pool) {
+            Ok(table) => {
+                x_count_tbn_lut(0);
+                return table;
+            }
+            Err(prepared) => prepared,
+        }
+    } else {
+        prepared
+    };
+    x_count_tbn_lut(1);
     build_lookup_from_prepared(prepared, threshold, matrix, word_length).0
+}
+
+// No NCBI counterpart: which LOSAT builder makes a table without chains (the table is the
+// reference builder's either way).
+/// The table of `prepared` without chains, every temporary freed by the build: the lean build
+/// (`x_lut_direct::x_build_lean_in`, its lists on `pool`'s threads when it has two or more) or, for
+/// 4-letter words, whose backbone index is wider than its 16 bits, the joint builder
+/// (`x_full_wide_table`, its tasks on the same threads; item X2e of line RG). TBLASTN's tables and
+/// TBLASTX's full table of another matrix than BLOSUM62 or another word length than 3.
+/// `Err(prepared)` in diagnostics mode, whose prints read the chains.
+fn x_table_without_chains(
+    prepared: PreparedLookupQuery,
+    threshold: i32,
+    matrix: ScoringMatrix,
+    word_length: usize,
+    pool: Option<&crate::utils::threading::SearchPool<'_>>,
+) -> std::result::Result<BlastAaLookupTable, PreparedLookupQuery> {
+    let prepared =
+        match x_lut_direct::x_build_lean_in(prepared, threshold, matrix, word_length, pool) {
+            Ok(table) => return Ok(table),
+            Err(prepared) => prepared,
+        };
+    match pool.filter(|pool| pool.enabled() && pool.threads() > 1) {
+        Some(pool) => pool.install(|| {
+            x_full_wide_table(prepared, threshold, matrix, word_length, pool.threads())
+        }),
+        None => x_full_wide_table(prepared, threshold, matrix, word_length, 1),
+    }
+}
+
+// No NCBI counterpart (memory only; the table is the one `build_lookup_from_prepared` builds):
+// LOSAT_X_TBNLUTLEAN, in the strict set (on unless `LOSAT_X_TBNLUTLEAN=0`).
+/// Whether TBLASTN builds its lookup tables with `x_lut_direct::x_build_lean`.
+fn x_tbn_lut_lean() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNLUTLEAN"))
+}
+
+// No NCBI counterpart: LOSAT_X_STATS counters; they do not change any value NCBI computes.
+/// TBLASTN tables built without chains (`[0]`: `x_build_lean`, or the joint builder for 4-letter
+/// words) and by the chain builder (`[1]`).
+static X_TBN_LUT_BUILDS: [std::sync::atomic::AtomicU64; 2] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 2];
+
+/// Counts one TBLASTN table built without chains (`which` 0) or by the chain builder (1) for the
+/// `[X_STATS] TBNLUTLEAN` line (`LOSAT_X_STATS` set).
+fn x_count_tbn_lut(which: usize) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *ON.get_or_init(|| std::env::var_os("LOSAT_X_STATS").is_some()) {
+        X_TBN_LUT_BUILDS[which].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// The `[X_STATS] TBNLUTLEAN lean= chain=` line (printed by `main` at exit) with `LOSAT_X_STATS`,
+/// when TBLASTN built any table.
+// No NCBI counterpart: prints the counters above; it does not change any value NCBI computes.
+pub fn x_tbn_lut_print_summary() {
+    let [lean, chain] = X_TBN_LUT_BUILDS
+        .each_ref()
+        .map(|c| c.load(std::sync::atomic::Ordering::Relaxed));
+    if lean + chain > 0 {
+        eprintln!("[X_STATS] TBNLUTLEAN lean={lean} chain={chain}");
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:104-108
+// ```c
+//    case eCompressedAaLookupTable:
+//       BlastCompressedAaLookupTableNew(query, lookup_segments,
+//                          (BlastCompressedAaLookupTable* *) &(lookup_wrap->lut),
+//                          lookup_options, sbp);
+// ```
+/// The concatenated query and the lookup segments that `x_lookup_table_for_profile` builds its
+/// table from (BLOSUM62, no Karlin blocks), for a table of another kind: TBLASTN's compressed
+/// table (`tblastn/search_seed.rs`).
+pub(crate) fn x_lookup_query_for_profile(
+    queries: &[Vec<QueryFrame>],
+    word_length: usize,
+) -> (Vec<u8>, Vec<(i32, i32)>) {
+    let bounds = (-4, 11);
+    let prepared = x_prepare_lookup_query(
+        queries,
+        ideal_karlin_params_for_matrix(ScoringMatrix::Blosum62, bounds),
+        &compute_std_aa_composition(),
+        word_length,
+        false,
+        ScoringMatrix::Blosum62,
+        bounds,
+        false,
+    );
+    (prepared.concat_query, prepared.lookup_locations)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2803
@@ -1193,7 +1661,7 @@ fn x_prepare_lookup_query(
     let mut query_offset = 0i32;
 
     for (q_idx, frames) in queries.iter().enumerate() {
-        for (f_idx, frame) in frames.iter().enumerate() {
+        for frame in frames.iter() {
             prepared.frame_bases.push(query_offset);
             prepared.concat_query.extend_from_slice(&frame.aa_seq[1..]);
 
@@ -1220,7 +1688,6 @@ fn x_prepare_lookup_query(
             if !x_with_karlin {
                 prepared.contexts.push(QueryContext {
                     q_idx: q_idx as u32,
-                    f_idx: f_idx as u8,
                     frame: frame.frame,
                     aa_seq: frame.aa_seq.clone(),
                     aa_seq_nomask: frame.aa_seq_nomask.clone(),
@@ -1242,7 +1709,6 @@ fn x_prepare_lookup_query(
 
             prepared.contexts.push(QueryContext {
                 q_idx: q_idx as u32,
-                f_idx: f_idx as u8,
                 frame: frame.frame,
                 aa_seq: frame.aa_seq.clone(),
                 aa_seq_nomask: frame.aa_seq_nomask.clone(),
@@ -1288,6 +1754,76 @@ pub(crate) fn prepare_blosum62_lookup_query_for_word_size(
         check_ideal,
         ScoringMatrix::Blosum62,
         (-4, 11),
+    );
+    (
+        prepared.concat_query,
+        prepared.lookup_locations,
+        prepared.contexts,
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2803 (cited at
+// `x_context_karlin`)
+// ```c
+//       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
+// ```
+/// [`prepare_blosum62_lookup_query_for_word_size`] for another matrix than BLOSUM62 (BLASTP's
+/// compressed table, item SC2b): the contexts' Karlin blocks from the matrix's scores, its score
+/// bounds and its ideal block, as `build_ncbi_lookup_for_profile(.., matrix, word_length)`
+/// prepares them; with a `pool` of more than one thread they are computed on its threads (each
+/// reads only its own context: the same blocks, as `x_prepare_blosum62_lookup_query_in_pool`).
+pub(crate) fn prepare_matrix_lookup_query_for_word_size(
+    queries: &[Vec<QueryFrame>],
+    word_length: usize,
+    check_ideal: bool,
+    matrix: ScoringMatrix,
+    pool: Option<&crate::utils::threading::SearchPool<'_>>,
+) -> (Vec<u8>, Vec<(i32, i32)>, Vec<QueryContext>) {
+    let bounds = matrix_score_bounds(matrix);
+    let ideal_params = ideal_karlin_params_for_matrix(matrix, bounds);
+    let std_comp = compute_std_aa_composition();
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if let Some(pool) = pool.filter(|pool| pool.enabled() && pool.threads() > 1) {
+        use rayon::prelude::*;
+        let prepared = x_prepare_lookup_query(
+            queries,
+            ideal_params,
+            &std_comp,
+            word_length,
+            check_ideal,
+            matrix,
+            bounds,
+            false,
+        );
+        let mut contexts = prepared.contexts;
+        let frames: Vec<&QueryFrame> = queries.iter().flatten().collect();
+        let karlin: Vec<(bool, KarlinParams)> = pool.install(|| {
+            frames
+                .par_iter()
+                .map(|frame| {
+                    x_context_karlin(frame, &std_comp, bounds, matrix, check_ideal, ideal_params)
+                })
+                .collect()
+        });
+        assert_eq!(karlin.len(), contexts.len());
+        for (context, (is_valid, karlin_params)) in contexts.iter_mut().zip(karlin) {
+            context.is_valid = is_valid;
+            context.karlin_params = karlin_params;
+        }
+        return (prepared.concat_query, prepared.lookup_locations, contexts);
+    }
+    let _ = pool;
+    let prepared = prepare_lookup_query(
+        queries,
+        ideal_params,
+        &std_comp,
+        word_length,
+        check_ideal,
+        matrix,
+        bounds,
     );
     (
         prepared.concat_query,
@@ -1772,6 +2308,9 @@ fn blast_aa_add_word_hits(
 ///                                   lookup->charsize, lookup->word_length,
 ///                                   query, location);
 /// ```
+/// (The tests' reference; every search builds its table with `build_ncbi_lookup_for_profile` or a
+/// builder without chains.)
+#[cfg(test)]
 pub fn build_ncbi_lookup(
     queries: &[Vec<QueryFrame>],
     threshold: i32,
@@ -1798,7 +2337,8 @@ pub fn build_ncbi_lookup(
 //         }
 //     }
 // ```
-/// [`build_ncbi_lookup`] for BLASTP: the table is filled in place from the per-cell counts, in
+/// `build_ncbi_lookup` (the BLOSUM62 3-letter table of [`build_ncbi_lookup_for_profile`]) for BLASTP:
+/// the table is filled in place from the per-cell counts, in
 /// the same append order as the loop above and BlastAaLookupFinalize (x_lut_direct.rs), so the
 /// chains of the reference builder are never held.
 pub(crate) fn x_bp_build_ncbi_lookup(
@@ -1811,14 +2351,17 @@ pub(crate) fn x_bp_build_ncbi_lookup(
 
 /// EXPERIMENT (LOSAT_X_BPLK16): [`x_bp_build_ncbi_lookup`] with the width of the table's hits
 /// chosen by the build (`narrow`: a table of `u16` hits where the lookup query is at most 65,535
-/// letters and the in-place builder applies; x_lut_direct.rs `x_bp_build_lookup_as`).
+/// letters and the in-place builder applies; x_lut_direct.rs `x_bp_build_lookup_as`), of the words
+/// of the search's `matrix` and word size (`word_length`: 3, or 2 for `-word_size 2`, item SC3).
 pub(crate) fn x_bp_build_ncbi_lookup_as(
     queries: &[Vec<QueryFrame>],
     threshold: i32,
     check_ideal: bool,
     narrow: bool,
+    matrix: ScoringMatrix,
+    word_length: usize,
 ) -> (x_lut_direct::XBpLookup, Vec<QueryContext>) {
-    x_lut_direct::x_bp_build_lookup_as(queries, threshold, check_ideal, narrow)
+    x_lut_direct::x_bp_build_lookup_as(queries, threshold, check_ideal, narrow, matrix, word_length)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:356-360
@@ -1829,25 +2372,36 @@ pub(crate) fn x_bp_build_ncbi_lookup_as(
 // sfree(lookup->thin_backbone[i]);
 // lookup->thin_backbone[i] = NULL;
 // ```
-/// EXPERIMENT (LOSAT_X_TBXLUT): [`build_ncbi_lookup`] for the full table
-/// of a TBLASTX query batch. With the switch the table is filled in place from the per-cell counts,
-/// in the same append order as the reference builder and BlastAaLookupFinalize (x_lut_direct.rs),
-/// so no chain is held: NCBI frees each chain as it copies it (above), the reference builder here
-/// holds all of them, and the arena's blocks, until the table is complete.
+/// EXPERIMENT (LOSAT_X_TBXLUT): [`build_ncbi_lookup_for_profile`] for the full table of a TBLASTX
+/// query batch, of the words of the search's `matrix` and word size (`word_length`). With the
+/// switch the table is filled in place from the per-cell counts, in the same append order as the
+/// reference builder and BlastAaLookupFinalize (x_lut_direct.rs; another matrix or word length:
+/// TBLASTN's builders, `x_table_without_chains`, 4-letter words the joint builder of
+/// `x_pair_lut_wide.rs`), so no chain is held: NCBI frees each chain as it copies it (above), the
+/// reference builder here holds all of them, and the arena's blocks, until the table is complete
+/// (item X2e of line RG: `-window_size 0 -word_size 4 -threshold 1` held 1.3-1.5x NCBI's memory).
 pub(crate) fn x_tbx_build_ncbi_lookup(
     queries: &[Vec<QueryFrame>],
     threshold: i32,
     karlin_params: &crate::stats::KarlinParams,
     check_ideal: bool,
+    matrix: ScoringMatrix,
+    word_length: usize,
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
-    x_lut_direct::x_tbx_build_lookup(queries, threshold, karlin_params, check_ideal)
+    x_lut_direct::x_tbx_build_lookup(
+        queries,
+        threshold,
+        karlin_params,
+        check_ideal,
+        matrix,
+        word_length,
+    )
 }
 
 // NCBI c++/src/algo/blast/core/blast_aalookup.c:227-245,438-465:
 // lookup->word_length = opt->word_size; lookup->threshold = opt->threshold;
 // row_max[i] = MAX(row_max[i], matrix[i][j]);
 // s_AddWordHits(lookup, matrix, query->sequence, ...);
-#[allow(dead_code)]
 pub(crate) fn build_ncbi_lookup_for_profile(
     queries: &[Vec<QueryFrame>],
     threshold: i32,
@@ -1902,6 +2456,11 @@ pub(crate) fn build_ncbi_lookup_for_profile(
 // ```
 /// BLASTX's lookup table of a prepared query; `parts` above 1: a pooled build's passes on that many tasks of the pool it runs on
 /// (`LOSAT_X_BXBUILDPAR`, `x_lut_direct.rs` `x_partitioned_passes`); the table is the same.
+///
+/// With `narrow_cutoff` (`Some` where the fused loop scans the table, `blastx/x_seed_diag.rs`
+/// `x_narrow_cutoff`) the in-place builder stores the hits in 16 bits (`BackboneCell16`) for a table
+/// whose lookup query is at most 65,535 letters and whose hits per used backbone cell, in
+/// hundredths, are at least the cutoff; the table holds the same cells otherwise.
 pub(crate) fn build_ncbi_lookup_from_prepared(
     concat_query: Vec<u8>,
     lookup_locations: Vec<(i32, i32)>,
@@ -1909,7 +2468,71 @@ pub(crate) fn build_ncbi_lookup_from_prepared(
     threshold: i32,
     pooled: bool,
     parts: usize,
-) -> BlastAaLookupTable {
+    narrow_cutoff: Option<u64>,
+) -> XBxTable {
+    build_ncbi_lookup_with(
+        ScoringMatrix::Blosum62,
+        LOOKUP_WORD_LENGTH,
+        concat_query,
+        lookup_locations,
+        contexts,
+        threshold,
+        pooled,
+        parts,
+        narrow_cutoff,
+    )
+}
+
+/// [`build_ncbi_lookup_from_prepared`] with another matrix than BLOSUM62 (BLASTX's other matrices,
+/// items SC6 and SC6b of line NP) or another word length than 3 (BLASTX's `-word_size` 2 and 4,
+/// item SC9): the same builds with the matrix's scores and the words of `word_length` letters (the
+/// neighbour lists of the pooled build and of a thread's builds are kept per matrix and word
+/// length, the key of `x_lut_direct.rs`'s memos; a backbone index wider than 16 bits, word length
+/// 4, is built by the joint builder, `x_pair_lut_wide.rs`, whose table is the reference builder's).
+/// Not inlined, so that BLOSUM62's build keeps its code.
+#[cold]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_ncbi_lookup_from_prepared_of(
+    matrix: ScoringMatrix,
+    word_length: usize,
+    concat_query: Vec<u8>,
+    lookup_locations: Vec<(i32, i32)>,
+    contexts: Vec<QueryContext>,
+    threshold: i32,
+    pooled: bool,
+    parts: usize,
+    narrow_cutoff: Option<u64>,
+) -> XBxTable {
+    debug_assert!(matrix != ScoringMatrix::Blosum62 || word_length != LOOKUP_WORD_LENGTH);
+    build_ncbi_lookup_with(
+        matrix,
+        word_length,
+        concat_query,
+        lookup_locations,
+        contexts,
+        threshold,
+        pooled,
+        parts,
+        narrow_cutoff,
+    )
+}
+
+/// The body of [`build_ncbi_lookup_from_prepared`] with the matrix `matrix` and words of
+/// `word_length` letters.
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn build_ncbi_lookup_with(
+    matrix: ScoringMatrix,
+    word_length: usize,
+    concat_query: Vec<u8>,
+    lookup_locations: Vec<(i32, i32)>,
+    contexts: Vec<QueryContext>,
+    threshold: i32,
+    pooled: bool,
+    parts: usize,
+    narrow_cutoff: Option<u64>,
+) -> XBxTable {
     let frame_bases = contexts.iter().map(|c| c.frame_base).collect();
     let prepared = PreparedLookupQuery {
         concat_query,
@@ -1929,21 +2552,92 @@ pub(crate) fn build_ncbi_lookup_from_prepared(
     //     }
     // ```
     // BLASTX: the table is filled in place from the per-cell counts, in the same append order as
-    // this loop and BlastAaLookupFinalize (x_lut_direct.rs); where that declines (diagnostics
-    // mode, or a backbone index wider than 16 bits) the reference builder below runs. With `pooled`
-    // (LOSAT_X_BXLUTPOOL, chosen by the caller for its search, LOSAT_X_BXPOOLN1) the build takes
-    // kept vectors; the caller gives them back (`x_give_back_pooled`) when it drops the table, or
-    // the pool goes without them (a missed reuse only).
+    // this loop and BlastAaLookupFinalize (x_lut_direct.rs); where that declines, a backbone index
+    // wider than 16 bits takes the joint builder below and diagnostics mode the reference builder
+    // below. With `pooled`
+    // (the pooled build, chosen by the caller for its search, LOSAT_X_BXPOOLN1) the build takes
+    // kept vectors; the caller gives them back (`x_give_back_pooled`, `x_give_back_pooled16`) when
+    // it drops the table, or the pool goes without them (a missed reuse only).
     let built = if pooled {
-        x_lut_direct::x_build_direct_pooled(prepared, threshold, ScoringMatrix::Blosum62, 3, parts)
+        x_lut_direct::x_build_direct_pooled(
+            prepared,
+            threshold,
+            matrix,
+            word_length,
+            parts,
+            narrow_cutoff,
+        )
     } else {
-        x_lut_direct::x_build_direct(prepared, threshold, ScoringMatrix::Blosum62, 3)
+        x_lut_direct::x_bx_build_direct(prepared, threshold, matrix, word_length, narrow_cutoff)
     };
     let prepared = match built {
         Ok(table) => return table,
         Err(prepared) => prepared,
     };
-    build_lookup_from_prepared(prepared, threshold, ScoringMatrix::Blosum62, 3).0
+    // A backbone index wider than the direct builder's 16 bits (`-word_size 4`, item SC9 of line
+    // NP; for BLOSUM62's 3 letters a constant false): the joint builder, on `parts` tasks.
+    // Diagnostics mode keeps the reference builder.
+    let prepared = match x_full_wide_table(prepared, threshold, matrix, word_length, parts) {
+        Ok(table) => return XBxTable::Wide(table),
+        Err(prepared) => prepared,
+    };
+    XBxTable::Wide(build_lookup_from_prepared(prepared, threshold, matrix, word_length).0)
+}
+
+// No NCBI counterpart: which LOSAT builder makes the table of a backbone index wider than 16 bits
+// (the table is the reference builder's either way, `x_pair_lut_wide.rs` module comment).
+/// The table of `prepared` from the joint builder of 32-bit backbone indices (`x_pair_lut_wide.rs`,
+/// the query's lookup locations as its one table) on `parts` tasks, where the 16-bit direct builder
+/// does not cover `word_length` (`-word_size 4`, item SC9 of line NP; BLASTX's table and TBLASTX's
+/// full table, item X2e of line RG); `Err(prepared)` for other word lengths and in diagnostics mode
+/// (whose prints read the reference builder's chains).
+#[inline(always)]
+fn x_full_wide_table(
+    prepared: PreparedLookupQuery,
+    threshold: i32,
+    matrix: ScoringMatrix,
+    word_length: usize,
+    parts: usize,
+) -> std::result::Result<BlastAaLookupTable, PreparedLookupQuery> {
+    if !x_pair_lut::x_direct_covers(word_length)
+        && x_pair_lut::x_pair_lut_wide::x_wide_covers(word_length)
+        && !diagnostics_enabled()
+    {
+        return Ok(x_pair_lut::XPairLutQuery::x_from_prepared(
+            prepared,
+            threshold,
+            matrix,
+            word_length,
+        )
+        .x_build_full_wide(parts));
+    }
+    Err(prepared)
+}
+
+/// The reference builder's table of a BLASTX lookup query (the inputs `build_ncbi_lookup_with`
+/// takes), for the tests of `blastx::seed` (item SC9 of line NP, a test of threaded builds).
+#[cfg(all(
+    test,
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(crate) fn x_reference_table_from_prepared(
+    matrix: ScoringMatrix,
+    word_length: usize,
+    concat_query: Vec<u8>,
+    lookup_locations: Vec<(i32, i32)>,
+    contexts: Vec<QueryContext>,
+    threshold: i32,
+) -> BlastAaLookupTable {
+    let frame_bases = contexts.iter().map(|c| c.frame_base).collect();
+    let prepared = PreparedLookupQuery {
+        concat_query,
+        lookup_locations,
+        contexts,
+        frame_bases,
+        skipped_seg_mask: 0,
+    };
+    build_lookup_from_prepared(prepared, threshold, matrix, word_length).0
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:227-245
@@ -2331,7 +3025,7 @@ fn build_lookup_from_prepared(
                 backbone[idx].entries[i] = off;
             }
         } else {
-            backbone[idx].entries[0] = overflow_cursor as i32;
+            backbone[idx].set_cursor(overflow_cursor);
             for &off in entries {
                 overflow[overflow_cursor] = off;
                 overflow_cursor += 1;
@@ -2383,80 +3077,41 @@ fn build_lookup_from_prepared(
     )
 }
 
-/// Build a simple direct (exact) 3-mer lookup table for tests and diagnostics.
-pub fn build_direct_lookup(queries: &[Vec<QueryFrame>]) -> Vec<Vec<(u32, u8, u32)>> {
-    let word_length = LOOKUP_WORD_LENGTH;
-    let alphabet_size = LOOKUP_ALPHABET_SIZE;
-    let charsize = ilog2(alphabet_size) + 1;
-    let mask = compute_mask(word_length, charsize);
-    let backbone_size = compute_backbone_size(word_length, alphabet_size, charsize);
-
-    let mut table: Vec<Vec<(u32, u8, u32)>> = vec![Vec::new(); backbone_size];
-
-    for (q_idx, frames) in queries.iter().enumerate() {
-        for (f_idx, frame) in frames.iter().enumerate() {
-            if frame.aa_len < 3 || frame.aa_seq.len() < 5 {
-                continue;
-            }
-
-            let seq_ptr = &frame.aa_seq[1..frame.aa_seq.len() - 1];
-            // NCBI invalid_mask = 0xff << charsize (Uint1).
-            // Reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:89-120
-            let invalid_mask: u8 = 0xffu8 << (charsize as u32);
-            let unmasked = compute_unmasked_intervals(&frame.seg_masks, frame.aa_len);
-            for (start, end) in unmasked {
-                let from = start as i32;
-                let to = end.saturating_sub(1) as i32;
-                // NCBI: if (word_length > to - from + 1) continue;
-                // Reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:96-100
-                if word_length as i32 > to - from + 1 {
-                    continue;
-                }
-                let mut offset = from;
-                let mut word_target = from + word_length as i32;
-
-                while offset <= to {
-                    if offset >= word_target {
-                        let word_start = (offset - word_length as i32) as usize;
-                        let idx = encode_kmer_3(
-                            seq_ptr[word_start] as usize,
-                            seq_ptr[word_start + 1] as usize,
-                            seq_ptr[word_start + 2] as usize,
-                            charsize,
-                        ) & mask;
-                        table[idx].push((q_idx as u32, f_idx as u8, word_start as u32));
-                    }
-                    if (seq_ptr[offset as usize] & invalid_mask) != 0 {
-                        // NCBI: word_target = seq + lut_word_length + 1
-                        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:117-120
-                        word_target = offset + word_length as i32 + 1;
-                    }
-                    offset += 1;
-                }
-
-                if offset >= word_target {
-                    let word_start = (offset - word_length as i32) as usize;
-                    let idx = encode_kmer_3(
-                        seq_ptr[word_start] as usize,
-                        seq_ptr[word_start + 1] as usize,
-                        seq_ptr[word_start + 2] as usize,
-                        charsize,
-                    ) & mask;
-                    table[idx].push((q_idx as u32, f_idx as u8, word_start as u32));
-                }
-            }
-        }
-    }
-
-    table
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::ScoringMatrix;
     use crate::stats::lookup_protein_params_ungapped;
     use crate::utils::matrix::{blosum62_score, ncbistdaa, BLASTAA_SIZE};
+
+    // NCBI blast_filter.c:1032-1114: the complement of the masks of one context, without the
+    // empty intervals at the ends.
+    #[test]
+    fn lookup_segments_are_the_complement_of_the_masks() {
+        assert_eq!(build_lookup_segments_for_context(0, 10, &[]), vec![(0, 9)]);
+        assert_eq!(
+            build_lookup_segments_for_context(0, 10, &[(2, 4)]),
+            vec![(0, 1), (4, 9)]
+        );
+        assert_eq!(
+            build_lookup_segments_for_context(0, 10, &[(0, 3)]),
+            vec![(3, 9)]
+        );
+        assert_eq!(
+            build_lookup_segments_for_context(0, 10, &[(6, 10)]),
+            vec![(0, 5)]
+        );
+        assert_eq!(
+            build_lookup_segments_for_context(0, 12, &[(0, 2), (5, 7), (9, 12)]),
+            vec![(2, 4), (7, 8)]
+        );
+        assert_eq!(
+            build_lookup_segments_for_context(4, 10, &[(2, 4)]),
+            vec![(4, 5), (8, 13)]
+        );
+        assert!(build_lookup_segments_for_context(0, 5, &[(0, 5)]).is_empty());
+        assert!(build_lookup_segments_for_context(0, 0, &[]).is_empty());
+    }
 
     // No NCBI counterpart (LOSAT_X_BPDBKEEP): the unthresholded arena cuts its slabs and long chains
     // from one region while it has room (one region per 32 MiB on 64-bit glibc, else one per
@@ -2543,6 +3198,63 @@ mod tests {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2803 (cited at
+    // `x_context_karlin`)
+    // The contexts of a query set with their Karlin blocks computed on a pool's threads
+    // (`x_lookup_contexts_for_profile_in_pool`) are those of the one-thread computation: every
+    // field, a context whose block fails (letters X only) included, for each matrix's bounds.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[test]
+    fn contexts_in_pool_equal_the_one_thread_contexts() {
+        let mut seed = 0x5eed_u64;
+        let mut residue = || {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            1 + ((seed >> 33) % 22) as u8
+        };
+        let mut queries: Vec<Vec<QueryFrame>> = (0..37)
+            .map(|i| {
+                let seq: Vec<u8> = (0..(5 + i * 13)).map(|_| residue()).collect();
+                vec![make_query_frame(seq, vec![(1, 3)])]
+            })
+            .collect();
+        queries.push(vec![make_poly_a_query_frame()]);
+        // Only negative scores: no Karlin block (NCBI's `is_valid = FALSE`).
+        queries.push(vec![make_query_frame(vec![ncbistdaa::X; 20], vec![])]);
+        for matrix in [
+            ScoringMatrix::Blosum62,
+            ScoringMatrix::Blosum45,
+            ScoringMatrix::Pam30,
+        ] {
+            let one = x_lookup_contexts_for_profile(&queries, false, matrix, 3).unwrap();
+            let pooled = crate::utils::threading::with_search_pool(4, "tblastn", |pool| {
+                Ok(x_lookup_contexts_for_profile_in_pool(
+                    &queries, false, matrix, 3, pool,
+                ))
+            })
+            .unwrap()
+            .unwrap();
+            assert_eq!(one.len(), pooled.len());
+            assert!(one.iter().any(|context| !context.is_valid));
+            for (a, b) in one.iter().zip(&pooled) {
+                assert_eq!(
+                    (a.q_idx, a.frame, a.aa_len, a.orig_len, a.frame_base),
+                    (b.q_idx, b.frame, b.aa_len, b.orig_len, b.frame_base)
+                );
+                assert_eq!((&a.aa_seq, &a.aa_seq_nomask), (&b.aa_seq, &b.aa_seq_nomask));
+                assert_eq!(a.is_valid, b.is_valid);
+                assert_eq!(
+                    format!("{:?}", a.karlin_params),
+                    format!("{:?}", b.karlin_params)
+                );
+            }
+        }
+    }
+
     fn build_lookup_for_test(queries: Vec<Vec<QueryFrame>>, threshold: i32) -> BlastAaLookupTable {
         let ungapped = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
         let (lookup, _) = build_ncbi_lookup(&queries, threshold, &ungapped, true);
@@ -2573,7 +3285,7 @@ mod tests {
             output: &mut Vec<u8>,
         ) {
             if t > order {
-                if order % p == 0 {
+                if order.is_multiple_of(p) {
                     for j in 1..=p {
                         output.push(a[j] as u8);
                     }
@@ -2917,6 +3629,71 @@ mod tests {
         ) & lookup.mask as usize;
 
         assert_eq!(lookup.get_hits(aaa_index), &[0]);
+    }
+
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:57 (`Int4
+    // overflow_cursor`, quoted at `BackboneCell`). A cursor below 2^31 is NCBI's `Int4` in
+    // `entries[0]` (and 0 in `entries[1]`); a cursor of 2^31 or more, which NCBI's `Int4` cannot
+    // hold (`-threshold 3e9`: 21,952 entries per word position, so 97,827 positions fill 2^31),
+    // reads back whole, as every scanner reads it (`cursor`, `x_cursor_at`), where
+    // `entries[0] as usize` gave 0xffff_ffff_8000_0000.
+    #[test]
+    fn cursor_holds_positions_past_int4() {
+        #[allow(unused_mut)]
+        let mut cursors = vec![0usize, 7, (1 << 31) - 1, 1 << 31, u32::MAX as usize];
+        #[cfg(target_pointer_width = "64")]
+        cursors.extend([1usize << 32, (1usize << 32) + 5, usize::MAX >> 2]);
+        for cursor in cursors {
+            let mut cell = BackboneCell::default();
+            cell.set_count(AA_HITS_PER_CELL + 1);
+            XCell::set_cursor(&mut cell, cursor);
+            assert_eq!(cell.cursor(), cursor, "{cursor:#x}");
+            assert_eq!(XCell::cursor(&cell), cursor, "{cursor:#x}");
+            // SAFETY: `cell` is a cell that nothing writes.
+            assert_eq!(
+                unsafe { BackboneCell::x_cursor_at(&cell) },
+                cursor,
+                "{cursor:#x}"
+            );
+            if cursor < 1 << 31 {
+                assert_eq!(cell.entries, [cursor as i32, 0, 0]);
+            }
+        }
+        let mut narrow = BackboneCell16::default();
+        narrow.set_count(AA_HITS_PER_CELL + 1);
+        narrow.set_cursor((1 << 31) + 3);
+        assert_eq!(narrow.cursor(), (1 << 31) + 3);
+        // SAFETY: `narrow` is a cell that nothing writes.
+        assert_eq!(
+            unsafe { BackboneCell16::x_cursor_at(&narrow) },
+            (1 << 31) + 3
+        );
+    }
+
+    // No NCBI counterpart: `get_hits` is a safe function of a table whose fields are `pub`, so an
+    // index past the backbone, or a cell whose run does not fit `overflow`, panics instead of
+    // reading outside the table (it read with `get_unchecked` until the SWEBOK 2026-11-04 audit,
+    // KA4).
+    #[test]
+    fn get_hits_panics_outside_the_table() {
+        let lookup = build_lookup_for_test(
+            vec![vec![make_query_frame(
+                vec![ncbistdaa::A, ncbistdaa::A, ncbistdaa::A],
+                vec![],
+            )]],
+            0,
+        );
+        let past = lookup.backbone.len();
+        let read = |table: &BlastAaLookupTable, index: usize| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| table.get_hits(index).len()))
+        };
+        assert!(read(&lookup, past).is_err());
+        let mut broken = lookup;
+        broken.backbone[0].num_used = AA_HITS_PER_CELL as i32 + 1;
+        broken.backbone[0].set_cursor(broken.overflow.len());
+        assert!(read(&broken, 0).is_err());
+        broken.backbone[0].num_used = -1;
+        assert!(read(&broken, 0).is_err());
     }
 
     // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/aalookup_unit_test.cpp:222-244 DebruijnSequenceTest

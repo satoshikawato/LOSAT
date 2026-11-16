@@ -1,0 +1,105 @@
+# Fixtures of `losat blastdbcmd` (`LOSAT/src/blastdbcmd`)
+
+What NCBI BLAST+ 2.17.0 blastdbcmd printed for `-info`, its argument errors, `-out` and
+`-logfile` (`LOSAT/tests/blastdbcmd_info.rs`), and for the retrieval of sequences
+(`-entry`, `-entry_batch`, `-outfmt`, `-range`, `-strand`, `-line_length`, `-ctrl_a`,
+`-target_only`, `-get_dups`, `-long_seqids`: `LOSAT/tests/blastdbcmd_retrieve.rs`), and for
+the taxonomy, the metadata, the lists of databases and the search path (`-taxids`,
+`-taxidlist`, `-tax_info`, `-metadata`, `-list`, `-show_blastdb_search_path`, `-ipg`:
+`LOSAT/tests/blastdbcmd_discovery.rs`), on databases with masks (`-info`,
+`-mask_sequence_with`, `%m`: `LOSAT/tests/blastdbcmd_masks.rs`), and on several names in `-db`
+(`LOSAT/tests/blastdbcmd_several_names.rs`), and for the line ends of the batch files on each
+platform (`LOSAT/tests/blastdbcmd_batch_line_ends.rs`). Frozen on
+2026-10-29 and 2026-10-30 by line BDC's probe on the workstation (cases `I01`-`I38`,
+`B01`-`B61`, `C01`-`C20`, `F01`-`F34`, `S01`-`S46`, `D01`-`D112`, on 2026-10-31 `H01`-`H119`,
+`M01`-`M07` on 2026-10-29, on 2026-11-01 `I101`-`I1195`, `J101`-`J222`, `K01`-`K39` and
+`M101`-`M1003`, on 2026-11-02 `N101`-`N2042` and `O01`-`O47`; NCBI was not run on this tree).
+`A01`-`A32` (line RG, series D, D1a, 2026-11-12) are NCBI BLAST+ 2.17.0 blastdbcmd (the release build on the developer
+machine) run in this directory on the alias files of `db/ak/` (`NSEQ`, `LENGTH`, `STATS_NSEQ`, `STATS_TOTLEN`,
+`MIN_SEQ_LENGTH`, `FIRST_OID`, `LAST_OID`, `VDBLIST`, values that do not convert) over `p5`, `n5`, the volumes of `dv4` and
+`j/lst/p5`, and on `-db "db/palias db/p5"` (a volume that an alias and a name both give):
+`LOSAT/tests/blastdbcmd_alias_keys.rs`, `remaining-gaps-20261112/D/fixtures/make_d1a_blastdbcmd.py`.
+`A33`-`A58` (D1a-2, 2026-11-13; `A37` and `A38` are LOSAT's refusals of `%d` and `%b`, not frozen) are the same
+build on `-ipg` and `-ipg_batch` (`in/ak_pig.txt`, `in/ak_pigm.txt`) through the ranges `db/ak/m_r`, `m_s` and `m_t`
+over `db/m/pmg`, whose PIGs' OIDs the ranges leave out (`A52`: approved difference 5, NCBI's header with the letters of
+its `%s` run): `make_d1a2_blastdbcmd.py`. `A59`-`A65` (D1a-2) are `-info` and `-entry all` on alias files with `NSEQ`,
+`LENGTH`, `STATS_NSEQ` and `STATS_TOTLEN` (`db/ak/e_*`) over volumes of no OID: `db/ak/ep` (a copy of `seqdb/db/empty`) and
+`db/ak/en` (a nucleotide index of no sequence).
+`A66`-`A182` (D1a-2 part 2, 2026-11-13) are the same build on the blastdbcmd commands of the probe cases `p4a_*` of
+`remaining-gaps-20261112/D/SURVEY_D1a2_A.md` (`FIRST_OID` / `LAST_OID` of 2^31 or more, the iteration range of the only
+alias file of a `-db` with another database) over `db/ak/or/`: the cases' alias files (`<case>_<name>.pal|nal`), copies of
+`tfp`, `tfn` and its volumes from `LOSAT/tests/db_search/taxfilter`, and `o` (ten sequences of `tfp` as `lcl|o0`..`lcl|o9`,
+taxid 10116, NCBI BLAST+ 2.17.0 makeblastdb, `remaining-gaps-20261112/D/fixtures/build_o.sh`), batch files
+`in/or_<case>_*.txt`; `-taxids` with `-no_taxid_expansion`. `A183`-`A190` are GIs of `p5` through `db/ak/p_range` and
+`in/or_gi.txt`: `make_d1a2a_fixtures.py`.
+`U01`, `U03` and `U04` (line SW, SW8, 2026-11-08) are NCBI BLAST+ 2.17.0 blastdbcmd on the
+developer machine, run with the words of the tests from the `blastdbcmd` directory of a copy of
+this layout whose `seqdb/db` held the five files of `user-column-db`
+(`LOSAT/tests/seqdb/README.md`); `{T}` replaces that copy's root. NCBI's whole file set (`-db
+uc/user-column-db -dbtype prot`, with its ISAM files) gave the same bytes but for the path.
+
+- `db/`: databases of that probe. `p5` (version 5, `-parse_seqids`) and `p4` (version 4)
+  are proteins with every Seq-id type, `n5` / `n4` the nucleotides, `p5n` / `p4n` / `n5n` /
+  `n4n` the same without parsed ids, `pL` / `nL` version 4 databases written by LOSAT
+  (`losat makedb`, now `losat makeblastdb`), `pm5` a protein database with the seg masks of
+  `makeblastdb -mask_data` (column files `.paa .pab .pac`), `palias` an alias file of `p5`
+  and `pm5` (blastdb_aliastool), `d5` a version 5 database whose accessions `XP_800001` and
+  `XP_800002` repeat on OIDs 1 and 256, 9 and 10 (the order of LMDB's duplicates), `e5` one
+  whose `XP_900001` is on 600 sequences and `XP_900002` on 300, `d5b` the same FASTA as `d5`,
+  `h_dd`, `h_p5p5n`, `h_p5np5` alias files over two LMDB files, `nm5` and `nm4` nucleotides
+  with the dust masks 11 and 12, `m/nms4` the FASTA of `nm4` with masks 12 on one of its
+  sequences, `m/pmg` proteins with GIs and seg masks whose `.ppi` and `.ppd` are copies of
+  their `.pni` and `.pnd` (an index of PIGs), `m/bad4/b_big` the files of `nm4` without its
+  little-endian column data `.nac` (probe M's database of that name, cases M782-M790). Version
+  4 with parsed ids besides `p4` and `n4`: `d4` (the FASTA of `d5`: the OIDs of a key in the text order of the
+  ISAM, `10` before `9`), `i4` (pdb ids of four digits that read as GIs, an EMBL and a GenBank
+  id in one definition line, CDD, GNOMON, PIG and trace ids as general ids, versions of one
+  accession, locus names), `it4` (nucleotide trace, SRA and TSA ids), `dv4` the FASTA of `d5`
+  in three volumes, with the alias files `i_dvr` (two volumes in reverse order) and `i_dv1`
+  (the second volume). Kept: the files LOSAT reads, the LMDB file of each version 5 database,
+  the ISAM files of GIs of `p5` and `n5`, and the string and GI ISAM files of the version 4
+  databases (whose presence makes a version 4 database one with parsed ids).
+- `in/`: the `-entry_batch` files of the probe (`i_p_all.txt`, `i_p_safe.txt`: every spelling
+  of an id of `p4`, the second without the ids that stop the batch; `i_i_all.txt`,
+  `i_i_range.txt`: those of `i4`; `n_p.txt`: accessions of `p5` and `pm5` with one that neither
+  holds).
+- `expected/ID.stdout`, `expected/ID.stderr`: NCBI's bytes for case `ID`, with `{R}` for the
+  directory the probe ran in (here `tests/blastdbcmd`, the current directory of the runs) and
+  `{T}` for the repository's `LOSAT/tests/` (the probe's copy of the seqdb fixtures).
+  `B07.logfile`, `B08.logfile` and `D72.logfile` are the files NCBI's `-logfile` wrote
+  (`B08.logfile` after two runs, B08 and B38, into one file), `D70.out` and `D84.out` those
+  of `-out`. The stdout of `D82`, `D87`, `D97` and `D101` is not NCBI's but the correct
+  output of an approved difference (line BDC DECISIONS 12: `-long_seqids` with `-range` on
+  the minus strand, where NCBI writes the forward letters under its `:c` header): NCBI's
+  header with the letters NCBI writes for the same range with short ids
+  (`dropin-survey-20261029/BDC/probe/make_expected.py`). `H09` the same difference on a
+  parsed database. `H107`, `H108` and `H109` are neither: NCBI stops on the accession of 600
+  sequences (`PD-LOSAT-NCBI-DEFECTS` exception 6), and the expected bytes are the OIDs in the
+  order NCBI gives a key of fewer sequences (`H110`). The stdout of the cases of the approved
+  differences 3 to 6 in the table of `blastdbcmd_masks.rs` is not NCBI's either: NCBI's
+  headers with the letters of NCBI's `-outfmt %s` run of the same words, or, for two `%m`, the
+  runs with one `%m` each (`make_expected.py`, `PD-LOSAT-BLASTDBCMD-DEVIATIONS`).
+- `eol/linux`, `eol/windows`, `eol/macos`: probe O, NCBI's bytes of the batch-file cases of
+  `blastdbcmd_batch_line_ends.rs` on each platform (`manifest.tsv`: the exit status and the
+  hashes of every case; no files for exit status 255, NCBI's exception with its build path,
+  which LOSAT refuses). Linux ran on the workstation; Windows x64 (`windows-2025`), macOS arm64
+  (`macos-15`) and macOS x64 (`macos-15-intel`) ran on GitHub Actions (run 41430195529 of the
+  branch `characterize/blastdbcmd-batch-eol`, NCBI's archives checked against their md5), the two
+  macOS outputs byte-identical but for the build path in the exception of exit status 255
+  (`eol/macos` is the arm64 copy). The Windows bytes are NCBI's text-mode output (`\r\n`) and
+  keep it (`eol/.gitattributes`); the test takes the `\r` before each `\n` away. The inputs
+  are written by the test.
+- `j/`: whole copies (every file but the build logs; no line-end conversion, `j/.gitattributes`:
+  the sizes are in `-list %U` and `-metadata`) of probe J's databases: `j/lst` holds `n4`,
+  `n5`, `p4`, `p5`, `p5n`, `dv4` (three volumes and their alias file) and `pal`
+  (blastdb_aliastool's alias of `p5` and `p5n`); `j/jd` copies of `p4` whose index file has
+  another date (`am12`, `pm12`, `d01`, `d1`, `feb30`, `bad`) or a title with characters JSON
+  escapes (`esc`); `j/jtax5/taxonomy4blast.sqlite3` a taxonomy over the taxids of `p5` (562,
+  9606, 10090, 10116 under 9604, 10066 and 1, with 3000 more taxids so that both b-trees have
+  interior pages; probe K, written by Python's `sqlite3`). The expected lines of `J160`,
+  `J161`, `J163` and `J164` are NCBI's lines of these databases (the probe's directory held
+  two more, `nal2` and `s18mv`). `J165`, `J166`, `J167` and `J176` are NCBI's lists of the
+  probe's `db/j/lsx` (empty files, links, a directory named `d.pin`), which the test builds
+  again on Unix. `K13` (`-taxids 1`, which never ends in NCBI: taxid 1 is its own parent) is
+  the approved difference of DI-8 DECISIONS 10; its expected bytes are NCBI's `K25`, the same
+  run with the explicit list of every taxid that taxid 1 reaches.

@@ -1,0 +1,26 @@
+{
+  "version": "1.2",
+  "dbname": "prd_ua",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "prd_ua (parsed Seq-ids)",
+  "number-of-letters": 500,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-11T14:21:00",
+  "number-of-volumes": 1,
+  "bytes-total": 50108,
+  "bytes-to-cache": 623,
+  "files": [
+    "prd_ua.pdb",
+    "prd_ua.phr",
+    "prd_ua.pin",
+    "prd_ua.pnd",
+    "prd_ua.pni",
+    "prd_ua.pog",
+    "prd_ua.pos",
+    "prd_ua.pot",
+    "prd_ua.psq",
+    "prd_ua.ptf",
+    "prd_ua.pto"
+  ]
+}

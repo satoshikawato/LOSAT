@@ -1,0 +1,9 @@
+Error: (803.7) Blast-db-mask-info.masks.masks.E.packed-int.E.id.local.str
+Bad char [0x7F] in string at line 11
+ab
+Error: (803.7) Blast-db-mask-info.masks.masks.E.packed-int.E.id.local.str
+Bad char [0x7F] in string at line 16
+ab
+Error: (803.7) Blast-db-mask-info.masks.masks.E.int.id.local.str
+Bad char [0x7F] in string at line 22
+cd

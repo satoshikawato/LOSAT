@@ -1,0 +1,206 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/PajaWSV.faa).
+           86 sequences; 66,738 total letters
+
+
+
+Query= BDT63074.1 tyrosine recombinase [Sicyonia whispovirus]
+
+Length=897
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.340    0.279     1.71    0.194    0.162 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.294    0.110    0.610    0.480     2.46     3.19 
+
+Effective search space used: 57161312
+
+
+Query= nohit a query without hits
+
+Length=12
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.346    0.250     3.25    0.194    0.162 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.294    0.110    0.610    0.480     2.46     3.19 
+
+Effective search space used: 665660
+
+
+Query= BDT63075.1 wsv226-like protein [Sicyonia whispovirus]
+
+Length=1142
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63562.1 wsv226-like protein [Pasiphaea japonica whispovirus]       512     1e-147
+
+
+> BDT63562.1 wsv226-like protein [Pasiphaea japonica whispovirus]
+Length=1101
+
+ Score = 512 bits (1200),  Expect = 1e-147, Method: Compositional matrix adjust.
+ Identities = 342/1119 (31%), Positives = 415/1119 (37%), Gaps = 150/1119 (13%)
+
+Query  101   TFKAEDAETATIESEAETALEAKA------ETALEAEADLYEQEIRRNVSEFVAGLPHVT  154
+             TF  ++ E     S  E   +         ET    E  LY      N   F+  LPH+T
+Sbjct  46    TFVKDELEKLNFLSMVEDEHQVMDFGDSIYETNTKQEDALYID----NDKNFINQLPHIT  101
+
+Query  155   GDYAEAERFGAPYLPPGKRRKETYRFWASKDFRAQYLGHLAGNRWIGEFVRGEIDATTCV  214
+             G   +A  +G PYLP     K    +W   +    YLG L GN  I  FV   IDATTC+
+Sbjct  102   GVCEDAVKYGRPYLPTNEMAKIVDGYWNTNNRKKKYLGYLCGNFAINAFVSNTIDATTCI  161
+
+Query  215   GMLRSVATAYGCGPIIRIALSCLNTLASGYSNSNNFEVKREDLVASINPPWRATRPLSMH  274
+             G LRS ATA+G       A  CL T     S  N F V R  + A   P     RP   +
+Sbjct  162   GFLRSRATAFGYPGLKCLAEMCLST-----SSNNSFTVPRKQMMAATFPEEMRRRPSTIQ  216
+
+Query  275   PEALNATNPSKVVSKLLGEKTRCVALDWKDTSRELGFCDSRNVGVLTNLIYAIAVPAYTA  334
+                        V  KL    T CV +DW + S    +  SR V  L NLI  I  PAYT 
+Sbjct  217   Q----MSETCQVYKKLANKNTVCVTMDWSEASKKINYDYSRKVCLLQNLIVIILLPAYTM  272
+
+Query  335   EMILSTEGKMEQHVLRKQGMQ-----------PPIERVELLKQKSVLCAIHSLTQYFSGP  383
+             + IL T+  +E  VL   G Q              E   LL    VL A   L  +FSG 
+Sbjct  273   DVILDTDRELERYVLASVGQQDDRDKYKYNQQTKEEKKNLLDDLCVLSAMSYLYTFFSG-  331
+
+Query  384   VRDSDVNDDDRTRRGVPSGKHLFAAPLRLPPFDAHPVVNLENHPLFTTDPLSTDGNPLRV  443
+                 D  DD           HL+ APLRLPPFD HPV+NL   P F       +     V
+Sbjct  332   ----DGKDDKSI--------HLYNAPLRLPPFDDHPVINLHECPYFSD---CGETARRKV  376
+
+Query  444   LASVSTPAHSAVALKHRSGRRP-------------------KKLLGLSKNGIELHVL--P  482
+              AS+STP +S V L HR  R P                    KL G    GIE  V   P
+Sbjct  377   VASISTPSQSMVTLNHRVQRTPLNNVNGCKDDKEQTSDNTYNKLIGVTNSGIEVRVVKKP  436
+
+Query  483   ALKDTGSRRRKKKVVRSDVMTNRQ----RDPLLHMATKEPPVFVRNVLAVAGNYGWFALI  538
+                     R KK  V    +        RDP  HM   E P F R  LA  G YGWF  +
+Sbjct  437   TATQSSCLRKKKREVKHSRLAQKLGEITRDPVTHMNRRERPLFLRSMLALCGSYGWFSIV  496
+
+Query  539   VGYMSSPDVLFNKTNCDGLFAPDLIRKYRSEQITTTPLRNRRIDTRFEGLELVDAMGHTS  598
+              GY    DVLF   + DGLF P  IR +R   +  TP+RNR ID RF GLEL D  G   
+Sbjct  497   LGYNPTLDVLFMGNDHDGLFSPHWIRRFRKRYVSMTPMRNRKIDLRFHGLELADTPGNAC  556
+
+Query  599   GFRIRPASL--SDDHCGGDSDDG----GLGVIGARDNPFYTKTNRPAWYSDASLEDLFG-  651
+              FRIRPASL  S+D              L V     NPF+T      WY    + D FG 
+Sbjct  557   AFRIRPASLCNSNDVYQTSPKTVKKRWTLNVLQGNRNPFFTRLLNFNWYNPSCMSDIFGD  616
+
+Query  652   -RVTLEQHVRAFDDRIGVFEDLLEG---DDRWLVNLQDKKDVLDRCKLALTFLLEAQTVM  707
+               + +EQHV  FD+    F +L  G   ++RW  NL DK +V + C   L   L      
+Sbjct  617   QPIYMEQHVAVFDNCLDMFSNLVRGTANENRWKANLLDKREVFNSCIFSLIIRLKCFCQC  676
+
+Query  708   LLNVHGLSEQEVRDAIRDLKSATPMLTTLGKEDEDPAAR-KILATETRR-RELCSTAE-S  764
+             L   H   + E+      LK    +             R   L  ET     LC   E S
+Sbjct  677   LHKKH--KDIEIK---KKLKNVRQL----------RGLRAQTLCRETKQLKKLCTKVESS  721
+
+Query  765   LIEMVPLHSLVEDRPEGEGHVRKARLSFPAPVRDSPHDLMEDMKKTFLSIDLCQFMLQSC  824
+              I          +  E      K R                DM         C  +   C
+Sbjct  722   IIGAMEFNRNMGNEKEYNTNKNKKRKVISDK-KLLQKTVASDMD----ALSVCYMLYDEC  776
+
+Query  825   EENKVRFFHGECREAAHEFLREVYRGAARYHVKDAHVRGTRVCLTWHRPFDAPAHRALAG  884
+             + N  RF   E RE A E  RE YR  AR H KD   RGT   LTW+ P++  A   +  
+Sbjct  777   DMNYQRFEDAEVRETAFEMVREMYRVSARLHLKDLLMRGTKMSLTWQKPYNPVAEATMSN  836
+
+Query  885   VPRCKMSRLLSCIEKSSGTNPLPTVAVAAGKEVLTLPSLMCLSTRAITPKPVRHTLLELM  944
+             +PRC         E       + T              L  L TR     P+RHTLL+L 
+Sbjct  837   IPRCRIPWIVHRFENRTLNEKMST--------------LQILETRDQVYRPIRHTLLQLV  882
+
+Query  945   YGTRAAATISTLTCLSWINWCMEADPKR--FYGPV-----------YESVMEIKCPRRPE  991
+             +G   A  +S  TC  W +WC+    K   +Y  V               ++        
+Sbjct  883   FGEKMANYVSVVTCFQWMDWCLNGVNKPEEYYWDVNRLVDSRKKNQNNNCLDTDIDNKRR  942
+
+Query  992   LLGMPPRGTKRKMCQHLEQLSDAQKISCWLKDDIRCHPFRVCFPKFRKAASKIDALRPHS  1051
+                       R        +SD + I  WL +D    P+           S I+      
+Sbjct  943   NNKRNRDDLTRESEIEITNMSDIEIINMWLNNDTKDLPYGT------LNGSIINKHWRRK  996
+
+Query  1052  RGESEA-------ESEVGSGSGYPAGTAAKDDVFVF-----KSIYSNITAPPRQKPLFGE  1099
+                S         E E   G           D   +      S   N T     K     
+Sbjct  997   KSSSSGDSDDDLYENENCNGGRKSKVPVVGGDFINYVIDSDDSSNTNETQQLKGKVHKHN  1056
+
+Query  1100  KKSTGRMGFKDIYAVALISLPSTLDQETKDIAADLGIET  1138
+             K  TGRMGF D+Y + LISLP    +  K I  +L  ET
+Sbjct  1057  KRNTGRMGFRDVYMICLISLPVVIHEKCKKIIRELYLET  1095
+
+
+
+Lambda      K        H        a         alpha
+   0.339    0.285     1.75    0.194    0.162 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.294    0.110    0.610    0.480     2.46     3.19 
+
+Effective search space used: 73111792
+
+
+Query= BDT63076.1 hypothetical protein [Sicyonia whispovirus]
+
+Length=109
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63532.1 wsv285-like protein [Pasiphaea japonica whispovirus]       24.4    0.27 
+
+
+> BDT63532.1 wsv285-like protein [Pasiphaea japonica whispovirus]
+Length=1068
+
+ Score = 24.4 bits (50),  Expect = 0.27, Method: Composition-based stats.
+ Identities = 13/27 (48%), Positives = 13/27 (48%), Gaps = 10/27 (37%)
+
+Query  17   NTMS---ML---NK--TYNLFVLFNFL  35
+            NTM     L   NK   Y  F LFNFL
+Sbjct  849  NTMTCDQILTCPNKLAVY--FSLFNFL  873
+
+
+
+Lambda      K        H        a         alpha
+   0.344    0.276     1.84    0.194    0.162 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.294    0.110    0.610    0.480     2.46     3.19 
+
+Effective search space used: 6152112
+
+
+  Database: User specified sequence set (Input: tests/fasta/PajaWSV.faa).
+    Posted date:  Unknown
+  Number of letters in database: 66,738
+  Number of sequences in database:  86
+
+
+
+Matrix: PAM30
+Gap Penalties: Existence: 9, Extension: 1
+Neighboring words threshold: 16
+Window for multiple hits: 15

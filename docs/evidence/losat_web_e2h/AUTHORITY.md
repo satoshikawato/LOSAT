@@ -44,7 +44,7 @@ NCBI のソースは固定 commit `598d8ae6`（引用の file:line は `c++/` �
 | 無視する問題 | `:358-360`：`ModifierFoundButNoneExpected`、`TooLong`、`TooManyAmbiguousResidues` | 題の `[key=value]`・1000 文字を超える題・最初の行の曖昧な文字が 40% を超える警告は出ない。`InvalidResidue` と `IgnoredResidue` は無視しない | RD-15、RD-14、RD-35、RD-34 |
 | 局所 ID の生成器 | `CSeqIdGenerator(1, "Query_" または "Subject_")`（`:364-367`、`fasta_reader_utils.cpp:439-486`） | ファイルごとに 1 つ、すべての batch で共有。レコードごとに 1 つ進む（題が空でも、残基が無くても、`>?_x` の疑似定義行でも、後で `-query_loc` が飛ばしても） | RD-9、BI-11、RP-1 |
 | 読み手の class | `UseDataLoaders()` ? `CBlastInputReader`（Seq-id を試す）: `CCustomizedFastaReader`（`:345-356`） | 後者は `x_CloseGap` を空にし、`AssignMolType` を旗に従わせる。前者は §G | BI-11、RD-43 |
-| mask | `-lcase_masking` のとき `SaveMask()` を `ReadOneSeq()` の前に呼ぶ（`:383-386`）。query と subject の両方 | 小文字の区間を mask にする（§D5）。4 つの program とも NCBI は受け付ける。LOSAT の BLASTP・TBLASTX は `cli.rs:375,637` で拒否のまま（読み込み器は mask を返し、使うかは program の判断） | BI-24、RD-1、RD-31、RD-46 |
+| mask | `-lcase_masking` のとき `SaveMask()` を `ReadOneSeq()` の前に呼ぶ（`:383-386`）。query と subject の両方 | 小文字の区間を mask にする（§D5）。4 つの program とも NCBI は受け付ける。LOSAT の BLASTP・TBLASTX は `cli.rs:375,637` で拒否のまま（読み込み器は mask を返し、使うかは program の判断）。2026-10-31 追記: TBLASTX は #642、BLASTP は線 NP の SM-L で受け付ける（拒否はない） | BI-24、RD-1、RD-31、RD-46 |
 
 ## B. 時点と順序
 
@@ -288,7 +288,7 @@ NCBI の読み方は program と役割だけで決まる（AD-9、AD-21）。`sc
 | 4 | 2^31 - 1（2147483647）残基を超える record（gap の長さを含む） | 4 program | NCBI の位置は `TSeqPos`（32 bit 符号なし、`ncbimisc.hpp:879`）、BLAST の配列の長さは `Int4`（`blast_def.h:246`）で、`size_read` も 32 bit で巻く（BI-29）。この長さの結果は桁あふれに依り、検証できる値が定義できない。`reader.rs` の `check_length`（`a <role> record longer than 2147483647 letters is not supported by LOSAT's <PROGRAM>`） | BI-29 |
 | 5 | ABI v1 は `from_bio` を通る | v1 の BLASTN・TBLASTX・BLASTP | 計画 TD-1 の凍結（gbdraw が使う）。今の検査と文言と順を変えない。通った入力は新しい読み込み器でなく `bio` の record を `from_bio` で包む。保守者の判断 4 の前提（「受け付ける入力は `bio` と NCBI で同じ読み方」）が TBLASTX・BLASTP の v1 では成り立たない（AD-24、AD-25）ので、文字どおり凍結を採る（`DECISIONS.md` 2026-10-08） | AD-23〜27 |
 | 6 | 題が `Subject_` の語で非 UTF-8 の byte を含む subject の tabular（RP-20） | N・X・T・P | NCBI は部分的な行と build の path つきの例外で終了コード 255。byte 一致で再現できない。§K の一括の問いの回答待ちの間は拒否 | RP-20 |
-| 7 | そのほか既存の拒否で読み込みと別の事柄 | — | `-lcase_masking`（BLASTP・TBLASTX。`cli.rs:375,637`）、N・X・T の tabular の custom の field（RP-9〜11）、`-html`・`-show_gis`・`-line_length`・`-num_descriptions`（RP-42）、`BATCH_SIZE` の非整数・`BL2SEQ_LEGACY`（BI-7、BI-32）、UTF-8 でない file 名 | 各行 |
+| 7 | そのほか既存の拒否で読み込みと別の事柄 | — | `-lcase_masking`（BLASTP・TBLASTX。`cli.rs:375,637`。2026-10-31 追記: 両方とも port 済みで、この行から外れた）、N・X・T の tabular の custom の field（RP-9〜11）、`-html`・`-show_gis`・`-line_length`・`-num_descriptions`（RP-42）、`BATCH_SIZE` の非整数・`BL2SEQ_LEGACY`（BI-7、BI-32）、UTF-8 でない file 名 | 各行 |
 
 ## K. NCBI の不具合に見える挙動（`PD-LOSAT-NCBI-DEFECTS` の一括の問いの候補）
 

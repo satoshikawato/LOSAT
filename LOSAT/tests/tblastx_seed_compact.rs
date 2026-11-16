@@ -45,7 +45,7 @@ fn fasta(name: &str) -> PathBuf {
 
 const SWITCH_OFF: (&str, &str) = ("LOSAT_X_SEEDCOMPACT", "0");
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
-const THREADS: [u32; 2] = [1, 4];
+const THREADS: [u32; 4] = [1, 4, 8, 16];
 
 /// The binary with the given variables as its only `LOSAT_*` variables that choose a code path.
 /// `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the `blastx-worker-probe` feature
@@ -132,10 +132,11 @@ fn compact(stderr: &str) -> [u64; 4] {
     )
 }
 
-/// The bytes a record saves: the size of an `InitHSP` minus the 28 bytes of the record.
-fn saved_per_record() -> u64 {
-    (std::mem::size_of::<LOSAT::algorithm::tblastx::blast_gapalign::InitHSP>() - 28) as u64
-}
+/// The bytes a record saves: the size of an `InitHSP` (72 bytes) minus the 28 bytes of the
+/// record. The in-crate test `init_hsp_size_is_the_one_the_seed_compact_test_counts`
+/// (`src/algorithm/tblastx/init_hsp_size_tests.rs`) asserts that the engine's `InitHSP` has this
+/// size, so that a change of the struct fails there and names this constant.
+const SAVED_PER_RECORD: u64 = 44;
 
 /// Checks the counters of a search whose units took `subjects` subjects on the compact path, and
 /// that they are those of `[X_STATS] PAIRPAR` (one chunk per frame: every init HSP of a chunk
@@ -154,11 +155,7 @@ fn assert_compact_ran(stderr: &str, subjects: u64, what: &str) {
         "{what}:\n{stderr}"
     );
     assert!(units > 0 && records > 0, "{what}:\n{stderr}");
-    assert_eq!(
-        bytes_saved,
-        records * saved_per_record(),
-        "{what}:\n{stderr}"
-    );
+    assert_eq!(bytes_saved, records * SAVED_PER_RECORD, "{what}:\n{stderr}");
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:367-372
@@ -171,8 +168,8 @@ fn assert_compact_ran(stderr: &str, subjects: u64, what: &str) {
 //     BLAST_SaveInitialHit(ungapped_hsps, q_off, s_off, ungapped_data);
 // ```
 // With no variable for the switch (it is on by default) the fixture pair runs on the compact lists
-// at one and four threads (one subject, all its units and init HSPs as records) and the report is
-// NCBI's.
+// at one, four, eight and sixteen threads (one subject, all its units and init HSPs as records) and
+// the report is NCBI's.
 #[test]
 fn the_switch_keeps_compact_lists_and_gives_ncbis_report() {
     let expected = ncbi_report();
@@ -254,9 +251,9 @@ fn record(defline: &str, letters: &str) -> String {
 // BlastInitHitListReset(init_hitlist);
 // ```
 // A database search (the inputs of tests/tblastx_db_search.rs: the first 6 kb of MjeNMV against
-// a database of MelaMJNV and PemoMJNVA made by `losat makedb`) at one and four threads: with the
-// switch (on by default) both subjects run on the compact lists, and the report is the report of
-// the same search with `LOSAT_X_SEEDCOMPACT=0`.
+// a database of MelaMJNV and PemoMJNVA made by `losat makeblastdb`) at one, four, eight and sixteen
+// threads: with the switch (on by default) both subjects run on the compact lists, and the report
+// is the report of the same search with `LOSAT_X_SEEDCOMPACT=0`.
 #[test]
 fn a_database_search_gives_the_report_of_the_search_without_the_switch() {
     let dir = std::env::temp_dir().join(format!(
@@ -282,15 +279,15 @@ fn a_database_search_gives_the_report_of_the_search_without_the_switch() {
     .unwrap();
     let db = dir.join("set").to_str().unwrap().to_string();
     let made = losat(&[])
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(&set)
         .args(["-dbtype", "nucl", "-out", &db])
         .output()
-        .expect("run losat makedb");
+        .expect("run losat makeblastdb");
     assert!(
         made.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&made.stderr)
     );
     for threads in THREADS {

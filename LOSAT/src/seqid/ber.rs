@@ -538,7 +538,10 @@ fn int_list(ber: &mut Reader<'_>, what: &str) -> Result<Vec<i32>, BerError> {
 
 /// Decodes one `Seq-id`; `replaced` counts the bytes of its strings that NCBI's reader
 /// replaces (`fix_visible_chars`).
-fn decode_seq_id(ber: &mut Reader<'_>, replaced: &mut usize) -> Result<ParsedSeqId, BerError> {
+pub(crate) fn decode_seq_id(
+    ber: &mut Reader<'_>,
+    replaced: &mut usize,
+) -> Result<ParsedSeqId, BerError> {
     let (alternative, end) = ber.open_alternative("Seq-id", 19)?;
     let id = match alternative {
         0 => ParsedSeqId::Local(decode_object_id(ber, replaced)?),

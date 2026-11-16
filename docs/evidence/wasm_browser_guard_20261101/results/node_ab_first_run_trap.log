@@ -1,0 +1,70 @@
+skipped (inputs missing): tbn
+r-1 bp guarded: 8.740 s exit 0 out 354b7a793402 guard 0.001 compile 0.014 compiled_ok true
+r-1 bp raw: 8.960 s exit 0 out 354b7a793402 guard 0.000 compile 0.012 compiled_ok true
+r-1 bpff guarded: 11.639 s exit 0 out 1dd47f97d8c7 guard 0.000 compile 0.016 compiled_ok true
+r-1 bpff raw: 11.463 s exit 0 out 1dd47f97d8c7 guard 0.000 compile 0.011 compiled_ok true
+r-1 mb guarded: 8.904 s exit 0 out d43569878806 guard 0.000 compile 0.012 compiled_ok true
+r-1 mb raw: 9.049 s exit 0 out d43569878806 guard 0.000 compile 0.013 compiled_ok true
+r-1 bn guarded: 12.472 s exit 0 out daa7e0ac3f5b guard 0.000 compile 0.019 compiled_ok true
+r-1 bn raw: 12.279 s exit 0 out daa7e0ac3f5b guard 0.000 compile 0.015 compiled_ok true
+r-1 dc guarded: 3.196 s exit 0 out 5c357f81bdca guard 0.000 compile 0.018 compiled_ok true
+r-1 dc raw: 3.297 s exit 0 out 5c357f81bdca guard 0.000 compile 0.013 compiled_ok true
+r-1 bns guarded: 3.525 s exit 0 out 09cbdcfa3a4a guard 0.000 compile 0.011 compiled_ok true
+r-1 bns raw: 3.739 s exit 0 out 09cbdcfa3a4a guard 0.000 compile 0.011 compiled_ok true
+r-1 bx guarded: 2.094 s exit 0 out aed21ad3e51a guard 0.000 compile 0.021 compiled_ok true
+r-1 bx raw: 1.882 s exit 0 out aed21ad3e51a guard 0.000 compile 0.013 compiled_ok true
+r-1 tbx guarded: 18.642 s exit 0 out ea54151b99ed guard 0.000 compile 0.016 compiled_ok true
+r-1 tbx raw: 19.193 s exit 0 out ea54151b99ed guard 0.000 compile 0.038 compiled_ok true
+r0 bp guarded: 11.330 s exit 0 out 354b7a793402 guard 0.000 compile 0.029 compiled_ok true
+r0 bp raw: 10.183 s exit 0 out 354b7a793402 guard 0.000 compile 0.014 compiled_ok true
+r0 bpff guarded: 12.936 s exit 0 out 1dd47f97d8c7 guard 0.000 compile 0.014 compiled_ok true
+r0 bpff raw: 12.534 s exit 0 out 1dd47f97d8c7 guard 0.000 compile 0.013 compiled_ok true
+r0 mb guarded: 9.509 s exit 0 out d43569878806 guard 0.000 compile 0.020 compiled_ok true
+r0 mb raw: 9.455 s exit 0 out d43569878806 guard 0.000 compile 0.014 compiled_ok true
+r0 bn guarded: 11.671 s exit 0 out daa7e0ac3f5b guard 0.000 compile 0.020 compiled_ok true
+r0 bn raw: 10.236 s exit 0 out daa7e0ac3f5b guard 0.000 compile 0.011 compiled_ok true
+r0 dc guarded: 2.900 s exit 0 out 5c357f81bdca guard 0.000 compile 0.014 compiled_ok true
+r0 dc raw: 2.722 s exit 0 out 5c357f81bdca guard 0.000 compile 0.011 compiled_ok true
+r0 bns guarded: 3.132 s exit 0 out 09cbdcfa3a4a guard 0.000 compile 0.012 compiled_ok true
+r0 bns raw: 3.125 s exit 0 out 09cbdcfa3a4a guard 0.000 compile 0.014 compiled_ok true
+r0 bx guarded: 1.408 s exit 0 out aed21ad3e51a guard 0.000 compile 0.012 compiled_ok true
+r0 bx raw: 1.452 s exit 0 out aed21ad3e51a guard 0.000 compile 0.013 compiled_ok true
+r0 tbx guarded: 9.665 s exit 0 out ea54151b99ed guard 0.000 compile 0.011 compiled_ok true
+r0 tbx raw: 9.641 s exit 0 out ea54151b99ed guard 0.000 compile 0.011 compiled_ok true
+r1 bp raw: 8.692 s exit 0 out 354b7a793402 guard 0.000 compile 0.013 compiled_ok true
+r1 bp guarded: 8.960 s exit 0 out 354b7a793402 guard 0.000 compile 0.013 compiled_ok true
+r1 bpff raw: 10.907 s exit 0 out 1dd47f97d8c7 guard 0.000 compile 0.013 compiled_ok true
+r1 bpff guarded: 10.597 s exit 0 out 1dd47f97d8c7 guard 0.000 compile 0.011 compiled_ok true
+r1 mb raw: 8.125 s exit 0 out d43569878806 guard 0.000 compile 0.011 compiled_ok true
+r1 mb guarded: 8.151 s exit 0 out d43569878806 guard 0.000 compile 0.011 compiled_ok true
+r1 bn raw: 10.324 s exit 0 out daa7e0ac3f5b guard 0.000 compile 0.013 compiled_ok true
+r1 bn guarded: 10.258 s exit 0 out daa7e0ac3f5b guard 0.000 compile 0.012 compiled_ok true
+r1 dc raw: 3.121 s exit 0 out 5c357f81bdca guard 0.000 compile 0.015 compiled_ok true
+r1 dc guarded: 3.704 s exit 0 out 5c357f81bdca guard 0.000 compile 0.011 compiled_ok true
+r1 bns raw: 4.299 s exit 0 out 09cbdcfa3a4a guard 0.000 compile 0.015 compiled_ok true
+r1 bns guarded: 4.822 s exit 0 out 09cbdcfa3a4a guard 0.000 compile 0.014 compiled_ok true
+r1 bx raw: 2.426 s exit 0 out aed21ad3e51a guard 0.000 compile 0.024 compiled_ok true
+r1 bx guarded: 2.446 s exit 0 out aed21ad3e51a guard 0.000 compile 0.019 compiled_ok true
+r1 tbx raw: 13.047 s exit 0 out ea54151b99ed guard 0.000 compile 0.017 compiled_ok true
+r1 tbx guarded: 18.408 s exit 0 out ea54151b99ed guard 0.000 compile 0.020 compiled_ok true
+r2 bp guarded: 11.931 s exit 0 out 354b7a793402 guard 0.000 compile 0.025 compiled_ok true
+r2 bp raw: 14.333 s exit 0 out 354b7a793402 guard 0.000 compile 0.013 compiled_ok true
+r2 bpff guarded: 42.591 s exit 0 out 1dd47f97d8c7 guard 0.000 compile 0.048 compiled_ok true
+r2 bpff raw: 38.719 s exit 0 out 1dd47f97d8c7 guard 0.000 compile 0.052 compiled_ok true
+r2 mb guarded: 21.560 s exit 0 out d43569878806 guard 0.000 compile 0.040 compiled_ok true
+r2 mb raw: 20.377 s exit 0 out d43569878806 guard 0.000 compile 0.033 compiled_ok true
+r2 bn guarded: 36.941 s exit 0 out daa7e0ac3f5b guard 0.000 compile 0.033 compiled_ok true
+RuntimeError: memory access out of bounds
+    at losat-18af08fbbee1418a.wasm._ZN5LOSAT9algorithm6blastn9alignment6gapped19x_prepare_nt_tables17h39f6962c46d9e4a5E (wasm://wasm/losat-18af08fbbee1418a.wasm-0308bdce:wasm-function[4695]:0x57b240)
+    at losat-18af08fbbee1418a.wasm._ZN5LOSAT9algorithm6blastn9alignment6gapped36blast_align_packed_nucl_with_scratch17h7c2cb366be663dd2E (wasm://wasm/losat-18af08fbbee1418a.wasm-0308bdce:wasm-function[4794]:0x59225a)
+    at losat-18af08fbbee1418a.wasm._ZN5LOSAT9algorithm6blastn9alignment6gapped36extend_gapped_heuristic_with_scratch17h52b997a197325379E (wasm://wasm/losat-18af08fbbee1418a.wasm-0308bdce:wasm-function[4792]:0x591a30)
+    at losat-18af08fbbee1418a.wasm._ZN5LOSAT9algorithm6blastn12blast_engine3run18search_query_batch28_$u7b$$u7b$closure$u7d$$u7d$28_$u7b$$u7b$closure$u7d$$u7d$28_$u7b$$u7b$closure$u7d$$u7d$17h7a093e90170d8dedE (wasm://wasm/losat-18af08fbbee1418a.wasm-0308bdce:wasm-function[4793]:0x59211e)
+    at losat-18af08fbbee1418a.wasm._ZN5LOSAT5utils6xahead14Ahead$LT$R$GT$8evaluate17h1b6530355fd4cc8cE (wasm://wasm/losat-18af08fbbee1418a.wasm-0308bdce:wasm-function[4791]:0x59187f)
+    at losat-18af08fbbee1418a.wasm._ZN77_$LT$rayon_core..job..HeapJob$LT$BODY$GT$$u20$as$u20$rayon_core..job..Job$GT$7execute17h9def5a0e4baa37c7E (wasm://wasm/losat-18af08fbbee1418a.wasm-0308bdce:wasm-function[4748]:0x589a71)
+    at losat-18af08fbbee1418a.wasm._ZN10rayon_core8registry12WorkerThread15wait_until_cold17hc1394378b8ac5fbcE (wasm://wasm/losat-18af08fbbee1418a.wasm-0308bdce:wasm-function[904]:0xf586e)
+    at losat-18af08fbbee1418a.wasm._ZN10rayon_core8registry13ThreadBuilder3run17h084b75d17bd443c6E (wasm://wasm/losat-18af08fbbee1418a.wasm-0308bdce:wasm-function[1147]:0x121118)
+    at losat-18af08fbbee1418a.wasm._ZN3std3sys9backtrace28__rust_begin_short_backtrace17h06e2a3b55eb964c6E (wasm://wasm/losat-18af08fbbee1418a.wasm-0308bdce:wasm-function[1146]:0x120ff0)
+    at losat-18af08fbbee1418a.wasm._ZN4core3ops8function6FnOnce40call_once$u7b$$u7b$vtable.shim$u7d$$u7d$17h657578da34c1feffE (wasm://wasm/losat-18af08fbbee1418a.wasm-0308bdce:wasm-function[1198]:0x1294dc)
+Error: WASI worker 1 exited unexpectedly with code 0
+    at process.<anonymous> (/home/kawato/losat-work/.worktrees/wg-guard/LOSAT/tests/wasi_thread_worker.js:185:32)
+    at process.emit (node:events:526:24)

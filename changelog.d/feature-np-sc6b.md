@@ -1,0 +1,2 @@
+- BLASTX with a matrix other than BLOSUM62 (BLOSUM45, BLOSUM50, BLOSUM80, BLOSUM90, PAM30, PAM70, PAM250, and IDENTITY in an ungapped search) searches with word size 3 as fast, relative to NCBI BLAST+, as with BLOSUM62: it builds and scans the lookup table and extends word hits as BLOSUM62's searches do. Reports do not change.
+  800 cDNAs x the yeast proteome (`-db`), 1 thread, time against NCBI BLAST+ 2.17.0: BLOSUM45 0.66 -> 0.43, PAM30 0.65 -> 0.46 (BLOSUM62: 0.40).

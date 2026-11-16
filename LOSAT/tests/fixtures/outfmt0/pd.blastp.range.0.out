@@ -1,0 +1,194 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/pd_sub_range_p.faa).
+           2 sequences; 180 total letters
+
+
+
+Query= qp1 first half
+
+Length=540
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+ranged one                                                            196     5e-66
+ranged two                                                            16.2    0.96 
+
+
+> ranged one
+Length=90
+
+ Score = 196 bits (497),  Expect = 5e-66, Method: Compositional matrix adjust.
+ Identities = 90/90 (100%), Positives = 90/90 (100%), Gaps = 0/90 (0%)
+
+Query  1   CLFRNERYSYATQWNYVQPGCEEPFEGTSFPYTKWGPDCWCGCGLKDTYEWCEYRMMTRG  60
+           CLFRNERYSYATQWNYVQPGCEEPFEGTSFPYTKWGPDCWCGCGLKDTYEWCEYRMMTRG
+Sbjct  1   CLFRNERYSYATQWNYVQPGCEEPFEGTSFPYTKWGPDCWCGCGLKDTYEWCEYRMMTRG  60
+
+Query  61  FDMCWKNGYDVELSNQCSQYDNFDFWLEVQ  90
+           FDMCWKNGYDVELSNQCSQYDNFDFWLEVQ
+Sbjct  61  FDMCWKNGYDVELSNQCSQYDNFDFWLEVQ  90
+
+
+ Score = 15.0 bits (27),  Expect = 2.1, Method: Compositional matrix adjust.
+ Identities = 15/47 (32%), Positives = 17/47 (36%), Gaps = 10/47 (21%)
+
+Query  495  LHNYMFTYTRQWAKIVMLYAWTGC--LFERMKFIADKKG---WRTCG  536
+              N  ++Y  QW      Y   GC   FE   F   K G   W  CG
+Sbjct  3    FRNERYSYATQWN-----YVQPGCEEPFEGTSFPYTKWGPDCWCGCG  44
+
+
+ Score = 14.6 bits (26),  Expect = 2.4, Method: Compositional matrix adjust.
+ Identities = 5/17 (29%), Positives = 7/17 (41%), Gaps = 0/17 (0%)
+
+Query  488  KPPCAAGLHNYMFTYTR  504
+            +P C        F YT+
+Sbjct  18   QPGCEEPFEGTSFPYTK  34
+
+
+ Score = 13.9 bits (24),  Expect = 5.2, Method: Compositional matrix adjust.
+ Identities = 4/6 (67%), Positives = 4/6 (67%), Gaps = 0/6 (0%)
+
+Query  261  WLTCGL  266
+            W  CGL
+Sbjct  40   WCGCGL  45
+
+
+> ranged two
+Length=90
+
+ Score = 16.2 bits (30),  Expect = 0.96, Method: Compositional matrix adjust.
+ Identities = 8/29 (28%), Positives = 12/29 (41%), Gaps = 2/29 (7%)
+
+Query  268  FHFGWTHKSPTGKETNFEQLTK--EFWTP  294
+            F + W   +  G +     LT   + WTP
+Sbjct  24   FRYWWNMWAFIGMDVRAPMLTGIHQVWTP  52
+
+
+ Score = 13.9 bits (24),  Expect = 5.7, Method: Compositional matrix adjust.
+ Identities = 8/25 (32%), Positives = 9/25 (36%), Gaps = 2/25 (8%)
+
+Query  43  CGLKDTYEWCEYRMMTRGFDMCWKN  67
+           C L     WC        F  CW+N
+Sbjct  67  CALMHLAPWCWMCCSPEIF--CWQN  89
+
+
+
+Lambda      K        H        a         alpha
+   0.324    0.136    0.484    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 65792
+
+
+Query= qp2 second half
+
+Length=540
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+ranged two                                                            193     5e-65
+ranged one                                                            13.9    5.3  
+
+
+> ranged two
+Length=90
+
+ Score = 193 bits (490),  Expect = 5e-65, Method: Compositional matrix adjust.
+ Identities = 90/90 (100%), Positives = 90/90 (100%), Gaps = 0/90 (0%)
+
+Query  1   YFTNDNYRNDSWDEFFSQLNKCPFRYWWNMWAFIGMDVRAPMLTGIHQVWTPMIIMISDL  60
+           YFTNDNYRNDSWDEFFSQLNKCPFRYWWNMWAFIGMDVRAPMLTGIHQVWTPMIIMISDL
+Sbjct  1   YFTNDNYRNDSWDEFFSQLNKCPFRYWWNMWAFIGMDVRAPMLTGIHQVWTPMIIMISDL  60
+
+Query  61  MESMEPCALMHLAPWCWMCCSPEIFCWQND  90
+           MESMEPCALMHLAPWCWMCCSPEIFCWQND
+Sbjct  61  MESMEPCALMHLAPWCWMCCSPEIFCWQND  90
+
+
+ Score = 15.8 bits (29),  Expect = 1.3, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  299  CCLPNIF  305
+            CC P IF
+Sbjct  79   CCSPEIF  85
+
+
+ Score = 13.9 bits (24),  Expect = 5.1, Method: Compositional matrix adjust.
+ Identities = 4/6 (67%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
+
+Query  296  LEPCCL  301
+            +EPC L
+Sbjct  64   MEPCAL  69
+
+
+ Score = 13.1 bits (22),  Expect = 9.9, Method: Compositional matrix adjust.
+ Identities = 3/4 (75%), Positives = 4/4 (100%), Gaps = 0/4 (0%)
+
+Query  277  FWWN  280
+            +WWN
+Sbjct  26   YWWN  29
+
+
+> ranged one
+Length=90
+
+ Score = 13.9 bits (24),  Expect = 5.3, Method: Compositional matrix adjust.
+ Identities = 4/10 (40%), Positives = 4/10 (40%), Gaps = 0/10 (0%)
+
+Query  67  CALMHLAPWC  76
+           C L     WC
+Sbjct  43  CGLKDTYEWC  52
+
+
+ Score = 13.9 bits (24),  Expect = 5.5, Method: Compositional matrix adjust.
+ Identities = 7/32 (22%), Positives = 15/32 (47%), Gaps = 3/32 (9%)
+
+Query  113  SWDYCHEPLHQRGYT---DNGARIAVMPMGSQ  141
+            ++++C   +  RG+     NG  + +    SQ
+Sbjct  48   TYEWCEYRMMTRGFDMCWKNGYDVELSNQCSQ  79
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.136    0.504    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 65792
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/pd_sub_range_p.faa).
+    Posted date:  Unknown
+  Number of letters in database: 180
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

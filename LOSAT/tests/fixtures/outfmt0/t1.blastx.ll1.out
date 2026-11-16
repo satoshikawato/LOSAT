@@ -1,0 +1,5266 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/t1_bx_s.faa).
+           38 sequences; 16,619 total letters
+
+
+
+Query= m_fam MelaMJNV 26001-31000
+
+Length=5000
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT61962.1 baculoviral IAP repeat-containing protein [Penaeus mon...  288     7e-87
+BDT61961.1 hypothetical protein [Penaeus monodon majanivirus A]       248     7e-78
+BDT61964.1 baculoviral IAP repeat-containing protein [Penaeus mon...  186     1e-51
+BDT61963.1 baculoviral IAP repeat-containing protein [Penaeus mon...  142     2e-37
+BDT61876.1 baculoviral IAP repeat-containing protein [Penaeus mon...  95.9    3e-25
+BDT61959.1 baculoviral IAP repeat-containing protein [Penaeus mon...  85.1    1e-20
+BDT61960.1 hypothetical protein [Penaeus monodon majanivirus A]       62.4    2e-12
+dup2 copy of BDT61858.1 wsv026-like protein [Penaeus monodon maja...  21.9    6.7  
+BDT61858.1 wsv026-like protein [Penaeus monodon majanivirus A]        21.9    6.7  
+BDT61867.1 wsv216-like protein [Penaeus monodon majanivirus A]        21.9    7.0  
+
+
+> BDT61962.1 baculoviral IAP repeat-containing protein [Penaeus 
+monodon majanivirus A]
+Length=577
+
+ Score = 288 bits (736),  Expect = 7e-87, Method: Compositional matrix adjust.
+ Identities = 183/580 (32%), Positives = 272/580 (47%), Gaps = 125/580 (22%)
+ Frame = -2
+
+Query  2707  S  2705
+             S
+Sbjct  4     S  4
+
+Query  2704  S  2702
+              
+Sbjct  5     H  5
+
+Query  2701  P  2699
+             P
+Sbjct  6     P  6
+
+Query  2698  G  2696
+              
+Sbjct  7     N  7
+
+Query  2695  C  2693
+              
+Sbjct  8     S  8
+
+Query  2692  M  2690
+              
+Sbjct  9     F  9
+
+Query  2689  F  2687
+              
+Sbjct  10    L  10
+
+Query  2686  A  2684
+              
+Sbjct  11    Q  11
+
+Query  2683  Q  2681
+             Q
+Sbjct  12    Q  12
+
+Query  2680  N  2678
+              
+Sbjct  13    E  13
+
+Query  2677  L  2675
+              
+Sbjct  14    E  14
+
+Query  2674  Y  2672
+             Y
+Sbjct  15    Y  15
+
+Query  2671  S  2669
+              
+Sbjct  16    R  16
+
+Query  2668  L  2666
+             L
+Sbjct  17    L  17
+
+Query  2665  E  2663
+              
+Sbjct  18    T  18
+
+Query  2662  D  2660
+              
+Sbjct  19    T  19
+
+Query  2659  L  2657
+              
+Sbjct  20    F  20
+
+Query  2656  N  2654
+             +
+Sbjct  21    S  21
+
+Query  2653  K  2651
+             +
+Sbjct  22    E  22
+
+Query  2650  Y  2648
+             +
+Sbjct  23    H  23
+
+Query  2647  C  2645
+              
+Sbjct  24    E  24
+
+Query  2644  K  2642
+              
+Sbjct  25    T  25
+
+Query  2641  P  2639
+              
+Sbjct  26    S  26
+
+Query  2638  P  2636
+             P
+Sbjct  27    P  27
+
+Query        -  
+              
+Sbjct  28    I  28
+
+Query        -  
+              
+Sbjct  29    D  29
+
+Query        -  
+              
+Sbjct  30    T  30
+
+Query        -  
+              
+Sbjct  31    T  31
+
+Query  2635  Q  2633
+             +
+Sbjct  32    R  32
+
+Query  2632  I  2630
+             +
+Sbjct  33    V  33
+
+Query  2629  H  2627
+             +
+Sbjct  34    Y  34
+
+Query  2626  K  2624
+             +
+Sbjct  35    R  35
+
+Query  2623  T  2621
+              
+Sbjct  36    N  36
+
+Query  2620  F  2618
+              
+Sbjct  37    M  37
+
+Query  2617  I  2615
+              
+Sbjct  38    P  38
+
+Query  2614  K  2612
+              
+Sbjct  39    F  39
+
+Query  2611  Y  2609
+              
+Sbjct  40    V  40
+
+Query  2608  A  2606
+             +
+Sbjct  41    S  41
+
+Query  2605  R  2603
+              
+Sbjct  42    Y  42
+
+Query  2602  D  2600
+             D
+Sbjct  43    D  43
+
+Query  2599  T  2597
+              
+Sbjct  44    C  44
+
+Query  2596  L  2594
+             L
+Sbjct  45    L  45
+
+Query  2593  I  2591
+              
+Sbjct  46    R  46
+
+Query  2590  Y  2588
+             Y
+Sbjct  47    Y  47
+
+Query  2587  E  2585
+             E
+Sbjct  48    E  48
+
+Query  2584  Q  2582
+             +
+Sbjct  49    E  49
+
+Query  2581  H  2579
+              
+Sbjct  50    K  50
+
+Query  2578  R  2576
+             R
+Sbjct  51    R  51
+
+Query  2575  L  2573
+             L
+Sbjct  52    L  52
+
+Query  2572  E  2570
+              
+Sbjct  53    G  53
+
+Query  2569  T  2567
+             T
+Sbjct  54    T  54
+
+Query  2566  F  2564
+             F
+Sbjct  55    F  55
+
+Query  2563  A  2561
+              
+Sbjct  56    I  56
+
+Query  2560  D  2558
+             D
+Sbjct  57    D  57
+
+Query  2557  W  2555
+             W
+Sbjct  58    W  58
+
+Query  2554  P  2552
+             P
+Sbjct  59    P  59
+
+Query  2551  H  2549
+             H
+Sbjct  60    H  60
+
+Query  2548  D  2546
+             +
+Sbjct  61    E  61
+
+Query  2545  F  2543
+             +
+Sbjct  62    W  62
+
+Query  2542  V  2540
+             +
+Sbjct  63    L  63
+
+Query  2539  S  2537
+              
+Sbjct  64    K  64
+
+Query  2536  P  2534
+             P
+Sbjct  65    P  65
+
+Query  2533  I  2531
+              
+Sbjct  66    S  66
+
+Query  2530  E  2528
+             E
+Sbjct  67    E  67
+
+Query  2527  L  2525
+             L
+Sbjct  68    L  68
+
+Query  2524  A  2522
+             A
+Sbjct  69    A  69
+
+Query  2521  A  2519
+             A
+Sbjct  70    A  70
+
+Query  2518  D  2516
+             D
+Sbjct  71    D  71
+
+Query  2515  G  2513
+             G
+Sbjct  72    G  72
+
+Query  2512  F  2510
+             F
+Sbjct  73    F  73
+
+Query  2509  Y  2507
+             Y
+Sbjct  74    Y  74
+
+Query  2506  F  2504
+             +
+Sbjct  75    Y  75
+
+Query  2503  L  2501
+             L
+Sbjct  76    L  76
+
+Query  2500  K  2498
+             +
+Sbjct  77    R  77
+
+Query  2497  K  2495
+             K
+Sbjct  78    K  78
+
+Query  2494  Q  2492
+              
+Sbjct  79    D  79
+
+Query  2491  D  2489
+             D
+Sbjct  80    D  80
+
+Query  2488  H  2486
+             H
+Sbjct  81    H  81
+
+Query  2485  V  2483
+              
+Sbjct  82    C  82
+
+Query  2482  M  2480
+              
+Sbjct  83    A  83
+
+Query  2479  C  2477
+             C
+Sbjct  84    C  84
+
+Query  2476  V  2474
+             +
+Sbjct  85    I  85
+
+Query  2473  F  2471
+             F
+Sbjct  86    F  86
+
+Query  2470  C  2468
+             C
+Sbjct  87    C  87
+
+Query  2467  V  2465
+              
+Sbjct  88    R  88
+
+Query  2464  G  2462
+             G
+Sbjct  89    G  89
+
+Query  2461  I  2459
+             I
+Sbjct  90    I  90
+
+Query  2458  L  2456
+             +
+Sbjct  91    V  91
+
+Query  2455  G  2453
+             G
+Sbjct  92    G  92
+
+Query  2452  L  2450
+              
+Sbjct  93    A  93
+
+Query  2449  F  2447
+             +
+Sbjct  94    W  94
+
+Query  2446  E  2444
+             E
+Sbjct  95    E  95
+
+Query  2443  M  2441
+              
+Sbjct  96    K  96
+
+Query  2440  G  2438
+              
+Sbjct  97    T  97
+
+Query  2437  D  2435
+             D
+Sbjct  98    D  98
+
+Query  2434  I  2432
+              
+Sbjct  99    T  99
+
+Query  2431  V  2429
+              
+Sbjct  100   P  100
+
+Query  2428  R  2426
+             R
+Sbjct  101   R  101
+
+Query  2425  E  2423
+              
+Sbjct  102   G  102
+
+Query  2422  K  2420
+             +
+Sbjct  103   E  103
+
+Query  2419  H  2417
+             H
+Sbjct  104   H  104
+
+Query  2416  K  2414
+             +
+Sbjct  105   E  105
+
+Query  2413  H  2411
+              
+Sbjct  106   R  106
+
+Query  2410  A  2408
+              
+Sbjct  107   H  107
+
+Query  2407  F  2405
+             F
+Sbjct  108   F  108
+
+Query  2404  P  2402
+             P
+Sbjct  109   P  109
+
+Query  2401  G  2399
+              
+Sbjct  110   H  110
+
+Query  2398  C  2396
+             C
+Sbjct  111   C  111
+
+Query  2395  A  2393
+              
+Sbjct  112   P  112
+
+Query  2392  F  2390
+             F
+Sbjct  113   F  113
+
+Query  2389  V  2387
+             +
+Sbjct  114   I  114
+
+Query  2386  R  2384
+             R
+Sbjct  115   R  115
+
+Query  2383  G  2381
+             G
+Sbjct  116   G  116
+
+Query  2380  D  2378
+              
+Sbjct  117   Q  117
+
+Query  2377  K  2375
+              
+Sbjct  118   P  118
+
+Query  2374  T  2372
+             T
+Sbjct  119   T  119
+
+Query  2371  C  2369
+              
+Sbjct  120   G  120
+
+Query  2368  N  2366
+             N
+Sbjct  121   N  121
+
+Query  2365  I  2363
+             +
+Sbjct  122   V  122
+
+Query  2362  P  2360
+             P
+Sbjct  123   P  123
+
+Query  2359  A  2357
+              
+Sbjct  124   I  124
+
+Query  2356  V  2354
+             V
+Sbjct  125   V  125
+
+Query  2353  K  2351
+             +
+Sbjct  126   Q  126
+
+Query  2350  K  2348
+              
+Sbjct  127   G  127
+
+Query  2347  N  2345
+             N
+Sbjct  128   N  128
+
+Query  2344  I  2342
+             I
+Sbjct  129   I  129
+
+Query  2341  F  2339
+              
+Sbjct  130   L  130
+
+Query  2338  E  2336
+              
+Sbjct  131   A  131
+
+Query  2335  K  2333
+             +
+Sbjct  132   R  132
+
+Query  2332  L  2330
+             L
+Sbjct  133   L  133
+
+Query  2329  S  2327
+              
+Sbjct  134   P  134
+
+Query  2326  H  2324
+              
+Sbjct  135   V  135
+
+Query  2323  E  2321
+              
+Sbjct  136   L  136
+
+Query  2320  Y  2318
+             +
+Sbjct  137   H  137
+
+Query  2317  K  2315
+              
+Sbjct  138   A  138
+
+Query  2314  P  2312
+              
+Sbjct  139   S  139
+
+Query        -  
+              
+Sbjct  140   L  140
+
+Query        -  
+              
+Sbjct  141   D  141
+
+Query        -  
+              
+Sbjct  142   D  142
+
+Query        -  
+              
+Sbjct  143   C  143
+
+Query        -  
+              
+Sbjct  144   G  144
+
+Query        -  
+              
+Sbjct  145   S  145
+
+Query        -  
+              
+Sbjct  146   R  146
+
+Query        -  
+              
+Sbjct  147   R  147
+
+Query        -  
+              
+Sbjct  148   V  148
+
+Query        -  
+              
+Sbjct  149   E  149
+
+Query        -  
+              
+Sbjct  150   A  150
+
+Query        -  
+              
+Sbjct  151   D  151
+
+Query        -  
+              
+Sbjct  152   A  152
+
+Query        -  
+              
+Sbjct  153   C  153
+
+Query        -  
+              
+Sbjct  154   R  154
+
+Query        -  
+              
+Sbjct  155   F  155
+
+Query        -  
+              
+Sbjct  156   S  156
+
+Query        -  
+              
+Sbjct  157   S  157
+
+Query        -  
+              
+Sbjct  158   R  158
+
+Query        -  
+              
+Sbjct  159   H  159
+
+Query        -  
+              
+Sbjct  160   M  160
+
+Query        -  
+              
+Sbjct  161   A  161
+
+Query        -  
+              
+Sbjct  162   G  162
+
+Query        -  
+              
+Sbjct  163   S  163
+
+Query        -  
+              
+Sbjct  164   Y  164
+
+Query  2311  P  2309
+             P
+Sbjct  165   P  165
+
+Query  2308  K  2306
+             +
+Sbjct  166   E  166
+
+Query  2305  Q  2303
+              
+Sbjct  167   C  167
+
+Query  2302  T  2300
+              
+Sbjct  168   R  168
+
+Query  2299  K  2297
+              
+Sbjct  169   G  169
+
+Query  2296  S  2294
+             S
+Sbjct  170   S  170
+
+Query  2293  P  2291
+             P
+Sbjct  171   P  171
+
+Query  2290  L  2288
+              
+Sbjct        -  
+
+Query  2287  L  2285
+              
+Sbjct        -  
+
+Query  2284  D  2282
+             D
+Sbjct  172   D  172
+
+Query  2281  Y  2279
+              
+Sbjct  173   E  173
+
+Query  2278  I  2276
+              
+Sbjct  174   T  174
+
+Query  2275  G  2273
+             G
+Sbjct  175   G  175
+
+Query  2272  I  2270
+             +
+Sbjct  176   L  176
+
+Query  2269  F  2267
+             +
+Sbjct  177   Y  177
+
+Query  2266  E  2264
+             +
+Sbjct  178   Q  178
+
+Query  2263  Y  2261
+             +
+Sbjct  179   H  179
+
+Query  2260  N  2258
+             +
+Sbjct  180   S  180
+
+Query  2257  I  2255
+              
+Sbjct        -  
+
+Query  2254  S  2252
+              
+Sbjct  181   G  181
+
+Query  2251  S  2249
+              
+Sbjct  182   P  182
+
+Query  2248  V  2246
+              
+Sbjct  183   K  183
+
+Query  2245  R  2243
+             R
+Sbjct  184   R  184
+
+Query  2242  F  2240
+              
+Sbjct  185   S  185
+
+Query  2239  K  2237
+              
+Sbjct  186   D  186
+
+Query  2236  R  2234
+              
+Sbjct  187   F  187
+
+Query  2233  D  2231
+              
+Sbjct  188   T  188
+
+Query  2230  T  2228
+             T
+Sbjct  189   T  189
+
+Query  2227  F  2225
+              
+Sbjct  190   L  190
+
+Query  2224  E  2222
+             +
+Sbjct  191   D  191
+
+Query  2221  K  2219
+              
+Sbjct  192   S  192
+
+Query  2218  R  2216
+             R
+Sbjct  193   R  193
+
+Query  2215  L  2213
+             L
+Sbjct  194   L  194
+
+Query  2212  A  2210
+              
+Sbjct  195   K  195
+
+Query  2209  S  2207
+             S
+Sbjct  196   S  196
+
+Query  2206  F  2204
+             +
+Sbjct  197   Y  197
+
+Query        -  
+              
+Sbjct  198   V  198
+
+Query  2203  K  2201
+             +
+Sbjct  199   E  199
+
+Query  2200  D  2198
+              
+Sbjct  200   G  200
+
+Query  2197  W  2195
+             W
+Sbjct  201   W  201
+
+Query  2194  P  2192
+             P
+Sbjct  202   P  202
+
+Query  2191  E  2189
+              
+Sbjct        -  
+
+Query  2188  Y  2186
+              
+Sbjct  203   I  203
+
+Query  2185  L  2183
+             L
+Sbjct  204   L  204
+
+Query  2182  V  2180
+              
+Sbjct  205   G  205
+
+Query  2179  Q  2177
+              
+Sbjct  206   L  206
+
+Query  2176  K  2174
+              
+Sbjct  207   H  207
+
+Query  2173  P  2171
+              
+Sbjct  208   A  208
+
+Query  2170  Q  2168
+             +
+Sbjct  209   R  209
+
+Query  2167  D  2165
+             D
+Sbjct  210   D  210
+
+Query  2164  L  2162
+             L
+Sbjct  211   L  211
+
+Query  2161  A  2159
+             A
+Sbjct  212   A  212
+
+Query  2158  E  2156
+             E
+Sbjct  213   E  213
+
+Query  2155  A  2153
+             A
+Sbjct  214   A  214
+
+Query  2152  G  2150
+             G
+Sbjct  215   G  215
+
+Query  2149  F  2147
+             F
+Sbjct  216   F  216
+
+Query  2146  Y  2144
+             +
+Sbjct  217   F  217
+
+Query  2143  Y  2141
+             Y
+Sbjct  218   Y  218
+
+Query  2140  C  2138
+             C
+Sbjct  219   C  219
+
+Query  2137  G  2135
+             G
+Sbjct  220   G  220
+
+Query  2134  L  2132
+             L
+Sbjct  221   L  221
+
+Query  2131  S  2129
+             S
+Sbjct  222   S  222
+
+Query  2128  D  2126
+             D
+Sbjct  223   D  223
+
+Query  2125  H  2123
+             H
+Sbjct  224   H  224
+
+Query  2122  V  2120
+             V
+Sbjct  225   V  225
+
+Query  2119  A  2117
+              
+Sbjct  226   R  226
+
+Query  2116  C  2114
+             C
+Sbjct  227   C  227
+
+Query  2113  F  2111
+             F
+Sbjct  228   F  228
+
+Query  2110  Y  2108
+             +
+Sbjct  229   H  229
+
+Query  2107  C  2105
+             C
+Sbjct  230   C  230
+
+Query  2104  E  2102
+              
+Sbjct  231   G  231
+
+Query  2101  G  2099
+              
+Sbjct  232   K  232
+
+Query  2098  G  2096
+             G
+Sbjct  233   G  233
+
+Query  2095  I  2093
+             +
+Sbjct  234   L  234
+
+Query  2092  L  2090
+              
+Sbjct  235   R  235
+
+Query  2089  N  2087
+             N
+Sbjct  236   N  236
+
+Query  2086  W  2084
+             W
+Sbjct  237   W  237
+
+Query  2083  E  2081
+              
+Sbjct  238   I  238
+
+Query  2080  R  2078
+              
+Sbjct  239   S  239
+
+Query  2077  N  2075
+             +
+Sbjct  240   S  240
+
+Query  2074  D  2072
+             D
+Sbjct  241   D  241
+
+Query  2071  I  2069
+             I
+Sbjct  242   I  242
+
+Query  2068  P  2066
+             P
+Sbjct  243   P  243
+
+Query  2065  W  2063
+             W
+Sbjct  244   W  244
+
+Query  2062  H  2060
+              
+Sbjct  245   K  245
+
+Query  2059  E  2057
+             E
+Sbjct  246   E  246
+
+Query  2056  H  2054
+             H
+Sbjct  247   H  247
+
+Query  2053  A  2051
+             A
+Sbjct  248   A  248
+
+Query  2050  K  2048
+             +
+Sbjct  249   R  249
+
+Query  2047  Y  2045
+             +
+Sbjct  250   W  250
+
+Query  2044  Y  2042
+             Y
+Sbjct  251   Y  251
+
+Query  2041  P  2039
+             P
+Sbjct  252   P  252
+
+Query  2038  T  2036
+              
+Sbjct  253   K  253
+
+Query  2035  C  2033
+             C
+Sbjct  254   C  254
+
+Query  2032  N  2030
+              
+Sbjct  255   R  255
+
+Query  2029  Y  2027
+             +
+Sbjct  256   F  256
+
+Query  2026  L  2024
+             +
+Sbjct  257   V  257
+
+Query  2023  Y  2021
+              
+Sbjct  258   L  258
+
+Query  2020  L  2018
+             L
+Sbjct  259   L  259
+
+Query  2017  K  2015
+              
+Sbjct  260   T  260
+
+Query  2014  K  2012
+             K
+Sbjct  261   K  261
+
+Query  2011  G  2009
+             G
+Sbjct  262   G  262
+
+Query  2008  K  2006
+             +
+Sbjct  263   Q  263
+
+Query  2005  N  2003
+             +
+Sbjct  264   D  264
+
+Query  2002  F  2000
+             +
+Sbjct  265   Y  265
+
+Query  1999  I  1997
+             I
+Sbjct  266   I  266
+
+Query  1996  D  1994
+             +
+Sbjct  267   N  267
+
+Query  1993  N  1991
+              
+Sbjct  268   E  268
+
+Query  1990  I  1988
+             +
+Sbjct  269   V  269
+
+Query  1987  Q  1985
+             Q
+Sbjct  270   Q  270
+
+Query        -  
+              
+Sbjct  271   Q  271
+
+Query        -  
+              
+Sbjct  272   E  272
+
+Query        -  
+              
+Sbjct  273   H  273
+
+Query        -  
+              
+Sbjct  274   P  274
+
+Query        -  
+              
+Sbjct  275   P  275
+
+Query        -  
+              
+Sbjct  276   Y  276
+
+Query  1984  L  1982
+              
+Sbjct  277   T  277
+
+Query  1981  K  1979
+             +
+Sbjct  278   R  278
+
+Query  1978  I  1976
+              
+Sbjct  279   T  279
+
+Query  1975  S  1973
+             +
+Sbjct  280   A  280
+
+Query  1972  E  1970
+              
+Sbjct  281   S  281
+
+Query  1969  N  1967
+              
+Sbjct  282   T  282
+
+Query  1966  T  1964
+             T
+Sbjct  283   T  283
+
+Query  1963  L  1961
+             +
+Sbjct  284   I  284
+
+Query  1960  Y  1958
+             Y
+Sbjct  285   Y  285
+
+Query  1957  E  1955
+              
+Sbjct  286   S  286
+
+Query  1954  S  1952
+              
+Sbjct  287   G  287
+
+Query  1951  F  1949
+              
+Sbjct  288   I  288
+
+Query  1948  D  1946
+             D
+Sbjct  289   D  289
+
+Query        -  
+              
+Sbjct  290   K  290
+
+Query        -  
+              
+Sbjct  291   A  291
+
+Query        -  
+              
+Sbjct  292   A  292
+
+Query        -  
+              
+Sbjct  293   S  293
+
+Query        -  
+              
+Sbjct  294   G  294
+
+Query        -  
+              
+Sbjct  295   S  295
+
+Query        -  
+              
+Sbjct  296   S  296
+
+Query        -  
+              
+Sbjct  297   N  297
+
+Query        -  
+              
+Sbjct  298   S  298
+
+Query        -  
+              
+Sbjct  299   P  299
+
+Query        -  
+              
+Sbjct  300   T  300
+
+Query        -  
+              
+Sbjct  301   E  301
+
+Query        -  
+              
+Sbjct  302   V  302
+
+Query        -  
+              
+Sbjct  303   Q  303
+
+Query        -  
+              
+Sbjct  304   S  304
+
+Query        -  
+              
+Sbjct  305   V  305
+
+Query        -  
+              
+Sbjct  306   S  306
+
+Query        -  
+              
+Sbjct  307   E  307
+
+Query        -  
+              
+Sbjct  308   Q  308
+
+Query  1945  E  1943
+             E
+Sbjct  309   E  309
+
+Query  1942  M  1940
+             +
+Sbjct  310   L  310
+
+Query  1939  D  1937
+             D
+Sbjct  311   D  311
+
+Query  1936  L  1934
+             L
+Sbjct  312   L  312
+
+Query  1933  L  1931
+             L
+Sbjct  313   L  313
+
+Query  1930  M  1928
+             M
+Sbjct  314   M  314
+
+Query  1927  E  1925
+              
+Sbjct  315   S  315
+
+Query  1924  L  1922
+             L
+Sbjct  316   L  316
+
+Query  1921  D  1919
+             D
+Sbjct  317   D  317
+
+Query  1918  I  1916
+             +
+Sbjct  318   V  318
+
+Query  1915  V  1913
+             V
+Sbjct  319   V  319
+
+Query  1912  R  1910
+             +
+Sbjct  320   K  320
+
+Query  1909  C  1907
+             C
+Sbjct  321   C  321
+
+Query  1906  I  1904
+             +
+Sbjct  322   V  322
+
+Query  1903  V  1901
+             +
+Sbjct  323   L  323
+
+Query  1900  S  1898
+              
+Sbjct  324   E  324
+
+Query  1897  I  1895
+             +
+Sbjct  325   M  325
+
+Query  1894  G  1892
+             G
+Sbjct  326   G  326
+
+Query  1891  Y  1889
+             Y
+Sbjct  327   Y  327
+
+Query  1888  S  1886
+              
+Sbjct  328   P  328
+
+Query  1885  I  1883
+              
+Sbjct  329   S  329
+
+Query  1882  N  1880
+              
+Sbjct  330   C  330
+
+Query  1879  D  1877
+              
+Sbjct  331   I  331
+
+Query  1876  A  1874
+              
+Sbjct  332   V  332
+
+Query  1873  K  1871
+             +
+Sbjct  333   R  333
+
+Query  1870  C  1868
+              
+Sbjct  334   A  334
+
+Query  1867  I  1865
+              
+Sbjct  335   C  335
+
+Query  1864  L  1862
+             L
+Sbjct  336   L  336
+
+Query  1861  K  1859
+             K
+Sbjct  337   K  337
+
+Query  1858  K  1856
+              
+Sbjct  338   D  338
+
+Query  1855  H  1853
+              
+Sbjct  339   R  339
+
+Query  1852  V  1850
+             V
+Sbjct  340   V  340
+
+Query  1849  T  1847
+              
+Sbjct  341   E  341
+
+Query  1846  E  1844
+             +
+Sbjct  342   Q  342
+
+Query  1843  T  1841
+             T
+Sbjct  343   T  343
+
+Query  1840  G  1838
+             G
+Sbjct  344   G  344
+
+Query  1837  W  1835
+              
+Sbjct  345   E  345
+
+Query  1834  P  1832
+             P
+Sbjct  346   P  346
+
+Query  1831  Y  1829
+             Y
+Sbjct  347   Y  347
+
+Query  1828  L  1826
+              
+Sbjct  348   F  348
+
+Query  1825  S  1823
+              
+Sbjct  349   V  349
+
+Query  1822  I  1820
+             I
+Sbjct  350   I  350
+
+Query  1819  E  1817
+             E
+Sbjct  351   E  351
+
+Query  1816  P  1814
+             P
+Sbjct  352   P  352
+
+Query  1813  Y  1811
+              
+Sbjct  353   C  353
+
+Query  1810  V  1808
+             +
+Sbjct  354   L  354
+
+Query        -  
+              
+Sbjct  355   E  355
+
+Query        -  
+              
+Sbjct  356   D  356
+
+Query        -  
+              
+Sbjct  357   V  357
+
+Query        -  
+              
+Sbjct  358   I  358
+
+Query        -  
+              
+Sbjct  359   H  359
+
+Query        -  
+              
+Sbjct  360   R  360
+
+Query        -  
+              
+Sbjct  361   M  361
+
+Query        -  
+              
+Sbjct  362   S  362
+
+Query        -  
+              
+Sbjct  363   V  363
+
+Query        -  
+              
+Sbjct  364   T  364
+
+Query        -  
+              
+Sbjct  365   E  365
+
+Query        -  
+              
+Sbjct  366   N  366
+
+Query        -  
+              
+Sbjct  367   R  367
+
+Query        -  
+              
+Sbjct  368   V  368
+
+Query        -  
+              
+Sbjct  369   A  369
+
+Query        -  
+              
+Sbjct  370   D  370
+
+Query        -  
+              
+Sbjct  371   N  371
+
+Query        -  
+              
+Sbjct  372   C  372
+
+Query        -  
+              
+Sbjct  373   S  373
+
+Query        -  
+              
+Sbjct  374   E  374
+
+Query        -  
+              
+Sbjct  375   S  375
+
+Query        -  
+              
+Sbjct  376   T  376
+
+Query        -  
+              
+Sbjct  377   E  377
+
+Query        -  
+              
+Sbjct  378   R  378
+
+Query        -  
+              
+Sbjct  379   E  379
+
+Query        -  
+              
+Sbjct  380   P  380
+
+Query        -  
+              
+Sbjct  381   S  381
+
+Query        -  
+              
+Sbjct  382   Y  382
+
+Query        -  
+              
+Sbjct  383   G  383
+
+Query        -  
+              
+Sbjct  384   G  384
+
+Query  1807  L  1805
+              
+Sbjct  385   T  385
+
+Query  1804  D  1802
+             D
+Sbjct  386   D  386
+
+Query  1801  I  1799
+             I
+Sbjct  387   I  387
+
+Query  1798  N  1796
+             +
+Sbjct  388   S  388
+
+Query  1795  Q  1793
+              
+Sbjct  389   S  389
+
+Query  1792  M  1790
+              
+Sbjct  390   S  390
+
+Query  1789  I  1787
+             I
+Sbjct  391   I  391
+
+Query  1786  L  1784
+              
+Sbjct  392   F  392
+
+Query  1783  K  1781
+             +
+Sbjct  393   Q  393
+
+Query  1780  R  1778
+             +
+Sbjct  394   Q  394
+
+Query  1777  P  1775
+              
+Sbjct  395   Q  395
+
+Query  1774  V  1772
+              
+Sbjct  396   A  396
+
+Query  1771  R  1769
+              
+Sbjct  397   P  397
+
+Query  1768  I  1766
+             I
+Sbjct  398   I  398
+
+Query  1765  I  1763
+              
+Sbjct  399   F  399
+
+Query  1762  P  1760
+             P
+Sbjct  400   P  400
+
+Query  1759  K  1757
+              
+Sbjct  401   S  401
+
+Query  1756  P  1754
+              
+Sbjct  402   T  402
+
+Query  1753  P  1751
+              
+Sbjct  403   S  403
+
+Query        -  
+              
+Sbjct  404   E  404
+
+Query        -  
+              
+Sbjct  405   T  405
+
+Query        -  
+              
+Sbjct  406   M  406
+
+Query        -  
+              
+Sbjct  407   G  407
+
+Query        -  
+              
+Sbjct  408   N  408
+
+Query        -  
+              
+Sbjct  409   R  409
+
+Query        -  
+              
+Sbjct  410   V  410
+
+Query  1750  S  1748
+             +
+Sbjct  411   A  411
+
+Query  1747  I  1745
+              
+Sbjct  412   S  412
+
+Query  1744  I  1742
+             I
+Sbjct  413   I  413
+
+Query  1741  R  1739
+             +
+Sbjct  414   Q  414
+
+Query  1738  H  1736
+              
+Sbjct  415   S  415
+
+Query  1735  L  1733
+             L
+Sbjct  416   L  416
+
+Query  1732  V  1730
+              
+Sbjct  417   P  417
+
+Query  1729  S  1727
+             S
+Sbjct  418   S  418
+
+Query  1726  E  1724
+             E
+Sbjct  419   E  419
+
+Query  1723  R  1721
+              
+Sbjct  420   S  420
+
+Query  1720  M  1718
+              
+Sbjct  421   T  421
+
+Query  1717  K  1715
+             +
+Sbjct  422   E  422
+
+Query  1714  s  1712
+              
+Sbjct        -  
+
+Query  1711  l  1709
+              
+Sbjct        -  
+
+Query  1708  l  1706
+             +
+Sbjct  423   V  423
+
+Query  1705  s  1703
+              
+Sbjct  424   E  424
+
+Query  1702  i  1700
+             +
+Sbjct  425   L  425
+
+Query  1699  s  1697
+              
+Sbjct  426   L  426
+
+Query  1696  e  1694
+              
+Sbjct  427   S  427
+
+Query  1693  s  1691
+              
+Sbjct  428   Q  428
+
+Query  1690  a  1688
+              
+Sbjct  429   Q  429
+
+Query  1687  s  1685
+              
+Sbjct  430   Q  430
+
+Query  1684  s  1682
+              
+Sbjct  431   Q  431
+
+Query  1681  S  1679
+              
+Sbjct  432   V  432
+
+Query  1678  T  1676
+             +
+Sbjct  433   S  433
+
+Query  1675  T  1673
+              
+Sbjct  434   I  434
+
+Query  1672  V  1670
+             +
+Sbjct  435   L  435
+
+Query  1669  E  1667
+              
+Sbjct  436   P  436
+
+Query  1666  G  1664
+              
+Sbjct  437   S  437
+
+Query  1663  T  1661
+             T
+Sbjct  438   T  438
+
+Query  1660  D  1658
+              
+Sbjct  439   P  439
+
+Query  1657  N  1655
+              
+Sbjct  440   E  440
+
+Query  1654  T  1652
+              
+Sbjct  441   I  441
+
+Query  1651  I  1649
+             I
+Sbjct  442   I  442
+
+Query  1648  S  1646
+              
+Sbjct  443   R  443
+
+Query  1645  Q  1643
+             Q
+Sbjct  444   Q  444
+
+Query  1642  K  1640
+             +
+Sbjct  445   Q  445
+
+Query  1639  T  1637
+              
+Sbjct  446   A  446
+
+Query        -  
+              
+Sbjct  447   S  447
+
+Query        -  
+              
+Sbjct  448   I  448
+
+Query  1636  L  1634
+              
+Sbjct  449   F  449
+
+Query  1633  P  1631
+             P
+Sbjct  450   P  450
+
+Query  1630  E  1628
+              
+Sbjct  451   T  451
+
+Query  1627  A  1625
+             A
+Sbjct  452   A  452
+
+Query  1624  D  1622
+              
+Sbjct  453   P  453
+
+Query  1621  N  1619
+              
+Sbjct  454   L  454
+
+Query  1618  M  1616
+              
+Sbjct  455   N  455
+
+Query  1615  E  1613
+              
+Sbjct  456   T  456
+
+Query  1612  T  1610
+             T
+Sbjct  457   T  457
+
+Query  1609  L  1607
+             L
+Sbjct  458   L  458
+
+Query  1606  T  1604
+             +
+Sbjct  459   S  459
+
+Query  1603  S  1601
+             S
+Sbjct  460   S  460
+
+Query  1600  Q  1598
+              
+Sbjct  461   S  461
+
+Query  1597  E  1595
+              
+Sbjct  462   S  462
+
+Query  1594  I  1592
+              
+Sbjct  463   S  463
+
+Query  1591  V  1589
+              
+Sbjct  464   S  464
+
+Query  1588  P  1586
+              
+Sbjct  465   S  465
+
+Query  1585  E  1583
+             E
+Sbjct  466   E  466
+
+Query  1582  A  1580
+              
+Sbjct  467   R  467
+
+Query  1579  D  1577
+             +
+Sbjct  468   E  468
+
+Query  1576  N  1574
+             N
+Sbjct  469   N  469
+
+Query  1573  T  1571
+             T
+Sbjct  470   T  470
+
+Query  1570  E  1568
+             E
+Sbjct  471   E  471
+
+Query  1567  T  1565
+             T
+Sbjct  472   T  472
+
+Query  1564  F  1562
+              
+Sbjct  473   E  473
+
+Query  1561  T  1559
+              
+Sbjct  474   A  474
+
+Query  1558  S  1556
+             +
+Sbjct  475   N  475
+
+Query  1555  Q  1553
+              
+Sbjct  476   H  476
+
+Query  1552  E  1550
+              
+Sbjct  477   I  477
+
+Query  1549  I  1547
+             +
+Sbjct  478   L  478
+
+Query  1546  Y  1544
+              
+Sbjct  479   Q  479
+
+Query  1543  L  1541
+             +
+Sbjct  480   I  480
+
+Query  1540  P  1538
+              
+Sbjct  481   V  481
+
+Query  1537  E  1535
+             E
+Sbjct  482   E  482
+
+Query  1534  A  1532
+              
+Sbjct  483   E  483
+
+Query        -  
+              
+Sbjct  484   I  484
+
+Query        -  
+              
+Sbjct  485   I  485
+
+Query        -  
+              
+Sbjct  486   S  486
+
+Query        -  
+              
+Sbjct  487   Q  487
+
+Query        -  
+              
+Sbjct  488   V  488
+
+Query        -  
+              
+Sbjct  489   S  489
+
+Query        -  
+              
+Sbjct  490   E  490
+
+Query        -  
+              
+Sbjct  491   E  491
+
+Query        -  
+              
+Sbjct  492   E  492
+
+Query        -  
+              
+Sbjct  493   K  493
+
+Query        -  
+              
+Sbjct  494   E  494
+
+Query        -  
+              
+Sbjct  495   G  495
+
+Query        -  
+              
+Sbjct  496   Y  496
+
+Query        -  
+              
+Sbjct  497   E  497
+
+Query        -  
+              
+Sbjct  498   E  498
+
+Query        -  
+              
+Sbjct  499   K  499
+
+Query        -  
+              
+Sbjct  500   E  500
+
+Query        -  
+              
+Sbjct  501   G  501
+
+Query        -  
+              
+Sbjct  502   Y  502
+
+Query        -  
+              
+Sbjct  503   E  503
+
+Query        -  
+              
+Sbjct  504   E  504
+
+Query        -  
+              
+Sbjct  505   K  505
+
+Query        -  
+              
+Sbjct  506   E  506
+
+Query        -  
+              
+Sbjct  507   E  507
+
+Query        -  
+              
+Sbjct  508   F  508
+
+Query  1531  K  1529
+             K
+Sbjct  509   K  509
+
+Query  1528  N  1526
+             +
+Sbjct  510   S  510
+
+Query  1525  A  1523
+              
+Sbjct  511   R  511
+
+Query  1522  E  1520
+             +
+Sbjct  512   Q  512
+
+Query  1519  T  1517
+             +
+Sbjct  513   S  513
+
+Query  1516  S  1514
+              
+Sbjct  514   Y  514
+
+Query  1513  T  1511
+              
+Sbjct  515   E  515
+
+Query  1510  S  1508
+              
+Sbjct  516   Q  516
+
+Query  1507  L  1505
+             L
+Sbjct  517   L  517
+
+Query  1504  K  1502
+             K
+Sbjct  518   K  518
+
+Query  1501  Q  1499
+             +
+Sbjct  519   E  519
+
+Query  1498  S  1496
+              
+Sbjct  520   E  520
+
+Query  1495  H  1493
+              
+Sbjct  521   L  521
+
+Query  1492  E  1490
+             E
+Sbjct  522   E  522
+
+Query  1489  H  1487
+              
+Sbjct  523   R  523
+
+Query  1486  M  1484
+             M
+Sbjct  524   M  524
+
+Query  1483  Y  1481
+              
+Sbjct  525   R  525
+
+Query  1480  E  1478
+             E
+Sbjct  526   E  526
+
+Query  1477  D  1475
+             D
+Sbjct  527   D  527
+
+Query  1474  R  1472
+             R
+Sbjct  528   R  528
+
+Query  1471  I  1469
+              
+Sbjct  529   T  529
+
+Query  1468  C  1466
+             C
+Sbjct  530   C  530
+
+Query  1465  K  1463
+             K
+Sbjct  531   K  531
+
+Query  1462  V  1460
+             V
+Sbjct  532   V  532
+
+Query  1459  C  1457
+             C
+Sbjct  533   C  533
+
+Query  1456  M  1454
+             M
+Sbjct  534   M  534
+
+Query  1453  S  1451
+              
+Sbjct  535   D  535
+
+Query  1450  N  1448
+             +
+Sbjct  536   S  536
+
+Query  1447  E  1445
+             E
+Sbjct  537   E  537
+
+Query  1444  A  1442
+              
+Sbjct  538   I  538
+
+Query  1441  R  1439
+              
+Sbjct  539   A  539
+
+Query  1438  V  1436
+             +
+Sbjct  540   I  540
+
+Query  1435  V  1433
+             V
+Sbjct  541   V  541
+
+Query  1432  Y  1430
+             +
+Sbjct  542   F  542
+
+Query  1429  F  1427
+              
+Sbjct  543   L  543
+
+Query  1426  P  1424
+             P
+Sbjct  544   P  544
+
+Query  1423  C  1421
+             C
+Sbjct  545   C  545
+
+Query  1420  T  1418
+             +
+Sbjct  546   S  546
+
+Query  1417  H  1415
+             H
+Sbjct  547   H  547
+
+Query  1414  M  1412
+             M
+Sbjct  548   M  548
+
+Query  1411  I  1409
+             +
+Sbjct  549   V  549
+
+Query  1408  A  1406
+              
+Sbjct  550   T  550
+
+Query  1405  C  1403
+             C
+Sbjct  551   C  551
+
+Query  1402  E  1400
+              
+Sbjct  552   V  552
+
+Query  1399  D  1397
+              
+Sbjct  553   S  553
+
+Query  1396  C  1394
+             C
+Sbjct  554   C  554
+
+Query  1393  T  1391
+              
+Sbjct  555   A  555
+
+Query  1390  L  1388
+             +
+Sbjct  556   V  556
+
+Query  1387  A  1385
+             +
+Sbjct  557   S  557
+
+Query  1384  L  1382
+             L
+Sbjct  558   L  558
+
+Query  1381  E  1379
+              
+Sbjct  559   R  559
+
+Query  1378  S  1376
+              
+Sbjct  560   Q  560
+
+Query  1375  C  1373
+             C
+Sbjct  561   C  561
+
+Query  1372  P  1370
+             P
+Sbjct  562   P  562
+
+Query  1369  I  1367
+             I
+Sbjct  563   I  563
+
+Query  1366  C  1364
+             C
+Sbjct  564   C  564
+
+Query  1363  R  1361
+             R
+Sbjct  565   R  565
+
+Query  1360  K  1358
+             +
+Sbjct  566   R  566
+
+Query  1357  D  1355
+             D
+Sbjct  567   D  567
+
+Query  1354  I  1352
+             I
+Sbjct  568   I  568
+
+Query  1351  N  1349
+              
+Sbjct  569   K  569
+
+Query  1348  Y  1346
+             +
+Sbjct  570   H  570
+
+Query  1345  V  1343
+             V
+Sbjct  571   V  571
+
+Query  1342  V  1340
+              
+Sbjct  572   C  572
+
+Query  1339  R  1337
+             R
+Sbjct  573   R  573
+
+Query  1336  P  1334
+              
+Sbjct  574   A  574
+
+Query  1333  I  1331
+             I
+Sbjct  575   I  575
+
+Query  1330  I  1328
+             +
+Sbjct  576   V  576
+
+Query  1327  S  1325
+             S
+Sbjct  577   S  577
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 22502727
+
+
+Query= m_mix MelaMJNV 56001-61600
+
+Length=5600
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT61866.1 wsv220-like protein [Penaeus monodon majanivirus A]        747     0.0  
+BDT61861.1 wsv206-like protein [Penaeus monodon majanivirus A]        186     9e-56
+BDT61865.1 hypothetical protein [Penaeus monodon majanivirus A]       25.4    0.51 
+BDT61877.1 hypothetical protein [Penaeus monodon majanivirus A]       24.6    0.63 
+BDT61930.1 semaphorin-1A-like protein [Penaeus monodon majaniviru...  24.6    1.2  
+
+
+> BDT61866.1 wsv220-like protein [Penaeus monodon majanivirus A]
+Length=731
+
+ Score = 747 bits (1928),  Expect = 0.0, Method: Compositional matrix adjust.
+ Identities = 427/712 (60%), Positives = 538/712 (76%), Gaps = 12/712 (2%)
+ Frame = -1
+
+Query  5525  S  5523
+             S
+Sbjct  19    S  19
+
+Query  5522  I  5520
+             I
+Sbjct  20    I  20
+
+Query  5519  S  5517
+             +
+Sbjct  21    A  21
+
+Query  5516  V  5514
+              
+Sbjct  22    A  22
+
+Query  5513  F  5511
+             F
+Sbjct  23    F  23
+
+Query  5510  E  5508
+             E
+Sbjct  24    E  24
+
+Query  5507  E  5505
+             E
+Sbjct  25    E  25
+
+Query  5504  A  5502
+             A
+Sbjct  26    A  26
+
+Query  5501  V  5499
+             V
+Sbjct  27    V  27
+
+Query  5498  K  5496
+             K
+Sbjct  28    K  28
+
+Query  5495  N  5493
+             N
+Sbjct  29    N  29
+
+Query  5492  I  5490
+             I
+Sbjct  30    I  30
+
+Query  5489  S  5487
+             S
+Sbjct  31    S  31
+
+Query  5486  I  5484
+             I
+Sbjct  32    I  32
+
+Query  5483  Y  5481
+             Y
+Sbjct  33    Y  33
+
+Query  5480  L  5478
+             L
+Sbjct  34    L  34
+
+Query  5477  L  5475
+             L
+Sbjct  35    L  35
+
+Query  5474  E  5472
+             E
+Sbjct  36    E  36
+
+Query  5471  E  5469
+             E
+Sbjct  37    E  37
+
+Query  5468  A  5466
+             A
+Sbjct  38    A  38
+
+Query  5465  E  5463
+             E
+Sbjct  39    E  39
+
+Query  5462  R  5460
+             R
+Sbjct  40    R  40
+
+Query  5459  G  5457
+             G
+Sbjct  41    G  41
+
+Query  5456  S  5454
+             S
+Sbjct  42    S  42
+
+Query  5453  W  5451
+             W
+Sbjct  43    W  43
+
+Query  5450  G  5448
+             G
+Sbjct  44    G  44
+
+Query  5447  D  5445
+             D
+Sbjct  45    D  45
+
+Query  5444  E  5442
+             +
+Sbjct  46    D  46
+
+Query  5441  Q  5439
+             Q
+Sbjct  47    Q  47
+
+Query  5438  S  5436
+             +
+Sbjct  48    N  48
+
+Query  5435  V  5433
+              
+Sbjct        -  
+
+Query  5432  E  5430
+             +
+Sbjct  49    K  49
+
+Query  5429  S  5427
+              
+Sbjct  50    L  50
+
+Query  5426  K  5424
+             K
+Sbjct  51    K  51
+
+Query  5423  N  5421
+             +
+Sbjct  52    D  52
+
+Query  5420  G  5418
+              
+Sbjct  53    L  53
+
+Query  5417  L  5415
+              
+Sbjct  54    Y  54
+
+Query  5414  N  5412
+             +
+Sbjct  55    D  55
+
+Query  5411  E  5409
+              
+Sbjct  56    G  56
+
+Query  5408  R  5406
+             +
+Sbjct  57    K  57
+
+Query  5405  P  5403
+              
+Sbjct  58    S  58
+
+Query  5402  K  5400
+             +
+Sbjct  59    E  59
+
+Query  5399  A  5397
+             A
+Sbjct  60    A  60
+
+Query  5396  S  5394
+              
+Sbjct  61    D  61
+
+Query  5393  D  5391
+              
+Sbjct  62    G  62
+
+Query  5390  R  5388
+              
+Sbjct  63    L  63
+
+Query  5387  E  5385
+             E
+Sbjct  64    E  64
+
+Query  5384  K  5382
+             +
+Sbjct  65    E  65
+
+Query  5381  D  5379
+             D
+Sbjct  66    D  66
+
+Query  5378  M  5376
+              
+Sbjct  67    T  67
+
+Query  5375  E  5373
+             E
+Sbjct  68    E  68
+
+Query  5372  N  5370
+             N
+Sbjct  69    N  69
+
+Query  5369  K  5367
+             K
+Sbjct  70    K  70
+
+Query  5366  N  5364
+             N
+Sbjct  71    N  71
+
+Query  5363  L  5361
+             L
+Sbjct  72    L  72
+
+Query  5360  G  5358
+             G
+Sbjct  73    G  73
+
+Query  5357  L  5355
+             L
+Sbjct  74    L  74
+
+Query  5354  Y  5352
+             Y
+Sbjct  75    Y  75
+
+Query  5351  V  5349
+             V
+Sbjct  76    V  76
+
+Query  5348  P  5346
+             P
+Sbjct  77    P  77
+
+Query  5345  A  5343
+             A
+Sbjct  78    A  78
+
+Query  5342  E  5340
+              
+Sbjct  79    G  79
+
+Query  5339  I  5337
+             I
+Sbjct  80    I  80
+
+Query  5336  N  5334
+             +
+Sbjct  81    D  81
+
+Query  5333  L  5331
+             +
+Sbjct  82    M  82
+
+Query  5330  D  5328
+              
+Sbjct  83    R  83
+
+Query  5327  A  5325
+             A
+Sbjct  84    A  84
+
+Query  5324  W  5322
+             W
+Sbjct  85    W  85
+
+Query  5321  R  5319
+             R
+Sbjct  86    R  86
+
+Query  5318  V  5316
+              
+Sbjct  87    A  87
+
+Query  5315  G  5313
+             G
+Sbjct  88    G  88
+
+Query  5312  D  5310
+             D
+Sbjct  89    D  89
+
+Query  5309  P  5307
+              
+Sbjct  90    A  90
+
+Query  5306  L  5304
+             L
+Sbjct  91    L  91
+
+Query  5303  Q  5301
+              
+Sbjct  92    G  92
+
+Query  5300  I  5298
+              
+Sbjct  93    D  93
+
+Query  5297  F  5295
+             +
+Sbjct  94    Y  94
+
+Query  5294  K  5292
+             K
+Sbjct  95    K  95
+
+Query  5291  D  5289
+             +
+Sbjct  96    N  96
+
+Query  5288  A  5286
+             A
+Sbjct  97    A  97
+
+Query  5285  Y  5283
+             Y
+Sbjct  98    Y  98
+
+Query  5282  T  5280
+              
+Sbjct  99    A  99
+
+Query  5279  A  5277
+             A
+Sbjct  100   A  100
+
+Query  5276  R  5274
+             R
+Sbjct  101   R  101
+
+Query  5273  L  5271
+             L
+Sbjct  102   L  102
+
+Query  5270  I  5268
+             I
+Sbjct  103   I  103
+
+Query  5267  V  5265
+             V
+Sbjct  104   V  104
+
+Query  5264  N  5262
+             N
+Sbjct  105   N  105
+
+Query  5261  I  5259
+             I
+Sbjct  106   I  106
+
+Query  5258  T  5256
+             T
+Sbjct  107   T  107
+
+Query  5255  F  5253
+             F
+Sbjct  108   F  108
+
+Query  5252  H  5250
+             H
+Sbjct  109   H  109
+
+Query  5249  H  5247
+             H
+Sbjct  110   H  110
+
+Query  5246  N  5244
+             N
+Sbjct  111   N  111
+
+Query  5243  K  5241
+             K
+Sbjct  112   K  112
+
+Query  5240  I  5238
+             I
+Sbjct  113   I  113
+
+Query  5237  A  5235
+             A
+Sbjct  114   A  114
+
+Query  5234  E  5232
+             E
+Sbjct  115   E  115
+
+Query  5231  I  5229
+             I
+Sbjct  116   I  116
+
+Query  5228  I  5226
+             +
+Sbjct  117   L  117
+
+Query  5225  Y  5223
+             Y
+Sbjct  118   Y  118
+
+Query  5222  M  5220
+              
+Sbjct  119   T  119
+
+Query  5219  L  5217
+             L
+Sbjct  120   L  120
+
+Query  5216  I  5214
+             I
+Sbjct  121   I  121
+
+Query  5213  S  5211
+             +
+Sbjct  122   A  122
+
+Query  5210  E  5208
+             E
+Sbjct  123   E  123
+
+Query  5207  L  5205
+             L
+Sbjct  124   L  124
+
+Query  5204  L  5202
+             L
+Sbjct  125   L  125
+
+Query  5201  L  5199
+             L
+Sbjct  126   L  126
+
+Query  5198  I  5196
+             +
+Sbjct  127   L  127
+
+Query  5195  L  5193
+             L
+Sbjct  128   L  128
+
+Query  5192  R  5190
+              
+Sbjct  129   E  129
+
+Query  5189  T  5187
+              
+Sbjct  130   D  130
+
+Query  5186  N  5184
+             N
+Sbjct  131   N  131
+
+Query  5183  I  5181
+             I
+Sbjct  132   I  132
+
+Query  5180  N  5178
+             N
+Sbjct  133   N  133
+
+Query  5177  E  5175
+             +
+Sbjct  134   D  134
+
+Query        -  
+              
+Sbjct  135   D  135
+
+Query  5174  G  5172
+             G
+Sbjct  136   G  136
+
+Query  5171  K  5169
+             K
+Sbjct  137   K  137
+
+Query  5168  K  5166
+              
+Sbjct  138   T  138
+
+Query  5165  Q  5163
+             Q
+Sbjct  139   Q  139
+
+Query  5162  L  5160
+             L
+Sbjct  140   L  140
+
+Query  5159  Q  5157
+             Q
+Sbjct  141   Q  141
+
+Query  5156  E  5154
+             E
+Sbjct  142   E  142
+
+Query  5153  Y  5151
+             Y
+Sbjct  143   Y  143
+
+Query  5150  G  5148
+             G
+Sbjct  144   G  144
+
+Query  5147  R  5145
+             R
+Sbjct  145   R  145
+
+Query  5144  V  5142
+             +
+Sbjct  146   L  146
+
+Query  5141  E  5139
+             +
+Sbjct  147   K  147
+
+Query  5138  P  5136
+             P
+Sbjct  148   P  148
+
+Query  5135  M  5133
+              
+Sbjct  149   A  149
+
+Query  5132  S  5130
+             S
+Sbjct  150   S  150
+
+Query  5129  I  5127
+             +
+Sbjct  151   V  151
+
+Query  5126  N  5124
+             N
+Sbjct  152   N  152
+
+Query  5123  E  5121
+             E
+Sbjct  153   E  153
+
+Query  5120  I  5118
+              
+Sbjct  154   T  154
+
+Query  5117  V  5115
+             V
+Sbjct  155   V  155
+
+Query  5114  K  5112
+             K
+Sbjct  156   K  156
+
+Query  5111  S  5109
+             S
+Sbjct  157   S  157
+
+Query  5108  L  5106
+             L
+Sbjct  158   L  158
+
+Query  5105  E  5103
+             E
+Sbjct  159   E  159
+
+Query  5102  G  5100
+              
+Sbjct  160   N  160
+
+Query  5099  I  5097
+             +
+Sbjct  161   V  161
+
+Query  5096  I  5094
+             I
+Sbjct  162   I  162
+
+Query  5093  K  5091
+             +
+Sbjct  163   R  163
+
+Query  5090  E  5088
+             E
+Sbjct  164   E  164
+
+Query  5087  K  5085
+             K
+Sbjct  165   K  165
+
+Query  5084  K  5082
+              
+Sbjct  166   N  166
+
+Query  5081  I  5079
+             I
+Sbjct  167   I  167
+
+Query  5078  E  5076
+             E
+Sbjct  168   E  168
+
+Query  5075  V  5073
+             V
+Sbjct  169   V  169
+
+Query  5072  D  5070
+             D
+Sbjct  170   D  170
+
+Query  5069  L  5067
+             L
+Sbjct  171   L  171
+
+Query  5066  Q  5064
+             +
+Sbjct  172   K  172
+
+Query  5063  R  5061
+             R
+Sbjct  173   R  173
+
+Query  5060  F  5058
+             F
+Sbjct  174   F  174
+
+Query  5057  R  5055
+             R
+Sbjct  175   R  175
+
+Query  5054  E  5052
+             E
+Sbjct  176   E  176
+
+Query  5051  I  5049
+             I
+Sbjct  177   I  177
+
+Query  5048  I  5046
+             +
+Sbjct  178   V  178
+
+Query  5045  N  5043
+              
+Sbjct  179   L  179
+
+Query  5042  Q  5040
+             +
+Sbjct  180   R  180
+
+Query  5039  L  5037
+             L
+Sbjct  181   L  181
+
+Query  5036  E  5034
+             E
+Sbjct  182   E  182
+
+Query  5033  T  5031
+              
+Sbjct  183   N  183
+
+Query  5030  E  5028
+             +
+Sbjct  184   D  184
+
+Query  5027  L  5025
+              
+Sbjct  185   S  185
+
+Query  5024  I  5022
+              
+Sbjct  186   R  186
+
+Query  5021  N  5019
+             N
+Sbjct  187   N  187
+
+Query  5018  Y  5016
+             +
+Sbjct  188   F  188
+
+Query  5015  D  5013
+             D
+Sbjct  189   D  189
+
+Query  5012  R  5010
+             R
+Sbjct  190   R  190
+
+Query  5009  E  5007
+             E
+Sbjct  191   E  191
+
+Query  5006  S  5004
+             S
+Sbjct  192   S  192
+
+Query  5003  R  5001
+             R
+Sbjct  193   R  193
+
+Query  5000  L  4998
+             L
+Sbjct  194   L  194
+
+Query  4997  S  4995
+             S
+Sbjct  195   S  195
+
+Query  4994  D  4992
+             D
+Sbjct  196   D  196
+
+Query  4991  Y  4989
+             +
+Sbjct  197   W  197
+
+Query  4988  F  4986
+              
+Sbjct  198   L  198
+
+Query  4985  L  4983
+             L
+Sbjct  199   L  199
+
+Query  4982  D  4980
+             D
+Sbjct  200   D  200
+
+Query  4979  N  4977
+             N
+Sbjct  201   N  201
+
+Query  4976  I  4974
+             I
+Sbjct  202   I  202
+
+Query  4973  Q  4971
+             Q
+Sbjct  203   Q  203
+
+Query  4970  K  4968
+             +
+Sbjct  204   E  204
+
+Query  4967  S  4965
+              
+Sbjct  205   R  205
+
+Query  4964  Y  4962
+             Y
+Sbjct  206   Y  206
+
+Query  4961  S  4959
+              
+Sbjct  207   P  207
+
+Query  4958  T  4956
+              
+Sbjct  208   A  208
+
+Query  4955  N  4953
+              
+Sbjct  209   G  209
+
+Query  4952  L  4950
+              
+Sbjct  210   G  210
+
+Query  4949  S  4947
+              
+Sbjct  211   G  211
+
+Query  4946  Y  4944
+              
+Sbjct        -  
+
+Query  4943  N  4941
+              
+Sbjct        -  
+
+Query  4940  S  4938
+             +
+Sbjct  212   T  212
+
+Query  4937  D  4935
+              
+Sbjct  213   T  213
+
+Query  4934  T  4932
+             T
+Sbjct  214   T  214
+
+Query  4931  T  4929
+             T
+Sbjct  215   T  215
+
+Query  4928  K  4926
+              
+Sbjct  216   T  216
+
+Query  4925  L  4923
+              
+Sbjct  217   T  217
+
+Query  4922  I  4920
+              
+Sbjct  218   T  218
+
+Query  4919  P  4917
+              
+Sbjct  219   S  219
+
+Query  4916  N  4914
+             N
+Sbjct  220   N  220
+
+Query  4913  D  4911
+             +
+Sbjct  221   N  221
+
+Query  4910  G  4908
+              
+Sbjct  222   E  222
+
+Query  4907  C  4905
+              
+Sbjct  223   Y  223
+
+Query  4904  L  4902
+             L
+Sbjct  224   L  224
+
+Query  4901  H  4899
+              
+Sbjct  225   C  225
+
+Query  4898  I  4896
+              
+Sbjct  226   T  226
+
+Query  4895  I  4893
+             I
+Sbjct  227   I  227
+
+Query  4892  D  4890
+             D
+Sbjct  228   D  228
+
+Query  4889  D  4887
+             D
+Sbjct  229   D  229
+
+Query  4886  D  4884
+              
+Sbjct  230   T  230
+
+Query  4883  I  4881
+              
+Sbjct  231   T  231
+
+Query  4880  P  4878
+             P
+Sbjct  232   P  232
+
+Query  4877  F  4875
+              
+Sbjct  233   L  233
+
+Query  4874  S  4872
+             S
+Sbjct  234   S  234
+
+Query  4871  I  4869
+              
+Sbjct  235   T  235
+
+Query  4868  E  4866
+             +
+Sbjct  236   D  236
+
+Query  4865  T  4863
+             T
+Sbjct  237   T  237
+
+Query  4862  I  4860
+             I
+Sbjct  238   I  238
+
+Query  4859  S  4857
+              
+Sbjct  239   L  239
+
+Query  4856  S  4854
+             S
+Sbjct  240   S  240
+
+Query  4853  I  4851
+              
+Sbjct  241   T  241
+
+Query  4850  F  4848
+              
+Sbjct  242   L  242
+
+Query  4847  P  4845
+             P
+Sbjct  243   P  243
+
+Query  4844  S  4842
+             S
+Sbjct  244   S  244
+
+Query  4841  T  4839
+              
+Sbjct  245   A  245
+
+Query  4838  R  4836
+             R
+Sbjct  246   R  246
+
+Query  4835  R  4833
+             R
+Sbjct  247   R  247
+
+Query  4832  K  4830
+             +
+Sbjct  248   E  248
+
+Query  4829  R  4827
+             R
+Sbjct  249   R  249
+
+Query  4826  P  4824
+             P
+Sbjct  250   P  250
+
+Query  4823  L  4821
+             +
+Sbjct  251   V  251
+
+Query  4820  K  4818
+             +
+Sbjct  252   R  252
+
+Query  4817  N  4815
+             N
+Sbjct  253   N  253
+
+Query  4814  I  4812
+             I
+Sbjct  254   I  254
+
+Query  4811  I  4809
+             +
+Sbjct  255   V  255
+
+Query  4808  G  4806
+             G
+Sbjct  256   G  256
+
+Query  4805  n  4803
+              
+Sbjct  257   E  257
+
+Query  4802  p  4800
+              
+Sbjct  258   S  258
+
+Query  4799  p  4797
+              
+Sbjct  259   S  259
+
+Query  4796  d  4794
+              
+Sbjct  260   S  260
+
+Query  4793  k  4791
+              
+Sbjct  261   A  261
+
+Query  4790  n  4788
+              
+Sbjct  262   P  262
+
+Query  4787  d  4785
+              
+Sbjct  263   P  263
+
+Query  4784  k  4782
+              
+Sbjct  264   D  264
+
+Query  4781  d  4779
+              
+Sbjct  265   R  265
+
+Query  4778  d  4776
+              
+Sbjct  266   P  266
+
+Query  4775  P  4773
+              
+Sbjct        -  
+
+Query  4772  W  4770
+             W
+Sbjct  267   W  267
+
+Query  4769  V  4767
+              
+Sbjct  268   E  268
+
+Query  4766  K  4764
+              
+Sbjct  269   D  269
+
+Query  4763  E  4761
+             E
+Sbjct  270   E  270
+
+Query  4760  R  4758
+             R
+Sbjct  271   R  271
+
+Query  4757  E  4755
+             E
+Sbjct  272   E  272
+
+Query  4754  Q  4752
+             Q
+Sbjct  273   Q  273
+
+Query  4751  T  4749
+             T
+Sbjct  274   T  274
+
+Query  4748  G  4746
+             G
+Sbjct  275   G  275
+
+Query  4745  Y  4743
+             Y
+Sbjct  276   Y  276
+
+Query  4742  S  4740
+             S
+Sbjct  277   S  277
+
+Query  4739  I  4737
+             I
+Sbjct  278   I  278
+
+Query  4736  D  4734
+              
+Sbjct  279   F  279
+
+Query  4733  S  4731
+             S
+Sbjct  280   S  280
+
+Query  4730  F  4728
+             F
+Sbjct  281   F  281
+
+Query  4727  H  4725
+              
+Sbjct  282   R  282
+
+Query  4724  S  4722
+             S
+Sbjct  283   S  283
+
+Query  4721  I  4719
+             +
+Sbjct  284   V  284
+
+Query  4718  W  4716
+             W
+Sbjct  285   W  285
+
+Query  4715  M  4713
+             M
+Sbjct  286   M  286
+
+Query  4712  S  4710
+             S
+Sbjct  287   S  287
+
+Query  4709  E  4707
+             E
+Sbjct  288   E  288
+
+Query  4706  F  4704
+             +
+Sbjct  289   Y  289
+
+Query  4703  A  4701
+              
+Sbjct  290   G  290
+
+Query  4700  D  4698
+             D
+Sbjct  291   D  291
+
+Query  4697  Y  4695
+             Y
+Sbjct  292   Y  292
+
+Query  4694  P  4692
+             P
+Sbjct  293   P  293
+
+Query  4691  I  4689
+             I
+Sbjct  294   I  294
+
+Query  4688  N  4686
+             N
+Sbjct  295   N  295
+
+Query  4685  L  4683
+             L
+Sbjct  296   L  296
+
+Query  4682  V  4680
+             V
+Sbjct  297   V  297
+
+Query  4679  N  4677
+             N
+Sbjct  298   N  298
+
+Query  4676  K  4674
+              
+Sbjct  299   A  299
+
+Query  4673  I  4671
+             I
+Sbjct  300   I  300
+
+Query  4670  I  4668
+             I
+Sbjct  301   I  301
+
+Query  4667  E  4665
+             E
+Sbjct  302   E  302
+
+Query  4664  D  4662
+              
+Sbjct  303   R  303
+
+Query  4661  I  4659
+             +
+Sbjct  304   L  304
+
+Query  4658  L  4656
+             L
+Sbjct  305   L  305
+
+Query  4655  S  4653
+              
+Sbjct  306   L  306
+
+Query  4652  K  4650
+             +
+Sbjct  307   R  307
+
+Query  4649  Y  4647
+             Y
+Sbjct  308   Y  308
+
+Query  4646  I  4644
+             +
+Sbjct  309   V  309
+
+Query  4643  I  4641
+             +
+Sbjct  310   V  310
+
+Query  4640  P  4638
+             P
+Sbjct  311   P  311
+
+Query  4637  L  4635
+             L
+Sbjct  312   L  312
+
+Query  4634  K  4632
+             +
+Sbjct  313   R  313
+
+Query  4631  D  4629
+             D
+Sbjct  314   D  314
+
+Query  4628  V  4626
+             V
+Sbjct  315   V  315
+
+Query  4625  F  4623
+             F
+Sbjct  316   F  316
+
+Query  4622  H  4620
+             H
+Sbjct  317   H  317
+
+Query  4619  I  4617
+             +
+Sbjct  318   V  318
+
+Query  4616  C  4614
+             C
+Sbjct  319   C  319
+
+Query  4613  L  4611
+              
+Sbjct  320   F  320
+
+Query  4610  H  4608
+             H
+Sbjct  321   H  321
+
+Query  4607  I  4605
+             +
+Sbjct  322   L  322
+
+Query  4604  K  4602
+             K
+Sbjct  323   K  323
+
+Query  4601  A  4599
+             A
+Sbjct  324   A  324
+
+Query  4598  H  4596
+             H
+Sbjct  325   H  325
+
+Query  4595  L  4593
+             L
+Sbjct  326   L  326
+
+Query  4592  K  4590
+              
+Sbjct  327   T  327
+
+Query  4589  C  4587
+             C
+Sbjct  328   C  328
+
+Query  4586  A  4584
+             A
+Sbjct  329   A  329
+
+Query  4583  R  4581
+             R
+Sbjct  330   R  330
+
+Query  4580  S  4578
+             +
+Sbjct  331   N  331
+
+Query  4577  I  4575
+             +
+Sbjct  332   V  332
+
+Query  4574  K  4572
+              
+Sbjct  333   N  333
+
+Query  4571  S  4569
+             +
+Sbjct  334   A  334
+
+Query  4568  T  4566
+             T
+Sbjct  335   T  335
+
+Query  4565  W  4563
+             W
+Sbjct  336   W  336
+
+Query  4562  Y  4560
+             Y
+Sbjct  337   Y  337
+
+Query  4559  D  4557
+             +
+Sbjct  338   E  338
+
+Query  4556  N  4554
+             N
+Sbjct  339   N  339
+
+Query  4553  V  4551
+              
+Sbjct  340   A  340
+
+Query  4550  T  4548
+             T
+Sbjct  341   T  341
+
+Query  4547  C  4545
+              
+Sbjct  342   F  342
+
+Query  4544  V  4542
+              
+Sbjct  343   A  343
+
+Query  4541  Y  4539
+             Y
+Sbjct  344   Y  344
+
+Query  4538  E  4536
+              
+Sbjct  345   G  345
+
+Query  4535  L  4533
+             L
+Sbjct  346   L  346
+
+Query  4532  P  4530
+             P
+Sbjct  347   P  347
+
+Query  4529  P  4527
+             P
+Sbjct  348   P  348
+
+Query  4526  I  4524
+             +
+Sbjct  349   V  349
+
+Query  4523  Y  4521
+             Y
+Sbjct  350   Y  350
+
+Query  4520  S  4518
+             S
+Sbjct  351   S  351
+
+Query  4517  M  4515
+             M
+Sbjct  352   M  352
+
+Query  4514  Q  4512
+             +
+Sbjct  353   R  353
+
+Query  4511  D  4509
+             D
+Sbjct  354   D  354
+
+Query  4508  T  4506
+             T
+Sbjct  355   T  355
+
+Query  4505  W  4503
+             W
+Sbjct  356   W  356
+
+Query  4502  L  4500
+             L
+Sbjct  357   L  357
+
+Query  4499  E  4497
+             E
+Sbjct  358   E  358
+
+Query  4496  L  4494
+             L
+Sbjct  359   L  359
+
+Query  4493  E  4491
+             E
+Sbjct  360   E  360
+
+Query  4490  N  4488
+             N
+Sbjct  361   N  361
+
+Query  4487  I  4485
+             +
+Sbjct  362   L  362
+
+Query  4484  L  4482
+             L
+Sbjct  363   L  363
+
+Query  4481  N  4479
+             N
+Sbjct  364   N  364
+
+Query  4478  I  4476
+             +
+Sbjct  365   V  365
+
+Query  4475  Y  4473
+             Y
+Sbjct  366   Y  366
+
+Query  4472  A  4470
+             A
+Sbjct  367   A  367
+
+Query  4469  Y  4467
+              
+Sbjct  368   C  368
+
+Query  4466  V  4464
+             V
+Sbjct  369   V  369
+
+Query  4463  A  4461
+             A
+Sbjct  370   A  370
+
+Query  4460  K  4458
+             K
+Sbjct  371   K  371
+
+Query  4457  V  4455
+             +
+Sbjct  372   L  372
+
+Query  4454  F  4452
+             F
+Sbjct  373   F  373
+
+Query  4451  L  4449
+             L
+Sbjct  374   L  374
+
+Query  4448  N  4446
+             N
+Sbjct  375   N  375
+
+Query  4445  I  4443
+             +
+Sbjct  376   M  376
+
+Query  4442  Y  4440
+             Y
+Sbjct  377   Y  377
+
+Query  4439  E  4437
+             +
+Sbjct  378   D  378
+
+Query  4436  L  4434
+             L
+Sbjct  379   L  379
+
+Query  4433  F  4431
+              
+Sbjct  380   L  380
+
+Query  4430  S  4428
+             S
+Sbjct  381   S  381
+
+Query  4427  S  4425
+             S
+Sbjct  382   S  382
+
+Query  4424  S  4422
+             S
+Sbjct  383   S  383
+
+Query  4421  N  4419
+             +
+Sbjct  384   S  384
+
+Query  4418  K  4416
+              
+Sbjct  385   H  385
+
+Query  4415  L  4413
+              
+Sbjct  386   G  386
+
+Query        -  
+              
+Sbjct  387   F  387
+
+Query        -  
+              
+Sbjct  388   H  388
+
+Query  4412  Q  4410
+             Q
+Sbjct  389   Q  389
+
+Query  4409  D  4407
+              
+Sbjct  390   S  390
+
+Query  4406  D  4404
+             D
+Sbjct  391   D  391
+
+Query  4403  W  4401
+              
+Sbjct  392   L  392
+
+Query  4400  T  4398
+             T
+Sbjct  393   T  393
+
+Query  4397  H  4395
+              
+Sbjct  394   R  394
+
+Query  4394  T  4392
+             T
+Sbjct  395   T  395
+
+Query  4391  K  4389
+             K
+Sbjct  396   K  396
+
+Query  4388  E  4386
+             E
+Sbjct  397   E  397
+
+Query  4385  I  4383
+              
+Sbjct  398   A  398
+
+Query  4382  Y  4380
+             Y
+Sbjct  399   Y  399
+
+Query  4379  I  4377
+             I
+Sbjct  400   I  400
+
+Query  4376  N  4374
+             N
+Sbjct  401   N  401
+
+Query  4373  T  4371
+             T
+Sbjct  402   T  402
+
+Query  4370  M  4368
+             +
+Sbjct  403   I  403
+
+Query  4367  E  4365
+             E
+Sbjct  404   E  404
+
+Query  4364  L  4362
+             L
+Sbjct  405   L  405
+
+Query  4361  L  4359
+             L
+Sbjct  406   L  406
+
+Query  4358  E  4356
+             E
+Sbjct  407   E  407
+
+Query  4355  S  4353
+              
+Sbjct  408   C  408
+
+Query  4352  I  4350
+             +
+Sbjct  409   M  409
+
+Query  4349  P  4347
+             P
+Sbjct  410   P  410
+
+Query  4346  V  4344
+             +
+Sbjct  411   M  411
+
+Query  4343  F  4341
+             +
+Sbjct  412   Y  412
+
+Query  4340  L  4338
+             L
+Sbjct  413   L  413
+
+Query  4337  F  4335
+             F
+Sbjct  414   F  414
+
+Query  4334  D  4332
+             D
+Sbjct  415   D  415
+
+Query  4331  T  4329
+             +
+Sbjct  416   S  416
+
+Query  4328  K  4326
+             K
+Sbjct  417   K  417
+
+Query  4325  W  4323
+             W
+Sbjct  418   W  418
+
+Query  4322  M  4320
+             M
+Sbjct  419   M  419
+
+Query  4319  D  4317
+             D
+Sbjct  420   D  420
+
+Query  4316  E  4314
+             E
+Sbjct  421   E  421
+
+Query  4313  H  4311
+             +
+Sbjct  422   N  422
+
+Query  4310  I  4308
+              
+Sbjct  423   F  423
+
+Query  4307  Y  4305
+             Y
+Sbjct  424   Y  424
+
+Query  4304  S  4302
+             S
+Sbjct  425   S  425
+
+Query  4301  W  4299
+             W
+Sbjct  426   W  426
+
+Query  4298  P  4296
+             P
+Sbjct  427   P  427
+
+Query  4295  Y  4293
+             Y
+Sbjct  428   Y  428
+
+Query  4292  T  4290
+             T
+Sbjct  429   T  429
+
+Query  4289  K  4287
+             +
+Sbjct  430   R  430
+
+Query  4286  R  4284
+             R
+Sbjct  431   R  431
+
+Query  4283  L  4281
+              
+Sbjct  432   G  432
+
+Query  4280  I  4278
+             +
+Sbjct  433   V  433
+
+Query  4277  H  4275
+              
+Sbjct  434   R  434
+
+Query  4274  Q  4272
+             Q
+Sbjct  435   Q  435
+
+Query  4271  L  4269
+             L
+Sbjct  436   L  436
+
+Query  4268  P  4266
+             P
+Sbjct  437   P  437
+
+Query  4265  I  4263
+             +
+Sbjct  438   V  438
+
+Query  4262  K  4260
+             +
+Sbjct  439   R  439
+
+Query  4259  D  4257
+             +
+Sbjct  440   N  440
+
+Query  4256  Y  4254
+             Y
+Sbjct  441   Y  441
+
+Query  4253  L  4251
+             L
+Sbjct  442   L  442
+
+Query  4250  S  4248
+             S
+Sbjct  443   S  443
+
+Query  4247  E  4245
+             E
+Sbjct  444   E  444
+
+Query  4244  N  4242
+             N
+Sbjct  445   N  445
+
+Query  4241  Y  4239
+             Y
+Sbjct  446   Y  446
+
+Query  4238  L  4236
+             L
+Sbjct  447   L  447
+
+Query  4235  L  4233
+             L
+Sbjct  448   L  448
+
+Query  4232  K  4230
+             +
+Sbjct  449   R  449
+
+Query  4229  T  4227
+             T
+Sbjct  450   T  450
+
+Query  4226  A  4224
+              
+Sbjct  451   V  451
+
+Query  4223  L  4221
+             L
+Sbjct  452   L  452
+
+Query  4220  I  4218
+             +
+Sbjct  453   V  453
+
+Query  4217  V  4215
+             +
+Sbjct  454   I  454
+
+Query  4214  P  4212
+             P
+Sbjct  455   P  455
+
+Query  4211  P  4209
+             P
+Sbjct  456   P  456
+
+Query  4208  N  4206
+             N
+Sbjct  457   N  457
+
+Query  4205  T  4203
+              
+Sbjct  458   G  458
+
+Query  4202  L  4200
+             +
+Sbjct  459   I  459
+
+Query  4199  N  4197
+             +
+Sbjct  460   H  460
+
+Query  4196  P  4194
+             P
+Sbjct  461   P  461
+
+Query  4193  I  4191
+             I
+Sbjct  462   I  462
+
+Query  4190  T  4188
+             T
+Sbjct  463   T  463
+
+Query  4187  E  4185
+             +
+Sbjct  464   K  464
+
+Query  4184  I  4182
+              
+Sbjct  465   R  465
+
+Query  4181  E  4179
+             +
+Sbjct  466   K  466
+
+Query  4178  S  4176
+             +
+Sbjct  467   N  467
+
+Query  4175  K  4173
+              
+Sbjct  468   N  468
+
+Query  4172  D  4170
+              
+Sbjct  469   S  469
+
+Query  4169  G  4167
+             G
+Sbjct  470   G  470
+
+Query  4166  I  4164
+             I
+Sbjct  471   I  471
+
+Query  4163  I  4161
+             +
+Sbjct  472   L  472
+
+Query  4160  I  4158
+             +
+Sbjct  473   M  473
+
+Query  4157  R  4155
+             R
+Sbjct  474   R  474
+
+Query  4154  L  4152
+             L
+Sbjct  475   L  475
+
+Query  4151  K  4149
+             K
+Sbjct  476   K  476
+
+Query  4148  I  4146
+             +
+Sbjct  477   V  477
+
+Query  4145  K  4143
+             K
+Sbjct  478   K  478
+
+Query  4142  A  4140
+             A
+Sbjct  479   A  479
+
+Query  4139  I  4137
+             +
+Sbjct  480   V  480
+
+Query  4136  E  4134
+             E
+Sbjct  481   E  481
+
+Query  4133  R  4131
+              
+Sbjct  482   Y  482
+
+Query  4130  I  4128
+             I
+Sbjct  483   I  483
+
+Query  4127  I  4125
+              
+Sbjct  484   T  484
+
+Query  4124  Q  4122
+              
+Sbjct  485   H  485
+
+Query  4121  L  4119
+             L
+Sbjct  486   L  486
+
+Query  4118  R  4116
+             R
+Sbjct  487   R  487
+
+Query  4115  T  4113
+             T
+Sbjct  488   T  488
+
+Query  4112  T  4110
+              
+Sbjct  489   D  489
+
+Query  4109  I  4107
+             +
+Sbjct  490   M  490
+
+Query  4106  H  4104
+              
+Sbjct  491   R  491
+
+Query  4103  D  4101
+             +
+Sbjct  492   E  492
+
+Query  4100  I  4098
+             I
+Sbjct  493   I  493
+
+Query  4097  F  4095
+             F
+Sbjct  494   F  494
+
+Query  4094  D  4092
+             D
+Sbjct  495   D  495
+
+Query  4091  D  4089
+             D
+Sbjct  496   D  496
+
+Query  4088  G  4086
+             G
+Sbjct  497   G  497
+
+Query  4085  F  4083
+             F
+Sbjct  498   F  498
+
+Query  4082  V  4080
+             V
+Sbjct  499   V  499
+
+Query  4079  T  4077
+             T
+Sbjct  500   T  500
+
+Query  4076  V  4074
+             +
+Sbjct  501   I  501
+
+Query  4073  V  4071
+             V
+Sbjct  502   V  502
+
+Query  4070  N  4068
+              
+Sbjct  503   K  503
+
+Query  4067  D  4065
+             D
+Sbjct  504   D  504
+
+Query  4064  T  4062
+              
+Sbjct  505   N  505
+
+Query  4061  H  4059
+              
+Sbjct  506   L  506
+
+Query  4058  K  4056
+             +
+Sbjct  507   Q  507
+
+Query  4055  t  4053
+              
+Sbjct        -  
+
+Query  4052  t  4050
+              
+Sbjct  508   K  508
+
+Query  4049  r  4047
+              
+Sbjct  509   T  509
+
+Query  4046  t  4044
+             T
+Sbjct  510   T  510
+
+Query  4043  s  4041
+             +
+Sbjct  511   N  511
+
+Query  4040  c  4038
+              
+Sbjct  512   T  512
+
+Query  4037  t  4035
+             T
+Sbjct  513   T  513
+
+Query  4034  s  4032
+              
+Sbjct  514   P  514
+
+Query  4031  d  4029
+              
+Sbjct  515   R  515
+
+Query  4028  s  4026
+             S
+Sbjct  516   S  516
+
+Query  4025  t  4023
+              
+Sbjct  517   D  517
+
+Query  4022  T  4020
+             +
+Sbjct  518   S  518
+
+Query  4019  K  4017
+             +
+Sbjct  519   R  519
+
+Query  4016  H  4014
+             +
+Sbjct  520   N  520
+
+Query  4013  D  4011
+              
+Sbjct  521   I  521
+
+Query  4010  T  4008
+              
+Sbjct  522   N  522
+
+Query  4007  D  4005
+              
+Sbjct  523   G  523
+
+Query  4004  V  4002
+             +
+Sbjct  524   M  524
+
+Query  4001  n  3999
+             N
+Sbjct  525   N  525
+
+Query  3998  d  3996
+             D
+Sbjct  526   D  526
+
+Query  3995  l  3993
+              
+Sbjct  527   F  527
+
+Query  3992  d  3990
+             +
+Sbjct  528   E  528
+
+Query  3989  i  3987
+              
+Sbjct  529   A  529
+
+Query  3986  n  3984
+              
+Sbjct  530   R  530
+
+Query  3983  i  3981
+             I
+Sbjct  531   I  531
+
+Query  3980  l  3978
+             L
+Sbjct  532   L  532
+
+Query  3977  i  3975
+              
+Sbjct  533   C  533
+
+Query  3974  D  3972
+             D
+Sbjct  534   D  534
+
+Query  3971  G  3969
+              
+Sbjct  535   S  535
+
+Query  3968  P  3966
+              
+Sbjct  536   T  536
+
+Query  3965  L  3963
+              
+Sbjct  537   F  537
+
+Query  3962  K  3960
+             +
+Sbjct  538   E  538
+
+Query  3959  N  3957
+             N
+Sbjct  539   N  539
+
+Query  3956  N  3954
+             N
+Sbjct  540   N  540
+
+Query  3953  P  3951
+             P
+Sbjct  541   P  541
+
+Query  3950  Y  3948
+             Y
+Sbjct  542   Y  542
+
+Query  3947  I  3945
+             +
+Sbjct  543   V  543
+
+Query  3944  V  3942
+             V
+Sbjct  544   V  544
+
+Query  3941  H  3939
+             H
+Sbjct  545   H  545
+
+Query  3938  P  3936
+             P
+Sbjct  546   P  546
+
+Query  3935  L  3933
+             L
+Sbjct  547   L  547
+
+Query  3932  Y  3930
+             Y
+Sbjct  548   Y  548
+
+Query  3929  N  3927
+             +
+Sbjct  549   H  549
+
+Query  3926  L  3924
+             L
+Sbjct  550   L  550
+
+Query  3923  K  3921
+             K
+Sbjct  551   K  551
+
+Query  3920  V  3918
+             +
+Sbjct  552   I  552
+
+Query  3917  I  3915
+              
+Sbjct  553   A  553
+
+Query  3914  H  3912
+             H
+Sbjct  554   H  554
+
+Query  3911  Q  3909
+             +
+Sbjct  555   R  555
+
+Query        -  
+              
+Sbjct  556   P  556
+
+Query  3908  D  3906
+              
+Sbjct  557   S  557
+
+Query  3905  N  3903
+             N
+Sbjct  558   N  558
+
+Query  3902  L  3900
+              
+Sbjct  559   W  559
+
+Query  3899  S  3897
+             S
+Sbjct  560   S  560
+
+Query  3896  T  3894
+              
+Sbjct  561   G  561
+
+Query  3893  P  3891
+              
+Sbjct  562   K  562
+
+Query  3890  G  3888
+             G
+Sbjct  563   G  563
+
+Query  3887  L  3885
+             L
+Sbjct  564   L  564
+
+Query  3884  A  3882
+             A
+Sbjct  565   A  565
+
+Query  3881  S  3879
+             S
+Sbjct  566   S  566
+
+Query  3878  L  3876
+             +
+Sbjct  567   I  567
+
+Query  3875  E  3873
+             E
+Sbjct  568   E  568
+
+Query  3872  E  3870
+             E
+Sbjct  569   E  569
+
+Query  3869  W  3867
+             W
+Sbjct  570   W  570
+
+Query  3866  D  3864
+             D
+Sbjct  571   D  571
+
+Query  3863  A  3861
+             A
+Sbjct  572   A  572
+
+Query  3860  R  3858
+             R
+Sbjct  573   R  573
+
+Query  3857  Y  3855
+             Y
+Sbjct  574   Y  574
+
+Query  3854  Y  3852
+             +
+Sbjct  575   H  575
+
+Query  3851  L  3849
+             L
+Sbjct  576   L  576
+
+Query  3848  S  3846
+             +
+Sbjct  577   A  577
+
+Query  3845  S  3843
+             S
+Sbjct  578   S  578
+
+Query  3842  E  3840
+             E
+Sbjct  579   E  579
+
+Query  3839  N  3837
+             +
+Sbjct  580   S  580
+
+Query  3836  G  3834
+             G
+Sbjct  581   G  581
+
+Query  3833  V  3831
+              
+Sbjct  582   T  582
+
+Query  3830  L  3828
+             L
+Sbjct  583   L  583
+
+Query  3827  s  3825
+             S
+Sbjct  584   S  584
+
+Query  3824  s  3822
+             S
+Sbjct  585   S  585
+
+Query  3821  s  3819
+             S
+Sbjct  586   S  586
+
+Query  3818  v  3816
+             V
+Sbjct  587   V  587
+
+Query  3815  t  3813
+             T
+Sbjct  588   T  588
+
+Query        -  
+              
+Sbjct  589   N  589
+
+Query  3812  n  3810
+              
+Sbjct  590   K  590
+
+Query  3809  k  3807
+              
+Sbjct  591   N  591
+
+Query  3806  n  3804
+             N
+Sbjct  592   N  592
+
+Query  3803  v  3801
+              
+Sbjct  593   N  593
+
+Query  3800  n  3798
+             N
+Sbjct  594   N  594
+
+Query  3797  n  3795
+             N
+Sbjct  595   N  595
+
+Query  3794  n  3792
+             N
+Sbjct  596   N  596
+
+Query  3791  n  3789
+             N
+Sbjct  597   N  597
+
+Query  3788  n  3786
+             N
+Sbjct  598   N  598
+
+Query  3785  n  3783
+             N
+Sbjct  599   N  599
+
+Query  3782  n  3780
+             N
+Sbjct  600   N  600
+
+Query  3779  n  3777
+             N
+Sbjct  601   N  601
+
+Query  3776  n  3774
+             N
+Sbjct  602   N  602
+
+Query  3773  t  3771
+              
+Sbjct  603   N  603
+
+Query  3770  n  3768
+             N
+Sbjct  604   N  604
+
+Query  3767  S  3765
+             +
+Sbjct  605   N  605
+
+Query  3764  H  3762
+              
+Sbjct  606   R  606
+
+Query  3761  S  3759
+             S
+Sbjct  607   S  607
+
+Query  3758  P  3756
+              
+Sbjct  608   S  608
+
+Query  3755  W  3753
+             W
+Sbjct  609   W  609
+
+Query  3752  F  3750
+             F
+Sbjct  610   F  610
+
+Query  3749  W  3747
+             W
+Sbjct  611   W  611
+
+Query  3746  R  3744
+             R
+Sbjct  612   R  612
+
+Query  3743  s  3741
+             S
+Sbjct  613   S  613
+
+Query  3740  l  3738
+             L
+Sbjct  614   L  614
+
+Query        -  
+              
+Sbjct  615   P  615
+
+Query  3737  p  3735
+              
+Sbjct  616   L  616
+
+Query  3734  l  3732
+              
+Sbjct  617   F  617
+
+Query  3731  f  3729
+              
+Sbjct  618   K  618
+
+Query  3728  k  3726
+              
+Sbjct  619   P  619
+
+Query  3725  p  3723
+              
+Sbjct  620   S  620
+
+Query  3722  s  3720
+              
+Sbjct  621   L  621
+
+Query  3719  l  3717
+             L
+Sbjct  622   L  622
+
+Query  3716  l  3714
+              
+Sbjct  623   K  623
+
+Query  3713  k  3711
+              
+Sbjct  624   D  624
+
+Query  3710  n  3708
+             +
+Sbjct  625   S  625
+
+Query  3707  s  3705
+             S
+Sbjct  626   S  626
+
+Query  3704  s  3702
+             S
+Sbjct  627   S  627
+
+Query  3701  s  3699
+              
+Sbjct  628   D  628
+
+Query  3698  s  3696
+             S
+Sbjct  629   S  629
+
+Query  3695  l  3693
+             L
+Sbjct  630   L  630
+
+Query  3692  p  3690
+             P
+Sbjct  631   P  631
+
+Query  3689  c  3687
+              
+Sbjct  632   Y  632
+
+Query  3686  K  3684
+             K
+Sbjct  633   K  633
+
+Query  3683  F  3681
+             F
+Sbjct  634   F  634
+
+Query  3680  W  3678
+             W
+Sbjct  635   W  635
+
+Query  3677  E  3675
+             E
+Sbjct  636   E  636
+
+Query  3674  T  3672
+              
+Sbjct  637   A  637
+
+Query  3671  A  3669
+             A
+Sbjct  638   A  638
+
+Query  3668  L  3666
+             L
+Sbjct  639   L  639
+
+Query  3665  C  3663
+              
+Sbjct  640   R  640
+
+Query  3662  Q  3660
+              
+Sbjct  641   H  641
+
+Query  3659  I  3657
+             I
+Sbjct  642   I  642
+
+Query  3656  C  3654
+              
+Sbjct  643   H  643
+
+Query  3653  N  3651
+             +
+Sbjct  644   S  644
+
+Query  3650  S  3648
+              
+Sbjct  645   H  645
+
+Query  3647  Q  3645
+             Q
+Sbjct  646   Q  646
+
+Query        -  
+              
+Sbjct  647   E  647
+
+Query  3644  Y  3642
+             +
+Sbjct  648   F  648
+
+Query  3641  D  3639
+             D
+Sbjct  649   D  649
+
+Query  3638  Y  3636
+              
+Sbjct  650   R  650
+
+Query  3635  N  3633
+              
+Sbjct  651   P  651
+
+Query  3632  Q  3630
+              
+Sbjct  652   M  652
+
+Query  3629  R  3627
+              
+Sbjct  653   M  653
+
+Query  3626  S  3624
+             +
+Sbjct  654   N  654
+
+Query  3623  Y  3621
+             Y
+Sbjct  655   Y  655
+
+Query  3620  S  3618
+             S
+Sbjct  656   S  656
+
+Query  3617  K  3615
+             K
+Sbjct  657   K  657
+
+Query  3614  N  3612
+             N
+Sbjct  658   N  658
+
+Query  3611  T  3609
+             T
+Sbjct  659   T  659
+
+Query  3608  E  3606
+             E
+Sbjct  660   E  660
+
+Query  3605  I  3603
+              
+Sbjct  661   A  661
+
+Query  3602  L  3600
+             L
+Sbjct  662   L  662
+
+Query  3599  E  3597
+             E
+Sbjct  663   E  663
+
+Query  3596  N  3594
+              
+Sbjct  664   I  664
+
+Query  3593  M  3591
+             M
+Sbjct  665   M  665
+
+Query  3590  I  3588
+             I
+Sbjct  666   I  666
+
+Query  3587  M  3585
+              
+Sbjct  667   K  667
+
+Query  3584  K  3582
+              
+Sbjct  668   M  668
+
+Query  3581  I  3579
+             +
+Sbjct  669   V  669
+
+Query  3578  E  3576
+             E
+Sbjct  670   E  670
+
+Query  3575  S  3573
+              
+Sbjct  671   V  671
+
+Query  3572  T  3570
+             T
+Sbjct  672   T  672
+
+Query  3569  E  3567
+             E
+Sbjct  673   E  673
+
+Query  3566  S  3564
+             +
+Sbjct  674   A  674
+
+Query  3563  L  3561
+              
+Sbjct  675   S  675
+
+Query  3560  K  3558
+              
+Sbjct  676   T  676
+
+Query  3557  E  3555
+             E
+Sbjct  677   E  677
+
+Query  3554  Q  3552
+             +
+Sbjct  678   K  678
+
+Query  3551  N  3549
+              
+Sbjct  679   K  679
+
+Query  3548  K  3546
+             K
+Sbjct  680   K  680
+
+Query  3545  I  3543
+              
+Sbjct  681   K  681
+
+Query  3542  K  3540
+              
+Sbjct  682   S  682
+
+Query  3539  D  3537
+             D
+Sbjct  683   D  683
+
+Query  3536  I  3534
+             I
+Sbjct  684   I  684
+
+Query  3533  E  3531
+             E
+Sbjct  685   E  685
+
+Query  3530  T  3528
+              
+Sbjct  686   D  686
+
+Query  3527  I  3525
+             I
+Sbjct  687   I  687
+
+Query  3524  V  3522
+             +
+Sbjct  688   L  688
+
+Query  3521  I  3519
+             +
+Sbjct  689   V  689
+
+Query  3518  Q  3516
+             Q
+Sbjct  690   Q  690
+
+Query  3515  D  3513
+             D
+Sbjct  691   D  691
+
+Query  3512  K  3510
+             K
+Sbjct  692   K  692
+
+Query  3509  Q  3507
+             Q
+Sbjct  693   Q  693
+
+Query  3506  L  3504
+             L
+Sbjct  694   L  694
+
+Query  3503  E  3501
+             E
+Sbjct  695   E  695
+
+Query  3500  S  3498
+             S
+Sbjct  696   S  696
+
+Query  3497  Y  3495
+             Y
+Sbjct  697   Y  697
+
+Query  3494  E  3492
+             E
+Sbjct  698   E  698
+
+Query  3491  K  3489
+             K
+Sbjct  699   K  699
+
+Query  3488  Q  3486
+             Q
+Sbjct  700   Q  700
+
+Query  3485  E  3483
+             E
+Sbjct  701   E  701
+
+Query  3482  E  3480
+             E
+Sbjct  702   E  702
+
+Query  3479  R  3477
+             R
+Sbjct  703   R  703
+
+Query  3476  R  3474
+             R
+Sbjct  704   R  704
+
+Query  3473  S  3471
+              
+Sbjct  705   L  705
+
+Query  3470  R  3468
+             R
+Sbjct  706   R  706
+
+Query  3467  N  3465
+             N
+Sbjct  707   N  707
+
+Query  3464  V  3462
+             V
+Sbjct  708   V  708
+
+Query  3461  E  3459
+             E
+Sbjct  709   E  709
+
+Query  3458  R  3456
+             R
+Sbjct  710   R  710
+
+Query  3455  S  3453
+             S
+Sbjct  711   S  711
+
+Query  3452  I  3450
+             I
+Sbjct  712   I  712
+
+Query  3449  F  3447
+             F
+Sbjct  713   F  713
+
+Query  3446  I  3444
+             +
+Sbjct  714   L  714
+
+Query  3443  T  3441
+             T
+Sbjct  715   T  715
+
+Query  3440  I  3438
+             I
+Sbjct  716   I  716
+
+Query  3437  L  3435
+             L
+Sbjct  717   L  717
+
+Query  3434  C  3432
+             C
+Sbjct  718   C  718
+
+Query  3431  K  3429
+             K
+Sbjct  719   K  719
+
+Query  3428  N  3426
+             N
+Sbjct  720   N  720
+
+Query  3425  L  3423
+             +
+Sbjct  721   M  721
+
+Query  3422  L  3420
+             L
+Sbjct  722   L  722
+
+Query  3419  T  3417
+             T
+Sbjct  723   T  723
+
+Query  3416  T  3414
+             T
+Sbjct  724   T  724
+
+Query  3413  L  3411
+             L
+Sbjct  725   L  725
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25234930
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/t1_bx_s.faa).
+    Posted date:  Unknown
+  Number of letters in database: 16,619
+  Number of sequences in database:  38
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

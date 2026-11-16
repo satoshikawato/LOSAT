@@ -375,7 +375,7 @@ mod tests {
                     .wrapping_mul(6_364_136_223_846_793_005)
                     .wrapping_add(1_442_695_040_888_963_407);
                 let value = (state >> 33) as usize;
-                if value % 11 == 0 {
+                if value.is_multiple_of(11) {
                     0
                 } else {
                     1 + value % 599

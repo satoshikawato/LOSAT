@@ -2,7 +2,8 @@ name: Nightly
 
 # Heavy checks kept off pull requests: every capture case (including the long
 # TBLASTX manifest cases) against the S02 baseline and the frozen hashes, the
-# WASI command/reactor matrix with the NCBI comparison oracle, and cargo audit.
+# WASI command/reactor matrix with the NCBI comparison oracle, the RustSec advisories of the
+# dependencies (cargo deny), and the coverage of the cargo test set (a report).
 #
 # GitHub starts a schedule only on the default branch, main, which moves only when dev is
 # promoted: on 2026-10-25 seven scheduled runs in a row had tested one main commit while dev,
@@ -35,7 +36,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: 1.92.0
@@ -44,15 +45,11 @@ jobs:
           workspaces: LOSAT -> target
       - name: Build release binary
         run: cd LOSAT && cargo build --release --locked --bin losat
-      - name: Link the frozen input paths
-        run: |
-          sudo mkdir -p /mnt/c/Users/genom/GitHub
-          sudo ln -sfn "$GITHUB_WORKSPACE" /mnt/c/Users/genom/GitHub/LOSAT
       - name: All output hashes, frozen hashes and outfmt 0 fixtures
         run: |
           python3 LOSAT/tests/ci_fast_regressions.py --losat LOSAT/target/release/losat \
             --out .tmp/full-regressions --programs all --all-cases
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: full-regressions
@@ -62,35 +59,141 @@ jobs:
             .tmp/full-regressions/timing.tsv
             .tmp/full-regressions/outfmt0-fixtures-*.tsv
             .tmp/full-regressions/*-regression-fixtures.tsv
+            .tmp/full-regressions/dropin-corpus.tsv
           if-no-files-found: warn
           retention-days: 30
 
   audit:
-    name: cargo audit
-    # RustSec advisories of both lock files. The advisory database is fetched at run time, so this
-    # job stays off pull requests: a failed fetch or a new advisory does not stop unrelated work.
-    # --deny warnings also fails on unmaintained, unsound and yanked crates. The --ignore list names
-    # the unmaintained crates of 2026-10-27, all from bio, whose replacement is planned:
-    # RUSTSEC-2025-0058 custom_derive, RUSTSEC-2025-0057 fxhash and RUSTSEC-2024-0436 paste
-    # (through statrs -> nalgebra -> simba). Remove an entry when its crate leaves Cargo.lock.
+    name: cargo deny advisories
+    # RustSec advisories of the three lock files (LOSAT, web/adapter, python; deny.toml). The
+    # advisory database is fetched at run time, so this job stays off pull requests: a failed fetch
+    # or a new advisory does not stop unrelated work. Vulnerable, unmaintained, unsound and yanked
+    # crates all fail, as cargo audit --deny warnings did here before (two lock files; python's was
+    # not audited). Not --locked, as in ci.yml. The other checks of deny.toml run on every pull
+    # request (ci.yml, `rust lint`).
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: 1.92.0
-      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
-          tool: cargo-audit@0.22.2
-      - name: cargo audit (LOSAT/Cargo.lock, web/adapter/Cargo.lock)
+          tool: cargo-deny@0.20.2
+      - name: cargo deny check advisories (LOSAT, web/adapter, python)
+        run: |
+          status=0
+          for manifest in LOSAT/Cargo.toml web/adapter/Cargo.toml python/Cargo.toml; do
+            echo "::group::$manifest"
+            cargo deny --manifest-path "$manifest" --config deny.toml check advisories || status=1
+            echo "::endgroup::"
+          done
+          exit "$status"
+
+  # No NCBI counterpart. A report, not a gate (SWEBOK 2026-11-04 audit, KA5 T12: no coverage
+  # measurement): the line and function coverage of LOSAT's sources under the test set of ci.yml's
+  # `rust-tests` (cargo nextest run --all-features), as the summary of job `coverage report` and
+  # the artifact `coverage`. Instrumented, the tests ran 6.3 times as long as without (2026-11-07,
+  # 3,403 tests, 8 test threads on a loaded 32-core machine), so they run in four shards; each
+  # exports lcov and `coverage report` adds them (LOSAT/tests/coverage_summary.py). cargo-llvm-cov
+  # leaves out the test files (tests/, examples/, tests.rs, *_tests.rs) and build.rs; inline
+  # #[cfg(test)] modules of src files are counted. No threshold, and `continue-on-error` keeps a
+  # failure of these jobs (a test, the tool) out of the run's conclusion, which job `dev` and the
+  # release gates read; ci.yml's `rust-tests` is the gate for the tests. Not on main: the scheduled
+  # run tests main, which moves only when a dev commit is promoted, after dev's nightly ran the
+  # coverage on it, and the release certification dispatches this workflow on main
+  # (docs/release/v0.2.0_certification_plan.md), which these jobs would lengthen by about two hours.
+  # The run of dev that job `dev` starts and a dispatched run of another branch measure coverage.
+  coverage:
+    name: coverage (${{ matrix.shard }}/4)
+    if: github.ref != 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    # About twice the longest shard estimated from the local run (2026-11-07: 99 min of tests,
+    # one test of about 90 min, and the instrumented build).
+    timeout-minutes: 240
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      # As in ci.yml's `rust-tests`: optimized test code with debug assertions and overflow checks.
+      CARGO_PROFILE_TEST_OPT_LEVEL: '3'
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
+      # The processes of one binary add their counts to one of eight files under a lock, instead
+      # of one file per process (cargo-llvm-cov's LOSAT-%p-%32m: 12,027 files and 29 GB for the
+      # whole test set).
+      LLVM_PROFILE_FILE_NAME: LOSAT-%8m.profraw
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: 1.92.0
+          components: llvm-tools-preview
+      # Prebuilt release binaries, checked against the SHA-256 in install-action's manifest.
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-llvm-cov@0.9.1,cargo-nextest@0.9.148
+      - name: cargo llvm-cov nextest --all-features (shard ${{ matrix.shard }}/4)
+        id: tests
         working-directory: LOSAT
         run: |
+          cargo llvm-cov nextest --locked --all-features --no-fail-fast --no-report \
+            --partition count:${{ matrix.shard }}/4
+        env:
+          LOSAT_BLASTX_WORKER_LOG: ${{ runner.temp }}/blastx-worker.log
+      # The artifact holds the directory coverage-shard-k, so that the shards' directories sit side
+      # by side after a merged download, however many shards uploaded.
+      - name: lcov of the shard
+        if: ${{ !cancelled() }}
+        working-directory: LOSAT
+        env:
+          TESTS: ${{ steps.tests.outcome }}
+          SHARD: ${{ runner.temp }}/shard/coverage-shard-${{ matrix.shard }}
+        run: |
           set -euo pipefail
-          ignore=(--ignore RUSTSEC-2024-0436 --ignore RUSTSEC-2025-0057
-                  --ignore RUSTSEC-2025-0058)
-          cargo audit --deny warnings "${ignore[@]}"
-          cargo audit --deny warnings "${ignore[@]}" --file ../web/adapter/Cargo.lock
+          mkdir -p "$SHARD"
+          echo "$TESTS" > "$SHARD/outcome"
+          cargo llvm-cov report --lcov --output-path "$SHARD/lcov.info"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: coverage-shard-${{ matrix.shard }}
+          path: ${{ runner.temp }}/shard/
+          if-no-files-found: warn
+          retention-days: 3
+
+  coverage-report:
+    name: coverage report
+    needs: coverage
+    if: ${{ !cancelled() && github.ref != 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: coverage-shard-*
+          path: ${{ runner.temp }}/shards
+          merge-multiple: true
+      # --shards: the number of entries of `coverage`'s matrix. The summary names each shard that
+      # failed or gave no report.
+      - name: Coverage of the shards
+        if: ${{ !cancelled() }}
+        run: |
+          python3 LOSAT/tests/coverage_summary.py --src LOSAT/src --shards 4 \
+            --out "$RUNNER_TEMP/coverage" --commit "$GITHUB_SHA" "$RUNNER_TEMP"/shards/coverage-shard-* \
+            >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage
+          path: |
+            ${{ runner.temp }}/coverage/lcov.info
+            ${{ runner.temp }}/coverage/files.tsv
+          if-no-files-found: warn
+          retention-days: 30
 
   wasm:
     uses: ./.github/workflows/wasm-threading.yml

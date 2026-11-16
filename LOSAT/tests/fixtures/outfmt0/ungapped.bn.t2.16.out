@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<BlastXML2
+    xmlns="http://www.ncbi.nlm.nih.gov"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+    xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd"
+>
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastn</program>
+      <version>BLASTN 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <subjects>Subject_1</subjects>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <expect>10</expect>
+          <sc-match>2</sc-match>
+          <sc-mismatch>-3</sc-mismatch>
+          <filter>L;m;</filter>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <bl2seq>
+            <Search>
+              <query-id>Query_1</query-id>
+              <query-title>q208</query-title>
+              <query-len>377</query-len>
+              <query-masking>
+                <Range>
+                  <from>180</from>
+                  <to>257</to>
+                </Range>
+              </query-masking>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>s208</id>
+                      <title>s208</title>
+                    </HitDescr>
+                  </description>
+                  <len>373</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>390.777</bit-score>
+                      <score>426</score>
+                      <evalue>3.1007e-113</evalue>
+                      <identity>228</identity>
+                      <query-from>135</query-from>
+                      <query-to>372</query-to>
+                      <query-strand>Plus</query-strand>
+                      <hit-from>238</hit-from>
+                      <hit-to>1</hit-to>
+                      <hit-strand>Minus</hit-strand>
+                      <align-len>238</align-len>
+                      <gaps>0</gaps>
+                      <qseq>TAACTAATTTACGAATTAAGGGTCACAAAAATAAGATTGGAAAATCttatttttatatctaatttatttttaattattgttgaaatgattttgaatttaattcaatattattaccatcattattCATTGCTGTTTCCACAAATTCTTCTACACTCATTCCAAAACCAGCTTGTGTAGCTATTTCTATTTTAGAATCATTTGCTTCTGATTCTGTGACTGCTGTAAATCCTACTCCACC</qseq>
+                      <hseq>TAACTAATTTATGAATTAAAGGTCAAAAAAATAAGATTGAAAAATCTTATTTTTATATCTTATTTATTTTTAATTATTGTTGAAATGATTTTGAATTTATTTCAATATTATTTCCATCATTATTCATTGCTGTTTCCACAAATTCTTCTACACTCATTCCAAATACAGCTTGTGTAGCTATTTCTATTTTAGAATCATTTGCTTCTGATTCTGTGACTGCTGTAAATCCAACTCCACC</hseq>
+                      <midline>||||||||||| ||||||| ||||| ||||||||||||| |||||||||||||||||||| |||||||||||||||||||||||||||||||||||||| |||||||||||| ||||||||||||||||||||||||||||||||||||||||||||||||||  |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||</midline>
+                    </Hsp>
+                    <Hsp>
+                      <num>2</num>
+                      <bit-score>214.32</bit-score>
+                      <score>233</score>
+                      <evalue>4.07465e-60</evalue>
+                      <identity>127</identity>
+                      <query-from>1</query-from>
+                      <query-to>134</query-to>
+                      <query-strand>Plus</query-strand>
+                      <hit-from>373</hit-from>
+                      <hit-to>240</hit-to>
+                      <hit-strand>Minus</hit-strand>
+                      <align-len>134</align-len>
+                      <gaps>0</gaps>
+                      <qseq>TTAAGCATTCTTTCTCCTTAAATTAAGTGGAGTGTAATATTTGTATATTTTACTCTTTTATTGTACCTAAATATACATGTATGTTTGAACTAAAAATTACTGTTGATCAAAATTATTTTCAATCCAAAAATTAT</qseq>
+                      <hseq>TTAAGCATTCTTTCTCCTTAAATTAAGTGGAGTGTAAATTTTGTATATTTTACTCTTTAATTATACCTAAATATACATGTATGTTTGAATTAAAAACTACTGTTGATCAAAATTATTTTAAATCCAAAAATTAT</hseq>
+                      <midline>|||||||||||||||||||||||||||||||||||||  ||||||||||||||||||| ||| |||||||||||||||||||||||||| |||||| |||||||||||||||||||||| ||||||||||||||</midline>
+                    </Hsp>
+                    <Hsp>
+                      <num>3</num>
+                      <bit-score>34.207</bit-score>
+                      <score>36</score>
+                      <evalue>6.75501e-06</evalue>
+                      <identity>24</identity>
+                      <query-from>161</query-from>
+                      <query-to>188</query-to>
+                      <query-strand>Plus</query-strand>
+                      <hit-from>185</hit-from>
+                      <hit-to>212</hit-to>
+                      <hit-strand>Plus</hit-strand>
+                      <align-len>28</align-len>
+                      <gaps>0</gaps>
+                      <qseq>AAAAATAAGATTGGAAAATCttattttt</qseq>
+                      <hseq>AAAAATAAGATTTTTCAATCTTATTTTT</hseq>
+                      <midline>||||||||||||    ||||||||||||</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <hsp-len>9</hsp-len>
+                  <eff-space>133952</eff-space>
+                  <kappa>0.408145662544724</kappa>
+                  <lambda>0.633731443099174</lambda>
+                  <entropy>0.91243839227971</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </bl2seq>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+</BlastXML2>

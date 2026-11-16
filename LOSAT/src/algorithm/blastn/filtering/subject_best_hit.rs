@@ -284,6 +284,6 @@ mod tests {
 
         // Both should remain after same-strand filtering
         // Cross-strand filtering might remove one depending on coordinates
-        assert!(hits.len() >= 1);
+        assert!(!hits.is_empty());
     }
 }

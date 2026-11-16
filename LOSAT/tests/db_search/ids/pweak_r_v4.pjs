@@ -1,0 +1,21 @@
+{
+  "version": "1.2",
+  "dbname": "pweak_r_v4",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "pweak_r_v4 (parsed Seq-ids)",
+  "number-of-letters": 1760,
+  "number-of-sequences": 8,
+  "last-updated": "2026-11-03T01:47:00",
+  "number-of-volumes": 1,
+  "bytes-total": 2930,
+  "bytes-to-cache": 1921,
+  "files": [
+    "pweak_r_v4.phr",
+    "pweak_r_v4.pin",
+    "pweak_r_v4.pog",
+    "pweak_r_v4.psd",
+    "pweak_r_v4.psi",
+    "pweak_r_v4.psq"
+  ]
+}

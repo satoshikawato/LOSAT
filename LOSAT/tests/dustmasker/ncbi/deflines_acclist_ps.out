@@ -1,0 +1,39 @@
+>gi|123|gb|ABC12345.1| some title	199	279
+>gi|123|gb|ABC12345.1| some title	430	480
+>gi|123|gb|ABC12345.1| some title	578	670
+>lcl|myid title here	199	279
+>lcl|myid title here	430	480
+>lcl|myid title here	578	670
+>ref|NC_000001.11| chromosome	199	279
+>ref|NC_000001.11| chromosome	430	480
+>ref|NC_000001.11| chromosome	578	670
+>sp|P12345|NAME_HUMAN prot	199	279
+>sp|P12345|NAME_HUMAN prot	430	480
+>sp|P12345|NAME_HUMAN prot	578	670
+>lcl|plainid double spaces	199	279
+>lcl|plainid double spaces	430	480
+>lcl|plainid double spaces	578	670
+>lcl|id_trailing_period title ends with period	199	279
+>lcl|id_trailing_period title ends with period	430	480
+>lcl|id_trailing_period title ends with period	578	670
+>lcl|id_tab tab	199	279
+>lcl|id_tab tab	430	480
+>lcl|id_tab tab	578	670
+>gnl|db|123 gnl title	199	279
+>gnl|db|123 gnl title	430	480
+>gnl|db|123 gnl title	578	670
+>lcl|id_only 	199	279
+>lcl|id_only 	430	480
+>lcl|id_only 	578	670
+>pdb|1ABC|A chain	199	279
+>pdb|1ABC|A chain	430	480
+>pdb|1ABC|A chain	578	670
+>emb|X1234.1|; semicolon	199	279
+>emb|X1234.1|; semicolon	430	480
+>emb|X1234.1|; semicolon	578	670
+>lcl|123456 	199	279
+>lcl|123456 	430	480
+>lcl|123456 	578	670
+>lcl|id with,comma, and	199	279
+>lcl|id with,comma, and	430	480
+>lcl|id with,comma, and	578	670

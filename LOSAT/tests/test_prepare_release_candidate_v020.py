@@ -9,6 +9,8 @@ import importlib.util
 import io
 import json
 import os
+import re
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -36,7 +38,7 @@ TARGETS = {
     ("native", "x86_64-apple-darwin", "LOSAT-0.2.0-x86_64-apple-darwin.tar.gz"),
     ("wasm", "wasm32-wasip1", "LOSAT-0.2.0-wasm32-wasip1.tar.gz"),
     ("wasm", "wasm32-wasip1-threads", "LOSAT-0.2.0-wasm32-wasip1-threads.tar.gz"),
-    ("source", "source", "LOSAT-0.2.0.crate"),
+    ("source", "source", "losat-0.2.0.crate"),
 }
 
 
@@ -99,7 +101,7 @@ class TempRepo:
         commit_file(
             self.root,
             "LOSAT/Cargo.toml",
-            '[package]\nname = "LOSAT"\nversion = "0.2.0"\n',
+            '[package]\nname = "losat"\nversion = "0.2.0"\n',
         )
         commit_file(self.root, "LOSAT/src/lib.rs", "// runtime\n")
         commit_file(self.root, "LOSAT/tests/fixture.txt", "fixture\n")
@@ -195,11 +197,12 @@ class ContractTests(unittest.TestCase):
     def test_contract_lists_rejected_tasks_and_toolchain(self) -> None:
         contract = release.load_contract(REPO_ROOT)
         self.assertEqual(
-            contract["public_cli"]["rejected_tasks"], ["blastp-short", "tblastn-fast"]
+            contract["public_cli"]["rejected_tasks"], ["blastp-short"]
         )
+        self.assertEqual(contract["public_cli"]["blastx_tasks"], ["blastx", "blastx-fast"])
+        self.assertEqual(contract["public_cli"]["tblastn_tasks"], ["tblastn", "tblastn-fast"])
         for case in contract["smoke"]:
             self.assertNotIn("blastp-short", case["arguments"])
-            self.assertNotIn("tblastn-fast", case["arguments"])
         toolchain = contract["cert_toolchain"]
         self.assertEqual(toolchain["rust"], "1.92.0")
         self.assertEqual(toolchain["cargo"], "1.92.0")
@@ -381,7 +384,7 @@ class LineageTests(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseFailure, "candidate SHA mismatch"):
             release.validate_candidate(self.repo.root, "a" * 40, contract)
         commit_file(
-            self.repo.root, "LOSAT/Cargo.toml", '[package]\nname = "LOSAT"\nversion = "0.1.0"\n'
+            self.repo.root, "LOSAT/Cargo.toml", '[package]\nname = "losat"\nversion = "0.1.0"\n'
         )
         with self.assertRaisesRegex(release.ReleaseFailure, "package version"):
             self.validate(contract)
@@ -547,16 +550,16 @@ class ArchiveTests(unittest.TestCase):
 
     def test_source_crate_rejects_generated_content(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            crate = Path(temp_dir) / "LOSAT-0.2.0.crate"
+            crate = Path(temp_dir) / "losat-0.2.0.crate"
             with tarfile.open(crate, "w:gz") as handle:
                 for name in (
-                    "LOSAT-0.2.0/Cargo.toml",
-                    "LOSAT-0.2.0/Cargo.lock",
-                    "LOSAT-0.2.0/README.md",
-                    "LOSAT-0.2.0/target/debug/losat",
+                    "losat-0.2.0/Cargo.toml",
+                    "losat-0.2.0/Cargo.lock",
+                    "losat-0.2.0/README.md",
+                    "losat-0.2.0/target/debug/losat",
                 ):
                     data = (
-                        b'[package]\nname = "LOSAT"\nversion = "0.2.0"\nlicense = "MIT"\n'
+                        b'[package]\nname = "losat"\nversion = "0.2.0"\nlicense = "MIT"\n'
                         if name.endswith("Cargo.toml")
                         else b"fixture"
                     )
@@ -565,7 +568,7 @@ class ArchiveTests(unittest.TestCase):
                     info.mode = 0o644
                     handle.addfile(info, io.BytesIO(data))
             with self.assertRaisesRegex(release.ReleaseFailure, "generated/scratch"):
-                release.crate_members(crate, "LOSAT-0.2.0")
+                release.crate_members(crate, "losat-0.2.0")
 
 
 class SmokeTests(unittest.TestCase):
@@ -847,6 +850,8 @@ class AggregateTests(unittest.TestCase):
             else:
                 sidecar["artifact_sha256"] = digest
                 sidecar["extracted_artifact"] = {"smoke": smoke}
+            if spec["target"] == "wasm32-wasip1-threads":
+                sidecar["binary"] = {"sha256": "b" * 64, "shared_memory_guard": {"sha256": "b" * 64}}
             release.write_json(inputs / f"{artifact.name}.metadata.json", sidecar)
 
     def run_aggregate(self, contract: dict, inputs: Path, outputs: Path) -> None:
@@ -931,6 +936,19 @@ class AggregateTests(unittest.TestCase):
             with self.assertRaisesRegex(release.ReleaseFailure, "differs from the eight"):
                 self.run_aggregate(contract, root / "inputs", root / "outputs")
 
+    def test_aggregate_rejects_a_threaded_sidecar_without_the_guard(self) -> None:
+        contract = filled_contract("d" * 40)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self.populate(root / "inputs", contract)
+            spec = next(item for item in contract["artifacts"] if item["target"] == "wasm32-wasip1-threads")
+            path = root / "inputs" / f"{spec['filename']}.metadata.json"
+            sidecar = json.loads(path.read_text(encoding="utf-8"))
+            del sidecar["binary"]["shared_memory_guard"]
+            release.write_json(path, sidecar)
+            with self.assertRaisesRegex(release.ReleaseFailure, "does not record the shared-memory guard"):
+                self.run_aggregate(contract, root / "inputs", root / "outputs")
+
     def test_aggregate_rejects_checksum_and_smoke_drift(self) -> None:
         contract = filled_contract("d" * 40)
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -951,12 +969,140 @@ class AggregateTests(unittest.TestCase):
                 self.run_aggregate(contract, root / "inputs", root / "outputs")
 
 
+# A module with an imported shared memory and one memory.fill (WebAssembly Core binary format).
+def _section(section_id: int, payload: bytes) -> bytes:
+    return bytes([section_id, len(payload)]) + payload
+
+
+_FILL_MODULE = (
+    b"\x00asm\x01\x00\x00\x00"
+    + _section(1, bytes([1, 0x60, 3, 0x7F, 0x7F, 0x7F, 0]))
+    + _section(2, bytes([1, 3]) + b"env" + bytes([6]) + b"memory" + bytes([2, 3, 1, 4]))
+    + _section(3, bytes([1, 0]))
+    + _section(10, bytes([1, 11, 0, 0x20, 0, 0x20, 1, 0x20, 2, 0xFC, 11, 0, 0x0B]))
+)
+
+
+@unittest.skipUnless(shutil.which("node"), "needs Node.js")
+class ThreadedGuardTests(unittest.TestCase):
+    def setUp(self) -> None:
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        self.raw, self.guarded = self.root / "raw.wasm", self.root / "guarded.wasm"
+        self.raw.write_bytes(_FILL_MODULE)
+        subprocess.run(
+            ["node", str(REPO_ROOT / "LOSAT/tests/wasi_shared_memory.js"), "guard", str(self.raw), str(self.guarded)],
+            check=True,
+            capture_output=True,
+        )
+
+    def assemble(self, binary: Path, unguarded: Path | None, target: str = "wasm32-wasip1-threads") -> dict:
+        contract = release.load_contract(REPO_ROOT)
+        spec = release.artifact_spec(contract, "wasm", target)
+        args = argparse.Namespace(
+            repo_root=REPO_ROOT,
+            candidate_sha="a" * 40,
+            target=target,
+            binary=binary,
+            unguarded_binary=unguarded,
+            node="node",
+            output_dir=self.root / "output",
+            allow_unfilled_lineage=True,
+        )
+        real_run = subprocess.run
+
+        # The fixture is not a whole command: wasi_artifact.js would reject it.
+        def run(argv, **kwargs):
+            if str(argv[1]).endswith("wasi_artifact.js"):
+                return subprocess.CompletedProcess(argv, 0, stdout="{}", stderr="")
+            return real_run(argv, **kwargs)
+
+        with (
+            mock.patch.object(release, "validate_candidate", return_value=False),
+            mock.patch.object(release, "capture_toolchain", return_value={}),
+            mock.patch.object(release, "version_output", return_value="losat 0.2.0"),
+            mock.patch.object(release, "run_smoke", return_value={"status": "PASS", "cases": []}),
+            mock.patch.object(release.subprocess, "run", side_effect=run),
+        ):
+            release.assemble_binary(args, "wasm")
+        return json.loads(
+            (self.root / "output" / f"{spec['filename']}.metadata.json").read_text(encoding="utf-8")
+        )
+
+    def test_threaded_artifact_must_carry_a_verified_shared_memory_guard(self) -> None:
+        with self.assertRaisesRegex(release.ReleaseFailure, "no verified shared-memory guard"):
+            release.threaded_guard_record("node", REPO_ROOT, self.raw)
+        record = release.threaded_guard_record("node", REPO_ROOT, self.guarded)
+        self.assertEqual((record["version"], record["fill"], record["copy"]), (4, 1, 0))
+        self.assertEqual(record["sha256"], hashlib.sha256(self.guarded.read_bytes()).hexdigest())
+
+    def test_assembly_refuses_an_unguarded_threaded_artifact(self) -> None:
+        with self.assertRaisesRegex(release.ReleaseFailure, "no verified shared-memory guard"):
+            self.assemble(self.raw, self.raw)
+
+    def test_assembly_needs_the_module_that_the_artifact_guards(self) -> None:
+        with self.assertRaisesRegex(release.ReleaseFailure, "needs --unguarded-binary"):
+            self.assemble(self.guarded, None)
+        other = self.root / "other.wasm"
+        other.write_bytes(_FILL_MODULE.replace(b"memory", b"memorz"))
+        with self.assertRaisesRegex(release.ReleaseFailure, "not the guard's output"):
+            self.assemble(self.guarded, other)
+        with self.assertRaisesRegex(release.ReleaseFailure, "not the guard's output"):
+            self.assemble(self.guarded, self.guarded)
+
+    def test_assembly_records_the_guard_and_the_unguarded_module(self) -> None:
+        guard = self.assemble(self.guarded, self.raw)["binary"]["shared_memory_guard"]
+        self.assertEqual(guard["sha256"], hashlib.sha256(self.guarded.read_bytes()).hexdigest())
+        self.assertEqual(guard["unguarded_sha256"], hashlib.sha256(self.raw.read_bytes()).hexdigest())
+        self.assertEqual(
+            guard["guard_sha256"],
+            hashlib.sha256((REPO_ROOT / "LOSAT/tests/wasi_shared_memory.js").read_bytes()).hexdigest(),
+        )
+
+    def test_serial_assembly_has_no_guard(self) -> None:
+        binary = self.assemble(self.raw, None, "wasm32-wasip1")["binary"]
+        self.assertNotIn("shared_memory_guard", binary)
+
+    def test_artifact_build_guards_threaded_modules_and_copies_serial_ones(self) -> None:
+        build_spec = importlib.util.spec_from_file_location(
+            "build_wasi_artifacts", REPO_ROOT / "LOSAT/tests/build_wasi_artifacts.py"
+        )
+        build = importlib.util.module_from_spec(build_spec)
+        build_spec.loader.exec_module(build)
+        for kind in ("threaded-command", "threaded-reactor"):
+            written = self.root / f"{kind}.wasm"
+            record = build.write_artifact("node", kind, self.raw, written)
+            self.assertEqual((record["fill"], record["output_sha256"]), (1, hashlib.sha256(written.read_bytes()).hexdigest()))
+            self.assertEqual(written.read_bytes(), self.guarded.read_bytes())
+        serial = self.root / "command.wasm"
+        self.assertIsNone(build.write_artifact("node", "command", self.raw, serial))
+        self.assertEqual(serial.read_bytes(), self.raw.read_bytes())
+        # Nothing to guard: the build fails and writes nothing.
+        empty = self.root / "empty.wasm"
+        empty.write_bytes(b"\x00asm\x01\x00\x00\x00")
+        unwritten = self.root / "unwritten.wasm"
+        with self.assertRaises(subprocess.CalledProcessError):
+            build.write_artifact("node", "threaded-command", empty, unwritten)
+        self.assertFalse(unwritten.exists())
+
+
 class WorkflowTests(unittest.TestCase):
     @unittest.skipUnless(WORKFLOW_PATH.exists(), "PR 3 adds the workflow")
-    def test_release_workflow_is_manual_read_only_and_non_publishing(self) -> None:
+    def test_release_workflow_is_manual_non_publishing_and_only_handoff_attests(self) -> None:
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
         self.assertIn("workflow_dispatch:", workflow)
         self.assertIn("contents: read", workflow)
+        # Only job `handoff` (the last job) may write: the OIDC token and the attestations.
+        before_handoff, handoff = workflow.split("\n  handoff:\n", 1)
+        for grant in ("id-token: write", "attestations: write"):
+            self.assertNotIn(grant, before_handoff)
+            self.assertEqual(handoff.count(grant), 1)
+        self.assertNotIn("contents: write", workflow)
+        self.assertIn("actions/attest-build-provenance@", handoff)
+        self.assertIn("sbom-path: .tmp/release-readiness/handoff/LOSAT-0.2.0.cdx.json", handoff)
+        # The provenance names GITHUB_SHA as the source, so a run whose head is not R must stop.
+        self.assertIn('if [[ "$GITHUB_SHA" != "$CANDIDATE_SHA" ]]; then', before_handoff)
         self.assertNotIn("actions/create-release", workflow)
         self.assertNotIn("softprops/action-gh-release", workflow)
         self.assertNotIn("cargo publish\n", workflow)
@@ -973,6 +1119,32 @@ class WorkflowTests(unittest.TestCase):
         ):
             self.assertIn(target, workflow)
         self.assertIn("prepare_release_candidate_v020.py", workflow)
+        # The threaded artifact is assembled from the guarded module.
+        self.assertIn("node LOSAT/tests/wasi_shared_memory.js guard", workflow)
+        self.assertIn("--binary .tmp/release-readiness/threaded-guarded/losat.wasm", workflow)
+        self.assertIn("--unguarded-binary LOSAT/target/wasm32-wasip1-threads/release/losat.wasm", workflow)
+
+
+    def test_dispatch_workflows_check_out_the_dispatched_commit(self) -> None:
+        """candidate_sha is an assertion, never a checkout ref (CodeQL actions/cache-poisoning)."""
+        workflows = REPO_ROOT / ".github" / "workflows"
+        for path in sorted(workflows.glob("*.yml")):
+            self.assertNotRegex(
+                path.read_text(encoding="utf-8"),
+                r"(?m)^\s*ref:\s*\$\{\{\s*inputs\.",
+                f"{path.name} checks out an input ref",
+            )
+        message = "::error::candidate_sha is checked, not checked out: dispatch on the branch whose head is the candidate"
+        for name in (
+            "release-readiness-v020.yml",
+            "release-readiness.yml",
+            "platform-native-certification.yml",
+            "wasm-threading.yml",
+        ):
+            workflow = (workflows / name).read_text(encoding="utf-8")
+            checkouts = len(re.findall(r"uses: actions/checkout@", workflow))
+            self.assertGreater(checkouts, 0, name)
+            self.assertEqual(workflow.count(message), checkouts, f"{name}: one check per checkout")
 
 
 if __name__ == "__main__":

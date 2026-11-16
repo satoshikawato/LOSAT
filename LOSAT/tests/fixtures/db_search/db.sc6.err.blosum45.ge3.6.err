@@ -1,0 +1,18 @@
+BLAST query/options error: Gap existence and extension values of 14 and 3 not supported for BLOSUM45
+supported values are:
+32767, 32767
+13, 3
+12, 3
+11, 3
+10, 3
+16, 2
+15, 2
+14, 2
+13, 2
+12, 2
+19, 1
+18, 1
+17, 1
+16, 1
+
+Please refer to the BLAST+ user manual.

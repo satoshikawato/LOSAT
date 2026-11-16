@@ -1,0 +1,42 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/x_gen2.xml
+#Output data file:	(stdout)
+#Annotation data at:	sites
+#E-Value cutoff:	0.01
+#Redundancy:	Full
+#Data requested:	Site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	RPSBLAST 2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Peptide	97	NP_416215.1 ferredoxin-like protein YdiT [Escherichia coli str. K-12 substr. MG1655]
+SITES
+ENDSITES
+ENDQUERY
+QUERY	Query_2	Peptide	77	NP_415978.1 tautomerase PptA [Escherichia coli str. K-12 substr. MG1655]
+SITES
+1	Query_2	Specific	dimer interface	P2,H3,I4,D5,I6,K7,C8,L21,D24,I25,V28,H32,L33	13	13	238274
+1	Query_2	Specific	active site 1	P2,H3,S39	3	3	238274
+1	Query_2	Specific	active site 2	K7,W52	2	2	238274
+ENDSITES
+ENDQUERY
+ENDSESSION	1
+ENDDATA

@@ -1,0 +1,7 @@
+# BLASTN 2.17.0+
+# Query: alln1 all N
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# BLASTN 2.17.0+
+# Query: alln2 all N
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# BLAST processed 2 queries

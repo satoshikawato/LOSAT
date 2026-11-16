@@ -22,7 +22,7 @@
 //!             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
 //! ```
 //!
-//! The reference (`Lookup::scan` + `word_finder`, which the diagnostic stages run) allocates and
+//! The reference (`Lookup::scan` + `word_finder`, which the tests compare with) allocates and
 //! zero-fills a buffer of `capacity()` pairs per (chunk, subject) and copies every batch into a
 //! new `(i32, i32)` vector before the diagonal loop reads it. `x_word_finder_scan` is
 //! `word_finder` with the scan loop of `Lookup::scan` inlined: the same `scan_range` state
@@ -34,11 +34,11 @@
 //! `scan_subject`) only write the buffer and return the number of pairs written, and only
 //! `pairs[0..hits)` is read afterwards, so stale contents beyond `hits` are never read. The
 //! pairs are visited in the same order with the same values (`u32 as i32`, as the copy did),
-//! and the diagonal statements below are those of `word_finder`. The caller uses this
-//! path only when nothing traces the seeds (not in the diagnostic stages).
+//! and the diagonal statements below are those of `word_finder`. The searches take this path
+//! for every subject but a `-subject` with scan ranges (`x_soft_subject.rs`).
 //!
 //! BXSCANBF (graduated 2026-10-26: no variable, always on): the scan of the standard
-//! lookup table is tblastn's branch-free scan (`tblastn/x_scan_bf.rs`, `x_scan_one_range_bf`,
+//! lookup table is tblastn's branch-free scan (`tblastx/x_aascan_bf.rs`, `x_scan_one_range_bf`,
 //! the loop of the former TBNSCANBF): the presence bits of a block of words advance a candidate list
 //! instead of a branch, and the listed words' hits are copied in position order with NCBI's stop
 //! and resume when the offset array is full. Its pairs and `scan_range` values are those of
@@ -67,8 +67,9 @@
 //!                     continue;
 //!                 }
 //! ```
-//! Where the direct loop scans every subject (`LOSAT_X_BXDIAG=0`, and the default without AVX2:
-//! aarch64, WebAssembly) 79-81 % of the hits of the three blastx cases of v4-A10 probe bx1 are too
+//! Where the direct loop scans every subject (`LOSAT_X_BXDIAG=0`, and the default without
+//! LOSAT_X_BXCROSS's cell test: `LOSAT_X_BXCROSS=0`, a CPU without AVX2 or POPCNT, aarch64,
+//! WebAssembly) 79-81 % of the hits of the three blastx cases of v4-A10 probe bx1 are too
 //! far and 14.5-17.4 % overlap, which of the two is hard to predict, and 1.2-1.4 % meet a flag-1
 //! cell and 2.1-2.8 % are candidates for the extension.
 //!
@@ -103,13 +104,13 @@
 //! (`x_word_finder_direct_sent`, never inlined); the loops without it keep their code.
 //!
 //! EXPERIMENT (LOSAT_X_BXSCANBYTE): the direct loop scans the standard table with tblastn's scan on
-//! presence bytes (`tblastn/x_scan_byte.rs` `x_scan_one_range_byte`, LOSAT_X_TBNSCANBYTE's code,
+//! presence bytes (`tblastx/x_scan_byte.rs` `x_scan_one_range_byte`, LOSAT_X_TBNSCANBYTE's code,
 //! whose header gives the exactness argument): the indexes of a block of 256 words made from the
 //! letters at once, the candidates listed from one byte per index, the hits of a block copied with
 //! one capacity test. It returns the pairs and `scan_range` values of
 //! `s_blast_aa_scan_subject_one_range` on every call, so the loop above reads the same pairs; it
-//! writes up to `X_SCAN_BYTE_SLACK` pairs past `array_size` (one more than the branch-free scan), which
-//! the per-thread buffer holds and nothing reads. The presence bytes (32 KB) are built the first
+//! writes up to `X_SCAN_BYTE_SLACK` pairs past `array_size` (more than the branch-free scan, for
+//! the chain runs of LOSAT_X_CHAINRUN), which the per-thread buffer holds and nothing reads. The presence bytes (32 KB) are built the first
 //! time the direct loop scans with the table and kept with it (`XKeptPresence` in
 //! `Lookup::Standard`), so they go with the table and no other table can see them. The switch
 //! takes the CPU policy of LOSAT_X_TBNSCANBYTE (`x_mode`): on unless it is `0`, the AVX2 forms
@@ -117,15 +118,15 @@
 //! cells with hits) on x86-64 without AVX2 and in WebAssembly, nothing on aarch64 (not timed); `=2`
 //! the plain loops for every table, `=3` for sparse tables, on any CPU. Where it does not act the
 //! branch-free scan of BXSCANBF (graduated, always on) runs. The fused loop of LOSAT_X_BXDIAG keeps
-//! its candidate loop. On x86-64 with AVX2 the direct loop scans the subjects of batches with few hits
-//! per used cell (BXDIAGMIN: short queries); without AVX2 every batch.
+//! its candidate loop. On x86-64 with AVX2 and POPCNT the direct loop scans the subjects of batches
+//! with few hits per used cell (BXDIAGMIN: short queries); elsewhere every batch.
 
-use super::x_ungap_sent::XSent;
+use super::x_ungap_sent::{by_word_size, XSent};
 use super::*;
 use crate::algorithm::blastp::extension::BlastpTwoHitUngappedResult;
 use crate::algorithm::blastp::x_seed_fused::XHitBf;
-use crate::algorithm::tblastn::x_scan_bf::{x_scan_one_range_bf, X_SCAN_BF_SLACK};
-use crate::algorithm::tblastn::x_scan_byte::{
+use crate::algorithm::tblastx::x_aascan_bf::{x_scan_one_range_bf, X_SCAN_BF_SLACK};
+use crate::algorithm::tblastx::x_scan_byte::{
     x_kept_presence, x_mode, x_scan_one_range_byte, x_table_presence, XScanByte, X_SCAN_BYTE_SLACK,
 };
 use std::cell::RefCell;
@@ -154,10 +155,10 @@ pub(crate) fn x_bxscan_byte() -> XScanByte {
 // No NCBI counterpart: the presence vector in another layout, kept with the table; it does not
 // change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BXSCANBYTE): a standard table's presence bytes and whether the table is
-/// sparse (`tblastn/x_scan_byte.rs` `x_table_presence`), built the first time the direct loop scans
+/// sparse (`tblastx/x_scan_byte.rs` `x_table_presence`), built the first time the direct loop scans
 /// with the table on presence bytes; `None` inside for a table they do not fit. It also carries the
 /// table's build number (`build`), which names the table for the choice of the loop
-/// (LOSAT_X_BXDIAGMIN, `x_seed_diag.rs`): a table built from pooled vectors (LOSAT_X_BXLUTPOOL)
+/// (LOSAT_X_BXDIAGMIN, `x_seed_diag.rs`): a table built from pooled vectors
 /// can sit at the address of the one dropped before it, with the same backbone vector; and whether
 /// the table was built pooled (`pooled`), so that its vectors go back to the pool when it is
 /// dropped (LOSAT_X_BXPOOLN1 builds a one-thread search's tables without the pool).
@@ -214,16 +215,14 @@ impl Lookup {
     }
 }
 
-/// The `[X_SHADOW]` summaries of the BXDIAG, BXUNGAPSENT, BXSUBJFLOW, BXDBSTREAM and BXEVALEMPTY
-/// switches (printed by `main` at exit, one line per switch that ran in shadow mode).
+/// The `[X_SHADOW]` summaries of the BXDIAG, BXUNGAPSENT and BXSUBJFLOW switches (printed by `main`
+/// at exit, one line per switch that ran in shadow mode).
 // No NCBI counterpart: prints the shadow-mode counters; it does not change any value NCBI computes.
 pub fn print_shadow_stats() {
     super::x_seed_diag::x_print_shadow_summary();
     super::x_ungap_sent::print_shadow_stats();
     #[cfg(feature = "parallel")]
     super::super::search::x_subject_flow::x_print_shadow_summary();
-    crate::algorithm::blastx::x_db_stream::x_print_shadow_summary();
-    crate::algorithm::blastx::statistics::x_print_eval_empty_summary();
 }
 
 thread_local! {
@@ -249,41 +248,109 @@ thread_local! {
 /// traces nothing).
 /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): with `sent` (the subject and its batch on that path,
 /// `x_ungap_sent.rs`) the fused and the direct loops extend with the sentinel walks.
+/// With the matrix of `scoring`: another matrix than BLOSUM62 takes [`x_word_finder_matrix`], its
+/// instance out of line.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn x_word_finder_scan(
+pub(crate) fn x_word_finder_scan<S: BxScoring>(
+    scoring: S,
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
     subject: &[u8],
-    lookup: &Lookup,
+    lookup: &BxLookup,
     diagonals: &mut Diagonals,
-    sent: Option<XSent<'_>>,
+    sent: Option<XSent<'_, S>>,
 ) -> Result<Vec<InitHsp>> {
-    // No NCBI counterpart: records which extension this subject takes (LOSAT_X_REACH); both
-    // loops below take `sent`.
+    if !S::BLOSUM62 {
+        return x_word_finder_matrix(
+            scoring, batch, parameters, options, subject, lookup, diagonals, sent,
+        );
+    }
+    x_word_finder_scan_with(
+        scoring, batch, parameters, options, subject, lookup, diagonals, sent,
+    )
+}
+
+/// `x_word_finder_scan` with another matrix than BLOSUM62 (items SC6 and SC6b of line NP): the same
+/// loops with the matrix's extensions (`MatrixBx`): the fused loop on the tables it pays for
+/// (LOSAT_X_BXDIAG, x_seed_diag.rs), the sentinel walks with the matrix's keys where `sent` is
+/// given (LOSAT_X_BXUNGAPSENT), the direct loop otherwise. Not inlined, so that BLOSUM62's loops
+/// keep their code.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn x_word_finder_matrix<S: BxScoring>(
+    scoring: S,
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    subject: &[u8],
+    lookup: &BxLookup,
+    diagonals: &mut Diagonals,
+    sent: Option<XSent<'_, S>>,
+) -> Result<Vec<InitHsp>> {
+    x_word_finder_scan_with(
+        scoring, batch, parameters, options, subject, lookup, diagonals, sent,
+    )
+}
+
+/// The body of [`x_word_finder_scan`] with the matrix of `scoring`: BLOSUM62's direct loop without
+/// `sent` is `x_word_finder_direct`, another matrix's `x_word_finder_matrix_direct`.
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn x_word_finder_scan_with<S: BxScoring>(
+    scoring: S,
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    subject: &[u8],
+    lookup: &BxLookup,
+    diagonals: &mut Diagonals,
+    sent: Option<XSent<'_, S>>,
+) -> Result<Vec<InitHsp>> {
+    // No NCBI counterpart: records which extension this subject takes (LOSAT_X_REACH); every loop
+    // below takes `sent`.
     if super::x_ungap_sent::on() {
         crate::utils::xreach::x_reach!("LOSAT_X_BXUNGAPSENT", sent.is_some());
     }
+    // The table of 16-bit hits is scanned by the fused loop (x_seed_diag.rs), never by the loops of
+    // `Int4` hits below.
+    let lookup = match lookup {
+        BxLookup::Wide(lookup) => lookup,
+        BxLookup::Narrow(lookup) => {
+            return super::x_seed_diag::x_word_finder_narrow(
+                scoring, batch, parameters, options, subject, lookup, diagonals, sent,
+            );
+        }
+    };
     // EXPERIMENT (LOSAT_X_BXDIAG): the fused loop where it acts (x_seed_diag.rs); where it does
     // not, the direct loop.
     if super::x_seed_diag::x_bxdiag_mode() != 0 {
         if let Some(hits) = super::x_seed_diag::x_word_finder_diag(
-            batch, parameters, options, subject, lookup, diagonals, sent,
+            scoring, batch, parameters, options, subject, lookup, diagonals, sent,
         )? {
             return Ok(hits);
         }
     }
     if let Some(sent) = sent {
-        return x_word_finder_direct_sent(
-            batch,
-            parameters,
-            options,
-            subject,
-            lookup,
-            diagonals,
-            x_bxscan_byte(),
-            x_bxhitbf(),
-            sent,
+        // The instance of the word size, chosen once for the subject (item SC9b-1).
+        return by_word_size!(
+            options.word_size,
+            W => x_word_finder_direct_sent::<S, W>(
+                batch,
+                parameters,
+                options,
+                subject,
+                lookup,
+                diagonals,
+                x_bxscan_byte(),
+                x_bxhitbf(),
+                sent,
+            )
+        );
+    }
+    if !S::BLOSUM62 {
+        return x_word_finder_matrix_direct(
+            scoring, batch, parameters, options, subject, lookup, diagonals,
         );
     }
     x_word_finder_direct(
@@ -296,6 +363,59 @@ pub(crate) fn x_word_finder_scan(
         x_bxscan_byte(),
         x_bxhitbf(),
     )
+}
+
+/// The direct loop of another matrix than BLOSUM62 (`x_word_finder_direct_with`, the port of NCBI's
+/// loop) with the matrix's extensions (`MatrixBx`): a subject without the sentinel walks.
+#[allow(clippy::too_many_arguments)]
+fn x_word_finder_matrix_direct<S: BxScoring>(
+    scoring: S,
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    subject: &[u8],
+    lookup: &Lookup,
+    diagonals: &mut Diagonals,
+) -> Result<Vec<InitHsp>> {
+    let scan_byte = x_bxscan_byte();
+    let hit_bf = x_bxhitbf();
+    let acts = x_hitbf_acts(hit_bf, options, subject, diagonals);
+    if hit_bf {
+        crate::utils::xreach::x_reach!("LOSAT_X_BXHITBF", acts);
+    }
+    macro_rules! direct {
+        ($hit_bf:literal) => {
+            x_word_finder_direct_with::<$hit_bf, _, _>(
+                batch,
+                parameters,
+                options,
+                subject,
+                lookup,
+                diagonals,
+                scan_byte,
+                |q: &[u8], s: &[u8], s_left_off, s_right_off, q_right_off, dropoff, word| {
+                    bx_two_hit(
+                        scoring,
+                        q,
+                        s,
+                        s_left_off,
+                        s_right_off,
+                        q_right_off,
+                        dropoff,
+                        word,
+                    )
+                },
+                |q: &[u8], s: &[u8], q_off, s_off, dropoff, word| {
+                    bx_one_hit(scoring, q, s, q_off, s_off, dropoff, word)
+                },
+            )
+        };
+    }
+    if acts {
+        direct!(true)
+    } else {
+        direct!(false)
+    }
 }
 
 // No NCBI counterpart: chooses LOSAT's loop; both loops give the reference's hits and table.
@@ -346,7 +466,7 @@ fn x_word_finder_direct(
             batch, parameters, options, subject, lookup, diagonals, scan_byte,
         );
     }
-    x_word_finder_direct_with::<false, _>(
+    x_word_finder_direct_with::<false, _, _>(
         batch,
         parameters,
         options,
@@ -355,6 +475,7 @@ fn x_word_finder_direct(
         diagonals,
         scan_byte,
         extend_two_hit_blosum62,
+        extend_one_hit_blosum62,
     )
 }
 
@@ -362,9 +483,12 @@ fn x_word_finder_direct(
 // change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): `x_word_finder_direct` with the extension of `sent`
 /// (`x_ungap_sent.rs`), in a function of its own so that the loops without it keep their code.
+/// With another matrix (item SC6b) the walks are its keys' and the one-hit argument is never
+/// called (`sent` exists only with a two-hit window). `W` is `options.word_size` as a const (2 to
+/// 4), the walks' instance: the caller chooses it once per subject (`by_word_size!`).
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-fn x_word_finder_direct_sent(
+fn x_word_finder_direct_sent<S: BxScoring, const W: usize>(
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
@@ -373,15 +497,18 @@ fn x_word_finder_direct_sent(
     diagonals: &mut Diagonals,
     scan_byte: XScanByte,
     hit_bf: bool,
-    sent: XSent<'_>,
+    sent: XSent<'_, S>,
 ) -> Result<Vec<InitHsp>> {
+    // The one-hit argument below is BLOSUM62's; another matrix's `sent` exists only with a two-hit
+    // window (`query_fits_of`), where it is never called.
+    debug_assert!(S::BLOSUM62 || options.window_size > 0);
     let acts = x_hitbf_acts(hit_bf, options, subject, diagonals);
     if hit_bf {
         crate::utils::xreach::x_reach!("LOSAT_X_BXHITBF", acts);
     }
     macro_rules! direct {
         ($hit_bf:literal, $shadow:literal) => {
-            x_word_finder_direct_with::<$hit_bf, _>(
+            x_word_finder_direct_with::<$hit_bf, _, _>(
                 batch,
                 parameters,
                 options,
@@ -390,8 +517,9 @@ fn x_word_finder_direct_sent(
                 diagonals,
                 scan_byte,
                 move |_: &[u8], _: &[u8], s_left_off, s_right_off, q_right_off, dropoff, _| {
-                    sent.two_hit::<$shadow>(s_left_off, s_right_off, q_right_off, dropoff)
+                    sent.two_hit::<$shadow, W>(s_left_off, s_right_off, q_right_off, dropoff)
                 },
+                extend_one_hit_blosum62,
             )
         };
     }
@@ -417,7 +545,7 @@ fn x_word_finder_direct_bf(
     diagonals: &mut Diagonals,
     scan_byte: XScanByte,
 ) -> Result<Vec<InitHsp>> {
-    x_word_finder_direct_with::<true, _>(
+    x_word_finder_direct_with::<true, _, _>(
         batch,
         parameters,
         options,
@@ -426,6 +554,7 @@ fn x_word_finder_direct_bf(
         diagonals,
         scan_byte,
         extend_two_hit_blosum62,
+        extend_one_hit_blosum62,
     )
 }
 
@@ -462,7 +591,7 @@ fn x_word_finder_direct_bf(
 // arguments and result (the sentinel walks of `x_ungap_sent.rs` in `x_word_finder_direct_sent`).
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
-fn x_word_finder_direct_with<const HIT_BF: bool, E>(
+fn x_word_finder_direct_with<const HIT_BF: bool, E, O>(
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
@@ -471,9 +600,11 @@ fn x_word_finder_direct_with<const HIT_BF: bool, E>(
     diagonals: &mut Diagonals,
     scan_byte: XScanByte,
     extend: E,
+    extend_one: O,
 ) -> Result<Vec<InitHsp>>
 where
     E: Fn(&[u8], &[u8], usize, usize, usize, i32, usize) -> Option<BlastpTwoHitUngappedResult>,
+    O: Fn(&[u8], &[u8], usize, usize, i32, usize) -> Option<BlastpOneHitUngappedResult>,
 {
     let query = &batch.sequence_start[1..];
     let word = options.word_size;
@@ -484,7 +615,7 @@ where
     let window = options.window_size;
     let lookup_word = match lookup {
         Lookup::Standard(l, _) => l.word_length,
-        Lookup::Compressed(l) => l.word_length,
+        Lookup::Compressed(l) => x_compressed_word_length(l),
     };
     let ranges = [(0, length as i32)];
     let mut range = [0, 0, length as i32 - lookup_word];
@@ -524,7 +655,7 @@ where
         while range[1] <= range[2] {
             let n = match (lookup, presence) {
                 // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127
-                // (`s_BlastAaScanSubject`; tblastn/x_scan_byte.rs gives the loop): the same pairs
+                // (`s_BlastAaScanSubject`; tblastx/x_scan_byte.rs gives the loop): the same pairs
                 // and `scan_range` on every call.
                 (Lookup::Standard(l, _), Some(presence)) => x_scan_one_range_byte(
                     scan_byte, l, presence, scanned, pairs, array_size, &mut range,
@@ -533,7 +664,7 @@ where
                     x_scan_one_range_bf(l, scanned, pairs, array_size, &mut range)
                 }
                 (Lookup::Compressed(l), _) => {
-                    l.scan_subject(scanned, &ranges, pairs, array_size, &mut range)
+                    x_compressed_scan(l, scanned, &ranges, pairs, array_size, &mut range)
                 }
             };
             for pair in &pairs[..n as usize] {
@@ -602,7 +733,7 @@ where
                     //                                               cutoffs->x_dropoff,
                     //                                               &hsp_q, &hsp_s, &hsp_len,
                     // ```
-                    let Some(result) = extend_one_hit_blosum62(
+                    let Some(result) = extend_one(
                         query,
                         subject,
                         q as usize,
@@ -796,6 +927,10 @@ mod tests {
     /// candidate loop.
     fn arms() -> Vec<(XScanByte, bool)> {
         let plain = XScanByte::On { avx2: false };
+        #[cfg_attr(
+            not(target_arch = "x86_64"),
+            expect(unused_mut, reason = "the AVX2 arms are pushed on x86_64 only")
+        )]
         let mut arms = vec![
             (XScanByte::Off, false),
             (XScanByte::Off, true),
@@ -867,9 +1002,7 @@ mod tests {
                 &batch,
                 &mut params,
                 &options,
-                s[0].sequence.len() as i64,
-                1,
-                s[0].sequence.len(),
+                parameters::SubjectNumbers::one(s[0].sequence.len()),
                 None,
             )
             .unwrap();
@@ -964,16 +1097,19 @@ mod tests {
                 }
                 for (&(scan_byte, hit_bf), pair) in arms.iter().zip(&mut sent_tables) {
                     for (d, shadow) in pair.iter_mut().zip([false, true]) {
-                        let hits = x_word_finder_direct_sent(
-                            &batch,
-                            &params,
-                            &options,
-                            &subject,
-                            &lookup,
-                            d,
-                            scan_byte,
-                            hit_bf,
-                            XSent::for_test(&batch.sequence_start, &lead, shadow),
+                        let hits = by_word_size!(
+                            options.word_size,
+                            W => x_word_finder_direct_sent::<_, W>(
+                                &batch,
+                                &params,
+                                &options,
+                                &subject,
+                                &lookup,
+                                d,
+                                scan_byte,
+                                hit_bf,
+                                XSent::for_test(Blosum62Bx, &batch.sequence_start, &lead, shadow),
+                            )
                         )
                         .unwrap();
                         let arm = format!(
@@ -1343,6 +1479,10 @@ mod tests {
             state ^= state << 17;
             (state % n as u64) as usize
         };
+        #[cfg_attr(
+            not(target_arch = "x86_64"),
+            expect(unused_mut, reason = "the AVX2 form is pushed on x86_64 only")
+        )]
         let mut forms = vec![XScanByte::On { avx2: false }];
         #[cfg(target_arch = "x86_64")]
         if std::is_x86_feature_detected!("avx2") {

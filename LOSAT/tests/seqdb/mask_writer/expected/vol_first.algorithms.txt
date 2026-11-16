@@ -1,0 +1,5 @@
+
+Available filtering algorithms applied to database sequences:
+
+Algorithm ID Algorithm name                          Algorithm options                       
+30           windowmasker                            default options used                    

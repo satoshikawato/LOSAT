@@ -26,14 +26,12 @@
 //! +1: 0 when that context is not valid), which is the `EffectiveSearchSpace` option of the
 //! batch (`SplitQuery_SetEffectiveSearchSpace`, `BlastOptions` memento: the first context).
 
-use std::borrow::Cow;
 use std::io::Write;
 use std::ops::Range;
 
 use anyhow::Result;
 
 use super::blast_engine::{TblastxHsp, TblastxQueryStats};
-use super::ncbi_cutoffs::try_compute_eff_lengths_tblastx;
 use super::report::SubjectLetters;
 use super::seqalign::{query_records_of, SeqalignSubjects};
 use super::subjects::SubjectSetNumbers;
@@ -41,36 +39,46 @@ use super::TblastxArgs;
 use crate::blastinput::app::Program;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::Placements;
-use crate::blastinput::value_parsers::SegSpec;
-use crate::report::archive::bioseq::BioseqInput;
+use crate::core::blast_util::ncbi_int4_from_double;
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::{Filter, OptionInputs};
+use crate::report::archive::requests::{LcaseFrames, RequestPolicy, RunRequests};
 use crate::report::archive::{
-    defline_of, ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive,
-    KaBlock,
+    ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
 };
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
-use crate::report::seqid::SeqId;
 use crate::report::serial::seqalign::{write_seq_aligns, Segments};
 
 /// The recorded options of a TBLASTX run (`options::algorithm_options`'s inputs), from the
 /// arguments as given: a value is recorded only when it was given or the class of its argument
 /// always sets it (`S/DESIGN_OF8.md` 2.2). TBLASTX has one task, and the options it does not
-/// accept (`-strand`, `-lcase_masking`, ...) are never recorded.
+/// accept (`-strand`, ...) are never recorded.
 pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
     let mut inputs = OptionInputs::new(Program::Tblastx, "tblastx");
     inputs.dbsize = args.dbsize;
+    inputs.searchsp = args.searchsp;
     // `-evalue` replaces the handle's value in place: the same list whether it was given.
     inputs.evalue = Some(args.evalue);
     inputs.word_size = args.word_size;
     inputs.qcov_hsp_perc = args.qcov_hsp_perc;
     inputs.max_hsps = args.max_hsps.map(|count| count as i32);
     // `-matrix` is recorded as typed when given; `-threshold` is read as a double and recorded as
-    // an `int` (`static_cast<int>`). Without `-threshold` and `-window_size` the list holds the
-    // matrix's suggestions (`report::archive::options`).
+    // an `int` (`static_cast<int>`), converted as the x86-64 build does (`INT_MIN` past `Int4`,
+    // as the lookup table takes it: `ncbi_int4_from_double`). Without `-threshold` and
+    // `-window_size` the list holds the matrix's suggestions (`report::archive::options`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:884-892
+    // ```c++
+    // CBlastOptions::SetWordThreshold(double w)
+    // {
+    //     ...
+    //     if (m_Remote) {
+    //         m_Remote->SetValue(eBlastOpt_WordThreshold, static_cast<int>(w));
+    //     }
+    // }
+    // ```
     inputs.matrix = args.matrix.clone();
-    inputs.threshold = args.threshold.map(|threshold| threshold as i32);
+    inputs.threshold = args.threshold.map(ncbi_int4_from_double);
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
     // ```c++
     //     if (args[kArgLookupTableMaskingOnly]) {
@@ -80,19 +88,7 @@ pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
     // `MaskAtHash` is recorded with the value given (the class always sets it: false when absent).
     inputs.soft_masking = args.soft_masking;
     inputs.window_size = args.window_size;
-    inputs.seg = args.seg_spec().ok().map(|spec| match spec {
-        SegSpec::No => Filter::No,
-        SegSpec::Yes => Filter::Yes,
-        SegSpec::WindowLocutHicut {
-            window,
-            locut,
-            hicut,
-        } => Filter::Seg {
-            window,
-            locut,
-            hicut,
-        },
-    });
+    inputs.seg = args.seg_spec().ok().map(Filter::from);
     inputs.culling_limit = args.culling_limit;
     inputs.query_gencode = i32::from(args.query_gencode);
     inputs.db_gencode = i32::from(args.db_gencode);
@@ -108,18 +104,64 @@ pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
 pub(crate) fn handle_for(
     args: &TblastxArgs,
     archive_requested: bool,
-) -> Result<Option<ArchiveHandle>> {
+    options: &crate::report::archive::OptionsHandle,
+) -> Option<ArchiveHandle> {
     if !archive_requested {
-        return Ok(None);
+        return None;
     }
     // NCBI keeps the name without the white space at its ends (`NStr::TruncateSpaces`,
     // blast_args.cpp:2472-2476), and the request's `database` is that name.
-    ArchiveHandle::for_program(&option_inputs(args), args.database_name(), "TBLASTX").map(Some)
+    Some(ArchiveHandle::for_program(
+        &option_inputs(args),
+        args.database_name(),
+        options,
+    ))
 }
 
-/// `report::archive::check_titles` for TBLASTX's records.
-pub(crate) fn check_titles(records: &[FastaRecord], role: &str) -> Result<()> {
-    crate::report::archive::check_titles(records, role, "TBLASTX")
+/// The requests of a run's batches (`RunRequests`): nucleotide queries and subjects, the
+/// `-subject` records `subjects` (`None` for `-db`), and with `-lcase_masking` (`lcase_masking`)
+/// the lower-case runs of each query in both frames of a translated query.
+pub(super) fn requests(subjects: Option<&[FastaRecord]>, lcase_masking: bool) -> RunRequests<'_> {
+    RunRequests::new(
+        RequestPolicy {
+            query_protein: false,
+            subject_protein: false,
+            lcase: lcase_masking.then_some(LcaseFrames::PlusAndMinus),
+        },
+        subjects,
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:1718-1725
+// ```c++
+// inline Int8
+// CBlastOptionsLocal::GetEffectiveSearchSpace() const
+// {
+//     if (m_EffLenOpts->num_searchspaces == 0)
+//         return 0;
+//
+//     return m_EffLenOpts->searchsp_eff[0];
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
+// ```c++
+//     int status = m_PrelimSearch->CheckInternalData();
+//     if (status != 0)
+//     {
+//          // Search was not run, but we send back an empty CSearchResultSet.
+// ```
+/// The `EffectiveSearchSpace` option of a batch whose first query has the statistics `first`
+/// (`BatchArchive::searched_space`, `StrategyExport::note_searched`): the effective search space
+/// of context 0 and that context's length in residues (`archive::RequestLength::space`), when NCBI
+/// searched the batch.
+pub(super) fn batch_searched_space(
+    searched: bool,
+    first: &TblastxQueryStats,
+) -> Option<crate::report::archive::SearchedContext0> {
+    searched.then_some(crate::report::archive::SearchedContext0 {
+        space: first.context0_search_space,
+        query_length: first.context0_aa_len,
+    })
 }
 
 pub(crate) use crate::report::archive::error_lines;
@@ -168,6 +210,7 @@ fn query_results_masks(
                 .collect();
             (!intervals.is_empty()).then(|| MaskEntry {
                 id: query.local_id.clone(),
+                best: query.believed().map(|ids| ids.best.clone()),
                 frame: frame_of(frame),
                 intervals,
             })
@@ -193,6 +236,8 @@ pub(super) struct ArchiveData<'a> {
     pub numbers: &'a SubjectSetNumbers,
     /// The queries of each batch written, in order.
     pub spans: &'a [Range<usize>],
+    /// `-lcase_masking`.
+    pub lcase_masking: bool,
 }
 
 /// The Seq-aligns of one batch: the elements of outfmt 8, one query at a time.
@@ -231,7 +276,7 @@ impl<'a> AlignSource for TblastxAligns<'a> {
             )?;
             let query = &data.queries[q_idx];
             let query = QueryRecord {
-                id: SeqId::Local(&query.local_id),
+                id: query.seq_id(),
                 searched_length: i32::try_from(query.seq().len())?,
                 offset: i32::try_from(data.query_placements.offset(q_idx))?,
             };
@@ -251,74 +296,21 @@ impl<'a> AlignSource for TblastxAligns<'a> {
     }
 }
 
-/// Writes the archive of each batch of `data.spans` to `writer`; `warnings` writes the warnings
-/// of a batch's queries (to the diagnostics, which saves them as the batch's messages) before
-/// its archive.
-pub(super) fn write_tblastx_archives(
-    handle: &ArchiveHandle,
+/// Calls `each` with the queries and the archive of each batch of `data.spans`, in order
+/// (`BatchArchive`: its request, `RunRequests::with_batch`, and its results).
+fn for_each_batch(
     data: &ArchiveData<'_>,
-    mut warnings: Option<&mut QueryWarnings<'_>>,
-    writer: &mut dyn Write,
+    mut each: impl FnMut(Range<usize>, &BatchArchive<'_>) -> Result<()>,
 ) -> Result<()> {
-    let run = RunRecord {
-        program: Program::Tblastx,
-        db_title: match data.subjects {
-            SeqalignSubjects::Records { .. } => None,
-            SeqalignSubjects::Database { title, .. } => Some(title),
-        },
-        gapped: false,
-    };
-    // The Bioseq inputs borrow their deflines: keep them alive for the whole call.
-    let subject_deflines: Vec<Cow<'_, [u8]>> =
-        data.subject_records.iter().map(defline_of).collect();
-    let subjects_input: Vec<BioseqInput<'_>> = data
-        .subject_records
-        .iter()
-        .zip(&subject_deflines)
-        .map(|(record, defline)| BioseqInput {
-            id: &record.local_id,
-            defline,
-            title: &record.title,
-            letters: record.archive_letters(),
-            protein: false,
-        })
-        .collect();
+    let requests = requests(Some(data.subject_records), data.lcase_masking);
     for span in data.spans.iter().cloned() {
         if span.is_empty() {
             continue;
         }
-        if let Some(warnings) = warnings.as_deref_mut() {
-            for index in span.clone() {
-                warnings.before_query(index, &mut *writer)?;
-            }
-        }
-        let records = &data.queries[span.clone()];
-        let deflines: Vec<Cow<'_, [u8]>> = records.iter().map(defline_of).collect();
-        let queries: Vec<BioseqInput<'_>> = records
-            .iter()
-            .zip(&deflines)
-            .map(|(record, defline)| BioseqInput {
-                id: &record.local_id,
-                defline,
-                title: &record.title,
-                letters: record.archive_letters(),
-                protein: false,
-            })
-            .collect();
         let first = span.start;
         let searched = data.searched[first];
-
-        // `RequiredStart` / `RequiredEnd`: a `-query_loc` that is not the first query's whole
-        // length.
+        let records = &data.queries[span.clone()];
         let placements = data.query_placements;
-        let required = if placements.ranged() {
-            let placement = &placements.0[first];
-            let cut = data.queries[first].seq().len();
-            (cut != placement.length)
-                .then_some((placement.offset as i32, (placement.offset + cut) as i32 - 1))
-        } else {
-            None
-        };
 
         // The results' masks are those of the search, so only a searched batch has them.
         let mut results_masks: Vec<MaskEntry> = Vec::new();
@@ -338,13 +330,10 @@ pub(super) fn write_tblastx_archives(
         let stats = &data.query_stats[first];
         let (ka_blocks, search_space, length_adjustment) = match &stats.karlin {
             Some(karlin) => {
-                let adjustment = try_compute_eff_lengths_tblastx(
-                    stats.aa_len as i64,
-                    data.numbers.effective_length(),
-                    data.numbers.count,
-                    karlin,
-                )
-                .map_or(0, |lengths| lengths.length_adjustment);
+                let adjustment = data
+                    .numbers
+                    .context_lengths(stats.aa_len as i64, karlin)
+                    .map_or(0, |lengths| lengths.length_adjustment);
                 (
                     [ka_block(karlin, false), KaBlock::missing(true)],
                     stats.eff_searchsp,
@@ -353,17 +342,43 @@ pub(super) fn write_tblastx_archives(
             }
             None => ([KaBlock::missing(false), KaBlock::missing(true)], 0, 0),
         };
-        let batch = BatchArchive {
-            queries: &queries,
-            subjects: &subjects_input,
-            required,
-            lcase_masks: &[],
-            masks: &results_masks,
-            ka_blocks,
-            search_space,
-            length_adjustment,
-            searched_space: searched.then_some(stats.context0_search_space),
-        };
+        requests.with_batch(records, placements.get(first), |request| {
+            let batch = BatchArchive {
+                request: *request,
+                masks: &results_masks,
+                ka_blocks,
+                search_space,
+                length_adjustment,
+                searched_space: batch_searched_space(searched, stats),
+            };
+            each(span, &batch)
+        })?;
+    }
+    Ok(())
+}
+
+/// Writes the archive of each batch of `data.spans` to `writer`; `warnings` writes the warnings
+/// of a batch's queries (to the diagnostics, which saves them as the batch's messages) before
+/// its archive, and its sink gets NCBI's posts of the bytes that the archive's stream replaces
+/// (`write_archive`).
+pub(super) fn write_tblastx_archives(
+    handle: &ArchiveHandle,
+    data: &ArchiveData<'_>,
+    warnings: &mut QueryWarnings<'_>,
+    writer: &mut dyn Write,
+) -> Result<()> {
+    let run = RunRecord {
+        program: Program::Tblastx,
+        db_title: match data.subjects {
+            SeqalignSubjects::Records { .. } => None,
+            SeqalignSubjects::Database { title, .. } => Some(title),
+        },
+        gapped: false,
+    };
+    for_each_batch(data, |span, batch| {
+        for index in span.clone() {
+            warnings.before_query(index, &mut *writer)?;
+        }
         let mut aligns = TblastxAligns {
             run: RunRecord {
                 program: run.program,
@@ -373,9 +388,14 @@ pub(super) fn write_tblastx_archives(
             data,
             span,
         };
-        write_archive(handle, &batch, &mut aligns, writer)?;
-    }
-    Ok(())
+        write_archive(
+            handle,
+            batch,
+            &mut aligns,
+            &mut *writer,
+            &mut *warnings.sink,
+        )
+    })
 }
 
 #[cfg(test)]
@@ -389,9 +409,9 @@ mod tests {
     // probes; `check_archive_layout.py opts`), without the `EffectiveSearchSpace` that each
     // archive adds: the name, the options given besides the inputs, and the list as
     // `Name=variant:value`. LOSAT's TBLASTX refuses some of these options at the command line
-    // (`-sum_stats`, `-strand`, `-subject_besthit`, `-xdrop_ungap`,
-    // `-parse_deflines`) or in its limits (`-word_size` other than 3): the list that NCBI would
-    // record is what the archive's model knows about them, pinned here.
+    // (`-sum_stats`, `-strand`, `-subject_besthit`, `-parse_deflines`; `-xdrop_ungap`, which NCBI
+    // does not record, is read since line RG X1): the list that NCBI would record is what the archive's model knows
+    // about them, pinned here.
     const CASES: &[(&str, &[&str], &str)] = &[
         ("def_sub", &[], "EvalueThreshold=cutoff:e-value:10 LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFilteringWindow=integer:12 SegFilteringLocut=real:2.2 SegFilteringHicut=real:2.5 WordThreshold=integer:13 WindowSize=integer:40 QueryGeneticCode=integer:1 DbGeneticCode=integer:1 HitlistSize=integer:500"),
         ("seg_no_sub", &["-seg", "no"], "EvalueThreshold=cutoff:e-value:10 LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFiltering=boolean:False WordThreshold=integer:13 WindowSize=integer:40 QueryGeneticCode=integer:1 DbGeneticCode=integer:1 HitlistSize=integer:500"),
@@ -474,6 +494,7 @@ mod tests {
                     ParamValue::Boolean(false) => "boolean:False".to_string(),
                     ParamValue::Real(value) => format!("real:{}", posix(*value)),
                     ParamValue::Str(value) => format!("string:{value}"),
+                    ParamValue::IntegerList(values) => format!("integer-list:{values:?}"),
                 };
                 format!("{}={value}", param.name)
             })
@@ -497,9 +518,8 @@ mod tests {
                     by_hand.push((extra[index], ""));
                     index += 1;
                 }
-                // Not recorded (the ungapped X-drop is never set by the application, the strand
-                // is not an option of the request).
-                "-xdrop_ungap" | "-strand" => index += 2,
+                // Not recorded (the strand is not an option of the request).
+                "-strand" => index += 2,
                 "-parse_deflines" => index += 1,
                 other => {
                     parsed.push(other);
@@ -522,6 +542,37 @@ mod tests {
             }
         }
         Some(inputs)
+    }
+
+    // A `-threshold` past `Int4` (2147483648, 1e10, +inf, 1e999) is recorded as `INT_MIN`, as
+    // NCBI BLAST+ 2.17.0 converts it (the lookup table takes the same value). NCBI's build writes
+    // it as `-8` in the archive, from a signed overflow that LOSAT does not reproduce
+    // (`report/serial/asn_text.rs` `itoa_i32`).
+    #[test]
+    fn a_threshold_past_int4_is_recorded_as_int_min() {
+        let inputs =
+            |value: &str| inputs_of(&["-threshold", value]).unwrap_or_else(|| panic!("{value}"));
+        let listed = |threshold: &str| {
+            let case = CASES
+                .iter()
+                .find(|case| case.0 == "opt_thr_frac_sub")
+                .expect("opt_thr_frac_sub");
+            case.2.replace(
+                "WordThreshold=integer:11",
+                &format!("WordThreshold=integer:{threshold}"),
+            )
+        };
+        for value in ["2147483648", "1e10", "+inf", "1e999"] {
+            assert_eq!(
+                render(&algorithm_options(&inputs(value))),
+                listed("-2147483648"),
+                "{value}"
+            );
+        }
+        assert_eq!(
+            render(&algorithm_options(&inputs("2147483647.5"))),
+            listed("2147483647")
+        );
     }
 
     #[test]

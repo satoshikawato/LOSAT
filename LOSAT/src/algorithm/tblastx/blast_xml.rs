@@ -4,7 +4,7 @@
 //! TBLASTX is an ungapped search, so NCBI makes one `diags` Seq-align per subject of a query's
 //! final hit list, one Std-seg per HSP (`BLASTUngappedHspListToSeqAlign`, see `seqalign`), and
 //! the XML writer takes each Std-seg as an `Hsp` of the subject's `Hit`
-//! (`PrepareBlastUngappedSeqalign`): the final list (`report_order`) holds the HSPs in that
+//! (`PrepareBlastUngappedSeqalign`): the final list (`hit_collector.rs`) holds the HSPs in that
 //! order, query by query, one run of HSPs per subject. What `s_SeqAlignSetToXMLHsps` reads of an
 //! HSP is its Seq-align (the coordinates in the records, lower first, the score, the bit score,
 //! the e-value or the sum e-value of a linked set) and the two rows of the alignment, from which
@@ -45,6 +45,7 @@ use std::io::Write;
 use anyhow::Result;
 
 use super::blast_engine::{TblastxHsp, TblastxQueryStats, TblastxReportRun};
+#[cfg(test)]
 use super::ncbi_cutoffs::try_compute_eff_lengths_tblastx;
 use super::subjects::SubjectSetNumbers;
 use crate::blastinput::fasta_reader::FastaRecord;
@@ -52,11 +53,11 @@ use crate::report::blast_xml::hsp::translation_frame;
 use crate::report::blast_xml::matrix::FormattingMatrix;
 use crate::report::blast_xml::names;
 use crate::report::blast_xml::{
-    filter, QueryMask, StructuredXml, SubjectNameCache, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats,
-    XmlSubjects, REFERENCE_GAPPED_BLAST,
+    filter, written_queries, QueryMask, StructuredXml, SubjectNameCache, XmlHit, XmlHsp, XmlQuery,
+    XmlRun, XmlStats, XmlSubjects, REFERENCE_GAPPED_BLAST,
 };
 use crate::report::blast_xml2::{Xml2Run, Xml2Target};
-use crate::report::query_warnings::{QueryWarnings, INVALID_QUERY_MESSAGE};
+use crate::report::query_warnings::{QueryWarnings, EMPTY_DATABASE_MESSAGE, INVALID_QUERY_MESSAGE};
 use crate::report::serial::seqalign::seqalign_evalue;
 use crate::utils::genetic_code::GeneticCode;
 
@@ -97,13 +98,16 @@ fn gap_costs(matrix: Option<&str>) -> (i32, i32) {
 /// translated query posts it only when no context of the batch is valid) and the message of a
 /// record without letters. TBLASTX posts nothing for an invalid query of a searched batch
 /// (blast_stat.c:2783-2790).
-fn query_messages(query: &FastaRecord, searched: bool) -> Vec<String> {
+fn query_messages(query: &FastaRecord, searched: bool, filtered_empty: bool) -> Vec<String> {
     let mut messages = Vec::new();
     if !searched {
         messages.push(INVALID_QUERY_MESSAGE.to_string());
     }
     if query.seq().is_empty() {
         messages.push(crate::algorithm::blastn::blast_engine::NO_DATA_MESSAGE.to_string());
+    }
+    if filtered_empty && searched {
+        messages.push(EMPTY_DATABASE_MESSAGE.to_string());
     }
     messages
 }
@@ -124,18 +128,13 @@ fn query_messages(query: &FastaRecord, searched: bool) -> Vec<String> {
 /// ```
 /// The search keeps that context's block, search space and length, not its length adjustment: it
 /// is computed again here with the search's own function (`try_compute_eff_lengths_tblastx`,
-/// the call of `search_query_batch` with the same subject set), and the search space it gives
+/// the call of `context_cutoffs` with the same subject set), and the search space it gives
 /// must be the kept one.
-fn query_stats(stats: &TblastxQueryStats, numbers: &SubjectSetNumbers) -> XmlStats {
+pub(crate) fn query_stats(stats: &TblastxQueryStats, numbers: &SubjectSetNumbers) -> XmlStats {
     let Some(karlin) = &stats.karlin else {
         return XmlStats::NONE;
     };
-    let lengths = try_compute_eff_lengths_tblastx(
-        stats.aa_len as i64,
-        numbers.effective_length(),
-        numbers.count,
-        karlin,
-    );
+    let lengths = numbers.context_lengths(stats.aa_len as i64, karlin).ok();
     debug_assert_eq!(
         lengths.map(|lengths| lengths.eff_searchsp),
         Some(stats.eff_searchsp),
@@ -159,6 +158,12 @@ pub(crate) fn xml2_run(run: &TblastxReportRun<'_>) -> Xml2Run {
             Some(_) => Xml2Target::Database,
             None => Xml2Target::Subjects(run.subjects.len()),
         },
+        subject_names: match &run.database {
+            Some(_) => None,
+            None => crate::report::blast_xml2::subject_names(
+                run.subjects.iter().map(FastaRecord::believed),
+            ),
+        },
         gapped: false,
         cbs: 0,
         query_gencode: Some(i32::from(run.args.query_gencode)),
@@ -169,14 +174,15 @@ pub(crate) fn xml2_run(run: &TblastxReportRun<'_>) -> Xml2Run {
 /// Writes the document of every query of `run` (`hits` is the final list after
 /// `shift_to_records`: record coordinates, in query order) through `document` (BLAST XML, or
 /// the XML2 / JSON documents) to `writer`, each query's warnings before it, with the document's
-/// header before the first query and its end after the last when `run.epilog`. Everything NCBI
-/// cannot write is refused before the first byte: the `-db` name, the query titles and
-/// messages, the titles of the subjects with hits. `all_masks`: the masks of every searched
+/// header before the first query and its end after the last when `run.epilog`. A query or
+/// subject title that NCBI crashes on (`names::Refusal`) is refused before the first byte; every
+/// other text is written as NCBI's streams write it. `all_masks`: the masks of every searched
 /// query are listed (XML2 and JSON), not those of the queries with hits alone (outfmt 5).
 /// `run.xml_taxa` holds the taxids of the database sequences that XML2 and JSON show.
 pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     document: &mut W,
     all_masks: bool,
+    only_xml2: bool,
     writer: &mut dyn Write,
     hits: &[TblastxHsp],
     run: &TblastxReportRun<'_>,
@@ -184,15 +190,15 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
 ) -> Result<()> {
     let args = run.args;
     let taxa = run.xml_taxa;
-    let (db_name, db_num, db_len) = match &run.database {
+    let (db_name, db_num, db_len, db_len_overflow) = match &run.database {
         Some(database) => (
             database.name,
-            i32::try_from(database.pairwise.num_sequences)?,
-            i64::try_from(database.pairwise.total_letters)?,
+            database.pairwise.num_sequences,
+            database.pairwise.total_letters,
+            database.pairwise.total_letters_overflow,
         ),
-        None => ("", 0, 0),
+        None => ("", 0, 0, false),
     };
-    names::check_database_name(PROGRAM, db_name)?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2206-2208 (XML2
     // and JSON) and :2242-2243 (BLAST XML)
     // ```c++
@@ -229,9 +235,9 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     );
     let xml_run = XmlRun {
         program: "tblastx",
-        version: "TBLASTX 2.17.0+",
+        version: concat!("TBLASTX ", crate::ncbi_blast_version!()),
         reference: REFERENCE_GAPPED_BLAST,
-        db_name: db_name.as_bytes(),
+        db_name,
         matrix: Some(matrix),
         expect: args.evalue,
         gap_open,
@@ -240,6 +246,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         filter: &filter,
         db_num,
         db_len,
+        db_len_overflow,
         positives: positives.as_ref(),
         mask_char: b'X',
     };
@@ -258,17 +265,28 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     }
     debug_assert_eq!(next, hits.len(), "the final list is in query order");
     // The definition line and message of every query, and the names of the subjects with
-    // hits, made (and refused) before the first byte.
-    let texts = queries
+    // hits, made (and refused) before the first byte, for the reports that the document writes:
+    // a run that stops (the one report call without the epilog: the XML formats are not streamed,
+    // `report_stream`) never writes the `-subject` report of its last query, which NCBI holds
+    // back, unless another format of the call (outfmt 5) writes it (`written_queries`; `only_xml2`:
+    // every structured format of the call is XML2 or JSON).
+    let reports = written_queries(
+        queries.len(),
+        !run.epilog,
+        only_xml2 && document.holds_back(),
+    );
+    let texts = queries[..reports]
         .iter()
         .enumerate()
         .map(|(q_idx, query)| {
             names::query_text(
                 PROGRAM,
-                &query.local_id,
+                query.local_id.as_bytes(),
+                query.warning_id(),
+                query.believed(),
                 query.title(),
                 false,
-                &query_messages(query, run.searched[q_idx]),
+                &query_messages(query, run.searched[q_idx], run.filtered_empty),
                 !query_hits[q_idx].is_empty(),
             )
         })
@@ -278,6 +296,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     let subjects = match &run.database {
         Some(database) => XmlSubjects::Database {
             ordinals: &database.reported.ordinals,
+            oids: database.oids,
             titles: crate::report::blast_xml::XmlTitles::Records(run.subjects),
             // Only XML2 shows the taxid (`taxa` is empty for outfmt 5).
             taxids: &taxa.taxids,
@@ -294,7 +313,10 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     };
     let mut cache = SubjectNameCache::new(&subjects);
     let mut last_subject = None;
-    for hsp in hits {
+    let written_hits = query_hits
+        .get(reports)
+        .map_or(hits.len(), |range| range.start);
+    for hsp in &hits[..written_hits] {
         if last_subject != Some(hsp.hit.s_idx) {
             last_subject = Some(hsp.hit.s_idx);
             cache.get(hsp.hit.s_idx as usize, PROGRAM)?;
@@ -307,10 +329,27 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     let mut masks: Vec<QueryMask> = Vec::new();
     let (mut window, mut query_row, mut subject_row): (Vec<u8>, Vec<u8>, Vec<u8>) =
         (Vec::new(), Vec::new(), Vec::new());
+    // The document's start (`StructuredXml::start`), before the first query's warnings, after the
+    // refusal of the database counts that the written reports would print.
+    document.start((reports > 0).then_some(&xml_run), &mut buf)?;
+    writer.write_all(&buf)?;
+    buf.clear();
     for (q_idx, query) in queries.iter().enumerate() {
         // The query's warnings come before its document (`QueryWarnings`).
         if let Some(warnings) = warnings.as_deref_mut() {
             warnings.before_query(q_idx, &mut *writer)?;
+        }
+        if q_idx == reports {
+            // The held report that is never written (`written_queries`).
+            document.unwritten(&mut buf)?;
+            crate::report::query_warnings::write_document_posts(
+                &buf,
+                document.take_posts(),
+                writer,
+                warnings.as_deref_mut(),
+            )?;
+            buf.clear();
+            break;
         }
         let text = &texts[q_idx];
         let searched_length = query.seq().len();
@@ -328,7 +367,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
             );
         }
         let xml_query = XmlQuery {
-            id: query.local_id.as_bytes(),
+            id: text.query_id(query.local_id.as_bytes()),
             title: &text.title,
             len: i32::try_from(searched_length)?,
             stats: query_stats(&run.query_stats[q_idx], run.numbers),
@@ -337,12 +376,28 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
             searched: run.searched[q_idx],
             masks: &masks,
         };
+        // What NCBI posts where it loads the subject of each `Hit` (`HitPosts`): the texts of the
+        // subjects that the query's report reads one by one (`QueryWarnings::subject_read`) and
+        // the taxonomy database's messages.
+        let mut posts = crate::report::query_warnings::HitPosts::new(
+            warnings
+                .as_deref()
+                .is_some_and(|warnings| warnings.reads_with_texts(q_idx)),
+        );
+        let posting = warnings.is_some();
         let written = document.query(&xml_run, &xml_query, &mut buf, |sink| {
             let mut first = 0usize;
             while first < query_hits.len() {
                 let s_idx = query_hits[first].hit.s_idx;
-                let mut end = first;
-                while end < query_hits.len() && query_hits[end].hit.s_idx == s_idx {
+                // The subject's HSPs and those of the copies of one record that follow it
+                // (`XmlSubjects::joins`, as `hit_ranges`).
+                let mut end = first + 1;
+                while end < query_hits.len() {
+                    let (previous, next) =
+                        (query_hits[end - 1].hit.s_idx, query_hits[end].hit.s_idx);
+                    if previous != next && !subjects.joins(previous as usize, next as usize) {
+                        break;
+                    }
                     end += 1;
                 }
                 let subject = cache.get(s_idx as usize, PROGRAM)?;
@@ -351,9 +406,13 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
                 // NCBI's messages about the taxonomy database: opening and the volume's lookup
                 // at the first `Hit` that needs them, the lookup of the `Hit` every time
                 // (nothing for the other formats).
-                if let Some(warnings) = warnings.as_deref_mut() {
-                    taxdb_printer.at_names(s_idx as usize, subject, &mut *warnings.sink)?;
-                }
+                posts.hit(sink.position(), s_idx, |texts| {
+                    if posting {
+                        taxdb_printer.at_names(s_idx as usize, subject, texts)
+                    } else {
+                        Ok(())
+                    }
+                })?;
                 sink.hit(&hit, |hsps| {
                     for hsp in &query_hits[first..end] {
                         run.subject_letters.rows_into(
@@ -415,12 +474,24 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         });
         // A failed query leaves its partial bytes in `buf`, which the error return drops.
         written?;
-        writer.write_all(&buf)?;
+        posts.document(document.take_posts());
+        crate::report::query_warnings::write_hit_posts(
+            &buf,
+            &posts,
+            q_idx,
+            writer,
+            warnings.as_deref_mut(),
+        )?;
         buf.clear();
     }
     if run.epilog {
         document.finish(&mut buf)?;
-        writer.write_all(&buf)?;
+        crate::report::query_warnings::write_document_posts(
+            &buf,
+            document.take_posts(),
+            writer,
+            warnings,
+        )?;
     }
     Ok(())
 }
@@ -437,7 +508,11 @@ mod tests {
         let numbers = SubjectSetNumbers {
             total: 3_000,
             count: 3,
+            link_total: 3_000,
+            average: None,
             dbsize: None,
+            searchsp: None,
+            statistics: None,
         };
         assert_eq!(
             query_stats(&TblastxQueryStats::default(), &numbers),
@@ -455,7 +530,11 @@ mod tests {
             let numbers = SubjectSetNumbers {
                 total: 3_000,
                 count,
+                link_total: 3_000,
+                average: None,
                 dbsize,
+                searchsp: None,
+                statistics: None,
             };
             let lengths = try_compute_eff_lengths_tblastx(
                 130,
@@ -465,10 +544,11 @@ mod tests {
             )
             .expect("fits");
             let stats = TblastxQueryStats {
-                karlin: Some(karlin.clone()),
+                karlin: Some(karlin),
                 eff_searchsp: lengths.eff_searchsp,
                 aa_len: 130,
                 context0_search_space: 0,
+                context0_aa_len: 0,
                 seg_masks: Vec::new(),
             };
             let xml = query_stats(&stats, &numbers);
@@ -487,13 +567,20 @@ mod tests {
     #[test]
     fn the_messages_of_a_query_follow_its_batch_and_its_letters() {
         let query = FastaRecord::new("Query_1", b"q", b"ACGTACGTA");
-        assert!(query_messages(&query, true).is_empty());
+        assert!(query_messages(&query, true, false).is_empty());
         assert_eq!(
-            query_messages(&query, false),
+            query_messages(&query, true, true),
+            vec![EMPTY_DATABASE_MESSAGE.to_string()]
+        );
+        assert!(query_messages(&query, false, true)
+            .iter()
+            .all(|message| message != EMPTY_DATABASE_MESSAGE));
+        assert_eq!(
+            query_messages(&query, false, false),
             vec![INVALID_QUERY_MESSAGE.to_string()]
         );
         let empty = FastaRecord::new("Query_2", b"e", b"");
-        assert_eq!(query_messages(&empty, true).len(), 1);
-        assert_eq!(query_messages(&empty, false).len(), 2);
+        assert_eq!(query_messages(&empty, true, false).len(), 1);
+        assert_eq!(query_messages(&empty, false, false).len(), 2);
     }
 }

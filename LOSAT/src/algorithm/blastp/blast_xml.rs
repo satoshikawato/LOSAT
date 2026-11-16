@@ -30,11 +30,12 @@ use std::io::Write;
 
 use anyhow::{bail, Context, Result};
 
+use super::blast_engine::query_rows::QueryRows;
 use super::hsp::BlastpHitList;
 use crate::report::blast_xml::names;
 use crate::report::blast_xml::{
-    QueryMask, StructuredXml, SubjectNameCache, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats,
-    XmlSubjects,
+    hit_ranges, written_queries, QueryMask, StructuredXml, SubjectNameCache, XmlHit, XmlHsp,
+    XmlQuery, XmlRun, XmlStats, XmlSubjects,
 };
 use crate::report::pairwise::PairwiseHit;
 use crate::report::query_warnings::QueryWarnings;
@@ -63,30 +64,37 @@ pub(crate) struct BlastpXml<'a> {
     pub program: &'static str,
     /// Whether the document ends with this call.
     pub epilog: bool,
+    /// Whether the run stops after this call: no epilog and no later report call (the block
+    /// search's next block) follow it (`written_queries`).
+    pub stops: bool,
+    /// Every structured format of the call is XML2 or JSON (outfmt 5, which writes every report,
+    /// is not among them; the library takes several formats).
+    pub only_xml2: bool,
 }
 
 /// Writes the document of every query of `hit_lists` (indexed by query) through `document`
 /// (BLAST XML, or the XML2 / JSON documents) to `writer`, each query's warnings before it,
 /// with the document's header before the first query and its end after the last when
-/// `xml.epilog`. `rows(q)` gives the rows of query `q`'s HSPs, in the lists' order.
+/// `xml.epilog`. `rows` gives the rows of each query's HSPs, in the lists' order.
 pub(crate) fn write_blastp_xml<W: StructuredXml>(
     xml: &BlastpXml<'_>,
     document: &mut W,
     hit_lists: &[Option<BlastpHitList>],
-    rows: &mut dyn FnMut(usize) -> Result<Vec<PairwiseHit>>,
+    rows: &mut QueryRows<'_>,
     writer: &mut dyn Write,
     mut warnings: Option<&mut QueryWarnings<'_>>,
 ) -> Result<()> {
     let program = xml.program;
-    // Everything NCBI cannot write is refused before the first byte of the document: the
-    // database name, each query's definition line and message, the names of the subjects with
-    // hits. This includes the last query of a `-subject` call, whose report NCBI holds back
-    // until the next query's arrives and never writes when the next batch fails to read
-    // (outfmt 15 and 16): LOSAT refuses a title it would not have written then. It cannot
-    // wait for the report to be written, which would refuse after a byte (the reports before
-    // it are written by now), and the next batch is not read yet.
-    names::check_text(xml.run.db_name)
-        .map_err(|refusal| refusal.error(program, "a database name"))?;
+    // A title NCBI crashes on (`names::Refusal`) is refused before the first byte of the
+    // document: for the reports that the document writes, each query's definition line and the
+    // names of the subjects with hits. A run that stops never writes the
+    // `-subject` report of its last query, which NCBI holds back, unless another format of the
+    // call (outfmt 5) writes it (`written_queries`).
+    let reports = written_queries(
+        hit_lists.len(),
+        xml.stops,
+        xml.only_xml2 && document.holds_back(),
+    );
     let has_hits = |q_idx: usize| {
         hit_lists[q_idx].as_ref().is_some_and(|list| {
             list.hsplist_array
@@ -97,15 +105,15 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
     };
     let texts = names::query_texts(
         program,
-        &xml.queries.records[..hit_lists.len()],
+        &xml.queries.records[..reports],
         true,
         &xml.messages,
         has_hits,
     )?;
-    // The names of the subjects with hits, made once each; a title NCBI cannot write is refused
-    // here, before the first byte.
+    // The names of the subjects with hits in the written reports, made once each; a title NCBI
+    // crashes on is refused here, before the first byte.
     let mut subjects = SubjectNameCache::new(&xml.subjects);
-    for hit_list in hit_lists.iter().flatten() {
+    for hit_list in hit_lists.iter().take(reports).flatten() {
         for hsp_list in hit_list.hsplist_array.iter().take(hit_list.hsplist_count) {
             if let Some(hsp) = hsp_list.hsps.first() {
                 subjects.get(hsp.s_idx as usize, program)?;
@@ -114,15 +122,32 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
     }
     let mut taxdb_printer = xml.taxdb_notes.printer();
     let mut buf: Vec<u8> = Vec::new();
+    // The document's start (`StructuredXml::start`), before the first query's warnings, after the
+    // refusal of the database counts that the written reports would print.
+    document.start((reports > 0).then_some(&xml.run), &mut buf)?;
+    writer.write_all(&buf)?;
+    buf.clear();
     for (q_idx, hit_list) in hit_lists.iter().enumerate() {
         // The query's warnings come before its document (`QueryWarnings`).
         if let Some(warnings) = warnings.as_deref_mut() {
             warnings.before_query(q_idx, &mut *writer)?;
         }
+        if q_idx == reports {
+            // The held report that is never written (`written_queries`).
+            document.unwritten(&mut buf)?;
+            crate::report::query_warnings::write_document_posts(
+                &buf,
+                document.take_posts(),
+                writer,
+                warnings.as_deref_mut(),
+            )?;
+            buf.clear();
+            break;
+        }
         let record = &xml.queries.records[q_idx];
         let text = &texts[q_idx];
         let query = XmlQuery {
-            id: record.local_id.as_bytes(),
+            id: text.query_id(record.local_id.as_bytes()),
             title: &text.title,
             len: xml.queries.searched_lengths[q_idx] as i32,
             stats: xml.stats[q_idx],
@@ -130,30 +155,48 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
             searched: xml.searched[q_idx],
             masks: &xml.masks[q_idx],
         };
-        let mut hit_rows: Vec<PairwiseHit> = Vec::new();
-        if hit_list.is_some() {
-            hit_rows = rows(q_idx)?;
-        }
+        let hit_rows: &[PairwiseHit] = match hit_list {
+            Some(_) => rows.query(q_idx)?,
+            None => &[],
+        };
         let mut next_row = 0usize;
         let start = buf.len();
+        // What NCBI posts where it loads the subject of each `Hit` (`HitPosts`): the texts of the
+        // subjects that the query's report reads one by one (`QueryWarnings::subject_read`) and
+        // the taxonomy database's messages.
+        let mut posts = crate::report::query_warnings::HitPosts::new(
+            warnings
+                .as_deref()
+                .is_some_and(|warnings| warnings.reads_with_texts(q_idx)),
+        );
+        let posting = warnings.is_some();
         let written = document.query(&xml.run, &query, &mut buf, |sink| {
             let Some(hit_list) = hit_list else {
                 return Ok(());
             };
-            for hsp_list in hit_list.hsplist_array.iter().take(hit_list.hsplist_count) {
-                let Some(first) = hsp_list.hsps.first() else {
-                    continue;
-                };
-                let s_idx = first.s_idx as usize;
+            let lists =
+                &hit_list.hsplist_array[..hit_list.hsplist_count.min(hit_list.hsplist_array.len())];
+            // A copy of one record that follows another is shown in its `Hit`.
+            let ranges = hit_ranges(
+                lists,
+                |hsp_list| hsp_list.hsps.first().map(|hsp| hsp.s_idx as usize),
+                |previous, s_idx| xml.subjects.joins(previous, s_idx),
+            );
+            for range in ranges {
+                let s_idx = lists[range.start].hsps[0].s_idx as usize;
                 let subject = subjects.get(s_idx, program)?;
                 let hit = XmlHit::of(subject, xml.subjects.length(s_idx));
                 // NCBI's messages about the taxonomy database: opening and the volume's lookup
                 // at the first `Hit` that needs them, the lookup of the `Hit` every time.
-                if let Some(warnings) = warnings.as_deref_mut() {
-                    taxdb_printer.at_names(s_idx, subject, &mut *warnings.sink)?;
-                }
+                posts.hit(sink.position(), s_idx as u32, |texts| {
+                    if posting {
+                        taxdb_printer.at_names(s_idx, subject, texts)
+                    } else {
+                        Ok(())
+                    }
+                })?;
                 sink.hit(&hit, |hsps| {
-                    for hsp in &hsp_list.hsps {
+                    for hsp in lists[range].iter().flat_map(|hsp_list| &hsp_list.hsps) {
                         let row = hit_rows
                             .get(next_row)
                             .context("BLASTP report rows do not cover the hit list")?;
@@ -187,12 +230,24 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
             buf.truncate(start);
             return Err(error);
         }
-        writer.write_all(&buf)?;
+        posts.document(document.take_posts());
+        crate::report::query_warnings::write_hit_posts(
+            &buf,
+            &posts,
+            q_idx,
+            writer,
+            warnings.as_deref_mut(),
+        )?;
         buf.clear();
     }
     if xml.epilog {
         document.finish(&mut buf)?;
-        writer.write_all(&buf)?;
+        crate::report::query_warnings::write_document_posts(
+            &buf,
+            document.take_posts(),
+            writer,
+            warnings,
+        )?;
     }
     Ok(())
 }

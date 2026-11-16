@@ -2,13 +2,11 @@
 // the temporary storage that holds them. The implementation runs in the Data worker
 // (src/infra/data-worker), so every argument and result is structured-cloneable. The
 // outputs of a run arrive over the MessagePort that `openRun` returns
-// (ports/run-output.ts), not through these methods.
-import type { DatasetRevision, FastaParserKind, RecordKey } from '../domain/dataset';
+// (losat/ports: run-output.ts), not through these methods.
+import type { CUSTOM_OUTPUT, FastaParserKind, InputRole, OutputFormat, ProgramId, RecordKey, RunOutput } from 'losat/domain';
+import type { HspRecord, InputCheck } from 'losat/ports';
+import type { DatasetRevision } from '../domain/dataset';
 import type { HspTable } from '../domain/hsp-table';
-import type { OutputFormat } from '../domain/output-format';
-import type { InputRole, ProgramId } from '../domain/programs';
-import type { HspRecord } from './engine';
-import type { InputCheck } from './input-check';
 
 export interface SourceRef {
   readonly sourceId: string;
@@ -30,7 +28,10 @@ export interface RunInput {
 export interface DatasetStore {
   /**
    * Keeps a reference to `file`. Its bytes are read with `File.slice` when needed and are
-   * never copied into storage (design §6.1).
+   * never copied into storage (design §6.1). A File named `.gz`, `.bz2` or `.zst` is inflated first
+   * by the engine's decoders (losat/ports: inflate.ts) and kept under its name without the suffix; its ref
+   * carries that name and the inflated size. A file whose bytes are not what its name says is
+   * refused with the engine's sentence.
    */
   addSource(file: File): Promise<SourceRef>;
   /**
@@ -48,18 +49,33 @@ export interface DatasetStore {
   buildRunInput(revisionIds: readonly string[]): Promise<RunInput>;
   /**
    * The engine's reading of the run input of the revisions for `program` and `role`
-   * (ports/input-check.ts). Resolves with the engine's verdict; rejects only when the
+   * (losat/ports: input-check.ts). Resolves with the engine's verdict; rejects only when the
    * check itself cannot run.
    */
   checkInput(program: ProgramId, role: InputRole, revisionIds: readonly string[]): Promise<InputCheck>;
   /** The first `maxBytes` bytes of a source, for its preview. */
   previewSource(sourceId: string, maxBytes: number): Promise<Uint8Array>;
+  /**
+   * Forgets a source and every revision of it, giving back their memory; later calls that
+   * name them reject as for an unknown id. The caller drops only what no one uses
+   * (src/application/source-refs.ts). An unknown id is ignored.
+   */
+  dropSource(sourceId: string): Promise<void>;
 }
 
 export interface ResultSetRef {
   readonly runId: string;
-  readonly byteLengths: Readonly<Record<OutputFormat, number>>;
+  /** The bytes of each output of the run: the formats that every run writes, and the output of its -outfmt where it has one. */
+  readonly byteLengths: Readonly<Record<OutputFormat, number> & Partial<Record<typeof CUSTOM_OUTPUT, number>>>;
   readonly hitCount: number;
+}
+
+/** The committed runs whose stored outputs cannot be read back (`RunStore.checkStoredResults`), in the order of the runs. */
+export interface StoredResultsCheck {
+  /** The browser removed their stored outputs: it answers that they are not found. */
+  readonly removed: readonly string[];
+  /** Their stored outputs failed to read for another reason. */
+  readonly unreadable: readonly string[];
 }
 
 /**
@@ -67,8 +83,12 @@ export interface ResultSetRef {
  * can be read. A staged run that is discarded (cancel, failure) leaves nothing behind.
  */
 export interface RunStore {
-  /** Stages a run and returns the port that its engine writes to. */
-  openRun(runId: string): Promise<MessagePort>;
+  /**
+   * Stages a run that writes `outputs` (`runOutputs` of its argv; the formats that every run
+   * writes always) and returns the port that its engine writes to. An output that the run
+   * does not write fails it at the commit.
+   */
+  openRun(runId: string, outputs?: readonly RunOutput[]): Promise<MessagePort>;
   /**
    * Waits for the `end` of the run's output and commits it. Rejects, and discards the run,
    * if the output is incomplete or the storage ran out (the error then says so).
@@ -76,9 +96,9 @@ export interface RunStore {
   commitRun(runId: string): Promise<ResultSetRef>;
   /** Drops a staged run. Committed and unknown runs are left alone. */
   discardRun(runId: string): Promise<void>;
-  readOutput(runId: string, format: OutputFormat): Promise<Uint8Array>;
+  readOutput(runId: string, output: RunOutput): Promise<Uint8Array>;
   /** Bytes [start, end) of one output of a committed run (an HSP's row or section). */
-  readOutputRange(runId: string, format: OutputFormat, start: number, end: number): Promise<Uint8Array>;
+  readOutputRange(runId: string, output: RunOutput, start: number, end: number): Promise<Uint8Array>;
   readHits(runId: string): Promise<readonly HspRecord[]>;
   /**
    * The HSP records of a committed run as columns, without the aligned sequences
@@ -88,6 +108,13 @@ export interface RunStore {
   readHitTable(runId: string): Promise<HspTable>;
   readDiagnostics(runId: string): Promise<string>;
   deleteRun(runId: string): Promise<void>;
+  /**
+   * Whether the stored outputs of every committed run are still there: it opens the HSP records
+   * of each run (the first block that opening the run asks for) and reads its first byte, a few
+   * runs at a time, so it stays quick for hundreds of runs. The browser can remove them under an
+   * open tab (WA2-SC-05); the check after the page was hidden (application/attention.ts) asks.
+   */
+  checkStoredResults(): Promise<StoredResultsCheck>;
 }
 
 export type StorageBackend = 'opfs' | 'memory';

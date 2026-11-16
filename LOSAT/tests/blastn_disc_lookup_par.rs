@@ -6,21 +6,23 @@
 //! filled by one loop, or by the threads of the search pool, each owning whole blocks of cells of
 //! both templates' tables. So the property under test is that the report does not depend on it:
 //! for `-task dc-megablast` with one template and with two (`coding_and_optimal`), template
-//! lengths 16, 18 and 21 and word sizes 11 and 12, with `-subject` and with `-db`, at 1 and 4
-//! threads, the searches with the switch off (`=0`), by default and with it set to 1 give the same
-//! bytes. `LOSAT_X_REACH` shows that the pool built the tables at 4 threads and not at 1. The same
-//! holds with `LOSAT_X_PAIRPARDISC`, in
-//! `LOSAT_X_QBATCHPAR` slots (private pools of two threads), for split query chunks
-//! (`CHUNK_SIZE`), and for megablast with a template (`-word_size 11 -template_type ...`);
-//! megablast without a template never builds this table. One search fills its table in several
-//! chunks of the pool fill (a query of 0.66 Mb, both strands), with one template and with two.
-//! That the parts run on several workers of the pool is checked by the unit test
-//! `the_fill_runs_on_several_workers_of_the_pool`; that the bytes equal NCBI's is the business of
-//! the blastn fixtures.
+//! lengths 16, 18 and 21 and word sizes 11 and 12, with `-subject` and with `-db`, at 1, 4, 8 and
+//! 16 threads, the searches with the switch off (`=0`), by default and with it set to 1 give the
+//! same bytes. `LOSAT_X_REACH` shows that the pool built the tables at 4, 8 and 16 threads and not
+//! at 1. The same holds with `LOSAT_X_PAIRPARDISC`, at 4 threads with several query batches
+//! (`BATCH_SIZE`) and for split query chunks (`CHUNK_SIZE`), and for megablast with a template
+//! (`-word_size 11 -template_type ...`); megablast without a template never builds this table. One
+//! search fills its table in several chunks of the pool fill (a query of 0.66 Mb, both strands),
+//! with one template and with two. That the parts run on several workers of the pool is checked by
+//! the unit test `the_fill_runs_on_several_workers_of_the_pool`; that the bytes equal NCBI's is the
+//! business of the blastn fixtures.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+mod temp_support;
+use temp_support::{worker_log_if_unset, TempFile};
 
 mod reach_support;
 
@@ -34,13 +36,10 @@ const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
     ("LOSAT_X_BPLKPAHEAD", "0"),
     ("LOSAT_X_BPREDOLPT", "0"),
     ("LOSAT_X_BPREDOPAR", "0"),
-    ("LOSAT_X_BPSUBJMETA", "0"),
     ("LOSAT_X_DCCSR", "0"),
     ("LOSAT_X_DIAGLV", "0"),
     ("LOSAT_X_PAIRPARDISC", "0"),
     ("LOSAT_X_PAIRPARFOLD", "0"),
-    ("LOSAT_X_QBATCHPAR", "0"),
-    ("LOSAT_X_QDUSTPAR", "0"),
     ("LOSAT_X_QPREPPAR", "0"),
     ("LOSAT_X_RPTSTREAM", "0"),
 ];
@@ -131,7 +130,7 @@ fn queries() -> Temp {
     Temp(path)
 }
 
-/// The database made by `losat makedb` from LC738868, LC738869 and LC738870 (in a directory of
+/// The database made by `losat makeblastdb` from LC738868, LC738869 and LC738870 (in a directory of
 /// this test, removed when dropped), and its name.
 fn database() -> (Temp, String) {
     let dir = Temp(temp_path("db"));
@@ -143,16 +142,17 @@ fn database() -> (Temp, String) {
     }
     std::fs::write(&set, bytes).unwrap();
     let db = dir.0.join("set").to_str().unwrap().to_string();
-    let output = losat()
-        .arg("makedb")
+    let (mut command, _log) = losat();
+    let output = command
+        .arg("makeblastdb")
         .arg("-in")
         .arg(&set)
         .args(["-dbtype", "nucl", "-out", &db])
         .output()
-        .expect("run losat makedb");
+        .expect("run losat makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     (dir, db)
@@ -163,7 +163,7 @@ fn database() -> (Temp, String) {
 /// a file of this process when the environment has none): a binary built with the
 /// `blastx-worker-probe` feature (`cargo test --all-features`, as in CI) needs that file name as
 /// soon as a search has more than one thread, and it selects nothing.
-fn losat() -> Command {
+fn losat() -> (Command, Option<TempFile>) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
@@ -173,16 +173,8 @@ fn losat() -> Command {
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join(format!(
-                "losat_disclutpar_{}_worker.log",
-                std::process::id()
-            )),
-        );
-    }
-    command
+    let log = worker_log_if_unset(&mut command, "blastn_disc_lookup_par_worker");
+    (command, log)
 }
 
 type Var<'a> = (&'a str, &'a str);
@@ -201,8 +193,9 @@ fn blastn(
     extra: &[&str],
     threads: u32,
     vars: &[Var<'_>],
-) -> (Vec<u8>, String) {
-    let output = losat()
+) -> (Vec<u8>, String, Option<TempFile>) {
+    let (mut command, log) = losat();
+    let output = command
         .arg("blastn")
         .arg("-query")
         .arg(queries)
@@ -219,18 +212,21 @@ fn blastn(
         output.status.success(),
         "{extra:?} {vars:?} threads {threads}: {stderr}"
     );
-    (output.stdout, stderr)
+    (output.stdout, stderr, log)
 }
 
 /// For one search (`subject` and `extra` arguments): the report with the switch off at one
-/// thread, then off, by default (on) and on (`=1`) at 1 and 4 threads, all the same bytes; the
-/// switch writes nothing, and the pool builds the tables (`LOSAT_X_REACH`) at 4 threads only.
+/// thread, then off, by default (on) and on (`=1`) at 1, 4, 8 and 16 threads, all the same bytes;
+/// the switch writes nothing, and the pool builds the tables (`LOSAT_X_REACH`) above one thread
+/// only.
 fn check(subject: &[&str], extra: &[&str], env: &[Var<'_>]) {
     let queries = queries();
-    let (expected, expected_stderr) = blastn(&queries, subject, extra, 1, &joined(&[env, &[OFF]]));
+    let (expected, expected_stderr, _log) =
+        blastn(&queries, subject, extra, 1, &joined(&[env, &[OFF]]));
     assert!(!expected.is_empty(), "{extra:?}: no hits");
-    for threads in [1, 4] {
-        let (report, stderr) = blastn(&queries, subject, extra, threads, &joined(&[env, &[OFF]]));
+    for threads in [1, 4, 8, 16] {
+        let (report, stderr, _log) =
+            blastn(&queries, subject, extra, threads, &joined(&[env, &[OFF]]));
         assert!(
             report == expected,
             "{extra:?} threads {threads}: off differs"
@@ -238,7 +234,7 @@ fn check(subject: &[&str], extra: &[&str], env: &[Var<'_>]) {
         assert_eq!(stderr, expected_stderr, "{extra:?} threads {threads}");
         for (on, what) in [(&[][..], "default"), (&[SWITCH][..], "on")] {
             let reach = reach_support::Reach::new("disclutpar");
-            let (report, stderr) = blastn(
+            let (report, stderr, _log) = blastn(
                 &queries,
                 subject,
                 extra,
@@ -364,50 +360,38 @@ fn dc_megablast_with_pairpardisc() {
     );
 }
 
-// The batches searched in LOSAT_X_QBATCHPAR slots (2 slots of 2 threads, each with a private
-// pool, batches of 10,000 letters): the slots' tables are built on their pools, and the report is
-// the same. Then a batch split into query chunks (`CHUNK_SIZE`), each chunk with its own table.
+// Several batches (batches of 10,000 letters), each batch's table built on the pool, and the
+// report is the same. Then a batch split into query chunks (`CHUNK_SIZE`), each chunk with its own
+// table.
 #[test]
-fn qbatchpar_slots_and_split_chunks() {
+fn several_batches_and_split_chunks() {
     let queries = queries();
     let s = subject();
     let subject = args(&s);
     let extra = ["-task", "dc-megablast"];
-    for (env, slots) in [
-        (
-            &[("BATCH_SIZE", "10000")][..],
-            &[("LOSAT_X_QBATCHPAR", "1"), ("LOSAT_X_QBATCHPARSLOTS", "2")][..],
-        ),
-        (
-            &[("BATCH_SIZE", "1000000"), ("CHUNK_SIZE", "7000")][..],
-            &[][..],
-        ),
+    for env in [
+        &[("BATCH_SIZE", "10000")][..],
+        &[("BATCH_SIZE", "1000000"), ("CHUNK_SIZE", "7000")][..],
     ] {
-        let (expected, expected_stderr) = blastn(&queries, &subject, &extra, 1, env);
+        let (expected, expected_stderr, _log) = blastn(&queries, &subject, &extra, 1, env);
         assert!(!expected.is_empty(), "{env:?}: no hits");
-        let (report, stderr) = blastn(
-            &queries,
-            &subject,
-            &extra,
-            4,
-            &joined(&[env, slots, &[OFF]]),
-        );
-        assert!(report == expected, "{env:?} {slots:?}: off differs");
+        let (report, stderr, _log) = blastn(&queries, &subject, &extra, 4, &joined(&[env, &[OFF]]));
+        assert!(report == expected, "{env:?}: off differs");
         assert_eq!(stderr, expected_stderr, "{env:?}");
         for on in [&[][..], &[SWITCH][..]] {
-            let reach = reach_support::Reach::new("disclutpar-slots");
-            let (report, stderr) = blastn(
+            let reach = reach_support::Reach::new("disclutpar-batches");
+            let (report, stderr, _log) = blastn(
                 &queries,
                 &subject,
                 &extra,
                 4,
-                &joined(&[env, slots, on, &[reach.var()]]),
+                &joined(&[env, on, &[reach.var()]]),
             );
-            assert!(report == expected, "{env:?} {slots:?} {on:?}: on differs");
+            assert!(report == expected, "{env:?} {on:?}: on differs");
             assert_eq!(stderr, expected_stderr, "{env:?}");
             assert!(
                 reach.sides("LOSAT_X_DISCLUTPAR").0,
-                "{env:?} {slots:?} {on:?}: no table was built on a pool"
+                "{env:?} {on:?}: no table was built on a pool"
             );
         }
     }
@@ -433,9 +417,10 @@ fn megablast_with_and_without_a_template() {
         &[],
     );
     let queries = queries();
-    let (expected, expected_stderr) = blastn(&queries, &args(&s), &["-task", "megablast"], 1, &[]);
+    let (expected, expected_stderr, _log) =
+        blastn(&queries, &args(&s), &["-task", "megablast"], 1, &[]);
     let reach = reach_support::Reach::new("disclutpar-megablast");
-    let (report, stderr) = blastn(
+    let (report, stderr, _log) = blastn(
         &queries,
         &args(&s),
         &["-task", "megablast"],
@@ -461,14 +446,14 @@ fn timing_line_is_printed() {
     let s = subject();
     let subject = args(&s);
     let extra = ["-task", "dc-megablast"];
-    let (expected, _) = blastn(&queries, &subject, &extra, 1, &[]);
+    let (expected, _, _log) = blastn(&queries, &subject, &extra, 1, &[]);
     for (threads, vars, on_pool) in [
         (4, &[("LOSAT_TIMING", "1"), SWITCH][..], true),
         (4, &[("LOSAT_TIMING", "1")][..], true),
         (4, &[("LOSAT_TIMING", "1"), OFF][..], false),
         (1, &[("LOSAT_TIMING", "1"), SWITCH][..], false),
     ] {
-        let (report, stderr) = blastn(&queries, &subject, &extra, threads, vars);
+        let (report, stderr, _log) = blastn(&queries, &subject, &extra, threads, vars);
         assert!(report == expected, "{vars:?} {threads}: the report differs");
         let line = stderr
             .lines()
@@ -505,7 +490,7 @@ fn timing_line_is_printed() {
         }
     }
     // Megablast builds no discontiguous table: no line.
-    let (_, stderr) = blastn(
+    let (_, stderr, _log) = blastn(
         &queries,
         &subject,
         &["-task", "megablast"],
@@ -548,20 +533,21 @@ fn dc_megablast_across_chunk_boundaries() {
             "18",
         ][..],
     ] {
-        let (expected, expected_stderr) = blastn(&query, &subject, extra, 1, &[OFF]);
+        let (expected, expected_stderr, _log) = blastn(&query, &subject, extra, 1, &[OFF]);
         assert!(!expected.is_empty(), "{extra:?}: no hits");
-        let (report, stderr) = blastn(&query, &subject, extra, 4, &[OFF]);
+        let (report, stderr, _log) = blastn(&query, &subject, extra, 4, &[OFF]);
         assert!(report == expected, "{extra:?}: off differs");
         assert_eq!(stderr, expected_stderr, "{extra:?}");
         let reach = reach_support::Reach::new("disclutpar-chunks");
-        let (report, stderr) = blastn(&query, &subject, extra, 4, &[SWITCH, reach.var()]);
+        let (report, stderr, _log) = blastn(&query, &subject, extra, 4, &[SWITCH, reach.var()]);
         assert!(report == expected, "{extra:?}: on differs");
         assert_eq!(stderr, expected_stderr, "{extra:?}");
         assert!(
             reach.sides("LOSAT_X_DISCLUTPAR").0,
             "{extra:?}: no table was built on a pool"
         );
-        let (report, stderr) = blastn(&query, &subject, extra, 4, &[SWITCH, ("LOSAT_TIMING", "1")]);
+        let (report, stderr, _log) =
+            blastn(&query, &subject, extra, 4, &[SWITCH, ("LOSAT_TIMING", "1")]);
         assert!(
             report == expected,
             "{extra:?}: on with LOSAT_TIMING differs"
@@ -596,7 +582,7 @@ fn dc_megablast_csr_of_a_large_table() {
     let subject_path = fasta("AP027131.fasta");
     let subject = ["-subject", subject_path.to_str().unwrap()];
     let extra = &["-task", "dc-megablast"][..];
-    let (expected, expected_stderr) = blastn(&query, &subject, extra, 1, &[]);
+    let (expected, expected_stderr, _log) = blastn(&query, &subject, extra, 1, &[]);
     assert!(!expected.is_empty(), "no hits");
     let field = |line: &str, name: &str| -> u64 {
         line.split_whitespace()
@@ -605,10 +591,10 @@ fn dc_megablast_csr_of_a_large_table() {
             .unwrap_or_else(|| panic!("no {name} in: {line}"))
     };
     for threads in [1, 4] {
-        let (report, stderr) = blastn(&query, &subject, extra, threads, &[CSR]);
+        let (report, stderr, _log) = blastn(&query, &subject, extra, threads, &[CSR]);
         assert!(report == expected, "threads {threads}: on differs");
         assert_eq!(stderr, expected_stderr, "threads {threads}");
-        let (report, stderr) = blastn(
+        let (report, stderr, _log) = blastn(
             &query,
             &subject,
             extra,

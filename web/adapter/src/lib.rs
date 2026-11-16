@@ -6,12 +6,16 @@
 //! message in `losat_web2_last_error_ptr/len`. Responses and outputs go to the host
 //! through `losat_host.emit` (`emit.rs`).
 
+pub mod defaults;
 pub mod describe;
 pub mod emit;
+pub mod files;
+pub mod inflate;
 pub mod json;
 pub mod run;
 pub mod scan;
 pub mod store;
+pub mod zip;
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -118,6 +122,16 @@ pub unsafe extern "C" fn losat_web2_describe(program_ptr: *const u8, program_len
 /// # Safety
 /// The pointer arguments must describe readable buffers of the given lengths.
 #[no_mangle]
+pub unsafe extern "C" fn losat_web2_start(argv_ptr: *const u8, argv_len: usize) -> i32 {
+    guarded(|| {
+        run::emit_start(&words(text(argv_ptr, argv_len, "argv")?))?;
+        Ok(0)
+    })
+}
+
+/// # Safety
+/// The pointer arguments must describe readable buffers of the given lengths.
+#[no_mangle]
 pub unsafe extern "C" fn losat_web2_validate(argv_ptr: *const u8, argv_len: usize) -> i32 {
     guarded(|| {
         run::validate(&words(text(argv_ptr, argv_len, "argv")?))?;
@@ -148,15 +162,54 @@ pub extern "C" fn losat_web2_release(handle: u32) -> i32 {
     guarded(|| store::release(handle).map(|()| 0))
 }
 
+/// Starts a named input file of `kind` (`1`: a WindowMasker unit counts file, the value of
+/// BLASTN's `-window_masker_db`) of `size` bytes; returns its handle.
+///
+/// # Safety
+/// The pointer arguments must describe readable buffers of the given lengths.
+#[no_mangle]
+pub unsafe extern "C" fn losat_web2_file_begin(
+    kind: u32,
+    name_ptr: *const u8,
+    name_len: usize,
+    size: usize,
+) -> i32 {
+    guarded(|| {
+        let handle = files::begin(kind, text(name_ptr, name_len, "file name")?, size)?;
+        i32::try_from(handle).map_err(|_| "input file handle space exhausted".to_string())
+    })
+}
+
+/// # Safety
+/// The pointer arguments must describe readable buffers of the given lengths.
+#[no_mangle]
+pub unsafe extern "C" fn losat_web2_file_chunk(file: u32, ptr: *const u8, len: usize) -> i32 {
+    guarded(|| files::chunk(file, bytes(ptr, len)).map(|()| 0))
+}
+
+/// Ends a named input file: emits a *file* JSON on stream 2.
+#[no_mangle]
+pub extern "C" fn losat_web2_file_end(file: u32) -> i32 {
+    guarded(|| {
+        let response = files::end(file)?;
+        emit(STREAM_RESPONSE, response.as_bytes());
+        Ok(0)
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn losat_web2_file_release(file: u32) -> i32 {
+    guarded(|| files::release(file).map(|()| 0))
+}
+
 fn scanners() -> &'static Mutex<(u32, HashMap<u32, scan::Scanner>)> {
     static SCANNERS: OnceLock<Mutex<(u32, HashMap<u32, scan::Scanner>)>> = OnceLock::new();
     SCANNERS.get_or_init(Mutex::default)
 }
 
-/// Starts an index scan with parser kind `0` (`bio::io::fasta` 1.6.0, the reader of
-/// BLASTP, TBLASTN, BLASTN and TBLASTX before session SF), `1` (NCBI BLAST+'s reader of
-/// nucleotide input: BLASTN, TBLASTX, the TBLASTN subject) or `2` (NCBI BLAST+'s reader
-/// of protein input: BLASTP, the TBLASTN query).
+/// Starts an index scan with parser kind `1` (NCBI BLAST+'s reader of nucleotide input:
+/// BLASTN, TBLASTX, the TBLASTN subject, the BLASTX query) or `2` (NCBI BLAST+'s reader of
+/// protein input: BLASTP, the TBLASTN query, the BLASTX subject).
 #[no_mangle]
 pub extern "C" fn losat_web2_scan_begin(parser: u32) -> i32 {
     guarded(|| {
@@ -203,6 +256,85 @@ pub extern "C" fn losat_web2_scan_end(scanner: u32) -> i32 {
     })
 }
 
+fn inflations() -> &'static Mutex<(u32, HashMap<u32, inflate::Inflation>)> {
+    static INFLATIONS: OnceLock<Mutex<(u32, HashMap<u32, inflate::Inflation>)>> = OnceLock::new();
+    INFLATIONS.get_or_init(Mutex::default)
+}
+
+/// Starts the inflation of a file named `name` (UTF-8), as the command line reads a file of that
+/// name: `.gz`, `.bz2` or `.zst` in any case gives an inflation handle and an *inflate* JSON on
+/// stream 2 (the compression and the name without the suffix); any other name returns `0`, no
+/// handle: the file is read as it is.
+///
+/// # Safety
+/// The pointer arguments must describe readable buffers of the given lengths.
+#[no_mangle]
+pub unsafe extern "C" fn losat_web2_inflate_begin(name_ptr: *const u8, name_len: usize) -> i32 {
+    guarded(|| {
+        let Some((inflation, response)) =
+            inflate::Inflation::begin(text(name_ptr, name_len, "name")?)
+        else {
+            return Ok(0);
+        };
+        let handle = {
+            let mut inflations = inflations().lock().expect("inflations");
+            let id = inflations
+                .0
+                .checked_add(1)
+                .filter(|id| i32::try_from(*id).is_ok())
+                .ok_or_else(|| "inflation handle space exhausted".to_string())?;
+            inflations.0 = id;
+            inflations.1.insert(id, inflation);
+            id as i32
+        };
+        emit(STREAM_RESPONSE, response.as_bytes());
+        Ok(handle)
+    })
+}
+
+/// Inflates the next bytes of the file; the inflated bytes go out on stream 5. A file that is not
+/// what its name says fails with the command line's sentence, and its handle is dropped.
+///
+/// # Safety
+/// The pointer arguments must describe readable buffers of the given lengths.
+#[no_mangle]
+pub unsafe extern "C" fn losat_web2_inflate_chunk(handle: u32, ptr: *const u8, len: usize) -> i32 {
+    guarded(|| {
+        // The inflation leaves the map while it runs, so that no lock is held while `emit` calls
+        // the host (as `inflate_end`); it goes back only when the chunk inflated.
+        let mut inflation = inflations()
+            .lock()
+            .expect("inflations")
+            .1
+            .remove(&handle)
+            .ok_or_else(|| format!("unknown inflation {handle}"))?;
+        inflation.chunk(bytes(ptr, len))?;
+        inflations()
+            .lock()
+            .expect("inflations")
+            .1
+            .insert(handle, inflation);
+        Ok(0)
+    })
+}
+
+/// Ends the file: the rest of the inflated bytes go out on stream 5, or the call fails with the
+/// command line's sentence of data cut short (or of an empty file). The handle is dropped either
+/// way; a host that stops before the end of the file calls this and ignores the result.
+#[no_mangle]
+pub extern "C" fn losat_web2_inflate_end(handle: u32) -> i32 {
+    guarded(|| {
+        let inflation = inflations()
+            .lock()
+            .expect("inflations")
+            .1
+            .remove(&handle)
+            .ok_or_else(|| format!("unknown inflation {handle}"))?;
+        inflation.end()?;
+        Ok(0)
+    })
+}
+
 /// # Safety
 /// The pointer arguments must describe readable buffers of the given lengths.
 #[no_mangle]
@@ -219,6 +351,7 @@ pub unsafe extern "C" fn losat_web2_run(
             program,
             query_handle,
             subject_handle,
+            run::writes_archive(&argv),
             |queries, subjects| run::run(&argv, queries, subjects),
         )??;
         Ok(0)

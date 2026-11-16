@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import type { OutputFormat } from '../../../src/domain/output-format';
+import type { OutputFormat } from 'losat/domain';
 import type { SearchCase } from '../harness/engine';
 import { REPOSITORY } from './harness-server';
 
@@ -27,9 +27,9 @@ function sha256(bytes: Uint8Array | string): string {
 
 const cache = new Map<string, NativeExpectation>();
 
-/** Runs the native CLI for every format with `argv` (program first) from `cwd` (relative to the repository, or absolute). */
-export function nativeExpectation(argv: readonly string[], cwd: string): NativeExpectation {
-  const key = JSON.stringify([argv, cwd]);
+/** Runs the native CLI for every format with `argv` (program first) from `cwd` (relative to the repository, or absolute), with `env` added to the environment. */
+export function nativeExpectation(argv: readonly string[], cwd: string, env: Readonly<Record<string, string>> = {}): NativeExpectation {
+  const key = JSON.stringify([argv, cwd, env]);
   const cached = cache.get(key);
   if (cached !== undefined) return cached;
   if (NATIVE === undefined) throw new Error(NO_NATIVE_REASON);
@@ -37,7 +37,7 @@ export function nativeExpectation(argv: readonly string[], cwd: string): NativeE
   let stderr: string | undefined;
   for (const format of FORMATS) {
     const args = [...argv, '-outfmt', String(format), '-num_threads', '1'];
-    const result = spawnSync(NATIVE, args, { cwd: resolve(REPOSITORY, cwd), maxBuffer: 1 << 30 });
+    const result = spawnSync(NATIVE, args, { cwd: resolve(REPOSITORY, cwd), maxBuffer: 1 << 30, env: { ...process.env, ...env } });
     if (result.status !== 0) throw new Error(`native ${args.join(' ')} failed (${result.status}): ${result.stderr}`);
     formats[format] = sha256(result.stdout);
     const warnings = sha256(result.stderr);
@@ -106,9 +106,8 @@ export function manifestCase(id: string, rowIds: readonly string[]): VbrCase {
 }
 
 /**
- * The V-BR cells (plan §7 S09): BLASTP, TBLASTN, BLASTN and TBLASTX, every format each
- * supports (0, 6, 7), compared with the native CLI and with NCBI's frozen bytes. BLASTX
- * joins in SX.
+ * The V-BR cells (plan §7 S09): BLASTP, TBLASTN, BLASTN, TBLASTX and BLASTX (line SX), every
+ * format each supports (0, 6, 7), compared with the native CLI and with NCBI's frozen bytes.
  */
 export function vbrCases(): VbrCase[] {
   return [
@@ -118,6 +117,27 @@ export function vbrCases(): VbrCase[] {
     manifestCase('width.blastp', ['width.blastp']),
     manifestCase('width.tblastn', ['width.tblastn']),
     manifestCase('tblastx.multi', ['tblastx.multi.0', 'tblastx.multi.7']),
+    // BLASTX's frozen NCBI rows of the three formats are those of blastx-fast (-subject, DW-36).
+    manifestCase('bxfast.def', ['bxfast.def.0', 'bxfast.def.6', 'bxfast.def.7']),
+    // BLASTX's ranges (line SX, DW-39): a query range in both records, a subject range, both,
+    // and 12 queries over several batches, some skipped by the range.
+    manifestCase('sxd.blastx.qloc', ['sxd.blastx.qloc.0', 'sxd.blastx.qloc.6', 'sxd.blastx.qloc.7']),
+    manifestCase('sxd.blastx.sloc', ['sxd.blastx.sloc.0']),
+    manifestCase('sxd.blastx.qsloc', ['sxd.blastx.qsloc.7']),
+    manifestCase('sxd.blastx.qmany', ['sxd.blastx.qmany.0', 'sxd.blastx.qmany.7']),
+    {
+      // A genome of 306,008 nt against its 111 proteins: BLASTX reads the query in 31 batches
+      // of up to 10,002 letters and, at 2 threads or more, searches the batches with the flow of
+      // LOSAT_X_BXFLOW (its workers wait with `recv_timeout` and `rayon::yield_now`, which
+      // must work in a browser's Worker; DECISIONS of line SX 5 (f)).
+      id: 'blastx.batches',
+      program: 'blastx',
+      options: [],
+      cwd: 'LOSAT',
+      query: 'tests/fasta/MjeNMV.fasta',
+      subject: 'tests/fasta/MjeNMV.faa',
+      frozen: {},
+    },
     {
       // A genetic code other than the standard one (TLOSAN Stage D fixtures, V-ABI quick).
       id: 'tblastn.code4',
@@ -151,5 +171,14 @@ export function vbrCases(): VbrCase[] {
       subject: 'docs/evidence/losat_web_e1c/run-20260928T203929Z/tblastx-threaded-direct/s.fna',
       frozen: {},
     },
+    // The defaults of every mode and task of the search form (WA-RS-03): megablast and BLASTX
+    // with their outfmt 7 rows (def7.*), dc-megablast, blastn-short, blastp-fast, blastp-short, tblastn-fast.
+    manifestCase('multi.megablast', ['multi.megablast', 'def7.multi.megablast']),
+    manifestCase('dc.default', ['dc.default', 'dc.default.7']),
+    manifestCase('short.default', ['short.default', 'short.default.7']),
+    manifestCase('e2e.blastp.fast', ['e2e.blastp.fast']),
+    manifestCase('short.blastp.def', ['score.blastp.short.def.0', 'score.blastp.short.def.6', 'score.blastp.short.def.7']),
+    manifestCase('pyl.blastx', ['pyl.blastx.0', 'pyl.blastx.6', 'def7.pyl.blastx']),
+    manifestCase('tfast.e2e.def', ['tfast.e2e.def.0', 'def7.tfast.e2e']),
   ];
 }

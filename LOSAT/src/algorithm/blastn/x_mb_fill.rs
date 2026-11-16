@@ -219,6 +219,10 @@ impl Raw {
         bucket: usize,
         q_off_1: u32,
     ) {
+        // SAFETY: the contract above: `bucket <= kmer_mask` and
+        // `q_off_1 <= query_offset + seq.len()` (a word of the fill), which `in_range` checked
+        // lie in every table (3-byte elements: below `capacity`); nothing else uses the tables
+        // while `fill_runs` holds `t`.
         unsafe {
             let word = if H24 {
                 x_mb_narrow::load_word(self.hashtable, bucket)

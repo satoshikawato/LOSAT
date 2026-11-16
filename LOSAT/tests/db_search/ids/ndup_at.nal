@@ -1,0 +1,5 @@
+#
+# Alias file of line DBID, N1b
+#
+TITLE ndup_at (two databases, parsed Seq-ids)
+DBLIST ndup_a ndup_t

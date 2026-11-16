@@ -8,9 +8,8 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:438-453
 
 use super::constants::SENTINEL_BYTE;
-use crate::utils::genetic_code::GeneticCode;
+use crate::utils::genetic_code::{complement, revcomp, GeneticCode};
 use crate::utils::matrix::aa_char_to_ncbistdaa;
-use bio::alphabets::dna;
 
 /// A query frame containing translated sequence and metadata
 #[derive(Debug, Clone)]
@@ -20,16 +19,16 @@ pub struct QueryFrame {
     /// Translated amino acid sequence with NCBI-style sentinel bytes.
     ///
     /// Layout: [SENTINEL_BYTE, aa_0, aa_1, ..., aa_n-1, SENTINEL_BYTE]
-    /// - aa_seq[0] = SENTINEL_BYTE (0) - NCBI NULLB
-    /// - aa_seq[1..len-1] = actual amino acids (encoded in NCBISTDAA 1-27)
-    /// - aa_seq[len-1] = SENTINEL_BYTE (0) - NCBI NULLB
+    /// - `aa_seq[0]` = SENTINEL_BYTE (0) - NCBI NULLB
+    /// - `aa_seq[1..len-1]` = actual amino acids (encoded in NCBISTDAA 1-27)
+    /// - `aa_seq[len-1]` = SENTINEL_BYTE (0) - NCBI NULLB
     ///
-    /// When accessing amino acid at logical position i, use aa_seq[i + 1].
+    /// When accessing amino acid at logical position i, use `aa_seq[i + 1]`.
     /// When reporting coordinates, subtract 1 from the raw position.
     ///
     /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:438-453
-    ///   prot_seq[0] = NULLB;  // sentinel at beginning
-    ///   prot_seq[index_prot] = NULLB;  // sentinel at end
+    ///   `prot_seq[0] = NULLB;`  // sentinel at beginning
+    ///   `prot_seq[index_prot] = NULLB;`  // sentinel at end
     pub aa_seq: Vec<u8>,
     /// Unmasked amino acid sequence (NCBI `sequence_nomask` semantics), including sentinels.
     ///
@@ -61,8 +60,10 @@ fn codon_to_aa_ncbistdaa(codon: &[u8], table: &GeneticCode) -> u8 {
 /// NCBI BLAST places NULLB sentinel bytes at the beginning and end of each
 /// translated sequence to ensure proper extension termination.
 /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:438-453
+/// ```c
 ///   prot_seq[0] = NULLB;  // First character is sentinel
 ///   prot_seq[index_prot] = NULLB;  // Last character is sentinel
+/// ```
 ///
 /// Returns (aa_seq_with_sentinels, actual_aa_count)
 fn translate_sequence(seq: &[u8], table: &GeneticCode) -> (Vec<u8>, usize) {
@@ -88,7 +89,7 @@ fn translate_sequence(seq: &[u8], table: &GeneticCode) -> (Vec<u8>, usize) {
 /// The residue of codon `offset` of `frame` (+1..+3, -1..-3) of `sequence` as the search
 /// translates it: the residue `generate_frames` puts at index `offset + 1` of that frame (the
 /// codon from `3 * offset + |frame| - 1` of the sequence, or of its reverse complement
-/// `dna::revcomp`, translated by `codon_to_aa_ncbistdaa`). The report reads single codons
+/// `revcomp`, translated by `codon_to_aa_ncbistdaa`). The report reads single codons
 /// with it (the engine counts of the Seq-aligns, `report::engine_counts`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1299-1308
@@ -109,13 +110,13 @@ pub(crate) fn frame_residue(sequence: &[u8], frame: i8, offset: usize, table: &G
     if frame > 0 {
         codon_to_aa_ncbistdaa(&sequence[first..first + 3], table)
     } else {
-        // `dna::revcomp(sequence)[j]` is `dna::complement(sequence[len - 1 - j])`.
+        // `revcomp(sequence)[j]` is `complement(sequence[len - 1 - j])`.
         let last = sequence.len() - 1 - first;
         codon_to_aa_ncbistdaa(
             &[
-                dna::complement(sequence[last]),
-                dna::complement(sequence[last - 1]),
-                dna::complement(sequence[last - 2]),
+                complement(sequence[last]),
+                complement(sequence[last - 1]),
+                complement(sequence[last - 2]),
             ],
             table,
         )
@@ -134,7 +135,7 @@ pub(crate) fn frame_residue(sequence: &[u8], frame: i8, offset: usize, table: &G
 /// Amino acids are encoded in NCBISTDAA (0-27).
 pub fn generate_frames(seq: &[u8], table: &GeneticCode) -> Vec<QueryFrame> {
     let mut frames = Vec::with_capacity(6);
-    let rev_seq = dna::revcomp(seq);
+    let rev_seq = revcomp(seq);
     let seq_len = seq.len();
 
     // Forward (Frames 1,2,3)
@@ -174,26 +175,72 @@ pub fn generate_frames(seq: &[u8], table: &GeneticCode) -> Vec<QueryFrame> {
 //                        nucl_length, hsp->subject.frame, target_t->translations[context],
 //                        target_t->gen_code_string);
 // ```
-// NCBI translates the one frame of the HSP. The frame here is the one `generate_frames` makes:
-// the same `translate_sequence` of the same letters (`seq[i..]`, or `revcomp(seq)[i..]`), present
-// under the same condition (`i + 3 <= len`).
-/// The frame `frame` (+1..+3, -1..-3) of `generate_frames(seq, table)`, as (residues with the
-/// sentinels, length), or `None` where `generate_frames` makes no such frame. Only that frame is
-/// translated (and for a reverse frame the reverse complement made).
-pub(crate) fn translate_frame(
+// NCBI translates the one frame of the HSP. The frame here is the one `generate_frames` makes,
+// present under the same condition (`i + 3 <= len`): `translate_sequence` of `seq[i..]` or of
+// `revcomp(seq)[i..]`, whose codon k is the letters `seq[i + 3k..i + 3k + 3]`, or the complements
+// of `seq[len - i - 3k - 1]`, `seq[len - i - 3k - 2]` and `seq[len - i - 3k - 3]` (`revcomp` is
+// `rev().map(complement)`). `x_codons_into` reads those letters in place and gives each codon the
+// residue `codon_to_aa_ncbistdaa` gives it.
+/// The number of residues of frame `frame` (+1..+3, -1..-3) of `generate_frames` of `len` letters,
+/// or `None` where `generate_frames` makes no such frame.
+pub(crate) fn frame_length(len: usize, frame: i8) -> Option<usize> {
+    let i = usize::from(frame.unsigned_abs()).checked_sub(1)?;
+    (i < 3 && i + 3 <= len).then(|| (len - i) / 3)
+}
+
+/// The residues of frame `frame` (+1..+3, -1..-3) of `generate_frames(seq, table)` without its
+/// sentinels, appended to `out`, and their number; `None` (and `out` unchanged) where
+/// `generate_frames` makes no such frame. `residues` is the table of the code
+/// (`x_codon_residues(table)`). Only that frame is translated, and no reverse complement is made.
+pub(crate) fn translate_frame_into(
     seq: &[u8],
     frame: i8,
-    table: &GeneticCode,
-) -> Option<(Vec<u8>, usize)> {
-    let i = usize::from(frame.unsigned_abs()).checked_sub(1)?;
-    if i >= 3 || i + 3 > seq.len() {
-        return None;
-    }
-    Some(if frame > 0 {
-        translate_sequence(&seq[i..], table)
+    residues: &[u8; 4096],
+    out: &mut Vec<u8>,
+) -> Option<usize> {
+    let count = frame_length(seq.len(), frame)?;
+    let i = usize::from(frame.unsigned_abs()) - 1;
+    if frame > 0 {
+        x_codons_into(&seq[i..i + 3 * count], false, residues, out);
     } else {
-        translate_sequence(&dna::revcomp(seq)[i..], table)
-    })
+        x_codons_into(
+            &seq[seq.len() - i - 3 * count..seq.len() - i],
+            true,
+            residues,
+            out,
+        );
+    }
+    Some(count)
+}
+
+/// Appends to `out` the residue (`codon_to_aa_ncbistdaa`, read from the code's table `residues`,
+/// `x_codon_residues`) of every codon of `letters` (a multiple of three letters) read forward, or
+/// with `reverse` of every codon of their reverse complement (`revcomp(letters)`) read forward.
+pub(crate) fn x_codons_into(
+    letters: &[u8],
+    reverse: bool,
+    residues: &[u8; 4096],
+    out: &mut Vec<u8>,
+) {
+    debug_assert_eq!(letters.len() % 3, 0, "whole codons");
+    let masks = x_letter_masks();
+    if reverse {
+        // codon k of `revcomp(letters)` is the complements of the letters of the k-th triple
+        // from the end, last letter first
+        let mask = |letter: u8| usize::from(masks.reverse[usize::from(letter)]);
+        out.extend(
+            letters
+                .rchunks_exact(3)
+                .map(|codon| residues[mask(codon[2]) << 8 | mask(codon[1]) << 4 | mask(codon[0])]),
+        );
+    } else {
+        let mask = |letter: u8| usize::from(masks.forward[usize::from(letter)]);
+        out.extend(
+            letters
+                .chunks_exact(3)
+                .map(|codon| residues[mask(codon[0]) << 8 | mask(codon[1]) << 4 | mask(codon[2])]),
+        );
+    }
 }
 
 /// The bases a window of `x_generate_frames_in_windows` holds: one window of a subject's letters
@@ -218,7 +265,7 @@ const X_FRAME_WINDOW: usize = 3 << 16;
 // six frames are filled in one pass over the letters, each codon start q (0 <= q <= len - 3)
 // giving the residue of forward frame q % 3 at index q / 3 (the codon letters q..q+3) and of
 // reverse frame r % 3 at index r / 3 with r = len - 3 - q (the complements of letters q+2, q+1,
-// q, in that order: `dna::revcomp` is `rev().map(complement)`). Every residue of the six frames
+// q, in that order: `revcomp` is `rev().map(complement)`). Every residue of the six frames
 // of `generate_frames` is the translation of the same three letters by the same
 // `codon_to_aa_ncbistdaa`, so the frames are the same: the frames that exist (`i + 3 <= len`),
 // in the same order, with the same lengths, sentinels and residues.
@@ -304,14 +351,8 @@ fn x_frames_in_windows(
                 let (b0, b1, b2) = (letters[at], letters[at + 1], letters[at + 2]);
                 forward[q % 3].aa_seq[q / 3 + 1] = codon_to_aa_ncbistdaa(&[b0, b1, b2], table);
                 let r = len - 3 - q;
-                reverse[r % 3].aa_seq[r / 3 + 1] = codon_to_aa_ncbistdaa(
-                    &[
-                        dna::complement(b2),
-                        dna::complement(b1),
-                        dna::complement(b0),
-                    ],
-                    table,
-                );
+                reverse[r % 3].aa_seq[r / 3 + 1] =
+                    codon_to_aa_ncbistdaa(&[complement(b2), complement(b1), complement(b0)], table);
             }
         }
         letters.drain(..codons_end - start);
@@ -322,7 +363,7 @@ fn x_frames_in_windows(
 }
 
 /// The ncbi4na mask (`base_mask`) of every byte as a codon letter, and of its complement
-/// (`dna::complement`, the map of `dna::revcomp`).
+/// (`complement`, the map of `revcomp`).
 struct XLetterMasks {
     forward: [u8; 256],
     reverse: [u8; 256],
@@ -333,7 +374,7 @@ fn x_letter_masks() -> &'static XLetterMasks {
     MASKS.get_or_init(|| XLetterMasks {
         forward: std::array::from_fn(|byte| crate::utils::genetic_code::base_mask(byte as u8)),
         reverse: std::array::from_fn(|byte| {
-            crate::utils::genetic_code::base_mask(dna::complement(byte as u8))
+            crate::utils::genetic_code::base_mask(complement(byte as u8))
         }),
     })
 }
@@ -352,7 +393,7 @@ const X_MASK_LETTERS: [u8; 16] = *b"-ACMGRSVTWYHKDBN";
 // is the residue of any codon with the same masks: here, of the letters `X_MASK_LETTERS`.
 /// The NCBIstdaa residue `codon_to_aa_ncbistdaa` gives every codon with masks (m0, m1, m2), at
 /// index m0 << 8 | m1 << 4 | m2; one table per thread for the last genetic code asked for.
-fn x_codon_residues(table: &GeneticCode) -> std::rc::Rc<[u8; 4096]> {
+pub(crate) fn x_codon_residues(table: &GeneticCode) -> std::rc::Rc<[u8; 4096]> {
     thread_local! {
         static LAST: std::cell::RefCell<Option<([u8; 64], std::rc::Rc<[u8; 4096]>)>> =
             const { std::cell::RefCell::new(None) };
@@ -381,11 +422,12 @@ fn x_codon_residues(table: &GeneticCode) -> std::rc::Rc<[u8; 4096]> {
 mod tests {
     use super::*;
 
-    /// `translate_frame` against `generate_frames`: each frame's residues and length, and no
-    /// frame where `generate_frames` makes none (also frames 0 and 4), for every length up to 40 and a long sequence,
-    /// with every byte the readers give (IUPAC letters, `-`, both cases), under two codes.
+    /// `translate_frame_into` (and `frame_length`) against `generate_frames`: each frame's
+    /// residues, appended after what `out` holds, and length, and no frame (`out` unchanged) where
+    /// `generate_frames` makes none (also frames 0, 4 and -4), for every length up to 40 and a long
+    /// sequence, with every byte the readers give (IUPAC letters, `-`, both cases), under two codes.
     #[test]
-    fn translate_frame_is_the_frame_of_generate_frames() {
+    fn translate_frame_into_is_the_frame_of_generate_frames() {
         let letters = b"ACGTMRSVWYHKDBN-acgtmrsvwyhkdbn";
         let mut state = 7u64;
         let mut sequence = |length: usize| -> Vec<u8> {
@@ -396,7 +438,7 @@ mod tests {
                         .wrapping_add(1442695040888963407);
                     let draw = (state >> 33) as usize;
                     // mostly unambiguous bases, so stop codons and ordinary residues occur
-                    if draw % 4 == 0 {
+                    if draw.is_multiple_of(4) {
                         letters[draw / 4 % letters.len()]
                     } else {
                         b"ACGTacgt"[draw / 4 % 8]
@@ -407,6 +449,7 @@ mod tests {
         let mut compared = 0;
         for id in [1, 4] {
             let code = GeneticCode::try_from_id(id).unwrap();
+            let residues = x_codon_residues(&code);
             for length in (0..=40).chain([3_001]) {
                 let seq = sequence(length);
                 let frames = generate_frames(&seq, &code);
@@ -414,10 +457,15 @@ mod tests {
                     let expected = frames
                         .iter()
                         .find(|candidate| candidate.frame == frame)
-                        .map(|candidate| (candidate.aa_seq.clone(), candidate.aa_len));
+                        .map(|candidate| candidate.aa_seq[1..1 + candidate.aa_len].to_vec());
+                    let mut out = b"kept".to_vec();
+                    let got = translate_frame_into(&seq, frame, &residues, &mut out);
+                    assert_eq!(got, frame_length(length, frame), "{length} {frame}");
+                    assert_eq!(got, expected.as_ref().map(Vec::len), "{length} {frame}");
+                    assert_eq!(&out[..4], b"kept", "{length} {frame}");
                     assert_eq!(
-                        translate_frame(&seq, frame, &code),
-                        expected,
+                        out[4..],
+                        expected.clone().unwrap_or_default()[..],
                         "{length} {frame}"
                     );
                     compared += usize::from(expected.is_some());
@@ -560,3 +608,7 @@ mod tests {
         assert_eq!(frame_stop.aa_seq[1], ncbistdaa::STOP);
     }
 }
+
+#[cfg(test)]
+#[path = "translation_tests.rs"]
+mod translation_tests;

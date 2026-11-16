@@ -21,14 +21,14 @@ use anyhow::Result;
 use crate::report::blast_xml::hsp::{round6, MaskLetter};
 use crate::report::blast_xml::records::{HitTaxonomy, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats};
 use crate::report::blast_xml::writer::{
-    count_hsp, int_member, real_member, string_member, HitSink, HitWrite, HspSink, HspWrite,
-    Scratch, StructuredXml,
+    count_hsp, int_member, real_member, replaced_posts, string_member, DocumentPost, HitSink,
+    HitWrite, HspSink, HspWrite, Scratch, StructuredXml,
 };
-use crate::report::serial::encoder::Encoder;
+use crate::report::serial::encoder::{Encoder, SerialError};
 use crate::report::serial::json::JsonEncoder;
 use crate::report::serial::xml::XmlEncoder;
 
-use super::framing::{NoSideFiles, RunSideFiles, SideFiles, Xml2Document, Xml2Kind};
+use super::framing::{MadeReport, NoSideFiles, RunSideFiles, SideFiles, Xml2Document, Xml2Kind};
 use super::records::{Xml2Run, Xml2Target};
 
 /// `Parameters` (`s_SetBlastXMLParameters`, blastxml2_format.cpp:514-555), members in the order
@@ -92,7 +92,7 @@ fn write_statistics<E: Encoder>(enc: &mut E, run: &XmlRun<'_>, params: &Xml2Run,
     enc.begin_sequence("Statistics");
     if params.target == Xml2Target::Database {
         enc.member("db-num", 0);
-        enc.big_int(i64::from(run.db_num));
+        enc.big_int(run.db_num);
         enc.end_member();
         enc.member("db-len", 1);
         enc.big_int(run.db_len);
@@ -122,6 +122,7 @@ fn write_search<E, F>(
     params: &Xml2Run,
     query: &XmlQuery<'_>,
     scratch: &mut Scratch,
+    start: usize,
     hits: F,
 ) -> Result<()>
 where
@@ -164,6 +165,7 @@ where
                 masks: query.masks,
                 scratch: &mut *scratch,
                 hits: 0,
+                start,
             };
             hits(&mut HitSink::new(&mut writer))?;
         }
@@ -191,6 +193,7 @@ fn write_report<E, F>(
     params: &Xml2Run,
     query: &XmlQuery<'_>,
     scratch: &mut Scratch,
+    start: usize,
     hits: F,
 ) -> Result<()>
 where
@@ -206,19 +209,36 @@ where
     string_member(enc, "reference", 2, run.reference.as_bytes());
     enc.member("search-target", 3);
     match params.target {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xml2format.cpp:157-169
+        // ```c++
+        // 	ITERATE(vector<CBlastFormatUtil::SDbInfo>, i, dbsInfo) {
+        // 		if(i != dbsInfo.begin()) {
+        // 			m_DbName += " " ;
+        // 		}
+        // 		m_DbName += i->name;
+        // ```
+        // `i->name` is each name of the `-db` list as the reports open it alone
+        // (`seqdb::alias::report_names`): quotes kept, one space between names.
         Xml2Target::Database => {
             enc.variant("Target", "db", 0);
-            enc.visible_str(run.db_name);
+            // The names' bytes reach the stream as they are; the stream writes or throws on them.
+            let names = crate::seqdb::alias::report_names(run.db_name).join(" ");
+            enc.visible_str(names.as_bytes());
             enc.end_variant();
         }
-        Xml2Target::Subjects(count) => {
-            enc.variant_string_list(
-                "Target",
-                "subjects",
-                1,
-                (1..=count).map(|n| format!("Subject_{n}")),
-            );
-        }
+        Xml2Target::Subjects(count) => match &params.subject_names {
+            Some(names) => {
+                enc.variant_string_list("Target", "subjects", 1, names.iter().cloned());
+            }
+            None => {
+                enc.variant_string_list(
+                    "Target",
+                    "subjects",
+                    1,
+                    (1..=count).map(|n| format!("Subject_{n}")),
+                );
+            }
+        },
     }
     enc.end_member();
     write_parameters(enc, run, params);
@@ -226,14 +246,14 @@ where
     match params.target {
         Xml2Target::Database => {
             enc.variant("Results", "search", 1);
-            write_search(enc, run, params, query, scratch, hits)?;
+            write_search(enc, run, params, query, scratch, start, hits)?;
             enc.end_variant();
         }
         Xml2Target::Subjects(_) => {
             enc.variant("Results", "bl2seq", 2);
             enc.begin_list(false);
             enc.element();
-            write_search(enc, run, params, query, scratch, hits)?;
+            write_search(enc, run, params, query, scratch, start, hits)?;
             enc.end_list();
             enc.end_variant();
         }
@@ -257,9 +277,19 @@ struct Xml2Hits<'a, E> {
     masks: &'a [crate::report::blast_xml::QueryMask],
     scratch: &'a mut Scratch,
     hits: i32,
+    /// Where the report that this call writes starts in the output (`Xml2Document::report`):
+    /// the query's own or, for a `-subject` run, the one held before it (no database, so no
+    /// posts at its `Hit`s).
+    start: usize,
 }
 
 impl<E: Encoder> HitWrite for Xml2Hits<'_, E> {
+    /// The start of the report written now: NCBI makes the whole report's data, loading the
+    /// subject of each `Hit`, before it writes any of it (`Xml2Document::report`).
+    fn position(&self) -> usize {
+        self.start
+    }
+
     fn hit(
         &mut self,
         hit: &XmlHit<'_>,
@@ -408,6 +438,110 @@ impl<E: Encoder> HspWrite for Xml2Hsps<'_, E> {
     }
 }
 
+/// Whether the text of the element `tag` of a report is a VisibleString (`string_member`, the
+/// target's `db` and `subjects`) rather than a number (`int_member`, `real_member`, `big_int`):
+/// NCBI's stream writes a string one character at a time and a number at once, which decides
+/// where its buffer reaches the output (`out_buffer::xml_written_at`).
+pub(super) fn is_string_element(tag: &[u8]) -> bool {
+    matches!(
+        tag,
+        b"program"
+            | b"version"
+            | b"reference"
+            | b"db"
+            | b"subjects"
+            | b"matrix"
+            | b"filter"
+            | b"query-id"
+            | b"query-title"
+            | b"id"
+            | b"accession"
+            | b"title"
+            | b"sciname"
+            | b"query-strand"
+            | b"hit-strand"
+            | b"qseq"
+            | b"hseq"
+            | b"midline"
+            | b"message"
+    )
+}
+
+/// What an XML report of outfmt 16 or 14 hands the framing (`MadeReport`) after its writer's
+/// `result`: the posts of its replaced control characters and, when NCBI's stream threw, the
+/// report cut at the failing byte (`XmlThrow::at`) and the exception's report. Outfmt 16 catches
+/// the exception and posts it after the bytes written (the stream's destructor writes its buffer
+/// out), and the run goes on; outfmt 14 does not catch it (`MadeReport::ends_run`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:749-766
+/// ```c++
+/// void
+/// BlastXML2_FormatReport(const IBlastXML2ReportData* data, CNcbiOstream *out_stream)
+/// {
+/// 	blastxml2::CBlastOutput2 bxmlout;
+/// 	try {
+/// 		s_FillBlastOutput(bxmlout, data);
+/// 		s_WriteXML2ObjectNoHeader(bxmlout, out_stream);
+/// 	}
+/// 	catch(CException &e){
+/// 	    ERR_POST(Error << e.GetMsg() << e.what() );
+/// 	    return;
+/// 	}
+/// ```
+/// The report of 16 is written to the output stream through the object stream's buffer
+/// (`s_WriteXML2ObjectNoHeader`, blastxml2_format.cpp:716-724): a post comes after the bytes that
+/// the buffer had written by then (`out_buffer::xml_written_at`). A 14 report goes to its file,
+/// so its posts only keep their order.
+fn xml_report_made(
+    report: &mut Vec<u8>,
+    kind: Xml2Kind,
+    program: &str,
+    result: Result<()>,
+    posts: Vec<crate::report::serial::xml::XmlPost>,
+    thrown: Option<Box<crate::report::serial::xml::XmlThrow>>,
+) -> Result<MadeReport> {
+    match (result, thrown) {
+        (Err(error), thrown)
+            if thrown.is_none()
+                || !matches!(
+                    error.downcast_ref::<SerialError>(),
+                    Some(SerialError::Utf8(_))
+                ) =>
+        {
+            Err(error)
+        }
+        (_, thrown) => {
+            if let Some(thrown) = &thrown {
+                report.truncate(thrown.at);
+            }
+            let written: Vec<u64> = if kind == Xml2Kind::Single16 && !posts.is_empty() {
+                let at: Vec<usize> = posts.iter().map(|post| post.at).collect();
+                crate::report::serial::out_buffer::xml_written_at(report, &at, is_string_element)
+            } else {
+                vec![0; posts.len()]
+            };
+            let mut written = written.into_iter();
+            let mut made = MadeReport {
+                posts: replaced_posts(posts, program, |_| written.next().unwrap_or(0) as usize),
+                ends_run: None,
+            };
+            match (kind, thrown) {
+                (Xml2Kind::Single16, Some(thrown)) => {
+                    let exception = thrown.exception();
+                    let mut message = exception.get_msg().as_bytes().to_vec();
+                    message.extend_from_slice(exception.what().as_bytes());
+                    made.posts.push(DocumentPost {
+                        at: report.len(),
+                        text: crate::ncbi_exception::error_post_line(None, Some(program), &message),
+                    });
+                }
+                (_, thrown) => made.ends_run = thrown,
+            }
+            Ok(made)
+        }
+    }
+}
+
 /// The writer of the XML2 and JSON documents of outfmt 16, 15, 14 and 13: one complete report per
 /// query, framed by `Xml2Document`.
 pub struct Xml2Writer<F: SideFiles = NoSideFiles> {
@@ -423,26 +557,27 @@ impl Xml2Writer<NoSideFiles> {
     /// way; a run uses `for_run` or `with_document`.
     #[cfg(test)]
     pub fn new(kind: Xml2Kind, params: Xml2Run) -> Self {
-        let delayed = matches!(params.target, Xml2Target::Subjects(_));
+        let delayed = params.target.holds_back();
         Self::with_document(Xml2Document::new(kind, delayed), params)
     }
 }
 
 impl Xml2Writer<RunSideFiles> {
     /// A writer of the document `kind` for the run with `-out` `out`: outfmt 13 and 14 write
-    /// their side files next to it and the master file to the output stream (`Xml2Document::for_run`).
-    pub fn for_run(kind: Xml2Kind, params: Xml2Run, out: Option<&std::path::Path>) -> Self {
-        let delayed = matches!(params.target, Xml2Target::Subjects(_));
-        Self::with_document(Xml2Document::for_run(kind, delayed, out), params)
+    /// their side files next to it, or to the caller's receiver `sink`, and the master file to
+    /// the output stream (`Xml2Document::for_run`).
+    pub fn for_run(
+        kind: Xml2Kind,
+        params: Xml2Run,
+        out: Option<&std::path::Path>,
+        sink: Option<&super::SideFileSink>,
+    ) -> Self {
+        let delayed = params.target.holds_back();
+        Self::with_document(Xml2Document::for_run(kind, delayed, out, sink), params)
     }
 }
 
 impl<F: SideFiles> Xml2Writer<F> {
-    /// Writes the document's start to `out` now (`Xml2Document::start`).
-    pub fn start(&mut self, out: &mut Vec<u8>) {
-        self.document.start(out);
-    }
-
     pub fn with_document(document: Xml2Document<F>, params: Xml2Run) -> Self {
         Self {
             document,
@@ -470,34 +605,62 @@ impl<F: SideFiles> StructuredXml for Xml2Writer<F> {
     where
         H: FnOnce(&mut HitSink<'_>) -> Result<()>,
     {
-        self.report.clear();
-        let params = self.params;
-        let result = match self.document.kind() {
-            Xml2Kind::Single16 => {
-                let mut enc = XmlEncoder::xml2_report(&mut self.report);
-                write_report(&mut enc, run, &params, query, &mut self.scratch, hits)
-            }
-            Xml2Kind::Files14 => {
-                let mut enc = XmlEncoder::xml2_document(&mut self.report);
-                write_report(&mut enc, run, &params, query, &mut self.scratch, hits)
-            }
-            Xml2Kind::Single15 => {
-                let mut enc = JsonEncoder::array_element(&mut self.report);
-                write_report(&mut enc, run, &params, query, &mut self.scratch, hits)
-            }
-            Xml2Kind::Files13 => {
-                let mut enc = JsonEncoder::new(&mut self.report);
-                write_report(&mut enc, run, &params, query, &mut self.scratch, hits)
-            }
-        };
-        if let Err(error) = result {
-            self.report.clear();
-            return Err(error);
+        let (params, scratch) = (&self.params, &mut self.scratch);
+        let kind = self.document.kind();
+        // The report is made after the framing's separator, where the `Hit`s load their subjects
+        // (`HitSink::position`: the start of the report written now).
+        self.document
+            .report(&mut self.report, out, |start, report| match kind {
+                Xml2Kind::Single16 | Xml2Kind::Files14 => {
+                    let mut enc = if kind == Xml2Kind::Single16 {
+                        XmlEncoder::xml2_report(report)
+                    } else {
+                        XmlEncoder::xml2_document(report)
+                    };
+                    let result = write_report(&mut enc, run, params, query, scratch, start, hits);
+                    let posts = enc.take_posts();
+                    let thrown = enc.take_thrown();
+                    xml_report_made(report, kind, run.program, result, posts, thrown)
+                }
+                Xml2Kind::Single15 => {
+                    let mut enc = JsonEncoder::array_element(report);
+                    write_report(&mut enc, run, params, query, scratch, start, hits)
+                        .map(|()| MadeReport::default())
+                }
+                Xml2Kind::Files13 => {
+                    let mut enc = JsonEncoder::new(report);
+                    write_report(&mut enc, run, params, query, scratch, start, hits)
+                        .map(|()| MadeReport::default())
+                }
+            })
+    }
+
+    fn take_posts(&mut self) -> crate::report::blast_xml::DocumentPosts {
+        self.document.take_posts()
+    }
+
+    fn start(&mut self, reported: Option<&XmlRun<'_>>, out: &mut Vec<u8>) -> Result<()> {
+        if let Some(run) = reported {
+            run.check_sums(match self.document.kind() {
+                Xml2Kind::Files13 => 13,
+                Xml2Kind::Files14 => 14,
+                Xml2Kind::Single15 => 15,
+                Xml2Kind::Single16 => 16,
+            })?;
         }
-        self.document.report(&mut self.report, out)
+        self.document.start(out);
+        Ok(())
     }
 
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<()> {
         self.document.epilog(out)
+    }
+
+    fn holds_back(&self) -> bool {
+        self.document.holds_back()
+    }
+
+    fn unwritten(&mut self, out: &mut Vec<u8>) -> Result<()> {
+        self.document.unwritten(out)
     }
 }

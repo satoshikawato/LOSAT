@@ -2,7 +2,7 @@
 //! list size and the warnings and the error that NCBI's `ExtractAlgorithmOptions` and
 //! `BlastHitSavingOptionsValidate` raise (blast_args.cpp:2894-2977, blast_options.c:1511-1517).
 //! The output bytes against NCBI are the fixtures of `outfmt0_manifest.tsv` and
-//! `db_search_manifest.tsv`.
+//! `db_search_manifest/`.
 
 use std::path::PathBuf;
 use std::process::{Command, Output};

@@ -12,7 +12,8 @@
 //! - `[TIMING] blastx_run: startup .. prolog .. read_stores .. loop .. epilog .. total ..
 //!   (search .. render .. titles .. input ..)`: wall times on the thread that runs `run`.
 //!   `startup` is everything before the prolog (options, the `-subject` file, the database's
-//!   index); `read_stores` reads the database's sequences; `loop` is the query loop (the pool's
+//!   index); `read_stores` opens the database's stream (`BlastxDatabase::x_open_stream`: the
+//!   index's longest length, no sequence read); `loop` is the query loop (the pool's
 //!   start and end included). Inside `loop`: `search` is the time the loop waits for searches,
 //!   `render` the time it writes reports (of which `titles` reads the reported sequences' titles
 //!   with `-db`), and `input = loop - search - render` the reader's own time (and the queueing of
@@ -59,11 +60,12 @@
 //!   `batch_end` is the end of the batch (`runtime::Runtime::batch_end`); `sum` is the whole
 //!   batch, so `sum` minus the stages is what lies between them.
 //! - `[TIMING] blastx_batch_end_<mode>: init .. read .. kappa_spec .. kappa_serial .. loop ..
-//!   finish .. (matches=N reused=N serial=N)`: inside `batch_end`. `init` is up to the
-//!   composition state, `read` takes the matches from the stream, `loop` is the in-order loop
-//!   over the matches, of which `kappa_spec` is the parallel redo made ahead (2+ threads)
-//!   and `kappa_serial` the redo of the matches done in the loop itself; `finish` is from the
-//!   heaps to the batch's results (hit lists, culling, sorting, the copy of the batch).
+//!   finish .. (matches=N reused=N serial=N)`: `init` and `finish` in `batch_end`, the others
+//!   in its composition-based redo (`runtime::kappa_batch`, `Runtime::kappa_redo_batch`).
+//!   `init` is up to the composition state, `read` takes the matches from the stream, `loop` is
+//!   the in-order loop over the matches, of which `kappa_spec` is the parallel redo made ahead
+//!   (2+ threads) and `kappa_serial` the redo of the matches done in the loop itself; `finish` is
+//!   from the heaps to the batch's results (hit lists, culling, sorting, the copy of the batch).
 //!   `matches` counts the matches, `reused` those whose redo was made ahead and `serial` those
 //!   redone in the loop.
 //! - `[TIMING] blastx_diag: mode=.. subjects=N cells=N batched_hits=N candidates=N`: with
@@ -150,13 +152,18 @@ pub(crate) enum Batch {
     ScanInline,
     Replay,
     ChunkEnd,
+    #[expect(
+        clippy::enum_variant_names,
+        reason = "named for `Runtime::batch_end`, the stage it times; `search.rs` refers to it as `XBatch::BatchEnd`"
+    )]
     BatchEnd,
     Sum,
 }
 const BATCH_LEN: usize = Batch::Sum as usize + 1;
 
-// No NCBI counterpart: names of the intervals of `batch_end`.
-/// The intervals and counts of `runtime::Runtime::batch_end`.
+// No NCBI counterpart: names of the intervals of `batch_end` and of its composition-based redo.
+/// The intervals and counts of `runtime::Runtime::batch_end` and of its composition-based redo
+/// (`runtime::kappa_batch`).
 #[derive(Clone, Copy)]
 pub(crate) enum End {
     Init,
@@ -195,6 +202,7 @@ pub(crate) fn run(stage: Run, start: Option<Instant>) -> u64 {
 
 // No NCBI counterpart: adds `n` to a run count or interval.
 #[inline]
+#[cfg(feature = "parallel")]
 pub(crate) fn run_add(stage: Run, n: u64) {
     if on() {
         RUN[stage as usize].fetch_add(n, Ordering::Relaxed);
@@ -228,6 +236,7 @@ impl SubjectWave {
 
     // No NCBI counterpart: runs one task of the wave, timing it when the wave has a clock.
     #[inline]
+    #[cfg(feature = "parallel")]
     pub(crate) fn task<T>(&self, f: impl FnOnce() -> T) -> T {
         let Some(wave_start) = self.start else {
             return f();
@@ -268,6 +277,7 @@ impl SubjectWave {
 }
 
 // No NCBI counterpart: adds one subject flow (`x_subject_flow::run`) to the run's counters.
+#[cfg(feature = "parallel")]
 pub(crate) fn subject_flow(start: Option<Instant>, tasks: u64, (ahead, taken): (u64, u64)) {
     if start.is_none() {
         return;

@@ -11,6 +11,18 @@ use crate::report::serial::encoder::Encoder;
 use crate::report::serial::json::JsonEncoder;
 use crate::report::serial::xml::XmlEncoder;
 
+/// Hands `report`, already made, to the document's framing (`Xml2Document::report`).
+fn put<F: SideFiles>(
+    doc: &mut Xml2Document<F>,
+    report: &[u8],
+    out: &mut Vec<u8>,
+) -> anyhow::Result<()> {
+    doc.report(&mut Vec::new(), out, |_, made| {
+        made.extend_from_slice(report);
+        Ok(crate::report::blast_xml2::framing::MadeReport::default())
+    })
+}
+
 const KA: &str = "Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options";
 
 /// `blastp_sub_invalidonly_fmt16.out`: one query of an unsearched batch, two `-subject` records.
@@ -114,7 +126,7 @@ const INVALID_ONLY_15: &str = r####"{
 }
 "####;
 
-fn run<'a>(matrix: Option<&'a FormattingMatrix>, db_name: &'static [u8]) -> XmlRun<'a> {
+fn run<'a>(matrix: Option<&'a FormattingMatrix>, db_name: &'static str) -> XmlRun<'a> {
     XmlRun {
         program: "blastp",
         version: "BLASTP 2.17.0+",
@@ -128,6 +140,7 @@ fn run<'a>(matrix: Option<&'a FormattingMatrix>, db_name: &'static [u8]) -> XmlR
         filter: b"F",
         db_num: 4,
         db_len: 5000,
+        db_len_overflow: false,
         positives: matrix,
         mask_char: b'X',
     }
@@ -135,6 +148,7 @@ fn run<'a>(matrix: Option<&'a FormattingMatrix>, db_name: &'static [u8]) -> XmlR
 
 fn params(target: Xml2Target) -> Xml2Run {
     Xml2Run {
+        subject_names: None,
         target,
         gapped: true,
         cbs: 2,
@@ -161,7 +175,7 @@ fn invalid_message() -> Vec<u8> {
 
 fn document(kind: Xml2Kind, target: Xml2Target, finish: bool) -> String {
     let message = invalid_message();
-    let run = run(None, b"");
+    let run = run(None, "");
     let mut writer = Xml2Writer::new(kind, params(target));
     let mut out = Vec::new();
     writer
@@ -204,7 +218,7 @@ fn an_unsearched_query_lists_no_masks() {
         (Xml2Kind::Single16, INVALID_ONLY_16),
         (Xml2Kind::Single15, INVALID_ONLY_15),
     ] {
-        let run = run(None, b"");
+        let run = run(None, "");
         let mut writer = Xml2Writer::new(kind, params(Xml2Target::Subjects(2)));
         let mut out = Vec::new();
         let query = XmlQuery {
@@ -244,15 +258,22 @@ fn a_subject_report_is_held_until_the_epilog() {
 
 #[test]
 fn the_framing_joins_reports_and_ends_the_document() {
-    let report = |text: &str| text.as_bytes().to_vec();
     // 16: the declaration and root start tag, the reports (each `\n<BlastOutput2>` ...
     // `</BlastOutput2>\n`, an empty line between two), the end tag.
     let mut doc = Xml2Document::new(Xml2Kind::Single16, false);
     let mut out = Vec::new();
-    doc.report(&mut report("\n<BlastOutput2>a</BlastOutput2>\n"), &mut out)
-        .unwrap();
-    doc.report(&mut report("\n<BlastOutput2>b</BlastOutput2>\n"), &mut out)
-        .unwrap();
+    put(
+        &mut doc,
+        "\n<BlastOutput2>a</BlastOutput2>\n".as_bytes(),
+        &mut out,
+    )
+    .unwrap();
+    put(
+        &mut doc,
+        "\n<BlastOutput2>b</BlastOutput2>\n".as_bytes(),
+        &mut out,
+    )
+    .unwrap();
     doc.epilog(&mut out).unwrap();
     assert_eq!(
         String::from_utf8(out).unwrap(),
@@ -264,8 +285,8 @@ fn the_framing_joins_reports_and_ends_the_document() {
     // 15: `,\n` before the second report and later ones
     let mut doc = Xml2Document::new(Xml2Kind::Single15, false);
     let mut out = Vec::new();
-    doc.report(&mut report("{\n  a\n}\n"), &mut out).unwrap();
-    doc.report(&mut report("{\n  b\n}\n"), &mut out).unwrap();
+    put(&mut doc, b"{\n  a\n}\n", &mut out).unwrap();
+    put(&mut doc, b"{\n  b\n}\n", &mut out).unwrap();
     doc.epilog(&mut out).unwrap();
     assert_eq!(
         String::from_utf8(out).unwrap(),
@@ -307,16 +328,8 @@ fn a_document_started_early_writes_its_start_once() {
                     doc.start(&mut out);
                 }
                 let start = out.len();
-                doc.report(
-                    &mut b"\n<BlastOutput2>a</BlastOutput2>\n".to_vec(),
-                    &mut out,
-                )
-                .unwrap();
-                doc.report(
-                    &mut b"\n<BlastOutput2>b</BlastOutput2>\n".to_vec(),
-                    &mut out,
-                )
-                .unwrap();
+                put(&mut doc, b"\n<BlastOutput2>a</BlastOutput2>\n", &mut out).unwrap();
+                put(&mut doc, b"\n<BlastOutput2>b</BlastOutput2>\n", &mut out).unwrap();
                 doc.epilog(&mut out).unwrap();
                 (start, out)
             };
@@ -334,23 +347,177 @@ fn a_document_started_early_writes_its_start_once() {
 }
 
 #[test]
+fn the_start_refuses_the_report_sums_before_its_first_byte() {
+    // Line RG D1a-3: NCBI writes the XML2 and JSON documents' start before the search and sums the
+    // database counts when it formats the first report, after its own errors of the search (probe
+    // `fix3_d1a3/p2`): LOSAT refuses the counts it would print where NCBI's sums overflow in the
+    // document's start, before any byte, and only for a call that writes reports.
+    let mut overflow = run(None, "d");
+    overflow.db_len_overflow = true;
+    let mut int64_min = run(None, "d");
+    int64_min.db_len = i64::MIN;
+    for kind in [
+        Xml2Kind::Single16,
+        Xml2Kind::Single15,
+        Xml2Kind::Files14,
+        Xml2Kind::Files13,
+    ] {
+        let refused = |run: &XmlRun<'_>| {
+            let mut writer = Xml2Writer::new(kind, params(Xml2Target::Database));
+            let mut out = Vec::new();
+            let refused = writer.start(Some(run), &mut out).is_err_and(|error| {
+                error.is::<crate::algorithm::common::database::ReportSumRefusal>()
+            });
+            // A refusal writes nothing; otherwise the start is written.
+            if refused {
+                assert!(out.is_empty(), "{kind:?}");
+            } else {
+                assert_eq!(out, framing::prolog_bytes(kind), "{kind:?}");
+            }
+            refused
+        };
+        assert!(refused(&overflow), "{kind:?}");
+        // `-0` in the serial XML only (outfmt 14 and 16); JSON writes INT64_MIN.
+        assert_eq!(
+            refused(&int64_min),
+            matches!(kind, Xml2Kind::Single16 | Xml2Kind::Files14),
+            "{kind:?}"
+        );
+        // A call that writes no report (a run without a query) prints no count.
+        let mut writer = Xml2Writer::new(kind, params(Xml2Target::Database));
+        let mut out = Vec::new();
+        writer.start(None, &mut out).unwrap();
+        assert_eq!(out, framing::prolog_bytes(kind), "{kind:?}");
+        let mut writer = Xml2Writer::new(kind, params(Xml2Target::Database));
+        let mut out = Vec::new();
+        writer.start(Some(&run(None, "d")), &mut out).unwrap();
+        assert_eq!(out, framing::prolog_bytes(kind), "{kind:?}");
+    }
+    let mut blast_xml = crate::report::blast_xml::BlastXmlWriter::new(0);
+    let mut out = Vec::new();
+    assert!(blast_xml.start(Some(&overflow), &mut out).is_err());
+    assert!(blast_xml.start(Some(&int64_min), &mut out).is_err());
+    let mut count = run(None, "d");
+    count.db_num = i64::from(i32::MAX) + 1;
+    assert!(blast_xml.start(Some(&count), &mut out).is_err());
+    assert!(blast_xml.start(None, &mut out).is_ok());
+    assert!(out.is_empty());
+}
+
+#[test]
+fn a_report_is_made_after_the_bytes_written_before_it() {
+    // NCBI writes outfmt 15's separator before it makes a report's data, which loads the
+    // report's subjects (`Xml2Document::report`): `make` gets the place after the separator, and
+    // the report written now follows it. For a `-subject` run the report written now is the one
+    // held before.
+    let made_after = |kind: Xml2Kind, delayed: bool| {
+        let mut doc = Xml2Document::new(kind, delayed);
+        let mut out = Vec::new();
+        doc.start(&mut out);
+        let mut befores = Vec::new();
+        for n in 1..=3 {
+            let mut start = 0;
+            doc.report(&mut Vec::new(), &mut out, |at, made| {
+                start = at;
+                made.extend_from_slice(format!("{{{n}}}\n").as_bytes());
+                Ok(crate::report::blast_xml2::framing::MadeReport::default())
+            })
+            .unwrap();
+            befores.push(String::from_utf8(out[..start].to_vec()).unwrap());
+        }
+        befores
+    };
+    let head = String::from_utf8(framing::HEAD15.to_vec()).unwrap();
+    assert_eq!(
+        made_after(Xml2Kind::Single15, false),
+        [
+            head.clone(),
+            format!("{head}{{1}}\n,\n"),
+            format!("{head}{{1}}\n,\n{{2}}\n,\n")
+        ]
+    );
+    assert_eq!(
+        made_after(Xml2Kind::Single15, true),
+        [head.clone(), head.clone(), format!("{head}{{1}}\n,\n")]
+    );
+    let head = framing::header16();
+    assert_eq!(
+        made_after(Xml2Kind::Single16, false),
+        [
+            head.clone(),
+            format!("{head}{{1}}\n"),
+            format!("{head}{{1}}\n{{2}}\n")
+        ]
+    );
+    // A report that fails leaves the count unchanged: once its bytes are cut, the next report is
+    // framed as it would have been.
+    let mut doc = Xml2Document::new(Xml2Kind::Single15, false);
+    let mut out = Vec::new();
+    put(&mut doc, b"{1}\n", &mut out).unwrap();
+    let cut = out.len();
+    let failed = doc.report(&mut Vec::new(), &mut out, |_, made| {
+        made.extend_from_slice(b"{partial");
+        anyhow::bail!("a failed report")
+    });
+    assert!(failed.is_err());
+    out.truncate(cut);
+    put(&mut doc, b"{2}\n", &mut out).unwrap();
+    assert_eq!(out, b"{\n\"BlastOutput2\": [\n{1}\n,\n{2}\n");
+}
+
+#[test]
 fn a_delayed_document_writes_one_report_late_and_drops_the_last_on_a_failure() {
     let mut doc = Xml2Document::new(Xml2Kind::Single15, true);
     let mut out = Vec::new();
-    doc.report(&mut b"{1}\n".to_vec(), &mut out).unwrap();
+    put(&mut doc, b"{1}\n", &mut out).unwrap();
     assert_eq!(out, framing::HEAD15);
-    doc.report(&mut b"{2}\n".to_vec(), &mut out).unwrap();
+    put(&mut doc, b"{2}\n", &mut out).unwrap();
     assert_eq!(out, b"{\n\"BlastOutput2\": [\n{1}\n");
     // a failed batch: no epilog, `{2}` is never written
     let mut doc = Xml2Document::new(Xml2Kind::Single15, true);
     let mut out = Vec::new();
-    doc.report(&mut b"{1}\n".to_vec(), &mut out).unwrap();
-    doc.report(&mut b"{2}\n".to_vec(), &mut out).unwrap();
-    doc.report(&mut b"{3}\n".to_vec(), &mut out).unwrap();
+    put(&mut doc, b"{1}\n", &mut out).unwrap();
+    put(&mut doc, b"{2}\n", &mut out).unwrap();
+    put(&mut doc, b"{3}\n", &mut out).unwrap();
     assert_eq!(out, b"{\n\"BlastOutput2\": [\n{1}\n,\n{2}\n");
     // the epilog writes the held report
     doc.epilog(&mut out).unwrap();
     assert_eq!(out, b"{\n\"BlastOutput2\": [\n{1}\n,\n{2}\n,\n{3}\n]\n}\n");
+}
+
+#[test]
+fn a_report_that_is_never_written_is_not_made_and_writes_the_one_held_before() {
+    // The last query of a `-subject` run that stops (`StructuredXml::unwritten`): its report is
+    // not made, the report held before it is written as the arriving report would write it, and
+    // the document's start comes first when nothing was written yet.
+    for kind in [Xml2Kind::Single15, Xml2Kind::Single16] {
+        let (mut made, mut skipped) =
+            (Xml2Document::new(kind, true), Xml2Document::new(kind, true));
+        let (mut with_report, mut without) = (Vec::new(), Vec::new());
+        for report in ["{1}\n", "{2}\n"] {
+            put(&mut made, report.as_bytes(), &mut with_report).unwrap();
+            put(&mut skipped, report.as_bytes(), &mut without).unwrap();
+        }
+        put(&mut made, b"{lost}\n", &mut with_report).unwrap();
+        skipped.unwritten(&mut without).unwrap();
+        assert_eq!(without, with_report, "{kind:?}");
+        // the run's only query: the start of the document alone
+        let mut only = Vec::new();
+        Xml2Document::new(kind, true).unwritten(&mut only).unwrap();
+        assert_eq!(only, framing::prolog_bytes(kind), "{kind:?}");
+    }
+    // The writer of a `-subject` search holds its reports back; BLAST XML and `-db` do not.
+    let subjects = Xml2Writer::new(Xml2Kind::Single16, params(Xml2Target::Subjects(1)));
+    let database = Xml2Writer::new(Xml2Kind::Single16, params(Xml2Target::Database));
+    assert!(subjects.holds_back() && !database.holds_back());
+    assert!(!crate::report::blast_xml::BlastXmlWriter::new(0).holds_back());
+    // The written reports of a call: all but the last only where the run stops and the document
+    // holds it back.
+    use crate::report::blast_xml::written_queries;
+    assert_eq!(written_queries(3, true, true), 2);
+    assert_eq!(written_queries(3, false, true), 3);
+    assert_eq!(written_queries(3, true, false), 3);
+    assert_eq!(written_queries(0, true, true), 0);
 }
 
 #[test]
@@ -365,7 +532,7 @@ fn a_run_written_by_several_documents_in_turn_has_the_bytes_of_one() {
             let mut whole = Xml2Document::new(kind, delayed);
             let mut expected = Vec::new();
             for report in &reports {
-                whole.report(&mut report.clone(), &mut expected).unwrap();
+                put(&mut whole, report, &mut expected).unwrap();
             }
             whole.epilog(&mut expected).unwrap();
             for blocks in [vec![1, 4], vec![2, 2, 1], vec![1, 1, 1, 1, 1]] {
@@ -376,7 +543,7 @@ fn a_run_written_by_several_documents_in_turn_has_the_bytes_of_one() {
                     let mut doc = Xml2Document::new(kind, delayed);
                     doc.resume(carry);
                     for report in &reports[next..next + size] {
-                        doc.report(&mut report.clone(), &mut out).unwrap();
+                        put(&mut doc, report, &mut out).unwrap();
                     }
                     next += size;
                     if index + 1 == blocks.len() {
@@ -414,9 +581,9 @@ fn one_hsp_named(
     let run = run(
         Some(&matrix),
         if target == Xml2Target::Database {
-            b"db/sprot"
+            "db/sprot"
         } else {
-            b""
+            ""
         },
     );
     let mut writer = Xml2Writer::new(kind, params(target));
@@ -453,6 +620,7 @@ fn one_hsp_named(
                     taxid,
                     taxonomy,
                     descriptions: &[],
+                    defline_thrown: false,
                 },
                 |hsps| {
                     hsps.hsp(&XmlHsp {
@@ -539,7 +707,7 @@ fn query_masking_lists_the_plus_regions_and_a_nucleotide_row_is_masked_in_lower_
 /// regions of the query (frame 0) are applied to the nucleotide row in lower case, and the
 /// scores come from `reward_penalty`.
 fn blastn_document(kind: Xml2Kind, minus: bool) -> String {
-    let mut run = run(None, b"");
+    let mut run = run(None, "");
     run.program = "blastn";
     run.version = "BLASTN 2.17.0+";
     run.matrix = None;
@@ -575,6 +743,7 @@ fn blastn_document(kind: Xml2Kind, minus: bool) -> String {
                     taxid: 0,
                     taxonomy: crate::report::blast_xml::records::UNNAMED,
                     descriptions: &[],
+                    defline_thrown: false,
                 },
                 |hsps| {
                     hsps.hsp(&XmlHsp {
@@ -795,8 +964,7 @@ fn the_master_files_list_the_side_files_and_the_json_master_has_no_final_end_of_
         let mut document = Xml2Document::with_files(kind, false, files);
         let mut master = Vec::new();
         for n in 1..=reports {
-            document
-                .report(&mut format!("report {n}\n").into_bytes(), &mut master)
+            put(&mut document, format!("report {n}\n").as_bytes(), &mut master)
                 .unwrap();
         }
         // the reports go to the files, nothing to the master until the epilog
@@ -821,8 +989,8 @@ fn the_files_of_a_subject_run_are_written_one_report_late_and_a_lost_report_has_
         let stored = files.files.clone();
         let mut document = Xml2Document::with_files(Xml2Kind::Files14, delayed, files);
         let mut master = Vec::new();
-        document.report(&mut b"q1\n".to_vec(), &mut master).unwrap();
-        document.report(&mut b"q2\n".to_vec(), &mut master).unwrap();
+        put(&mut document, b"q1\n", &mut master).unwrap();
+        put(&mut document, b"q2\n", &mut master).unwrap();
         assert!(master.is_empty());
         assert_eq!(stored.borrow().len(), files_written, "delayed {delayed}");
     }
@@ -839,10 +1007,8 @@ fn a_side_file_that_cannot_be_opened_is_ncbis_argument_error_and_earlier_files_s
     let stored = files.files.clone();
     let mut document = Xml2Document::with_files(Xml2Kind::Files13, false, files);
     let mut master = Vec::new();
-    document.report(&mut b"q1\n".to_vec(), &mut master).unwrap();
-    let error = document
-        .report(&mut b"q2\n".to_vec(), &mut master)
-        .unwrap_err();
+    put(&mut document, b"q1\n", &mut master).unwrap();
+    let error = put(&mut document, b"q2\n", &mut master).unwrap_err();
     let native = error.downcast::<crate::cli::NativeError>().unwrap();
     assert_eq!(native.exit, 1);
     assert_eq!(
@@ -855,19 +1021,120 @@ fn a_side_file_that_cannot_be_opened_is_ncbis_argument_error_and_earlier_files_s
 
 #[test]
 fn no_files_means_no_side_file_for_a_caller_that_has_no_output_file() {
-    let mut document = Xml2Document::for_run(Xml2Kind::Files14, false, None);
-    let error = document
-        .report(&mut b"q1\n".to_vec(), &mut Vec::new())
-        .unwrap_err();
+    let mut document = Xml2Document::for_run(Xml2Kind::Files14, false, None, None);
+    let error = put(&mut document, b"q1\n", &mut Vec::new()).unwrap_err();
     assert!(error.downcast_ref::<crate::cli::NativeError>().is_some());
     // outfmt 15 and 16 have no side files, with or without a name
     for kind in [Xml2Kind::Single16, Xml2Kind::Single15] {
         let mut out = Vec::new();
-        let mut document = Xml2Document::for_run(kind, false, Some(std::path::Path::new("o.out")));
-        document.report(&mut b"x\n".to_vec(), &mut out).unwrap();
+        let mut document =
+            Xml2Document::for_run(kind, false, Some(std::path::Path::new("o.out")), None);
+        put(&mut document, b"x\n", &mut out).unwrap();
         document.epilog(&mut out).unwrap();
         assert!(String::from_utf8(out).unwrap().contains("x\n"));
     }
+}
+
+/// A receiver of side files (`report::run_files::FileReceiver`) that keeps them in memory, failing at a name.
+#[derive(Default)]
+struct Received {
+    files: std::sync::Mutex<Vec<(Vec<u8>, Vec<u8>)>>,
+    fail_at: Option<&'static [u8]>,
+}
+
+impl crate::report::run_files::FileReceiver for Received {
+    fn receive(&self, name: &[u8], bytes: &[u8]) -> std::io::Result<()> {
+        if self.fail_at == Some(name) {
+            return Err(std::io::Error::other("full"));
+        }
+        self.files
+            .lock()
+            .unwrap()
+            .push((name.to_vec(), bytes.to_vec()));
+        Ok(())
+    }
+}
+
+/// The caller's receiver (`SideFileSink`) gets each side file whole, named as `FsSideFiles` names
+/// it for the sink's `-out`, and the master lists those names; it takes the place of the run's
+/// `-out`, and outfmt 15 and 16 ignore it.
+#[test]
+fn a_receiver_gets_the_side_files_that_the_master_lists() {
+    let received = std::sync::Arc::new(Received::default());
+    let sink = super::SideFileSink::new("results", received.clone());
+    for (kind, ext, master) in [
+        (
+            Xml2Kind::Files13,
+            "json",
+            "{\n\t\"BlastJSON\": [\n\t\t{\"File\": \"results_1.json\" },\n\t\t{\"File\": \"results_2.json\" }\n\t]\n}",
+        ),
+        (
+            Xml2Kind::Files14,
+            "xml",
+            &*format!("{MASTER14_HEAD_TEXT}\t<xi:include href=\"results_1.xml\"/>\n\t<xi:include href=\"results_2.xml\"/>\n</BlastXML2>\n"),
+        ),
+    ] {
+        received.files.lock().unwrap().clear();
+        // The sink wins over a `-out` of the run: no file is written next to it.
+        let mut document =
+            Xml2Document::for_run(kind, false, Some(std::path::Path::new("/nonexistent/o.out")), Some(&sink));
+        let mut out = Vec::new();
+        put(&mut document, b"q1\n", &mut out).unwrap();
+        put(&mut document, b"q2\n", &mut out).unwrap();
+        assert!(out.is_empty());
+        document.epilog(&mut out).unwrap();
+        assert_eq!(String::from_utf8(out).unwrap(), master);
+        assert_eq!(
+            *received.files.lock().unwrap(),
+            [
+                (format!("results_1.{ext}").into_bytes(), b"q1\n".to_vec()),
+                (format!("results_2.{ext}").into_bytes(), b"q2\n".to_vec()),
+            ]
+        );
+    }
+    // A `-out` with a directory and an extension names the side files as `FsSideFiles` does.
+    received.files.lock().unwrap().clear();
+    let named = super::SideFileSink::new("d/Y.Json", received.clone());
+    let mut document = Xml2Document::for_run(Xml2Kind::Files13, false, None, Some(&named));
+    let mut out = Vec::new();
+    put(&mut document, b"q\n", &mut out).unwrap();
+    document.epilog(&mut out).unwrap();
+    assert_eq!(received.files.lock().unwrap()[0].0, b"d/Y_1.json");
+    assert!(String::from_utf8(out)
+        .unwrap()
+        .contains("\"Y.Json_1.json\""));
+    // Outfmt 15 and 16 have no side files.
+    received.files.lock().unwrap().clear();
+    for kind in [Xml2Kind::Single16, Xml2Kind::Single15] {
+        let mut out = Vec::new();
+        let mut document = Xml2Document::for_run(kind, false, None, Some(&sink));
+        put(&mut document, b"x\n", &mut out).unwrap();
+        document.epilog(&mut out).unwrap();
+        assert!(String::from_utf8(out).unwrap().contains("x\n"));
+    }
+    assert!(received.files.lock().unwrap().is_empty());
+}
+
+/// A side file that the receiver refuses is the side-file write error of every program
+/// (`side_file_write_error`): the files before it were received, the master stays empty.
+#[test]
+fn a_receiver_that_fails_is_the_side_file_write_error() {
+    let received = std::sync::Arc::new(Received {
+        fail_at: Some(b"r_2.json"),
+        ..Received::default()
+    });
+    let sink = super::SideFileSink::new("r", received.clone());
+    let mut document = Xml2Document::for_run(Xml2Kind::Files13, false, None, Some(&sink));
+    let mut master = Vec::new();
+    put(&mut document, b"q1\n", &mut master).unwrap();
+    let error = put(&mut document, b"q2\n", &mut master).unwrap_err();
+    let native = error.downcast_ref::<crate::cli::NativeError>().unwrap();
+    assert_eq!(
+        (native.exit, native.message.as_str()),
+        (6, "BLAST failed to write output\n")
+    );
+    assert_eq!(received.files.lock().unwrap().len(), 1);
+    assert!(master.is_empty());
 }
 
 /// The eight naming probes of `S/probe5/out/naming` (DESIGN_OF5 1.7): the `-out` argument, the
@@ -938,14 +1205,10 @@ fn side_files_on_the_file_system_are_truncated_and_numbered() {
     std::fs::write(dir.join("o.out_1.xml"), "stale stale stale stale\n").unwrap();
     std::fs::write(dir.join("o.out_3.xml"), "stale\n").unwrap();
     let out = dir.join("o.out");
-    let mut document = Xml2Document::for_run(Xml2Kind::Files14, false, Some(&out));
+    let mut document = Xml2Document::for_run(Xml2Kind::Files14, false, Some(&out), None);
     let mut master = Vec::new();
-    document
-        .report(&mut b"one\n".to_vec(), &mut master)
-        .unwrap();
-    document
-        .report(&mut b"two\n".to_vec(), &mut master)
-        .unwrap();
+    put(&mut document, b"one\n", &mut master).unwrap();
+    put(&mut document, b"two\n", &mut master).unwrap();
     document.epilog(&mut master).unwrap();
     assert_eq!(std::fs::read(dir.join("o.out_1.xml")).unwrap(), b"one\n");
     assert_eq!(std::fs::read(dir.join("o.out_2.xml")).unwrap(), b"two\n");
@@ -957,14 +1220,210 @@ fn side_files_on_the_file_system_are_truncated_and_numbered() {
     // a directory of the name of a side file: NCBI's error
     let blocked = dir.join("p.out");
     std::fs::create_dir_all(dir.join("p.out_2.xml")).unwrap();
-    let mut document = Xml2Document::for_run(Xml2Kind::Files14, false, Some(&blocked));
-    document
-        .report(&mut b"one\n".to_vec(), &mut Vec::new())
-        .unwrap();
-    let error = document
-        .report(&mut b"two\n".to_vec(), &mut Vec::new())
-        .unwrap_err();
+    let mut document = Xml2Document::for_run(Xml2Kind::Files14, false, Some(&blocked), None);
+    put(&mut document, b"one\n", &mut Vec::new()).unwrap();
+    let error = put(&mut document, b"two\n", &mut Vec::new()).unwrap_err();
     assert!(error.downcast_ref::<crate::cli::NativeError>().is_some());
     assert_eq!(std::fs::read(dir.join("p.out_1.xml")).unwrap(), b"one\n");
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// A 16 document of one `-db` query with `hits` hits titled `hits_title` (the last one `last_title`)
+/// and the message `message`, with the posts of its writer (`StructuredXml::take_posts`).
+fn many_hits_16(
+    hits: usize,
+    hits_title: &[u8],
+    last_title: &[u8],
+    message: Option<&[u8]>,
+) -> (Vec<u8>, Vec<crate::report::blast_xml::writer::DocumentPost>) {
+    let matrix = FormattingMatrix::new("BLOSUM62").unwrap();
+    let run = run(Some(&matrix), "db/sprot");
+    let mut writer = Xml2Writer::new(Xml2Kind::Single16, params(Xml2Target::Database));
+    let query = XmlQuery {
+        id: b"Query_1",
+        title: b"q1",
+        len: 12,
+        stats: XmlStats::NONE,
+        message,
+        searched: true,
+        masks: &[],
+    };
+    let mut out = Vec::new();
+    writer.start(None, &mut out).unwrap();
+    let mut posts = writer.take_posts().posts;
+    let base = out.len();
+    writer
+        .query(&run, &query, &mut out, |sink| {
+            for n in 0..hits {
+                let title = if n + 1 == hits {
+                    last_title
+                } else {
+                    hits_title
+                };
+                sink.hit(
+                    &XmlHit {
+                        id: b"gnl|BL_ORD_ID|3",
+                        title,
+                        accession: b"3",
+                        len: 20,
+                        taxid: 0,
+                        taxonomy: crate::report::blast_xml::records::UNNAMED,
+                        descriptions: &[],
+                        defline_thrown: false,
+                    },
+                    |hsps| {
+                        hsps.hsp(&XmlHsp {
+                            score: 21,
+                            bit_score: 12.697412345,
+                            evalue: 1.515236,
+                            query_from: 3,
+                            query_to: 8,
+                            hit_from: 5,
+                            hit_to: 10,
+                            query_frame: 0,
+                            hit_frame: 0,
+                            qrow: b"WCNYFW",
+                            srow: b"WENYCW",
+                            ops: None,
+                            query_first: 2,
+                            query_step: 1,
+                        })
+                    },
+                )?;
+            }
+            Ok(())
+        })
+        .unwrap();
+    posts.extend(writer.take_posts().posts);
+    assert!(posts.iter().all(|post| post.at >= base));
+    writer.finish(&mut out).unwrap();
+    posts.extend(writer.take_posts().posts);
+    (out, posts)
+}
+
+#[test]
+fn every_text_of_a_report_that_is_no_string_element_is_a_number() {
+    // `is_string_element` decides how NCBI's buffer writes an element's text
+    // (`out_buffer::xml_written_at`): the elements it leaves out hold numbers only.
+    let (out, _) = many_hits_16(2, b"s1 title", b"s1 title", Some(b"Query_1 m"));
+    let text = String::from_utf8(out).unwrap();
+    let mut checked = 0;
+    for line in text.lines().chain(INVALID_ONLY_16.lines()) {
+        let line = line.trim_start();
+        let Some(rest) = line.strip_prefix('<') else {
+            continue;
+        };
+        let Some((tag, rest)) = rest.split_once('>') else {
+            continue;
+        };
+        let Some((value, _)) = rest.split_once("</") else {
+            continue;
+        };
+        if !super::writer::is_string_element(tag.as_bytes()) {
+            assert!(value.parse::<f64>().is_ok(), "{tag}: {value}");
+            checked += 1;
+        }
+    }
+    assert!(checked > 20, "{checked}");
+}
+
+#[test]
+fn a_16_report_posts_its_control_characters_and_its_exception_as_ncbi_writes_them() {
+    // A control character: `#`, the post after the bytes NCBI's buffer had written (the report's
+    // start until 4 KiB of it fill the buffer; K4h probe t.c01: `...description.sciname` line 39).
+    let (out, posts) = many_hits_16(1, b"\x01s1 a", b"\x01s1 a", None);
+    assert_eq!(posts.len(), 1);
+    // The report starts after the document's start (`PrintProlog`).
+    let report_start = super::framing::header16().len();
+    assert_eq!(posts[0].at, report_start);
+    let post = String::from_utf8(posts[0].text.clone()).unwrap();
+    assert!(
+        post.starts_with("Error: (803.7) [blastp] BlastOutput2.report.results.search.hits.description.title\nBad char [0x1] in string at line "),
+        "{post}"
+    );
+    assert!(String::from_utf8_lossy(&out).contains("<title>#s1 a</title>"));
+    // The same character in a message after many hits: NCBI's buffer has written some of the
+    // report by then (whole buffers less the byte it keeps back).
+    let (out, posts) = many_hits_16(40, b"s1 title", b"s1 title", Some(b"\x01Query_1"));
+    assert_eq!(posts.len(), 1);
+    let written = posts[0].at - report_start;
+    let message = out.windows(9).position(|w| w == b"<message>").unwrap();
+    assert!(
+        written > 4000 && report_start + written < message,
+        "{written}"
+    );
+    // An exception: the report is cut at the failing byte, the post follows it, the document
+    // goes on with its end.
+    let (out, posts) = many_hits_16(3, b"s1 title", b"s1 a\xc3\xa9b", None);
+    assert_eq!(posts.len(), 1);
+    let cut = out.len() - b"</BlastXML2>\n".len();
+    assert!(out[..cut].ends_with(b"<title>s1 a"));
+    assert_eq!(posts[0].at, cut);
+    let post = String::from_utf8(posts[0].text.clone()).unwrap();
+    assert!(post.starts_with("Error: [blastp]  Frame type= eFrameNamed, Object type= BlastOutput2NCBI C++ Exception:\n"), "{post}");
+    assert!(
+        post.ends_with("Object type= BlastOutput2 (m_Pos = 0)\n\n"),
+        "{post}"
+    );
+}
+
+/// A report that raises an exception NCBI's report function catches (`CaughtException`, BLASTX's
+/// HSPs of length 0): JSON counts it, so its separator stays (`,\n,\n` for a failed middle
+/// report); a `-subject` run fails where it writes the held report (the next arrival or the
+/// epilog, whose end still follows).
+#[test]
+fn a_failed_report_keeps_its_separator_and_fails_where_it_is_written() {
+    use crate::ncbi_exception::{NcbiException, ThrowSite};
+    let exception = || {
+        NcbiException::new(
+            ThrowSite {
+                file: "src/objects/seq/../seqalign/Seq_align.cpp",
+                line: 227,
+                kind: "CSeqalignException::eInvalidAlignment",
+                function: None,
+            },
+            "CSeq_align::GetSeqRange(): Row is empty",
+        )
+    };
+    let fail = |doc: &mut Xml2Document, out: &mut Vec<u8>| {
+        let mut report = Vec::new();
+        doc.report(&mut report, out, |_, _| {
+            Err(crate::report::blast_xml::CaughtException(exception()).into())
+        })
+    };
+    let caught = |result: anyhow::Result<()>| {
+        result
+            .unwrap_err()
+            .is::<crate::report::blast_xml::CaughtException>()
+    };
+    // `-db`: a, (failed), b.
+    let mut doc = Xml2Document::new(Xml2Kind::Single15, false);
+    let mut out = Vec::new();
+    put(&mut doc, b"{\n  a\n}\n", &mut out).unwrap();
+    assert!(caught(fail(&mut doc, &mut out)));
+    put(&mut doc, b"{\n  b\n}\n", &mut out).unwrap();
+    doc.epilog(&mut out).unwrap();
+    assert_eq!(
+        String::from_utf8(out).unwrap(),
+        "{\n\"BlastOutput2\": [\n{\n  a\n}\n,\n,\n{\n  b\n}\n]\n}\n"
+    );
+    // `-subject`: (failed) held, then a arrives: the failure; a is written by the epilog.
+    let mut doc = Xml2Document::new(Xml2Kind::Single15, true);
+    let mut out = Vec::new();
+    fail(&mut doc, &mut out).unwrap();
+    assert!(caught(put(&mut doc, b"{\n  a\n}\n", &mut out)));
+    doc.epilog(&mut out).unwrap();
+    assert_eq!(
+        String::from_utf8(out).unwrap(),
+        "{\n\"BlastOutput2\": [\n,\n{\n  a\n}\n]\n}\n"
+    );
+    // `-subject`: the held failed report in the epilog: the failure after the document's end.
+    let mut doc = Xml2Document::new(Xml2Kind::Single16, true);
+    let mut out = Vec::new();
+    fail(&mut doc, &mut out).unwrap();
+    assert!(caught(doc.epilog(&mut out)));
+    assert_eq!(
+        String::from_utf8(out).unwrap(),
+        format!("{}</BlastXML2>\n", framing::header16())
+    );
 }

@@ -6,22 +6,24 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use super::ber::decode_full_set;
-use super::defline_set::{
-    alignment_line_id, compare, description_id, seq_id_list, tabular_id, Sic, TabularId,
-};
+use super::defline_set::{alignment_line_id, compare, description_id, match_keys, Sic};
 use super::label::{bare, content, fasta, first_gi, format_label};
 use super::model::{
     Dbtag, GiimportId, IdPat, ObjectId, ParsedSeqId, PatentNumber, PatentSeqId, PdbSeqId, TextseqId,
 };
 use super::rank::{best_rank_score, find_best, text_score};
 use super::{BlastDefline, DeflineSet};
-use crate::report::defline::generate_defline;
+use crate::blastinput::app::{FormatChoice, ReportFormat};
+use crate::report::db_subject::ParsedSubject;
 use crate::report::seqid::SeqId;
 use crate::report::serial::asn_ber::AsnBinaryEncoder;
 use crate::report::serial::asn_text::AsnTextEncoder;
 use crate::report::serial::encoder::Encoder;
 use crate::report::serial::json::JsonEncoder;
-use crate::seqdb::{SeqDb, SeqDbError, SeqType};
+use crate::report::tabular::{
+    TabularHsp, TabularQuery, TabularSpec, TabularSubject, TabularTaxonomy, TabularWriter,
+};
+use crate::seqdb::{SeqDb, SeqType};
 
 fn fixture_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -124,13 +126,7 @@ fn check_deflines(name: &str, sets: &[(u32, DeflineSet)], expected: &[Vec<String
 fn every_definition_line_reads_as_ncbis_blastdbcmd_reads_it() {
     for (name, seqtype) in DATABASES {
         let db = open(name, seqtype);
-        let error = db
-            .check_ordinal_ids()
-            .expect_err("a database with parsed Seq-ids");
-        assert!(
-            matches!(error, SeqDbError::Unsupported { .. }),
-            "{name}: {error}"
-        );
+        assert!(db.has_parsed_seqids().unwrap(), "{name}");
         let sets: Vec<(u32, DeflineSet)> = sets(&db)
             .into_iter()
             .zip(0..)
@@ -200,7 +196,7 @@ fn the_whole_distributed_18s_database_reads_as_ncbis_blastdbcmd_reads_it() {
         .map(|line| line.splitn(7, '%').map(str::to_string).collect())
         .collect();
     let db = SeqDb::open(&base, SeqType::Nucleotide).unwrap();
-    assert!(db.check_ordinal_ids().is_err());
+    assert!(db.has_parsed_seqids().unwrap());
     let sets: Vec<(u32, DeflineSet)> = sets(&db)
         .into_iter()
         .zip(0..)
@@ -251,48 +247,83 @@ fn every_seq_id_encodes_as_makeblastdb_stored_it() {
     assert!(ids > 150, "{ids}");
 }
 
-/// The first word of the subject Bioseq's generated title (`GenerateDefline` of its title;
-/// no fixture record with a `lcl|Subject_` id has a Seq-id that changes the title).
-fn title_word(bioseq: &BlastDefline, protein: bool) -> Vec<u8> {
-    let title = bioseq.title.as_deref().unwrap_or(b"");
-    let defline = generate_defline(title, protein, false).expect("a known encoding");
-    defline.text.split(|&c| c == b' ').next().unwrap().to_vec()
-}
-
-/// The ids and titles that `tabular_id` and the joins give for one sequence, in the column
-/// order `sseqid sallseqid sacc saccver sallacc sgi sallgi stitle salltitles staxid staxids`.
-fn tabular_row(set: &DeflineSet, protein: bool) -> Vec<String> {
-    let aln = set.alignment_id().expect("an id");
-    let bioseq = &set.deflines[set.bioseq_defline(aln).expect("a target")];
-    let word = title_word(bioseq, protein);
-    let target = seq_id_list(&bioseq.ids, &word);
-    let staxid = set.first_taxid();
-    let staxids = set.tax_ids();
-    vec![
-        with(|out| tabular_id(&target, TabularId::Full, out)),
-        with(|out| set.tabular_all(TabularId::Full, &word, out)),
-        with(|out| tabular_id(&target, TabularId::Accession, out)),
-        with(|out| tabular_id(&target, TabularId::AccessionVersion, out)),
-        with(|out| set.tabular_all(TabularId::Accession, &word, out)),
-        with(|out| tabular_id(&target, TabularId::Gi, out)),
-        with(|out| set.tabular_all(TabularId::Gi, &word, out)),
-        with(|out| set.first_title(out)),
-        with(|out| set.all_titles(out)),
-        if staxid == 0 {
-            "N/A".to_string()
-        } else {
-            staxid.to_string()
+/// The columns `sseqid sallseqid sacc saccver sallacc sgi sallgi stitle salltitles staxid staxids`
+/// of one database sequence as the reports make them: the ids and titles of
+/// `report::db_subject::ParsedSubject` (`tabular_ids`, `tabular_gi`, `all_tabular_ids`, the titles
+/// of its definition lines), its `TabularTaxonomy::of_deflines`, written by the tabular writer
+/// (`TabularWriter::row`). `None` for a sequence that LOSAT refuses to show (`ParsedSubject::new`,
+/// `tabular_ids`, `all_tabular_ids`); `match_rows` still fails when no sequence gives an NCBI row.
+fn tabular_row(set: &DeflineSet, protein: bool) -> Option<Vec<String>> {
+    let subject = ParsedSubject::new(set.clone()).ok()?;
+    let [id, accession, accession_version] = subject.tabular_ids(protein).ok()??;
+    let all_ids = subject.all_tabular_ids(protein).ok()?.ids;
+    let titles: Vec<&[u8]> = subject
+        .deflines()
+        .iter()
+        .map(|defline| defline.title.as_deref().unwrap_or_default())
+        .collect();
+    let taxonomy = TabularTaxonomy::of_deflines(subject.deflines());
+    let spec = TabularSpec::of(
+        ReportFormat::Tabular,
+        &FormatChoice {
+            number: 6,
+            spec:
+                "sseqid sallseqid sacc saccver sallacc sgi sallgi stitle salltitles staxid staxids"
+                    .to_string(),
+            delimiter: String::new(),
         },
-        if staxids.is_empty() {
-            "N/A".to_string()
-        } else {
-            staxids
-                .iter()
-                .map(i32::to_string)
-                .collect::<Vec<_>>()
-                .join(";")
-        },
-    ]
+    )
+    .expect("the fields");
+    let shown = TabularSubject {
+        id: &id,
+        accession: &accession,
+        accession_version: &accession_version,
+        gi: subject.tabular_gi(),
+        all_ids: &all_ids,
+        length: 0,
+        titles: Some(&titles),
+        taxonomy: &taxonomy,
+        names: None,
+        nucleotide: !protein,
+        qcovs: -1,
+        qcovus: -1,
+        lookup: crate::report::tabular::SubjectLookup::Found,
+        index: 0,
+    };
+    let hsp = TabularHsp {
+        q_start: 1,
+        q_end: 1,
+        s_start: 1,
+        s_end: 1,
+        evalue: 0.0,
+        bit_score: 0.0,
+        score: 0,
+        length: 1,
+        gap_opens: 0,
+        gaps: 0,
+        num_ident: 1,
+        q_frame: 0,
+        s_frame: 0,
+        rows: None,
+        end_gaps: true,
+        qcovhsp: 100,
+    };
+    let mut out = Vec::new();
+    TabularWriter {
+        spec: &spec,
+        program_version: "BLASTP 2.17.0+",
+        matrix: None,
+    }
+    .row(
+        &mut out,
+        &mut crate::report::tabular::TabularRows::default(),
+        &TabularQuery::local(b"q", 1),
+        &shown,
+        None,
+        &hsp,
+    );
+    let row = text(out.strip_suffix(b"\n").expect("one row"));
+    Some(row.split('\t').map(str::to_string).collect())
 }
 
 const CASES: [(&str, &str, SeqType); 4] = [
@@ -350,7 +381,7 @@ fn tabular_id_and_title_fields_are_ncbis() {
         match_rows(
             case,
             expected,
-            |oid| Some(tabular_row(&sets[oid], protein)),
+            |oid| tabular_row(&sets[oid], protein),
             sets.len(),
         );
     }
@@ -656,6 +687,95 @@ fn printings_of_forms_without_a_fixture() {
     assert_eq!(find_best(&[], text_score), None);
 }
 
+// LOSAT's check that no two sequences of a database are taken for one (line DBID, ID4t fix 2b):
+// every pair of ids that `compare` finds the same shares a key of `match_keys`.
+#[test]
+fn ids_that_compare_the_same_share_a_match_key() {
+    let pdb = |mol: &str, chain: Option<i32>, chain_id: Option<&str>| {
+        ParsedSeqId::Pdb(PdbSeqId {
+            mol: mol.as_bytes().to_vec(),
+            chain,
+            rel: None,
+            chain_id: chain_id.map(|id| id.as_bytes().to_vec()),
+        })
+    };
+    let patent = |country: &str, number: PatentNumber, seqid: i32| {
+        ParsedSeqId::Patent(PatentSeqId {
+            seqid,
+            cit: IdPat {
+                country: country.as_bytes().to_vec(),
+                id: number,
+                doc_type: None,
+            },
+        })
+    };
+    let general = |db: &str, tag: ObjectId| {
+        ParsedSeqId::General(Dbtag {
+            db: db.as_bytes().to_vec(),
+            tag,
+        })
+    };
+    let ids = [
+        ParsedSeqId::Genbank(textseq(Some("AB000015"), None, Some(1))),
+        ParsedSeqId::Genbank(textseq(Some("AB000015"), None, Some(2))),
+        ParsedSeqId::Embl(textseq(Some("ab000015"), None, None)),
+        ParsedSeqId::Ddbj(textseq(Some("AB000016"), Some("LOCUS1"), None)),
+        ParsedSeqId::Tpg(textseq(None, Some("locus1"), Some(3))),
+        ParsedSeqId::Other(textseq(Some("NR_000001"), None, Some(1))),
+        ParsedSeqId::Other(textseq(Some("nr_000001"), None, None)),
+        ParsedSeqId::Swissprot(textseq(Some("P12345"), Some("NAME_HUMAN"), Some(1))),
+        ParsedSeqId::Pir(textseq(None, Some("name_human"), None)),
+        ParsedSeqId::Local(ObjectId::Str(b"5".to_vec())),
+        ParsedSeqId::Local(ObjectId::Id(5)),
+        ParsedSeqId::Local(ObjectId::Str(b"05".to_vec())),
+        ParsedSeqId::Local(ObjectId::Str(b"Ab".to_vec())),
+        ParsedSeqId::Local(ObjectId::Str(b"aB".to_vec())),
+        general("db", ObjectId::Id(1)),
+        general("DB", ObjectId::Str(b"1".to_vec())),
+        general("db", ObjectId::Str(b"Tag".to_vec())),
+        general("Db", ObjectId::Str(b"TAG".to_vec())),
+        pdb("1ABC", None, None),
+        pdb("1ABC", Some(65), Some("AA")),
+        pdb("1ABC", Some(66), None),
+        pdb("1abc", None, None),
+        patent("us", PatentNumber::Number(b"123a".to_vec()), 1),
+        patent("US", PatentNumber::Number(b"123A".to_vec()), 1),
+        patent("US", PatentNumber::AppNumber(b"123A".to_vec()), 1),
+        ParsedSeqId::Gi(7),
+        ParsedSeqId::Gibbsq(7),
+        ParsedSeqId::Gibbmt(7),
+        ParsedSeqId::Giim(GiimportId {
+            id: 7,
+            db: None,
+            release: None,
+        }),
+    ];
+    let keys: Vec<HashSet<u64>> = ids
+        .iter()
+        .map(|id| {
+            let mut keys = Vec::new();
+            match_keys(id, &mut keys);
+            assert!(!keys.is_empty(), "{id:?} has no key");
+            keys.into_iter().collect()
+        })
+        .collect();
+    let mut same = 0;
+    for (a, a_keys) in ids.iter().zip(&keys) {
+        for (b, b_keys) in ids.iter().zip(&keys) {
+            if compare(a, b) == Sic::Yes {
+                same += 1;
+                assert!(!a_keys.is_disjoint(b_keys), "{a:?} and {b:?} share no key");
+            }
+        }
+    }
+    // Pairs other than an id with itself are among them (versions, case, alternatives, chains).
+    assert!(same > ids.len() + 12, "{same}");
+    // Distinct values have distinct keys.
+    assert!(keys[0].is_disjoint(&keys[5]));
+    assert!(keys[18].is_disjoint(&keys[21]));
+    assert!(keys[25].is_disjoint(&keys[26]));
+}
+
 #[test]
 fn seq_id_comparisons_follow_ncbi() {
     let gb = ParsedSeqId::Genbank(textseq(Some("AB000015"), None, Some(1)));
@@ -845,4 +965,202 @@ fn damaged_records_are_errors() {
         [ParsedSeqId::Local(ObjectId::Str(b"x#".to_vec()))]
     );
     assert!(decoded.deflines[0].ids.len() == 2);
+}
+
+fn text_id(name: Option<&str>, acc: Option<&str>, version: Option<i32>) -> TextseqId {
+    TextseqId {
+        name: name.map(|s| s.as_bytes().to_vec()),
+        accession: acc.map(|s| s.as_bytes().to_vec()),
+        release: None,
+        version,
+    }
+}
+
+/// `GetLabel(eDefault, fLabel_Default | fLabel_UpperCase)`, the label of makeblastdb's
+/// duplicate check: the labels makeblastdb 2.17.0 printed in "Duplicate seq_ids are found"
+/// (makedb-v5 survey B pd01-pd18, n06; S3b extra fixtures x_dup_*, x_hashvol_dup).
+#[test]
+fn duplicate_check_labels_are_makeblastdb_s() {
+    let label = |id: &ParsedSeqId| with(|out| super::label::both_upper_version(id, out));
+    let cases: Vec<(ParsedSeqId, &str)> = vec![
+        (
+            ParsedSeqId::Other(text_id(None, Some("np_000549"), Some(1))),
+            "REF|NP_000549.1",
+        ),
+        (
+            ParsedSeqId::Other(text_id(None, Some("NP_9"), None)),
+            "REF|NP_9",
+        ),
+        (
+            ParsedSeqId::Swissprot(TextseqId {
+                release: Some(b"unreviewed".to_vec()),
+                ..text_id(Some("HBA_HUMAN"), Some("P69905"), None)
+            }),
+            "SP|P69905",
+        ),
+        // No accession: the name is the secondary id.
+        (
+            ParsedSeqId::Genbank(text_id(Some("locus1"), None, None)),
+            "GB|LOCUS1",
+        ),
+        // pir and prf: the name first.
+        (
+            ParsedSeqId::Pir(text_id(Some("s12345"), None, None)),
+            "PIR|S12345",
+        ),
+        (
+            ParsedSeqId::Prf(text_id(Some("1234567A"), Some("X"), None)),
+            "PRF|1234567A",
+        ),
+        (
+            ParsedSeqId::Local(ObjectId::Str(b"abc".to_vec())),
+            "LCL|ABC",
+        ),
+        (ParsedSeqId::Local(ObjectId::Id(123)), "LCL|123"),
+        (
+            ParsedSeqId::General(Dbtag {
+                db: b"BL_ORD_ID".to_vec(),
+                tag: ObjectId::Id(6),
+            }),
+            "GNL|BL_ORD_ID|6",
+        ),
+        (
+            ParsedSeqId::General(Dbtag {
+                db: b"db".to_vec(),
+                tag: ObjectId::Str(b"x".to_vec()),
+            }),
+            "GNL|DB|X",
+        ),
+        (
+            ParsedSeqId::General(Dbtag {
+                db: b"db".to_vec(),
+                tag: ObjectId::Str(Vec::new()),
+            }),
+            "GNL|",
+        ),
+        (ParsedSeqId::Gi(42), "GI|42"),
+        (
+            ParsedSeqId::Pdb(PdbSeqId {
+                mol: b"1abc".to_vec(),
+                chain: Some(i32::from(b'a')),
+                rel: None,
+                chain_id: Some(b"a".to_vec()),
+            }),
+            "PDB|1ABC|a",
+        ),
+        (
+            ParsedSeqId::Pdb(PdbSeqId {
+                mol: b"3def".to_vec(),
+                chain: Some(i32::from(b' ')),
+                rel: None,
+                chain_id: None,
+            }),
+            "PDB|3DEF",
+        ),
+        (
+            ParsedSeqId::Patent(PatentSeqId {
+                seqid: 1,
+                cit: IdPat {
+                    country: b"us".to_vec(),
+                    id: PatentNumber::Number(b"1234567".to_vec()),
+                    doc_type: None,
+                },
+            }),
+            "PAT|US|1234567|1",
+        ),
+        (
+            ParsedSeqId::Giim(GiimportId {
+                id: 5,
+                db: None,
+                release: None,
+            }),
+            "GIM|5",
+        ),
+    ];
+    for (id, expected) in cases {
+        assert_eq!(label(&id), expected, "{id:?}");
+    }
+    // Bytes of 0x80 or more are kept (`NStr::ToUpper` of the C locale; S3b x_dup_nonascii).
+    let mut out = Vec::new();
+    super::label::both_upper_version(
+        &ParsedSeqId::Local(ObjectId::Str(b"\xe9abc".to_vec())),
+        &mut out,
+    );
+    assert_eq!(out, b"LCL|\xe9ABC");
+}
+
+/// `GetLabel(eContent, fLabel_GeneralDbIsContent)`: a general id's tag without its database,
+/// the accession without its version (the keys of `-taxid_map`).
+#[test]
+fn taxid_map_keys_drop_the_general_database_and_the_version() {
+    let key = |id: &ParsedSeqId| with(|out| super::label::content_general_db_is_content(id, out));
+    assert_eq!(
+        key(&ParsedSeqId::General(Dbtag {
+            db: b"mydb".to_vec(),
+            tag: ObjectId::Str(b"tag2".to_vec()),
+        })),
+        "tag2"
+    );
+    assert_eq!(
+        key(&ParsedSeqId::Other(text_id(
+            None,
+            Some("np_000551"),
+            Some(3)
+        ))),
+        "NP_000551"
+    );
+    assert_eq!(
+        key(&ParsedSeqId::Pdb(PdbSeqId {
+            mol: b"1ABC".to_vec(),
+            chain: Some(i32::from(b'A')),
+            rel: None,
+            chain_id: Some(b"A".to_vec()),
+        })),
+        "1ABC_A"
+    );
+    assert_eq!(key(&ParsedSeqId::Gi(777)), "777");
+}
+
+/// `weak_keys` gives the ids that NCBI's scope matches weakly by an id (`GetMatchingHandles` with
+/// `eAllowWeakMatch`) and `kind_keys` the keys by which such an id is found, in the directions
+/// NCBI 2.17.0 showed a query read with `-parse_deflines` for a database sequence (probe of line
+/// DBID N2c, `blastdb-ids-20261021/R/weak/p1.out`, cases q1 to q6).
+#[test]
+fn weak_keys_find_the_ids_that_ncbis_scope_matches_weakly() {
+    use super::id_scope::{kind_keys, weak_keys};
+    let text = |accession: Option<&str>, name: Option<&str>, version: Option<i32>| TextseqId {
+        name: name.map(|name| name.as_bytes().to_vec()),
+        accession: accession.map(|accession| accession.as_bytes().to_vec()),
+        release: None,
+        version,
+    };
+    let finds = |by: &ParsedSeqId, id: &ParsedSeqId| {
+        let (mut weak, mut held) = (Vec::new(), Vec::new());
+        weak_keys(by, &mut weak);
+        kind_keys(id, &mut held);
+        held.iter().any(|key| weak.contains(key))
+    };
+    let sp = |accession, name, version| ParsedSeqId::Swissprot(text(accession, name, version));
+    let gb = |accession, version| ParsedSeqId::Genbank(text(Some(accession), None, version));
+    let pir = |accession, name| ParsedSeqId::Pir(text(accession, name, None));
+    // q1, q2: a name with an accession and the name alone, both ways, in any case.
+    let named = sp(Some("P00001"), Some("NAME_B"), Some(1));
+    assert!(finds(&named, &sp(None, Some("NAME_B"), None)));
+    assert!(finds(&named, &sp(None, Some("name_b"), None)));
+    assert!(finds(&sp(None, Some("NAME_B"), None), &named));
+    // Two accessions: the scope compares them, not their names.
+    assert!(!finds(&named, &sp(Some("P00002"), Some("NAME_B"), Some(1))));
+    // q3, q4: an accession without a version finds its versions, not the other way.
+    assert!(finds(&gb("CCC00020", None), &gb("CCC00020", Some(1))));
+    assert!(finds(&gb("CCC00020", None), &gb("ccc00020", Some(2))));
+    assert!(!finds(&gb("CCC00020", Some(1)), &gb("CCC00020", None)));
+    assert!(!finds(&gb("CCC00020", Some(1)), &gb("CCC00020", Some(2))));
+    // q5, q6: a `pir` accession alone finds that name alone, not the other way.
+    assert!(finds(&pir(Some("ABCD"), None), &pir(None, Some("ABCD"))));
+    assert!(!finds(&pir(None, Some("ABCD")), &pir(Some("ABCD"), None)));
+    assert!(!finds(&gb("ABCD", None), &pir(None, Some("ABCD"))));
+    // Other alternatives have no weak keys (their keys fold case and number forms already).
+    let mut weak = Vec::new();
+    weak_keys(&ParsedSeqId::Gi(777), &mut weak);
+    assert!(weak.is_empty());
 }

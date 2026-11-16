@@ -6,13 +6,12 @@
 // so that the search's allocations, its thread stacks and every pointer that crosses the
 // ABI and WASI are high. The page compares the two.
 import { ENGINE_ASSETS } from 'virtual:losat-engine';
-import { sha256Hex } from '../../../src/infra/browser/platform';
-import { ThreadHost } from '../../../src/infra/engine-worker/thread-host';
-import { ReactorAbi, ROLE_QUERY, ROLE_SUBJECT, type AbiExports } from '../../../src/infra/reactor/abi';
-import type { MemoryLimits } from '../../../src/infra/reactor/artifact';
-import { loadReactor } from '../../../src/infra/reactor/instance';
-import { createSharedMemory } from '../../../src/infra/reactor/shared-memory';
-import { createWasi } from '../../../src/infra/reactor/wasi';
+import { loadReactor, sha256Hex, type MemoryLimits } from 'losat';
+import { InstanceUse } from '../../../../packages/losat/src/infra/engine-worker/instance-use';
+import { ThreadHost } from '../../../../packages/losat/src/infra/engine-worker/thread-host';
+import { ReactorAbi, ROLE_QUERY, ROLE_SUBJECT, type AbiExports } from '../../../../packages/losat/src/infra/reactor/abi';
+import { createSharedMemory } from '../../../../packages/losat/src/infra/reactor/shared-memory';
+import { createWasi } from '../../../../packages/losat/src/infra/reactor/wasi';
 import type { HighMemoryCase, HighMemoryMode, HighMemoryRequest, HighMemoryResult } from './protocol';
 
 const PAGE = 65_536;
@@ -48,7 +47,14 @@ async function runMode(
   request: HighMemoryRequest,
 ): Promise<HighMemoryMode> {
   const { memory, maximumPages } = createSharedMemory(limits);
-  const host = new ThreadHost({ module, memory, faultChannel: request.faultChannel });
+  const host = new ThreadHost({
+    module,
+    memory,
+    maximumPages,
+    faultChannel: request.faultChannel,
+    keeperChannel: `${request.faultChannel}:keeper`,
+    use: InstanceUse.create(),
+  });
   try {
     // As instantiateThreadedMain, keeping the exports for fillLow.
     const wasi = createWasi();
@@ -68,6 +74,9 @@ async function runMode(
     const firstHighPointer = initialBytes > TWO_GIB ? fillLow(exports) : 0;
     const outputs: HighMemoryCase[] = [];
     for (const search of request.cases) {
+      // As runtime.run: every thread worker ready before a run, also those whose thread of the
+      // previous run is still returning (the ThreadHost has one set; a spawn does not wait for those).
+      await host.prepare(request.threads - 1);
       const query = abi.register(search.program, ROLE_QUERY, search.query);
       const subject = abi.register(search.program, ROLE_SUBJECT, search.subject);
       const streams = new Map<number, Uint8Array[]>();

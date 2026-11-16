@@ -1,0 +1,19 @@
+# BLASTP 2.17.0+
+# Query: qp1 query protein one
+# Database: User specified sequence set (Input: tests/fasta/outfmt11/arch_bp_s.faa)
+# Fields: query id, subject id, evalue
+# 2 hits found
+qp1,sp1,5.30e-94
+qp1,sp2,2.82e-67
+# BLASTP 2.17.0+
+# Query: qp2 unrelated protein
+# Database: User specified sequence set (Input: tests/fasta/outfmt11/arch_bp_s.faa)
+# Fields: query id, subject id, evalue
+# 2 hits found
+qp2,sp1,1.5
+qp2,sp1,1.9
+# BLASTP 2.17.0+
+# Query: qnone no hits
+# Database: User specified sequence set (Input: tests/fasta/outfmt11/arch_bp_s.faa)
+# 0 hits found
+# BLAST processed 3 queries

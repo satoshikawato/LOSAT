@@ -29,47 +29,60 @@ use super::results::HspList;
 use super::runtime::BatchResults;
 use super::seqalign::{query_records, SeqalignSubjects};
 use crate::blastinput::app::Program;
+use crate::core::blast_util::ncbi_int4_from_double;
 use crate::report::archive::bioseq::BioseqInput;
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::{Filter, OptionInputs};
+use crate::report::archive::requests::{LcaseFrames, RequestPolicy, RequestRecord, RunRequests};
 use crate::report::archive::{
     ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
 };
 use crate::report::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
-use crate::report::seqid::SeqId;
 use crate::report::serial::seqalign::{write_seq_aligns, Segments};
 use crate::stats::tables::KarlinParams;
 
 /// The recorded options of a BLASTX run (`options::algorithm_options`'s inputs), from the
 /// arguments as given: a value is recorded only when it was given or the class of its argument
-/// always sets it (`S/DESIGN_OF8.md` 2.2).
+/// always sets it (`S/DESIGN_OF8.md` 2.2). RPSTBLASTN, whose search is BLASTX's, gives its own
+/// (`BlastxArgs::request_inputs`), made from these and its arguments.
 pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
+    if let Some(inputs) = &args.request_inputs {
+        return OptionInputs::clone(inputs);
+    }
     let mut inputs = OptionInputs::new(Program::Blastx, &args.task);
     inputs.dbsize = args.dbsize;
+    inputs.searchsp = args.searchsp;
     inputs.evalue = Some(args.evalue);
     inputs.gapopen = args.gap_open;
     inputs.gapextend = args.gap_extend;
     inputs.matrix = args.matrix.clone();
+    // `-xdrop_gap` and `-xdrop_gap_final` as given (`SetGapXDropoff`, `SetGapXDropoffFinal`);
+    // `-xdrop_ungap` has no entry (NCBI records none).
+    inputs.xdrop_gap = args.xdrop_gap;
+    inputs.xdrop_gap_final = args.xdrop_gap_final;
     inputs.word_size = args.word_size;
     inputs.qcov_hsp_perc = args.qcov_hsp_perc;
     inputs.max_hsps = args.max_hsps;
     inputs.sum_stats = args.sum_stats;
-    // `-threshold` is read as a double and recorded as an `int` (`static_cast<int>`).
-    inputs.threshold = args.threshold.map(|threshold| threshold as i32);
+    // `-threshold` is read as a double and recorded as an `int` (`static_cast<int>`), converted
+    // as the x86-64 build does (`INT_MIN` past `Int4`, as the lookup table takes it:
+    // `ncbi_int4_from_double`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:884-892
+    // ```c++
+    // CBlastOptions::SetWordThreshold(double w)
+    // {
+    //     ...
+    //     if (m_Remote) {
+    //         m_Remote->SetValue(eBlastOpt_WordThreshold, static_cast<int>(w));
+    //     }
+    // }
+    // ```
+    inputs.threshold = args.threshold.map(ncbi_int4_from_double);
     inputs.window_size = args.window_size;
     inputs.ungapped = args.ungapped;
     inputs.soft_masking = Some(args.soft_masking);
-    inputs.seg = Some(if !args.seg.enabled {
-        Filter::No
-    } else if args.seg.yes {
-        Filter::Yes
-    } else {
-        Filter::Seg {
-            window: args.seg.window,
-            locut: args.seg.locut,
-            hicut: args.seg.hicut,
-        }
-    });
+    // An archive is written only for a `-seg` that `resolve` read.
+    inputs.seg = args.seg_spec().ok().map(Filter::from);
     inputs.culling_limit = args.culling_limit;
     inputs.subject_besthit = args.subject_besthit;
     inputs.max_intron_length = args.max_intron_length;
@@ -78,7 +91,7 @@ pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
         .max_target_seqs
         .or(args.num_alignments.map(|size| size as i32))
         .map_or(500, |size| size);
-    inputs.comp_based_stats = i32::from(args.comp_based_stats);
+    inputs.comp_based_stats = i32::from(super::args::composition_mode(&args.comp_based_stats));
     inputs
 }
 
@@ -87,109 +100,71 @@ pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
 pub(crate) fn handle_for(
     args: &BlastxArgs,
     archive_requested: bool,
-) -> Result<Option<ArchiveHandle>> {
+    options: &crate::report::archive::OptionsHandle,
+) -> Option<ArchiveHandle> {
     if !archive_requested {
-        return Ok(None);
+        return None;
     }
     // NCBI keeps the name without the white space at its ends (`NStr::TruncateSpaces`,
     // blast_args.cpp:2472-2476), and the request's `database` is that name.
     let database = args.db.as_deref().map(crate::seqdb::db_argument_name);
-    ArchiveHandle::for_program(&option_inputs(args), database, "BLASTX").map(Some)
-}
-
-/// The refusal of a title that the archive cannot write as NCBI does
-/// (`report::archive::ArchiveEncoding::writes_text`: in text and binary a byte outside
-/// `0x20..=0x7E`, in XML a control byte) for BLASTX's records, before the first byte.
-pub(crate) fn check_titles(records: &[FastaRecord], role: &str) -> Result<()> {
-    let encoding = crate::report::archive::ArchiveEncoding::from_env();
-    if let Some(record) = records
-        .iter()
-        .find(|record| !encoding.writes_text(record.title.as_bytes()))
-    {
-        anyhow::bail!(
-            "the title of the {role} {} has a character the archive cannot write as NCBI does (outside the visible ASCII range in text and binary, a control character in XML), which is not supported by LOSAT's BLASTX with -outfmt 11",
-            record.internal_id
-        );
-    }
-    Ok(())
+    Some(ArchiveHandle::for_program(
+        &option_inputs(args),
+        database,
+        options,
+    ))
 }
 
 pub(crate) use crate::report::archive::error_lines;
 
-/// A title the archive cannot write, found by `prescan_query_titles` (`check_titles`); a typed
-/// error, so that it is told apart from the reader's own errors, which end the scan.
-#[derive(Debug)]
-struct TitleRefusal(String);
-
-impl std::fmt::Display for TitleRefusal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
+// ```c++
+// CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
+//     : m_QueryVector(& queries)
+// {
+//     if (queries.Empty()) {
+//         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:650-652
+// ```c++
+//     if (BlastSetup_Validate(qinfo, NULL) != 0 && messages.HasMessages()) {
+//         NCBI_THROW(CBlastException, eSetup, messages.ToString());
+//     }
+// ```
+/// Whether NCBI searches the reader batch `batch` and writes its archive: a batch without a
+/// query (every record skipped by `-query_loc`) is `Empty CBlastQueryVector`, and one without a
+/// valid context and with a query without letters fails its set-up
+/// (`ReaderBatchShape::set_up_fails`), which stops the run there as the search does
+/// (`native::run_inner`, `query_setup::prepare_unit_queries`).
+pub(crate) fn written_batch(batch: &[FastaRecord], options: &ResolvedOptions) -> bool {
+    !batch.is_empty()
+        && !super::reader_batch::ReaderBatchShape::layout(batch, options).set_up_fails()
 }
 
-impl std::error::Error for TitleRefusal {}
-
-/// Whether the query is a regular file, decided on the handle already open (`fstat`), before any
-/// second `open` by path: `prescan_query_titles` reads the file a second time, which would take
-/// bytes from a pipe (`<(...)`, `/dev/stdin`) or wait for a writer of a named FIFO.
-pub(crate) fn query_is_regular(file: &std::fs::File) -> bool {
-    file.metadata().is_ok_and(|metadata| metadata.is_file())
-        && crate::blastinput::input_files::has_stream_position(file)
-}
-
-/// The refusal of a query for which `query_is_regular` is false.
-pub(crate) fn refuse_irregular_query() -> Result<()> {
-    anyhow::bail!("unsupported BLASTX query input for -outfmt 11: use a regular file")
-}
-
-/// Reads the query file once before the search, batch by batch as the search reads it
-/// (`batch_size` letters, the run's), and refuses the first record whose title the archive
-/// cannot write (`check_titles`), so that no refusal can follow a written byte. A reader error
-/// ends the scan: the run reads the file again and fails there as it always did, after the
-/// archives of the batches before it (NCBI writes them), so the titles of the batches the reader
-/// completed before the error are checked; the records of the batch the error interrupts are
-/// never written and need no check. The file must be a regular file (`query_is_regular`).
-pub(crate) fn prescan_query_titles(
-    path: &std::path::Path,
-    lowercase: bool,
-    batch_size: usize,
-) -> Result<()> {
-    let file = std::fs::File::open(path)?;
-    let mut stream = super::input::FastaStream::from_file(file);
-    let scanned = super::input::parse_fasta_stream_with_warnings(
-        &mut stream,
-        false,
-        lowercase,
-        batch_size,
-        &mut |batch| {
-            check_titles(batch, "query").map_err(|refusal| TitleRefusal(refusal.to_string()).into())
-        },
-        &mut |_| Ok(()),
-    );
-    match scanned {
-        Err(error) if error.is::<TitleRefusal>() => Err(error),
-        _ => Ok(()),
-    }
-}
-
-/// What the archive of one query batch needs.
-pub(crate) struct ArchiveCall<'a> {
-    pub handle: &'a ArchiveHandle,
+/// The queries of one query batch and what its archive reads (`with_batch`).
+pub(crate) struct CallBatch<'a> {
     pub options: &'a ResolvedOptions,
     /// The batch's queries; `BatchResults::query_ordinal` indexes them.
     pub queries: &'a [FastaRecord],
-    /// The subjects by the oids of the hit lists.
-    pub subjects: &'a [FastaRecord],
-    pub names: SeqalignSubjects<'a>,
-    /// `-subject`: every subject record (the Bioseqs of the request); `None` for `-db`.
-    pub subject_records: Option<&'a [FastaRecord]>,
+    /// The requests of the run's archives (`requests`, with every `-subject` record; made once).
+    pub requests: &'a RunRequests<'a>,
     /// The results of the batch: one entry, or several when the search split a batch above
     /// 10002 letters (`BATCH_SIZE`).
     pub batches: &'a [BatchResults],
 }
 
-/// The values of a batch's first query that `search-stats`, `ka-blocks` and the
-/// `EffectiveSearchSpace` option take.
+/// What the archive of one query batch needs.
+pub(crate) struct ArchiveCall<'a> {
+    pub handle: &'a ArchiveHandle,
+    pub batch: CallBatch<'a>,
+    /// The subjects by the oids of the hit lists.
+    pub subjects: &'a [FastaRecord],
+    pub names: SeqalignSubjects<'a>,
+}
+
+/// The values of a batch's first query that `search-stats` and `ka-blocks` take (the
+/// `EffectiveSearchSpace` option: `batch_searched_space`).
 struct FirstContext {
     /// The ungapped block of the first valid context and the gapped one (absent for an
     /// ungapped search); `None` when the first query has no valid context (both blocks are
@@ -198,50 +173,113 @@ struct FirstContext {
     /// The effective search space and length adjustment of that context (0 without one).
     search_space: i64,
     length_adjustment: i64,
-    /// The search space of the first query's context 0 (the option); 0 when it is not valid.
-    context0_space: i64,
 }
 
 fn first_context(batch: &BatchResults, gapped: Option<KarlinParams>) -> FirstContext {
     let parameters = &batch.parameters[..6];
     let valid = parameters.iter().find(|parameters| parameters.valid);
     FirstContext {
-        karlin: valid.map(|parameters| (parameters.ungapped.clone(), gapped)),
+        karlin: valid.map(|parameters| (parameters.ungapped, gapped)),
         search_space: valid.map_or(0, |parameters| parameters.search_space),
         length_adjustment: valid.map_or(0, |parameters| i64::from(parameters.length_adjustment)),
-        context0_space: if parameters[0].valid {
-            parameters[0].search_space
-        } else {
-            0
-        },
     }
 }
 
-/// The defline line of the Bioseq: the line as read, else `>` and the title. BLASTX keeps
-/// its own copy of `report::archive::defline_of`: its `FastaRecord` is its own type, and an
-/// empty defline counts as missing.
-fn defline_of(record: &FastaRecord) -> Cow<'_, [u8]> {
-    match record
-        .source
-        .as_ref()
-        .map(|source| source.defline.as_slice())
-    {
-        Some(defline) if !defline.is_empty() => Cow::Borrowed(defline),
-        _ => {
-            let mut line = vec![b'>'];
-            line.extend_from_slice(record.title.as_bytes());
-            Cow::Owned(line)
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:1718-1725
+// ```c++
+// inline Int8
+// CBlastOptionsLocal::GetEffectiveSearchSpace() const
+// {
+//     if (m_EffLenOpts->num_searchspaces == 0)
+//         return 0;
+//
+//     return m_EffLenOpts->searchsp_eff[0];
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
+// ```c++
+//     int status = m_PrelimSearch->CheckInternalData();
+//     if (status != 0)
+//     {
+//          // Search was not run, but we send back an empty CSearchResultSet.
+// ```
+/// The `EffectiveSearchSpace` option of a reader batch whose results are `batches` (its units;
+/// `BatchArchive::searched_space`, `StrategyExport::note_searched`): the search space of the first
+/// query's context 0 (frame +1; an invalid context keeps `-searchsp`, else 0,
+/// `effective_lengths`) and that context's query length (0 for an invalid one;
+/// `archive::RequestLength::space`), when NCBI searched the batch (a unit was searched).
+pub(crate) fn batch_searched_space(
+    batches: &[BatchResults],
+) -> Option<crate::report::archive::SearchedContext0> {
+    batches.iter().any(|batch| !batch.search_skipped).then(|| {
+        let parameters = &batches[0].parameters[0];
+        crate::report::archive::SearchedContext0 {
+            space: parameters.search_space,
+            query_length: if parameters.valid {
+                batches[0].prepared.contexts[0].length as i64
+            } else {
+                0
+            },
+        }
+    })
+}
+
+/// The requests of a run's batches (`RunRequests`): nucleotide queries, protein subjects (the
+/// `-subject` records `subjects`, `None` for `-db`), and the lower-case runs of each query in both
+/// frames of a translated query (the reader keeps them only with `-lcase_masking`,
+/// `FastaRecord::archive_lowercase_runs`).
+pub(crate) fn requests(subjects: Option<&[FastaRecord]>) -> RunRequests<'_> {
+    RunRequests::new(
+        RequestPolicy {
+            query_protein: false,
+            subject_protein: true,
+            lcase: Some(LcaseFrames::PlusAndMinus),
+        },
+        subjects,
+    )
+}
+
+impl RequestRecord for FastaRecord {
+    fn bioseq(&self, protein: bool) -> BioseqInput<'_> {
+        // The defline line: the line as read, else `>` and the title (`report::archive::defline_of`;
+        // BLASTX's `FastaRecord` is its own type, and an empty defline counts as missing).
+        let defline = match self.source.as_ref().map(|source| source.defline.as_slice()) {
+            Some(defline) if !defline.is_empty() => Cow::Borrowed(defline),
+            _ => {
+                let mut line = vec![b'>'];
+                line.extend_from_slice(&self.title);
+                Cow::Owned(line)
+            }
+        };
+        BioseqInput {
+            id: &self.internal_id,
+            ids: self.believed().map(|ids| ids.ids.as_slice()),
+            seq_loc: self.archive_seq_loc(),
+            defline,
+            title: &self.title,
+            // The whole record, also when a range cut it (`FastaRecord::archive_letters`).
+            letters: self.archive_letters(),
+            protein,
         }
     }
-}
 
-fn bioseq_input<'a>(record: &'a FastaRecord, defline: &'a [u8], protein: bool) -> BioseqInput<'a> {
-    BioseqInput {
-        id: &record.internal_id,
-        defline,
-        title: record.title.as_bytes(),
-        letters: &record.sequence,
-        protein,
+    fn searched_len(&self) -> usize {
+        self.sequence.len()
+    }
+
+    /// The runs of the whole record, also outside a `-query_loc` interval (the reader's mask of
+    /// the record, `x_FastaToSeqLoc`), whatever `-strand`.
+    fn lowercase_runs(&self) -> Vec<(i32, i32)> {
+        self.archive_lowercase_runs()
+    }
+
+    fn mask(&self, frame: Frame, intervals: Vec<(i32, i32)>) -> MaskEntry {
+        MaskEntry {
+            id: self.internal_id.clone(),
+            best: self.believed().map(|ids| ids.best.clone()),
+            frame,
+            intervals,
+        }
     }
 }
 
@@ -259,12 +297,13 @@ fn frame_of(frame: i8) -> Frame {
 
 /// The `masks` of the results: per query of a searched batch, one mask per frame with intervals,
 /// in the order plus1, plus2, plus3, minus1, minus2, minus3; the intervals are the context's
-/// nucleotide intervals other than an empty one and the whole query, in the order found (the
-/// minus frames descending). The same intervals outfmt 15 and 16 print.
+/// nucleotide intervals moved into the record (`seq_range::record_mask`: other than an empty one
+/// and the whole interval), in the order found (the minus frames descending). The same intervals
+/// outfmt 15 and 16 print.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:930-959
 /// (`Blast_GetSeqLocInfoVector`) and remote_blast.cpp:1064-1138.
-fn results_masks(call: &ArchiveCall<'_>) -> Vec<MaskEntry> {
+fn results_masks(call: &CallBatch<'_>) -> Vec<MaskEntry> {
     let mut masks = Vec::new();
     for batch in call.batches {
         if batch.search_skipped {
@@ -272,43 +311,23 @@ fn results_masks(call: &ArchiveCall<'_>) -> Vec<MaskEntry> {
         }
         for qidx in 0..batch.queries.len() {
             let query = &call.queries[batch.query_ordinal + qidx];
-            let length = query.sequence.len() as i32;
+            let (length, offset) = (query.sequence.len(), query.placement().offset);
             for context in &batch.prepared.contexts[qidx * 6..qidx * 6 + 6] {
                 let intervals: Vec<(i32, i32)> = context
                     .dna_masks
                     .iter()
-                    .copied()
-                    .filter(|&(from, to)| from <= to && !(from == 0 && to == length - 1))
+                    .filter_map(|&(from, to)| {
+                        crate::blastinput::seq_range::record_mask(from, to, length, offset)
+                    })
                     .collect();
                 if !intervals.is_empty() {
                     masks.push(MaskEntry {
                         id: query.internal_id.clone(),
+                        best: query.believed().map(|ids| ids.best.clone()),
                         frame: frame_of(context.frame),
                         intervals,
                     });
                 }
-            }
-        }
-    }
-    masks
-}
-
-/// The `LCaseMask` parameters of `-lcase_masking`: per lower-case interval of a query (the
-/// runs of the record, in nucleotide coordinates) one mask in frame `plus1` and one in `minus1`,
-/// whatever `-strand`.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:614-645
-/// (the user mask of a translated query is mapped to its plus and minus strand).
-fn lcase_masks(call: &ArchiveCall<'_>) -> Vec<MaskEntry> {
-    let mut masks = Vec::new();
-    for query in call.queries {
-        for &(from, to) in &query.lowercase_masks {
-            for frame in [Frame::Plus1, Frame::Minus1] {
-                masks.push(MaskEntry {
-                    id: query.internal_id.clone(),
-                    frame,
-                    intervals: vec![(from, to)],
-                });
             }
         }
     }
@@ -347,9 +366,9 @@ impl<'a> AlignSource for BlastxAligns<'a> {
                     &mut hsp_records,
                 )?;
                 let query_record = QueryRecord {
-                    id: SeqId::Local(&query.internal_id),
+                    id: query.seq_id(),
                     searched_length: i32::try_from(query.sequence.len())?,
-                    offset: 0,
+                    offset: i32::try_from(query.placement().offset)?,
                 };
                 out.write_with(|enc, flush| {
                     write_seq_aligns(
@@ -368,50 +387,22 @@ impl<'a> AlignSource for BlastxAligns<'a> {
     }
 }
 
-/// Writes the archive of the batch of `call` to `writer`: the messages saved since the last
-/// archive (the reader's warnings of the batch, the option warnings), the request, the
-/// alignments of every query, the masks and the statistics of the first query.
-pub(crate) fn write_blastx_archive(call: &ArchiveCall<'_>, writer: &mut dyn Write) -> Result<()> {
+/// Calls `each` with the archive of the batch of `call` (`BatchArchive`: its request,
+/// `RunRequests::with_batch`, and its results).
+fn with_batch(
+    call: &CallBatch<'_>,
+    each: impl FnOnce(&BatchArchive<'_>) -> Result<()>,
+) -> Result<()> {
     let options = call.options;
-    let run = RunRecord {
-        program: Program::Blastx,
-        db_title: match &call.names {
-            SeqalignSubjects::Records => None,
-            SeqalignSubjects::Database { title, .. } => Some(title),
-        },
-        gapped: options.gapped,
-    };
     // The gapped block is the table's for the matrix and gap costs (LOSAT's BLASTX searches
     // BLOSUM62 with 11 / 1); an ungapped search has none.
     let gapped = options.gapped.then(|| {
         crate::stats::tables::lookup_protein_params(&crate::config::ProteinScoringSpec {
-            matrix: crate::config::ScoringMatrix::Blosum62,
+            matrix: options.scoring,
             gap_open: options.gap_open,
             gap_extend: options.gap_extend,
         })
     });
-    // The Bioseq inputs borrow their deflines: keep them alive for the whole call.
-    let subject_deflines: Vec<Cow<'_, [u8]>> = call
-        .subject_records
-        .map(|records| records.iter().map(defline_of).collect())
-        .unwrap_or_default();
-    let subjects_input: Vec<BioseqInput<'_>> = call
-        .subject_records
-        .map(|records| {
-            records
-                .iter()
-                .zip(&subject_deflines)
-                .map(|(record, defline)| bioseq_input(record, defline, true))
-                .collect()
-        })
-        .unwrap_or_default();
-    let deflines: Vec<Cow<'_, [u8]>> = call.queries.iter().map(defline_of).collect();
-    let queries: Vec<BioseqInput<'_>> = call
-        .queries
-        .iter()
-        .zip(&deflines)
-        .map(|(record, defline)| bioseq_input(record, defline, false))
-        .collect();
     let first = call
         .batches
         .first()
@@ -420,9 +411,7 @@ pub(crate) fn write_blastx_archive(call: &ArchiveCall<'_>, writer: &mut dyn Writ
             karlin: None,
             search_space: 0,
             length_adjustment: 0,
-            context0_space: 0,
         });
-    let searched = call.batches.iter().any(|batch| !batch.search_skipped);
     let ka_blocks = match &first.karlin {
         Some((ungapped, gapped)) => [
             ka_block(ungapped, false),
@@ -432,27 +421,57 @@ pub(crate) fn write_blastx_archive(call: &ArchiveCall<'_>, writer: &mut dyn Writ
         ],
         None => [KaBlock::missing(false), KaBlock::missing(true)],
     };
-    let lcase = lcase_masks(call);
     let masks = results_masks(call);
-    let batch = BatchArchive {
-        queries: &queries,
-        subjects: &subjects_input,
-        required: None,
-        lcase_masks: &lcase,
-        masks: &masks,
-        ka_blocks,
-        search_space: first.search_space,
-        length_adjustment: first.length_adjustment,
-        searched_space: searched.then_some(first.context0_space),
+    call.requests.with_batch(
+        call.queries,
+        call.queries.first().map(FastaRecord::placement),
+        |request| {
+            each(&BatchArchive {
+                request: *request,
+                masks: &masks,
+                ka_blocks,
+                search_space: first.search_space,
+                length_adjustment: first.length_adjustment,
+                searched_space: batch_searched_space(call.batches),
+            })
+        },
+    )
+}
+
+/// Writes the archive of the batch of `call` to `writer`: the messages saved since the last
+/// archive (the reader's warnings of the batch, the option warnings), the request, the
+/// alignments of every query, the masks and the statistics of the first query. NCBI's posts of
+/// the bytes that the archive's stream replaces go to `diagnostics` (`write_archive`).
+pub(crate) fn write_blastx_archive(
+    call: &ArchiveCall<'_>,
+    writer: &mut dyn Write,
+    diagnostics: &mut dyn Write,
+) -> Result<()> {
+    let run = RunRecord {
+        program: Program::Blastx,
+        db_title: match &call.names {
+            SeqalignSubjects::Records => None,
+            SeqalignSubjects::Database { title, .. } => Some(title),
+        },
+        gapped: call.batch.options.gapped,
     };
-    let mut aligns = BlastxAligns {
-        run,
-        queries: call.queries,
-        subjects: call.subjects,
-        names: &call.names,
-        batches: call.batches,
-    };
-    write_archive(call.handle, &batch, &mut aligns, writer)
+    // `-subject`'s Seq-loc mapper cuts an HSP of length 0 at the first letter of the searched part
+    // of a subject with HSPs of letters in two, and makes alignments without scores of a subject
+    // whose every HSP has length 0 where it rewrites one, which LOSAT does not write
+    // (`empty_rows::refuse_mapped_without_scores`).
+    if run.remaps_subjects() && !run.gapped {
+        super::empty_rows::refuse_mapped_without_scores(call.batch.batches, run.gapped, None)?;
+    }
+    with_batch(&call.batch, |batch| {
+        let mut aligns = BlastxAligns {
+            run,
+            queries: call.batch.queries,
+            subjects: call.subjects,
+            names: &call.names,
+            batches: call.batch.batches,
+        };
+        write_archive(call.handle, batch, &mut aligns, writer, diagnostics)
+    })
 }
 
 #[cfg(test)]
@@ -567,6 +586,7 @@ mod tests {
                     ParamValue::Boolean(false) => "boolean:False".to_string(),
                     ParamValue::Real(value) => format!("real:{}", posix(*value)),
                     ParamValue::Str(value) => format!("string:{value}"),
+                    ParamValue::IntegerList(values) => format!("integer-list:{values:?}"),
                 };
                 format!("{}={value}", param.name)
             })
@@ -585,20 +605,18 @@ mod tests {
         }
     }
 
-    /// The inputs of a command line that LOSAT's `blastx` refuses (a task, matrix, word size,
-    /// composition mode or `-use_sw_tback` it does not search with): the options model must still
-    /// write the list NCBI wrote for it. The options LOSAT takes come from its arguments, the
-    /// refused ones are set by hand.
+    /// The inputs of a command line that LOSAT's `blastx` parser refuses (`-use_sw_tback`, which it
+    /// does not search with): the options model must still write the list NCBI
+    /// wrote for it. The options LOSAT takes come from its arguments, the refused ones are set by
+    /// hand.
     fn refused_inputs(extra: &[&str]) -> OptionInputs {
-        const REFUSED: [&str; 8] = [
+        const REFUSED: [&str; 6] = [
             "-task",
             "-matrix",
             "-word_size",
             "-gapopen",
             "-gapextend",
             "-comp_based_stats",
-            "-xdrop_gap",
-            "-xdrop_gap_final",
         ];
         let mut kept = Vec::new();
         let mut refused: Vec<(&str, &str)> = Vec::new();
@@ -608,9 +626,9 @@ mod tests {
             if REFUSED.contains(&flag) {
                 refused.push((flag, extra.get(index + 1).copied().unwrap_or_default()));
                 index += 2;
-            } else if matches!(flag, "-use_sw_tback" | "-xdrop_ungap") {
-                refused.push((flag, extra.get(index + 1).copied().unwrap_or_default()));
-                index += if flag == "-use_sw_tback" { 1 } else { 2 };
+            } else if flag == "-use_sw_tback" {
+                refused.push((flag, ""));
+                index += 1;
             } else {
                 kept.push(flag);
                 index += 1;
@@ -624,16 +642,47 @@ mod tests {
                 "-word_size" => inputs.word_size = value.parse().ok(),
                 "-gapopen" => inputs.gapopen = value.parse().ok(),
                 "-gapextend" => inputs.gapextend = value.parse().ok(),
-                "-xdrop_gap" => inputs.xdrop_gap = value.parse().ok(),
-                "-xdrop_gap_final" => inputs.xdrop_gap_final = value.parse().ok(),
                 "-comp_based_stats" => {
-                    inputs.comp_based_stats = value.trim_end_matches('u').parse().unwrap_or(2);
+                    inputs.comp_based_stats =
+                        i32::from(crate::algorithm::blastx::args::composition_mode(value));
                 }
                 "-use_sw_tback" => inputs.use_sw_tback = true,
                 _ => {}
             }
         }
         inputs
+    }
+
+    // A `-threshold` past `Int4` (2147483648, 1e10, +inf, 1e999) is recorded as `INT_MIN`, as
+    // NCBI BLAST+ 2.17.0 converts it (the lookup table takes the same value). NCBI's build writes
+    // it as `-8` in the archive, from a signed overflow that LOSAT does not reproduce
+    // (`report/serial/asn_text.rs` `itoa_i32`).
+    #[test]
+    fn a_threshold_past_int4_is_recorded_as_int_min() {
+        let inputs = |value: &str| {
+            option_inputs(&parse(&["-threshold", value]).unwrap_or_else(|| panic!("{value}")))
+        };
+        let listed = |threshold: &str| {
+            let case = CASES
+                .iter()
+                .find(|case| case.0 == "opt_thr_frac")
+                .expect("opt_thr_frac");
+            case.2.replace(
+                "WordThreshold=integer:11",
+                &format!("WordThreshold=integer:{threshold}"),
+            )
+        };
+        for value in ["2147483648", "1e10", "+inf", "1e999"] {
+            assert_eq!(
+                render(&algorithm_options(&inputs(value))),
+                listed("-2147483648"),
+                "{value}"
+            );
+        }
+        assert_eq!(
+            render(&algorithm_options(&inputs("2147483647.5"))),
+            listed("2147483647")
+        );
     }
 
     #[test]
@@ -654,8 +703,11 @@ mod tests {
                 "{name} {extra:?}"
             );
         }
-        // The cases LOSAT's command line takes are the model's check of `option_inputs`.
-        assert!(refused > 10 && CASES.len() - refused > 50, "{refused}");
+        // The cases LOSAT's command line takes are the model's check of `option_inputs` (every
+        // matrix and composition mode since series SC, SC6; the word sizes LOSAT does not search
+        // with since line LIB, P-S3, whose parser reads them and whose `resolve` refuses them):
+        // 2 of the 80 are refused (`-use_sw_tback`; the X-drop cases parse since line RG X1).
+        assert!(refused == 2 && CASES.len() - refused > 60, "{refused}");
     }
 
     #[test]

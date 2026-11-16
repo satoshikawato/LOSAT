@@ -1,9 +1,10 @@
 // Scales and display classes of the results' plots (S13b; docs/web/ncbi_ui_mapping.md, "Dot Plot"
 // and "Graphic Summary"). The dot plot's ticks follow the Owner's blast2dotplot.py (its tick_size
 // table and its bp / kbp / Mbp labels), applied to the visible span so that zooming chooses them
-// again. The classes only sort an engine value into the bins of a fixed table (the identity
-// classes of the script, the "Alignment Scores" bins of NCBI's Graphic Summary): they compute no
-// BLAST value, and the values shown next to them stay the engine's strings.
+// again (with steps of its own for the short spans that zooming reaches). The classes only sort an
+// engine value into the bins of a fixed table (the identity classes of the script, the "Alignment
+// Scores" bins of NCBI's Graphic Summary): they compute no BLAST value, and the values shown next
+// to them stay the engine's strings.
 
 // --- ticks of the dot plot -------------------------------------------------------------------------
 
@@ -12,8 +13,16 @@ export interface TickSteps {
   readonly minor: number;
 }
 
-/** The major and minor tick steps for a span of letters: the `tick_size` table of blast2dotplot.py. */
+/**
+ * The major and minor tick steps for a span of letters: the `tick_size` table of blast2dotplot.py
+ * above 100 letters. The script's table is for whole sequences, and gives 100 letters or fewer one
+ * number at most; LOSAT zooms, so a short span has steps of 10, 5 and 2 letters, and 1 between
+ * them: at least two numbers on an axis of 4 letters or more (WA2-OP-02; MIN_SPAN in plot-geometry).
+ */
 export function tickSteps(span: number): TickSteps {
+  if (span <= 10) return { major: 2, minor: 1 };
+  if (span <= 20) return { major: 5, minor: 1 };
+  if (span <= 100) return { major: 10, minor: 1 };
   if (span <= 1000) return { major: 100, minor: 10 };
   if (span <= 5000) return { major: 500, minor: 100 };
   if (span <= 10000) return { major: 1000, minor: 500 };
@@ -139,13 +148,17 @@ export interface ScoreBin {
   readonly color: string;
 }
 
-/** The "Alignment Scores" bins of NCBI's Graphic Summary, half-open: < 40, [40, 50), [50, 80), [80, 200), >= 200. */
+/**
+ * The "Alignment Scores" bins of NCBI's Graphic Summary, half-open: < 40, [40, 50), [50, 80), [80, 200), >= 200.
+ * The colours are Okabe–Ito's colour-universal palette (Owner, 2026-11-02) in place of NCBI's blue, green,
+ * magenta and red: black, blue, bluish green, reddish purple, vermillion, told apart in every common colour vision.
+ */
 export const SCORE_BINS: readonly ScoreBin[] = Object.freeze([
   { label: '< 40', color: '#000000' },
-  { label: '40 - 50', color: '#0020e9' },
-  { label: '50 - 80', color: '#75ea4c' },
-  { label: '80 - 200', color: '#db3de9' },
-  { label: '>= 200', color: '#db3324' },
+  { label: '40 - 50', color: '#0072b2' },
+  { label: '50 - 80', color: '#009e73' },
+  { label: '80 - 200', color: '#cc79a7' },
+  { label: '>= 200', color: '#d55e00' },
 ]);
 
 /** The bin (an index of SCORE_BINS) of an HSP record's bit score; a value that is not a number falls in the first. */

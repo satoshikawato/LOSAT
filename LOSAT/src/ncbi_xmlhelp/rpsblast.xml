@@ -1,0 +1,273 @@
+<?xml version="1.0"?>
+<ncbi_application xmlns="ncbi:application"
+ xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+ xs:schemaLocation="ncbi:application ncbi_application.xsd"
+>
+<program type="regular">
+<name>rpsblast</name>
+<version>2.17.0</version>
+<description>Reverse Position Specific BLAST 2.17.0+</description>
+<detailed_description></detailed_description>
+</program>
+<arguments>
+<key name="comp_based_stats" type="String" optional="true">
+<description>Use composition-based statistics:&#xa;    D or d: default (equivalent to 1 )&#xa;    0 or F or f: Simplified Composition-based statistics as in Bioinformatics 15:1000-1011, 1999&#xa;    1 or T or t: Composition-based statistics as in NAR 29:2994-3005, 2001&#xa;</description>
+<group>2</group>
+<synopsis>compo</synopsis>
+<default>1</default>
+</key>
+<key name="db" type="String" optional="true">
+<description>BLAST database name</description>
+<group>2</group>
+<synopsis>database_name</synopsis>
+</key>
+<key name="dbsize" type="Int8" optional="true">
+<description>Effective length of the database </description>
+<group>9</group>
+<synopsis>num_letters</synopsis>
+</key>
+<key name="entrez_query" type="String" optional="true">
+<description>Restrict search with the given Entrez query</description>
+<group>7</group>
+<synopsis>entrez_query</synopsis>
+</key>
+<key name="evalue" type="Real" optional="true">
+<description>Expectation value (E) threshold for saving hits. Default = 10</description>
+<group>2</group>
+<synopsis>evalue</synopsis>
+</key>
+<key name="export_search_strategy" type="File_Out" optional="true">
+<description>File name to record the search strategy used</description>
+<group>10</group>
+<synopsis>filename</synopsis>
+</key>
+<key name="import_search_strategy" type="File_In" optional="true">
+<description>Search strategy to use</description>
+<group>10</group>
+<synopsis>filename</synopsis>
+</key>
+<key name="line_length" type="Integer" optional="true">
+<description>Line length for formatting alignments&#xa;Not applicable for outfmt &gt; 4&#xa;Default = `60&apos;</description>
+<group>5</group>
+<synopsis>line_length</synopsis>
+<constraint>
+<description>&gt;=1</description>
+</constraint>
+</key>
+<key name="max_hsps" type="Integer" optional="true">
+<description>Set maximum number of HSPs per subject sequence to save for each query</description>
+<group>7</group>
+<synopsis>int_value</synopsis>
+<constraint>
+<description>&gt;=1</description>
+</constraint>
+</key>
+<key name="max_target_seqs" type="Integer" optional="true">
+<description>Maximum number of aligned sequences to keep &#xa;(value of 5 or more is recommended)&#xa;Default = `500&apos;</description>
+<group>7</group>
+<synopsis>num_sequences</synopsis>
+<constraint>
+<description>&gt;=1</description>
+</constraint>
+</key>
+<key name="mt_mode" type="Integer" optional="true">
+<description>Multi-thread mode to use in RPS BLAST search:&#xa; 0 (auto) split by database vols&#xa; 1 split by queries</description>
+<group>12</group>
+<synopsis>int_value</synopsis>
+<constraint>
+<description>(&gt;=0 and =&lt;1)</description>
+</constraint>
+<default>0</default>
+</key>
+<key name="num_alignments" type="Integer" optional="true">
+<description>Number of database sequences to show alignments for&#xa;Default = `250&apos;</description>
+<group>5</group>
+<synopsis>int_value</synopsis>
+<constraint>
+<description>&gt;=0</description>
+</constraint>
+</key>
+<key name="num_descriptions" type="Integer" optional="true">
+<description>Number of database sequences to show one-line descriptions for&#xa;Not applicable for outfmt &gt; 4&#xa;Default = `500&apos;</description>
+<group>5</group>
+<synopsis>int_value</synopsis>
+<constraint>
+<description>&gt;=0</description>
+</constraint>
+</key>
+<key name="num_threads" type="Integer" optional="true">
+<description>Number of threads to use in RPS BLAST search:&#xa; 0 (auto = num of databases)&#xa; 1 (disable)&#xa; max number of threads = num of databases</description>
+<group>12</group>
+<synopsis>int_value</synopsis>
+<constraint>
+<description>&gt;=0</description>
+</constraint>
+<default>1</default>
+</key>
+<key name="out" type="File_Out" optional="true">
+<description>Output file name</description>
+<group>2</group>
+<synopsis>output_file</synopsis>
+<constraint>
+<description>file name length &lt; 256</description>
+</constraint>
+<default>-</default>
+</key>
+<key name="outfmt" type="String" optional="true">
+<description>alignment view options:&#xa;  0 = Pairwise,&#xa;  1 = Query-anchored showing identities,&#xa;  2 = Query-anchored no identities,&#xa;  3 = Flat query-anchored showing identities,&#xa;  4 = Flat query-anchored no identities,&#xa;  5 = BLAST XML,&#xa;  6 = Tabular,&#xa;  7 = Tabular with comment lines,&#xa;  8 = Seqalign (Text ASN.1),&#xa;  9 = Seqalign (Binary ASN.1),&#xa; 10 = Comma-separated values,&#xa; 11 = BLAST archive (ASN.1),&#xa; 12 = Seqalign (JSON),&#xa; 13 = Multiple-file BLAST JSON,&#xa; 14 = Multiple-file BLAST XML2,&#xa; 15 = Single-file BLAST JSON,&#xa; 16 = Single-file BLAST XML2,&#xa; 18 = Organism Report,&#xa; 20 = Comma-separated values with header lines&#xa;&#xa;Options 6, 7, 10 and 20 can be additionally configured to produce&#xa;a custom format specified by space delimited format specifiers,&#xa;or by a token specified by the delim keyword.&#xa; E.g.: &quot;10 delim=@ qacc sacc score&quot;.&#xa;The delim keyword must appear after the numeric output format&#xa;specification.&#xa;The supported format specifiers are:&#xa;&#x9;    qseqid means Query Seq-id&#xa;&#x9;       qgi means Query GI&#xa;&#x9;      qacc means Query accession&#xa;&#x9;   qaccver means Query accession.version&#xa;&#x9;      qlen means Query sequence length&#xa;&#x9;    sseqid means Subject Seq-id&#xa;&#x9; sallseqid means All subject Seq-id(s), separated by a &apos;;&apos;&#xa;&#x9;       sgi means Subject GI&#xa;&#x9;    sallgi means All subject GIs&#xa;&#x9;      sacc means Subject accession&#xa;&#x9;   saccver means Subject accession.version&#xa;&#x9;   sallacc means All subject accessions&#xa;&#x9;      slen means Subject sequence length&#xa;&#x9;    qstart means Start of alignment in query&#xa;&#x9;      qend means End of alignment in query&#xa;&#x9;    sstart means Start of alignment in subject&#xa;&#x9;      send means End of alignment in subject&#xa;&#x9;      qseq means Aligned part of query sequence&#xa;&#x9;      sseq means Aligned part of subject sequence&#xa;&#x9;    evalue means Expect value&#xa;&#x9;  bitscore means Bit score&#xa;&#x9;     score means Raw score&#xa;&#x9;    length means Alignment length&#xa;&#x9;    pident means Percentage of identical matches&#xa;&#x9;    nident means Number of identical matches&#xa;&#x9;  mismatch means Number of mismatches&#xa;&#x9;  positive means Number of positive-scoring matches&#xa;&#x9;   gapopen means Number of gap openings&#xa;&#x9;      gaps means Total number of gaps&#xa;&#x9;      ppos means Percentage of positive-scoring matches&#xa;&#x9;    frames means Query and subject frames separated by a &apos;/&apos;&#xa;&#x9;    qframe means Query frame&#xa;&#x9;    sframe means Subject frame&#xa;&#x9;      btop means Blast traceback operations (BTOP)&#xa;&#x9;    staxid means Subject Taxonomy ID&#xa;&#x9;  ssciname means Subject Scientific Name&#xa;&#x9;  scomname means Subject Common Name&#xa;&#x9;sblastname means Subject Blast Name&#xa;&#x9; sskingdom means Subject Super Kingdom&#xa;&#x9;   staxids means unique Subject Taxonomy ID(s), separated by a &apos;;&apos;&#xa;&#x9;&#x9;&#x9; (in numerical order)&#xa;&#x9; sscinames means unique Subject Scientific Name(s), separated by a &apos;;&apos;&#xa;&#x9; scomnames means unique Subject Common Name(s), separated by a &apos;;&apos;&#xa;&#x9;sblastnames means unique Subject Blast Name(s), separated by a &apos;;&apos;&#xa;&#x9;&#x9;&#x9; (in alphabetical order)&#xa;&#x9;sskingdoms means unique Subject Super Kingdom(s), separated by a &apos;;&apos;&#xa;&#x9;&#x9;&#x9; (in alphabetical order) &#xa;&#x9;    stitle means Subject Title&#xa;&#x9;salltitles means All Subject Title(s), separated by a &apos;&lt;&gt;&apos;&#xa;&#x9;   sstrand means Subject Strand&#xa;&#x9;     qcovs means Query Coverage Per Subject&#xa;&#x9;   qcovhsp means Query Coverage Per HSP&#xa;&#x9;    qcovus means Query Coverage Per Unique Subject (blastn only)&#xa;When not provided, the default value is:&#xa;&apos;qaccver saccver pident length mismatch gapopen qstart qend sstart send evalue bitscore&apos;, which is equivalent to the keyword &apos;std&apos;&#xa;</description>
+<group>5</group>
+<synopsis>format</synopsis>
+<default>0</default>
+</key>
+<key name="qcov_hsp_perc" type="Real" optional="true">
+<description>Percent query coverage per hsp</description>
+<group>7</group>
+<synopsis>float_value</synopsis>
+<constraint>
+<description>0..100</description>
+<Doubles>
+<min>0</min>
+<max>100</max>
+</Doubles>
+</constraint>
+</key>
+<key name="query" type="File_In" optional="true">
+<description>Input file name</description>
+<group>1</group>
+<synopsis>input_file</synopsis>
+<default>-</default>
+</key>
+<key name="query_loc" type="String" optional="true">
+<description>Location on the query sequence in 1-based offsets (Format: start-stop)</description>
+<group>1</group>
+<synopsis>range</synopsis>
+</key>
+<key name="searchsp" type="Int8" optional="true">
+<description>Effective length of the search space</description>
+<group>9</group>
+<synopsis>int_value</synopsis>
+<constraint>
+<description>&gt;=0</description>
+</constraint>
+</key>
+<key name="seg" type="String" optional="true">
+<description>Filter query sequence with SEG (Format: &apos;yes&apos;, &apos;window locut hicut&apos;, or &apos;no&apos; to disable)</description>
+<group>6</group>
+<synopsis>SEG_options</synopsis>
+<default>no</default>
+</key>
+<key name="soft_masking" type="Boolean" optional="true">
+<description>Apply filtering locations as soft masks</description>
+<group>6</group>
+<synopsis>soft_masking</synopsis>
+<default>false</default>
+</key>
+<key name="sorthits" type="Integer" optional="true">
+<description>Sorting option for hits:&#xa;alignment view options:&#xa;  0 = Sort by evalue,&#xa;  1 = Sort by bit score,&#xa;  2 = Sort by total score,&#xa;  3 = Sort by percent identity,&#xa;  4 = Sort by query coverage&#xa;Not applicable for outfmt &gt; 4&#xa;</description>
+<group>5</group>
+<synopsis>sort_hits</synopsis>
+<constraint>
+<description>(&gt;=0 and =&lt;4)</description>
+</constraint>
+</key>
+<key name="sorthsps" type="Integer" optional="true">
+<description>Sorting option for hps:&#xa;  0 = Sort by hsp evalue,&#xa;  1 = Sort by hsp score,&#xa;  2 = Sort by hsp query start,&#xa;  3 = Sort by hsp percent identity,&#xa;  4 = Sort by hsp subject start&#xa;Not applicable for outfmt != 0&#xa;</description>
+<group>5</group>
+<synopsis>sort_hsps</synopsis>
+<constraint>
+<description>(&gt;=0 and =&lt;4)</description>
+</constraint>
+</key>
+<key name="sum_stats" type="Boolean" optional="true">
+<description>Use sum statistics</description>
+<group>9</group>
+<synopsis>bool_value</synopsis>
+</key>
+<key name="window_size" type="Integer" optional="true">
+<description>Multiple hits window size, use 0 to specify 1-hit algorithm</description>
+<group>11</group>
+<synopsis>int_value</synopsis>
+<constraint>
+<description>&gt;=0</description>
+</constraint>
+</key>
+<key name="xdrop_gap" type="Real" optional="true">
+<description>X-dropoff value (in bits) for preliminary gapped extensions</description>
+<group>11</group>
+<synopsis>float_value</synopsis>
+</key>
+<key name="xdrop_gap_final" type="Real" optional="true">
+<description>X-dropoff value (in bits) for final gapped alignment</description>
+<group>11</group>
+<synopsis>float_value</synopsis>
+</key>
+<key name="xdrop_ungap" type="Real" optional="true">
+<description>X-dropoff value (in bits) for ungapped extensions</description>
+<group>11</group>
+<synopsis>float_value</synopsis>
+</key>
+<flag name="h" optional="true">
+<description>Print USAGE and DESCRIPTION;  ignore all other parameters</description>
+</flag>
+<flag name="help" optional="true">
+<description>Print USAGE, DESCRIPTION and ARGUMENTS; ignore all other parameters</description>
+</flag>
+<flag name="html" optional="true">
+<description>Produce HTML output?</description>
+<group>5</group>
+</flag>
+<flag name="lcase_masking" optional="true">
+<description>Use lower case filtering in query and subject sequence(s)?</description>
+<group>6</group>
+</flag>
+<flag name="parse_deflines" optional="true">
+<description>Should the query and subject defline(s) be parsed?</description>
+<group>12</group>
+</flag>
+<flag name="remote" optional="true">
+<description>Execute search remotely?</description>
+<group>12</group>
+</flag>
+<flag name="show_gis" optional="true">
+<description>Show NCBI GIs in deflines?</description>
+<group>5</group>
+</flag>
+<flag name="use_sw_tback" optional="true">
+<description>Compute locally optimal Smith-Waterman alignments?</description>
+<group>12</group>
+</flag>
+<flag name="version" optional="true">
+<description>Print version number;  ignore other arguments</description>
+</flag>
+<dependencies>
+<first_requires_second>
+<arg1>entrez_query</arg1>
+<arg2>remote</arg2>
+</first_requires_second>
+<first_excludes_second>
+<arg1>export_search_strategy</arg1>
+<arg2>import_search_strategy</arg2>
+</first_excludes_second>
+<first_excludes_second>
+<arg1>import_search_strategy</arg1>
+<arg2>export_search_strategy</arg2>
+</first_excludes_second>
+<first_excludes_second>
+<arg1>max_target_seqs</arg1>
+<arg2>num_descriptions</arg2>
+</first_excludes_second>
+<first_excludes_second>
+<arg1>max_target_seqs</arg1>
+<arg2>num_alignments</arg2>
+</first_excludes_second>
+<first_excludes_second>
+<arg1>num_alignments</arg1>
+<arg2>max_target_seqs</arg2>
+</first_excludes_second>
+<first_excludes_second>
+<arg1>num_descriptions</arg1>
+<arg2>max_target_seqs</arg2>
+</first_excludes_second>
+</dependencies>
+</arguments>
+</ncbi_application>

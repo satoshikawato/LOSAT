@@ -1,0 +1,11 @@
+Blast-db-mask-info ::= {
+  algo-id 0,
+  algo-program seg,
+  algo-options "opt1",
+  masks {
+    masks {
+    int { from 10, to 40, id swissprot { name "NAME_HUMAN", accession "P12345", release "Reviewed", version 1 } }
+    },
+    more FALSE
+  }
+}

@@ -18,7 +18,7 @@
 //! The records are those of NCBI's HSPs (the starts, lengths and scores printed in the
 //! files; an e-value or bit score as its 15 printed digits, which give back the same double).
 
-use super::encoder::{Encoder, SerialError};
+use super::encoder::{Encoder, ReplacedChar, SerialError, StreamPosition, Traced};
 use super::{write_query, SeqAlignError, SerialFormat};
 use crate::blastinput::app::Program;
 use crate::common::GapEditOp::{self, Del, Ins, Sub};
@@ -93,6 +93,7 @@ fn subject(id: SeqId<'_>, searched_length: i32) -> SubjectRecord<'_> {
         id,
         searched_length,
         offset: 0,
+        use_this_seqid: &[],
     }
 }
 
@@ -191,8 +192,8 @@ fn blastp_documents(format: SerialFormat, db_title: Option<&[u8]>) -> Vec<u8> {
     };
     let subjects = match db_title {
         Some(_) => [
-            subject(SeqId::BlOrdId(0), 137),
-            subject(SeqId::BlOrdId(1), 150),
+            subject(SeqId::BlOrdId(crate::seqdb::Oid::of_unrestricted(0)), 137),
+            subject(SeqId::BlOrdId(crate::seqdb::Oid::of_unrestricted(1)), 150),
         ],
         None => [
             subject(SeqId::Local("Subject_1"), 137),
@@ -486,14 +487,84 @@ fn json_strings_are_escaped_as_ncbi() {
     assert_eq!(buf, b"\"a\\\"b\\\\c\\u0001\\u001F\x7f\xc3\xa9d\"");
 }
 
-/// A byte outside the visible range is an error of the ASN.1 text encoder (the callers
-/// refuse such titles before the search).
+/// A byte outside the visible range is an error of the ASN.1 text encoder (its callers refuse
+/// such strings, or write the document again through `Traced`).
 #[test]
 fn asn_text_records_a_non_visible_byte() {
     let mut buf = Vec::new();
     let mut enc = super::asn_text::AsnTextEncoder::new(&mut buf);
     enc.visible_str(b"a\tb");
     assert_eq!(enc.error(), Some(SerialError::NonVisibleChar(b'\t')));
+    assert_eq!(enc.take_replaced(), Vec::new());
+}
+
+/// Through `Traced`, each byte outside the visible range is `#` and a `ReplacedChar` at the
+/// line where NCBI checks it: before the byte's wrap (NCBI 2.17.0 convert2blastmask, probe RG
+/// K/k4/probe case c_txt_w62: the two bytes of the first `é` at the 63rd and 64th place of a
+/// line that wraps at the second are both on line 4, the next `é` on line 5). A flush before
+/// the end keeps the document.
+#[test]
+fn asn_text_with_frames_replaces_each_byte_at_its_line() {
+    // `  m "` is 5 columns: the wrap comes before the 75th byte of the string (column 79).
+    let string = [
+        b"a".repeat(73),
+        "\u{e9}\u{e9}".as_bytes().to_vec(),
+        b"b".to_vec(),
+    ]
+    .concat();
+    let mut sink = Vec::new();
+    let mut buf = Vec::new();
+    let mut enc = Traced::new(super::asn_text::AsnTextEncoder::new(&mut buf), 0);
+    enc.begin_document("T");
+    enc.begin_sequence("T");
+    enc.member("n", 0);
+    enc.int(1);
+    enc.end_member();
+    enc.flush_to(&mut sink, false).unwrap();
+    enc.member("m", 1);
+    enc.visible_str(&string);
+    enc.end_member();
+    enc.member("l", 2);
+    enc.begin_list(false);
+    enc.element();
+    enc.visible_str(b"x");
+    enc.element();
+    enc.visible_str(b"\x7fy");
+    enc.end_list();
+    enc.end_member();
+    enc.end_sequence();
+    enc.end_document();
+    assert_eq!(enc.error(), None);
+    let replaced = enc.take_replaced_chars();
+    enc.flush_to(&mut sink, true).unwrap();
+    let text = String::from_utf8(sink).unwrap();
+    assert_eq!(
+        text,
+        format!(
+            "T ::= {{\n  n 1,\n  m \"{}\n####b\",\n  l {{\n    \"x\",\n    \"#y\"\n  }}\n}}\n",
+            "a".repeat(73)
+        )
+    );
+    let at = |byte: u8, line: u64, trace: &str, string: &[u8]| ReplacedChar {
+        trace: trace.to_string(),
+        byte,
+        position: StreamPosition::Line(line),
+        string: std::sync::Arc::from(string),
+    };
+    assert_eq!(
+        replaced,
+        vec![
+            at(0xc3, 3, "T.m", &string),
+            at(0xa9, 3, "T.m", &string),
+            at(0xc3, 4, "T.m", &string),
+            at(0xa9, 4, "T.m", &string),
+            at(0x7f, 7, "T.l.E", b"\x7fy"),
+        ]
+    );
+    assert_eq!(
+        replaced[4].message(),
+        b"T.l.E\nBad char [0x7F] in string at line 7\n\x7fy".to_vec()
+    );
 }
 
 /// `COStreamBuffer::PutInt4`.
@@ -511,8 +582,8 @@ fn integers_are_decimal() {
     }
 }
 
-/// LOSAT's refusals of a database for the Seq-annot formats (`check_database`): a database
-/// named `n/a` or `SRA` (any case), and for the ASN.1 text and binary a title byte outside 0x20..0x7E.
+/// LOSAT's refusal of a database for the Seq-annot formats (`check_database`): a database named
+/// `n/a` or `SRA` (any case), whatever its title.
 #[test]
 fn databases_that_ncbi_describes_otherwise_are_refused() {
     use super::seqalign::check_database;
@@ -522,7 +593,7 @@ fn databases_that_ncbi_describes_otherwise_are_refused() {
             SerialFormat::AsnBinary,
             SerialFormat::Json,
         ] {
-            let error = check_database(format, name, b"title", Program::Blastn).unwrap_err();
+            let error = check_database(format, name, Program::Blastn).unwrap_err();
             assert!(
                 error
                     .to_string()
@@ -531,33 +602,140 @@ fn databases_that_ncbi_describes_otherwise_are_refused() {
             );
         }
     }
-    assert!(check_database(SerialFormat::AsnText, "db/x", b"a\tb", Program::Blastp).is_err());
-    assert!(check_database(SerialFormat::AsnText, "db/x", b"\xc3\xa9", Program::Blastp).is_err());
-    assert!(check_database(SerialFormat::AsnBinary, "db/x", b"a\tb", Program::Blastp).is_err());
-    assert!(check_database(
-        SerialFormat::AsnBinary,
-        "db/x",
-        b"\xc3\xa9",
-        Program::Blastp
-    )
-    .is_err());
-    assert!(check_database(
-        SerialFormat::AsnBinary,
-        "db/x",
-        b"plain title",
-        Program::Blastp
-    )
-    .is_ok());
-    for title in [&b"a\tb"[..], b"\xc3\xa9", b"plain title"] {
-        assert!(check_database(SerialFormat::Json, "db/x", title, Program::Blastp).is_ok());
-    }
-    assert!(check_database(
+    for format in [
         SerialFormat::AsnText,
-        "db/nash",
-        b"fixture/sprot.fa",
-        Program::Blastp
-    )
-    .is_ok());
+        SerialFormat::AsnBinary,
+        SerialFormat::Json,
+    ] {
+        assert!(check_database(format, "db/x", Program::Blastp).is_ok());
+        assert!(check_database(format, "db/nash", Program::Blastp).is_ok());
+    }
+}
+
+/// One stream that a test's report and diagnostics both write to (`2>&1`).
+#[derive(Clone, Default)]
+struct Combined(std::rc::Rc<std::cell::RefCell<Vec<u8>>>);
+
+impl std::io::Write for Combined {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.borrow_mut().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// The documents of `blastp_db_documents` written by `write_query_to` with the database title
+/// `title`: the report alone, the posts alone, and both in one stream.
+fn blastp_db_documents_posted(format: SerialFormat, title: &[u8]) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+    let run = RunRecord {
+        program: Program::Blastp,
+        db_title: Some(title),
+        gapped: true,
+    };
+    let subjects = [
+        subject(SeqId::BlOrdId(crate::seqdb::Oid::of_unrestricted(0)), 137),
+        subject(SeqId::BlOrdId(crate::seqdb::Oid::of_unrestricted(1)), 150),
+    ];
+    let hsps = [
+        hsp(
+            0,
+            (0, 0),
+            (0, 0),
+            652,
+            5.30325651018409e-94,
+            255.758355778158,
+            (125, 130, 2),
+            &BP_Q1_HSP1,
+        ),
+        hsp(
+            1,
+            (1, 1),
+            (0, 0),
+            477,
+            2.8220561436493e-67,
+            188.348429992622,
+            (100, 110, 2),
+            &BP_Q1_HSP2,
+        ),
+    ];
+    let write = |writer: &mut dyn std::io::Write, diagnostics: &mut dyn std::io::Write| {
+        let mut buf = Vec::new();
+        for id in ["Query_1", "Query_2"] {
+            super::write_query_to(
+                format,
+                &run,
+                &query(id, 140),
+                &subjects,
+                &hsps,
+                &mut buf,
+                writer,
+                diagnostics,
+            )
+            .unwrap();
+        }
+    };
+    let (mut report, mut posts) = (Vec::new(), Vec::new());
+    write(&mut report, &mut posts);
+    let combined = Combined::default();
+    write(&mut combined.clone(), &mut combined.clone());
+    let both = combined.0.borrow().clone();
+    (report, posts, both)
+}
+
+/// A database title with bytes outside 0x20..0x7E in the ASN.1 text and binary Seq-annots: `#`
+/// for each, and NCBI's post of each byte of each query's document, whose position counts from
+/// that document's start (one object stream per document), with the program's prefix; a short
+/// document is still in NCBI's buffer when it posts, so the posts come before its bytes
+/// (NCBI 2.17.0, `blastn -db` of a title `t\xe9tle db`: `Bad char [0xE9] in string at line 25`,
+/// `byte 197`, before each document). The JSON stream posts nothing (it escapes the bytes below
+/// 0x20 and writes these as they are).
+#[test]
+fn a_database_title_outside_the_visible_range_is_written_with_ncbis_posts() {
+    let title = b"caf\xc3\xa9 \x7f";
+    let shown = b"caf## #";
+    for format in [SerialFormat::AsnText, SerialFormat::AsnBinary] {
+        let (report, posts, both) = blastp_db_documents_posted(format, title);
+        // The report is the plain writer's with `#` in place of each such byte.
+        let (plain, no_posts, _) = blastp_db_documents_posted(format, shown);
+        assert!(no_posts.is_empty());
+        assert_same_bytes(&report, &plain);
+        let document = &plain[..plain.len() / 2];
+        let at = document
+            .windows(shown.len())
+            .position(|window| window == shown)
+            .unwrap();
+        let position = |offset: usize| match format {
+            SerialFormat::AsnText => format!(
+                "line {}",
+                1 + document[..at].iter().filter(|&&byte| byte == b'\n').count()
+            ),
+            _ => format!("byte {}", at + offset),
+        };
+        let mut post = Vec::new();
+        for (byte, offset) in [(0xC3u8, 3), (0xA9, 4), (0x7F, 6)] {
+            post.extend_from_slice(
+                format!(
+                    "Error: (803.7) [blastp] Seq-annot.desc.E.user.data.E.label.str\nBad char [0x{byte:X}] in string at {}\n",
+                    position(offset)
+                )
+                .as_bytes(),
+            );
+            post.extend_from_slice(title);
+            post.push(b'\n');
+        }
+        assert_eq!(posts, [&post[..], &post[..]].concat());
+        // The two documents differ only in the query's id (`Query_1`, `Query_2`).
+        assert_eq!(
+            both,
+            [&post[..], document, &post[..], &plain[document.len()..]].concat(),
+            "{format:?}"
+        );
+    }
+    let (report, posts, _) = blastp_db_documents_posted(SerialFormat::Json, title);
+    assert!(posts.is_empty());
+    assert!(report.windows(title.len()).any(|window| window == title));
 }
 
 /// The mapper of a `-subject` search's remap leaves out a first and a last Std-seg with a gap
@@ -656,4 +834,97 @@ fn ungapped_translated_hsps_are_diags_seq_aligns() {
     assert!(text.contains("from 12,\n              to 41,\n              strand plus,"));
     // An empty edit script and no gap: no `empty` row.
     assert!(!text.contains("empty"));
+}
+
+/// Under a positive list every Seq-align of a subject with strings ends with the `ext`
+/// `use_this_seqid`: a gapped one per HSP, a `diags` one per subject; a subject without strings
+/// has none (blast_seqalign.cpp:1234-1245; probes E01, E12 of line DI-8).
+#[test]
+fn a_subject_with_strings_writes_the_use_this_seqid_ext() {
+    const EXT: &str = "ext{{typestr\"use_this_seqid\",data{{labelstr\"SEQIDS\",num2,\
+         datastrs{\"seqid:P69905.2\",\"seqid:P01942.2\"}}}}}";
+    let strings = [b"seqid:P69905.2".to_vec(), b"seqid:P01942.2".to_vec()];
+    let ops = [Sub(30)];
+    for gapped in [true, false] {
+        let run = RunRecord {
+            program: if gapped {
+                Program::Blastp
+            } else {
+                Program::Tblastx
+            },
+            db_title: Some(b"db"),
+            gapped,
+        };
+        let subjects = [
+            SubjectRecord {
+                use_this_seqid: &strings,
+                ..subject(SeqId::Local("Subject_1"), 100)
+            },
+            subject(SeqId::Local("Subject_2"), 100),
+        ];
+        let document = |subject_index| {
+            let frames = if gapped { (0, 0) } else { (1, 1) };
+            let hsps = [hsp(
+                subject_index,
+                (0, 0),
+                frames,
+                100,
+                1e-5,
+                50.0,
+                (30, 30, 0),
+                &ops,
+            )];
+            let mut buf = Vec::new();
+            assert!(write_query(
+                SerialFormat::AsnText,
+                &run,
+                &query("Query_1", 100),
+                &subjects,
+                &hsps,
+                &mut buf,
+            )
+            .unwrap());
+            String::from_utf8(buf).unwrap().replace([' ', '\n'], "")
+        };
+        let named = document(0);
+        assert!(named.contains(EXT), "{named}");
+        assert!(!document(1).contains("use_this_seqid"));
+    }
+}
+
+/// The bytes replaced in one string share one copy of it, and the lines go on from the last
+/// replaced byte (a string of 20,000 bytes, every other one DEL: 10,000 posts of NCBI, each with
+/// the whole string).
+#[test]
+fn replaced_bytes_of_a_long_string_share_it() {
+    let string: Vec<u8> = (0..20_000)
+        .map(|at| if at % 2 == 0 { b'a' } else { 0x7f })
+        .collect();
+    let mut buf = Vec::new();
+    let mut enc = Traced::new(super::asn_text::AsnTextEncoder::new(&mut buf), 0);
+    enc.begin_document("T");
+    enc.begin_sequence("T");
+    enc.member("m", 0);
+    enc.visible_str(&string);
+    enc.end_member();
+    enc.end_sequence();
+    enc.end_document();
+    let replaced = enc.take_replaced_chars();
+    assert_eq!(replaced.len(), 10_000);
+    assert!(replaced
+        .iter()
+        .all(|byte| std::sync::Arc::ptr_eq(&byte.string, &replaced[0].string)));
+    assert_eq!(&replaced[0].string[..], &string[..]);
+    // `  m "` and 73 more bytes fill line 2 to column 78; each later line holds 78 bytes.
+    let lines: Vec<u64> = replaced
+        .iter()
+        .map(|byte| match byte.position {
+            StreamPosition::Line(line) => line,
+            StreamPosition::Byte(_) => unreachable!(),
+        })
+        .collect();
+    assert_eq!(lines[0], 2);
+    assert!(lines.windows(2).all(|pair| pair[0] <= pair[1]));
+    let text_lines = buf.iter().filter(|&&byte| byte == b'\n').count() as u64;
+    assert!(lines[9_999] <= text_lines);
 }

@@ -1,0 +1,17 @@
+# RPSBLAST 2.17.0+
+# Query: YP_009220478.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+YP_009220478.1	CDD:102	50.000	6	3	0	27	32	34	39	4.7	14.7
+# RPSBLAST 2.17.0+
+# Query: tk_lc TK-TMK with residues 61-120 in lower case
+# Database: rps_mini3v
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 5 hits found
+tk_lc	CDD:101	100.000	190	0	0	1	190	1	190	1.66e-70	208
+tk_lc	CDD:102	28.571	35	19	2	216	244	106	140	0.35	18.9
+tk_lc	CDD:102	45.455	11	6	0	355	365	108	118	7.8	14.7
+tk_lc	CDD:102	25.000	20	15	0	228	247	83	102	8.4	14.3
+tk_lc	CDD:103	50.000	10	5	0	180	189	149	158	8.5	14.3
+# BLAST processed 2 queries

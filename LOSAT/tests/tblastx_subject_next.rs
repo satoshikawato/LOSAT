@@ -15,10 +15,13 @@
 //! off, at one and several threads, against the one-thread search with it off, on a set laid out
 //! as a genome database is (two long records first, then many short ones), with ambiguity codes in the long records (N blocks, single IUPAC codes, one of them in a
 //! run across a translation window), through `-subject` and through a database of the same records
-//! (`losat makedb`).
+//! (`losat makeblastdb`).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+mod temp_support;
+use temp_support::TempPath;
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -43,13 +46,14 @@ fn losat(switches: &[(&str, &str)]) -> Command {
     command
 }
 
-fn temp_dir(tag: &str) -> PathBuf {
+/// A directory of the test's own, removed with what is in it when the value is dropped.
+fn temp_dir(tag: &str) -> TempPath {
     let dir = std::env::temp_dir().join(format!(
         "losat-tblastx-subject-next-{tag}-{}",
         std::process::id()
     ));
     std::fs::create_dir_all(&dir).unwrap();
-    dir
+    TempPath::new(dir)
 }
 
 fn letters(name: &str) -> Vec<u8> {
@@ -106,15 +110,15 @@ fn inputs(dir: &Path) -> (PathBuf, PathBuf) {
 fn makedb(dir: &Path, fasta_file: &Path) -> String {
     let db = dir.join("set").to_str().unwrap().to_string();
     let output = losat(&[])
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(fasta_file)
         .args(["-dbtype", "nucl", "-out", &db])
         .output()
-        .expect("run losat makedb");
+        .expect("run losat makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     db

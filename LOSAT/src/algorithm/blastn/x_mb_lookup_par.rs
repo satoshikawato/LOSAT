@@ -103,14 +103,12 @@
 //! that is freed after all (one too small for a fill, or one whose fill found the lock taken at its
 //! end) never moves the threshold; the lines no fill wrote are never touched and not resident. What
 //! the process keeps, for `n` threads and `s` the largest per-worker size of its tables: resident,
-//! at most `n x s` from the fills on the whole pool plus, with `LOSAT_X_QBATCHPAR`, `m x s` for each
-//! slot of `m` threads that filled a table while another fill ran (the slots' threads add up to
-//! `n`, so below `2 n x s` in all), and a fill that finds the lock taken can add one more kept
-//! buffer; address space, 32 MiB + 4 KiB per kept buffer (`n x s` when that is larger: 255 threads
-//! at 160 KiB). At 64 threads and 160 KiB that is 10 MiB resident in one mapping of 32 MiB + 4 KiB,
-//! and with four slots of 16 threads 17.5 MiB resident in four. Elsewhere (macOS, Windows, musl,
-//! wasm32) the buffer has the fill's size and is freed at the end of the fill: those allocators
-//! return large blocks themselves, and there is no threshold to keep low.
+//! at most `n x s` from the fills on the whole pool, and a fill that finds the lock taken can add
+//! one more kept buffer; address space, 32 MiB + 4 KiB per kept buffer (`n x s` when that is
+//! larger: 255 threads at 160 KiB). At 64 threads and 160 KiB that is 10 MiB resident in one
+//! mapping of 32 MiB + 4 KiB. Elsewhere (macOS, Windows, musl, wasm32) the buffer has the fill's
+//! size and is freed at the end of the fill: those allocators return large blocks themselves, and
+//! there is no threshold to keep low.
 //!
 //! EXPERIMENT (LOSAT_X_MBLUTONCE; in the strict set since 2026-10-18: on unless it is `0`): `fill`
 //! hands the table to the read-once fill of `x_mb_lookup_once.rs` (its first dispatch), in which
@@ -124,7 +122,7 @@
 //! another worker's, so no 4-byte access may cover them. The plan, the reading order and the
 //! updates are the same, so the table is the same.
 
-use super::{build_unmasked_ranges, MaskedInterval, PvArrayType, BLAST2NA_MASK, PV_ARRAY_MASK};
+use super::{build_unmasked_ranges, x_range_words, MaskedInterval, PvArrayType, PV_ARRAY_MASK};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
@@ -687,60 +685,51 @@ fn fill_part<const H24: bool>(
                 continue;
             }
 
-            let mut current_kmer: u64 = 0;
-            let mut valid_bases = 0usize;
-
-            for pos in range_start..range_end {
-                let base = seq[pos];
-                if (base & BLAST2NA_MASK) != 0 {
-                    current_kmer = 0;
-                    valid_bases = 0;
-                    continue;
-                }
-
-                current_kmer = ((current_kmer << 2) | base as u64) & words.kmer_mask;
-                valid_bases += 1;
-                if valid_bases < lut_word_length {
-                    continue;
-                }
-
-                let bucket = current_kmer as usize;
-                if owner[bucket >> block_shift] != part {
-                    continue;
-                }
-                let q_off_1 = (query_offset + (pos + 1 - lut_word_length) + 1) as u32;
-                if words.ascending_cells {
-                    own_words.push((bucket as u32, q_off_1));
-                }
-                #[cfg(target_arch = "x86_64")]
-                {
-                    // SAFETY: `bucket` < table size (masked k-mer); a prefetch does not fault.
-                    unsafe {
-                        core::arch::x86_64::_mm_prefetch(
-                            if H24 {
-                                super::x_mb_narrow::at(t.hashtable.ptr, bucket)
-                            } else {
-                                t.hashtable.ptr.add(bucket) as *const i8
-                            },
-                            core::arch::x86_64::_MM_HINT_T0,
-                        );
+            x_range_words(
+                &seq[range_start..range_end],
+                lut_word_length,
+                words.kmer_mask,
+                || {},
+                |current_kmer, i| {
+                    let pos = range_start + i;
+                    let bucket = current_kmer as usize;
+                    if owner[bucket >> block_shift] != part {
+                        return;
                     }
-                    let slot = x_ring_len % X_DELAY;
-                    if x_ring_len >= X_DELAY {
-                        let (b, q) = x_ring[slot];
-                        // SAFETY: the cell block of `b` is owned by this part; `q` is the
-                        // offset of one of this part's words.
-                        unsafe { t.apply::<H24>(b as usize, q) };
+                    let q_off_1 = (query_offset + (pos + 1 - lut_word_length) + 1) as u32;
+                    if words.ascending_cells {
+                        own_words.push((bucket as u32, q_off_1));
                     }
-                    x_ring[slot] = (bucket as u32, q_off_1);
-                    x_ring_len += 1;
-                }
-                #[cfg(not(target_arch = "x86_64"))]
-                {
-                    // SAFETY: as above.
-                    unsafe { t.apply::<H24>(bucket, q_off_1) };
-                }
-            }
+                    #[cfg(target_arch = "x86_64")]
+                    {
+                        // SAFETY: `bucket` < table size (masked k-mer); a prefetch does not fault.
+                        unsafe {
+                            core::arch::x86_64::_mm_prefetch(
+                                if H24 {
+                                    super::x_mb_narrow::at(t.hashtable.ptr, bucket)
+                                } else {
+                                    t.hashtable.ptr.add(bucket) as *const i8
+                                },
+                                core::arch::x86_64::_MM_HINT_T0,
+                            );
+                        }
+                        let slot = x_ring_len % X_DELAY;
+                        if x_ring_len >= X_DELAY {
+                            let (b, q) = x_ring[slot];
+                            // SAFETY: the cell block of `b` is owned by this part; `q` is the
+                            // offset of one of this part's words.
+                            unsafe { t.apply::<H24>(b as usize, q) };
+                        }
+                        x_ring[slot] = (bucket as u32, q_off_1);
+                        x_ring_len += 1;
+                    }
+                    #[cfg(not(target_arch = "x86_64"))]
+                    {
+                        // SAFETY: as above.
+                        unsafe { t.apply::<H24>(bucket, q_off_1) };
+                    }
+                },
+            );
         }
     }
     #[cfg(target_arch = "x86_64")]
@@ -1263,6 +1252,10 @@ pub(super) mod tests {
     // The tables of one case, built by the fill of this module in one part (the loop's
     // statements in reading order; the tests above check it against `build_two_stage_lookup`),
     // from start values `helper0` / `pv0` of the counters and presence-vector words.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     struct Built {
         hashtable: Vec<u32>,
         next_pos: Vec<u32>,
@@ -1271,6 +1264,10 @@ pub(super) mod tests {
         stats: FillStats,
     }
 
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     fn build_with(
         parts: usize,
         in_pool: bool,
@@ -1307,6 +1304,10 @@ pub(super) mod tests {
         b
     }
 
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     fn assert_same(a: &Built, b: &Built, what: &str) {
         assert_eq!(a.hashtable, b.hashtable, "{what}: hashtable");
         assert_eq!(a.next_pos, b.next_pos, "{what}: next_pos");
@@ -1376,7 +1377,7 @@ pub(super) mod tests {
             let mb = &reference.mb_lookup;
             let (cells, next_len) = (
                 1usize << (2 * lut_word_length),
-                next_len_of(&queries, offsets),
+                next_len_of(queries, offsets),
             );
             // (a table of 3-byte elements, LOSAT_X_MB24, gives its chains back as 4-byte arrays)
             let (mb_hashtable, mb_next_pos) = reference.x_chain_arrays(next_len);
@@ -1578,7 +1579,7 @@ pub(super) mod tests {
             (12, true, 400_000),
         ] {
             let q = repeat_case(&mut rng, 25_000);
-            let queries = vec![q];
+            let queries = [q];
             let refs: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
             let offsets = vec![0i32];
             let masks = vec![Vec::new()];

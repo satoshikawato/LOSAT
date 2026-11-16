@@ -23,6 +23,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod temp_support;
+use temp_support::{worker_log_if_unset, TempFile};
+
 mod reach_support;
 
 fn fixture(name: &str) -> PathBuf {
@@ -46,6 +49,8 @@ fn genome(name: &str) -> Vec<u8> {
 
 /// What one run printed: the report and standard error.
 struct Run {
+    /// The run\'s worker log, when the test made one: kept until the caller drops the run.
+    _log: Option<TempFile>,
     code: Option<i32>,
     stdout: Vec<u8>,
     stderr: String,
@@ -89,7 +94,7 @@ fn pieces(first: usize, count: usize) -> Vec<u8> {
     fasta
 }
 
-/// A nucleotide database of `pieces(first, count)` made with `LOSAT makedb` in the directory
+/// A nucleotide database of `pieces(first, count)` made with `LOSAT makeblastdb` in the directory
 /// `label`, with `extra` arguments (`-max_file_sz` for volumes); returns the database name.
 fn database(label: &str, first: usize, count: usize, extra: &[&str]) -> PathBuf {
     let dir = temp_dir(label);
@@ -97,7 +102,7 @@ fn database(label: &str, first: usize, count: usize, extra: &[&str]) -> PathBuf 
     std::fs::write(&input, pieces(first, count)).unwrap();
     let name = dir.join("pieces");
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(&input)
         .args(["-dbtype", "nucl"])
@@ -105,10 +110,10 @@ fn database(label: &str, first: usize, count: usize, extra: &[&str]) -> PathBuf 
         .arg(&name)
         .args(extra)
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run LOSAT makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     name
@@ -159,12 +164,7 @@ fn blastn_any_exit(
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat-bndbstream-worker.log"),
-        );
-    }
+    let log = worker_log_if_unset(&mut command, "blastn_db_stream_worker");
     let output = command
         .arg("blastn")
         .args(["-task", task])
@@ -178,6 +178,7 @@ fn blastn_any_exit(
         .output()
         .expect("run LOSAT");
     Run {
+        _log: log,
         code: output.status.code(),
         stdout: output.stdout,
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
@@ -253,6 +254,84 @@ fn reports_with_the_window_are_the_reports_with_rounds() {
     let sides = same_reports("megablast", &db, 4, "0", &[], &one_thread);
     assert!(sides.0, "pairwise report: sides {sides:?}");
     let _ = std::fs::remove_dir_all(db.parent().unwrap());
+}
+
+// `LOSAT_X_BNDBWIDE` (the window of 16 blocks per thread while few bytes of results wait) changes no
+// report: on and off at 2, 4 and 8 threads, for each task. Its own side runs where the list of
+// blocks is longer than 2 blocks per thread (4 per thread of the cut), its reference side where
+// the database is one block (blocks of 1 MiB).
+#[test]
+fn reports_with_the_wide_window_are_the_reports_with_the_narrow_one() {
+    const WIDE_OFF: (&str, &str) = ("LOSAT_X_BNDBWIDE", "0");
+    let db = database("wide", 0, 10_000, &[]);
+    for task in ["megablast", "blastn", "dc-megablast"] {
+        let one_thread = blastn(task, &db, 1, &[], "6");
+        for threads in [2u32, 4, 8] {
+            let what = format!("{task} threads {threads}");
+            let off = blastn(task, &db, threads, &[WIDE_OFF], "6");
+            assert!(off.stdout == one_thread.stdout, "{what}: off differs");
+            let reach = reach_support::Reach::new("bndbwide");
+            let on = blastn(task, &db, threads, &[reach.var()], "6");
+            assert!(on.stdout == one_thread.stdout, "{what}: on differs");
+            assert_eq!(on.stderr, off.stderr, "{what}: standard error differs");
+            assert_eq!(reach.sides("LOSAT_X_BNDBWIDE"), (true, false), "{what}");
+        }
+    }
+    let reach = reach_support::Reach::new("bndbwide-one-block");
+    let on = blastn("megablast", &db, 4, &[CUT_OFF, reach.var()], "6");
+    assert_eq!(
+        reach.sides("LOSAT_X_BNDBWIDE"),
+        (false, true),
+        "{}",
+        on.stderr
+    );
+    let _ = std::fs::remove_dir_all(db.parent().unwrap());
+}
+
+// `LOSAT_X_BNDBSMALL` (a largest block of 256 KiB) changes no report. Pieces of two genomes, about
+// 2.5 MiB of sequence file: above 256 KiB per block at 2 threads (its own side), below it at 4 (its
+// reference side), and at one thread the blocks are those of 1 MiB.
+#[test]
+fn reports_with_small_blocks_are_the_reports_with_large_ones() {
+    const SMALL_OFF: (&str, &str) = ("LOSAT_X_BNDBSMALL", "0");
+    let dir = temp_dir("small");
+    let mut fasta = Vec::new();
+    for (name, letters) in [
+        ("k12", genome("MG1655.fna")),
+        ("sakai", genome("Sakai.fna")),
+    ] {
+        for (index, piece) in letters.chunks(5_000).enumerate() {
+            fasta.extend(format!(">{name}{index}\n").bytes());
+            fasta.extend_from_slice(piece);
+            fasta.push(b'\n');
+        }
+    }
+    let input = dir.join("two.fna");
+    std::fs::write(&input, fasta).unwrap();
+    let db = dir.join("two");
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
+        .arg("makeblastdb")
+        .arg("-in")
+        .arg(&input)
+        .args(["-dbtype", "nucl"])
+        .arg("-out")
+        .arg(&db)
+        .output()
+        .expect("run LOSAT makeblastdb");
+    assert!(output.status.success(), "makeblastdb failed");
+    let one_thread = blastn("megablast", &db, 1, &[], "6");
+    assert!(!one_thread.stdout.is_empty());
+    for (threads, sides) in [(2u32, (true, false)), (4, (false, true))] {
+        let what = format!("threads {threads}");
+        let off = blastn("megablast", &db, threads, &[SMALL_OFF], "6");
+        assert!(off.stdout == one_thread.stdout, "{what}: off differs");
+        let reach = reach_support::Reach::new("bndbsmall");
+        let on = blastn("megablast", &db, threads, &[reach.var()], "6");
+        assert!(on.stdout == one_thread.stdout, "{what}: on differs");
+        assert_eq!(on.stderr, off.stderr, "{what}: standard error differs");
+        assert_eq!(reach.sides("LOSAT_X_BNDBSMALL"), sides, "{what}");
+    }
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 // At one thread the blocks are searched one after another: the switch's decision takes its

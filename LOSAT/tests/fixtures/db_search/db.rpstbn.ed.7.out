@@ -1,0 +1,234 @@
+# RPSTBLASTN 2.17.0+
+# Query: len1
+# Database: rps_mini
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: len2
+# Database: rps_mini
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: len3
+# Database: rps_mini
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: len4
+# Database: rps_mini
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: len5
+# Database: rps_mini
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: len6
+# Database: rps_mini
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: len7
+# Database: rps_mini
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: len11
+# Database: rps_mini
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: len12
+# Database: rps_mini
+# 0 hits found
+# RPSTBLASTN 2.17.0+
+# Query: tkcut570
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 17 hits found
+tkcut570	gnl|CDD|101	1	570	1	4.15e-129	349
+tkcut570	gnl|CDD|101	129	88	-1	1.1	16.2
+tkcut570	gnl|CDD|101	476	369	-2	3.1	14.6
+tkcut570	gnl|CDD|101	321	304	-1	5.1	14.2
+tkcut570	gnl|CDD|101	176	138	-2	6.2	13.9
+tkcut570	gnl|CDD|101	136	116	-3	9.3	13.1
+tkcut570	gnl|CDD|102	431	402	-2	3.0	14.6
+tkcut570	gnl|CDD|102	259	279	1	3.8	14.2
+tkcut570	gnl|CDD|102	88	162	1	5.7	13.9
+tkcut570	gnl|CDD|102	505	531	1	6.2	13.9
+tkcut570	gnl|CDD|102	101	145	2	6.4	13.9
+tkcut570	gnl|CDD|102	432	503	3	6.7	13.9
+tkcut570	gnl|CDD|103	538	567	1	3.0	14.6
+tkcut570	gnl|CDD|103	229	194	-3	7.5	13.5
+tkcut570	gnl|CDD|103	503	453	-2	7.7	13.5
+tkcut570	gnl|CDD|103	330	295	-1	8.2	13.5
+tkcut570	gnl|CDD|103	299	270	-2	9.7	13.1
+# RPSTBLASTN 2.17.0+
+# Query: tkrc570
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 17 hits found
+tkrc570	gnl|CDD|101	570	1	-1	4.15e-129	349
+tkrc570	gnl|CDD|101	442	483	1	1.1	16.2
+tkrc570	gnl|CDD|101	95	202	2	3.1	14.6
+tkrc570	gnl|CDD|101	250	267	1	5.1	14.2
+tkrc570	gnl|CDD|101	395	433	2	6.2	13.9
+tkrc570	gnl|CDD|101	435	455	3	9.3	13.1
+tkrc570	gnl|CDD|102	140	169	2	3.0	14.6
+tkrc570	gnl|CDD|102	312	292	-1	3.8	14.2
+tkrc570	gnl|CDD|102	483	409	-1	5.7	13.9
+tkrc570	gnl|CDD|102	66	40	-1	6.3	13.9
+tkrc570	gnl|CDD|102	470	426	-2	6.4	13.9
+tkrc570	gnl|CDD|102	139	68	-3	6.7	13.9
+tkrc570	gnl|CDD|103	33	4	-1	3.0	14.6
+tkrc570	gnl|CDD|103	342	377	3	7.5	13.5
+tkrc570	gnl|CDD|103	68	118	2	7.7	13.5
+tkrc570	gnl|CDD|103	241	276	1	8.2	13.5
+tkrc570	gnl|CDD|103	272	301	2	9.7	13.1
+# RPSTBLASTN 2.17.0+
+# Query: tkcut571
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 17 hits found
+tkcut571	gnl|CDD|101	1	570	1	4.32e-129	349
+tkcut571	gnl|CDD|101	129	88	-2	1.1	16.2
+tkcut571	gnl|CDD|101	476	369	-3	3.1	14.6
+tkcut571	gnl|CDD|101	321	304	-2	5.1	14.2
+tkcut571	gnl|CDD|101	176	138	-3	6.3	13.9
+tkcut571	gnl|CDD|101	136	116	-1	9.3	13.1
+tkcut571	gnl|CDD|102	431	402	-3	3.0	14.6
+tkcut571	gnl|CDD|102	259	279	1	3.8	14.2
+tkcut571	gnl|CDD|102	88	162	1	5.7	13.9
+tkcut571	gnl|CDD|102	505	531	1	6.2	13.9
+tkcut571	gnl|CDD|102	101	145	2	6.4	13.9
+tkcut571	gnl|CDD|102	432	503	3	6.7	13.9
+tkcut571	gnl|CDD|103	538	567	1	3.0	14.6
+tkcut571	gnl|CDD|103	229	194	-1	7.5	13.5
+tkcut571	gnl|CDD|103	503	453	-3	7.7	13.5
+tkcut571	gnl|CDD|103	330	295	-2	8.2	13.5
+tkcut571	gnl|CDD|103	299	270	-3	9.7	13.1
+# RPSTBLASTN 2.17.0+
+# Query: tkrc571
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 17 hits found
+tkrc571	gnl|CDD|101	571	2	-1	4.32e-129	349
+tkrc571	gnl|CDD|101	443	484	2	1.1	16.2
+tkrc571	gnl|CDD|101	96	203	3	3.1	14.6
+tkrc571	gnl|CDD|101	251	268	2	5.1	14.2
+tkrc571	gnl|CDD|101	396	434	3	6.3	13.9
+tkrc571	gnl|CDD|101	436	456	1	9.3	13.1
+tkrc571	gnl|CDD|102	141	170	3	3.0	14.6
+tkrc571	gnl|CDD|102	313	293	-1	3.8	14.2
+tkrc571	gnl|CDD|102	484	410	-1	5.7	13.9
+tkrc571	gnl|CDD|102	67	41	-1	6.3	13.9
+tkrc571	gnl|CDD|102	471	427	-2	6.4	13.9
+tkrc571	gnl|CDD|102	140	69	-3	6.7	13.9
+tkrc571	gnl|CDD|103	34	5	-1	3.0	14.6
+tkrc571	gnl|CDD|103	343	378	1	7.5	13.5
+tkrc571	gnl|CDD|103	69	119	3	7.7	13.5
+tkrc571	gnl|CDD|103	242	277	2	8.2	13.5
+tkrc571	gnl|CDD|103	273	302	3	9.7	13.1
+# RPSTBLASTN 2.17.0+
+# Query: tkcut572
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 17 hits found
+tkcut572	gnl|CDD|101	1	570	1	4.32e-129	349
+tkcut572	gnl|CDD|101	129	88	-3	1.1	16.2
+tkcut572	gnl|CDD|101	476	369	-1	3.1	14.6
+tkcut572	gnl|CDD|101	321	304	-3	5.1	14.2
+tkcut572	gnl|CDD|101	176	138	-1	6.3	13.9
+tkcut572	gnl|CDD|101	136	116	-2	9.3	13.1
+tkcut572	gnl|CDD|102	431	402	-1	3.0	14.6
+tkcut572	gnl|CDD|102	259	279	1	3.8	14.2
+tkcut572	gnl|CDD|102	88	162	1	5.7	13.9
+tkcut572	gnl|CDD|102	505	531	1	6.3	13.9
+tkcut572	gnl|CDD|102	101	145	2	6.5	13.9
+tkcut572	gnl|CDD|102	432	503	3	6.8	13.9
+tkcut572	gnl|CDD|103	538	567	1	3.0	14.6
+tkcut572	gnl|CDD|103	229	194	-2	7.5	13.5
+tkcut572	gnl|CDD|103	503	453	-1	7.8	13.5
+tkcut572	gnl|CDD|103	330	295	-3	8.3	13.5
+tkcut572	gnl|CDD|103	299	270	-1	9.8	13.1
+# RPSTBLASTN 2.17.0+
+# Query: tkrc572
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 17 hits found
+tkrc572	gnl|CDD|101	572	3	-1	4.32e-129	349
+tkrc572	gnl|CDD|101	444	485	3	1.1	16.2
+tkrc572	gnl|CDD|101	97	204	1	3.1	14.6
+tkrc572	gnl|CDD|101	252	269	3	5.1	14.2
+tkrc572	gnl|CDD|101	397	435	1	6.3	13.9
+tkrc572	gnl|CDD|101	437	457	2	9.3	13.1
+tkrc572	gnl|CDD|102	142	171	1	3.0	14.6
+tkrc572	gnl|CDD|102	314	294	-1	3.9	14.2
+tkrc572	gnl|CDD|102	485	411	-1	5.8	13.9
+tkrc572	gnl|CDD|102	68	42	-1	6.3	13.9
+tkrc572	gnl|CDD|102	472	428	-2	6.5	13.9
+tkrc572	gnl|CDD|102	141	70	-3	6.8	13.9
+tkrc572	gnl|CDD|103	35	6	-1	3.0	14.6
+tkrc572	gnl|CDD|103	344	379	2	7.5	13.5
+tkrc572	gnl|CDD|103	70	120	1	7.8	13.5
+tkrc572	gnl|CDD|103	243	278	3	8.3	13.5
+tkrc572	gnl|CDD|103	274	303	1	9.8	13.1
+# RPSTBLASTN 2.17.0+
+# Query: nrun
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 17 hits found
+nrun	gnl|CDD|101	1	570	1	8.15e-121	328
+nrun	gnl|CDD|101	129	88	-1	1.2	16.2
+nrun	gnl|CDD|101	476	369	-2	3.3	14.6
+nrun	gnl|CDD|101	321	304	-1	5.4	14.2
+nrun	gnl|CDD|101	176	138	-2	6.6	13.9
+nrun	gnl|CDD|101	594	580	-1	7.3	13.5
+nrun	gnl|CDD|101	136	116	-3	9.8	13.1
+nrun	gnl|CDD|102	529	594	1	1.1	16.2
+nrun	gnl|CDD|102	431	402	-2	3.2	14.6
+nrun	gnl|CDD|102	259	279	1	4.0	14.2
+nrun	gnl|CDD|102	88	162	1	6.0	13.9
+nrun	gnl|CDD|102	505	531	1	6.6	13.9
+nrun	gnl|CDD|102	101	145	2	6.8	13.9
+nrun	gnl|CDD|102	432	503	3	7.2	13.9
+nrun	gnl|CDD|103	538	567	1	3.2	14.6
+nrun	gnl|CDD|103	503	453	-2	8.3	13.5
+nrun	gnl|CDD|103	330	295	-1	8.8	13.5
+# RPSTBLASTN 2.17.0+
+# Query: lower
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 18 hits found
+lower	gnl|CDD|101	1	570	1	6.22e-129	349
+lower	gnl|CDD|101	129	88	-1	1.2	16.2
+lower	gnl|CDD|101	476	369	-2	3.3	14.6
+lower	gnl|CDD|101	321	304	-1	5.4	14.2
+lower	gnl|CDD|101	176	138	-2	6.6	13.9
+lower	gnl|CDD|101	594	580	-1	7.3	13.5
+lower	gnl|CDD|101	136	116	-3	9.8	13.1
+lower	gnl|CDD|102	529	594	1	1.1	16.2
+lower	gnl|CDD|102	431	402	-2	3.2	14.6
+lower	gnl|CDD|102	259	279	1	4.0	14.2
+lower	gnl|CDD|102	88	162	1	6.0	13.9
+lower	gnl|CDD|102	505	531	1	6.6	13.9
+lower	gnl|CDD|102	101	145	2	6.8	13.9
+lower	gnl|CDD|102	432	503	3	7.2	13.9
+lower	gnl|CDD|103	538	567	1	3.2	14.6
+lower	gnl|CDD|103	229	194	-3	8.0	13.5
+lower	gnl|CDD|103	503	453	-2	8.3	13.5
+lower	gnl|CDD|103	330	295	-1	8.8	13.5
+# RPSTBLASTN 2.17.0+
+# Query: amb
+# Database: rps_mini
+# Fields: query id, subject id, q. start, q. end, query frame, evalue, bit score
+# 15 hits found
+amb	gnl|CDD|101	1	570	1	9.17e-126	341
+amb	gnl|CDD|101	476	369	-2	3.3	14.6
+amb	gnl|CDD|101	321	304	-1	5.4	14.2
+amb	gnl|CDD|101	176	138	-2	6.6	13.9
+amb	gnl|CDD|101	594	580	-1	7.3	13.5
+amb	gnl|CDD|101	136	116	-3	9.8	13.1
+amb	gnl|CDD|102	529	594	1	1.1	16.2
+amb	gnl|CDD|102	431	402	-2	3.2	14.6
+amb	gnl|CDD|102	259	279	1	4.0	14.2
+amb	gnl|CDD|102	505	531	1	6.6	13.9
+amb	gnl|CDD|102	432	503	3	7.2	13.9
+amb	gnl|CDD|103	538	567	1	3.2	14.6
+amb	gnl|CDD|103	229	194	-3	8.0	13.5
+amb	gnl|CDD|103	503	453	-2	8.3	13.5
+amb	gnl|CDD|103	330	295	-1	8.8	13.5
+# BLAST processed 18 queries

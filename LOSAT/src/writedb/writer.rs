@@ -4,22 +4,36 @@
 //! the size limit, and closing renames a single volume or writes the alias
 //! file of several.
 
-use std::path::PathBuf;
+use std::collections::BTreeSet;
+use std::path::Path;
 
 use super::bioseq::Bioseq;
-use super::convert::{seq_data_to_binary, BinarySequence};
-use super::header::{defline_set, BadTitleChar};
-use super::volume::Volume;
+use super::convert::{seq_data_to_binary, sequence_hash, BinarySequence};
+pub use super::files::DbVersion;
+use super::files::OffsetArrays;
+use super::header::{defline_set, encode_defline_set, BadChar, BadTitleChar};
+use super::lmdb::{
+    lmdb_file_name, lmdb_map_size_from_env, LmdbEnvSettings, WriteDbLmdb, WriteDbTaxId,
+};
+use super::mask_data::{MaskWriter, MaskedRanges};
+use super::ofstream::OfStream;
+use super::platform::Platform;
+pub use super::volume::Indices;
+use super::volume::{IndexScratch, Volume};
 use super::WriteDbError;
+use crate::seqid::model::{Dbtag, ObjectId};
+use crate::seqid::{DeflineSet, ParsedSeqId};
 
-/// `CWriteDB_Impl` for a version 4 database without parsed Seq-ids.
-#[derive(Debug)]
+/// `CWriteDB_Impl` of format version 4 or 5, with the indices of `-parse_seqids` and
+/// `-hash_index`.
 pub struct WriteDb {
     dbname: String,
     protein: bool,
     title: Vec<u8>,
     date: Vec<u8>,
     max_file_size: u64,
+    /// `m_DbVersion`.
+    version: DbVersion,
     /// `m_VolumeList`; the last element is `m_Volume`.
     volumes: Vec<Volume>,
     closed: bool,
@@ -27,6 +41,58 @@ pub struct WriteDb {
     pending: Option<Bioseq>,
     /// What NCBI's serializer posts to the diagnostic stream, in order.
     diagnostics: Vec<u8>,
+    /// `m_Lmdbdb` (version 5, from the first published sequence until `Close`).
+    lmdb: Option<WriteDbLmdb>,
+    /// `m_Taxdb` (as `m_Lmdbdb`).
+    taxdb: Option<WriteDbTaxId>,
+    /// `m_LmdbOid`: the OID of the next sequence over all volumes.
+    lmdb_oid: u32,
+    /// The platform whose makeblastdb the files follow.
+    platform: Platform,
+    /// `m_Indices`; `indices.full` is `m_ParseIDs` (`-parse_seqids`).
+    indices: Indices,
+    /// `m_Deflines` of the kept sequence (`SetDeflines`, with `-parse_seqids`).
+    pending_deflines: Option<DeflineSet>,
+    /// The taxid of the kept sequence's definition line without `-parse_seqids`
+    /// (`FixTaxId` of `CBuildDatabase::x_EditHeaders`, `set_taxid`).
+    pending_taxid: i32,
+    /// `m_Hash` of the kept sequence (`-hash_index`).
+    pending_hash: u32,
+    /// `m_Ids` of the sequence published last: the ids of all its definition lines
+    /// (`x_CookIds`), which the volume checks for duplicates and indexes, and which the
+    /// version 5 LMDB maps to its OID (makedb-v5 S3c).
+    ids: Vec<ParsedSeqId>,
+    /// `m_TaxIds` of the sequence published last: the taxids of its definition lines,
+    /// ascending, each once.
+    tax_ids: Vec<i32>,
+    /// Every taxid given to `m_Taxdb` (version 5): `GetDBTaxIds` of the new database.
+    db_tax_ids: BTreeSet<i32>,
+    /// Version 5 with `-parse_seqids`: whether a sequence gave `m_Lmdbdb` keys, and the first
+    /// sequence after such a one whose ids were all GIs (its OID and the FASTA form of its
+    /// first id), until a sequence with keys follows.
+    lmdb_had_keys: bool,
+    gi_only_after_keys: Option<(u32, Vec<u8>)>,
+    /// The first sequence of GIs only between two sequences with keys: makeblastdb 2.17.0
+    /// aborts on it when it writes the `.pos` file (`WriteDb::close`).
+    gi_only_between_keys: Option<(u32, Vec<u8>)>,
+    /// The mask data: the registered algorithms, the mask column and the blobs of the
+    /// sequence being written. Empty for a database without mask data.
+    mask: MaskWriter,
+}
+
+impl std::fmt::Debug for WriteDb {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WriteDb")
+            .field("dbname", &self.dbname)
+            .field("protein", &self.protein)
+            .field("version", &self.version)
+            .field("volumes", &self.volumes.len())
+            .field("closed", &self.closed)
+            .field("lmdb_oid", &self.lmdb_oid)
+            .field("platform", &self.platform)
+            .field("indices", &self.indices)
+            .finish_non_exhaustive()
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1864-1885
@@ -55,7 +121,8 @@ pub struct WriteDb {
 // #endif
 // ```
 // makeblastdb prints, for each byte of a title that a VisibleString cannot
-// hold and each time the definition line is serialized:
+// hold and each time the definition line is serialized (`post_bad_chars`: of any
+// string of a parsed definition line, under the path of its member):
 // "Error: (803.7) [makeblastdb] Blast-def-line-set.E.title", "Bad char [0xC3]
 // in string at byte 21" and the title.
 fn post_bad_title_chars(diagnostics: &mut Vec<u8>, title: &[u8], bad: &[BadTitleChar]) {
@@ -73,22 +140,75 @@ fn post_bad_title_chars(diagnostics: &mut Vec<u8>, title: &[u8], bad: &[BadTitle
     }
 }
 
+/// `post_bad_title_chars` for the strings of definition lines with parsed Seq-ids:
+/// `Error: (803.7) [makeblastdb] Blast-def-line-set.E.seqid.E.local.str`, `Bad char
+/// [0xE9] in string at byte 38` and the string (makeblastdb 2.17.0, survey B fixture
+/// p23_nonascii; the member paths of the other alternatives from the S3a probes).
+fn post_bad_chars(diagnostics: &mut Vec<u8>, bad: &[BadChar]) {
+    for bad_char in bad {
+        diagnostics.extend_from_slice(
+            format!(
+                "Error: (803.7) [makeblastdb] {}\nBad char [0x{:X}] in string at byte {}\n",
+                bad_char.path, bad_char.byte, bad_char.stream_offset
+            )
+            .as_bytes(),
+        );
+        diagnostics.extend_from_slice(&bad_char.string);
+        diagnostics.push(b'\n');
+    }
+}
+
 impl WriteDb {
-    /// `CWriteDB(dbname, seqtype, title, ...)` followed by `SetMaxFileSize`.
-    /// `date` is the creation date of the index files, in the form of
-    /// `current_date`'s argument.
-    pub fn new(dbname: &str, protein: bool, title: &[u8], date: &[u8], max_file_size: u64) -> Self {
+    /// `CWriteDB(dbname, seqtype, title, ..., dbver, ...)` followed by
+    /// `SetMaxFileSize`. `date` is the creation date of the index files, in
+    /// the form of `current_date`'s argument; `platform` the platform whose
+    /// makeblastdb the files follow ([`Platform::host`] for a build);
+    /// `indices` is `indexing` (`eFullIndex` for `-parse_seqids`, whose definition lines
+    /// are given by `set_deflines` and written as they are; `eAddHash` for
+    /// `-hash_index`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        dbname: &str,
+        protein: bool,
+        title: &[u8],
+        date: &[u8],
+        max_file_size: u64,
+        version: DbVersion,
+        platform: Platform,
+        indices: Indices,
+    ) -> Self {
         Self {
             dbname: dbname.to_string(),
             protein,
             title: title.to_vec(),
             date: date.to_vec(),
             max_file_size,
+            version,
             volumes: Vec::new(),
             closed: false,
             pending: None,
             diagnostics: Vec::new(),
+            lmdb: None,
+            taxdb: None,
+            lmdb_oid: 0,
+            platform,
+            indices,
+            pending_deflines: None,
+            pending_taxid: 0,
+            pending_hash: 0,
+            ids: Vec::new(),
+            tax_ids: Vec::new(),
+            db_tax_ids: BTreeSet::new(),
+            lmdb_had_keys: false,
+            gi_only_after_keys: None,
+            gi_only_between_keys: None,
+            mask: MaskWriter::default(),
         }
+    }
+
+    /// `m_DbVersion`.
+    pub fn version(&self) -> DbVersion {
+        self.version
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1563-1566
@@ -123,8 +243,46 @@ impl WriteDb {
     /// diagnostics of the title.
     pub fn extract_bioseq_deflines(&mut self, bioseq: &Bioseq) {
         let mut bad = Vec::new();
-        defline_set(&bioseq.title, 0, &mut bad);
+        defline_set(&bioseq.title, 0, 0, &mut bad);
         post_bad_title_chars(&mut self.diagnostics, &bioseq.title, &bad);
+    }
+
+    /// The serialization of `ExtractBioseqDeflines` with `-parse_seqids`: the
+    /// diagnostics of the definition lines it built (`writedb::deflines`), before
+    /// `FixTaxId` gives them a taxid.
+    pub fn post_extracted_deflines(&mut self, deflines: &DeflineSet) {
+        let mut bad = Vec::new();
+        encode_defline_set(deflines, &mut bad);
+        post_bad_chars(&mut self.diagnostics, &bad);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1242-1249
+    // ```c++
+    // void CWriteDB_Impl::SetDeflines(const CBlast_def_line_set & deflines)
+    // {
+    //     CRef<CBlast_def_line_set>
+    //         bdls(const_cast<CBlast_def_line_set*>(& deflines));
+    //
+    //     s_CheckEmptyLists(bdls, true);
+    //     m_Deflines = bdls;
+    // }
+    // ```
+    // `s_CheckEmptyLists` removes empty membership and link lists, which the definition lines
+    // of FASTA input do not have.
+    /// `SetDeflines`: the definition lines of the sequence added last.
+    pub fn set_deflines(&mut self, deflines: DeflineSet) {
+        self.pending_deflines = Some(deflines);
+    }
+
+    /// `SetDeflines` without `-parse_seqids`: the definition line is built at the
+    /// publication (`cook_header`) with this taxid (`FixTaxId`).
+    pub fn set_taxid(&mut self, taxid: i32) {
+        self.pending_taxid = taxid;
+    }
+
+    /// The taxids of the database (version 5; `GetDBTaxIds` of the new database), each once.
+    pub fn db_tax_ids(&self) -> &BTreeSet<i32> {
+        &self.db_tax_ids
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:158-180
@@ -157,6 +315,14 @@ impl WriteDb {
     /// keeps this one.
     pub fn add_sequence(&mut self, bioseq: Bioseq) -> Result<(), WriteDbError> {
         self.publish()?;
+        // `x_ResetSequenceData`.
+        self.pending_deflines = None;
+        self.pending_taxid = 0;
+        self.pending_hash = 0;
+        self.ids.clear();
+        self.tax_ids.clear();
+        // `x_ResetSequenceData`: the mask blobs of the previous sequence go.
+        self.mask.reset_sequence();
         if bioseq.is_aa != self.protein {
             let name = |protein: bool| if protein { "protein" } else { "nucleotide" };
             return Err(WriteDbError::Creation(format!(
@@ -164,6 +330,11 @@ impl WriteDb {
                 name(bioseq.is_aa),
                 name(self.protein)
             )));
+        }
+        if self.indices.hash {
+            if let Some(seq_data) = &bioseq.seq_data {
+                self.pending_hash = sequence_hash(seq_data, bioseq.length).unwrap_or(0);
+            }
         }
         self.pending = Some(bioseq);
         Ok(())
@@ -178,13 +349,103 @@ impl WriteDb {
     //         OID = (m_Volume ) ? m_Volume->GetOID() : 0;
     //     }
     // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:779-781,887-893,925-952
+    // ```c++
+    //     if (! bin_hdr.empty() && OID<0) {
+    //         return;
+    //     }
+    //     ...
+    //     if (bin_hdr.empty() || OID>=0) {
+    //         // Compress the deflines to binary.
+    //
+    //         CNcbiOstrstream oss;
+    //         oss << MSerial_AsnBinary << *deflines;
+    //         bin_hdr = CNcbiOstrstreamToString(oss);
+    //     }
+    // ...
+    // void CWriteDB_Impl::x_CookIds()
+    // {
+    //     if (! m_Ids.empty()) {
+    //         return;
+    //     }
+    //     ...
+    //     ITERATE(list< CRef<CBlast_def_line> >, iter, m_Deflines->Get()) {
+    //         const list< CRef<CSeq_id> > & ids = (**iter).GetSeqid();
+    //         ...
+    //         ITERATE (list<CRef<CSeq_id> >, it, ids) {
+    //             m_Ids.push_back(*it);
+    //         }
+    //     }
+    // }
+    // ```
+    // With `-parse_seqids` (OID -1) the definition lines given by `SetDeflines` are
+    // serialized once; a second `x_CookHeader` for a new volume returns at once.
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:895-900
+    // ```c++
+    //     if ((! deflines.Empty()) && deflines->CanGet()) {
+    //     	ITERATE(list< CRef<CBlast_def_line> >, defline, deflines->Get()) {
+    //     		CBlast_def_line::TTaxIds taxid_set = (*defline)->GetTaxIds();
+    //             tax_ids.insert(taxid_set.begin(), taxid_set.end());
+    //         }
+    //     }
+    // ```
+    // `GetTaxIds` is the definition line's taxid (set on every one by `FixTaxId`) and its
+    // `links`, which makeblastdb's definition lines do not have.
+    /// `x_CookHeader` and `x_CookIds` with `-parse_seqids`.
+    fn cook_parsed_header(&mut self) -> Vec<u8> {
+        let deflines = self.pending_deflines.take().unwrap_or_default();
+        let mut bad = Vec::new();
+        let binhdr = encode_defline_set(&deflines, &mut bad);
+        post_bad_chars(&mut self.diagnostics, &bad);
+        let mut tax_ids: Vec<i32> = deflines
+            .deflines
+            .iter()
+            .filter_map(|defline| defline.taxid)
+            .collect();
+        tax_ids.sort_unstable();
+        tax_ids.dedup();
+        self.tax_ids = tax_ids;
+        self.ids = deflines
+            .deflines
+            .into_iter()
+            .flat_map(|defline| defline.ids)
+            .collect();
+        binhdr
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:925-929
+    // ```c++
+    // void CWriteDB_Impl::x_CookIds()
+    // {
+    //     if (! m_Ids.empty()) {
+    //         return;
+    //     }
+    // ```
+    // Without `-parse_seqids` the definition line's first id is the injected
+    // `gnl|BL_ORD_ID|<oid>` (writedb_impl.cpp:866-874), so `m_Ids` is that id. When the
+    // sequence goes to a new volume, the header is cooked again with OID 0 but `m_Ids`
+    // keeps the id of the first cooking, the OID the sequence would have had in the full
+    // volume: makeblastdb 2.17.0 indexes `gnl|bl_ord_id|<that oid>` for OID 0 of the new
+    // volume and checks it for duplicates there (s3b/probe: `-hash_index -max_file_sz 4000`
+    // on 3 long and 20 short proteins stops with "Duplicate seq_ids are found:
+    // GNL|BL_ORD_ID|6"). The ids are needed by a volume with indices only.
     /// `x_CookHeader`: the header record with the number the sequence gets
-    /// in the current volume.
+    /// in the current volume; the first cooking of a sequence also sets `m_Ids` (with
+    /// indices) and `m_TaxIds`.
     fn cook_header(&mut self, title: &[u8]) -> Vec<u8> {
         let oid = self.volumes.last().map_or(0, Volume::oid);
         let mut bad = Vec::new();
-        let binhdr = defline_set(title, oid, &mut bad);
+        let binhdr = defline_set(title, oid, self.pending_taxid, &mut bad);
         post_bad_title_chars(&mut self.diagnostics, title, &bad);
+        if self.tax_ids.is_empty() {
+            self.tax_ids.push(self.pending_taxid);
+        }
+        if self.indices.any() && self.ids.is_empty() {
+            self.ids.push(ParsedSeqId::General(Dbtag {
+                db: b"BL_ORD_ID".to_vec(),
+                tag: ObjectId::Id(oid as i32),
+            }));
+        }
         binhdr
     }
 
@@ -264,24 +525,71 @@ impl WriteDb {
     // The size check of the old volume uses the header cooked with the old
     // volume's number; the record written to a new volume is cooked again
     // with number 0.
+    //
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1169-1175
+    // ```c++
+    //         if (done  &&  (m_DbVersion == eBDB_Version5)  &&  m_Lmdbdb) {
+    //         	if (m_ParseIDs) {
+    //         		m_Lmdbdb->InsertEntries(m_Ids,m_LmdbOid);
+    //         	}
+    //             m_Taxdb->InsertEntries(m_TaxIds, m_LmdbOid);
+    //             m_LmdbOid++;
+    //         }
+    // ```
+    // The same follows the write into a new volume (writedb_impl.cpp:1226-1232).
+    // Without `-parse_seqids` no Seq-id goes to `m_Lmdbdb`. `m_TaxIds` is the
+    // set of the tax ids of the sequence's definition lines: makeblastdb sets
+    // tax id 0 on each of them without `-taxid` and `-taxid_map`
+    // (`CTaxIdSet::FixTaxId`, taxid_set.cpp:84-136), and `InsertEntries` records
+    // tax id 0 for the set {0} as for an empty set (writedb_lmdb.cpp:446-464).
     /// `x_Publish`: writes the kept sequence, into a new volume when the
     /// current one is full.
     fn publish(&mut self) -> Result<(), WriteDbError> {
         let Some(bioseq) = self.pending.take() else {
             return Ok(());
         };
-        let mut binhdr = self.cook_header(&bioseq.title);
+        if self.version == DbVersion::V5 && self.lmdb.is_none() {
+            self.open_lmdb_files()?;
+        }
+        let mut binhdr = if self.indices.full {
+            self.cook_parsed_header()
+        } else {
+            self.cook_header(&bioseq.title)
+        };
         let binary = self.cook_sequence(&bioseq)?;
+        let hash = self.pending_hash;
 
         let mut done = false;
         if let Some(volume) = self.volumes.last_mut() {
-            done = volume.write_sequence(&binary.seq, &binary.ambig, &binhdr)?;
+            done = volume.write_sequence(
+                &binary.seq,
+                &binary.ambig,
+                &binhdr,
+                &self.ids,
+                hash,
+                self.mask.blobs(),
+            )?;
+            if done {
+                self.insert_lmdb_entries()?;
+            }
         }
         if !done {
             let index = self.volumes.len() as u32;
+            // The new volume's index file takes the arrays of the closed one
+            // (`OffsetArrays`), its indices their memory (`IndexScratch`).
+            let mut arrays = OffsetArrays::default();
+            let mut scratch = IndexScratch::default();
             if let Some(volume) = self.volumes.last_mut() {
                 volume.close()?;
+                arrays = volume.take_offset_arrays();
+                scratch = volume.take_index_scratch();
             }
+            // The date of the column is read before the volume's files are created, so
+            // that a clock that cannot be read leaves none.
+            let column_date = match self.mask.column_meta() {
+                Some(_) => Some(self.mask.column_date(index as usize)?),
+                None => None,
+            };
             self.volumes.push(Volume::create(
                 &self.dbname,
                 self.protein,
@@ -289,16 +597,154 @@ impl WriteDb {
                 &self.date,
                 index,
                 self.max_file_size,
+                self.version,
+                self.platform.sizeof_long,
+                arrays,
+                self.indices,
+                scratch,
             )?);
-            binhdr = self.cook_header(&bioseq.title);
+            if let (Some(meta), Some(date)) = (self.mask.column_meta(), &column_date) {
+                if let Some(volume) = self.volumes.last_mut() {
+                    volume.create_mask_column(meta, date, self.max_file_size)?;
+                }
+            }
+            if !self.indices.full {
+                binhdr = self.cook_header(&bioseq.title);
+            }
             let volume = self.volumes.last_mut().expect("a volume was pushed");
-            done = volume.write_sequence(&binary.seq, &binary.ambig, &binhdr)?;
+            done = volume.write_sequence(
+                &binary.seq,
+                &binary.ambig,
+                &binhdr,
+                &self.ids,
+                hash,
+                self.mask.blobs(),
+            )?;
+            if done {
+                self.insert_lmdb_entries()?;
+            }
             if !done {
                 return Err(WriteDbError::Creation(
                     "Cannot write sequence to volume.".to_string(),
                 ));
             }
         }
+        Ok(())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.hpp:655
+    // ```c++
+    //     int m_LmdbOid;
+    // ```
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/seqdbcommon.hpp:58
+    // ```c++
+    // typedef Int4 TOid;
+    // ```
+    // An OID is a 4-byte signed integer in NCBI's writer and in its LMDB files, so a database
+    // has at most 2^31 sequences; NCBI's `m_LmdbOid++` overflows past that. LOSAT stops with
+    // an error at the sequence that would get OID 2^31 (no NCBI overflow reproduced).
+    /// The keys of the ids (`-parse_seqids`) and the tax ids of the sequence just written,
+    /// under the next OID of the database (version 5).
+    fn insert_lmdb_entries(&mut self) -> Result<(), WriteDbError> {
+        if let Some(taxdb) = self.taxdb.as_mut() {
+            if self.lmdb_oid > i32::MAX as u32 {
+                return Err(WriteDbError::Other(format!(
+                    "a version 5 database holds at most {} sequences (an OID is an Int4)",
+                    i32::MAX as u64 + 1
+                )));
+            }
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1169-1173
+            // ```c++
+            //         if (done  &&  (m_DbVersion == eBDB_Version5)  &&  m_Lmdbdb) {
+            //         	if (m_ParseIDs) {
+            //         		m_Lmdbdb->InsertEntries(m_Ids,m_LmdbOid);
+            //         	}
+            //             m_Taxdb->InsertEntries(m_TaxIds, m_LmdbOid);
+            // ```
+            if self.indices.full {
+                if let Some(lmdb) = self.lmdb.as_mut() {
+                    let keys = lmdb.insert_entries(&self.ids, self.lmdb_oid)?;
+                    // A sequence of GIs only between two sequences with keys stops
+                    // makeblastdb's `.pos` file (`close`): the first one is kept to name it.
+                    if keys > 0 {
+                        if self.gi_only_between_keys.is_none() {
+                            self.gi_only_between_keys = self.gi_only_after_keys.take();
+                        }
+                        self.gi_only_after_keys = None;
+                        self.lmdb_had_keys = true;
+                    } else if self.lmdb_had_keys && self.gi_only_after_keys.is_none() {
+                        let mut name = Vec::new();
+                        if let Some(id) = self.ids.first() {
+                            crate::seqid::label::fasta(id, &mut name);
+                        }
+                        self.gi_only_after_keys = Some((self.lmdb_oid, name));
+                    }
+                }
+            }
+            taxdb.insert_entries(&self.tax_ids, self.lmdb_oid);
+            if self.tax_ids.is_empty() {
+                self.db_tax_ids.insert(0);
+            } else {
+                self.db_tax_ids.extend(self.tax_ids.iter().copied());
+            }
+            self.lmdb_oid += 1;
+        }
+        Ok(())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1136-1154
+    // ```c++
+    //     if(m_DbVersion == eBDB_Version5 && m_Lmdbdb.Empty()) {
+    //         const string lmdb_fname_w_path = BuildLMDBFileName(m_Dbname, m_Protein);
+    //         Uint8 map_size = 0;
+    //         char* map_sz_str = getenv("BLASTDB_LMDB_MAP_SIZE");
+    //         if (map_sz_str) {
+    //         	map_size = NStr::StringToUInt8(map_sz_str);
+    //         }
+    //         if(map_size > 0){
+    //         	m_Lmdbdb.Reset(new CWriteDB_LMDB(lmdb_fname_w_path, map_size));
+    //         	m_Taxdb.Reset(new CWriteDB_TaxID(
+    //         		          GetFileNameFromExistingLMDBFile(lmdb_fname_w_path, ELMDBFileType::eTaxId2Offsets),
+    //         		          map_size));
+    //         }
+    //         else {
+    //         	m_Lmdbdb.Reset(new CWriteDB_LMDB(lmdb_fname_w_path));
+    //         	m_Taxdb.Reset(new CWriteDB_TaxID(
+    //         		          GetFileNameFromExistingLMDBFile(lmdb_fname_w_path, ELMDBFileType::eTaxId2Offsets)));
+    //         }
+    //     }
+    // ```
+    // The page size of LMDB, its default map sizes and the length of its files on Windows are
+    // the platform's (DECISIONS 8 of the makedb-v5 line, `Platform`).
+    /// Creates the LMDB files of a version 5 database (`<db>.pdb` and
+    /// `<db>.ptf`, or `.ndb` and `.ntf`) at its first published sequence.
+    fn open_lmdb_files(&mut self) -> Result<(), WriteDbError> {
+        let lmdb_fname_w_path = build_lmdb_file_name(&self.dbname, self.protein);
+        let map_size = lmdb_map_size_from_env()?;
+        let settings = LmdbEnvSettings::from_env();
+        let platform = self.platform.lmdb()?;
+        let (lmdb_map, tax_map) = if map_size > 0 {
+            (map_size, map_size)
+        } else {
+            (
+                self.platform.default_lmdb_map_size,
+                self.platform.default_taxid_map_size,
+            )
+        };
+        let lmdb = WriteDbLmdb::new(
+            std::path::Path::new(&lmdb_fname_w_path),
+            lmdb_map,
+            &platform,
+            &settings,
+        )?;
+        self.lmdb = Some(lmdb);
+        let taxdb = WriteDbTaxId::new(
+            &lmdb_file_name(std::path::Path::new(&lmdb_fname_w_path), "tf"),
+            tax_map,
+            &platform,
+            &settings,
+        )?;
+        self.taxdb = Some(taxdb);
         Ok(())
     }
 
@@ -335,7 +781,7 @@ impl WriteDb {
         seq_data_to_binary(seq_data, bioseq.length as u32).map_err(|_| {
             WriteDbError::Creation(format!(
                 "Unable to process sequence for entry [{}].",
-                bioseq.local_id
+                bioseq.first_id_string()
             ))
         })
     }
@@ -372,14 +818,39 @@ impl WriteDb {
     //         	LOG_POST(Info << "Rename files index to " << num_digits << " digits");
     //         }
     // ```
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:378-380
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:378-394
     // ```c++
     //         if (m_VolumeList.size() > 1 || m_UseGiMask) {
     //             x_MakeAlias();
     //         }
+    //         if ((m_DbVersion == eBDB_Version5)  &&  m_Lmdbdb) {
+    //         	vector<string> vol_names(m_VolumeList.size());
+    //         	vector<blastdb::TOid> vol_num_oids(m_VolumeList.size());
+    //         	for(unsigned i=0; i < m_VolumeList.size(); i++) {
+    //         		CRef<CWriteDB_Volume> & v = m_VolumeList[i];
+    //         		vol_names[i] = CDirEntry(v->GetVolumeName()).GetName();
+    //         		vol_num_oids[i] = v->GetOID();
+    //         	}
+    //             m_Lmdbdb->InsertVolumesInfo(vol_names, vol_num_oids);
+    //             m_Lmdbdb.Reset();
+    //             m_Taxdb.Reset();
+    //         }
+    //
+    //         m_Volume.Reset();
+    //     }
     // ```
-    /// `Close`: publishes the last sequence, closes the last volume, and
-    /// gives the files their final names.
+    // The volume names are the final ones (after `RenameSingle` or
+    // `RenameFileIndex`). `Reset` runs the destructors of the two LMDB
+    // writers, which write their lookup files and their LMDB transactions
+    // (`WriteDbLmdb::close`, `WriteDbTaxId::close`). An exception that leaves `Close` before
+    // them (the duplicate id of the last sequence, found when `x_Publish` writes it) leaves
+    // the last volume open and both writers alive: their destructors run when the writer is
+    // destroyed, after `x_EndBuild` has removed the files of the build
+    // (`destroy_after_failed_close`). An exception that leaves one of these destructors ends
+    // makeblastdb (`std::terminate`): LOSAT ends with an error there, and no destructor runs
+    // after it (`lmdb` and `taxdb` are dropped without their work).
+    /// `Close`: publishes the last sequence, closes the last volume, gives
+    /// the files their final names, and writes the LMDB files of version 5.
     pub fn close(&mut self) -> Result<(), WriteDbError> {
         if self.closed {
             return Ok(());
@@ -391,18 +862,194 @@ impl WriteDb {
             return Ok(());
         }
         self.volumes[count - 1].close()?;
+        drop(self.volumes[count - 1].take_offset_arrays());
+        drop(self.volumes[count - 1].take_index_scratch());
         if count == 1 {
-            self.volumes[0].rename_single()?;
+            self.volumes[0].rename_single();
         } else if count > 100 {
             let num_digits = count.ilog10() + 1;
             for volume in &mut self.volumes {
-                volume.rename_file_index(num_digits)?;
+                volume.rename_file_index(num_digits);
             }
         }
         if count > 1 {
-            self.make_alias()?;
+            self.make_alias();
+        }
+        if self.version == DbVersion::V5 {
+            if let Some(lmdb) = self.lmdb.as_mut() {
+                let vol_names: Vec<String> = self
+                    .volumes
+                    .iter()
+                    .map(|volume| file_name(volume.volume_name()).to_string())
+                    .collect();
+                let vol_num_oids: Vec<u32> = self.volumes.iter().map(Volume::oid).collect();
+                lmdb.insert_volumes_info(&vol_names, &vol_num_oids)?;
+                // `m_Lmdbdb.Reset()`: makeblastdb aborts in this destructor (the `.pos` file).
+                if let Some((oid, name)) = self.gi_only_between_keys.take() {
+                    self.lmdb = None;
+                    self.taxdb = None;
+                    return Err(gi_only_between_keys_error(oid, &name));
+                }
+                if let Some(lmdb) = self.lmdb.take() {
+                    if let Err(error) = lmdb.close() {
+                        self.taxdb = None;
+                        return Err(error);
+                    }
+                }
+                if let Some(taxdb) = self.taxdb.take() {
+                    taxdb.close()?;
+                }
+            }
         }
         Ok(())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:100-108
+    // ```c++
+    // CWriteDB_Impl::~CWriteDB_Impl()
+    // {
+    //     try {
+    //     	Close();
+    //     } catch (const CWriteDBException& e) {
+    //         ERR_POST(Error << "BLAST Database creation error: " << e.GetMsg());
+    //     }
+    //
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.hpp:629-648
+    // ```c++
+    //     CRef<CWriteDB_Volume> m_Volume;
+    //
+    //     /// List of all volumes so far, up to and including m_Volume.
+    //     vector< CRef<CWriteDB_Volume> > m_VolumeList;
+    //     ...
+    //     ///Write lmdb handle
+    //     CRef <CWriteDB_LMDB>    m_Lmdbdb;
+    //
+    //     ///Write tax info handle
+    //     CRef <CWriteDB_TaxID>    m_Taxdb;
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:146-151
+    // ```c++
+    // CWriteDB_Volume::~CWriteDB_Volume()
+    // {
+    //     if (m_Open) {
+    //         Close();
+    //     }
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:65-72,437-444
+    // ```c++
+    // CWriteDB_LMDB::~CWriteDB_LMDB()
+    // {
+    // 	x_CreateOidToSeqidsLookupFile();
+    // 	x_CommitTransaction();
+    //     CBlastLMDBManager::GetInstance().CloseEnv(m_Db);
+    //     CFile(m_Db+"-lock").Remove();
+    // ...
+    // CWriteDB_TaxID::~CWriteDB_TaxID()
+    // {
+    // 	x_CreateOidToTaxIdsLookupFile();
+    // 	x_CreateTaxIdToOidsLookupFile();
+    // 	x_CommitTransaction();
+    //     CBlastLMDBManager::GetInstance().CloseEnv(m_Db);
+    //     CFile(m_Db+"-lock").Remove();
+    // }
+    // ```
+    // After a `Close` that threw, the destructor's `Close` returns at once (`m_Closed`), and the
+    // members are destroyed in the reverse order of their declaration: `m_Taxdb` (the `.pot`
+    // and `.pto` files, the commit into `.ptf`), `m_Lmdbdb` (the `.pos` file, the commit into the
+    // `.pdb` file, which `x_EndBuild` removed: it goes to the removed file), then
+    // `m_VolumeList` and `m_Volume`, whose last volume closes: its index file is written to the
+    // removed one, and the files it makes at the close (the ISAM files, the OID to GI file) are
+    // made under the volume's numbered name, since no rename ran. makeblastdb destroys the
+    // writer when it ends, after its message; the files are those of these steps either way.
+    // A destructor that throws ends makeblastdb (`std::terminate`): the steps after it do not
+    // run (the tax id writer of a database whose first sequence failed: "No tax info for any
+    // oid"). An error of the last volume's close is LOSAT's 4 GiB stop, after the build's error.
+    /// The destructors of the writer's members after a `close` that failed (`x_EndBuild` has
+    /// removed the files of the build).
+    pub fn destroy_after_failed_close(&mut self) {
+        if let Some(taxdb) = self.taxdb.take() {
+            if taxdb.close().is_err() {
+                self.lmdb = None;
+                return;
+            }
+        }
+        if let Some(lmdb) = self.lmdb.take() {
+            if lmdb.close().is_err() {
+                return;
+            }
+        }
+        if let Some(volume) = self.volumes.last_mut() {
+            let _ = volume.close();
+        }
+    }
+
+    /// `RegisterMaskAlgorithm(program, options, name)`: registers a masking algorithm of the
+    /// filtering program `program` (a `Blast-filter-program` number) and returns its id.
+    /// `name` is the name of the mask file for makeblastdb. The first registration creates
+    /// the mask column.
+    pub fn register_mask_algorithm(
+        &mut self,
+        program: i32,
+        options: &[u8],
+        name: &[u8],
+    ) -> Result<i32, WriteDbError> {
+        self.mask
+            .register_program(program, options, name, !self.volumes.is_empty())
+    }
+
+    /// `RegisterMaskAlgorithm(id, description, options)`: the form of `makeblastdb -mask_id`.
+    pub fn register_mask_algorithm_id(
+        &mut self,
+        id: &[u8],
+        description: &[u8],
+        options: &[u8],
+    ) -> Result<i32, WriteDbError> {
+        self.mask
+            .register_id(id, description, options, !self.volumes.is_empty())
+    }
+
+    /// `SetMaskData`: the masked ranges of the sequence added last (its mask blobs are
+    /// written with it when it is published). The ranges are those
+    /// `MaskedRangeSet::get_ranges` gives.
+    pub fn set_mask_data(&mut self, ranges: &[MaskedRanges]) -> Result<(), WriteDbError> {
+        // `x_ComputeSeqLength` of a sequence from a `CBioseq` is the length of its Seq-inst.
+        let seq_length = self
+            .pending
+            .as_ref()
+            .and_then(|bioseq| u32::try_from(bioseq.length).ok());
+        self.mask
+            .set_mask_data(ranges, seq_length, !self.volumes.is_empty())
+    }
+
+    /// Test hook: the date that the mask column of volume `index` stores instead of the
+    /// time of its creation.
+    #[cfg(test)]
+    pub fn set_column_date(&mut self, index: usize, date: &[u8]) {
+        self.mask.set_column_date(index, date);
+    }
+
+    /// The date for a mask column when the clock cannot be read (the time of the build).
+    pub fn set_column_date_fallback(&mut self, date: &[u8]) {
+        self.mask.set_date_fallback(date);
+    }
+
+    /// The volumes written: the path of each without extension, its number
+    /// of sequences and its letters (what NCBI's reader takes from the index
+    /// files for the totals of the database).
+    pub fn volume_totals(&self) -> Vec<(String, u32, u64)> {
+        self.volumes
+            .iter()
+            .map(|volume| {
+                (
+                    volume.volume_name().to_string(),
+                    volume.oid(),
+                    volume.letters(),
+                )
+            })
+            .collect()
     }
 
     fn alias_name(&self) -> String {
@@ -436,26 +1083,28 @@ impl WriteDb {
     //           << "TITLE "        << m_Title << "\n"
     //           << "DBLIST "       << dblist  << "\n";
     // ```
+    // The `ofstream` is not tested (`super::ofstream`): an alias file that cannot be opened or
+    // written leaves the build going on, and the new database cannot be opened afterwards. The
+    // stream writes the file when it is destroyed. makeblastdb sets no GI mask.
     /// `x_MakeAlias`: the alias file of a database of several volumes.
-    fn make_alias(&self) -> Result<(), WriteDbError> {
-        let mut text = Vec::new();
-        text.extend_from_slice(b"#\n# Alias file created: ");
-        text.extend_from_slice(&self.date);
-        text.extend_from_slice(b"\n#\nTITLE ");
-        text.extend_from_slice(&self.title);
-        text.extend_from_slice(b"\nDBLIST ");
+    fn make_alias(&self) {
+        let mut dblist = Vec::new();
         for (i, volume) in self.volumes.iter().enumerate() {
             if i > 0 {
-                text.push(b' ');
+                dblist.push(b' ');
             }
-            text.extend_from_slice(file_name(volume.volume_name()).as_bytes());
+            dblist.extend_from_slice(file_name(volume.volume_name()).as_bytes());
         }
-        text.push(b'\n');
-        let name = self.alias_name();
-        std::fs::write(&name, text).map_err(|source| WriteDbError::Io {
-            path: PathBuf::from(name),
-            source,
-        })
+        let mut alias = OfStream::create(Path::new(&self.alias_name()));
+        alias.insert(b"#\n# Alias file created: ");
+        alias.insert(&self.date);
+        alias.insert(b"\n#\n");
+        alias.insert(b"TITLE ");
+        alias.insert(&self.title);
+        alias.insert(b"\n");
+        alias.insert(b"DBLIST ");
+        alias.insert(&dblist);
+        alias.insert(b"\n");
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1655-1674
@@ -489,6 +1138,11 @@ impl WriteDb {
             .collect()
     }
 
+    // The LMDB file is named for version 5 whether it was created or not; the
+    // other files of `CWriteDB_LMDB` and `CWriteDB_TaxID` (`.pos`, `.ptf`,
+    // `.pot`, `.pto`) are not, so a failed build of version 5 leaves them
+    // (makeblastdb 2.17.0, an error in the FASTA input after the first
+    // sequence: `db.pot`, `db.ptf` and `db.pto` stay).
     /// `ListFiles`: every file of the database written so far.
     pub fn list_files(&self) -> Vec<String> {
         let mut files = Vec::new();
@@ -498,18 +1152,66 @@ impl WriteDb {
         if self.volumes.len() > 1 {
             files.push(self.alias_name());
         }
+        if self.version == DbVersion::V5 {
+            files.push(build_lmdb_file_name(&self.dbname, self.protein));
+        }
         files
     }
+}
 
-    /// Drops every open file without flushing (before a failed build removes
-    /// its files).
-    pub fn abandon(&mut self) {
-        self.closed = true;
-        self.pending = None;
-        for volume in &mut self.volumes {
-            volume.abandon();
-        }
-    }
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:383-392
+// ```c++
+// 	for(unsigned int i = 0; i < m_list.size(); i++) {
+// 		if(i > 0 && m_list[i].oid != m_list[i-1].oid ) {
+// 			if((m_list[i].oid - m_list[i-1].oid) != 1) {
+// 		 		NCBI_THROW( CSeqDBException, eArgErr, "Input id list not in ascending oid order");
+// 			}
+// ```
+// A sequence whose ids are all GIs gives no element of `m_list` (`x_InsertEntry` returns
+// at a GI), so one between two sequences with other ids leaves a gap in the OIDs of the list.
+// `x_CreateOidToSeqidsLookupFile` runs in `~CWriteDB_LMDB`, where the exception ends
+// makeblastdb 2.17.0 with SIGABRT after the volumes are written (survey B p11_gionly_mid).
+// LOSAT refuses the database there with an error that names the sequence (makedb-v5
+// DECISIONS 10: no NCBI abort reproduced). GI-only sequences before the first sequence with
+// keys or after the last one leave no gap and are written as makeblastdb writes them.
+/// The refusal of a version 5 database with `-parse_seqids` in which the sequence of OID `oid`
+/// (first id `name`) has GIs only and lies between sequences with other ids.
+fn gi_only_between_keys_error(oid: u32, name: &[u8]) -> WriteDbError {
+    let mut message = b"Input id list not in ascending oid order: the sequence ".to_vec();
+    message.extend_from_slice(name);
+    message.extend_from_slice(
+        format!(
+            " (OID {oid}) has only GI ids and lies between sequences with other ids, which \
+             makeblastdb 2.17.0 cannot write into the .pos file of a version 5 database (it \
+             aborts); LOSAT refuses the database (-blastdb_version 4 writes it)"
+        )
+        .as_bytes(),
+    );
+    WriteDbError::CreationBytes(message)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:749-761
+// ```c++
+// string BuildLMDBFileName(const string& basename, bool is_protein, bool use_index, unsigned int index)
+// {
+//     if (basename.empty()) {
+//         throw invalid_argument("Basename is empty");
+//     }
+//
+//     string vol_str=kEmptyStr;
+//     if(use_index) {
+//     	vol_str = (index > 9) ?".": ".0";
+//     	vol_str += NStr::UIntToString(index);
+//     }
+//     return basename + vol_str + (is_protein ? ".pdb" : ".ndb");
+// }
+// ```
+// The writer calls it with the defaults `use_index = false`, `index = 0`
+// (include/objtools/blast/seqdb_reader/impl/seqdb_lmdb.hpp:118): one LMDB file for the
+// database, beside its volumes.
+/// `BuildLMDBFileName(basename, is_protein)`: `<db>.pdb` or `<db>.ndb`.
+pub(crate) fn build_lmdb_file_name(basename: &str, is_protein: bool) -> String {
+    format!("{basename}{}", if is_protein { ".pdb" } else { ".ndb" })
 }
 
 /// `CDirEntry(path).GetName()`: the part after the last path separator.

@@ -33,14 +33,12 @@ mod run_impl;
 pub use run_impl::check_options;
 pub use run_impl::run;
 pub use run_impl::run_local;
+pub use run_impl::run_local_database;
 // EXPERIMENT (PAIRPAR): the summary line `main` prints at exit.
 pub use run_impl::x_pair_par_print_summary;
 // The seed release's `LOSAT_X_STATS` line `main` prints at exit. No NCBI
 // counterpart: it prints counters and changes no value NCBI computes.
 pub use run_impl::x_seed_release_print_summary;
-// ABI v1 (`web_api::v1_tblastx`) searches through `run_local_with` with its checks.
-#[cfg(target_arch = "wasm32")]
-pub(crate) use run_impl::{check_losat_limits, run_local_with, V1Checks};
 // What every report of a run needs (`blast_xml`).
 pub(crate) use run_impl::TblastxReportRun;
 
@@ -64,8 +62,9 @@ pub(crate) use indicatif::ProgressBar;
 pub(crate) use rayon::prelude::*;
 pub(crate) use std::collections::HashSet;
 pub(crate) use std::sync::atomic::{AtomicI32, AtomicU64, AtomicUsize, Ordering as AtomicOrdering};
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 pub(crate) use std::sync::mpsc::channel;
-pub(crate) use std::time::{Duration, Instant};
+pub(crate) use std::time::Instant;
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
 // ```c
@@ -75,8 +74,7 @@ pub(crate) use std::time::{Duration, Instant};
 // Blast_HSPListSortByEvalue(hsp_list);
 // ```
 pub(crate) use crate::api::local_blast::{FormatProbe, OutputSink, ReportOutputs};
-pub(crate) use crate::blastinput::value_parsers::tblastx_outfmt;
-pub(crate) use crate::common::{write_output_ncbi_order_evalue_hsp_order_to_writer, Hit};
+pub(crate) use crate::common::Hit;
 pub(crate) use crate::config::ScoringMatrix;
 pub(crate) use crate::stats::{lookup_protein_params_ungapped, KarlinParams};
 pub(crate) use crate::utils::genetic_code::GeneticCode;
@@ -84,23 +82,24 @@ pub(crate) use crate::utils::seg::SegMasker;
 
 pub(crate) use super::args::{TblastxArgs, TblastxMatrix};
 pub(crate) use super::chaining::UngappedHit;
-pub(crate) use super::constants::{GAP_TRIGGER_BIT_SCORE, X_DROP_UNGAPPED_BITS};
+pub(crate) use super::constants::GAP_TRIGGER_BIT_SCORE;
 pub(crate) use super::diagnostics::{
     diagnostics_enabled, print_summary as print_diagnostics_summary, DiagnosticCounters,
 };
-pub(crate) use super::extension::{convert_coords, extend_hit_two_hit, extend_hit_two_hit_with};
-// EXPERIMENT (LOSAT_X_TBXUNGAPSENT): extension/x_two_hit_fast.rs.
 pub(crate) use super::extension::{
-    extend_hit_two_hit_sent, x_tbx_sent_contexts, x_tbx_sent_subject,
+    convert_coords, extend_hit_two_hit_fitting, extend_hit_two_hit_with,
 };
-pub(crate) use super::lookup::{build_ncbi_lookup, QueryContext};
+// EXPERIMENT (LOSAT_X_TBXUNGAPSENT): extension/x_two_hit_fast.rs.
+pub(crate) use super::extension::{x_tbx_sent_contexts, x_tbx_sent_subject};
+#[cfg(test)]
+pub(crate) use super::lookup::build_ncbi_lookup;
+pub(crate) use super::lookup::QueryContext;
 pub(crate) use super::ncbi_cutoffs::{
-    compute_eff_lengths_tblastx, cutoff_score_for_update_tblastx, cutoff_score_max_for_tblastx,
-    gap_trigger_raw_score, x_drop_raw_score, BLAST_GAP_DECAY_RATE,
+    cutoff_score_for_update_tblastx, cutoff_score_max_for_tblastx, gap_trigger_raw_score,
+    x_drop_raw_score, BLAST_GAP_DECAY_RATE,
 };
 pub(crate) use super::reevaluate::{
-    get_num_identities_and_positives_ungapped, hsp_test, reevaluate_ungapped_hit_ncbi_translated,
-    reevaluate_ungapped_hit_ncbi_translated_with,
+    get_num_identities_and_positives_ungapped, reevaluate_ungapped_hit_ncbi_translated_with,
 };
 pub(crate) use super::report;
 pub(crate) use super::scoring::{Blosum62Score, MatrixScores, TbxScore};
@@ -115,7 +114,8 @@ pub(crate) use super::stage_dump;
 // ```
 pub(crate) use super::sum_stats_linking::{
     apply_sum_stats_even_gap_linking_with_parallel, calculate_link_hsp_cutoffs_ncbi,
-    compute_avg_query_length_ncbi, find_smallest_lambda_params, LinkingParams,
+    compute_avg_query_length_ncbi, find_smallest_lambda_params, link_one_hit_with_int4_ends,
+    LinkingParams,
 };
 pub(crate) use super::tracing::{
     trace_final_hit_if_match, trace_hsp_target, trace_match_target, trace_ungapped_hit_if_match,
@@ -131,11 +131,13 @@ pub(crate) use super::blast_extend::DiagStruct;
 
 // Import InitHSP and related functions from blast_gapalign module (NCBI blast_gapalign.c equivalent)
 pub(crate) use super::blast_gapalign::{
-    get_ungapped_hsp_list, sort_init_hsps_by_score_ncbi, sort_ungapped_hits_by_score_ncbi,
-    trace_init_hsp_if_match, ungapped_hits_is_sorted_by_score_ncbi, InitHSP,
+    get_ungapped_hsp_list, get_ungapped_hsp_list_int4, sort_init_hsps_by_score_ncbi,
+    sort_ungapped_hits_by_score_int4, sort_ungapped_hits_by_score_ncbi, trace_init_hsp_if_match,
+    ungapped_hits_is_sorted_by_score_ncbi, InitHSP,
 };
 
 // Import subject scanning functions from blast_aascan module (NCBI blast_aascan.c equivalent)
+#[cfg(test)]
 pub(crate) use super::blast_aascan::s_blast_aa_scan_subject;
 
 // ---------------------------------------------------------------------------
@@ -201,6 +203,8 @@ pub(crate) struct TblastxQueryStats {
     /// not valid: the `EffectiveSearchSpace` option of a BLAST archive (outfmt 11) takes the
     /// first context of the batch's first query, not its first valid one.
     pub context0_search_space: i64,
+    /// That context's length in residues, 0 when it is not valid (`archive::RequestLength::space`).
+    pub context0_aa_len: i64,
     /// The SEG intervals (residues of the frame, end exclusive) of each translated frame.
     pub seg_masks: Vec<(i8, Vec<(usize, usize)>)>,
 }
@@ -216,7 +220,9 @@ pub(crate) struct TblastxQueryStats {
 //                 results = lcl_blast.Run();
 // ```
 /// The result of one query batch. The query indices of `hits` and `queries` are the
-/// queries' positions in the batch.
+/// queries' positions in the batch. `hits` are in report order (`hit_collector.rs`: each
+/// query's `-max_target_seqs` subjects in NCBI's order), so the batches' hits follow each other
+/// in the run's report.
 #[derive(Debug, Default)]
 pub(crate) struct TblastxBatch {
     pub hits: Vec<TblastxHsp>,
@@ -239,7 +245,10 @@ pub(crate) struct WorkerState<S> {
     //    status = s_BlastSearchEngineCore(..., &hsp_list, ...);
     // }
     // ```
-    pub tx: Option<std::sync::mpsc::Sender<Vec<TblastxHsp>>>,
+    /// The channel to the writer thread (`hit_collector.rs`), which takes each subject's final
+    /// HSPs with the subject's index; `None` when the subject loop keeps the collector itself.
+    pub tx: Option<std::sync::mpsc::Sender<(usize, Vec<TblastxHsp>)>>,
+    /// The final HSPs of the subject being searched, sent at the end of the subject.
     pub hits: Vec<TblastxHsp>,
     pub offset_pairs: Vec<OffsetPair>,
     pub diag_array: Vec<DiagStruct>,
@@ -332,6 +341,14 @@ pub(crate) fn reevaluate_ungapped_hsp_list<S: TbxScore>(
     let mut kept_hits = Vec::new();
 
     for mut hit in ungapped_hits {
+        // No HSP of length 0 or less arrives (its end, an `Int4` at or below its start, would read
+        // here as a `u32`): the one-hit word finder's path drops those HSPs after its first linking
+        // call, where NCBI's re-evaluation (this function) deletes them
+        // (`link_one_hit_with_int4_ends`).
+        debug_assert!(
+            !hit.is_int4_inverted(),
+            "an HSP of length 0 or less reached the re-evaluation"
+        );
         let ctx = &contexts[hit.ctx_idx as usize];
         let s_frame_scoring = &s_frames_scoring[usize::from(hit.s_f_idx)];
         let s_frame_report = &s_frames_report[usize::from(hit.s_f_idx)];
@@ -444,8 +461,13 @@ pub(crate) fn reevaluate_ungapped_hsp_list<S: TbxScore>(
         //         align_length < hit_options->min_hit_length) ;
         // ```
         let percent_identity = 0.0;
-        let min_hit_length = 0usize;
-        if hsp_test(num_ident, new_len, percent_identity, min_hit_length) {
+        let min_hit_length = 0;
+        if crate::core::blast_hits::hsp_test(
+            num_ident as i64,
+            new_len as i64,
+            percent_identity,
+            min_hit_length,
+        ) {
             continue;
         }
 

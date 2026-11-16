@@ -15,12 +15,13 @@ supported on a best-effort basis. Older releases are not supported.
 
 ## Reporting A Vulnerability
 
-If the repository has GitHub private vulnerability reporting enabled (Security
-tab, "Report a vulnerability"), use that channel first.
+Report a vulnerability privately through GitHub's private vulnerability
+reporting: the repository's Security tab, "Report a vulnerability". Please do
+not open a public issue, pull request, or discussion for a vulnerability.
 
-If private reporting is not available, open a GitHub issue with a high-level
-summary and avoid posting exploit details, sensitive inputs, or private data.
-Ask the maintainers for a private disclosure channel in that issue.
+Only if private reporting is not available to you, open a GitHub issue with a
+high-level summary and no exploit details, sensitive inputs, or private data,
+and ask the maintainer for a private disclosure channel in that issue.
 
 Please include:
 
@@ -29,6 +30,12 @@ Please include:
 - Reproduction steps using minimal public input when possible.
 - Whether the issue affects runtime behavior, generated output, crashes, or
   artifact integrity.
+
+## Disclosure
+
+The report stays private while the fix is prepared. After the fix is released,
+the maintainer publishes a GitHub security advisory (GHSA) for the
+vulnerability, naming the affected versions and the version that fixes it.
 
 ## Security Scope
 

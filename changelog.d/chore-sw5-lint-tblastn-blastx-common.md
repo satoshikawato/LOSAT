@@ -1,0 +1,1 @@
+- Lints: the tblastn, blastx and shared protein-search code no longer has warnings of the lints that the `[lints]` table still allows for now (unused imports, variables, `mut`, code and casts, and clippy's style lints): unused items are removed or built only where they are used, and the few kept on purpose carry `#[expect(lint, reason = "...")]`. No output changes.

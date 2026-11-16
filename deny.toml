@@ -1,0 +1,57 @@
+# cargo-deny (https://github.com/EmbarkStudios/cargo-deny) for the three Cargo projects with a lock
+# file: LOSAT, web/adapter and python. No NCBI counterpart: supply-chain checks of LOSAT's own
+# dependencies (SWEBOK 2026-11-04 audit, KA13/KA15: C15b, C15e).
+#
+# - ci.yml, job `rust lint`: `check bans licenses sources`, on every pull request. Their result
+#   changes only with the lock files, so they fail only on a pull request that changes one: a new
+#   dependency, or a new version under another licence.
+# - nightly.yml, job `audit`: `check advisories`. The RustSec database is fetched at run time and
+#   changes from day to day, so this stays off pull requests (as cargo audit did before it).
+#
+# Run from the repository root, without --locked (whether each lock file is current is checked
+# where it is built: clippy in `rust lint`, web.yml's `adapter`, python.yml):
+#   cargo deny --manifest-path <LOSAT|web/adapter|python>/Cargo.toml --config deny.toml check
+
+[graph]
+# Every target and every feature: the Wasm, Windows and macOS dependencies and the optional ones
+# (rayon behind `parallel`) are checked as well as the Linux build's.
+all-features = true
+
+[advisories]
+# As cargo audit --deny warnings did: vulnerabilities (always errors), unmaintained and unsound
+# crates anywhere in the graph, and yanked versions all fail. No advisory is ignored.
+unmaintained = "all"
+unsound = "all"
+yanked = "deny"
+ignore = []
+
+[licenses]
+# The licenses the three graphs need, each one satisfying at least one crate's expression
+# (2026-11-08). A crate whose expression no license here satisfies fails the check. One file serves
+# three graphs, so a license that one graph does not use is not reported.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception", # target-lexicon (python, through PyO3's build)
+    "bzip2-1.0.6", # libbz2-rs-sys (bzip2's pure-Rust backend)
+    "CC0-1.0", # tiny-keccak (python)
+    "MIT",
+    "Unicode-3.0", # unicode-ident
+    "Zlib", # zlib-rs
+]
+unused-allowed-license = "allow"
+
+[bans]
+# A second version of a crate is reported, not failed. The ones on 2026-11-08 are build-time
+# macro crates and their helpers: syn 2 next to syn 3 (clap_derive's) in all three, through
+# wasm-bindgen 0.2.121's macros in LOSAT and web/adapter (indicatif -> web-time -> js-sys, wasm32
+# only) and through windows-implement, windows-interface and zerocopy-derive in python; getrandom
+# 0.2 (const-random-macro) next to 0.3 (ahash) in python.
+multiple-versions = "warn"
+# No `*` requirement. web/adapter and python name LOSAT by path; neither is published.
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+# crates.io only: no other registry and no git dependency.
+unknown-registry = "deny"
+unknown-git = "deny"

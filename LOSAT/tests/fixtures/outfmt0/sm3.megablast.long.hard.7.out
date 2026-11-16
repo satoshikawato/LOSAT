@@ -1,0 +1,9 @@
+# BLASTN 2.17.0+
+# Query: sm3longq
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/sm3_long_s.fna)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+sm3longq	sm3longs	96.386	2186	72	7	9812	11992	9814	11997	0.0	3332
+sm3longq	sm3longs	96.852	1874	54	5	21342	23211	21346	23218	0.0	2948
+sm3longq	sm3longs	96.831	1546	45	4	12752	14295	12758	14301	0.0	2488
+# BLAST processed 1 queries

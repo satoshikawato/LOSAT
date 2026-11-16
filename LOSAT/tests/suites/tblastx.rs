@@ -9,10 +9,16 @@ mod run_local_tblastx;
 mod tblastx_band;
 #[path = "../tblastx_batch_pipe.rs"]
 mod tblastx_batch_pipe;
+#[path = "../tblastx_chunk_merge.rs"]
+mod tblastx_chunk_merge;
 #[path = "../tblastx_db_search.rs"]
 mod tblastx_db_search;
+#[path = "../tblastx_db_stream.rs"]
+mod tblastx_db_stream;
 #[path = "../tblastx_extbatch.rs"]
 mod tblastx_extbatch;
+#[path = "../tblastx_few_groups.rs"]
+mod tblastx_few_groups;
 #[path = "../tblastx_hitbf.rs"]
 mod tblastx_hitbf;
 #[path = "../tblastx_kmerge.rs"]
@@ -37,6 +43,8 @@ mod tblastx_ref_lut;
 mod tblastx_report_par;
 #[path = "../tblastx_resolve.rs"]
 mod tblastx_resolve;
+#[path = "../tblastx_run_engine.rs"]
+mod tblastx_run_engine;
 #[path = "../tblastx_search_timing.rs"]
 mod tblastx_search_timing;
 #[path = "../tblastx_seed_bucket.rs"]

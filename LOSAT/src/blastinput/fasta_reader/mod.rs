@@ -53,11 +53,11 @@
 //!                                        m_Config.GetSeqLenThreshold2Guess()));
 //!     }
 //! ```
-//! `-parse_deflines` (`fParseRawID`) is rejected by LOSAT's programs; `fSkipCheck` is not
-//! set by the BLAST programs.
+//! `-parse_deflines` (`fParseRawID`) is `believed`; `fSkipCheck` is not set by the BLAST programs.
 
+pub mod believed;
 pub(crate) mod reader;
-mod seq_id;
+pub(crate) mod seq_id;
 pub(crate) mod stream;
 #[cfg(test)]
 mod tests;
@@ -66,10 +66,10 @@ use std::borrow::Cow;
 use std::io::{Read, Seek};
 
 pub(crate) use stream::FastaStream;
-// The title warning of a record, for ABI v1's records (`web_api::v1_bio::from_bio`).
-#[cfg(target_arch = "wasm32")]
-pub(crate) use reader::seq_data_in_title_warning;
 use stream::LineReader;
+
+// The record and its public methods: `crate::record` (documented as `api::FastaRecord`).
+pub use crate::record::FastaRecord;
 
 /// How an input is read: the molecule, the role's local ID prefix and whether the data
 /// loaders are configured (the Seq-id path of `CBlastInputReader`).
@@ -87,12 +87,42 @@ pub struct ReaderConfig {
     pub role: &'static str,
     /// Keep the defline line of each record (`FastaRecord::source`), for the BLAST archive.
     pub keep_defline: bool,
+    /// `-parse_deflines` (`believed`).
+    pub parse_deflines: bool,
+    /// The strand of a query's Seq-loc (`CBlastInputSourceConfig::GetStrand`), read with
+    /// `-parse_deflines`.
+    pub strand: crate::report::archive::bioseq::SeqLocStrand,
+    /// Whether the reader knows that the run writes the archive when it keeps the deflines
+    /// (`keep_defline`), and refuses what the archive cannot write as it reads
+    /// (`refuse_range_in_archive`). The library API reads before it knows the formats.
+    pub archive_known: bool,
 }
 
 impl ReaderConfig {
     /// The same reader, keeping the defline lines (`-outfmt 11`).
     pub fn with_defline(mut self, keep: bool) -> Self {
         self.keep_defline = keep;
+        self
+    }
+
+    // No NCBI counterpart: NCBI reads for one format; a caller of the library reads the records
+    // before it asks for its formats (`api::read_fasta`), and the refusal comes with the search.
+    /// The reader of a caller that keeps every defline, whatever the formats of its searches
+    /// (`archive_known`).
+    pub fn with_archive_unknown(mut self) -> Self {
+        self.archive_known = false;
+        self
+    }
+
+    /// The reader with `-parse_deflines` or without it (`believed`).
+    pub fn with_parse_deflines(mut self, parse_deflines: bool) -> Self {
+        self.parse_deflines = parse_deflines;
+        self
+    }
+
+    /// The reader of a nucleotide query with `-strand value`.
+    pub fn with_strand(mut self, value: &str) -> Self {
+        self.strand = crate::report::archive::bioseq::SeqLocStrand::of_option(value);
         self
     }
 
@@ -117,6 +147,13 @@ impl ReaderConfig {
             program,
             role: "query",
             keep_defline: false,
+            archive_known: true,
+            parse_deflines: false,
+            strand: if protein {
+                crate::report::archive::bioseq::SeqLocStrand::Unknown
+            } else {
+                crate::report::archive::bioseq::SeqLocStrand::Both
+            },
         }
     }
 
@@ -141,28 +178,15 @@ impl ReaderConfig {
             program,
             role: "subject",
             keep_defline: false,
+            archive_known: true,
+            parse_deflines: false,
+            strand: if protein {
+                crate::report::archive::bioseq::SeqLocStrand::Unknown
+            } else {
+                crate::report::archive::bioseq::SeqLocStrand::Both
+            },
         }
     }
-}
-
-/// One record as NCBI's FASTA input source reads it.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
-pub struct FastaRecord {
-    /// The generated local ID (`lcl|Query_N`, `lcl|Subject_N`, without `lcl|`).
-    pub local_id: String,
-    /// The title: the defline after `>` and the white space that follows it, up to the
-    /// first byte below 0x20, without white space at its ends (`x_ApplyMods`); empty when
-    /// the record has none. Any other bytes, including bytes that are not UTF-8.
-    pub title: Vec<u8>,
-    /// The residues (IUPAC letters; nucleotide `U` as `T`; `>?` gaps as `N` or `X`), in
-    /// lower case where the lowercase mask covers them.
-    pub sequence: Vec<u8>,
-    /// The reader's messages written while the record was read, in order (each one a
-    /// line; NCBI writes them to standard error as it reads).
-    pub warnings: Vec<u8>,
-    /// What the BLAST archive (outfmt 11) writes besides the letters; `None` (8 bytes, no
-    /// allocation) unless the reader was configured to keep it (`ReaderConfig::keep_defline`).
-    pub source: Option<Box<RecordSource>>,
 }
 
 /// The parts of a record that only the BLAST archive writes.
@@ -175,36 +199,113 @@ pub struct RecordSource {
     pub defline: Vec<u8>,
     /// The record's letters before a cut to a range (`FastaRecord::cut`).
     pub uncut: Option<Vec<u8>>,
+    /// The Seq-ids `-parse_deflines` read (`believed`).
+    pub believed: Option<std::sync::Arc<believed::BelievedIds>>,
+    /// The start of the letters after a cut to a range, in the record.
+    pub cut_from: usize,
+    /// The length of the record before a cut to a range (0 for a record that no range cut);
+    /// BLASTX's reports read where the letters lie in the record from it and `cut_from`. A plain
+    /// `usize` keeps the source in glibc's 80-byte chunks.
+    pub uncut_length: usize,
 }
 
+impl RecordSource {
+    /// The source of a part of the record (a chunk of a split query): all of it but the whole
+    /// letters, which only the archive's Bioseq of the record reads.
+    pub fn without_uncut(&self) -> Box<Self> {
+        Box::new(Self {
+            defline: self.defline.clone(),
+            uncut: None,
+            believed: self.believed.clone(),
+            cut_from: self.cut_from,
+            uncut_length: self.uncut_length,
+        })
+    }
+}
+
+// What the engine reads of a record: outside the library API (`api::FastaRecord`), whose types
+// these would bring along.
+#[doc(hidden)]
 impl FastaRecord {
-    /// A record from its parts (tests and the ABI's records).
-    pub fn new(local_id: impl Into<String>, title: &[u8], sequence: &[u8]) -> Self {
-        Self {
-            local_id: local_id.into(),
-            title: title.to_vec(),
-            sequence: sequence.to_vec(),
-            warnings: Vec::new(),
-            source: None,
+    /// The Seq-ids `-parse_deflines` read, `None` without the option.
+    pub fn believed(&self) -> Option<&believed::BelievedIds> {
+        self.source.as_ref()?.believed.as_deref()
+    }
+
+    /// The record of the Bioseq whose Seq-ids are `ids` (at least one), shown as `-parse_deflines`
+    /// shows the ids it read, whose Seq-aligns take the first (`BelievedIds::of_bioseq`): the query
+    /// of psiblast's and tblastn's `-in_pssm`, the PSSM's Bioseq (`pssm_search::PsiSearch::
+    /// query_record`; NCBI BLAST+ 2.17.0: `Query= gi|4504347 <title>`, `qseqid` `gi|4504347`, and
+    /// with `-parse_deflines` `Query= Query_1 <title>` of a local id).
+    pub fn believing(mut self, ids: Vec<crate::seqid::ParsedSeqId>) -> Self {
+        let believed = believed::BelievedIds::of_bioseq(
+            ids,
+            crate::report::archive::bioseq::SeqLocStrand::Unknown,
+        );
+        self.local_id = believed.bare_id();
+        self.source.get_or_insert_with(Default::default).believed =
+            Some(std::sync::Arc::new(believed));
+        self
+    }
+
+    /// What `Query=` and `# Query:` show: the title, and with `-parse_deflines` the id before it
+    /// (`local_id`, `BelievedIds::bare_id`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:732-734
+    /// ```c++
+    ///     string all_id_str = GetSeqIdString(cbs, believe_query);
+    ///     all_id_str += " ";
+    ///     all_id_str = NStr::TruncateSpaces(all_id_str + GetSeqDescrString(cbs));
+    /// ```
+    pub fn query_line(&self) -> Cow<'_, [u8]> {
+        if self.believed().is_none() {
+            return Cow::Borrowed(&self.title);
+        }
+        let mut line = self.local_id.clone().into_bytes();
+        if !self.title.is_empty() {
+            line.push(b' ');
+            line.extend_from_slice(&self.title);
+        }
+        Cow::Owned(line)
+    }
+
+    /// The id of the record in NCBI's warnings (`report::query_warnings::warning_query_id`).
+    pub fn warning_id(&self) -> &[u8] {
+        match self.believed() {
+            Some(ids) => &ids.warning_id,
+            None => self.local_id.as_bytes(),
         }
     }
 
-    /// The residues.
-    pub fn seq(&self) -> &[u8] {
-        &self.sequence
+    /// The Seq-id of the record in the Seq-aligns and the archive.
+    pub fn seq_id(&self) -> crate::report::seqid::SeqId<'_> {
+        match self.believed() {
+            Some(ids) => crate::report::seqid::SeqId::Db(&ids.best),
+            None => crate::report::seqid::SeqId::Local(&self.local_id),
+        }
     }
 
-    /// The title bytes (empty without one).
-    pub fn title(&self) -> &[u8] {
-        &self.title
+    /// The record as the Seq-loc of the archive's `seq-loc-list` (`-parse_deflines`, an id that is
+    /// not local): the searched interval (`x_FastaToSeqLoc`; the `to` of an empty record is -1).
+    pub fn archive_seq_loc(&self) -> Option<crate::report::archive::bioseq::QuerySeqLoc<'_>> {
+        let source = self.source.as_ref()?;
+        let from = source.cut_from as i32;
+        source
+            .believed
+            .as_ref()?
+            .seq_loc(from, from + self.sequence.len() as i32 - 1)
     }
 
     /// The ID that the tabular formats and the reports show for a record with a local
-    /// ID: the title up to its first space, or the local ID when there is no title.
+    /// ID: the title up to its first space, or the local ID when there is no title. With
+    /// `-parse_deflines` the `qaccver` of its ids.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:474-504
     /// (`s_ReplaceLocalId`; see `report::` for its callers)
     pub fn shown_id(&self) -> &[u8] {
+        if let Some(ids) = self.believed() {
+            return &ids.tabular[2];
+        }
         if self.title.is_empty() {
             self.local_id.as_bytes()
         } else {
@@ -214,6 +315,31 @@ impl FastaRecord {
                 .position(|&byte| byte == b' ')
                 .unwrap_or(self.title.len());
             &self.title[..end]
+        }
+    }
+
+    /// The subject ID of the tabular formats of a `-subject` record that the default report
+    /// prints (`saccver`; also `sseqid` and `sacc` of a record read without `-parse_deflines`):
+    /// `report::defline::tabular_subject_id`, or with `-parse_deflines` the `saccver` of the
+    /// record's ids as `report::db_subject::ParsedSubject` makes them (NCBI keeps a parsed local
+    /// id, `s_ReplaceLocalId` with `parse_local`, and `GetSeqIdList` replaces an `lcl|Subject_`
+    /// one with the first word of the title generated from the rest of the defline).
+    /// `Ok(None)` where `GetSeqIdList` throws (`GenerateDefline` cannot decode the title,
+    /// `report::tabular::SubjectLookup::Failed`); `Err` where LOSAT refuses the ids of a record
+    /// read with `-parse_deflines` (`ParsedSubject::tabular_ids`; never a nucleotide record's).
+    pub fn subject_tabular_id(&self, protein: bool) -> Result<Option<Vec<u8>>, &'static str> {
+        match self.believed() {
+            Some(ids) => Ok(
+                crate::report::db_subject::ParsedSubject::of_record(ids, &self.title)
+                    .tabular_ids(protein)?
+                    .map(|[_, _, saccver]| saccver),
+            ),
+            None => Ok(crate::report::defline::tabular_subject_id(
+                self.local_id.as_bytes(),
+                &self.title,
+                protein,
+            )
+            .ok()),
         }
     }
 
@@ -250,6 +376,9 @@ impl FastaRecord {
                             .clone()
                             .unwrap_or_else(|| self.sequence.clone()),
                     ),
+                    believed: source.believed.clone(),
+                    cut_from: source.cut_from + from,
+                    uncut_length: source.uncut_length.max(self.sequence.len()),
                 })
             }),
         }
@@ -278,6 +407,8 @@ impl FastaRecord {
     pub fn cut_in_place(&mut self, from: usize, to_exclusive: usize) {
         if let Some(source) = self.source.as_mut() {
             source.uncut.get_or_insert_with(|| self.sequence.clone());
+            source.uncut_length = source.uncut_length.max(self.sequence.len());
+            source.cut_from += from;
         }
         self.sequence.truncate(to_exclusive);
         self.sequence.drain(..from);
@@ -287,8 +418,7 @@ impl FastaRecord {
 
 /// A record as the programs use it: its residues, the record cut to a range, and its title
 /// bytes (the ranges in `seq_range.rs`, the query warnings, the masks and the lookup
-/// tables). The bridge of the port plan (§1) also implemented it for the `bio` records until
-/// every program read with NCBI's reader (step S8).
+/// tables).
 pub trait InputRecord: Sized {
     /// The residues (the search's letters, lower case where the lowercase mask covers
     /// them).
@@ -311,6 +441,9 @@ pub trait InputRecord: Sized {
     ///             		title = (*desc)->GetTitle();
     /// ```
     fn title_bytes(&self) -> Cow<'_, [u8]>;
+
+    /// The id of the record in NCBI's warnings when `-parse_deflines` read it.
+    fn believed_warning_id(&self) -> Option<&[u8]>;
 }
 
 impl InputRecord for FastaRecord {
@@ -325,6 +458,10 @@ impl InputRecord for FastaRecord {
     fn title_bytes(&self) -> Cow<'_, [u8]> {
         Cow::Borrowed(&self.title)
     }
+
+    fn believed_warning_id(&self) -> Option<&[u8]> {
+        self.believed().map(|ids| ids.warning_id.as_slice())
+    }
 }
 
 /// `CObjReaderParseException`'s codes that the reader throws with these flags.
@@ -334,6 +471,10 @@ pub enum ParseErrorCode {
     Eof,
     /// `eFormat` (`CheckDataLine`).
     Format,
+    /// `eNoDefline`: the first line that is neither blank nor a comment is not a defline, under
+    /// `-parse_deflines` (a reader without `fDLOptional`). The queries end with it as with any
+    /// reader error; the subjects end with `GetAllSeqs`'s own error (`ReadError::into_all_seqs_error`).
+    NoDefline,
 }
 
 /// Why a record was not read.
@@ -386,6 +527,62 @@ impl ReadError {
             ReadError::Write(error) => error.into(),
         }
     }
+
+    /// The error as the programs end with it when it stops a read of all records
+    /// (`CBlastInput::GetAllSeqs`, the subjects): `eNoDefline` is `GetAllSeqs`'s own input
+    /// error (`no_defline_error`), every other error is `into_app_error`'s.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:205-214
+    /// ```c++
+    ///         catch (const CObjReaderParseException& e) {
+    ///             auto err = e.GetErrCode();
+    ///             if (err == CObjReaderParseException::eEOF) {
+    ///                 break;
+    ///             } else if (err == CObjReaderParseException::eNoDefline) {
+    ///                 CNcbiStrstream ss;
+    ///                 ss << "Query input doesn't start with "
+    ///                     "a defline or comment, line " << e.GetPos() << ends;
+    ///                 NCBI_THROW(CInputException, eInvalidInput, ss.str());
+    ///             }
+    /// ```
+    pub fn into_all_seqs_error(self) -> anyhow::Error {
+        match self {
+            ReadError::Parse {
+                code: ParseErrorCode::NoDefline,
+                line,
+                ..
+            } => no_defline_error(line),
+            error => error.into_app_error(),
+        }
+    }
+}
+
+/// The error of `CBlastInput::GetAllSeqs` (the subjects) whose reader stopped at line `line`
+/// with `eNoDefline`: a `CInputException` (`BLAST query/options error: ...`, exit 1). The text
+/// ends with the NUL that `ends` writes into the stream; the error archive drops it
+/// (`report::diag_log::sanitize`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:209-214
+/// ```c++
+///             } else if (err == CObjReaderParseException::eNoDefline) {
+///                 CNcbiStrstream ss;
+///                 ss << "Query input doesn't start with "
+///                     "a defline or comment, line " << e.GetPos() << ends;
+///                 NCBI_THROW(CInputException, eInvalidInput, ss.str());
+///             }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-176
+/// ```c++
+///     catch (const blast::CInputException& e) {                               \
+///         LOG_POST(Error << "BLAST query/options error: " << e.GetMsg());     \
+///         LOG_POST(Error << "Please refer to the BLAST+ user manual.");       \
+///         exit_code = BLAST_INPUT_ERROR;                                      \
+///     }                                                                       \
+/// ```
+pub fn no_defline_error(line: u64) -> anyhow::Error {
+    crate::blastinput::app::options_error(&format!(
+        "Query input doesn't start with a defline or comment, line {line}\0"
+    ))
 }
 
 /// NCBI's `CBlastFastaInputSource` over one opened input.
@@ -444,10 +641,10 @@ impl<'a> FastaInputSource<&'a [u8]> {
     }
 }
 
+#[cfg(test)]
 impl<'a> FastaInputSource<&'a [u8]> {
     /// `from_bytes` with LOSAT's bulk paths off: one byte at a time, the reference that
     /// the tests compare the bulk paths with.
-    #[cfg(test)]
     pub(crate) fn from_bytes_byte_at_a_time(bytes: &'a [u8], config: ReaderConfig) -> Self {
         let mut stream = FastaStream::from_bytes(bytes);
         stream.bulk = false;
@@ -518,12 +715,47 @@ impl<R: Read> FastaInputSource<R> {
         }
     }
 
-    /// EXPERIMENT (LOSAT_X_QSCANPAR): a reader over `input`, a part of a query file that starts at a
-    /// record start (`x_query_scan_par.rs`); its stream is a file's without the readable-byte hint,
-    /// which only the pushback of a `\r` reads.
+    /// LOSAT_X_QSTREAM's first reading in parts: a reader over `input`, a part of a query file that
+    /// starts at a record start (`x_query_scan_par.rs`); its stream is a file's without the
+    /// readable-byte hint, which only the pushback of a `\r` reads.
     #[cfg_attr(not(all(unix, feature = "parallel")), allow(dead_code))]
     pub(crate) fn x_from_reader(input: R, config: ReaderConfig) -> Self {
         Self::from_stream(FastaStream::new(input), config)
+    }
+
+    /// LOSAT_X_QSTREAM's second reading in parts: `x_from_reader` for a part whose first record the
+    /// file's reader reads after `lines` lines, with the local ID `next_id`.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:48-56
+    /// ```c++
+    /// CBlastInputSourceConfig::CBlastInputSourceConfig
+    ///     (const SDataLoaderConfig& dlconfig,
+    ///      objects::ENa_strand strand         /* = objects::eNa_strand_other */,
+    ///      bool lowercase                     /* = false */,
+    ///      bool believe_defline               /* = false */,
+    ///      TSeqRange range                    /* = TSeqRange() */,
+    ///      bool retrieve_seq_data             /* = true */,
+    ///      int local_id_counter               /* = 1 */,
+    /// ```
+    /// The BLAST programs leave `local_id_counter` at 1 (`FastaReader::new`); a part's reader starts
+    /// it where the file's one reader is (`FastaReader::x_start_at`).
+    #[cfg_attr(not(all(unix, feature = "parallel")), allow(dead_code))]
+    pub(crate) fn x_from_reader_at(
+        input: R,
+        config: ReaderConfig,
+        lines: u64,
+        next_id: i64,
+    ) -> Self {
+        let mut source = Self::x_from_reader(input, config);
+        source.reader.x_start_at(lines, next_id);
+        source
+    }
+
+    /// LOSAT_X_QSTREAM's reading in parts: the lines read so far (`GetLineNumber`,
+    /// line_reader.cpp:208-216, `LineReader::line_number`).
+    #[cfg_attr(not(all(unix, feature = "parallel")), allow(dead_code))]
+    pub(crate) fn x_line_number(&self) -> u64 {
+        self.reader.lines.line_number()
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:370-374
@@ -536,6 +768,15 @@ impl<R: Read> FastaInputSource<R> {
     /// ```
     pub fn end(&mut self) -> bool {
         self.reader.lines.at_eof()
+    }
+
+    /// The search whose records this source reads under `-parse_deflines`: a query and a subject
+    /// with one id are compared (`crate::seqid::id_scope::IdScope`).
+    pub fn set_id_scope(
+        &mut self,
+        id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
+    ) {
+        self.reader.set_id_scope(id_scope);
     }
 
     /// The next record (`GetNextSequence`, without the range and strand of
@@ -589,12 +830,6 @@ impl<R: Read> FastaInputSource<R> {
     }
 }
 
-/// `IsIStreamEmpty` on an opened input (true when it has only white space; false for a
-/// stream without a position, such as a pipe).
-pub fn input_is_empty<R: Read + Seek>(stream: &mut FastaStream<R>) -> bool {
-    stream::stream_is_empty(stream)
-}
-
 /// All records of an input (`CBlastInput::GetAllSeqs`, the subjects): the messages go to
 /// `warn` as they are written; a reader error stops the reading.
 ///
@@ -624,7 +859,8 @@ pub fn input_is_empty<R: Read + Seek>(stream: &mut FastaStream<R>) -> bool {
 ///     return retval;
 /// }
 /// ```
-/// `eNoDefline` needs a reader without `fDLOptional`.
+/// `eNoDefline` needs a reader without `fDLOptional`; the error is returned as the reader gave
+/// it, and a caller that reads subjects ends with `ReadError::into_all_seqs_error`.
 pub fn read_all<R: Read>(
     source: &mut FastaInputSource<R>,
     warn: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,
@@ -712,12 +948,13 @@ pub fn read_all<R: Read>(
 ///                    "Invalid from coordinate (greater than sequence length)");
 ///     }
 /// ```
-/// `eNoDefline` needs a reader without `fDLOptional`. The range's `CInputException` is
-/// `BLAST query/options error: ...` (`seq_range::record_interval`, `app::options_error`); a
-/// reader exception is `BLAST query error: ...` (`ReadError::into_app_error`). The source's
+/// `eNoDefline` needs a reader without `fDLOptional` (`-parse_deflines`): it is `GetAllSeqs`'s
+/// `CInputException` (`no_defline_error`). The range's `CInputException` is also
+/// `BLAST query/options error: ...` (`seq_range::record_interval`, `app::options_error`); any other
+/// reader exception is `BLAST query error: ...` (`ReadError::into_all_seqs_error`). The source's
 /// `ReaderConfig::subject` carries `read_proteins` and the data loaders of `dlconfig`;
-/// `-parse_deflines` is rejected by the programs and `gaps_to_Ns` is the mapper's; LOSAT keeps
-/// the lowercase mask in every record (`FastaRecord::sequence`).
+/// `gaps_to_Ns` is the mapper's; LOSAT keeps the lowercase mask in every record
+/// (`FastaRecord::sequence`).
 pub fn read_subjects<R: Read>(
     source: &mut FastaInputSource<R>,
     range: Option<&crate::blastinput::seq_range::SequenceRange>,
@@ -754,7 +991,7 @@ pub fn read_subjects_map<R: Read, T>(
                 code: ParseErrorCode::Eof,
                 ..
             }) => break,
-            Err(error) => return Err(error.into_app_error()),
+            Err(error) => return Err(error.into_all_seqs_error()),
         }
     }
     Ok(records)

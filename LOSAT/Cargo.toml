@@ -1,10 +1,10 @@
 [package]
-name = "LOSAT"
+name = "losat"
 version = "0.2.0"
 edition = "2021"
 rust-version = "1.92"
 autotests = false
-description = "Pure-Rust local BLAST with NCBI-verified fixtures, genetic-code exceptions, and command-WASI support"
+description = "Pure-Rust local BLAST that matches NCBI BLAST+ on LOSAT's test fixtures, with genetic-code exceptions and command-WASI support"
 license = "MIT"
 repository = "https://github.com/satoshikawato/LOSAT"
 readme = "../README.md"
@@ -17,19 +17,27 @@ exclude = [
     "**/*.pyc",
     "**/*.tmp",
     "**/*.orig",
-    "/matrix",
 ]
 
+# docs.rs documents the default features for Linux x86-64.
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
+# The cdylib is the ABI v1 WASI reactor (`cargo build --lib --target wasm32-wasip1`).
 [lib]
 crate-type = ["rlib", "cdylib"]
 
-# The command is `losat` (`losat.exe`, `losat.wasm`); the package and the library crate stay `LOSAT`.
+# The command is `losat` (`losat.exe`, `losat.wasm`), as are the package and the library crate
+# (`use losat::api`). The reactor and the WASI command are both `losat.wasm`: a WASI build names
+# its target (`--lib` or `--bin losat`), so that Cargo copies only that one to `release/`.
 [[bin]]
 name = "losat"
 path = "src/main.rs"
 
 # The files of tests/ are modules of six suite binaries (tests/suites/<name>.rs, one `#[path]` module per
-# file) instead of one binary each; the two files that change the process environment stay alone.
+# file) instead of one binary each; the two files that change the process environment or
+# process-wide state (the counting global allocator of thread_memory) stay alone. Unit tests live in
+# the crate, next to the code they test (`#[cfg(test)]`).
 # tests/suite_layout.rs checks that every file is in exactly one test binary.
 [[test]]
 name = "blastn"
@@ -60,17 +68,27 @@ name = "blastn_report_stream_api"
 path = "tests/blastn_report_stream_api.rs"
 
 [[test]]
-name = "unit_tests"
-path = "tests/unit_tests.rs"
+name = "thread_memory"
+path = "tests/thread_memory.rs"
 
 [dependencies]
 anyhow = "1.0"
-bio = "1.6"
 clap = { version = "4.5", features = ["derive"] }
 rayon = { version = "1.11", optional = true }
-libm = "0.2.15"
 indicatif = "0.18"
-rustc-hash = "1.1"
+rustc-hash = "2.1"
+# Compressed input (`-query`, `-subject`, `makeblastdb -in` named `.gz`, `.bz2` or `.zst`), with
+# pure-Rust decoders only, as the pure-Rust runtime boundary requires (no C library, no `links`
+# metadata): flate2's zlib-rs backend, bzip2's libbz2-rs-sys backend (not bzip2-sys), and
+# ruzstd (a decoder; LOSAT never compresses). bzip2 0.6 builds libbz2-rs-sys by default; its `bzip2-sys`
+# feature (the C library) is never enabled. zlib-rs is a Rust port of zlib's inflate (no build
+# script, no `links`), so that a `.gz` file inflates, and fails, as in makeblastdb, which calls the
+# system's zlib (`blastinput::compressed::GzipMembers`); flate2's default miniz_oxide backend accepts
+# data that zlib refuses (a distance past the window start, a block without its end code).
+# `runtime_detection` lets zlib-rs pick its SIMD copy and checksum paths at run time (std).
+flate2 = { version = "1.1", default-features = false, features = ["zlib-rs", "runtime_detection"] }
+bzip2 = "0.6"
+ruzstd = "0.9"
 
 # NCBI reference (598d8ae6): c++/include/corelib/ncbistre.hpp:437-440
 # ```c++
@@ -84,18 +102,32 @@ rustc-hash = "1.1"
 #     x_FillBuffer((size_t) m_Sb->in_avail());
 #     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
 # ```
-# Rust filesystem support for the native readable-byte hint; no BLAST behavior,
-# foreign algorithm, NCBI runtime/build dependency or libc-auxv feature.
+# NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:395,3969
+# ```c
+# #define	GET_PAGESIZE(x)	((x) = sysconf(_SC_PAGE_SIZE))
+# 	GET_PAGESIZE(e->me_os_psize);
+# ```
+# Rust system calls for the native readable-byte hint (`io`), and for the page size
+# of the LMDB files of version 5 (`writedb::platform::host_page_size`): `param`
+# (rustix's `sysconf(_SC_PAGESIZE)` on macOS and the BSDs) and `mm` (the kernel's
+# alignment through `mmap` and `mprotect` on Linux, which needs neither /proc nor
+# the C library), and the read-only mappings of the RPS-BLAST profile files
+# (`utils::mapped_file`, as NCBI's `CMemoryFile`), and `fs` for the write-permission
+# test of makeblastdb's output directory (`access`, which NCBI's `euidaccess` calls,
+# `writedb::build_db::check_access_write`). No BLAST behavior, foreign algorithm, NCBI runtime/build
+# dependency or libc-auxv feature (the pure-Rust runtime boundary,
+# tests/check_pure_rust_runtime_boundary.py, allows no direct libc call). A caret requirement
+# like every other dependency: Cargo.lock fixes the exact version for every build from this
+# repository (CI and the release with --locked), and Dependabot moves it.
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "=0.38.44", default-features = false, features = ["std"] }
+rustix = { version = "1.1.6", default-features = false, features = ["std", "param", "mm", "fs", "stdio"] }
 
 # Windows file-handle type (`GetFileType`, `GetConsoleMode`) for the stream-position test of
-# `IsIStreamEmpty` (`input_files::has_stream_position`); only the three features those need.
+# `IsIStreamEmpty` (`input_files::has_stream_position`), and the read-only file mappings of the
+# RPS-BLAST profile files (`utils::mapped_file`: `CreateFileMappingW`, whose signature names
+# `SECURITY_ATTRIBUTES`, and `MapViewOfFile`); only the features those need.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", default-features = false, features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console"] }
-
-[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
-getrandom = { version = "0.2", features = ["js"] }
+windows-sys = { version = "0.61", default-features = false, features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Memory", "Win32_System_SystemInformation"] }
 
 [features]
 default = ["parallel"]
@@ -149,3 +181,25 @@ opt-level = 3
 # tests ran 5 % faster than at level 1, and line tables cut the build by a fifth.
 [profile.test]
 opt-level = 1
+
+# Lint levels of every target of the package (lib, bins, tests, examples).
+# A lint is allowed here only with a reason. A single place that keeps a lint's shape on purpose
+# uses `#[expect(lint, reason = "...")]` at that item instead of an entry here.
+
+[lints.clippy]
+# NCBI's C functions are ported argument by argument (e.g. Blast_SemiGappedAlign,
+# blast_gapalign.c), so a reviewer reads the Rust call next to the C one.
+too_many_arguments = "allow"
+# Per-thread and per-batch results are nested tuples and vectors that follow NCBI's structures.
+type_complexity = "allow"
+# Index loops address several arrays with one index, as NCBI's C does; iterators change the
+# generated code of the lookup, scan and extension loops.
+needless_range_loop = "allow"
+explicit_counter_loop = "allow"
+# NCBI's tables keep NCBI's digits so they diff against NCBI's source; each literal rounds to
+# the same f64.
+excessive_precision = "allow"
+# The NCBI C/C++ snippets (AGENTS.md rule 4) are quoted with NCBI's own tabs.
+tabs_in_doc_comments = "allow"
+# Functions that take a list of ranges are given the whole span as one range.
+single_range_in_vec_init = "allow"

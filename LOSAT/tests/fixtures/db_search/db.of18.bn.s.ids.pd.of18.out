@@ -1,0 +1,31 @@
+
+                                          Tax BLAST report                                          
+
+Query= nq1 query nucleotide one
+
+Length=900
+
+                                           Organism Report                                           
+Accession                                          Description                        Score E-value 
+
+                              Zero taxid sp. (zero common) [zeroblast]                              
+ XM_000101                  subject one two HSPs                                       812   0.0     
+ s3_local_identifier        subject three with a title that is longer than the desc... 545   7e-158  
+ XM_000111                  subject eleven strong then planted weak HSP                542   2e-157  
+ XM_000109                  subject nine                                               366   4e-104  
+ AB000106                   subject six                                                315   6e-89   
+ tag_s8                     subject eight                                              311   7e-88   
+ XM_000105                  subject five 275    s 5e-77    e Accession                   a <@de... 275   5e-77   
+ AB000104                   subject four                                               270   2e-75   
+ s7_not_in_taxdb_long_label subject seven taxid not in taxdb                           260   4e-72   
+ CAA00102                   subject two                                                252   6e-70   
+ AB000110                   subject ten                                                204   3e-55   
+
+                                          Tax BLAST report                                          
+
+Query= nq2 unrelated query (no hits)
+
+Length=120
+
+                                           Organism Report                                           
+Accession...  Description... Score... E-value... 

@@ -82,7 +82,7 @@ fn letters(path: &Path) -> String {
         .collect()
 }
 
-/// The reads, the subject windows as FASTA, and their database made by `losat makedb`.
+/// The reads, the subject windows as FASTA, and their database made by `losat makeblastdb`.
 fn inputs(dir: &TestDir) -> (PathBuf, PathBuf, String) {
     let genome = letters(&fasta("LC738874.fasta"));
     let mut reads = String::new();
@@ -107,15 +107,15 @@ fn inputs(dir: &TestDir) -> (PathBuf, PathBuf, String) {
     std::fs::write(&set, windows).expect("write the windows");
     let db = dir.0.join("windows").to_str().unwrap().to_string();
     let output = losat()
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(&set)
         .args(["-dbtype", "nucl", "-out", &db])
         .output()
-        .expect("run losat makedb");
+        .expect("run losat makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     (query, set, db)

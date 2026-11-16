@@ -48,8 +48,8 @@ plus the one focused fixture from the stage's `AUTHORITY.md`. Adapter: `cargo fm
 `cargo test --locked` in `web/adapter` (1-2 min). App: `cd web/app && npm run check` (median
 77 s); `npm ci` only when `package-lock.json` changed.
 
-- A bare `cargo test <filter>` builds and links every test binary before it filters: the lib tests, the bin, and the eight under `LOSAT/tests/` (the suites blastn, blastp, blastx, tblastn, tblastx and common in `tests/suites/`, plus blastn_report_stream_api and unit_tests). A plain `cargo test --test <suite>` runs all of that suite's files' tests at once, up to the CPU count, so a timing gate passes `-- --test-threads N`.
-- `LOSAT/Cargo.toml` sets `[profile.test] opt-level = 1`, as CI does, so `CARGO_PROFILE_TEST_OPT_LEVEL=1` is no longer needed.
+- A bare `cargo test <filter>` builds and links every test binary before it filters: the lib tests, the bin, and the eight under `LOSAT/tests/` (the suites blastn, blastp, blastx, tblastn, tblastx and common in `tests/suites/`, plus blastn_report_stream_api and thread_memory). A plain `cargo test --test <suite>` runs all of that suite's files' tests at once, up to the CPU count, so a timing gate passes `-- --test-threads N`.
+- `LOSAT/Cargo.toml` sets `[profile.test] opt-level = 1`, so a local test build needs no `CARGO_PROFILE_TEST_OPT_LEVEL`. CI builds the test profile at opt-level 3 with line tables only (`CARGO_PROFILE_TEST_*` in `.github/workflows/ci.yml`).
 
 ## Standard (end of a step and before every push; 10-25 minutes)
 
@@ -58,7 +58,9 @@ Engine, in addition to quick:
 - clippy, the four LOSAT configurations of the gate script (`--all-targets --all-features -D warnings`,
   `--all-targets --no-default-features`, `--lib --target wasm32-wasip1 --no-default-features`,
   `--lib --target wasm32-wasip1-threads --features wasm-threads`): about 5 min warm;
-- the whole `cargo test --locked --all-features` (920 tests, 1-2 min warm);
+- the whole `cargo test --locked --all-features`, started in the background and waited for once
+  (count its tests with `cargo test --locked --all-features -- --list 2>/dev/null | grep -c ': test$'`;
+  the time depends on the machine's load, so take it from the run's log, not from this file);
 - `python3 LOSAT/tests/ci_fast_regressions.py --losat "$N" --out "$BUILD_ROOT/<task>/fast" --changed-from <base> --jobs 4`
   (S02 baseline hashes, Gate A and TLOSAN Stage G frozen hashes, outfmt 0 fixtures, and the
   BLASTN/TBLASTX frozen regressions of the selected programs; 1-2 min);
@@ -95,7 +97,11 @@ below only when its condition holds:
 
 ## GitHub CI
 
-A PR runs `ci.yml` (`rust` about 35 min: lint and two cargo-nextest shards; `fast output
-regressions` 4.5 min with all programs) and, when `web/**` or `LOSAT/src/**` changed, `web.yml`
-(about 20 min; the `adapter` job reruns V-ABI quick). Nightly runs `--all-cases` and the WASI
+A PR runs `ci.yml` (`rust` 10-12 min: lint, the test build in two parts, the unit tests in about
+6 min and the rest in about 4, then six cargo-nextest shards of 3-5 min; `fast output regressions`
+9-13 min with all programs; runs of 2026-11-13 after #1088, 15-18 min before #1082, #1083 and #1088)
+and, when `web/**` or `LOSAT/src/**` changed, `web.yml` (12-14 min: reactors and native, then V-ABI
+quick, one process per reactor, and seven browser-engine shards, beside the FakeEngine application's
+tests in three browser jobs; 17 min p50 of 69 runs of 2026-11-12/13 before V-ABI's two processes,
+#1075). A push to a branch without a PR starts none. Nightly runs `--all-cases` and the WASI
 matrix (median 120 min). Do not rerun locally what CI runs for the same commit.

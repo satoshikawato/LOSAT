@@ -1,0 +1,1 @@
+- `losat` called as `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `makeblastdb` or `blastdbcmd` runs that program, so tools that look for these names on `PATH` can use LOSAT without changes. `losat --install-shims [DIR]` makes the names (symbolic links, copies on Windows) and leaves an existing file of another program alone. The Bioconda recipe installs them.

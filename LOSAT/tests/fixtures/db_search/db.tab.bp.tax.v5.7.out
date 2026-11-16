@@ -1,0 +1,71 @@
+# BLASTP 2.17.0+
+# Query: qp1 query protein one
+# Database: tests/db_search/ids/prot_v5
+# Fields: subject tax id, subject sci name, subject com names, subject blast name, subject super kingdom, subject tax ids, subject sci names, subject com names, subject blast names, subject super kingdoms, subject title, subject titles, subject strand, % query coverage per subject, % query coverage per hsp, % query coverage per uniq subject
+# 51 hits found
+9606	N/A	N/A	N/A	N/A	9606;10090	N/A;N/A	N/A;N/A	N/A	N/A	alpha protein [Homo sapiens]	alpha protein [Homo sapiens]<>alpha-like protein<>hypothetical protein, partial	N/A	100	100	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	first defline without a gi	first defline without a gi<>second defline with a gi<>third defline swissprot	N/A	100	100	N/A
+10116	N/A	N/A	N/A	N/A	10116	N/A	N/A	N/A	N/A	gi plus ref protein	gi plus ref protein	N/A	100	100	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	long title number 01 with many words so that it is longer than sixty characters in total	long title number 01 with many words so that it is longer than sixty characters in total<>long title number 02 with many words so that it is longer than sixty characters in total<>long title number 03 with many words so that it is longer than sixty characters in total<>long title number 04 with many words so that it is longer than sixty characters in total<>long title number 05 with many words so that it is longer than sixty characters in total<>long title number 06 with many words so that it is longer than sixty characters in total<>long title number 07 with many words so that it is longer than sixty characters in total<>long title number 08 with many words so that it is longer than sixty characters in total<>long title number 09 with many words so that it is longer than sixty characters in total<>long title number 10 with many words so that it is longer than sixty characters in total<>long title number 11 with many words so that it is longer than sixty characters in total<>long title number 12 with many words so that it is longer than sixty characters in total	N/A	100	100	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	swissprot without version	swissprot without version	N/A	100	100	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	emb protein	emb protein	N/A	100	100	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	has a title	has a title<>N/A<>third has a title	N/A	100	100	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	trembl entry	trembl entry	N/A	100	100	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	Chain A, test structure	Chain A, test structure	N/A	100	100	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	dbj protein	dbj protein	N/A	100	100	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	pir protein	pir protein	N/A	100	100	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	prf protein	prf protein	N/A	100	100	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	local id protein	local id protein	N/A	100	100	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	general id protein	general id protein	N/A	100	100	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	bare refseq accession	bare refseq accession	N/A	100	100	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	bare uniprot-like accession	bare uniprot-like accession	N/A	100	100	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	bare non-accession word	bare non-accession word	N/A	100	100	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	gb with a locus name	gb with a locus name	N/A	100	100	N/A
+562	N/A	N/A	N/A	N/A	562;9606	N/A;N/A	N/A;N/A	N/A	N/A	N/A	N/A<>second defline<>third defline	N/A	100	100	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	third-party protein	third-party protein	N/A	100	100	N/A
+9606	N/A	N/A	N/A	N/A	9606	N/A	N/A	N/A	N/A	with taxid	with taxid	N/A	100	100	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	N/A	N/A<>tpa second	N/A	43	43	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	N/A	N/A<>second	N/A	43	43	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	N/A	N/A	N/A	43	43	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	N/A	N/A	N/A	43	43	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	tpe titled	tpe titled	N/A	43	43	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	no chain four	no chain four<>two chain four	N/A	43	43	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	N/A	N/A	N/A	43	43	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	N/A	N/A	N/A	43	43	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	tpa with subject	tpa with subject	N/A	43	43	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	subject seven title	subject seven title	N/A	43	43	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	N/A	N/A	N/A	43	43	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	N/A	N/A	N/A	43	43	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	N/A	N/A	N/A	43	43	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	N/A	N/A	N/A	43	43	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	N/A	N/A	N/A	43	43	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	tpa titled protein	tpa titled protein	N/A	43	43	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	titled first	titled first<>second line	N/A	43	43	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	N/A	N/A	N/A	43	43	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	subject seven	subject seven	N/A	43	43	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	pre-grant patent	pre-grant patent	N/A	43	43	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	prf two fields	prf two fields	N/A	43	43	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	patent with letters	patent with letters	N/A	43	43	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	patent reissue	patent reissue	N/A	43	43	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	trace id	trace id	N/A	43	43	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word 	long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word 	N/A	43	43	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	big gi	big gi	N/A	43	43	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	gibbmt	gibbmt	N/A	43	43	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	genome pipeline	genome pipeline	N/A	43	43	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	third party ddbj	third party ddbj	N/A	43	43	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	third party embl	third party embl	N/A	43	43	N/A
+# BLASTP 2.17.0+
+# Query: qp2 unrelated protein
+# Database: tests/db_search/ids/prot_v5
+# Fields: subject tax id, subject sci name, subject com names, subject blast name, subject super kingdom, subject tax ids, subject sci names, subject com names, subject blast names, subject super kingdoms, subject title, subject titles, subject strand, % query coverage per subject, % query coverage per hsp, % query coverage per uniq subject
+# 5 hits found
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	general id protein	general id protein	N/A	76	51	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	general id protein	general id protein	N/A	76	31	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	pir protein	pir protein	N/A	38	38	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	bare uniprot-like accession	bare uniprot-like accession	N/A	38	38	N/A
+9606	N/A	N/A	N/A	N/A	9606	N/A	N/A	N/A	N/A	with taxid	with taxid	N/A	22	22	N/A
+# BLASTP 2.17.0+
+# Query: qnone no hits
+# Database: tests/db_search/ids/prot_v5
+# 0 hits found
+# BLAST processed 3 queries

@@ -2,13 +2,16 @@
 """Tests for ci_fast_regressions.py and frozen_allowlist.py (no LOSAT binary is run)."""
 from __future__ import annotations
 
+import argparse
 import contextlib
 import io
 import json
+import os
 import re
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -16,6 +19,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import blastn_regression_fixtures as fixtures  # noqa: E402
 import ci_fast_regressions as fast  # noqa: E402
 import db_search_fixtures as db_fixtures  # noqa: E402
+import fasta_input_fixtures as fasta_input  # noqa: E402
+import range_regression_fixtures as range_fixtures  # noqa: E402
 import tblastx_regression_fixtures as tblastx_fixtures  # noqa: E402
 import xinclude_fixtures as xinclude  # noqa: E402
 from frozen_allowlist import Allowlist  # noqa: E402
@@ -130,13 +135,24 @@ class DbSearchFixtureTests(unittest.TestCase):
         self.assertEqual(set(fast.DB_SEARCH_PROGRAMS), set(db_fixtures.PROGRAMS))
         self.assertTrue(set(fast.DB_SEARCH_PROGRAMS) <= set(fast.PROGRAMS))
         self.assertEqual(len({r["row_id"] for r in rows}), len(rows))
+        by_id = {r["row_id"]: r for r in rows}
         for r in rows:
             if r["kind"] != "ncbi":
                 continue
-            data = (db_fixtures.FROZEN / f"{r['row_id']}.out").read_bytes()
+            # A row that expects a near input's NCBI run (`ncbi-near:`) reads that row's files and has its columns.
+            near = db_fixtures.near_row_id(r)
+            if near:
+                source = by_id[near]
+                self.assertEqual((source["kind"], db_fixtures.near_row_id(source), source["outfmt"]),
+                                 ("ncbi", None, r["outfmt"]), r["row_id"])
+                self.assertEqual([source[k] for k in ("rc", "stdout_sha256", "stdout_bytes", "stderr_sha256")],
+                                 [r[k] for k in ("rc", "stdout_sha256", "stdout_bytes", "stderr_sha256")], r["row_id"])
+                self.assertFalse((db_fixtures.FROZEN / f"{r['row_id']}.out").exists(), r["row_id"])
+            frozen = db_fixtures.frozen_id(r)
+            data = (db_fixtures.FROZEN / f"{frozen}.out").read_bytes()
             self.assertEqual(db_fixtures.sha256(data), r["stdout_sha256"], r["row_id"])
             self.assertEqual(str(len(data)), r["stdout_bytes"], r["row_id"])
-            err = db_fixtures.FROZEN / f"{r['row_id']}.err"
+            err = db_fixtures.FROZEN / f"{frozen}.err"
             self.assertEqual(db_fixtures.sha256(err.read_bytes()) if err.exists() else "", r["stderr_sha256"], r["row_id"])
 
 
@@ -157,12 +173,54 @@ class DbSearchFixtureTests(unittest.TestCase):
         dirty = {"PATH": "/bin", "HOME": "/home/someone", "USERPROFILE": "C:/Users/someone",
                  "NCBI_CONFIG__BLAST__BLASTDB": "/x", "NCBI_CONFIG_PATH": "/y", "NCBI": "/z",
                  "BLASTDB": "/d", "BLAST_USE_NCBI_ENV": "yes", "LOSAT_X_SOMETHING": "1",
-                 "BATCH_SIZE": "1", "CHUNK_SIZE": "2", "OLD_FSC": "1", "BL2SEQ_LEGACY": "1", "LANG": "C"}
+                 "BATCH_SIZE": "1", "CHUNK_SIZE": "2", "OLD_FSC": "1", "BL2SEQ_LEGACY": "1", "LANG": "C",
+                 "ADAPTIVE_CBS": "1", "CTOOLKIT_COMPATIBLE": ""}
         clean = db_fixtures.clean_env(dirty, "/empty/home")
         self.assertEqual(clean, {"PATH": "/bin", "HOME": "/empty/home", "USERPROFILE": "/empty/home",
                                  "LANG": "C"})
         # nothing of the caller's environment is changed
         self.assertEqual(dirty["HOME"], "/home/someone")
+
+    def test_ncbi_runs_have_the_usage_report_off(self):
+        # NCBI BLAST+ 2.17.0 sends a run's parameters to NCBI at exit unless BLAST_USAGE_REPORT is false
+        # (blast_usage_report.cpp:195-220): every NCBI run of the harness has it, LOSAT's runs do not.
+        clean = db_fixtures.clean_env({"PATH": "/bin", "BLAST_USAGE_REPORT": "true"}, "/empty/home")
+        self.assertNotIn("BLAST_USAGE_REPORT", clean)
+        self.assertEqual(db_fixtures.ncbi_env(clean)["BLAST_USAGE_REPORT"], "false")
+        self.assertEqual(db_fixtures.ncbi_env(clean), {**clean, "BLAST_USAGE_REPORT": "false"})
+        # a row's tokens cannot turn it back on
+        self.assertFalse(db_fixtures.is_env_token("BLAST_USAGE_REPORT=true"))
+
+    @unittest.skipUnless(os.name == "posix", "the stand-in NCBI programs are shell scripts")
+    def test_freeze_runs_ncbi_with_the_usage_report_off(self):
+        # `freeze` with stand-in NCBI programs that print the variable: a plain row, an RPS row
+        # (`freeze_rps`) and a rejection row whose NCBI stdout is frozen; the manifest is not written.
+        rows = db_fixtures.read_manifest()[1]
+        def first(test):
+            return dict(next(r for r in rows if test(r)))
+        plain = first(lambda r: r["kind"] == "ncbi" and not xinclude.wants_files(r) and not xinclude.wants_pssm(r)
+                      and db_fixtures.rps_cell(r["db"]) is None)
+        rps = first(lambda r: r["kind"] == "ncbi" and db_fixtures.rps_cell(r["db"]) is not None)
+        rejection = first(lambda r: r["kind"] == "losat-rejection" and r["stdout_bytes"]
+                          and not xinclude.wants_pssm(r))
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir, frozen = Path(tmp) / "bin", Path(tmp) / "frozen"
+            bin_dir.mkdir()
+            for program in db_fixtures.PROGRAMS:
+                script = bin_dir / program
+                script.write_text('#!/bin/sh\nprintf "%s" "${BLAST_USAGE_REPORT-unset}"\n')
+                script.chmod(0o755)
+            written = []
+            with unittest.mock.patch.object(db_fixtures, "read_manifest", lambda: ({}, [plain, rps, rejection])), \
+                    unittest.mock.patch.object(db_fixtures, "write_manifest", lambda *a: written.append(a)), \
+                    unittest.mock.patch.object(db_fixtures, "FROZEN", frozen), \
+                    unittest.mock.patch.dict(os.environ, {"BLAST_USAGE_REPORT": "true"}), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                args = argparse.Namespace(ncbi_bin=str(bin_dir), program="", only="")
+                self.assertEqual(db_fixtures.freeze(args), 0)
+            for row in (plain, rps, rejection):
+                self.assertEqual((frozen / f"{row['row_id']}.out").read_bytes(), b"false", row["row_id"])
+            self.assertEqual(len(written), 1)
 
 
 def fake_search(directory: Path, master: bytes, sides: list[bytes], stdout: bytes = b"", extra: str = "") -> list[str]:
@@ -196,11 +254,15 @@ class XincludeFixtureTests(unittest.TestCase):
         for cells in rows:
             row = dict(zip(header, cells))
             self.assertEqual(run_oracle.row_cells(header, row), cells, cells[0])
-        # the -db manifest likewise, and its header is the old one only while no row has the columns
-        header, rows = self.manifest_lines(db_fixtures.MANIFEST)
+        # the -db manifest likewise (each program's file), and its header is the old one only while no row has the columns
         parsed = db_fixtures.read_manifest()[1]
-        self.assertEqual(header, db_fixtures.header_cells(parsed))
-        for cells, row in zip(rows, parsed):
+        listed = []
+        for program in db_fixtures.PROGRAMS:
+            header, rows = self.manifest_lines(db_fixtures.manifest_file(program))
+            self.assertEqual(header, db_fixtures.header_cells(parsed), program)
+            listed += rows
+        self.assertEqual(len(listed), len(parsed))
+        for cells, row in zip(listed, parsed):
             self.assertEqual(db_fixtures.row_cells(row), cells, cells[0])
         old = {column: "" for column in db_fixtures.COLUMNS}
         self.assertEqual(db_fixtures.header_cells([old]), db_fixtures.COLUMNS)
@@ -209,11 +271,20 @@ class XincludeFixtureTests(unittest.TestCase):
                          db_fixtures.COLUMNS + xinclude.FILES_COLUMNS)
 
     def test_files_rows_match_the_frozen_master_and_side_files(self):
-        found = 0
+        found = pssm_rows = 0
         for manifest_rows, frozen, key in (
                 (run_oracle.read_manifest()[2], run_oracle.ENGINE / "tests/fixtures/outfmt0", "fixture_id"),
                 (db_fixtures.read_manifest()[1], db_fixtures.FROZEN, "row_id")):
             for row in manifest_rows:
+                if xinclude.wants_pssm(row):
+                    # psiblast's PSSM rows: `side_sha256` names the PSSM files (empty: none); those of
+                    # the `pssm` kind are all frozen, the others when 64 KB or less
+                    pssm_rows += 1
+                    self.assertTrue(xinclude.frozen_pssm_agrees(row, frozen), row[key])
+                    if xinclude.files_kind(row) == xinclude.PSSM:
+                        files, _ = xinclude.pssm_files(frozen, row[key])
+                        self.assertEqual(xinclude.pssm_cell(files, row[key]), row["side_sha256"], row[key])
+                    continue
                 if not xinclude.wants_files(row):
                     self.assertEqual(row.get("side_sha256", ""), "", row[key])
                     continue
@@ -226,11 +297,62 @@ class XincludeFixtureTests(unittest.TestCase):
                 names = [xinclude.side_name(row_id, n, outfmt) for n in range(1, len(hashes) + 1)]
                 self.assertEqual(sorted(path.name for path in frozen.glob(f"{row_id}.out_*")), sorted(names), row_id)
                 self.assertEqual([xinclude.sha256((frozen / name).read_bytes()) for name in names], hashes, row_id)
+                # a run that NCBI stops (rc other than 0) writes the side files of the batches before
+                # and no master, whose list comes after the last query's file: a batch's prefetch
+                # stops (line DBID mixdb2), an exception (BLASTX's empty rows, line RG X2g: rc 255)
+                if row.get("rc", "0") != "0":
+                    self.assertEqual(master, b"", row_id)
+                    continue
                 # the master lists the side files by those names (13: no end of line after the last)
                 listed = re.findall(rb'href="([^"]*)"' if outfmt == "14" else rb'"File": "([^"]*)"', master)
                 self.assertEqual([name.decode() for name in listed], names, row_id)
                 self.assertEqual(master.endswith(b"\n"), outfmt == "14", row_id)
         self.assertGreaterEqual(found, 9)
+        self.assertGreaterEqual(pssm_rows, 2)
+
+    def test_pssm_files_are_listed_asn_first_and_frozen_by_kind(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            big = b"x" * (xinclude.FREEZE_LIMIT + 1)
+            for name, data in (("r.pssm", b"ascii"), ("r.asn.2", b"two"), ("r.asn.1", big), ("r.asn", b"asn"),
+                               ("other", b"")):
+                (directory / name).write_bytes(data)
+            files, stray = xinclude.pssm_files(directory, "r")
+            self.assertEqual([name for name, _ in files], ["r.asn", "r.asn.1", "r.asn.2", "r.pssm"])
+            self.assertEqual(stray, ["other"])
+            result = xinclude.PssmResult(None, files)
+            cell = xinclude.pssm_cell(files, "r", xinclude.PSSM_BOTH)
+            self.assertTrue(cell.startswith(f".asn={xinclude.sha256(b'asn')}:3,"), cell)
+            row = {"row_id": "r", "files": xinclude.PSSM_BOTH, "side_sha256": cell}
+            frozen = directory / "frozen"
+            frozen.mkdir()
+            xinclude.freeze_pssm(result, frozen, "r", xinclude.PSSM_BOTH)
+            self.assertEqual(sorted(path.name for path in frozen.iterdir()), ["r.asn", "r.asn.2", "r.pssm"])
+            self.assertTrue(xinclude.frozen_pssm_agrees(row, frozen))
+            # Every listed file of 64 KB or less must be frozen, and the cell must give the sizes.
+            (frozen / "r.asn.2").unlink()
+            self.assertFalse(xinclude.frozen_pssm_agrees(row, frozen))
+            (frozen / "r.asn.2").write_bytes(b"two")
+            self.assertFalse(xinclude.frozen_pssm_agrees({**row, "side_sha256": xinclude.pssm_cell(files, "r")}, frozen))
+            first_difference = lambda want, got: "differs"  # noqa: E731
+            self.assertEqual(xinclude.pssm_problems(result, row, frozen, first_difference), [])
+            changed = xinclude.PssmResult(None, [(name, b"y" if name == "r.asn.1" else data) for name, data in files])
+            problems = xinclude.pssm_problems(changed, row, frozen, first_difference)
+            self.assertEqual(len(problems), 1)
+            self.assertIn("r.asn.1 differs", problems[0])
+            self.assertIn("not frozen", problems[0])
+            # The `pssm` kind freezes every file, so the big one must be frozen too.
+            self.assertFalse(xinclude.frozen_pssm_agrees({**row, "files": xinclude.PSSM}, frozen))
+
+    def test_pssm_pre_files_exist_before_the_run(self):
+        # `{pre:<suffix>}` writes `<tmp>/<row_id><suffix>` before the run and is not passed on.
+        check = "import sys; from pathlib import Path; assert not any('{pre' in a for a in sys.argv); " \
+                "assert Path(sys.argv[2]).with_suffix('.asn.1').read_bytes() == b'previous file\\n'"
+        result = xinclude.run_with_pssm([sys.executable, "-c", check, "{pre:.asn.1}", "{pre:.pssm}"], "r",
+                                        xinclude.PSSM_ASN)
+        self.assertEqual(result.run.returncode, 0, result.run.stderr)
+        self.assertEqual(result.files, [("r.asn.1", xinclude.PRE_BYTES), ("r.pssm", xinclude.PRE_BYTES)])
+        self.assertEqual(result.stray, [])
 
     def test_side_files_are_collected_in_the_order_of_their_numbers(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -380,6 +502,105 @@ class StartupTraceNoticeTests(unittest.TestCase):
         failures = self.check("print('losat 1.0')\nsys.stderr.write('warning\\n')\nsys.exit(1)")
         self.assertTrue(any("exited" in failure for failure in failures))
         self.assertTrue(any("stderr without" in failure for failure in failures))
+
+
+class RunTasksTests(unittest.TestCase):
+    """`run_tasks`: the fixture scripts run `jobs` at a time; their failure lines come in the order of the tasks."""
+
+    @staticmethod
+    def task(name: str, code: str, log: Path | None = None) -> fast.Task:
+        return fast.Task(name, [sys.executable, "-c", code],
+                         lambda result: [] if result.returncode == 0 else [f"{name} exit {result.returncode}"], log=log)
+
+    def test_failures_in_task_order_logs_and_seconds(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "b.tsv"
+            # `a` ends last but its failure comes first.
+            tasks = [self.task("a", "import time, sys; time.sleep(0.5); sys.exit(1)"),
+                     self.task("b", "import sys; print('b-out'); sys.stderr.write('b-err')", log),
+                     self.task("c", "import sys; sys.exit(2)")]
+            failures, seconds = fast.run_tasks(tasks, 3)
+            self.assertEqual(failures, ["a exit 1", "c exit 2"])
+            self.assertEqual(log.read_text(), "b-out\nb-err")
+            self.assertEqual(list(seconds), ["a", "b", "c"])
+
+    def test_the_tasks_run_at_once(self):
+        # Each task writes its flag, then waits (at most 60 s) for the other's: both pass only when they run
+        # at the same time.
+        with tempfile.TemporaryDirectory() as tmp:
+            def waiter(mine: str, other: str) -> str:
+                return (f"import pathlib, sys, time; d = pathlib.Path({tmp!r}); (d / {mine!r}).touch(); "
+                        f"end = time.time() + 60\n"
+                        f"while not (d / {other!r}).exists() and time.time() < end: time.sleep(0.05)\n"
+                        f"sys.exit(0 if (d / {other!r}).exists() else 1)")
+            failures, _ = fast.run_tasks([self.task("x", waiter("x", "y")), self.task("y", waiter("y", "x"))], 2)
+            self.assertEqual(failures, [])
+
+    def test_the_default_jobs_are_the_cpus_this_process_may_use(self):
+        expected = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count() or 4
+        self.assertEqual(fast.default_jobs(), expected)
+
+
+STAND_IN_NCBI = '#!/bin/sh\nprintf "%s" "${BLAST_USAGE_REPORT-unset}"\n'
+
+
+def stand_in_bin(directory: Path, programs) -> Path:
+    """Stand-in NCBI programs that print the value of BLAST_USAGE_REPORT (`unset` without it)."""
+    bin_dir = directory / "bin"
+    bin_dir.mkdir()
+    for program in programs:
+        script = bin_dir / program
+        script.write_text(STAND_IN_NCBI)
+        script.chmod(0o755)
+    return bin_dir
+
+
+@unittest.skipUnless(os.name == "posix", "the stand-in NCBI programs are shell scripts")
+class NcbiUsageReportOffTests(unittest.TestCase):
+    """NCBI BLAST+ 2.17.0 sends a run's parameters to NCBI at exit unless BLAST_USAGE_REPORT is false
+    (blast_usage_report.cpp:195-220): the harnesses' NCBI runs have it (db_search_fixtures.ncbi_env), the
+    runs of LOSAT keep their environment."""
+
+    def caller_env(self, home: str) -> dict[str, str]:
+        # the freeze commands refuse to run with these set or with a ~/.ncbirc
+        env = {k: v for k, v in os.environ.items() if k not in fasta_input.REPORT_ENV + range_fixtures.REPORT_ENV}
+        return env | {"HOME": home, "BLAST_USAGE_REPORT": "true"}
+
+    def test_fasta_input_freeze(self):
+        one = next(r for r in fasta_input.build_rows() if r.kind == "ncbi" and fasta_input.network_safe(r) is None)
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir = stand_in_bin(Path(tmp), {"blastn", one.program})
+            written = []
+            args = argparse.Namespace(ncbi_bin=str(bin_dir), out=str(Path(tmp) / "out"), no_netns=True, rows=None,
+                                      match=None, tier=None, verify=False, jobs=1)
+            with unittest.mock.patch.object(fasta_input, "build_rows", lambda: [one]), \
+                    unittest.mock.patch.object(fasta_input, "read_manifest", lambda: []), \
+                    unittest.mock.patch.object(fasta_input, "write_manifest", lambda *a: written.append(a)), \
+                    unittest.mock.patch.dict(os.environ, self.caller_env(tmp), clear=True), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                fasta_input.command_freeze(args)
+                # LOSAT's run keeps the caller's environment
+                self.assertEqual(fasta_input.execute([str(bin_dir / one.program)], one, False)[1], b"true")
+            self.assertEqual((Path(tmp) / "out" / f"{one.row_id}.out").read_bytes(), b"false")
+            self.assertEqual((Path(tmp) / "out" / f"{one.row_id}.merged").read_bytes(), b"false")
+            self.assertEqual(written[0][1], "false")  # the version line: `blastn -version`'s output
+
+    def test_range_regression_freeze(self):
+        case = range_fixtures.CASES[0]
+        program = case[1].split(" ", 1)[0]
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir = stand_in_bin(Path(tmp), {"blastn", program})
+            fixtures_dir = Path(tmp) / "fixtures"
+            with unittest.mock.patch.object(range_fixtures, "CASES", [case]), \
+                    unittest.mock.patch.object(range_fixtures, "FIXTURES", fixtures_dir), \
+                    unittest.mock.patch.object(range_fixtures, "MANIFEST", fixtures_dir / "manifest.tsv"), \
+                    unittest.mock.patch.dict(os.environ, self.caller_env(tmp), clear=True), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                range_fixtures.command_freeze(argparse.Namespace(bin_dir=str(bin_dir)))
+                # LOSAT's runs (`check_one`) go through run_case without `env_of`
+                self.assertEqual(fixtures.run_case(str(bin_dir / program), [], "x", "", "").stdout, b"true")
+            self.assertEqual((fixtures_dir / f"{case[0]}.out").read_bytes(), b"false")
+            self.assertIn("of false (", (fixtures_dir / "manifest.tsv").read_text())
 
 
 if __name__ == "__main__":

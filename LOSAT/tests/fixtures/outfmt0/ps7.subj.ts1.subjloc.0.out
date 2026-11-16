@@ -1,0 +1,198 @@
+PSITBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/tslice.fna).
+           5 sequences; 15,385 total letters
+
+
+
+Query= BDT61857.1 innexin [Penaeus monodon majanivirus A]
+
+Length=378
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+m_plus MelaMJNV 36001-44000 with ambiguity codes and an N block       415     8e-138
+v_slice LvMJNV 21001-39000 with ambiguity codes                       23.8    0.10  
+m_minus MelaMJNV 59001-62000 with ambiguity codes                     19.6    2.1   
+v_mut_8pct LvMJNV 28501-30700 with substitutions and indels           18.0    6.1   
+
+
+> m_plus MelaMJNV 36001-44000 with ambiguity codes and an N block
+Length=8000
+
+ Score = 415 bits (1067),  Expect = 8e-138
+ Identities = 146/230 (63%), Positives = 183/230 (80%), Gaps = 0/230 (0%)
+ Frame = +2
+
+Query  125   GLLFYAPHYIWKTWEGGRMQSITADLSVPILNKEDQRKRVNQLADYLQNSLWNNNTYALK  184
+             GL+FYAPHY WKT EGGR+Q I  D S PI N E++RKR+ QLADYLQNSLW NNTY +K
+Sbjct  1640  GLMFYAPHYFWKTLEGGRLQXIVTDFSTPIFNSEERRKRIKQLADYLQNSLWXNNTYVIK  1819
+
+Query  185   YLFCQCLSLVNCIVNMVLMNKFLNGKFLTYGADVFSYSEAVDQESRTDPMIEVFPRVTKC  244
+             YL C+ L L+NCI+N+VL++KFLNG F+TYG DV SY+E  D E++  PMI +FPR+ KC
+Sbjct  1820  YLICEFLYLLNCIINIVLIDKFLNGMFITYGTDVLSYNEVTDHENKIHPMIALFPRMXKC  1999
+
+Query  245   SMSMFGSSGTLQKHDFLCVLAVNVINEKIYLAMWLWFILLISLSILVFFFHLAVFAVPVI  304
+             SM+M+GSSG++++HDFLCVLAVNV+NEKI L MW W   LIS+SILV  F+L VF  P++
+Sbjct  2000  SMNMYGSSGSIERHDFLCVLAVNVVNEKIXLIMWFWLFFLISMSILVCIFYLIVFIFPIM  2179
+
+Query  305   RRLYLVYLLGSGDKARIVARTFNQMGDVFLLYLLKKNVECQSLNLLLTEL  354
+             RRLYL+ LLGS  K  +V +TFNQMGD+F+L LL KN++ Q L LL+TEL
+Sbjct  2180  RRLYLLILLGSNKKVNVVIQTFNQMGDIFILSLLXKNIDSQYLELLVTEL  2329
+
+
+ Score = 128 bits (323),  Expect = 9e-36
+ Identities = 46/111 (41%), Positives = 59/111 (53%), Gaps = 33/111 (30%)
+ Frame = +1
+
+Query  56    SCVYDSGHPKLNDKVVNTYCWIHTTFTLPNRPYRDMSAI---------------------  94
+             SC+ D  +PKL+DKV+NTYCWIHTTFT+PNR Y++   +                     
+Sbjct  1243  SCIVDRTNPKLSDKVINTYCWIHTTFTIPNRIYKERGKLSFTFIFLCIYKTFDVFYFAVV  1422
+
+Query  95    ------------SSPGIGTHNLSDPVTYHAYYQWVPFMLFIQGLLFYAPHY  133
+                           PGI  +N  D +TYHAYYQWVPFMLF+Q ++    HY
+Sbjct  1423  YIIFVLFLILDTHFPGISNYNRVDTITYHAYYQWVPFMLFLQVIISL**HY  1575
+
+
+ Score = 111 bits (277),  Expect = 8e-30
+ Identities = 49/55 (89%), Positives = 53/55 (96%), Gaps = 0/55 (0%)
+ Frame = +3
+
+Query  1     MASLGLLSTLRGILQGKRNADIENLISKLHYRVTTTTVFCFCLLVTTNTLVGDPI  55
+             MASLGLLSTLRGILQGKRNADIEN++SKLHYRVTTT +F FCL+VTTNTLVGDPI
+Sbjct  933   MASLGLLSTLRGILQGKRNADIENIMSKLHYRVTTTVLFSFCLIVTTNTLVGDPI  1097
+
+
+ Score = 23.8 bits (50),  Expect = 0.10
+ Identities = 12/44 (27%), Positives = 25/44 (57%), Gaps = 7/44 (16%)
+ Frame = -3
+
+Query  240   RVTKCSMSMFGSSGTLQKHDFLCVLAVNVINE--KIYLAMWLWF  281
+             R +KCSM+      T+   + +  L ++ IN+  +IY+ M+ ++
+Sbjct  1329  RNSKCSMN-----PTISIDNLIT*LGISAINDTAEIYIYMYYYY  1213
+
+
+ Score = 19.6 bits (39),  Expect = 2.1
+ Identities = 4/9 (44%), Positives = 6/9 (67%), Gaps = 0/9 (0%)
+ Frame = -3
+
+Query  127   LFYAPHYIW  135
+             ++Y  HY W
+Sbjct  1227  MYYYYHYYW  1201
+
+
+ Score = 18.8 bits (37),  Expect = 3.6
+ Identities = 6/17 (35%), Positives = 11/17 (65%), Gaps = 0/17 (0%)
+ Frame = +3
+
+Query  35   TTTVFCFCLLVTTNTLV  51
+            ++T+F  C+    NTL+
+Sbjct  696  SSTLFGMCIK*KKNTLI  746
+
+
+> v_slice LvMJNV 21001-39000 with ambiguity codes
+Length=18000
+
+ Score = 23.8 bits (50),  Expect = 0.10
+ Identities = 7/19 (37%), Positives = 10/19 (53%), Gaps = 0/19 (0%)
+ Frame = -3
+
+Query  45    VTTNTLVGDPISCVYDSGH  63
+             +TT T+V     CV D  +
+Sbjct  1477  ITTTTVVYSKTRCVIDRTN  1421
+
+
+ Score = 20.7 bits (42),  Expect = 0.92
+ Identities = 7/19 (37%), Positives = 10/19 (53%), Gaps = 0/19 (0%)
+ Frame = -3
+
+Query  45    VTTNTLVGDPISCVYDSGH  63
+             +TT T+V     CV D  +
+Sbjct  2071  ITTTTVVYSKTRCVID*TN  2015
+
+
+ Score = 20.7 bits (42),  Expect = 0.92
+ Identities = 7/19 (37%), Positives = 10/19 (53%), Gaps = 0/19 (0%)
+ Frame = -3
+
+Query  45    VTTNTLVGDPISCVYDSGH  63
+             +TT T+V     CV D  +
+Sbjct  1282  ITTTTVVYSKTRCVID*TN  1226
+
+
+ Score = 17.6 bits (34),  Expect = 8.2
+ Identities = 6/30 (20%), Positives = 13/30 (43%), Gaps = 0/30 (0%)
+ Frame = +1
+
+Query  183  LKYLFCQCLSLVNCIVNMVLMNKFLNGKFL  212
+            +KY+       + C++  +     +N K L
+Sbjct  418  IKYIISILFYRILCLLLFISCAHIINKKIL  507
+
+
+> m_minus MelaMJNV 59001-62000 with ambiguity codes
+Length=3000
+
+ Score = 19.6 bits (39),  Expect = 2.1
+ Identities = 16/61 (26%), Positives = 26/61 (43%), Gaps = 4/61 (7%)
+ Frame = +3
+
+Query  1     MASLGLLSTLRGILQGKRNADIENLI---SKLHYRVTTTTVFCFCLLVTTNTLVGDPISC  57
+             +AS    S   GI+       IEN++   S+L+Y   +     +   + T  L GD I  
+Sbjct  1029  VAST*CTSXFMGIIHNSNKTIIENIMYSCSQLYYTFYSFNF*SYNYSILTFYL-GDRIKX  1205
+
+Query  58    V  58
+             +
+Sbjct  1206  I  1208
+
+
+ Score = 18.4 bits (36),  Expect = 4.7
+ Identities = 6/13 (46%), Positives = 7/13 (54%), Gaps = 0/13 (0%)
+ Frame = +1
+
+Query  39   FCFCLLVTTNTLV  51
+            FCFC      TL+
+Sbjct  145  FCFCCCFLFKTLM  183
+
+
+> v_mut_8pct LvMJNV 28501-30700 with substitutions and indels
+Length=2185
+
+ Score = 18.0 bits (35),  Expect = 6.1
+ Identities = 8/39 (21%), Positives = 20/39 (51%), Gaps = 5/39 (13%)
+ Frame = -2
+
+Query  25   LISKLHYRVTTTTVFCFCLLVTT-----NTLVGDPISCV  58
+            +++ L++R+++        + T      + +VGD  SC+
+Sbjct  723  ILANLYFRISSIL*RSS*EVSTV*YSMRSIMVGDCFSCI  607
+
+
+
+Lambda      K        H        a         alpha
+   0.324    0.138    0.425    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0426    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1613040
+
+
+  Database: User specified sequence set (Input: tests/db_search/tslice.fna).
+    Posted date:  Unknown
+  Number of letters in database: 15,385
+  Number of sequences in database:  5
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

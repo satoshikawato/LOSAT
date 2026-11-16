@@ -1,0 +1,117 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/bx_pyl_s.faa).
+           3 sequences; 330 total letters
+
+
+
+Query= pyl_q1
+
+Length=396
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+pyl_s3 O and X                                                        214     5e-78
+pyl_s1                                                                214     5e-78
+
+
+> pyl_s3 O and X
+Length=120
+
+ Score = 214 bits (545),  Expect = 5e-78, Method: Compositional matrix adjust.
+ Identities = 105/120 (88%), Positives = 105/120 (88%), Gaps = 0/120 (0%)
+ Frame = +1
+
+Query  22   LANAFNVMXPTYMPARSFPBFACELETESLZHSHPLKMHSIJQQNLEDTFFKXLYWLCFA  201
+            LANAF VMXPTYMPARSFP FA ELETESL HSHPLKMH I QQNLEDTFFK LYW CFA
+Sbjct  1    LANAFXVMXPTYMPARSFPOFABELETESLOHSHPLKMHZIXQQNLEDTFFKOLYWUCFA  60
+
+Query  202  HVKBPHPGWRNDKWZHHVEAGGKDSJQWRIHGHAIFXVHTFCAWGCYBYKYRVATRNAHV  381
+            HVK PHPGWRNDK  HHVEAGGKDS QWRI GHAIF VHTFCAWGCY YKYRVATRNAHV
+Sbjct  61   HVKOPHPGWRNDKJXHHVEAGGKDSOQWRI*GHAIFOVHTFCAWGCYXYKYRVATRNAHV  120
+
+
+> pyl_s1
+Length=120
+
+ Score = 214 bits (545),  Expect = 5e-78, Method: Compositional matrix adjust.
+ Identities = 104/120 (87%), Positives = 104/120 (87%), Gaps = 0/120 (0%)
+ Frame = +1
+
+Query  22   LANAFNVMXPTYMPARSFPBFACELETESLZHSHPLKMHSIJQQNLEDTFFKXLYWLCFA  201
+            LANAF VM PTYMPARSFP FA ELETESL HSHPLKMH I QQNLEDTFFK LYW CFA
+Sbjct  1    LANAFXVMOPTYMPARSFPOFABELETESLOHSHPLKMHZIOQQNLEDTFFKOLYWUCFA  60
+
+Query  202  HVKBPHPGWRNDKWZHHVEAGGKDSJQWRIHGHAIFXVHTFCAWGCYBYKYRVATRNAHV  381
+            HVK PHPGWRNDK  HHVEAGGKDS QWRI GHAIF VHTFCAWGCY YKYRVATRNAHV
+Sbjct  61   HVKOPHPGWRNDKJOHHVEAGGKDSOQWRI*GHAIFOVHTFCAWGCYXYKYRVATRNAHV  120
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 30240
+
+
+Query= pyl_q2
+
+Length=306
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+pyl_s2                                                                162     2e-58
+
+
+> pyl_s2
+Length=90
+
+ Score = 162 bits (411),  Expect = 2e-58, Method: Compositional matrix adjust.
+ Identities = 78/90 (87%), Positives = 78/90 (87%), Gaps = 0/90 (0%)
+ Frame = -1
+
+Query  285  CPNVYMTMXERPDGQVGAEBVISRTHARDDZSCSFLNTDMEJKYSKGKESPKXDTLNESM  106
+            CPNVY TM ERPDGQVGAE VI RTHARDD SCSFLNTD E KYSKGKESPK DTL ESM
+Sbjct  1    CPNVYXTMOERPDGQVGAEOVIBRTHARDDOSCSFLNTDZEOKYSKGKESPKODTLUESM  60
+
+Query  105  EHVBGDYCDSTYQIZGSPHICKHHHKQMKV  16
+            EHV GDYCDSTYQ  GSPHICKHHHKQMKV
+Sbjct  61   EHVOGDYCDSTYQJOGSPHICKHHHKQMKV  90
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 23184
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/bx_pyl_s.faa).
+    Posted date:  Unknown
+  Number of letters in database: 330
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

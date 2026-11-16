@@ -1,14 +1,20 @@
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
+import { test } from './support/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
-import { openSearch, paste, program } from './support/search';
+import { navigate } from './support/navigate';
+import { chooseRun, openSearch, paste, program, waitStatus } from './support/search';
 
 test('the page is cross-origin isolated, so the threaded engine can use shared memory', async ({ page }) => {
-  await page.goto('/');
+  await navigate(page, '/');
   expect(await page.evaluate(() => globalThis.crossOriginIsolated)).toBe(true);
   expect(await page.evaluate(() => typeof SharedArrayBuffer)).toBe('function');
 });
 
-test(`paste, queue, run, view and export with ${BUILD_HAS_ENGINE ? 'the engine' : 'the fake engine'}`, async ({ page }) => {
+test(`paste, run, view and export with ${BUILD_HAS_ENGINE ? 'the engine' : 'the fake engine'}`, async ({ page }) => {
+  // With the engine, more than the default 30 s, as in the other specs that search with it: on
+  // CI, WebKit took 10-23 s of the 30 s to open the page alone, and the run was still preparing
+  // when the test ended (losat-baselines/web-flaky-20261103/runs).
+  if (BUILD_HAS_ENGINE) test.setTimeout(120_000);
   await openSearch(page);
   // The banner shows exactly when the build has no engine (web/AGENTS.md rule 7).
   await expect(page.getByTestId('fake-engine-banner')).toHaveCount(BUILD_HAS_ENGINE ? 0 : 1);
@@ -17,11 +23,11 @@ test(`paste, queue, run, view and export with ${BUILD_HAS_ENGINE ? 'the engine' 
   await program(page, 'tblastx');
   await paste(page, 'query', '>q1\nACGTACGTACGT\n');
   await paste(page, 'subject', '>s1\nACGTACGTACGT\n');
-  await page.getByTestId('add-to-queue').click();
+  await page.getByTestId('run-losat').click();
 
-  await expect(page.getByTestId('run-1-status')).toHaveText('completed');
-  // The results tab shows the newest completed run; the outputs as written are in its Outputs view.
-  await page.getByTestId('tab-results').click();
+  // "Run LOSAT" opens the results page of the run: its status, then its results and, in the
+  // Outputs view, the outputs as written.
+  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', '1');
   await page.getByTestId('results-view-outputs').click();
   await expect(page.getByTestId('result-output')).toHaveAttribute('data-shown', '1:6');
@@ -38,19 +44,32 @@ test(`paste, queue, run, view and export with ${BUILD_HAS_ENGINE ? 'the engine' 
   const download = page.waitForEvent('download');
   await page.getByTestId('export-output').click();
   const file = await download;
-  expect(file.suggestedFilename()).toBe('losat-run1-tblastx.outfmt0.txt');
+  expect(file.suggestedFilename()).toMatch(/^losat-run1-tblastx-\d{8}T\d{6}Z\.outfmt0\.txt$/);
 });
 
-test('a BLASTN query of white space only is refused with the index scan error, before it is queued', async ({ page }) => {
-  // The adapter's register reads such a file as no records and the CLI then warns
-  // "Query is Empty!", but the index scan (bio's reader) refuses it; the application follows
-  // the scan and does not rebuild BLASTN's rules (S09, docs/evidence/losat_web_w1/README.md).
+test('a BLASTN query of white space only has no record, and its run ends as the CLI\'s does', async ({ page }) => {
+  // The index scan reads with the program's reader (NCBI's, DW-38), which reads no record from
+  // it; the CLI then warns "Query is Empty!". (Before, bio's reader refused it before the run.)
   await openSearch(page);
   await program(page, 'blastn');
   await paste(page, 'query', ' \n');
   await paste(page, 'subject', '>s1\nACGTACGTACGT\n');
-  await page.getByTestId('add-to-queue').click();
-  await expect(page.getByTestId('search-message')).toHaveText('Query (pasted): Expected > at record start.');
-  await expect(page.getByTestId('query-source-0-error')).toHaveText('This input cannot be read: Expected > at record start.');
-  await expect(page.getByTestId('run-1')).toHaveCount(0);
+  await expect(page.getByTestId('query-source-0-summary')).toContainText('0 records');
+  await page.getByTestId('run-losat').click();
+  await waitStatus(page, 1, 'completed');
+  if (BUILD_HAS_ENGINE) {
+    await chooseRun(page, 1);
+    await page.getByTestId('results-view-details').click();
+    await expect(page.getByTestId('run-diagnostics')).toContainText('Query is Empty!');
+  }
+});
+
+test('the empty Results tab offers "Run a search", which opens the Search tab', async ({ page }) => {
+  await openSearch(page);
+  await page.getByTestId('tab-results').click();
+  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('results-empty')).toBeVisible();
+  await page.getByTestId('results-run-a-search').click();
+  await expect(page.getByTestId('tab-search')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-selected', 'false');
 });

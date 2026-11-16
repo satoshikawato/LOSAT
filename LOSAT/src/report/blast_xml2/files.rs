@@ -28,8 +28,10 @@
 
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use super::framing::{SideFiles, Xml2Kind};
+use crate::report::run_files::FileReceiver;
 
 /// The characters `CDirEntry::SplitPath` takes as the end of the directory part: `/` on Unix;
 /// `:`, `/` and `\` on Windows.
@@ -164,6 +166,11 @@ impl FsSideFiles {
     pub fn path(&self, n: u32) -> PathBuf {
         path_from_bytes(self.name(&self.path_base, n))
     }
+
+    /// The path of the n-th side file as bytes.
+    fn path_bytes(&self, n: u32) -> Vec<u8> {
+        self.name(&self.path_base, n)
+    }
 }
 
 impl SideFiles for FsSideFiles {
@@ -175,6 +182,149 @@ impl SideFiles for FsSideFiles {
 
     fn listed(&self, n: u32) -> Vec<u8> {
         self.name(&self.listed_base, n)
+    }
+
+    /// Opens the side file of the n-th report as NCBI does when it writes the report, without
+    /// leaving a mark: a path that exists is opened for writing and not truncated (a directory or a
+    /// file without write permission fails), a path that does not exist is created and removed. The
+    /// run that holds its side files makes this check when the report is made, so that an
+    /// unopenable file stops it where NCBI's run stops, not at the epilog after every later batch
+    /// was searched (DECISIONS 35 S1). The bytes are written when the hold ends, which creates the
+    /// file again.
+    fn check_openable(&self, n: u32) -> io::Result<()> {
+        let path = self.path(n);
+        match std::fs::OpenOptions::new().write(true).open(&path) {
+            Ok(_) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                // A dangling link is created through (`File::create` follows it); only a path that
+                // did not exist at all is removed again.
+                let existed = path.symlink_metadata().is_ok();
+                std::fs::File::create(&path)?;
+                if !existed {
+                    std::fs::remove_file(&path)?;
+                }
+                Ok(())
+            }
+            Err(error) => Err(error),
+        }
+    }
+}
+
+/// The side files of a run given to the caller's receiver, named as `FsSideFiles` names them for a
+/// `-out` of the caller's choosing; the master file lists them by the same rule
+/// (`FsSideFiles::listed`). A `-out` without a directory and without the extension `.xml` or
+/// `.json` gives the side files the names that the master lists, in both formats.
+#[derive(Clone)]
+pub struct SideFileSink {
+    out: PathBuf,
+    receiver: Arc<dyn FileReceiver>,
+}
+
+impl SideFileSink {
+    pub fn new(out: impl Into<PathBuf>, receiver: Arc<dyn FileReceiver>) -> Self {
+        Self {
+            out: out.into(),
+            receiver,
+        }
+    }
+
+    /// The `-out` whose name the side files and the master's entries follow.
+    pub fn out(&self) -> &Path {
+        &self.out
+    }
+
+    /// The side files of a run of the kind `kind` (`Files14` or `Files13`).
+    pub fn side_files(&self, kind: Xml2Kind) -> ReceivedSideFiles {
+        ReceivedSideFiles {
+            names: FsSideFiles::new(&self.out, kind),
+            receiver: self.receiver.clone(),
+        }
+    }
+}
+
+/// `SideFiles` that hand each side file to a `FileReceiver` (`SideFileSink::side_files`).
+pub struct ReceivedSideFiles {
+    names: FsSideFiles,
+    receiver: Arc<dyn FileReceiver>,
+}
+
+impl SideFiles for ReceivedSideFiles {
+    /// A writer that hands the side file over when it is flushed or dropped (the trait's other
+    /// callers; a run writes through `write_file`).
+    fn create(&mut self, n: u32) -> io::Result<Box<dyn Write + '_>> {
+        Ok(Box::new(Received {
+            receiver: &*self.receiver,
+            name: self.names.path_bytes(n),
+            bytes: Vec::new(),
+            delivered: false,
+        }))
+    }
+
+    fn listed(&self, n: u32) -> Vec<u8> {
+        self.names.listed(n)
+    }
+
+    /// The report goes to the receiver as it is, without a copy; a receiver that fails is the
+    /// side-file write error of every program (`side_file_write_error`).
+    fn write_file(&mut self, n: u32, report: &[u8]) -> anyhow::Result<()> {
+        self.receiver
+            .receive(&self.names.path_bytes(n), report)
+            .map_err(|_| super::framing::side_file_write_error())
+    }
+}
+
+/// One side file for a receiver from `create`: the bytes are kept and handed over at the first
+/// flush, or when it is dropped without one.
+struct Received<'a> {
+    receiver: &'a dyn FileReceiver,
+    name: Vec<u8>,
+    bytes: Vec<u8>,
+    delivered: bool,
+}
+
+impl Received<'_> {
+    fn deliver(&mut self) -> io::Result<()> {
+        if std::mem::replace(&mut self.delivered, true) {
+            return Ok(());
+        }
+        let bytes = std::mem::take(&mut self.bytes);
+        self.receiver.receive(&self.name, &bytes)
+    }
+}
+
+impl Write for Received<'_> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if self.delivered {
+            return Err(io::Error::other("the side file was handed over"));
+        }
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.deliver()
+    }
+}
+
+impl Drop for Received<'_> {
+    fn drop(&mut self) {
+        let _ = self.deliver();
+    }
+}
+
+/// The side files of a run of `kind`: the caller's receiver (`sink`) when it gives one, else the
+/// files next to `out` (the run's `-out`), else none (outfmt 15 and 16, and a caller with neither,
+/// which then fails at its first report).
+pub fn run_side_files(
+    kind: Xml2Kind,
+    out: Option<&Path>,
+    sink: Option<&SideFileSink>,
+) -> super::framing::RunSideFiles {
+    match (sink, out) {
+        _ if !kind.is_files() => Box::new(super::framing::NoSideFiles),
+        (Some(sink), _) => Box::new(sink.side_files(kind)),
+        (None, Some(out)) => Box::new(FsSideFiles::new(out, kind)),
+        (None, None) => Box::new(super::framing::NoSideFiles),
     }
 }
 

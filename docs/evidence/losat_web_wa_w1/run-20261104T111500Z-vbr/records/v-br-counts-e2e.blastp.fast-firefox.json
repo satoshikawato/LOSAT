@@ -1,0 +1,912 @@
+[
+  {
+    "id": "e2e.blastp.fast n=3",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "runtimePath": "threaded",
+    "threads": 3,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "native": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "hits": 7,
+    "elapsedMs": 1150,
+    "memory": {
+      "linearBytesBefore": 3145728,
+      "linearBytesAfter": 11337728,
+      "instanceRuns": 1
+    }
+  },
+  {
+    "id": "e2e.blastp.fast n=5",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "runtimePath": "threaded",
+    "threads": 5,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "native": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "hits": 7,
+    "elapsedMs": 291,
+    "memory": {
+      "linearBytesBefore": 11337728,
+      "linearBytesAfter": 13434880,
+      "instanceRuns": 2
+    }
+  },
+  {
+    "id": "e2e.blastp.fast n=6",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "runtimePath": "threaded",
+    "threads": 6,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "native": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "hits": 7,
+    "elapsedMs": 314,
+    "memory": {
+      "linearBytesBefore": 13434880,
+      "linearBytesAfter": 14417920,
+      "instanceRuns": 3
+    }
+  },
+  {
+    "id": "e2e.blastp.fast n=7",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "runtimePath": "threaded",
+    "threads": 7,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "native": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "hits": 7,
+    "elapsedMs": 305,
+    "memory": {
+      "linearBytesBefore": 14417920,
+      "linearBytesAfter": 15466496,
+      "instanceRuns": 4
+    }
+  },
+  {
+    "id": "e2e.blastp.fast n=9",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "runtimePath": "threaded",
+    "threads": 9,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "native": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "hits": 7,
+    "elapsedMs": 304,
+    "memory": {
+      "linearBytesBefore": 15466496,
+      "linearBytesAfter": 17825792,
+      "instanceRuns": 5
+    }
+  },
+  {
+    "id": "e2e.blastp.fast n=10",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "runtimePath": "threaded",
+    "threads": 10,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "native": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "hits": 7,
+    "elapsedMs": 336,
+    "memory": {
+      "linearBytesBefore": 17825792,
+      "linearBytesAfter": 18874368,
+      "instanceRuns": 6
+    }
+  },
+  {
+    "id": "e2e.blastp.fast n=11",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "runtimePath": "threaded",
+    "threads": 11,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "native": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "hits": 7,
+    "elapsedMs": 325,
+    "memory": {
+      "linearBytesBefore": 18874368,
+      "linearBytesAfter": 19726336,
+      "instanceRuns": 7
+    }
+  },
+  {
+    "id": "e2e.blastp.fast n=12",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "runtimePath": "threaded",
+    "threads": 12,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "native": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "hits": 7,
+    "elapsedMs": 304,
+    "memory": {
+      "linearBytesBefore": 19726336,
+      "linearBytesAfter": 20774912,
+      "instanceRuns": 8
+    }
+  },
+  {
+    "id": "e2e.blastp.fast n=13",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "runtimePath": "threaded",
+    "threads": 13,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "native": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "hits": 7,
+    "elapsedMs": 333,
+    "memory": {
+      "linearBytesBefore": 20774912,
+      "linearBytesAfter": 22216704,
+      "instanceRuns": 9
+    }
+  },
+  {
+    "id": "e2e.blastp.fast n=14",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "runtimePath": "threaded",
+    "threads": 14,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "native": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "hits": 7,
+    "elapsedMs": 311,
+    "memory": {
+      "linearBytesBefore": 22216704,
+      "linearBytesAfter": 22937600,
+      "instanceRuns": 10
+    }
+  },
+  {
+    "id": "e2e.blastp.fast n=15",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "runtimePath": "threaded",
+    "threads": 15,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "native": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "hits": 7,
+    "elapsedMs": 334,
+    "memory": {
+      "linearBytesBefore": 22937600,
+      "linearBytesAfter": 24379392,
+      "instanceRuns": 11
+    }
+  },
+  {
+    "id": "e2e.blastp.fast n=17",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "runtimePath": "threaded",
+    "threads": 17,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "native": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "hits": 7,
+    "elapsedMs": 350,
+    "memory": {
+      "linearBytesBefore": 24379392,
+      "linearBytesAfter": 25952256,
+      "instanceRuns": 12
+    }
+  },
+  {
+    "id": "e2e.blastp.fast n=18",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "runtimePath": "threaded",
+    "threads": 18,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "native": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "hits": 7,
+    "elapsedMs": 326,
+    "memory": {
+      "linearBytesBefore": 25952256,
+      "linearBytesAfter": 27131904,
+      "instanceRuns": 13
+    }
+  },
+  {
+    "id": "e2e.blastp.fast n=19",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "runtimePath": "threaded",
+    "threads": 19,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "native": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "hits": 7,
+    "elapsedMs": 325,
+    "memory": {
+      "linearBytesBefore": 27131904,
+      "linearBytesAfter": 28377088,
+      "instanceRuns": 14
+    }
+  },
+  {
+    "id": "e2e.blastp.fast n=20",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "runtimePath": "threaded",
+    "threads": 20,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "native": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "hits": 7,
+    "elapsedMs": 380,
+    "memory": {
+      "linearBytesBefore": 28377088,
+      "linearBytesAfter": 29687808,
+      "instanceRuns": 15
+    }
+  },
+  {
+    "id": "e2e.blastp.fast n=21",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "runtimePath": "threaded",
+    "threads": 21,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "native": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "hits": 7,
+    "elapsedMs": 605,
+    "memory": {
+      "linearBytesBefore": 29687808,
+      "linearBytesAfter": 30343168,
+      "instanceRuns": 16
+    }
+  },
+  {
+    "id": "e2e.blastp.fast n=22",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "runtimePath": "threaded",
+    "threads": 22,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "native": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "hits": 7,
+    "elapsedMs": 435,
+    "memory": {
+      "linearBytesBefore": 30343168,
+      "linearBytesAfter": 31391744,
+      "instanceRuns": 17
+    }
+  },
+  {
+    "id": "e2e.blastp.fast n=23",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "runtimePath": "threaded",
+    "threads": 23,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "native": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "hits": 7,
+    "elapsedMs": 422,
+    "memory": {
+      "linearBytesBefore": 31391744,
+      "linearBytesAfter": 32374784,
+      "instanceRuns": 18
+    }
+  },
+  {
+    "id": "e2e.blastp.fast n=24",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "runtimePath": "threaded",
+    "threads": 24,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "native": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "hits": 7,
+    "elapsedMs": 374,
+    "memory": {
+      "linearBytesBefore": 32374784,
+      "linearBytesAfter": 33554432,
+      "instanceRuns": 19
+    }
+  },
+  {
+    "id": "e2e.blastp.fast n=25",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "runtimePath": "threaded",
+    "threads": 25,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "native": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "hits": 7,
+    "elapsedMs": 435,
+    "memory": {
+      "linearBytesBefore": 33554432,
+      "linearBytesAfter": 34668544,
+      "instanceRuns": 20
+    }
+  },
+  {
+    "id": "e2e.blastp.fast n=26",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "runtimePath": "threaded",
+    "threads": 26,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "native": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "hits": 7,
+    "elapsedMs": 706,
+    "memory": {
+      "linearBytesBefore": 34668544,
+      "linearBytesAfter": 35651584,
+      "instanceRuns": 21
+    }
+  },
+  {
+    "id": "e2e.blastp.fast n=27",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "runtimePath": "threaded",
+    "threads": 27,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "native": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "hits": 7,
+    "elapsedMs": 452,
+    "memory": {
+      "linearBytesBefore": 35651584,
+      "linearBytesAfter": 36831232,
+      "instanceRuns": 22
+    }
+  },
+  {
+    "id": "e2e.blastp.fast n=28",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "runtimePath": "threaded",
+    "threads": 28,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "native": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "hits": 7,
+    "elapsedMs": 330,
+    "memory": {
+      "linearBytesBefore": 36831232,
+      "linearBytesAfter": 37814272,
+      "instanceRuns": 23
+    }
+  },
+  {
+    "id": "e2e.blastp.fast n=29",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "runtimePath": "threaded",
+    "threads": 29,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "native": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "hits": 7,
+    "elapsedMs": 332,
+    "memory": {
+      "linearBytesBefore": 37814272,
+      "linearBytesAfter": 39124992,
+      "instanceRuns": 24
+    }
+  },
+  {
+    "id": "e2e.blastp.fast n=30",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "runtimePath": "threaded",
+    "threads": 30,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "native": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "hits": 7,
+    "elapsedMs": 317,
+    "memory": {
+      "linearBytesBefore": 39124992,
+      "linearBytesAfter": 39976960,
+      "instanceRuns": 25
+    }
+  },
+  {
+    "id": "e2e.blastp.fast n=31",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "runtimePath": "threaded",
+    "threads": 31,
+    "engineBuild": "losat-web-threads.wasm sha256:68764abb4a92be0f (shared-memory guard)",
+    "sha256": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "native": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "hits": 7,
+    "elapsedMs": 456,
+    "memory": {
+      "linearBytesBefore": 39976960,
+      "linearBytesAfter": 41222144,
+      "instanceRuns": 26
+    }
+  }
+]

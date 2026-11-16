@@ -1,0 +1,666 @@
+RPSBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: rps_mini
+           3 sequences; 560 total letters
+
+
+
+Query= YP_009220476.1 envelope protein [White spot syndrome virus]
+
+Length=208
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.317    0.136    0.382 
+
+Gapped
+Lambda      K        H
+   0.267   0.0504    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220478.1 hypothetical protein [White spot syndrome virus]
+
+Length=295
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.311    0.135    0.392 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220482.1 hypothetical protein [White spot syndrome virus]
+
+Length=200
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  16.6    9.2  
+
+
+
+Lambda      K        H
+   0.319    0.131    0.388 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220483.1 hypothetical protein [White spot syndrome virus]
+
+Length=286
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  17.8    4.9  
+
+
+
+Lambda      K        H
+   0.313    0.130    0.364 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220649.1 DNA polymerase [White spot syndrome virus]
+
+Length=2351
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  354     3e-101
+
+
+
+Lambda      K        H
+   0.317    0.132    0.388 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220484.1 hypothetical protein [White spot syndrome virus]
+
+Length=231
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.305    0.120    0.314 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220489.1 hypothetical protein [White spot syndrome virus]
+
+Length=196
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.315    0.132    0.393 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220491.1 hypothetical protein [White spot syndrome virus]
+
+Length=208
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.319    0.136    0.409 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220493.1 thymidylate synthetase [White spot syndrome virus]
+
+Length=289
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.322    0.140    0.433 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220496.1 hypothetical protein [White spot syndrome virus]
+
+Length=276
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.316    0.134    0.371 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220497.1 hypothetical protein [White spot syndrome virus]
+
+Length=297
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  17.0    7.4  
+
+
+
+Lambda      K        H
+   0.316    0.131    0.374 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220507.1 hypothetical protein [White spot syndrome virus]
+
+Length=229
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.315    0.128    0.365 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220508.1 hypothetical protein [White spot syndrome virus]
+
+Length=185
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.304    0.117    0.320 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220514.1 hypothetical protein [White spot syndrome virus]
+
+Length=150
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.308    0.123    0.327 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220516.1 hypothetical protein [White spot syndrome virus]
+
+Length=271
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  19.7    1.2  
+
+
+
+Lambda      K        H
+   0.316    0.134    0.391 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220517.1 hypothetical protein [White spot syndrome virus]
+
+Length=222
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.316    0.131    0.379 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220519.1 hypothetical protein [White spot syndrome virus]
+
+Length=337
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  17.4    6.0  
+
+
+
+Lambda      K        H
+   0.320    0.137    0.407 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220525.1 hypothetical protein [White spot syndrome virus]
+
+Length=199
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.329    0.138    0.469 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220529.1 ribonucleotide reductase large subunit [White spot
+syndrome virus]
+
+Length=848
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  353     4e-101
+
+
+
+Lambda      K        H
+   0.318    0.134    0.392 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220531.1 immediate-early protein [White spot syndrome virus]
+
+Length=302
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.309    0.135    0.401 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220533.1 hypothetical protein [White spot syndrome virus]
+
+Length=372
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  18.2    3.5  
+
+
+
+Lambda      K        H
+   0.322    0.137    0.385 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220535.1 ribonucleotide reductase small subunit [White spot
+syndrome virus]
+
+Length=413
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.319    0.135    0.387 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220536.1 hypothetical protein [White spot syndrome virus]
+
+Length=311
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.321    0.140    0.448 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220538.1 hypothetical protein [White spot syndrome virus]
+
+Length=257
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.313    0.132    0.369 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220539.1 envelope protein [White spot syndrome virus]
+
+Length=278
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  17.0    7.7  
+
+
+
+Lambda      K        H
+   0.320    0.136    0.405 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220541.1 hypothetical protein [White spot syndrome virus]
+
+Length=179
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.328    0.141    0.459 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220543.1 hypothetical protein [White spot syndrome virus]
+
+Length=204
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.321    0.136    0.413 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220544.1 hypothetical protein [White spot syndrome virus]
+
+Length=275
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.312    0.128    0.388 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220553.1 hypothetical protein [White spot syndrome virus]
+
+Length=294
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.319    0.137    0.391 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220554.1 envelope protein [White spot syndrome virus]
+
+Length=292
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.317    0.135    0.374 
+
+Gapped
+Lambda      K        H
+   0.267   0.0504    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220556.1 envelope protein [White spot syndrome virus]
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  18.9    1.8  
+
+
+
+Lambda      K        H
+   0.317    0.131    0.381 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220561.1 hypothetical protein [White spot syndrome virus]
+
+Length=281
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.314    0.132    0.368 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+Query= YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase
+[White spot syndrome virus]
+
+Length=398
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  317     3e-90
+
+
+
+Lambda      K        H
+   0.320    0.137    0.406 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000000
+
+
+  Database: rps_mini
+    Posted date:  Nov 7, 2026  10:01 PM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40

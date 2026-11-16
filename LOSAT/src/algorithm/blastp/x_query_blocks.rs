@@ -32,13 +32,14 @@
 //!   only. A block is made of whole batches, and the batches inside a block are those of the
 //!   whole input (they are counted greedily from the block's first record, which starts a
 //!   batch of the whole input).
+//!
 //! The rows of tabular format 6 depend only on each query's hit list and come in query order,
 //! so the blocks' rows written one after the other are the rows of the whole search. The block
 //! search is used only where the blocks' reports written one after the other are the report of
 //! the whole search (see `blast_engine.rs` `search` and `x_query_block_plan`); everything else
 //! takes the reference path.
 //!
-//! LOSAT_X_BPQBLOCKFMT (strict set, `x_bp_qblock_fmt`) also takes outfmt 0 and 7, whose reports
+//! The block search also takes outfmt 0 and 7, whose reports
 //! hold more than the rows (NCBI prints the prolog, then each batch's result sets in its batch
 //! loop, then the epilog: `blastp_app.cpp` below):
 //! - each query's part depends only on that query's final list and on fixed inputs: outfmt 7's
@@ -59,10 +60,19 @@
 //!   (`BlastpReports::x_queries_before`).
 //! - the refusals of the reference path that come before it writes anything and depend on the
 //!   hits are, for outfmt 0, those of a shown subject's title (a title of punctuation that NCBI's
-//!   `x_CleanAndCompress` reads past, ABI v1's titles): the blocks are searched only when no
+//!   `x_CleanAndCompress` reads past): the blocks are searched only when no
 //!   subject's title is refused (`blast_engine.rs` `x_block_shown_titles_allowed`, with `-db`
 //!   `database::x_titles_allow_blocks`), so that none comes after the reports of the blocks
-//!   before. The other refusals are those of outfmt 6 above.
+//!   before. The other refusals are those of outfmt 6 above. Two refusals of a query's record
+//!   are made per block instead, in the call of the block that holds the query, before that
+//!   block's first byte and after the reports of the blocks before (`run_call`): outfmt 0's
+//!   refusal of the masks of a record that is both a query and a subject under `-parse_deflines`
+//!   (`believed::refuse_shared_masks`), and outfmt 1 to 4's refusal of such a record's section
+//!   that NCBI BLAST+ aborts on (`pairwise::blastp_section_aborts`; what NCBI writes before its
+//!   abort depends on its buffers). The refusals of a database sequence that NCBI shows as a
+//!   query (`ListedTitles::refuse_generated_query_ids`, `refuse_display_ids_of_queries`) sit at
+//!   the same place, but run only in the search of all queries: such a sequence has parsed
+//!   Seq-ids, whose definition lines `database::x_titles_allow_blocks` never takes.
 //! - nothing else is written to standard error while a block is searched (only the debug trace and
 //!   `LOSAT_TIMING`'s lines, which each block prints for itself).
 //!
@@ -105,16 +115,19 @@
 //!   that tie have the same subject start and query start, so the same diagonal, and come from
 //!   hits at different subject offsets, saved in the same order in both searches; the sorted list
 //!   is the reference's (its query starts shifted by the block's start).
+//!
 //! The same argument covers the reference path's one table of all queries against NCBI's table
 //! per query batch. A block's table is tested for NCBI's overflow banks with the block's own
 //! batches (`blast_engine.rs` `ncbi_compressed_lookup_tables`), and the block search is taken only
 //! where the words of each batch's offsets show that no batch's table fills them
-//! (`x_block_words_fit`, tested before the first block), so that the reference path's refusal,
-//! which comes before any row, is never made in a later block.
+//! (`x_word_blocks`, tested before the first block), so that the reference path's refusal,
+//! which comes before any row, is never made in a later block. The same counts also close a block
+//! before a batch whose words would take the block's table past the slots of NCBI's largest batch
+//! table (`x_word_blocks`): NCBI holds one batch's table at a time, so with a lowered threshold a
+//! block of 50,000 letters would hold several times NCBI's table. A block is still made of whole
+//! batches of the whole input, so the argument above holds for it.
 //!
-//! LOSAT_X_BPQBLOCKSA (strict set, `x_bp_qblock_sa`, outfmt 8, 9, 11 and 12) and LOSAT_X_BPQBLOCKXML
-//! (strict set, `x_bp_qblock_xml`, outfmt 5) take the other formats of one blastp report; both act
-//! only with `LOSAT_X_BPQBLOCK`:
+//! It also takes the other formats of one blastp report (outfmt 8, 9, 11 and 12, and outfmt 5):
 //! - outfmt 8, 9 and 12 (Seq-annot of Seq-aligns as ASN.1 text, BER and JSON): NCBI writes one
 //!   self-contained Seq-annot per query that has alignments, at once, a new object stream for each,
 //!   and writes no prolog and no epilog for them. LOSAT's writer keeps nothing from one query to the
@@ -132,16 +145,16 @@
 //!   flag (the last block), as outfmt 7's count does; the run values (program, version,
 //!   `BlastOutput_db`, matrix, gap costs, filter, `db-num`, `db-len`, kappa, lambda, entropy) are
 //!   fixed inputs; `hsp-len`, `eff-space`, the masks and the message are the query's own. The
-//!   writer refuses what NCBI cannot write (a byte >= 0x80 or a control byte in a name, a title it
-//!   cannot guess the encoding of or reads past the end of) before its first byte, which in a later
-//!   block would come after the earlier blocks' bytes. So the block search is taken only when
-//!   none is refused, checked with the writer's own functions before the first block: the database
-//!   name and every query's definition line and message id (`x_block_xml_run_allowed`), every
+//!   writer refuses a title that NCBI crashes on (`names::Refusal::ReadsPastEnd`) before its first
+//!   byte, which in a later block would come after the earlier blocks' bytes; every other byte
+//!   (>= 0x80, a control byte) NCBI's stream writes or fails at by itself, the same in a block. So
+//!   the block search is taken only when none is refused, checked with the writer's own functions
+//!   before the first block: every query's definition line (`x_block_xml_run_allowed`), every
 //!   `-subject` record's names (`x_block_xml_subjects_allowed`; conservative, the writer refuses
 //!   only a subject with hits), and with `-db` the definition lines as for outfmt 8
 //!   (`database::x_titles_read_allow_blocks`). Otherwise the search of all queries refuses where
 //!   it does today; the file sink is not created before then.
-//! - outfmt 13 to 16 (LOSAT_X_BPQBLOCKXML2, strict set, `x_bp_qblock_xml2`; BLAST JSON and XML2, single
+//! - outfmt 13 to 16 (BLAST JSON and XML2, single
 //!   stream (15, 16) or side files and a master file (13, 14)):
 //!   NCBI writes one complete document per query (`x_PrintXML2Report`), `PrintProlog` the start of the
 //!   whole document and `PrintEpilog` its end; JSON joins the documents with `,\n`; a `-subject`
@@ -184,8 +197,7 @@
 //!   needs them, in query order; a query's warnings before its report). The input files (queries,
 //!   subjects, lists) are read before the first block, so a side file that has the name of one of
 //!   them does not change what a later block reads.
-//! - outfmt 11 (the BLAST archive, under LOSAT_X_BPQBLOCKSA as outfmt 8, 9 and 12; no new switch.
-//!   `LOSAT_X_BPQBLOCKSA=0` keeps 8, 9, 11 and 12 on the search of all queries): NCBI writes one
+//! - outfmt 11 (the BLAST archive): NCBI writes one
 //!   `Blast4-archive` per query batch, straight after the batch's search (`blastp_app.cpp`), and
 //!   no prolog or epilog. A batch's document is made from the batch's own data: its queries'
 //!   Bioseqs, the Seq-aligns of its final hit lists (as outfmt 8), the SEG masks of its queries,
@@ -203,13 +215,14 @@
 //!   are updated by a document in the order the documents are written, which is the order of the
 //!   blocks, so a block sees what the search of all queries has at that batch. The refusals
 //!   before the first byte are those of outfmt 8 (with `-db` the definition lines,
-//!   `database::x_titles_read_allow_blocks`: the archive reads the same Seq-ids) and the titles
-//!   and `-db` name that the archive cannot write (a byte outside `0x20..=0x7E`, `check_titles`),
-//!   which `search_cli` checks for every record before the search starts. The errors that NCBI
-//!   turns into an error archive (`run`) come after the documents of the batches before, from
-//!   the same handle. In a call of several outputs, hit records or an observer
-//!   (LOSAT_X_BPQBLOCKWEB) the plan is refused for 11 as for 15 and 16: the handle's muting and
+//!   `database::x_titles_read_allow_blocks`: the archive reads the same Seq-ids). A string that
+//!   the archive does not write as it is (`report::archive::ArchiveEncoding::writes_text`) is
+//!   written with NCBI's posts where its document is written (`write_archive`), in a block as in
+//!   the search of all queries. The errors that NCBI turns into an error archive (`run`) come
+//!   after the documents of the batches before, from the same handle. In a call of several outputs, hit records or an observer
+//!   the plan is refused for 11 as for 15 and 16: the handle's muting and
 //!   messages with several formats were argued for the CLI's shape.
+//!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
 //! ```c++
 //!         if (results.HasAlignments()) {
@@ -235,7 +248,7 @@
 //!         	incremental_struct->m_IterationNum++;
 //! ```
 //!
-//! LOSAT_X_BPQBLOCKWEB (strict set, `x_bp_qblock_web`; acts only with `LOSAT_X_BPQBLOCK`) takes a
+//! The block search also takes a
 //! `run_local` call with several outputs, the hit records or an observer (ABI v2 of the Web build
 //! asks for outfmt 0, 6 and 7, the records and the byte ranges of each HSP in each output), when
 //! every output of several is a writer of the caller, no `-db` is searched and an observer comes
@@ -243,10 +256,13 @@
 //! - each output's bytes are those of the one-output case above: what is not per query (the prolog,
 //!   the epilog, the counts of outfmt 7 and 5) is set per block for every output alike
 //!   (`BlastpReports`), each output's writer writes only to its own sink, and with several outputs
-//!   the sinks are the caller's writers, unbuffered (a stream that two outputs share would get each
-//!   block's formats in turn, so several outputs need writers; one output may also be standard
-//!   output or a file, as above). The checks of the refusals that depend on the hits are made for
-//!   every kind of report among the outputs before the first block. The warnings go with the first
+//!   the sinks are the caller's writers, unbuffered. Several outputs need writers: the search of
+//!   all queries writes each output's whole report in turn, so two outputs on standard output would
+//!   get each block's formats in turn, two outputs to one file would write over each other, and a
+//!   file that cannot be created would stop the run after the first block's part of the outputs
+//!   before it (`x_query_block_plan`); one output may also be standard output or a file, as
+//!   above. The checks of the refusals that depend on the hits are made for every kind of report
+//!   among the outputs before the first block. The warnings go with the first
 //!   output, query by query, in every block.
 //! - the final list of all queries is the blocks' lists one after the other: it is ordered by query,
 //!   then by subject, then by HSP (`hsp.rs`'s final sort), and a query's list does not depend on the
@@ -262,16 +278,36 @@
 //!   are those of the search of all queries. Each format's events come in the same order as in the
 //!   search of all queries; between formats they alternate block by block, and an observer reads
 //!   each format's events apart (the ABI orders the events within a stream only).
-//! An outfmt 13 to 16 output (LOSAT_X_BPQBLOCKXML2) does not take blocks in such a call: the
+//!
+//! An outfmt 13 to 16 output does not take blocks in such a call: the
 //! document's run-level frame and `Xml2Carry` were argued and checked for a call of one output
-//! (the CLI's shape) only, so `x_query_block_plan` records `XBlockFormat::Xml2` for the reach check
-//! and then refuses the plan when the call has several outputs, hit records or an observer; the
-//! search of all queries runs, as it did before either switch (Owner-delegated 2026-10-22).
+//! (the CLI's shape) only, so `x_query_block_plan` refuses the plan when the call has several
+//! outputs, hit records or an observer; the search of all queries runs (Owner-delegated 2026-10-22).
+//!
+//! The search of all queries, which writes the reports that the block search does not take (outfmt
+//! 10, 18 and 20, custom tabular fields that read more of `-db`'s definition lines, `-query_loc`,
+//! several outputs with `-db`, a run that a check before the first block leaves to it), runs its
+//! preliminary stage in the same blocks of whole batches (`blast_engine.rs` `x_prelim_block_plan`
+//! and the block loop of `run_preliminary`, `blast_engine/prelim_run.rs`, item SC8b-2; blastp
+//! only): each block is a call of the preliminary stage only (`PrelimOnly::Block`) with its own
+//! lookup table, diagonal table and scratch, freed when it returns, and its compact hit lists move
+//! to their queries among all queries (`query_split::rebase_hit_list`: only the query's index
+//! moves, the HSPs' query coordinates are relative to their context). The argument above is the
+//! preliminary stage's: a query's preliminary hit list is the same in a block as in the search of
+//! all queries, whatever report follows. The redo, the traceback and the reports then run once over
+//! all queries, with the contexts, search spaces, cutoffs and batches of all queries, as after one
+//! table (the contexts without a table, `x_blocks_contexts`, are each builder's), so no report
+//! byte, report order or error order depends on the blocks: nothing is written before the hit lists
+//! are joined, the set-up's checks and refusals come before the first block, and a sequence file
+//! that a block cannot read is the error of the search of all queries (`preliminary_search_error`).
+//! The plan is made by the search of all queries only (`BlastpReports::x_plan_blocks`), never again
+//! inside a block (whose words would close it on a smaller most).
 //!
 //! `LOSAT_X_BPQBLOCK` is a value switch of the strict set (`utils/xswitch.rs`): a positive number
-//! of query letters (the block closes at the first batch end at or past it), 50,000 when it is
-//! not set or is not a positive number. `0`,
-//! turns the block path off.
+//! of query letters (the block closes at the first batch end at or past it; also before a batch
+//! whose words would take the block's words past its most, `blast_engine.rs` `x_word_blocks`),
+//! 50,000 when it is not set or is not a positive number. `0` turns both block paths off (the
+//! block search and the preliminary stage in blocks).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-295
 //! ```c++
@@ -391,13 +427,14 @@ use std::path::Path;
 
 use super::encoding::EncodedProtein;
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
-    x_bpclut_on, x_bplkpflat_mode, x_pool_builds, XFlatArgs, XFlatSpare, XLkpFlat,
+    x_bpclut_on, x_bplkpflat_mode, x_pool_builds, XFlatArgs, XFlatSpare, XLkpFlat, XSegmentPool,
 };
 use crate::algorithm::tblastx::lookup::{QueryContext, XAaSpares};
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::api::local_blast::{FormatObserver, HspIndex, OutputSink};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::RangedBatch;
+use crate::config::ScoringMatrix;
 use crate::utils::threading::SearchPool;
 #[cfg(all(
     feature = "parallel",
@@ -419,56 +456,6 @@ pub(crate) fn x_bp_qblock() -> Option<usize> {
     *N.get_or_init(|| crate::utils::xswitch::value("LOSAT_X_BPQBLOCK", 1..=usize::MAX, 50_000))
 }
 
-// No NCBI counterpart: reads LOSAT_X_BPQBLOCKFMT (a strict-set switch: on unless it is `0`) once.
-// It chooses which reports the block search writes, not any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPQBLOCKFMT): whether the block search also takes one report of outfmt 0 or
-/// 7 (with LOSAT_X_BPQBLOCKWEB also several reports of these and the others the block search
-/// takes); off, only one outfmt 6 report.
-pub(crate) fn x_bp_qblock_fmt() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPQBLOCKFMT"))
-}
-
-// No NCBI counterpart: reads LOSAT_X_BPQBLOCKSA and LOSAT_X_BPQBLOCKXML (strict-set switches: on
-// unless `0`) once. They choose which reports the block search writes, not any value NCBI
-// computes.
-/// EXPERIMENT (LOSAT_X_BPQBLOCKSA): whether the block search also takes one Seq-annot report
-/// (outfmt 8, 9 or 12) or the BLAST archive (outfmt 11). Acts only with `LOSAT_X_BPQBLOCK`.
-pub(crate) fn x_bp_qblock_sa() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPQBLOCKSA"))
-}
-
-/// EXPERIMENT (LOSAT_X_BPQBLOCKXML): whether the block search also takes one BLAST XML report
-/// (outfmt 5). Acts only with `LOSAT_X_BPQBLOCK`.
-pub(crate) fn x_bp_qblock_xml() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPQBLOCKXML"))
-}
-
-/// EXPERIMENT (LOSAT_X_BPQBLOCKXML2): whether the block search also takes one XML2 or JSON report
-/// (outfmt 13 to 16). Acts only with `LOSAT_X_BPQBLOCK`.
-pub(crate) fn x_bp_qblock_xml2() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPQBLOCKXML2"))
-}
-
-// No NCBI counterpart: reads LOSAT_X_BPQBLOCKWEB (a strict-set switch: on unless `0`) once. It
-// chooses which calls the block search takes, not any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPQBLOCKWEB): whether the block search also takes a `run_local` call with
-/// more than one output, the hit records or an observer (ABI v2 of the Web build: outfmt 0, 6 and
-/// 7, the records and the byte ranges), each output a writer of the caller and no `-db`. Acts only
-/// with `LOSAT_X_BPQBLOCK`.
-pub(crate) fn x_bp_qblock_web() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPQBLOCKWEB"))
-}
-
 // No NCBI counterpart: the reports the block search writes; it does not change any value NCBI
 // computes.
 /// EXPERIMENT (LOSAT_X_BPQBLOCK): which report the block search writes, which the driver's checks
@@ -477,13 +464,13 @@ pub(crate) fn x_bp_qblock_web() -> bool {
 pub(crate) enum XBlockReport {
     /// Outfmt 6 and 7.
     Tabular,
-    /// Outfmt 0 (LOSAT_X_BPQBLOCKFMT).
+    /// Outfmt 0.
     Pairwise,
-    /// Outfmt 8, 9, 11 and 12 (LOSAT_X_BPQBLOCKSA).
+    /// Outfmt 8, 9, 11 and 12.
     Seqalign,
-    /// Outfmt 5 (LOSAT_X_BPQBLOCKXML).
+    /// Outfmt 5.
     Xml,
-    /// Outfmt 13 to 16 (LOSAT_X_BPQBLOCKXML2). The framing state (the count of reports, which
+    /// Outfmt 13 to 16. The framing state (the count of reports, which
     /// numbers the side files of 13 and 14) moves from block to block (`Xml2Carry`).
     Xml2,
 }
@@ -496,45 +483,13 @@ impl XBlockReport {
     }
 }
 
-// No NCBI counterpart: names which switches decide the block search of a call for `x_reach!`; it
-// does not change any value NCBI computes.
-/// A switch besides LOSAT_X_BPQBLOCK that governs a search whose block plan is made
-/// (`LOSAT_X_REACH`): the format switch of each output (outfmt 6 has none), and for a call of
-/// several outputs, the hit records or an observer the switch of `run_local`. The plan's refusals
-/// before it looks at a call's outputs record none.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum XBlockFormat {
-    /// Outfmt 0 and 7 (LOSAT_X_BPQBLOCKFMT).
-    Fmt,
-    /// Outfmt 8, 9, 11 and 12 (LOSAT_X_BPQBLOCKSA).
-    Seqalign,
-    /// Outfmt 5 (LOSAT_X_BPQBLOCKXML).
-    Xml,
-    /// Outfmt 13 to 16 (LOSAT_X_BPQBLOCKXML2).
-    Xml2,
-    /// Several outputs, the hit records or an observer (LOSAT_X_BPQBLOCKWEB).
-    Web,
-}
-
-// No NCBI counterpart: records which side the block-search switches took; it does not change any
-// value NCBI computes.
-/// `LOSAT_X_REACH`: the search took the block search (`own`) or the search of all queries, for
-/// LOSAT_X_BPQBLOCK and each switch of `formats`, each while it is on.
-pub(crate) fn x_reach_block_search(formats: &[XBlockFormat], own: bool) {
-    use crate::utils::xreach::x_reach;
-    if x_bp_qblock().is_none() {
-        return;
-    }
-    x_reach!("LOSAT_X_BPQBLOCK", own);
-    for format in formats {
-        match format {
-            XBlockFormat::Fmt if x_bp_qblock_fmt() => x_reach!("LOSAT_X_BPQBLOCKFMT", own),
-            XBlockFormat::Seqalign if x_bp_qblock_sa() => x_reach!("LOSAT_X_BPQBLOCKSA", own),
-            XBlockFormat::Xml if x_bp_qblock_xml() => x_reach!("LOSAT_X_BPQBLOCKXML", own),
-            XBlockFormat::Xml2 if x_bp_qblock_xml2() => x_reach!("LOSAT_X_BPQBLOCKXML2", own),
-            XBlockFormat::Web if x_bp_qblock_web() => x_reach!("LOSAT_X_BPQBLOCKWEB", own),
-            _ => {}
-        }
+// No NCBI counterpart: records which side the block search took; it does not change any value NCBI
+// computes.
+/// `LOSAT_X_REACH`: the search took the block search (`own`) or the search of all queries, while
+/// LOSAT_X_BPQBLOCK is on.
+pub(crate) fn x_reach_block_search(own: bool) {
+    if x_bp_qblock().is_some() {
+        crate::utils::xreach::x_reach!("LOSAT_X_BPQBLOCK", own);
     }
 }
 
@@ -546,36 +501,23 @@ pub(crate) fn x_reach_block_search(formats: &[XBlockFormat], own: bool) {
 // ```
 // The refusals of the XML report (`write_blastp_xml`) come before its first byte; a block would
 // make them after the bytes of the blocks before. These are the writer's own checks, made for the
-// whole run before the first block (`names::check_text`, `names::xml_query_title`,
-// `query_warnings::warning_query_id`, `names::xml_subject_names`); when one fails the search of
-// all queries runs and refuses where it does today.
-/// EXPERIMENT (LOSAT_X_BPQBLOCKXML): whether the database name and every query's definition line and
-/// message id can be written by the XML report. The message of a query holds only its warning id
-/// (`warning_query_id`) besides ASCII text. The database name check is defensive: the CLI refuses
-/// the name in block 0 before any byte with the same output, and `run_local` takes no `-db`; it
-/// would bind if `run_local` ever searched a database (its file is created at `open()`).
-pub(crate) fn x_block_xml_run_allowed(
-    db_name: &str,
-    queries: &[FastaRecord],
-    pool: &SearchPool<'_>,
-) -> bool {
+// whole run before the first block (`names::xml_query_title`, `names::xml_subject_names`: a title
+// NCBI crashes on, `names::Refusal`); when one fails the search of all queries runs and refuses
+// where it does today. Every other text reaches NCBI's stream, which writes it or fails at its own
+// level (`report::serial::xml`), the same in a block.
+/// EXPERIMENT (LOSAT_X_BPQBLOCK): whether no query's definition line is refused by the XML report.
+pub(crate) fn x_block_xml_run_allowed(queries: &[FastaRecord], pool: &SearchPool<'_>) -> bool {
     use crate::report::blast_xml::names;
-    names::check_text(db_name.as_bytes()).is_ok()
-        && x_all_in_groups(queries.len(), pool, |range| {
-            queries[range].iter().all(|record| {
-                names::xml_query_title(&record.title, true).is_ok()
-                    && names::check_text(&crate::report::query_warnings::warning_query_id(
-                        record.local_id.as_bytes(),
-                        &record.title,
-                    ))
-                    .is_ok()
-            })
-        })
+    x_all_in_groups(queries.len(), pool, |range| {
+        queries[range]
+            .iter()
+            .all(|record| names::xml_query_title(&record.title, true).is_ok())
+    })
 }
 
-/// EXPERIMENT (LOSAT_X_BPQBLOCKXML): whether the names of every `-subject` record can be written
-/// by the XML report (`names::xml_subject_names`; the report refuses only a subject with hits,
-/// so this is conservative).
+/// EXPERIMENT (LOSAT_X_BPQBLOCK): whether no `-subject` record's names are refused by the XML
+/// report (`names::xml_subject_names`; the report refuses only a subject with hits, so this is
+/// conservative).
 pub(crate) fn x_block_xml_subjects_allowed(
     subjects: &[FastaRecord],
     pool: &SearchPool<'_>,
@@ -624,11 +566,14 @@ fn x_all_in_groups(
 // Every format prints from the final result set of its call; a block's call numbers the HSPs of
 // its own list from 0. No NCBI counterpart for the offset: it maps a block's numbers to those of
 // the list of all queries, the blocks' lists one after the other.
-/// EXPERIMENT (LOSAT_X_BPQBLOCKWEB): the caller's observer for one block, whose HSP indices are
+/// EXPERIMENT (LOSAT_X_BPQBLOCK): the caller's observer for one block, whose HSP indices are
 /// those of the block's list plus `base`, the number of HSPs of the blocks before.
 pub(crate) struct XOffsetObserver<'a> {
     pub(crate) inner: &'a mut (dyn FormatObserver + Send),
     pub(crate) base: HspIndex,
+    /// The block's first query among the call's queries (a record's `q_idx` is this plus its
+    /// index in the block).
+    pub(crate) first_query: usize,
 }
 
 impl FormatObserver for XOffsetObserver<'_> {
@@ -646,6 +591,18 @@ impl FormatObserver for XOffsetObserver<'_> {
 
     fn subject_end(&mut self, format: usize, first_hsp: HspIndex) {
         self.inner.subject_end(format, self.base + first_hsp);
+    }
+
+    fn query_stats(&mut self, q_idx: usize, stats: crate::report::blast_xml::XmlStats) {
+        self.inner.query_stats(self.first_query + q_idx, stats);
+    }
+
+    fn queries_begin(&mut self) {
+        self.inner.queries_begin();
+    }
+
+    fn batch_extensions(&mut self, extensions: i32) {
+        self.inner.batch_extensions(extensions);
     }
 }
 
@@ -666,20 +623,38 @@ impl FormatObserver for XOffsetObserver<'_> {
 // NCBI searches and reports one batch at a time; a block is one or more whole batches.
 /// The blocks of searched queries: consecutive batches (`batches`, of the whole input), each
 /// block closed at the first batch end where its letters (`lengths` of the searched queries)
-/// reach `block_letters`. `None` when a batch has no searched query or the batches do not cover
-/// the searched queries in order.
+/// reach `block_letters`. With `words` (the words of each batch's compressed table, one per
+/// batch, and the most a block may hold: `blast_engine.rs` `x_word_blocks`), a block is also
+/// closed before a batch whose words would take the block's past the most; a batch is never
+/// split, so a block holds at least one. `None` when a batch has no searched query, the batches
+/// do not cover the searched queries in order, or `words` does not have one count per batch.
 pub(crate) fn x_query_blocks(
     batches: &[RangedBatch],
     lengths: &[usize],
     block_letters: usize,
+    words: Option<(&[u64], u64)>,
 ) -> Option<Vec<Range<usize>>> {
+    if words.is_some_and(|(batch_words, _)| batch_words.len() != batches.len()) {
+        return None;
+    }
     let mut blocks = Vec::new();
     let mut start = 0usize;
     let mut end = 0usize;
     let mut letters = 0usize;
-    for batch in batches {
+    let mut block_words = 0u64;
+    for (index, batch) in batches.iter().enumerate() {
         if batch.searched.is_empty() || batch.searched.start != end {
             return None;
+        }
+        if let Some((batch_words, most)) = words {
+            let added = batch_words[index];
+            if start < end && block_words.saturating_add(added) > most {
+                blocks.push(start..end);
+                start = end;
+                letters = 0;
+                block_words = 0;
+            }
+            block_words = block_words.saturating_add(added);
         }
         end = batch.searched.end;
         letters += lengths.get(batch.searched.clone())?.iter().sum::<usize>();
@@ -687,6 +662,7 @@ pub(crate) fn x_query_blocks(
             blocks.push(start..end);
             start = end;
             letters = 0;
+            block_words = 0;
         }
     }
     if end != lengths.len() {
@@ -716,7 +692,10 @@ impl<'a> XBlockSink<'a> {
         match sink {
             OutputSink::Stdout => Self::Stdout(BufWriter::new(io::stdout())),
             OutputSink::File(path) => Self::File { path, file: None },
-            OutputSink::Writer(writer) => Self::Writer(&mut **writer),
+            OutputSink::Writer(writer) | OutputSink::Files(writer, _) => {
+                Self::Writer(&mut **writer)
+            }
+            OutputSink::Out(out) => Self::Writer(&mut **out),
         }
     }
 
@@ -763,7 +742,7 @@ impl Write for XBlockSink<'_> {
 pub(crate) struct XBlockSubjects {
     /// The address and count of the records encoded.
     records: (usize, usize),
-    /// EXPERIMENT (LOSAT_X_BPSUBJMETA): the records' tabular IDs and titles, made with the switch.
+    /// EXPERIMENT (LOSAT_X_BPQBLOCK): the records' tabular IDs and titles (`None` for `-db`).
     x_meta: Option<super::blast_engine::x_subject_meta::XSubjectMeta>,
     encoded: Vec<EncodedProtein>,
     x_lookup_spare: XFlatSpare,
@@ -771,10 +750,19 @@ pub(crate) struct XBlockSubjects {
     /// allocated or moved here by the block search's thread for the build of that table ahead of its
     /// block (`blast_engine/x_lookup_ahead.rs`, `x_bp_lookup_spares`).
     x_lookup_ahead: XFlatSpare,
+    /// Item SC2d-2: the segments of packed appends kept from one flat build to the next
+    /// (`x_bp_segments`).
+    x_segments: XSegmentPool,
     /// EXPERIMENT (LOSAT_X_BPLKPAHEAD): the vectors and neighbour lists of exact blastp's tables
     /// built ahead of their blocks (`x_bp_aa_spares`); EXPERIMENT (LOSAT_X_BPLKREUSE): or the
     /// vectors of the last block's table, for the next block's own build (`x_bp_aa_block_spare`).
     x_aa_spares: XAaSpares,
+    /// Each block's queries (`x_key`: the address and count of its records) and words
+    /// (`blast_engine.rs` `x_word_blocks`), for its table's build (`x_block_appends`).
+    x_block_words: Vec<((usize, usize), u64)>,
+    /// The SEG-masked subject ranges of the redo of `encoded`, kept from block to block
+    /// (`x_block_seg_store`).
+    x_seg_store: std::sync::Arc<super::kappa::XSharedSubjectRanges>,
 }
 
 impl XBlockSubjects {
@@ -787,9 +775,75 @@ impl XBlockSubjects {
             encoded,
             x_lookup_spare: XFlatSpare::default(),
             x_lookup_ahead: XFlatSpare::default(),
+            x_segments: XSegmentPool::default(),
             x_aa_spares: XAaSpares::default(),
+            x_block_words: Vec::new(),
+            x_seg_store: std::sync::Arc::new(super::kappa::XSharedSubjectRanges::new()),
         }
     }
+
+    // No NCBI counterpart: the reserve of the builds (`x_block_appends`); it changes no value NCBI
+    // computes.
+    /// Keeps each block's words: `blocks` gives the block's queries (a slice of the searched
+    /// records, as the block search passes them) and its words.
+    pub(crate) fn x_set_block_words<'r>(
+        &mut self,
+        blocks: impl Iterator<Item = (&'r [FastaRecord], u64)>,
+    ) {
+        self.x_block_words = blocks
+            .map(|(queries, words)| ((queries.as_ptr() as usize, queries.len()), words))
+            .collect();
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1635-1636
+// ```c
+//                 status = s_DoSegSequenceData(seqData, eBlastTypeBlastp,
+//                                              subject_maybe_biased);
+// ```
+// NCBI masks a subject range in each batch that reaches it. Reuse of an identical result only: an
+// entry is a function of its key where the key names the same subject in every block.
+/// EXPERIMENT (LOSAT_X_BPQBLOCK): the store of SEG-masked subject ranges that the blocks' redos
+/// share (`x_redo_par.rs` `x_redo`, which empties it after a block as LOSAT_X_BPSEGWIN empties it
+/// after a window), where the redo's `subjects` are the subjects encoded once for all blocks
+/// (`XBlockSubjects`); `None` outside the block search and for other subjects. The store's key
+/// names a subject by its index in the redo's subjects (`kappa.rs` `BlastpKappaSubjectRangeCache`),
+/// the same subject in every block only in that shared encoding: a `-db` search's redo names a
+/// subject by its rank among the block's listed subjects (`x_redo_subjects.rs`), another subject in
+/// another block, so each block of a `-db` search keeps its own store, as the search of all queries.
+pub(crate) fn x_block_seg_store(
+    pool: &SearchPool<'_>,
+    subjects: super::x_redo_subjects::XRedoSubjects<'_>,
+) -> Option<std::sync::Arc<super::kappa::XSharedSubjectRanges>> {
+    let super::x_redo_subjects::XRedoSubjects::Encoded(encoded) = subjects else {
+        return None;
+    };
+    pool.x_ext::<XBlockSubjects>()
+        .filter(|block| {
+            std::ptr::eq(block.encoded.as_ptr(), encoded.as_ptr())
+                && block.encoded.len() == encoded.len()
+        })
+        .map(|block| block.x_seg_store.clone())
+}
+
+// No NCBI counterpart: the reserve of a build (`x_clut_direct.rs` `x_try_build_flat_reserving`); it
+// changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPQBLOCK): the words of the block whose queries are `query_records` (the
+/// same slice), the most appends of its compressed table's build (a table of a block holds at most
+/// the words its batches' offsets add, `CompressedWordCount`); 0 outside the block search or for a
+/// slice that is no block's.
+pub(crate) fn x_block_appends(pool: &SearchPool<'_>, query_records: &[FastaRecord]) -> usize {
+    let key = (query_records.as_ptr() as usize, query_records.len());
+    pool.x_ext::<XBlockSubjects>()
+        .and_then(|subjects| {
+            subjects
+                .x_block_words
+                .iter()
+                .find(|(block, _)| *block == key)
+        })
+        .map_or(0, |&(_, words)| {
+            usize::try_from(words).unwrap_or(usize::MAX)
+        })
 }
 
 // No NCBI counterpart: reads back the encoding attached by the block search (reuse only).
@@ -805,8 +859,8 @@ pub(crate) fn x_block_subjects<'p>(
 }
 
 // No NCBI counterpart: reads back the IDs and titles attached by the block search (reuse only).
-/// EXPERIMENT (LOSAT_X_BPSUBJMETA): the subjects' tabular IDs and titles attached to `pool`
-/// (`blast_engine/x_subject_meta.rs`), when the switch made them and they are those of `records`
+/// EXPERIMENT (LOSAT_X_BPQBLOCK): the subjects' tabular IDs and titles attached to `pool`
+/// (`blast_engine/x_subject_meta.rs`), when they are those of `records`
 /// (the same slice).
 pub(crate) fn x_block_subject_meta<'p>(
     pool: &SearchPool<'p>,
@@ -887,6 +941,15 @@ pub(crate) fn x_bp_lookup_spares<'p>(
         .map(|subjects| (&subjects.x_lookup_spare, &subjects.x_lookup_ahead))
 }
 
+// No NCBI counterpart: buffer reuse between the blocks' flat builds (`XSegmentPool`).
+/// Item SC2d-2: the block search's kept segments of packed appends, where its flat tables take spare
+/// vectors (`x_bp_lookup_spare`): each build's appends pass takes them, its stripes pass keeps its own.
+pub(crate) fn x_bp_segments<'p>(pool: &SearchPool<'p>) -> Option<&'p XSegmentPool> {
+    x_bp_lookup_spare(pool)?;
+    pool.x_ext::<XBlockSubjects>()
+        .map(|subjects| &subjects.x_segments)
+}
+
 // No NCBI counterpart: where LOSAT_X_BPLKPAHEAD acts for exact blastp, and buffer reuse between its
 // tables (`XAaSpares`); it reads switches and changes no value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPLKPAHEAD): the block search's spares of exact blastp's tables
@@ -940,11 +1003,13 @@ pub(crate) enum XLookupFor {
 
 /// EXPERIMENT (LOSAT_X_BPLKPFLAT): the lookup query of blastp-fast's compressed table and what the
 /// pool's build of its flat table gets with the switch (`lookup/x_clut_par.rs`): the block search's
-/// spare vectors, and with `LOSAT_X_BPQBLOCK` the contexts' Karlin blocks as extra tasks of the
-/// build's appends pass, in place of their own pass on the pool (`x_bp_lookup_query`).
+/// spare vectors, and for BLOSUM62 with `LOSAT_X_BPQBLOCK` the contexts' Karlin blocks as extra tasks
+/// of the build's appends pass, in place of their own pass on the pool (`x_bp_lookup_query`).
 pub(crate) struct XLookupFlat<'a> {
     mode: XLkpFlat,
     spare: Option<&'a XFlatSpare>,
+    /// Item SC2d-2: the block search's kept segments of packed appends (`x_bp_segments`).
+    segments: Option<&'a XSegmentPool>,
     /// LOSAT_X_BPLKPAHEAD: the build ahead of its block (`XLookupFor::Ahead`).
     x_ahead: bool,
     #[cfg(all(
@@ -960,15 +1025,20 @@ impl<'a> XLookupFlat<'a> {
     // ```c
     //       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
     // ```
-    /// The values of `x_bp_lookup_query(query_frames, word_size, pool)`; where the switch acts with
-    /// `LOSAT_X_BPQBLOCK`, the contexts come without their Karlin blocks, which `finish` sets after
-    /// the build (`XKarlinTasks`). A query chunk of a split batch (`XLookupFor::QueryChunk`, a search
-    /// that ends after its preliminary stage, inside its block's search, and drops its table there)
-    /// takes no spare vectors: the block's table keeps them. The build of the next block's table
-    /// ahead of it (`XLookupFor::Ahead`, LOSAT_X_BPLKPAHEAD) takes the second spare's.
+    /// The values of `x_bp_lookup_query(query_frames, word_size, pool)` for BLOSUM62, and of
+    /// `prepare_matrix_lookup_query_for_word_size` (the contexts' Karlin blocks on `pool` where it
+    /// has more than one thread) for another search matrix `matrix` (item SC2b). For BLOSUM62, where
+    /// the switch acts with `LOSAT_X_BPQBLOCK`, the contexts come without their Karlin blocks, which
+    /// `finish` sets after the build (`XKarlinTasks`); another matrix's come with theirs, before the
+    /// build (no extra tasks). The spare vectors are the same for every matrix (item SC2d-2): a query
+    /// chunk of a split batch (`XLookupFor::QueryChunk`, a search that ends after its preliminary
+    /// stage, inside its block's search, and drops its table there) takes none: the block's table
+    /// keeps them. The build of the next block's table ahead of it (`XLookupFor::Ahead`,
+    /// LOSAT_X_BPLKPAHEAD) takes the second spare's.
     pub(crate) fn lookup_query<'p: 'a>(
         query_frames: &'a [Vec<QueryFrame>],
         word_size: usize,
+        matrix: ScoringMatrix,
         pool: &SearchPool<'p>,
         x_for: XLookupFor,
     ) -> (Self, Vec<u8>, Vec<(i32, i32)>, Vec<QueryContext>) {
@@ -982,6 +1052,32 @@ impl<'a> XLookupFlat<'a> {
             XLookupFor::Ahead => x_bp_lookup_spares(pool).map(|(_, ahead)| ahead),
         };
         let x_ahead = x_for == XLookupFor::Ahead;
+        let segments = match x_for {
+            XLookupFor::Search | XLookupFor::Ahead => x_bp_segments(pool),
+            XLookupFor::QueryChunk => None,
+        };
+        if matrix != ScoringMatrix::Blosum62 {
+            let (query, locations, contexts) =
+                crate::algorithm::tblastx::lookup::prepare_matrix_lookup_query_for_word_size(
+                    query_frames,
+                    word_size,
+                    false,
+                    matrix,
+                    Some(pool),
+                );
+            let flat = Self {
+                mode,
+                spare,
+                segments,
+                x_ahead,
+                #[cfg(all(
+                    feature = "parallel",
+                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+                ))]
+                karlin: None,
+            };
+            return (flat, query, locations, contexts);
+        }
         #[cfg(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -990,12 +1086,14 @@ impl<'a> XLookupFlat<'a> {
             let (mut flat, query, locations, contexts) =
                 Self::with_karlin_tasks(query_frames, word_size, mode, spare);
             flat.x_ahead = x_ahead;
+            flat.segments = segments;
             return (flat, query, locations, contexts);
         }
         let (query, locations, contexts) = x_bp_lookup_query(query_frames, word_size, pool);
         let flat = Self {
             mode,
             spare,
+            segments,
             x_ahead,
             #[cfg(all(
                 feature = "parallel",
@@ -1044,6 +1142,7 @@ impl<'a> XLookupFlat<'a> {
         let flat = Self {
             mode,
             spare,
+            segments: None,
             x_ahead: false,
             karlin: Some(karlin),
         };
@@ -1051,8 +1150,9 @@ impl<'a> XLookupFlat<'a> {
     }
 
     // No NCBI counterpart: the arguments of the build (`x_bp_build_compressed_lookup`).
-    /// The switch's mode, the spare vectors and the extra tasks, for the build.
-    pub(crate) fn build_args(&self) -> XFlatArgs<'_> {
+    /// The switch's mode, the spare vectors and the extra tasks, for the build, with `appends`
+    /// (`x_block_appends`) for the serial builders' reserve.
+    pub(crate) fn build_args(&self, appends: usize) -> XFlatArgs<'_> {
         #[cfg(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -1069,8 +1169,10 @@ impl<'a> XLookupFlat<'a> {
         XFlatArgs {
             mode: self.mode,
             spare: self.spare,
+            segments: self.segments,
             extra,
             x_ahead: self.x_ahead,
+            appends,
         }
     }
 
@@ -1273,7 +1375,7 @@ mod tests {
                             &flat_locations,
                             &[0..flat_locations.len()],
                             pool,
-                            flat.build_args(),
+                            flat.build_args(0),
                         );
                         assert!(matches!(built, Some(XFlatBuild::Table(_))));
                         let from_tasks = flat.finish(&mut flat_contexts);
@@ -1302,39 +1404,99 @@ mod tests {
         ];
         // Letters per batch: 12, 12, 4, 7.
         assert_eq!(
-            x_query_blocks(&batches, &lengths, 20),
+            x_query_blocks(&batches, &lengths, 20, None),
             Some(vec![0..4, 4..7])
         );
         assert_eq!(
-            x_query_blocks(&batches, &lengths, 12),
+            x_query_blocks(&batches, &lengths, 12, None),
             Some(vec![0..2, 2..4, 4..7])
         );
         assert_eq!(
-            x_query_blocks(&batches, &lengths, 1),
+            x_query_blocks(&batches, &lengths, 1, None),
             Some(vec![0..2, 2..4, 4..6, 6..7])
         );
-        assert_eq!(x_query_blocks(&batches, &lengths, 1000), Some(vec![0..7]));
+        assert_eq!(
+            x_query_blocks(&batches, &lengths, 1000, None),
+            Some(vec![0..7])
+        );
+    }
+
+    #[test]
+    fn blocks_close_before_a_batch_that_takes_their_words_past_the_most() {
+        let lengths = [6, 6, 3, 9, 2, 2, 7];
+        let batches = [
+            batch(0..2, 0..2),
+            batch(2..4, 2..4),
+            batch(4..6, 4..6),
+            batch(6..7, 6..7),
+        ];
+        let words = [40u64, 30, 10, 50];
+        // The words close a block before the batch that takes it past the most (a block may
+        // reach the most).
+        assert_eq!(
+            x_query_blocks(&batches, &lengths, 1000, Some((&words, 80))),
+            Some(vec![0..6, 6..7])
+        );
+        assert_eq!(
+            x_query_blocks(&batches, &lengths, 1000, Some((&words, 70))),
+            Some(vec![0..4, 4..7])
+        );
+        assert_eq!(
+            x_query_blocks(&batches, &lengths, 1000, Some((&words, 69))),
+            Some(vec![0..2, 2..6, 6..7])
+        );
+        // A batch above the most is a block of its own; it is never split.
+        assert_eq!(
+            x_query_blocks(&batches, &lengths, 1000, Some((&words, 1))),
+            Some(vec![0..2, 2..4, 4..6, 6..7])
+        );
+        // Words that never reach the most leave the blocks of the letters.
+        assert_eq!(
+            x_query_blocks(&batches, &lengths, 20, Some((&words, 1000))),
+            Some(vec![0..4, 4..7])
+        );
+        // A block closed by its letters counts its words anew: the letters close 0..2 and 2..4
+        // (12 letters each), and 4..7 holds 10 + 50 words, within 75 (with the words of the
+        // blocks before kept, 40 + 30 + 10 would pass 75 and close 4..6).
+        assert_eq!(
+            x_query_blocks(&batches, &lengths, 12, Some((&words, 75))),
+            Some(vec![0..2, 2..4, 4..7])
+        );
+        // A block closed by its words counts its letters anew: 40 + 30 > 55 closes 0..2, and
+        // 2..6 has 16 letters, below 20, when 10 + 50 > 55 closes it.
+        assert_eq!(
+            x_query_blocks(&batches, &lengths, 20, Some((&words, 55))),
+            Some(vec![0..2, 2..6, 6..7])
+        );
+        // One count per batch, or no blocks.
+        assert_eq!(
+            x_query_blocks(&batches, &lengths, 20, Some((&words[..3], 1000))),
+            None
+        );
     }
 
     #[test]
     fn batches_that_do_not_cover_the_queries_give_no_blocks() {
         let lengths = [5, 5, 5];
         assert_eq!(
-            x_query_blocks(&[batch(0..2, 0..2), batch(2..3, 2..2)], &lengths, 1),
+            x_query_blocks(&[batch(0..2, 0..2), batch(2..3, 2..2)], &lengths, 1, None),
             None
         );
-        assert_eq!(x_query_blocks(&[batch(0..2, 0..2)], &lengths, 1), None);
         assert_eq!(
-            x_query_blocks(&[batch(0..1, 0..1), batch(1..3, 2..3)], &lengths, 1),
+            x_query_blocks(&[batch(0..2, 0..2)], &lengths, 1, None),
             None
         );
-        assert_eq!(x_query_blocks(&[], &[], 1), Some(vec![]));
+        assert_eq!(
+            x_query_blocks(&[batch(0..1, 0..1), batch(1..3, 2..3)], &lengths, 1, None),
+            None
+        );
+        assert_eq!(x_query_blocks(&[], &[], 1, None), Some(vec![]));
     }
 
     // The XML checks of the block search agree with the writer's own functions on the probe titles
     // of `report/blast_xml/names.rs`: names that pass (periods, `TPA:`, doubled spaces, an empty
-    // title), a byte >= 0x80 (UTF-8 and Latin-1), a control byte, and punctuation that
-    // `x_CleanAndCompress` reads past the end of. A one-record check and the same record among
+    // title, a byte >= 0x80 in UTF-8 and Latin-1, a control byte: the stream writes them), and
+    // punctuation that `x_CleanAndCompress` reads past the end of (refused). A one-record check and the same record among
     // others, on a pool of 1 and 3 threads.
     #[test]
     fn the_xml_checks_agree_with_the_writers_functions() {
@@ -1386,7 +1548,7 @@ mod tests {
             .collect();
         let passing = records.iter().filter(|record| ok_query(record)).count();
         assert!(
-            passing >= 5 && passing < records.len(),
+            passing >= 9 && passing < records.len(),
             "the probe titles pass and fail: {passing}"
         );
         for threads in [1, 3] {
@@ -1394,7 +1556,7 @@ mod tests {
                 for record in &records {
                     let one = std::slice::from_ref(record);
                     assert_eq!(
-                        x_block_xml_run_allowed("db", one, pool),
+                        x_block_xml_run_allowed(one, pool),
                         ok_query(record),
                         "query title {:?}, threads {threads}",
                         String::from_utf8_lossy(&record.title)
@@ -1411,7 +1573,7 @@ mod tests {
                     (0..50)
                         .map(|index| {
                             let title: &[u8] = if Some(index) == bad {
-                                "caf\u{e9}".as_bytes()
+                                b", ,"
                             } else {
                                 b"ok title"
                             };
@@ -1419,16 +1581,12 @@ mod tests {
                         })
                         .collect()
                 };
-                assert!(x_block_xml_run_allowed("db", &many(None), pool));
+                assert!(x_block_xml_run_allowed(&many(None), pool));
                 assert!(x_block_xml_subjects_allowed(&many(None), pool));
                 for bad in [0, 17, 49] {
-                    assert!(!x_block_xml_run_allowed("db", &many(Some(bad)), pool));
+                    assert!(!x_block_xml_run_allowed(&many(Some(bad)), pool));
                     assert!(!x_block_xml_subjects_allowed(&many(Some(bad)), pool));
                 }
-                // The database name is checked as the writer checks it.
-                assert!(x_block_xml_run_allowed("", &many(None), pool));
-                assert!(!x_block_xml_run_allowed("d\u{e9}", &many(None), pool));
-                assert!(!x_block_xml_run_allowed("d\x01", &many(None), pool));
                 Ok(())
             })
             .expect("pool");
@@ -1453,5 +1611,41 @@ mod tests {
         }
         assert_eq!(std::fs::read(&path).unwrap(), b"a\t1\nb\t2\n");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // The redo's store of SEG-masked subject ranges is the blocks' only for the subjects encoded
+    // for all blocks (`x_block_seg_store`): its key is a subject's index in the redo's subjects,
+    // which in another set (another encoding, a `-db` search's listed subjects, whose ranks differ
+    // between blocks) may name another subject. The `-db` blocks: `tests/psiblast_taxdb_blocks.rs`.
+    #[test]
+    fn the_seg_store_of_the_blocks_serves_only_their_subject_encoding() {
+        use super::super::encoding::encode_protein_sequence;
+        use super::super::x_redo_subjects::XRedoSubjects;
+        let records: Vec<FastaRecord> = [&b"MKVLAAGIVALLLAAGCSS"[..], b"MSTNPKPQRKTKRNTNRR"]
+            .iter()
+            .enumerate()
+            .map(|(index, seq)| FastaRecord::new(format!("Subject_{}", index + 1), b"", seq))
+            .collect();
+        let encode = || {
+            records
+                .iter()
+                .map(|record| encode_protein_sequence(record.seq()))
+                .collect::<Vec<_>>()
+        };
+        let other = encode();
+        let subjects = XBlockSubjects::new(&records, encode());
+        crate::utils::threading::with_search_pool(1, "blastp", |pool| {
+            assert!(x_block_seg_store(pool, XRedoSubjects::Encoded(&subjects.encoded)).is_none());
+            let pool = pool.x_with_ext(&subjects);
+            let store = x_block_seg_store(&pool, XRedoSubjects::Encoded(&subjects.encoded))
+                .expect("the blocks' store");
+            assert!(std::sync::Arc::ptr_eq(&store, &subjects.x_seg_store));
+            assert!(x_block_seg_store(&pool, XRedoSubjects::Encoded(&other)).is_none());
+            assert!(
+                x_block_seg_store(&pool, XRedoSubjects::Encoded(&subjects.encoded[..1])).is_none()
+            );
+            Ok(())
+        })
+        .unwrap();
     }
 }

@@ -1,0 +1,39 @@
+# TBLASTN 2.17.0+
+# Query: BDT61866.1 wsv220-like protein [Penaeus monodon majanivirus A]
+# Database: tests/db_search/tslice
+# Fields: subject tax id, subject sci name, subject com names, subject blast name, subject super kingdom, subject tax ids, subject sci names, subject com names, subject blast names, subject super kingdoms, subject title, subject titles, subject strand, % query coverage per subject, % query coverage per hsp, % query coverage per uniq subject
+# 3 hits found
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	m_minus MelaMJNV 59001-62000 with ambiguity codes	m_minus MelaMJNV 59001-62000 with ambiguity codes	minus	99	99	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	v_slice LvMJNV 21001-39000 with ambiguity codes	v_slice LvMJNV 21001-39000 with ambiguity codes	plus	99	99	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	m_plus MelaMJNV 36001-44000 with ambiguity codes and an N block	m_plus MelaMJNV 36001-44000 with ambiguity codes and an N block	minus	2	2	N/A
+# TBLASTN 2.17.0+
+# Query: BDT62090.1 hypothetical protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]
+# Database: tests/db_search/tslice
+# Fields: subject tax id, subject sci name, subject com names, subject blast name, subject super kingdom, subject tax ids, subject sci names, subject com names, subject blast names, subject super kingdoms, subject title, subject titles, subject strand, % query coverage per subject, % query coverage per hsp, % query coverage per uniq subject
+# 5 hits found
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	v_slice LvMJNV 21001-39000 with ambiguity codes	v_slice LvMJNV 21001-39000 with ambiguity codes	minus	100	100	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	v_slice LvMJNV 21001-39000 with ambiguity codes	v_slice LvMJNV 21001-39000 with ambiguity codes	minus	100	9	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	v_slice LvMJNV 21001-39000 with ambiguity codes	v_slice LvMJNV 21001-39000 with ambiguity codes	plus	100	5	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	v_slice LvMJNV 21001-39000 with ambiguity codes	v_slice LvMJNV 21001-39000 with ambiguity codes	plus	100	4	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	v_mut_8pct LvMJNV 28501-30700 with substitutions and indels	v_mut_8pct LvMJNV 28501-30700 with substitutions and indels	minus	5	5	N/A
+# TBLASTN 2.17.0+
+# Query: BDT62092.1 tyrosine recombinase [Litopenaeus vannamei majanivirus Nimav-1_LVa]
+# Database: tests/db_search/tslice
+# Fields: subject tax id, subject sci name, subject com names, subject blast name, subject super kingdom, subject tax ids, subject sci names, subject com names, subject blast names, subject super kingdoms, subject title, subject titles, subject strand, % query coverage per subject, % query coverage per hsp, % query coverage per uniq subject
+# 11 hits found
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	v_slice LvMJNV 21001-39000 with ambiguity codes	v_slice LvMJNV 21001-39000 with ambiguity codes	plus	98	78	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	v_slice LvMJNV 21001-39000 with ambiguity codes	v_slice LvMJNV 21001-39000 with ambiguity codes	plus	98	5	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	v_slice LvMJNV 21001-39000 with ambiguity codes	v_slice LvMJNV 21001-39000 with ambiguity codes	plus	98	14	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	v_slice LvMJNV 21001-39000 with ambiguity codes	v_slice LvMJNV 21001-39000 with ambiguity codes	plus	98	1	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	v_slice LvMJNV 21001-39000 with ambiguity codes	v_slice LvMJNV 21001-39000 with ambiguity codes	minus	98	3	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	v_mut_8pct LvMJNV 28501-30700 with substitutions and indels	v_mut_8pct LvMJNV 28501-30700 with substitutions and indels	plus	78	77	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	v_mut_8pct LvMJNV 28501-30700 with substitutions and indels	v_mut_8pct LvMJNV 28501-30700 with substitutions and indels	plus	78	2	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	v_far_22pct LvMJNV 28501-30700 diverged	v_far_22pct LvMJNV 28501-30700 diverged	plus	79	77	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	v_far_22pct LvMJNV 28501-30700 diverged	v_far_22pct LvMJNV 28501-30700 diverged	plus	79	1	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	m_plus MelaMJNV 36001-44000 with ambiguity codes and an N block	m_plus MelaMJNV 36001-44000 with ambiguity codes and an N block	minus	7	7	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	m_minus MelaMJNV 59001-62000 with ambiguity codes	m_minus MelaMJNV 59001-62000 with ambiguity codes	minus	1	1	N/A
+# TBLASTN 2.17.0+
+# Query: q_nohit random protein of 40 residues
+# Database: tests/db_search/tslice
+# 0 hits found
+# BLAST processed 4 queries

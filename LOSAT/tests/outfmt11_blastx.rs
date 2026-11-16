@@ -1,7 +1,7 @@
 //! `blastx -outfmt 11` (the BLAST archive) against the bytes that NCBI BLAST+ 2.17.0 `blastx
 //! -num_threads 1` writes, for the cases that need an environment variable or a failing run (the
 //! searches without them are the `sa.arch.bx.*` rows of `outfmt0_manifest.tsv` and the
-//! `db.sa.arch.bx.*` rows of `db_search_manifest.tsv`): `BATCH_SIZE` (one archive per query
+//! `db.sa.arch.bx.*` rows of `db_search_manifest/blastx.tsv`): `BATCH_SIZE` (one archive per query
 //! batch, `EffectiveSearchSpace` per batch, an unsearched batch repeating the last value, a batch
 //! above the default size not split, a batch whose last query crosses the limit), a reader error
 //! in the second batch (the archive of the first batch, then an error archive, rc 1),
@@ -673,10 +673,10 @@ fn the_out_file_receives_the_archive() {
 
 /// In the text and binary archives a title with a byte outside `0x20..=0x7E` (0x80 and above,
 /// and 0x7F) is written as `#` by NCBI, with a diagnostic per byte (in XML NCBI writes the byte,
-/// and so does LOSAT): LOSAT refuses it (query, `-subject` and a `-db` name)
-/// before the first byte.
+/// and so does LOSAT), query and `-subject`; a `-db` name names a database that does not exist.
+/// NCBI's bytes are frozen in `tests/archive_replaced/`.
 #[test]
-fn non_ascii_titles_and_database_names_are_refused() {
+fn non_ascii_titles_and_database_names_are_written_as_ncbi_writes_them() {
     let dir = std::env::temp_dir().join(format!("losat_outfmt11_bx_title_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let plain = engine().join(input("arch_bx_s.faa"));
@@ -701,13 +701,10 @@ fn non_ascii_titles_and_database_names_are_refused() {
             let mut full = args.clone();
             full.extend_from_slice(&["-outfmt", "11"]);
             let output = run(&[], &full, "1");
-            assert_ne!(output.status.code(), Some(0), "{role}");
-            assert!(output.stdout.is_empty(), "{role}: nothing is written");
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            assert!(stderr.contains("visible ASCII"), "{name} {role}: {stderr}");
-            assert!(stderr.contains("-outfmt 11"), "{name} {role}: {stderr}");
+            assert_eq!(output.status.code(), Some(0), "{name} {role}");
+            crate::outfmt11_titles::assert_replaced(name, &output, &format!("{name} {role}"));
         }
-        // The same title is fine in outfmt 8: only the archive refuses it.
+        // The same title is plain text in outfmt 8.
         let output = run(
             &[],
             &["-query", titled, "-subject", plain, "-outfmt", "8"],
@@ -721,22 +718,17 @@ fn non_ascii_titles_and_database_names_are_refused() {
             &["-query", plain, "-db", database, "-outfmt", "11"],
             "1",
         );
-        assert_ne!(output.status.code(), Some(0), "{database:?}");
-        assert!(output.stdout.is_empty(), "{database:?}");
-        assert!(
-            String::from_utf8_lossy(&output.stderr).contains("-db name"),
-            "{database:?}"
-        );
+        crate::outfmt11_titles::assert_missing_database(&output, database);
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A title the archive cannot write in a batch that NCBI completes before a reader error: the
-/// archive of that batch would be written before the error, so LOSAT refuses before the first
-/// byte (the prescan checks the titles batch by batch, with the run's batch size). The bad record
-/// is in the second batch (`BATCH_SIZE=60`), or after the first 10,002 letters (the default).
+/// A title that NCBI's stream replaces bytes of, in a batch that NCBI completes before a reader
+/// error: the archive of that batch is written before the error, with `caf##` and the two
+/// `Bad char` reports. The bad record is in the second batch (`BATCH_SIZE=60`), or after the first
+/// 10,002 letters (the default).
 #[test]
-fn a_non_ascii_title_before_a_reader_error_is_refused_before_the_first_byte() {
+fn a_non_ascii_title_before_a_reader_error_is_written_before_the_error() {
     let dir = std::env::temp_dir().join(format!(
         "losat_outfmt11_bx_batchtitle_{}",
         std::process::id()
@@ -779,11 +771,10 @@ fn a_non_ascii_title_before_a_reader_error_is_refused_before_the_first_byte() {
         );
         let label = format!("{file:?} {batch_size:?}");
         assert_eq!(output.status.code(), Some(1), "{label}");
-        assert!(output.stdout.is_empty(), "{label}: nothing is written");
+        crate::outfmt11_titles::assert_replaced("utf8", &output, &label);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains("visible ASCII"), "{label}: {stderr}");
-        // The same file without outfmt 11 reaches the reader error (the archive's refusal is
-        // not involved).
+        assert!(stderr.contains("CFastaReader"), "{label}: {stderr}");
+        // Without outfmt 11 the run reaches the reader error alone.
         let output = run(
             &env,
             &[
@@ -804,11 +795,11 @@ fn a_non_ascii_title_before_a_reader_error_is_refused_before_the_first_byte() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A named FIFO as `-query` with outfmt 11 is refused at once (the prescan would open it a second
-/// time and wait for a writer that never comes): the type is decided on the open handle.
+/// A named FIFO as `-query` with outfmt 11 is read once, at once, and gives the bytes of the regular
+/// file with the same content (no second open waits for a writer that never comes).
 #[cfg(unix)]
 #[test]
-fn a_fifo_query_is_refused_without_waiting() {
+fn a_fifo_query_gives_the_regular_files_bytes() {
     use std::time::{Duration, Instant};
     let dir = std::env::temp_dir().join(format!("losat_outfmt11_bx_fifo_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -859,14 +850,22 @@ fn a_fifo_query_is_refused_without_waiting() {
         let _ = writer.join();
     }
     let output = child.wait_with_output().unwrap();
-    let status = status.expect("the run must refuse the FIFO, not wait on it");
-    assert_eq!(status.code(), Some(1));
-    assert!(output.stdout.is_empty());
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("regular file"),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
+    let status = status.expect("the run must read the FIFO once, not wait on it");
+    let file = run(
+        &[],
+        &[
+            "-query",
+            &input("arch_bx_q.fna"),
+            "-subject",
+            subject.to_str().unwrap(),
+            "-outfmt",
+            "11",
+        ],
+        "1",
     );
+    assert_eq!(status.code(), file.status.code());
+    assert!(output.stdout == file.stdout, "standard output");
+    assert_eq!(output.stderr, file.stderr, "standard error");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -912,36 +911,13 @@ fn a_missing_database_gives_an_error_archive() {
         .all(|line| line.starts_with(' ')));
 }
 
-/// A `BATCH_SIZE` NCBI cannot convert stops it with a `CStringException`; LOSAT refuses it
-/// before the first byte and says so (outfmt 11 and 6).
-#[test]
-fn a_batch_size_that_is_not_an_integer_is_refused() {
-    let query = input("arch_bx_q.fna");
-    let subject = input("arch_bx_s.faa");
-    for value in ["abc", "", "1.5", "0x10"] {
-        for format in ["11", "6"] {
-            let output = run(
-                &[("BATCH_SIZE", value)],
-                &["-query", &query, "-subject", &subject, "-outfmt", format],
-                "1",
-            );
-            assert_ne!(output.status.code(), Some(0), "{value:?} {format}");
-            assert!(output.stdout.is_empty(), "{value:?} {format}");
-            assert!(
-                String::from_utf8_lossy(&output.stderr).contains("BATCH_SIZE"),
-                "{value:?} {format}"
-            );
-        }
-    }
-}
-
 /// NCBI's `PrintErrorArchive` converts the trimmed `-outfmt` text to an integer and writes
 /// nothing when that throws (`11 qseqid`); `11` with white space around it converts. NCBI 2.17.0
 /// with a missing `-query`: rc 1 and no bytes for `11 qseqid` and ` 11 qseqid`, the error
 /// archive of `noquery_sub` for ` 11 `.
 #[test]
 fn an_outfmt_spec_gets_no_error_archive() {
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         for (outfmt, written) in [("11 qseqid", false), (" 11 qseqid", false), (" 11 ", true)] {
             let output = run(
                 &[],

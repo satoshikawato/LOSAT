@@ -1,0 +1,174 @@
+# RPSTBLASTN 2.17.0+
+# Query: stopq
+# Database: rps_mini
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 24 hits found
+stopq	CDD:103	22.727	22	17	0	362	427	75	96	0.12	19.2
+stopq	CDD:103	18.182	22	18	0	47	112	75	96	0.15	18.9
+stopq	CDD:103	13.636	44	38	0	446	577	53	96	0.17	18.5
+stopq	CDD:103	20.455	44	35	0	128	259	53	96	0.20	18.5
+stopq	CDD:103	13.636	22	19	0	44	109	75	96	0.25	18.1
+stopq	CDD:103	22.727	22	17	0	428	493	75	96	0.48	17.3
+stopq	CDD:103	20.408	49	38	1	392	538	49	96	0.56	16.9
+stopq	CDD:103	19.565	46	37	0	77	214	49	94	0.69	16.9
+stopq	CDD:103	19.149	47	38	0	323	463	50	96	0.72	16.9
+stopq	CDD:103	18.750	32	26	0	368	463	72	103	0.87	16.5
+stopq	CDD:103	18.182	44	35	1	32	160	53	96	0.92	16.5
+stopq	CDD:103	17.647	34	25	1	497	589	53	86	1.0	16.2
+stopq	CDD:103	18.182	44	33	1	437	559	53	96	1.1	16.2
+stopq	CDD:103	23.810	21	16	0	266	328	76	96	1.2	16.2
+stopq	CDD:103	22.500	40	31	0	218	337	53	92	1.4	15.8
+stopq	CDD:103	22.727	44	33	1	146	274	53	96	1.4	15.8
+stopq	CDD:103	20.455	44	32	1	287	409	53	96	1.4	15.8
+stopq	CDD:103	18.182	44	24	1	200	295	53	96	1.6	15.8
+stopq	CDD:103	23.404	47	36	0	98	238	50	96	1.9	15.4
+stopq	CDD:103	18.750	16	13	0	23	70	76	91	2.0	15.4
+stopq	CDD:103	18.182	44	34	1	83	208	53	96	2.3	15.4
+stopq	CDD:103	18.750	32	26	0	443	538	72	103	2.9	15.0
+stopq	CDD:103	23.529	17	13	0	11	61	80	96	4.4	14.2
+stopq	CDD:103	22.727	22	17	0	281	346	75	96	7.7	13.5
+# RPSTBLASTN 2.17.0+
+# Query: YP_009220476.1 bt strand=+ flank=0
+# Database: rps_mini
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 5 hits found
+YP_009220476.1	CDD:102	33.333	15	10	0	53	9	115	129	0.14	19.2
+YP_009220476.1	CDD:102	33.333	15	10	0	102	58	127	141	2.5	15.0
+YP_009220476.1	CDD:102	31.579	19	11	1	210	266	1	17	3.9	14.6
+YP_009220476.1	CDD:102	37.500	16	10	0	215	262	96	111	6.3	13.9
+YP_009220476.1	CDD:102	31.579	19	10	1	613	566	149	167	8.9	13.5
+# RPSTBLASTN 2.17.0+
+# Query: YP_009220478.1 bt strand=- flank=0
+# Database: rps_mini
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 9 hits found
+YP_009220478.1	CDD:102	25.926	27	20	0	140	220	27	53	0.36	18.5
+YP_009220478.1	CDD:102	42.857	14	8	0	285	244	12	25	0.39	18.5
+YP_009220478.1	CDD:102	19.231	26	21	0	84	161	126	151	1.5	16.5
+YP_009220478.1	CDD:102	55.556	9	4	0	542	568	47	55	3.1	15.4
+YP_009220478.1	CDD:102	30.435	23	14	1	872	810	17	39	3.3	15.4
+YP_009220478.1	CDD:102	36.000	25	13	1	742	807	123	147	5.2	14.6
+YP_009220478.1	CDD:102	26.667	30	21	1	317	231	95	124	6.3	14.6
+YP_009220478.1	CDD:102	33.333	15	10	0	400	356	120	134	8.4	14.2
+YP_009220478.1	CDD:102	50.000	8	4	0	534	557	27	34	9.4	13.9
+# RPSTBLASTN 2.17.0+
+# Query: YP_009220482.1 bt strand=+ flank=1
+# Database: rps_mini
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+YP_009220482.1	CDD:101	25.000	40	29	1	377	496	54	92	0.28	18.1
+YP_009220482.1	CDD:101	24.000	25	16	1	408	334	23	44	2.5	15.0
+YP_009220482.1	CDD:101	33.333	12	7	1	119	154	45	55	5.6	14.2
+YP_009220482.1	CDD:101	33.333	12	8	0	40	75	169	180	8.9	13.5
+# RPSTBLASTN 2.17.0+
+# Query: YP_009220483.1 bt strand=- flank=1
+# Database: rps_mini
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+YP_009220483.1	CDD:102	45.455	22	11	1	252	317	62	82	0.29	18.5
+YP_009220483.1	CDD:102	40.000	10	6	0	105	76	96	105	4.5	15.0
+YP_009220483.1	CDD:102	23.077	26	17	1	431	363	118	143	5.3	14.6
+# RPSTBLASTN 2.17.0+
+# Query: YP_009220649.1 bt strand=+ flank=2
+# Database: rps_mini
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 6 hits found
+YP_009220649.1	CDD:101	20.000	35	26	1	103	207	130	162	0.048	20.8
+YP_009220649.1	CDD:101	41.667	12	7	0	65	30	47	58	0.72	16.9
+YP_009220649.1	CDD:101	31.579	19	13	0	444	388	40	58	1.9	15.8
+YP_009220649.1	CDD:101	57.143	7	3	0	111	91	135	141	3.6	15.0
+YP_009220649.1	CDD:101	22.727	22	15	1	452	511	160	181	5.2	14.2
+YP_009220649.1	CDD:101	80.000	5	1	0	540	526	54	58	7.2	13.9
+# RPSTBLASTN 2.17.0+
+# Query: YP_009220484.1 bt strand=- flank=2
+# Database: rps_mini
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+YP_009220484.1	CDD:103	44.000	25	13	1	219	293	23	46	0.14	19.2
+YP_009220484.1	CDD:103	20.000	40	31	1	662	546	51	90	0.74	16.9
+YP_009220484.1	CDD:103	29.412	17	12	0	219	169	52	68	2.5	15.4
+YP_009220484.1	CDD:103	57.143	7	3	0	81	101	145	151	3.8	14.6
+# RPSTBLASTN 2.17.0+
+# Query: YP_009220489.1 bt strand=+ flank=0
+# Database: rps_mini
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+YP_009220489.1	CDD:103	26.667	15	11	0	531	575	73	87	0.55	17.3
+YP_009220489.1	CDD:103	36.111	36	18	2	178	83	124	158	1.1	16.2
+YP_009220489.1	CDD:103	26.667	15	11	0	69	25	134	148	1.7	15.8
+YP_009220489.1	CDD:103	36.364	11	7	0	8	40	50	60	3.3	14.6
+# RPSTBLASTN 2.17.0+
+# Query: YP_009220491.1 bt strand=- flank=0
+# Database: rps_mini
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+YP_009220491.1	CDD:101	50.000	8	4	0	606	583	129	136	1.9	15.4
+YP_009220491.1	CDD:101	25.000	24	18	0	103	32	45	68	2.0	15.4
+YP_009220491.1	CDD:101	71.429	7	2	0	356	336	13	19	5.5	14.2
+# RPSTBLASTN 2.17.0+
+# Query: YP_009220493.1 bt strand=+ flank=1
+# Database: rps_mini
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+YP_009220493.1	CDD:101	21.277	47	37	0	89	229	124	170	0.98	16.9
+YP_009220493.1	CDD:101	50.000	12	6	0	427	392	79	90	1.3	16.5
+YP_009220493.1	CDD:101	30.000	10	7	0	598	627	178	187	7.0	14.2
+# RPSTBLASTN 2.17.0+
+# Query: YP_009220496.1 bt strand=- flank=1
+# Database: rps_mini
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+YP_009220496.1	CDD:101	26.531	49	34	1	161	307	93	139	0.91	16.9
+YP_009220496.1	CDD:101	33.333	12	8	0	159	124	35	46	1.6	16.2
+YP_009220496.1	CDD:101	23.077	26	20	0	580	503	156	181	8.6	13.9
+YP_009220496.1	CDD:101	35.714	28	15	2	158	235	151	177	9.5	13.9
+# RPSTBLASTN 2.17.0+
+# Query: YP_009220497.1 bt strand=+ flank=2
+# Database: rps_mini
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+YP_009220497.1	CDD:101	27.273	77	51	1	18	248	110	181	0.27	18.9
+YP_009220497.1	CDD:101	55.556	9	4	0	823	797	130	138	4.9	15.0
+YP_009220497.1	CDD:101	18.519	27	21	1	821	741	22	47	5.2	14.6
+# RPSTBLASTN 2.17.0+
+# Query: YP_009220507.1 bt strand=- flank=2
+# Database: rps_mini
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+YP_009220507.1	CDD:101	38.462	13	8	0	383	421	139	151	1.3	16.2
+YP_009220507.1	CDD:101	75.000	8	2	0	42	65	68	75	1.8	15.8
+YP_009220507.1	CDD:101	37.500	8	5	0	78	101	183	190	5.2	14.2
+YP_009220507.1	CDD:101	21.429	14	11	0	75	116	174	187	8.4	13.9
+# RPSTBLASTN 2.17.0+
+# Query: YP_009220508.1 bt strand=+ flank=0
+# Database: rps_mini
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 6 hits found
+YP_009220508.1	CDD:103	50.000	10	5	0	361	390	52	61	0.95	16.2
+YP_009220508.1	CDD:103	46.154	13	7	0	67	105	138	150	2.0	15.4
+YP_009220508.1	CDD:103	36.842	19	12	0	34	90	81	99	2.5	15.0
+YP_009220508.1	CDD:103	38.462	13	8	0	55	93	81	93	2.6	15.0
+YP_009220508.1	CDD:103	42.857	14	7	1	75	37	144	157	7.0	13.5
+YP_009220508.1	CDD:103	50.000	6	3	0	39	22	110	115	7.6	13.5
+# RPSTBLASTN 2.17.0+
+# Query: YP_009220514.1 bt strand=- flank=0
+# Database: rps_mini
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+YP_009220514.1	CDD:102	36.842	19	10	1	270	214	38	54	0.44	16.9
+YP_009220514.1	CDD:102	57.143	7	3	0	26	6	14	20	3.9	14.2
+YP_009220514.1	CDD:102	26.667	15	11	0	73	29	81	95	8.2	13.1
+# RPSTBLASTN 2.17.0+
+# Query: YP_009220601.1 bt strand=+ flank=1
+# Database: rps_mini
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 8 hits found
+YP_009220601.1	CDD:101	100.000	190	0	0	20	589	1	190	2.37e-124	349
+YP_009220601.1	CDD:101	23.529	51	38	1	808	656	57	106	1.00	17.3
+YP_009220601.1	CDD:101	28.947	38	23	1	617	730	11	44	1.3	16.9
+YP_009220601.1	CDD:101	36.364	11	7	0	596	628	31	41	2.4	16.2
+YP_009220601.1	CDD:101	25.000	16	12	0	249	202	61	76	3.6	15.4
+YP_009220601.1	CDD:101	33.333	27	18	0	607	687	35	61	4.0	15.4
+YP_009220601.1	CDD:101	31.250	16	11	0	328	281	78	93	4.3	15.4
+YP_009220601.1	CDD:101	14.815	27	23	0	887	967	50	76	6.2	14.6
+# BLAST processed 16 queries

@@ -1,0 +1,42 @@
+Blast-db-mask-info ::= {
+  algo-id 1,
+  algo-program seg,
+  algo-options "window=12; locut=0.5; hicut=0.0001",
+  masks {
+    masks {
+      int {
+        from 15,
+        to 30,
+        id local id 1
+      },
+      packed-int {
+        {
+          from 25,
+          to 39,
+          id local id 3
+        },
+        {
+          from 200,
+          to 220,
+          id local id 3
+        },
+        {
+          from 220,
+          to 231,
+          id local id 3
+        },
+        {
+          from 232,
+          to 243,
+          id local id 3
+        },
+        {
+          from 244,
+          to 255,
+          id local id 3
+        }
+      }
+    },
+    more FALSE
+  }
+}

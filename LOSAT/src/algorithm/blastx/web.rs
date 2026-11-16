@@ -1,5 +1,6 @@
 //! Existing reactor ABI adapter; the search, batching and reports use BLASTX owners.
 use super::{args::BlastxArgs, input, native, query_setup::BATCH_SIZE, report, runtime};
+use crate::api::local_blast::OutputSink;
 use anyhow::{bail, Result};
 use std::{cell::RefCell, io::Write, path::Path};
 
@@ -17,12 +18,20 @@ pub(crate) fn parse_args(extra: &[&str]) -> Result<BlastxArgs> {
         .iter()
         .any(|key| key.split('=').next().unwrap_or(key) == "-db")
     {
-        bail!("-db (a database search) is not supported by LOSAT Web yet");
+        bail!("-db (a database search) is not supported in the browser yet");
     }
     if extra.iter().any(|key| {
         matches!(
             key.split('=').next().unwrap_or(key),
-            "-query" | "-subject" | "-out" | "-help" | "--help" | "--version"
+            "-query"
+                | "-subject"
+                | "-out"
+                | "-h"
+                | "-help"
+                | "-help-full"
+                | "-xmlhelp"
+                | "--help"
+                | "--version"
         )
     }) {
         bail!("file/help arguments are unsupported for the BLASTX web API");
@@ -84,11 +93,18 @@ fn v1_outfmt(value: &str) -> std::result::Result<String, String> {
 }
 
 /// The options of ABI v1's BLASTX: the format number and the fields as ABI v1 read them
-/// (`v1_outfmt`: the words between white space), before BLASTX read `-outfmt` as NCBI.
+/// (`v1_outfmt`: the words between white space, each `std` or one of `args::FIELDS`), before
+/// BLASTX read `-outfmt` as NCBI; a list other than the `std` fields is written by the shared
+/// tabular writer, as the CLI's (`ResolvedOptions::tabular`), without a taxonomy database
+/// (DECISIONS 7 of line CLI C2; ABI v1's fields show no taxonomy).
 fn v1_resolve(args: &BlastxArgs) -> Result<super::args::ResolvedOptions> {
     let mut words = args.outfmt.split_whitespace();
-    let outfmt = words.next().unwrap_or_default().parse::<u8>()?;
-    args.resolve_with_format(outfmt, words)
+    let number = words.next().unwrap_or_default().parse::<u8>()?;
+    args.resolve_with_format(&crate::blastinput::app::FormatChoice {
+        number: i32::from(number),
+        spec: words.collect::<Vec<_>>().join(" "),
+        delimiter: String::new(),
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:302-314
@@ -109,6 +125,10 @@ fn v1_resolve(args: &BlastxArgs) -> Result<super::args::ResolvedOptions> {
 // ```
 // Original bytes are reparsed on each call with this role's gencode/mask
 // options; generic FASTA handles never cache translated or masked search state.
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    expect(dead_code, reason = "called only by the web ABI (`web_api`, wasm32)")
+)]
 pub(crate) fn run_pair(
     args: BlastxArgs,
     query: &[u8],
@@ -152,7 +172,14 @@ pub(crate) fn run_pair(
     }
     let mut output = Vec::new();
     let label = Path::new(subject_label);
-    let shown = report::ShownSubjects::Fasta { path: label };
+    let no_parsed = report::RecordsParsed::default();
+    let shown = report::ShownSubjects::Fasta {
+        path: label,
+        parsed: &no_parsed,
+    };
+    // The run's decision for a matrix name that NCBI's XML does not know
+    // (`blast_xml::xml_matrix_failure`): none, as ABI v1 writes outfmt 0, 6 and 7 (`v1_outfmt`).
+    let xml_matrix = super::blast_xml::xml_matrix_failure(std::slice::from_ref(&options), true);
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:784-788
     // ```c++
     //         		if(warning != kEmptyStr){
@@ -162,18 +189,22 @@ pub(crate) fn run_pair(
     //         		ERR_POST(Warning << warning);
     // ```
     for s in subjects.iter().filter(|s| s.sequence.is_empty()) {
-        writeln!(
-            diagnostics.borrow_mut(),
-            "Warning: [blastx] {} {}: Subject sequence contains no data",
-            s.internal_id,
-            s.title
-        )?;
+        let mut diagnostics = diagnostics.borrow_mut();
+        write!(diagnostics, "Warning: [blastx] {} ", s.internal_id)?;
+        diagnostics.write_all(&s.title)?;
+        writeln!(diagnostics, ": Subject sequence contains no data")?;
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
     // ```c++
     //         formatter.PrintProlog();
     // ```
-    report::write_prolog(&mut output, &options, &subjects, &shown)?;
+    report::write_prolog(
+        &mut output,
+        &mut *diagnostics.borrow_mut(),
+        &options,
+        &subjects,
+        &shown,
+    )?;
     let mut processed = 0;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-262
     // ```c++
@@ -270,7 +301,9 @@ pub(crate) fn run_pair(
                             let mut results =
                                 searched.next().expect("one search per queued batch")?;
                             report::render_queries(
-                                &mut output,
+                                &mut crate::cli::NcbiOstream::sink(&mut OutputSink::Writer(
+                                    &mut output,
+                                ))?,
                                 &mut *diagnostics.borrow_mut(),
                                 &options,
                                 queries,
@@ -278,7 +311,10 @@ pub(crate) fn run_pair(
                                 &shown,
                                 &mut results,
                                 processed,
+                                // No document here holds a report back (`stops`).
+                                false,
                                 None,
+                                xml_matrix,
                             )?;
                             processed += queries.len();
                         }
@@ -354,7 +390,7 @@ pub(crate) fn run_pair(
                 //                	    formatter.PrintOneResultSet(**result, query_batch);
                 // ```
                 report::render_queries(
-                    &mut output,
+                    &mut crate::cli::NcbiOstream::sink(&mut OutputSink::Writer(&mut output))?,
                     &mut *diagnostics.borrow_mut(),
                     &options,
                     queries,
@@ -362,7 +398,10 @@ pub(crate) fn run_pair(
                     &shown,
                     &mut results,
                     processed,
+                    // No document here holds a report back (`stops`).
+                    false,
                     None,
+                    xml_matrix,
                 )?;
                 processed += queries.len();
                 Ok(())
@@ -387,12 +426,20 @@ pub(crate) fn run_pair(
     } else {
         x_run_batches(None)?;
     }
-    drop(x_run_batches);
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:297-297
     // ```c++
     //         formatter.PrintEpilog(opt);
     // ```
-    report::write_epilog(&mut output, &options, &subjects, &shown, processed, None)?;
+    report::write_epilog(
+        &mut output,
+        &mut *diagnostics.borrow_mut(),
+        &options,
+        &subjects,
+        &shown,
+        processed,
+        None,
+        xml_matrix,
+    )?;
     Ok(output)
 }
 

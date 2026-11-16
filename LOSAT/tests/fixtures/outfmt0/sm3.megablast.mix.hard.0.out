@@ -1,0 +1,199 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/mask_subject.fasta).
+           1 sequences; 500 total letters
+
+
+
+Query= m1
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+subj_mask subject with a CA-repeat low-complexity block               231     2e-65
+
+
+> subj_mask subject with a CA-repeat low-complexity block
+Length=500
+
+ Score = 231 bits (125),  Expect = 2e-65
+ Identities = 167/168 (99%), Gaps = 0/168 (0%)
+ Strand=Plus/Plus
+
+Query  1    GATGCAAAGCCGGCTCACAAGGATGATGGGGCATAGTTAGCTTCGCCAAAGTCCATACAG  60
+            |||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||
+Sbjct  51   GATGCAAAGCCGGCTCACAAGGATGATGGGCCATAGTTAGCTTCGCCAAAGTCCATACAG  110
+
+Query  61   AAGTGATACGGACTTTTGGGCAGGCCTCATCGGGTGAGTTgggactggtccggatgagtg  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  111  AAGTGATACGGACTTTTGGGCAGGCCTCATCGGGTGAGTTGGGACTGGTCCGGATGAGTG  170
+
+Query  121  TGGCAGTGTGAATATTGTAGTTTACAATATGCTGTTATATCGTGCTAG  168
+            ||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  171  TGGCAGTGTGAATATTGTAGTTTACAATATGCTGTTATATCGTGCTAG  218
+
+
+ Score = 147 bits (79),  Expect = 8e-40
+ Identities = 81/82 (99%), Gaps = 0/82 (0%)
+ Strand=Plus/Plus
+
+Query  219  TATGATACCGTGATGACATGTCCGTGCCAGTCTAGATTACCCGTCATTATTGTTACAGAG  278
+            |||||||||||||||||||||||||||||||||||||||||| |||||||||||||||||
+Sbjct  269  TATGATACCGTGATGACATGTCCGTGCCAGTCTAGATTACCCCTCATTATTGTTACAGAG  328
+
+Query  279  GATGGGTGGGTAGTGCCCTGTT  300
+            ||||||||||||||||||||||
+Sbjct  329  GATGGGTGGGTAGTGCCCTGTT  350
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 142100
+
+
+Query= m2_alllc
+
+Length=200
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= m3
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+subj_mask subject with a CA-repeat low-complexity block               289     1e-82
+
+
+> subj_mask subject with a CA-repeat low-complexity block
+Length=500
+
+ Score = 289 bits (156),  Expect = 1e-82
+ Identities = 180/182 (99%), Gaps = 0/182 (0%)
+ Strand=Plus/Plus
+
+Query  119  TATGATACCGTGATGACATGTCCGTGCCAGTCTAGATTACCCGTCATTATTGTTACAGAG  178
+            |||||||||||||||||||||||||||||||||||||||||| |||||||||||||||||
+Sbjct  269  TATGATACCGTGATGACATGTCCGTGCCAGTCTAGATTACCCCTCATTATTGTTACAGAG  328
+
+Query  179  GATGGGTGGGTAGTGCCCTGTTCGTGCGGCTCGTCGTTCCCTCCTACGACCGGCGGCAAC  238
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||
+Sbjct  329  GATGGGTGGGTAGTGCCCTGTTCGTGCGGCTCGTCGTTCCCTCCTACGACCGGCGCCAAC  388
+
+Query  239  GGAAGGTTTTTAcggtgaaagaTGAGTCAAACTCCCGTTTCAATAAAAGAATATGATCTT  298
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  389  GGAAGGTTTTTACGGTGAAAGATGAGTCAAACTCCCGTTTCAATAAAAGAATATGATCTT  448
+
+Query  299  TG  300
+            ||
+Sbjct  449  TG  450
+
+
+ Score = 89.8 bits (48),  Expect = 1e-22
+ Identities = 48/48 (100%), Gaps = 0/48 (0%)
+ Strand=Plus/Plus
+
+Query  21   TGGCAGTGTGAATATTGTAGTTTACAATATGCTGTTATATCGTGCTAG  68
+            ||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  171  TGGCAGTGTGAATATTGTAGTTTACAATATGCTGTTATATCGTGCTAG  218
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 142100
+
+
+Query= m4_alllc
+
+Length=80
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= m5half
+
+Length=350
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+subj_mask subject with a CA-repeat low-complexity block               233     7e-66
+
+
+> subj_mask subject with a CA-repeat low-complexity block
+Length=500
+
+ Score = 233 bits (126),  Expect = 7e-66
+ Identities = 130/132 (98%), Gaps = 0/132 (0%)
+ Strand=Plus/Plus
+
+Query  219  TATGATACCGTGATGACATGTCCGTGCCAGTCTAGATTACCCGTCATTATTGTTACAGAG  278
+            |||||||||||||||||||||||||||||||||||||||||| |||||||||||||||||
+Sbjct  269  TATGATACCGTGATGACATGTCCGTGCCAGTCTAGATTACCCCTCATTATTGTTACAGAG  328
+
+Query  279  GATGGGTGGGTAGTGCCCTGTTCGTGCGGCTCGTCGTTCCCTCCTACGACCGGCGGCAAC  338
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||
+Sbjct  329  GATGGGTGGGTAGTGCCCTGTTCGTGCGGCTCGTCGTTCCCTCCTACGACCGGCGCCAAC  388
+
+Query  339  GGAAGGTTTTTA  350
+            ||||||||||||
+Sbjct  389  GGAAGGTTTTTA  400
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 165771
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/mask_subject.fasta).
+    Posted date:  Unknown
+  Number of letters in database: 500
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

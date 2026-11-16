@@ -1,0 +1,22 @@
+{
+  "version": "1.2",
+  "dbname": "lcr",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "in/lcr.fa",
+  "number-of-letters": 90910,
+  "number-of-sequences": 300,
+  "last-updated": "2026-11-13T08:12:00",
+  "number-of-volumes": 1,
+  "bytes-total": 156137,
+  "bytes-to-cache": 93699,
+  "files": [
+    "lcr.pdb",
+    "lcr.phr",
+    "lcr.pin",
+    "lcr.pot",
+    "lcr.psq",
+    "lcr.ptf",
+    "lcr.pto"
+  ]
+}

@@ -406,7 +406,7 @@ fn an_error_at_a_later_batch_comes_as_without_the_switch() {
     }
 }
 
-// A protein database made by `losat makedb` as the subject, at three threads.
+// A protein database made by `losat makeblastdb` as the subject, at three threads.
 #[test]
 fn a_database_gives_the_reports_without_the_switch() {
     let query = TempFasta::new("q", &queries_with_warnings());
@@ -417,7 +417,7 @@ fn a_database_gives_the_reports_without_the_switch() {
     let proteins = subject();
     let made = Command::new(env!("CARGO_BIN_EXE_losat"))
         .args([
-            "makedb",
+            "makeblastdb",
             "-in",
             proteins.path(),
             "-dbtype",
@@ -426,7 +426,7 @@ fn a_database_gives_the_reports_without_the_switch() {
             name,
         ])
         .output()
-        .expect("run losat makedb");
+        .expect("run losat makeblastdb");
     assert!(
         made.status.success(),
         "{}",

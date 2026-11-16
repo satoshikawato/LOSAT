@@ -1,0 +1,122 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/x2_negwin_s.fna).
+           1 sequences; 63 total letters
+
+
+
+Query= negwin
+
+Length=21
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+negwin VNV in frame 1                                                  8.5    6.9  
+
+
+> negwin VNV in frame 1
+Length=63
+
+ Score =  8.5 bits (10),  Expect = 6.9
+ Identities = 2/4 (50%), Positives = 3/4 (75%), Gaps = 0/4 (0%)
+ Frame = -2
+
+Query  8   VTTT  11
+           +T T
+Sbjct  26  LTLT  15
+
+
+ Score =  8.1 bits (9),  Expect = 10
+ Identities = 2/3 (67%), Positives = 2/3 (67%), Gaps = 0/3 (0%)
+ Frame = -2
+
+Query  10  TTT  12
+           T T
+Sbjct  23  TLT  15
+
+
+ Score =  8.1 bits (9),  Expect = 10
+ Identities = 2/3 (67%), Positives = 2/3 (67%), Gaps = 0/3 (0%)
+ Frame = -2
+
+Query  11  TTT  13
+           T T
+Sbjct  23  TLT  15
+
+
+ Score =  8.1 bits (9),  Expect = 10
+ Identities = 2/3 (67%), Positives = 2/3 (67%), Gaps = 0/3 (0%)
+ Frame = -2
+
+Query  12  TTT  14
+           T T
+Sbjct  23  TLT  15
+
+
+ Score =  8.1 bits (9),  Expect = 10
+ Identities = 2/3 (67%), Positives = 2/3 (67%), Gaps = 0/3 (0%)
+ Frame = -2
+
+Query  13  TTT  15
+           T T
+Sbjct  23  TLT  15
+
+
+ Score =  8.1 bits (9),  Expect = 10
+ Identities = 2/3 (67%), Positives = 2/3 (67%), Gaps = 0/3 (0%)
+ Frame = -2
+
+Query  14  TTT  16
+           T T
+Sbjct  23  TLT  15
+
+
+ Score =  7.7 bits (8),  Expect = 15
+ Identities = 1/9 (11%), Positives = 6/9 (67%), Gaps = 0/9 (0%)
+ Frame = +1
+
+Query  8   VTTTTTTTT  16
+           V  +++ ++
+Sbjct  22  VKASSSASS  48
+
+
+ Score =  6.9 bits (6),  Expect = 31
+ Identities = 1/8 (13%), Positives = 4/8 (50%), Gaps = 0/8 (0%)
+ Frame = +1
+
+Query  8   VTTTTTTT  15
+           V    +++
+Sbjct  16  VNVKASSS  39
+
+
+
+Lambda      K        H        a         alpha
+   0.326    0.139    0.913    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 441
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/x2_negwin_s.fna).
+    Posted date:  Unknown
+  Number of letters in database: 63
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 4

@@ -68,8 +68,8 @@ use crate::seqdb::SeqDb;
 use crate::utils::threading::SearchPool;
 
 use super::{
-    read_search_block, search_blocks_of, BlastpDatabase, BlastpHitList, BlastpSubjectRef,
-    BlastpSubjectResult, BlastpSubjectScratch, PrelimSink, XPrelimHsp, BLOCK_BYTES,
+    read_search_block, search_blocks_of, BlastpDatabase, BlastpSubjectRef, BlastpSubjectResult,
+    BlastpSubjectScratch, PrelimSink, BLOCK_BYTES,
 };
 
 // No NCBI counterpart: reads the LOSAT_X_BPDBCUT switch once; it does not change any value NCBI
@@ -106,9 +106,13 @@ pub(super) fn x_cut_block_bytes(sequence_bytes: u64, threads: usize) -> u64 {
 // No NCBI counterpart: the size of the blocks (scheduling); it changes no value NCBI computes.
 /// The bytes of the database's sequences as a one-volume sequence file holds them: the letters, a
 /// sentinel byte after each sequence and one before the first (each further volume has one more).
+/// The sequences are the included ones (`SeqDb::included_length`); an index that cannot be read
+/// counts as the largest database, whose blocks are those of one thread (the search then meets
+/// the error in the order of one thread).
 pub(super) fn x_sequence_bytes(database: &BlastpDatabase) -> u64 {
     database
-        .total_letters()
+        .included_letters()
+        .unwrap_or(u64::MAX)
         .saturating_add(u64::from(database.num_sequences()))
         .saturating_add(1)
 }
@@ -116,6 +120,7 @@ pub(super) fn x_sequence_bytes(database: &BlastpDatabase) -> u64 {
 // No NCBI counterpart: the size of the blocks (scheduling); it changes no value NCBI computes.
 /// The block size of the search of `database` on `pool`: the cut when the pool searches the rounds
 /// with more than one thread, else `BLOCK_BYTES`.
+#[cfg(test)]
 pub(super) fn x_db_cut_block_bytes(database: &BlastpDatabase, pool: &SearchPool<'_>) -> u64 {
     x_keep_cap(x_db_cut_bytes(database, pool))
 }
@@ -124,6 +129,9 @@ pub(super) fn x_db_cut_block_bytes(database: &BlastpDatabase, pool: &SearchPool<
 /// The cut of `database` on `pool` (`x_cut_block_bytes` at the pool's threads, 1 when it is off).
 fn x_db_cut_bytes(database: &BlastpDatabase, pool: &SearchPool<'_>) -> u64 {
     let threads = if pool.enabled() { pool.threads() } else { 1 };
+    if threads <= 1 {
+        return BLOCK_BYTES;
+    }
     x_cut_block_bytes(x_sequence_bytes(database), threads)
 }
 
@@ -164,10 +172,10 @@ pub(super) fn x_count_blocks(db: &SeqDb, block_bytes: u64) -> u64 {
 /// The error that the search of `db` with blocks of `BLOCK_BYTES` returns, found by reading and
 /// preparing those blocks in order; `error` (the cut's) when every block reads (an error that does
 /// not come back on a second read).
-pub(super) fn x_one_thread_error(db: &SeqDb, error: anyhow::Error) -> anyhow::Error {
+pub(super) fn x_one_thread_error(db: &SeqDb, program: &str, error: anyhow::Error) -> anyhow::Error {
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, BLOCK_BYTES) {
-        if let Err(first) = read_search_block(db, range) {
+        if let Err(first) = read_search_block(db, range, program) {
             return first;
         }
         next_ordinal = range.end_ordinal();
@@ -242,7 +250,7 @@ where
         if block_bytes == BLOCK_BYTES {
             error
         } else {
-            x_one_thread_error(db, error)
+            x_one_thread_error(db, database.program, error)
         }
     })
 }
@@ -285,3 +293,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "x_db_cut_fixture_tests.rs"]
+mod fixture_tests;

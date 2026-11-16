@@ -1,0 +1,289 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: masked nucleotide in volumes, m05-m08
+Masked using: 'windowmasker'
+           8 sequences; 2,836 total letters
+
+
+
+Query= m01 microsatellite and a repeat
+
+Length=640
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 1697500
+
+
+Query= m02 poly-A at the start
+
+Length=350
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 915264
+
+
+Query= m03 short, no mask
+
+Length=40
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 79692
+
+
+Query= m04 CAG repeat at the end
+
+Length=390
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 1024224
+
+
+Query= m05 one base
+
+Length=1
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 2836
+
+
+Query= m06 two low-complexity runs
+
+Length=810
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+m06 two low-complexity runs                                           1462    0.0  
+
+
+>m06 two low-complexity runs
+Length=810
+
+ Score = 1462 bits (1620),  Expect = 0.0
+ Identities = 810/810 (100%), Gaps = 0/810 (0%)
+ Strand=Plus/Plus
+
+Query  1    TTGCCTACCGTCTAATTTCATGTACGTTACTTTCCGGGCATTGTACTAACCGATTCGCAC  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1    TTGCCTACCGTCTAATTTCATGTACGTTACTTTCCGGGCATTGTACTAACCGATTCGCAC  60
+
+Query  61   CCTTCCCTCGGGTTAAACATCCCAAGTTGGTCGCGGCCTCTCGGCTAAACTCAAGGTGAA  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  61   CCTTCCCTCGGGTTAAACATCCCAAGTTGGTCGCGGCCTCTCGGCTAAACTCAAGGTGAA  120
+
+Query  121  TAGCTTATACCCACGCTAATGTGCGGTGTTGAGAGAGAGAGAGAGAGAGAGAGAGAGAGA  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121  TAGCTTATACCCACGCTAATGTGCGGTGTTGAGAGAGAGAGAGAGAGAGAGAGAGAGAGA  180
+
+Query  181  GAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGACTACGCTCAGGTGTACTCGA  240
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  GAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGAGACTACGCTCAGGTGTACTCGA  240
+
+Query  241  GAATGTGGTCGCCGGCTCCAGATAGCCTTCCTTACAAAGACGTACAATCATCGCTCATAG  300
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  241  GAATGTGGTCGCCGGCTCCAGATAGCCTTCCTTACAAAGACGTACAATCATCGCTCATAG  300
+
+Query  301  GGATCTCATTACTAGTGGGCGAGAGATGTCTGGCGCCTCTTGATGACAATCGGCAGTACT  360
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  301  GGATCTCATTACTAGTGGGCGAGAGATGTCTGGCGCCTCTTGATGACAATCGGCAGTACT  360
+
+Query  361  CGCCCGTCGCATGGTCAACACGGTTGTATTGTTCATCATGGACCCTAAGCCCGTGCGTTA  420
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  361  CGCCCGTCGCATGGTCAACACGGTTGTATTGTTCATCATGGACCCTAAGCCCGTGCGTTA  420
+
+Query  421  GTGTCAAATCCTATCACATGGCGCGAAGCGACGAACGCCCCATATCTATTCTTATATATC  480
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  421  GTGTCAAATCCTATCACATGGCGCGAAGCGACGAACGCCCCATATCTATTCTTATATATC  480
+
+Query  481  GTCAGCACAGGTGCAGATGCCTGTGTGGTACTACGAGTATCGCCGGCAAGAACTGTGTGC  540
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  481  GTCAGCACAGGTGCAGATGCCTGTGTGGTACTACGAGTATCGCCGGCAAGAACTGTGTGC  540
+
+Query  541  ACCGATGAGACCCCGCCGGGGTCAGTCACCAGGGAAAGTGAGCCGTGTAGCTGCGCCATG  600
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  541  ACCGATGAGACCCCGCCGGGGTCAGTCACCAGGGAAAGTGAGCCGTGTAGCTGCGCCATG  600
+
+Query  601  TTATAAGCGCTAGAGTTGGATTTTCTTTTCTTTTCTTTTCTTTTCTTTTCTTTTCTTTTC  660
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  601  TTATAAGCGCTAGAGTTGGATTTTCTTTTCTTTTCTTTTCTTTTCTTTTCTTTTCTTTTC  660
+
+Query  661  TTTTCTTTTCTTTTCTTTTCTTTTCTTTTCCTCCTGGACGCCGGGCGATAAACATCGTAG  720
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  661  TTTTCTTTTCTTTTCTTTTCTTTTCTTTTCCTCCTGGACGCCGGGCGATAAACATCGTAG  720
+
+Query  721  AGCCTCTTCGACTTGACAAGCCCCAGCCGCCATGGTGGAGTTCCTTTTCGTGCTAAATGA  780
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  721  AGCCTCTTCGACTTGACAAGCCCCAGCCGCCATGGTGGAGTTCCTTTTCGTGCTAAATGA  780
+
+Query  781  GTGGTGCAAGGCAGGTTTTAGCTGAGAACC  810
+            ||||||||||||||||||||||||||||||
+Sbjct  781  GTGGTGCAAGGCAGGTTTTAGCTGAGAACC  810
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 2159220
+
+
+Query= m07 the repeat twice
+
+Length=320
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+m07 the repeat twice                                                  145     1e-38
+
+
+>m07 the repeat twice
+Length=320
+
+ Score = 145 bits (160),  Expect = 1e-38
+ Identities = 80/80 (100%), Gaps = 0/80 (0%)
+ Strand=Plus/Plus
+
+Query  121  GGGCGACATGTCAAATTCGGTAGCCCATACTGGTGAGCGTTGTGTCGCCCGCCTTGCGGA  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121  GGGCGACATGTCAAATTCGGTAGCCCATACTGGTGAGCGTTGTGTCGCCCGCCTTGCGGA  180
+
+Query  181  AGTAAAGAATAGCCGTATCT  200
+            ||||||||||||||||||||
+Sbjct  181  AGTAAAGAATAGCCGTATCT  200
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 833544
+
+
+Query= m08 ambiguity in a run
+
+Length=285
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+m08 ambiguity in a run                                                497     2e-144
+
+
+>m08 ambiguity in a run
+Length=285
+
+ Score = 497 bits (550),  Expect = 2e-144
+ Identities = 285/285 (100%), Gaps = 0/285 (0%)
+ Strand=Plus/Plus
+
+Query  1    AGGCAACGGCCTCCTTTGAAAGGCAGACCTACACGGCACACCAAACCTCAAGATATCGCG  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1    AGGCAACGGCCTCCTTTGAAAGGCAGACCTACACGGCACACCAAACCTCAAGATATCGCG  60
+
+Query  61   TATTCGCCCGAGGCGACCGCCAGATCATTTGGTACAGGCGACACACACACACACACACAC  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  61   TATTCGCCCGAGGCGACCGCCAGATCATTTGGTACAGGCGACACACACACACACACACAC  120
+
+Query  121  ACACACACACACACACACACNNNNNACACACACACACACACACACACACACACACACACA  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121  ACACACACACACACACACACNNNNNACACACACACACACACACACACACACACACACACA  180
+
+Query  181  CACACATTCTACGAAATGGAAGCTGATATGCGGGAGAAGCAACTGTGGTCACTCTAGTAC  240
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  CACACATTCTACGAAATGGAAGCTGATATGCGGGAGAAGCAACTGTGGTCACTCTAGTAC  240
+
+Query  241  TACGATACACAACGACATGAATCTGCCGTATCAGAGGAACGCATC  285
+            |||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  241  TACGATACACAACGACATGAATCTGCCGTATCAGAGGAACGCATC  285
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 738204
+
+
+  Database: masked nucleotide in volumes, m05-m08
+  Masked using: 'windowmasker'
+    Posted date:  Oct 20, 2026  12:54 PM
+  Number of letters in database: 2,836
+  Number of sequences in database:  8
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

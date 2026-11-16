@@ -1,0 +1,2 @@
+Error: (CObjReaderParseException::eNoDefline) CFastaReader: Input doesn't start with a defline or comment around line 1 (m_Pos = 1)
+Error: (106.16) Application's execution failed (CObjReaderParseException::eNoDefline) CFastaReader: Input doesn't start with a defline or comment around line 1 (m_Pos = 1)

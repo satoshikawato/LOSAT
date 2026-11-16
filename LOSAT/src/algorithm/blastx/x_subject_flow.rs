@@ -31,13 +31,13 @@
 //! the loop's order for everything after `compute_subject` (the sink: linking, reaping, the HSP
 //! stream) and changes only which thread computes a subject and when.
 
-use super::{compute_subject, SubjectComputation};
+use super::{compute_subject_any, SubjectComputation};
 use crate::algorithm::blastx::{
     args::ResolvedOptions,
     parameters::ContextParameters,
     query_setup::PreparedQueryBatch,
     search::PreliminarySink,
-    seed::{Diagonals, Lookup},
+    seed::{BxLookup, Diagonals},
     subjects::Subjects,
 };
 use anyhow::Result;
@@ -110,8 +110,8 @@ impl XTasks {
         if n == 0 || u32::try_from(n).is_err() {
             return None;
         }
-        let total = match subjects.total_length() {
-            Ok(total) if total > 0 => total as u128,
+        let total = match subjects.included_length() {
+            Some(total) if total > 0 => u128::from(total),
             _ => return None,
         };
         // `k` times the mean length, rounded up.
@@ -163,19 +163,22 @@ fn shadow() -> bool {
 }
 
 /// No NCBI counterpart: whether the subject loop runs as a flow, and with how many subjects per
-/// task (fewer inside the capped batch flow, `x_bx_mem::flow_subjects_per_task`). Not with
-/// diagnostics (they keep every subject's seeds), without a pool, with one task only, or when a
-/// diagonal offset could pass 2^30 (module comment).
+/// task (fewer inside the capped batch flow, `x_bx_mem::flow_subjects_per_task`). Not without a
+/// pool, with one task only, or when a diagonal offset could pass 2^30 (module comment).
 pub(super) fn chosen(
     pool: &crate::utils::threading::SearchPool<'_>,
-    diagnostics: bool,
     options: &ResolvedOptions,
     subjects: Subjects<'_>,
 ) -> Option<usize> {
     // Dispatch point (LOSAT_X_BXCAPFILL, in the strict set): inside the capped batch flow, tasks of
     // fewer subjects (x_bx_mem::flow_subjects_per_task).
-    let k = super::x_bx_mem::flow_subjects_per_task(pool, subjects.len(), subjects_per_task()?);
-    let own = fits(k, pool, diagnostics, options, subjects);
+    let k = super::x_bx_mem::flow_subjects_per_task(
+        pool,
+        options,
+        subjects.len(),
+        subjects_per_task()?,
+    );
+    let own = fits(k, pool, options, subjects);
     crate::utils::xreach::x_reach!("LOSAT_X_BXSUBJFLOW", own);
     own.then_some(k)
 }
@@ -184,11 +187,10 @@ pub(super) fn chosen(
 pub(super) fn fits(
     k: usize,
     pool: &crate::utils::threading::SearchPool<'_>,
-    diagnostics: bool,
     options: &ResolvedOptions,
     subjects: Subjects<'_>,
 ) -> bool {
-    !(diagnostics || !pool.enabled() || pool.threads() < 2 || subjects.len() <= k)
+    !(!pool.enabled() || pool.threads() < 2 || subjects.len() <= k)
         && offsets_stay_below_2_30(options.window_size, subjects.longest_length())
 }
 
@@ -211,7 +213,6 @@ const CHUNK_FLOW_MIN_SUBJECTS: usize = 2_048;
 /// computes (the sink sees the chunks in order either way, `search::search_core`).
 pub(super) fn chunks_in_order(
     pool: &crate::utils::threading::SearchPool<'_>,
-    diagnostics: bool,
     options: &ResolvedOptions,
     subjects: Subjects<'_>,
 ) -> bool {
@@ -220,7 +221,7 @@ pub(super) fn chunks_in_order(
         return false;
     }
     let own = subjects_per_task().is_some_and(|k| {
-        fits(k, pool, diagnostics, options, subjects)
+        fits(k, pool, options, subjects)
             && subjects.len()
                 >= CHUNK_FLOW_MIN_SUBJECTS.max(CHUNK_FLOW_SUBJECTS_PER_THREAD * pool.threads())
     });
@@ -234,7 +235,6 @@ pub(super) fn chunks_in_order(
 /// condition of its own.
 pub(super) fn crosses_chunks(
     pool: &crate::utils::threading::SearchPool<'_>,
-    diagnostics: bool,
     options: &ResolvedOptions,
     subjects: Subjects<'_>,
     chunks: usize,
@@ -243,7 +243,7 @@ pub(super) fn crosses_chunks(
     if chunks < 2 || !*ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXCHUNKCROSS")) {
         return None;
     }
-    let k = chosen(pool, diagnostics, options, subjects);
+    let k = chosen(pool, options, subjects);
     crate::utils::xreach::x_reach!("LOSAT_X_BXCHUNKCROSS", k.is_some());
     k
 }
@@ -257,92 +257,6 @@ pub(super) fn offsets_stay_below_2_30(window_size: i32, longest: usize) -> bool 
         .is_some_and(|reach| reach <= 1 << 28)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{offsets_stay_below_2_30, XTasks};
-    use crate::algorithm::blastx::{input::FastaRecord, subjects::Subjects};
-
-    fn records(lengths: &[usize]) -> Vec<FastaRecord> {
-        lengths
-            .iter()
-            .enumerate()
-            .map(|(i, &length)| FastaRecord {
-                internal_id: format!("s{i}"),
-                title: String::new(),
-                sequence: vec![b'A'; length],
-                lowercase_masks: Vec::new(),
-                warnings: Vec::new(),
-                source: None,
-            })
-            .collect()
-    }
-
-    // The cut covers the subjects in order, no task holds more than `k` subjects, and a task of
-    // two or more subjects holds at most `k` times the mean length; equal lengths keep the grid.
-    #[test]
-    fn the_tasks_cut_by_residues_cover_the_subjects_in_order() {
-        let mut lengths = vec![300; 1_000];
-        for length in &mut lengths[400..420] {
-            *length = 20_000;
-        }
-        lengths[999] = 7;
-        for k in [1, 2, 7, 64, 2_000] {
-            let set = records(&lengths);
-            let tasks = XTasks::cut(k, Subjects::Fasta(&set)).unwrap();
-            let budget = (k * lengths.iter().sum::<usize>()).div_ceil(lengths.len());
-            let mut next = 0;
-            for task in 0..tasks.count() {
-                let range = tasks.range(task);
-                assert_eq!(range.start, next, "k {k} task {task}");
-                assert!(!range.is_empty() && range.len() <= k, "k {k} task {task}");
-                let residues: usize = lengths[range.clone()].iter().sum();
-                assert!(range.len() == 1 || residues <= budget, "k {k} task {task}");
-                next = range.end;
-            }
-            assert_eq!(next, lengths.len(), "k {k}");
-            if k == 64 {
-                // The twenty long subjects (subjects 400-419 of the grid's task 384..448): two per
-                // task under the budget of 64 x the mean length (693.707), 26 tasks for the grid's
-                // 16.
-                assert_eq!(budget, 44_398);
-                assert_eq!(tasks.count(), 26);
-                assert_eq!(tasks.range(6), 384..401);
-                assert_eq!(tasks.range(7), 401..403);
-                assert_eq!(tasks.range(16), 419..483);
-            }
-        }
-        let set = records(&[300; 1_000]);
-        let tasks = XTasks::cut(64, Subjects::Fasta(&set)).unwrap();
-        assert_eq!(tasks.count(), 16);
-        assert_eq!(tasks.range(15), 960..1_000);
-        assert!(XTasks::cut(64, Subjects::Fasta(&[])).is_none());
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-175
-    // ```c++
-    //         if (ewp->diag_table->offset >= INT4_MAX / 4) {
-    //             ewp->diag_table->offset = ewp->diag_table->window;
-    //             s_BlastDiagClear(ewp->diag_table);
-    //         } else {
-    //             ewp->diag_table->offset += subject_length + ewp->diag_table->window;
-    //         }
-    // ```
-    // The offset a subject is scanned at is below INT4_MAX / 4 plus the previous subject and a
-    // window; its entries add at most the subject's own length.
-    #[test]
-    fn the_flow_is_kept_only_where_no_offset_passes_2_30() {
-        assert!(offsets_stay_below_2_30(40, 5_000_000));
-        assert!(offsets_stay_below_2_30((1 << 28) - 2 * 35_000, 35_000));
-        assert!(!offsets_stay_below_2_30((1 << 28) - 2 * 35_000 + 1, 35_000));
-        assert!(!offsets_stay_below_2_30(536_870_000, 4_910));
-        assert!(!offsets_stay_below_2_30(-1, 10));
-        // The bound holds for the worst history: INT4_MAX / 4 - 1 plus two subjects and a
-        // window stays below 2^30.
-        let worst = i64::from(i32::MAX / 4) - 1 + (1 << 28);
-        assert!(worst < 1 << 30);
-    }
-}
-
 /// No NCBI counterpart: the subjects `range` of one task, searched on `diagonals`; see `Task`.
 #[allow(clippy::too_many_arguments)]
 fn search_task(
@@ -351,23 +265,22 @@ fn search_task(
     batch: &PreparedQueryBatch,
     params: &[ContextParameters],
     options: &ResolvedOptions,
-    lookup: &Lookup,
+    lookup: &BxLookup,
     diagonals: &mut Diagonals,
     xdrop: i32,
-    db_length: i64,
     x_containment: bool,
 ) -> Task {
     let mut kept = Vec::new();
     let (first, end) = (range.start, range.end);
-    // EXPERIMENT (LOSAT_X_BXDBSTREAM): the task's subjects, read at once when the subjects are read
-    // in blocks; an error stops the flow at the task's first subject.
+    // The task's subjects, read at once when the subjects are read in blocks; an error stops the
+    // flow at the task's first subject.
     let x_block = match subjects.x_read_range(first, end) {
         Ok(block) => block,
         Err(error) => return (kept, Some((first, error))),
     };
     let subjects = subjects.x_with_block(x_block.as_ref());
     for oid in first..end {
-        match compute_subject(
+        match compute_subject_any(
             subjects,
             batch,
             params,
@@ -375,15 +288,10 @@ fn search_task(
             lookup,
             diagonals,
             xdrop,
-            false,
-            db_length,
             oid,
             x_containment,
         ) {
-            Ok(mut computed) => {
-                // Only the diagnostic stages read these (not with the flow).
-                computed.seeds = Vec::new();
-                computed.initial = Vec::new();
+            Ok(computed) => {
                 if !computed.is_empty() {
                     kept.push((oid, computed));
                 }
@@ -427,8 +335,7 @@ fn x_shadow_check(kept: &[(usize, SubjectComputation)], failed_at: Option<usize>
                 && ca.raw == cb.raw
                 && ca.purged == cb.purged
                 && ca.containment == cb.containment
-                && ca.prepared_link.map(|(c, f)| (c, f.to_bits()))
-                    == cb.prepared_link.map(|(c, f)| (c, f.to_bits())),
+                && ca.prepared_link == cb.prepared_link,
             "LOSAT_X_BXSUBJFLOWSHADOW: subject {oa} differs"
         );
     }
@@ -445,8 +352,7 @@ fn x_shadow_check(kept: &[(usize, SubjectComputation)], failed_at: Option<usize>
 /// calls of the waves' replay loop (`subject_start`, `containment`, `preliminary_purge`,
 /// `subject`); `diagonals` is the owner's table, `helper_tables` one table per helper (its own, or
 /// with `LOSAT_X_BXDIAGKEEP` the one its thread keeps, `x_bx_mem::XScratch`); `capped` = the chunk's
-/// batch is one of the capped batch flow (`x_bx_mem::in_capped_batch`). Returns the number of
-/// subjects handed to the sink.
+/// batch is one of the capped batch flow (`x_bx_mem::in_capped_batch`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run(
     k: usize,
@@ -454,17 +360,25 @@ pub(super) fn run(
     batch: &PreparedQueryBatch,
     params: &[ContextParameters],
     options: &ResolvedOptions,
-    lookup: &Lookup,
+    lookup: &BxLookup,
     diagonals: &mut Diagonals,
     helper_tables: Vec<super::x_bx_mem::XScratch<'_>>,
     xdrop: i32,
-    db_length: i64,
     x_containment: bool,
     capped: bool,
     sink: &mut impl PreliminarySink,
-) -> Result<usize> {
+) -> Result<()> {
     let bounds = XTasks::new(k, subjects);
     let tasks = bounds.count();
+    // A helper for each task but the first at most: the owner searches a task itself when no helper
+    // has taken it, and a helper with no task to take only wakes a thread of the pool (each spawn
+    // wakes a sleeping one), which then takes other work and keeps its tables and its glibc arena
+    // for the rest of the run: 800 cDNAs x 2 yeast proteins `-subject` has 2 tasks a batch, and at
+    // 64 threads all 64 searched subjects and kept a diagonal table each.
+    let helper_tables: Vec<_> = helper_tables
+        .into_iter()
+        .take(tasks.saturating_sub(1))
+        .collect();
     // The fused loop's choice for the lookup table, worked out here once for every helper (a
     // helper's thread may have searched another table's tasks in between).
     let x_ratio =
@@ -485,7 +399,6 @@ pub(super) fn run(
             lookup,
             table,
             xdrop,
-            db_length,
             x_containment,
         )
     };
@@ -499,7 +412,6 @@ pub(super) fn run(
         crate::utils::xahead::Ahead::new(4 * (helper_tables.len() + 1))
     };
     let x_t = super::super::x_timing::lap();
-    let mut call = 0usize;
     let mut own = super::x_bx_mem::XScratch::Borrowed(diagonals);
     let result = crate::utils::xahead::with_helpers(Some(&ahead), helper_tables, &compute, || {
         for task in 0..tasks {
@@ -534,7 +446,6 @@ pub(super) fn run(
                     sink.preliminary_purge(oid, &raw, &purged)?;
                 }
                 sink.subject(oid, &purged, batch, params)?;
-                call += 1;
             }
             if let Some((_, error)) = error {
                 return Err(error);
@@ -543,7 +454,7 @@ pub(super) fn run(
         Ok(())
     });
     super::super::x_timing::subject_flow(x_t, tasks as u64, ahead.counts());
-    result.map(|()| call)
+    result
 }
 
 /// No NCBI counterpart: tasks per thread that the flow across chunks searches ahead of the loop's
@@ -556,7 +467,7 @@ const X_CROSS_AHEAD: usize = 16;
 /// the loop's thread.
 pub(super) struct XChunkSetup {
     pub(super) params: Vec<ContextParameters>,
-    pub(super) lookup: Lookup,
+    pub(super) lookup: BxLookup,
     pub(super) xdrop: i32,
     pub(super) table: Diagonals,
     pub(super) length: usize,
@@ -566,7 +477,7 @@ pub(super) struct XChunkSetup {
 // its lookup table (worked out once, as `run` does) and the length of its diagonal tables.
 struct XChunkReady {
     params: Vec<ContextParameters>,
-    lookup: Lookup,
+    lookup: BxLookup,
     xdrop: i32,
     ratio: Option<u64>,
     length: usize,
@@ -776,8 +687,7 @@ impl XCrossScratch {
 /// its order: per chunk `chunk_start`, the subjects as `run` hands them, `chunk_end`; a chunk
 /// without a valid context gets `chunk_start` only; a setup that failed returns its error after
 /// that chunk's `chunk_start`. A task's value depends on its chunk and subjects alone (module
-/// comment), so only which thread computes what, and when, changes. Returns the number of subjects
-/// handed to the sink.
+/// comment), so only which thread computes what, and when, changes.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run_chunks(
     k: usize,
@@ -788,12 +698,11 @@ pub(super) fn run_chunks(
     options: &ResolvedOptions,
     helpers: usize,
     keep: bool,
-    db_length: i64,
     x_containment: bool,
     capped: bool,
     is_split: bool,
     sink: &mut impl PreliminarySink,
-) -> Result<usize> {
+) -> Result<()> {
     let bounds = XTasks::new(k, subjects);
     let tasks = bounds.count();
     let total = chunks.len() * tasks;
@@ -844,7 +753,6 @@ pub(super) fn run_chunks(
             &ready.lookup,
             table,
             ready.xdrop,
-            db_length,
             x_containment,
         )
     };
@@ -870,7 +778,6 @@ pub(super) fn run_chunks(
         })
         .collect();
     let x_t = super::super::x_timing::lap();
-    let mut call = 0usize;
     let mut own = XCrossScratch::Owned(0, None);
     let result = crate::utils::xahead::with_helpers(Some(&ahead), scratches, &compute, || {
         for (c, chunk) in chunks.iter().enumerate() {
@@ -924,7 +831,6 @@ pub(super) fn run_chunks(
                         sink.preliminary_purge(oid, &raw, &purged)?;
                     }
                     sink.subject(oid, &purged, batch, params)?;
-                    call += 1;
                 }
                 if let Some((_, error)) = error {
                     return Err(error);
@@ -937,5 +843,92 @@ pub(super) fn run_chunks(
         Ok(())
     });
     super::super::x_timing::subject_flow(x_t, total as u64, ahead.counts());
-    result.map(|()| call)
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{offsets_stay_below_2_30, XTasks};
+    use crate::algorithm::blastx::{input::FastaRecord, subjects::Subjects};
+
+    fn records(lengths: &[usize]) -> Vec<FastaRecord> {
+        lengths
+            .iter()
+            .enumerate()
+            .map(|(i, &length)| FastaRecord {
+                internal_id: format!("s{i}"),
+                title: Vec::new(),
+                sequence: vec![b'A'; length],
+                lowercase_masks: Vec::new(),
+                warnings: Vec::new(),
+                source: None,
+                around: None,
+            })
+            .collect()
+    }
+
+    // The cut covers the subjects in order, no task holds more than `k` subjects, and a task of
+    // two or more subjects holds at most `k` times the mean length; equal lengths keep the grid.
+    #[test]
+    fn the_tasks_cut_by_residues_cover_the_subjects_in_order() {
+        let mut lengths = vec![300; 1_000];
+        for length in &mut lengths[400..420] {
+            *length = 20_000;
+        }
+        lengths[999] = 7;
+        for k in [1, 2, 7, 64, 2_000] {
+            let set = records(&lengths);
+            let tasks = XTasks::cut(k, Subjects::Fasta(&set)).unwrap();
+            let budget = (k * lengths.iter().sum::<usize>()).div_ceil(lengths.len());
+            let mut next = 0;
+            for task in 0..tasks.count() {
+                let range = tasks.range(task);
+                assert_eq!(range.start, next, "k {k} task {task}");
+                assert!(!range.is_empty() && range.len() <= k, "k {k} task {task}");
+                let residues: usize = lengths[range.clone()].iter().sum();
+                assert!(range.len() == 1 || residues <= budget, "k {k} task {task}");
+                next = range.end;
+            }
+            assert_eq!(next, lengths.len(), "k {k}");
+            if k == 64 {
+                // The twenty long subjects (subjects 400-419 of the grid's task 384..448): two per
+                // task under the budget of 64 x the mean length (693.707), 26 tasks for the grid's
+                // 16.
+                assert_eq!(budget, 44_398);
+                assert_eq!(tasks.count(), 26);
+                assert_eq!(tasks.range(6), 384..401);
+                assert_eq!(tasks.range(7), 401..403);
+                assert_eq!(tasks.range(16), 419..483);
+            }
+        }
+        let set = records(&[300; 1_000]);
+        let tasks = XTasks::cut(64, Subjects::Fasta(&set)).unwrap();
+        assert_eq!(tasks.count(), 16);
+        assert_eq!(tasks.range(15), 960..1_000);
+        assert!(XTasks::cut(64, Subjects::Fasta(&[])).is_none());
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-175
+    // ```c++
+    //         if (ewp->diag_table->offset >= INT4_MAX / 4) {
+    //             ewp->diag_table->offset = ewp->diag_table->window;
+    //             s_BlastDiagClear(ewp->diag_table);
+    //         } else {
+    //             ewp->diag_table->offset += subject_length + ewp->diag_table->window;
+    //         }
+    // ```
+    // The offset a subject is scanned at is below INT4_MAX / 4 plus the previous subject and a
+    // window; its entries add at most the subject's own length.
+    #[test]
+    fn the_flow_is_kept_only_where_no_offset_passes_2_30() {
+        assert!(offsets_stay_below_2_30(40, 5_000_000));
+        assert!(offsets_stay_below_2_30((1 << 28) - 2 * 35_000, 35_000));
+        assert!(!offsets_stay_below_2_30((1 << 28) - 2 * 35_000 + 1, 35_000));
+        assert!(!offsets_stay_below_2_30(536_870_000, 4_910));
+        assert!(!offsets_stay_below_2_30(-1, 10));
+        // The bound holds for the worst history: INT4_MAX / 4 - 1 plus two subjects and a
+        // window stays below 2^30.
+        let worst = i64::from(i32::MAX / 4) - 1 + (1 << 28);
+        assert!(worst < 1 << 30);
+    }
 }

@@ -87,6 +87,7 @@ impl SplitSizes {
     }
 
     /// The default sizes of a task (neither variable set).
+    #[cfg(test)]
     pub fn default_for(megablast: bool) -> Self {
         Self::new(megablast, None, None)
     }
@@ -175,39 +176,10 @@ pub fn calculate_num_chunks(sizes: SplitSizes, concatenated_query_length: usize)
     (num_chunks as usize, chunk_size as usize)
 }
 
-/// Whether NCBI's setup of some query chunk would split that chunk again: each chunk's
-/// search builds its own query splitter with the same chunk size and overlap, and only a
-/// debug build asserts that it does not split. When it does (an overlap close to the chunk
-/// size), the release build skips the chunk's lookup table and stops with a null reference.
-/// LOSAT searches such a chunk once (approved exception 1 of PD-LOSAT-NCBI-DEFECTS), so
-/// this only tells where the exception applies.
-///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_aux_priv.cpp:190-201
-/// ```c
-///     BlastSeqSrc* seqsrc =
-///         BlastSeqSrcCopy(full_data->m_SeqSrc->GetPointer());
-///     CRef<SBlastSetupData> setup_data =
-///         BlastSetupPreliminarySearchEx(
-///                 qf, options,
-///                 CRef<objects::CPssmWithParameters>(),
-///                 seqsrc, num_threads);
-///     BlastSeqSrcResetChunkIterator(seqsrc);
-///     setup_data->m_InternalData->m_SeqSrc.Reset(new TBlastSeqSrc(seqsrc,
-///                                                BlastSeqSrcFree));
-///
-///     _ASSERT(setup_data->m_QuerySplitter->IsQuerySplit() == false);
-/// ```
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_aux_priv.cpp:206-208
-/// ```c
-///     // 5. Create the lookup table
-///     if ( !retval->m_QuerySplitter->IsQuerySplit() ) {
-///         LookupTableWrap* lut =
-/// ```
-pub fn chunk_would_be_split(chunks: &[QueryChunk], sizes: SplitSizes) -> bool {
-    chunks.iter().any(|chunk| {
-        let length = chunk.queries.iter().map(ChunkQuery::len).sum();
-        calculate_num_chunks(sizes, length).0 > 1
-    })
+/// Whether NCBI splits a query batch whose queries have `concatenated_query_length` letters into
+/// chunks (`calculate_num_chunks` gives more than one; `split_query_batch` makes them).
+pub fn splits(sizes: SplitSizes, concatenated_query_length: usize) -> bool {
+    calculate_num_chunks(sizes, concatenated_query_length).0 > 1
 }
 
 /// The query chunks of a batch with queries of `lengths` residues, or `None` when NCBI
@@ -328,7 +300,7 @@ pub fn split_query_batch(
     let mut chunk_start = 0usize;
     for (chunk_num, range) in chunk_ranges.iter_mut().enumerate() {
         let mut chunk_end = chunk_start + chunk_size;
-        if chunk_end >= total_length || (chunk_end < total_length && chunk_num + 1 == num_chunks) {
+        if chunk_end >= total_length || chunk_num + 1 == num_chunks {
             chunk_end = total_length;
         }
         *range = (chunk_start, chunk_end);
@@ -665,6 +637,58 @@ pub fn restrict_masks(
         .collect()
 }
 
+/// `restrict_masks` for masks given in the record's coordinates (`[start, end)` in the record),
+/// as NCBI holds a query's lower-case masks: the runs of the whole record, also those before a
+/// `-query_loc` interval. A run that ends on the letter before the interval then reaches the
+/// first letter of the query's first part through the restriction's extra residue, which a mask
+/// in the searched letters' coordinates cannot express. The steps are `restrict_masks`'s.
+pub fn restrict_record_masks(
+    masks: &[MaskedInterval],
+    part: &ChunkQuery,
+    offset: usize,
+) -> Vec<MaskedInterval> {
+    let last = part.to - 1;
+    let (interval_from, interval_to) = (part.from + offset, last + offset);
+    masks
+        .iter()
+        .filter_map(|mask| {
+            let left = mask.start.max(part.from);
+            let right_open = mask.end.min(last);
+            if left >= right_open {
+                return None;
+            }
+            let restricted_left = left.saturating_sub(interval_from);
+            let restricted_right = right_open.min(interval_to) as isize - interval_from as isize;
+            (restricted_left as isize <= restricted_right)
+                .then(|| MaskedInterval::new(restricted_left, restricted_right as usize + 1))
+        })
+        .collect()
+}
+
+/// `restrict_masks` of a query whose letter before its `-query_loc` interval (record letter
+/// `offset - 1`) is lower case, with `-lcase_masking`. NCBI restricts the lower-case runs of the
+/// whole record (`restrict_record_masks`); of the letters outside the interval only that one can
+/// reach a part, the first letter of the query's first part, whether its run ends there or goes
+/// on into the interval. The masks in the searched letters' coordinates are moved into the
+/// record's with that letter added. It masks the first letter of a part that starts the query and
+/// is longer than `offset` letters; `restrict_masks` misses that letter when the run ends on the
+/// letter before the interval, or goes on into the interval and the part is `offset + 1` letters
+/// long, and masks the same letters in every other part.
+pub fn restrict_masks_with_letter_before(
+    masks: &[MaskedInterval],
+    part: &ChunkQuery,
+    offset: usize,
+) -> Vec<MaskedInterval> {
+    let mut record = Vec::with_capacity(masks.len() + 1);
+    record.push(MaskedInterval::new(offset - 1, offset));
+    record.extend(
+        masks
+            .iter()
+            .map(|mask| MaskedInterval::new(mask.start + offset, mask.end + offset)),
+    );
+    restrict_record_masks(&record, part, offset)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -864,6 +888,106 @@ mod tests {
         );
     }
 
+    // Masks in the record's coordinates are restricted as `restrict_masks` restricts the same
+    // masks in the searched letters' coordinates; a run that ends on the letter before the
+    // interval (record 9 with offset 10) reaches the first part's first letter, only while that
+    // part's last letter (`to - 1`, which bounds the run in record coordinates) is not before the
+    // offset.
+    #[test]
+    fn record_masks_restrict_as_searched_masks_and_reach_the_first_letter() {
+        let offset = 10;
+        let searched = [
+            MaskedInterval::new(0, 3),
+            MaskedInterval::new(95, 120),
+            MaskedInterval::new(185, 190),
+        ];
+        let record: Vec<_> = searched
+            .iter()
+            .map(|mask| MaskedInterval::new(mask.start + offset, mask.end + offset))
+            .collect();
+        for (from, to) in [(0, 100), (90, 200), (180, 200), (0, 11), (0, 12)] {
+            let part = ChunkQuery { query: 0, from, to };
+            assert_eq!(
+                restrict_record_masks(&record, &part, offset),
+                restrict_masks(&searched, &part, offset),
+                "{from}..{to}"
+            );
+        }
+        let before = [MaskedInterval::new(4, 10)];
+        let part = |to| ChunkQuery {
+            query: 0,
+            from: 0,
+            to,
+        };
+        assert_eq!(
+            restrict_record_masks(&before, &part(100), offset),
+            vec![MaskedInterval::new(0, 1)]
+        );
+        assert_eq!(
+            restrict_record_masks(&before, &part(11), offset),
+            vec![MaskedInterval::new(0, 1)]
+        );
+        assert!(restrict_record_masks(&before, &part(10), offset).is_empty());
+        let later = ChunkQuery {
+            query: 0,
+            from: 90,
+            to: 200,
+        };
+        assert!(restrict_record_masks(&before, &later, offset).is_empty());
+        let two_before = [MaskedInterval::new(4, 9)];
+        assert!(restrict_record_masks(&two_before, &part(100), offset).is_empty());
+    }
+
+    // The masks of a part from the runs of the searched letters, with the letter before the
+    // interval when it is lower case, mask the residues that the runs of the whole record mask
+    // (`restrict_record_masks`, NCBI's), for every lower-case pattern of a 10-letter record, four
+    // intervals and every part; the searched letters' runs alone miss some.
+    #[test]
+    fn the_letter_before_the_interval_gives_the_whole_records_masks() {
+        use super::super::coordination::collect_lowercase_masks;
+        let residues = |masks: &[MaskedInterval]| -> std::collections::BTreeSet<usize> {
+            masks.iter().flat_map(|mask| mask.start..mask.end).collect()
+        };
+        let mut missed = 0;
+        for pattern in 0u32..1 << 10 {
+            let record: Vec<u8> = (0..10)
+                .map(|letter| {
+                    if pattern >> letter & 1 == 1 {
+                        b'a'
+                    } else {
+                        b'A'
+                    }
+                })
+                .collect();
+            let runs = collect_lowercase_masks(&record);
+            for (offset, end) in [(1, 10), (2, 8), (3, 10), (4, 9)] {
+                let searched = collect_lowercase_masks(&record[offset..end]);
+                let before = record[offset - 1].is_ascii_lowercase();
+                for from in 0..end - offset {
+                    for to in from + 1..=end - offset {
+                        let part = ChunkQuery { query: 0, from, to };
+                        let whole = residues(&restrict_record_masks(&runs, &part, offset));
+                        let masks = if before {
+                            restrict_masks_with_letter_before(&searched, &part, offset)
+                        } else {
+                            restrict_masks(&searched, &part, offset)
+                        };
+                        assert_eq!(
+                            residues(&masks),
+                            whole,
+                            "{} {offset}..{end} {from}..{to}",
+                            String::from_utf8_lossy(&record)
+                        );
+                        missed += usize::from(
+                            residues(&restrict_masks(&searched, &part, offset)) != whole,
+                        );
+                    }
+                }
+            }
+        }
+        assert!(missed > 0);
+    }
+
     // CHUNK_SIZE and OVERLAP_CHUNK_SIZE as NCBI reads them (split_query_aux_priv.cpp:100-138).
     #[test]
     fn environment_sizes_follow_ncbis_size_t_arithmetic() {
@@ -935,21 +1059,6 @@ mod tests {
         let narrow = SplitSizes::new(false, Some(-5), Some(-10));
         assert!(calculate_num_chunks(narrow, 12_000).0 > 1);
         assert!(!SplitSizes::new(false, Some(3000), Some(-10)).negative_chunk_size());
-    }
-
-    // Oracle (E2g audit a): a 30000-residue query with CHUNK_SIZE 3000 fails from
-    // OVERLAP_CHUNK_SIZE 1526 (chunks of 2950 over 1474) and runs at 1525.
-    #[test]
-    fn a_chunk_that_ncbi_would_split_again() {
-        let fails = SplitSizes::new(false, Some(3000), Some(1526));
-        let chunks = split_query_batch(&[30_000], fails, QueryStrand::Both).expect("split");
-        assert!(chunk_would_be_split(&chunks, fails));
-        let runs = SplitSizes::new(false, Some(3000), Some(1525));
-        let chunks = split_query_batch(&[30_000], runs, QueryStrand::Both).expect("split");
-        assert!(!chunk_would_be_split(&chunks, runs));
-        let default = SplitSizes::default_for(false);
-        let chunks = split_query_batch(&[1_999_800], default, QueryStrand::Both).expect("split");
-        assert!(!chunk_would_be_split(&chunks, default));
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:392-410,604-626

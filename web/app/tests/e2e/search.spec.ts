@@ -2,16 +2,30 @@
 // application. The tests run with the FakeEngine build and with the engine build
 // (LOSAT_WEB_REACTORS); what only the engine can show (its messages, the kept subject, a
 // search long enough to edit or cancel while it runs) is checked in the engine build.
-import { expect, test, type Page } from '@playwright/test';
-import { BUILD_HAS_ENGINE } from './support/browser';
+import { expect, type Page } from '@playwright/test';
+import { test } from './support/test';
+import { spawnSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { constants as zlib, gzipSync, zstdCompressSync } from 'node:zlib';
+import { COMPOSITION_MODES, MATRICES, PROTEIN_GAP_COSTS, PROTEIN_WORD_SIZES } from '../../src/domain/programs';
+import { RESULTS_REMOVED_MESSAGE } from '../../src/infra/data/block-store';
+import { TMP_DIRECTORY } from '../../src/infra/data/session';
+import { BUILD_HAS_ENGINE, sessionDirectories, sessionFiles } from './support/browser';
+import { NATIVE, NO_NATIVE_REASON } from './support/native';
+import { reload } from './support/navigate';
 import {
+  chooseRun,
+  described,
   fasta,
   openFiles,
   openParameters,
   openSearch,
   paste,
+  pickRun,
   program,
   result,
+  runMessage,
   settled,
   showRecords,
   submit,
@@ -25,19 +39,17 @@ import {
  */
 const SLOW = { program: 'blastp', query: 'NZ_CP006932.faa', subject: 'NZ_CP006932.faa' } as const;
 
-/** Where a part of a run's card is: its top below the card's top, and its right edge from the card's right edge. */
-async function placeInCard(page: Page, number: number, part: string): Promise<{ top: number; right: number }> {
-  const card = (await page.getByTestId(`run-${number}`).boundingBox())!;
-  const box = (await page.getByTestId(`run-${number}-${part}`).boundingBox())!;
-  return { top: Math.round(box.y - card.y), right: Math.round(card.x + card.width - box.x - box.width) };
-}
-
 async function startSlowSearch(page: Page): Promise<void> {
   await program(page, SLOW.program);
   await openFiles(page, 'query', [{ name: SLOW.query, text: fasta(SLOW.query) }]);
   await openFiles(page, 'subject', [{ name: SLOW.subject, text: fasta(SLOW.subject) }]);
   await submit(page);
-  await expect(page.getByTestId('run-1-status')).toHaveText('running', { timeout: 60_000 });
+  await expect(page.getByTestId('run-1-option')).toHaveAttribute('data-status', 'running', { timeout: 60_000 });
+}
+
+/** Back to the search form (it stays mounted with its edits) after "Run LOSAT" went to the results. */
+async function backToSearch(page: Page): Promise<void> {
+  await page.getByTestId('tab-search').click();
 }
 
 // Engine searches are slower in Firefox and WebKit than in Chromium (W1 README).
@@ -75,33 +87,101 @@ test('a file is summarized with its records, not put in the paste box; files can
   await expect(page.getByTestId('subject-source-0-summary')).toHaveText('1 record · 10 nt');
 });
 
-// A record that the checker refuses. The FakeEngine names the record in its message ("query record 3
-// (bad) ..."), so the screen offers to exclude it. The engine's register (S10) reads with NCBI's
-// reader: it refuses a gap line ('>?') with a message about the line, which names no record, so the
-// screen shows the refusal without the exclude button and the record is excluded with its checkbox.
-const REFUSED_RECORD = BUILD_HAS_ENGINE ? '>?10\nACGT\n' : '>bad\nACGT!ACGT\n';
+// A record that the checker refuses. The FakeEngine refuses a record with '!' in its sequence and
+// names it in its message ("query record 3 (bad) ..."), so the screen offers to exclude it. The
+// engine's register reads with the index scan's reader kind (DW-38), so it refuses no record that
+// the index read; NCBI's reader skips the '!', and the record is left out with its checkbox.
+const REFUSED_RECORD = '>bad\nACGT!ACGT\n';
 
-test('records: duplicate IDs by number, the engine refuses a record, exclusion, and a run after exclusion', async ({ page }) => {
+// Compressed files are inflated by the engine's decoders (ABI v2 inflate_*; swebok-improve SW8 D2):
+// a build without the engine reads every file as it is.
+const NO_DECODERS = "the engine's decoders inflate a compressed file (engine build)";
+
+test('a file named .gz is inflated when it is opened and shows its plain name', async ({ page }) => {
+  test.skip(!BUILD_HAS_ENGINE, NO_DECODERS);
+  await openFiles(page, 'subject', [{ name: 'LC738884.fasta.gz', text: gzipSync(fasta('LC738884.fasta')) }]);
+  await expect(page.getByTestId('subject-source-0')).toHaveAttribute('data-status', 'ready');
+  await expect(page.getByTestId('subject-source-0').locator('.source-name')).toHaveText('LC738884.fasta');
+  await openFiles(page, 'subject', [{ name: 'LC738884.fasta', text: fasta('LC738884.fasta') }]);
+  const summary = await page.getByTestId('subject-source-0-summary').textContent();
+  expect(summary).toMatch(/record/);
+  await expect(page.getByTestId('subject-source-1-summary')).toHaveText(summary!.trim());
+});
+
+test('a file named .zst is inflated when it is opened and shows its plain name', async ({ page }) => {
+  test.skip(!BUILD_HAS_ENGINE, NO_DECODERS);
+  await openFiles(page, 'subject', [{ name: 'LC738884.fasta.zst', text: zstdCompressSync(fasta('LC738884.fasta')) }]);
+  await expect(page.getByTestId('subject-source-0')).toHaveAttribute('data-status', 'ready');
+  await expect(page.getByTestId('subject-source-0').locator('.source-name')).toHaveText('LC738884.fasta');
+  await openFiles(page, 'subject', [{ name: 'LC738884.fasta', text: fasta('LC738884.fasta') }]);
+  const summary = await page.getByTestId('subject-source-0-summary').textContent();
+  expect(summary).toMatch(/record/);
+  await expect(page.getByTestId('subject-source-1-summary')).toHaveText(summary!.trim());
+});
+
+test('a file named .bz2 is inflated when it is opened and shows its plain name', async ({ page }) => {
+  test.skip(!BUILD_HAS_ENGINE, NO_DECODERS);
+  // Node has no bzip2 encoder: the bzip2 command writes the file (the Linux runners have it).
+  const packed = spawnSync('bzip2', ['-9c'], { input: fasta('LC738884.fasta'), maxBuffer: 1 << 26 });
+  expect(packed.status, String(packed.error ?? packed.stderr)).toBe(0);
+  await openFiles(page, 'subject', [{ name: 'LC738884.fasta.bz2', text: packed.stdout }]);
+  await expect(page.getByTestId('subject-source-0')).toHaveAttribute('data-status', 'ready');
+  await expect(page.getByTestId('subject-source-0').locator('.source-name')).toHaveText('LC738884.fasta');
+  await openFiles(page, 'subject', [{ name: 'LC738884.fasta', text: fasta('LC738884.fasta') }]);
+  const summary = await page.getByTestId('subject-source-0-summary').textContent();
+  expect(summary).toMatch(/record/);
+  await expect(page.getByTestId('subject-source-1-summary')).toHaveText(summary!.trim());
+});
+
+test("a file named .bz2 that is not bzip2 data is refused with the command line's sentence on its card", async ({ page }) => {
+  test.skip(!BUILD_HAS_ENGINE, NO_DECODERS);
+  await openFiles(page, 'subject', [{ name: 'two.fa.bz2', text: '>a\nACGT\n' }]);
+  await expect(page.getByTestId('subject-source-0')).toHaveAttribute('data-status', 'failed');
+  await expect(page.getByTestId('subject-source-0-error')).toHaveText(
+    "This input cannot be read: 'two.fa.bz2' is named .bz2 but is not bzip2 data (bzip2: bz2 header missing); LOSAT reads a file named .bz2 through bzip2",
+  );
+});
+
+test("a file named .zst whose checksum is wrong is refused with the command line's sentence", async ({ page }, testInfo) => {
+  test.skip(!BUILD_HAS_ENGINE, NO_DECODERS);
+  const name = 'LC738884.fasta.zst';
+  const packed = Buffer.from(zstdCompressSync(fasta('LC738884.fasta'), { params: { [zlib.ZSTD_c_checksumFlag]: 1 } }));
+  packed[packed.length - 1]! ^= 1;
+  await openFiles(page, 'subject', [{ name, text: packed }]);
+  await expect(page.getByTestId('subject-source-0')).toHaveAttribute('data-status', 'failed');
+  const sentence = `'${name}' is named .zst but is not zstd data (a zstd frame's checksum does not match its data); LOSAT reads a file named .zst through zstd`;
+  await expect(page.getByTestId('subject-source-0-error')).toHaveText(`This input cannot be read: ${sentence}`);
+  if (NATIVE === undefined) {
+    testInfo.annotations.push({ type: 'skip', description: `the native CLI's sentence: ${NO_NATIVE_REASON}` });
+    return;
+  }
+  // The command line reads the same bytes under the same name, and puts its option before the sentence.
+  const file = testInfo.outputPath(name);
+  writeFileSync(file, packed);
+  writeFileSync(testInfo.outputPath('s.fa'), '>s\nACGTACGTACGTACGTAAACCCGGGTTT\n');
+  const run = spawnSync(NATIVE, ['blastn', '-query', name, '-subject', 's.fa', '-outfmt', '6'], { cwd: dirname(file), timeout: 60_000 });
+  expect(run.status).toBe(1);
+  expect(String(run.stderr)).toBe(`Error: -query: ${sentence}\n`);
+});
+
+test('records: duplicate IDs by number, a record that the input check refuses (FakeEngine), exclusion, and a run after exclusion', async ({ page }) => {
   await program(page, 'blastn');
   await paste(page, 'query', `>dup first\nACGTACGTACGTAAACCCGGGTTT\n>dup second\nACGTACGTACGTAAACCCGGGTTA\n${REFUSED_RECORD}`);
   await paste(page, 'subject', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n');
   await expect(page.getByTestId('query-source-0-duplicates')).toContainText('2 records share an ID');
   const check = page.getByTestId('query-source-0-check');
-  await expect(check).toHaveAttribute('data-check', 'refused');
-  await expect(check).toContainText(BUILD_HAS_ENGINE ? 'not supported by LOSAT Web' : 'query record 3 (bad)');
-  if (!BUILD_HAS_ENGINE) await expect(check).toContainText('FAKE ENGINE check');
-  // The refused input cannot be queued.
-  await submit(page);
-  await expect(page.getByTestId('search-message')).toContainText(
-    BUILD_HAS_ENGINE ? 'Query (pasted): ' : 'Query (pasted): query record 3 (bad)',
-  );
-  await expect(page.getByTestId('run-1')).toHaveCount(0);
-
   if (BUILD_HAS_ENGINE) {
-    await expect(page.getByTestId('query-source-0-exclude-refused')).toHaveCount(0);
+    await expect(check).toHaveAttribute('data-check', 'ok');
     await showRecords(page, 'query');
     await page.getByTestId('query-source-0-record-2').uncheck();
   } else {
+    await expect(check).toHaveAttribute('data-check', 'refused');
+    await expect(check).toContainText('query record 3 (bad)');
+    await expect(check).toContainText('FAKE ENGINE check');
+    // The refused input cannot be started.
+    await submit(page);
+    await expect(page.getByTestId('search-message')).toContainText('Query (pasted): query record 3 (bad)');
+    await expect(page.getByTestId('run-1-option')).toHaveCount(0);
     await page.getByTestId('query-source-0-exclude-refused').click();
   }
   await expect(check).toHaveAttribute('data-check', 'ok');
@@ -110,6 +190,7 @@ test('records: duplicate IDs by number, the engine refuses a record, exclusion, 
   await waitStatus(page, 1, 'completed');
 
   // Leave out the first "dup" (by its number) and search again.
+  await backToSearch(page);
   await showRecords(page, 'query');
   await page.getByTestId('query-source-0-record-0').uncheck();
   await expect(check).toHaveAttribute('data-check', 'ok');
@@ -131,19 +212,19 @@ test('the same subject, another query: the engine keeps the subject (R1)', async
   await paste(page, 'query', '>qa\nACGTACGTACGTAAACCCGGGTTT\n');
   await submit(page);
   await waitStatus(page, 1, 'completed');
+  await backToSearch(page);
   await paste(page, 'query', '>qb\nACGTACGTACGTAAACCCGGGTTA\n');
   await submit(page);
   await waitStatus(page, 2, 'completed');
   if (BUILD_HAS_ENGINE) {
-    await page.getByTestId('run-2').locator('summary', { hasText: 'Details' }).click();
-    await expect(page.getByTestId('run-2-details').locator('[data-detail="subject-retained"]')).toHaveText(
-      'kept from the previous search',
-    );
+    await chooseRun(page, 2);
+    await page.getByTestId('results-view-details').click();
+    await expect(page.getByTestId('run-record')).toContainText('kept from the previous search');
     expect((await result(page, 2, 7)).output).toContain('# Query: qb');
   }
 });
 
-test('several runs in the queue; the next job is edited while one runs; separate searches as a group', async ({ page }) => {
+test('several runs; the next search is edited while one runs; separate searches as a group', async ({ page }) => {
   if (BUILD_HAS_ENGINE) {
     await startSlowSearch(page);
   } else {
@@ -151,10 +232,11 @@ test('several runs in the queue; the next job is edited while one runs; separate
     await openFiles(page, 'query', [{ name: 'q1.fa', text: '>q1\nMKLVVLAAGGHHKL\n' }]);
     await openFiles(page, 'subject', [{ name: 's1.fa', text: '>s1\nMKLVVLAAGGHHKL\n' }]);
     await submit(page);
-    await expect(page.getByTestId('run-1')).toBeVisible();
+    await expect(page.getByTestId('run-1-option')).toHaveCount(1);
   }
 
-  // Edit the next job while run 1 runs: another program, query and option, two subjects searched separately.
+  // Edit the next search while run 1 runs: another program, query and option, two subjects searched separately.
+  await backToSearch(page);
   await program(page, 'tblastx');
   await page.getByTestId('query-source-0-remove').click();
   await paste(page, 'query', '>next\nACGTACGTACGTACGTAC\n');
@@ -166,81 +248,84 @@ test('several runs in the queue; the next job is edited while one runs; separate
     { name: 'b.fa', text: '>b\nTTTACGTACGTACGTACGTACGT\n' },
   ]);
   await page.getByTestId('subject-mode-separate').check();
-  await expect(page.getByTestId('add-to-queue')).toHaveText(/^Run LOSAT \(2 runs(, add to queue)?\)$/);
-  // While run 1 runs, the button says that the next runs wait in the queue.
-  if (BUILD_HAS_ENGINE) await expect(page.getByTestId('add-to-queue')).toHaveText('Run LOSAT (2 runs, add to queue)');
-  await expect(page.getByTestId('add-to-queue-bottom')).toHaveText(/^Run LOSAT \(2 runs(, add to queue)?\)$/);
+  await expect(page.getByTestId('run-losat')).toHaveText('Run LOSAT (2 runs)');
+  await expect(page.getByTestId('run-losat-bottom')).toHaveText('Run LOSAT (2 runs)');
   await submit(page);
-  await expect(page.getByTestId('run-3')).toBeVisible();
-  await expect(page.getByTestId('run-2')).toContainText('query.fa vs a.fa · group run 1 of 2');
-  await expect(page.getByTestId('run-3')).toContainText('query.fa vs b.fa · group run 2 of 2');
-  await expect(page.getByTestId('run-3-options')).toHaveText('Options: -evalue 1e-3');
+  // The page goes to the results of the first run of the group.
+  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('run-3-option')).toHaveCount(1);
+  await expect(page.getByTestId('run-2-option')).toContainText('query.fa vs a.fa');
+  await expect(page.getByTestId('run-3-option')).toContainText('query.fa vs b.fa');
+  await expect(page.getByTestId('results-run-options')).toContainText('group run 1 of 2');
+  await pickRun(page, 3);
+  await expect(page.getByTestId('results-run-options')).toContainText('-evalue 1e-3');
+  await expect(page.getByTestId('results-run-options')).toContainText('group run 2 of 2');
   // Run 1 kept its own program, inputs and options.
-  await expect(page.getByTestId('run-1')).toContainText('BLASTP');
-  await expect(page.getByTestId('run-1-options')).toHaveText('Options: defaults');
+  await expect(page.getByTestId('run-1-option')).toContainText('BLASTP');
+  await pickRun(page, 1);
+  await expect(page.getByTestId('results-run-options')).toHaveText('defaults');
 
   if (BUILD_HAS_ENGINE) {
-    await expect(page.getByTestId('run-1')).toContainText(`${SLOW.query} vs ${SLOW.subject}`);
+    await expect(page.getByTestId('run-1-option')).toContainText(`${SLOW.query} vs ${SLOW.subject}`);
     // The group waits behind run 1; cancelling the group leaves run 1 running.
-    await expect(page.getByTestId('run-2-status')).toHaveText('queued');
-    // One card layout (W4b screen review L7): the phase line and Cancel are at the same place in
-    // the running card and in the waiting one.
-    await expect(page.getByTestId('run-2-phase')).toHaveText('Waiting');
-    expect(await placeInCard(page, 2, 'progress')).toEqual(await placeInCard(page, 1, 'progress'));
-    expect(await placeInCard(page, 2, 'cancel')).toEqual(await placeInCard(page, 1, 'cancel'));
-    await page.getByTestId('run-2-cancel-group').click();
-    await expect(page.getByTestId('run-2-status')).toHaveText('cancelled');
-    await expect(page.getByTestId('run-3-status')).toHaveText('cancelled');
-    await expect(page.getByTestId('run-1-status')).toHaveText('running');
-    await expect(page.getByTestId('run-1-phase')).toHaveText('Searching');
-    await expect(page.getByTestId('run-1-elapsed')).toHaveText(/^\d+:\d\d$/);
+    await pickRun(page, 2);
+    await expect(page.getByTestId('run-2-option')).toHaveAttribute('data-status', 'queued');
+    await expect(page.getByTestId('run-status')).toHaveAttribute('data-status', 'queued');
+    await expect(page.getByTestId('run-status')).toHaveAttribute('data-run', '2');
+    await expect(page.getByTestId('run-status-phase')).toHaveText('Waiting for run 1');
+    await expect(page.getByTestId('run-status-tab-warning')).toHaveText('Closing or reloading this tab ends the search');
+    await page.getByTestId('run-status-cancel-group').click();
+    await expect(page.getByTestId('run-2-option')).toHaveAttribute('data-status', 'cancelled');
+    await expect(page.getByTestId('run-3-option')).toHaveAttribute('data-status', 'cancelled');
+    await expect(page.getByTestId('run-1-option')).toHaveAttribute('data-status', 'running');
+    await pickRun(page, 1);
+    await expect(page.getByTestId('run-status-phase')).toHaveText('Searching');
+    await expect(page.getByTestId('run-status-phase').getByTestId('losat-loader')).toBeVisible(); // the loader before the words (DW-43)
+    await expect(page.getByTestId('run-status-elapsed')).toHaveText(/^\d+:\d\d$/);
+    await backToSearch(page);
     await submit(page); // the same group again, behind run 1
-    await expect(page.getByTestId('run-5-status')).toHaveText('queued');
-    await page.getByTestId('run-1-cancel').click();
+    await expect(page.getByTestId('run-5-option')).toHaveAttribute('data-status', 'queued');
+    await pickRun(page, 1);
+    await page.getByTestId('run-status-cancel').click();
     await waitStatus(page, 1, 'cancelled');
+    // A run that ended leaves the status block, and its loader, for the results message.
+    await expect(page.getByTestId('results-status')).toHaveAttribute('data-run-status', 'cancelled');
+    await expect(page.getByTestId('run-status')).toHaveCount(0);
     await waitStatus(page, 4, 'completed');
     await waitStatus(page, 5, 'completed');
   } else {
-    await expect(page.getByTestId('run-1')).toContainText('q1.fa vs s1.fa');
+    await expect(page.getByTestId('run-1-option')).toContainText('q1.fa vs s1.fa');
     await waitStatus(page, 1, 'completed');
     await waitStatus(page, 2, 'completed');
     await waitStatus(page, 3, 'completed');
   }
   const last = await result(page, BUILD_HAS_ENGINE ? 5 : 3, 6);
   expect(last.command).toBe('losat tblastx -query query.fa -subject b.fa -evalue 1e-3 -outfmt 6');
-  // A finished card has the same lines: the run and its status, the time it took, "Open results"
-  // at the right, then what it searched.
-  const number = BUILD_HAS_ENGINE ? 5 : 3;
-  await expect(page.getByTestId(`run-${number}-phase`)).toHaveText('Took');
-  const box = async (part: string) => (await page.getByTestId(`run-${number}-${part}`).boundingBox())!;
-  const [head, progress, open, options] = [await box('status'), await box('progress'), await box('open'), await box('options')];
-  expect(progress.y).toBeGreaterThanOrEqual(head.y + head.height - 1);
-  expect(open.y).toBeGreaterThanOrEqual(progress.y + progress.height - 1);
-  expect(options.y).toBeGreaterThanOrEqual(open.y + open.height - 1);
-  expect((await placeInCard(page, number, 'open')).right).toBeLessThanOrEqual(12);
 });
 
 test('cancel a running search; the next one runs', async ({ page }) => {
   test.skip(!BUILD_HAS_ENGINE, 'needs a search that runs long enough to cancel (engine build)');
   await startSlowSearch(page);
-  await page.getByTestId('run-1-cancel').click();
+  await page.getByTestId('run-status-cancel').click();
   await waitStatus(page, 1, 'cancelled');
   // The same subject, another query: the new runtime registers the subject again.
+  await backToSearch(page);
   await page.getByTestId('query-source-0-remove').click();
   await paste(page, 'query', '>small\nMKLVVLAAGGHHKLMKLVVLAAGGHHKL\n');
   await submit(page);
   await waitStatus(page, 2, 'completed');
-  await page.getByTestId('run-2').locator('summary', { hasText: 'Details' }).click();
-  await expect(page.getByTestId('run-2-details').locator('[data-detail="subject-retained"]')).toHaveText(
-    'read for this search',
-  );
+  await chooseRun(page, 2);
+  await page.getByTestId('results-view-details').click();
+  await expect(page.getByTestId('run-record')).toContainText('read for this search');
 });
 
 test('the region of a role with one record: the drag, the fields, the limits and the argv', async ({ page }) => {
   await program(page, 'blastn');
   await paste(page, 'query', '>q1\nACGTACGTACGTAAACCCGGGTTT\n>q2\nACGTACGTACGTAAACCCGGGTTA\n');
   await paste(page, 'subject', `>s1\n${'ACGTACGTAC'.repeat(10)}\n`);
-  await expect(page.getByTestId('query-region-unavailable')).toContainText('(2 are)');
+  // With two query records included, the query shows no subrange at all.
+  await expect(page.getByTestId('query-region')).toHaveCount(0);
+  await expect(page.getByTestId('query-region-unavailable')).toHaveCount(0);
   await expect(page.getByTestId('subject-region').locator('legend')).toHaveText('Subject subrange');
   await expect(page.getByTestId('subject-region-record')).toHaveText('Record s1');
 
@@ -269,15 +354,30 @@ test('the region of a role with one record: the drag, the fields, the limits and
   await expect(page.getByTestId('search-message')).toHaveText(
     'Subject region: The stop must be between 1 and 100, the length of the record.',
   );
+  // A range of one letter and a start after the stop are NCBI's errors in every mode; the fields say so (WA-IN-07).
+  await page.getByTestId('subject-region-stop').fill('5');
+  await expect(page.getByTestId('subject-region-problem')).toHaveText('The stop must be larger than the start.');
+  await expect(page.getByTestId('subject-region-swap')).toHaveCount(0);
+  await page.getByTestId('subject-region-start').fill('60');
+  await expect(page.getByTestId('subject-region-problem')).toHaveText('The start cannot be larger than the stop.');
+  await submit(page);
+  await expect(page.getByTestId('search-message')).toHaveText('Subject region: The start cannot be larger than the stop.');
   if (BUILD_HAS_ENGINE) {
-    // A range of one letter is NCBI's error, which the engine's validate gives.
-    await page.getByTestId('subject-region-stop').fill('5');
-    await expect(page.getByTestId('argv-validation')).toHaveText(
-      'The engine refuses these options: BLAST engine error: Invalid specification of subject location (range cannot be empty)',
-    );
+    // The argv leaves the region out until it is one, so the engine's validate has nothing to refuse.
+    await expect(page.getByTestId('argv-validation')).not.toContainText('subject location');
   }
+  // The form offers the swap (Owner, 2026-11-04); outside the record it offers none.
+  await expect(page.getByTestId('subject-region-swap')).toHaveText('Swap to 5–60');
+  await page.getByTestId('subject-region-swap').click();
+  await expect(page.getByTestId('subject-region-start')).toBeFocused();
+  await expect(page.getByTestId('subject-region-start')).toHaveValue('5');
+  await expect(page.getByTestId('subject-region-stop')).toHaveValue('60');
+  await expect(page.getByTestId('subject-region-problem')).toHaveCount(0);
+  await page.getByTestId('subject-region-start').fill('101');
+  await expect(page.getByTestId('subject-region-swap')).toHaveCount(0);
+  await page.getByTestId('subject-region-start').fill('5');
   await page.getByTestId('subject-region-stop').fill('060');
-  await expect(page.getByTestId('subject-region-argument')).toContainText('-subject_loc 5-60');
+  await expect(page.getByTestId('subject-region-argument')).toHaveText('Positions in the results are those of the whole record.');
   // The query has one record once the other is excluded.
   await showRecords(page, 'query');
   await page.getByTestId('query-source-0-record-1').uncheck();
@@ -285,6 +385,7 @@ test('the region of a role with one record: the drag, the fields, the limits and
   await page.getByTestId('query-region-stop').fill('20');
   await submit(page);
   await waitStatus(page, 1, 'completed');
+  await expect(page.getByTestId('results-run-options')).toContainText('-subject_loc 5-60');
   expect((await result(page, 1, 6)).command).toBe(
     'losat blastn -query query.fa -subject subject.fa -query_loc 3-20 -subject_loc 5-60 -outfmt 6',
   );
@@ -292,12 +393,12 @@ test('the region of a role with one record: the drag, the fields, the limits and
 
 test("the options form: the engine's defaults are not written; tasks, templates and genetic codes", async ({ page }) => {
   await program(page, 'tblastx');
-  // TBLASTX has no task (no Program Selection); its genetic codes are in the query's and the subject's blocks.
+  // TBLASTX has no task (no Task Selection); its genetic codes are in the query's and the subject's blocks.
   await expect(page.getByTestId('program-selection')).toHaveCount(0);
   await expect(page.getByTestId('query-panel').getByTestId('param-query_gencode')).toBeVisible();
   await expect(page.getByTestId('subject-panel').getByTestId('param-db_gencode')).toBeVisible();
   await openParameters(page);
-  await expect(page.getByTestId('param-evalue')).toHaveAttribute('placeholder', 'default: 10');
+  await expect(page.getByTestId('param-evalue')).toHaveAttribute('placeholder', '10');
   const queryCodes = page.getByTestId('param-query_gencode').locator('option');
   await expect(queryCodes).toHaveCount(27); // Default and the engine's 26 codes
   await expect(queryCodes.nth(0)).toHaveText('Default (1. Standard)');
@@ -306,26 +407,37 @@ test("the options form: the engine's defaults are not written; tasks, templates 
   // A value equal to the engine's default is not written, and not marked.
   await expect(page.getByTestId('param-evalue-field')).not.toHaveClass(/\bchanged\b/);
   await page.getByTestId('param-db_gencode').selectOption('11');
-  await expect(page.getByTestId('subject-gencode-note')).toContainText('Approved LOSAT exception');
+  await expect(page.getByTestId('subject-gencode-note')).toContainText('Results with this code can differ from NCBI BLAST+, which translates local subjects otherwise (approved LOSAT exception).');
   await expect(page.getByTestId('param-db_gencode-field')).toHaveClass(/\bchanged\b/);
   await paste(page, 'query', '>q\nACGTACGTACGTACGTAC\n');
   await paste(page, 'subject', '>s\nACGTACGTACGTACGTAC\n');
   await submit(page);
   await waitStatus(page, 1, 'completed');
   expect((await result(page, 1, 7)).command).toBe('losat tblastx -query query.fa -subject subject.fa -db_gencode 11 -outfmt 7');
+  // The run's mark is one of its words; the approved exception is in the run's details and in
+  // the mark's title, not in the mark (the maintainer, 2026-11-04).
+  await chooseRun(page, 1);
+  const badge = page.getByTestId('results-summary').getByTestId('verification-badge');
+  await expect(badge).toHaveText(BUILD_HAS_ENGINE ? /^(Supported|Not yet supported)$/ : 'Development build');
+  if (BUILD_HAS_ENGINE) {
+    await expect(badge).toHaveAttribute('title', /Approved exception: LOSAT translates the local subjects with -db_gencode 11\./);
+    await page.getByTestId('results-view-details').click();
+    await expect(page.getByTestId('verification-exception')).toContainText('-db_gencode 11');
+  }
+  await page.getByTestId('tab-search').click();
 
-  // TBLASTN's subject codes include 32 (the approved exception); its one task (tblastn-fast is
-  // not offered since #509) is a radio button.
+  // TBLASTN's subject codes include 32 (the approved exception); its tasks (tblastn and
+  // tblastn-fast) are radio buttons.
   await program(page, 'tblastn');
   await expect(page.getByTestId('param-db_gencode').locator('option[value="32"]')).toHaveCount(1);
   await expect(page.getByTestId('param-task-field')).toContainText('Algorithm');
-  await expect(page.getByTestId('param-task').getByRole('radio')).toHaveCount(1);
+  await expect(page.getByTestId('param-task').getByRole('radio')).toHaveCount(2);
   await expect(page.getByTestId('param-task-tblastn')).toBeChecked();
 
   // BLASTN: Discontiguous Word Options appear for discontiguous megablast, Template length
   // first; they stay while they hold a value; choosing the blastn task empties and hides them.
   await program(page, 'blastn');
-  const legends = page.getByTestId('parameter-form').locator('legend');
+  const legends = page.getByTestId('parameter-form').locator('.section-legend');
   const sections = ['General Parameters', 'Scoring Parameters', 'Filters and Masking', 'Other Parameters'];
   const withTemplates = [...sections.slice(0, 3), 'Discontiguous Word Options', 'Other Parameters'];
   await expect(legends).toHaveText(sections);
@@ -343,19 +455,20 @@ test("the options form: the engine's defaults are not written; tasks, templates 
   await expect(page.getByTestId('param-task-blastn')).toBeChecked();
   await expect(legends).toHaveText(sections);
   await task(page, 'dc-megablast');
-  await expect(page.getByTestId('param-template_type')).toHaveValue('');
-  await expect(page.getByTestId('param-template_length')).toHaveValue('');
+  await expect(page.getByTestId('param-template_type')).toHaveValue('coding');
+  await expect(page.getByTestId('param-template_length')).toHaveValue('18');
   if (BUILD_HAS_ENGINE) {
     await task(page, 'blastn');
-    await page.getByTestId('param-word_size').fill('3');
+    await page.getByTestId('param-word_size').selectOption('other');
+    await page.getByTestId('param-word_size-other').fill('3');
     await expect(page.getByTestId('argv-validation')).toContainText(
-      "The engine refuses these options: error: invalid value '3' for '-word_size <WORD_SIZE>': expected an integer >= 4",
+      "error: invalid value '3' for '-word_size <WORD_SIZE>': expected an integer >= 4",
     );
-    await page.getByTestId('param-word_size').fill('');
+    await page.getByTestId('param-word_size-other').fill('');
     // Templates with the megablast task (the default, not written): the section stays, and the engine refuses them.
+    // The type alone set writes the length shown with it (WA-FM-03).
     await task(page, 'dc-megablast');
-    await page.getByTestId('param-template_type').selectOption('coding');
-    await page.getByTestId('param-template_length').selectOption('18');
+    await page.getByTestId('param-template_type').selectOption('optimal');
     await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
     await task(page, 'megablast');
     await expect(page.getByTestId('argv-validation')).toContainText(
@@ -364,43 +477,253 @@ test("the options form: the engine's defaults are not written; tasks, templates 
   }
 });
 
-test("the engine's refusals of option values are shown as the engine writes them, and nothing is queued", async ({ page }) => {
+test("the engine's refusals of option values are shown as the engine writes them, and nothing is started", async ({ page }) => {
   test.skip(!BUILD_HAS_ENGINE, "the engine's messages need the engine build");
   await program(page, 'tblastx');
   await openParameters(page);
-  // A toolkit word in a free-text value (S08+a, D14).
-  await page.getByTestId('param-seg').fill('-version');
+  // A toolkit word in a free-text value (S08+a, D14): the arguments of the Low complexity regions filter.
+  await page.getByTestId('param-seg-value').fill('-version');
   await expect(page.getByTestId('argv-validation')).toHaveText(
-    "The engine refuses these options: error: the NCBI BLAST+ option -version is not supported by LOSAT's TBLASTX",
+    "error: the NCBI C++ Toolkit option -version runs on the command line of LOSAT's TBLASTX only: the library API and the Web engine do not write NCBI's version text",
   );
   await paste(page, 'query', '>q\nACGTACGTACGTACGTAC\n');
   await paste(page, 'subject', '>s\nACGTACGTACGTACGTAC\n');
   await submit(page);
   await expect(page.getByTestId('search-message')).toHaveText(
-    "error: the NCBI BLAST+ option -version is not supported by LOSAT's TBLASTX",
+    "error: the NCBI C++ Toolkit option -version runs on the command line of LOSAT's TBLASTX only: the library API and the Web engine do not write NCBI's version text",
   );
-  await expect(page.getByTestId('run-1')).toHaveCount(0);
-  // A value that LOSAT does not support, and one that NCBI refuses.
+  await expect(page.getByTestId('run-1-option')).toHaveCount(0);
+  // IDENTITY (typed after "Other": NCBI's page does not list it) runs with its gap costs 15/2; a
+  // value that LOSAT does not support (IDENTITY with the compressed lookup table of word size 5,
+  // with which NCBI crashes), and one that NCBI refuses.
   await program(page, 'blastp');
-  await page.getByTestId('param-comp_based_stats').selectOption('1');
+  await page.getByTestId('param-matrix').selectOption('other');
+  await page.getByTestId('param-matrix-other').fill('IDENTITY');
+  await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+  await page.getByTestId('param-word_size').selectOption('5');
   await expect(page.getByTestId('argv-validation')).toHaveText(
-    "The engine refuses these options: -comp_based_stats 1 is not supported by LOSAT's BLASTP",
+    "-matrix IDENTITY with the compressed lookup table (-word_size 5), with which NCBI BLAST+'s blastp crashes, is not supported by LOSAT's BLASTP",
   );
-  await page.getByTestId('param-comp_based_stats').selectOption('');
+  await page.getByTestId('param-word_size').selectOption('3');
+  await page.getByTestId('param-matrix').selectOption('BLOSUM62');
   await page.getByTestId('param-evalue').fill('0');
   await expect(page.getByTestId('argv-validation')).toContainText('BLAST query/options error:');
 });
 
-test('empty inputs, every record excluded, a sequence without a defline, and BLASTX', async ({ page }) => {
+// WA-FM-01: scores without a Karlin-Altschul table row are not refused by the form's check. The CLI
+// meets the tables only when a query has an ungapped block, so the run gives the CLI's result: a
+// warning and no hit for 3,-1, and the table's error for `-task blastn -reward 7` (penalty -3).
+test('BLASTN scores without a table row: the form accepts them and the run gives the engine result', async ({ page }) => {
+  test.skip(!BUILD_HAS_ENGINE, "the engine's checks need the engine build");
+  await program(page, 'blastn');
+  await openParameters(page);
+  const validation = page.getByTestId('argv-validation');
+  await page.getByTestId('param-matchscores').selectOption('other');
+  await page.getByTestId('param-reward').fill('3');
+  await page.getByTestId('param-penalty').fill('-1');
+  await expect(validation).toHaveAttribute('data-state', 'ok');
+  await paste(page, 'query', '>q\nACGTACGTAGCTAGCTAGGATCGATCGATCGTAGCTAGCTAGCTAGGCTAGCATCGATCGA\n');
+  await paste(page, 'subject', '>s\nACGTACGTAGCTAGCTAGGATCGATCGATCGTAGCTAGCTAGCTAGGCTAGCATCGATCGA\n');
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  await backToSearch(page);
+  await task(page, 'blastn');
+  await page.getByTestId('param-matchscores').selectOption('other');
+  await page.getByTestId('param-reward').fill('7');
+  await page.getByTestId('param-penalty').fill('-3');
+  await expect(validation).toHaveAttribute('data-state', 'ok');
+  await submit(page);
+  await waitStatus(page, 2, 'failed');
+  expect(await runMessage(page, 2)).toContain('Substitution scores 7 and -3 are not supported');
+});
+
+// WA-FM-02: a select offers the values of NCBI's page that LOSAT's engine reads, and no other;
+// "Other" takes the rest of a matrix, word size or gap costs, which the engine refuses. A change
+// of the engine that reads more of them fails here until the select offers them. Compositional
+// adjustments has no "Other", so the native CLI of the same commit tells which modes BLASTP, BLASTX
+// and TBLASTN read.
+test("the selects of the protein modes offer NCBI's values that the engine reads, and no other", async ({ page }, testInfo) => {
+  test.skip(!BUILD_HAS_ENGINE, "the engine's checks need the engine build");
+  test.setTimeout(600_000);
+  await openParameters(page);
+  const validation = page.getByTestId('argv-validation');
+  const evalue = page.getByTestId('param-evalue');
+  /** Whether the engine reads the form's values: a fresh validation after a refused e-value. */
+  const read = async (): Promise<boolean> => {
+    await evalue.fill('x');
+    await expect(validation).toContainText("'x'");
+    await evalue.fill('');
+    await expect(validation).not.toContainText("'x'");
+    await expect(validation).not.toHaveAttribute('data-state', 'checking');
+    return (await validation.getAttribute('data-state')) === 'ok';
+  };
+  /** Chooses a value of a field's select, or types it after "Other". */
+  const choose = async (id: string, value: string): Promise<boolean> => {
+    const select = page.getByTestId(`param-${id}`);
+    const offered = (await select.locator(`option[value="${value}"]`).count()) > 0;
+    if (offered) await select.selectOption(value);
+    else {
+      await select.selectOption('other');
+      await page.getByTestId(`param-${id}-other`).fill(value);
+    }
+    return offered;
+  };
+  const check = async (id: string, values: readonly string[], back: string) => {
+    for (const value of values) {
+      const offered = await choose(id, value);
+      expect(await read(), `${id} ${value} ${offered ? 'offered' : 'not offered'}`).toBe(offered);
+      await page.getByTestId(`param-${id}`).selectOption(back);
+      await expect(validation).toHaveAttribute('data-state', 'ok');
+    }
+  };
+  /** The program's Compositional adjustments offer the modes that the native CLI of the same commit reads. */
+  const checkModes = async (id: 'blastp' | 'blastx' | 'tblastn') => {
+    if (NATIVE === undefined) {
+      testInfo.annotations.push({ type: 'skip', description: `Compositional adjustments of ${id}: ${NO_NATIVE_REASON}` });
+      return;
+    }
+    const protein = 'MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQ';
+    const nucleotide = 'ATGAAAACCGCGTATATTGCGAAACAGCGCCAGATTAGCTTTGTGAAAAGCCAT';
+    const query = testInfo.outputPath(`${id}-query.fa`);
+    const subject = testInfo.outputPath(`${id}-subject.fa`);
+    writeFileSync(query, `>q\n${id === 'blastx' ? nucleotide : protein}\n`);
+    writeFileSync(subject, `>s\n${id === 'tblastn' ? nucleotide : protein}\n`);
+    const offered = await page.getByTestId('param-comp_based_stats').locator('option').evaluateAll((options) => options.map((o) => (o as HTMLOptionElement).value));
+    for (const mode of COMPOSITION_MODES) {
+      const run = spawnSync(NATIVE, [id, '-query', query, '-subject', subject, '-comp_based_stats', mode, '-outfmt', '6', '-num_threads', '1'], {
+        timeout: 60_000,
+      });
+      expect(run.status === 0, `${id} -comp_based_stats ${mode}: ${run.error?.message ?? String(run.stderr)}`).toBe(offered.includes(mode));
+    }
+  };
+  for (const [id, tasks] of [['blastp', ['blastp', 'blastp-fast', 'blastp-short']], ['blastx', ['blastx', 'blastx-fast']]] as const) {
+    await program(page, id);
+    for (const name of tasks) {
+      await task(page, name);
+      await check('matrix', MATRICES, 'BLOSUM62');
+      await check('word_size', PROTEIN_WORD_SIZES, name.endsWith('-fast') ? '5' : '3');
+      const gaps = page.getByTestId('param-gapcosts');
+      for (const pair of PROTEIN_GAP_COSTS.lists.BLOSUM62!) {
+        const offered = (await gaps.locator(`option[value="${pair}"]`).count()) > 0;
+        if (offered) await gaps.selectOption(pair);
+        else {
+          const [open, extend] = pair.split(' ');
+          await gaps.selectOption('other');
+          await page.getByTestId('param-gapopen').fill(open!);
+          await page.getByTestId('param-gapextend').fill(extend!);
+        }
+        expect(await read(), `${name} gap costs ${pair} ${offered ? 'offered' : 'not offered'}`).toBe(offered);
+        await gaps.selectOption('11 1');
+        await expect(validation).toHaveAttribute('data-state', 'ok');
+      }
+    }
+    await checkModes(id);
+  }
+  await program(page, 'tblastx');
+  await check('word_size', PROTEIN_WORD_SIZES.filter((size) => ['2', '3'].includes(size)), '3');
+  // TBLASTN reads NCBI's matrices with the compressed lookup table (tblastn-fast, word sizes 5 to
+  // 7) and with the standard one.
+  await program(page, 'tblastn');
+  await task(page, 'tblastn-fast');
+  await check('matrix', MATRICES, 'BLOSUM62');
+  await page.getByTestId('param-word_size').selectOption('3');
+  await check('matrix', ['BLOSUM45', 'PAM30'], 'BLOSUM62');
+  await task(page, 'tblastn');
+  await page.getByTestId('param-word_size').selectOption('6');
+  await check('matrix', MATRICES, 'BLOSUM62');
+  await checkModes('tblastn');
+});
+
+// WA-FM-03: BLAST+ reads the template length only with its type, and the type with its length.
+test("dc-megablast's template shows NCBI's values; one changed writes the other as shown", async ({ page }) => {
+  await program(page, 'blastn');
+  await openParameters(page);
+  await task(page, 'dc-megablast');
+  await expect(page.getByTestId('param-template_length')).toHaveValue('18');
+  await expect(page.getByTestId('param-template_type')).toHaveValue('coding');
+  await page.getByTestId('param-template_length').selectOption('21');
+  await expect(page.getByTestId('param-template_length-field')).toHaveClass(/\bchanged\b/);
+  await expect(page.getByTestId('param-template_type-field')).not.toHaveClass(/\bchanged\b/);
+  await expect(page.getByTestId('algorithm-parameters-changed')).toHaveText('(1 changed)');
+  await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+  await paste(page, 'query', '>q\nACGTACGTAGCTAGCTAGGATCGATCGATCGTAGCTAGCTAGCTAGGCTAGCATCGATCGA\n');
+  await paste(page, 'subject', '>s\nACGTACGTAGCTAGCTAGGATCGATCGATCGTAGCTAGCTAGCTAGGCTAGCATCGATCGA\n');
+  await submit(page);
+  await expect(page.getByTestId('results-run-options')).toHaveText('-task dc-megablast -template_length 21 -template_type coding');
+  await waitStatus(page, 1, 'completed');
+});
+
+// WA-FM-07: a value that starts with '-' is shown as a value, not as an option's name.
+test("a negative value is shown as the option's value in the run's options and command", async ({ page }) => {
+  await program(page, 'blastn');
+  await openParameters(page);
+  await page.getByTestId('param-matchscores').selectOption('1,-3');
+  await paste(page, 'query', '>q\nACGTACGTAGCTAGCTAGGATCGATCGATCGTAGCTAGCTAGCTAGGCTAGCATCGATCGA\n');
+  await paste(page, 'subject', '>s\nACGTACGTAGCTAGCTAGGATCGATCGATCGTAGCTAGCTAGCTAGGCTAGCATCGATCGA\n');
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  const names = (testId: string) => page.getByTestId(testId).locator('.option-name');
+  await expect(page.getByTestId('results-run-options')).toHaveText('-penalty -3');
+  await expect(names('results-run-options')).toHaveText(['-penalty']);
+  await page.getByTestId('results-view-details').click();
+  await expect(page.getByTestId('run-argv')).toHaveText('blastn -query query.fa -subject subject.fa -penalty -3');
+  await expect(names('run-argv')).toHaveText(['-query', '-subject', '-penalty']);
+  await expect(page.getByTestId('run-command-6')).toHaveText('losat blastn -query query.fa -subject subject.fa -penalty -3 -outfmt 6');
+  await expect(names('run-command-6')).toHaveText(['-query', '-subject', '-penalty', '-outfmt']);
+});
+
+// The index scan reads with the program's reader (SURVEY #3): NCBI's nucleotide reader stores 19 of
+// these 24 letters (not E F I L P Q), so the record table and the engine's register agree on 19.
+test('a protein-like record in a nucleotide input: the record table counts the letters the reader stores; the run completes', async ({ page }) => {
+  await program(page, 'blastn');
+  await paste(page, 'query', '>gene_x\nMKLVVLAAGGHHKLMKLVVLAAGG\n>q\nACGTACGTACGTAAACCCGGGTTT\n');
+  await paste(page, 'subject', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n');
+  await expect(page.getByTestId('query-source-0-check')).toHaveAttribute('data-check', 'ok');
+  await showRecords(page, 'query');
+  const row = page.getByTestId('query-source-0-records').locator('.record-row').first();
+  await expect(row.locator('.record-length')).toHaveText('19');
+  await expect(row.locator('.badge.warn')).toHaveText('protein?');
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+});
+
+test('a query without a defline runs; the engine names it as NCBI does', async ({ page }) => {
+  await program(page, 'blastn');
+  await paste(page, 'query', 'ACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n');
+  await paste(page, 'subject', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n');
+  await expect(page.getByTestId('query-source-0-check')).toHaveAttribute('data-check', 'ok');
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  // The results name it as the tabular outputs do.
+  await chooseRun(page, 1);
+  await expect(page.getByTestId('results-query-id')).toHaveText('Query_1');
+  if (BUILD_HAS_ENGINE) expect((await result(page, 1, 6)).output).toMatch(/^Query_1\ts1\t/m);
+});
+
+test('empty inputs, every record excluded, a sequence without a defline, and the subrange of BLASTX', async ({ page }) => {
   await program(page, 'blastn');
   await submit(page);
   await expect(page.getByTestId('search-message')).toHaveText('Add the query sequences: paste them or open FASTA files.');
+  // A gap line fails the index: NCBI's reader reads it as data of the record before it.
+  await paste(page, 'query', '>q\nACGT\n>?10\nACGT\n');
+  await expect(page.getByTestId('query-source-0-error')).toHaveText(
+    "This input cannot be read: line 3 is a gap line ('>?'), whose residues have no bytes in the input for LOSAT's index to locate; gap lines are not supported in the browser",
+  );
+  if (BUILD_HAS_ENGINE) {
+    // A first line that NCBI's data loaders would fetch as a Seq-id fails; '>' can go before it (a defline line
+    // would make it the first data line).
+    await paste(page, 'query', 'AB123456\nACGTACGTACGTACGT');
+    await expect(page.getByTestId('query-source-0-error')).toContainText('may be a sequence identifier');
+    await expect(page.getByTestId('query-source-0-add-defline')).toHaveCount(0);
+    await page.getByTestId('query-source-0-put-defline-mark').click();
+    await settled(page, 'query');
+    await expect(page.getByTestId('query-input')).toHaveValue('>AB123456\nACGTACGTACGTACGT');
+    await expect(page.getByTestId('query-source-0-check')).toHaveAttribute('data-check', 'ok');
+  }
+  // NCBI's reader reads a sequence without a defline as a record without a title (DW-38).
   await paste(page, 'query', 'ACGTACGTACGTACGT');
-  await expect(page.getByTestId('query-source-0-error')).toHaveText('This input cannot be read: Expected > at record start.');
-  await page.getByTestId('query-source-0-add-defline').click();
-  await settled(page, 'query');
-  await expect(page.getByTestId('query-input')).toHaveValue('>pasted_query\nACGTACGTACGTACGT');
   await expect(page.getByTestId('query-source-0')).toHaveAttribute('data-status', 'ready');
+  await expect(page.getByTestId('query-source-0-summary')).toContainText('1 record');
   await submit(page);
   await expect(page.getByTestId('search-message')).toHaveText('Add the subject sequences: paste them or open FASTA files.');
   await paste(page, 'subject', '>s\nACGTACGTACGT\n');
@@ -408,11 +731,316 @@ test('empty inputs, every record excluded, a sequence without a defline, and BLA
   await page.getByTestId('subject-source-0-exclude-shown').click();
   await submit(page);
   await expect(page.getByTestId('search-message')).toHaveText('Every subject record is excluded.');
-  await expect(page.getByTestId('run-1')).toHaveCount(0);
+  await expect(page.getByTestId('run-1-option')).toHaveCount(0);
 
+  // BLASTX takes -query_loc (DW-39): the query's only record shows its subrange.
+  await expect(page.getByTestId('query-region')).toBeVisible();
   await program(page, 'blastx');
-  await expect(page.getByTestId('program-unavailable')).toContainText('BLASTX joins LOSAT Web after its certification');
-  await expect(page.getByTestId('add-to-queue')).toBeDisabled();
+  await expect(page.getByTestId('param-query_gencode')).toBeVisible();
+  await expect(page.getByTestId('query-region')).toBeVisible();
+  await expect(page.getByTestId('run-losat')).toBeEnabled();
+});
+
+// A mode that reads a role with the other FASTA reader kind reads the source again; coming back to the mode that the
+// source was set up in shows its table as it was left (WA-IN-01).
+test("records left out and a subrange stay through a mode that reads the role with the other kind", async ({ page }) => {
+  await program(page, 'blastn');
+  const records = '>q1\nACGTACGTACGTAAACCCGGGTTT\n>q2\nACGTACGTACGTAAACCCGGGTTA\n>q3\nACGTACGTACGTAAACCCGGGTTC\n';
+  await paste(page, 'query', records);
+  await paste(page, 'subject', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n');
+  await showRecords(page, 'query');
+  await page.getByTestId('query-source-0-record-1').uncheck();
+  await page.getByTestId('query-source-0-record-2').uncheck();
+  await expect(page.getByTestId('query-source-0-summary')).toContainText('(1 included)');
+  await page.getByTestId('query-region-start').fill('2');
+  await page.getByTestId('query-region-stop').fill('12');
+
+  // BLASTP reads the query with the protein flags: another table, with nothing left out.
+  await program(page, 'blastp');
+  await settled(page, 'query');
+  await expect(page.getByTestId('query-source-0-summary')).not.toContainText('included');
+  await program(page, 'blastn');
+  await settled(page, 'query');
+  await expect(page.getByTestId('query-source-0-summary')).toContainText('(1 included)');
+  await showRecords(page, 'query');
+  await expect(page.getByTestId('query-source-0-record-0')).toBeChecked();
+  await expect(page.getByTestId('query-source-0-record-1')).not.toBeChecked();
+  await expect(page.getByTestId('query-source-0-record-2')).not.toBeChecked();
+  await expect(page.getByTestId('query-region-start')).toHaveValue('2');
+  await expect(page.getByTestId('query-region-stop')).toHaveValue('12');
+  // The search takes both: the first record only, with its subrange.
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  await chooseRun(page, 1);
+  await expect(page.getByTestId('results-run-options')).toContainText('-query_loc 2-12');
+  expect((await result(page, 1, 6)).command).toBe('losat blastn -query query.fa -subject subject.fa -query_loc 2-12 -outfmt 6');
+});
+
+// An input without a sequence is run as the command line runs it (rc 0 and a warning), and the results say
+// that the query has none, not that the query filters hid it (WA-IN-02).
+const EMPTY_QUERY_MODES = [
+  ['blastn', '  \n\n', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n'],
+  ['blastp', '', '>s1\nMKVLAAGIVGLLLAQPSTEWMKVLAAGIVGLLL\n'],
+  ['blastx', '\n', '>s1\nMKVLAAGIVGLLLAQPSTEWMKVLAAGIVGLLL\n'],
+  ['tblastn', ' ', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n'],
+  ['tblastx', '\n\n\n', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n'],
+] as const;
+for (const [id, query, subject] of EMPTY_QUERY_MODES) {
+  test(`an empty query runs in ${id}; its results say that the query has no sequences, with the engine warning`, async ({ page }) => {
+    test.skip(id !== 'blastn' && !BUILD_HAS_ENGINE, 'the other modes are checked with the engine');
+    await program(page, id);
+    if (query === '') {
+      // An empty box has no source: an empty file does.
+      await openFiles(page, 'query', [{ name: 'empty.fa', text: '' }]);
+    } else {
+      await paste(page, 'query', query);
+    }
+    await paste(page, 'subject', subject);
+    await expect(page.locator('[data-testid^="query-source-"][data-status="ready"]')).toHaveCount(1);
+    await expect(page.getByTestId('query-source-0')).toContainText('0 records');
+    await submit(page);
+    await waitStatus(page, 1, 'completed');
+    await pickRun(page, 1);
+    const notice = page.locator('[data-testid="results-notice"][data-kind="empty-query"]');
+    await expect(notice).toContainText('The query has no sequences.');
+    await expect(page.locator('[data-testid="results-notice"][data-kind="no-queries"]')).toHaveCount(0);
+    if (BUILD_HAS_ENGINE) await expect(page.getByTestId('results-notice-engine')).toHaveText(/Warning: \[\w+\] Query is Empty!/);
+  });
+}
+
+// The browser can remove the origin's files under an open tab (clearing the site's data). The next run makes the tab's
+// directory again; if it cannot, it says what happened, not the browser's own words (WA-IN-03). WebKit's build of
+// Playwright has no OPFS, and keeps results in memory.
+test("a run after the browser removed the tab's storage still completes", async ({ page }) => {
+  await program(page, 'blastn');
+  await paste(page, 'query', '>q1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n');
+  await paste(page, 'subject', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n');
+  test.skip((await page.getByTestId('storage-status').getAttribute('data-backend')) !== 'opfs', 'this browser keeps results in memory');
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  // A synchronous access handle holds its file for a moment after it is closed: the removal is tried again.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(async (tmp) => {
+          try {
+            await (await navigator.storage.getDirectory()).removeEntry(tmp, { recursive: true });
+            return 'removed';
+          } catch (error) {
+            return (error as Error).name;
+          }
+        }, TMP_DIRECTORY),
+      { timeout: 10_000 },
+    )
+    .toBe('removed');
+  await backToSearch(page);
+  await submit(page);
+  await waitStatus(page, 2, 'completed');
+  await chooseRun(page, 2);
+  // What the removal took with it says so when it is opened.
+  await pickRun(page, 1);
+  await expect(page.getByTestId('results-status')).toHaveText(`The results of run 1 could not be read: ${RESULTS_REMOVED_MESSAGE}`);
+});
+
+/**
+ * Hides the page (visibilityState and its event, as the browsers do for a tab in the background) as soon as a run is in
+ * progress: a FakeEngine run lasts a fraction of a second. The check on return is made only for a page that was hidden
+ * with runs in progress.
+ */
+async function hideWhenARunStarts(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const busy = ['queued', 'preparing', 'running', 'finalizing'].map((status) => `[data-testid^="run-"][data-status="${status}"]`).join(', ');
+    const observer = new MutationObserver(() => {
+      if (document.querySelector(busy) === null) return;
+      observer.disconnect();
+      Object.defineProperty(document, 'visibilityState', { get: () => 'hidden', configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-status'] });
+  });
+}
+
+async function showPage(page: Page): Promise<void> {
+  await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe('hidden');
+  // Shorter hides (a quick switch of tabs) make no report (application/attention.ts).
+  await page.waitForTimeout(1100);
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+}
+
+/** The tokens of the runs stored in OPFS under tmp/<session>/runs/, sorted. */
+async function storedRuns(page: Page): Promise<string[]> {
+  const tokens = new Set<string>();
+  for (const session of await sessionDirectories(page)) {
+    for (const path of await sessionFiles(page, session)) if (path.startsWith('runs/')) tokens.add(path.split('/')[1]!);
+  }
+  return [...tokens].sort();
+}
+
+/** Removes the stored blocks of runs (by token) from OPFS, or all of tmp/, as the browser can under an open tab. */
+async function removeStored(page: Page, tokens: readonly string[] | 'all'): Promise<void> {
+  // A synchronous access handle holds its file for a moment after it is closed: the removal is tried again.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          async ({ tmpName, tokens }) => {
+            try {
+              const root = await navigator.storage.getDirectory();
+              if (tokens === 'all') {
+                await root.removeEntry(tmpName, { recursive: true });
+                return 'removed';
+              }
+              const tmp = await root.getDirectoryHandle(tmpName);
+              const sessions = (tmp as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries();
+              for await (const [, session] of sessions) {
+                if (session.kind !== 'directory') continue;
+                const runs = await (session as FileSystemDirectoryHandle).getDirectoryHandle('runs').catch(() => undefined);
+                for (const token of tokens) {
+                  await runs?.removeEntry(token, { recursive: true }).catch((error: Error) => {
+                    if (error.name !== 'NotFoundError') throw error;
+                  });
+                }
+              }
+              return 'removed';
+            } catch (error) {
+              return (error as Error).name;
+            }
+          },
+          { tmpName: TMP_DIRECTORY, tokens },
+        ),
+      { timeout: 10_000 },
+    )
+    .toBe('removed');
+}
+
+// The browser can also remove the stored results by itself: Chromium did in an off-the-record context after about
+// half an hour, and the notice on return said "The stored results are available." while no run could be opened
+// (WA2-SC-05). The check on return reads back a byte of each run's stored HSP records.
+test('a tab hidden while a run is in progress says on return that the stored results are available', async ({ page }) => {
+  await program(page, 'blastn');
+  await paste(page, 'query', '>q1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n');
+  await paste(page, 'subject', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n');
+  await hideWhenARunStarts(page);
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  await showPage(page);
+  await expect(page.getByTestId('resume-run-1')).toContainText(/Run 1 was \w+ when the tab was hidden; it is completed now\./);
+  await expect(page.getByTestId('resume-data')).toHaveText('The stored results are available.');
+  await chooseRun(page, 1);
+});
+
+test('a tab hidden while a run is in progress says on return which runs the browser removed the stored results of', async ({
+  page,
+}) => {
+  await program(page, 'blastn');
+  await paste(page, 'query', '>q1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n');
+  await paste(page, 'subject', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n');
+  test.skip((await page.getByTestId('storage-status').getAttribute('data-backend')) !== 'opfs', 'this browser keeps results in memory');
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  const [first] = await storedRuns(page);
+  expect(first).toBeDefined();
+
+  // The browser removes the stored results of run 1 while the tab is hidden with run 2 in progress.
+  await backToSearch(page);
+  await hideWhenARunStarts(page);
+  await submit(page);
+  await waitStatus(page, 2, 'completed');
+  await removeStored(page, [first!]);
+  await showPage(page);
+  await expect(page.getByTestId('resume-data')).toHaveText('The browser removed the stored results of run 1. Run it again.');
+  await expect(page.getByTestId('resume-notice')).not.toContainText('available');
+  await chooseRun(page, 2);
+  await pickRun(page, 1);
+  // The sentence names no cause (tests/unit/opfs-block-store.test.ts).
+  await expect(page.getByTestId('results-status')).toHaveText(`The results of run 1 could not be read: ${RESULTS_REMOVED_MESSAGE}`);
+  await page.getByTestId('resume-dismiss').click();
+
+  // All of them, as in WA2-SC-05.
+  await backToSearch(page);
+  await hideWhenARunStarts(page);
+  await submit(page);
+  await waitStatus(page, 3, 'completed');
+  await removeStored(page, 'all');
+  await showPage(page);
+  await expect(page.getByTestId('resume-data')).toHaveText('The browser removed the stored results of runs 1–3. Run them again.');
+});
+
+test('a GenBank, EMBL or FASTQ file is read as FASTA text, as the command line does, with a warning (WA-IN-04)', async ({ page }) => {
+  await program(page, 'blastn');
+  await openFiles(page, 'query', [
+    { name: 'x.gb', text: 'LOCUS       X 24 bp DNA linear\nORIGIN\n        1 acgtacgtac gtacgtacgt acgt\n//\n' },
+    { name: 'r.fastq', text: '@r1\nACGTACGTACGTACGTACGTACGT\n+\nIIIIIIIIIIIIIIIIIIIIIIII\n' },
+    { name: 'x.fa', text: '>x\nACGTACGTACGTACGTACGTACGT\n' },
+  ]);
+  await expect(page.getByTestId('query-source-0-format-warning')).toHaveText(
+    'This looks like a GenBank flat file. LOSAT reads it as FASTA, so its text becomes sequence. Convert it to FASTA first.',
+  );
+  await expect(page.getByTestId('query-source-0-summary')).toContainText('1 record');
+  await expect(page.getByTestId('query-source-1-format-warning')).toContainText('This looks like a FASTQ file');
+  await expect(page.getByTestId('query-source-2-summary')).toBeVisible();
+  await expect(page.getByTestId('query-source-2-format-warning')).toHaveCount(0);
+  await paste(page, 'subject', 'ID   X56734; SV 1; linear; mRNA; STD; PLN; 24 BP.\nSQ   Sequence 24 BP;\n     acgtacgtac gtacgtacgt acgt 24\n//\n');
+  await expect(page.getByTestId('subject-source-0-format-warning')).toContainText('This looks like an EMBL or UniProt flat file');
+});
+
+test('"Add the line" keeps the focus on the card, not the page\'s body (WA2-AX-04)', async ({ page }) => {
+  await program(page, 'blastn');
+  // Not a defline, and the gap line fails it again after the defline: the card stays, with the button.
+  await paste(page, 'query', 'ACGTACGTACGT\n>?10\nACGT\n');
+  await expect(page.getByTestId('query-source-0-error')).toContainText('gap line');
+  await page.getByTestId('query-source-0-add-defline').click();
+  await expect(page.getByTestId('query-input')).toHaveValue('>pasted_query\nACGTACGTACGT\n>?10\nACGT\n');
+  await expect(page.getByTestId('query-source-0')).toBeFocused();
+});
+
+test('an input that starts with a byte order mark says why it cannot be read (WA-IN-05)', async ({ page }) => {
+  await program(page, 'blastn');
+  await paste(page, 'query', '\uFEFF>q1\nACGTACGTACGTACGTACGTACGT\n');
+  await expect(page.getByTestId('query-source-0-error')).toContainText("doesn't look like plausible data");
+  await expect(page.getByTestId('query-source-0-mark')).toContainText('The text starts with a byte order mark (U+FEFF).');
+  await page.getByTestId('query-source-0-remove-mark').click();
+  // The button goes with the old reading: the focus stays on the card (WA2-AX-04).
+  await expect(page.getByTestId('query-source-0')).toBeFocused();
+  await expect(page.getByTestId('query-input')).toHaveValue('>q1\nACGTACGTACGTACGTACGTACGT\n');
+  await expect(page.getByTestId('query-source-0-summary')).toHaveText('1 record · 24 nt');
+  await expect(page.getByTestId('query-source-0-mark')).toHaveCount(0);
+
+  const utf16le = (text: string) => Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, 'utf16le')]);
+  const utf16be = (text: string) => Buffer.concat([Buffer.from([0xfe, 0xff]), Buffer.from(text, 'utf16le').swap16()]);
+  await openFiles(page, 'subject', [
+    { name: 'bom.fa', text: Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('>s1\nACGTACGTACGTACGTACGTACGT\n')]) },
+    { name: 'le.fa', text: utf16le('>s2\nACGT\n') },
+    { name: 'be.fa', text: utf16be('>s3\nACGT\n') },
+  ]);
+  await expect(page.getByTestId('subject-source-0-mark')).toHaveText(
+    'The file starts with a UTF-8 byte order mark. Save it as plain text without the mark (UTF-8 or ASCII).',
+  );
+  await expect(page.getByTestId('subject-source-0-remove-mark')).toHaveCount(0);
+  await expect(page.getByTestId('subject-source-1-mark')).toHaveText('The file is UTF-16 text. Save it as plain UTF-8 or ASCII text.');
+  await expect(page.getByTestId('subject-source-2-mark')).toHaveText('The file is UTF-16 text. Save it as plain UTF-8 or ASCII text.');
+});
+
+test('reloading the tab asks first while the form holds inputs, which no later visit restores (WA-IN-06)', async ({ page }) => {
+  const dialogs: string[] = [];
+  page.on('dialog', (dialog) => {
+    dialogs.push(dialog.type());
+    void dialog.accept();
+  });
+  // Browsers ask only on a page that the user has interacted with: the empty form is one.
+  await page.getByTestId('query-input').click();
+  await reload(page);
+  expect(dialogs).toEqual([]);
+  await described(page);
+  await page.getByTestId('query-input').click();
+  await paste(page, 'query', '>q1\nACGTACGTACGTACGTACGTACGT\n');
+  await reload(page);
+  expect(dialogs).toEqual(['beforeunload']);
+  await described(page);
+  await expect(page.getByTestId('query-input')).toHaveValue('');
 });
 
 test('the sequence kind warning is an estimate and does not change the program', async ({ page }) => {
@@ -440,6 +1068,10 @@ test.describe('leaving and returning', () => {
         visibility = visible ? 'visible' : 'hidden';
         document.dispatchEvent(new Event('visibilitychange'));
       };
+      // A handheld device (coarse pointer): "Keep searching while you're away" is shown there.
+      const matchMedia = window.matchMedia.bind(window);
+      window.matchMedia = (query: string) =>
+        query.includes('pointer: coarse') ? ({ matches: true, media: query } as MediaQueryList) : matchMedia(query);
       Object.defineProperty(navigator, 'wakeLock', {
         configurable: true,
         value: {
@@ -456,9 +1088,10 @@ test.describe('leaving and returning', () => {
       });
     });
     await openSearch(page);
-    await page.getByTestId('keep-awake').check();
+    // On unless turned off (Owner 2026-11-03).
+    await expect(page.getByTestId('keep-awake')).toBeChecked();
     await startSlowSearch(page);
-    await expect(page.getByTestId('wake-lock-held')).toBeVisible();
+    await expect(page.getByTestId('keep-awake').locator('xpath=..')).toHaveAttribute('data-wake-lock', 'held');
     await page.evaluate(() => (window as unknown as { __setVisible: (v: boolean) => void }).__setVisible(false));
     await page.waitForTimeout(1200);
     await page.evaluate(() => (window as unknown as { __setVisible: (v: boolean) => void }).__setVisible(true));
@@ -474,9 +1107,9 @@ test.describe('leaving and returning', () => {
       expect(shown.type()).toBe('beforeunload');
       await shown.dismiss();
     }
-    await page.getByTestId('run-1-cancel').click();
+    await page.getByTestId('run-status-cancel').click();
     await waitStatus(page, 1, 'cancelled');
-    await expect(page.getByTestId('wake-lock-held')).toHaveCount(0);
+    await expect(page.getByTestId('keep-awake').locator('xpath=..')).not.toHaveAttribute('data-wake-lock', 'held');
     await page.getByTestId('resume-dismiss').click();
     await expect(page.getByTestId('resume-notice')).toHaveCount(0);
     const log = await page.evaluate(() => (window as unknown as { __wakeLog: string[] }).__wakeLog);
@@ -485,13 +1118,58 @@ test.describe('leaving and returning', () => {
   });
 });
 
+test('the header, and the "?" help that shows on hover or keyboard focus and stays on click (DW-41)', async ({ page }) => {
+  await openSearch(page);
+  await expect(page).toHaveTitle('LOSAT');
+  await expect(page.locator('.app-header h1')).toHaveText('LOSAT');
+  await expect(page.locator('.app-header .tagline')).toHaveText('A miniaturized reimplementation of NCBI BLAST algorithm');
+  // A desktop (fine pointer) is not offered the wake lock's choice; its screen does not turn off by itself.
+  await expect(page.getByTestId('keep-awake')).toHaveCount(0);
+
+  const toggle = page.getByTestId('param-task-help-toggle');
+  const help = page.getByTestId('param-task-help');
+  await expect(help).toHaveCount(0);
+  // Pointed at: shown; pointed away: gone (as NCBI's helpbox).
+  await toggle.hover();
+  await expect(help).toHaveText('Task to execute: megablast, blastn, dc-megablast or blastn-short');
+  await expect(help).toHaveAttribute('data-pinned', 'false');
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await page.mouse.move(0, 0);
+  await expect(help).toHaveCount(0);
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  // Clicked: stays while the pointer is elsewhere; a click elsewhere closes it.
+  await toggle.click();
+  await expect(help).toHaveAttribute('data-pinned', 'true');
+  await page.mouse.move(0, 0);
+  await expect(help).toBeVisible();
+  await page.getByTestId('program-summary').click();
+  await expect(help).toHaveCount(0);
+  // Clicked again: the next click closes it, although the pointer is still over the "?".
+  await toggle.click();
+  await expect(help).toHaveAttribute('data-pinned', 'true');
+  await toggle.click();
+  await expect(help).toHaveCount(0);
+  // Escape closes it too.
+  await toggle.click();
+  await expect(help).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(help).toHaveCount(0);
+  // Reached with the keyboard (Tab from the task's radio): shown until the focus moves on.
+  await page.getByTestId('param-task-megablast').click();
+  await page.keyboard.press('Tab');
+  await expect(toggle).toBeFocused();
+  await expect(help).toBeVisible();
+  await page.keyboard.press('Tab');
+  await expect(help).toHaveCount(0);
+});
+
 test("the search screen in NCBI's order and words (W4b)", async ({ page }) => {
-  await expect(page.getByTestId('program-summary')).toHaveText('BLASTN searches nucleotide subjects using a nucleotide query.');
+  await expect(page.getByTestId('program-summary')).toHaveText('BLASTN mode searches nucleotide subjects using a nucleotide query.');
   await expect(page.getByTestId('query-panel').locator('legend').first()).toHaveText('Enter Query Sequence');
   await expect(page.getByTestId('subject-panel').locator('legend').first()).toHaveText('Enter Subject Sequence');
-  await expect(page.getByTestId('program-selection').locator('legend')).toHaveText('Program Selection');
+  await expect(page.getByTestId('program-selection').locator('legend')).toHaveText('Task Selection');
   // The blocks one under the other, in NCBI's order.
-  const order = ['program-tabs', 'program-summary', 'query-panel', 'subject-panel', 'program-selection', 'add-to-queue', 'algorithm-parameters'];
+  const order = ['program-tabs', 'program-summary', 'query-panel', 'subject-panel', 'program-selection', 'run-losat', 'algorithm-parameters'];
   const tops = [];
   for (const id of order) tops.push((await page.getByTestId(id).boundingBox())!.y);
   expect(tops).toEqual([...tops].sort((a, b) => a - b));
@@ -501,10 +1179,13 @@ test("the search screen in NCBI's order and words (W4b)", async ({ page }) => {
     ['subject', 'Subject'],
   ] as const) {
     const panel = page.getByTestId(`${role}-panel`);
-    await expect(panel).toContainText('Enter FASTA sequence(s)');
-    await expect(panel).toContainText(`${title} subrange`);
+    await expect(panel).toContainText('Enter accession number(s) or FASTA sequence(s)');
+    // The subrange appears only once one record is included.
+    await expect(page.getByTestId(`${role}-region`)).toHaveCount(0);
+    await expect(panel).not.toContainText(`${title} subrange`);
+    await expect(panel).toContainText('or drop files here');
     await expect(panel).toContainText('Or, upload file');
-    await expect(page.getByTestId(`${role}-input`)).toHaveAccessibleName('Enter FASTA sequence(s)');
+    await expect(page.getByTestId(`${role}-input`)).toHaveAccessibleName('Enter accession number(s) or FASTA sequence(s)');
   }
   await expect(page.getByTestId('query-panel')).toContainText('Job Title');
   await expect(page.getByTestId('query-panel')).toContainText('Enter a descriptive title for your search');
@@ -518,7 +1199,7 @@ test("the search screen in NCBI's order and words (W4b)", async ({ page }) => {
   await expect(page.locator('[data-testid^="query-source-"][data-status]')).toHaveCount(1);
   await expect(page.getByTestId('query-source-0')).toContainText('q.fa');
 
-  // Program Selection: BLASTN's "Optimize for", the engine's default task checked.
+  // Task Selection: BLASTN's "Optimize for", the engine's default task checked.
   await expect(page.getByTestId('param-task-field')).toContainText('Optimize for');
   await expect(page.getByTestId('param-task').getByRole('radio')).toHaveCount(4);
   await expect(page.getByTestId('param-task')).toHaveAccessibleName(/^Optimize for -task/);
@@ -532,10 +1213,10 @@ test("the search screen in NCBI's order and words (W4b)", async ({ page }) => {
   }
   await expect(page.getByTestId('param-task-megablast')).toBeChecked();
   // The search button (NCBI's BLAST button) and the line that says what it searches.
-  await expect(page.getByTestId('add-to-queue')).toHaveText('Run LOSAT');
+  await expect(page.getByTestId('run-losat')).toHaveText('Run LOSAT');
   const line = page.getByTestId('search-summary-line');
   await expect(line).toHaveText(
-    'Search nucleotide subjects with BLASTN, task megablast (optimized for highly similar sequences). Runs in this browser.',
+    'Search nucleotide subjects with BLASTN, task megablast (optimized for highly similar sequences).',
   );
   await task(page, 'dc-megablast');
   await expect(line).toContainText('task dc-megablast (optimized for more dissimilar sequences)');
@@ -548,23 +1229,38 @@ test("the search screen in NCBI's order and words (W4b)", async ({ page }) => {
     'Expect threshold',
     'Word size',
     'Match/Mismatch Scores',
-    'Match',
-    'Mismatch',
     'Gap Costs',
-    'Existence',
-    'Extension',
-    'Low complexity regions filter (DUST)',
+    'Filter',
+    'Low complexity regions',
     'Mask lower case letters',
     'Template length',
     'Template type',
   ]) {
     await expect(form.locator('.param-label', { hasText: label }).first()).toBeVisible();
   }
-  await expect(page.getByTestId('param-reward')).toHaveAccessibleName('Match -reward');
-  await expect(page.getByTestId('param-gapopen')).toHaveAccessibleName('Existence -gapopen');
+  // Each control shows the value that the search uses (discontiguous megablast's here), as NCBI's
+  // form shows its values; NCBI's lists are selects, and NCBI's sentence is beside its control.
+  await expect(page.getByTestId('param-word_size')).toHaveValue('11');
+  await expect(page.getByTestId('param-word_size').locator('option')).toHaveText(['11', '12', 'Other']);
+  // NCBI's pairs are one select each; the gap costs are those of the scores' list (no Linear: megablast only).
+  await expect(page.getByTestId('param-matchscores')).toHaveValue('2,-3');
+  await expect(page.getByTestId('param-matchscores').locator('option')).toHaveText(['1,-2', '1,-3', '1,-4', '2,-3', '4,-5', '1,-1', 'Other']);
+  await expect(page.getByTestId('param-gapcosts')).toHaveValue('5 2');
+  await expect(page.getByTestId('param-gapcosts').locator('option').first()).toHaveText('Existence: 4 Extension: 4');
+  await expect(page.getByTestId('param-reward')).toHaveCount(0);
+  await expect(page.getByTestId('param-dust')).toBeChecked();
+  await expect(page.getByTestId('param-dust-value')).toHaveValue('20 64 1');
+  await expect(page.getByTestId('param-soft_masking')).toBeChecked();
+  await expect(page.getByTestId('param-max_target_seqs')).toHaveValue('500');
+  await expect(page.getByTestId('param-max_target_seqs-field')).toContainText('Select the maximum number of aligned sequences to display');
+  await expect(line.locator('strong')).toHaveText(['nucleotide subjects', 'BLASTN, task dc-megablast (optimized for more dissimilar sequences)']);
+  await expect(page.getByTestId('param-matchscores')).toHaveAccessibleName('Match/Mismatch Scores -reward -penalty');
+  await expect(page.getByTestId('param-gapcosts')).toHaveAccessibleName('Gap Costs -gapopen -gapextend');
+  await expect(page.getByTestId('param-dust')).toHaveAccessibleName('Low complexity regions -dust');
+  await expect(page.getByTestId('param-dust-value')).toHaveAccessibleName('Low complexity regions -dust arguments');
 
   await program(page, 'blastp');
-  await expect(page.getByTestId('program-summary')).toHaveText('BLASTP searches protein subjects using a protein query.');
+  await expect(page.getByTestId('program-summary')).toHaveText('BLASTP mode searches protein subjects using a protein query.');
   await expect(page.getByTestId('param-task-field')).toContainText('Algorithm');
   await expect(page.getByTestId('param-task').locator('label', { has: page.getByTestId('param-task-blastp') })).toHaveText(
     'blastp (protein-protein BLAST)',
@@ -572,17 +1268,37 @@ test("the search screen in NCBI's order and words (W4b)", async ({ page }) => {
   await expect(page.getByTestId('param-task').locator('label', { has: page.getByTestId('param-task-blastp-fast') })).toHaveText(
     'Quick BLASTP (blastp-fast)',
   );
-  await expect(line).toHaveText('Search protein subjects with BLASTP, task blastp (protein-protein BLAST). Runs in this browser.');
-  await expect(form.locator('legend')).toHaveText(['General Parameters', 'Scoring Parameters', 'Filters and Masking', 'Other Parameters']);
+  await expect(page.getByTestId('param-task').locator('label', { has: page.getByTestId('param-task-blastp-short') })).toHaveText(
+    'Short sequences (blastp-short)',
+  );
+  await expect(line).toHaveText('Search protein subjects with BLASTP, task blastp (protein-protein BLAST).');
+  await expect(form.locator('.section-legend')).toHaveText(['General Parameters', 'Scoring Parameters', 'Filters and Masking', 'Other Parameters']);
+  // The select shows the engine's default as its value, as NCBI's does.
   const cbs = page.getByTestId('param-comp_based_stats');
-  await expect(cbs.locator('option').first()).toHaveText('Default (2: Conditional compositional score matrix adjustment)');
-  await expect(cbs.locator('option[value="0"]')).toHaveText('0: No adjustment');
-  await expect(cbs.locator('option[value="3"]')).toHaveText('3: Universal compositional score matrix adjustment');
-  await expect(page.getByTestId('param-seg-field')).toContainText('Low complexity regions filter (SEG)');
+  await expect(cbs).toHaveValue('2');
+  // LOSAT's BLASTP adjusts with NCBI's four modes (WA-FM-02; series SC, SC5).
+  await expect(cbs.locator('option')).toHaveText([
+    '0: No adjustment',
+    '1: Composition-based statistics',
+    '2: Conditional compositional score matrix adjustment',
+    '3: Universal compositional score matrix adjustment',
+  ]);
+  await expect(page.getByTestId('param-seg-field')).toContainText('Low complexity regions');
+  await expect(page.getByTestId('param-seg')).not.toBeChecked();
+  await expect(page.getByTestId('param-seg-value')).toHaveCount(0);
+  await expect(page.getByTestId('param-gapcosts')).toHaveValue('11 1');
+  // TBLASTN lists NCBI's four (its engine reads modes 1 and 3 with -matrix IDENTITY, resetting them to 0).
+  await program(page, 'tblastn');
+  await expect(cbs.locator('option')).toHaveText([
+    '0: No adjustment',
+    '1: Composition-based statistics',
+    '2: Conditional compositional score matrix adjustment',
+    '3: Universal compositional score matrix adjustment',
+  ]);
   await program(page, 'tblastx');
   await expect(page.getByTestId('param-culling_limit-field')).toContainText('Max matches in a query range');
   await expect(line).toHaveText(
-    'Search translated nucleotide subjects with TBLASTX (translated nucleotide query). Runs in this browser.',
+    'Search translated nucleotide subjects with TBLASTX (translated nucleotide query).',
   );
 });
 
@@ -593,7 +1309,7 @@ test('Algorithm parameters: closed at start, the changed values marked and count
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await expect(toggle).toHaveText(/^\+\s*Algorithm parameters\s*$/);
   await expect(page.getByTestId('param-evalue')).toHaveCount(0);
-  await expect(page.getByTestId('add-to-queue-bottom')).toHaveCount(0);
+  await expect(page.getByTestId('run-losat-bottom')).toHaveCount(0);
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   await expect(toggle).toHaveText(/^−\s*Algorithm parameters\s*$/);
@@ -603,33 +1319,34 @@ test('Algorithm parameters: closed at start, the changed values marked and count
   const evalue = page.getByTestId('param-evalue-field');
   await expect(evalue).not.toHaveClass(/\bchanged\b/);
   await page.getByTestId('param-evalue').fill('1e-3');
-  await page.getByTestId('param-reward').fill('2');
+  await page.getByTestId('param-matchscores').selectOption('2,-3');
   await expect(evalue).toHaveClass(/\bchanged\b/);
   await expect(evalue).toContainText('♦');
   await expect(page.getByTestId('param-evalue')).toHaveAccessibleName(/^Expect threshold -evalue\s*, changed from the default$/);
-  await expect(page.getByTestId('param-reward-field')).toHaveClass(/\bchanged\b/);
-  await expect(page.getByTestId('param-penalty-field')).not.toHaveClass(/\bchanged\b/);
-  await expect(toggle).toContainText('(2 changed)');
-  // The task is chosen in Program Selection: it is not counted.
+  await expect(page.getByTestId('param-matchscores-field')).toHaveClass(/\bchanged\b/);
+  await expect(page.getByTestId('param-matchscores')).toHaveAccessibleName(/^Match\/Mismatch Scores -reward -penalty\s*, changed from the default$/);
+  await expect(page.getByTestId('param-gapcosts-field')).not.toHaveClass(/\bchanged\b/);
+  // The count is that of the options written: -evalue, -reward and -penalty.
+  await expect(toggle).toContainText('(3 changed)');
+  // The task is chosen in Task Selection: it is not counted. 2,-3 is the blastn task's
+  // default: it is neither counted nor written any more.
   await task(page, 'blastn');
-  await expect(page.getByTestId('algorithm-parameters-changed')).toHaveText('(2 changed)');
+  await expect(page.getByTestId('algorithm-parameters-changed')).toHaveText('(1 changed)');
+  await expect(page.getByTestId('param-matchscores-field')).not.toHaveClass(/\bchanged\b/);
 
   await page.getByTestId('job-title').fill('  Globin check  ');
   await paste(page, 'query', '>q\nACGTACGTACGTAAACCCGGGTTT\n');
   await paste(page, 'subject', '>s\nACGTACGTACGTAAACCCGGGTTTACGT\n');
   await submit(page);
-  await expect(page.getByTestId('run-1-options')).toHaveText('Options: -task blastn -evalue 1e-3 -reward 2');
-  await expect(page.getByTestId('run-1-title')).toHaveText('Globin check');
+  await expect(page.getByTestId('results-run-options')).toHaveText('-task blastn -evalue 1e-3');
+  await expect(page.getByTestId('results-job-title')).toHaveText('Globin check');
   await waitStatus(page, 1, 'completed');
-  // The title comes before the input names on the card (in one reading: the card changes as the run ends).
-  const parts = await page.getByTestId('run-1').evaluate((card) => [...card.children].map((child) => child.className));
-  expect(parts.indexOf('run-title')).toBeGreaterThan(-1);
-  expect(parts.indexOf('run-title')).toBeLessThan(parts.findIndex((name) => name.startsWith('run-inputs')));
+  await backToSearch(page);
 
   // Closed, the bar keeps the count; a program with changed values opens it when it is chosen.
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  await expect(toggle).toContainText('(2 changed)');
+  await expect(toggle).toContainText('(1 changed)');
   await program(page, 'blastp');
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await expect(page.getByTestId('algorithm-parameters-changed')).toHaveCount(0);
@@ -638,29 +1355,209 @@ test('Algorithm parameters: closed at start, the changed values marked and count
 
   // "Restore default search parameters" clears the Algorithm parameters, not the task.
   await page.getByTestId('restore-defaults').click();
-  await expect(page.getByTestId('param-evalue')).toHaveValue('');
-  await expect(page.getByTestId('param-reward')).toHaveValue('');
+  // The controls show the blastn task's defaults again.
+  await expect(page.getByTestId('param-evalue')).toHaveValue('10');
+  await expect(page.getByTestId('param-matchscores')).toHaveValue('2,-3');
   await expect(evalue).not.toHaveClass(/\bchanged\b/);
   await expect(page.getByTestId('algorithm-parameters-changed')).toHaveCount(0);
   await expect(page.getByTestId('param-task-blastn')).toBeChecked();
   await page.getByTestId('job-title').fill('');
-  // The second button, below the parameters, queues the same search.
-  const bottom = page.getByTestId('add-to-queue-bottom');
+  // The second button, below the parameters, starts the same search.
+  const bottom = page.getByTestId('run-losat-bottom');
   await expect(bottom).toHaveText('Run LOSAT');
   await expect(page.getByTestId('argv-validation')).not.toHaveAttribute('data-state', 'checking');
   await bottom.click();
-  await expect(page.getByTestId('run-2-options')).toHaveText('Options: -task blastn');
-  await expect(page.getByTestId('run-2-title')).toHaveCount(0);
-  await expect(page.getByTestId('algorithm-parameters').getByTestId('search-message')).toHaveText('Added to the queue.');
+  await expect(page.getByTestId('results-run-options')).toHaveText('-task blastn');
+  await expect(page.getByTestId('results-job-title')).toHaveCount(0);
+  // A started search shows no message: the page is on the run.
+  await expect(page.getByTestId('search-message')).toHaveCount(0);
+  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-selected', 'true');
   await waitStatus(page, 2, 'completed');
 });
 
-test('narrow screens put the inputs and the queue one under the other, without horizontal scrolling', async ({ page }) => {
+test("Algorithm parameters show the task's values; NCBI's lists with Other; a default chosen is not written, a given hit list size is", async ({
+  page,
+}) => {
+  await program(page, 'blastn');
+  await openParameters(page);
+  const words = page.getByTestId('param-word_size');
+  const wordsField = page.getByTestId('param-word_size-field');
+  await expect(words).toHaveValue('28');
+  await task(page, 'blastn');
+  await expect(words).toHaveValue('11');
+  await words.selectOption('15');
+  await expect(wordsField).toHaveClass(/\bchanged\b/);
+  await words.selectOption('11');
+  await expect(wordsField).not.toHaveClass(/\bchanged\b/);
+  await words.selectOption('other');
+  await page.getByTestId('param-word_size-other').fill('9');
+  await expect(wordsField).toHaveClass(/\bchanged\b/);
+  await expect(words).toHaveValue('other');
+  // A true/false option with a default is a checkbox in NCBI's "Mask" row.
+  const mask = page.getByTestId('param-soft_masking');
+  await expect(mask).toBeChecked();
+  await mask.uncheck();
+  await expect(page.getByTestId('param-soft_masking-field')).toHaveClass(/\bchanged\b/);
+  // Max target sequences shows its default only while the other hit list options are not set
+  // (BLAST+ tells them given from not given).
+  await page.getByTestId('param-num_alignments').fill('3');
+  await expect(page.getByTestId('param-max_target_seqs')).toHaveValue('');
+  await paste(page, 'query', '>q\nACGTACGTACGTAAACCCGGGTTT\n');
+  await paste(page, 'subject', '>s\nACGTACGTACGTAAACCCGGGTTTACGT\n');
+  await submit(page);
+  await expect(page.getByTestId('results-run-options')).toHaveText('-task blastn -word_size 9 -soft_masking false -num_alignments 3');
+  await waitStatus(page, 1, 'completed');
+});
+
+test("NCBI's selects of pairs follow the scores and the matrix; Other shows the two fields; Low complexity regions is a checkbox", async ({
+  page,
+}) => {
+  await program(page, 'blastn');
+  await openParameters(page);
+  const scores = page.getByTestId('param-matchscores');
+  const gaps = page.getByTestId('param-gapcosts');
+  // Megablast's Linear (0 0) is its default.
+  await expect(gaps).toHaveValue('0 0');
+  await expect(gaps.locator('option:checked')).toHaveText('Linear');
+  // "Other" with nothing typed stays while other state changes (review of SURVEY #13, 3).
+  await gaps.selectOption('other');
+  await page.getByTestId('job-title').fill('pairs');
+  await expect(page.getByTestId('param-gapopen')).toHaveValue('0');
+  await gaps.selectOption('0 0');
+  await expect(page.getByTestId('param-gapopen')).toHaveCount(0);
+  await page.getByTestId('job-title').fill('');
+  await task(page, 'blastn');
+  await expect(gaps).toHaveValue('5 2');
+  // 4,-5 has its own list, whose default NCBI chooses (BLAST stops with 5 2 there).
+  await scores.selectOption('4,-5');
+  await expect(gaps).toHaveValue('12 8');
+  await expect(gaps.locator('option:checked')).toHaveText('Existence: 12 Extension: 8');
+  await expect(page.getByTestId('param-gapcosts-field')).toHaveClass(/\bchanged\b/);
+  // Other: the two fields, with the values that the search uses.
+  await gaps.selectOption('other');
+  await expect(page.getByTestId('param-gapopen')).toHaveValue('12');
+  await expect(page.getByTestId('param-gapopen')).toHaveAccessibleName(/^Existence -gapopen/);
+  await page.getByTestId('param-gapopen').fill('6');
+  await page.getByTestId('param-gapextend').fill('5');
+  await expect(gaps).toHaveValue('other');
+  // The filter: off writes no; on again is the default.
+  const dust = page.getByTestId('param-dust');
+  await dust.uncheck();
+  await expect(page.getByTestId('param-dust-value')).toHaveCount(0);
+  await expect(page.getByTestId('param-dust-field')).toHaveClass(/\bchanged\b/);
+  await paste(page, 'query', '>q\nACGTACGTACGTAAACCCGGGTTT\n');
+  await paste(page, 'subject', '>s\nACGTACGTACGTAAACCCGGGTTTACGT\n');
+  await submit(page);
+  await expect(page.getByTestId('results-run-options')).toHaveText('-task blastn -reward 4 -penalty -5 -gapopen 6 -gapextend 5 -dust no');
+  await waitStatus(page, 1, 'completed');
+  await backToSearch(page);
+  await dust.check();
+  await expect(page.getByTestId('param-dust-value')).toHaveValue('');
+  await expect(page.getByTestId('param-dust-value')).toHaveAttribute('placeholder', '20 64 1');
+  await expect(page.getByTestId('param-dust-field')).not.toHaveClass(/\bchanged\b/);
+  // blastn-short filters with no by default: on is yes, and the text box takes the arguments.
+  await task(page, 'blastn-short');
+  await expect(dust).not.toBeChecked();
+  await dust.check();
+  await expect(page.getByTestId('param-dust-value')).toHaveValue('yes');
+  await page.getByTestId('param-dust-value').fill('20 32 1');
+  await expect(dust).toBeChecked();
+
+  // TBLASTN's gap costs follow the matrix: its default, as NCBI's page and the engine have it.
+  await program(page, 'tblastn');
+  const matrix = page.getByTestId('param-matrix');
+  await expect(gaps).toHaveValue('11 1');
+  await gaps.selectOption('10 1');
+  await expect(page.getByTestId('param-gapcosts-field')).toHaveClass(/\bchanged\b/);
+  await matrix.selectOption('PAM30');
+  await expect(gaps).toHaveValue('9 1');
+  await expect(page.getByTestId('param-gapcosts-field')).not.toHaveClass(/\bchanged\b/);
+  await expect(page.getByTestId('algorithm-parameters-changed')).toHaveText('(1 changed)');
+  // BLASTP's and BLASTX's lists are NCBI's of the matrix (BLOSUM62 here; WA-FM-02, series SC6).
+  await program(page, 'blastp');
+  await expect(gaps.locator('option')).toHaveText([
+    ...PROTEIN_GAP_COSTS.lists.BLOSUM62!.map((pair) => `Existence: ${pair.replace(' ', ' Extension: ')}`),
+    'Other',
+  ]);
+  await expect(gaps).toHaveValue('11 1');
+  const seg = page.getByTestId('param-seg');
+  await seg.check();
+  await expect(page.getByTestId('param-seg-value')).toHaveValue('yes');
+  await expect(page.getByTestId('algorithm-parameters-changed')).toHaveText('(1 changed)');
+  await program(page, 'blastx');
+  await expect(gaps.locator('option')).toHaveText([
+    ...PROTEIN_GAP_COSTS.lists.BLOSUM62!.map((pair) => `Existence: ${pair.replace(' ', ' Extension: ')}`),
+    'Other',
+  ]);
+  await expect(gaps).toHaveValue('11 1');
+});
+
+test("Additional options: the command line's other options after the form's, marked and counted, read by the engine; Max matches in a query range in every mode (DW-42)", async ({
+  page,
+}) => {
+  await openParameters(page);
+  for (const id of ['blastn', 'blastp', 'blastx', 'tblastn', 'tblastx']) {
+    await program(page, id);
+    await expect(page.getByTestId('param-culling_limit-field')).toContainText('Max matches in a query range');
+    // The last row of the form, in Other Parameters.
+    await expect(page.getByTestId('parameter-form').locator('.parameter-section').last().locator('.param-row').last()).toHaveAttribute(
+      'data-testid',
+      'param-extra-field',
+    );
+  }
+  await program(page, 'blastn');
+  const field = page.getByTestId('param-extra-field');
+  const extra = page.getByTestId('param-extra');
+  const validation = page.getByTestId('argv-validation');
+  await expect(field).not.toHaveClass(/\bchanged\b/);
+  await expect(extra).toHaveAccessibleName('Additional options');
+  // The engine reads the words as the command line does, and says what it does not read.
+  await extra.fill('-qcov_hsp_perc 50 -foo');
+  await expect(validation).toHaveText("error: unknown option or argument '-foo'; use -help for CLI v2 syntax");
+  await extra.fill('-num_threads 2');
+  await expect(validation).toHaveText('-num_threads is set in the form: Threads');
+  // The CLI's help, and the CLI's options that a search in the browser cannot have (WA-FM-04, WA-FM-05).
+  await extra.fill('-help');
+  await expect(validation).toHaveText('-help is not available in the browser');
+  await extra.fill('-db nt');
+  await expect(validation).toHaveText('-db (a database search) is not supported in the browser yet');
+  await extra.fill('-mt_mode 1');
+  await expect(validation).toHaveText('-mt_mode is managed by LOSAT');
+  await extra.fill("-strand 'plus");
+  await expect(validation).toHaveText("Additional options: a quote (') is not closed");
+  // An option of the form is set there.
+  await extra.fill('-ungapped -evalue=1');
+  await expect(validation).toHaveText('-evalue is set in the form: Expect threshold');
+  await extra.fill("-ungapped  -strand 'plus'");
+  await expect(validation).toHaveAttribute('data-state', 'ok');
+  await expect(field).toHaveClass(/\bchanged\b/);
+  await expect(field).toContainText('♦');
+  await expect(extra).toHaveAccessibleName(/^Additional options\s*, changed from the default$/);
+  await page.getByTestId('param-culling_limit').fill('1');
+  await expect(page.getByTestId('algorithm-parameters-changed')).toHaveText('(2 changed)');
+  await paste(page, 'query', '>q\nACGTACGTACGTAAACCCGGGTTT\n');
+  await paste(page, 'subject', '>s\nACGTACGTACGTAAACCCGGGTTTACGT\n');
+  await submit(page);
+  await expect(page.getByTestId('results-run-options')).toHaveText('-culling_limit 1 -ungapped -strand plus');
+  await waitStatus(page, 1, 'completed');
+  await backToSearch(page);
+  // Each mode has its own; "Restore default search parameters" empties them.
+  await program(page, 'blastp');
+  await expect(extra).toHaveValue('');
+  await program(page, 'blastn');
+  await expect(extra).toHaveValue("-ungapped  -strand 'plus'");
+  await page.getByTestId('restore-defaults').click();
+  await expect(extra).toHaveValue('');
+  await expect(field).not.toHaveClass(/\bchanged\b/);
+  await expect(page.getByTestId('algorithm-parameters-changed')).toHaveCount(0);
+});
+
+test('narrow screens put the inputs one under the other, without horizontal scrolling', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await paste(page, 'query', `>NZ_CP006932.1 first\nACGTACGTACGTACGTAC\n>NZ_CP006932.1 second\n${BUILD_HAS_ENGINE ? 'ACGT\n>?10\nACGT' : 'ACGT!ACGT'}\n`);
+  await paste(page, 'query', '>NZ_CP006932.1 first\nACGTACGTACGTACGTAC\n>NZ_CP006932.1 second\nACGT!ACGT\n');
   // A record row puts its tags on a second line: the ID and the "refused" tag stay in the list.
-  // The engine's refusals name no record (see REFUSED_RECORD), so only the FakeEngine shows the tag.
-  await expect(page.getByTestId('query-source-0-check')).toHaveAttribute('data-check', 'refused');
+  // Only the FakeEngine refuses the record (see REFUSED_RECORD), so only it shows the tag.
+  await expect(page.getByTestId('query-source-0-check')).toHaveAttribute('data-check', BUILD_HAS_ENGINE ? 'ok' : 'refused');
   await showRecords(page, 'query');
   const list = (await page.getByTestId('query-source-0-records').locator('.record-viewport').boundingBox())!;
   if (!BUILD_HAS_ENGINE) {
@@ -672,9 +1569,7 @@ test('narrow screens put the inputs and the queue one under the other, without h
   }
   const query = (await page.getByTestId('query-panel').boundingBox())!;
   const subject = (await page.getByTestId('subject-panel').boundingBox())!;
-  const queue = (await page.getByTestId('queue').boundingBox())!;
   expect(subject.y).toBeGreaterThan(query.y + query.height - 1);
-  expect(queue.y).toBeGreaterThan(subject.y);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   // The query block's paste box, drop zone and Job Title start and end at the same x (W4b screen review L13).
   const edges = await Promise.all(

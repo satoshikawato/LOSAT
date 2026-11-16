@@ -1,0 +1,46 @@
+
+                                          Tax BLAST report                                          
+
+Query= nq1 query nucleotide one
+
+Length=900
+
+                                           Organism Report                                           
+Accession                                          Description                        Score E-value 
+
+                                   Homo sapiens (human) [primates]                                   
+ XM_000101                  subject one two HSPs                                       368   2e-180  
+ s3_local_identifier        subject three with a title that is longer than the desc... 288   1e-81   
+ XM_000111                  subject eleven strong then planted weak HSP                245   1e-71   
+
+                                Mus musculus (house mouse) [rodents]                                
+ CAA00102                   subject two                                                185   9e-51   
+ tag_s8                     subject eight                                              176   7e-48   
+
+                                Escherichia coli () [enterobacteria]                                
+ AB000104                   subject four                                               165   1e-44   
+
+                                     synthetic construct () [-]                                     
+ XM_000105                  subject five 156    s 6e-42    e Accession                   a <@de... 156   6e-42   
+
+                              unclassified sequences () [unclassified]                              
+ AB000110                   subject ten                                                115   2e-29   
+
+                                          Tax BLAST report                                          
+
+Query= nq2 unrelated query (no hits)
+
+Length=120
+
+                                           Organism Report                                           
+Accession                                      Description                           Score E-value 
+
+                                   Homo sapiens (human) [primates]                                   
+ XM_000101           subject one two HSPs                                              21.2  0.027   
+ s3_local_identifier subject three with a title that is longer than the description... 13.9  4.1     
+
+                                Escherichia coli () [enterobacteria]                                
+ AB000104            subject four                                                      20.8  0.037   
+
+                                Mus musculus (house mouse) [rodents]                                
+ CAA00102            subject two                                                       16.6  0.64    

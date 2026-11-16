@@ -77,6 +77,7 @@ NCBI は、範囲を、その役割（query か subject）の入力が読む**�
 | BLASTP | 480 | 同上 | DIFF 0：一致 186、同じ誤り 216、LOSAT の拒否 78 |
 | TBLASTN | 420 | 同上 | DIFF 0：一致 180、同じ誤り 156、LOSAT の拒否 84 |
 | TBLASTX | 420 | 同上 | DIFF 0：一致 198、同じ誤り 138、LOSAT の拒否 84 |
+| BLASTX（線 SX の SXd2 で追加、`--programs blastx`） | 480 | — | DIFF 0：一致 183、同じ誤り 225、LOSAT の拒否 72（R1 だけ。outfmt 5・11・16 の 480 件も同じ内訳） |
 
 LOSAT の拒否は R1（`StringToInt` が読めない部分）と R2（文字の無い区間）だけ。
 

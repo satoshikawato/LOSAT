@@ -4,10 +4,10 @@
 A conditional switch of the strict set (LOSAT/src/utils/xswitch.rs STRICT_SET) takes its own path
 only where a rule holds (input sizes, thread count, options, memory); elsewhere the reference path
 runs although the switch is on. A conditional or platform switch that graduated (GRADUATED in the
-same file) has no variable any more but keeps its rule. Runs with LOSAT_X_REACH=<directory> write
-one file per LOSAT process (LOSAT/src/utils/xreach.rs). This script folds the files of a directory
-and compares them with switch_reach_expected.tsv, one row per switch of the set and per graduated
-switch:
+same file) has no variable any more but keeps its rule. Runs with LOSAT_X_REACH=<absolute
+directory> write one file per LOSAT process (LOSAT/src/utils/xreach.rs). This script folds the
+files of a directory and compares them with switch_reach_expected.tsv, one row per switch of the
+set and per graduated switch:
 
   switch    the variable, as in STRICT_SET or GRADUATED
   programs  the LOSAT subcommands whose runs reach it (comma-separated)

@@ -1,0 +1,23 @@
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: q
+# Database: tests/db_search/ids/psr_cp
+# Fields: subject id, % identity, bit score, evalue
+# 4 hits found
+gb|AAA00001.1|	75.200	376	1.68e-137
+gb|AAA00001.1|	75.200	376	1.68e-137
+gb|BBB00001.1|	71.200	352	3.04e-128
+gb|CCC00001.1|	67.200	326	6.16e-118
+# PSIBLAST 2.17.0+
+# Iteration: 2
+# Query: q
+# Database: tests/db_search/ids/psr_cp
+# Fields: subject id, % identity, bit score, evalue
+# 4 hits found
+gb|AAA00001.1|	75.200	450	7.54e-167
+gb|AAA00001.1|	75.200	450	7.54e-167
+gb|BBB00001.1|	71.200	443	2.97e-164
+gb|CCC00001.1|	67.200	440	4.31e-163
+
+Search has CONVERGED!
+# BLAST processed 2 queries

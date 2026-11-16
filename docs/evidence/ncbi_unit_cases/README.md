@@ -27,15 +27,26 @@ python3 LOSAT/tests/ncbi_unit_case_ledger.py scan --root .     # citation lines 
 - `algo/blast/unit_tests/api/<m>_unit_test.cpp` for aalookup, aascan, blast, blastdiag,
   blastengine, blastextend, blastfilter, blasthits, blastoptions, blastsetup, gapinfo,
   gencode_singleton, hspfilter_besthit, hspfilter_culling, hspstream, linkhsp, ntlookup, ntscan,
-  nuclwordfinder, optionshandle, querydata, queryinfo, redoalignment, scoreblk, split_query, stat,
-  subj_ranges, traceback, tracebacksearch, bl2seq. Each file is one module, named as in the list.
+  nuclwordfinder, optionshandle, pssmcreate, querydata, queryinfo, redoalignment, scoreblk,
+  split_query, stat, subj_ranges, traceback, tracebacksearch, bl2seq, msa2pssm, prelimsearch,
+  psibl2seq, psiblast, psiblast_iteration, pssmcreate_cdd, pssmenginefreqratios, rps, seqinfosrc,
+  seqsrc, setupfactory, uniform_search, version_reference. Each file is one module, named as in
+  the list.
+- the BLAST database tests, one module per `<m>_unit_test.cpp`:
+  `algo/blast/unit_tests/seqdb_reader/` (seqdb, seqdb_lmdb, seqdb_tax4blast),
+  `objtools/blast/seqdb_writer/unit_test/` (writedb, writedb_lmdb, criteria),
+  `objtools/blast/blastdb_format/unit_test/` (seq_formatter, seq_writer).
 - `algo/blast/unit_tests/blast_format/*.cpp` (module `blast_format`),
   `algo/blast/unit_tests/blast_mt/*.cpp` (`blast_mt`),
   `algo/blast/blastinput/unit_test/blastinput_unit_test.cpp` (`blastinput`),
   `objtools/align_format/unit_test/*.cpp` (`align_format`).
 
-PSI-BLAST, PSSM, RPS, PHI, delta, magicblast, rmblast, remote BLAST, SeqDB and BLAST database tests
-are out of scope.
+Out of scope are the tests of programs and services LOSAT does not have (api phiblast, delta,
+magicblast, rmblast_blasthits, rmblast_traceback, remote_blast, search_strategy;
+`algo/blast/proteinkmer/unit_test/`, `objtools/blast/services/unit_test/`), of NCBI's mock
+sequence sources (api mockseqsrc1, mockseqsrc2), and of the object manager's BLAST database data
+loader (`algo/blast/unit_tests/blastdb/bdbloader_unit_test.cpp`,
+`algo/blast/blastinput/unit_test/blast_scope_src_unit_test.cpp`).
 
 ## Columns
 
@@ -44,7 +55,8 @@ are out of scope.
 - `file`: path from the NCBI repository root, as written in a citation.
 - `line_start`, `line_end`: the `BOOST_*_TEST_CASE(` line and the line of the closing brace.
 - `kind`: `AUTO` (`BOOST_AUTO_TEST_CASE`), `FIXTURE` (`BOOST_FIXTURE_TEST_CASE`), `DISABLED`
-  (inside `#if 0` or `#if SEQLOC_MIX_QUERY_OK`, which NCBI never compiles), or `MACRO`.
+  (inside `#if 0`, or under `SEQLOC_MIX_QUERY_OK` or `KAPPA_PRINT_DIAGNOSTICS`, which no NCBI
+  build defines, so NCBI never compiles it), or `MACRO`.
   `BOOST_AUTO_TEST_CASE_TIMEOUT` lines only set a timeout and are not cases.
 - `MACRO`: a `#define` whose body declares a case, counted once as written. ntscan's
   `DECLARE_TEST` (lines 846-905) is one row named after the macro, from the `#define` to its last
@@ -76,7 +88,7 @@ are out of scope.
 | `partial` | a LOSAT test exercises the case but asserts less | a citation line, a `path::fn` test, or the evidence in `note` |
 | `e2e` | only fixtures, frozen hashes or oracle comparisons cover it | the fixture in `losat_test` or `note` |
 | `to-port` | LOSAT has ported the function, but no test checks this case | the LOSAT function in `note` |
-| `n-a` | LOSAT has no such feature (object manager, GenBank, `-db`, PSI/RPS/PHI, ...) or NCBI compiles the case out | the reason in `note` |
+| `n-a` | LOSAT has no such feature (object manager, sequences fetched by id from GenBank or a BLAST database, a program LOSAT lacks such as deltablast or rpstblastn, an option LOSAT refuses such as `-phi_pattern`, ...) or NCBI compiles the case out | the reason in `note` (for a refused option, the `path:line` of the refusal) |
 | `superseded` | another LOSAT test or fixture checks more than the NCBI case | the reason in `note` |
 
 ## Adding a row (porting a case)
@@ -149,3 +161,34 @@ tests made on `main` b28e42e1, each module's mapping checked by a second reader 
 -> `n-a`; the 18 refuted claims take the reader's corrected status and evidence; `DISABLED` cases
 set to `n-a`). Where the cited test could not be found on the current `main`, the row is
 `partial` with the evidence (paths at b28e42e1) in `note`.
+
+## Re-grading of 2026-11-07
+
+The `n-a` reasons of 2026-10-10 were written before LOSAT read BLAST databases (`-db`) and before
+`-parse_deflines`, `-query_loc`/`-subject_loc`, blastn `-strand`, psiblast and LOSAT's own FASTA
+reader. On `dev` 869dfe0ee every `n-a` row (324) and the 77 other rows whose note claimed a LOSAT
+limit were checked again against the NCBI case and the LOSAT code, and a second reader checked
+every status change. 270 rows changed: 73 left `n-a` (17 `ported`, 38 `partial`, 14 `e2e`,
+3 `to-port`, 1 `superseded`), 10 `partial` rows became `ported`, 4 `e2e` and 2 `to-port` rows
+became `partial`, 1 `partial` row became `n-a` (Smith-Waterman mode, which every program
+refuses), and the other 180 changed rows keep their status with a note (for 33 also the
+`losat_test`) that states today's facts. Notes that cite LOSAT lines start with
+`evidence (869dfe0e):`. Of the 61 `n-a` rows whose reason was a BLAST database, 52 stay `n-a`:
+they need sequences fetched by id, the object manager, a refused option (`-filtering_db`, ...)
+or C++ API plumbing with no LOSAT counterpart; 48 of their notes were rewritten to say which.
+
+## Scope widened 2026-11-08
+
+On `dev` a20ad436a the scope gained the NCBI tests of the BLAST database reader, writer and
+formatter, and the api tests of PSI-BLAST, the PSSM engine, RPS-BLAST, the sequence sources, the
+preliminary search, the setup factory, uniform search and the version and reference strings:
+405 cases (`NCBI_CASES.tsv` 696 -> 1,101), 62 of which NCBI compiles out. Each compiled case was
+graded against the NCBI case and the LOSAT code, and a second reader checked every row above
+`n-a`. The new rows: 55 `ported`, 80 `partial`, 13 `e2e`, 16 `to-port`, 15 `superseded` and
+226 `n-a` (the 62 compiled out; the others need GI or alias-file lists, the object manager,
+sequences fetched by id, a program LOSAT lacks (deltablast, rpstblastn) or an option it refuses
+(`-in_msa`), or are C++ API plumbing with no LOSAT counterpart). Notes that cite LOSAT lines start
+with `evidence (a20ad436):`; the six rps rows were graded on `dev` c513a3046, which added rpsblast,
+and start with `evidence (c513a304):`. On that commit four older rows that gave RPS-BLAST as
+missing were graded again: blastinput RpsBlastCBS became `partial`, blastsetup
+NumberOfContextsRPSBlast `to-port`, and two `n-a` notes now give today's reason.

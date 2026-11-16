@@ -19,7 +19,7 @@
 //!
 //! Only the default `FastWriteDouble` branches exist here (a registry or environment value that
 //! turns it off is rejected by the callers, outfmt-20261019 DECISIONS 13). The digits come from
-//! 80-bit x87 `long double` arithmetic on NCBI's x86-64 build; [`crate::utils::x87`] reproduces it, so
+//! 80-bit x87 `long double` arithmetic on NCBI's x86-64 build; `crate::utils::x87` reproduces it, so
 //! no `f64` formatting of the Rust standard library is involved and every platform prints the
 //! same bytes.
 
@@ -118,6 +118,16 @@ const fn ld(n: i32) -> X87 {
         i += 1;
     }
     panic!("no long double literal 1e<n> in LONG_DOUBLE_POW10");
+}
+
+/// `__NLG(1.e<n>)` / `NCBI_CONST_LONGDOUBLE(1e<n>)` for an `n` of `LONG_DOUBLE_POW10` (the
+/// literals of `NStr::StringToDoublePosix` are among them: `1e-15` to `1e15`, and the multiples
+/// of 16 up to 256 of either sign). `None` for another `n`.
+pub(crate) fn long_double_pow10(n: i32) -> Option<X87> {
+    LONG_DOUBLE_POW10
+        .iter()
+        .find(|&&(k, _, _)| k == n)
+        .map(|&(_, significand, exponent)| X87::from_parts(significand, exponent))
 }
 
 #[cfg(test)]
@@ -261,11 +271,13 @@ impl EcvtDigits {
     }
 
     /// `*dec`: the decimal exponent of the first digit.
+    #[cfg(test)]
     pub fn dec(&self) -> i32 {
         self.dec
     }
 
     /// `*sign`: -1 or 1; 0 for +0 and for precision 0.
+    #[cfg(test)]
     pub fn sign(&self) -> i32 {
         self.sign
     }

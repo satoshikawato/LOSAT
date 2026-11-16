@@ -13,11 +13,89 @@ pub enum Xml2Target {
     Subjects(usize),
 }
 
+impl Xml2Target {
+    /// Whether the documents of the search hold each query's report back until the next query's
+    /// arrives (`reports_held`; `Xml2Document`): a `-subject` search. The writer is made for the
+    /// programs that do not iterate: psiblast's and tblastn `-in_pssm`'s XML formats are not
+    /// written yet (line PS, items PS15 and PS15b).
+    pub fn holds_back(self) -> bool {
+        reports_held(matches!(self, Self::Subjects(_)), false)
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:121, :196
+// ```c++
+//     m_IsBl2Seq = (m_DbName == kEmptyStr ? true : false);
+//     ...
+//     m_IsIterative = options.IsIterativeSearch();
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:862-866
+// ```c++
+// CBlastOptions::IsIterativeSearch() const{
+//     switch ( GetProgram()) {
+//     	case ePSIBlast :
+//     	case ePSITblastn :
+//     	case eDeltaBlast :
+//     		return true;
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2364, :2376-2377
+// ```c++
+// 	if((m_IsIterative) || (m_IsBl2Seq)) {
+// 		if(m_AccumulatedResults.empty()) {
+// 			_ASSERT(m_AccumulatedQueries->size() == 0);
+// 			...
+// 			CConstRef<CSeq_id> query_id = results.GetSeqId();
+// 			if(m_AccumulatedResults[0].GetSeqId()->Match(*query_id)) {
+// ```
+/// NCBI's `m_IsBl2Seq || m_IsIterative`: whether the XML2 and JSON documents of a search hold each
+/// query's report back until a result of a query whose Seq-id does not match arrives (or the
+/// epilog): a search of subject records (`subject_search`: `-subject`, no database name) or of an
+/// iterative program (`iterative`: psiblast, tblastn `-in_pssm`). The one rule behind the writer's
+/// hold (`Xml2Target::holds_back`), the place where a matrix name NCBI's XML does not know fails
+/// (`blast_xml::matrix::xml_formatting_failure`) and BLASTX's checks of the reports' titles before
+/// the search (`blastx::blast_xml::scan_queries`).
+pub fn reports_held(subject_search: bool, iterative: bool) -> bool {
+    subject_search || iterative
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xml2format.cpp:174-185
+// ```c++
+//         for (unsigned int i = 0; i < subjectsInfo->Size(); i++) {
+//             CConstRef<CSeq_id> subject_id = subjectsInfo->GetSeqId(i);
+//             ...
+//             m_SubjectIds.push_back(CAlignFormatUtil::GetBareId(*subject_id));
+// ```
+// The Seq-id of a subject's Seq-loc is the `BestRank` best of its ids
+// (blast_fasta_input.cpp:458-466).
+/// The `subjects` strings of the records `records` (their ids under `-parse_deflines`): the bare id
+/// of each record's best id; `None` for records read without the option.
+pub fn subject_names<'a>(
+    mut records: impl Iterator<
+        Item = Option<&'a crate::blastinput::fasta_reader::believed::BelievedIds>,
+    >,
+) -> Option<std::sync::Arc<[String]>> {
+    let first = records.next()?;
+    let first = first?;
+    let name = |ids: &crate::blastinput::fasta_reader::believed::BelievedIds| {
+        let mut out = Vec::new();
+        crate::seqid::label::bare(&ids.best, &mut out);
+        String::from_utf8_lossy(&out).into_owned()
+    };
+    let mut names = vec![name(first)];
+    for ids in records {
+        names.push(ids.map_or_else(String::new, name));
+    }
+    Some(names.into())
+}
+
 /// The values of an XML2 document that outfmt 5 does not have (`s_SetBlastXMLParameters`,
 /// blastxml2_format.cpp:514-555), read once per run from the program's resolved arguments.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Xml2Run {
     pub target: Xml2Target,
+    /// The `subjects` strings of `-subject` records whose ids `-parse_deflines` read
+    /// (`subject_names`); `None`: `Subject_N`.
+    pub subject_names: Option<std::sync::Arc<[String]>>,
     /// Whether the search is gapped: `gap-open` and `gap-extend` are written only then (not
     /// for TBLASTX and `-ungapped`); megablast writes its 0 and 0.
     pub gapped: bool,

@@ -23,7 +23,6 @@ use crate::core::composition_adjustment::redo_alignment::{
     BlastCompoSequenceData, BlastCompoSequenceRange, BlastRedoAlignCallbacks, BlastRedoAlignParams,
     BlastRedoOneMatchResult, EMatrixAdjustRule,
 };
-use crate::utils::genetic_code::GeneticCode;
 
 mod x_reap_index;
 
@@ -278,6 +277,7 @@ pub(super) fn postredo_num_ident(
 // align_length += esp->num[index];
 // if (*q == *s) num_ident++; else if (matrix[*q][*s] > 0) num_pos++;
 // *num_pos_ptr = num_pos + num_ident;
+#[cfg(test)]
 pub(super) fn postredo_converted_stats(
     converted: &ConvertedKappaHsp,
     query_sequence: &[u8],
@@ -522,8 +522,6 @@ const TBLASTN_REDO_CALLBACKS: BlastRedoAlignCallbacks = BlastRedoAlignCallbacks 
     calc_lambda: Some(redo_calc_lambda),
     get_range: translated_subject_get_range,
     redo_one_alignment: tblastn_redo_one_alignment_callback,
-    new_xdrop_align: None,
-    free_align_traceback: None,
 };
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:770-803,3577-3639
@@ -653,6 +651,7 @@ mod tests {
         local_extension_final_xdrop, local_kappa_redo_params,
     };
     use crate::common::GapEditOp;
+    use crate::utils::genetic_code::GeneticCode;
     use crate::utils::matrix::BLASTAA_SIZE;
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:770-803,1896-1957,3577-3689
@@ -664,14 +663,9 @@ mod tests {
     // ```
     #[test]
     fn hard_seg_preliminary_hsp_redoes_to_ncbi_alignment() {
-        use crate::core::composition_adjustment::adjust_scores::{
-            build_matrix_info, read_aa_composition,
-        };
-        use crate::core::composition_adjustment::redo_alignment::{
-            build_query_word_hashes, BlastCompoGappingParams,
-        };
+        use crate::core::composition_adjustment::adjust_scores::read_aa_composition;
+        use crate::core::composition_adjustment::redo_alignment::build_query_word_hashes;
         use crate::utils::matrix::aa_char_to_ncbistdaa;
-        use std::cell::Cell;
         let root = format!(
             "{}/../docs/evidence/tlosan_stage_d",
             env!("CARGO_MANIFEST_DIR")
@@ -804,7 +798,8 @@ mod tests {
                 min_subject_length: (subject_nt.len() / 3) as i32,
                 composition_based_stats: 2,
             },
-        );
+        )
+        .unwrap();
         assert_eq!(parameters.lengths[0].eff_searchsp, 15225);
         let seg = SegParams::default();
         let search_query: Vec<_> = query_fasta
@@ -840,7 +835,7 @@ mod tests {
             &parameters.lengths,
             subject_nt.len() as i32,
             &[gapped],
-            &gumbel,
+            Some(&gumbel),
             parameters.link.as_ref().unwrap(),
         )
         .unwrap();
@@ -878,7 +873,6 @@ mod tests {
             160,
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             false,
-            10.0,
             true,
             25.0,
             local_extension_final_xdrop(15.0, 25.0, gapped.lambda).unwrap(),
@@ -943,17 +937,14 @@ mod tests {
         };
         use crate::config::ProteinScoringSpec;
         use crate::core::composition_adjustment::adjust_scores::{
-            blast_adjust_scores, build_matrix_info, read_aa_composition,
+            blast_adjust_scores, read_aa_composition,
         };
-        use crate::core::composition_adjustment::redo_alignment::{
-            build_query_word_hashes, BlastCompoGappingParams,
-        };
+        use crate::core::composition_adjustment::redo_alignment::build_query_word_hashes;
         use crate::stats::spouge::lookup_protein_gumbel_params;
         use crate::stats::tables::{
             lookup_protein_params_gapped, lookup_protein_params_ungapped, KarlinParams,
         };
         use crate::utils::matrix::aa_char_to_ncbistdaa;
-        use std::cell::Cell;
 
         let root = concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -1077,7 +1068,8 @@ mod tests {
                 min_subject_length: 120,
                 composition_based_stats: 2,
             },
-        );
+        )
+        .unwrap();
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:870-899;
         // ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3577-3595
         // ```c
@@ -1131,7 +1123,7 @@ mod tests {
             &parameters.lengths,
             subject_nt.len() as i32,
             &[gapped],
-            &gumbel,
+            Some(&gumbel),
             parameters.link.as_ref().unwrap(),
         )
         .unwrap();
@@ -1177,7 +1169,6 @@ mod tests {
             query.len() as i32,
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             false,
-            10.0,
             true,
             25.0,
             local_extension_final_xdrop(15.0, 25.0, gapped.lambda).unwrap(),
@@ -1321,7 +1312,7 @@ mod tests {
             &parameters.lengths,
             subject_nt.len() as i32,
             &[scaled],
-            &gumbel,
+            Some(&gumbel),
             &link_params,
         )
         .unwrap();
@@ -1362,14 +1353,9 @@ mod tests {
     // ```
     #[test]
     fn multi_query_preliminary_hsps_redo_to_ncbi_alignment_order() {
-        use crate::core::composition_adjustment::adjust_scores::{
-            build_matrix_info, read_aa_composition,
-        };
-        use crate::core::composition_adjustment::redo_alignment::{
-            build_query_word_hashes, BlastCompoGappingParams,
-        };
+        use crate::core::composition_adjustment::adjust_scores::read_aa_composition;
+        use crate::core::composition_adjustment::redo_alignment::build_query_word_hashes;
         use crate::utils::matrix::aa_char_to_ncbistdaa;
-        use std::cell::Cell;
         let root = format!(
             "{}/../docs/evidence/tlosan_stage_d",
             env!("CARGO_MANIFEST_DIR")
@@ -1479,7 +1465,8 @@ mod tests {
                 min_subject_length: 2_125,
                 composition_based_stats: 2,
             },
-        );
+        )
+        .unwrap();
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:870-899;
         // ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3577-3595
         // ```c
@@ -1541,7 +1528,7 @@ mod tests {
             &parameters.lengths,
             subject_nt.len() as i32,
             &[gapped; 3],
-            &gumbel,
+            Some(&gumbel),
             parameters.link.as_ref().unwrap(),
         )
         .unwrap();
@@ -1619,7 +1606,6 @@ mod tests {
                 120,
                 BlastCompoAdjustMode::CompositionMatrixAdjust,
                 false,
-                10.0,
                 true,
                 25.0,
                 local_extension_final_xdrop(15.0, 25.0, gapped.lambda).unwrap(),
@@ -1775,7 +1761,7 @@ mod tests {
                 &parameters.lengths,
                 6_377,
                 &[scaled; 3],
-                &gumbel,
+                Some(&gumbel),
                 &post_link,
             )
             .unwrap();
@@ -2261,7 +2247,8 @@ mod tests {
                 min_subject_length: 120,
                 composition_based_stats: 2,
             },
-        );
+        )
+        .unwrap();
         assert_eq!(parameters.cutoffs[0].word_cutoff, 18);
         assert_eq!(parameters.cutoffs[0].hit_cutoff, 18);
         assert_eq!(parameters.cutoffs[0].word_xdrop, 16);
@@ -2313,7 +2300,7 @@ mod tests {
                 &parameters.lengths,
                 subject.len() as i32,
                 &[gapped],
-                &gumbel,
+                Some(&gumbel),
                 parameters.link.as_ref().unwrap(),
             )
             .unwrap();
@@ -2390,15 +2377,10 @@ mod tests {
         use crate::algorithm::tblastn::stage_d_results::{
             KappaHspPayload, KappaResultHitList, KappaResultList,
         };
-        use crate::core::composition_adjustment::adjust_scores::{
-            build_matrix_info, read_aa_composition,
-        };
-        use crate::core::composition_adjustment::redo_alignment::{
-            build_query_word_hashes, BlastCompoGappingParams,
-        };
+        use crate::core::composition_adjustment::adjust_scores::read_aa_composition;
+        use crate::core::composition_adjustment::redo_alignment::build_query_word_hashes;
         use crate::stats::tables::KarlinParams;
         use crate::utils::matrix::aa_char_to_ncbistdaa;
-        use std::cell::Cell;
         let mode_trace = std::fs::read_to_string(format!(
             "{root}/tlosan_stage_d/kappa_mode2_20260924/run_20260923_default.tsv"
         ))
@@ -2471,7 +2453,6 @@ mod tests {
                 query.len() as i32,
                 BlastCompoAdjustMode::CompositionMatrixAdjust,
                 false,
-                10.0,
                 true,
                 25.0,
                 local_extension_final_xdrop(15.0, 25.0, gapped.lambda).unwrap(),
@@ -2546,7 +2527,7 @@ mod tests {
                 &parameters.lengths,
                 subject.len() as i32,
                 &[scaled],
-                &gumbel,
+                Some(&gumbel),
                 &post_link,
             )
             .unwrap();

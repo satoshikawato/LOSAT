@@ -54,7 +54,7 @@ fn temp_dir() -> PathBuf {
 }
 
 /// The query (letters 100,000-109,000 of AP027131) and the subject set (its proteins and those
-/// of AP027132 and AP027133) as files, and the subject set's `losat makedb` database.
+/// of AP027132 and AP027133) as files, and the subject set's `losat makeblastdb` database.
 fn inputs(dir: &Path) -> (PathBuf, PathBuf, String) {
     inputs_of(dir, 9_000, 1)
 }
@@ -93,15 +93,15 @@ fn inputs_of(dir: &Path, length: usize, copies: usize) -> (PathBuf, PathBuf, Str
     std::fs::write(&set, text).unwrap();
     let db = dir.join("set").to_str().unwrap().to_string();
     let output = losat()
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(&set)
         .args(["-dbtype", "prot", "-out", &db])
         .output()
-        .expect("run losat makedb");
+        .expect("run losat makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     (query, set, db)

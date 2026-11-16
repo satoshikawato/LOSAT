@@ -47,7 +47,7 @@ MUL_ADD_SITES = {
 # No NCBI counterpart: the release-binary functions that `x_product_error` is inlined into
 # (the ErfC code of `stats/spouge.rs`). With an FMA target (x86-64-v3, aarch64) `mul_add` is an
 # FMA instruction there; on baseline x86-64 it is a call of `fma`.
-MUL_ADD_FUNCTION_PREFIXES = ("LOSAT::stats::spouge::",)
+MUL_ADD_FUNCTION_PREFIXES = ("losat::stats::spouge::",)
 # No NCBI counterpart: functions that may hold an FMA instruction: the `mul_add` sites and
 # the `fma` of Rust's compiler-builtins that baseline x86-64 links, which takes the FMA or FMA4
 # instruction when the CPU has one and a software fused multiply-add otherwise (all three round

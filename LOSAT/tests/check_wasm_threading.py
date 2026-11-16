@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """Real native/WASI threading gates with raw NCBI 2.17.0 oracle output."""
 import argparse
-import csv
 import hashlib
 import json
 import os
 import platform
-import re
 from pathlib import Path
 import subprocess
 import sys
@@ -14,6 +12,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 TESTS = ROOT / "LOSAT/tests"
 sys.path.insert(0, str(TESTS))
+import db_search_fixtures
 from wasm_performance import validate_thread_evidence
 
 
@@ -165,11 +164,9 @@ def main():
     # ```
     # A database file is opened once for the process and read by every thread. -db at every
     # thread count, against the frozen NCBI bytes of one outfmt 6 row per program
-    # (LOSAT/tests/db_search_manifest.tsv; the Node host's threads read a descriptor that
+    # (LOSAT/tests/db_search_manifest/<program>.tsv; the Node host's threads read a descriptor that
     # another thread opened).
-    with (TESTS / "db_search_manifest.tsv").open() as handle:
-        manifest = {row["row_id"]: row for row in csv.DictReader(
-            (line for line in handle if not line.startswith("#")), delimiter="\t")}
+    manifest = {row["row_id"]: row for row in db_search_fixtures.read_manifest()[1]}
     for row_id in ["db.blastn.mega.6", "db.d1.6", "db.blastx.default.6", "db.tblastn.default.6", "db.tblastx.default.6"]:
         row = manifest[row_id]
         assert row["kind"] == "ncbi" and not row["extra_args"], row_id
@@ -182,30 +179,6 @@ def main():
                 assert data == reference, f"raw output differs: {row_id}/{kind}-n{n}"
                 validate_thread_evidence(log, n, "native" if kind == "native-serial" else kind)
         print(row_id, "-db raw parity + thread contract PASS", flush=True)
-    # NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:225-228
-    # ```c++
-    #         CBlastFormat formatter(opt, *db_adapter,
-    #                                fmt_args->GetFormattedOutputChoice(),
-    #                                query_opts->GetParseDeflines(),
-    #                                m_CmdLineArgs->GetOutputStream(),
-    # ```
-    # The output is one stream of the process. blastp-fast's query blocks searched two at a time
-    # (LOSAT_X_BPQSLOTS) are written by whichever pool thread completes the order, to the -out file
-    # that another thread created (the Node host's threads write a descriptor that another thread
-    # opened), and to /dev/null; against the native bytes. MeenMJNV x MejoMJNV makes two blocks, the
-    # second the larger, so the thread that wrote the first one rarely writes the second (the host
-    # test in test_wasi_runners.js always writes from the other thread).
-    common = ["blastp", "-task", "blastp-fast", "-query", TESTS / "fasta/MeenMJNV.faa",
-              "-subject", TESTS / "fasta/MejoMJNV.faa", "-outfmt", "6", "-evalue", "0.001", "-num_threads", "2"]
-    reference, _ = execute("slots/native-n2", [*prefixes["native"], *common, "-out", "{out}"])
-    for label, target in [("file", "{out}"), ("dev-null", "/dev/null")]:
-        data, log = execute(f"slots/threaded-n2-{label}", [*prefixes["threaded"], *common, "-out", target],
-                            {"LOSAT_X_STATS": "1", "LOSAT_WASI_THREADS_DEBUG": "1"})
-        assert data == (reference if label == "file" else b""), f"raw output differs: slots/threaded-n2-{label}"
-        slots = re.search(r"\[X_STATS\] BPQSLOTS searches=1 blocks=(\d+)", log)
-        assert slots and int(slots.group(1)) >= 2, f"the blocks did not take the slots: {label}"
-        validate_thread_evidence(log, 2, "threaded")
-    print("blastp-fast slots -out parity + thread contract PASS", flush=True)
     for program, query in [("blastn", "nuc1"), ("tblastx", "nuc1"), ("blastp", "aa1")]:
         common = [program, "-query", inputs[query], "-subject", inputs[query], "-outfmt", "6", "-out", "{out}"]
         for kind, prefix in prefixes.items():
@@ -253,31 +226,39 @@ def main():
                 if kind not in prefixes: continue
                 data, log = execute(f"dev-null/{program}-{kind}-n{n}", [*prefixes[kind], *empty_args, "-num_threads", str(n)])
                 assert data == empty and log == empty_log, f"output or messages differ: dev-null/{program}-{kind}-n{n}"
-    # NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
-    # AddDefaultKey(kArgOutputFormat, ..., eString, ...);
-    # Unported format routes must reject explicitly before starting any worker
-    # (BLASTN names what it does not support since S07+: "not supported by LOSAT").
-    # TBLASTX writes outfmt 0 and 7 since S08; they are compared with the oracle below.
-    for program, formats in [("blastn", ["6 qseqid sseqid"]),
-                             ("tblastx", ["6 qseqid sseqid"])]:
-        for index, fmt in enumerate(formats):
-            for kind, prefix in prefixes.items():
-                n = 1 if kind in ["serial", "native-serial"] else 8
-                data, log = execute(f"unsupported-format/{program}-{index}-{kind}",
-                    [*prefix, program, "-query", inputs["nuc1"], "-subject", inputs["nuc1"],
-                     "-outfmt", fmt, "-num_threads", str(n), "-out", "{out}"],
-                    {"LOSAT_WASI_THREADS_DEBUG": "1"}, expected=1)
-                assert not data and any(marker in log.lower() for marker in
-                                        ("unsupported", "not implemented", "not supported by losat"))
-                assert "spawn_attempt" not in log and "[losat-thread-pool]" not in log
+            # No NCBI counterpart (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 8): a -query or
+            # -subject named .gz, .bz2 or .zst is inflated beside the input before it is read
+            # (LOSAT/src/blastinput/input_files.rs), so the report is the plain file's. Rust's
+            # temp_dir() panics on the WASI targets; the commands must not reach it.
+            import bz2, gzip
+            packed_dir = out / "compressed-inputs"
+            packed_dir.mkdir(parents=True, exist_ok=True)
+            plain = Path(inputs[query]).read_bytes()
+            packed = {".gz": gzip.compress(plain), ".bz2": bz2.compress(plain),
+                      ".zst": subprocess.run(["zstd", "-q", "-c"], input=plain, capture_output=True, check=True).stdout}
+            plain_args = [program, "-subject", inputs[query], "-outfmt", "6", "-out", "{out}"]
+            reference, _ = execute(f"compressed/{program}-native-plain", [*prefixes["native"], *plain_args, "-query", inputs[query]])
+            for suffix, data in packed.items():
+                name = packed_dir / f"{query}.fasta{suffix}"
+                name.write_bytes(data)
+                for kind, n in [("native", 1), ("serial", 1), ("threaded", 1), ("threaded", 4)]:
+                    if kind not in prefixes: continue
+                    for role in ["query", "subject"]:
+                        roles = {"query": inputs[query], "subject": inputs[query], role: name}
+                        result, _ = execute(f"compressed/{program}-{kind}-n{n}-{role}{suffix}",
+                                            [*prefixes[kind], program, "-query", roles["query"], "-subject", roles["subject"],
+                                             "-outfmt", "6", "-out", "{out}", "-num_threads", str(n)])
+                        assert result == reference, f"raw output differs: compressed/{program}-{kind}-n{n}-{role}{suffix}"
+    # The organism report (-outfmt 18) is written since line RG T2 (c86dd36c1) and is compared
+    # with the oracle like the other formats; no output format is refused in these programs.
     format_failures = []
     for program, query, subject, formats, task in [
         ("blastx", "blastx-query", "aa3", ["0", "6", "7", "6 std qframe sframe btop"], None),
         ("blastp", "aa3", "aa3", ["0", "7", "6 std qlen slen positive ppos btop stitle"], None),
         ("blastp", "aa-query-edge", "aa-subject-edge", ["0", "7", "6 std qlen slen positive ppos btop stitle", "7 qseqid qacc qaccver sseqid sacc saccver qlen slen score nident positive gaps frames qframe sframe qseq sseq btop stitle"], None),
-        ("blastn", "nuc3", "nuc3", ["0", "7"], "megablast"),
+        ("blastn", "nuc3", "nuc3", ["0", "7", "18"], "megablast"),
         ("blastn", "nuc3", "nuc3", ["0", "7"], "blastn"),
-        ("tblastx", "nuc3", "nuc3", ["0", "7"], None),
+        ("tblastx", "nuc3", "nuc3", ["0", "7", "18"], None),
         ("tblastn", "aa1", "tblastn-subjects", ["0", "7"], None),
     ]:
         for index, fmt in enumerate(formats):

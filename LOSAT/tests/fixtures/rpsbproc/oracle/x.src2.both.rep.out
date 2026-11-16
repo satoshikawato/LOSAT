@@ -1,0 +1,53 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/x_src2.xml
+#Output data file:	(stdout)
+#Annotation data at:	data
+#E-Value cutoff:	0.01
+#Redundancy:	Concise
+#Data requested:	Domain hits and site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	RPSBLAST 2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Peptide	206	NP_417755.1 30S ribosomal subunit protein S4 [Escherichia coli str. K-12 substr. MG1655]
+DOMAINS
+1	Query_1	Specific	440288	1	206	1.46341e-134	375.182	COG0522	RpsD	-	-
+ENDDOMAINS
+SITES
+1	Query_1	Specific	RNA binding surface	R97,A109,T110,A112,E113,R115,Q116,S119,H120,A122,V129,V130,N131,I132,A133,S134,Y135,Q136,S138	19	19	238095
+ENDSITES
+ENDQUERY
+QUERY	Query_2	Peptide	140	NP_415914.1 phenylacetyl-CoA thioesterase [Escherichia coli str. K-12 substr. MG1655]
+DOMAINS
+1	Query_2	Specific	131339	19	132	5.5444e-60	180.694	TIGR02286	PaaD	-	529137
+ENDDOMAINS
+SITES
+1	Query_2	Specific	CoenzymeA binding site	C51,A77,F84,L85,R86,P87	6	6	239527
+1	Query_2	Specific	PHB binding site	G53,D61,T62,A65,Y66,A77	6	6	239527
+1	Query_2	Specific	subunit interaction site	H52,G54,F57,S78,A79,C80,T81,I82,F84	9	9	239527
+ENDSITES
+ENDQUERY
+ENDSESSION	1
+ENDDATA

@@ -1,10 +1,11 @@
 // FakeEngine: a stand-in for the real engine until the Wasm engine exists (plan §7, W0).
 // Its outputs are not search results and say so on every line. It exists so that the
 // application layer and UI can be built and tested against the EngineGateway contract.
-import { recordMismatch } from '../../domain/dataset';
-import { OUTPUT_FORMATS } from '../../domain/output-format';
-import { PROGRAMS, type ProgramId } from '../../domain/programs';
+import { RunOutputWriter, sha256Hex, toProgramDescription } from 'losat';
+import { CUSTOM_OUTPUT, OUTPUT_FORMATS, recordMismatch, type ProgramId } from 'losat/domain';
 import {
+  DIAGNOSTICS_STREAM,
+  HITS_STREAM,
   InputMismatchError,
   RunCancelledError,
   type EngineGateway,
@@ -13,11 +14,11 @@ import {
   type HspRecord,
   type ProgramDescription,
   type RuntimeInfo,
+  type StartResult,
   type ValidationResult,
-} from '../../ports/engine';
-import { DIAGNOSTICS_STREAM, HITS_STREAM } from '../../ports/run-output';
-import { toProgramDescription } from '../reactor/control';
-import { RunOutputWriter } from '../run-output/writer';
+} from 'losat/ports';
+import { customOutfmt, OUTFMT_FLAG, outfmtOption } from '../../domain/output-format';
+import { PROGRAMS } from '../../domain/programs';
 import DESCRIBE from './describe.json';
 import { fakeRecordKeys } from './fake-fasta';
 
@@ -48,11 +49,35 @@ export class FakeEngine implements EngineGateway {
     return toProgramDescription(json);
   }
 
+  /**
+   * NCBI's application start is not imitated: no registry file, no file of the run, no dry run (its
+   * `validate` refuses `-conffile`, `-logfile` and `-dryrun`, which `describe` does not list).
+   */
+  async start(): Promise<StartResult> {
+    return { ok: true, start: { conffile: null, logFile: null, dryRun: false } };
+  }
+
+  /**
+   * Refuses an unknown program, and a word that is neither an option of the program's `describe`
+   * nor the value of the option before it, with the CLI's message; the engine's other checks are
+   * not imitated, and a registry file is not read.
+   */
   async validate(argv: readonly string[]): Promise<ValidationResult> {
     const program = argv[0];
     if (!PROGRAMS.some((p) => p.id === program)) return { ok: false, message: `unknown program: ${program}` };
-    // As ABI v2 does until session SX (web/adapter/src/run.rs `Program::parse`).
-    if (program === 'blastx') return { ok: false, message: 'blastx is not available in LOSAT Web ABI v2 yet' };
+    const { parameters } = await this.describe(program as ProgramId);
+    const outfmt = outfmtOption(argv);
+    for (let i = 1; i < argv.length; i++) {
+      const word = argv[i]!;
+      if (i === outfmt?.at) {
+        i += outfmt.words - 1;
+        continue;
+      }
+      const [flag, value] = word.split(/=(.*)/s, 2);
+      const option = parameters.find((p) => p.flag === flag);
+      if (option === undefined) return { ok: false, message: `error: unknown option or argument '${word}'; use -help for CLI v2 syntax` };
+      if (option.takesValue && value === undefined) i++;
+    }
     return { ok: true };
   }
 
@@ -67,10 +92,16 @@ export class FakeEngine implements EngineGateway {
     if (request.query.bytes.length === 0 || request.subject.bytes.length === 0) {
       throw new Error('No sequence input was provided');
     }
+    // The counts file is accepted and recorded, not used: the fake searches nothing.
+    const counts = request.windowMasker;
+    const windowMasker =
+      counts === undefined
+        ? undefined
+        : { name: counts.name, size: counts.file.size, sha256: await sha256Hex(new Uint8Array(await counts.file.arrayBuffer())), retained: false, loadMs: 0 };
     const writer = new RunOutputWriter(output);
     this.writeOutputs(request, writer);
     writer.end();
-    return { path: 'fake', threads: 1, engineBuild: 'fake-engine' };
+    return { path: 'fake', threads: 1, engineBuild: 'fake-engine', ...(windowMasker === undefined ? {} : { windowMasker }) };
   }
 
   cancel(runId: string): void {
@@ -81,7 +112,7 @@ export class FakeEngine implements EngineGateway {
   private register(request: EngineRunRequest): void {
     for (const role of ['query', 'subject'] as const) {
       const input = request[role];
-      const mismatch = recordMismatch(input.records, fakeRecordKeys(input.bytes));
+      const mismatch = recordMismatch(input.records, fakeRecordKeys(input.bytes, programOf(request), role));
       if (mismatch !== undefined) throw new InputMismatchError(role, mismatch);
     }
   }
@@ -90,16 +121,16 @@ export class FakeEngine implements EngineGateway {
    * Writes outputs with the structure of a search, so that the results screen can be built
    * and tested without the engine: up to 200 queries, each but every fourth with HSPs on
    * up to three subjects (the third subject is left out of outfmt 0, as subjects past
-   * -num_alignments are), a reverse HSP and, for BLASTN, a one-letter HSP. Every text
+   * -num_alignments are), a reverse HSP on a nucleotide subject and, for BLASTN, a one-letter HSP. Every text
    * says that it is not a search result, and the values are marked FAKE.
    */
   private writeOutputs(request: EngineRunRequest, writer: RunOutputWriter): void {
     const encoder = new TextEncoder();
     const program = request.argv[0] ?? '';
-    const queries = fakeRecordKeys(request.query.bytes).slice(0, 200);
-    const subjects = fakeRecordKeys(request.subject.bytes).slice(0, 3);
-    const nucleotide = { query: program === 'blastn' || program === 'tblastx', subject: program !== 'blastp' };
-    const translated = { query: program === 'tblastx', subject: program === 'tblastn' || program === 'tblastx' };
+    const queries = fakeRecordKeys(request.query.bytes, programOf(request), 'query').slice(0, 200);
+    const subjects = fakeRecordKeys(request.subject.bytes, programOf(request), 'subject').slice(0, 3);
+    const nucleotide = { query: ['blastn', 'blastx', 'tblastx'].includes(program), subject: ['blastn', 'tblastn', 'tblastx'].includes(program) };
+    const translated = { query: program === 'blastx' || program === 'tblastx', subject: program === 'tblastn' || program === 'tblastx' };
     let out0 = `${FAKE_MARKER}\nProgram: ${program}\n`;
     // outfmt 6 has no comment lines; this first line is what makes an exported fake outfmt 6
     // say that it is not a search result. The rows are read by their `out6` ranges.
@@ -166,6 +197,10 @@ export class FakeEngine implements EngineGateway {
     writer.write(0, encoder.encode(out0));
     writer.write(6, encoder.encode(out6));
     writer.write(7, encoder.encode(`${out7}# ${index} hits found\n`));
+    // The output of the argv's -outfmt (a format besides 0, 6 and 7, or 6 or 7 with fields): the
+    // rows of outfmt 6, marked.
+    const custom = customOutfmt(request.argv);
+    if (custom !== undefined) writer.write(CUSTOM_OUTPUT, encoder.encode(`# ${FAKE_MARKER}\n# ${OUTFMT_FLAG} ${custom}\n${out6.slice(out6.indexOf('\n') + 1)}`));
     writer.write(HITS_STREAM, encoder.encode(hits));
     writer.write(DIAGNOSTICS_STREAM, encoder.encode(`Warning: ${FAKE_MARKER}\n`));
   }
@@ -173,4 +208,9 @@ export class FakeEngine implements EngineGateway {
   private pause(): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, this.phaseDelayMs));
   }
+}
+
+/** The program of a run: the first word of its argv. */
+function programOf(request: EngineRunRequest): ProgramId {
+  return request.argv[0] as ProgramId;
 }

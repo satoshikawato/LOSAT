@@ -627,6 +627,34 @@ pub fn disc_word_scan_subject(
     scan_range: [i32; 2],
     on_word: &mut impl FnMut(i32, u32, Option<u32>),
 ) {
+    disc_word_scan_subject_until(
+        kind,
+        packed,
+        template_type,
+        second_template_type,
+        template_length,
+        scan_range,
+        &mut |s_off, index, index2| {
+            on_word(s_off, index, index2);
+            true
+        },
+    );
+}
+
+/// `disc_word_scan_subject` with a stop: the scan returns after the word for which `on_word`
+/// returns `false`, as NCBI's scan returns when its offset array is full (`total_hits >=
+/// max_hits`, blast_nascan.c:1447-1454) with the next offset in `scan_range[0]`; a scan started
+/// again from any word's offset gives the words from that one on, as NCBI's next call does.
+/// EXPERIMENT (LOSAT_X_SEEDPIECE): the strips paths' seed pieces (`x_pair_seed_piece.rs`).
+pub(crate) fn disc_word_scan_subject_until(
+    kind: DiscScanSubjectKind,
+    packed: &[u8],
+    template_type: DiscTemplateType,
+    second_template_type: DiscTemplateType,
+    template_length: i32,
+    scan_range: [i32; 2],
+    on_word: &mut impl FnMut(i32, u32, Option<u32>) -> bool,
+) {
     match kind {
         DiscScanSubjectKind::General => {
             mb_disc_word_scan_subject_1(packed, template_type, template_length, scan_range, on_word)
@@ -729,7 +757,7 @@ fn mb_disc_word_scan_subject_1(
     template_type: DiscTemplateType,
     template_length: i32,
     mut scan_range: [i32; 2],
-    on_word: &mut impl FnMut(i32, u32, Option<u32>),
+    on_word: &mut impl FnMut(i32, u32, Option<u32>) -> bool,
 ) {
     let mut s = (scan_range[0] / COMPRESSION_RATIO_I32) as usize;
     let mut accum: u64 = 0;
@@ -755,11 +783,13 @@ fn mb_disc_word_scan_subject_1(
                 if scan_range[0] > scan_range[1] {
                     break;
                 }
-                on_word(
+                if !on_word(
                     scan_range[0],
                     compute_discontiguous_index(accum, template_type),
                     None,
-                );
+                ) {
+                    return;
+                }
                 scan_range[0] += 1;
                 phase = 1;
             }
@@ -769,11 +799,13 @@ fn mb_disc_word_scan_subject_1(
                 }
                 accum = (accum << 8) | packed[s] as u64;
                 s += 1;
-                on_word(
+                if !on_word(
                     scan_range[0],
                     compute_discontiguous_index(accum >> 6, template_type),
                     None,
-                );
+                ) {
+                    return;
+                }
                 scan_range[0] += 1;
                 phase = 2;
             }
@@ -781,11 +813,13 @@ fn mb_disc_word_scan_subject_1(
                 if scan_range[0] > scan_range[1] {
                     break;
                 }
-                on_word(
+                if !on_word(
                     scan_range[0],
                     compute_discontiguous_index(accum >> 4, template_type),
                     None,
-                );
+                ) {
+                    return;
+                }
                 scan_range[0] += 1;
                 phase = 3;
             }
@@ -793,11 +827,13 @@ fn mb_disc_word_scan_subject_1(
                 if scan_range[0] > scan_range[1] {
                     break;
                 }
-                on_word(
+                if !on_word(
                     scan_range[0],
                     compute_discontiguous_index(accum >> 2, template_type),
                     None,
-                );
+                ) {
+                    return;
+                }
                 scan_range[0] += 1;
                 phase = 0;
             }
@@ -877,7 +913,7 @@ fn mb_disc_word_scan_subject_two_templates_1(
     second_template_type: DiscTemplateType,
     template_length: i32,
     mut scan_range: [i32; 2],
-    on_word: &mut impl FnMut(i32, u32, Option<u32>),
+    on_word: &mut impl FnMut(i32, u32, Option<u32>) -> bool,
 ) {
     let mut s = (scan_range[0] / COMPRESSION_RATIO_I32) as usize;
     let mut accum: u64 = 0;
@@ -902,7 +938,7 @@ fn mb_disc_word_scan_subject_two_templates_1(
             s_off,
             compute_discontiguous_index(shifted, template_type),
             Some(compute_discontiguous_index(shifted, second_template_type)),
-        );
+        )
     };
     loop {
         match phase {
@@ -910,7 +946,9 @@ fn mb_disc_word_scan_subject_two_templates_1(
                 if scan_range[0] > scan_range[1] {
                     break;
                 }
-                word(scan_range[0], accum);
+                if !word(scan_range[0], accum) {
+                    return;
+                }
                 scan_range[0] += 1;
                 phase = 1;
             }
@@ -920,7 +958,9 @@ fn mb_disc_word_scan_subject_two_templates_1(
                 }
                 accum = (accum << 8) | packed[s] as u64;
                 s += 1;
-                word(scan_range[0], accum >> 6);
+                if !word(scan_range[0], accum >> 6) {
+                    return;
+                }
                 scan_range[0] += 1;
                 phase = 2;
             }
@@ -928,7 +968,9 @@ fn mb_disc_word_scan_subject_two_templates_1(
                 if scan_range[0] > scan_range[1] {
                     break;
                 }
-                word(scan_range[0], accum >> 4);
+                if !word(scan_range[0], accum >> 4) {
+                    return;
+                }
                 scan_range[0] += 1;
                 phase = 3;
             }
@@ -936,7 +978,9 @@ fn mb_disc_word_scan_subject_two_templates_1(
                 if scan_range[0] > scan_range[1] {
                     break;
                 }
-                word(scan_range[0], accum >> 2);
+                if !word(scan_range[0], accum >> 2) {
+                    return;
+                }
                 scan_range[0] += 1;
                 phase = 0;
             }
@@ -1044,7 +1088,7 @@ fn mb_disc_word_scan_subject_two_templates_1(
 fn mb_disc_word_scan_subject_11_18_1(
     packed: &[u8],
     mut scan_range: [i32; 2],
-    on_word: &mut impl FnMut(i32, u32, Option<u32>),
+    on_word: &mut impl FnMut(i32, u32, Option<u32>) -> bool,
 ) {
     const K_TEMPLATE_LENGTH: i32 = 18;
     let mut s = (scan_range[0] / COMPRESSION_RATIO_I32) as usize;
@@ -1081,7 +1125,9 @@ fn mb_disc_word_scan_subject_11_18_1(
                     | ((lo & 0x03c00000) >> 10)
                     | ((lo & 0xf0000000) >> 12)
                     | ((hi & 0x0000000c) << 18);
-                on_word(scan_range[0], index, None);
+                if !on_word(scan_range[0], index, None) {
+                    return;
+                }
                 scan_range[0] += 1;
                 phase = 1;
             }
@@ -1099,7 +1145,9 @@ fn mb_disc_word_scan_subject_11_18_1(
                     | ((lo & 0xf0000000) >> 16)
                     | ((hi & 0x0000003c) << 14)
                     | ((hi & 0x00000300) << 12);
-                on_word(scan_range[0], index, None);
+                if !on_word(scan_range[0], index, None) {
+                    return;
+                }
                 scan_range[0] += 1;
                 phase = 2;
             }
@@ -1114,7 +1162,9 @@ fn mb_disc_word_scan_subject_11_18_1(
                     | ((lo & 0x3c000000) >> 14)
                     | ((hi & 0x0000000f) << 16)
                     | ((hi & 0x000000c0) << 14);
-                on_word(scan_range[0], index, None);
+                if !on_word(scan_range[0], index, None) {
+                    return;
+                }
                 scan_range[0] += 1;
                 phase = 3;
             }
@@ -1130,7 +1180,9 @@ fn mb_disc_word_scan_subject_11_18_1(
                     | ((lo & 0xc0000000) >> 14)
                     | ((hi & 0x00000003) << 18)
                     | ((hi & 0x00000030) << 16);
-                on_word(scan_range[0], index, None);
+                if !on_word(scan_range[0], index, None) {
+                    return;
+                }
                 scan_range[0] += 1;
                 phase = 0;
             }
@@ -1238,7 +1290,7 @@ fn mb_disc_word_scan_subject_11_18_1(
 fn mb_disc_word_scan_subject_11_21_1(
     packed: &[u8],
     mut scan_range: [i32; 2],
-    on_word: &mut impl FnMut(i32, u32, Option<u32>),
+    on_word: &mut impl FnMut(i32, u32, Option<u32>) -> bool,
 ) {
     const K_TEMPLATE_LENGTH: i32 = 21;
     let mut s = (scan_range[0] / COMPRESSION_RATIO_I32) as usize;
@@ -1276,7 +1328,9 @@ fn mb_disc_word_scan_subject_11_21_1(
                     | ((lo & 0xf0000000) >> 14)
                     | ((hi & 0x0000000c) << 16)
                     | ((hi & 0x00000300) << 12);
-                on_word(scan_range[0], index, None);
+                if !on_word(scan_range[0], index, None) {
+                    return;
+                }
                 scan_range[0] += 1;
                 phase = 1;
             }
@@ -1295,7 +1349,9 @@ fn mb_disc_word_scan_subject_11_21_1(
                     | ((hi & 0x0000003c) << 12)
                     | ((hi & 0x00000300) << 10)
                     | ((hi & 0x0000c000) << 6);
-                on_word(scan_range[0], index, None);
+                if !on_word(scan_range[0], index, None) {
+                    return;
+                }
                 scan_range[0] += 1;
                 phase = 2;
             }
@@ -1311,7 +1367,9 @@ fn mb_disc_word_scan_subject_11_21_1(
                     | ((hi & 0x0000000f) << 14)
                     | ((hi & 0x000000c0) << 12)
                     | ((hi & 0x00003000) << 8);
-                on_word(scan_range[0], index, None);
+                if !on_word(scan_range[0], index, None) {
+                    return;
+                }
                 scan_range[0] += 1;
                 phase = 3;
             }
@@ -1328,7 +1386,9 @@ fn mb_disc_word_scan_subject_11_21_1(
                     | ((hi & 0x00000003) << 16)
                     | ((hi & 0x00000030) << 14)
                     | ((hi & 0x00000c00) << 10);
-                on_word(scan_range[0], index, None);
+                if !on_word(scan_range[0], index, None) {
+                    return;
+                }
                 scan_range[0] += 1;
                 phase = 0;
             }

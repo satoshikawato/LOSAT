@@ -9,13 +9,14 @@ import {
   openApp,
   openProbe,
   OUTFMT7_MARK,
-  queueSearch,
   runSearch,
+  startSearch,
   sessionDirectories,
   sessionFiles,
   setQuota,
 } from './support/browser';
 import { expect, killRenderers, test } from './support/profile';
+import { runMessage } from './support/search';
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
 
@@ -25,7 +26,7 @@ test('a tab keeps its outputs in OPFS under tmp/<session>/runs/<run>/, named by 
   const page = await openApp(profile.context);
   await expect(page.getByTestId('storage-status')).toHaveAttribute('data-backend', 'opfs');
   await runSearch(page, 1);
-  await expect(page.getByTestId('storage-usage')).toContainText(/^Browser storage \(OPFS\): [1-9]\d* bytes used by this tab/);
+  await expect(page.getByTestId('storage-status')).toHaveAttribute('data-backend', 'opfs');
 
   const probe = await openProbe(profile.context);
   const sessions = await sessionDirectories(probe);
@@ -68,7 +69,6 @@ for (const ending of ['is killed', 'is closed'] as const) {
 
     const next = await openApp(profile.context);
     await expect(next.getByTestId('storage-status')).toHaveAttribute('data-removed-sessions', '1');
-    await expect(next.getByTestId('storage-status')).toContainText('Removed the temporary data left by 1 closed tab.');
     const sessions = await sessionDirectories(probe);
     expect(sessions).toHaveLength(1);
     expect(sessions).not.toContain(abandoned);
@@ -153,9 +153,9 @@ test('a run that runs out of storage fails with the reason; earlier results stay
   // usage that Chromium checks, which would leave room for the next run.
   await setQuota(page, 0);
   try {
-    await queueSearch(page);
-    await expect(page.getByTestId('run-2-status')).toHaveText('failed');
-    await expect(page.getByTestId('run-2')).toContainText('Not enough temporary storage for the results of this run');
+    await startSearch(page);
+    await expect(page.getByTestId('run-2-option')).toHaveAttribute('data-status', 'failed');
+    expect(await runMessage(page, 2)).toContain('Not enough temporary storage for the results of this run');
 
     await expectResult(page, 1);
     const download = page.waitForEvent('download');

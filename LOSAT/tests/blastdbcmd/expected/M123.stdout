@@ -1,0 +1,15 @@
+Database: masked_nucl
+	4 sequences; 1,399 total bases
+
+Date: Oct 29, 2026  7:13 PM	Longest sequence: 449 bases
+
+BLASTDB Version: 5
+
+Available filtering algorithms applied to database sequences:
+
+Algorithm ID Algorithm name                          Algorithm options                       
+11           dust                                    window=64; level=20; linker=1           
+12           dust                                    window=32; level=15; linker=1           
+
+Volumes:
+	{R}/db/nm5

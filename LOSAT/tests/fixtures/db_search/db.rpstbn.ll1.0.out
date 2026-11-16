@@ -1,0 +1,1143 @@
+RPSTBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: rps_mini
+           3 sequences; 560 total letters
+
+
+
+Query= tkcut570
+
+Length=570
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  349     4e-129
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 349 bits (895),  Expect = 4e-129
+ Identities = 190/190 (100%), Positives = 190/190 (100%), Gaps = 0/190 (0%)
+ Frame = +1
+
+Query  1    M  3
+            M
+Sbjct       M  
+
+Query  4    Q  6
+            Q
+Sbjct  2    Q  2
+
+Query  7    L  9
+            L
+Sbjct  3    L  3
+
+Query  10   I  12
+            I
+Sbjct  4    I  4
+
+Query  13   L  15
+            L
+Sbjct  5    L  5
+
+Query  16   S  18
+            S
+Sbjct  6    S  6
+
+Query  19   H  21
+            H
+Sbjct  7    H  7
+
+Query  22   H  24
+            H
+Sbjct  8    H  8
+
+Query  25   L  27
+            L
+Sbjct  9    L  9
+
+Query  28   T  30
+            T
+Sbjct  10   T  10
+
+Query  31   M  33
+            M
+Sbjct  11   M  11
+
+Query  34   A  36
+            A
+Sbjct  12   A  12
+
+Query  37   G  39
+            G
+Sbjct  13   G  13
+
+Query  40   R  42
+            R
+Sbjct  14   R  14
+
+Query  43   V  45
+            V
+Sbjct  15   V  15
+
+Query  46   E  48
+            E
+Sbjct  16   E  16
+
+Query  49   L  51
+            L
+Sbjct  17   L  17
+
+Query  52   V  54
+            V
+Sbjct  18   V  18
+
+Query  55   T  57
+            T
+Sbjct  19   T  19
+
+Query  58   G  60
+            G
+Sbjct  20   G  20
+
+Query  61   P  63
+            P
+Sbjct  21   P  21
+
+Query  64   M  66
+            M
+Sbjct  22   M  22
+
+Query  67   F  69
+            F
+Sbjct  23   F  23
+
+Query  70   A  72
+            A
+Sbjct  24   A  24
+
+Query  73   G  75
+            G
+Sbjct  25   G  25
+
+Query  76   K  78
+            K
+Sbjct  26   K  26
+
+Query  79   S  81
+            S
+Sbjct  27   S  27
+
+Query  82   T  84
+            T
+Sbjct  28   T  28
+
+Query  85   Y  87
+            Y
+Sbjct  29   Y  29
+
+Query  88   L  90
+            L
+Sbjct  30   L  30
+
+Query  91   K  93
+            K
+Sbjct  31   K  31
+
+Query  94   N  96
+            N
+Sbjct  32   N  32
+
+Query  97   I  99
+            I
+Sbjct  33   I  33
+
+Query  100  Y  102
+            Y
+Sbjct  34   Y  34
+
+Query  103  Q  105
+            Q
+Sbjct  35   Q  35
+
+Query  106  Q  108
+            Q
+Sbjct  36   Q  36
+
+Query  109  E  111
+            E
+Sbjct  37   E  37
+
+Query  112  N  114
+            N
+Sbjct  38   N  38
+
+Query  115  G  117
+            G
+Sbjct  39   G  39
+
+Query  118  G  120
+            G
+Sbjct  40   G  40
+
+Query  121  N  123
+            N
+Sbjct  41   N  41
+
+Query  124  K  126
+            K
+Sbjct  42   K  42
+
+Query  127  H  129
+            H
+Sbjct  43   H  43
+
+Query  130  C  132
+            C
+Sbjct  44   C  44
+
+Query  133  L  135
+            L
+Sbjct  45   L  45
+
+Query  136  F  138
+            F
+Sbjct  46   F  46
+
+Query  139  V  141
+            V
+Sbjct  47   V  47
+
+Query  142  K  144
+            K
+Sbjct  48   K  48
+
+Query  145  H  147
+            H
+Sbjct  49   H  49
+
+Query  148  S  150
+            S
+Sbjct  50   S  50
+
+Query  151  L  153
+            L
+Sbjct  51   L  51
+
+Query  154  E  156
+            E
+Sbjct  52   E  52
+
+Query  157  T  159
+            T
+Sbjct  53   T  53
+
+Query  160  R  162
+            R
+Sbjct  54   R  54
+
+Query  163  Y  165
+            Y
+Sbjct  55   Y  55
+
+Query  166  G  168
+            G
+Sbjct  56   G  56
+
+Query  169  C  171
+            C
+Sbjct  57   C  57
+
+Query  172  G  174
+            G
+Sbjct  58   G  58
+
+Query  175  T  177
+            T
+Sbjct  59   T  59
+
+Query  178  G  180
+            G
+Sbjct  60   G  60
+
+Query  181  T  183
+            T
+Sbjct  61   T  61
+
+Query  184  I  186
+            I
+Sbjct  62   I  62
+
+Query  187  V  189
+            V
+Sbjct  63   V  63
+
+Query  190  T  192
+            T
+Sbjct  64   T  64
+
+Query  193  H  195
+            H
+Sbjct  65   H  65
+
+Query  196  A  198
+            A
+Sbjct  66   A  66
+
+Query  199  G  201
+            G
+Sbjct  67   G  67
+
+Query  202  E  204
+            E
+Sbjct  68   E  68
+
+Query  205  V  207
+            V
+Sbjct  69   V  69
+
+Query  208  I  210
+            I
+Sbjct  70   I  70
+
+Query  211  E  213
+            E
+Sbjct  71   E  71
+
+Query  214  G  216
+            G
+Sbjct  72   G  72
+
+Query  217  C  219
+            C
+Sbjct  73   C  73
+
+Query  220  T  222
+            T
+Sbjct  74   T  74
+
+Query  223  T  225
+            T
+Sbjct  75   T  75
+
+Query  226  V  228
+            V
+Sbjct  76   V  76
+
+Query  229  S  231
+            S
+Sbjct  77   S  77
+
+Query  232  S  234
+            S
+Sbjct  78   S  78
+
+Query  235  I  237
+            I
+Sbjct  79   I  79
+
+Query  238  K  240
+            K
+Sbjct  80   K  80
+
+Query  241  E  243
+            E
+Sbjct  81   E  81
+
+Query  244  L  246
+            L
+Sbjct  82   L  82
+
+Query  247  I  249
+            I
+Sbjct  83   I  83
+
+Query  250  S  252
+            S
+Sbjct  84   S  84
+
+Query  253  V  255
+            V
+Sbjct  85   V  85
+
+Query  256  L  258
+            L
+Sbjct  86   L  86
+
+Query  259  P  261
+            P
+Sbjct  87   P  87
+
+Query  262  E  264
+            E
+Sbjct  88   E  88
+
+Query  265  V  267
+            V
+Sbjct  89   V  89
+
+Query  268  V  270
+            V
+Sbjct  90   V  90
+
+Query  271  D  273
+            D
+Sbjct  91   D  91
+
+Query  274  V  276
+            V
+Sbjct  92   V  92
+
+Query  277  I  279
+            I
+Sbjct  93   I  93
+
+Query  280  L  282
+            L
+Sbjct  94   L  94
+
+Query  283  I  285
+            I
+Sbjct  95   I  95
+
+Query  286  D  288
+            D
+Sbjct  96   D  96
+
+Query  289  E  291
+            E
+Sbjct  97   E  97
+
+Query  292  G  294
+            G
+Sbjct  98   G  98
+
+Query  295  Q  297
+            Q
+Sbjct  99   Q  99
+
+Query  298  F  300
+            F
+Sbjct  100  F  100
+
+Query  301  F  303
+            F
+Sbjct  101  F  101
+
+Query  304  T  306
+            T
+Sbjct  102  T  102
+
+Query  307  D  309
+            D
+Sbjct  103  D  103
+
+Query  310  L  312
+            L
+Sbjct  104  L  104
+
+Query  313  V  315
+            V
+Sbjct  105  V  105
+
+Query  316  L  318
+            L
+Sbjct  106  L  106
+
+Query  319  V  321
+            V
+Sbjct  107  V  107
+
+Query  322  N  324
+            N
+Sbjct  108  N  108
+
+Query  325  R  327
+            R
+Sbjct  109  R  109
+
+Query  328  L  330
+            L
+Sbjct  110  L  110
+
+Query  331  A  333
+            A
+Sbjct  111  A  111
+
+Query  334  D  336
+            D
+Sbjct  112  D  112
+
+Query  337  K  339
+            K
+Sbjct  113  K  113
+
+Query  340  G  342
+            G
+Sbjct  114  G  114
+
+Query  343  K  345
+            K
+Sbjct  115  K  115
+
+Query  346  R  348
+            R
+Sbjct  116  R  116
+
+Query  349  I  351
+            I
+Sbjct  117  I  117
+
+Query  352  V  354
+            V
+Sbjct  118  V  118
+
+Query  355  I  357
+            I
+Sbjct  119  I  119
+
+Query  358  A  360
+            A
+Sbjct  120  A  120
+
+Query  361  A  363
+            A
+Sbjct  121  A  121
+
+Query  364  L  366
+            L
+Sbjct  122  L  122
+
+Query  367  D  369
+            D
+Sbjct  123  D  123
+
+Query  370  G  372
+            G
+Sbjct  124  G  124
+
+Query  373  T  375
+            T
+Sbjct  125  T  125
+
+Query  376  S  378
+            S
+Sbjct  126  S  126
+
+Query  379  D  381
+            D
+Sbjct  127  D  127
+
+Query  382  Q  384
+            Q
+Sbjct  128  Q  128
+
+Query  385  Q  387
+            Q
+Sbjct  129  Q  129
+
+Query  388  M  390
+            M
+Sbjct  130  M  130
+
+Query  391  F  393
+            F
+Sbjct  131  F  131
+
+Query  394  S  396
+            S
+Sbjct  132  S  132
+
+Query  397  P  399
+            P
+Sbjct  133  P  133
+
+Query  400  I  402
+            I
+Sbjct  134  I  134
+
+Query  403  H  405
+            H
+Sbjct  135  H  135
+
+Query  406  K  408
+            K
+Sbjct  136  K  136
+
+Query  409  L  411
+            L
+Sbjct  137  L  137
+
+Query  412  L  414
+            L
+Sbjct  138  L  138
+
+Query  415  P  417
+            P
+Sbjct  139  P  139
+
+Query  418  Y  420
+            Y
+Sbjct  140  Y  140
+
+Query  421  T  423
+            T
+Sbjct  141  T  141
+
+Query  424  N  426
+            N
+Sbjct  142  N  142
+
+Query  427  S  429
+            S
+Sbjct  143  S  143
+
+Query  430  I  432
+            I
+Sbjct  144  I  144
+
+Query  433  V  435
+            V
+Sbjct  145  V  145
+
+Query  436  K  438
+            K
+Sbjct  146  K  146
+
+Query  439  L  441
+            L
+Sbjct  147  L  147
+
+Query  442  A  444
+            A
+Sbjct  148  A  148
+
+Query  445  S  447
+            S
+Sbjct  149  S  149
+
+Query  448  K  450
+            K
+Sbjct  150  K  150
+
+Query  451  C  453
+            C
+Sbjct  151  C  151
+
+Query  454  M  456
+            M
+Sbjct  152  M  152
+
+Query  457  I  459
+            I
+Sbjct  153  I  153
+
+Query  460  C  462
+            C
+Sbjct  154  C  154
+
+Query  463  K  465
+            K
+Sbjct  155  K  155
+
+Query  466  I  468
+            I
+Sbjct  156  I  156
+
+Query  469  D  471
+            D
+Sbjct  157  D  157
+
+Query  472  T  474
+            T
+Sbjct  158  T  158
+
+Query  475  K  477
+            K
+Sbjct  159  K  159
+
+Query  478  E  480
+            E
+Sbjct  160  E  160
+
+Query  481  A  483
+            A
+Sbjct  161  A  161
+
+Query  484  P  486
+            P
+Sbjct  162  P  162
+
+Query  487  F  489
+            F
+Sbjct  163  F  163
+
+Query  490  T  492
+            T
+Sbjct  164  T  164
+
+Query  493  V  495
+            V
+Sbjct  165  V  165
+
+Query  496  R  498
+            R
+Sbjct  166  R  166
+
+Query  499  F  501
+            F
+Sbjct  167  F  167
+
+Query  502  G  504
+            G
+Sbjct  168  G  168
+
+Query  505  N  507
+            N
+Sbjct  169  N  169
+
+Query  508  D  510
+            D
+Sbjct  170  D  170
+
+Query  511  N  513
+            N
+Sbjct  171  N  171
+
+Query  514  D  516
+            D
+Sbjct  172  D  172
+
+Query  517  N  519
+            N
+Sbjct  173  N  173
+
+Query  520  N  522
+            N
+Sbjct  174  N  174
+
+Query  523  V  525
+            V
+Sbjct  175  V  175
+
+Query  526  I  528
+            I
+Sbjct  176  I  176
+
+Query  529  C  531
+            C
+Sbjct  177  C  177
+
+Query  532  V  534
+            V
+Sbjct  178  V  178
+
+Query  535  G  537
+            G
+Sbjct  179  G  179
+
+Query  538  G  540
+            G
+Sbjct  180  G  180
+
+Query  541  A  543
+            A
+Sbjct  181  A  181
+
+Query  544  E  546
+            E
+Sbjct  182  E  182
+
+Query  547  M  549
+            M
+Sbjct  183  M  183
+
+Query  550  Y  552
+            Y
+Sbjct  184  Y  184
+
+Query  553  A  555
+            A
+Sbjct  185  A  185
+
+Query  556  A  558
+            A
+Sbjct  186  A  186
+
+Query  559  A  561
+            A
+Sbjct  187  A  187
+
+Query  562  C  564
+            C
+Sbjct  188  C  188
+
+Query  565  R  567
+            R
+Sbjct  189  R  189
+
+Query  568  D  570
+            D
+Sbjct  190  D  190
+
+
+ Score = 16.2 bits (30),  Expect = 1.1
+ Identities = 6/14 (43%), Positives = 7/14 (50%), Gaps = 0/14 (0%)
+ Frame = -1
+
+Query  129  M  127
+            M
+Sbjct  22   M  22
+
+Query  126  F  124
+            F
+Sbjct  23   F  23
+
+Query  123  I  121
+             
+Sbjct  24   A  24
+
+Query  120  A  118
+             
+Sbjct  25   G  25
+
+Query  117  S  115
+             
+Sbjct  26   K  26
+
+Query  114  V  112
+             
+Sbjct  27   S  27
+
+Query  111  F  109
+             
+Sbjct  28   T  28
+
+Query  108  L  106
+             
+Sbjct  29   Y  29
+
+Query  105  L  103
+            L
+Sbjct  30   L  30
+
+Query  102  I  100
+             
+Sbjct  31   K  31
+
+Query  99   N  97
+            N
+Sbjct  32   N  32
+
+Query  96   I  94
+            I
+Sbjct  33   I  33
+
+Query  93   F  91
+            +
+Sbjct  34   Y  34
+
+Query  90   Q  88
+            Q
+Sbjct  35   Q  35
+
+
+ Score = 14.6 bits (26),  Expect = 3.1
+ Identities = 9/36 (25%), Positives = 16/36 (44%), Gaps = 4/36 (11%)
+ Frame = -2
+
+Query  476  F  474
+            F
+Sbjct  131  F  131
+
+Query  473  V  471
+             
+Sbjct  132  S  132
+
+Query  470  S  468
+             
+Sbjct  133  P  133
+
+Query  467  I  465
+            I
+Sbjct  134  I  134
+
+Query  464  L  462
+             
+Sbjct  135  H  135
+
+Query  461  Q  459
+            +
+Sbjct  136  K  136
+
+Query  458  I  456
+            +
+Sbjct  137  L  137
+
+Query  455  M  453
+            +
+Sbjct  138  L  138
+
+Query  452  H  450
+             
+Sbjct       -  
+
+Query  449  F  447
+             
+Sbjct       -  
+
+Query  446  D  444
+             
+Sbjct       -  
+
+Query  443  A  441
+             
+Sbjct       -  
+
+Query  440  S  438
+             
+Sbjct  139  P  139
+
+Query  437  F  435
+            +
+Sbjct  140  Y  140
+
+Query  434  T  432
+            T
+Sbjct  141  T  141
+
+Query  431  I  429
+             
+Sbjct  142  N  142
+
+Query  428  E  426
+             
+Sbjct  143  S  143
+
+Query  425  L  423
+            +
+Sbjct  144  I  144
+
+Query  422  V  420
+            V
+Sbjct  145  V  145
+
+Query  419  Y  417
+             
+Sbjct  146  K  146
+
+Query  416  G  414
+             
+Sbjct  147  L  147
+
+Query  413  S  411
+            +
+Sbjct  148  A  148
+
+Query  410  N  408
+            +
+Sbjct  149  S  149
+
+Query  407  L  405
+             
+Sbjct  150  K  150
+
+Query  404  C  402
+            C
+Sbjct  151  C  151
+
+Query  401  M  399
+            M
+Sbjct  152  M  152
+
+Query  398  G  396
+             
+Sbjct  153  I  153
+
+Query  395  L  393
+             
+Sbjct  154  C  154
+
+Query  392  N  390
+             
+Sbjct  155  K  155
+
+Query  389  I  387
+            I
+Sbjct  156  I  156
+
+Query  386  C  384
+             
+Sbjct  157  D  157
+
+Query  383  *  381
+             
+Sbjct  158  T  158
+
+Query  380  S  378
+             
+Sbjct  159  K  159
+
+Query  377  E  375
+            E
+Sbjct  160  E  160
+
+Query  374  V  372
+             
+Sbjct  161  A  161
+
+Query  371  P  369
+            P
+Sbjct  162  P  162
+
+
+ Score = 14.2 bits (25),  Expect = 5.1
+ Identities = 3/6 (50%), Positives = 3/6 (50%), Gaps = 0/6 (0%)
+ Frame = -1
+
+Query  321  D  319
+            D
+Sbjct  172  D  172
+
+Query  318  K  316
+             
+Sbjct  173  N  173
+
+Query  315  Y  313
+             
+Sbjct  174  N  174
+
+Query  312  K  310
+             
+Sbjct  175  V  175
+
+Query  309  I  307
+            I
+Sbjct  176  I  176
+
+Query  306  C  304
+            C
+Sbjct  177  C  177
+
+
+ Score = 13.9 bits (24),  Expect = 6.2
+ Identities = 5/13 (38%), Positives = 5/13 (38%), Gaps = 0/13 (0%)
+ Frame = -2
+
+Query  176  V  174
+            V
+Sbjct  63   V  63
+
+Query  173  P  171
+             
+Sbjct  64   T  64
+
+Query  170  H  168
+            H
+Sbjct  65   H  65
+
+Query  167  P  165
+             
+Sbjct  66   A  66
+
+Query  164  Y  162
+             
+Sbjct  67   G  67
+
+Query  161  R  159
+             
+Sbjct  68   E  68
+
+Query  158  V  156
+            V
+Sbjct  69   V  69
+
+Query  155  S  153
+             
+Sbjct  70   I  70
+
+Query  152  R  150
+             
+Sbjct  71   E  71
+
+Query  149  E  147
+             
+Sbjct  72   G  72
+
+Query  146  C  144
+            C
+Sbjct  73   C  73
+
+Query  143  F  141
+             
+Sbjct  74   T  74
+
+Query  140  T  138
+            T
+Sbjct  75   T  75
+
+
+ Score = 13.1 bits (22),  Expect = 9.3
+ Identities = 4/7 (57%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+ Frame = -3
+
+Query  136  K  134
+             
+Sbjct  39   G  39
+
+Query  133  G  131
+            G
+Sbjct  40   G  40
+
+Query  130  N  128
+            N
+Sbjct  41   N  41
+
+Query  127  V  125
+             
+Sbjct  42   K  42
+
+Query  124  Y  122
+            +
+Sbjct  43   H  43
+
+Query  121  C  119
+            C
+Sbjct  44   C  44
+
+Query  118  L  116
+            L
+Sbjct  45   L  45
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 78077
+
+
+  Database: rps_mini
+    Posted date:  Nov 7, 2026  10:01 PM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40

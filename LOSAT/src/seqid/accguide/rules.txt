@@ -1,0 +1,4933 @@
+version 2
+3+5 AAE gb_patent_prot
+3+5 ??_ unknown
+3+5 A?? gb_prot
+3+7 A?? gb_prot
+3+9 A?? gb_prot
+3+11 A?? gb_prot
+3+5 B?? ddbj_prot
+3+7 B?? ddbj_prot
+3+9 B?? ddbj_prot
+3+11 B?? ddbj_prot
+3+5 C?? embl_prot *
+3+7 C?? embl_prot *
+3+9 C?? embl_prot
+3+11 C?? embl_prot
+3+5 D?? gb_tpa_prot *
+3+7 D?? gb_tpa_prot
+3+9 D?? gb_tpa_prot
+3+11 D?? gb_tpa_prot
+3+5 E?? gb_wgs_prot
+3+7 E?? gb_wgsv_prot
+3+9 E?? gb_prot
+3+11 E?? gb_prot
+3+5 F?? ddbj_tpa_prot
+3+7 F?? ddbj_tpa_prot
+3+9 F?? ddbj_tpa_prot
+3+11 F?? ddbj_tpa_prot
+3+5 G?? ddbj_wgs_prot
+3+7 G?? ddbj_prot
+3+9 G?? ddbj_prot
+3+11 G?? ddbj_prot
+3+5 H?? gb_tpa_wgsv_prot
+3+7 H?? gb_tpa_wgsv_prot
+3+9 H?? gb_tpa_prot
+3+11 H?? gb_tpa_prot
+3+5 I?? ddbj_tpa_tsa_prot
+3+7 I?? ddbj_tpa_prot
+3+9 I?? ddbj_tpa_prot
+3+11 I?? ddbj_tpa_prot
+3+5 J?? gb_tsa_prot
+3+7 J?? gb_prot
+3+9 J?? gb_prot
+3+11 J?? gb_prot
+3+5 K?? gb_wgs_prot
+3+7 K?? gb_wgs_prot
+3+9 K?? gb_prot
+3+11 K?? gb_prot
+3+5 L?? ddbj_prot
+3+7 L?? ddbj_prot
+3+9 L?? ddbj_prot
+3+11 L?? ddbj_prot
+3+5 M?? gb_wgsv_prot
+3+7 M?? gb_wgsv_prot
+3+9 M?? gb_prot
+3+11 M?? gb_prot
+3+5 N?? gb_wgsv_prot
+3+7 N?? gb_wgsv_prot
+3+9 N?? gb_prot
+3+11 N?? gb_prot
+3+5 O?? gb_wgs_prot
+3+7 O?? gb_prot
+3+9 O?? gb_prot
+3+11 O?? gb_prot
+3+5 P?? gb_wgs_prot
+3+7 P?? gb_prot
+3+9 P?? gb_prot
+3+11 P?? gb_prot
+3+5 Q?? gb_prot
+3+7 Q?? gb_prot
+3+9 Q?? gb_prot
+3+11 Q?? gb_prot
+3+5 R?? gb_wgs_prot
+3+7 R?? gb_prot
+3+9 R?? gb_prot
+3+11 R?? gb_prot
+3+5 S?? embl_prot *
+3+7 S?? embl_prot
+3+9 S?? embl_prot
+3+11 S?? embl_prot
+3+5 T?? gb_wgs_prot
+3+7 T?? gb_prot
+3+9 T?? gb_prot
+3+11 T?? gb_prot
+3+5 U?? gb_prot
+3+7 U?? gb_prot
+3+9 U?? gb_prot
+3+11 U?? gb_prot
+3+5 V?? embl_prot *
+3+7 V?? embl_prot
+3+9 V?? embl_prot
+3+11 V?? embl_prot
+3+5 W?? gb_prot
+3+7 W?? gb_prot
+3+9 W?? gb_prot
+3+11 W?? gb_prot
+3+5 X?? gb_prot
+3+7 X?? gb_prot
+3+9 X?? gb_prot
+3+11 X?? gb_prot
+3+5 ??? unreserved_prot
+3+7 ??? unreserved_prot
+3+9 ??? unreserved_prot
+3+11 ??? unreserved_prot
+4+9 GPC_ gpipe_chromosome
+4+9 GPG_ gpipe_genomic
+4+9 GPM_ gpipe_mrna
+4+9 GPN_ gpipe_other_nuc
+4+9 GPP_ gpipe_prot
+4+9 GPR_ gpipe_ncrna
+4+9 GPS_ gpipe_scaffold
+4+9 ZPC_ gpipe_chromosome
+4+9 ZPG_ gpipe_genomic
+4+9 ZPM_ gpipe_mrna
+4+9 ZPN_ gpipe_other_nuc
+4+9 ZPP_ gpipe_prot
+4+9 ZPR_ gpipe_ncrna
+4+9 ZPS_ gpipe_scaffold
+4+9 GP?_ gpipe_unreserved
+4+9 ZP?_ gpipe_unreserved
+4+8 ???_ unknown
+4+9 ???_ unknown
+4+10 ???_ unknown
+4+8 A??? gb_wgs_nuc
+4+9 A??? gb_wgs_nuc
+4+10 A??? gb_wgs_nuc
+4+8 B??? ddbj_wgs_nuc
+4+9 B??? ddbj_wgs_nuc
+4+10 B??? ddbj_wgs_nuc
+4+8 C??? embl_wgs_nuc
+4+9 C??? embl_wgs_nuc
+4+10 C??? embl_wgs_nuc
+4+8 D??? gb_tpa_wgs_nuc
+4+9 D??? gb_tpa_wgs_nuc
+4+10 D??? gb_tpa_wgs_nuc
+4+8 E??? ddbj_tpa_wgs_nuc
+4+9 E??? ddbj_tpa_wgs_nuc
+4+10 E??? ddbj_tpa_wgs_nuc
+4+8 F??? embl_wgs_nuc
+4+9 F??? embl_wgs_nuc
+4+10 F??? embl_wgs_nuc
+4+8 G??? gb_tsa_nuc
+4+9 G??? gb_tsa_nuc
+4+10 G??? gb_tsa_nuc
+4+8 H??? embl_tsa_nuc *
+4+9 H??? embl_tsa_nuc
+4+10 H??? embl_tsa_nuc
+4+8 I??? ddbj_tsa_nuc
+4+9 I??? ddbj_tsa_nuc
+4+10 I??? ddbj_tsa_nuc
+4+8 J??? gb_wgs_nuc
+4+9 J??? gb_wgs_nuc
+4+10 J??? gb_wgs_nuc
+4+8 K??? gb_targeted_nuc
+4+9 K??? gb_targeted_nuc
+4+10 K??? gb_targeted_nuc
+4+8 L??? gb_wgs_nuc
+4+9 L??? gb_wgs_nuc
+4+10 L??? gb_wgs_nuc
+4+8 M??? gb_wgs_nuc
+4+9 M??? gb_wgs_nuc
+4+10 M??? gb_wgs_nuc
+4+8 N??? gb_wgs_nuc
+4+9 N??? gb_wgs_nuc
+4+10 N??? gb_wgs_nuc
+4+8 O??? embl_wgs_nuc
+4+9 O??? embl_wgs_nuc
+4+10 O??? embl_wgs_nuc
+4+8 P??? gb_wgs_nuc
+4+9 P??? gb_wgs_nuc
+4+10 P??? gb_wgs_nuc
+4+8 Q??? gb_wgs_nuc
+4+9 Q??? gb_wgs_nuc
+4+10 Q??? gb_wgs_nuc
+4+8 R??? gb_wgs_nuc
+4+9 R??? gb_wgs_nuc
+4+10 R??? gb_wgs_nuc
+4+8 S??? gb_wgs_nuc
+4+9 S??? gb_wgs_nuc
+4+10 S??? gb_wgs_nuc
+4+8 T??? ddbj_targeted_nuc
+4+9 T??? ddbj_targeted_nuc
+4+10 T??? ddbj_targeted_nuc
+4+8 U??? embl_wgs_nuc
+4+9 U??? embl_wgs_nuc
+4+10 U??? embl_wgs_nuc
+4+8 V??? gb_wgs_nuc
+4+9 V??? gb_wgs_nuc
+4+10 V??? gb_wgs_nuc
+4+8 W??? gb_wgs_nuc
+4+9 W??? gb_wgs_nuc
+4+10 W??? gb_wgs_nuc
+4+8 X??? gb_wgs_nuc
+4+9 X??? gb_wgs_nuc
+4+10 X??? gb_wgs_nuc
+4+8 Y??? ddbj_tpa_tsa_nuc
+4+9 Y??? ddbj_tpa_tsa_nuc
+4+10 Y??? ddbj_tpa_tsa_nuc
+4+8 Z??? ddbj_tpa_targeted_nuc
+4+9 Z??? ddbj_tpa_targeted_nuc
+4+10 Z??? ddbj_tpa_targeted_nuc
+4+8 ???? unreserved_nuc
+4+9 ???? unreserved_nuc
+4+10 ???? unreserved_nuc
+6+9 ?????_ unknown
+6+10 ?????_ unknown
+6+11 ?????_ unknown
+6+9 A????? gb_wgs_nuc
+6+10 A????? gb_wgs_nuc
+6+11 A????? gb_wgs_nuc
+6+9 B????? ddbj_wgs_nuc
+6+10 B????? ddbj_wgs_nuc
+6+11 B????? ddbj_wgs_nuc
+6+9 C????? embl_wgs_nuc *
+6+10 C????? embl_wgs_nuc
+6+11 C????? embl_wgs_nuc
+6+9 D????? gb_tpa_wgs_nuc
+6+10 D????? gb_tpa_wgs_nuc
+6+11 D????? gb_tpa_wgs_nuc
+6+9 J????? gb_wgs_nuc
+6+10 J????? gb_wgs_nuc
+6+11 J????? gb_wgs_nuc
+6+9 ?????? unreserved_nuc
+6+10 ?????? unreserved_nuc
+6+11 ?????? unreserved_nuc
+5+7 A???? ddbj_other_nuc
+5+7 A???? ddbj_mga
+3+9 AT_ named_annot_track
+3+6 AC_ refseq_chromosome
+3+6 AP_ refseq_prot
+3+6 NC_ refseq_chromosome
+3+6 NG_ refseq_genomic
+3+6 NM_ refseq_mrna
+3+9 NM_ refseq_mrna
+3+6 NP_ refseq_prot
+3+9 NP_ refseq_prot
+3+6 NR_ refseq_ncrna
+3+6 NS_ refseq_genome
+3+6 NT_ refseq_contig
+3+6 NW_ refseq_wgs_intermed
+3+9 NW_ refseq_wgs_intermed
+4+5 NZ_? refseq_contig
+5+6 NZ_?? refseq_contig
+7+8 NZ_???? refseq_wgs_nuc
+7+9 NZ_???? refseq_wgs_nuc
+7+10 NZ_???? refseq_wgs_nuc
+9+9 NZ_?????? refseq_wgs_nuc
+9+10 NZ_?????? refseq_wgs_nuc
+9+11 NZ_?????? refseq_wgs_nuc
+3+9 WC_ refseq_chromosome_ncbo
+3+9 WP_ refseq_unique_prot
+3+9 WT_ refseq_contig_ncbo
+3+6 XM_ refseq_mrna_predicted
+3+9 XM_ refseq_mrna_predicted
+3+6 XP_ refseq_prot_predicted
+3+9 XP_ refseq_prot_predicted
+3+6 XR_ refseq_ncrna_predicted
+3+9 XR_ refseq_ncrna_predicted
+3+6 YP_ refseq_prot_predicted
+3+9 YP_ refseq_prot_predicted
+3+8 ZP_ refseq_wgs_prot
+3+6 ??_ refseq_unreserved
+3+7 ??_ refseq_unreserved
+3+8 ??_ refseq_unreserved
+3+9 ??_ refseq_unreserved
+4+6 MAP_ gb_optical_map
+1+5 A embl_patent
+1+5 B gb_gss
+1+5 C ddbj_est *
+1+5 D ddbj_dirsub *
+1+5 E ddbj_patent
+1+5 F embl_est *
+1+5 G gb_sts
+1+5 H gb_est
+1+5 I gb_patent
+1+5 J gsdb_dirsub
+1+5 K gsdb_dirsub
+1+5 L gsdb_dirsub *
+1+5 M gsdb_dirsub *
+1+5 N unreserved_nuc *
+1+5 O swissprot
+1+5 P swissprot
+1+5 Q swissprot
+1+5 R gb_est
+1+5 S gb_backbone
+1+5 T gb_est *
+1+5 U gb_dirsub *
+1+5 V embl_dirsub
+1+5 W gb_est
+1+5 X embl_dirsub *
+1+5 Y embl_dirsub *
+1+5 Z embl_dirsub *
+1+5 ? unreserved_nuc
+2+6 AA gb_est
+2+8 AA gb_other_nuc
+2+10 AA gb_other_nuc
+2+6 AB ddbj_dirsub *
+2+8 AB ddbj_other_nuc
+2+10 AB ddbj_other_nuc
+2+6 AC gb_htgs
+2+8 AC gb_other_nuc
+2+10 AC gb_other_nuc
+2+6 AD gb_gsdb
+2+8 AD gb_other_nuc
+2+10 AD gb_other_nuc
+2+6 AE gb_genome
+2+8 AE gb_other_nuc
+2+10 AE gb_other_nuc
+2+6 AF gb_dirsub *
+2+8 AF gb_other_nuc
+2+10 AF gb_other_nuc
+2+6 AG ddbj_gss *
+2+8 AG ddbj_other_nuc
+2+10 AG ddbj_other_nuc
+2+6 AH gb_segset
+2+8 AH gb_other_nuc
+2+10 AH gb_other_nuc
+2+6 AI gb_est
+2+8 AI gb_other_nuc
+2+10 AI gb_other_nuc
+2+6 AJ embl_dirsub *
+2+8 AJ embl_other_nuc
+2+10 AJ embl_other_nuc
+2+6 AK ddbj_mrna
+2+8 AK ddbj_other_nuc
+2+10 AK ddbj_other_nuc
+2+6 AL embl_dirsub *
+2+8 AL embl_other_nuc
+2+10 AL embl_other_nuc
+2+6 AM embl_dirsub *
+2+8 AM embl_other_nuc
+2+10 AM embl_other_nuc
+2+6 AN embl_con
+2+8 AN embl_other_nuc
+2+10 AN embl_other_nuc
+2+6 AO unreserved_nuc
+2+8 AO unreserved_nuc
+2+10 AO unreserved_nuc
+2+6 AP ddbj_genome
+2+8 AP ddbj_other_nuc
+2+10 AP ddbj_other_nuc
+2+6 AQ gb_gss
+2+8 AQ gb_other_nuc
+2+10 AQ gb_other_nuc
+2+6 AR gb_patent
+2+8 AR gb_other_nuc
+2+10 AR gb_other_nuc
+2+6 AS gb_other_nuc
+2+8 AS gb_other_nuc
+2+10 AS gb_other_nuc
+2+6 AT ddbj_est
+2+8 AT ddbj_other_nuc
+2+10 AT ddbj_other_nuc
+2+6 AU ddbj_est *
+2+8 AU ddbj_other_nuc
+2+10 AU ddbj_other_nuc
+2+6 AV ddbj_est
+2+8 AV ddbj_other_nuc
+2+10 AV ddbj_other_nuc
+2+6 AW gb_est
+2+8 AW gb_other_nuc
+2+10 AW gb_other_nuc
+2+6 AX embl_patent *
+2+8 AX embl_other_nuc
+2+10 AX embl_other_nuc
+2+6 AY gb_dirsub *
+2+8 AY gb_other_nuc
+2+10 AY gb_other_nuc
+2+6 AZ gb_gss
+2+8 AZ gb_other_nuc
+2+10 AZ gb_other_nuc
+2+6 BA ddbj_con
+2+8 BA ddbj_other_nuc
+2+10 BA ddbj_other_nuc
+2+6 BB ddbj_est
+2+8 BB ddbj_other_nuc
+2+10 BB ddbj_other_nuc
+2+6 BC gb_cdna
+2+8 BC gb_other_nuc
+2+10 BC gb_other_nuc
+2+6 BD ddbj_patent
+2+8 BD ddbj_other_nuc
+2+10 BD ddbj_other_nuc
+2+6 BE gb_est
+2+8 BE gb_other_nuc
+2+10 BE gb_other_nuc
+2+6 BF gb_est
+2+8 BF gb_other_nuc
+2+10 BF gb_other_nuc
+2+6 BG gb_est
+2+8 BG gb_other_nuc
+2+10 BG gb_other_nuc
+2+6 BH gb_gss
+2+8 BH gb_other_nuc
+2+10 BH gb_other_nuc
+2+6 BI gb_est
+2+8 BI gb_other_nuc
+2+10 BI gb_other_nuc
+2+6 BJ ddbj_est
+2+8 BJ ddbj_other_nuc
+2+10 BJ ddbj_other_nuc
+2+6 BK gb_tpa_nuc
+2+8 BK gb_tpa_nuc
+2+10 BK gb_tpa_nuc
+2+6 BL gb_tpa_segset
+2+8 BL gb_tpa_nuc
+2+10 BL gb_tpa_nuc
+2+6 BM gb_est
+2+8 BM gb_other_nuc
+2+10 BM gb_other_nuc
+2+6 BN embl_tpa_nuc
+2+8 BN embl_tpa_nuc
+2+10 BN embl_tpa_nuc
+2+6 BO unreserved_nuc
+2+8 BO unreserved_nuc
+2+10 BO unreserved_nuc
+2+6 BP ddbj_est
+2+8 BP ddbj_other_nuc
+2+10 BP ddbj_other_nuc
+2+6 BQ gb_est
+2+8 BQ gb_other_nuc
+2+10 BQ gb_other_nuc
+2+6 BR ddbj_tpa_nuc
+2+8 BR ddbj_tpa_nuc
+2+10 BR ddbj_tpa_nuc
+2+6 BS ddbj_genome
+2+8 BS ddbj_other_nuc
+2+10 BS ddbj_other_nuc
+2+6 BT gb_cdna
+2+8 BT gb_other_nuc
+2+10 BT gb_other_nuc
+2+6 BU gb_est
+2+8 BU gb_other_nuc
+2+10 BU gb_other_nuc
+2+6 BV gb_sts
+2+8 BV gb_other_nuc
+2+10 BV gb_other_nuc
+2+6 BW ddbj_est
+2+8 BW ddbj_other_nuc
+2+10 BW ddbj_other_nuc
+2+6 BX embl_dirsub *
+2+8 BX embl_other_nuc
+2+10 BX embl_other_nuc
+2+6 BY ddbj_est
+2+8 BY ddbj_other_nuc
+2+10 BY ddbj_other_nuc
+2+6 BZ gb_gss
+2+8 BZ gb_other_nuc
+2+10 BZ gb_other_nuc
+2+6 CA gb_est
+2+8 CA gb_other_nuc
+2+10 CA gb_other_nuc
+2+6 CB gb_est
+2+8 CB gb_other_nuc
+2+10 CB gb_other_nuc
+2+6 CC gb_gss
+2+8 CC gb_other_nuc
+2+10 CC gb_other_nuc
+2+6 CD gb_est
+2+8 CD gb_other_nuc
+2+10 CD gb_other_nuc
+2+6 CE gb_gss
+2+8 CE gb_other_nuc
+2+10 CE gb_other_nuc
+2+6 CF gb_est
+2+8 CF gb_other_nuc
+2+10 CF gb_other_nuc
+2+6 CG gb_gss
+2+8 CG gb_other_nuc
+2+10 CG gb_other_nuc
+2+6 CH gb_con
+2+8 CH gb_other_nuc
+2+10 CH gb_other_nuc
+2+6 CI ddbj_est
+2+8 CI ddbj_other_nuc
+2+10 CI ddbj_other_nuc
+2+6 CJ ddbj_est
+2+8 CJ ddbj_other_nuc
+2+10 CJ ddbj_other_nuc
+2+6 CK gb_est
+2+8 CK gb_other_nuc
+2+10 CK gb_other_nuc
+2+6 CL gb_gss
+2+8 CL gb_other_nuc
+2+10 CL gb_other_nuc
+2+6 CM gb_chromosome
+2+8 CM gb_other_nuc
+2+10 CM gb_other_nuc
+2+6 CN gb_est
+2+8 CN gb_other_nuc
+2+10 CN gb_other_nuc
+2+6 CO gb_est
+2+8 CO gb_other_nuc
+2+10 CO gb_other_nuc
+2+6 CP gb_genome *
+2+8 CP gb_other_nuc
+2+10 CP gb_other_nuc
+2+6 CQ embl_patent
+2+8 CQ embl_other_nuc
+2+10 CQ embl_other_nuc
+2+6 CR embl_dirsub *
+2+8 CR embl_other_nuc
+2+10 CR embl_other_nuc
+2+6 CS embl_patent
+2+8 CS embl_other_nuc
+2+10 CS embl_other_nuc
+2+6 CT embl_dirsub *
+2+8 CT embl_other_nuc
+2+10 CT embl_other_nuc
+2+6 CU embl_dirsub *
+2+8 CU embl_other_nuc
+2+10 CU embl_other_nuc
+2+6 CV gb_est
+2+8 CV gb_other_nuc
+2+10 CV gb_other_nuc
+2+6 CW gb_gss
+2+8 CW gb_other_nuc
+2+10 CW gb_other_nuc
+2+6 CX gb_est
+2+8 CX gb_other_nuc
+2+10 CX gb_other_nuc
+2+6 CY gb_genome
+2+8 CY gb_other_nuc
+2+10 CY gb_other_nuc
+2+6 CZ gb_gss
+2+8 CZ gb_other_nuc
+2+10 CZ gb_other_nuc
+2+6 DA ddbj_est
+2+8 DA ddbj_other_nuc
+2+10 DA ddbj_other_nuc
+2+6 DB ddbj_est
+2+8 DB ddbj_other_nuc
+2+10 DB ddbj_other_nuc
+2+6 DC ddbj_est
+2+8 DC ddbj_other_nuc
+2+10 DC ddbj_other_nuc
+2+6 DD ddbj_patent
+2+8 DD ddbj_other_nuc
+2+10 DD ddbj_other_nuc
+2+6 DE ddbj_gss *
+2+8 DE ddbj_other_nuc
+2+10 DE ddbj_other_nuc
+2+6 DF ddbj_con
+2+8 DF ddbj_other_nuc
+2+10 DF ddbj_other_nuc
+2+6 DG ddbj_con
+2+8 DG ddbj_other_nuc
+2+10 DG ddbj_other_nuc
+2+6 DH ddbj_gss
+2+8 DH ddbj_other_nuc
+2+10 DH ddbj_other_nuc
+2+6 DI ddbj_patent
+2+8 DI ddbj_other_nuc
+2+10 DI ddbj_other_nuc
+2+6 DJ ddbj_patent
+2+8 DJ ddbj_other_nuc
+2+10 DJ ddbj_other_nuc
+2+6 DK ddbj_est
+2+8 DK ddbj_other_nuc
+2+10 DK ddbj_other_nuc
+2+6 DL ddbj_patent
+2+8 DL ddbj_other_nuc
+2+10 DL ddbj_other_nuc
+2+6 DM ddbj_patent
+2+8 DM ddbj_other_nuc
+2+10 DM ddbj_other_nuc
+2+6 DN gb_est
+2+8 DN gb_other_nuc
+2+10 DN gb_other_nuc
+2+6 DO unreserved_nuc
+2+8 DO unreserved_nuc
+2+10 DO unreserved_nuc
+2+6 DP gb_htgs
+2+8 DP gb_other_nuc
+2+10 DP gb_other_nuc
+2+6 DQ gb_dirsub *
+2+8 DQ gb_other_nuc
+2+10 DQ gb_other_nuc
+2+6 DR gb_est
+2+8 DR gb_other_nuc
+2+10 DR gb_other_nuc
+2+6 DS gb_con *
+2+8 DS gb_other_nuc
+2+10 DS gb_other_nuc
+2+6 DT gb_est
+2+8 DT gb_other_nuc
+2+10 DT gb_other_nuc
+2+6 DU gb_gss
+2+8 DU gb_other_nuc
+2+10 DU gb_other_nuc
+2+6 DV gb_est
+2+8 DV gb_other_nuc
+2+10 DV gb_other_nuc
+2+6 DW gb_est
+2+8 DW gb_other_nuc
+2+10 DW gb_other_nuc
+2+6 DX gb_gss
+2+8 DX gb_other_nuc
+2+10 DX gb_other_nuc
+2+6 DY gb_est
+2+8 DY gb_other_nuc
+2+10 DY gb_other_nuc
+2+6 DZ gb_patent
+2+8 DZ gb_other_nuc
+2+10 DZ gb_other_nuc
+2+6 EA gb_patent
+2+8 EA gb_other_nuc
+2+10 EA gb_other_nuc
+2+6 EB gb_est
+2+8 EB gb_other_nuc
+2+10 EB gb_other_nuc
+2+6 EC gb_est
+2+8 EC gb_other_nuc
+2+10 EC gb_other_nuc
+2+6 ED gb_gss
+2+8 ED gb_other_nuc
+2+10 ED gb_other_nuc
+2+6 EE gb_est
+2+8 EE gb_other_nuc
+2+10 EE gb_other_nuc
+2+6 EF gb_dirsub *
+2+8 EF gb_other_nuc
+2+10 EF gb_other_nuc
+2+6 EG gb_est
+2+8 EG gb_other_nuc
+2+10 EG gb_other_nuc
+2+6 EH gb_est
+2+8 EH gb_other_nuc
+2+10 EH gb_other_nuc
+2+6 EI gb_gss
+2+8 EI gb_other_nuc
+2+10 EI gb_other_nuc
+2+6 EJ gb_gss
+2+8 EJ gb_other_nuc
+2+10 EJ gb_other_nuc
+2+6 EK gb_gss
+2+8 EK gb_other_nuc
+2+10 EK gb_other_nuc
+2+6 EL gb_est
+2+8 EL gb_other_nuc
+2+10 EL gb_other_nuc
+2+6 EM gb_con
+2+8 EM gb_other_nuc
+2+10 EM gb_other_nuc
+2+6 EN gb_con
+2+8 EN gb_other_nuc
+2+10 EN gb_other_nuc
+2+6 EO gb_other_nuc
+2+8 EO gb_other_nuc
+2+10 EO gb_other_nuc
+2+6 EP gb_con
+2+8 EP gb_other_nuc
+2+10 EP gb_other_nuc
+2+6 EQ gb_con
+2+8 EQ gb_other_nuc
+2+10 EQ gb_other_nuc
+2+6 ER gb_gss
+2+8 ER gb_other_nuc
+2+10 ER gb_other_nuc
+2+6 ES gb_est
+2+8 ES gb_other_nuc
+2+10 ES gb_other_nuc
+2+6 ET gb_gss
+2+8 ET gb_other_nuc
+2+10 ET gb_other_nuc
+2+6 EU gb_dirsub *
+2+8 EU gb_other_nuc
+2+10 EU gb_other_nuc
+2+6 EV gb_est
+2+8 EV gb_other_nuc
+2+10 EV gb_other_nuc
+2+6 EW gb_est
+2+8 EW gb_other_nuc
+2+10 EW gb_other_nuc
+2+6 EX gb_est
+2+8 EX gb_other_nuc
+2+10 EX gb_other_nuc
+2+6 EY gb_est
+2+8 EY gb_other_nuc
+2+10 EY gb_other_nuc
+2+6 EZ gb_tsa_nuc
+2+8 EZ gb_other_nuc
+2+10 EZ gb_other_nuc
+2+6 FA gb_con
+2+8 FA gb_other_nuc
+2+10 FA gb_other_nuc
+2+6 FB embl_patent
+2+8 FB embl_other_nuc
+2+10 FB embl_other_nuc
+2+6 FC gb_est
+2+8 FC gb_other_nuc
+2+10 FC gb_other_nuc
+2+6 FD gb_est
+2+8 FD gb_other_nuc
+2+10 FD gb_other_nuc
+2+6 FE gb_est
+2+8 FE gb_other_nuc
+2+10 FE gb_other_nuc
+2+6 FF gb_est
+2+8 FF gb_other_nuc
+2+10 FF gb_other_nuc
+2+6 FG gb_est
+2+8 FG gb_other_nuc
+2+10 FG gb_other_nuc
+2+6 FH gb_gss
+2+8 FH gb_other_nuc
+2+10 FH gb_other_nuc
+2+6 FI gb_gss
+2+8 FI gb_other_nuc
+2+10 FI gb_other_nuc
+2+6 FJ gb_dirsub *
+2+8 FJ gb_other_nuc
+2+10 FJ gb_other_nuc
+2+6 FK gb_est
+2+8 FK gb_other_nuc
+2+10 FK gb_other_nuc
+2+6 FL gb_est
+2+8 FL gb_other_nuc
+2+10 FL gb_other_nuc
+2+6 FM embl_dirsub *
+2+8 FM embl_other_nuc
+2+10 FM embl_other_nuc
+2+6 FN embl_dirsub *
+2+8 FN embl_other_nuc
+2+10 FN embl_other_nuc
+2+6 FO embl_dirsub *
+2+8 FO embl_other_nuc
+2+10 FO embl_other_nuc
+2+6 FP embl_dirsub *
+2+8 FP embl_other_nuc
+2+10 FP embl_other_nuc
+2+6 FQ embl_dirsub *
+2+8 FQ embl_other_nuc
+2+10 FQ embl_other_nuc
+2+6 FR embl_dirsub *
+2+8 FR embl_other_nuc
+2+10 FR embl_other_nuc
+2+6 FS ddbj_est
+2+8 FS ddbj_other_nuc
+2+10 FS ddbj_other_nuc
+2+6 FT ddbj_gss
+2+8 FT ddbj_other_nuc
+2+10 FT ddbj_other_nuc
+2+6 FU ddbj_patent
+2+8 FU ddbj_other_nuc
+2+10 FU ddbj_other_nuc
+2+6 FV ddbj_patent
+2+8 FV ddbj_other_nuc
+2+10 FV ddbj_other_nuc
+2+6 FW ddbj_patent
+2+8 FW ddbj_other_nuc
+2+10 FW ddbj_other_nuc
+2+6 FX ddbj_tsa_nuc
+2+8 FX ddbj_other_nuc
+2+10 FX ddbj_other_nuc
+2+6 FY ddbj_est
+2+8 FY ddbj_other_nuc
+2+10 FY ddbj_other_nuc
+2+6 FZ ddbj_patent
+2+8 FZ ddbj_other_nuc
+2+10 FZ ddbj_other_nuc
+2+6 GA ddbj_gss
+2+8 GA ddbj_other_nuc
+2+10 GA ddbj_other_nuc
+2+6 GB ddbj_patent
+2+8 GB ddbj_other_nuc
+2+10 GB ddbj_other_nuc
+2+6 GC gb_patent
+2+8 GC gb_other_nuc
+2+10 GC gb_other_nuc
+2+6 GD gb_est
+2+8 GD gb_other_nuc
+2+10 GD gb_other_nuc
+2+6 GE gb_est
+2+8 GE gb_other_nuc
+2+10 GE gb_other_nuc
+2+6 GF gb_sts
+2+8 GF gb_other_nuc
+2+10 GF gb_other_nuc
+2+6 GG gb_con
+2+8 GG gb_other_nuc
+2+10 GG gb_other_nuc
+2+6 GH gb_est
+2+8 GH gb_other_nuc
+2+10 GH gb_other_nuc
+2+6 GI unreserved_nuc
+2+8 GI unreserved_nuc
+2+10 GI unreserved_nuc
+2+6 GJ gb_tpa_con
+2+8 GJ gb_tpa_nuc
+2+10 GJ gb_tpa_nuc
+2+6 GK gb_tpa_chromosome
+2+8 GK gb_tpa_nuc
+2+10 GK gb_tpa_nuc
+2+6 GL gb_con
+2+8 GL gb_other_nuc
+2+10 GL gb_other_nuc
+2+6 GM embl_patent
+2+8 GM embl_other_nuc
+2+10 GM embl_other_nuc
+2+6 GN embl_patent
+2+8 GN embl_other_nuc
+2+10 GN embl_other_nuc
+2+6 GO gb_est
+2+8 GO gb_other_nuc
+2+10 GO gb_other_nuc
+2+6 GP gb_patent
+2+8 GP gb_other_nuc
+2+10 GP gb_other_nuc
+2+6 GQ gb_dirsub *
+2+8 GQ gb_other_nuc
+2+10 GQ gb_other_nuc
+2+6 GR gb_est
+2+8 GR gb_other_nuc
+2+10 GR gb_other_nuc
+2+6 GS gb_gss
+2+8 GS gb_other_nuc
+2+10 GS gb_other_nuc
+2+6 GT gb_est
+2+8 GT gb_other_nuc
+2+10 GT gb_other_nuc
+2+6 GU gb_dirsub *
+2+8 GU gb_other_nuc
+2+10 GU gb_other_nuc
+2+6 GV gb_patent
+2+8 GV gb_other_nuc
+2+10 GV gb_other_nuc
+2+6 GW gb_est
+2+8 GW gb_other_nuc
+2+10 GW gb_other_nuc
+2+6 GX gb_patent
+2+8 GX gb_other_nuc
+2+10 GX gb_other_nuc
+2+6 GY gb_patent
+2+8 GY gb_other_nuc
+2+10 GY gb_other_nuc
+2+6 GZ gb_patent
+2+8 GZ gb_other_nuc
+2+10 GZ gb_other_nuc
+2+6 HA embl_patent
+2+8 HA embl_other_nuc
+2+10 HA embl_other_nuc
+2+6 HB embl_patent
+2+8 HB embl_other_nuc
+2+10 HB embl_other_nuc
+2+6 HC embl_patent
+2+8 HC embl_other_nuc
+2+10 HC embl_other_nuc
+2+6 HD embl_patent
+2+8 HD embl_other_nuc
+2+10 HD embl_other_nuc
+2+6 HE embl_dirsub *
+2+8 HE embl_other_nuc
+2+10 HE embl_other_nuc
+2+6 HF embl_dirsub *
+2+8 HF embl_other_nuc
+2+10 HF embl_other_nuc
+2+6 HG embl_dirsub *
+2+8 HG embl_other_nuc
+2+10 HG embl_other_nuc
+2+6 HH embl_patent
+2+8 HH embl_other_nuc
+2+10 HH embl_other_nuc
+2+6 HI embl_patent
+2+8 HI embl_other_nuc
+2+10 HI embl_other_nuc
+2+6 HJ gb_patent
+2+8 HJ gb_other_nuc
+2+10 HJ gb_other_nuc
+2+6 HK gb_patent
+2+8 HK gb_other_nuc
+2+10 HK gb_other_nuc
+2+6 HL gb_patent
+2+8 HL gb_other_nuc
+2+10 HL gb_other_nuc
+2+6 HM gb_dirsub *
+2+8 HM gb_other_nuc
+2+10 HM gb_other_nuc
+2+6 HN gb_gss
+2+8 HN gb_other_nuc
+2+10 HN gb_other_nuc
+2+6 HO gb_est
+2+8 HO gb_other_nuc
+2+10 HO gb_other_nuc
+2+6 HP gb_tsa_nuc
+2+8 HP gb_other_nuc
+2+10 HP gb_other_nuc
+2+6 HQ gb_dirsub *
+2+8 HQ gb_other_nuc
+2+10 HQ gb_other_nuc
+2+6 HR gb_gss
+2+8 HR gb_other_nuc
+2+10 HR gb_other_nuc
+2+6 HS gb_est
+2+8 HS gb_other_nuc
+2+10 HS gb_other_nuc
+2+6 HT ddbj_tpa_con
+2+8 HT ddbj_tpa_nuc
+2+10 HT ddbj_tpa_nuc
+2+6 HU ddbj_tpa_chromosome
+2+8 HU ddbj_tpa_nuc
+2+10 HU ddbj_tpa_nuc
+2+6 HV ddbj_patent
+2+8 HV ddbj_other_nuc
+2+10 HV ddbj_other_nuc
+2+6 HW ddbj_patent
+2+8 HW ddbj_other_nuc
+2+10 HW ddbj_other_nuc
+2+6 HX ddbj_est
+2+8 HX ddbj_other_nuc
+2+10 HX ddbj_other_nuc
+2+6 HY ddbj_est
+2+8 HY ddbj_other_nuc
+2+10 HY ddbj_other_nuc
+2+6 HZ ddbj_patent
+2+8 HZ ddbj_other_nuc
+2+10 HZ ddbj_other_nuc
+2+6 JA embl_patent
+2+8 JA embl_other_nuc
+2+10 JA embl_other_nuc
+2+6 JB embl_patent
+2+8 JB embl_other_nuc
+2+10 JB embl_other_nuc
+2+6 JC embl_patent
+2+8 JC embl_other_nuc
+2+10 JC embl_other_nuc
+2+6 JD embl_patent
+2+8 JD embl_other_nuc
+2+10 JD embl_other_nuc
+2+6 JE embl_patent
+2+8 JE embl_other_nuc
+2+10 JE embl_other_nuc
+2+6 JF gb_dirsub
+2+8 JF gb_other_nuc
+2+10 JF gb_other_nuc
+2+6 JG gb_est
+2+8 JG gb_other_nuc
+2+10 JG gb_other_nuc
+2+6 JH gb_con
+2+8 JH gb_other_nuc
+2+10 JH gb_other_nuc
+2+6 JI gb_tsa_nuc
+2+8 JI gb_other_nuc
+2+10 JI gb_other_nuc
+2+6 JJ gb_gss
+2+8 JJ gb_other_nuc
+2+10 JJ gb_other_nuc
+2+6 JK gb_est
+2+8 JK gb_other_nuc
+2+10 JK gb_other_nuc
+2+6 JL gb_tsa_nuc
+2+8 JL gb_other_nuc
+2+10 JL gb_other_nuc
+2+6 JM gb_gss
+2+8 JM gb_other_nuc
+2+10 JM gb_other_nuc
+2+6 JN gb_dirsub *
+2+8 JN gb_other_nuc
+2+10 JN gb_other_nuc
+2+6 JO gb_tsa_nuc
+2+8 JO gb_other_nuc
+2+10 JO gb_other_nuc
+2+6 JP gb_tsa_nuc
+2+8 JP gb_other_nuc
+2+10 JP gb_other_nuc
+2+6 JQ gb_dirsub
+2+8 JQ gb_other_nuc
+2+10 JQ gb_other_nuc
+2+6 JR gb_tsa_nuc
+2+8 JR gb_other_nuc
+2+10 JR gb_other_nuc
+2+6 JS gb_gss
+2+8 JS gb_other_nuc
+2+10 JS gb_other_nuc
+2+6 JT gb_tsa_nuc
+2+8 JT gb_other_nuc
+2+10 JT gb_other_nuc
+2+6 JU gb_tsa_nuc
+2+8 JU gb_other_nuc
+2+10 JU gb_other_nuc
+2+6 JV gb_tsa_nuc
+2+8 JV gb_other_nuc
+2+10 JV gb_other_nuc
+2+6 JW gb_tsa_nuc
+2+8 JW gb_other_nuc
+2+10 JW gb_other_nuc
+2+6 JX gb_dirsub
+2+8 JX gb_other_nuc
+2+10 JX gb_other_nuc
+2+6 JY gb_gss
+2+8 JY gb_other_nuc
+2+10 JY gb_other_nuc
+2+6 JZ gb_est
+2+8 JZ gb_other_nuc
+2+10 JZ gb_other_nuc
+2+6 KA gb_tsa_nuc
+2+8 KA gb_other_nuc
+2+10 KA gb_other_nuc
+2+6 KB gb_con
+2+8 KB gb_other_nuc
+2+10 KB gb_other_nuc
+2+6 KC gb_dirsub
+2+8 KC gb_other_nuc
+2+10 KC gb_other_nuc
+2+6 KD gb_con
+2+8 KD gb_other_nuc
+2+10 KD gb_other_nuc
+2+6 KE gb_con
+2+8 KE gb_other_nuc
+2+10 KE gb_other_nuc
+2+6 KF gb_dirsub *
+2+8 KF gb_other_nuc
+2+10 KF gb_other_nuc
+2+6 KG gb_gss
+2+8 KG gb_other_nuc
+2+10 KG gb_other_nuc
+2+6 KH gb_patent
+2+8 KH gb_other_nuc
+2+10 KH gb_other_nuc
+2+6 KI gb_con
+2+8 KI gb_other_nuc
+2+10 KI gb_other_nuc
+2+6 KJ gb_dirsub *
+2+8 KJ gb_other_nuc
+2+10 KJ gb_other_nuc
+2+6 KK gb_con
+2+8 KK gb_other_nuc
+2+10 KK gb_other_nuc
+2+6 KL gb_con
+2+8 KL gb_other_nuc
+2+10 KL gb_other_nuc
+2+6 KM gb_dirsub *
+2+8 KM gb_other_nuc
+2+10 KM gb_other_nuc
+2+6 KN gb_con
+2+8 KN gb_other_nuc
+2+10 KN gb_other_nuc
+2+6 KO gb_gss
+2+8 KO gb_other_nuc
+2+10 KO gb_other_nuc
+2+6 KP gb_dirsub
+2+8 KP gb_other_nuc
+2+10 KP gb_other_nuc
+2+6 KQ gb_con
+2+8 KQ gb_other_nuc
+2+10 KQ gb_other_nuc
+2+6 KR gb_dirsub
+2+8 KR gb_other_nuc
+2+10 KR gb_other_nuc
+2+6 KS gb_gss
+2+8 KS gb_other_nuc
+2+10 KS gb_other_nuc
+2+6 KT gb_dirsub
+2+8 KT gb_other_nuc
+2+10 KT gb_other_nuc
+2+6 KU gb_dirsub
+2+8 KU gb_other_nuc
+2+10 KU gb_other_nuc
+2+6 KV gb_con
+2+8 KV gb_other_nuc
+2+10 KV gb_other_nuc
+2+6 KW gb_other_nuc
+2+8 KW gb_other_nuc
+2+10 KW gb_other_nuc
+2+6 KX gb_dirsub
+2+8 KX gb_other_nuc
+2+10 KX gb_other_nuc
+2+6 KY gb_dirsub
+2+8 KY gb_other_nuc
+2+10 KY gb_other_nuc
+2+6 KZ gb_con
+2+8 KZ gb_other_nuc
+2+10 KZ gb_other_nuc
+2+6 LA ddbj_tsa_nuc
+2+8 LA ddbj_other_nuc
+2+10 LA ddbj_other_nuc
+2+6 LB ddbj_gss
+2+8 LB ddbj_other_nuc
+2+10 LB ddbj_other_nuc
+2+6 LC ddbj_dirsub
+2+8 LC ddbj_other_nuc
+2+10 LC ddbj_other_nuc
+2+6 LD ddbj_con
+2+8 LD ddbj_other_nuc
+2+10 LD ddbj_other_nuc
+2+6 LE ddbj_tsa_nuc
+2+8 LE ddbj_other_nuc
+2+10 LE ddbj_other_nuc
+2+6 LF ddbj_patent
+2+8 LF ddbj_other_nuc
+2+10 LF ddbj_other_nuc
+2+6 LG ddbj_patent
+2+8 LG ddbj_other_nuc
+2+10 LG ddbj_other_nuc
+2+6 LH ddbj_tsa_nuc
+2+8 LH ddbj_other_nuc
+2+10 LH ddbj_other_nuc
+2+6 LI ddbj_tsa_nuc
+2+8 LI ddbj_other_nuc
+2+10 LI ddbj_other_nuc
+2+6 LJ ddbj_tsa_nuc
+2+8 LJ ddbj_other_nuc
+2+10 LJ ddbj_other_nuc
+2+6 LK embl_dirsub *
+2+8 LK embl_other_nuc
+2+10 LK embl_other_nuc
+2+6 LL embl_dirsub
+2+8 LL embl_other_nuc
+2+10 LL embl_other_nuc
+2+6 LM embl_dirsub *
+2+8 LM embl_other_nuc
+2+10 LM embl_other_nuc
+2+6 LN embl_dirsub *
+2+8 LN embl_other_nuc
+2+10 LN embl_other_nuc
+2+6 LO embl_dirsub *
+2+8 LO embl_other_nuc
+2+10 LO embl_other_nuc
+2+6 LP embl_patent
+2+8 LP embl_other_nuc
+2+10 LP embl_other_nuc
+2+6 LQ embl_patent
+2+8 LQ embl_other_nuc
+2+10 LQ embl_other_nuc
+2+6 LR embl_dirsub *
+2+8 LR embl_other_nuc
+2+10 LR embl_other_nuc
+2+6 LS embl_dirsub
+2+8 LS embl_other_nuc
+2+10 LS embl_other_nuc
+2+6 LT embl_dirsub *
+2+8 LT embl_other_nuc
+2+10 LT embl_other_nuc
+2+6 LU ddbj_est
+2+8 LU ddbj_other_nuc
+2+10 LU ddbj_other_nuc
+2+6 LV ddbj_patent
+2+8 LV ddbj_other_nuc
+2+10 LV ddbj_other_nuc
+2+6 LW ddbj_other_nuc
+2+8 LW ddbj_other_nuc
+2+10 LW ddbj_other_nuc
+2+6 LX ddbj_patent
+2+8 LX ddbj_other_nuc
+2+10 LX ddbj_other_nuc
+2+6 LY ddbj_patent
+2+8 LY ddbj_other_nuc
+2+10 LY ddbj_other_nuc
+2+6 LZ ddbj_patent
+2+8 LZ ddbj_other_nuc
+2+10 LZ ddbj_other_nuc
+2+6 MA ddbj_patent
+2+8 MA ddbj_other_nuc
+2+10 MA ddbj_other_nuc
+2+6 MB ddbj_patent
+2+8 MB ddbj_other_nuc
+2+10 MB ddbj_other_nuc
+2+6 MC ddbj_patent
+2+8 MC ddbj_other_nuc
+2+10 MC ddbj_other_nuc
+2+6 MD ddbj_patent
+2+8 MD ddbj_other_nuc
+2+10 MD ddbj_other_nuc
+2+6 ME ddbj_patent
+2+8 ME ddbj_other_nuc
+2+10 ME ddbj_other_nuc
+2+6 MF gb_dirsub
+2+8 MF gb_other_nuc
+2+10 MF gb_other_nuc
+2+6 MG gb_dirsub
+2+8 MG gb_other_nuc
+2+10 MG gb_other_nuc
+2+6 MH gb_dirsub
+2+8 MH gb_other_nuc
+2+10 MH gb_other_nuc
+2+6 MI gb_patent
+2+8 MI gb_other_nuc
+2+10 MI gb_other_nuc
+2+6 MJ gb_gss
+2+8 MJ gb_other_nuc
+2+10 MJ gb_other_nuc
+2+6 MK gb_dirsub
+2+8 MK gb_other_nuc
+2+10 MK gb_other_nuc
+2+6 ML gb_con
+2+8 ML gb_other_nuc
+2+10 ML gb_other_nuc
+2+6 MM gb_patent
+2+8 MM gb_other_nuc
+2+10 MM gb_other_nuc
+2+6 MN gb_dirsub
+2+8 MN gb_other_nuc
+2+10 MN gb_other_nuc
+2+6 MO gb_patent
+2+8 MO gb_other_nuc
+2+10 MO gb_other_nuc
+2+6 MP embl_patent
+2+8 MP embl_other_nuc
+2+10 MP embl_other_nuc
+2+6 MQ embl_patent
+2+8 MQ embl_other_nuc
+2+10 MQ embl_other_nuc
+2+6 MR embl_patent
+2+8 MR embl_other_nuc
+2+10 MR embl_other_nuc
+2+6 MS embl_patent
+2+8 MS embl_other_nuc
+2+10 MS embl_other_nuc
+2+6 MT gb_dirsub
+2+8 MT gb_other_nuc
+2+10 MT gb_other_nuc
+2+6 MU gb_con
+2+8 MU gb_other_nuc
+2+10 MU gb_other_nuc
+2+6 MV gb_patent
+2+8 MV gb_other_nuc
+2+10 MV gb_other_nuc
+2+6 MW gb_dirsub
+2+8 MW gb_other_nuc
+2+10 MW gb_other_nuc
+2+6 MX gb_patent
+2+8 MX gb_other_nuc
+2+10 MX gb_other_nuc
+2+6 MY gb_patent
+2+8 MY gb_other_nuc
+2+10 MY gb_other_nuc
+2+6 MZ gb_dirsub
+2+8 MZ gb_other_nuc
+2+10 MZ gb_other_nuc
+2+6 NC unreserved_nuc
+2+8 NC unreserved_nuc
+2+10 NC unreserved_nuc
+2+6 NG unreserved_nuc
+2+8 NG unreserved_nuc
+2+10 NG unreserved_nuc
+2+6 NM unreserved_nuc
+2+8 NM unreserved_nuc
+2+10 NM unreserved_nuc
+2+6 NP unreserved_nuc
+2+8 NP unreserved_nuc
+2+10 NP unreserved_nuc
+2+6 NR unreserved_nuc
+2+8 NR unreserved_nuc
+2+10 NR unreserved_nuc
+2+6 NS unreserved_nuc
+2+8 NS unreserved_nuc
+2+10 NS unreserved_nuc
+2+6 NT unreserved_nuc
+2+8 NT unreserved_nuc
+2+10 NT unreserved_nuc
+2+6 NW unreserved_nuc
+2+8 NW unreserved_nuc
+2+10 NW unreserved_nuc
+2+6 NZ unreserved_nuc
+2+8 NZ unreserved_nuc
+2+10 NZ unreserved_nuc
+2+6 OA embl_other_nuc
+2+8 OA embl_other_nuc
+2+10 OA embl_other_nuc
+2+6 OB embl_other_nuc *
+2+8 OB embl_other_nuc
+2+10 OB embl_other_nuc
+2+6 OC embl_other_nuc
+2+8 OC embl_other_nuc
+2+10 OC embl_other_nuc
+2+6 OD embl_other_nuc
+2+8 OD embl_other_nuc
+2+10 OD embl_other_nuc
+2+6 OE embl_other_nuc
+2+8 OE embl_other_nuc
+2+10 OE embl_other_nuc
+2+6 OF ddbj_patent
+2+8 OF ddbj_other_nuc
+2+10 OF ddbj_other_nuc
+2+6 OG ddbj_patent
+2+8 OG ddbj_other_nuc
+2+10 OG ddbj_other_nuc
+2+6 OH ddbj_est
+2+8 OH ddbj_other_nuc
+2+10 OH ddbj_other_nuc
+2+6 OI ddbj_patent
+2+8 OI ddbj_other_nuc
+2+10 OI ddbj_other_nuc
+2+6 OJ ddbj_patent
+2+8 OJ ddbj_other_nuc
+2+10 OJ ddbj_other_nuc
+2+6 OK gb_dirsub
+2+8 OK gb_other_nuc
+2+10 OK gb_other_nuc
+2+6 OL gb_dirsub
+2+8 OL gb_other_nuc
+2+10 OL gb_other_nuc
+2+6 OM gb_dirsub
+2+8 OM gb_other_nuc
+2+10 OM gb_other_nuc
+2+6 ON gb_dirsub
+2+8 ON gb_other_nuc
+2+10 ON gb_other_nuc
+2+6 OO gb_patent
+2+8 OO gb_other_nuc
+2+10 OO gb_other_nuc
+2+6 OP gb_dirsub
+2+8 OP gb_other_nuc
+2+10 OP gb_other_nuc
+2+6 OQ gb_dirsub
+2+8 OQ gb_other_nuc
+2+10 OQ gb_other_nuc
+2+6 OR gb_dirsub
+2+8 OR gb_other_nuc
+2+10 OR gb_other_nuc
+2+6 OS gb_patent
+2+8 OS gb_other_nuc
+2+10 OS gb_other_nuc
+2+6 OT gb_patent
+2+8 OT gb_other_nuc
+2+10 OT gb_other_nuc
+2+6 O? embl_other_nuc
+2+8 O? embl_other_nuc
+2+10 O? embl_other_nuc
+2+6 PA ddbj_patent
+2+8 PA ddbj_other_nuc
+2+10 PA ddbj_other_nuc
+2+6 PB ddbj_patent
+2+8 PB ddbj_other_nuc
+2+10 PB ddbj_other_nuc
+2+6 PC ddbj_patent
+2+8 PC ddbj_other_nuc
+2+10 PC ddbj_other_nuc
+2+6 PD ddbj_patent
+2+8 PD ddbj_other_nuc
+2+10 PD ddbj_other_nuc
+2+6 PE ddbj_patent
+2+8 PE ddbj_other_nuc
+2+10 PE ddbj_other_nuc
+2+6 PF ddbj_patent
+2+8 PF ddbj_other_nuc
+2+10 PF ddbj_other_nuc
+2+6 PG ddbj_patent
+2+8 PG ddbj_other_nuc
+2+10 PG ddbj_other_nuc
+2+6 PH ddbj_patent
+2+8 PH ddbj_other_nuc
+2+10 PH ddbj_other_nuc
+2+6 PI ddbj_patent
+2+8 PI ddbj_other_nuc
+2+10 PI ddbj_other_nuc
+2+6 PJ ddbj_patent
+2+8 PJ ddbj_other_nuc
+2+10 PJ ddbj_other_nuc
+2+6 PK ddbj_patent
+2+8 PK ddbj_other_nuc
+2+10 PK ddbj_other_nuc
+2+6 PL ddbj_patent
+2+8 PL ddbj_other_nuc
+2+10 PL ddbj_other_nuc
+2+6 PM ddbj_patent
+2+8 PM ddbj_other_nuc
+2+10 PM ddbj_other_nuc
+2+6 PN ddbj_patent
+2+8 PN ddbj_other_nuc
+2+10 PN ddbj_other_nuc
+2+6 PO ddbj_patent
+2+8 PO ddbj_other_nuc
+2+10 PO ddbj_other_nuc
+2+6 PP gb_dirsub
+2+8 PP gb_other_nuc
+2+10 PP gb_other_nuc
+2+6 PQ gb_dirsub
+2+8 PQ gb_other_nuc
+2+10 PQ gb_other_nuc
+2+6 PR gb_patent
+2+8 PR gb_other_nuc
+2+10 PR gb_other_nuc
+2+6 PS gb_con
+2+8 PS gb_other_nuc
+2+10 PS gb_other_nuc
+2+6 PT gb_patent
+2+8 PT gb_other_nuc
+2+10 PT gb_other_nuc
+2+6 PU gb_patent
+2+8 PU gb_other_nuc
+2+10 PU gb_other_nuc
+2+6 PV gb_dirsub
+2+8 PV gb_other_nuc
+2+10 PV gb_other_nuc
+2+6 PW unreserved_nuc
+2+8 PW unreserved_nuc
+2+10 PW unreserved_nuc
+2+6 P? gb_other_nuc
+2+8 P? gb_other_nuc
+2+10 P? gb_other_nuc
+2+6 QA gb_other_nuc
+2+8 QA gb_other_nuc
+2+10 QA gb_other_nuc
+2+6 QB gb_other_nuc
+2+8 QB gb_other_nuc
+2+10 QB gb_other_nuc
+2+6 QC gb_other_nuc
+2+8 QC gb_other_nuc
+2+10 QC gb_other_nuc
+2+6 QD gb_other_nuc
+2+8 QD gb_other_nuc
+2+10 QD gb_other_nuc
+2+6 QE gb_other_nuc
+2+8 QE gb_other_nuc
+2+10 QE gb_other_nuc
+2+6 QF gb_other_nuc
+2+8 QF gb_other_nuc
+2+10 QF gb_other_nuc
+2+6 QG gb_other_nuc
+2+8 QG gb_other_nuc
+2+10 QG gb_other_nuc
+2+6 QH gb_other_nuc
+2+8 QH gb_other_nuc
+2+10 QH gb_other_nuc
+2+6 QI gb_other_nuc
+2+8 QI gb_other_nuc
+2+10 QI gb_other_nuc
+2+6 QJ gb_other_nuc
+2+8 QJ gb_other_nuc
+2+10 QJ gb_other_nuc
+2+6 QK embl_patent
+2+8 QK embl_other_nuc
+2+10 QK embl_other_nuc
+2+6 QL embl_patent
+2+8 QL embl_other_nuc
+2+10 QL embl_other_nuc
+2+6 QM embl_patent
+2+8 QM embl_other_nuc
+2+10 QM embl_other_nuc
+2+6 QN embl_patent
+2+8 QN embl_other_nuc
+2+10 QN embl_other_nuc
+2+6 QO embl_patent
+2+8 QO embl_other_nuc
+2+10 QO embl_other_nuc
+2+6 TI unreserved_nuc
+2+8 TI unreserved_nuc
+2+10 TI unreserved_nuc
+2+6 WP unreserved_nuc
+2+8 WP unreserved_nuc
+2+10 WP unreserved_nuc
+2+6 XM unreserved_nuc
+2+8 XM unreserved_nuc
+2+10 XM unreserved_nuc
+2+6 XP unreserved_nuc
+2+8 XP unreserved_nuc
+2+10 XP unreserved_nuc
+2+6 XR unreserved_nuc
+2+8 XR unreserved_nuc
+2+10 XR unreserved_nuc
+2+6 YP unreserved_nuc
+2+8 YP unreserved_nuc
+2+10 YP unreserved_nuc
+2+6 ZP unreserved_nuc
+2+8 ZP unreserved_nuc
+2+10 ZP unreserved_nuc
+2+6 ?? unreserved_nuc
+2+8 ?? unreserved_nuc
+2+10 ?? unreserved_nuc
+special2 DAA+5 gb_prot
+:
+special2 C+5 ddbj_dirsub
+:
+special2 D+5 ddbj_est
+:
+special2 D+5 ddbj_other_nuc
+:
+special F38006 embl_dirsub
+special2 L+5 gb_est
+:
+special2 L+5 gb_sts
+:
+special L48736-L48796 gb_gss
+special L08881-L15794 gb_other_nuc
+special2 M+5 gb_est
+:
+special2 M+5 gb_sts
+:
+special N00001 gb_embl
+special N00002 gb_embl_ddbj
+special N00003 gb_ddbj
+special N00004 gb_ddbj
+special N00005 gb_embl_ddbj
+special N00006 gb_ddbj
+special N00007 gb_ddbj
+special N00008 gb_other_nuc
+special N00009 gb_embl_ddbj
+special N00010 gb_embl_ddbj
+special N00011 gb_embl
+special N00012 gb_embl_ddbj
+special N00013 gb_other_nuc
+special N00014 gb_ddbj
+special N00015 gb_ddbj
+special N00016 gb_ddbj
+special N00017 gb_ddbj
+special N00018 gb_other_nuc
+special N00019 gb_other_nuc
+special N00020 gb_embl_ddbj
+special N00021 gb_ddbj
+special N00022 gb_embl_ddbj
+special N00023 gb_ddbj
+special N00024 gb_ddbj
+special N00025 gb_embl_ddbj
+special N00026 gb_ddbj
+special N00027 gb_other_nuc
+special N00028 ddbj_other_nuc
+special N00029 gb_ddbj
+special N00030 gb_ddbj
+special N00031 gb_ddbj
+special N00032 gb_ddbj
+special N00033 gb_ddbj
+special N00034 gb_ddbj
+special N00035 ddbj_other_nuc
+special N00036 gb_ddbj
+special N00037 ddbj_other_nuc
+special N00038 gb_ddbj
+special N00039 gb_ddbj
+special N00040 gb_ddbj
+special N00041 gb_other_nuc
+special N00042 gb_ddbj
+special N00043 gb_ddbj
+special N00044 gb_ddbj
+special N00045 gb_other_nuc
+special N00046 gb_other_nuc
+special N00047 gb_ddbj
+special N00048 gb_other_nuc
+special N00049 gb_ddbj
+special N00050 gb_ddbj
+special N00051 gb_ddbj
+special N00052 gb_other_nuc
+special N00053 ddbj_other_nuc
+special N00054 gb_other_nuc
+special N00055 gb_ddbj
+special N00056 gb_ddbj
+special N00057 gb_embl
+special N00058 gb_embl_ddbj
+special N00059 gb_ddbj
+special N00060 embl_other_nuc
+special N00061 ddbj_other_nuc
+special N00062 ddbj_other_nuc
+special N00063 ddbj_other_nuc
+special N00064 embl_other_nuc
+special N00065 ddbj_other_nuc
+special N00066 ddbj_other_nuc
+special N00067 ddbj_other_nuc
+special N00068 ddbj_other_nuc
+special N00069 ddbj_other_nuc
+special N00070 embl_ddbj
+special N00078 ddbj_other_nuc
+special N00079 ddbj_other_nuc
+special N00083 ddbj_other_nuc
+special N00088 ddbj_other_nuc
+special N00090 ddbj_other_nuc
+special N00091 ddbj_other_nuc
+special N00092 ddbj_other_nuc
+special N00093 ddbj_other_nuc
+special N00094 ddbj_other_nuc
+special N18624 gb_other_nuc
+special N20001-N97317 gb_est
+special N97318-N97531 gb_gss
+special N97532-N99999 gb_est
+special2 T+5 gb_gss
+:
+special2 U+5 gb_est
+:
+special2 U+5 gb_gss
+:
+special2 U+5 gb_other_nuc
+:
+special2 X+5 embl_est
+:
+special2 Y+5 embl_est
+:
+special2 Z+5 embl_est
+:
+special2 Z+5 embl_other_nuc
+:
+special2 AB+6 ddbj_est
+:
+special2 AB+6 ddbj_other_nuc
+:
+special2 AF+6 gb_est
+:
+special2 AF+6 gb_gss
+:
+special AF000235-AF373213 gb_other_nuc
+special AG266800-AG266855 ddbj_dirsub
+special2 AJ+6 embl_est
+:
+special2 AJ+6 embl_other_nuc
+:
+special2 AL+6 embl_est
+:
+special AL160494-AL161251 embl_gss
+special2 AL+6 embl_other_nuc
+:
+special2 AM+6 embl_est
+:
+special2 AM+6 embl_other_nuc
+:
+special2 AU+6 ddbj_dirsub
+:
+special AU036596-AU036726 ddbj_gss
+special AX114121 embl_dirsub
+special2 AY+6 gb_est
+:
+special2 AY+6 gb_gss
+:
+special2 BX+6 embl_est
+:
+special2 BX+6 embl_other_nuc
+:
+special2 CP+6 gb_dirsub
+:
+special2 CR+6 embl_est
+:
+special2 CR+6 embl_other_nuc
+:
+special2 CT+6 embl_est
+:
+special2 CT+6 embl_other_nuc
+:
+special2 CU+6 embl_est
+:
+special2 CU+6 embl_other_nuc
+:
+special2 DE+6 ddbj_dirsub
+:
+special2 DQ+6 gb_est
+:
+special2 DQ+6 gb_gss
+:
+special2 DS+6 gb_dirsub
+:
+special2 DS+6 gb_other_nuc
+:
+special2 EF+6 gb_est
+:
+special2 EF+6 gb_gss
+:
+special2 EU+6 gb_est
+:
+special EU306364-EU306386 gb_gss
+special2 FJ+6 gb_est
+:
+special2 FM+6 embl_est
+:
+special2 FN+6 embl_est
+:
+special2 FO+6 embl_est
+:
+special2 FP+6 embl_est
+:
+special2 FP+6 embl_other_nuc
+:
+special2 FQ+6 embl_est
+:
+special2 FR+6 embl_est
+:
+special2 FR+6 embl_tpa_nuc
+:
+special GQ162211-GQ162212 gb_est
+special2 GU+6 gb_est
+:
+special2 HE+6 embl_est
+:
+special2 HE+6 embl_tpa_nuc
+:
+special2 HF+6 embl_est
+:
+special2 HF+6 embl_tpa_nuc
+:
+special HF913790-HF920632 embl_wgs_nuc
+special2 HG+6 embl_est
+:
+special2 HG+6 embl_tpa_nuc
+:
+special HM042681 gb_est
+special2 HQ+6 gb_est
+:
+special JN376805-JN377341 gb_est
+special KF487514 gb_est
+special KJ472321-KJ472336 gb_est
+special KM673248-KM673271 gb_est
+special2 LK+6 embl_tpa_nuc
+:
+special LK985528-LK995307 embl_est
+special2 LM+6 embl_tpa_nuc
+:
+special LM994684-LM994695 embl_est
+special2 LN+6 embl_est
+:
+special2 LN+6 embl_tpa_nuc
+:
+special2 LR+6 embl_tpa_nuc
+:
+special2 LT+6 embl_est
+:
+special2 LT+6 embl_tpa_nuc
+:
+special OB000001-OB660024 embl_con
+special2 CAADSF+9 embl_tpa_wgs_nuc
+:
+special CAADSM000000000-CAAGJX999999999 embl_tpa_wgs_nuc
+special CAAGKD000000000-CAAGKQ999999999 embl_tpa_wgs_nuc
+special CAAGKS000000000-CAAGRI999999999 embl_tpa_wgs_nuc
+special CAAGRK000000000-CAAGSH999999999 embl_tpa_wgs_nuc
+special2 CAAHDL+9 embl_tpa_wgs_nuc
+:
+special CAAHDO000000000-CAAHFA999999999 embl_tpa_wgs_nuc
+special CABPVU000000000-CABUTS999999999 embl_tpa_wgs_nuc
+special CABUTU000000000-CABVEI999999999 embl_tpa_wgs_nuc
+special2 CABVEV+9 embl_tpa_wgs_nuc
+:
+special CABVEX000000000-CABVGH999999999 embl_tpa_wgs_nuc
+special CADEPO000000000-CADEVH999999999 embl_tpa_wgs_nuc
+special CADEVJ000000000-CADFGZ999999999 embl_tpa_wgs_nuc
+special CADFHB000000000-CADFUU999999999 embl_tpa_wgs_nuc
+special2 CADKUY+9 embl_tpa_wgs_nuc
+:
+special CAJJIC000000000-CAJJID999999999 embl_tpa_wgs_nuc
+special CAJJIG000000000-CAJJIK999999999 embl_tpa_wgs_nuc
+special2 CAJJIM+9 embl_tpa_wgs_nuc
+:
+special CAJJIQ000000000-CAJJJK999999999 embl_tpa_wgs_nuc
+special CAJJJM000000000-CAJMTE999999999 embl_tpa_wgs_nuc
+special CAJSFZ000000000-CAJSGD999999999 embl_tpa_wgs_nuc
+special CAJTIX000000000-CAJTJC999999999 embl_tpa_wgs_nuc
+special CAJTJE000000000-CAJTJH999999999 embl_tpa_wgs_nuc
+special2 CAJTJJ+9 embl_tpa_wgs_nuc
+:
+special CAJTJS000000000-CAJTJT999999999 embl_tpa_wgs_nuc
+special2 CAJTJV+9 embl_tpa_wgs_nuc
+:
+special CAJTJY000000000-CAJTKB999999999 embl_tpa_wgs_nuc
+special2 CAJTKE+9 embl_tpa_wgs_nuc
+:
+special CAJTKG000000000-CAJTKL999999999 embl_tpa_wgs_nuc
+special2 CAJTKS+9 embl_tpa_wgs_nuc
+:
+special CAJTKU000000000-CAJTXH999999999 embl_tpa_wgs_nuc
+special CAJTXK000000000-CAJURP999999999 embl_tpa_wgs_nuc
+special2 CAJURR+9 embl_tpa_wgs_nuc
+:
+special2 CAJURT+9 embl_tpa_wgs_nuc
+:
+special CAJURV000000000-CAJUSB999999999 embl_tpa_wgs_nuc
+special CAJUSD000000000-CAJUSU999999999 embl_tpa_wgs_nuc
+special2 CAJUSW+9 embl_tpa_wgs_nuc
+:
+special CAJUSZ000000000-CAJUTC999999999 embl_tpa_wgs_nuc
+special2 CAJUTE+9 embl_tpa_wgs_nuc
+:
+special2 CAJUTH+9 embl_tpa_wgs_nuc
+:
+special CAJUTJ000000000-CAJUTM999999999 embl_tpa_wgs_nuc
+special2 CAJUTQ+9 embl_tpa_wgs_nuc
+:
+special2 CAJUTS+9 embl_tpa_wgs_nuc
+:
+special CAJUTV000000000-CAJUTW999999999 embl_tpa_wgs_nuc
+special CAJUTY000000000-CAJUUA999999999 embl_tpa_wgs_nuc
+special CAJVVG000000000-CAJVVN999999999 embl_tpa_wgs_nuc
+special CAJVVR000000000-CAJVVX999999999 embl_tpa_wgs_nuc
+special2 CAJVVZ+9 embl_tpa_wgs_nuc
+:
+special CAJVWG000000000-CAJYBX999999999 embl_tpa_wgs_nuc
+special CAJYCH000000000-CAJYCJ999999999 embl_tpa_wgs_nuc
+special2 CAJYLB+9 embl_tpa_wgs_nuc
+:
+special CAJZDA000000000-CAJZFS999999999 embl_tpa_wgs_nuc
+special CAJZFU000000000-CAJZHB999999999 embl_tpa_wgs_nuc
+special CAJZHD000000000-CAJZHK999999999 embl_tpa_wgs_nuc
+special2 CAJZHP+9 embl_tpa_wgs_nuc
+:
+special CAJZHR000000000-CAJZHT999999999 embl_tpa_wgs_nuc
+special CAJZHV000000000-CAJZHZ999999999 embl_tpa_wgs_nuc
+special CAJZIB000000000-CAJZJZ999999999 embl_tpa_wgs_nuc
+special CAJZKB000000000-CAJZLA999999999 embl_tpa_wgs_nuc
+special CAJZLC000000000-CAJZLH999999999 embl_tpa_wgs_nuc
+special CAJZLJ000000000-CAJZLK999999999 embl_tpa_wgs_nuc
+special2 CAJZLM+9 embl_tpa_wgs_nuc
+:
+special2 CAJZLO+9 embl_tpa_wgs_nuc
+:
+special2 CAJZLS+9 embl_tpa_wgs_nuc
+:
+special CAKAEN000000000-CAKAIS999999999 embl_tpa_wgs_nuc
+special CAKAOQ000000000-CAKASD999999999 embl_tpa_wgs_nuc
+special2 CAKMHU+9 embl_tpa_wgs_nuc
+:
+special CAKMHW000000000-CAKMJE999999999 embl_tpa_wgs_nuc
+special CAKMKY000000000-CAKMLH999999999 embl_tpa_wgs_nuc
+special CAKMLJ000000000-CAKMLK999999999 embl_tpa_wgs_nuc
+special CAKMLM000000000-CAKMME999999999 embl_tpa_wgs_nuc
+special CAKMMH000000000-CAKMMO999999999 embl_tpa_wgs_nuc
+special2 CAKMMQ+9 embl_tpa_wgs_nuc
+:
+special2 CAKMMS+9 embl_tpa_wgs_nuc
+:
+special CAKMMU000000000-CAKMMV999999999 embl_tpa_wgs_nuc
+special CAKMMX000000000-CAKMMZ999999999 embl_tpa_wgs_nuc
+special CAKMNB000000000-CAKMNE999999999 embl_tpa_wgs_nuc
+special CAKMNH000000000-CAKMNP999999999 embl_tpa_wgs_nuc
+special CAKMNX000000000-CAKMRG999999999 embl_tpa_wgs_nuc
+special CAKMRL000000000-CAKMRN999999999 embl_tpa_wgs_nuc
+special CAKNFQ000000000-CAKNSC999999999 embl_tpa_wgs_nuc
+special CAKZFW000000000-CAKZJO999999999 embl_tpa_wgs_nuc
+special CAKZJV000000000-CAKZRW999999999 embl_tpa_wgs_nuc
+special2 CAKZSJ+9 embl_tpa_wgs_nuc
+:
+special CAKZSL000000000-CAKZSM999999999 embl_tpa_wgs_nuc
+special2 CAKZSP+9 embl_tpa_wgs_nuc
+:
+special CAKZSR000000000-CAKZST999999999 embl_tpa_wgs_nuc
+special CAKZSW000000000-CAKZTC999999999 embl_tpa_wgs_nuc
+special2 CAKZTF+9 embl_tpa_wgs_nuc
+:
+special CAKZTH000000000-CAKZTL999999999 embl_tpa_wgs_nuc
+special2 CAKZTN+9 embl_tpa_wgs_nuc
+:
+special2 CAKZTP+9 embl_tpa_wgs_nuc
+:
+special CAKZTR000000000-CAKZTS999999999 embl_tpa_wgs_nuc
+special CAKZTU000000000-CAKZTX999999999 embl_tpa_wgs_nuc
+special2 CAKZUA+9 embl_tpa_wgs_nuc
+:
+special CAKZUC000000000-CAKZUD999999999 embl_tpa_wgs_nuc
+special CAKZUH000000000-CAKZUI999999999 embl_tpa_wgs_nuc
+special2 CAKZUO+9 embl_tpa_wgs_nuc
+:
+special CAKZUW000000000-CAKZUZ999999999 embl_tpa_wgs_nuc
+special2 CAKZVH+9 embl_tpa_wgs_nuc
+:
+special2 CAKZVM+9 embl_tpa_wgs_nuc
+:
+special CAKZVO000000000-CAKZVT999999999 embl_tpa_wgs_nuc
+special CAKZVV000000000-CAKZWE999999999 embl_tpa_wgs_nuc
+special CAKZWG000000000-CAKZWO999999999 embl_tpa_wgs_nuc
+special CAKZWR000000000-CAKZWZ999999999 embl_tpa_wgs_nuc
+special CAKZXB000000000-CAKZYZ999999999 embl_tpa_wgs_nuc
+special CAKZZB000000000-CALAHR999999999 embl_tpa_wgs_nuc
+special CALAHT000000000-CALAIE999999999 embl_tpa_wgs_nuc
+special CALAIG000000000-CALAII999999999 embl_tpa_wgs_nuc
+special CALAIK000000000-CALAIN999999999 embl_tpa_wgs_nuc
+special CALAIP000000000-CALAIV999999999 embl_tpa_wgs_nuc
+special2 CALAJC+9 embl_tpa_wgs_nuc
+:
+special2 CALAJE+9 embl_tpa_wgs_nuc
+:
+special CALAJI000000000-CALAJJ999999999 embl_tpa_wgs_nuc
+special2 CALAJU+9 embl_tpa_wgs_nuc
+:
+special CALAJW000000000-CALAJY999999999 embl_tpa_wgs_nuc
+special CALAKA000000000-CALAKD999999999 embl_tpa_wgs_nuc
+special CALAKF000000000-CALAKG999999999 embl_tpa_wgs_nuc
+special CALAKI000000000-CALAKK999999999 embl_tpa_wgs_nuc
+special CALAKN000000000-CALAKP999999999 embl_tpa_wgs_nuc
+special CALAKS000000000-CALAKT999999999 embl_tpa_wgs_nuc
+special CALAKV000000000-CALAKY999999999 embl_tpa_wgs_nuc
+special2 CALALA+9 embl_tpa_wgs_nuc
+:
+special CALALC000000000-CALAMG999999999 embl_tpa_wgs_nuc
+special CALAMJ000000000-CALAMK999999999 embl_tpa_wgs_nuc
+special2 CALAMP+9 embl_tpa_wgs_nuc
+:
+special CALAMR000000000-CALAMW999999999 embl_tpa_wgs_nuc
+special CALAMY000000000-CALAMZ999999999 embl_tpa_wgs_nuc
+special2 CALANB+9 embl_tpa_wgs_nuc
+:
+special CALANE000000000-CALANI999999999 embl_tpa_wgs_nuc
+special CALANK000000000-CALANX999999999 embl_tpa_wgs_nuc
+special CALAOA000000000-CALAOB999999999 embl_tpa_wgs_nuc
+special CALAOD000000000-CALAOE999999999 embl_tpa_wgs_nuc
+special CALAOG000000000-CALAOZ999999999 embl_tpa_wgs_nuc
+special CALAPC000000000-CALBAC999999999 embl_tpa_wgs_nuc
+special CALBAE000000000-CALBAI999999999 embl_tpa_wgs_nuc
+special CALBAL000000000-CALBBG999999999 embl_tpa_wgs_nuc
+special CALBBI000000000-CALBBP999999999 embl_tpa_wgs_nuc
+special CALBBR000000000-CALBCM999999999 embl_tpa_wgs_nuc
+special CALBCP000000000-CALBCW999999999 embl_tpa_wgs_nuc
+special2 CALBDA+9 embl_tpa_wgs_nuc
+:
+special CALBDC000000000-CALBDF999999999 embl_tpa_wgs_nuc
+special CALBDH000000000-CALBDN999999999 embl_tpa_wgs_nuc
+special CALBDP000000000-CALBDX999999999 embl_tpa_wgs_nuc
+special CALBEH000000000-CALBEJ999999999 embl_tpa_wgs_nuc
+special CALBEM000000000-CALBUG999999999 embl_tpa_wgs_nuc
+special CALBUJ000000000-CALBUP999999999 embl_tpa_wgs_nuc
+special CALBUR000000000-CALBUZ999999999 embl_tpa_wgs_nuc
+special CALBVB000000000-CALBVH999999999 embl_tpa_wgs_nuc
+special2 CALBVJ+9 embl_tpa_wgs_nuc
+:
+special CALBWE000000000-CALBWJ999999999 embl_tpa_wgs_nuc
+special CALBWL000000000-CALBWR999999999 embl_tpa_wgs_nuc
+special CALBWT000000000-CALCDC999999999 embl_tpa_wgs_nuc
+special CALCDE000000000-CALCIN999999999 embl_tpa_wgs_nuc
+special CALCIP000000000-CALCJG999999999 embl_tpa_wgs_nuc
+special2 CALCJJ+9 embl_tpa_wgs_nuc
+:
+special2 CALCJL+9 embl_tpa_wgs_nuc
+:
+special2 CALCJQ+9 embl_tpa_wgs_nuc
+:
+special2 CALCJU+9 embl_tpa_wgs_nuc
+:
+special CALCJW000000000-CALCKF999999999 embl_tpa_wgs_nuc
+special CALCKH000000000-CALCKO999999999 embl_tpa_wgs_nuc
+special CALCKS000000000-CALCKT999999999 embl_tpa_wgs_nuc
+special2 CALCKV+9 embl_tpa_wgs_nuc
+:
+special CALCKZ000000000-CALCLK999999999 embl_tpa_wgs_nuc
+special CALCLM000000000-CALCLN999999999 embl_tpa_wgs_nuc
+special CALCLQ000000000-CALCMD999999999 embl_tpa_wgs_nuc
+special CALCMF000000000-CALCMH999999999 embl_tpa_wgs_nuc
+special CALCML000000000-CALCMT999999999 embl_tpa_wgs_nuc
+special CALCMW000000000-CALCRH999999999 embl_tpa_wgs_nuc
+special CALCRJ000000000-CALCUV999999999 embl_tpa_wgs_nuc
+special CALCUX000000000-CALDAU999999999 embl_tpa_wgs_nuc
+special2 CALDAW+9 embl_tpa_wgs_nuc
+:
+special CALDBA000000000-CALDBE999999999 embl_tpa_wgs_nuc
+special2 CALDBG+9 embl_tpa_wgs_nuc
+:
+special CALDBI000000000-CALDCB999999999 embl_tpa_wgs_nuc
+special CALDCD000000000-CALDCJ999999999 embl_tpa_wgs_nuc
+special CALDCM000000000-CALDCN999999999 embl_tpa_wgs_nuc
+special CALDCP000000000-CALDCS999999999 embl_tpa_wgs_nuc
+special CALDCU000000000-CALDDG999999999 embl_tpa_wgs_nuc
+special CALDDJ000000000-CALDDL999999999 embl_tpa_wgs_nuc
+special CALDDS000000000-CALDDT999999999 embl_tpa_wgs_nuc
+special CALDDW000000000-CALDDX999999999 embl_tpa_wgs_nuc
+special CALDDZ000000000-CALDEA999999999 embl_tpa_wgs_nuc
+special CALDEC000000000-CALDEL999999999 embl_tpa_wgs_nuc
+special CALDEQ000000000-CALDEV999999999 embl_tpa_wgs_nuc
+special CALDEX000000000-CALDEY999999999 embl_tpa_wgs_nuc
+special2 CALDFA+9 embl_tpa_wgs_nuc
+:
+special CALDFC000000000-CALDFU999999999 embl_tpa_wgs_nuc
+special2 CALDFX+9 embl_tpa_wgs_nuc
+:
+special CALDGB000000000-CALDGE999999999 embl_tpa_wgs_nuc
+special CALDGG000000000-CALDGM999999999 embl_tpa_wgs_nuc
+special CALDGO000000000-CALDGP999999999 embl_tpa_wgs_nuc
+special CALDGR000000000-CALDHC999999999 embl_tpa_wgs_nuc
+special2 CALDHE+9 embl_tpa_wgs_nuc
+:
+special CALDHN000000000-CALDHY999999999 embl_tpa_wgs_nuc
+special CALDIA000000000-CALDKT999999999 embl_tpa_wgs_nuc
+special CALDKW000000000-CALDSN999999999 embl_tpa_wgs_nuc
+special CALDUU000000000-CALDUX999999999 embl_tpa_wgs_nuc
+special CALDUZ000000000-CALDVB999999999 embl_tpa_wgs_nuc
+special CALDVD000000000-CALDVO999999999 embl_tpa_wgs_nuc
+special CALDVQ000000000-CALDVV999999999 embl_tpa_wgs_nuc
+special CALDVX000000000-CALDVZ999999999 embl_tpa_wgs_nuc
+special CALDWB000000000-CALDWF999999999 embl_tpa_wgs_nuc
+special CALDWH000000000-CALDWQ999999999 embl_tpa_wgs_nuc
+special CALDWS000000000-CALDWV999999999 embl_tpa_wgs_nuc
+special CALDWX000000000-CALDWY999999999 embl_tpa_wgs_nuc
+special CALDXA000000000-CALDXI999999999 embl_tpa_wgs_nuc
+special CALDXK000000000-CALDXX999999999 embl_tpa_wgs_nuc
+special CALDXZ000000000-CALDYB999999999 embl_tpa_wgs_nuc
+special CALDYD000000000-CALDYI999999999 embl_tpa_wgs_nuc
+special2 CALDYK+9 embl_tpa_wgs_nuc
+:
+special CALDZM000000000-CALDZN999999999 embl_tpa_wgs_nuc
+special2 CALDZV+9 embl_tpa_wgs_nuc
+:
+special CALEAA000000000-CALEAB999999999 embl_tpa_wgs_nuc
+special CALEAH000000000-CALEAP999999999 embl_tpa_wgs_nuc
+special CALEAR000000000-CALEAU999999999 embl_tpa_wgs_nuc
+special CALEAW000000000-CALEBJ999999999 embl_tpa_wgs_nuc
+special CALEBL000000000-CALEBS999999999 embl_tpa_wgs_nuc
+special CALEBU000000000-CALECA999999999 embl_tpa_wgs_nuc
+special CALECC000000000-CALECD999999999 embl_tpa_wgs_nuc
+special CALECG000000000-CALECO999999999 embl_tpa_wgs_nuc
+special CALECR000000000-CALECS999999999 embl_tpa_wgs_nuc
+special CALECU000000000-CALECY999999999 embl_tpa_wgs_nuc
+special CALEDA000000000-CALEDG999999999 embl_tpa_wgs_nuc
+special2 CALEDK+9 embl_tpa_wgs_nuc
+:
+special2 CALEDM+9 embl_tpa_wgs_nuc
+:
+special CALEDO000000000-CALEDQ999999999 embl_tpa_wgs_nuc
+special CALEDX000000000-CALEEB999999999 embl_tpa_wgs_nuc
+special CALEED000000000-CALEPD999999999 embl_tpa_wgs_nuc
+special CALEPF000000000-CALEPJ999999999 embl_tpa_wgs_nuc
+special CALEPL000000000-CALETK999999999 embl_tpa_wgs_nuc
+special CALETM000000000-CALETT999999999 embl_tpa_wgs_nuc
+special CALETV000000000-CALETW999999999 embl_tpa_wgs_nuc
+special CALETY000000000-CALEUF999999999 embl_tpa_wgs_nuc
+special CALEUH000000000-CALEUN999999999 embl_tpa_wgs_nuc
+special2 CALEUP+9 embl_tpa_wgs_nuc
+:
+special CALEUR000000000-CALEUW999999999 embl_tpa_wgs_nuc
+special CALEUZ000000000-CALEVQ999999999 embl_tpa_wgs_nuc
+special CALEVS000000000-CALEVY999999999 embl_tpa_wgs_nuc
+special CALEWA000000000-CALEWE999999999 embl_tpa_wgs_nuc
+special CALEWG000000000-CALEWI999999999 embl_tpa_wgs_nuc
+special CALEWK000000000-CALEWX999999999 embl_tpa_wgs_nuc
+special CALEWZ000000000-CALEXO999999999 embl_tpa_wgs_nuc
+special CALEXQ000000000-CALEXZ999999999 embl_tpa_wgs_nuc
+special CALEYB000000000-CALEYC999999999 embl_tpa_wgs_nuc
+special CALEYE000000000-CALEYJ999999999 embl_tpa_wgs_nuc
+special CALEYL000000000-CALFAJ999999999 embl_tpa_wgs_nuc
+special2 CALFAL+9 embl_tpa_wgs_nuc
+:
+special CALFAN000000000-CALFAU999999999 embl_tpa_wgs_nuc
+special CALFAW000000000-CALFAX999999999 embl_tpa_wgs_nuc
+special2 CALFAZ+9 embl_tpa_wgs_nuc
+:
+special2 CALFBY+9 embl_tpa_wgs_nuc
+:
+special2 CALFCA+9 embl_tpa_wgs_nuc
+:
+special CALFCC000000000-CALFCD999999999 embl_tpa_wgs_nuc
+special2 CALFCH+9 embl_tpa_wgs_nuc
+:
+special CALFCJ000000000-CALFCT999999999 embl_tpa_wgs_nuc
+special CALFCW000000000-CALFCY999999999 embl_tpa_wgs_nuc
+special CALFDB000000000-CALFDG999999999 embl_tpa_wgs_nuc
+special CALFDJ000000000-CALFDM999999999 embl_tpa_wgs_nuc
+special CALFDO000000000-CALFDT999999999 embl_tpa_wgs_nuc
+special CALFDV000000000-CALFDX999999999 embl_tpa_wgs_nuc
+special CALFEC000000000-CALFED999999999 embl_tpa_wgs_nuc
+special CALFEF000000000-CALFFD999999999 embl_tpa_wgs_nuc
+special CALFFF000000000-CALFFI999999999 embl_tpa_wgs_nuc
+special CALFFL000000000-CALFSF999999999 embl_tpa_wgs_nuc
+special CALFSK000000000-CALFUG999999999 embl_tpa_wgs_nuc
+special CALFUY000000000-CALFVC999999999 embl_tpa_wgs_nuc
+special CALFXA000000000-CALGAS999999999 embl_tpa_wgs_nuc
+special CALGAX000000000-CALGJP999999999 embl_tpa_wgs_nuc
+special2 CALGJY+9 embl_tpa_wgs_nuc
+:
+special CALGKF000000000-CALGKG999999999 embl_tpa_wgs_nuc
+special2 CALGKM+9 embl_tpa_wgs_nuc
+:
+special CALGKO000000000-CALGKU999999999 embl_tpa_wgs_nuc
+special CALGKW000000000-CALGLD999999999 embl_tpa_wgs_nuc
+special CALGLF000000000-CALGLI999999999 embl_tpa_wgs_nuc
+special CALGLK000000000-CALGLQ999999999 embl_tpa_wgs_nuc
+special CALGMG000000000-CALGMI999999999 embl_tpa_wgs_nuc
+special CALGMK000000000-CALGML999999999 embl_tpa_wgs_nuc
+special2 CALGMN+9 embl_tpa_wgs_nuc
+:
+special CALGMP000000000-CALGMQ999999999 embl_tpa_wgs_nuc
+special CALGMU000000000-CALGMZ999999999 embl_tpa_wgs_nuc
+special CALGNB000000000-CALGNC999999999 embl_tpa_wgs_nuc
+special2 CALGNF+9 embl_tpa_wgs_nuc
+:
+special CALGNL000000000-CALGNM999999999 embl_tpa_wgs_nuc
+special CALGNQ000000000-CALGNR999999999 embl_tpa_wgs_nuc
+special2 CALGNV+9 embl_tpa_wgs_nuc
+:
+special2 CALGNY+9 embl_tpa_wgs_nuc
+:
+special2 CALGOD+9 embl_tpa_wgs_nuc
+:
+special CALGOH000000000-CALGPF999999999 embl_tpa_wgs_nuc
+special CALGPP000000000-CALGPZ999999999 embl_tpa_wgs_nuc
+special2 CALGQB+9 embl_tpa_wgs_nuc
+:
+special CALGQD000000000-CALGQK999999999 embl_tpa_wgs_nuc
+special CALGQM000000000-CALGQT999999999 embl_tpa_wgs_nuc
+special2 CALGQW+9 embl_tpa_wgs_nuc
+:
+special CALGQY000000000-CALGVO999999999 embl_tpa_wgs_nuc
+special CALGVQ000000000-CALGVY999999999 embl_tpa_wgs_nuc
+special CALGWA000000000-CALGWG999999999 embl_tpa_wgs_nuc
+special CALGWI000000000-CALGWM999999999 embl_tpa_wgs_nuc
+special CALGWO000000000-CALGWU999999999 embl_tpa_wgs_nuc
+special2 CALGWW+9 embl_tpa_wgs_nuc
+:
+special CALGWZ000000000-CALGXA999999999 embl_tpa_wgs_nuc
+special CALGXC000000000-CALGXI999999999 embl_tpa_wgs_nuc
+special2 CALGXK+9 embl_tpa_wgs_nuc
+:
+special2 CALGXM+9 embl_tpa_wgs_nuc
+:
+special CALGXO000000000-CALGXS999999999 embl_tpa_wgs_nuc
+special2 CALGXU+9 embl_tpa_wgs_nuc
+:
+special CALGXW000000000-CALGXY999999999 embl_tpa_wgs_nuc
+special CALGYC000000000-CALGYZ999999999 embl_tpa_wgs_nuc
+special CALGZE000000000-CALGZN999999999 embl_tpa_wgs_nuc
+special CALGZP000000000-CALHAA999999999 embl_tpa_wgs_nuc
+special CALHAC000000000-CALHAD999999999 embl_tpa_wgs_nuc
+special CALHBG000000000-CALHBI999999999 embl_tpa_wgs_nuc
+special2 CALHBK+9 embl_tpa_wgs_nuc
+:
+special CALHBM000000000-CALHBN999999999 embl_tpa_wgs_nuc
+special CALHBS000000000-CALHBT999999999 embl_tpa_wgs_nuc
+special2 CALHBV+9 embl_tpa_wgs_nuc
+:
+special CALHBX000000000-CALHCA999999999 embl_tpa_wgs_nuc
+special2 CALHCD+9 embl_tpa_wgs_nuc
+:
+special CALHCR000000000-CALHDF999999999 embl_tpa_wgs_nuc
+special CALHDH000000000-CALHDX999999999 embl_tpa_wgs_nuc
+special CALHDZ000000000-CALHED999999999 embl_tpa_wgs_nuc
+special CALHEF000000000-CALHEJ999999999 embl_tpa_wgs_nuc
+special CALHEL000000000-CALHEN999999999 embl_tpa_wgs_nuc
+special CALHEP000000000-CALHFF999999999 embl_tpa_wgs_nuc
+special CALHFH000000000-CALHFP999999999 embl_tpa_wgs_nuc
+special CALHFR000000000-CALHGD999999999 embl_tpa_wgs_nuc
+special CALHGF000000000-CALHGH999999999 embl_tpa_wgs_nuc
+special CALHGK000000000-CALHGN999999999 embl_tpa_wgs_nuc
+special2 CALHGP+9 embl_tpa_wgs_nuc
+:
+special CALHGR000000000-CALHGW999999999 embl_tpa_wgs_nuc
+special2 CALHGY+9 embl_tpa_wgs_nuc
+:
+special CALHHA000000000-CALHHB999999999 embl_tpa_wgs_nuc
+special CALHHD000000000-CALHHG999999999 embl_tpa_wgs_nuc
+special CALHHI000000000-CALHHN999999999 embl_tpa_wgs_nuc
+special2 CALHHP+9 embl_tpa_wgs_nuc
+:
+special CALHHR000000000-CALHHX999999999 embl_tpa_wgs_nuc
+special CALHHZ000000000-CALHIA999999999 embl_tpa_wgs_nuc
+special CALHIC000000000-CALHIK999999999 embl_tpa_wgs_nuc
+special CALHIM000000000-CALHIN999999999 embl_tpa_wgs_nuc
+special2 CALHIQ+9 embl_tpa_wgs_nuc
+:
+special2 CALHIS+9 embl_tpa_wgs_nuc
+:
+special CALHIY000000000-CALHJC999999999 embl_tpa_wgs_nuc
+special CALHJG000000000-CALHJJ999999999 embl_tpa_wgs_nuc
+special CALHJL000000000-CALHJN999999999 embl_tpa_wgs_nuc
+special CALHJP000000000-CALHKI999999999 embl_tpa_wgs_nuc
+special CALHKL000000000-CALHKP999999999 embl_tpa_wgs_nuc
+special CALHKR000000000-CALHLA999999999 embl_tpa_wgs_nuc
+special CALHLG000000000-CALHLV999999999 embl_tpa_wgs_nuc
+special CALHLX000000000-CALHMB999999999 embl_tpa_wgs_nuc
+special CALHMD000000000-CALHMF999999999 embl_tpa_wgs_nuc
+special CALHMH000000000-CALHML999999999 embl_tpa_wgs_nuc
+special CALHMN000000000-CALHMU999999999 embl_tpa_wgs_nuc
+special CALHMW000000000-CALHMZ999999999 embl_tpa_wgs_nuc
+special2 CALHNB+9 embl_tpa_wgs_nuc
+:
+special CALHND000000000-CALHNH999999999 embl_tpa_wgs_nuc
+special2 CALHNJ+9 embl_tpa_wgs_nuc
+:
+special CALHNL000000000-CALHNR999999999 embl_tpa_wgs_nuc
+special CALHNT000000000-CALHNW999999999 embl_tpa_wgs_nuc
+special CALHNY000000000-CALHOH999999999 embl_tpa_wgs_nuc
+special CALHOJ000000000-CALHOT999999999 embl_tpa_wgs_nuc
+special CALHOV000000000-CALHOW999999999 embl_tpa_wgs_nuc
+special CALHOY000000000-CALHPG999999999 embl_tpa_wgs_nuc
+special CALHPL000000000-CALHPT999999999 embl_tpa_wgs_nuc
+special CALHPV000000000-CALHQB999999999 embl_tpa_wgs_nuc
+special CALHQD000000000-CALHQV999999999 embl_tpa_wgs_nuc
+special2 CALHQX+9 embl_tpa_wgs_nuc
+:
+special CALHQZ000000000-CALHRA999999999 embl_tpa_wgs_nuc
+special CALHRE000000000-CALHRG999999999 embl_tpa_wgs_nuc
+special2 CALHRI+9 embl_tpa_wgs_nuc
+:
+special CALHRK000000000-CALHRP999999999 embl_tpa_wgs_nuc
+special CALHRR000000000-CALHRT999999999 embl_tpa_wgs_nuc
+special2 CALHRV+9 embl_tpa_wgs_nuc
+:
+special CALHRX000000000-CALHRY999999999 embl_tpa_wgs_nuc
+special CALHSC000000000-CALHSS999999999 embl_tpa_wgs_nuc
+special2 CALHSU+9 embl_tpa_wgs_nuc
+:
+special CALHSW000000000-CALHSX999999999 embl_tpa_wgs_nuc
+special2 CALHSZ+9 embl_tpa_wgs_nuc
+:
+special CALHTC000000000-CALHTE999999999 embl_tpa_wgs_nuc
+special CALHTG000000000-CALHTQ999999999 embl_tpa_wgs_nuc
+special CALHTS000000000-CALHTU999999999 embl_tpa_wgs_nuc
+special2 CALHTW+9 embl_tpa_wgs_nuc
+:
+special2 CALHTZ+9 embl_tpa_wgs_nuc
+:
+special CALHUB000000000-CALHUF999999999 embl_tpa_wgs_nuc
+special2 CALHUH+9 embl_tpa_wgs_nuc
+:
+special CALHUJ000000000-CALHUL999999999 embl_tpa_wgs_nuc
+special CALHUN000000000-CALHUY999999999 embl_tpa_wgs_nuc
+special2 CALHVA+9 embl_tpa_wgs_nuc
+:
+special2 CALHVC+9 embl_tpa_wgs_nuc
+:
+special CALHVE000000000-CALHVG999999999 embl_tpa_wgs_nuc
+special CALHVI000000000-CALHVO999999999 embl_tpa_wgs_nuc
+special CALHVQ000000000-CALHVW999999999 embl_tpa_wgs_nuc
+special CALHVY000000000-CALHWJ999999999 embl_tpa_wgs_nuc
+special CALHWL000000000-CALHWN999999999 embl_tpa_wgs_nuc
+special CALHWP000000000-CALHXA999999999 embl_tpa_wgs_nuc
+special CALHXD000000000-CALHXE999999999 embl_tpa_wgs_nuc
+special2 CALHXH+9 embl_tpa_wgs_nuc
+:
+special CALHXJ000000000-CALHXT999999999 embl_tpa_wgs_nuc
+special2 CALHXV+9 embl_tpa_wgs_nuc
+:
+special CALHXX000000000-CALHYD999999999 embl_tpa_wgs_nuc
+special CALHYF000000000-CALHYK999999999 embl_tpa_wgs_nuc
+special CALHYN000000000-CALHYW999999999 embl_tpa_wgs_nuc
+special CALHYZ000000000-CALHZM999999999 embl_tpa_wgs_nuc
+special2 CALHZO+9 embl_tpa_wgs_nuc
+:
+special CALHZQ000000000-CALHZS999999999 embl_tpa_wgs_nuc
+special2 CALHZU+9 embl_tpa_wgs_nuc
+:
+special CALHZW000000000-CALIAE999999999 embl_tpa_wgs_nuc
+special CALIAH000000000-CALIAT999999999 embl_tpa_wgs_nuc
+special CALIAV000000000-CALIBH999999999 embl_tpa_wgs_nuc
+special2 CALIBJ+9 embl_tpa_wgs_nuc
+:
+special2 CALIBM+9 embl_tpa_wgs_nuc
+:
+special CALIBS000000000-CALICB999999999 embl_tpa_wgs_nuc
+special CALICD000000000-CALICL999999999 embl_tpa_wgs_nuc
+special CALICN000000000-CALIDH999999999 embl_tpa_wgs_nuc
+special CALIDJ000000000-CALIDK999999999 embl_tpa_wgs_nuc
+special CALIDM000000000-CALIDQ999999999 embl_tpa_wgs_nuc
+special CALIDS000000000-CALIEA999999999 embl_tpa_wgs_nuc
+special CALIEC000000000-CALIED999999999 embl_tpa_wgs_nuc
+special CALIEF000000000-CALIEH999999999 embl_tpa_wgs_nuc
+special CALIEJ000000000-CALIEM999999999 embl_tpa_wgs_nuc
+special CALIEO000000000-CALIEP999999999 embl_tpa_wgs_nuc
+special CALIES000000000-CALIFK999999999 embl_tpa_wgs_nuc
+special CALIFN000000000-CALIFX999999999 embl_tpa_wgs_nuc
+special CALIFZ000000000-CALIGH999999999 embl_tpa_wgs_nuc
+special CALIGJ000000000-CALIGO999999999 embl_tpa_wgs_nuc
+special2 CALIGQ+9 embl_tpa_wgs_nuc
+:
+special CALIGS000000000-CALIHA999999999 embl_tpa_wgs_nuc
+special CALIHC000000000-CALIHE999999999 embl_tpa_wgs_nuc
+special CALIHG000000000-CALIHK999999999 embl_tpa_wgs_nuc
+special CALIHM000000000-CALIHT999999999 embl_tpa_wgs_nuc
+special2 CALIHV+9 embl_tpa_wgs_nuc
+:
+special CALIHX000000000-CALIHZ999999999 embl_tpa_wgs_nuc
+special2 CALIIB+9 embl_tpa_wgs_nuc
+:
+special CALIID000000000-CALIIJ999999999 embl_tpa_wgs_nuc
+special CALIIM000000000-CALIIO999999999 embl_tpa_wgs_nuc
+special CALIIQ000000000-CALIIV999999999 embl_tpa_wgs_nuc
+special2 CALIIX+9 embl_tpa_wgs_nuc
+:
+special CALIIZ000000000-CALIJB999999999 embl_tpa_wgs_nuc
+special2 CALIJD+9 embl_tpa_wgs_nuc
+:
+special CALIJF000000000-CALIJI999999999 embl_tpa_wgs_nuc
+special CALIJK000000000-CALIJL999999999 embl_tpa_wgs_nuc
+special CALIJN000000000-CALIJY999999999 embl_tpa_wgs_nuc
+special CALIKA000000000-CALIKI999999999 embl_tpa_wgs_nuc
+special CALIKY000000000-CALILA999999999 embl_tpa_wgs_nuc
+special CALILC000000000-CALILO999999999 embl_tpa_wgs_nuc
+special CALILQ000000000-CALIMA999999999 embl_tpa_wgs_nuc
+special2 CALIMC+9 embl_tpa_wgs_nuc
+:
+special2 CALIME+9 embl_tpa_wgs_nuc
+:
+special2 CALIMK+9 embl_tpa_wgs_nuc
+:
+special CALIMM000000000-CALIMU999999999 embl_tpa_wgs_nuc
+special2 CALIMW+9 embl_tpa_wgs_nuc
+:
+special CALIMY000000000-CALINA999999999 embl_tpa_wgs_nuc
+special2 CALINC+9 embl_tpa_wgs_nuc
+:
+special CALING000000000-CALINI999999999 embl_tpa_wgs_nuc
+special CALINK000000000-CALINL999999999 embl_tpa_wgs_nuc
+special2 CALINN+9 embl_tpa_wgs_nuc
+:
+special CALINR000000000-CALIOB999999999 embl_tpa_wgs_nuc
+special2 CALIOD+9 embl_tpa_wgs_nuc
+:
+special CALIOF000000000-CALIOK999999999 embl_tpa_wgs_nuc
+special CALIOM000000000-CALIOS999999999 embl_tpa_wgs_nuc
+special CALIOU000000000-CALIOW999999999 embl_tpa_wgs_nuc
+special CALIOY000000000-CALIPB999999999 embl_tpa_wgs_nuc
+special CALIPD000000000-CALIQD999999999 embl_tpa_wgs_nuc
+special CALIQF000000000-CALIQN999999999 embl_tpa_wgs_nuc
+special CALIQP000000000-CALIRB999999999 embl_tpa_wgs_nuc
+special CALIRE000000000-CALIRL999999999 embl_tpa_wgs_nuc
+special2 CALIRN+9 embl_tpa_wgs_nuc
+:
+special CALIRT000000000-CALISA999999999 embl_tpa_wgs_nuc
+special2 CALISC+9 embl_tpa_wgs_nuc
+:
+special CALISE000000000-CALISJ999999999 embl_tpa_wgs_nuc
+special CALISL000000000-CALISN999999999 embl_tpa_wgs_nuc
+special CALISQ000000000-CALIST999999999 embl_tpa_wgs_nuc
+special2 CALISV+9 embl_tpa_wgs_nuc
+:
+special CALISX000000000-CALITB999999999 embl_tpa_wgs_nuc
+special CALITD000000000-CALITI999999999 embl_tpa_wgs_nuc
+special CALITK000000000-CALITL999999999 embl_tpa_wgs_nuc
+special CALITQ000000000-CALITU999999999 embl_tpa_wgs_nuc
+special CALITW000000000-CALIUA999999999 embl_tpa_wgs_nuc
+special CALIUC000000000-CALIUF999999999 embl_tpa_wgs_nuc
+special2 CALIUH+9 embl_tpa_wgs_nuc
+:
+special2 CALIUN+9 embl_tpa_wgs_nuc
+:
+special CALIUP000000000-CALIUW999999999 embl_tpa_wgs_nuc
+special CALIUZ000000000-CALIVD999999999 embl_tpa_wgs_nuc
+special CALIVF000000000-CALIVM999999999 embl_tpa_wgs_nuc
+special CALIVO000000000-CALIVS999999999 embl_tpa_wgs_nuc
+special CALIVU000000000-CALIWS999999999 embl_tpa_wgs_nuc
+special CALIWU000000000-CALIWZ999999999 embl_tpa_wgs_nuc
+special CALIXB000000000-CALIXJ999999999 embl_tpa_wgs_nuc
+special CALIXL000000000-CALIXM999999999 embl_tpa_wgs_nuc
+special CALIXO000000000-CALIXT999999999 embl_tpa_wgs_nuc
+special CALIXV000000000-CALIYZ999999999 embl_tpa_wgs_nuc
+special CALIZC000000000-CALIZE999999999 embl_tpa_wgs_nuc
+special CALIZG000000000-CALIZH999999999 embl_tpa_wgs_nuc
+special CALIZJ000000000-CALIZZ999999999 embl_tpa_wgs_nuc
+special CALJAB000000000-CALJAD999999999 embl_tpa_wgs_nuc
+special CALJAF000000000-CALJAJ999999999 embl_tpa_wgs_nuc
+special2 CALJAO+9 embl_tpa_wgs_nuc
+:
+special CALJAR000000000-CALJAY999999999 embl_tpa_wgs_nuc
+special CALJBA000000000-CALJBG999999999 embl_tpa_wgs_nuc
+special CALJBI000000000-CALJBM999999999 embl_tpa_wgs_nuc
+special CALJBO000000000-CALJBP999999999 embl_tpa_wgs_nuc
+special CALJBR000000000-CALJBS999999999 embl_tpa_wgs_nuc
+special CALJBU000000000-CALJBX999999999 embl_tpa_wgs_nuc
+special CALJCA000000000-CALJCE999999999 embl_tpa_wgs_nuc
+special CALJCG000000000-CALJCX999999999 embl_tpa_wgs_nuc
+special CALJCZ000000000-CALJDC999999999 embl_tpa_wgs_nuc
+special2 CALJDE+9 embl_tpa_wgs_nuc
+:
+special CALJDI000000000-CALJDJ999999999 embl_tpa_wgs_nuc
+special CALJDL000000000-CALJDM999999999 embl_tpa_wgs_nuc
+special CALJDP000000000-CALJDS999999999 embl_tpa_wgs_nuc
+special CALJDV000000000-CALJED999999999 embl_tpa_wgs_nuc
+special2 CALJIC+9 embl_tpa_wgs_nuc
+:
+special CALJIE000000000-CALJIG999999999 embl_tpa_wgs_nuc
+special CALJII000000000-CALJIM999999999 embl_tpa_wgs_nuc
+special CALJIO000000000-CALJIP999999999 embl_tpa_wgs_nuc
+special CALJIR000000000-CALJIT999999999 embl_tpa_wgs_nuc
+special CALJIV000000000-CALJIX999999999 embl_tpa_wgs_nuc
+special CALJJA000000000-CALJJB999999999 embl_tpa_wgs_nuc
+special CALJJD000000000-CALJJN999999999 embl_tpa_wgs_nuc
+special2 CALJJP+9 embl_tpa_wgs_nuc
+:
+special CALJJS000000000-CALJJT999999999 embl_tpa_wgs_nuc
+special2 CALJJW+9 embl_tpa_wgs_nuc
+:
+special CALJKA000000000-CALJMB999999999 embl_tpa_wgs_nuc
+special CALJME000000000-CALJMG999999999 embl_tpa_wgs_nuc
+special CALJMJ000000000-CALJMT999999999 embl_tpa_wgs_nuc
+special CALJMV000000000-CALJMX999999999 embl_tpa_wgs_nuc
+special2 CALJMZ+9 embl_tpa_wgs_nuc
+:
+special CALJNF000000000-CALJNH999999999 embl_tpa_wgs_nuc
+special CALJNK000000000-CALJNQ999999999 embl_tpa_wgs_nuc
+special CALJNS000000000-CALJNU999999999 embl_tpa_wgs_nuc
+special CALJNW000000000-CALJNZ999999999 embl_tpa_wgs_nuc
+special2 CALJOG+9 embl_tpa_wgs_nuc
+:
+special2 CALJOI+9 embl_tpa_wgs_nuc
+:
+special2 CALJOL+9 embl_tpa_wgs_nuc
+:
+special CALJON000000000-CALJPE999999999 embl_tpa_wgs_nuc
+special2 CALJPG+9 embl_tpa_wgs_nuc
+:
+special2 CALJPI+9 embl_tpa_wgs_nuc
+:
+special CALJPK000000000-CALJPN999999999 embl_tpa_wgs_nuc
+special2 CALJPP+9 embl_tpa_wgs_nuc
+:
+special CALJPR000000000-CALJPS999999999 embl_tpa_wgs_nuc
+special CALJPU000000000-CALJQF999999999 embl_tpa_wgs_nuc
+special2 CALJQH+9 embl_tpa_wgs_nuc
+:
+special CALJQL000000000-CALJQW999999999 embl_tpa_wgs_nuc
+special CALJQY000000000-CALJRV999999999 embl_tpa_wgs_nuc
+special CALJRX000000000-CALJSA999999999 embl_tpa_wgs_nuc
+special CALJSC000000000-CALJSP999999999 embl_tpa_wgs_nuc
+special CALJSR000000000-CALJSU999999999 embl_tpa_wgs_nuc
+special CALJSW000000000-CALJTM999999999 embl_tpa_wgs_nuc
+special2 CALJTO+9 embl_tpa_wgs_nuc
+:
+special CALJTQ000000000-CALJTR999999999 embl_tpa_wgs_nuc
+special2 CALJTU+9 embl_tpa_wgs_nuc
+:
+special CALJTW000000000-CALJVG999999999 embl_tpa_wgs_nuc
+special CALJWM000000000-CALJWN999999999 embl_tpa_wgs_nuc
+special CALJWP000000000-CALJWQ999999999 embl_tpa_wgs_nuc
+special2 CALJWS+9 embl_tpa_wgs_nuc
+:
+special CALJWU000000000-CALJWX999999999 embl_tpa_wgs_nuc
+special2 CALJXA+9 embl_tpa_wgs_nuc
+:
+special CALJXC000000000-CALJXD999999999 embl_tpa_wgs_nuc
+special CALJXF000000000-CALJXN999999999 embl_tpa_wgs_nuc
+special CALJXP000000000-CALJXT999999999 embl_tpa_wgs_nuc
+special CALJXV000000000-CALJYB999999999 embl_tpa_wgs_nuc
+special CALJYD000000000-CALJYF999999999 embl_tpa_wgs_nuc
+special CALJYI000000000-CALJYQ999999999 embl_tpa_wgs_nuc
+special CALJYS000000000-CALJYV999999999 embl_tpa_wgs_nuc
+special CALJYX000000000-CALJZM999999999 embl_tpa_wgs_nuc
+special2 CALJZO+9 embl_tpa_wgs_nuc
+:
+special2 CALJZR+9 embl_tpa_wgs_nuc
+:
+special2 CALJZT+9 embl_tpa_wgs_nuc
+:
+special CALJZV000000000-CALKBH999999999 embl_tpa_wgs_nuc
+special CALKBJ000000000-CALKBT999999999 embl_tpa_wgs_nuc
+special CALKHJ000000000-CALKIW999999999 embl_tpa_wgs_nuc
+special CALKKC000000000-CALKKM999999999 embl_tpa_wgs_nuc
+special CALKKO000000000-CALKKU999999999 embl_tpa_wgs_nuc
+special CALKKW000000000-CALKLB999999999 embl_tpa_wgs_nuc
+special2 CALKLE+9 embl_tpa_wgs_nuc
+:
+special CALKLG000000000-CALKLN999999999 embl_tpa_wgs_nuc
+special CALKLQ000000000-CALKLR999999999 embl_tpa_wgs_nuc
+special CALKLT000000000-CALKLW999999999 embl_tpa_wgs_nuc
+special CALKLY000000000-CALKMB999999999 embl_tpa_wgs_nuc
+special CALKMD000000000-CALKME999999999 embl_tpa_wgs_nuc
+special CALKMG000000000-CALKMN999999999 embl_tpa_wgs_nuc
+special2 CALKMP+9 embl_tpa_wgs_nuc
+:
+special2 CALKMR+9 embl_tpa_wgs_nuc
+:
+special CALKPG000000000-CALKPL999999999 embl_tpa_wgs_nuc
+special CALKPN000000000-CALKPX999999999 embl_tpa_wgs_nuc
+special CALKPZ000000000-CALKQT999999999 embl_tpa_wgs_nuc
+special2 CALKQV+9 embl_tpa_wgs_nuc
+:
+special CALKQX000000000-CALKRJ999999999 embl_tpa_wgs_nuc
+special CALKRL000000000-CALKRM999999999 embl_tpa_wgs_nuc
+special CALKRO000000000-CALKRT999999999 embl_tpa_wgs_nuc
+special CALKRV000000000-CALKRY999999999 embl_tpa_wgs_nuc
+special CALKSA000000000-CALKTG999999999 embl_tpa_wgs_nuc
+special CALKTI000000000-CALKTT999999999 embl_tpa_wgs_nuc
+special CALKTV000000000-CALKUT999999999 embl_tpa_wgs_nuc
+special2 CALKUV+9 embl_tpa_wgs_nuc
+:
+special CALKUX000000000-CALKUZ999999999 embl_tpa_wgs_nuc
+special CALKVB000000000-CALKVL999999999 embl_tpa_wgs_nuc
+special CALKVQ000000000-CALKXB999999999 embl_tpa_wgs_nuc
+special CALKYE000000000-CALKZG999999999 embl_tpa_wgs_nuc
+special CALKZI000000000-CALKZM999999999 embl_tpa_wgs_nuc
+special CALKZO000000000-CALKZQ999999999 embl_tpa_wgs_nuc
+special2 CALLAS+9 embl_tpa_wgs_nuc
+:
+special CALLAX000000000-CALLAY999999999 embl_tpa_wgs_nuc
+special2 CALLBF+9 embl_tpa_wgs_nuc
+:
+special CALLBP000000000-CALLBQ999999999 embl_tpa_wgs_nuc
+special CALLBS000000000-CALLBT999999999 embl_tpa_wgs_nuc
+special CALLBV000000000-CALLCC999999999 embl_tpa_wgs_nuc
+special CALLCI000000000-CALLCN999999999 embl_tpa_wgs_nuc
+special CALLCP000000000-CALLCY999999999 embl_tpa_wgs_nuc
+special CALLDB000000000-CALLDG999999999 embl_tpa_wgs_nuc
+special CALLDI000000000-CALLDK999999999 embl_tpa_wgs_nuc
+special CALLDM000000000-CALLDO999999999 embl_tpa_wgs_nuc
+special CALLDQ000000000-CALLDY999999999 embl_tpa_wgs_nuc
+special CALLEA000000000-CALLEH999999999 embl_tpa_wgs_nuc
+special CALLEJ000000000-CALLEM999999999 embl_tpa_wgs_nuc
+special CALLEO000000000-CALLEQ999999999 embl_tpa_wgs_nuc
+special CALLES000000000-CALLEW999999999 embl_tpa_wgs_nuc
+special CALLEY000000000-CALLEZ999999999 embl_tpa_wgs_nuc
+special CALLFB000000000-CALLFG999999999 embl_tpa_wgs_nuc
+special CALLFI000000000-CALLFL999999999 embl_tpa_wgs_nuc
+special CALLFN000000000-CALLFY999999999 embl_tpa_wgs_nuc
+special CALLGB000000000-CALLGC999999999 embl_tpa_wgs_nuc
+special CALLGE000000000-CALLGJ999999999 embl_tpa_wgs_nuc
+special CALLGL000000000-CALLGO999999999 embl_tpa_wgs_nuc
+special CALLGQ000000000-CALLGR999999999 embl_tpa_wgs_nuc
+special CALLGT000000000-CALLHF999999999 embl_tpa_wgs_nuc
+special CALLHJ000000000-CALLHK999999999 embl_tpa_wgs_nuc
+special CALLHM000000000-CALLHS999999999 embl_tpa_wgs_nuc
+special CALLHV000000000-CALLIE999999999 embl_tpa_wgs_nuc
+special2 CALLIH+9 embl_tpa_wgs_nuc
+:
+special CALLIR000000000-CALLJB999999999 embl_tpa_wgs_nuc
+special CALLJV000000000-CALLKN999999999 embl_tpa_wgs_nuc
+special2 CALLLT+9 embl_tpa_wgs_nuc
+:
+special CALLMO000000000-CALLMU999999999 embl_tpa_wgs_nuc
+special CALLMW000000000-CALLND999999999 embl_tpa_wgs_nuc
+special CALLNF000000000-CALLNS999999999 embl_tpa_wgs_nuc
+special CALLNU000000000-CALLNW999999999 embl_tpa_wgs_nuc
+special2 CALLNZ+9 embl_tpa_wgs_nuc
+:
+special CALLOC000000000-CALLOQ999999999 embl_tpa_wgs_nuc
+special CALLOT000000000-CALLPB999999999 embl_tpa_wgs_nuc
+special2 CALLPD+9 embl_tpa_wgs_nuc
+:
+special CALLPF000000000-CALLPH999999999 embl_tpa_wgs_nuc
+special2 CALLPJ+9 embl_tpa_wgs_nuc
+:
+special CALLQD000000000-CALLQO999999999 embl_tpa_wgs_nuc
+special2 CALLQQ+9 embl_tpa_wgs_nuc
+:
+special CALLQS000000000-CALLQX999999999 embl_tpa_wgs_nuc
+special CALLRA000000000-CALLRO999999999 embl_tpa_wgs_nuc
+special2 CALLRQ+9 embl_tpa_wgs_nuc
+:
+special CALLRS000000000-CALLRT999999999 embl_tpa_wgs_nuc
+special CALLRV000000000-CALLTW999999999 embl_tpa_wgs_nuc
+special CALLTY000000000-CALLUA999999999 embl_tpa_wgs_nuc
+special CALLUC000000000-CALLUE999999999 embl_tpa_wgs_nuc
+special2 CALLVH+9 embl_tpa_wgs_nuc
+:
+special CALLVJ000000000-CALLVW999999999 embl_tpa_wgs_nuc
+special CALLVZ000000000-CALLWA999999999 embl_tpa_wgs_nuc
+special CALLWC000000000-CALLWL999999999 embl_tpa_wgs_nuc
+special CALLWP000000000-CALLWU999999999 embl_tpa_wgs_nuc
+special CALLWW000000000-CALLXA999999999 embl_tpa_wgs_nuc
+special2 CALLXG+9 embl_tpa_wgs_nuc
+:
+special CALLXL000000000-CALLYE999999999 embl_tpa_wgs_nuc
+special2 CALLYG+9 embl_tpa_wgs_nuc
+:
+special CALLYJ000000000-CALMEX999999999 embl_tpa_wgs_nuc
+special CALMEZ000000000-CALMHN999999999 embl_tpa_wgs_nuc
+special CALMHR000000000-CALMKP999999999 embl_tpa_wgs_nuc
+special CALMKR000000000-CALMRF999999999 embl_tpa_wgs_nuc
+special CALMRJ000000000-CALMVA999999999 embl_tpa_wgs_nuc
+special CALMVE000000000-CALMWA999999999 embl_tpa_wgs_nuc
+special CALMWD000000000-CALNCY999999999 embl_tpa_wgs_nuc
+special CALNEE000000000-CALNHU999999999 embl_tpa_wgs_nuc
+special2 CALNPA+9 embl_tpa_wgs_nuc
+:
+special2 CALNRV+9 embl_tpa_wgs_nuc
+:
+special CAMPDC000000000-CAMPDU999999999 embl_tpa_wgs_nuc
+special CAMPDW000000000-CAMPDY999999999 embl_tpa_wgs_nuc
+special2 CAMPFV+9 embl_tpa_wgs_nuc
+:
+special CAMPGF000000000-CAMPKX999999999 embl_tpa_wgs_nuc
+special CAMPLK000000000-CAMPOS999999999 embl_tpa_wgs_nuc
+special2 CAMPPG+9 embl_tpa_wgs_nuc
+:
+special CAMPTU000000000-CAMPTV999999999 embl_tpa_wgs_nuc
+special CAMPTY000000000-CAMPUA999999999 embl_tpa_wgs_nuc
+special CAMPUE000000000-CAMPUF999999999 embl_tpa_wgs_nuc
+special CAMPUH000000000-CAMPUN999999999 embl_tpa_wgs_nuc
+special2 CAMPUP+9 embl_tpa_wgs_nuc
+:
+special CAMPUW000000000-CAMPUX999999999 embl_tpa_wgs_nuc
+special CAMPVA000000000-CAMPVB999999999 embl_tpa_wgs_nuc
+special2 CAMPVD+9 embl_tpa_wgs_nuc
+:
+special2 CAMPVF+9 embl_tpa_wgs_nuc
+:
+special2 CAMPVK+9 embl_tpa_wgs_nuc
+:
+special2 CAMPVM+9 embl_tpa_wgs_nuc
+:
+special CAMPVO000000000-CAMPVT999999999 embl_tpa_wgs_nuc
+special CAMPVV000000000-CAMPVW999999999 embl_tpa_wgs_nuc
+special CAMPVY000000000-CAMPWD999999999 embl_tpa_wgs_nuc
+special2 CAMPWI+9 embl_tpa_wgs_nuc
+:
+special2 CAMPWK+9 embl_tpa_wgs_nuc
+:
+special CAMPWN000000000-CAMPWO999999999 embl_tpa_wgs_nuc
+special CAMPWQ000000000-CAMPWS999999999 embl_tpa_wgs_nuc
+special2 CAMPWU+9 embl_tpa_wgs_nuc
+:
+special2 CAMPWW+9 embl_tpa_wgs_nuc
+:
+special CAMPWY000000000-CAMPXE999999999 embl_tpa_wgs_nuc
+special CAMPXG000000000-CAMPXI999999999 embl_tpa_wgs_nuc
+special2 CAMPXN+9 embl_tpa_wgs_nuc
+:
+special2 CAMPXP+9 embl_tpa_wgs_nuc
+:
+special2 CAMPXV+9 embl_tpa_wgs_nuc
+:
+special CAMPYB000000000-CAMPYD999999999 embl_tpa_wgs_nuc
+special2 CAMPYH+9 embl_tpa_wgs_nuc
+:
+special2 CAMPYJ+9 embl_tpa_wgs_nuc
+:
+special2 CAMPYN+9 embl_tpa_wgs_nuc
+:
+special2 CAMPYQ+9 embl_tpa_wgs_nuc
+:
+special CAMPYS000000000-CAMPYT999999999 embl_tpa_wgs_nuc
+special2 CAMPYV+9 embl_tpa_wgs_nuc
+:
+special CAMPYX000000000-CAMPYY999999999 embl_tpa_wgs_nuc
+special CAMPZA000000000-CAMPZB999999999 embl_tpa_wgs_nuc
+special CAMPZD000000000-CAMPZE999999999 embl_tpa_wgs_nuc
+special2 CAMQAB+9 embl_tpa_wgs_nuc
+:
+special CAMQAO000000000-CAMQAP999999999 embl_tpa_wgs_nuc
+special2 CAMQAR+9 embl_tpa_wgs_nuc
+:
+special CAMQAT000000000-CAMQAU999999999 embl_tpa_wgs_nuc
+special CAMQAW000000000-CAMQBA999999999 embl_tpa_wgs_nuc
+special2 CAMQBE+9 embl_tpa_wgs_nuc
+:
+special CAMQBG000000000-CAMQBI999999999 embl_tpa_wgs_nuc
+special2 CAMQBN+9 embl_tpa_wgs_nuc
+:
+special CAMQBP000000000-CAMQBW999999999 embl_tpa_wgs_nuc
+special2 CAMQBZ+9 embl_tpa_wgs_nuc
+:
+special CAMQCD000000000-CAMQCF999999999 embl_tpa_wgs_nuc
+special2 CAMQCH+9 embl_tpa_wgs_nuc
+:
+special CAMQCK000000000-CAMQCO999999999 embl_tpa_wgs_nuc
+special CAMQCR000000000-CAMQCS999999999 embl_tpa_wgs_nuc
+special2 CAMQCZ+9 embl_tpa_wgs_nuc
+:
+special CAMQDC000000000-CAMQDD999999999 embl_tpa_wgs_nuc
+special2 CAMQDG+9 embl_tpa_wgs_nuc
+:
+special2 CAMQDS+9 embl_tpa_wgs_nuc
+:
+special CAMQEN000000000-CAMQEO999999999 embl_tpa_wgs_nuc
+special CAMQEQ000000000-CAMQET999999999 embl_tpa_wgs_nuc
+special CAMQFA000000000-CAMQFC999999999 embl_tpa_wgs_nuc
+special2 CAMQFE+9 embl_tpa_wgs_nuc
+:
+special2 CAMQFL+9 embl_tpa_wgs_nuc
+:
+special CAMQFR000000000-CAMQFT999999999 embl_tpa_wgs_nuc
+special CAMQGL000000000-CAMQPX999999999 embl_tpa_wgs_nuc
+special CAMQQL000000000-CAMQTP999999999 embl_tpa_wgs_nuc
+special CAMQTS000000000-CAMQTV999999999 embl_tpa_wgs_nuc
+special CAMQTX000000000-CAMQUC999999999 embl_tpa_wgs_nuc
+special CAMQUF000000000-CAMQUZ999999999 embl_tpa_wgs_nuc
+special CAMQVB000000000-CAMQVC999999999 embl_tpa_wgs_nuc
+special CAMQVF000000000-CAMQVU999999999 embl_tpa_wgs_nuc
+special CAMQVW000000000-CAMQWJ999999999 embl_tpa_wgs_nuc
+special CAMQWL000000000-CAMQWP999999999 embl_tpa_wgs_nuc
+special CAMQWR000000000-CAMQWS999999999 embl_tpa_wgs_nuc
+special CAMQWU000000000-CAMQWW999999999 embl_tpa_wgs_nuc
+special CAMQWZ000000000-CAMQZL999999999 embl_tpa_wgs_nuc
+special CAMQZN000000000-CAMQZY999999999 embl_tpa_wgs_nuc
+special CAMRAA000000000-CAMRAR999999999 embl_tpa_wgs_nuc
+special CAMRAT000000000-CAMRAX999999999 embl_tpa_wgs_nuc
+special CAMRBA000000000-CAMREN999999999 embl_tpa_wgs_nuc
+special CAMREP000000000-CAMRFE999999999 embl_tpa_wgs_nuc
+special2 CAMRGM+9 embl_tpa_wgs_nuc
+:
+special CAMRSF000000000-CAMRXA999999999 embl_tpa_wgs_nuc
+special CAMSBO000000000-CAMSEK999999999 embl_tpa_wgs_nuc
+special CAMSEM000000000-CAMSLM999999999 embl_tpa_wgs_nuc
+special CAMSLO000000000-CAMSTW999999999 embl_tpa_wgs_nuc
+special CAMSTY000000000-CAMTCG999999999 embl_tpa_wgs_nuc
+special CAMTDX000000000-CAMTSY999999999 embl_tpa_wgs_nuc
+special CAMTZD000000000-CAMUPJ999999999 embl_tpa_wgs_nuc
+special CAMUPX000000000-CAMUSE999999999 embl_tpa_wgs_nuc
+special CAMUSG000000000-CAMUSQ999999999 embl_tpa_wgs_nuc
+special CAMUSS000000000-CAMWBN999999999 embl_tpa_wgs_nuc
+special CAMWBP000000000-CAMWCS999999999 embl_tpa_wgs_nuc
+special CAMWCU000000000-CAMWEA999999999 embl_tpa_wgs_nuc
+special CAMWEC000000000-CAMXAO999999999 embl_tpa_wgs_nuc
+special2 CAMXAQ+9 embl_tpa_wgs_nuc
+:
+special CAMXAS000000000-CAMXAV999999999 embl_tpa_wgs_nuc
+special CAMXAX000000000-CAMXAZ999999999 embl_tpa_wgs_nuc
+special CAMXBB000000000-CAMXBF999999999 embl_tpa_wgs_nuc
+special2 CAMXBH+9 embl_tpa_wgs_nuc
+:
+special CAMXCV000000000-CAMXCZ999999999 embl_tpa_wgs_nuc
+special CAMXHZ000000000-CAMXUF999999999 embl_tpa_wgs_nuc
+special CAMXVC000000000-CAMYGE999999999 embl_tpa_wgs_nuc
+special CAMYGH000000000-CAMYGQ999999999 embl_tpa_wgs_nuc
+special CAMYGS000000000-CAMYHG999999999 embl_tpa_wgs_nuc
+special CAMYHI000000000-CAMYIA999999999 embl_tpa_wgs_nuc
+special CAMYOQ000000000-CAMYPB999999999 embl_tpa_wgs_nuc
+special2 CAMYPD+9 embl_tpa_wgs_nuc
+:
+special CAMYPF000000000-CAMYTO999999999 embl_tpa_wgs_nuc
+special CAMYTY000000000-CAMZJH999999999 embl_tpa_wgs_nuc
+special CAMZXK000000000-CANACM999999999 embl_tpa_wgs_nuc
+special CANACO000000000-CANAFE999999999 embl_tpa_wgs_nuc
+special CANAFJ000000000-CANAHP999999999 embl_tpa_wgs_nuc
+special CANAIF000000000-CANAKZ999999999 embl_tpa_wgs_nuc
+special CANAMA000000000-CANASN999999999 embl_tpa_wgs_nuc
+special CANASP000000000-CANATP999999999 embl_tpa_wgs_nuc
+special CANATR000000000-CANATX999999999 embl_tpa_wgs_nuc
+special CANATZ000000000-CANAUJ999999999 embl_tpa_wgs_nuc
+special CANAUM000000000-CANAZH999999999 embl_tpa_wgs_nuc
+special CANAZJ000000000-CANAZZ999999999 embl_tpa_wgs_nuc
+special CANBAB000000000-CANBAH999999999 embl_tpa_wgs_nuc
+special CANBAL000000000-CANBCK999999999 embl_tpa_wgs_nuc
+special CANBCM000000000-CANBKP999999999 embl_tpa_wgs_nuc
+special CANBKY000000000-CANBMP999999999 embl_tpa_wgs_nuc
+special CANCXK000000000-CANDNQ999999999 embl_tpa_wgs_nuc
+special CANDOE000000000-CANDWZ999999999 embl_tpa_wgs_nuc
+special CANDYS000000000-CANERT999999999 embl_tpa_wgs_nuc
+special CANNOB000000000-CANNPS999999999 embl_tpa_wgs_nuc
+special CANNVC000000000-CANNWK999999999 embl_tpa_wgs_nuc
+special CANNYW000000000-CANNZP999999999 embl_tpa_wgs_nuc
+special CANOAG000000000-CANOAN999999999 embl_tpa_wgs_nuc
+special CANOBF000000000-CANOOP999999999 embl_tpa_wgs_nuc
+special CANOOR000000000-CANOQF999999999 embl_tpa_wgs_nuc
+special CANOQQ000000000-CANPDD999999999 embl_tpa_wgs_nuc
+special CANPDG000000000-CANPDL999999999 embl_tpa_wgs_nuc
+special CANPDN000000000-CANPDO999999999 embl_tpa_wgs_nuc
+special2 CANPDQ+9 embl_tpa_wgs_nuc
+:
+special2 CANPDS+9 embl_tpa_wgs_nuc
+:
+special2 CANPDU+9 embl_tpa_wgs_nuc
+:
+special CANPDW000000000-CANPDY999999999 embl_tpa_wgs_nuc
+special CANPEA000000000-CANPEE999999999 embl_tpa_wgs_nuc
+special CANPEG000000000-CANPEH999999999 embl_tpa_wgs_nuc
+special CANPEK000000000-CANPEL999999999 embl_tpa_wgs_nuc
+special2 CANPEO+9 embl_tpa_wgs_nuc
+:
+special CANPEQ000000000-CANPER999999999 embl_tpa_wgs_nuc
+special CANPET000000000-CANPEU999999999 embl_tpa_wgs_nuc
+special CANPEW000000000-CANPFL999999999 embl_tpa_wgs_nuc
+special CANPFO000000000-CANPFP999999999 embl_tpa_wgs_nuc
+special2 CANPFR+9 embl_tpa_wgs_nuc
+:
+special CANPFT000000000-CANPFU999999999 embl_tpa_wgs_nuc
+special2 CANPFW+9 embl_tpa_wgs_nuc
+:
+special CANPFY000000000-CANPFZ999999999 embl_tpa_wgs_nuc
+special CANPGB000000000-CANPGE999999999 embl_tpa_wgs_nuc
+special CANPGH000000000-CANPGI999999999 embl_tpa_wgs_nuc
+special CANPGK000000000-CANPGV999999999 embl_tpa_wgs_nuc
+special2 CANPGX+9 embl_tpa_wgs_nuc
+:
+special2 CANPGZ+9 embl_tpa_wgs_nuc
+:
+special2 CANPHB+9 embl_tpa_wgs_nuc
+:
+special CANPHE000000000-CANPIV999999999 embl_tpa_wgs_nuc
+special CANPIX000000000-CANPJA999999999 embl_tpa_wgs_nuc
+special2 CANPJC+9 embl_tpa_wgs_nuc
+:
+special CANPJF000000000-CANPJI999999999 embl_tpa_wgs_nuc
+special CANPJK000000000-CANPJN999999999 embl_tpa_wgs_nuc
+special CANPJP000000000-CANPJQ999999999 embl_tpa_wgs_nuc
+special CANPJS000000000-CANPJX999999999 embl_tpa_wgs_nuc
+special2 CANPJZ+9 embl_tpa_wgs_nuc
+:
+special CANPKB000000000-CANPKC999999999 embl_tpa_wgs_nuc
+special2 CANPKE+9 embl_tpa_wgs_nuc
+:
+special2 CANPKH+9 embl_tpa_wgs_nuc
+:
+special2 CANPKJ+9 embl_tpa_wgs_nuc
+:
+special2 CANPKL+9 embl_tpa_wgs_nuc
+:
+special CANPKT000000000-CANPKU999999999 embl_tpa_wgs_nuc
+special CANPKW000000000-CANPKX999999999 embl_tpa_wgs_nuc
+special2 CANPKZ+9 embl_tpa_wgs_nuc
+:
+special CANPLB000000000-CANPLI999999999 embl_tpa_wgs_nuc
+special2 CANPLM+9 embl_tpa_wgs_nuc
+:
+special2 CANPLO+9 embl_tpa_wgs_nuc
+:
+special2 CANPMK+9 embl_tpa_wgs_nuc
+:
+special2 CANPMP+9 embl_tpa_wgs_nuc
+:
+special CANPMR000000000-CANPMT999999999 embl_tpa_wgs_nuc
+special CANPMV000000000-CANPMW999999999 embl_tpa_wgs_nuc
+special CANPMZ000000000-CANPNQ999999999 embl_tpa_wgs_nuc
+special CANPNS000000000-CANPNX999999999 embl_tpa_wgs_nuc
+special2 CANPNZ+9 embl_tpa_wgs_nuc
+:
+special CANPOC000000000-CANPOF999999999 embl_tpa_wgs_nuc
+special CANPOH000000000-CANPOM999999999 embl_tpa_wgs_nuc
+special2 CANPOO+9 embl_tpa_wgs_nuc
+:
+special CANPOS000000000-CANPOW999999999 embl_tpa_wgs_nuc
+special2 CANPOY+9 embl_tpa_wgs_nuc
+:
+special CANPPA000000000-CANPPC999999999 embl_tpa_wgs_nuc
+special CANPPE000000000-CANPPQ999999999 embl_tpa_wgs_nuc
+special2 CANPPW+9 embl_tpa_wgs_nuc
+:
+special2 CANPQE+9 embl_tpa_wgs_nuc
+:
+special2 CANPQS+9 embl_tpa_wgs_nuc
+:
+special2 CANPQU+9 embl_tpa_wgs_nuc
+:
+special2 CANPQW+9 embl_tpa_wgs_nuc
+:
+special CANPRF000000000-CANPRG999999999 embl_tpa_wgs_nuc
+special2 CANPTD+9 embl_tpa_wgs_nuc
+:
+special2 CANPTH+9 embl_tpa_wgs_nuc
+:
+special2 CANPTM+9 embl_tpa_wgs_nuc
+:
+special2 CANPTO+9 embl_tpa_wgs_nuc
+:
+special CANPTS000000000-CANPTW999999999 embl_tpa_wgs_nuc
+special CANPUC000000000-CANPUE999999999 embl_tpa_wgs_nuc
+special CANPUG000000000-CANPUI999999999 embl_tpa_wgs_nuc
+special CANRQJ000000000-CANSGC999999999 embl_tpa_wgs_nuc
+special CANSGE000000000-CANSNY999999999 embl_tpa_wgs_nuc
+special CANSOA000000000-CANSTM999999999 embl_tpa_wgs_nuc
+special CANSTO000000000-CANSXA999999999 embl_tpa_wgs_nuc
+special CANSXC000000000-CANSXG999999999 embl_tpa_wgs_nuc
+special CANSXI000000000-CANSZC999999999 embl_tpa_wgs_nuc
+special CANSZE000000000-CANTAK999999999 embl_tpa_wgs_nuc
+special CANTAM000000000-CANTDV999999999 embl_tpa_wgs_nuc
+special CANTDX000000000-CANTFF999999999 embl_tpa_wgs_nuc
+special CANTFN000000000-CANTKU999999999 embl_tpa_wgs_nuc
+special CAOJBL000000000-CAOJBM999999999 embl_tpa_wgs_nuc
+special CAOJBO000000000-CAOJBP999999999 embl_tpa_wgs_nuc
+special2 CAOJBT+9 embl_tpa_wgs_nuc
+:
+special CAOJBX000000000-CAOJBZ999999999 embl_tpa_wgs_nuc
+special CAOJCC000000000-CAOJCK999999999 embl_tpa_wgs_nuc
+special CAOJCT000000000-CAOJWF999999999 embl_tpa_wgs_nuc
+special CAOJWM000000000-CAOJZE999999999 embl_tpa_wgs_nuc
+special CAOJZG000000000-CAOKAE999999999 embl_tpa_wgs_nuc
+special CAOKAG000000000-CAOKEF999999999 embl_tpa_wgs_nuc
+special CAOKEH000000000-CAOKFE999999999 embl_tpa_wgs_nuc
+special CAOKFG000000000-CAOKNL999999999 embl_tpa_wgs_nuc
+special CAOKNN000000000-CAOKRJ999999999 embl_tpa_wgs_nuc
+special CAOKRM000000000-CAOKRN999999999 embl_tpa_wgs_nuc
+special CAOKRP000000000-CAOKSS999999999 embl_tpa_wgs_nuc
+special CAOKSU000000000-CAOKTE999999999 embl_tpa_wgs_nuc
+special CAOKTU000000000-CAOKTV999999999 embl_tpa_wgs_nuc
+special CAOKTX000000000-CAOKXA999999999 embl_tpa_wgs_nuc
+special CAOKXC000000000-CAOKYD999999999 embl_tpa_wgs_nuc
+special CAOKYF000000000-CAOKYO999999999 embl_tpa_wgs_nuc
+special CAOKYT000000000-CAOKZK999999999 embl_tpa_wgs_nuc
+special CAOKZM000000000-CAOLAH999999999 embl_tpa_wgs_nuc
+special CAOLAJ000000000-CAOLCB999999999 embl_tpa_wgs_nuc
+special CAOLCD000000000-CAOLCS999999999 embl_tpa_wgs_nuc
+special CAOLCU000000000-CAOLDP999999999 embl_tpa_wgs_nuc
+special CAOLDR000000000-CAOLDX999999999 embl_tpa_wgs_nuc
+special CAOLDZ000000000-CAOLEG999999999 embl_tpa_wgs_nuc
+special CAOLEI000000000-CAOLEV999999999 embl_tpa_wgs_nuc
+special CAOLEX000000000-CAOLEY999999999 embl_tpa_wgs_nuc
+special CAOLFA000000000-CAOLHH999999999 embl_tpa_wgs_nuc
+special CAOLHJ000000000-CAOLJL999999999 embl_tpa_wgs_nuc
+special CAOLJN000000000-CAOLNA999999999 embl_tpa_wgs_nuc
+special CAOLNC000000000-CAOLNW999999999 embl_tpa_wgs_nuc
+special CAOLNY000000000-CAOLOL999999999 embl_tpa_wgs_nuc
+special CAOLON000000000-CAOLOW999999999 embl_tpa_wgs_nuc
+special CAOLOY000000000-CAOLPH999999999 embl_tpa_wgs_nuc
+special CAOLPJ000000000-CAOLQW999999999 embl_tpa_wgs_nuc
+special CAOLQY000000000-CAOLSJ999999999 embl_tpa_wgs_nuc
+special CAOLSL000000000-CAOLWR999999999 embl_tpa_wgs_nuc
+special CAOLWT000000000-CAOLYJ999999999 embl_tpa_wgs_nuc
+special CAOLYL000000000-CAOMBI999999999 embl_tpa_wgs_nuc
+special CAOMBK000000000-CAOMBX999999999 embl_tpa_wgs_nuc
+special CAOMBZ000000000-CAOMCY999999999 embl_tpa_wgs_nuc
+special CAOMDA000000000-CAOMEF999999999 embl_tpa_wgs_nuc
+special CAOMEH000000000-CAOMHN999999999 embl_tpa_wgs_nuc
+special CAOMHP000000000-CAOMHU999999999 embl_tpa_wgs_nuc
+special CAOMHW000000000-CAOMII999999999 embl_tpa_wgs_nuc
+special CAOMIK000000000-CAOMNS999999999 embl_tpa_wgs_nuc
+special CAOMNU000000000-CAOMOB999999999 embl_tpa_wgs_nuc
+special CAOMOD000000000-CAOMUT999999999 embl_tpa_wgs_nuc
+special CAOMUV000000000-CAOMVR999999999 embl_tpa_wgs_nuc
+special CAOMVT000000000-CAOMYQ999999999 embl_tpa_wgs_nuc
+special CAOMYS000000000-CAONDD999999999 embl_tpa_wgs_nuc
+special CAONDF000000000-CAONNF999999999 embl_tpa_wgs_nuc
+special CAONNH000000000-CAONPB999999999 embl_tpa_wgs_nuc
+special CAONPD000000000-CAONPO999999999 embl_tpa_wgs_nuc
+special CAONPQ000000000-CAONRB999999999 embl_tpa_wgs_nuc
+special CAONRD000000000-CAONSW999999999 embl_tpa_wgs_nuc
+special CAONSY000000000-CAONUM999999999 embl_tpa_wgs_nuc
+special CAONUO000000000-CAONUW999999999 embl_tpa_wgs_nuc
+special CAONUY000000000-CAONXD999999999 embl_tpa_wgs_nuc
+special CAONXF000000000-CAONXQ999999999 embl_tpa_wgs_nuc
+special CAONXS000000000-CAONXY999999999 embl_tpa_wgs_nuc
+special CAONYA000000000-CAOOCB999999999 embl_tpa_wgs_nuc
+special CAOOCD000000000-CAOOFA999999999 embl_tpa_wgs_nuc
+special CAOOFC000000000-CAOOFV999999999 embl_tpa_wgs_nuc
+special CAOOFX000000000-CAOOHB999999999 embl_tpa_wgs_nuc
+special CAOOHD000000000-CAOOHX999999999 embl_tpa_wgs_nuc
+special CAOOHZ000000000-CAOOJA999999999 embl_tpa_wgs_nuc
+special CAOOJC000000000-CAOOOH999999999 embl_tpa_wgs_nuc
+special CAOOOJ000000000-CAOOOV999999999 embl_tpa_wgs_nuc
+special CAOOOX000000000-CAOOQA999999999 embl_tpa_wgs_nuc
+special CAOOQC000000000-CAOOXZ999999999 embl_tpa_wgs_nuc
+special CAOOYB000000000-CAOOYT999999999 embl_tpa_wgs_nuc
+special CAOOYV000000000-CAOPDL999999999 embl_tpa_wgs_nuc
+special CAOPDN000000000-CAOPEA999999999 embl_tpa_wgs_nuc
+special CAOPEC000000000-CAOPFN999999999 embl_tpa_wgs_nuc
+special CAOPFP000000000-CAOPJI999999999 embl_tpa_wgs_nuc
+special CAOPJK000000000-CAOPMU999999999 embl_tpa_wgs_nuc
+special CAOPMW000000000-CAOPQV999999999 embl_tpa_wgs_nuc
+special CAOPQX000000000-CAOPSP999999999 embl_tpa_wgs_nuc
+special CAOPSR000000000-CAOPYH999999999 embl_tpa_wgs_nuc
+special CAOPYJ000000000-CAOQEK999999999 embl_tpa_wgs_nuc
+special CAOQEM000000000-CAOQGR999999999 embl_tpa_wgs_nuc
+special CAOQGT000000000-CAOQHQ999999999 embl_tpa_wgs_nuc
+special CAOQHS000000000-CAOQMU999999999 embl_tpa_wgs_nuc
+special CAOQMW000000000-CAOQNG999999999 embl_tpa_wgs_nuc
+special CAOQNI000000000-CAOQQO999999999 embl_tpa_wgs_nuc
+special CAOQQQ000000000-CAOQSE999999999 embl_tpa_wgs_nuc
+special CAOQSG000000000-CAOQUA999999999 embl_tpa_wgs_nuc
+special CAOQUC000000000-CAOQUJ999999999 embl_tpa_wgs_nuc
+special CAOQUL000000000-CAOQVC999999999 embl_tpa_wgs_nuc
+special CAOQVE000000000-CAOQXE999999999 embl_tpa_wgs_nuc
+special CAOQXG000000000-CAORGS999999999 embl_tpa_wgs_nuc
+special CAORGU000000000-CAORGX999999999 embl_tpa_wgs_nuc
+special CAORGZ000000000-CAORHH999999999 embl_tpa_wgs_nuc
+special CAORHJ000000000-CAORKC999999999 embl_tpa_wgs_nuc
+special CAORKE000000000-CAORNQ999999999 embl_tpa_wgs_nuc
+special CAORNS000000000-CAOROA999999999 embl_tpa_wgs_nuc
+special CAOROC000000000-CAOROK999999999 embl_tpa_wgs_nuc
+special CAOROM000000000-CAORUY999999999 embl_tpa_wgs_nuc
+special CAORVA000000000-CAORVJ999999999 embl_tpa_wgs_nuc
+special CAORVL000000000-CAORYL999999999 embl_tpa_wgs_nuc
+special CAORYN000000000-CAOSAC999999999 embl_tpa_wgs_nuc
+special CAOSAE000000000-CAOSBH999999999 embl_tpa_wgs_nuc
+special CAOSBJ000000000-CAOSBT999999999 embl_tpa_wgs_nuc
+special CAOSBV000000000-CAOSEH999999999 embl_tpa_wgs_nuc
+special CAOSEJ000000000-CAOSGA999999999 embl_tpa_wgs_nuc
+special CAOSGC000000000-CAOSGD999999999 embl_tpa_wgs_nuc
+special CAOSGF000000000-CAOSHC999999999 embl_tpa_wgs_nuc
+special CAOSHE000000000-CAOSOQ999999999 embl_tpa_wgs_nuc
+special CAOSOS000000000-CAOSWZ999999999 embl_tpa_wgs_nuc
+special CAOSXB000000000-CAOSXN999999999 embl_tpa_wgs_nuc
+special CAOSXP000000000-CAOSZC999999999 embl_tpa_wgs_nuc
+special CAOSZE000000000-CAOSZJ999999999 embl_tpa_wgs_nuc
+special CAOSZL000000000-CAOTAY999999999 embl_tpa_wgs_nuc
+special CAOTBA000000000-CAOTCS999999999 embl_tpa_wgs_nuc
+special CAOTCU000000000-CAOTEG999999999 embl_tpa_wgs_nuc
+special CAOTEI000000000-CAOTFS999999999 embl_tpa_wgs_nuc
+special CAOTFU000000000-CAOTGQ999999999 embl_tpa_wgs_nuc
+special CAOTGS000000000-CAOTGT999999999 embl_tpa_wgs_nuc
+special CAOTGV000000000-CAOTIT999999999 embl_tpa_wgs_nuc
+special CAOTIV000000000-CAOTQN999999999 embl_tpa_wgs_nuc
+special CAOTQP000000000-CAOTRN999999999 embl_tpa_wgs_nuc
+special CAOTRP000000000-CAOTVB999999999 embl_tpa_wgs_nuc
+special CAOTVD000000000-CAOUDQ999999999 embl_tpa_wgs_nuc
+special CAOUDS000000000-CAOUHD999999999 embl_tpa_wgs_nuc
+special CAOUHF000000000-CAOUIE999999999 embl_tpa_wgs_nuc
+special CAOUIG000000000-CAOULW999999999 embl_tpa_wgs_nuc
+special CAOULY000000000-CAOUMG999999999 embl_tpa_wgs_nuc
+special CAOUMI000000000-CAOUPD999999999 embl_tpa_wgs_nuc
+special CAOUPF000000000-CAOUYI999999999 embl_tpa_wgs_nuc
+special CAOUYK000000000-CAOVBG999999999 embl_tpa_wgs_nuc
+special CAOVBI000000000-CAOVGB999999999 embl_tpa_wgs_nuc
+special CAOVGD000000000-CAOVJX999999999 embl_tpa_wgs_nuc
+special CAOVJZ000000000-CAOVKB999999999 embl_tpa_wgs_nuc
+special CAOVKD000000000-CAOVLE999999999 embl_tpa_wgs_nuc
+special CAOVLG000000000-CAOVSR999999999 embl_tpa_wgs_nuc
+special CAOVST000000000-CAOVVZ999999999 embl_tpa_wgs_nuc
+special CAOVWB000000000-CAOVWE999999999 embl_tpa_wgs_nuc
+special CAOVWG000000000-CAOVXV999999999 embl_tpa_wgs_nuc
+special CAOVXX000000000-CAOVZH999999999 embl_tpa_wgs_nuc
+special CAOVZJ000000000-CAOWEI999999999 embl_tpa_wgs_nuc
+special CAOWEK000000000-CAOWGY999999999 embl_tpa_wgs_nuc
+special CAOWHA000000000-CAOWNF999999999 embl_tpa_wgs_nuc
+special CAOWNH000000000-CAOWNS999999999 embl_tpa_wgs_nuc
+special CAOWNU000000000-CAOWOH999999999 embl_tpa_wgs_nuc
+special CAOWOJ000000000-CAOWPO999999999 embl_tpa_wgs_nuc
+special CAOWPQ000000000-CAOWQI999999999 embl_tpa_wgs_nuc
+special CAOWQK000000000-CAOWQN999999999 embl_tpa_wgs_nuc
+special CAOWQP000000000-CAOWUT999999999 embl_tpa_wgs_nuc
+special CAOWUV000000000-CAOWVD999999999 embl_tpa_wgs_nuc
+special CAOWVF000000000-CAOWWE999999999 embl_tpa_wgs_nuc
+special CAOWWG000000000-CAOWWO999999999 embl_tpa_wgs_nuc
+special CAOWWQ000000000-CAOWXN999999999 embl_tpa_wgs_nuc
+special CAOWXP000000000-CAOWZE999999999 embl_tpa_wgs_nuc
+special CAOWZG000000000-CAOXBA999999999 embl_tpa_wgs_nuc
+special CAOXBC000000000-CAOXBL999999999 embl_tpa_wgs_nuc
+special CAOXBN000000000-CAOXCI999999999 embl_tpa_wgs_nuc
+special CAOXCK000000000-CAOXDE999999999 embl_tpa_wgs_nuc
+special CAOXDG000000000-CAOXDL999999999 embl_tpa_wgs_nuc
+special CAOXDN000000000-CAOXDQ999999999 embl_tpa_wgs_nuc
+special CAOXDS000000000-CAOXFD999999999 embl_tpa_wgs_nuc
+special CAOXFF000000000-CAOXHP999999999 embl_tpa_wgs_nuc
+special CAOXHR000000000-CAOXLI999999999 embl_tpa_wgs_nuc
+special CAOXLK000000000-CAOXMP999999999 embl_tpa_wgs_nuc
+special CAOXMR000000000-CAOXOX999999999 embl_tpa_wgs_nuc
+special CAOXOZ000000000-CAOXPQ999999999 embl_tpa_wgs_nuc
+special CAOXPS000000000-CAOXSH999999999 embl_tpa_wgs_nuc
+special CAOXSJ000000000-CAOXTX999999999 embl_tpa_wgs_nuc
+special CAOXTZ000000000-CAOXXD999999999 embl_tpa_wgs_nuc
+special CAOXXF000000000-CAOXYB999999999 embl_tpa_wgs_nuc
+special CAOXYD000000000-CAOXYK999999999 embl_tpa_wgs_nuc
+special CAOXYM000000000-CAOXYX999999999 embl_tpa_wgs_nuc
+special CAOXYZ000000000-CAOXZI999999999 embl_tpa_wgs_nuc
+special CAOXZK000000000-CAOYBZ999999999 embl_tpa_wgs_nuc
+special CAOYCB000000000-CAOYGV999999999 embl_tpa_wgs_nuc
+special CAOYGX000000000-CAOYHV999999999 embl_tpa_wgs_nuc
+special CAOYHX000000000-CAOYPK999999999 embl_tpa_wgs_nuc
+special CAOYPM000000000-CAOYQI999999999 embl_tpa_wgs_nuc
+special CAOYQK000000000-CAOYSP999999999 embl_tpa_wgs_nuc
+special CAOYSR000000000-CAOYTE999999999 embl_tpa_wgs_nuc
+special CAOYTG000000000-CAOYTQ999999999 embl_tpa_wgs_nuc
+special CAOYTS000000000-CAOYVQ999999999 embl_tpa_wgs_nuc
+special CAOYVS000000000-CAOYZR999999999 embl_tpa_wgs_nuc
+special CAOYZT000000000-CAOZIW999999999 embl_tpa_wgs_nuc
+special CAOZIY000000000-CAOZJK999999999 embl_tpa_wgs_nuc
+special CAOZJM000000000-CAOZKY999999999 embl_tpa_wgs_nuc
+special CAOZLA000000000-CAOZLR999999999 embl_tpa_wgs_nuc
+special CAOZLT000000000-CAOZNY999999999 embl_tpa_wgs_nuc
+special CAOZOA000000000-CAOZQX999999999 embl_tpa_wgs_nuc
+special2 CAOZQZ+9 embl_tpa_wgs_nuc
+:
+special CAOZRB000000000-CAOZVN999999999 embl_tpa_wgs_nuc
+special CAOZVP000000000-CAOZWV999999999 embl_tpa_wgs_nuc
+special CAOZWX000000000-CAOZYX999999999 embl_tpa_wgs_nuc
+special CAOZYZ000000000-CAOZZV999999999 embl_tpa_wgs_nuc
+special CAOZZX000000000-CAPADY999999999 embl_tpa_wgs_nuc
+special CAPAEA000000000-CAPAEK999999999 embl_tpa_wgs_nuc
+special CAPAEM000000000-CAPAKH999999999 embl_tpa_wgs_nuc
+special CAPAKJ000000000-CAPALK999999999 embl_tpa_wgs_nuc
+special CAPALM000000000-CAPAMI999999999 embl_tpa_wgs_nuc
+special CAPAMK000000000-CAPAPJ999999999 embl_tpa_wgs_nuc
+special CAPAPL000000000-CAPATS999999999 embl_tpa_wgs_nuc
+special CAPATU000000000-CAPAXV999999999 embl_tpa_wgs_nuc
+special CAPAXX000000000-CAPAYI999999999 embl_tpa_wgs_nuc
+special CAPAYK000000000-CAPAZD999999999 embl_tpa_wgs_nuc
+special CAPAZF000000000-CAPAZP999999999 embl_tpa_wgs_nuc
+special CAPAZR000000000-CAPBHA999999999 embl_tpa_wgs_nuc
+special CAPBHC000000000-CAPBHE999999999 embl_tpa_wgs_nuc
+special CAPBHG000000000-CAPBNZ999999999 embl_tpa_wgs_nuc
+special CAPBOB000000000-CAPBPZ999999999 embl_tpa_wgs_nuc
+special CAPBQB000000000-CAPBQI999999999 embl_tpa_wgs_nuc
+special CAPBQK000000000-CAPBTQ999999999 embl_tpa_wgs_nuc
+special CAPBTS000000000-CAPBUI999999999 embl_tpa_wgs_nuc
+special CAPBUK000000000-CAPBWY999999999 embl_tpa_wgs_nuc
+special CAPBXA000000000-CAPBYY999999999 embl_tpa_wgs_nuc
+special CAPBZA000000000-CAPCAA999999999 embl_tpa_wgs_nuc
+special CAPCAC000000000-CAPCAJ999999999 embl_tpa_wgs_nuc
+special CAPCAL000000000-CAPCCQ999999999 embl_tpa_wgs_nuc
+special CAPCCS000000000-CAPCEB999999999 embl_tpa_wgs_nuc
+special CAPCED000000000-CAPCEK999999999 embl_tpa_wgs_nuc
+special CAPCEM000000000-CAPCJJ999999999 embl_tpa_wgs_nuc
+special CAPCJL000000000-CAPCJO999999999 embl_tpa_wgs_nuc
+special CAPCJQ000000000-CAPCLJ999999999 embl_tpa_wgs_nuc
+special CAPCLL000000000-CAPCMH999999999 embl_tpa_wgs_nuc
+special CAPCMJ000000000-CAPCNL999999999 embl_tpa_wgs_nuc
+special CAPCNN000000000-CAPCSF999999999 embl_tpa_wgs_nuc
+special CAPCSH000000000-CAPCXJ999999999 embl_tpa_wgs_nuc
+special CAPCXL000000000-CAPDEZ999999999 embl_tpa_wgs_nuc
+special CAPDFB000000000-CAPDKA999999999 embl_tpa_wgs_nuc
+special CAPDKC000000000-CAPDKI999999999 embl_tpa_wgs_nuc
+special CAPDKK000000000-CAPDNO999999999 embl_tpa_wgs_nuc
+special CAPDNQ000000000-CAPDPK999999999 embl_tpa_wgs_nuc
+special CAPDPM000000000-CAPDSL999999999 embl_tpa_wgs_nuc
+special CAPDSN000000000-CAPDTV999999999 embl_tpa_wgs_nuc
+special CAPDTX000000000-CAPDVI999999999 embl_tpa_wgs_nuc
+special CAPDVK000000000-CAPDZU999999999 embl_tpa_wgs_nuc
+special CAPDZW000000000-CAPEDN999999999 embl_tpa_wgs_nuc
+special CAPEDP000000000-CAPEFS999999999 embl_tpa_wgs_nuc
+special CAPEFV000000000-CAPEHI999999999 embl_tpa_wgs_nuc
+special CAPEHK000000000-CAPEJX999999999 embl_tpa_wgs_nuc
+special CAPEJZ000000000-CAPEKQ999999999 embl_tpa_wgs_nuc
+special CAPEKS000000000-CAPELB999999999 embl_tpa_wgs_nuc
+special CAPELD000000000-CAPENT999999999 embl_tpa_wgs_nuc
+special CAPENV000000000-CAPEPG999999999 embl_tpa_wgs_nuc
+special CAPEPI000000000-CAPEPR999999999 embl_tpa_wgs_nuc
+special CAPEPT000000000-CAPEQL999999999 embl_tpa_wgs_nuc
+special CAPEQN000000000-CAPEQO999999999 embl_tpa_wgs_nuc
+special CAPEQQ000000000-CAPEWR999999999 embl_tpa_wgs_nuc
+special CAPEWT000000000-CAPFAG999999999 embl_tpa_wgs_nuc
+special CAPFAI000000000-CAPFAQ999999999 embl_tpa_wgs_nuc
+special CAPFAS000000000-CAPFBX999999999 embl_tpa_wgs_nuc
+special CAPFBZ000000000-CAPFHY999999999 embl_tpa_wgs_nuc
+special CAPFIA000000000-CAPFIU999999999 embl_tpa_wgs_nuc
+special CAPFIW000000000-CAPFLA999999999 embl_tpa_wgs_nuc
+special CAPFLC000000000-CAPFOH999999999 embl_tpa_wgs_nuc
+special CAPFOJ000000000-CAPFPC999999999 embl_tpa_wgs_nuc
+special CAPFPE000000000-CAPFQV999999999 embl_tpa_wgs_nuc
+special CAPFQX000000000-CAPFVC999999999 embl_tpa_wgs_nuc
+special CAPFVE000000000-CAPFVV999999999 embl_tpa_wgs_nuc
+special CAPFVX000000000-CAPFYA999999999 embl_tpa_wgs_nuc
+special CAPFYC000000000-CAPGAG999999999 embl_tpa_wgs_nuc
+special CAPGAI000000000-CAPGEJ999999999 embl_tpa_wgs_nuc
+special CAPGEL000000000-CAPGEP999999999 embl_tpa_wgs_nuc
+special CAPGER000000000-CAPGGJ999999999 embl_tpa_wgs_nuc
+special CAPGGL000000000-CAPGHC999999999 embl_tpa_wgs_nuc
+special CAPGHF000000000-CAPGIO999999999 embl_tpa_wgs_nuc
+special CAPGIR000000000-CAPGKK999999999 embl_tpa_wgs_nuc
+special CAPGKM000000000-CAPGMX999999999 embl_tpa_wgs_nuc
+special CAPGMZ000000000-CAPGOA999999999 embl_tpa_wgs_nuc
+special CAPGOC000000000-CAPGRW999999999 embl_tpa_wgs_nuc
+special CAPGRY000000000-CAPGTW999999999 embl_tpa_wgs_nuc
+special CAPGTY000000000-CAPGUH999999999 embl_tpa_wgs_nuc
+special CAPGUJ000000000-CAPGXW999999999 embl_tpa_wgs_nuc
+special CAPGXY000000000-CAPHAN999999999 embl_tpa_wgs_nuc
+special CAPHAP000000000-CAPHAW999999999 embl_tpa_wgs_nuc
+special CAPHAY000000000-CAPHBD999999999 embl_tpa_wgs_nuc
+special CAPHBF000000000-CAPHDZ999999999 embl_tpa_wgs_nuc
+special CAPHEB000000000-CAPHEN999999999 embl_tpa_wgs_nuc
+special CAPHEP000000000-CAPHFZ999999999 embl_tpa_wgs_nuc
+special CAPHGB000000000-CAPHHN999999999 embl_tpa_wgs_nuc
+special CAPHHP000000000-CAPHKF999999999 embl_tpa_wgs_nuc
+special CAPHKH000000000-CAPHKZ999999999 embl_tpa_wgs_nuc
+special CAPHLB000000000-CAPHMI999999999 embl_tpa_wgs_nuc
+special CAPHMK000000000-CAPIAS999999999 embl_tpa_wgs_nuc
+special CAPIAU000000000-CAPIDA999999999 embl_tpa_wgs_nuc
+special CAPIDC000000000-CAPIDK999999999 embl_tpa_wgs_nuc
+special CAPIDM000000000-CAPIEC999999999 embl_tpa_wgs_nuc
+special CAPIEE000000000-CAPIKF999999999 embl_tpa_wgs_nuc
+special CAPIKH000000000-CAPIKW999999999 embl_tpa_wgs_nuc
+special CAPIKY000000000-CAPIMB999999999 embl_tpa_wgs_nuc
+special CAPIMD000000000-CAPIMO999999999 embl_tpa_wgs_nuc
+special CAPIMQ000000000-CAPINB999999999 embl_tpa_wgs_nuc
+special CAPIND000000000-CAPIPR999999999 embl_tpa_wgs_nuc
+special CAPIPT000000000-CAPIQD999999999 embl_tpa_wgs_nuc
+special CAPIQF000000000-CAPISR999999999 embl_tpa_wgs_nuc
+special CAPIST000000000-CAPITZ999999999 embl_tpa_wgs_nuc
+special CAPIUC000000000-CAPIVN999999999 embl_tpa_wgs_nuc
+special CAPIVQ000000000-CAPIVT999999999 embl_tpa_wgs_nuc
+special CAPIVV000000000-CAPJAR999999999 embl_tpa_wgs_nuc
+special CAPJAT000000000-CAPJEK999999999 embl_tpa_wgs_nuc
+special CAPJEM000000000-CAPJEU999999999 embl_tpa_wgs_nuc
+special CAPJEW000000000-CAPJIX999999999 embl_tpa_wgs_nuc
+special CAPJIZ000000000-CAPJKE999999999 embl_tpa_wgs_nuc
+special CAPJKG000000000-CAPJLE999999999 embl_tpa_wgs_nuc
+special CAPJLG000000000-CAPJNK999999999 embl_tpa_wgs_nuc
+special CAPJNM000000000-CAPJXB999999999 embl_tpa_wgs_nuc
+special CAPJXD000000000-CAPJXZ999999999 embl_tpa_wgs_nuc
+special CAPJYB000000000-CAPKAF999999999 embl_tpa_wgs_nuc
+special CAPKAH000000000-CAPKBZ999999999 embl_tpa_wgs_nuc
+special CAPKCB000000000-CAPKGI999999999 embl_tpa_wgs_nuc
+special CAPKGK000000000-CAPKGX999999999 embl_tpa_wgs_nuc
+special CAPKGZ000000000-CAPKKT999999999 embl_tpa_wgs_nuc
+special CAPKKV000000000-CAPKML999999999 embl_tpa_wgs_nuc
+special CAPKMN000000000-CAPKMO999999999 embl_tpa_wgs_nuc
+special CAPKMQ000000000-CAPKRH999999999 embl_tpa_wgs_nuc
+special CAPKRJ000000000-CAPKWT999999999 embl_tpa_wgs_nuc
+special CAPKWV000000000-CAPKYJ999999999 embl_tpa_wgs_nuc
+special CAPKYL000000000-CAPLCN999999999 embl_tpa_wgs_nuc
+special CAPLCP000000000-CAPLCT999999999 embl_tpa_wgs_nuc
+special CAPLCV000000000-CAPLJR999999999 embl_tpa_wgs_nuc
+special CAPLJT000000000-CAPLKH999999999 embl_tpa_wgs_nuc
+special CAPLKJ000000000-CAPLKW999999999 embl_tpa_wgs_nuc
+special CAPLKY000000000-CAPLMF999999999 embl_tpa_wgs_nuc
+special CAPLMH000000000-CAPLSN999999999 embl_tpa_wgs_nuc
+special CAPLSP000000000-CAPLSR999999999 embl_tpa_wgs_nuc
+special CAPLST000000000-CAPLUS999999999 embl_tpa_wgs_nuc
+special CAPLUU000000000-CAPLVE999999999 embl_tpa_wgs_nuc
+special CAPLVG000000000-CAPLXD999999999 embl_tpa_wgs_nuc
+special CAPLXF000000000-CAPLZT999999999 embl_tpa_wgs_nuc
+special CAPLZV000000000-CAPMAI999999999 embl_tpa_wgs_nuc
+special CAPMAK000000000-CAPMAN999999999 embl_tpa_wgs_nuc
+special CAPMAP000000000-CAPMCA999999999 embl_tpa_wgs_nuc
+special CAPMCC000000000-CAPMFL999999999 embl_tpa_wgs_nuc
+special CAPMFN000000000-CAPMFQ999999999 embl_tpa_wgs_nuc
+special CAPMFS000000000-CAPMHX999999999 embl_tpa_wgs_nuc
+special CAPMHZ000000000-CAPMQK999999999 embl_tpa_wgs_nuc
+special CAPMQM000000000-CAPMSL999999999 embl_tpa_wgs_nuc
+special CAPMSN000000000-CAPMUF999999999 embl_tpa_wgs_nuc
+special CAPMUH000000000-CAPMVW999999999 embl_tpa_wgs_nuc
+special CAPMVY000000000-CAPMWB999999999 embl_tpa_wgs_nuc
+special CAPMWD000000000-CAPMWE999999999 embl_tpa_wgs_nuc
+special CAPMWG000000000-CAPNBP999999999 embl_tpa_wgs_nuc
+special CAPNBR000000000-CAPNCA999999999 embl_tpa_wgs_nuc
+special CAPNCC000000000-CAPNCX999999999 embl_tpa_wgs_nuc
+special CAPNCZ000000000-CAPNHP999999999 embl_tpa_wgs_nuc
+special CAPNHR000000000-CAPNJX999999999 embl_tpa_wgs_nuc
+special CAPNJZ000000000-CAPNNL999999999 embl_tpa_wgs_nuc
+special CAPNNN000000000-CAPNOA999999999 embl_tpa_wgs_nuc
+special CAPNOC000000000-CAPNPS999999999 embl_tpa_wgs_nuc
+special CAPNPU000000000-CAPNRW999999999 embl_tpa_wgs_nuc
+special CAPNRY000000000-CAPNWK999999999 embl_tpa_wgs_nuc
+special CAPNWM000000000-CAPNYD999999999 embl_tpa_wgs_nuc
+special CAPNYF000000000-CAPOBE999999999 embl_tpa_wgs_nuc
+special CAPOBG000000000-CAPODU999999999 embl_tpa_wgs_nuc
+special CAPODW000000000-CAPOEG999999999 embl_tpa_wgs_nuc
+special CAPOEI000000000-CAPOFM999999999 embl_tpa_wgs_nuc
+special CAPOFO000000000-CAPOGN999999999 embl_tpa_wgs_nuc
+special CAPOGP000000000-CAPOIY999999999 embl_tpa_wgs_nuc
+special CAPOJA000000000-CAPOJU999999999 embl_tpa_wgs_nuc
+special CAPOJW000000000-CAPOLL999999999 embl_tpa_wgs_nuc
+special CAPOLN000000000-CAPOLU999999999 embl_tpa_wgs_nuc
+special CAPOLW000000000-CAPOOG999999999 embl_tpa_wgs_nuc
+special CAPOOI000000000-CAPOOO999999999 embl_tpa_wgs_nuc
+special CAPOOQ000000000-CAPORM999999999 embl_tpa_wgs_nuc
+special CAPORO000000000-CAPORS999999999 embl_tpa_wgs_nuc
+special CAPORU000000000-CAPOSU999999999 embl_tpa_wgs_nuc
+special CAPOSW000000000-CAPOUV999999999 embl_tpa_wgs_nuc
+special CAPOUX000000000-CAPPEF999999999 embl_tpa_wgs_nuc
+special CAPPEH000000000-CAPPHO999999999 embl_tpa_wgs_nuc
+special CAPPHQ000000000-CAPPJL999999999 embl_tpa_wgs_nuc
+special CAPPJN000000000-CAPPUM999999999 embl_tpa_wgs_nuc
+special CAPPUO000000000-CAPPWX999999999 embl_tpa_wgs_nuc
+special CAPPWZ000000000-CAPPXH999999999 embl_tpa_wgs_nuc
+special CAPPXJ000000000-CAPQBP999999999 embl_tpa_wgs_nuc
+special CAPQBR000000000-CAPQDI999999999 embl_tpa_wgs_nuc
+special CAPQDK000000000-CAPQEK999999999 embl_tpa_wgs_nuc
+special CAPQEM000000000-CAPQHI999999999 embl_tpa_wgs_nuc
+special CAPQHK000000000-CAPQIK999999999 embl_tpa_wgs_nuc
+special2 CAPQIM+9 embl_tpa_wgs_nuc
+:
+special CAPQIO000000000-CAPQIT999999999 embl_tpa_wgs_nuc
+special CAPQIV000000000-CAPQJQ999999999 embl_tpa_wgs_nuc
+special CAPQJS000000000-CAPQNB999999999 embl_tpa_wgs_nuc
+special CAPQND000000000-CAPQNI999999999 embl_tpa_wgs_nuc
+special CAPQNK000000000-CAPQPN999999999 embl_tpa_wgs_nuc
+special CAPQPP000000000-CAPQWL999999999 embl_tpa_wgs_nuc
+special CAPQWN000000000-CAPQZE999999999 embl_tpa_wgs_nuc
+special CAPQZG000000000-CAPQZS999999999 embl_tpa_wgs_nuc
+special CAPQZU000000000-CAPRAE999999999 embl_tpa_wgs_nuc
+special CAPRAG000000000-CAPRBN999999999 embl_tpa_wgs_nuc
+special CAPRBP000000000-CAPRCD999999999 embl_tpa_wgs_nuc
+special CAPRCF000000000-CAPRGI999999999 embl_tpa_wgs_nuc
+special CAPRGK000000000-CAPRKY999999999 embl_tpa_wgs_nuc
+special CAPRLA000000000-CAPRNX999999999 embl_tpa_wgs_nuc
+special CAPRNZ000000000-CAPRRH999999999 embl_tpa_wgs_nuc
+special CAPRRJ000000000-CAPRRN999999999 embl_tpa_wgs_nuc
+special CAPRRP000000000-CAPRTL999999999 embl_tpa_wgs_nuc
+special CAPRTN000000000-CAPSBA999999999 embl_tpa_wgs_nuc
+special CAPSBC000000000-CAPSBO999999999 embl_tpa_wgs_nuc
+special CAPSBQ000000000-CAPSBX999999999 embl_tpa_wgs_nuc
+special CAPSBZ000000000-CAPSJJ999999999 embl_tpa_wgs_nuc
+special CAPSJL000000000-CAPSNH999999999 embl_tpa_wgs_nuc
+special CAPSNJ000000000-CAPSOJ999999999 embl_tpa_wgs_nuc
+special CAPSOL000000000-CAPSOP999999999 embl_tpa_wgs_nuc
+special CAPSOR000000000-CAPSPE999999999 embl_tpa_wgs_nuc
+special CAPSPG000000000-CAPSPM999999999 embl_tpa_wgs_nuc
+special CAPSPO000000000-CAPSSG999999999 embl_tpa_wgs_nuc
+special CAPSSI000000000-CAPSUQ999999999 embl_tpa_wgs_nuc
+special CAPSUS000000000-CAPSVM999999999 embl_tpa_wgs_nuc
+special CAPSVO000000000-CAPSXX999999999 embl_tpa_wgs_nuc
+special CAPSXZ000000000-CAPTDU999999999 embl_tpa_wgs_nuc
+special CAPTDW000000000-CAPTER999999999 embl_tpa_wgs_nuc
+special CAPTET000000000-CAPTFE999999999 embl_tpa_wgs_nuc
+special CAPTFG000000000-CAPTNR999999999 embl_tpa_wgs_nuc
+special CAPTNT000000000-CAPTPB999999999 embl_tpa_wgs_nuc
+special CAPTPD000000000-CAPTSA999999999 embl_tpa_wgs_nuc
+special CAPTSC000000000-CAPTTW999999999 embl_tpa_wgs_nuc
+special CAPTTY000000000-CAPTTZ999999999 embl_tpa_wgs_nuc
+special CAPTUB000000000-CAPTXI999999999 embl_tpa_wgs_nuc
+special CAPTXK000000000-CAPTXM999999999 embl_tpa_wgs_nuc
+special CAPTXO000000000-CAPUBD999999999 embl_tpa_wgs_nuc
+special CAPUBF000000000-CAPUES999999999 embl_tpa_wgs_nuc
+special CAPUEU000000000-CAPUEY999999999 embl_tpa_wgs_nuc
+special CAPUFA000000000-CAPUHH999999999 embl_tpa_wgs_nuc
+special CAPUHJ000000000-CAPUIT999999999 embl_tpa_wgs_nuc
+special CAPUIV000000000-CAPUJS999999999 embl_tpa_wgs_nuc
+special CAPUJU000000000-CAPULH999999999 embl_tpa_wgs_nuc
+special CAPULJ000000000-CAPULP999999999 embl_tpa_wgs_nuc
+special CAPULR000000000-CAPUNS999999999 embl_tpa_wgs_nuc
+special CAPUNU000000000-CAPUNV999999999 embl_tpa_wgs_nuc
+special CAPUNX000000000-CAPUPA999999999 embl_tpa_wgs_nuc
+special CAPUPC000000000-CAPUPK999999999 embl_tpa_wgs_nuc
+special CAPUPM000000000-CAPURI999999999 embl_tpa_wgs_nuc
+special CAPURK000000000-CAPUSR999999999 embl_tpa_wgs_nuc
+special CAPUST000000000-CAPUUV999999999 embl_tpa_wgs_nuc
+special CAPUUX000000000-CAPVAA999999999 embl_tpa_wgs_nuc
+special CAPVAC000000000-CAPVBM999999999 embl_tpa_wgs_nuc
+special CAPVBO000000000-CAPVBW999999999 embl_tpa_wgs_nuc
+special CAPVBY000000000-CAPVEM999999999 embl_tpa_wgs_nuc
+special CAPVEO000000000-CAPVFH999999999 embl_tpa_wgs_nuc
+special CAPVFJ000000000-CAPVJB999999999 embl_tpa_wgs_nuc
+special CAPVJD000000000-CAPVKH999999999 embl_tpa_wgs_nuc
+special CAPVKJ000000000-CAPVMT999999999 embl_tpa_wgs_nuc
+special CAPVMV000000000-CAPVOM999999999 embl_tpa_wgs_nuc
+special CAPVOO000000000-CAPVPN999999999 embl_tpa_wgs_nuc
+special CAPVPP000000000-CAPVUH999999999 embl_tpa_wgs_nuc
+special CAPVUJ000000000-CAPVVY999999999 embl_tpa_wgs_nuc
+special CAPVWA000000000-CAPVXX999999999 embl_tpa_wgs_nuc
+special CAPVXZ000000000-CAPVZD999999999 embl_tpa_wgs_nuc
+special CAPVZF000000000-CAPVZI999999999 embl_tpa_wgs_nuc
+special CAPVZK000000000-CAPWAB999999999 embl_tpa_wgs_nuc
+special CAPWAD000000000-CAPWEH999999999 embl_tpa_wgs_nuc
+special CAPWEJ000000000-CAPWHH999999999 embl_tpa_wgs_nuc
+special CAPWHJ000000000-CAPWNE999999999 embl_tpa_wgs_nuc
+special CAPWNG000000000-CAPWNI999999999 embl_tpa_wgs_nuc
+special CAPWNK000000000-CAPWPT999999999 embl_tpa_wgs_nuc
+special CAPWPV000000000-CAPWUV999999999 embl_tpa_wgs_nuc
+special CAPWUX000000000-CAPWVK999999999 embl_tpa_wgs_nuc
+special CAPWVM000000000-CAPWXJ999999999 embl_tpa_wgs_nuc
+special CAPWXL000000000-CAPWXO999999999 embl_tpa_wgs_nuc
+special CAPWXQ000000000-CAPWYH999999999 embl_tpa_wgs_nuc
+special CAPWYJ000000000-CAPWYU999999999 embl_tpa_wgs_nuc
+special CAPWYW000000000-CAPWYY999999999 embl_tpa_wgs_nuc
+special CAPWZA000000000-CAPXAI999999999 embl_tpa_wgs_nuc
+special CAPXAK000000000-CAPXAN999999999 embl_tpa_wgs_nuc
+special CAPXAP000000000-CAPXFJ999999999 embl_tpa_wgs_nuc
+special CAPXFL000000000-CAPXIH999999999 embl_tpa_wgs_nuc
+special CAPXIJ000000000-CAPXIZ999999999 embl_tpa_wgs_nuc
+special CAPXJB000000000-CAPXMY999999999 embl_tpa_wgs_nuc
+special CAPXNA000000000-CAPXNX999999999 embl_tpa_wgs_nuc
+special CAPXOA000000000-CAPXPR999999999 embl_tpa_wgs_nuc
+special CAPXPT000000000-CAPXUQ999999999 embl_tpa_wgs_nuc
+special CAPXUS000000000-CAPXWQ999999999 embl_tpa_wgs_nuc
+special CAPXWS000000000-CAPXXS999999999 embl_tpa_wgs_nuc
+special CAPXXU000000000-CAPXXY999999999 embl_tpa_wgs_nuc
+special CAPXYA000000000-CAPYDE999999999 embl_tpa_wgs_nuc
+special CAPYDG000000000-CAPYFU999999999 embl_tpa_wgs_nuc
+special CAPYFW000000000-CAPYHC999999999 embl_tpa_wgs_nuc
+special CAPYHE000000000-CAPYMP999999999 embl_tpa_wgs_nuc
+special CAPYMR000000000-CAPYNE999999999 embl_tpa_wgs_nuc
+special CAPYNG000000000-CAPYNZ999999999 embl_tpa_wgs_nuc
+special CAPYOB000000000-CAPYRK999999999 embl_tpa_wgs_nuc
+special CAPYRM000000000-CAPYVE999999999 embl_tpa_wgs_nuc
+special CAPYVG000000000-CAPYVI999999999 embl_tpa_wgs_nuc
+special CAPYVK000000000-CAPYZF999999999 embl_tpa_wgs_nuc
+special CAPYZH000000000-CAPZAJ999999999 embl_tpa_wgs_nuc
+special2 CAPZAL+9 embl_tpa_wgs_nuc
+:
+special CAPZAN000000000-CAPZFG999999999 embl_tpa_wgs_nuc
+special CAPZFI000000000-CAPZGL999999999 embl_tpa_wgs_nuc
+special CAPZGN000000000-CAPZJN999999999 embl_tpa_wgs_nuc
+special CAPZJP000000000-CAPZJR999999999 embl_tpa_wgs_nuc
+special CAPZJT000000000-CAPZNK999999999 embl_tpa_wgs_nuc
+special CAPZNM000000000-CAPZPI999999999 embl_tpa_wgs_nuc
+special CAPZPK000000000-CAPZQD999999999 embl_tpa_wgs_nuc
+special CAPZQF000000000-CAPZQQ999999999 embl_tpa_wgs_nuc
+special CAPZQS000000000-CAPZRC999999999 embl_tpa_wgs_nuc
+special CAPZRE000000000-CAPZRR999999999 embl_tpa_wgs_nuc
+special CAPZRT000000000-CAPZUK999999999 embl_tpa_wgs_nuc
+special CAPZUM000000000-CAPZVI999999999 embl_tpa_wgs_nuc
+special CAPZVK000000000-CAPZVN999999999 embl_tpa_wgs_nuc
+special CAPZVP000000000-CAPZXW999999999 embl_tpa_wgs_nuc
+special CAPZXY000000000-CAQACW999999999 embl_tpa_wgs_nuc
+special CAQACY000000000-CAQAGG999999999 embl_tpa_wgs_nuc
+special CAQAGI000000000-CAQAIC999999999 embl_tpa_wgs_nuc
+special CAQAIE000000000-CAQARH999999999 embl_tpa_wgs_nuc
+special CAQARJ000000000-CAQAYR999999999 embl_tpa_wgs_nuc
+special CAQAYT000000000-CAQAZG999999999 embl_tpa_wgs_nuc
+special CAQAZI000000000-CAQAZP999999999 embl_tpa_wgs_nuc
+special CAQAZR000000000-CAQBAT999999999 embl_tpa_wgs_nuc
+special CAQBAV000000000-CAQBAZ999999999 embl_tpa_wgs_nuc
+special CAQBBB000000000-CAQBBX999999999 embl_tpa_wgs_nuc
+special CAQBBZ000000000-CAQBDI999999999 embl_tpa_wgs_nuc
+special CAQBDK000000000-CAQBFI999999999 embl_tpa_wgs_nuc
+special CAQBFK000000000-CAQBIJ999999999 embl_tpa_wgs_nuc
+special CAQBIL000000000-CAQBKQ999999999 embl_tpa_wgs_nuc
+special CAQBKS000000000-CAQBLW999999999 embl_tpa_wgs_nuc
+special CAQBLY000000000-CAQBMW999999999 embl_tpa_wgs_nuc
+special CAQBMY000000000-CAQBRU999999999 embl_tpa_wgs_nuc
+special CAQBRW000000000-CAQBTV999999999 embl_tpa_wgs_nuc
+special CAQBTX000000000-CAQBZW999999999 embl_tpa_wgs_nuc
+special CAQBZY000000000-CAQCBI999999999 embl_tpa_wgs_nuc
+special CAQCBK000000000-CAQCCQ999999999 embl_tpa_wgs_nuc
+special CAQCCS000000000-CAQCFR999999999 embl_tpa_wgs_nuc
+special CAQCFT000000000-CAQCGC999999999 embl_tpa_wgs_nuc
+special CAQCGE000000000-CAQCIT999999999 embl_tpa_wgs_nuc
+special CAQCIV000000000-CAQCIW999999999 embl_tpa_wgs_nuc
+special CAQCIY000000000-CAQCKL999999999 embl_tpa_wgs_nuc
+special CAQCKN000000000-CAQCLE999999999 embl_tpa_wgs_nuc
+special CAQCLG000000000-CAQCLM999999999 embl_tpa_wgs_nuc
+special CAQCLO000000000-CAQCNH999999999 embl_tpa_wgs_nuc
+special CAQCNJ000000000-CAQCNK999999999 embl_tpa_wgs_nuc
+special CAQCNM000000000-CAQCNQ999999999 embl_tpa_wgs_nuc
+special CAQCNS000000000-CAQCPS999999999 embl_tpa_wgs_nuc
+special CAQCPU000000000-CAQCSD999999999 embl_tpa_wgs_nuc
+special CAQCSF000000000-CAQCUL999999999 embl_tpa_wgs_nuc
+special CAQCUN000000000-CAQCUO999999999 embl_tpa_wgs_nuc
+special CAQCUQ000000000-CAQCXK999999999 embl_tpa_wgs_nuc
+special CAQCXM000000000-CAQCYY999999999 embl_tpa_wgs_nuc
+special CAQCZA000000000-CAQCZK999999999 embl_tpa_wgs_nuc
+special2 CAQCZM+9 embl_tpa_wgs_nuc
+:
+special CAQCZO000000000-CAQDCD999999999 embl_tpa_wgs_nuc
+special CAQDCF000000000-CAQDDQ999999999 embl_tpa_wgs_nuc
+special CAQDDS000000000-CAQDDT999999999 embl_tpa_wgs_nuc
+special CAQDDV000000000-CAQDEX999999999 embl_tpa_wgs_nuc
+special CAQDEZ000000000-CAQDFV999999999 embl_tpa_wgs_nuc
+special CAQDFX000000000-CAQDJS999999999 embl_tpa_wgs_nuc
+special CAQDJU000000000-CAQDJY999999999 embl_tpa_wgs_nuc
+special CAQDKA000000000-CAQDMN999999999 embl_tpa_wgs_nuc
+special CAQDMP000000000-CAQDNE999999999 embl_tpa_wgs_nuc
+special CAQDNG000000000-CAQDNJ999999999 embl_tpa_wgs_nuc
+special CAQDNL000000000-CAQDNO999999999 embl_tpa_wgs_nuc
+special CAQDNR000000000-CAQDOV999999999 embl_tpa_wgs_nuc
+special CAQDOX000000000-CAQDTA999999999 embl_tpa_wgs_nuc
+special CAQDTC000000000-CAQDTN999999999 embl_tpa_wgs_nuc
+special CAQDTP000000000-CAQDUV999999999 embl_tpa_wgs_nuc
+special CAQDUX000000000-CAQDXP999999999 embl_tpa_wgs_nuc
+special CAQDXR000000000-CAQEBC999999999 embl_tpa_wgs_nuc
+special CAQEBE000000000-CAQEBM999999999 embl_tpa_wgs_nuc
+special CAQEBO000000000-CAQEBU999999999 embl_tpa_wgs_nuc
+special CAQEBW000000000-CAQEDI999999999 embl_tpa_wgs_nuc
+special CAQEDK000000000-CAQEEE999999999 embl_tpa_wgs_nuc
+special CAQEEG000000000-CAQEEJ999999999 embl_tpa_wgs_nuc
+special CAQEEL000000000-CAQEJD999999999 embl_tpa_wgs_nuc
+special CAQEJF000000000-CAQEKA999999999 embl_tpa_wgs_nuc
+special2 CAQEKC+9 embl_tpa_wgs_nuc
+:
+special CAQEKE000000000-CAQEKG999999999 embl_tpa_wgs_nuc
+special CAQEKI000000000-CAQELB999999999 embl_tpa_wgs_nuc
+special CAQELD000000000-CAQENK999999999 embl_tpa_wgs_nuc
+special CAQENM000000000-CAQEOU999999999 embl_tpa_wgs_nuc
+special CAQEOW000000000-CAQERZ999999999 embl_tpa_wgs_nuc
+special CAQESB000000000-CAQESX999999999 embl_tpa_wgs_nuc
+special CAQESZ000000000-CAQEUG999999999 embl_tpa_wgs_nuc
+special CAQEUI000000000-CAQEWH999999999 embl_tpa_wgs_nuc
+special CAQEWJ000000000-CAQEWW999999999 embl_tpa_wgs_nuc
+special CAQEWY000000000-CAQEZE999999999 embl_tpa_wgs_nuc
+special CAQEZG000000000-CAQFAT999999999 embl_tpa_wgs_nuc
+special CAQFAV000000000-CAQFCC999999999 embl_tpa_wgs_nuc
+special CAQFCE000000000-CAQFFA999999999 embl_tpa_wgs_nuc
+special CAQFFC000000000-CAQFGM999999999 embl_tpa_wgs_nuc
+special CAQFGO000000000-CAQFGV999999999 embl_tpa_wgs_nuc
+special CAQFGX000000000-CAQFHD999999999 embl_tpa_wgs_nuc
+special CAQFHF000000000-CAQFIG999999999 embl_tpa_wgs_nuc
+special CAQFII000000000-CAQFKE999999999 embl_tpa_wgs_nuc
+special CAQFKG000000000-CAQFMX999999999 embl_tpa_wgs_nuc
+special CAQFMZ000000000-CAQFPQ999999999 embl_tpa_wgs_nuc
+special CAQFPS000000000-CAQFSI999999999 embl_tpa_wgs_nuc
+special CAQFSK000000000-CAQFTF999999999 embl_tpa_wgs_nuc
+special CAQFTH000000000-CAQFTU999999999 embl_tpa_wgs_nuc
+special CAQFTW000000000-CAQFVB999999999 embl_tpa_wgs_nuc
+special CAQFVD000000000-CAQFWF999999999 embl_tpa_wgs_nuc
+special CAQFWH000000000-CAQFWT999999999 embl_tpa_wgs_nuc
+special CAQFWV000000000-CAQFWX999999999 embl_tpa_wgs_nuc
+special CAQFWZ000000000-CAQFXX999999999 embl_tpa_wgs_nuc
+special CAQFXZ000000000-CAQFZS999999999 embl_tpa_wgs_nuc
+special CAQFZU000000000-CAQGAS999999999 embl_tpa_wgs_nuc
+special CAQGAU000000000-CAQGAV999999999 embl_tpa_wgs_nuc
+special CAQGAX000000000-CAQGCD999999999 embl_tpa_wgs_nuc
+special CAQGCF000000000-CAQGCH999999999 embl_tpa_wgs_nuc
+special CAQGCJ000000000-CAQGFL999999999 embl_tpa_wgs_nuc
+special CAQGFN000000000-CAQGGM999999999 embl_tpa_wgs_nuc
+special CAQGGO000000000-CAQGHN999999999 embl_tpa_wgs_nuc
+special CAQGHP000000000-CAQGIP999999999 embl_tpa_wgs_nuc
+special CAQGIR000000000-CAQGKN999999999 embl_tpa_wgs_nuc
+special CAQGKP000000000-CAQGMD999999999 embl_tpa_wgs_nuc
+special CAQGMF000000000-CAQGNH999999999 embl_tpa_wgs_nuc
+special CAQGNJ000000000-CAQGOA999999999 embl_tpa_wgs_nuc
+special CAQGOC000000000-CAQGOX999999999 embl_tpa_wgs_nuc
+special CAQGOZ000000000-CAQGQL999999999 embl_tpa_wgs_nuc
+special CAQGQN000000000-CAQGVA999999999 embl_tpa_wgs_nuc
+special CAQGVC000000000-CAQGWX999999999 embl_tpa_wgs_nuc
+special CAQGWZ000000000-CAQGXX999999999 embl_tpa_wgs_nuc
+special CAQGXZ000000000-CAQHAF999999999 embl_tpa_wgs_nuc
+special CAQHAH000000000-CAQHBT999999999 embl_tpa_wgs_nuc
+special CAQHBV000000000-CAQHDW999999999 embl_tpa_wgs_nuc
+special CAQHDY000000000-CAQHEY999999999 embl_tpa_wgs_nuc
+special CAQHFA000000000-CAQHHQ999999999 embl_tpa_wgs_nuc
+special CAQHHS000000000-CAQHJZ999999999 embl_tpa_wgs_nuc
+special CAQHKB000000000-CAQHKV999999999 embl_tpa_wgs_nuc
+special CAQHKX000000000-CAQHLN999999999 embl_tpa_wgs_nuc
+special CAQHLP000000000-CAQHTC999999999 embl_tpa_wgs_nuc
+special CAQHTE000000000-CAQHTV999999999 embl_tpa_wgs_nuc
+special CAQHTX000000000-CAQHWB999999999 embl_tpa_wgs_nuc
+special CAQHWD000000000-CAQHXC999999999 embl_tpa_wgs_nuc
+special CAQHXE000000000-CAQHXU999999999 embl_tpa_wgs_nuc
+special CAQHXW000000000-CAQHZQ999999999 embl_tpa_wgs_nuc
+special CAQHZS000000000-CAQIAL999999999 embl_tpa_wgs_nuc
+special CAQIAN000000000-CAQIEP999999999 embl_tpa_wgs_nuc
+special CAQIER000000000-CAQIFZ999999999 embl_tpa_wgs_nuc
+special CAQIGB000000000-CAQIHO999999999 embl_tpa_wgs_nuc
+special CAQIHQ000000000-CAQINF999999999 embl_tpa_wgs_nuc
+special CAQINH000000000-CAQIPM999999999 embl_tpa_wgs_nuc
+special CAQIPO000000000-CAQITU999999999 embl_tpa_wgs_nuc
+special CAQITW000000000-CAQIUJ999999999 embl_tpa_wgs_nuc
+special CAQIUL000000000-CAQIXK999999999 embl_tpa_wgs_nuc
+special CAQIXM000000000-CAQJCE999999999 embl_tpa_wgs_nuc
+special CAQJCG000000000-CAQJCU999999999 embl_tpa_wgs_nuc
+special CAQJCW000000000-CAQJDQ999999999 embl_tpa_wgs_nuc
+special CAQJDS000000000-CAQJEA999999999 embl_tpa_wgs_nuc
+special CAQJEC000000000-CAQJEL999999999 embl_tpa_wgs_nuc
+special CAQJEN000000000-CAQJGK999999999 embl_tpa_wgs_nuc
+special CAQJGM000000000-CAQJHI999999999 embl_tpa_wgs_nuc
+special CAQJHK000000000-CAQJIO999999999 embl_tpa_wgs_nuc
+special CAQJIQ000000000-CAQJJG999999999 embl_tpa_wgs_nuc
+special CAQJJI000000000-CAQJJQ999999999 embl_tpa_wgs_nuc
+special CAQJJS000000000-CAQJKA999999999 embl_tpa_wgs_nuc
+special CAQJKC000000000-CAQJNM999999999 embl_tpa_wgs_nuc
+special CAQJNO000000000-CAQJRA999999999 embl_tpa_wgs_nuc
+special CAQJRC000000000-CAQJRP999999999 embl_tpa_wgs_nuc
+special CAQJRR000000000-CAQJSM999999999 embl_tpa_wgs_nuc
+special CAQJSO000000000-CAQJUG999999999 embl_tpa_wgs_nuc
+special2 CAQJUI+9 embl_tpa_wgs_nuc
+:
+special CAQJUK000000000-CAQJVX999999999 embl_tpa_wgs_nuc
+special CAQJVZ000000000-CAQJWN999999999 embl_tpa_wgs_nuc
+special CAQJWP000000000-CAQJYM999999999 embl_tpa_wgs_nuc
+special CAQJYO000000000-CAQJYZ999999999 embl_tpa_wgs_nuc
+special CAQJZB000000000-CAQKBN999999999 embl_tpa_wgs_nuc
+special2 CAQKBP+9 embl_tpa_wgs_nuc
+:
+special CAQKBR000000000-CAQKDO999999999 embl_tpa_wgs_nuc
+special CAQKDQ000000000-CAQKEW999999999 embl_tpa_wgs_nuc
+special CAQKEY000000000-CAQKGM999999999 embl_tpa_wgs_nuc
+special CAQKGO000000000-CAQKGV999999999 embl_tpa_wgs_nuc
+special CAQKGX000000000-CAQKHC999999999 embl_tpa_wgs_nuc
+special CAQKHE000000000-CAQKHF999999999 embl_tpa_wgs_nuc
+special2 CAQKHH+9 embl_tpa_wgs_nuc
+:
+special CAQKHJ000000000-CAQKJT999999999 embl_tpa_wgs_nuc
+special CAQKJV000000000-CAQKLB999999999 embl_tpa_wgs_nuc
+special CAQKLD000000000-CAQKMO999999999 embl_tpa_wgs_nuc
+special CAQKMQ000000000-CAQKNQ999999999 embl_tpa_wgs_nuc
+special CAQKNS000000000-CAQKPO999999999 embl_tpa_wgs_nuc
+special CAQKPQ000000000-CAQKPR999999999 embl_tpa_wgs_nuc
+special CAQKPT000000000-CAQKQD999999999 embl_tpa_wgs_nuc
+special CAQKQF000000000-CAQKSJ999999999 embl_tpa_wgs_nuc
+special CAQKSL000000000-CAQKWE999999999 embl_tpa_wgs_nuc
+special CAQKWG000000000-CAQLCF999999999 embl_tpa_wgs_nuc
+special CAQLCH000000000-CAQLEE999999999 embl_tpa_wgs_nuc
+special CAQLEG000000000-CAQLFF999999999 embl_tpa_wgs_nuc
+special CAQLFH000000000-CAQLFK999999999 embl_tpa_wgs_nuc
+special CAQLFM000000000-CAQLGM999999999 embl_tpa_wgs_nuc
+special CAQLGO000000000-CAQLKS999999999 embl_tpa_wgs_nuc
+special CAQLKU000000000-CAQLNX999999999 embl_tpa_wgs_nuc
+special CAQLNZ000000000-CAQLOM999999999 embl_tpa_wgs_nuc
+special CAQLOO000000000-CAQLOR999999999 embl_tpa_wgs_nuc
+special CAQLOT000000000-CAQLQR999999999 embl_tpa_wgs_nuc
+special CAQLQT000000000-CAQLRZ999999999 embl_tpa_wgs_nuc
+special CAQLSB000000000-CAQLUF999999999 embl_tpa_wgs_nuc
+special CAQLUH000000000-CAQLVC999999999 embl_tpa_wgs_nuc
+special CAQLVE000000000-CAQMAA999999999 embl_tpa_wgs_nuc
+special CAQMAC000000000-CAQMBV999999999 embl_tpa_wgs_nuc
+special CAQMBX000000000-CAQMES999999999 embl_tpa_wgs_nuc
+special CAQMEU000000000-CAQMMP999999999 embl_tpa_wgs_nuc
+special CAQMMR000000000-CAQMVL999999999 embl_tpa_wgs_nuc
+special CAQMVN000000000-CAQNAL999999999 embl_tpa_wgs_nuc
+special CAQNAN000000000-CAQNID999999999 embl_tpa_wgs_nuc
+special2 CAQNIF+9 embl_tpa_wgs_nuc
+:
+special CAQNIH000000000-CAQNJH999999999 embl_tpa_wgs_nuc
+special CAQNJJ000000000-CAQNJZ999999999 embl_tpa_wgs_nuc
+special CAQNKB000000000-CAQNZB999999999 embl_tpa_wgs_nuc
+special CAQNZD000000000-CAQOFG999999999 embl_tpa_wgs_nuc
+special CAQOFI000000000-CAQOHU999999999 embl_tpa_wgs_nuc
+special CAQOHW000000000-CAQOQN999999999 embl_tpa_wgs_nuc
+special CAQOQP000000000-CAQOSD999999999 embl_tpa_wgs_nuc
+special CAQOSF000000000-CAQOSN999999999 embl_tpa_wgs_nuc
+special CAQOSP000000000-CAQOSY999999999 embl_tpa_wgs_nuc
+special CAQOTA000000000-CAQOTN999999999 embl_tpa_wgs_nuc
+special CAQOTP000000000-CAQOUG999999999 embl_tpa_wgs_nuc
+special CAQOUI000000000-CAQOXZ999999999 embl_tpa_wgs_nuc
+special CAQOYB000000000-CAQOYH999999999 embl_tpa_wgs_nuc
+special CAQOYJ000000000-CAQPAE999999999 embl_tpa_wgs_nuc
+special CAQPAG000000000-CAQPBM999999999 embl_tpa_wgs_nuc
+special CAQPBO000000000-CAQPDC999999999 embl_tpa_wgs_nuc
+special CAQPDE000000000-CAQPGX999999999 embl_tpa_wgs_nuc
+special CAQPGZ000000000-CAQPIM999999999 embl_tpa_wgs_nuc
+special CAQPIO000000000-CAQPKI999999999 embl_tpa_wgs_nuc
+special CAQPKK000000000-CAQPLM999999999 embl_tpa_wgs_nuc
+special CAQPLO000000000-CAQPPE999999999 embl_tpa_wgs_nuc
+special CAQPPG000000000-CAQPQE999999999 embl_tpa_wgs_nuc
+special CAQPQG000000000-CAQPQM999999999 embl_tpa_wgs_nuc
+special CAQPQO000000000-CAQPQT999999999 embl_tpa_wgs_nuc
+special CAQPQV000000000-CAQPSM999999999 embl_tpa_wgs_nuc
+special CAQPSO000000000-CAQPSX999999999 embl_tpa_wgs_nuc
+special CAQPSZ000000000-CAQQAV999999999 embl_tpa_wgs_nuc
+special CAQQAX000000000-CAQQDC999999999 embl_tpa_wgs_nuc
+special CAQQDE000000000-CAQQJW999999999 embl_tpa_wgs_nuc
+special CAQQJY000000000-CAQQOE999999999 embl_tpa_wgs_nuc
+special CAQQOG000000000-CAQQOS999999999 embl_tpa_wgs_nuc
+special CAQQOU000000000-CAQQQJ999999999 embl_tpa_wgs_nuc
+special CAQQQL000000000-CAQQSQ999999999 embl_tpa_wgs_nuc
+special CAQQSS000000000-CAQQTX999999999 embl_tpa_wgs_nuc
+special CAQQTZ000000000-CAQQVS999999999 embl_tpa_wgs_nuc
+special CAQQVU000000000-CAQRBT999999999 embl_tpa_wgs_nuc
+special CAQRBV000000000-CAQRCP999999999 embl_tpa_wgs_nuc
+special CAQRCR000000000-CAQRHJ999999999 embl_tpa_wgs_nuc
+special CAQRHL000000000-CAQROJ999999999 embl_tpa_wgs_nuc
+special CAQROL000000000-CAQRQF999999999 embl_tpa_wgs_nuc
+special CAQRQH000000000-CAQRRG999999999 embl_tpa_wgs_nuc
+special CAQRRI000000000-CAQRWE999999999 embl_tpa_wgs_nuc
+special CAQRWG000000000-CAQRWT999999999 embl_tpa_wgs_nuc
+special CAQRWV000000000-CAQRZO999999999 embl_tpa_wgs_nuc
+special CAQRZQ000000000-CAQSAD999999999 embl_tpa_wgs_nuc
+special CAQSAF000000000-CAQSCF999999999 embl_tpa_wgs_nuc
+special CAQSCH000000000-CAQSJY999999999 embl_tpa_wgs_nuc
+special CAQSKA000000000-CAQSMJ999999999 embl_tpa_wgs_nuc
+special CAQSML000000000-CAQSQJ999999999 embl_tpa_wgs_nuc
+special CAQSQL000000000-CAQSRG999999999 embl_tpa_wgs_nuc
+special CAQSRI000000000-CAQSRO999999999 embl_tpa_wgs_nuc
+special CAQSRQ000000000-CAQSVS999999999 embl_tpa_wgs_nuc
+special CAQSVU000000000-CAQTDW999999999 embl_tpa_wgs_nuc
+special CAQTDY000000000-CAQTFC999999999 embl_tpa_wgs_nuc
+special CAQTFE000000000-CAQTGJ999999999 embl_tpa_wgs_nuc
+special CAQTGL000000000-CAQTII999999999 embl_tpa_wgs_nuc
+special CAQTIK000000000-CAQTJL999999999 embl_tpa_wgs_nuc
+special CAQTJN000000000-CAQTKV999999999 embl_tpa_wgs_nuc
+special CAQTKX000000000-CAQTTK999999999 embl_tpa_wgs_nuc
+special CAQTTM000000000-CAQTWC999999999 embl_tpa_wgs_nuc
+special CAQTWE000000000-CAQTWW999999999 embl_tpa_wgs_nuc
+special CAQTWY000000000-CAQUBK999999999 embl_tpa_wgs_nuc
+special CAQUBM000000000-CAQUCB999999999 embl_tpa_wgs_nuc
+special CAQUCD000000000-CAQUEB999999999 embl_tpa_wgs_nuc
+special CAQUED000000000-CAQUGU999999999 embl_tpa_wgs_nuc
+special CAQUGW000000000-CAQUJA999999999 embl_tpa_wgs_nuc
+special CAQUJC000000000-CAQUXH999999999 embl_tpa_wgs_nuc
+special CAQUXJ000000000-CAQVAM999999999 embl_tpa_wgs_nuc
+special CAQVAO000000000-CAQVFC999999999 embl_tpa_wgs_nuc
+special CAQVFE000000000-CAQVGP999999999 embl_tpa_wgs_nuc
+special CAQVGR000000000-CAQVHB999999999 embl_tpa_wgs_nuc
+special CAQVHD000000000-CAQVHN999999999 embl_tpa_wgs_nuc
+special2 CAQVHP+9 embl_tpa_wgs_nuc
+:
+special CAQVHR000000000-CAQVJA999999999 embl_tpa_wgs_nuc
+special CAQVJC000000000-CAQVJZ999999999 embl_tpa_wgs_nuc
+special CAQVKB000000000-CAQVQJ999999999 embl_tpa_wgs_nuc
+special CAQVQL000000000-CAQVTI999999999 embl_tpa_wgs_nuc
+special CAQVTK000000000-CAQVVY999999999 embl_tpa_wgs_nuc
+special CAQVWA000000000-CAQVWS999999999 embl_tpa_wgs_nuc
+special CAQVWU000000000-CAQVYM999999999 embl_tpa_wgs_nuc
+special CAQVYO000000000-CAQWBW999999999 embl_tpa_wgs_nuc
+special CAQWBY000000000-CAQWFG999999999 embl_tpa_wgs_nuc
+special CAQWFI000000000-CAQWJU999999999 embl_tpa_wgs_nuc
+special CAQWJW000000000-CAQWKN999999999 embl_tpa_wgs_nuc
+special CAQWKP000000000-CAQWMU999999999 embl_tpa_wgs_nuc
+special CAQWMW000000000-CAQWNG999999999 embl_tpa_wgs_nuc
+special CAQWNJ000000000-CAQWPA999999999 embl_tpa_wgs_nuc
+special CAQWPC000000000-CAQWUF999999999 embl_tpa_wgs_nuc
+special CAQWUH000000000-CAQWXR999999999 embl_tpa_wgs_nuc
+special CAQWXT000000000-CAQWYS999999999 embl_tpa_wgs_nuc
+special CAQWYU000000000-CAQXAB999999999 embl_tpa_wgs_nuc
+special CAQXAD000000000-CAQXAF999999999 embl_tpa_wgs_nuc
+special CAQXAH000000000-CAQXEL999999999 embl_tpa_wgs_nuc
+special CAQXEN000000000-CAQXFQ999999999 embl_tpa_wgs_nuc
+special CAQXFS000000000-CAQXID999999999 embl_tpa_wgs_nuc
+special CAQXIF000000000-CAQXJF999999999 embl_tpa_wgs_nuc
+special CAQXJH000000000-CAQXMO999999999 embl_tpa_wgs_nuc
+special CAQXMQ000000000-CAQXSP999999999 embl_tpa_wgs_nuc
+special CAQXSR000000000-CAQYAC999999999 embl_tpa_wgs_nuc
+special CAQYAE000000000-CAQYCK999999999 embl_tpa_wgs_nuc
+special CAQYCM000000000-CAQYCZ999999999 embl_tpa_wgs_nuc
+special CAQYDB000000000-CAQYFD999999999 embl_tpa_wgs_nuc
+special CAQYFF000000000-CAQYGF999999999 embl_tpa_wgs_nuc
+special CAQYGH000000000-CAQYHG999999999 embl_tpa_wgs_nuc
+special CAQYHI000000000-CAQYIX999999999 embl_tpa_wgs_nuc
+special CAQYIZ000000000-CAQYKC999999999 embl_tpa_wgs_nuc
+special CAQYKE000000000-CAQYOK999999999 embl_tpa_wgs_nuc
+special CAQYOM000000000-CAQYPW999999999 embl_tpa_wgs_nuc
+special CAQYPY000000000-CAQYXX999999999 embl_tpa_wgs_nuc
+special CAQYXZ000000000-CAQZAX999999999 embl_tpa_wgs_nuc
+special CAQZAZ000000000-CAQZDA999999999 embl_tpa_wgs_nuc
+special CAQZDD000000000-CAQZDK999999999 embl_tpa_wgs_nuc
+special CAQZDM000000000-CAQZJN999999999 embl_tpa_wgs_nuc
+special CAQZJP000000000-CAQZUS999999999 embl_tpa_wgs_nuc
+special CAQZUU000000000-CARABB999999999 embl_tpa_wgs_nuc
+special CARABD000000000-CARADM999999999 embl_tpa_wgs_nuc
+special CARADO000000000-CARADX999999999 embl_tpa_wgs_nuc
+special CARADZ000000000-CARAMV999999999 embl_tpa_wgs_nuc
+special CARAMX000000000-CARANA999999999 embl_tpa_wgs_nuc
+special CARANC000000000-CARANF999999999 embl_tpa_wgs_nuc
+special CARANH000000000-CARAPD999999999 embl_tpa_wgs_nuc
+special CARAPF000000000-CARAQN999999999 embl_tpa_wgs_nuc
+special CARAQP000000000-CARAUK999999999 embl_tpa_wgs_nuc
+special CARAUM000000000-CARAVT999999999 embl_tpa_wgs_nuc
+special CARAVV000000000-CARAWH999999999 embl_tpa_wgs_nuc
+special CARAWJ000000000-CARBFR999999999 embl_tpa_wgs_nuc
+special CARBFT000000000-CARBLM999999999 embl_tpa_wgs_nuc
+special CARBLO000000000-CARBPJ999999999 embl_tpa_wgs_nuc
+special CARBPL000000000-CARBQV999999999 embl_tpa_wgs_nuc
+special CARBQX000000000-CARBRS999999999 embl_tpa_wgs_nuc
+special CARBRU000000000-CARBUB999999999 embl_tpa_wgs_nuc
+special2 CARBUD+9 embl_tpa_wgs_nuc
+:
+special CARBUF000000000-CARBUZ999999999 embl_tpa_wgs_nuc
+special CARBVB000000000-CARBYD999999999 embl_tpa_wgs_nuc
+special CARBYF000000000-CARBZS999999999 embl_tpa_wgs_nuc
+special CARBZU000000000-CARCBW999999999 embl_tpa_wgs_nuc
+special CARCBY000000000-CARCDQ999999999 embl_tpa_wgs_nuc
+special CARCDS000000000-CARCGN999999999 embl_tpa_wgs_nuc
+special CARCGP000000000-CARCOC999999999 embl_tpa_wgs_nuc
+special CARCOE000000000-CARCOI999999999 embl_tpa_wgs_nuc
+special CARCOK000000000-CARCQZ999999999 embl_tpa_wgs_nuc
+special CARCRB000000000-CARCUZ999999999 embl_tpa_wgs_nuc
+special CARCVB000000000-CARCXW999999999 embl_tpa_wgs_nuc
+special CARCXY000000000-CARCZI999999999 embl_tpa_wgs_nuc
+special CARCZK000000000-CARDAA999999999 embl_tpa_wgs_nuc
+special CARDAC000000000-CARDBZ999999999 embl_tpa_wgs_nuc
+special CARDCB000000000-CARDIT999999999 embl_tpa_wgs_nuc
+special CARDIV000000000-CARDJM999999999 embl_tpa_wgs_nuc
+special CARDJO000000000-CARDQK999999999 embl_tpa_wgs_nuc
+special CARDQM000000000-CARDYK999999999 embl_tpa_wgs_nuc
+special CARDYM000000000-CAREBT999999999 embl_tpa_wgs_nuc
+special CAREBV000000000-CAREGX999999999 embl_tpa_wgs_nuc
+special CAREGZ000000000-CAREHH999999999 embl_tpa_wgs_nuc
+special CAREHJ000000000-CAREHY999999999 embl_tpa_wgs_nuc
+special CAREIA000000000-CAREKD999999999 embl_tpa_wgs_nuc
+special CAREKF000000000-CARELB999999999 embl_tpa_wgs_nuc
+special CARELD000000000-CARELG999999999 embl_tpa_wgs_nuc
+special CARELI000000000-CAREQB999999999 embl_tpa_wgs_nuc
+special CAREQD000000000-CARERM999999999 embl_tpa_wgs_nuc
+special CARERO000000000-CARESY999999999 embl_tpa_wgs_nuc
+special CARETA000000000-CARFGK999999999 embl_tpa_wgs_nuc
+special CARFGM000000000-CARFKC999999999 embl_tpa_wgs_nuc
+special CARFKE000000000-CARFPU999999999 embl_tpa_wgs_nuc
+special CARFPW000000000-CARFUA999999999 embl_tpa_wgs_nuc
+special CARFUC000000000-CARFWZ999999999 embl_tpa_wgs_nuc
+special CARFXB000000000-CARFXP999999999 embl_tpa_wgs_nuc
+special CARFXR000000000-CARFXT999999999 embl_tpa_wgs_nuc
+special CARFXV000000000-CARGFU999999999 embl_tpa_wgs_nuc
+special CARGFW000000000-CARGLB999999999 embl_tpa_wgs_nuc
+special CARGLD000000000-CARGRC999999999 embl_tpa_wgs_nuc
+special CARGRE000000000-CARGSP999999999 embl_tpa_wgs_nuc
+special CARGSR000000000-CARGWZ999999999 embl_tpa_wgs_nuc
+special CARGXB000000000-CARGYK999999999 embl_tpa_wgs_nuc
+special CARGYM000000000-CARHIT999999999 embl_tpa_wgs_nuc
+special CARHIV000000000-CARHKF999999999 embl_tpa_wgs_nuc
+special CARHKH000000000-CARHKP999999999 embl_tpa_wgs_nuc
+special CARHKR000000000-CARHSP999999999 embl_tpa_wgs_nuc
+special CARHSR000000000-CARHUC999999999 embl_tpa_wgs_nuc
+special CARHUF000000000-CARHWW999999999 embl_tpa_wgs_nuc
+special CARHWY000000000-CARIAM999999999 embl_tpa_wgs_nuc
+special CARIAO000000000-CARIDB999999999 embl_tpa_wgs_nuc
+special CARIDD000000000-CARIDI999999999 embl_tpa_wgs_nuc
+special CARIDK000000000-CARIKS999999999 embl_tpa_wgs_nuc
+special CARIKU000000000-CARIPD999999999 embl_tpa_wgs_nuc
+special CARIPF000000000-CARIPL999999999 embl_tpa_wgs_nuc
+special CARIPN000000000-CARIXF999999999 embl_tpa_wgs_nuc
+special CARIXH000000000-CARIZW999999999 embl_tpa_wgs_nuc
+special CARIZY000000000-CARJBQ999999999 embl_tpa_wgs_nuc
+special CARJBS000000000-CARJCZ999999999 embl_tpa_wgs_nuc
+special CARJDB000000000-CARJEE999999999 embl_tpa_wgs_nuc
+special CARJEG000000000-CARJFJ999999999 embl_tpa_wgs_nuc
+special CARJFL000000000-CARJHO999999999 embl_tpa_wgs_nuc
+special CARJHQ000000000-CARJIO999999999 embl_tpa_wgs_nuc
+special CARJIQ000000000-CARJLH999999999 embl_tpa_wgs_nuc
+special CARJLJ000000000-CARJMX999999999 embl_tpa_wgs_nuc
+special CARJMZ000000000-CARJUX999999999 embl_tpa_wgs_nuc
+special CARJUZ000000000-CARJYK999999999 embl_tpa_wgs_nuc
+special CARJYM000000000-CARJYW999999999 embl_tpa_wgs_nuc
+special CARJYY000000000-CARKCV999999999 embl_tpa_wgs_nuc
+special CARKCX000000000-CARKDV999999999 embl_tpa_wgs_nuc
+special CARKDX000000000-CARKDY999999999 embl_tpa_wgs_nuc
+special CARKEA000000000-CARKEN999999999 embl_tpa_wgs_nuc
+special CARKEP000000000-CARKEY999999999 embl_tpa_wgs_nuc
+special CARKFA000000000-CARKIX999999999 embl_tpa_wgs_nuc
+special CARKIZ000000000-CARKMN999999999 embl_tpa_wgs_nuc
+special CARKMP000000000-CARKPZ999999999 embl_tpa_wgs_nuc
+special CARKQB000000000-CARKUT999999999 embl_tpa_wgs_nuc
+special CARKUV000000000-CARKWF999999999 embl_tpa_wgs_nuc
+special CARKWH000000000-CARKWZ999999999 embl_tpa_wgs_nuc
+special CARKXB000000000-CARKYR999999999 embl_tpa_wgs_nuc
+special CARKYT000000000-CARKZB999999999 embl_tpa_wgs_nuc
+special CARKZD000000000-CARLAT999999999 embl_tpa_wgs_nuc
+special CARLAV000000000-CARLBM999999999 embl_tpa_wgs_nuc
+special2 CARLBO+9 embl_tpa_wgs_nuc
+:
+special CARLBQ000000000-CARLFA999999999 embl_tpa_wgs_nuc
+special CARLFC000000000-CARLHD999999999 embl_tpa_wgs_nuc
+special CARLHF000000000-CARLHQ999999999 embl_tpa_wgs_nuc
+special CARLHS000000000-CARLKM999999999 embl_tpa_wgs_nuc
+special CARLKO000000000-CARLNE999999999 embl_tpa_wgs_nuc
+special CARLNG000000000-CARLOC999999999 embl_tpa_wgs_nuc
+special CARLOE000000000-CARLRB999999999 embl_tpa_wgs_nuc
+special CARLRD000000000-CARLRX999999999 embl_tpa_wgs_nuc
+special CARLRZ000000000-CARLSL999999999 embl_tpa_wgs_nuc
+special CARLSN000000000-CARLTB999999999 embl_tpa_wgs_nuc
+special CARLTD000000000-CARLWD999999999 embl_tpa_wgs_nuc
+special CARLWF000000000-CARLZF999999999 embl_tpa_wgs_nuc
+special CARLZH000000000-CARMBB999999999 embl_tpa_wgs_nuc
+special CARMBD000000000-CARMBK999999999 embl_tpa_wgs_nuc
+special CARMBM000000000-CARMDH999999999 embl_tpa_wgs_nuc
+special CARMDJ000000000-CARMDK999999999 embl_tpa_wgs_nuc
+special CARMDM000000000-CARMFL999999999 embl_tpa_wgs_nuc
+special CARMFN000000000-CARMGX999999999 embl_tpa_wgs_nuc
+special CARMGZ000000000-CARMHA999999999 embl_tpa_wgs_nuc
+special CARMHC000000000-CARMOL999999999 embl_tpa_wgs_nuc
+special CARMON000000000-CARMTS999999999 embl_tpa_wgs_nuc
+special CARMTU000000000-CARMVJ999999999 embl_tpa_wgs_nuc
+special CARMVL000000000-CARNAN999999999 embl_tpa_wgs_nuc
+special CARNAP000000000-CARNBQ999999999 embl_tpa_wgs_nuc
+special CARNBS000000000-CARNBX999999999 embl_tpa_wgs_nuc
+special CARNBZ000000000-CARNCL999999999 embl_tpa_wgs_nuc
+special CARNCN000000000-CARNGO999999999 embl_tpa_wgs_nuc
+special CARNGQ000000000-CARNNQ999999999 embl_tpa_wgs_nuc
+special CARNNS000000000-CARNNZ999999999 embl_tpa_wgs_nuc
+special CARNOB000000000-CARNPZ999999999 embl_tpa_wgs_nuc
+special CARNQB000000000-CARNTT999999999 embl_tpa_wgs_nuc
+special CARNTV000000000-CARNUU999999999 embl_tpa_wgs_nuc
+special CARNUW000000000-CARNWM999999999 embl_tpa_wgs_nuc
+special CARNWO000000000-CARNZQ999999999 embl_tpa_wgs_nuc
+special CARNZS000000000-CAROBZ999999999 embl_tpa_wgs_nuc
+special CAROCB000000000-CAROEQ999999999 embl_tpa_wgs_nuc
+special CAROES000000000-CAROFA999999999 embl_tpa_wgs_nuc
+special CAROFC000000000-CAROFV999999999 embl_tpa_wgs_nuc
+special CAROFX000000000-CAROIB999999999 embl_tpa_wgs_nuc
+special2 CAROID+9 embl_tpa_wgs_nuc
+:
+special CAROIF000000000-CAROJB999999999 embl_tpa_wgs_nuc
+special CAROJD000000000-CAROJR999999999 embl_tpa_wgs_nuc
+special CAROJT000000000-CAROJW999999999 embl_tpa_wgs_nuc
+special CAROJY000000000-CAROMZ999999999 embl_tpa_wgs_nuc
+special CARONC000000000-CAROPU999999999 embl_tpa_wgs_nuc
+special CAROPW000000000-CAROQJ999999999 embl_tpa_wgs_nuc
+special CAROQL000000000-CAROTF999999999 embl_tpa_wgs_nuc
+special CAROTH000000000-CAROTR999999999 embl_tpa_wgs_nuc
+special CAROTT000000000-CAROWS999999999 embl_tpa_wgs_nuc
+special2 CAROWU+9 embl_tpa_wgs_nuc
+:
+special CAROWW000000000-CAROXU999999999 embl_tpa_wgs_nuc
+special CAROXW000000000-CAROZB999999999 embl_tpa_wgs_nuc
+special CAROZD000000000-CARPFE999999999 embl_tpa_wgs_nuc
+special CARPFG000000000-CARPHY999999999 embl_tpa_wgs_nuc
+special CARPIA000000000-CARPJJ999999999 embl_tpa_wgs_nuc
+special CARPJL000000000-CARPLB999999999 embl_tpa_wgs_nuc
+special CARPLD000000000-CARPLZ999999999 embl_tpa_wgs_nuc
+special CARPMB000000000-CARPOI999999999 embl_tpa_wgs_nuc
+special CARPOK000000000-CARPWN999999999 embl_tpa_wgs_nuc
+special CARPWP000000000-CARPXP999999999 embl_tpa_wgs_nuc
+special CARPXR000000000-CARPXV999999999 embl_tpa_wgs_nuc
+special CARPXX000000000-CARQAA999999999 embl_tpa_wgs_nuc
+special CARQAC000000000-CARQAI999999999 embl_tpa_wgs_nuc
+special CARQAK000000000-CARQBH999999999 embl_tpa_wgs_nuc
+special CARQBJ000000000-CARQCR999999999 embl_tpa_wgs_nuc
+special CARQCT000000000-CARQKG999999999 embl_tpa_wgs_nuc
+special CARQKI000000000-CARQND999999999 embl_tpa_wgs_nuc
+special CARQNF000000000-CARQPS999999999 embl_tpa_wgs_nuc
+special CARQPU000000000-CARQTS999999999 embl_tpa_wgs_nuc
+special CARQTU000000000-CARQWR999999999 embl_tpa_wgs_nuc
+special CARQWT000000000-CARQWY999999999 embl_tpa_wgs_nuc
+special CARQXA000000000-CARQZS999999999 embl_tpa_wgs_nuc
+special CARQZU000000000-CARQZW999999999 embl_tpa_wgs_nuc
+special CARQZY000000000-CARREF999999999 embl_tpa_wgs_nuc
+special CARREH000000000-CARRFI999999999 embl_tpa_wgs_nuc
+special CARRFK000000000-CARRFY999999999 embl_tpa_wgs_nuc
+special CARRGA000000000-CARRHK999999999 embl_tpa_wgs_nuc
+special CARRHM000000000-CARRHZ999999999 embl_tpa_wgs_nuc
+special CARRIB000000000-CARRID999999999 embl_tpa_wgs_nuc
+special2 CARRIG+9 embl_tpa_wgs_nuc
+:
+special CARRII000000000-CARRIK999999999 embl_tpa_wgs_nuc
+special CARRIM000000000-CARRIQ999999999 embl_tpa_wgs_nuc
+special CARRIS000000000-CARRJW999999999 embl_tpa_wgs_nuc
+special CARRJY000000000-CARRKB999999999 embl_tpa_wgs_nuc
+special CARRKD000000000-CARRKI999999999 embl_tpa_wgs_nuc
+special CARRKK000000000-CARRLP999999999 embl_tpa_wgs_nuc
+special CARRLR000000000-CARRML999999999 embl_tpa_wgs_nuc
+special CARRMO000000000-CARRSG999999999 embl_tpa_wgs_nuc
+special CARRSI000000000-CARRSN999999999 embl_tpa_wgs_nuc
+special CARRSP000000000-CARRTL999999999 embl_tpa_wgs_nuc
+special CARRTO000000000-CARRUU999999999 embl_tpa_wgs_nuc
+special CARRUW000000000-CARRYI999999999 embl_tpa_wgs_nuc
+special CARRYK000000000-CARSAK999999999 embl_tpa_wgs_nuc
+special CARSAM000000000-CARSBP999999999 embl_tpa_wgs_nuc
+special CARSBR000000000-CARSCA999999999 embl_tpa_wgs_nuc
+special CARSCC000000000-CARSCS999999999 embl_tpa_wgs_nuc
+special CARSCU000000000-CARSCZ999999999 embl_tpa_wgs_nuc
+special CARSDB000000000-CARSDZ999999999 embl_tpa_wgs_nuc
+special CARSFA000000000-CARSFZ999999999 embl_tpa_wgs_nuc
+special CARSGB000000000-CARSIE999999999 embl_tpa_wgs_nuc
+special CARSIG000000000-CARSIR999999999 embl_tpa_wgs_nuc
+special CARSIT000000000-CARSKW999999999 embl_tpa_wgs_nuc
+special CARSKZ000000000-CARSLH999999999 embl_tpa_wgs_nuc
+special CARSLJ000000000-CARSMA999999999 embl_tpa_wgs_nuc
+special CARSMD000000000-CARSQK999999999 embl_tpa_wgs_nuc
+special CARSQM000000000-CARSQV999999999 embl_tpa_wgs_nuc
+special CARSQX000000000-CARSRI999999999 embl_tpa_wgs_nuc
+special CARSRK000000000-CARSSB999999999 embl_tpa_wgs_nuc
+special CARSSD000000000-CARSSU999999999 embl_tpa_wgs_nuc
+special CARSSW000000000-CARSTF999999999 embl_tpa_wgs_nuc
+special CARSTH000000000-CARSVC999999999 embl_tpa_wgs_nuc
+special CARSVE000000000-CARSXW999999999 embl_tpa_wgs_nuc
+special CARSXY000000000-CARSYA999999999 embl_tpa_wgs_nuc
+special CARSYC000000000-CARSYF999999999 embl_tpa_wgs_nuc
+special CARSYH000000000-CARSYM999999999 embl_tpa_wgs_nuc
+special CARSYO000000000-CARTAE999999999 embl_tpa_wgs_nuc
+special CARTAG000000000-CARTAI999999999 embl_tpa_wgs_nuc
+special CARTAK000000000-CARTBE999999999 embl_tpa_wgs_nuc
+special CARTBG000000000-CARTBH999999999 embl_tpa_wgs_nuc
+special CARTBJ000000000-CARTCV999999999 embl_tpa_wgs_nuc
+special CARTCX000000000-CARTCZ999999999 embl_tpa_wgs_nuc
+special CARTDB000000000-CARTDF999999999 embl_tpa_wgs_nuc
+special CARTDH000000000-CARTDM999999999 embl_tpa_wgs_nuc
+special CARTDO000000000-CARTFH999999999 embl_tpa_wgs_nuc
+special CARTFJ000000000-CARTGQ999999999 embl_tpa_wgs_nuc
+special CARTGS000000000-CARTHD999999999 embl_tpa_wgs_nuc
+special CARTHF000000000-CARTKF999999999 embl_tpa_wgs_nuc
+special CARTKH000000000-CARTNB999999999 embl_tpa_wgs_nuc
+special CARTNE000000000-CARTNG999999999 embl_tpa_wgs_nuc
+special CARTNI000000000-CARTNO999999999 embl_tpa_wgs_nuc
+special CARTNQ000000000-CARTPC999999999 embl_tpa_wgs_nuc
+special CARTPE000000000-CARTPU999999999 embl_tpa_wgs_nuc
+special CARTPX000000000-CARTQA999999999 embl_tpa_wgs_nuc
+special CARTQC000000000-CARTQJ999999999 embl_tpa_wgs_nuc
+special CARTQL000000000-CARTQR999999999 embl_tpa_wgs_nuc
+special CARTQT000000000-CARTRF999999999 embl_tpa_wgs_nuc
+special CARTRH000000000-CARTRI999999999 embl_tpa_wgs_nuc
+special2 CARTRK+9 embl_tpa_wgs_nuc
+:
+special CARTRM000000000-CARTRU999999999 embl_tpa_wgs_nuc
+special CARTRW000000000-CARTSO999999999 embl_tpa_wgs_nuc
+special CARTSQ000000000-CARTUG999999999 embl_tpa_wgs_nuc
+special CARTUI000000000-CARTWC999999999 embl_tpa_wgs_nuc
+special CARTWE000000000-CARTWJ999999999 embl_tpa_wgs_nuc
+special CARTWL000000000-CARTYA999999999 embl_tpa_wgs_nuc
+special CARTYC000000000-CARTYI999999999 embl_tpa_wgs_nuc
+special CARTYK000000000-CARTYX999999999 embl_tpa_wgs_nuc
+special CARTYZ000000000-CARTZT999999999 embl_tpa_wgs_nuc
+special CARTZW000000000-CARTZY999999999 embl_tpa_wgs_nuc
+special CARUAA000000000-CARUAC999999999 embl_tpa_wgs_nuc
+special CARUAE000000000-CARUAG999999999 embl_tpa_wgs_nuc
+special CARUAI000000000-CARUAJ999999999 embl_tpa_wgs_nuc
+special CARUAL000000000-CARUAN999999999 embl_tpa_wgs_nuc
+special CARUAP000000000-CARUAR999999999 embl_tpa_wgs_nuc
+special2 CARUAT+9 embl_tpa_wgs_nuc
+:
+special2 CARUAW+9 embl_tpa_wgs_nuc
+:
+special CARUAY000000000-CARUBC999999999 embl_tpa_wgs_nuc
+special2 CARUBF+9 embl_tpa_wgs_nuc
+:
+special CARUBH000000000-CARUBM999999999 embl_tpa_wgs_nuc
+special2 CARUBO+9 embl_tpa_wgs_nuc
+:
+special CARUBT000000000-CARUBV999999999 embl_tpa_wgs_nuc
+special CARUBX000000000-CARUCG999999999 embl_tpa_wgs_nuc
+special CARUCI000000000-CARUCK999999999 embl_tpa_wgs_nuc
+special CARUCM000000000-CARUCO999999999 embl_tpa_wgs_nuc
+special CARUCQ000000000-CARUDB999999999 embl_tpa_wgs_nuc
+special CARUDD000000000-CARUDL999999999 embl_tpa_wgs_nuc
+special CARUDN000000000-CARUDO999999999 embl_tpa_wgs_nuc
+special CARUDQ000000000-CARUDR999999999 embl_tpa_wgs_nuc
+special CARUDT000000000-CARUDZ999999999 embl_tpa_wgs_nuc
+special CARUEB000000000-CARUFD999999999 embl_tpa_wgs_nuc
+special CARUFF000000000-CARUFX999999999 embl_tpa_wgs_nuc
+special CARUFZ000000000-CARUGQ999999999 embl_tpa_wgs_nuc
+special CARUGT000000000-CARUHG999999999 embl_tpa_wgs_nuc
+special CARUHK000000000-CARUIO999999999 embl_tpa_wgs_nuc
+special CARUIQ000000000-CARUIV999999999 embl_tpa_wgs_nuc
+special CARUIX000000000-CARUJQ999999999 embl_tpa_wgs_nuc
+special CARUJS000000000-CARUKB999999999 embl_tpa_wgs_nuc
+special CARUKD000000000-CARUKG999999999 embl_tpa_wgs_nuc
+special2 CARUKI+9 embl_tpa_wgs_nuc
+:
+special CARUKL000000000-CARULB999999999 embl_tpa_wgs_nuc
+special2 CARULE+9 embl_tpa_wgs_nuc
+:
+special CARULG000000000-CARULN999999999 embl_tpa_wgs_nuc
+special CARULP000000000-CARULR999999999 embl_tpa_wgs_nuc
+special CARULT000000000-CARUME999999999 embl_tpa_wgs_nuc
+special CARUMG000000000-CARUMO999999999 embl_tpa_wgs_nuc
+special CARUMQ000000000-CARUMR999999999 embl_tpa_wgs_nuc
+special CARUMT000000000-CARUNI999999999 embl_tpa_wgs_nuc
+special CARUNK000000000-CARUOJ999999999 embl_tpa_wgs_nuc
+special CARUOL000000000-CARUPO999999999 embl_tpa_wgs_nuc
+special CARUPQ000000000-CARUPV999999999 embl_tpa_wgs_nuc
+special CARUPX000000000-CARUQR999999999 embl_tpa_wgs_nuc
+special CARUQT000000000-CARUQU999999999 embl_tpa_wgs_nuc
+special2 CARUQW+9 embl_tpa_wgs_nuc
+:
+special CARUQY000000000-CARUQZ999999999 embl_tpa_wgs_nuc
+special CARURC000000000-CARURD999999999 embl_tpa_wgs_nuc
+special2 CARURF+9 embl_tpa_wgs_nuc
+:
+special CARURO000000000-CARURP999999999 embl_tpa_wgs_nuc
+special2 CARURT+9 embl_tpa_wgs_nuc
+:
+special2 CARURZ+9 embl_tpa_wgs_nuc
+:
+special CARUSB000000000-CARUSC999999999 embl_tpa_wgs_nuc
+special CARUSH000000000-CARUSI999999999 embl_tpa_wgs_nuc
+special CARUSK000000000-CARUSS999999999 embl_tpa_wgs_nuc
+special2 CARUSU+9 embl_tpa_wgs_nuc
+:
+special2 CARUSX+9 embl_tpa_wgs_nuc
+:
+special CARUSZ000000000-CARUTE999999999 embl_tpa_wgs_nuc
+special CARUTG000000000-CARUTK999999999 embl_tpa_wgs_nuc
+special CARUTM000000000-CARUUH999999999 embl_tpa_wgs_nuc
+special CARUUJ000000000-CARUUU999999999 embl_tpa_wgs_nuc
+special CARUUW000000000-CARUUX999999999 embl_tpa_wgs_nuc
+special CARUUZ000000000-CARUWB999999999 embl_tpa_wgs_nuc
+special CARUWD000000000-CARUWE999999999 embl_tpa_wgs_nuc
+special CARUWI000000000-CARUWL999999999 embl_tpa_wgs_nuc
+special CARUWO000000000-CARUWV999999999 embl_tpa_wgs_nuc
+special CARUWX000000000-CARUXA999999999 embl_tpa_wgs_nuc
+special2 CARUXD+9 embl_tpa_wgs_nuc
+:
+special2 CARUXJ+9 embl_tpa_wgs_nuc
+:
+special CARUXL000000000-CARUXN999999999 embl_tpa_wgs_nuc
+special2 CARUXT+9 embl_tpa_wgs_nuc
+:
+special CARUXX000000000-CARVBR999999999 embl_tpa_wgs_nuc
+special CARVBT000000000-CARVDV999999999 embl_tpa_wgs_nuc
+special CARVDX000000000-CARVKH999999999 embl_tpa_wgs_nuc
+special CARVKJ000000000-CARVKN999999999 embl_tpa_wgs_nuc
+special CARVKP000000000-CARVPD999999999 embl_tpa_wgs_nuc
+special CARVPF000000000-CARVTP999999999 embl_tpa_wgs_nuc
+special CARVTR000000000-CARVWT999999999 embl_tpa_wgs_nuc
+special CARVWV000000000-CARVXZ999999999 embl_tpa_wgs_nuc
+special CARVYB000000000-CARWBV999999999 embl_tpa_wgs_nuc
+special CARWBX000000000-CARWEY999999999 embl_tpa_wgs_nuc
+special CARWFA000000000-CARWGU999999999 embl_tpa_wgs_nuc
+special2 CARWGW+9 embl_tpa_wgs_nuc
+:
+special CARWGY000000000-CARWKL999999999 embl_tpa_wgs_nuc
+special CARWKN000000000-CARWKQ999999999 embl_tpa_wgs_nuc
+special CARWKS000000000-CARWLJ999999999 embl_tpa_wgs_nuc
+special CARWLL000000000-CARWOV999999999 embl_tpa_wgs_nuc
+special CARWOX000000000-CARWRL999999999 embl_tpa_wgs_nuc
+special CARWRN000000000-CARWTS999999999 embl_tpa_wgs_nuc
+special CARWTU000000000-CARWTX999999999 embl_tpa_wgs_nuc
+special CARWTZ000000000-CARWVL999999999 embl_tpa_wgs_nuc
+special CARWVN000000000-CARWWF999999999 embl_tpa_wgs_nuc
+special CARWWH000000000-CARWXI999999999 embl_tpa_wgs_nuc
+special CARWXK000000000-CARWZQ999999999 embl_tpa_wgs_nuc
+special CARWZS000000000-CARXCM999999999 embl_tpa_wgs_nuc
+special CARXCO000000000-CARXGY999999999 embl_tpa_wgs_nuc
+special CARXHA000000000-CARXJZ999999999 embl_tpa_wgs_nuc
+special CARXKC000000000-CARXLP999999999 embl_tpa_wgs_nuc
+special CARXLR000000000-CARXOG999999999 embl_tpa_wgs_nuc
+special CARXOI000000000-CARXPC999999999 embl_tpa_wgs_nuc
+special CARXPE000000000-CARXQG999999999 embl_tpa_wgs_nuc
+special CARXQI000000000-CARXRE999999999 embl_tpa_wgs_nuc
+special CARXRG000000000-CARXXJ999999999 embl_tpa_wgs_nuc
+special CARXXL000000000-CARYAM999999999 embl_tpa_wgs_nuc
+special CARYAO000000000-CASBCP999999999 embl_tpa_wgs_nuc
+special CASBCS000000000-CASBIE999999999 embl_tpa_wgs_nuc
+special CATKWV000000000-CATKZC999999999 embl_tpa_wgs_nuc
+special CATKZE000000000-CATKZN999999999 embl_tpa_wgs_nuc
+special CATKZP000000000-CATLJF999999999 embl_tpa_wgs_nuc
+special CATLKS000000000-CATLOD999999999 embl_tpa_wgs_nuc
+special2 CATLOF+9 embl_tpa_wgs_nuc
+:
+special2 CATLQM+9 embl_tpa_wgs_nuc
+:
+special2 CATLQT+9 embl_tpa_wgs_nuc
+:
+special CATLQV000000000-CATLQW999999999 embl_tpa_wgs_nuc
+special2 CATLQY+9 embl_tpa_wgs_nuc
+:
+special CATLRD000000000-CATLRE999999999 embl_tpa_wgs_nuc
+special2 CATLRM+9 embl_tpa_wgs_nuc
+:
+special2 CATLRP+9 embl_tpa_wgs_nuc
+:
+special2 CATLRS+9 embl_tpa_wgs_nuc
+:
+special2 CATLRY+9 embl_tpa_wgs_nuc
+:
+special CATLSA000000000-CATLSB999999999 embl_tpa_wgs_nuc
+special2 CATLSE+9 embl_tpa_wgs_nuc
+:
+special CATLSG000000000-CATLSH999999999 embl_tpa_wgs_nuc
+special2 CATLSP+9 embl_tpa_wgs_nuc
+:
+special2 CATLSR+9 embl_tpa_wgs_nuc
+:
+special CATLSV000000000-CATLSX999999999 embl_tpa_wgs_nuc
+special2 CATLTH+9 embl_tpa_wgs_nuc
+:
+special2 CATLTL+9 embl_tpa_wgs_nuc
+:
+special2 CATLTN+9 embl_tpa_wgs_nuc
+:
+special CATLTX000000000-CATLTY999999999 embl_tpa_wgs_nuc
+special CATLUB000000000-CATLUC999999999 embl_tpa_wgs_nuc
+special CATLUE000000000-CATLUF999999999 embl_tpa_wgs_nuc
+special CATLUH000000000-CATLUI999999999 embl_tpa_wgs_nuc
+special CATLUO000000000-CATLUP999999999 embl_tpa_wgs_nuc
+special2 CATLWF+9 embl_tpa_wgs_nuc
+:
+special2 CATLWJ+9 embl_tpa_wgs_nuc
+:
+special2 CATLWQ+9 embl_tpa_wgs_nuc
+:
+special2 CATLYM+9 embl_tpa_wgs_nuc
+:
+special2 CATLZE+9 embl_tpa_wgs_nuc
+:
+special2 CATLZH+9 embl_tpa_wgs_nuc
+:
+special2 CATLZR+9 embl_tpa_wgs_nuc
+:
+special2 CATLZW+9 embl_tpa_wgs_nuc
+:
+special CATMAO000000000-CATMAV999999999 embl_tpa_wgs_nuc
+special CATMAY000000000-CATMAZ999999999 embl_tpa_wgs_nuc
+special CATMBB000000000-CATMBD999999999 embl_tpa_wgs_nuc
+special2 CATMBG+9 embl_tpa_wgs_nuc
+:
+special2 CATMBI+9 embl_tpa_wgs_nuc
+:
+special CATMBK000000000-CATMBQ999999999 embl_tpa_wgs_nuc
+special CATMBS000000000-CATMBU999999999 embl_tpa_wgs_nuc
+special2 CATMBX+9 embl_tpa_wgs_nuc
+:
+special CATMBZ000000000-CATMCA999999999 embl_tpa_wgs_nuc
+special CATMCD000000000-CATMCF999999999 embl_tpa_wgs_nuc
+special CATMCH000000000-CATMCM999999999 embl_tpa_wgs_nuc
+special2 CATMCQ+9 embl_tpa_wgs_nuc
+:
+special2 CATMCV+9 embl_tpa_wgs_nuc
+:
+special2 CATMCX+9 embl_tpa_wgs_nuc
+:
+special CATMDC000000000-CATMDE999999999 embl_tpa_wgs_nuc
+special2 CATMEG+9 embl_tpa_wgs_nuc
+:
+special2 CATMEJ+9 embl_tpa_wgs_nuc
+:
+special2 CATMEP+9 embl_tpa_wgs_nuc
+:
+special2 CATMER+9 embl_tpa_wgs_nuc
+:
+special2 CATMMU+9 embl_tpa_wgs_nuc
+:
+special2 CATMNC+9 embl_tpa_wgs_nuc
+:
+special2 CATMOT+9 embl_tpa_wgs_nuc
+:
+special2 CATMPD+9 embl_tpa_wgs_nuc
+:
+special2 CATMPF+9 embl_tpa_wgs_nuc
+:
+special CATMPH000000000-CATMPI999999999 embl_tpa_wgs_nuc
+special CATMPR000000000-CATMPS999999999 embl_tpa_wgs_nuc
+special CATMUY000000000-CATMVC999999999 embl_tpa_wgs_nuc
+special2 CATMVG+9 embl_tpa_wgs_nuc
+:
+special CATMVI000000000-CATMVN999999999 embl_tpa_wgs_nuc
+special CATMVP000000000-CATMVQ999999999 embl_tpa_wgs_nuc
+special CATMVS000000000-CATMZQ999999999 embl_tpa_wgs_nuc
+special CATMZS000000000-CATNCO999999999 embl_tpa_wgs_nuc
+special CATNCQ000000000-CATNDE999999999 embl_tpa_wgs_nuc
+special CATNDG000000000-CATNDJ999999999 embl_tpa_wgs_nuc
+special CATNDL000000000-CATNEF999999999 embl_tpa_wgs_nuc
+special CATNEJ000000000-CATNEL999999999 embl_tpa_wgs_nuc
+special CATNEO000000000-CATNEU999999999 embl_tpa_wgs_nuc
+special2 CATNUW+9 embl_tpa_wgs_nuc
+:
+special CATNVF000000000-CATNVZ999999999 embl_tpa_wgs_nuc
+special2 CATOAL+9 embl_tpa_wgs_nuc
+:
+special CATOHR000000000-CATOPO999999999 embl_tpa_wgs_nuc
+special CATVPU000000000-CATVWV999999999 embl_tpa_wgs_nuc
+special CATVWX000000000-CATVXD999999999 embl_tpa_wgs_nuc
+special CATVXF000000000-CATVYY999999999 embl_tpa_wgs_nuc
+special CATVZA000000000-CATVZS999999999 embl_tpa_wgs_nuc
+special CATVZU000000000-CATWAE999999999 embl_tpa_wgs_nuc
+special CATWAG000000000-CATWAQ999999999 embl_tpa_wgs_nuc
+special CATWAS000000000-CATWDN999999999 embl_tpa_wgs_nuc
+special CATWDP000000000-CATWDQ999999999 embl_tpa_wgs_nuc
+special CATWDS000000000-CATWEG999999999 embl_tpa_wgs_nuc
+special CATWEI000000000-CATWFS999999999 embl_tpa_wgs_nuc
+special CATWFU000000000-CATWGA999999999 embl_tpa_wgs_nuc
+special CATWGC000000000-CATWGF999999999 embl_tpa_wgs_nuc
+special CATWGH000000000-CATWHB999999999 embl_tpa_wgs_nuc
+special CATWHD000000000-CATWHH999999999 embl_tpa_wgs_nuc
+special CATWHJ000000000-CATXER999999999 embl_tpa_wgs_nuc
+special CATXFC000000000-CATXGK999999999 embl_tpa_wgs_nuc
+special CATXGM000000000-CATXOD999999999 embl_tpa_wgs_nuc
+special2 CATXOU+9 embl_tpa_wgs_nuc
+:
+special CATXOW000000000-CATXOY999999999 embl_tpa_wgs_nuc
+special2 CATXPD+9 embl_tpa_wgs_nuc
+:
+special CATXRH000000000-CATYKS999999999 embl_tpa_wgs_nuc
+special CATYKU000000000-CATYSV999999999 embl_tpa_wgs_nuc
+special CATYSX000000000-CATYWN999999999 embl_tpa_wgs_nuc
+special CATYWP000000000-CATYYN999999999 embl_tpa_wgs_nuc
+special CATYYP000000000-CATYYZ999999999 embl_tpa_wgs_nuc
+special CATYZB000000000-CATZAQ999999999 embl_tpa_wgs_nuc
+special2 CATZAS+9 embl_tpa_wgs_nuc
+:
+special CATZAU000000000-CATZAY999999999 embl_tpa_wgs_nuc
+special CATZBA000000000-CATZBT999999999 embl_tpa_wgs_nuc
+special CATZBV000000000-CATZCD999999999 embl_tpa_wgs_nuc
+special2 CATZCI+9 embl_tpa_wgs_nuc
+:
+special CATZCL000000000-CATZCO999999999 embl_tpa_wgs_nuc
+special CATZCR000000000-CATZKT999999999 embl_tpa_wgs_nuc
+special CATZKV000000000-CATZLJ999999999 embl_tpa_wgs_nuc
+special CATZLM000000000-CATZVN999999999 embl_tpa_wgs_nuc
+special CATZVP000000000-CAUACO999999999 embl_tpa_wgs_nuc
+special CAUACQ000000000-CAUAJN999999999 embl_tpa_wgs_nuc
+special CAUAJP000000000-CAUAJR999999999 embl_tpa_wgs_nuc
+special CAUAJV000000000-CAUAKB999999999 embl_tpa_wgs_nuc
+special2 CAUART+9 embl_tpa_wgs_nuc
+:
+special2 CAUARW+9 embl_tpa_wgs_nuc
+:
+special CAUASA000000000-CAUASF999999999 embl_tpa_wgs_nuc
+special CAUASH000000000-CAUATU999999999 embl_tpa_wgs_nuc
+special CAUAVB000000000-CAUAVD999999999 embl_tpa_wgs_nuc
+special CAUAVF000000000-CAUAVL999999999 embl_tpa_wgs_nuc
+special CAUAVN000000000-CAUAVW999999999 embl_tpa_wgs_nuc
+special CAUAVY000000000-CAUBOM999999999 embl_tpa_wgs_nuc
+special CAUBOO000000000-CAUBUH999999999 embl_tpa_wgs_nuc
+special CAUBUJ000000000-CAUBUT999999999 embl_tpa_wgs_nuc
+special CAUBUV000000000-CAUDIX999999999 embl_tpa_wgs_nuc
+special2 CAUDLZ+9 embl_tpa_wgs_nuc
+:
+special CAUDMB000000000-CAUDMF999999999 embl_tpa_wgs_nuc
+special CAUDMH000000000-CAUDNQ999999999 embl_tpa_wgs_nuc
+special CAUDNS000000000-CAUEEO999999999 embl_tpa_wgs_nuc
+special2 CAUEER+9 embl_tpa_wgs_nuc
+:
+special CAUEET000000000-CAUEGG999999999 embl_tpa_wgs_nuc
+special CAUEII000000000-CAUFVH999999999 embl_tpa_wgs_nuc
+special CAUFVS000000000-CAUGLX999999999 embl_tpa_wgs_nuc
+special CAUGLZ000000000-CAUHTP999999999 embl_tpa_wgs_nuc
+special CAUJND000000000-CAUJNO999999999 embl_tpa_wgs_nuc
+special CAUOKV000000000-CAUOPQ999999999 embl_tpa_wgs_nuc
+special2 CAUOQQ+9 embl_tpa_wgs_nuc
+:
+special2 CAUOQX+9 embl_tpa_wgs_nuc
+:
+special2 CAUOQZ+9 embl_tpa_wgs_nuc
+:
+special2 CAUORB+9 embl_tpa_wgs_nuc
+:
+special CAUORD000000000-CAUOSA999999999 embl_tpa_wgs_nuc
+special CAUOSC000000000-CAUOSG999999999 embl_tpa_wgs_nuc
+special CAUOSI000000000-CAUOSR999999999 embl_tpa_wgs_nuc
+special CAUOST000000000-CAUOTB999999999 embl_tpa_wgs_nuc
+special CAUOTD000000000-CAUOTK999999999 embl_tpa_wgs_nuc
+special CAUOTM000000000-CAUOUA999999999 embl_tpa_wgs_nuc
+special CAUOUC000000000-CAUOUD999999999 embl_tpa_wgs_nuc
+special CAUOUF000000000-CAUOUG999999999 embl_tpa_wgs_nuc
+special CAUOUI000000000-CAUOVY999999999 embl_tpa_wgs_nuc
+special CAUOWA000000000-CAUOWJ999999999 embl_tpa_wgs_nuc
+special2 CAUOWL+9 embl_tpa_wgs_nuc
+:
+special CAUOWN000000000-CAUOXB999999999 embl_tpa_wgs_nuc
+special CAUOXD000000000-CAUOXK999999999 embl_tpa_wgs_nuc
+special CAUOXM000000000-CAUOXQ999999999 embl_tpa_wgs_nuc
+special CAUOXS000000000-CAUOYO999999999 embl_tpa_wgs_nuc
+special CAUOYQ000000000-CAUOYT999999999 embl_tpa_wgs_nuc
+special CAUOYV000000000-CAUOYY999999999 embl_tpa_wgs_nuc
+special CAUOZA000000000-CAUOZD999999999 embl_tpa_wgs_nuc
+special CAUOZF000000000-CAUOZO999999999 embl_tpa_wgs_nuc
+special CAUOZR000000000-CAUOZU999999999 embl_tpa_wgs_nuc
+special CAUOZW000000000-CAUPAE999999999 embl_tpa_wgs_nuc
+special CAUPAG000000000-CAUPAR999999999 embl_tpa_wgs_nuc
+special CAUPAT000000000-CAUPAV999999999 embl_tpa_wgs_nuc
+special CAUPAY000000000-CAUPBI999999999 embl_tpa_wgs_nuc
+special CAUPBK000000000-CAUPBZ999999999 embl_tpa_wgs_nuc
+special CAUPCB000000000-CAUPCO999999999 embl_tpa_wgs_nuc
+special CAUPCQ000000000-CAUPCV999999999 embl_tpa_wgs_nuc
+special CAUPCX000000000-CAUPDP999999999 embl_tpa_wgs_nuc
+special CAUPDR000000000-CAUPEG999999999 embl_tpa_wgs_nuc
+special2 CAUPEK+9 embl_tpa_wgs_nuc
+:
+special CAUPEN000000000-CAUPEQ999999999 embl_tpa_wgs_nuc
+special CAUPES000000000-CAUPEU999999999 embl_tpa_wgs_nuc
+special CAUPEW000000000-CAUPGO999999999 embl_tpa_wgs_nuc
+special2 CAUPGQ+9 embl_tpa_wgs_nuc
+:
+special CAUPGS000000000-CAUPHK999999999 embl_tpa_wgs_nuc
+special CAUPHN000000000-CAUPHP999999999 embl_tpa_wgs_nuc
+special CAUPHR000000000-CAUPHS999999999 embl_tpa_wgs_nuc
+special CAUPHU000000000-CAUPHW999999999 embl_tpa_wgs_nuc
+special CAUPHZ000000000-CAUPJB999999999 embl_tpa_wgs_nuc
+special CAUPJD000000000-CAUPJR999999999 embl_tpa_wgs_nuc
+special CAUPJT000000000-CAUPJU999999999 embl_tpa_wgs_nuc
+special CAUPJW000000000-CAUPJY999999999 embl_tpa_wgs_nuc
+special2 CAUPKB+9 embl_tpa_wgs_nuc
+:
+special CAUPKE000000000-CAUPKM999999999 embl_tpa_wgs_nuc
+special2 CAUPKO+9 embl_tpa_wgs_nuc
+:
+special CAUPKQ000000000-CAUPKV999999999 embl_tpa_wgs_nuc
+special CAUPKX000000000-CAUPLG999999999 embl_tpa_wgs_nuc
+special2 CAUPLJ+9 embl_tpa_wgs_nuc
+:
+special CAUPLL000000000-CAUPLQ999999999 embl_tpa_wgs_nuc
+special CAUPLS000000000-CAUPLV999999999 embl_tpa_wgs_nuc
+special CAUPLX000000000-CAUPMC999999999 embl_tpa_wgs_nuc
+special CAUPME000000000-CAUPMF999999999 embl_tpa_wgs_nuc
+special CAUPMH000000000-CAUPMI999999999 embl_tpa_wgs_nuc
+special2 CAUPMK+9 embl_tpa_wgs_nuc
+:
+special2 CAUPMM+9 embl_tpa_wgs_nuc
+:
+special CAUPMO000000000-CAUPMP999999999 embl_tpa_wgs_nuc
+special CAUPMS000000000-CAUPMX999999999 embl_tpa_wgs_nuc
+special2 CAUPMZ+9 embl_tpa_wgs_nuc
+:
+special CAUPNB000000000-CAUPNF999999999 embl_tpa_wgs_nuc
+special2 CAUPNH+9 embl_tpa_wgs_nuc
+:
+special CAUPNJ000000000-CAUPNK999999999 embl_tpa_wgs_nuc
+special CAUPNN000000000-CAUPNZ999999999 embl_tpa_wgs_nuc
+special2 CAUPOB+9 embl_tpa_wgs_nuc
+:
+special CAUPOD000000000-CAUPOM999999999 embl_tpa_wgs_nuc
+special2 CAUPOO+9 embl_tpa_wgs_nuc
+:
+special CAUPOQ000000000-CAUPOT999999999 embl_tpa_wgs_nuc
+special CAUPOX000000000-CAUPOY999999999 embl_tpa_wgs_nuc
+special2 CAUPPA+9 embl_tpa_wgs_nuc
+:
+special CAUPPD000000000-CAUPPF999999999 embl_tpa_wgs_nuc
+special CAUPPI000000000-CAUPPY999999999 embl_tpa_wgs_nuc
+special CAUPQA000000000-CAUPQF999999999 embl_tpa_wgs_nuc
+special2 CAUPQH+9 embl_tpa_wgs_nuc
+:
+special2 CAUPQJ+9 embl_tpa_wgs_nuc
+:
+special CAUPQM000000000-CAUPQN999999999 embl_tpa_wgs_nuc
+special CAUPQP000000000-CAUPQR999999999 embl_tpa_wgs_nuc
+special2 CAUPRB+9 embl_tpa_wgs_nuc
+:
+special CAUPSY000000000-CAUTMV999999999 embl_tpa_wgs_nuc
+special2 CAUTMX+9 embl_tpa_wgs_nuc
+:
+special CAUTNA000000000-CAUTOK999999999 embl_tpa_wgs_nuc
+special CAUTOM000000000-CAUVWA999999999 embl_tpa_wgs_nuc
+special CAWVRH000000000-CAWWDE999999999 embl_tpa_wgs_nuc
+special CAWZYP000000000-CAWZYZ999999999 embl_tpa_wgs_nuc
+special CAXAAG000000000-CAXACN999999999 embl_tpa_wgs_nuc
+special CAXAFD000000000-CAXAJU999999999 embl_tpa_wgs_nuc
+special CAXASQ000000000-CAXAUW999999999 embl_tpa_wgs_nuc
+special CAXAUY000000000-CAXAXI999999999 embl_tpa_wgs_nuc
+special CAXAXL000000000-CAXAYR999999999 embl_tpa_wgs_nuc
+special CAXAYT000000000-CAXBOQ999999999 embl_tpa_wgs_nuc
+special CAXBOS000000000-CAXBSW999999999 embl_tpa_wgs_nuc
+special CAXBUO000000000-CAXCFA999999999 embl_tpa_wgs_nuc
+special CAXCFC000000000-CAXCFE999999999 embl_tpa_wgs_nuc
+special CAXDIY000000000-CAXDKL999999999 embl_tpa_wgs_nuc
+special CAXDKN000000000-CAXDLL999999999 embl_tpa_wgs_nuc
+special CAXDLN000000000-CAXDMO999999999 embl_tpa_wgs_nuc
+special CAXDMQ000000000-CAXDMR999999999 embl_tpa_wgs_nuc
+special CAXDMV000000000-CAXDNN999999999 embl_tpa_wgs_nuc
+special CAXDNQ000000000-CAXDOD999999999 embl_tpa_wgs_nuc
+special CAXDOI000000000-CAXDOJ999999999 embl_tpa_wgs_nuc
+special CAXDOL000000000-CAXDOO999999999 embl_tpa_wgs_nuc
+special CAXDOT000000000-CAXDPF999999999 embl_tpa_wgs_nuc
+special CAXDPH000000000-CAXDPJ999999999 embl_tpa_wgs_nuc
+special CAXDPL000000000-CAXDPM999999999 embl_tpa_wgs_nuc
+special CAXDPR000000000-CAXDPU999999999 embl_tpa_wgs_nuc
+special CAXDPW000000000-CAXDPX999999999 embl_tpa_wgs_nuc
+special CAXDPZ000000000-CAXDPZ999999999 embl_tpa_wgs_nuc
+special CAXDQB000000000-CAXDQE999999999 embl_tpa_wgs_nuc
+special CAXDQG000000000-CAXDQG999999999 embl_tpa_wgs_nuc
+special CAXDQJ000000000-CAXDQT999999999 embl_tpa_wgs_nuc
+special CAXDQW000000000-CAXDQY999999999 embl_tpa_wgs_nuc
+special CAXDRB000000000-CAXDRB999999999 embl_tpa_wgs_nuc
+special CAXDRE000000000-CAXDRE999999999 embl_tpa_wgs_nuc
+special CAXDRG000000000-CAXDRG999999999 embl_tpa_wgs_nuc
+special CAXDRI000000000-CAXDRU999999999 embl_tpa_wgs_nuc
+special CAXDRW000000000-CAXDRX999999999 embl_tpa_wgs_nuc
+special CAXDRZ000000000-CAXDSE999999999 embl_tpa_wgs_nuc
+special CAXDSG000000000-CAXDSK999999999 embl_tpa_wgs_nuc
+special CAXDSM000000000-CAXDTH999999999 embl_tpa_wgs_nuc
+special CAXDTJ000000000-CAXDTM999999999 embl_tpa_wgs_nuc
+special CAXDTO000000000-CAXDTO999999999 embl_tpa_wgs_nuc
+special CAXDTW000000000-CAXDTW999999999 embl_tpa_wgs_nuc
+special CAXEFG000000000-CAXEFJ999999999 embl_tpa_wgs_nuc
+special CAXEGS000000000-CAXEKY999999999 embl_tpa_wgs_nuc
+special CAXELA000000000-CAXEMQ999999999 embl_tpa_wgs_nuc
+special CAXEMS000000000-CAXENB999999999 embl_tpa_wgs_nuc
+special CAXEND000000000-CAXENO999999999 embl_tpa_wgs_nuc
+special CAXENQ000000000-CAXEOK999999999 embl_tpa_wgs_nuc
+special CAXEOM000000000-CAXEOS999999999 embl_tpa_wgs_nuc
+special CAXEOU000000000-CAXEQM999999999 embl_tpa_wgs_nuc
+special CAXEQO000000000-CAXEQW999999999 embl_tpa_wgs_nuc
+special CAXEQY000000000-CAXERD999999999 embl_tpa_wgs_nuc
+special CAXERF000000000-CAXERI999999999 embl_tpa_wgs_nuc
+special CAXERK000000000-CAXERM999999999 embl_tpa_wgs_nuc
+special CAXERO000000000-CAXERS999999999 embl_tpa_wgs_nuc
+special CAXERU000000000-CAXERW999999999 embl_tpa_wgs_nuc
+special CAXERY000000000-CAXESF999999999 embl_tpa_wgs_nuc
+special CAXESH000000000-CAXESR999999999 embl_tpa_wgs_nuc
+special CAXEST000000000-CAXETH999999999 embl_tpa_wgs_nuc
+special CAXETJ000000000-CAXETW999999999 embl_tpa_wgs_nuc
+special CAXETY000000000-CAXEUB999999999 embl_tpa_wgs_nuc
+special CAXEUD000000000-CAXEUI999999999 embl_tpa_wgs_nuc
+special CAXEUK000000000-CAXEUM999999999 embl_tpa_wgs_nuc
+special CAXEUP000000000-CAXEVZ999999999 embl_tpa_wgs_nuc
+special CAXEWB000000000-CAXEWG999999999 embl_tpa_wgs_nuc
+special CAXEWI000000000-CAXEWO999999999 embl_tpa_wgs_nuc
+special CAXEWQ000000000-CAXEWR999999999 embl_tpa_wgs_nuc
+special CAXEWT000000000-CAXEYF999999999 embl_tpa_wgs_nuc
+special CAXEYH000000000-CAXEYH999999999 embl_tpa_wgs_nuc
+special CAXEYJ000000000-CAXEYL999999999 embl_tpa_wgs_nuc
+special CAXEYN000000000-CAXEYQ999999999 embl_tpa_wgs_nuc
+special CAXEYS000000000-CAXEYS999999999 embl_tpa_wgs_nuc
+special CAXEYU000000000-CAXEYX999999999 embl_tpa_wgs_nuc
+special CAXEYZ000000000-CAXEYZ999999999 embl_tpa_wgs_nuc
+special CAXEZB000000000-CAXEZC999999999 embl_tpa_wgs_nuc
+special CAXEZE000000000-CAXEZM999999999 embl_tpa_wgs_nuc
+special CAXEZO000000000-CAXEZW999999999 embl_tpa_wgs_nuc
+special CAXEZY000000000-CAXEZY999999999 embl_tpa_wgs_nuc
+special CAXFAA000000000-CAXFAB999999999 embl_tpa_wgs_nuc
+special CAXFAD000000000-CAXFAF999999999 embl_tpa_wgs_nuc
+special CAXFAH000000000-CAXFAM999999999 embl_tpa_wgs_nuc
+special CAXFAO000000000-CAXFAV999999999 embl_tpa_wgs_nuc
+special CAXFAX000000000-CAXFAX999999999 embl_tpa_wgs_nuc
+special CAXFBA000000000-CAXFBA999999999 embl_tpa_wgs_nuc
+special CAXFBD000000000-CAXFBD999999999 embl_tpa_wgs_nuc
+special CAXFBF000000000-CAXFBG999999999 embl_tpa_wgs_nuc
+special CAXFBJ000000000-CAXFBS999999999 embl_tpa_wgs_nuc
+special CAXFBU000000000-CAXFBW999999999 embl_tpa_wgs_nuc
+special CAXFBZ000000000-CAXFCX999999999 embl_tpa_wgs_nuc
+special CAXFCZ000000000-CAXFDS999999999 embl_tpa_wgs_nuc
+special CAXFDU000000000-CAXFDX999999999 embl_tpa_wgs_nuc
+special CAXFDZ000000000-CAXFEA999999999 embl_tpa_wgs_nuc
+special CAXFEO000000000-CAXFEO999999999 embl_tpa_wgs_nuc
+special CAXFER000000000-CAXFER999999999 embl_tpa_wgs_nuc
+special CAXFEW000000000-CAXFEW999999999 embl_tpa_wgs_nuc
+special CAXFEY000000000-CAXFEY999999999 embl_tpa_wgs_nuc
+special CAXFFB000000000-CAXFFB999999999 embl_tpa_wgs_nuc
+special CAXFFD000000000-CAXFFF999999999 embl_tpa_wgs_nuc
+special CAXFFL000000000-CAXFFL999999999 embl_tpa_wgs_nuc
+special CAXFFS000000000-CAXFFS999999999 embl_tpa_wgs_nuc
+special CAXFFU000000000-CAXFFZ999999999 embl_tpa_wgs_nuc
+special CAXFGC000000000-CAXFGE999999999 embl_tpa_wgs_nuc
+special CAXFGG000000000-CAXFGG999999999 embl_tpa_wgs_nuc
+special CAXFGI000000000-CAXFGK999999999 embl_tpa_wgs_nuc
+special CAXFGM000000000-CAXFGM999999999 embl_tpa_wgs_nuc
+special CAXFGO000000000-CAXFGT999999999 embl_tpa_wgs_nuc
+special CAXFGX000000000-CAXFGY999999999 embl_tpa_wgs_nuc
+special CAXFHB000000000-CAXFHC999999999 embl_tpa_wgs_nuc
+special CAXFHF000000000-CAXFHF999999999 embl_tpa_wgs_nuc
+special CAXFIC000000000-CAXFIC999999999 embl_tpa_wgs_nuc
+special CAXFIF000000000-CAXFIH999999999 embl_tpa_wgs_nuc
+special CAXFIJ000000000-CAXFIK999999999 embl_tpa_wgs_nuc
+special CAXFIQ000000000-CAXFIU999999999 embl_tpa_wgs_nuc
+special CAXFIY000000000-CAXFJG999999999 embl_tpa_wgs_nuc
+special CAXFJI000000000-CAXFJI999999999 embl_tpa_wgs_nuc
+special CAXFJL000000000-CAXFJP999999999 embl_tpa_wgs_nuc
+special CAXFJR000000000-CAXFJR999999999 embl_tpa_wgs_nuc
+special CAXFJT000000000-CAXFJW999999999 embl_tpa_wgs_nuc
+special CAXFJY000000000-CAXFJZ999999999 embl_tpa_wgs_nuc
+special CAXFKB000000000-CAXFKB999999999 embl_tpa_wgs_nuc
+special CAXFKD000000000-CAXFKE999999999 embl_tpa_wgs_nuc
+special CAXFKJ000000000-CAXFKJ999999999 embl_tpa_wgs_nuc
+special CAXFKM000000000-CAXFKN999999999 embl_tpa_wgs_nuc
+special CAXFKT000000000-CAXFKT999999999 embl_tpa_wgs_nuc
+special CAXFKV000000000-CAXFKV999999999 embl_tpa_wgs_nuc
+special CAXFKX000000000-CAXFKZ999999999 embl_tpa_wgs_nuc
+special CAXFLB000000000-CAXFLC999999999 embl_tpa_wgs_nuc
+special CAXFLE000000000-CAXFLI999999999 embl_tpa_wgs_nuc
+special CAXFLK000000000-CAXFLK999999999 embl_tpa_wgs_nuc
+special CAXFLM000000000-CAXFLM999999999 embl_tpa_wgs_nuc
+special CAXFLO000000000-CAXFLQ999999999 embl_tpa_wgs_nuc
+special CAXFLS000000000-CAXFLT999999999 embl_tpa_wgs_nuc
+special CAXFLV000000000-CAXFLV999999999 embl_tpa_wgs_nuc
+special CAXFLY000000000-CAXFLY999999999 embl_tpa_wgs_nuc
+special CAXFMB000000000-CAXFMB999999999 embl_tpa_wgs_nuc
+special CAXFMD000000000-CAXFMD999999999 embl_tpa_wgs_nuc
+special CAXFMI000000000-CAXFMI999999999 embl_tpa_wgs_nuc
+special CAXFMN000000000-CAXFMN999999999 embl_tpa_wgs_nuc
+special CAXFMP000000000-CAXFMP999999999 embl_tpa_wgs_nuc
+special CAXFMS000000000-CAXFMW999999999 embl_tpa_wgs_nuc
+special CAXFMY000000000-CAXFNA999999999 embl_tpa_wgs_nuc
+special CAXFNC000000000-CAXFND999999999 embl_tpa_wgs_nuc
+special CAXFNF000000000-CAXFNM999999999 embl_tpa_wgs_nuc
+special CAXFNO000000000-CAXFNO999999999 embl_tpa_wgs_nuc
+special CAXFNQ000000000-CAXFNR999999999 embl_tpa_wgs_nuc
+special CAXFNT000000000-CAXFNT999999999 embl_tpa_wgs_nuc
+special CAXFNW000000000-CAXFNZ999999999 embl_tpa_wgs_nuc
+special CAXFOB000000000-CAXFOX999999999 embl_tpa_wgs_nuc
+special CAXFOZ000000000-CAXFPB999999999 embl_tpa_wgs_nuc
+special CAXFPD000000000-CAXFPD999999999 embl_tpa_wgs_nuc
+special CAXFPF000000000-CAXFPG999999999 embl_tpa_wgs_nuc
+special CAXFPI000000000-CAXFPM999999999 embl_tpa_wgs_nuc
+special CAXFPO000000000-CAXFPW999999999 embl_tpa_wgs_nuc
+special CAXFPY000000000-CAXFPY999999999 embl_tpa_wgs_nuc
+special CAXFQA000000000-CAXFQA999999999 embl_tpa_wgs_nuc
+special CAXFQC000000000-CAXFQE999999999 embl_tpa_wgs_nuc
+special CAXFQG000000000-CAXFQN999999999 embl_tpa_wgs_nuc
+special CAXFQP000000000-CAXFQP999999999 embl_tpa_wgs_nuc
+special CAXFQR000000000-CAXFQR999999999 embl_tpa_wgs_nuc
+special CAXFQT000000000-CAXFQT999999999 embl_tpa_wgs_nuc
+special CAXFQV000000000-CAXFQV999999999 embl_tpa_wgs_nuc
+special CAXFQY000000000-CAXFQY999999999 embl_tpa_wgs_nuc
+special CAXFRA000000000-CAXFRA999999999 embl_tpa_wgs_nuc
+special CAXFRE000000000-CAXFRG999999999 embl_tpa_wgs_nuc
+special CAXFRJ000000000-CAXFRK999999999 embl_tpa_wgs_nuc
+special CAXFRQ000000000-CAXFRQ999999999 embl_tpa_wgs_nuc
+special CAXFRS000000000-CAXFRS999999999 embl_tpa_wgs_nuc
+special CAXFRX000000000-CAXFRY999999999 embl_tpa_wgs_nuc
+special CAXFSC000000000-CAXFSD999999999 embl_tpa_wgs_nuc
+special CAXFSJ000000000-CAXFSJ999999999 embl_tpa_wgs_nuc
+special CAXFSR000000000-CAXFSW999999999 embl_tpa_wgs_nuc
+special CAXFSY000000000-CAXFTK999999999 embl_tpa_wgs_nuc
+special CAXFTM000000000-CAXFTW999999999 embl_tpa_wgs_nuc
+special CAXFZX000000000-CAXFZZ999999999 embl_tpa_wgs_nuc
+special CAXGAB000000000-CAXGCZ999999999 embl_tpa_wgs_nuc
+special CAXGHC000000000-CAXGYU999999999 embl_tpa_wgs_nuc
+special CAXGZH000000000-CAXHBE999999999 embl_tpa_wgs_nuc
+special CAXHBG000000000-CAXHHX999999999 embl_tpa_wgs_nuc
+special CAXHYR000000000-CAXIDP999999999 embl_tpa_wgs_nuc
+special CAXIEU000000000-CAXIEV999999999 embl_tpa_wgs_nuc
+special CAXMLP000000000-CAXMLW999999999 embl_tpa_wgs_nuc
+special CAXSZN000000000-CAXSZN999999999 embl_tpa_wgs_nuc
+special CAXSZR000000000-CAXSZS999999999 embl_tpa_wgs_nuc
+special CAXSZV000000000-CAXSZX999999999 embl_tpa_wgs_nuc
+special CAXTAE000000000-CAXTAE999999999 embl_tpa_wgs_nuc
+special CAXTAK000000000-CAXTAK999999999 embl_tpa_wgs_nuc
+special CAXTAO000000000-CAXTAP999999999 embl_tpa_wgs_nuc
+special CAXTAT000000000-CAXTAU999999999 embl_tpa_wgs_nuc
+special CAXTAX000000000-CAXTBC999999999 embl_tpa_wgs_nuc
+special CAXTBG000000000-CAXTBG999999999 embl_tpa_wgs_nuc
+special CAXTBI000000000-CAXTBJ999999999 embl_tpa_wgs_nuc
+special CAXTBL000000000-CAXTBN999999999 embl_tpa_wgs_nuc
+special CAXTBP000000000-CAXTBR999999999 embl_tpa_wgs_nuc
+special CAXTBT000000000-CAXTBU999999999 embl_tpa_wgs_nuc
+special CAXTBW000000000-CAXTCF999999999 embl_tpa_wgs_nuc
+special CAXTCH000000000-CAXTCV999999999 embl_tpa_wgs_nuc
+special CAXTCX000000000-CAXTCX999999999 embl_tpa_wgs_nuc
+special CAXTCZ000000000-CAXTDB999999999 embl_tpa_wgs_nuc
+special CAXTDD000000000-CAXTDD999999999 embl_tpa_wgs_nuc
+special CAXTDF000000000-CAXTDI999999999 embl_tpa_wgs_nuc
+special CAXTDK000000000-CAXTDM999999999 embl_tpa_wgs_nuc
+special CAXTDO000000000-CAXTDP999999999 embl_tpa_wgs_nuc
+special CAXTDW000000000-CAXTDX999999999 embl_tpa_wgs_nuc
+special CAXTDZ000000000-CAXTEA999999999 embl_tpa_wgs_nuc
+special CAXTED000000000-CAXTEF999999999 embl_tpa_wgs_nuc
+special CAXTEJ000000000-CAXTEJ999999999 embl_tpa_wgs_nuc
+special CAXTEL000000000-CAXTEP999999999 embl_tpa_wgs_nuc
+special CAXTER000000000-CAXTES999999999 embl_tpa_wgs_nuc
+special CAXTEU000000000-CAXTEU999999999 embl_tpa_wgs_nuc
+special CAXTEW000000000-CAXTEX999999999 embl_tpa_wgs_nuc
+special CAXTFC000000000-CAXTFC999999999 embl_tpa_wgs_nuc
+special CAXTFF000000000-CAXTFG999999999 embl_tpa_wgs_nuc
+special CAXTFI000000000-CAXTFJ999999999 embl_tpa_wgs_nuc
+special CAXTFM000000000-CAXTFP999999999 embl_tpa_wgs_nuc
+special CAXTFR000000000-CAXTFV999999999 embl_tpa_wgs_nuc
+special CAXTFX000000000-CAXTFY999999999 embl_tpa_wgs_nuc
+special CAXTGE000000000-CAXTGE999999999 embl_tpa_wgs_nuc
+special CAXTGK000000000-CAXTGK999999999 embl_tpa_wgs_nuc
+special CAXTGN000000000-CAXTGN999999999 embl_tpa_wgs_nuc
+special CAXTGZ000000000-CAXTGZ999999999 embl_tpa_wgs_nuc
+special CAXTHG000000000-CAXTHH999999999 embl_tpa_wgs_nuc
+special CAXTHJ000000000-CAXTHK999999999 embl_tpa_wgs_nuc
+special CAXTHM000000000-CAXTHM999999999 embl_tpa_wgs_nuc
+special CAXTHO000000000-CAXTHY999999999 embl_tpa_wgs_nuc
+special CAXTIC000000000-CAXTID999999999 embl_tpa_wgs_nuc
+special CAXTIF000000000-CAXTIG999999999 embl_tpa_wgs_nuc
+special CAXTII000000000-CAXTII999999999 embl_tpa_wgs_nuc
+special CAXTIR000000000-CAXTIR999999999 embl_tpa_wgs_nuc
+special CAXTIU000000000-CAXTIW999999999 embl_tpa_wgs_nuc
+special CAXTIY000000000-CAXTIZ999999999 embl_tpa_wgs_nuc
+special CAXTJC000000000-CAXTJC999999999 embl_tpa_wgs_nuc
+special CAXTJE000000000-CAXTJE999999999 embl_tpa_wgs_nuc
+special CAXTJH000000000-CAXTJH999999999 embl_tpa_wgs_nuc
+special CAXTJJ000000000-CAXTJJ999999999 embl_tpa_wgs_nuc
+special CAXTJM000000000-CAXTKN999999999 embl_tpa_wgs_nuc
+special CAXTKP000000000-CAXTKQ999999999 embl_tpa_wgs_nuc
+special CAXTKV000000000-CAXTKV999999999 embl_tpa_wgs_nuc
+special CAXTKZ000000000-CAXTKZ999999999 embl_tpa_wgs_nuc
+special CAXTLB000000000-CAXTLE999999999 embl_tpa_wgs_nuc
+special CAXTLG000000000-CAXTLG999999999 embl_tpa_wgs_nuc
+special CAXTLK000000000-CAXTLK999999999 embl_tpa_wgs_nuc
+special CAXTLM000000000-CAXTLM999999999 embl_tpa_wgs_nuc
+special CAXTLO000000000-CAXTLO999999999 embl_tpa_wgs_nuc
+special CAXTLQ000000000-CAXTLS999999999 embl_tpa_wgs_nuc
+special CAXTLV000000000-CAXTLX999999999 embl_tpa_wgs_nuc
+special CAXTMA000000000-CAXTMA999999999 embl_tpa_wgs_nuc
+special CAXTMD000000000-CAXTMG999999999 embl_tpa_wgs_nuc
+special CAXTMI000000000-CAXTMI999999999 embl_tpa_wgs_nuc
+special CAXTMK000000000-CAXTMN999999999 embl_tpa_wgs_nuc
+special CAXTMP000000000-CAXTMT999999999 embl_tpa_wgs_nuc
+special CAXTMV000000000-CAXTNH999999999 embl_tpa_wgs_nuc
+special CAXTNJ000000000-CAXTNX999999999 embl_tpa_wgs_nuc
+special CAXTNZ000000000-CAXTOE999999999 embl_tpa_wgs_nuc
+special CAXTOG000000000-CAXTOI999999999 embl_tpa_wgs_nuc
+special CAXTOK000000000-CAXTOK999999999 embl_tpa_wgs_nuc
+special CAXTOO000000000-CAXTOQ999999999 embl_tpa_wgs_nuc
+special CAXTOS000000000-CAXTOV999999999 embl_tpa_wgs_nuc
+special CAXTOX000000000-CAXTOX999999999 embl_tpa_wgs_nuc
+special CAXTOZ000000000-CAXTOZ999999999 embl_tpa_wgs_nuc
+special CAXTPE000000000-CAXTPV999999999 embl_tpa_wgs_nuc
+special CAXTPX000000000-CAXTPY999999999 embl_tpa_wgs_nuc
+special CAXTQB000000000-CAXTQF999999999 embl_tpa_wgs_nuc
+special CAXTQJ000000000-CAXTQJ999999999 embl_tpa_wgs_nuc
+special CAXTQM000000000-CAXTQN999999999 embl_tpa_wgs_nuc
+special CAXTQP000000000-CAXTQP999999999 embl_tpa_wgs_nuc
+special CAXTQU000000000-CAXTQU999999999 embl_tpa_wgs_nuc
+special CAXTRA000000000-CAXTRA999999999 embl_tpa_wgs_nuc
+special CAXTRE000000000-CAXTSO999999999 embl_tpa_wgs_nuc
+special CAXTSQ000000000-CAXTSS999999999 embl_tpa_wgs_nuc
+special CAXTSU000000000-CAXTSX999999999 embl_tpa_wgs_nuc
+special CAXTSZ000000000-CAXTTH999999999 embl_tpa_wgs_nuc
+special CAXTTJ000000000-CAXTUE999999999 embl_tpa_wgs_nuc
+special CAXTUG000000000-CAXTUK999999999 embl_tpa_wgs_nuc
+special CAXTUM000000000-CAXTUT999999999 embl_tpa_wgs_nuc
+special CAXTUV000000000-CAXTUW999999999 embl_tpa_wgs_nuc
+special CAXTUY000000000-CAXTVE999999999 embl_tpa_wgs_nuc
+special CAXTVG000000000-CAXTVM999999999 embl_tpa_wgs_nuc
+special CAXTVO000000000-CAXTVO999999999 embl_tpa_wgs_nuc
+special CAXTVQ000000000-CAXTVQ999999999 embl_tpa_wgs_nuc
+special CAXTVS000000000-CAXTVT999999999 embl_tpa_wgs_nuc
+special CAXTVW000000000-CAXTWA999999999 embl_tpa_wgs_nuc
+special CAXTWC000000000-CAXTWC999999999 embl_tpa_wgs_nuc
+special CAXTWF000000000-CAXTWK999999999 embl_tpa_wgs_nuc
+special CAXTWM000000000-CAXTWN999999999 embl_tpa_wgs_nuc
+special CAXTWP000000000-CAXTWV999999999 embl_tpa_wgs_nuc
+special CAXTXB000000000-CAXTXB999999999 embl_tpa_wgs_nuc
+special CAXTXD000000000-CAXTXE999999999 embl_tpa_wgs_nuc
+special CAXTXM000000000-CAXTXM999999999 embl_tpa_wgs_nuc
+special CAXTXW000000000-CAXTXW999999999 embl_tpa_wgs_nuc
+special CAXTXZ000000000-CAXTXZ999999999 embl_tpa_wgs_nuc
+special CAXTYC000000000-CAXTYC999999999 embl_tpa_wgs_nuc
+special CAXTYF000000000-CAXTYF999999999 embl_tpa_wgs_nuc
+special CAXTYH000000000-CAXTYH999999999 embl_tpa_wgs_nuc
+special CAXTYP000000000-CAXTYQ999999999 embl_tpa_wgs_nuc
+special CAXTZG000000000-CAXTZG999999999 embl_tpa_wgs_nuc
+special CAXTZL000000000-CAXTZL999999999 embl_tpa_wgs_nuc
+special CAXUAH000000000-CAXUAH999999999 embl_tpa_wgs_nuc
+special CAXUAR000000000-CAXUAR999999999 embl_tpa_wgs_nuc
+special CAXUAZ000000000-CAXUBE999999999 embl_tpa_wgs_nuc
+special CAXUBG000000000-CAXUBG999999999 embl_tpa_wgs_nuc
+special CAXUBJ000000000-CAXUBJ999999999 embl_tpa_wgs_nuc
+special CAXUBM000000000-CAXUBO999999999 embl_tpa_wgs_nuc
+special CAXUBS000000000-CAXUBS999999999 embl_tpa_wgs_nuc
+special CAXUBX000000000-CAXUBX999999999 embl_tpa_wgs_nuc
+special CAXUCD000000000-CAXUCD999999999 embl_tpa_wgs_nuc
+special CAXUCF000000000-CAXUCF999999999 embl_tpa_wgs_nuc
+special CAXUCH000000000-CAXUCH999999999 embl_tpa_wgs_nuc
+special CAXUCK000000000-CAXUCM999999999 embl_tpa_wgs_nuc
+special CAXUCP000000000-CAXUCT999999999 embl_tpa_wgs_nuc
+special CAXUCV000000000-CAXUCV999999999 embl_tpa_wgs_nuc
+special CAXUCX000000000-CAXUCZ999999999 embl_tpa_wgs_nuc
+special CAXUDB000000000-CAXUDC999999999 embl_tpa_wgs_nuc
+special CAXUDF000000000-CAXUDF999999999 embl_tpa_wgs_nuc
+special CAXUDL000000000-CAXUDL999999999 embl_tpa_wgs_nuc
+special CAXUDN000000000-CAXUDN999999999 embl_tpa_wgs_nuc
+special CAXUDP000000000-CAXUDP999999999 embl_tpa_wgs_nuc
+special CAXUDZ000000000-CAXUDZ999999999 embl_tpa_wgs_nuc
+special CAXUEB000000000-CAXUEC999999999 embl_tpa_wgs_nuc
+special CAXUEE000000000-CAXUEG999999999 embl_tpa_wgs_nuc
+special CAXUEI000000000-CAXUEQ999999999 embl_tpa_wgs_nuc
+special CAXUES000000000-CAXUFA999999999 embl_tpa_wgs_nuc
+special CAXUFD000000000-CAXUFD999999999 embl_tpa_wgs_nuc
+special CAXUFG000000000-CAXUFG999999999 embl_tpa_wgs_nuc
+special CAXUFI000000000-CAXUFI999999999 embl_tpa_wgs_nuc
+special CAXUFK000000000-CAXUFM999999999 embl_tpa_wgs_nuc
+special CAXUFO000000000-CAXUFP999999999 embl_tpa_wgs_nuc
+special CAXUFS000000000-CAXUFS999999999 embl_tpa_wgs_nuc
+special CAXUFU000000000-CAXUFV999999999 embl_tpa_wgs_nuc
+special CAXUFZ000000000-CAXUFZ999999999 embl_tpa_wgs_nuc
+special CAXUGD000000000-CAXUGD999999999 embl_tpa_wgs_nuc
+special CAXUGH000000000-CAXUGH999999999 embl_tpa_wgs_nuc
+special CAXUGJ000000000-CAXUGJ999999999 embl_tpa_wgs_nuc
+special CAXUGO000000000-CAXUGP999999999 embl_tpa_wgs_nuc
+special CAXUGS000000000-CAXUGS999999999 embl_tpa_wgs_nuc
+special CAXUGV000000000-CAXUGV999999999 embl_tpa_wgs_nuc
+special CAXUGX000000000-CAXUHC999999999 embl_tpa_wgs_nuc
+special CAXUHE000000000-CAXUHG999999999 embl_tpa_wgs_nuc
+special CAXUHI000000000-CAXUHI999999999 embl_tpa_wgs_nuc
+special CAXUHK000000000-CAXUHM999999999 embl_tpa_wgs_nuc
+special CAXUHS000000000-CAXUHS999999999 embl_tpa_wgs_nuc
+special CAXUHU000000000-CAXUHU999999999 embl_tpa_wgs_nuc
+special CAXUIA000000000-CAXUIB999999999 embl_tpa_wgs_nuc
+special CAXUID000000000-CAXUIG999999999 embl_tpa_wgs_nuc
+special CAXUII000000000-CAXUII999999999 embl_tpa_wgs_nuc
+special CAXUIL000000000-CAXUIN999999999 embl_tpa_wgs_nuc
+special CAXUIQ000000000-CAXUIS999999999 embl_tpa_wgs_nuc
+special CAXUIU000000000-CAXUIV999999999 embl_tpa_wgs_nuc
+special CAXUIY000000000-CAXUIY999999999 embl_tpa_wgs_nuc
+special CAXUJD000000000-CAXUJH999999999 embl_tpa_wgs_nuc
+special CAXUJK000000000-CAXUJK999999999 embl_tpa_wgs_nuc
+special CAXUJR000000000-CAXUJR999999999 embl_tpa_wgs_nuc
+special CAXUKA000000000-CAXUKB999999999 embl_tpa_wgs_nuc
+special CAXUKK000000000-CAXUKK999999999 embl_tpa_wgs_nuc
+special CAXUKO000000000-CAXUKO999999999 embl_tpa_wgs_nuc
+special CAXUKS000000000-CAXUKS999999999 embl_tpa_wgs_nuc
+special CAXULL000000000-CAXULL999999999 embl_tpa_wgs_nuc
+special CAXULP000000000-CAXULQ999999999 embl_tpa_wgs_nuc
+special CAXULW000000000-CAXULY999999999 embl_tpa_wgs_nuc
+special CAXUMK000000000-CAXUMK999999999 embl_tpa_wgs_nuc
+special CAXUMS000000000-CAXUMS999999999 embl_tpa_wgs_nuc
+special CAXUMU000000000-CAXUMV999999999 embl_tpa_wgs_nuc
+special CAXUMX000000000-CAXUMX999999999 embl_tpa_wgs_nuc
+special CAXUMZ000000000-CAXUNA999999999 embl_tpa_wgs_nuc
+special CAXUND000000000-CAXUND999999999 embl_tpa_wgs_nuc
+special CAXUNG000000000-CAXUNL999999999 embl_tpa_wgs_nuc
+special CAXUNP000000000-CAXUOM999999999 embl_tpa_wgs_nuc
+special CAXUTT000000000-CAXUTT999999999 embl_tpa_wgs_nuc
+special CAXUTZ000000000-CAXUTZ999999999 embl_tpa_wgs_nuc
+special CAXUUD000000000-CAXUUE999999999 embl_tpa_wgs_nuc
+special CAXUUG000000000-CAXUUH999999999 embl_tpa_wgs_nuc
+special CAXUUJ000000000-CAXUUJ999999999 embl_tpa_wgs_nuc
+special CAXUUL000000000-CAXUUV999999999 embl_tpa_wgs_nuc
+special CAXUUX000000000-CAXUVC999999999 embl_tpa_wgs_nuc
+special CAXUVE000000000-CAXUVG999999999 embl_tpa_wgs_nuc
+special CAXUVI000000000-CAXUVJ999999999 embl_tpa_wgs_nuc
+special CAXUVL000000000-CAXUVO999999999 embl_tpa_wgs_nuc
+special CAXUVQ000000000-CAXUWI999999999 embl_tpa_wgs_nuc
+special CAXUWK000000000-CAXUWV999999999 embl_tpa_wgs_nuc
+special CAXUWX000000000-CAXUWY999999999 embl_tpa_wgs_nuc
+special CAXUXA000000000-CAXUXB999999999 embl_tpa_wgs_nuc
+special CAXUXD000000000-CAXVDB999999999 embl_tpa_wgs_nuc
+special CAXVDE000000000-CAXVDE999999999 embl_tpa_wgs_nuc
+special CAXVDG000000000-CAXVDL999999999 embl_tpa_wgs_nuc
+special CAXVDN000000000-CAXVDN999999999 embl_tpa_wgs_nuc
+special CAXVDP000000000-CAXVDP999999999 embl_tpa_wgs_nuc
+special CAXVDR000000000-CAXVEF999999999 embl_tpa_wgs_nuc
+special CAXVEH000000000-CAXVEO999999999 embl_tpa_wgs_nuc
+special CAXVEQ000000000-CAXVFD999999999 embl_tpa_wgs_nuc
+special CAXVFF000000000-CAXVGI999999999 embl_tpa_wgs_nuc
+special CAYFEQ000000000-CAYFSG999999999 embl_tpa_wgs_nuc
+special CAYFSI000000000-CAYFTW999999999 embl_tpa_wgs_nuc
+special CAYFTY000000000-CAYFTY999999999 embl_tpa_wgs_nuc
+special CAYFUB000000000-CAYFUC999999999 embl_tpa_wgs_nuc
+special CAYFUF000000000-CAYFWM999999999 embl_tpa_wgs_nuc
+special CAYFWR000000000-CAYHFN999999999 embl_tpa_wgs_nuc
+special CAYHFP000000000-CAYJXL999999999 embl_tpa_wgs_nuc
+special CAYJYK000000000-CAYKOY999999999 embl_tpa_wgs_nuc
+special CAYKPD000000000-CAYKPE999999999 embl_tpa_wgs_nuc
+special CAYKPH000000000-CAYKPL999999999 embl_tpa_wgs_nuc
+special CAYKPR000000000-CAYKPR999999999 embl_tpa_wgs_nuc
+special CAYKPT000000000-CAYKPT999999999 embl_tpa_wgs_nuc
+special CAYKPW000000000-CAYKQL999999999 embl_tpa_wgs_nuc
+special CAYKQN000000000-CAYKQN999999999 embl_tpa_wgs_nuc
+special CAYKQP000000000-CAYKQS999999999 embl_tpa_wgs_nuc
+special CAYKQU000000000-CAYKRE999999999 embl_tpa_wgs_nuc
+special CAYKRP000000000-CAYKSZ999999999 embl_tpa_wgs_nuc
+special CAYKTB000000000-CAYKTS999999999 embl_tpa_wgs_nuc
+special CAYKTU000000000-CAYLRH999999999 embl_tpa_wgs_nuc
+special CAYLRJ000000000-CAYMLH999999999 embl_tpa_wgs_nuc
+special CAYMLJ000000000-CAYNJO999999999 embl_tpa_wgs_nuc
+special CAYNJQ000000000-CAYNJQ999999999 embl_tpa_wgs_nuc
+special CAYNJS000000000-CAYNJT999999999 embl_tpa_wgs_nuc
+special CAYNJW000000000-CAYNKF999999999 embl_tpa_wgs_nuc
+special CAYNKH000000000-CAYNKN999999999 embl_tpa_wgs_nuc
+special CAYNKP000000000-CAYNLN999999999 embl_tpa_wgs_nuc
+special CAYNLP000000000-CAYPKY999999999 embl_tpa_wgs_nuc
+special CAYPLA000000000-CAYQGH999999999 embl_tpa_wgs_nuc
+special CAYQGJ000000000-CAYQGJ999999999 embl_tpa_wgs_nuc
+special CAYQIR000000000-CAYRGN999999999 embl_tpa_wgs_nuc
+special CAYRGP000000000-CAYSQQ999999999 embl_tpa_wgs_nuc
+special CAYSQS000000000-CAYSYD999999999 embl_tpa_wgs_nuc
+special CAYSYF000000000-CAYSYF999999999 embl_tpa_wgs_nuc
+special CAYSYH000000000-CAYSYR999999999 embl_tpa_wgs_nuc
+special CAYSYT000000000-CAYTAB999999999 embl_tpa_wgs_nuc
+special CAYTAD000000000-CAYTAW999999999 embl_tpa_wgs_nuc
+special CAYTAY000000000-CAYTAZ999999999 embl_tpa_wgs_nuc
+special CAYTBB000000000-CAYTBD999999999 embl_tpa_wgs_nuc
+special CAYTBF000000000-CAYTBO999999999 embl_tpa_wgs_nuc
+special CAYTBQ000000000-CAYTBQ999999999 embl_tpa_wgs_nuc
+special CAYTBT000000000-CAYTCK999999999 embl_tpa_wgs_nuc
+special CAYTCM000000000-CAYTCM999999999 embl_tpa_wgs_nuc
+special CAYTCO000000000-CAYTCO999999999 embl_tpa_wgs_nuc
+special CAYTCQ000000000-CAYTCT999999999 embl_tpa_wgs_nuc
+special CAYTCV000000000-CAYTCX999999999 embl_tpa_wgs_nuc
+special CAYTCZ000000000-CAYTCZ999999999 embl_tpa_wgs_nuc
+special CAYTDB000000000-CAYTDU999999999 embl_tpa_wgs_nuc
+special CAYTDW000000000-CAYTEA999999999 embl_tpa_wgs_nuc
+special CAYTEC000000000-CAYTEO999999999 embl_tpa_wgs_nuc
+special CAYTEQ000000000-CAYTEX999999999 embl_tpa_wgs_nuc
+special CAYTEZ000000000-CAYTFC999999999 embl_tpa_wgs_nuc
+special CAYTFE000000000-CAYUDU999999999 embl_tpa_wgs_nuc
+special CAYUDW000000000-CAYVEF999999999 embl_tpa_wgs_nuc
+special CAYVEH000000000-CAYXWF999999999 embl_tpa_wgs_nuc
+special CAYXWH000000000-CAYXWQ999999999 embl_tpa_wgs_nuc
+special CAYXWS000000000-CAYXWX999999999 embl_tpa_wgs_nuc
+special CAYXWZ000000000-CAYXXB999999999 embl_tpa_wgs_nuc
+special CAYXXD000000000-CAYXYF999999999 embl_tpa_wgs_nuc
+special CAYXYJ000000000-CAYYKS999999999 embl_tpa_wgs_nuc
+special CAYYKU000000000-CAYYKX999999999 embl_tpa_wgs_nuc
+special CAYYKZ000000000-CAZBEU999999999 embl_tpa_wgs_nuc
+special CAZBEW000000000-CAZCAM999999999 embl_tpa_wgs_nuc
+special CAZCAO000000000-CAZCRY999999999 embl_tpa_wgs_nuc
+special CAZCSC000000000-CAZCXS999999999 embl_tpa_wgs_nuc
+special CAZCXU000000000-CAZDBK999999999 embl_tpa_wgs_nuc
+special CAZDBO000000000-CAZDBQ999999999 embl_tpa_wgs_nuc
+special CAZDBS000000000-CAZDBV999999999 embl_tpa_wgs_nuc
+special CAZDBX000000000-CAZDBY999999999 embl_tpa_wgs_nuc
+special CAZDCA000000000-CAZDCP999999999 embl_tpa_wgs_nuc
+special CAZDCR000000000-CAZDDE999999999 embl_tpa_wgs_nuc
+special CAZDDG000000000-CAZDDN999999999 embl_tpa_wgs_nuc
+special CAZDDU000000000-CAZDIA999999999 embl_tpa_wgs_nuc
+special CAZDIC000000000-CAZDIL999999999 embl_tpa_wgs_nuc
+special CAZDIN000000000-CAZDIS999999999 embl_tpa_wgs_nuc
+special CAZDIU000000000-CAZDJE999999999 embl_tpa_wgs_nuc
+special CAZDJG000000000-CAZDJI999999999 embl_tpa_wgs_nuc
+special CAZDJK000000000-CAZDJN999999999 embl_tpa_wgs_nuc
+special CAZDJP000000000-CAZDUV999999999 embl_tpa_wgs_nuc
+special CAZDUX000000000-CAZEFX999999999 embl_tpa_wgs_nuc
+special CAZEGA000000000-CAZELD999999999 embl_tpa_wgs_nuc
+special CAZELH000000000-CAZEQQ999999999 embl_tpa_wgs_nuc
+special CAZEQV000000000-CAZHFD999999999 embl_tpa_wgs_nuc
+special CAZHFF000000000-CAZRSR999999999 embl_tpa_wgs_nuc
+special CAZRST000000000-CAZRSU999999999 embl_tpa_wgs_nuc
+special CAZRSW000000000-CAZRUE999999999 embl_tpa_wgs_nuc
+special CAZRUG000000000-CAZSCL999999999 embl_tpa_wgs_nuc
+special CAZSCO000000000-CAZSCO999999999 embl_tpa_wgs_nuc
+special CAZSCS000000000-CAZSEA999999999 embl_tpa_wgs_nuc
+special CAZSEC000000000-CAZSEE999999999 embl_tpa_wgs_nuc
+special CAZSEG000000000-CAZSFD999999999 embl_tpa_wgs_nuc
+special CAZSFH000000000-CAZSFK999999999 embl_tpa_wgs_nuc
+special CAZSFM000000000-CAZSFM999999999 embl_tpa_wgs_nuc
+special CAZSFP000000000-CAZUGM999999999 embl_tpa_wgs_nuc
+special CAZUGO000000000-CAZWEB999999999 embl_tpa_wgs_nuc
+special CAZWED000000000-CAZWEJ999999999 embl_tpa_wgs_nuc
+special CAZWEL000000000-CAZWZD999999999 embl_tpa_wgs_nuc
+special CAZWZF000000000-CAZXBT999999999 embl_tpa_wgs_nuc
+special CAZXBV000000000-CAZXBW999999999 embl_tpa_wgs_nuc
+special CAZXBY000000000-CAZXDF999999999 embl_tpa_wgs_nuc
+special CAZXDH000000000-CAZXDI999999999 embl_tpa_wgs_nuc
+special CAZXDK000000000-CAZXDQ999999999 embl_tpa_wgs_nuc
+special CAZXDS000000000-CAZXDY999999999 embl_tpa_wgs_nuc
+special CAZXEC000000000-CAZXJK999999999 embl_tpa_wgs_nuc
+special CAZXJM000000000-CAZYKD999999999 embl_tpa_wgs_nuc
+special CAZYKH000000000-CAZZNZ999999999 embl_tpa_wgs_nuc
+special CAZZPA000000000-CAZZQA999999999 embl_tpa_wgs_nuc
+special CBCSLO000000000-CBCTZZ999999999 embl_tpa_wgs_nuc
+special2 CBDDBE+9 embl_tpa_wgs_nuc
+:
+special CBDEIC000000000-CBDEKD999999999 embl_tpa_wgs_nuc
+special CBDELQ000000000-CBDESL999999999 embl_tpa_wgs_nuc
+special CBDEWI000000000-CBDEYI999999999 embl_tpa_wgs_nuc
+special CBDEYL000000000-CBDFEN999999999 embl_tpa_wgs_nuc
+special CBDFEP000000000-CBDFEW999999999 embl_tpa_wgs_nuc
+special2 HBHG+8 embl_tpa_tsa_nuc
+:
+special2 HBHS+8 embl_tpa_tsa_nuc
+:
+special2 HBRC+8 embl_tpa_tsa_nuc
+:
+special2 HBRG+8 embl_tpa_tsa_nuc
+:
+special HBRM00000000-HBRN99999999 embl_tpa_tsa_nuc
+special HBRR00000000-HBRS99999999 embl_tpa_tsa_nuc
+special HBRU00000000-HBRV99999999 embl_tpa_tsa_nuc
+special2 HBRZ+8 embl_tpa_tsa_nuc
+:
+special HBSB00000000-HBSP99999999 embl_tpa_tsa_nuc
+special2 HBSZ+8 embl_tpa_tsa_nuc
+:
+special2 HBTB+8 embl_tpa_tsa_nuc
+:
+special HBXM00000000-HBXN99999999 embl_tpa_tsa_nuc
+special HBXP00000000-HBXU99999999 embl_tpa_tsa_nuc
+special HBXW00000000-HBYC99999999 embl_tpa_tsa_nuc
+special HBYF00000000-HBYO99999999 embl_tpa_tsa_nuc
+special2 HBYQ+8 embl_tpa_tsa_nuc
+:
+special2 HBYS+8 embl_tpa_tsa_nuc
+:
+special2 HBYU+8 embl_tpa_tsa_nuc
+:
+special HBYX00000000-HBYY99999999 embl_tpa_tsa_nuc
+special2 HBZI+8 embl_tpa_tsa_nuc
+:
+special2 HBZK+8 embl_tpa_tsa_nuc
+:
+special HBZM00000000-HBZN99999999 embl_tpa_tsa_nuc
+special2 HBZQ+8 embl_tpa_tsa_nuc
+:
+special2 HBZS+8 embl_tpa_tsa_nuc
+:
+special2 CAD+5 embl_tpa_prot
+:
+special2 CAE+5 embl_tpa_prot
+:
+special2 CAF+5 embl_tpa_prot
+:
+special2 CAG+5 embl_tpa_prot
+:
+special2 CAH+5 embl_tpa_prot
+:
+special2 CAI+5 embl_tpa_prot
+:
+special2 CAJ+5 embl_tpa_prot
+:
+special2 CAK+5 embl_tpa_prot
+:
+special2 CAL+5 embl_tpa_prot
+:
+special2 CAM+5 embl_tpa_prot
+:
+special CAN88845-CAN88848 embl_tpa_prot
+special CAO03085-CAO03089 embl_tpa_prot
+special2 CAP+5 embl_tpa_prot
+:
+special2 CAQ+5 embl_tpa_prot
+:
+special2 CAR+5 embl_tpa_prot
+:
+special CAU95867-CAU95879 embl_tpa_prot
+special CAV13457 embl_tpa_prot
+special2 CAX+5 embl_tpa_prot
+:
+special2 CBF+5 embl_tpa_prot
+:
+special CBK25604 embl_tpa_prot
+special2 CBL+5 embl_tpa_prot
+:
+special CBM43246 embl_tpa_prot
+special2 CBN+5 embl_tpa_prot
+:
+special CBV36767-CBV36776 embl_tpa_prot
+special2 CBX+5 embl_tpa_prot
+:
+special2 CBY+5 embl_tpa_prot
+:
+special2 CBZ+5 embl_tpa_prot
+:
+special CCB84813 embl_tpa_prot
+special CCC21095-CCC21104 embl_tpa_prot
+special CCD22089-CCD22162 embl_tpa_prot
+special CCE69367-CCE71257 embl_tpa_prot
+special CCH35981-CCH35984 embl_tpa_prot
+special CCP37863-CCP38020 embl_tpa_prot
+special CCQ18550 embl_tpa_prot
+special2 CDG+5 embl_tpa_prot
+:
+special2 CDI+5 embl_tpa_prot
+:
+special2 CDK+5 embl_tpa_prot
+:
+special CDM98735-CDM98850 embl_tpa_prot
+special CDW51382-CDW51481 embl_tpa_prot
+special2 CEL+5 embl_tpa_prot
+:
+special CEO43666-CEO43667 embl_tpa_prot
+special CRI06393-CRI06404 embl_tpa_prot
+special CRK77046 embl_tpa_prot
+special CTQ86077-CTQ86287 embl_tpa_prot
+special2 CUQ+5 embl_tpa_prot
+:
+special2 CUS+5 embl_tpa_prot
+:
+special2 SAI+5 embl_tpa_prot
+:
+special2 SAQ+5 embl_tpa_prot
+:
+special SCC98881-SCC98885 embl_tpa_prot
+special SFW93197-SFW93317 embl_tpa_prot
+special SNU76807-SNU78093 embl_tpa_prot
+special SOR70182-SOR70392 embl_tpa_prot
+special VDK10822-VDK11088 embl_tpa_prot
+special VDM91303-VDM91304 embl_tpa_prot
+special2 VZP+5 embl_tpa_prot
+:
+special2 VZQ+5 embl_tpa_prot
+:
+special2 CAA+7 embl_tpa_prot
+:
+special2 CAB+7 embl_tpa_prot
+:
+special2 CAD+7 embl_tpa_tsa_prot
+:
+special2 CAF+7 embl_tpa_tsa_prot
+:
+special2 CAG+7 embl_tpa_tsa_prot
+:
+special2 CAH+7 embl_tpa_tsa_prot
+:
+special2 CAI+7 embl_tpa_tsa_prot
+:
+special2 CAI+7 embl_tpa_wgs_prot
+:

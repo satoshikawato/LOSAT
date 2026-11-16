@@ -1,0 +1,1 @@
+- BLASTP and psiblast write the local id of a `-subject` record without a title (`Subject_1`) in `sallseqid` and `sallacc`, as NCBI BLAST+ 2.17.0 does; they wrote `unnamed` (drop-in DI-7).

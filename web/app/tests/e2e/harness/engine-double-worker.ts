@@ -1,7 +1,7 @@
 // A test double of the Engine worker: it writes the run outputs that the page asks for
 // through RunOutputWriter, from its own thread, to the port of the real Data worker.
-import { RunOutputWriter } from '../../../src/infra/run-output/writer';
-import type { OutputStream } from '../../../src/ports/run-output';
+import { RunOutputWriter } from 'losat';
+import type { OutputStream } from 'losat/ports';
 import type { EngineDoubleCommand, EngineDoubleReply } from './protocol';
 
 const scope = self as unknown as {

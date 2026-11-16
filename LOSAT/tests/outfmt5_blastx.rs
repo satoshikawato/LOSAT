@@ -1,9 +1,11 @@
-#![allow(warnings, clippy::all)]
-
-//! BLAST XML (outfmt 5) of BLASTX: the refusals of what NCBI BLAST+ 2.17.0 cannot write (a
-//! byte >= 0x80 in a title or in the `-db` name, DECISIONS 19, Q2) and the document across
-//! several query batches (one header, global Iteration numbers, one trailer), and the refusals
-//! of a later batch (OF4b part 2): every refusal comes before the first byte of the output.
+//! BLAST XML (outfmt 5) of BLASTX: the one title that NCBI BLAST+ 2.17.0 cannot make (punctuation
+//! alone, such as `, ,`, on which `x_CleanAndCompress` reads past the end of the string) is refused
+//! before the first byte, also when its record is in a later query batch or is a subject that only a
+//! later batch hits (BLASTX holds its document until it knows), the document across several query
+//! batches (one header, global Iteration numbers, one trailer), and the refusals of a later batch (OF4b
+//! part 2): every refusal comes before the first byte of the output. The titles NCBI does write (a
+//! byte >= 0x80, a control byte, a title whose encoding it cannot guess, the `-db` name) are the rows
+//! `db.xb.blastx.*` of `tests/db_search_manifest/blastx.tsv` and `tests/xml_dbname.rs`.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:725-733
 //! ```c++
@@ -19,6 +21,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod temp_support;
+use temp_support::{Finished, TempFile};
+
 fn temp_dir(stem: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -33,11 +38,11 @@ fn temp_dir(stem: &str) -> PathBuf {
     dir
 }
 
-fn run_str(args: &[&str]) -> Output {
+fn run_str(args: &[&str]) -> Finished<Output, TempFile> {
     run_env(args, &[])
 }
 
-fn run_env(args: &[&str], env: &[(&str, &str)]) -> Output {
+fn run_env(args: &[&str], env: &[(&str, &str)]) -> Finished<Output, TempFile> {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") {
@@ -45,16 +50,14 @@ fn run_env(args: &[&str], env: &[(&str, &str)]) -> Output {
         }
     }
     // An --all-features binary at 2+ threads keeps this variable (see the other tests).
-    command.env(
-        "LOSAT_BLASTX_WORKER_LOG",
-        std::env::temp_dir().join("losat_outfmt5_worker.log"),
-    );
+    let log = TempFile::keep_on_failure("losat_outfmt5_worker", "worker.log");
+    command.env("LOSAT_BLASTX_WORKER_LOG", &log);
     command.envs(env.iter().copied());
-    command.args(args).output().expect("run LOSAT")
+    let output = command.args(args).output().expect("run LOSAT");
+    Finished::new(output, log)
 }
 
 const PROTEIN: &str = "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG";
-const OTHER_PROTEIN: &str = "WQERTYIPASDFGHKLCVNMWQERTYIPASDFGHKLCVNMWQERTYIPASDFGHKLCVNM";
 
 /// One codon per amino acid.
 fn codon(letter: char) -> &'static str {
@@ -99,132 +102,20 @@ fn fasta(path: &Path, records: &[(&[u8], &[u8])]) {
     fs::write(path, text).expect("write FASTA");
 }
 
-fn refused(output: &Output, what: &str) {
-    refused_as(output, what, what)
-}
-
 fn refused_as(output: &Output, what: &str, label: &str) {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert_eq!(output.status.code(), Some(1), "{label}: {stderr}");
     assert!(output.stdout.is_empty(), "{label}: nothing is written");
     assert!(
         stderr.contains(&format!(
-            "{what} with a character outside the US-ASCII range (which the XML output of NCBI BLAST+ cannot write) is not supported by LOSAT's BLASTX"
+            "{what} with punctuation that NCBI BLAST+ 2.17.0 crashes on when it makes the definition line is not supported by LOSAT's BLASTX"
         )),
         "{label}: {stderr}"
     );
 }
 
-#[test]
-fn a_query_title_outside_us_ascii_is_refused() {
-    let dir = temp_dir("query");
-    let (query, subject) = (dir.join("q.fa"), dir.join("s.fa"));
-    let nucleotide = back_translate(PROTEIN);
-    for title in ["caf\u{e9} ".as_bytes(), b"caf\xe9"] {
-        for position in 0..2 {
-            let mut records: Vec<(&[u8], &[u8])> = vec![
-                (b"q1 ok", nucleotide.as_bytes()),
-                (b"q2 ok", nucleotide.as_bytes()),
-            ];
-            records[position] = (title, nucleotide.as_bytes());
-            fasta(&query, &records);
-            fasta(&subject, &[(b"s1 subject", PROTEIN.as_bytes())]);
-            let output = run_str(&[
-                "blastx",
-                "-query",
-                query.to_str().unwrap(),
-                "-subject",
-                subject.to_str().unwrap(),
-                "-outfmt",
-                "5",
-            ]);
-            if title == b"caf\xe9" {
-                // BLASTX's reader refuses a title that is not UTF-8 for every format.
-                assert_eq!(output.status.code(), Some(1));
-                assert!(output.stdout.is_empty());
-                assert!(
-                    String::from_utf8_lossy(&output.stderr).contains("invalid UTF-8 FASTA title")
-                );
-            } else {
-                refused(&output, "a query title");
-            }
-        }
-    }
-    fs::remove_dir_all(dir).ok();
-}
-
-#[test]
-fn a_subject_title_outside_us_ascii_is_refused_where_it_is_written() {
-    let dir = temp_dir("subject");
-    let (query, subject) = (dir.join("q.fa"), dir.join("s.fa"));
-    let nucleotide = back_translate(PROTEIN);
-    fasta(&query, &[(b"q1 ok", nucleotide.as_bytes())]);
-    // The subject with the bad title has a hit: NCBI cuts the document after the Iteration's
-    // hits start; LOSAT refuses.
-    fasta(
-        &subject,
-        &[
-            (b"s1 ok", OTHER_PROTEIN.as_bytes()),
-            ("s2 caf\u{e9}".as_bytes(), PROTEIN.as_bytes()),
-        ],
-    );
-    let args = [
-        "blastx",
-        "-query",
-        query.to_str().unwrap(),
-        "-subject",
-        subject.to_str().unwrap(),
-        "-outfmt",
-        "5",
-    ];
-    refused(&run_str(&args), "a subject title");
-    // Without a hit the subject is never written, and the search succeeds (an all-N query
-    // has none).
-    fasta(&query, &[(b"q1 ok", &[b'N'; 60])]);
-    fasta(&subject, &[("s1 caf\u{e9}".as_bytes(), PROTEIN.as_bytes())]);
-    let output = run_str(&args);
-    assert_eq!(
-        output.status.code(),
-        Some(0),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(output
-        .stdout
-        .starts_with(b"<?xml version=\"1.0\" encoding=\"US-ASCII\"?>\n"));
-    fs::remove_dir_all(dir).ok();
-}
-
-#[test]
-fn a_database_name_outside_us_ascii_is_refused() {
-    let dir = temp_dir("db");
-    let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search");
-    let copy = dir.join("bslice_caf\u{e9}");
-    for extension in ["phr", "pin", "psq"] {
-        fs::copy(
-            tests.join(format!("bslice.{extension}")),
-            format!("{}.{extension}", copy.display()),
-        )
-        .expect("copy database");
-    }
-    let output = run_str(&[
-        "blastx",
-        "-query",
-        tests.join("bslice_q.fna").to_str().unwrap(),
-        "-db",
-        copy.to_str().unwrap(),
-        "-outfmt",
-        "5",
-    ]);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_eq!(output.status.code(), Some(1), "{stderr}");
-    assert!(output.stdout.is_empty(), "nothing is written");
-    assert!(
-        stderr.contains("a database name with a character outside the US-ASCII range (which the XML output of NCBI BLAST+ cannot write) is not supported by LOSAT's BLASTX"),
-        "{stderr}"
-    );
-    fs::remove_dir_all(dir).ok();
-}
+/// The title of punctuation that NCBI's `x_CleanAndCompress` reads past the end of.
+const PUNCTUATION: &[u8] = b", ,";
 
 /// 30 queries of about 1,500 letters (the batch holds 10,002 letters, so several batches),
 /// each the back-translation of the protein, on alternate strands.
@@ -259,7 +150,7 @@ fn several_batches_make_one_document_with_global_iteration_numbers() {
     let (query, subject) = (dir.join("q.fa"), dir.join("s.fa"));
     many_queries(&query, None);
     fasta(&subject, &[(b"s1 subject", PROTEIN.as_bytes())]);
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         let output = run_str(&[
             "blastx",
             "-query",
@@ -273,7 +164,7 @@ fn several_batches_make_one_document_with_global_iteration_numbers() {
         ]);
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert_eq!(output.status.code(), Some(0), "{stderr}");
-        let text = String::from_utf8(output.stdout).expect("ASCII");
+        let text = String::from_utf8(output.stdout.clone()).expect("ASCII");
         assert_eq!(text.matches("<?xml").count(), 1);
         assert_eq!(text.matches("<BlastOutput_program>").count(), 1);
         assert_eq!(text.matches("<Iteration>").count(), 30);
@@ -303,7 +194,7 @@ fn runs(
     query: &Path,
     subject: &Path,
     extra: &[&str],
-) -> Vec<(String, Output, Vec<u8>)> {
+) -> Vec<(String, Finished<Output, TempFile>, Vec<u8>)> {
     let mut results = Vec::new();
     let variants: [(&str, &str, &[(&str, &str)]); 3] = [
         ("1 thread", "1", &[]),
@@ -337,7 +228,7 @@ fn runs(
 
 /// `refused` for every run of `runs`: rc 1, the message, nothing on standard output, and an
 /// empty `-out` file.
-fn all_refused(results: &[(String, Output, Vec<u8>)], what: &str) {
+fn all_refused(results: &[(String, Finished<Output, TempFile>, Vec<u8>)], what: &str) {
     for (variant, output, file) in results {
         refused_as(output, what, &format!("{what} ({variant})"));
         assert!(
@@ -351,19 +242,19 @@ fn all_refused(results: &[(String, Output, Vec<u8>)], what: &str) {
 fn a_bad_query_title_in_a_later_batch_writes_nothing() {
     let dir = temp_dir("later_query");
     let (query, subject) = (dir.join("q.fa"), dir.join("s.fa"));
-    many_queries(&query, Some((25, "q25 caf\u{e9}".as_bytes())));
+    many_queries(&query, Some((25, PUNCTUATION)));
     fasta(&subject, &[(b"s1 subject", PROTEIN.as_bytes())]);
     all_refused(&runs(&dir, &query, &subject, &[]), "a query title");
     // The last query of the file, and the first of a later batch.
     for index in [29, 12] {
-        many_queries(&query, Some((index, "caf\u{e9}".as_bytes())));
+        many_queries(&query, Some((index, PUNCTUATION)));
         all_refused(&runs(&dir, &query, &subject, &[]), "a query title");
     }
     fs::remove_dir_all(dir).ok();
 }
 
 /// 30 queries: the first 25 are the back-translation of `PROTEIN` (hits for the subject `s1`),
-/// the others of `OTHER_PROTEIN` (a hit for the subject `s2`, which comes only in the batches
+/// the others of `OTHER_PROTEIN_LONG` (a hit for the subject `s2`, which comes only in the batches
 /// after the first). The titles of the subjects are those given.
 fn late_hit_files(dir: &Path, s2_title: &[u8]) -> (PathBuf, PathBuf) {
     let (query, subject) = (dir.join("q.fa"), dir.join("s.fa"));
@@ -410,14 +301,14 @@ fn a_bad_subject_title_whose_only_hit_is_in_a_later_batch_writes_nothing() {
         "1e-10",
     ]);
     assert_eq!(control.status.code(), Some(0));
-    let text = String::from_utf8(control.stdout).expect("ASCII");
+    let text = String::from_utf8(control.stdout.clone()).expect("ASCII");
     assert_eq!(
         text.matches("<Hit_def>s2 plain</Hit_def>").count(),
         5,
         "{text}"
     );
     assert!(text.matches("<Hit_def>s1 subject</Hit_def>").count() >= 25);
-    let (query, subject) = late_hit_files(&dir, "s2 caf\u{e9}".as_bytes());
+    let (query, subject) = late_hit_files(&dir, PUNCTUATION);
     all_refused(&runs(&dir, &query, &subject, STRICT), "a subject title");
     fs::remove_dir_all(dir).ok();
 }
@@ -427,7 +318,7 @@ fn a_bad_subject_title_without_a_hit_gives_the_whole_document() {
     let dir = temp_dir("subject_no_hit");
     // No query hits s2: its title is never written, so the document is NCBI's (it equals the
     // document of the same searches with a plain title, which has been compared with
-    // `blastx -outfmt 5 -num_threads 1` of NCBI BLAST+ 2.17.0).
+    // `blastx -outfmt 5 -num_threads 1` of NCBI BLAST+ 2.17.0), whatever the title.
     let write = |s2_title: &[u8]| {
         let (query, subject) = (dir.join("q.fa"), dir.join("s.fa"));
         many_queries(&query, None);
@@ -442,22 +333,26 @@ fn a_bad_subject_title_without_a_hit_gives_the_whole_document() {
     };
     let (query, subject) = write(b"s2 plain");
     let expected = runs(&dir, &query, &subject, STRICT);
-    let (query, subject) = write("s2 caf\u{e9}".as_bytes());
-    let results = runs(&dir, &query, &subject, STRICT);
     let reference = &expected[1].1.stdout;
     assert_eq!(expected[1].1.status.code(), Some(0));
     let text = String::from_utf8_lossy(reference);
     assert_eq!(text.matches("<Iteration>").count(), 30);
     assert!(!text.contains("s2 plain"), "no query hits s2");
     assert!(text.ends_with("</Iteration>\n</BlastOutput_iterations>\n</BlastOutput>\n\n"));
-    for (variant, output, file) in &results {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert_eq!(output.status.code(), Some(0), "{variant}: {stderr}");
-        if variant.ends_with(", stdout") {
-            assert_eq!(&output.stdout, reference, "{variant}");
-        } else {
-            assert!(output.stdout.is_empty(), "{variant}");
-            assert_eq!(file, reference, "{variant}: the -out file");
+    // The title that LOSAT refuses where it is written (the hold keeps the document until the
+    // last batch shows that nothing writes it), and one that NCBI writes when a hit reaches it.
+    for title in [PUNCTUATION, "s2 caf\u{e9}".as_bytes()] {
+        let (query, subject) = write(title);
+        let results = runs(&dir, &query, &subject, STRICT);
+        for (variant, output, file) in &results {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert_eq!(output.status.code(), Some(0), "{variant}: {stderr}");
+            if variant.ends_with(", stdout") {
+                assert_eq!(&output.stdout, reference, "{variant}");
+            } else {
+                assert!(output.stdout.is_empty(), "{variant}");
+                assert_eq!(file, reference, "{variant}: the -out file");
+            }
         }
     }
     fs::remove_dir_all(dir).ok();
@@ -486,7 +381,13 @@ fn one_query_files(dir: &Path) -> (Vec<u8>, PathBuf) {
 
 /// `blastx` reading the query from a named pipe that a writer thread fills.
 #[cfg(unix)]
-fn run_fifo(dir: &Path, text: &[u8], subject: &Path, format: &str, out: Option<&Path>) -> Output {
+fn run_fifo(
+    dir: &Path,
+    text: &[u8],
+    subject: &Path,
+    format: &str,
+    out: Option<&Path>,
+) -> Finished<Output, TempFile> {
     use std::io::Write;
     let fifo = dir.join(format!("query_{format}.fifo"));
     let made = Command::new("mkfifo").arg(&fifo).status().expect("mkfifo");
@@ -522,7 +423,7 @@ fn run_fifo(dir: &Path, text: &[u8], subject: &Path, format: &str, out: Option<&
 
 /// `blastx -query /dev/stdin` with a pipe on standard input.
 #[cfg(unix)]
-fn run_dev_stdin(text: &[u8], subject: &Path, format: &str) -> Output {
+fn run_dev_stdin(text: &[u8], subject: &Path, format: &str) -> Finished<Output, TempFile> {
     use std::io::Write;
     use std::process::Stdio;
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
@@ -531,10 +432,8 @@ fn run_dev_stdin(text: &[u8], subject: &Path, format: &str) -> Output {
             command.env_remove(name);
         }
     }
-    command.env(
-        "LOSAT_BLASTX_WORKER_LOG",
-        std::env::temp_dir().join("losat_outfmt5_worker.log"),
-    );
+    let log = TempFile::keep_on_failure("losat_outfmt5_worker", "worker.log");
+    command.env("LOSAT_BLASTX_WORKER_LOG", &log);
     let mut child = command
         .args([
             "blastx",
@@ -559,7 +458,7 @@ fn run_dev_stdin(text: &[u8], subject: &Path, format: &str) -> Output {
     });
     let output = child.wait_with_output().expect("wait");
     writer.join().expect("writer thread");
-    output
+    Finished::new(output, log)
 }
 
 #[cfg(unix)]
@@ -583,7 +482,7 @@ fn a_named_pipe_query_is_refused_for_outfmt_5_and_works_for_outfmt_6() {
     // The other formats read the pipe once, as NCBI does.
     let tabular = run_fifo(&dir, &text, &subject, "6", None);
     assert_eq!(tabular.status.code(), Some(0));
-    let rows = String::from_utf8(tabular.stdout).unwrap();
+    let rows = String::from_utf8(tabular.stdout.clone()).unwrap();
     assert!(rows.starts_with("q1\ts1\t"), "{rows}");
     // The same query as a regular file gives the document.
     let query = dir.join("q.fa");
@@ -612,7 +511,7 @@ fn dev_stdin_from_a_pipe_is_refused_for_outfmt_5_and_works_for_outfmt_6() {
     refused_not_regular(&run_dev_stdin(&text, &subject, "5"), "/dev/stdin");
     let tabular = run_dev_stdin(&text, &subject, "6");
     assert_eq!(tabular.status.code(), Some(0));
-    let rows = String::from_utf8(tabular.stdout).unwrap();
+    let rows = String::from_utf8(tabular.stdout.clone()).unwrap();
     assert!(rows.starts_with("q1\ts1\t"), "{rows}");
     fs::remove_dir_all(dir).ok();
 }
@@ -632,10 +531,7 @@ fn a_held_document_is_written_when_the_run_ends_with_a_reader_error() {
     fs::write(&query, &text).unwrap();
     let subject = dir.join("s.fa");
     let mut results: Vec<(String, Vec<u8>, Vec<u8>)> = Vec::new();
-    for (label, s2_title) in [
-        ("held", "s2 caf\u{e9}".as_bytes()),
-        ("not held", b"s2 plain".as_slice()),
-    ] {
+    for (label, s2_title) in [("held", PUNCTUATION), ("not held", b"s2 plain".as_slice())] {
         fasta(
             &subject,
             &[
@@ -643,7 +539,7 @@ fn a_held_document_is_written_when_the_run_ends_with_a_reader_error() {
                 (s2_title, OTHER_PROTEIN_LONG.as_bytes()),
             ],
         );
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             for to_file in [false, true] {
                 let out = dir.join(format!("out_{label}_{threads}.xml"));
                 let mut args = vec![
@@ -673,7 +569,7 @@ fn a_held_document_is_written_when_the_run_ends_with_a_reader_error() {
                     assert!(output.stdout.is_empty(), "{label} {threads}");
                     fs::read(&out).unwrap()
                 } else {
-                    output.stdout
+                    output.stdout.clone()
                 };
                 results.push((
                     format!(
@@ -681,7 +577,7 @@ fn a_held_document_is_written_when_the_run_ends_with_a_reader_error() {
                         if to_file { "-out" } else { "stdout" }
                     ),
                     written,
-                    output.stderr,
+                    output.stderr.clone(),
                 ));
             }
         }

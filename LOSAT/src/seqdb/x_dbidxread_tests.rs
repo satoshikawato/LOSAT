@@ -233,21 +233,47 @@ fn blocks_end_where_the_held_arrays_end_them() {
     }
 }
 
+// LOSAT_X_BNDBSMALL: the ends that a list of blocks gets with one window of offsets kept from
+// block to block are those of `block_end`, from every first sequence on and in runs of any length.
+#[test]
+fn listed_blocks_end_where_block_end_ends_them() {
+    use super::volume::XOffsetWindow;
+    for (name, held, read) in volume_pairs() {
+        let n = held.num_oids();
+        for max_bytes in [0u64, 1, 2, 5, 64, 100, 400, 1 << 20, u64::MAX] {
+            for entries in [1, 2, 3, 5, 1024] {
+                for start in 0..n {
+                    for volume in [&held, &read] {
+                        let mut window = XOffsetWindow::default();
+                        let mut first = start;
+                        while first < n {
+                            let want = volume.block_end(first, max_bytes).unwrap();
+                            let got = volume
+                                .x_listed_block_end(first, max_bytes, &mut window, entries)
+                                .unwrap();
+                            assert_eq!(
+                                got, want,
+                                "{name} from {first} within {max_bytes}, runs of {entries}"
+                            );
+                            first = got;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn blocks_read_alike() {
     for (name, held, read) in volume_pairs() {
         let n = held.num_oids();
         for first in 0..n {
             for end in first + 1..=n {
-                let a = held.read_block(first, end, 7).unwrap();
-                let b = read.read_block(first, end, 7).unwrap();
+                let a = held.read_block(first, end, 7, 7).unwrap();
+                let b = read.read_block(first, end, 7, 7).unwrap();
                 assert_eq!(format!("{a:?}"), format!("{b:?}"), "{name} {first}..{end}");
             }
-            assert_eq!(
-                format!("{:?}", held.check_ambiguity(first, first)),
-                format!("{:?}", read.check_ambiguity(first, first)),
-                "{name} {first}"
-            );
             assert_eq!(
                 held.header_bytes(first).unwrap(),
                 read.header_bytes(first).unwrap()
@@ -363,6 +389,106 @@ fn damaged_headers_read_in_ranges_as_one_by_one() {
 }
 
 #[test]
+fn a_header_is_read_alike_alone_and_in_a_range() {
+    let ids = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/ids");
+    for (path, seqtype) in [
+        (fixture_db_dir().join("prot_v4"), SeqType::Protein),
+        (fixture_db_dir().join("prot_mv"), SeqType::Protein),
+        (fixture_db_dir().join("nucl_v5"), SeqType::Nucleotide),
+        (fixture_db_dir().join("nucl_mv"), SeqType::Nucleotide),
+        (ids.join("nucl_v4"), SeqType::Nucleotide),
+        (ids.join("nucl_v5"), SeqType::Nucleotide),
+        (ids.join("njoined"), SeqType::Nucleotide),
+        (ids.join("prot_v4"), SeqType::Protein),
+        (ids.join("refuse_v5"), SeqType::Protein),
+        // Line DBID N2a: a stored `gnl|BL_ORD_ID|n` of another number, in a second volume too.
+        (ids.join("pord_vx"), SeqType::Protein),
+        (ids.join("nord_v5"), SeqType::Nucleotide),
+    ] {
+        let db = SeqDb::open(path.to_str().unwrap(), seqtype).unwrap();
+        let parsed = check_headers(&db, &path);
+        assert_eq!(parsed > 0, path.starts_with(&ids), "{path:?}");
+    }
+    // A taxid list leaves out sequences and definition lines (`SeqDb::restrict_taxids`).
+    for list in [
+        TaxidList::Positive([9606].into_iter().collect()),
+        TaxidList::Negative([9606].into_iter().collect()),
+    ] {
+        let path = ids.join("nucl_v5");
+        let mut db = SeqDb::open(path.to_str().unwrap(), SeqType::Nucleotide).unwrap();
+        let whole = db.num_seqs();
+        db.restrict_taxids(&list).unwrap();
+        assert!(db.num_seqs() > 0 && db.num_seqs() < whole, "{list:?}");
+        assert!(check_headers(&db, &path) > 0, "{list:?}");
+    }
+    // A seqid list too. The negative list keeps a sequence without any of its lines here, which
+    // both reads refuse alike (`no_line_kept`).
+    for negative in [false, true] {
+        let path = ids.join("nucl_v5");
+        let mut db = SeqDb::open(path.to_str().unwrap(), SeqType::Nucleotide).unwrap();
+        let whole = db.num_seqs();
+        let file =
+            super::seqidlist::read_si_list(b"AF000002.3\nAJ000003.1\n", &mut Vec::new()).unwrap();
+        let list = DbList::Seqids(SeqidList { negative, file });
+        db.restrict(&list, &mut Vec::new()).unwrap();
+        assert!(db.num_seqs() > 0 && db.num_seqs() < whole, "{negative}");
+        if !negative {
+            assert!(check_headers(&db, &path) > 0);
+            continue;
+        }
+        let mut refused = 0;
+        for range in db.header_ranges(1024) {
+            assert!(db.visit_sequence_headers(range, |ordinal, header| {
+                let walked = header.err().map(|error| error.to_string());
+                refused += usize::from(walked.is_some());
+                let alone = db.read_header(ordinal).err();
+                assert_eq!(walked, alone.map(|error| error.to_string()), "{ordinal}");
+                true
+            }));
+        }
+        assert!(refused > 0);
+    }
+}
+
+/// Checks `visit_sequence_headers` and `read_header` of every sequence of `db` against
+/// `deflines` and `defline_set`; returns how many records with parsed Seq-ids it saw.
+fn check_headers(db: &SeqDb, path: &Path) -> usize {
+    let mut parsed = 0;
+    for max_seqs in [1, 3, 1024] {
+        let mut headers = Vec::new();
+        for range in db.header_ranges(max_seqs) {
+            assert!(db.visit_sequence_headers(range, |ordinal, header| {
+                headers.push((ordinal, header.unwrap()));
+                true
+            }));
+            // `visit` ends the walk.
+            let mut calls = 0;
+            assert!(!db.visit_sequence_headers(range, |_, _| {
+                calls += 1;
+                false
+            }));
+            assert_eq!(calls, 1, "{path:?}");
+        }
+        let expected: Vec<_> = (0..db.num_seqs())
+            .map(|ordinal| {
+                // A record with parsed Seq-ids is what `deflines` does not read.
+                let header = match db.deflines(ordinal) {
+                    Err(error) if error.is_parsed_seqids() => {
+                        parsed += 1;
+                        SequenceHeader::Parsed(db.defline_set(ordinal).unwrap())
+                    }
+                    deflines => SequenceHeader::Ordinal(deflines.unwrap()),
+                };
+                assert_eq!(db.read_header(ordinal).unwrap(), header, "{path:?}");
+                (ordinal, header)
+            })
+            .collect();
+        assert_eq!(headers, expected, "{path:?}");
+    }
+    parsed
+}
+
+#[test]
 fn database_ranges_cover_every_sequence_once() {
     for name in ["prot_v4", "prot_mv", "nucl_v5", "nucl_mv", "empty"] {
         let seqtype = if name.starts_with("nucl") {
@@ -393,64 +519,8 @@ fn database_ranges_cover_every_sequence_once() {
                     .map(|ordinal| (ordinal, db.deflines(ordinal).unwrap()))
                     .collect();
                 assert_eq!(titles, expected, "{name}");
-                let mut checked = Vec::new();
-                assert!(db.visit_ambiguity(*range, |ordinal, result| {
-                    checked.push((ordinal, result.is_ok()));
-                    true
-                }));
-                let expected: Vec<_> = (range.first_ordinal..range.end_ordinal())
-                    .map(|ordinal| (ordinal, db.check_ambiguity(ordinal).is_ok()))
-                    .collect();
-                assert_eq!(checked, expected, "{name}");
             }
             assert_eq!(next, db.num_seqs(), "{name}");
-        }
-    }
-}
-
-#[test]
-fn damaged_ambiguity_data_check_in_ranges_as_one_by_one() {
-    let dir = TempDir::new("ambiguity");
-    let base = copy_database("nucl_v4", &["nin", "nsq", "nhr"], &dir.0);
-    let nsq = base.with_extension("nsq");
-    let bytes = std::fs::read(&nsq).unwrap();
-    let clean = Volume::open_as(&base, SeqType::Nucleotide, XDbIdxRead::Off).unwrap();
-    let n = clean.num_oids();
-    let mut damages = Vec::new();
-    for oid in 0..n {
-        let (at, next) = clean.index().ambiguity_range(oid).unwrap().unwrap();
-        if at < next {
-            // The entry count raised by one, and the data cut off inside the sequence's data.
-            let mut damaged = bytes.clone();
-            damaged[at as usize + 3] = damaged[at as usize + 3].wrapping_add(1);
-            damages.push(damaged);
-            damages.push(bytes[..next as usize - 1].to_vec());
-        }
-    }
-    drop(clean);
-    assert!(damages.len() >= 2, "the fixture has ambiguity data");
-    for damaged in damages {
-        std::fs::write(&nsq, &damaged).unwrap();
-        let read = Volume::open_as(&base, SeqType::Nucleotide, XDbIdxRead::On).unwrap();
-        for (first, end) in [(0, n), (1, n), (0, 1), (n - 1, n)] {
-            let mut seen = Vec::new();
-            read.visit_ambiguity(first, end, 100 + first, &mut |oid, result| {
-                seen.push(format!(
-                    "{oid}: {:?}",
-                    result.map_err(|error| error.to_string())
-                ));
-                true
-            });
-            let expected: Vec<String> = (first..end)
-                .map(|oid| {
-                    format!(
-                        "{oid}: {:?}",
-                        read.check_ambiguity(oid, 100 + oid)
-                            .map_err(|error| error.to_string())
-                    )
-                })
-                .collect();
-            assert_eq!(seen, expected, "{first}..{end}");
         }
     }
 }
@@ -494,7 +564,7 @@ fn an_index_file_changed_after_the_open_gives_errors_not_panics() {
             overwrite_entries(&index, arrays, num_oids, array, words);
             let n = num_oids as u32;
             let label = format!("{name}, array {array} set to {:?}..", &words[..2]);
-            let block = volume.read_block(0, n, 0);
+            let block = volume.read_block(0, n, 0, 0);
             if array != 0 {
                 let error = block.expect_err(&label).to_string();
                 assert!(error.contains("the file changed"), "{label}: {error}");
@@ -502,7 +572,7 @@ fn an_index_file_changed_after_the_open_gives_errors_not_panics() {
             for first in 0..n {
                 let _ = volume.block_end(first, 64);
                 let _ = volume.block_bytes(first, n);
-                let _ = volume.read_block(first, first + 1, first);
+                let _ = volume.read_block(first, first + 1, first, first);
             }
             let mut visited = 0;
             volume.visit_deflines(0, n, 1 << 20, &mut |_, _| {

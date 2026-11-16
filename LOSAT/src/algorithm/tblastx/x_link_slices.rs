@@ -162,6 +162,50 @@ use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
 // No NCBI counterpart: counters for LOSAT_X_STATS; they do not change any value NCBI computes.
 static LINKINGS: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+thread_local! {
+    // The kernel scratch of a pool thread (module doc, item 4): one per worker thread, made on
+    // first use, shared by the pool path and the helped path.
+    static POOLS: RefCell<Option<BufferPools>> = const { RefCell::new(None) };
+}
+
+// EXPERIMENT (LOSAT_X_TBXBOARD): whether this thread's linking calls are a TBXPIPE chain that
+// must not wait in the pool (tblastx/x_batch_pipe.rs, item 6). No NCBI counterpart (scheduling
+// only).
+thread_local! {
+    static HELPED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The calling thread's helped mode until the guard drops (it restores the mode before).
+pub(crate) struct XHelped(bool);
+
+impl Drop for XHelped {
+    fn drop(&mut self) {
+        HELPED.with(|helped| helped.set(self.0));
+    }
+}
+
+// EXPERIMENT (LOSAT_X_TBXBOARD): the linking calls and score sorts that follow on this thread
+// are a chain of the batch pipe that must not wait in the pool: its groups are linked on the
+// search's board (`x_link_board`), and its sorts are sorted there or stay on the thread
+// (x_link_sort.rs `x_board_sort`, `pool_allowed`). No NCBI counterpart.
+/// Sets this thread's helped mode to `on` until the guard drops.
+pub(crate) fn x_helped(on: bool) -> XHelped {
+    XHelped(HELPED.with(|helped| helped.replace(on)))
+}
+
+/// Whether this thread's linking calls are in the helped mode.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(super) fn x_helped_now() -> bool {
+    HELPED.with(std::cell::Cell::get)
+}
 static GROUPS: AtomicU64 = AtomicU64::new(0);
 static PARALLEL_LINKINGS: AtomicU64 = AtomicU64::new(0);
 
@@ -318,14 +362,27 @@ fn link_slices(
     kernel_times: &KernelTimes,
     on_pool: bool,
 ) -> bool {
+    // EXPERIMENT (LOSAT_X_TBXBOARD): the groups on the search's board (tblastx/x_work_board.rs),
+    // taken before any unit, for a call on the pool and for a pipe chain (`x_helped_now`).
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if (on_pool || x_helped_now())
+        && groups.len() > 1
+        && rayon::current_thread_index().is_some()
+        && rayon::current_num_threads() > 1
+    {
+        if let Some((board, _)) = crate::algorithm::tblastx::x_work_board::current() {
+            x_link_board(board, groups, args, &scratch, kernel_times);
+            return on_pool;
+        }
+    }
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     if on_pool {
-        thread_local! {
-            static POOLS: RefCell<Option<BufferPools>> = const { RefCell::new(None) };
-        }
         groups.into_par_iter().for_each(|group| {
             POOLS.with(|pools| {
                 let mut pools_opt = pools.borrow_mut();
@@ -353,6 +410,52 @@ fn link_slices(
     false
 }
 
+// EXPERIMENT (LOSAT_X_TBXBOARD): the groups of a linking call on the search's board, the largest
+// first (tblastx/x_work_board.rs). No NCBI counterpart: the groups are disjoint and each kernel's
+// result depends on its group alone (module doc, items 2-4), so which thread links which group,
+// and when, changes nothing. No thread waits in the pool: the board's takers and this call's
+// helper jobs take groups, and this thread blocks until the groups others took are linked (the
+// kernels make no pool call).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn x_link_board(
+    board: &crate::algorithm::tblastx::x_work_board::XBoard,
+    mut groups: Vec<&mut [UngappedHit]>,
+    args: &GroupArgs<'_>,
+    scratch: &Scratch,
+    kernel_times: &KernelTimes,
+) {
+    // The largest group first (equal sizes in group order): the call ends when its largest group
+    // is linked.
+    groups.sort_by_key(|group| std::cmp::Reverse(group.len()));
+    let n = groups.len();
+    let slices: Vec<(usize, usize)> = groups
+        .iter_mut()
+        .map(|group| (group.as_mut_ptr() as usize, group.len()))
+        .collect();
+    let run = |i: usize, _: &mut crate::algorithm::tblastx::x_work_board::XTaker| {
+        let (ptr, len) = slices[i];
+        // SAFETY: the slices are disjoint parts of the list this call borrows mutably (`groups`
+        // came from `split_at_mut`); the board runs index `i` once, and `run_groups` returns only
+        // after every index has run.
+        let group = unsafe { std::slice::from_raw_parts_mut(ptr as *mut UngappedHit, len) };
+        POOLS.with(|pools| {
+            let mut pools_opt = pools.borrow_mut();
+            let pool = pools_opt.get_or_insert_with(|| {
+                buffer_pools(
+                    scratch.initial_lh_size,
+                    scratch.total_hits,
+                    scratch.literal_port,
+                )
+            });
+            kernel_times.time(|| link_one_slice(group, args, pool));
+        });
+    };
+    board.run_groups(n, &run);
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:522-531
 // ```c
 // if (H->prev != NULL &&
@@ -364,6 +467,20 @@ fn link_slices(
 //    hp_frame_number[++cur_frame]++;
 //    hp_frame_start[cur_frame] = H;
 // ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419
+// ```c
+// s_BlastEvenGapLinkHSPs(EBlastProgramType program_number, BlastHSPList* hsp_list,
+// ```
+// No NCBI counterpart for the two switches: LOSAT_LINKING_LEGACY links every group with the literal
+// port, LOSAT_LINK_FAST_SHADOW also runs it and compares (`link_hsp_group_incremental`). They do
+// not change any value NCBI computes.
+/// `link_groups_as`'s `use_legacy` and `fast_shadow` from the environment: the group step of
+/// `x_hsp_inplace::link_in_place` for every list but a one-hit list with an HSP of length 0 or
+/// less.
+pub(super) fn link_modes() -> (bool, bool) {
+    (legacy_linking_requested(), link_shadow_enabled())
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
 // ```c
 // for (frame_index=0; frame_index<num_query_frames; frame_index++)
@@ -373,21 +490,21 @@ fn link_slices(
 //    hp_frame_start[frame_index]->prev = hp_start;
 //    number_of_hsps = hp_frame_number[frame_index];
 // ```
-// The group step of `link_in_place` on the sorted list (module doc). Returns
-// the list and its number of groups.
+// The group step of `x_hsp_inplace::link_in_place` on the sorted list (module doc), with the two
+// variables of `link_groups_as` that `link_modes` gives (`link_modes` itself for the default list).
+// Returns the list and its number of groups.
 /// The sorted list with every group linked in place (the reference's list after its concatenation).
-pub(super) fn link_groups(
+pub(super) fn link_groups<M>(
     hits: Vec<UngappedHit>,
     call: &Call<'_>,
     lap: &mut LinkLap,
-) -> (Vec<UngappedHit>, usize) {
-    link_groups_as(
-        hits,
-        call,
-        lap,
-        legacy_linking_requested(),
-        link_shadow_enabled(),
-    )
+    link_modes: M,
+) -> (Vec<UngappedHit>, usize)
+where
+    M: FnOnce() -> (bool, bool),
+{
+    let (use_legacy, fast_shadow) = link_modes();
+    link_groups_as(hits, call, lap, use_legacy, fast_shadow)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
@@ -400,9 +517,10 @@ pub(super) fn link_groups(
 //    number_of_hsps = hp_frame_number[frame_index];
 // ```
 // `link_groups` with the two variables that choose the literal port and size the scratch given
-// (the tests run both ways). The statements of the reference's group step in their order, with the
+// (`link_modes`; the tests run both ways, and a one-hit list with an HSP of length 0 or less asks
+// for the literal port). The statements of the reference's group step in their order, with the
 // cut replaced by the slices and the assembly by nothing.
-/// `link_groups` with `legacy_linking_requested()` and `link_shadow_enabled()` given.
+/// `link_groups` with `use_legacy` and `fast_shadow` given.
 fn link_groups_as(
     mut hits: Vec<UngappedHit>,
     call: &Call<'_>,
@@ -690,13 +808,11 @@ mod tests {
                 cutoff_small_gap: 20,
                 cutoff_big_gap: 20,
                 gap_prob: 0.5,
-                ignore_small_gaps: false,
             },
             LinkHspCutoffs {
                 cutoff_small_gap: 0,
                 cutoff_big_gap: 30,
                 gap_prob: 0.0,
-                ignore_small_gaps: true,
             },
         ]
     }

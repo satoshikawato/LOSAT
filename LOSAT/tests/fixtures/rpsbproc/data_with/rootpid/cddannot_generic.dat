@@ -1,0 +1,5 @@
+238274	cd00491	4Oxalocrotonate_Tautomerase	1	dimer interface	0	1	0	0	0,1,2,3,4,5,6,18,21,22,25,29,30	2
+238274	cd00491	4Oxalocrotonate_Tautomerase	2	hexamer interface	0	1	0	0	3,5,15,16,19,20,23,34,35,37,38,39,40,41,43,44,47,48,49,50,51,52,53,54,55	2
+238274	cd00491	4Oxalocrotonate_Tautomerase	3	active site 1	0	1	0	0	0,1,36	1
+238274	cd00491	4Oxalocrotonate_Tautomerase	4	active site 2	0	1	0	0	5,49	1
+319888	cd16366	FDH_beta_like	1	Fe-S cluster binding site	0	1	1	0	0,7,8,9,10,12,13,17,21,46,48,66,69,70,71,72,77,81,82,85,86,94,104,105,106,107,111,112,113,115,116,125,127,128,129,130,131,143,147,152	4

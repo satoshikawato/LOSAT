@@ -1,0 +1,61 @@
+# The ascii and optimized ascii counts files of blastn -window_masker_taxid <taxid> (line NP M3d), written to
+# LOSAT/target/winmask_blastn/taxid/<taxid>/wmasker.obinary by make_blastn_error_fixtures.py and tests/blastn_window_masker.rs.
+# Columns: taxid, base (a file of tests/winmask/counts/, or - for an empty one), then the edits, applied to the lines of the
+# base (split at each line feed; the text after the last one is the last, empty, line):
+#   N=TEXT  line N (from 1) becomes TEXT (\n inserts lines; \r \t \\ as written);  cut=N  only lines 1 to N are kept, each with
+#   its line feed;  crlf  the lines end with a carriage return and a line feed.
+# mg1655_u9.ascii: 504 metadata lines, 505 the unit size, 506-13873 the units, 13875-14380 comments, 14382-14385 t_low, t_extend,
+# t_threshold, t_high. mg1655_u9.oascii: 504 metadata lines, 505 AAAA, 506 the unit size, 507 "M k roff bc", 508-511 t_low,
+# t_extend, t_threshold, t_high, 512-131583 the hash table, 131584-135277 the values table.
+# The counts NCBI reads as written by windowmasker.
+11	mg1655_u9.ascii
+12	mg1655_u9.oascii
+13	mg1655_u9.oascii	crlf
+# Numbers and lines that give the counts of 11 and 12: a sign, spaces and tabs, hexadecimal and octal parameters, upper case,
+# comments, parameters NCBI does not read (unknown, or set already); for the optimized ascii, atoi's and >>'s stops.
+14	mg1655_u9.ascii	505=+9	506=  2 76	507=0x3 80	508=\t4\t99	509= \t5 \t 115	510=6 93\n# c\n	13873=3FD00 100	13874=#x	14382=>t_low +74	14383=>t_extend 0223	14384=>t_threshold\t \t0xAD	14385=>t_high 210\n>t_foo abc\n> 5\n>t_threshold abc\n>t_extend 0
+19	mg1655_u9.oascii	505=AAAAxyz	506= 9x	507=\t3694 17\t0 2 99 x	508=74abc	509= 147	510=+173
+# Counts that mask otherwise: t_low raised by a second line (NCBI's warning at each load), unit sizes 0 and 16, no unit size
+# line and no units (the default unit size 15), and the optimized ascii's truncations (t_high, a hash table line, values).
+15	mg1655_u9.ascii	14385=>t_high 210\n>t_low 80
+16	mg1655_u9.ascii	505=0
+17	mg1655_u9.ascii	505=16
+18	-	1=##windowmasker-statistics-format-version:ascii 1.1.0\n>t_low 74\n>t_extend 147\n>t_threshold 173\n>t_high 210\n
+20	mg1655_u9.oascii	511=99999999999	519=abc	131589=70000
+# Errors of the ascii reader: the parameters missing, a > line without a value, the conversions of the parameters (base 0),
+# of the unit size and the counts (base 10) and of the units (base 16), a unit line of one field, the order of the units, a
+# ##pct: line without its value, unit sizes whose window wraps (252) and above 16 (17, refused by LOSAT), the metadata's version.
+30	mg1655_u9.ascii	14382=	14383=	14384=	14385=
+31	mg1655_u9.ascii	14383=	14385=
+32	mg1655_u9.ascii	14384=>t_threshold
+33	mg1655_u9.ascii	14384=>t_threshold abc
+34	mg1655_u9.ascii	14384=>t_threshold 173\r
+35	mg1655_u9.ascii	14384=>t_threshold 99999999999999999999
+36	mg1655_u9.ascii	14384=>t_threshold 4294967296
+37	mg1655_u9.ascii	14384=>t_threshold 0x
+38	mg1655_u9.ascii	505=9x
+39	mg1655_u9.ascii	505=+
+40	mg1655_u9.ascii	505=99999999999999999999
+41	mg1655_u9.ascii	509=5
+42	mg1655_u9.ascii	509=5 -5
+43	mg1655_u9.ascii	509=1g 100
+44	mg1655_u9.ascii	13873=1ffffffff 100
+45	mg1655_u9.ascii	510=5 115
+46	mg1655_u9.ascii	4=##pct:
+47	mg1655_u9.ascii	505=252
+48	mg1655_u9.ascii	505=17
+49	mg1655_u9.ascii	2=##windowmasker-statistics-algorithm-version:99999999999.0.0
+50	mg1655_u9.ascii	2=##windowmasker-statistics-algorithm-version:.0.0
+# Errors of the optimized ascii reader: the unit size, the hash key size, the offset, the shift (a value >> fails to read, which
+# it sets to 0), a file that ends in the header, in the hash table and in the values table, a ##pct: line, a hash table past
+# the values; and a shift that >> does not reach (NCBI checks it uninitialized: refused by LOSAT).
+51	mg1655_u9.oascii	506=0
+52	mg1655_u9.oascii	507=3694 0 0 2
+53	mg1655_u9.oascii	507=3694 17 16 2
+54	mg1655_u9.oascii	507=3694 17 0 x
+55	mg1655_u9.oascii	cut=508
+56	mg1655_u9.oascii	cut=600
+57	mg1655_u9.oascii	cut=131600
+58	mg1655_u9.oascii	4=##pct:
+59	mg1655_u9.oascii	507=100 17 0 2
+60	mg1655_u9.oascii	507=3694 17 0

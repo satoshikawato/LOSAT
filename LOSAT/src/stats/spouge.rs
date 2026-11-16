@@ -1,4 +1,4 @@
-use crate::config::{ProteinScoringSpec, ScoringMatrix};
+use crate::config::ProteinScoringSpec;
 use crate::utils::x87::X87;
 
 use super::protein_options::{gap_costs_row, scoring_matrix_table};
@@ -24,7 +24,11 @@ use super::tables::KarlinParams;
 #[derive(Debug, Clone, Copy)]
 pub struct BlastGumbelBlk {
     pub lambda: f64,
+    // `C` and `G`: read by the tests that compare the table with NCBI's (`b`, `beta` and `tau`
+    // are made from `G` once).
+    #[cfg(test)]
     pub c: f64,
+    #[cfg(test)]
     pub g: f64,
     pub a: f64,
     pub alpha: f64,
@@ -84,7 +88,9 @@ pub fn lookup_protein_gumbel_params(
     let alpha_un = ungapped.0[9];
     Some(BlastGumbelBlk {
         lambda: row.0[3],
+        #[cfg(test)]
         c: row.0[8],
+        #[cfg(test)]
         g,
         a,
         alpha,
@@ -184,8 +190,13 @@ fn erfc_ncbi(z: f64) -> f64 {
     // `z`; ErfC reads nothing else, so this is reuse only.
     let key = z.to_bits();
     X_ERFC_MEMO.with(|memo| {
-        let mut memo = memo.borrow_mut();
-        let slot = (key.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 52) as usize;
+        let (memo, used) = &mut *memo.borrow_mut();
+        if memo.is_empty() {
+            // The allocation of the largest size, of which the slots in use are touched.
+            *memo = Vec::with_capacity(X_ERFC_MOST);
+            memo.resize(X_ERFC_FIRST, (u64::MAX, 0));
+        }
+        let slot = x_erfc_slot(key, memo.len());
         let (stored, value) = memo[slot];
         if stored == key {
             return f64::from_bits(value);
@@ -194,7 +205,21 @@ fn erfc_ncbi(z: f64) -> f64 {
         // A key of all ones marks an empty slot; that argument (a NaN) is
         // simply never stored.
         if key != u64::MAX {
+            *used += usize::from(stored == u64::MAX);
             memo[slot] = (key, result.to_bits());
+            if 2 * *used > memo.len() && memo.len() < X_ERFC_MOST {
+                // Twice the slots in the same allocation: the result in slot s moves to slot 2s
+                // or 2s + 1 (the next bit of its hash), taken from the last slot down, so that
+                // each lands on a slot already emptied or new.
+                let half = memo.len();
+                memo.resize(2 * half, (u64::MAX, 0));
+                for slot in (0..half).rev() {
+                    let (stored, value) = std::mem::replace(&mut memo[slot], (u64::MAX, 0));
+                    if stored != u64::MAX {
+                        memo[x_erfc_slot(stored, 2 * half)] = (stored, value);
+                    }
+                }
+            }
         }
         result
     })
@@ -210,10 +235,27 @@ fn erfc_ncbi(z: f64) -> f64 {
 //             e = BLAST_SpougeStoE(b, kbp, gbp, m, n);
 // ```
 // No NCBI counterpart: a per-thread table of (argument bits, result bits) for `erfc_ncbi`.
-// It holds earlier ErfC results of the loop above and changes no value.
+// It holds earlier ErfC results of the loop above and changes no value. It uses `X_ERFC_FIRST`
+// slots and doubles them while more than half hold a result, up to `X_ERFC_MOST`, in one
+// allocation of `X_ERFC_MOST` slots of which only the slots in use are written, so that a thread
+// that computes a few values touches a few pages (with 64 threads every thread of a search
+// computes some, and a table of the largest size each was 4 MiB). A new table for each doubling
+// left the outgrown ones in the thread's heap (+60 KiB of RssAnon at one thread), and one step
+// from 64 to 4,096 slots touched 64 KiB in threads that needed fewer (+1-3 MiB at 48 threads).
 thread_local! {
-    static X_ERFC_MEMO: std::cell::RefCell<Vec<(u64, u64)>> =
-        std::cell::RefCell::new(vec![(u64::MAX, 0); 4096]);
+    static X_ERFC_MEMO: std::cell::RefCell<(Vec<(u64, u64)>, usize)> =
+        const { std::cell::RefCell::new((Vec::new(), 0)) };
+}
+
+// No NCBI counterpart: the first and the largest number of slots of `X_ERFC_MEMO`.
+const X_ERFC_FIRST: usize = 64;
+const X_ERFC_MOST: usize = 4096;
+
+// No NCBI counterpart: the slot of `key` in a table of `slots` slots (a power of two): the top
+// bits of the hash.
+#[inline]
+fn x_erfc_slot(key: u64, slots: usize) -> usize {
+    (key.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> (64 - slots.trailing_zeros())) as usize
 }
 
 // NCBI c++/src/algo/blast/core/boost_erf.c:52-244:
@@ -720,6 +762,23 @@ mod tests {
     }
 
     use super::*;
+    use crate::config::ScoringMatrix;
+
+    #[test]
+    fn x_erfc_memo_keeps_the_reference_bits_as_it_grows() {
+        // No NCBI counterpart (reuse only): `X_ERFC_MEMO` grows from 64 to 4,096 slots as this
+        // thread fills it; every value, computed or read back after the growth, is ErfC's.
+        let zs: Vec<f64> = (0..6_000).map(|i| -5.9 + f64::from(i) * 1.9e-3).collect();
+        for _ in 0..2 {
+            for &z in &zs {
+                assert_eq!(
+                    erfc_ncbi(z).to_bits(),
+                    erf_impl_ncbi(z, true).to_bits(),
+                    "z={z:e}"
+                );
+            }
+        }
+    }
 
     // LOSAT_X_ERFABSORB (graduated 2026-10-26): the reference ErfC is 2.0 for every z < -6, and
     // `erfc_ncbi`, which does not call it there, has the reference's bits everywhere.
@@ -972,7 +1031,20 @@ mod tests {
                 f[1].parse().unwrap(),
                 f[2].parse().unwrap(),
             );
-            assert_eq!(actual.to_bits(), hex(f[4]), "{row}");
+            let want = hex(f[4]);
+            // The ErfC port above is plain double and double-double arithmetic, so its rows
+            // are exact on every platform. `blast_spouge_stoe` also calls the platform `exp`
+            // three times (the two `exp(-0.5 * f * f)` terms and `exp(-lambda * y)`), and the
+            // E value multiplies them into a product. Apple's libm differs from glibc's by
+            // an ULP per call (PD-LOSAT-PLATFORM-LIBM): platform-checks run 41062695644 read
+            // 2 ULP on macOS arm64 (row `54521 99 256`) and 4 ULP on macOS x64 (row
+            // `24337 600 112`). macOS accepts up to 8 ULP, every other OS stays exact.
+            let max_ulp = if cfg!(target_os = "macos") { 8 } else { 0 };
+            assert!(
+                actual.to_bits().abs_diff(want) <= max_ulp,
+                "{row}: bits {} want {want} (at most {max_ulp} ULP apart)",
+                actual.to_bits()
+            );
         }
         assert_eq!((erfc.lines().count(), spouge.lines().count()), (337, 177));
     }

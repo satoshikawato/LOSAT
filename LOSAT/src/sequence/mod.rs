@@ -4,7 +4,5 @@
 //! including the 2-bit packed nucleotide format used by NCBI BLAST.
 
 pub mod packed_letters;
-pub mod packed_nucleotide;
 pub mod packed_subject;
-
-pub use packed_nucleotide::*;
+pub(crate) mod stdaa_letters;

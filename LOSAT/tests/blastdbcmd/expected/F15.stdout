@@ -1,0 +1,23 @@
+0|XP_000001.1|ref|XP_000001.1||N/A|alpha protein [Homo sapiens]|9606|0|137|0XC595E30F|-1
+0|P99999.2|sp|P99999.2|TEST_HUMAN|N/A|alpha-like protein|10090|0|137|0XC595E30F|-1
+0|AAA00001.1|gb|AAA00001.1||N/A|hypothetical protein, partial|9606|0|137|0XC595E30F|-1
+1|NP_000002.1|ref|NP_000002.1||123456|gi plus ref protein|10116|0|137|0X53F607B3|-1
+2|Q00003|sp|Q00003|ABC_MOUSE|N/A|swissprot without version|0|0|137|0XB8D40B43|-1
+3|A0A000|tr|A0A000|A0A000_YEAST|N/A|trembl entry|0|0|137|0XBD335EFB|-1
+4|1ABC_A|pdb|1ABC|A|N/A|Chain A, test structure|0|0|137|0X376E3E68|-1
+5|CAA00005.1|emb|CAA00005.1||N/A|emb protein|0|0|137|0XEEB94938|-1
+6|BAA00006.1|dbj|BAA00006.1||N/A|dbj protein|0|0|137|0XF37FBFDD|-1
+7|pir||S00007|pir||S00007|N/A|pir protein|0|0|137|0X1848DC7F|-1
+8|prf||0008123A|prf||0008123A|N/A|prf protein|0|0|137|0XEB349DDB|-1
+9|myprot9|lcl|myprot9|N/A|local id protein|0|0|137|0X81AE070C|-1
+10|mydb:prot10|gnl|mydb|prot10|N/A|general id protein|0|0|137|0XA2A1EE74|-1
+11|XP_000011.2|ref|XP_000011.2||N/A|bare refseq accession|0|0|137|0X16AEB849|-1
+12|P00012|sp|P00012||N/A|bare uniprot-like accession|0|0|137|0X40F6C4E9|-1
+13|myprot_13|lcl|myprot_13|N/A|bare non-accession word|0|0|137|0X9F407161|-1
+14|gi|1414|gi|1414|1414|gi only|0|0|137|0XAB4DF058|-1
+15|DAA00016.1|tpg|DAA00016.1||N/A|third-party protein|0|0|137|0X62BA9C93|-1
+16|AAA00017.1|gb|AAA00017.1|LOCUS17|N/A|gb with a locus name|0|0|137|0XFF03598F|-1
+17|AAA00018.1|gb|AAA00018.1||1818||562|0|137|0XFDCF9AA3|-1
+17|CAA00019.1|emb|CAA00019.1||1819|second defline|562|0|137|0XFDCF9AA3|-1
+17|XP_000020.1|ref|XP_000020.1||1820|third defline|9606|0|137|0XFDCF9AA3|-1
+18|P00019.3|sp|P00019.3|NAME_HUMAN|N/A|with taxid|9606|0|137|0X72C5BC01|-1

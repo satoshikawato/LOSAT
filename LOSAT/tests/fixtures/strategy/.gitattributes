@@ -1,0 +1,5 @@
+# Frozen bytes: no line-ending conversion.
+*.ss -text
+*.out -text
+*.err -text
+*.tsv -text

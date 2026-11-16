@@ -1,0 +1,5 @@
+Warning: [blastp] Examining 5 or more matches is recommended
+Warning: [blastp] Query_1 BDT63074.1 tyrosi.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
+Warning: [blastp] Query_2 nohit a query without hits: Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
+Warning: [blastp] Query_3 BDT63075.1 wsv226.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
+Warning: [blastp] Query_4 BDT63076.1 hypoth.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 

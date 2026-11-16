@@ -1,0 +1,197 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/of1/tns.fa).
+           6 sequences; 2,345 total letters
+
+
+
+Query= tnq protein query
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+t_mins minus insertion                                                189     4e-67
+t_mdel minus deletion                                                 175     8e-62
+t_ins plus insertion                                                  173     4e-61
+t_pm both strands                                                     138     2e-46
+t_fr two frames                                                       133     7e-45
+t_code alt codons                                                     128     2e-43
+
+
+
+Query_1    1    AYTHGMRFCPKVKQQCTFYC  20
+Subject_5  342  AYTHGMRFCPKVKQQCTFYC  283
+Subject_3  1    AYTVGMRFCPKVKQQCTFYC  60
+Subject_1  1    AYTHGMRFCPKVKQQCTFYC  60
+Subject_2  1    AYTHGMRFCFKVKQQCTFMC  60
+Subject_6  1              KVKQICTFYC  30
+
+Query_1    21   MEQDNVTQVMVCSFKTEDFS  40
+Subject_4  369  MEQDNVTQVMVDSFKTEDFS  310
+Subject_5  282  MEQDNVTQVMVCSFKVEDFS  223
+Subject_3  61   AEQDNVTQVMVCSFKTEDFS  120
+Subject_1  61   MEQDNVTEVMVRPFKTEDFS  120
+Subject_2  61   MEQMNVTQVMVCSDKTEDFS  120
+Subject_2  241                RRARYT  224
+Subject_6  31   MEQDN*TIVMRCSFKTEDFY  90
+
+Query_1    41   THGTIWKHCMWKCWDTSFPT  60
+Subject_4  309  THGTIWKHCMGKCWDTSFPT  250
+Subject_5  222  THGTIWWHCM------SFPT  181
+Subject_3  133  THGTIWKHCMWNCWDTSFPT  192
+                \                   
+                |                   
+                WWHW
+Subject_1  121  THGTFWKHCMWKCWDTSFKT  180
+Subject_2  167       WKHCMWKCWDTSFPY  211
+Subject_2  121  THGTIWKHCMWKCWD       165
+Subject_2  223  VRLAVWKRCVPALPHTVFP   167
+Subject_6  91   THGTIWRHIMWKRWDRSFPT  150
+
+Query_1    61   SKSHCVTCTSqqqqqqqqqq  80
+Subject_4  249  KKSHCVTCTSFKTLPGDHIH  181
+                 \                  
+                 |                  
+                PRH
+Subject_5  180  SKSPCVTCTSSKTLPGDHIH  121
+Subject_3  193  SKSHIVTCTSSKTLPGDHIH  252
+Subject_1  541  SKSRCVTCTSSKTLPGDHHH  482
+Subject_1  181  SKSHCVTCTS            210
+Subject_2  212  SKSHCVTCTSSKTLPGDHIH  271
+Subject_6  151  SKRHCVTCTSSKSLPGDHIH  210
+
+Query_1    81   qqqqqqeqFSANDWFCRWRF  100
+Subject_4  180  LQRIAVEQFSANDWFCRWRF  121
+Subject_5  120  LQRIAVEQFSANDQFCQWRF  61
+Subject_3  253  LQRIAVEQFSANDWFCRWRF  312
+Subject_1  481  LQRIAVEQFSANDWFCRWRG  422
+Subject_2  272  LQRIAVEQFSANDWFCRWDF  331
+Subject_6  211  LQRIAVEQFSATDTRCR*RR  270
+
+Query_1    101  CFKGWLINPDVPCPTKVRVD  120
+Subject_4  120  CFKGWLINPDVPCPTKGRVY  61
+Subject_5  60   CFKGWLIPPDVPCPTKVRVD  1
+Subject_3  313  CFKGWLINPD            342
+Subject_1  421  CFKGWLINPDVPCRTKVRVD  362
+Subject_2  332  CFKGWLINPDVPCPTKVRVN  391
+Subject_6  271  CTK*WLINPDVPRP*KVRVD  330
+
+Query_1    121  TYLNCGCCEVWDKEITESDA  140
+Subject_4  60   TYLNCGCCEVWDKEITESDA  1
+Subject_1  361  TYLNCGCCEVWDKEITEVDA  302
+Subject_2  392  TYLNCGCCEV            421
+
+Query_1    141  QNYIHEANAE  150
+Subject_1  301  QNYIHEANAE  272
+
+
+Lambda      K        H        a         alpha
+   0.326    0.135    0.513    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 76137
+
+
+Query= tnq2 second
+
+Length=110
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+t_mins minus insertion                                                170     2e-60
+t_fr two frames                                                       150     3e-52
+t_ins plus insertion                                                  131     3e-45
+t_mdel minus deletion                                                 126     3e-43
+t_pm both strands                                                     120     5e-40
+t_code alt codons                                                     114     1e-38
+
+
+
+Query_2    1    VCSFKTEDFSTFGTIWKHCM  20
+Subject_4  339  VDSFKTEDFSTHGTIWKHCM  280
+Subject_2  167                 WKHCM  181
+Subject_2  91   VCSDKTEDFSTHGTIWKHCM  150
+Subject_2  241      RRARYTVRLAVWKRCV  194
+Subject_3  91   VCSFKTEDFSTHGTIWKHCM  162
+                          \         
+                          |         
+                       WWHW
+Subject_5  252  VCSFKVEDFSTHGTIWWHCM  193
+Subject_1  91   VRPFKTEDFSTHGTFWKHCM  150
+Subject_6  64    CSFKTEDFYTHGTIWRHIM  120
+
+Query_2    21   WKCWDTSFDTSKSHCATCTS  40
+Subject_4  279  GKCWDTSFPTKKSHCVTCTS  211
+                           \        
+                           |        
+                         PRH
+Subject_2  182  WKCWDTSFPYSKSHCVTCTS  241
+Subject_2  151  WKCWD                 165
+Subject_3  163  WNCWDTSFPTSKSHIVTCTS  222
+Subject_5  192  ------SFPTSKSPCVTCTS  151
+Subject_1  541            SKSRCVTCTS  512
+Subject_1  151  WKCWDTSFKTSKSHCVTCTS  210
+Subject_6  121  WKRWDRSFPTSKRHCVTCTS  180
+
+Query_2    41   EKTLYGDHIILQRIAVSVFS  60
+Subject_4  210  FKTLPGDHIHLQRIAVEQFS  151
+Subject_2  242  SKTLPGDHIHLQRIAVEQFS  301
+Subject_3  223  SKTLPGDHIHLQRIAVEQFS  282
+Subject_5  150  SKTLPGDHIHLQRIAVEQFS  91
+Subject_1  511  SKTLPGDHHHLQRIAVEQFS  452
+Subject_1  211  SKTLPGDHI             237
+Subject_6  181  SKSLPGDHIHLQRIAVEQFS  240
+
+Query_2    61   ANDWRCRWRFCFKSWLINPY  80
+Subject_4  150  ANDWFCRWRFCFKGWLINPD  91
+Subject_2  302  ANDWFCRWDFCFKGWLINPD  361
+Subject_3  283  ANDWFCRWRFCFKGWLINP   339
+Subject_5  90   ANDQFCQWRFCFKGWLIPPD  31
+Subject_1  451  ANDWFCRWRGCFKGWLINPD  392
+Subject_6  241  ATDTRCR*RRCTK*WLINPD  300
+
+Query_2    81   VPCPTKVRVDTYLNCGCCEV  100
+Subject_4  90   VPCPTKGRVYTYLNCGCCEV  31
+Subject_2  362  VPCPTKVRVNTYLNCGCCEV  421
+Subject_5  30   VPCPTKVRVD            1
+Subject_1  391  VPCRTKVRVDTYLNCGCCEV  332
+Subject_6  301  VPRP*KVRVD            330
+
+Query_2    101  TGKVITESKA  110
+Subject_4  30   WDKEITESDA  1
+Subject_1  331  WDKEITEVDA  302
+
+
+Lambda      K        H        a         alpha
+   0.327    0.135    0.505    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 54782
+
+
+  Database: User specified sequence set (Input: tests/db_search/of1/tns.fa).
+    Posted date:  Unknown
+  Number of letters in database: 2,345
+  Number of sequences in database:  6
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

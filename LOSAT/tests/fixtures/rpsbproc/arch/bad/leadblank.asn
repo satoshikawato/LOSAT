@@ -1,0 +1,173 @@
+
+
+   	Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "rpsblast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">NP_414783.1 protein YkfF [Escherichia coli str.
+ K-12 substr. MG1655]"
+                  }
+                }
+              },
+              title "NP_414783.1 protein YkfF [Escherichia coli str. K-12
+ substr. MG1655]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 79,
+              seq-data ncbieaa "MTQSVLLPPGPFTRRQAQAVTTTYSNITLEDDQGSHFRLVVRDTEG
+RMVWRAWNFEPDAGEGLNRYIRTSGIRTDTATR"
+            }
+          }
+        }
+      },
+      subject database "Cdd",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -2 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 1
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "DbLength",
+          value big-integer 15821058
+        },
+        {
+          name "MatrixName",
+          value string "BLOSUM62"
+        },
+        {
+          name "GapOpeningCost",
+          value integer 11
+        },
+        {
+          name "GapExtensionCost",
+          value integer 1
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 399285312
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 337
+          },
+          {
+            id str "blast_score",
+            value int 337
+          },
+          {
+            id str "e_value",
+            value real { 504742318164089, 10, -57 }
+          },
+          {
+            id str "bit_score",
+            value real { 133903752533461, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 60
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "num_positives",
+            value int 63
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 891075949367089, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            general {
+              db "CDD",
+              tag id 488084
+            }
+          },
+          starts {
+            4,
+            0
+          },
+          lens {
+            70
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 318894682407865, 10, -15 },
+        k { 132560830496981, 10, -15 },
+        h { 404681998198166, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 399285312",
+      "Effective search space used: 399285312",
+      "Length adjustment: 47"
+    }
+  }
+}

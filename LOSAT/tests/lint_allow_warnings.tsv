@@ -1,0 +1,4 @@
+# The Rust files that may keep a blanket `#![allow(warnings ...)]` (LOSAT/tests/check_lint_allow_ratchet.py).
+# Fixed at dev 8a5656f7f (2026-11-05) with lib.rs, main.rs and 23 test files; empty since every file dropped
+# the attribute (2026-11-06). Never add a row.
+path

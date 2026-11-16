@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "pshare_b",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pshare_b",
+  "number-of-letters": 220,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-02T23:24:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49718,
+  "bytes-to-cache": 326,
+  "files": [
+    "pshare_b.pdb",
+    "pshare_b.phr",
+    "pshare_b.pin",
+    "pshare_b.pog",
+    "pshare_b.pos",
+    "pshare_b.pot",
+    "pshare_b.psq",
+    "pshare_b.ptf",
+    "pshare_b.pto"
+  ]
+}

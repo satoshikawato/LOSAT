@@ -1,0 +1,22 @@
+{
+  "version": "1.2",
+  "dbname": "ambig",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "in/ambig.fa",
+  "number-of-letters": 417,
+  "number-of-sequences": 5,
+  "last-updated": "2026-11-13T08:12:00",
+  "number-of-volumes": 1,
+  "bytes-total": 37886,
+  "bytes-to-cache": 559,
+  "files": [
+    "ambig.pdb",
+    "ambig.phr",
+    "ambig.pin",
+    "ambig.pot",
+    "ambig.psq",
+    "ambig.ptf",
+    "ambig.pto"
+  ]
+}

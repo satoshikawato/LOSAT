@@ -1,0 +1,99 @@
+Blast-db-mask-info ::= {
+  algo-id 2,
+  algo-program dust,
+  algo-options "window=64; level=20; linker=1",
+  masks {
+    masks {
+      int {
+        from 120,
+        to 181,
+        id gi 123
+      },
+      int {
+        from 120,
+        to 179,
+        id other {
+          accession "NC_000002",
+          version 2
+        }
+      },
+      int {
+        from 120,
+        to 179,
+        id local str "abc"
+      },
+      int {
+        from 119,
+        to 179,
+        id general {
+          db "mydb",
+          tag str "tag1"
+        }
+      },
+      int {
+        from 120,
+        to 179,
+        id swissprot {
+          name "NAME_HUMAN",
+          accession "P12345",
+          release "reviewed",
+          version 1
+        }
+      },
+      int {
+        from 120,
+        to 179,
+        id pdb {
+          mol "1ABC",
+          chain 65,
+          chain-id "A"
+        }
+      },
+      int {
+        from 119,
+        to 179,
+        id embl {
+          accession "CAA12345",
+          version 1
+        }
+      },
+      int {
+        from 119,
+        to 180,
+        id genbank {
+          name "LOCUSX",
+          accession "AAB00001",
+          version 1
+        }
+      },
+      int {
+        from 120,
+        to 179,
+        id local str "XYZ_9"
+      },
+      int {
+        from 119,
+        to 179,
+        id local id 5
+      },
+      int {
+        from 120,
+        to 180,
+        id general {
+          db "db2",
+          tag id 123
+        }
+      },
+      int {
+        from 119,
+        to 179,
+        id other {
+          name "foo",
+          accession "NC_000003",
+          version 1
+        }
+      }
+    },
+    more FALSE
+  }
+}

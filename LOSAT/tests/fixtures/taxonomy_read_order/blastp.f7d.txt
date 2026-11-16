@@ -1,0 +1,10 @@
+# BLASTP 2.17.0+
+# Query: q
+# Database: ids/txr_p
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+q	AAA00001.1	90.000	250	25	0	1	250	1	250	2.78e-171	461
+Error: [blastp] Error: Offset error at end of taxdb file.
+q	BBB00001.1	75.200	250	62	0	1	250	1	250	5.34e-135	369
+q	DDD00001.1	24.444	45	27	2	32	69	132	176	8.9	14.2
+# BLAST processed 1 queries

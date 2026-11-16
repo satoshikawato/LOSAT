@@ -1,0 +1,151 @@
+# RPSBLAST 2.17.0+
+# Query: YP_009220476.1 envelope protein [White spot syndrome virus]
+# Database: rps_mini
+# 0 hits found
+# RPSBLAST 2.17.0+
+# Query: YP_009220478.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini
+# 0 hits found
+# RPSBLAST 2.17.0+
+# Query: YP_009220482.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini
+# 0 hits found
+# RPSBLAST 2.17.0+
+# Query: YP_009220483.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini
+# 0 hits found
+# RPSBLAST 2.17.0+
+# Query: YP_009220649.1 DNA polymerase [White spot syndrome virus]
+# Database: rps_mini
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+YP_009220649.1	CDD:103	100.000	190	0	0	1101	1290	1	190	1.95e-116	354
+# RPSBLAST 2.17.0+
+# Query: YP_009220484.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini
+# 0 hits found
+# RPSBLAST 2.17.0+
+# Query: YP_009220489.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+YP_009220489.1	CDD:102	26.000	50	33	2	31	76	89	138	1.1	16.2
+# RPSBLAST 2.17.0+
+# Query: YP_009220491.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini
+# 0 hits found
+# RPSBLAST 2.17.0+
+# Query: YP_009220493.1 thymidylate synthetase [White spot syndrome virus]
+# Database: rps_mini
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+YP_009220493.1	CDD:101	21.277	47	37	0	26	72	124	170	1.7	16.3
+# RPSBLAST 2.17.0+
+# Query: YP_009220496.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini
+# 0 hits found
+# RPSBLAST 2.17.0+
+# Query: YP_009220497.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini
+# 0 hits found
+# RPSBLAST 2.17.0+
+# Query: YP_009220507.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini
+# 0 hits found
+# RPSBLAST 2.17.0+
+# Query: YP_009220508.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini
+# 0 hits found
+# RPSBLAST 2.17.0+
+# Query: YP_009220514.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini
+# 0 hits found
+# RPSBLAST 2.17.0+
+# Query: YP_009220516.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini
+# 0 hits found
+# RPSBLAST 2.17.0+
+# Query: YP_009220517.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+YP_009220517.1	CDD:103	21.918	73	56	1	61	132	37	109	1.4	15.9
+# RPSBLAST 2.17.0+
+# Query: YP_009220519.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+YP_009220519.1	CDD:103	27.273	44	22	2	134	177	49	82	0.82	17.4
+# RPSBLAST 2.17.0+
+# Query: YP_009220525.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini
+# 0 hits found
+# RPSBLAST 2.17.0+
+# Query: YP_009220529.1 ribonucleotide reductase large subunit [White spot syndrome virus]
+# Database: rps_mini
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+YP_009220529.1	CDD:102	100.000	180	0	0	301	480	1	180	8.60e-122	353
+# RPSBLAST 2.17.0+
+# Query: YP_009220531.1 immediate-early protein [White spot syndrome virus]
+# Database: rps_mini
+# 0 hits found
+# RPSBLAST 2.17.0+
+# Query: YP_009220533.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini
+# 0 hits found
+# RPSBLAST 2.17.0+
+# Query: YP_009220535.1 ribonucleotide reductase small subunit [White spot syndrome virus]
+# Database: rps_mini
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+YP_009220535.1	CDD:101	19.608	51	32	1	179	229	93	134	3.5	15.9
+# RPSBLAST 2.17.0+
+# Query: YP_009220536.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini
+# 0 hits found
+# RPSBLAST 2.17.0+
+# Query: YP_009220538.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini
+# 0 hits found
+# RPSBLAST 2.17.0+
+# Query: YP_009220539.1 envelope protein [White spot syndrome virus]
+# Database: rps_mini
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+YP_009220539.1	CDD:103	24.194	62	45	1	90	149	26	87	0.67	17.4
+# RPSBLAST 2.17.0+
+# Query: YP_009220541.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini
+# 0 hits found
+# RPSBLAST 2.17.0+
+# Query: YP_009220543.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini
+# 0 hits found
+# RPSBLAST 2.17.0+
+# Query: YP_009220544.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini
+# 0 hits found
+# RPSBLAST 2.17.0+
+# Query: YP_009220553.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini
+# 0 hits found
+# RPSBLAST 2.17.0+
+# Query: YP_009220554.1 envelope protein [White spot syndrome virus]
+# Database: rps_mini
+# 0 hits found
+# RPSBLAST 2.17.0+
+# Query: YP_009220556.1 envelope protein [White spot syndrome virus]
+# Database: rps_mini
+# 0 hits found
+# RPSBLAST 2.17.0+
+# Query: YP_009220561.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini
+# 0 hits found
+# RPSBLAST 2.17.0+
+# Query: YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase [White spot syndrome virus]
+# Database: rps_mini
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+YP_009220601.1	CDD:101	100.000	190	0	0	1	190	1	190	4.60e-113	317
+# BLAST processed 33 queries

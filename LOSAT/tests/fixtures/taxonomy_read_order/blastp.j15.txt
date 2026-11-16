@@ -1,0 +1,264 @@
+{
+"BlastOutput2": [
+Error: [blastp] Error: Offset error at end of taxdb file.
+Error: [blastp] Error: Offset error at end of taxdb file.
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "ids/txr_p"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "q",
+          "query_len": 250,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gb|AAA00001.1|",
+                  "accession": "AAA00001",
+                  "title": "a_title",
+                  "taxid": 9606,
+                  "sciname": "Homo sapiens"
+                }
+              ],
+              "len": 250,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 461.455,
+                  "score": 1186,
+                  "evalue": 2.77505e-171,
+                  "identity": 225,
+                  "positive": 227,
+                  "query_from": 1,
+                  "query_to": 250,
+                  "hit_from": 1,
+                  "hit_to": 250,
+                  "align_len": 250,
+                  "gaps": 0,
+                  "qseq": "RKNGRMWEGDCSSKFLNEYKVHDHDCSMDENQIKLSRRFHGGQNGSSHQLCFYKRPFEKAPPDMVHSHRNSQLIAINVSKAHWGPGTWLEPVKLSQCDENTAEKEGRGTKDRGPVKLKEQTWWPGKMKITWIHMCNVCGIQTYALGWSTDPLKIAYTAIYIDMWRIWHVIMFSNSNWTNGTGRAPLRYAKIAIIKVLCMTAWNGIVPFGEMSIGHRHKDVKGPCICHNNHVPCRRKMTCDWMHDTMHKWG",
+                  "hseq": "RKNGRMWEGDQSSKFLNEYKVHDHDCSMDENQDKLSRNFHGGQNGSSHFLCFYKRPFEKTPPDMVHAHRNSQLIAIKVSKAHWGPGTWLEPVKLSDCDANTPEKEGRGTKDRGPVKLKEQTWWPGTMKITWIHMHNVCGIQTYAPGWSTDPLKIAYTAIYIDMWRQWGVIMFSNLNWTNGTGRAPLRYAKIAIIKVLCITASNGIVYFGEMSIGHRHKDVKSPPICHNNECPKRHKMTCDWMHDTMHKWG",
+                  "midline": "RKNGRMWEGD SSKFLNEYKVHDHDCSMDENQ KLSR FHGGQNGSSH LCFYKRPFEK PPDMVH+HRNSQLIAI VSKAHWGPGTWLEPVKLS CD NT EKEGRGTKDRGPVKLKEQTWWPG MKITWIHM NVCGIQTYA GWSTDPLKIAYTAIYIDMWR W VIMFSN NWTNGTGRAPLRYAKIAIIKVLC+TA NGIV FGEMSIGHRHKDVK P ICHNN  P R KMTCDWMHDTMHKWG"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "gb|BBB00001.1|"
+                }
+              ],
+              "len": 250,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 369.392,
+                  "score": 947,
+                  "evalue": 5.34086e-135,
+                  "identity": 188,
+                  "positive": 195,
+                  "query_from": 1,
+                  "query_to": 250,
+                  "hit_from": 1,
+                  "hit_to": 250,
+                  "align_len": 250,
+                  "gaps": 0,
+                  "qseq": "RKNGRMWEGDCSSKFLNEYKVHDHDCSMDENQIKLSRRFHGGQNGSSHQLCFYKRPFEKAPPDMVHSHRNSQLIAINVSKAHWGPGTWLEPVKLSQCDENTAEKEGRGTKDRGPVKLKEQTWWPGKMKITWIHMCNVCGIQTYALGWSTDPLKIAYTAIYIDMWRIWHVIMFSNSNWTNGTGRAPLRYAKIAIIKVLCMTAWNGIVPFGEMSIGHRHKDVKGPCICHNNHVPCRRKMTCDWMHDTMHKWG",
+                  "hseq": "RKNGRMWESDCSSKALNEYKVHDHDCHHDENQVKLESRFHGGQQGFVHFLCFYKRPDEKAPPDLGHSHRNSKLIAQNWSKAHMGPGDWLECVKLQQYDENAAQKEGRVGKGRGPVKRKEQTWWRGKDKITHIEMCQDEGIQTYALGWVNDPLKITATAIYIDMWRICYVPNTSNSNVTNGTGAAPLGYAKLAIIKTLCMHTWGGAEWFGEMSIGHRHKDVKGPDICHCARVPCRRKMYCDWSHNTMHKWG",
+                  "midline": "RKNGRMWE DCSSK LNEYKVHDHDC  DENQ+KL  RFHGGQ G  H LCFYKRP EKAPPD+ HSHRNS+LIA N SKAH GPG WLE VKL Q DEN A+KEGR  K RGPVK KEQTWW GK KIT I MC   GIQTYALGW  DPLKI  TAIYIDMWRI +V   SNSN TNGTG APL YAK+AIIK LCM  W G   FGEMSIGHRHKDVKGP ICH   VPCRRKM CDW H+TMHKWG"
+                }
+              ]
+            },
+            {
+              "num": 3,
+              "description": [
+                {
+                  "id": "gb|DDD00001.1|",
+                  "accession": "DDD00001",
+                  "title": "decoy",
+                  "taxid": 9606,
+                  "sciname": "Homo sapiens"
+                }
+              ],
+              "len": 250,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 14.2382,
+                  "score": 25,
+                  "evalue": 8.87903,
+                  "identity": 11,
+                  "positive": 19,
+                  "query_from": 32,
+                  "query_to": 69,
+                  "hit_from": 132,
+                  "hit_to": 176,
+                  "align_len": 45,
+                  "gaps": 7,
+                  "qseq": "QIKLSRRFHGGQNGS----SHQLCFYKRPFEKAPP---DMVHSHR",
+                  "hseq": "QVKQNPIFDGFIIASWGKLAFQVNYWMFTYCRVPPPPESPCHDHR",
+                  "midline": "Q+K +  F G    S    + Q+ ++   + + PP      H HR"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 3,
+            "db_len": 750,
+            "hsp_len": 31,
+            "eff_space": 143883,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+Error: [blastp] Error: Offset error at end of taxdb file.
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "ids/txr_p"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_2",
+          "query_title": "qb",
+          "query_len": 250,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gb|AAA00001.1|",
+                  "accession": "AAA00001",
+                  "title": "a_title",
+                  "taxid": 9606,
+                  "sciname": "Homo sapiens"
+                }
+              ],
+              "len": 250,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 461.455,
+                  "score": 1186,
+                  "evalue": 2.77505e-171,
+                  "identity": 225,
+                  "positive": 227,
+                  "query_from": 1,
+                  "query_to": 250,
+                  "hit_from": 1,
+                  "hit_to": 250,
+                  "align_len": 250,
+                  "gaps": 0,
+                  "qseq": "RKNGRMWEGDCSSKFLNEYKVHDHDCSMDENQIKLSRRFHGGQNGSSHQLCFYKRPFEKAPPDMVHSHRNSQLIAINVSKAHWGPGTWLEPVKLSQCDENTAEKEGRGTKDRGPVKLKEQTWWPGKMKITWIHMCNVCGIQTYALGWSTDPLKIAYTAIYIDMWRIWHVIMFSNSNWTNGTGRAPLRYAKIAIIKVLCMTAWNGIVPFGEMSIGHRHKDVKGPCICHNNHVPCRRKMTCDWMHDTMHKWG",
+                  "hseq": "RKNGRMWEGDQSSKFLNEYKVHDHDCSMDENQDKLSRNFHGGQNGSSHFLCFYKRPFEKTPPDMVHAHRNSQLIAIKVSKAHWGPGTWLEPVKLSDCDANTPEKEGRGTKDRGPVKLKEQTWWPGTMKITWIHMHNVCGIQTYAPGWSTDPLKIAYTAIYIDMWRQWGVIMFSNLNWTNGTGRAPLRYAKIAIIKVLCITASNGIVYFGEMSIGHRHKDVKSPPICHNNECPKRHKMTCDWMHDTMHKWG",
+                  "midline": "RKNGRMWEGD SSKFLNEYKVHDHDCSMDENQ KLSR FHGGQNGSSH LCFYKRPFEK PPDMVH+HRNSQLIAI VSKAHWGPGTWLEPVKLS CD NT EKEGRGTKDRGPVKLKEQTWWPG MKITWIHM NVCGIQTYA GWSTDPLKIAYTAIYIDMWR W VIMFSN NWTNGTGRAPLRYAKIAIIKVLC+TA NGIV FGEMSIGHRHKDVK P ICHNN  P R KMTCDWMHDTMHKWG"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "gb|BBB00001.1|"
+                }
+              ],
+              "len": 250,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 369.392,
+                  "score": 947,
+                  "evalue": 5.34086e-135,
+                  "identity": 188,
+                  "positive": 195,
+                  "query_from": 1,
+                  "query_to": 250,
+                  "hit_from": 1,
+                  "hit_to": 250,
+                  "align_len": 250,
+                  "gaps": 0,
+                  "qseq": "RKNGRMWEGDCSSKFLNEYKVHDHDCSMDENQIKLSRRFHGGQNGSSHQLCFYKRPFEKAPPDMVHSHRNSQLIAINVSKAHWGPGTWLEPVKLSQCDENTAEKEGRGTKDRGPVKLKEQTWWPGKMKITWIHMCNVCGIQTYALGWSTDPLKIAYTAIYIDMWRIWHVIMFSNSNWTNGTGRAPLRYAKIAIIKVLCMTAWNGIVPFGEMSIGHRHKDVKGPCICHNNHVPCRRKMTCDWMHDTMHKWG",
+                  "hseq": "RKNGRMWESDCSSKALNEYKVHDHDCHHDENQVKLESRFHGGQQGFVHFLCFYKRPDEKAPPDLGHSHRNSKLIAQNWSKAHMGPGDWLECVKLQQYDENAAQKEGRVGKGRGPVKRKEQTWWRGKDKITHIEMCQDEGIQTYALGWVNDPLKITATAIYIDMWRICYVPNTSNSNVTNGTGAAPLGYAKLAIIKTLCMHTWGGAEWFGEMSIGHRHKDVKGPDICHCARVPCRRKMYCDWSHNTMHKWG",
+                  "midline": "RKNGRMWE DCSSK LNEYKVHDHDC  DENQ+KL  RFHGGQ G  H LCFYKRP EKAPPD+ HSHRNS+LIA N SKAH GPG WLE VKL Q DEN A+KEGR  K RGPVK KEQTWW GK KIT I MC   GIQTYALGW  DPLKI  TAIYIDMWRI +V   SNSN TNGTG APL YAK+AIIK LCM  W G   FGEMSIGHRHKDVKGP ICH   VPCRRKM CDW H+TMHKWG"
+                }
+              ]
+            },
+            {
+              "num": 3,
+              "description": [
+                {
+                  "id": "gb|DDD00001.1|",
+                  "accession": "DDD00001",
+                  "title": "decoy",
+                  "taxid": 9606,
+                  "sciname": "Homo sapiens"
+                }
+              ],
+              "len": 250,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 14.2382,
+                  "score": 25,
+                  "evalue": 8.87903,
+                  "identity": 11,
+                  "positive": 19,
+                  "query_from": 32,
+                  "query_to": 69,
+                  "hit_from": 132,
+                  "hit_to": 176,
+                  "align_len": 45,
+                  "gaps": 7,
+                  "qseq": "QIKLSRRFHGGQNGS----SHQLCFYKRPFEKAPP---DMVHSHR",
+                  "hseq": "QVKQNPIFDGFIIASWGKLAFQVNYWMFTYCRVPPPPESPCHDHR",
+                  "midline": "Q+K +  F G    S    + Q+ ++   + + PP      H HR"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 3,
+            "db_len": 750,
+            "hsp_len": 31,
+            "eff_space": 143883,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+]
+}

@@ -1,0 +1,46 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/x_ntr60.xml
+#Output data file:	(stdout)
+#Annotation data at:	nt
+#E-Value cutoff:	0.01
+#Redundancy:	Concise
+#Data requested:	Domain hits and site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	RPSTBLASTN 2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Nucleotide	5000	mg00060_295001-300000
+DOMAINS
+1	Query_1[-1]	Specific	440347	744	1901	6.32852e-33	132.855	COG0582	FimB	-	-
+1	Query_1[-2]	Superfamily	0	2408	2719	2.05958e-33	128.733	cl21456	Periplasmic_Binding_Protein_Type_2	N	-
+1	Query_1[-3]	Non-specific	469553	3739	4998	0	920.032	NF041671	peri_hyde_PaoC	N	-
+1	Query_1[-3]	Specific	441578	2812	3654	7.9585e-55	193.929	COG1975	XdhC	-	-
+ENDDOMAINS
+SITES
+1	Query_1[-1]	Specific	active site	R1181-1179,H911-909,R902-900,R899-897,Y803-801	5	0	271182
+ENDSITES
+ENDQUERY
+ENDSESSION	1
+ENDDATA

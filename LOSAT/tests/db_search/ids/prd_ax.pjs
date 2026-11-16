@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "prd_ax",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "prd_ax (parsed Seq-ids)",
+  "number-of-letters": 500,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-12T01:35:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 2,
+  "bytes-total": 50042,
+  "bytes-to-cache": 623,
+  "files": [
+    "prd_ax.pdb",
+    "prd_ax.phr",
+    "prd_ax.pin",
+    "prd_ax.pog",
+    "prd_ax.pos",
+    "prd_ax.pot",
+    "prd_ax.psq",
+    "prd_ax.ptf",
+    "prd_ax.pto"
+  ]
+}

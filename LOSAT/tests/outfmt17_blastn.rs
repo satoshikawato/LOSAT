@@ -1,5 +1,3 @@
-#![allow(warnings, clippy::all)]
-
 //! SAM (outfmt 17) of BLASTN: what the frozen-fixture rows cannot show. NCBI keeps every record until
 //! its formatter is destroyed and writes the header last, so a batch that fails to read still has
 //! the earlier batches' document written (the formatter is unwound before the error is printed), and
@@ -17,28 +15,19 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, Output};
+
+mod temp_support;
+use temp_support::{home_and_worker_log, unique_dir, Finished, RunFiles};
 
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/outfmt17")
 }
 
-fn temp_dir(stem: &str) -> PathBuf {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("system time before Unix epoch")
-        .as_nanos();
-    let dir = std::env::temp_dir().join(format!(
-        "losat_outfmt17_{stem}_{}_{}",
-        std::process::id(),
-        nanos
-    ));
-    fs::create_dir_all(&dir).expect("temp dir");
-    dir
-}
-
-/// LOSAT with no `LOSAT_*`, `NCBI*` or `BLAST*` variable of the caller, an empty home, and `env`.
-fn command(env: &[(&str, &str)]) -> Command {
+/// LOSAT with no `LOSAT_*`, `NCBI*` or `BLAST*` variable of the caller, an empty home, and `env`;
+/// with the home and the worker log, which are removed when the returned files are dropped (the
+/// log is kept when the test panics).
+fn command(env: &[(&str, &str)]) -> (Command, RunFiles) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
@@ -49,23 +38,20 @@ fn command(env: &[(&str, &str)]) -> Command {
     for name in ["BATCH_SIZE", "CHUNK_SIZE", "BLASTDB"] {
         command.env_remove(name);
     }
-    let home = std::env::temp_dir().join("losat_outfmt17_home");
-    fs::create_dir_all(&home).expect("empty home");
-    command.env("HOME", &home).env("USERPROFILE", &home);
-    command.env(
-        "LOSAT_BLASTX_WORKER_LOG",
-        std::env::temp_dir().join("losat_outfmt17_worker.log"),
-    );
+    let files = home_and_worker_log(&mut command, "losat_outfmt17");
     command.envs(env.iter().copied());
-    command
+    (command, files)
 }
 
-fn run_in(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
-    command(env)
+/// A run of LOSAT: its `Output`, which stays with the run's files until the caller drops it.
+fn run_in(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Finished<Output> {
+    let (mut command, files) = command(env);
+    let output = command
         .current_dir(dir)
         .args(args)
         .output()
-        .expect("run LOSAT")
+        .expect("run LOSAT");
+    Finished::new(output, files)
 }
 
 /// The SAM document without the CL tag of its @PG line: the bytes from the `\tCL:` that follows
@@ -134,7 +120,7 @@ fn equals_frozen_in(
                 "{name}: the frozen status"
             );
             let [flag, value] = mode_args(mode, db);
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 for switch in [None, Some(("LOSAT_X_RPTSTREAM", "0"))] {
                     let mut vars = env.to_vec();
                     vars.extend(switch);
@@ -186,9 +172,8 @@ fn several_batches_write_one_document() {
 /// `db/snucl_bt` is `snucl` and a third subject (`sn3`, random, no hit of any query here) whose stored
 /// title holds the byte 0xE9: NCBI reads no title for a subject without a hit, so a search that no
 /// query hits `sn3` in prints no message and writes the whole document. LOSAT refuses a stored title
-/// outside `' '..'~'` when a report shows it, and its streaming used to stay off for such a database
-/// (`Off::Titles`): outfmt 17 now streams (`sam_despite=titles`), one report call per batch, with the
-/// bytes of NCBI.
+/// outside `' '..'~'` when a report shows it, and nothing is read before the search for that (drop-in
+/// DECISIONS 44): outfmt 17 streams, one report call per batch, with the bytes of NCBI.
 #[test]
 fn a_stored_title_that_no_hit_reads_still_streams_the_document() {
     equals_frozen_in(
@@ -228,9 +213,7 @@ fn a_stored_title_that_no_hit_reads_still_streams_the_document() {
         // Three queries in three batches, each batch written by its own report call; the
         // switch acts (`off=none`) though the database has a title the reports would refuse.
         assert!(
-            stats.contains(" batches=3 ")
-                && stats.contains(" off=none ")
-                && stats.contains(" sam_despite=titles"),
+            stats.contains(" batches=3 ") && stats.contains(" off=none "),
             "{format}: {stats}"
         );
     }
@@ -279,7 +262,7 @@ fn the_error_sites_flush_the_document_with_a_stored_title_that_no_hit_reads() {
 fn a_title_refusal_in_a_later_batch_writes_nothing() {
     let dir = fixtures();
     for format in ["17", "17 SQ SR"] {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let args = [
                 "blastn",
                 "-query",
@@ -346,7 +329,7 @@ fn a_header_file_that_cannot_be_read_writes_nothing() {
             .trim()
             .parse()
             .unwrap();
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let output = run_in(
                 &dir,
                 &[
@@ -391,7 +374,7 @@ fn a_header_file_that_cannot_be_read_writes_nothing() {
 #[test]
 fn an_empty_query_file_writes_nothing() {
     let dir = fixtures();
-    let scratch = temp_dir("empty");
+    let scratch = unique_dir("losat_outfmt17_empty");
     let empty = scratch.join("empty.fna");
     fs::write(&empty, b"").unwrap();
     for format in ["17", "17 SQ SR"] {
@@ -440,7 +423,7 @@ fn an_empty_query_file_writes_nothing() {
 #[test]
 fn a_file_sink_holds_the_document_of_standard_output() {
     let dir = fixtures();
-    let scratch = temp_dir("out");
+    let scratch = unique_dir("losat_outfmt17_out");
     for (query, extra, env, rc) in [
         ("q_multi3.fna", &[][..], BATCHES, 0),
         ("qnucl_bad.fna", &[][..], BATCHES, 1),

@@ -7,6 +7,14 @@
 //! depend on it, and that the default took the CSR where its rule says so: `LOSAT_X_REACH` shows
 //! the switch's own side, and `LOSAT_TIMING`'s `[TIMING] x_bn_csr: builds= parallel=` line counts
 //! the CSR tables and those built on the search pool (all of them at four threads, none at one).
+//! The packed head of a newest-first table (`LOSAT_X_BNCSRPACK`, strict set) is on in the default
+//! too: its `=0` gives the same report, and the reading-order table never takes it.
+//! The scans of either head take each word's run from the element the ring hands over with it
+//! (`LOSAT_X_BNRANKONCE`, strict set: a packed head's word ranked once): on in the default, which
+//! takes its side, and its `=0` (the run read again from the cell) gives the same report.
+//! The packed heads count their presence bits with x86-64's popcnt where the CPU has it
+//! (`LOSAT_X_BNPOPCNT`, strict set, a platform switch: `LOSAT_TIMING`'s `popcnt=` says which form
+//! ran); its `=0` (`count_ones`) gives the same report.
 //! Two tables: `-task blastn` (word size 11) with a query of 1.27 Mb (a 4^11-cell table, newest
 //! first, above the rule), and `-word_size 9` with a query of 9,800 letters (the 4^8-cell table
 //! that stands for NCBI's small table, in reading order, above the rule), each against a subject
@@ -20,6 +28,14 @@ mod reach_support;
 
 const SWITCH: &str = "LOSAT_X_BNCSR";
 const SWITCH_OFF: (&str, &str) = ("LOSAT_X_BNCSR", "0");
+/// The packed head of a newest-first CSR table (`LOSAT_X_BNCSRPACK`, strict set).
+const PACK: &str = "LOSAT_X_BNCSRPACK";
+const PACK_OFF: (&str, &str) = ("LOSAT_X_BNCSRPACK", "0");
+/// The run handed over by the scans' ring (`LOSAT_X_BNRANKONCE`, strict set).
+const RANK_ONCE: &str = "LOSAT_X_BNRANKONCE";
+const RANK_ONCE_OFF: (&str, &str) = ("LOSAT_X_BNRANKONCE", "0");
+/// The bit counts of the packed heads with x86-64's popcnt (`LOSAT_X_BNPOPCNT`, strict set).
+const POPCNT_OFF: (&str, &str) = ("LOSAT_X_BNPOPCNT", "0");
 const TIMING: (&str, &str) = ("LOSAT_TIMING", "1");
 
 fn fasta(name: &str) -> PathBuf {
@@ -62,21 +78,21 @@ fn letters(path: &Path) -> String {
         .collect()
 }
 
-/// A database of `subject` made with `losat makedb` in `dir`.
+/// A database of `subject` made with `losat makeblastdb` in `dir`.
 fn database(dir: &TestDir, subject: &Path, name: &str) -> PathBuf {
     let db = dir.path(name);
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(subject)
         .args(["-dbtype", "nucl"])
         .arg("-out")
         .arg(&db)
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run LOSAT makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     db
@@ -121,7 +137,8 @@ fn search(
     (output.stdout, stderr)
 }
 
-/// `(builds, parallel)` of `[TIMING] x_bn_csr: builds=<n> parallel=<n> words=<n>` in `stderr`
+/// `(builds, parallel)` of `[TIMING] x_bn_csr: builds=<n> parallel=<n> words=<n> popcnt=<0|1>` in
+/// `stderr`
 /// (`None` without the line).
 fn csr_builds(stderr: &str) -> Option<(u64, u64)> {
     let line = stderr
@@ -136,11 +153,41 @@ fn csr_builds(stderr: &str) -> Option<(u64, u64)> {
     Some((field("builds="), field("parallel=")))
 }
 
+/// `popcnt=<0|1>` of the `[TIMING] x_bn_csr:` line in `stderr` (`None` without the line).
+fn csr_popcnt(stderr: &str) -> Option<bool> {
+    let line = stderr
+        .lines()
+        .find_map(|line| line.strip_prefix("[TIMING] x_bn_csr: "))?;
+    match line
+        .split_whitespace()
+        .find_map(|word| word.strip_prefix("popcnt="))
+    {
+        Some("1") => Some(true),
+        Some("0") => Some(false),
+        other => panic!("popcnt= {other:?} in: {line}"),
+    }
+}
+
+/// Whether this CPU has x86-64's popcnt instruction (the default form of `LOSAT_X_BNPOPCNT`).
+fn popcnt_cpu() -> bool {
+    #[cfg(target_arch = "x86_64")]
+    {
+        std::arch::is_x86_feature_detected!("popcnt")
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        false
+    }
+}
+
 /// For `query` and `extra` against `subject` as a file and as a database: the report with the
-/// switch off at one thread, then off, by default and by default with `LOSAT_TIMING` at 1 and 4
-/// threads, all the same bytes; the default takes the switch's side (`LOSAT_X_REACH`), builds every
-/// CSR table on the pool at four threads and on the search thread at one, and writes nothing else.
-fn check(dir: &TestDir, query: &Path, subject: &Path, extra: &[&str]) {
+/// switch off at one thread, then off, by default, by default with `LOSAT_TIMING` and with the
+/// packed head off (`LOSAT_X_BNCSRPACK=0`), the ring's run off (`LOSAT_X_BNRANKONCE=0`) or popcnt
+/// off (`LOSAT_X_BNPOPCNT=0`) at 1 and 4 threads, all the same bytes; the default takes the switch's side (`LOSAT_X_REACH`), the
+/// ring's run, and the packed head's when `packed` (a newest-first table) or its reference side
+/// (the reading-order table), builds every CSR table on the pool at four threads and on the search
+/// thread at one, and writes nothing else.
+fn check(dir: &TestDir, query: &Path, subject: &Path, extra: &[&str], packed: bool) {
     let db = database(dir, subject, "subject_db");
     for subjects in [("-subject", subject), ("-db", db.as_path())] {
         let what = format!("{extra:?} {}", subjects.0);
@@ -158,6 +205,36 @@ fn check(dir: &TestDir, query: &Path, subject: &Path, extra: &[&str]) {
                 reach.sides(SWITCH).0,
                 "{what} threads {threads}: no table laid out as CSR"
             );
+            assert_eq!(
+                reach.sides(PACK),
+                (packed, !packed),
+                "{what} threads {threads}: packed heads"
+            );
+            assert!(
+                reach.sides(RANK_ONCE).0,
+                "{what} threads {threads}: no scan with the ring's run"
+            );
+            let (report, stderr) = search(query, subjects, extra, threads, &[RANK_ONCE_OFF]);
+            assert!(
+                report == expected,
+                "{what} threads {threads}: the ring's run off differs"
+            );
+            assert_eq!(stderr, expected_stderr, "{what} threads {threads} run off");
+            let (report, stderr) = search(query, subjects, extra, threads, &[POPCNT_OFF]);
+            assert!(
+                report == expected,
+                "{what} threads {threads}: popcnt off differs"
+            );
+            assert_eq!(
+                stderr, expected_stderr,
+                "{what} threads {threads} popcnt off"
+            );
+            let (report, stderr) = search(query, subjects, extra, threads, &[PACK_OFF]);
+            assert!(
+                report == expected,
+                "{what} threads {threads}: packed head off differs"
+            );
+            assert_eq!(stderr, expected_stderr, "{what} threads {threads} pack off");
             let (report, stderr) = search(query, subjects, extra, threads, &[TIMING]);
             assert!(
                 report == expected,
@@ -165,6 +242,17 @@ fn check(dir: &TestDir, query: &Path, subject: &Path, extra: &[&str]) {
             );
             let (builds, parallel) = csr_builds(&stderr)
                 .unwrap_or_else(|| panic!("{what} threads {threads}: no CSR line:\n{stderr}"));
+            assert_eq!(
+                csr_popcnt(&stderr),
+                Some(popcnt_cpu()),
+                "{what} threads {threads}: the bit counts' form"
+            );
+            let (_, stderr) = search(query, subjects, extra, threads, &[TIMING, POPCNT_OFF]);
+            assert_eq!(
+                csr_popcnt(&stderr),
+                Some(false),
+                "{what} threads {threads}: popcnt off"
+            );
             assert!(builds > 0, "{what} threads {threads}");
             let on_pool = if threads > 1 { builds } else { 0 };
             assert_eq!(parallel, on_pool, "{what} threads {threads}: pool builds");
@@ -204,7 +292,7 @@ fn blastn_word_11_large_query_batch() {
         format!(">ap132_60k\n{}\n", &genome[100_000..160_000]),
     )
     .expect("write the subject");
-    check(&dir, &query, &subject, &["-task", "blastn"]);
+    check(&dir, &query, &subject, &["-task", "blastn"], true);
 }
 
 // The 4^8-cell table of `-word_size 9` that stands for NCBI's small table (reading order): 9,800
@@ -225,5 +313,6 @@ fn blastn_word_9_reading_order_table() {
         &query,
         &fasta("LC738868.fasta"),
         &["-task", "blastn", "-word_size", "9"],
+        false,
     );
 }

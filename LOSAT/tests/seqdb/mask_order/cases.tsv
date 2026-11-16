@@ -1,0 +1,5 @@
+oob_same_sequence	in.fna	oob_same.asnt
+oob_later_algorithm	in.fna	tie_in.asnt,oob_dust.asnt
+oob_later_sequence	in.fna	oob_next.asnt
+no_sequences_later	in.fna nodata.fna	tie.asnt
+tie	in.fna	tie.asnt

@@ -51,11 +51,12 @@ use std::cell::Cell;
 
 use super::x_seed_fused::{x_prefetch, x_test_hit, X_PREFETCH_DISTANCE};
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
+#[cfg(target_arch = "x86_64")]
+use crate::algorithm::tblastx::lookup::compressed::CompressedLookupBackboneCell;
 use crate::algorithm::tblastx::lookup::compressed::{
     compressed_pv_test, compressed_reciprocal_divide, compute_compressed_index_u8,
-    BlastCompressedAaLookupTable, CompressedBackbonePayload, CompressedLookupBackboneCell,
-    COMPRESSED_HITS_CELL_MASK, COMPRESSED_HITS_PER_BACKBONE_CELL,
-    COMPRESSED_HITS_PER_OVERFLOW_CELL,
+    BlastCompressedAaLookupTable, CompressedBackbonePayload, COMPRESSED_HITS_CELL_MASK,
+    COMPRESSED_HITS_PER_BACKBONE_CELL, COMPRESSED_HITS_PER_OVERFLOW_CELL,
 };
 
 /// No NCBI counterpart: the buffers of the fused loop, reused across subjects (NCBI copies the hits
@@ -794,7 +795,8 @@ mod tests {
                 query.push(0);
             }
             let lookup = build_blosum62_compressed_lookup(word_size, threshold, &query, &locations)
-                .expect("compressed lookup");
+                .expect("compressed lookup")
+                .expect("within the overflow banks");
             assert!(lookup.longest_chain > 5, "cells with overflow lists");
             let longest = lookup.longest_chain as usize;
             let mut subjects = Vec::new();

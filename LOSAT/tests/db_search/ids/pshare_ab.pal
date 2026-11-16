@@ -1,0 +1,5 @@
+#
+# Alias file of line DBID, N2b
+#
+TITLE pshare_ab (two databases, parsed Seq-ids)
+DBLIST pshare_a pshare_b

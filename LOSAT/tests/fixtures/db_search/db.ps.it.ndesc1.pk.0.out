@@ -1,0 +1,349 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: PajaWSV proteins
+           86 sequences; 66,738 total letters
+
+Results from round 1
+
+
+Query= YP_009220615.1 putative protein kinase [White spot syndrome virus]
+
+Length=730
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63551.1 wsv423-like protein [Pasiphaea japonica whispovirus]       503     5e-170
+
+
+>BDT63551.1 wsv423-like protein [Pasiphaea japonica whispovirus]
+Length=815
+
+ Score = 503 bits (1294),  Expect = 5e-170, Method: Compositional matrix adjust.
+ Identities = 271/639 (42%), Positives = 380/639 (59%), Gaps = 30/639 (5%)
+
+Query  99   YNFNRNKKKRPITIDENQFATLNPTYATDIIKKQQL---------PSVSAASVLRKHRAN  149
+            +N N + KK    I ++Q AT N +YA DII               ++   S  ++H  N
+Sbjct  189  FNNNSHSKKIITHIPKSQMATKNNSYAADIITSSSSMSYRSNNTKSAIVTRSTTQRHSNN  248
+
+Query  150  ADTQYRKRFSHPNCAKFSTVNLKARDYTPLSVLRSHVKGPKHLKSSCDTVTETNVVKRNF  209
+                  K F  P  A F  ++LKAR YTPLS+LRS + G  HL S C+ VTET +++R+ 
+Sbjct  249  ------KYFQQPKRACFQNISLKARVYTPLSILRSQILGGDHLGSLCEPVTETIIIRRDA  302
+
+Query  210  SSIDKWVKLEKPPCYFAVAEADTNIAAGLESPFHLIRQAAKLGLISDVQDVSSNYETIKQ  269
+            +S++KW+ L+  P YF  AE +TNI+    S +  IR+ A   LI  +Q V   Y  I  
+Sbjct  303  NSLEKWLTLKDTPSYFQRAEVNTNISCAQNSNYSFIRRVANFALIKPIQRVIERYSEIHT  362
+
+Query  270  SCIDAKEKASKFLWSNNRTKQPPSSWWPVGFGS---KNLSVLDTSPLLNWNRLCKNNGKG  326
+            +C  A  K+     +  R  + P + WPVG+     K    +D SP   +   C  +   
+Sbjct  363  NCELAITKSYTLTPNQTRGYKLPDNMWPVGYDGGCDKPTMCVDISPFKTYRNYCTTH---  419
+
+Query  327  WIKTMSIDHMAKNVFKLSPGACESILEKKTTLLGEVTAQCKKWESYRRNIPVPAHVQPEY  386
+                + + ++A++VFKLS  + E I++K+TTLL EV+  CK+W + R+ +  P HV   Y
+Sbjct  420  ----LDLLYLARDVFKLSQESYERIMKKETTLLFEVSWCCKQWCNNRKGVSRPPHVPEAY  475
+
+Query  387  ASQVVMIGPSELYLEVKVGVYYMLETGKVIKFMTDKEMYCEFVFETVFSHALEGRMKGAV  446
+                V I PSE +LEVK+GVYYML+TG+VIKFMT  E   EFV E++F   ++G +KGAV
+Sbjct  476  FPYTVFITPSERFLEVKLGVYYMLDTGRVIKFMTRPECLTEFVLESLFGFGIQGNLKGAV  535
+
+Query  447  GVRKMCVEGFCVEMDFAGISVIDVLNGDLKCKMDENV-VQQPNPSTTSSKPAAELMQDHG  505
+            GV  +C EGFC+EM+FAG+++ DVLNGDL C ++  V     N      KP  E++Q H 
+Sbjct  536  GVLSVCPEGFCLEMEFAGMALQDVLNGDLNCNLNGPVPPHNQNQHLRIDKP--EMIQHHM  593
+
+Query  506  SLCRMRDTLYGVRMLQATGRLPEGLQSKCKKPITDSISAIAIVGKMRERMLNQLPFVLVE  565
+            +  +++  LY VRMLQ TG LP+ L+ KC   ITDS +A+ +   MR+R LNQLPF L E
+Sbjct  594  APSKLKGILYNVRMLQVTGNLPDELKKKCTLHITDSHAAVGVANLMRDRFLNQLPFALTE  653
+
+Query  566  IVNIVTRLSQQGLVNPDIKSDNIVIDGITGQPKMIDFGLIVPCKKYYNFKCWGT--DERF  623
+            I+NIVTRLSQQGLVNPDIK+DNIVIDG TGQPKMIDFGL++P       K       E  
+Sbjct  654  IINIVTRLSQQGLVNPDIKADNIVIDGSTGQPKMIDFGLLLPADYCDKVKRRNNPYPENV  713
+
+Query  624  FSNHPHTAPEFINSELCSETAMTFGLAYLLIDMLSILIKRTADLSANSIYTNIPFLSIVS  683
+            ++ +P TAPE++   +C+E AMT+GL+YL+  +++ L  RT D +  S+ TNI    ++ 
+Sbjct  714  YNLYPQTAPEYLQGRMCNEAAMTYGLSYLISFVIATLSSRTTDFAVGSMKTNIKLSFLLG  773
+
+Query  684  KMYDQEKTNRPRAYEIAPVIGACFPFKDNIAKLFQSPKH  722
+              YD+  + RP+ Y +   I  CFP ++ I KLF +PKH
+Sbjct  774  LAYDKCASKRPKPYILTKAIAGCFPLQEKIMKLFLNPKH  812
+
+
+ Score = 17.7 bits (34),  Expect = 221, Method: Compositional matrix adjust.
+ Identities = 13/37 (35%), Positives = 16/37 (43%), Gaps = 2/37 (5%)
+
+Query  90   LREDYESTPYNFNRNKKKRPITIDENQFATLNPTYAT  126
+            LR+   S P   +    KRPI     Q   L P Y+T
+Sbjct  7    LRQKQFSYPSPNHLPPNKRPIRCSSKQI--LTPHYST  41
+
+
+ Score = 16.5 bits (31),  Expect = 499, Method: Compositional matrix adjust.
+ Identities = 7/20 (35%), Positives = 11/20 (55%), Gaps = 0/20 (0%)
+
+Query  48   CSKNATRRSPPSDSPYSLRP  67
+            C K   R +P  ++ Y+L P
+Sbjct  699  CDKVKRRNNPYPENVYNLYP  718
+
+
+ Score = 15.8 bits (29),  Expect = 758, Method: Compositional matrix adjust.
+ Identities = 5/11 (45%), Positives = 7/11 (64%), Gaps = 0/11 (0%)
+
+Query  715  KLFQSPKHSLY  725
+            K FQ PK + +
+Sbjct  249  KYFQQPKRACF  259
+
+
+
+Lambda      K        H        a         alpha
+   0.317    0.133    0.397    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 39956488
+Results from round 2
+
+
+Query= YP_009220615.1 putative protein kinase [White spot syndrome virus]
+
+Length=730
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+Sequences used in model and found again:
+
+BDT63551.1 wsv423-like protein [Pasiphaea japonica whispovirus]       1001    0.0  
+
+Sequences not found previously or not previously below threshold:
+
+
+
+>BDT63551.1 wsv423-like protein [Pasiphaea japonica whispovirus]
+Length=815
+
+ Score = 1001 bits (2588),  Expect = 0.0, Method: Composition-based stats.
+ Identities = 272/642 (42%), Positives = 381/642 (59%), Gaps = 30/642 (5%)
+
+Query  96   STPYNFNRNKKKRPITIDENQFATLNPTYATDIIK---------KQQLPSVSAASVLRKH  146
+            S  +N N + KK    I ++Q AT N +YA DII               ++   S  ++H
+Sbjct  186  SRHFNNNSHSKKIITHIPKSQMATKNNSYAADIITSSSSMSYRSNNTKSAIVTRSTTQRH  245
+
+Query  147  RANADTQYRKRFSHPNCAKFSTVNLKARDYTPLSVLRSHVKGPKHLKSSCDTVTETNVVK  206
+              N      K F  P  A F  ++LKAR YTPLS+LRS + G  HL S C+ VTET +++
+Sbjct  246  SNN------KYFQQPKRACFQNISLKARVYTPLSILRSQILGGDHLGSLCEPVTETIIIR  299
+
+Query  207  RNFSSIDKWVKLEKPPCYFAVAEADTNIAAGLESPFHLIRQAAKLGLISDVQDVSSNYET  266
+            R+ +S++KW+ L+  P YF  AE +TNI+    S +  IR+ A   LI  +Q V   Y  
+Sbjct  300  RDANSLEKWLTLKDTPSYFQRAEVNTNISCAQNSNYSFIRRVANFALIKPIQRVIERYSE  359
+
+Query  267  IKQSCIDAKEKASKFLWSNNRTKQPPSSWWPVGFGS---KNLSVLDTSPLLNWNRLCKNN  323
+            I  +C  A  K+     +  R  + P + WPVG+     K    +D SP   +   C  +
+Sbjct  360  IHTNCELAITKSYTLTPNQTRGYKLPDNMWPVGYDGGCDKPTMCVDISPFKTYRNYCTTH  419
+
+Query  324  GKGWIKTMSIDHMAKNVFKLSPGACESILEKKTTLLGEVTAQCKKWESYRRNIPVPAHVQ  383
+                   + + ++A++VFKLS  + E I++K+TTLL EV+  CK+W + R+ +  P HV 
+Sbjct  420  -------LDLLYLARDVFKLSQESYERIMKKETTLLFEVSWCCKQWCNNRKGVSRPPHVP  472
+
+Query  384  PEYASQVVMIGPSELYLEVKVGVYYMLETGKVIKFMTDKEMYCEFVFETVFSHALEGRMK  443
+              Y    V I PSE +LEVK+GVYYML+TG+VIKFMT  E   EFV E++F   ++G +K
+Sbjct  473  EAYFPYTVFITPSERFLEVKLGVYYMLDTGRVIKFMTRPECLTEFVLESLFGFGIQGNLK  532
+
+Query  444  GAVGVRKMCVEGFCVEMDFAGISVIDVLNGDLKCKMDENV-VQQPNPSTTSSKPAAELMQ  502
+            GAVGV  +C EGFC+EM+FAG+++ DVLNGDL C ++  V     N      KP  E++Q
+Sbjct  533  GAVGVLSVCPEGFCLEMEFAGMALQDVLNGDLNCNLNGPVPPHNQNQHLRIDKP--EMIQ  590
+
+Query  503  DHGSLCRMRDTLYGVRMLQATGRLPEGLQSKCKKPITDSISAIAIVGKMRERMLNQLPFV  562
+             H +  +++  LY VRMLQ TG LP+ L+ KC   ITDS +A+ +   MR+R LNQLPF 
+Sbjct  591  HHMAPSKLKGILYNVRMLQVTGNLPDELKKKCTLHITDSHAAVGVANLMRDRFLNQLPFA  650
+
+Query  563  LVEIVNIVTRLSQQGLVNPDIKSDNIVIDGITGQPKMIDFGLIVPCKKYYNFKCWGT--D  620
+            L EI+NIVTRLSQQGLVNPDIK+DNIVIDG TGQPKMIDFGL++P       K       
+Sbjct  651  LTEIINIVTRLSQQGLVNPDIKADNIVIDGSTGQPKMIDFGLLLPADYCDKVKRRNNPYP  710
+
+Query  621  ERFFSNHPHTAPEFINSELCSETAMTFGLAYLLIDMLSILIKRTADLSANSIYTNIPFLS  680
+            E  ++ +P TAPE++   +C+E AMT+GL+YL+  +++ L  RT D +  S+ TNI    
+Sbjct  711  ENVYNLYPQTAPEYLQGRMCNEAAMTYGLSYLISFVIATLSSRTTDFAVGSMKTNIKLSF  770
+
+Query  681  IVSKMYDQEKTNRPRAYEIAPVIGACFPFKDNIAKLFQSPKH  722
+            ++   YD+  + RP+ Y +   I  CFP ++ I KLF +PKH
+Sbjct  771  LLGLAYDKCASKRPKPYILTKAIAGCFPLQEKIMKLFLNPKH  812
+
+
+ Score = 18.9 bits (37),  Expect = 80, Method: Composition-based stats.
+ Identities = 13/37 (35%), Positives = 16/37 (43%), Gaps = 2/37 (5%)
+
+Query  90   LREDYESTPYNFNRNKKKRPITIDENQFATLNPTYAT  126
+            LR+   S P   +    KRPI     Q  T  P Y+T
+Sbjct  7    LRQKQFSYPSPNHLPPNKRPIRCSSKQILT--PHYST  41
+
+
+ Score = 18.5 bits (36),  Expect = 127, Method: Composition-based stats.
+ Identities = 7/20 (35%), Positives = 11/20 (55%), Gaps = 0/20 (0%)
+
+Query  48   CSKNATRRSPPSDSPYSLRP  67
+            C K   R +P  ++ Y+L P
+Sbjct  699  CDKVKRRNNPYPENVYNLYP  718
+
+
+ Score = 17.0 bits (32),  Expect = 367, Method: Composition-based stats.
+ Identities = 4/12 (33%), Positives = 5/12 (42%), Gaps = 0/12 (0%)
+
+Query  377  PVPAHVQPEYAS  388
+            P P H+ P    
+Sbjct  15   PSPNHLPPNKRP  26
+
+
+ Score = 15.8 bits (29),  Expect = 757, Method: Composition-based stats.
+ Identities = 8/35 (23%), Positives = 12/35 (34%), Gaps = 0/35 (0%)
+
+Query  362  VTAQCKKWESYRRNIPVPAHVQPEYASQVVMIGPS  396
+            V + C      R   P P  +  E +  V  +  S
+Sbjct  96   VGSCCPPTTIQRPKRPRPTSLVAEASLTVTGVTTS  130
+
+
+ Score = 15.8 bits (29),  Expect = 783, Method: Composition-based stats.
+ Identities = 5/11 (45%), Positives = 7/11 (64%), Gaps = 0/11 (0%)
+
+Query  715  KLFQSPKHSLY  725
+            K FQ PK + +
+Sbjct  249  KYFQQPKRACF  259
+
+
+
+Lambda      K        H        a         alpha
+   0.317    0.131    0.367    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0401    0.140     1.90     42.6     43.6 
+
+Effective search space used: 39956488
+Results from round 3
+
+
+Query= YP_009220615.1 putative protein kinase [White spot syndrome virus]
+
+Length=730
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+Sequences used in model and found again:
+
+BDT63551.1 wsv423-like protein [Pasiphaea japonica whispovirus]       931     0.0  
+
+Sequences not found previously or not previously below threshold:
+
+
+
+>BDT63551.1 wsv423-like protein [Pasiphaea japonica whispovirus]
+Length=815
+
+ Score = 931 bits (2405),  Expect = 0.0, Method: Composition-based stats.
+ Identities = 276/670 (41%), Positives = 387/670 (58%), Gaps = 30/670 (4%)
+
+Query  68   MKRLKKNNGEVGGKAPPPVTLRLREDYESTPYNFNRNKKKRPITIDENQFATLNPTYATD  127
+              +   +N  V  K   P          S  +N N + KK    I ++Q AT N +YA D
+Sbjct  158  SNKASSSNKMVKQKTYSPHPKVTCRRPLSRHFNNNSHSKKIITHIPKSQMATKNNSYAAD  217
+
+Query  128  IIK---------KQQLPSVSAASVLRKHRANADTQYRKRFSHPNCAKFSTVNLKARDYTP  178
+            II               ++   S  ++H  N      K F  P  A F  ++LKAR YTP
+Sbjct  218  IITSSSSMSYRSNNTKSAIVTRSTTQRHSNN------KYFQQPKRACFQNISLKARVYTP  271
+
+Query  179  LSVLRSHVKGPKHLKSSCDTVTETNVVKRNFSSIDKWVKLEKPPCYFAVAEADTNIAAGL  238
+            LS+LRS + G  HL S C+ VTET +++R+ +S++KW+ L+  P YF  AE +TNI+   
+Sbjct  272  LSILRSQILGGDHLGSLCEPVTETIIIRRDANSLEKWLTLKDTPSYFQRAEVNTNISCAQ  331
+
+Query  239  ESPFHLIRQAAKLGLISDVQDVSSNYETIKQSCIDAKEKASKFLWSNNRTKQPPSSWWPV  298
+             S +  IR+ A   LI  +Q V   Y  I  +C  A  K+     +  R  + P + WPV
+Sbjct  332  NSNYSFIRRVANFALIKPIQRVIERYSEIHTNCELAITKSYTLTPNQTRGYKLPDNMWPV  391
+
+Query  299  GFGS---KNLSVLDTSPLLNWNRLCKNNGKGWIKTMSIDHMAKNVFKLSPGACESILEKK  355
+            G+     K    +D SP   +   C  +       + + ++A++VFKLS  + E I++K+
+Sbjct  392  GYDGGCDKPTMCVDISPFKTYRNYCTTH-------LDLLYLARDVFKLSQESYERIMKKE  444
+
+Query  356  TTLLGEVTAQCKKWESYRRNIPVPAHVQPEYASQVVMIGPSELYLEVKVGVYYMLETGKV  415
+            TTLL EV+  CK+W + R+ +  P HV   Y    V I PSE +LEVK+GVYYML+TG+V
+Sbjct  445  TTLLFEVSWCCKQWCNNRKGVSRPPHVPEAYFPYTVFITPSERFLEVKLGVYYMLDTGRV  504
+
+Query  416  IKFMTDKEMYCEFVFETVFSHALEGRMKGAVGVRKMCVEGFCVEMDFAGISVIDVLNGDL  475
+            IKFMT  E   EFV E++F   ++G +KGAVGV  +C EGFC+EM+FAG+++ DVLNGDL
+Sbjct  505  IKFMTRPECLTEFVLESLFGFGIQGNLKGAVGVLSVCPEGFCLEMEFAGMALQDVLNGDL  564
+
+Query  476  KCKMDENV-VQQPNPSTTSSKPAAELMQDHGSLCRMRDTLYGVRMLQATGRLPEGLQSKC  534
+             C ++  V     N      KP  E++Q H +  +++  LY VRMLQ TG LP+ L+ KC
+Sbjct  565  NCNLNGPVPPHNQNQHLRIDKP--EMIQHHMAPSKLKGILYNVRMLQVTGNLPDELKKKC  622
+
+Query  535  KKPITDSISAIAIVGKMRERMLNQLPFVLVEIVNIVTRLSQQGLVNPDIKSDNIVIDGIT  594
+               ITDS +A+ +   MR+R LNQLPF L EI+NIVTRLSQQGLVNPDIK+DNIVIDG T
+Sbjct  623  TLHITDSHAAVGVANLMRDRFLNQLPFALTEIINIVTRLSQQGLVNPDIKADNIVIDGST  682
+
+Query  595  GQPKMIDFGLIVPCKKYYNFKCWGT--DERFFSNHPHTAPEFINSELCSETAMTFGLAYL  652
+            GQPKMIDFGL++P       K       E  ++ +P TAPE++   +C+E AMT+GL+YL
+Sbjct  683  GQPKMIDFGLLLPADYCDKVKRRNNPYPENVYNLYPQTAPEYLQGRMCNEAAMTYGLSYL  742
+
+Query  653  LIDMLSILIKRTADLSANSIYTNIPFLSIVSKMYDQEKTNRPRAYEIAPVIGACFPFKDN  712
+            +  +++ L  RT D +  S+ TNI    ++   YD+  + RP+ Y +   I  CFP ++ 
+Sbjct  743  ISFVIATLSSRTTDFAVGSMKTNIKLSFLLGLAYDKCASKRPKPYILTKAIAGCFPLQEK  802
+
+Query  713  IAKLFQSPKH  722
+            I KLF +PKH
+Sbjct  803  IMKLFLNPKH  812
+
+
+ Score = 18.2 bits (35),  Expect = 128, Method: Composition-based stats.
+ Identities = 4/12 (33%), Positives = 5/12 (42%), Gaps = 0/12 (0%)
+
+Query  377  PVPAHVQPEYAS  388
+            P P H+ P    
+Sbjct  15   PSPNHLPPNKRP  26
+
+
+ Score = 16.7 bits (31),  Expect = 417, Method: Composition-based stats.
+ Identities = 8/36 (22%), Positives = 12/36 (33%), Gaps = 0/36 (0%)
+
+Query  362  VTAQCKKWESYRRNIPVPAHVQPEYASQVVMIGPSE  397
+            V + C      R   P P  +  E +  V  +  S 
+Sbjct  96   VGSCCPPTTIQRPKRPRPTSLVAEASLTVTGVTTSS  131
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.122    0.310    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0373    0.140     1.90     42.6     43.6 
+
+Effective search space used: 39956488
+
+
+  Database: PajaWSV proteins
+    Posted date:  Oct 13, 2026  1:44 PM
+  Number of letters in database: 66,738
+  Number of sequences in database:  86
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

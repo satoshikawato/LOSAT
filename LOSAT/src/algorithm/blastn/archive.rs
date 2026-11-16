@@ -12,7 +12,6 @@
 //! the document, this module gathers what it holds from the hit lists, the query masks and
 //! the Karlin-Altschul blocks that BLASTN keeps for its other formats.
 
-use std::borrow::Cow;
 use std::io::Write;
 use std::ops::Range;
 
@@ -27,12 +26,12 @@ use crate::blastinput::app::Program;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::Placements;
 use crate::blastinput::value_parsers::{parse_dust_filtering, DustSpec};
-use crate::report::archive::bioseq::BioseqInput;
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::{Filter, OptionInputs};
+use crate::report::archive::requests::{LcaseFrames, RequestPolicy, RunRequests};
 use crate::report::archive::{
-    defline_of, ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive,
-    KaBlock,
+    ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
+    RequestInputs,
 };
 #[cfg(test)]
 use crate::report::diag_log::ERROR;
@@ -46,12 +45,16 @@ use crate::utils::dust::MaskedInterval;
 pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInputs {
     let mut inputs = OptionInputs::new(Program::Blastn, &args.task);
     inputs.dbsize = args.dbsize;
+    inputs.searchsp = args.searchsp;
     inputs.evalue = args.evalue;
     inputs.gapopen = args.gap_open;
     inputs.gapextend = args.gap_extend;
     inputs.word_size = args.word_size.map(|size| size as i32);
     inputs.perc_identity = args.percent_identity;
     inputs.qcov_hsp_perc = args.qcov_hsp_perc;
+    // (`-ungapped` with outfmt 11 is refused, `cli_output_formats`; the search strategy records
+    // it, probe `ung` of RG-F1.)
+    inputs.ungapped = args.ungapped;
     inputs.max_hsps = args.max_hsps_per_subject.map(|count| count as i32);
     inputs.penalty = args.penalty;
     inputs.reward = args.reward;
@@ -79,9 +82,19 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
                 linker: linker as u32 as i32,
             },
         });
+    inputs.soft_masking = Some(args.soft_masking());
     inputs.window_masker_db = args.window_masker_db.clone();
+    inputs.window_masker_taxid = args.window_masker_taxid;
     inputs.culling_limit = args.culling_limit;
     inputs.subject_besthit = args.subject_besthit;
+    // The X-drops and the window as given (CGenericSearchArgs and CWindowSizeArg set them
+    // only then, blast_args.cpp:280-286,487-489) and `-no_greedy` (the algorithms); the
+    // ungapped X-drop and the off-diagonal range are not recorded (`options.rs`).
+    inputs.xdrop_gap = args.xdrop_gap;
+    inputs.xdrop_gap_final = args.xdrop_gap_final;
+    inputs.window_size = args.window_size;
+    inputs.no_greedy = args.no_greedy;
+    inputs.mb_index_name = args.megablast_index_name().map(str::to_string);
     inputs.hitlist_size = args
         .max_target_seqs
         .or(args.num_alignments)
@@ -95,36 +108,50 @@ pub(crate) fn handle_for(
     args: &BlastnArgs,
     dust: Option<&str>,
     archive_requested: bool,
-) -> Result<Option<ArchiveHandle>> {
+    options: &crate::report::archive::OptionsHandle,
+) -> Option<ArchiveHandle> {
     if !archive_requested {
-        return Ok(None);
+        return None;
     }
-    ArchiveHandle::for_program(&option_inputs(args, dust), args.db.as_deref(), "BLASTN").map(Some)
+    Some(ArchiveHandle::for_program(
+        &option_inputs(args, dust),
+        args.database_name(),
+        options,
+    ))
 }
 
-/// `report::archive::check_titles` for BLASTN's records.
-pub(crate) fn check_titles(records: &[FastaRecord], role: &str) -> Result<()> {
-    crate::report::archive::check_titles(records, role, "BLASTN")
+/// The requests of a run's batches (`RunRequests`): nucleotide queries and subjects (the
+/// `-subject` records `subjects`, `None` for `-db`), and with `-lcase_masking` (`lcase_masking`)
+/// the lower-case runs of each query for both strands. Before the search (the search strategy's
+/// requests) the query vector's mask has no DUST or WindowMasker interval yet, which
+/// `x_CalculateMasks` adds in the search (probe `lcq` of RG-F1); the archive writes its own
+/// `LCaseMask` parameters (`for_each_batch`).
+pub(crate) fn requests(subjects: Option<&[FastaRecord]>, lcase_masking: bool) -> RunRequests<'_> {
+    RunRequests::new(
+        RequestPolicy {
+            query_protein: false,
+            subject_protein: false,
+            lcase: lcase_masking.then_some(LcaseFrames::PlusTwice),
+        },
+        subjects,
+    )
 }
 
 pub(crate) use crate::report::archive::error_lines;
 
-/// What the archive of a call needs: the call's queries (one batch, or several when the
-/// reports of every batch are written after the search) and their data.
-pub(crate) struct ArchiveCall<'a> {
-    pub handle: &'a ArchiveHandle,
+/// The queries of a call's batches and what their archives read (`for_each_batch`).
+pub(crate) struct CallBatches<'a> {
+    /// The call's queries: one batch, or several when the reports of every batch are written
+    /// after the search.
     pub queries: &'a [FastaRecord],
     pub query_lengths: &'a [usize],
     pub query_placements: &'a Placements,
     /// `-subject`: every subject record, whole (the Bioseqs of the request).
     pub subject_records: Option<&'a [FastaRecord]>,
-    /// The subject names of the Seq-aligns.
-    pub subjects: SubjectNames<'a>,
-    pub subject_placements: &'a Placements,
-    pub hit_lists: &'a [Option<BlastnHitList>],
     pub query_masks: &'a [Vec<MaskedInterval>],
     /// The DUST-only masks of the call's queries (plus strand, in the searched letters),
     /// made for every query; with `-window_masker_db` (`window_masker`) the WindowMasker masks.
+    /// Only the archive reads them (empty without it).
     pub dust_masks: &'a [Vec<MaskedInterval>],
     pub unsearched: &'a [bool],
     pub lcase_masking: bool,
@@ -133,6 +160,16 @@ pub(crate) struct ArchiveCall<'a> {
     pub minus_strand: bool,
     /// The queries of each batch of the call, in order; empty for a call that is one batch.
     pub spans: &'a [Range<usize>],
+}
+
+/// What the archive of a call needs: the call's batches and their results.
+pub(crate) struct ArchiveCall<'a> {
+    pub handle: &'a ArchiveHandle,
+    pub batches: CallBatches<'a>,
+    /// The subject names of the Seq-aligns.
+    pub subjects: SubjectNames<'a>,
+    pub subject_placements: &'a Placements,
+    pub hit_lists: &'a [Option<BlastnHitList>],
 }
 
 /// The values of a batch's first query that `search-stats`, `ka-blocks` and the
@@ -146,6 +183,8 @@ pub(crate) struct FirstContext {
     pub length_adjustment: i64,
     /// The search space of the batch's context 0 (the option).
     pub context0_space: i64,
+    /// That context's query length, 0 for an invalid one (`archive::RequestLength::space`).
+    pub context0_length: i64,
 }
 
 /// The Seq-aligns of one batch of a call.
@@ -282,15 +321,18 @@ fn lcase_mask_intervals(
         .collect()
 }
 
-/// Writes the archive of each batch of `call` to `writer`; `warnings` writes the warnings
-/// of a batch's queries (to the diagnostics, which saves them as the batch's messages)
-/// before its archive. `first_context(first_query)` gives the values of a batch's first
-/// query.
-pub(crate) fn write_blastn_archives(
-    call: &ArchiveCall<'_>,
-    mut warnings: Option<&mut QueryWarnings<'_>>,
+/// Calls `each` with the queries and the archive of each batch of `call`, in order
+/// (`BatchArchive`: its request, `RunRequests::with_batch`, and its results).
+/// `first_context(first_query)` gives the values of a batch's first query.
+///
+/// The `LCaseMask` parameters are the masks of NCBI's query vector after the search, which hold
+/// the DUST or WindowMasker intervals that the search added (`lcase_mask_intervals`), so the
+/// archive writes its own (the search strategy's requests, written before the search, hold the
+/// lower-case runs only, `requests`).
+pub(crate) fn for_each_batch(
+    call: &CallBatches<'_>,
     first_context: &dyn Fn(usize) -> Result<FirstContext>,
-    writer: &mut dyn Write,
+    mut each: impl FnMut(Range<usize>, &BatchArchive<'_>) -> Result<()>,
 ) -> Result<()> {
     let whole = [0..call.queries.len()];
     let spans: &[Range<usize>] = if call.spans.is_empty() {
@@ -298,66 +340,15 @@ pub(crate) fn write_blastn_archives(
     } else {
         call.spans
     };
-    let run = RunRecord {
-        program: Program::Blastn,
-        db_title: call.subjects.db_title(),
-        gapped: true,
-    };
-    // The Bioseq inputs borrow their deflines: keep them alive for the whole call.
-    let subject_deflines: Vec<Cow<'_, [u8]>> = call
-        .subject_records
-        .map(|records| records.iter().map(defline_of).collect())
-        .unwrap_or_default();
-    let subjects_input: Vec<BioseqInput<'_>> = call
-        .subject_records
-        .map(|records| {
-            records
-                .iter()
-                .zip(&subject_deflines)
-                .map(|(record, defline)| BioseqInput {
-                    id: &record.local_id,
-                    defline,
-                    title: &record.title,
-                    letters: record.archive_letters(),
-                    protein: false,
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    // The request without `LCaseMask` parameters: the archive writes its own (above).
+    let requests = requests(call.subject_records, false);
     for span in spans.iter().cloned() {
         if span.is_empty() {
             continue;
         }
-        if let Some(warnings) = warnings.as_deref_mut() {
-            for index in span.clone() {
-                warnings.before_query(index, &mut *writer)?;
-            }
-        }
-        let records = &call.queries[span.clone()];
-        let deflines: Vec<Cow<'_, [u8]>> = records.iter().map(defline_of).collect();
-        let queries: Vec<BioseqInput<'_>> = records
-            .iter()
-            .zip(&deflines)
-            .map(|(record, defline)| BioseqInput {
-                id: &record.local_id,
-                defline,
-                title: &record.title,
-                letters: record.archive_letters(),
-                protein: false,
-            })
-            .collect();
         let first = span.start;
         let searched = !call.unsearched[first];
         let context = first_context(first)?;
-
-        let required = if call.query_placements.ranged() {
-            let placement = &call.query_placements.0[first];
-            let cut = call.queries[first].seq().len();
-            (cut != placement.length)
-                .then_some((placement.offset as i32, (placement.offset + cut) as i32 - 1))
-        } else {
-            None
-        };
 
         let mut masks: Vec<MaskEntry> = Vec::new();
         let mut lcase_masks: Vec<MaskEntry> = Vec::new();
@@ -375,6 +366,7 @@ pub(crate) fn write_blastn_archives(
                 if !shown.is_empty() {
                     masks.push(MaskEntry {
                         id: record.local_id.clone(),
+                        best: record.believed().map(|ids| ids.best.clone()),
                         frame: Frame::Plus1,
                         intervals: shown,
                     });
@@ -394,6 +386,7 @@ pub(crate) fn write_blastn_archives(
             if !intervals.is_empty() {
                 lcase_masks.push(MaskEntry {
                     id: record.local_id.clone(),
+                    best: record.believed().map(|ids| ids.best.clone()),
                     frame: Frame::Plus1,
                     intervals,
                 });
@@ -407,32 +400,71 @@ pub(crate) fn write_blastn_archives(
             ],
             None => [KaBlock::missing(false), KaBlock::missing(true)],
         };
-        let batch = BatchArchive {
-            queries: &queries,
-            subjects: &subjects_input,
-            required,
-            lcase_masks: &lcase_masks,
-            masks: &masks,
-            ka_blocks,
-            search_space: context.search_space,
-            length_adjustment: context.length_adjustment,
-            searched_space: searched.then_some(context.context0_space),
-        };
+        requests.with_batch(
+            &call.queries[span.clone()],
+            call.query_placements.get(first),
+            |request| {
+                let batch = BatchArchive {
+                    request: RequestInputs {
+                        lcase_masks: &lcase_masks,
+                        ..*request
+                    },
+                    masks: &masks,
+                    ka_blocks,
+                    search_space: context.search_space,
+                    length_adjustment: context.length_adjustment,
+                    searched_space: searched.then_some(crate::report::archive::SearchedContext0 {
+                        space: context.context0_space,
+                        query_length: context.context0_length,
+                    }),
+                };
+                each(span, &batch)
+            },
+        )?;
+    }
+    Ok(())
+}
+
+/// Writes the archive of each batch of `call` to `writer`; `warnings` writes the warnings
+/// of a batch's queries (to the diagnostics, which saves them as the batch's messages)
+/// before its archive, and its sink gets NCBI's posts of the bytes that the archive's stream
+/// replaces (`write_archive`). `first_context(first_query)` gives the values of a batch's first
+/// query.
+pub(crate) fn write_blastn_archives(
+    call: &ArchiveCall<'_>,
+    warnings: &mut QueryWarnings<'_>,
+    first_context: &dyn Fn(usize) -> Result<FirstContext>,
+    writer: &mut dyn Write,
+) -> Result<()> {
+    let run = RunRecord {
+        program: Program::Blastn,
+        db_title: call.subjects.db_title(),
+        gapped: true,
+    };
+    for_each_batch(&call.batches, first_context, |span, batch| {
+        for index in span.clone() {
+            warnings.before_query(index, &mut *writer)?;
+        }
         let mut aligns = BlastnAligns {
             run,
             queries: QueryNames {
-                records: call.queries,
-                searched_lengths: call.query_lengths,
-                placements: call.query_placements,
+                records: call.batches.queries,
+                searched_lengths: call.batches.query_lengths,
+                placements: call.batches.query_placements,
             },
             subjects: call.subjects,
             subject_placements: call.subject_placements,
             hit_lists: &call.hit_lists[span.clone()],
-            first,
+            first: span.start,
         };
-        write_archive(call.handle, &batch, &mut aligns, writer)?;
-    }
-    Ok(())
+        write_archive(
+            call.handle,
+            batch,
+            &mut aligns,
+            &mut *writer,
+            &mut *warnings.sink,
+        )
+    })
 }
 
 #[cfg(test)]
@@ -448,9 +480,22 @@ mod tests {
     // list as `Name=variant:value`.
     const CASES: &[(&str, &[&str], &str)] = &[
     ("b_n_allN_db_fmt11", &[], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
+    // DI-6 (the frozen archives xdrop.*.11 of tests/outfmt0_manifest.tsv): the X-drops and the window
+    // as given, -no_greedy's algorithms (eDynProgScoreOnly, eDynProgTbck = 0), the window of
+    // dc-megablast replaced in its place, pyani ANIb's options.
+    ("di6_nogreedy", &["-no_greedy", "-gapopen", "5", "-gapextend", "2"], "EvalueThreshold=cutoff:e-value:10 GapOpeningCost=integer:5 GapExtensionCost=integer:2 GapExtnAlgorithm=integer:0 GapTracebackAlgorithm=integer:0 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
+    ("di6_xdrops", &["-xdrop_ungap", "5", "-xdrop_gap", "12.5", "-xdrop_gap_final", "150", "-window_size", "40"], "EvalueThreshold=cutoff:e-value:10 GapXDropoff=real:12.5 GapXDropoffFinal=real:150 MaskAtHash=boolean:True UngappedMode=boolean:False WindowSize=integer:40 HitlistSize=integer:500"),
+    ("di6_dc_win0", &["-task", "dc-megablast", "-window_size", "0"], "EvalueThreshold=cutoff:e-value:10 MBTemplateType=integer:0 MBTemplateLength=integer:18 WordSize=integer:11 WindowSize=integer:0 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
+    ("di6_anib", &["-task", "blastn", "-xdrop_gap_final", "150", "-dust", "no", "-evalue", "1e-15", "-max_target_seqs", "1"], "EvalueThreshold=cutoff:e-value:1e-15 GapXDropoffFinal=real:150 MaskAtHash=boolean:True DustFiltering=boolean:False UngappedMode=boolean:False HitlistSize=integer:1"),
+    // DI-6b (the frozen archives minraw.*.11): the value is not recorded (the remote options'
+    // eBlastOpt_CutoffScore is `if (0)`, api/blast_options_cxx.cpp:435-442).
+    ("di6b_minraw", &["-min_raw_gapped_score", "15"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
     ("e_n_badpair_fmt11", &["-reward", "2", "-penalty", "-7"], "EvalueThreshold=cutoff:e-value:10 MismatchPenalty=integer:-7 MatchReward=integer:2 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
     ("in_n_dust_minus_fmt11", &["-strand", "minus"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
     ("in_n_lcase_mask_fmt11", &["-lcase_masking"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
+    // SM-3 (the frozen archives sm3.*.11 of tests/outfmt0_manifest.tsv): the value as given.
+    ("sm3_hard", &["-soft_masking", "false"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:False UngappedMode=boolean:False HitlistSize=integer:500"),
+    ("sm3_soft", &["-soft_masking", "true"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
     ("in_n_mts1_fmt11", &["-task", "blastn", "-max_target_seqs", "1"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:1"),
     ("in_n_qloc_fmt11", &["-query_loc", "10-300"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
     ("in_n_qloc_full_fmt11", &["-query_loc", "1-480"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
@@ -496,6 +541,7 @@ mod tests {
                     ParamValue::Boolean(false) => "boolean:False".to_string(),
                     ParamValue::Real(value) => format!("real:{}", posix(*value)),
                     ParamValue::Str(value) => format!("string:{value}"),
+                    ParamValue::IntegerList(values) => format!("integer-list:{values:?}"),
                 };
                 format!("{}={value}", param.name)
             })
@@ -549,6 +595,7 @@ mod tests {
         record.source = Some(Box::new(RecordSource {
             defline: b">q".to_vec(),
             uncut: Some(whole),
+            ..RecordSource::default()
         }));
         assert_eq!(
             lcase_mask_intervals(&record, &[], 29, true, false, true, false),

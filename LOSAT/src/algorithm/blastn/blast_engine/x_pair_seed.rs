@@ -39,12 +39,14 @@
 //! position of its grid `start + k * scan_step` and derives its state from that position.
 //! This module cuts the grid of each scan range into strips (`plan_strips`). Phase 1, on
 //! any thread: the reference kernel scans one strip with `s_range` of the whole range (the
-//! value `scan_range[2] + lut_word_length` NCBI passes), walks the lookup chains as
-//! `on_word` does, and runs the steps of `process_offset_pairs` that read nothing but the
-//! inputs (the context of the query offset, the bounds test, the word extension of
-//! `s_BlastNaExtend`); a pair that passes becomes a `Seed`, in the order of the pairs.
+//! value `scan_range[2] + lut_word_length` NCBI passes), walks the lookup chains as `on_word`
+//! of the reference scan (`two_stage_scan::scan_two_stage_lookup`) does, and runs the steps of
+//! `pair_extend::extend_offset_pairs` that read nothing
+//! but the inputs (the context of the query offset, the bounds test, the word extension of
+//! `s_BlastNaExtend`, which `extend_offset_pairs` calls as `word_extend_pair`); a pair that
+//! passes becomes a `Seed`, in the order of the pairs.
 //! Phase 2, on the owner thread only: the seeds of strip 0, 1, 2, ... in that order go
-//! through a statement-for-statement copy of the rest of `process_offset_pairs` for one-hit
+//! through a statement-for-statement copy of the rest of `extend_offset_pairs` for one-hit
 //! mode (diagonal-hash retrieve, the `last_hit` test, `type_of_word`, the ungapped
 //! extension, the cutoff, `ungapped_hits.push`, the diagonal-hash insert) on the real
 //! `diag_hash` and `ungapped_hits`. The owner therefore sees the reference sequence of
@@ -82,14 +84,14 @@ use super::{
 };
 use crate::algorithm::blastn::lookup::TwoStageLookup;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 #[path = "x_pair_seed_disc.rs"]
 mod disc;
 
 #[path = "x_pair_seed_na.rs"]
 mod na;
-pub(super) use na::{run as run_na, NaInputs};
+pub(super) use na::{run as run_na, wants as wants_na, NaInputs};
 
 // EXPERIMENT (LOSAT_X_PAIRPARFOLD): the fold of both strips paths split by diagonal-hash bucket
 // over the pool (`x_pair_seed_part.rs`); its scratch is a field of `SubjectScratch`.
@@ -107,7 +109,7 @@ static X_OWNER_SCAN_NS: AtomicU64 = AtomicU64::new(0);
 static X_WAIT_NS: AtomicU64 = AtomicU64::new(0);
 
 /// The inputs of the seed stage of one subject chunk, borrowed from
-/// `collect_prelim_hits_for_chunk` (the same names as there).
+/// `prelim_subject::prelim_chunk_hits` (the same names as there).
 pub(super) struct Inputs<'a> {
     pub(super) two_stage: &'a TwoStageLookup,
     pub(super) search_seq_packed: &'a [u8],
@@ -135,7 +137,7 @@ pub(super) struct Inputs<'a> {
     pub(super) timing: Option<&'a BlastnTiming>,
 }
 
-/// The diagonal array of `collect_prelim_hits_for_chunk` (a query block of at most 8000
+/// The diagonal array of `prelim_subject::prelim_chunk_hits` (a query block of at most 8000
 /// letters): `hit_level_array`, `hit_len_array`, `diag_table_length` (NCBI's
 /// `diag_array_length`), `diag_table_mask` (`diag_mask`) and `diag_array_size`, the names
 /// there, for the two-hit stage of LOSAT_X_PAIRPARDISCARR (child module `disc`). With the
@@ -167,10 +169,167 @@ struct Seed {
 }
 
 /// No NCBI counterpart (scheduling only): where `seed_of_pair` puts a strip's seeds, in scan
-/// order: a list (`Vec<Seed>`), or EXPERIMENT (LOSAT_X_DCSEEDLEAN) the lists of the strip's
-/// partitions (`part::PartSink`).
+/// order: a list (`Vec<Seed>`), or EXPERIMENT (LOSAT_X_DCSEEDLEAN, LOSAT_X_BNSEEDLISTS) the
+/// lists of the strip's partitions (`part::PartSink`).
 trait SeedOut {
     fn push(&mut self, seed: Seed);
+
+    /// EXPERIMENT (LOSAT_X_SEEDPIECE): how many more seeds `push` takes (a seed piece's room,
+    /// `x_pair_seed_piece.rs`); unbounded for a strip's list.
+    #[inline(always)]
+    fn room(&self) -> usize {
+        usize::MAX
+    }
+
+    /// EXPERIMENT (LOSAT_X_SEEDPIECE): no room any more (a piece whose scan stopped, so that the
+    /// words the scan still hands out go to `Cut::run_cold`, which leaves at once).
+    #[inline(always)]
+    fn close(&mut self) {}
+}
+
+/// EXPERIMENT (LOSAT_X_SEEDPIECE): where the scan of a strip goes on after a seed piece: the
+/// subject offset of the word (`kmer_start`) of the first pair the piece had no room for, and
+/// where that pair is in the word: for a word whose pairs are a run (a CSR cell, the direct
+/// table's list), how many pairs of the run the scan read before it (every pair the reference
+/// reads, whether `seed_of_pair` keeps it or not); for a word whose pairs are chains, the pair's
+/// element of its chain (`node`, its `q_off`) and whether that is the second template's chain. A
+/// scan started again from that word's offset gives the same words from that one on (NCBI's scan
+/// resumes at `scan_range[0]`), and its first word with pairs is that word.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct Resume {
+    pub(super) s: usize,
+    pub(super) skip: u32,
+    pub(super) node: u32,
+    pub(super) second: bool,
+}
+
+impl Resume {
+    /// A strip's scan from its start.
+    pub(super) fn at(s: usize) -> Self {
+        Resume {
+            s,
+            ..Resume::default()
+        }
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_SEEDPIECE): the cut of one piece's scan: where the first word goes on
+/// (`Resume`: the pairs of its run to pass over, or the element of its chains to start from) and
+/// where the scan stopped (`None` while it goes on). Cells, so that the closures of a scan (the
+/// word's, the ring's `emit`) share it.
+#[derive(Default)]
+struct Cut {
+    skip: std::cell::Cell<u32>,
+    node: std::cell::Cell<u32>,
+    second: bool,
+    stop: std::cell::Cell<Option<Resume>>,
+}
+
+impl Cut {
+    fn new(from: &Resume) -> Self {
+        Cut {
+            skip: std::cell::Cell::new(from.skip),
+            node: std::cell::Cell::new(from.node),
+            second: from.second,
+            stop: std::cell::Cell::new(None),
+        }
+    }
+
+    /// Whether the scan goes on (no stop yet).
+    #[inline(always)]
+    fn go(&self) -> bool {
+        self.stop.get().is_none()
+    }
+
+    /// The pairs `run` of a word, after those the pieces before took (the first word passes
+    /// over them): `Ok` with all of them when `out` has room for all (the caller hands each to
+    /// its pair in its own loop, the loop of the strips' scan), else `Err` with the pairs passed
+    /// over and the rest, for `run_cold`.
+    ///
+    /// (The caller's loop is the strips' loop, whose body runs for every pair, so that the
+    /// loads of the inputs `seed_of_pair` reads stay out of the loop: a loop that tests the room
+    /// before each pair, or that calls its pair from a second loop too, kept them in or kept the
+    /// pair a call, about 30 instructions more per seed; results/s14p and s14q of line EB.)
+    #[inline(always)]
+    fn fit<'r, O: SeedOut>(
+        &self,
+        run: &'r [u32],
+        out: &O,
+    ) -> Result<&'r [u32], (usize, &'r [u32])> {
+        // (a skip only at the word a piece starts at, so the store is out of the loop's way)
+        let skip = self.skip.get() as usize;
+        let run = if skip == 0 {
+            run
+        } else {
+            self.skip.set(0);
+            &run[skip..]
+        };
+        if run.len() <= out.room() {
+            Ok(run)
+        } else {
+            Err((skip, run))
+        }
+    }
+
+    /// The pairs `run` (the rest of the run of the word at subject offset `s` after `skip`
+    /// pairs) through `pair`, while `out` has room: those before the first pair it has no room
+    /// for, where the cut stops (and `out` is closed, so the later words leave at the test of
+    /// `go`). `pair` pushes at most one seed.
+    #[cold]
+    #[inline(never)]
+    fn run_cold<O: SeedOut>(
+        &self,
+        s: usize,
+        skip: usize,
+        run: &[u32],
+        out: &mut O,
+        mut pair: impl FnMut(u32, &mut O),
+    ) {
+        if !self.go() {
+            return;
+        }
+        for (j, &q) in run.iter().enumerate() {
+            if out.room() == 0 {
+                self.stop.set(Some(Resume {
+                    skip: (skip + j) as u32,
+                    ..Resume::at(s)
+                }));
+                out.close();
+                return;
+            }
+            pair(q, out);
+        }
+    }
+
+    /// For a word whose pairs are chains: where the first word's walk of its chain starts (the
+    /// element the piece before stopped at, or 0: the head), and whether its first template's
+    /// chain is passed over (the piece before stopped in the second's); 0 and `false` for every
+    /// later word.
+    #[inline(always)]
+    fn chain_start(&self) -> (u32, bool) {
+        let node = self.node.replace(0);
+        (node, node != 0 && self.second)
+    }
+
+    /// For a word whose pairs are chains: whether the pair at element `q_off_1` of the word at
+    /// `s` (of the second template's chain where `second`) goes to `seed_of_pair`. The first pair
+    /// `out` has no room for stops the cut there.
+    #[inline(always)]
+    fn take<O: SeedOut>(&self, s: usize, q_off_1: u32, second: bool, out: &mut O) -> bool {
+        if !self.go() {
+            return false;
+        }
+        if out.room() == 0 {
+            self.stop.set(Some(Resume {
+                node: q_off_1,
+                second,
+                ..Resume::at(s)
+            }));
+            out.close();
+            return false;
+        }
+        true
+    }
 }
 
 impl SeedOut for Vec<Seed> {
@@ -228,6 +387,68 @@ fn chunk_free_scope(
         && scan_range == 0
         && !small_na_word
         && !diagnostics
+}
+
+/// No NCBI counterpart (scheduling only): the test of `run` for a chunk with a contiguous table
+/// (the names of `Inputs`): `chunk_free_scope`, an unmasked subject and a chunk the subject's
+/// owner searches by itself. `run` and `wants` read it.
+#[inline(always)]
+fn owner_chunk(
+    use_array_indexing: bool,
+    window_size: usize,
+    scan_range: usize,
+    small_na_word: bool,
+    diagnostics: bool,
+    subject_masked: bool,
+    one_subject_owner: bool,
+) -> bool {
+    chunk_free_scope(
+        false,
+        use_array_indexing,
+        window_size,
+        scan_range,
+        small_na_word,
+        diagnostics,
+    ) && !subject_masked
+        && one_subject_owner
+}
+
+/// No NCBI counterpart (scheduling only): whether `prelim_subject::prelim_chunk_hits` calls `run`
+/// for a chunk with these inputs (the names of `Inputs`; `disc`: the table is discontiguous),
+/// asked before it builds `Inputs`: always for a discontiguous table (`disc::run` decides with
+/// its own switches), else `run`'s tests for a contiguous table (`owner_chunk` and a pool of two
+/// threads or more), so a chunk that `run` would send back at once (every chunk of a database
+/// search: one thread has no pool, and a pool searches the subjects in parallel) costs neither
+/// the inputs nor the call. Such a chunk records the reference side of LOSAT_X_PAIRPAR here, as
+/// `run` recorded it.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+pub(super) fn wants(
+    disc: bool,
+    use_array_indexing: bool,
+    window_size: usize,
+    scan_range: usize,
+    small_na_word: bool,
+    diagnostics: bool,
+    subject_masked: bool,
+    one_subject_owner: bool,
+) -> bool {
+    if disc {
+        return true;
+    }
+    let wanted = owner_chunk(
+        use_array_indexing,
+        window_size,
+        scan_range,
+        small_na_word,
+        diagnostics,
+        subject_masked,
+        one_subject_owner,
+    ) && pool_threads().is_some();
+    if !wanted {
+        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", false);
+    }
+    wanted
 }
 
 /// No NCBI counterpart (scheduling only): whether the strips take an unmasked chunk that the owner
@@ -361,29 +582,63 @@ fn plan_strips(
 /// Phase 1 for one strip: the scan kernel `scan_subject_kmers_with_ranges` picks for this
 /// lookup width and step (unmasked subject), from `job.start` to `job.end`; every lookup
 /// chain hit as in `on_word` (the chain order); every pair through `seed_of_pair`.
-fn scan_strip(x: &Inputs<'_>, job: &StripJob, out: &mut Vec<Seed>) {
+fn scan_strip<O: SeedOut>(x: &Inputs<'_>, job: &StripJob, out: &mut O) {
+    scan_strip_from::<O, false>(x, job, Resume::at(job.start), out);
+}
+
+/// `scan_strip` from the word at `from.s` (a word of the strip's scan: `job.start`, or where a
+/// piece stopped), that word from where `from` says (`Resume`). EXPERIMENT (LOSAT_X_SEEDPIECE):
+/// with `PIECE` the scan stops at the first pair `out` has no room for (`Cut`) and returns where
+/// it goes on; `None` when the strip is done.
+fn scan_strip_from<O: SeedOut, const PIECE: bool>(
+    x: &Inputs<'_>,
+    job: &StripJob,
+    from: Resume,
+    out: &mut O,
+) -> Option<Resume> {
     // EXPERIMENT (LOSAT_X_BNCSR): a contiguous table laid out as CSR has no chains.
+    // EXPERIMENT (LOSAT_X_BNCSRPACK): the form of its head chosen once, each form's scan its own.
     if let Some(csr) = x.two_stage.x_mb_csr() {
-        return scan_strip_csr(x, csr, job, out);
+        // EXPERIMENT (LOSAT_X_BNPVONCE): one presence test per word on a head that fits the cache.
+        return match csr.x_packed() {
+            Some(packed) if super::x_bn_pv_once(&packed) => {
+                scan_strip_csr::<O, _, false, PIECE>(x, &packed, job, from, out)
+            }
+            Some(packed) => scan_strip_csr::<O, _, true, PIECE>(x, &packed, job, from, out),
+            None => scan_strip_csr::<O, _, true, PIECE>(x, csr, job, from, out),
+        };
     }
+    super::x_bn_rank_once(false);
     let two_stage = x.two_stage;
     let lut_word_length = two_stage.lut_word_length();
     let packed = x.search_seq_packed;
     let subject_len = x.s_len;
     let scan_step = x.scan_step;
     let s_range = job.s_range;
-    let (start, end) = (job.start, job.end);
+    let end = job.end;
+    let cut = Cut::new(&from);
     let mut on_kmer = |kmer_start: usize, current_lut_kmer: u64| {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1418
         // ```c
         // offset_pairs[i].qs_offsets.q_off   = q_off - 1;
         // offset_pairs[i++].qs_offsets.s_off = s_off;
         // ```
-        two_stage.for_each_hit(current_lut_kmer, |q_off_1| {
+        let mut pair = |q_off_1: u32| {
             if q_off_1 != 0 {
+                if PIECE && !cut.take(kmer_start, q_off_1, false, out) {
+                    return;
+                }
                 seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
             }
-        });
+        };
+        if PIECE {
+            let (node, _) = cut.chain_start();
+            two_stage.for_each_hit_from(current_lut_kmer, node, &mut pair);
+            cut.go()
+        } else {
+            two_stage.for_each_hit(current_lut_kmer, &mut pair);
+            true
+        }
     };
     scan_kernel(
         packed,
@@ -391,41 +646,74 @@ fn scan_strip(x: &Inputs<'_>, job: &StripJob, out: &mut Vec<Seed>) {
         lut_word_length,
         scan_step,
         x.subject_masked,
-        start,
+        from.s,
         end,
         &mut on_kmer,
     );
+    cut.stop.get()
 }
 
 /// EXPERIMENT (LOSAT_X_BNCSR): `scan_strip` over a contiguous table laid out as CSR
 /// (`lookup::x_bn_csr`): the words with hits (the presence test of `for_each_hit` first), in
 /// order, each `RING` words late through `x_dc_csr::Ring` (whose prefetches bring in the cell's
 /// offsets and the ends of its run), then the cell's run, which holds the chain's offsets in the
-/// chain's order; so the same pairs reach `seed_of_pair` in the same order.
+/// chain's order; so the same pairs reach `seed_of_pair` in the same order. EXPERIMENT
+/// (LOSAT_X_BNCSRPACK): over a head of either form (`x_dc_csr::XHead`).
 #[inline(never)]
-fn scan_strip_csr(
+fn scan_strip_csr<
+    O: SeedOut,
+    H: crate::algorithm::blastn::lookup::x_dc_csr::XHead,
+    const PV: bool,
+    const PIECE: bool,
+>(
     x: &Inputs<'_>,
-    csr: &crate::algorithm::blastn::lookup::x_dc_csr::Csr,
+    csr: &H,
     job: &StripJob,
-    out: &mut Vec<Seed>,
-) {
-    use crate::algorithm::blastn::lookup::x_dc_csr::Ring;
+    from: Resume,
+    out: &mut O,
+) -> Option<Resume> {
+    use crate::algorithm::blastn::lookup::x_dc_csr::XRing;
     let two_stage = x.two_stage;
     let s_range = job.s_range;
-    let mut emit = |(kmer_start, index): (usize, u64)| {
+    let cut = Cut::new(&from);
+    // EXPERIMENT (LOSAT_X_BNRANKONCE): with `rank_once` a word's run is the one of the head's
+    // element the ring hands over with it (a packed head's word is ranked once), else the cell's
+    // run read again.
+    let rank_once = super::x_bn_rank_once(true);
+    let mut emit = |(kmer_start, index): (usize, u64), e: usize| {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1418
         // ```c
         // offset_pairs[i].qs_offsets.q_off   = q_off - 1;
         // offset_pairs[i++].qs_offsets.s_off = s_off;
         // ```
-        for &q_off_1 in csr.run(index as usize) {
+        let mut run = if rank_once {
+            csr.run_at(e)
+        } else {
+            csr.run(index as usize)
+        };
+        if PIECE {
+            match cut.fit(run, out) {
+                Ok(fit) => run = fit,
+                Err((skip, rest)) => {
+                    cut.run_cold(kmer_start, skip, rest, out, |q_off_1, out| {
+                        seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out)
+                    });
+                    return;
+                }
+            }
+        }
+        for &q_off_1 in run {
             seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
         }
     };
-    let mut ring: Ring<'_, (usize, u64)> = Ring::new(csr);
+    let mut ring: H::Ring<'_, (usize, u64)> = csr.ring();
+    // (a cut stops only in `emit`, so only a word that let one out can have stopped it)
     let mut on_kmer = |kmer_start: usize, current_lut_kmer: u64| {
-        if two_stage.has_hits(current_lut_kmer) {
-            ring.push((kmer_start, current_lut_kmer), |w| w.1 as usize, &mut emit);
+        if !PV || two_stage.has_hits(current_lut_kmer) {
+            let left = ring.push((kmer_start, current_lut_kmer), |w| w.1 as usize, &mut emit);
+            !PIECE || !left || cut.go()
+        } else {
+            true
         }
     };
     scan_kernel(
@@ -434,18 +722,22 @@ fn scan_strip_csr(
         two_stage.lut_word_length(),
         x.scan_step,
         x.subject_masked,
-        job.start,
+        from.s,
         job.end,
         &mut on_kmer,
     );
-    ring.flush(&mut emit);
+    // (a stopped scan drops the words still in the ring: the next piece scans them again)
+    if !PIECE || cut.go() {
+        ring.flush(|w| w.1 as usize, &mut emit);
+    }
+    cut.stop.get()
 }
 
 /// The scan kernel `scan_subject_kmers_with_ranges` picks for this lookup width and step,
 /// from `start` to `end` (`scan_strip`, and the child module `na`).
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-fn scan_kernel<F: FnMut(usize, u64)>(
+fn scan_kernel<F: FnMut(usize, u64) -> bool>(
     packed: &[u8],
     subject_len: usize,
     lut_word_length: usize,
@@ -546,10 +838,11 @@ fn scan_kernel<F: FnMut(usize, u64)>(
 ///         q_offset -= ext_left;
 ///         s_offset -= ext_left;
 /// ```
-/// Phase 1 for one pair: the statements of `process_offset_pairs` before the diagonal is
-/// read (context, bounds test, word extension), which read only the inputs. A pair that
+/// Phase 1 for one pair: the statements of `pair_extend::extend_offset_pairs` before the
+/// diagonal is read (context, bounds test, word extension), which read only the inputs. A pair that
 /// the reference drops with `continue` here is dropped; any other becomes a `Seed`, pushed to
-/// `out` (a strip's list, or with LOSAT_X_DCSEEDLEAN its partition's list, `part::PartSink`).
+/// `out` (a strip's list, or with LOSAT_X_BNSEEDLISTS / LOSAT_X_DCSEEDLEAN its partition's list,
+/// `part::PartSink`).
 #[inline(always)]
 fn seed_of_pair<O: SeedOut>(
     x: &Inputs<'_>,
@@ -593,7 +886,7 @@ fn seed_of_pair<O: SeedOut>(
             }
             // SAFETY: s_idx tracks s_off / COMPRESSION_RATIO within bounds by max_ext_left.
             let s_byte = unsafe { *search_seq_packed.get_unchecked(s_idx) };
-            let s_base = ((s_byte << (2 * (s_off % COMPRESSION_RATIO))) >> 6) as u8;
+            let s_base = (s_byte << (2 * (s_off % COMPRESSION_RATIO))) >> 6;
             // SAFETY: q_left is bounded by the outer-sentinel query buffer.
             let q_base =
                 unsafe { *encoded_query_concat_blastna_with_sentinels.get_unchecked(q_left) };
@@ -617,7 +910,7 @@ fn seed_of_pair<O: SeedOut>(
             while ext_right < (ext_to - ext_left) {
                 // SAFETY: s_idx tracks s_off / COMPRESSION_RATIO within bounds by s_len check above.
                 let s_byte = unsafe { *search_seq_packed.get_unchecked(s_idx) };
-                let s_base = ((s_byte << (2 * (s_off % COMPRESSION_RATIO))) >> 6) as u8;
+                let s_base = (s_byte << (2 * (s_off % COMPRESSION_RATIO))) >> 6;
                 // SAFETY: q_right is bounded by the outer-sentinel query buffer.
                 let q_base =
                     unsafe { *encoded_query_concat_blastna_with_sentinels.get_unchecked(q_right) };
@@ -627,7 +920,7 @@ fn seed_of_pair<O: SeedOut>(
                 ext_right += 1;
                 q_right += 1;
                 s_off += 1;
-                if s_off % COMPRESSION_RATIO == 0 {
+                if s_off.is_multiple_of(COMPRESSION_RATIO) {
                     s_idx += 1;
                 }
             }
@@ -692,9 +985,9 @@ struct FoldCounts {
 ///                           (hit_ready) ? 0 : s_end_pos - s_off_pos,
 ///                           hit_ready, s_off_pos, window_size + Delta + 1);
 /// ```
-/// Phase 2 (owner only): the rest of `process_offset_pairs` for the seeds of one strip, in
-/// order, statement for statement for the diagonal hash in one-hit mode (`two_hits` false,
-/// so `off_found` stays false and `hit_ready` true until the cutoff test); the debug, trace
+/// Phase 2 (owner only): the rest of `pair_extend::extend_offset_pairs` for the seeds of one
+/// strip, in order, statement for statement for the diagonal hash in one-hit mode (`two_hits`
+/// false, so `off_found` stays false and `hit_ready` true until the cutoff test); the debug, trace
 /// and diagonal-array branches are outside the scope and left out.
 ///
 /// With `PT` (LOSAT_X_PAIRPARFOLD, `x_pair_seed_part.rs`) the seeds are one partition's seeds
@@ -703,7 +996,36 @@ struct FoldCounts {
 /// buckets the inserts change, and the time of the ungapped extensions (instead of the shared
 /// LOSAT_TIMING counters); without it `out` and `pos` are not read.
 #[allow(clippy::too_many_arguments)]
+#[inline(always)]
 fn fold<const PT: bool>(
+    x: &Inputs<'_>,
+    seeds: &[Seed],
+    diag_hash: &mut DiagHashTable,
+    ungapped_hits: &mut Vec<UngappedHit>,
+    timing: Option<&BlastnTiming>,
+    scan_pause_ns: &mut u64,
+    counts: &mut FoldCounts,
+    out: &mut part::PartOut,
+    pos: &[u32],
+) {
+    fold_t::<PT, true>(
+        x,
+        seeds,
+        diag_hash,
+        ungapped_hits,
+        timing,
+        scan_pause_ns,
+        counts,
+        out,
+        pos,
+    );
+}
+
+/// `fold`; EXPERIMENT (LOSAT_X_BNSEEDLISTS): without `TRACK` the inserts of a partition do not
+/// record the buckets they change (`part::insert_t`; the merge then writes back every bucket of
+/// the partition).
+#[allow(clippy::too_many_arguments)]
+fn fold_t<const PT: bool, const TRACK: bool>(
     x: &Inputs<'_>,
     seeds: &[Seed],
     diag_hash: &mut DiagHashTable,
@@ -850,7 +1172,7 @@ fn fold<const PT: bool>(
         // ```
         // (`hit_ready` is still 1 in one-hit mode; the reference keeps this test.)
         if !hit_ready {
-            part::insert::<PT, false, false>(
+            part::insert_t::<PT, false, false, TRACK>(
                 diag_hash,
                 out,
                 x_key,
@@ -953,7 +1275,7 @@ fn fold<const PT: bool>(
             //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
             //                       hit_ready, s_off_pos, window_size + Delta + 1);
             // ```
-            part::insert::<PT, false, false>(
+            part::insert_t::<PT, false, false, TRACK>(
                 diag_hash,
                 out,
                 x_key,
@@ -998,12 +1320,12 @@ fn fold<const PT: bool>(
                 query_idx: ctx.query_idx,
                 query_frame: ctx.frame,
                 query_context_offset: ctx.query_offset,
-                seed_q_off: q_off - q_context_start,
-                seed_s_off: s_off,
-                qs,
-                qe,
-                ss,
-                se: ungapped_se,
+                seed_q_off: (q_off - q_context_start) as u32,
+                seed_s_off: s_off as u32,
+                qs: qs as u32,
+                qe: qe as u32,
+                ss: ss as u32,
+                se: ungapped_se as u32,
                 score: ungapped_score,
             },
         );
@@ -1017,7 +1339,7 @@ fn fold<const PT: bool>(
         //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
         //                       hit_ready, s_off_pos, window_size + Delta + 1);
         // ```
-        part::insert::<PT, false, false>(
+        part::insert_t::<PT, false, false, TRACK>(
             diag_hash,
             out,
             x_key,
@@ -1064,8 +1386,16 @@ impl<T> Drop for Producing<'_, T> {
 
 // No NCBI counterpart: when the owner leaves its loop (at the end, or unwinding), the helpers
 // that wait for it to take a strip (`ahead > 0`) stop waiting.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 struct Closing<'a, T>(&'a Strips<T>);
 
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 impl<T> Drop for Closing<'_, T> {
     fn drop(&mut self) {
         self.0.failed.store(true, Ordering::Release);
@@ -1123,6 +1453,10 @@ impl<T> Strips<T> {
         guard.done = true;
     }
 
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     fn helper(&self, produce: &impl Fn(usize, &mut Vec<T>)) {
         loop {
             if self.ahead > 0 {
@@ -1301,6 +1635,17 @@ impl StageStats {
 const PART_STRIPS_PER_THREAD: usize = 64;
 const PART_AHEAD_PER_THREAD: usize = 2;
 
+/// No NCBI counterpart: reads LOSAT_X_BNSEEDLISTS once (a strict-set switch: on unless it is
+/// `0`). With it the partitioned stages of this module and of `na` (LOSAT_X_PAIRPARFOLD) take
+/// LOSAT_X_DCSEEDLEAN's form (`part::seed_stage_part_lists`): the home loop scans each strip
+/// into its partitions' lists, and the folds do not record the buckets they change, the merge
+/// writing back every bucket of each partition. Each partition folds the same seeds in the same
+/// order, so the hits and the table are those of the cut and the tracked folds.
+pub(super) fn seed_lists_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNSEEDLISTS"))
+}
+
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
 /// ```c
 ///     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
@@ -1312,7 +1657,7 @@ const PART_AHEAD_PER_THREAD: usize = 2;
 /// The seed stage of one chunk on `threads` threads (this one and `threads - 1` helpers of
 /// its pool): strips scanned by any thread, folded here in strip order into `hash` and
 /// `hits`. With `fold_part` (LOSAT_X_PAIRPARFOLD, `x_pair_seed_part.rs`) the fold is split by
-/// diagonal-hash bucket over the threads instead.
+/// diagonal-hash bucket over the threads instead, in the form LOSAT_X_BNSEEDLISTS says.
 fn seed_stage(
     x: &Inputs<'_>,
     threads: usize,
@@ -1321,6 +1666,30 @@ fn seed_stage(
     timing: Option<&BlastnTiming>,
     timed: bool,
     fold_part: Option<part::FoldPart<'_>>,
+) -> StageStats {
+    seed_stage_of(
+        x,
+        threads,
+        hash,
+        hits,
+        timing,
+        timed,
+        fold_part,
+        seed_lists_on(),
+    )
+}
+
+/// `seed_stage`; `lists`: LOSAT_X_BNSEEDLISTS's partitioned stage (`seed_lists_on`).
+#[allow(clippy::too_many_arguments)]
+fn seed_stage_of(
+    x: &Inputs<'_>,
+    threads: usize,
+    hash: &mut DiagHashTable,
+    hits: &mut Vec<UngappedHit>,
+    timing: Option<&BlastnTiming>,
+    timed: bool,
+    fold_part: Option<part::FoldPart<'_>>,
+    lists: bool,
 ) -> StageStats {
     // The partitioned fold holds the seeds of the strips within its look-ahead of the slowest
     // partition: `PART_AHEAD_PER_THREAD` of `PART_STRIPS_PER_THREAD` strips per thread, 1/32 of a
@@ -1343,6 +1712,54 @@ fn seed_stage(
     let produce = |i: usize, out: &mut Vec<Seed>| scan_strip(x, &jobs[i], out);
     if let Some(fold_part) = fold_part {
         let parts = fold_part.parts;
+        // EXPERIMENT (LOSAT_X_BNSEEDLISTS): every partitioned stage takes the partitions' lists and
+        // the folds that do not record their buckets.
+        if lists {
+            crate::utils::xreach::x_reach!("LOSAT_X_BNSEEDLISTS", true);
+            let produce_lists =
+                |i: usize, out: &mut part::PartSink<'_>| scan_strip(x, &jobs[i], out);
+            // EXPERIMENT (LOSAT_X_SEEDPIECE): a piece of strip i, from its start or a stop.
+            let produce_piece = |i: usize, from: Option<Resume>, out: &mut part::PieceSink<'_>| {
+                let job = &jobs[i];
+                scan_strip_from::<_, true>(x, job, from.unwrap_or(Resume::at(job.start)), out)
+            };
+            let fold_one = |st: &mut part::PartState, seeds: &[Seed], pos: &[u32]| {
+                let part::PartState {
+                    hash,
+                    hits,
+                    out,
+                    counts,
+                    scan_pause_ns,
+                    ..
+                } = st;
+                fold_t::<true, false>(
+                    x,
+                    seeds,
+                    hash,
+                    hits,
+                    timing,
+                    scan_pause_ns,
+                    counts,
+                    out,
+                    pos,
+                );
+            };
+            let r = part::seed_stage_part_lists(
+                jobs.len(),
+                threads,
+                PART_AHEAD_PER_THREAD * threads,
+                hash,
+                hits,
+                fold_part,
+                &produce,
+                &produce_lists,
+                &produce_piece,
+                &fold_one,
+                timed,
+            );
+            part::record(part::ONE_HIT, parts, &r);
+            return StageStats::of_part(jobs.len(), r, timing);
+        }
         let fold_one = |st: &mut part::PartState, seeds: &[Seed], pos: &[u32]| {
             let part::PartState {
                 hash,
@@ -1420,6 +1837,10 @@ fn seed_stage(
 }
 
 // No NCBI counterpart: a copy of the diagonal hash, for the unit tests.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 #[cfg(test)]
 fn copy_hash(h: &DiagHashTable) -> DiagHashTable {
     DiagHashTable {
@@ -1448,7 +1869,7 @@ fn copy_hash(h: &DiagHashTable) -> DiagHashTable {
 ///                                 query_info, ewp, init_hitlist, scan_range[2] + lut_word_length);
 ///     }
 /// ```
-/// Dispatch of `collect_prelim_hits_for_chunk`: the seed stage of this chunk (the loop above
+/// Dispatch of `prelim_subject::prelim_chunk_hits`: the seed stage of this chunk (the loop above
 /// with its one-hit extension) when the chunk is in scope (`chunk_free_scope`, a pool of two
 /// threads or more, an unmasked subject, one subject owner); `true` means it has run and the
 /// reference scan is skipped. `fold_scratch` holds the allocations of
@@ -1466,16 +1887,15 @@ pub(super) fn run(
     if x.two_stage.disc().is_some() {
         return disc::run(x, diag_hash, diag_array, ungapped_hits, fold_scratch);
     }
-    if !chunk_free_scope(
-        false,
+    if !owner_chunk(
         x.use_array_indexing,
         x.window_size,
         x.scan_range,
         x.small_na_word,
         x.diagnostics,
-    ) || x.subject_masked
-        || !x.one_subject_owner
-    {
+        x.subject_masked,
+        x.one_subject_owner,
+    ) {
         crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", false);
         return false;
     }
@@ -1546,16 +1966,44 @@ pub(super) fn summary() {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     use super::super::{
         build_blastna_matrix, build_nucl_score_table, build_query_blastna_buffer,
         diag_hash_insert_window, scan_subject_kmers_with_ranges,
     };
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     use super::*;
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     use crate::algorithm::blastn::lookup::{build_two_stage_lookup, reverse_complement};
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     use crate::core::blast_encoding::{encode_iupac_to_blastna, encode_subject_ncbi2na_packed};
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     use crate::utils::dust::MaskedInterval;
 
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     struct Lcg(u64);
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     impl Lcg {
         fn next(&mut self) -> u64 {
             self.0 = self
@@ -1569,8 +2017,16 @@ mod tests {
         }
     }
 
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     type HashState = (Vec<u32>, Vec<(i32, i32, bool, i32, u32)>, u32, u32, i32);
 
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     fn hash_state(h: &DiagHashTable) -> HashState {
         (
             h.backbone.clone(),
@@ -1600,6 +2056,10 @@ mod tests {
     // `level = -window` (a table reset with a window, the round-1 sign-extension case) and
     // the subject offsets start below zero around them. The stream folded from strips
     // scanned on 1..8 threads must give the decisions and the table of the serial fold.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     #[derive(Clone, Copy, Debug)]
     struct Op {
         diag: i32,
@@ -1609,6 +2069,10 @@ mod tests {
         ungapped_end: i32,
     }
 
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     fn apply(hash: &mut DiagHashTable, op: &Op, window: i32, decisions: &mut Vec<u8>) {
         let last_hit = hash.retrieve(op.diag).map_or(0, |(level, _, _)| level);
         if op.s_off_pos < last_hit {
@@ -1716,6 +2180,10 @@ mod tests {
         }
     }
 
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     fn random_dna(rng: &mut Lcg, len: usize) -> Vec<u8> {
         (0..len).map(|_| b"ACGT"[rng.below(4) as usize]).collect()
     }
@@ -1790,7 +2258,7 @@ mod tests {
             }
             let s_len = subject.len();
             let packed = encode_subject_ncbi2na_packed(&subject);
-            let ctx_seqs = vec![
+            let ctx_seqs = [
                 encode_iupac_to_blastna(&query),
                 encode_iupac_to_blastna(&minus),
             ];
@@ -2003,8 +2471,9 @@ mod tests {
             }
             // LOSAT_X_PAIRPARFOLD (`x_pair_seed_part.rs`): the fold split into 2, 3, 7, 8 and 16
             // partitions on 1..8 threads, on tables with and without level bounds, for two
-            // chunks in a row on one scratch (the second with the hash offset moved on): the
-            // hits and the table of the serial fold.
+            // chunks in a row on one scratch (the second with the hash offset moved on), in both
+            // forms of LOSAT_X_BNSEEDLISTS's stage (the scratch passing its strip buffers from one
+            // form to the other): the hits and the table of the serial fold.
             let x2 = Inputs {
                 diag_offset: diag_offset + s_len as isize + 16,
                 ..x
@@ -2056,31 +2525,48 @@ mod tests {
                         .build()
                         .unwrap();
                     pool.install(|| {
-                        let mut hash = new_table();
                         let mut scratch = part::PartScratch::default();
-                        for (chunk, xc) in [&x, &x2].into_iter().enumerate() {
-                            let at = format!(
-                                "case {case} threads {threads} parts {parts} levels {levels} chunk {chunk}"
-                            );
-                            hash.offset = xc.diag_offset as i32;
-                            let mut hits = Vec::new();
-                            let stats = seed_stage(
-                                xc,
-                                threads,
-                                &mut hash,
-                                &mut hits,
-                                None,
-                                false,
-                                Some(part::FoldPart {
-                                    scratch: &mut scratch,
-                                    parts,
-                                }),
-                            );
-                            assert_eq!(stats.counts.seeds, seeds.len() as u64, "{at}");
-                            let (keys, state, max_level) = &expected[chunk];
-                            assert_eq!(&hits.iter().map(key).collect::<Vec<_>>(), keys, "{at}");
-                            assert_eq!(&hash_state(&hash), state, "{at}");
-                            assert_eq!(&hash.max_level, max_level, "{at}");
+                        // EXPERIMENT (LOSAT_X_SEEDPIECE): the lists' stage also in pieces of 1
+                        // seed, a few and hundreds (the kernels stop inside words' runs and
+                        // restart at many offsets), on the same scratch
+                        for (lists, pieces) in [
+                            (false, 0usize),
+                            (true, 0),
+                            (true, 1),
+                            (true, 2 + (case + threads) % 9),
+                            (true, 200 + 31 * parts),
+                        ] {
+                            scratch.x_pieces = Some(pieces);
+                            let mut hash = new_table();
+                            for (chunk, xc) in [&x, &x2].into_iter().enumerate() {
+                                let at = format!(
+                                    "case {case} threads {threads} parts {parts} levels {levels} lists {lists} pieces {pieces} chunk {chunk}"
+                                );
+                                hash.offset = xc.diag_offset as i32;
+                                let mut hits = Vec::new();
+                                let stats = seed_stage_of(
+                                    xc,
+                                    threads,
+                                    &mut hash,
+                                    &mut hits,
+                                    None,
+                                    false,
+                                    Some(part::FoldPart {
+                                        scratch: &mut scratch,
+                                        parts,
+                                    }),
+                                    lists,
+                                );
+                                assert_eq!(stats.counts.seeds, seeds.len() as u64, "{at}");
+                                let (keys, state, max_level) = &expected[chunk];
+                                assert_eq!(
+                                    &hits.iter().map(key).collect::<Vec<_>>(),
+                                    keys,
+                                    "{at}"
+                                );
+                                assert_eq!(&hash_state(&hash), state, "{at}");
+                                assert_eq!(&hash.max_level, max_level, "{at}");
+                            }
                         }
                     });
                 }

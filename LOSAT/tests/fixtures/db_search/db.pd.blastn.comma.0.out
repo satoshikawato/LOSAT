@@ -1,0 +1,104 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: nucleotide slices of two viruses
+           6 sequences; 27,511 total letters
+
+
+
+Query= a_b t
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+a_l6k exact slice of LC738875                                         555     6e-161
+a_mut_8pct substitutions and indels                                   416     3e-119
+
+
+>a_l6k exact slice of LC738875
+Length=6000
+
+ Score = 555 bits (300),  Expect = 6e-161
+ Identities = 300/300 (100%), Gaps = 0/300 (0%)
+ Strand=Plus/Plus
+
+Query  1     attaatattatttcataatggttattgttacctatatttatttatgtttatgtatatgta  60
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  2001  ATTAATATTATTTCATAATGGTTATTGTTACCTATATTTATTTATGTTTATGTATATGTA  2060
+
+Query  61    ttcattaACATTCACTTAACTACGTTTGCCGGAAATATCATACTACTAACCTTCCAATTT  120
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  2061  TTCATTAACATTCACTTAACTACGTTTGCCGGAAATATCATACTACTAACCTTCCAATTT  2120
+
+Query  121   TAAGTATTCTAGAGGGTACACCTATGTCGATGAAACAATGTGTTTATTCGGCATATTTAG  180
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  2121  TAAGTATTCTAGAGGGTACACCTATGTCGATGAAACAATGTGTTTATTCGGCATATTTAG  2180
+
+Query  181   CAAGTAGACTAAAGTTGAACTGAACATAACAGTACCTTGAAGACATTCTTTATTCGGAAA  240
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  2181  CAAGTAGACTAAAGTTGAACTGAACATAACAGTACCTTGAAGACATTCTTTATTCGGAAA  2240
+
+Query  241   GTGGGAAATTGGTCGCTGGGTATTTTTCTTCTTTTTCTATCACTAACTAATGAGGATTTC  300
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  2241  GTGGGAAATTGGTCGCTGGGTATTTTTCTTCTTTTTCTATCACTAACTAATGAGGATTTC  2300
+
+
+>a_mut_8pct substitutions and indels
+Length=6011
+
+ Score = 416 bits (225),  Expect = 3e-119
+ Identities = 276/301 (92%), Gaps = 2/301 (1%)
+ Strand=Plus/Plus
+
+Query  1     attaatattatttcataatggttattgttacctatatttatttatgtttatgtatatgta  60
+             ||| |||||||| |||||||| ||| |||||||||||||||||||  || ||||||||||
+Sbjct  2002  ATTGATATTATTACATAATGGGTATAGTTACCTATATTTATTTATAATTTTGTATATGTA  2061
+
+Query  61    ttcattaACATTCACTTAACTACGTTTGCCGGAAATATCATACTACT-AACCTTCCAATT  119
+             |||||||||||||||||||||||||||||| || ||||| ||||||| |||| |||||||
+Sbjct  2062  TTCATTAACATTCACTTAACTACGTTTGCCCGAGATATCTTACTACTGAACC-TCCAATT  2120
+
+Query  120   TTAAGTATTCTAGAGGGTACACCTATGTCGATGAAACAATGTGTTTATTCGGCATATTTA  179
+             |||||||||||||||||||||||||||| |||||||||||||||||||||||||||| ||
+Sbjct  2121  TTAAGTATTCTAGAGGGTACACCTATGTAGATGAAACAATGTGTTTATTCGGCATATATA  2180
+
+Query  180   GCAAGTAGACTAAAGTTGAACTGAACATAACAGTACCTTGAAGACATTCTTTATTCGGAA  239
+             | |||| |||||||||| |||||||||||||||||||||||||||||||||||| ||| |
+Sbjct  2181  GAAAGTCGACTAAAGTTCAACTGAACATAACAGTACCTTGAAGACATTCTTTATGCGGCA  2240
+
+Query  240   AGTGGGAAATTGGTCGCTGGGTATTTTTCTTCTTTTTCTATCACTAACTAATGAGGATTT  299
+             |||||||||| ||||||||||| |||||| ||||| |||| |||||||||||||| ||||
+Sbjct  2241  AGTGGGAAATGGGTCGCTGGGTCTTTTTCCTCTTTCTCTAGCACTAACTAATGAGTATTT  2300
+
+Query  300   C  300
+             |
+Sbjct  2301  C  2301
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 7814985
+
+
+  Database: nucleotide slices of two viruses
+    Posted date:  Oct 15, 2026  2:47 PM
+  Number of letters in database: 27,511
+  Number of sequences in database:  6
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

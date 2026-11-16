@@ -9,8 +9,8 @@
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/ncbi_math.h:152-163
 const LOGDERIV_ORDER_MAX: usize = 4;
 const POLYGAMMA_ORDER_MAX: usize = LOGDERIV_ORDER_MAX;
-const NCBIMATH_PI: f64 = 3.1415926535897932384626433832795;
-const NCBIMATH_LN2: f64 = 0.69314718055994530941723212145818;
+const NCBIMATH_PI: f64 = std::f64::consts::PI; // the same f64 as NCBI's literal
+const NCBIMATH_LN2: f64 = std::f64::consts::LN_2; // the same f64 as NCBI's literal
 const NCBIMATH_LNPI: f64 = 1.1447298858494001741434273513531;
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:60-62
@@ -72,7 +72,7 @@ const PRECOMPUTED_FACTORIAL: [f64; 35] = [
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:33-55
 #[rustfmt::skip]
-fn blast_expm1(x: f64) -> f64 {
+pub(crate) fn blast_expm1(x: f64) -> f64 {
     let absx = x.abs();
     if absx > 0.33 {
         return x.exp() - 1.0;
@@ -121,7 +121,7 @@ fn blast_log1p(x: f64) -> f64 {
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:444-470
-fn blast_powi(mut x: f64, mut n: i32) -> f64 {
+pub(crate) fn blast_powi(mut x: f64, mut n: i32) -> f64 {
     if n == 0 {
         return 1.0;
     }
@@ -267,7 +267,7 @@ fn s_poly_gamma(x: f64, order: i32) -> f64 {
             value = -value;
         }
         if order == 0 {
-            let mut sx = (NCBIMATH_PI * x).sin().abs();
+            let sx = (NCBIMATH_PI * x).sin().abs();
             if (x < -0.1 && ((x.ceil() == x) || sx < 2.0 * DBL_EPSILON)) || sx == 0.0 {
                 return f64::INFINITY;
             }
@@ -347,13 +347,6 @@ pub fn gap_decay_divisor(decay_rate: f64, num_segments: usize) -> f64 {
     (1.0 - decay_rate) * blast_powi(decay_rate, (num_segments - 1) as i32)
 }
 
-/// Natural log of factorial.
-///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:473-480
-pub fn ln_factorial(n: f64) -> f64 {
-    blast_ln_factorial(n)
-}
-
 /// Natural log of gamma function for positive integers.
 ///
 /// ln(Gamma(n)) = ln((n-1)!) for positive integers
@@ -369,6 +362,10 @@ pub fn ln_gamma_int(n: i32) -> f64 {
 ///
 /// E = -ln(1 - P)
 pub fn p_to_e(p: f64) -> f64 {
+    #[expect(
+        clippy::manual_range_contains,
+        reason = "NaN: `!(a..=b).contains(&x)` is true for NaN, the comparisons are false"
+    )]
     if p < 0.0 || p > 1.0 {
         return i32::MIN as f64;
     }
@@ -460,10 +457,8 @@ fn blast_sum_p_calc(r: i32, s: f64) -> f64 {
         if s <= -3.4 * rf {
             return 1.0;
         }
-    } else if r < 101 {
-        if s <= -4.0 * rf {
-            return 1.0;
-        }
+    } else if r < 101 && s <= -4.0 * rf {
+        return 1.0;
     }
 
     let stddev = rf.sqrt();
@@ -497,7 +492,7 @@ fn blast_sum_p_calc(r: i32, s: f64) -> f64 {
     let num_hsps_minus_2 = r - 2;
 
     // Callback for outer integral
-    let mut outer_integral = |x: f64, adj2: f64, sdvir: f64| -> f64 {
+    let outer_integral = |x: f64, adj2: f64, sdvir: f64| -> f64 {
         let y = (x - sdvir).exp();
         if !y.is_finite() {
             return 0.0;
@@ -533,7 +528,7 @@ fn blast_sum_p_calc(r: i32, s: f64) -> f64 {
     }
 }
 
-// No NCBI counterpart (`LOSAT_X_SUMPMEMO`, docs/agents/diagnostics.md): s_BlastSumP calls
+// No NCBI counterpart (LOSAT_X_SUMPMEMO, graduated 2026-10-27, always on; docs/agents/diagnostics.md): s_BlastSumP calls
 // s_BlastSumPCalc on every call. Its value depends only on `r` and `s`, and a linking round asks
 // again for the chain that was not chosen in the round before: in TBLASTX of two ~650 kb genomes
 // at one thread, 56,780 of 59,452 calls had the arguments of one of the two calls before them.
@@ -541,10 +536,6 @@ fn blast_sum_p_calc(r: i32, s: f64) -> f64 {
 // the same.
 /// `blast_sum_p_calc(r, s)`, from the thread's last two results when one has the same arguments.
 fn blast_sum_p_calc_reused(r: i32, s: f64) -> f64 {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if !*ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_SUMPMEMO")) {
-        return blast_sum_p_calc(r, s);
-    }
     thread_local! {
         // The last two (r, bits of s, value), the later one first. r = 0 gives 0.0 for any s.
         static LAST: std::cell::Cell<[(i32, u64, f64); 2]> =
@@ -694,7 +685,7 @@ where
 ///
 /// # Arguments
 /// * `starting_points` - Number of starting points permitted between adjacent alignments
-///                       (typically max_overlap + max_gap + 1)
+///   (typically max_overlap + max_gap + 1)
 /// * `num_hsps` - Number of distinct alignments in this collection
 /// * `xsum` - Sum of normalized scores (each weighted by lambda and logK)
 /// * `query_length` - Effective length of the query sequence
@@ -795,61 +786,10 @@ pub fn uneven_gap_sum_e(
     sum_e
 }
 
-/// Calculate E-value for alignments with arbitrarily large gaps.
-///
-/// This is used when HSPs are far apart and the gap size is not constrained.
-///
-/// # Arguments
-/// * `num_hsps` - Number of distinct alignments in this collection
-/// * `xsum` - Sum of normalized scores
-/// * `query_length` - Effective length of the query sequence
-/// * `subject_length` - Effective length of the subject sequence
-/// * `searchsp_eff` - Effective size of the search space
-/// * `weight_divisor` - Divisor used to weight the E-value
-pub fn large_gap_sum_e(
-    num_hsps: i16,
-    xsum: f64,
-    query_length: i32,
-    subject_length: i32,
-    searchsp_eff: i64,
-    weight_divisor: f64,
-) -> f64 {
-    let mut sum_e: f64;
-
-    if num_hsps == 1 {
-        sum_e = (searchsp_eff as f64) * (-xsum).exp();
-    } else {
-        let num = num_hsps as i32;
-
-        // NCBI: xsum -= num*log(subject_length*query_length) - ln_factorial(num)
-        // i.e. xsum = xsum - num*log(prod) + ln_factorial(num)
-        let prod = (subject_length as f64) * (query_length as f64);
-        let adjusted_xsum = xsum - (num as f64) * prod.ln() + ln_factorial_int(num);
-
-        let sum_p = blast_sum_p(num, adjusted_xsum);
-
-        // NCBI: sum_e = PtoE(sum_p) * (searchsp_eff / (query_length*subject_length))
-        sum_e = p_to_e(sum_p) * ((searchsp_eff as f64) / prod);
-    }
-
-    // NCBI: if( weight_divisor == 0.0 || (sum_e /= weight_divisor) > INT4_MAX )
-    if weight_divisor == 0.0 {
-        sum_e = i32::MAX as f64;
-    } else {
-        sum_e /= weight_divisor;
-        if sum_e > (i32::MAX as f64) {
-            sum_e = i32::MAX as f64;
-        }
-    }
-
-    sum_e
-}
-
-/// `large_gap_sum_e` in NCBI's order of evaluation: `xsum -= num*log(...) - lnfact`
+/// The e-value of alignments with arbitrarily large gaps, in NCBI's order of evaluation: `xsum -= num*log(...) - lnfact`
 /// subtracts the difference, which rounds differently from subtracting the product and
 /// adding the factorial (the HSP order of TBLASTX depends on the last bit, and BLASTX's sum
-/// e-values differ from NCBI's in the last digits otherwise). TBLASTX and BLASTX use it;
-/// `large_gap_sum_e` keeps the other order for its unit tests only.
+/// e-values differ from NCBI's in the last digits otherwise). TBLASTX and BLASTX use it.
 ///
 /// NCBI reference: c++/src/algo/blast/core/blast_stat.c:4560-4561
 /// ```c
@@ -894,20 +834,10 @@ pub fn normalize_score(raw_score: i32, lambda: f64, log_k: f64) -> f64 {
 
 /// NCBI BLAST default parameters for HSP linking
 pub mod defaults {
-    /// Gap probability for ungapped alignments
-    pub const GAP_PROB_UNGAPPED: f64 = 0.5;
-    /// Gap probability for gapped alignments
-    pub const GAP_PROB_GAPPED: f64 = 1.0;
-    /// Gap decay rate for ungapped alignments
-    pub const GAP_DECAY_RATE_UNGAPPED: f64 = 0.5;
-    /// Gap decay rate for gapped alignments
-    pub const GAP_DECAY_RATE_GAPPED: f64 = 0.1;
     /// Default gap size for HSP linking
     pub const GAP_SIZE: i32 = 40;
     /// Default overlap size for HSP linking
     pub const OVERLAP_SIZE: i32 = 9;
-    /// Window size = gap_size + overlap_size + 1
-    pub const WINDOW_SIZE: i32 = GAP_SIZE + OVERLAP_SIZE + 1;
 }
 
 #[cfg(test)]
@@ -929,13 +859,13 @@ mod tests {
     #[test]
     fn test_ln_factorial() {
         // ln(1!) = 0
-        assert!((ln_factorial(1.0) - 0.0).abs() < 1e-10);
+        assert!((blast_ln_factorial(1.0) - 0.0).abs() < 1e-10);
 
         // ln(2!) = ln(2) ≈ 0.693
-        assert!((ln_factorial(2.0) - 2.0_f64.ln()).abs() < 1e-10);
+        assert!((blast_ln_factorial(2.0) - 2.0_f64.ln()).abs() < 1e-10);
 
         // ln(5!) = ln(120) ≈ 4.787
-        assert!((ln_factorial(5.0) - 120.0_f64.ln()).abs() < 1e-10);
+        assert!((blast_ln_factorial(5.0) - 120.0_f64.ln()).abs() < 1e-10);
     }
 
     #[test]
@@ -999,3 +929,11 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "evalue_precision_tests.rs"]
+mod evalue_precision_tests;
+
+#[cfg(test)]
+#[path = "evalue_precision_fix_verification_tests.rs"]
+mod evalue_precision_fix_verification_tests;

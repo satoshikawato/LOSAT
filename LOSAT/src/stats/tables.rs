@@ -1,6 +1,7 @@
-use super::protein_options::{
-    gap_costs_row, protein_gap_existence_extend_params, scoring_matrix_table,
-};
+use super::karlin_calc::blast_gcd;
+#[cfg(test)]
+use super::protein_options::protein_gap_existence_extend_params;
+use super::protein_options::{gap_costs_row, scoring_matrix_table};
 use super::protein_tables::ProteinTableRow;
 use crate::config::{NuclScoringSpec, ProteinScoringSpec, ScoringMatrix};
 
@@ -65,7 +66,7 @@ impl ParamEntry {
         }
     }
 
-    fn to_karlin_params(&self) -> KarlinParams {
+    fn to_karlin_params(self) -> KarlinParams {
         KarlinParams {
             lambda: self.lambda,
             k: self.k,
@@ -210,37 +211,6 @@ const BLASTN_5_4: &[ParamEntry] = &[
     ParamEntry::new(8, 6, 0.146, 0.039, 0.11, 1.3, -29.0),
 ];
 
-/// NCBI reference: c++/src/algo/blast/core/ncbi_math.c:405-419
-/// ```c
-/// Int4 BLAST_Gcd(Int4 a, Int4 b)
-/// {
-///    Int4   c;
-///
-///    b = ABS(b);
-///    if (b > a)
-///       c=a, a=b, b=c;
-///
-///    while (b != 0) {
-///       c = a%b;
-///       a = b;
-///       b = c;
-///    }
-///    return a;
-/// }
-/// ```
-fn blast_gcd(a: i32, b: i32) -> i32 {
-    let (mut a, mut b) = (a, b.abs());
-    if b > a {
-        std::mem::swap(&mut a, &mut b);
-    }
-    while b != 0 {
-        let c = a % b;
-        a = b;
-        b = c;
-    }
-    a
-}
-
 /// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3955-3963
 /// ```c
 /// static double s_GetUngappedBeta(Int4 reward, Int4 penalty)
@@ -253,7 +223,7 @@ fn blast_gcd(a: i32, b: i32) -> i32 {
 ///     return beta;
 /// }
 /// ```
-fn ungapped_beta(reward: i32, penalty: i32) -> f64 {
+pub(crate) fn ungapped_beta(reward: i32, penalty: i32) -> f64 {
     if (reward, penalty) == (1, -1) || (reward, penalty) == (2, -3) {
         -2.0
     } else {
@@ -522,8 +492,9 @@ fn protein_row_params(row: &ProteinTableRow) -> KarlinParams {
 /// for alpha and beta).
 ///
 /// A gapped search checks the gap costs against the table before it starts
-/// (`BLAST_ValidateOptions`, `protein_options::validate_protein_options`; blastx accepts 11/1
-/// only), so costs outside the table are a LOSAT defect here: it panics instead of reading
+/// (`BLAST_ValidateOptions`,
+/// `blastinput::protein_options_check::validate_protein_options`; blastx accepts 11/1 only), so
+/// costs outside the table are a LOSAT defect here: it panics instead of reading
 /// another row. NCBI does not check them for an ungapped search, which no LOSAT protein program
 /// runs yet; a change that opens `-ungapped` must not call this with unchecked costs.
 ///
@@ -634,6 +605,7 @@ pub fn lookup_protein_params_ungapped(matrix: ScoringMatrix) -> KarlinParams {
 ///     }
 ///        }
 /// ```
+#[cfg(test)]
 pub fn lookup_protein_params_gapped(matrix: ScoringMatrix) -> KarlinParams {
     let (gap_open, gap_extend) = protein_gap_existence_extend_params(matrix.ncbi_name())
         .expect("every matrix has a BEST row");

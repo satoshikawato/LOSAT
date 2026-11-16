@@ -1,0 +1,1021 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: nucl_v5 (parsed Seq-ids)
+           24 sequences; 11,712 total letters
+
+
+
+Query= NP_000142.1 q one
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BN000025.1 third party embl nucleotide                                128     6e-48
+ti:123 trace id nucleotide                                            128     6e-48
+NR_000023.1                                                           128     6e-48
+AF000022.1 subject id beside an accession                             128     6e-48
+AF000021.1 a long nucleotide title that goes past the sixty byte ...  128     6e-48
+AF000020.1 second definition line with a gi                           128     6e-48
+NC_000019.1                                                           128     6e-48
+BK000018.1                                                            128     6e-48
+nucleotide subject title                                              128     6e-48
+                                                                      128     6e-48
+AF000015.1                                                            128     6e-48
+US1234567_14 patent nucleotide                                        128     6e-48
+AF000013.1 gb with a locus name                                       128     6e-48
+BK000012.1 third-party nucleotide                                     128     6e-48
+mynuc_10 bare non-accession word                                      128     6e-48
+AB000009 bare ddbj accession without version                          128     6e-48
+NM_000008.2 bare refseq accession                                     128     6e-48
+mydb:nuc7 general id nucleotide                                       128     6e-48
+mynuc6 local id nucleotide                                            128     6e-48
+NC_000005.11 chromosome-like                                          128     6e-48
+AB000004.1 dbj nucleotide                                             128     6e-48
+AJ000003.1 emb nucleotide                                             128     6e-48
+AF000002.3 gi plus gb nucleotide                                      128     6e-48
+NM_000001.1 alpha mRNA [Homo sapiens]                                 128     6e-48
+
+
+>BN000025.1 third party embl nucleotide
+Length=488
+
+ Score = 128 bits (322),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 60/66 (91%), Positives = 63/66 (95%), Gaps = 0/66 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHP
+Sbjct  46   MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHP  225
+
+Query  61   CNLWIC  66
+            CNL IC
+Sbjct  226  CNLCIC  243
+
+
+ Score = 68.2 bits (165),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 32/42 (76%), Positives = 34/42 (81%), Gaps = 0/42 (0%)
+ Frame = +2
+
+Query  99   MCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG  140
+            +C +VR TDQSLRH K  HDAN EK KIFH MVGHGRTASEG
+Sbjct  338  VCNVVRITDQSLRHCKPNHDANCEKFKIFHNMVGHGRTASEG  463
+
+
+ Score = 49.7 bits (117),  Expect = 1e-11, Method: Compositional matrix adjust.
+ Identities = 28/75 (37%), Positives = 38/75 (51%), Gaps = 7/75 (9%)
+ Frame = +3
+
+Query  34   GWENYCWPANMSWKVLMKYEFSSDI-------HPCNLWICWIPKEMATPGWWNTDTLHMS  86
+            GW + C        +  +Y+  S         +P   ++  +PK+MA PG   TDTLH S
+Sbjct  120  GWAHGCNEGLGELLLAREYKLESPYEV*VFLRYPPLQFMHLLPKDMANPGLSKTDTLHRS  299
+
+Query  87   EMGLWMHKYPKCMCV  101
+             MGLW HK+ K MCV
+Sbjct  300  AMGLWRHKHLKGMCV  344
+
+
+>ti:123 trace id nucleotide
+Length=488
+
+ Score = 128 bits (322),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 60/66 (91%), Positives = 63/66 (95%), Gaps = 0/66 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHP
+Sbjct  46   MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHP  225
+
+Query  61   CNLWIC  66
+            CNL IC
+Sbjct  226  CNLCIC  243
+
+
+ Score = 68.2 bits (165),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 32/42 (76%), Positives = 34/42 (81%), Gaps = 0/42 (0%)
+ Frame = +2
+
+Query  99   MCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG  140
+            +C +VR TDQSLRH K  HDAN EK KIFH MVGHGRTASEG
+Sbjct  338  VCNVVRITDQSLRHCKPNHDANCEKFKIFHNMVGHGRTASEG  463
+
+
+ Score = 49.7 bits (117),  Expect = 1e-11, Method: Compositional matrix adjust.
+ Identities = 28/75 (37%), Positives = 38/75 (51%), Gaps = 7/75 (9%)
+ Frame = +3
+
+Query  34   GWENYCWPANMSWKVLMKYEFSSDI-------HPCNLWICWIPKEMATPGWWNTDTLHMS  86
+            GW + C        +  +Y+  S         +P   ++  +PK+MA PG   TDTLH S
+Sbjct  120  GWAHGCNEGLGELLLAREYKLESPYEV*VFLRYPPLQFMHLLPKDMANPGLSKTDTLHRS  299
+
+Query  87   EMGLWMHKYPKCMCV  101
+             MGLW HK+ K MCV
+Sbjct  300  AMGLWRHKHLKGMCV  344
+
+
+>NR_000023.1 
+Length=488
+
+ Score = 128 bits (322),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 60/66 (91%), Positives = 63/66 (95%), Gaps = 0/66 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHP
+Sbjct  46   MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHP  225
+
+Query  61   CNLWIC  66
+            CNL IC
+Sbjct  226  CNLCIC  243
+
+
+ Score = 68.2 bits (165),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 32/42 (76%), Positives = 34/42 (81%), Gaps = 0/42 (0%)
+ Frame = +2
+
+Query  99   MCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG  140
+            +C +VR TDQSLRH K  HDAN EK KIFH MVGHGRTASEG
+Sbjct  338  VCNVVRITDQSLRHCKPNHDANCEKFKIFHNMVGHGRTASEG  463
+
+
+ Score = 49.7 bits (117),  Expect = 1e-11, Method: Compositional matrix adjust.
+ Identities = 28/75 (37%), Positives = 38/75 (51%), Gaps = 7/75 (9%)
+ Frame = +3
+
+Query  34   GWENYCWPANMSWKVLMKYEFSSDI-------HPCNLWICWIPKEMATPGWWNTDTLHMS  86
+            GW + C        +  +Y+  S         +P   ++  +PK+MA PG   TDTLH S
+Sbjct  120  GWAHGCNEGLGELLLAREYKLESPYEV*VFLRYPPLQFMHLLPKDMANPGLSKTDTLHRS  299
+
+Query  87   EMGLWMHKYPKCMCV  101
+             MGLW HK+ K MCV
+Sbjct  300  AMGLWRHKHLKGMCV  344
+
+
+>AF000022.1 subject id beside an accession
+Length=488
+
+ Score = 128 bits (322),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 60/66 (91%), Positives = 63/66 (95%), Gaps = 0/66 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHP
+Sbjct  46   MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHP  225
+
+Query  61   CNLWIC  66
+            CNL IC
+Sbjct  226  CNLCIC  243
+
+
+ Score = 68.2 bits (165),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 32/42 (76%), Positives = 34/42 (81%), Gaps = 0/42 (0%)
+ Frame = +2
+
+Query  99   MCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG  140
+            +C +VR TDQSLRH K  HDAN EK KIFH MVGHGRTASEG
+Sbjct  338  VCNVVRITDQSLRHCKPNHDANCEKFKIFHNMVGHGRTASEG  463
+
+
+ Score = 49.7 bits (117),  Expect = 1e-11, Method: Compositional matrix adjust.
+ Identities = 28/75 (37%), Positives = 38/75 (51%), Gaps = 7/75 (9%)
+ Frame = +3
+
+Query  34   GWENYCWPANMSWKVLMKYEFSSDI-------HPCNLWICWIPKEMATPGWWNTDTLHMS  86
+            GW + C        +  +Y+  S         +P   ++  +PK+MA PG   TDTLH S
+Sbjct  120  GWAHGCNEGLGELLLAREYKLESPYEV*VFLRYPPLQFMHLLPKDMANPGLSKTDTLHRS  299
+
+Query  87   EMGLWMHKYPKCMCV  101
+             MGLW HK+ K MCV
+Sbjct  300  AMGLWRHKHLKGMCV  344
+
+
+>AF000021.1 a long nucleotide title that goes past the sixty byte wrap of 
+the alignment heading line of outfmt zero
+ AJ000021.1 another long title for the second definition line of this record, 
+also past sixty bytes
+Length=488
+
+ Score = 128 bits (322),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 60/66 (91%), Positives = 63/66 (95%), Gaps = 0/66 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHP
+Sbjct  46   MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHP  225
+
+Query  61   CNLWIC  66
+            CNL IC
+Sbjct  226  CNLCIC  243
+
+
+ Score = 68.2 bits (165),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 32/42 (76%), Positives = 34/42 (81%), Gaps = 0/42 (0%)
+ Frame = +2
+
+Query  99   MCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG  140
+            +C +VR TDQSLRH K  HDAN EK KIFH MVGHGRTASEG
+Sbjct  338  VCNVVRITDQSLRHCKPNHDANCEKFKIFHNMVGHGRTASEG  463
+
+
+ Score = 49.7 bits (117),  Expect = 1e-11, Method: Compositional matrix adjust.
+ Identities = 28/75 (37%), Positives = 38/75 (51%), Gaps = 7/75 (9%)
+ Frame = +3
+
+Query  34   GWENYCWPANMSWKVLMKYEFSSDI-------HPCNLWICWIPKEMATPGWWNTDTLHMS  86
+            GW + C        +  +Y+  S         +P   ++  +PK+MA PG   TDTLH S
+Sbjct  120  GWAHGCNEGLGELLLAREYKLESPYEV*VFLRYPPLQFMHLLPKDMANPGLSKTDTLHRS  299
+
+Query  87   EMGLWMHKYPKCMCV  101
+             MGLW HK+ K MCV
+Sbjct  300  AMGLWRHKHLKGMCV  344
+
+
+>XM_000020.1 first definition line without a gi
+ AF000020.1 second definition line with a gi
+Length=488
+
+ Score = 128 bits (322),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 60/66 (91%), Positives = 63/66 (95%), Gaps = 0/66 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHP
+Sbjct  46   MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHP  225
+
+Query  61   CNLWIC  66
+            CNL IC
+Sbjct  226  CNLCIC  243
+
+
+ Score = 68.2 bits (165),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 32/42 (76%), Positives = 34/42 (81%), Gaps = 0/42 (0%)
+ Frame = +2
+
+Query  99   MCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG  140
+            +C +VR TDQSLRH K  HDAN EK KIFH MVGHGRTASEG
+Sbjct  338  VCNVVRITDQSLRHCKPNHDANCEKFKIFHNMVGHGRTASEG  463
+
+
+ Score = 49.7 bits (117),  Expect = 1e-11, Method: Compositional matrix adjust.
+ Identities = 28/75 (37%), Positives = 38/75 (51%), Gaps = 7/75 (9%)
+ Frame = +3
+
+Query  34   GWENYCWPANMSWKVLMKYEFSSDI-------HPCNLWICWIPKEMATPGWWNTDTLHMS  86
+            GW + C        +  +Y+  S         +P   ++  +PK+MA PG   TDTLH S
+Sbjct  120  GWAHGCNEGLGELLLAREYKLESPYEV*VFLRYPPLQFMHLLPKDMANPGLSKTDTLHRS  299
+
+Query  87   EMGLWMHKYPKCMCV  101
+             MGLW HK+ K MCV
+Sbjct  300  AMGLWRHKHLKGMCV  344
+
+
+>NC_000019.1 
+Length=488
+
+ Score = 128 bits (322),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 60/66 (91%), Positives = 63/66 (95%), Gaps = 0/66 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHP
+Sbjct  46   MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHP  225
+
+Query  61   CNLWIC  66
+            CNL IC
+Sbjct  226  CNLCIC  243
+
+
+ Score = 68.2 bits (165),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 32/42 (76%), Positives = 34/42 (81%), Gaps = 0/42 (0%)
+ Frame = +2
+
+Query  99   MCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG  140
+            +C +VR TDQSLRH K  HDAN EK KIFH MVGHGRTASEG
+Sbjct  338  VCNVVRITDQSLRHCKPNHDANCEKFKIFHNMVGHGRTASEG  463
+
+
+ Score = 49.7 bits (117),  Expect = 1e-11, Method: Compositional matrix adjust.
+ Identities = 28/75 (37%), Positives = 38/75 (51%), Gaps = 7/75 (9%)
+ Frame = +3
+
+Query  34   GWENYCWPANMSWKVLMKYEFSSDI-------HPCNLWICWIPKEMATPGWWNTDTLHMS  86
+            GW + C        +  +Y+  S         +P   ++  +PK+MA PG   TDTLH S
+Sbjct  120  GWAHGCNEGLGELLLAREYKLESPYEV*VFLRYPPLQFMHLLPKDMANPGLSKTDTLHRS  299
+
+Query  87   EMGLWMHKYPKCMCV  101
+             MGLW HK+ K MCV
+Sbjct  300  AMGLWRHKHLKGMCV  344
+
+
+>BK000018.1 TPA:
+Length=488
+
+ Score = 128 bits (322),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 60/66 (91%), Positives = 63/66 (95%), Gaps = 0/66 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHP
+Sbjct  46   MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHP  225
+
+Query  61   CNLWIC  66
+            CNL IC
+Sbjct  226  CNLCIC  243
+
+
+ Score = 68.2 bits (165),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 32/42 (76%), Positives = 34/42 (81%), Gaps = 0/42 (0%)
+ Frame = +2
+
+Query  99   MCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG  140
+            +C +VR TDQSLRH K  HDAN EK KIFH MVGHGRTASEG
+Sbjct  338  VCNVVRITDQSLRHCKPNHDANCEKFKIFHNMVGHGRTASEG  463
+
+
+ Score = 49.7 bits (117),  Expect = 1e-11, Method: Compositional matrix adjust.
+ Identities = 28/75 (37%), Positives = 38/75 (51%), Gaps = 7/75 (9%)
+ Frame = +3
+
+Query  34   GWENYCWPANMSWKVLMKYEFSSDI-------HPCNLWICWIPKEMATPGWWNTDTLHMS  86
+            GW + C        +  +Y+  S         +P   ++  +PK+MA PG   TDTLH S
+Sbjct  120  GWAHGCNEGLGELLLAREYKLESPYEV*VFLRYPPLQFMHLLPKDMANPGLSKTDTLHRS  299
+
+Query  87   EMGLWMHKYPKCMCV  101
+             MGLW HK+ K MCV
+Sbjct  300  AMGLWRHKHLKGMCV  344
+
+
+>Subject_31 nucleotide subject title
+Length=488
+
+ Score = 128 bits (322),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 60/66 (91%), Positives = 63/66 (95%), Gaps = 0/66 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHP
+Sbjct  46   MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHP  225
+
+Query  61   CNLWIC  66
+            CNL IC
+Sbjct  226  CNLCIC  243
+
+
+ Score = 68.2 bits (165),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 32/42 (76%), Positives = 34/42 (81%), Gaps = 0/42 (0%)
+ Frame = +2
+
+Query  99   MCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG  140
+            +C +VR TDQSLRH K  HDAN EK KIFH MVGHGRTASEG
+Sbjct  338  VCNVVRITDQSLRHCKPNHDANCEKFKIFHNMVGHGRTASEG  463
+
+
+ Score = 49.7 bits (117),  Expect = 1e-11, Method: Compositional matrix adjust.
+ Identities = 28/75 (37%), Positives = 38/75 (51%), Gaps = 7/75 (9%)
+ Frame = +3
+
+Query  34   GWENYCWPANMSWKVLMKYEFSSDI-------HPCNLWICWIPKEMATPGWWNTDTLHMS  86
+            GW + C        +  +Y+  S         +P   ++  +PK+MA PG   TDTLH S
+Sbjct  120  GWAHGCNEGLGELLLAREYKLESPYEV*VFLRYPPLQFMHLLPKDMANPGLSKTDTLHRS  299
+
+Query  87   EMGLWMHKYPKCMCV  101
+             MGLW HK+ K MCV
+Sbjct  300  AMGLWRHKHLKGMCV  344
+
+
+>Subject_30 
+Length=488
+
+ Score = 128 bits (322),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 60/66 (91%), Positives = 63/66 (95%), Gaps = 0/66 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHP
+Sbjct  46   MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHP  225
+
+Query  61   CNLWIC  66
+            CNL IC
+Sbjct  226  CNLCIC  243
+
+
+ Score = 68.2 bits (165),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 32/42 (76%), Positives = 34/42 (81%), Gaps = 0/42 (0%)
+ Frame = +2
+
+Query  99   MCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG  140
+            +C +VR TDQSLRH K  HDAN EK KIFH MVGHGRTASEG
+Sbjct  338  VCNVVRITDQSLRHCKPNHDANCEKFKIFHNMVGHGRTASEG  463
+
+
+ Score = 49.7 bits (117),  Expect = 1e-11, Method: Compositional matrix adjust.
+ Identities = 28/75 (37%), Positives = 38/75 (51%), Gaps = 7/75 (9%)
+ Frame = +3
+
+Query  34   GWENYCWPANMSWKVLMKYEFSSDI-------HPCNLWICWIPKEMATPGWWNTDTLHMS  86
+            GW + C        +  +Y+  S         +P   ++  +PK+MA PG   TDTLH S
+Sbjct  120  GWAHGCNEGLGELLLAREYKLESPYEV*VFLRYPPLQFMHLLPKDMANPGLSKTDTLHRS  299
+
+Query  87   EMGLWMHKYPKCMCV  101
+             MGLW HK+ K MCV
+Sbjct  300  AMGLWRHKHLKGMCV  344
+
+
+>AF000015.1 
+ XM_000016.1 second defline
+Length=488
+
+ Score = 128 bits (322),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 60/66 (91%), Positives = 63/66 (95%), Gaps = 0/66 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHP
+Sbjct  46   MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHP  225
+
+Query  61   CNLWIC  66
+            CNL IC
+Sbjct  226  CNLCIC  243
+
+
+ Score = 68.2 bits (165),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 32/42 (76%), Positives = 34/42 (81%), Gaps = 0/42 (0%)
+ Frame = +2
+
+Query  99   MCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG  140
+            +C +VR TDQSLRH K  HDAN EK KIFH MVGHGRTASEG
+Sbjct  338  VCNVVRITDQSLRHCKPNHDANCEKFKIFHNMVGHGRTASEG  463
+
+
+ Score = 49.7 bits (117),  Expect = 1e-11, Method: Compositional matrix adjust.
+ Identities = 28/75 (37%), Positives = 38/75 (51%), Gaps = 7/75 (9%)
+ Frame = +3
+
+Query  34   GWENYCWPANMSWKVLMKYEFSSDI-------HPCNLWICWIPKEMATPGWWNTDTLHMS  86
+            GW + C        +  +Y+  S         +P   ++  +PK+MA PG   TDTLH S
+Sbjct  120  GWAHGCNEGLGELLLAREYKLESPYEV*VFLRYPPLQFMHLLPKDMANPGLSKTDTLHRS  299
+
+Query  87   EMGLWMHKYPKCMCV  101
+             MGLW HK+ K MCV
+Sbjct  300  AMGLWRHKHLKGMCV  344
+
+
+>US1234567_14 patent nucleotide
+Length=488
+
+ Score = 128 bits (322),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 60/66 (91%), Positives = 63/66 (95%), Gaps = 0/66 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHP
+Sbjct  46   MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHP  225
+
+Query  61   CNLWIC  66
+            CNL IC
+Sbjct  226  CNLCIC  243
+
+
+ Score = 68.2 bits (165),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 32/42 (76%), Positives = 34/42 (81%), Gaps = 0/42 (0%)
+ Frame = +2
+
+Query  99   MCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG  140
+            +C +VR TDQSLRH K  HDAN EK KIFH MVGHGRTASEG
+Sbjct  338  VCNVVRITDQSLRHCKPNHDANCEKFKIFHNMVGHGRTASEG  463
+
+
+ Score = 49.7 bits (117),  Expect = 1e-11, Method: Compositional matrix adjust.
+ Identities = 28/75 (37%), Positives = 38/75 (51%), Gaps = 7/75 (9%)
+ Frame = +3
+
+Query  34   GWENYCWPANMSWKVLMKYEFSSDI-------HPCNLWICWIPKEMATPGWWNTDTLHMS  86
+            GW + C        +  +Y+  S         +P   ++  +PK+MA PG   TDTLH S
+Sbjct  120  GWAHGCNEGLGELLLAREYKLESPYEV*VFLRYPPLQFMHLLPKDMANPGLSKTDTLHRS  299
+
+Query  87   EMGLWMHKYPKCMCV  101
+             MGLW HK+ K MCV
+Sbjct  300  AMGLWRHKHLKGMCV  344
+
+
+>AF000013.1 gb with a locus name
+Length=488
+
+ Score = 128 bits (322),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 60/66 (91%), Positives = 63/66 (95%), Gaps = 0/66 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHP
+Sbjct  46   MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHP  225
+
+Query  61   CNLWIC  66
+            CNL IC
+Sbjct  226  CNLCIC  243
+
+
+ Score = 68.2 bits (165),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 32/42 (76%), Positives = 34/42 (81%), Gaps = 0/42 (0%)
+ Frame = +2
+
+Query  99   MCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG  140
+            +C +VR TDQSLRH K  HDAN EK KIFH MVGHGRTASEG
+Sbjct  338  VCNVVRITDQSLRHCKPNHDANCEKFKIFHNMVGHGRTASEG  463
+
+
+ Score = 49.7 bits (117),  Expect = 1e-11, Method: Compositional matrix adjust.
+ Identities = 28/75 (37%), Positives = 38/75 (51%), Gaps = 7/75 (9%)
+ Frame = +3
+
+Query  34   GWENYCWPANMSWKVLMKYEFSSDI-------HPCNLWICWIPKEMATPGWWNTDTLHMS  86
+            GW + C        +  +Y+  S         +P   ++  +PK+MA PG   TDTLH S
+Sbjct  120  GWAHGCNEGLGELLLAREYKLESPYEV*VFLRYPPLQFMHLLPKDMANPGLSKTDTLHRS  299
+
+Query  87   EMGLWMHKYPKCMCV  101
+             MGLW HK+ K MCV
+Sbjct  300  AMGLWRHKHLKGMCV  344
+
+
+>BK000012.1 third-party nucleotide
+Length=488
+
+ Score = 128 bits (322),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 60/66 (91%), Positives = 63/66 (95%), Gaps = 0/66 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHP
+Sbjct  46   MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHP  225
+
+Query  61   CNLWIC  66
+            CNL IC
+Sbjct  226  CNLCIC  243
+
+
+ Score = 68.2 bits (165),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 32/42 (76%), Positives = 34/42 (81%), Gaps = 0/42 (0%)
+ Frame = +2
+
+Query  99   MCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG  140
+            +C +VR TDQSLRH K  HDAN EK KIFH MVGHGRTASEG
+Sbjct  338  VCNVVRITDQSLRHCKPNHDANCEKFKIFHNMVGHGRTASEG  463
+
+
+ Score = 49.7 bits (117),  Expect = 1e-11, Method: Compositional matrix adjust.
+ Identities = 28/75 (37%), Positives = 38/75 (51%), Gaps = 7/75 (9%)
+ Frame = +3
+
+Query  34   GWENYCWPANMSWKVLMKYEFSSDI-------HPCNLWICWIPKEMATPGWWNTDTLHMS  86
+            GW + C        +  +Y+  S         +P   ++  +PK+MA PG   TDTLH S
+Sbjct  120  GWAHGCNEGLGELLLAREYKLESPYEV*VFLRYPPLQFMHLLPKDMANPGLSKTDTLHRS  299
+
+Query  87   EMGLWMHKYPKCMCV  101
+             MGLW HK+ K MCV
+Sbjct  300  AMGLWRHKHLKGMCV  344
+
+
+>mynuc_10 bare non-accession word
+Length=488
+
+ Score = 128 bits (322),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 60/66 (91%), Positives = 63/66 (95%), Gaps = 0/66 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHP
+Sbjct  46   MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHP  225
+
+Query  61   CNLWIC  66
+            CNL IC
+Sbjct  226  CNLCIC  243
+
+
+ Score = 68.2 bits (165),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 32/42 (76%), Positives = 34/42 (81%), Gaps = 0/42 (0%)
+ Frame = +2
+
+Query  99   MCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG  140
+            +C +VR TDQSLRH K  HDAN EK KIFH MVGHGRTASEG
+Sbjct  338  VCNVVRITDQSLRHCKPNHDANCEKFKIFHNMVGHGRTASEG  463
+
+
+ Score = 49.7 bits (117),  Expect = 1e-11, Method: Compositional matrix adjust.
+ Identities = 28/75 (37%), Positives = 38/75 (51%), Gaps = 7/75 (9%)
+ Frame = +3
+
+Query  34   GWENYCWPANMSWKVLMKYEFSSDI-------HPCNLWICWIPKEMATPGWWNTDTLHMS  86
+            GW + C        +  +Y+  S         +P   ++  +PK+MA PG   TDTLH S
+Sbjct  120  GWAHGCNEGLGELLLAREYKLESPYEV*VFLRYPPLQFMHLLPKDMANPGLSKTDTLHRS  299
+
+Query  87   EMGLWMHKYPKCMCV  101
+             MGLW HK+ K MCV
+Sbjct  300  AMGLWRHKHLKGMCV  344
+
+
+>AB000009 bare ddbj accession without version
+Length=488
+
+ Score = 128 bits (322),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 60/66 (91%), Positives = 63/66 (95%), Gaps = 0/66 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHP
+Sbjct  46   MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHP  225
+
+Query  61   CNLWIC  66
+            CNL IC
+Sbjct  226  CNLCIC  243
+
+
+ Score = 68.2 bits (165),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 32/42 (76%), Positives = 34/42 (81%), Gaps = 0/42 (0%)
+ Frame = +2
+
+Query  99   MCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG  140
+            +C +VR TDQSLRH K  HDAN EK KIFH MVGHGRTASEG
+Sbjct  338  VCNVVRITDQSLRHCKPNHDANCEKFKIFHNMVGHGRTASEG  463
+
+
+ Score = 49.7 bits (117),  Expect = 1e-11, Method: Compositional matrix adjust.
+ Identities = 28/75 (37%), Positives = 38/75 (51%), Gaps = 7/75 (9%)
+ Frame = +3
+
+Query  34   GWENYCWPANMSWKVLMKYEFSSDI-------HPCNLWICWIPKEMATPGWWNTDTLHMS  86
+            GW + C        +  +Y+  S         +P   ++  +PK+MA PG   TDTLH S
+Sbjct  120  GWAHGCNEGLGELLLAREYKLESPYEV*VFLRYPPLQFMHLLPKDMANPGLSKTDTLHRS  299
+
+Query  87   EMGLWMHKYPKCMCV  101
+             MGLW HK+ K MCV
+Sbjct  300  AMGLWRHKHLKGMCV  344
+
+
+>NM_000008.2 bare refseq accession
+Length=488
+
+ Score = 128 bits (322),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 60/66 (91%), Positives = 63/66 (95%), Gaps = 0/66 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHP
+Sbjct  46   MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHP  225
+
+Query  61   CNLWIC  66
+            CNL IC
+Sbjct  226  CNLCIC  243
+
+
+ Score = 68.2 bits (165),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 32/42 (76%), Positives = 34/42 (81%), Gaps = 0/42 (0%)
+ Frame = +2
+
+Query  99   MCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG  140
+            +C +VR TDQSLRH K  HDAN EK KIFH MVGHGRTASEG
+Sbjct  338  VCNVVRITDQSLRHCKPNHDANCEKFKIFHNMVGHGRTASEG  463
+
+
+ Score = 49.7 bits (117),  Expect = 1e-11, Method: Compositional matrix adjust.
+ Identities = 28/75 (37%), Positives = 38/75 (51%), Gaps = 7/75 (9%)
+ Frame = +3
+
+Query  34   GWENYCWPANMSWKVLMKYEFSSDI-------HPCNLWICWIPKEMATPGWWNTDTLHMS  86
+            GW + C        +  +Y+  S         +P   ++  +PK+MA PG   TDTLH S
+Sbjct  120  GWAHGCNEGLGELLLAREYKLESPYEV*VFLRYPPLQFMHLLPKDMANPGLSKTDTLHRS  299
+
+Query  87   EMGLWMHKYPKCMCV  101
+             MGLW HK+ K MCV
+Sbjct  300  AMGLWRHKHLKGMCV  344
+
+
+>mydb:nuc7 general id nucleotide
+Length=488
+
+ Score = 128 bits (322),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 60/66 (91%), Positives = 63/66 (95%), Gaps = 0/66 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHP
+Sbjct  46   MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHP  225
+
+Query  61   CNLWIC  66
+            CNL IC
+Sbjct  226  CNLCIC  243
+
+
+ Score = 68.2 bits (165),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 32/42 (76%), Positives = 34/42 (81%), Gaps = 0/42 (0%)
+ Frame = +2
+
+Query  99   MCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG  140
+            +C +VR TDQSLRH K  HDAN EK KIFH MVGHGRTASEG
+Sbjct  338  VCNVVRITDQSLRHCKPNHDANCEKFKIFHNMVGHGRTASEG  463
+
+
+ Score = 49.7 bits (117),  Expect = 1e-11, Method: Compositional matrix adjust.
+ Identities = 28/75 (37%), Positives = 38/75 (51%), Gaps = 7/75 (9%)
+ Frame = +3
+
+Query  34   GWENYCWPANMSWKVLMKYEFSSDI-------HPCNLWICWIPKEMATPGWWNTDTLHMS  86
+            GW + C        +  +Y+  S         +P   ++  +PK+MA PG   TDTLH S
+Sbjct  120  GWAHGCNEGLGELLLAREYKLESPYEV*VFLRYPPLQFMHLLPKDMANPGLSKTDTLHRS  299
+
+Query  87   EMGLWMHKYPKCMCV  101
+             MGLW HK+ K MCV
+Sbjct  300  AMGLWRHKHLKGMCV  344
+
+
+>mynuc6 local id nucleotide
+Length=488
+
+ Score = 128 bits (322),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 60/66 (91%), Positives = 63/66 (95%), Gaps = 0/66 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHP
+Sbjct  46   MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHP  225
+
+Query  61   CNLWIC  66
+            CNL IC
+Sbjct  226  CNLCIC  243
+
+
+ Score = 68.2 bits (165),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 32/42 (76%), Positives = 34/42 (81%), Gaps = 0/42 (0%)
+ Frame = +2
+
+Query  99   MCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG  140
+            +C +VR TDQSLRH K  HDAN EK KIFH MVGHGRTASEG
+Sbjct  338  VCNVVRITDQSLRHCKPNHDANCEKFKIFHNMVGHGRTASEG  463
+
+
+ Score = 49.7 bits (117),  Expect = 1e-11, Method: Compositional matrix adjust.
+ Identities = 28/75 (37%), Positives = 38/75 (51%), Gaps = 7/75 (9%)
+ Frame = +3
+
+Query  34   GWENYCWPANMSWKVLMKYEFSSDI-------HPCNLWICWIPKEMATPGWWNTDTLHMS  86
+            GW + C        +  +Y+  S         +P   ++  +PK+MA PG   TDTLH S
+Sbjct  120  GWAHGCNEGLGELLLAREYKLESPYEV*VFLRYPPLQFMHLLPKDMANPGLSKTDTLHRS  299
+
+Query  87   EMGLWMHKYPKCMCV  101
+             MGLW HK+ K MCV
+Sbjct  300  AMGLWRHKHLKGMCV  344
+
+
+>NC_000005.11 chromosome-like
+Length=488
+
+ Score = 128 bits (322),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 60/66 (91%), Positives = 63/66 (95%), Gaps = 0/66 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHP
+Sbjct  46   MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHP  225
+
+Query  61   CNLWIC  66
+            CNL IC
+Sbjct  226  CNLCIC  243
+
+
+ Score = 68.2 bits (165),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 32/42 (76%), Positives = 34/42 (81%), Gaps = 0/42 (0%)
+ Frame = +2
+
+Query  99   MCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG  140
+            +C +VR TDQSLRH K  HDAN EK KIFH MVGHGRTASEG
+Sbjct  338  VCNVVRITDQSLRHCKPNHDANCEKFKIFHNMVGHGRTASEG  463
+
+
+ Score = 49.7 bits (117),  Expect = 1e-11, Method: Compositional matrix adjust.
+ Identities = 28/75 (37%), Positives = 38/75 (51%), Gaps = 7/75 (9%)
+ Frame = +3
+
+Query  34   GWENYCWPANMSWKVLMKYEFSSDI-------HPCNLWICWIPKEMATPGWWNTDTLHMS  86
+            GW + C        +  +Y+  S         +P   ++  +PK+MA PG   TDTLH S
+Sbjct  120  GWAHGCNEGLGELLLAREYKLESPYEV*VFLRYPPLQFMHLLPKDMANPGLSKTDTLHRS  299
+
+Query  87   EMGLWMHKYPKCMCV  101
+             MGLW HK+ K MCV
+Sbjct  300  AMGLWRHKHLKGMCV  344
+
+
+>AB000004.1 dbj nucleotide
+Length=488
+
+ Score = 128 bits (322),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 60/66 (91%), Positives = 63/66 (95%), Gaps = 0/66 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHP
+Sbjct  46   MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHP  225
+
+Query  61   CNLWIC  66
+            CNL IC
+Sbjct  226  CNLCIC  243
+
+
+ Score = 68.2 bits (165),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 32/42 (76%), Positives = 34/42 (81%), Gaps = 0/42 (0%)
+ Frame = +2
+
+Query  99   MCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG  140
+            +C +VR TDQSLRH K  HDAN EK KIFH MVGHGRTASEG
+Sbjct  338  VCNVVRITDQSLRHCKPNHDANCEKFKIFHNMVGHGRTASEG  463
+
+
+ Score = 49.7 bits (117),  Expect = 1e-11, Method: Compositional matrix adjust.
+ Identities = 28/75 (37%), Positives = 38/75 (51%), Gaps = 7/75 (9%)
+ Frame = +3
+
+Query  34   GWENYCWPANMSWKVLMKYEFSSDI-------HPCNLWICWIPKEMATPGWWNTDTLHMS  86
+            GW + C        +  +Y+  S         +P   ++  +PK+MA PG   TDTLH S
+Sbjct  120  GWAHGCNEGLGELLLAREYKLESPYEV*VFLRYPPLQFMHLLPKDMANPGLSKTDTLHRS  299
+
+Query  87   EMGLWMHKYPKCMCV  101
+             MGLW HK+ K MCV
+Sbjct  300  AMGLWRHKHLKGMCV  344
+
+
+>AJ000003.1 emb nucleotide
+Length=488
+
+ Score = 128 bits (322),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 60/66 (91%), Positives = 63/66 (95%), Gaps = 0/66 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHP
+Sbjct  46   MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHP  225
+
+Query  61   CNLWIC  66
+            CNL IC
+Sbjct  226  CNLCIC  243
+
+
+ Score = 68.2 bits (165),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 32/42 (76%), Positives = 34/42 (81%), Gaps = 0/42 (0%)
+ Frame = +2
+
+Query  99   MCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG  140
+            +C +VR TDQSLRH K  HDAN EK KIFH MVGHGRTASEG
+Sbjct  338  VCNVVRITDQSLRHCKPNHDANCEKFKIFHNMVGHGRTASEG  463
+
+
+ Score = 49.7 bits (117),  Expect = 1e-11, Method: Compositional matrix adjust.
+ Identities = 28/75 (37%), Positives = 38/75 (51%), Gaps = 7/75 (9%)
+ Frame = +3
+
+Query  34   GWENYCWPANMSWKVLMKYEFSSDI-------HPCNLWICWIPKEMATPGWWNTDTLHMS  86
+            GW + C        +  +Y+  S         +P   ++  +PK+MA PG   TDTLH S
+Sbjct  120  GWAHGCNEGLGELLLAREYKLESPYEV*VFLRYPPLQFMHLLPKDMANPGLSKTDTLHRS  299
+
+Query  87   EMGLWMHKYPKCMCV  101
+             MGLW HK+ K MCV
+Sbjct  300  AMGLWRHKHLKGMCV  344
+
+
+>AF000002.3 gi plus gb nucleotide
+Length=488
+
+ Score = 128 bits (322),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 60/66 (91%), Positives = 63/66 (95%), Gaps = 0/66 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHP
+Sbjct  46   MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHP  225
+
+Query  61   CNLWIC  66
+            CNL IC
+Sbjct  226  CNLCIC  243
+
+
+ Score = 68.2 bits (165),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 32/42 (76%), Positives = 34/42 (81%), Gaps = 0/42 (0%)
+ Frame = +2
+
+Query  99   MCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG  140
+            +C +VR TDQSLRH K  HDAN EK KIFH MVGHGRTASEG
+Sbjct  338  VCNVVRITDQSLRHCKPNHDANCEKFKIFHNMVGHGRTASEG  463
+
+
+ Score = 49.7 bits (117),  Expect = 1e-11, Method: Compositional matrix adjust.
+ Identities = 28/75 (37%), Positives = 38/75 (51%), Gaps = 7/75 (9%)
+ Frame = +3
+
+Query  34   GWENYCWPANMSWKVLMKYEFSSDI-------HPCNLWICWIPKEMATPGWWNTDTLHMS  86
+            GW + C        +  +Y+  S         +P   ++  +PK+MA PG   TDTLH S
+Sbjct  120  GWAHGCNEGLGELLLAREYKLESPYEV*VFLRYPPLQFMHLLPKDMANPGLSKTDTLHRS  299
+
+Query  87   EMGLWMHKYPKCMCV  101
+             MGLW HK+ K MCV
+Sbjct  300  AMGLWRHKHLKGMCV  344
+
+
+>NM_000001.1 alpha mRNA [Homo sapiens]
+ AF000001.1 alpha cDNA
+ X00001.2 alpha clone
+Length=488
+
+ Score = 128 bits (322),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 60/66 (91%), Positives = 63/66 (95%), Gaps = 0/66 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHP
+Sbjct  46   MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHP  225
+
+Query  61   CNLWIC  66
+            CNL IC
+Sbjct  226  CNLCIC  243
+
+
+ Score = 68.2 bits (165),  Expect(2) = 6e-48, Method: Compositional matrix adjust.
+ Identities = 32/42 (76%), Positives = 34/42 (81%), Gaps = 0/42 (0%)
+ Frame = +2
+
+Query  99   MCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG  140
+            +C +VR TDQSLRH K  HDAN EK KIFH MVGHGRTASEG
+Sbjct  338  VCNVVRITDQSLRHCKPNHDANCEKFKIFHNMVGHGRTASEG  463
+
+
+ Score = 49.7 bits (117),  Expect = 1e-11, Method: Compositional matrix adjust.
+ Identities = 28/75 (37%), Positives = 38/75 (51%), Gaps = 7/75 (9%)
+ Frame = +3
+
+Query  34   GWENYCWPANMSWKVLMKYEFSSDI-------HPCNLWICWIPKEMATPGWWNTDTLHMS  86
+            GW + C        +  +Y+  S         +P   ++  +PK+MA PG   TDTLH S
+Sbjct  120  GWAHGCNEGLGELLLAREYKLESPYEV*VFLRYPPLQFMHLLPKDMANPGLSKTDTLHRS  299
+
+Query  87   EMGLWMHKYPKCMCV  101
+             MGLW HK+ K MCV
+Sbjct  300  AMGLWRHKHLKGMCV  344
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 310648
+
+
+Query= q2 q two
+
+Length=45
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.328    0.137    0.542    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 97888
+
+
+Query= plain3 q three
+
+Length=36
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+  Database: nucl_v5 (parsed Seq-ids)
+    Posted date:  Oct 27, 2026  12:40 PM
+  Number of letters in database: 11,712
+  Number of sequences in database:  24
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

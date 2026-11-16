@@ -61,7 +61,8 @@ pub(crate) fn x_mapped_capacity(elements: usize, size: usize) -> usize {
     }
 }
 
-/// No NCBI counterpart (LOSAT_X_BPDBKEEP): the capacity, in elements of `size` bytes, of a buffer
+/// No NCBI counterpart (LOSAT_X_BPDBKEEP; LOSAT_X_TBNLUTLEAN, TBLASTN's lookup tables): the
+/// capacity, in elements of `size` bytes, of a buffer
 /// of `elements` that glibc maps whatever its size and whose free leaves the mmap threshold as it
 /// is (above glibc's ceiling; `elements` elsewhere). Its pages beyond those touched are not
 /// resident.
@@ -144,18 +145,45 @@ impl<T: Copy> XPool<T> {
     /// buffer that holds `need` is lent, so that it is not moved before it is given back (its
     /// touched bytes are kept by its address).
     pub(crate) fn take(&self, need: usize) -> Option<Vec<T>> {
-        self.take_touched(need, usize::MAX)
+        self.take_touched(need, usize::MAX).map(|mut v| {
+            v.clear();
+            v
+        })
     }
 
-    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): `take` among the idle buffers that touched at most twice
+    /// `reserve` of an empty buffer for `len` elements, then the buffer filled to `len` elements:
+    /// a buffer taken from the pool keeps the elements its last user left in it (`give` keeps
+    /// them), so only the elements past those are set to `fill`, as `resize` sets only the
+    /// elements past a buffer's length. For a reader that then writes all `len` elements (the
+    /// database's block reads, `seqdb::file`), which need not have them zeroed first.
+    pub(crate) fn x_filled(&self, len: usize, fill: T) -> Vec<T> {
+        let mut v = Vec::new();
+        if len.saturating_mul(std::mem::size_of::<T>().max(1)) >= X_MAPPED_FROM {
+            if let Some(pooled) = self.take_touched(len, usize::MAX) {
+                v = pooled;
+                v.truncate(len);
+            }
+        }
+        let additional = len - v.len();
+        x_reserve_mapped(&mut v, additional);
+        v.resize(len, fill);
+        v
+    }
+
+    /// `take` among the idle buffers that touched at most twice
     /// the bytes of `need`: a buffer lent for as long as it is used (a TBLASTN frame) holds its
     /// touched pages, which the pool's idle bound no longer counts.
     pub(crate) fn x_take_near(&self, need: usize) -> Option<Vec<T>> {
         let bytes = need.saturating_mul(std::mem::size_of::<T>().max(1));
         self.take_touched(need, bytes.saturating_mul(2))
+            .map(|mut v| {
+                v.clear();
+                v
+            })
     }
 
-    /// `take` among the idle buffers that touched at most `most` bytes.
+    /// The idle buffer `take` lends among those that touched at most `most` bytes, with the
+    /// elements its last user left in it (`give`).
     fn take_touched(&self, need: usize, most: usize) -> Option<Vec<T>> {
         if !X_MAPPED_ALLOCATOR {
             return None;
@@ -210,7 +238,7 @@ impl<T: Copy> XPool<T> {
         x_reserve_mapped(v, additional);
     }
 
-    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): forgets the buffer at `v`, lent by `take` and kept by its
+    /// Forgets the buffer at `v`, lent by `take` and kept by its
     /// user (a TBLASTN store made of a read buffer, freed and never given back), so that a buffer
     /// mapped later at the same address does not inherit its touched bytes.
     pub(crate) fn x_disown(&self, v: &[T]) {
@@ -219,7 +247,7 @@ impl<T: Copy> XPool<T> {
         st.lent.retain(|&(a, _)| a != addr);
     }
 
-    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): frees every idle buffer (the last TBLASTN `-db` stream of
+    /// Frees every idle buffer (the last TBLASTN `-db` stream of
     /// the process is closed, and its frames would stay resident until the next search).
     pub(crate) fn x_clear_idle(&self) {
         let freed = {
@@ -230,18 +258,18 @@ impl<T: Copy> XPool<T> {
         drop(freed);
     }
 
-    /// Puts `v` into the pool, empty, when its capacity is at least `X_MAPPED_FROM` bytes (`v`
-    /// becomes a new empty `Vec`); a smaller `v` stays as it is. Idle buffers beyond the pool's
-    /// bound of touched bytes are freed, the oldest first; a buffer that alone touched
-    /// more is freed at once.
+    /// Puts `v` into the pool when its capacity is at least `X_MAPPED_FROM` bytes (`v` becomes a
+    /// new empty `Vec`); a smaller `v` stays as it is. The pool keeps its elements (`Copy`
+    /// values, so nothing is dropped), which `x_filled` does not write again; `take` empties it.
+    /// Idle buffers beyond the pool's bound of touched bytes are freed, the oldest first; a buffer
+    /// that alone touched more is freed at once.
     pub(crate) fn give(&self, v: &mut Vec<T>) {
         let size = std::mem::size_of::<T>().max(1);
         if !X_MAPPED_ALLOCATOR || v.capacity().saturating_mul(size) < X_MAPPED_FROM {
             return;
         }
-        let mut v = std::mem::take(v);
+        let v = std::mem::take(v);
         let used = v.len() * size;
-        v.clear();
         let mut freed = Vec::new();
         {
             let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -269,7 +297,7 @@ impl<T: Copy> XPool<T> {
 }
 
 /// No NCBI counterpart: the pool of byte buffers: BLASTN's database reads and BLASTNA letters
-/// (LOSAT_X_BNMAPPED), TBLASTN's `-db` reads and large frames (LOSAT_X_TBNDBSTREAM).
+/// (LOSAT_X_BNMAPPED), TBLASTN's `-db` reads and large frames.
 pub(crate) static X_BYTES: XPool<u8> = XPool::new(x_pool_idle_bytes);
 
 /// No NCBI counterpart: the elements sorted at a time with `sort_by` before they are merged in
@@ -479,7 +507,41 @@ mod tests {
         }
     }
 
-    // EXPERIMENT (LOSAT_X_TBNDBSTREAM): `x_take_near`, `x_disown` and `x_clear_idle`.
+    // `x_filled` (the database's block reads, C4-2 I): a buffer of the pool keeps the bytes its
+    // last user left and only the bytes past them are filled; `take` still lends an empty buffer; a
+    // buffer below `X_MAPPED_FROM` is a new one, filled.
+    #[test]
+    fn pool_fills_only_past_the_kept_bytes() {
+        let pool: XPool<u8> = XPool::new(|| 64 << 20);
+        let mut v: Vec<u8> = Vec::new();
+        x_reserve_mapped(&mut v, 3 * X_MAPPED_FROM);
+        v.resize(2 * X_MAPPED_FROM, 7);
+        let addr = v.as_ptr();
+        pool.give(&mut v);
+        let longer = pool.x_filled(2 * X_MAPPED_FROM + 5, 0);
+        assert_eq!(longer.len(), 2 * X_MAPPED_FROM + 5);
+        if X_MAPPED_ALLOCATOR {
+            assert_eq!(longer.as_ptr(), addr);
+            assert!(longer[..2 * X_MAPPED_FROM].iter().all(|&b| b == 7));
+            assert!(longer[2 * X_MAPPED_FROM..].iter().all(|&b| b == 0));
+        } else {
+            assert!(longer.iter().all(|&b| b == 0));
+        }
+        let mut longer = longer;
+        pool.give(&mut longer);
+        let shorter = pool.x_filled(X_MAPPED_FROM, 0);
+        assert_eq!(shorter.len(), X_MAPPED_FROM);
+        let kept = if X_MAPPED_ALLOCATOR { 7 } else { 0 };
+        assert!(shorter.iter().all(|&b| b == kept));
+        let mut shorter = shorter;
+        pool.give(&mut shorter);
+        let empty = pool.take(1);
+        assert_eq!(empty.is_some(), X_MAPPED_ALLOCATOR);
+        assert!(empty.is_none_or(|empty| empty.is_empty()));
+        assert_eq!(pool.x_filled(10, 3), vec![3u8; 10]);
+    }
+
+    // `x_take_near`, `x_disown` and `x_clear_idle`.
     #[test]
     fn pool_lends_near_buffers_forgets_kept_ones_and_clears() {
         let pool: XPool<u8> = XPool::new(|| 64 << 20);

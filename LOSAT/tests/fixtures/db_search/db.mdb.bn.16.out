@@ -1,0 +1,195 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<BlastXML2
+    xmlns="http://www.ncbi.nlm.nih.gov"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+    xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd"
+>
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastn</program>
+      <version>BLASTN 2.17.0+</version>
+      <reference>Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000), &quot;A greedy algorithm for aligning DNA sequences&quot;, J Comput Biol 2000; 7(1-2):203-14.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/multidb/na tests/db_search/multidb/nb</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <expect>10</expect>
+          <sc-match>1</sc-match>
+          <sc-mismatch>-2</sc-mismatch>
+          <gap-open>0</gap-open>
+          <gap-extend>0</gap-extend>
+          <filter>L;m;</filter>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_1</query-id>
+              <query-title>ENST00000320868.9 cdna chromosome:GRCh38:16:176680:177522:1 gene:ENSG00000206172.10 gene_biotype:protein_coding transcript_biotype:protein_coding gene_symbol:HBA1 description:hemoglobin subunit alpha 1 [Source:HGNC Symbol;Acc:HGNC:4823]</query-title>
+              <query-len>577</query-len>
+              <query-masking>
+                <Range>
+                  <from>494</from>
+                  <to>544</to>
+                </Range>
+              </query-masking>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>ENSTTEST0001.1</id>
+                      <accession>ENSTTEST0001.1</accession>
+                      <title>copy of record 1</title>
+                      <taxid>9606</taxid>
+                    </HitDescr>
+                  </description>
+                  <len>577</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>1066.64</bit-score>
+                      <score>577</score>
+                      <evalue>0</evalue>
+                      <identity>577</identity>
+                      <query-from>1</query-from>
+                      <query-to>577</query-to>
+                      <query-strand>Plus</query-strand>
+                      <hit-from>1</hit-from>
+                      <hit-to>577</hit-to>
+                      <hit-strand>Plus</hit-strand>
+                      <align-len>577</align-len>
+                      <gaps>0</gaps>
+                      <qseq>ACTCTTCTGGTCCCCACAGACTCAGAGAGAACCCACCATGGTGCTGTCTCCTGCCGACAAGACCAACGTCAAGGCCGCCTGGGGTAAGGTCGGCGCGCACGCTGGCGAGTATGGTGCGGAGGCCCTGGAGAGGATGTTCCTGTCCTTCCCCACCACCAAGACCTACTTCCCGCACTTCGACCTGAGCCACGGCTCTGCCCAGGTTAAGGGCCACGGCAAGAAGGTGGCCGACGCGCTGACCAACGCCGTGGCGCACGTGGACGACATGCCCAACGCGCTGTCCGCCCTGAGCGACCTGCACGCGCACAAGCTTCGGGTGGACCCGGTCAACTTCAAGCTCCTAAGCCACTGCCTGCTGGTGACCCTGGCCGCCCACCTCCCCGCCGAGTTCACCCCTGCGGTGCACGCCTCCCTGGACAAGTTCCTGGCTTCTGTGAGCACCGTGCTGACCTCCAAATACCGTTAAGCTGGAGCCTCGGTGGCCATGCTTCTTGccccttgggcctccccccagcccctcctccccttcctgcacccgtacccccGTGGTCTTTGAATAAAGTCTGAGTGGGCGGCA</qseq>
+                      <hseq>ACTCTTCTGGTCCCCACAGACTCAGAGAGAACCCACCATGGTGCTGTCTCCTGCCGACAAGACCAACGTCAAGGCCGCCTGGGGTAAGGTCGGCGCGCACGCTGGCGAGTATGGTGCGGAGGCCCTGGAGAGGATGTTCCTGTCCTTCCCCACCACCAAGACCTACTTCCCGCACTTCGACCTGAGCCACGGCTCTGCCCAGGTTAAGGGCCACGGCAAGAAGGTGGCCGACGCGCTGACCAACGCCGTGGCGCACGTGGACGACATGCCCAACGCGCTGTCCGCCCTGAGCGACCTGCACGCGCACAAGCTTCGGGTGGACCCGGTCAACTTCAAGCTCCTAAGCCACTGCCTGCTGGTGACCCTGGCCGCCCACCTCCCCGCCGAGTTCACCCCTGCGGTGCACGCCTCCCTGGACAAGTTCCTGGCTTCTGTGAGCACCGTGCTGACCTCCAAATACCGTTAAGCTGGAGCCTCGGTGGCCATGCTTCTTGCCCCTTGGGCCTCCCCCCAGCCCCTCCTCCCCTTCCTGCACCCGTACCCCCGTGGTCTTTGAATAAAGTCTGAGTGGGCGGCA</hseq>
+                      <midline>|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+                <Hit>
+                  <num>2</num>
+                  <description>
+                    <HitDescr>
+                      <id>ENST00000320868.9</id>
+                      <accession>ENST00000320868.9</accession>
+                      <title>cdna chromosome:GRCh38:16:176680:177522:1 gene:ENSG00000206172.10 gene_biotype:protein_coding transcript_biotype:protein_coding gene_symbol:HBA1 description:hemoglobin subunit alpha 1 [Source:HGNC Symbol;Acc:HGNC:4823]</title>
+                      <taxid>9606</taxid>
+                    </HitDescr>
+                    <HitDescr>
+                      <id>ENSDART00000101734.5</id>
+                      <accession>ENSDART00000101734.5</accession>
+                      <title>cdna chromosome:GRCz11:3:55127549:55128258:-1 gene:ENSDARG00000088330.5 gene_biotype:protein_coding transcript_biotype:protein_coding gene_symbol:hbae1.2 description:hemoglobin, alpha embryonic 1.2 [Source:ZFIN;Acc:ZDB-GENE-170302-1]</title>
+                      <taxid>7955</taxid>
+                    </HitDescr>
+                  </description>
+                  <len>577</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>1066.64</bit-score>
+                      <score>577</score>
+                      <evalue>0</evalue>
+                      <identity>577</identity>
+                      <query-from>1</query-from>
+                      <query-to>577</query-to>
+                      <query-strand>Plus</query-strand>
+                      <hit-from>1</hit-from>
+                      <hit-to>577</hit-to>
+                      <hit-strand>Plus</hit-strand>
+                      <align-len>577</align-len>
+                      <gaps>0</gaps>
+                      <qseq>ACTCTTCTGGTCCCCACAGACTCAGAGAGAACCCACCATGGTGCTGTCTCCTGCCGACAAGACCAACGTCAAGGCCGCCTGGGGTAAGGTCGGCGCGCACGCTGGCGAGTATGGTGCGGAGGCCCTGGAGAGGATGTTCCTGTCCTTCCCCACCACCAAGACCTACTTCCCGCACTTCGACCTGAGCCACGGCTCTGCCCAGGTTAAGGGCCACGGCAAGAAGGTGGCCGACGCGCTGACCAACGCCGTGGCGCACGTGGACGACATGCCCAACGCGCTGTCCGCCCTGAGCGACCTGCACGCGCACAAGCTTCGGGTGGACCCGGTCAACTTCAAGCTCCTAAGCCACTGCCTGCTGGTGACCCTGGCCGCCCACCTCCCCGCCGAGTTCACCCCTGCGGTGCACGCCTCCCTGGACAAGTTCCTGGCTTCTGTGAGCACCGTGCTGACCTCCAAATACCGTTAAGCTGGAGCCTCGGTGGCCATGCTTCTTGccccttgggcctccccccagcccctcctccccttcctgcacccgtacccccGTGGTCTTTGAATAAAGTCTGAGTGGGCGGCA</qseq>
+                      <hseq>ACTCTTCTGGTCCCCACAGACTCAGAGAGAACCCACCATGGTGCTGTCTCCTGCCGACAAGACCAACGTCAAGGCCGCCTGGGGTAAGGTCGGCGCGCACGCTGGCGAGTATGGTGCGGAGGCCCTGGAGAGGATGTTCCTGTCCTTCCCCACCACCAAGACCTACTTCCCGCACTTCGACCTGAGCCACGGCTCTGCCCAGGTTAAGGGCCACGGCAAGAAGGTGGCCGACGCGCTGACCAACGCCGTGGCGCACGTGGACGACATGCCCAACGCGCTGTCCGCCCTGAGCGACCTGCACGCGCACAAGCTTCGGGTGGACCCGGTCAACTTCAAGCTCCTAAGCCACTGCCTGCTGGTGACCCTGGCCGCCCACCTCCCCGCCGAGTTCACCCCTGCGGTGCACGCCTCCCTGGACAAGTTCCTGGCTTCTGTGAGCACCGTGCTGACCTCCAAATACCGTTAAGCTGGAGCCTCGGTGGCCATGCTTCTTGCCCCTTGGGCCTCCCCCCAGCCCCTCCTCCCCTTCCTGCACCCGTACCCCCGTGGTCTTTGAATAAAGTCTGAGTGGGCGGCA</hseq>
+                      <midline>|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+                <Hit>
+                  <num>3</num>
+                  <description>
+                    <HitDescr>
+                      <id>ENST00000251595.11</id>
+                      <accession>ENST00000251595.11</accession>
+                      <title>cdna chromosome:GRCh38:16:172876:173710:1 gene:ENSG00000188536.15 gene_biotype:protein_coding transcript_biotype:protein_coding gene_symbol:HBA2 description:hemoglobin subunit alpha 2 [Source:HGNC Symbol;Acc:HGNC:4824]</title>
+                      <taxid>9606</taxid>
+                    </HitDescr>
+                  </description>
+                  <len>576</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>953.992</bit-score>
+                      <score>516</score>
+                      <evalue>0</evalue>
+                      <identity>557</identity>
+                      <query-from>1</query-from>
+                      <query-to>577</query-to>
+                      <query-strand>Plus</query-strand>
+                      <hit-from>1</hit-from>
+                      <hit-to>576</hit-to>
+                      <hit-strand>Plus</hit-strand>
+                      <align-len>577</align-len>
+                      <gaps>1</gaps>
+                      <qseq>ACTCTTCTGGTCCCCACAGACTCAGAGAGAACCCACCATGGTGCTGTCTCCTGCCGACAAGACCAACGTCAAGGCCGCCTGGGGTAAGGTCGGCGCGCACGCTGGCGAGTATGGTGCGGAGGCCCTGGAGAGGATGTTCCTGTCCTTCCCCACCACCAAGACCTACTTCCCGCACTTCGACCTGAGCCACGGCTCTGCCCAGGTTAAGGGCCACGGCAAGAAGGTGGCCGACGCGCTGACCAACGCCGTGGCGCACGTGGACGACATGCCCAACGCGCTGTCCGCCCTGAGCGACCTGCACGCGCACAAGCTTCGGGTGGACCCGGTCAACTTCAAGCTCCTAAGCCACTGCCTGCTGGTGACCCTGGCCGCCCACCTCCCCGCCGAGTTCACCCCTGCGGTGCACGCCTCCCTGGACAAGTTCCTGGCTTCTGTGAGCACCGTGCTGACCTCCAAATACCGTTAAGCTGGAGCCTCGGTGGCCATGCTTCTTGccccttgggcctccccccagcccctcctccccttcctgcacccgtacccccGTGGTCTTTGAATAAAGTCTGAGTGGGCGGCA</qseq>
+                      <hseq>ACTCTTCTGGTCCCCACAGACTCAGAGAGAACCCACCATGGTGCTGTCTCCTGCCGACAAGACCAACGTCAAGGCCGCCTGGGGTAAGGTCGGCGCGCACGCTGGCGAGTATGGTGCGGAGGCCCTGGAGAGGATGTTCCTGTCCTTCCCCACCACCAAGACCTACTTCCCGCACTTCGACCTGAGCCACGGCTCTGCCCAGGTTAAGGGCCACGGCAAGAAGGTGGCCGACGCGCTGACCAACGCCGTGGCGCACGTGGACGACATGCCCAACGCGCTGTCCGCCCTGAGCGACCTGCACGCGCACAAGCTTCGGGTGGACCCGGTCAACTTCAAGCTCCTAAGCCACTGCCTGCTGGTGACCCTGGCCGCCCACCTCCCCGCCGAGTTCACCCCTGCGGTGCACGCCTCCCTGGACAAGTTCCTGGCTTCTGTGAGCACCGTGCTGACCTCCAAATACCGTTAAGCTGGAGCCTCGGTAGCCGTTCCTCCTGCCCGCTGGGCCTCCCAACGGGCCCTCCTCCCCTCCTTGCACCGGCCCTTCC-TGGTCTTTGAATAAAGTCTGAGTGGGCAGCA</hseq>
+                      <midline>|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||| | | || |||||  ||||||||||  | | |||||||||||| | |||||| |  |  || ||||||||||||||||||||||||||| |||</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+                <Hit>
+                  <num>4</num>
+                  <description>
+                    <HitDescr>
+                      <id>ENST00000652335.1</id>
+                      <accession>ENST00000652335.1</accession>
+                      <title>cdna chromosome:GRCh38:16:142728:153964:1 gene:ENSG00000130656.7 gene_biotype:protein_coding transcript_biotype:protein_coding gene_symbol:HBZ description:hemoglobin subunit zeta [Source:HGNC Symbol;Acc:HGNC:4835]</title>
+                      <taxid>9606</taxid>
+                    </HitDescr>
+                  </description>
+                  <len>547</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>56.5198</bit-score>
+                      <score>30</score>
+                      <evalue>6.12471e-11</evalue>
+                      <identity>55</identity>
+                      <query-from>119</query-from>
+                      <query-to>184</query-to>
+                      <query-strand>Plus</query-strand>
+                      <hit-from>461</hit-from>
+                      <hit-to>526</hit-to>
+                      <hit-strand>Plus</hit-strand>
+                      <align-len>67</align-len>
+                      <gaps>2</gaps>
+                      <qseq>GAGGCCCTGGAGAGGATGTTCCT-GTCCTTCCCCACCACCAAGACCTACTTCCCGCACTTCGACCTG</qseq>
+                      <hseq>GAGACTCTGGAGAGGCTCTTCCTCAGCCACCCGCA-GACCAAGACCTACTTCCCGCACTTCGACCTG</hseq>
+                      <midline>||| | ||||||||| | |||||   ||  || ||  ||||||||||||||||||||||||||||||</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <db-num>17</db-num>
+                  <db-len>11514</db-len>
+                  <hsp-len>15</hsp-len>
+                  <eff-space>6327558</eff-space>
+                  <kappa>0.46</kappa>
+                  <lambda>1.28</lambda>
+                  <entropy>0.85</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+</BlastXML2>

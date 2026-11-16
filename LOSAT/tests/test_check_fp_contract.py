@@ -106,13 +106,13 @@ class SourceCheckTests(unittest.TestCase):
 
 
 X86_DUMP = """\
-0000000000012340 <LOSAT::stats::spouge::BLAST_SpougeStoE::h0123456789abcdef>:
+0000000000012340 <losat::stats::spouge::BLAST_SpougeStoE::h0123456789abcdef>:
    12340:\tpush   %rbp
    12341:\tvfmadd213sd %xmm2,%xmm1,%xmm0
    12346:\tcall   12000 <fma@plt>
    1234b:\tret
 
-0000000000012350 <LOSAT::algorithm::blastp::kappa::redo::h0123456789abcdef>:
+0000000000012350 <losat::algorithm::blastp::kappa::redo::h0123456789abcdef>:
    12350:\tvmulsd %xmm1,%xmm0,%xmm0
    12354:\tvaddsd %xmm2,%xmm0,%xmm0
    12358:\tvfnmadd231pd %ymm2,%ymm1,%ymm0
@@ -120,7 +120,7 @@ X86_DUMP = """\
 """
 
 BASELINE_DUMP = """\
-0000000000135b80 <LOSAT::stats::spouge::erf_impl_ncbi>:
+0000000000135b80 <losat::stats::spouge::erf_impl_ncbi>:
   135ee4:	mov    0x668f7d(%rip),%r14        # 79ee68 <_DYNAMIC+0x2d8>
   135f3f:	call   *%r14
   135f50:	mov    0x10(%rip),%rax        # 79ee70 <_DYNAMIC+0x2e0>
@@ -131,7 +131,7 @@ BASELINE_DUMP = """\
 """
 
 ARM_DUMP = """\
-0000000000012340 <LOSAT::stats::spouge::erfc::h0123456789abcdef>:
+0000000000012340 <losat::stats::spouge::erfc::h0123456789abcdef>:
    12340:\tfmadd\td0, d1, d2, d3
    12344:\tfmul\td0, d0, d1
    12348:\tret
@@ -141,31 +141,31 @@ ARM_DUMP = """\
 class BinaryCountTests(unittest.TestCase):
     def test_x86_counts_by_function(self) -> None:
         counts = fp.count_fma(X86_DUMP.splitlines(), "x86_64")
-        spouge = counts["LOSAT::stats::spouge::BLAST_SpougeStoE::h0123456789abcdef"]
+        spouge = counts["losat::stats::spouge::BLAST_SpougeStoE::h0123456789abcdef"]
         self.assertEqual((spouge.instructions, spouge.refs), (1, 1))
-        kappa = counts["LOSAT::algorithm::blastp::kappa::redo::h0123456789abcdef"]
+        kappa = counts["losat::algorithm::blastp::kappa::redo::h0123456789abcdef"]
         self.assertEqual((kappa.instructions, kappa.refs), (1, 0))
         self.assertEqual(kappa.mnemonics, {"vfnmadd231pd": 1})
 
     def test_an_fma_outside_the_sites_fails(self) -> None:
         errors = fp.judge(fp.count_fma(X86_DUMP.splitlines(), "x86_64"))
         self.assertEqual(len(errors), 1)
-        self.assertIn("LOSAT::algorithm::blastp::kappa::redo", errors[0])
+        self.assertIn("losat::algorithm::blastp::kappa::redo", errors[0])
         self.assertIn("1 FMA instruction(s)", errors[0])
 
     def test_baseline_got_call_and_the_library_fma(self) -> None:
         counts = fp.count_fma(BASELINE_DUMP.splitlines(), "x86_64", frozenset({0x79EE68}))
-        self.assertEqual(counts["LOSAT::stats::spouge::erf_impl_ncbi"].refs, 1)
-        self.assertEqual(counts["LOSAT::stats::spouge::erf_impl_ncbi"].instructions, 0)
+        self.assertEqual(counts["losat::stats::spouge::erf_impl_ncbi"].refs, 1)
+        self.assertEqual(counts["losat::stats::spouge::erf_impl_ncbi"].instructions, 0)
         library = counts["compiler_builtins::math::libm_math::arch::x86::fma::fma_with_fma"]
         self.assertEqual((library.instructions, library.refs), (1, 0))
         self.assertEqual(fp.judge(counts), [])
 
     def test_a_reference_to_fma_outside_the_sites_fails(self) -> None:
-        dump = BASELINE_DUMP.replace("LOSAT::stats::spouge::erf_impl_ncbi", "LOSAT::stats::karlin::lambda")
+        dump = BASELINE_DUMP.replace("losat::stats::spouge::erf_impl_ncbi", "losat::stats::karlin::lambda")
         errors = fp.judge(fp.count_fma(dump.splitlines(), "x86_64", frozenset({0x79EE68})))
         self.assertEqual(len(errors), 2)
-        self.assertIn("LOSAT::stats::karlin::lambda: 1 reference(s) to fma", errors[0])
+        self.assertIn("losat::stats::karlin::lambda: 1 reference(s) to fma", errors[0])
         self.assertIn("the mul_add site was not found", errors[1])
 
     def test_only_the_sites_pass(self) -> None:

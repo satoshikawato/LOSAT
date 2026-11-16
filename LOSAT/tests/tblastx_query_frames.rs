@@ -11,12 +11,12 @@
 //! after the other, or one task per frame on the search pool. So the property under test is that
 //! the report does not depend on it: for several queries with low-complexity runs (pieces of
 //! MelaMJNV, a query of four letters, whose four frames hold one residue each, and one of two
-//! letters, which has no frame) at 1 and 4 threads, the searches with the switch off and by
+//! letters, which has no frame) at 1, 4, 8 and 16 threads, the searches with the switch off and by
 //! default give the same bytes; with several query batches (`BATCH_SIZE`) too; and `-seg no` is not
 //! acted on. That the frames are masked on the pool's threads is checked by the unit test
 //! `frames_are_masked_on_the_pool_threads`; here the reach rows (`LOSAT_X_REACH`,
-//! `tests/reach_support`) show that the pool path ran at 4 threads and not at 1. That those bytes
-//! equal NCBI's is the business of the TBLASTX fixtures.
+//! `tests/reach_support`) show that the pool path ran at 4, 8 and 16 threads and not at 1. That
+//! those bytes equal NCBI's is the business of the TBLASTX fixtures.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -160,15 +160,15 @@ fn with<'a>(
     vars
 }
 
-/// The search with the switch off at one thread, then off and by default at 1 and 4 threads, all
-/// with the same bytes and no standard error. The default runs write the reach rows: the frames
-/// are masked on the pool at 4 threads and not at 1.
+/// The search with the switch off at one thread, then off and by default at 1, 4, 8 and 16
+/// threads, all with the same bytes and no standard error. The default runs write the reach rows:
+/// the frames are masked on the pool above one thread and not at 1.
 fn check(env: &[(&'static str, &'static str)], extra: &[&str]) {
     let inputs = Inputs::new();
     let (expected, stderr) = tblastx(&inputs, extra, 1, &with(env, &[OFF]));
     assert!(!expected.is_empty(), "{env:?} {extra:?}: no hits");
     assert_eq!(stderr, "", "{env:?} {extra:?}");
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         let (report, stderr) = tblastx(&inputs, extra, threads, &with(env, &[OFF]));
         assert!(
             report == expected,
@@ -220,7 +220,7 @@ fn seg_no_is_not_acted_on() {
     let extra = ["-seg", "no"];
     let (expected, _) = tblastx(&inputs, &extra, 1, &[OFF]);
     assert!(!expected.is_empty());
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         let reach = reach_support::Reach::new("qframes_seg_no");
         let (report, _) = tblastx(&inputs, &extra, threads, &[reach.var()]);
         assert!(report == expected, "threads {threads}: default differs");

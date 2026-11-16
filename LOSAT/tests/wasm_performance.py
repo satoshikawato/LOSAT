@@ -340,7 +340,7 @@ def freeze(args):
             # Freeze the memory adapter and the table of files too: they affect the executed module.
             "runner_hashes": {
                 p: digest(p)
-                for p in [*runners.values(), str(TESTS / "wasi_shared_memory.js"), str(TESTS / "wasi_files.js")]
+                for p in [*runners.values(), str(TESTS / "wasi_thread_worker.js"), str(TESTS / "wasi_shared_memory.js"), str(TESTS / "wasi_files.js")]
             },
         },
         "hardware": {

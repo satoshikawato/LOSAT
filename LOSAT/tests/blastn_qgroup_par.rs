@@ -8,8 +8,8 @@
 //! blastn-short with several queries (pieces of LC738874, or of LC738868 itself for megablast and
 //! dc-megablast, with microsatellites, runs of `N`, lower case letters, a poly-A query, one of 20
 //! letters and one of 300 `N` followed by 400 letters) against LC738868 at 1 and 4 threads, the
-//! searches with `LOSAT_X_QGROUPPAR=0` and by default give the same bytes. The same holds in
-//! `LOSAT_X_QBATCHPAR` slots of two threads and for batches split into query chunks. With
+//! searches with `LOSAT_X_QGROUPPAR=0` and by default give the same bytes. The same holds with
+//! several query batches and for batches split into query chunks. With
 //! `LOSAT_X_STATS` the counters show which form ran: per query at 4 threads, the owner loop where
 //! one query holds most of the HSPs. That the bytes equal NCBI's is the business of the blastn
 //! fixtures.
@@ -298,21 +298,12 @@ fn masking_and_other_scores() {
     );
 }
 
-// Several batches (`BATCH_SIZE`), searched in LOSAT_X_QBATCHPAR slots of two threads (each with a
-// private pool, on which the stages run per query), and a batch split into query chunks.
+// Several batches (`BATCH_SIZE`), on whose pool the stages run per query, and a batch split into
+// query chunks.
 #[test]
-fn slots_and_split_batches() {
+fn several_and_split_batches() {
     let queries = Queries::pieces();
-    let (_, traceback) = check_task(
-        &queries,
-        "blastn",
-        &[],
-        &[
-            ("BATCH_SIZE", "20000"),
-            ("LOSAT_X_QBATCHPAR", "1"),
-            ("LOSAT_X_QBATCHPARSLOTS", "2"),
-        ],
-    );
+    let (_, traceback) = check_task(&queries, "blastn", &[], &[("BATCH_SIZE", "20000")]);
     assert!(traceback > 0, "{traceback}");
     check_task(
         &queries,

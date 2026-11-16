@@ -1,110 +1,11 @@
 //! Query batches of a search (NCBI `CBlastInput::GetNextSeqBatch`).
 
-use std::ops::Range;
+use crate::blastinput::fasta_reader::{FastaRecord, ReadError};
 
-use crate::algorithm::blastn::blast_engine::{QueryReading, NO_DATA_MESSAGE};
-use crate::blastinput::fasta_reader::FastaRecord;
-
-/// Splits queries of the given lengths into NCBI's query batches.
-///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_input.cpp:138-170
-/// ```c++
-///     TSeqPos size_read = 0;
-///     ...
-///     while (size_read < GetBatchSize()) {
-///         ...
-///             size_read += sequence::GetLength(loc->GetWhole(), q->GetScope());
-///         ...
-///         retval->AddQuery(q);
-/// ```
-/// The query that reaches the batch size stays in the current batch. The batch size
-/// depends on the program (`blast_input_aux.cpp:104-119`).
-pub fn query_batches(lengths: &[usize], batch_size: usize) -> Vec<Range<usize>> {
-    let mut batches = Vec::new();
-    let mut start = 0;
-    while start < lengths.len() {
-        let mut end = start;
-        let mut residues = 0usize;
-        while end < lengths.len() && residues < batch_size {
-            residues += lengths[end];
-            end += 1;
-        }
-        batches.push(start..end);
-        start = end;
-    }
-    batches
-}
-
-/// The end (a query index) of the query batch that starts at `start`: queries are added
-/// while the residues read are fewer than the batch size.
-///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_input.cpp:138-170
-/// ```c++
-///     TSeqPos size_read = 0;
-///
-///     while (size_read < GetBatchSize()) {
-///
-///         if (End())
-///             break;
-///         ...
-///             size_read += sequence::GetLength(loc->GetWhole(), q->GetScope());
-///         ...
-///         retval->AddQuery(q);
-///     }
-/// ```
-/// The batch size and `size_read` are `TSeqPos` (32-bit unsigned): an `Int4` batch size
-/// converts to it (a negative one becomes 2^32 plus the value).
-pub fn next_query_batch_end(lengths: &[usize], start: usize, batch_size: u32) -> usize {
-    let mut end = start;
-    let mut size_read: u32 = 0;
-    while end < lengths.len() && size_read < batch_size {
-        size_read = size_read.wrapping_add(lengths[end] as u32);
-        end += 1;
-    }
-    end
-}
-
-/// `NStr::StringToInt` with the default flags: an optional sign and decimal digits, within
-/// the range of an `int`, and nothing else (no spaces); `None` where NCBI throws its
-/// `CStringException`.
-///
-/// NCBI reference: ncbi-blast/c++/src/corelib/ncbistr.cpp:635-643
-/// ```c
-/// int NStr::StringToInt(const CTempString str, TStringToNumFlags flags, int base)
-/// {
-///     S2N_CONVERT_GUARD_EX(flags);
-///     Int8 value = StringToInt8(str, flags, base);
-///     if ( value < kMin_Int  ||  value > kMax_Int ) {
-///         S2N_CONVERT_ERROR(int, "overflow", ERANGE, 0);
-///     }
-///     return (int) value;
-/// }
-/// ```
-/// NCBI reference: ncbi-blast/c++/src/corelib/ncbistr.cpp:810-862
-/// ```c
-///     // Determine sign
-///     bool sign = false;
-///     switch (str[pos]) {
-///     case '-':
-///         sign = true;
-///         /*FALLTHRU*/
-///     case '+':
-///         pos++;
-///         break;
-///     ...
-///     // Last checks
-///     if ( pos == pos0  || ((comma >= 0)  &&  (comma != 3)) ) {
-///         S2N_CONVERT_ERROR_INVAL(Int8);
-///     }
-/// ```
-/// `i32::from_str` reads the same strings.
-pub fn ncbi_string_to_int(value: &std::ffi::OsStr) -> Option<i32> {
-    value.to_str()?.parse::<i32>().ok()
-}
-
-/// The query batch size of blastn from the environment variable `BATCH_SIZE` (0 when it
-/// is not set: NCBI then uses `CBatchSizeMixer`). `Err` holds the value that NCBI cannot
-/// convert (an empty value too).
+/// The query batch size from the environment variable `BATCH_SIZE` (`value`; 0 when it is not
+/// set: blastn then uses `CBatchSizeMixer`, the other programs their default). `Err` is the
+/// `CStringException` of `NStr::StringToInt` (flags 0: an optional sign and decimal digits within
+/// the range of an `int`, no spaces) for a value it cannot convert, an empty one too.
 ///
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:85-91
 /// ```c
@@ -120,12 +21,12 @@ pub fn ncbi_string_to_int(value: &std::ffi::OsStr) -> Option<i32> {
 /// ```c
 ///     if (! use_default) return 0;
 /// ```
-pub fn get_query_batch_size(value: Option<&std::ffi::OsStr>) -> Result<i32, String> {
+pub(crate) fn get_query_batch_size(
+    value: Option<&std::ffi::OsStr>,
+) -> Result<i32, crate::ncbi_exception::NcbiException> {
     match value {
         None => Ok(0),
-        Some(value) => {
-            ncbi_string_to_int(value).ok_or_else(|| value.to_string_lossy().into_owned())
-        }
+        Some(value) => crate::ncbi_str::string_to_int(value.as_encoded_bytes(), 0),
     }
 }
 
@@ -237,6 +138,381 @@ impl BatchSizeMixer {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2313
+// ```c++
+// void CBlastFormat::ResetScopeHistory()
+// {
+//     // Do not reset the scope for BLAST2Sequences or else we'll loose the
+//     // sequence data! (see x_CreateSubjectBioseq)
+//     if (m_IsBl2Seq){
+//         return;
+//     }
+//     ...
+//     if (m_FormatType != CFormattingArgs::eXml)
+//     {
+//         m_Scope->ResetDataAndHistory();
+//     }
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-258 (each program's batch loop)
+// ```c++
+//         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+//             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+// ```
+/// The query records that NCBI's scope holds while it reports a query batch under
+/// `-parse_deflines` (`QueryScopes`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum QueryScopeSpan {
+    /// The batch's records: the batch reader adds them to the scope, and the formatter empties
+    /// it after the batch's reports.
+    Batch,
+    /// Every batch's: the formatter keeps them with `-subject` (bl2seq) and in outfmt 5, whose
+    /// XML document it writes after the last batch (NCBI BLAST+ 2.17.0 then shows a reported
+    /// database sequence with the id of a later batch's query as that query, or fails:
+    /// `Q/SURVEY_Q1c.md` of line RG).
+    Run,
+}
+
+impl QueryScopeSpan {
+    /// The span of a search with `-subject` (`subject`) or a database, whose reports `xml`
+    /// include outfmt 5 (where one call writes several formats, outfmt 5 among them gives the
+    /// larger span).
+    pub(crate) fn of(subject: bool, xml: bool) -> Self {
+        if subject || xml {
+            QueryScopeSpan::Run
+        } else {
+            QueryScopeSpan::Batch
+        }
+    }
+}
+
+/// Whether one of the `-outfmt` values `outfmts` is outfmt 5 (`QueryScopeSpan::of`).
+pub(crate) fn outfmts_have_xml<'a>(outfmts: impl IntoIterator<Item = &'a str>) -> bool {
+    use crate::blastinput::app::{parse_formatting_string, ReportFormat};
+    outfmts.into_iter().any(|outfmt| {
+        parse_formatting_string(outfmt)
+            .is_ok_and(|choice| ReportFormat::from_number(choice.number) == Some(ReportFormat::Xml))
+    })
+}
+
+/// The ids of the query records of one scope (`QueryScopes`): the keys of each id
+/// (`seqid::defline_set::scope_keys`, and the own kind of `id_scope::version_keys` and
+/// `id_scope::name_keys`).
+#[derive(Debug, Default)]
+pub(crate) struct QueryScope {
+    keys: std::collections::HashSet<u64>,
+}
+
+impl QueryScope {
+    /// Adds the ids `ids` of a query record, or LOSAT's refusal of a record whose id another
+    /// record of the scope has (`believed::duplicate_id`).
+    fn add(&mut self, ids: &[crate::seqid::ParsedSeqId], program: &str) -> anyhow::Result<()> {
+        if let Some(refusal) = crate::blastinput::fasta_reader::believed::duplicate_id(
+            ids,
+            &mut self.keys,
+            "query",
+            program,
+        ) {
+            return Err(refusal);
+        }
+        // `duplicate_id` keeps the version's kind of two BLASTN queries only.
+        self.keys.extend(
+            ids.iter()
+                .filter_map(|id| crate::seqid::id_scope::version_keys(id).map(|(own, _)| own)),
+        );
+        Ok(())
+    }
+
+    /// Adds the ids `ids` of query records (`BelievedIds`), whatever ids the scope has
+    /// (`QueryScopes::with_whole_run`): the keys that `add` keeps of an id (`scope_keys` and the
+    /// own kind of `name_keys` and `version_keys`), which `has_key` asks.
+    pub(crate) fn add_ids_of<'r>(
+        &mut self,
+        ids: impl IntoIterator<Item = &'r crate::blastinput::fasta_reader::believed::BelievedIds>,
+    ) {
+        let mut keys = Vec::new();
+        for id in ids.into_iter().flat_map(|believed| &believed.ids) {
+            keys.clear();
+            crate::seqid::defline_set::scope_keys(id, &mut keys);
+            self.keys.extend(keys.iter().copied());
+            self.keys
+                .extend(crate::seqid::id_scope::name_keys(id).map(|(own, _)| own));
+            self.keys
+                .extend(crate::seqid::id_scope::version_keys(id).map(|(own, _)| own));
+        }
+    }
+
+    /// The scope of query records read without `-parse_deflines`, by their generated local ids
+    /// `local_ids` (`Query_N`, without `lcl|`; `believed::generated_ids`): the keys that `add_ids_of`
+    /// keeps of such an id (`scope_keys`: a local string id in any case, as NCBI's scope finds
+    /// one).
+    pub(crate) fn of_generated_ids<'r>(local_ids: impl IntoIterator<Item = &'r str>) -> Self {
+        let mut scope = Self::default();
+        let mut keys = Vec::new();
+        for id in local_ids
+            .into_iter()
+            .flat_map(crate::blastinput::fasta_reader::believed::generated_ids)
+        {
+            keys.clear();
+            crate::seqid::defline_set::scope_keys(&id, &mut keys);
+            scope.keys.extend(keys.iter().copied());
+        }
+        scope
+    }
+
+    /// Whether a query of the scope has an id with one of the keys `keys`.
+    pub(crate) fn has_key(&self, keys: &[u64]) -> bool {
+        keys.iter().any(|key| self.keys.contains(key))
+    }
+}
+
+/// The scopes of the query batches of one report, for the refusals of the query-anchored formats
+/// (outfmt 1 to 4; `common::database::refuse_query_ids_of_anchored_reports`), one owner for
+/// BLASTN's and TBLASTN's reports: the scope of each batch (`spans`: the query records, by index,
+/// that NCBI's formatter adds to its scope for the batch's reports) holds the generated local
+/// ids (`QueryScope::of_generated_ids`) of queries read without `-parse_deflines` (`generated`:
+/// the first query has no `believed` ids), or the ids of the queries that the reports show
+/// (`QueryScope::add_ids_of`: `-parse_deflines`, a PSSM query shown with its ids).
+pub(crate) struct AnchoredBatchScopes {
+    generated: bool,
+    spans: Vec<std::ops::Range<usize>>,
+    scopes: Vec<QueryScope>,
+    none: QueryScope,
+}
+
+impl AnchoredBatchScopes {
+    /// The scopes of the batches `spans` of the query records `records` (a span past the records
+    /// is cut to them).
+    pub(crate) fn new(records: &[FastaRecord], spans: Vec<std::ops::Range<usize>>) -> Self {
+        let generated = records
+            .first()
+            .is_none_or(|query| query.believed().is_none());
+        let scopes = spans
+            .iter()
+            .map(|span| {
+                let records = &records[span.start.min(records.len())..span.end.min(records.len())];
+                if generated {
+                    QueryScope::of_generated_ids(
+                        records.iter().map(|record| record.local_id.as_str()),
+                    )
+                } else {
+                    let mut scope = QueryScope::default();
+                    scope.add_ids_of(records.iter().filter_map(FastaRecord::believed));
+                    scope
+                }
+            })
+            .collect();
+        Self {
+            generated,
+            spans,
+            scopes,
+            none: QueryScope::default(),
+        }
+    }
+
+    /// The scopes of the batches that start at the query records `starts` (the first batch at 0
+    /// whether or not `starts` lists it; each batch ends where the next starts, the last at the
+    /// end of `records`).
+    pub(crate) fn of_starts(records: &[FastaRecord], starts: &[usize]) -> Self {
+        let mut starts: Vec<usize> = starts.to_vec();
+        if starts.first() != Some(&0) {
+            starts.insert(0, 0);
+        }
+        let spans = starts
+            .iter()
+            .enumerate()
+            .map(|(index, &start)| start..starts.get(index + 1).copied().unwrap_or(records.len()))
+            .collect();
+        Self::new(records, spans)
+    }
+
+    /// Whether the queries were read without `-parse_deflines` (their generated ids).
+    pub(crate) fn generated(&self) -> bool {
+        self.generated
+    }
+
+    /// The scope of the batch that holds the query record `query` (empty past the batches).
+    pub(crate) fn of_query(&self, query: usize) -> &QueryScope {
+        self.spans
+            .iter()
+            .position(|span| span.contains(&query))
+            .map_or(&self.none, |batch| &self.scopes[batch])
+    }
+}
+
+/// Whether the reports of a search show the ids of its query records `records`: under
+/// `-parse_deflines` (`parse_deflines`), and with `-in_pssm` (`pssm_query`) when the PSSM's query is
+/// shown with its ids (`pssm_search::PsiSearch::query_record`: an id that is not one local id).
+/// The scopes of such queries (`QueryScopes::of_search`) refuse what NCBI's scope mixes up.
+pub(crate) fn believed_queries(
+    parse_deflines: bool,
+    pssm_query: bool,
+    records: &[FastaRecord],
+) -> bool {
+    parse_deflines || (pssm_query && records.iter().any(|record| record.believed().is_some()))
+}
+
+/// The scopes of the query records of a search under `-parse_deflines`, by searched query:
+/// NCBI's scope finds a sequence by its id, so two queries of one scope with one id show as one
+/// (the first: its letters are searched for both), and a reported database sequence with the id
+/// of a query of its scope shows as that query (`DI7/DECISIONS.md` 8, 12 of the drop-in survey;
+/// `common::database::refuse_id_of_a_query`). LOSAT refuses both.
+#[derive(Debug)]
+pub(crate) struct QueryScopes {
+    span: QueryScopeSpan,
+    /// The program, for the refusals.
+    program: &'static str,
+    scopes: Vec<QueryScope>,
+    /// The first searched query of each scope.
+    starts: Vec<usize>,
+    /// The ids of every query of the run, for the reported database sequences where they come
+    /// before the batches add theirs (`with_whole_run`).
+    whole_run: Option<QueryScope>,
+    /// Whether a read before the search added every batch (`read_ahead`).
+    read_ahead: bool,
+}
+
+impl QueryScopes {
+    /// No scope yet: the batches add theirs (`add_batch`).
+    pub(crate) fn new(span: QueryScopeSpan, program: &'static str) -> Self {
+        Self {
+            span,
+            program,
+            scopes: Vec::new(),
+            starts: Vec::new(),
+            whole_run: None,
+            read_ahead: false,
+        }
+    }
+
+    /// The scopes that a read of the queries before the search made with the search's batches
+    /// (BLASTX's, whose reader gives the batches one at a time): the batches of the search add
+    /// nothing again (`add_batch_ids`), and a refusal came before the search.
+    pub(crate) fn read_ahead(mut self) -> Self {
+        self.read_ahead = true;
+        self
+    }
+
+    /// With `QueryScopeSpan::Run`, `whole_run`: the ids of every query of the run (`QueryScope::
+    /// add_ids_of`), which `of_query` gives. A reader that gives the batches one at a time
+    /// (BLASTX's) collects them before the search, where NCBI writes outfmt 5 after the last batch:
+    /// its scope then holds every batch's queries for the reported database sequences of the first.
+    /// The batches still add theirs, for two queries with one id.
+    pub(crate) fn with_whole_run(mut self, whole_run: QueryScope) -> Self {
+        if self.span == QueryScopeSpan::Run {
+            self.whole_run = Some(whole_run);
+        }
+        self
+    }
+
+    /// The span of the scopes.
+    pub(crate) fn span(&self) -> QueryScopeSpan {
+        self.span
+    }
+
+    /// `new` for a search whose reports show the ids of its queries (`believed`, `believed_queries`;
+    /// `None` otherwise), with `QueryScopeSpan::of` of `subject` and `xml`.
+    pub(crate) fn of_search(
+        believed: bool,
+        subject: bool,
+        xml: bool,
+        program: &'static str,
+    ) -> Option<Self> {
+        believed.then(|| Self::new(QueryScopeSpan::of(subject, xml), program))
+    }
+
+    /// The scopes of `records`, the input records of one call of a search whose queries
+    /// (searched from the first, `-query_loc` cuts included) they all are: one batch.
+    pub(crate) fn of_records(
+        span: QueryScopeSpan,
+        program: &'static str,
+        records: &[FastaRecord],
+    ) -> anyhow::Result<Self> {
+        let mut scopes = Self::new(span, program);
+        scopes.add_batch(records, 0)?;
+        Ok(scopes)
+    }
+
+    /// Adds the batch of the input records `records`, whose first searched query is
+    /// `first_searched` (a new scope, or with `Run` the one scope), or LOSAT's refusal of a
+    /// record with the id of another of the scope.
+    pub(crate) fn add_batch(
+        &mut self,
+        records: &[FastaRecord],
+        first_searched: usize,
+    ) -> anyhow::Result<()> {
+        self.add_batch_ids(
+            records.iter().filter_map(FastaRecord::believed),
+            first_searched,
+        )
+    }
+
+    /// `add_batch` of the ids `ids` of a batch's records (`BelievedIds`; BLASTX's reader has
+    /// records of its own).
+    pub(crate) fn add_batch_ids<'r>(
+        &mut self,
+        ids: impl IntoIterator<Item = &'r crate::blastinput::fasta_reader::believed::BelievedIds>,
+        first_searched: usize,
+    ) -> anyhow::Result<()> {
+        if self.read_ahead {
+            return Ok(());
+        }
+        if self.scopes.is_empty() || self.span == QueryScopeSpan::Batch {
+            self.scopes.push(QueryScope::default());
+            self.starts.push(first_searched);
+        }
+        let scope = self.scopes.last_mut().expect("pushed above");
+        for believed in ids {
+            scope.add(&believed.ids, self.program)?;
+        }
+        Ok(())
+    }
+
+    /// `with_whole_run` of the ids of the input records `records` (every query of the run), where
+    /// NCBI's scope holds them when the reports read the database sequences (outfmt 5) and the
+    /// batches are cut as the search goes (blastn's, tblastx's loops).
+    pub(crate) fn with_whole_run_of(self, records: &[FastaRecord]) -> Self {
+        if self.span != QueryScopeSpan::Run {
+            return self;
+        }
+        let mut whole_run = QueryScope::default();
+        whole_run.add_ids_of(records.iter().filter_map(FastaRecord::believed));
+        self.with_whole_run(whole_run)
+    }
+
+    /// The scope of the searched query `query` (of the batches added; `whole_run` if set).
+    pub(crate) fn of_query(&self, query: usize) -> &QueryScope {
+        if let Some(whole_run) = &self.whole_run {
+            return whole_run;
+        }
+        let after = self.starts.partition_point(|&start| start <= query);
+        &self.scopes[after.saturating_sub(1)]
+    }
+
+    /// The scopes of the searched queries from `first`, as one call that searches them numbers
+    /// them (`of_query` of its index).
+    pub(crate) fn numbered_from(&self, first: usize) -> QueryScopesFrom<'_> {
+        QueryScopesFrom {
+            scopes: self,
+            first,
+        }
+    }
+}
+
+/// `QueryScopes` of the searched queries from `first` (`QueryScopes::numbered_from`).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct QueryScopesFrom<'a> {
+    scopes: &'a QueryScopes,
+    first: usize,
+}
+
+impl<'a> QueryScopesFrom<'a> {
+    /// The scope of the call's query `query`.
+    pub(crate) fn of_query(&self, query: usize) -> &'a QueryScope {
+        self.scopes.of_query(self.first + query)
+    }
+}
+
 /// The query batches as NCBI's batch loop reads them, up to the batch that stops the run.
 pub(crate) struct QueryBatches {
     /// The reader's messages of each batch's records (skipped ones too), before the
@@ -250,6 +526,18 @@ pub(crate) struct QueryBatches {
     /// What stops the run at the batch after them: the messages that NCBI writes as it
     /// reads that batch, and its error.
     pub(crate) stop: Option<(Vec<u8>, anyhow::Error)>,
+    /// The searched queries of that batch when NCBI's set-up of its search fails (`batch_error`:
+    /// every query without letters): NCBI made the batch's query factory, so its search strategy
+    /// request is written (`SaveSearchStrategy` before `CLocalBlast::Run`, blastp_app.cpp:259-276).
+    /// `None` when the reading or an empty batch stops the run (no request).
+    pub(crate) stop_batch: Option<std::ops::Range<usize>>,
+    /// Under `-parse_deflines`, the scopes of those batches' queries (`QueryScopes`).
+    pub(crate) query_scopes: Option<QueryScopes>,
+    /// LOSAT's refusal of two queries of one scope with one id, in the first batch that has them
+    /// before any batch that NCBI fails (`QueryScopes::add_batch`): the run returns it before any
+    /// report, as a refusal follows no written byte; the other fields are then those of the
+    /// batches before it.
+    pub(crate) query_refusal: Option<anyhow::Error>,
 }
 
 impl QueryBatches {
@@ -260,6 +548,54 @@ impl QueryBatches {
             .starts
             .partition_point(|&(_, searched)| searched <= query);
         self.starts[after.saturating_sub(1)]
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:259-262
+    // ```c++
+    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+    //
+    //             SaveSearchStrategy(args, m_CmdLineArgs, queries, m_OptsHndl);
+    // ```
+    /// Where the searched queries of the run's first batch with a search strategy request end:
+    /// the first searched batch, else the batch whose set-up fails (`stop_batch`); `None` when
+    /// the run stops before it makes a query factory.
+    pub(crate) fn first_request_end(&self) -> Option<usize> {
+        match self.starts.first() {
+            Some(_) => Some(self.searched_span(0).end),
+            None => self.stop_batch.as_ref().map(|span| span.end),
+        }
+    }
+
+    /// Where the searched queries end of the batch whose formatting NCBI fails for a matrix name
+    /// its BLAST XML report data does not know (`blast_xml::matrix::XmlMatrixFailure`): the
+    /// search strategy's last request (`StrategyExport::stop_after`). The batch of the run's first
+    /// searched query (as `first_request_end`), or of its second when the report is held
+    /// (`XmlMatrixFailure::SecondQueryOrEnd`: NCBI's next query of another Seq-id); `None`
+    /// when a held report fails at the run's end or the run stops before: every request that
+    /// the run makes is written (probe K/k4f: `-subject` 13-16 with one query and an empty second
+    /// batch wrote both requests and stopped with that batch's error).
+    pub(crate) fn xml_matrix_request_end(
+        &self,
+        failure: crate::report::blast_xml::matrix::XmlMatrixFailure,
+    ) -> Option<usize> {
+        let query = failure.query();
+        if query == 0 {
+            return self.first_request_end();
+        }
+        (query < self.searched_done).then(|| self.searched_span(query).end)
+    }
+
+    /// The searched queries of the batch of the searched query `query`.
+    pub(crate) fn searched_span(&self, query: usize) -> std::ops::Range<usize> {
+        let after = self
+            .starts
+            .partition_point(|&(_, searched)| searched <= query);
+        let end = self
+            .starts
+            .get(after)
+            .map_or(self.searched_done, |&(_, searched)| searched);
+        self.start_of(query).1..end
     }
 }
 
@@ -332,6 +668,9 @@ impl QueryBatches {
 /// - the batch has no query (a batch size of 0, a batch of records that `-query_loc`
 ///   skips, or a batch that an `eEOF` ends before its first record): `Empty
 ///   CBlastQueryVector`;
+/// - the batch's query splitter, made before its setup, cannot convert `CHUNK_SIZE` or (where
+///   it splits, `reads_overlap`: not RPS-BLAST) `OVERLAP_CHUNK_SIZE`
+///   (`app::check_query_split_environment`): the first batch stops there;
 /// - every query of the batch has no letters: the context of a protein query is valid at
 ///   the set-up exactly when it has letters, so NCBI's set-up fails with one `Sequence
 ///   contains no data` per query (`GetMessage` puts the severity first) and `CATCH_ALL`
@@ -339,12 +678,19 @@ impl QueryBatches {
 ///
 /// A batch whose queries have letters but no Karlin-Altschul parameters is set up and not
 /// searched (`run_resolved_in_pool`).
+///
+/// Under `-parse_deflines` (`query_scopes`, without a batch yet) each batch that NCBI searches
+/// adds its records to the scopes (`QueryScopes::add_batch`); LOSAT's refusal of two of one scope
+/// with one id ends the reading there (`QueryBatches::query_refusal`), after the batch's errors of
+/// NCBI's own (a batch that NCBI does not search reports nothing of its scope).
 pub(crate) fn read_query_batches(
     input_records: &[FastaRecord],
     searched: &[FastaRecord],
     input: &crate::blastinput::seq_range::QueryInput,
     reading: QueryReading,
     batch_size: u32,
+    reads_overlap: bool,
+    query_scopes: Option<QueryScopes>,
 ) -> QueryBatches {
     read_batches(
         input_records,
@@ -352,7 +698,12 @@ pub(crate) fn read_query_batches(
         input,
         reading,
         batch_size,
-        &no_data_batch_error,
+        &|batch| {
+            crate::blastinput::app::check_query_split_environment(false, reads_overlap)
+                .err()
+                .or_else(|| no_data_batch_error(batch))
+        },
+        query_scopes,
     )
 }
 
@@ -392,12 +743,15 @@ pub(crate) fn read_query_batches(
 /// query` (exit 3). A batch of one query without letters (the last records, or a `-query_loc`
 /// interval that starts just past its record's end) crashes NCBI 2.17.0's psiblast (SIGSEGV);
 /// LOSAT rejects it there. A query whose Karlin-Altschul parameters cannot be computed stops the
-/// run at its batch too (`blast_engine.rs` `search`).
+/// run at its batch too (`blast_engine.rs` `search`). The query splitter of the batch's search
+/// (`CPsiBlast::Run`, after the constructor's check) stops the first batch where it cannot convert
+/// `CHUNK_SIZE` or `OVERLAP_CHUNK_SIZE` (`app::check_query_split_environment`).
 pub(crate) fn read_psiblast_query_batches(
     input_records: &[FastaRecord],
     searched: &[FastaRecord],
     input: &crate::blastinput::seq_range::QueryInput,
     reading: QueryReading,
+    query_scopes: Option<QueryScopes>,
 ) -> QueryBatches {
     read_batches(
         input_records,
@@ -405,7 +759,12 @@ pub(crate) fn read_psiblast_query_batches(
         input,
         reading,
         1,
-        &psiblast_batch_error,
+        &|batch| {
+            psiblast_batch_error(batch).or_else(|| {
+                crate::blastinput::app::check_query_split_environment(false, true).err()
+            })
+        },
+        query_scopes,
     )
 }
 
@@ -418,6 +777,7 @@ fn read_batches(
     mut reading: QueryReading,
     batch_size: u32,
     batch_error: &dyn Fn(&[FastaRecord]) -> Option<anyhow::Error>,
+    mut query_scopes: Option<QueryScopes>,
 ) -> QueryBatches {
     let mut warnings: Vec<Vec<u8>> = vec![Vec::new(); searched.len()];
     let mut starts = Vec::new();
@@ -466,8 +826,10 @@ fn read_batches(
                 .into(),
             );
         }
+        let mut stop_batch = None;
         if stop_error.is_none() {
             stop_error = batch_error(&searched[start..end]);
+            stop_batch = stop_error.is_some().then_some(start..end);
         }
         if let Some(error) = stop_error {
             return QueryBatches {
@@ -476,7 +838,26 @@ fn read_batches(
                 searched_done: start,
                 starts,
                 stop: Some((batch_warnings, error)),
+                stop_batch,
+                query_scopes,
+                query_refusal: None,
             };
+        }
+        // LOSAT's refusal, which the records alone decide: the caller returns it before any
+        // report (`QueryBatches::query_refusal`).
+        if let Some(scopes) = query_scopes.as_mut() {
+            if let Err(refusal) = scopes.add_batch(&input_records[input_start..input_end], start) {
+                return QueryBatches {
+                    warnings,
+                    input_done: input_start,
+                    searched_done: start,
+                    starts,
+                    stop: None,
+                    stop_batch: None,
+                    query_scopes,
+                    query_refusal: Some(refusal),
+                };
+            }
         }
         warnings[start].extend_from_slice(&batch_warnings);
         starts.push((input_start, start));
@@ -488,6 +869,9 @@ fn read_batches(
         searched_done: searched.len(),
         starts,
         stop: None,
+        stop_batch: None,
+        query_scopes,
+        query_refusal: None,
     }
 }
 
@@ -525,18 +909,63 @@ fn psiblast_batch_error(batch: &[FastaRecord]) -> Option<anyhow::Error> {
     }
 }
 
+/// How the reading of the queries of a search ended, after its records.
+#[derive(Debug)]
+pub(crate) enum QueryReading {
+    /// The records of `run_local`: an input without records is NCBI's `Query is Empty!`
+    /// (the inputs of the ABI are read as regular files).
+    Records,
+    /// The CLI's reader reached the end of its input (`CBlastInput::End()`); without
+    /// records, no query batch is read.
+    End,
+    /// The CLI's reader found only blank and comment lines where it expected a record
+    /// (`eEOF`), which ends the batch being read.
+    BlankLines,
+    /// The CLI's reader failed on the record after the last one read (a reader error, or
+    /// LOSAT's explicit rejection of a line that NCBI would fetch as a Seq-id), after
+    /// writing `warnings`.
+    Error { error: ReadError, warnings: Vec<u8> },
+}
+
+impl QueryReading {
+    /// Whether NCBI's reader reads on after the last record (`End()` is false): an `eEOF`
+    /// or an error then comes in the batch being read.
+    pub(crate) fn reads_past_records(&self) -> bool {
+        matches!(self, QueryReading::BlankLines | QueryReading::Error { .. })
+    }
+}
+
+/// NCBI's message for a query or subject without letters.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup.hpp:190-198
+/// ```c
+///     TSeqPos size() const {
+///         TSeqPos retval = x_Size();
+///         if (retval == 0) {
+///             NCBI_THROW(CBlastException, eInvalidArgument,
+///                        "Sequence contains no data");
+///         }
+///         return retval;
+///     }
+/// ```
+pub(crate) const NO_DATA_MESSAGE: &str = "Sequence contains no data";
+
 #[cfg(test)]
 mod tests {
-    use super::{
-        get_query_batch_size, ncbi_string_to_int, next_query_batch_end, query_batches,
-        BatchSizeMixer,
-    };
+    use super::{get_query_batch_size, BatchSizeMixer};
+    use crate::blastinput::seq_range::next_ranged_batch_end;
+
+    /// The end of the batch that starts at `start` when no record is skipped. The batch size
+    /// is a `TSeqPos` (32-bit unsigned): an `Int4` batch size converts to it.
+    fn next_query_batch_end(lengths: &[usize], start: usize, batch_size: u32) -> usize {
+        next_ranged_batch_end(lengths, &vec![false; lengths.len()], start, batch_size)
+    }
 
     // blast_input.cpp:134-171: a batch takes records until their letters reach the batch
     // size; each searched query belongs to the batch that read it.
     #[test]
     fn every_searched_query_knows_where_its_batch_starts() {
-        use crate::algorithm::blastn::blast_engine::QueryReading;
+        use super::QueryReading;
         use crate::blastinput::fasta_reader::FastaRecord;
         use crate::blastinput::seq_range::QueryInput;
         let records: Vec<FastaRecord> = [4usize, 7, 3, 12, 1]
@@ -545,12 +974,158 @@ mod tests {
             .map(|(i, &len)| FastaRecord::new(format!("q{i}"), b"", &vec![b'A'; len]))
             .collect();
         let input = QueryInput::whole(&records);
-        let batches =
-            super::read_query_batches(&records, &records, &input, QueryReading::Records, 10);
+        let batches = super::read_query_batches(
+            &records,
+            &records,
+            &input,
+            QueryReading::Records,
+            10,
+            true,
+            None,
+        );
         assert!(batches.stop.is_none());
         assert_eq!(batches.starts, vec![(0, 0), (2, 2), (4, 4)]);
         let starts: Vec<(usize, usize)> = (0..5).map(|q| batches.start_of(q)).collect();
         assert_eq!(starts, vec![(0, 0), (0, 0), (2, 2), (2, 2), (4, 4)]);
+    }
+
+    // Probe K4f of line RG (NCBI 2.17.0, `-matrix blosum62`): the strategy's last request is that
+    // of the batch of the run's first searched query, or of its second where the report is held;
+    // a held run of one searched query (also one that an empty batch stops) writes every request.
+    #[test]
+    fn the_xml_matrix_failure_ends_the_requests_at_its_batch() {
+        use super::QueryReading;
+        use crate::blastinput::fasta_reader::FastaRecord;
+        use crate::blastinput::seq_range::QueryInput;
+        use crate::report::blast_xml::matrix::XmlMatrixFailure;
+        let batches_of = |lengths: &[usize], batch_size: u32| {
+            let records: Vec<FastaRecord> = lengths
+                .iter()
+                .enumerate()
+                .map(|(i, &len)| FastaRecord::new(format!("q{i}"), b"", &vec![b'A'; len]))
+                .collect();
+            let input = QueryInput::whole(&records);
+            super::read_query_batches(
+                &records,
+                &records,
+                &input,
+                QueryReading::Records,
+                batch_size,
+                true,
+                None,
+            )
+        };
+        let (first, held) = (
+            XmlMatrixFailure::FirstQuery,
+            XmlMatrixFailure::SecondQueryOrEnd,
+        );
+        // Three batches of one query; one batch of three.
+        let three = batches_of(&[4, 7, 3], 1);
+        assert_eq!(three.xml_matrix_request_end(first), Some(1));
+        assert_eq!(three.xml_matrix_request_end(held), Some(2));
+        let one_batch = batches_of(&[4, 7, 3], 100);
+        assert_eq!(one_batch.xml_matrix_request_end(first), Some(3));
+        assert_eq!(one_batch.xml_matrix_request_end(held), Some(3));
+        // One query; one query and a batch without letters, which stops the run.
+        let alone = batches_of(&[4], 1);
+        assert_eq!(alone.xml_matrix_request_end(first), Some(1));
+        assert_eq!(alone.xml_matrix_request_end(held), None);
+        let stopped = batches_of(&[4, 0], 1);
+        assert!(stopped.stop.is_some() && stopped.searched_done == 1);
+        assert_eq!(stopped.xml_matrix_request_end(first), Some(1));
+        assert_eq!(stopped.xml_matrix_request_end(held), None);
+    }
+
+    /// The records of `fasta` read with `-parse_deflines` (BLASTP's reader).
+    fn parsed_records(fasta: &[u8]) -> Vec<crate::blastinput::fasta_reader::FastaRecord> {
+        use crate::blastinput::fasta_reader::{read_all, FastaInputSource, ReaderConfig};
+        let config = ReaderConfig::query("BLASTP", true, false).with_parse_deflines(true);
+        let mut source = FastaInputSource::from_bytes(fasta, config);
+        read_all(&mut source, &mut |_| Ok(())).unwrap()
+    }
+
+    /// The scope keys of the local id `id`.
+    fn local_keys(id: &str) -> Vec<u64> {
+        use crate::seqid::model::{ObjectId, ParsedSeqId};
+        let mut keys = Vec::new();
+        crate::seqid::defline_set::scope_keys(
+            &ParsedSeqId::Local(ObjectId::Str(id.as_bytes().to_vec())),
+            &mut keys,
+        );
+        keys
+    }
+
+    // blast_format.cpp:2295-2313 (series Q of line RG, Q1c): a batch's scope holds its own queries;
+    // a call that searches from a later query numbers them from there.
+    #[test]
+    fn query_scopes_number_the_searched_queries_of_each_batch() {
+        use super::{QueryScopeSpan, QueryScopes};
+        let records = parsed_records(b">a x\nAC\n>b x\nAC\n>a y\nAC\n>c x\nAC\n");
+        let mut scopes = QueryScopes::new(QueryScopeSpan::Batch, "BLASTP");
+        scopes.add_batch(&records[..2], 0).unwrap();
+        scopes.add_batch(&records[2..], 2).unwrap();
+        assert!(scopes.of_query(0).has_key(&local_keys("b")));
+        assert!(scopes.of_query(1).has_key(&local_keys("b")));
+        assert!(!scopes.of_query(2).has_key(&local_keys("b")));
+        assert!(scopes.of_query(3).has_key(&local_keys("c")));
+        assert!(!scopes.of_query(1).has_key(&local_keys("c")));
+        let from = scopes.numbered_from(2);
+        assert!(from.of_query(0).has_key(&local_keys("c")));
+        assert!(!from.of_query(1).has_key(&local_keys("b")));
+        // `-subject` and outfmt 5: one scope, in which the second `a` is refused.
+        let mut run = QueryScopes::new(QueryScopeSpan::Run, "BLASTP");
+        run.add_batch(&records[..2], 0).unwrap();
+        let error = run.add_batch(&records[2..], 2).unwrap_err().to_string();
+        assert!(
+            error.contains("two query records have the Seq-id lcl|a"),
+            "{error}"
+        );
+        // The ids of every query before the batches add theirs; a read ahead adds nothing again.
+        let whole = QueryScopes::new(QueryScopeSpan::Run, "BLASTP").with_whole_run_of(&records);
+        assert!(whole.of_query(0).has_key(&local_keys("c")));
+        let mut ahead = QueryScopes::of_records(QueryScopeSpan::Run, "BLASTP", &records[1..])
+            .unwrap()
+            .read_ahead();
+        ahead.add_batch(&records[1..], 0).unwrap();
+        // A batch's scope has no ids of the whole run.
+        let mut batch =
+            QueryScopes::new(QueryScopeSpan::Batch, "BLASTP").with_whole_run_of(&records);
+        batch.add_batch(&records[..2], 0).unwrap();
+        assert!(!batch.of_query(0).has_key(&local_keys("c")));
+    }
+
+    // The refusal of two queries of one scope is a refusal of the run, not a stop of NCBI's batch
+    // loop: the caller returns it before any report (`QueryBatches::query_refusal`).
+    #[test]
+    fn two_queries_of_one_scope_are_the_runs_refusal() {
+        use super::{QueryReading, QueryScopeSpan, QueryScopes};
+        use crate::blastinput::seq_range::QueryInput;
+        let records = parsed_records(b">a x\nAC\n>a y\nAC\n");
+        let input = QueryInput::whole(&records);
+        for (span, refused) in [(QueryScopeSpan::Batch, false), (QueryScopeSpan::Run, true)] {
+            let batches = super::read_query_batches(
+                &records,
+                &records,
+                &input,
+                QueryReading::Records,
+                1,
+                true,
+                Some(QueryScopes::new(span, "BLASTP")),
+            );
+            assert!(batches.stop.is_none());
+            assert_eq!(batches.query_refusal.is_some(), refused);
+            assert_eq!(batches.starts.len(), if refused { 1 } else { 2 });
+        }
+        let batches = super::read_query_batches(
+            &records,
+            &records,
+            &input,
+            QueryReading::Records,
+            10,
+            true,
+            Some(QueryScopes::new(QueryScopeSpan::Batch, "BLASTP")),
+        );
+        assert!(batches.query_refusal.is_some() && batches.starts.is_empty());
     }
 
     // psiblast_app.cpp:468 and psiblast_aux_priv.cpp:636-649: a batch of one letter takes one
@@ -559,7 +1134,7 @@ mod tests {
     // without residues crashes it).
     #[test]
     fn a_psiblast_batch_holds_one_query() {
-        use crate::algorithm::blastn::blast_engine::QueryReading;
+        use super::QueryReading;
         use crate::blastinput::fasta_reader::FastaRecord;
         use crate::blastinput::seq_range::QueryInput;
         let records = |lengths: &[usize]| -> Vec<FastaRecord> {
@@ -571,7 +1146,13 @@ mod tests {
         };
         let read = |records: &[FastaRecord]| {
             let input = QueryInput::whole(records);
-            super::read_psiblast_query_batches(records, records, &input, QueryReading::Records)
+            super::read_psiblast_query_batches(
+                records,
+                records,
+                &input,
+                QueryReading::Records,
+                None,
+            )
         };
         let whole = records(&[4, 7, 3]);
         let batches = read(&whole);
@@ -603,48 +1184,73 @@ mod tests {
         // blastp's batches of the same records: the record without letters is searched with the
         // next one, without an error.
         let input = QueryInput::whole(&joined);
-        let blastp = super::read_query_batches(&joined, &joined, &input, QueryReading::Records, 1);
+        let blastp = super::read_query_batches(
+            &joined,
+            &joined,
+            &input,
+            QueryReading::Records,
+            1,
+            true,
+            None,
+        );
         assert!(blastp.stop.is_none());
         assert_eq!(blastp.starts, vec![(0, 0), (1, 1)]);
     }
 
     #[test]
     fn the_query_that_reaches_the_batch_size_stays_in_the_batch() {
-        assert_eq!(query_batches(&[19_999, 2, 1], 20_000), vec![0..2, 2..3]);
-        assert_eq!(
-            query_batches(&[], 20_000),
-            Vec::<std::ops::Range<usize>>::new()
-        );
+        assert_eq!(next_query_batch_end(&[19_999, 2, 1], 0, 20_000), 2);
+        assert_eq!(next_query_batch_end(&[19_999, 2, 1], 2, 20_000), 3);
     }
 
+    // NCBI BLAST+ 2.17.0 with `BATCH_SIZE` set (env parity probe h_probe of 2026-11-12, cases
+    // `BATCH_SIZE.*`): `NStr::StringToInt` with flags 0 takes a sign and no spaces, and stops at
+    // the line and position of each error.
     #[test]
     fn batch_size_strings_are_read_as_ncbis_string_to_int() {
         use std::ffi::OsStr;
         for (text, value) in [
-            ("100", Some(100)),
-            ("+100", Some(100)),
-            ("-1", Some(-1)),
-            ("007", Some(7)),
-            ("2147483647", Some(i32::MAX)),
-            ("-2147483648", Some(i32::MIN)),
-            ("2147483648", None),
-            ("", None),
-            (" 100", None),
-            ("100 ", None),
-            ("1e5", None),
-            ("abc", None),
-            ("+", None),
-            ("1,000", None),
-            ("0x10", None),
+            ("100", 100),
+            ("+5", 5),
+            ("-1", -1),
+            ("0", 0),
+            ("007", 7),
+            ("2147483647", i32::MAX),
+            ("-2147483648", i32::MIN),
+            // NCBI reads up to a NUL (`while (char ch = str[pos])`, ncbistr.cpp:841).
+            ("12\u{0}x", 12),
         ] {
-            assert_eq!(ncbi_string_to_int(OsStr::new(text)), value, "{text:?}");
+            assert_eq!(
+                get_query_batch_size(Some(OsStr::new(text))),
+                Ok(value),
+                "{text:?}"
+            );
+        }
+        for (text, line, pos) in [
+            ("abc", 861, 0),
+            ("", 861, 0),
+            (" 5", 861, 0),
+            ("5 ", 870, 1),
+            ("1.5", 870, 1),
+            ("5x", 870, 1),
+            ("+", 861, 1),
+            ("1,000", 870, 1),
+            ("0x10", 870, 1),
+            ("99999999999999999999", 852, 18),
+            ("-99999999999999999999", 852, 19),
+            ("2147483648", 640, 0),
+            ("-2147483649", 640, 0),
+            ("\u{0}12", 861, 0),
+        ] {
+            let error = get_query_batch_size(Some(OsStr::new(text))).unwrap_err();
+            assert_eq!(error.site().line, line, "{text:?}");
+            assert!(
+                error.what().ends_with(&format!("(m_Pos = {pos})\n")),
+                "{text:?}: {}",
+                error.what()
+            );
         }
         assert_eq!(get_query_batch_size(None), Ok(0));
-        assert_eq!(get_query_batch_size(Some(OsStr::new("5000"))), Ok(5000));
-        assert_eq!(
-            get_query_batch_size(Some(OsStr::new(""))),
-            Err(String::new())
-        );
     }
 
     #[test]

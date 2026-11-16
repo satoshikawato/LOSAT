@@ -1,0 +1,705 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: tfn
+           16 sequences; 10,937 total letters
+
+
+
+Query= ENST00000320868.9 cdna chromosome:GRCh38:16:176680:177522:1
+gene:ENSG00000206172.10 gene_biotype:protein_coding
+transcript_biotype:protein_coding gene_symbol:HBA1
+description:hemoglobin subunit alpha 1 [Source:HGNC
+Symbol;Acc:HGNC:4823]
+
+Length=577
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value   N
+
+ENSDART00000101734.5 cdna chromosome:GRCz11:3:55127549:55128258:-...  460     2e-133  1
+ENSDART00000101709.5 cdna chromosome:GRCz11:3:55093581:55094399:1...  141     9e-48   2
+ENSDART00000113098.5 cdna chromosome:GRCz11:3:55100045:55100936:1...  125     4e-45   2
+ENSDART00000125092.4 cdna chromosome:GRCz11:3:55120330:55121125:-...  121     4e-43   2
+ENSDART00000053077.6 cdna chromosome:GRCz11:3:55091230:55092051:-...  91.8    2e-22   1
+ENSDART00000066384.5 cdna chromosome:GRCz11:12:20349865:20350629:...  81.7    2e-19   1
+ENSDART00000101713.5 cdna chromosome:GRCz11:3:55103445:55104310:-...  63.4    6e-14   1
+FBtr0301286 cdna primary_assembly:BDGP6.54:3R:6607913:6608914:-1 ...  18.0    2.8     1
+FBtr0083245 cdna primary_assembly:BDGP6.54:3R:15896926:15902584:-...  18.0    2.8     1
+FBtr0078640 cdna primary_assembly:BDGP6.54:3R:5830062:5831785:1 g...  17.6    3.8     1
+
+
+>ENSDART00000101734.5 cdna chromosome:GRCz11:3:55127549:55128258:-1 gene:ENSDARG00000088330.5 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:hbae1.2 description:hemoglobin, alpha 
+embryonic 1.2 [Source:ZFIN;Acc:ZDB-GENE-170302-1]
+Length=577
+
+ Score = 460 bits (998),  Expect = 2e-133
+ Identities = 192/192 (100%), Positives = 192/192 (100%), Gaps = 0/192 (0%)
+ Frame = +2/+2
+
+Query  2    LFWSPQTQREPTMVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFD  181
+            LFWSPQTQREPTMVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFD
+Sbjct  2    LFWSPQTQREPTMVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFD  181
+
+Query  182  LSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLV  361
+            LSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLV
+Sbjct  182  LSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLV  361
+
+Query  362  TLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR*AGASVAMLLAPWASPQPLLPFLHPY  541
+            TLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR*AGASVAMLLAPWASPQPLLPFLHPY
+Sbjct  362  TLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR*AGASVAMLLAPWASPQPLLPFLHPY  541
+
+Query  542  PRGL*IKSEWAA  577
+            PRGL*IKSEWAA
+Sbjct  542  PRGL*IKSEWAA  577
+
+
+ Score = 453 bits (984),  Expect = 2e-131
+ Identities = 192/192 (100%), Positives = 192/192 (100%), Gaps = 0/192 (0%)
+ Frame = -2/-2
+
+Query  576  AAHSDFIQRPRGYGCRKGRRGWGEAQGARSMATEAPA*RYLEVSTVLTEARNLSREACTA  397
+            AAHSDFIQRPRGYGCRKGRRGWGEAQGARSMATEAPA*RYLEVSTVLTEARNLSREACTA
+Sbjct  576  AAHSDFIQRPRGYGCRKGRRGWGEAQGARSMATEAPA*RYLEVSTVLTEARNLSREACTA  397
+
+Query  396  GVNSAGRWAARVTSRQWLRSLKLTGSTRSLCACRSLRADSALGMSSTCATALVSASATFL  217
+            GVNSAGRWAARVTSRQWLRSLKLTGSTRSLCACRSLRADSALGMSSTCATALVSASATFL
+Sbjct  396  GVNSAGRWAARVTSRQWLRSLKLTGSTRSLCACRSLRADSALGMSSTCATALVSASATFL  217
+
+Query  216  PWPLTWAEPWLRSKCGK*VLVVGKDRNILSRASAPYSPACAPTLPQAALTLVLSAGDSTM  37
+            PWPLTWAEPWLRSKCGK*VLVVGKDRNILSRASAPYSPACAPTLPQAALTLVLSAGDSTM
+Sbjct  216  PWPLTWAEPWLRSKCGK*VLVVGKDRNILSRASAPYSPACAPTLPQAALTLVLSAGDSTM  37
+
+Query  36   VGSL*VCGDQKS  1
+            VGSL*VCGDQKS
+Sbjct  36   VGSL*VCGDQKS  1
+
+
+ Score = 107 bits (228),  Expect(4) = 9e-79
+ Identities = 53/53 (100%), Positives = 53/53 (100%), Gaps = 0/53 (0%)
+ Frame = +3/+3
+
+Query  417  TSSWLL*APC*PPNTVKLEPRWPCFLPLGpppspsspsCTRTPVVFE*SLSGR  575
+            TSSWLL*APC*PPNTVKLEPRWPCFLPLGPPPSPSSPSCTRTPVVFE*SLSGR
+Sbjct  417  TSSWLL*APC*PPNTVKLEPRWPCFLPLGPPPSPSSPSCTRTPVVFE*SLSGR  575
+
+
+ Score = 99.6 bits (211),  Expect(4) = 9e-79
+ Identities = 38/38 (100%), Positives = 38/38 (100%), Gaps = 0/38 (0%)
+ Frame = +3/+3
+
+Query  3    SSGPHRLRENPPWCCLLPTRPTSRPPGVRSARTLASMV  116
+            SSGPHRLRENPPWCCLLPTRPTSRPPGVRSARTLASMV
+Sbjct  3    SSGPHRLRENPPWCCLLPTRPTSRPPGVRSARTLASMV  116
+
+
+ Score = 84.5 bits (178),  Expect(4) = 9e-79
+ Identities = 30/30 (100%), Positives = 30/30 (100%), Gaps = 0/30 (0%)
+ Frame = +1/+1
+
+Query  109  VWCGGPGEDVPVLPHHQDLLPALRPEPRLC  198
+            VWCGGPGEDVPVLPHHQDLLPALRPEPRLC
+Sbjct  109  VWCGGPGEDVPVLPHHQDLLPALRPEPRLC  198
+
+
+ Score = 45.5 bits (93),  Expect(4) = 9e-79
+ Identities = 18/18 (100%), Positives = 18/18 (100%), Gaps = 0/18 (0%)
+ Frame = +1/+1
+
+Query  286  PERPARAQASGGPGQLQA  339
+            PERPARAQASGGPGQLQA
+Sbjct  286  PERPARAQASGGPGQLQA  339
+
+
+ Score = 100 bits (214),  Expect(5) = 1e-60
+ Identities = 53/53 (100%), Positives = 53/53 (100%), Gaps = 0/53 (0%)
+ Frame = -3/-3
+
+Query  575  PPTQTLFKDHggtgagrgggaggRPKGQEAWPPRLQLNGIWRSARCSQKPGTC  417
+            PPTQTLFKDHGGTGAGRGGGAGGRPKGQEAWPPRLQLNGIWRSARCSQKPGTC
+Sbjct  575  PPTQTLFKDHGGTGAGRGGGAGGRPKGQEAWPPRLQLNGIWRSARCSQKPGTC  417
+
+
+ Score = 97.3 bits (206),  Expect(5) = 1e-60
+ Identities = 39/39 (100%), Positives = 39/39 (100%), Gaps = 0/39 (0%)
+ Frame = -1/-1
+
+Query  118  RTILASVRADLTPGGLDVGLVGRRQHHGGFSLSLWGPEE  2
+            RTILASVRADLTPGGLDVGLVGRRQHHGGFSLSLWGPEE
+Sbjct  118  RTILASVRADLTPGGLDVGLVGRRQHHGGFSLSLWGPEE  2
+
+
+ Score = 35.0 bits (70),  Expect(5) = 1e-60
+ Identities = 15/15 (100%), Positives = 15/15 (100%), Gaps = 0/15 (0%)
+ Frame = -1/-1
+
+Query  352  AVA*ELEVDRVHPKL  308
+            AVA*ELEVDRVHPKL
+Sbjct  352  AVA*ELEVDRVHPKL  308
+
+
+ Score = 31.3 bits (62),  Expect(5) = 1e-60
+ Identities = 12/12 (100%), Positives = 12/12 (100%), Gaps = 0/12 (0%)
+ Frame = -3/-3
+
+Query  314  EACARAGRSGRT  279
+            EACARAGRSGRT
+Sbjct  314  EACARAGRSGRT  279
+
+
+ Score = 29.0 bits (57),  Expect(5) = 1e-60
+ Identities = 13/13 (100%), Positives = 13/13 (100%), Gaps = 0/13 (0%)
+ Frame = -1/-1
+
+Query  223  LLAVALNLGRAVA  185
+            LLAVALNLGRAVA
+Sbjct  223  LLAVALNLGRAVA  185
+
+
+ Score = 83.1 bits (175),  Expect(3) = 3e-30
+ Identities = 31/31 (100%), Positives = 31/31 (100%), Gaps = 0/31 (0%)
+ Frame = +1/+1
+
+Query  403  ARLPGQVPGFCEHRADLQIPLSWSLGGHASC  495
+            ARLPGQVPGFCEHRADLQIPLSWSLGGHASC
+Sbjct  403  ARLPGQVPGFCEHRADLQIPLSWSLGGHASC  495
+
+
+ Score = 47.3 bits (97),  Expect(3) = 3e-30
+ Identities = 18/18 (100%), Positives = 18/18 (100%), Gaps = 0/18 (0%)
+ Frame = +1/+1
+
+Query  1   TLLVPTDSERTHHGAVSC  54
+           TLLVPTDSERTHHGAVSC
+Sbjct  1   TLLVPTDSERTHHGAVSC  54
+
+
+ Score = 26.3 bits (51),  Expect(3) = 3e-30
+ Identities = 10/10 (100%), Positives = 10/10 (100%), Gaps = 0/10 (0%)
+ Frame = +1/+1
+
+Query  547  WSLNKV*VGG  576
+            WSLNKV*VGG
+Sbjct  547  WSLNKV*VGG  576
+
+
+ Score = 59.3 bits (123),  Expect(3) = 2e-24
+ Identities = 21/21 (100%), Positives = 21/21 (100%), Gaps = 0/21 (0%)
+ Frame = -3/-3
+
+Query  65  WSCRQETAPWWVLSESVGTRR  3
+           WSCRQETAPWWVLSESVGTRR
+Sbjct  65  WSCRQETAPWWVLSESVGTRR  3
+
+
+ Score = 47.3 bits (97),  Expect(3) = 2e-24
+ Identities = 19/19 (100%), Positives = 19/19 (100%), Gaps = 0/19 (0%)
+ Frame = -1/-1
+
+Query  472  SSLTVFGGQHGAHRSQELV  416
+            SSLTVFGGQHGAHRSQELV
+Sbjct  472  SSLTVFGGQHGAHRSQELV  416
+
+
+ Score = 30.4 bits (60),  Expect(3) = 2e-24
+ Identities = 11/11 (100%), Positives = 11/11 (100%), Gaps = 0/11 (0%)
+ Frame = -1/-1
+
+Query  577  CRPLRLYSKTT  545
+            CRPLRLYSKTT
+Sbjct  577  CRPLRLYSKTT  545
+
+
+ Score = 27.2 bits (53),  Expect = 0.005
+ Identities = 10/30 (33%), Positives = 13/30 (43%), Gaps = 0/30 (0%)
+ Frame = +3/+3
+
+Query  12   PHRLRENPPWCCLLPTRPTSRPPGVRSART  101
+            P+ ++  P W C LP  P   P      RT
+Sbjct  453  PNTVKLEPRWPCFLPLGPPPSPSSPSCTRT  542
+
+
+ Score = 25.4 bits (49),  Expect = 0.017
+ Identities = 12/26 (46%), Positives = 13/26 (50%), Gaps = 0/26 (0%)
+ Frame = -2/+3
+
+Query  264  SSTCATALVSASATFLPWPLTWAEPW  187
+            +ST ATAL    AT   WP     PW
+Sbjct  174  TST*ATALPRLRATARRWPTR*PTPW  251
+
+
+ Score = 21.7 bits (41),  Expect = 0.22
+ Identities = 12/25 (48%), Positives = 13/25 (52%), Gaps = 0/25 (0%)
+ Frame = +2/-1
+
+Query  188  HGSAQVKGHGKKVADALTNAVAHVD  262
+            HG  Q  GH   VA  L  AVA V+
+Sbjct  250  HGVGQRVGHLLAVALNLGRAVAQVE  176
+
+
+ Score = 21.2 bits (40),  Expect = 0.30
+ Identities = 6/15 (40%), Positives = 9/15 (60%), Gaps = 0/15 (0%)
+ Frame = +3/+3
+
+Query  453  PNTVKLEPRWPCFLP  497
+            P+ ++  P W C LP
+Sbjct  12   PHRLRENPPWCCLLP  56
+
+
+ Score = 20.8 bits (39),  Expect = 0.42
+ Identities = 7/15 (47%), Positives = 7/15 (47%), Gaps = 0/15 (0%)
+ Frame = +1/-3
+
+Query  112  WCGGPGEDVPVLPHH  156
+            W G  G   P  PHH
+Sbjct  155  WWGRTGTSSPGPPHH  111
+
+
+ Score = 17.1 bits (31),  Expect = 5.3
+ Identities = 6/21 (29%), Positives = 10/21 (48%), Gaps = 0/21 (0%)
+ Frame = -2/-3
+
+Query  573  AHSDFIQRPRGYGCRKGRRGW  511
+            A   + +RP  + CR+    W
+Sbjct  98   ARRPYPRRP*RWSCRQETAPW  36
+
+
+>ENSDART00000101709.5 cdna chromosome:GRCz11:3:55093581:55094399:1 gene:ENSDARG00000069735.5 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:hbaa2 description:hemoglobin, alpha 
+adult 2 [Source:ZFIN;Acc:ZDB-GENE-081104-38]
+Length=564
+
+ Score = 141 bits (303),  Expect(2) = 9e-48
+ Identities = 63/101 (62%), Positives = 76/101 (75%), Gaps = 0/101 (0%)
+ Frame = +2/+3
+
+Query  179  DLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLL  358
+            D S GSAQVK HGK V  A+T+AV  +DD+  ALS+LSDLHA KLRVDP NFK+LSH +L
+Sbjct  186  DHSLGSAQVKKHGKIVMGAITDAVGKIDDLLGALSSLSDLHATKLRVDPGNFKILSHNIL  365
+
+Query  359  VTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR*AGASV  481
+            VTLA H PA+FT  VH ++DKFLA++S  L  KYR*   S+
+Sbjct  366  VTLAVHFPADFTAEVHVAVDKFLAALSAALADKYR*TQNSL  488
+
+
+ Score = 54.2 bits (112),  Expect(2) = 9e-48
+ Identities = 21/55 (38%), Positives = 30/55 (55%), Gaps = 0/55 (0%)
+ Frame = +2/+3
+
+Query  14   PQTQREPTMVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHF  178
+            P+   +  M L+  DK  +K  WGK+ + A   G EA+ RM   +P TK YF H+
+Sbjct  18   PRRGSDQKMSLTAKDKAVIKGFWGKIASQADSIGQEAMGRMLTVYPQTKIYFAHW  182
+
+
+ Score = 74.4 bits (156),  Expect = 3e-17
+ Identities = 42/90 (47%), Positives = 48/90 (53%), Gaps = 0/90 (0%)
+ Frame = -2/-3
+
+Query  459  YLEVSTVLTEARNLSREACTAGVNSAGRWAARVTSRQWLRSLKLTGSTRSLCACRSLRAD  280
+            YL        ARNLS   CT+ V SAG+  A VT   W + LK  GSTRSL A RSL+  
+Sbjct  466  YLSARAADKAARNLSTATCTSAVKSAGK*TASVTRMLWDKILKFPGSTRSLVAWRSLKEL  287
+
+Query  279  SALGMSSTCATALVSASATFLPWPLTWAEP  190
+            +A   SS   TA V A  T LP   T A+P
+Sbjct  286  NAPRRSSIFPTASVIAPITILPCFFT*ADP  197
+
+
+>ENSDART00000113098.5 cdna chromosome:GRCz11:3:55100045:55100936:1 gene:ENSDARG00000097011.3 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:hbaa1 description:hemoglobin, alpha 
+adult 1 [Source:ZFIN;Acc:ZDB-GENE-980526-79]
+ FBtr0337025 cdna primary_assembly:BDGP6.54:3R:6607913:6608914:-1 gene:FBgn0250846 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:glob2 description:globin 2
+Length=651
+
+ Score = 125 bits (268),  Expect(2) = 4e-45
+ Identities = 51/103 (50%), Positives = 72/103 (70%), Gaps = 0/103 (0%)
+ Frame = +2/+2
+
+Query  179  DLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLL  358
+            DLS GS  VK HGK +  A+  A++ +DD+   L+ALS+LHA KLRVDP NFK+LSH ++
+Sbjct  260  DLSPGSGPVKKHGKTIMGAVGEAISKIDDLVGGLAALSELHAFKLRVDPANFKILSHNVI  439
+
+Query  359  VTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR*AGASVAM  487
+            V +A   PA+FTP VH S+DKF  +++  L+ KYR*  +  ++
+Sbjct  440  VVIAMLFPADFTPEVHVSVDKFFNNLALALSEKYR*TSSGYSL  568
+
+
+ Score = 61.6 bits (128),  Expect(2) = 4e-45
+ Identities = 26/47 (55%), Positives = 29/47 (62%), Gaps = 0/47 (0%)
+ Frame = +2/+2
+
+Query  38   MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHF  178
+            M LS  DK  VKA W K+   A E GAEAL RM   +P TKTYF H+
+Sbjct  116  MSLSDTDKAVVKAIWAKISPKADEIGAEALARMLTVYPQTKTYFSHW  256
+
+
+ Score = 57.0 bits (118),  Expect(2) = 1e-17
+ Identities = 39/96 (41%), Positives = 46/96 (48%), Gaps = 0/96 (0%)
+ Frame = -2/-1
+
+Query  465  *RYLEVSTVLTEARNLSREACTAGVNSAGRWAARVTSRQWLRSLKLTGSTRSLCACRSLR  286
+            *RY          +NLS +  T+GV SAG+  A  T     R LKL GSTRSL A  SLR
+Sbjct  546  *RYFSERARAKLLKNLSTDT*TSGVKSAGKSMAMTTMTLCDRILKLAGSTRSLKAWSSLR  367
+
+Query  285  ADSALGMSSTCATALVSASATFLPWPLTWAEPWLRS  178
+            A S    SS    A  +A     P   T  +P L+S
+Sbjct  366  AASPPTRSSIFEIASPTAPMIVFPCFFTGPDPGLKS  259
+
+
+ Score = 37.7 bits (76),  Expect(2) = 1e-17
+ Identities = 22/41 (54%), Positives = 25/41 (61%), Gaps = 0/41 (0%)
+ Frame = -2/-1
+
+Query  168  K*VLVVGKDRNILSRASAPYSPACAPTLPQAALTLVLSAGD  46
+            K*VLV G   +IL+RASAP S A    L Q ALT  LS  +
+Sbjct  246  K*VLV*G*TVSILARASAPISSALGLILAQMALTTALSVSE  124
+
+
+ Score = 26.3 bits (51),  Expect(2) = 4e-04
+ Identities = 10/22 (45%), Positives = 14/22 (64%), Gaps = 0/22 (0%)
+ Frame = +1/+1
+
+Query  112  WCGGPGEDVPVLPHHQDLLPAL  177
+            WC  P ++   LP +QDLL +L
+Sbjct  190  WC*SPRQNADRLPSNQDLLFSL  255
+
+
+ Score = 21.7 bits (41),  Expect(2) = 4e-04
+ Identities = 10/17 (59%), Positives = 11/17 (65%), Gaps = 0/17 (0%)
+ Frame = +1/+1
+
+Query  286  PERPARAQASGGPGQLQ  336
+            PER    QA+  PGQLQ
+Sbjct  367  PERTPCLQAAC*PGQLQ  417
+
+
+ Score = 17.1 bits (31),  Expect = 5.3
+ Identities = 6/6 (100%), Positives = 6/6 (100%), Gaps = 0/6 (0%)
+ Frame = +3/+3
+
+Query  57   TRPTSR  74
+            TRPTSR
+Sbjct  402  TRPTSR  419
+
+
+>ENSDART00000125092.4 cdna chromosome:GRCz11:3:55120330:55121125:-1 gene:ENSDARG00000089475.6 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:hbae1.1 description:hemoglobin, alpha 
+embryonic 1.1 [Source:ZFIN;Acc:ZDB-GENE-980526-80]
+Length=633
+
+ Score = 121 bits (259),  Expect(2) = 4e-43
+ Identities = 52/105 (50%), Positives = 71/105 (68%), Gaps = 0/105 (0%)
+ Frame = +2/+2
+
+Query  179  DLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLL  358
+            DLS GSA V+ HGK V   +  AV+ +DD+   L  LS+LHA +LRVDP NFK+LSH +L
+Sbjct  236  DLSPGSAPVRKHGKTVMGGVAEAVSKIDDLNAGLLNLSELHAFQLRVDPANFKILSHNIL  415
+
+Query  359  VTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR*AGASVAMLL  493
+            V LA   PA+FTP  H ++DKFL++++  ++ KYR*   +V   L
+Sbjct  416  VVLATLFPADFTPEAHVAMDKFLSALALAMSEKYR*THFTVLQTL  550
+
+
+ Score = 58.8 bits (122),  Expect(2) = 4e-43
+ Identities = 23/48 (48%), Positives = 29/48 (60%), Gaps = 0/48 (0%)
+ Frame = +2/+2
+
+Query  35   TMVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHF  178
+            TM LS  DK  VK  W K+   A + G +AL RM + +P TKTYF H+
+Sbjct  89   TMSLSAKDKAAVKTLWAKIAGKADDIGHDALSRMLIVYPQTKTYFSHW  232
+
+
+ Score = 69.3 bits (145),  Expect(2) = 2e-20
+ Identities = 42/83 (51%), Positives = 44/83 (53%), Gaps = 0/83 (0%)
+ Frame = -2/-1
+
+Query  426  RNLSREACTAGVNSAGRWAARVTSRQWLRSLKLTGSTRSLCACRSLRADSALGMSSTCAT  247
+            RNLS     +GV SAG   AR T   W R LKL GSTRS  A  SLR  S    SS   T
+Sbjct  483  RNLSIAT*ASGVKSAGNKVARTTRMLWDRILKLAGSTRSWKAWSSLRFRSPALRSSILLT  304
+
+Query  246  ALVSASATFLPWPLTWAEPWLRS  178
+            A  +   T LP  LT AEP LRS
+Sbjct  303  ASATPPITVLPCFLTGAEPGLRS  235
+
+
+ Score = 35.0 bits (70),  Expect(2) = 2e-20
+ Identities = 21/45 (47%), Positives = 23/45 (51%), Gaps = 0/45 (0%)
+ Frame = -2/-1
+
+Query  168  K*VLVVGKDRNILSRASAPYSPACAPTLPQAALTLVLSAGDSTMV  34
+            K*VLV G   NIL RAS P S A    L    LT  LS  +  +V
+Sbjct  222  K*VLVWG*TINILERASCPMSSAFPAILAHRVLTAALSLAERLIV  88
+
+
+ Score = 24.4 bits (47),  Expect = 0.033
+ Identities = 10/17 (59%), Positives = 10/17 (59%), Gaps = 0/17 (0%)
+ Frame = +1/+1
+
+Query  148  PHHQDLLPALRPEPRLC  198
+            P    LL   RPEPRLC
+Sbjct  205  PDQDLLLSLERPEPRLC  255
+
+
+ Score = 18.0 bits (33),  Expect = 2.8
+ Identities = 5/6 (83%), Positives = 6/6 (100%), Gaps = 0/6 (0%)
+ Frame = -1/-2
+
+Query  451  GQHGAH  434
+            G+HGAH
+Sbjct  365  GKHGAH  348
+
+
+>ENSDART00000053077.6 cdna chromosome:GRCz11:3:55091230:55092051:-1 gene:ENSDARG00000069734.5 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:hbba2 description:hemoglobin, beta 
+adult 2 [Source:ZFIN;Acc:ZDB-GENE-040801-164]
+Length=650
+
+ Score = 91.8 bits (194),  Expect = 2e-22
+ Identities = 40/90 (44%), Positives = 54/90 (60%), Gaps = 0/90 (0%)
+ Frame = +2/+3
+
+Query  191  GSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLA  370
+            G+ +V  HGK V  AL  AV +VDD+    + LS LH  KL VDP NFKLL+ CL + +A
+Sbjct  300  GNPKVSEHGKTVLKALEKAVKNVDDIKTTYAKLSQLHCEKLNVDPDNFKLLADCLSIVIA  479
+
+Query  371  AHLPAEFTPAVHASLDKFLASVSTVLTSKY  460
+             +    F P+V ++  K L+ V   LTS+Y
+Sbjct  480  TNFGPAFNPSVQSTWQKLLSVVVAALTSRY  569
+
+
+ Score = 44.6 bits (91),  Expect = 3e-08
+ Identities = 29/89 (33%), Positives = 40/89 (45%), Gaps = 0/89 (0%)
+ Frame = -2/-2
+
+Query  450  VSTVLTEARNLSREACTAGVNSAGRWAARVTSRQWLRSLKLTGSTRSLCACRSLRADSAL  271
+            V    T  ++  +   T G+ +  +  A    RQ   SLKL+GST S   C  L     +
+Sbjct  559  VRAATTTDKSFCQVDWTEGLKAGPKLVAMTMLRQSANSLKLSGSTLSFSQCSWLSLA*VV  380
+
+Query  270  GMSSTCATALVSASATFLPWPLTWAEPWL  184
+             MSST  TA  +A +T LP   T   P +
+Sbjct  379  LMSSTFLTAFSNAFSTVLPCSETLGLPMI  293
+
+
+>ENSDART00000066384.5 cdna chromosome:GRCz11:12:20349865:20350629:-1 gene:ENSDARG00000045143.5 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:hbbe2 description:hemoglobin beta 
+embryonic-2 [Source:ZFIN;Acc:ZDB-GENE-040702-1]
+Length=590
+
+ Score = 81.7 bits (172),  Expect = 2e-19
+ Identities = 37/89 (42%), Positives = 54/89 (61%), Gaps = 0/89 (0%)
+ Frame = +2/+2
+
+Query  200  QVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHL  379
+            +V  HG  V   L  A+ ++DD+ N  + LS LH+ KL VDP NF+LL+ CL + +A+ +
+Sbjct  254  KVAAHGTVVLHGLDRAMKNMDDIKNTYAELSVLHSEKLHVDPDNFRLLADCLTIVIASTM  433
+
+Query  380  PAEFTPAVHASLDKFLASVSTVLTSKYR*  466
+             A FT  + A+  KFLA V + L  +Y *
+Sbjct  434  GAAFTADMQAAWQKFLAVVVSALQRQYH*  520
+
+
+ Score = 53.8 bits (111),  Expect = 5e-11
+ Identities = 31/79 (39%), Positives = 40/79 (51%), Gaps = 0/79 (0%)
+ Frame = -2/-3
+
+Query  435  TEARNLSREACTAGVNSAGRWAARVTSRQWLRSLKLTGSTRSLCACRSLRADSALGMSST  256
+            T ARN  + AC + V +A    A    RQ   SLKL+GST S   C +L +     MSS 
+Sbjct  489  TTARNFCQAACMSAVKAAPMVEAITIVRQSASSLKLSGSTCSFSECSTLSSA*VFLMSSM  310
+
+Query  255  CATALVSASATFLPWPLTW  199
+               AL S  +T +PW  T+
+Sbjct  309  FFMALSSPWSTTVPWAATF  253
+
+
+ Score = 16.6 bits (30),  Expect = 7.3
+ Identities = 6/17 (35%), Positives = 7/17 (41%), Gaps = 0/17 (0%)
+ Frame = -1/-2
+
+Query  64   GLVGRRQHHGGFSLSLW  14
+            G V   +H G     LW
+Sbjct  301  GSVQSVEHDGSVGCDLW  251
+
+
+>ENSDART00000101713.5 cdna chromosome:GRCz11:3:55103445:55104310:-1 gene:ENSDARG00000089087.7 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:hbba1 description:hemoglobin, beta 
+adult 1 [Source:ZFIN;Acc:ZDB-GENE-990415-18]
+Length=667
+
+ Score = 63.4 bits (132),  Expect = 6e-14
+ Identities = 25/60 (42%), Positives = 39/60 (65%), Gaps = 0/60 (0%)
+ Frame = +2/+3
+
+Query  191  GSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLA  370
+            G+ +V  HG+ V   L  A+ ++D++ N  +ALS +H+ KL VDP NF+LL+ C+ V  A
+Sbjct  276  GNPKVAAHGRTVMGGLERAIKNMDNVKNTYAALSVMHSEKLHVDPDNFRLLADCITVCAA  455
+
+
+ Score = 33.1 bits (66),  Expect = 8e-05
+ Identities = 24/62 (39%), Positives = 27/62 (44%), Gaps = 0/62 (0%)
+ Frame = -2/-1
+
+Query  369  ARVTSRQWLRSLKLTGSTRSLCACRSLRADSALGMSSTCATALVSASATFLPWPLTWAEP  190
+            A  T  Q  RSLKL+GST S   C +LRA       S    AL     T LP   T   P
+Sbjct  454  AAQTVMQSARSLKLSGSTCSFSECITLRAA*VFLTLSMFLMALSRPPITVLP*AATLGLP  275
+
+Query  189  WL  184
+             +
+Sbjct  274  MI  269
+
+
+ Score = 18.0 bits (33),  Expect = 2.8
+ Identities = 7/23 (30%), Positives = 12/23 (52%), Gaps = 0/23 (0%)
+ Frame = -3/-1
+
+Query  488  AWPPRLQLNGIWRSARCSQKPGT  420
+            AWP  +    + +SAR  +  G+
+Sbjct  472  AWPNFMAAQTVMQSARSLKLSGS  404
+
+
+ Score = 17.1 bits (31),  Expect = 5.3
+ Identities = 8/26 (31%), Positives = 9/26 (35%), Gaps = 0/26 (0%)
+ Frame = -2/+2
+
+Query  153  VGKDRNILSRASAPYSPACAPTLPQA  76
+            V  D  I      P  P C    PQ+
+Sbjct  212  VSLDSEIFRHIRQPVKPRCDHG*PQS  289
+
+
+ Score = 16.6 bits (30),  Expect = 7.2
+ Identities = 4/8 (50%), Positives = 5/8 (63%), Gaps = 0/8 (0%)
+ Frame = -3/+2
+
+Query  59   CRQETAPW  36
+            CR  + PW
+Sbjct  125  CRAHSHPW  148
+
+
+>FBtr0301286 cdna primary_assembly:BDGP6.54:3R:6607913:6608914:-1 gene:FBgn0250846 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:glob2 description:globin 2
+Length=823
+
+ Score = 18.0 bits (33),  Expect = 2.8
+ Identities = 6/7 (86%), Positives = 6/7 (86%), Gaps = 0/7 (0%)
+ Frame = +3/+3
+
+Query  483  PCFLPLG  503
+            PC LPLG
+Sbjct  672  PCPLPLG  692
+
+
+ Score = 16.6 bits (30),  Expect = 7.3
+ Identities = 4/10 (40%), Positives = 7/10 (70%), Gaps = 0/10 (0%)
+ Frame = +2/-1
+
+Query  299  HAHKLRVDPV  328
+            H H +R+D +
+Sbjct  532  HPHIIRIDAI  503
+
+
+>FBtr0083245 cdna primary_assembly:BDGP6.54:3R:15896926:15902584:-1 gene:FBgn0027657 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:glob1 description:globin 1
+Length=1043
+
+ Score = 18.0 bits (33),  Expect = 2.8
+ Identities = 6/13 (46%), Positives = 6/13 (46%), Gaps = 0/13 (0%)
+ Frame = -2/+1
+
+Query  375  WAARVTSRQWLRS  337
+            WA     R W RS
+Sbjct  451  WARMAIWRSWTRS  489
+
+
+ Score = 18.0 bits (33),  Expect = 2.8
+ Identities = 4/7 (57%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+ Frame = -2/-2
+
+Query  213  WPLTWAE  193
+            WP TW +
+Sbjct  457  WPRTWMD  437
+
+
+ Score = 16.6 bits (30),  Expect = 7.2
+ Identities = 6/16 (38%), Positives = 8/16 (50%), Gaps = 0/16 (0%)
+ Frame = -2/+3
+
+Query  408  ACTAGVNSAGRWAARV  361
+            AC+   + A  WA  V
+Sbjct  582  ACSLDESQAATWAKLV  629
+
+
+ Score = 16.2 bits (29),  Expect = 9.9
+ Identities = 5/10 (50%), Positives = 5/10 (50%), Gaps = 0/10 (0%)
+ Frame = -3/+1
+
+Query  65   WSCRQETAPW  36
+            W C Q  A W
+Sbjct  565  WMC*QLPAVW  594
+
+
+ Score = 16.2 bits (29),  Expect = 10.0
+ Identities = 6/12 (50%), Positives = 6/12 (50%), Gaps = 0/12 (0%)
+ Frame = +1/-3
+
+Query  292  RPARAQASGGPG  327
+            RPA      GPG
+Sbjct  483  RPASPDRHPGPG  448
+
+
+>FBtr0078640 cdna primary_assembly:BDGP6.54:3R:5830062:5831785:1 gene:FBgn0037385 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:glob3 description:globin 3
+Length=1118
+
+ Score = 17.6 bits (32),  Expect = 3.8
+ Identities = 6/9 (67%), Positives = 7/9 (78%), Gaps = 0/9 (0%)
+ Frame = -2/+2
+
+Query  321  STRSLCACR  295
+            S+ SLC CR
+Sbjct  893  SSISLCRCR  919
+
+
+ Score = 17.1 bits (31),  Expect = 5.3
+ Identities = 3/5 (60%), Positives = 4/5 (80%), Gaps = 0/5 (0%)
+ Frame = -3/+1
+
+Query  41   PWWVL  27
+            PWW +
+Sbjct  505  PWWTM  519
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 372983
+
+
+  Database: tfn
+    Posted date:  Oct 30, 2026  12:55 PM
+  Number of letters in database: 10,937
+  Number of sequences in database:  16
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

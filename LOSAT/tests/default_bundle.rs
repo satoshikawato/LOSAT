@@ -1,21 +1,21 @@
 //! The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle): blastp's
-//! `LOSAT_X_BPREDOPAR`, `LOSAT_X_BPREDOLPT`, `LOSAT_X_BPDBCUT`, `LOSAT_X_BPSUBJMETA` and
+//! `LOSAT_X_BPREDOPAR`, `LOSAT_X_BPREDOLPT`, `LOSAT_X_BPDBCUT` and
 //! `LOSAT_X_BPLKPAHEAD`, and blastn's `LOSAT_X_PAIRPARDISC`, `LOSAT_X_PAIRPARFOLD`,
-//! `LOSAT_X_QDUSTPAR`, `LOSAT_X_DIAGLV`, `LOSAT_X_QBATCHPAR`, `LOSAT_X_QPREPPAR` and
-//! `LOSAT_X_RPTSTREAM`. Each has its own test file, whose searches run with the others off (the
-//! default before). Here the searches run with the default (no variable) and
-//! give the report of each switch off (`=0`) and of
-//! all of them off, with the same standard error. And the default runs them: the
-//! `[TIMING] x_bpredopar:` line of BPREDOPAR, with BPREDOLPT's `lpt_windows=`, comes without a
-//! variable and not with `LOSAT_X_BPREDOPAR=0`; QBATCHPAR's `[X_STATS]` line comes without a
-//! variable, and its off reason for these small query files is the budget, which is 0 by default
-//! for a query file that NCBI's blastn would not split by queries (`x_qbatch_par.rs`,
-//! `Profile::of_search`), and `LOSAT_X_QBATCHPARMEM` still sets one. `LOSAT_X_REACH`, set in the
-//! default run of a search, shows that BPLKPAHEAD, BPSUBJMETA, BPDBCUT, DIAGLV, QDUSTPAR and
-//! QPREPPAR take their own paths on these searches.
+//! `LOSAT_X_DIAGLV`, `LOSAT_X_QPREPPAR` and `LOSAT_X_RPTSTREAM` (and
+//! `LOSAT_X_QBATCHPAR`, which was removed on 2026-10-28, and `LOSAT_X_QDUSTPAR`, folded into
+//! `LOSAT_X_QPREPPAR` on 2026-11-01). Each has its own test file, whose
+//! searches run with the others off (the default before). Here the searches run with the default
+//! (no variable) and give the report of each switch off (`=0`) and of all of them off, with the
+//! same standard error. And the default runs them: the `[TIMING] x_bpredopar:` line of BPREDOPAR,
+//! with BPREDOLPT's `lpt_windows=`, comes without a variable and not with `LOSAT_X_BPREDOPAR=0`.
+//! `LOSAT_X_REACH`, set in the default run of a search, shows that BPLKPAHEAD, BPDBCUT, DIAGLV and QPREPPAR
+//! take their own paths on these searches.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+mod temp_support;
+use temp_support::{worker_log_if_unset, TempFile};
 
 mod reach_support;
 
@@ -25,7 +25,6 @@ const BLASTP: &[&str] = &[
     "LOSAT_X_BPLKPAHEAD",
     "LOSAT_X_BPREDOLPT",
     "LOSAT_X_BPREDOPAR",
-    "LOSAT_X_BPSUBJMETA",
 ];
 
 /// The blastn switches of the bundle.
@@ -33,8 +32,6 @@ const BLASTN: &[&str] = &[
     "LOSAT_X_DIAGLV",
     "LOSAT_X_PAIRPARDISC",
     "LOSAT_X_PAIRPARFOLD",
-    "LOSAT_X_QBATCHPAR",
-    "LOSAT_X_QDUSTPAR",
     "LOSAT_X_QPREPPAR",
     "LOSAT_X_RPTSTREAM",
 ];
@@ -59,7 +56,7 @@ fn work_dir(label: &str) -> PathBuf {
 /// `blastx-worker-probe` feature (`cargo test --all-features`, as in CI) needs that file name as
 /// soon as a search has more than one thread, and it selects nothing. Must exit with 0; returns
 /// the report and standard error.
-fn losat(args: &[&str], vars: &[(&str, &str)]) -> (Vec<u8>, String) {
+fn losat(args: &[&str], vars: &[(&str, &str)]) -> (Vec<u8>, String, Option<TempFile>) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
@@ -72,12 +69,7 @@ fn losat(args: &[&str], vars: &[(&str, &str)]) -> (Vec<u8>, String) {
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat-default-bundle-worker.log"),
-        );
-    }
+    let log = worker_log_if_unset(&mut command, "default_bundle_worker");
     let output = command
         .args(args)
         .envs(vars.iter().copied())
@@ -85,7 +77,7 @@ fn losat(args: &[&str], vars: &[(&str, &str)]) -> (Vec<u8>, String) {
         .expect("run LOSAT");
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     assert!(output.status.success(), "{args:?} {vars:?}: {stderr}");
-    (output.stdout, stderr)
+    (output.stdout, stderr, log)
 }
 
 /// The search `args` (with `base` set in every run) gives one report and one standard error with
@@ -103,7 +95,7 @@ fn one_report(
         base.iter().copied().chain(extra).collect()
     };
     let default_vars: Vec<(&str, &str)> = base.iter().chain(first).copied().collect();
-    let (report, stderr) = losat(args, &default_vars);
+    let (report, stderr, _log) = losat(args, &default_vars);
     assert!(!report.is_empty(), "{args:?}: the search has hits");
     let mut arms = Vec::new();
     for &name in switches {
@@ -117,7 +109,7 @@ fn one_report(
             .collect(),
     ));
     for vars in &arms {
-        let (other, other_stderr) = losat(args, vars);
+        let (other, other_stderr, _log) = losat(args, vars);
         assert!(
             other == report,
             "{args:?}: the report differs with {vars:?}"
@@ -143,21 +135,21 @@ fn counts(stderr: &str, prefix: &str) -> std::collections::HashMap<String, u64> 
         .collect()
 }
 
-/// A protein database of the subject proteome, made with `losat makedb`; returns its name.
+/// A protein database of the subject proteome, made with `losat makeblastdb`; returns its name.
 fn protein_database(label: &str) -> PathBuf {
     let name = work_dir(label).join("MejoMJNV");
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(fixture("MejoMJNV.faa"))
         .args(["-dbtype", "prot"])
         .arg("-out")
         .arg(&name)
         .output()
-        .expect("run losat makedb");
+        .expect("run losat makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     name
@@ -180,9 +172,8 @@ fn pieces(label: &str) -> PathBuf {
     file
 }
 
-/// blastp-fast with `-subject` in blocks (three blocks of `LOSAT_X_BPQSLOTS`'s 33,333 letters for the
-/// 77,448 letters of the query proteome) and exact blastp with `-db` (two blocks of the default
-/// `LOSAT_X_BPQBLOCK`) at four threads.
+/// blastp-fast with `-subject` and exact blastp with `-db`, each in blocks (two blocks of the default
+/// `LOSAT_X_BPQBLOCK` for the 77,448 letters of the query proteome) at four threads.
 #[test]
 fn blastp_gives_one_report_with_the_switches_on_and_off() {
     let query = fixture("MeenMJNV.faa");
@@ -225,13 +216,13 @@ fn blastp_gives_one_report_with_the_switches_on_and_off() {
     one_report(&exact, &[], &[reach_db.var()], BLASTP);
     // The rows come from the default runs whose reports every `=0` arm above matched, so the
     // equalities compare these paths (a later change of scope or input would otherwise make
-    // them vacuous). BPQSLOTS: blastp-fast's blocks were searched two at a time. BPSUBJMETA:
-    // subject records were read by the metadata path. BPLKPAHEAD: the look-ahead build was chosen
-    // for exact blastp's blocks (blastp-fast's take BPQSLOTS, which builds nothing ahead).
-    for switch in ["LOSAT_X_BPQSLOTS", "LOSAT_X_BPSUBJMETA"] {
-        let sides = reach_fast.sides(switch);
-        assert!(sides.0, "{switch}: sides {sides:?}: its path did not run");
-    }
+    // them vacuous). BPQBLOCK: the blastp-fast `-subject` search took blocks. BPLKPAHEAD: the
+    // look-ahead build was chosen for exact blastp's blocks.
+    let sides = reach_fast.sides("LOSAT_X_BPQBLOCK");
+    assert!(
+        sides.0,
+        "LOSAT_X_BPQBLOCK: sides {sides:?}: its path did not run"
+    );
     let sides = reach_db.sides("LOSAT_X_BPLKPAHEAD");
     assert!(
         sides.0,
@@ -245,7 +236,7 @@ fn blastp_gives_one_report_with_the_switches_on_and_off() {
     );
     // The default runs BPREDOPAR's path (and BPREDOLPT's windows); its switch at 0 does not.
     let timing = [("LOSAT_TIMING", "1")];
-    let (_, stderr) = losat(&fast, &timing);
+    let (_, stderr, _log) = losat(&fast, &timing);
     let lines: Vec<&str> = stderr
         .lines()
         .filter(|line| line.starts_with("[TIMING] x_bpredopar: "))
@@ -258,7 +249,7 @@ fn blastp_gives_one_report_with_the_switches_on_and_off() {
         lines.iter().all(|line| line.contains(" lpt_windows=")),
         "{lines:?}"
     );
-    let (_, stderr) = losat(&fast, &[("LOSAT_TIMING", "1"), ("LOSAT_X_BPREDOPAR", "0")]);
+    let (_, stderr, _log) = losat(&fast, &[("LOSAT_TIMING", "1"), ("LOSAT_X_BPREDOPAR", "0")]);
     assert!(!stderr.contains("[TIMING] x_bpredopar: "), "{stderr}");
 }
 
@@ -300,7 +291,7 @@ fn blastn_gives_one_report_with_the_switches_on_and_off() {
             ("LOSAT_TIMING", "1"),
             ("LOSAT_X_STATS", "1"),
         ];
-        let (_, stderr) = losat(&args, &observed);
+        let (_, stderr, _log) = losat(&args, &observed);
         let seeds = counts(&stderr, stage);
         assert!(
             seeds["chunks"] > 0 && seeds["partitions"] > 0,
@@ -319,7 +310,7 @@ fn blastn_gives_one_report_with_the_switches_on_and_off() {
             ("LOSAT_TIMING", "1"),
             ("LOSAT_X_PAIRPARFOLD", "0"),
         ];
-        let (_, stderr) = losat(&args, &folded_off);
+        let (_, stderr, _log) = losat(&args, &folded_off);
         let unfolded = counts(&stderr, stage);
         assert_eq!(
             unfolded.get("partitions").copied().unwrap_or(0),
@@ -328,9 +319,9 @@ fn blastn_gives_one_report_with_the_switches_on_and_off() {
         );
         // The rows of the default run above. DIAGLV: the reference fold took the diag-hash path
         // with level bounds (its mark is in the reference fold only, not in the strips folds).
-        // QDUSTPAR: the query dusting ran on the pool. QPREPPAR: the pool ran the batch (the
-        // mark fires for any batch with more than one context at 2+ threads).
-        for switch in ["LOSAT_X_DIAGLV", "LOSAT_X_QDUSTPAR", "LOSAT_X_QPREPPAR"] {
+        // QPREPPAR: the pool ran the batch (the mark fires for any batch with more than one
+        // context at 2+ threads; the query dusting is one of its maps).
+        for switch in ["LOSAT_X_DIAGLV", "LOSAT_X_QPREPPAR"] {
             let sides = reach.sides(switch);
             assert!(
                 sides.0,
@@ -338,64 +329,4 @@ fn blastn_gives_one_report_with_the_switches_on_and_off() {
             );
         }
     }
-    // QBATCHPAR runs by default; these query files get no default budget, and the variable
-    // still sets one.
-    let args = [
-        "blastn",
-        "-task",
-        "dc-megablast",
-        "-query",
-        query,
-        "-subject",
-        subject,
-        "-outfmt",
-        "6",
-        "-num_threads",
-        "4",
-    ];
-    let stats = |vars: &[(&str, &str)]| -> String {
-        let (_, stderr) = losat(&args, vars);
-        stderr
-            .lines()
-            .find(|line| line.starts_with("[X_STATS] QBATCHPAR "))
-            .unwrap_or_else(|| panic!("no QBATCHPAR line with {vars:?}: {stderr}"))
-            .to_string()
-    };
-    let line = stats(&[("BATCH_SIZE", "4000"), ("LOSAT_X_STATS", "1")]);
-    assert!(
-        line.contains(" budget_mib=0 ") && line.ends_with(" off=budget"),
-        "{line}"
-    );
-    let line = stats(&[
-        ("BATCH_SIZE", "4000"),
-        ("LOSAT_X_STATS", "1"),
-        ("LOSAT_X_QBATCHPARMEM", "84"),
-    ]);
-    assert!(line.contains(" budget_mib=84 "), "{line}");
-    let (_, stderr) = losat(
-        &args,
-        &[
-            ("BATCH_SIZE", "4000"),
-            ("LOSAT_X_STATS", "1"),
-            ("LOSAT_X_QBATCHPAR", "0"),
-        ],
-    );
-    assert!(!stderr.contains("[X_STATS] QBATCHPAR "), "{stderr}");
-    // With a budget and two slots forced, the slots search batches ahead of the loop, and the
-    // report is that of the default before (every switch of the bundle at 0).
-    let slots = [
-        ("BATCH_SIZE", "4000"),
-        ("LOSAT_X_STATS", "1"),
-        ("LOSAT_X_QBATCHPARMEM", "4096"),
-        ("LOSAT_X_QBATCHPARSLOTS", "2"),
-    ];
-    let (report, stderr) = losat(&args, &slots);
-    let speculated = counts(&stderr, "[X_STATS] QBATCHPAR ");
-    assert_eq!((speculated["k"], speculated["m"]), (2, 2), "{stderr}");
-    let before: Vec<(&str, &str)> = [("BATCH_SIZE", "4000")]
-        .into_iter()
-        .chain(BLASTP.iter().chain(BLASTN).map(|&name| (name, "0")))
-        .collect();
-    let (expected, _) = losat(&args, &before);
-    assert!(report == expected, "the report differs with two slots");
 }

@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "tm_psi_c150",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "tm_psi_c150",
+  "number-of-letters": 610,
+  "number-of-sequences": 4,
+  "last-updated": "2026-11-04T17:39:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 3,
+  "bytes-total": 50421,
+  "bytes-to-cache": 743,
+  "files": [
+    "tm_psi_c150.pdb",
+    "tm_psi_c150.phr",
+    "tm_psi_c150.pin",
+    "tm_psi_c150.pog",
+    "tm_psi_c150.pos",
+    "tm_psi_c150.pot",
+    "tm_psi_c150.psq",
+    "tm_psi_c150.ptf",
+    "tm_psi_c150.pto"
+  ]
+}

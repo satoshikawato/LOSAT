@@ -1,0 +1,666 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastx",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">FBtr0100310 cdna
+ primary_assembly:BDGP6.54:2L:117174:120631:-1 gene:FBgn0031220
+ gene_biotype:protein_coding transcript_biotype:protein_coding
+ gene_symbol:CG4822"
+                  }
+                }
+              },
+              title "FBtr0100310 cdna
+ primary_assembly:BDGP6.54:2L:117174:120631:-1 gene:FBgn0031220
+ gene_biotype:protein_coding transcript_biotype:protein_coding
+ gene_symbol:CG4822"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 2505,
+              seq-data ncbi2na '3DAD207624A7B4B6E4EC7BB1E7F5343E00DE2FEFF6A799
+D221C63664FDB2AC0E03C3F002F7DAD2F683FBF52060A8A99FD6EB548C6624384D8F40104182DC
+80CF00E80794926C0292C417540D2757D0CC92613C196325D8958D0DE287F404B5DA5D0B3F94D7
+A526B03F92FF681CEF3BAF5614850E7D0010218FF9A22D0E83BF4774607C798F32A5F4A67AC014
+479C05E7A6A7FAB08CC11018557CC31D7F0CFC58C996EE60D6988FFAC0412D6623398B7F6403B7
+63330E4878ED7A1D12FC5B1C80E38FFA6901F82FA8020703F00402720B8F8603FEA0EF99700845
+70114E9D009CDEAAE26026FCE4F95F89EB410545ED37F723817107AFC863F362F44393E571D02F
+FA596AA991EE379D4D4C653794237D88E76392DC6F7258294B9B714280AAD413EC5FDF8207FA9F
+EFB50C1710569E1F4F360BE7E5F8B3A6AD7346250EB2096EA41A40BE663A2D7524BA0AE0104105
+005845136AA4DB6FF180A8D2FE18223C95007FE8A503B27AE9C4B109CF9FB9B39C3503BA2230B6
+C4D09F0BDC4E04DBDF9FC7AEAF6771FEB3A81769770267FF07DAFD3BD14FB8C9317717D738E5EE
+77CCFF54680D0DEF002A2C41052EB16DE275C719243AF17409C5373BF3FE96F3F37353EEC7C3B5
+25051F83AF59FE539CFC4327F6C1A5707D612FFA7EF8DD4B21E27CB8390EF4EA94BDD96E59E35E
+7F53F1A4FAB3A68A04C4CD577CE2BF74E4DF2717D94CB3A0A5CB64D7EC61C686658443F98211A0
+37FE74FC00B602FFBC97FF28F6004E473FBADDCDF9F8E2FFCFE7BD16C924C7F38F21E61E011D62
+B4954FFE4CED3127BC180CFF07F1F6C43C704F0413A9AFE176B9C800F3FC26B3F4AA12DF05D533
+CFCEA7D0C33C301CD02E33E8F78300BF38D080'H
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">YOL075C pep
+ chromosome:R64-1-1:XV:189658:193542:-1 gene:YOL075C transcript:YOL075C_mRNA
+ gene_biotype:protein_coding transcript_biotype:protein_coding
+ description:Putative ABC transporter [Source:SGD;Acc:S000005435]"
+                }
+              }
+            },
+            title "YOL075C pep chromosome:R64-1-1:XV:189658:193542:-1
+ gene:YOL075C transcript:YOL075C_mRNA gene_biotype:protein_coding
+ transcript_biotype:protein_coding description:Putative ABC transporter
+ [Source:SGD;Acc:S000005435]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 1294,
+            seq-data ncbieaa "MSQQENGDVATELIENRLSFSRIPRISLHVRDLSIVASKTNTTLVNTF
+SMDLPSGSVMAVMGGSGSGKTTLLNVLASKISGGLTHNGSIRYVLEDTGSEPNETEPKRAHLDGQDHPIQKHVIMAYL
+PQQDVLSPRLTCRETLKFAADLKLNSSERTKKLMVEQLIEELGLKDCADTLVGDNSHRGLSGGEKRRLSIGTQMISNP
+SIMFLDEPTTGLDAYSAFLVIKTLKKLAKEDGRTFIMSIHQPRSDILFLLDQVCILSKGNVVYCDKMDNTIPYFESIG
+YHVPQLVNPADYFIDLSSVDSRSDKEEAATQSRLNSLIDHWHDYERTHLQLQAESYISNATEIQIQNMTTRLPFWKQV
+TVLTRRNFKLNFSDYVTLISTFAEPLIIGTVCGWIYYKPDKSSIGGLRTTTACLYASTILQCYLYLLFDTYRLCEQDI
+ALYDRERAEGSVTPLAFIVARKISLFLSDDFAMTMIFVSITYFMFGLEADARKFFYQFAVVFLCQLSCSGLSMLSVAV
+SRDFSKASLVGNMTFTVLSMGCGFFVNAKVMPVYVRWIKYIAFTWYSFGTLMSSTFTNSYCTTDNLDECLGNQILEVY
+GFPRNWITVPAVVLLCWSVGYFVVGAIILYLHKIDITLQNEVKSKQKKIKKKSPTGMKPEIQLLDDVYHQKDLEAEKG
+KNIHITIKLEDIDLRVIFSAPFSNWKEGNFHHETKEILQSVNAIFKPGMINAIMGPSGSGKSSLLNLISGRLKSSVFA
+KFDTSGSIMFNDIQVSELMFKNVCSYVSQDDDHLLAALTVKETLKYAAALRLHHLTEAERMERTDNLIRSLGLKHCEN
+NIIGNEFVKGISGGEKRRVTMGVQLLNDPPILLLDEPTSGLDSFTSATILEILEKLCREQGKTIIITIHQPRSELFKR
+FGNVLLLAKSGRTAFNGSPDEMIAYFTELGYNCPSFTNVADFFLDLISVNTQNEQNEISSRARVEKILSAWKANMDNE
+SLSPTPISEKQQYSQESFFTEYSEFVRKPANLVLAYIVNVKRQFTTTRRSFDSLMARIAQIPGLGVIFALFFAPVKHN
+YTSISNRLGLAQESTALYFVGMLGNLACYPTERDYFYEEYNDNVYGIAPFFLAYMTLELPLSALASVLYAVFTVLACG
+LPRTAGNFFATVYCSFIVTCCGEALGIMTNTFFERPGFVVNCISIILSIGTQMSGLMSLGMSRVLKGFNYLNPVGYTS
+MIIINFAFPGNLKLTCEDGGKNSDGTCEFANGHDVLVSYGLVRNTQKYLGIIVCVAIIYRLIAFFILKAKLEWIKW"
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "LongestIntronLength",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFilteringWindow",
+          value integer 12
+        },
+        {
+          name "SegFilteringLocut",
+          value real { 22, 10, -1 }
+        },
+        {
+          name "SegFilteringHicut",
+          value real { 25, 10, -1 }
+        },
+        {
+          name "WordThreshold",
+          value integer 12
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "QueryGeneticCode",
+          value integer 1
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 373032
+        }
+      },
+      program-options {
+        {
+          name "RequiredStart",
+          value integer 1500
+        },
+        {
+          name "RequiredEnd",
+          value integer 2504
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 79
+          },
+          {
+            id str "blast_score",
+            value int 79
+          },
+          {
+            id str "e_value",
+            value real { 699961372750259, 10, -20 }
+          },
+          {
+            id str "bit_score",
+            value real { 350389987775149, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 46
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 88
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 607985074626866, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_1"
+            },
+            loc {
+              int {
+                from 1661,
+                to 1891,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 1090,
+                to 1166,
+                strand unknown,
+                id local str "Subject_1"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_1"
+            },
+            loc {
+              int {
+                from 1892,
+                to 1912,
+                strand plus,
+                id local str "Query_1"
+              },
+              empty local str "Subject_1"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_1"
+            },
+            loc {
+              int {
+                from 1913,
+                to 2047,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 1167,
+                to 1211,
+                strand unknown,
+                id local str "Subject_1"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_1"
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 1212,
+                to 1215,
+                strand unknown,
+                id local str "Subject_1"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_1"
+            },
+            loc {
+              int {
+                from 2048,
+                to 2056,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 1216,
+                to 1218,
+                strand unknown,
+                id local str "Subject_1"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_1"
+            },
+            loc {
+              int {
+                from 2057,
+                to 2062,
+                strand plus,
+                id local str "Query_1"
+              },
+              empty local str "Subject_1"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_1"
+            },
+            loc {
+              int {
+                from 2063,
+                to 2113,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 1219,
+                to 1235,
+                strand unknown,
+                id local str "Subject_1"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_1"
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 1236,
+                to 1239,
+                strand unknown,
+                id local str "Subject_1"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_1"
+            },
+            loc {
+              int {
+                from 2114,
+                to 2170,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 1240,
+                to 1258,
+                strand unknown,
+                id local str "Subject_1"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_1"
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 1259,
+                to 1260,
+                strand unknown,
+                id local str "Subject_1"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_1"
+            },
+            loc {
+              int {
+                from 2171,
+                to 2227,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 1261,
+                to 1279,
+                strand unknown,
+                id local str "Subject_1"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_1"
+            },
+            loc {
+              int {
+                from 2228,
+                to 2236,
+                strand plus,
+                id local str "Query_1"
+              },
+              empty local str "Subject_1"
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_1"
+            },
+            loc {
+              int {
+                from 2237,
+                to 2266,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 1280,
+                to 1289,
+                strand unknown,
+                id local str "Subject_1"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 41
+          },
+          {
+            id str "blast_score",
+            value int 41
+          },
+          {
+            id str "e_value",
+            value real { 282538610230145, 10, -15 }
+          },
+          {
+            id str "bit_score",
+            value real { 204014148926555, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 15
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 24
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 148283582089552, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_1"
+            },
+            loc {
+              int {
+                from 1691,
+                to 1750,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 1245,
+                to 1264,
+                strand unknown,
+                id local str "Subject_1"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_1"
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 1265,
+                to 1265,
+                strand unknown,
+                id local str "Subject_1"
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_1"
+            },
+            loc {
+              int {
+                from 1751,
+                to 1834,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 1266,
+                to 1293,
+                strand unknown,
+                id local str "Subject_1"
+              }
+            }
+          }
+        }
+      }
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 1500,
+              to 1533,
+              id local str "Query_1"
+            },
+            {
+              from 1695,
+              to 1728,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame plus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 2074,
+              to 2128,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 1625,
+              to 1658,
+              id local str "Query_1"
+            },
+            {
+              from 1970,
+              to 2003,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 2244,
+              to 2270,
+              id local str "Query_1"
+            },
+            {
+              from 1719,
+              to 1748,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 1775,
+              to 1807,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 1972,
+              to 2004,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame minus3
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 317605957635731, 10, -15 },
+        k { 133956144488482, 10, -15 },
+        h { 401214524497119, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 373032",
+      "Effective search space used: 373032",
+      "Length adjustment: 38"
+    }
+  }
+}

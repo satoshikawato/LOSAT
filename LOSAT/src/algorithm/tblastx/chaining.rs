@@ -1,35 +1,6 @@
-//! HSP chaining and filtering for TBLASTX
+//! Ungapped HSP record of TBLASTX
 //!
-//! This module handles clustering, chaining, and filtering of HSPs (High-Scoring Pairs)
-//! for protein/translated sequences.
-
-use crate::common::Hit;
-use crate::stats::KarlinParams;
-use rustc_hash::FxHashMap;
-use std::cmp::Ordering;
-use std::sync::atomic::Ordering as AtomicOrdering;
-// Removed MAX_DIAG_DRIFT_AA and MAX_GAP_AA - clustering logic removed (not in NCBI)
-use super::diagnostics::DiagnosticCounters;
-
-/// Extended hit structure that includes frame and amino acid coordinate information
-/// for HSP chaining. This is used internally during chaining and then converted
-/// back to regular Hit for output.
-#[derive(Debug, Clone)]
-pub struct ExtendedHit {
-    pub hit: Hit,
-    /// Raw alignment score (ungapped or gapped) used for sum-statistics linking.
-    /// This corresponds to NCBI `BlastHSP.score`.
-    pub raw_score: i32,
-    pub q_frame: i8,
-    pub s_frame: i8,
-    pub q_aa_start: usize,
-    pub q_aa_end: usize,
-    pub s_aa_start: usize,
-    pub s_aa_end: usize,
-    pub q_orig_len: usize,
-    pub s_orig_len: usize,
-    pub from_gapped: bool,
-}
+//! `UngappedHit` is the lightweight HSP the scan, the linking and the report steps pass around.
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:96-101,126-128,133,158
 // ```c
@@ -157,202 +128,58 @@ pub struct UngappedHit {
     pub num: i32,
 }
 
-/// Sequence data for re-alignment during HSP chaining
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:170-173 (in `Blast_HSPInit`,
+// called by `BLAST_GetUngappedHSPList`, blast_gapalign.c:4760-4767)
 // ```c
-// typedef struct BlastHSPList {
-//    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-//    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
-//                       Set to 0 if not applicable */
-//    BlastHSP** hsp_array; /**< Array of pointers to individual HSPs */
-//    Int4 hspcnt; /**< Number of HSPs saved */
-//    ...
-// } BlastHSPList;
+//    new_hsp->query.offset = query_start;
+//    new_hsp->subject.offset = subject_start;
+//    new_hsp->query.end = query_end;
+//    new_hsp->subject.end = subject_end;
 // ```
-pub type SequenceKey = (u32, u32, i8, i8); // (q_idx, s_idx, q_frame, s_frame)
-pub type SequenceData = (Vec<u8>, Vec<u8>); // (query_aa_seq, subject_aa_seq)
-
-/// NCBI BLAST-style HSP domination test.
-/// Based on s_DominateTest() from hspfilter_culling.c (lines 79-120).
-///
-/// Returns true if `p` dominates `y`, meaning `y` should be culled.
-///
-/// Key criteria:
-/// 1. HSPs must be in the same frame combination (critical for TBLASTX)
-/// 2. Overlap must be > 50% of the candidate HSP's length
-/// 3. Main criterion: weighted score/length comparison
-///    d = 4*s1*l1 + 2*s1*l2 - 2*s2*l1 - 4*s2*l2
-///    If d > 0, p dominates y
-fn hsp_dominates(p: &ExtendedHit, y: &ExtendedHit) -> bool {
-    // Critical: Only compare HSPs within the same frame combination
-    // Without this check, HSPs from different frames would incorrectly dominate each other
-    if p.q_frame != y.q_frame || p.s_frame != y.s_frame {
-        return false;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1054,1083 (in
+// `s_BlastAaExtendOneHit`)
+// ```c
+//     init_hit_width = q_right_off - q_left_off + 1;
+// ...
+//     *hsp_len = left_disp + right_disp + init_hit_width;
+// ```
+// No NCBI counterpart: where LOSAT keeps the `Int4` ends of an HSP whose length is 0 or negative.
+// The one-hit word finder of TBLASTX (`-window_size 0`) can save such an HSP (a word whose
+// running sum is reset after its best part), and NCBI's `end = offset + length` is then at or
+// before the offset, and below 0 near a frame's start. The fields `q_aa_end` and `s_aa_end` hold
+// that `Int4` in two's complement; a positive length leaves every end non-negative, where the
+// `Int4` and the `u32` are the same number. These methods are the one reader and writer of the
+// `Int4` ends: the one-hit path (`blast_gapalign::get_ungapped_hsp_list_int4`, the chunk offsets
+// and merge of `blast_engine/run_impl.rs`, the first linking call of `subject_link.rs`) uses them
+// from the conversion of such an HSP until the HSPs of length 0 or less are dropped right after
+// that linking call, where NCBI's re-evaluation deletes them (a length of 0 or less scores 0,
+// below every cutoff: blast_hits.c:687-699, 449-453). Nothing after that sees such an HSP.
+impl UngappedHit {
+    /// NCBI's `query.end` (`Int4`).
+    #[inline]
+    pub(crate) fn q_end_int4(&self) -> i32 {
+        self.q_aa_end as i32
     }
 
-    // Must be same query-subject pair
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
-    // ```c
-    // typedef struct BlastHSPList {
-    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
-    //                       Set to 0 if not applicable */
-    // } BlastHSPList;
-    // ```
-    if p.hit.q_idx != y.hit.q_idx || p.hit.s_idx != y.hit.s_idx {
-        return false;
+    /// NCBI's `subject.end` (`Int4`).
+    #[inline]
+    pub(crate) fn s_end_int4(&self) -> i32 {
+        self.s_aa_end as i32
     }
 
-    // Normalize coordinates to plus strand (like NCBI BLAST's LinkedHSP.begin/end)
-    // For reverse-strand hits, q_start > q_end, so we use min/max to ensure b < e
-    let b1 = p.hit.q_start.min(p.hit.q_end) as i64;
-    let e1 = p.hit.q_start.max(p.hit.q_end) as i64;
-    let b2 = y.hit.q_start.min(y.hit.q_end) as i64;
-    let e2 = y.hit.q_start.max(y.hit.q_end) as i64;
-
-    let l1 = e1 - b1;
-    let l2 = e2 - b2;
-
-    // Calculate overlap
-    let overlap = e1.min(e2) - b1.max(b2);
-
-    // If not overlap by more than 50% of candidate's length, don't dominate
-    if 2 * overlap < l2 {
-        return false;
+    /// Sets NCBI's `query.end` and `subject.end` (`Int4`).
+    #[inline]
+    pub(crate) fn set_int4_ends(&mut self, q_end: i32, s_end: i32) {
+        self.q_aa_end = q_end as u32;
+        self.s_aa_end = s_end as u32;
     }
 
-    // Use bit_score as the score metric (higher is better)
-    let s1 = (p.hit.bit_score * 100.0) as i64;
-    let s2 = (y.hit.bit_score * 100.0) as i64;
-
-    // Main criterion: 2 * (%diff in score) + 1 * (%diff in length)
-    // Formula: d = 4*s1*l1 + 2*s1*l2 - 2*s2*l1 - 4*s2*l2
-    let d = 4 * s1 * l1 + 2 * s1 * l2 - 2 * s2 * l1 - 4 * s2 * l2;
-
-    // Tie-breaker for identical HSPs
-    if (s1 == s2 && b1 == b2 && l1 == l2) || d == 0 {
-        if s1 != s2 {
-            return s1 > s2;
-        }
-        // Use subject start as tie-breaker (like NCBI uses OID/subject.offset)
-        return p.hit.s_start < y.hit.s_start;
+    /// Whether the HSP's length (`query.end - query.offset`, the subject's being the same) is 0
+    /// or less.
+    #[inline]
+    pub(crate) fn is_int4_inverted(&self) -> bool {
+        self.q_end_int4() <= self.q_aa_start as i32
     }
-
-    d > 0
-}
-
-/// Chain and filter HSPs for protein/translated sequences.
-///
-/// This implements a cluster-then-extend approach similar to BLASTN:
-/// 1. Groups HSPs by query-subject pair AND frame combination
-/// 2. Clusters nearby HSPs on similar diagonals
-/// 3. Re-runs gapped alignment on merged regions to get accurate statistics
-/// 4. Filters redundant overlapping hits
-/// 5. Applies e-value threshold to filter insignificant hits
-pub fn chain_and_filter_hsps_protein(
-    mut hits: Vec<ExtendedHit>,
-    _sequences: &FxHashMap<SequenceKey, SequenceData>,
-    _db_len_aa_total: usize,
-    _params: &KarlinParams,
-    evalue_threshold: f64,
-    diagnostics: Option<&DiagnosticCounters>,
-) -> Vec<Hit> {
-    if hits.is_empty() {
-        return Vec::new();
-    }
-
-    // Record HSPs before chaining
-    let hsps_before = hits.len();
-    if let Some(diag) = diagnostics {
-        diag.base
-            .hsps_before_chain
-            .store(hsps_before, AtomicOrdering::Relaxed);
-    }
-
-    // Group hits by query-subject pair AND frame combination
-    let mut groups: FxHashMap<SequenceKey, Vec<ExtendedHit>> = FxHashMap::default();
-    for hit in hits.drain(..) {
-        let key = (hit.hit.q_idx, hit.hit.s_idx, hit.q_frame, hit.s_frame);
-        groups.entry(key).or_default().push(hit);
-    }
-
-    let mut result_hits = Vec::new();
-
-    // NCBI BLAST does NOT perform clustering for tblastx.
-    // This function is kept for compatibility but simply passes through HSPs
-    // after e-value filtering, matching NCBI's default behavior.
-    //
-    // NCBI reference: tblastx uses ungapped search only, no clustering/chaining
-    // is performed. HSPs are output directly after sum-statistics linking.
-    for (_key, mut group_hits) in groups {
-        if group_hits.is_empty() {
-            continue;
-        }
-
-        // Output all HSPs that pass e-value threshold (no clustering)
-        for ext_hit in group_hits {
-            // NCBI blast_hits.c:1996: `if (hsp->evalue > cutoff)` removes the HSP, so a NaN
-            // cutoff keeps it.
-            if !(ext_hit.hit.e_value > evalue_threshold) {
-                result_hits.push(ext_hit);
-            }
-        }
-    }
-
-    // Record HSPs after chaining (before domination filter)
-    if let Some(diag) = diagnostics {
-        diag.base
-            .hsps_after_chain
-            .store(result_hits.len(), AtomicOrdering::Relaxed);
-    }
-
-    // Sort by bit score (highest first) for domination filtering
-    result_hits.sort_by(|a, b| {
-        b.hit
-            .bit_score
-            .partial_cmp(&a.hit.bit_score)
-            .unwrap_or(Ordering::Equal)
-    });
-
-    // NCBI BLAST does not apply HSP culling for TBLASTX by default
-    // (see blast_options.c: "Gapped search is not allowed for tblastx")
-    // Skip domination filter to match NCBI BLAST behavior
-    let filtered_hits = result_hits;
-
-    // Record culled HSPs (always 0 since culling is disabled)
-    if let Some(diag) = diagnostics {
-        diag.base
-            .hsps_culled_dominated
-            .store(0, AtomicOrdering::Relaxed);
-    }
-
-    // Count output sources and convert to Hit
-    let mut output_from_ungapped = 0usize;
-    let mut output_from_gapped = 0usize;
-    let final_hits: Vec<Hit> = filtered_hits
-        .into_iter()
-        .map(|ext_hit| {
-            if ext_hit.from_gapped {
-                output_from_gapped += 1;
-            } else {
-                output_from_ungapped += 1;
-            }
-            ext_hit.hit
-        })
-        .collect();
-
-    // Record output source counts and final hits
-    if let Some(diag) = diagnostics {
-        diag.output_from_ungapped
-            .store(output_from_ungapped, AtomicOrdering::Relaxed);
-        diag.output_from_gapped
-            .store(output_from_gapped, AtomicOrdering::Relaxed);
-        diag.base
-            .hsps_after_overlap_filter
-            .store(final_hits.len(), AtomicOrdering::Relaxed);
-    }
-
-    final_hits
 }
 
 #[cfg(test)]

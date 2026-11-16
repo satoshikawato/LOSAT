@@ -1,5 +1,3 @@
-#![allow(warnings, clippy::all)]
-
 //! BLAST XML (outfmt 5) of BLASTP and BLASTN when no query is formatted (an empty standard
 //! input as the query): NCBI writes the epilog's end of line alone, one newline.
 //!
@@ -13,22 +11,23 @@
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+mod temp_support;
+use temp_support::{Finished, TempFile};
+
 const PROTEIN_SUBJECT: &[u8] =
     b">s1 subject\nMWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPK\n";
 const NUCLEOTIDE_SUBJECT: &[u8] =
     b">s1 subject\nATGGCTAGCTAGGATCCGATCGATTTAGGCTAGCTAGGCTAATCGGATCGATCGGGATCGATTAGCCTAGG\n";
 
-fn run_with_empty_stdin(args: &[&str]) -> std::process::Output {
+fn run_with_empty_stdin(args: &[&str]) -> Finished<std::process::Output, TempFile> {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") {
             command.env_remove(name);
         }
     }
-    command.env(
-        "LOSAT_BLASTX_WORKER_LOG",
-        std::env::temp_dir().join("losat_outfmt5_worker.log"),
-    );
+    let log = TempFile::keep_on_failure("losat_outfmt5_worker", "worker.log");
+    command.env("LOSAT_BLASTX_WORKER_LOG", &log);
     let mut child = command
         .args(args)
         .stdin(Stdio::piped())
@@ -37,7 +36,7 @@ fn run_with_empty_stdin(args: &[&str]) -> std::process::Output {
         .spawn()
         .expect("run LOSAT");
     drop(child.stdin.take());
-    child.wait_with_output().expect("wait for LOSAT")
+    Finished::new(child.wait_with_output().expect("wait for LOSAT"), log)
 }
 
 #[test]
@@ -56,7 +55,7 @@ fn an_empty_query_input_writes_one_newline() {
             ["-subject", subject_path.to_str().unwrap()],
             ["-db", db_path.to_str().unwrap()],
         ] {
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let mut args = vec![
                     program,
                     "-query",
@@ -104,7 +103,7 @@ fn an_empty_query_pipe_writes_one_newline_for_tblastn_and_tblastx() {
         ("tblastx", &[]),
     ];
     for (program, extra) in cases {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let mut args = vec![
                 program,
                 "-query",

@@ -4,8 +4,8 @@
 //!
 //! This file is a child module of `x_lut_direct.rs` (declared there with `#[path]`, as that file
 //! is for `backbone.rs`), so it uses the neighbour lists of the in-place builder (`x_target_list`,
-//! the per-thread memo) and the reference builder pieces of `backbone.rs` (`prepare_lookup_query`,
-//! `blast_lookup_index_query_exact_matches`) without changing them.
+//! the memos of TBLASTX's builds, `X_TBX_MEMOS`) and the reference builder pieces of `backbone.rs`
+//! (`prepare_lookup_query`, `blast_lookup_index_query_exact_matches`) without changing them.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:92-94,105-115
 //! ```c
@@ -114,7 +114,7 @@
 //!    from the full table. The stub's `longest_chain` is the maximum over the cells of the summed
 //!    group counts: the groups partition every full chain, so this is the full table's value.
 //!
-//! Corner cases: threshold 0 (T(s) = [s], no neighbours) and a threshold of INT_MIN (every word
+//! Corner cases: threshold 0 (T(s) = \[s\], no neighbours) and a threshold of INT_MIN (every word
 //! is a neighbour) are `x_target_list`'s cases, unchanged; a group without a location (contexts
 //! shorter than a word, or fully masked) has an empty exact backbone and an all-zero table, as the
 //! filter of the full table has; with more than `X_MAX_GROUPS` contexts a group holds several
@@ -125,6 +125,11 @@
 //! `x_assert_same_contexts`).
 
 use super::*;
+
+// SC10b PR-3: the group tables of words whose backbone index does not fit 16 bits (`-word_size 4`),
+// built for all groups at once with 32-bit indices on the search pool (`x_build_tables_wide`).
+#[path = "x_pair_lut_wide.rs"]
+pub(crate) mod x_pair_lut_wide;
 
 /// The prepared query of one batch (the reference `prepare_lookup_query`) with the settings of
 /// its lookup table.
@@ -142,9 +147,72 @@ pub(crate) struct XPairLutQuery {
 
 /// One direct group table with the bounds of its entries.
 pub(crate) struct XPairLutGroup {
+    /// With `rank` not empty, a compacted table (`x_scan_bf::x_compact`): its backbone holds only
+    /// the cells with entries.
     pub table: BlastAaLookupTable,
     pub q_min: u32,
     pub q_max: u32,
+    /// The presence-vector rank of a compacted table (`x_scan_bf::x_rank`), else empty.
+    pub rank: Vec<u32>,
+}
+
+/// No NCBI counterpart: a block of a group's build from which glibc maps it (`x_group_capacity`).
+const X_GROUP_MAPPED_FROM: usize = 64 << 10;
+
+/// No NCBI counterpart: the capacity of a block of `elements` of a group's build. Batches are built
+/// and searched on the pool's threads at several threads, and blocks of 100 KiB to 1.5 MiB that
+/// stay in those threads' arenas between the kept tables hold their heaps' high water: 50 cDNAs x
+/// 1 Mb and 40 x 40 Begomovirus genomes at 8 threads, the arenas 17-23 MiB, with one arena (the
+/// same live data) a max RSS below that of the reference loop. So a block of at least
+/// `X_GROUP_MAPPED_FROM` bytes takes the capacity that glibc maps whatever its size and whose free
+/// leaves its mmap threshold as it is (`x_unthresholded_capacity`, as TBLASTN's tables,
+/// x_lut_direct.rs); only what is written is touched.
+fn x_group_capacity<T>(elements: usize, mapped: bool) -> usize {
+    let size = std::mem::size_of::<T>();
+    if mapped && elements.saturating_mul(size) >= X_GROUP_MAPPED_FROM {
+        crate::utils::x_mapped::x_unthresholded_capacity(elements, size)
+    } else {
+        elements
+    }
+}
+
+/// No NCBI counterpart: `vec![0; elements]` with `x_group_capacity`; `calloc` touches none of a
+/// mapped block.
+fn x_group_zeroed<T: Copy + Default>(elements: usize, mapped: bool) -> Vec<T> {
+    let mut zeroed = vec![T::default(); x_group_capacity::<T>(elements, mapped)];
+    zeroed.truncate(elements);
+    zeroed
+}
+
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:103-105
+// (ComputeTableIndex: `wordsize` letters of `charsize` bits)
+// ```c
+//   for(i = 0; i < wordsize; i++) {
+//     index = (index << charsize) | word[i];
+//   }
+// ```
+// The precondition of the direct builders (`x_build_direct`, `x_build_group`): their neighbour
+// lists hold backbone indices in 16 bits (`x_target_list`), so the index of a word, `word_length`
+// letters of `charsize` bits (5 for the 28 letters), must fit 16 bits: words of 2 and 3 letters
+// (10 and 15 bits), not of 4 (20 bits). Words of 4 letters take the joint builder of 32-bit
+// indices instead (`x_pair_lut_wide.rs`, `x_tables_cover`), so that the unit path's group tables
+// are built from the query and not filtered out of a full table (`build_groups`).
+/// Whether the direct builder takes a table of `word_length`-letter words: their backbone index
+/// fits 16 bits.
+#[inline(always)]
+pub(crate) const fn x_direct_covers(word_length: usize) -> bool {
+    let charsize = LOOKUP_ALPHABET_SIZE.ilog2() as usize + 1;
+    word_length * charsize <= 16 && word_length <= 32
+}
+
+// No NCBI counterpart: which builder makes the unit path's group tables (the tables are the same
+// either way, module comment).
+/// Whether the unit path builds the group tables of `word_length`-letter words from the query:
+/// the 16-bit direct builder (`x_direct_covers`: 2 and 3 letters) or the joint builder of 32-bit
+/// indices (`x_pair_lut_wide::x_wide_covers`: 4 letters).
+#[inline(always)]
+pub(crate) const fn x_tables_cover(word_length: usize) -> bool {
+    x_direct_covers(word_length) || x_pair_lut_wide::x_wide_covers(word_length)
 }
 
 impl XPairLutQuery {
@@ -167,11 +235,28 @@ impl XPairLutQuery {
         threshold: i32,
         check_ideal: bool,
     ) -> Option<Self> {
-        let matrix = ScoringMatrix::Blosum62;
-        let word_length = LOOKUP_WORD_LENGTH;
-        let alphabet_size = LOOKUP_ALPHABET_SIZE;
-        let charsize = ilog2(alphabet_size) + 1;
-        if diagnostics_enabled() || word_length * charsize > 16 || word_length > 32 {
+        Self::x_prepare_for(
+            queries,
+            threshold,
+            check_ideal,
+            ScoringMatrix::Blosum62,
+            LOOKUP_WORD_LENGTH,
+        )
+    }
+
+    /// `x_prepare` with the scores of `matrix` (`-matrix`) and words of `word_length` letters
+    /// (`-word_size`): the query preparation of `build_ncbi_lookup_for_profile(queries, threshold,
+    /// _, check_ideal, matrix, word_length)`. `None` also for a word length whose backbone index
+    /// neither builder covers (`x_tables_cover`).
+    #[inline(always)]
+    pub(crate) fn x_prepare_for(
+        queries: &[Vec<QueryFrame>],
+        threshold: i32,
+        check_ideal: bool,
+        matrix: ScoringMatrix,
+        word_length: usize,
+    ) -> Option<Self> {
+        if diagnostics_enabled() || !x_tables_cover(word_length) {
             return None;
         }
         // Same expressions as build_ncbi_lookup_for_profile.
@@ -189,13 +274,31 @@ impl XPairLutQuery {
             matrix,
             bounds,
         );
-        // Same expression as build_lookup_from_prepared (BLAST_SequenceBlk length).
+        Some(Self::x_from_prepared(
+            prepared,
+            threshold,
+            matrix,
+            word_length,
+        ))
+    }
+
+    /// The query of `build_lookup_from_prepared(prepared, threshold, matrix, word_length)`: the
+    /// lookup query `prepared` with the scores of `matrix` and words of `word_length` letters, as
+    /// `x_prepare_for` makes it for TBLASTX and `blastx::seed::Lookup` hands it over for BLASTX's
+    /// table of 4-letter words (`x_build_full_wide`, item SC9 of line NP).
+    pub(in super::super) fn x_from_prepared(
+        prepared: PreparedLookupQuery,
+        threshold: i32,
+        matrix: ScoringMatrix,
+        word_length: usize,
+    ) -> Self {
+        let alphabet_size = LOOKUP_ALPHABET_SIZE;
+        // The expressions of `build_lookup_from_prepared`.
         let query_length = prepared
             .contexts
             .last()
             .map(|ctx| ctx.frame_base + ctx.aa_len as i32)
             .unwrap_or(0);
-        // Same expression as build_lookup_from_prepared (blast_aalookup.c:438-444).
         let row_max: Vec<i32> = (0..alphabet_size)
             .map(|i| {
                 (0..alphabet_size)
@@ -204,19 +307,24 @@ impl XPairLutQuery {
                     .unwrap_or(i32::MIN)
             })
             .collect();
-        Some(Self {
+        Self {
             prepared,
             threshold,
             matrix,
             word_length,
             query_length,
             row_max,
-        })
+        }
     }
 
     /// The query contexts (those `build_ncbi_lookup` returns with its table).
     pub(crate) fn contexts(&self) -> &[QueryContext] {
         &self.prepared.contexts
+    }
+
+    /// The word length of the tables built from this query (`lookup->word_length`).
+    pub(crate) fn word_length(&self) -> usize {
+        self.word_length
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1045-1056
@@ -311,10 +419,11 @@ impl XPairLutQuery {
     // ```
     // The count, layout and fill passes of `x_lut_direct.rs::x_build_direct` on the reference
     // exact backbone of `locations` (one group's lookup locations), reading the prepared query in
-    // place. The neighbour lists come from the calling thread's memo, as there.
+    // place. The neighbour lists come from a memo of TBLASTX's builds (`x_with_tbx_memo`).
     /// The lookup table of one group: the table `build_groups` filters out of the full table for
     /// the group whose lookup locations are `locations` (module comment).
-    pub(crate) fn x_build_group(&self, locations: &[(i32, i32)]) -> XPairLutGroup {
+    /// `mapped`: the build's large blocks take `x_group_capacity`'s mapped capacity.
+    pub(crate) fn x_build_group(&self, locations: &[(i32, i32)], mapped: bool) -> XPairLutGroup {
         let threshold = self.threshold;
         let matrix = self.matrix;
         let word_length = self.word_length;
@@ -337,8 +446,7 @@ impl XPairLutQuery {
             &mut skipped_invalid_residue,
         );
 
-        X_MEMO.with(|memo| {
-            let mut memo = memo.borrow_mut();
+        x_with_tbx_memo(|memo| {
             let key = (matrix, threshold, word_length, alphabet_size);
             if memo
                 .as_ref()
@@ -356,7 +464,7 @@ impl XPairLutQuery {
             // Count pass: count[w] = number of appends the reference makes to cell w from the
             // source words of this group. The bounds of the entries are taken on the way: every
             // offset of a source word with a target is an entry of the table.
-            let mut counts: Vec<u32> = vec![0; backbone_size];
+            let mut counts: Vec<u32> = x_group_zeroed(backbone_size, mapped);
             let mut q_min = u32::MAX;
             let mut q_max = 0u32;
             for idx in 0..backbone_size {
@@ -389,8 +497,23 @@ impl XPairLutQuery {
                 }
             }
 
-            // Layout: BlastAaLookupFinalize's rule applied to the counts.
-            let mut backbone: Vec<BackboneCell> = vec![BackboneCell::default(); backbone_size];
+            // Layout: BlastAaLookupFinalize's rule applied to the counts. A table the branch-free
+            // scan takes (`x_scan_bf_takes`, as `XGroup::new` decides for a table of the full
+            // backbone) is laid out compacted (`x_scan_bf::x_compact`): its backbone holds the cells
+            // with entries in index order, cell w at `slot[w]`; the entries, the overflow array and
+            // the presence vector are those of the full layout.
+            let used = counts.iter().filter(|&&count| count > 0).count();
+            let compact =
+                crate::algorithm::tblastx::x_scan_bf::x_scan_bf_takes(used, backbone_size);
+            let backbone_len = if compact { used } else { backbone_size };
+            let mut backbone: Vec<BackboneCell> =
+                Vec::with_capacity(x_group_capacity::<BackboneCell>(backbone_len, mapped));
+            backbone.resize(backbone_len, BackboneCell::default());
+            let mut slot: Vec<u32> = if compact {
+                x_group_zeroed(backbone_size, mapped)
+            } else {
+                Vec::new()
+            };
             let pv_size = (backbone_size >> PV_ARRAY_BTS) + 1;
             let mut pv: Vec<u32> = vec![0u32; pv_size];
             let mut overflow_size = 0usize;
@@ -403,24 +526,36 @@ impl XPairLutQuery {
                     longest_chain = count as i32;
                 }
             }
-            let mut overflow: Vec<i32> = vec![0; overflow_size];
-            let mut base: Vec<u32> = vec![0; backbone_size];
+            let mut overflow: Vec<i32> =
+                Vec::with_capacity(x_group_capacity::<i32>(overflow_size, mapped));
+            overflow.resize(overflow_size, 0);
+            // Where the fill pass writes each cell's next offset: 0 in the cell, the start of its
+            // run in the overflow array (a `usize`: a position of an array of 2^32 entries or
+            // more, which a `u32` wrapped).
+            let mut next: Vec<usize> = x_group_zeroed(backbone_size, mapped);
             let mut overflow_cursor = 0usize;
+            let mut kept = 0usize;
             for (idx, &count) in counts.iter().enumerate() {
                 if count == 0 {
                     continue;
                 }
                 pv_set(&mut pv, idx);
-                backbone[idx].num_used = count as i32;
+                let at = if compact {
+                    slot[idx] = kept as u32;
+                    kept += 1;
+                    kept - 1
+                } else {
+                    idx
+                };
+                backbone[at].num_used = count as i32;
                 if count as usize > AA_HITS_PER_CELL {
-                    backbone[idx].entries[0] = overflow_cursor as i32;
-                    base[idx] = overflow_cursor as u32;
+                    backbone[at].set_cursor(overflow_cursor);
+                    next[idx] = overflow_cursor;
                     overflow_cursor += count as usize;
                 }
             }
 
             // Fill pass: the reference's appends of this group, in the reference's order.
-            let mut fill: Vec<u32> = vec![0; backbone_size];
             for idx in 0..backbone_size {
                 let Some(offset_list) = exact_backbone[idx].as_deref() else {
                     continue;
@@ -430,20 +565,26 @@ impl XPairLutQuery {
                 let list = lists[idx].as_deref().expect("listed in the count pass");
                 for &w in list {
                     let w = w as usize;
-                    let at = fill[w] as usize;
+                    let at = next[w];
                     if counts[w] as usize <= AA_HITS_PER_CELL {
-                        backbone[w].entries[at..at + offsets.len()].copy_from_slice(offsets);
+                        let cell = if compact { slot[w] as usize } else { w };
+                        backbone[cell].entries[at..at + offsets.len()].copy_from_slice(offsets);
                     } else {
-                        let start = base[w] as usize + at;
-                        overflow[start..start + offsets.len()].copy_from_slice(offsets);
+                        overflow[at..at + offsets.len()].copy_from_slice(offsets);
                     }
-                    fill[w] += offsets.len() as u32;
+                    next[w] += offsets.len();
                 }
             }
 
+            let rank = if compact {
+                crate::algorithm::tblastx::x_scan_bf::x_rank(&pv)
+            } else {
+                Vec::new()
+            };
             XPairLutGroup {
                 q_min: if longest_chain > 0 { q_min } else { 0 },
                 q_max,
+                rank,
                 table: BlastAaLookupTable {
                     backbone,
                     overflow,
@@ -481,11 +622,12 @@ impl XPairLutQuery {
     // The table the reference code holds when the unit path scans with the group tables only: the
     // header fields of the full table (expressions of `build_lookup_from_prepared`; the full
     // chain of a cell is the union of its group chains, so `longest_chain` is the largest summed
-    // count) over an all-zero backbone and presence vector of the normal size and no overflow
-    // array. A scan of it finds nothing and reads nothing out of bounds; `x_pair_par.rs` and the
-    // per-subject dispatch make sure it is never scanned.
+    // count) over an all-zero presence vector of the normal size, no backbone cells and no
+    // overflow array. A scan of it tests presence bits only, finds nothing and reads nothing out
+    // of bounds; `x_pair_par.rs` and the per-subject dispatch make sure it is never scanned.
     /// The stub of the full table (no entries) and the contexts `build_ncbi_lookup` returns.
-    /// `groups` are the tables of every group of this query.
+    /// `groups` are the tables of every group of this query, of the full backbone or compacted
+    /// (`x_scan_bf::x_compact`).
     pub(crate) fn x_into_stub<'a>(
         self,
         groups: impl Iterator<Item = &'a BlastAaLookupTable>,
@@ -497,9 +639,8 @@ impl XPairLutQuery {
         let backbone_size = compute_backbone_size(word_length, alphabet_size, charsize);
         let mut totals: Vec<i64> = vec![0; backbone_size];
         for table in groups {
-            assert_eq!(table.backbone.len(), backbone_size, "group backbone size");
-            for (total, cell) in totals.iter_mut().zip(&table.backbone) {
-                *total += i64::from(cell.num_used);
+            for (index, cell) in x_cells_with_entries(table, backbone_size) {
+                totals[index] += i64::from(cell.num_used);
             }
         }
         let longest_chain = i32::try_from(totals.iter().copied().max().unwrap_or(0))
@@ -513,7 +654,7 @@ impl XPairLutQuery {
         } = self.prepared;
         (
             BlastAaLookupTable {
-                backbone: vec![BackboneCell::default(); backbone_size],
+                backbone: Vec::new(),
                 overflow: Vec::new(),
                 pv: vec![0u32; (backbone_size >> PV_ARRAY_BTS) + 1],
                 frame_bases,
@@ -530,6 +671,32 @@ impl XPairLutQuery {
             contexts,
         )
     }
+}
+
+// No NCBI counterpart: reads a group table of the unit path in either layout (`x_into_stub`).
+/// The cells with entries of `table`, with their indices, in index order: cell `i` of a table of
+/// `backbone_size` cells, or, for a compacted table (`x_scan_bf::x_compact`), its `k`-th kept
+/// cell for its `k`-th set presence bit.
+pub(crate) fn x_cells_with_entries(
+    table: &BlastAaLookupTable,
+    backbone_size: usize,
+) -> impl Iterator<Item = (usize, &BackboneCell)> + '_ {
+    let full = table.backbone.len() == backbone_size;
+    assert!(
+        full || table.backbone.len() < backbone_size,
+        "group backbone size"
+    );
+    table
+        .pv
+        .iter()
+        .enumerate()
+        .flat_map(|(word, &bits)| {
+            (0..32usize)
+                .filter(move |bit| (bits >> bit) & 1 != 0)
+                .map(move |bit| (word << PV_ARRAY_BTS) | bit)
+        })
+        .enumerate()
+        .map(move |(k, index)| (index, &table.backbone[if full { index } else { k }]))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:343-346,351-354
@@ -639,10 +806,10 @@ fn x_assert_same_header(
 //          ((BlastAaLookupTable*)lookup->lut)->longest_chain;
 // ```
 // No computation: the stub must carry the values the reference code reads from the full table
-// (`longest_chain` for the offset-pair array, the header for the context search) and the full
-// table's array sizes with no entry.
+// (`longest_chain` for the offset-pair array, the header for the context search), the full
+// table's presence-vector size and no entry.
 /// Assert that the stub has the full table's header fields and `longest_chain`, the full table's
-/// backbone and pv sizes, and no entry.
+/// pv size with no bit set, no backbone cell and no overflow entry.
 #[cfg(test)]
 pub(crate) fn x_assert_stub_scalars(stub: &BlastAaLookupTable, full: &BlastAaLookupTable) {
     x_assert_same_header("stub", 0, stub, full);
@@ -650,17 +817,15 @@ pub(crate) fn x_assert_stub_scalars(stub: &BlastAaLookupTable, full: &BlastAaLoo
         stub.longest_chain, full.longest_chain,
         "stub: longest_chain differs from the full table"
     );
-    assert!(
-        stub.backbone.len() == full.backbone.len() && stub.pv.len() == full.pv.len(),
-        "stub: backbone or pv size differs from the full table"
+    assert_eq!(
+        stub.pv.len(),
+        full.pv.len(),
+        "stub: pv size differs from the full table"
     );
     assert!(
         stub.overflow.is_empty()
-            && stub.pv.iter().all(|&word| word == 0)
-            && stub
-                .backbone
-                .iter()
-                .all(|cell| cell.num_used == 0 && cell.entries == [0; AA_HITS_PER_CELL]),
+            && stub.backbone.is_empty()
+            && stub.pv.iter().all(|&word| word == 0),
         "stub: the stub table must have no entry"
     );
 }
@@ -699,7 +864,6 @@ pub(crate) fn x_assert_same_contexts_as(
     for (c, (a, b)) in direct.iter().zip(reference).enumerate() {
         let QueryContext {
             q_idx,
-            f_idx,
             frame,
             aa_seq,
             aa_seq_nomask,
@@ -720,7 +884,6 @@ pub(crate) fn x_assert_same_contexts_as(
         };
         assert!(
             *q_idx == b.q_idx
-                && *f_idx == b.f_idx
                 && *frame == b.frame
                 && *aa_seq == b.aa_seq
                 && *aa_seq_nomask == b.aa_seq_nomask
@@ -782,7 +945,7 @@ mod tests {
             if chain.len() <= AA_HITS_PER_CELL {
                 table.backbone[idx].entries[..chain.len()].copy_from_slice(&chain);
             } else {
-                table.backbone[idx].entries[0] = table.overflow.len() as i32;
+                table.backbone[idx].set_cursor(table.overflow.len());
                 table.overflow.extend_from_slice(&chain);
             }
             table.longest_chain = table.longest_chain.max(chain.len() as i32);
@@ -795,6 +958,7 @@ mod tests {
             q_min: if table.longest_chain > 0 { q_min } else { 0 },
             q_max,
             table,
+            rank: Vec::new(),
         }
     }
 
@@ -820,11 +984,21 @@ mod tests {
             .x_group_locations(&starts)
             .expect("every location inside one group");
         assert_eq!(locations.len(), starts.len());
-        let groups: Vec<XPairLutGroup> = locations.iter().map(|l| q.x_build_group(l)).collect();
+        let groups: Vec<XPairLutGroup> =
+            locations.iter().map(|l| q.x_build_group(l, true)).collect();
         let mut with_entries = 0usize;
         let mut in_overflow = 0usize;
         for (g, direct) in groups.iter().enumerate() {
-            let reference = filtered(&full, &bounds, g);
+            let mut reference = filtered(&full, &bounds, g);
+            // A direct table laid out compacted equals the filtered one compacted.
+            if !direct.rank.is_empty() {
+                let rank = crate::algorithm::tblastx::x_scan_bf::x_compact(&mut reference.table);
+                assert_eq!(direct.rank, rank, "group {g}: rank differs");
+            } else {
+                assert!(!crate::algorithm::tblastx::x_scan_bf::x_scan_bf_choice(
+                    &reference.table
+                ));
+            }
             x_assert_same_group(
                 g,
                 &direct.table,

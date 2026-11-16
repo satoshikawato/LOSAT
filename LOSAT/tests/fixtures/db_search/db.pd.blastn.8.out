@@ -1,0 +1,574 @@
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastn",
+          data int 1
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "nucleotide slices of two viruses",
+          data bool TRUE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 1500
+        },
+        {
+          id str "blast_score",
+          value int 1500
+        },
+        {
+          id str "e_value",
+          value real { 0, 10, 0 }
+        },
+        {
+          id str "bit_score",
+          value real { 277109477274053, 10, -11 }
+        },
+        {
+          id str "num_ident",
+          value int 1500
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 1, 10, 2 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          gi 42,
+          general {
+            db "BL_ORD_ID",
+            tag id 0
+          }
+        },
+        starts {
+          0,
+          2000
+        },
+        lens {
+          1500
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 1123
+        },
+        {
+          id str "blast_score",
+          value int 1123
+        },
+        {
+          id str "e_value",
+          value real { 0, 10, 0 }
+        },
+        {
+          id str "bit_score",
+          value real { 207490785380915, 10, -11 }
+        },
+        {
+          id str "num_ident",
+          value int 1378
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 1, 10, 2 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 9,
+        ids {
+          gi 42,
+          general {
+            db "BL_ORD_ID",
+            tag id 1
+          }
+        },
+        starts {
+          0,
+          2001,
+          -1,
+          2108,
+          107,
+          2109,
+          111,
+          -1,
+          112,
+          2113,
+          -1,
+          3107,
+          1106,
+          3109,
+          -1,
+          3454,
+          1451,
+          3455
+        },
+        lens {
+          107,
+          1,
+          4,
+          1,
+          994,
+          2,
+          345,
+          1,
+          49
+        },
+        strands {
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 603
+        },
+        {
+          id str "blast_score",
+          value int 603
+        },
+        {
+          id str "e_value",
+          value real { 0, 10, 0 }
+        },
+        {
+          id str "bit_score",
+          value real { 111465003459346, 10, -11 }
+        },
+        {
+          id str "num_ident",
+          value int 700
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 500333333333333, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 9,
+        ids {
+          gi 42,
+          general {
+            db "BL_ORD_ID",
+            tag id 2
+          }
+        },
+        starts {
+          757,
+          2000,
+          -1,
+          2006,
+          763,
+          2007,
+          -1,
+          2017,
+          773,
+          2018,
+          -1,
+          2639,
+          1394,
+          2641,
+          1441,
+          -1,
+          1442,
+          2688
+        },
+        lens {
+          6,
+          1,
+          10,
+          1,
+          621,
+          2,
+          47,
+          1,
+          58
+        },
+        strands {
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastn",
+          data int 1
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "nucleotide slices of two viruses",
+          data bool TRUE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 676
+        },
+        {
+          id str "blast_score",
+          value int 676
+        },
+        {
+          id str "e_value",
+          value real { 0, 10, 0 }
+        },
+        {
+          id str "bit_score",
+          value real { 124945545921412, 10, -11 }
+        },
+        {
+          id str "num_ident",
+          value int 766
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 576428571428571, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "q2",
+          general {
+            db "BL_ORD_ID",
+            tag id 3
+          }
+        },
+        starts {
+          0,
+          100
+        },
+        lens {
+          800
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 480
+        },
+        {
+          id str "blast_score",
+          value int 480
+        },
+        {
+          id str "e_value",
+          value real { 0, 10, 0 }
+        },
+        {
+          id str "bit_score",
+          value real { 887512127355897, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 520
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 390714285714286, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "q2",
+          general {
+            db "BL_ORD_ID",
+            tag id 3
+          }
+        },
+        starts {
+          860,
+          960
+        },
+        lens {
+          540
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastn",
+          data int 1
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "nucleotide slices of two viruses",
+          data bool TRUE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 1264
+        },
+        {
+          id str "blast_score",
+          value int 1264
+        },
+        {
+          id str "e_value",
+          value real { 0, 10, 0 }
+        },
+        {
+          id str "bit_score",
+          value real { 233528545478879, 10, -11 }
+        },
+        {
+          id str "num_ident",
+          value int 1757
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 998, 10, -1 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 17,
+        ids {
+          general {
+            db "qdb",
+            tag str "q3"
+          },
+          general {
+            db "BL_ORD_ID",
+            tag id 4
+          }
+        },
+        starts {
+          1638,
+          500,
+          -1,
+          862,
+          1636,
+          863,
+          1635,
+          -1,
+          1540,
+          865,
+          1539,
+          -1,
+          1537,
+          960,
+          -1,
+          962,
+          1035,
+          963,
+          -1,
+          1465,
+          1031,
+          1466,
+          1030,
+          -1,
+          1022,
+          1470,
+          1020,
+          -1,
+          1016,
+          1478,
+          -1,
+          1482,
+          4,
+          1484
+        },
+        lens {
+          362,
+          1,
+          2,
+          1,
+          95,
+          1,
+          2,
+          1,
+          502,
+          1,
+          4,
+          1,
+          8,
+          2,
+          4,
+          2,
+          1012
+        },
+        strands {
+          minus,
+          plus,
+          minus,
+          plus,
+          minus,
+          plus,
+          minus,
+          plus,
+          minus,
+          plus,
+          minus,
+          plus,
+          minus,
+          plus,
+          minus,
+          plus,
+          minus,
+          plus,
+          minus,
+          plus,
+          minus,
+          plus,
+          minus,
+          plus,
+          minus,
+          plus,
+          minus,
+          plus,
+          minus,
+          plus,
+          minus,
+          plus,
+          minus,
+          plus
+        }
+      }
+    }
+  }
+}

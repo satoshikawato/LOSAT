@@ -1,10 +1,11 @@
 // Helpers of the E2E tests that search through the real application (S12, S13): inputs
-// pasted or opened as files, the program, the queue, and the stored outputs of a run as the
+// pasted or opened as files, the program, the runs, and the stored outputs of a run as the
 // results screen's Outputs view shows them.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import { REPOSITORY } from './harness-server';
+import { navigate } from './navigate';
 
 export type Role = 'query' | 'subject';
 
@@ -14,8 +15,8 @@ export const fasta = (path: string): Buffer => readFileSync(join(REPOSITORY, 'LO
 /**
  * Waits until the engine's describe of the chosen program has come (or failed). It comes after
  * the page opens (the Data worker starts its session and loads the serial reactor first: up to
- * a second in Firefox) or the program changes, and its help and task move every control below
- * "Program Selection" down. A click on such a control while it moves is lost: Firefox and
+ * a second in Firefox) or the mode changes, and its help and task move every control below
+ * "Task Selection" down. A click on such a control while it moves is lost: Firefox and
  * WebKit press and release some 20-300 ms apart, Playwright checks the target at the press
  * only, and the release lands on the panel (WF1, losat-baselines/web-flaky-20261016).
  */
@@ -25,7 +26,7 @@ export async function described(page: Page): Promise<void> {
 
 /** Opens the application at its search form, once the form no longer moves (`described`). */
 export async function openSearch(page: Page): Promise<void> {
-  await page.goto('/');
+  await navigate(page, '/');
   await described(page);
 }
 
@@ -57,7 +58,7 @@ export async function openFiles(
   for (let i = 0; i < files.length; i++) await settled(page, role, before + i);
 }
 
-/** Opens the record list of a source (it starts open for a few records). */
+/** Opens the record list of a source (it starts closed). */
 export async function showRecords(page: Page, role: Role, index = 0): Promise<void> {
   await page
     .getByTestId(`${role}-source-${index}`)
@@ -78,14 +79,14 @@ export async function openParameters(page: Page): Promise<void> {
   await expect(page.getByTestId('parameter-form')).toBeVisible();
 }
 
-/** Chooses a task in "Program Selection" (W4b: radio buttons). */
+/** Chooses a task in "Task Selection" (W4b: radio buttons). */
 export async function task(page: Page, value: string): Promise<void> {
   await page.getByTestId(`param-task-${value}`).check();
 }
 
 export async function submit(page: Page): Promise<void> {
   await expect(page.getByTestId('argv-validation')).not.toHaveAttribute('data-state', 'checking');
-  await page.getByTestId('add-to-queue').click();
+  await page.getByTestId('run-losat').click();
 }
 
 /** Waits until run `run` ends, and fails with its error if it ends otherwise than `status`. */
@@ -95,21 +96,37 @@ export async function waitStatus(
   status: 'completed' | 'cancelled' | 'failed',
   timeout = 120_000,
 ): Promise<void> {
-  const element = page.getByTestId(`run-${run}-status`);
-  await expect(element).toHaveText(/^(completed|cancelled|failed)$/, { timeout });
-  const actual = await element.textContent();
+  const option = page.getByTestId(`run-${run}-option`);
+  await expect(option).toHaveAttribute('data-status', /^(completed|cancelled|failed)$/, { timeout });
+  const actual = await option.getAttribute('data-status');
   if (actual !== status) {
-    const error = (await page.getByTestId(`run-${run}-error`).textContent({ timeout: 1000 }).catch(() => null)) ?? '';
+    const error = await runMessage(page, run);
     throw new Error(`run ${run} ended ${actual}, not ${status}: ${error}`);
   }
 }
 
+/** Selects run `run` in the results page's run picker (the page may show no results for it). */
+export async function pickRun(page: Page, run: number): Promise<void> {
+  await page.getByTestId('tab-results').click();
+  // By the option's value (the run's ID), not its label: the label ends in " (running)" until the
+  // run ends, so a label read just before then matched no option, and "several runs" timed out
+  // (CI of #731 and #732; found by the SX line).
+  const value = await page.getByTestId(`run-${run}-option`).getAttribute('value');
+  await page.getByTestId('results-run').selectOption(value!);
+}
+
+/** The text the results page gives for run `run` when it has no results (a failed or cancelled run). */
+export async function runMessage(page: Page, run: number): Promise<string> {
+  await pickRun(page, run);
+  const status = page.getByTestId('results-status');
+  await expect(status).toHaveAttribute('data-phase', 'unavailable');
+  await expect(status).toContainText(`Run ${run} `);
+  return ((await status.textContent()) ?? '').trim();
+}
+
 /** Chooses run `run` in the results tab's run picker and waits until its results are read. */
 export async function chooseRun(page: Page, run: number): Promise<void> {
-  await page.getByTestId('tab-results').click();
-  const select = page.getByTestId('results-run');
-  const label = await select.locator('option', { hasText: new RegExp(`^Run ${run} · `) }).textContent();
-  await select.selectOption({ label: label!.trim() });
+  await pickRun(page, run);
   await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', String(run));
 }
 
@@ -131,4 +148,22 @@ export async function result(page: Page, run: number, format: 0 | 6 | 7): Promis
   const output = (await page.getByTestId('result-output').textContent()) ?? '';
   await page.getByTestId('tab-search').click();
   return { command, output };
+}
+
+/**
+ * The stored outputs of run `run` (outfmt 0, 6 and 7), saved from "Download All" as the bytes the
+ * application stores, and the run's warnings (empty when the engine wrote none).
+ */
+export async function storedOutputs(page: Page, run: number): Promise<{ outputs: Record<0 | 6 | 7, Buffer>; warnings: string }> {
+  await chooseRun(page, run);
+  const outputs: Partial<Record<0 | 6 | 7, Buffer>> = {};
+  for (const format of [0, 6, 7] as const) {
+    await page.getByTestId('results-download-all').click();
+    const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('results-download-menu').getByTestId(`results-download-${format}`).click()]);
+    outputs[format] = readFileSync((await download.path())!);
+  }
+  await page.getByTestId('results-view-details').click();
+  const none = await page.getByTestId('run-diagnostics-none').count();
+  const warnings = none > 0 ? '' : ((await page.getByTestId('run-diagnostics').textContent()) ?? '');
+  return { outputs: outputs as Record<0 | 6 | 7, Buffer>, warnings };
 }

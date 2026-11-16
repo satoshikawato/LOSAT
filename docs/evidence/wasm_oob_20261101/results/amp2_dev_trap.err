@@ -1,0 +1,49 @@
+[wo] trap tid=7 message=memory access out of bounds view_after=61276160 true_size=61276160 ptr=60756160 ptr_in_true=true
+[wo] trap tid=14 message=memory access out of bounds view_after=61276160 true_size=61276160 ptr=60756160 ptr_in_true=true
+[wo] trap tid=3 message=memory access out of bounds view_after=61276160 true_size=61276160 ptr=60756160 ptr_in_true=true
+[wo] trap tid=6 message=memory access out of bounds view_after=61276160 true_size=61276160 ptr=60756160 ptr_in_true=true
+[wo] trap tid=15 message=memory access out of bounds view_after=61276160 true_size=61276160 ptr=60756160 ptr_in_true=true
+RuntimeError: memory access out of bounds
+    at losat-18af08fbbee1418a.wasm._ZN3std3sys12thread_local6native4lazy20Storage$LT$T$C$D$GT$16get_or_init_slow17h93224c914c036e12E (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[928]:0x13f1eb)
+    at losat-18af08fbbee1418a.wasm._ZN15crossbeam_deque5deque16Stealer$LT$T$GT$5steal17ha8be1440b3fe5a78E (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[8951]:0xa138e5)
+    at losat-18af08fbbee1418a.wasm._ZN10rayon_core8registry12WorkerThread14take_local_job17h3cdebc935cd1643fE.974 (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[8949]:0xa13332)
+    at losat-18af08fbbee1418a.wasm._ZN10rayon_core8registry12WorkerThread15wait_until_cold17hc1394378b8ac5fbcE (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[924]:0xf541e)
+    at losat-18af08fbbee1418a.wasm._ZN10rayon_core8registry13ThreadBuilder3run17h084b75d17bd443c6E (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[1165]:0x169f36)
+    at losat-18af08fbbee1418a.wasm._ZN3std3sys9backtrace28__rust_begin_short_backtrace17h013661cf5cc9c55aE (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[1164]:0x169e0e)
+    at losat-18af08fbbee1418a.wasm._ZN4core3ops8function6FnOnce40call_once$u7b$$u7b$vtable.shim$u7d$$u7d$17h0d5547969a73d073E (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[6453]:0x757ae6)
+    at losat-18af08fbbee1418a.wasm._ZN3std3sys6thread6wasip16Thread3new12thread_start17h44563f54289d3a5fE (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[9096]:0xa1eeda)
+    at losat-18af08fbbee1418a.wasm.__wasi_thread_start_C (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[9243]:0xa29f16)
+    at losat-18af08fbbee1418a.wasm.wasi_thread_start (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[9266]:0xa2b18f)
+RuntimeError: memory access out of bounds
+    at losat-18af08fbbee1418a.wasm._ZN3std3sys12thread_local6native4lazy20Storage$LT$T$C$D$GT$16get_or_init_slow17h93224c914c036e12E (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[928]:0x13f1eb)
+    at losat-18af08fbbee1418a.wasm._ZN15crossbeam_deque5deque16Stealer$LT$T$GT$5steal17ha8be1440b3fe5a78E (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[8951]:0xa138e5)
+    at losat-18af08fbbee1418a.wasm._ZN10rayon_core8registry12WorkerThread14take_local_job17h3cdebc935cd1643fE.974 (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[8949]:0xa13332)
+    at losat-18af08fbbee1418a.wasm._ZN10rayon_core8registry12WorkerThread15wait_until_cold17hc1394378b8ac5fbcE (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[924]:0xf541e)
+    at losat-18af08fbbee1418a.wasm._ZN10rayon_core8registry13ThreadBuilder3run17h084b75d17bd443c6E (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[1165]:0x169f36)
+    at losat-18af08fbbee1418a.wasm._ZN3std3sys9backtrace28__rust_begin_short_backtrace17h013661cf5cc9c55aE (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[1164]:0x169e0e)
+    at losat-18af08fbbee1418a.wasm._ZN4core3ops8function6FnOnce40call_once$u7b$$u7b$vtable.shim$u7d$$u7d$17h0d5547969a73d073E (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[6453]:0x757ae6)
+    at losat-18af08fbbee1418a.wasm._ZN3std3sys6thread6wasip16Thread3new12thread_start17h44563f54289d3a5fE (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[9096]:0xa1eeda)
+    at losat-18af08fbbee1418a.wasm.__wasi_thread_start_C (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[9243]:0xa29f16)
+    at losat-18af08fbbee1418a.wasm.wasi_thread_start (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[9266]:0xa2b18f)
+RuntimeError: memory access out of bounds
+    at losat-18af08fbbee1418a.wasm._ZN3std3sys12thread_local6native4lazy20Storage$LT$T$C$D$GT$16get_or_init_slow17h93224c914c036e12E (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[928]:0x13f1eb)
+    at losat-18af08fbbee1418a.wasm._ZN15crossbeam_deque5deque16Stealer$LT$T$GT$5steal17ha8be1440b3fe5a78E (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[8951]:0xa138e5)
+    at losat-18af08fbbee1418a.wasm._ZN10rayon_core8registry12WorkerThread14take_local_job17h3cdebc935cd1643fE.974 (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[8949]:0xa13332)
+    at losat-18af08fbbee1418a.wasm._ZN10rayon_core8registry12WorkerThread15wait_until_cold17hc1394378b8ac5fbcE (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[924]:0xf541e)
+    at losat-18af08fbbee1418a.wasm._ZN10rayon_core8registry13ThreadBuilder3run17h084b75d17bd443c6E (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[1165]:0x169f36)
+    at losat-18af08fbbee1418a.wasm._ZN3std3sys9backtrace28__rust_begin_short_backtrace17h013661cf5cc9c55aE (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[1164]:0x169e0e)
+    at losat-18af08fbbee1418a.wasm._ZN4core3ops8function6FnOnce40call_once$u7b$$u7b$vtable.shim$u7d$$u7d$17h0d5547969a73d073E (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[6453]:0x757ae6)
+    at losat-18af08fbbee1418a.wasm._ZN3std3sys6thread6wasip16Thread3new12thread_start17h44563f54289d3a5fE (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[9096]:0xa1eeda)
+    at losat-18af08fbbee1418a.wasm.__wasi_thread_start_C (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[9243]:0xa29f16)
+    at losat-18af08fbbee1418a.wasm.wasi_thread_start (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[9266]:0xa2b18f)
+RuntimeError: memory access out of bounds
+    at losat-18af08fbbee1418a.wasm._ZN3std3sys12thread_local6native4lazy20Storage$LT$T$C$D$GT$16get_or_init_slow17h93224c914c036e12E (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[928]:0x13f1eb)
+    at losat-18af08fbbee1418a.wasm._ZN15crossbeam_deque5deque16Stealer$LT$T$GT$5steal17ha8be1440b3fe5a78E (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[8951]:0xa138e5)
+    at losat-18af08fbbee1418a.wasm._ZN10rayon_core8registry12WorkerThread14take_local_job17h3cdebc935cd1643fE.974 (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[8949]:0xa13332)
+    at losat-18af08fbbee1418a.wasm._ZN10rayon_core8registry12WorkerThread15wait_until_cold17hc1394378b8ac5fbcE (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[924]:0xf541e)
+    at losat-18af08fbbee1418a.wasm._ZN10rayon_core8registry13ThreadBuilder3run17h084b75d17bd443c6E (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[1165]:0x169f36)
+    at losat-18af08fbbee1418a.wasm._ZN3std3sys9backtrace28__rust_begin_short_backtrace17h013661cf5cc9c55aE (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[1164]:0x169e0e)
+    at losat-18af08fbbee1418a.wasm._ZN4core3ops8function6FnOnce40call_once$u7b$$u7b$vtable.shim$u7d$$u7d$17h0d5547969a73d073E (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[6453]:0x757ae6)
+    at losat-18af08fbbee1418a.wasm._ZN3std3sys6thread6wasip16Thread3new12thread_start17h44563f54289d3a5fE (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[9096]:0xa1eeda)
+    at losat-18af08fbbee1418a.wasm.__wasi_thread_start_C (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[9243]:0xa29f16)
+    at losat-18af08fbbee1418a.wasm.wasi_thread_start (wasm://wasm/losat-18af08fbbee1418a.wasm-03236366:wasm-function[9266]:0xa2b18f)

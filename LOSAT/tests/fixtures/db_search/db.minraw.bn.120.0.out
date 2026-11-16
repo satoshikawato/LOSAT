@@ -1,0 +1,189 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: MejoMJNV
+           1 sequences; 401,182 total letters
+
+
+
+Query= frag00022
+
+Length=1020
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 400357680
+
+
+Query= frag00026
+
+Length=1020
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 400357680
+
+
+Query= frag00027
+
+Length=1020
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+LC738878.1 MAG: Metapenaeus joyneri majanivirus Tokushima2020 DNA...  116     3e-27
+
+
+>LC738878.1 MAG: Metapenaeus joyneri majanivirus Tokushima2020 
+DNA, complete genome
+Length=401182
+
+ Score = 116 bits (128),  Expect = 3e-27
+ Identities = 131/173 (76%), Gaps = 2/173 (1%)
+ Strand=Plus/Minus
+
+Query  145     TCTCCCCCTTACGATAGTATTATTTTCACGGTTTGGTCTAATTTCTATTCTAACCGCAGG  204
+               ||| || ||||| ||||||||||  | | | | |||| |||||| ||||  ||| || ||
+Sbjct  180952  TCTACCTCTTACAATAGTATTATGATGAGGATATGGTTTAATTTGTATTTCAACTGCTGG  180893
+
+Query  205     AAAATTTAGTAGGTAATCAGCATTAGATTTACTCAAGTTTACAGTTATA-CCCTTTTCTA  263
+               ||| || |  ||| ||| |||||||||||||| |||| |||   || || ||||||||||
+Sbjct  180892  AAAGTTAACAAGGAAATGAGCATTAGATTTAC-CAAGGTTAACTTTGTATCCCTTTTCTA  180834
+
+Query  264     TCAATAATCCTAATGCGCAGTATAATGTTAAACAAAGAGCCTCTTCGGATGCA  316
+                 ||||| || |  ||  | |||| ||| |||||||| || ||||| ||||||
+Sbjct  180833  ATAATAACCCCAGCGCATAATATAGTGTCAAACAAAGTGCTTCTTCCGATGCA  180781
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 400357680
+
+
+Query= frag00034
+
+Length=1020
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+LC738878.1 MAG: Metapenaeus joyneri majanivirus Tokushima2020 DNA...  137     3e-33
+
+
+>LC738878.1 MAG: Metapenaeus joyneri majanivirus Tokushima2020 
+DNA, complete genome
+Length=401182
+
+ Score = 137 bits (151),  Expect = 3e-33
+ Identities = 208/301 (69%), Gaps = 24/301 (8%)
+ Strand=Plus/Minus
+
+Query  295     AATGATGTTTATCTTCTTTACTTTCCAGATTATAAGCCGTTACACGTGACGCGTTATAGC  354
+               |||| | ||||||||||    | || |  |  ||  || | |||||||  || || ||||
+Sbjct  179967  AATGTTTTTTATCTTCTCGTTTATCTAATTCGTATACCATAACACGTGGAGCATTGTAGC  179908
+
+Query  355     TTACCATATCAGTATATTTTGAACCAGTATGTAATAACTTTATAATATTTTCTTTACCTC  414
+               |||| | ||||| ||| | ||| ||| |||  ||||| || ||||  ||||  |||||||
+Sbjct  179907  TTACAACATCAGCATACTCTGATCCAATATTCAATAATTTCATAAGTTTTTTCTTACCTC  179848
+
+Query  415     CTTCTAAAAAAGTCGTGAC---------------------AGTAGCATTGGGTCTTCTGG  453
+               | |||||| | ||  | ||                     | ||  ||||  |||||   
+Sbjct  179847  CATCTAAATATGTACTTACCAGATTTTGGTTTTTATTATTATTATTATTGTTTCTTCC--  179790
+
+Query  454     ATAAAGGTTGTCCTAAACTGTTCATAGTCTTTGTACCGAGATATTCGAAATAGGCTTCTT  513
+                ||||||||| |||||||| ||||| || || || || | |||||| |||||||||||||
+Sbjct  179789  -TAAAGGTTGCCCTAAACTATTCATTGTTTTGGTGCCTAAATATTCAAAATAGGCTTCTT  179731
+
+Query  514     GTAAAAACGTATCAGTCCTTGATCCGATGAGTGGTTTTTCATCAAAATATGTATTTAAAA  573
+               |||||||  |||| ||  ||||| | || || ||||||||| | |||||| ||| |||||
+Sbjct  179730  GTAAAAAGATATCGGTTTTTGATTCAATAAGCGGTTTTTCACCGAAATATTTATCTAAAA  179671
+
+Query  574     A  574
+               |
+Sbjct  179670  A  179670
+
+
+ Score = 132 bits (145),  Expect = 1e-31
+ Identities = 252/369 (68%), Gaps = 2/369 (1%)
+ Strand=Plus/Minus
+
+Query  651     ATTGCAATCTCAATCAAGT-CTTTAGGTGTCACCGGAGCTATTTCCCCAGAGGTTAAATC  709
+               || |||||||| | ||||| |    || || || |||||| |||| || |  |||| || 
+Sbjct  179518  ATGGCAATCTCTA-CAAGTTCACGTGGGGTTACAGGAGCTGTTTCTCCCGTAGTTAGATT  179460
+
+Query  710     TGTCGTAGATTTAAAGGCGGTCACATAATTTTTAACGTGAGATGCTAGGATTTCCGGTGT  769
+               ||| | ||| || ||     | || ||||| || || |||   |||||  |||  || ||
+Sbjct  179459  TGTAGCAGACTTGAATATTTTTACGTAATTATTTACATGATCAGCTAGATTTTTGGGGGT  179400
+
+Query  770     CATAACATTTTCGTACCACGCCATGTTCAATGCCAGATCTAATACCATACCTAAAATACT  829
+               ||||||||| |||||||| |||||||| |||||||  || |  |  | ||| || |||| 
+Sbjct  179399  CATAACATTATCGTACCAAGCCATGTTTAATGCCAAGTCAAGAATTAAACCCAATATACC  179340
+
+Query  830     TCCTACTATAAAAAGAATGCCAATCCCATCCAATATTCCTGCTACCAACGCTACAAGTTC  889
+               | | ||||  || | ||| ||||| ||||| |||||||||||| | || || ||||||| 
+Sbjct  179339  TGCAACTAAGAATAAAATACCAATACCATCTAATATTCCTGCTGCTAATGCCACAAGTTT  179280
+
+Query  890     TGTAAATATCTCTAATGCGGTAACGAGTGCTCCTCGTACTAAGAAATCTACTGCAAGTCG  949
+                | |||||| | ||| ||   ||| |  |  ||||| | |||  |||  |  |||| || 
+Sbjct  179279  AGCAAATATTTGTAAAGCTAAAACAACCGAACCTCGAATTAAATAATTAATCGCAAATCT  179220
+
+Query  950     TTGAGCGGTAGATAGTACCATCCTGGAGAAAACCGTCACCAAAGCATCTTCCGCCATTAG  1009
+               ||  ||  ||   | ||| |  |  || |||||||  || | |  ||| || | ||| ||
+Sbjct  179219  TTCTGCACTACTGATTACGAATCGAGAAAAAACCGATACAAGAAAATCCTCTGTCATAAG  179160
+
+Query  1010    TGCTCCTCT  1018
+                ||| ||||
+Sbjct  179159  AGCTGCTCT  179151
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 400357680
+
+
+  Database: MejoMJNV
+    Posted date:  Oct 30, 2026  9:30 PM
+  Number of letters in database: 401,182
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

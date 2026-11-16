@@ -1,0 +1,2 @@
+The -taxids command line option requires additional data files. Please see the section 'Taxonomic filtering for BLAST databases' in https://www.ncbi.nlm.nih.gov/books/NBK569839/ for details.
+BLAST Database error: No alias or index file found for nucleotide database [j/lst/p4] in search path [{R}::]. Please verify the spelling of the BLAST database and its molecule type.

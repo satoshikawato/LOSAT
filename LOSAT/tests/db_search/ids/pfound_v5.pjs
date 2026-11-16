@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "pfound_v5",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pfound_v5 (parsed Seq-ids)",
+  "number-of-letters": 2200,
+  "number-of-sequences": 10,
+  "last-updated": "2026-11-01T12:29:00",
+  "number-of-volumes": 1,
+  "bytes-total": 52723,
+  "bytes-to-cache": 2403,
+  "files": [
+    "pfound_v5.pdb",
+    "pfound_v5.phr",
+    "pfound_v5.pin",
+    "pfound_v5.pog",
+    "pfound_v5.pos",
+    "pfound_v5.pot",
+    "pfound_v5.psq",
+    "pfound_v5.ptf",
+    "pfound_v5.pto"
+  ]
+}

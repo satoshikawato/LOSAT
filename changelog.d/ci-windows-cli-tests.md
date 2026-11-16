@@ -1,0 +1,1 @@
+- Test hygiene: the Windows `cargo test` job passes again: the run_local CLI output files get a file-name-safe name, the `blastdbcmd -info` tests use plain (non-`\\?\`) paths and Windows-style expected paths, and a directory as `-taxid_map` is expected to be refused on Windows; no change to the engine.

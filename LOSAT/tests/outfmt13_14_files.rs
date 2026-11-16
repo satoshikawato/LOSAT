@@ -1,5 +1,3 @@
-#![allow(warnings, clippy::all)]
-
 //! BLAST JSON and XML2 as files (outfmt 13 and 14): what the frozen-fixture rows of the manifests
 //! (`files` column) cannot show. BLASTP and BLASTN first (OF5c part 1), then BLASTX, TBLASTN and TBLASTX
 //! (part 2: the last section of this file). The names of the side files and of the entries of
@@ -20,11 +18,16 @@
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2316-2353, :2425-2457.
 
 mod run_local_support;
+mod temp_support;
 
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+
+use losat::api::Program;
+use run_local_support::Files;
+use temp_support::{home_and_worker_log, Finished, RunFiles};
 
 fn engine() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf()
@@ -56,7 +59,9 @@ fn temp_dir(stem: &str) -> PathBuf {
     dir
 }
 
-fn command(env: &[(&str, &str)]) -> Command {
+/// LOSAT with an empty home, a worker log and `env`: the home and the log are removed when the
+/// returned files are dropped (the log is kept when the test panics).
+fn command(env: &[(&str, &str)]) -> (Command, RunFiles) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let name_text = name.to_string_lossy();
@@ -67,28 +72,25 @@ fn command(env: &[(&str, &str)]) -> Command {
     for name in ["BATCH_SIZE", "CHUNK_SIZE", "BLASTDB"] {
         command.env_remove(name);
     }
-    let home = std::env::temp_dir().join("losat_outfmt1314_home");
-    fs::create_dir_all(&home).expect("empty home");
-    command.env("HOME", &home).env("USERPROFILE", &home);
-    command.env(
-        "LOSAT_BLASTX_WORKER_LOG",
-        std::env::temp_dir().join("losat_outfmt1314_worker.log"),
-    );
+    let files = home_and_worker_log(&mut command, "losat_outfmt1314");
     command.envs(env.iter().copied());
-    command
+    (command, files)
 }
 
-fn run_in(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
-    command(env)
+fn run_in(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Finished<Output> {
+    let (mut command, files) = command(env);
+    let output = command
         .current_dir(dir)
         .args(args)
         .output()
-        .expect("run LOSAT")
+        .expect("run LOSAT");
+    Finished::new(output, files)
 }
 
-fn run_with_stdin(dir: &Path, args: &[&str], stdin: &[u8]) -> Output {
+fn run_with_stdin(dir: &Path, args: &[&str], stdin: &[u8]) -> Finished<Output> {
     use std::io::Write;
-    let mut child = command(&[])
+    let (mut command, files) = command(&[]);
+    let mut child = command
         .current_dir(dir)
         .args(args)
         .stdin(Stdio::piped())
@@ -97,7 +99,7 @@ fn run_with_stdin(dir: &Path, args: &[&str], stdin: &[u8]) -> Output {
         .spawn()
         .expect("run LOSAT");
     child.stdin.take().unwrap().write_all(stdin).unwrap();
-    child.wait_with_output().expect("wait for LOSAT")
+    Finished::new(child.wait_with_output().expect("wait for LOSAT"), files)
 }
 
 /// The names of the entries of a directory, sorted.
@@ -188,7 +190,7 @@ fn blastp_names_the_side_files_and_the_master_entries_as_ncbi() {
     let subject = inputs().join("sprot.faa");
     let (query, subject) = (query.to_str().unwrap(), subject.to_str().unwrap());
     for (case, format, expected, out) in NAMING {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let root = temp_dir(case);
             fs::create_dir_all(root.join("d")).unwrap();
             // `rel.xml` is relative to the working directory (probe `naming/rel14`).
@@ -250,7 +252,7 @@ fn blastn_writes_the_same_files() {
             "master_blastn14",
         ),
     ] {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let root = temp_dir("blastn");
             fs::create_dir_all(root.join("d")).unwrap();
             let output = run_in(
@@ -461,7 +463,7 @@ fn a_run_with_no_query_writes_a_master_with_no_entry() {
             ["-subject", subject.to_str().unwrap()],
             ["-db", db.to_str().unwrap()],
         ] {
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let root = temp_dir("emptypipe");
                 let mut args = vec!["blastp", "-query", "-"];
                 args.extend(target);
@@ -520,7 +522,7 @@ fn a_failed_batch_keeps_the_db_files_and_loses_the_held_subject_file() {
             ("sub", ["-subject", "sprot.faa"], 1),
             ("db", ["-db", "db/sprot"], 2),
         ] {
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let work = temp_dir("badbatch");
                 let out = work.join(format!("badbatch_{mode}_{format}.out"));
                 let mut args = vec!["blastp", "-query", "qprot_bad.faa"];
@@ -565,88 +567,6 @@ fn a_failed_batch_keeps_the_db_files_and_loses_the_held_subject_file() {
     }
 }
 
-/// 13 and 14 are written by the command line only (DECISIONS 26 Q10: `run_local` has no output
-/// file, ABI v1 has no such format): the shared entries of BLASTP and BLASTN stop at NCBI's
-/// XInclude error.
-#[test]
-fn run_local_does_not_write_outfmt_13_and_14() {
-    use run_local_support::reader_records as records;
-    use LOSAT::api::local_blast::{
-        run_local_blastn, run_local_blastp, FormatOutput, OutputSink, ReportOutputs,
-    };
-    use LOSAT::blastinput::fasta_reader::ReaderConfig;
-    use LOSAT::cli::{try_parse_from, Cli, Commands};
-    let (query, subject) = (frozen().join("qprot.faa"), inputs().join("sprot.faa"));
-    let (nquery, nsubject) = (inputs().join("qnucl_valid.fna"), inputs().join("snucl.fna"));
-    for format in ["13", "14"] {
-        let mut diagnostics = Vec::new();
-        let mut sink = Vec::new();
-        let mut outputs = ReportOutputs {
-            formats: vec![FormatOutput {
-                outfmt: format,
-                sink: OutputSink::Writer(&mut sink),
-            }],
-            diagnostics: &mut diagnostics,
-            hits: None,
-            observer: None,
-        };
-        let cli: Cli = try_parse_from([
-            "LOSAT",
-            "blastp",
-            "-query",
-            query.to_str().unwrap(),
-            "-subject",
-            subject.to_str().unwrap(),
-        ])
-        .unwrap();
-        let Commands::Blastp(args) = cli.command else {
-            unreachable!()
-        };
-        let error = run_local_blastp(
-            args,
-            &records(&query, ReaderConfig::query("BLASTP", true, true)),
-            &records(&subject, ReaderConfig::subject("BLASTP", true, true)),
-            "",
-            "",
-            &mut outputs,
-        )
-        .unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains(&format!("Please provide a file name for outfmt {format}.")),
-            "blastp {format}: {error}"
-        );
-        let cli: Cli = try_parse_from([
-            "LOSAT",
-            "blastn",
-            "-query",
-            nquery.to_str().unwrap(),
-            "-subject",
-            nsubject.to_str().unwrap(),
-        ])
-        .unwrap();
-        let Commands::Blastn(args) = cli.command else {
-            unreachable!()
-        };
-        let error = run_local_blastn(
-            args,
-            &records(&nquery, ReaderConfig::query("BLASTN", false, true)),
-            &records(&nsubject, ReaderConfig::subject("BLASTN", false, true)),
-            &mut outputs,
-        )
-        .unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains(&format!("Please provide a file name for outfmt {format}.")),
-            "blastn {format}: {error}"
-        );
-        drop(outputs);
-        assert!(sink.is_empty() && diagnostics.is_empty());
-    }
-}
-
 // ---------------------------------------------------------------------------------------------
 // OF5c part 2: BLASTX, TBLASTN and TBLASTX.
 //
@@ -659,7 +579,9 @@ fn run_local_does_not_write_outfmt_13_and_14() {
 //  * `badbatch_tblastn_{sub,db}_N`: `BATCH_SIZE=100`, `qprot_bad.faa` against `snucl.fna` | `db/snucl`;
 //  * `badbatch_tblastx_{sub,db}_N`: `BATCH_SIZE=100`, `qnucl_bad.fna`, `-evalue 1e-20 -max_hsps 2`;
 //  * `holdmix_blastx_db_N`: `qnx_late.fna` against `db/sprot_mixtax` with `BLASTDB` the taxonomy
-//    database `high_bytes_utf8` (DECISIONS 32: LOSAT holds the output of this run in memory).
+//    database `high_bytes_utf8` (the name of 9606 has bytes >= 0x80; NCBI never looks that taxid up);
+//  * `taxbad_blastx_db_N`: the same taxonomy database with `db/sprot_tax`, whose 9606 the second batch
+//    reports (`.err`: the standard error of the run; `.rc`: its exit status).
 // ---------------------------------------------------------------------------------------------
 
 const BAD_BATCH: &str = "BLAST query error: CFastaReader: Near line";
@@ -677,9 +599,10 @@ fn frozen_names(case: &str) -> Vec<String> {
 }
 
 /// Runs `args` (with `-num_threads`, `-outfmt` and `-out <work>/<case>.out` added) in
-/// `tests/fixtures/outfmt16` at one and four threads and checks that exactly the files of NCBI's run
-/// appear, with its bytes, with `rc` and a standard error that starts as `stderr_start` (and is
-/// empty when that is empty). Returns nothing; every run is in its own directory.
+/// `tests/fixtures/outfmt16` at one, four, eight and sixteen threads and checks that exactly the
+/// files of NCBI's run appear, with its bytes, with `rc` and a standard error that starts as
+/// `stderr_start` (and is empty when that is empty). Returns nothing; every run is in its own
+/// directory.
 fn equals_frozen_files(
     case: &str,
     format: &str,
@@ -689,7 +612,7 @@ fn equals_frozen_files(
     stderr_start: &str,
 ) {
     let expected = frozen_names(case);
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         let work = temp_dir(case);
         let out = work.join(format!("{case}.out"));
         let mut argv = args.to_vec();
@@ -896,11 +819,11 @@ fn tblastn_matrix_error_leaves_an_empty_master_and_no_side_file() {
     }
 }
 
-/// BLASTX's hold (DECISIONS 21/32) keeps the side files' bytes too: a `-db` search whose taxonomy database
-/// has a name LOSAT would refuse for a sequence never reported is held until the epilog, and then writes what
-/// NCBI writes (`holdmix_blastx_db_N`: NCBI never looks that taxid up).
+/// A `-db` search whose taxonomy database has a name with bytes >= 0x80 for a sequence that is never reported
+/// writes what NCBI writes (`holdmix_blastx_db_N`: NCBI never looks that taxid up), the side files and the
+/// master included.
 #[test]
-fn blastx_hold_writes_the_files_at_the_epilog_as_ncbi_does() {
+fn blastx_with_an_unreported_taxonomy_name_writes_the_files_as_ncbi_does() {
     let taxdb = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/taxdb/high_bytes_utf8");
     for format in ["13", "14"] {
         equals_frozen_files(
@@ -914,10 +837,10 @@ fn blastx_hold_writes_the_files_at_the_epilog_as_ncbi_does() {
     }
 }
 
-/// An unopenable side file under the hold: the held side files are written at the epilog, in order, and the
-/// run stops at the one it cannot open with NCBI's message (the files before it stay; the master stays empty).
+/// An unopenable side file of that run: the side files are written in order, and the run stops at the one it
+/// cannot open with NCBI's message (the files before it stay; the master stays empty).
 #[test]
-fn blastx_hold_stops_at_a_side_file_it_cannot_open() {
+fn blastx_stops_at_a_side_file_it_cannot_open() {
     let taxdb = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/taxdb/high_bytes_utf8");
     for (format, extension) in [("13", "json"), ("14", "xml")] {
         for (blocked, written) in [(2, 1), (1, 0)] {
@@ -959,43 +882,27 @@ fn blastx_hold_stops_at_a_side_file_it_cannot_open() {
     }
 }
 
-/// DECISIONS 28/30 for 13 and 14: a taxonomy database name outside US-ASCII that the second batch reports is
-/// refused after the first batch's report was made: the hold drops it, so no side file is written and the master
-/// stays empty. (NCBI cuts the side file of the failing report at the byte, rc 255, in 14: a refusal is LOSAT's.)
+/// DECISIONS 28/30 for 13 and 14: a taxonomy database name with a byte >= 0x80 that the second batch reports
+/// (`high_bytes_utf8`, `db/sprot_tax`, `qnx_late.fna`) is written as NCBI BLAST+ 2.17.0 writes it
+/// (`taxbad_blastx_db_{13,14}`: `BLASTDB=.../high_bytes_utf8 blastx -query qnx_late.fna -db db/sprot_tax
+/// -num_threads 1 -outfmt N -out taxbad_blastx_db_N.out`, run in `tests/fixtures/outfmt16`): the JSON side
+/// files hold the name as it is and the master lists both (exit status 0); the second XML2 side file is cut at
+/// the byte, the master stays empty, and `Error: NCBI C++ Exception:` and its trace follow on standard error,
+/// exit status 255.
 #[test]
-fn a_refusal_in_a_later_batch_leaves_no_side_file_and_an_empty_master() {
+fn a_taxonomy_name_outside_us_ascii_in_a_later_batch_is_written_as_ncbi_writes_it() {
     let taxdb = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/taxdb/high_bytes_utf8");
-    for format in ["13", "14"] {
-        for threads in ["1", "4"] {
-            let work = temp_dir("taxrefused");
-            let out = work.join("o.out");
-            let mut args = blastx_args("qnx_late.fna", ["-db", "db/sprot_tax"]);
-            args.extend([
-                "-num_threads",
-                threads,
-                "-outfmt",
-                format,
-                "-out",
-                out.to_str().unwrap(),
-            ]);
-            let output = run_in(&inputs(), &args, &[("BLASTDB", taxdb.to_str().unwrap())]);
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            assert_eq!(
-                output.status.code(),
-                Some(1),
-                "{format} {threads}: {stderr}"
-            );
-            assert!(
-                stderr.contains(
-                    "a taxonomy database scientific name with a character outside the US-ASCII range"
-                ),
-                "{format} {threads}: {stderr}"
-            );
-            assert!(output.stdout.is_empty());
-            assert_eq!(names(&work), ["o.out"], "{format} {threads}");
-            assert_eq!(fs::read(&out).unwrap(), b"", "{format} {threads}");
-            fs::remove_dir_all(work).ok();
-        }
+    for (format, rc) in [("13", 0), ("14", 255)] {
+        let case = format!("taxbad_blastx_db_{format}");
+        let err = String::from_utf8(read_frozen(&format!("{case}.err"))).unwrap();
+        equals_frozen_files(
+            &case,
+            format,
+            &blastx_args("qnx_late.fna", ["-db", "db/sprot_tax"]),
+            &[("BLASTDB", taxdb.to_str().unwrap())],
+            rc,
+            &err,
+        );
     }
 }
 
@@ -1007,11 +914,12 @@ fn write_fasta(path: &Path, records: &[(&str, String)]) {
     fs::write(path, text).unwrap();
 }
 
-/// Q2 for 13 and 14 (as `a_title_or_database_name_outside_us_ascii_is_refused_in_15_and_16`): a byte >= 0x80 in a
-/// query title (also in a later batch, which the pre-scan finds), a `-subject` title or the `-db` name is refused
-/// before anything is written: the master is empty and there is no side file.
+/// The title that NCBI BLAST+ 2.17.0 cannot make (punctuation alone) for 13 and 14 (as `a_title_of_punctuation_is_refused_in_15_and_16`):
+/// in a query title (also in a later batch, which the pre-scan finds) or a `-subject` title it is refused before
+/// anything is written: the master is empty and there is no side file. (The titles NCBI does write are the rows
+/// `db.xb.*`, and the `-db` name `tests/xml_dbname.rs`.)
 #[test]
-fn a_title_outside_us_ascii_is_refused_in_13_and_14_with_nothing_written() {
+fn a_title_of_punctuation_is_refused_in_13_and_14_with_nothing_written() {
     let protein = "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG";
     let codons: std::collections::HashMap<char, &str> = [
         ('A', "GCT"),
@@ -1044,11 +952,11 @@ fn a_title_outside_us_ascii_is_refused_in_13_and_14_with_nothing_written() {
     }
     let refused_title = |stderr: &str, what: &str| {
         stderr.contains(&format!(
-            "{what} with a character outside the US-ASCII range (which the XML output of NCBI BLAST+ cannot write) is not supported by LOSAT's BLASTX"
+            "{what} with punctuation that NCBI BLAST+ 2.17.0 crashes on when it makes the definition line is not supported by LOSAT's BLASTX"
         ))
     };
     for format in ["13", "14"] {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             let work = temp_dir("q2");
             let (query, subject) = (work.join("q.fa"), work.join("s.fa"));
             let out = work.join("o.out");
@@ -1082,8 +990,8 @@ fn a_title_outside_us_ascii_is_refused_in_13_and_14_with_nothing_written() {
             write_fasta(&subject, &[("s1 subject", protein.to_string())]);
             // a query title: the first query's, or the second's in the next batch
             for (first, second, label) in [
-                ("caf\u{e9} q1", "q2 ok", "first"),
-                ("q1 ok", "caf\u{e9} q2", "second, same batch"),
+                (", ,", "q2 ok", "first"),
+                ("q1 ok", ", ,", "second, same batch"),
             ] {
                 write_fasta(
                     &query,
@@ -1097,10 +1005,7 @@ fn a_title_outside_us_ascii_is_refused_in_13_and_14_with_nothing_written() {
             }
             write_fasta(
                 &query,
-                &[
-                    ("q1 ok", padded.clone()),
-                    ("caf\u{e9} q2", nucleotide.clone()),
-                ],
+                &[("q1 ok", padded.clone()), (", ,", nucleotide.clone())],
             );
             check(
                 &run(),
@@ -1119,7 +1024,7 @@ fn a_title_outside_us_ascii_is_refused_in_13_and_14_with_nothing_written() {
                         "s1 ok",
                         "WQERTYIPASDFGHKLCVNMWQERTYIPASDFGHKLCVNM".to_string(),
                     ),
-                    ("s2 caf\u{e9}", protein.to_string()),
+                    (", ,", protein.to_string()),
                 ],
             );
             check(
@@ -1143,7 +1048,8 @@ fn a_blastx_query_that_is_not_a_regular_file_is_refused_in_13_and_14() {
     let text = b">q1 plain\nATGGATTTCGAACAGCGGCATGAACCGTAA\n".to_vec();
     for format in ["13", "14"] {
         let out = work.join(format!("o{format}.out"));
-        let mut child = command(&[])
+        let (mut command, _files) = command(&[]);
+        let mut child = command
             .args([
                 "blastx",
                 "-query",
@@ -1206,7 +1112,7 @@ fn an_empty_query_gives_an_empty_master_or_a_master_with_no_entry_in_the_other_p
                 ["-subject", subject.to_str().unwrap()],
                 ["-db", db.to_str().unwrap()],
             ] {
-                for threads in ["1", "4"] {
+                for threads in ["1", "4", "8", "16"] {
                     let root = temp_dir("emptypipe2");
                     let mut args = vec![program, "-query", "-"];
                     args.extend(target);
@@ -1217,7 +1123,7 @@ fn an_empty_query_gives_an_empty_master_or_a_master_with_no_entry_in_the_other_p
                         assert_eq!(output.status.code(), Some(1), "{label}");
                         assert!(
                             String::from_utf8_lossy(&output.stderr)
-                                .contains("unsupported BLASTX stdin query/subject"),
+                                .contains("unsupported BLASTX query input for -outfmt"),
                             "{label}"
                         );
                     } else {
@@ -1264,7 +1170,7 @@ fn an_empty_query_gives_an_empty_master_or_a_master_with_no_entry_in_the_other_p
 }
 
 /// 13 and 14 to standard output for BLASTX, TBLASTN and TBLASTX are NCBI's error as for the other programs
-/// (`cli_v2.rs` checks the message of each program; here: nothing is written and no search starts).
+/// (`src/cli_v2_tests.rs` checks the message of each program; here: nothing is written and no search starts).
 #[test]
 fn outfmt_13_and_14_to_standard_output_ask_for_a_file_name_in_every_program() {
     let root = temp_dir("stdout2");
@@ -1298,84 +1204,109 @@ fn outfmt_13_and_14_to_standard_output_ask_for_a_file_name_in_every_program() {
     fs::remove_dir_all(root).ok();
 }
 
-/// `run_local` has no output file, so TBLASTN and TBLASTX (like BLASTP and BLASTN) stop at NCBI's XInclude error.
+/// `api::run_to_file` writes outfmt 13 and 14 as the command line writes them with `-out r` in
+/// every program: the master file and each side file, by the names of the files, and the command
+/// line's standard error to the diagnostics. The same test of the crate
+/// (`api/local_blast_tests/outfmt13_14.rs`) holds the other half: the caller's receiver of side
+/// files (`OutputSink::Files`, LOSAT Web) of `run_local` gets what `run_to_file` writes.
 #[test]
-fn run_local_does_not_write_outfmt_13_and_14_in_tblastn_and_tblastx() {
-    use run_local_support::reader_records as records;
-    use LOSAT::api::local_blast::{
-        run_local_tblastn, run_local_tblastx, FormatOutput, OutputSink, ReportOutputs,
-    };
-    use LOSAT::blastinput::fasta_reader::ReaderConfig;
-    use LOSAT::cli::{try_parse_from, Cli, Commands};
-    let (pquery, nsubject) = (inputs().join("qprot_bad.faa"), inputs().join("snucl.fna"));
-    let nquery = inputs().join("qnucl_valid.fna");
+fn run_local_writes_outfmt_13_and_14_to_a_receiver_as_the_command_line_writes_files() {
+    let work = temp_dir("receiver");
     let pquery = {
         // qprot_bad.faa has a bad third record: use the first two
-        let valid = temp_dir("rl").join("qprot_valid.faa");
-        let text = fs::read_to_string(&pquery).unwrap();
+        let valid = work.join("qprot_valid.faa");
+        let text = fs::read_to_string(inputs().join("qprot_bad.faa")).unwrap();
         fs::write(&valid, text.split(">q3").next().unwrap()).unwrap();
         valid
     };
-    for format in ["13", "14"] {
-        for program in ["tblastn", "tblastx"] {
-            let mut diagnostics = Vec::new();
-            let mut sink = Vec::new();
-            let mut outputs = ReportOutputs {
-                formats: vec![FormatOutput {
-                    outfmt: format,
-                    sink: OutputSink::Writer(&mut sink),
-                }],
-                diagnostics: &mut diagnostics,
-                hits: None,
-                observer: None,
-            };
-            let query = if program == "tblastn" {
-                &pquery
-            } else {
-                &nquery
-            };
-            let cli: Cli = try_parse_from([
-                "LOSAT",
-                program,
+    let (sprot, snucl) = (inputs().join("sprot.faa"), inputs().join("snucl.fna"));
+    let (nquery, xquery) = (
+        inputs().join("qnucl_valid.fna"),
+        inputs().join("qnx_late.fna"),
+    );
+    let cases: [(Program, &Path, &Path, &[&str]); 5] = [
+        (Program::Blastp, &frozen().join("qprot.faa"), &sprot, &[]),
+        (Program::Blastn, &nquery, &snucl, &[]),
+        (Program::Blastx, &xquery, &sprot, &[]),
+        (Program::Tblastn, &pquery, &snucl, &[]),
+        (
+            Program::Tblastx,
+            &nquery,
+            &snucl,
+            &["-evalue", "1e-20", "-max_hsps", "2"],
+        ),
+    ];
+    // The master file, the side files `r_<n>.<ext>` in the order of their numbers, and the
+    // command line's standard error or the diagnostics.
+    let side_files = |dir: &Path, ext: &str| {
+        let mut sides = Vec::new();
+        for n in 1.. {
+            let name = format!("r_{n}.{ext}");
+            match fs::read(dir.join(&name)) {
+                Ok(bytes) => sides.push((name, bytes)),
+                Err(_) => break,
+            }
+        }
+        sides
+    };
+    for (program, query, subject, extra) in cases {
+        for (format, ext) in [("13", "json"), ("14", "xml")] {
+            let what = format!("{} {format}", program.name());
+            let dir = work.join(format!("{}_{format}", program.name()));
+            fs::create_dir_all(&dir).unwrap();
+            let mut argv = vec![
+                program.name(),
                 "-query",
                 query.to_str().unwrap(),
                 "-subject",
-                nsubject.to_str().unwrap(),
-            ])
-            .unwrap();
-            let error = match cli.command {
-                Commands::Tblastn(args) => run_local_tblastn(
-                    args,
-                    &records(query, ReaderConfig::query("TBLASTN", true, true)),
-                    &records(&nsubject, ReaderConfig::subject("TBLASTN", false, true)),
-                    &mut outputs,
-                ),
-                Commands::Tblastx(args) => run_local_tblastx(
-                    args,
-                    &records(query, ReaderConfig::query("TBLASTX", false, true)),
-                    &records(&nsubject, ReaderConfig::subject("TBLASTX", false, true)),
-                    &mut outputs,
-                ),
-                _ => unreachable!(),
-            }
-            .unwrap_err();
+                subject.to_str().unwrap(),
+            ];
+            argv.extend_from_slice(extra);
+            let mut cli_argv = argv.clone();
+            cli_argv.extend_from_slice(&["-num_threads", "1", "-outfmt", format, "-out", "r"]);
+            let cli_run = run_in(&dir, &cli_argv, &[]);
+            assert_ok(&cli_run, &what);
+            let cli_sides = side_files(&dir, ext);
             assert!(
-                error
-                    .to_string()
-                    .contains(&format!("Please provide a file name for outfmt {format}.")),
-                "{program} {format}: {error}"
+                cli_sides.len() >= 2,
+                "{what}: {} side files",
+                cli_sides.len()
             );
-            drop(outputs);
-            assert!(sink.is_empty() && diagnostics.is_empty());
+            let cli_master = fs::read(dir.join("r")).unwrap();
+
+            let library_dir = work.join(format!("{}_{format}_api", program.name()));
+            fs::create_dir_all(&library_dir).unwrap();
+            let mut options = extra.to_vec();
+            options.extend_from_slice(&["-num_threads", "1"]);
+            let (result, diagnostics) = Files::new(program, query, subject).write_file(
+                format,
+                &options,
+                &library_dir.join("r"),
+            );
+            result.unwrap_or_else(|error| panic!("{what}: {error}"));
+            assert!(
+                fs::read(library_dir.join("r")).unwrap() == cli_master,
+                "{what}: master"
+            );
+            assert!(
+                side_files(&library_dir, ext) == cli_sides,
+                "{what}: side files"
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&diagnostics),
+                String::from_utf8_lossy(&cli_run.stderr),
+                "{what}: diagnostics"
+            );
         }
     }
+    fs::remove_dir_all(work).ok();
 }
 
 // ---- OF5c review fixes (DECISIONS 35) ----
 
 /// The inputs of the probes `W1` of the OF5c review: three query batches (BLASTX reads batches of 10,002 bases) of
-/// which the third carries an invalid residue (a reader warning), and a `-subject` file with a title outside
-/// US-ASCII on a sequence without a hit, which makes BLASTX hold its output.
+/// which the third carries an invalid residue (a reader warning), and a `-subject` file with a title of
+/// punctuation alone (`, ,`) on a sequence without a hit, which makes BLASTX hold its output.
 fn write_hold_inputs(work: &Path, third_query: &str) -> (PathBuf, PathBuf) {
     let protein = "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG";
     let codons: std::collections::HashMap<char, &str> = [
@@ -1421,7 +1352,7 @@ fn write_hold_inputs(work: &Path, third_query: &str) -> (PathBuf, PathBuf) {
         &[
             ("s1 subject", protein.to_string()),
             (
-                "s2 caf\u{e9} no hit",
+                ", ,",
                 "WQERTYIPASDFGHKLCVNMWQERTYIPASDFGHKLCVNM".to_string(),
             ),
         ],
@@ -1438,7 +1369,7 @@ fn blastx_hold_stops_at_an_unopenable_side_file_before_it_reads_the_later_batche
     let warned = format!("{}ACGTJJACGT{}", "ACGT".repeat(2400), "ACGT".repeat(100));
     for (format, extension) in [("13", "json"), ("14", "xml")] {
         for (label, third) in [("warning", warned.as_str()), ("bad batch", "ACGT%%%%")] {
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let work = temp_dir("holdearly");
                 let (query, subject) = write_hold_inputs(&work, third);
                 let out = work.join("o.out");
@@ -1646,7 +1577,7 @@ fn a_side_file_write_error_gives_one_answer_in_every_program() {
             ]),
             false,
         ),
-        // the hold: the subject file has a title outside US-ASCII on a sequence without a hit
+        // the hold: the subject file has a title of punctuation alone on a sequence without a hit
         ("blastx -subject, hold", Vec::new(), true),
     ];
     for (format, extension) in [("13", "json"), ("14", "xml")] {

@@ -482,6 +482,21 @@ impl Encoder for JsonEncoder<'_> {
         self.write_string(name.as_bytes());
     }
 
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrjson.cpp:382-393
+    /// ```c++
+    ///     if (values.IsInteger()) {
+    ///         value_str = NStr::IntToString(value);
+    ///         const string& name = values.FindNameEx(value, values.IsInteger());
+    ///         if (name.empty() || GetWriteNamedIntegersByValue()) {
+    ///             WriteKeywordValue(value_str);
+    ///         } else {
+    ///             WriteValue(name);
+    ///         }
+    /// ```
+    fn named_int(&mut self, name: &str, _value: i32) {
+        self.write_string(name.as_bytes());
+    }
+
     /// NCBI reference (598d8ae6): c++/src/serial/objostrjson.cpp:168-171
     /// ```c++
     /// void CObjectOStreamJson::WriteBool(bool data)

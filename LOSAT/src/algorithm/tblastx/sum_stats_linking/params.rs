@@ -4,10 +4,6 @@
 
 use crate::stats::KarlinParams;
 
-/// NCBI BLAST_GAP_DECAY_RATE (ungapped search default)
-/// Reference: ncbi-blast/c++/include/algo/blast/core/blast_parameters.h:68
-pub const BLAST_GAP_DECAY_RATE: f64 = 0.5;
-
 /// Parameters for HSP linking cutoffs
 /// These are the outputs from calculate_link_hsp_cutoffs_ncbi()
 #[derive(Debug, Clone, Copy)]
@@ -18,15 +14,27 @@ pub struct LinkHspCutoffs {
     pub cutoff_big_gap: i32,
     /// Gap probability (may be set to 0 for small search spaces)
     pub gap_prob: f64,
-    /// Whether to ignore small gaps (when gap_prob=0)
-    pub ignore_small_gaps: bool,
+}
+
+impl LinkHspCutoffs {
+    /// Whether the linking ignores small gaps: a small-gap cutoff of 0, the rule of
+    /// `core::link_hsps`. In TBLASTX that is the search space of at most 8 windows, where
+    /// gap_prob is 0 too (`calculate_link_hsp_cutoffs_ncbi`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:495
+    /// ```c
+    ///    ignore_small_gaps = (cutoff[0] == 0);
+    /// ```
+    pub fn ignore_small_gaps(&self) -> bool {
+        self.cutoff_small_gap == 0
+    }
 }
 
 /// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1448-1455;
 /// c++/src/algo/blast/core/link_hsps.c:468-493
 /// CalculateLinkHSPCutoffs(..., db_length, subject->length);
-/// cutoff[0] = link_hsp_params->cutoff_small_gap;
-/// cutoff[1] = link_hsp_params->cutoff_big_gap;
+/// `cutoff[0] = link_hsp_params->cutoff_small_gap;`
+/// `cutoff[1] = link_hsp_params->cutoff_big_gap;`
 /// Per-subject state computed before search and shared by both linking passes.
 #[derive(Debug, Clone)]
 pub struct LinkingParams {
@@ -52,16 +60,6 @@ pub fn find_smallest_lambda_params(params_list: &[KarlinParams]) -> Option<Karli
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
         .cloned()
-}
-
-/// Find smallest Lambda value from a list of context parameters
-/// Returns the minimum lambda value (f64::MAX if list is empty or all invalid)
-pub fn find_smallest_lambda(params_list: &[KarlinParams]) -> f64 {
-    params_list
-        .iter()
-        .filter(|p| p.lambda > 0.0)
-        .map(|p| p.lambda)
-        .fold(f64::MAX, f64::min)
 }
 
 /// Compute NCBI-style average query length from nucleotide lengths

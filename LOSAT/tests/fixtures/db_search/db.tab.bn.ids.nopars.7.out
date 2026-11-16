@@ -1,0 +1,30 @@
+# BLASTN 2.17.0+
+# Query: q_a 1500 of a
+# Database: tests/db_search/nslice
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score, query id, query gi, query acc., query length, subject id, subject ids, subject gi, subject gis, subject acc., subject accs., subject length
+# 3 hits found
+q_a	a_l6k	100.000	1500	0	0	1	1500	2001	3500	0.0	2771	q_a	0	q_a	1500	a_l6k	a_l6k	0	0	a_l6k	a_l6k	6000
+q_a	a_mut_8pct	91.622	1504	121	4	1	1500	2002	3504	0.0	2074	q_a	0	q_a	1500	a_mut_8pct	a_mut_8pct	0	0	a_mut_8pct	a_mut_8pct	6011
+q_a	b_p6k	93.708	747	42	4	758	1500	2001	2746	0.0	1114	q_a	0	q_a	1500	b_p6k	b_p6k	0	0	b_p6k	b_p6k	6000
+# BLASTN 2.17.0+
+# Query: q_c_amb 1400 across the ambiguity codes, 4 percent substitutions
+# Database: tests/db_search/nslice
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score, query id, query gi, query acc., query length, subject id, subject ids, subject gi, subject gis, subject acc., subject accs., subject length
+# 2 hits found
+q_c_amb	c_amb	95.750	800	34	0	1	800	101	900	0.0	1249	q_c_amb	0	q_c_amb	1400	c_amb	c_amb	0	0	c_amb	c_amb	3000
+q_c_amb	c_amb	96.296	540	20	0	861	1400	961	1500	0.0	887	q_c_amb	0	q_c_amb	1400	c_amb	c_amb	0	0	c_amb	c_amb	3000
+# BLASTN 2.17.0+
+# Query: q_d_minus reverse complement of d, 12 percent substitutions
+# Database: tests/db_search/nslice
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score, query id, query gi, query acc., query length, subject id, subject ids, subject gi, subject gis, subject acc., subject accs., subject length
+# 1 hits found
+q_d_minus	d_mut_15pct	87.806	2001	234	8	5	2000	2496	501	0.0	2335	q_d_minus	0	q_d_minus	2000	d_mut_15pct	d_mut_15pct	0	0	d_mut_15pct	d_mut_15pct	4000
+# BLASTN 2.17.0+
+# Query: q_e_p diverged
+# Database: tests/db_search/nslice
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: q_nohit random
+# Database: tests/db_search/nslice
+# 0 hits found
+# BLAST processed 5 queries

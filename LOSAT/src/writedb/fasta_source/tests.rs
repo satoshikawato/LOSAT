@@ -85,7 +85,7 @@ fn fate(bioseq: &Bioseq) -> Fate {
 /// Reads `input` to its end as `CBuildDatabase::AddFasta` does: the source, `fate` for
 /// each sequence, and `No sequences added` (build_db.cpp:1410-1412).
 fn run<R: Read>(input: R, protein: bool) -> Outcome {
-    let mut source = FastaBioseqSource::new(input, protein);
+    let mut source = FastaBioseqSource::with_parse_ids(input, protein, false);
     let mut outcome = Outcome {
         warnings: Vec::new(),
         ignored: Vec::new(),
@@ -146,7 +146,7 @@ fn residues(bioseq: &Bioseq) -> String {
         }
         SeqData::Ncbi2na(bytes) => {
             assert_eq!(bytes.len(), length.div_ceil(4));
-            if length % 4 != 0 {
+            if !length.is_multiple_of(4) {
                 assert_eq!(bytes[length / 4] << (2 * (length % 4)), 0);
             }
             (0..length)
@@ -155,7 +155,7 @@ fn residues(bioseq: &Bioseq) -> String {
         }
         SeqData::Ncbi4na(bytes) => {
             assert_eq!(bytes.len(), length.div_ceil(2));
-            if length % 2 != 0 {
+            if !length.is_multiple_of(2) {
                 assert_eq!(bytes[length / 2] & 15, 0);
             }
             (0..length)
@@ -284,7 +284,7 @@ fn makeblastdb_cases_match() {
 }
 
 fn one(input: &[u8], protein: bool) -> Bioseq {
-    let mut source = FastaBioseqSource::new(input, protein);
+    let mut source = FastaBioseqSource::with_parse_ids(input, protein, false);
     let bioseq = source
         .next_bioseq(&mut |_| ())
         .expect("no error")
@@ -380,7 +380,8 @@ fn seq_data_choice_and_bytes() {
 /// The local IDs count the records of the input from 1, the empty ones too.
 #[test]
 fn local_ids_and_titles() {
-    let mut source = FastaBioseqSource::new(&b">a one\nMKV\n>b two\n>\nGG\n"[..], true);
+    let mut source =
+        FastaBioseqSource::with_parse_ids(&b">a one\nMKV\n>b two\n>\nGG\n"[..], true, false);
     let mut read = Vec::new();
     while let Some(bioseq) = source.next_bioseq(&mut |_| ()).unwrap() {
         read.push((bioseq.local_id, bioseq.title, bioseq.is_aa, bioseq.length));
@@ -649,6 +650,66 @@ fn record_above_the_length_limit() {
     );
 }
 
+/// A record of 4,294,967,296 residues or more (gaps included) comes with NCBI's length, its
+/// count modulo 2^32, and no data (line RG DECISIONS K3-6, K3-8): makeblastdb's checks
+/// test that length, and `s_FixBioseqDeltas` throws for a protein whose gaps stayed a
+/// delta, leaves a delta that starts with `Seq-loc null` without data, and builds the rest,
+/// which LOSAT refuses.
+#[test]
+fn record_past_32_bits() {
+    for (input, protein, length, past) in [
+        // Nucleotide gaps are parsed: a delta whose first piece is a literal.
+        (
+            &b">a\nA\n>?4294967295\n"[..],
+            false,
+            0,
+            Some(PastSeqPos::Refused {
+                length: 4_294_967_296,
+            }),
+        ),
+        (
+            b">a\nACGT\n>?4294967295\n>?4294967295\nAC\n",
+            false,
+            4,
+            Some(PastSeqPos::Refused {
+                length: 8_589_934_596,
+            }),
+        ),
+        // A lone hyphen first: `Seq-loc null`, no data.
+        (b">a\n-\n>?4294967295\n>?1\nA\n", false, 1, None),
+        // Protein gaps that sum to 2^32 are kept (`m_TotalGapLength` is 0): a protein delta.
+        (
+            b">a\nM\n>?4294967295\n>?1\nK\n",
+            true,
+            2,
+            Some(PastSeqPos::ProteinDelta),
+        ),
+        // Other sums are runs of `X` in NCBI, longer than the length.
+        (
+            b">a\nM\n>?4294967295\n>?2\nK\n",
+            true,
+            3,
+            Some(PastSeqPos::Refused {
+                length: 4_294_967_299,
+            }),
+        ),
+    ] {
+        let bioseq = one(input, protein);
+        assert_eq!(
+            (bioseq.length, bioseq.seq_data, bioseq.past_seq_pos),
+            (length, None, past),
+            "{}",
+            String::from_utf8_lossy(input)
+        );
+    }
+    // NCBI's length 4,294,967,294 is above the limit: its error, as without the wrap.
+    let bioseq = one(b">a\n>?4294967295\n>?4294967295\n", false);
+    assert_eq!(
+        (bioseq.length, bioseq.seq_data, bioseq.past_seq_pos),
+        (4_294_967_294, None, None)
+    );
+}
+
 /// A reader that fails after its bytes.
 struct FailingRead<'a>(&'a [u8]);
 
@@ -666,13 +727,14 @@ impl Read for FailingRead<'_> {
 
 #[test]
 fn read_error_ends_the_reading() {
-    let mut source = FastaBioseqSource::new(FailingRead(b">a\nMKV\n>b\nGG\n"), true);
+    let mut source =
+        FastaBioseqSource::with_parse_ids(FailingRead(b">a\nMKV\n>b\nGG\n"), true, false);
     let first = source.next_bioseq(&mut |_| ());
     assert_eq!(
         first,
         Err(SourceError {
             message: "Read error: the disk is gone".to_string(),
-            out_of_memory: false,
+            kind: SourceErrorKind::Creation,
         })
     );
     assert_eq!(source.next_bioseq(&mut |_| ()), Ok(None));
@@ -701,7 +763,7 @@ fn a_delta_that_cannot_be_allocated_is_an_error() {
     );
     assert!(fix_bioseq_deltas(delta(u64::MAX - 1)).is_err());
     let error = SourceError::out_of_memory();
-    assert!(error.out_of_memory);
+    assert_eq!(error.kind, SourceErrorKind::OutOfMemory);
     assert_eq!(error.message, "BLAST ran out of memory");
 }
 
@@ -741,7 +803,7 @@ fn fasta_files_match_their_makeblastdb_databases() {
         let (name, protein) = (columns[0], columns[1] == "prot");
         let started = std::time::Instant::now();
         let file = std::fs::File::open(columns[2]).unwrap_or_else(|e| panic!("{name}: {e}"));
-        let mut source = FastaBioseqSource::new(file, protein);
+        let mut source = FastaBioseqSource::with_parse_ids(file, protein, false);
         let seqtype = if protein {
             SeqType::Protein
         } else {

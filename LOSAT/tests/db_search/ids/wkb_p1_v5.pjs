@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "wkb_p1_v5",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "wkb_p1_v5 (parsed Seq-ids)",
+  "number-of-letters": 880,
+  "number-of-sequences": 4,
+  "last-updated": "2026-11-08T14:09:00",
+  "number-of-volumes": 1,
+  "bytes-total": 50640,
+  "bytes-to-cache": 1029,
+  "files": [
+    "wkb_p1_v5.pdb",
+    "wkb_p1_v5.phr",
+    "wkb_p1_v5.pin",
+    "wkb_p1_v5.pog",
+    "wkb_p1_v5.pos",
+    "wkb_p1_v5.pot",
+    "wkb_p1_v5.psq",
+    "wkb_p1_v5.ptf",
+    "wkb_p1_v5.pto"
+  ]
+}

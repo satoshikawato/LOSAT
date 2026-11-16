@@ -1,0 +1,38 @@
+# TBLASTN 2.17.0+
+# Query: BDT61866.1 wsv220-like protein [Penaeus monodon majanivirus A]
+# Database: User specified sequence set (Input: tests/db_search/tslice.fna)
+# Fields: subject tax id, subject sci name, subject com names, subject blast name, subject super kingdom, subject tax ids, subject sci names, subject com names, subject blast names, subject super kingdoms, subject title, subject titles, subject strand, % query coverage per subject, % query coverage per hsp, % query coverage per uniq subject
+# 3 hits found
+N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	minus	99	99	N/A
+N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	plus	99	99	N/A
+N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	minus	2	2	N/A
+# TBLASTN 2.17.0+
+# Query: BDT62090.1 hypothetical protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]
+# Database: User specified sequence set (Input: tests/db_search/tslice.fna)
+# Fields: subject tax id, subject sci name, subject com names, subject blast name, subject super kingdom, subject tax ids, subject sci names, subject com names, subject blast names, subject super kingdoms, subject title, subject titles, subject strand, % query coverage per subject, % query coverage per hsp, % query coverage per uniq subject
+# 5 hits found
+N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	minus	100	100	N/A
+N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	minus	100	9	N/A
+N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	plus	100	5	N/A
+N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	plus	100	4	N/A
+N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	minus	5	5	N/A
+# TBLASTN 2.17.0+
+# Query: BDT62092.1 tyrosine recombinase [Litopenaeus vannamei majanivirus Nimav-1_LVa]
+# Database: User specified sequence set (Input: tests/db_search/tslice.fna)
+# Fields: subject tax id, subject sci name, subject com names, subject blast name, subject super kingdom, subject tax ids, subject sci names, subject com names, subject blast names, subject super kingdoms, subject title, subject titles, subject strand, % query coverage per subject, % query coverage per hsp, % query coverage per uniq subject
+# 10 hits found
+N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	plus	98	78	N/A
+N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	plus	98	5	N/A
+N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	plus	98	14	N/A
+N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	plus	98	1	N/A
+N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	minus	98	3	N/A
+N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	plus	78	77	N/A
+N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	plus	78	2	N/A
+N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	plus	79	77	N/A
+N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	plus	79	1	N/A
+N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	N/A	minus	1	1	N/A
+# TBLASTN 2.17.0+
+# Query: q_nohit random protein of 40 residues
+# Database: User specified sequence set (Input: tests/db_search/tslice.fna)
+# 0 hits found
+# BLAST processed 4 queries

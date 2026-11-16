@@ -1,0 +1,1 @@
+- docs: README's opening names `-db` next to `-query`/`-subject`; dated notes in the 2026-08-30 runtime-authority record (no `qsort` adapter left; `LOSAT/build.rs` exists), the library surface plan (blastx has `run_local`) and the 4 GiB Wasm study (nodejs/node#62671 closed, fix only in Node 27 alpha so far); the Bioconda README says "supported" instead of "certified".

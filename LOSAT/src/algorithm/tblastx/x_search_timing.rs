@@ -33,7 +33,8 @@
 //!
 //! `units` and `merge` are the calls whose insides `[TIMING] x_pairpar` already times, and
 //! `link2` is the call `[TIMING] sum_stats_linking` times; `reevaluate` is the whole list pass,
-//! of which `[TIMING] reevaluate` times the per-HSP calls. The old lines are unchanged.
+//! of which `[TIMING] reevaluate` times the per-HSP calls. The old lines are unchanged, but for
+//! `[TIMING] identity_calc`, which was always 0 (nothing wrote its counters) and is no longer printed.
 
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::time::{Duration, Instant};

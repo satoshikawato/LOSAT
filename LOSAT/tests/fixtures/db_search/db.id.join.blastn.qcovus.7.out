@@ -1,0 +1,15 @@
+# BLASTN 2.17.0+
+# Query: njq query of the joined records
+# Database: tests/db_search/ids/njoin_abc
+# Fields: query id, subject id, % query coverage per subject, % query coverage per uniq subject, % query coverage per hsp
+# 9 hits found
+njq	gb|JHA00001.1|	100	100	100
+njq	gb|JHA00006.1|	100	100	100
+njq	gb|JHA00001.1|	100	100	100
+njq	gb|JHA00001.1|	100	100	100
+njq	gb|JHA00002.1|	100	100	100
+njq	gb|JHA00003.1|	90	90	45
+njq	gb|JHA00003.1|	90	90	45
+njq	gb|JHA00003.1|	90	90	45
+njq	gb|JHA00003.1|	90	90	45
+# BLAST processed 1 queries

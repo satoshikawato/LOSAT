@@ -33,6 +33,7 @@ pub const BLAST_SCORE_MIN: i32 = i16::MIN as i32;
 pub mod ncbistdaa {
     pub const GAP: u8 = 0;
     pub const A: u8 = 1;
+    #[cfg(test)]
     pub const B: u8 = 2;
     pub const C: u8 = 3;
     pub const D: u8 = 4;
@@ -54,11 +55,11 @@ pub mod ncbistdaa {
     pub const W: u8 = 20;
     pub const X: u8 = 21;
     pub const Y: u8 = 22;
+    #[cfg(test)]
     pub const Z: u8 = 23;
     pub const U: u8 = 24;
     pub const STOP: u8 = 25;
     pub const O: u8 = 26;
-    pub const J: u8 = 27;
 }
 
 /// Standard matrix order `ARNDCQEGHILKMFPSTWYVBJZX*`.
@@ -130,7 +131,7 @@ pub fn ncbistdaa_to_blosum62(ncbi: u8) -> u8 {
 /// 'N','P','Q','R','S','T','V','W','X','Y','Z','U','*','O','J'};
 /// ```
 #[inline(always)]
-pub fn aa_char_to_ncbistdaa(aa: u8) -> u8 {
+pub const fn aa_char_to_ncbistdaa(aa: u8) -> u8 {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:110-121
     // ```c
     // ... AMINOACID_TO_NCBISTDAA ...
@@ -717,9 +718,27 @@ pub fn standard_protein_matrix(matrix: ScoringMatrix) -> ProteinScoreMatrix {
     }
 }
 
+#[cfg(test)]
 #[inline(always)]
 pub fn protein_defscore(matrix: ScoringMatrix) -> i32 {
     standard_protein_matrix(matrix).defscore
+}
+
+/// The score of two NCBIstdaa letters in a standard matrix (`sbp->matrix->data[q][s]`), BLOSUM62's
+/// from its direct table: BLASTP's extensions and counts, and the positives of a PSSM search's
+/// alignments (`pssm_search::traceback0::final_hsp`).
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3409-3438
+/// ```c
+/// score += sbp->matrix->data[*query_var][*subject_var];
+/// ```
+#[inline(always)]
+pub fn standard_score(matrix: ScoringMatrix, query_residue: u8, subject_residue: u8) -> i32 {
+    if matrix == ScoringMatrix::Blosum62 {
+        blosum62_score_ncbistdaa_direct(query_residue, subject_residue)
+    } else {
+        protein_score(matrix, query_residue, subject_residue)
+    }
 }
 
 #[inline(always)]
@@ -883,21 +902,6 @@ pub fn protein_score_direct(matrix: ScoringMatrix, b1: usize, b2: usize) -> i32 
 #[inline(always)]
 pub fn blosum62_score(aa1_ncbi: u8, aa2_ncbi: u8) -> i32 {
     blosum62_score_ncbistdaa_direct(aa1_ncbi, aa2_ncbi)
-}
-
-#[inline(always)]
-pub fn blosum62_score_direct(b1: usize, b2: usize) -> i32 {
-    protein_score_direct(ScoringMatrix::Blosum62, b1, b2)
-}
-
-pub const AA_TABLE_SIZE: usize = BLOSUM62_SIZE * BLOSUM62_SIZE * BLOSUM62_SIZE;
-pub static MATRIX: [i8; BLOSUM62_SIZE * BLOSUM62_SIZE] = BLOSUM62;
-pub const NCBI_AA_SIZE: usize = BLASTAA_SIZE;
-pub const STOP_CODON: u8 = ncbistdaa::STOP;
-
-#[inline(always)]
-pub fn aa_char_to_ncbi_index(aa: u8) -> u8 {
-    ncbistdaa_to_blosum62(aa_char_to_ncbistdaa(aa))
 }
 
 #[cfg(test)]

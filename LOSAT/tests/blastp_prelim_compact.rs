@@ -8,7 +8,7 @@
 //! reports (every report is written from the redo's results, which read the expanded lists) with
 //! the reference (that the reports equal NCBI's is the business of the frozen fixtures), one search
 //! for each place where these searches expand the lists: the one-thread redo (each query's list
-//! when it reaches it), the windows of the redo at four threads (`LOSAT_X_BPREDOWINEXPAND`, in
+//! when it reaches it), the windows of the redo at four threads (in
 //! blocks of `LOSAT_X_BPQBLOCK`) and the end of a query chunk's search
 //! (`CHUNK_SIZE`). They check from the `[TIMING] x_bppcompact: expanded_lists=<n>` lines that
 //! compact lists were expanded, and from the `[TIMING] x_bpredopar:` lines that the redo ran in
@@ -22,8 +22,8 @@
 //! window of the redo (64 jobs per thread) holds all the jobs of a search here, so the search with
 //! query chunks runs in windows of one job per thread (`SMALL_WINDOWS`), several of them;
 //! the expansion ahead over several windows of compact lists runs on all 101 queries in
-//! `blastp_redo_par.rs`, which compares `LOSAT_X_BPREDOWINEXPAND=0` (every list expanded before a
-//! redo of more than one thread) with the windows, small and default. The default blocks of
+//! `blastp_redo_par.rs`, which compares the windows, small and default, with the redo of
+//! `LOSAT_X_BPREDOPAR=0` (every list expanded before a redo of more than one thread). The default blocks of
 //! 50,000 letters run in the default test of `blastp_query_blocks.rs`.
 //!
 //! Other files run the compact lists beside other settings:
@@ -43,6 +43,9 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+mod temp_support;
+use temp_support::{worker_log_if_unset, TempFile};
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -107,7 +110,7 @@ fn blastp(
     threads: u32,
     vars: &[(&str, &str)],
     extra: &[&str],
-) -> (Vec<u8>, Vec<usize>, Vec<usize>) {
+) -> (Vec<u8>, Vec<usize>, Vec<usize>, Option<TempFile>) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
@@ -119,12 +122,7 @@ fn blastp(
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat-bppcompact-worker.log"),
-        );
-    }
+    let log = worker_log_if_unset(&mut command, "blastp_prelim_compact_worker");
     let output = command
         .arg("blastp")
         .arg("-query")
@@ -158,7 +156,7 @@ fn blastp(
                 .unwrap_or_else(|| panic!("windows= in {line}"))
         })
         .collect();
-    (output.stdout, expanded, redo_windows)
+    (output.stdout, expanded, redo_windows, log)
 }
 
 #[test]
@@ -166,13 +164,14 @@ fn compact_lists_give_the_reports_of_the_one_thread_search() {
     let query = queries("full");
     // One thread: the redo expands each query's list when it reaches it, in one search of all
     // queries (one line, a list per query that has one; the loop passes BDT62553.1 by).
-    let (reference, expanded, _) = blastp(&query, 1, &[BATCH, BLOCKS_OFF], &["-outfmt", "6"]);
+    let (reference, expanded, _, _log) = blastp(&query, 1, &[BATCH, BLOCKS_OFF], &["-outfmt", "6"]);
     assert!(!reference.is_empty(), "the queries have a report");
     assert_eq!(expanded, [4], "threads 1");
     // Four threads: the window of the redo expands the lists as it reaches them, in the two blocks
     // of `TWO_BLOCKS` (one window each), one line per block. The report is the one-thread
     // search's.
-    let (rows, expanded, redo_windows) = blastp(&query, 4, &[BATCH, TWO_BLOCKS], &["-outfmt", "6"]);
+    let (rows, expanded, redo_windows, _log) =
+        blastp(&query, 4, &[BATCH, TWO_BLOCKS], &["-outfmt", "6"]);
     assert!(
         rows == reference,
         "threads 4, two blocks: the report differs"
@@ -196,9 +195,9 @@ fn compact_lists_of_query_chunks_give_the_same_rows() {
     // Each chunk's search (`CHUNKS`: two of each split batch) expands its lists, one per query
     // part (five), before the chunk merge; at four threads the windows of the redo
     // (`SMALL_WINDOWS`, several) then read the merged lists beside the compact list of
-    // BDT62581.1, which they expand: six in all. The reference expands every list before the
-    // redo (`LOSAT_X_BPREDOWINEXPAND=0`) instead of window by window.
-    let (reference, _, _) = blastp(
+    // BDT62581.1, which they expand: six in all. The reference is the redo without windows
+    // (`LOSAT_X_BPREDOPAR=0`), which expands every list before it.
+    let (reference, _, _, _log) = blastp(
         &query,
         4,
         &[
@@ -207,13 +206,13 @@ fn compact_lists_of_query_chunks_give_the_same_rows() {
             CHUNKS[1],
             SMALL_WINDOWS,
             BLOCKS_OFF,
-            ("LOSAT_X_BPREDOWINEXPAND", "0"),
+            ("LOSAT_X_BPREDOPAR", "0"),
         ],
         &["-outfmt", "6"],
     );
     assert!(!reference.is_empty(), "the queries have a report");
     let vars = &[BATCH, CHUNKS[0], CHUNKS[1], SMALL_WINDOWS, BLOCKS_OFF][..];
-    let (rows, expanded, redo_windows) = blastp(&query, 4, vars, &["-outfmt", "6"]);
+    let (rows, expanded, redo_windows, _log) = blastp(&query, 4, vars, &["-outfmt", "6"]);
     assert!(rows == reference, "{vars:?}: rows with query chunks differ");
     assert_eq!(expanded, [6], "{vars:?}");
     assert!(

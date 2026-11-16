@@ -1,0 +1,7 @@
+#
+# Alias file created 10/29/2026 19:13:52
+#
+TITLE two protein dbs
+DBLIST "db/p5" "db/pm5" 
+NSEQ 21
+LENGTH 3031

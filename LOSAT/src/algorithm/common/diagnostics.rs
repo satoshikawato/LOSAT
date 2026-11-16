@@ -10,7 +10,14 @@ use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering as AtomicOrdering};
 
 /// Check if diagnostics are enabled via environment variable
 pub fn diagnostics_enabled() -> bool {
-    std::env::var("LOSAT_DIAGNOSTICS")
+    diagnostics_flag(std::env::var("LOSAT_DIAGNOSTICS"))
+}
+
+/// No NCBI counterpart: whether a read of LOSAT_DIAGNOSTICS turns the diagnostics on ("1", or
+/// "true" in any case). Kept apart from the read, as `utils::xswitch::state` is, so that a test
+/// gives it values without changing the environment of the process the lib's tests share.
+fn diagnostics_flag(value: Result<String, std::env::VarError>) -> bool {
+    value
         .map(|v| v == "1" || v.to_lowercase() == "true")
         .unwrap_or(false)
 }
@@ -57,8 +64,6 @@ pub struct BaseDiagnosticCounters {
     pub hsps_in_merged_clusters: AtomicUsize, // Total HSPs that were part of merged clusters
     // HSP culling diagnostics
     pub hsps_culled_dominated: AtomicUsize, // HSPs culled by domination test
-    // Chain member filtering (NCBI link_hsps.c:1018-1020)
-    pub hsps_chain_member_filtered: AtomicUsize, // HSPs filtered as chain members (linked_set && !start_of_chain)
 }
 
 impl Default for BaseDiagnosticCounters {
@@ -90,7 +95,6 @@ impl Default for BaseDiagnosticCounters {
             clusters_merged: AtomicUsize::new(0),
             hsps_in_merged_clusters: AtomicUsize::new(0),
             hsps_culled_dominated: AtomicUsize::new(0),
-            hsps_chain_member_filtered: AtomicUsize::new(0),
             seed_score_min: AtomicI32::new(i32::MAX),
             seed_score_max: AtomicI32::new(i32::MIN),
             seed_score_sum: AtomicUsize::new(0),
@@ -365,83 +369,9 @@ impl ProteinDiagnosticCounters {
     }
 }
 
-/// Diagnostic counters for nucleotide alignments (BLASTN)
-#[derive(Default)]
-pub struct NucleotideDiagnosticCounters {
-    pub base: BaseDiagnosticCounters,
-    // BLASTN-specific counters can be added here
-    // For now, BLASTN uses the base counters
-}
-
-impl NucleotideDiagnosticCounters {
-    /// Print a summary of all diagnostic counters for BLASTN
-    pub fn print_summary(&self, min_ungapped_score: i32) {
-        eprintln!("\n=== BLASTN Pipeline Diagnostics ===");
-        eprintln!("Seed Stage:");
-        eprintln!(
-            "  K-mer matches found:        {}",
-            self.base.kmer_matches.load(AtomicOrdering::Relaxed)
-        );
-        eprintln!(
-            "  Seeds filtered (low score): {}",
-            self.base.seeds_low_score.load(AtomicOrdering::Relaxed)
-        );
-        eprintln!(
-            "  Seeds filtered (two-hit):   {}",
-            self.base.seeds_two_hit_failed.load(AtomicOrdering::Relaxed)
-        );
-        eprintln!(
-            "  Seeds passed to extension:  {}",
-            self.base.seeds_passed.load(AtomicOrdering::Relaxed)
-        );
-        eprintln!("Ungapped Extension Stage:");
-        eprintln!(
-            "  Ungapped extensions run:    {}",
-            self.base.ungapped_extensions.load(AtomicOrdering::Relaxed)
-        );
-        eprintln!(
-            "  Filtered (low score < {}):  {}",
-            min_ungapped_score,
-            self.base.ungapped_low_score.load(AtomicOrdering::Relaxed)
-        );
-        eprintln!("Post-Processing Stage:");
-        eprintln!(
-            "  HSPs before chaining:       {}",
-            self.base.hsps_before_chain.load(AtomicOrdering::Relaxed)
-        );
-        eprintln!(
-            "  Clusters (single HSP):      {}",
-            self.base.clusters_single.load(AtomicOrdering::Relaxed)
-        );
-        eprintln!(
-            "  Clusters (merged):          {}",
-            self.base.clusters_merged.load(AtomicOrdering::Relaxed)
-        );
-        eprintln!(
-            "  HSPs in merged clusters:    {}",
-            self.base
-                .hsps_in_merged_clusters
-                .load(AtomicOrdering::Relaxed)
-        );
-        eprintln!(
-            "  HSPs after chaining:        {}",
-            self.base.hsps_after_chain.load(AtomicOrdering::Relaxed)
-        );
-        eprintln!(
-            "  HSPs culled (dominated):    {}",
-            self.base
-                .hsps_culled_dominated
-                .load(AtomicOrdering::Relaxed)
-        );
-        eprintln!(
-            "  Final hits (after filter):  {}",
-            self.base
-                .hsps_after_overlap_filter
-                .load(AtomicOrdering::Relaxed)
-        );
-        eprintln!("====================================\n");
-    }
-}
-
 // For backward compatibility, provide a type alias for TBLASTX
 pub type DiagnosticCounters = ProteinDiagnosticCounters;
+
+#[cfg(test)]
+#[path = "diagnostics_tests.rs"]
+mod diagnostics_tests;

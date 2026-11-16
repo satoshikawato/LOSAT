@@ -1,8 +1,10 @@
 //! The definition lines of one database sequence (`Blast-def-line-set`) and the choices that
 //! every report makes from them: the Seq-align id (`alignment_id`), the definition line of the
 //! subject Bioseq (`bioseq_defline`) and of the shown id (`display_defline`), and the joins of
-//! the formats that show every definition line (tabular `sall*`, `salltitles`, `staxids`, the
-//! XML `Hit_def`, the lines of an outfmt 0 alignment block).
+//! the formats that show every definition line (the XML `Hit_def`, the lines of an outfmt 0
+//! alignment block; the tabular `sall*`, `salltitles` and `staxids` are made by
+//! `report::db_subject::ParsedSubject`, `report::tabular::TabularTaxonomy` and the tabular
+//! writer from these definition lines).
 //!
 //! NCBI's formatters read the definition lines through the object manager: the Seq-align id
 //! is resolved to the sequence again, whose Bioseq holds the ids and title of one definition
@@ -77,8 +79,6 @@ pub enum TabularId {
     Accession,
     /// `saccver` (`eAccVersion`).
     AccessionVersion,
-    /// `sgi` (`eGi`).
-    Gi,
 }
 
 impl BlastDefline {
@@ -131,6 +131,93 @@ impl BlastDefline {
 }
 
 impl DeflineSet {
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:957-1019
+    // ```c++
+    // static void
+    // s_GetBioseqTitle(CRef<CBlast_def_line_set> deflines, string & title)
+    // {
+    //     title.erase();
+    //     ...
+    //     bool first_defline(true);
+    //
+    //     for(TDefIt iter = dl.begin(); iter != dl.end(); iter++) {
+    //         ostringstream oss;
+    //
+    //         const CBlast_def_line & defline = **iter;
+    //
+    //         if (! title.empty()) {
+    //             //oss << "\1";
+    //             oss << " ";
+    //         }
+    //
+    //         bool wrote_seqids(false);
+    //
+    //         if ((!first_defline) && defline.CanGetSeqid()) {
+    //             const list< CRef<CSeq_id > > & sl = defline.GetSeqid();
+    //
+    //             bool first_seqid(true);
+    //
+    //             // First should look like: "<title>"
+    //             // Others should look like: " ><seqid>|<seqid>|<seqid><title>"
+    //
+    //             for (TSeqIt seqit = sl.begin(); seqit != sl.end(); seqit++) {
+    //                 if (first_seqid) {
+    //                     oss << ">";
+    //                 } else {
+    //                     oss << "|";
+    //                 }
+    //
+    //                 (*seqit)->WriteAsFasta(oss);
+    //
+    //                 first_seqid = false;
+    //                 wrote_seqids = true;
+    //             }
+    //         }
+    //
+    //         // Omit seqids from first defline
+    //         first_defline = false;
+    //
+    //         if (defline.CanGetTitle()) {
+    //             if (wrote_seqids) {
+    //                 oss << " ";
+    //             }
+    //             oss << defline.GetTitle();
+    //         }
+    //
+    //         title += oss.str();
+    //     }
+    // }
+    // ```
+    /// The title of the Bioseq: the first definition line's title, then ` >` with the FASTA
+    /// strings of the ids of each later one (joined by `|`) and its title.
+    pub fn bioseq_title(&self) -> Vec<u8> {
+        let mut title = Vec::new();
+        let mut first_defline = true;
+        for defline in &self.deflines {
+            let mut oss = Vec::new();
+            if !title.is_empty() {
+                oss.push(b' ');
+            }
+            let mut wrote_seqids = false;
+            if !first_defline {
+                for (at, id) in defline.ids.iter().enumerate() {
+                    oss.push(if at == 0 { b'>' } else { b'|' });
+                    fasta(id, &mut oss);
+                    wrote_seqids = true;
+                }
+            }
+            first_defline = false;
+            if let Some(text) = &defline.title {
+                if wrote_seqids {
+                    oss.push(b' ');
+                }
+                oss.extend_from_slice(text);
+            }
+            title.extend_from_slice(&oss);
+        }
+        title
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1844-1864
     // ```c++
     // list< CRef<CSeq_id> > CSeqDBVol::GetSeqIDs(int  oid) const
@@ -241,24 +328,80 @@ impl DeflineSet {
     //     case e_Local:
     //         SetLocal().SetStrOrId(acc);
     // ```
-    // `TruncateSpaces` drops the bytes that C's `isspace` takes; `SetStrOrId` gives an
-    // integer tag for a label that reads as one, which `compare` treats as the same tag.
+    // `TruncateSpaces_Unsafe` (`eTrunc_Both`) is `ncbi_str::truncate_spaces`; `SetStrOrId` gives
+    // an integer tag for a label that reads as one, which `compare` treats as the same tag.
     pub fn bioseq_defline(&self, target: &ParsedSeqId) -> Option<usize> {
         let mut label = Vec::new();
         content(target, true, &mut label);
-        let is_space = |c: &u8| matches!(c, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r');
-        let start = label
-            .iter()
-            .position(|c| !is_space(c))
-            .unwrap_or(label.len());
-        let end = label
-            .iter()
-            .rposition(|c| !is_space(c))
-            .map_or(start, |end| end + 1);
-        let local = ParsedSeqId::Local(ObjectId::Str(label[start..end].to_vec()));
+        let acc = crate::ncbi_str::truncate_spaces(&label);
+        let local = ParsedSeqId::Local(ObjectId::Str(acc.to_vec()));
         self.deflines
             .iter()
             .position(|defline| seqid_in(&defline.ids, target) || seqid_in(&defline.ids, &local))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1069-1092
+    // ```c++
+    //     if (preferred_gi != ZERO_GI || preferred_seqid) {
+    //         CRef<CBlast_def_line_set> new_bdls(new CBlast_def_line_set);
+    //     ...
+    //             seqid.Reset(preferred_seqid);
+    //     ...
+    //         ITERATE(list< CRef<CBlast_def_line> >, iter, BDLS->Get()) {
+    //             if ((! found) && s_SeqDB_SeqIdIn((**iter).GetSeqid(), *seqid)) {
+    //                 found = true;
+    //                 new_bdls->Set().push_front(*iter);
+    //             } else {
+    //                 new_bdls->Set().push_back(*iter);
+    //             }
+    //         }
+    // ```
+    // The data loader asks for the Bioseq of the id it was asked for (cached_sequence.cpp:58), so
+    // `target` is the Seq-align id by which the sequence is read; `x_GetTaxonomy` walks the lines in
+    // this order and asks its volume's cache for each positive taxid (seqdbvol.cpp:1129-1153).
+    /// The positive taxids of the definition lines in the order in which NCBI's volume looks them
+    /// up where it loads this sequence's Bioseq for the id `target` (`CSeqDBVol::x_GetTaxonomy` of
+    /// `x_GetTaxDefline`): the first line that holds `target` (`s_SeqDB_SeqIdIn`, without the
+    /// local form that `bioseq_defline` also takes) first, then the others in their stored order;
+    /// a taxid of several lines comes once for each (each is a lookup of the volume's cache).
+    /// Without a target (`GetBioseq(oid)`: blastdbcmd without `-target_only`, the maskers, a
+    /// sequence read by its ordinal id) the stored order.
+    pub fn taxonomy_lookups(&self, target: Option<&ParsedSeqId>) -> Vec<i32> {
+        self.taxonomy_order(target).collect()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:1004-1011
+    // ```c++
+    //         case CSeqdesc::e_Source:
+    //             {
+    //             if ((needed_desc_choices & fSource) != 0) {
+    //                 m_Source.Reset(&desc_it->GetSource());
+    //                 // take first, then skip remainder
+    //                 needed_desc_choices &= ~fSource;
+    //             }
+    // ```
+    /// The taxid of the Bioseq's first source, whose name `CDeflineGenerator` makes an empty title
+    /// of (`report::defline::BioseqFacts::taxname`): the first of `taxonomy_lookups(target)`, the
+    /// one owner of that order for every reader (the search's headers, blastdbcmd, the maskers).
+    /// With `-target_only` it is taken from every definition line the filter keeps, not from the
+    /// target's line alone that the Bioseq's ids and title come from.
+    pub fn first_source_taxid(&self, target: Option<&ParsedSeqId>) -> Option<i32> {
+        self.taxonomy_order(target).next()
+    }
+
+    /// `taxonomy_lookups` as an iterator.
+    fn taxonomy_order(&self, target: Option<&ParsedSeqId>) -> TaxonomyOrder<'_> {
+        let front = target.and_then(|target| {
+            self.deflines
+                .iter()
+                .position(|defline| seqid_in(&defline.ids, target))
+        });
+        TaxonomyOrder {
+            deflines: &self.deflines,
+            front,
+            front_given: false,
+            next: 0,
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4741-4785
@@ -320,175 +463,6 @@ impl DeflineSet {
             found: found.is_some(),
             taxid,
         })
-    }
-
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:590-603
-    // ```c++
-    //     if (bdlRef.NotEmpty() && bdlRef->CanGet() && bdlRef->IsSet() && !bdlRef->Get().empty()){
-    //     	ITERATE(CBlast_def_line_set::Tdata, itr, bdlRef->Get()) {
-    //             if((*itr)->IsSetTaxid()) {
-    //                     if((*itr)->GetTaxid() != ZERO_TAX_ID) {
-    //                     	m_SubjectTaxId = (*itr)->GetTaxid();
-    //                     	break;
-    //                     }
-    //             }
-    //     	}
-    //     }
-    //
-    //     if(m_SubjectTaxId == ZERO_TAX_ID) {
-    //           m_SubjectTaxId = sequence::GetTaxId(handle);
-    //     }
-    // ```
-    // The fall-back finds nothing: the Bioseq's taxonomy descriptors are those of its
-    // definition line's taxid when it is above 0 (`x_GetTaxonomy`, seqdbvol.cpp:1131-1137),
-    // and then the loop has found a non-zero taxid already.
-    /// The `staxid` of the set: the first non-zero `taxid` (`x_SetTaxInfo`), 0 for none.
-    pub fn first_taxid(&self) -> i32 {
-        self.deflines
-            .iter()
-            .filter_map(|defline| defline.taxid)
-            .find(|&taxid| taxid != 0)
-            .unwrap_or(0)
-    }
-
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:647-670
-    // ```c++
-    //     if (bdlRef.NotEmpty() && bdlRef->CanGet() && bdlRef->IsSet() && !bdlRef->Get().empty()){
-    //     	ITERATE(CBlast_def_line_set::Tdata, itr, bdlRef->Get()) {
-    //     		CBlast_def_line::TTaxIds t = (*itr)->GetTaxIds();
-    //     		m_SubjectTaxIds.insert(t.begin(), t.end());
-    //     	}
-    //     }
-    //
-    //     if(m_SubjectTaxIds.empty()) {
-    //             CSeqdesc_CI desc_s(handle, CSeqdesc::e_Source);
-    //             for (;desc_s; ++desc_s) {
-    //                      TTaxId t = desc_s->GetSource().GetOrg().GetTaxId();
-    //                      if(t != ZERO_TAX_ID) {
-    //                     	 m_SubjectTaxIds.insert(t);
-    //                      }
-    //             }
-    //
-    //             CSeqdesc_CI desc(handle, CSeqdesc::e_Org);
-    //             for (; desc; ++desc) {
-    //                     TTaxId t= desc->GetOrg().GetTaxId();
-    //                     if(t != ZERO_TAX_ID) {
-    //                     	m_SubjectTaxIds.insert(t);
-    //                     }
-    //             }
-    //     }
-    // ```
-    // The fall-back finds nothing for the reason given at `first_taxid`: a definition line
-    // with a taxid above 0 makes `GetTaxIds` non-empty. `m_SubjectTaxIds` is a `set`.
-    /// The `staxids` of the set: the union of every definition line's `GetTaxIds`
-    /// (`x_SetTaxInfoAll`), in ascending order.
-    pub fn tax_ids(&self) -> BTreeSet<i32> {
-        let mut ids = BTreeSet::new();
-        for defline in &self.deflines {
-            ids.extend(defline.tax_ids());
-        }
-        ids
-    }
-
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:544-555
-    // ```c++
-    //     if (bdlRef.NotEmpty() && bdlRef->CanGet() && bdlRef->IsSet() && !bdlRef->Get().empty()){
-    //         vector< CConstRef<CSeq_id> > original_seqids;
-    //
-    //         ITERATE(CBlast_def_line_set::Tdata, itr, bdlRef->Get()) {
-    //             original_seqids.clear();
-    //             ITERATE(CBlast_def_line::TSeqid, id, (*itr)->GetSeqid()) {
-    //                 original_seqids.push_back(*id);
-    //             }
-    //             list<CRef<objects::CSeq_id> > next_seqid_list;
-    //             // Next call replaces BL_ORD_ID if found.
-    //             CShowBlastDefline::GetSeqIdList(bh,original_seqids,next_seqid_list);
-    //             m_SubjectIds.push_back(next_seqid_list);
-    //         }
-    // ```
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:224-231
-    // ```c++
-    // void CBlastTabularInfo::x_PrintSubjectAllSeqIds(void)
-    // {
-    //     ITERATE(vector<list<CRef<CSeq_id> > >, iter, m_SubjectIds) {
-    //         if (iter != m_SubjectIds.begin())
-    //             m_Ostream << ";";
-    //         m_Ostream << s_GetSeqIdListString(*iter, eFullId);
-    //     }
-    // }
-    // ```
-    // `x_PrintSubjectAllGis` and `x_PrintSubjectAllAccessions` (tabular.cpp:238-264) are the
-    // same loop with `eGi` and `eAccession`.
-    /// The tabular field of `kind` for each definition line, `;`-joined (`sallseqid`,
-    /// `sallacc`, `sallgi`): `tabular_id` of the line's ids after `seq_id_list` with
-    /// `title_word` (the subject Bioseq's, the same for every line).
-    pub fn tabular_all(&self, kind: TabularId, title_word: &[u8], out: &mut Vec<u8>) {
-        for (i, defline) in self.deflines.iter().enumerate() {
-            if i > 0 {
-                out.push(b';');
-            }
-            tabular_id(&seq_id_list(&defline.ids, title_word), kind, out);
-        }
-    }
-
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:387-440
-    // ```c++
-    // void CBlastTabularInfo::x_PrintSubjectAllTitles ()
-    // {
-    // 	if(m_SubjectDefline.NotEmpty() && m_SubjectDefline->CanGet() &&
-    // 	   m_SubjectDefline->IsSet() && !m_SubjectDefline->Get().empty())
-    // 	{
-    // 		const list<CRef<CBlast_def_line> > & defline = m_SubjectDefline->Get();
-    // 		list<CRef<CBlast_def_line> >::const_iterator iter = defline.begin();
-    // 		for(; iter != defline.end(); ++iter)
-    // 		{
-    // 			if (iter != defline.begin())
-    // 						 m_Ostream << "<>";
-    //
-    // 			if((*iter)->IsSetTitle())
-    // 			{
-    // 				if((*iter)->GetTitle().empty())
-    // 					m_Ostream << NA;
-    // 				else
-    // 					m_Ostream << (*iter)->GetTitle();
-    // 			}
-    // 			else
-    // 				m_Ostream << NA;
-    // 		}
-    // 	}
-    // 	else
-    // 		m_Ostream << NA;
-    //
-    // }
-    //
-    // void CBlastTabularInfo::x_PrintSubjectTitle()
-    // ...
-    // 			if(defline.front()->IsSetTitle())
-    // 			{
-    // 				if(defline.front()->GetTitle().empty())
-    // 					m_Ostream << NA;
-    // 				else
-    // 					m_Ostream << defline.front()->GetTitle();
-    // 			}
-    // 			else
-    // 				m_Ostream << NA;
-    // ```
-    /// `stitle`: the first title, `N/A` for an empty or absent one or no definition line.
-    pub fn first_title(&self, out: &mut Vec<u8>) {
-        tabular_title(self.deflines.first(), out);
-    }
-
-    /// `salltitles`: every title as `stitle` prints it, `<>`-joined.
-    pub fn all_titles(&self, out: &mut Vec<u8>) {
-        if self.deflines.is_empty() {
-            out.extend_from_slice(NOT_AVAILABLE);
-        }
-        for (i, defline) in self.deflines.iter().enumerate() {
-            if i > 0 {
-                out.extend_from_slice(b"<>");
-            }
-            tabular_title(Some(defline), out);
-        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:266-304
@@ -564,15 +538,6 @@ impl DeflineSet {
     }
 }
 
-const NOT_AVAILABLE: &[u8] = b"N/A";
-
-fn tabular_title(defline: Option<&BlastDefline>, out: &mut Vec<u8>) {
-    match defline.and_then(|defline| defline.title.as_deref()) {
-        Some(title) if !title.is_empty() => out.extend_from_slice(title),
-        _ => out.extend_from_slice(NOT_AVAILABLE),
-    }
-}
-
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:165-197
 // ```c++
 // static string
@@ -610,10 +575,13 @@ fn tabular_title(defline: Option<&BlastDefline>, out: &mut Vec<u8>) {
 // }
 // ```
 // NCBI dereferences the best id of an empty list (accession kinds); every definition line
-// that makeblastdb writes has an id, and LOSAT writes `Unknown` for none.
+// that makeblastdb writes has an id, and LOSAT writes `Unknown` for none. `eGi` prints a
+// number: the tabular `sgi` and `sallgi` are `BlastDefline::gi` of the definition lines, as
+// `seq_id_list` replaces no GI (`report::db_subject::ParsedSubject::tabular_gi`,
+// `all_tabular_ids`).
 /// The tabular id of `kind` of the id list `ids` (`s_GetSeqIdListString`): `Unknown` for an
-/// empty result. The subject fields (`sseqid`, `sacc`, `saccver`, `sgi`) take the ids of the
-/// subject Bioseq's definition line (`bioseq_defline`) after `seq_id_list`.
+/// empty result. The subject fields (`sseqid`, `sacc`, `saccver`) take the ids of the subject
+/// Bioseq's definition line (`bioseq_defline`) after `seq_id_list`.
 pub fn tabular_id(ids: &[ParsedSeqId], kind: TabularId, out: &mut Vec<u8>) {
     let start = out.len();
     match kind {
@@ -623,7 +591,6 @@ pub fn tabular_id(ids: &[ParsedSeqId], kind: TabularId, out: &mut Vec<u8>) {
                 content(best, kind == TabularId::AccessionVersion, out);
             }
         }
-        TabularId::Gi => number(out, first_gi(ids)),
     }
     if out.len() == start {
         out.extend_from_slice(b"Unknown");
@@ -965,6 +932,304 @@ pub fn compare(a: &ParsedSeqId, b: &ParsedSeqId) -> Sic {
     }
 }
 
+// No NCBI counterpart: a necessary condition of `compare`'s `Yes`, for LOSAT's check that no two
+// sequences of a database can be taken for one where a report joins following hits
+// (`report::db_subject::join_keys`).
+/// Adds to `keys` the keys of `id`: two ids that `compare` finds the same (`Sic::Yes`) share at
+/// least one key, so ids that share none never do (ids that share one need not). A text Seq-id
+/// has its accession and its name in upper case, whatever its alternative (a superset of the
+/// alternatives `compare` compares across); a `pdb` id its molecule; the other alternatives their
+/// alternative and their value, an object id as its number or its string in upper case
+/// (`object_id_match`). The keys are 64-bit hashes of those values.
+pub fn match_keys(id: &ParsedSeqId, keys: &mut Vec<u64>) {
+    use std::hash::{Hash, Hasher};
+    let mut key = |parts: &[&[u8]]| {
+        let mut hasher = std::hash::DefaultHasher::new();
+        parts.hash(&mut hasher);
+        keys.push(hasher.finish());
+    };
+    let tag_key = |tag: &ObjectId| -> Vec<u8> {
+        match object_id_number(tag) {
+            Some(number) => format!("n{number}").into_bytes(),
+            None => match tag {
+                ObjectId::Str(text) => [b"s".as_slice(), &text.to_ascii_uppercase()].concat(),
+                ObjectId::Id(_) => unreachable!("an integer tag is a number"),
+            },
+        }
+    };
+    match id {
+        ParsedSeqId::Local(tag) => key(&[b"local", &tag_key(tag)]),
+        ParsedSeqId::Gibbsq(number) => key(&[b"gibbsq", &number.to_le_bytes()]),
+        ParsedSeqId::Gibbmt(number) => key(&[b"gibbmt", &number.to_le_bytes()]),
+        ParsedSeqId::Giim(giim) => key(&[b"giim", &giim.id.to_le_bytes()]),
+        ParsedSeqId::Patent(patent) => {
+            let number = match &patent.cit.id {
+                PatentNumber::Number(number) | PatentNumber::AppNumber(number) => number,
+            };
+            key(&[
+                b"patent",
+                &patent.seqid.to_le_bytes(),
+                &patent.cit.country.to_ascii_uppercase(),
+                &number.to_ascii_uppercase(),
+            ])
+        }
+        ParsedSeqId::General(dbtag) => key(&[
+            b"general",
+            &dbtag.db.to_ascii_uppercase(),
+            &tag_key(&dbtag.tag),
+        ]),
+        ParsedSeqId::Gi(gi) => key(&[b"gi", &gi.to_le_bytes()]),
+        ParsedSeqId::Pdb(pdb) => key(&[b"pdb", &pdb.mol]),
+        _ => {
+            let text = id
+                .textseq()
+                .expect("the other alternatives are text Seq-ids");
+            if let Some(accession) = &text.accession {
+                key(&[b"accession", &accession.to_ascii_uppercase()]);
+            }
+            if let Some(name) = &text.name {
+                key(&[b"name", &name.to_ascii_uppercase()]);
+            }
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:1502
+// ```c++
+//     TSeq_id2TSE_Set::const_iterator tse_set = m_TSE_seq.find(idh);
+// ```
+// The handle of a text Seq-id is its accession and version in any alternative, in any case (probe
+// of the DI-7 review: `NM_1.1` and `NM_1.2`, `NM_1` and `NM_1.1`, `pdb|1ABC|A` and `|B` are two
+// sequences to NCBI's scope; `gb|X.1|` and `emb|X.1|`, `abc` and `ABC` are one).
+/// Adds to `keys` the keys of `id` as NCBI's scope finds a sequence by it: two ids that the scope
+/// finds as one share a key. Other than `match_keys`, a version and a PDB chain tell ids apart.
+pub fn scope_keys(id: &ParsedSeqId, keys: &mut Vec<u64>) {
+    use std::hash::{Hash, Hasher};
+    let mut key = |parts: &[&[u8]]| {
+        let mut hasher = std::hash::DefaultHasher::new();
+        parts.hash(&mut hasher);
+        keys.push(hasher.finish());
+    };
+    if let ParsedSeqId::Pdb(pdb) = id {
+        key(&[
+            b"pdb",
+            &pdb.mol.to_ascii_uppercase(),
+            &pdb.chain.unwrap_or(32).to_le_bytes(),
+            pdb.chain_id.as_deref().unwrap_or_default(),
+        ]);
+    } else if let Some(text) = id.textseq() {
+        let version = text
+            .version
+            .map_or(Vec::new(), |v| v.to_le_bytes().to_vec());
+        match (&text.accession, &text.name) {
+            (Some(accession), _) => {
+                key(&[b"accession", &accession.to_ascii_uppercase(), &version]);
+            }
+            (None, Some(name)) => key(&[b"name", &name.to_ascii_uppercase()]),
+            (None, None) => {}
+        }
+    } else {
+        match_keys(id, keys);
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1064-1095
+// ```c++
+// bool CSeq_id_Textseq_Tree::x_Equals(const CTextseq_id& id1,
+//                                     const CTextseq_id& id2)
+// {
+//     if ( id1.IsSetAccession() != id2.IsSetAccession() ) {
+//         return false;
+//     }
+//     if ( id1.IsSetName() != id2.IsSetName() ) {
+//         return false;
+//     }
+//     if ( id1.IsSetVersion() != id2.IsSetVersion() ) {
+//         return false;
+//     }
+//     if ( id1.IsSetRelease() != id2.IsSetRelease() ) {
+//         return false;
+//     }
+//     if ( id1.IsSetAccession() &&
+//          !NStr::EqualNocase(id1.GetAccession(), id2.GetAccession()) ) {
+//         return false;
+//     }
+//     if ( id1.IsSetName() &&
+//          !NStr::EqualNocase(id1.GetName(), id2.GetName()) ) {
+//         return false;
+//     }
+//     if ( id1.IsSetVersion() &&
+//          id1.GetVersion() != id2.GetVersion() ) {
+//         return false;
+//     }
+//     if ( id1.IsSetRelease() &&
+//          id1.GetRelease() != id2.GetRelease() ) {
+//         return false;
+//     }
+//     return true;
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1713-1719
+// ```c++
+// bool CSeq_id_GB_Tree::x_Check(const CSeq_id::E_Choice& type) const
+// {
+//     return
+//         type == CSeq_id::e_Genbank  ||
+//         type == CSeq_id::e_Embl  ||
+//         type == CSeq_id::e_Ddbj;
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1141-1148 (`FindInfo`; the
+// packed key of an accession, `ParseAcc` at 825-880, holds its prefix without case, its digits
+// and its version, not the alternative)
+// ```c++
+//     if ( s_PackTextidEnabled() &&
+//          tid.IsSetAccession() && !tid.IsSetName() && !tid.IsSetRelease() ) {
+//         const string& acc = tid.GetAccession();
+//         TPackedKey key = CSeq_id_Textseq_Info::ParseAcc(acc, tid);
+//         if ( key ) {
+//             TPacked packed = CSeq_id_Textseq_Info::Pack(key, tid);
+//             TReadLockGuard guard(m_TreeLock);
+//             TPackedMap_CI it = m_PackedMap.find(key);
+// ```
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.hpp:767-768 (`CSeq_id_Local_Tree`),
+// 919-925 (`CSeq_id_General_Tree`) and 998-1008 (`CSeq_id_Patent_Tree`)
+// ```c++
+//     typedef unordered_map<string, CSeq_id_Local_Info*, PHashNocase, PEqualNocase> TByStr;
+//     typedef map<CObject_id::TId, CSeq_id_Local_Info*>         TById;
+//     ...
+//         typedef unordered_map<string, CSeq_id_General_PlainInfo*, PHashNocase, PEqualNocase> TByStr;
+//         typedef map<TPacked, CSeq_id_General_PlainInfo*>         TById;
+//         ...
+//     typedef map<string, STagMap, PNocase> TDbMap;
+//     ...
+//     // 3-level indexing: country, (number|app_number), seqid.
+//     // Ignoring patent doc-type in indexing.
+//     ...
+//         typedef map<string, TBySeqid, PNocase> TByNumber; // or by App_number
+//     ...
+//     typedef map<string, SPat_idMap, PNocase> TByCountry;
+// ```
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:3467-3481 (the PDB tree's key;
+// `CSeq_id_PDB_Info::Normalize` upper-cases the molecule after its first letter and sets
+// `chain_id` from `chain`, then the tree compares the normalized ids, `Equals`)
+// ```c++
+//     string skey = id.GetMol().Get();
+//     if (id.IsSetChain_id()) {
+//         skey += '_';
+//         skey += id.GetChain_id();
+//     }
+//     else if (id.IsSetChain()) {
+//         skey += '_';
+//         skey += char(id.GetChain());
+//     }
+//     return skey;
+// ```
+// No NCBI counterpart: LOSAT's sets of `CSeq_id_Handle` (psiblast's inclusion sets and the rows
+// of its PSSM, `algorithm::psiblast::rounds::SetKey`) take two ids for one where they are equal
+// (`ParsedSeqId`'s `Eq`, which the handle of each id follows, but for a `giim` id, which those
+// sets refuse) and refuse two other ids that share this key, where the handles can be one or two.
+/// Adds to `out` the key of `id` that every id which NCBI's `CSeq_id_Handle` takes for the same
+/// sequence shares: a text Seq-id's accession and name in upper case, its version and release,
+/// with GenBank, EMBL and DDBJ as one alternative (their tree; an accession that packs is one
+/// handle in the three); a local id's tag and a `general` id's database and tag as `match_keys`
+/// takes them (a number, or a string in upper case); a patent's country, number (or application
+/// number, as one) in upper case and the sequence's number; a PDB id's molecule in upper case and
+/// its chain as written (`chain_id`, else `chain`, read as its default); the others' values. Ids
+/// that NCBI keeps apart can share it (`gb|ABC1.1|` and `emb|abc1.1|`).
+pub fn handle_superset_key(id: &ParsedSeqId, out: &mut Vec<u8>) {
+    let mut part = |bytes: &[u8]| {
+        out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        out.extend_from_slice(bytes);
+    };
+    let tag_key = |tag: &ObjectId| -> Vec<u8> {
+        match object_id_number(tag) {
+            Some(number) => format!("n{number}").into_bytes(),
+            None => match tag {
+                ObjectId::Str(text) => [b"s".as_slice(), &text.to_ascii_uppercase()].concat(),
+                ObjectId::Id(_) => unreachable!("an integer tag is a number"),
+            },
+        }
+    };
+    let option = |value: Option<&[u8]>| -> Vec<u8> {
+        value.map_or(b"-".to_vec(), |value| [b"+".as_slice(), value].concat())
+    };
+    match id {
+        ParsedSeqId::Local(tag) => {
+            part(b"local");
+            part(&tag_key(tag));
+        }
+        ParsedSeqId::Gibbsq(number) => {
+            part(b"gibbsq");
+            part(&number.to_le_bytes());
+        }
+        ParsedSeqId::Gibbmt(number) => {
+            part(b"gibbmt");
+            part(&number.to_le_bytes());
+        }
+        ParsedSeqId::Giim(giim) => {
+            part(b"giim");
+            part(&giim.id.to_le_bytes());
+        }
+        ParsedSeqId::Patent(patent) => {
+            let number = match &patent.cit.id {
+                PatentNumber::Number(number) | PatentNumber::AppNumber(number) => number,
+            };
+            part(b"patent");
+            part(&patent.cit.country.to_ascii_uppercase());
+            part(&number.to_ascii_uppercase());
+            part(&patent.seqid.to_le_bytes());
+        }
+        ParsedSeqId::General(dbtag) => {
+            part(b"general");
+            part(&dbtag.db.to_ascii_uppercase());
+            part(&tag_key(&dbtag.tag));
+        }
+        ParsedSeqId::Gi(gi) => {
+            part(b"gi");
+            part(&gi.to_le_bytes());
+        }
+        ParsedSeqId::Pdb(pdb) => {
+            let chain = match &pdb.chain_id {
+                Some(chain_id) => chain_id.clone(),
+                None => vec![pdb.chain_or_default() as u8],
+            };
+            part(b"pdb");
+            part(&pdb.mol.to_ascii_uppercase());
+            part(&chain);
+        }
+        _ => {
+            let text = id
+                .textseq()
+                .expect("the other alternatives are text Seq-ids");
+            let alternative = match id {
+                ParsedSeqId::Genbank(_) | ParsedSeqId::Embl(_) | ParsedSeqId::Ddbj(_) => "gb",
+                _ => id.alternative_name(),
+            };
+            part(alternative.as_bytes());
+            part(&option(
+                text.accession
+                    .as_ref()
+                    .map(|accession| accession.to_ascii_uppercase())
+                    .as_deref(),
+            ));
+            part(&option(
+                text.name
+                    .as_ref()
+                    .map(|name| name.to_ascii_uppercase())
+                    .as_deref(),
+            ));
+            part(&option(
+                text.version
+                    .map(|version| version.to_le_bytes())
+                    .as_ref()
+                    .map(|bytes| bytes.as_slice()),
+            ));
+            part(&option(text.release.as_deref()));
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Patent_seq_id.cpp:53-56
 // ```c++
 // bool CPatent_seq_id::Match(const CPatent_seq_id& psip2) const
@@ -1147,22 +1412,27 @@ fn object_id_match(a: &ObjectId, b: &ObjectId) -> bool {
 }
 
 /// The value of an Object-id that `GetIdType` reads as an integer: an `id`, or a `str` that
-/// is a whole decimal `Int8` without a `+` or leading zeros (`NStr::StringToInt8` with the
-/// default flags takes no spaces).
+/// `NStr::StringToInt8(str, fConvErr_NoThrow | fConvErr_NoErrMessage)` reads
+/// (`ncbi_str::string_to_int8` with no flags: no spaces, and the string ends at a 0 byte;
+/// `NoThrow` gives 0 with `errno` set for an error, which is `e_Str`), without a `+` or leading
+/// zeros; a 0 only as the whole string.
 fn object_id_number(tag: &ObjectId) -> Option<i64> {
     match tag {
         ObjectId::Id(id) => Some(i64::from(*id)),
         ObjectId::Str(text) => {
-            let text = std::str::from_utf8(text).ok()?;
-            let digits = text.strip_prefix('-').unwrap_or(text);
-            if digits.is_empty()
-                || !digits.bytes().all(|c| c.is_ascii_digit())
-                || (digits.len() > 1 && digits.starts_with('0'))
-                || (digits == "0" && text.len() != 1)
+            // `StringToInt8` with no flags fails at a first byte other than a digit or a sign
+            // (no spaces): such a text is `e_Str` without the conversion and its exception.
+            if !text
+                .first()
+                .is_some_and(|&c| c.is_ascii_digit() || c == b'+' || c == b'-')
             {
                 return None;
             }
-            text.parse::<i64>().ok()
+            match crate::ncbi_str::string_to_int8(text, 0).ok()? {
+                0 => (text.len() == 1).then_some(0),
+                value if value > 0 => (!matches!(text[0], b'0' | b'+')).then_some(value),
+                value => (text[1] != b'0').then_some(value),
+            }
         }
     }
 }
@@ -1197,4 +1467,89 @@ fn pdb_match(a: &PdbSeqId, b: &PdbSeqId) -> bool {
         }
     }
     a.mol == b.mol
+}
+
+/// The positive taxids of a sequence's definition lines in the order of NCBI's lookups
+/// (`DeflineSet::taxonomy_order`): the line `front` first, then the others in their stored order.
+/// A plain loop over the lines (no iterator adapters: the readers ask its first item of every
+/// sequence they read).
+#[derive(Clone)]
+pub(crate) struct TaxonomyOrder<'a> {
+    deflines: &'a [BlastDefline],
+    front: Option<usize>,
+    front_given: bool,
+    next: usize,
+}
+
+impl Iterator for TaxonomyOrder<'_> {
+    type Item = i32;
+
+    fn next(&mut self) -> Option<i32> {
+        if !self.front_given {
+            self.front_given = true;
+            if let Some(taxid) = self
+                .front
+                .and_then(|index| self.deflines[index].taxid)
+                .filter(|&taxid| taxid > 0)
+            {
+                return Some(taxid);
+            }
+        }
+        while let Some(defline) = self.deflines.get(self.next) {
+            let index = self.next;
+            self.next += 1;
+            if Some(index) == self.front {
+                continue;
+            }
+            if let Some(taxid) = defline.taxid.filter(|&taxid| taxid > 0) {
+                return Some(taxid);
+            }
+        }
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // `CObject_id::GetIdType` (Object_id.cpp:93-161): the strings that are integers, and those
+    // that stay strings (an error of `StringToInt8`, a `+`, leading zeros, `-0`). The conversion
+    // ends at a 0 byte, so `5\0x` is the integer 5 (the string's size is still 3).
+    #[test]
+    fn object_id_strings_are_typed_as_ncbis_get_id_type() {
+        let number = |text: &[u8]| object_id_number(&ObjectId::Str(text.to_vec()));
+        let integers: [(&[u8], i64); 7] = [
+            (b"5", 5),
+            (b"0", 0),
+            (b"-12", -12),
+            (b"9223372036854775807", i64::MAX),
+            (b"-9223372036854775808", i64::MIN),
+            (b"5\x00x", 5),
+            (b"-7\x00", -7),
+        ];
+        for (text, value) in integers {
+            assert_eq!(number(text), Some(value), "{text:?}");
+        }
+        let strings: [&[u8]; 14] = [
+            b"",
+            b"-",
+            b"+5",
+            b"05",
+            b"-05",
+            b"-0",
+            b"00",
+            b"0\x00",
+            b" 5",
+            b"5 ",
+            b"5x",
+            b"9223372036854775808",
+            b"abc",
+            b"\xff5",
+        ];
+        for text in strings {
+            assert_eq!(number(text), None, "{text:?}");
+        }
+        assert_eq!(object_id_number(&ObjectId::Id(-3)), Some(-3));
+    }
 }

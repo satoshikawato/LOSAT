@@ -1,10 +1,11 @@
 //! Checks how the files of `LOSAT/tests/` are built into test binaries. `Cargo.toml` turns
 //! automatic test discovery off and lists eight binaries: six suites (`tests/suites/<name>.rs`,
-//! one `#[path]` module per file) and two files that change the process environment and so stay
-//! alone. A file that no binary lists would silently not build, a file in two binaries would run
-//! twice, and a suite member that changes the process environment or process-wide state (the panic
-//! hook, rayon's global pool) would disturb the other tests of its process. Each test below names
-//! every offender and says how to fix it. Standard library only.
+//! one `#[path]` module per file) and two files that change the process environment or
+//! process-wide state and so stay alone. A file that no binary lists would silently not build, a
+//! file in two binaries would run twice, and a suite member that changes the process environment
+//! or process-wide state (the panic hook, rayon's global pool, the global allocator) would disturb
+//! the other tests of its process. Each test below names every offender and says how to fix it.
+//! Standard library only.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -23,6 +24,10 @@ const PROCESS_CALLS: [&str; 6] = [
     "take_hook",
     "build_global",
 ];
+
+/// The attributes that set process-wide state: the global allocator, through which every test of
+/// the binary allocates.
+const PROCESS_ATTRIBUTES: [&str; 1] = ["global_allocator"];
 
 fn manifest_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -372,23 +377,32 @@ fn declarations(tokens: &[Token]) -> Vec<Decl> {
     decls
 }
 
-/// The calls of `PROCESS_CALLS` in a token stream, written `name(`.
-fn process_calls(tokens: &[Token]) -> Vec<String> {
-    let mut calls = Vec::new();
-    for pair in tokens.windows(2) {
-        if let [Token::Ident(word), Token::Punct('(')] = pair {
-            if PROCESS_CALLS.contains(&word.as_str()) {
-                calls.push(format!("{word}("));
+/// The calls of `PROCESS_CALLS` in a token stream, written `name(`, as `name(...)`, and the
+/// attributes of `PROCESS_ATTRIBUTES`, written `#[name]`.
+fn process_changes(tokens: &[Token]) -> Vec<String> {
+    let mut changes = Vec::new();
+    for (at, pair) in tokens.windows(2).enumerate() {
+        match pair {
+            [Token::Ident(word), Token::Punct('(')] if PROCESS_CALLS.contains(&word.as_str()) => {
+                changes.push(format!("{word}(...)"));
             }
+            [Token::Punct('#'), Token::Punct('[')] => {
+                if let Some([Token::Ident(word), Token::Punct(']')]) = tokens.get(at + 2..at + 4) {
+                    if PROCESS_ATTRIBUTES.contains(&word.as_str()) {
+                        changes.push(format!("#[{word}]"));
+                    }
+                }
+            }
+            _ => {}
         }
     }
-    calls
+    changes
 }
 
 #[derive(Default)]
 struct Walk {
     visited: Vec<PathBuf>,
-    /// (file, call) for every environment or process-wide change found.
+    /// (file, call or attribute) for every environment or process-wide change found.
     changes: Vec<(PathBuf, String)>,
     /// Declarations that resolve to no file or to two.
     unresolved: Vec<String>,
@@ -409,8 +423,8 @@ fn walk_module_tree(file: &Path, own_dir: bool, walk: &mut Walk) {
         dir.join(file.file_stem().expect("a file stem"))
     };
     let tokens = tokenize(&read(file));
-    for call in process_calls(&tokens) {
-        walk.changes.push((file.to_path_buf(), call));
+    for change in process_changes(&tokens) {
+        walk.changes.push((file.to_path_buf(), change));
     }
     for decl in declarations(&tokens) {
         let name = &decl.name;
@@ -550,7 +564,7 @@ fn cargo_toml_lists_the_binaries() {
         {
             problems.push(format!(
                 "[[test]] `{}` has path `{}`: the name must be the file stem (`--test <suite>` and the \
-                 nextest binary id `LOSAT::<suite>` rely on it)",
+                 nextest binary id `losat::<suite>` rely on it)",
                 target.name, target.path
             ));
         }
@@ -622,9 +636,9 @@ fn suite_members_are_top_level_files_named_like_their_module() {
                 decl.inline.join("::")
             ));
         }
-        for call in process_calls(&tokens) {
+        for change in process_changes(&tokens) {
             problems.push(format!(
-                "{root}: calls {call}...) in the suite root itself, which changes the process environment or \
+                "{root}: uses {change} in the suite root itself, which changes the process environment or \
                  process-wide state for every test of the suite: a suite root holds only member declarations"
             ));
         }
@@ -688,7 +702,7 @@ fn suite_members_do_not_change_the_process_environment() {
                 member.suite_root
             ));
         }
-        for (changing, call) in &walk.changes {
+        for (changing, change) in &walk.changes {
             let fix = if *changing == root_file {
                 "give the file its own `[[test]]` in LOSAT/Cargo.toml, as blastn_report_stream_api"
                     .to_string()
@@ -700,7 +714,7 @@ fn suite_members_do_not_change_the_process_environment() {
                 )
             };
             problems.push(format!(
-                "member {file}: {} calls {call}...), which changes the process environment or process-wide \
+                "member {file}: {} uses {change}, which changes the process environment or process-wide \
                  state, and the tests of a suite share one process: {fix}",
                 shown(changing)
             ));
@@ -709,9 +723,9 @@ fn suite_members_do_not_change_the_process_environment() {
     assert!(problems.is_empty(), "\n{}\n", lines(&problems));
 }
 
-/// The walk must see the environment changes of the lone files, the one of `unit_tests` through
-/// `tests/unit/common/diagnostics.rs` inside `mod unit { pub mod common; }`. When this stops being
-/// true, the file no longer needs its own binary and can join a suite.
+/// The walk must see the environment changes of the lone files, also through an inline block
+/// `mod a { pub mod x; }`. When a lone file's change is gone, the file no longer needs its own
+/// binary and can join a suite.
 #[test]
 fn walk_finds_the_lone_files_changes() {
     let (_, targets, _) = cargo_targets();
@@ -729,19 +743,40 @@ fn walk_finds_the_lone_files_changes() {
             ));
         }
     }
-    // The inline-module handling, checked on the file whose change sits inside `mod unit { ... }`,
-    // whether or not the file still has a binary of its own.
-    let unit_walk = walk_from(&manifest_dir().join("tests/unit_tests.rs"));
-    if !unit_walk
-        .changes
-        .iter()
-        .any(|(file, _)| shown(file) == "tests/unit/common/diagnostics.rs")
-    {
-        problems.push(
-            "the walk of tests/unit_tests.rs does not reach tests/unit/common/diagnostics.rs through \
-             `mod unit { pub mod common; }`: fix the inline-module handling of the walk"
-                .to_string(),
-        );
+    // The inline-module handling, checked on files written for it (no test file depends on it
+    // since `tests/unit_tests.rs` moved into the crate): inside `mod outer { ... }` of the root file,
+    // `mod inner;` resolves to `outer/inner.rs` and `mod nested;` to `outer/nested/mod.rs`, and each
+    // holds a change.
+    let dir =
+        std::env::temp_dir().join(format!("losat-suite-layout-inline-{}", std::process::id()));
+    fs::create_dir_all(dir.join("outer").join("nested")).expect("create the fixture directory");
+    let root = dir.join("root.rs");
+    let inner = dir.join("outer").join("inner.rs");
+    let nested = dir.join("outer").join("nested").join("mod.rs");
+    let change = "pub fn change() {\n    std::env::set_var(\"A\", \"1\");\n}\n";
+    fs::write(
+        &root,
+        "mod outer {\n    pub mod inner;\n    pub mod nested;\n}\n",
+    )
+    .expect("write the fixture root");
+    fs::write(&inner, change).expect("write the fixture file module");
+    fs::write(&nested, change).expect("write the fixture mod.rs module");
+    let inline_walk = walk_from(&root);
+    let _ = fs::remove_dir_all(&dir);
+    for (member, shape) in [(&inner, "outer/inner.rs"), (&nested, "outer/nested/mod.rs")] {
+        if !inline_walk.changes.iter().any(|(file, _)| file == member) {
+            problems.push(format!(
+                "the walk of a root file with `mod outer {{ pub mod inner; pub mod nested; }}` does not \
+                 reach {shape} ({}): fix the inline-module handling of the walk",
+                inline_walk.unresolved.join("; ")
+            ));
+        }
+    }
+    if !inline_walk.unresolved.is_empty() {
+        problems.push(format!(
+            "the walk of the inline-module fixture leaves declarations unresolved: {}",
+            inline_walk.unresolved.join("; ")
+        ));
     }
     assert!(problems.is_empty(), "\n{}\n", lines(&problems));
 }

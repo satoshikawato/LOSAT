@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "psr_cpb",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "psr_cpb (parsed Seq-ids)",
+  "number-of-letters": 250,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-08T20:41:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49672,
+  "bytes-to-cache": 364,
+  "files": [
+    "psr_cpb.pdb",
+    "psr_cpb.phr",
+    "psr_cpb.pin",
+    "psr_cpb.pog",
+    "psr_cpb.pos",
+    "psr_cpb.pot",
+    "psr_cpb.psq",
+    "psr_cpb.ptf",
+    "psr_cpb.pto"
+  ]
+}

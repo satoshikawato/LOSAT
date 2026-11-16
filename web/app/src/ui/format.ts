@@ -27,6 +27,11 @@ export function formatDuration(ms: number): string {
   return hours > 0 ? `${hours}:${String(minutes).padStart(2, '0')}:${seconds}` : `${minutes}:${seconds}`;
 }
 
+/** A short time span with its unit, for example "420 ms" or "2.6 s" (a step of a run, which `formatDuration` rounds down to the second). */
+export function formatMillis(ms: number): string {
+  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
+}
+
 /**
  * A time in ISO 8601 form in local time, date and time of day with a space between them, for
  * example "2026-10-09 21:49:30" (S13 screen review L5).
@@ -38,9 +43,47 @@ export function formatDateTime(ms: number): string {
   return `${date} ${two(time.getHours())}:${two(time.getMinutes())}:${two(time.getSeconds())}`;
 }
 
+/** The first paragraph of an option's help (`describe`), without the references to NCBI's sources. */
+export function optionHelp(raw: string | undefined): string {
+  const paragraph = (raw ?? '').split(/\n\s*\n/)[0] ?? '';
+  return paragraph.replace(/\s*(?:NCBI reference|Reference):.*$/s, '').trim();
+}
+
 /** A count and its noun, singular for one: "1 subject", "3 subjects", "1 HSP", "5 HSPs" (W4b screen review L12). */
 export function formatCounted(count: number, noun: string): string {
   return `${formatCount(count)} ${count === 1 ? noun : `${noun}s`}`;
+}
+
+/**
+ * Run numbers as words, in order: "run 2", "runs 1 and 3", "runs 1–4", "runs 1, 3 and 5–7". Three or more
+ * runs in a row are written as a range, so that hundreds of runs stay short.
+ */
+export function formatRuns(numbers: readonly number[]): string {
+  const sorted = [...new Set(numbers)].sort((a, b) => a - b);
+  const parts: string[] = [];
+  for (let first = 0; first < sorted.length; ) {
+    let last = first;
+    while (last + 1 < sorted.length && sorted[last + 1] === sorted[last]! + 1) last++;
+    if (last - first >= 2) parts.push(`${sorted[first]}–${sorted[last]}`);
+    else parts.push(...sorted.slice(first, last + 1).map(String));
+    first = last + 1;
+  }
+  const list = parts.length < 2 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+  return `${sorted.length === 1 ? 'run' : 'runs'} ${list}`;
+}
+
+/**
+ * What the notice after a hidden tab says of the completed runs whose stored results could not be read back
+ * (WA2-SC-05): the runs the browser removed them of, then those that failed to read otherwise, and that they can be
+ * run again. Empty when there are none.
+ */
+export function lostResultsText(removed: readonly number[], unreadable: readonly number[]): string {
+  const sentences = [
+    ...(removed.length > 0 ? [`The browser removed the stored results of ${formatRuns(removed)}.`] : []),
+    ...(unreadable.length > 0 ? [`The stored results of ${formatRuns(unreadable)} could not be read.`] : []),
+  ];
+  if (sentences.length === 0) return '';
+  return `${sentences.join(' ')} Run ${removed.length + unreadable.length === 1 ? 'it' : 'them'} again.`;
 }
 
 /** The frames of an HSP of a translated search: the translated sequences' only (results.ts hspEntry). */

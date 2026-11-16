@@ -12,9 +12,11 @@ pub mod framing;
 pub mod records;
 pub mod writer;
 
-pub use files::{base_name, FsSideFiles};
+#[cfg(test)]
+pub use files::base_name;
+pub use files::{run_side_files, FsSideFiles, SideFileSink};
 pub use framing::{NoSideFiles, RunSideFiles, SideFiles, Xml2Carry, Xml2Document, Xml2Kind};
-pub use records::{Xml2Run, Xml2Target};
+pub use records::{reports_held, subject_names, Xml2Run, Xml2Target};
 pub use writer::Xml2Writer;
 
 #[cfg(test)]

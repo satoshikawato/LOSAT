@@ -1,0 +1,4 @@
+Error: (CRegistryException::eSection) Invalid registry section (']' is missing): `[sec' (m_Pos = 1)
+Error: (106.15) Application's initialization failed (CRegistryException::eSection) Invalid registry section (']' is missing): `[sec' (m_Pos = 1)
+Error: (CRegistryException::eSection) Invalid registry section (']' is missing): `[sec' (m_Pos = 1)
+Error: (106.15) Application's initialization failed (CRegistryException::eSection) Invalid registry section (']' is missing): `[sec' (m_Pos = 1)

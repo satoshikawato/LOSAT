@@ -1,0 +1,2 @@
+Error: (CObjReaderParseException::eFormat) CFastaReader: Near line 4, there's a line that doesn't look like plausible data, but it's not marked as defline or comment. (m_Pos = 4)
+Error: (106.16) Application's execution failed (CObjReaderParseException::eFormat) CFastaReader: Near line 4, there's a line that doesn't look like plausible data, but it's not marked as defline or comment. (m_Pos = 4)

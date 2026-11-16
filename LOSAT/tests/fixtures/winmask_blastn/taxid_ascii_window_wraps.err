@@ -1,0 +1,9 @@
+BLAST engine error: Warning: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/winmask/seq_masker.cpp", line 126: Error: (CSeqMaskerException::validation error) ncbi::CSeqMasker::CSeqMasker() - window size (0) must be greater or equal to unit size (252)
+ Warning: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/winmask/seq_masker.cpp", line 126: Error: (CSeqMaskerException::validation error) ncbi::CSeqMasker::CSeqMasker() - window size (0) must be greater or equal to unit size (252)
+ Warning: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/winmask/seq_masker.cpp", line 126: Error: (CSeqMaskerException::validation error) ncbi::CSeqMasker::CSeqMasker() - window size (0) must be greater or equal to unit size (252)
+ Warning: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/winmask/seq_masker.cpp", line 126: Error: (CSeqMaskerException::validation error) ncbi::CSeqMasker::CSeqMasker() - window size (0) must be greater or equal to unit size (252)
+ 

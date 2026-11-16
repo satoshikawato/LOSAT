@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The queries of the run (its query records, in order), with their subject and HSP counts.
-// A run of many queries is drawn a screenful at a time.
+// A run of many queries is drawn a screenful at a time, and is one Tab stop (VirtualRows).
 import { computed } from 'vue';
 import type { ResultsBrowser, ResultsState } from '../application/results';
 import { formatCount, formatCounted } from './format';
@@ -51,9 +51,10 @@ function setHitsOnly(event: Event): void {
       label="Queries"
       testid="query-list"
     >
-      <template #row="{ position }">
+      <template #row="{ position, tabindex }">
         <button
           type="button"
+          :tabindex="tabindex"
           class="pick-row"
           :class="{ selected: state.queries[position]!.qIdx === state.qIdx, empty: state.queries[position]!.hsps === 0 }"
           :aria-pressed="state.queries[position]!.qIdx === state.qIdx"

@@ -1,32 +1,33 @@
 //! The first reading of LOSAT_X_QSTREAM (each query record's length) read in parts at record starts
-//! by the search's threads (`LOSAT_X_QSCANPAR`, `src/algorithm/blastn/blast_engine/x_query_scan_par.rs`)
-//! on whole searches.
+//! by the search's threads (`src/algorithm/blastn/blast_engine/x_query_scan_par.rs`) on whole
+//! searches.
 //!
-//! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless its variable is `0`.
-//! It changes who reads the lengths, not the lengths, so the property under test is that nothing a
-//! run writes depends on it (exit status, report and standard error), and that the default took its
-//! path where its rule says so (`LOSAT_X_REACH`): LOSAT_X_QSTREAM reading the lengths first, two
-//! threads or more, a file of `LOSAT_X_QSCANPARMIN` bytes or more (0 here, so that a small file
-//! is cut), no `\r` and no reader error. The searches keep LOSAT_X_QSTREAM acting: small batches
-//! (`BATCH_SIZE`) and no LOSAT_X_QBATCHPAR slots (whose window would hold the whole file). Cases:
-//! 240 pieces of two genomes (lower case, `N` runs, a line with digits that the reader warns
-//! about, records without letters and without ids) with dc-megablast and blastn against a subject
-//! file (`-subject`) at one, two and four threads and against a database (`-db`) at four; the same
-//! file with `\r\n` line ends, with a gap line (`>?`) and with a reader error in its last record,
-//! where the default keeps the one-thread reading. That those bytes equal NCBI's is the business of the
-//! fixture suites.
+//! The parts have no switch of their own: wherever LOSAT_X_QSTREAM acts, at two threads or more on
+//! unix with the `parallel` feature and on a file of `LOSAT_X_QSCANPARMIN` bytes or more (4 MiB; 0
+//! here, so that a small file is cut), the first reading is in parts, and it falls back to one
+//! thread on a `\r`, a gap line (`>?`), a reader error and the like. (`LOSAT_X_QSCANPAR` was folded
+//! into LOSAT_X_QSTREAM on 2026-11-01.) Since 2026-11-03 the second reading reads the same parts
+//! again on the search's threads, each by a reader that starts at the part's line and record. It
+//! changes who reads the lengths and the records, not them, so the property under test is that
+//! nothing a run writes depends on the thread count (exit status, report and standard error), and
+//! that the parts were taken where the rule says so: `scan_par=1` in the `[X_STATS] QSTREAM` line
+//! (printed with `LOSAT_X_STATS`), `scan_par=0` at one thread and on the fallback files. The
+//! searches keep LOSAT_X_QSTREAM acting: small batches (`BATCH_SIZE`; the query files are far above
+//! two batches). Cases: 240 pieces of two genomes (lower case, `N` runs, a line with digits that
+//! the reader warns about, records without letters and without ids) with dc-megablast, megablast
+//! and blastn against a subject file (`-subject`) at one, two and four threads and against a
+//! database (`-db`) at four (dc-megablast and megablast); the same file with `\r\n` line ends, with
+//! a gap line (`>?`) and with a reader error in its last record, where the one-thread reading is
+//! kept. That those bytes equal NCBI's is the business of the fixture suites.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-mod reach_support;
+mod temp_support;
+use temp_support::{worker_log_if_unset, TempFile};
 
-const SWITCH: &str = "LOSAT_X_QSCANPAR";
-const SWITCH_OFF: (&str, &str) = ("LOSAT_X_QSCANPAR", "0");
 /// Every file is cut, whatever its size (tuning).
 const ANY_SIZE: (&str, &str) = ("LOSAT_X_QSCANPARMIN", "0");
-/// No slots: LOSAT_X_QSTREAM's rule keeps it off where they would read most of the file ahead.
-const NO_SLOTS: (&str, &str) = ("LOSAT_X_QBATCHPAR", "0");
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -105,7 +106,7 @@ fn query_text(tail: &[u8]) -> Vec<u8> {
 }
 
 /// One search of `query` with `target` (`-subject FILE` or `-db NAME`) and `task`, `-outfmt 6`,
-/// `BATCH_SIZE` 20,000 and the given variables as its only `LOSAT_*` variables.
+/// `BATCH_SIZE` 20,000, `ANY_SIZE` and the given variables as its only `LOSAT_*` variables.
 /// `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the `blastx-worker-probe` feature (`cargo
 /// test --all-features`, as in CI) needs that file name as soon as a search has more than one
 /// thread, and it selects nothing (it is set to a file of this test when the environment has none).
@@ -116,7 +117,7 @@ fn search(
     task: &str,
     threads: u32,
     vars: &[(&str, &str)],
-) -> (Option<i32>, Vec<u8>, Vec<u8>) {
+) -> (Option<i32>, Vec<u8>, Vec<u8>, Option<TempFile>) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
@@ -126,12 +127,7 @@ fn search(
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join(format!("losat_qscan_{}_worker.log", std::process::id())),
-        );
-    }
+    let log = worker_log_if_unset(&mut command, "blastn_query_scan_par_worker");
     let output = command
         .arg("blastn")
         .args(["-task", task])
@@ -141,38 +137,61 @@ fn search(
         .args(["-outfmt", "6"])
         .args(["-num_threads", &threads.to_string()])
         .env("BATCH_SIZE", "20000")
-        .envs([NO_SLOTS, ANY_SIZE])
+        .env(ANY_SIZE.0, ANY_SIZE.1)
         .envs(vars.iter().copied())
         .output()
         .expect("run LOSAT");
-    (output.status.code(), output.stdout, output.stderr)
+    (output.status.code(), output.stdout, output.stderr, log)
 }
 
-/// For `query` against `target` with `task`: the run with the switch off at four threads, then by
-/// default at `threads`, the same exit status, report and standard error; the default took the
-/// switch's path (`own`) at two threads or more, the one-thread reading at one.
+/// The value of `field` (`scan_par=`) in the one `[X_STATS] QSTREAM` line of `stderr`, and
+/// `stderr` without the `[X_STATS]` lines.
+fn take_stats(stderr: &[u8], field: &str) -> (String, String) {
+    let text = String::from_utf8_lossy(stderr).into_owned();
+    let lines: Vec<&str> = text
+        .lines()
+        .filter(|line| line.starts_with("[X_STATS] QSTREAM "))
+        .collect();
+    assert_eq!(lines.len(), 1, "one QSTREAM line:\n{text}");
+    assert!(
+        lines[0].ends_with(" off=none"),
+        "QSTREAM acted: {}",
+        lines[0]
+    );
+    let value = lines[0]
+        .split_whitespace()
+        .find_map(|word| word.strip_prefix(field))
+        .unwrap_or_else(|| panic!("no {field} in: {}", lines[0]))
+        .to_string();
+    let rest = text
+        .split_inclusive('\n')
+        .filter(|line| !line.starts_with("[X_STATS] "))
+        .collect();
+    (value, rest)
+}
+
+/// For `query` against `target` with `task`: the run at one thread, then the runs at `threads`
+/// with `LOSAT_X_STATS`, the same exit status, report and standard error (without the stats
+/// lines); the first reading was in parts (`scan_par=1`) at two threads or more where `own`, else
+/// not.
 fn check(query: &Path, target: [&str; 2], task: &str, threads: &[u32], own: bool) {
-    let expected = search(query, target, task, 4, &[SWITCH_OFF]);
+    let expected = search(query, target, task, 1, &[]);
     for &n in threads {
-        let reach = reach_support::Reach::new("qscan");
-        let run = search(query, target, task, n, &[reach.var()]);
+        let run = search(query, target, task, n, &[("LOSAT_X_STATS", "1")]);
         let what = format!("{task} {target:?} threads {n}");
+        let (scan_par, stderr) = take_stats(&run.2, "scan_par=");
         assert_eq!(run.0, expected.0, "{what}: exit status");
         assert!(run.1 == expected.1, "{what}: the report differs");
         assert_eq!(
-            String::from_utf8_lossy(&run.2),
+            stderr,
             String::from_utf8_lossy(&expected.2),
             "{what}: standard error"
         );
         // The parts are read with `read_at` of `std::os::unix::fs::FileExt` and need the `parallel`
-        // feature: elsewhere (Windows, WebAssembly) the switch never acts and the sides stay
-        // `(false, true)` (module doc of `x_query_scan_par.rs`).
+        // feature: elsewhere (Windows, WebAssembly) the first reading stays on one thread
+        // (module doc of `x_query_scan_par.rs`).
         let took = own && n >= 2 && cfg!(all(unix, feature = "parallel"));
-        assert_eq!(
-            reach.sides(SWITCH),
-            (took, !took),
-            "{what}: sides of {SWITCH}"
-        );
+        assert_eq!(scan_par, if took { "1" } else { "0" }, "{what}: scan_par");
     }
 }
 
@@ -184,6 +203,7 @@ fn the_parts_give_the_reports_of_the_one_thread_reading() {
     let subject = fasta("LC738868.fasta");
     let target = ["-subject", subject.to_str().unwrap()];
     check(&query, target, "dc-megablast", &[1, 2, 4], true);
+    check(&query, target, "megablast", &[1, 2, 4], true);
     check(&query, target, "blastn", &[1, 4], true);
 }
 
@@ -199,14 +219,15 @@ fn a_database_search_gives_the_same_bytes() {
     std::fs::write(dir.path("set.fna"), set).unwrap();
     let db = dir.path("set").to_str().unwrap().to_string();
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(dir.path("set.fna"))
         .args(["-dbtype", "nucl", "-out", &db])
         .output()
-        .expect("run losat makedb");
-    assert!(output.status.success(), "makedb");
+        .expect("run losat makeblastdb");
+    assert!(output.status.success(), "makeblastdb");
     check(&query, ["-db", &db], "dc-megablast", &[4], true);
+    check(&query, ["-db", &db], "megablast", &[4], true);
 }
 
 #[test]
@@ -239,12 +260,16 @@ fn a_file_with_cr_a_gap_line_or_a_reader_error_keeps_the_one_thread_reading() {
     // exit that writes no reach file: the bytes alone).
     let query = dir.path("error.fa");
     std::fs::write(&query, query_text(b">bad\n%%%%%%%%%%%%%%%%\n")).expect("write the queries");
-    let expected = search(&query, target, "dc-megablast", 4, &[SWITCH_OFF]);
+    let expected = search(&query, target, "dc-megablast", 1, &[]);
     assert_ne!(
         expected.0,
         Some(0),
         "the error file: {}",
         String::from_utf8_lossy(&expected.2)
     );
-    assert_eq!(search(&query, target, "dc-megablast", 4, &[]), expected);
+    let again = search(&query, target, "dc-megablast", 4, &[]);
+    assert_eq!(
+        (again.0, again.1, again.2),
+        (expected.0, expected.1, expected.2)
+    );
 }

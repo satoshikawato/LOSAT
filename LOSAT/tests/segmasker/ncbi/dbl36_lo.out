@@ -1,0 +1,10 @@
+Blast-db-mask-info ::= {
+  algo-id 1,
+  algo-program seg,
+  algo-options "window=12; locut=nan; hicut=9",
+  masks {
+    masks {
+    },
+    more FALSE
+  }
+}

@@ -76,14 +76,22 @@ const E_JCHAR: usize = 27;
 // ```
 const LAMBDA_RATIO_LOWER_BOUND: f64 = 0.5;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_mode_condition.c:36-42
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_mode_condition.c:38-47
 // ```c
+// /** 180 degrees in half a circle */
+// #define HALF_CIRCLE_DEGREES 180
+// /** some digits of PI */
+// #define PI 3.1415926543
 // #define QUERY_MATCH_DISTANCE_THRESHOLD 0.16
 // #define LENGTH_RATIO_THRESHOLD 3.0
 // #define ANGLE_DEGREE_THRESHOLD 70.0
 // #define HIGH_PAIR_THRESHOLD 0.4
 // #define LENGTH_LOWER_THRESHOLD 50
 // ```
+const HALF_CIRCLE_DEGREES: f64 = 180.0;
+// NCBI's digits, not `std::f64::consts::PI` (3.14159265358979...): the rule's angle must be NCBI's
+// to the last bit at the 70-degree threshold.
+const PI: f64 = 3.1415926543;
 const QUERY_MATCH_DISTANCE_THRESHOLD: f64 = 0.16;
 const LENGTH_RATIO_THRESHOLD: f64 = 3.0;
 const ANGLE_DEGREE_THRESHOLD: f64 = 70.0;
@@ -1125,7 +1133,7 @@ const X_WC_STRIDE: usize = 2 * COMPO_NUM_TRUE_AA;
 // or square root.
 fn x_factor_ltriang_pos_def_cols(a: &mut [Vec<f64>], n: usize, wc: &mut [f64]) {
     let s = X_WC_STRIDE;
-    debug_assert!(n <= s && wc.len() >= s * s && s % 2 == 0);
+    debug_assert!(n <= s && wc.len() >= s * s && s.is_multiple_of(2));
     // Column-major copy. Slots above a column's diagonal and below row n are
     // scratch: they are written by the padded loops below but never read as
     // matrix elements.
@@ -1399,88 +1407,6 @@ fn x_step_bound(x: &[f64], step_x: &[f64], max: f64) -> f64 {
     alpha
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:329-337
-// ```c
-// double Blast_MatrixEntropy(double ** matrix, int alphsize, const double row_prob[],
-//                            const double col_prob[], double Lambda)
-// ```
-fn matrix_entropy(
-    matrix: &[Vec<f64>],
-    alphsize: usize,
-    row_prob: &[f64; COMPO_NUM_TRUE_AA],
-    col_prob: &[f64; COMPO_NUM_TRUE_AA],
-    lambda: f64,
-) -> f64 {
-    let mut entropy = 0.0;
-    for i in 0..alphsize {
-        for j in 0..alphsize {
-            let nat_score = lambda * matrix[i][j];
-            entropy += nat_score.exp() * nat_score * row_prob[i] * col_prob[j];
-        }
-    }
-    entropy
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:358-376
-// ```c
-// double Blast_TargetFreqEntropy(double ** target_freq)
-// ```
-fn target_freq_entropy(target_freq: &[[f64; COMPO_NUM_TRUE_AA]; COMPO_NUM_TRUE_AA]) -> f64 {
-    let mut row_prob = [0.0; COMPO_NUM_TRUE_AA];
-    let mut col_prob = [0.0; COMPO_NUM_TRUE_AA];
-    for (i, row) in target_freq.iter().enumerate() {
-        for (j, &freq) in row.iter().enumerate() {
-            row_prob[i] += freq;
-            col_prob[j] += freq;
-        }
-    }
-    let mut entropy = 0.0;
-    for (i, row) in target_freq.iter().enumerate() {
-        for (j, &freq) in row.iter().enumerate() {
-            entropy += freq * (freq / row_prob[i] / col_prob[j]).ln();
-        }
-    }
-    entropy
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:385-397
-// ```c
-// void Blast_CalcFreqRatios(double ** ratios, int alphsize,
-//                           double row_prob[], double col_prob[])
-// ```
-fn calc_freq_ratios_dense(
-    ratios: &mut [Vec<f64>],
-    alphsize: usize,
-    row_prob: &[f64],
-    col_prob: &[f64],
-) {
-    for i in 0..alphsize {
-        if row_prob[i] > 0.0 {
-            for j in 0..alphsize {
-                if col_prob[j] > 0.0 {
-                    ratios[i][j] /= row_prob[i] * col_prob[j];
-                }
-            }
-        }
-    }
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:401-415
-// ```c
-// void Blast_FreqRatioToScore(double ** matrix, int rows, int cols, double Lambda)
-// ```
-fn freq_ratio_to_score_dense(matrix: &mut [Vec<f64>], rows: usize, cols: usize, lambda: f64) {
-    for row in matrix.iter_mut().take(rows) {
-        for value in row.iter_mut().take(cols) {
-            if *value == 0.0 {
-                *value = COMPO_SCORE_MIN as f64;
-            } else {
-                *value = value.ln() / lambda;
-            }
-        }
-    }
-}
-
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:401-415
 // ```c
 // void Blast_FreqRatioToScore(double ** matrix, int rows, int cols, double Lambda)
@@ -1502,7 +1428,7 @@ fn freq_ratio_to_score_square(
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:117-240
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:220-334
 // ```c
 // void Blast_CalcLambdaFullPrecision(double * plambda, int *piterations,
 //                                    double **score, int alphsize,
@@ -1546,12 +1472,18 @@ fn calc_lambda_full_precision_from_scores(
 
     let mut k = 0usize;
     while k < K_LAMBDA_ITERATION_LIMIT {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:266
+        // ```c
+        // double fold = f;            /* previous value of f */
+        // ```
+        // `fold` takes f before f is evaluated again, so the Newton test
+        // below compares this iteration's f with the previous iteration's f.
+        let fold = f;
         let lambda = -x.ln();
         let was_newton = is_newton;
         let x_pow_max_score = (-max_score * lambda).exp();
         f = -x_pow_max_score;
         let mut slope = max_score * f / x;
-        let fold = f;
 
         for i in 0..alphsize {
             if row_prob[i] == 0.0 {
@@ -1586,7 +1518,7 @@ fn calc_lambda_full_precision_from_scores(
             x = (left + right) / 2.0;
             break;
         }
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:290-320
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:311-330
         // ```c
         // if ((was_newton && fabs(f) > .9 * fabs(fold)) || slope >= 0) {
         //     x = (left + right)/2;
@@ -1723,42 +1655,6 @@ fn set_pair_ambig_probs_to_sum(probs: &mut [f64; COMPO_LARGEST_ALPHABET]) {
     probs[E_BCHAR] = probs[E_DCHAR] + probs[E_NCHAR];
     probs[E_ZCHAR] = probs[E_ECHAR] + probs[E_QCHAR];
     probs[E_JCHAR] = probs[E_ICHAR] + probs[E_LCHAR];
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:485-536
-// ```c
-// int Blast_EntropyOldFreqNewContext(...)
-// ```
-fn entropy_old_freq_new_context(
-    target_freq: &[[f64; COMPO_NUM_TRUE_AA]; COMPO_NUM_TRUE_AA],
-    row_prob: &[f64; COMPO_NUM_TRUE_AA],
-    col_prob: &[f64; COMPO_NUM_TRUE_AA],
-) -> Result<Option<f64>> {
-    let mut scores = dense_matrix_new(COMPO_NUM_TRUE_AA, COMPO_NUM_TRUE_AA);
-    let mut old_col_prob = [0.0; COMPO_NUM_TRUE_AA];
-    let mut old_row_prob = [0.0; COMPO_NUM_TRUE_AA];
-    for i in 0..COMPO_NUM_TRUE_AA {
-        for j in 0..COMPO_NUM_TRUE_AA {
-            old_row_prob[i] += target_freq[i][j];
-            old_col_prob[j] += target_freq[i][j];
-            scores[i][j] = target_freq[i][j];
-        }
-    }
-    calc_freq_ratios_dense(&mut scores, COMPO_NUM_TRUE_AA, &old_row_prob, &old_col_prob);
-    freq_ratio_to_score_dense(&mut scores, COMPO_NUM_TRUE_AA, COMPO_NUM_TRUE_AA, 1.0);
-    let (lambda, iter_count) =
-        calc_lambda_full_precision_from_scores(&scores, COMPO_NUM_TRUE_AA, row_prob, col_prob);
-    if iter_count < K_LAMBDA_ITERATION_LIMIT && lambda > 0.0 {
-        Ok(Some(matrix_entropy(
-            &scores,
-            COMPO_NUM_TRUE_AA,
-            row_prob,
-            col_prob,
-            lambda,
-        )))
-    } else {
-        Ok(None)
-    }
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:538-604
@@ -2811,6 +2707,10 @@ fn optimize_target_frequencies_reference(
             constrain_rel_entropy,
             relative_entropy,
         );
+        #[expect(
+            clippy::neg_cmp_op_on_partial_ord,
+            reason = "NCBI's convergence test `!(rnorm > tol)` stops on a NaN rnorm (optimize_target_freq.c:760-762); `<=` would not"
+        )]
         if !(rnorm > K_COMPO_ADJUST_ERR_TOLERANCE) {
             break;
         }
@@ -2879,27 +2779,13 @@ fn composition_matrix_adjust(
     gather_letter_probs(&mut row_probs, query_prob_std);
     gather_letter_probs(&mut col_probs, subject_prob_std);
 
-    let mut desired_re = 0.0;
-    match matrix_adjust_rule {
-        EMatrixAdjustRule::UnconstrainedRelEntropy => {}
-        EMatrixAdjustRule::RelEntropyOldMatrixNewContext => {
-            if let Some(value) =
-                entropy_old_freq_new_context(&workspace.mat_b, &row_probs, &col_probs)?
-            {
-                desired_re = value;
-            }
-        }
-        EMatrixAdjustRule::RelEntropyOldMatrixOldContext => {
-            desired_re = target_freq_entropy(&workspace.mat_b);
-        }
-        EMatrixAdjustRule::UserSpecifiedRelEntropy => {
-            desired_re = specified_re;
-        }
+    let desired_re = match matrix_adjust_rule {
+        EMatrixAdjustRule::UserSpecifiedRelEntropy => specified_re,
         _ => bail!(
             "unsupported matrix-adjust rule {:?} for composition matrix adjustment",
             matrix_adjust_rule
         ),
-    }
+    };
 
     apply_pseudocounts(
         &mut row_probs,
@@ -3146,7 +3032,10 @@ pub(crate) fn blast_adjust_scores(
 // No NCBI counterpart: the input is used only to compute a result ahead of the real call, which uses
 // it only when its own input has the same bits; it does not change any value NCBI computes.
 /// The Newton input that `blast_adjust_scores` with these arguments would pass to
-/// `optimize_target_frequencies`, if it reaches the constrained iteration.
+/// `optimize_target_frequencies`, if it reaches the constrained iteration. Its `q` (the
+/// workspace's `mat_b`) is `shared_q`, made by the first call that returns an input: a caller
+/// passes one `shared_q` per workspace, so the inputs of a batch share one copy.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn x_newton_input(
     matrix_info: &BlastMatrixInfo,
     query_composition: &BlastAminoAcidComposition,
@@ -3155,6 +3044,7 @@ pub(crate) fn x_newton_input(
     subject_length: i32,
     composition_adjust_mode: BlastCompoAdjustMode,
     workspace: &BlastCompositionWorkspace,
+    shared_q: &mut Option<super::x_newton_lanes::NewtonQ>,
 ) -> Option<super::x_newton_lanes::NewtonInput> {
     if query_composition.num_true_amino_acids == 0 || subject_composition.num_true_amino_acids == 0
     {
@@ -3187,24 +3077,14 @@ pub(crate) fn x_newton_input(
     let mut col_probs = [0.0; COMPO_NUM_TRUE_AA];
     gather_letter_probs(&mut row_probs, &query_composition.prob);
     gather_letter_probs(&mut col_probs, &subject_composition.prob);
-    let mut desired_re = 0.0;
-    match matrix_adjust_rule {
-        EMatrixAdjustRule::UnconstrainedRelEntropy => {}
-        EMatrixAdjustRule::RelEntropyOldMatrixNewContext => {
-            if let Some(value) =
-                entropy_old_freq_new_context(&workspace.mat_b, &row_probs, &col_probs).ok()?
-            {
-                desired_re = value;
-            }
-        }
-        EMatrixAdjustRule::RelEntropyOldMatrixOldContext => {
-            desired_re = target_freq_entropy(&workspace.mat_b);
-        }
-        EMatrixAdjustRule::UserSpecifiedRelEntropy => {
-            desired_re = K_FIXED_RE_BLOSUM62;
-        }
+    let desired_re = match matrix_adjust_rule {
+        EMatrixAdjustRule::UserSpecifiedRelEntropy => K_FIXED_RE_BLOSUM62,
         _ => return None,
-    }
+    };
+    #[expect(
+        clippy::neg_cmp_op_on_partial_ord,
+        reason = "NCBI constrains the relative entropy only when desired_re > 0.0 (composition_adjustment.c:1396); `desired_re <= 0.0` would let NaN through"
+    )]
     if !(desired_re > 0.0) {
         return None;
     }
@@ -3220,14 +3100,17 @@ pub(crate) fn x_newton_input(
         &workspace.second_standard_freq,
         20,
     );
-    let mut q = [0.0; COMPO_NUM_TRUE_AA * COMPO_NUM_TRUE_AA];
-    for i in 0..COMPO_NUM_TRUE_AA {
-        for j in 0..COMPO_NUM_TRUE_AA {
-            q[i * COMPO_NUM_TRUE_AA + j] = workspace.mat_b[i][j];
+    let q = shared_q.get_or_insert_with(|| {
+        let mut q = [0.0; COMPO_NUM_TRUE_AA * COMPO_NUM_TRUE_AA];
+        for i in 0..COMPO_NUM_TRUE_AA {
+            for j in 0..COMPO_NUM_TRUE_AA {
+                q[i * COMPO_NUM_TRUE_AA + j] = workspace.mat_b[i][j];
+            }
         }
-    }
+        std::rc::Rc::new(q)
+    });
     Some(super::x_newton_lanes::NewtonInput {
-        q,
+        q: std::rc::Rc::clone(q),
         row: row_probs,
         col: col_probs,
         relative_entropy: desired_re,
@@ -3401,6 +3284,22 @@ fn high_pair_either_seq(
         || high_pair_frequencies(match_prob, match_length)
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_mode_condition.c:200-204
+// ```c
+//     angle =
+//         acos((D_m_mat * D_m_mat + D_q_mat * D_q_mat -
+//               D_m_q * D_m_q) / 2.0 / D_m_mat / D_q_mat);
+//     /* convert from radians to degrees */
+//     angle = angle * HALF_CIRCLE_DEGREES / PI;
+// ```
+// No clamp and no zero guard: a cosine rounded below -1 or above 1, or a zero distance, gives
+// NaN, and `angle > ANGLE_DEGREE_THRESHOLD` is then false (the relative-entropy rule), as in NCBI.
+fn matrix_adjust_rule_angle(d_m_mat: f64, d_q_mat: f64, d_m_q: f64) -> f64 {
+    let angle =
+        ((d_m_mat * d_m_mat + d_q_mat * d_q_mat - d_m_q * d_m_q) / 2.0 / d_m_mat / d_q_mat).acos();
+    angle * HALF_CIRCLE_DEGREES / PI
+}
+
 fn blast_choose_matrix_adjust_rule(
     length1: i32,
     length2: i32,
@@ -3444,21 +3343,25 @@ fn blast_choose_matrix_adjust_rule(
             let d_q_mat = blast_get_relative_entropy(prob_array1, p_matrix);
             let d_m_q = blast_get_relative_entropy(prob_array2, prob_array1);
 
-            let angle = if d_m_mat > 0.0 && d_q_mat > 0.0 {
-                let cos_angle = ((d_m_mat * d_m_mat) + (d_q_mat * d_q_mat) - (d_m_q * d_m_q))
-                    / (2.0 * d_m_mat * d_q_mat);
-                cos_angle.clamp(-1.0, 1.0).acos().to_degrees()
-            } else {
-                0.0
-            };
+            let angle = matrix_adjust_rule_angle(d_m_mat, d_q_mat, d_m_q);
 
             let len_large = (length1.max(length2)) as f64;
             let len_small = (length1.min(length2)) as f64;
             let _ = corr_factor;
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_mode_condition.c:215-225
+            // ```c
+            //     if (s_HighPairEitherSeq(P_query, Len_query, P_match, Len_match)) {
+            //         which_rule = eUserSpecifiedRelEntropy;
+            //     } else {
+            //       if ((D_m_q > QUERY_MATCH_DISTANCE_THRESHOLD) &&
+            //         (len_large / len_small > LENGTH_RATIO_THRESHOLD) &&
+            //         (angle > ANGLE_DEGREE_THRESHOLD)) {
+            // ```
+            // The length ratio is not guarded either: a zero length divides to inf or NaN as in C
+            // (and `blast_adjust_scores` returns before a sequence without true amino acids).
             if high_pair_either_seq(prob_array1, length1, prob_array2, length2) {
                 Ok(EMatrixAdjustRule::UserSpecifiedRelEntropy)
             } else if d_m_q > QUERY_MATCH_DISTANCE_THRESHOLD
-                && len_small > 0.0
                 && len_large / len_small > LENGTH_RATIO_THRESHOLD
                 && angle > ANGLE_DEGREE_THRESHOLD
             {
@@ -3473,24 +3376,7 @@ fn blast_choose_matrix_adjust_rule(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::blast_stat::composition::compute_lambda_from_score_probs;
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:551-572
-    // ```c
-    // s_CalcLambda(double probs[], int min_score, int max_score, double lambda0)
-    // {
-    //     return Blast_KarlinLambdaNR(&freq, lambda0);
-    // }
-    // ```
-    fn test_compute_lambda_from_score_probs(
-        score_probs: &[f64],
-        min_score: i32,
-        max_score: i32,
-        lambda0: f64,
-    ) -> Result<f64> {
-        compute_lambda_from_score_probs(score_probs, min_score, max_score, lambda0)
-            .map_err(anyhow::Error::msg)
-    }
+    use crate::core::composition_adjustment::redo_alignment::redo_calc_lambda;
 
     // NCBI composition_adjustment/composition_adjustment.c:1204-1248:
     // if (i + kCompositionMargin < left) left = i + kCompositionMargin;
@@ -3595,7 +3481,7 @@ mod tests {
                     BlastCompoAdjustMode::CompositionMatrixAdjust,
                     call[6].parse().unwrap(),
                     &mut workspace,
-                    test_compute_lambda_from_score_probs,
+                    redo_calc_lambda,
                 )
                 .unwrap()
                 .unwrap();
@@ -3818,6 +3704,90 @@ mod tests {
     }
 
     #[test]
+    fn matrix_adjust_rule_angle_follows_the_ncbi_expression() {
+        // compo_mode_condition.c:200-204. NCBI's PI (3.1415926543) is above pi, so its degrees
+        // are a little smaller: a right angle is not 90 and a straight one is not 180.
+        assert_eq!(matrix_adjust_rule_angle(0.3, 0.4, 0.5), 89.99999997965406);
+        assert_eq!(matrix_adjust_rule_angle(0.3, 0.2, 0.5), 179.99999995930813);
+        // A cosine below -1 (a collapsed triangle) and a zero distance give NaN, not 180 or 0.
+        assert!(matrix_adjust_rule_angle(0.3, 0.2, 0.5000000001).is_nan());
+        assert!(matrix_adjust_rule_angle(0.3, 0.0, 0.3).is_nan());
+        assert!(matrix_adjust_rule_angle(0.0, 0.0, 0.0).is_nan());
+    }
+
+    // The query and match distances of the rule, and the cosine of its angle.
+    fn matrix_adjust_rule_cosine(
+        query: &[f64; COMPO_NUM_TRUE_AA],
+        subject: &[f64; COMPO_NUM_TRUE_AA],
+    ) -> f64 {
+        let d_m_mat = blast_get_relative_entropy(subject, &BLOSUM62_BG);
+        let d_q_mat = blast_get_relative_entropy(query, &BLOSUM62_BG);
+        let d_m_q = blast_get_relative_entropy(subject, query);
+        (d_m_mat * d_m_mat + d_q_mat * d_q_mat - d_m_q * d_m_q) / 2.0 / d_m_mat / d_q_mat
+    }
+
+    #[test]
+    fn matrix_adjust_rule_takes_ncbi_degrees_at_the_threshold() {
+        // A query shifted from BLOSUM62's background (letter 11 up, letter 2 down) against the
+        // distant, four times longer match of the test above. At the first shift the angle is
+        // 70.0000000079 degrees with the true pi but 69.9999999921 with NCBI's PI, so NCBI takes
+        // the relative-entropy rule; past NCBI's crossing it takes the scaling rule.
+        let mut subject = [0.8 / 19.0; COMPO_NUM_TRUE_AA];
+        subject[11] = 0.2;
+        let at = |shift: f64| {
+            let mut query = BLOSUM62_BG;
+            query[11] += shift;
+            query[2] -= shift;
+            let degrees = matrix_adjust_rule_cosine(&query, &subject)
+                .acos()
+                .to_degrees();
+            let rule = blast_choose_matrix_adjust_rule(
+                100,
+                400,
+                &query,
+                &subject,
+                ScoringMatrix::Blosum62,
+                BlastCompoAdjustMode::CompositionMatrixAdjust,
+            )
+            .unwrap();
+            (degrees, rule)
+        };
+        let (degrees, rule) = at(0.03708335181724542);
+        assert!(degrees > ANGLE_DEGREE_THRESHOLD, "{degrees}");
+        assert_eq!(rule, EMatrixAdjustRule::UserSpecifiedRelEntropy);
+        let (_, rule) = at(0.03708335187554269);
+        assert_eq!(rule, EMatrixAdjustRule::CompoScaleOldMatrix);
+    }
+
+    #[test]
+    fn matrix_adjust_rule_collapsed_triangle_takes_relative_entropy() {
+        // The query lies just past BLOSUM62's background on the line from the match, so the
+        // background is between the two and the triangle of distances collapses: the cosine
+        // rounds to -1.6. NCBI's acos is then NaN (the relative-entropy rule); a clamp to -1
+        // (180 degrees) would take the scaling rule. The -1.6 is the rounding of `a / temp` in
+        // the 2e-9 query distance (IEEE division, the same on every platform); a libm's log
+        // error there is about 1e-24, six orders below the squared distance.
+        let mut subject = [0.8 / 19.0; COMPO_NUM_TRUE_AA];
+        subject[11] = 0.2;
+        let query: [f64; COMPO_NUM_TRUE_AA] =
+            std::array::from_fn(|i| BLOSUM62_BG[i] - 1.4e-8 * (subject[i] - BLOSUM62_BG[i]));
+        let cosine = matrix_adjust_rule_cosine(&query, &subject);
+        assert!(cosine < -1.0, "{cosine}");
+        assert_eq!(
+            blast_choose_matrix_adjust_rule(
+                100,
+                400,
+                &query,
+                &subject,
+                ScoringMatrix::Blosum62,
+                BlastCompoAdjustMode::CompositionMatrixAdjust,
+            )
+            .unwrap(),
+            EMatrixAdjustRule::UserSpecifiedRelEntropy
+        );
+    }
+
+    #[test]
     fn test_blast_composition_pvalue_clamps_left_tail() {
         assert_eq!(
             blast_composition_pvalue(COMPO_MIN_LAMBDA),
@@ -3942,7 +3912,7 @@ mod tests {
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             0,
             &mut workspace,
-            test_compute_lambda_from_score_probs,
+            redo_calc_lambda,
         )
         .unwrap()
         .expect("adjusted matrix result");
@@ -3972,7 +3942,7 @@ mod tests {
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             0,
             &mut workspace,
-            test_compute_lambda_from_score_probs,
+            redo_calc_lambda,
         )
         .unwrap();
         assert!(adjusted.is_none());
@@ -4004,5 +3974,158 @@ mod tests {
 
         assert!((scores[E_BCHAR][E_XCHAR] - (-15.0)).abs() < 1.0e-12);
         assert!((scores[E_XCHAR][E_BCHAR] - (-10.0)).abs() < 1.0e-12);
+    }
+
+    /// NCBI's `Blast_CalcLambdaFullPrecision`, statement by statement. The
+    /// third value counts the Newton steps it refused because f did not fall
+    /// below 0.9 of the previous iteration's f (`fold`).
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:220-334
+    // ```c
+    // for (k = 0;  k < max_iterations;  k++) {
+    //     double fold = f;            /* previous value of f */
+    //     ...
+    //     if ((was_newton && fabs(f) > .9 * fabs(fold)) || slope >= 0) {
+    //         x = (left + right)/2;  /* bisect */
+    // ```
+    fn ncbi_calc_lambda_full_precision(
+        score: &[Vec<f64>],
+        alphsize: usize,
+        row_prob: &[f64],
+        col_prob: &[f64],
+    ) -> (f64, usize, usize) {
+        let mut f = 4.0;
+        let mut left = 0.0;
+        let mut right = 1.0;
+        let mut x = 0.367879441171f64;
+        let mut is_newton = false;
+        let mut max_score = COMPO_SCORE_MIN as f64;
+        let mut avg_score = 0.0;
+        for i in 0..alphsize {
+            for j in 0..alphsize {
+                if row_prob[i] == 0.0 || col_prob[j] == 0.0 {
+                    continue;
+                }
+                if max_score < score[i][j] {
+                    max_score = score[i][j];
+                }
+                avg_score += row_prob[i] * col_prob[j] * score[i][j];
+            }
+        }
+        assert!(max_score > 0.0 && avg_score < 0.0, "lambda must exist");
+        let mut fold_refusals = 0;
+        let mut k = 0;
+        while k < K_LAMBDA_ITERATION_LIMIT {
+            let fold = f;
+            let lambda = -x.ln();
+            let was_newton = is_newton;
+            let x_pow_max_score = (-max_score * lambda).exp();
+            f = -x_pow_max_score;
+            let mut slope = max_score * f / x;
+            for i in 0..alphsize {
+                for j in 0..alphsize {
+                    if row_prob[i] == 0.0 || col_prob[j] == 0.0 {
+                        continue;
+                    }
+                    let ff = if max_score != score[i][j] {
+                        let diff_score = max_score - score[i][j];
+                        let ff = row_prob[i] * col_prob[j] * (-lambda * diff_score).exp();
+                        slope += diff_score * ff / x;
+                        ff
+                    } else {
+                        row_prob[i] * col_prob[j]
+                    };
+                    f += ff;
+                }
+            }
+            if f > 0.0 {
+                left = x;
+            } else if f < 0.0 {
+                right = x;
+            } else {
+                break;
+            }
+            if right - left <= 2.0 * left * (1.0 - right) * K_LAMBDA_ERROR_TOLERANCE
+                && (f / x_pow_max_score).abs() <= K_LAMBDA_FUNCTION_TOLERANCE
+            {
+                x = (left + right) / 2.0;
+                break;
+            }
+            let f_fell_too_little = was_newton && f.abs() > 0.9 * fold.abs();
+            if f_fell_too_little || slope >= 0.0 {
+                if f_fell_too_little && slope < 0.0 {
+                    fold_refusals += 1;
+                }
+                x = (left + right) / 2.0;
+            } else {
+                let p = -f / slope;
+                let y = x + p;
+                if y <= left || y >= right {
+                    x = (left + right) / 2.0;
+                } else {
+                    is_newton = true;
+                    x = y;
+                    if p.abs() <= K_LAMBDA_ERROR_TOLERANCE * x * (1.0 - x)
+                        && (f / x_pow_max_score).abs() <= K_LAMBDA_FUNCTION_TOLERANCE
+                    {
+                        break;
+                    }
+                }
+            }
+            k += 1;
+        }
+        let lambda = if k < K_LAMBDA_ITERATION_LIMIT {
+            -x.ln()
+        } else {
+            -1.0
+        };
+        (lambda, k, fold_refusals)
+    }
+
+    // The two matrices make NCBI refuse one Newton step because f did not
+    // fall below 0.9 of the previous f. Comparing with -x^max_score instead
+    // (the order LOSAT had before) takes 6 and 5 iterations, and the first
+    // lambda differs in its last bits.
+    #[test]
+    fn calc_lambda_full_precision_compares_f_with_the_previous_iteration_like_ncbi() {
+        let cases = [
+            (
+                "a",
+                [[-2.0, -6.0], [-2.0, 4.0]],
+                [5.0 / 7.0, 2.0 / 7.0],
+                [2.0 / 3.0, 1.0 / 3.0],
+                3,
+            ),
+            ("b", [[-4.0, -5.0], [-4.0, 4.0]], [0.8, 0.2], [0.5, 0.5], 4),
+        ];
+        for (name, matrix, rows, cols, iterations) in cases {
+            let score: Vec<Vec<f64>> = matrix.iter().map(|row| row.to_vec()).collect();
+            let mut row_prob = [0.0; COMPO_NUM_TRUE_AA];
+            let mut col_prob = [0.0; COMPO_NUM_TRUE_AA];
+            row_prob[..2].copy_from_slice(&rows);
+            col_prob[..2].copy_from_slice(&cols);
+
+            let (ncbi_lambda, ncbi_iterations, fold_refusals) =
+                ncbi_calc_lambda_full_precision(&score, 2, &row_prob, &col_prob);
+            assert_eq!(fold_refusals, 1, "case {name} reaches the refusal");
+            assert_eq!(ncbi_iterations, iterations, "case {name}");
+
+            let (lambda, iter_count) =
+                calc_lambda_full_precision_from_scores(&score, 2, &row_prob, &col_prob);
+            assert_eq!(iter_count, ncbi_iterations, "case {name} iterations");
+            assert_eq!(
+                lambda.to_bits(),
+                ncbi_lambda.to_bits(),
+                "case {name}: lambda {lambda} vs NCBI {ncbi_lambda}"
+            );
+
+            // lambda solves sum_ij p_i q_j exp(lambda s_ij) = 1.
+            let mut phi = -1.0;
+            for i in 0..2 {
+                for j in 0..2 {
+                    phi += rows[i] * cols[j] * (lambda * matrix[i][j]).exp();
+                }
+            }
+            assert!(phi.abs() <= 1.0e-12, "case {name}: phi {phi}");
+        }
     }
 }

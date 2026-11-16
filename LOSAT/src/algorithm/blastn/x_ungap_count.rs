@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_BNUNGAPCOUNT): the exact ungapped
+//! LOSAT_X_BNUNGAPCOUNT (graduated 2026-10-27, always on): the exact ungapped
 //! extension (`s_NuclUngappedExtendExact`) with the number of steps of each direction worked out
 //! before its loop.
 //!
@@ -50,7 +50,8 @@
 //! Where it runs. `extension::extend_hit_ungapped_exact_ncbi` (every caller of the exact
 //! extension: blastn-short and other word sizes below 11, and the exact pass that follows
 //! `extend_hit_ungapped_approx_ncbi` when its score reaches the reduced cutoff) calls
-//! `extend_hit_ungapped_exact_counted` when the switch is on, and the ported loops otherwise.
+//! `extend_hit_ungapped_exact_counted`; the loop-for-loop port (`extend_hit_ungapped_exact_ported`,
+//! `cfg(test)`) is the reference of the unit test below.
 //!
 //! Why the result is the same. The pair `(s, base)` is subject position `p = 4 * s + 3 - base`
 //! (`base = 3 - p % 4`, and `NCBI2NA_UNPACK_BASE(ch, base)` is the base at `p`):
@@ -73,23 +74,11 @@
 //! counts, so the ported loops' `q_idx == 0` / `q_idx >= q_len` exits (which never fire) are not
 //! needed, and the query letters are BLASTNA codes (`< 16`), so the matrix cell
 //! `code * 16 + base` is in the 256-cell matrix.
-//!
-//! The variable is read once. `LOSAT_X_BNUNGAPCOUNT` (a switch of the strict set,
-//! `utils/xswitch.rs`: on unless it is `0`) runs this module.
 
 use super::extension::UngappedData;
-use std::sync::OnceLock;
 
 /// BLASTNA alphabet size (`blast_encoding.h:91-92`).
 const BLASTNA_SIZE: usize = 16;
-
-/// No NCBI counterpart: reads LOSAT_X_BNUNGAPCOUNT once. It is a strict-set switch: on unless it
-/// is `0`. It chooses a LOSAT code path and changes no value NCBI computes.
-#[inline(always)]
-pub(crate) fn on() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNUNGAPCOUNT"))
-}
 
 /// `matrix[code][base]` of the BLASTNA matrix (`code < 16`, `base < 4`).
 #[inline(always)]
@@ -122,7 +111,18 @@ pub(crate) fn extend_hit_ungapped_exact_counted(
     x_dropoff: i32,
     matrix: &[i32; BLASTNA_SIZE * BLASTNA_SIZE],
 ) -> UngappedData {
-    let x = -x_dropoff;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:743-747 (the same at
+    // 913-917 and 1755-1759)
+    // ```c
+    //                s_NuclUngappedExtendExact(query, subject, matrix, q_off,
+    //                                   s_off, -(cutoffs->x_dropoff), ungapped_data);
+    //             }else {
+    //                s_NuclUngappedExtend(query, subject, matrix, q_off, s_end, s_off,
+    //                                  -(cutoffs->x_dropoff), ungapped_data,
+    // ```
+    // A raw X-drop past `Int4` (`INT_MIN`, `core::x_drop`) negates to itself in NCBI's x86-64
+    // build, so the extension never stops at the X-drop; LOSAT negates it the same way.
+    let x = x_dropoff.wrapping_neg();
     debug_assert!(q_off < q_seq.len() && s_off < subject_len);
     debug_assert!(subject_len.div_ceil(4) <= s_seq_packed.len());
     let q = q_seq.as_ptr();
@@ -214,7 +214,7 @@ mod tests {
             for _ in 0..1 + next(&mut state) % 4 {
                 for _ in 0..1 + next(&mut state) % 40 {
                     let r = next(&mut state);
-                    query.push(if r % 50 == 0 {
+                    query.push(if r.is_multiple_of(50) {
                         (4 + r % 11) as u8
                     } else {
                         (r % 4) as u8

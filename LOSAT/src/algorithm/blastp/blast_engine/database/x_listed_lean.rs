@@ -7,8 +7,8 @@
 //! for outfmt 0 (`subject_titles`) and once for the `stitle` field (`ListedTitles::stitles`). With
 //! the UniRef50 database, the first query batch (91 queries) of 100 at 32 threads lists 70,701
 //! subjects of 50.8 MB of letters: the records added 41 MiB and the two title copies 10 MiB of
-//! anonymous memory on top of the listed sequences (`ListedSubjects::encoded`, which the redo reads
-//! and the reports keep without `LOSAT_X_BPREDODBSUBJ`), all in the main heap in about 0.2 s (v4-D12
+//! anonymous memory on top of the listed sequences (`ListedSubjects::encoded`, which the redo read
+//! and the reports kept before `LOSAT_X_BPREDODBSUBJ` graduated), all in the main heap in about 0.2 s (v4-D12
 //! s3 probe, workstation).
 //!
 //! With the switch on, `ListedSubjects::x_read_titles_lean` reads the same titles, in the same
@@ -17,10 +17,11 @@
 //! borrow these titles for outfmt 0 and for `stitle`, and read the letters of a subject from its
 //! stored residues by `ncbistdaa_to_ascii` (`blast_engine.rs` `ShownSubjects`), which is how
 //! `read_titles` makes the records' letters. Only two readers take letters from the records: the
-//! recount of the HSPs with pyrrolysine (`recount_pyrrolysine_identities`) and the O of the rendered
-//! rows (`restore_displayed_o`), both for the subjects of the final hit lists. Every other reader
-//! of a listed subject takes the stored residues (`subjects`) or its title by rank. So every letter
-//! and title that a report reads is the byte that the records held, and the reports do not change.
+//! recount of the HSPs with pyrrolysine or a gap character (`recount_shown_identities`) and the O
+//! of the rendered rows (`restore_displayed_o`), both for the subjects of the final hit lists.
+//! Every other reader of a listed subject takes the stored residues (`subjects`) or its title by
+//! rank. So every letter and title that a report reads is the byte that the records held, and the
+//! reports do not change.
 //!
 //! No NCBI counterpart for the holding: NCBI reads each sequence and definition line from the
 //! mapped database files when it formats a hit (`CSeqDBVol::x_GetHdrAsn1Binary`, quoted above
@@ -28,8 +29,7 @@
 //!
 //! `LOSAT_X_BPLISTEDLEAN` is a switch of the strict set: on unless it is `0`.
 //! It acts for every task of BLASTP with `-db`, in the
-//! search of all queries and in the blocks of `LOSAT_X_BPQBLOCK` (not with ABI v1's titles, which
-//! read the records).
+//! search of all queries and in the blocks of `LOSAT_X_BPQBLOCK`.
 
 use std::sync::{Arc, OnceLock};
 
@@ -57,16 +57,18 @@ impl ListedSubjects {
     /// EXPERIMENT (LOSAT_X_BPLISTEDLEAN): `read_titles` without the records: the definition lines
     /// of the subjects of the final hit lists (`hit_lists`), read in the same order with the same
     /// errors, one `Arc` each; the other subjects share one empty title.
-    pub(in crate::algorithm::blastp::blast_engine) fn x_read_titles_lean(
-        &self,
-        database: &BlastpDatabase,
+    pub(in crate::algorithm::blastp::blast_engine) fn x_read_titles_lean<'a>(
+        &'a self,
+        database: &'a BlastpDatabase,
         hit_lists: &[Option<BlastpHitList>],
-    ) -> Result<ListedTitles<'_>> {
+    ) -> Result<ListedTitles<'a>> {
         let ranks = self.ordinals.len();
         let mut titles: Vec<Arc<[u8]>> = vec![Arc::from(&b""[..]); ranks];
         let mut replaced_title_bytes = vec![false; ranks];
+        let mut sources = Vec::new();
         let mut read = vec![false; ranks];
         let mut parsed = ParsedSubjects::default();
+        let headers = crate::algorithm::common::database::HeaderReader::new(&database.db);
         for (query, hit_list) in hit_lists.iter().enumerate() {
             let Some(hit_list) = hit_list else {
                 continue;
@@ -77,25 +79,34 @@ impl ListedSubjects {
                 if std::mem::replace(&mut read[rank], true) {
                     continue;
                 }
-                let (title, replaced) =
-                    parsed.read(database, rank, self.ordinals[rank], query, ranks)?;
-                titles[rank] = Arc::from(title);
-                replaced_title_bytes[rank] = replaced;
+                let stored =
+                    parsed.read(database, &headers, rank, self.ordinals[rank], query, ranks)?;
+                titles[rank] = Arc::from(stored.title);
+                replaced_title_bytes[rank] = stored.replaced_bytes;
+                crate::algorithm::common::database::keep_source(
+                    &mut sources,
+                    rank,
+                    ranks,
+                    stored.source,
+                );
             }
         }
         Ok(ListedTitles {
             listed: self,
+            oids: database.oid_map(),
             shown: ListedShown::Lean(titles),
             replaced_title_bytes,
+            sources,
             parsed: parsed.by_rank,
+            program: database.program,
         })
     }
 }
 
 // No NCBI counterpart: a check of the unit tests; it changes no value NCBI computes.
 /// The lean titles (`lean`) against the records of `read_titles` (`records`) of the same search,
-/// rank by rank: the title, the flag of replaced title bytes and every letter (the stored
-/// residue's `ncbistdaa_to_ascii`).
+/// rank by rank: the title, the flags of replaced title bytes, the source of a title made from
+/// it, and every letter (the stored residue's `ncbistdaa_to_ascii`).
 #[cfg(test)]
 pub(in crate::algorithm::blastp::blast_engine) fn x_assert_same_titles_and_letters(
     lean: &ListedTitles<'_>,
@@ -123,6 +134,11 @@ pub(in crate::algorithm::blastp::blast_engine) fn x_assert_same_titles_and_lette
         assert_eq!(
             lean.replaced_title_bytes[rank], records.replaced_title_bytes[rank],
             "rank {rank} (ordinal {ordinal}): replaced title bytes"
+        );
+        assert_eq!(
+            lean.source(rank),
+            records.source(rank),
+            "rank {rank} (ordinal {ordinal}): source of the title"
         );
         let stored = &listed.encoded[rank];
         let residues = &stored.aa_seq[1..=stored.aa_len];

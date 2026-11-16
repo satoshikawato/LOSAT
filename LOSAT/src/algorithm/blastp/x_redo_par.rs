@@ -36,7 +36,8 @@
 //!    then each match runs `postprocess_preliminary_hits` with the arguments of the one-thread loop,
 //!    with per-worker scratch (composition workspace, gapped-alignment scratch, and the
 //!    subject-range SEG cache backed by one shared store for the search; with `LOSAT_X_BPSEGWIN`
-//!    the store is emptied after a window once it holds 4,096 entries or more, `x_bp_seg_win`);
+//!    the store is emptied after a window once it holds 4,096 entries or more,
+//!    `kappa.rs` `x_bp_seg_win`);
 //! 5. the replay, per match in order: the early termination test (`BlastCompo_EarlyTermination`)
 //!    on the heaps of the query's batch; then the match's error, if it has one (the first error of
 //!    a match that the test does not end is the one the one-thread loop reports); then
@@ -104,9 +105,8 @@
 //! (`x_compute_window_lpt`). The window's results are read by job index as without it. With it on,
 //! the `[TIMING] x_bpredopar:` line ends with `lpt_windows=<windows computed so>`.
 //!
-//! `LOSAT_X_BPREDOWINEXPAND` (a switch of the strict set, on by default from the pull request that
-//! added it; it acts only where this path runs) leaves each compact preliminary list
-//! (`x_prelim_compact.rs`) as it is until
+//! This path (graduated 2026-10-27; the switch was `LOSAT_X_BPREDOWINEXPAND`) leaves each compact
+//! preliminary list (`x_prelim_compact.rs`) as it is until
 //! a window reaches it, instead of expanding the lists of all queries before the redo: before each
 //! window the lists from the first one not expanded are expanded in query order, by the same
 //! `x_expand_hit_list`, until the queries expanded from the window's start hold more jobs than a
@@ -178,37 +178,6 @@ pub(crate) fn x_bp_redo_lpt() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPREDOLPT"))
 }
 
-/// EXPERIMENT (LOSAT_X_BPSEGWIN): the built-in number of entries (about 320 bytes each) from
-/// which the store is emptied after a window.
-const X_SEG_WIN_ENTRIES: usize = 4_096;
-
-// No NCBI counterpart: reads the LOSAT_X_BPSEGWIN switch once; it does not change any value NCBI
-// computes.
-/// EXPERIMENT (LOSAT_X_BPSEGWIN): the number of entries from which the search's store of
-/// SEG-masked subject ranges (`XSharedSubjectRanges`) is emptied after a window, or `None` (off).
-/// A strict-set value switch: the integer given, 2 or more, else 4,096; `None` for `0`. Where the
-/// redo runs in windows, a store that holds that many entries once a window is computed is
-/// emptied, so it holds about the ranges of one window, not those of the whole search; a smaller
-/// store is kept for the next windows (masking its ranges again costs more time than it saves
-/// memory: bp_wssv at 8 threads, 86 entries). A later window that reaches a range again masks it
-/// again: an entry is a function of its key (the subject, the range and the SEG parameters), so
-/// it gets the same bytes and bias flag.
-pub(crate) fn x_bp_seg_win() -> Option<usize> {
-    static MIN: OnceLock<Option<usize>> = OnceLock::new();
-    *MIN.get_or_init(|| {
-        crate::utils::xswitch::value("LOSAT_X_BPSEGWIN", 2..=usize::MAX, X_SEG_WIN_ENTRIES)
-    })
-}
-
-// No NCBI counterpart: reads the LOSAT_X_BPREDOWINEXPAND switch once; it does not change any value
-// NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPREDOWINEXPAND): a strict-set switch, on unless it is `0`. It acts only
-/// where this path runs with compact lists.
-pub(crate) fn x_bp_redo_win_expand() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPREDOWINEXPAND"))
-}
-
 /// Jobs per thread that a window holds at most, unless `LOSAT_X_BPREDOPARWINDOW` gives another
 /// number.
 const X_WINDOW_JOBS_PER_THREAD: usize = 64;
@@ -236,7 +205,7 @@ fn x_window_jobs_per_thread() -> usize {
 const X_JOB_MATCHES: usize = 4;
 
 /// What the redo of a search reads besides the preliminary hit lists and the heaps: the values
-/// the one-thread loop of `run_resolved_in_pool` reads.
+/// that `redo_run::one_thread_redo` reads (made of `redo_run::RedoInputs` in `x_windows_redo`).
 pub(crate) struct XRedoParSearch<'a, P> {
     pub pool: &'a SearchPool<'a>,
     pub threads: usize,
@@ -244,15 +213,15 @@ pub(crate) struct XRedoParSearch<'a, P> {
     /// `blast_engine::query_nomask_sequence`.
     pub query_nomask: fn(&QueryContext) -> &[u8],
     pub search_spaces: &'a [SearchSpace],
-    /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): or a database's listed subjects, read per match.
+    /// The encoded subject set, or a database's listed subjects, read per match.
     pub subjects: super::x_redo_subjects::XRedoSubjects<'a>,
     /// Each query's batch (`kappa_query_batches`): the heaps its early termination test reads.
     pub query_batches: &'a [Range<usize>],
     pub matrix: ScoringMatrix,
     pub gapped_params: &'a KarlinParams,
-    pub gapped_gumbel: &'a BlastGumbelBlk,
+    pub gapped_gumbel: Option<&'a BlastGumbelBlk>,
     pub evalue: f64,
-    /// `build_redo_align_params` of `run_resolved_in_pool`.
+    /// `build_redo_align_params` of `run_call` (`RedoInputs`).
     pub build_redo_align_params: &'a P,
     pub timing: bool,
     /// `postprocess_preliminary_hits`' `engine_positives` (the Seq-aligns are requested).
@@ -284,13 +253,21 @@ impl XScratch {
     //                     scoringParams->options->matrix
     //             );
     // ```
-    fn new(range_cache: BlastpKappaSubjectRangeCache) -> Self {
-        Self {
+    fn new(range_cache: BlastpKappaSubjectRangeCache, matrix: ScoringMatrix) -> Self {
+        let mut scratch = Self {
             composition_workspace: BlastCompositionWorkspace::new_blosum62(),
             gap_scratch: GapAlignScratch::new(),
             hits: Vec::new(),
             range_cache,
+        };
+        // Another matrix than BLOSUM62: its workspace (item SC2b).
+        if matrix != ScoringMatrix::Blosum62 {
+            super::blast_engine::blastp_use_matrix_workspace(
+                &mut scratch.composition_workspace,
+                matrix,
+            );
         }
+        scratch
     }
 }
 
@@ -324,7 +301,7 @@ fn x_list_matches<H>(list: &BlastpHitList<H>) -> usize {
 }
 
 /// The matches of each query: those of its compact list while it is not expanded
-/// (LOSAT_X_BPREDOWINEXPAND; `compact` is empty or has one entry per query), else those of its
+/// (`compact` is empty or has one entry per query), else those of its
 /// preliminary hit list.
 fn x_query_matches(
     lists: &[Option<BlastpHitList>],
@@ -575,7 +552,7 @@ fn x_local_match(lists: &[Option<BlastpHitList>], matched: XMatch) -> &BlastpHsp
         .hsplist_array[matched.position]
 }
 
-/// EXPERIMENT (LOSAT_X_BPREDOWINEXPAND): the compact preliminary lists (`x_prelim_compact.rs`) that
+/// The compact preliminary lists (`x_prelim_compact.rs`) that
 /// the windows expand as they reach them, in query order.
 pub(crate) struct XExpandAhead<'a> {
     /// A query's compact list until it is expanded into its preliminary hit list.
@@ -636,7 +613,7 @@ impl<'a> XExpandAhead<'a> {
             window.next.map_or(self.expanded_to == lists.len(), |next| {
                 next.q_idx < self.expanded_to
             }),
-            "BPREDOWINEXPAND: a window from {start:?} reads past the expanded lists (next {:?}, {} of {} expanded)",
+            "a window from {start:?} reads past the expanded lists (next {:?}, {} of {} expanded)",
             window.next,
             self.expanded_to,
             lists.len()
@@ -834,9 +811,10 @@ where
             .collect()
     };
     let new_scratch = || {
-        XScratch::new(BlastpKappaSubjectRangeCache::x_with_shared(Some(
-            shared.clone(),
-        )))
+        XScratch::new(
+            BlastpKappaSubjectRangeCache::new(Some(shared.clone())),
+            search.matrix,
+        )
     };
     let lpt = lpt && {
         let acts = search.pool.enabled() && search.threads > 1 && window.jobs.len() > 1;
@@ -1064,7 +1042,7 @@ fn x_replay(
 /// The windows of a search, each computed (`compute`, with the lists and the heaps as the replay
 /// of the windows before left them) and then replayed in stream order into `heaps`. A query's
 /// preliminary list is released after the replay of the window that holds its last match. With
-/// `expand` (LOSAT_X_BPREDOWINEXPAND), the compact lists are expanded ahead of each window.
+/// `expand`, the compact lists are expanded ahead of each window.
 #[allow(clippy::too_many_arguments)]
 fn x_redo_windows(
     lists: &mut [Option<BlastpHitList>],
@@ -1180,8 +1158,13 @@ where
     // reported here, before any match, as there.
     (search.build_redo_align_params)(0)?;
     // One store of masked subject ranges for the search, as in the query-parallel redo
-    // (`XSharedSubjectRanges`).
-    let shared = Arc::new(XSharedSubjectRanges::new());
+    // (`XSharedSubjectRanges`); in a block search of the subjects encoded for all blocks the store
+    // of all blocks (`x_query_blocks::x_block_seg_store`): an entry depends on its key only (the
+    // subject's index in that encoding, the range), the same in every block.
+    let block_store = super::x_query_blocks::x_block_seg_store(search.pool, search.subjects);
+    let shared = block_store
+        .clone()
+        .unwrap_or_else(|| Arc::new(XSharedSubjectRanges::new()));
     let threads = search.threads.max(1);
     let limits = XWindowLimits {
         jobs: x_window_jobs_per_thread().saturating_mul(threads),
@@ -1191,7 +1174,7 @@ where
     let lpt = x_bp_redo_lpt();
     // EXPERIMENT (LOSAT_X_BPSEGWIN): a store of `seg_win` entries or more after a window is
     // emptied.
-    let seg_win = x_bp_seg_win();
+    let seg_win = super::kappa::x_bp_seg_win();
     let mut seg_emptied = false;
     let mut lpt_windows = 0;
     let counts = x_redo_windows(
@@ -1213,6 +1196,12 @@ where
     );
     if seg_win.is_some() {
         crate::utils::xreach::x_reach!("LOSAT_X_BPSEGWIN", seg_emptied);
+    }
+    // The block search keeps the store for the next block only as LOSAT_X_BPSEGWIN keeps it for
+    // the next window (fewer entries than its bound); without the switch a search's store ends with
+    // the search, as outside the block search.
+    if block_store.is_some() && seg_win.is_none_or(|min| shared.x_len() >= min) {
+        shared.x_clear();
     }
     let mut counts = counts?;
     counts.lpt_windows = lpt.then_some(lpt_windows);
@@ -1240,7 +1229,7 @@ fn x_print_timing(counts: &XCounts) {
 
 /// EXPERIMENT (LOSAT_X_BPREDOPAR): the redo of a search in jobs of a few matches, into `heaps`
 /// (the redone heaps of the search). The preliminary lists are released after their redo, as the
-/// one-thread loop releases them. With `compact` (LOSAT_X_BPREDOWINEXPAND, one
+/// one-thread loop releases them. With `compact` (one
 /// entry per query), a query's compact list stands for its list until the windows expand it; none
 /// is left afterwards. Returns the number of lists released.
 pub(crate) fn x_redo_par_run<P>(
@@ -1364,6 +1353,7 @@ mod tests {
 
     fn hsp(oid: u32, e_value: f64) -> BlastpHsp {
         BlastpHsp {
+            num: 1,
             identity: 50.0,
             length: 10,
             mismatch: 5,
@@ -2466,7 +2456,6 @@ mod tests {
                 let encoded = super::super::encoding::encode_protein_sequence(query);
                 QueryContext {
                     q_idx: q_idx as u32,
-                    f_idx: 0,
                     frame: 0,
                     aa_seq: encoded.aa_seq,
                     aa_seq_nomask: None,
@@ -2491,14 +2480,12 @@ mod tests {
                 let effective_db_len =
                     (db_letters as i64 - subjects.len() as i64 * length_adjustment) as f64;
                 SearchSpace {
-                    effective_query_len,
-                    effective_db_len,
                     effective_space: effective_query_len * effective_db_len,
                     length_adjustment,
                 }
             })
             .collect();
-        let ideal = crate::core::blast_stat::composition::compute_blosum62_ideal_karlin_params()
+        let ideal = crate::stats::compute_blosum62_ideal_karlin_params()
             .expect("BLOSUM62 ideal parameters");
         XRedoFixture {
             contexts,
@@ -2533,27 +2520,21 @@ mod tests {
             gapping_params: BlastCompoGappingParams {
                 gap_open: 11 * SCALE as i32,
                 gap_extend: SCALE as i32,
-                decline_align: 0,
                 x_dropoff: (25.0 * std::f64::consts::LN_2 / scaled_lambda) as i32,
                 context: std::cell::Cell::new(None),
             },
             compo_adjust_mode: BlastCompoAdjustMode::CompositionMatrixAdjust,
             alphsize: crate::utils::matrix::BLASTAA_SIZE as i32,
             composition_test_index: 0,
-            unified_p: false,
             log_k: fixture.gapped_params.k.ln(),
             score_divisor: SCALE,
-            restricted_alignment: false,
             smith_waterman: false,
-            is_same_adjustment: false,
             near_identical_cutoff: 1.74 * std::f64::consts::LN_2 / scaled_lambda,
             position_based: false,
-            re_matrix_adjustment_pseudocounts: 20,
             ccat_query_length: fixture.contexts[q_idx].aa_len as i32,
             query_is_translated: false,
             subject_is_translated: false,
             cutoff_score: 1,
-            cutoff_evalue: 10.0,
             do_link_hsps: false,
         }
     }
@@ -2615,7 +2596,7 @@ mod tests {
                         query_batches: &fixture.batches,
                         matrix: ScoringMatrix::Blosum62,
                         gapped_params: &fixture.gapped_params,
-                        gapped_gumbel: &fixture.gapped_gumbel,
+                        gapped_gumbel: Some(&fixture.gapped_gumbel),
                         evalue: 10.0,
                         build_redo_align_params: &build,
                         timing: false,
@@ -2743,7 +2724,7 @@ mod tests {
                         query_batches: &fixture.batches,
                         matrix: ScoringMatrix::Blosum62,
                         gapped_params: &fixture.gapped_params,
-                        gapped_gumbel: &fixture.gapped_gumbel,
+                        gapped_gumbel: Some(&fixture.gapped_gumbel),
                         evalue: 10.0,
                         build_redo_align_params: &build,
                         timing: false,

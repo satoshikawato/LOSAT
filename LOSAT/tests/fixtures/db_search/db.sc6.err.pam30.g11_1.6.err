@@ -1,0 +1,15 @@
+BLAST query/options error: Gap existence and extension values of 11 and 1 not supported for PAM30
+supported values are:
+32767, 32767
+7, 2
+6, 2
+5, 2
+10, 1
+9, 1
+8, 1
+15, 3
+14, 2
+14, 1
+13, 3
+
+Please refer to the BLAST+ user manual.

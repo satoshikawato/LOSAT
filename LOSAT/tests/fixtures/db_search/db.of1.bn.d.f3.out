@@ -1,0 +1,124 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: nucleotide subjects of the query-anchored rows
+           5 sequences; 1,094 total letters
+
+
+
+Query= bnq query
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_plus plus insertion same place                                      282     3e-80
+s_pmo overlapping plus and minus                                      246     2e-69
+s_mins minus insertion                                                235     3e-66
+s_mdel minus deletion                                                 205     6e-57
+s_mins2 minus insertion same place                                    187     1e-51
+
+
+
+Query_1  1    TGTATATTCGGACTTGGCCTATCCACACAAGCGGTATTGAGGTGGAACGTTAGCGTTTGG  60
+4        1    ............................................................  60
+0        1    ....................TC................CG....................  60
+1        192              ................................................  145
+3        122                                ..........C...................  93
+
+Query_1  61   TACTGTCGGCACGTACGCCTCGTGAGGC----A----T--ACAACATTTTTCGTATCCGC  110
+4        61   ............................----.TAAG.--....................  114
+0        370  ............................----.----.--....................  321
+0        61   ..G..............G..........----.----.--....................  110
+1        144  ............................ATGG.----.--.......A............  91
+2        184                                                    .........G  175
+3        92   ............................----.----.CC........AC..........  41
+
+Query_1  111  GAGCATAAATGTTTCTAGCGTTTCCAGTTTTGACGGTACAtttttttttttttttttttt  170
+4        115  .........................................C.AACGACCAA.CA.GGGG  174
+0        320  ............A............................C.AACGACCA..CA.GGGG  261
+0        111  .........................................                     151
+1        90   .........................................                     50
+2        174  .............................A...........C.AACGACCAA.CA.GGG-  116
+3        40   ....G................................C..                      1
+
+Query_1  171  tttttGCGGATGATGCAGCACTCTTCAGACCGGAAGCCGTCACGCCAACTCGACGACCCT  230
+4        175  CGGCA.................A.............T.............            224
+0        260  CGGCA.......................................................  201
+1        25        .........................                                1
+2        115  -----....CA.CG.A..........................T....T............  61
+
+Query_1  231  AGGATTTATATTGCACAGTTGGGGTCACACGCTGGGTGTAAGAGATATTCCGCGTGTCCC  290
+0        200  ..........                                                    191
+2        60   .......................................................T....  1
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 297792
+
+
+Query= bnq2 second query
+
+Length=160
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_mdel minus deletion                                                 232     2e-65
+s_pmo overlapping plus and minus                                      226     9e-64
+s_plus plus insertion same place                                      195     5e-54
+s_mins minus insertion                                                168     7e-46
+s_mins2 minus insertion same place                                    77.9    1e-18
+
+
+
+Query_2  1    TCGTATCCGCGAGCATAAATGTTTCTAGCGTTTCCAGTTTTGACTGTACATCTAACGACC  60
+2        184  .........G.............................A....G...............  125
+0        330  ......................A.....................G...............  271
+0        101  ............................................G...............  160
+4        105  ............................................G...............  164
+1        100  ............................................G...............  41
+3        50   ..............G.............................G..C..            1
+
+Query_2  61   GATCATGGGGCGGCAGCGGATGACGCAGCACTCTTCAGACCGGAAGCCGTCACGCCAACT  120
+2        124  A...................------..........................T....T..  71
+0        270  AT.....................T....................................  211
+4        165  A......................T........A.............T.............  224
+1        40   A......................T................                      1
+
+Query_2  121  CGACGACCCCAGGATTTATATTGCACAGTTGGGGTCACAC  160
+2        70   .........T..............................  31
+0        210  .........T..........                      191
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 153032
+
+
+  Database: nucleotide subjects of the query-anchored rows
+    Posted date:  Nov 15, 2026  2:47 AM
+  Number of letters in database: 1,094
+  Number of sequences in database:  5
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

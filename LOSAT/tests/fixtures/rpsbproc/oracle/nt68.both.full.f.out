@@ -1,0 +1,95 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/nt68.asn
+#Output data file:	(stdout)
+#Annotation data at:	nt
+#E-Value cutoff:	0.01
+#Redundancy:	Full
+#Data requested:	Domain hits and site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: YES
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	tblastn	2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Nucleotide	5000	mg00068_335001-340000
+DOMAINS
+1	Query_1[1]	Specific	517326	3751	4395	1.64913e-105	335.332	pfam06545	AllG	-	-
+1	Query_1[1]	Specific	491845	1423	1749	1.65252e-37	136.99	pfam11392	AllH	-	-
+1	Query_1[1]	Specific	440430	289	882	3.6905e-26	110.429	COG0666	ANKYR	-	-
+1	Query_1[1]	Non-specific	440430	289	882	5.70824e-26	110.044	COG0666	ANKYR	N	-
+1	Query_1[1]	Non-specific	440430	286	882	3.46058e-23	101.954	COG0666	ANKYR	C	-
+1	Query_1[1]	Non-specific	440430	355	882	5.13809e-18	86.5464	COG0666	ANKYR	C	-
+1	Query_1[1]	Non-specific	440430	310	687	2.13142e-11	66.9013	COG0666	ANKYR	N	-
+1	Query_1[1]	Non-specific	222980	304	825	3.12595e-10	64.6607	PHA03095	PHA03095	C	-
+1	Query_1[1]	Specific	492909	505	801	4.99245e-10	57.8125	pfam12796	Ank_2	-	-
+1	Query_1[1]	Non-specific	165205	337	831	1.64741e-09	62.2884	PHA02874	PHA02874	NC	-
+1	Query_1[1]	Non-specific	222984	331	882	2.85526e-09	61.6046	PHA03100	PHA03100	C	476869
+1	Query_1[1]	Non-specific	492909	613	882	1.38968e-08	53.9605	pfam12796	Ank_2	-	-
+1	Query_1[1]	Non-specific	165207	268	882	7.9578e-08	57.3806	PHA02876	PHA02876	NC	-
+1	Query_1[1]	Non-specific	140343	544	867	1.31317e-07	56.8302	PTZ00322	PTZ00322	C	-
+1	Query_1[1]	Non-specific	222980	307	882	6.22733e-07	54.2603	PHA03095	PHA03095	C	-
+1	Query_1[1]	Non-specific	492909	313	576	2.49995e-06	47.4121	pfam12796	Ank_2	-	-
+1	Query_1[1]	Non-specific	165205	259	879	2.22969e-05	49.1916	PHA02874	PHA02874	C	-
+1	Query_1[1]	Non-specific	165207	316	831	7.00904e-05	47.7506	PHA02876	PHA02876	NC	-
+1	Query_1[1]	Non-specific	520835	316	456	7.93837e-05	41.8124	pfam13637	Ank_4	-	-
+1	Query_1[1]	Non-specific	165205	271	831	0.000121816	46.4952	PHA02874	PHA02874	NC	-
+1	Query_1[1]	Non-specific	222939	343	870	0.000149666	46.4118	PHA02878	PHA02878	NC	476869
+1	Query_1[1]	Non-specific	215625	313	480	0.000194279	46.3998	PLN03192	PLN03192	N	-
+1	Query_1[1]	Non-specific	492909	313	486	0.000274186	41.6341	pfam12796	Ank_2	N	-
+1	Query_1[1]	Non-specific	493753	649	831	0.000276339	40.4093	pfam13857	Ank_5	-	-
+1	Query_1[1]	Non-specific	222980	343	831	0.000298754	45.4007	PHA03095	PHA03095	NC	-
+1	Query_1[1]	Non-specific	273311	307	873	0.000603056	44.6866	TIGR00870	trp	C	532257
+1	Query_1[1]	Non-specific	222939	316	912	0.001846	42.945	PHA02878	PHA02878	C	476869
+1	Query_1[1]	Non-specific	222984	334	576	0.00258663	42.3447	PHA03100	PHA03100	NC	476869
+1	Query_1[1]	Non-specific	165206	328	882	0.00299922	42.2856	PHA02875	PHA02875	C	-
+1	Query_1[1]	Non-specific	222980	355	660	0.00350164	41.9339	PHA03095	PHA03095	NC	-
+1	Query_1[1]	Non-specific	165231	334	582	0.0050024	41.907	PHA02917	PHA02917	NC	-
+1	Query_1[1]	Non-specific	165205	442	882	0.00883138	40.7172	PHA02874	PHA02874	C	-
+1	Query_1[1]	Non-specific	165207	400	882	0.00897077	40.8171	PHA02876	PHA02876	C	-
+1	Query_1[2]	Non-specific	505031	1793	3304	6.43366e-152	476.845	NF004760	PRK06091	-	-
+1	Query_1[2]	Non-specific	513542	2813	3292	1.9274e-24	100.411	pfam00549	Ligase_CoA	-	452923
+1	Query_1[2]	Non-specific	439844	2078	2542	2.53679e-11	66.6222	COG0074	SucD	C	-
+1	Query_1[2]	Non-specific	515068	2345	2617	1.04354e-10	59.9031	pfam02629	CoA_binding	-	531134
+1	Query_1[2]	Non-specific	215066	2078	2614	1.33877e-05	49.1955	PLN00125	PLN00125	C	-
+1	Query_1[2]	Non-specific	240307	2339	2542	5.51927e-05	47.4023	PTZ00187	PTZ00187	NC	-
+ENDDOMAINS
+SUPERFAMILIES
+1	Query_1	Superfamily	0	331	882	2.85526e-09	61.6046	cl39094	PHA03100	C	-
+1	Query_1	Superfamily	0	2813	3292	1.9274e-24	100.411	cl29107	Ligase_CoA	-	-
+ENDSUPERFAMILIES
+1	Query_1[1]	Specific	oligomer interface	L604-606,E619-621,K622-624,G625-627,L631-633,S634-636,E646-648,A655-657,N685-687,V691-693,W697-699,L709-711,E712-714,V721-723,L724-726,N727-729,Q748-750,A751-753,L763-765,E772-774,D799-801,Y805-807,K811-813,E823-825,L826-828,E835-837,R838-840,G841-843,E847-849,E850-852,L862-864,A871-873	36	0	0
+1	Query_1[1]	Specific	oligomer interface	K397-399,T409-411,L412-414,L421-423,Y424-426,Q427-429,Y433-435,A436-438,A448-450,D457-459,D484-486,T490-492,L604-606,E619-621,K622-624,G625-627,L631-633,S634-636,E646-648,A655-657,N685-687,V691-693,W697-699,L709-711,E712-714,V721-723,L724-726,N727-729,Q748-750,A751-753,L763-765,E772-774,D799-801	36	0	0
+1	Query_1[1]	Specific	oligomer interface	L313-315,Q322-324,Q325-327,G328-330,I334-336,D337-339,T349-351,A358-360,D385-387,Q391-393,K397-399,T409-411,L412-414,L421-423,Y424-426,Q427-429,Y433-435,A436-438,A448-450,D457-459,D484-486,T490-492,L496-498,L508-510,I511-513,L520-522,N523-525,D526-528,L532-534,T535-537,I547-549,P556-558	36	0	0
+MOTIFS
+1	Query_1[1]	ANK repeat	601	689	0
+1	Query_1[1]	ANK repeat	691	803	0
+1	Query_1[1]	ANK repeat	805	884	0
+1	Query_1[1]	ANK repeat	394	488	0
+1	Query_1[1]	ANK repeat	490	689	0
+1	Query_1[1]	ANK repeat	691	803	0
+1	Query_1[1]	ANK repeat	391	488	0
+1	Query_1[1]	ANK repeat	490	584	0
+ENDMOTIFS
+ENDQUERY
+ENDSESSION	1
+ENDDATA

@@ -1,0 +1,5 @@
+Warning: [makeblastdb] 
+Input file nodata.fna does NOT appear to be FASTA (processing anyway).
+Advise validating database with 'blastdbcheck -dbtype [prot|nucl] -db ${DBNAME}'
+
+BLAST Database creation error: No sequences added

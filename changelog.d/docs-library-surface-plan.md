@@ -1,0 +1,1 @@
+- Added the library surface plan (`docs/losat_library_surface_plan.md`): the public API of the engine crate (`api`, `cli`), the order of the distribution channels (crates.io, npm as a wrapper of the WASI reactors, PyPI as a bin wheel), and the implementation stages after the v0.2.0 cut. A plan only; no code change.

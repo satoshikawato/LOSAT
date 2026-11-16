@@ -91,7 +91,7 @@
 //! - fill: the recorded appends again in order, each written at its cell's cursor (the cell's start,
 //!   moved on by one per append), so that a cell's slice holds its offsets in the order of their
 //!   appends; then the offset of rank k (0-based) of a cell whose count n is above 5 is moved to slot
-//!   `x_emission_position(k, n)` (for n <= 5 that slot is k).
+//!   `x_emission_position(k, n)` (for n <= 5 that slot is k), in place (`x_to_scan_order`).
 //!
 //! The permutation. Let a cell take the offsets o_0, ..., o_{n-1} in this order (o_k is appended when
 //! `num_used` is k). By `add_word_hit` (above): o_0 is `query_offset` and o_1..o_4 are
@@ -101,14 +101,15 @@
 //! So for n >= 6 the offset o_k with k >= 3 lies in the g-th overflow cell of the cell, g = (k - 3) >> 2,
 //! at slot s = (k - 3) & 3, the list runs from the newest cell (g = G - 1) to the first (g = 0, whose
 //! `next` is NULL), G = ceil((n - 3) / 4) = floor(n / 4) cells, and the newest holds
-//! m = n - 3 - 4 (G - 1) offsets, 1 <= m <= 4. The scan (above) writes o_0 at dest[0]; for n <= 5 it
-//! writes o_k at dest[k]. For n >= 6 it writes o_1, o_2 at dest[1], dest[2], then
+//! m = n - 3 - 4 (G - 1) offsets, 1 <= m <= 4. The scan (above) writes o_0 at `dest[0]`; for n <= 5 it
+//! writes o_k at `dest[k]`. For n >= 6 it writes o_1, o_2 at `dest[1]`, `dest[2]`, then
 //! f = (n - 3) & 3 slots of the head; n - 3 = m (mod 4), so f = m when f != 0, and the walk then moves
 //! to the next cell, while for f = 0 (m = 4) the walk starts at the head: either way the head's m
 //! slots come first, then cells G - 2, ..., 0 with 4 slots each. Hence the emission position of o_k:
 //! - k when n <= 5 or k < 3;
 //! - 3 + s when g = G - 1 (the head);
 //! - 3 + m + 4 (G - 2 - g) + s = n - 4 (g + 1) + s when g < G - 1.
+//!
 //! The head's positions are 3..3 + m and cell g's are n - 4 (g + 1)..n - 4 g, so the positions are a
 //! permutation of 0..n. For n = 6 and 7 there is one cell and every position is k.
 //!
@@ -171,8 +172,16 @@
 //!   packed appends (the record of the appends is not read again) in their order, each at its cell's
 //!   cursor, so a cell's slice holds o_0..o_{n-1} as the fill pass leaves it; then o_k goes to slot
 //!   `x_emission_position(k, n)` in each cell of more than 5 offsets, the fill pass's statements.
+//!
 //! The table is the count-and-fill builder's slot for slot; only the order of the memory accesses
 //! differs.
+//!
+//! BLASTX's tables hold `u16` query offsets (`XBxCompressedLookup::Flat`; its query batches of more
+//! than 2^16 letters keep `i32` ones), so an offset above a cell's index in its bucket does not fit
+//! a slot of `hits`. Its bucket fill (`x_bx_buckets_on`) keeps no record and no partition: each
+//! append goes, as the count pass makes it, to the chunks of its bucket (`XBucketChunks`) as
+//! `query_offset << 16 | index & (2^10 - 1)`, and each bucket is filled from its chunks in the same
+//! order and by the same statements.
 //!
 //! With more than one thread the search's pool builds the same table (`x_clut_par.rs`, exactness
 //! argument in its header); at one thread (and in builds without threads) the serial builder runs:
@@ -203,6 +212,11 @@ use std::sync::{Mutex, PoisonError};
 ))]
 #[path = "x_clut_par.rs"]
 mod x_clut_par;
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(crate) use x_clut_par::XFlatAppends;
 
 // No NCBI counterpart: reads the switch once; it does not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPCLUT): a strict-set switch, on unless it is `0`: the flat table
@@ -282,7 +296,7 @@ pub fn x_bplkpflat_print_summary() {
 /// recycled instead of being zeroed again for each block. The second field (LOSAT_X_BPLKPAHEAD) holds
 /// a PV array's vector for a build ahead of its block (`x_make_room`); it is empty otherwise.
 #[derive(Default)]
-pub(crate) struct XFlatSpare(Mutex<(Vec<u32>, Vec<i32>)>, Mutex<Vec<u32>>);
+pub(crate) struct XFlatSpare<H = i32>(Mutex<(Vec<u32>, Vec<H>)>, Mutex<Vec<u32>>);
 
 impl XFlatSpare {
     // No NCBI counterpart: buffer reuse only (above).
@@ -290,6 +304,23 @@ impl XFlatSpare {
     /// table is dropped.
     pub(crate) fn give(&self, table: XFlatCompressedLookup) {
         *self.0.lock().unwrap_or_else(PoisonError::into_inner) = (table.starts, table.hits);
+    }
+
+    // No NCBI counterpart: buffer reuse only (above).
+    /// Item SC2d (LOSAT_X_BPLKPAHEAD): moves the `starts` and `hits` kept here, if any, to `other`
+    /// (in place of any it keeps); this spare then keeps none. The second spare gives the vectors of
+    /// a block's table to the block spare where the build ahead of the next block made no table, so
+    /// that the next block's own build takes them (`blastp/blast_engine/x_lookup_ahead.rs`).
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    pub(crate) fn x_give_to(&self, other: &XFlatSpare) {
+        // Each lock is held only around a move.
+        let kept = std::mem::take(&mut *self.0.lock().unwrap_or_else(PoisonError::into_inner));
+        if kept.0.capacity() != 0 || kept.1.capacity() != 0 {
+            *other.0.lock().unwrap_or_else(PoisonError::into_inner) = kept;
+        }
     }
 
     // No NCBI counterpart: buffer reuse, and the thread that allocates the table's vectors
@@ -300,9 +331,11 @@ impl XFlatSpare {
     /// which then allocates none of the table's vectors (`XFlatArgs::x_ahead`): keeps here vectors
     /// with the room for a table of `backbone_size` cells and `hits` hits and for its PV array at any
     /// PV shift. The vectors are this spare's own, else those `block` keeps (the block spare, which
-    /// the block before gave back), and each one short of its room is replaced here by an empty one
-    /// of `backbone_size + 1`, `hits_grown` (at least `hits`) and `(backbone_size >> PV_ARRAY_BTS) +
-    /// 1` entries of capacity. Nothing is written into them. Returns the number of vectors allocated.
+    /// the block before gave back); `starts` and the PV array short of their room are replaced here
+    /// by empty ones of `backbone_size + 1` and `(backbone_size >> PV_ARRAY_BTS) + 1` entries of
+    /// capacity, and `hits` short of its room is grown in place to `hits_grown` (at least `hits`)
+    /// entries of capacity (item SC2d; its entries are kept). Nothing is written into them. Returns
+    /// the number of vectors allocated or grown.
     pub(crate) fn x_make_room(
         &self,
         block: &XFlatSpare,
@@ -326,7 +359,10 @@ impl XFlatSpare {
             allocated += 1;
         }
         if kept.1.capacity() < hits {
-            kept.1 = Vec::with_capacity(hits_grown.max(hits));
+            // Item SC2d: grown in place of a new vector, so that the pages the vector's last table
+            // touched stay with it (the room past them is not resident).
+            let grown = hits_grown.max(hits);
+            kept.1.reserve_exact(grown - kept.1.len().min(grown));
             allocated += 1;
         }
         if pv.capacity() < pv_words {
@@ -336,6 +372,102 @@ impl XFlatSpare {
         *self.0.lock().unwrap_or_else(PoisonError::into_inner) = kept;
         *self.1.lock().unwrap_or_else(PoisonError::into_inner) = pv;
         allocated
+    }
+}
+
+// No NCBI counterpart: buffer reuse between the builds of a block search (memory placement only); it
+// changes no value NCBI computes.
+/// Item SC2d-2: segments of packed appends (`x_clut_par.rs` `XSegmentOut`) kept by the block search
+/// (`blastp/x_query_blocks.rs` `XBlockSubjects`) from one build's stripes pass to the next build's
+/// appends pass, at most as many as the build's threads, each cut to the entries that build wrote (the
+/// pages past them returned), so that the next build writes their pages, which the last build
+/// touched, instead of faulting the pages of fresh mappings. A kept segment's values are not read: a
+/// piece writes every entry of its range before any is read. What the pool holds is at most the last
+/// build's appends (as many as the hits of the table that build made).
+#[derive(Default)]
+pub(crate) struct XSegmentPool(Mutex<Vec<Vec<u32>>>);
+
+impl XSegmentPool {
+    // No NCBI counterpart: buffer reuse only (above).
+    /// A kept segment of at least `n` entries, if any (the pool then keeps it no more).
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        allow(dead_code)
+    )]
+    fn take(&self, n: usize) -> Option<Vec<u32>> {
+        // The lock is held only around a move.
+        let mut kept = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let at = kept.iter().position(|segment| segment.len() >= n)?;
+        Some(kept.swap_remove(at))
+    }
+
+    // No NCBI counterpart: buffer reuse only (above).
+    /// Keeps at most `at_most` of `segments` (a build's, each cut to its entries) in place of what the
+    /// pool holds: segments of earlier builds that this build did not take (none long enough for its
+    /// pieces, or more than it needed) are dropped, so the pool holds at most the last build's.
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        allow(dead_code)
+    )]
+    fn keep(&self, segments: Vec<Vec<u32>>, at_most: usize) {
+        let new: Vec<Vec<u32>> = segments
+            .into_iter()
+            .filter(|segment| !segment.is_empty())
+            .take(at_most)
+            .map(|mut segment| {
+                // The capacity past the entries written is returned (their pages too).
+                segment.shrink_to_fit();
+                segment
+            })
+            .collect();
+        self.replace(new);
+    }
+
+    // No NCBI counterpart: buffer reuse only (item SC9i of line NP).
+    /// Keeps at most `at_most` of `segments` (a wave's) for the next wave of the same build, in place
+    /// of what the pool holds, each whole: at the length it was made with, so that the next wave
+    /// writes the pages this one touched and no mapping is cut, freed or made between the waves of a
+    /// build. A cut or freed mapping stops every thread of the process for its TLB: cut after each
+    /// wave (`keep`), BLASTX `-word_size 6` with 800 cDNAs at 32 threads made 16,318 `mremap` and
+    /// 13,784 `munmap` calls instead of dev's 71 and 2,412. The last wave's segments are cut
+    /// (`keep`).
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        allow(dead_code)
+    )]
+    fn keep_whole(&self, segments: Vec<Vec<u32>>, at_most: usize) {
+        let new: Vec<Vec<u32>> = segments
+            .into_iter()
+            .filter(|segment| segment.capacity() != 0)
+            .take(at_most)
+            .map(|mut segment| {
+                // SAFETY: a segment is made as `vec![0u32; n]` (capacity n, every entry written) and
+                // cut since only by `truncate` (`XSegmentOut::finish`), which leaves the entries past
+                // its length written, or by `keep` (`shrink_to_fit`: capacity = length).
+                unsafe { segment.set_len(segment.capacity()) };
+                segment
+            })
+            .collect();
+        self.replace(new);
+    }
+
+    /// Puts `new` in place of what the pool holds.
+    fn replace(&self, new: Vec<Vec<u32>>) {
+        // The lock is held only around a move; the old segments are dropped after it.
+        let old = std::mem::replace(
+            &mut *self.0.lock().unwrap_or_else(PoisonError::into_inner),
+            new,
+        );
+        drop(old);
     }
 }
 
@@ -369,14 +501,21 @@ pub(crate) trait XExtraTasks: Sync {
 )]
 pub(crate) struct XFlatArgs<'a> {
     pub(crate) mode: XLkpFlat,
+    /// The vectors of an earlier table (not read by the first part of a split build ahead,
+    /// `x_bp_flat_ahead_appends`, whose second part takes the second spare's).
     pub(crate) spare: Option<&'a XFlatSpare>,
     pub(crate) extra: Option<&'a dyn XExtraTasks>,
+    /// Item SC2d-2: the block search's kept segments of packed appends (`XSegmentPool`).
+    pub(crate) segments: Option<&'a XSegmentPool>,
     /// LOSAT_X_BPLKPAHEAD: the build of a block's table ahead of that block, on a pool task
     /// (`blastp/blast_engine/x_lookup_ahead.rs`): it allocates none of the table's vectors, takes
     /// them all from `spare` (made ready by `XFlatSpare::x_make_room`), and makes no table where they
     /// lack the room, the appends pass the bound (`TooLarge`) or the switch's mode is `Off`; the
     /// block then builds its table itself.
     pub(crate) x_ahead: bool,
+    /// The most appends the build makes, as its caller counted them (0 where it did not): the
+    /// serial builders reserve their record of the appends once (`x_try_build_flat_reserving`).
+    pub(crate) appends: usize,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1189
@@ -384,6 +523,22 @@ pub(crate) struct XFlatArgs<'a> {
 //     const Int4 kTargetPVBytes = 262144;
 // ```
 const X_TARGET_PV_BYTES: usize = 262_144;
+
+// No NCBI counterpart: the callers of `XFlatCompressedLookup::scan_subject` and
+// `XFlatCompressedLookup::x_list_pairs_lean`, one copy each.
+/// BLASTP's caller of `XFlatCompressedLookup::scan_subject` and `x_list_pairs_lean` (BLOSUM62's
+/// scans, `blastp/x_seed_fused_clut.rs`; and the tests').
+pub(crate) const X_BLASTP: u8 = 0;
+/// TBLASTN's caller of `XFlatCompressedLookup::scan_subject` (`tblastn/search_seed.rs`).
+pub(crate) const X_TBLASTN: u8 = 1;
+/// BLASTX's caller of `XFlatCompressedLookup::scan_subject` (`blastx/seed.rs`, `x_seed_scan.rs`).
+pub(crate) const X_BLASTX: u8 = 2;
+/// BLASTP's scan of a `-subject` with lower-case letters (`-lcase_masking`), a copy of its own so
+/// that `X_BLASTP` keeps its one caller.
+pub(crate) const X_BLASTP_SOFT: u8 = 3;
+/// BLASTP's scans with a matrix other than BLOSUM62 (item SC2b; `scan_subject` and
+/// `x_list_pairs_lean`), copies of their own so that `X_BLASTP` keeps its one caller.
+pub(crate) const X_BLASTP_MATRIX: u8 = 4;
 
 /// EXPERIMENT (LOSAT_X_BPCLUT): the compressed lookup table with each cell's hits in one slice of
 /// `hits` (`starts[index]..starts[index + 1]`), in NCBI's scan order. The other fields are those of
@@ -403,29 +558,87 @@ const X_TARGET_PV_BYTES: usize = 262_144;
 //     Int4* scaled_compress_table;
 // } BlastCompressedAaLookupTable;
 // ```
-pub(crate) struct XFlatCompressedLookup {
+pub(crate) struct XFlatCompressedLookup<H: XQueryOffset = i32> {
     pub(crate) word_length: i32,
     pub(crate) compressed_alphabet_size: i32,
     pub(crate) reciprocal_alphabet_size: i32,
     pub(crate) longest_chain: i32,
-    /// The cells with hits (`finalize`'s `count`). EXPERIMENT (LOSAT_X_BPCLUTSCANBF): chooses how
-    /// `for_each_cell` lists the offsets ([`XFlatCompressedLookup::x_scan_bf_pays`]).
-    pub(crate) used_cells: usize,
     pub(crate) pv: Vec<u32>,
     pub(crate) pv_array_bts: i32,
     pub(crate) scaled_compress_table_u8: [i32; 256],
     /// `backbone_size + 1` entries: cell `index`'s hits are `hits[starts[index]..starts[index + 1]]`.
     pub(crate) starts: Vec<u32>,
-    pub(crate) hits: Vec<i32>,
+    pub(crate) hits: Vec<H>,
 }
 
+// No NCBI counterpart: NCBI's cells hold Int4 query offsets.
+/// The type of a flat table's query offsets: `i32` as NCBI's (BLASTP, TBLASTN), or `u16` for
+/// BLASTX, whose query batches of at most 2 x 10002 letters have fewer than 2^16 letters in their
+/// contexts (`X_U16_LETTERS`); the offsets are the same numbers.
+pub(crate) trait XQueryOffset: Copy + Default + Ord + Send + Sync {
+    fn from_offset(offset: u32) -> Self;
+    fn offset(self) -> u32;
+    /// `table` (of `i32` offsets) with offsets of this type, the same numbers.
+    fn x_from_wide(table: XFlatCompressedLookup) -> XFlatCompressedLookup<Self>;
+}
+
+impl XQueryOffset for i32 {
+    #[inline(always)]
+    fn from_offset(offset: u32) -> Self {
+        offset as i32
+    }
+
+    #[inline(always)]
+    fn offset(self) -> u32 {
+        self as u32
+    }
+
+    fn x_from_wide(table: XFlatCompressedLookup) -> XFlatCompressedLookup<Self> {
+        table
+    }
+}
+
+impl XQueryOffset for u16 {
+    #[inline(always)]
+    fn from_offset(offset: u32) -> Self {
+        offset as u16
+    }
+
+    #[inline(always)]
+    fn offset(self) -> u32 {
+        u32::from(self)
+    }
+
+    fn x_from_wide(table: XFlatCompressedLookup) -> XFlatCompressedLookup<Self> {
+        x_narrow_flat(table)
+    }
+}
+
+/// The most letters a query of a `u16` flat table has (its offsets are below 2^16).
+pub(crate) const X_U16_LETTERS: usize = 1 << 16;
+
 /// What the flat builder made.
-pub(crate) enum XFlatBuild {
-    Table(XFlatCompressedLookup),
+#[expect(
+    clippy::large_enum_variant,
+    reason = "boxing a variant changes the layout and the memory; that needs an RSS and time measurement"
+)]
+pub(crate) enum XFlatBuild<H: XQueryOffset = i32> {
+    Table(XFlatCompressedLookup<H>),
     /// One of NCBI's tables fills its overflow banks (the reference's `Err(())`).
     Refused,
     /// More appends than the slices' `u32` offsets take: the reference builder runs instead.
     TooLarge,
+}
+
+impl XFlatBuild {
+    /// The same outcome, a table's offsets of type `H` (`XQueryOffset::x_from_wide`).
+    pub(crate) fn x_offsets<H: XQueryOffset>(self) -> XFlatBuild<H> {
+        match self {
+            XFlatBuild::Table(table) => XFlatBuild::Table(H::x_from_wide(table)),
+            XFlatBuild::Refused => XFlatBuild::Refused,
+            XFlatBuild::TooLarge => XFlatBuild::TooLarge,
+        }
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:787-849 and
@@ -436,8 +649,9 @@ pub(crate) enum XFlatBuild {
 //                 Int4 first_cell_entries = (numhits - 3) & COMPRESSED_HITS_CELL_MASK;
 // ```
 /// The position in NCBI's scan order of the offset appended with rank `k` (0-based) to a cell that
-/// ends with `n` offsets (module header).
-#[inline(always)]
+/// ends with `n` offsets (module header). The builders put a cell in that order with
+/// `x_to_scan_order`; this is the statement of the order that the unit tests check it against.
+#[cfg(test)]
 pub(crate) fn x_emission_position(k: u32, n: u32) -> u32 {
     if n <= (COMPRESSED_HITS_PER_BACKBONE_CELL as u32 + 1) || k < 3 {
         return k;
@@ -449,6 +663,38 @@ pub(crate) fn x_emission_position(k: u32, n: u32) -> u32 {
         3 + s
     } else {
         n - 4 * (g + 1) + s
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:787-849 and
+// c++/src/algo/blast/core/blast_aascan.c:348-396 (module header, `x_emission_position`)
+// ```c
+//         Int4 cell_index = (num_entries -3) & COMPRESSED_HITS_CELL_MASK ;
+//         ...
+//                 Int4 first_cell_entries = (numhits - 3) & COMPRESSED_HITS_CELL_MASK;
+// ```
+/// A cell's offsets, given in the order of their appends (o_0..o_{n-1}), put in NCBI's scan order in
+/// place: o_k at `x_emission_position(k, n)`. That order keeps o_0..o_2 and takes the n >> 2 groups
+/// after them (groups of four, the last one of (n & 3) + 1 offsets) last group first, each group in
+/// its own order; so the slots after the third are reversed, and then the first group of the
+/// reversed slots (the last group's) and each group of four after it are reversed back. No copy of
+/// the cell is made (the unit test `scan_order_in_place_is_the_emission_positions` compares it with
+/// `x_emission_position` for 0 to 300 offsets).
+#[inline(always)]
+pub(crate) fn x_to_scan_order<T>(cell: &mut [T]) {
+    // `x_emission_position`'s `cells`: with one group (n <= 7, the cells of 5 or fewer offsets
+    // among them) the order is the order of the appends.
+    let groups = cell.len() >> 2;
+    if groups < 2 {
+        return;
+    }
+    let tail = &mut cell[3..];
+    tail.reverse();
+    let last_len = tail.len() - 4 * (groups - 1);
+    let (last, full) = tail.split_at_mut(last_len);
+    last.reverse();
+    for group in full.chunks_exact_mut(4) {
+        group.reverse();
     }
 }
 
@@ -501,6 +747,33 @@ impl XSink for Vec<u32> {
     }
 }
 
+/// No NCBI counterpart: a query word as `XWords` reads it: a slice of the table's word length
+/// (`[u8]`, read at run time) or an array of a word length fixed by the build's instance
+/// (`[u8; W]`, BLASTX's `x_bx_buckets_on`, item SC9 of line NP), whose length and checks the
+/// compiler then folds, as it did for `-word_size 5` when that was BLASTX's only compressed one.
+trait XQueryWord {
+    /// The word length of the type, `None` for a slice.
+    const LEN: Option<usize>;
+    /// The letters.
+    fn letters(&self) -> &[u8];
+}
+
+impl XQueryWord for [u8] {
+    const LEN: Option<usize> = None;
+    #[inline(always)]
+    fn letters(&self) -> &[u8] {
+        self
+    }
+}
+
+impl<const W: usize> XQueryWord for [u8; W] {
+    const LEN: Option<usize> = Some(W);
+    #[inline(always)]
+    fn letters(&self) -> &[u8] {
+        self
+    }
+}
+
 /// The words of one query offset, as `add_word_hits` adds them (module header).
 struct XWords<'a> {
     word_length: usize,
@@ -514,9 +787,52 @@ struct XWords<'a> {
     power: [u32; 8],
     /// `matrix_sorted_char[c][i] * A^(word_length - 1)`: the last letter's term of a neighbor's index.
     last: [[u32; BLASTAA_SIZE]; BLASTAA_SIZE],
+    /// `matrix_sorted_char[c][i] * A^(word_length - 2)`: the term of the letter before the last, the
+    /// one that `for_each_word_in` chooses last (the parallel builder's, `x_clut_par.rs`).
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        allow(dead_code)
+    )]
+    below_last: [[u32; BLASTAA_SIZE]; BLASTAA_SIZE],
+}
+
+// No NCBI counterpart: the order of the build's work (item SC9i of line NP).
+/// What `XWords::word_start` reads of a query offset's word: the offset, `row_max` of the positions
+/// before the last (`bound`: the sum that the last letter's loop adds a letter's score to), the
+/// word's own cell (`NO_CELL` when `add_word_hits` adds none: the word reaches the threshold or is
+/// skipped), and the query's residue at the last position.
+#[cfg_attr(
+    not(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )),
+    allow(dead_code)
+)]
+#[derive(Clone, Copy, Debug)]
+struct XWordStart {
+    offset: i32,
+    bound: i32,
+    own: u32,
+    last: u8,
+}
+
+impl XWordStart {
+    /// `own` when the word has no cell of its own (a backbone has fewer than 2^32 cells).
+    const NO_CELL: u32 = u32::MAX;
 }
 
 impl<'a> XWords<'a> {
+    /// No NCBI counterpart: the word length of a word of type `Q` (`XQueryWord`): the type's, or
+    /// the table's.
+    #[inline(always)]
+    fn length_of<Q: XQueryWord + ?Sized>(&self) -> usize {
+        debug_assert!(Q::LEN.is_none_or(|w| w == self.word_length));
+        Q::LEN.unwrap_or(self.word_length)
+    }
+
     fn new(
         header: &'a XHeader,
         threshold: i32,
@@ -530,9 +846,17 @@ impl<'a> XWords<'a> {
             scale *= header.alphabet as u32;
         }
         let mut last = [[0u32; BLASTAA_SIZE]; BLASTAA_SIZE];
-        for (c, row) in last.iter_mut().enumerate() {
-            for (i, term) in row.iter_mut().enumerate().take(header.alphabet) {
+        let mut below_last = [[0u32; BLASTAA_SIZE]; BLASTAA_SIZE];
+        for (c, (row, below_row)) in last.iter_mut().zip(below_last.iter_mut()).enumerate() {
+            for (i, (term, below_term)) in row
+                .iter_mut()
+                .zip(below_row.iter_mut())
+                .enumerate()
+                .take(header.alphabet)
+            {
                 *term = u32::from(info.matrix_sorted_char[c][i]) * power[header.word_length - 1];
+                *below_term =
+                    u32::from(info.matrix_sorted_char[c][i]) * power[header.word_length - 2];
             }
             // `neighbors` takes the last letters as the prefix of the sorted row whose scores reach
             // the threshold; the recursion's loop stops at the first that does not, the same prefix
@@ -554,6 +878,7 @@ impl<'a> XWords<'a> {
             info,
             power,
             last,
+            below_last,
         }
     }
 
@@ -592,7 +917,8 @@ impl<'a> XWords<'a> {
     // ```
     /// Gives `sink` every cell that `add_word_hits` appends the offset of `word` to, in its order.
     #[inline]
-    fn for_each_word(&self, word: &[u8], sink: &mut impl XSink) {
+    fn for_each_word<Q: XQueryWord + ?Sized>(&self, query_word: &Q, sink: &mut impl XSink) {
+        let word = query_word.letters();
         let mut self_score = 0i32;
         for &residue in word {
             let compressed = self.compress_table[residue as usize] as usize;
@@ -603,7 +929,7 @@ impl<'a> XWords<'a> {
         }
         if self.threshold == 0 || self_score < self.threshold {
             let (index, skip) = compute_compressed_index(
-                self.word_length,
+                self.length_of::<Q>(),
                 word,
                 self.alphabet,
                 self.scaled_compress_table,
@@ -619,7 +945,7 @@ impl<'a> XWords<'a> {
         for &residue in &word[1..] {
             score += self.info.row_max[residue as usize];
         }
-        self.neighbors(word, score, 0, 0, sink);
+        self.neighbors(query_word, score, 0, 0, sink);
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1019-1053
@@ -657,20 +983,21 @@ impl<'a> XWords<'a> {
     // terms of `compute_encoded_compressed_index`). At the last position the loop's letters are the
     // prefix of the sorted row up to the first score below the threshold (`partition_point`; the row
     // does not increase, checked in `new`).
-    fn neighbors(
+    fn neighbors<Q: XQueryWord + ?Sized>(
         &self,
-        query_word: &[u8],
+        word: &Q,
         mut score: i32,
         current_pos: usize,
         partial: u32,
         sink: &mut impl XSink,
     ) {
+        let query_word = word.letters();
         let curr_query_char = query_word[current_pos] as usize;
         score -= self.info.row_max[curr_query_char];
         let row_sorted = &self.info.matrix_sorted[curr_query_char][..self.alphabet];
         let threshold = self.threshold;
 
-        if current_pos == self.word_length - 1 {
+        if current_pos == self.length_of::<Q>() - 1 {
             let count =
                 row_sorted.partition_point(|&letter_score| score + letter_score >= threshold);
             sink.many(partial, &self.last[curr_query_char][..count]);
@@ -679,7 +1006,7 @@ impl<'a> XWords<'a> {
 
         let char_sorted = &self.info.matrix_sorted_char[curr_query_char];
         let scale = self.power[current_pos];
-        if current_pos + 2 == self.word_length {
+        if current_pos + 2 == self.length_of::<Q>() {
             // The call for the last position, inline: the same statements as the branch above.
             let last_char = query_word[current_pos + 1] as usize;
             let last_row = &self.info.matrix_sorted[last_char][..self.alphabet];
@@ -701,9 +1028,249 @@ impl<'a> XWords<'a> {
                 break;
             }
             self.neighbors(
-                query_word,
+                word,
                 score + letter_score,
                 current_pos + 1,
+                partial + u32::from(char_sorted[i]) * scale,
+                sink,
+            );
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1075-1121 and :1019-1053
+    // (`for_each_word`, `neighbors`)
+    // ```c
+    //     if (lookup->threshold == 0 || score < lookup->threshold) {
+    //         s_CompressedLookupAddUnencoded(lookup, w, query_offset);
+    //     }
+    //     ...
+    //     s_CompressedAddWordHitsCore(info, score, 0);
+    // ```
+    /// Item SC9i of line NP: the cells of `for_each_word` whose last letter (the index's most
+    /// significant digit, of weight `A^(word_length - 1)`) is in `letters`, each once, in another
+    /// order: the last letter first, only among `letters`, then the others as `neighbors` chooses
+    /// them (from position 0 to the one before the last, whose loop is the innermost, so that
+    /// consecutive cells lie `A^(word_length - 2)` apart, in different stripes of the parallel
+    /// builder as `neighbors`' consecutive cells are). Each is given less the first cell of
+    /// `letters`, `letters.start * A^(word_length - 1)` (the index in the parallel builder's wave,
+    /// `x_clut_par.rs`).
+    ///
+    /// The same cells. `neighbors` gives every compressed word `c` with `sum_i matrix[w[i]][c_i] >=
+    /// threshold` once: each position's loop runs the letters of a row sorted by score down to the
+    /// first whose score with the best of the positions after it (`row_max`) misses the threshold, so
+    /// the bound never drops a word that reaches it, and the words are the leaves of a tree of
+    /// distinct letter choices. Choosing the positions in another order gives the same set (the sum
+    /// and the bound do not depend on the order), and so does testing the last position's letters
+    /// one by one, in any order, against the same bound (the sorted loop's break only skips letters
+    /// that fail it). The word itself is appended (`threshold == 0 || self_score < threshold`) at
+    /// its index, which no neighbor has (a neighbor's sum reaches the threshold, the word's is
+    /// `self_score`).
+    ///
+    /// The order does not matter to the table. For one query offset the cells are distinct (above),
+    /// so a cell's appends are one per offset, in the order of the offsets, whatever the order of
+    /// the cells within an offset; the overflow cells an append takes depend only on its cell's count
+    /// before it (`x_takes_overflow_cell`), its rank among the cell's appends.
+    #[cfg(test)]
+    fn for_each_word_in<Q: XQueryWord + ?Sized>(
+        &self,
+        query_word: &Q,
+        letters: &std::ops::Range<u32>,
+        sink: &mut impl XSink,
+    ) {
+        if let Some(start) = self.word_start(query_word, 0) {
+            self.for_each_word_from(&start, query_word, letters, sink);
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1075-1121 (as
+    // `for_each_word`)
+    // ```c
+    //     score = 0;
+    //     for (i = 0; i < lookup->word_length; i++) {
+    //         int c = lookup->compress_table[w[i]];
+    //
+    //         if (c >= lookup->compressed_alphabet_size) /* "non-20 aa": skip it*/
+    //             return;
+    //
+    //         score += info->matrix[w[i]][c];
+    //     }
+    //     ...
+    //     if (lookup->threshold == 0 || score < lookup->threshold) {
+    //         s_CompressedLookupAddUnencoded(lookup, w, query_offset);
+    //     }
+    // ```
+    /// What `for_each_word_in` reads of the word at `offset` before its last letter's loop, the same
+    /// for every range of last letters (item SC9i of line NP: the parallel builder's first wave keeps
+    /// it for the later waves, `x_clut_par.rs`); `None` when the word has a letter outside the
+    /// alphabet (`add_word_hits` adds nothing for it).
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        allow(dead_code)
+    )]
+    #[inline]
+    fn word_start<Q: XQueryWord + ?Sized>(
+        &self,
+        query_word: &Q,
+        offset: i32,
+    ) -> Option<XWordStart> {
+        let word = query_word.letters();
+        let last = self.length_of::<Q>() - 1;
+        let mut self_score = 0i32;
+        for &residue in word {
+            let compressed = self.compress_table[residue as usize] as usize;
+            if compressed >= self.alphabet {
+                return None;
+            }
+            self_score += self.matrix[residue as usize][compressed];
+        }
+        let mut own = XWordStart::NO_CELL;
+        if self.threshold == 0 || self_score < self.threshold {
+            let (index, skip) = compute_compressed_index(
+                self.length_of::<Q>(),
+                word,
+                self.alphabet,
+                self.scaled_compress_table,
+            );
+            if skip == 0 {
+                own = index as u32;
+            }
+        }
+        let mut bound = 0i32;
+        if self.threshold != 0 {
+            for &residue in &word[..last] {
+                bound += self.info.row_max[residue as usize];
+            }
+        }
+        Some(XWordStart {
+            offset,
+            bound,
+            own,
+            last: word[last],
+        })
+    }
+
+    /// `for_each_word_in` from the word's `start` (`word_start`): the word's own cell when its last
+    /// letter (the index's most significant digit) is in `letters`, then the last position's loop
+    /// over `letters` (`neighbors`' statements) and the positions below it.
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        allow(dead_code)
+    )]
+    #[inline]
+    fn for_each_word_from<Q: XQueryWord + ?Sized>(
+        &self,
+        start: &XWordStart,
+        query_word: &Q,
+        letters: &std::ops::Range<u32>,
+        sink: &mut impl XSink,
+    ) {
+        let last = self.length_of::<Q>() - 1;
+        let last_char = start.last as usize;
+        if start.own != XWordStart::NO_CELL
+            && letters.contains(&u32::from(self.compress_table[last_char]))
+        {
+            debug_assert_eq!(
+                start.own / self.power[last],
+                u32::from(self.compress_table[last_char])
+            );
+            sink.one(start.own - letters.start * self.power[last]);
+        }
+        if self.threshold == 0 {
+            return;
+        }
+        let score = start.bound;
+        for letter in letters.clone() {
+            let letter_score = self.matrix[last_char][letter as usize];
+            if score + letter_score < self.threshold {
+                continue;
+            }
+            self.neighbors_below_last(
+                query_word,
+                score + letter_score,
+                0,
+                (letter - letters.start) * self.power[last],
+                sink,
+            );
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1019-1053 (`neighbors`)
+    // ```c
+    //     score -= info->row_max[currQueryChar];
+    //     ...
+    //     for (i = 0; i < info->compressed_alphabet_size &&
+    //            (score + rowSorted[i] >= info->threshold); i++) {
+    //         subject_word[current_pos] = charSorted[i];
+    //         s_CompressedAddWordHitsCore(info, score + rowSorted[i],
+    //                                     current_pos + 1);
+    //     }
+    // ```
+    /// `for_each_word_in`'s recursion: `neighbors` with the last letter chosen (in `partial`, the
+    /// index of the letters chosen, and in `score`, the bound of the word: the letters chosen, and
+    /// `row_max` of the positions left), its positions from `pos` to the one before the last.
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        allow(dead_code)
+    )]
+    fn neighbors_below_last<Q: XQueryWord + ?Sized>(
+        &self,
+        word: &Q,
+        mut score: i32,
+        pos: usize,
+        partial: u32,
+        sink: &mut impl XSink,
+    ) {
+        let query_word = word.letters();
+        let below_last = self.length_of::<Q>() - 2;
+        let curr_query_char = query_word[pos] as usize;
+        score -= self.info.row_max[curr_query_char];
+        let row_sorted = &self.info.matrix_sorted[curr_query_char][..self.alphabet];
+        let threshold = self.threshold;
+
+        if pos == below_last {
+            let count =
+                row_sorted.partition_point(|&letter_score| score + letter_score >= threshold);
+            sink.many(partial, &self.below_last[curr_query_char][..count]);
+            return;
+        }
+
+        let char_sorted = &self.info.matrix_sorted_char[curr_query_char];
+        let scale = self.power[pos];
+        if pos + 1 == below_last {
+            // The call for the position before the last, inline: the same statements as the branch
+            // above.
+            let next_char = query_word[below_last] as usize;
+            let next_row = &self.info.matrix_sorted[next_char][..self.alphabet];
+            let terms = &self.below_last[next_char];
+            let next_max = self.info.row_max[next_char];
+            for (i, &letter_score) in row_sorted.iter().enumerate() {
+                if score + letter_score < threshold {
+                    break;
+                }
+                let next_score = score + letter_score - next_max;
+                let count =
+                    next_row.partition_point(|&next_letter| next_score + next_letter >= threshold);
+                sink.many(partial + u32::from(char_sorted[i]) * scale, &terms[..count]);
+            }
+            return;
+        }
+        for (i, &letter_score) in row_sorted.iter().enumerate() {
+            if score + letter_score < threshold {
+                break;
+            }
+            self.neighbors_below_last(
+                word,
+                score + letter_score,
+                pos + 1,
                 partial + u32::from(char_sorted[i]) * scale,
                 sink,
             );
@@ -847,12 +1414,34 @@ fn x_max_appends(backbone_size: usize) -> usize {
 //                                     query, locations);
 //     s_CompressedLookupFinalize(lookup);
 // ```
+// The builds use `x_try_build_flat_reserving`; the tests build without a count.
+#[cfg(test)]
 pub(crate) fn x_try_build_flat_compressed_lookup(
     word_size: usize,
     scaled_threshold: i32,
     query: &[u8],
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
+) -> Option<XFlatBuild> {
+    x_try_build_flat_reserving(word_size, scaled_threshold, query, locations, tables, 0)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
+// `x_try_build_flat_compressed_lookup`)
+// ```c
+//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+//                                     query, locations);
+// ```
+/// `x_try_build_flat_compressed_lookup` with `appends`, the most appends the build makes as its
+/// caller counted them (0 where it did not): the builders reserve their record of the appends
+/// once instead of growing it (the same table).
+fn x_try_build_flat_reserving(
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    appends: usize,
 ) -> Option<XFlatBuild> {
     if x_bpffill_on() {
         match x_try_build_flat_by_buckets(
@@ -862,6 +1451,7 @@ pub(crate) fn x_try_build_flat_compressed_lookup(
             locations,
             tables,
             NCBI_OVERFLOW_CELL_CAPACITY,
+            appends,
         ) {
             XBucketBuild::Built(built) => {
                 crate::utils::xreach::x_reach!("LOSAT_X_BPFFILL", true);
@@ -878,8 +1468,17 @@ pub(crate) fn x_try_build_flat_compressed_lookup(
         tables,
         NCBI_OVERFLOW_CELL_CAPACITY,
         X_COUNT_CHUNK,
+        appends,
     )
 }
+
+// No NCBI counterpart: how many appends ahead the count pass reads the count of a cell, and the fill
+// pass the cursor of a cell and then the slot it points to (cache hints only, `x_prefetch`).
+const X_COUNT_AHEAD: usize = 32;
+const X_FILL_STARTS_AHEAD: usize = 32;
+const X_FILL_HITS_AHEAD: usize = 16;
+// The fill reads a cursor for the hits hint after the starts hint has fetched its line.
+const _: () = assert!(X_FILL_HITS_AHEAD <= X_FILL_STARTS_AHEAD);
 
 // No NCBI counterpart: how many appends the count pass records before it counts them (and tests NCBI's
 // table, as the reference does after each query offset); it bounds the record kept before a refusal.
@@ -928,7 +1527,11 @@ impl XCount {
     // ```
     /// Counts the appends recorded since the last call, in order.
     fn count_new(&mut self) {
-        for &index in &self.targets[self.counted..] {
+        let new = &self.targets[self.counted..];
+        for (k, &index) in new.iter().enumerate() {
+            if let Some(&ahead) = new.get(k + X_COUNT_AHEAD) {
+                x_prefetch(self.counts.as_ptr().wrapping_add(ahead as usize));
+            }
             let c = self.counts[index as usize];
             self.cells += usize::from(x_takes_overflow_cell(c));
             self.counts[index as usize] = c + 1;
@@ -945,11 +1548,12 @@ impl XCount {
 //         }
 // ```
 // The passes of the module header; the tests of NCBI's tables are those of
-// `try_build_blosum62_compressed_lookup_with_capacity`, made after each chunk of appends and at the end
+// `try_build_compressed_lookup_with_capacity`, made after each chunk of appends and at the end
 // of a table instead of after each query offset (the reference tests a table once, at the first query
 // offset where its appends have taken more cells of the table of all batches than the capacity, and its
 // outcome, the batch's own table, does not depend on that offset; the cells taken only grow, so a table
 // that passes that bound passes it at the end of the table).
+#[allow(clippy::too_many_arguments)]
 fn x_try_build_flat_with_capacity(
     word_size: usize,
     scaled_threshold: i32,
@@ -958,9 +1562,63 @@ fn x_try_build_flat_with_capacity(
     tables: &[std::ops::Range<usize>],
     overflow_cell_capacity: usize,
     count_chunk: usize,
+    appends: usize,
+) -> Option<XFlatBuild> {
+    x_flat_with_capacity_of(
+        Blosum62Compressed,
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        overflow_cell_capacity,
+        count_chunk,
+        appends,
+    )
+}
+
+/// `x_try_build_flat_with_capacity` with the words of the search matrix `matrix`
+/// (`build_compressed_score_matrix`). `None` also for IDENTITY, whose table NCBI cannot build.
+#[allow(clippy::too_many_arguments)]
+fn x_try_build_flat_of(
+    matrix: ScoringMatrix,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    overflow_cell_capacity: usize,
+    count_chunk: usize,
+) -> Option<XFlatBuild> {
+    x_flat_with_capacity_of(
+        matrix,
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        overflow_cell_capacity,
+        count_chunk,
+        0,
+    )
+}
+
+// The body of both builders above, so that BLOSUM62's keeps its constant matrix.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn x_flat_with_capacity_of<S: CompressedScores>(
+    scores: S,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    overflow_cell_capacity: usize,
+    count_chunk: usize,
+    appends: usize,
 ) -> Option<XFlatBuild> {
     let header = XHeader::new(word_size)?;
-    let matrix = build_blosum62_compressed_score_matrix(header.alphabet)?;
+    let matrix = scores.score_matrix(header.alphabet)?;
     let info = CompressedNeighborInfo::new(&matrix, header.alphabet);
     let words = XWords::new(&header, scaled_threshold, &matrix, &info);
     let backbone_size = header.backbone_size;
@@ -969,9 +1627,11 @@ fn x_try_build_flat_with_capacity(
     // Count pass, over the segments before, inside and between NCBI's tables (the words between
     // tables, a split query batch, are added without a test).
     let ranges = x_count_ranges(tables, locations.len());
+    // With `appends` (the caller's count), the record is reserved once; an offset has at most one
+    // entry of `per_offset`.
     let mut st = XCount {
-        targets: Vec::new(),
-        per_offset: Vec::new(),
+        targets: Vec::with_capacity(appends.min(max_appends + 1)),
+        per_offset: Vec::with_capacity(if appends > 0 { query.len() } else { 0 }),
         // One more entry: the counts become the slices' starts.
         counts: vec![0u32; backbone_size + 1],
         counted: 0,
@@ -991,14 +1651,14 @@ fn x_try_build_flat_with_capacity(
                 return true;
             }
             tested = true;
-            refused = !(words_before
-                && !x_table_fills_banks(
+            refused = !words_before
+                || x_table_fills_banks(
                     &words,
                     backbone_size,
                     query,
                     range_locations,
                     overflow_cell_capacity,
-                ));
+                );
             !refused
         };
         let completed = x_for_each_offset(word_size, query, range_locations, |offset, word| {
@@ -1057,8 +1717,9 @@ fn x_try_build_flat_with_capacity(
     //             PV_SET(pv, i, pv_array_bts);
     //             longest_chain = MAX(count, longest_chain);
     // ```
-    // The statements of `finalize` on the counts (`num_used`); then each count becomes its cell's start
-    // (the sum of the counts before it), the last entry the number of hits.
+    // The statements of `finalize` on the counts (`num_used`); then each cell's start (the sum of the
+    // counts before it) goes to the entry after the cell's, where the fill pass uses it as the cell's
+    // cursor, and the first entry becomes 0.
     let nonempty_count = starts[..backbone_size]
         .iter()
         .filter(|&&count| count > 0)
@@ -1072,9 +1733,10 @@ fn x_try_build_flat_with_capacity(
     // The cells whose scan order is not the order of their appends (more than 5 offsets).
     let mut overflowed: Vec<u32> = Vec::new();
     let mut total = 0u32;
-    for (index, entry) in starts[..backbone_size].iter_mut().enumerate() {
-        let count = *entry;
-        *entry = total;
+    // Entry `index + 1` holds cell `index + 1`'s count until cell `index`'s start replaces it.
+    let mut count = std::mem::take(&mut starts[0]);
+    for index in 0..backbone_size {
+        let next = std::mem::replace(&mut starts[index + 1], total);
         if count > 0 {
             compressed_pv_set(&mut pv, index, pv_array_bts);
             longest_chain = longest_chain.max(count as i32);
@@ -1083,19 +1745,28 @@ fn x_try_build_flat_with_capacity(
             }
         }
         total += count;
+        count = next;
     }
-    starts[backbone_size] = total;
 
-    // Fill pass: the appends again in order, each at the next slot of its cell (the starts serve as the
-    // cells' cursors), so each cell holds o_0..o_{n-1}; a cursor ends at the next cell's start, so the
-    // starts are then those of the cells after them, moved back by one entry. Then each cell of more
-    // than 5 offsets puts o_k at `x_emission_position(k, n)` (cells of 5 or fewer: position k).
+    // Fill pass: the appends again in order, each at the next slot of its cell (the cursor of cell
+    // `index` is entry `index + 1`), so each cell holds o_0..o_{n-1}; a cursor ends at the next cell's
+    // start, so then entry `index` is cell `index`'s start and the last entry the number of hits. Then
+    // each cell of more than 5 offsets puts o_k at `x_emission_position(k, n)` (cells of 5 or fewer:
+    // position k).
     let mut hits = vec![0i32; total as usize];
     let mut at = 0usize;
     for &(query_offset, appends) in &per_offset {
         let end = at + appends as usize;
-        for &index in &targets[at..end] {
-            let cursor = &mut starts[index as usize];
+        for (k, &index) in targets[at..end].iter().enumerate() {
+            if let Some(&ahead) = targets.get(at + k + X_FILL_STARTS_AHEAD) {
+                x_prefetch(starts.as_ptr().wrapping_add(ahead as usize + 1));
+            }
+            if let Some(&near) = targets.get(at + k + X_FILL_HITS_AHEAD) {
+                if let Some(&slot) = starts.get(near as usize + 1) {
+                    x_prefetch(hits.as_ptr().wrapping_add(slot as usize));
+                }
+            }
+            let cursor = &mut starts[index as usize + 1];
             hits[*cursor as usize] = query_offset;
             *cursor += 1;
         }
@@ -1103,20 +1774,9 @@ fn x_try_build_flat_with_capacity(
     }
     drop(targets);
     drop(per_offset);
-    // The last cell (index `backbone_size - 1` = A^w) is never a word's index, so its cursor stayed at
-    // `total`, the last entry.
-    starts.copy_within(0..backbone_size, 1);
-    starts[0] = 0;
-    let mut appended: Vec<i32> = Vec::new();
     for &index in &overflowed {
         let index = index as usize;
-        let cell = &mut hits[starts[index] as usize..starts[index + 1] as usize];
-        let n = cell.len() as u32;
-        appended.clear();
-        appended.extend_from_slice(cell);
-        for (k, &query_offset) in appended.iter().enumerate() {
-            cell[x_emission_position(k as u32, n) as usize] = query_offset;
-        }
+        x_to_scan_order(&mut hits[starts[index] as usize..starts[index + 1] as usize]);
     }
 
     Some(XFlatBuild::Table(XFlatCompressedLookup {
@@ -1124,7 +1784,6 @@ fn x_try_build_flat_with_capacity(
         compressed_alphabet_size: header.alphabet as i32,
         reciprocal_alphabet_size: header.reciprocal_alphabet_size,
         longest_chain,
-        used_cells: nonempty_count,
         pv,
         pv_array_bts: pv_array_bts as i32,
         scaled_compress_table_u8: build_scaled_compress_table_u8(&header.scaled_compress_table),
@@ -1155,10 +1814,14 @@ fn x_bucket_packs(letters: usize) -> bool {
 }
 
 /// What the bucket fill made.
-enum XBucketBuild {
+#[expect(
+    clippy::large_enum_variant,
+    reason = "boxing a variant changes the layout and the memory; that needs an RSS and time measurement"
+)]
+enum XBucketBuild<H: XQueryOffset = i32> {
     /// `x_try_build_flat_with_capacity`'s outcome: its table, its `TooLarge`, or `None` where the
     /// table's header cannot be made.
-    Built(Option<XFlatBuild>),
+    Built(Option<XFlatBuild<H>>),
     /// The count-and-fill builder decides (`x_try_build_flat_by_buckets`).
     Declined,
 }
@@ -1184,6 +1847,283 @@ fn x_try_build_flat_by_buckets(
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
     overflow_cell_capacity: usize,
+    appends: usize,
+) -> XBucketBuild {
+    x_buckets_on(
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        overflow_cell_capacity,
+        false,
+        appends,
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1318-1320,1359-1373
+// ```c
+//     lookup->backbone = (CompressedLookupBackboneCell* )calloc(
+//                                     lookup->backbone_size,
+//                                     sizeof(CompressedLookupBackboneCell));
+// ...
+// BlastCompressedAaLookupTable *BlastCompressedAaLookupTableDestruct(
+//                                  BlastCompressedAaLookupTable * lookup)
+// {
+//     ...
+//     sfree(lookup->backbone);
+// ```
+// NCBI allocates a zeroed table for each query chunk and frees it with the chunk. Buffer reuse only:
+// the kept pv is cleared and zero-filled as calloc gives it; the kept starts and hits, every entry of
+// which the bucket fill writes before any is read, are only sized (`x_sized_on`).
+/// EXPERIMENT (LOSAT_X_BXCLUTPOOL): whether BLASTX builds its flat compressed tables on vectors kept
+/// between builds. Every thread that built a table kept a table's worth and its build's record of
+/// the appends in its glibc arena after they were freed, about 20 MiB per thread on a split query.
+pub(crate) fn x_bx_clut_pool() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXCLUTPOOL"))
+}
+
+/// No NCBI counterpart: the vectors of a flat table kept for the next build (LOSAT_X_BXCLUTPOOL).
+#[derive(Default)]
+struct XFlatTableVectors<H = i32> {
+    starts: Vec<u32>,
+    hits: Vec<H>,
+    pv: Vec<u32>,
+}
+
+// No NCBI counterpart: the kept sets and the number of sets lent to pooled builds whose tables have
+// not come back. A set comes back only against one lent, so a table built without the pool
+// (`LOSAT_X_BPFFILL=0`, a fill declined before it took a set) adds nothing, and the pool never holds
+// more sets than pooled builds and their tables were alive at once.
+struct XFlatPool<H = i32> {
+    kept: Vec<XFlatTableVectors<H>>,
+    lent: usize,
+}
+
+impl<H: Default> XFlatPool<H> {
+    fn lend(&mut self) -> XFlatTableVectors<H> {
+        self.lent += 1;
+        self.kept.pop().unwrap_or_default()
+    }
+
+    /// Keeps `vectors` against a set lent; with none lent they are refused (and dropped by the caller).
+    fn take_back(&mut self, vectors: XFlatTableVectors<H>) -> Result<(), XFlatTableVectors<H>> {
+        if self.lent == 0 {
+            return Err(vectors);
+        }
+        self.lent -= 1;
+        self.kept.push(vectors);
+        Ok(())
+    }
+}
+
+// No NCBI counterpart: one pool per offset type: BLASTX's `u16` tables, and its `i32` ones of query
+// batches of more than `X_U16_LETTERS` letters.
+static X_FLAT_TABLES: Mutex<XFlatPool> = Mutex::new(XFlatPool {
+    kept: Vec::new(),
+    lent: 0,
+});
+static X_NARROW_FLAT_TABLES: Mutex<XFlatPool<u16>> = Mutex::new(XFlatPool {
+    kept: Vec::new(),
+    lent: 0,
+});
+
+/// The pool of the tables of query offsets `Self`.
+trait XPooledOffset: Sized + 'static {
+    fn x_pool() -> &'static Mutex<XFlatPool<Self>>;
+}
+
+impl XPooledOffset for i32 {
+    fn x_pool() -> &'static Mutex<XFlatPool<Self>> {
+        &X_FLAT_TABLES
+    }
+}
+
+impl XPooledOffset for u16 {
+    fn x_pool() -> &'static Mutex<XFlatPool<Self>> {
+        &X_NARROW_FLAT_TABLES
+    }
+}
+
+fn x_flat_pool<H: XPooledOffset>() -> std::sync::MutexGuard<'static, XFlatPool<H>> {
+    H::x_pool().lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+// No NCBI counterpart for the size: the record of a bucket fill's appends, one entry per hit of the
+// table, is needed only during the build. Kept between builds, three builds side by side held three
+// records through the search (ABRicate's call at 8 threads: 48 MiB instead of 40); freed from a
+// thread's arena, it stayed resident there, as the tables did. glibc maps an allocation of at least
+// its mmap threshold, but it raises the threshold to the size of each mapped block that is freed (up
+// to 32 MiB), so its capacity is above that ceiling: it is always mapped and returned when dropped,
+// and the pages beyond its length are never touched and are not resident (as
+// `tblastn/x_subject_translate.rs` `x_frame_capacity`). Other allocators return large blocks on their
+// own, and a wasm memory would keep the capacity. BLASTX's `u16` fill keeps no record; the chunks of
+// its appends (`XBucketChunks`, at most 63 entries more per bucket) are cut from an arena of this
+// capacity for the same reason.
+/// EXPERIMENT (LOSAT_X_BXCLUTPOOL): the capacity, in entries, of the record of a pooled bucket fill.
+const fn x_mapped_record_entries() -> usize {
+    x_mapped_entries::<u32>()
+}
+
+/// The fewest entries of type `T` that glibc maps whatever its dynamic mmap threshold (above), 0
+/// with another allocator.
+const fn x_mapped_entries<T>() -> usize {
+    if cfg!(all(target_os = "linux", target_env = "gnu")) {
+        // glibc's largest dynamic mmap threshold (DEFAULT_MMAP_THRESHOLD_MAX on 64-bit), and one
+        // page more
+        ((32 << 20) + 4096) / std::mem::size_of::<T>()
+    } else {
+        0
+    }
+}
+
+// No NCBI counterpart: `vector` cleared and zero-filled to `n` entries (as calloc gives them); one
+// short of room is replaced by a zeroed one of `n` entries.
+fn x_zeroed_on<T: Copy + Default>(mut vector: Vec<T>, n: usize) -> Vec<T> {
+    if vector.capacity() < n {
+        return vec![T::default(); n];
+    }
+    vector.clear();
+    vector.resize(n, T::default());
+    vector
+}
+
+// No NCBI counterpart: `vector` with `n` entries for a fill that writes every entry before any is
+// read (the bucket fill's starts and hits): the values the table before left are not cleared, only
+// entries added past them are zeroed. One short of room is replaced by a zeroed one (calloc'd, so
+// that a large one is mapped and its pages are touched only when the fill writes them) of `n`
+// entries, or with `slack` (the hits, whose number changes from table to table) of `n + n / 4`
+// entries cut to `n`. Zero-filling them again cost the small searches 1-5 % of their user cycles.
+// `S` is the bucket fill's matrix type (`x_buckets_with`), so that BLOSUM62's builders keep the
+// callers, and the inlining, of their own instances.
+#[expect(
+    clippy::extra_unused_type_parameters,
+    reason = "S only keeps one instance per bucket-fill matrix type (see above)"
+)]
+fn x_sized_on<S, T: Copy + Default>(mut vector: Vec<T>, n: usize, slack: bool) -> Vec<T> {
+    if vector.capacity() < n {
+        let mut fresh = vec![T::default(); if slack { n + n / 4 } else { n }];
+        fresh.truncate(n);
+        return fresh;
+    }
+    vector.resize(n, T::default());
+    vector
+}
+
+// No NCBI counterpart: buffer reuse (LOSAT_X_BXCLUTPOOL); NCBI frees the vectors.
+/// Keeps the vectors of a flat `table` for the next pooled build (the table is left empty), if a set
+/// is lent ([`XFlatPool`]); otherwise the table keeps them.
+pub(crate) fn x_give_back_flat(table: &mut XFlatCompressedLookup<u16>) {
+    x_give_back_to_pool(table);
+}
+
+/// `x_give_back_flat` for a table of `i32` offsets.
+pub(crate) fn x_give_back_wide_flat(table: &mut XFlatCompressedLookup) {
+    x_give_back_to_pool(table);
+}
+
+fn x_give_back_to_pool<H: XQueryOffset + XPooledOffset>(table: &mut XFlatCompressedLookup<H>) {
+    let mut pool = x_flat_pool::<H>();
+    if pool.lent == 0 {
+        return;
+    }
+    // Only the vectors an arena would keep; the table keeps (and drops) the others.
+    let vectors = XFlatTableVectors {
+        starts: x_take_arena_sized(&mut table.starts),
+        hits: x_take_arena_sized(&mut table.hits),
+        pv: x_take_arena_sized(&mut table.pv),
+    };
+    let kept = pool.take_back(vectors);
+    debug_assert!(kept.is_ok());
+}
+
+// No NCBI counterpart: memory placement only (line NP, SC9d); NCBI frees the vectors.
+/// `vector`'s buffer taken for the pool (`vector` left empty), unless glibc maps a block of its
+/// capacity whatever its dynamic mmap threshold (more than its largest one,
+/// DEFAULT_MMAP_THRESHOLD_MAX on 64-bit): then nothing is taken (an empty vector), and the buffer,
+/// dropped with its table, goes back to the system. The pool is for the vectors that a pool thread's
+/// arena would keep after they are freed; kept, the larger ones stayed resident between builds
+/// (word size 7's 40 MB of starts per table: 800 cDNAs x scer_pep at 8 threads, 1.41-1.46 GB of
+/// maximum RSS with them in the pool, 1.06-1.15 GB without the pool).
+fn x_take_arena_sized<T>(vector: &mut Vec<T>) -> Vec<T> {
+    let bytes = vector.capacity().saturating_mul(std::mem::size_of::<T>());
+    if cfg!(all(target_os = "linux", target_env = "gnu")) && bytes > 32 << 20 {
+        return Vec::new();
+    }
+    std::mem::take(vector)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175 (see
+// `x_try_build_flat_by_buckets`)
+// ```c
+//         for (offset = from; offset <= to; offset++){
+//             s_CompressedAddWordHits(&info, query->sequence, offset);
+//         }
+// ```
+/// `x_try_build_flat_by_buckets`, with `pooled` on vectors kept between builds
+/// (`LOSAT_X_BXCLUTPOOL`); the table is the same.
+#[allow(clippy::too_many_arguments)]
+fn x_buckets_on(
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    overflow_cell_capacity: usize,
+    pooled: bool,
+    appends: usize,
+) -> XBucketBuild {
+    x_buckets_with(
+        Blosum62Compressed,
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        overflow_cell_capacity,
+        pooled,
+        appends,
+    )
+}
+
+/// `x_try_build_flat_by_buckets` with the words of the search matrix `matrix`
+/// (`build_compressed_score_matrix`), as `x_try_build_flat_of` builds them.
+fn x_buckets_of(
+    matrix: ScoringMatrix,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    overflow_cell_capacity: usize,
+) -> XBucketBuild {
+    x_buckets_with(
+        matrix,
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        overflow_cell_capacity,
+        false,
+        0,
+    )
+}
+
+// The body of both builders above, so that BLOSUM62's keeps its constant matrix.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn x_buckets_with<S: CompressedScores>(
+    scores: S,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    overflow_cell_capacity: usize,
+    pooled: bool,
+    appends: usize,
 ) -> XBucketBuild {
     if !x_bucket_packs(query.len()) {
         return XBucketBuild::Declined;
@@ -1196,7 +2136,7 @@ fn x_try_build_flat_by_buckets(
     if ilog2(backbone_size / (8 * X_TARGET_PV_BYTES)) != 0 {
         return XBucketBuild::Declined;
     }
-    let Some(matrix) = build_blosum62_compressed_score_matrix(header.alphabet) else {
+    let Some(matrix) = scores.score_matrix(header.alphabet) else {
         return XBucketBuild::Built(None);
     };
     let info = CompressedNeighborInfo::new(&matrix, header.alphabet);
@@ -1207,14 +2147,35 @@ fn x_try_build_flat_by_buckets(
     // after the appends; the record of the appends is dropped at the end, the offsets' appends
     // after the partition (they bound the list of a cell's offsets moved to the scan order: a query
     // offset appends to a cell at most twice).
+    let kept = if pooled {
+        x_flat_pool::<i32>().lend()
+    } else {
+        XFlatTableVectors::default()
+    };
     // One more entry: the number of hits.
-    let mut starts = vec![0u32; backbone_size + 1];
+    let mut starts = x_sized_on::<S, _>(kept.starts, backbone_size + 1, false);
 
     // Appends, over the segments before, inside and between NCBI's tables, recorded as the
     // count-and-fill builder records them; not counted.
     let ranges = x_count_ranges(tables, locations.len());
-    let mut targets: Vec<u32> = Vec::new();
-    let mut per_offset: Vec<(i32, u32)> = Vec::new();
+    // With `appends` (the caller's count), the record is reserved once; an offset has at most one
+    // entry of `per_offset`.
+    let mut targets: Vec<u32> = if pooled {
+        Vec::with_capacity(x_mapped_record_entries())
+    } else {
+        Vec::with_capacity(appends.min(max_appends + 1))
+    };
+    let mut per_offset: Vec<(i32, u32)> =
+        Vec::with_capacity(if appends > 0 { query.len() } else { 0 });
+    // The kept vectors taken go back to the pool at a refusal.
+    let give_back = |starts: Vec<u32>, hits: Vec<i32>, pv: Vec<u32>| {
+        if pooled {
+            let refused = x_flat_pool::<i32>()
+                .take_back(XFlatTableVectors { starts, hits, pv })
+                .err();
+            drop(refused);
+        }
+    };
     for (range, is_table) in ranges {
         let range_start = targets.len();
         let mut too_large = false;
@@ -1238,11 +2199,13 @@ fn x_try_build_flat_by_buckets(
             }
             true
         });
-        if too_large {
-            return XBucketBuild::Built(Some(XFlatBuild::TooLarge));
-        }
-        if declined {
-            return XBucketBuild::Declined;
+        if too_large || declined {
+            give_back(starts, kept.hits, kept.pv);
+            return if too_large {
+                XBucketBuild::Built(Some(XFlatBuild::TooLarge))
+            } else {
+                XBucketBuild::Declined
+            };
         }
     }
     let total = targets.len();
@@ -1258,8 +2221,8 @@ fn x_try_build_flat_by_buckets(
     for b in 0..buckets {
         bucket_starts[b + 1] += bucket_starts[b];
     }
-    let mut pv = vec![0u32; (backbone_size >> PV_ARRAY_BTS) + 1];
-    let mut hits = vec![0i32; total];
+    let mut pv = x_zeroed_on(kept.pv, (backbone_size >> PV_ARRAY_BTS) + 1);
+    let mut hits = x_sized_on::<S, _>(kept.hits, total, pooled);
     {
         let mut cursors = bucket_starts[..buckets].to_vec();
         let out = hits.as_mut_ptr();
@@ -1315,7 +2278,6 @@ fn x_try_build_flat_by_buckets(
     // above), so the bits are set as the counts are read.
     let mut cell_slots = vec![0u32; 1 << X_BUCKET_SHIFT];
     let mut overflowed: Vec<u32> = Vec::new();
-    let mut appended: Vec<i32> = Vec::new();
     let mut nonempty_count = 0usize;
     let mut longest_chain = 0i32;
     for b in 0..buckets {
@@ -1369,13 +2331,7 @@ fn x_try_build_flat_by_buckets(
             let cell = cell as usize;
             let begin = starts[first + cell] as usize;
             let end = slots[cell] as usize;
-            let n = (end - begin) as u32;
-            let slice = &mut hits[begin..end];
-            appended.clear();
-            appended.extend_from_slice(slice);
-            for (k, &query_offset) in appended.iter().enumerate() {
-                slice[x_emission_position(k as u32, n) as usize] = query_offset;
-            }
+            x_to_scan_order(&mut hits[begin..end]);
         }
     }
     starts[backbone_size] = total as u32;
@@ -1390,7 +2346,6 @@ fn x_try_build_flat_by_buckets(
         compressed_alphabet_size: header.alphabet as i32,
         reciprocal_alphabet_size: header.reciprocal_alphabet_size,
         longest_chain,
-        used_cells: nonempty_count,
         pv,
         pv_array_bts: pv_array_bts as i32,
         scaled_compress_table_u8: build_scaled_compress_table_u8(&header.scaled_compress_table),
@@ -1399,10 +2354,591 @@ fn x_try_build_flat_by_buckets(
     })))
 }
 
-impl XFlatCompressedLookup {
+// No NCBI counterpart: the entries of a chunk of `XBucketChunks` (256 bytes).
+const X_BX_CHUNK: u32 = 64;
+
+// No NCBI counterpart: BLASTX's bucket fill (`x_bx_buckets_on`) keeps no record of the appends.
+/// The appends of BLASTX's bucket fill, each written as it is made into the chunks of its bucket
+/// of 2^`X_BUCKET_SHIFT` cells, as `query offset << 16 | the cell's index in its bucket`. The
+/// chunks of all buckets are cut from one arena; a bucket's chunks are linked in the order of
+/// their entries, which is the order of the appends.
+struct XBucketChunks {
+    arena: Vec<u32>,
+    /// Per bucket: the arena index its next entry takes. An index at a chunk's start (0 before
+    /// the bucket's first entry) opens a chunk: a bucket's next entry is never the first of the
+    /// chunk it fills.
+    next_entry: Vec<u32>,
+    /// Per bucket: its first and last chunks (`u32::MAX` before the first) and its number of
+    /// chunks.
+    first: Vec<u32>,
+    last: Vec<u32>,
+    chunks: Vec<u32>,
+    /// Per chunk: the next chunk of its bucket.
+    link: Vec<u32>,
+    /// The query offset of the appends being made, above the cells' indices.
+    high: u32,
+    total: usize,
+}
+
+impl XBucketChunks {
+    fn new(buckets: usize, arena: Vec<u32>) -> Self {
+        Self {
+            arena,
+            next_entry: vec![0; buckets],
+            first: vec![u32::MAX; buckets],
+            last: vec![u32::MAX; buckets],
+            chunks: vec![0; buckets],
+            link: Vec::new(),
+            high: 0,
+            total: 0,
+        }
+    }
+
+    /// A new chunk for bucket `b`: the arena index of its first entry.
+    #[cold]
+    #[inline(never)]
+    fn open(&mut self, b: usize) -> u32 {
+        let chunk = self.link.len() as u32;
+        self.arena.resize(self.arena.len() + X_BX_CHUNK as usize, 0);
+        self.link.push(u32::MAX);
+        match self.last[b] {
+            u32::MAX => self.first[b] = chunk,
+            last => self.link[last as usize] = chunk,
+        }
+        self.last[b] = chunk;
+        self.chunks[b] += 1;
+        chunk * X_BX_CHUNK
+    }
+
+    /// The entries of bucket `b`.
+    fn count(&self, b: usize) -> u32 {
+        match self.chunks[b] {
+            0 => 0,
+            n => (n - 1) * X_BX_CHUNK + ((self.next_entry[b] - 1) & (X_BX_CHUNK - 1)) + 1,
+        }
+    }
+
+    /// `visit(entry)` for the entries of bucket `b`, in order.
+    #[inline(always)]
+    fn for_each(&self, b: usize, mut visit: impl FnMut(u32)) {
+        let mut left = self.count(b);
+        let mut chunk = self.first[b];
+        while left != 0 {
+            let n = left.min(X_BX_CHUNK);
+            let at = (chunk * X_BX_CHUNK) as usize;
+            for &entry in &self.arena[at..at + n as usize] {
+                visit(entry);
+            }
+            left -= n;
+            chunk = self.link[chunk as usize];
+        }
+    }
+}
+
+impl XSink for XBucketChunks {
+    #[inline(always)]
+    fn one(&mut self, index: u32) {
+        let b = (index >> X_BUCKET_SHIFT) as usize;
+        let mut at = self.next_entry[b];
+        if at & (X_BX_CHUNK - 1) == 0 {
+            at = self.open(b);
+        }
+        self.arena[at as usize] = self.high | (index & ((1 << X_BUCKET_SHIFT) - 1));
+        self.next_entry[b] = at + 1;
+        self.total += 1;
+    }
+
+    // The trait's loop, inlined into `XWords`' neighbour lists: with the bucket fill's several
+    // instances (word sizes, offset types, runs) the compiler kept it a call per list, 1.3 % more
+    // instructions of BLASTX word size 5 at 1 thread than dev's one instance (line NP, SC9e).
+    #[inline(always)]
+    fn many(&mut self, partial: u32, last: &[u32]) {
+        for &letter in last {
+            self.one(partial + letter);
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175 (see
+// `x_try_build_flat_by_buckets`)
+// ```c
+//         for (offset = from; offset <= to; offset++){
+//             s_CompressedAddWordHits(&info, query->sequence, offset);
+//         }
+// ```
+/// BLASTX's bucket fill: `x_buckets_on`'s table with `u16` offsets, with `pooled` on vectors kept
+/// between builds (`LOSAT_X_BXCLUTPOOL`), in `parts` (`x_bx_buckets_with`). `WORD` is the word
+/// length (`x_bx_build_compressed_lookup`'s), a constant of the instance down to the neighbouring
+/// words (`XQueryWord`).
+#[allow(clippy::too_many_arguments)]
+fn x_bx_buckets_on<const WORD: usize>(
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    overflow_cell_capacity: usize,
+    pooled: bool,
+    parts: usize,
+) -> XBucketBuild<u16> {
+    x_bx_buckets_with::<_, u16, [u8; WORD]>(
+        Blosum62Compressed,
+        WORD,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        overflow_cell_capacity,
+        pooled,
+        parts,
+        |word| word.try_into().expect("a word of the word length"),
+    )
+}
+
+// No NCBI counterpart: a run of the query offsets of a build in parts (`x_bx_buckets_with`); it
+// changes no value NCBI computes.
+/// The query offsets of the count ranges `ranges` (over `locations`) cut into `parts` runs of about
+/// as many offsets each (fewer runs where there are fewer offsets; one empty run where there are
+/// none), in order: each run's segments with the index of their count range. One run is the
+/// offsets of `locations` in the serial builders' order.
+fn x_offset_parts(
+    word_size: usize,
+    ranges: &[(std::ops::Range<usize>, bool)],
+    locations: &[(i32, i32)],
+    parts: usize,
+) -> Vec<Vec<(usize, (i32, i32))>> {
+    let word = word_size as i64;
+    let offsets = |&(left, right): &(i32, i32)| {
+        usize::try_from(i64::from(right) - word + 2 - i64::from(left)).unwrap_or(0)
+    };
+    let total: usize = ranges
+        .iter()
+        .flat_map(|(range, _)| &locations[range.clone()])
+        .map(offsets)
+        .sum();
+    let parts = parts.clamp(1, total.max(1));
+    // The first offset (in order) of run `part`.
+    let bound = |part: usize| (part * total).div_ceil(parts);
+    let mut runs: Vec<Vec<(usize, (i32, i32))>> = vec![Vec::new(); parts];
+    let (mut part, mut placed) = (0usize, 0usize);
+    for (index, (range, _)) in ranges.iter().enumerate() {
+        for &(left, right) in &locations[range.clone()] {
+            let to = i64::from(right) - word + 1;
+            let mut from = i64::from(left);
+            while from <= to {
+                while placed >= bound(part + 1) {
+                    part += 1;
+                }
+                let take = ((bound(part + 1) - placed) as i64).min(to - from + 1);
+                // Offsets from..=from + take - 1: the segment's right end less what follows them.
+                runs[part].push((index, (from as i32, (from + take - 1 + word - 1) as i32)));
+                placed += take as usize;
+                from += take;
+            }
+        }
+    }
+    runs
+}
+
+// No NCBI counterpart: why a run of the bucket fill stopped (`x_bx_buckets_with`).
+#[derive(Clone, Copy)]
+enum XBucketStop {
+    /// The appends passed the table's most (`x_max_appends`): the serial builders' `TooLarge`.
+    TooLarge,
+    /// A table's appends passed the overflow capacity: the bucket fill declines.
+    Declined,
+}
+
+// No NCBI counterpart: one run's appends (`x_bx_buckets_with`).
+struct XBucketRun {
+    appends: XBucketChunks,
+    /// The appends of each count range the run has offsets of, in order.
+    range_appends: Vec<(usize, usize)>,
+    stop: Option<XBucketStop>,
+}
+
+// No NCBI counterpart: runs `items` on this thread (`parts` 1, or a build without threads), or on
+// `parts` tasks of the pool the build runs on (`x_clut_par::x_items_in_parts`), each with its own
+// scratch from `init`; the results in item order.
+fn x_bucket_items<T, R: Send + Sync>(
+    parts: usize,
+    items: usize,
+    init: impl Fn() -> T + Sync,
+    item: impl Fn(&mut T, usize) -> R + Sync,
+) -> Vec<R> {
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if parts > 1 {
+        return x_clut_par::x_items_in_parts(parts, items, init, item);
+    }
+    let _ = parts;
+    let mut scratch = init();
+    (0..items).map(|index| item(&mut scratch, index)).collect()
+}
+
+/// No NCBI counterpart: the runs of BLASTX's bucket fill in parts per part (line NP, SC9e), and
+/// its bucket ranges per part in the layout and fill; a few per part so that the tasks end close
+/// together.
+const X_BUCKET_RANGES_PER_PART: usize = 4;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175 (the loop),
+// :787-849 (the appends), :1182-1242 (`finalize`; see `x_buckets_with`)
+// ```c
+//         for (offset = from; offset <= to; offset++){
+//             s_CompressedAddWordHits(&info, query->sequence, offset);
+//         }
+// ```
+// NCBI builds a query chunk's table on one thread before the search threads start
+// (c++/src/algo/blast/api/prelim_stage.cpp:145-188 starts them for the search).
+/// BLASTX's bucket fill: `x_buckets_with`'s table with offsets of type `H`, the words of `scores`,
+/// with `pooled` on vectors kept between builds (`LOSAT_X_BXCLUTPOOL`), its chunks cut from a mapped
+/// arena (`x_mapped_record_entries`). An offset above a cell's
+/// index in its bucket no longer fits 32 bits of a `u16` table's hits, so there is no packed copy of
+/// the appends in `hits`: each append goes as it is made to its bucket's chunks (`XBucketChunks`),
+/// in place of the record of the appends and its partition, and each bucket's cells are filled from
+/// them. Declined as `x_buckets_on`, and where the query has more than `X_U16_LETTERS` letters.
+///
+/// In `parts` (line NP, SC9e: a BLASTX unit under the cap, `LOSAT_X_BXBUILDPAR`, `blastx/x_bx_mem.rs`;
+/// 1: on this thread), the same table slot for slot: the query offsets in order cut into runs
+/// (`x_offset_parts`), each run's appends in chunks of its own (the run's appends in order); a
+/// bucket's appends are then its runs' in run order, the appends of the serial fill in order, and
+/// its slots follow those of the buckets before. The buckets, in ranges of whole buckets (whole PV
+/// words: 2^`X_BUCKET_SHIFT` cells), are counted, laid out and filled as on one thread, each range
+/// into its own slices of `starts`, `hits` and `pv`. The work is the serial fill's but for a pass
+/// over each bucket's runs. Where the runs stop (too many appends, or a table's past the overflow
+/// capacity), the serial fill decides at one part (it stops at the first; the runs only show that
+/// it stops). `word_of` gives `scores`' query word type of a word of the word length.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn x_bx_buckets_with<S, H, Q>(
+    scores: S,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    overflow_cell_capacity: usize,
+    pooled: bool,
+    parts: usize,
+    word_of: impl Fn(&[u8]) -> &Q + Sync,
+) -> XBucketBuild<H>
+where
+    S: CompressedScores,
+    H: XQueryOffset + XPooledOffset,
+    Q: XQueryWord + ?Sized,
+{
+    if query.len() > X_U16_LETTERS {
+        return XBucketBuild::Declined;
+    }
+    let Some(header) = XHeader::new(word_size) else {
+        return XBucketBuild::Built(None);
+    };
+    let backbone_size = header.backbone_size;
+    // `finalize`'s larger PV shift is `PV_ARRAY_BTS` (word size 5): the layout sets the PV bits.
+    if ilog2(backbone_size / (8 * X_TARGET_PV_BYTES)) != 0 {
+        return XBucketBuild::Declined;
+    }
+    let Some(matrix) = scores.score_matrix(header.alphabet) else {
+        return XBucketBuild::Built(None);
+    };
+    let info = CompressedNeighborInfo::new(&matrix, header.alphabet);
+    let words = XWords::new(&header, scaled_threshold, &matrix, &info);
+    let max_appends = x_max_appends(backbone_size);
+    let buckets = backbone_size.div_ceil(1 << X_BUCKET_SHIFT);
+    let mask = (1u32 << X_BUCKET_SHIFT) - 1;
+    let ranges = x_count_ranges(tables, locations.len());
+
+    // Appends, over the segments before, inside and between NCBI's tables, in the count-and-fill
+    // builder's order, into their buckets' chunks; not counted. A run stops where the serial fill
+    // would: its appends past `max_appends` (the runs' together, `appended`, at more than one), or
+    // a table's past the overflow capacity.
+    let runs = |parts: usize| -> Result<Vec<XBucketRun>, XBucketStop> {
+        let cuts = x_offset_parts(word_size, &ranges, locations, parts);
+        let parts = cuts.len();
+        let appended = std::sync::atomic::AtomicUsize::new(0);
+        let stopped = std::sync::atomic::AtomicBool::new(false);
+        let runs = x_bucket_items(
+            parts,
+            parts,
+            || (),
+            |(), part| {
+                // The arena mapped whichever thread fills it (`x_mapped_record_entries`).
+                let mut appends =
+                    XBucketChunks::new(buckets, Vec::with_capacity(x_mapped_record_entries()));
+                let mut range_appends = Vec::new();
+                let mut stop = None;
+                // The open count range, the appends at its start, and those not yet added to
+                // `appended`.
+                let (mut open, mut range_start, mut reported) = (usize::MAX, 0usize, 0usize);
+                for &(index, segment) in &cuts[part] {
+                    if index != open {
+                        if open != usize::MAX {
+                            range_appends.push((open, appends.total - range_start));
+                        }
+                        (open, range_start) = (index, appends.total);
+                    }
+                    let is_table = ranges[index].1;
+                    let whole = x_for_each_offset(word_size, query, &[segment], |offset, word| {
+                        appends.high = (offset as u32) << 16;
+                        words.for_each_word(word_of(word), &mut appends);
+                        if appends.total > max_appends {
+                            stop = Some(XBucketStop::TooLarge);
+                            return false;
+                        }
+                        // An append takes at most one overflow cell: within the capacity the
+                        // table's test passes.
+                        if is_table && appends.total - range_start > overflow_cell_capacity {
+                            stop = Some(XBucketStop::Declined);
+                            return false;
+                        }
+                        if parts > 1 && appends.total - reported >= X_COUNT_CHUNK {
+                            let more =
+                                appends.total - std::mem::replace(&mut reported, appends.total);
+                            if appended.fetch_add(more, Ordering::Relaxed) + more > max_appends {
+                                stop = Some(XBucketStop::TooLarge);
+                            }
+                            if stop.is_some() || stopped.load(Ordering::Relaxed) {
+                                return false;
+                            }
+                        }
+                        true
+                    });
+                    if !whole {
+                        stopped.store(true, Ordering::Relaxed);
+                        // Another run's stop: the serial fill decides (below).
+                        stop.get_or_insert(XBucketStop::TooLarge);
+                        break;
+                    }
+                }
+                if open != usize::MAX {
+                    range_appends.push((open, appends.total - range_start));
+                }
+                XBucketRun {
+                    appends,
+                    range_appends,
+                    stop,
+                }
+            },
+        );
+        if let Some(stop) = runs.iter().find_map(|run| run.stop) {
+            return Err(stop);
+        }
+        if parts > 1 {
+            // The runs' appends together: the serial fill's at its end.
+            let total: usize = runs.iter().map(|run| run.appends.total).sum();
+            let mut table_appends = vec![0usize; ranges.len()];
+            for run in &runs {
+                for &(index, appends) in &run.range_appends {
+                    table_appends[index] += appends;
+                }
+            }
+            let past_capacity = table_appends
+                .iter()
+                .zip(&ranges)
+                .any(|(&appends, (_, is_table))| *is_table && appends > overflow_cell_capacity);
+            if total > max_appends || past_capacity {
+                return Err(XBucketStop::TooLarge);
+            }
+        }
+        Ok(runs)
+    };
+    let runs = match runs(parts) {
+        Ok(runs) => runs,
+        // The serial fill stops at the first of the two (more than one part: the runs only show
+        // that it stops).
+        Err(_) if parts > 1 => match runs(1) {
+            Ok(runs) => runs,
+            Err(stop) => return x_bucket_stop(stop),
+        },
+        Err(stop) => return x_bucket_stop(stop),
+    };
+
+    // Per bucket: its first slot of `hits`, after those of the buckets before.
+    let mut bucket_starts = vec![0u32; buckets + 1];
+    for b in 0..buckets {
+        let appends: u32 = runs.iter().map(|run| run.appends.count(b)).sum();
+        bucket_starts[b + 1] = bucket_starts[b] + appends;
+    }
+    let total = bucket_starts[buckets] as usize;
+
+    let kept = if pooled {
+        x_flat_pool::<H>().lend()
+    } else {
+        XFlatTableVectors::default()
+    };
+    // One more entry: the number of hits.
+    let mut starts = x_sized_on::<S, _>(kept.starts, backbone_size + 1, false);
+    let mut hits = x_sized_on::<S, _>(kept.hits, total, pooled);
+    let mut pv = x_zeroed_on(kept.pv, (backbone_size >> PV_ARRAY_BTS) + 1);
+
+    // Ranges of whole buckets of about as many appends each, with their slices of the vectors.
+    const { assert!(X_BUCKET_SHIFT as usize >= PV_ARRAY_BTS) };
+    let pieces = if parts > 1 {
+        (parts * X_BUCKET_RANGES_PER_PART).min(buckets)
+    } else {
+        1
+    };
+    let mut bounds = vec![0usize; pieces + 1];
+    for (piece, bound) in bounds.iter_mut().enumerate().skip(1) {
+        let target = (piece * total).div_ceil(pieces) as u32;
+        *bound = bucket_starts
+            .partition_point(|&start| start < target)
+            .min(buckets);
+    }
+    bounds[pieces] = buckets;
+    let mut slices = Vec::with_capacity(pieces);
+    {
+        let (mut starts_left, mut hits_left, mut pv_left) =
+            (&mut starts[..backbone_size], &mut hits[..], &mut pv[..]);
+        for piece in 0..pieces {
+            let (b0, b1) = (bounds[piece], bounds[piece + 1].max(bounds[piece]));
+            let cells = (b1 << X_BUCKET_SHIFT).min(backbone_size)
+                - (b0 << X_BUCKET_SHIFT).min(backbone_size);
+            let slots = (bucket_starts[b1] - bucket_starts[b0]) as usize;
+            // The last range's words end with the array's (one past the last cell's).
+            let words = if piece + 1 == pieces {
+                pv_left.len()
+            } else {
+                ((b1 - b0) << (X_BUCKET_SHIFT as usize - PV_ARRAY_BTS)).min(pv_left.len())
+            };
+            let (s, rest) = std::mem::take(&mut starts_left).split_at_mut(cells);
+            starts_left = rest;
+            let (h, rest) = std::mem::take(&mut hits_left).split_at_mut(slots);
+            hits_left = rest;
+            let (p, rest) = std::mem::take(&mut pv_left).split_at_mut(words);
+            pv_left = rest;
+            slices.push(Mutex::new(Some((b0..b1, s, h, p))));
+        }
+    }
+
+    // Per bucket, as `x_buckets_on`: the counts of its cells (its runs' chunks in order), their
+    // starts, the PV bits and `finalize`'s statistics, the fill from the chunks, then the scan order
+    // of the cells of more than 5 offsets.
+    let statistics = x_bucket_items(
+        parts,
+        pieces,
+        || (vec![0u32; 1 << X_BUCKET_SHIFT], Vec::<u32>::new()),
+        |(cell_slots, overflowed), piece| {
+            let (piece_buckets, starts, hits, pv) = slices[piece]
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take()
+                .expect("each bucket range taken once");
+            let first_cell = piece_buckets.start << X_BUCKET_SHIFT;
+            let first_slot = bucket_starts[piece_buckets.start];
+            let mut nonempty_count = 0usize;
+            let mut longest_chain = 0i32;
+            for b in piece_buckets {
+                let first = (b << X_BUCKET_SHIFT) - first_cell;
+                let cells = (backbone_size - (b << X_BUCKET_SHIFT)).min(1 << X_BUCKET_SHIFT);
+                // Each cell's count, then its cursor (in the range's slots).
+                let slots = &mut cell_slots[..cells];
+                slots.fill(0);
+                for run in &runs {
+                    run.appends
+                        .for_each(b, |entry| slots[(entry & mask) as usize] += 1);
+                }
+                overflowed.clear();
+                let mut slot = bucket_starts[b];
+                for (cell, (start, count)) in starts[first..first + cells]
+                    .iter_mut()
+                    .zip(slots.iter_mut())
+                    .enumerate()
+                {
+                    let n = *count;
+                    *start = slot;
+                    if n > 0 {
+                        nonempty_count += 1;
+                        longest_chain = longest_chain.max(n as i32);
+                        compressed_pv_set(pv, first + cell, PV_ARRAY_BTS);
+                        if n > COMPRESSED_HITS_PER_BACKBONE_CELL as u32 + 1 {
+                            overflowed.push(cell as u32);
+                        }
+                    }
+                    *count = slot - first_slot;
+                    slot += n;
+                }
+                for run in &runs {
+                    run.appends.for_each(b, |entry| {
+                        let at = &mut slots[(entry & mask) as usize];
+                        hits[*at as usize] = H::from_offset(entry >> 16);
+                        *at += 1;
+                    });
+                }
+                // A cursor ends at the cell's end.
+                for &cell in overflowed.iter() {
+                    let cell = cell as usize;
+                    let begin = (starts[first + cell] - first_slot) as usize;
+                    let end = slots[cell] as usize;
+                    x_to_scan_order(&mut hits[begin..end]);
+                }
+            }
+            (nonempty_count, longest_chain)
+        },
+    );
+    drop(slices);
+    starts[backbone_size] = total as u32;
+    drop(runs);
+    let nonempty_count: usize = statistics.iter().map(|&(count, _)| count).sum();
+    let longest_chain = statistics
+        .iter()
+        .map(|&(_, chain)| chain)
+        .max()
+        .unwrap_or(0);
+    let mut pv_array_bts = PV_ARRAY_BTS;
+    if (nonempty_count as f64) <= 0.01 * (backbone_size as f64) {
+        pv_array_bts += ilog2(backbone_size / (8 * X_TARGET_PV_BYTES));
+    }
+
+    XBucketBuild::Built(Some(XFlatBuild::Table(XFlatCompressedLookup {
+        word_length: header.word_length as i32,
+        compressed_alphabet_size: header.alphabet as i32,
+        reciprocal_alphabet_size: header.reciprocal_alphabet_size,
+        longest_chain,
+        pv,
+        pv_array_bts: pv_array_bts as i32,
+        scaled_compress_table_u8: build_scaled_compress_table_u8(&header.scaled_compress_table),
+        starts,
+        hits,
+    })))
+}
+
+// No NCBI counterpart: the outcome of a bucket fill that stopped (`XBucketStop`).
+fn x_bucket_stop<H: XQueryOffset>(stop: XBucketStop) -> XBucketBuild<H> {
+    match stop {
+        XBucketStop::TooLarge => XBucketBuild::Built(Some(XFlatBuild::TooLarge)),
+        XBucketStop::Declined => XBucketBuild::Declined,
+    }
+}
+
+// No NCBI counterpart: the count-and-fill builder's table (where the bucket fill declines at one
+// part) with the `u16` offsets of BLASTX's (the query has at most `X_U16_LETTERS` letters).
+fn x_narrow_flat(table: XFlatCompressedLookup) -> XFlatCompressedLookup<u16> {
+    XFlatCompressedLookup {
+        word_length: table.word_length,
+        compressed_alphabet_size: table.compressed_alphabet_size,
+        reciprocal_alphabet_size: table.reciprocal_alphabet_size,
+        longest_chain: table.longest_chain,
+        pv: table.pv,
+        pv_array_bts: table.pv_array_bts,
+        scaled_compress_table_u8: table.scaled_compress_table_u8,
+        starts: table.starts,
+        hits: table
+            .hits
+            .iter()
+            .map(|&q| {
+                debug_assert!(q as u32 <= u32::from(u16::MAX));
+                u16::from_offset(q as u32)
+            })
+            .collect(),
+    }
+}
+
+impl<H: XQueryOffset> XFlatCompressedLookup<H> {
     /// The hits of cell `index`, in NCBI's scan order.
     #[inline(always)]
-    pub(crate) fn cell(&self, index: usize) -> &[i32] {
+    pub(crate) fn cell(&self, index: usize) -> &[H] {
         &self.hits[self.starts[index] as usize..self.starts[index + 1] as usize]
     }
 
@@ -1438,8 +2974,10 @@ impl XFlatCompressedLookup {
     // }
     // ```
     /// `BlastCompressedAaLookupTable::scan_subject` on the flat table: the same statements, a cell's
-    /// hits copied from its slice.
-    pub(crate) fn scan_subject(
+    /// hits copied from its slice. `CALLER` gives each caller a copy of its own (`X_BLASTP`,
+    /// `X_TBLASTN`, `X_BLASTX`, `X_BLASTP_SOFT`, `X_BLASTP_MATRIX`), so that the compiler inlines
+    /// BLASTP's as it did when that was the only caller.
+    pub(crate) fn scan_subject<const CALLER: u8>(
         &self,
         subject: &[u8],
         seq_ranges: &[(i32, i32)],
@@ -1569,7 +3107,7 @@ impl XFlatCompressedLookup {
                                 .zip(cell)
                             {
                                 *pair = OffsetPair {
-                                    q_off: q_off as u32,
+                                    q_off: q_off.offset(),
                                     s_off,
                                 };
                             }
@@ -1589,7 +3127,9 @@ impl XFlatCompressedLookup {
 
         totalhits
     }
+}
 
+impl XFlatCompressedLookup {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:495-503
     // ```c
     //     scan_range[0] = 0;
@@ -1768,14 +3308,17 @@ impl XFlatCompressedLookup {
 
     // No NCBI counterpart: the range of LOSAT's two-offsets-per-step scan; it does not change any
     // value NCBI computes.
-    /// EXPERIMENT (LOSAT_X_BPFSTAGE): whether [`Self::x_list_pairs`] lists the offsets of `subject`
-    /// (`subject_length` residues): the compressed alphabet has 15 letters (NCBI's reciprocal for
-    /// 15), the word length is 2 to 6 (the indices stay below 15^6, where the divisions by 15 and
-    /// by 225 are exact), the presence bits are one per cell (shift `PV_ARRAY_BTS`, as on every
-    /// table with 1 % of its cells used or more, which the branch-free list needs) and they and the
-    /// slice bounds cover every index, and the subject keeps a byte past its last word (the
-    /// sentinel, which a search's subjects of a word or more keep), so that the scan reads no letter
-    /// out of bounds.
+    /// EXPERIMENT (LOSAT_X_BPCLUTSCANBF): whether [`Self::x_list_pairs_lean`] lists the offsets of
+    /// `subject` (`subject_length` residues): the compressed alphabet has 15 letters (NCBI's
+    /// reciprocal for 15), the word length is 2 to 6 (the indices stay below 15^6, where the
+    /// divisions by 15 and by 225 are exact), the presence bits are one per cell (shift
+    /// `PV_ARRAY_BTS`: only this two-offset step needs one bit per cell, `for_each_cell::<true, _>`
+    /// handles any shift; the tables of words of 5 letters, over a backbone of 15^5 cells, below
+    /// NCBI's 8 x 262,144 for a coarser shift, always have one bit per cell, while those of 6 letters
+    /// (15^6 cells) have the shift 7, so this scan declines them) and they and the
+    /// slice bounds cover every index, and the subject keeps a byte
+    /// past its last word (the sentinel, which a search's subjects of a word or more keep), so that
+    /// the scan reads no letter out of bounds.
     pub(crate) fn x_pairs_fit(&self, subject: &[u8], subject_length: usize) -> bool {
         let Ok(word_length) = usize::try_from(self.word_length) else {
             return false;
@@ -1797,151 +3340,32 @@ impl XFlatCompressedLookup {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:274-341 (quoted at
     // `for_each_cell`)
-    /// EXPERIMENT (LOSAT_X_BPFSTAGE): the list of `for_each_cell::<true, _>` (each offset whose
+    /// EXPERIMENT (LOSAT_X_BPCLUTSCANBF): the list of `for_each_cell::<true, _>` (each offset whose
     /// index has its presence bit, with the index, in order) for a subject where
-    /// [`Self::x_pairs_fit`] holds, made two offsets per step and out of line (the scan inlined in
-    /// a larger loop kept its state on the stack). With both new letters `c0` and `c1` in the
-    /// alphabet (scaled values `C0`, `C1`, multiples of 15^(word length - 1)) and `p` the preshift
-    /// before offset `s`, the index of `s` is `i0 = p + C0`, the index of `s + 1` is `i0 / 15 + C1`
-    /// (NCBI's step), and the preshift after `s + 1` is `(i0 / 15 + C1) / 15 = i0 / 225 + C1 / 15`
-    /// (as `C1` is a multiple of 15), so the chain from preshift to preshift takes one multiply per
-    /// two offsets; `C1 / 15` is off the chain. The divisions are NCBI's reciprocal multiply and,
-    /// for 225, `x * 19,088,744 >> 32`, exact below 15^6 (lib test); `C1 / 15`, an exact division,
-    /// is `C1` times the inverse of 15 modulo 2^32. A letter outside the alphabet
-    /// takes NCBI's step and its skip, as `for_each_cell` does. `cells` reserves
+    /// [`Self::x_pairs_fit`] holds, made two offsets per step. With both new letters `c0` and `c1`
+    /// in the alphabet (scaled values `C0`, `C1`, multiples of 15^(word length - 1)) and `p` the
+    /// preshift before offset `s`, the index of `s` is `i0 = p + C0`, the index of `s + 1` is
+    /// `i0 / 15 + C1` (NCBI's step), and the preshift after `s + 1` is
+    /// `(i0 / 15 + C1) / 15 = i0 / 225 + C1 / 15` (as `C1` is a multiple of 15), so the chain from
+    /// preshift to preshift takes one multiply per two offsets; `C1 / 15` is off the chain. The
+    /// divisions are NCBI's reciprocal multiply and, for 225, `x * 19,088,744 >> 32`, exact below
+    /// 15^6 (lib test); `C1 / 15`, an exact division, is `C1` times the inverse of 15 modulo 2^32.
+    /// The two-offset steps are a loop of their own, out of line ([`x_pairs_loop`]), so that their
+    /// state (the offset, the list's length, the preshift and the next letter) stays in registers:
+    /// in one loop with the other steps, the list's length was kept on the stack, loaded and stored
+    /// at every pair. That loop takes NCBI's reciprocal for 15 as the constant `x_pairs_fit` asks
+    /// for, computes in `u32` (every index is below 15^6) and reads the subject through a pointer a
+    /// word length in. The first word, a letter outside the alphabet (NCBI's step and its skip, as
+    /// in `for_each_cell`) and the last offset take one offset per step. `cells` reserves
     /// [`X_STARTS_AHEAD`] places past the list.
     ///
     /// # Safety
     ///
     /// [`Self::x_pairs_fit`]`(subject, subject_length)` holds: the scan reads the subject's bytes
-    /// and the presence bits without bounds checks.
+    /// and the presence bits without bounds checks. `CALLER` gives each caller a copy of its own,
+    /// as in [`Self::scan_subject`] (`X_BLASTP`, `X_BLASTP_MATRIX`).
     #[inline(never)]
-    pub(crate) unsafe fn x_list_pairs(
-        &self,
-        subject: &[u8],
-        subject_length: usize,
-        cells: &mut Vec<(i32, u32)>,
-    ) {
-        debug_assert!(self.x_pairs_fit(subject, subject_length));
-        // The scaled letters are at most 14 * 15^(word length - 1), so every index and preshift
-        // below stays under 15^word length.
-        let word_length = self.word_length as usize;
-        let recip = i64::from(self.reciprocal_alphabet_size);
-        let table = &self.scaled_compress_table_u8;
-        let pv = &self.pv;
-        cells.clear();
-        let s_last = subject_length.saturating_sub(word_length);
-        // SAFETY: the loops read up to s_last + word length, below subject.len() (x_pairs_fit, the
-        // caller's contract).
-        let byte_at = |i: usize| unsafe { *subject.get_unchecked(i) };
-        let bit_of = |index: i32| {
-            let ix = index as usize;
-            // SAFETY: an index is below 15^word length (the scaled letters, above), which the bits
-            // cover (x_pairs_fit, the caller's contract).
-            let word = unsafe { *pv.get_unchecked(ix >> PV_ARRAY_BTS) };
-            (word >> (ix & PV_ARRAY_MASK)) & 1
-        };
-        let div225 = |x: i32| ((i64::from(x) * 19_088_744) >> 32) as i32;
-        // 15 * 0xEEEE_EEEF = 1 modulo 2^32.
-        let div15_exact = |x: i32| (x as u32).wrapping_mul(0xEEEE_EEEF) as i32;
-
-        let mut s = 0usize;
-        let mut index = 0i32;
-        while s <= s_last {
-            let (computed, skip) = compute_compressed_index_u8(
-                word_length - 1,
-                &subject[s..s + word_length - 1],
-                15,
-                table,
-            );
-            index = computed;
-            if skip == 0 {
-                break;
-            }
-            s += 1;
-        }
-        let mut next_char = if s <= s_last {
-            byte_at(s + word_length - 1)
-        } else {
-            0
-        };
-        let mut preshift = compressed_reciprocal_divide(index, recip);
-        cells.reserve(s_last + 1 - s + X_STARTS_AHEAD);
-        let list = cells.as_mut_ptr();
-        let mut listed = 0usize;
-        while s <= s_last {
-            if s < s_last {
-                let c1 = byte_at(s + word_length);
-                let scaled0 = table[usize::from(next_char)];
-                let scaled1 = table[usize::from(c1)];
-                if (scaled0 | scaled1) >= 0 {
-                    let i0 = preshift + scaled0;
-                    let i1 = compressed_reciprocal_divide(i0, recip) + scaled1;
-                    preshift = div225(i0) + div15_exact(scaled1);
-                    next_char = byte_at(s + word_length + 1);
-                    let bit0 = bit_of(i0);
-                    // SAFETY: each offset adds at most one to `listed`, so `listed` stays below
-                    // the reserve (as in `for_each_cell`).
-                    unsafe { list.add(listed).write((s as i32, i0 as u32)) };
-                    listed += bit0 as usize;
-                    let bit1 = bit_of(i1);
-                    // SAFETY: as above.
-                    unsafe { list.add(listed).write((s as i32 + 1, i1 as u32)) };
-                    listed += bit1 as usize;
-                    s += 2;
-                    continue;
-                }
-            }
-            let mut compressed_char = table[usize::from(next_char)];
-            next_char = byte_at(s + word_length);
-            if compressed_char < 0 {
-                preshift = 0;
-                s += 1;
-                let mut skip = self.word_length - 1;
-                while skip != 0 && s <= s_last {
-                    compressed_char = table[usize::from(next_char)];
-                    next_char = byte_at(s + word_length);
-                    if compressed_char < 0 {
-                        skip = self.word_length - 1;
-                        preshift = 0;
-                        s += 1;
-                        continue;
-                    }
-                    index = preshift + compressed_char;
-                    preshift = compressed_reciprocal_divide(index, recip);
-                    skip -= 1;
-                    s += 1;
-                }
-                continue;
-            }
-            index = preshift + compressed_char;
-            preshift = compressed_reciprocal_divide(index, recip);
-            let bit = bit_of(index);
-            // SAFETY: as above.
-            unsafe { list.add(listed).write((s as i32, index as u32)) };
-            listed += bit as usize;
-            s += 1;
-        }
-        // SAFETY: the first `listed` places were written above, within the reserve.
-        unsafe { cells.set_len(listed) };
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:274-341 (quoted at
-    // `for_each_cell`)
-    /// EXPERIMENT (LOSAT_X_BPFLEAN): [`Self::x_list_pairs`] with its two-offset steps in a loop of
-    /// their own, out of line ([`x_pairs_loop`]), so that their state (the offset, the list's
-    /// length, the preshift and the next letter) stays in registers: in one loop with the other
-    /// steps, the list's length was kept on the stack, loaded and stored at every pair. That loop
-    /// takes NCBI's reciprocal for 15 as the constant `x_pairs_fit` asks for, computes in `u32`
-    /// (every index is below 15^6) and reads the subject through a pointer a word length in. The
-    /// first word, a letter outside the alphabet and the last offset take the steps of
-    /// `x_list_pairs`, so the list, and the reserve past it, are the same.
-    ///
-    /// # Safety
-    ///
-    /// As [`Self::x_list_pairs`]: [`Self::x_pairs_fit`]`(subject, subject_length)` holds.
-    #[inline(never)]
-    pub(crate) unsafe fn x_list_pairs_lean(
+    pub(crate) unsafe fn x_list_pairs_lean<const CALLER: u8>(
         &self,
         subject: &[u8],
         subject_length: usize,
@@ -2012,7 +3436,7 @@ impl XFlatCompressedLookup {
             if s > s_last {
                 break;
             }
-            // Offset s_last, or a pair with a letter outside the alphabet: x_list_pairs's step.
+            // Offset s_last, or a pair with a letter outside the alphabet: one offset's step.
             let mut compressed_char = table[usize::from(next_char)];
             next_char = byte_at(s + word_length);
             if compressed_char < 0 {
@@ -2047,19 +3471,10 @@ impl XFlatCompressedLookup {
         // SAFETY: the first `listed` places were written above, within the reserve.
         unsafe { cells.set_len(listed) };
     }
-
-    // No NCBI counterpart: chooses LOSAT's list form; both list the same offsets.
-    /// EXPERIMENT (LOSAT_X_BPCLUTSCANBF): whether blastp-fast lists this table's offsets without a
-    /// branch (`for_each_cell::<true, _>`): at least [`x_scan_bf_min`] of every 10,000 backbone
-    /// cells have hits. With fewer, few offsets pass `PV_TEST`, the branch is mostly predicted and
-    /// the list's store at every offset costs more than the mispredicts it saves.
-    pub(crate) fn x_scan_bf_pays(&self) -> bool {
-        x_dense_enough(self.used_cells, self.starts.len() - 1, x_scan_bf_min())
-    }
 }
 
 // No NCBI counterpart: the state of LOSAT's list around its two-offset steps.
-/// EXPERIMENT (LOSAT_X_BPFLEAN): where [`x_pairs_loop`] starts and stops: the next offset `s`,
+/// EXPERIMENT (LOSAT_X_BPCLUTSCANBF): where [`x_pairs_loop`] starts and stops: the next offset `s`,
 /// the list's length `listed`, the preshift before `s` and the letter at `s + word length - 1`.
 struct XPairsAt {
     s: usize,
@@ -2070,11 +3485,12 @@ struct XPairsAt {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:274-341 (quoted at
 // `XFlatCompressedLookup::for_each_cell`)
-/// EXPERIMENT (LOSAT_X_BPFLEAN): the two-offset steps of [`XFlatCompressedLookup::x_list_pairs`]
-/// from `at`, until fewer than two offsets up to `s_last` are left or a pair has a letter outside
-/// the alphabet; `at` then holds that pair's first offset, for the caller's step. `sub_w` points a
-/// word length into the subject, `table` holds the scaled letters and `pv` the presence bits. The
-/// divisions are those of `x_list_pairs` with NCBI's reciprocal for 15, 286,331,154, as a constant.
+/// EXPERIMENT (LOSAT_X_BPCLUTSCANBF): the two-offset steps of
+/// [`XFlatCompressedLookup::x_list_pairs_lean`] from `at`, until fewer than two offsets up to
+/// `s_last` are left or a pair has a letter outside the alphabet; `at` then holds that pair's first
+/// offset, for the caller's step. `sub_w` points a word length into the subject, `table` holds the
+/// scaled letters and `pv` the presence bits. The divisions are those of `x_list_pairs_lean`'s
+/// header with NCBI's reciprocal for 15, 286,331,154, as a constant.
 ///
 /// # Safety
 ///
@@ -2110,7 +3526,7 @@ unsafe fn x_pairs_loop(
         }
         let i0 = (preshift + scaled0) as u32;
         let i1 = ((u64::from(i0) * 286_331_154) >> 32) as u32 + scaled1 as u32;
-        // i0 / 225 + C1 / 15, as in x_list_pairs.
+        // i0 / 225 + C1 / 15, as in x_list_pairs_lean's header.
         preshift = (((u64::from(i0) * 19_088_744) >> 32) as u32)
             .wrapping_add((scaled1 as u32).wrapping_mul(0xEEEE_EEEF)) as i32;
         // SAFETY: s + 1 + word length <= s_last + word length < subject.len() (x_pairs_fit).
@@ -2134,41 +3550,10 @@ unsafe fn x_pairs_loop(
     };
 }
 
-// No NCBI counterpart: the rule of LOSAT_X_BPCLUTSCANBFMIN; it does not change any value NCBI
-// computes.
-/// EXPERIMENT (LOSAT_X_BPCLUTSCANBF): `used` of `cells` backbone cells reach `min` per 10,000 (a
-/// `min` above 10,000 takes no table).
-fn x_dense_enough(used: usize, cells: usize, min: u64) -> bool {
-    u128::from(used as u64) * 10_000 >= u128::from(min) * cells as u128
-}
-
-// No NCBI counterpart: a tuning value of LOSAT's list form; it does not change any value NCBI
-// computes.
-/// EXPERIMENT (LOSAT_X_BPCLUTSCANBFMIN): the built-in value of [`x_scan_bf_min`]. Natively 500: on
-/// the workstation the branch-free list cost x1.07 the cycles at 234 used cells per 10,000, x1.00 at
-/// 442, x0.96 at 728 and x0.80 at 2,260. On wasm32 0 (every table): in Node the loop with the branch
-/// is the slower one at every density measured, the branch-free list x0.81 the time at 119 and x0.80
-/// at 234.
-const X_SCAN_BF_MIN: u64 = if cfg!(target_arch = "wasm32") { 0 } else { 500 };
-
-// No NCBI counterpart: reads LOSAT_X_BPCLUTSCANBFMIN once; it does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPCLUTSCANBFMIN): the fewest backbone cells with hits, per 10,000, for which
-/// blastp-fast's scan lists the offsets without a branch (built-in [`X_SCAN_BF_MIN`]); `0` every
-/// table; a value that is not a number takes the built-in one.
-fn x_scan_bf_min() -> u64 {
-    static MIN: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
-    *MIN.get_or_init(|| {
-        std::env::var("LOSAT_X_BPCLUTSCANBFMIN")
-            .ok()
-            .and_then(|v| v.trim().parse().ok())
-            .unwrap_or(X_SCAN_BF_MIN)
-    })
-}
-
-// No NCBI counterpart: how many cells ahead `for_each_cell` reads the slice bounds and the hits. Tuning
-// only. LOSAT_X_BPFSTAGE's and LOSAT_X_BPFLEAN's loops (`blastp/x_seed_fused_clut.rs`) read ahead as
-// far, over X_STARTS_AHEAD entries past their list, so the hits must not be read further ahead than the
-// bounds.
+// No NCBI counterpart: how many cells ahead `for_each_cell` reads the slice bounds and the hits.
+// Tuning only. blastp-fast's lean loop after the branch-free list (`x_scan_flat_lean` in
+// `blastp/x_seed_fused_clut.rs`) reads ahead as far, over X_STARTS_AHEAD entries past its list, so
+// the hits must not be read further ahead than the bounds.
 pub(crate) const X_STARTS_AHEAD: usize = 16;
 pub(crate) const X_HITS_AHEAD: usize = 8;
 const _: () = assert!(X_HITS_AHEAD <= X_STARTS_AHEAD);
@@ -2191,6 +3576,16 @@ pub(crate) fn x_prefetch<T>(ptr: *const T) {
 pub(crate) enum XCompressedLookup {
     Reference(BlastCompressedAaLookupTable),
     Flat(XFlatCompressedLookup),
+}
+
+/// BLASTX's compressed lookup table: the reference table, or flat with `u16` query offsets, or flat
+/// with `i32` offsets for a query batch of more than `X_U16_LETTERS` letters (several queries in
+/// one batch are not split, so a batch that reaches 10002 letters with a long last query keeps it
+/// whole). Matched only out of line (`blastx/seed.rs`).
+pub(crate) enum XBxCompressedLookup {
+    Reference(BlastCompressedAaLookupTable),
+    Flat(XFlatCompressedLookup<u16>),
+    Wide(XFlatCompressedLookup),
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
@@ -2240,6 +3635,604 @@ pub(crate) fn x_bp_build_compressed_lookup(
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
+// ```c
+//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+//                                     query, locations);
+//     s_CompressedLookupFinalize(lookup);
+// ```
+/// Item SC2d (LOSAT_X_BPLKPAHEAD): the first part of `x_bp_build_compressed_lookup` (of
+/// `x_bp_build_compressed_lookup_of` for another search matrix `matrix`, item SC2d-2) for a build
+/// ahead of its block (`XFlatArgs::x_ahead`): the appends pass of the pool's flat table, with the
+/// extra tasks (`x_clut_par.rs`). `None` where the build would give no table ahead (the switch off, a
+/// pool of one thread, `TooLarge`) or the build ends at the appends pass; the second part is
+/// `x_bp_flat_ahead_table`.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn x_bp_flat_ahead_appends(
+    matrix: ScoringMatrix,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    pool: &SearchPool<'_>,
+    x_flat_args: XFlatArgs<'_>,
+) -> Option<XFlatAppends> {
+    if !x_bpclut_on() || !x_pool_builds(pool) {
+        return None;
+    }
+    x_clut_par::x_flat_ahead_appends_in_pool(
+        matrix,
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        pool,
+        x_flat_args,
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
+// `x_bp_flat_ahead_appends`)
+// ```c
+//     s_CompressedLookupFinalize(lookup);
+// ```
+/// Item SC2d (LOSAT_X_BPLKPAHEAD): the second part of a build ahead of its block: the flat table of
+/// `appends` (`x_bp_flat_ahead_appends` of `matrix`, `query` and `locations`) on the vectors that
+/// `spare` holds (`XFlatSpare::x_make_room`). `None` where they lack the room (the spare keeps them)
+/// or a table refuses (which the block's own build then raises).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn x_bp_flat_ahead_table(
+    matrix: ScoringMatrix,
+    appends: XFlatAppends,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    pool: &SearchPool<'_>,
+    spare: &XFlatSpare,
+    segments: Option<&XSegmentPool>,
+) -> Option<XFlatCompressedLookup> {
+    match x_clut_par::x_flat_ahead_stripes_in_pool(
+        matrix, appends, query, locations, pool, spare, segments,
+    )? {
+        XFlatBuild::Table(table) => Some(table),
+        XFlatBuild::Refused | XFlatBuild::TooLarge => None,
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
+// ```c
+//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+//                                     query, locations);
+//     s_CompressedLookupFinalize(lookup);
+// ```
+/// TBLASTN's compressed lookup table (word sizes 5 to 7, `tblastn/search_seed.rs`): what
+/// `x_bp_build_compressed_lookup` builds on one thread, the reference table with the switch off and
+/// otherwise the flat one (the bucket fill, the count-and-fill builder where it declines, the
+/// reference builder where that declines), with the same refusal. A function of its own, which
+/// calls only the builders that blastp-fast's build calls out of line, so that blastp-fast's build
+/// keeps its code.
+#[inline(never)]
+pub(crate) fn x_tbn_build_compressed_lookup(
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+) -> Option<Result<XCompressedLookup, ()>> {
+    x_build_compressed_on(
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        false,
+        1,
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1303-1310,1352-1354
+// ```c
+//     new_alphabet = SCompressedAlphabetNew(sbp,
+//                                 lookup->compressed_alphabet_size,
+//                                 kMatrixScale);
+//     ...
+//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+//                                     query, locations);
+// ```
+/// `x_tbn_build_compressed_lookup` with the words of the search matrix `matrix`, any but BLOSUM62
+/// (`build_compressed_score_matrix`): the same builders in the same order, the reference table with
+/// the switch off. Out of line, so that BLOSUM62's build keeps its code.
+#[inline(never)]
+pub(crate) fn x_tbn_build_compressed_lookup_of(
+    matrix: ScoringMatrix,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    parts: usize,
+) -> Option<Result<XCompressedLookup, ()>> {
+    let reference = || {
+        try_build_compressed_lookup(
+            matrix,
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+        )
+        .map(|built| built.map(XCompressedLookup::Reference))
+    };
+    if !x_bpclut_on() {
+        return reference();
+    }
+    // The bucket fill on this thread, and where it declines the count-and-fill builder's table in
+    // `parts` (`x_flat_in_parts`, BLASTX's past `X_U16_LETTERS` letters; 1: on this thread).
+    let bucket = if x_bpffill_on() {
+        x_buckets_of(
+            matrix,
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+            NCBI_OVERFLOW_CELL_CAPACITY,
+        )
+    } else {
+        XBucketBuild::Declined
+    };
+    let built = match bucket {
+        XBucketBuild::Built(built) => built,
+        XBucketBuild::Declined => x_flat_in_parts::<i32>(
+            matrix,
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+            parts,
+            false,
+        )
+        .unwrap_or_else(|| {
+            x_try_build_flat_of(
+                matrix,
+                word_size,
+                scaled_threshold,
+                query,
+                locations,
+                tables,
+                NCBI_OVERFLOW_CELL_CAPACITY,
+                X_COUNT_CHUNK,
+            )
+        }),
+    };
+    match built? {
+        XFlatBuild::Table(table) => Some(Ok(XCompressedLookup::Flat(table))),
+        XFlatBuild::Refused => Some(Err(())),
+        XFlatBuild::TooLarge => reference(),
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1303-1310,1352-1354 (see
+// `x_tbn_build_compressed_lookup_of`)
+// ```c
+//     new_alphabet = SCompressedAlphabetNew(sbp,
+//                                 lookup->compressed_alphabet_size,
+//                                 kMatrixScale);
+//     ...
+//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+//                                     query, locations);
+// ```
+/// BLASTX's compressed table of a query batch with the words of the search matrix `matrix`, any but
+/// BLOSUM62 (items SC2b, SC9 of line NP): as `x_bx_build_compressed_lookup`, its bucket fill
+/// (`x_bx_buckets_with`, word size 5) in `parts` and where it declines the count-and-fill builder's
+/// table in `parts` (`x_flat_in_parts`; 1: on this thread), with `Int4` offsets, on fresh vectors as
+/// in dev (line NP SC9e: lent by the pool of BLASTX's tables, BLOSUM45 word size 6's tables of 50
+/// cDNAs x scer_pep at 8 threads took about 5 % more maximum RSS, 2,756 against 2,632-2,646 MB over
+/// 20 runs each, in the same time); `x_tbn_build_compressed_lookup_of` past `X_U16_LETTERS`
+/// letters. Out of line, so that BLOSUM62's build keeps its code.
+#[inline(never)]
+pub(crate) fn x_bx_build_compressed_lookup_of(
+    matrix: ScoringMatrix,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    parts: usize,
+) -> Option<Result<XCompressedLookup, ()>> {
+    if query.len() > X_U16_LETTERS || !x_bpclut_on() {
+        return x_tbn_build_compressed_lookup_of(
+            matrix,
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+            parts,
+        );
+    }
+    let bucket = if x_bpffill_on() {
+        x_bx_buckets_with::<_, i32, [u8]>(
+            matrix,
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+            NCBI_OVERFLOW_CELL_CAPACITY,
+            false,
+            parts,
+            |word| word,
+        )
+    } else {
+        XBucketBuild::Declined
+    };
+    let built = match bucket {
+        XBucketBuild::Built(built) => built,
+        XBucketBuild::Declined => x_flat_in_parts::<i32>(
+            matrix,
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+            parts,
+            false,
+        )
+        .unwrap_or_else(|| {
+            x_try_build_flat_of(
+                matrix,
+                word_size,
+                scaled_threshold,
+                query,
+                locations,
+                tables,
+                NCBI_OVERFLOW_CELL_CAPACITY,
+                X_COUNT_CHUNK,
+            )
+        }),
+    };
+    match built? {
+        XFlatBuild::Table(table) => Some(Ok(XCompressedLookup::Flat(table))),
+        XFlatBuild::Refused => Some(Err(())),
+        XFlatBuild::TooLarge => try_build_compressed_lookup(
+            matrix,
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+        )
+        .map(|built| built.map(XCompressedLookup::Reference)),
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1303-1310,1352-1354 (see
+// `x_tbn_build_compressed_lookup_of`)
+// ```c
+//     new_alphabet = SCompressedAlphabetNew(sbp,
+//                                 lookup->compressed_alphabet_size,
+//                                 kMatrixScale);
+//     ...
+//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+//                                     query, locations);
+// ```
+/// blastp-fast's compressed lookup table with the words of the search matrix `matrix`, any but
+/// BLOSUM62 (items SC2b, SC2d-2): `x_bp_build_compressed_lookup` with the matrix's words. The flat
+/// table by `pool`'s threads where `x_pool_builds` (`x_try_build_flat_in_pool_of`, with
+/// `x_flat_args`: the spare vectors and the build ahead, as BLOSUM62's; the reference builder where
+/// it declines), else `x_tbn_build_compressed_lookup_of` on this thread; the reference table with
+/// the switch off. A build ahead of its block (`XFlatArgs::x_ahead`) is only the pool's build with
+/// the switch on; elsewhere it returns `None` at once. Out of line, so that BLOSUM62's build keeps
+/// its code.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn x_bp_build_compressed_lookup_of(
+    matrix: ScoringMatrix,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    pool: &SearchPool<'_>,
+    x_flat_args: XFlatArgs<'_>,
+) -> Option<Result<XCompressedLookup, ()>> {
+    if x_flat_args.x_ahead && (!x_bpclut_on() || !x_pool_builds(pool)) {
+        return None;
+    }
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if x_bpclut_on() && x_pool_builds(pool) {
+        return match x_clut_par::x_try_build_flat_in_pool_of(
+            matrix,
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+            pool,
+            x_flat_args,
+        )? {
+            XFlatBuild::Table(table) => Some(Ok(XCompressedLookup::Flat(table))),
+            XFlatBuild::Refused => Some(Err(())),
+            // LOSAT_X_BPLKPAHEAD: a build ahead of its block runs no reference builder; the block
+            // builds its table itself (`XFlatArgs::x_ahead`).
+            XFlatBuild::TooLarge if x_flat_args.x_ahead => None,
+            XFlatBuild::TooLarge => try_build_compressed_lookup(
+                matrix,
+                word_size,
+                scaled_threshold,
+                query,
+                locations,
+                tables,
+            )
+            .map(|built| built.map(XCompressedLookup::Reference)),
+        };
+    }
+    let _ = (pool, x_flat_args);
+    x_tbn_build_compressed_lookup_of(
+        matrix,
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        1,
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
+// `x_tbn_build_compressed_lookup`)
+// ```c
+//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+//                                     query, locations);
+//     s_CompressedLookupFinalize(lookup);
+// ```
+/// BLASTX's compressed lookup table: `x_tbn_build_compressed_lookup`'s with `u16` offsets
+/// (`x_bx_buckets_on`; the count-and-fill builder's table narrowed where the bucket fill declines),
+/// on vectors kept between builds with `LOSAT_X_BXCLUTPOOL` (`blastx::seed::Lookup`'s drop gives
+/// them back). A query of more than `X_U16_LETTERS` letters gets `x_tbn_build_compressed_lookup`'s
+/// table, also on kept vectors. One instance per word length `WORD` (`-word_size` 5 to 7, chosen
+/// once per query batch by `blastx::seed`), so that the bucket fill's walk of the neighbouring
+/// words takes its length as a constant, as it did when 5 was the only one (item SC9 of line NP;
+/// 6 and 7 decline at its PV test and take the count-and-fill builder, with the length at run
+/// time). A unit under the cap (`parts` above 1, `LOSAT_X_BXBUILDPAR`) builds its table in that
+/// many parts: the bucket fill in parts (`x_bx_buckets_on`, line NP SC9e) and where it declines the
+/// count-and-fill builder's table in parts, the stripes writing the `u16` offsets into vectors the
+/// pool lends (`x_flat_in_parts`, items SC9b (2) and SC9d of line NP).
+#[inline(never)]
+pub(crate) fn x_bx_build_compressed_lookup<const WORD: usize>(
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    parts: usize,
+) -> Option<Result<XBxCompressedLookup, ()>> {
+    let word_size = WORD;
+    if query.len() > X_U16_LETTERS {
+        return x_build_compressed_on(
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+            x_bx_clut_pool(),
+            parts,
+        )
+        .map(|built| {
+            built.map(|table| match table {
+                XCompressedLookup::Reference(table) => XBxCompressedLookup::Reference(table),
+                XCompressedLookup::Flat(table) => XBxCompressedLookup::Wide(table),
+            })
+        });
+    }
+    let reference = || {
+        try_build_blosum62_compressed_lookup(word_size, scaled_threshold, query, locations, tables)
+            .map(|built| built.map(XBxCompressedLookup::Reference))
+    };
+    if !x_bpclut_on() {
+        return reference();
+    }
+    // The bucket fill (word size 5) in `parts`, and where it declines the count-and-fill builder's
+    // table in `parts` (`x_flat_in_parts`; 1: on this thread), on the pool's vectors.
+    let pooled = x_bx_clut_pool();
+    let bucket = if x_bpffill_on() {
+        x_bx_buckets_on::<WORD>(
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+            NCBI_OVERFLOW_CELL_CAPACITY,
+            pooled,
+            parts,
+        )
+    } else {
+        XBucketBuild::Declined
+    };
+    let built = match bucket {
+        XBucketBuild::Built(built) => built,
+        XBucketBuild::Declined => x_flat_in_parts::<u16>(
+            ScoringMatrix::Blosum62,
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+            parts,
+            pooled,
+        )
+        .unwrap_or_else(|| {
+            x_try_build_flat_with_capacity(
+                word_size,
+                scaled_threshold,
+                query,
+                locations,
+                tables,
+                NCBI_OVERFLOW_CELL_CAPACITY,
+                X_COUNT_CHUNK,
+                0,
+            )
+            .map(XFlatBuild::x_offsets)
+        }),
+    };
+    match built? {
+        XFlatBuild::Table(table) => Some(Ok(XBxCompressedLookup::Flat(table))),
+        XFlatBuild::Refused => Some(Err(())),
+        XFlatBuild::TooLarge => reference(),
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
+// ```c
+//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+//                                     query, locations);
+//     s_CompressedLookupFinalize(lookup);
+// ```
+// NCBI builds a query chunk's table on one thread before the search threads start
+// (c++/src/algo/blast/api/prelim_stage.cpp:145-188 starts them for the search).
+/// Item SC9b (2) of line NP: the count-and-fill builder's table of `matrix`'s words built by `parts`
+/// tasks of the pool the build runs on (`x_clut_par::x_try_build_flat_in_parts`, the same table slot
+/// for slot), with offsets of type `H` written by the stripes and, with `pooled`
+/// (`LOSAT_X_BXCLUTPOOL`), on vectors the pool of BLASTX's tables lends: a BLASTX unit under the cap
+/// (`LOSAT_X_BXBUILDPAR`, `blastx/x_bx_mem.rs`) where the bucket fill declines (word sizes 6 and 7).
+/// `None` where the builder runs on this thread: `parts` 1, or a build without threads.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn x_flat_in_parts<H: XQueryOffset + XPooledOffset>(
+    matrix: ScoringMatrix,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    parts: usize,
+    pooled: bool,
+) -> Option<Option<XFlatBuild<H>>> {
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if parts > 1 {
+        // LOSAT_X_BXCLUTPOOL: the table on a set of vectors the pool lends (allocated by the
+        // build's caller once, not by the pool's threads for each table: freed there, glibc's
+        // raised mmap threshold left them in those threads' arenas); a build that makes no table
+        // drops them and gives an empty set back against the one lent.
+        let lent = pooled.then(|| x_flat_pool::<H>().lend());
+        let built = x_clut_par::x_try_build_flat_in_parts(
+            matrix,
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+            parts,
+            lent,
+        );
+        if pooled && !matches!(built, Some(XFlatBuild::Table(_))) {
+            drop(x_flat_pool::<H>().take_back(XFlatTableVectors::default()));
+        }
+        return Some(built);
+    }
+    let _ = (
+        matrix,
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        parts,
+        pooled,
+    );
+    None
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
+// `x_tbn_build_compressed_lookup`)
+// ```c
+//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+//                                     query, locations);
+//     s_CompressedLookupFinalize(lookup);
+// ```
+/// `x_tbn_build_compressed_lookup`, with `pooled` the builds on vectors kept between builds
+/// (`LOSAT_X_BXCLUTPOOL`) and, at more than one part, the count-and-fill builder's table in `parts`
+/// (`x_flat_in_parts`; 1: the bucket fill, or the count-and-fill builder where it declines, on this
+/// thread).
+fn x_build_compressed_on(
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    pooled: bool,
+    parts: usize,
+) -> Option<Result<XCompressedLookup, ()>> {
+    let reference = || {
+        try_build_blosum62_compressed_lookup(word_size, scaled_threshold, query, locations, tables)
+            .map(|built| built.map(XCompressedLookup::Reference))
+    };
+    if !x_bpclut_on() {
+        return reference();
+    }
+    // The bucket fill on this thread, and where it declines the count-and-fill builder's table in
+    // `parts` on the pool's vectors (`x_flat_in_parts`; 1: on this thread).
+    let bucket = if x_bpffill_on() {
+        x_buckets_on(
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+            NCBI_OVERFLOW_CELL_CAPACITY,
+            pooled,
+            0,
+        )
+    } else {
+        XBucketBuild::Declined
+    };
+    let built = match bucket {
+        XBucketBuild::Built(built) => built,
+        XBucketBuild::Declined => x_flat_in_parts::<i32>(
+            ScoringMatrix::Blosum62,
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+            parts,
+            pooled,
+        )
+        .unwrap_or_else(|| {
+            x_try_build_flat_with_capacity(
+                word_size,
+                scaled_threshold,
+                query,
+                locations,
+                tables,
+                NCBI_OVERFLOW_CELL_CAPACITY,
+                X_COUNT_CHUNK,
+                0,
+            )
+        }),
+    };
+    match built? {
+        XFlatBuild::Table(table) => Some(Ok(XCompressedLookup::Flat(table))),
+        XFlatBuild::Refused => Some(Err(())),
+        XFlatBuild::TooLarge => reference(),
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-149
 // ```c
 //     TBlastThreads the_threads(GetNumberOfThreads());
@@ -2262,7 +4255,7 @@ pub(crate) fn x_pool_builds(pool: &SearchPool<'_>) -> bool {
 // ```
 /// EXPERIMENT (LOSAT_X_BPCLUT): the flat table, by `pool`'s threads when `x_pool_builds` (the same
 /// table, `x_clut_par.rs`; `x_flat_args` as LOSAT_X_BPLKPFLAT gives it), else by the serial builder
-/// (which does not use `x_flat_args`: it runs none of the extra tasks and takes no vectors).
+/// (which uses only `x_flat_args.appends`: it runs none of the extra tasks and takes no vectors).
 pub(crate) fn x_build_flat_in_pool(
     word_size: usize,
     scaled_threshold: i32,
@@ -2287,8 +4280,15 @@ pub(crate) fn x_build_flat_in_pool(
             x_flat_args,
         );
     }
-    let _ = (pool, x_flat_args);
-    x_try_build_flat_compressed_lookup(word_size, scaled_threshold, query, locations, tables)
+    let _ = pool;
+    x_try_build_flat_reserving(
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        x_flat_args.appends,
+    )
 }
 
 // No NCBI counterpart: compares two of LOSAT's flat tables (the tests' check).
@@ -2311,7 +4311,6 @@ pub(crate) fn x_assert_same_flat_tables_as(
             && got.compressed_alphabet_size == want.compressed_alphabet_size
             && got.reciprocal_alphabet_size == want.reciprocal_alphabet_size
             && got.longest_chain == want.longest_chain
-            && got.used_cells == want.used_cells
             && got.pv_array_bts == want.pv_array_bts
             && got.scaled_compress_table_u8 == want.scaled_compress_table_u8,
         "{what} table header differs"
@@ -2410,6 +4409,75 @@ mod tests {
     pub(super) const FEW_LETTERS: [u8; 4] =
         [ncbistdaa::A, ncbistdaa::L, ncbistdaa::S, ncbistdaa::K];
 
+    // Item SC9i of line NP: `for_each_word_in` gives the cells of `for_each_word` whose last letter
+    // is in the range, each once (less the range's first cell), for word sizes 5 to 7, matrices of each kind, thresholds that
+    // make few and many neighbors (and 0: the word alone), words with letters outside the
+    // compressed alphabet, and every range of letters (all, none, one, any run).
+    #[test]
+    fn word_cells_of_a_range_of_last_letters_are_the_words_cells_there() {
+        let mut rng = XorShift(0x6a09_e667_f3bc_c908);
+        let mut seen = [0usize; 3];
+        for (word_size, matrix, thresholds) in [
+            (5usize, ScoringMatrix::Blosum62, &[1100, 1930, 0][..]),
+            (6, ScoringMatrix::Blosum62, &[1300, 2100][..]),
+            (6, ScoringMatrix::Blosum45, &[1300, 2100][..]),
+            (7, ScoringMatrix::Blosum62, &[1200, 2025][..]),
+            (7, ScoringMatrix::Pam30, &[1200, 2025][..]),
+        ] {
+            let header = XHeader::new(word_size).expect("word size");
+            let scores = matrix
+                .score_matrix(header.alphabet)
+                .expect("compressed matrix");
+            let info = CompressedNeighborInfo::new(&scores, header.alphabet);
+            let alphabet = header.alphabet as u32;
+            let top = alphabet.pow(word_size as u32 - 1);
+            for &threshold in thresholds {
+                let words = XWords::new(&header, threshold, &scores, &info);
+                for round in 0..60 {
+                    let letters: &[u8] = match round % 3 {
+                        0 => &FEW_LETTERS,
+                        1 => &LETTERS,
+                        _ => &[
+                            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 21, 24, 25,
+                        ],
+                    };
+                    let word: Vec<u8> = (0..word_size)
+                        .map(|_| letters[rng.below(letters.len())])
+                        .collect();
+                    let mut all = Vec::new();
+                    words.for_each_word(&word[..], &mut all);
+                    let mut distinct = all.clone();
+                    distinct.sort_unstable();
+                    distinct.dedup();
+                    assert_eq!(distinct.len(), all.len(), "an offset appends a cell twice");
+                    let a = rng.below(alphabet as usize + 1) as u32;
+                    let b = rng.below(alphabet as usize + 1) as u32;
+                    let mut ranges = vec![0..alphabet, a..a, a.min(b)..a.max(b)];
+                    ranges.extend((0..alphabet).map(|letter| letter..letter + 1));
+                    for range in ranges {
+                        let mut want: Vec<u32> = all
+                            .iter()
+                            .copied()
+                            .filter(|cell| range.contains(&(cell / top)))
+                            .map(|cell| cell - range.start * top)
+                            .collect();
+                        let mut got = Vec::new();
+                        words.for_each_word_in(&word[..], &range, &mut got);
+                        want.sort_unstable();
+                        got.sort_unstable();
+                        assert_eq!(
+                            got, want,
+                            "{matrix:?} word {word_size} threshold {threshold} word {word:?} letters {range:?}"
+                        );
+                        seen[usize::from(!want.is_empty())
+                            + usize::from(want.len() == all.len() && !all.is_empty())] += 1;
+                    }
+                }
+            }
+        }
+        assert!(seen.iter().all(|&n| n > 100), "cases seen {seen:?}");
+    }
+
     fn flat_table(build: Option<XFlatBuild>) -> XFlatCompressedLookup {
         match build.expect("word size 5") {
             XFlatBuild::Table(table) => table,
@@ -2466,6 +4534,33 @@ mod tests {
             .collect();
         subject.push(0);
         subject
+    }
+
+    // `x_to_scan_order` puts o_k at `x_emission_position(k, n)` for cells of 0 to 300 offsets, of
+    // both offset types of the tables (`i32`, `u16`).
+    #[test]
+    fn scan_order_in_place_is_the_emission_positions() {
+        for n in 0..=300u32 {
+            let mut expected = vec![u32::MAX; n as usize];
+            for k in 0..n {
+                expected[x_emission_position(k, n) as usize] = k;
+            }
+            let mut cell: Vec<i32> = (0..n as i32).collect();
+            x_to_scan_order(&mut cell);
+            assert!(
+                cell.iter().map(|&v| v as u32).eq(expected.iter().copied()),
+                "n {n}"
+            );
+            let mut narrow: Vec<u16> = (0..n as u16).collect();
+            x_to_scan_order(&mut narrow);
+            assert!(
+                narrow
+                    .iter()
+                    .map(|&v| u32::from(v))
+                    .eq(expected.iter().copied()),
+                "u16 n {n}"
+            );
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:825-841
@@ -2638,6 +4733,112 @@ mod tests {
         assert!(flat.hits.is_empty() && flat.longest_chain == 0);
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1303-1310
+    // ```c
+    //     new_alphabet = SCompressedAlphabetNew(sbp,
+    //                                 lookup->compressed_alphabet_size,
+    //                                 kMatrixScale);
+    // ```
+    // Every search matrix but IDENTITY at word size 5 (BLOSUM45 also at 6, PAM30 at 7), random queries
+    // with NCBI's tables and a split batch, the word sizes' thresholds and lower ones: the bucket fill (word size 5) and the
+    // count-and-fill builder of the matrix's words build the reference table of those words
+    // (`try_build_compressed_lookup`), or refuse where it refuses, and
+    // `x_tbn_build_compressed_lookup_of` takes them.
+    #[test]
+    fn flat_tables_of_each_matrix_are_its_reference_tables() {
+        let mut rng = XorShift(0x3c6e_f372_fe94_f82b);
+        let (mut built_seen, mut refused_seen) = (0, 0);
+        for matrix in ScoringMatrix::ALL {
+            if matrix == ScoringMatrix::Identity {
+                assert!(x_try_build_flat_of(matrix, 5, 1100, &[], &[], &[], 1, 1).is_none());
+                continue;
+            }
+            // Word sizes 6 and 7 (backbones of 15^6 and 10^7 cells) with two matrices only.
+            let larger: &[(usize, &[i32], usize)] = match matrix {
+                ScoringMatrix::Blosum45 => &[(6, &[2100, 1300], NCBI_OVERFLOW_CELL_CAPACITY)],
+                ScoringMatrix::Pam30 => &[(7, &[2025, 1200], NCBI_OVERFLOW_CELL_CAPACITY)],
+                _ => &[],
+            };
+            for &(word, thresholds, capacity) in [
+                (5usize, &[1930, 1100][..], NCBI_OVERFLOW_CELL_CAPACITY),
+                (5, &[1600, 0][..], 4),
+            ]
+            .iter()
+            .chain(larger)
+            {
+                for &threshold in thresholds {
+                    let lengths: Vec<usize> =
+                        (0..2 + rng.below(4)).map(|_| 8 + rng.below(250)).collect();
+                    let letters: &[u8] = if rng.below(2) == 0 {
+                        &FEW_LETTERS
+                    } else {
+                        &LETTERS
+                    };
+                    let (query, locations, first) = queries(&mut rng, &lengths, letters, 1);
+                    let tables = [first[0]..first[lengths.len() - 1]];
+                    let what = format!("{matrix:?} word {word} threshold {threshold}");
+                    let reference = try_build_compressed_lookup_with_capacity(
+                        matrix, word, threshold, &query, &locations, &tables, capacity,
+                    )
+                    .expect("word size");
+                    let counted = x_try_build_flat_of(
+                        matrix,
+                        word,
+                        threshold,
+                        &query,
+                        &locations,
+                        &tables,
+                        capacity,
+                        X_COUNT_CHUNK,
+                    )
+                    .expect("word size");
+                    match (&reference, counted) {
+                        (Err(()), XFlatBuild::Refused) => refused_seen += 1,
+                        (Ok(reference), XFlatBuild::Table(flat)) => {
+                            x_assert_same_compressed_table(&flat, reference);
+                            built_seen += 1;
+                        }
+                        (reference, _) => {
+                            panic!("{what}: reference refused {}", reference.is_err())
+                        }
+                    }
+                    match x_buckets_of(
+                        matrix, word, threshold, &query, &locations, &tables, capacity,
+                    ) {
+                        // Word sizes 6 and 7 and small capacities only (`x_try_build_flat_by_buckets`).
+                        XBucketBuild::Declined => assert!(
+                            word != 5 || capacity != NCBI_OVERFLOW_CELL_CAPACITY,
+                            "{what}: declined"
+                        ),
+                        XBucketBuild::Built(Some(XFlatBuild::Table(flat))) => {
+                            let reference = reference.as_ref().expect(&what);
+                            x_assert_same_compressed_table(&flat, reference);
+                        }
+                        XBucketBuild::Built(_) => panic!("{what}: buckets refused"),
+                    }
+                    if let Some(reference) = reference
+                        .as_ref()
+                        .ok()
+                        .filter(|_| capacity == NCBI_OVERFLOW_CELL_CAPACITY)
+                    {
+                        let Some(Ok(XCompressedLookup::Flat(flat))) =
+                            x_tbn_build_compressed_lookup_of(
+                                matrix, word, threshold, &query, &locations, &tables, 1,
+                            )
+                        else {
+                            panic!("{what}: no flat table")
+                        };
+                        x_assert_same_compressed_table(&flat, reference);
+                    }
+                }
+            }
+        }
+        assert!(
+            built_seen > 0 && refused_seen > 0,
+            "{built_seen} {refused_seen}"
+        );
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:759-768
     // ```c
     //     if (lookup->curr_overflow_cell ==
@@ -2707,13 +4908,19 @@ mod tests {
             }
             capacities.retain(|&capacity| capacity > 0);
             for capacity in capacities {
-                let reference = try_build_blosum62_compressed_lookup_with_capacity(
-                    5, threshold, &query, &locations, &tables, capacity,
+                let reference = try_build_compressed_lookup_with_capacity(
+                    Blosum62Compressed,
+                    5,
+                    threshold,
+                    &query,
+                    &locations,
+                    &tables,
+                    capacity,
                 )
                 .expect("word size 5");
                 // The bucket fill (LOSAT_X_BPFFILL) builds the same table or declines.
                 match x_try_build_flat_by_buckets(
-                    5, threshold, &query, &locations, &tables, capacity,
+                    5, threshold, &query, &locations, &tables, capacity, 0,
                 ) {
                     XBucketBuild::Declined => {}
                     XBucketBuild::Built(Some(XFlatBuild::Table(flat))) => {
@@ -2730,7 +4937,7 @@ mod tests {
                 // reference tests), of a few, and the default (a test at each table's end).
                 for chunk in [1, 7, X_COUNT_CHUNK] {
                     let built = x_try_build_flat_with_capacity(
-                        5, threshold, &query, &locations, &tables, capacity, chunk,
+                        5, threshold, &query, &locations, &tables, capacity, chunk, 0,
                     )
                     .expect("word size 5");
                     match (&reference, built) {
@@ -2793,9 +5000,10 @@ mod tests {
                     &tables,
                     capacity,
                     X_COUNT_CHUNK,
+                    0,
                 );
                 let got = x_try_build_flat_by_buckets(
-                    5, threshold, &query, &locations, &tables, capacity,
+                    5, threshold, &query, &locations, &tables, capacity, 0,
                 );
                 match (got, want) {
                     (XBucketBuild::Declined, _) => {
@@ -2837,8 +5045,9 @@ mod tests {
             &[0..1],
             capacity,
             X_COUNT_CHUNK,
+            0,
         );
-        let got = x_try_build_flat_by_buckets(5, 1100, &query, &locations, &[0..1], capacity);
+        let got = x_try_build_flat_by_buckets(5, 1100, &query, &locations, &[0..1], capacity, 0);
         let (XBucketBuild::Built(Some(XFlatBuild::Table(got))), Some(XFlatBuild::Table(want))) =
             (got, want)
         else {
@@ -2847,10 +5056,10 @@ mod tests {
         assert!(got.hits.iter().any(|&offset| offset >= 1 << 21));
         x_assert_same_flat_tables(&got, &want);
         query.push(FEW_LETTERS[0]);
-        let got = x_try_build_flat_by_buckets(5, 1100, &query, &locations, &[0..1], capacity);
+        let got = x_try_build_flat_by_buckets(5, 1100, &query, &locations, &[0..1], capacity, 0);
         assert!(matches!(got, XBucketBuild::Declined), "2^22 letters");
         let got =
-            x_try_build_flat_by_buckets(6, 1100, &query[..1000], &[(0, 999)], &[0..1], capacity);
+            x_try_build_flat_by_buckets(6, 1100, &query[..1000], &[(0, 999)], &[0..1], capacity, 0);
         assert!(matches!(got, XBucketBuild::Declined), "word size 6");
     }
 
@@ -2869,7 +5078,7 @@ mod tests {
     // The scans: on random subjects (letters outside the alphabet none, rare, frequent; short
     // subjects), the flat `scan_subject` gives the reference's hits and rounds for arrays from the
     // longest cell up, and `for_each_cell` gives the same hits, with the branch-free list too
-    // (LOSAT_X_BPCLUTSCANBF); `used_cells` counts the cells with hits.
+    // (LOSAT_X_BPCLUTSCANBF).
     #[test]
     fn flat_scans_give_the_reference_scans_hits() {
         let mut rng = XorShift(0x3c6e_f372_fe94_f82b);
@@ -2890,7 +5099,7 @@ mod tests {
             ));
             assert!(reference.longest_chain > 5, "cells with overflow lists");
             let used = flat.starts.windows(2).filter(|w| w[1] > w[0]).count();
-            assert!(used > 0 && flat.used_cells == used, "used cells");
+            assert!(used > 0, "cells with hits");
             let longest = reference.longest_chain as usize;
             let mut subjects = Vec::new();
             for outside_one_in in [0usize, 50, 6, 2] {
@@ -2919,7 +5128,7 @@ mod tests {
                         });
                     let (got, got_rounds) =
                         rounds(5, length, array_size, |ranges, pairs, size, range| {
-                            flat.scan_subject(subject, ranges, pairs, size, range)
+                            flat.scan_subject::<X_BLASTP>(subject, ranges, pairs, size, range)
                         });
                     assert_eq!(got, want, "subject {n}, array {array_size}");
                     assert_eq!(got_rounds, want_rounds, "subject {n}, array {array_size}");
@@ -2943,8 +5152,9 @@ mod tests {
                     );
                     cells = scratch;
                 }
-                // LOSAT_X_BPFSTAGE: the list two offsets per step, on a subject of a word or more
-                // with its sentinel; a shorter one, or one without the sentinel, is declined.
+                // The lean loop's list (`x_list_pairs_lean`, two offsets per step) on a subject of
+                // a word or more with its sentinel; a shorter one, or one without the sentinel, is
+                // declined.
                 assert_eq!(
                     flat.x_pairs_fit(subject, length),
                     length >= 5,
@@ -2958,23 +5168,15 @@ mod tests {
                     continue;
                 }
                 let want_list = cells.clone();
-                // SAFETY: x_pairs_fit holds (asserted above).
-                unsafe { flat.x_list_pairs(subject, length, &mut cells) };
-                assert_eq!(cells, want_list, "subject {n}: x_list_pairs's list");
-                assert!(
-                    cells.capacity() >= cells.len() + X_STARTS_AHEAD,
-                    "subject {n}: reserve"
-                );
-                // LOSAT_X_BPFLEAN: the list with the two-offset steps out of line.
                 let mut lean = Vec::new();
                 // SAFETY: x_pairs_fit holds (asserted above).
-                unsafe { flat.x_list_pairs_lean(subject, length, &mut lean) };
+                unsafe { flat.x_list_pairs_lean::<X_BLASTP>(subject, length, &mut lean) };
                 assert_eq!(lean, want_list, "subject {n}: x_list_pairs_lean's list");
                 assert!(
                     lean.capacity() >= lean.len() + X_STARTS_AHEAD,
                     "subject {n}: lean reserve"
                 );
-                let listed: Vec<(u32, u32)> = cells
+                let listed: Vec<(u32, u32)> = lean
                     .iter()
                     .flat_map(|&(s, index)| {
                         flat.cell(index as usize)
@@ -2982,14 +5184,14 @@ mod tests {
                             .map(move |&q| (s as u32, q as u32))
                     })
                     .collect();
-                assert_eq!(Some(listed), expected, "subject {n}: x_list_pairs");
+                assert_eq!(Some(listed), expected, "subject {n}: x_list_pairs_lean");
             }
         }
     }
 
-    // LOSAT_X_BPFSTAGE: `x * 19,088,744 >> 32` is `x / 225` below 15^6, NCBI's reciprocal
-    // multiply is `x / 15` there (the indices of word lengths up to 6), and the multiply by the
-    // inverse of 15 is `x / 15` on its multiples.
+    // LOSAT_X_BPCLUTSCANBF's lean loop: `x * 19,088,744 >> 32` is `x / 225` below 15^6, NCBI's
+    // reciprocal multiply is `x / 15` there (the indices of word lengths up to 6), and the multiply
+    // by the inverse of 15 is `x / 15` on its multiples.
     #[test]
     fn the_pairs_scan_divisions_are_exact_below_fifteen_to_the_sixth() {
         for x in 0..15i64.pow(6) {
@@ -3009,8 +5211,8 @@ mod tests {
         }
     }
 
-    // LOSAT_X_BPFSTAGE: the list two offsets per step on word length 6 too (and LOSAT_X_BPFLEAN's),
-    // and the tables and subjects it declines.
+    // LOSAT_X_BPCLUTSCANBF's lean loop: the list two offsets per step on word length 6 too, and
+    // the tables and subjects it declines.
     #[test]
     fn the_pairs_scan_lists_word_length_six_and_declines_outside_its_range() {
         let mut rng = XorShift(0x6a09_e667_f3bc_c909);
@@ -3044,15 +5246,12 @@ mod tests {
                     want.extend(hits.iter().map(|&q| (s, q)));
                 });
                 let want_list = cells.clone();
-                // SAFETY: x_pairs_fit holds (asserted above).
-                unsafe { flat6.x_list_pairs(&subject, length, &mut cells) };
-                assert_eq!(cells, want_list, "length {length}: list");
                 let mut lean = Vec::new();
                 // SAFETY: x_pairs_fit holds (asserted above).
-                unsafe { flat6.x_list_pairs_lean(&subject, length, &mut lean) };
-                assert_eq!(lean, want_list, "length {length}: lean list");
+                unsafe { flat6.x_list_pairs_lean::<X_BLASTP>(&subject, length, &mut lean) };
+                assert_eq!(lean, want_list, "length {length}: list");
                 found += want.len();
-                let got: Vec<(i32, i32)> = cells
+                let got: Vec<(i32, i32)> = lean
                     .iter()
                     .flat_map(|&(s, index)| flat6.cell(index as usize).iter().map(move |&q| (s, q)))
                     .collect();
@@ -3073,15 +5272,505 @@ mod tests {
         assert!(!flat6.x_pairs_fit(&subject, 50), "bits short of 15^6");
     }
 
-    // LOSAT_X_BPCLUTSCANBFMIN: a table takes the branch-free list from `min` used cells per 10,000 up;
-    // `0` takes it for every table, an empty one included.
+    // BLASTX's bucket fill (`u16` offsets, LOSAT_X_BXCLUTPOOL on kept vectors or not) makes
+    // `x_buckets_on`'s table with its offsets narrowed: queries of one segment and of several in
+    // NCBI's tables, low-complexity ones whose cells pass 32 offsets (the scan order), and one of
+    // `X_U16_LETTERS` letters.
     #[test]
-    fn the_branch_free_list_starts_at_min_used_cells_per_ten_thousand() {
-        assert!(x_dense_enough(500, 10_000, 500));
-        assert!(!x_dense_enough(499, 10_000, 500));
-        assert!(x_dense_enough(37_969, 759_376, 500));
-        assert!(!x_dense_enough(37_968, 759_376, 500));
-        assert!(x_dense_enough(0, 759_376, 0));
-        assert!(!x_dense_enough(759_376, 759_376, u64::MAX));
+    fn pooled_flat_tables_equal_the_unpooled_ones_on_kept_vectors() {
+        let mut rng = XorShift(0x9E37_79B9_7F4A_7C15);
+        let segments = |length: usize, pieces: usize| -> Vec<(i32, i32)> {
+            let step = length / pieces;
+            (0..pieces)
+                .map(|p| {
+                    let from = p * step;
+                    let to = if p + 1 == pieces {
+                        length
+                    } else {
+                        from + step - 3
+                    };
+                    (from as i32, to as i32 - 1)
+                })
+                .collect()
+        };
+        let wide = |query: &[u8], locations: &[(i32, i32)], tables: &[std::ops::Range<usize>]| {
+            match x_buckets_on(5, 1100, query, locations, tables, usize::MAX >> 8, false, 0) {
+                XBucketBuild::Built(Some(XFlatBuild::Table(table))) => x_narrow_flat(table),
+                _ => panic!("the bucket fill builds this table"),
+            }
+        };
+        let narrow = |query: &[u8],
+                      locations: &[(i32, i32)],
+                      tables: &[std::ops::Range<usize>],
+                      pooled: bool| {
+            match x_bx_buckets_on::<5>(1100, query, locations, tables, usize::MAX >> 8, pooled, 1) {
+                XBucketBuild::Built(Some(XFlatBuild::Table(table))) => table,
+                _ => panic!("BLASTX's bucket fill builds this table"),
+            }
+        };
+        let same =
+            |got: &XFlatCompressedLookup<u16>, want: &XFlatCompressedLookup<u16>, what: &str| {
+                assert_eq!(got.hits, want.hits, "{what}");
+                assert_eq!(got.starts, want.starts, "{what}");
+                assert_eq!(got.pv, want.pv, "{what}");
+                assert_eq!(got.longest_chain, want.longest_chain, "{what}");
+                assert_eq!(got.pv_array_bts, want.pv_array_bts, "{what}");
+                assert_eq!(got.word_length, want.word_length, "{what}");
+            };
+        let mut alive = None;
+        let mut longest = 0;
+        for (round, (length, pieces, repeat)) in [
+            (3_000, 1, 0),
+            (40, 1, 0),
+            (9_000, 3, 0),
+            (200, 1, 0),
+            (20_000, 6, 0),
+            (7, 1, 0),
+            (1_500, 2, 40),
+            (20_000, 1, 0),
+            (6_000, 4, 200),
+            // `random_subject` adds a letter.
+            (X_U16_LETTERS - 1, 6, 0),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut query = random_subject(&mut rng, length, 0);
+            // Low complexity: the first `repeat` letters repeat one word.
+            for (i, letter) in query.iter_mut().take(repeat).enumerate() {
+                *letter = [1, 5, 9, 1, 5][i % 5];
+            }
+            let locations = segments(length, pieces);
+            let tables: Vec<std::ops::Range<usize>> = if pieces > 2 {
+                vec![0..1, 2..pieces]
+            } else {
+                vec![0..pieces]
+            };
+            let want = wide(&query, &locations, &tables);
+            longest = longest.max(want.longest_chain);
+            let unpooled = narrow(&query, &locations, &tables, false);
+            same(&unpooled, &want, &format!("round {round} unpooled"));
+            let got = narrow(&query, &locations, &tables, true);
+            same(&got, &want, &format!("round {round} pooled"));
+            match round % 3 {
+                0 => {
+                    if let Some(mut kept) = alive.replace(got) {
+                        x_give_back_flat(&mut kept);
+                    }
+                }
+                // Values no table holds: the build must write every entry it keeps (starts, hits)
+                // and clear the PV array.
+                _ => {
+                    let mut poisoned = got;
+                    poisoned.starts.fill(u32::MAX);
+                    poisoned.hits.fill(u16::MAX);
+                    poisoned.pv.fill(u32::MAX);
+                    x_give_back_flat(&mut poisoned);
+                }
+            }
+        }
+        if let Some(mut kept) = alive {
+            x_give_back_flat(&mut kept);
+        }
+        assert!(longest > 32, "a cell passes 32 offsets ({longest})");
+    }
+
+    // BLASTX's table: `u16` offsets up to `X_U16_LETTERS` letters, `i32` ones past them;
+    // the count-and-fill builder's table (where the bucket fill declines) narrowed is the bucket
+    // fill's, here on locations out of query order in two tables.
+    #[test]
+    fn blastx_tables_take_u16_offsets_up_to_their_letters() {
+        let mut rng = XorShift(0x2545_F491_4F6C_DD1D);
+        let query = random_subject(&mut rng, X_U16_LETTERS + 1, 0);
+        let all = [(0, query.len() as i32 - 1)];
+        assert!(matches!(
+            x_bx_build_compressed_lookup::<5>(1100, &query, &all, &[0..1], 1),
+            Some(Ok(XBxCompressedLookup::Wide(_)))
+        ));
+        let query = &query[..X_U16_LETTERS];
+        assert!(matches!(
+            x_bx_build_compressed_lookup::<5>(
+                1100,
+                query,
+                &[(0, query.len() as i32 - 1)],
+                &[0..1],
+                1
+            ),
+            Some(Ok(XBxCompressedLookup::Flat(_)))
+        ));
+        let swapped = [(5_000, 9_999), (0, 4_999)];
+        let tables = [0..1, 1..2];
+        let XBucketBuild::Built(Some(XFlatBuild::Table(got))) =
+            x_bx_buckets_on::<5>(1100, query, &swapped, &tables, usize::MAX >> 8, false, 1)
+        else {
+            panic!("BLASTX's bucket fill builds this table");
+        };
+        let Some(XFlatBuild::Table(want)) = x_try_build_flat_with_capacity(
+            5,
+            1100,
+            query,
+            &swapped,
+            &tables,
+            NCBI_OVERFLOW_CELL_CAPACITY,
+            X_COUNT_CHUNK,
+            0,
+        ) else {
+            panic!("the count-and-fill builder builds this table");
+        };
+        let want = x_narrow_flat(want);
+        assert_eq!(got.starts, want.starts);
+        assert_eq!(got.hits, want.hits);
+        assert_eq!(got.pv, want.pv);
+        assert_eq!(got.longest_chain, want.longest_chain);
+    }
+
+    // Line NP, SC9e: BLASTX's bucket fill in parts (`x_bx_buckets_with`) makes the one-part fill's
+    // table, slot for slot, on a pool of 4 threads: BLOSUM62's (`u16`) and BLOSUM45's (`i32`, which
+    // is also the record fill's, `x_buckets_of`), on segments in one table and in two with a gap,
+    // low-complexity ones whose cells pass 32 offsets (the scan order), runs cut inside segments,
+    // more parts than offsets, and an empty query; a table past the overflow capacity is declined in
+    // parts as at one part. The runs (`x_offset_parts`) hold every offset once, in order.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[test]
+    fn blastx_bucket_fill_in_parts_is_the_one_part_fill() {
+        fn offsets(word: usize, runs: &[Vec<(usize, (i32, i32))>]) -> Vec<(usize, i32)> {
+            let mut all = Vec::new();
+            for run in runs {
+                for &(index, (left, right)) in run {
+                    all.extend((left..=right - word as i32 + 1).map(|offset| (index, offset)));
+                }
+            }
+            all
+        }
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(4)
+            .build()
+            .expect("test pool");
+        let mut rng = XorShift(0x2545_F491_4F6C_DD1D);
+        let mut longest = 0;
+        for (round, (length, segments, tables, repeat)) in [
+            (
+                4_400,
+                vec![(3, 1_499), (1_501, 2_998), (3_001, 4_399)],
+                vec![0..3],
+                0,
+            ),
+            (
+                9_000,
+                vec![(0, 2_999), (3_002, 5_999), (6_004, 8_999)],
+                vec![0..1, 2..3],
+                0,
+            ),
+            (1_500, vec![(0, 1_499)], vec![0..1], 300),
+            (12, vec![(0, 11)], vec![0..1], 0),
+            (0, vec![], vec![0..0], 0),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut query = random_subject(&mut rng, length, 0);
+            for (i, letter) in query.iter_mut().take(repeat).enumerate() {
+                *letter = [1, 5, 9, 1, 5][i % 5];
+            }
+            let ranges = x_count_ranges(&tables, segments.len());
+            let serial = offsets(5, &x_offset_parts(5, &ranges, &segments, 1));
+            for parts in [2, 3, 7, 64] {
+                let runs = x_offset_parts(5, &ranges, &segments, parts);
+                assert!(runs.len() <= parts, "round {round}: at most {parts} runs");
+                assert_eq!(offsets(5, &runs), serial, "round {round}: {parts} runs");
+            }
+            let narrow = |parts: usize, capacity: usize| {
+                x_bx_buckets_on::<5>(1100, &query, &segments, &tables, capacity, false, parts)
+            };
+            let wide = |parts: usize, capacity: usize| {
+                x_bx_buckets_with::<_, i32, [u8]>(
+                    ScoringMatrix::Blosum45,
+                    5,
+                    1100,
+                    &query,
+                    &segments,
+                    &tables,
+                    capacity,
+                    false,
+                    parts,
+                    |word| word,
+                )
+            };
+            let XBucketBuild::Built(Some(XFlatBuild::Table(want))) = narrow(1, usize::MAX >> 8)
+            else {
+                panic!("round {round}: BLASTX's bucket fill builds this table");
+            };
+            let XBucketBuild::Built(Some(XFlatBuild::Table(want_wide))) = wide(1, usize::MAX >> 8)
+            else {
+                panic!("round {round}: BLASTX's bucket fill builds BLOSUM45's table");
+            };
+            let XBucketBuild::Built(Some(XFlatBuild::Table(record))) = x_buckets_of(
+                ScoringMatrix::Blosum45,
+                5,
+                1100,
+                &query,
+                &segments,
+                &tables,
+                usize::MAX >> 8,
+            ) else {
+                panic!("round {round}: the record fill builds BLOSUM45's table");
+            };
+            assert_eq!(want_wide.starts, record.starts, "round {round}: B45 starts");
+            assert_eq!(want_wide.hits, record.hits, "round {round}: B45 hits");
+            assert_eq!(want_wide.pv, record.pv, "round {round}: B45 pv");
+            assert_eq!(
+                want_wide.longest_chain, record.longest_chain,
+                "round {round}"
+            );
+            assert_eq!(want_wide.pv_array_bts, record.pv_array_bts, "round {round}");
+            longest = longest.max(want.longest_chain);
+            for parts in [2, 3, 5, 64] {
+                let what = format!("round {round} in {parts} parts");
+                let XBucketBuild::Built(Some(XFlatBuild::Table(got))) =
+                    pool.install(|| narrow(parts, usize::MAX >> 8))
+                else {
+                    panic!("{what}: no table");
+                };
+                assert_eq!(got.starts, want.starts, "{what}: starts");
+                assert_eq!(got.hits, want.hits, "{what}: hits");
+                assert_eq!(got.pv, want.pv, "{what}: pv");
+                assert_eq!(got.longest_chain, want.longest_chain, "{what}");
+                assert_eq!(got.pv_array_bts, want.pv_array_bts, "{what}");
+                let XBucketBuild::Built(Some(XFlatBuild::Table(got))) =
+                    pool.install(|| wide(parts, usize::MAX >> 8))
+                else {
+                    panic!("{what}: no BLOSUM45 table");
+                };
+                assert_eq!(got.starts, want_wide.starts, "{what}: B45 starts");
+                assert_eq!(got.hits, want_wide.hits, "{what}: B45 hits");
+                assert_eq!(got.pv, want_wide.pv, "{what}: B45 pv");
+                assert_eq!(got.longest_chain, want_wide.longest_chain, "{what}");
+            }
+            // Past the overflow capacity: declined in parts as at one part.
+            let total: u32 = *want.starts.last().expect("the number of hits");
+            if total > 1 {
+                let capacity = total as usize / 4;
+                assert!(matches!(narrow(1, capacity), XBucketBuild::Declined));
+                for parts in [2, 3] {
+                    assert!(
+                        matches!(
+                            pool.install(|| narrow(parts, capacity)),
+                            XBucketBuild::Declined
+                        ),
+                        "round {round}: declined in {parts} parts"
+                    );
+                }
+            }
+        }
+        assert!(longest > 32, "a cell passes 32 offsets ({longest})");
+    }
+
+    // Item SC9b (2) of line NP: BLASTX's table of a unit built in parts on a pool (`x_flat_in_parts`,
+    // BLOSUM62's with `u16` offsets written by the stripes, SC9d; word size 5's by the bucket fill in
+    // parts, SC9e) is the one-part
+    // build's, slot for slot, for each word size and for BLOSUM62 and another matrix, on segments of
+    // one table; also a query past `X_U16_LETTERS`. Each table is given back to the pool
+    // (LOSAT_X_BXCLUTPOOL) with values no table holds, so that the builds after it take vectors
+    // whose entries they must all write (the pool is process-wide: other tests' vectors may be taken).
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[test]
+    fn blastx_tables_built_in_parts_are_the_one_part_tables() {
+        // The table's fields, and whether its offsets are `u16`.
+        type Fields = ((i32, i32, i32, Vec<u32>, Vec<u32>, Vec<u32>, i32), bool);
+        fn fields(built: Option<Result<XBxCompressedLookup, ()>>) -> Fields {
+            fn of<H: XQueryOffset>(
+                table: &mut XFlatCompressedLookup<H>,
+                poison: H,
+                narrow: bool,
+            ) -> Fields {
+                let fields = (
+                    table.word_length,
+                    table.pv_array_bts,
+                    table.compressed_alphabet_size,
+                    table.starts.clone(),
+                    table.hits.iter().map(|&q| q.offset()).collect(),
+                    table.pv.clone(),
+                    table.longest_chain,
+                );
+                table.starts.fill(u32::MAX);
+                table.hits.fill(poison);
+                table.pv.fill(u32::MAX);
+                (fields, narrow)
+            }
+            match built {
+                Some(Ok(XBxCompressedLookup::Flat(mut table))) => {
+                    let got = of(&mut table, u16::MAX, true);
+                    x_give_back_flat(&mut table);
+                    got
+                }
+                Some(Ok(XBxCompressedLookup::Wide(mut table))) => {
+                    let got = of(&mut table, i32::MIN, false);
+                    x_give_back_wide_flat(&mut table);
+                    got
+                }
+                _ => panic!("a flat table"),
+            }
+        }
+        let build = |matrix: ScoringMatrix, word: usize, query: &[u8], parts: usize| {
+            let scaled = x_compressed_scaled_threshold(match word {
+                5 => 11.0,
+                6 => 21.0,
+                _ => 20.25,
+            });
+            let segments = [(3, 1_499), (1_501, 2_998), (3_001, 4_399)];
+            let tables = [0..segments.len()];
+            match (matrix, word) {
+                (ScoringMatrix::Blosum62, 5) => {
+                    x_bx_build_compressed_lookup::<5>(scaled, query, &segments, &tables, parts)
+                }
+                (ScoringMatrix::Blosum62, 6) => {
+                    x_bx_build_compressed_lookup::<6>(scaled, query, &segments, &tables, parts)
+                }
+                (ScoringMatrix::Blosum62, _) => {
+                    x_bx_build_compressed_lookup::<7>(scaled, query, &segments, &tables, parts)
+                }
+                _ => x_bx_build_compressed_lookup_of(
+                    matrix, word, scaled, query, &segments, &tables, parts,
+                )
+                .map(|built| {
+                    built.map(|table| match table {
+                        XCompressedLookup::Reference(table) => {
+                            XBxCompressedLookup::Reference(table)
+                        }
+                        XCompressedLookup::Flat(table) => XBxCompressedLookup::Wide(table),
+                    })
+                }),
+            }
+        };
+        let mut rng = XorShift(0x9E37_79B9_7F4A_7C15);
+        let query = random_subject(&mut rng, 4_400, 0);
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(4)
+            .build()
+            .expect("test pool");
+        for matrix in [ScoringMatrix::Blosum62, ScoringMatrix::Blosum45] {
+            for word in 5..=7 {
+                let want = fields(build(matrix, word, &query, 1));
+                assert_eq!(want.1, matrix == ScoringMatrix::Blosum62);
+                for parts in [2, 3, 5, 2] {
+                    let got = pool.install(|| fields(build(matrix, word, &query, parts)));
+                    assert!(
+                        got == want,
+                        "{matrix:?} word {word} in {parts} parts: not the one-part table"
+                    );
+                }
+            }
+        }
+        let long = random_subject(&mut rng, X_U16_LETTERS + 2_000, 0);
+        let all = [(0, long.len() as i32 - 2)];
+        let wide = |parts| {
+            fields(x_bx_build_compressed_lookup::<6>(
+                2100,
+                &long,
+                &all,
+                &[0..1],
+                parts,
+            ))
+        };
+        let want = wide(1);
+        assert!(
+            pool.install(|| wide(3)) == want,
+            "a query past X_U16_LETTERS in 3 parts"
+        );
+    }
+
+    // LOSAT_X_BXCLUTPOOL, `i32` offsets (BLASTX's query batches of more than `X_U16_LETTERS`
+    // letters): a table built on vectors another table and another build left (smaller and
+    // larger tables in turn, two alive at once) equals the table built without the pool, in every
+    // field. The pool is process-wide, so other tests' vectors may be among those taken.
+    #[test]
+    fn pooled_wide_flat_tables_equal_the_unpooled_ones_on_kept_vectors() {
+        let mut rng = XorShift(0x9E37_79B9_7F4A_7C15);
+        let build = |query: &[u8], pooled: bool| {
+            let locations = [(0, query.len() as i32 - 1)];
+            match x_buckets_on(
+                5,
+                1100,
+                query,
+                &locations,
+                &[0..1],
+                usize::MAX >> 8,
+                pooled,
+                0,
+            ) {
+                XBucketBuild::Built(Some(XFlatBuild::Table(table))) => table,
+                _ => panic!("the bucket fill builds this table"),
+            }
+        };
+        let mut alive = None;
+        for (round, length) in [3_000, 40, 9_000, 200, 20_000, 7, 1_500, 20_000]
+            .into_iter()
+            .enumerate()
+        {
+            let query = random_subject(&mut rng, length, 0);
+            let want = build(&query, false);
+            let got = build(&query, true);
+            x_assert_same_flat_tables(&got, &want);
+            assert_eq!(got.pv, want.pv, "round {round}");
+            assert_eq!(got.hits, want.hits, "round {round}");
+            assert_eq!(got.starts, want.starts, "round {round}");
+            assert_eq!(got.longest_chain, want.longest_chain, "round {round}");
+            assert_eq!(got.pv_array_bts, want.pv_array_bts, "round {round}");
+            match round % 3 {
+                0 => {
+                    if let Some(mut kept) = alive.replace(got) {
+                        x_give_back_wide_flat(&mut kept);
+                    }
+                }
+                // Values no table holds: the build must write every entry it keeps (starts, hits)
+                // and clear the PV array.
+                _ => {
+                    let mut poisoned = got;
+                    poisoned.starts.fill(u32::MAX);
+                    poisoned.hits.fill(-7);
+                    poisoned.pv.fill(u32::MAX);
+                    x_give_back_wide_flat(&mut poisoned);
+                }
+            }
+        }
+        if let Some(mut kept) = alive {
+            x_give_back_wide_flat(&mut kept);
+        }
+    }
+
+    // LOSAT_X_BXCLUTPOOL: a set comes back only against one lent, so tables built without the pool
+    // do not grow it; it holds at most as many sets as were lent at once.
+    #[test]
+    fn the_flat_pool_keeps_only_sets_it_lent() {
+        let set = |n: usize| XFlatTableVectors::<u16> {
+            starts: vec![0; n],
+            hits: Vec::new(),
+            pv: Vec::new(),
+        };
+        let mut pool = XFlatPool {
+            kept: Vec::new(),
+            lent: 0,
+        };
+        assert!(pool.take_back(set(1)).is_err(), "nothing lent");
+        assert!(pool.kept.is_empty());
+        let first = pool.lend();
+        let second = pool.lend();
+        assert!(first.starts.is_empty() && second.starts.is_empty());
+        assert!(pool.take_back(set(2)).is_ok());
+        assert!(pool.take_back(set(3)).is_ok());
+        assert!(pool.take_back(set(4)).is_err(), "both sets are back");
+        assert_eq!(pool.kept.len(), 2);
+        assert_eq!(
+            pool.lend().starts.len(),
+            3,
+            "the last one back goes out first"
+        );
+        assert_eq!((pool.kept.len(), pool.lent), (1, 1));
     }
 }

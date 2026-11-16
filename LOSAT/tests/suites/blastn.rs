@@ -5,30 +5,40 @@
 
 #[path = "../blastn_bn_csr.rs"]
 mod blastn_bn_csr;
+#[path = "../blastn_bn_seed_lists.rs"]
+mod blastn_bn_seed_lists;
 #[path = "../blastn_db_cut.rs"]
 mod blastn_db_cut;
+#[path = "../blastn_db_hard_long.rs"]
+mod blastn_db_hard_long;
 #[path = "../blastn_db_search.rs"]
 mod blastn_db_search;
+#[path = "../blastn_db_soft_long.rs"]
+mod blastn_db_soft_long;
 #[path = "../blastn_db_stream.rs"]
 mod blastn_db_stream;
 #[path = "../blastn_dc_seed_lean.rs"]
 mod blastn_dc_seed_lean;
-#[path = "../blastn_dc_two_slots.rs"]
-mod blastn_dc_two_slots;
 #[path = "../blastn_diag_lv.rs"]
 mod blastn_diag_lv;
 #[path = "../blastn_disc_lookup_par.rs"]
 mod blastn_disc_lookup_par;
-#[path = "../blastn_eight_slots.rs"]
-mod blastn_eight_slots;
+#[path = "../blastn_dp32.rs"]
+mod blastn_dp32;
+#[path = "../blastn_ext_first.rs"]
+mod blastn_ext_first;
 #[path = "../blastn_few_subj.rs"]
 mod blastn_few_subj;
 #[path = "../blastn_greedy_row_fuse.rs"]
 mod blastn_greedy_row_fuse;
+#[path = "../blastn_hit_group.rs"]
+mod blastn_hit_group;
 #[path = "../blastn_hl_grow.rs"]
 mod blastn_hl_grow;
 #[path = "../blastn_lut_drop.rs"]
 mod blastn_lut_drop;
+#[path = "../blastn_mb_csr.rs"]
+mod blastn_mb_csr;
 #[path = "../blastn_mb_fill.rs"]
 mod blastn_mb_fill;
 #[path = "../blastn_mb_lookup_once.rs"]
@@ -45,8 +55,6 @@ mod blastn_pairpar_fold;
 mod blastn_pairpar_merge;
 #[path = "../blastn_pairpar_na.rs"]
 mod blastn_pairpar_na;
-#[path = "../blastn_qbatchpar.rs"]
-mod blastn_qbatchpar;
 #[path = "../blastn_qctx_sentinel.rs"]
 mod blastn_qctx_sentinel;
 #[path = "../blastn_qgroup_par.rs"]
@@ -55,6 +63,8 @@ mod blastn_qgroup_par;
 mod blastn_query_drop;
 #[path = "../blastn_query_dust_par.rs"]
 mod blastn_query_dust_par;
+#[path = "../blastn_query_parts.rs"]
+mod blastn_query_parts;
 #[path = "../blastn_query_prep_par.rs"]
 mod blastn_query_prep_par;
 #[path = "../blastn_query_scan_par.rs"]
@@ -63,6 +73,8 @@ mod blastn_query_scan_par;
 mod blastn_query_stream;
 #[path = "../blastn_report_stream.rs"]
 mod blastn_report_stream;
+#[path = "../blastn_seed_piece.rs"]
+mod blastn_seed_piece;
 #[path = "../blastn_strand.rs"]
 mod blastn_strand;
 #[path = "../blastn_subject_store.rs"]
@@ -71,11 +83,7 @@ mod blastn_subject_store;
 mod blastn_subject_stream;
 #[path = "../blastn_tab_par.rs"]
 mod blastn_tab_par;
-#[path = "../blastn_ungap_count.rs"]
-mod blastn_ungap_count;
 #[path = "../blastn_window_masker.rs"]
 mod blastn_window_masker;
-#[path = "../megablast_xdrop.rs"]
-mod megablast_xdrop;
 #[path = "../run_local_blastn.rs"]
 mod run_local_blastn;

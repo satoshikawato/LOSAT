@@ -3,24 +3,22 @@ use std::path::PathBuf;
 use std::slice;
 use std::sync::{Mutex, OnceLock};
 
-use bio::io::fasta;
-
-// ABI v1's `bio` records and its searches of BLASTN, BLASTP and TBLASTX (plan TD-1): the
-// v1 layer reads its inputs with `bio` and makes its frozen checks; the engines take the
-// records of NCBI's reader only (session SFc, S10).
-pub mod v1_bio;
+// ABI v1's searches of BLASTN, BLASTP and TBLASTX (plan TD-1): the v1 layer makes its frozen
+// checks of the request and reads its inputs with NCBI's reader (`v1_input`).
 mod v1_blastn;
 mod v1_blastp;
+mod v1_input;
 mod v1_tblastx;
 
-use crate::algorithm::blastp::args::{BlastpCompBasedStats, BlastpCompositionMode, BlastpSegSpec};
+use crate::algorithm::blastp::args::{BlastpCompBasedStats, BlastpSegSpec};
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
 // ```c++
 //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
 //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
 //                 results = lcl_blast.Run();
 // ```
-use crate::algorithm::{blastn, blastp, blastx, tblastx};
+use crate::algorithm::{blastn, blastp, blastx, tblastn, tblastx};
+use crate::blastinput::fasta_reader::{read_all, FastaInputSource, ReaderConfig};
 
 static LAST_RESULT: OnceLock<Mutex<Vec<u8>>> = OnceLock::new();
 static LAST_ERROR: OnceLock<Mutex<Vec<u8>>> = OnceLock::new();
@@ -64,7 +62,6 @@ fn fasta_store() -> &'static Mutex<FastaStore> {
 // ```
 struct StoredFasta {
     bytes: Vec<u8>,
-    records: Vec<fasta::Record>,
     label: String,
 }
 
@@ -75,13 +72,8 @@ struct FastaStore {
 }
 
 impl FastaStore {
-    fn insert(
-        &mut self,
-        records: Vec<fasta::Record>,
-        label: String,
-        bytes: Vec<u8>,
-    ) -> Result<i32, String> {
-        if records.is_empty() {
+    fn insert(&mut self, records: usize, label: String, bytes: Vec<u8>) -> Result<i32, String> {
+        if records == 0 {
             return Err("FASTA store input did not contain any records".to_string());
         }
         if self.next_handle <= 0 {
@@ -92,14 +84,7 @@ impl FastaStore {
             .next_handle
             .checked_add(1)
             .ok_or_else(|| "FASTA store handle space exhausted".to_string())?;
-        self.entries.insert(
-            handle,
-            StoredFasta {
-                records,
-                label,
-                bytes,
-            },
-        );
+        self.entries.insert(handle, StoredFasta { label, bytes });
         Ok(handle)
     }
 
@@ -165,7 +150,10 @@ unsafe fn read_bytes<'a>(ptr: *const u8, len: usize, name: &str) -> Result<&'a [
     Ok(slice::from_raw_parts(ptr, len))
 }
 
-fn parse_fasta_records(bytes: &[u8], name: &str) -> Result<Vec<fasta::Record>, String> {
+/// The records of a stored input, which the store only counts: each run reads the stored bytes
+/// with the reader of its program and role (`run_pair_handles`). The store does not know the
+/// molecule, so it reads with protein flags, which take every nucleotide letter.
+fn count_stored_records(bytes: &[u8]) -> Result<usize, String> {
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
     // ```c
     // SetupQueries_OMF(IBlastQuerySource& queries,
@@ -174,10 +162,12 @@ fn parse_fasta_records(bytes: &[u8], name: &str) -> Result<Vec<fasta::Record>, S
     //                  EBlastProgramType prog,
     //                  ...)
     // ```
-    fasta::Reader::new(bytes)
-        .records()
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|err| format!("failed to parse {name}: {err}"))
+    read_all(
+        &mut FastaInputSource::from_bytes(bytes, ReaderConfig::subject("BLASTP", true, false)),
+        &mut |_| Ok(()),
+    )
+    .map(|records| records.len())
+    .map_err(|err| format!("failed to parse stored FASTA: {err}"))
 }
 
 fn parse_extra_args(raw: &str) -> Vec<&str> {
@@ -232,6 +222,52 @@ fn parse_num_threads_arg(value: &str, flag: &str) -> Result<usize, String> {
         .map_err(|err| format!("{flag} parse error: {err}"))
 }
 
+/// `-searchsp` and `-dbsize` of ABI v1's BLASTN, TBLASTX and BLASTP, as the CLI reads them (added
+/// on gbdraw's request, 2026-11-10: a comparison's E-values take the scale of its genomes). The
+/// value is the CLI's own parser's, in the two spellings of the other options of ABI v1 (the next
+/// word, or joined with `=`), and goes to the same field of the args structure as on the CLI.
+/// `Ok(true)` when the word at `index` was one of them (the value is consumed); `Ok(false)` for
+/// any other word.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
+/// ```c++
+///     arg_desc.AddOptionalKey(kArgEffSearchSpace, "int_value",
+///                             "Effective length of the search space",
+///                             CArgDescriptions::eInt8);
+///     arg_desc.SetConstraint(kArgEffSearchSpace,
+///                            new CArgAllowValuesGreaterThanOrEqual(0));
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2570-2572
+/// ```c++
+///     if (args[kArgDbSize]) {
+///         opt.SetDbLength(args[kArgDbSize].AsInt8());
+///     }
+/// ```
+fn take_search_space_arg(
+    args: &[&str],
+    index: &mut usize,
+    searchsp: &mut Option<i64>,
+    dbsize: &mut Option<i64>,
+) -> Result<bool, String> {
+    use crate::blastinput::value_parsers::{ncbi_int8, nonnegative_ncbi_int8};
+    let flag = args[*index];
+    let (name, joined) = match flag.split_once('=') {
+        Some((name, value)) => (name, Some(value)),
+        None => (flag, None),
+    };
+    let (target, parse): (&mut Option<i64>, fn(&str) -> Result<i64, String>) = match name {
+        "-searchsp" => (searchsp, nonnegative_ncbi_int8),
+        "-dbsize" => (dbsize, ncbi_int8),
+        _ => return Ok(false),
+    };
+    let value = match joined {
+        Some(value) => value,
+        None => next_arg(args, index, flag)?,
+    };
+    *target = Some(parse(value).map_err(|err| format!("{name} parse error: {err}"))?);
+    Ok(true)
+}
+
 fn parse_blastn_args(
     extra_args: &[&str],
     query: PathBuf,
@@ -250,15 +286,26 @@ fn parse_blastn_args(
         subject: Some(subject),
         // The frozen web ABI v1 (plan TD-1) has no database search.
         db: None,
+        // The Web ABI searches a subject, not a database: no taxid list (line DI-8).
+        db_filter: Default::default(),
+        // ... and no database masks (series NP, M4a-2).
+        db_mask: Default::default(),
+        db_mask_resolved: None,
+        formatting: Default::default(),
         dbsize: None,
+        show_gis: false,
+        parse_deflines: false,
+        id_scope: None,
+        searchsp: None,
         task: "megablast".to_string(),
         template_type: None,
         template_length: None,
         word_size: None,
         num_threads: 1,
+        mt_mode: None,
+        use_index: None,
         evalue: Some(10.0),
         percent_identity: None,
-        min_hit_length: 0,
         max_target_seqs: None,
         num_descriptions: None,
         num_alignments: None,
@@ -277,26 +324,55 @@ fn parse_blastn_args(
         dust_filtering: None,
         dust: crate::blastinput::value_parsers::DustSpec::Yes,
         lcase_masking: false,
+        // The frozen web ABI v1 has no `-soft_masking` (refused below as an unknown flag).
+        soft_masking: None,
         // The frozen web ABI v1 (plan TD-1) has no WindowMasker.
+        window_masker_taxid: None,
         window_masker_db: None,
         window_masker: None,
         window_masker_counts: None,
+        window_masker_registry: None,
+        // ABI v1 writes no tabular field list.
+        tabular_taxdb: None,
+        subject_taxdb: None,
+        taxdb_setting: None,
         strand: "both".to_string(),
         // The frozen web ABI v1 (plan TD-1) has no ranges.
         query_loc: None,
         subject_loc: None,
         subject_besthit: false,
         culling_limit: None,
+        // The frozen web ABI v1 has no `-ungapped`, X-drops, `-no_greedy`, `-window_size`,
+        // `-off_diagonal_range` or `-min_raw_gapped_score` (they are refused below as unknown
+        // flags).
+        ungapped: false,
+        xdrop_ungap: None,
+        xdrop_gap: None,
+        xdrop_gap_final: None,
+        no_greedy: false,
+        min_raw_gapped_score: None,
+        window_size: None,
+        off_diagonal_range: None,
         verbose: false,
         scan_step: 0,
         outfmt: "6".to_string(),
         archive: None,
+        export_search_strategy: None,
+        strategy: None,
         command_line: None,
+        // The command line's progress bar; a web search writes nothing to standard error.
+        progress_bar: false,
+        one_query_batch: false,
+        first_query_ordinal: 0,
     };
 
     let mut index = 0;
     while index < extra_args.len() {
         let flag = extra_args[index];
+        if take_search_space_arg(extra_args, &mut index, &mut args.searchsp, &mut args.dbsize)? {
+            index += 1;
+            continue;
+        }
         if let Some(value) = flag.strip_prefix("-task=") {
             args.task = value.to_string();
         } else if flag == "-task" {
@@ -376,7 +452,14 @@ fn parse_tblastx_args(
         subject: Some(subject),
         // A database search is not part of LOSAT Web yet (DB-7).
         db: None,
+        // The Web ABI searches a subject, not a database: no taxid list (line DI-8).
+        db_filter: Default::default(),
+        formatting: Default::default(),
         dbsize: None,
+        show_gis: false,
+        parse_deflines: false,
+        id_scope: None,
+        searchsp: None,
         evalue: 10.0,
         // The frozen web ABI v1 (plan TD-1) has no -threshold, -matrix or -window_size: BLOSUM62's
         // suggestions, 13 and 40.
@@ -396,6 +479,8 @@ fn parse_tblastx_args(
         // NCBI blast_options.c:83-85: window=kSegWindow; locut=kSegLocut; hicut=kSegHicut.
         seg: "yes".to_string(),
         soft_masking: None,
+        lcase_masking: false,
+        xdrop_ungap: None,
         window_size: None,
         outfmt: "6".to_string(),
         culling_limit: None,
@@ -403,11 +488,22 @@ fn parse_tblastx_args(
         query_loc: None,
         subject_loc: None,
         archive: None,
+        export_search_strategy: None,
+        strategy: None,
+        tabular_taxdb: None,
+        subject_taxdb: None,
+        taxdb_setting: None,
+        first_query_ordinal: 0,
+        matrix_file: None,
     };
 
     let mut index = 0;
     while index < extra_args.len() {
         let flag = extra_args[index];
+        if take_search_space_arg(extra_args, &mut index, &mut args.searchsp, &mut args.dbsize)? {
+            index += 1;
+            continue;
+        }
         if flag == "-query_gencode" {
             args.query_gencode = next_arg(extra_args, &mut index, flag)?
                 .parse()
@@ -535,12 +631,19 @@ fn parse_blastp_args(
         subject: Some(subject),
         // The frozen web ABI v1 (plan TD-1) searches subject records, not a database.
         db: None,
+        // The Web ABI searches a subject, not a database: no taxid list (line DI-8).
+        db_filter: Default::default(),
         dbsize: None,
+        show_gis: false,
+        parse_deflines: false,
+        id_scope: None,
+        searchsp: None,
         task: "blastp".to_string(),
         evalue: None,
         threshold: None,
         word_size: None,
         num_threads: 1,
+        mt_mode: None,
         out: Some(out),
         max_target_seqs: None,
         num_descriptions: None,
@@ -549,6 +652,9 @@ fn parse_blastp_args(
         qcov_hsp_perc: None,
         culling_limit: None,
         ungapped: false,
+        xdrop_ungap: None,
+        xdrop_gap: None,
+        xdrop_gap_final: None,
         window_size: None,
         matrix: None,
         gap_open: None,
@@ -556,19 +662,34 @@ fn parse_blastp_args(
         comp_based_stats: "2".to_string(),
         seg: None,
         soft_masking: None,
+        lcase_masking: false,
         use_sw_tback: false,
         // The frozen web ABI v1 (plan TD-1) has no ranges.
         query_loc: None,
         subject_loc: None,
         outfmt: "6".to_string(),
         archive: None,
+        export_search_strategy: None,
+        strategy: None,
+        request_inputs: None,
         app: blastp::args::BlastpApp::Blastp,
+        taxdb_setting: None,
         inclusion_ethresh: None,
+        gap_trigger: None,
+        sum_stats: false,
+        first_query_ordinal: 0,
+        psiblast_pssm: None,
+        formatting: Default::default(),
+        rps: None,
     };
 
     let mut index = 0;
     while index < extra_args.len() {
         let flag = extra_args[index];
+        if take_search_space_arg(extra_args, &mut index, &mut args.searchsp, &mut args.dbsize)? {
+            index += 1;
+            continue;
+        }
         if let Some(value) = flag.strip_prefix("-task=") {
             args.task = value.to_string();
         } else if flag == "-task" {
@@ -799,7 +920,27 @@ fn run_pair(
             subject_fasta,
         )
         .map_err(engine_error),
-        other => return Err(format!("unsupported LOSAT program: {other}")),
+        // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:213-219
+        // ```c++
+        //             if(IsIStreamEmpty(m_CmdLineArgs->GetInputStream())){
+        //                	ERR_POST(Warning << "Query is Empty!");
+        //                	return BLAST_EXIT_SUCCESS;
+        //             }
+        //             fasta.Reset(new CBlastFastaInputSource(
+        //                                          m_CmdLineArgs->GetInputStream(),
+        //                                          iconfig));
+        // ```
+        // Added to ABI v1 on the Owner's request (2026-11-04): the CLI's parser and run over
+        // the call's bytes (`tblastn::web`).
+        "tblastn" => tblastn::web::run_pair(
+            tblastn::web::parse_args(&extra).map_err(engine_error)?,
+            query_fasta.as_bytes(),
+            subject_fasta.as_bytes(),
+            "query",
+            "subject",
+        )
+        .map_err(engine_error),
+        other => Err(format!("unsupported LOSAT program: {other}")),
     }
 }
 
@@ -872,15 +1013,38 @@ fn run_pair_handles(
                 .entries
                 .get(&subject_handle)
                 .ok_or_else(|| format!("unknown subject FASTA handle: {subject_handle}"))?;
-            v1_blastp::run_web_pair_records(
+            v1_blastp::run_web_pair_bytes(
                 parse_blastp_args(
                     &extra,
                     std::path::PathBuf::new(),
                     std::path::PathBuf::new(),
                     std::path::PathBuf::new(),
                 )?,
-                &query.records,
-                &subject.records,
+                &query.bytes,
+                &subject.bytes,
+                &query.label,
+                &subject.label,
+            )
+            .map_err(engine_error)
+        }
+        // The stored bytes, read by the CLI's reader of each role (`tblastn::web`); the labels
+        // are the names the report shows for the inputs.
+        "tblastn" => {
+            let store = fasta_store()
+                .lock()
+                .map_err(|_| "FASTA store mutex poisoned".to_string())?;
+            let query = store
+                .entries
+                .get(&query_handle)
+                .ok_or_else(|| format!("unknown query FASTA handle: {query_handle}"))?;
+            let subject = store
+                .entries
+                .get(&subject_handle)
+                .ok_or_else(|| format!("unknown subject FASTA handle: {subject_handle}"))?;
+            tblastn::web::run_pair(
+                tblastn::web::parse_args(&extra).map_err(engine_error)?,
+                &query.bytes,
+                &subject.bytes,
                 &query.label,
                 &subject.label,
             )
@@ -934,7 +1098,7 @@ pub unsafe extern "C" fn losat_web_store_fasta(
         Ok(value) => value.to_string(),
         Err(err) => return set_error(err),
     };
-    let records = match parse_fasta_records(fasta_bytes, "stored FASTA") {
+    let records = match count_stored_records(fasta_bytes) {
         Ok(value) => value,
         Err(err) => return set_error(err),
     };
@@ -1105,10 +1269,6 @@ pub extern "C" fn losat_web_has_direct_api() -> i32 {
 mod tests {
     use super::*;
 
-    fn record(id: &str) -> fasta::Record {
-        fasta::Record::with_attrs(id, None, b"ARND")
-    }
-
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
     // ```c
     // SetupQueries_OMF(IBlastQuerySource& queries,
@@ -1122,18 +1282,10 @@ mod tests {
         let mut store = FastaStore::default();
 
         let first = store
-            .insert(
-                vec![record("q1")],
-                "query".to_string(),
-                b">q1\nACGT\n".to_vec(),
-            )
+            .insert(1, "query".to_string(), b">q1\nACGT\n".to_vec())
             .expect("first handle");
         let second = store
-            .insert(
-                vec![record("s1")],
-                "subject".to_string(),
-                b">s1\nACGT\n".to_vec(),
-            )
+            .insert(1, "subject".to_string(), b">s1\nACGT\n".to_vec())
             .expect("second handle");
 
         assert_eq!(first, 1);
@@ -1230,8 +1382,8 @@ mod tests {
         assert!(v1_blastn::run_web_pair(with(&["-evalue", "1e400"]), "", fasta).is_ok());
         #[cfg(not(feature = "parallel"))]
         assert!(v1_blastn::run_web_pair(with(&["-num_threads", "2"]), "", fasta).is_err());
-        let error = v1_blastn::run_web_pair(with(&[]), fasta, empty_record).unwrap_err();
-        assert!(engine_error(error).contains("subject record 1 (s0) has no residues"));
+        // A subject without residues gets its warning and is not searched, as in the CLI.
+        assert!(v1_blastn::run_web_pair(with(&[]), fasta, empty_record).is_ok());
         // NCBI's CArg_Double reads a signed infinity and NaN, not a bare `inf`, and NCBI
         // searches with them (E2g).
         let error = parse_blastn_args(
@@ -1246,6 +1398,202 @@ mod tests {
         assert!(v1_blastn::run_web_pair(with(&["-evalue=+nan"]), fasta, fasta).is_ok());
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:338-340
+    // ```c++
+    //    	flags+= CFastaReader::fHyphensIgnoreAndWarn;
+    //
+    //     flags+= CFastaReader::fDisableNoResidues;
+    // ```
+    // Plan TD-1, revised (DW-48): ABI v1 reads its inputs with NCBI's reader, as the CLI: the
+    // same report for what the reader removes or changes, and every defline that it reads.
+    #[test]
+    fn inputs_are_read_by_ncbis_reader() {
+        let dna = "GGATCCTTAGCAATCGGCTAAGCTTCCGATACGTTAGGCATCCAGTTCAGGATTACAGGCTTAACCGGT";
+        let protein = "MKVLAAGIVGLLLAQPAMAAEIPVDPALAVKLTSGQTVEFRWDNGHYCPIM";
+        for (program, letters) in [("blastn", dna), ("tblastx", dna), ("blastp", protein)] {
+            let (head, tail) = letters.split_at(30);
+            let subject = format!(">s1\n{letters}\n");
+            let report = |query: &str| run_pair(program, query, &subject, "6", "");
+            let expected = report(&format!(">q1 first\n{letters}\n")).expect("report");
+            assert!(!expected.is_empty(), "{program}");
+            for query in [
+                format!(">q1 first\n{head}-{tail}\n"),
+                format!(">q1 first\r\n{head}\r\n\r\n{tail}\r\n"),
+                format!(";comment\n>q1 first\n{head} {tail}\n"),
+                format!("  \n>q1 first\n{letters}\n>q2\n"),
+            ] {
+                assert_eq!(
+                    report(&query).as_ref(),
+                    Ok(&expected),
+                    "{program}: {query:?}"
+                );
+            }
+            // A subject without residues among others gets its warning and counts in the
+            // statistics of the search (the E-value differs), as in the CLI.
+            let subjects = format!(">s0\n{subject}");
+            let query = format!(">q1 first\n{letters}\n");
+            let with_empty = run_pair(program, &query, &subjects, "6", "").expect("report");
+            assert!(with_empty.starts_with(b"q1\ts1\t"), "{program}");
+            // White space only is NCBI's `Query is Empty!`; comment lines only are not empty.
+            assert_eq!(report(" \n"), Ok(Vec::new()), "{program}");
+            let error = report(";comment\n").unwrap_err();
+            assert!(error.contains("Empty CBlastQueryVector"), "{error}");
+            // A defline that is not ASCII is read as bytes.
+            let named = report(&format!(">\u{3042}1\n{letters}\n")).expect("report");
+            assert!(named.starts_with("\u{3042}1\t".as_bytes()), "{program}");
+        }
+    }
+
+    // BLASTP's handles read the stored bytes as `run_pair` reads the call's, with the labels.
+    #[test]
+    fn blastp_handles_read_the_stored_bytes_as_the_call_does() {
+        let fasta = b">q\nMKVLAAGIVGLLLAQPAMAAEIPVDPALAVKLTSGQTVEFRWDNGHYCPIM\n".to_vec();
+        let text = std::str::from_utf8(&fasta).expect("UTF-8");
+        let expected = run_pair("blastp", text, text, "6", "");
+        assert!(expected.as_ref().is_ok_and(|report| !report.is_empty()));
+        let stored = |label: &str| {
+            fasta_store()
+                .lock()
+                .expect("store")
+                .insert(
+                    count_stored_records(&fasta).expect("records"),
+                    label.to_string(),
+                    fasta.clone(),
+                )
+                .expect("handle")
+        };
+        let (query, subject) = (stored("query"), stored("subject"));
+        assert_eq!(
+            run_pair_handles("blastp", query, subject, "6", ""),
+            expected
+        );
+        let mut store = fasta_store().lock().expect("store");
+        store.release(query).expect("release");
+        store.release(subject).expect("release");
+    }
+
+    // The store counts the records of NCBI's reader: white space and comments have none, and
+    // the letters before the first defline are a record (`fDLOptional`).
+    #[test]
+    fn the_store_counts_the_records_of_ncbis_reader() {
+        assert_eq!(count_stored_records(b""), Ok(0));
+        assert_eq!(count_stored_records(b" \n\n"), Ok(0));
+        assert_eq!(count_stored_records(b";comment\n"), Ok(0));
+        assert_eq!(count_stored_records(b">a\nACGT\n>b\nMKV\n"), Ok(2));
+        assert_eq!(count_stored_records(b"ACGT\n"), Ok(1));
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:213-219
+    // ```c++
+    //             if(IsIStreamEmpty(m_CmdLineArgs->GetInputStream())){
+    //                	ERR_POST(Warning << "Query is Empty!");
+    //                	return BLAST_EXIT_SUCCESS;
+    //             }
+    //             fasta.Reset(new CBlastFastaInputSource(
+    //                                          m_CmdLineArgs->GetInputStream(),
+    //                                          iconfig));
+    // ```
+    // TBLASTN (added on the Owner's request, 2026-11-04): both exports return the bytes of the
+    // shared vector (`tblastn::web::vector`), which `tests/web_v1_tblastn.rs` holds to the CLI.
+    #[test]
+    fn tblastn_web_pair_and_handles_return_the_cli_bytes_of_the_shared_vector() {
+        use crate::algorithm::tblastn::web::vector;
+        let stored = |file: &str, label: &str| {
+            let bytes = vector::read(file);
+            fasta_store()
+                .lock()
+                .expect("store")
+                .insert(
+                    // The store takes only inputs with one record or more.
+                    count_stored_records(&bytes).unwrap_or_default(),
+                    label.to_string(),
+                    bytes,
+                )
+                .ok()
+        };
+        for case in vector::cases() {
+            let extra = case.extra.join("\0");
+            let expected = case
+                .expected
+                .map_err(|message| String::from_utf8(message).expect("UTF-8 message"));
+            // `run_pair` names the subject `subject`.
+            if case.label == "subject" {
+                let (query, subject) = (vector::read(&case.query), vector::read(&case.subject));
+                assert_eq!(
+                    run_pair(
+                        "tblastn",
+                        std::str::from_utf8(&query).expect("UTF-8 query"),
+                        std::str::from_utf8(&subject).expect("UTF-8 subject"),
+                        &case.outfmt,
+                        &extra
+                    ),
+                    expected,
+                    "{} (run_pair)",
+                    case.name
+                );
+            }
+            // The handles of the inputs that the store takes (not the blank ones).
+            let handles = (
+                stored(&case.query, "query"),
+                stored(&case.subject, &case.label),
+            );
+            if let (Some(query_handle), Some(subject_handle)) = handles {
+                assert_eq!(
+                    run_pair_handles(
+                        "tblastn",
+                        query_handle,
+                        subject_handle,
+                        &case.outfmt,
+                        &extra
+                    ),
+                    expected,
+                    "{} (run_pair_handles)",
+                    case.name
+                );
+            }
+            let mut store = fasta_store().lock().expect("store");
+            for handle in [handles.0, handles.1].into_iter().flatten() {
+                store.release(handle).expect("release");
+            }
+        }
+        let query = vector::read("query.faa");
+        let subject = vector::read("subject.fna");
+        let (query_text, subject_text) = (
+            std::str::from_utf8(&query).expect("UTF-8 query"),
+            std::str::from_utf8(&subject).expect("UTF-8 subject"),
+        );
+        // An empty `outfmt` is 6 (`web_outfmt_or_default`), as for the other programs.
+        let fmt6 = vector::read("fmt6.out");
+        assert_eq!(
+            run_pair("tblastn", query_text, subject_text, " ", ""),
+            Ok(fmt6)
+        );
+        // The words that name files or a database are refused before the search.
+        assert_eq!(
+            run_pair("tblastn", query_text, subject_text, "6", "-db\0nt"),
+            Err("-db (a database search) is not supported in the browser yet".to_string())
+        );
+        assert_eq!(
+            run_pair("tblastn", query_text, subject_text, "6", "-out\0x"),
+            Err("file/help arguments are unsupported for the TBLASTN web API".to_string())
+        );
+        // `-help-full` asks for the CLI's help, as `-help` (line RG item E2).
+        assert_eq!(
+            run_pair("tblastn", query_text, subject_text, "6", "-help-full"),
+            Err("file/help arguments are unsupported for the TBLASTN web API".to_string())
+        );
+        // The serial module has no threads to give (as the CLI built without them).
+        #[cfg(not(feature = "parallel"))]
+        assert!(run_pair(
+            "tblastn",
+            query_text,
+            subject_text,
+            "6",
+            "-num_threads\x002"
+        )
+        .is_err());
+    }
+
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
     // ```c
     // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
@@ -1258,9 +1606,7 @@ mod tests {
     fn fasta_store_rejects_empty_and_unknown_handles() {
         let mut store = FastaStore::default();
 
-        assert!(store
-            .insert(Vec::new(), "empty".to_string(), Vec::new())
-            .is_err());
+        assert!(store.insert(0, "empty".to_string(), Vec::new()).is_err());
         assert!(store.release(42).is_err());
     }
 
@@ -1273,11 +1619,7 @@ mod tests {
     fn fasta_store_clear_removes_entries_and_resets_handles() {
         let mut store = FastaStore::default();
         let handle = store
-            .insert(
-                vec![record("q1")],
-                "query".to_string(),
-                b">q1\nACGT\n".to_vec(),
-            )
+            .insert(1, "query".to_string(), b">q1\nACGT\n".to_vec())
             .expect("stored handle");
 
         assert_eq!(handle, 1);
@@ -1285,12 +1627,129 @@ mod tests {
         assert!(store.entries.is_empty());
 
         let next = store
-            .insert(
-                vec![record("q2")],
-                "query2".to_string(),
-                b">q2\nACGT\n".to_vec(),
-            )
+            .insert(1, "query2".to_string(), b">q2\nACGT\n".to_vec())
             .expect("stored handle after clear");
         assert_eq!(next, 1);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238 and 2570-2572
+    // ```c++
+    //     arg_desc.AddOptionalKey(kArgEffSearchSpace, "int_value",
+    //                             "Effective length of the search space",
+    //                             CArgDescriptions::eInt8);
+    //     if (args[kArgDbSize]) {
+    //         opt.SetDbLength(args[kArgDbSize].AsInt8());
+    // ```
+    // `-searchsp` and `-dbsize` (added on gbdraw's request, 2026-11-10, so that a comparison's
+    // E-values have the scale of its genomes): `losat_web_run_pair` returns the bytes of the shared
+    // vector (`tests/fixtures/web_v1_search_space/`), which `tests/web_v1_search_space.rs` holds to
+    // the CLI; BLASTP's handles return them too.
+    #[test]
+    fn search_space_and_database_size_give_the_cli_bytes_of_the_shared_vector() {
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/web_v1_search_space");
+        let read = |name: &str| {
+            let path = dir.join(name);
+            std::fs::read(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+        };
+        let cases = String::from_utf8(read("cases.tsv")).expect("UTF-8 cases");
+        let mut count = 0;
+        for line in cases.lines().filter(|line| !line.starts_with('#')) {
+            let [name, program, query, subject, outfmt, extra] =
+                line.split('\t').collect::<Vec<_>>()[..]
+            else {
+                panic!("six columns: {line:?}");
+            };
+            let (query, subject) = (read(query), read(subject));
+            let extra = extra.split_whitespace().collect::<Vec<_>>().join("\0");
+            let expected = Ok(read(&format!("{name}.out")));
+            assert_eq!(
+                run_pair(
+                    program,
+                    std::str::from_utf8(&query).expect("UTF-8 query"),
+                    std::str::from_utf8(&subject).expect("UTF-8 subject"),
+                    outfmt,
+                    &extra
+                ),
+                expected,
+                "{name} (run_pair)"
+            );
+            if program == "blastp" {
+                let store = |bytes: &Vec<u8>, label: &str| {
+                    fasta_store()
+                        .lock()
+                        .expect("store")
+                        .insert(
+                            count_stored_records(bytes).expect("records"),
+                            label.to_string(),
+                            bytes.clone(),
+                        )
+                        .expect("handle")
+                };
+                let (query, subject) = (store(&query, "query"), store(&subject, "subject"));
+                assert_eq!(
+                    run_pair_handles("blastp", query, subject, outfmt, &extra),
+                    expected,
+                    "{name} (run_pair_handles)"
+                );
+                fasta_store().lock().expect("store").clear();
+            }
+            count += 1;
+        }
+        assert_eq!(count, 12);
+    }
+
+    // The two values are NCBI's `CArg_Int8` (`-dbsize`) and `CArg_Int8` of at least 0
+    // (`-searchsp`), read by the CLI's value parsers; an invalid one is refused with the parser's
+    // message, in the words of the other options of ABI v1 (`<flag> parse error: <detail>`).
+    #[test]
+    fn invalid_search_space_and_database_size_are_refused_as_the_cli_refuses_them() {
+        use crate::blastinput::value_parsers::{ncbi_int8, nonnegative_ncbi_int8};
+        let no_path = || (PathBuf::new(), PathBuf::new(), PathBuf::new());
+        let parse = |program: &str, words: &[&str]| -> Result<(Option<i64>, Option<i64>), String> {
+            let (query, subject, out) = no_path();
+            match program {
+                "blastn" => parse_blastn_args(words, query, subject, out)
+                    .map(|args| (args.searchsp, args.dbsize)),
+                "tblastx" => parse_tblastx_args(words, query, subject, out)
+                    .map(|args| (args.searchsp, args.dbsize)),
+                _ => parse_blastp_args(words, query, subject, out)
+                    .map(|args| (args.searchsp, args.dbsize)),
+            }
+        };
+        for program in ["blastn", "tblastx", "blastp"] {
+            for (flag, parser) in [
+                (
+                    "-searchsp",
+                    nonnegative_ncbi_int8 as fn(&str) -> Result<i64, String>,
+                ),
+                ("-dbsize", ncbi_int8 as fn(&str) -> Result<i64, String>),
+            ] {
+                for value in ["-1", "abc", "", "1.5", "0x", "9223372036854775808"] {
+                    let joined = format!("{flag}={value}");
+                    for words in [vec![flag, value], vec![joined.as_str()]] {
+                        let expected = parser(value)
+                            .err()
+                            .map(|detail| format!("{flag} parse error: {detail}"));
+                        let got = parse(program, &words).err();
+                        assert_eq!(got, expected, "{program} {words:?}");
+                    }
+                }
+                let error = parse(program, &[flag]).unwrap_err();
+                assert_eq!(error, format!("{flag} requires a value"), "{program}");
+            }
+            // The values that NCBI reads: a sign, hexadecimal, 64 bits; 0 is no search space.
+            assert_eq!(
+                parse(program, &["-searchsp", "0x10", "-dbsize=-3000000000"]),
+                Ok((Some(16), Some(-3_000_000_000))),
+                "{program}"
+            );
+            assert_eq!(
+                parse(program, &["-searchsp=9223372036854775807"]),
+                Ok((Some(i64::MAX), None)),
+                "{program}"
+            );
+            assert_eq!(parse(program, &[]), Ok((None, None)), "{program}");
+        }
     }
 }

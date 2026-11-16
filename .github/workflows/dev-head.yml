@@ -1,0 +1,78 @@
+name: Dev head
+
+# The ruleset "dev CI" requires its checks on a pull request, not on the commit that dev points to
+# after the merge: the checks are not strict (a pull request merges on checks of an older dev), and
+# a merge made with the default token, as Auto-merge's are (118 of 119 merges, 2026-11-01 to
+# 11-04), starts no push run of ci.yml. Until this workflow, only nightly.yml's job `dev` looked at
+# dev, once a day. So every four hours this workflow starts ci.yml on dev (workflow_dispatch, which
+# the default token may start) when dev's head has no run of ci.yml that passed or is still
+# running, and fails when the last run of ci.yml on dev that ended did not pass: the scheduled
+# run's mail reports it, as nightly.yml's job `dev` does. A head whose run failed is not started
+# again: the job stays red until someone reruns that run or dev moves on.
+#
+# GitHub starts a schedule only from the file on the default branch, main. main and dev carry the
+# same file; the copy on main is the one that runs, and it starts dev's own copy of ci.yml.
+on:
+  schedule:
+    - cron: '41 */4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    name: check the head of dev
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Start ci.yml on the head of dev and check the last run that ended
+        run: |
+          set -euo pipefail
+          head=$(gh api "repos/$GH_REPO/commits/dev" --jq .sha)
+          # Runs of ci.yml on dev itself (push, or started here), newest first; a pull request's
+          # runs check its merge ref, never dev's commit. A cancelled run that a newer run
+          # follows was cancelled by it (ci.yml's concurrency) and counts as none; the newest
+          # run, if cancelled, was stopped by hand or by a timeout and counts as not passed.
+          runs='[.[] | select(.event == "push" or .event == "workflow_dispatch")
+                 | select(.conclusion != "skipped")]
+                | [to_entries[] | select(.key == 0 or .value.conclusion != "cancelled") | .value]'
+          list() {
+            gh run list --workflow ci.yml --branch dev --limit 50 \
+              --json event,headSha,status,conclusion,url --jq "$runs | $1"
+          }
+          state=$(list "[.[] | select(.headSha == \"$head\")]
+            | if any(.status != \"completed\") then \"running\"
+              elif any(.conclusion == \"success\") then \"passed\"
+              elif length > 0 then \"failed\"
+              else \"none\" end")
+          case "$state" in
+            none)
+              gh workflow run ci.yml --ref dev
+              echo "Started ci.yml on dev (${head:0:9})." ;;
+            running) echo "ci.yml is running on dev (${head:0:9})." ;;
+            passed) echo "ci.yml passed on dev (${head:0:9})." ;;
+            failed) echo "ci.yml ran on dev (${head:0:9}) and did not pass; not started again." ;;
+          esac
+          last=$(list '[.[] | select(.status == "completed")][0] // empty
+            | [.conclusion, .headSha, .url] | @tsv')
+          if [ -z "$last" ]; then
+            echo "No run of ci.yml on dev has ended yet."
+            exit 0
+          fi
+          read -r conclusion sha url <<< "$last"
+          if [ "$conclusion" != success ]; then
+            echo "::error::The last run of ci.yml on dev (${sha:0:9}) ended '$conclusion': $url"
+            exit 1
+          fi
+          echo "The last run of ci.yml on dev (${sha:0:9}) passed: $url"

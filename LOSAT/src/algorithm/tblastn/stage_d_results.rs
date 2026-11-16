@@ -168,6 +168,41 @@ impl KappaResultHitList {
         self.lists.sort_by(compare_result_lists);
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:827-857;
+    // c++/src/algo/blast/core/blast_hits.c:3331-3337 (`core::blast_hspstream`)
+    // ```c
+    //     	  if (MIN_BUF_SZ + 100 < hit_list->hsplist_count) {
+    //         	  int max_index = hit_list->hsplist_count -1;
+    // ...
+    //         	  Blast_HitListSortByEvalue(hit_list);
+    // ...
+    //         			  s_TrimHitList(hit_list, i);
+    // ```
+    /// `BlastHSPCBSStreamClose`'s trim of this query's preliminary hit list (`ADAPTIVE_CBS`):
+    /// sorted by E-value (`Blast_HitListSortByEvalue`: the lists left without HSPs, last,
+    /// removed) and cut where the E-values pass the limit, when it holds enough lists.
+    pub(super) fn cbs_close_trim(&mut self, hitlist_size: usize) {
+        use crate::core::blast_hspstream::{cbs_trim_count, cbs_trim_sorts};
+        let count = self.lists.len();
+        if !cbs_trim_sorts(count, hitlist_size) {
+            return;
+        }
+        self.lists.sort_unstable_by(compare_result_lists);
+        let sorted = self
+            .lists
+            .iter()
+            .position(|list| list.hsps.hsps.is_empty())
+            .unwrap_or(count);
+        self.lists.truncate(sorted);
+        self.heapified = false;
+        let lists = &self.lists;
+        if let Some(keep) =
+            cbs_trim_count(count, sorted, hitlist_size, |i| lists[i].hsps.best_evalue)
+        {
+            self.lists.truncate(keep);
+        }
+    }
+
     // NCBI c++/src/algo/blast/api/blast_seqalign.cpp:1572-1577:
     // for (int index = 0; index < hit_list->hsplist_count; index++) {
     //     BlastHSPList* hsp_list = hit_list->hsplist_array[index];
@@ -295,6 +330,11 @@ impl KappaResultHitList {
         &mut self.lists
     }
 
+    /// The hit list after `cut` removes lists from it (`database::drop_unaligned`).
+    pub(super) fn with_lists_mut(&mut self, cut: impl FnOnce(&mut Vec<KappaResultList>)) {
+        cut(&mut self.lists);
+    }
+
     pub(super) fn worst_evalue(&self) -> f64 {
         self.worst_evalue
     }
@@ -323,19 +363,32 @@ fn refresh_best_evalue(list: &mut LinkedHspList) {
 // if (evalue1 < 1.0e-180 && evalue2 < 1.0e-180) return 0;
 // if ((retval = s_EvalueComp(h1->evalue, h2->evalue)) != 0) return retval;
 // return ScoreCompareHSPs(v1, v2);
-fn sort_hsps_by_evalue(list: &mut KappaResultList) {
-    let compare = |a: &LinkedHsp, b: &LinkedHsp| {
-        let evalue = if a.evalue < 1.0e-180 && b.evalue < 1.0e-180 {
-            Ordering::Equal
-        } else if a.evalue < b.evalue {
-            Ordering::Less
-        } else if a.evalue > b.evalue {
-            Ordering::Greater
-        } else {
-            Ordering::Equal
-        };
-        evalue.then_with(|| score_compare(&a.hsp, &b.hsp))
+/// The order of a list's HSPs in the reports (`sort_hsps_by_evalue`, `evalue_order`).
+fn compare_report_hsps(a: &LinkedHsp, b: &LinkedHsp) -> Ordering {
+    let evalue = if a.evalue < 1.0e-180 && b.evalue < 1.0e-180 {
+        Ordering::Equal
+    } else if a.evalue < b.evalue {
+        Ordering::Less
+    } else if a.evalue > b.evalue {
+        Ordering::Greater
+    } else {
+        Ordering::Equal
     };
+    evalue.then_with(|| score_compare(&a.hsp, &b.hsp))
+}
+
+/// The indices of `list`'s HSPs (and payloads) in the order `sort_hsps_by_evalue` puts them
+/// (`KappaResultHitList::sort_hsps_for_report`, before the reports), without moving them: the
+/// same stable sort by `compare_report_hsps`.
+pub(super) fn evalue_order(list: &KappaResultList) -> Vec<usize> {
+    let hsps = &list.hsps.hsps;
+    let mut order: Vec<usize> = (0..hsps.len()).collect();
+    order.sort_by(|&a, &b| compare_report_hsps(&hsps[a], &hsps[b]));
+    order
+}
+
+fn sort_hsps_by_evalue(list: &mut KappaResultList) {
+    let compare = compare_report_hsps;
     if list.payloads.is_empty() {
         list.hsps.hsps.sort_by(compare);
     } else {

@@ -1,0 +1,119 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/x_ntspec1.xml
+#Output data file:	(stdout)
+#Annotation data at:	xnew
+#E-Value cutoff:	0.01
+#Redundancy:	Full
+#Data requested:	Domain hits and site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	RPSTBLASTN 2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Nucleotide	5000	mg00017_80001-85000
+DOMAINS
+1	Query_1[3]	Non-specific	506937	4389	5000	8.74743e-145	447.525	NF007063	PRK09508	C	-
+1	Query_1[3]	Non-specific	176155	4704	5000	3.07068e-33	128.138	cd08466	PBP2_LeuO	C	531135
+1	Query_1[3]	Specific	440348	4434	4952	9.26107e-31	123.053	COG0583	LysR	C	-
+1	Query_1[3]	Specific	513171	4437	4613	1.096e-16	75.8912	pfam00126	HTH_1	-	-
+1	Query_1[3]	Non-specific	176109	4704	5000	4.009e-16	78.7954	cd08417	PBP2_Nitroaromatics_like	C	531135
+1	Query_1[3]	Non-specific	508020	4428	4643	7.24746e-08	56.1535	NF008239	PRK11013	C	-
+1	Query_1[3]	Non-specific	468737	4434	4961	1.57257e-07	54.9303	NF040786	LysR_Sec_metab	C	-
+1	Query_1[3]	Non-specific	176102	4782	4952	1.03799e-06	51.0617	cd05466	PBP2_LTTR_substrate	C	531135
+1	Query_1[3]	Non-specific	508180	4455	4952	4.56489e-06	50.7253	NF008416	PRK11242	C	-
+1	Query_1[3]	Non-specific	515602	4782	4952	0.000115337	45.3617	pfam03466	LysR_substrate	C	-
+1	Query_1[3]	Non-specific	176151	4707	4970	0.000126851	44.9278	cd08462	PBP2_NodD	C	531135
+1	Query_1[3]	Non-specific	177082	4437	4604	0.00294162	41.9294	CHL00180	rbcR	C	-
+1	Query_1[3]	Non-specific	176112	4878	4994	0.00773346	39.7825	cd08420	PBP2_CysL_like	NC	531135
+1	Query_1[3]	Non-specific	176126	4833	4973	0.0087468	39.5636	cd08435	PBP2_GbpR	NC	531135
+1	Query_1[-1]	Specific	272939	894	1943	0	639.448	TIGR00169	leuB	-	529099
+1	Query_1[-1]	Specific	440241	882	1949	0	581.971	COG0473	LeuB	-	-
+1	Query_1[-1]	Specific	513222	894	1943	0	546.892	pfam00180	Iso_dh	-	529099
+1	Query_1[-1]	Non-specific	215188	870	1952	9.72777e-109	352.453	PLN02329	PLN02329	-	529099
+1	Query_1[-1]	Non-specific	503773	882	1958	1.20493e-96	315.713	NF002898	PRK03437	-	-
+1	Query_1[-1]	Non-specific	273963	891	1952	5.85657e-85	282.879	TIGR02089	TTC	-	529099
+1	Query_1[-1]	Non-specific	468794	894	1946	2.7962e-55	196.939	NF040855	iso_homocit_dh	-	-
+1	Query_1[-1]	Non-specific	506614	888	1958	5.97145e-55	200.117	NF006673	PRK09222	C	-
+1	Query_1[-1]	Non-specific	215062	912	2045	2.99244e-46	171.601	PLN00118	PLN00118	-	529099
+1	Query_1[-1]	Non-specific	440304	888	1925	1.14319e-41	159.121	COG0538	Icd	-	-
+1	Query_1[-1]	Non-specific	215065	942	1940	2.89005e-31	127.288	PLN00123	PLN00123	-	529099
+1	Query_1[-1]	Non-specific	240417	888	1292	5.92797e-05	47.6758	PTZ00435	PTZ00435	N	529099
+1	Query_1[-1]	Non-specific	177715	891	1310	0.00110049	43.4831	PLN00096	PLN00096	N	529099
+1	Query_1[-2]	Specific	503205	1961	3529	0	1138.52	NF002084	PRK00915.1-1	-	-
+1	Query_1[-2]	Specific	130046	2039	3520	0	910.675	TIGR00973	leuA_bact	-	531136
+1	Query_1[-2]	Specific	503207	2018	3529	0	781.305	NF002086	PRK00915.1-3	-	-
+1	Query_1[-2]	Non-specific	503208	2033	3529	0	683.111	NF002087	PRK00915.1-4	-	-
+1	Query_1[-2]	Non-specific	503209	1985	3523	0	601.548	NF002088	PRK00915.1-5	-	-
+1	Query_1[-2]	Specific	439889	2120	3526	0	586.363	COG0119	LeuA	-	-
+1	Query_1[-2]	Non-specific	215182	2006	3517	7.42322e-161	503.734	PLN02321	PLN02321	-	-
+1	Query_1[-2]	Specific	163678	2705	3511	4.21424e-151	462.688	cd07940	DRE_TIM_IPMS	-	531136
+1	Query_1[-2]	Non-specific	503206	2033	3517	2.06815e-135	429.402	NF002085	PRK00915.1-2	-	-
+1	Query_1[-2]	Non-specific	178767	2378	3517	1.88281e-117	380.421	PLN03228	PLN03228	-	531136
+1	Query_1[-2]	Specific	513661	2711	3520	4.00789e-116	367.03	pfam00682	HMGL-like	-	-
+1	Query_1[-2]	Non-specific	163674	2705	3508	4.80883e-83	273.563	cd03174	DRE_TIM_metallolyase	-	531136
+1	Query_1[-2]	Non-specific	274248	2396	3517	9.08168e-78	262.604	TIGR02660	nifV_homocitr	-	531136
+1	Query_1[-2]	Non-specific	163677	2702	3511	2.58963e-59	205.432	cd07939	DRE_TIM_NifV	-	531136
+1	Query_1[-2]	Non-specific	163679	2795	3511	1.63172e-46	168.787	cd07941	DRE_TIM_LeuA3	-	531136
+1	Query_1[-2]	Specific	214910	2033	2425	2.22561e-43	154.565	smart00917	LeuA_dimer	-	421756
+1	Query_1[-2]	Non-specific	163683	2666	3505	1.00979e-38	146.752	cd07945	DRE_TIM_CMS	-	531136
+1	Query_1[-2]	Non-specific	163685	2795	3511	7.04952e-38	143.626	cd07948	DRE_TIM_HCS	-	531136
+1	Query_1[-2]	Non-specific	518300	2075	2425	1.5845e-34	128.864	pfam08502	LeuA_dimer	-	421756
+1	Query_1[-2]	Non-specific	163680	2753	3502	5.64181e-30	121.523	cd07942	DRE_TIM_LeuA	-	531136
+1	Query_1[-2]	Non-specific	525026	2429	2671	6.0566e-24	97.1615	pfam22617	HCS_D2	-	-
+1	Query_1[-2]	Non-specific	163681	2789	3517	1.35027e-22	99.4956	cd07943	DRE_TIM_HOA	-	531136
+1	Query_1[-2]	Non-specific	163684	2756	3511	1.11662e-19	91.2293	cd07947	DRE_TIM_Re_CS	-	531136
+1	Query_1[-2]	Non-specific	163676	2705	3511	9.762e-17	82.4403	cd07938	DRE_TIM_HMGL	-	531136
+1	Query_1[-2]	Non-specific	163682	2792	3511	1.18863e-10	64.1218	cd07944	DRE_TIM_HOA_like	-	531136
+1	Query_1[-2]	Non-specific	178347	2795	3670	1.00169e-06	52.8695	PLN02746	PLN02746	-	531136
+1	Query_1[-2]	Non-specific	163675	2843	3511	1.25967e-05	48.9667	cd07937	DRE_TIM_PC_TC_5S	-	531136
+1	Query_1[-3]	Non-specific	504533	1	864	0	633.311	NF004016	PRK05478	C	-
+1	Query_1[-3]	Non-specific	272940	1	864	0	600.689	TIGR00170	leuC	C	529010
+1	Query_1[-3]	Non-specific	508751	1	864	4.38047e-157	487.491	NF009116	PRK12466	C	-
+1	Query_1[-3]	Specific	439835	1	864	7.97433e-147	457.57	COG0065	LeuC	C	-
+1	Query_1[-3]	Specific	513358	1	846	3.53104e-134	423.363	pfam00330	Aconitase	C	-
+1	Query_1[-3]	Non-specific	153133	1	780	1.22228e-121	387.315	cd01583	IPMI	C	529010
+1	Query_1[-3]	Non-specific	502965	1	858	5.03766e-67	233.168	NF001614	PRK00402	C	-
+1	Query_1[-3]	Non-specific	273563	1	855	3.88185e-58	207.298	TIGR01343	hacA_fam	C	529010
+1	Query_1[-3]	Non-specific	273960	1	858	6.10636e-53	192.284	TIGR02086	IPMI_arch	C	529010
+1	Query_1[-3]	Non-specific	153129	1	774	1.41751e-34	138.013	cd01351	Aconitase	C	529010
+1	Query_1[-3]	Non-specific	153135	1	558	2.4441e-24	107.149	cd01585	AcnA_Bact	C	529010
+1	Query_1[-3]	Non-specific	440669	127	549	1.0358e-18	93.2456	COG1048	AcnA	C	-
+1	Query_1[-3]	Non-specific	153132	157	774	1.85841e-17	86.1288	cd01582	Homoaconitase	C	529010
+1	Query_1[-3]	Non-specific	240263	127	558	2.66862e-17	88.5303	PTZ00092	PTZ00092	NC	-
+1	Query_1[-3]	Non-specific	153134	1	597	5.8523e-17	85.5694	cd01584	AcnA_Mitochondrial	C	529010
+1	Query_1[-3]	Non-specific	153136	148	558	5.65541e-14	76.189	cd01586	AcnA_IRP	NC	529010
+1	Query_1[-3]	Non-specific	506674	127	549	7.11224e-14	77.4736	NF006757	PRK09277	NC	-
+1	Query_1[-3]	Non-specific	215047	127	558	2.04229e-12	72.5304	PLN00070	PLN00070	NC	-
+1	Query_1[-3]	Specific	507224	3625	3708	2.25674e-05	42.6644	NF007397	PRK09925	-	-
+1	Query_1[-3]	Non-specific	153131	148	561	3.17724e-05	48.649	cd01581	AcnB	NC	529010
+1	Query_1[-3]	Specific	429805	3625	3708	0.000421586	39.0929	pfam08054	Leu_leader	-	452791
+ENDDOMAINS
+SITES
+1	Query_1[-2]	Specific	active site	R3493-3491,D3490-3488,Q3481-3479,E3400-3398,R3307-3305,H3241-3239,S3115-3113,E3109-3107,P3025-3023,T3019-3017,H2926-2924,H2920-2918	12	0	163678
+1	Query_1[-2]	Specific	catalytic residues	R3493-3491,D3490-3488,E3400-3398	3	0	163678
+1	Query_1[-2]	Specific	metal binding site	H2926-2924,H2920-2918	2	0	163678
+ENDSITES
+ENDQUERY
+ENDSESSION	1
+ENDDATA

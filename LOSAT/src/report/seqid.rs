@@ -1,10 +1,10 @@
 //! NCBI's Seq-id of the sequences that LOSAT reports, and its printings.
 //!
-//! LOSAT reads queries and `-subject` subjects without `-parse_deflines` (refused), so a
-//! reported sequence has one of three Seq-ids: the local ID that NCBI's FASTA reader
+//! A reported sequence has one of three Seq-ids: the local ID that NCBI's FASTA reader
 //! generates (`Query_N`, `Subject_N`), the ordinal ID of a sequence of a database without
 //! parsed Seq-ids (`gnl|BL_ORD_ID|<oid>`), or a Seq-id that a database built with
-//! `-parse_seqids` stores (`SeqId::Db`, chosen and printed by `crate::seqid`). The serial
+//! `-parse_seqids` stores or `-parse_deflines` read from a query's defline (`SeqId::Db`, chosen
+//! and printed by `crate::seqid`). The serial
 //! formats (outfmt 8, 9, 11, 12) write the Seq-id object itself (`SeqId::write`); the other
 //! printings (the title's first word, `gnl|BL_ORD_ID|0`, `BL_ORD_ID:0`, ...) join this type
 //! with the formats that use them.
@@ -74,9 +74,10 @@ pub enum SeqId<'a> {
     ///                         int vol_oid = dbt.GetTag().GetId();
     ///                         dbt.SetTag().SetId(m_VolStart + vol_oid);
     /// ```
-    /// The tag is the sequence's ordinal ID in the opened database (its volume's start plus
-    /// its position in the volume).
-    BlOrdId(u32),
+    /// The tag is the sequence's OID in the opened database (its volume's start plus its
+    /// position in the volume), not its rank in a list that restricts the search
+    /// (`seqdb::Oid`).
+    BlOrdId(crate::seqdb::Oid),
     /// A Seq-id of a database sequence with parsed Seq-ids: the Seq-align id that
     /// `seqid::DeflineSet::alignment_id` chooses (or the id a format shows).
     Db(&'a ParsedSeqId),
@@ -101,10 +102,7 @@ impl SeqId<'_> {
     pub fn sam_name(&self, out: &mut Vec<u8>) {
         match *self {
             SeqId::Local(id) => out.extend_from_slice(id.as_bytes()),
-            SeqId::BlOrdId(oid) => {
-                out.extend_from_slice(b"BL_ORD_ID:");
-                out.extend_from_slice(oid.to_string().as_bytes());
-            }
+            SeqId::BlOrdId(oid) => out.extend_from_slice(oid.content_label().as_bytes()),
             SeqId::Db(id) => crate::seqid::label::content(id, true, out),
         }
     }
@@ -130,9 +128,9 @@ impl SeqId<'_> {
                 enc.end_member();
                 enc.member("tag", 1);
                 enc.variant("Object-id", "id", 0);
-                // An ordinal ID is an `Int4` in NCBI (`int oid`); a database has fewer than
-                // 2^31 sequences.
-                enc.int(oid as i32);
+                // An OID is an `Int4` in NCBI (`int oid`); a database has fewer than 2^31
+                // sequences.
+                enc.int(oid.get() as i32);
                 enc.end_variant();
                 enc.end_member();
                 enc.end_sequence();
@@ -238,7 +236,10 @@ fn write_parsed<E: Encoder>(id: &ParsedSeqId, enc: &mut E) {
         ParsedSeqId::Pdb(id) => {
             enc.begin_sequence("PDB-seq-id");
             enc.member("mol", 0);
+            // `mol PDB-mol-id` (seqloc.asn), a named VisibleString (`begin_named`).
+            enc.begin_named("PDB-mol-id");
             enc.visible_str(&id.mol);
+            enc.end_named();
             enc.end_member();
             let chain = match id.chain {
                 Some(chain) => Some(chain),
@@ -277,7 +278,9 @@ fn write_parsed<E: Encoder>(id: &ParsedSeqId, enc: &mut E) {
     enc.end_variant();
 }
 
-fn write_object_id<E: Encoder>(enc: &mut E, tag: &ObjectId) {
+/// Writes an `Object-id` (a CHOICE): the tag of a local id and of a `Dbtag`, and a PSSM's
+/// `identifier` (`report::serial::pssm`).
+pub(crate) fn write_object_id<E: Encoder>(enc: &mut E, tag: &ObjectId) {
     match tag {
         ObjectId::Id(id) => {
             enc.variant("Object-id", "id", 0);

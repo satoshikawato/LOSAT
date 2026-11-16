@@ -14,21 +14,19 @@ use std::sync::OnceLock;
 use crate::common::{GapEditOp, Hit};
 use crate::config::ScoringMatrix;
 use crate::core::blast_seg::{SegMasker, SegParams};
-use crate::core::blast_stat::composition::compute_lambda_from_score_probs;
-use crate::core::blast_stat::{e_to_p, p_to_e};
 use crate::core::composition_adjustment::adjust_scores::{
     blast_overall_p_value, read_aa_composition, x_newton_input, AdjustedProteinMatrix,
     BlastCompositionWorkspace,
 };
 use crate::core::composition_adjustment::redo_alignment::{
     blast_compo_alignment_new, blast_redo_one_match_with_workspace_queries_and_matrix,
-    build_query_word_hashes, preliminary_test_near_identical, test_near_identical,
-    windows_from_protein_aligns, x_whole_subject_composition, BlastCompoAlignment,
-    BlastCompoAlignmentContext, BlastCompoMatchingSequence, BlastCompoQueryInfo,
-    BlastCompoSequenceData, BlastCompoSequenceRange, BlastRedoAlignCallbacks, BlastRedoRangeResult,
-    EMatrixAdjustRule, XSubjectComposition,
+    build_query_word_hashes, preliminary_test_near_identical, redo_calc_lambda,
+    test_near_identical, windows_from_protein_aligns, x_whole_subject_composition,
+    BlastCompoAlignment, BlastCompoAlignmentContext, BlastCompoMatchingSequence,
+    BlastCompoQueryInfo, BlastCompoSequenceData, BlastCompoSequenceRange, BlastRedoAlignCallbacks,
+    BlastRedoRangeResult, EMatrixAdjustRule, XSubjectComposition,
 };
-use crate::stats::{blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
+use crate::stats::{blast_spouge_stoe, e_to_p, p_to_e, BlastGumbelBlk, KarlinParams};
 use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, ncbistdaa, protein_score};
 
 use super::gapalign::{
@@ -325,7 +323,9 @@ pub(crate) struct BlastpKappaSubjectRangeCache {
 /// search, so a subject is SEG-masked once however many queries hit it. The
 /// query-parallel redo creates one cache per query, in which a subject range
 /// is never looked up twice, so every (query, subject) pair runs SEG again.
-/// Those per-query caches read and write this store. The
+/// Those per-query caches read and write this store. The one-thread redo of
+/// the block search keeps the blocks' store from block to block where its
+/// subjects are those encoded for all blocks (`x_query_blocks::x_block_seg_store`). The
 /// entry for a key is the value the serial cache holds for it: the masked
 /// range and its bias flag depend on the subject range only. Two threads may
 /// compute the same entry at the same time; they then store equal values.
@@ -353,7 +353,7 @@ impl XSharedSubjectRanges {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    // No NCBI counterpart: memory only (LOSAT_X_BPSEGWIN, `x_redo_par::x_bp_seg_win`); it changes
+    // No NCBI counterpart: memory only (LOSAT_X_BPSEGWIN, `x_bp_seg_win`); it changes
     // no value NCBI computes.
     /// Drops every entry and the maps' room. A range looked up afterwards is masked again, into the
     /// value it had: an entry depends on its key only.
@@ -381,18 +381,34 @@ impl XSharedSubjectRanges {
     }
 }
 
-impl BlastpKappaSubjectRangeCache {
-    pub(crate) fn new() -> Self {
-        Self {
-            masked_ranges: HashMap::new(),
-            x_shared: None,
-        }
-    }
+/// EXPERIMENT (LOSAT_X_BPSEGWIN): the built-in number of entries (about 320 bytes each) from
+/// which the store is emptied after a window.
+const X_SEG_WIN_ENTRIES: usize = 4_096;
 
+// No NCBI counterpart: reads the LOSAT_X_BPSEGWIN switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPSEGWIN): the number of entries from which the search's store of
+/// SEG-masked subject ranges (`XSharedSubjectRanges`) is emptied after a window, or `None` (off).
+/// A strict-set value switch: the integer given, 2 or more, else 4,096; `None` for `0`. Where the
+/// redo runs in windows, a store that holds that many entries once a window is computed is
+/// emptied, so it holds about the ranges of one window, not those of the whole search; a smaller
+/// store is kept for the next windows (masking its ranges again costs more time than it saves
+/// memory: bp_wssv at 8 threads, 86 entries). A later window that reaches a range again masks it
+/// again: an entry is a function of its key (the subject, the range and the SEG parameters), so
+/// it gets the same bytes and bias flag.
+pub(crate) fn x_bp_seg_win() -> Option<usize> {
+    static MIN: OnceLock<Option<usize>> = OnceLock::new();
+    *MIN.get_or_init(|| {
+        crate::utils::xswitch::value("LOSAT_X_BPSEGWIN", 2..=usize::MAX, X_SEG_WIN_ENTRIES)
+    })
+}
+
+impl BlastpKappaSubjectRangeCache {
     // No NCBI counterpart: constructor that selects the search-wide store (see
     // XSharedSubjectRanges); it does not change any value NCBI computes.
-    /// A cache backed by the search-wide store (`None`: the cache keeps its own map).
-    pub(crate) fn x_with_shared(shared: Option<std::sync::Arc<XSharedSubjectRanges>>) -> Self {
+    /// A cache backed by `shared`, a store of more than one cache (`None`: the cache keeps its own
+    /// map).
+    pub(crate) fn new(shared: Option<std::sync::Arc<XSharedSubjectRanges>>) -> Self {
         Self {
             masked_ranges: HashMap::new(),
             x_shared: shared,
@@ -534,10 +550,6 @@ fn build_incoming_alignment_list(
 #[derive(Debug, Clone)]
 struct RedoneBlastpHit {
     hit: Hit,
-    query_start: i32,
-    query_end: i32,
-    subject_start: i32,
-    subject_end: i32,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1755-1770
@@ -817,27 +829,10 @@ fn blastp_redo_one_alignment_callback(
 //     s_NewAlignmentUsingXdrop, s_FreeEditScript
 // };
 // ```
-//
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:551-570
-// ```c
-// static double
-// s_CalcLambda(double probs[], int min_score, int max_score, double lambda0)
-// {
-//     ...
-//     return Blast_KarlinLambdaNR(&freq, lambda0);
-// }
-// ```
-fn blastp_calc_lambda(probs: &[f64], min_score: i32, max_score: i32, lambda0: f64) -> Result<f64> {
-    compute_lambda_from_score_probs(probs, min_score, max_score, lambda0)
-        .map_err(anyhow::Error::msg)
-}
-
 const BLASTP_REDO_ALIGN_CALLBACKS: BlastRedoAlignCallbacks = BlastRedoAlignCallbacks {
-    calc_lambda: Some(blastp_calc_lambda),
+    calc_lambda: Some(redo_calc_lambda),
     get_range: blastp_get_range_callback,
     redo_one_alignment: blastp_redo_one_alignment_callback,
-    new_xdrop_align: None,
-    free_align_traceback: None,
 };
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:323-329
@@ -918,10 +913,6 @@ fn redone_hit_from_alignment_owned(
             gap_info,
             num_positives: 0,
         },
-        query_start: align.query_start,
-        query_end: align.query_end,
-        subject_start: align.match_start,
-        subject_end: align.match_end,
     })
 }
 
@@ -1339,7 +1330,7 @@ fn blast_nint(x: f64) -> i32 {
 // ```
 fn scaled_karlin_params(params: &KarlinParams, score_divisor: f64) -> KarlinParams {
     if score_divisor == 1.0 {
-        return params.clone();
+        return *params;
     }
     KarlinParams {
         lambda: params.lambda / score_divisor,
@@ -1653,7 +1644,7 @@ fn recompute_num_identities_impl<const BLOSUM62: bool>(
             hsp.num_ident = num_ident;
             hsp.num_positives = num_positives;
             hsp.gapopen = gap_opens;
-            hsp.mismatch = alignment_len.saturating_sub(num_ident + gap_letters);
+            hsp.mismatch = alignment_len.saturating_sub(num_ident + gap_letters) as i64;
             hsp.identity = if alignment_len > 0 {
                 (num_ident as f64 * 100.0) / (alignment_len as f64)
             } else {
@@ -1688,7 +1679,7 @@ fn recompute_num_identities_impl<const BLOSUM62: bool>(
         hsp.length = q_span;
         hsp.num_ident = num_ident;
         hsp.num_positives = num_positives;
-        hsp.mismatch = q_span.saturating_sub(num_ident);
+        hsp.mismatch = q_span.saturating_sub(num_ident) as i64;
         hsp.gapopen = 0;
         hsp.identity = if q_span > 0 {
             (num_ident as f64 * 100.0) / (q_span as f64)
@@ -1741,6 +1732,16 @@ fn adjust_evalues_for_composition(
         return;
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:172-176
+    // ```c
+    //         hsp->evalue *= db_to_sequence_scale;
+    //
+    //         align_p_value = BLAST_KarlinEtoP(hsp->evalue);
+    //         combined_p_value = Blast_Overall_P_Value(comp_p_value,align_p_value);
+    //         hsp->evalue = BLAST_KarlinPtoE(combined_p_value);
+    // ```
+    // `stats::e_to_p` / `stats::p_to_e` are `BLAST_KarlinEtoP` / `BLAST_KarlinPtoE` with
+    // NCBI's `BLAST_Expm1` / `BLAST_Log1p` (not libm's `exp_m1` / `ln_1p`).
     let mut best_evalue = f64::MAX;
     for hsp in &mut hsp_list.hsps {
         hsp.e_value *= db_to_sequence_scale;
@@ -1755,6 +1756,38 @@ fn adjust_evalues_for_composition(
     hsp_list.best_evalue = best_evalue;
 }
 
+/// `Blast_HSPListGetEvalues` of the redo (no linking): the e-values from the scaled `kbp_gap`,
+/// with Spouge's finite-size correction when the search has a Gumbel block.
+#[inline]
+fn get_evalues(
+    hsp_list: &mut BlastpHspList,
+    eval_params: &KarlinParams,
+    gumbel_params: Option<&BlastGumbelBlk>,
+    query_workspace: &BlastpKappaQueryWorkspace,
+    subject_length: i32,
+) {
+    match gumbel_params {
+        Some(gumbel_params) => {
+            for hsp in &mut hsp_list.hsps {
+                hsp.e_value = blast_spouge_stoe(
+                    hsp.raw_score,
+                    eval_params,
+                    gumbel_params,
+                    query_workspace.query_length,
+                    subject_length,
+                );
+            }
+        }
+        None => {
+            let search_space = query_workspace.redo_query_info.eff_search_space;
+            for hsp in &mut hsp_list.hsps {
+                hsp.e_value = search_space
+                    * (-eval_params.lambda * hsp.raw_score as f64 + eval_params.k.ln()).exp();
+            }
+        }
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:395-457
 // ```c
 // static int
@@ -1767,13 +1800,14 @@ fn adjust_evalues_for_composition(
 fn evaluate_and_purge(
     hsp_list: &mut BlastpHspList,
     params: &KarlinParams,
-    gumbel_params: &BlastGumbelBlk,
+    gumbel_params: Option<&BlastGumbelBlk>,
     query_workspace: &BlastpKappaQueryWorkspace,
     subject_length: i32,
     expect_value: f64,
     pvalue_for_this_pair: Option<f64>,
     lambda_ratio: Option<f64>,
     score_divisor: f64,
+    do_link_hsps: bool,
 ) -> (i32, f64) {
     let mut best_evalue = f64::MAX;
     let mut best_score = 0;
@@ -1792,16 +1826,40 @@ fn evaluate_and_purge(
     // }
     // ```
     let eval_params = scaled_karlin_params(params, score_divisor);
-    for hsp in &mut hsp_list.hsps {
-        hsp.e_value = blast_spouge_stoe(
-            hsp.raw_score,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:411-414
+    // ```c
+    //     if (hitParams->do_sum_stats) {
+    //         status = BLAST_LinkHsps(program_number, hsp_list, queryInfo,
+    //                                 subject_length, sbp,
+    //                                 hitParams->link_hsp_params, TRUE);
+    //     } else {
+    // ```
+    // psiblast's `-sum_stats true`: the linked sets' e-values from the scaled `kbp_gap`, with the
+    // traceback's linking parameters (`EvenGapLinkParams::traceback`); `BLAST_LinkHsps` sorts the
+    // list by score and sets the best e-value.
+    if do_link_hsps {
+        super::hsp::link_hsp_list(
+            hsp_list,
+            crate::core::link_hsps::LinkContext {
+                lambda: eval_params.lambda,
+                log_k: eval_params.k.ln(),
+                query_length: query_workspace.query_length,
+                length_adjustment: query_workspace.length_adjustment,
+                eff_searchsp: query_workspace.redo_query_info.eff_search_space as i64,
+            },
+            subject_length,
+            &crate::core::link_hsps::EvenGapLinkParams::traceback(),
+        );
+    } else {
+        get_evalues(
+            hsp_list,
             &eval_params,
             gumbel_params,
-            query_workspace.query_length,
+            query_workspace,
             subject_length,
         );
+        update_best_evalue(hsp_list);
     }
-    update_best_evalue(hsp_list);
     if let Some(comp_p_value) = pvalue_for_this_pair.filter(|p| (0.0..=1.0).contains(p)) {
         adjust_evalues_for_composition(
             hsp_list,
@@ -1849,7 +1907,7 @@ pub(crate) fn postprocess_preliminary_hits(
     subject: &[u8],
     matrix: ScoringMatrix,
     karlin_params: &KarlinParams,
-    gumbel_params: &BlastGumbelBlk,
+    gumbel_params: Option<&BlastGumbelBlk>,
     redo_align_params: &BlastRedoAlignParams,
     expect_value: f64,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1719-1720
@@ -1872,7 +1930,7 @@ pub(crate) fn postprocess_preliminary_hits(
     }
 
     let incoming_aligns =
-        build_incoming_alignment_list(&preliminary_hits, redo_align_params.score_divisor);
+        build_incoming_alignment_list(preliminary_hits, redo_align_params.score_divisor);
     let matching_seq = BlastCompoMatchingSequence::new(preliminary_hits[0].s_idx as i32, subject);
     if let Some(target) = blastp_trace_hsp_target() {
         if blastp_trace_matches_pair(target, preliminary_hits[0].q_idx, preliminary_hits[0].s_idx) {
@@ -2034,6 +2092,7 @@ pub(crate) fn postprocess_preliminary_hits(
         pvalue_for_this_pair,
         lambda_ratio,
         redo_align_params.score_divisor,
+        redo_align_params.do_link_hsps,
     );
     if best_evalue > expect_value || hsp_list.hsps.is_empty() {
         return Ok(BlastpPostprocessResult {
@@ -2076,7 +2135,7 @@ pub(crate) fn postprocess_preliminary_hits(
                     hsp.length,
                     hsp.num_ident,
                     hsp.num_positives,
-                    hsp.length.saturating_sub(hsp.num_ident.saturating_add(hsp.mismatch)),
+                    hsp.length as i64 - hsp.num_ident as i64 - hsp.mismatch,
                     hsp.gapopen,
                     hsp.mismatch,
                     hsp.identity,
@@ -2164,6 +2223,7 @@ pub(crate) fn x_newton_lanes_prefetch_matches(
     }
     let query_info = &query_workspace.redo_query_info;
     let mut inputs = Vec::new();
+    let mut shared_q = None;
     for local_match in local_matches {
         if local_match.hsps.is_empty()
             || blast_compo_early_termination(local_match.best_evalue, heaps)
@@ -2175,7 +2235,7 @@ pub(crate) fn x_newton_lanes_prefetch_matches(
             .iter()
             .map(super::blast_engine::preliminary_hit_from_local_match_hsp)
             .collect();
-        // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database, dropped after the match (the
+        // Read from the database, dropped after the match (the
         // redo reads it again); on an error nothing is computed ahead, and the redo of the match
         // reaches the error itself.
         let Ok(subject) = subjects.read(local_match.oid) else {
@@ -2229,6 +2289,7 @@ pub(crate) fn x_newton_lanes_prefetch_matches(
             range.subject.length,
             redo_align_params.compo_adjust_mode,
             composition_workspace,
+            &mut shared_q,
         ) {
             inputs.push(input);
         }
@@ -2257,7 +2318,6 @@ mod tests {
                 crate::core::composition_adjustment::redo_alignment::BlastCompoGappingParams {
                     gap_open: 11,
                     gap_extend: 1,
-                    decline_align: 0,
                     x_dropoff: 50,
                     context: std::cell::Cell::new(None),
                 },
@@ -2265,20 +2325,15 @@ mod tests {
                 crate::core::composition_adjustment::redo_alignment::BlastCompoAdjustMode::CompositionMatrixAdjust,
             alphsize: crate::utils::matrix::BLASTAA_SIZE as i32,
             composition_test_index: 0,
-            unified_p: false,
             log_k: 0.0,
             score_divisor: 1.0,
-            restricted_alignment: false,
             smith_waterman: false,
-            is_same_adjustment: false,
             near_identical_cutoff: 0.0,
             position_based: false,
-            re_matrix_adjustment_pseudocounts: 20,
             ccat_query_length: 80,
             query_is_translated: false,
             subject_is_translated: false,
             cutoff_score: 0,
-            cutoff_evalue: 10.0,
             do_link_hsps: false,
         }
     }
@@ -2345,17 +2400,9 @@ mod tests {
     fn test_reap_contained_hits_uses_internal_offsets_ncbi_style() {
         let outer = RedoneBlastpHit {
             hit: make_hit(200, 101, 150, 201, 250),
-            query_start: 100,
-            query_end: 150,
-            subject_start: 200,
-            subject_end: 250,
         };
         let inner = RedoneBlastpHit {
             hit: make_hit(180, 101, 149, 201, 249),
-            query_start: 100,
-            query_end: 149,
-            subject_start: 200,
-            subject_end: 249,
         };
 
         let kept_hits = vec![outer.clone(), inner];
@@ -2365,22 +2412,6 @@ mod tests {
         assert_eq!(hsp_list.hsps[0].raw_score, outer.hit.raw_score);
         assert_eq!(hsp_list.hsps[0].q_start, outer.hit.q_start);
         assert_eq!(hsp_list.hsps[0].s_start, outer.hit.s_start);
-    }
-
-    fn make_redone_hit(
-        score: i32,
-        q_start: usize,
-        q_end: usize,
-        s_start: usize,
-        s_end: usize,
-    ) -> RedoneBlastpHit {
-        RedoneBlastpHit {
-            hit: make_hit(score, q_start, q_end, s_start, s_end),
-            query_start: q_start.saturating_sub(1) as i32,
-            query_end: q_end as i32,
-            subject_start: s_start.saturating_sub(1) as i32,
-            subject_end: s_end as i32,
-        }
     }
 
     #[test]
@@ -2531,7 +2562,7 @@ mod tests {
 
     #[test]
     fn test_adjust_evalues_for_composition_matches_ncbi_sequence_scaling() {
-        let query_workspace = build_query_workspace(&vec![1u8; 100], 100, 10, 9000.0);
+        let query_workspace = build_query_workspace(&[1u8; 100], 100, 10, 9000.0);
         let mut hsp_list = BlastpHspList {
             oid: 0,
             query_index: 0,
@@ -2613,18 +2644,19 @@ mod tests {
             hsps: vec![BlastpHsp::from_hit(make_hit(1062, 1, 10, 1, 10))],
             best_evalue: f64::MAX,
         };
-        let query_workspace = build_query_workspace(&vec![1u8; 100], 100, 0, 100000.0);
+        let query_workspace = build_query_workspace(&[1u8; 100], 100, 0, 100000.0);
 
         let (_best_score, best_evalue) = evaluate_and_purge(
             &mut hsp_list,
             &params,
-            &gumbel,
+            Some(&gumbel),
             &query_workspace,
             200,
             10.0,
             None,
             None,
             1.0,
+            false,
         );
 
         let expected = blast_spouge_stoe(1062, &params, &gumbel, 100, 200);
@@ -2662,18 +2694,19 @@ mod tests {
             hsps: vec![BlastpHsp::from_hit(make_hit(1062, 1, 10, 1, 10))],
             best_evalue: f64::MAX,
         };
-        let query_workspace = build_query_workspace(&vec![1u8; 100], 100, 0, 100000.0);
+        let query_workspace = build_query_workspace(&[1u8; 100], 100, 0, 100000.0);
 
         let (_best_score, best_evalue) = evaluate_and_purge(
             &mut hsp_list,
             &params,
-            &gumbel,
+            Some(&gumbel),
             &query_workspace,
             200,
             10.0,
             None,
             None,
             32.0,
+            false,
         );
 
         assert_eq!(hsp_list.hsps.len(), 1);
@@ -2690,8 +2723,8 @@ mod tests {
 
     #[test]
     fn test_redo_preliminary_blastp_hit_preserves_internal_offsets_with_ranges() {
-        let full_query = BlastCompoSequenceData::from_ncbistdaa(&vec![1u8; 12]);
-        let full_subject = BlastCompoSequenceData::from_ncbistdaa(&vec![1u8; 11]);
+        let full_query = BlastCompoSequenceData::from_ncbistdaa(&[1u8; 12]);
+        let full_subject = BlastCompoSequenceData::from_ncbistdaa(&[1u8; 11]);
         let query_range = BlastCompoSequenceRange {
             begin: 4,
             end: 12,
@@ -2760,7 +2793,7 @@ mod tests {
         };
         let params = test_redo_align_params();
 
-        let query = BlastCompoSequenceData::from_ncbistdaa(&vec![2u8; 80]);
+        let query = BlastCompoSequenceData::from_ncbistdaa(&[2u8; 80]);
         let query_range = BlastCompoSequenceRange {
             begin: 0,
             end: 80,
@@ -2814,7 +2847,7 @@ mod tests {
             context: 0,
         };
         let params = test_redo_align_params();
-        let query = BlastCompoSequenceData::from_ncbistdaa(&vec![2u8; 80]);
+        let query = BlastCompoSequenceData::from_ncbistdaa(&[2u8; 80]);
         let query_range = subject_range;
         let align = blast_compo_alignment_new(
             80,
@@ -2828,7 +2861,7 @@ mod tests {
             None,
         );
         let words = build_query_word_hashes(query.data());
-        let mut cache = BlastpKappaSubjectRangeCache::new();
+        let mut cache = BlastpKappaSubjectRangeCache::new(None);
         let get = |cache: &mut BlastpKappaSubjectRangeCache| {
             build_subject_range_data(
                 &matching_seq,
@@ -3003,15 +3036,15 @@ mod tests {
         // int sEnd = align->matchEnd - seqOffset - 1;
         // ```
         let mut residues = vec![9u8; 4];
-        residues.extend(std::iter::repeat(1u8).take(80));
-        residues.extend(std::iter::repeat(9u8).take(4));
+        residues.extend(std::iter::repeat_n(1u8, 80));
+        residues.extend(std::iter::repeat_n(9u8, 4));
         let matching_seq = BlastCompoMatchingSequence::new(0, &residues);
         let subject_range = BlastCompoSequenceRange {
             begin: 4,
             end: 84,
             context: 0,
         };
-        let query = BlastCompoSequenceData::from_ncbistdaa(&vec![1u8; 80]);
+        let query = BlastCompoSequenceData::from_ncbistdaa(&[1u8; 80]);
         let query_range = BlastCompoSequenceRange {
             begin: 0,
             end: 80,
@@ -3118,24 +3151,12 @@ mod tests {
         let hits = vec![
             RedoneBlastpHit {
                 hit: make_hit(100, 11, 50, 101, 140),
-                query_start: 10,
-                query_end: 50,
-                subject_start: 100,
-                subject_end: 140,
             },
             RedoneBlastpHit {
                 hit: make_hit(90, 21, 40, 111, 130),
-                query_start: 20,
-                query_end: 40,
-                subject_start: 110,
-                subject_end: 130,
             },
             RedoneBlastpHit {
                 hit: make_hit(80, 61, 80, 151, 170),
-                query_start: 60,
-                query_end: 80,
-                subject_start: 150,
-                subject_end: 170,
             },
         ];
         let mut hsp_list = hsp_list_of(&hits);
@@ -3184,10 +3205,6 @@ mod tests {
         let mut hits = vec![
             RedoneBlastpHit {
                 hit: make_hit(100, 1, 40, 101, 140),
-                query_start: 0,
-                query_end: 40,
-                subject_start: 100,
-                subject_end: 140,
             },
             RedoneBlastpHit {
                 hit: {
@@ -3195,10 +3212,6 @@ mod tests {
                     hit.query_frame = 1;
                     hit
                 },
-                query_start: 10,
-                query_end: 30,
-                subject_start: 110,
-                subject_end: 130,
             },
         ];
         hits[0].hit.query_frame = 1;

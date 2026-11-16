@@ -1,0 +1,361 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/x2g_p0063_s.faa).
+           1 sequences; 88 total letters
+
+
+
+Query= p0063_q
+
+Length=53
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+p0063_s                                                               12.5    1.5    3
+
+
+> p0063_s
+Length=88
+
+ Score = 11.6 bits (19),  Expect(3) = 0.45
+ Identities = 3/7 (43%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+ Frame = +1
+
+Query  7   LYVKRCT  27
+           + VK C+
+Sbjct  59  MQVKACS  65
+
+
+ Score = 11.6 bits (19),  Expect(3) = 0.45
+ Identities = 3/3 (100%), Positives = 3/3 (100%), Gaps = 0/3 (0%)
+ Frame = +1
+
+Query  34  DNY  42
+           DNY
+Sbjct  77  DNY  79
+
+
+ Score =  7.5 bits (10),  Expect(3) = 0.45
+ Identities = 1/2 (50%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+ Frame = +1
+
+Query  1   YV  6
+           Y+
+Sbjct  48  YI  49
+
+
+ Score = 12.5 bits (21),  Expect(3) = 1.5
+ Identities = 5/11 (45%), Positives = 6/11 (55%), Gaps = 0/11 (0%)
+ Frame = +2
+
+Query  8   CTSKGVLALII  40
+           C  K + AL I
+Sbjct  39  CCDKWIDALYI  49
+
+
+ Score =  8.4 bits (12),  Expect(3) = 1.5
+ Identities = 2/2 (100%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+ Frame = +1
+
+Query  40  YE  45
+           YE
+Sbjct  67  YE  68
+
+
+ Score =  7.0 bits (9),  Expect(3) = 1.5
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = +2
+
+Query  8   C  10
+           C
+Sbjct  13  C  13
+
+
+ Score =  9.8 bits (15),  Expect(2) = 1.6
+ Identities = 3/6 (50%), Positives = 4/6 (67%), Gaps = 0/6 (0%)
+ Frame = -2
+
+Query  46  LRNYQC  29
+           L + QC
+Sbjct  71  LMSGQC  76
+
+
+ Score =  9.3 bits (14),  Expect(2) = 1.6
+ Identities = 2/3 (67%), Positives = 3/3 (100%), Gaps = 0/3 (0%)
+ Frame = -3
+
+Query  24  TPF  16
+           +PF
+Sbjct  80  SPF  82
+
+
+ Score = 12.1 bits (20),  Expect(3) = 1.8
+ Identities = 3/7 (43%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+ Frame = -1
+
+Query  26  VHLLTYK  6
+           +H + YK
+Sbjct  19  LHKIPYK  25
+
+
+ Score =  8.4 bits (12),  Expect(3) = 1.8
+ Identities = 1/3 (33%), Positives = 3/3 (100%), Gaps = 0/3 (0%)
+ Frame = -2
+
+Query  37  YQC  29
+           ++C
+Sbjct  11  HKC  13
+
+
+ Score =  7.0 bits (9),  Expect(3) = 1.8
+ Identities = 2/5 (40%), Positives = 3/5 (60%), Gaps = 0/5 (0%)
+ Frame = -2
+
+Query  52  RELRN  38
+           +E  N
+Sbjct  2   KEKLN  6
+
+
+ Score = 10.2 bits (16),  Expect(2) = 2.0
+ Identities = 3/9 (33%), Positives = 6/9 (67%), Gaps = 0/9 (0%)
+ Frame = +1
+
+Query  13  VKRCTSIDN  39
+           +K   +ID+
+Sbjct  1   IKEKLNIDS  9
+
+
+ Score =  8.4 bits (12),  Expect(2) = 2.0
+ Identities = 1/4 (25%), Positives = 4/4 (100%), Gaps = 0/4 (0%)
+ Frame = +1
+
+Query  40  YEVL  51
+           Y+++
+Sbjct  24  YKIV  27
+
+
+ Score =  9.3 bits (14),  Expect = 2.3
+ Identities = 2/14 (14%), Positives = 7/14 (50%), Gaps = 0/14 (0%)
+ Frame = +1
+
+Query  1   YVLYVKRCTSIDNY  42
+           Y+++    +  D +
+Sbjct  30  YMVHEDSASCCDKW  43
+
+
+ Score =  9.3 bits (14),  Expect = 2.3
+ Identities = 2/4 (50%), Positives = 3/4 (75%), Gaps = 0/4 (0%)
+ Frame = +2
+
+Query  8   CTSK  19
+           C +K
+Sbjct  85  CQAK  88
+
+
+ Score =  8.9 bits (13),  Expect = 3.1
+ Identities = 2/3 (67%), Positives = 3/3 (100%), Gaps = 0/3 (0%)
+ Frame = +3
+
+Query  18  KVY  26
+           K+Y
+Sbjct  28  KLY  30
+
+
+ Score =  8.4 bits (12),  Expect = 4.3
+ Identities = 1/4 (25%), Positives = 3/4 (75%), Gaps = 0/4 (0%)
+ Frame = -3
+
+Query  21  PFDV  10
+           P+ +
+Sbjct  23  PYKI  26
+
+
+ Score =  9.3 bits (14),  Expect(2) = 4.4
+ Identities = 2/3 (67%), Positives = 3/3 (100%), Gaps = 0/3 (0%)
+ Frame = +1
+
+Query  7   LYV  15
+           LY+
+Sbjct  47  LYI  49
+
+
+ Score =  7.5 bits (10),  Expect(2) = 4.4
+ Identities = 1/2 (50%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+ Frame = +1
+
+Query  19  RC  24
+           +C
+Sbjct  75  QC  76
+
+
+ Score =  7.9 bits (11),  Expect = 5.9
+ Identities = 1/3 (33%), Positives = 3/3 (100%), Gaps = 0/3 (0%)
+ Frame = -3
+
+Query  51  ENF  43
+           +N+
+Sbjct  77  DNY  79
+
+
+ Score =  8.9 bits (13),  Expect(2) = 6.5
+ Identities = 2/2 (100%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+ Frame = -2
+
+Query  40  NY  35
+           NY
+Sbjct  78  NY  79
+
+
+ Score =  7.0 bits (9),  Expect(2) = 6.5
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = -2
+
+Query  31  C  29
+           C
+Sbjct  85  C  85
+
+
+ Score =  8.9 bits (13),  Expect(4) = 7.7
+ Identities = 2/3 (67%), Positives = 2/3 (67%), Gaps = 0/3 (0%)
+ Frame = -2
+
+Query  37  YQC  29
+           Y C
+Sbjct  48  YIC  50
+
+
+ Score =  8.4 bits (12),  Expect(4) = 7.7
+ Identities = 2/2 (100%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+ Frame = -1
+
+Query  23  HL  18
+           HL
+Sbjct  56  HL  57
+
+
+ Score =  7.5 bits (10),  Expect(4) = 7.7
+ Identities = 2/3 (67%), Positives = 3/3 (100%), Gaps = 0/3 (0%)
+ Frame = -2
+
+Query  52  REL  44
+           +EL
+Sbjct  17  QEL  19
+
+
+ Score =  6.6 bits (8),  Expect(4) = 7.7
+ Identities = 1/2 (50%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+ Frame = -1
+
+Query  11  YK  6
+           Y+
+Sbjct  67  YE  68
+
+
+ Score =  9.3 bits (14),  Expect(3) = 8.0
+ Identities = 2/3 (67%), Positives = 3/3 (100%), Gaps = 0/3 (0%)
+ Frame = -1
+
+Query  29  LVH  21
+           +VH
+Sbjct  31  MVH  33
+
+
+ Score =  7.5 bits (10),  Expect(3) = 8.0
+ Identities = 2/4 (50%), Positives = 3/4 (75%), Gaps = 0/4 (0%)
+ Frame = -3
+
+Query  12  VQNV  1
+           VQ +
+Sbjct  51  VQTM  54
+
+
+ Score =  6.6 bits (8),  Expect(3) = 8.0
+ Identities = 1/4 (25%), Positives = 3/4 (75%), Gaps = 0/4 (0%)
+ Frame = -3
+
+Query  45  FVII  34
+           + I+
+Sbjct  24  YKIV  27
+
+
+ Score =  7.5 bits (10),  Expect = 8.1
+ Identities = 1/8 (13%), Positives = 5/8 (63%), Gaps = 0/8 (0%)
+ Frame = -3
+
+Query  36  INASTPFD  13
+           + A + ++
+Sbjct  61  VKACSMYE  68
+
+
+ Score =  8.4 bits (12),  Expect(3) = 9.3
+ Identities = 2/3 (67%), Positives = 3/3 (100%), Gaps = 0/3 (0%)
+ Frame = +1
+
+Query  7   LYV  15
+           LY+
+Sbjct  29  LYM  31
+
+
+ Score =  7.5 bits (10),  Expect(3) = 9.3
+ Identities = 1/7 (14%), Positives = 6/7 (86%), Gaps = 0/7 (0%)
+ Frame = +1
+
+Query  28  SIDNYEV  48
+           ++D+ ++
+Sbjct  53  TMDHLKM  59
+
+
+ Score =  7.0 bits (9),  Expect(3) = 9.3
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = +1
+
+Query  22  C  24
+           C
+Sbjct  40  C  40
+
+
+ Score =  7.9 bits (11),  Expect(2) = 9.4
+ Identities = 1/2 (50%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+ Frame = +1
+
+Query  19  RC  24
+           +C
+Sbjct  12  KC  13
+
+
+ Score =  7.0 bits (9),  Expect(2) = 9.4
+ Identities = 2/3 (67%), Positives = 2/3 (67%), Gaps = 0/3 (0%)
+ Frame = +2
+
+Query  38  ITK  46
+           I K
+Sbjct  26  IVK  28
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 720
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/x2g_p0063_s.faa).
+    Posted date:  Unknown
+  Number of letters in database: 88
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 1

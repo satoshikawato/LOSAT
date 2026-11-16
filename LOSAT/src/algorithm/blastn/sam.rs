@@ -69,18 +69,26 @@ pub(crate) fn add_blastn_sam(
             let subject = sam_subjects.len() as u32;
             let (id, offset, key) = match subjects {
                 SubjectNames::Records(records) => (
-                    SeqId::Local(&records[s_idx].local_id),
+                    match records[s_idx].believed() {
+                        Some(ids) => SeqId::Db(crate::report::db_subject::forced_accession(
+                            &ids.best, &ids.ids,
+                        )),
+                        None => SeqId::Local(&records[s_idx].local_id),
+                    },
                     subject_placements.offset(s_idx) as i32,
                     s_idx as u64,
                 ),
                 // A sequence with parsed Seq-ids is named by an id of its Bioseq
                 // (`ParsedSubject::sam_id`).
                 SubjectNames::Database {
-                    ordinals, parsed, ..
+                    ordinals,
+                    oids,
+                    parsed,
+                    ..
                 } => (
                     match parsed.get(s_idx).and_then(Option::as_deref) {
                         Some(subject) => SeqId::Db(subject.sam_id()),
-                        None => SeqId::BlOrdId(ordinals[s_idx]),
+                        None => SeqId::BlOrdId(oids.oid(ordinals[s_idx])),
                     },
                     0,
                     u64::from(ordinals[s_idx]),
@@ -91,6 +99,7 @@ pub(crate) fn add_blastn_sam(
                     id,
                     searched_length: (lengths.searched)(s_idx) as i32,
                     offset,
+                    use_this_seqid: &[],
                 }),
                 key,
                 index: s_idx,
@@ -117,7 +126,12 @@ pub(crate) fn add_blastn_sam(
                 });
             }
         }
-        let query_record = queries.record(q_idx);
+        let mut query_record = queries.record(q_idx);
+        if let Some(ids) = queries.records[q_idx].believed() {
+            query_record.id = SeqId::Db(crate::report::db_subject::forced_accession(
+                &ids.best, &ids.ids,
+            ));
+        }
         let query = SamSequence {
             record: SamId::Query(query_record),
             key: (queries_before + q_idx) as u64,

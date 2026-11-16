@@ -1,8 +1,7 @@
 // Runs the RecordScanner contract against the adapter's serial reactor in a dedicated
-// worker, with the same scanner module as the Data worker (src/infra/reactor/scanner.ts).
+// worker, with the same scanner module as the Data worker (web/packages/losat/src/infra/reactor/scanner.ts).
 import { ENGINE_ASSETS } from 'virtual:losat-engine';
-import { instantiateSerial, loadReactor } from '../../../src/infra/reactor/instance';
-import { ReactorScanner, reopening } from '../../../src/infra/reactor/scanner';
+import { instantiateSerial, loadReactor, ReactorScanner, reopening } from 'losat';
 import { runCases, type CaseResult } from '../../contract/contract';
 import { RECORD_SCANNER_CASES } from '../../contract/record-scanner.contract';
 

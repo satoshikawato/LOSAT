@@ -22,10 +22,14 @@ const K_LN20: f64 = 2.9957322735539909;
 /// NCBI BLAST ln(2) constant.
 /// Reference: ncbi-blast/c++/include/algo/blast/core/ncbi_math.h
 /// #define NCBIMATH_LN2 0.69314718055994530941723212145818
-const NCBIMATH_LN2: f64 = 0.69314718055994530941723212145818;
+const NCBIMATH_LN2: f64 = std::f64::consts::LN_2; // the same f64 as NCBI's literal
 
 /// Natural log values for 0.1, 0.2, 0.3, ... 1.0 used by NCBI when window total=10.
 /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:1305-1311
+#[expect(
+    clippy::approx_constant,
+    reason = "NCBI's log_win10[] digits (blast_seg.c:1307-1311): -2.30258509 is not the f64 of -LN_10, and the std constant would change SEG's entropy"
+)]
 const LOG_WIN10: [f64; 11] = [
     0.0,
     -2.30258509,
@@ -214,7 +218,7 @@ impl<'a> SegWindow<'a> {
     }
 
     fn has_dash(&self) -> bool {
-        self.slice().iter().any(|&letter| letter == b'-')
+        self.slice().contains(&b'-')
     }
 
     fn shift_win1(&mut self) -> bool {
@@ -439,33 +443,83 @@ fn entropy_from_state_vector(state: &[i32]) -> f64 {
         classes += 1;
     }
     if packable {
-        return X_ENTROPY_MEMO.with(|memo| {
-            let mut memo = memo.borrow_mut();
-            let mask = memo.len() - 1;
-            let mut slot = (key.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40) as usize & mask;
-            loop {
-                let (stored_key, bits) = memo[slot];
-                if stored_key == key {
-                    return f64::from_bits(bits);
-                }
-                if stored_key == u64::MAX {
-                    let value = entropy_from_state_vector_reference(state);
-                    memo[slot] = (key, value.to_bits());
-                    return value;
-                }
-                slot = (slot + 1) & mask;
-            }
-        });
+        if let Some(value) = x_memo_get(x_state_entropies(), key) {
+            return value;
+        }
     }
     entropy_from_state_vector_reference(state)
 }
 
-thread_local! {
-    // No NCBI counterpart: memo table of entropy values per state vector (`s_Entropy` is a pure function of the vector); it does not change any value NCBI computes.
-    // Open-addressing table. Only state vectors summing to at most 15 are
-    // stored, and there are fewer than 700 of those, so it never fills.
-    static X_ENTROPY_MEMO: std::cell::RefCell<Vec<(u64, u64)>> =
-        std::cell::RefCell::new(vec![(u64::MAX, 0); 4096]);
+// No NCBI counterpart: the windows of at most 15 letters, as the count vectors NCBI's state
+// vector holds for them: every non-increasing list of positive counts summing to at most 15 (684
+// lists, the empty one among them), each passed to `visit`.
+fn x_each_count_list(visit: &mut impl FnMut(&[i32])) {
+    fn more(list: &mut Vec<i32>, left: i32, most: i32, visit: &mut impl FnMut(&[i32])) {
+        visit(list);
+        for count in (1..=most.min(left)).rev() {
+            list.push(count);
+            more(list, left - count, count, visit);
+            list.pop();
+        }
+    }
+    more(&mut Vec::new(), 15, 15, visit);
+}
+
+// No NCBI counterpart: an open-addressing table of `slots` (key, entropy bits) pairs, one for each
+// count list of `x_each_count_list`, keyed by `key` and valued by `value`.
+fn x_entropy_table(
+    slots: usize,
+    key: impl Fn(&[i32]) -> u64,
+    value: impl Fn(&[i32], u64) -> f64,
+) -> Box<[(u64, u64)]> {
+    let mut table = vec![(u64::MAX, 0); slots].into_boxed_slice();
+    let mask = slots - 1;
+    x_each_count_list(&mut |counts| {
+        let key = key(counts);
+        let mut slot = (key.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40) as usize & mask;
+        while table[slot].0 != u64::MAX {
+            slot = (slot + 1) & mask;
+        }
+        table[slot] = (key, value(counts, key).to_bits());
+    });
+    table
+}
+
+// No NCBI counterpart: the entropy stored for `key` in a table of `x_entropy_table`, if any.
+#[inline]
+fn x_memo_get(table: &[(u64, u64)], key: u64) -> Option<f64> {
+    let mask = table.len() - 1;
+    let mut slot = (key.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40) as usize & mask;
+    loop {
+        let (stored, bits) = table[slot];
+        if stored == key {
+            return Some(f64::from_bits(bits));
+        }
+        if stored == u64::MAX {
+            return None;
+        }
+        slot = (slot + 1) & mask;
+    }
+}
+
+// No NCBI counterpart: memo table of entropy values per state vector (`s_Entropy` is a pure
+// function of the vector); it does not change any value NCBI computes. Fewer than 700 state
+// vectors sum to at most 15, so the table holds each of them, as NCBI keeps the vector (counts in
+// non-increasing order), computed once for the process and read by every thread. A vector not in
+// it is computed by the port.
+fn x_state_entropies() -> &'static [(u64, u64)] {
+    static TABLE: std::sync::OnceLock<Box<[(u64, u64)]>> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        x_entropy_table(
+            4096,
+            |counts| {
+                counts.iter().enumerate().fold(0, |key, (class, &count)| {
+                    key | ((count as u64) << (4 * class))
+                })
+            },
+            |counts, _| entropy_from_state_vector_reference(counts),
+        )
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1598-1606,1616-1621
@@ -557,9 +611,10 @@ impl SegParams {
         // if (sparamsp->locut > sparamsp->hicut)
         //     sparamsp->hicut = sparamsp->locut;
         // ```
+        // (`< 0.0`, so a NaN stays: segmasker's `-locut -nan`.)
         let window = if window > 0 { window } else { 12 };
-        let mut locut = if locut >= 0.0 { locut } else { 0.0 };
-        let mut hicut = if hicut >= 0.0 { hicut } else { 0.0 };
+        let locut = if locut < 0.0 { 0.0 } else { locut };
+        let mut hicut = if hicut < 0.0 { 0.0 } else { hicut };
         if locut > hicut {
             hicut = locut;
         }
@@ -597,11 +652,8 @@ pub struct SegMasker {
     maxtrim: usize,
     downset: usize,
     upset: usize,
-    /// Whether a recursion on the left part of a trimmed segment keeps only the head of
-    /// its result, as NCBI's `s_SegSeq` does (true, the default; see `mask_sequence`).
-    ncbi_left_segments: bool,
     /// LOSAT_X_SEGTRIMMEMO (graduated 2026-10-26): whether the fast path takes a segment's trim from the
-    /// thread's memo (`x_seg_trim_memo.rs`); set by the maskers that repeat segments.
+    /// memo shared by all threads (`x_seg_trim_memo.rs`); set by the maskers that repeat segments.
     x_trim_memo: bool,
 }
 
@@ -612,7 +664,7 @@ impl SegMasker {
 
         // downset = (window+1)/2 - 1, upset = window - downset
         // Reference: blast_seg.c:2050-2051
-        let downset = (params.window + 1) / 2 - 1;
+        let downset = params.window.div_ceil(2) - 1;
         let upset = params.window - downset;
 
         Self {
@@ -624,21 +676,12 @@ impl SegMasker {
             maxtrim: params.maxtrim,
             downset,
             upset,
-            ncbi_left_segments: true,
             x_trim_memo: false,
         }
     }
 
-    /// The masker that keeps every segment of the left recursion (LOSAT's SEG before S08).
-    /// BLASTX keeps it until it is integrated (plan DW-10, SX); every other program uses
-    /// NCBI's behavior.
-    pub fn keeping_all_left_segments(mut self) -> Self {
-        self.ncbi_left_segments = false;
-        self
-    }
-
     /// LOSAT_X_SEGTRIMMEMO (graduated 2026-10-26): the masker that takes the trim of a segment it (or
-    /// another such masker on this thread) trimmed before from the thread's memo. For maskers
+    /// another such masker, on any thread) trimmed before from the memo. For maskers
     /// that see the same segments again (TBLASTN's redo windows, BLASTX's query and its chunks);
     /// the result is the same either way.
     // No NCBI counterpart: chooses where a trim result comes from; it does not change any value
@@ -649,13 +692,14 @@ impl SegMasker {
     }
 
     /// Create a SEG masker with default parameters (window=12, locut=2.2, hicut=2.5)
+    #[cfg(test)]
     pub fn with_defaults() -> Self {
         Self::new(12, 2.2, 2.5)
     }
 
     /// Create with full parameters including maxbogus and maxtrim
     pub fn with_params(params: &SegParams) -> Self {
-        let downset = (params.window + 1) / 2 - 1;
+        let downset = params.window.div_ceil(2) - 1;
         let upset = params.window - downset;
 
         Self {
@@ -667,7 +711,6 @@ impl SegMasker {
             maxtrim: params.maxtrim,
             downset,
             upset,
-            ncbi_left_segments: true,
             x_trim_memo: false,
         }
     }
@@ -849,9 +892,32 @@ impl SegMasker {
         (leftend + best_lend, leftend + best_rend)
     }
 
-    /// Mask a sequence and return the list of masked intervals
+    /// Mask a sequence and return the list of masked intervals, the overlapping segments merged:
+    /// `SeqBufferSeg` as BLAST's filters call it (`sparamsp->overlaps = TRUE`, blast_filter.c
+    /// and the composition adjustment's `s_DoSegSequenceData`).
     /// Reference: blast_seg.c:2030-2116 (s_SegSeq)
     pub fn mask_sequence(&self, seq: &[u8]) -> Vec<MaskedInterval> {
+        self.seq_buffer_seg::<true>(seq)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2224-2238, 2311-2316
+    // ```c
+    // SegParameters* SegParametersNewAa (void)
+    // {
+    //    ...
+    //    sparamsp->overlaps = FALSE;
+    // ...
+    //    /* merge the segment if desired. */
+    //    if (sparamsp->overlaps)
+    //       s_MergeSegs(seqwin, segs);
+    // ```
+    /// `SeqBufferSeg` with `sparamsp->overlaps` = `OVERLAPS`: the intervals of the segments in
+    /// NCBI's order (`s_SegsToBlastSeqLoc`), merged where they overlap when `OVERLAPS`. The
+    /// masker of `losat segmasker` (`CSegMasker`) keeps `SegParametersNewAa`'s `FALSE`; BLAST's
+    /// filters set `TRUE` (`mask_sequence`). Each value is its own copy of the code, so the
+    /// filters' copy is the same machine code as before the masker of segmasker came.
+    #[inline(always)]
+    pub(crate) fn seq_buffer_seg<const OVERLAPS: bool>(&self, seq: &[u8]) -> Vec<MaskedInterval> {
         if seq.len() < self.window {
             return Vec::new();
         }
@@ -870,9 +936,9 @@ impl SegMasker {
         // other settings run `mask_sequence_reference`, the port of `s_SegSeq`. The fast path keeps the
         // control flow of this loop and replaces only the entropy and trim computations.
         if self.x_fast_applies() {
-            return self.x_mask_sequence(seq);
+            return self.x_mask_sequence::<OVERLAPS>(seq);
         }
-        self.mask_sequence_reference(seq)
+        self.mask_sequence_reference::<OVERLAPS>(seq)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2030-2032,2053-2060
@@ -890,7 +956,7 @@ impl SegMasker {
     // ```
     // The original body of `mask_sequence`, moved here unchanged; it is the port of this function. It runs
     // where the fast path does not apply (`x_fast_applies`).
-    fn mask_sequence_reference(&self, seq: &[u8]) -> Vec<MaskedInterval> {
+    fn mask_sequence_reference<const OVERLAPS: bool>(&self, seq: &[u8]) -> Vec<MaskedInterval> {
         let mut segs_inclusive: Vec<(usize, usize)> = Vec::new();
 
         fn seg_seq(masker: &SegMasker, seq: &[u8], offset: usize, segs: &mut Vec<(usize, usize)>) {
@@ -942,19 +1008,10 @@ impl SegMasker {
                                 // one segment only its head (the one found last) is kept; the
                                 // others are dropped (and leaked). This deterministic result
                                 // is reproduced.
-                                if masker.ncbi_left_segments {
-                                    let mut left_segs: Vec<(usize, usize)> = Vec::new();
-                                    seg_seq(
-                                        masker,
-                                        &seq[lend..=rend],
-                                        offset + lend,
-                                        &mut left_segs,
-                                    );
-                                    if let Some(&head) = left_segs.first() {
-                                        segs.insert(0, head);
-                                    }
-                                } else {
-                                    seg_seq(masker, &seq[lend..=rend], offset + lend, segs);
+                                let mut left_segs: Vec<(usize, usize)> = Vec::new();
+                                seg_seq(masker, &seq[lend..=rend], offset + lend, &mut left_segs);
+                                if let Some(&head) = left_segs.first() {
+                                    segs.insert(0, head);
                                 }
                             }
                         }
@@ -997,7 +1054,9 @@ impl SegMasker {
         // if (sparamsp->overlaps)
         //    s_MergeSegs(seqwin, segs);
         // ```
-        merge_segs_inclusive(seq.len(), &mut segs_inclusive);
+        if OVERLAPS {
+            merge_segs_inclusive(seq.len(), &mut segs_inclusive);
+        }
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:2300-2319
         // ```c
@@ -1078,24 +1137,36 @@ impl SegMasker {
 /// Longest segment handled by the count histogram of `x_trim_segment`.
 pub(crate) const X_TRIM_MAX: usize = 127;
 
-thread_local! {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1593-1593,1599-1602,1621-1623
-    // ```c
-    // s_Entropy(Int4* sv)
-    // ...
-    //    for (i=0; sv[i]!=0; i++)
-    //      {
-    //       total += sv[i];
-    //      }
-    // ...
-    //    ent = fabs(ent/(double)total);
-    //    return(ent);
-    // ```
-    // No NCBI counterpart: memo table of `s_Entropy` values per count histogram. The entropy depends only on the
-    // counts, so reusing it changes no value.
-    // Entropy by count histogram (4 bits per count value, windows up to 15).
-    static X_ENTROPY_BY_HISTOGRAM: std::cell::RefCell<Vec<(u64, u64)>> =
-        std::cell::RefCell::new(vec![(u64::MAX, 0); 2048]);
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1593-1593,1599-1602,1621-1623
+// ```c
+// s_Entropy(Int4* sv)
+// ...
+//    for (i=0; sv[i]!=0; i++)
+//      {
+//       total += sv[i];
+//      }
+// ...
+//    ent = fabs(ent/(double)total);
+//    return(ent);
+// ```
+// No NCBI counterpart: memo table of `s_Entropy` values per count histogram. The entropy depends only on the
+// counts, so reusing it changes no value.
+// Entropy by count histogram (4 bits per count value, windows up to 15): the table holds every
+// histogram of a window of at most 15 letters (fewer than 700), computed once for the process
+// and read by every thread. A histogram not in it is computed by the port.
+fn x_histogram_entropies() -> &'static [(u64, u64)] {
+    static TABLE: std::sync::OnceLock<Box<[(u64, u64)]>> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        x_entropy_table(
+            2048,
+            |counts| {
+                counts
+                    .iter()
+                    .fold(0, |key, &count| key + (1u64 << (4 * (count - 1))))
+            },
+            |_, key| x_entropy_of_histogram(key),
+        )
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1598-1603,1616-1621
@@ -1349,58 +1420,38 @@ impl SegMasker {
         //    return(ent);
         // ```
         // The entropy of a window depends only on its count histogram, so the value for a seen histogram is reused.
-        X_ENTROPY_BY_HISTOGRAM.with(|memo| {
-            let mut memo = memo.borrow_mut();
-            let slots = memo.len() - 1;
-            let mut filled = 0usize;
-            for start in 0..windows {
-                h[first + start] = if bogus > maxbogus {
-                    -1.0
+        let memo = x_histogram_entropies();
+        for start in 0..windows {
+            h[first + start] = if bogus > maxbogus {
+                -1.0
+            } else {
+                x_memo_get(memo, key).unwrap_or_else(|| x_entropy_of_histogram(key))
+            };
+            if start + window < len {
+                let outgoing = index[seq[start] as usize];
+                if outgoing == 255 {
+                    bogus -= 1;
                 } else {
-                    let mut slot = (key.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40) as usize & slots;
-                    loop {
-                        let (stored, bits) = memo[slot];
-                        if stored == key {
-                            break f64::from_bits(bits);
-                        }
-                        if stored == u64::MAX {
-                            let value = x_entropy_of_histogram(key);
-                            // Fewer than 700 histograms exist for windows up to
-                            // 15 letters; the table is never close to full.
-                            memo[slot] = (key, value.to_bits());
-                            filled += 1;
-                            debug_assert!(filled < slots);
-                            break value;
-                        }
-                        slot = (slot + 1) & slots;
+                    let count = counts[outgoing as usize];
+                    key -= 1u64 << (4 * (count - 1));
+                    if count > 1 {
+                        key += 1u64 << (4 * (count - 2));
                     }
-                };
-                if start + window < len {
-                    let outgoing = index[seq[start] as usize];
-                    if outgoing == 255 {
-                        bogus -= 1;
-                    } else {
-                        let count = counts[outgoing as usize];
+                    counts[outgoing as usize] = count - 1;
+                }
+                let incoming = index[seq[start + window] as usize];
+                if incoming == 255 {
+                    bogus += 1;
+                } else {
+                    let count = counts[incoming as usize];
+                    if count > 0 {
                         key -= 1u64 << (4 * (count - 1));
-                        if count > 1 {
-                            key += 1u64 << (4 * (count - 2));
-                        }
-                        counts[outgoing as usize] = count - 1;
                     }
-                    let incoming = index[seq[start + window] as usize];
-                    if incoming == 255 {
-                        bogus += 1;
-                    } else {
-                        let count = counts[incoming as usize];
-                        if count > 0 {
-                            key -= 1u64 << (4 * (count - 1));
-                        }
-                        key += 1u64 << (4 * count);
-                        counts[incoming as usize] = count + 1;
-                    }
+                    key += 1u64 << (4 * count);
+                    counts[incoming as usize] = count + 1;
                 }
             }
-        });
+        }
         h
     }
 
@@ -1576,7 +1627,7 @@ impl SegMasker {
     // The recursion, the left-trim handling and the order of the segments are the same as in
     // `mask_sequence_reference`; only the entropy array and the trim use the histogram.
     /// `mask_sequence` through `x_entropy_array` and `x_trim_segment`.
-    fn x_mask_sequence(&self, seq: &[u8]) -> Vec<MaskedInterval> {
+    fn x_mask_sequence<const OVERLAPS: bool>(&self, seq: &[u8]) -> Vec<MaskedInterval> {
         let index = self.x_letter_index();
         let mut segs_inclusive: Vec<(usize, usize)> = Vec::new();
 
@@ -1613,8 +1664,8 @@ impl SegMasker {
                     // ```
                     // LOSAT_X_SEGTRIMMEMO (graduated 2026-10-26, always on): the trim's offsets
                     // within the segment are a function of its letters and `maxtrim`
-                    // (x_seg_trim_memo.rs); for a masker that asks for it, a segment this thread
-                    // trimmed before takes the stored offsets.
+                    // (x_seg_trim_memo.rs); for a masker that asks for it, a segment trimmed
+                    // before (by any thread) takes the stored offsets.
                     (leftend, rightend) =
                         if masker.x_trim_memo && leftend <= rightend && rightend < seq.len() {
                             let base = leftend;
@@ -1637,20 +1688,16 @@ impl SegMasker {
                         if lend < leftend {
                             let rend = leftend - 1;
                             if rend < seq.len() && lend <= rend {
-                                if masker.ncbi_left_segments {
-                                    let mut left_segs: Vec<(usize, usize)> = Vec::new();
-                                    seg_seq(
-                                        masker,
-                                        index,
-                                        &seq[lend..=rend],
-                                        offset + lend,
-                                        &mut left_segs,
-                                    );
-                                    if let Some(&head) = left_segs.first() {
-                                        segs.insert(0, head);
-                                    }
-                                } else {
-                                    seg_seq(masker, index, &seq[lend..=rend], offset + lend, segs);
+                                let mut left_segs: Vec<(usize, usize)> = Vec::new();
+                                seg_seq(
+                                    masker,
+                                    index,
+                                    &seq[lend..=rend],
+                                    offset + lend,
+                                    &mut left_segs,
+                                );
+                                if let Some(&head) = left_segs.first() {
+                                    segs.insert(0, head);
                                 }
                             }
                         }
@@ -1668,7 +1715,9 @@ impl SegMasker {
         }
 
         seg_seq(self, &index, seq, 0, &mut segs_inclusive);
-        merge_segs_inclusive(seq.len(), &mut segs_inclusive);
+        if OVERLAPS {
+            merge_segs_inclusive(seq.len(), &mut segs_inclusive);
+        }
         segs_inclusive.reverse();
         segs_inclusive
             .into_iter()
@@ -1781,11 +1830,7 @@ mod tests {
                 3 => SegParams::with_all(15, 2.6, 2.9, 15, 100),
                 _ => SegParams::with_all(8, 1.5, 1.9, 1, 10),
             };
-            let masker = if case % 7 == 3 {
-                SegMasker::with_params(&params).keeping_all_left_segments()
-            } else {
-                SegMasker::with_params(&params)
-            };
+            let masker = SegMasker::with_params(&params);
             assert!(masker.x_fast_applies());
             let len = 1 + (next() % if case % 11 == 0 { 3000 } else { 400 }) as usize;
             let mut seq = Vec::with_capacity(len);
@@ -1821,14 +1866,22 @@ mod tests {
             let reference = if seq.len() < masker.window {
                 Vec::new()
             } else {
-                masker.mask_sequence_reference(&seq)
+                masker.mask_sequence_reference::<true>(&seq)
             };
             let fast = if seq.len() < masker.window {
                 Vec::new()
             } else {
-                masker.x_mask_sequence(&seq)
+                masker.x_mask_sequence::<true>(&seq)
             };
             assert_eq!(fast, reference, "case {case}, length {len}");
+            // segmasker's SEG, without the merge (review of line RG item K2, N1).
+            if seq.len() >= masker.window {
+                assert_eq!(
+                    masker.x_mask_sequence::<false>(&seq),
+                    masker.mask_sequence_reference::<false>(&seq),
+                    "case {case}, length {len}, unmerged"
+                );
+            }
             masked += reference.len();
         }
         assert!(
@@ -1883,11 +1936,16 @@ mod tests {
             let begin = (next() % 5000) as usize;
             let end = (begin + 50 + (next() % 900) as usize).min(seq.len());
             let window = &seq[begin..end];
-            let reference = masker.mask_sequence_reference(window);
+            let reference = masker.mask_sequence_reference::<true>(window);
             assert_eq!(
-                masker.x_mask_sequence(window),
+                masker.x_mask_sequence::<true>(window),
                 reference,
                 "window {begin}..{end}"
+            );
+            assert_eq!(
+                masker.x_mask_sequence::<false>(window),
+                masker.mask_sequence_reference::<false>(window),
+                "window {begin}..{end}, unmerged"
             );
             masked += reference.len();
         }
@@ -2464,5 +2522,37 @@ mod tests {
             merge_segs_inclusive(fields[1].parse().unwrap(), &mut intervals);
             assert_eq!(intervals, parse(fields[3]), "{}", fields[0]);
         }
+    }
+
+    // No NCBI counterpart (reuse only): the two process-wide tables hold every window of at most
+    // 15 letters (684 count lists), and each gives the port's bits for it.
+    #[test]
+    fn x_entropy_tables_hold_every_short_window_with_the_ports_bits() {
+        let mut lists = 0;
+        x_each_count_list(&mut |counts| {
+            lists += 1;
+            let reference = entropy_from_state_vector_reference(counts).to_bits();
+            let state = counts
+                .iter()
+                .enumerate()
+                .fold(0u64, |key, (class, &count)| {
+                    key | ((count as u64) << (4 * class))
+                });
+            assert_eq!(
+                x_memo_get(x_state_entropies(), state).map(f64::to_bits),
+                Some(reference),
+                "{counts:?}"
+            );
+            assert_eq!(entropy_from_state_vector(counts).to_bits(), reference);
+            let histogram = counts
+                .iter()
+                .fold(0u64, |key, &count| key + (1u64 << (4 * (count - 1))));
+            assert_eq!(
+                x_memo_get(x_histogram_entropies(), histogram).map(f64::to_bits),
+                Some(reference),
+                "{counts:?}"
+            );
+        });
+        assert_eq!(lists, 684);
     }
 }

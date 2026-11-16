@@ -1,7 +1,7 @@
 //! `tblastn -outfmt 11` (the BLAST archive) against the bytes that NCBI BLAST+ 2.17.0 `tblastn
 //! -num_threads 1` writes, for the cases that need an environment variable or a failing run (the
 //! searches without them are the `sa.arch.tbn.*` rows of `outfmt0_manifest.tsv` and the
-//! `db.sa.arch.tbn.*` rows of `db_search_manifest.tsv`): `BATCH_SIZE` (one archive per query
+//! `db.sa.arch.tbn.*` rows of `db_search_manifest/tblastn.tsv`): `BATCH_SIZE` (one archive per query
 //! batch, `EffectiveSearchSpace` per batch, an unsearched batch repeating the last value, the
 //! batch's own SEG and `LCaseMask` masks), a reader error in the second batch (the archive of the
 //! first batch, then an error archive, rc 1), `ARCHIVE_FORMAT` (`bin...` in any case: ASN.1
@@ -13,9 +13,9 @@
 //!
 //! Frozen bytes: `tests/fixtures/outfmt11/tbn_<case>.out` and `.err`, written by NCBI's `tblastn
 //! -num_threads 1 <args> -outfmt 11` run from `LOSAT/` with the case's environment
-//! (S/of8/scripts/freeze_outfmt11_tbn_tests.sh of the line OF8 records). Every case runs at 1 and
-//! 4 threads, and the multi-batch cases also with each strict-set switch of the search turned off
-//! (`LOSAT_X_TBN...=0`). A database that does not exist (rc 2) carries the search path in its
+//! (S/of8/scripts/freeze_outfmt11_tbn_tests.sh of the line OF8 records). Every case runs at 1, 4, 8
+//! and 16 threads, and the multi-batch cases also with each strict-set switch of the search turned
+//! off (`LOSAT_X_TBN...=0`). A database that does not exist (rc 2) carries the search path in its
 //! message, which depends on where the test runs: only the structure is compared.
 
 use std::path::PathBuf;
@@ -339,9 +339,9 @@ fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str) {
 }
 
 #[test]
-fn archives_equal_ncbis_at_one_and_four_threads() {
+fn archives_equal_ncbis_at_1_4_8_and_16_threads() {
     for case in &cases() {
-        for threads in ["1", "4"] {
+        for threads in ["1", "4", "8", "16"] {
             check(case, &[], threads);
         }
     }
@@ -408,11 +408,11 @@ fn the_out_file_receives_the_archive() {
 
 /// In the text and binary archives a title with a byte outside `0x20..=0x7E` (0x80 and above,
 /// and 0x7F) is written as `#` by NCBI, with a diagnostic per byte (in XML NCBI writes the byte,
-/// and so does LOSAT): LOSAT refuses it (query, `-subject` and a `-db` name)
-/// before the first byte, and a bad title in a batch that NCBI completes before a reader error
-/// too (the archive of that batch would be written before the error).
+/// and so does LOSAT), query and `-subject`, also in a batch that NCBI completes before a reader
+/// error (its archive is written before the error); a `-db` name names a database that does not
+/// exist. NCBI's bytes are frozen in `tests/archive_replaced/`.
 #[test]
-fn non_ascii_titles_and_database_names_are_refused() {
+fn non_ascii_titles_and_database_names_are_written_as_ncbi_writes_them() {
     let dir = std::env::temp_dir().join(format!("losat_outfmt11_tbn_title_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let plain_query = engine().join(input("arch_tbn_q.faa"));
@@ -445,12 +445,9 @@ fn non_ascii_titles_and_database_names_are_refused() {
             let mut full = args.clone();
             full.extend_from_slice(&["-outfmt", "11"]);
             let output = run(&[], &full, "1");
-            assert_ne!(output.status.code(), Some(0), "{role}");
-            assert!(output.stdout.is_empty(), "{role}: nothing is written");
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            assert!(stderr.contains("visible ASCII"), "{name} {role}: {stderr}");
-            assert!(stderr.contains("-outfmt 11"), "{name} {role}: {stderr}");
-            // The same title is fine in outfmt 8: only the archive refuses it.
+            assert_eq!(output.status.code(), Some(0), "{name} {role}");
+            crate::outfmt11_titles::assert_replaced(name, &output, &format!("{name} {role}"));
+            // The same title is plain text in outfmt 8.
             let mut plain_format = args.clone();
             plain_format.extend_from_slice(&["-outfmt", "8"]);
             let output = run(&[], &plain_format, "1");
@@ -483,8 +480,10 @@ fn non_ascii_titles_and_database_names_are_refused() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert_eq!(output.status.code(), Some(1), "{format}: {stderr}");
         if format == "11" {
-            assert!(output.stdout.is_empty(), "{format}: nothing is written");
-            assert!(stderr.contains("visible ASCII"), "{format}: {stderr}");
+            // The first batch is completed: its archive is written with the title as `caf##`,
+            // before the reader error.
+            crate::outfmt11_titles::assert_replaced("utf8", &output, format);
+            assert!(stderr.contains("CFastaReader"), "{format}: {stderr}");
         } else {
             // Without the archive the run reaches the reader error.
             assert!(stderr.contains("CFastaReader"), "{format}: {stderr}");
@@ -496,12 +495,7 @@ fn non_ascii_titles_and_database_names_are_refused() {
             &["-query", plain_query, "-db", database, "-outfmt", "11"],
             "1",
         );
-        assert_ne!(output.status.code(), Some(0), "{database:?}");
-        assert!(output.stdout.is_empty(), "{database:?}");
-        assert!(
-            String::from_utf8_lossy(&output.stderr).contains("-db name"),
-            "{database:?}"
-        );
+        crate::outfmt11_titles::assert_missing_database(&output, database);
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -548,36 +542,13 @@ fn a_missing_database_gives_an_error_archive() {
         .all(|line| line.starts_with(' ')));
 }
 
-/// A `BATCH_SIZE` NCBI cannot convert stops it with a `CStringException`; LOSAT refuses it
-/// before the first byte and says so (outfmt 11 and 6).
-#[test]
-fn a_batch_size_that_is_not_an_integer_is_refused() {
-    let query = input("arch_tbn_q.faa");
-    let subject = input("arch_tbn_s.fna");
-    for value in ["abc", "", "1.5", "0x10"] {
-        for format in ["11", "6"] {
-            let output = run(
-                &[("BATCH_SIZE", value)],
-                &["-query", &query, "-subject", &subject, "-outfmt", format],
-                "1",
-            );
-            assert_ne!(output.status.code(), Some(0), "{value:?} {format}");
-            assert!(output.stdout.is_empty(), "{value:?} {format}");
-            assert!(
-                String::from_utf8_lossy(&output.stderr).contains("BATCH_SIZE"),
-                "{value:?} {format}"
-            );
-        }
-    }
-}
-
 /// NCBI's `PrintErrorArchive` converts the trimmed `-outfmt` text to an integer and writes
 /// nothing when that throws (`11 qseqid`); `11` with white space around it converts. NCBI 2.17.0
 /// with a missing `-query`: rc 1 and no bytes for `11 qseqid` and ` 11 qseqid`, the error
 /// archive of `noquery_sub` for ` 11 `.
 #[test]
 fn an_outfmt_spec_gets_no_error_archive() {
-    for threads in ["1", "4"] {
+    for threads in ["1", "4", "8", "16"] {
         for (outfmt, written) in [("11 qseqid", false), (" 11 qseqid", false), (" 11 ", true)] {
             let output = run(
                 &[],

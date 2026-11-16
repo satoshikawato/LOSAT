@@ -1,0 +1,94 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/MejoMJNV.fasta).
+           1 sequences; 401,182 total letters
+
+
+
+Query= LC738874.1 MAG: Melicertus latisulcatus majanivirus Okinawa2016 DNA,
+complete genome
+
+Length=287061
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+LC738878.1 MAG: Metapenaeus joyneri majanivirus Tokushima2020 DNA...  146     7e-34
+
+
+> LC738878.1 MAG: Metapenaeus joyneri majanivirus Tokushima2020 
+DNA, complete genome
+Length=401182
+
+ Score = 146 bits (76),  Expect = 7e-34
+ Identities = 274/373 (73%), Gaps = 0/373 (0%)
+ Strand=Plus/Plus
+
+Query  76797   ACCATGTTTATGCCCCCATTCAATTAAACtttttttGAAAATAGAGGCAGGTAAAACTTT  76856
+               |||||||||||||||||||||||||||||||||||| ||||||   ||||| | || |||
+Sbjct  203018  ACCATGTTTATGCCCCCATTCAATTAAACTTTTTTTAAAAATACTAGCAGGAAGAAATTT  203077
+
+Query  76857   ACCTTCAAAAGTCCAATCAGATTCATCAAATCTCAGTCTTTGATCACTCGTTGTATATAT  76916
+               |||   ||||||  ||| |||||| |||||| | |  | ||  |||  | |  |||| ||
+Sbjct  203078  ACCAGTAAAAGTGAAATTAGATTCGTCAAATTTTATACGTTTGTCATACTTGTTATAAAT  203137
+
+Query  76917   ATTATCTTTAAAGTTGTATAGATATCGAAAGGTATTCAACCCCCAACCGTGTTCAGAATA  76976
+               ||| |||||||| || || ||||||| ||| | ||| | |||||||||||  ||||||| 
+Sbjct  203138  ATTTTCTTTAAAATTATAAAGATATCTAAATGAATTAACCCCCCAACCGTAATCAGAATT  203197
+
+Query  76977   TATTGGATAGGGTGAAACGCTATACTCTGGTGAAAATTCATCGAATATCTTAAGTCTTAT  77036
+                |    ||| || ||||| ||||||||||| ||   ||     ||||| || | |  | |
+Sbjct  203198  AACAACATAAGGCGAAACACTATACTCTGGAGATTCTTTTCTAAATATTTTCAATTCTGT  203257
+
+Query  77037   GCTTTCTGATTTGGTAAAATAACGTGAAAATGTTTCGTGATCAAAGAGAAGATCACGATC  77096
+                 |      | | || |||||||| ||||||||||| || |||||||||||   ||||||
+Sbjct  203258  ATTAGAATCTCTTGTTAAATAACGAGAAAATGTTTCATGGTCAAAGAGAAGTGTACGATC  203317
+
+Query  77097   TATGGAAAATATGTCGTGTTCCGAGTTTATCATTGGTAATAACGAGTGTGATGTGGGAAA  77156
+               ||| |||||||| || |  |  || |||  || |||||| |  || || ||||| |||||
+Sbjct  203318  TATTGAAAATATATCATTGTTTGAATTTGGCAATGGTAAAAGTGAATGAGATGTTGGAAA  203377
+
+Query  77157   TATAAATTGAGCA  77169
+                || | |||||||
+Sbjct  203378  CATGAGTTGAGCA  203390
+
+
+ Score = 94.9 bits (49),  Expect = 3e-18
+ Identities = 63/70 (90%), Gaps = 0/70 (0%)
+ Strand=Plus/Minus
+
+Query  243904  CGATTAAACAACCATAATTCATTACCCCCCATATGTTGAATAATATCCAATAGTATATTA  243963
+               |||||||||||||||||||||||||||||||||||||| || || || || | |||||||
+Sbjct  28067   CGATTAAACAACCATAATTCATTACCCCCCATATGTTGTATTATGTCTAAAATTATATTA  28008
+
+Query  243964  ACTGTAACAA  243973
+               | ||||||||
+Sbjct  28007   ATTGTAACAA  27998
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Effective search space used: 115148565240
+
+
+  Database: User specified sequence set (Input: tests/fasta/MejoMJNV.fasta).
+    Posted date:  Unknown
+  Number of letters in database: 401,182
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 5, Extension: 2

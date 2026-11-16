@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_CTXO1, a strict-set switch): the context of a query offset in constant time,
+//! LOSAT_X_CTXO1 (graduated 2026-10-27, always on): the context of a query offset in constant time,
 //! from the layout of the concatenated query, instead of a binary search over the contexts (the
 //! runs of `QueryContextIndex`) or a table of four bytes per query letter (`direct_map`).
 //!
@@ -404,7 +404,7 @@ mod tests {
             };
             let mut lengths = Vec::new();
             for _ in 0..queries {
-                let len = if lcg(&mut state) % 10 == 0 {
+                let len = if lcg(&mut state).is_multiple_of(10) {
                     0
                 } else {
                     lo + (lcg(&mut state) as usize % span)

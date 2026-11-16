@@ -7,7 +7,11 @@
 
 /// ln(n!) for n = 0..10000 (10001 entries).
 /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:50-1303
-pub const LNFAC: [f64; 10001] = [
+#[expect(
+    clippy::approx_constant,
+    reason = "NCBI's lnfact[] digits (blast_seg.c:50-52): 0.693147 is not the f64 of LN_2, and the std constant would change SEG's probabilities"
+)]
+pub static LNFAC: [f64; 10001] = [
     0.000000,
     0.000000,
     0.693147,

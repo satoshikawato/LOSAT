@@ -1,0 +1,4 @@
+Error: (CRegistryException::eValue) Single(unescaped) '"' in the middle of registry value: 'b=c"d' (m_Pos = 2)
+Error: (106.15) Application's initialization failed (CRegistryException::eValue) Single(unescaped) '"' in the middle of registry value: 'b=c"d' (m_Pos = 2)
+Error: (CRegistryException::eValue) Single(unescaped) '"' in the middle of registry value: 'b=c"d' (m_Pos = 2)
+Error: (106.15) Application's initialization failed (CRegistryException::eValue) Single(unescaped) '"' in the middle of registry value: 'b=c"d' (m_Pos = 2)

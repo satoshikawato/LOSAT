@@ -1,0 +1,54 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/nt49.asn
+#Output data file:	(stdout)
+#Annotation data at:	nt
+#E-Value cutoff:	0.01
+#Redundancy:	Concise
+#Data requested:	Domain hits and site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	tblastn	2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Nucleotide	5000	mg00049_240001-245000
+DOMAINS
+1	Query_1[1]	Specific	493211	4327	4995	3.6792e-113	359.36	pfam13230	GATase_4	-	529030
+1	Query_1[1]	Specific	507269	370	813	3.46305e-84	272.149	NF007443	PRK09993	-	-
+1	Query_1[3]	Specific	502977	3543	4118	2.50382e-136	419.911	NF001628	PRK00414	-	-
+1	Query_1[-3]	Specific	439499	862	3297	0	1822.31	NF038187	FadE_coli	-	-
+1	Query_1[-3]	Non-specific	507552	1	189	1.11459e-36	139.876	NF007757	PRK10438	C	-
+ENDDOMAINS
+SITES
+1	Query_1[1]	Specific	putative active site	C4330-4332,R4561-4563,N4648-4650,G4651-4653,Q4654-4656,D4711-4713	6	0	238889
+1	Query_1[1]	Specific	putative dimer interface	R4465-4467,K4474-4476,D4477-4479,R4612-4614,G4684-4686,N4687-4689,T4750-4752	7	0	238889
+1	Query_1[3]	Specific	active site	N3696-3698,G3699-3701,G3702-3704,S3897-3899,T3900-3902,S3903-3905,S3912-3914,Y4041-4043,Q4056-4058	9	0	240139
+1	Query_1[3]	Specific	dimer interface	A3579-3581,L3591-3593,Q3633-3635,A3642-3644,G3702-3704,M3720-3722,H3723-3725,Q4056-4058,E4059-4061,K4071-4073,H4080-4082,Q4092-4094,K4104-4106	13	0	240139
+1	Query_1[-3]	Specific	FAD binding site	F2592-2590,T2583-2581,S2565-2563,Y2469-2467,T2463-2461,D1902-1900,G1890-1888,E1815-1813	8	0	173847
+1	Query_1[-3]	Specific	substrate binding pocket	S2565-2563,D2562-2560,V2205-2203,L2196-2194,S2193-2191,R2184-2182,F2097-2095,E1815-1813	8	0	173847
+1	Query_1[-3]	Specific	homotetramer interface	P2577-2575,D2562-2560,Y2469-2467,H2322-2320,F2319-2317,P2316-2314,L2313-2311,N2310-2308,R2106-2104,F2097-2095,G2070-2068,P2058-2056,L2055-2053,R2049-2047,V2028-2026,I2004-2002,Y1947-1945,I1914-1912,D1902-1900,K1887-1885,I1881-1879,S1866-1864,N1863-1861,Y1845-1843,Q1842-1840,P1833-1831,I1830-1828,I1824-1822	32	0	173847
+1	Query_1[-3]	Specific	catalytic base	E1815-1813	1	0	173847
+ENDSITES
+ENDQUERY
+ENDSESSION	1
+ENDDATA

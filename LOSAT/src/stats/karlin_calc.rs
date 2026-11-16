@@ -7,6 +7,7 @@
 //!   - check_ideal logic: use kbp_ideal if computed Lambda >= ideal Lambda
 
 use crate::config::ScoringMatrix;
+use crate::stats::sum_statistics::{blast_expm1, blast_powi};
 use crate::stats::KarlinParams;
 use crate::utils::matrix::{ncbistdaa, protein_score, BLASTAA_SIZE};
 
@@ -170,7 +171,7 @@ pub fn compute_std_aa_composition() -> [f64; BLASTAA_SIZE] {
 /// Stores probability distribution of alignment scores
 #[derive(Debug, Clone)]
 pub struct ScoreFreqProfile {
-    /// Score probabilities: sprob[score] = probability of score
+    /// Score probabilities: `sprob[score]` = probability of score
     /// Indexed by score value (negative scores are valid)
     sprob: Vec<f64>,
     /// Minimum score with non-zero probability
@@ -186,7 +187,7 @@ pub struct ScoreFreqProfile {
 impl ScoreFreqProfile {
     pub fn new(score_min: i32, score_max: i32) -> Self {
         let range = (score_max - score_min + 1) as usize;
-        let mut sprob = vec![0.0; range];
+        let sprob = vec![0.0; range];
 
         Self {
             sprob,
@@ -225,8 +226,36 @@ impl ScoreFreqProfile {
         self.score_avg
     }
 
-    pub fn sprob(&self) -> &[f64] {
-        &self.sprob
+    /// A profile whose fields are given as NCBI's caller sets them, without the normalization of
+    /// `BlastScoreFreqCalc`: `sprob[0]` is the probability of `score_min`.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2700-2726
+    // ```c
+    //     score_freqs = Blast_ScoreFreqNew(min_score, max_score);
+    //     ...
+    //     score_freqs->obs_min = min_score;
+    //     score_freqs->obs_max = max_score;
+    //     ...
+    //             score_freqs->sprob[kScore] +=
+    //                 (std_probs[aa_alphabet[r]]/effective_length);
+    //     ...
+    //     for (s = min_score; s <= max_score; s++) {
+    //         score_freqs->score_avg += (s * score_freqs->sprob[s]);
+    //     }
+    // ```
+    pub(crate) fn from_ncbi_parts(
+        score_min: i32,
+        sprob: Vec<f64>,
+        obs_min: i32,
+        obs_max: i32,
+        score_avg: f64,
+    ) -> Self {
+        Self {
+            sprob,
+            obs_min,
+            obs_max,
+            score_avg,
+            score_min,
+        }
     }
 }
 
@@ -274,6 +303,10 @@ pub fn score_freq_profile_from_probabilities(
         }
     }
 
+    #[expect(
+        clippy::manual_range_contains,
+        reason = "NaN: `!(a..=b).contains(&x)` is true for NaN, the comparisons are false"
+    )]
     if score_sum > 0.0001 || score_sum < -0.0001 {
         for score in obs_min..=obs_max {
             let prob = sfp.get_prob(score) / score_sum;
@@ -369,6 +402,10 @@ pub fn compute_score_freq_profile_for_matrix(
 
     // Compute average score (also normalize probabilities)
     let mut score_avg = 0.0;
+    #[expect(
+        clippy::manual_range_contains,
+        reason = "NaN: `!(a..=b).contains(&x)` is true for NaN, the comparisons are false"
+    )]
     if score_sum > 0.0001 || score_sum < -0.0001 {
         for score in obs_min..=obs_max {
             let prob = sfp.get_prob(score) / score_sum;
@@ -382,8 +419,25 @@ pub fn compute_score_freq_profile_for_matrix(
     sfp
 }
 
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:405-418
-fn blast_gcd(mut a: i32, mut b: i32) -> i32 {
+/// NCBI reference: c++/src/algo/blast/core/ncbi_math.c:405-419
+/// ```c
+/// Int4 BLAST_Gcd(Int4 a, Int4 b)
+/// {
+///    Int4   c;
+///
+///    b = ABS(b);
+///    if (b > a)
+///       c=a, a=b, b=c;
+///
+///    while (b != 0) {
+///       c = a%b;
+///       a = b;
+///       b = c;
+///    }
+///    return a;
+/// }
+/// ```
+pub(crate) fn blast_gcd(mut a: i32, mut b: i32) -> i32 {
     let mut c: i32;
 
     b = b.abs();
@@ -410,57 +464,6 @@ fn blast_score_chk(lo: i32, hi: i32) -> Result<(), String> {
         return Err("Score range exceeds BLAST_SCORE_RANGE_MAX".to_string());
     }
     Ok(())
-}
-
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:33-55
-#[rustfmt::skip]
-fn blast_expm1(x: f64) -> f64 {
-    let absx = x.abs();
-    if absx > 0.33 {
-        return x.exp() - 1.0;
-    }
-    if absx < 1.0e-16 {
-        return x;
-    }
-    x * (1.0
-        + x * (1.0 / 2.0
-            + x * (1.0 / 6.0
-                + x * (1.0 / 24.0
-                    + x * (1.0 / 120.0
-                        + x * (1.0 / 720.0
-                            + x * (1.0 / 5040.0
-                                + x * (1.0 / 40320.0
-                                    + x * (1.0 / 362880.0
-                                        + x * (1.0 / 3628800.0
-                                            + x * (1.0 / 39916800.0
-                                                + x * (1.0 / 479001600.0
-                                                    + x / 6227020800.0))))))))))))
-}
-
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:444-470
-fn blast_powi(mut x: f64, mut n: i32) -> f64 {
-    if n == 0 {
-        return 1.0;
-    }
-    if x == 0.0 {
-        if n < 0 {
-            return f64::INFINITY;
-        }
-        return 0.0;
-    }
-    if n < 0 {
-        x = 1.0 / x;
-        n = -n;
-    }
-    let mut y = 1.0;
-    while n > 0 {
-        if (n & 1) != 0 {
-            y *= x;
-        }
-        n /= 2;
-        x *= x;
-    }
-    y
 }
 
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2491-2563
@@ -580,6 +583,58 @@ fn compute_lambda_nr(sfp: &ScoreFreqProfile, initial_guess: f64) -> Result<f64, 
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:550-572
+// ```c
+// static double
+// s_CalcLambda(double probs[], int min_score, int max_score, double lambda0)
+// {
+//
+//     int i;                 /* loop index */
+//     int score_range;       /* range of possible scores */
+//     double avg;            /* expected score of aligning two characters */
+//     Blast_ScoreFreq freq;  /* score frequency data */
+//
+//     score_range = max_score - min_score + 1;
+//     avg = 0.0;
+//     for (i = 0;  i < score_range;  i++) {
+//         avg += (min_score + i) * probs[i];
+//     }
+//     freq.score_min = min_score;
+//     freq.score_max = max_score;
+//     freq.obs_min = min_score;
+//     freq.obs_max = max_score;
+//     freq.sprob0 = probs;
+//     freq.sprob = &probs[-min_score];
+//     freq.score_avg = avg;
+//
+//     return Blast_KarlinLambdaNR(&freq, lambda0);
+// }
+// ```
+/// NCBI's `s_CalcLambda` as written: the probabilities `probs` of the scores `min_score` to
+/// `max_score` as given (not normalized, the observed range as given), -1.0 where
+/// `Blast_KarlinLambdaNR` gives it. The composition-based statistics call it: the position-based
+/// ones (`core::composition_adjustment::compo_scale`) and the redo's `calc_lambda` callback
+/// (`core::composition_adjustment::redo_alignment::redo_calc_lambda`).
+pub(crate) fn calc_lambda_of_score_probs(
+    probs: Vec<f64>,
+    min_score: i32,
+    max_score: i32,
+    lambda0: f64,
+) -> f64 {
+    let mut score_avg = 0.0;
+    for (i, &prob) in probs.iter().enumerate() {
+        score_avg += (min_score + i as i32) as f64 * prob;
+    }
+    let sfp = ScoreFreqProfile {
+        sprob: probs,
+        obs_min: min_score,
+        obs_max: max_score,
+        score_avg,
+        score_min: min_score,
+    };
+    compute_lambda_nr(&sfp, lambda0).unwrap_or(-1.0)
+}
+
 /// Compute H from Lambda
 /// Reference: NCBI BlastKarlinLtoH (blast_stat.c:2607-2633)
 fn compute_h_from_lambda(sfp: &ScoreFreqProfile, lambda: f64) -> Result<f64, String> {
@@ -689,8 +744,8 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
     let mut low_alignment_score = 0;
     let mut high_alignment_score = 0;
     let mut inner_sum = 1.0;
-    let mut oldsum = 1.0;
-    let mut oldsum2 = 1.0;
+    // NCBI's `oldsum` and `oldsum2` (blast_stat.c:2266, 2344, 2379-2380) are read only under
+    // `#ifdef ADD_GEOMETRIC_TERMS_TO_K` (blast_stat.c:2383-2410), which nothing defines.
     alignment_score_probabilities[0] = 1.0;
 
     let mut iter_counter = 0;
@@ -781,9 +836,6 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
             i += 1;
         }
 
-        oldsum2 = oldsum;
-        oldsum = inner_sum;
-
         iter_counter += 1;
         inner_sum /= iter_counter as f64;
         outer_sum += inner_sum;
@@ -844,6 +896,61 @@ pub fn apply_check_ideal(computed: KarlinParams, ideal: KarlinParams) -> KarlinP
         // Use computed (smaller Lambda, less conservative)
         computed
     }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2833-2852
+// ```c
+// Blast_ScoreBlkKbpIdealCalc(BlastScoreBlk* sbp)
+// {
+//    stdrfp = Blast_ResFreqNew(sbp);
+//    Blast_ResFreqStdComp(sbp, stdrfp);
+//    sfp = Blast_ScoreFreqNew(sbp->loscore, sbp->hiscore);
+//    BlastScoreFreqCalc(sbp, sfp, stdrfp, stdrfp);
+//    sbp->kbp_ideal = Blast_KarlinBlkNew();
+//    Blast_KarlinBlkUngappedCalc(sbp->kbp_ideal, sfp);
+// }
+// ```
+pub fn compute_blosum62_ideal_karlin_params() -> Result<KarlinParams, String> {
+    // Memo (was LOSAT_X_IDEALMEMO): the function has no inputs (standard
+    // composition, BLOSUM62, score range -4..11), so its value is computed
+    // once per process. TBLASTN and BLASTX call it for every query batch and,
+    // in the parallel redo, on every worker.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2843-2848,2754-2754
+    // ```c
+    //    stdrfp = Blast_ResFreqNew(sbp);
+    //    Blast_ResFreqStdComp(sbp, stdrfp);
+    //    sfp = Blast_ScoreFreqNew(sbp->loscore, sbp->hiscore);
+    //    BlastScoreFreqCalc(sbp, sfp, stdrfp, stdrfp);
+    //    sbp->kbp_ideal = Blast_KarlinBlkNew();
+    //    Blast_KarlinBlkUngappedCalc(sbp->kbp_ideal, sfp);
+    // ...
+    //    status = Blast_ScoreBlkKbpIdealCalc(sbp);
+    // ```
+    // NCBI computes `kbp_ideal` once per score block, in `Blast_ScoreBlkKbpIdealCalc` called from
+    // `Blast_ScoreBlkKbpUngappedCalc`; BLOSUM62 with the standard composition has no other inputs.
+    // The memo keeps the value of the first call of the port below and returns it again. It is reuse only.
+    use std::sync::OnceLock;
+    static IDEAL: OnceLock<Result<KarlinParams, String>> = OnceLock::new();
+    IDEAL
+        .get_or_init(x_compute_blosum62_ideal_karlin_params)
+        .clone()
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2843-2848
+// ```c
+//    stdrfp = Blast_ResFreqNew(sbp);
+//    Blast_ResFreqStdComp(sbp, stdrfp);
+//    sfp = Blast_ScoreFreqNew(sbp->loscore, sbp->hiscore);
+//    BlastScoreFreqCalc(sbp, sfp, stdrfp, stdrfp);
+//    sbp->kbp_ideal = Blast_KarlinBlkNew();
+//    Blast_KarlinBlkUngappedCalc(sbp->kbp_ideal, sfp);
+// ```
+// The body of the original `compute_blosum62_ideal_karlin_params`, moved into its own function so
+// that the memo can call it; the computation is unchanged.
+fn x_compute_blosum62_ideal_karlin_params() -> Result<KarlinParams, String> {
+    let std_comp = compute_std_aa_composition();
+    let sfp = compute_score_freq_profile(&std_comp, &std_comp, -4, 11);
+    compute_karlin_params_ungapped(&sfp)
 }
 
 #[cfg(test)]

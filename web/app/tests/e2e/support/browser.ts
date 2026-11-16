@@ -5,11 +5,12 @@ import { expect, type BrowserContext, type CDPSession, type Page } from '@playwr
 import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
 import { siteHeaders } from '../../../build/headers';
-import { findReactors, losatEngine } from '../../../build/reactors';
+import { findReactors, losatEngine, type Reactors } from '../../../build/reactors';
 import { losatVerification } from '../../../build/verification';
 import { SESSION_LOCK_PREFIX, TMP_DIRECTORY } from '../../../src/infra/data/session';
+import { navigate } from './navigate';
 import { E2E_ORIGIN } from './origin';
-import { showOutput } from './search';
+import { described, paste, showOutput, submit } from './search';
 
 export const ORIGIN = E2E_ORIGIN;
 
@@ -18,7 +19,7 @@ const REACTORS = findReactors();
 export const BUILD_HAS_ENGINE = REACTORS !== undefined;
 
 /**
- * Text in the stored outfmt 7 of the BLASTN search of queueSearch: the engine's header, or
+ * Text in the stored outfmt 7 of the BLASTN search of startSearch: the engine's header, or
  * the FakeEngine's marker.
  */
 export const OUTFMT7_MARK = BUILD_HAS_ENGINE ? '# BLASTN 2.17.0+' : 'FAKE ENGINE OUTPUT';
@@ -29,7 +30,7 @@ export async function openProbe(context: BrowserContext): Promise<Page> {
     route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>probe</title>' }),
   );
   const probe = await context.newPage();
-  await probe.goto('/__probe');
+  await navigate(probe, '/__probe');
   return probe;
 }
 
@@ -108,23 +109,30 @@ export async function setQuota(page: Page, bytes: number | null): Promise<void> 
 /** Opens the application and waits until its start-up cleanup has finished. */
 export async function openApp(context: BrowserContext): Promise<Page> {
   const page = await context.newPage();
-  await page.goto('/');
+  await navigate(page, '/');
   await expect(page.getByTestId('storage-status')).toHaveAttribute('data-cleanup', 'done');
   return page;
 }
 
-/** Pastes a query and a subject and queues a BLASTN search. */
-export async function queueSearch(page: Page): Promise<void> {
+/**
+ * Pastes a query and a subject and starts a BLASTN search, once the form no longer moves: the
+ * describe that comes after the page opens puts "Task Selection" above "Run LOSAT", and each
+ * source read grows its card. A click while the button moves is lost (WF1): on CI the press
+ * came before the describe and the release after it, in Chromium too, and run 1 never came
+ * (storage tests, losat-baselines/web-flaky-20261103/runs).
+ */
+export async function startSearch(page: Page): Promise<void> {
   await page.getByTestId('tab-search').click();
-  await page.getByTestId('query-input').fill('>q1\nACGTACGTACGT\n');
-  await page.getByTestId('subject-input').fill('>s1\nACGTACGTACGT\n');
-  await page.getByTestId('add-to-queue').click();
+  await described(page);
+  await paste(page, 'query', '>q1\nACGTACGTACGT\n');
+  await paste(page, 'subject', '>s1\nACGTACGTACGT\n');
+  await submit(page);
 }
 
-/** Queues a search and waits until it, run `number`, completes. */
+/** Starts a search and waits until it, run `number`, completes. */
 export async function runSearch(page: Page, number: number): Promise<void> {
-  await queueSearch(page);
-  await expect(page.getByTestId(`run-${number}-status`)).toHaveText('completed');
+  await startSearch(page);
+  await expect(page.getByTestId(`run-${number}-option`)).toHaveAttribute('data-status', 'completed');
 }
 
 /**
@@ -150,18 +158,19 @@ const TYPES: Readonly<Record<string, string>> = {
  * Builds tests/e2e/harness in memory with Vite; the application build is not touched. The
  * harness build has the engine modules of LOSAT_WEB_REACTORS and the verification table (the
  * composition root imports both), as the application build does, and the test hooks of the
- * Engine worker (`__LOSAT_TEST_HOOKS__`).
+ * Engine worker (`__LOSAT_TEST_HOOKS__`). `reactors` replaces the modules of
+ * LOSAT_WEB_REACTORS (a measurement of another form of the same modules).
  */
-export async function buildHarness(): Promise<HarnessFiles> {
+export async function buildHarness(reactors: Reactors | undefined = REACTORS): Promise<HarnessFiles> {
   const result = await build({
     root: fileURLToPath(new URL('../harness/', import.meta.url)),
     base: '/__harness/',
     configFile: false,
     publicDir: false,
     logLevel: 'warn',
-    plugins: [losatEngine({ reactors: REACTORS }), losatVerification()],
+    plugins: [losatEngine({ reactors }), losatVerification()],
     define: { __LOSAT_TEST_HOOKS__: 'true' },
-    worker: { format: 'es', plugins: () => [losatEngine({ reactors: REACTORS, emit: false })] },
+    worker: { format: 'es', plugins: () => [losatEngine({ reactors, emit: false })] },
     build: { write: false, target: 'es2022', minify: false, modulePreload: false },
   });
   const files = new Map<string, { body: string | Uint8Array; type: string }>();

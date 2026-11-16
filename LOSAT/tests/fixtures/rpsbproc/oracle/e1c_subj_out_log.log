@@ -1,0 +1,2 @@
+Error: (CInvalidChoiceSelection::eFail) CBlast4_subject::GetDatabase(): Invalid choice selection: NCBI-Blast4::Blast4-subject.sequences
+Error: (106.16) Application's execution failed (CInvalidChoiceSelection::eFail) CBlast4_subject::GetDatabase(): Invalid choice selection: NCBI-Blast4::Blast4-subject.sequences

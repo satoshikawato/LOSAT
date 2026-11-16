@@ -1,0 +1,22 @@
+{
+  "version": "1.2",
+  "dbname": "p5n",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "prot_ids",
+  "number-of-letters": 2603,
+  "number-of-sequences": 19,
+  "last-updated": "2026-10-29T19:13:00",
+  "number-of-volumes": 1,
+  "bytes-total": 42022,
+  "bytes-to-cache": 2863,
+  "files": [
+    "p5n.pdb",
+    "p5n.phr",
+    "p5n.pin",
+    "p5n.pot",
+    "p5n.psq",
+    "p5n.ptf",
+    "p5n.pto"
+  ]
+}

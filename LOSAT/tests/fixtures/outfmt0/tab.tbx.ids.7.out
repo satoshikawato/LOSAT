@@ -1,0 +1,35 @@
+# TBLASTX 2.17.0+
+# Query: qn1 query nucleotide one
+# Database: User specified sequence set (Input: tests/db_search/ids/nucl.fna)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score, query id, query gi, query acc., query length, subject id, subject ids, subject gi, subject gis, subject acc., subject accs., subject length
+# 25 hits found
+qn1	tpe|BN000025.1|	90.909	66	6	0	31	228	46	243	3.73e-74	160	qn1	0	qn1	480	tpe|BN000025.1|	tpe|BN000025.1|	0	0	tpe|BN000025.1|	tpe|BN000025.1|	488
+qn1	gnl|ti|123	90.909	66	6	0	31	228	46	243	3.73e-74	160	qn1	0	qn1	480	gnl|ti|123	gnl|ti|123	0	0	gnl|ti|123	gnl|ti|123	488
+qn1	ref|NR_000023.1|	90.909	66	6	0	31	228	46	243	3.73e-74	160	qn1	0	qn1	480	ref|NR_000023.1|	ref|NR_000023.1|	0	0	ref|NR_000023.1|	ref|NR_000023.1|	488
+qn1	lcl|Subject_22|gb|AF000022.1|	90.909	66	6	0	31	228	46	243	3.73e-74	160	qn1	0	qn1	480	lcl|Subject_22|gb|AF000022.1|	lcl|Subject_22|gb|AF000022.1|	0	0	lcl|Subject_22|gb|AF000022.1|	lcl|Subject_22|gb|AF000022.1|	488
+qn1	gb|AF000021.1|	90.909	66	6	0	31	228	46	243	3.73e-74	160	qn1	0	qn1	480	gb|AF000021.1|	gb|AF000021.1|	0	0	gb|AF000021.1|	gb|AF000021.1|	488
+qn1	ref|XM_000020.1|	90.909	66	6	0	31	228	46	243	3.73e-74	160	qn1	0	qn1	480	ref|XM_000020.1|	ref|XM_000020.1|	0	0	ref|XM_000020.1|	ref|XM_000020.1|	488
+qn1	ref|NC_000019.1|	90.909	66	6	0	31	228	46	243	3.73e-74	160	qn1	0	qn1	480	ref|NC_000019.1|	ref|NC_000019.1|	0	0	ref|NC_000019.1|	ref|NC_000019.1|	488
+qn1	tpg|BK000018.1|	90.909	66	6	0	31	228	46	243	3.73e-74	160	qn1	0	qn1	480	tpg|BK000018.1|	tpg|BK000018.1|	0	0	tpg|BK000018.1|	tpg|BK000018.1|	488
+qn1	lcl|Subject_31	90.909	66	6	0	31	228	46	243	3.73e-74	160	qn1	0	qn1	480	lcl|Subject_31	lcl|Subject_31	0	0	lcl|Subject_31	lcl|Subject_31	488
+qn1	lcl|Subject_30	90.909	66	6	0	31	228	46	243	3.73e-74	160	qn1	0	qn1	480	lcl|Subject_30	lcl|Subject_30	0	0	lcl|Subject_30	lcl|Subject_30	488
+qn1	gi|1515|gb|AF000015.1|	90.909	66	6	0	31	228	46	243	3.73e-74	160	qn1	0	qn1	480	gi|1515|gb|AF000015.1|	gi|1515|gb|AF000015.1|	0	0	gi|1515|gb|AF000015.1|	gi|1515|gb|AF000015.1|	488
+qn1	pat|US|1234567|14	90.909	66	6	0	31	228	46	243	3.73e-74	160	qn1	0	qn1	480	pat|US|1234567|14	pat|US|1234567|14	0	0	pat|US|1234567|14	pat|US|1234567|14	488
+qn1	gb|AF000013.1|LOCUS13	90.909	66	6	0	31	228	46	243	3.73e-74	160	qn1	0	qn1	480	gb|AF000013.1|LOCUS13	gb|AF000013.1|LOCUS13	0	0	gb|AF000013.1|LOCUS13	gb|AF000013.1|LOCUS13	488
+qn1	tpg|BK000012.1|	90.909	66	6	0	31	228	46	243	3.73e-74	160	qn1	0	qn1	480	tpg|BK000012.1|	tpg|BK000012.1|	0	0	tpg|BK000012.1|	tpg|BK000012.1|	488
+qn1	gi|1111	90.909	66	6	0	31	228	46	243	3.73e-74	160	qn1	0	qn1	480	gi|1111	gi|1111	0	0	gi|1111	gi|1111	488
+qn1	mynuc_10	90.909	66	6	0	31	228	46	243	3.73e-74	160	qn1	0	qn1	480	mynuc_10	mynuc_10	0	0	mynuc_10	mynuc_10	488
+qn1	AB000009	90.909	66	6	0	31	228	46	243	3.73e-74	160	qn1	0	qn1	480	AB000009	AB000009	0	0	AB000009	AB000009	488
+qn1	NM_000008.2	90.909	66	6	0	31	228	46	243	3.73e-74	160	qn1	0	qn1	480	NM_000008.2	NM_000008.2	0	0	NM_000008.2	NM_000008.2	488
+qn1	gnl|mydb|nuc7	90.909	66	6	0	31	228	46	243	3.73e-74	160	qn1	0	qn1	480	gnl|mydb|nuc7	gnl|mydb|nuc7	0	0	gnl|mydb|nuc7	gnl|mydb|nuc7	488
+qn1	lcl|mynuc6	90.909	66	6	0	31	228	46	243	3.73e-74	160	qn1	0	qn1	480	lcl|mynuc6	lcl|mynuc6	0	0	lcl|mynuc6	lcl|mynuc6	488
+qn1	ref|NC_000005.11|	90.909	66	6	0	31	228	46	243	3.73e-74	160	qn1	0	qn1	480	ref|NC_000005.11|	ref|NC_000005.11|	0	0	ref|NC_000005.11|	ref|NC_000005.11|	488
+qn1	dbj|AB000004.1|	90.909	66	6	0	31	228	46	243	3.73e-74	160	qn1	0	qn1	480	dbj|AB000004.1|	dbj|AB000004.1|	0	0	dbj|AB000004.1|	dbj|AB000004.1|	488
+qn1	emb|AJ000003.1|	90.909	66	6	0	31	228	46	243	3.73e-74	160	qn1	0	qn1	480	emb|AJ000003.1|	emb|AJ000003.1|	0	0	emb|AJ000003.1|	emb|AJ000003.1|	488
+qn1	gi|654321|gb|AF000002.3|	90.909	66	6	0	31	228	46	243	3.73e-74	160	qn1	0	qn1	480	gi|654321|gb|AF000002.3|	gi|654321|gb|AF000002.3|	0	0	gi|654321|gb|AF000002.3|	gi|654321|gb|AF000002.3|	488
+qn1	ref|NM_000001.1|	90.909	66	6	0	31	228	46	243	3.73e-74	160	qn1	0	qn1	480	ref|NM_000001.1|	ref|NM_000001.1|	0	0	ref|NM_000001.1|	ref|NM_000001.1|	488
+# TBLASTX 2.17.0+
+# Query: qn2 unrelated nucleotide (no hits expected)
+# Database: User specified sequence set (Input: tests/db_search/ids/nucl.fna)
+# 0 hits found
+# BLAST processed 2 queries

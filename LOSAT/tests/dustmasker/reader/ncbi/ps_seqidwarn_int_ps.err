@@ -1,0 +1,2 @@
+Error: (CObjReaderParseException::eNoIDs) Could not construct seq-id from 'xyz|ABC|DEF' (m_Pos = 1)
+Error: (106.16) Application's execution failed (CObjReaderParseException::eNoIDs) Could not construct seq-id from 'xyz|ABC|DEF' (m_Pos = 1)

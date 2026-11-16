@@ -1,0 +1,194 @@
+<?xml version="1.0"?>
+<ncbi_application xmlns="ncbi:application"
+ xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+ xs:schemaLocation="ncbi:application ncbi_application.xsd"
+>
+<program type="regular">
+<name>makeblastdb</name>
+<version>2.17.0</version>
+<description>Application to create BLAST databases, version 2.17.0+</description>
+<detailed_description></detailed_description>
+</program>
+<arguments>
+<key name="blastdb_version" type="Integer" optional="true">
+<description>Version of BLAST database to be created</description>
+<group>4</group>
+<synopsis>version</synopsis>
+<constraint>
+<description>4..5</description>
+<Integers>
+<min>4</min>
+<max>5</max>
+</Integers>
+</constraint>
+<default>5</default>
+</key>
+<key name="dbtype" type="String">
+<description>Molecule type of target db</description>
+<synopsis>molecule_type</synopsis>
+<constraint>
+<description>`nucl&apos;, `prot&apos;</description>
+<Strings case_sensitive="true">
+<value>nucl</value>
+<value>prot</value>
+</Strings>
+</constraint>
+</key>
+<key name="gi_mask_name" type="String" optional="true">
+<description>Comma-separated list of masking data output files.</description>
+<group>3</group>
+<synopsis>gi_based_mask_names</synopsis>
+</key>
+<key name="in" type="File_In" optional="true">
+<description>Input file/database name</description>
+<group>1</group>
+<synopsis>input_file</synopsis>
+<default>-</default>
+</key>
+<key name="input_type" type="String" optional="true">
+<description>Type of the data specified in input_file</description>
+<group>1</group>
+<synopsis>type</synopsis>
+<constraint>
+<description>`asn1_bin&apos;, `asn1_txt&apos;, `blastdb&apos;, `fasta&apos;</description>
+<Strings case_sensitive="true">
+<value>asn1_bin</value>
+<value>asn1_txt</value>
+<value>blastdb</value>
+<value>fasta</value>
+</Strings>
+</constraint>
+<default>fasta</default>
+</key>
+<key name="logfile" type="File_Out" optional="true">
+<description>File to which the program log should be redirected</description>
+<group>4</group>
+<synopsis>File_Name</synopsis>
+<flags><append/></flags>
+</key>
+<key name="mask_data" type="String" optional="true">
+<description>Comma-separated list of input files containing masking data as produced by NCBI masking applications (e.g. dustmasker, segmasker, windowmasker)</description>
+<group>3</group>
+<synopsis>mask_data_files</synopsis>
+</key>
+<key name="mask_desc" type="String" optional="true">
+<description>Comma-separated list of free form strings to describe the masking algorithm details</description>
+<group>3</group>
+<synopsis>mask_algo_descriptions</synopsis>
+</key>
+<key name="mask_id" type="String" optional="true">
+<description>Comma-separated list of strings to uniquely identify the masking algorithm</description>
+<group>3</group>
+<synopsis>mask_algo_ids</synopsis>
+</key>
+<key name="max_file_sz" type="String" optional="true">
+<description>Maximum file size for BLAST database files</description>
+<group>4</group>
+<synopsis>number_of_bytes</synopsis>
+<default>3GB</default>
+</key>
+<key name="metadata_output_prefix" type="String" optional="true">
+<description>Path prefix for location of database files in metadata</description>
+<group>4</group>
+</key>
+<key name="oid_masks" type="Integer" optional="true">
+<description>0x01 Exclude Model</description>
+<group>5</group>
+<synopsis>oid_masks</synopsis>
+</key>
+<key name="out" type="String" optional="true">
+<description>Name of BLAST database to be created&#xa;Default = input file name provided to -in argumentRequired if multiple file(s)/database(s) are provided as input</description>
+<group>4</group>
+<synopsis>database_name</synopsis>
+</key>
+<key name="taxid" type="Integer" optional="true">
+<description>Taxonomy ID to assign to all sequences</description>
+<group>5</group>
+<synopsis>TaxID</synopsis>
+<constraint>
+<description>&gt;=0</description>
+</constraint>
+</key>
+<key name="taxid_map" type="File_In" optional="true">
+<description>Text file mapping sequence IDs to taxonomy IDs.&#xa;Format:&lt;SequenceId&gt; &lt;TaxonomyId&gt;&lt;newline&gt;</description>
+<group>5</group>
+<synopsis>TaxIDMapFile</synopsis>
+</key>
+<key name="title" type="String" optional="true">
+<description>Title for BLAST database&#xa;Default = input file name provided to -in argument</description>
+<group>2</group>
+<synopsis>database_title</synopsis>
+</key>
+<flag name="gi_mask" optional="true">
+<description>Create GI indexed masking data.</description>
+<group>3</group>
+</flag>
+<flag name="h" optional="true">
+<description>Print USAGE and DESCRIPTION;  ignore all other parameters</description>
+</flag>
+<flag name="hash_index" optional="true">
+<description>Create index of sequence hash values.</description>
+<group>2</group>
+</flag>
+<flag name="help" optional="true">
+<description>Print USAGE, DESCRIPTION and ARGUMENTS; ignore all other parameters</description>
+</flag>
+<flag name="help-full" optional="true">
+<description>Print USAGE, DESCRIPTION and ARGUMENTS, including hidden ones; ignore all other parameters</description>
+</flag>
+<flag name="parse_seqids" optional="true">
+<description>Option to parse seqid for FASTA input if set, for all other input types seqids are parsed automatically</description>
+<group>2</group>
+</flag>
+<flag name="randomize" optional="true">
+<description>Randomize input db seqs</description>
+<group>2</group>
+<flags><hidden/></flags>
+</flag>
+<flag name="version" optional="true">
+<description>Print version number;  ignore other arguments</description>
+</flag>
+<dependencies>
+<first_requires_second>
+<arg1>gi_mask</arg1>
+<arg2>parse_seqids</arg2>
+</first_requires_second>
+<first_requires_second>
+<arg1>gi_mask_name</arg1>
+<arg2>mask_data</arg2>
+</first_requires_second>
+<first_requires_second>
+<arg1>gi_mask_name</arg1>
+<arg2>gi_mask</arg2>
+</first_requires_second>
+<first_requires_second>
+<arg1>mask_desc</arg1>
+<arg2>mask_id</arg2>
+</first_requires_second>
+<first_requires_second>
+<arg1>mask_id</arg1>
+<arg2>mask_data</arg2>
+</first_requires_second>
+<first_requires_second>
+<arg1>taxid_map</arg1>
+<arg2>parse_seqids</arg2>
+</first_requires_second>
+<first_excludes_second>
+<arg1>gi_mask</arg1>
+<arg2>mask_id</arg2>
+</first_excludes_second>
+<first_excludes_second>
+<arg1>mask_id</arg1>
+<arg2>gi_mask</arg2>
+</first_excludes_second>
+<first_excludes_second>
+<arg1>taxid</arg1>
+<arg2>taxid_map</arg2>
+</first_excludes_second>
+<first_excludes_second>
+<arg1>taxid_map</arg1>
+<arg2>taxid</arg2>
+</first_excludes_second>
+</dependencies>
+</arguments>
+</ncbi_application>

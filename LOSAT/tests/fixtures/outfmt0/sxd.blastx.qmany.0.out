@@ -1,0 +1,1932 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/MjeNMV.faa).
+           111 sequences; 77,006 total letters
+
+
+
+Query= mje1 MjeNMV 1-3000
+
+Length=3000
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT61649.1 hypothetical protein [Marsupenaeus japonicus endogenou...  116     1e-31
+BDT61650.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  23.9    1.5  
+BDT61675.1 hypothetical protein [Marsupenaeus japonicus endogenou...  22.7    3.0  
+BDT61742.1 wsv332-like protein [Marsupenaeus japonicus endogenous...  22.7    3.1  
+BDT61666.1 hypothetical protein [Marsupenaeus japonicus endogenou...  21.2    9.6  
+BDT61694.1 wsv433-like protein [Marsupenaeus japonicus endogenous...  21.2    9.7  
+
+
+> BDT61649.1 hypothetical protein [Marsupenaeus japonicus endogenous 
+nimavirus]
+Length=423
+
+ Score = 116 bits (291),  Expect = 1e-31, Method: Compositional matrix adjust.
+ Identities = 68/68 (100%), Positives = 68/68 (100%), Gaps = 0/68 (0%)
+ Frame = +1
+
+Query  2797  MSSSNGPsktttkekgeIPLKEKNTGKRKCFVKEAHHQEDGGSRDSTSCTSVSTQSTPDL  2976
+             MSSSNGPSKTTTKEKGEIPLKEKNTGKRKCFVKEAHHQEDGGSRDSTSCTSVSTQSTPDL
+Sbjct  1     MSSSNGPSKTTTKEKGEIPLKEKNTGKRKCFVKEAHHQEDGGSRDSTSCTSVSTQSTPDL  60
+
+Query  2977  CEENIAVP  3000
+             CEENIAVP
+Sbjct  61    CEENIAVP  68
+
+
+> BDT61650.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=1355
+
+ Score = 23.9 bits (50),  Expect = 1.5, Method: Composition-based stats.
+ Identities = 12/44 (27%), Positives = 22/44 (50%), Gaps = 0/44 (0%)
+ Frame = +2
+
+Query  2234  LRVYLSLGRRGRSYVFILVLGEREELKCVYIYSC*KKNIPLHSS  2365
+             LRV +   +R  S+  +L    +E   C +  +  + N+P+H S
+Sbjct  167   LRVNILTDKRYESHHSMLFAHAKERPDCAFALNLNEGNVPIHMS  210
+
+
+> BDT61675.1 hypothetical protein [Marsupenaeus japonicus endogenous 
+nimavirus]
+Length=1058
+
+ Score = 22.7 bits (47),  Expect = 3.0, Method: Composition-based stats.
+ Identities = 7/12 (58%), Positives = 10/12 (83%), Gaps = 0/12 (0%)
+ Frame = -2
+
+Query  2957  VDTLVHDVESRE  2922
+             +DT++HD ES E
+Sbjct  427   IDTIIHDAESNE  438
+
+
+> BDT61742.1 wsv332-like protein [Marsupenaeus japonicus endogenous 
+nimavirus]
+Length=798
+
+ Score = 22.7 bits (47),  Expect = 3.1, Method: Composition-based stats.
+ Identities = 10/26 (38%), Positives = 14/26 (54%), Gaps = 0/26 (0%)
+ Frame = +1
+
+Query  2002  RLCLFFWLFIPFYLFMNCRWMATEQL  2079
+             R CLF  + IP  +  NC  +A  Q+
+Sbjct  591   RQCLFSSILIPDIIGANCSILAPMQI  616
+
+
+> BDT61666.1 hypothetical protein [Marsupenaeus japonicus endogenous 
+nimavirus]
+Length=3818
+
+ Score = 21.2 bits (43),  Expect = 9.6, Method: Compositional matrix adjust.
+ Identities = 8/27 (30%), Positives = 18/27 (67%), Gaps = 1/27 (4%)
+ Frame = -3
+
+Query  2494  RYILSHVFIYIYIIKSPVNLQHLSEYR  2414
+             +Y++  + + +Y +  P+  QH++EYR
+Sbjct  2930  KYLVPDILLNVYGL-IPIESQHVTEYR  2955
+
+
+> BDT61694.1 wsv433-like protein [Marsupenaeus japonicus endogenous 
+nimavirus]
+Length=1399
+
+ Score = 21.2 bits (43),  Expect = 9.7, Method: Compositional matrix adjust.
+ Identities = 8/20 (40%), Positives = 15/20 (75%), Gaps = 0/20 (0%)
+ Frame = -3
+
+Query  2464  IYIIKSPVNLQHLSEYRYDY  2405
+             IY++ +P++ Q+LS   Y+Y
+Sbjct  502   IYLLNAPLHAQYLSPLPYNY  521
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 18604560
+
+
+Query= mje3 MjeNMV 4501-6500
+
+Length=2000
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= mje4 MjeNMV 6501-10000
+
+Length=3500
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT61650.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  479     9e-167
+BDT61729.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  97.8    1e-23 
+BDT61660.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  79.0    1e-17 
+BDT61659.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  76.6    7e-17 
+BDT61655.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  75.9    1e-16 
+BDT61656.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  74.7    1e-16 
+BDT61657.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  75.1    2e-16 
+BDT61723.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  73.2    1e-15 
+BDT61661.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  55.1    3e-10 
+BDT61678.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  43.9    6e-07 
+BDT61658.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  38.1    6e-05 
+BDT61698.1 wsv447-like protein [Marsupenaeus japonicus endogenous...  23.5    3.0   
+BDT61710.1 wsv192-like protein [Marsupenaeus japonicus endogenous...  23.5    3.0   
+
+
+> BDT61650.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=1355
+
+ Score = 479 bits (1232),  Expect(2) = 9e-167, Method: Compositional matrix adjust.
+ Identities = 247/258 (96%), Positives = 250/258 (97%), Gaps = 6/258 (2%)
+ Frame = -1
+
+Query  3089  MSRPNNNSSIDNSQPDDNRDIIHTESETCETSKDMKMKVNRINTFGEHHQYAHHPIVIAE  2910
+             MSRPNNNSSIDNSQPDDNRDIIHTESETCETSKDMKMKVNRINTFGEHHQYAHHPIVIAE
+Sbjct  1     MSRPNNNSSIDNSQPDDNRDIIHTESETCETSKDMKMKVNRINTFGEHHQYAHHPIVIAE  60
+
+Query  2909  AGFYKVNQSVFCFKCGLnidideinntddIVELHTTKNPSCIFARNLPPLPRSRLFDQYD  2730
+             AGFYKVNQSVFCFKCGLNIDIDEINNTDDIVELHTTKNPSCIFARNLPPLPRSRLFDQYD
+Sbjct  61    AGFYKVNQSVFCFKCGLNIDIDEINNTDDIVELHTTKNPSCIFARNLPPLPRSRLFDQYD  120
+
+Query  2729  DDLRYEVNRLGTFIDWPCVPMEPMELSKAGFFYSRIENKCICYKCGLRVNILTDKRYESH  2550
+             DDLRYEVNRLGTFIDWPCVPMEPMELSKAGFFYSRIENKCICYKCGLRVNILTDKRYESH
+Sbjct  121   DDLRYEVNRLGTFIDWPCVPMEPMELSKAGFFYSRIENKCICYKCGLRVNILTDKRYESH  180
+
+Query  2549  HSMLFAHAKERPDCAFALNLNEGNVPIHMSKIIKKITSKYRNSHDKDASKTTEKEINIST  2370
+             HSMLFAHAKERPDCAFALNLNEGNVPIHMSKIIKKITSKYRNSHDKDASKTTEKEINIST
+Sbjct  181   HSMLFAHAKERPDCAFALNLNEGNVPIHMSKIIKKITSKYRNSHDKDASKTTEKEINIST  240
+
+Query  2369  TLDKRK***C*WFNLTNI  2316
+             TLDK        +N+TN+
+Sbjct  241   TLDKHN------WNVTNV  252
+
+
+ Score = 120 bits (302),  Expect(2) = 9e-167, Method: Compositional matrix adjust.
+ Identities = 57/63 (90%), Positives = 58/63 (92%), Gaps = 2/63 (3%)
+ Frame = -3
+
+Query  2217  NWNVTNVNHILRPYTPPKHKNYTLPESRKKTFNTWPLEDKDLKERLIEAGFFYT--GETY  2044
+             NWNVTNVNHILRPYTPPKHKNYTLPESRKKTFNTWPLEDKDLKERLIEAGFFYT  G+  
+Sbjct  246   NWNVTNVNHILRPYTPPKHKNYTLPESRKKTFNTWPLEDKDLKERLIEAGFFYTGKGDHV  305
+
+Query  2043  TCF  2035
+              CF
+Sbjct  306   ICF  308
+
+
+ Score = 127 bits (319),  Expect = 4e-33, Method: Compositional matrix adjust.
+ Identities = 81/192 (42%), Positives = 111/192 (58%), Gaps = 15/192 (8%)
+ Frame = -1
+
+Query  2909  AGFYKVNQSVFCFKCGLnidideinntddIVELHTTKNPSCIFARNLPPLPRSRLFD---  2739
+             AGF K +  + C +C   IDI+ +N +D+IV+LH  KNP+C  A+NLPPLPRS+ F+   
+Sbjct  663   AGFRKCDSYITCIECHACIDIETLNISDNIVKLHQNKNPNCPLAQNLPPLPRSKKFEIDF  722
+
+Query  2738  ----QYDDDLRYEVNRLGTFIDWPCVPMEPMELSKAGFFYSRIENKCICYKCGLRVNILT  2571
+                 +   DLRYE+ RL +FIDWP   ++P +LS AGFFYSR  N CIC+ C   V    
+Sbjct  723   DSITELPTDLRYEIKRLESFIDWPNKRVQPKDLSAAGFFYSRNTNYCICFYCNEYV----  778
+
+Query  2570  DKRYESHHSMLF--AHAKERPDCAFALNLNEGNVPIHMSKIIKKITSKYRNSHDKDASKT  2397
+               R+  +  M     H K+ P C FA     GN+PIHMS II KITS+     +++    
+Sbjct  779   --RFFDNIPMTIRDIHLKKNPYCLFAQGKPVGNIPIHMSDIINKITSQNLAVINQENGLE  836
+
+Query  2396  TEKEINISTTLD  2361
+             TE +   +  +D
+Sbjct  837   TETQKTKNKVMD  848
+
+
+ Score = 59.7 bits (143),  Expect = 2e-11, Method: Compositional matrix adjust.
+ Identities = 64/267 (24%), Positives = 106/267 (40%), Gaps = 63/267 (24%)
+ Frame = -1
+
+Query  2990  DMKMKVNRINTFGEHHQYAHHPIVIAEAGFY--KVNQSVFCFKCGLnidideinntddIV  2817
+             D++ +VNR+ TF +       P+ +++AGF+  ++     C+KCGL ++I      +   
+Sbjct  122   DLRYEVNRLGTFIDWPCVPMEPMELSKAGFFYSRIENKCICYKCGLRVNILTDKRYESHH  181
+
+Query  2816  EL---HTTKNPSCIFARNL----PPLPRSRLFDQYDDDLR------------YEVN----  2706
+              +   H  + P C FA NL     P+  S++  +     R             E+N    
+Sbjct  182   SMLFAHAKERPDCAFALNLNEGNVPIHMSKIIKKITSKYRNSHDKDASKTTEKEINISTT  241
+
+Query  2705  -------------------------------RLGTFIDWPCVPMEPME-LSKAGFFYSRI  2622
+                                            R  TF  WP    +  E L +AGFFY+  
+Sbjct  242   LDKHNWNVTNVNHILRPYTPPKHKNYTLPESRKKTFNTWPLEDKDLKERLIEAGFFYTGK  301
+
+Query  2621  ENKCICYKCGLRVNILTDKRYESHHSMLFAHAKERPDCAFALNLNEGNVPIHMSKIIKKI  2442
+              +  IC++CG+ +     + +ES+   L  HA   P C F +++  G   I   K +KK 
+Sbjct  302   GDHVICFQCGVGI-----RNWESYDDPLTQHAMWSPSCCF-IHIFAGQPFIDQVKEMKKT  355
+
+Query  2441  TSKYRNSHDKDASKTTEKEINISTTLD  2361
+               K   +  KD  + TE + +    LD
+Sbjct  356   LFKKPTTCTKDIGQITEDDWDNLMGLD  382
+
+
+ Score = 52.0 bits (123),  Expect = 4e-09, Method: Compositional matrix adjust.
+ Identities = 59/259 (23%), Positives = 108/259 (42%), Gaps = 54/259 (21%)
+ Frame = -1
+
+Query  3002  ETSKDMKMKVNRINTFGEHHQYAHHPIVIAEAGFYKVNQSVFC--FKCGLnidideinnt  2829
+             E   D++ ++ R+ +F +       P  ++ AGF+    + +C  F C         N  
+Sbjct  727   ELPTDLRYEIKRLESFIDWPNKRVQPKDLSAAGFFYSRNTNYCICFYCN-EYVRFFDNIP  785
+
+Query  2828  ddIVELHTTKNPSCIFARNLP----PL-----------------------------PRSR  2748
+               I ++H  KNP C+FA+  P    P+                              +++
+Sbjct  786   MTIRDIHLKKNPYCLFAQGKPVGNIPIHMSDIINKITSQNLAVINQENGLETETQKTKNK  845
+
+Query  2747  LFDQYD------DDLRYEVNRLGTFIDWPCVPME-PMELSKAGFFYSRIENKCICYKC--  2595
+             + D Y+      DD      RL +F +WP    + P  L +AGF+Y+   +   C+ C  
+Sbjct  846   VMDSYNYTGPLHDDYITINKRLQSFFNWPVRNYQNPEILVEAGFYYTGTSDHVQCFHCGG  905
+
+Query  2594  GLRVNILTDKRYESHHSMLFAHAKERPDCAFALNLNEGNVPIHMSKIIKKITSKYRNSHD  2415
+             GLR   + D  +E        HAK  P+C + L L +G   I+  ++ + +   + +S D
+Sbjct  906   GLRNWEMDDDPWE-------LHAKWYPNCNYVL-LKKGESFINNVRVEEPLKGTFSSSRD  957
+
+Query  2414  K-DASKTTEKEINISTTLD  2361
+             + +  + T+++ +I   LD
+Sbjct  958   QYNQLEITKQDWDILLGLD  976
+
+
+ Score = 41.6 bits (96),  Expect = 8e-06, Method: Compositional matrix adjust.
+ Identities = 20/50 (40%), Positives = 28/50 (56%), Gaps = 2/50 (4%)
+ Frame = -3
+
+Query  2178  YTPPKHKNYTLPESRKKTFNTWPLEDKDLKERLIEAGFFYTGET--YTCF  2035
+             YT P H +Y     R ++F  WP+ +    E L+EAGF+YTG +    CF
+Sbjct  852   YTGPLHDDYITINKRLQSFFNWPVRNYQNPEILVEAGFYYTGTSDHVQCF  901
+
+
+ Score = 23.5 bits (49),  Expect = 3.0, Method: Compositional matrix adjust.
+ Identities = 14/37 (38%), Positives = 19/37 (51%), Gaps = 7/37 (19%)
+ Frame = -3
+
+Query  2136  RKKTFNTWP---LEDKDLKERLIEAGFFYTGETYTCF  2035
+             R ++F  WP   ++ KDL      AGFFY+  T  C 
+Sbjct  738   RLESFIDWPNKRVQPKDLSA----AGFFYSRNTNYCI  770
+
+
+> BDT61729.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=704
+
+ Score = 97.8 bits (242),  Expect = 1e-23, Method: Compositional matrix adjust.
+ Identities = 73/203 (36%), Positives = 99/203 (49%), Gaps = 16/203 (8%)
+ Frame = -1
+
+Query  2969  RINTFGEHHQYAHHPIVIAEAGFY--KVNQSVFCFKCGLnidideinntddIVELHTTKN  2796
+             R++TF E + +A     +A+AGFY  K    V CF C   +D   I+  DDI  LH  K 
+Sbjct  14    RLDTF-ERYDFAADKKKLAQAGFYYTKKGDEVKCFDCKWEVDAKTISPADDIARLHKEKR  72
+
+Query  2795  PSCIFARNLPPLP---RSRLFDQYDDDLRYEVNRLGTFIDWPCVPMEPMELSKAGFFYSR  2625
+             P C FA+ L  +P   RS+ F  YD  LR+E  RL TFIDWP   ++P EL+  G +Y R
+Sbjct  73    PDCHFAQGLRTVPKPSRSKTFISYDS-LRFEKERLETFIDWPIQWLDPSELASDGLYYLR  131
+
+Query  2624  IENKCICYKC-GLRVNILTDKRYESHHSMLFAHAKERPDCAFALNLNEGNVPIHMSKIIK  2448
+               + C C  C G+             H   F+H      C F      GNVPIH S I+ 
+Sbjct  132   TSDHCACVFCRGIIGAWEVGDTPRGEHQRHFSH------CPFIRGQPVGNVPIHHSDILA  185
+
+Query  2447  KITSKYRNSHDKDASKTTEKEIN  2379
+             ++   Y+NS  +  + T    I+
+Sbjct  186   RL--PYQNSTPQTNTSTKRHGID  206
+
+
+ Score = 46.6 bits (109),  Expect = 2e-07, Method: Compositional matrix adjust.
+ Identities = 25/78 (32%), Positives = 43/78 (55%), Gaps = 6/78 (8%)
+ Frame = -1
+
+Query  2726  DLRYEVNRLGTFIDWP-CVPMEPMELSKAGFFYSRIENKCICYKCGLRVNILTDKRYESH  2550
+             D  +  +RL +F+ WP  V  +P +L++AGFFY  + +   C+ CG   N L  + +E +
+Sbjct  246   DFLFTESRLASFVKWPERVTQKPCDLAEAGFFYCGLSDHVRCFHCG---NGL--RNWEDN  300
+
+Query  2549  HSMLFAHAKERPDCAFAL  2496
+                   HA+  P+C++ L
+Sbjct  301   DIPWNEHARWYPECSYVL  318
+
+
+ Score = 37.0 bits (84),  Expect = 2e-04, Method: Compositional matrix adjust.
+ Identities = 20/52 (38%), Positives = 25/52 (48%), Gaps = 2/52 (4%)
+ Frame = -3
+
+Query  2178  YTPPKHKNYTLPESRKKTFNTWPLEDKDLKERLIEAGFFYTG--ETYTCFFL  2029
+             Y+ PK K++   ESR  +F  WP         L EAGFFY G  +   CF  
+Sbjct  239   YSGPKRKDFLFTESRLASFVKWPERVTQKPCDLAEAGFFYCGLSDHVRCFHC  290
+
+
+ Score = 25.0 bits (53),  Expect = 0.95, Method: Compositional matrix adjust.
+ Identities = 15/45 (33%), Positives = 23/45 (51%), Gaps = 4/45 (9%)
+ Frame = -3
+
+Query  2163  HKNYTLPESRKKTFNTWPLEDKDLKERLIEAGFFYT--GETYTCF  2035
+             H++    E R  TF  +       K++L +AGF+YT  G+   CF
+Sbjct  5     HESLAREEYRLDTFERYDFAAD--KKKLAQAGFYYTKKGDEVKCF  47
+
+
+ Score = 21.9 bits (45),  Expect = 7.6, Method: Compositional matrix adjust.
+ Identities = 13/38 (34%), Positives = 18/38 (47%), Gaps = 3/38 (8%)
+ Frame = -3
+
+Query  2136  RKKTFNTWPLEDKDLKERLIEAGFFY--TGETYTCFFL  2029
+             R +TF  WP++  D  E L   G +Y  T +   C F 
+Sbjct  105   RLETFIDWPIQWLDPSE-LASDGLYYLRTSDHCACVFC  141
+
+
+> BDT61660.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=551
+
+ Score = 79.0 bits (193),  Expect = 1e-17, Method: Compositional matrix adjust.
+ Identities = 59/199 (30%), Positives = 100/199 (50%), Gaps = 23/199 (12%)
+ Frame = -1
+
+Query  3002  ETSKDMKMKVNRINTFGEH---HQYAHHPIVIAEAGFYKVNQSVFCFKCGLnidideinn  2832
+             E + ++  +  R++TF  +   + Y  H  ++A+AGF   +  V CF C L +D+  I  
+Sbjct  2     EPTMELLNEKKRLDTFNLNPIKNPYPIHTRLLAKAGFIYTDNDVKCFLCNLKLDMKNIIG  61
+
+Query  2831  tddIVELHTTKNPSCIFARNLPPLPRSRLFDQYDDD------------------LRYEVN  2706
+             ++DI+++H  K+P C FA++L      + F +   D                  L YE N
+Sbjct  62    SEDIIKIHKKKSPGCSFAQSLYGFENLQKFKKNPIDKKSCRDWAYYSYTEGNIGLIYEKN  121
+
+Query  2705  RLGTFIDWPCVPMEPMELSKAGFFYSRIENKCICYKCGLRVNILTDKRYESHHSMLFAHA  2526
+             RL +FI+WP   + P  L+  GF+Y+RI++   C  C  RVNI   ++ ++ +++   H 
+Sbjct  122   RLESFIEWPINWLSPSNLAADGFYYTRIKDHVACAFC--RVNIGEFEKCDTINTIREKHK  179
+
+Query  2525  KERPDCAFALNLNEGNVPI  2469
+              + P+C F       NVPI
+Sbjct  180   HKSPNCPFINGHKTDNVPI  198
+
+
+ Score = 28.1 bits (61),  Expect = 0.11, Method: Compositional matrix adjust.
+ Identities = 17/51 (33%), Positives = 22/51 (43%), Gaps = 2/51 (4%)
+ Frame = -3
+
+Query  2181  PYTPPKHKNYTLPESRKKTFNTWPLEDKDLKERLIEAGFFY--TGETYTCF  2035
+             PY     K Y+  E R  +F  WP       + L EAG +Y   G+   CF
+Sbjct  227   PYQSYSKKEYSKIEKRLASFKKWPDCLVQKPQDLAEAGLYYEGVGDYVRCF  277
+
+
+ Score = 23.5 bits (49),  Expect = 2.8, Method: Compositional matrix adjust.
+ Identities = 14/37 (38%), Positives = 20/37 (54%), Gaps = 2/37 (5%)
+ Frame = -3
+
+Query  2136  RKKTFNTWPLEDK-DLKERLI-EAGFFYTGETYTCFF  2032
+             R  TFN  P+++   +  RL+ +AGF YT     CF 
+Sbjct  13    RLDTFNLNPIKNPYPIHTRLLAKAGFIYTDNDVKCFL  49
+
+
+> BDT61659.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=702
+
+ Score = 76.6 bits (187),  Expect = 7e-17, Method: Compositional matrix adjust.
+ Identities = 59/191 (31%), Positives = 98/191 (51%), Gaps = 23/191 (12%)
+ Frame = -1
+
+Query  2969  RINTFGEHHQYAHHPI---VIAEAGFYKVNQSVFCFKCGLnidideinntddIVELHTTK  2799
+             R++TF  +     +PI   ++A+AGF   +  V CF C L +D+  I  ++DI+++H  K
+Sbjct  13    RLDTFNLNPIKRPYPIDTRLLAKAGFIYTDNDVKCFLCHLKLDMKNIIGSEDIIKIHKKK  72
+
+Query  2798  NPSCIFARNL-----------PPLP----RSRLFDQYDDD---LRYEVNRLGTFIDWPCV  2673
+             +P C FA++L            P+     R   +  Y +    L YE  RL +FI+WP  
+Sbjct  73    SPGCSFAQSLYGFENIQKFKKKPISKVSHRDWAYYSYKEGIIGLIYERKRLESFIEWPIN  132
+
+Query  2672  PMEPMELSKAGFFYSRIENKCICYKCGLRVNILTDKRYESHHSMLFAHAKERPDCAFALN  2493
+              + P  L+  GF+Y+RI++   C  C  RVNI   ++ ++ +++   H  + P+C F   
+Sbjct  133   WLSPSNLAADGFYYTRIKDHVACAFC--RVNIGEFEKCDTINTIREKHKHKSPNCPFING  190
+
+Query  2492  LNEGNVPIHMS  2460
+                 NVPI +S
+Sbjct  191   HKTDNVPIFLS  201
+
+
+ Score = 41.2 bits (95),  Expect = 9e-06, Method: Compositional matrix adjust.
+ Identities = 25/77 (32%), Positives = 39/77 (51%), Gaps = 9/77 (12%)
+ Frame = -1
+
+Query  2705  RLGTFIDWP-CVPMEPMELSKAGFFYSRIENKCICYKC-GLRVNILTDKRYESHHSMLFA  2532
+             RL +F  WP C+  +P +L++AG +Y  + +   C++C G   N      +E        
+Sbjct  243   RLASFKKWPDCLVQKPQDLAEAGLYYEGVGDYVRCFQCSGGHCN------WEKEDIPWNL  296
+
+Query  2531  HAKERPDCAFALNLNEG  2481
+             HA+ RPDC   L L +G
+Sbjct  297   HARWRPDC-LHLYLKKG  312
+
+
+ Score = 28.9 bits (63),  Expect = 0.066, Method: Compositional matrix adjust.
+ Identities = 17/51 (33%), Positives = 22/51 (43%), Gaps = 2/51 (4%)
+ Frame = -3
+
+Query  2181  PYTPPKHKNYTLPESRKKTFNTWPLEDKDLKERLIEAGFFY--TGETYTCF  2035
+             PY     K Y+  E R  +F  WP       + L EAG +Y   G+   CF
+Sbjct  228   PYQSCSKKEYSTIEKRLASFKKWPDCLVQKPQDLAEAGLYYEGVGDYVRCF  278
+
+
+ Score = 22.7 bits (47),  Expect = 5.3, Method: Compositional matrix adjust.
+ Identities = 8/17 (47%), Positives = 9/17 (53%), Gaps = 0/17 (0%)
+ Frame = -3
+
+Query  2082  LIEAGFFYTGETYTCFF  2032
+             L +AGF YT     CF 
+Sbjct  33    LAKAGFIYTDNDVKCFL  49
+
+
+> BDT61655.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=546
+
+ Score = 75.9 bits (185),  Expect = 1e-16, Method: Compositional matrix adjust.
+ Identities = 64/215 (30%), Positives = 101/215 (47%), Gaps = 25/215 (12%)
+ Frame = -1
+
+Query  3017  ESETCETSKDMKMKVNRINTFGEH------HQYAHHPIVIAEAGFYKVNQSVF-CFKCGL  2859
+             ESE C   K + ++  R+ TF              H  ++A+AGF+ + + V  CF C L
+Sbjct  9     ESEIC--PKHIHLEQRRVETFINQFNENIDEGLPIHYRLLAKAGFFYMKEDVIACFCCKL  66
+
+Query  2858  nidideinntddIVELHTTKNPSCIFARNL-----------PPLPRSRLFDQYDDDLRYE  2712
+              ID+  +  +DDI+ +H   +P C+FA+NL           PP      F    + L YE
+Sbjct  67    QIDVKTLRTSDDIIMIHKKSSPGCMFAQNLYSLEDLNKYCKPPQIHKTFFKYARNTLIYE  126
+
+Query  2711  VNRLGTFIDWPCVPMEPMELSKAGFFYSRIENKCICYKCGLRVNILTDKRYESHHSMLFA  2532
+              +RL TF DWP   + P+EL+  GF++ + ++  +C  C   V IL    +E    +   
+Sbjct  127   QHRLETFADWPHDFVSPIELAADGFYFLKKQDHVMCVFC---VGIL--GLFEMGDIVREK  181
+
+Query  2531  HAKERPDCAFALNLNEGNVPIHMSKIIKKITSKYR  2427
+             H    P CAF       N+P     I +K++ +Y+
+Sbjct  182   HKHAFPGCAFVRGDKTCNIPAVKKNIFEKLSHEYK  216
+
+
+ Score = 26.2 bits (56),  Expect = 0.46, Method: Compositional matrix adjust.
+ Identities = 14/38 (37%), Positives = 18/38 (47%), Gaps = 2/38 (5%)
+ Frame = -3
+
+Query  2142  ESRKKTFNTWPLEDKDLKERLIEAGFFYTG--ETYTCF  2035
+             E R  +F  WP       + L EAGF+Y G  +   CF
+Sbjct  247   EKRLASFKDWPEYLVQKPQDLAEAGFYYCGLSDHVACF  284
+
+
+ Score = 24.6 bits (52),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 15/38 (39%), Positives = 20/38 (53%), Gaps = 3/38 (8%)
+ Frame = -1
+
+Query  2969  RINTFGEHHQY-AHHPIVIAEAGFYKVNQS--VFCFKC  2865
+             R+ +F +  +Y    P  +AEAGFY    S  V CF C
+Sbjct  249   RLASFKDWPEYLVQKPQDLAEAGFYYCGLSDHVACFHC  286
+
+
+> BDT61656.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=389
+
+ Score = 74.7 bits (182),  Expect = 1e-16, Method: Compositional matrix adjust.
+ Identities = 54/182 (30%), Positives = 92/182 (51%), Gaps = 17/182 (9%)
+ Frame = -1
+
+Query  2969  RINTFGEHHQYAHHPIVIAEAGFY-KVNQSVFCFKCGLnidideinntddIVELHTTKNP  2793
+             R ++F  +H Y   P ++A+AGF+   N  + CF C L +D+  + +TDDI+ +H  ++P
+Sbjct  17    RWDSF--NHYYYIDPRLLAKAGFFFSKNDDIQCFTCDLELDMKTLTSTDDIINIHKERSP  74
+
+Query  2792  SCIFARNL---------PPLPRSRLFDQYDDDLRYEVNRLGTFIDWPCVPMEPMELSKAG  2640
+              C FA++L           LP  + ++   ++L  E  RL TFIDWP   + P  L+  G
+Sbjct  75    KCSFAQSLYGFENILKFLKLPIRKTYEYIHENLNQEKVRLSTFIDWPLEWLSPSSLAADG  134
+
+Query  2639  FFYSRIENKCICYKCGLRVNILTDKRYESHHSMLFAHAKERPDCAFALNLNEGNVPIHMS  2460
+             F+Y+R E++  C  C   ++      ++    +   H +  P+C F    +  N+PI   
+Sbjct  135   FYYTRREDRVKCVFCRKEIS-----GFKKGCIIGEEHKRLSPNCHFVNGSSTSNIPIKFY  189
+
+Query  2459  KI  2454
+              I
+Sbjct  190   SI  191
+
+
+ Score = 37.7 bits (86),  Expect = 1e-04, Method: Compositional matrix adjust.
+ Identities = 23/69 (33%), Positives = 33/69 (48%), Gaps = 10/69 (14%)
+ Frame = -1
+
+Query  2705  RLGTFIDWP-CVPMEPMELSKAGFFYSRIENKCICYKC--GLRVNILTDKRYESHHSMLF  2535
+             RL +F +WP C+  +P++L+ AGFFY    +   C+ C  GL         +E       
+Sbjct  231   RLASFENWPDCLVQKPLDLANAGFFYEGANDYVRCFHCYGGLY-------NWEKGDIPWN  283
+
+Query  2534  AHAKERPDC  2508
+              HAK  P C
+Sbjct  284   EHAKWYPKC  292
+
+
+ Score = 23.1 bits (48),  Expect = 3.6, Method: Compositional matrix adjust.
+ Identities = 14/36 (39%), Positives = 17/36 (47%), Gaps = 1/36 (3%)
+ Frame = -3
+
+Query  2163  HKNYTLPESRKKTFNTWPLEDKDLKERLIEAGFFYT  2056
+             H+N    + R  TF  WPLE       L   GF+YT
+Sbjct  104   HENLNQEKVRLSTFIDWPLEWLS-PSSLAADGFYYT  138
+
+
+ Score = 22.3 bits (46),  Expect = 6.6, Method: Compositional matrix adjust.
+ Identities = 14/36 (39%), Positives = 18/36 (50%), Gaps = 4/36 (11%)
+ Frame = -3
+
+Query  2154  YTLPESRKKTFNTWP--LEDKDLKERLIEAGFFYTG  2053
+             ++  + R  +F  WP  L  K L   L  AGFFY G
+Sbjct  225   FSTIKERLASFENWPDCLVQKPLD--LANAGFFYEG  258
+
+
+> BDT61657.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=535
+
+ Score = 75.1 bits (183),  Expect = 2e-16, Method: Compositional matrix adjust.
+ Identities = 55/200 (28%), Positives = 98/200 (49%), Gaps = 25/200 (13%)
+ Frame = -1
+
+Query  2972  NRINTFGEH-------HQYAHHPIVIAEAGFYKVNQSVFCFKCGLnidideinntddIVE  2814
+             NR+NTF          ++   H +++A+AGF+ +N  + CF C L ID+  I  +DDI++
+Sbjct  19    NRVNTFRRFTLTDYDIYKLPIHHVLLAKAGFFYINNHIKCFTCDLTIDLKTIRTSDDIIQ  78
+
+Query  2813  LHTTKNPSCIFAR------NLPPLPRSRLFDQYDDD-------LRYEVNRLGTFIDWPCV  2673
+             +H  ++P C+FA+      N+    + R+   +          L +E  RL TF +WP  
+Sbjct  79    IHKERSPECLFAQSLYSFENIEKYCKPRIHKAFTKGTNGAHYRLYWEKFRLETFTNWPID  138
+
+Query  2672  PMEPMELSKAGFFYSRIENKCICYKCGLRVNILTDKRYESHHSMLFAHAKERPDCAFALN  2493
+              + P++L+  GFFY ++++   C  C + + +     +E    +   H +  P C+F L 
+Sbjct  139   WISPIDLAADGFFYLKVKDYVKCIFCDIILIM-----FEKGDIVRNEHKRLSPRCSFILG  193
+
+Query  2492  LNEGNVPIHMSKIIKKITSK  2433
+                 NVP     I  K++ +
+Sbjct  194   EFTLNVPNVKMNIFDKLSDR  213
+
+
+ Score = 49.7 bits (117),  Expect = 2e-08, Method: Compositional matrix adjust.
+ Identities = 28/73 (38%), Positives = 39/73 (53%), Gaps = 6/73 (8%)
+ Frame = -1
+
+Query  2705  RLGTFIDWP-CVPMEPMELSKAGFFYSRIENKCICYKCGLRVNILTDKRYESHHSMLFAH  2529
+             RL +F DWP CV  EP  L++AGFFY  I +   C+ C   +     + +E +   L  H
+Sbjct  246   RLESFKDWPECVGQEPQALAEAGFFYCGISDHVQCFHCRGII-----RNWEKNDIPLHEH  300
+
+Query  2528  AKERPDCAFALNL  2490
+             AK  P+C + L L
+Sbjct  301   AKWFPNCDYLLLL  313
+
+
+ Score = 30.8 bits (68),  Expect = 0.014, Method: Compositional matrix adjust.
+ Identities = 20/50 (40%), Positives = 24/50 (48%), Gaps = 3/50 (6%)
+ Frame = -3
+
+Query  2178  YTPPKHKNYTLPESRKKTFNTWPLEDKDLKERLIEAGFFYTG--ETYTCF  2035
+             YT  K  N T  E R ++F  WP       + L EAGFFY G  +   CF
+Sbjct  233   YTTSKTSNMT-KEERLESFKDWPECVGQEPQALAEAGFFYCGISDHVQCF  281
+
+
+ Score = 28.5 bits (62),  Expect = 0.082, Method: Compositional matrix adjust.
+ Identities = 16/49 (33%), Positives = 23/49 (47%), Gaps = 6/49 (12%)
+ Frame = -3
+
+Query  2163  HKNYTLPESRKKTFNTWPLEDKDLKER------LIEAGFFYTGETYTCF  2035
+             H N+   ++R  TF  + L D D+ +       L +AGFFY      CF
+Sbjct  11    HNNFFHEQNRVNTFRRFTLTDYDIYKLPIHHVLLAKAGFFYINNHIKCF  59
+
+
+> BDT61723.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=725
+
+ Score = 73.2 bits (178),  Expect = 1e-15, Method: Compositional matrix adjust.
+ Identities = 45/120 (38%), Positives = 60/120 (50%), Gaps = 9/120 (8%)
+ Frame = -1
+
+Query  2795  PSCIFARNLPPLP---RSRLFDQYDDDLRYEVNRLGTFIDWPCVPMEPMELSKAGFFYSR  2625
+             P C FA+ L  +P   RS+ F  YD  LR+E  RL TFIDWP   ++P EL+  GF+Y R
+Sbjct  17    PDCHFAQGLRTVPKPSRSKTFISYDS-LRFEKERLDTFIDWPIKWLDPSELASDGFYYLR  75
+
+Query  2624  IENKCICYKCGLRVNILTDKRYESHHSMLFAHAKERPDCAFALNLNEGNVPIHMSKIIKK  2445
+               + C C  C   V       +E   +    H +  P C F      GNV IH S I+++
+Sbjct  76    TADHCACVFCRGIVGA-----WEVGDTPRGEHQRHFPHCPFIRGQPVGNVSIHHSDILEQ  130
+
+
+ Score = 32.0 bits (71),  Expect = 0.007, Method: Compositional matrix adjust.
+ Identities = 19/47 (40%), Positives = 22/47 (47%), Gaps = 6/47 (13%)
+ Frame = -3
+
+Query  2178  YTPPKHKNYTLPESRKKTFNT------WPLEDKDLKERLIEAGFFYT  2056
+             Y  PK K++ L ESR  +FN       WP         L EAGFFY 
+Sbjct  183   YLGPKRKDFVLTESRLASFNDSRLAIKWPERVTQKPCDLAEAGFFYA  229
+
+
+ Score = 26.2 bits (56),  Expect = 0.39, Method: Compositional matrix adjust.
+ Identities = 14/34 (41%), Positives = 21/34 (62%), Gaps = 7/34 (21%)
+ Frame = -1
+
+Query  2708  NRLGTF------IDWPC-VPMEPMELSKAGFFYS  2628
+             +RL +F      I WP  V  +P +L++AGFFY+
+Sbjct  196   SRLASFNDSRLAIKWPERVTQKPCDLAEAGFFYA  229
+
+
+> BDT61661.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=352
+
+ Score = 55.1 bits (131),  Expect = 3e-10, Method: Compositional matrix adjust.
+ Identities = 56/204 (27%), Positives = 86/204 (42%), Gaps = 18/204 (9%)
+ Frame = -1
+
+Query  2972  NRINTFGEHHQYAHHPI---VIAEAGFYKVNQSVFCFKCGLnidideinntddIVELHTT  2802
+             +R  TF  +      PI   + A+AGF   +  V CF C    ++  I  +DDI+++H  
+Sbjct  12    DRWGTFNPNFMKRRLPINTRLTAKAGFIHTDNDVKCFLC---ENMKNIIGSDDIIKIHKK  68
+
+Query  2801  KNPSCIFARNLPPLPRSRLFDQYDDDLRYEVNRLGTFIDWPCVPMEPMELSKAGFFYSRI  2622
+             ++P           P  + +      L  E  RL TFIDWP   + P  L+  GF+Y+RI
+Sbjct  69    RSPG------YSTYPNGKCYTV----LEREEFRLQTFIDWPLDWLSPSNLAANGFYYTRI  118
+
+Query  2621  ENKCICYKCGLRVNIL--TDKRYESHHSMLFAHAKERPDCAFALNLNEGNVPIHMSKIIK  2448
+             ++   C  C   +     +D   E H  +   H    P+C F       NVP   S I +
+Sbjct  119   KDHVECAFCRGVIGEFEKSDIIREEHDLIREKHKHVSPNCPFINGHKTENVPQIFSNIFE  178
+
+Query  2447  KITSKYRNSHDKDASKTTEKEINI  2376
+               +++  N + K  S   E    I
+Sbjct  179   IYSTRKDNPNYKYKSMKAENNFYI  202
+
+
+ Score = 33.5 bits (75),  Expect = 0.002, Method: Compositional matrix adjust.
+ Identities = 18/56 (32%), Positives = 27/56 (48%), Gaps = 2/56 (4%)
+ Frame = -3
+
+Query  2196  NHILRPYTPPKHKNYTLPESRKKTFNTWPLEDKDLKERLIEAGFFY--TGETYTCF  2035
+             N+   PY P   ++++  E R  +F  WP       + L EAGF+Y   G+   CF
+Sbjct  198   NNFYIPYYPCSERDFSTIEKRLASFEKWPDCLVQKPQDLAEAGFYYDGVGDQVHCF  253
+
+
+ Score = 24.3 bits (51),  Expect = 1.5, Method: Compositional matrix adjust.
+ Identities = 12/23 (52%), Positives = 13/23 (57%), Gaps = 2/23 (9%)
+ Frame = -1
+
+Query  2927  PIVIAEAGFY--KVNQSVFCFKC  2865
+             P  +AEAGFY   V   V CF C
+Sbjct  233   PQDLAEAGFYYDGVGDQVHCFHC  255
+
+
+ Score = 23.1 bits (48),  Expect = 3.1, Method: Compositional matrix adjust.
+ Identities = 18/43 (42%), Positives = 21/43 (49%), Gaps = 4/43 (9%)
+ Frame = -3
+
+Query  2175  TPPKHKNYTLPES---RKKTFNTWPLEDKDLKERLIEAGFFYT  2056
+             T P  K YT+ E    R +TF  WPL D      L   GF+YT
+Sbjct  75    TYPNGKCYTVLEREEFRLQTFIDWPL-DWLSPSNLAANGFYYT  116
+
+
+> BDT61678.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=254
+
+ Score = 43.9 bits (102),  Expect = 6e-07, Method: Compositional matrix adjust.
+ Identities = 19/40 (48%), Positives = 24/40 (60%), Gaps = 0/40 (0%)
+ Frame = -1
+
+Query  2729  DDLRYEVNRLGTFIDWPCVPMEPMELSKAGFFYSRIENKC  2610
+             DDLRYE NR+ TF  WP   +  ++L+  GFFY   E  C
+Sbjct  16    DDLRYEFNRILTFTKWPKEWLSALKLASDGFFYLEEEESC  55
+
+
+ Score = 30.8 bits (68),  Expect = 0.011, Method: Compositional matrix adjust.
+ Identities = 13/27 (48%), Positives = 19/27 (70%), Gaps = 2/27 (7%)
+ Frame = -1
+
+Query  2933  HHPIVIAEAGFYK--VNQSVFCFKCGL  2859
+              +P+ ++EAGF    V+ SVFCF CG+
+Sbjct  108   QNPVHLSEAGFIADGVSDSVFCFYCGI  134
+
+
+ Score = 29.6 bits (65),  Expect = 0.026, Method: Compositional matrix adjust.
+ Identities = 12/40 (30%), Positives = 23/40 (58%), Gaps = 1/40 (3%)
+ Frame = -1
+
+Query  2705  RLGTFIDWPCVPME-PMELSKAGFFYSRIENKCICYKCGL  2589
+             RL ++ +W    ++ P+ LS+AGF    + +   C+ CG+
+Sbjct  95    RLDSYKNWSKESIQNPVHLSEAGFIADGVSDSVFCFYCGI  134
+
+
+> BDT61658.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=421
+
+ Score = 38.1 bits (87),  Expect = 6e-05, Method: Compositional matrix adjust.
+ Identities = 29/98 (30%), Positives = 42/98 (43%), Gaps = 14/98 (14%)
+ Frame = -1
+
+Query  2780  ARNLPPLPRSRLFDQYDDDLRYEVNRLGTFIDWP-CVPMEPMELSKAGFFYSRIENKCIC  2604
+               N+ PL    +   Y    R    RL +F +WP  V  +P +L++AGF    I +   C
+Sbjct  40    GENIDPLKSIPIIRSYTATSR----RLKSFNNWPEYVIKKPQDLAEAGFLSRNISDHVRC  95
+
+Query  2603  YKCG--LRVNILTDKRYESHHSMLFAHAKERPDCAFAL  2496
+             + CG  LR        ++S       HAK  P C + L
+Sbjct  96    FYCGGCLR-------NWKSEDIPWIEHAKWFPQCHYLL  126
+
+
+ Score = 29.3 bits (64),  Expect = 0.044, Method: Compositional matrix adjust.
+ Identities = 17/53 (32%), Positives = 24/53 (45%), Gaps = 2/53 (4%)
+ Frame = -3
+
+Query  2169  PKHKNYTLPESRKKTFNTWPLEDKDLKERLIEAGFFY--TGETYTCFFL*ACI  2017
+             P  ++YT    R K+FN WP       + L EAGF      +   CF+   C+
+Sbjct  50    PIIRSYTATSRRLKSFNNWPEYVIKKPQDLAEAGFLSRNISDHVRCFYCGGCL  102
+
+
+> BDT61698.1 wsv447-like protein [Marsupenaeus japonicus endogenous 
+nimavirus]
+Length=1743
+
+ Score = 23.5 bits (49),  Expect = 3.0, Method: Composition-based stats.
+ Identities = 9/13 (69%), Positives = 10/13 (77%), Gaps = 0/13 (0%)
+ Frame = +2
+
+Query  2021  HAHKKKHVYVSPV  2059
+             H HK+  VYVSPV
+Sbjct  1377  HLHKRPPVYVSPV  1389
+
+
+> BDT61710.1 wsv192-like protein [Marsupenaeus japonicus endogenous 
+nimavirus]
+Length=1024
+
+ Score = 23.5 bits (49),  Expect = 3.0, Method: Compositional matrix adjust.
+ Identities = 16/48 (33%), Positives = 21/48 (44%), Gaps = 3/48 (6%)
+ Frame = -1
+
+Query  2621  ENKCICYKCGLRVNILTDKRYESHHSMLFAHAKER---PDCAFALNLN  2487
+             E   + + CG    + TD  Y    +  F+HA  R   PD  F L LN
+Sbjct  362   EKDILLFLCGRIAEMDTDHPYLQLLTSCFSHALGRRVTPDYIFILLLN  409
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 29888557
+
+
+Query= mje5 MjeNMV 10001-12500
+
+Length=2500
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT61651.1 tyrosine recombinase [Marsupenaeus japonicus endogenou...  75.9    1e-18
+BDT61671.1 wsv415-like protein [Marsupenaeus japonicus endogenous...  24.3    0.36 
+
+
+> BDT61651.1 tyrosine recombinase [Marsupenaeus japonicus endogenous 
+nimavirus]
+Length=728
+
+ Score = 75.9 bits (185),  Expect = 1e-18, Method: Composition-based stats.
+ Identities = 62/62 (100%), Positives = 62/62 (100%), Gaps = 0/62 (0%)
+ Frame = +2
+
+Query  2183  attstaipestfvsiadstnstasfsdptavsatdstatsvdPtavssnvvDTDTNEDNE  2362
+             ATTSTAIPESTFVSIADSTNSTASFSDPTAVSATDSTATSVDPTAVSSNVVDTDTNEDNE
+Sbjct  10    ATTSTAIPESTFVSIADSTNSTASFSDPTAVSATDSTATSVDPTAVSSNVVDTDTNEDNE  69
+
+Query  2363  dr  2368
+             DR
+Sbjct  70    DR  71
+
+
+> BDT61671.1 wsv415-like protein [Marsupenaeus japonicus endogenous 
+nimavirus]
+Length=404
+
+ Score = 24.3 bits (51),  Expect = 0.36, Method: Compositional matrix adjust.
+ Identities = 11/27 (41%), Positives = 18/27 (67%), Gaps = 0/27 (0%)
+ Frame = -1
+
+Query  2494  VYDILKHYTSYNGNSNYIERKILYNHI  2414
+             +Y+I++   S   + NYIE+ +LYN I
+Sbjct  284   LYNIIESVRSSFPDKNYIEKDVLYNTI  310
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 7538899
+
+
+Query= mje7 MjeNMV 14500-17499
+
+Length=3000
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT61653.1 reverse transcriptase [Marsupenaeus japonicus endogeno...  311     5e-105
+BDT61712.1 wsv139-like protein [Marsupenaeus japonicus endogenous...  23.1    2.8   
+BDT61656.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  21.9    5.7   
+BDT61687.1 wsv360-like protein [Marsupenaeus japonicus endogenous...  21.2    9.2   
+
+
+> BDT61653.1 reverse transcriptase [Marsupenaeus japonicus endogenous 
+nimavirus]
+Length=534
+
+ Score = 311 bits (798),  Expect = 5e-105, Method: Compositional matrix adjust.
+ Identities = 151/151 (100%), Positives = 151/151 (100%), Gaps = 0/151 (0%)
+ Frame = -1
+
+Query  3000  AKKAFMDMKNILCAHNIKIENRKYLFNYYIRPILLYGCESWTITKNMEKRLEAVEVWFWR  2821
+             AKKAFMDMKNILCAHNIKIENRKYLFNYYIRPILLYGCESWTITKNMEKRLEAVEVWFWR
+Sbjct  384   AKKAFMDMKNILCAHNIKIENRKYLFNYYIRPILLYGCESWTITKNMEKRLEAVEVWFWR  443
+
+Query  2820  NMINITRISDEYTLDSTEIKKELLHTIKLRQLNFIGRELRKEGGIEKNIMKAEMAGKRAR  2641
+             NMINITRISDEYTLDSTEIKKELLHTIKLRQLNFIGRELRKEGGIEKNIMKAEMAGKRAR
+Sbjct  444   NMINITRISDEYTLDSTEIKKELLHTIKLRQLNFIGRELRKEGGIEKNIMKAEMAGKRAR  503
+
+Query  2640  GRQRSKMLDWMTKEFNIKDGEQLGVIIENWK  2548
+             GRQRSKMLDWMTKEFNIKDGEQLGVIIENWK
+Sbjct  504   GRQRSKMLDWMTKEFNIKDGEQLGVIIENWK  534
+
+
+ Score = 21.6 bits (44),  Expect = 7.9, Method: Compositional matrix adjust.
+ Identities = 15/40 (38%), Positives = 18/40 (45%), Gaps = 1/40 (3%)
+ Frame = +2
+
+Query  2873  IVHDSHPYNNIG-RI**LNKYFLFSIFILCAHNIFFMSIK  2989
+             I  D     +I  RI    K F+    ILCAHNI   + K
+Sbjct  367   ITSDGRSDTDIKYRIDLAKKAFMDMKNILCAHNIKIENRK  406
+
+
+> BDT61712.1 wsv139-like protein [Marsupenaeus japonicus endogenous 
+nimavirus]
+Length=1064
+
+ Score = 23.1 bits (48),  Expect = 2.8, Method: Compositional matrix adjust.
+ Identities = 13/43 (30%), Positives = 20/43 (47%), Gaps = 2/43 (5%)
+ Frame = -3
+
+Query  2551  EMM*GDSTLI*LLYTKDKDNPALWSICYNSFMCIEASL--PQY  2429
+             EM+ GD      LY+ D D    W++C +  + +   L  P Y
+Sbjct  412   EMVKGDEPFTINLYSSDNDVLHKWNLCASHSVALSGKLDIPSY  454
+
+
+> BDT61656.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=389
+
+ Score = 21.9 bits (45),  Expect = 5.7, Method: Compositional matrix adjust.
+ Identities = 11/30 (37%), Positives = 14/30 (47%), Gaps = 0/30 (0%)
+ Frame = +3
+
+Query  2775  SPKCIHPISLLCLSCFSKTTLLPLRASFPY  2864
+             SPKC    SL       K   LP+R ++ Y
+Sbjct  73    SPKCSFAQSLYGFENILKFLKLPIRKTYEY  102
+
+
+> BDT61687.1 wsv360-like protein [Marsupenaeus japonicus endogenous 
+nimavirus]
+Length=6218
+
+ Score = 21.2 bits (43),  Expect = 9.2, Method: Compositional matrix adjust.
+ Identities = 8/16 (50%), Positives = 12/16 (75%), Gaps = 0/16 (0%)
+ Frame = +3
+
+Query  2106  FVKHLIKKITYIKENI  2153
+             FV H ++ I Y+KE+I
+Sbjct  2287  FVNHDLQSIIYLKEDI  2302
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 18604560
+
+
+Query= mje8 MjeNMV 17500-19500
+
+Length=2001
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= mje9 MjeNMV 19501-23500
+
+Length=4000
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT61654.1 DNA ligase 1-like protein [Marsupenaeus japonicus endo...  156     9e-42
+BDT61661.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  24.6    1.6  
+BDT61695.1 wsv303-like protein [Marsupenaeus japonicus endogenous...  24.6    1.8  
+BDT61687.1 wsv360-like protein [Marsupenaeus japonicus endogenous...  23.1    5.1  
+
+
+> BDT61654.1 DNA ligase 1-like protein [Marsupenaeus japonicus 
+endogenous nimavirus]
+Length=1303
+
+ Score = 132 bits (331),  Expect(2) = 6e-63, Method: Compositional matrix adjust.
+ Identities = 59/59 (100%), Positives = 59/59 (100%), Gaps = 0/59 (0%)
+ Frame = -1
+
+Query  3481  RNMKRKDECIKNGQEIETQSDKNEPPAQKYPKLKPEEDYDPSKDNYHPINDAFWKHSEE  3305
+             RNMKRKDECIKNGQEIETQSDKNEPPAQKYPKLKPEEDYDPSKDNYHPINDAFWKHSEE
+Sbjct  624   RNMKRKDECIKNGQEIETQSDKNEPPAQKYPKLKPEEDYDPSKDNYHPINDAFWKHSEE  682
+
+
+ Score = 121 bits (304),  Expect(2) = 6e-63, Method: Compositional matrix adjust.
+ Identities = 58/64 (91%), Positives = 61/64 (95%), Gaps = 0/64 (0%)
+ Frame = -2
+
+Query  3207  YNFRTPYIALVKIMGLIENTNGRLKIIEILANFFRSVIVLYPDDLLQCVYLCLNKVAPAF  3028
+             ++  TPYIALVKIMGLIENTNGRLKIIEILANFFRSVIVLYPDDLLQCVYLCLNKVAPAF
+Sbjct  679   HSEETPYIALVKIMGLIENTNGRLKIIEILANFFRSVIVLYPDDLLQCVYLCLNKVAPAF  738
+
+Query  3027  KGLS  3016
+             KG+ 
+Sbjct  739   KGIE  742
+
+
+ Score = 153 bits (386),  Expect(2) = 2e-60, Method: Compositional matrix adjust.
+ Identities = 77/89 (87%), Positives = 78/89 (88%), Gaps = 8/89 (9%)
+ Frame = -3
+
+Query  2933  QI*FFCL--------GIELGIGETILMRAIAQASGHSIDKIKHDTKQKGDLGIVAEQYRS  2778
+             Q  + CL        GIELGIGETILMRAIAQASGHSIDKIKHDTKQKGDLGIVAEQYRS
+Sbjct  725   QCVYLCLNKVAPAFKGIELGIGETILMRAIAQASGHSIDKIKHDTKQKGDLGIVAEQYRS  784
+
+Query  2777  TDRNMLLPTLTVKDIFDHLKEIASLSGSG  2691
+             TDRNMLLPTLTVKDIFDHLKEIASLSGSG
+Sbjct  785   TDRNMLLPTLTVKDIFDHLKEIASLSGSG  813
+
+
+ Score = 92.4 bits (228),  Expect(2) = 2e-60, Method: Compositional matrix adjust.
+ Identities = 44/45 (98%), Positives = 44/45 (98%), Gaps = 0/45 (0%)
+ Frame = -1
+
+Query  2575  AHSKKIDRVKDIYIACQPSESRYLIRSLGGKLRIGLAEKSVQQVL  2441
+             AHSKKIDRVKDIYIACQPSESRYLIRSLGGKLRIGLAEKSVQQ L
+Sbjct  814   AHSKKIDRVKDIYIACQPSESRYLIRSLGGKLRIGLAEKSVQQAL  858
+
+
+ Score = 156 bits (395),  Expect = 9e-42, Method: Compositional matrix adjust.
+ Identities = 72/76 (95%), Positives = 72/76 (95%), Gaps = 0/76 (0%)
+ Frame = -1
+
+Query  4000  HHYNTLPKKSKAQKTEWTMKEPSITSYGSFYDIPKTLTSIYDCKNLMIQCHACQKYNISP  3821
+             HHYNTLPKKSKAQKTEWTMKEPSITSYGSFYDIPKTLTSIYDCKNLMIQCHACQKYNISP
+Sbjct  553   HHYNTLPKKSKAQKTEWTMKEPSITSYGSFYDIPKTLTSIYDCKNLMIQCHACQKYNISP  612
+
+Query  3820  YIVRCNECREDVRHKH  3773
+             YIVRCNECRED   K 
+Sbjct  613   YIVRCNECREDRNMKR  628
+
+
+ Score = 79.3 bits (194),  Expect = 3e-17, Method: Compositional matrix adjust.
+ Identities = 38/38 (100%), Positives = 38/38 (100%), Gaps = 0/38 (0%)
+ Frame = -2
+
+Query  2301  TPPGQKYPPDIINAGKTIGSKKLKSQFEKYSTILSTTY  2188
+             TPPGQKYPPDIINAGKTIGSKKLKSQFEKYSTILSTTY
+Sbjct  865   TPPGQKYPPDIINAGKTIGSKKLKSQFEKYSTILSTTY  902
+
+
+ Score = 41.2 bits (95),  Expect = 2e-05, Method: Compositional matrix adjust.
+ Identities = 17/28 (61%), Positives = 22/28 (79%), Gaps = 0/28 (0%)
+ Frame = -1
+
+Query  2086  DTFKYVLNYNFSEFPSYDTIIPILLTKG  2003
+             + +  +L+  + EFPSYDTIIPILLTKG
+Sbjct  892   EKYSTILSTTYCEFPSYDTIIPILLTKG  919
+
+
+> BDT61661.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=352
+
+ Score = 24.6 bits (52),  Expect = 1.6, Method: Compositional matrix adjust.
+ Identities = 12/34 (35%), Positives = 19/34 (56%), Gaps = 0/34 (0%)
+ Frame = -2
+
+Query  3192  PYIALVKIMGLIENTNGRLKIIEILANFFRSVIV  3091
+             PY+ L K +  IEN N   K ++I  ++ RS + 
+Sbjct  280   PYLYLKKNIKYIENKNEIKKTLDIDEDYRRSPLT  313
+
+
+> BDT61695.1 wsv303-like protein [Marsupenaeus japonicus endogenous 
+nimavirus]
+Length=739
+
+ Score = 24.6 bits (52),  Expect = 1.8, Method: Compositional matrix adjust.
+ Identities = 9/27 (33%), Positives = 15/27 (56%), Gaps = 0/27 (0%)
+ Frame = -2
+
+Query  3465  KMNVLKMAKRLRHNQIKMNHLPKNTPS  3385
+             K+N L + +  R N+I   H+P + P 
+Sbjct  128   KLNFLDLKEFFRKNKIAYTHVPDSFPG  154
+
+
+> BDT61687.1 wsv360-like protein [Marsupenaeus japonicus endogenous 
+nimavirus]
+Length=6218
+
+ Score = 23.1 bits (48),  Expect = 5.1, Method: Composition-based stats.
+ Identities = 9/17 (53%), Positives = 11/17 (65%), Gaps = 0/17 (0%)
+ Frame = +2
+
+Query  2783  GIVQQQYQDHLSVLYHV  2833
+             G +Q  YQD L V YH+
+Sbjct  1135  GNIQSVYQDALIVAYHI  1151
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 40994316
+
+
+Query= mje10 MjeNMV 23501-26100
+
+Length=2600
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT61655.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  180     2e-56
+BDT61657.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  89.4    5e-23
+BDT61729.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  76.6    2e-18
+BDT61723.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  65.1    1e-14
+BDT61650.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  58.9    2e-12
+BDT61660.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  51.2    7e-10
+BDT61659.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  34.7    2e-04
+BDT61664.1 wsv026-like protein [Marsupenaeus japonicus endogenous...  23.1    1.2  
+BDT61667.1 wsv206-like protein [Marsupenaeus japonicus endogenous...  21.2    4.5  
+BDT61749.1 wsv267-like protein [Marsupenaeus japonicus endogenous...  20.8    5.8  
+
+
+> BDT61655.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=546
+
+ Score = 180 bits (457),  Expect = 2e-56, Method: Compositional matrix adjust.
+ Identities = 86/86 (100%), Positives = 86/86 (100%), Gaps = 0/86 (0%)
+ Frame = -1
+
+Query  2600  ADNTETFTFQEIYLPEAKNTETSTSLKKSHEHMYEDRICKVCMSNEASVVYFPCTHMIAC  2421
+             ADNTETFTFQEIYLPEAKNTETSTSLKKSHEHMYEDRICKVCMSNEASVVYFPCTHMIAC
+Sbjct  461   ADNTETFTFQEIYLPEAKNTETSTSLKKSHEHMYEDRICKVCMSNEASVVYFPCTHMIAC  520
+
+Query  2420  EDCTLALEYCPICRKDINYVVRPIIS  2343
+             EDCTLALEYCPICRKDINYVVRPIIS
+Sbjct  521   EDCTLALEYCPICRKDINYVVRPIIS  546
+
+
+> BDT61657.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=535
+
+ Score = 89.4 bits (220),  Expect = 5e-23, Method: Compositional matrix adjust.
+ Identities = 46/84 (55%), Positives = 54/84 (64%), Gaps = 7/84 (8%)
+ Frame = -1
+
+Query  2597  DNTETFTFQEIYLPEAKNTETSTSLKKSHEHMYEDRICKVCMSNEASVVYFPCTHMIACE  2418
+             +N ETFT QE  L   KN E+S       E M EDRICKVCM N+  VVY PCTHM AC 
+Sbjct  458   ENMETFTSQET-LSNTKNLESSL------EQMREDRICKVCMDNDERVVYLPCTHMAACT  510
+
+Query  2417  DCTLALEYCPICRKDINYVVRPII  2346
+              CTL L  CPICR +I Y+++P +
+Sbjct  511   LCTLPLRTCPICRMEIEYIIKPTV  534
+
+
+> BDT61729.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=704
+
+ Score = 76.6 bits (187),  Expect = 2e-18, Method: Compositional matrix adjust.
+ Identities = 31/70 (44%), Positives = 46/70 (66%), Gaps = 0/70 (0%)
+ Frame = -1
+
+Query  2552  AKNTETSTSLKKSHEHMYEDRICKVCMSNEASVVYFPCTHMIACEDCTLALEYCPICRKD  2373
+             A + +++  L    E + + R+CK+CM  E +VV+ PC HM+ C  C +AL  CPICRKD
+Sbjct  635   ASSPQSTKELADELERIRDIRMCKICMDTEMNVVFLPCAHMVTCVSCAVALTQCPICRKD  694
+
+Query  2372  INYVVRPIIS  2343
+             I Y ++PI+S
+Sbjct  695   IKYTIKPIVS  704
+
+
+> BDT61723.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=725
+
+ Score = 65.1 bits (157),  Expect = 1e-14, Method: Compositional matrix adjust.
+ Identities = 32/66 (48%), Positives = 40/66 (61%), Gaps = 0/66 (0%)
+ Frame = -1
+
+Query  2540  ETSTSLKKSHEHMYEDRICKVCMSNEASVVYFPCTHMIACEDCTLALEYCPICRKDINYV  2361
+             E+   L+++ E   E   CK+CM     VV+ PC HMI C +C LAL  CPICRKDI  +
+Sbjct  660   ESMDELERTPERTPETLSCKICMDAMLEVVFIPCRHMITCAECALALYTCPICRKDIQRM  719
+
+Query  2360  VRPIIS  2343
+             V  IIS
+Sbjct  720   VNVIIS  725
+
+
+> BDT61650.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=1355
+
+ Score = 58.9 bits (141),  Expect = 2e-12, Method: Compositional matrix adjust.
+ Identities = 26/51 (51%), Positives = 31/51 (61%), Gaps = 0/51 (0%)
+ Frame = -1
+
+Query  2498  EDRICKVCMSNEASVVYFPCTHMIACEDCTLALEYCPICRKDINYVVRPII  2346
+             E R+C VCM++E  VV  PC HM+ C  C L    CPICR  I  VV+PI 
+Sbjct  1304  ERRLCTVCMTDEVDVVILPCDHMVCCTSCLLTQSMCPICRGVIEKVVKPIF  1354
+
+
+ Score = 38.9 bits (89),  Expect = 1e-05, Method: Compositional matrix adjust.
+ Identities = 17/60 (28%), Positives = 31/60 (52%), Gaps = 4/60 (7%)
+ Frame = -1
+
+Query  2555  EAKNTETSTSLKKSHEHM----YEDRICKVCMSNEASVVYFPCTHMIACEDCTLALEYCP  2388
+             + +  + S   K+  +H+     ++ +CK C ++    V FPC HM +C+ C L+   CP
+Sbjct  603   QQEENQGSRKRKRDDDHLQAKLLKNYVCKTCYNDGIESVNFPCGHMTSCKKCILSHTNCP  662
+
+
+> BDT61660.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=551
+
+ Score = 51.2 bits (121),  Expect = 7e-10, Method: Compositional matrix adjust.
+ Identities = 23/57 (40%), Positives = 36/57 (63%), Gaps = 0/57 (0%)
+ Frame = -1
+
+Query  2519  KSHEHMYEDRICKVCMSNEASVVYFPCTHMIACEDCTLALEYCPICRKDINYVVRPI  2349
+             K+ E   ++  C+VC +  A+VV  PCTHM+ACE C + L  CP C+ +   +++PI
+Sbjct  492   KTPEQKRDNPKCEVCKNKYANVVIQPCTHMVACESCVIDLPQCPKCQHNTLRIMKPI  548
+
+
+> BDT61659.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=702
+
+ Score = 34.7 bits (78),  Expect = 2e-04, Method: Compositional matrix adjust.
+ Identities = 16/47 (34%), Positives = 23/47 (49%), Gaps = 0/47 (0%)
+ Frame = -1
+
+Query  2486  CKVCMSNEASVVYFPCTHMIACEDCTLALEYCPICRKDINYVVRPII  2346
+             C+VC    A+V    C H++ C  C + L  CP C ++I     P I
+Sbjct  655   CEVCKIENANVELLSCAHVVVCGCCVIGLTCCPKCHRNIRRKRNPNI  701
+
+
+ Score = 21.6 bits (44),  Expect = 4.2, Method: Compositional matrix adjust.
+ Identities = 13/27 (48%), Positives = 17/27 (63%), Gaps = 1/27 (4%)
+ Frame = -1
+
+Query  2600  ADNTETFTFQEIYLPEAKNTETSTSLK  2520
+             ++NTE  T  E  LPE +N E  TSL+
+Sbjct  439   SENTENPTSLEA-LPETENIENPTSLE  464
+
+
+ Score = 21.2 bits (43),  Expect = 4.6, Method: Compositional matrix adjust.
+ Identities = 11/26 (42%), Positives = 13/26 (50%), Gaps = 0/26 (0%)
+ Frame = -1
+
+Query  2597  DNTETFTFQEIYLPEAKNTETSTSLK  2520
+             DN       E  LPE +N E  TSL+
+Sbjct  562   DNLNATLSHESALPETENIENPTSLE  587
+
+
+> BDT61664.1 wsv026-like protein [Marsupenaeus japonicus endogenous 
+nimavirus]
+Length=1456
+
+ Score = 23.1 bits (48),  Expect = 1.2, Method: Compositional matrix adjust.
+ Identities = 14/46 (30%), Positives = 22/46 (48%), Gaps = 1/46 (2%)
+ Frame = -1
+
+Query  2498  EDRICKVCMSNEASVVYFPCTHMIACEDCTLALEYCPICRKDINYV  2361
+             E+   ++CM  +A+ +      +I C D    L Y  +  KDIN V
+Sbjct  1330  EEWFSRMCMMRKANYISAEYIEIITCPDDINRL-YAKVNNKDINNV  1374
+
+
+> BDT61667.1 wsv206-like protein [Marsupenaeus japonicus endogenous 
+nimavirus]
+Length=223
+
+ Score = 21.2 bits (43),  Expect = 4.5, Method: Compositional matrix adjust.
+ Identities = 6/19 (32%), Positives = 10/19 (53%), Gaps = 0/19 (0%)
+ Frame = +1
+
+Query  2458  LASLLIHTLHMRSSYMCSC  2514
+             +  + + T   R  YMC+C
+Sbjct  111   MKGITLDTYDTREEYMCTC  129
+
+
+> BDT61749.1 wsv267-like protein [Marsupenaeus japonicus endogenous 
+nimavirus]
+Length=325
+
+ Score = 20.8 bits (42),  Expect = 5.8, Method: Compositional matrix adjust.
+ Identities = 9/14 (64%), Positives = 12/14 (86%), Gaps = 0/14 (0%)
+ Frame = -3
+
+Query  2256  IVIKLSYIDVEYFF  2215
+             IVIK+S ID++ FF
+Sbjct  62    IVIKVSNIDIKQFF  75
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 9762665
+
+
+Query= mje12 MjeNMV 27301-30600
+
+Length=3300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT61656.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  475     1e-169
+BDT61660.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  206     7e-63 
+BDT61659.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  207     3e-62 
+BDT61657.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  187     1e-55 
+BDT61655.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  177     3e-52 
+BDT61661.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  165     2e-49 
+BDT61729.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  144     1e-39 
+BDT61662.1 wsv115-like protein [Marsupenaeus japonicus endogenous...  104     6e-26 
+BDT61723.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  96.3    2e-23 
+BDT61650.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  91.7    9e-22 
+BDT61678.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  41.2    4e-06 
+BDT61658.1 baculoviral IAP repeat-containing protein [Marsupenaeu...  40.8    8e-06 
+BDT61726.1 hypothetical protein [Marsupenaeus japonicus endogenou...  22.7    3.2   
+BDT61687.1 wsv360-like protein [Marsupenaeus japonicus endogenous...  21.9    7.1   
+
+
+> BDT61656.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=389
+
+ Score = 475 bits (1223),  Expect = 1e-169, Method: Compositional matrix adjust.
+ Identities = 243/243 (100%), Positives = 243/243 (100%), Gaps = 0/243 (0%)
+ Frame = -2
+
+Query  2729  MEDKESNCNIYQHEDKRWDSFNHYYYIDPRLLAKAGFFFSKNDDIQCFTCDLELDMKTLT  2550
+             MEDKESNCNIYQHEDKRWDSFNHYYYIDPRLLAKAGFFFSKNDDIQCFTCDLELDMKTLT
+Sbjct  1     MEDKESNCNIYQHEDKRWDSFNHYYYIDPRLLAKAGFFFSKNDDIQCFTCDLELDMKTLT  60
+
+Query  2549  STDDIINIHKERSPKCSFAQSLYGFENILKFLKLPIRKTYEYIHENLNQEKVRLSTFIDW  2370
+             STDDIINIHKERSPKCSFAQSLYGFENILKFLKLPIRKTYEYIHENLNQEKVRLSTFIDW
+Sbjct  61    STDDIINIHKERSPKCSFAQSLYGFENILKFLKLPIRKTYEYIHENLNQEKVRLSTFIDW  120
+
+Query  2369  PLEWLSPSSLAADGFYYTRREDRVKCVFCRKEISGFKKGCIIGEEHKRLSPNCHFVNGSS  2190
+             PLEWLSPSSLAADGFYYTRREDRVKCVFCRKEISGFKKGCIIGEEHKRLSPNCHFVNGSS
+Sbjct  121   PLEWLSPSSLAADGFYYTRREDRVKCVFCRKEISGFKKGCIIGEEHKRLSPNCHFVNGSS  180
+
+Query  2189  TSNIPIKFYSIEGMLWHNIRKHQpsisssypysaiIHDNSWRGKFSTIKERLASFENWPD  2010
+             TSNIPIKFYSIEGMLWHNIRKHQPSISSSYPYSAIIHDNSWRGKFSTIKERLASFENWPD
+Sbjct  181   TSNIPIKFYSIEGMLWHNIRKHQPSISSSYPYSAIIHDNSWRGKFSTIKERLASFENWPD  240
+
+Query  2009  CLV  2001
+             CLV
+Sbjct  241   CLV  243
+
+
+ Score = 53.9 bits (128),  Expect = 6e-10, Method: Compositional matrix adjust.
+ Identities = 47/174 (27%), Positives = 72/174 (41%), Gaps = 25/174 (14%)
+ Frame = -2
+
+Query  2654  YIDPRLLAKAGFFFSKNDD-IQCFTCDLELDMKTLTSTDDIINIHKERSPKCSFAQSLYG  2478
+             ++ P  LA  GF++++ +D ++C  C  E+          I   HK  SP C F      
+Sbjct  124   WLSPSSLAADGFYYTRREDRVKCVFCRKEIS--GFKKGCIIGEEHKRLSPNCHFVNGSST  181
+
+Query  2477  FENILKFLKLP------IRK----------TYEYIHEN-----LNQEKVRLSTFIDWPLE  2361
+                 +KF  +       IRK              IH+N      +  K RL++F +WP  
+Sbjct  182   SNIPIKFYSIEGMLWHNIRKHQPSISSSYPYSAIIHDNSWRGKFSTIKERLASFENWPDC  241
+
+Query  2360  WLS-PSSLAADGFYYTRREDRVKCVFCRKEISGFKKGCIIGEEHKRLSPNCHFV  2202
+              +  P  LA  GF+Y    D V+C  C   +  ++KG I   EH +  P C  +
+Sbjct  242   LVQKPLDLANAGFFYEGANDYVRCFHCYGGLYNWEKGDIPWNEHAKWYPKCQHI  295
+
+
+> BDT61660.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=551
+
+ Score = 206 bits (524),  Expect = 7e-63, Method: Compositional matrix adjust.
+ Identities = 121/254 (48%), Positives = 158/254 (62%), Gaps = 31/254 (12%)
+ Frame = -2
+
+Query  2693  HEDKRWDSFN-----HYYYIDPRLLAKAGFFFSKNDDIQCFTCDLELDMKTLTSTDDIIN  2529
+             +E KR D+FN     + Y I  RLLAKAGF ++ ND ++CF C+L+LDMK +  ++DII 
+Sbjct  9     NEKKRLDTFNLNPIKNPYPIHTRLLAKAGFIYTDND-VKCFLCNLKLDMKNIIGSEDIIK  67
+
+Query  2528  IHKERSPKCSFAQSLYGFENILKFLKLPIRKT-------YEYIHENLN--QEKVRLSTFI  2376
+             IHK++SP CSFAQSLYGFEN+ KF K PI K        Y Y   N+    EK RL +FI
+Sbjct  68    IHKKKSPGCSFAQSLYGFENLQKFKKNPIDKKSCRDWAYYSYTEGNIGLIYEKNRLESFI  127
+
+Query  2375  DWPLEWLSPSSLAADGFYYTRREDRVKCVFCRKEISGFKKGCIIG---EEHKRLSPNCHF  2205
+             +WP+ WLSPS+LAADGFYYTR +D V C FCR  I  F+K   I    E+HK  SPNC F
+Sbjct  128   EWPINWLSPSNLAADGFYYTRIKDHVACAFCRVNIGEFEKCDTINTIREKHKHKSPNCPF  187
+
+Query  2204  VNGSSTSNIPIKF------YSIEGMLWHNIRKHQpsisssypysaiIHDNSWRGKFSTIK  2043
+             +NG  T N+PI F      Y  E      IR+++         + I + +  + ++S I+
+Sbjct  188   INGHKTDNVPIFFPYFYTLYPCEDKPITYIRRYR-------DITGIPYQSYSKKEYSKIE  240
+
+Query  2042  ERLASFENWPDCLV  2001
+             +RLASF+ WPDCLV
+Sbjct  241   KRLASFKKWPDCLV  254
+
+
+ Score = 46.2 bits (108),  Expect = 2e-07, Method: Compositional matrix adjust.
+ Identities = 44/186 (24%), Positives = 79/186 (42%), Gaps = 25/186 (13%)
+ Frame = -2
+
+Query  2693  HEDKRWDSFNHY--YYIDPRLLAKAGFFFSK-NDDIQCFTCDLEL-DMKTLTSTDDIINI  2526
+             +E  R +SF  +   ++ P  LA  GF++++  D + C  C + + + +   + + I   
+Sbjct  118   YEKNRLESFIEWPINWLSPSNLAADGFYYTRIKDHVACAFCRVNIGEFEKCDTINTIREK  177
+
+Query  2525  HKERSPKCSFAQ---------------SLYGFEN-----ILKFLKLPIRKTYEYIHENLN  2406
+             HK +SP C F                 +LY  E+     I ++  +       Y  +  +
+Sbjct  178   HKHKSPNCPFINGHKTDNVPIFFPYFYTLYPCEDKPITYIRRYRDITGIPYQSYSKKEYS  237
+
+Query  2405  QEKVRLSTFIDWPLEWLS-PSSLAADGFYYTRREDRVKCVFCRKEISGFKKGCIIGEEHK  2229
+             + + RL++F  WP   +  P  LA  G YY    D V+C  C   +  ++K  I    H 
+Sbjct  238   KIEKRLASFKKWPDCLVQKPQDLAEAGLYYEGVGDYVRCFHCSGGLCNWEKEDIPWNLHA  297
+
+Query  2228  RLSPNC  2211
+             +  P+C
+Sbjct  298   KWYPDC  303
+
+
+> BDT61659.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=702
+
+ Score = 207 bits (527),  Expect = 3e-62, Method: Compositional matrix adjust.
+ Identities = 119/248 (48%), Positives = 151/248 (61%), Gaps = 18/248 (7%)
+ Frame = -2
+
+Query  2693  HEDKRWDSFN-----HYYYIDPRLLAKAGFFFSKNDDIQCFTCDLELDMKTLTSTDDIIN  2529
+             +E KR D+FN       Y ID RLLAKAGF ++ ND ++CF C L+LDMK +  ++DII 
+Sbjct  9     NEKKRLDTFNLNPIKRPYPIDTRLLAKAGFIYTDND-VKCFLCHLKLDMKNIIGSEDIIK  67
+
+Query  2528  IHKERSPKCSFAQSLYGFENILKFLKLPIRKT-------YEYIHE--NLNQEKVRLSTFI  2376
+             IHK++SP CSFAQSLYGFENI KF K PI K        Y Y      L  E+ RL +FI
+Sbjct  68    IHKKKSPGCSFAQSLYGFENIQKFKKKPISKVSHRDWAYYSYKEGIIGLIYERKRLESFI  127
+
+Query  2375  DWPLEWLSPSSLAADGFYYTRREDRVKCVFCRKEISGFKKGCIIG---EEHKRLSPNCHF  2205
+             +WP+ WLSPS+LAADGFYYTR +D V C FCR  I  F+K   I    E+HK  SPNC F
+Sbjct  128   EWPINWLSPSNLAADGFYYTRIKDHVACAFCRVNIGEFEKCDTINTIREKHKHKSPNCPF  187
+
+Query  2204  VNGSSTSNIPIKFYSIEGMLWHNIRKHQpsisssypysaiIHDNSWRGKFSTIKERLASF  2025
+             +NG  T N+PI     +    +  R              I + +  + ++STI++RLASF
+Sbjct  188   INGHKTDNVPIFLSYFDTSYGYEDRPITYICREDDYIIGIPYQSCSKKEYSTIEKRLASF  247
+
+Query  2024  ENWPDCLV  2001
+             + WPDCLV
+Sbjct  248   KKWPDCLV  255
+
+
+ Score = 44.7 bits (104),  Expect = 6e-07, Method: Compositional matrix adjust.
+ Identities = 46/190 (24%), Positives = 81/190 (43%), Gaps = 32/190 (17%)
+ Frame = -2
+
+Query  2693  HEDKRWDSFNHY--YYIDPRLLAKAGFFFSK-NDDIQCFTCDLEL-DMKTLTSTDDIINI  2526
+             +E KR +SF  +   ++ P  LA  GF++++  D + C  C + + + +   + + I   
+Sbjct  118   YERKRLESFIEWPINWLSPSNLAADGFYYTRIKDHVACAFCRVNIGEFEKCDTINTIREK  177
+
+Query  2525  HKERSPKCSFAQ---------------SLYGFEN-----ILK----FLKLPIRKTYEYIH  2418
+             HK +SP C F                 + YG+E+     I +     + +P +   +  +
+Sbjct  178   HKHKSPNCPFINGHKTDNVPIFLSYFDTSYGYEDRPITYICREDDYIIGIPYQSCSKKEY  237
+
+Query  2417  ENLNQEKVRLSTFIDWPLEWLS-PSSLAADGFYYTRREDRVKCVFCRKEISGFKKGCIIG  2241
+               + +   RL++F  WP   +  P  LA  G YY    D V+C  C      ++K  I  
+Sbjct  238   STIEK---RLASFKKWPDCLVQKPQDLAEAGLYYEGVGDYVRCFQCSGGHCNWEKEDIPW  294
+
+Query  2240  EEHKRLSPNC  2211
+               H R  P+C
+Sbjct  295   NLHARWRPDC  304
+
+
+> BDT61657.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=535
+
+ Score = 187 bits (474),  Expect = 1e-55, Method: Compositional matrix adjust.
+ Identities = 110/255 (43%), Positives = 151/255 (59%), Gaps = 16/255 (6%)
+ Frame = -2
+
+Query  2726  EDKESNCNIYQHEDKRWDSFNHYYYID---------PRLLAKAGFFFSKNDDIQCFTCDL  2574
+             +DKE   N + HE  R ++F  +   D           LLAKAGFF+  N+ I+CFTCDL
+Sbjct  5     KDKELIHNNFFHEQNRVNTFRRFTLTDYDIYKLPIHHVLLAKAGFFYI-NNHIKCFTCDL  63
+
+Query  2573  ELDMKTLTSTDDIINIHKERSPKCSFAQSLYGFENILKFLKLPIRKTYEY----IHENLN  2406
+              +D+KT+ ++DDII IHKERSP+C FAQSLY FENI K+ K  I K +       H  L 
+Sbjct  64    TIDLKTIRTSDDIIQIHKERSPECLFAQSLYSFENIEKYCKPRIHKAFTKGTNGAHYRLY  123
+
+Query  2405  QEKVRLSTFIDWPLEWLSPSSLAADGFYYTRREDRVKCVFCRKEISGFKKGCIIGEEHKR  2226
+              EK RL TF +WP++W+SP  LAADGF+Y + +D VKC+FC   +  F+KG I+  EHKR
+Sbjct  124   WEKFRLETFTNWPIDWISPIDLAADGFFYLKVKDYVKCIFCDIILIMFEKGDIVRNEHKR  183
+
+Query  2225  LSPNCHFVNGSSTSNIP-IKFYSIEGMLWHNIRKHQpsisssypysaiIHDNSWRGKFST  2049
+             LSP C F+ G  T N+P +K    + +   +  K  P     +    + +  S      T
+Sbjct  184   LSPRCSFILGEFTLNVPNVKMNIFDKLSDRDTYKPSPEREKLFVKGVLKYTTSKTSNM-T  242
+
+Query  2048  IKERLASFENWPDCL  2004
+              +ERL SF++WP+C+
+Sbjct  243   KEERLESFKDWPECV  257
+
+
+ Score = 68.9 bits (167),  Expect = 1e-14, Method: Compositional matrix adjust.
+ Identities = 59/177 (33%), Positives = 80/177 (45%), Gaps = 31/177 (18%)
+ Frame = -2
+
+Query  2654  YIDPRLLAKAGFFFSKNDD-IQCFTCDLELDMKTLTSTDDIINIHKERSPKCSFAQSLYG  2478
+             +I P  LA  GFF+ K  D ++C  CD+ L M      D + N HK  SP+CSF    + 
+Sbjct  139   WISPIDLAADGFFYLKVKDYVKCIFCDIILIM--FEKGDIVRNEHKRLSPRCSFILGEFT  196
+
+Query  2477  FE------NILKFLKLPIRKTYEYIHE------------------NLNQEKVRLSTFIDW  2370
+                     NI  F KL  R TY+   E                  N+ +E+ RL +F DW
+Sbjct  197   LNVPNVKMNI--FDKLSDRDTYKPSPEREKLFVKGVLKYTTSKTSNMTKEE-RLESFKDW  253
+
+Query  2369  P-LEWLSPSSLAADGFYYTRREDRVKCVFCRKEISGFKKGCIIGEEHKRLSPNCHFV  2202
+             P      P +LA  GF+Y    D V+C  CR  I  ++K  I   EH +  PNC ++
+Sbjct  254   PECVGQEPQALAEAGFFYCGISDHVQCFHCRGIIRNWEKNDIPLHEHAKWFPNCDYL  310
+
+
+> BDT61655.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=546
+
+ Score = 177 bits (449),  Expect = 3e-52, Method: Compositional matrix adjust.
+ Identities = 101/218 (46%), Positives = 136/218 (62%), Gaps = 4/218 (2%)
+ Frame = -2
+
+Query  2642  RLLAKAGFFFSKNDDIQCFTCDLELDMKTLTSTDDIINIHKERSPKCSFAQSLYGFENIL  2463
+             RLLAKAGFF+ K D I CF C L++D+KTL ++DDII IHK+ SP C FAQ+LY  E++ 
+Sbjct  44    RLLAKAGFFYMKEDVIACFCCKLQIDVKTLRTSDDIIMIHKKSSPGCMFAQNLYSLEDLN  103
+
+Query  2462  KFLKLP-IRKTY-EYIHENLNQEKVRLSTFIDWPLEWLSPSSLAADGFYYTRREDRVKCV  2289
+             K+ K P I KT+ +Y    L  E+ RL TF DWP +++SP  LAADGFY+ +++D V CV
+Sbjct  104   KYCKPPQIHKTFFKYARNTLIYEQHRLETFADWPHDFVSPIELAADGFYFLKKQDHVMCV  163
+
+Query  2288  FCRKEISGFKKGCIIGEEHKRLSPNCHFVNGSSTSNIPIKFYSIEGMLWHNIR--KHQps  2115
+             FC   +  F+ G I+ E+HK   P C FV G  T NIP    +I   L H  +  K   S
+Sbjct  164   FCVGILGLFEMGDIVREKHKHAFPGCAFVRGDKTCNIPAVKKNIFEKLSHEYKPPKQTNS  223
+
+Query  2114  isssypysaiIHDNSWRGKFSTIKERLASFENWPDCLV  2001
+                 Y      + +S R K  T+++RLASF++WP+ LV
+Sbjct  224   PLLDYIGVFKYNISSVRFKRDTLEKRLASFKDWPEYLV  261
+
+
+ Score = 52.0 bits (123),  Expect = 3e-09, Method: Compositional matrix adjust.
+ Identities = 54/197 (27%), Positives = 83/197 (42%), Gaps = 33/197 (17%)
+ Frame = -2
+
+Query  2705  NIYQHEDKRWDSFNHYY--YIDPRLLAKAGFFF-SKNDDIQCFTCDLELDMKTLTSTDDI  2535
+             N   +E  R ++F  +   ++ P  LA  GF+F  K D + C  C   + +  L    DI
+Sbjct  121   NTLIYEQHRLETFADWPHDFVSPIELAADGFYFLKKQDHVMCVFC---VGILGLFEMGDI  177
+
+Query  2534  I-NIHKERSPKCSFAQSLYG----------FENILKFLKLPIRKT---YEYI---HENLN  2406
+             +   HK   P C+F +              FE +    K P +      +YI     N++
+Sbjct  178   VREKHKHAFPGCAFVRGDKTCNIPAVKKNIFEKLSHEYKPPKQTNSPLLDYIGVFKYNIS  237
+
+Query  2405  QEKV-------RLSTFIDWPLEWL--SPSSLAADGFYYTRREDRVKCVFCRKEISGFKKG  2253
+               +        RL++F DWP E+L   P  LA  GFYY    D V C  C   I  +++ 
+Sbjct  238   SVRFKRDTLEKRLASFKDWP-EYLVQKPQDLAEAGFYYCGLSDHVACFHCEGGILNWERN  296
+
+Query  2252  CIIGEEHKRLSPNCHFV  2202
+              I   EH +  P C+++
+Sbjct  297   DIPWHEHAKYYPTCNYL  313
+
+
+> BDT61661.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=352
+
+ Score = 165 bits (418),  Expect = 2e-49, Method: Compositional matrix adjust.
+ Identities = 107/249 (43%), Positives = 140/249 (56%), Gaps = 41/249 (16%)
+ Frame = -2
+
+Query  2699  YQHEDKRWDSFNHYYY-----IDPRLLAKAGFFFSKNDDIQCFTCDLELDMKTLTSTDDI  2535
+             Y HE+ RW +FN  +      I+ RL AKAGF  + ND ++CF C+   +MK +  +DDI
+Sbjct  7     YLHEEDRWGTFNPNFMKRRLPINTRLTAKAGFIHTDND-VKCFLCE---NMKNIIGSDDI  62
+
+Query  2534  INIHKERSPKCSFAQSLYGFENILKFLKLPIRKTYEYIHENLNQEKVRLSTFIDWPLEWL  2355
+             I IHK+RSP  S                 P  K Y      L +E+ RL TFIDWPL+WL
+Sbjct  63    IKIHKKRSPGYS---------------TYPNGKCYTV----LEREEFRLQTFIDWPLDWL  103
+
+Query  2354  SPSSLAADGFYYTRREDRVKCVFCRKEISGFKKGCIIGEE-------HKRLSPNCHFVNG  2196
+             SPS+LAA+GFYYTR +D V+C FCR  I  F+K  II EE       HK +SPNC F+NG
+Sbjct  104   SPSNLAANGFYYTRIKDHVECAFCRGVIGEFEKSDIIREEHDLIREKHKHVSPNCPFING  163
+
+Query  2195  SSTSNIPIKFYSIEGMLWHNIRK----HQpsisssypysaiIHDNSWRGKFSTIKERLAS  2028
+               T N+P  F +I  +  ++ RK    ++     +     I +       FSTI++RLAS
+Sbjct  164   HKTENVPQIFSNIFEI--YSTRKDNPNYKYKSMKAENNFYIPYYPCSERDFSTIEKRLAS  221
+
+Query  2027  FENWPDCLV  2001
+             FE WPDCLV
+Sbjct  222   FEKWPDCLV  230
+
+
+ Score = 37.7 bits (86),  Expect = 7e-05, Method: Compositional matrix adjust.
+ Identities = 43/183 (23%), Positives = 70/183 (38%), Gaps = 34/183 (19%)
+ Frame = -2
+
+Query  2654  YIDPRLLAKAGFFFSK-NDDIQCFTC-----DLELDMKTLTSTDDIINIHKERSPKCSFA  2493
+             ++ P  LA  GF++++  D ++C  C     + E         D I   HK  SP C F 
+Sbjct  102   WLSPSNLAANGFYYTRIKDHVECAFCRGVIGEFEKSDIIREEHDLIREKHKHVSPNCPFI  161
+
+Query  2492  QSLYGFENILKFLKLPIRKTYEYIHENLNQE-------------------------KVRL  2388
+                +  EN+ +     I + Y    +N N +                         + RL
+Sbjct  162   NG-HKTENVPQIFS-NIFEIYSTRKDNPNYKYKSMKAENNFYIPYYPCSERDFSTIEKRL  219
+
+Query  2387  STFIDWPLEWLS-PSSLAADGFYYTRREDRVKCVFCRKEISGFKKGCIIGEEHKRLSPNC  2211
+             ++F  WP   +  P  LA  GFYY    D+V C  C   +  ++K  I   +H +    C
+Sbjct  220   ASFEKWPDCLVQKPQDLAEAGFYYDGVGDQVHCFHCCGGLCNWEKEDIPWNQHAKWYSYC  279
+
+Query  2210  HFV  2202
+              ++
+Sbjct  280   PYL  282
+
+
+> BDT61729.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=704
+
+ Score = 144 bits (363),  Expect = 1e-39, Method: Compositional matrix adjust.
+ Identities = 75/184 (41%), Positives = 105/184 (57%), Gaps = 9/184 (5%)
+ Frame = -2
+
+Query  2690  EDKRWDSFNHY-YYIDPRLLAKAGFFFSK-NDDIQCFTCDLELDMKTLTSTDDIINIHKE  2517
+             E+ R D+F  Y +  D + LA+AGF+++K  D+++CF C  E+D KT++  DDI  +HKE
+Sbjct  11    EEYRLDTFERYDFAADKKKLAQAGFYYTKKGDEVKCFDCKWEVDAKTISPADDIARLHKE  70
+
+Query  2516  RSPKCSFAQSLYGFENILKFLKLPIRKTYEYIHENLNQEKVRLSTFIDWPLEWLSPSSLA  2337
+             + P C FAQ L       + +  P R      +++L  EK RL TFIDWP++WL PS LA
+Sbjct  71    KRPDCHFAQGL-------RTVPKPSRSKTFISYDSLRFEKERLETFIDWPIQWLDPSELA  123
+
+Query  2336  ADGFYYTRREDRVKCVFCRKEISGFKKGCIIGEEHKRLSPNCHFVNGSSTSNIPIKFYSI  2157
+             +DG YY R  D   CVFCR  I  ++ G     EH+R   +C F+ G    N+PI    I
+Sbjct  124   SDGLYYLRTSDHCACVFCRGIIGAWEVGDTPRGEHQRHFSHCPFIRGQPVGNVPIHHSDI  183
+
+Query  2156  EGML  2145
+                L
+Sbjct  184   LARL  187
+
+
+ Score = 48.1 bits (113),  Expect = 5e-08, Method: Compositional matrix adjust.
+ Identities = 40/141 (28%), Positives = 55/141 (39%), Gaps = 37/141 (26%)
+ Frame = -2
+
+Query  2420  HENLNQEKVRLSTFIDWPLEWLSPSSLAADGFYYTRREDRVKCVFCRKEISG--FKKGCI  2247
+             HE+L +E+ RL TF  +         LA  GFYYT++ D VKC  C+ E+          
+Sbjct  5     HESLAREEYRLDTFERYDFA-ADKKKLAQAGFYYTKKGDEVKCFDCKWEVDAKTISPADD  63
+
+Query  2246  IGEEHKRLSPNCHFVNGSSTSNIPIK---FYSIEGMLWHNIRKHQpsisssypysaiIHD  2076
+             I   HK   P+CHF  G  T   P +   F S + + +                      
+Sbjct  64    IARLHKEKRPDCHFAQGLRTVPKPSRSKTFISYDSLRFE---------------------  102
+
+Query  2075  NSWRGKFSTIKERLASFENWP  2013
+                       KERL +F +WP
+Sbjct  103   ----------KERLETFIDWP  113
+
+
+ Score = 42.0 bits (97),  Expect = 5e-06, Method: Compositional matrix adjust.
+ Identities = 22/65 (34%), Positives = 31/65 (48%), Gaps = 1/65 (2%)
+ Frame = -2
+
+Query  2393  RLSTFIDWPLEWLS-PSSLAADGFYYTRREDRVKCVFCRKEISGFKKGCIIGEEHKRLSP  2217
+             RL++F+ WP      P  LA  GF+Y    D V+C  C   +  ++   I   EH R  P
+Sbjct  253   RLASFVKWPERVTQKPCDLAEAGFFYCGLSDHVRCFHCGNGLRNWEDNDIPWNEHARWYP  312
+
+Query  2216  NCHFV  2202
+              C +V
+Sbjct  313   ECSYV  317
+
+
+ Score = 26.9 bits (58),  Expect = 0.23, Method: Compositional matrix adjust.
+ Identities = 21/63 (33%), Positives = 30/63 (48%), Gaps = 3/63 (5%)
+ Frame = -2
+
+Query  2636  LAKAGFFFSK-NDDIQCFTCDLELDMKTLTSTDDIINIHKERSPKCSFAQSLYGFENILK  2460
+             LA+AGFF+   +D ++CF C   L  +     D   N H    P+CS+     G E I K
+Sbjct  271   LAEAGFFYCGLSDHVRCFHCGNGL--RNWEDNDIPWNEHARWYPECSYVLLKKGHEFIDK  328
+
+Query  2459  FLK  2451
+               +
+Sbjct  329   VQR  331
+
+
+> BDT61662.1 wsv115-like protein [Marsupenaeus japonicus endogenous 
+nimavirus]
+Length=1006
+
+ Score = 104 bits (259),  Expect = 6e-26, Method: Compositional matrix adjust.
+ Identities = 65/77 (84%), Positives = 74/77 (96%), Gaps = 0/77 (0%)
+ Frame = -1
+
+Query  3297  FFITLLVYIFLFRKLCLAIVKTKLVIHDFIKnsllfnlnesnlmNYNDVDRLKANSASVR  3118
+             FFITLLVYIFLFRK  LA++KTKL+IHDFIKNSLLFNLNE+NLMNY DVD+LKANSAS+R
+Sbjct  930   FFITLLVYIFLFRKSYLAVIKTKLIIHDFIKNSLLFNLNETNLMNYKDVDKLKANSASIR  989
+
+Query  3117  YYFSEFTKPYTNFLLTQ  3067
+             Y+FSEFTKPYTN+LLT+
+Sbjct  990   YFFSEFTKPYTNYLLTR  1006
+
+
+> BDT61723.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=725
+
+ Score = 96.3 bits (238),  Expect = 2e-23, Method: Compositional matrix adjust.
+ Identities = 49/125 (39%), Positives = 69/125 (55%), Gaps = 7/125 (6%)
+ Frame = -2
+
+Query  2546  TDDIINIHKERSPKCSFAQSLYGFENILKFLKLPIRKTYEYIHENLNQEKVRLSTFIDWP  2367
+             + +I ++ +E  P C FAQ L       + +  P R      +++L  EK RL TFIDWP
+Sbjct  5     SQEIDDMSQEMRPDCHFAQGL-------RTVPKPSRSKTFISYDSLRFEKERLDTFIDWP  57
+
+Query  2366  LEWLSPSSLAADGFYYTRREDRVKCVFCRKEISGFKKGCIIGEEHKRLSPNCHFVNGSST  2187
+             ++WL PS LA+DGFYY R  D   CVFCR  +  ++ G     EH+R  P+C F+ G   
+Sbjct  58    IKWLDPSELASDGFYYLRTADHCACVFCRGIVGAWEVGDTPRGEHQRHFPHCPFIRGQPV  117
+
+Query  2186  SNIPI  2172
+              N+ I
+Sbjct  118   GNVSI  122
+
+
+ Score = 24.6 bits (52),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 11/35 (31%), Positives = 18/35 (51%), Gaps = 0/35 (0%)
+ Frame = -2
+
+Query  2306  DRVKCVFCRKEISGFKKGCIIGEEHKRLSPNCHFV  2202
+             D V+C +C   +  ++K  I   EH    P C++V
+Sbjct  263   DHVRCFYCGNGLRNWEKDDIPWNEHAYWFPECYYV  297
+
+
+ Score = 22.7 bits (47),  Expect = 3.8, Method: Compositional matrix adjust.
+ Identities = 11/33 (33%), Positives = 19/33 (58%), Gaps = 2/33 (6%)
+ Frame = -2
+
+Query  2690  EDKRWDSFNHY--YYIDPRLLAKAGFFFSKNDD  2598
+             E +R D+F  +   ++DP  LA  GF++ +  D
+Sbjct  46    EKERLDTFIDWPIKWLDPSELASDGFYYLRTAD  78
+
+
+> BDT61650.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=1355
+
+ Score = 91.7 bits (226),  Expect = 9e-22, Method: Compositional matrix adjust.
+ Identities = 58/214 (27%), Positives = 101/214 (47%), Gaps = 20/214 (9%)
+ Frame = -2
+
+Query  2768  SILAQKSNNT*DIMEDKESNCNIYQHEDKRWDSFN-----HYYYIDPRLLAKAGFFFSKN  2604
+             SI   + ++  DI+  +   C   +    + +  N     H Y   P ++A+AGF+   N
+Sbjct  9     SIDNSQPDDNRDIIHTESETCETSKDMKMKVNRINTFGEHHQYAHHPIVIAEAGFY-KVN  67
+
+Query  2603  DDIQCFTCDLELDMKTLTSTDDIINIHKERSPKCSFAQSLYGFENILKFLKLPIRKTYEY  2424
+               + CF C L +D+  + +TDDI+ +H  ++P C FA++L           LP  + ++ 
+Sbjct  68    QSVFCFKCGLNIDIDEINNTDDIVELHTTKNPSCIFARNL---------PPLPRSRLFDQ  118
+
+Query  2423  IHENLNQEKVRLSTFIDWPLEWLSPSSLAADGFYYTRREDRVKCVFCRKEIS-----GFK  2259
+               ++L  E  RL TFIDWP   + P  L+  GF+Y+R E++  C  C   ++      ++
+Sbjct  119   YDDDLRYEVNRLGTFIDWPCVPMEPMELSKAGFFYSRIENKCICYKCGLRVNILTDKRYE  178
+
+Query  2258  KGCIIGEEHKRLSPNCHFVNGSSTSNIPIKFYSI  2157
+                 +   H +  P+C F    +  N+PI    I
+Sbjct  179   SHHSMLFAHAKERPDCAFALNLNEGNVPIHMSKI  212
+
+
+ Score = 89.0 bits (219),  Expect = 8e-21, Method: Compositional matrix adjust.
+ Identities = 64/210 (30%), Positives = 100/210 (48%), Gaps = 22/210 (10%)
+ Frame = -2
+
+Query  2597  IQCFTCDLELDMKTLTSTDDIINIHKERSPKCSFAQSLYGFENILKFLKLPIRKTYEYIH  2418
+             I C  C   +D++TL  +D+I+ +H+ ++P C  AQ+L       KF ++      E + 
+Sbjct  672   ITCIECHACIDIETLNISDNIVKLHQNKNPNCPLAQNLPPLPRSKKF-EIDFDSITE-LP  729
+
+Query  2417  ENLNQEKVRLSTFIDWPLEWLSPSSLAADGFYYTRREDRVKCVFCRKEISGFKK-GCIIG  2241
+              +L  E  RL +FIDWP + + P  L+A GF+Y+R  +   C +C + +  F      I 
+Sbjct  730   TDLRYEIKRLESFIDWPNKRVQPKDLSAAGFFYSRNTNYCICFYCNEYVRFFDNIPMTIR  789
+
+Query  2240  EEHKRLSPNCHFVNGSSTSNIPIKFYSI--------------EGMLWHNIRKHQpsisss  2103
+             + H + +P C F  G    NIPI    I              E  L    +K +  +  S
+Sbjct  790   DIHLKKNPYCLFAQGKPVGNIPIHMSDIINKITSQNLAVINQENGLETETQKTKNKVMDS  849
+
+Query  2102  ypysaiIHDNSWRGKFSTIKERLASFENWP  2013
+             Y Y+  +HD+     + TI +RL SF NWP
+Sbjct  850   YNYTGPLHDD-----YITINKRLQSFFNWP  874
+
+
+ Score = 59.7 bits (143),  Expect = 2e-11, Method: Compositional matrix adjust.
+ Identities = 54/202 (27%), Positives = 88/202 (44%), Gaps = 41/202 (20%)
+ Frame = -2
+
+Query  2696  QHEDKRWDSFNHY--YYIDPRLLAKAGFFFSKNDD-IQCFTCDLEL---DMKTLTSTDDI  2535
+             ++E KR +SF  +    + P+ L+ AGFF+S+N +   CF C+  +   D   +T  D  
+Sbjct  733   RYEIKRLESFIDWPNKRVQPKDLSAAGFFYSRNTNYCICFYCNEYVRFFDNIPMTIRD--  790
+
+Query  2534  INIHKERSPKCSFAQSL---------------------------YGFENILKFLKLPIRK  2436
+               IH +++P C FAQ                              G E   +  K  +  
+Sbjct  791   --IHLKKNPYCLFAQGKPVGNIPIHMSDIINKITSQNLAVINQENGLETETQKTKNKVMD  848
+
+Query  2435  TYEY---IHENLNQEKVRLSTFIDWPLE-WLSPSSLAADGFYYTRREDRVKCVFCRKEIS  2268
+             +Y Y   +H++      RL +F +WP+  + +P  L   GFYYT   D V+C  C   + 
+Sbjct  849   SYNYTGPLHDDYITINKRLQSFFNWPVRNYQNPEILVEAGFYYTGTSDHVQCFHCGGGLR  908
+
+Query  2267  GFKKGCIIGEEHKRLSPNCHFV  2202
+              ++      E H +  PNC++V
+Sbjct  909   NWEMDDDPWELHAKWYPNCNYV  930
+
+
+ Score = 43.1 bits (100),  Expect = 2e-06, Method: Compositional matrix adjust.
+ Identities = 46/197 (23%), Positives = 74/197 (38%), Gaps = 47/197 (24%)
+ Frame = -2
+
+Query  2651  IDPRLLAKAGFFFSK-NDDIQCFTCDLELDM---KTLTSTDDIINIHKERSPKCSFAQSL  2484
+             ++P  L+KAGFF+S+  +   C+ C L +++   K   S   ++  H +  P C+FA +L
+Sbjct  141   MEPMELSKAGFFYSRIENKCICYKCGLRVNILTDKRYESHHSMLFAHAKERPDCAFALNL  200
+
+Query  2483  YGFENILKFLKLPIRKTYEY----------------------------------------  2424
+                   +   K+  + T +Y                                        
+Sbjct  201   NEGNVPIHMSKIIKKITSKYRNSHDKDASKTTEKEINISTTLDKHNWNVTNVNHILRPYT  260
+
+Query  2423  --IHENLNQEKVRLSTFIDWPLEWLS-PSSLAADGFYYTRREDRVKCVFCRKEISGFKKG  2253
+                H+N    + R  TF  WPLE       L   GF+YT + D V C  C   I  ++  
+Sbjct  261   PPKHKNYTLPESRKKTFNTWPLEDKDLKERLIEAGFFYTGKGDHVICFQCGVGIRNWESY  320
+
+Query  2252  CIIGEEHKRLSPNCHFV  2202
+                  +H   SP+C F+
+Sbjct  321   DDPLTQHAMWSPSCCFI  337
+
+
+ Score = 35.0 bits (79),  Expect = 7e-04, Method: Compositional matrix adjust.
+ Identities = 30/112 (27%), Positives = 56/112 (50%), Gaps = 12/112 (11%)
+ Frame = -2
+
+Query  2687  DKRWDSFNHY---YYIDPRLLAKAGFFFSKNDD-IQCFTCDLELDMKTLTSTDDIINIHK  2520
+             +KR  SF ++    Y +P +L +AGF+++   D +QCF C   L  +     DD   +H 
+Sbjct  864   NKRLQSFFNWPVRNYQNPEILVEAGFYYTGTSDHVQCFHCGGGL--RNWEMDDDPWELHA  921
+
+Query  2519  ERSPKCSFAQSLYGFENILKFLKL--PIRKTYEYIHENLNQEKVRLSTFIDW  2370
+             +  P C++     G E+ +  +++  P++ T+    +  NQ ++   T  DW
+Sbjct  922   KWYPNCNYVLLKKG-ESFINNVRVEEPLKGTFSSSRDQYNQLEI---TKQDW  969
+
+
+> BDT61678.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=254
+
+ Score = 41.2 bits (95),  Expect = 4e-06, Method: Compositional matrix adjust.
+ Identities = 18/39 (46%), Positives = 25/39 (64%), Gaps = 0/39 (0%)
+ Frame = -2
+
+Query  2420  HENLNQEKVRLSTFIDWPLEWLSPSSLAADGFYYTRRED  2304
+             +++L  E  R+ TF  WP EWLS   LA+DGF+Y   E+
+Sbjct  15    YDDLRYEFNRILTFTKWPKEWLSALKLASDGFFYLEEEE  53
+
+
+ Score = 34.3 bits (77),  Expect = 7e-04, Method: Compositional matrix adjust.
+ Identities = 22/89 (25%), Positives = 40/89 (45%), Gaps = 1/89 (1%)
+ Frame = -2
+
+Query  2465  LKFLKLPIRKTYEYIHENLNQEKVRLSTFIDWPLEWL-SPSSLAADGFYYTRREDRVKCV  2289
+             ++F        ++ I+      + RL ++ +W  E + +P  L+  GF      D V C 
+Sbjct  71    IRFNNFNYTDDFQPIYTEYISSQRRLDSYKNWSKESIQNPVHLSEAGFIADGVSDSVFCF  130
+
+Query  2288  FCRKEISGFKKGCIIGEEHKRLSPNCHFV  2202
+             +C   + G++K  I   EH   +P C +V
+Sbjct  131   YCGIYLIGWRKNDIPWNEHALWNPCCPYV  159
+
+
+> BDT61658.1 baculoviral IAP repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=421
+
+ Score = 40.8 bits (94),  Expect = 8e-06, Method: Compositional matrix adjust.
+ Identities = 28/93 (30%), Positives = 42/93 (45%), Gaps = 10/93 (11%)
+ Frame = -2
+
+Query  2474  ENILKFLKLPIRKTYEYIHENLNQEKVRLSTFIDWPLEWL--SPSSLAADGFYYTRREDR  2301
+             ENI     +PI ++Y            RL +F +WP E++   P  LA  GF      D 
+Sbjct  41    ENIDPLKSIPIIRSYTATSR-------RLKSFNNWP-EYVIKKPQDLAEAGFLSRNISDH  92
+
+Query  2300  VKCVFCRKEISGFKKGCIIGEEHKRLSPNCHFV  2202
+             V+C +C   +  +K   I   EH +  P CH++
+Sbjct  93    VRCFYCGGCLRNWKSEDIPWIEHAKWFPQCHYL  125
+
+
+ Score = 25.8 bits (55),  Expect = 0.49, Method: Compositional matrix adjust.
+ Identities = 11/31 (35%), Positives = 19/31 (61%), Gaps = 1/31 (3%)
+ Frame = -2
+
+Query  2699  YQHEDKRWDSFNHYYY-IDPRLLAKAGFFFS  2610
+             +++   RW +FN+  Y ID  L+  AG ++S
+Sbjct  371   FKNNKDRWKTFNYRQYSIDKWLIPMAGLYYS  401
+
+
+ Score = 23.5 bits (49),  Expect = 2.6, Method: Compositional matrix adjust.
+ Identities = 7/19 (37%), Positives = 12/19 (63%), Gaps = 0/19 (0%)
+ Frame = -2
+
+Query  2057  FSTIKERLASFENWPDCLV  2001
+             ++    RL SF NWP+ ++
+Sbjct  55    YTATSRRLKSFNNWPEYVI  73
+
+
+> BDT61726.1 hypothetical protein [Marsupenaeus japonicus endogenous 
+nimavirus]
+Length=268
+
+ Score = 22.7 bits (47),  Expect = 3.2, Method: Compositional matrix adjust.
+ Identities = 10/24 (42%), Positives = 12/24 (50%), Gaps = 0/24 (0%)
+ Frame = -3
+
+Query  2146  YGIILENISLLYHLPIHIVPLYTI  2075
+             Y II EN+  +Y L     P Y I
+Sbjct  38    YDIIKENVKKMYRLGKQFSPSYHI  61
+
+
+> BDT61687.1 wsv360-like protein [Marsupenaeus japonicus endogenous 
+nimavirus]
+Length=6218
+
+ Score = 21.9 bits (45),  Expect = 7.1, Method: Composition-based stats.
+ Identities = 10/25 (40%), Positives = 15/25 (60%), Gaps = 0/25 (0%)
+ Frame = +2
+
+Query  2984  nkydisrGVIGLCISNSPIWCIYIM  3058
+             N+YD+  G+  L  S+S    +YIM
+Sbjct  761   NEYDMGVGISALTSSSSTEQPVYIM  785
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25352170
+
+
+  Database: User specified sequence set (Input: tests/fasta/MjeNMV.faa).
+    Posted date:  Unknown
+  Number of letters in database: 77,006
+  Number of sequences in database:  111
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

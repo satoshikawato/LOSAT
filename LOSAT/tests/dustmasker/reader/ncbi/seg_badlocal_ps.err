@@ -1,0 +1,3 @@
+NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objtools/readers/fasta_reader_utils.cpp", line 77: Error: (CObjReaderParseException::eInvalidID) ncbi::objects::s_PostError() - 'a]b' is not a valid local ID (m_Pos = 1)
+

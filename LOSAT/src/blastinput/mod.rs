@@ -8,6 +8,12 @@
 
 // NCBI app/blast/blast_app_util.hpp and blastinput/blast_args.cpp: the application layer.
 pub mod app;
+pub mod compressed;
+// NCBI blastinput/blast_args.cpp (s_GetTaxIDList): the taxid options of a database search.
+pub mod db_filter;
+// NCBI blastinput/blast_args.cpp:2342-2356, api/uniform_search.cpp: the database masks of a
+// database search (`-db_soft_mask`, `-db_hard_mask`).
+pub mod db_mask;
 // NCBI blastinput/blast_fasta_input.cpp, objtools/readers/fasta.cpp, util/line_reader.cpp:
 // the FASTA input of BLASTN, TBLASTX, TBLASTN and BLASTP.
 pub mod fasta_reader;
@@ -15,6 +21,13 @@ pub mod fasta_reader;
 pub mod input_files;
 // NCBI corelib/ncbiapp.cpp, metareg.cpp: the application layer's environment and registry.
 pub mod ncbi_environment;
+// NCBI corelib/ncbireg.cpp (IRWRegistry::x_Read): the reader of the registry files.
+pub(crate) mod ncbi_registry;
+// NCBI core/blast_options.c BLAST_ValidateOptions: the protein option checks of blastp, tblastn
+// and psiblast.
+pub mod protein_options_check;
+// NCBI serial/objistrasn.cpp: psiblast's PSSM in ASN.1 text (`-out_pssm`, `-in_pssm`).
+pub mod pssm_text;
 pub mod query_batch;
 // NCBI blastinput/blast_args.cpp:2894-2978: the hit list size and the numbers of descriptions
 // and alignments of a run.
@@ -28,3 +41,6 @@ pub mod value_parsers;
 // NCBI api/blast_objmgr_tools.cpp:515-520 (`GetCompressedPlusStrand`): EXPERIMENT (LOSAT_X_TBNSTORE,
 // LOSAT_X_TBXSTORE), the records of `-subject` packed as read.
 pub(crate) mod x_packed_subjects;
+
+#[cfg(test)]
+mod damaged_input_tests;

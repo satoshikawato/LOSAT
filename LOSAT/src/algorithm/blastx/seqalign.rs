@@ -21,8 +21,9 @@
 //!   tabular formatter's recount from the displayed rows;
 //! - `comp_adjustment_method`: `composition_method`; `gap_info`: `edit_script` (empty for an
 //!   ungapped HSP);
-//! - the lengths of the construction: the query's nucleotide length (LOSAT's BLASTX has no
-//!   `-query_loc`) and the subject's length; no subject range (`-subject_loc` is rejected).
+//! - the lengths of the construction: the searched letters' lengths (with `-query_loc` /
+//!   `-subject_loc`, the interval's), and the intervals' starts, which `RemapToQueryLoc` and
+//!   `s_RemapToSubjectLoc` add to the rows (`FastaRecord::placement`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:518-531
 //! ```c
@@ -63,11 +64,14 @@ pub(super) enum SeqalignSubjects<'a> {
 }
 
 /// Writes the documents of every query of `batches` to `writer`. A structured format writes
-/// none of a query's own warnings (`ReportFormat::writes_query_warnings`), so nothing goes
-/// to standard error here.
+/// none of a query's own warnings (`ReportFormat::writes_query_warnings`); what goes to
+/// `stderr` here are NCBI's posts of the bytes that its stream replaces in a query's document
+/// (`write_query_to`).
+#[allow(clippy::too_many_arguments)]
 pub(super) fn write_blastx_seqalign(
     format: SerialFormat,
     writer: &mut impl Write,
+    stderr: &mut dyn Write,
     gapped: bool,
     queries: &[FastaRecord],
     subjects: &[FastaRecord],
@@ -96,9 +100,9 @@ pub(super) fn write_blastx_seqalign(
                 &mut hsp_records,
             )?;
             let query_record = QueryRecord {
-                id: SeqId::Local(&query.internal_id),
+                id: query.seq_id(),
                 searched_length: i32::try_from(query.sequence.len())?,
-                offset: 0,
+                offset: i32::try_from(query.placement().offset)?,
             };
             write_query_to(
                 format,
@@ -108,6 +112,7 @@ pub(super) fn write_blastx_seqalign(
                 &hsp_records,
                 &mut buf,
                 writer,
+                &mut *stderr,
             )?;
         }
     }
@@ -132,18 +137,22 @@ pub(super) fn query_records<'a>(
         }
         let subject_index = subject_records.len() as u32;
         let subject = &subjects[list.oid];
+        let parsed = match names {
+            SeqalignSubjects::Records => None,
+            SeqalignSubjects::Database { reported, .. } => reported.parsed_subject(list.oid),
+        };
         subject_records.push(SubjectRecord {
             id: match names {
-                SeqalignSubjects::Records => SeqId::Local(&subject.internal_id),
-                SeqalignSubjects::Database { reported, .. } => {
-                    match reported.parsed_subject(list.oid) {
-                        Some(subject) => SeqId::Db(subject.alignment_id()),
-                        None => SeqId::BlOrdId(reported.ordinal(list.oid)),
-                    }
-                }
+                SeqalignSubjects::Records => subject.seq_id(),
+                SeqalignSubjects::Database { reported, .. } => match parsed {
+                    Some(subject) => SeqId::Db(subject.alignment_id()),
+                    None => SeqId::BlOrdId(reported.oid(list.oid)),
+                },
             },
             searched_length: i32::try_from(subject.sequence.len())?,
-            offset: 0,
+            // `-subject_loc` (a `-db` subject is never cut).
+            offset: i32::try_from(subject.placement().offset)?,
+            use_this_seqid: crate::report::db_subject::use_this_seqid(parsed),
         });
         for hsp in &list.hsps {
             hsp_records.push(HspRecord {

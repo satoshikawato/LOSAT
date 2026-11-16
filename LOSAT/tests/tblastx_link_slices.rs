@@ -42,7 +42,7 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
-const THREADS: [u32; 2] = [1, 4];
+const THREADS: [u32; 4] = [1, 4, 8, 16];
 
 /// One TBLASTX run of the fixture pair (`-outfmt 6` on standard output) with the given
 /// variables as its only `LOSAT_*` variables that choose a code path.
@@ -117,7 +117,7 @@ fn in_place_stats(stderr: &str) -> Option<[u64; 3]> {
 }
 
 /// `[X_STATS] PAIRPAR`: units. At one thread the cost rule sends the fixture pair to the reference
-/// frame loop (`units=0`), at four threads it runs its units.
+/// frame loop (`units=0`), at four, eight and sixteen threads it runs its units.
 fn check_path(stderr: &str, threads: u32, what: &str) {
     let [units] = counters(stderr, "[X_STATS] PAIRPAR ", ["units"])
         .unwrap_or_else(|| panic!("{what}: no [X_STATS] PAIRPAR line:\n{stderr}"));
@@ -160,7 +160,7 @@ fn check_stats(stderr: &str, threads: u32, what: &str) -> (u64, u64) {
 //    number_of_hsps = hp_frame_number[frame_index];
 // ```
 // The default search: the report is NCBI's, both linking calls link their groups as slices, and
-// the numbers are the same with one thread and four.
+// the numbers are the same at every thread count.
 #[test]
 fn the_default_search_gives_ncbis_report_with_the_groups_linked_as_slices() {
     let expected = ncbi_report();
@@ -173,7 +173,10 @@ fn the_default_search_gives_ncbis_report_with_the_groups_linked_as_slices() {
         assert!(in_place_stats(&stderr).is_some(), "{what}:\n{stderr}");
         seen.push(groups);
     }
-    assert_eq!(seen[0], seen[1], "the groups do not depend on the threads");
+    assert!(
+        seen.iter().all(|groups| *groups == seen[0]),
+        "the groups do not depend on the threads: {seen:?}"
+    );
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419,483-486
@@ -188,8 +191,8 @@ fn the_default_search_gives_ncbis_report_with_the_groups_linked_as_slices() {
 // The slices together with the other variables of the linking call: the literal port
 // (LOSAT_LINKING_LEGACY: its groups are linked on copies of the slices and written back, never
 // handed back to the cut) and the literal port beside the default kernel
-// (LOSAT_LINK_FAST_SHADOW). Threads 1 and 4 cover the reference frame loop and the unit path. The
-// report is NCBI's and the path ran in every run.
+// (LOSAT_LINK_FAST_SHADOW). Threads 1, 4, 8 and 16 cover the reference frame loop and the unit
+// path. The report is NCBI's and the path ran in every run.
 #[test]
 fn the_path_with_the_other_linking_variables() {
     let expected = ncbi_report();

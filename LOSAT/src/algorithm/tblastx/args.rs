@@ -63,9 +63,13 @@ pub struct TblastxArgs {
         long,
         value_name = "NAME",
         conflicts_with_all = ["subject", "subject_loc"],
-        help = "BLAST database name (a nucleotide database without parsed Seq-ids)"
+        help = "BLAST database name (a nucleotide database, with or without parsed Seq-ids)"
     )]
     pub db: Option<String>,
+    /// `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist` and
+    /// `-no_taxid_expansion` (line DI-8).
+    #[command(flatten)]
+    pub db_filter: crate::blastinput::db_filter::DbFilterArgs,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
     // ```c++
     //     // DB size
@@ -80,6 +84,38 @@ pub struct TblastxArgs {
     // (`subjects::SubjectSetNumbers`).
     #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
     pub dbsize: Option<i64>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2663
+    // ```c++
+    //     arg_desc.AddFlag(kArgShowGIs, "Show NCBI GIs in deflines?", true);
+    // ```
+    #[arg(
+        long = "show_gis",
+        default_value_t = false,
+        help = "Show NCBI GIs in deflines?"
+    )]
+    pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2050-2052
+    // ```c++
+    //     arg_desc.AddDefaultKey(kArgParseDeflines, "TF", "Should the query and "
+    // ```
+    // `-parse_deflines` is a flag of the programs (blast_args.cpp:1961).
+    #[arg(
+        long = "parse_deflines",
+        default_value_t = false,
+        help = "Should the query and subject defline(s) be parsed?"
+    )]
+    pub parse_deflines: bool,
+    /// The ids of the search's records under `-parse_deflines` (`run`).
+    #[arg(skip)]
+    pub id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
+    // ```c++
+    //     arg_desc.AddOptionalKey(kArgEffSearchSpace, "int_value",
+    //                             "Effective length of the search space",
+    //                             CArgDescriptions::eInt8);
+    // ```
+    #[arg(long, value_parser = crate::blastinput::value_parsers::nonnegative_ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
+    pub searchsp: Option<i64>,
     #[arg(long, default_value_t = 10.0, value_parser = tblastx_real)]
     pub evalue: f64,
     // NCBI blast_args.cpp:578-583: a double of at least 0; the lookup table takes its
@@ -108,6 +144,11 @@ pub struct TblastxArgs {
 
     #[arg(long, value_name = "PATH", value_parser = ncbi_output_path())]
     pub out: Option<PathBuf>,
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3532-3535
+    /// (quoted at `BlastpArgs::export_search_strategy`). The search strategy file
+    /// (`report::archive::strategy`), created by `run` before the other options are read.
+    #[arg(long, value_name = "filename", value_parser = ncbi_output_path(), help = "File name to record the search strategy used")]
+    pub export_search_strategy: Option<PathBuf>,
     #[arg(long, default_value_t = 1, value_parser = genetic_code)]
     pub query_gencode: u8,
     #[arg(long, default_value_t = 1, value_parser = genetic_code)]
@@ -137,6 +178,10 @@ pub struct TblastxArgs {
     pub num_descriptions: Option<usize>,
     #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
     pub num_alignments: Option<usize>,
+    /// `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler,
+    /// `blastinput::report_counts::FormattingArgs`).
+    #[command(flatten)]
+    pub formatting: crate::blastinput::report_counts::FormattingArgs,
     /// The hit list size and the numbers of descriptions and alignments of the pairwise
     /// report, which `check_ncbi_options` sets from `-max_target_seqs`, `-num_descriptions`,
     /// `-num_alignments` and the output format (`blastinput::report_counts`). Not a public
@@ -201,11 +246,34 @@ pub struct TblastxArgs {
     // by `soft_masking`.
     #[arg(long, value_parser = ncbi_boolean, help = "Apply filtering locations as soft masks [default: false]")]
     pub soft_masking: Option<bool>,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942,2549-2557
+    // arg_desc.AddFlag(kArgUseLCaseMasking,
+    //     "Use lower case filtering in query and subject sequence(s)?", true);
+    // ReadSequencesToBlast(..., use_lcase_masks, subjects, ...);
+    #[arg(long)]
+    pub lcase_masking: bool,
 
-    /// Two-hit window size for triggering ungapped extension (default: 40, or the matrix's
-    /// suggestion; `window`). Smaller values are more strict, larger values are more sensitive.
-    /// 0 (NCBI's one-hit word finder) is not supported by LOSAT's TBLASTX.
-    #[arg(long, value_parser = nonnegative_ncbi_integer)]
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:209-214, 276-278
+    // ```c++
+    //         arg_desc.SetCurrentGroup("Extension options");
+    //         // ungapped X-drop
+    //         // Default values: blastn=20, megablast=10, others=7
+    //         arg_desc.AddOptionalKey(kArgUngappedXDropoff, "float_value",
+    //                             "X-dropoff value (in bits) for ungapped extensions",
+    //                             CArgDescriptions::eDouble);
+    //     ...
+    //     if (args.Exist(kArgUngappedXDropoff) && args[kArgUngappedXDropoff]) {
+    //         opt.SetXDropoff(args[kArgUngappedXDropoff].AsDouble());
+    //     }
+    // ```
+    // TBLASTX has no gapped X-drops (blast_args.cpp:216-229, `!m_IsTblastx`). Read by
+    // `x_drop_ungapped_bits`.
+    #[arg(long = "xdrop_ungap", value_name = "float_value", value_parser = tblastx_real, help = "X-dropoff value (in bits) for ungapped extensions [default: 7]")]
+    pub xdrop_ungap: Option<f64>,
+
+    // The window of the two-hit word finder (`window`); 0 takes the one-hit word finder. The help is
+    // NCBI's, as tblastn's.
+    #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion]")]
     pub window_size: Option<i32>,
 
     /// Output format: 0 (pairwise), 6 or 7 (tabular), without custom fields.
@@ -255,6 +323,7 @@ pub struct TblastxArgs {
     #[arg(
         long = "subject_loc",
         value_name = "RANGE",
+        conflicts_with_all = crate::blastinput::db_filter::DB_FILTER_OPTIONS,
         help = "Location on the subject sequence in 1-based offsets (Format: start-stop)"
     )]
     pub subject_loc: Option<String>,
@@ -262,6 +331,45 @@ pub struct TblastxArgs {
     /// reads the arguments (`archive::handle_for`).
     #[arg(skip)]
     pub archive: Option<crate::report::archive::ArchiveHandle>,
+    /// The run's search strategy export (`-export_search_strategy`), made by `run`
+    /// (`strategy::StrategyExport::for_run`).
+    #[arg(skip)]
+    pub strategy: Option<crate::report::archive::strategy::StrategyExport>,
+    /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath("taxdb.bti")`), asked
+    /// before the search where a tabular field list looks every taxid up (the plural names of the
+    /// taxonomy database, the organism report; `algorithm::tblastx::tabular`), by the command line
+    /// and the library (`common::database::subject_taxonomy`); `None` elsewhere (LOSAT Web has no
+    /// files: not found). Not a public option.
+    #[arg(skip)]
+    pub tabular_taxdb: Option<bool>,
+    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), made with
+    /// `tabular_taxdb` (`common::database::SubjectTaxdb`); `None` elsewhere. Not a public option.
+    #[arg(skip)]
+    pub subject_taxdb: Option<crate::algorithm::common::database::SubjectTaxdb>,
+    /// The `[BLAST] BLASTDB` setting through which a `-subject` search's tabular reports look for
+    /// the taxonomy database (`common::database::subject_taxonomy`), which a search of records of
+    /// the library (`api::run`) reads from the call's application settings when a report looks
+    /// every taxid up; `None` elsewhere (the command line passes its settings, LOSAT Web has no
+    /// files). Not a public option.
+    #[arg(skip)]
+    pub taxdb_setting: Option<crate::algorithm::common::database::TaxdbSetting>,
+    // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input.hpp:180-182
+    // ```c++
+    //     int GetLocalIdCounterInitValue() const { return m_LocalIdCounter; }
+    //     ...
+    //     void SetLocalIdCounterInitValue(int val) { m_LocalIdCounter = val; }
+    // ```
+    // The position in the whole input of the first of these records, as a reader's counter
+    // starts there (`api::run_batches`): a query's `Query_N` in the messages. 0 on the command
+    // line, whose records are the whole input.
+    #[arg(skip)]
+    pub first_query_ordinal: usize,
+    /// The file that NCBI BLAST+ reads for a `-matrix` that its tables do not have
+    /// (`ncbi_environment::ApplicationSettings::matrix_file`), found before the search by the
+    /// command line and the library API (`find_matrix_file`); `None` in LOSAT Web. Not a public
+    /// option.
+    #[arg(skip)]
+    pub matrix_file: Option<std::path::PathBuf>,
 }
 
 /// What NCBI's score block makes of the `-matrix` name of an ungapped search.
@@ -307,7 +415,8 @@ impl TblastxArgs {
     /// The other names that the loader knows (`blosum` or `pam` and the exact digits) are the
     /// tables' names ignoring the case. A name that the loader does not know is looked for as
     /// a file (`BlastFindMatrixPath`, blast_stat.c:1631-1660); LOSAT reads no matrix file, and
-    /// NCBI 2.17.0 aborts for a file that it finds (`SURVEY_scoring.md` §1.3).
+    /// NCBI 2.17.0 aborts for a file that it finds (`SURVEY_scoring.md` §1.3), which LOSAT
+    /// refuses (`matrix_file`).
     pub fn scoring_matrix(&self) -> TblastxMatrix {
         let name = self.matrix_name();
         if let Ok(matrix) = name.parse::<crate::config::ScoringMatrix>() {
@@ -321,6 +430,23 @@ impl TblastxArgs {
         } else {
             TblastxMatrix::Unknown
         }
+    }
+
+    /// Looks up the file that NCBI reads for an `Unknown` matrix (`scoring_matrix`) with `search`
+    /// (`MatrixSearch::file`) into `matrix_file`: the first step of the command line's run
+    /// (`run`) and of the library's searches (`run_local_database`, `api::run`'s search of
+    /// records), before the options and the outputs, as NCBI's score block, which looks for it
+    /// when it sets up a batch, refuses the run there (`run_in_pool`).
+    pub(crate) fn find_matrix_file(
+        &mut self,
+        search: &crate::blastinput::ncbi_environment::MatrixSearch,
+    ) -> anyhow::Result<()> {
+        if self.scoring_matrix() == TblastxMatrix::Unknown {
+            self.matrix_file = search
+                .file(self.matrix_name())
+                .map_err(anyhow::Error::msg)?;
+        }
+        Ok(())
     }
 
     /// The word threshold: `-threshold`, or the matrix's suggestion for a translated subject.
@@ -364,6 +490,23 @@ impl TblastxArgs {
         })
     }
 
+    /// The ungapped X-drop in bits (`word_options->x_dropoff`): `-xdrop_ungap`, else TBLASTX's
+    /// default.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_prot_options.cpp:100-104 (the
+    /// base handle of `CTBlastxOptionsHandle`, tblastx_options.cpp:47-49)
+    /// ```c++
+    /// CBlastProteinOptionsHandle::SetInitialWordOptionsDefaults()
+    /// {
+    ///     SetXDropoff(BLAST_UNGAPPED_X_DROPOFF_PROT);
+    ///     SetWindowSize(BLAST_WINDOW_SIZE_PROT);
+    /// }
+    /// ```
+    pub fn x_drop_ungapped_bits(&self) -> f64 {
+        self.xdrop_ungap
+            .unwrap_or(super::constants::X_DROP_UNGAPPED_BITS)
+    }
+
     /// The word size the search uses: the argument, else TBLASTX's default (3).
     pub fn word_size(&self) -> i32 {
         self.word_size.unwrap_or(3)
@@ -377,7 +520,7 @@ impl TblastxArgs {
     /// The -seg value as NCBI's filtering handler reads it (`check_options` reports its
     /// errors first).
     pub fn seg_spec(&self) -> anyhow::Result<SegSpec> {
-        crate::blastinput::app::parse_seg_option(&self.seg, "TBLASTX")
+        crate::blastinput::app::parse_seg_option(&self.seg)
     }
 
     /// `-soft_masking` (`mask_at_hash`): the SEG intervals keep words out of the lookup table but
@@ -420,3 +563,7 @@ impl TblastxArgs {
             .display()
     }
 }
+
+#[cfg(test)]
+#[path = "args_tests.rs"]
+mod args_tests;

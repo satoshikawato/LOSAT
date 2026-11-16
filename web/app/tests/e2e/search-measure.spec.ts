@@ -7,12 +7,14 @@
 // 60): the time from choosing the file to its record table (the Data worker's index scan
 // with the engine's serial reactor and the SHA-256 of every record), the engine's check of
 // the input (`register` on the Data worker's reactor), leaving one record out (a new
-// revision and the check again), and "Add to queue" (the run input and its SHA-256, the
+// revision and the check again), and "Run LOSAT" (the run input and its SHA-256, the
 // engine's validate). One warm-up and three measured repetitions, each in a new page.
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './support/test';
 import { ENGINE, NO_ENGINE_REASON } from './support/engine';
+import { navigate } from './support/navigate';
 
 const MEASURE = new Set((process.env['LOSAT_WEB_MEASURE'] ?? '').split(',').filter((name) => name !== ''));
 const EVIDENCE = process.env['LOSAT_WEB_EVIDENCE'] || undefined;
@@ -54,7 +56,7 @@ interface Sample {
 }
 
 async function once(page: Page, file: Buffer, count: number): Promise<Sample> {
-  await page.goto('/');
+  await navigate(page, '/');
   await page.getByTestId('program-blastp').check();
   await page.getByTestId('subject-input').fill('>s\nMKLVVLAAGGHHKL\n');
   await expect(page.getByTestId('subject-source-0-check')).toHaveAttribute('data-check', 'ok');
@@ -78,10 +80,10 @@ async function once(page: Page, file: Buffer, count: number): Promise<Sample> {
   const t4 = Date.now();
   const recheckInApp = Number(await source.getAttribute('data-check-ms'));
 
-  await page.getByTestId('add-to-queue').click();
-  await expect(page.getByTestId('run-1')).toBeVisible({ timeout: 600_000 });
+  await page.getByTestId('run-losat').click();
+  await expect(page.getByTestId('run-1-option')).toHaveCount(1, { timeout: 600_000 });
   const t5 = Date.now();
-  await page.getByTestId('run-1-cancel').click({ timeout: 2000 }).catch(() => undefined);
+  await page.getByTestId('run-status-cancel').click({ timeout: 2000 }).catch(() => undefined);
   return { indexMs: t1 - t0, indexInApp, checkInApp, excludeMs: t4 - t3, recheckInApp, enqueueMs: t5 - t4 };
 }
 

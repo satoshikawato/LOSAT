@@ -1,0 +1,350 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "tblastn",
+      "version": "TBLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/ids/nucl_v5"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "db_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "qp1 query protein one",
+          "query_len": 140,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "tpe|BN000025.1|",
+                  "accession": "BN000025",
+                  "title": "third party embl nucleotide"
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 128.642,
+                  "score": 322,
+                  "evalue": 8.66374e-49,
+                  "identity": 60,
+                  "positive": 63,
+                  "query_from": 1,
+                  "query_to": 66,
+                  "hit_from": 46,
+                  "hit_to": 243,
+                  "hit_frame": 1,
+                  "align_len": 66,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                  "hseq": "MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                  "midline": "MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 68.1662,
+                  "score": 165,
+                  "evalue": 8.66374e-49,
+                  "identity": 32,
+                  "positive": 34,
+                  "query_from": 99,
+                  "query_to": 140,
+                  "hit_from": 338,
+                  "hit_to": 463,
+                  "hit_frame": 2,
+                  "align_len": 42,
+                  "gaps": 0,
+                  "qseq": "MCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG",
+                  "hseq": "VCNVVRITDQSLRHCKPNHDANCEKFKIFHNMVGHGRTASEG",
+                  "midline": "+C +VR TDQSLRH K  HDAN EK KIFH MVGHGRTASEG"
+                },
+                {
+                  "num": 3,
+                  "bit_score": 49.6766,
+                  "score": 117,
+                  "evalue": 1.41065e-12,
+                  "identity": 28,
+                  "positive": 38,
+                  "query_from": 34,
+                  "query_to": 101,
+                  "hit_from": 120,
+                  "hit_to": 344,
+                  "hit_frame": 3,
+                  "align_len": 75,
+                  "gaps": 7,
+                  "qseq": "GWENYCWPANMSWKVLMKYEFSSDI-------HPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCV",
+                  "hseq": "GWAHGCNEGLGELLLAREYKLESPYEV*VFLRYPPLQFMHLLPKDMANPGLSKTDTLHRSAMGLWRHKHLKGMCV",
+                  "midline": "GW + C        +  +Y+  S         +P   ++  +PK+MA PG   TDTLH S MGLW HK+ K MCV"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "gb|AF000022.1|",
+                  "accession": "AF000022",
+                  "title": "subject id beside an accession"
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 128.642,
+                  "score": 322,
+                  "evalue": 8.66374e-49,
+                  "identity": 60,
+                  "positive": 63,
+                  "query_from": 1,
+                  "query_to": 66,
+                  "hit_from": 46,
+                  "hit_to": 243,
+                  "hit_frame": 1,
+                  "align_len": 66,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                  "hseq": "MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                  "midline": "MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 68.1662,
+                  "score": 165,
+                  "evalue": 8.66374e-49,
+                  "identity": 32,
+                  "positive": 34,
+                  "query_from": 99,
+                  "query_to": 140,
+                  "hit_from": 338,
+                  "hit_to": 463,
+                  "hit_frame": 2,
+                  "align_len": 42,
+                  "gaps": 0,
+                  "qseq": "MCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG",
+                  "hseq": "VCNVVRITDQSLRHCKPNHDANCEKFKIFHNMVGHGRTASEG",
+                  "midline": "+C +VR TDQSLRH K  HDAN EK KIFH MVGHGRTASEG"
+                },
+                {
+                  "num": 3,
+                  "bit_score": 49.6766,
+                  "score": 117,
+                  "evalue": 1.41065e-12,
+                  "identity": 28,
+                  "positive": 38,
+                  "query_from": 34,
+                  "query_to": 101,
+                  "hit_from": 120,
+                  "hit_to": 344,
+                  "hit_frame": 3,
+                  "align_len": 75,
+                  "gaps": 7,
+                  "qseq": "GWENYCWPANMSWKVLMKYEFSSDI-------HPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCV",
+                  "hseq": "GWAHGCNEGLGELLLAREYKLESPYEV*VFLRYPPLQFMHLLPKDMANPGLSKTDTLHRSAMGLWRHKHLKGMCV",
+                  "midline": "GW + C        +  +Y+  S         +P   ++  +PK+MA PG   TDTLH S MGLW HK+ K MCV"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 24,
+            "db_len": 11712,
+            "hsp_len": 24,
+            "eff_space": 48372,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "tblastn",
+      "version": "TBLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/ids/nucl_v5"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "db_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_2",
+          "query_title": "qp2 unrelated protein",
+          "query_len": 45,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "tpe|BN000025.1|",
+                  "accession": "BN000025",
+                  "title": "third party embl nucleotide"
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 12.3122,
+                  "score": 20,
+                  "evalue": 3.35242,
+                  "identity": 4,
+                  "positive": 8,
+                  "query_from": 22,
+                  "query_to": 33,
+                  "hit_from": 435,
+                  "hit_to": 470,
+                  "hit_frame": 3,
+                  "align_len": 12,
+                  "gaps": 0,
+                  "qseq": "WMLWKEHLTFQW",
+                  "hseq": "WVMGEQHLRATW",
+                  "midline": "W++ ++HL   W"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 11.927,
+                  "score": 19,
+                  "evalue": 4.29441,
+                  "identity": 4,
+                  "positive": 4,
+                  "query_from": 33,
+                  "query_to": 39,
+                  "hit_from": 148,
+                  "hit_to": 168,
+                  "hit_frame": 1,
+                  "align_len": 7,
+                  "gaps": 0,
+                  "qseq": "WCNYFWT",
+                  "hseq": "WENYCWP",
+                  "midline": "W NY W "
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "gb|AF000022.1|",
+                  "accession": "AF000022",
+                  "title": "subject id beside an accession"
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 12.3122,
+                  "score": 20,
+                  "evalue": 3.35242,
+                  "identity": 4,
+                  "positive": 8,
+                  "query_from": 22,
+                  "query_to": 33,
+                  "hit_from": 435,
+                  "hit_to": 470,
+                  "hit_frame": 3,
+                  "align_len": 12,
+                  "gaps": 0,
+                  "qseq": "WMLWKEHLTFQW",
+                  "hseq": "WVMGEQHLRATW",
+                  "midline": "W++ ++HL   W"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 11.927,
+                  "score": 19,
+                  "evalue": 4.29441,
+                  "identity": 4,
+                  "positive": 4,
+                  "query_from": 33,
+                  "query_to": 39,
+                  "hit_from": 148,
+                  "hit_to": 168,
+                  "hit_frame": 1,
+                  "align_len": 7,
+                  "gaps": 0,
+                  "qseq": "WCNYFWT",
+                  "hseq": "WENYCWP",
+                  "midline": "W NY W "
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 24,
+            "db_len": 11712,
+            "hsp_len": 14,
+            "eff_space": 13857,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "tblastn",
+      "version": "TBLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/ids/nucl_v5"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "db_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_3",
+          "query_title": "qnone no hits",
+          "query_len": 36,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 24,
+            "db_len": 11712,
+            "hsp_len": 0,
+            "eff_space": 0,
+            "kappa": -1,
+            "lambda": -1,
+            "entropy": -1
+          },
+          "message": "Query_3 qnone no hits:  Query_3 qnone no hits: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options  No hits found"
+        }
+      }
+    }
+  }
+]
+}

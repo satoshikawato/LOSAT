@@ -1,4 +1,4 @@
-//! tblastn's lookup scan without a branch on the presence vector (`src/algorithm/tblastn/x_scan_bf.rs`;
+//! tblastn's lookup scan without a branch on the presence vector (`src/algorithm/tblastx/x_aascan_bf.rs`;
 //! the former switch `LOSAT_X_TBNSCANBF` graduated on 2026-10-26) on whole searches.
 //!
 //! NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127

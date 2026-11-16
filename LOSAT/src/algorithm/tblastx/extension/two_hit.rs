@@ -2,14 +2,18 @@
 //!
 //! Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c
 
-use super::get_score;
-use super::ungapped::extend_hit_ungapped;
 use crate::algorithm::tblastx::scoring::{Blosum62Score, TbxScore};
 // The table walks of the two-hit extension (x_two_hit_fast.rs).
 use super::x_two_hit_fast;
 
 // Import the internal extension functions from ungapped module
 // These are used for left/right extension
+// The wasm simd128 build extends with `extend_left_ungapped_simd128` instead.
+#[cfg(not(all(
+    target_arch = "wasm32",
+    target_feature = "simd128",
+    not(feature = "tblastx-wasm-scalar")
+)))]
 #[inline(always)]
 fn extend_left_ungapped_scalar<S: TbxScore>(
     sc: S,
@@ -20,8 +24,7 @@ fn extend_left_ungapped_scalar<S: TbxScore>(
     initial_score: i32,
     x_drop: i32,
 ) -> (i32, usize) {
-    // Use the public extend_hit_ungapped to get left extension behavior
-    // We need to replicate the left extension logic here since it's internal
+    // The left extension of the two-hit extension (its own copy: the walk starts at the word).
     let max_left = q_off.min(s_off);
 
     let mut score = initial_score;
@@ -89,6 +92,10 @@ unsafe fn extend_left_ungapped_simd128<S: TbxScore>(
     let mut left_disp = 0usize;
     let mut i = 0usize;
 
+    #[expect(
+        unused_assignments,
+        reason = "the lane macro steps pos after every lane, the last one too; the next block starts again from its own offset"
+    )]
     while i + 16 <= max_left {
         let q_ptr = q_seq.as_ptr().add(q_off - i - 16);
         let s_ptr = s_seq.as_ptr().add(s_off - i - 16);
@@ -153,7 +160,7 @@ unsafe fn extend_left_ungapped_simd128<S: TbxScore>(
 }
 
 #[inline(always)]
-fn extend_left_ungapped<S: TbxScore>(
+pub(super) fn extend_left_ungapped<S: TbxScore>(
     sc: S,
     q_seq: &[u8],
     s_seq: &[u8],
@@ -180,20 +187,25 @@ fn extend_left_ungapped<S: TbxScore>(
         // exact scalar NCBI control flow available for native-vs-Wasm parity
         // isolation while leaving production SIMD builds unchanged.
         unsafe {
-            return extend_left_ungapped_simd128(
-                sc,
-                q_seq,
-                s_seq,
-                q_off,
-                s_off,
-                initial_score,
-                x_drop,
-            );
+            extend_left_ungapped_simd128(sc, q_seq, s_seq, q_off, s_off, initial_score, x_drop)
         }
     }
-    extend_left_ungapped_scalar(sc, q_seq, s_seq, q_off, s_off, initial_score, x_drop)
+    #[cfg(not(all(
+        target_arch = "wasm32",
+        target_feature = "simd128",
+        not(feature = "tblastx-wasm-scalar")
+    )))]
+    {
+        extend_left_ungapped_scalar(sc, q_seq, s_seq, q_off, s_off, initial_score, x_drop)
+    }
 }
 
+// The wasm simd128 build extends with `extend_right_ungapped_simd128` instead.
+#[cfg(not(all(
+    target_arch = "wasm32",
+    target_feature = "simd128",
+    not(feature = "tblastx-wasm-scalar")
+)))]
 #[inline(always)]
 fn extend_right_ungapped_scalar<S: TbxScore>(
     sc: S,
@@ -213,6 +225,8 @@ fn extend_right_ungapped_scalar<S: TbxScore>(
     let mut j = 0usize;
 
     while q_start + j < q_limit && s_start + j < s_limit {
+        // SAFETY: `q_start + j` and `s_start + j` are in bounds; the loop condition
+        // tests both against `q_limit` and `s_limit`, the lengths of the two slices.
         let q_char = unsafe { *q_seq.get_unchecked(q_start + j) };
         let s_char = unsafe { *s_seq.get_unchecked(s_start + j) };
 
@@ -270,6 +284,10 @@ unsafe fn extend_right_ungapped_simd128<S: TbxScore>(
     let mut right_disp = 0usize;
     let mut j = 0usize;
 
+    #[expect(
+        unused_assignments,
+        reason = "the lane macro steps pos after every lane, the last one too; the next block starts again from its own offset"
+    )]
     while j + 16 <= n {
         let base = j;
         let q_ptr = q_seq.as_ptr().add(q_start + base);
@@ -333,7 +351,7 @@ unsafe fn extend_right_ungapped_simd128<S: TbxScore>(
 }
 
 #[inline(always)]
-fn extend_right_ungapped<S: TbxScore>(
+pub(super) fn extend_right_ungapped<S: TbxScore>(
     sc: S,
     q_seq: &[u8],
     s_seq: &[u8],
@@ -360,37 +378,27 @@ fn extend_right_ungapped<S: TbxScore>(
         // exact scalar NCBI control flow available for native-vs-Wasm parity
         // isolation while leaving production SIMD builds unchanged.
         unsafe {
-            return extend_right_ungapped_simd128(
-                sc,
-                q_seq,
-                s_seq,
-                q_start,
-                s_start,
-                initial_score,
-                x_drop,
-            );
+            extend_right_ungapped_simd128(sc, q_seq, s_seq, q_start, s_start, initial_score, x_drop)
         }
     }
-    extend_right_ungapped_scalar(sc, q_seq, s_seq, q_start, s_start, initial_score, x_drop)
+    #[cfg(not(all(
+        target_arch = "wasm32",
+        target_feature = "simd128",
+        not(feature = "tblastx-wasm-scalar")
+    )))]
+    {
+        extend_right_ungapped_scalar(sc, q_seq, s_seq, q_start, s_start, initial_score, x_drop)
+    }
 }
 
-/// Two-hit ungapped extension: NCBI BLAST style.
-/// Given two hits L (left/first) and R (right/second) on the same diagonal,
-/// extend from R to the left first. Only if the left extension reaches L,
-/// proceed with right extension. This prevents fragmentation of longer HSPs.
-///
-/// Unlike the one-hit extension, this always returns a result (the left extension
-/// at minimum), matching NCBI BLAST's behavior.
-/// Returns (q_start, q_end, s_start, s_end, score, right_extended, s_last_off)
-/// where s_last_off is the rightmost subject position scanned (for diagonal suppression)
-///
-/// # Arguments
-/// * `x_drop` - X-drop threshold (LOSAT default: 11, NCBI standard: 7)
+/// The two-hit extension for the searches, without a test of the bounds: the word at `q_right_off` and
+/// `s_right_off` must fit in both sequences. The searches pass lookup hits on the letters; no
+/// lookup word holds a frame's NULLB (its matrix row is BLAST_SCORE_MIN).
 // The values come from the table walks of x_two_hit_fast.rs, which hand back to
 // `extend_hit_two_hit_reference` what they do not cover; the debug output (`debug_ext`) stays
 // with the reference.
 #[inline]
-pub fn extend_hit_two_hit(
+pub(crate) fn extend_hit_two_hit_fitting(
     q_seq: &[u8],
     s_seq: &[u8],
     s_left_off: usize,
@@ -418,9 +426,11 @@ pub fn extend_hit_two_hit(
     )
 }
 
-/// `extend_hit_two_hit` with the scores of `sc`: BLOSUM62's instance is `extend_hit_two_hit`,
-/// another matrix's runs the reference walks with its table (the table walks of TBXUNGAP hold
-/// BLOSUM62's scores and bounds).
+/// `extend_hit_two_hit_fitting` with the scores of `sc` (the word must fit, as there): BLOSUM62's
+/// instance is `extend_hit_two_hit_fitting`,
+/// another matrix's takes the table walks of TBXUNGAP with its byte table
+/// (`TbxScore::table_two_hit`), and the reference walks with its scores for the calls those do
+/// not cover.
 #[inline(always)]
 pub(crate) fn extend_hit_two_hit_with<S: TbxScore>(
     sc: S,
@@ -433,7 +443,7 @@ pub(crate) fn extend_hit_two_hit_with<S: TbxScore>(
     debug_ext: bool,
 ) -> (usize, usize, usize, usize, i32, bool, usize) {
     if S::BLOSUM62 {
-        return extend_hit_two_hit(
+        return extend_hit_two_hit_fitting(
             q_seq,
             s_seq,
             s_left_off,
@@ -442,6 +452,13 @@ pub(crate) fn extend_hit_two_hit_with<S: TbxScore>(
             x_drop,
             debug_ext,
         );
+    }
+    if !debug_ext {
+        if let Some(r) =
+            sc.table_two_hit(q_seq, s_seq, s_left_off, s_right_off, q_right_off, x_drop)
+        {
+            return r;
+        }
     }
     extend_hit_two_hit_reference(
         sc,
@@ -455,12 +472,14 @@ pub(crate) fn extend_hit_two_hit_with<S: TbxScore>(
     )
 }
 
-/// EXPERIMENT (LOSAT_X_TBXUNGAPSENT): `extend_hit_two_hit(&q_full[1..q_full.len() - 1],
+/// EXPERIMENT (LOSAT_X_TBXUNGAPSENT): `extend_hit_two_hit_fitting(&q_full[1..q_full.len() - 1],
 /// &s_full[1..s_full.len() - 1], s_left_off, s_right_off, q_right_off, x_drop, false)` with the
 /// walks that the sentinels of the two buffers stop (x_two_hit_fast.rs).
 ///
 /// SAFETY: `q_full` is the buffer of a context of a batch `x_two_hit_fast::sent_contexts`
 /// accepted, and `s_full` the buffer of a subject frame `x_two_hit_fast::sent_subject` accepted.
+/// The word at `q_right_off` and `s_right_off` lies in the letters (the buffers without their
+/// sentinels), as for `extend_hit_two_hit_fitting`.
 // NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit`.
 #[inline(always)]
 pub(crate) unsafe fn extend_hit_two_hit_sent(
@@ -487,8 +506,9 @@ pub(crate) unsafe fn extend_hit_two_hit_sent(
     }
 }
 
-/// The calls `extend_hit_two_hit_sent` leaves to `extend_hit_two_hit` (an X-drop outside
-/// 1..=127, a word that does not fit), out of the callers' code.
+/// The calls `extend_hit_two_hit_sent` leaves to `extend_hit_two_hit_fitting` (an X-drop outside
+/// 1..=127; `two_hit_sent` also refuses a word past the letters, which a lookup hit's is not), out
+/// of the callers' code.
 // NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit`.
 #[cold]
 #[inline(never)]
@@ -500,7 +520,7 @@ fn extend_hit_two_hit_sent_refused(
     q_right_off: usize,
     x_drop: i32,
 ) -> (usize, usize, usize, usize, i32, bool, usize) {
-    extend_hit_two_hit(
+    extend_hit_two_hit_fitting(
         &q_full[1..q_full.len() - 1],
         &s_full[1..s_full.len() - 1],
         s_left_off,
@@ -511,7 +531,7 @@ fn extend_hit_two_hit_sent_refused(
     )
 }
 
-/// `extend_hit_two_hit` as written before the table walks: the calls they do not cover (an X-drop
+/// The two-hit extension as written before the table walks: the calls they do not cover (an X-drop
 /// outside 1..=127, a word that does not fit) and the debug output, with the scores of `sc`.
 pub(super) fn extend_hit_two_hit_reference<S: TbxScore>(
     sc: S,
@@ -531,7 +551,16 @@ pub(super) fn extend_hit_two_hit_reference<S: TbxScore>(
     // DEBUG: Print sequence segment for tracing
     static DEBUG_PRINTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-    let k_size = 3;
+    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:1104-1108 (the word length of the
+    // lookup table, `-word_size`: 3 for BLOSUM62's instance, `TbxScore::word`)
+    // ```c
+    //     /* find one beyond the position (up to word_size-1 letters to the right)
+    //        that gives the largest starting score */
+    //     /* Use "one beyond" to make the numbering consistent with how it's done
+    //        for BlastAaExtendOneHit and the "Extend" functions called here. */
+    //     for (i = 0; i < word_size; i++) {
+    // ```
+    let k_size = sc.word();
 
     // First, find the best scoring position within the word at R
     // NCBI BLAST assumes caller provides valid coordinates within bounds.
@@ -656,11 +685,12 @@ pub(super) fn extend_hit_two_hit_reference<S: TbxScore>(
     )
 }
 
-// No NCBI counterpart (LOSAT_X_STATS): the cells one call of `extend_hit_two_hit` scores, for
-// the statistics of the unit path (tblastx/x_unit_probe.rs). It repeats the call's scalar loops
-// (the same sums and the same stops, aa_ungapped.c:846-866 and 886-921) and counts their steps;
-// the search never calls it. The test below checks that it returns what the call returns.
-/// What one call of `extend_hit_two_hit` scored, and its result.
+// No NCBI counterpart (LOSAT_X_STATS): the cells one call of `extend_hit_two_hit_reference` scores,
+// with the search's scores and word length, for the statistics of the unit path
+// (tblastx/x_unit_probe.rs). It repeats the call's scalar loops (the same sums and the same stops,
+// aa_ungapped.c:846-866 and 886-921) and counts their steps; the search never calls it. The test
+// below checks that it returns what the call returns.
+/// What one call of `extend_hit_two_hit_reference` scored, and its result.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct XTwoHitCells {
     /// Cells of the left extension (from the word's best end towards the first hit).
@@ -671,12 +701,14 @@ pub(crate) struct XTwoHitCells {
     pub(crate) s_lo: usize,
     /// One past the last subject position scored.
     pub(crate) s_hi: usize,
-    /// The seven values `extend_hit_two_hit` returns for the same arguments.
+    /// The seven values `extend_hit_two_hit_reference` returns for the same arguments.
     pub(crate) result: (usize, usize, usize, usize, i32, bool, usize),
 }
 
-/// The cells of `extend_hit_two_hit(q_seq, s_seq, s_left_off, s_right_off, q_right_off, x_drop, false)`.
-pub(crate) fn x_two_hit_cells(
+/// The cells of `extend_hit_two_hit_reference(sc, q_seq, s_seq, s_left_off, s_right_off,
+/// q_right_off, x_drop, false)`: the scores of `sc` and its word length (`TbxScore::word`).
+pub(crate) fn x_two_hit_cells<S: TbxScore>(
+    sc: S,
     q_seq: &[u8],
     s_seq: &[u8],
     s_left_off: usize,
@@ -684,10 +716,10 @@ pub(crate) fn x_two_hit_cells(
     q_right_off: usize,
     x_drop: i32,
 ) -> XTwoHitCells {
-    let k_size = 3;
+    let k_size = sc.word();
     let (mut score, mut seed_score, mut right_d) = (0i32, 0i32, 0usize);
     for i in 0..k_size {
-        score += get_score(q_seq[q_right_off + i], s_seq[s_right_off + i]);
+        score += sc.score(q_seq[q_right_off + i], s_seq[s_right_off + i]);
         if score > seed_score {
             seed_score = score;
             right_d = i + 1;
@@ -698,7 +730,7 @@ pub(crate) fn x_two_hit_cells(
     let max_left = q_r.min(s_r);
     let (mut score, mut left_score, mut left_disp, mut left) = (0i32, 0i32, 0usize, 0usize);
     while left < max_left {
-        score += get_score(q_seq[q_r - 1 - left], s_seq[s_r - 1 - left]);
+        score += sc.score(q_seq[q_r - 1 - left], s_seq[s_r - 1 - left]);
         left += 1;
         if score > left_score {
             left_score = score;
@@ -714,7 +746,7 @@ pub(crate) fn x_two_hit_cells(
     if reached_first_hit {
         let (mut score, mut max_score, mut j) = (left_score, left_score, 0usize);
         while q_r + j < q_seq.len() && s_r + j < s_seq.len() {
-            score += get_score(q_seq[q_r + j], s_seq[s_r + j]);
+            score += sc.score(q_seq[q_r + j], s_seq[s_r + j]);
             right += 1;
             if score > max_score {
                 max_score = score;
@@ -751,7 +783,9 @@ mod x_cells_tests {
     use super::*;
 
     // No NCBI counterpart (a statistics helper). The counting copy returns what the extension
-    // returns, on random NCBIstdaa sequences, offsets and X-drops.
+    // returns, on random NCBIstdaa sequences, offsets and X-drops, with the scores and the word
+    // length of the search: BLOSUM62's instance (`extend_hit_two_hit_fitting`), and every matrix at
+    // words of 2, 3 and 4 letters (`extend_hit_two_hit_reference`).
     #[test]
     fn the_counting_copy_returns_what_the_extension_returns() {
         let mut state = 0x9e37_79b9_7f4a_7c15u64;
@@ -761,24 +795,47 @@ mod x_cells_tests {
             state ^= state << 17;
             state % n
         };
-        for _ in 0..20_000 {
+        let tables: Vec<crate::algorithm::tblastx::scoring::MatrixScores> = [2, 3, 4]
+            .into_iter()
+            .flat_map(|word| {
+                crate::config::ScoringMatrix::ALL
+                    .into_iter()
+                    .map(move |matrix| {
+                        crate::algorithm::tblastx::scoring::MatrixScores::with_word(matrix, word)
+                    })
+            })
+            .collect();
+        for round in 0..40_000 {
             let q_len = 4 + next(120) as usize;
             let s_len = 4 + next(120) as usize;
             // Mostly a few residues, so that runs of positive scores are common.
             let alphabet = 1 + next(24);
             let q: Vec<u8> = (0..q_len).map(|_| 1 + next(alphabet) as u8).collect();
             let s: Vec<u8> = (0..s_len).map(|_| 1 + next(alphabet) as u8).collect();
-            let q_right = next((q_len - 3) as u64 + 1) as usize;
-            let s_right = next((s_len - 3) as u64 + 1) as usize;
-            let s_left = s_right.saturating_sub(next(50) as usize);
             let x_drop = 1 + next(40) as i32;
-            let cells = x_two_hit_cells(&q, &s, s_left, s_right, q_right, x_drop);
-            let result = extend_hit_two_hit(&q, &s, s_left, s_right, q_right, x_drop, false);
-            assert_eq!(cells.result, result);
+            // Even rounds: BLOSUM62's instance; odd rounds: a matrix and a word length.
+            let sc = (round % 2 == 1).then(|| tables[next(tables.len() as u64) as usize].scorer());
+            let word = sc.map_or(3, |sc| sc.word());
+            let q_right = next((q_len - word) as u64 + 1) as usize;
+            let s_right = next((s_len - word) as u64 + 1) as usize;
+            let s_left = s_right.saturating_sub(next(50) as usize);
+            let (cells, result) = match sc {
+                None => (
+                    x_two_hit_cells(Blosum62Score, &q, &s, s_left, s_right, q_right, x_drop),
+                    extend_hit_two_hit_fitting(&q, &s, s_left, s_right, q_right, x_drop, false),
+                ),
+                Some(sc) => (
+                    x_two_hit_cells(sc, &q, &s, s_left, s_right, q_right, x_drop),
+                    extend_hit_two_hit_reference(
+                        sc, &q, &s, s_left, s_right, q_right, x_drop, false,
+                    ),
+                ),
+            };
+            assert_eq!(cells.result, result, "round {round} word {word}");
             if !result.5 {
                 assert_eq!(cells.right, 0);
             }
-            assert!(cells.s_lo <= s_right && cells.s_hi >= s_right + 3 && cells.s_hi <= s_len);
+            assert!(cells.s_lo <= s_right && cells.s_hi >= s_right + word && cells.s_hi <= s_len);
         }
     }
 }

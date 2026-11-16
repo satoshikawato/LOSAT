@@ -1,0 +1,3 @@
+NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/objtools/blast/seqdb_reader/seqdbalias.cpp", line 750: Error: (CSeqDBException::eInvalid) BLASTDB::ncbi::CSeqDBAliasNode::x_ExpandAliases() - No database names were found in alias file [@CWD@/db/alias_nodblist].
+

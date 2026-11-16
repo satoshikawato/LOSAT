@@ -1,0 +1,6 @@
+
+Available filtering algorithms applied to database sequences:
+
+Algorithm ID Algorithm name                          Algorithm options                       
+100          dustX                                   window=64; level=20; linker=1           
+101          wmY                                     default options used                    

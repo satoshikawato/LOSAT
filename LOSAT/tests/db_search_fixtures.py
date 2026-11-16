@@ -1,46 +1,82 @@
 #!/usr/bin/env python3
 """Frozen `blastp -db`, `blastn -db`, `tblastn -db`, `blastx -db`, `tblastx -db` and `psiblast -db` fixtures: LOSAT against the bytes NCBI BLAST+ 2.17.0 wrote (comparison only).
 
-LOSAT/tests/db_search_manifest.tsv lists the rows (columns: row_id, program, kind, db, query, extra_args,
+LOSAT/tests/db_search_manifest/<program>.tsv (one file per program, read by `read_manifest`, which
+returns the rows in the order of `PROGRAMS`, then the order of each file; README.md there) lists the rows (columns: row_id, program, kind, db, query, extra_args,
 outfmt, rc, stdout_sha256, stdout_bytes, stderr_sha256, covers, and for the rows of outfmt 13 and 14 two more:
 files, side_sha256; xinclude_fixtures.py says what they mean: the run gets `-out <tmp>/<row_id>.out`, the frozen
-master is <row_id>.out, the side files <row_id>.out_<n>.json|xml; a row without them has 12 cells). Every row runs from LOSAT/ as
+master is <row_id>.out, the side files <row_id>.out_<n>.json|xml; a row without them has 12 cells; a psiblast row
+whose files column is `pssm` gets `-out_ascii_pssm <tmp>/<row_id>.pssm`, and the files it writes are frozen as
+<row_id>.pssm and <row_id>.pssm.<n>, listed in side_sha256, none when the cell is empty; `{pssm_dir}` in its
+extra_args is that <tmp>, where any other file the run writes is reported; `pssm-asn` gets `-out_pssm
+<tmp>/<row_id>.asn` instead and `pssm-both` both, and in these two kinds only a file of 64 KB or less is frozen,
+a larger one being compared by its SHA-256 in side_sha256). Every row runs from LOSAT/ as
 `PROGRAM -db DB -query QUERY EXTRA_ARGS -outfmt OUTFMT`, PROGRAM being the row's `program` cell
+(a psiblast or tblastn query cell `pssm-gz:PATH` or `pssm:PATH` is a PSSM query: `-in_pssm FILE` in place of
+`-query QUERY`, the gzipped file PATH inflated into a temporary directory, or PATH as it is;
+xinclude_fixtures.py `query_argv`)
 (`blastp`, `blastn`, `tblastn`, `blastx`, `tblastx` or `psiblast`; NCBI's own binary of that name, or `LOSAT PROGRAM`) (an empty `db` cell is the literal empty
-argument `-db ""`; `extra_args` is split like a shell line, its tokens `BLASTDB=DIR` are not arguments but the environment variable of both programs (the directory of a `taxdb.bti`, relative to LOSAT/); `outfmt` is one argument, so a custom
+argument `-db ""`, and a cell `subject:PATH` runs `-subject PATH` in place of `-db DB`: psiblast's refusal of a
+subject set whose sequences all have no letters, which only a subject set reaches; `extra_args` is split like a shell line, its tokens `BLASTDB=DIR` are not arguments but the environment variable of both programs (the directory of a `taxdb.bti`, relative to LOSAT/); `outfmt` is one argument, so a custom
 `7 qseqid sseqid ...` spec stays whole). The databases are under LOSAT/tests/seqdb/db and
 LOSAT/tests/db_search (README.md there says how they were built).
 
 - kind `ncbi`: the expectation is NCBI's stdout, stderr and exit status (`rc`) of a run with
   `-num_threads 1`, every byte, nothing normalised. The frozen bytes are
   LOSAT/tests/fixtures/db_search/<row_id>.out and <row_id>.err (only when stderr is not empty).
-- kind `losat-rejection`: NCBI is not run. LOSAT must exit with `rc`, write nothing to stdout, and
-  its stderr must contain the text that follows `expect: ` in the `covers` cell (up to the end of
-  the cell or a ` | ` separator). The hash columns stay empty.
+- a `ncbi` row whose `covers` cell has `ncbi-near: ROW_ID` (up to a space or a ` | `): the expectation is the frozen
+  bytes, exit status and hash columns of the `ncbi` row ROW_ID, NCBI's run of a near input (the same search with
+  the mask one letter shorter), where NCBI's own run of the row reaches an approved NCBI defect
+  (PD-LOSAT-NCBI-DEFECTS exception 13: `-db_hard_mask` with a mask that runs to the end, on which NCBI BLAST+
+  2.17.0 crashes, adds rows from the masked letters or drops seeds of the next subject). The row has no frozen files of its own; `freeze` does not run NCBI
+  for it and copies ROW_ID's columns (`near_row_id`).
+- kind `losat-rejection`: LOSAT must exit with `rc`, write nothing to stdout, and its stderr must
+  contain the text that follows `expect: ` in the `covers` cell (up to the end of the cell or a
+  ` | ` separator). The hash columns stay empty. A rejection row with a PSSM files kind must also
+  write no PSSM file. A rejection that LOSAT makes after reports that NCBI writes too (psiblast's
+  `-out_pssm` file that cannot be written: NCBI stops after that query's report with its own error)
+  has a non-empty `stdout_bytes` cell: its stdout must be NCBI's of the same command, frozen as
+  <row_id>.out by `freeze` (which runs NCBI for such a row and keeps only its stdout) and checked
+  against `stdout_sha256`. Its `rc` and stderr are LOSAT's.
 
 `freeze --ncbi-bin DIR [--program NAME] [--only PREFIX]` runs NCBI for the `ncbi` rows, writes the frozen files and
 rewrites the rc, hash and size columns of the manifest (rows outside --program and --only keep theirs;
 the default is every program). It runs NCBI in a cleaned environment (see `check`), because each
 variable and file that is cleaned changes NCBI's result: BLASTDB, NCBI*, BLAST*, BATCH_SIZE, CHUNK_SIZE,
-ARCHIVE_FORMAT, OLD_FSC, BL2SEQ_LEGACY, and `~/.ncbirc` (HOME is an empty directory).
+ARCHIVE_FORMAT, PRE_FETCH_SEQS_LIMIT, OLD_FSC, BL2SEQ_LEGACY, ADAPTIVE_CBS, CTOOLKIT_COMPATIBLE, and `~/.ncbirc`
+(HOME is an empty directory); every NCBI run then gets BLAST_USAGE_REPORT=false (`ncbi_env`: NCBI BLAST+
+sends no usage report with the run's parameters to NCBI). LOSAT's runs (`check`) keep the cleaned
+environment as it is.
 
 `check --losat BIN [--threads N] [--program NAME] [--only PREFIX] [--out TSV]` runs LOSAT with `-num_threads N`
-(default 1) in the same cleaned environment (no NCBI*, BLAST*, LOSAT_*, BATCH_SIZE, CHUNK_SIZE, OLD_FSC or
-BL2SEQ_LEGACY variable; HOME and USERPROFILE are an empty directory, so that no `~/.ncbirc` names a
+(default 1) in the same cleaned environment (no NCBI*, BLAST*, LOSAT_*, BATCH_SIZE, CHUNK_SIZE, PRE_FETCH_SEQS_LIMIT, OLD_FSC,
+BL2SEQ_LEGACY, ADAPTIVE_CBS or CTOOLKIT_COMPATIBLE variable; HOME and USERPROFILE are an empty directory, so that no `~/.ncbirc` names a
 taxonomy database or a BLASTDB), compares stdout,
 stderr and exit status with the frozen files (and checks that each frozen file's sha256 is the
 manifest's), prints one line per row (`same`, `rejection`, or `differs` with the first differing
 line), writes the same lines to --out, and exits 0 only when every row is `same` or `rejection`.
+With `--library` BIN is `examples/library_command_line`, the same search through the library API: a
+failure's exit status counts as any other failure's, a rejection row writes nothing to stdout there
+too (the library holds its output where the command line holds it), a row whose query the reader refuses is
+`library-input-error` when the message is the command line's (the library reads the whole query
+before it searches, so the reports of the batches before the error do not exist; so is a rejection
+row whose query has a reader error after the batch that the command line refuses). psiblast's rounds
+(`-num_iterations` other than 1), its PSSM files (the PSSM kinds) and the PSSM queries of psiblast
+and tblastn (`-in_pssm`, the library's `Inputs::pssm`) run through the library as on the command line;
+the rows of rpsblast and rpstblastn (the library API has no such program) and those that give both
+`-query` and `-in_pssm` (the library's query is one or the other) are `library-skip`.
 The tool takes no lock; whoever runs it next to other NCBI runs holds the caller's own.
 """
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import os
 import shlex
 import subprocess
 import sys
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -49,38 +85,56 @@ TESTS = ENGINE / "tests"
 sys.path.insert(0, str(TESTS))
 import xinclude_fixtures as xinclude  # noqa: E402  (the rows of outfmt 13 and 14)
 
-MANIFEST = TESTS / "db_search_manifest.tsv"
+MANIFEST = TESTS / "db_search_manifest"  # the directory: <program>.tsv for each of PROGRAMS
 FROZEN = TESTS / "fixtures" / "db_search"
 COLUMNS = ["row_id", "program", "kind", "db", "query", "extra_args", "outfmt", "rc", "stdout_sha256", "stdout_bytes",
            "stderr_sha256", "covers"]
-PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx", "psiblast")
-NCBI_ENV = ("BATCH_SIZE", "CHUNK_SIZE", "OVERLAP_CHUNK_SIZE", "OLD_FSC", "BL2SEQ_LEGACY", "ARCHIVE_FORMAT")
+PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx", "psiblast", "rpsblast", "rpstblastn")
+NCBI_ENV = ("BATCH_SIZE", "CHUNK_SIZE", "OVERLAP_CHUNK_SIZE", "OLD_FSC", "BL2SEQ_LEGACY", "ARCHIVE_FORMAT",
+            "PRE_FETCH_SEQS_LIMIT", "ADAPTIVE_CBS", "CTOOLKIT_COMPATIBLE")
 TIMEOUT = 600
 # The `NAME=VALUE` tokens of `extra_args` that are environment variables of both programs: BLASTDB
 # (the directory of a `taxdb.bti`), the three that cut a query file into batches and chunks, and
-# ARCHIVE_FORMAT (how outfmt 11 writes its archive: unset text, `bin...` binary).
-ENV_NAMES = ("BLASTDB", "BATCH_SIZE", "CHUNK_SIZE", "OVERLAP_CHUNK_SIZE", "ARCHIVE_FORMAT")
+# ARCHIVE_FORMAT (how outfmt 11 writes its archive: unset text, `bin...` binary), PRE_FETCH_SEQS_LIMIT
+# (the number of Seq-aligns above which NCBI's formatter reads the reported sequences one by one), and
+# BL2SEQ_LEGACY (read for -subject only; a -db search ignores it), OLD_FSC (no Gumbel block, any value), and
+# ADAPTIVE_CBS (the larger preliminary hit list and its trim with composition-based statistics, any value).
+ENV_NAMES = ("BLASTDB", "BATCH_SIZE", "CHUNK_SIZE", "OVERLAP_CHUNK_SIZE", "ARCHIVE_FORMAT", "PRE_FETCH_SEQS_LIMIT",
+             "BL2SEQ_LEGACY", "OLD_FSC", "ADAPTIVE_CBS")
 
 
-def read_manifest() -> tuple[list[str], list[dict[str, str]]]:
-    comments, rows = [], []
-    header: list[str] = []
-    for line in MANIFEST.read_text().split("\n"):
-        if line.startswith("#"):
-            comments.append(line)
-        elif line and not header:
-            header = line.split("\t")
-            if header not in (COLUMNS, COLUMNS + xinclude.FILES_COLUMNS):
-                raise SystemExit(f"{MANIFEST.name}: unexpected header {line!r}")
-        elif line:
-            cells = line.split("\t")
-            if not len(COLUMNS) <= len(cells) <= len(header):
-                raise SystemExit(f"{MANIFEST.name}: {len(cells)} cells in {line[:60]!r}")
-            row = {column: "" for column in header}
-            row.update(zip(header, cells))
-            if row["program"] not in PROGRAMS:
-                raise SystemExit(f"{MANIFEST.name}: unknown program {row['program']!r} in {row['row_id']}")
-            rows.append(row)
+def manifest_file(program: str) -> Path:
+    """The file of a program's rows."""
+    return MANIFEST / f"{program}.tsv"
+
+
+def read_manifest() -> tuple[dict[str, list[str]], list[dict[str, str]]]:
+    """The comment lines of each program's file (by program) and all rows: the programs in the order
+    of `PROGRAMS`, each file's rows in its order. A row in the file of another program is an error."""
+    comments: dict[str, list[str]] = {program: [] for program in PROGRAMS}
+    rows: list[dict[str, str]] = []
+    for program in PROGRAMS:
+        path = manifest_file(program)
+        if not path.exists():
+            # A missing file would drop its rows from every check without notice.
+            raise SystemExit(f"{MANIFEST.name}/{path.name}: missing (every program in PROGRAMS has a file)")
+        header: list[str] = []
+        for line in path.read_text().split("\n"):
+            if line.startswith("#"):
+                comments[program].append(line)
+            elif line and not header:
+                header = line.split("\t")
+                if header not in (COLUMNS, COLUMNS + xinclude.FILES_COLUMNS):
+                    raise SystemExit(f"{path.name}: unexpected header {line!r}")
+            elif line:
+                cells = line.split("\t")
+                if not len(COLUMNS) <= len(cells) <= len(header):
+                    raise SystemExit(f"{path.name}: {len(cells)} cells in {line[:60]!r}")
+                row = {column: "" for column in header}
+                row.update(zip(header, cells))
+                if row["program"] != program:
+                    raise SystemExit(f"{path.name}: the row {row['row_id']} is a {row['program']!r} row")
+                rows.append(row)
     return comments, rows
 
 
@@ -98,9 +152,20 @@ def header_cells(rows: list[dict[str, str]]) -> list[str]:
     return COLUMNS + xinclude.FILES_COLUMNS if files else COLUMNS
 
 
-def write_manifest(comments: list[str], rows: list[dict[str, str]]) -> None:
-    lines = comments + ["\t".join(header_cells(rows))] + ["\t".join(row_cells(row)) for row in rows]
-    MANIFEST.write_text("\n".join(lines) + "\n")
+def write_manifest(comments: dict[str, list[str]], rows: list[dict[str, str]]) -> None:
+    """Write each program's file: its comment lines, the header (the `files` columns when some row of
+    any program has them, so the files keep one header) and its rows. A file whose text is the same is left alone."""
+    header = "\t".join(header_cells(rows))
+    MANIFEST.mkdir(exist_ok=True)
+    for program in PROGRAMS:
+        own = [row for row in rows if row["program"] == program]
+        if not own and not manifest_file(program).exists():
+            continue
+        lines = comments.get(program, []) + [header] + ["\t".join(row_cells(row)) for row in own]
+        text = "\n".join(lines) + "\n"
+        path = manifest_file(program)
+        if not path.exists() or path.read_text() != text:
+            path.write_text(text)
 
 
 def extra_tokens(row: dict[str, str]) -> list[str]:
@@ -111,10 +176,64 @@ def is_env_token(token: str) -> bool:
     return token.partition("=")[0] in ENV_NAMES
 
 
+def rps_cell(cell: str) -> tuple[list[str], set[str], dict[str, str], str | None] | None:
+    """The profile databases of an rpsblast `db` cell `rps-gz:NAME[+NAME2...][!EXT...][!EXT=FILE...][@ALIAS]`:
+    the names (`-db "NAME NAME2"`), the extensions left out (`!aux`, `!freq`), the files put in their
+    place (`!aux=FILE`: LOSAT/tests/db_search/rps/FILE as each NAME.aux) and the alias file the run
+    searches (`@ALIAS`: LOSAT/tests/db_search/rps/ALIAS.pal beside the inflated files, `-db ALIAS`; its
+    DBLIST names them); None for another cell."""
+    if not cell.startswith("rps-gz:"):
+        return None
+    body, at, alias = cell.removeprefix("rps-gz:").partition("@")
+    names, *changes = body.split("!")
+    dropped = {"." + change for change in changes if "=" not in change}
+    replaced = dict(("." + change.split("=")[0], change.split("=")[1]) for change in changes if "=" in change)
+    return names.split("+"), dropped, replaced, (alias if at else None)
+
+
+def inflate_rps(cell: str) -> Path:
+    """A fresh directory (its path with links resolved, as NCBI's RPS errors print it) holding the
+    files LOSAT/tests/db_search/rps/NAME.*.gz of the cell's databases, inflated, but the extensions it
+    leaves out or replaces, and the cell's alias file."""
+    names, dropped, replaced, alias = rps_cell(cell)
+    rps_dir = TESTS / "db_search" / "rps"
+    target = Path(tempfile.mkdtemp(prefix="rps_db_")).resolve()
+    for name in names:
+        sources = sorted(rps_dir.glob(f"{name}.*.gz"))
+        if not sources:
+            raise SystemExit(f"no files LOSAT/tests/db_search/rps/{name}.*.gz")
+        for source in sources:
+            inflated = source.name.removesuffix(".gz")
+            if inflated[len(name):] in dropped or inflated[len(name):] in replaced:
+                continue
+            (target / inflated).write_bytes(gzip.decompress(source.read_bytes()))
+        for extension, file in replaced.items():
+            (target / f"{name}{extension}").write_bytes((rps_dir / file).read_bytes())
+    if alias is not None:
+        (target / f"{alias}.pal").write_bytes((rps_dir / f"{alias}.pal").read_bytes())
+    return target
+
+
+def rps_dir_token(row: dict[str, str]) -> bool:
+    """Whether the row's outputs name the database's directory, frozen as the token `{db_dir}`."""
+    return "path: {db_dir}" in row["covers"]
+
+
+def subjects_argv(cell: str) -> list[str]:
+    """The arguments of a `db` cell: `-db DB`, `-subject PATH` for a cell `subject:PATH`, or `-db NAME`
+    (`-db ALIAS` with `@ALIAS`) for an rpsblast cell `rps-gz:NAME...` (`rps_cell`; the run's BLASTDB is the
+    inflated directory)."""
+    if cell.startswith("subject:"):
+        return ["-subject", cell.removeprefix("subject:")]
+    if (rps := rps_cell(cell)) is not None:
+        return ["-db", rps[3] if rps[3] is not None else " ".join(rps[0])]
+    return ["-db", cell]
+
+
 def search_argv(row: dict[str, str]) -> list[str]:
     """The arguments after the program name (the same for NCBI and LOSAT)."""
     extra = [token for token in extra_tokens(row) if not is_env_token(token)]
-    return ["-db", row["db"], "-query", row["query"], *extra, "-outfmt", row["outfmt"]]
+    return [*subjects_argv(row["db"]), *xinclude.query_argv(row["query"], ENGINE), *extra, "-outfmt", row["outfmt"]]
 
 
 def row_env(row: dict[str, str], base: dict[str, str]) -> dict[str, str]:
@@ -137,6 +256,19 @@ def clean_env(base: dict[str, str], home: str) -> dict[str, str]:
            or (not k.startswith(("NCBI", "BLAST", "LOSAT_")) and k not in NCBI_ENV)}
     env["HOME"] = env["USERPROFILE"] = home
     return env
+
+
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_usage_report.cpp:195-220 (the
+# report's parameters, sent to NCBI's server when the application ends unless BLAST_USAGE_REPORT, in the
+# environment or the registry, is a false value)
+NCBI_RUN_ENV = {"BLAST_USAGE_REPORT": "false"}
+
+
+def ncbi_env(base: dict[str, str]) -> dict[str, str]:
+    """The environment of every NCBI run of the harness (`freeze`): `base`, the cleaned environment, with
+    BLAST_USAGE_REPORT=false, so that NCBI BLAST+ 2.17.0 does not send the run's parameters to NCBI at exit.
+    A row cannot set it (it is not one of `ENV_NAMES`). LOSAT's runs keep `base`."""
+    return {**base, **NCBI_RUN_ENV}
 
 
 def sha256(data: bytes) -> str:
@@ -182,6 +314,18 @@ def expected_text(row: dict[str, str]) -> str:
     return rest.split(" | ")[0]
 
 
+def near_row_id(row: dict[str, str]) -> str | None:
+    """The `ncbi` row whose frozen NCBI run of a near input is the expectation of `row` (`ncbi-near: ROW_ID` in its
+    covers cell), or None: the row's own frozen files."""
+    _, marker, rest = row["covers"].partition("ncbi-near: ")
+    return rest.split(" | ")[0].split()[0] if marker else None
+
+
+def frozen_id(row: dict[str, str]) -> str:
+    """The row id that names the frozen files of `row`'s expectation (`near_row_id`, else its own)."""
+    return near_row_id(row) or row["row_id"]
+
+
 def selected(row: dict[str, str], args: argparse.Namespace) -> bool:
     return row["row_id"].startswith(args.only) and args.program in ("", row["program"])
 
@@ -190,17 +334,42 @@ def freeze(args: argparse.Namespace) -> int:
     comments, rows = read_manifest()
     FROZEN.mkdir(parents=True, exist_ok=True)
     home = tempfile.TemporaryDirectory(prefix="db_search_home_")
-    env = clean_env(dict(os.environ), home.name)
+    # Every NCBI run below (and `freeze_rps`'s) takes this environment, with the usage report off.
+    env = ncbi_env(clean_env(dict(os.environ), home.name))
     for row in rows:
-        if row["kind"] != "ncbi" or not selected(row, args):
+        if not selected(row, args):
             continue
         command = [str(Path(args.ncbi_bin) / row["program"]), *search_argv(row), "-num_threads", "1"]
+        if row["kind"] == "losat-rejection" and row["stdout_bytes"]:
+            # NCBI's stdout of the command that LOSAT refuses after the reports NCBI writes too.
+            if xinclude.wants_pssm(row):
+                run = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=ENGINE,
+                                             timeout=TIMEOUT, env=row_env(row, env)).run
+            else:
+                run = subprocess.run(command, cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
+                                     env=row_env(row, env))
+            (FROZEN / f"{row['row_id']}.out").write_bytes(run.stdout)
+            row.update(stdout_sha256=sha256(run.stdout), stdout_bytes=str(len(run.stdout)))
+            print(f"{row['row_id']}\tncbi_rc={run.returncode}\tstdout={len(run.stdout)} (rejection row: stdout only)")
+            continue
+        if row["kind"] != "ncbi" or near_row_id(row):
+            continue
         files = xinclude.wants_files(row)
+        pssm = xinclude.wants_pssm(row)
+        if rps_cell(row["db"]) is not None:
+            freeze_rps(row, command, env)
+            continue
         if files:
             written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=ENGINE,
                                               timeout=TIMEOUT, env=row_env(row, env))
             run = written.run
             xinclude.freeze(written, FROZEN, row["row_id"], row["outfmt"])
+        elif pssm:
+            pssms = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=ENGINE,
+                                           timeout=TIMEOUT, env=row_env(row, env))
+            run = pssms.run
+            xinclude.freeze_pssm(pssms, FROZEN, row["row_id"], xinclude.files_kind(row))
+            (FROZEN / f"{row['row_id']}.out").write_bytes(run.stdout)
         else:
             run = subprocess.run(command, cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
                                  env=row_env(row, env))
@@ -214,33 +383,123 @@ def freeze(args: argparse.Namespace) -> int:
                    stderr_sha256=sha256(run.stderr) if run.stderr else "")
         if files:
             row.update(xinclude.observed(written))
+        if pssm:
+            row.update(xinclude.observed_pssm(pssms, row["row_id"], xinclude.files_kind(row)))
         print(f"{row['row_id']}\trc={run.returncode}\tstdout={len(run.stdout)}\tstderr={len(run.stderr)}"
-              + (f"\tsides={len(written.sides)}" if files else ""))
+              + (f"\tsides={len(written.sides)}" if files else "")
+              + (f"\tpssm_files={len(pssms.files)}" if pssm else ""))
+    # The rows whose expectation is a near input's NCBI run (`near_row_id`) take that row's columns, after it
+    # is frozen (it may come later in the file).
+    by_id = {row["row_id"]: row for row in rows}
+    for row in rows:
+        near = near_row_id(row)
+        if not selected(row, args) or row["kind"] != "ncbi" or not near:
+            continue
+        source = by_id.get(near)
+        if source is None or source["kind"] != "ncbi" or near_row_id(source) or source["outfmt"] != row["outfmt"]:
+            raise SystemExit(f"{row['row_id']}: ncbi-near {near} is not an ncbi row of its own run with the same outfmt")
+        row.update({key: source[key] for key in ("rc", "stdout_sha256", "stdout_bytes", "stderr_sha256")})
+        print(f"{row['row_id']}\tncbi-near={near}\trc={row['rc']}\tstdout={row['stdout_bytes']}")
     write_manifest(comments, rows)
     return 0
 
 
-def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str]) -> tuple[str, str]:
-    command = [str(losat), row["program"], *search_argv(row), "-num_threads", str(threads)]
+def freeze_rps(row: dict[str, str], command: list[str], env: dict[str, str]) -> None:
+    """`freeze` of an rpsblast row: NCBI's run with BLASTDB the inflated database, its directory
+    written as `{db_dir}` where the row says so."""
+    db_dir = inflate_rps(row["db"])
+    try:
+        run = subprocess.run(command, cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
+                             env={**row_env(row, env), "BLASTDB": str(db_dir)})
+    finally:
+        shutil.rmtree(db_dir, ignore_errors=True)
+    stdout, stderr = run.stdout, run.stderr
+    if rps_dir_token(row):
+        stdout = stdout.replace(str(db_dir).encode(), b"{db_dir}")
+        stderr = stderr.replace(str(db_dir).encode(), b"{db_dir}")
+    (FROZEN / f"{row['row_id']}.out").write_bytes(stdout)
+    err = FROZEN / f"{row['row_id']}.err"
+    if stderr:
+        err.write_bytes(stderr)
+    else:
+        err.unlink(missing_ok=True)
+    row.update(rc=str(run.returncode), stdout_sha256=sha256(stdout), stdout_bytes=str(len(stdout)),
+               stderr_sha256=sha256(stderr) if stderr else "")
+    print(f"{row['row_id']}\trc={run.returncode}\tstdout={len(stdout)}\tstderr={len(stderr)}")
+
+
+def status_differs(observed: int, expected: int, library: bool) -> bool:
+    """Whether a run's exit status is not the frozen one. `examples/library_command_line.rs` ends every
+    failure with status 1: the library API's errors carry the command line's message, not its status."""
+    return (observed != 0) != (expected != 0) if library else observed != expected
+
+
+def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str], library: bool = False) -> tuple[str, str]:
     files = xinclude.wants_files(row)
-    if files:
+    pssm = xinclude.wants_pssm(row)
+    # The library API refuses rpsblast and rpstblastn (`api::Program::parse`, line PS items PS11a, PS12a).
+    # Its query is records or a PSSM file (`Inputs::new`, `Inputs::pssm`), never both: a row that gives
+    # the command line `-query` and `-in_pssm` (the parser's exclusion) has no library call.
+    argv = search_argv(row)
+    if library and (row["program"] in ("rpsblast", "rpstblastn")
+                    or ("-query" in argv and "-in_pssm" in argv)):
+        return "library-skip", ""
+    command = [str(losat), row["program"], *search_argv(row), "-num_threads", str(threads)]
+    db_dir = inflate_rps(row["db"]) if rps_cell(row["db"]) is not None else None
+    if db_dir is not None:
+        try:
+            run = subprocess.run(command, cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
+                                 env={**row_env(row, env), "BLASTDB": str(db_dir)})
+        finally:
+            shutil.rmtree(db_dir, ignore_errors=True)
+        if rps_dir_token(row):
+            run.stdout = run.stdout.replace(str(db_dir).encode(), b"{db_dir}")
+            run.stderr = run.stderr.replace(str(db_dir).encode(), b"{db_dir}")
+    elif files:
         written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=ENGINE,
                                           env=row_env(row, env), timeout=TIMEOUT)
         run = written.run
+    elif pssm:
+        pssms = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=ENGINE,
+                                       env=row_env(row, env), timeout=TIMEOUT)
+        run = pssms.run
     else:
         run = subprocess.run(command, cwd=ENGINE, capture_output=True, env=row_env(row, env), timeout=TIMEOUT)
     if row["kind"] == "losat-rejection":
+        # The library reads the whole query before it searches: a reader error ends the call before
+        # the batch that the command line refuses, with the reader's message.
+        if library and run.returncode != 0 and run.stdout == b"" and run.stderr.startswith(b"BLAST query error:") \
+                and expected_text(row).encode() not in run.stderr:
+            return "library-input-error", ""
         problems = []
-        if run.returncode != int(row["rc"]):
+        if status_differs(run.returncode, int(row["rc"]), library):
             problems.append(f"exit {run.returncode}, expected {row['rc']}")
-        if run.stdout:
+        # A refusal follows no byte in either path (the library holds its output where the command
+        # line holds it, BLASTX's XML documents through `blast_xml::documents_may_refuse`); the rows
+        # whose refusal comes after NCBI's reports are psiblast's PSSM file and rounds rows, which the
+        # library skips.
+        if row["stdout_bytes"]:
+            out_path = FROZEN / f"{row['row_id']}.out"
+            out = out_path.read_bytes() if out_path.exists() else b""
+            if sha256(out) != row["stdout_sha256"] or len(out) != int(row["stdout_bytes"]):
+                problems.append("frozen .out does not match the manifest")
+            if run.stdout != out:
+                problems.append("stdout " + first_difference(out, run.stdout))
+        elif run.stdout:
             problems.append(f"stdout is not empty ({len(run.stdout)} bytes)")
         if expected_text(row).encode() not in run.stderr:
             problems.append(f"stderr lacks {expected_text(row)!r}: {run.stderr.decode(errors='replace').strip()[:150]!r}")
+        if pssm and (pssms.files or pssms.stray):
+            problems.append(f"a refused run wrote {[name for name, _ in pssms.files] + pssms.stray}")
         return ("differs", "; ".join(problems)) if problems else ("rejection", "")
-    out = (FROZEN / f"{row['row_id']}.out").read_bytes()
-    err_path = FROZEN / f"{row['row_id']}.err"
+    out = (FROZEN / f"{frozen_id(row)}.out").read_bytes()
+    err_path = FROZEN / f"{frozen_id(row)}.err"
     err = err_path.read_bytes() if row["stderr_sha256"] else b""
+    # The library reads the whole query before it searches: a reader error ends the call there,
+    # with the command line's message of it, before the reports of the batches before it.
+    if library and run.returncode != 0 and int(row["rc"]) != 0 and run.stdout == b"" \
+            and run.stderr.startswith(b"BLAST query error:") and run.stderr in err:
+        return "library-input-error", ""
     problems = []
     if files:
         problems += xinclude.problems(written, row, FROZEN, first_difference)
@@ -248,7 +507,7 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
         problems.append("frozen .out does not match the manifest")
     if (sha256(err) if err else "") != row["stderr_sha256"] or err_path.exists() != bool(row["stderr_sha256"]):
         problems.append("frozen .err does not match the manifest")
-    if run.returncode != int(row["rc"]):
+    if status_differs(run.returncode, int(row["rc"]), library):
         problems.append(f"exit {run.returncode}, expected {row['rc']}: {run.stderr.decode(errors='replace').strip()[:150]!r}")
     # A SAM row differs in the command line of the @PG line only (`strip_sam_cl`).
     if not files:
@@ -259,6 +518,8 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
             problems.append("stdout " + first_difference(expected_out, observed_out))
     if run.stderr != err:
         problems.append("stderr " + first_difference(err, run.stderr))
+    if pssm:
+        problems += xinclude.pssm_problems(pssms, row, FROZEN, first_difference)
     return ("differs", "; ".join(problems)) if problems else ("same", "")
 
 
@@ -270,7 +531,7 @@ def check(args: argparse.Namespace) -> int:
     for row in read_manifest()[1]:
         if not selected(row, args):
             continue
-        status, detail = check_row(row, losat, args.threads, env)
+        status, detail = check_row(row, losat, args.threads, env, args.library)
         bad += status == "differs"
         lines.append(f"{row['row_id']}\t{status}\t{detail}")
     text = "".join(line + "\n" for line in lines)
@@ -294,6 +555,8 @@ def main() -> int:
     ck.add_argument("--program", choices=PROGRAMS, default="", help="only the rows of this program (default: all)")
     ck.add_argument("--only", default="")
     ck.add_argument("--out", type=Path)
+    ck.add_argument("--library", action="store_true",
+                    help="--losat is examples/library_command_line (the search through the library API)")
     args = parser.parse_args()
     return freeze(args) if args.command == "freeze" else check(args)
 

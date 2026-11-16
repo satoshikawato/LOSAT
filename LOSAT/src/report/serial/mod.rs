@@ -14,18 +14,27 @@
 //! `real` holds the real-number digits of every object stream; `encoder` the object-stream
 //! calls that the type writers make, with one implementation per format (`asn_text`,
 //! `json`, `asn_ber`); `seqalign` the Seq-annot of Seq-aligns of outfmt 8, 9 and 12 (`write_query`; the per-query
-//! step `write_query_to` and the hit-list loop `write_hit_list_seqaligns` that the programs share).
+//! step `write_query_to` and the hit-list loop `write_hit_list_seqaligns` that the programs share);
+//! `pssm` the `PssmWithParameters` of psiblast's `-out_pssm`; `asn_text_reader` the lexical layer of
+//! NCBI's ASN.1 text object stream, which LOSAT's readers of ASN.1 text share; `xml_reader` NCBI's
+//! XML object stream for the types of an ASN.1 module (rpsbproc's BlastOutput input).
 
 pub mod asn_ber;
 pub mod asn_text;
+pub(crate) mod asn_text_reader;
 pub mod encoder;
 pub mod json;
+pub(crate) mod out_buffer;
+pub mod pssm;
 pub mod real;
 pub mod seqalign;
 pub mod xml;
+pub(crate) mod xml_reader;
 
+pub use seqalign::SerialFormat;
 pub(crate) use seqalign::{write_hit_list_seqaligns, write_query_to};
-pub use seqalign::{write_query, SeqAlignError, SerialFormat};
+#[cfg(test)]
+pub use seqalign::{write_query, SeqAlignError};
 
 #[cfg(test)]
 mod asn_ber_tests;
@@ -37,3 +46,5 @@ mod real_tests;
 mod seqalign_tests;
 #[cfg(test)]
 mod xml_archive_tests;
+#[cfg(test)]
+mod xml_reader_tests;

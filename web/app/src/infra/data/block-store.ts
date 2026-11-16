@@ -41,6 +41,42 @@ export class StorageFullError extends Error {
   }
 }
 
+/*
+ * The browser can remove the site's storage under an open tab. Clearing the site data does, and so did Chromium by
+ * itself in an off-the-record context after about half an hour (WA2-SC-05): the two messages below name no cause.
+ */
+
+/** The browser took the storage of the tab away and it could not be made again. */
+export const STORAGE_REMOVED_MESSAGE = "The browser removed this tab's storage. Reload the page.";
+
+/** A stored block is gone: the browser removed the storage that held it. */
+export const RESULTS_REMOVED_MESSAGE = 'The browser removed the stored results of this run. Run it again.';
+
+export class StorageRemovedError extends Error {
+  constructor(message = STORAGE_REMOVED_MESSAGE, cause?: unknown) {
+    super(message, cause === undefined ? undefined : { cause });
+    this.name = 'StorageRemovedError';
+  }
+}
+
+/** True for the browser's NotFoundError (and StorageRemovedError): a file or directory that is not there. */
+export function isStorageRemoved(error: unknown): boolean {
+  return error instanceof StorageRemovedError || errorName(error) === 'NotFoundError';
+}
+
+/**
+ * True for the errors that a browser gives when it creates an entry in a directory that was removed:
+ * NotFoundError (Chromium) and UnknownError (Firefox). UnknownError is also what a real fault looks like,
+ * so this only says that the directory should be looked at.
+ */
+export function mayBeStorageRemoved(error: unknown): boolean {
+  return isStorageRemoved(error) || errorName(error) === 'UnknownError';
+}
+
+function errorName(error: unknown): unknown {
+  return typeof error === 'object' && error !== null ? (error as { name?: unknown }).name : undefined;
+}
+
 /**
  * Results kept in memory (no OPFS) may take at most this many bytes in a tab (S09). Memory
  * is then the only copy of the results, so running out of it would end the tab and lose

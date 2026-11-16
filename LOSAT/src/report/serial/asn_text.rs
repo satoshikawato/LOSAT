@@ -28,9 +28,12 @@
 //! ```
 //! The back limit keeps at least the last 80 bytes in the buffer when it is flushed; the
 //! string wrap below looks back at most one line (79 columns), so it always finds the bytes
-//! in the buffer, and the whole document stands for the buffer here.
+//! in the buffer. The encoder's `out` holds the document from its start, or under
+//! `encoder::Traced` from where NCBI's buffer was last flushed (`Traced` hands on only what
+//! NCBI wrote, `out_buffer::OutBuffer`, which keeps those 80 bytes): either way it holds every
+//! byte that the wrap looks at.
 
-use super::encoder::{Encoder, SerialError};
+use super::encoder::{Encoder, Replaced, SerialError, Stream, StreamPosition};
 use super::real::write_asn_text_double;
 
 /// The column after which a VisibleString is wrapped (`WrapAt(78, true)`).
@@ -51,6 +54,12 @@ pub struct AsnTextEncoder<'b> {
     /// `CObjectOStreamAsn::m_BlockStart`.
     block_start: bool,
     error: Option<SerialError>,
+    /// The bytes that `visible_str_replacing` replaced (`replace`).
+    replaced: Vec<Replaced>,
+    /// `line`'s count of the ends of line: those before `lines_to` (the start of the line it
+    /// was on at its last call) in `out`.
+    lines_to: usize,
+    lines: u64,
 }
 
 impl<'b> AsnTextEncoder<'b> {
@@ -64,7 +73,41 @@ impl<'b> AsnTextEncoder<'b> {
             line_length: 0,
             block_start: false,
             error: None,
+            replaced: Vec::new(),
+            lines_to: start,
+            lines: 0,
         }
+    }
+
+    /// `ReplaceVisibleChar` of the byte `byte`, at the line before the byte's wrap (`Replaced`,
+    /// `encoder::Traced`); `write_string` then writes `#` as it writes a byte.
+    #[cold]
+    #[inline(never)]
+    fn replace(&mut self, byte: u8) {
+        let line = self.line();
+        self.replaced.push(Replaced {
+            byte,
+            position: StreamPosition::Line(line),
+            with_string: true,
+            at: self.out.len() - self.start,
+        });
+    }
+
+    /// `m_Output.GetLine()`: 1 + the ends of line that the encoder holds (`encoder::Traced` adds
+    /// those that `flush_to` handed on, which starts the count again). The count goes on from the
+    /// start of the line of the last call: the string wrap inserts its end of line in the current
+    /// line only, and the lines before it are final.
+    fn line(&mut self) -> u64 {
+        if self.lines_to < self.start || self.lines_to > self.out.len() {
+            self.lines_to = self.start;
+            self.lines = 0;
+        }
+        let tail = &self.out[self.lines_to..];
+        if let Some(last) = tail.iter().rposition(|&byte| byte == b'\n') {
+            self.lines += tail[..=last].iter().filter(|&&byte| byte == b'\n').count() as u64;
+            self.lines_to += last + 1;
+        }
+        1 + self.lines
     }
 
     /// `COStreamBuffer::PutString` / `PutChar`: bytes without an end of line.
@@ -247,6 +290,8 @@ impl<'b> AsnTextEncoder<'b> {
     /// ```
     /// `isspace` is that of the C locale; the bytes of the stream are visible characters,
     /// spaces and ends of line.
+    // Inlined into both forms of `write_string`, as into its one caller before the replacing form.
+    #[inline(always)]
     fn put_eol_at_word_end(&mut self, line_length: usize) {
         let buffer = self.start;
         let mut line_pos = self.line_length;
@@ -289,6 +334,8 @@ impl<'b> AsnTextEncoder<'b> {
 }
 
 impl Encoder for AsnTextEncoder<'_> {
+    const STREAM: Option<super::encoder::Stream> = Some(super::encoder::Stream::AsnText);
+
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:105-111
     /// ```c++
     /// void CObjectOStreamAsn::WriteFileHeader(TTypeInfo type)
@@ -488,6 +535,18 @@ impl Encoder for AsnTextEncoder<'_> {
         self.put(name.as_bytes());
     }
 
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:127-131
+    /// ```c++
+    /// void CObjectOStreamAsn::WriteEnum(const CEnumeratedTypeValues& values,
+    ///                                   TEnumValueType value)
+    /// {
+    ///     WriteEnum(values,value,values.FindNameEx(value, values.IsInteger()));
+    /// }
+    /// ```
+    fn named_int(&mut self, name: &str, _value: i32) {
+        self.put(name.as_bytes());
+    }
+
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:140-146
     /// ```c++
     /// void CObjectOStreamAsn::WriteBool(bool data)
@@ -536,26 +595,20 @@ impl Encoder for AsnTextEncoder<'_> {
     ///     }
     /// ```
     /// A byte outside 0x20..0x7E (`GoodVisibleChar`, include/serial/impl/objistr.inl:456-459)
-    /// is NCBI's replacement with an error message; the callers refuse such strings before
-    /// the search, and the encoder records the error here.
+    /// is NCBI's replacement with an error message: here an error (`write_string`).
     fn visible_str(&mut self, value: &[u8]) {
-        self.put(b"\"");
-        for &byte in value {
-            if !(0x20..=0x7e).contains(&byte) {
-                if self.error.is_none() {
-                    self.error = Some(SerialError::NonVisibleChar(byte));
-                }
-                continue;
-            }
-            if self.line_length > STRING_WRAP {
-                self.put_eol_at_word_end(STRING_WRAP);
-            }
-            self.put(&[byte]);
-            if byte == b'"' {
-                self.put(b"\"");
-            }
-        }
-        self.put(b"\"");
+        self.write_string::<false>(value);
+    }
+
+    /// `visible_str` that writes NCBI's `#` for a byte outside 0x20..0x7E and records it
+    /// (`replace`).
+    fn visible_str_replacing(&mut self, value: &[u8]) {
+        self.write_string::<true>(value);
+    }
+
+    /// `string_store` (`visible_str`) that writes NCBI's `#` (`visible_str_replacing`).
+    fn string_store_replacing(&mut self, value: &[u8]) {
+        self.write_string::<true>(value);
     }
 
     /// `WriteDouble2(data, DBL_DIG)` (`real::write_asn_text_double`).
@@ -648,11 +701,61 @@ impl Encoder for AsnTextEncoder<'_> {
         }
         sink.write_all(&self.out[self.start..keep_from])?;
         self.out.drain(self.start..keep_from);
+        // `line` counts again from the bytes held (`encoder::Traced` adds those handed on).
+        (self.lines_to, self.lines) = (self.start, 0);
+        Ok(())
+    }
+
+    fn held(&self) -> &[u8] {
+        &self.out[self.start..]
+    }
+
+    fn hand_on(&mut self, sink: &mut dyn std::io::Write, count: usize) -> std::io::Result<()> {
+        let end = self.start + count;
+        sink.write_all(&self.out[self.start..end])?;
+        self.out.drain(self.start..end);
+        // `line` counts again from the bytes held (`encoder::Traced` adds those handed on).
+        (self.lines_to, self.lines) = (self.start, 0);
         Ok(())
     }
 
     fn error(&self) -> Option<SerialError> {
         self.error
+    }
+
+    fn take_replaced(&mut self) -> Vec<Replaced> {
+        std::mem::take(&mut self.replaced)
+    }
+}
+
+impl AsnTextEncoder<'_> {
+    /// The loop of `WriteString` (quoted at `visible_str`): without `REPLACE` a byte outside
+    /// 0x20..0x7E is the error `NonVisibleChar` and is not written, with it the byte is
+    /// recorded at its line (before its wrap, `replace`) and `#` is written in its place.
+    #[inline(always)]
+    fn write_string<const REPLACE: bool>(&mut self, value: &[u8]) {
+        self.put(b"\"");
+        for &byte in value {
+            let byte = if !Stream::AsnText.replaces(byte) {
+                byte
+            } else if REPLACE {
+                self.replace(byte);
+                b'#'
+            } else {
+                if self.error.is_none() {
+                    self.error = Some(SerialError::NonVisibleChar(byte));
+                }
+                continue;
+            };
+            if self.line_length > STRING_WRAP {
+                self.put_eol_at_word_end(STRING_WRAP);
+            }
+            self.put(&[byte]);
+            if byte == b'"' {
+                self.put(b"\"");
+            }
+        }
+        self.put(b"\"");
     }
 }
 
@@ -688,7 +791,9 @@ impl DecimalI32 {
 ///         *--pos = '-';
 ///     }
 /// ```
-/// (`i32::MIN` does not occur: positions, lengths, counts and scores of BLAST.)
+/// `i32::MIN` is written as its digits. NCBI's `-n` overflows there and its build writes `-8`
+/// (the archive's `WordThreshold` of a `-threshold` past `Int4`, NCBI BLAST+ 2.17.0); LOSAT does
+/// not reproduce that overflow. Positions, lengths, counts and scores of BLAST do not reach it.
 pub(crate) fn itoa_i32(value: i32) -> DecimalI32 {
     let mut buffer = [0u8; 11];
     let mut pos = buffer.len();

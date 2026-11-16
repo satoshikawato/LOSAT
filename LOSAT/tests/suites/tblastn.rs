@@ -13,10 +13,16 @@ mod tblastn_culling;
 mod tblastn_db_search;
 #[path = "../tblastn_db_stream.rs"]
 mod tblastn_db_stream;
+#[path = "../tblastn_in_pssm.rs"]
+mod tblastn_in_pssm;
 #[path = "../tblastn_link_ctx.rs"]
 mod tblastn_link_ctx;
 #[path = "../tblastn_link_window.rs"]
 mod tblastn_link_window;
+#[path = "../tblastn_lut_lean.rs"]
+mod tblastn_lut_lean;
+#[path = "../tblastn_newton_drop.rs"]
+mod tblastn_newton_drop;
 #[path = "../tblastn_oid_chunk.rs"]
 mod tblastn_oid_chunk;
 #[path = "../tblastn_reap_idx.rs"]
@@ -35,3 +41,5 @@ mod tblastn_ungap;
 mod tblastn_unit_xlate;
 #[path = "../tblastn_xlate_simd.rs"]
 mod tblastn_xlate_simd;
+#[path = "../web_v1_tblastn.rs"]
+mod web_v1_tblastn;

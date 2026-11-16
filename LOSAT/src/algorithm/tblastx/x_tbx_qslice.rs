@@ -75,7 +75,10 @@
 //! equal slices (`X_QSLICE_MAX_SLICES` at most; `x_partition`); the cut does not depend on the
 //! subjects. A batch in which no group is cut runs as before (`scan_unit`, whose machine code does
 //! not change); in a batch with a cut group every group's units take this path (a group that is not
-//! cut is one slice). The size of a slice changes no output. x86-64 only (where it was measured).
+//! cut is one slice). The groups of a search whose slice table would not fit beside the slice's
+//! window are never cut (`x_slices_fit`: words of 4 letters, whose backbone alone exceeds the window;
+//! cut at 8 to 32 threads on two 0.6 Mb genomes, they took 4-9 % more time and 80-240 MiB more
+//! memory). The size of a slice changes no output. x86-64 only (where it was measured).
 //! The probes of LOSAT_TIMING / LOSAT_X_STATS (x_unit_probe.rs) need the group's table: with them
 //! nothing is cut.
 //!
@@ -86,6 +89,7 @@
 //! next hit on its cell is tested, from whichever slice); the batch is flushed at the end of the
 //! unit.
 
+#[cfg(test)]
 use super::x_kmerge::XUnitSort;
 use super::x_tbx_extbatch::{self, XPendBatch, BATCH};
 use super::*;
@@ -135,6 +139,34 @@ fn slice_rule() -> Option<XSliceRule> {
             }),
         }
     })
+}
+
+// No NCBI counterpart: a term of the rule (module doc; SC10b PR-3). A slice has a lookup table of its
+// own, so a cut group repeats the table's backbone once per slice, and the slice width
+// (`X_QSLICE_LETTERS`) was chosen so that the slice's window fits the core's L2 with the slice's
+// backbone. That holds for words of 2 and 3 letters (892 and 28,540 cells, 14 KB and 457 KB); a
+// backbone of 4-letter words has 913,276 cells (14.6 MB; 2-4 MB compacted), larger than the window
+// itself, so its slices would bring no locality and multiply the tables.
+/// Whether the groups of a batch of `word_length`-letter words may be cut: a slice table's backbone
+/// (16-byte cells, `compute_backbone_size`) is no larger than the slice's window
+/// (`X_QSLICE_LETTERS` diagonal cells, `DiagStruct`).
+#[inline(always)]
+pub(super) const fn x_slices_fit(word_length: usize) -> bool {
+    use crate::algorithm::tblastx::lookup::LOOKUP_ALPHABET_SIZE;
+    let charsize = LOOKUP_ALPHABET_SIZE.ilog2() as usize + 1;
+    if word_length * charsize >= usize::BITS as usize {
+        return false;
+    }
+    // compute_backbone_size (blast_aalookup.c:238-240), as a constant expression.
+    let mut cells = 0usize;
+    let mut i = 0usize;
+    while i < word_length {
+        cells |= (LOOKUP_ALPHABET_SIZE - 1) << (i * charsize);
+        i += 1;
+    }
+    cells += 1;
+    cells * std::mem::size_of::<BackboneCell>()
+        <= X_QSLICE_LETTERS * std::mem::size_of::<DiagStruct>()
 }
 
 // No NCBI counterpart: the rule of the switch for one batch (module doc). The groups are those of
@@ -343,7 +375,8 @@ pub(super) fn lut_direct_sliced(
     on_pool: bool,
 ) -> Option<Vec<XSliced>> {
     let locations = q.x_group_locations(starts)?;
-    let word_length = crate::algorithm::tblastx::lookup::LOOKUP_WORD_LENGTH as i32;
+    // The word length of the tables (`-word_size`, as `x_build_group` reads it).
+    let word_length = q.word_length() as i32;
     let pieces: Vec<Vec<(i32, i32)>> = locations
         .iter()
         .zip(parts)
@@ -410,7 +443,7 @@ pub(super) fn lut_shadow_compare(direct: Option<&[XSliced]>, reference: Option<&
     }
 }
 
-impl XPairPar {
+impl<M: TbxScore> XPairPar<M> {
     // EXPERIMENT (LOSAT_X_TBXQSLICE): `run_subject_unit_fns` for a batch with a cut group. The rules
     // of LOSAT_X_TBXPREFETCH and LOSAT_X_TBXEXTBATCH read each unit's window (module doc). No NCBI
     // counterpart: dispatch only.
@@ -532,7 +565,8 @@ impl XPairPar {
     //     hits = scansub(lookup_wrap, subject,
     //                               offset_pairs, array_size, scan_range);
     // ```
-    // The scan loop of `scan_unit` (RI:3082-3168 on one unit) once per slice with the slice's table,
+    // The scan loop of `scan_unit` (the reference's, `scan_chunk_plain` with
+    // `word_finder::scan_next_hits`, on one unit) once per slice with the slice's table,
     // in slice order, on the unit's one table (module doc, items 1-3), with `x_hit`, or with
     // `x_hit_batched` of LOSAT_X_TBXEXTBATCH (`B`; the batch flushed at the end of the unit), and
     // LOSAT_X_TBXPREFETCH's hint (`PF`) as in `scan_unit`.
@@ -547,22 +581,22 @@ impl XPairPar {
         scratch: &mut XScratch,
         init_hsps: &mut S,
     ) {
-        self.scan_unit_sliced_hits::<S, B, PF, false, false>(group, unit, inp, scratch, init_hsps);
+        self.scan_unit_sliced_hits::<S, B, PF, false, 0>(group, unit, inp, scratch, init_hsps);
     }
 
     // EXPERIMENT (LOSAT_X_TBXHITBF, x_tbx_hitbf.rs): with `BF` the hits of a batch go through
     // `x_hits_bf`, which takes the too-far and overlap outcomes without a branch and hands the
     // others to `x_hit` (or `x_hit_batched` with `B`); without it this is the loop before the
     // switch. `BF` runs only where `x_tbx_hitbf::fits` holds.
-    /// `scan_unit_sliced`, with `BF` the branch-free hit loop of LOSAT_X_TBXHITBF and with `SENT` the
-    /// extensions of `extend_hit_two_hit_sent` (LOSAT_X_TBXUNGAPSENT).
+    /// `scan_unit_sliced`, with `BF` the branch-free hit loop of LOSAT_X_TBXHITBF and with `SENT` (a
+    /// word length, 0: none) the extensions of `TbxScore::sent_two_hit_of` (LOSAT_X_TBXUNGAPSENT).
     #[inline(always)]
     pub(super) fn scan_unit_sliced_hits<
         S: XInitSink,
         const B: bool,
         const PF: bool,
         const BF: bool,
-        const SENT: bool,
+        const SENT: usize,
     >(
         &self,
         group: &XSliced,
@@ -572,7 +606,8 @@ impl XPairPar {
         init_hsps: &mut S,
     ) {
         // LOSAT_X_TBXUNGAPSENT: as in `scan_unit_cells`.
-        assert!(!SENT || self.x_unit_sent(unit, inp));
+        let sent = SENT != 0;
+        assert!(!sent || self.x_unit_sent(unit, inp));
         let wordsize = inp.wordsize;
         let window = inp.window;
         let s_frame = &inp.s_frames_preliminary[unit.f];
@@ -608,11 +643,12 @@ impl XPairPar {
             cutoff_scores: inp.cutoff_scores,
             x_dropoff_per_context: inp.x_dropoff_per_context,
             subject,
-            subject_sent: if SENT { subject_full } else { &[] },
+            subject_sent: if sent { subject_full } else { &[] },
             s_f_idx: unit.f,
             s_frame: s_frame.frame,
             s_idx: inp.s_idx,
             s_len: inp.s_len,
+            sc: self.sc,
         };
         let mut b = XPendBatch::new(BATCH);
 
@@ -654,9 +690,7 @@ impl XPairPar {
                 while scan_range[1] <= scan_range[2] {
                     let prev_scan_left = scan_range[1];
                     // [C] hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
-                    let hits = crate::algorithm::tblastx::x_scan_bf::x_scan_subject(
-                        slice.scan_bf,
-                        sub,
+                    let hits = slice.scan(
                         subject,
                         &seq_ranges,
                         &mut scratch.offset_pairs[..],
@@ -664,7 +698,7 @@ impl XPairPar {
                         &mut scan_range,
                     );
                     if hits == 0 && scan_range[1] == prev_scan_left {
-                        // The reference's safety guard (RI:3157-3161).
+                        // The reference's safety guard (`word_finder::scan_next_hits`).
                         break;
                     }
                     let diag_ptr = scratch.diag.as_mut_ptr();
@@ -687,7 +721,7 @@ impl XPairPar {
                                 wordsize,
                                 |cell, query_offset, subject_offset| {
                                     if B {
-                                        x_tbx_extbatch::x_hit_batched::<S, SENT>(
+                                        x_tbx_extbatch::x_hit_batched::<S, _, SENT>(
                                             diag_ptr,
                                             cell,
                                             query_offset,
@@ -697,7 +731,7 @@ impl XPairPar {
                                             init_hsps,
                                         );
                                     } else {
-                                        x_hit::<S, XNoProbe, SENT>(
+                                        x_hit::<S, XNoProbe, _, SENT>(
                                             &mut *diag_ptr.add(cell),
                                             query_offset,
                                             subject_offset,
@@ -740,7 +774,7 @@ impl XPairPar {
                             // and subject_offset < s_len, so diag_coord < width =
                             // scratch.diag.len(); every candidate's cell is such a cell.
                             unsafe {
-                                x_tbx_extbatch::x_hit_batched::<S, SENT>(
+                                x_tbx_extbatch::x_hit_batched::<S, _, SENT>(
                                     diag_ptr,
                                     diag_coord,
                                     query_offset,
@@ -753,7 +787,7 @@ impl XPairPar {
                         } else {
                             // SAFETY: as above.
                             let diag_entry = unsafe { &mut *diag_ptr.add(diag_coord) };
-                            x_hit::<S, XNoProbe, SENT>(
+                            x_hit::<S, XNoProbe, _, SENT>(
                                 diag_entry,
                                 query_offset,
                                 subject_offset,
@@ -769,7 +803,12 @@ impl XPairPar {
         if B && b.pending() > 0 {
             // SAFETY: the candidates' cells are cells of this unit's table.
             unsafe {
-                x_tbx_extbatch::flush::<S, SENT>(&mut b, scratch.diag.as_mut_ptr(), &h, init_hsps)
+                x_tbx_extbatch::flush::<S, _, SENT>(
+                    &mut b,
+                    scratch.diag.as_mut_ptr(),
+                    &h,
+                    init_hsps,
+                )
             };
         }
     }
@@ -863,12 +902,13 @@ mod tests {
     }
 
     // No NCBI counterpart: the cut of the lookup locations (module doc, item 5): every word start of
-    // every location goes to exactly one piece, in the slice that holds it, in list order.
+    // every location goes to exactly one piece, in the slice that holds it, in list order, for
+    // words of 2, 3 and 4 letters (`-word_size`).
     #[test]
     fn slice_locations_keep_every_word_once_in_its_slice() {
         let mut rng = Rng(0x51ce_0000_1234_abcd);
-        for _ in 0..2000 {
-            let wl = 3i32;
+        for round in 0..3000 {
+            let wl = [3i32, 2, 4][round % 3];
             let a = rng.below(50) as i32;
             let b = a + 1 + rng.below(400) as i32;
             let k = 1 + rng.below(8) as usize;
@@ -926,8 +966,8 @@ mod tests {
     // No NCBI counterpart: one instance of the scan in slices by the bits of `variant`: batched
     // extensions (2), the prefetch (1), the branch-free hit loop of LOSAT_X_TBXHITBF (4); `SENT`:
     // the extensions of LOSAT_X_TBXUNGAPSENT (for a unit `x_unit_sent` accepts).
-    fn scan_sliced_variant<S: XInitSink, const SENT: bool>(
-        pp: &XPairPar,
+    fn scan_sliced_variant<S: XInitSink, M: TbxScore, const SENT: usize>(
+        pp: &XPairPar<M>,
         variant: usize,
         sliced: &XSliced,
         unit: &XUnit,
@@ -968,11 +1008,32 @@ mod tests {
     // batched extensions, the prefetch and the branch-free hit loop (LOSAT_X_TBXHITBF).
     #[test]
     fn slices_equal_scan_unit() {
+        slices_check(Blosum62Score, 0x5eed_51ce_0123_4567);
+    }
+
+    // No NCBI counterpart: `slices_equal_scan_unit` for a search of 2-letter words (`-word_size
+    // 2`, the other matrices' instance; SC10b PR-2): the slices of the direct builder at that word
+    // length, the sentinel walks of 2-letter words (`SENT` = 2).
+    #[test]
+    fn slices_of_2_letter_words_equal_scan_unit() {
+        use crate::algorithm::tblastx::scoring::MatrixScores;
+        for (i, matrix) in [ScoringMatrix::Blosum62, ScoringMatrix::Pam30]
+            .into_iter()
+            .enumerate()
+        {
+            let scores = MatrixScores::with_word(matrix, 2);
+            slices_check(scores.scorer(), 0x2b17_51ce_0000_0001 + i as u64);
+        }
+    }
+
+    /// The checks of `slices_equal_scan_unit` for the search of `sc` (its matrix and word length).
+    fn slices_check<M: TbxScore>(sc: M, seed: u64) {
         let alphabet = aa("ACDEKLMNPQRSTVWY");
         let narrow = aa("AKLE");
-        let params = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+        let (matrix, word) = (sc.matrix(), sc.word());
+        let params = lookup_protein_params_ungapped(matrix);
         let serial = crate::utils::threading::SearchPool::x_serial();
-        let mut rng = Rng(0x5eed_51ce_0123_4567);
+        let mut rng = Rng(seed);
         let mut records = 0usize;
         let mut cut_groups = 0usize;
         // LOSAT_X_TBXUNGAPSENT: the units, those whose chunk is the whole frame, and those that took
@@ -1001,8 +1062,11 @@ mod tests {
             };
             let queries = [frames.clone()];
             let threshold = 11;
-            let (lookup, contexts) = build_ncbi_lookup(&queries, threshold, &params, true);
-            let starts = group_starts(&contexts);
+            let (lookup, contexts) =
+                crate::algorithm::tblastx::lookup::build_ncbi_lookup_for_profile(
+                    &queries, threshold, &params, true, matrix, word,
+                );
+            let starts = group_starts(&contexts, X_MAX_GROUPS);
             // Every fourth case cuts no group (one slice each, as a group of a cut batch that is
             // not cut).
             let spans = x_group_spans(&contexts, &starts);
@@ -1010,11 +1074,12 @@ mod tests {
             let parts = x_partition(&spans, width, 0)
                 .unwrap_or_else(|| spans.iter().map(|&(a, _)| vec![a]).collect());
             let filtered = build_sliced(&lookup, &parts);
-            let q = XPairLutQuery::x_prepare(&queries, threshold, true).expect("direct builder");
+            let q = XPairLutQuery::x_prepare_for(&queries, threshold, true, matrix, word)
+                .expect("direct builder");
             let direct = lut_direct_sliced(&q, &starts, &parts, &serial, false).expect("groups");
             lut_shadow_compare(Some(&direct), Some(&filtered));
             cut_groups += direct.iter().filter(|g| g.slices.len() > 1).count();
-            let groups = build_groups(&lookup, &contexts);
+            let groups = build_groups(&lookup, &contexts, X_MAX_GROUPS);
             // The stub's longest_chain over the slices is the full table's.
             let (stub, _) = q.x_into_stub(tables(&direct));
             assert_eq!(stub.longest_chain, lookup.longest_chain);
@@ -1031,7 +1096,10 @@ mod tests {
             let pp = XPairPar {
                 groups,
                 stub: false,
-                sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
+                // As `prepare` decides it.
+                sent: sc.x_sent_walks()
+                    && x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
+                sc,
                 sliced: Some(direct),
                 mask_rule: None,
                 extents: Vec::new(),
@@ -1044,7 +1112,7 @@ mod tests {
                 cutoff_scores: &cutoff_scores,
                 x_dropoff_per_context: &x_dropoff_per_context,
                 window,
-                wordsize: 3,
+                wordsize: word as i32,
                 s_idx: 0,
                 s_len: 999,
             };
@@ -1084,7 +1152,7 @@ mod tests {
                             }
                             let mut got: Vec<InitHSP> = Vec::new();
                             if variant < 8 {
-                                scan_sliced_variant::<_, false>(
+                                scan_sliced_variant::<_, _, 0>(
                                     &pp,
                                     variant,
                                     sliced,
@@ -1093,8 +1161,18 @@ mod tests {
                                     &mut scratch,
                                     &mut got,
                                 );
+                            } else if word == 2 {
+                                scan_sliced_variant::<_, _, 2>(
+                                    &pp,
+                                    variant & 7,
+                                    sliced,
+                                    &unit,
+                                    &inp,
+                                    &mut scratch,
+                                    &mut got,
+                                );
                             } else {
-                                scan_sliced_variant::<_, true>(
+                                scan_sliced_variant::<_, _, 3>(
                                     &pp,
                                     variant & 7,
                                     sliced,
@@ -1144,7 +1222,7 @@ mod tests {
                         &mut compact,
                     );
                     let mut compact_bf: Vec<XUnitHsp> = Vec::new();
-                    pp.scan_unit_sliced_hits::<_, true, false, true, false>(
+                    pp.scan_unit_sliced_hits::<_, true, false, true, 0>(
                         &pp.sliced.as_ref().unwrap()[g],
                         &unit,
                         &inp,

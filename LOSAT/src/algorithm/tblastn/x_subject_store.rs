@@ -6,6 +6,7 @@ use std::cell::Cell;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
+use crate::algorithm::common::x_db_stream::XDbStream;
 use crate::sequence::packed_subject::{PackedNucleotide, SubjectNt};
 
 // No NCBI counterpart: reads the LOSAT_X_TBNSTORE variable once; it does not change any value NCBI
@@ -35,9 +36,12 @@ pub(super) enum SubjectLetters<'a> {
     Records(&'a [&'a [u8]]),
     /// EXPERIMENT (LOSAT_X_TBNSTORE): packed subjects, the letters of one made when it is read.
     Packed(&'a [PackedNucleotide]),
-    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the sequences of a `-db` database, each read where it is
-    /// searched (`x_db_stream.rs`).
-    Stream(&'a super::x_db_stream::XDbStream<'a>),
+    /// The sequences of a `-db` database, each read where it is
+    /// searched (`common/x_db_stream.rs`).
+    Stream(&'a XDbStream<'a>),
+    /// The numbers of bases alone, of the reported sequences of a `-db` search whose reports read
+    /// no letters (`database::reported_subjects`).
+    Lengths(&'a [usize]),
 }
 
 impl<'a> SubjectLetters<'a> {
@@ -47,21 +51,58 @@ impl<'a> SubjectLetters<'a> {
             Self::Records(subjects) => subjects.len(),
             Self::Packed(subjects) => subjects.len(),
             Self::Stream(stream) => stream.count(),
+            Self::Lengths(lengths) => lengths.len(),
         }
     }
 
-    /// The number of letters of subject `oid`.
+    /// The number of letters of subject `oid`. A `-db` stream holds no lengths: its search reads
+    /// a subject's length where it reads the subject (`XPrelimSubject::Stream`), its reports
+    /// from the reported sequences (`database::reported_subjects`).
     pub(super) fn length(&self, oid: usize) -> usize {
         match self {
             Self::Records(subjects) => subjects[oid].len(),
             Self::Packed(subjects) => subjects[oid].len(),
-            Self::Stream(stream) => stream.length(oid),
+            Self::Stream(_) => unreachable!("a -db stream reads its lengths with its sequences"),
+            Self::Lengths(lengths) => lengths[oid],
+        }
+    }
+
+    /// The numbers of letters of the subjects in OID order, a `-db` stream's read from the index
+    /// and the last byte of each sequence (`XDbStream::read_length`): for an observer of the
+    /// search (a library caller's), not the search.
+    pub(super) fn x_read_lengths(&self) -> anyhow::Result<Vec<usize>> {
+        match self {
+            Self::Stream(stream) => (0..stream.count())
+                .map(|oid| stream.read_length(oid))
+                .collect(),
+            _ => Ok(self.lengths().collect()),
         }
     }
 
     /// The numbers of letters of the subjects, in OID order.
     pub(super) fn lengths(&self) -> impl Iterator<Item = usize> + '_ {
         (0..self.count()).map(|oid| self.length(oid))
+    }
+
+    /// The number of letters of the longest subject and of all the subjects (saturated): a `-db`
+    /// database sums them up in its check (`XDbStream::longest_and_total`), as it holds no
+    /// length per sequence.
+    pub(super) fn longest_and_total(&self) -> (usize, u64) {
+        if let Self::Stream(stream) = self {
+            return stream.longest_and_total();
+        }
+        self.lengths().fold((0, 0), |(longest, total), length| {
+            let length_u64 = u64::try_from(length).unwrap_or(u64::MAX);
+            (
+                usize::max(longest, length),
+                total.saturating_add(length_u64),
+            )
+        })
+    }
+
+    /// The total of `longest_and_total`, saturated to `usize`.
+    pub(super) fn total_bases(&self) -> usize {
+        usize::try_from(self.longest_and_total().1).unwrap_or(usize::MAX)
     }
 
     /// `f` of the letters of subject `oid`, made in a buffer that the thread keeps between
@@ -75,7 +116,9 @@ impl<'a> SubjectLetters<'a> {
                 LETTERS_MADE.fetch_add(1, Ordering::Relaxed);
                 with_buffer(|buffer| subjects[oid].ascii_into(buffer), f)
             }
-            Self::Stream(_) => unreachable!("a database sequence has no lower-case letters"),
+            Self::Stream(_) | Self::Lengths(_) => {
+                unreachable!("a database sequence has no lower-case letters")
+            }
         }
     }
 
@@ -87,29 +130,31 @@ impl<'a> SubjectLetters<'a> {
     /// has no lower-case letters, so its stage always reads its stored bases, as NCBI's (no
     /// subject mask without `-db_soft_mask`).
     ///
-    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): a sequence of a `-db` stream is given unread
-    /// (`XPrelimSubject::Stream`): the stage reads it when it makes its plan.
+    /// A sequence of a `-db` stream is given unread and without its length
+    /// (`XSearchSubject::Stream`): the search reads its length (`XPrelimSubject::Stream`), and the
+    /// stage reads it when it makes its plan.
     pub(super) fn with_search_subject<R>(
         &self,
         oid: usize,
         case: bool,
-        f: impl FnOnce(XPrelimSubject<'_>) -> R,
+        f: impl FnOnce(XSearchSubject<'_>) -> R,
     ) -> R {
         match self {
             Self::Packed(subjects) if !case || subjects[oid].lowercase().is_empty() => {
-                f(XPrelimSubject::Nt(SubjectNt::Packed(&subjects[oid])))
+                f(XSearchSubject::Nt(SubjectNt::Packed(&subjects[oid])))
             }
             Self::Packed(_) => {
                 // A packed subject whose lower-case letters the stage reads: the letters.
                 crate::utils::xreach::x_reach!("LOSAT_X_TBNSTORE", false);
                 self.with_letters(oid, |letters| {
-                    f(XPrelimSubject::Nt(SubjectNt::Letters(letters)))
+                    f(XSearchSubject::Nt(SubjectNt::Letters(letters)))
                 })
             }
             Self::Records(_) => self.with_letters(oid, |letters| {
-                f(XPrelimSubject::Nt(SubjectNt::Letters(letters)))
+                f(XSearchSubject::Nt(SubjectNt::Letters(letters)))
             }),
-            Self::Stream(stream) => f(XPrelimSubject::Stream(stream, oid)),
+            Self::Stream(stream) => f(XSearchSubject::Stream(stream, oid)),
+            Self::Lengths(_) => unreachable!("the lengths of the reports are not searched"),
         }
     }
 
@@ -122,17 +167,27 @@ impl<'a> SubjectLetters<'a> {
             Self::Records(subjects) => SubjectNt::Letters(subjects[oid]),
             Self::Packed(subjects) => SubjectNt::Packed(&subjects[oid]),
             Self::Stream(_) => unreachable!("a -db stream is read through XStageSubjects"),
+            Self::Lengths(_) => unreachable!("reports that read no letters hold the lengths"),
         }
     }
 }
 
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the subject of one preliminary stage: its letters or its
-/// store, or a sequence of a `-db` stream, which `search_seed::x_scan_plan` reads when it makes
-/// the subject's plan and drops once the plan is made.
+/// A subject as `SubjectLetters::with_search_subject` gives it: its letters or its store, or a
+/// sequence of a `-db` stream (its OID), not read and without its length.
+#[derive(Clone, Copy)]
+pub(super) enum XSearchSubject<'a> {
+    Nt(SubjectNt<'a>),
+    Stream(&'a XDbStream<'a>, usize),
+}
+
+/// The subject of one preliminary stage: its letters or its
+/// store, or a sequence of a `-db` stream (its OID) with its length, which
+/// `search_seed::x_scan_plan` reads when it makes the subject's plan and drops once the plan is
+/// made.
 #[derive(Clone, Copy)]
 pub(super) enum XPrelimSubject<'a> {
     Nt(SubjectNt<'a>),
-    Stream(&'a super::x_db_stream::XDbStream<'a>, usize),
+    Stream(&'a XDbStream<'a>, usize, usize),
 }
 
 impl XPrelimSubject<'_> {
@@ -140,7 +195,7 @@ impl XPrelimSubject<'_> {
     pub(super) fn len(&self) -> usize {
         match self {
             Self::Nt(subject) => subject.len(),
-            Self::Stream(stream, oid) => stream.length(*oid),
+            Self::Stream(_, _, length) => *length,
         }
     }
 }
@@ -168,6 +223,13 @@ const X_KEPT_BUFFER: usize = 8 << 20;
 thread_local! {
     /// EXPERIMENT (LOSAT_X_TBNSTORE): this thread's letter buffer between subjects.
     static X_LETTERS: Cell<Vec<u8>> = const { Cell::new(Vec::new()) };
+}
+
+/// Frees this thread's letter buffer at the end of its loop over the chunks of the subject flow
+/// (`x_oid_flow::x_loop_free`, LOSAT_X_TBNLOOPFREE).
+#[cfg(feature = "parallel")]
+pub(super) fn x_free_letters() {
+    let _ = X_LETTERS.try_with(|buffer| drop(buffer.take()));
 }
 
 /// EXPERIMENT (LOSAT_X_TBNSTORE): the subject records, each one's letters packed as soon as it has
@@ -318,7 +380,7 @@ mod tests {
                     .wrapping_mul(6364136223846793005)
                     .wrapping_add(1442695040888963407);
                 let draw = (state >> 33) as usize;
-                fasta.push(if draw % 8 == 0 {
+                fasta.push(if draw.is_multiple_of(8) {
                     b"RYKMSWBDHVNrykmswbdhvn"[draw / 8 % 22]
                 } else {
                     b"ACGTacgt"[draw / 8 % 8]

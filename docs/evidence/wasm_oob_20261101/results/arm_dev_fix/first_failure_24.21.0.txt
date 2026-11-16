@@ -1,0 +1,8 @@
+RuntimeError: memory access out of bounds
+    at losat-00404be369eef48d.wasm.dlmalloc (wasm://wasm/losat-00404be369eef48d.wasm-03170166:wasm-function[9212]:0x9eed8b)
+    at losat-00404be369eef48d.wasm.malloc (wasm://wasm/losat-00404be369eef48d.wasm-03170166:wasm-function[9211]:0x9ee413)
+    at losat-00404be369eef48d.wasm._ZN5LOSAT9algorithm6blastp8encoding23encode_protein_sequence17h1e0512c177d62ae9E (wasm://wasm/losat-00404be369eef48d.wasm-03170166:wasm-function[1528]:0x16b162)
+    at losat-00404be369eef48d.wasm._ZN5rayon4iter8plumbing24bridge_producer_consumer6helper17hed3450e41e27a2e1E (wasm://wasm/losat-00404be369eef48d.wasm-03170166:wasm-function[6116]:0x6df279)
+    at losat-00404be369eef48d.wasm._ZN10rayon_core4join12join_context28_$u7b$$u7b$closure$u7d$$u7d$17hdbd0cae57ba3f23cE (wasm://wasm/losat-00404be369eef48d.wasm-03170166:wasm-function[6119]:0x6dfc3c)
+    at losat-00404be369eef48d.wasm._ZN5rayon4iter8plumbing24bridge_producer_consumer6helper17hed3450e41e27a2e1E (wasm://wasm/losat-00404be369eef48d.wasm-03170166:wasm-function[6116]:0x6df47a)
+    at losat-00404be369eef48d.wasm._ZN10rayon_core4join12join_context28_$u7b$$u7b$closure$u7d$$u7d$17hdbd0cae57ba3f23cE (wasm://wasm

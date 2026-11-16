@@ -1,10 +1,10 @@
-// Run output channel contract (ports/run-output.ts, ports/data.ts RunStore): an engine-side
+// Run output channel contract (losat/ports run-output.ts, ports/data.ts RunStore): an engine-side
 // writer sends the outputs of a run over the MessagePort of `openRun`, and the data layer
 // stages, commits, discards and reads them. Vitest runs it in one thread; Playwright runs
 // it with the writer in a separate worker and the real Data worker (OPFS). S09 runs it with
 // the writer inside the real Engine worker.
+import { DIAGNOSTICS_STREAM, HITS_STREAM, type OutputStream } from 'losat/ports';
 import type { RunStore } from '../../src/ports/data';
-import { DIAGNOSTICS_STREAM, HITS_STREAM, type OutputStream } from '../../src/ports/run-output';
 import {
   check,
   concatBytes,

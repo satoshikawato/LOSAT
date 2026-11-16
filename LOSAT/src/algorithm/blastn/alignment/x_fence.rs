@@ -1,11 +1,13 @@
-//! EXPERIMENT (LOSAT_X_BNTBRANGE): the fence sentries that this thread's traceback alignments
-//! met.
+//! The fence sentries that this thread's alignments met: traceback alignments of a sequence
+//! decoded in ranges (EXPERIMENT LOSAT_X_BNTBRANGE) and preliminary greedy alignments on a window
+//! of the subject (`x_greedy_prelim`).
 //!
 //! No NCBI counterpart: NCBI's kernels set `fence_hit` for `Blast_TracebackFromHSPList`, which
 //! breaks its loop, and the caller fetches the whole sequence and traces the HSP list again
 //! (blast_traceback.c:516-520, 1651-1688). LOSAT's kernels return as before and count the fence
-//! here; a caller compares the count before and after its call (`x_fenced`). Only a sequence
-//! decoded in ranges (`database::traceback_listed`) has fences.
+//! here; a caller compares the count before and after its call (`x_fenced`, `x_fence_count`).
+//! Only a sequence decoded in ranges (`database::traceback_listed`) and a preliminary window have
+//! fences.
 
 use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -14,7 +16,7 @@ thread_local! {
     static X_FENCE_HITS: Cell<u64> = const { Cell::new(0) };
 }
 
-/// A traceback alignment of this thread stopped at a fence.
+/// An alignment of this thread stopped at a fence.
 #[cold]
 #[inline(never)]
 pub(crate) fn x_fence_met() {
@@ -40,4 +42,10 @@ pub(crate) fn x_fence_note(fenced: Option<&AtomicBool>, mark: Option<u64>) {
 /// Whether the sequence of `fenced` met a fence: its traceback stops (`x_fence_note`).
 pub(crate) fn x_fenced(fenced: Option<&AtomicBool>) -> bool {
     fenced.is_some_and(|fenced| fenced.load(Ordering::Relaxed))
+}
+
+/// The fences this thread's alignments met so far; a caller that reads it before and after a call
+/// on a window knows whether the call stopped at a fence.
+pub(crate) fn x_fence_count() -> u64 {
+    X_FENCE_HITS.with(Cell::get)
 }

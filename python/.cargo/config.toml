@@ -1,0 +1,4 @@
+# A copy of the x86-64 rustflags of LOSAT/.cargo/config.toml: Cargo reads that file only for a build
+# under LOSAT/. They align loops and change no output.
+[target.'cfg(target_arch = "x86_64")']
+rustflags = ["-C", "llvm-args=-align-loops=64", "-C", "llvm-args=-max-bytes-for-alignment=63"]

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The view filters (ViewState, design §11.2): they change what the lists and the dot plot
-// show, never the search, and never the compatibility outputs. They compare the engine's
-// values of the HSP records (docs/web/results_columns.md).
+// show, never the search, and never the compatibility outputs. The E value and bit score
+// filters compare the values that the lists show (docs/web/results_columns.md).
 import { ref, watch } from 'vue';
 import type { ResultsBrowser } from '../application/results';
 import type { ViewFilters } from '../domain/result-index';
@@ -89,7 +89,6 @@ function clear(): void {
       <button type="submit" class="filter-submit" data-testid="filter-apply">Filter</button>
       <button type="button" data-testid="filter-clear" @click="clear">Reset</button>
     </div>
-    <p class="muted small">Filters change the view only. Exports of outfmt 0, 6 and 7 always hold the whole result.</p>
     <p v-if="problem" class="error" role="alert" data-testid="filter-problem">{{ problem }}</p>
   </form>
 </template>

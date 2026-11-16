@@ -14,10 +14,10 @@
 //! (`LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS=1`, whose gate sends every batch to the frame loop at any
 //! threshold and thread count) and compare the report with the switch (the default), whose in-place
 //! build the run's reach file shows (`LOSAT_X_REACH`, `tests/reach_support`), against the report
-//! with `LOSAT_X_TBXLUT=0`, at the default threshold (13), at 11 and at `+inf` (NCBI's INT_MIN:
-//! every word enters every cell it can), at one and four threads; and on the default path, where
-//! the unit path builds its own tables and the switch acts only on a batch the guard or
-//! `LOSAT_X_PAIRPARGATE` sends back.
+//! with `LOSAT_X_TBXLUT=0`, at the default threshold (13) and at 11 at one, four, eight and sixteen
+//! threads, and at `+inf` (NCBI's INT_MIN: every word enters every cell it can) at one thread; and
+//! on the default path, where the unit path builds its own tables and the switch acts only on a
+//! batch the guard or `LOSAT_X_PAIRPARGATE` sends back.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -90,6 +90,21 @@ fn tblastx(
     threads: u32,
     switches: &[(&str, &str)],
 ) -> (Vec<u8>, String) {
+    let options: &[&str] = match threshold {
+        Some(threshold) => &["-threshold", threshold],
+        None => &[],
+    };
+    tblastx_with(query, subject, options, threads, switches)
+}
+
+/// [`tblastx`] with the search options `options`.
+fn tblastx_with(
+    query: &Path,
+    subject: &Path,
+    options: &[&str],
+    threads: u32,
+    switches: &[(&str, &str)],
+) -> (Vec<u8>, String) {
     let mut command = losat(switches);
     command
         .arg("tblastx")
@@ -97,16 +112,14 @@ fn tblastx(
         .arg(query)
         .arg("-subject")
         .arg(subject)
-        .args(["-outfmt", "6", "-num_threads", &threads.to_string()]);
-    if let Some(threshold) = threshold {
-        command.args(["-threshold", threshold]);
-    }
+        .args(["-outfmt", "6", "-num_threads", &threads.to_string()])
+        .args(options);
     command.env("LOSAT_X_STATS", "1");
     let output = command.output().expect("run LOSAT");
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     assert!(
         output.status.success(),
-        "{switches:?} threshold {threshold:?} threads {threads}: {stderr}"
+        "{switches:?} {options:?} threads {threads}: {stderr}"
     );
     if switches.contains(&REFERENCE) {
         // The chunk-switch gate sends every batch to the reference frame loop: no unit runs.
@@ -114,7 +127,7 @@ fn tblastx(
         assert_eq!(
             (units, fallback_gate >= 1),
             (0, true),
-            "{switches:?} threshold {threshold:?} threads {threads}: the frame loop:\n{stderr}"
+            "{switches:?} {options:?} threads {threads}: the frame loop:\n{stderr}"
         );
     }
     (output.stdout, stderr)
@@ -145,7 +158,7 @@ fn built_in_place(reach: &reach_support::Reach) -> bool {
 }
 
 /// Two queries in one batch (1,500 and 2,000 bases of MjeNMV) against two subjects (40 kb of
-/// MelaMJNV, 30 kb of PemoMJNVA), threshold 13 and 11, one and four threads.
+/// MelaMJNV, 30 kb of PemoMJNVA), threshold 13 and 11, one, four, eight and sixteen threads.
 #[test]
 fn the_reference_loop_reports_the_same_with_the_table_filled_in_place() {
     let dir = temp_dir("thresholds");
@@ -164,7 +177,7 @@ fn the_reference_loop_reports_the_same_with_the_table_filled_in_place() {
         ],
     );
     for threshold in [None, Some("11")] {
-        for threads in [1, 4] {
+        for threads in [1, 4, 8, 16] {
             let (base, _) = tblastx(
                 &query,
                 &subject,
@@ -218,6 +231,41 @@ fn every_word_threshold_gives_the_same_report() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+/// The one-hit word finder (`-window_size 0`, which runs in the reference frame loop) with words of
+/// 4 and 2 letters and another matrix than BLOSUM62 (item X2e of line RG: the table of 4-letter
+/// words from the joint builder, the others from the direct builder; before, the chain builder,
+/// which held 1.3x NCBI's memory at `-word_size 4 -threshold 1`): the report is the chain
+/// builder's (`=0`) and the table was built in place, at one and four threads. A 450-base query
+/// against 3 kb.
+#[test]
+fn the_one_hit_loop_reports_the_same_at_other_word_sizes_and_matrices() {
+    let dir = temp_dir("one-hit");
+    let query = write(&dir, "q.fna", &[("mje", &letters("MjeNMV.fasta")[..450])]);
+    let subject = write(
+        &dir,
+        "s.fna",
+        &[("mela", &letters("MelaMJNV.fasta")[..3_000])],
+    );
+    for options in [
+        &["-window_size", "0", "-word_size", "4", "-threshold", "7"][..],
+        &["-window_size", "0", "-word_size", "2", "-threshold", "9"][..],
+        &["-window_size", "0", "-matrix", "BLOSUM45"][..],
+    ] {
+        for threads in [1, 4] {
+            let (base, _) = tblastx_with(&query, &subject, options, threads, &[SWITCH_OFF]);
+            assert!(!base.is_empty(), "{options:?}: no hits to compare");
+            let reach = reach_support::Reach::new("tbxlut-one-hit");
+            let (with, _) = tblastx_with(&query, &subject, options, threads, &[reach.var()]);
+            assert_eq!(base, with, "LOSAT_X_TBXLUT, {options:?}, threads {threads}");
+            assert!(
+                built_in_place(&reach),
+                "{options:?}, threads {threads}: the table was not built in place"
+            );
+        }
+    }
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 /// The default path (the unit path of the strict set builds its own tables; at one thread the gate
 /// sends this short query's batch to the reference loop, where the switch acts): the report is the
 /// one of `LOSAT_X_TBXLUT=0`.
@@ -230,7 +278,7 @@ fn the_default_path_reports_the_same_with_the_switch() {
         "s.fna",
         &[("mela", &letters("MelaMJNV.fasta")[..40_000])],
     );
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         let (base, _) = tblastx(&query, &subject, None, threads, &[SWITCH_OFF]);
         let (with, _) = tblastx(&query, &subject, None, threads, &[]);
         assert_eq!(base, with, "default path, threads {threads}");

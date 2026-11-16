@@ -11,10 +11,16 @@ mod blastx_db_stream;
 mod blastx_diag;
 #[path = "../blastx_diag_bitfield.rs"]
 mod blastx_diag_bitfield;
+#[path = "../blastx_fast.rs"]
+mod blastx_fast;
+#[path = "../blastx_fast_flat.rs"]
+mod blastx_fast_flat;
 #[path = "../blastx_flow.rs"]
 mod blastx_flow;
 #[path = "../blastx_hitbf.rs"]
 mod blastx_hitbf;
+#[path = "../blastx_range.rs"]
+mod blastx_range;
 #[path = "../blastx_scan_byte.rs"]
 mod blastx_scan_byte;
 #[path = "../blastx_subject_flow.rs"]
@@ -23,3 +29,5 @@ mod blastx_subject_flow;
 mod blastx_ungap_sent;
 #[path = "../blastx_unit_cap.rs"]
 mod blastx_unit_cap;
+#[path = "../run_local_blastx.rs"]
+mod run_local_blastx;

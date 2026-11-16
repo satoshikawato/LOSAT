@@ -11,6 +11,7 @@ import type { BrowserContext, Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { HEADERS_FILE, parseHeadersFile, pathHeaders, siteHeaders } from '../../../build/headers';
 import type { HarnessFiles } from './browser';
+import { navigate } from './navigate';
 
 /** The repository root; /__files/<path> serves <root>/<path> (inputs of the searches). */
 export const REPOSITORY = fileURLToPath(new URL('../../../../../', import.meta.url));
@@ -26,6 +27,12 @@ export interface HarnessServerOptions {
   readonly isolated?: boolean;
   /** Generated files, served under /__extra/<name> (inputs of measurements). */
   readonly extra?: ReadonlyMap<string, Uint8Array>;
+  /**
+   * Serves every response `Cache-Control: no-store`. Chromium fails a fetch
+   * (net::ERR_CACHE_WRITE_FAILURE) when workers that run at the same time write the same
+   * engine module into its HTTP cache.
+   */
+  readonly noStore?: boolean;
 }
 
 /** Starts a server for the harness files under /__harness/ and repository files under /__files/. */
@@ -41,7 +48,7 @@ export async function startHarnessServer(files: HarnessFiles, options: HarnessSe
   const server = createServer((request: IncomingMessage, response: ServerResponse) => {
     const path = decodeURIComponent(new URL(request.url ?? '/', 'http://localhost').pathname);
     const send = (status: number, type: string, body: string | Uint8Array, extra: Record<string, string> = {}) => {
-      response.writeHead(status, { ...headers, ...extra, 'Content-Type': type });
+      response.writeHead(status, { ...headers, ...extra, ...(options.noStore === true ? { 'Cache-Control': 'no-store' } : {}), 'Content-Type': type });
       response.end(body);
     };
     if (path.startsWith('/__harness/')) {
@@ -89,7 +96,7 @@ export async function openHarness(context: BrowserContext, server: HarnessServer
   const page = await context.newPage();
   // The harness logs each case and search as it finishes.
   page.on('console', (message) => console.log(message.text()));
-  await page.goto(`${server.origin}/__harness/index.html`);
+  await navigate(page, `${server.origin}/__harness/index.html`);
   await page.waitForFunction(() => window.losatHarness !== undefined);
   return page;
 }

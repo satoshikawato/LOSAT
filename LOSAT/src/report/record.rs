@@ -121,6 +121,17 @@ pub struct QueryRecord<'a> {
     pub offset: i32,
 }
 
+impl HspRecord<'_> {
+    /// Whether the HSP's Std-seg rows are empty (an ungapped HSP of length 0,
+    /// `serial::seqalign::ungapped_rows_empty`).
+    pub fn rows_empty(&self) -> bool {
+        super::serial::seqalign::ungapped_rows_empty(
+            i64::from(self.q_offset),
+            i64::from(self.q_end),
+        )
+    }
+}
+
 /// A subject with HSPs, as the Seq-aligns name and measure it.
 #[derive(Clone, Copy, Debug)]
 pub struct SubjectRecord<'a> {
@@ -132,6 +143,9 @@ pub struct SubjectRecord<'a> {
     /// The start of the `-subject_loc` interval in the record (0 without one, and always 0
     /// for `-db`), which `s_RemapToSubjectLoc` adds to the subject row.
     pub offset: i32,
+    /// The strings of the Seq-aligns' `use_this_seqid` (`ParsedSubject::use_this_seqid`), empty
+    /// when they have none: every search but a `-db` search with a positive list.
+    pub use_this_seqid: &'a [Vec<u8>],
 }
 
 /// What a whole search contributes to every document.
@@ -183,6 +197,8 @@ pub enum SubjectNames<'a> {
     Records(&'a [FastaRecord]),
     Database {
         ordinals: &'a [u32],
+        /// The OID of each ordinal id, which names a sequence without parsed Seq-ids.
+        oids: crate::seqdb::OidMap<'a>,
         title: &'a [u8],
         /// The subjects with parsed Seq-ids by rank (empty without them): their Seq-align id
         /// (`report::db_subject::ParsedSubject::alignment_id`).
@@ -207,20 +223,28 @@ impl<'a> SubjectNames<'a> {
     pub fn record(&self, index: usize, offset: usize, database_length: i32) -> SubjectRecord<'a> {
         match *self {
             SubjectNames::Records(records) => SubjectRecord {
-                id: SeqId::Local(&records[index].local_id),
+                id: records[index].seq_id(),
                 searched_length: records[index].seq().len() as i32,
                 offset: offset as i32,
+                use_this_seqid: &[],
             },
             SubjectNames::Database {
-                ordinals, parsed, ..
-            } => SubjectRecord {
-                id: match parsed.get(index).and_then(Option::as_deref) {
-                    Some(subject) => SeqId::Db(subject.alignment_id()),
-                    None => SeqId::BlOrdId(ordinals[index]),
-                },
-                searched_length: database_length,
-                offset: 0,
-            },
+                ordinals,
+                oids,
+                parsed,
+                ..
+            } => {
+                let subject = parsed.get(index).and_then(Option::as_deref);
+                SubjectRecord {
+                    id: match subject {
+                        Some(subject) => SeqId::Db(subject.alignment_id()),
+                        None => SeqId::BlOrdId(oids.oid(ordinals[index])),
+                    },
+                    searched_length: database_length,
+                    offset: 0,
+                    use_this_seqid: crate::report::db_subject::use_this_seqid(subject),
+                }
+            }
         }
     }
 }
@@ -237,7 +261,7 @@ impl<'a> QueryNames<'a> {
     /// The record of query `index`.
     pub fn record(&self, index: usize) -> QueryRecord<'a> {
         QueryRecord {
-            id: SeqId::Local(&self.records[index].local_id),
+            id: self.records[index].seq_id(),
             searched_length: self.searched_lengths[index] as i32,
             offset: self.placements.offset(index) as i32,
         }

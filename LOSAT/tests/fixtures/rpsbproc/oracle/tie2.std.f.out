@@ -1,0 +1,40 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/tie2.asn
+#Output data file:	(stdout)
+#Annotation data at:	data
+#E-Value cutoff:	0.01
+#Redundancy:	Standard
+#Data requested:	Domain hits
+#Output format -- tab-delimited table
+#Show superfamilies: YES
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	blastp	2.17.0+	Cdd	BLOSUM62	2e-06
+QUERY	Query_1	Peptide	430	NP_415929.1 phosphatase domain-containing protein YnbD [Escherichia coli str. K-12 substr. MG1655]
+DOMAINS
+1	Query_1	Specific	350376	295	429	3.06789e-55	179.393	cd14527	DSP_bac	-	531719
+1	Query_1	Specific	513744	306	428	2.2919e-36	129.694	pfam00782	DSPc	-	531719
+1	Query_1	Specific	214551	299	430	7.20422e-36	128.94	smart00195	DSPc	-	531719
+1	Query_1	Specific	239481	47	197	9.57818e-33	122.036	cd03386	PAP2_Aur1_like	-	529117
+1	Query_1	Specific	441989	306	430	9.62303e-28	106.979	COG2453	CDC14	-	-
+ENDDOMAINS
+SUPERFAMILIES
+1	Query_1	Superfamily	0	295	429	3.06789e-55	179.393	cl28904	PTP_DSP_cys	-	-
+1	Query_1	Superfamily	0	47	197	9.57818e-33	122.036	cl00474	PAP2_like	-	-
+ENDSUPERFAMILIES
+ENDQUERY
+ENDSESSION	1
+ENDDATA

@@ -1,0 +1,50 @@
+Seq-loc ::= int {
+  from 72,
+  to 91,
+  id general {
+    db "BL_ORD_ID",
+    tag id 0
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 20,
+    to 35,
+    id general {
+      db "BL_ORD_ID",
+      tag id 1
+    }
+  },
+  {
+    from 66,
+    to 77,
+    id general {
+      db "BL_ORD_ID",
+      tag id 1
+    }
+  }
+}
+Seq-loc ::= int {
+  from 15,
+  to 31,
+  id general {
+    db "BL_ORD_ID",
+    tag id 2
+  }
+}
+Seq-loc ::= int {
+  from 23,
+  to 41,
+  id general {
+    db "BL_ORD_ID",
+    tag id 3
+  }
+}
+Seq-loc ::= int {
+  from 76,
+  to 93,
+  id general {
+    db "BL_ORD_ID",
+    tag id 4
+  }
+}

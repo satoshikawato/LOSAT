@@ -1,6 +1,4 @@
-use super::constants::X_DROP_UNGAPPED;
 use crate::core::blast_encoding::COMPRESSION_RATIO;
-use crate::utils::dust::MaskedInterval;
 
 /// BLASTNA alphabet size.
 /// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_encoding.h:91-92
@@ -73,6 +71,7 @@ pub fn build_nucl_score_table(reward: i32, penalty: i32) -> [i32; 256] {
 /// ```c
 /// #define NCBI2NA_UNPACK_BASE(x, N) (((x)>>(2*(N))) & NCBI2NA_MASK)
 /// ```
+#[cfg(test)]
 #[inline]
 fn ncbi2na_unpack_base(byte: u8, n: u8) -> u8 {
     (byte >> (2 * n)) & 0x03
@@ -102,10 +101,11 @@ fn ncbi2na_unpack_base(byte: u8, n: u8) -> u8 {
 /// }
 /// ```
 ///
-/// With `LOSAT_X_BNUNGAPCOUNT` (in the strict set) the same loops run with their step counts
-/// worked out first (`x_ungap_count.rs`); `=0` runs the ported loops below.
+/// LOSAT_X_BNUNGAPCOUNT (graduated 2026-10-27, always on): the same loops run with their step
+/// counts worked out first (`x_ungap_count.rs`). The loop-for-loop port below stays as the
+/// reference of that module's unit test.
 #[inline(always)]
-pub fn extend_hit_ungapped_exact_ncbi(
+pub(crate) fn extend_hit_ungapped_exact_ncbi(
     q_seq: &[u8],        // BLASTNA (1 byte/base)
     s_seq_packed: &[u8], // ncbi2na packed (4 bases/byte)
     q_off: usize,
@@ -114,30 +114,20 @@ pub fn extend_hit_ungapped_exact_ncbi(
     x_dropoff: i32,
     matrix: &[i32; BLASTNA_SIZE * BLASTNA_SIZE],
 ) -> UngappedData {
-    if super::x_ungap_count::on() {
-        super::x_ungap_count::extend_hit_ungapped_exact_counted(
-            q_seq,
-            s_seq_packed,
-            q_off,
-            s_off,
-            subject_len,
-            x_dropoff,
-            matrix,
-        )
-    } else {
-        extend_hit_ungapped_exact_ported(
-            q_seq,
-            s_seq_packed,
-            q_off,
-            s_off,
-            subject_len,
-            x_dropoff,
-            matrix,
-        )
-    }
+    super::x_ungap_count::extend_hit_ungapped_exact_counted(
+        q_seq,
+        s_seq_packed,
+        q_off,
+        s_off,
+        subject_len,
+        x_dropoff,
+        matrix,
+    )
 }
 
-/// The port of `s_NuclUngappedExtendExact` above, loop for loop (`LOSAT_X_BNUNGAPCOUNT=0`).
+/// The port of `s_NuclUngappedExtendExact` above, loop for loop: the reference of the unit test of
+/// `x_ungap_count.rs` (it was the path of `LOSAT_X_BNUNGAPCOUNT=0`).
+#[cfg(test)]
 #[inline(never)]
 pub(crate) fn extend_hit_ungapped_exact_ported(
     q_seq: &[u8],        // BLASTNA (1 byte/base)
@@ -148,7 +138,18 @@ pub(crate) fn extend_hit_ungapped_exact_ported(
     x_dropoff: i32,
     matrix: &[i32; BLASTNA_SIZE * BLASTNA_SIZE],
 ) -> UngappedData {
-    let x = -x_dropoff;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:743-747 (the same at
+    // 913-917 and 1755-1759)
+    // ```c
+    //                s_NuclUngappedExtendExact(query, subject, matrix, q_off,
+    //                                   s_off, -(cutoffs->x_dropoff), ungapped_data);
+    //             }else {
+    //                s_NuclUngappedExtend(query, subject, matrix, q_off, s_end, s_off,
+    //                                  -(cutoffs->x_dropoff), ungapped_data,
+    // ```
+    // A raw X-drop past `Int4` (`INT_MIN`, `core::x_drop`) negates to itself in NCBI's x86-64
+    // build, so the extension never stops at the X-drop; LOSAT negates it the same way.
+    let x = x_dropoff.wrapping_neg();
     let q_len = q_seq.len();
 
     let mut base: isize = 3 - (s_off % COMPRESSION_RATIO) as isize;
@@ -772,7 +773,7 @@ mod small_na_tests {
 ///    }
 /// }
 /// ```
-pub fn extend_hit_ungapped_approx_ncbi(
+pub(crate) fn extend_hit_ungapped_approx_ncbi(
     q_seq: &[u8],        // BLASTNA (1 byte/base)
     s_seq_packed: &[u8], // ncbi2na packed (4 bases/byte)
     q_off: usize,
@@ -784,7 +785,18 @@ pub fn extend_hit_ungapped_approx_ncbi(
     reduced_cutoff: i32,
     matrix: &[i32; BLASTNA_SIZE * BLASTNA_SIZE],
 ) -> UngappedData {
-    let x = -x_dropoff;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:743-747 (the same at
+    // 913-917 and 1755-1759)
+    // ```c
+    //                s_NuclUngappedExtendExact(query, subject, matrix, q_off,
+    //                                   s_off, -(cutoffs->x_dropoff), ungapped_data);
+    //             }else {
+    //                s_NuclUngappedExtend(query, subject, matrix, q_off, s_end, s_off,
+    //                                  -(cutoffs->x_dropoff), ungapped_data,
+    // ```
+    // A raw X-drop past `Int4` (`INT_MIN`, `core::x_drop`) negates to itself in NCBI's x86-64
+    // build, so the extension never stops at the X-drop; LOSAT negates it the same way.
+    let x = x_dropoff.wrapping_neg();
     let q_len = q_seq.len();
 
     let len = (COMPRESSION_RATIO - (s_off % COMPRESSION_RATIO)) % COMPRESSION_RATIO;
@@ -793,7 +805,7 @@ pub fn extend_hit_ungapped_approx_ncbi(
 
     let mut q_idx = q_ext as isize;
     let mut s_idx = (s_ext / COMPRESSION_RATIO) as isize;
-    let left_len = (q_ext.min(s_ext) / COMPRESSION_RATIO) as usize;
+    let left_len = q_ext.min(s_ext) / COMPRESSION_RATIO;
 
     let mut score = 0i32;
     let mut sum = 0i32;
@@ -833,7 +845,7 @@ pub fn extend_hit_ungapped_approx_ncbi(
     // Right extension in 4-base blocks.
     let mut q_idx = q_ext as isize;
     let mut s_idx = (s_ext / COMPRESSION_RATIO) as isize;
-    let right_len = ((q_len - q_ext).min(subject_len - s_ext) / COMPRESSION_RATIO) as usize;
+    let right_len = (q_len - q_ext).min(subject_len - s_ext) / COMPRESSION_RATIO;
     sum = 0;
     new_q = q_idx;
 
@@ -1029,107 +1041,6 @@ mod approx_context_tests {
             (2, 8, 8, 16)
         );
     }
-}
-
-/// Extend an ungapped hit in both directions using X-drop termination.
-///
-/// # Index Semantics
-/// - Left extension starts at i=0 (the seed position itself), extending leftward
-/// - Right extension starts at j=1 (position after seed), avoiding double-counting
-/// - The seed position (q_pos, s_pos) is scored once in the left extension loop
-///
-/// This follows NCBI BLAST's na_ungapped.c pattern where the extension includes
-/// the starting position and extends outward in both directions.
-///
-/// # Arguments
-/// * `q_seq` - Query sequence
-/// * `s_seq` - Subject sequence
-/// * `q_pos` - Seed position in query
-/// * `s_pos` - Seed position in subject
-/// * `reward` - Score for match (typically positive, e.g., 2)
-/// * `penalty` - Score for mismatch (typically negative, e.g., -3)
-/// * `x_drop` - X-drop threshold for termination (optional, uses default if None)
-///
-/// # Returns
-/// (q_start, q_end, s_start, s_end, score) - Half-open interval [start, end)
-pub fn extend_hit_ungapped(
-    q_seq: &[u8],
-    s_seq: &[u8],
-    q_pos: usize,
-    s_pos: usize,
-    reward: i32,
-    penalty: i32,
-    x_drop: Option<i32>,
-) -> (usize, usize, usize, usize, i32) {
-    let x_drop_val = x_drop.unwrap_or(X_DROP_UNGAPPED);
-    let mut current_score = 0;
-    let mut max_score = 0;
-
-    // Left extension: starts at i=0 (seed position) and extends leftward
-    // When i=0: accesses q_seq[q_pos] and s_seq[s_pos] (the seed position)
-    // When i=1: accesses q_seq[q_pos-1] and s_seq[s_pos-1] (one left of seed)
-    let mut best_i = 0;
-    let mut i = 0;
-    let max_left = q_pos.min(s_pos);
-
-    while i <= max_left {
-        let q = unsafe { *q_seq.get_unchecked(q_pos - i) };
-        let s = unsafe { *s_seq.get_unchecked(s_pos - i) };
-        let sc = if q == s { reward } else { penalty };
-        current_score += sc;
-
-        if current_score > max_score {
-            max_score = current_score;
-            best_i = i;
-        } else if (max_score - current_score) > x_drop_val {
-            break;
-        }
-        i += 1;
-    }
-
-    // Right extension: starts at j=1 to avoid double-counting seed position
-    // When j=1: accesses q_seq[q_pos+1] and s_seq[s_pos+1]
-    let mut current_score_r = max_score;
-    let mut max_score_total = max_score;
-    let mut best_j = 0;
-    let mut j = 1;
-
-    while (q_pos + j) < q_seq.len() && (s_pos + j) < s_seq.len() {
-        let q = unsafe { *q_seq.get_unchecked(q_pos + j) };
-        let s = unsafe { *s_seq.get_unchecked(s_pos + j) };
-        let sc = if q == s { reward } else { penalty };
-        current_score_r += sc;
-
-        if current_score_r >= max_score_total {
-            max_score_total = current_score_r;
-            best_j = j;
-        } else if (max_score_total - current_score_r) > x_drop_val {
-            // NCBI BLAST uses only X-drop termination, NOT score <= 0 check
-            // Reference: na_ungapped.c:220-233
-            break;
-        }
-        j += 1;
-    }
-
-    let result = (
-        q_pos - best_i,
-        q_pos + best_j + 1,
-        s_pos - best_i,
-        s_pos + best_j + 1,
-        max_score_total,
-    );
-
-    // Debug coordinate tracking
-    // No NCBI counterpart: LOSAT_DEBUG_COORDS only prints a debug line (the variable is
-    // read once); it does not change any value NCBI computes.
-    if crate::utils::xenv::debug_coords_is_ok() {
-        eprintln!(
-            "[UNGAPPED] q_pos={}, s_pos={}, best_i={}, best_j={} -> q=[{}, {}), s=[{}, {}), score={}",
-            q_pos, s_pos, best_i, best_j, result.0, result.1, result.2, result.3, result.4
-        );
-    }
-
-    result
 }
 
 /// Determine word type for two-stage lookup
@@ -1387,8 +1298,8 @@ where
     // return ((ext_max == ext_to) ? 2 : 1);
     // ```
     if double_ext_max == double_ext_to {
-        return (2, extended, q_off_adjusted, s_off_adjusted);
+        (2, extended, q_off_adjusted, s_off_adjusted)
     } else {
-        return (1, extended, q_off_adjusted, s_off_adjusted);
+        (1, extended, q_off_adjusted, s_off_adjusted)
     }
 }

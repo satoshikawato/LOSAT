@@ -1,15 +1,16 @@
 // The real engine in the browsers (S09, plan §6.2 V-BR and the S10 contracts): the S10
 // contract suites against the adapter's serial reactor and the Engine worker; V-BR,
 // searches through the application compared with the native CLI of the same commit and
-// with NCBI's frozen bytes (TD-5) at 1, 2 and 4 threads; the retained subject (R1); cancel
+// with NCBI's frozen bytes (TD-5) at 1 to 32 threads; the retained subject (R1); cancel
 // and recovery; renewal of the runtime; and the serial fallback. Every project (Chromium,
 // Firefox, WebKit) runs them, on a harness server (support/harness-server.ts). The
 // storage-full cases need the Chrome DevTools Protocol and run in contracts.spec.ts.
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test } from '@playwright/test';
-import type { OutputFormat } from '../../src/domain/output-format';
+import { expect, type BrowserContext } from '@playwright/test';
+import type { OutputFormat } from 'losat/domain';
+import { test } from './support/test';
 import type { RetentionResult, SearchCase, SearchResult } from './harness/engine';
 import { buildHarness, type HarnessFiles } from './support/browser';
 import { ENGINE, NO_ENGINE_REASON } from './support/engine';
@@ -22,6 +23,25 @@ test.setTimeout(900_000);
 /** Where the tests write their records for the gate record (docs/evidence/losat_web_w1). */
 const EVIDENCE = process.env['LOSAT_WEB_EVIDENCE'] || undefined;
 const FORMATS: readonly OutputFormat[] = [0, 6, 7];
+/**
+ * The thread counts of V-BR (WA-RS-03). Auto (web/packages/losat/src/infra/engine-worker/policy.ts) and the Threads list
+ * choose any count from 1 to 32, and a run's mark is Supported only at a count that was checked
+ * (domain/verification.ts). Every case runs on the serial path and on the threaded path at 2, 4,
+ * 8, 16 and 32 threads; one case of each program also runs at every other count.
+ */
+const VBR_THREADS: readonly number[] = [1, 2, 4, 8, 16, 32];
+const OTHER_THREADS: readonly number[] = Array.from({ length: 32 }, (_, i) => i + 1).filter((n) => !VBR_THREADS.includes(n));
+/**
+ * The case of each program that runs at OTHER_THREADS: one whose work the thread count divides
+ * (several records, query batches, the threaded module's own reducer).
+ */
+const EVERY_COUNT_CASES: readonly string[] = ['multi.megablast', 'e2e.blastp.fast', 'blastx.batches', 'tblastn.batches', 'tblastx.threaded-direct'];
+/**
+ * The defaults of the search form's tasks (WA-RS-03), run in a page of their own: in WebKit 26.5,
+ * a page that had run some 95 searches failed the next dc-megablast search with "ran out of
+ * memory" (memory.grow refused) at every thread count, which a new page does not.
+ */
+const TASK_DEFAULT_CASES: readonly string[] = ['multi.megablast', 'dc.default', 'short.default', 'e2e.blastp.fast', 'short.blastp.def', 'pyl.blastx', 'tfast.e2e.def'];
 
 let harness: HarnessFiles;
 let isolated: HarnessServer;
@@ -30,7 +50,7 @@ let notIsolated: HarnessServer;
 /**
  * A TBLASTN search of several query batches (62,500 residues of NZ_CP006932's proteins
  * against 437,500 nt of its genome), as files in a directory of their own: the query is
- * searched in batches of 20,000 residues, each with its own thread pool. The directory is
+ * searched in batches of 20,000 residues, all on the run's thread pool. The directory is
  * made by the worker that runs these tests and removed after them.
  */
 let batchesDir: string | undefined;
@@ -138,16 +158,14 @@ test('run output contract: the writer in the Engine worker, the real Data worker
   expect(withoutQuota).toHaveLength(10);
 });
 
-test('V-BR: searches through the application give the expected bytes at 1, 2 and 4 threads', async ({ context, browserName }) => {
-  test.skip(NATIVE === undefined, NO_NATIVE_REASON);
+/** Runs V-BR searches (each case at each of its thread counts), checks them, and returns the record's rows. */
+async function vbrSearches(context: BrowserContext, runs: readonly (readonly [VbrCase, number])[]): Promise<unknown[]> {
   const page = await openHarness(context, isolated);
-  const cases = vbrCases();
-  const list: SearchCase[] = cases.flatMap((vbr) => [1, 2, 4].map((threads) => searchOf(vbr, threads)));
+  const list: SearchCase[] = runs.map(([vbr, threads]) => searchOf(vbr, threads));
   const results: SearchResult[] = await page.evaluate((searches) => window.losatHarness!.engine.searches(searches), list);
   const rows = [];
   for (const [i, result] of results.entries()) {
-    const vbr = cases[Math.floor(i / 3)]!;
-    const threads = list[i]!.threads as number;
+    const [vbr, threads] = runs[i]!;
     expect.soft(result.status, `${result.id}: ${result.record.error ?? ''}`).toBe('completed');
     if (result.status !== 'completed') continue;
     expect.soft(result.record.runtimePath, `${result.id} ${result.record.fallbackReason ?? ''}`).toBe(threads === 1 ? 'serial' : 'threaded');
@@ -168,8 +186,33 @@ test('V-BR: searches through the application give the expected bytes at 1, 2 and
       memory: result.record.memory,
     });
   }
-  record('v-br', browserName, rows);
+  return rows;
+}
+
+test('V-BR: searches through the application give the expected bytes at 1, 2, 4, 8, 16 and 32 threads', async ({ context, browserName }) => {
+  test.skip(NATIVE === undefined, NO_NATIVE_REASON);
+  const cases = vbrCases().filter((vbr) => !TASK_DEFAULT_CASES.includes(vbr.id));
+  const runs = cases.flatMap((vbr) => VBR_THREADS.map((threads) => [vbr, threads] as const));
+  record('v-br', browserName, await vbrSearches(context, runs));
 });
+
+test('V-BR: the defaults of the tasks give the expected bytes at 1, 2, 4, 8, 16 and 32 threads', async ({ context, browserName }) => {
+  test.skip(NATIVE === undefined, NO_NATIVE_REASON);
+  const cases = vbrCases().filter((vbr) => TASK_DEFAULT_CASES.includes(vbr.id));
+  expect(cases.map((vbr) => vbr.id)).toEqual(TASK_DEFAULT_CASES);
+  const runs = cases.flatMap((vbr) => VBR_THREADS.map((threads) => [vbr, threads] as const));
+  record('v-br-defaults', browserName, await vbrSearches(context, runs));
+});
+
+// One search of each program at every other thread count up to 32, each program in a page of its own.
+if (new Set(vbrCases().filter((vbr) => EVERY_COUNT_CASES.includes(vbr.id)).map((vbr) => vbr.program)).size !== 5) throw new Error('EVERY_COUNT_CASES: one case of each program');
+for (const id of EVERY_COUNT_CASES) {
+  test(`V-BR: ${id} gives the expected bytes at every other thread count up to 32`, async ({ context, browserName }) => {
+    test.skip(NATIVE === undefined, NO_NATIVE_REASON);
+    const vbr = vbrCases().find((candidate) => candidate.id === id)!;
+    record(`v-br-counts-${id}`, browserName, await vbrSearches(context, OTHER_THREADS.map((threads) => [vbr, threads] as const)));
+  });
+}
 
 test('R1: searches of one subject with other queries and options reuse it and give the expected bytes', async ({ context, browserName }) => {
   test.skip(NATIVE === undefined, NO_NATIVE_REASON);
@@ -213,9 +256,10 @@ test('R1: searches of one subject with other queries and options reuse it and gi
   record('r1', browserName, rows);
 });
 
-test('a search that builds one thread pool after another runs threaded from a new runtime', async ({ context }) => {
-  // The first threaded search of a runtime: each query batch starts its pool while the
-  // threads of the previous pool are still returning (the ThreadHost's spare thread workers).
+test('a run of several searches or query batches runs threaded from a new runtime', async ({ context }) => {
+  // The first threaded search of a runtime, whose thread workers are one set: the query
+  // batches, and the two searches of -num_alignments (outfmt 0 has another hit list size than
+  // 6 and 7), all run on the run's one thread pool (with_run_pool).
   const page = await openHarness(context, isolated);
   const batches: VbrCase = {
     id: 'tblastn.query_batches',
@@ -226,15 +270,23 @@ test('a search that builds one thread pool after another runs threaded from a ne
     subject: 'batches_subject.fasta',
     frozen: {},
   };
+  const twoSearches: VbrCase = { ...batches, id: 'tblastn.query_batches.num_alignments', options: ['-num_alignments', '3'] };
   const file = (name: string) => ({ url: `/__extra/${name}`, name });
-  for (const threads of [2, 4]) {
-    const search: SearchCase = { ...searchOf(batches, threads), query: file(batches.query), subject: file(batches.subject) };
-    // A new application (a session with its own options), so that this is the first search of its runtime.
-    const [result] = await page.evaluate((s) => window.losatHarness!.engine.searches([s], { renewal: {} }), search);
-    expect(result!.status, result!.record.error).toBe('completed');
-    expect(result!.record.runtimePath).toBe('threaded');
-    expect(result!.record.threads).toBe(threads);
-    if (NATIVE !== undefined) expectOutputs(batches, result!);
+  for (const vbr of [batches, twoSearches]) {
+    const outputs: string[] = [];
+    for (const threads of [2, 4]) {
+      const search: SearchCase = { ...searchOf(vbr, threads), query: file(vbr.query), subject: file(vbr.subject) };
+      // A new application (a session with its own options), so that this is the first search of its runtime.
+      const [result] = await page.evaluate((s) => window.losatHarness!.engine.searches([s], { renewal: {} }), search);
+      expect(result!.status, result!.record.error).toBe('completed');
+      expect(result!.record.runtimePath).toBe('threaded');
+      expect(result!.record.threads).toBe(threads);
+      outputs.push(JSON.stringify(result!.sha256));
+      // The two searches' CLI warnings differ by format (abi_v2.md §8), which nativeExpectation
+      // does not take; V-ABI (web/adapter/tests/v_abi.js) compares such runs with the native CLI.
+      if (NATIVE !== undefined && vbr === batches) expectOutputs(vbr, result!);
+    }
+    expect(outputs[1], `${vbr.id}: the same bytes at 2 and 4 threads`).toBe(outputs[0]);
   }
 });
 
@@ -274,11 +326,44 @@ test('a cancelled search ends its runtime; the next search runs in a new one wit
     expect(result.next.sha256[0]).toBe(next.frozen[0]!.sha256);
     expect(result.next.record.runtimeGeneration).toBe(2);
     expect(result.next.record.runtimePath).toBe(threads === 1 ? 'serial' : 'threaded');
+    // A cancel during a threaded search ends the runtime once the keeper grew its memory.
+    expect(result.runtimeEnds).toEqual([threads === 1 ? 'at-once' : 'grown']);
     if (NATIVE !== undefined) expectOutputs(next, result.next);
     rows.push({ threads, cancelMs: Math.round(result.cancelMs), nextPrepareMs: Math.round(result.nextPrepareMs) });
     console.log(`cancel n=${threads}: cancelled in ${Math.round(result.cancelMs)} ms; next search prepared in ${Math.round(result.nextPrepareMs)} ms`);
   }
   record('cancel', browserName, rows);
+});
+
+test('an instance that stops during a search ends its runtime', async ({ context }) => {
+  const page = await openHarness(context, isolated);
+  const vbr = vbrCases()[0]!;
+  for (const threads of [1, 4]) {
+    const result = await page.evaluate((s) => window.losatHarness!.engine.stopDuringSearch(s), searchOf(vbr, threads));
+    expect(result.stopped.status).toBe('failed');
+    expect(result.stopped.record.error).toContain('a test stopped the engine at its first output');
+    // A serial instance is never in use as a threaded one. On 4 threads the engine writes its
+    // outputs after its pool's threads have been joined (web/adapter/src/run.rs, with_run_pool),
+    // so whether one of them has not yet returned when the Gateway ends the runtime is a matter
+    // of timing; the use count decides it either way (instance-use.ts, and the unit tests).
+    expect(result.runtimeEnds).toHaveLength(1);
+    if (threads === 1) expect(result.runtimeEnds).toEqual(['at-once']);
+    else expect(['at-once', 'grown']).toContain(result.runtimeEnds[0]);
+  }
+});
+
+test('a cancel while the threaded instance warms up ends its runtime once the keeper grew the memory', async ({ context }) => {
+  const page = await openHarness(context, isolated);
+  const vbr = vbrCases()[0]!;
+  const result = await page.evaluate((s) => window.losatHarness!.engine.cancelDuringWarmUp(s), searchOf(vbr, 4));
+  expect(result.cancelled).toBe('cancelled');
+  // A warm-up sends no message, but its calls into the threaded instance are a use of it
+  // (instance-use.ts): the Gateway ends the runtime after the keeper's grow, not at once.
+  expect(result.runtimeEnds).toEqual(['grown']);
+  expect(result.next.status, result.next.record.error).toBe('completed');
+  expect(result.next.record.runtimeGeneration).toBe(2);
+  expect(result.next.record.runtimePath).toBe('threaded');
+  expect(result.next.sha256[0]).toBe(vbr.frozen[0]!.sha256);
 });
 
 test('a runtime renewed after every search gives the same bytes and registers the subject again', async ({ context }) => {
@@ -302,6 +387,24 @@ test('a runtime renewed after every search gives the same bytes and registers th
     expect(result.sha256[0], result.id).toBe(vbr.frozen[0]!.sha256);
     if (NATIVE !== undefined) expectOutputs(vbr, result);
   }
+});
+
+test('threaded runtimes started one after another in one page all run threaded: an ended runtime does not keep its shared memory alive', async ({ context }) => {
+  const page = await openHarness(context, isolated);
+  const vbr = vbrCases()[1]!;
+  // More runtimes than one page of WebKit 26.5 (build 2311 of Playwright 1.61.1, Linux) held shared memories of the
+  // threaded module at once (15 of 4 GiB): a memory that an ended runtime leaves alive until a
+  // thread collects it takes the place of a later one.
+  const list: SearchCase[] = Array.from({ length: 32 }, (_, i) => ({ ...searchOf(vbr, 2), id: `runtime ${i + 1} n=2` }));
+  const renewed: RetentionResult[] = await page.evaluate(
+    (cases) => window.losatHarness!.engine.retention(cases, { renewal: { maxRuns: 1 } }),
+    list,
+  );
+  expect(renewed.map((result) => `${result.id}: ${result.error ?? result.runtime?.fallbackReason ?? result.runtime?.path}`)).toEqual(
+    list.map((search) => `${search.id}: threaded`),
+  );
+  expect(renewed.map((result) => result.runtime?.runtimeGeneration)).toEqual(list.map((_, i) => i + 1));
+  for (const result of renewed) expect(result.sha256[0], result.id).toBe(vbr.frozen[0]!.sha256);
 });
 
 test('without cross-origin isolation, a threaded search runs on the serial module with the reason', async ({ context }) => {

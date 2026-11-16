@@ -1,0 +1,2 @@
+- A taxid or seqid list that keeps no sequence of the database (`-negative_taxids`, `-seqidlist` and the others) is searched as in NCBI BLAST+: exit status 0, `Warning: [<program>] <query id>: Filtering resulted in an empty database. ` for each query of a searched batch, and the report of each format without hits, with NCBI's statistics (the length of the database's first sequence, one sequence). LOSAT refused these runs before.
+- `-outfmt 11` with one of these lists writes NCBI's `TaxidList` or `NegativeTaxidList` program option.

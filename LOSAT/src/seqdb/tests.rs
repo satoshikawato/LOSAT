@@ -148,6 +148,11 @@ fn check_sequence(block: &SequenceBlock, i: usize, letters: &[u8], what: &str) {
                 encode_iupac_to_blastna(&upper).as_slice(),
                 "{what}: BLASTNA"
             );
+            assert_eq!(
+                block.nucleotide_iupac(i).expect("IUPAC"),
+                upper,
+                "{what}: IUPAC"
+            );
             // The 2-bit data: the base itself, or for an ambiguity code one of
             // the bases it stands for (makeblastdb picks one at random).
             let packed = block.nucleotide_packed(i);
@@ -192,7 +197,9 @@ fn check_database(db: &SeqDb, entries: &[Entry], max_bytes: u64, name: &str) {
     assert_eq!(db.num_seqs() as usize, entries.len(), "{name}: sequences");
     let mut next = 0u32;
     let mut blocks = 0;
+    let mut listed = Vec::new();
     while let Some(range) = db.next_block(next, max_bytes) {
+        listed.push(range);
         assert_eq!(range.first_ordinal, next, "{name}: blocks are contiguous");
         assert!(!range.is_empty(), "{name}: a block holds a sequence");
         let volume = &db.volumes()[range.volume];
@@ -223,6 +230,31 @@ fn check_database(db: &SeqDb, entries: &[Entry], max_bytes: u64, name: &str) {
     assert!(db.next_block(next, max_bytes).is_none());
     if max_bytes == 0 {
         assert_eq!(blocks, entries.len(), "{name}: one sequence per block");
+    }
+    check_listed_blocks(db, &listed, max_bytes, name);
+}
+
+/// LOSAT_X_BNDBSMALL: `x_next_blocks` lists the blocks of `next_block` (`listed`), whole or
+/// from any of them on, in runs of 1 offset to the whole volume.
+fn check_listed_blocks(db: &SeqDb, listed: &[BlockRange], max_bytes: u64, name: &str) {
+    assert_eq!(db.x_next_blocks(0, max_bytes, usize::MAX), listed, "{name}");
+    for entries in [1, 2, 3, 5, 1 << 14] {
+        let what = format!("{name} within {max_bytes}, runs of {entries}");
+        assert_eq!(
+            db.x_next_blocks_in(0, max_bytes, usize::MAX, entries),
+            listed,
+            "{what}"
+        );
+        for (k, range) in listed.iter().enumerate() {
+            for max in [1, 2, usize::MAX] {
+                let want = &listed[k..listed.len().min(k.saturating_add(max))];
+                let got = db.x_next_blocks_in(range.first_ordinal, max_bytes, max, entries);
+                assert_eq!(got, want, "{what} from {} max {max}", range.first_ordinal);
+            }
+        }
+        assert!(db
+            .x_next_blocks_in(db.num_seqs(), max_bytes, usize::MAX, entries)
+            .is_empty());
     }
 }
 
@@ -554,6 +586,7 @@ fn both_ambiguity_formats_are_read() {
     assert_eq!(block.ambiguity_bytes(6), [0, 0, 0, 0]);
     assert!(block.ambiguity_runs(6).unwrap().is_empty());
     assert_eq!(block.nucleotide_blastna(6).unwrap(), [15, 2, 15]);
+    assert_eq!(block.nucleotide_iupac(6).unwrap(), b"G");
 }
 
 fn open_error(name: &str, seqtype: SeqType) -> SeqDbError {
@@ -564,13 +597,108 @@ fn open_error(name: &str, seqtype: SeqType) -> SeqDbError {
 }
 
 #[test]
+fn the_first_header_check_reads_the_stored_lines() {
+    // Line RG D1a-2 (E): search programs check the first headers after the list
+    // (`common::database::restrict_database`). A seqid rule that keeps no line of OID 0 refuses
+    // the reads of that sequence, not the check of a database without parsed Seq-ids.
+    let mut db = SeqDb::open(&db_name("prot_v4"), SeqType::Protein).unwrap();
+    let rule = std::sync::Arc::new(super::filter::DeflineRule::Seqids(vec![
+        b"NOSUCH_1".to_vec()
+    ]));
+    for (volume, &start) in db.volumes.iter_mut().zip(&db.volume_starts) {
+        volume.set_defline_rule(rule.clone(), start);
+    }
+    assert!(db.deflines(0).is_err());
+    assert!(!db.has_parsed_seqids().unwrap());
+}
+
+#[test]
+fn a_seqid_rule_reads_ordinal_ids_as_oids_in_the_database() {
+    // Line DBID ordsl: NCBI's filtered header read adds the volume's first OID to the tag of each
+    // `BL_ORD_ID` before the list's rule reads the Seq-ids (`x_GetHdrAsn1` with `adjust_oids`),
+    // so a list's `gnl|BL_ORD_ID|n` keeps the line of OID n, not that of the n-th sequence of a
+    // later volume (prot_mv: six volumes, each record's stored tag its number in the volume).
+    let mut db = SeqDb::open(&db_name("prot_mv"), SeqType::Protein).unwrap();
+    let later = db.volume_starts[1];
+    assert!(later > 0);
+    let with_rule = |db: &mut SeqDb, id: String| {
+        let rule = std::sync::Arc::new(super::filter::DeflineRule::Seqids(vec![id.into_bytes()]));
+        let starts = db.volume_starts.clone();
+        for (volume, start) in db.volumes.iter_mut().zip(starts) {
+            volume.set_defline_rule(rule.clone(), start);
+        }
+    };
+    with_rule(&mut db, format!("BL_ORD_ID:{later}"));
+    assert_eq!(db.deflines(later).unwrap()[0].bl_ord_id, later);
+    assert!(db.deflines(0).is_err());
+    with_rule(&mut db, "BL_ORD_ID:0".to_string());
+    assert_eq!(db.deflines(0).unwrap()[0].bl_ord_id, 0);
+    assert!(db.deflines(later).is_err());
+    // A negative list removes the line whose tag plus the volume's first OID it names.
+    let with_negative = |db: &mut SeqDb, id: String| {
+        let rule = std::sync::Arc::new(super::filter::DeflineRule::NegativeSeqids(vec![
+            id.into_bytes()
+        ]));
+        let starts = db.volume_starts.clone();
+        for (volume, start) in db.volumes.iter_mut().zip(starts) {
+            volume.set_defline_rule(rule.clone(), start);
+        }
+    };
+    with_negative(&mut db, format!("BL_ORD_ID:{later}"));
+    assert!(db.deflines(later).is_err());
+    assert_eq!(db.deflines(0).unwrap()[0].bl_ord_id, 0);
+    with_negative(&mut db, "BL_ORD_ID:0".to_string());
+    assert!(db.deflines(0).is_err());
+    assert_eq!(db.deflines(later).unwrap()[0].bl_ord_id, later);
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1774-1803 and
+// seqdbatlas.cpp:114-127 (quoted at `Volume::protein_mapped_bytes_after`)
+/// After a protein's sentinel byte NCBI's mapping of the volume's sequence file holds the volume's
+/// next proteins, each with its sentinel, to the end of the file, then the zeros of the file's last
+/// memory page: after a volume's last protein only those zeros, nothing of the next volume.
+#[test]
+fn a_proteins_mapped_bytes_after_are_the_rest_of_its_volume_and_page() {
+    for name in ["prot_v4", "prot_mv"] {
+        let db = SeqDb::open(&db_name(name), SeqType::Protein).unwrap();
+        let mut seen_last = 0;
+        for ordinal in 0..db.num_seqs() {
+            let at = db.find_volume(ordinal).unwrap();
+            let vol = &db.volumes()[at.volume];
+            let psq = volume::with_extension(vol.base(), SeqType::Protein, "sq");
+            let psq = std::fs::metadata(psq).unwrap().len();
+            let page_rest = psq.next_multiple_of(super::file::MAP_PAGE) - psq;
+            let expected: u64 = (at.vol_oid + 1..vol.num_oids())
+                .map(|oid| u64::from(vol.protein_length(oid).unwrap()) + 1)
+                .sum();
+            let after = db.protein_mapped_bytes_after(ordinal).unwrap();
+            assert_eq!(after, expected + page_rest, "{name} {ordinal}");
+            if at.vol_oid == 0 {
+                // The file's first byte (a sentinel), the protein and its sentinel, the rest.
+                let length = u64::from(vol.protein_length(0).unwrap());
+                assert_eq!(1 + length + 1 + expected, psq, "{name} {ordinal}");
+            }
+            if at.vol_oid + 1 == vol.num_oids() {
+                assert_eq!(after, page_rest, "{name} {ordinal}");
+                assert_eq!((psq + after) % super::file::MAP_PAGE, 0, "{name} {ordinal}");
+                seen_last += 1;
+            }
+        }
+        assert_eq!(seen_last, db.volumes().len(), "{name}");
+        assert_eq!(db.volumes().len() > 1, name == "prot_mv");
+    }
+}
+
+#[test]
 fn databases_that_need_unread_data_are_rejected() {
-    // A database with parsed Seq-ids opens; the check of the search programs
-    // that read ordinal ids only refuses it, as the reader's open did before.
+    // A database with parsed Seq-ids opens and says so; the decoder of the ordinal ids
+    // refuses its headers, as the reader's open did before.
     for name in ["prot_ids_v4", "prot_ids_v5"] {
         let db =
             SeqDb::open(&db_name(name), SeqType::Protein).unwrap_or_else(|e| panic!("{name}: {e}"));
-        let error = db.check_ordinal_ids().expect_err("parsed Seq-ids");
+        assert!(db.has_parsed_seqids().unwrap(), "{name}");
+        let error = db.deflines(0).expect_err("parsed Seq-ids");
+        assert!(error.is_parsed_seqids(), "{name}: {error}");
         assert!(
             matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains("parsed Seq-ids")),
             "{name}: {error}"
@@ -578,29 +706,27 @@ fn databases_that_need_unread_data_are_rejected() {
         assert!(
             error.to_string().ends_with(&format!(
                 "{name}.phr: unsupported database: the database stores parsed Seq-ids \
-                 (makeblastdb -parse_seqids, or a database distributed by NCBI); LOSAT's search \
-                 programs read them, its psiblast reads databases built without -parse_seqids \
-                 only"
+                 (makeblastdb -parse_seqids, or a database distributed by NCBI), which the \
+                 decoder of the ordinal ids does not read"
             )),
             "{name}: {error}"
         );
         assert_eq!(db.defline_set(0).unwrap().deflines.len(), 1, "{name}");
     }
     let db = SeqDb::open(&db_name("prot_v4"), SeqType::Protein).unwrap();
-    db.check_ordinal_ids().unwrap();
-    for (name, key) in [("alias_gilist", "GILIST")] {
-        let error = open_error(name, SeqType::Protein);
-        assert!(
-            matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains(key)),
-            "{name}: {error}"
-        );
-    }
-    // NCBI counts prot_v4 twice here (30 sequences reported, 20 read).
-    let error = open_error("alias_twice", SeqType::Protein);
+    assert!(!db.has_parsed_seqids().unwrap());
+    let (name, key) = ("alias_gilist", "GILIST");
+    let error = open_error(name, SeqType::Protein);
     assert!(
-        matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains("more than once")),
-        "{error}"
+        matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains(key)),
+        "{name}: {error}"
     );
+    // NCBI counts prot_v4 twice here (30 sequences reported, 20 read): the volume is opened
+    // once, the walks count it for each alias node that names it (line RG, D1a).
+    let db = SeqDb::open(&db_name("alias_twice"), SeqType::Protein).unwrap();
+    assert_eq!((db.num_seqs(), db.num_oids()), (20, 20));
+    assert_eq!((db.ncbi_num_seqs(), db.printed_num_seqs()), (30, 30));
+    assert_eq!(db.statistics_numbers(), (2403, 30));
 }
 
 #[test]
@@ -632,50 +758,336 @@ fn alias_nseq_and_length_that_equal_the_sums_are_read() {
     assert_eq!(db.volumes().len(), 8);
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1575-1595
+// (`WalkNodes`, quoted at `alias::walk_nodes`): a node with the key gives its value and is not
+// descended into; NCBI's `NStr` functions convert it, and a value that does not convert is the
+// `CStringException` of `Error: <what()>` (exit status 255).
 #[test]
-fn alias_nseq_and_length_that_differ_from_the_sums_are_rejected() {
-    for (name, key, shown) in [
-        ("alias_nseq_high", "NSEQ", "(21)"),
-        ("alias_length_low", "LENGTH", "(1601)"),
-        ("alias_nseq_plus", "NSEQ", "(+20)"),
-        ("alias_nseq_exp", "NSEQ", "(2e1)"),
-        ("alias_length_space", "LENGTH", "(1 602)"),
-        // The inner node is right and the outer one has LENGTH 2402 (sum 2403).
-        ("alias_sums_nested_bad", "LENGTH", "(2402)"),
-        // The inner alias file is wrong, although the outer node's values would
-        // make NCBI skip it.
-        ("alias_sums_inner_bad", "NSEQ", "(21)"),
+fn alias_nseq_and_length_are_ncbis_walks() {
+    // NSEQ and LENGTH that are not the sums are NCBI's counts (line RG, D1a); the volumes and
+    // their ordinal ids stay those of the volumes.
+    for (name, counts) in [
+        ("alias_nseq_high", (21, 1602)),
+        ("alias_length_low", (20, 1601)),
+        // `NStr::StringToInt8` reads a leading plus sign.
+        ("alias_nseq_plus", (20, 1602)),
+        ("alias_sums_nested_bad", (30, 2402)),
+        // The outer node's values stop the walk: the inner node's NSEQ 21 is never read.
+        ("alias_sums_inner_bad", (31, 2403)),
     ] {
-        let error = open_error(name, SeqType::Protein);
-        assert!(
-            matches!(&error, SeqDbError::Unsupported { message, .. }
-                if message.contains(&format!("alias file key {key} {shown}"))),
-            "{name}: {error}"
+        let db = SeqDb::open(&db_name(name), SeqType::Protein)
+            .unwrap_or_else(|error| panic!("{name}: {error}"));
+        assert_eq!(
+            (db.ncbi_num_seqs(), db.total_length()),
+            counts,
+            "{name}: GetNumSeqs and GetTotalLength"
         );
-        let SeqDbError::Unsupported { path, .. } = &error else {
-            unreachable!()
-        };
-        assert!(
-            path.extension().is_some_and(|ext| ext == "pal"),
-            "{name}: the error names an alias file: {}",
-            path.display()
+        assert_eq!(
+            (db.printed_num_seqs(), db.printed_total_length()),
+            (counts.0, counts.1),
+            "{name}: the reports' counts"
+        );
+        assert_eq!(
+            db.statistics_numbers(),
+            (counts.1 as i64, counts.0),
+            "{name}"
+        );
+        assert_eq!(
+            db.num_seqs(),
+            db.num_oids(),
+            "{name}: every OID is included"
         );
     }
-    // The wrong value is named together with the sum.
-    let error = open_error("alias_nseq_high", SeqType::Protein);
-    assert!(
-        error.to_string().contains(
-            "alias file key NSEQ (21) differs from the number of sequences of its databases (20)"
-        ),
-        "{error}"
+    for (name, value, kind) in [
+        ("alias_nseq_exp", "2e1", "Int8"),
+        ("alias_length_space", "1 602", "Uint8"),
+    ] {
+        let error = open_error(name, SeqType::Protein);
+        let exception = error
+            .ncbi_exception()
+            .unwrap_or_else(|| panic!("{name}: {error}"));
+        assert!(
+            exception
+                .what()
+                .contains(&format!("Cannot convert string '{value}' to {kind}")),
+            "{name}: {}",
+            exception.what()
+        );
+    }
+}
+
+#[test]
+fn alias_count_keys_follow_ncbis_walks() {
+    // prot_v4: 10 sequences, 801 letters, the longest 300.
+    let dir = temp_dir("walks");
+    copy_database("prot_v4", &["pin", "psq", "phr"], &dir);
+    let open = |text: &str| {
+        std::fs::write(dir.join("w.pal"), text).unwrap();
+        SeqDb::open(dir.join("w").to_str().unwrap(), SeqType::Protein)
+    };
+    let both = |inner: &str| {
+        std::fs::write(dir.join("inner.pal"), inner).unwrap();
+    };
+    // Siblings add up; a branch without the key counts its volumes.
+    both("DBLIST prot_v4\nNSEQ 7\nLENGTH 70\n");
+    let db = open("DBLIST inner prot_v4\n").unwrap();
+    assert_eq!((db.ncbi_num_seqs(), db.total_length()), (17, 871));
+    assert_eq!((db.num_seqs(), db.num_oids()), (10, 10));
+    // `(int)` of the Int8 walk: 2^32 + 1 is 1.
+    let db = open("DBLIST prot_v4\nNSEQ 4294967297\n").unwrap();
+    assert_eq!(db.ncbi_num_seqs(), 1);
+    // MIN_SEQ_LENGTH: the smallest value, 0 (then BLAST_SEQSRC_MINLENGTH) for a branch of
+    // volumes alone; never changed by a list-less search otherwise.
+    assert_eq!(
+        open("DBLIST prot_v4\nMIN_SEQ_LENGTH 50\n")
+            .unwrap()
+            .min_length(),
+        50
     );
-    let error = open_error("alias_length_low", SeqType::Protein);
-    assert!(
-        error.to_string().contains(
-            "alias file key LENGTH (1601) differs from the total length of its databases (1602)"
-        ),
-        "{error}"
+    both("DBLIST prot_v4\nMIN_SEQ_LENGTH 50\n");
+    assert_eq!(open("DBLIST inner prot_v4\n").unwrap().min_length(), 10);
+    assert_eq!(open("DBLIST prot_v4\n").unwrap().min_length(), 10);
+    // STATS_*: 0 for a branch without the key, a sibling's value is still used; they replace
+    // the statistics' numbers only when positive.
+    both("DBLIST prot_v4\nSTATS_NSEQ 40\nSTATS_TOTLEN 4000\n");
+    let db = open("DBLIST inner prot_v4\n").unwrap();
+    assert_eq!((db.num_seqs_stats(), db.total_length_stats()), (40, 4000));
+    assert_eq!(db.statistics_numbers(), (4000, 40));
+    assert_eq!(
+        (db.printed_num_seqs(), db.printed_total_length()),
+        (20, 1602)
     );
+    let db = open("DBLIST prot_v4\nSTATS_NSEQ 0\nSTATS_TOTLEN 0\n").unwrap();
+    assert_eq!(db.statistics_numbers(), (801, 10));
+    let db = open("DBLIST prot_v4\nSTATS_TOTLEN 5000\n").unwrap();
+    assert_eq!(db.statistics_numbers(), (5000, 10));
+    // NSEQ 0: NCBI warns that the database is empty and searches its sequences; the statistics
+    // count no sequence.
+    let db = open("DBLIST prot_v4\nNSEQ 0\n").unwrap();
+    assert!(db.filtered_empty());
+    assert_eq!((db.num_seqs(), db.statistics_numbers()), (10, (801, 0)));
+    // The average length reads no STATS_* key and divides by at least one.
+    assert_eq!(db.average_length(), 801);
+    // A repeated key takes the later value (seqdbalias.cpp:446-449).
+    let db = open("DBLIST prot_v4\nNSEQ 10\nNSEQ 99\n").unwrap();
+    assert_eq!(db.ncbi_num_seqs(), 99);
+    // NCBI's `int` and `Int8` through the statistics (line RG D1a-3): a negative NSEQ, one of
+    // 2^31 (INT_MIN), a LENGTH of 2^63 or more (negative: the setup reads OID 0's length and one
+    // sequence, the Gumbel block the negative total, and the results are not sorted).
+    let db = open("DBLIST prot_v4\nNSEQ -1\n").unwrap();
+    assert_eq!(db.statistics_numbers(), (801, -1));
+    assert_eq!((db.printed_num_seqs(), db.average_length()), (-1, 801));
+    let db = open("DBLIST prot_v4\nNSEQ 2147483648\n").unwrap();
+    assert_eq!(db.statistics_numbers(), (801, i32::MIN));
+    let db = open("DBLIST prot_v4\nLENGTH 9223372036854775809\n").unwrap();
+    let statistics = db.statistics();
+    assert_eq!(statistics.setup_count, 1);
+    assert_eq!(statistics.gumbel_db_length, i64::MIN + 1);
+    assert_eq!(statistics.engine_db_length, i64::MIN + 1);
+    assert!(!statistics.per_subject() && !statistics.sorts_results());
+    assert_eq!(db.printed_total_length(), 9_223_372_036_854_775_809);
+    let db = open("DBLIST prot_v4\nLENGTH 4294967296000000000\n").unwrap();
+    assert!(db.statistics().sorts_results());
+    // `LENGTH 0` over sequences: NCBI's statistics of each subject (line RG D1a-3 part 2), with the
+    // setup's fallback to OID 0 and one sequence; no sort of the results.
+    let db = open("DBLIST prot_v4\nLENGTH 0\n").unwrap();
+    let statistics = db.statistics();
+    assert!(statistics.per_subject() && !statistics.sorts_results());
+    assert_eq!(
+        (statistics.setup_count, statistics.gumbel_db_length),
+        (1, 0)
+    );
+    assert_eq!(statistics.request_count, 10);
+    // FIRST_OID 2^31 is NCBI's INT_MAX (D1a-2 part 2): no OID listed, the range [10, 10), the
+    // walks' counts.
+    let db = open("DBLIST prot_v4\nFIRST_OID 2147483648\n").unwrap();
+    assert_eq!((db.num_seqs(), db.ncbi_num_seqs()), (0, 10));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:110-139
+// (quoted at `SeqDb::read_alias_tree`): without a list the walks run in the order NSEQ, LENGTH,
+// MIN_SEQ_LENGTH, STATS_NSEQ, STATS_TOTLEN after the ranges; with one NCBI scans the totals and
+// walks STATS_* only, and the reports' database, opened again without the list, meets the
+// others (probes p2_err_order and p3_q1 of remaining-gaps-20261112/D).
+#[test]
+fn alias_value_errors_come_in_ncbis_order() {
+    let dir = temp_dir("order");
+    copy_database("prot_v4", &["pin", "psq", "phr"], &dir);
+    std::fs::write(
+        dir.join("o.pal"),
+        "DBLIST prot_v4\nSTATS_NSEQ s1\nMIN_SEQ_LENGTH m1\nLENGTH l1\nNSEQ n1\n",
+    )
+    .unwrap();
+    let name = dir.join("o").to_str().unwrap().to_string();
+    let what = |error: SeqDbError| {
+        error
+            .ncbi_exception()
+            .unwrap_or_else(|| panic!("{error}"))
+            .what()
+    };
+    let error = SeqDb::open(&name, SeqType::Protein).unwrap_err();
+    assert!(what(error).contains("'n1'"));
+    let mut db = SeqDb::open_search_in(
+        &name,
+        SeqType::Protein,
+        &SearchPath::new(&std::env::current_dir().unwrap(), None, None).unwrap(),
+    )
+    .unwrap();
+    db.x_keep_oids(|oid| oid < 3);
+    assert!(what(db.check_alias_values().unwrap_err()).contains("'s1'"));
+    std::fs::write(
+        dir.join("o.pal"),
+        "DBLIST prot_v4\nMIN_SEQ_LENGTH m1\nLENGTH l1\nNSEQ n1\nFIRST_OID f1\n",
+    )
+    .unwrap();
+    // The ranges come first, at the open.
+    let error = SeqDb::open_search_in(
+        &name,
+        SeqType::Protein,
+        &SearchPath::new(&std::env::current_dir().unwrap(), None, None).unwrap(),
+    )
+    .unwrap_err();
+    assert!(what(error).contains("'f1'"));
+    std::fs::write(
+        dir.join("o.pal"),
+        "DBLIST prot_v4\nMIN_SEQ_LENGTH m1\nLENGTH l1\nNSEQ n1\n",
+    )
+    .unwrap();
+    let mut db = SeqDb::open_search_in(
+        &name,
+        SeqType::Protein,
+        &SearchPath::new(&std::env::current_dir().unwrap(), None, None).unwrap(),
+    )
+    .unwrap();
+    db.x_keep_oids(|oid| oid < 3);
+    db.check_alias_values().unwrap();
+    assert!(what(db.read_name_records(&name, false).unwrap_err()).contains("'n1'"));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:131-206
+// (quoted at `alias::range_mask`): a node's range is ANDed with its parent's, the paths to one
+// volume are ORed, and the OIDs count the whole volume set.
+#[test]
+fn alias_oid_ranges_select_ncbis_oids() {
+    let dir = temp_dir("ranges");
+    copy_database("prot_v4", &["pin", "psq", "phr"], &dir);
+    copy_database("prot_old", &["pin", "psq", "phr"], &dir);
+    let write = |file: &str, text: &str| std::fs::write(dir.join(file), text).unwrap();
+    let open = |name: &str| SeqDb::open(dir.join(name).to_str().unwrap(), SeqType::Protein);
+    let oids = |db: &SeqDb| {
+        (0..db.num_seqs())
+            .map(|at| db.oid(at).get())
+            .collect::<Vec<u32>>()
+    };
+    // FIRST_OID and LAST_OID are 1-based and inclusive; the walks are not the range's.
+    write("r.pal", "DBLIST prot_v4\nFIRST_OID 3\nLAST_OID 7\n");
+    let db = open("r").unwrap();
+    assert_eq!(oids(&db), [2, 3, 4, 5, 6]);
+    assert_eq!((db.ncbi_num_seqs(), db.total_length()), (10, 801));
+    assert!(!db.is_restricted());
+    // The schedules read the length of the included sequences, not NCBI's walk.
+    let lengths = |db: &SeqDb| {
+        (0..db.num_seqs())
+            .map(|at| u64::from(db.protein_length(at).unwrap()))
+            .sum::<u64>()
+    };
+    assert_eq!(db.included_length().unwrap(), lengths(&db));
+    assert!(lengths(&db) < 801);
+    assert_eq!(open("prot_v4").unwrap().included_length().unwrap(), 801);
+    // Nested ranges: the intersection.
+    write("n.pal", "DBLIST r\nFIRST_OID 5\n");
+    assert_eq!(oids(&open("n").unwrap()), [4, 5, 6]);
+    // Two alias files over one volume: the union.
+    write("a.pal", "DBLIST prot_v4\nLAST_OID 2\n");
+    write("u.pal", "DBLIST a r\n");
+    let db = open("u").unwrap();
+    assert_eq!(oids(&db), [0, 1, 2, 3, 4, 5, 6]);
+    assert_eq!(db.ncbi_num_seqs(), 20);
+    // FIRST_OID 0 is FIRST_OID 1; a range past the end or empty includes nothing.
+    write("z.pal", "DBLIST prot_v4\nFIRST_OID 0\nLAST_OID 1\n");
+    assert_eq!(oids(&open("z").unwrap()), [0]);
+    write("e.pal", "DBLIST prot_v4\nFIRST_OID 8\nLAST_OID 4\n");
+    let db = open("e").unwrap();
+    assert_eq!((db.num_seqs(), db.ncbi_num_seqs()), (0, 10));
+    assert!(!db.filtered_empty());
+    // The OIDs of a range count the whole volume set (prot_old's are 0-9, prot_v4's 10-19).
+    write(
+        "g.pal",
+        "DBLIST prot_old prot_v4\nFIRST_OID 9\nLAST_OID 12\n",
+    );
+    assert_eq!(oids(&open("g").unwrap()), [8, 9, 10, 11]);
+    // A list narrows the range's OIDs.
+    let mut db = open("r").unwrap();
+    db.x_keep_oids(|oid| oid % 2 == 0);
+    assert_eq!(oids(&db), [2, 4, 6]);
+    assert_eq!(db.ncbi_num_seqs(), 3);
+    assert_eq!(db.included_length().unwrap(), lengths(&db));
+    // The range of the only alias file of the -db with another name (D1a-2, survey A): the
+    // OID list holds every OID of prot_v4, the iteration range is r's. A search reads the
+    // listed OIDs inside the range; NCBI's loop from OID 0 also passes the first listed OID at
+    // its first check, made before the list is set up, and the checks after that keep the
+    // included OIDs.
+    let names = |a: &str, b: &str| format!("{} {}", dir.join(a).display(), dir.join(b).display());
+    let db = SeqDb::open(&names("r", "prot_v4"), SeqType::Protein).unwrap();
+    assert_eq!(oids(&db), [2, 3, 4, 5, 6]);
+    assert_eq!(db.included_length().unwrap(), lengths(&db));
+    assert_eq!((db.ncbi_num_seqs(), db.total_length()), (20, 1602));
+    assert_eq!(db.oid_walk().collect::<Vec<u32>>(), [0, 2, 3, 4, 5, 6]);
+    assert_eq!(db.oid_walk().collect::<Vec<u32>>(), [2, 3, 4, 5, 6]);
+    assert!(!db.check_oid(0) && db.check_oid(2) && !db.check_oid(7));
+    assert!((0..20).all(|oid| db.includes_oid(oid) == db.check_oid(oid)));
+    let db = SeqDb::open(&names("r", "prot_v4"), SeqType::Protein).unwrap();
+    assert!(db.check_oid(0) && !db.check_oid(0));
+    // With a list the constructor's scan of the totals follows that loop over the listed OIDs,
+    // and the search reads every listed OID (the constructor sets the range back).
+    let mut db = SeqDb::open_search_in(
+        &names("r", "prot_v4"),
+        SeqType::Protein,
+        &SearchPath::new(&std::env::current_dir().unwrap(), None, None).unwrap(),
+    )
+    .unwrap();
+    db.x_keep_oids(|oid| [0, 4, 8].contains(&oid));
+    assert_eq!(oids(&db), [0, 4, 8]);
+    assert_eq!(db.ncbi_num_seqs(), 2);
+    assert_eq!(db.included_length().unwrap(), lengths(&db));
+    assert_eq!(db.oid_walk().collect::<Vec<u32>>(), [0, 4, 8]);
+    // The loop passes the OID at the range's end when the list holds it and not the OID before
+    // it (`x_CheckOrFindOID` tests `next_oid > m_RestrictEnd`).
+    write("b.pal", "DBLIST prot_old\nFIRST_OID 1\nLAST_OID 5\n");
+    write("t.pal", "DBLIST b\nFIRST_OID 1\nLAST_OID 10\n");
+    let db = SeqDb::open(&names("t", "prot_v4"), SeqType::Protein).unwrap();
+    assert_eq!(oids(&db), [0, 1, 2, 3, 4]);
+    let walk = [0, 1, 2, 3, 4, 10];
+    assert_eq!(db.oid_walk().collect::<Vec<u32>>(), walk);
+    assert_eq!(db.oid_walk().collect::<Vec<u32>>(), walk);
+    // FIRST_OID and LAST_OID of 2^31 or more are NCBI's negative ints: a negative first OID
+    // keeps no OID, a negative last OID is no bound for the list and the end 0 of the range.
+    write("l3g.pal", "DBLIST prot_v4\nLAST_OID 3000000000\n");
+    let db = open("l3g").unwrap();
+    assert_eq!((db.num_seqs(), db.ncbi_num_seqs()), (0, 10));
+    assert_eq!(db.oid_walk().collect::<Vec<u32>>(), [0]);
+    write("f3g.pal", "DBLIST prot_v4\nFIRST_OID 3000000000\n");
+    let db = open("f3g").unwrap();
+    assert_eq!(db.oid_walk().count(), 0);
+    write(
+        "f3l3g.pal",
+        "DBLIST prot_v4\nFIRST_OID 3\nLAST_OID 3000000000\n",
+    );
+    let db = open("f3l3g").unwrap();
+    assert_eq!((db.num_seqs(), db.oid_walk().count()), (0, 0));
+    write("nest.pal", "DBLIST f3l3g\n");
+    assert_eq!(oids(&open("nest").unwrap()), [2, 3, 4, 5, 6, 7, 8, 9]);
+    // FIRST_OID 2^31: NCBI's `INT_MIN--` gives INT_MAX, the range [N, N).
+    write("f31.pal", "DBLIST prot_old\nFIRST_OID 2147483648\n");
+    let db = SeqDb::open(&names("f31", "prot_v4"), SeqType::Protein).unwrap();
+    assert_eq!(oids(&db), Vec::<u32>::new());
+    assert_eq!(db.oid_walk().collect::<Vec<u32>>(), [10]);
+    write("f31p1.pal", "DBLIST prot_old\nFIRST_OID 2147483649\n");
+    let db = SeqDb::open(&names("f31p1", "prot_v4"), SeqType::Protein).unwrap();
+    assert_eq!(oids(&db), (10..20).collect::<Vec<u32>>());
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
@@ -794,13 +1206,11 @@ fn column_files_and_missing_files() {
     let name = dir.join("prot_v4").to_str().unwrap().to_string();
     assert!(SeqDb::open(&name, SeqType::Protein).is_ok());
 
-    // A column file (mask data): rejected.
+    // A column file (mask data), here not even a column index: not read when the database is
+    // opened (`CSeqDBVol::x_OpenAllColumns` runs for the column readers only, `mask_tests.rs`
+    // `a_search_reads_no_column_file`).
     std::fs::write(dir.join("prot_v4.paa"), b"column").unwrap();
-    let error = SeqDb::open(&name, SeqType::Protein).unwrap_err();
-    assert!(
-        matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains("column data")),
-        "{error}"
-    );
+    assert!(SeqDb::open(&name, SeqType::Protein).is_ok());
     std::fs::remove_file(dir.join("prot_v4.paa")).unwrap();
 
     // No sequence file: the database opens (its headers are read) and the
@@ -869,14 +1279,39 @@ fn alias_lines_are_read_as_ncbi_reads_them() {
         ]
     );
     assert_eq!(
-        test_split_quoted(b"one \"two words\"  three\"four\" five"),
+        test_split_quoted(b"one \"two words\"  three\"four\" five", false),
         [b"one".as_slice(), b"two words", b"three", b"four", b"five"]
     );
-    assert!(test_split_quoted(b"  ").is_empty());
+    assert!(test_split_quoted(b"  ", false).is_empty());
     assert_eq!(
-        test_split_quoted(b"\"open quote"),
+        test_split_quoted(b"\"open quote", false),
         [b"open quote".as_slice()]
     );
+    // The reports keep the quotes (`SeqDB_SplitQuoted(..., true)`), and NCBI's `i++` past a
+    // closing quote also skips the byte after it.
+    assert_eq!(
+        test_split_quoted(b"\"a b\" \"c\"", true),
+        [b"\"a b\"".as_slice(), b"\"c\""]
+    );
+    assert_eq!(
+        test_split_quoted(b"\"a\"b c", true),
+        [b"\"a\"".as_slice(), b"c"]
+    );
+    assert_eq!(
+        test_split_quoted(b"x\"open", true),
+        [b"x".as_slice(), b"\"open"]
+    );
+    // The names the reports open alone: white space at their ends dropped, empty ones left
+    // out (probe DI-8f K01, K02: `<db>` of XML2).
+    assert_eq!(
+        super::alias::report_names(" db/n5t  db/nc5 "),
+        ["db/n5t", "db/nc5"]
+    );
+    assert_eq!(
+        super::alias::report_names("\"db/n5t\" \"db/nc5\""),
+        ["\"db/n5t\"", "\"db/nc5\""]
+    );
+    assert_eq!(super::alias::report_names("a\t b"), ["a", "b"]);
 }
 
 /// BER bytes of one `Blast-def-line-set` with one definition line.
@@ -923,9 +1358,9 @@ fn the_taxid_of_a_definition_line_is_read_apart() {
         tagged.push((taxid, record));
     }
     for (taxid, record) in &tagged {
-        assert_eq!(decode_defline_taxids(record, path).unwrap(), [*taxid]);
+        assert_eq!(decode_defline_taxids(record, path, 5).unwrap(), [*taxid]);
         // the title and ordinal id are read the same, and the default decode leaves the taxid 0
-        let deflines = decode_defline_set(record, path).unwrap();
+        let deflines = decode_defline_set(record, path, 5).unwrap();
         assert_eq!(deflines[0].title, b"t1 title");
         assert_eq!(deflines[0].volume_ordinal, 5);
         assert_eq!(deflines[0].taxid, 0);
@@ -937,13 +1372,13 @@ fn the_taxid_of_a_definition_line_is_read_apart() {
         .position(|window| window == [0xa2, 0x80, 0x02, 0x01, 0x00])
         .unwrap();
     record.drain(at..at + 7);
-    assert_eq!(decode_defline_taxids(&record, path).unwrap(), [0]);
+    assert_eq!(decode_defline_taxids(&record, path, 5).unwrap(), [0]);
 }
 
 #[test]
 fn header_records_are_decoded() {
     let path = Path::new("test.phr");
-    let decode = |record: &[u8]| decode_defline_set(record, path);
+    let decode = |record: &[u8]| decode_defline_set(record, path, 0);
 
     // The first record of the fixture, byte for byte.
     let fixture = std::fs::read(fixture_dir().join("db/prot_v4.phr")).unwrap();
@@ -962,7 +1397,8 @@ fn header_records_are_decoded() {
         (vec![0x7f, 0xff, 0xff, 0xff], i32::MAX as u32),
     ] {
         let title = vec![b't'; 300];
-        let deflines = decode(&defline_record(&title, &bl_ord_id(&integer))).unwrap();
+        let record = defline_record(&title, &bl_ord_id(&integer));
+        let deflines = decode_defline_set(&record, path, value).unwrap();
         assert_eq!(deflines[0].volume_ordinal, value);
         assert_eq!(deflines[0].title, title);
     }
@@ -994,6 +1430,28 @@ fn header_records_are_decoded() {
         decode(&defline_record(b"title", &two)),
         Err(SeqDbError::Unsupported { .. })
     ));
+    // The id of another number than the sequence's in the volume: a FASTA id that makeblastdb
+    // -parse_seqids stored as written, unsupported (a parsed Seq-id) whatever the other number.
+    for (stored, oid) in [(5u8, 3u32), (3, 5), (0, 1), (1, 0)] {
+        let record = defline_record(b"title", &bl_ord_id(&[stored]));
+        assert!(decode_defline_set(&record, path, u32::from(stored)).is_ok());
+        let error = decode_defline_set(&record, path, oid).unwrap_err();
+        assert!(error.is_parsed_seqids(), "{stored} at {oid}: {error}");
+        assert!(decode_defline_taxids(&record, path, oid)
+            .unwrap_err()
+            .is_parsed_seqids());
+    }
+    // A damaged record with such an id is a parsed one here; its error comes from the decoder of
+    // every Seq-id (`decode_full`), when a report reads it, as for any other parsed Seq-id.
+    let mut trailing = defline_record(b"title", &bl_ord_id(&[5]));
+    trailing.push(0);
+    assert!(decode_defline_set(&trailing, path, 0)
+        .unwrap_err()
+        .is_parsed_seqids());
+    assert!(matches!(
+        decode_defline_set(&trailing, path, 5),
+        Err(SeqDbError::Format { .. })
+    ));
     // A negative ordinal id, a cut record, bytes after the record.
     assert!(matches!(
         decode(&defline_record(b"title", &bl_ord_id(&[0xff]))),
@@ -1011,13 +1469,11 @@ fn header_records_are_decoded() {
 }
 
 #[test]
-fn every_filtering_or_statistics_alias_key_is_rejected() {
+fn every_filtering_alias_key_is_rejected() {
     let dir = temp_dir("keys");
     copy_database("prot_v4", &["pin", "psq", "phr"], &dir);
     let name = dir.join("keyed").to_str().unwrap().to_string();
     for key in [
-        "FIRST_OID",
-        "LAST_OID",
         "GILIST",
         "TILIST",
         "SEQIDLIST",
@@ -1025,12 +1481,6 @@ fn every_filtering_or_statistics_alias_key_is_rejected() {
         "OIDLIST",
         "MEMB_BIT",
         "MASKLIST",
-        "VDBLIST",
-        "NSEQ",
-        "LENGTH",
-        "STATS_NSEQ",
-        "STATS_TOTLEN",
-        "MIN_SEQ_LENGTH",
         "OID_MASK_TYPE",
     ] {
         std::fs::write(
@@ -1044,10 +1494,11 @@ fn every_filtering_or_statistics_alias_key_is_rejected() {
             "{key}: {error}"
         );
     }
-    // Keys NCBI does not apply are ignored: an unknown key, and MAX_SEQ_LENGTH.
+    // Keys NCBI's CSeqDB does not apply are ignored: an unknown key, MAX_SEQ_LENGTH and
+    // VDBLIST.
     std::fs::write(
         dir.join("keyed.pal"),
-        b"TITLE t\nDBLIST prot_v4\nMAX_SEQ_LENGTH 5\nSOME_KEY x\n",
+        b"TITLE t\nDBLIST prot_v4\nMAX_SEQ_LENGTH 5\nSOME_KEY x\nVDBLIST SRR1\n",
     )
     .unwrap();
     assert_eq!(
@@ -1055,22 +1506,14 @@ fn every_filtering_or_statistics_alias_key_is_rejected() {
         300
     );
 
-    // NSEQ and LENGTH that equal the sums are read; a repeated key takes the
-    // later value (seqdbalias.cpp:446-449), here the right one.
+    // A repeated key takes the later value (seqdbalias.cpp:446-449).
     std::fs::write(
         dir.join("keyed.pal"),
         b"TITLE t\nDBLIST prot_v4\nNSEQ 99\nLENGTH 801\nNSEQ 10\n",
     )
     .unwrap();
     let db = SeqDb::open(&name, SeqType::Protein).unwrap();
-    assert_eq!((db.num_seqs(), db.total_length()), (10, 801));
-    std::fs::write(
-        dir.join("keyed.pal"),
-        b"TITLE t\nDBLIST prot_v4\nNSEQ 10\nNSEQ 99\n",
-    )
-    .unwrap();
-    let error = SeqDb::open(&name, SeqType::Protein).unwrap_err();
-    assert!(error.to_string().contains("NSEQ (99)"), "{error}");
+    assert_eq!((db.ncbi_num_seqs(), db.total_length()), (10, 801));
 
     // A group alias file in the directory: rejected for an alias file and for
     // a plain volume alike.
@@ -1095,13 +1538,57 @@ fn a_name_is_a_list_as_for_ncbi() {
         SeqDb::open(&quoted, SeqType::Protein).unwrap().num_seqs(),
         10
     );
-    // Two names: several databases in one search are not supported.
-    let two = format!("{prot_v4} {}", db_name("prot_old"));
-    let error = SeqDb::open(&two, SeqType::Protein).unwrap_err();
-    assert!(
-        matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains("several databases")),
-        "{error}"
-    );
+    // Two names: the databases of both are searched as one, and the reports keep one record
+    // per name in the order of the list (DI-8 DECISIONS 29).
+    let prot_old = db_name("prot_old");
+    let alone = |name: &str| {
+        let mut db = SeqDb::open(name, SeqType::Protein).unwrap();
+        db.read_name_records(name, false).unwrap();
+        db
+    };
+    // What the reports show of a record (its table is read only with masks).
+    let shown = |records: &[super::NameRecord]| {
+        records
+            .iter()
+            .map(|record| {
+                assert!(record.mask_algorithms.is_none());
+                (
+                    record.name.clone(),
+                    record.title.clone(),
+                    record.date.clone(),
+                    record.num_seqs,
+                    record.total_length,
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let (v4, old) = (alone(&prot_v4), alone(&prot_old));
+    for (list, first, second) in [
+        (format!("{prot_v4} {prot_old}"), &v4, &old),
+        (format!("{prot_old} {prot_v4}"), &old, &v4),
+    ] {
+        let both = alone(&list);
+        assert_eq!(both.num_seqs(), v4.num_seqs() + old.num_seqs(), "{list}");
+        assert_eq!(
+            both.total_length(),
+            v4.total_length() + old.total_length(),
+            "{list}"
+        );
+        assert_eq!(
+            shown(both.name_records()),
+            [shown(first.name_records()), shown(second.name_records())].concat(),
+            "{list}"
+        );
+    }
+    // The same name twice: its volume is opened (and searched) once, the reports show it
+    // twice (probe DI-8f P25, F38).
+    let twice = alone(&format!("{prot_v4} {prot_v4}"));
+    assert_eq!(twice.num_seqs(), v4.num_seqs());
+    assert_eq!(twice.name_records().len(), 2);
+    assert_eq!(shown(&twice.name_records()[1..]), shown(v4.name_records()));
+    // A quoted name keeps its quotes in its record (`GetBlastDbInfo` splits with them).
+    let quoted_db = alone(&quoted);
+    assert_eq!(quoted_db.name_records()[0].name, quoted);
     let error = SeqDb::open("  ", SeqType::Protein).unwrap_err();
     assert!(
         matches!(&error, SeqDbError::NotFound(message)
@@ -1111,7 +1598,7 @@ fn a_name_is_a_list_as_for_ncbi() {
 }
 
 /// One database name is a path taken as it is: a space or a double quote in
-/// it does not split it (the entry point of `losat makedb`, whose output name
+/// it does not split it (the entry point of `losat makeblastdb`, whose output name
 /// is one name).
 #[test]
 fn one_name_is_not_a_list() {
@@ -1176,6 +1663,7 @@ fn volumes_to_remove_are_those_beside_the_alias_file() {
         &name,
         SeqType::Protein,
         super::alias::LocalCopy::Dir(here.to_str().unwrap()),
+        &SearchPath::current_dir().unwrap(),
     )
     .unwrap();
     assert_eq!(read.volumes, [path(&here, "db.00"), path(&sub, "db.01")]);
@@ -1234,7 +1722,18 @@ fn ambiguity_data_that_do_not_fit_the_sequence() {
         let db = SeqDb::open(&name, SeqType::Nucleotide).unwrap();
         db.read_sequence(4).unwrap()
     };
+    // The letters of the BLASTNA decode (the formatter's: `BLASTNA_TO_IUPACNA`).
+    let letters_of = |blastna: &[u8]| -> Vec<u8> {
+        blastna[1..blastna.len() - 1]
+            .iter()
+            .map(|&code| b"ACGTRYMKWSBDHVN-"[usize::from(code & 0xF)])
+            .collect()
+    };
     let intact = read(&original).nucleotide_blastna(0).unwrap();
+    assert_eq!(
+        read(&original).nucleotide_iupac(0).unwrap(),
+        letters_of(&intact)
+    );
     // BLASTNA: N = 14, R = 4, Y = 5; the stored 2-bit bases are 0..=3.
     assert_eq!(intact[1 + 30..1 + 35], [14; 5]);
     assert_eq!((intact[1 + 55], intact[1 + 59]), (4, 5));
@@ -1245,6 +1744,10 @@ fn ambiguity_data_that_do_not_fit_the_sequence() {
     let mut past_end = original.clone();
     past_end[72..76].copy_from_slice(&[0x50, 0, 0, 74]);
     let clipped = read(&past_end).nucleotide_blastna(0).unwrap();
+    assert_eq!(
+        read(&past_end).nucleotide_iupac(0).unwrap(),
+        letters_of(&clipped)
+    );
     assert_eq!(clipped[1 + 30..1 + 35], [14; 5]);
     assert!(clipped[1 + 55] < 4, "R is not restored");
     assert!(
@@ -1256,6 +1759,10 @@ fn ambiguity_data_that_do_not_fit_the_sequence() {
     let mut crossing = original.clone();
     crossing[76..80].copy_from_slice(&[0xf4, 0, 0, 72]);
     let crossed = read(&crossing).nucleotide_blastna(0).unwrap();
+    assert_eq!(
+        read(&crossing).nucleotide_iupac(0).unwrap(),
+        letters_of(&crossed)
+    );
     assert_eq!(crossed.len(), 74 + 2);
     assert_eq!(crossed[1 + 72..1 + 74], [14, 14]);
     assert_eq!(crossed[75], BLASTNA_SENTINEL);
@@ -1268,10 +1775,14 @@ fn ambiguity_data_that_do_not_fit_the_sequence() {
         block.nucleotide_blastna(0),
         Err(SeqDbError::Format { message, .. }) if message.contains("shorter than their count")
     ));
+    assert_eq!(
+        block.nucleotide_iupac(0).unwrap_err().to_string(),
+        block.nucleotide_blastna(0).unwrap_err().to_string()
+    );
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): `SeqDb::x_nucleotide_check` of a block of one sequence and
+/// `SeqDb::x_nucleotide_check` of a block of one sequence and
 /// `read_block` of the same block give the same length and ambiguity runs, or the same errors.
 /// Returns whether they failed.
 fn check_as_read_block(db: &SeqDb, range: BlockRange, what: &str) -> bool {
@@ -1361,7 +1872,7 @@ fn x_check_range_gives_the_errors_of_read_range() {
 #[test]
 fn header_members_lengths_and_bytes() {
     let path = Path::new("test.phr");
-    let decode = |record: &[u8]| decode_defline_set(record, path);
+    let decode = |record: &[u8]| decode_defline_set(record, path, 0);
 
     // Definite lengths throughout, and no title (it is optional).
     let seqid = [
@@ -1370,7 +1881,7 @@ fn header_members_lengths_and_bytes() {
     ];
     let mut record = vec![0x30, 0x20, 0x30, 0x1e, 0xa1, 0x1c, 0x30, 0x1a];
     record.extend_from_slice(&seqid);
-    let deflines = decode(&record).unwrap();
+    let deflines = decode_defline_set(&record, path, 65_537).unwrap();
     assert_eq!(deflines.len(), 1);
     assert!(deflines[0].title.is_empty());
     assert_eq!(deflines[0].volume_ordinal, 65_537);
@@ -1386,7 +1897,7 @@ fn header_members_lengths_and_bytes() {
         members.extend_from_slice(&[0, 0, 0, 0]);
     }
     members.extend_from_slice(&[0, 0, 0, 0]);
-    let deflines = decode(&members).unwrap();
+    let deflines = decode_defline_set(&members, path, 3).unwrap();
     assert_eq!(deflines[0].title, b"t");
     assert_eq!(deflines[0].volume_ordinal, 3);
 
@@ -1626,11 +2137,21 @@ fn check_search_path_row(
         (&row[0], &row[1], &row[2], &row[3], &row[4], &row[5]);
     // The tables hold the value of blastp's `-db`, which the program trims. A
     // search program reads the first header of each volume right after it opens the
-    // database (`algorithm::common::database::refuse_parsed_seqids`, or `check_seqids`
-    // where it reads parsed Seq-ids too); the tables' databases have none.
+    // database (`algorithm::common::database::check_seqids`).
     let name = db_argument_name(name);
     let opened = SeqDb::open_in(name, SeqType::Protein, search)
-        .and_then(|db| db.check_ordinal_ids().map(|()| db));
+        .and_then(|db| db.has_parsed_seqids().map(|parsed| (db, parsed)));
+    // A database with parsed Seq-ids, which the search programs read (line DBID); NCBI's
+    // outcome is that of its formatters (an `other` row).
+    if losat == "parsed" {
+        let (_, parsed) = opened.unwrap_or_else(|e| panic!("{id}: LOSAT does not open it: {e:?}"));
+        assert!(parsed, "{id}: parsed Seq-ids");
+        return;
+    }
+    let opened = opened.map(|(db, parsed)| {
+        assert!(!parsed, "{id}: parsed Seq-ids");
+        db
+    });
 
     // A volume without its sequence file: NCBI's search fails when it reads
     // the first sequence, with the search stage's own text and exit status.
@@ -1674,8 +2195,13 @@ fn check_search_path_row(
         "ok" => {
             let db = opened.unwrap_or_else(|e| panic!("{id}: NCBI opens it, LOSAT: {e:?}"));
             assert_eq!(String::from_utf8_lossy(db.title()), *title, "{id}: title");
-            assert_eq!(db.num_seqs().to_string(), *sequences, "{id}: sequences");
-            let listed = super::alias::test_info_volumes(name, SeqType::Protein, search).unwrap();
+            // blastdbcmd -info prints `GetNumSeqs`: the walk of NSEQ (line RG, D1a).
+            assert_eq!(
+                db.printed_num_seqs().to_string(),
+                *sequences,
+                "{id}: sequences"
+            );
+            let listed = super::alias::info_volumes(name, SeqType::Protein, search).unwrap();
             let expected: Vec<String> = volumes.split(" | ").map(place).collect();
             assert_eq!(listed, expected, "{id}: volumes");
         }

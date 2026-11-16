@@ -3,13 +3,13 @@ use super::{
     args::ResolvedOptions,
     input::FastaRecord,
     parameters::{
-        effective_lengths, ka_once_on, score_block, subject_parameters, ContextParameters,
+        effective_lengths, ka_once_on, score_block_for, subject_parameters, ContextParameters,
     },
-    preliminary::{gapped, purge_endpoints, sort_by_score, ungapped, PreliminaryHsp},
+    preliminary::{purge_endpoints, sort_by_score, ungapped, PreliminaryHsp},
     query_setup::{batch_ranges, PreparedQueryBatch, BATCH_SIZE},
     reader_batch::{prepare_reader_batch, UnitPrep},
-    seed::{word_finder, Diagonals, InitHsp, Lookup},
-    split::{adjust_chunk_hsps, merge_chunk_hsps, split_queries, QueryChunk},
+    seed::{BxLookup, Diagonals},
+    split::{split_queries, split_sizes, QueryChunk},
     subjects::Subjects,
 };
 use anyhow::{ensure, Result};
@@ -150,7 +150,7 @@ pub(crate) trait PreliminarySink {
         _oid: usize,
         _batch: &PreparedQueryBatch,
         _params: &[ContextParameters],
-        _prepared_link: Option<([i32; 2], f64)>,
+        _prepared_link: Option<crate::core::link_hsps::LinkCutoffs>,
     ) -> Result<()> {
         Ok(())
     }
@@ -192,123 +192,11 @@ pub(crate) trait PreliminarySink {
 //             Int4 prot_length = 0;
 //             if (score_options->is_ooframe) {
 // ```
-struct DiagnosticOnly;
-impl PreliminarySink for DiagnosticOnly {}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:491-526
-// ```c++
-//         BlastInitHitListReset(init_hitlist);
-//
-//         if (aux_struct->WordFinder) {
-//             aux_struct->WordFinder(subject, query, query_info, lookup, matrix,
-//                                    word_params, aux_struct->ewp,
-//                                    aux_struct->offset_pairs,
-//                                    kScanSubjectOffsetArraySize,
-//                                    init_hitlist, ungapped_stats);
-//
-//             if (init_hitlist->total == 0) continue;
-//         }
-//
-//         if (score_options->gapped_calculation) {
-//             Int4 prot_length = 0;
-//             if (score_options->is_ooframe) {
-//                 /* Convert query offsets in all HSPs into the mixed-frame
-//                    coordinates */
-//                 s_TranslateHSPsToDNAPCoord(program_number, init_hitlist,
-//                        query_info, subject->frame, orig_length, backup.offset);
-//                 if (kTranslatedSubject) {
-//                     prot_length = subject->length;
-//                     subject->length = orig_length;
-//                 }
-//             }
-//         /** NB: If queries are concatenated, HSP offsets must be adjusted
-//           * inside the following function call, so coordinates are
-//           * relative to the individual contexts (i.e. queries, strands or
-//           * frames). Contexts should also be filled in HSPs when they
-//           * are saved.
-//           */
-//         /* fence_hit is null, since this is only for prelim stage. */
-//         if (aux_struct->GetGappedScore) {
-//             status = aux_struct->GetGappedScore(program_number, query,
-//                     query_info,
-//                     subject, gap_align, score_params, ext_params, hit_params,
-//                     word_params, init_hitlist, &hsp_list, gapped_stats, NULL);
-// ```
-pub struct SubjectStage {
-    pub oid: usize,
-    pub call: usize,
-    pub parameters: Vec<ContextParameters>,
-    pub gap_xdrop: i32,
-    pub seeds: Vec<(i32, i32)>,
-    pub initial: Vec<InitHsp>,
-    pub raw: Vec<PreliminaryHsp>,
-    pub purged: Vec<PreliminaryHsp>,
-}
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:235-271
-// ```c++
-//         CRef<CSplitQueryBlk> split_query_blk = query_splitter->Split();
-//
-//         for (Uint4 i = 0; i < query_splitter->GetNumberOfChunks(); i++) {
-//             try {
-//                 CRef<IQueryFactory> chunk_qf =
-//                     query_splitter->GetQueryFactoryForChunk(i);
-//                 _TRACE("Query chunk " << i << "/" <<
-//                        query_splitter->GetNumberOfChunks());
-//                 CRef<SInternalData> chunk_data =
-//                     SplitQuery_CreateChunkData(chunk_qf, m_Options,
-//                                                m_InternalData,
-//                                                GetNumberOfThreads());
-//
-//                 CRef<ILocalQueryData> query_data(
-//                         chunk_qf->MakeLocalQueryData( &*m_Options ) );
-//                 BLAST_SequenceBlk * chunk_queries =
-//                     query_data->GetSequenceBlk();
-//                 GetDbIndexSetUsingThreadsFn()( IsMultiThreaded() );
-//                 GetDbIndexRunSearchFn()(
-//                         chunk_queries, lut_options, word_options );
-//
-//                 if (IsMultiThreaded()) {
-//                      x_LaunchMultiThreadedSearch(*chunk_data);
-//                 } else {
-//                     retval =
-//                         CPrelimSearchRunner(*chunk_data, opts_memento.get())();
-//                     if (retval) {
-//                         NCBI_THROW(CBlastException, eCoreBlastError,
-//                                    BlastErrorCode2String(retval));
-//                     }
-//                 }
-//
-//
-//                 _ASSERT(chunk_data->m_HspStream->GetPointer());
-//                 BlastHSPStreamMerge(split_query_blk->GetCStruct(), i,
-//                                 chunk_data->m_HspStream->GetPointer(),
-//                                 m_InternalData->m_HspStream->GetPointer());
-// ```
-pub struct ChunkStage {
-    pub statistically_valid: bool,
-    pub chunk: QueryChunk,
-    pub subjects: Vec<SubjectStage>,
-}
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:292-301
-// ```c++
-//         // Restore the full query sequence for the traceback stage!
-//         if (m_InternalData->m_Queries == NULL) {
-//             CRef<ILocalQueryData> query_data
-//                 (m_QueryFactory->MakeLocalQueryData(&*m_Options));
-//             // Query masking info is calculated as a side-effect
-//             CBlastScoreBlk sbp
-//                 (CSetupFactory::CreateScoreBlock(opts_memento.get(), query_data,
-//                                         NULL, m_Messages, NULL, NULL));
-//             m_InternalData->m_Queries = query_data->GetSequenceBlk();
-//         }
-// ```
-pub struct BatchStage {
-    pub query_ordinal: usize,
-    pub restored: PreparedQueryBatch,
-    pub full_parameters: Vec<ContextParameters>,
-    pub chunks: Vec<ChunkStage>,
-    pub merged_by_query: Vec<Vec<Vec<PreliminaryHsp>>>,
-}
+// The sink of `search_preliminary` (the tests'): it keeps nothing.
+#[cfg(test)]
+struct Discard;
+#[cfg(test)]
+impl PreliminarySink for Discard {}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-246
 // ```c++
@@ -428,21 +316,16 @@ pub struct BatchStage {
 //
 //         Blast_HSPListSortByScore(hsp_list);
 // ```
-pub fn search_preliminary(
+// Only the tests call it (not `pub`: a subject's `lowercase_masks` past its letters would give the
+// scan ranges outside the subject).
+#[cfg(test)]
+pub(crate) fn search_preliminary(
     records: &[FastaRecord],
     subjects: &[FastaRecord],
     options: &ResolvedOptions,
-) -> Result<Vec<BatchStage>> {
+) -> Result<()> {
     crate::utils::threading::with_search_pool(options.num_threads as usize, "BLASTX", |pool| {
-        search_core(
-            records,
-            subjects.into(),
-            options,
-            true,
-            &mut DiagnosticOnly,
-            pool,
-            None,
-        )
+        search_core(records, subjects.into(), options, &mut Discard, pool, None)
     })
 }
 
@@ -511,19 +394,41 @@ pub(crate) mod x_subject_flow;
 #[path = "x_bx_mem.rs"]
 pub(crate) mod x_bx_mem;
 
+// No NCBI counterpart (LOSAT's check of a `-db` stream, `XStreamDb::x_check`): the point where a
+// database refused before the search fails the first batch with a valid context
+// (`Subjects::Unreadable`, below) is marked, and an error that the call raises after it, while the
+// stream's reads have not checked every sequence, is an `XPastHead`: the run reports the
+// database's first error before it (`native::search_error`), as when the whole database was read
+// before the first batch.
 pub(crate) fn search_core(
     records: &[FastaRecord],
     subjects: Subjects<'_>,
     options: &ResolvedOptions,
-    diagnostics: bool,
     sink: &mut impl PreliminarySink,
     pool: &crate::utils::threading::SearchPool<'_>,
     prep: Option<UnitPrep>,
-) -> Result<Vec<BatchStage>> {
-    ensure!(
-        !subjects.is_empty() || subjects.is_unreadable(),
-        "BLASTX preliminary requires a protein subject"
-    );
+) -> Result<()> {
+    let past_head = std::cell::Cell::new(false);
+    x_search_core(records, subjects, options, sink, pool, prep, &past_head).map_err(|error| {
+        if past_head.get() {
+            subjects.x_past_head(error)
+        } else {
+            error
+        }
+    })
+}
+
+/// `search_core`, which sets `past_head` where the database refused before the search fails.
+#[allow(clippy::too_many_arguments)]
+fn x_search_core(
+    records: &[FastaRecord],
+    subjects: Subjects<'_>,
+    options: &ResolvedOptions,
+    sink: &mut impl PreliminarySink,
+    pool: &crate::utils::threading::SearchPool<'_>,
+    prep: Option<UnitPrep>,
+    past_head: &std::cell::Cell<bool>,
+) -> Result<()> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181
     // ```c++
     //     if(dbscan_mode)
@@ -547,19 +452,30 @@ pub(crate) fn search_core(
     //         subject->length = MAX_DBSEQ_LEN;
     //         backup->next = backup->offset + MAX_DBSEQ_LEN - dbseq_chunk_overlap;
     // ```
-    ensure!(
-        subjects.longest_length() <= 5_000_000,
-        "BLASTX preliminary protein-subject splitting above 5000000 residues is not implemented"
-    );
-    let db_length = subjects.total_length()?;
-    let db_count = i64::try_from(subjects.len())?;
-    let min_subject_length = subjects.shortest_length();
-    let mut result = Vec::new();
-    let mut call = 0;
+    // LOSAT does not split a subject; a batch that is searched refuses longer ones (below).
+    let longest_subject = subjects.longest_length();
+    let numbers = subjects.numbers()?;
+    let (db_length, db_count) = (numbers.total, numbers.count);
     // No NCBI counterpart: decides whether candidate HSPs are copied for the containment callback;
     // it does not change any value NCBI computes.
-    let x_containment = diagnostics || sink.x_wants_containment();
+    let x_containment = sink.x_wants_containment();
     use super::x_timing::Batch as XBatch;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:138-150
+    // ```c++
+    //     CRef<SBlastSetupData> retval(new SBlastSetupData(qf, options));
+    //     ...
+    //     // 1. Initialize the query data (borrow it from the factory)
+    //     CRef<ILocalQueryData> query_data(qf->MakeLocalQueryData(&*options));
+    // ```
+    // NCBI's query splitter reads its sizes (`SBlastSetupData`, `CQuerySplitter`) before the
+    // batch's queries are set up, so their errors come before the setup's (an empty query's
+    // `Sequence contains no data`), also for a batch that is not searched. `records` are one
+    // query batch, or one prepared unit of it (`prep`, whose shape counts the batch's queries).
+    let sizes = split_sizes(
+        prep.as_ref()
+            .and_then(|prep| prep.prepared.reader_shape.as_deref())
+            .map_or(records.len(), |shape| shape.query_count),
+    )?;
     let ranges = batch_ranges(records, BATCH_SIZE);
     // The units of a reader batch (`records`) are prepared first, together, and the values NCBI
     // takes of the whole query batch are reduced (`reader_batch.rs`); each unit is then searched
@@ -616,22 +532,26 @@ pub(crate) fn search_core(
                 context.is_valid = false;
             }
             sink.unsearched_batch(range.start, &full, &full_params)?;
-            if diagnostics {
-                result.push(BatchStage {
-                    query_ordinal: range.start,
-                    restored: full,
-                    full_parameters: full_params,
-                    chunks: Vec::new(),
-                    merged_by_query: vec![vec![Vec::new(); subjects.len()]; queries.len()],
-                });
-            }
             continue;
         }
         // NCBI reads the database's sequences in the preliminary search of the first batch
-        // with a valid context (batches without one are not searched, above).
+        // with a valid context (batches without one are not searched, above). The subjects are
+        // checked there too, after the split sizes and the setup of the queries, whose errors
+        // come first at any thread count (`native.rs`, `XUnit::take_prep`).
+        // A database may include no sequence (a list or an alias file's range that keeps none):
+        // its batches are searched without subjects.
+        ensure!(
+            !subjects.is_empty() || !matches!(subjects, Subjects::Fasta(_)),
+            "BLASTX preliminary requires a protein subject"
+        );
+        ensure!(
+            longest_subject <= 5_000_000,
+            "BLASTX preliminary protein-subject splitting above 5000000 residues is not implemented"
+        );
         if subjects.is_unreadable() {
             return Err(super::subjects::UnreadableSubjects.into());
         }
+        past_head.set(true);
         let x_t = super::x_timing::lap();
         // Dispatch point (LOSAT_X_BXKAONCE, in the strict set), taking the blocks: `score_block`'s
         // raw blocks, before the lengths, kept for the one chunk of a batch that is not split (the
@@ -651,7 +571,19 @@ pub(crate) fn search_core(
         for (context, p) in full.contexts.iter_mut().zip(&full_params) {
             context.is_valid = p.valid;
         }
-        let spaces: Vec<_> = full_params.iter().map(|p| p.search_space).collect();
+        // The options' spaces that each chunk's setup reads (`SplitQuery_SetEffectiveSearchSpace`):
+        // the batch's own, unless the statistics' total before the fallback to OID 0 is not
+        // positive (`parameters::preliminary_spaces`).
+        let spaces: Vec<_> = match super::parameters::preliminary_spaces(
+            &full,
+            &full_params,
+            options,
+            numbers,
+            matches!(subjects, Subjects::Stream(_)),
+        )? {
+            Some(spaces) => spaces,
+            None => full_params.iter().map(|p| p.search_space).collect(),
+        };
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-222
         // ```c++
         //     CEffectiveSearchSpacesMemento eff_memento(m_Options);
@@ -660,7 +592,15 @@ pub(crate) fn search_core(
         //     int retval = 0;
         // ```
         sink.batch_start(range.start, &full, &full_params)?;
-        let chunks = split_queries(queries, &full, options)?;
+        let mut chunks = split_queries(queries, &full, options, sizes)?;
+        // The statistics of each subject read the options' spaces of the whole query by each
+        // chunk's context index (`s_GetEffectiveSearchSpaceForContext`, blast_setup.c:676-697).
+        if subjects.per_subject() {
+            let option_spaces: std::sync::Arc<[i64]> = spaces.clone().into();
+            for chunk in &mut chunks {
+                chunk.prepared.subject_option_spaces = Some(option_spaces.clone());
+            }
+        }
         super::x_timing::batch(XBatch::Setup, x_t);
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:233-236
         // ```c++
@@ -670,14 +610,6 @@ pub(crate) fn search_core(
         //
         // ```
         let is_split = chunks.len() > 1;
-        let mut stages = Vec::new();
-        // Read only with diagnostics (`merged_by_query`): queries x subjects vectors are
-        // not made otherwise (a database holds hundreds of thousands of subjects).
-        let mut merged = if diagnostics {
-            vec![vec![Vec::new(); subjects.len()]; queries.len()]
-        } else {
-            Vec::new()
-        };
         // With a pool of 2+ threads: one job per query chunk instead of one per
         // subject.  NCBI c++/src/algo/blast/api/prelim_stage.cpp:235-271 searches
         // the chunks one after another and only `BlastHSPStreamMerge` relates
@@ -715,8 +647,7 @@ pub(crate) fn search_core(
         let x_chunks_par = super::runtime::x_bx_par_rule(|| {
             pool.enabled()
                 && chunks.len() > 1
-                && !diagnostics
-                && !x_subject_flow::chunks_in_order(pool, diagnostics, options, subjects)
+                && !x_subject_flow::chunks_in_order(pool, options, subjects)
         });
         #[cfg(feature = "parallel")]
         let chunks = if x_chunks_par {
@@ -728,7 +659,8 @@ pub(crate) fn search_core(
             let x_cap = x_bx_mem::chunk_unit_cap(pool, options, subjects);
             // Dispatch point (LOSAT_X_BXBUILDPAR, in the strict set): a capped wave's chunks build
             // their tables on the threads the cap leaves each (x_bx_mem.rs).
-            let x_parts = x_bx_mem::build_parts(pool, x_cap.is_some());
+            let x_parts =
+                x_bx_mem::build_parts(pool, options, x_cap.is_some(), subjects.len(), false);
             let mut x_next = 0;
             while x_next < chunks.len() {
                 let x_wave = x_cap.map(|(k, _)| x_bx_mem::chunk_wave(pool, k));
@@ -747,9 +679,7 @@ pub(crate) fn search_core(
                                 subjects,
                                 options,
                                 &spaces,
-                                db_length,
-                                db_count,
-                                min_subject_length,
+                                numbers,
                                 x_containment,
                                 x_cap.map(|(_, per_task)| per_task),
                                 x_parts,
@@ -786,7 +716,6 @@ pub(crate) fn search_core(
                             sink.preliminary_purge(oid, &raw, &purged)?;
                         }
                         sink.subject(oid, &purged, batch, &params)?;
-                        call += 1;
                     }
                     sink.chunk_end(chunk, is_split)?;
                 }
@@ -801,13 +730,7 @@ pub(crate) fn search_core(
         // flow of tasks across the chunks; each chunk's setup is made by the loop's statements
         // below, the sink sees the chunks and subjects in the loop's order (x_subject_flow.rs).
         #[cfg(feature = "parallel")]
-        let chunks = match x_subject_flow::crosses_chunks(
-            pool,
-            diagnostics,
-            options,
-            subjects,
-            chunks.len(),
-        ) {
+        let chunks = match x_subject_flow::crosses_chunks(pool, options, subjects, chunks.len()) {
             Some(x_k) => {
                 if x_raw_params.take().is_some() {
                     crate::utils::xreach::x_reach!("LOSAT_X_BXKAONCE", false);
@@ -818,11 +741,11 @@ pub(crate) fn search_core(
                 let x_make =
                     |c: usize, x_parts: usize| -> Result<Option<x_subject_flow::XChunkSetup>> {
                         let batch = &x_chunks[c].prepared;
-                        let mut params = score_block(batch);
+                        let mut params = score_block_for(batch, options.scoring);
                         if !params.iter().any(|p| p.valid) {
                             return Ok(None);
                         }
-                        let lookup = Lookup::x_new_in_parts(batch, &params, options, x_parts)?;
+                        let lookup = BxLookup::x_new_in_parts(batch, &params, options, x_parts)?;
                         let last = batch.contexts.last().expect("BLASTX contexts");
                         let length = last.offset + last.length;
                         let table = Diagonals::new(length, options.window_size)?;
@@ -830,9 +753,7 @@ pub(crate) fn search_core(
                             batch,
                             &mut params,
                             options,
-                            db_length,
-                            db_count,
-                            min_subject_length,
+                            numbers,
                             Some(fixed_spaces),
                         )?;
                         Ok(Some(x_subject_flow::XChunkSetup {
@@ -844,7 +765,7 @@ pub(crate) fn search_core(
                         }))
                     };
                 let x_t = super::x_timing::lap();
-                call += x_subject_flow::run_chunks(
+                x_subject_flow::run_chunks(
                     x_k,
                     x_chunks,
                     &x_make,
@@ -853,7 +774,6 @@ pub(crate) fn search_core(
                     options,
                     pool.threads() - 1,
                     x_bx_mem::diag_keep(options, subjects),
-                    db_length,
                     x_containment,
                     x_bx_mem::in_capped_batch(pool),
                     is_split,
@@ -903,7 +823,7 @@ pub(crate) fn search_core(
                     if other.is_some() {
                         crate::utils::xreach::x_reach!("LOSAT_X_BXKAONCE", false);
                     }
-                    score_block(batch)
+                    score_block_for(batch, options.scoring)
                 }
             };
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:277-288
@@ -922,13 +842,6 @@ pub(crate) fn search_core(
             //                 }
             // ```
             if !params.iter().any(|p| p.valid) {
-                if diagnostics {
-                    stages.push(ChunkStage {
-                        chunk,
-                        statistically_valid: false,
-                        subjects: Vec::new(),
-                    });
-                }
                 continue;
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:685-696
@@ -951,21 +864,13 @@ pub(crate) fn search_core(
             // Dispatch point (LOSAT_X_BXBUILDPAR, in the strict set): a batch of the capped batch
             // flow builds its table on the threads the cap leaves it (x_bx_mem.rs).
             #[cfg(feature = "parallel")]
-            let x_parts = x_bx_mem::build_parts(pool, false);
+            let x_parts = x_bx_mem::build_parts(pool, options, false, subjects.len(), true);
             #[cfg(not(feature = "parallel"))]
             let x_parts = 1;
-            let lookup = Lookup::x_new_in_parts(batch, &params, options, x_parts)?;
+            let lookup = BxLookup::x_new_in_parts(batch, &params, options, x_parts)?;
             let last = batch.contexts.last().expect("BLASTX contexts");
-            let mut diagonals = Diagonals::new(last.offset + last.length, options.window_size)?;
-            let xdrop = subject_parameters(
-                batch,
-                &mut params,
-                options,
-                db_length,
-                db_count,
-                min_subject_length,
-                Some(fixed_spaces),
-            )?;
+            let xdrop =
+                subject_parameters(batch, &mut params, options, numbers, Some(fixed_spaces))?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:172-180
             // ```c++
             //     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
@@ -1000,13 +905,33 @@ pub(crate) fn search_core(
                 1
             };
             #[cfg(feature = "parallel")]
-            let x_flow_k = x_subject_flow::chosen(pool, diagnostics, options, subjects);
+            let x_flow_k = x_subject_flow::chosen(pool, options, subjects);
             // Dispatch point (LOSAT_X_BXDIAGKEEP, in the strict set): the flow's helpers run on the
             // tables their threads keep (x_bx_mem.rs); only where the flow searches the subjects
             // (the waves below then have nothing to do).
             #[cfg(feature = "parallel")]
             let x_keep =
                 pool.enabled() && x_flow_k.is_some() && x_bx_mem::diag_keep(options, subjects);
+            // The loop's own table: where the helpers run on the tables their threads keep, the
+            // one this thread keeps too (x_bx_mem.rs `XDiagSlot`), not a new table for every
+            // batch or chunk the thread searches.
+            let mut x_new_table = None;
+            #[cfg(feature = "parallel")]
+            let mut x_own_slot = x_keep
+                .then(|| x_bx_mem::XDiagSlot::new(last.offset + last.length, options.window_size));
+            #[cfg(feature = "parallel")]
+            let diagonals: &mut Diagonals = match x_own_slot.as_mut() {
+                Some(slot) => slot.get()?,
+                None => x_new_table.insert(Diagonals::new(
+                    last.offset + last.length,
+                    options.window_size,
+                )?),
+            };
+            #[cfg(not(feature = "parallel"))]
+            let diagonals: &mut Diagonals = x_new_table.insert(Diagonals::new(
+                last.offset + last.length,
+                options.window_size,
+            )?);
             #[cfg(feature = "parallel")]
             let mut worker_diagonals = if pool.enabled() && !x_keep {
                 (0..subjects.len().min(pool.threads()))
@@ -1016,7 +941,6 @@ pub(crate) fn search_core(
                 Vec::new()
             };
             super::x_timing::batch(XBatch::Lookup, x_t);
-            let mut subject_stages = Vec::new();
             // Dispatch point (LOSAT_X_BXSUBJFLOW[=k], in the strict set: on unless `=0`): the
             // subjects as a flow of tasks of k consecutive subjects, handed to the sink in subject
             // order by this thread
@@ -1024,8 +948,12 @@ pub(crate) fn search_core(
             #[cfg(feature = "parallel")]
             let x_flowed = if let Some(x_k) = x_flow_k {
                 let x_t = super::x_timing::lap();
+                // Dispatch point (LOSAT_X_BXCAPFILL, in the strict set): a batch of one task of the
+                // capped batch flow has helpers for the threads the cap leaves it
+                // (x_bx_mem::flow_threads).
+                let x_threads = x_bx_mem::flow_threads(pool, options, subjects.len());
                 let helper_tables = if x_keep {
-                    (1..pool.threads())
+                    (1..x_threads)
                         .map(|_| {
                             x_bx_mem::XScratch::Slot(x_bx_mem::XDiagSlot::new(
                                 last.offset + last.length,
@@ -1036,21 +964,20 @@ pub(crate) fn search_core(
                 } else {
                     std::mem::take(&mut worker_diagonals)
                         .into_iter()
-                        .take(pool.threads() - 1)
+                        .take(x_threads - 1)
                         .map(x_bx_mem::XScratch::Owned)
                         .collect()
                 };
-                call += x_subject_flow::run(
+                x_subject_flow::run(
                     x_k,
                     subjects,
                     batch,
                     &params,
                     options,
                     &lookup,
-                    &mut diagonals,
+                    &mut *diagonals,
                     helper_tables,
                     xdrop,
-                    db_length,
                     x_containment,
                     x_bx_mem::in_capped_batch(pool),
                     sink,
@@ -1071,13 +998,13 @@ pub(crate) fn search_core(
             } else {
                 subjects.len().div_ceil(wave_size)
             };
-            // EXPERIMENT (LOSAT_X_BXDBSTREAM): the blocks of the serial pass.
+            // The blocks of the serial pass.
             let mut x_pass = subjects.x_pass();
             for wave_index in 0..x_waves {
                 let wave_start = wave_index * wave_size;
                 let wave: Vec<usize> =
                     (wave_start..subjects.len().min(wave_start + wave_size)).collect();
-                // EXPERIMENT (LOSAT_X_BXDBSTREAM): the subjects of a wave that the pool searches,
+                // The subjects of a wave that the pool searches,
                 // read before its fork.
                 let x_wave_block = if pool.enabled() {
                     subjects.x_read_range(wave_start, wave_start + wave.len())?
@@ -1122,7 +1049,7 @@ pub(crate) fn search_core(
                                                             + x_slot * x_k
                                                             + x_within
                                                     );
-                                                    compute_subject(
+                                                    compute_subject_any(
                                                         x_wave_subjects,
                                                         batch,
                                                         &params,
@@ -1130,8 +1057,6 @@ pub(crate) fn search_core(
                                                         &lookup,
                                                         scratch,
                                                         xdrop,
-                                                        diagnostics,
-                                                        db_length,
                                                         oid,
                                                         x_containment,
                                                     )
@@ -1164,16 +1089,14 @@ pub(crate) fn search_core(
                         } else {
                             x_pass.view(oid)?
                         };
-                        let computed = compute_subject(
+                        let computed = compute_subject_any(
                             x_subjects,
                             batch,
                             &params,
                             options,
                             &lookup,
-                            &mut diagonals,
+                            &mut *diagonals,
                             xdrop,
-                            diagnostics,
-                            db_length,
                             oid,
                             x_containment,
                         );
@@ -1184,13 +1107,7 @@ pub(crate) fn search_core(
                     for (h, contained) in &computed.containment {
                         sink.containment(h, *contained);
                     }
-                    let SubjectComputation {
-                        seeds,
-                        initial,
-                        raw,
-                        purged,
-                        ..
-                    } = computed;
+                    let SubjectComputation { raw, purged, .. } = computed;
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-899
                     // ```c++
                     //     if (hit_params->link_hsp_params) {
@@ -1234,68 +1151,6 @@ pub(crate) fn search_core(
                         sink.preliminary_purge(oid, &raw, &purged)?;
                     }
                     sink.subject(oid, &purged, batch, &params)?;
-                    if diagnostics {
-                        let mut adjusted = purged.clone();
-                        let points = adjust_chunk_hsps(&mut adjusted, &chunk)?;
-                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:456-487
-                        // ```c++
-                        //    for (i = 0; i < results1->num_queries; i++) {
-                        //        BlastHitList *hitlist = results1->hitlist_array[i];
-                        //        Int4 global_query = query_list[i];
-                        //        Int4 split_points[NUM_FRAMES];
-                        // #ifdef _DEBUG
-                        //        ASSERT(i < num_queries);
-                        // #endif
-                        //
-                        //        if (hitlist == NULL) {
-                        // #if defined(_DEBUG_VERBOSE)
-                        // fprintf(stderr, "No hits to query %d\n", global_query);
-                        // #endif
-                        //            continue;
-                        //        }
-                        //
-                        //        /* we will be mapping HSPs from the local context to
-                        //           their place on the unsplit concatenated query. Once
-                        //           that's done, overlapping HSPs need to get merged, and
-                        //           to do that we must know the offset within each context
-                        //           where the last chunk ended and the current chunk begins */
-                        //        for (j = 0; j < contexts_per_query; j++) {
-                        //            split_points[j] = -1;
-                        //        }
-                        //
-                        //        for (j = 0; j < contexts_per_query; j++) {
-                        //            Int4 local_context = i * contexts_per_query + j;
-                        //            if (context_list[local_context] >= 0) {
-                        //                split_points[context_list[local_context] % contexts_per_query] =
-                        //                                 offset_list[local_context];
-                        //            }
-                        //        }
-                        //
-                        // ```
-                        let mut by_query = vec![Vec::new(); queries.len()];
-                        for h in adjusted {
-                            by_query[h.context / 6].push(h);
-                        }
-                        for (query, hsps) in by_query.into_iter().enumerate() {
-                            merge_chunk_hsps(
-                                &mut merged[query][oid],
-                                hsps,
-                                &points,
-                                i32::MAX as usize,
-                            );
-                        }
-                        subject_stages.push(SubjectStage {
-                            oid,
-                            call,
-                            parameters: params.clone(),
-                            gap_xdrop: xdrop,
-                            seeds,
-                            initial,
-                            raw,
-                            purged,
-                        });
-                    }
-                    call += 1;
                 }
                 super::x_timing::batch(XBatch::Replay, x_t_replay);
             }
@@ -1309,13 +1164,6 @@ pub(crate) fn search_core(
             let x_t = super::x_timing::lap();
             sink.chunk_end(&chunk, is_split)?;
             super::x_timing::batch(XBatch::ChunkEnd, x_t);
-            if diagnostics {
-                stages.push(ChunkStage {
-                    statistically_valid: true,
-                    chunk,
-                    subjects: subject_stages,
-                });
-            }
         }
         // full preparation retains full DNA lengths, masked/nomask bytes and ordinal.
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:292-301
@@ -1336,17 +1184,8 @@ pub(crate) fn search_core(
         super::x_timing::batch(XBatch::BatchEnd, x_t);
         super::x_timing::batch(XBatch::Sum, x_t_batch);
         super::x_timing::batch_count();
-        if diagnostics {
-            result.push(BatchStage {
-                query_ordinal: range.start,
-                restored: full,
-                full_parameters: full_params,
-                chunks: stages,
-                merged_by_query: merged,
-            });
-        }
     }
-    Ok(result)
+    Ok(())
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:172-179
@@ -1398,30 +1237,20 @@ fn x_compute_chunk(
     subjects: Subjects<'_>,
     options: &ResolvedOptions,
     fixed_spaces: &[i64],
-    db_length: i64,
-    db_count: i64,
-    min_subject_length: usize,
+    numbers: super::parameters::SubjectNumbers,
     x_containment: bool,
     x_par: Option<usize>,
     x_parts: usize,
 ) -> Result<Option<(Vec<ContextParameters>, Vec<(usize, SubjectComputation)>)>> {
     let batch = &chunk.prepared;
-    let mut params = score_block(batch);
+    let mut params = score_block_for(batch, options.scoring);
     if !params.iter().any(|p| p.valid) {
         return Ok(None);
     }
-    let lookup = Lookup::x_new_in_parts(batch, &params, options, x_parts)?;
+    let lookup = BxLookup::x_new_in_parts(batch, &params, options, x_parts)?;
     let last = batch.contexts.last().expect("BLASTX contexts");
     if let Some(per_task) = x_par {
-        let xdrop = subject_parameters(
-            batch,
-            &mut params,
-            options,
-            db_length,
-            db_count,
-            min_subject_length,
-            Some(fixed_spaces),
-        )?;
+        let xdrop = subject_parameters(batch, &mut params, options, numbers, Some(fixed_spaces))?;
         let results = x_bx_mem::chunk_subjects_on_pool(
             per_task,
             subjects,
@@ -1430,30 +1259,21 @@ fn x_compute_chunk(
             options,
             &lookup,
             xdrop,
-            db_length,
             x_containment,
         )?;
         return Ok(Some((params, results)));
     }
     let mut diagonals = Diagonals::new(last.offset + last.length, options.window_size)?;
-    let xdrop = subject_parameters(
-        batch,
-        &mut params,
-        options,
-        db_length,
-        db_count,
-        min_subject_length,
-        Some(fixed_spaces),
-    )?;
+    let xdrop = subject_parameters(batch, &mut params, options, numbers, Some(fixed_spaces))?;
     // Only the subjects with something for the sink are kept, by oid: the chunks of a wave are
     // all in memory at once, and a database holds hundreds of thousands of subjects, most
     // without a hit. The sink gets the others as empty computations (`SubjectComputation::
     // empty`), so it sees the same calls as from the serial chunk loop.
     let mut results = Vec::new();
-    // EXPERIMENT (LOSAT_X_BXDBSTREAM): the blocks of the chunk's pass.
+    // The blocks of the chunk's pass.
     let mut x_pass = subjects.x_pass();
     for oid in 0..subjects.len() {
-        let mut computed = compute_subject(
+        let computed = compute_subject_any(
             x_pass.view(oid)?,
             batch,
             &params,
@@ -1461,16 +1281,9 @@ fn x_compute_chunk(
             &lookup,
             &mut diagonals,
             xdrop,
-            false,
-            db_length,
             oid,
             x_containment,
         )?;
-        // Only the diagnostic stages read these.
-        // No NCBI counterpart: drops the seed and initial-HSP lists, which only the diagnostic
-        // stages read, to save memory; it does not change any value NCBI computes.
-        computed.seeds = Vec::new();
-        computed.initial = Vec::new();
         if !computed.is_empty() {
             results.push((oid, computed));
         }
@@ -1479,12 +1292,10 @@ fn x_compute_chunk(
 }
 
 struct SubjectComputation {
-    seeds: Vec<(i32, i32)>,
-    initial: Vec<InitHsp>,
     raw: Vec<PreliminaryHsp>,
     purged: Vec<PreliminaryHsp>,
     containment: Vec<(PreliminaryHsp, bool)>,
-    prepared_link: Option<([i32; 2], f64)>,
+    prepared_link: Option<crate::core::link_hsps::LinkCutoffs>,
 }
 
 #[cfg(feature = "parallel")]
@@ -1493,8 +1304,6 @@ impl SubjectComputation {
     /// others).
     fn empty() -> Self {
         Self {
-            seeds: Vec::new(),
-            initial: Vec::new(),
             raw: Vec::new(),
             purged: Vec::new(),
             containment: Vec::new(),
@@ -1529,11 +1338,224 @@ fn compute_subject(
     batch: &PreparedQueryBatch,
     params: &[ContextParameters],
     options: &ResolvedOptions,
-    lookup: &Lookup,
+    lookup: &BxLookup,
     diagonals: &mut Diagonals,
     xdrop: i32,
-    diagnostics: bool,
-    db_length: i64,
+    oid: usize,
+    x_containment: bool,
+) -> Result<SubjectComputation> {
+    compute_subject_with(
+        super::seed::Blosum62Bx,
+        subjects,
+        batch,
+        params,
+        options,
+        lookup,
+        diagonals,
+        xdrop,
+        oid,
+        x_containment,
+    )
+}
+
+/// [`compute_subject`] of a search with another matrix than BLOSUM62 (item SC6 of line NP), its
+/// own instance of the stages; the callers choose it once per subject by the search's matrix. Not
+/// inlined, so that BLOSUM62's keeps its code.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn compute_subject_of(
+    subjects: Subjects<'_>,
+    batch: &PreparedQueryBatch,
+    params: &[ContextParameters],
+    options: &ResolvedOptions,
+    lookup: &BxLookup,
+    diagonals: &mut Diagonals,
+    xdrop: i32,
+    oid: usize,
+    x_containment: bool,
+) -> Result<SubjectComputation> {
+    compute_subject_with(
+        super::seed::MatrixBx::of(options.scoring),
+        subjects,
+        batch,
+        params,
+        options,
+        lookup,
+        diagonals,
+        xdrop,
+        oid,
+        x_containment,
+    )
+}
+
+/// [`compute_subject`] or [`compute_subject_of`] by the search's matrix, with the chunk's
+/// parameters `params`, or, where NCBI computes the statistics of each subject (the batch's
+/// `subject_option_spaces`, a database length of 0), with the subject's own
+/// (`compute_own_subject`): one test of the batch per subject on the default path.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1428-1443 (quoted above
+// `search_preliminary`): the subject's own statistics before its scan.
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn compute_subject_any(
+    subjects: Subjects<'_>,
+    batch: &PreparedQueryBatch,
+    params: &[ContextParameters],
+    options: &ResolvedOptions,
+    lookup: &BxLookup,
+    diagonals: &mut Diagonals,
+    xdrop: i32,
+    oid: usize,
+    x_containment: bool,
+) -> Result<SubjectComputation> {
+    if let Some(option_spaces) = batch.subject_option_spaces.as_deref() {
+        return compute_own_subject(
+            subjects,
+            batch,
+            params,
+            option_spaces,
+            options,
+            lookup,
+            diagonals,
+            xdrop,
+            oid,
+            x_containment,
+        );
+    }
+    compute_subject_scored(
+        subjects,
+        batch,
+        params,
+        options,
+        lookup,
+        diagonals,
+        xdrop,
+        oid,
+        x_containment,
+    )
+}
+
+/// [`compute_subject`] or [`compute_subject_of`] by the search's matrix.
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn compute_subject_scored(
+    subjects: Subjects<'_>,
+    batch: &PreparedQueryBatch,
+    params: &[ContextParameters],
+    options: &ResolvedOptions,
+    lookup: &BxLookup,
+    diagonals: &mut Diagonals,
+    xdrop: i32,
+    oid: usize,
+    x_containment: bool,
+) -> Result<SubjectComputation> {
+    if options.scoring == crate::config::ScoringMatrix::Blosum62 {
+        compute_subject(
+            subjects,
+            batch,
+            params,
+            options,
+            lookup,
+            diagonals,
+            xdrop,
+            oid,
+            x_containment,
+        )
+    } else {
+        compute_subject_of(
+            subjects,
+            batch,
+            params,
+            options,
+            lookup,
+            diagonals,
+            xdrop,
+            oid,
+            x_containment,
+        )
+    }
+}
+
+/// [`compute_subject_scored`] with the subject's own parameters where NCBI computes the
+/// statistics of each subject (`parameters::subject_update`, with the whole query's options'
+/// spaces `option_spaces`): a subject with residues, the one NCBI searches (blast_engine.c:1428-
+/// 1432); an empty one keeps the chunk's. The sink computes them again for the e-values of the
+/// subject's HSPs (`Runtime::subject`). Apart from the default path.
+#[cold]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn compute_own_subject(
+    subjects: Subjects<'_>,
+    batch: &PreparedQueryBatch,
+    params: &[ContextParameters],
+    option_spaces: &[i64],
+    options: &ResolvedOptions,
+    lookup: &BxLookup,
+    diagonals: &mut Diagonals,
+    xdrop: i32,
+    oid: usize,
+    x_containment: bool,
+) -> Result<SubjectComputation> {
+    let length = subjects.length(oid);
+    let own = if length > 0 {
+        Some(super::parameters::subject_update(
+            batch,
+            params,
+            options,
+            subjects.numbers()?,
+            length,
+            option_spaces,
+        )?)
+    } else {
+        None
+    };
+    let params = own.as_deref().unwrap_or(params);
+    let mut computed = compute_subject_scored(
+        subjects,
+        batch,
+        params,
+        options,
+        lookup,
+        diagonals,
+        xdrop,
+        oid,
+        x_containment,
+    )?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1448-1455 (quoted at
+    // `compute_subject_with`): a reader batch searched in units (`reader_batch.rs`) links with
+    // `cutoff_score_min` of the word parameters, the minimum over the batch's contexts
+    // (blast_parameters.c:401-416, `parameters::subject_word_cutoff_min`) at the subject's length.
+    if let (Some(shape), Some(_)) = (batch.reader_shape.as_deref(), computed.prepared_link) {
+        if length > 0 {
+            computed.prepared_link = Some(super::linking::link_cutoffs(
+                batch,
+                params,
+                length as i32,
+                subjects.total_length()?,
+                super::parameters::subject_word_cutoff_min(
+                    &shape.batch_contexts,
+                    options,
+                    subjects.numbers()?,
+                    length,
+                )?,
+            ));
+        }
+    }
+    Ok(computed)
+}
+
+/// The body of [`compute_subject`] with the matrix of `scoring`: BLOSUM62's stages are today's
+/// functions (`BxScoring::BLOSUM62`), another matrix's their instances for it.
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn compute_subject_with<S: super::seed::BxScoring>(
+    scoring: S,
+    subjects: Subjects<'_>,
+    batch: &PreparedQueryBatch,
+    params: &[ContextParameters],
+    options: &ResolvedOptions,
+    lookup: &BxLookup,
+    diagonals: &mut Diagonals,
+    xdrop: i32,
     oid: usize,
     x_containment: bool,
 ) -> Result<SubjectComputation> {
@@ -1551,7 +1573,7 @@ fn compute_subject(
     };
     let encoded: &[u8] = &x_buffer[usize::from(x_lead)..];
     // `subjects.length(oid)` for every kind of subjects: the residues before the sentinel byte (a
-    // database read in blocks then looks the subject up once, LOSAT_X_BXDBSTREAM).
+    // database read in blocks then looks the subject up once).
     let subject_length = encoded.len() - 1;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1451-1455
     // ```c++
@@ -1563,12 +1585,17 @@ fn compute_subject(
     // ```
     // Worker-local cutoff preparation precedes WordFinder as in NCBI; only
     // adoption/observer notification is replayed on the serial OID collector.
-    let prepared_link = if !options.gapped && options.sum_stats {
-        Some(super::even_gap::cutoffs(
+    // `db_length` is `BlastSeqSrcGetTotLen` (blast_engine.c:1407), not the statistics' total:
+    // `Subjects::total_length`.
+    // With the statistics of each subject, `compute_own_subject` makes them again for a reader
+    // batch searched in units.
+    let prepared_link = if super::linking::computes_link_cutoffs(options) {
+        Some(super::linking::link_cutoffs(
             batch,
             params,
             subject_length as i32,
-            db_length,
+            subjects.total_length()?,
+            None,
         ))
     } else {
         None
@@ -1605,7 +1632,6 @@ fn compute_subject(
     //
     //       if (Blast_SubjectIsTranslated(program_number)) {
     // ```
-    let mut seeds = Vec::new();
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-511
     // ```c
     //     while (scan_range[1] <= scan_range[2]) {
@@ -1619,39 +1645,34 @@ fn compute_subject(
     //             Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
     //             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
     // ```
-    // Dispatch point between the fast seed loops and the diagnostic stages: when nothing traces the
-    // seeds (not the diagnostic stages), the seed loop reads the scanner's per-thread buffer in
-    // place (x_seed_scan.rs; LOSAT_X_BXDIAG, chosen inside `x_word_finder_scan`, reads the lookup
-    // cells in place instead, x_seed_diag.rs); otherwise the reference word finder below runs and
-    // collects the seeds.
-    let initial = if !diagnostics {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:494-500
+    // ```c++
+    //             aux_struct->WordFinder(subject, query, query_info, lookup, matrix,
+    //                                    word_params, aux_struct->ewp,
+    //                                    aux_struct->offset_pairs,
+    //                                    kScanSubjectOffsetArraySize,
+    //                                    init_hitlist, ungapped_stats);
+    //
+    //             if (init_hitlist->total == 0) continue;
+    // ```
+    // The seed loop reads the scanner's per-thread buffer in place (x_seed_scan.rs;
+    // LOSAT_X_BXDIAG, chosen inside `x_word_finder_scan`, reads the lookup cells in place instead,
+    // x_seed_diag.rs). A `-subject` with lower-case letters (`-lcase_masking`) is scanned over its
+    // scan ranges by the reference word finder (x_soft_subject.rs). The tests compare both with
+    // the reference word finder (`seed::word_finder_bx`).
+    let initial = if let Some(ranges) = super::x_soft_subject::x_subject_scan_ranges(subjects, oid)
+    {
+        super::x_soft_subject::x_word_finder(
+            scoring, batch, params, options, encoded, lookup, diagonals, &ranges, None,
+        )?
+    } else {
         let x_sent = if x_lead {
-            super::seed::x_ungap_sent::XSent::new(&batch.sequence_start, &x_buffer)
+            super::seed::x_ungap_sent::XSent::new(scoring, &batch.sequence_start, &x_buffer)
         } else {
             None
         };
         super::seed::x_seed_scan::x_word_finder_scan(
-            batch, params, options, encoded, lookup, diagonals, x_sent,
-        )?
-    } else {
-        word_finder(
-            batch,
-            params,
-            options,
-            &encoded,
-            lookup,
-            diagonals,
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:494-500
-            // ```c++
-            //             aux_struct->WordFinder(subject, query, query_info, lookup, matrix,
-            //                                    word_params, aux_struct->ewp,
-            //                                    aux_struct->offset_pairs,
-            //                                    kScanSubjectOffsetArraySize,
-            //                                    init_hitlist, ungapped_stats);
-            //
-            //             if (init_hitlist->total == 0) continue;
-            // ```
-            |pairs| seeds.extend_from_slice(pairs),
+            scoring, batch, params, options, encoded, lookup, diagonals, x_sent,
         )?
     };
     let raw = if options.gapped {
@@ -1664,21 +1685,40 @@ fn compute_subject(
         //       {
         //          BlastHSP* new_hsp;
         // ```
-        super::preliminary::gapped_observed(
-            batch,
-            params,
-            options,
-            &encoded,
-            &initial,
-            xdrop,
-            &mut |h, contained| {
-                // No NCBI counterpart: the copy is skipped when nothing reads it; it does not
-                // change any value NCBI computes.
-                if x_containment {
-                    containment.push((h.clone(), contained))
-                }
-            },
-        )?
+        let mut observe = |h: &super::preliminary::PreliminaryHsp, contained: bool| {
+            // No NCBI counterpart: the copy is skipped when nothing reads it; it does not
+            // change any value NCBI computes.
+            if x_containment {
+                containment.push((h.clone(), contained))
+            }
+        };
+        // What NCBI's buffer of the subject holds after its sentinel, read only for a one-hit
+        // gapped start whose window passes the sentinel (`preliminary::gapped_start_negative`).
+        let subject_after = || subjects.buffer_after(oid);
+        if S::BLOSUM62 {
+            super::preliminary::gapped_observed(
+                batch,
+                params,
+                options,
+                encoded,
+                &subject_after,
+                &initial,
+                xdrop,
+                &mut observe,
+            )?
+        } else {
+            super::preliminary::gapped_observed_of(
+                scoring,
+                batch,
+                params,
+                options,
+                encoded,
+                &subject_after,
+                &initial,
+                xdrop,
+                &mut observe,
+            )?
+        }
     } else {
         ungapped(batch, &initial)
     };
@@ -1706,8 +1746,6 @@ fn compute_subject(
     #[cfg(feature = "blastx-worker-probe")]
     worker_probe("finish", oid);
     Ok(SubjectComputation {
-        seeds,
-        initial,
         raw,
         purged,
         containment,

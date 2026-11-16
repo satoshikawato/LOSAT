@@ -1,0 +1,21 @@
+{
+  "version": "1.2",
+  "dbname": "nz_pc",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "nz pc",
+  "number-of-letters": 326,
+  "number-of-sequences": 4,
+  "last-updated": "2026-11-05T05:52:00",
+  "number-of-volumes": 1,
+  "bytes-total": 887,
+  "bytes-to-cache": 435,
+  "files": [
+    "nz_pc.phr",
+    "nz_pc.pin",
+    "nz_pc.pog",
+    "nz_pc.psd",
+    "nz_pc.psi",
+    "nz_pc.psq"
+  ]
+}

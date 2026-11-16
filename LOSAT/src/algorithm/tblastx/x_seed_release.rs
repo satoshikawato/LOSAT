@@ -46,23 +46,25 @@
 //!
 //! In LOSAT the HSP list of a subject is made and linked inside the per-subject closure of the
 //! batch function (`process_subject`): the units of the unit path (or the reference frame loop)
-//! find the HSPs, the unit lists are merged into the subject's list, and the list is linked. The
-//! heap of a large search peaks in that merge and in the first linking call, and neither reads a
-//! table the scan used. AP027131 x AP027133 (genetic code 4, one thread), bytes requested under
-//! massif, before -> after this module: end of the units 110.4 -> 102.4 MiB, the merge 155.8 ->
-//! 81.0 MiB, the first linking call 167.6 -> 107.3 MiB, which is the peak of the run in both. Of
-//! the 167.6 MiB, 51.8 MiB are group tables and 8.0 MiB the worker's diagonal table.
+//! find the HSPs, the unit lists are merged into the subject's list, and the list is linked
+//! (`subject_link::link_subject_hits`). The heap of a large search peaks in that merge and in the
+//! first linking call, and neither reads a table the scan used. AP027131 x AP027133 (genetic code
+//! 4, one thread), bytes requested under massif, before -> after this module: end of the units
+//! 110.4 -> 102.4 MiB, the merge 155.8 -> 81.0 MiB, the first linking call 167.6 -> 107.3 MiB,
+//! which is the peak of the run in both. Of the 167.6 MiB, 51.8 MiB are group tables and 8.0 MiB
+//! the worker's diagonal table.
 //!
 //! The batch function moves its tables into two holders (`XSeedBatch`), each an `XSeedState`
 //! with the same rule: `lookup` holds the batch's lookup table (the full table of the reference
 //! frame loop, or the stub of PAIRLUT), `units` the unit path with its group tables.
 //! Every call of `process_subject` opens one stage of each (`enter`) as its first statements. It
-//! ends the units stage (`XSeedStage::end`) when the subject's units have run, before their lists
-//! are merged, and the lookup stage after the seed stage, before the first linking call; a stage
-//! dropped without `end` (the return for a subject too short to search, an unwinding panic) ends
-//! in `Drop`. Each state counts its stages that have not ended, starting from the number of
-//! subjects of the batch. The stage end that brings a count to zero takes that state's tables
-//! out of it, which frees them unless another stage still holds them.
+//! ends the units stage (`XSeedStage::end`, in `subject_prep::run_unit_path`) when the subject's
+//! units have run, before their lists are merged, and the lookup stage after the seed stage
+//! (`subject_link::end_subject_seed_stage`), before the first linking call; a stage dropped
+//! without `end` (the return for a subject too short to search, an unwinding panic) ends in
+//! `Drop`. Each state counts its stages that have not ended, starting from the number of subjects
+//! of the batch. The stage end that brings a count to zero takes that state's tables out of it,
+//! which frees them unless another stage still holds them.
 //!
 //! The worker's diagonal table (`WorkerState.diag_array`) is read and written only by the
 //! reference frame loop. (a) A batch that the unit path takes
@@ -87,12 +89,13 @@
 //! 2. The tables are reachable only through a stage. `XSeedBatch::new` takes them by value (the
 //!    batch function keeps no binding of them), each slot is private to this module, and the
 //!    only access a state hands out is `XSeedStage::tables`.
-//! 3. No read after an end inside `process_subject`: `tables` borrows the stage and `end` takes
-//!    the stage by value, so the borrow checker rejects any use of `x_pair_par_ref` (or of
-//!    anything borrowed from it) after `x_units_stage.end()`, and any use of `lookup_ref` after
-//!    `x_seed_stage.end()`. The merge that follows the units stage is a function without `self`
-//!    (`XPairPar::merge_subject`): it gets the units' own lists by value and cannot name a group
-//!    table.
+//! 3. No read after an end in `process_subject`, `subject_prep::run_unit_path` or
+//!    `subject_link::end_subject_seed_stage` (the closure moves `x_units_stage` and `x_seed_stage`
+//!    into those calls): `tables` borrows the stage and `end` takes the stage by value, so the
+//!    borrow checker rejects any use of `x_pair_par_ref` (or of anything borrowed from it) after
+//!    `x_units_stage.end()`, and any use of `lookup_ref` after `x_seed_stage.end()`. The merge
+//!    that follows the units stage is a function without `self` (`XPairPar::merge_subject`): it
+//!    gets the units' own lists by value and cannot name a group table.
 //! 4. A stage that is still open keeps its tables alive through its own `Arc`, whatever the
 //!    count says: taking the state's `Arc` out of the slot cannot free tables another call of
 //!    `process_subject` is reading.
@@ -114,6 +117,7 @@
 
 use super::x_pair_par::XPairPar;
 use crate::algorithm::tblastx::lookup::BlastAaLookupTable;
+use crate::algorithm::tblastx::scoring::{Blosum62Score, TbxScore};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -155,26 +159,26 @@ pub fn print_summary() {
 // (x_pair_par.rs), read while the units of a subject run. Nothing after the seed stage reads
 // either, and nothing after a subject's units reads the second.
 /// The seed-stage tables of one query batch.
-pub(super) struct XSeedBatch {
+pub(super) struct XSeedBatch<M: TbxScore = Blosum62Score> {
     /// The batch's lookup table.
     pub(super) lookup: XSeedState<BlastAaLookupTable>,
     /// The unit path of the batch (`None`: the reference frame loop takes every subject).
-    pub(super) units: XSeedState<Option<XPairPar>>,
+    pub(super) units: XSeedState<Option<XPairPar<M>>>,
     /// The unit path takes every subject of the batch: the reference frame
     /// loop, the only reader of a worker's diagonal table, runs for no subject.
     units_only: bool,
 }
 
-impl XSeedBatch {
+impl<M: TbxScore> XSeedBatch<M> {
     // No NCBI counterpart: whether the reference frame loop can run for this batch is read
-    // from the unit path before it moves into its holder (dispatch point 2 of PAIRPAR in
-    // run_impl.rs: the loop runs zero times exactly when the unit path exists). One batch is
-    // counted once, whatever the number of holders; the release of the unit path is counted only
-    // for a batch that has one.
+    // from the unit path before it moves into its holder (dispatch point 2 of PAIRPAR,
+    // `subject_prep::run_unit_path`: the loop runs zero times exactly when the unit path
+    // exists). One batch is counted once, whatever the number of holders; the release of the unit
+    // path is counted only for a batch that has one.
     /// The holders of a batch of `subjects` subjects.
     pub(super) fn new(
         lookup: BlastAaLookupTable,
-        pair_par: Option<XPairPar>,
+        pair_par: Option<XPairPar<M>>,
         subjects: usize,
     ) -> Self {
         let units_only = pair_par.is_some();
@@ -638,7 +642,7 @@ mod tests {
     fn the_two_holders_of_a_batch_count_their_stages_apart() {
         // A batch without a unit path (the reference frame loop takes every subject): its
         // workers keep their diagonal table.
-        let batch = XSeedBatch::new(empty_lookup(), None, 2);
+        let batch = XSeedBatch::<Blosum62Score>::new(empty_lookup(), None, 2);
         assert_eq!(batch.worker_table_cells(64), 64);
 
         // First subject: the units stage ends first, then the lookup stage.
@@ -663,7 +667,7 @@ mod tests {
         expected = "the seed-stage tables of the batch were released before the seed stage of subject 1 started"
     )]
     fn a_unit_stage_after_the_release_of_the_unit_holder_stops_the_run() {
-        let batch = XSeedBatch::new(empty_lookup(), None, 1);
+        let batch = XSeedBatch::<Blosum62Score>::new(empty_lookup(), None, 1);
         let lookup_stage = batch.lookup.enter(0);
         assert!(batch.units.enter(0).end());
         // The lookup holder still serves the open stage, and would serve a new one.

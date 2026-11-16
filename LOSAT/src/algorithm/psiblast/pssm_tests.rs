@@ -1,0 +1,1278 @@
+//! Tests of psiblast's PSSM options, input, ASCII PSSM and files (`pssm.rs`).
+
+use super::*;
+use crate::core::psi::{PsiDiagnostics, PsiPssm};
+
+/// BLOSUM62 11/1's gapped block (`Blast_KarlinBlkGappedCalc`).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:268
+// ```c
+//     {11, 1, (double) INT2_MAX, 0.267, 0.041, 0.14, 1.9, -30, 0.669720, 42.602800, 43.636200},
+// ```
+const BLOSUM62_11_1: KarlinBlk = KarlinBlk {
+    lambda: 0.267,
+    k: 0.041,
+    h: 0.14,
+};
+
+fn native(error: &anyhow::Error) -> (i32, String) {
+    let native = error
+        .downcast_ref::<crate::cli::NativeError>()
+        .expect("a NativeError");
+    (native.exit, native.message.clone())
+}
+
+fn options(save_last: bool, save_each: bool, ascii: Option<&str>) -> PsiblastPssmOptions {
+    PsiblastPssmOptions {
+        save_pssm_after_last_round: save_last,
+        save_each_pssm: save_each,
+        out_pssm: None,
+        out_ascii_pssm: ascii.map(str::to_string),
+        pseudocount: 0,
+        in_pssm: None,
+        versions: Default::default(),
+        check_scope: Default::default(),
+        rounds: None,
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1283-1303 (quoted at
+// `PsiblastPssmOptions::check`); NCBI 2.17.0 `tk.lastonly` and `tk.eachonly`.
+#[test]
+fn saving_a_pssm_needs_a_pssm_file() {
+    let error = options(true, false, None).check().unwrap_err();
+    assert_eq!(
+        native(&error),
+        (
+            1,
+            "BLAST query/options error: save_pssm_after_last_round option requires out_pssm or out_ascii_pssm\nPlease refer to the BLAST+ user manual.\n"
+                .to_string()
+        )
+    );
+    // The last round's check comes first.
+    let error = options(true, true, None).check().unwrap_err();
+    assert!(native(&error)
+        .1
+        .contains("save_pssm_after_last_round option"));
+    let error = options(false, true, None).check().unwrap_err();
+    assert_eq!(
+        native(&error),
+        (
+            1,
+            "BLAST query/options error: save_each_pssm option requires out_pssm or out_ascii_pssm\nPlease refer to the BLAST+ user manual.\n"
+                .to_string()
+        )
+    );
+    assert!(options(true, true, Some("a.txt")).check().is_ok());
+    assert!(options(false, false, Some("a.txt")).check().is_ok());
+    // `-out_pssm` satisfies both checks too.
+    let asn_only = PsiblastPssmOptions {
+        out_pssm: Some("p.asn".to_string()),
+        ..options(true, true, None)
+    };
+    assert!(asn_only.check().is_ok());
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:304-321 (quoted at
+// `PsiblastPssmOptions::request`): without `-save_pssm_after_last_round` one round makes no PSSM.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:591-608 (quoted at
+// `PsiDiagnosticsRequest`): the frequency ratios always, the rest with `-out_ascii_pssm`.
+#[test]
+fn only_the_last_rounds_pssm_with_a_pssm_file_is_a_request() {
+    assert_eq!(options(false, false, Some("a.txt")).request(), None);
+    assert_eq!(options(false, true, Some("a.txt")).request(), None);
+    assert_eq!(options(true, false, None).request(), None);
+    let request = options(true, true, Some("-")).request().unwrap();
+    assert_eq!(
+        request,
+        PssmRequest {
+            asn_path: None,
+            ascii_path: Some("-".to_string()),
+            save_each: true,
+            pseudocount: 0,
+            versions: Default::default(),
+        }
+    );
+    assert_eq!(request.diagnostics(), PsiDiagnosticsRequest::new_ex(true));
+    let with_asn = PsiblastPssmOptions {
+        out_pssm: Some("p.asn".to_string()),
+        ..options(true, false, None)
+    };
+    let request = with_asn.request().unwrap();
+    assert_eq!(request.asn_path.as_deref(), Some("p.asn"));
+    assert_eq!(request.ascii_path, None);
+    let diagnostics = request.diagnostics();
+    assert!(diagnostics.frequency_ratios);
+    assert!(
+        !diagnostics.information_content && !diagnostics.sigma && !diagnostics.num_matching_seqs
+    );
+    let no_asn_flag = PsiblastPssmOptions {
+        out_pssm: Some("p.asn".to_string()),
+        ..options(false, false, None)
+    };
+    assert_eq!(no_asn_flag.request(), None);
+}
+
+// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/pssmcreate_unit_test.cpp:1223-1227 testRejectUnsupportedMatrix
+// The matrix without frequency ratios that LOSAT knows is IDENTITY (NCBI's case names a matrix
+// "TEST", which LOSAT's parser does not accept).
+#[test]
+fn a_matrix_without_frequency_ratios_has_no_score_block() {
+    assert!(score_block(ScoringMatrix::Identity, BLOSUM62_11_1).is_err());
+}
+
+// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/pssmcreate_unit_test.cpp:1239-1245 testPsiLowerCaseMatrix
+#[test]
+fn a_lower_case_matrix_name_has_frequency_ratios() {
+    let matrix: ScoringMatrix = "blosum62".parse().unwrap();
+    let sbp = score_block(matrix, BLOSUM62_11_1).unwrap();
+    assert_eq!(sbp.bit_scale_factor, 2);
+    assert_eq!(
+        score_block(ScoringMatrix::Blosum45, BLOSUM62_11_1)
+            .unwrap()
+            .bit_scale_factor,
+        3
+    );
+    // BLOSUM62's ideal Lambda (`kbp_ideal`), as blastp's engine computes it.
+    let ideal = crate::stats::compute_blosum62_ideal_karlin_params().unwrap();
+    assert_eq!(sbp.ideal_lambda, ideal.lambda);
+}
+
+fn alignment(
+    subject: u32,
+    e_value: f64,
+    q_start: usize,
+    s_start: usize,
+    q_length: usize,
+    ops: Option<&[GapEditOp]>,
+) -> PssmAlignment<'_> {
+    PssmAlignment {
+        subject,
+        e_value,
+        q_start,
+        s_start,
+        q_length,
+        ops,
+    }
+}
+
+fn row_letters(row: &[PsiMsaCell]) -> Vec<Option<u8>> {
+    row.iter()
+        .map(|cell| cell.is_aligned.then_some(cell.letter))
+        .collect()
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:283-323 and 363-408
+// (quoted at `input_msa` and `process_denseg`).
+#[test]
+fn the_msa_has_a_row_per_qualifying_subject_in_seq_align_order() {
+    let query = [1, 2, 3, 4, 5, 6];
+    let subjects: [&[u8]; 3] = [&[10, 11, 12, 13, 14, 15, 16], &[20, 21, 22], &[7, 8, 9, 10]];
+    let subject = |s_idx: u32| Ok(Some(subjects[s_idx as usize].to_vec()));
+    let gapped = [
+        GapEditOp::Sub(2),
+        GapEditOp::Ins(1),
+        GapEditOp::Del(2),
+        GapEditOp::Sub(1),
+    ];
+    let alignments = [
+        // Subject 0: two HSPs, the second does not overwrite aligned cells.
+        alignment(0, 1e-10, 0, 1, 0, Some(&gapped)),
+        alignment(0, 1e-5, 1, 0, 3, None),
+        // Subject 1 is not below the threshold, but moves `last_sid` on.
+        alignment(1, 1.0, 0, 0, 3, None),
+        alignment(2, 0.0, 3, 0, 3, None),
+    ];
+    let msa = input_msa(
+        &query,
+        &alignments,
+        &subject,
+        &SetKey::Index,
+        0.002,
+        &mut Vec::new(),
+    )
+    .unwrap();
+    assert_eq!(msa.rows.len(), 3);
+    assert_eq!(row_letters(&msa.rows[0]), query.map(Some).to_vec());
+    // HSP 1 at query 0: 11 12, a gap in the subject at query 2, the subject's 13 14 skipped,
+    // 15 at query 3; HSP 2 fills query 1..4 only where nothing is aligned (none left).
+    assert_eq!(
+        row_letters(&msa.rows[1]),
+        vec![Some(11), Some(12), Some(0), Some(15), None, None]
+    );
+    // Subject 2's HSP comes after subject 1's: the next row, query 3..6 = 7 8 9.
+    assert_eq!(
+        row_letters(&msa.rows[2]),
+        vec![None, None, None, Some(7), Some(8), Some(9)]
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:344-354 and 440-450
+// (quoted at `input_msa`): a Seq-align whose letters cannot be read (no sequence, or a range
+// that ends beyond the letters read by its id) makes its row the query's letters, also over the
+// cells that an earlier Seq-align of the row filled, and its subject is named for the warning.
+#[test]
+fn an_unread_seq_align_makes_its_row_the_query() {
+    let query = [1, 2, 3, 4, 5, 6];
+    // Subject 0 reads its own letters; subject 1 (the same row: its key is 0's) reads another
+    // sequence one letter short of its range; subject 2 reads none; subject 3 a longer one.
+    let letters = |s_idx: u32| {
+        Ok(match s_idx {
+            0 => Some(vec![10, 11, 12, 13]),
+            1 => Some(vec![20, 21]),
+            2 => None,
+            _ => Some(vec![30, 31, 32, 33, 34, 35, 36]),
+        })
+    };
+    let key = |s_idx: u32| SetKey::Index(if s_idx == 1 { 0 } else { s_idx });
+    // Two query letters over three subject letters: the range is 0..3.
+    let gapped = [GapEditOp::Sub(1), GapEditOp::Del(1), GapEditOp::Sub(1)];
+    let alignments = [
+        alignment(0, 1e-10, 0, 0, 3, None),
+        alignment(1, 1e-9, 3, 0, 2, Some(&gapped)),
+        alignment(2, 1e-8, 0, 0, 2, None),
+        alignment(3, 1e-7, 2, 1, 3, None),
+    ];
+    let mut unread = Vec::new();
+    let msa = input_msa(&query, &alignments, &letters, &key, 0.002, &mut unread).unwrap();
+    assert_eq!(unread, vec![1, 2]);
+    assert_eq!(msa.rows.len(), 4);
+    let whole = query.map(Some).to_vec();
+    assert_eq!(row_letters(&msa.rows[1]), whole);
+    assert_eq!(row_letters(&msa.rows[2]), whole);
+    assert_eq!(
+        row_letters(&msa.rows[3]),
+        vec![None, None, Some(31), Some(32), Some(33), None]
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:310-323 (quoted at
+// `input_msa`): `msa_index` moves on after a subject that is not counted, and an HSP whose index
+// passes the rows NCBI allocates is written out of bounds (`_ASSERT` only). LOSAT refuses it.
+#[test]
+fn an_alignment_past_the_last_row_is_refused() {
+    let query = [1, 2, 3];
+    let subject = |_: u32| Ok(Some(vec![4, 5, 6]));
+    // Subject 1 is not counted but comes first: subject 0's HSP takes index 2 of 2 rows.
+    let alignments = [
+        alignment(1, 1.0, 0, 0, 3, None),
+        alignment(0, 1e-10, 0, 0, 3, None),
+    ];
+    let error = input_msa(
+        &query,
+        &alignments,
+        &subject,
+        &SetKey::Index,
+        0.002,
+        &mut Vec::new(),
+    )
+    .unwrap_err();
+    assert!(error.downcast_ref::<crate::cli::NativeError>().is_none());
+    assert_eq!(
+        error.to_string(),
+        "an alignment past the last row of the PSSM's multiple alignment (a subject included by -inclusion_ethresh after one that is not, or a copy of a record after another subject, where NCBI BLAST+'s psiblast writes out of bounds) is not supported by LOSAT's PSIBLAST"
+    );
+    // A counted subject first keeps every later counted subject in its row.
+    let alignments = [
+        alignment(0, 1e-10, 0, 0, 3, None),
+        alignment(1, 1.0, 0, 0, 3, None),
+        alignment(2, 1e-10, 0, 0, 3, None),
+    ];
+    let msa = input_msa(
+        &query,
+        &alignments,
+        &subject,
+        &SetKey::Index,
+        0.002,
+        &mut Vec::new(),
+    )
+    .unwrap();
+    assert_eq!(msa.rows.len(), 3);
+    assert_eq!(row_letters(&msa.rows[2]), vec![Some(4), Some(5), Some(6)]);
+}
+
+fn key_of(ids: &'static [&'static str]) -> impl Fn(u32) -> SetKey {
+    use crate::seqid::accguide::parse_flags::{ANY_LOCAL, PARTIAL_OK, RAW_TEXT};
+    move |s_idx: u32| {
+        let ids = crate::seqid::parse::parse_ids(
+            ids[s_idx as usize].as_bytes(),
+            PARTIAL_OK | ANY_LOCAL | RAW_TEXT,
+            &mut |_| {},
+        )
+        .unwrap();
+        SetKey::Id(ids.into_iter().next().unwrap().unwrap())
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:178-184 and 310-320
+// (quoted at `input_msa`): the rows are the handles of the counted Seq-align ids, and a
+// Seq-align whose id `Match`es the previous one's takes its row (review 2 of line DBID
+// weakbatch, H1 and P2-P3; weakbatch DECISIONS 43 (4)).
+#[test]
+fn following_seq_aligns_whose_ids_match_share_a_row() {
+    let query = [1, 2, 3, 4];
+    let subjects: [&[u8]; 4] = [
+        &[5, 6, 7, 8],
+        &[5, 6, 7, 8],
+        &[9, 10, 11, 12],
+        &[13, 14, 15, 16],
+    ];
+    let subject = |s_idx: u32| Ok(Some(subjects[s_idx as usize].to_vec()));
+    // Copies of one record (subjects 0 and 1): one handle, one row; the copy fills only the
+    // cells that the first left unaligned.
+    let key = key_of(&[
+        "gb|AAA00001.1|",
+        "gb|AAA00001.1|",
+        "gb|BBB00002.1|",
+        "gb|BBB00002|",
+    ]);
+    let alignments = [
+        alignment(0, 1e-10, 0, 0, 2, None),
+        alignment(1, 1e-9, 1, 1, 3, None),
+        alignment(2, 1e-8, 0, 0, 4, None),
+    ];
+    let msa = input_msa(&query, &alignments, &subject, &key, 0.002, &mut Vec::new()).unwrap();
+    assert_eq!(msa.rows.len(), 3);
+    assert_eq!(
+        row_letters(&msa.rows[1]),
+        vec![Some(5), Some(6), Some(7), Some(8)]
+    );
+    assert_eq!(
+        row_letters(&msa.rows[2]),
+        vec![Some(9), Some(10), Some(11), Some(12)]
+    );
+    // `gb|BBB00002.1|` and `gb|BBB00002|` `Match` but are two handles: two rows, the second
+    // one left empty.
+    let alignments = [
+        alignment(2, 1e-10, 0, 0, 2, None),
+        alignment(3, 1e-9, 2, 2, 2, None),
+    ];
+    let msa = input_msa(&query, &alignments, &subject, &key, 0.002, &mut Vec::new()).unwrap();
+    assert_eq!(msa.rows.len(), 3);
+    assert_eq!(
+        row_letters(&msa.rows[1]),
+        vec![Some(9), Some(10), Some(15), Some(16)]
+    );
+    assert_eq!(row_letters(&msa.rows[2]), vec![None; 4]);
+    // Such ids with another subject between them take two rows of their own.
+    let alignments = [
+        alignment(2, 1e-10, 0, 0, 2, None),
+        alignment(0, 1e-9, 0, 0, 4, None),
+        alignment(3, 1e-8, 2, 2, 2, None),
+    ];
+    let msa = input_msa(&query, &alignments, &subject, &key, 0.002, &mut Vec::new()).unwrap();
+    assert_eq!(msa.rows.len(), 4);
+    assert_eq!(
+        row_letters(&msa.rows[3]),
+        vec![None, None, Some(15), Some(16)]
+    );
+    // A copy after another subject: one handle for two rows, past the last row (NCBI BLAST+
+    // 2.17.0 crashes, review 2 P3).
+    let alignments = [
+        alignment(0, 1e-10, 0, 0, 4, None),
+        alignment(2, 1e-9, 0, 0, 4, None),
+        alignment(1, 1e-8, 0, 0, 4, None),
+    ];
+    let error = input_msa(&query, &alignments, &subject, &key, 0.002, &mut Vec::new()).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .starts_with("an alignment past the last row of the PSSM's multiple alignment"),
+        "{error}"
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:529-547
+// (`GetLowestEvalue`, quoted at `input_msa`): the e-value counts as at most
+// BLAST_EXPECT_VALUE (10), and a NaN as 10.
+#[test]
+fn an_e_value_from_10_on_counts_as_10() {
+    let query = [1, 2];
+    let subject = |_: u32| Ok(Some(vec![3, 4]));
+    for (e_value, threshold, rows) in [
+        (9.0, 10.0, 2),
+        (9.0, 9.0, 1),
+        (10.0, 10.0, 1),
+        (50.0, 20.0, 2),
+        (f64::NAN, 20.0, 2),
+        (f64::NAN, 10.0, 1),
+        (0.0, 1e-300, 2),
+    ] {
+        let msa = input_msa(
+            &query,
+            &[alignment(0, e_value, 0, 0, 2, None)],
+            &subject,
+            &SetKey::Index,
+            threshold,
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(msa.rows.len(), rows, "{e_value} {threshold}");
+    }
+}
+
+#[test]
+fn fixed_formats_as_the_c_library() {
+    for (value, precision, text) in [
+        (0.125, 2, "0.12"),
+        (0.375, 2, "0.38"),
+        (-0.001, 2, "-0.00"),
+        // The double nearest 0.13695 is below it (0.136949999...).
+        (0.13695, 4, "0.1369"),
+        (0.03125, 4, "0.0312"),
+        (0.09375, 4, "0.0938"),
+        (0.04100, 4, "0.0410"),
+        (f64::NAN, 2, "nan"),
+        (-f64::NAN, 2, "-nan"),
+        (f64::INFINITY, 4, "inf"),
+        (f64::NEG_INFINITY, 4, "-inf"),
+    ] {
+        assert_eq!(fixed(value, precision), text, "{value}");
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:191-327 (quoted at
+// `print_ascii_pssm`).
+#[test]
+fn the_ascii_pssm_has_ncbis_columns() {
+    let mut scores = vec![[BLAST_SCORE_MIN; BLASTAA_SIZE]; 2];
+    let mut freqs = vec![[0.0; BLASTAA_SIZE]; 2];
+    for (c, &residue) in RESIDUE_ORDER.iter().enumerate() {
+        scores[0][residue] = c as i32 - 3;
+        scores[1][residue] = -(c as i32);
+        freqs[0][residue] = if c == 0 { 0.995 } else { 0.0 };
+        freqs[1][residue] = if c == 1 { 0.004 } else { 0.0 };
+    }
+    // A residue at BLAST_SCORE_MIN (`-I`, no percentage), and -12 makes the width 4.
+    scores[1][RESIDUE_ORDER[19]] = BLAST_SCORE_MIN;
+    scores[1][RESIDUE_ORDER[18]] = -12;
+    let pssm = PsiPssm {
+        scores,
+        gapped: BLOSUM62_11_1,
+        ungapped: BLOSUM62_11_1,
+        diagnostics: PsiDiagnostics {
+            information_content: Some(vec![0.5, -0.004]),
+            weighted_residue_freqs: Some(freqs),
+            gapless_column_weights: Some(vec![1.234, 9.0]),
+            num_matching_seqs: Some(vec![2, 2]),
+            ..PsiDiagnostics::default()
+        },
+    };
+    let query = [ncbistdaa::A, ncbistdaa::X];
+    let text = String::from_utf8(print_ascii_pssm(&pssm, &query, ANCILLARY)).unwrap();
+    let mut expected = String::from("\nLast position-specific scoring matrix computed, weighted observed percentages rounded down, information per position, and relative weight of gapless real matches to pseudocounts\n         ");
+    for letter in "ARNDCQEGHILKMFPSTWYV".chars() {
+        expected.push_str(&format!("{letter:>4}"));
+    }
+    for letter in "ARNDCQEGHILKMFPSTWYV".chars() {
+        expected.push_str(&format!("   {letter}"));
+    }
+    expected.push_str("\n    1 A  ");
+    for c in 0..20 {
+        expected.push_str(&format!("{:>4}", c - 3));
+    }
+    expected.push(' ');
+    expected.push_str(" 100");
+    for _ in 1..20 {
+        expected.push_str("   0");
+    }
+    expected.push_str("  0.50 1.23");
+    expected.push_str("\n    2 X  ");
+    for c in 0..18 {
+        expected.push_str(&format!("{:>4}", -c));
+    }
+    expected.push_str(" -12-I  ");
+    for _ in 0..19 {
+        expected.push_str("   0");
+    }
+    expected.push_str("  -0.00     0.00");
+    expected.push_str("\n\n                      K         Lambda\n");
+    expected.push_str("Standard Ungapped    0.1370     0.3200\n");
+    expected.push_str("Standard Gapped      0.0410     0.2670\n");
+    expected.push_str("PSI Ungapped         0.1370     0.3200\n");
+    expected.push_str("PSI Gapped           0.0410     0.2670\n");
+    assert_eq!(text, expected);
+}
+
+const TK_1_40: &[u8] = b"MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGG";
+
+fn pssm_request(pseudocount: i32) -> PssmRequest {
+    PssmRequest {
+        asn_path: None,
+        ascii_path: Some("-".to_string()),
+        save_each: false,
+        pseudocount,
+        versions: Default::default(),
+    }
+}
+
+const ANCILLARY: PssmAncillary = PssmAncillary {
+    ungapped: KarlinBlk {
+        lambda: 0.31998,
+        k: 0.13697,
+        h: 0.4,
+    },
+    gapped: BLOSUM62_11_1,
+    psi_ungapped: KarlinBlk {
+        lambda: 0.31998,
+        k: 0.13697,
+        h: 0.4,
+    },
+    psi_gapped: BLOSUM62_11_1,
+};
+
+const SCORING: PssmScoring<'static> = PssmScoring {
+    matrix: ScoringMatrix::Blosum62,
+    matrix_name: "BLOSUM62",
+    gap_open: 11,
+    gap_extend: 1,
+};
+
+/// `query_pssm` of a query of `letters` named `Query_1`.
+fn run_query_pssm(
+    request: &PssmRequest,
+    inclusion_ethresh: f64,
+    letters: &[u8],
+    alignments: &[PssmAlignment<'_>],
+    subject: &dyn Fn(u32) -> Result<Option<Vec<u8>>>,
+) -> Result<QueryPssm> {
+    let id = crate::seqid::ParsedSeqId::Local(crate::report::serial::pssm::ObjectId::Str(
+        b"Query_1".to_vec(),
+    ));
+    run_query_pssm_of(
+        request,
+        inclusion_ethresh,
+        letters,
+        &id,
+        alignments,
+        subject,
+    )
+}
+
+/// `query_pssm` of a query of `letters` whose Seq-id is `id`.
+fn run_query_pssm_of(
+    request: &PssmRequest,
+    inclusion_ethresh: f64,
+    letters: &[u8],
+    id: &crate::seqid::ParsedSeqId,
+    alignments: &[PssmAlignment<'_>],
+    subject: &dyn Fn(u32) -> Result<Option<Vec<u8>>>,
+) -> Result<QueryPssm> {
+    query_pssm(
+        request,
+        SCORING,
+        BLOSUM62_11_1,
+        inclusion_ethresh,
+        PssmQueryRecord {
+            letters,
+            id,
+            title: b"a title",
+        },
+        alignments,
+        subject,
+        &SetKey::Index,
+        ANCILLARY,
+        &mut Vec::new(),
+    )
+}
+
+/// The first record of `fasta`, read as psiblast's query reader reads it with `-parse_deflines`.
+fn believed_query(fasta: &str) -> crate::blastinput::fasta_reader::FastaRecord {
+    use crate::blastinput::fasta_reader::{FastaInputSource, ReaderConfig};
+    let config = ReaderConfig::query("PSIBLAST", true, false).with_parse_deflines(true);
+    FastaInputSource::from_bytes(fasta.as_bytes(), config)
+        .next_sequence(&mut |_| Ok(()))
+        .expect("a record")
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:150-155 (quoted at
+// `fasta_query_id`). NCBI BLAST+ 2.17.0 `psiblast -parse_deflines -num_iterations 2 -out_pssm`
+// (line RG Q1's probe `q.<form>.it2.pssm` on `tests/db_search/taxfilter/tfp`): the PSSM's query
+// Bioseq has the record's Seq-align id alone (of `gi|123|gb|AAA1.1|` the gi), as these lines.
+#[test]
+fn a_pssm_query_read_with_parse_deflines_has_its_seq_align_id() {
+    let plain = crate::blastinput::fasta_reader::FastaRecord::new("Query_3", b"t", TK_1_40);
+    assert_eq!(
+        fasta_query_id(&plain, 3),
+        crate::seqid::ParsedSeqId::Local(crate::report::serial::pssm::ObjectId::Str(
+            b"Query_3".to_vec()
+        ))
+    );
+    let letters = std::str::from_utf8(TK_1_40).unwrap();
+    let subject = |_: u32| Ok(Some(ncbistdaa_letters(TK_1_40)));
+    let alignments = [alignment(0, 1e-20, 0, 0, 40, None)];
+    let request = PssmRequest {
+        asn_path: Some("p.asn".to_string()),
+        ascii_path: None,
+        save_each: false,
+        pseudocount: 0,
+        versions: Default::default(),
+    };
+    for (defline, id) in [
+        ("gi|123|gb|AAA1.1| t", "        gi 123\n"),
+        ("lcl|123 t", "        local id 123\n"),
+        ("myquery t", "        local str \"myquery\"\n"),
+        (
+            "pdb|1A3N|A t",
+            "        pdb {\n          mol \"1A3N\",\n          chain 65,\n          chain-id \"A\"\n        }\n",
+        ),
+        (
+            "gnl|mydb|42 t",
+            "        general {\n          db \"mydb\",\n          tag id 42\n        }\n",
+        ),
+        (
+            "sp|P69905.2|HBA_HUMAN t",
+            "        swissprot {\n          name \"HBA_HUMAN\",\n          accession \"P69905\",\n          release \"reviewed\",\n          version 2\n        }\n",
+        ),
+        (
+            "ref|NP_000549.1| t",
+            "        other {\n          accession \"NP_000549\",\n          version 1\n        }\n",
+        ),
+    ] {
+        let record = believed_query(&format!(">{defline}\n{letters}\n"));
+        let pssm_id = fasta_query_id(&record, 1);
+        assert_eq!(&pssm_id, &record.believed().unwrap().best, "{defline}");
+        let asn = run_query_pssm_of(&request, 0.002, TK_1_40, &pssm_id, &alignments, &subject)
+            .unwrap()
+            .asn
+            .unwrap();
+        let text = String::from_utf8(asn).unwrap();
+        let expected = format!("    query seq {{\n      id {{\n{id}      }},\n");
+        assert!(text.contains(&expected), "{defline}:\n{text:.400}");
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:894-903 and
+// psi_pssm_input.cpp:166-171 (quoted at `query_pssm`); NCBI 2.17.0 `db.ps.pssm.o.0`: an O of
+// the query record is X in the search's buffer, which is the PSSM's query, so the ASCII PSSM
+// prints X and the X branch of the gapless weight (`    0.00`) at that position.
+#[test]
+fn an_o_in_the_query_prints_as_x() {
+    // TK 1-40 with O at 30 (as `tk_o.faa`); the subject is TK 1-40 with three substitutions
+    // (92.5% identity: not purged as near-identical), so column 30 has two sequences.
+    let mut record = TK_1_40.to_vec();
+    record[29] = b'O';
+    let mut subject_letters = TK_1_40.to_vec();
+    for (position, letter) in [(4, b'A'), (14, b'I'), (24, b'S')] {
+        subject_letters[position] = letter;
+    }
+    let subject = |_: u32| Ok(Some(ncbistdaa_letters(&subject_letters)));
+    let alignments = [alignment(0, 1e-20, 0, 0, 40, None)];
+    let query = crate::algorithm::blastp::encoding::encode_protein_sequence(&record);
+    let query = &query.aa_seq[1..=query.aa_len];
+    assert_eq!(query[29], ncbistdaa::X);
+    let msa = input_msa(
+        query,
+        &alignments,
+        &subject,
+        &SetKey::Index,
+        0.002,
+        &mut Vec::new(),
+    )
+    .unwrap();
+    let sbp = score_block(ScoringMatrix::Blosum62, BLOSUM62_11_1).unwrap();
+    let pssm =
+        psi::create_pssm_with_diagnostics(&msa, 0, &sbp, PsiDiagnosticsRequest::new_ex(true))
+            .unwrap();
+    assert!(pssm.diagnostics.num_matching_seqs.as_ref().unwrap()[29] > 1);
+    let text = String::from_utf8(
+        run_query_pssm(&pssm_request(0), 0.002, &record, &alignments, &subject)
+            .unwrap()
+            .ascii
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(text.as_bytes(), print_ascii_pssm(&pssm, query, ANCILLARY));
+    let line = text
+        .lines()
+        .find(|line| line.starts_with("   30 "))
+        .unwrap();
+    assert!(line.starts_with("   30 X  "), "{line}");
+    // `"  " info " "` then the X branch's `"    0.00"` (the other branch has no padding).
+    assert!(line.ends_with("     0.00"), "{line}");
+    // A column with an O nowhere keeps its letter and its weight.
+    let line = text
+        .lines()
+        .find(|line| line.starts_with("   31 "))
+        .unwrap();
+    assert!(line.starts_with("   31 K  "), "{line}");
+    assert!(!line.ends_with("     0.00"), "{line}");
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1577-1600 and
+// c++/src/algo/blast/api/pssm_engine.cpp:131-148 (quoted at `query_pssm`); NCBI 2.17.0
+// `db.ps.pssm.pcneg.7` and `db.ps.pssm.inc0.6`: the PSSM engine's options checks, the pseudocount
+// first, then the inclusion threshold.
+#[test]
+fn the_pssm_engine_checks_the_pseudocount_then_the_inclusion_threshold() {
+    let subject = |_: u32| Ok(Some(ncbistdaa_letters(TK_1_40)));
+    let alignments = [alignment(0, 1e-20, 0, 0, 40, None)];
+    let run = |pseudocount: i32, inclusion_ethresh: f64| {
+        run_query_pssm(
+            &pssm_request(pseudocount),
+            inclusion_ethresh,
+            TK_1_40,
+            &alignments,
+            &subject,
+        )
+    };
+    let pseudocount = (
+        1,
+        "BLAST options error: IPssmInputData returns invalid PSIBlastOptions: Pseudo count must be greater than or equal to 0\n"
+            .to_string(),
+    );
+    let inclusion = (
+        1,
+        "BLAST options error: IPssmInputData returns invalid PSIBlastOptions: Inclusion threshold must be greater than 0\n"
+            .to_string(),
+    );
+    assert_eq!(native(&run(-1, 0.002).unwrap_err()), pseudocount);
+    assert_eq!(native(&run(-1, 0.0).unwrap_err()), pseudocount);
+    assert_eq!(native(&run(0, 0.0).unwrap_err()), inclusion);
+    assert_eq!(native(&run(5, -1e-5).unwrap_err()), inclusion);
+    assert!(run(0, 1e-300).is_ok());
+}
+
+/// A directory of its own for a test's files.
+fn scratch(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("losat-pssm-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn request(path: &std::path::Path, save_each: bool) -> PssmRequest {
+    PssmRequest {
+        asn_path: None,
+        ascii_path: Some(path.to_str().unwrap().to_string()),
+        save_each,
+        pseudocount: 0,
+        versions: Default::default(),
+    }
+}
+
+fn asn_request(path: &std::path::Path, save_each: bool) -> PssmRequest {
+    PssmRequest {
+        asn_path: Some(path.to_str().unwrap().to_string()),
+        ascii_path: None,
+        save_each,
+        pseudocount: 0,
+        versions: Default::default(),
+    }
+}
+
+/// The PSSM files of `request` for the queries' PSSMs `asn` and `ascii` (one entry per query),
+/// written after the "reports".
+fn write_files(request: &PssmRequest, asn: &[&[u8]], ascii: &[&[u8]]) -> Result<()> {
+    let mut files = PssmFiles::new(request);
+    for query in 0..asn.len().max(ascii.len()) {
+        files.add(
+            asn.get(query).copied(),
+            ascii.get(query).map(|pssm| pssm.to_vec()),
+        )?;
+    }
+    files.commit()
+}
+
+/// The names in `dir`, sorted.
+fn names(dir: &std::path::Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect();
+    names.sort();
+    names
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:50-66 (quoted at
+// `OutputFileReset`); NCBI 2.17.0 `two.last`, `pre.nohit.keep`, `two.each.last`,
+// `err.baddir`.
+#[test]
+fn each_pssm_replaces_the_file_or_gets_a_numbered_one() {
+    let dir = scratch("files");
+    let file = dir.join("a.txt");
+    let pssms: [&[u8]; 2] = [b"first\n", b"second\n"];
+    write_files(&request(&file, false), &[], &pssms).unwrap();
+    assert_eq!(std::fs::read(&file).unwrap(), b"second\n");
+    // No PSSM: the file stays.
+    write_files(&request(&file, false), &[], &[]).unwrap();
+    assert_eq!(std::fs::read(&file).unwrap(), b"second\n");
+    // Versions: F.1, F.2, and F is not touched.
+    write_files(&request(&file, true), &[], &pssms).unwrap();
+    assert_eq!(std::fs::read(dir.join("a.txt.1")).unwrap(), b"first\n");
+    assert_eq!(std::fs::read(dir.join("a.txt.2")).unwrap(), b"second\n");
+    assert_eq!(std::fs::read(&file).unwrap(), b"second\n");
+    // An ASCII file that cannot be opened is not reported.
+    let missing = dir.join("nodir").join("a.txt");
+    write_files(&request(&missing, false), &[], &pssms).unwrap();
+    assert!(!missing.exists());
+    // The same name for both files: each query's ASN.1 file, then its ASCII one.
+    let both = PssmRequest {
+        asn_path: Some(file.to_str().unwrap().to_string()),
+        ..request(&file, false)
+    };
+    write_files(&both, &[b"asn 1\n", b"asn 2\n"], &pssms).unwrap();
+    assert_eq!(std::fs::read(&file).unwrap(), b"second\n");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:319-321 (quoted at
+// `run_resolved_in_pool`'s end): a run that fails before `SavePssmToFile` leaves every PSSM file
+// as it was (NCBI 2.17.0, `-out /dev/full`: the earlier file stays, none is made).
+#[test]
+fn staged_asn_files_change_no_target_before_the_commit() {
+    let dir = scratch("staged");
+    let file = dir.join("p.asn");
+    // Dropped (a run that fails before its reports): no file is made, none is left.
+    let mut files = PssmFiles::new(&asn_request(&file, false));
+    files.add(Some(b"pssm 1\n"), None).unwrap();
+    files.add(Some(b"pssm 2\n"), None).unwrap();
+    // The second PSSM's staging file replaces the first one's.
+    assert_eq!(names(&dir).len(), 1);
+    assert!(!file.exists());
+    drop(files);
+    assert!(names(&dir).is_empty());
+    // An existing file stays until the commit, which replaces it.
+    std::fs::write(&file, b"previous file\n").unwrap();
+    let mut files = PssmFiles::new(&asn_request(&file, false));
+    files.add(Some(b"pssm 1\n"), None).unwrap();
+    files.add(Some(b"pssm 2\n"), None).unwrap();
+    assert_eq!(std::fs::read(&file).unwrap(), b"previous file\n");
+    drop(files);
+    assert_eq!(std::fs::read(&file).unwrap(), b"previous file\n");
+    assert_eq!(names(&dir), ["p.asn"]);
+    let mut files = PssmFiles::new(&asn_request(&file, false));
+    files.add(Some(b"pssm 1\n"), None).unwrap();
+    files.add(Some(b"pssm 2\n"), None).unwrap();
+    assert_eq!(std::fs::read(&file).unwrap(), b"previous file\n");
+    files.commit().unwrap();
+    assert_eq!(std::fs::read(&file).unwrap(), b"pssm 2\n");
+    assert_eq!(names(&dir), ["p.asn"]);
+    // Numbered files: each staged, F.1 truncated in place by the commit, F.2 made.
+    std::fs::write(dir.join("p.asn.1"), b"previous file\n").unwrap();
+    let mut files = PssmFiles::new(&asn_request(&file, true));
+    files.add(Some(b"pssm 1\n"), None).unwrap();
+    files.add(Some(b"pssm 2\n"), None).unwrap();
+    assert_eq!(names(&dir).len(), 4);
+    assert_eq!(
+        std::fs::read(dir.join("p.asn.1")).unwrap(),
+        b"previous file\n"
+    );
+    assert!(!dir.join("p.asn.2").exists());
+    files.commit().unwrap();
+    assert_eq!(names(&dir), ["p.asn", "p.asn.1", "p.asn.2"]);
+    assert_eq!(std::fs::read(dir.join("p.asn.1")).unwrap(), b"pssm 1\n");
+    assert_eq!(std::fs::read(dir.join("p.asn.2")).unwrap(), b"pssm 2\n");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1304-1318 (quoted at
+// `PssmVersions`): the two streams are made once per run, so `-save_each_pssm` numbers the files
+// over the run. Two calls whose requests share one `PssmVersions` (the library's query batches)
+// number their files as one call; a request of its own starts again at 1. The check of the names
+// before a call starts at the run's next number.
+#[test]
+fn the_runs_numbers_go_on_over_the_calls_that_share_them() {
+    let dir = scratch("versions");
+    let file = dir.join("p.asn");
+    let first = asn_request(&file, true);
+    let second = PssmRequest {
+        versions: first.versions.clone(),
+        ..asn_request(&file, true)
+    };
+    write_files(&first, &[b"pssm 1\n", b"pssm 2\n"], &[]).unwrap();
+    assert_eq!(second.versions.next(), [3, 1]);
+    assert_eq!(second, first);
+    write_files(&second, &[b"pssm 3\n"], &[]).unwrap();
+    assert_eq!(names(&dir), ["p.asn.1", "p.asn.2", "p.asn.3"]);
+    assert_eq!(std::fs::read(dir.join("p.asn.3")).unwrap(), b"pssm 3\n");
+    write_files(&asn_request(&file, true), &[b"again\n"], &[]).unwrap();
+    assert_eq!(std::fs::read(dir.join("p.asn.1")).unwrap(), b"again\n");
+    assert_ne!(asn_request(&file, true), first);
+    // The check of the names before a call covers the next `queries` numbers of the run.
+    #[cfg(unix)]
+    {
+        let link = dir.join("p.asn.4");
+        std::os::unix::fs::symlink(dir.join("missing"), &link).unwrap();
+        let refusal = format!(
+            "an -out_pssm file that is a symbolic link to a missing file ({}) is not supported by LOSAT's PSIBLAST",
+            link.display()
+        );
+        assert_eq!(first.versions.next(), [4, 1]);
+        let checked = |request: &PssmRequest, queries| {
+            check_pssm_files(request, queries, None).map_err(|error| error.to_string())
+        };
+        assert_eq!(checked(&first, 1), Err(refusal.clone()));
+        let fresh = asn_request(&file, true);
+        assert_eq!(checked(&fresh, 3), Ok(()));
+        assert_eq!(checked(&fresh, 4), Err(refusal));
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:50-66 (quoted at
+// `OutputFileReset`): version 0 removes the file and makes it again, a numbered file is
+// truncated (`ofstream`), which keeps its inode and mode.
+#[cfg(unix)]
+#[test]
+fn the_commit_makes_or_truncates_the_file_as_ncbi() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let dir = scratch("modes");
+    let fresh = dir.join("fresh");
+    std::fs::write(&fresh, b"").unwrap();
+    let fresh_mode = std::fs::metadata(&fresh).unwrap().mode();
+    std::fs::remove_file(&fresh).unwrap();
+    let file = dir.join("p.asn");
+    for name in ["p.asn", "p.asn.1"] {
+        std::fs::write(dir.join(name), b"previous file\n").unwrap();
+        std::fs::set_permissions(dir.join(name), std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let numbered = std::fs::metadata(dir.join("p.asn.1")).unwrap();
+    write_files(&asn_request(&file, false), &[b"pssm\n"], &[]).unwrap();
+    assert_eq!(std::fs::metadata(&file).unwrap().mode(), fresh_mode);
+    write_files(&asn_request(&file, true), &[b"pssm\n"], &[]).unwrap();
+    let truncated = std::fs::metadata(dir.join("p.asn.1")).unwrap();
+    assert_eq!(truncated.ino(), numbered.ino());
+    assert_eq!(truncated.mode(), numbered.mode());
+    assert_eq!(std::fs::read(dir.join("p.asn.1")).unwrap(), b"pssm\n");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// NCBI 2.17.0 `err.baddir.p`: an -out_pssm file that cannot be opened stops the run after that
+// query's report (`PssmFiles::add`); `-out_pssm /dev/full`: one that cannot be written (the review
+// probe of PS3).
+#[test]
+fn an_asn_file_that_cannot_be_written_is_refused_when_staged() {
+    let dir = scratch("refused");
+    let refused = |path: &std::path::Path, save_each: bool| -> String {
+        let mut files = PssmFiles::new(&asn_request(path, save_each));
+        files.add(Some(b"pssm\n"), None).unwrap_err().to_string()
+    };
+    let cannot = "a -out_pssm file that cannot be written (";
+    assert!(refused(&dir.join("nodir").join("p.asn"), false).starts_with(cannot));
+    std::fs::create_dir(dir.join("d")).unwrap();
+    assert!(refused(&dir.join("d"), false).starts_with(cannot));
+    assert_eq!(names(&dir), ["d"]);
+    // Earlier queries' files are written by the commit after a refused one.
+    let file = dir.join("p.asn");
+    let mut files = PssmFiles::new(&asn_request(&file, true));
+    files.add(Some(b"pssm 1\n"), None).unwrap();
+    std::fs::create_dir(dir.join("p.asn.2")).unwrap();
+    assert!(files
+        .add(Some(b"pssm 2\n"), None)
+        .unwrap_err()
+        .to_string()
+        .starts_with(cannot));
+    files.commit().unwrap();
+    assert_eq!(std::fs::read(dir.join("p.asn.1")).unwrap(), b"pssm 1\n");
+    assert_eq!(names(&dir), ["d", "p.asn.1", "p.asn.2"]);
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(dir.join("missing"), dir.join("link")).unwrap();
+        assert_eq!(
+            refused(&dir.join("link"), false),
+            format!(
+                "an -out_pssm file that is a symbolic link to a missing file ({}) is not supported by LOSAT's PSIBLAST",
+                dir.join("link").display()
+            )
+        );
+    }
+    #[cfg(target_os = "linux")]
+    {
+        assert!(refused(std::path::Path::new("/dev/full"), false)
+            .starts_with("a -out_pssm file that cannot be written (/dev/full: "));
+        write_files(
+            &asn_request(std::path::Path::new("/dev/null"), false),
+            &[b"pssm\n"],
+            &[],
+        )
+        .unwrap();
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// A file that cannot be opened for writing: version 0 removes it when its directory allows
+// (`CDirEntry::RemoveEntry`), a numbered file is opened in place and fails.
+#[cfg(unix)]
+#[test]
+fn a_read_only_file_is_replaced_only_with_version_0() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = scratch("readonly");
+    let file = dir.join("p.asn");
+    for name in ["p.asn", "p.asn.1"] {
+        std::fs::write(dir.join(name), b"previous file\n").unwrap();
+        std::fs::set_permissions(dir.join(name), std::fs::Permissions::from_mode(0o444)).unwrap();
+    }
+    // Root opens any file for writing.
+    if std::fs::OpenOptions::new().write(true).open(&file).is_err() {
+        let mut files = PssmFiles::new(&asn_request(&file, true));
+        assert!(files
+            .add(Some(b"pssm\n"), None)
+            .unwrap_err()
+            .to_string()
+            .starts_with("a -out_pssm file that cannot be written ("));
+        drop(files);
+        assert_eq!(
+            std::fs::read(dir.join("p.asn.1")).unwrap(),
+            b"previous file\n"
+        );
+    }
+    write_files(&asn_request(&file, false), &[b"pssm\n"], &[]).unwrap();
+    assert_eq!(std::fs::read(&file).unwrap(), b"pssm\n");
+    assert_eq!(names(&dir), ["p.asn", "p.asn.1"]);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// The re-review of PS3 (RS1): the staging file's name is short, so a target name that NCBI can
+// make (up to NAME_MAX, 255 bytes here) is staged; a longer one fails as NCBI's open does
+// (`ENAMETOOLONG` from the target's `stat`).
+#[cfg(unix)]
+#[test]
+fn a_long_target_name_is_staged_and_a_too_long_one_refused() {
+    let dir = scratch("longname");
+    let long = dir.join("L".repeat(245));
+    write_files(&asn_request(&long, false), &[b"pssm\n"], &[]).unwrap();
+    assert_eq!(std::fs::read(&long).unwrap(), b"pssm\n");
+    let mut files = PssmFiles::new(&asn_request(&dir.join("L".repeat(300)), false));
+    assert!(files
+        .add(Some(b"pssm\n"), None)
+        .unwrap_err()
+        .to_string()
+        .starts_with("a -out_pssm file that cannot be written ("));
+    drop(files);
+    assert_eq!(names(&dir), ["L".repeat(245)]);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// The re-review of PS3 (RS2): an existing file that opens for writing in a directory that takes no
+// new file is written in place after the reports, as NCBI's version 0 (which cannot remove its
+// name) and numbered files are (NCBI 2.17.0 `rodir`); nothing changes before the commit.
+#[cfg(unix)]
+#[test]
+fn an_existing_file_in_a_directory_that_takes_no_file_is_written_in_place() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let dir = scratch("rodir");
+    let ro = dir.join("ro");
+    std::fs::create_dir(&ro).unwrap();
+    for name in ["p.asn", "p.asn.1"] {
+        std::fs::write(ro.join(name), b"previous file\n").unwrap();
+    }
+    let inode = |name: &str| std::fs::metadata(ro.join(name)).unwrap().ino();
+    let (before, before_1) = (inode("p.asn"), inode("p.asn.1"));
+    std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o555)).unwrap();
+    // Root makes files in any directory: then the files are staged as elsewhere.
+    let in_place = std::fs::File::create(ro.join("probe")).is_err();
+    let file = ro.join("p.asn");
+    let mut files = PssmFiles::new(&asn_request(&file, false));
+    files.add(Some(b"pssm 1\n"), None).unwrap();
+    files.add(Some(b"pssm 2\n"), None).unwrap();
+    assert_eq!(std::fs::read(&file).unwrap(), b"previous file\n");
+    drop(files);
+    assert_eq!(std::fs::read(&file).unwrap(), b"previous file\n");
+    write_files(&asn_request(&file, false), &[b"pssm 1\n", b"pssm 2\n"], &[]).unwrap();
+    write_files(&asn_request(&file, true), &[b"pssm 1\n"], &[]).unwrap();
+    assert_eq!(std::fs::read(&file).unwrap(), b"pssm 2\n");
+    assert_eq!(std::fs::read(ro.join("p.asn.1")).unwrap(), b"pssm 1\n");
+    assert_eq!(inode("p.asn.1"), before_1);
+    if in_place {
+        assert_eq!(inode("p.asn"), before);
+    }
+    std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let _ = std::fs::remove_file(ro.join("probe"));
+    assert_eq!(names(&ro), ["p.asn", "p.asn.1"]);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// The re-review of PS3 (RN1): `/dev/null` keeps no PSSM bytes; another device keeps them for the
+// commit. RN2: `EPERM` from the test open (an immutable or append-only file) is not removable.
+#[cfg(target_os = "linux")]
+#[test]
+fn dev_null_keeps_no_bytes_and_eperm_is_immutable() {
+    let mut files = PssmFiles::new(&asn_request(std::path::Path::new("/dev/null"), false));
+    files.add(Some(b"pssm\n"), None).unwrap();
+    assert!(matches!(files.pending[0].asn, Some((_, Staged::Null))));
+    files.commit().unwrap();
+    let mut files = PssmFiles::new(&asn_request(std::path::Path::new("/dev/zero"), false));
+    files.add(Some(b"pssm\n"), None).unwrap();
+    assert!(matches!(files.pending[0].asn, Some((_, Staged::Device(_)))));
+    // Linux's EPERM and EACCES.
+    assert!(immutable(&std::io::Error::from_raw_os_error(1)));
+    assert!(!immutable(&std::io::Error::from_raw_os_error(13)));
+}
+
+// The review of PS3 (B2): NCBI writes a PSSM file that is also a report stream among the reports'
+// bytes, in an order of their buffers; refused before the search.
+#[test]
+fn a_pssm_file_that_is_a_report_stream_is_refused() {
+    let dir = scratch("alias");
+    let out = dir.join("out.txt");
+    std::fs::write(&out, b"").unwrap();
+    let check = |request: &PssmRequest, queries: usize| {
+        check_pssm_files(request, queries, Some(&out)).map_err(|error| error.to_string())
+    };
+    assert_eq!(
+        check(&asn_request(&out, false), 1),
+        Err(format!(
+            "an -out_pssm file that is also the -out file ({}) is not supported by LOSAT's PSIBLAST",
+            out.display()
+        ))
+    );
+    assert!(check(&request(&out, false), 1)
+        .unwrap_err()
+        .starts_with("an -out_ascii_pssm file that is also the -out file"));
+    // With -save_each_pssm, every numbered name up to the number of queries.
+    let base = dir.join("p.asn");
+    std::fs::write(dir.join("p.asn.2"), b"").unwrap();
+    assert!(check(&asn_request(&base, true), 2).is_ok());
+    assert!(check(&asn_request(&base, false), 2).is_ok());
+    let numbered = check_pssm_files(&asn_request(&base, true), 2, Some(&dir.join("p.asn.2")));
+    assert!(numbered
+        .unwrap_err()
+        .to_string()
+        .starts_with("an -out_pssm file that is also the -out file"));
+    assert!(check_pssm_files(&asn_request(&base, true), 1, Some(&dir.join("p.asn.2"))).is_ok());
+    // `/dev/null` shows no order: it is no report stream (`report_stream_of`).
+    assert!(check(&asn_request(std::path::Path::new("/dev/null"), false), 1).is_ok());
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let null = std::fs::metadata("/dev/null").unwrap().rdev();
+        let is_null = |name: &str| std::fs::metadata(name).is_ok_and(|file| file.rdev() == null);
+        if !is_null("/dev/stdout") {
+            let stdout = check(&asn_request(std::path::Path::new("/dev/stdout"), false), 1);
+            assert!(stdout
+                .unwrap_err()
+                .starts_with("an -out_pssm file that is also the standard output (/dev/stdout)"));
+        }
+        if !is_null("/dev/stderr") {
+            let stderr = check(&request(std::path::Path::new("/dev/stderr"), false), 1);
+            assert!(stderr
+                .unwrap_err()
+                .starts_with("an -out_ascii_pssm file that is also the standard "));
+        }
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:302-321 and 440-450
+// (quoted at `input_msa`): each included Seq-align's subject is read in turn, the scope loading
+// its sequence (and looking its taxids up) before the letters, whose failure warns.
+#[test]
+fn a_reads_taxonomy_texts_come_before_its_warnings_and_after_those_before_it() {
+    let line = |text: &str| text.as_bytes().to_vec();
+    let mut messages = PssmReadMessages::default();
+    // Subject 3 fails (no sequence, so no load), subject 5 fails twice, subject 7 not at all.
+    messages.push(3, line("warn 3\n"));
+    messages.push(5, line("warn 5a\n"));
+    messages.push(5, line("warn 5b\n"));
+    messages.add_load_texts([
+        (2, line("text 2\n")),
+        (3, Vec::new()),
+        (5, line("text 5\n")),
+        (7, line("text 7\n")),
+    ]);
+    assert_eq!(
+        String::from_utf8(messages.bytes()).unwrap(),
+        "text 2\nwarn 3\ntext 5\nwarn 5a\nwarn 5b\ntext 7\n"
+    );
+    // Without warnings the texts are the messages.
+    let mut texts = PssmReadMessages::default();
+    texts.add_load_texts([(0, Vec::new()), (1, line("text 1\n"))]);
+    assert_eq!(texts.bytes(), line("text 1\n"));
+}
+
+#[test]
+fn a_querys_read_messages_keep_the_order_of_the_queries() {
+    let dir = scratch("read-messages");
+    let mut files = PssmFiles::new(&request(&dir.join("p.txt"), false));
+    let mut warning = PssmReadMessages::default();
+    warning.push(0, b"warn q1\n".to_vec());
+    files.add_read_warnings(1, warning);
+    files.add_read_warnings(2, PssmReadMessages::default());
+    // Texts of query 0, which has no warning, and of query 1, before its warning.
+    files
+        .read_messages(0)
+        .add_load_texts([(4, b"text q0\n".to_vec())]);
+    files
+        .read_messages(1)
+        .add_load_texts([(0, b"text q1\n".to_vec())]);
+    // An entry made for texts that are not there is not written.
+    let _ = files.read_messages(3);
+    // The posts of a file's write come after the query's read messages; a query with posts only
+    // has them alone, in the order of the queries.
+    let posts = |text: &str| {
+        let mut posts = crate::report::diag_log::Posts::new();
+        posts.post(crate::report::diag_log::ERROR, text.as_bytes().to_vec());
+        posts
+    };
+    files.add_file_posts(1, posts("post q1\nline 2\n"));
+    files.add_file_posts(2, crate::report::diag_log::Posts::new());
+    files.add_file_posts(4, posts("post q4\n"));
+    let mut q1 = crate::report::diag_log::Posts::of_lines(b"text q1\nwarn q1\n".to_vec());
+    q1.append(&posts("post q1\nline 2\n"));
+    assert_eq!(
+        files.take_read_warnings(),
+        vec![
+            (
+                0,
+                crate::report::diag_log::Posts::of_lines(b"text q0\n".to_vec())
+            ),
+            (1, q1),
+            (4, posts("post q4\n")),
+        ]
+    );
+    assert!(files.take_read_warnings().is_empty());
+    drop(files);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// psiblast's PSSM file with a query title outside the visible ASCII range: NCBI's ASN.1 text
+/// stream writes `#` for each such byte and posts error 803.7 with the member, the line and the
+/// whole title (NCBI 2.17.0, `psiblast -query qps.faa -out_pssm o.asn
+/// -save_pssm_after_last_round`, title `YP_009220551.1 t\xe9tle`: `Error: (803.7) [psiblast]
+/// PssmWithParameters.pssm.query.seq.descr.E.title` / `Bad char [0xE9] in string at line 12`); a
+/// title without one writes no post and the same bytes as `asn_text`.
+#[test]
+fn a_pssm_title_outside_the_visible_range_is_written_with_ncbis_posts() {
+    use crate::report::serial::pssm::{asn_text, asn_text_posting};
+    let value = |title: &[u8]| PssmWithParameters {
+        pssm: Pssm {
+            is_protein: None,
+            identifier: None,
+            num_rows: 1,
+            num_columns: 1,
+            row_labels: None,
+            by_row: None,
+            query: Some(PssmQuery {
+                ids: vec![crate::seqid::ParsedSeqId::Local(ObjectId::Str(
+                    b"Query_1".to_vec(),
+                ))],
+                titles: Some(vec![title.to_vec()]),
+                inst: SeqInst {
+                    repr: ("raw", 2),
+                    mol: ("aa", 3),
+                    length: Some(1),
+                    seq_data: None,
+                },
+            }),
+            intermediate_data: None,
+            final_data: None,
+        },
+        params: None,
+    };
+    let (plain, none) = asn_text_posting(&value(b"t#tle")).unwrap();
+    assert!(none.is_empty());
+    assert_eq!(plain, asn_text(&value(b"t#tle")).unwrap());
+    let (bytes, replaced) = asn_text_posting(&value(b"t\xe9tle")).unwrap();
+    assert_eq!(bytes, plain);
+    let at = plain
+        .windows(5)
+        .position(|window| window == b"t#tle")
+        .unwrap();
+    let line = 1 + plain[..at].iter().filter(|&&byte| byte == b'\n').count();
+    let mut want = format!(
+        "Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.descr.E.title\nBad char [0xE9] in string at line {line}\n"
+    )
+    .into_bytes();
+    want.extend_from_slice(b"t\xe9tle\n");
+    assert_eq!(file_posts("psiblast", &replaced).text(), want);
+}

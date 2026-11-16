@@ -1,0 +1,2 @@
+# ViPTreeGen writes -out tblastx.out.tmp; LOSAT/.gitignore ignores *.tmp.
+!*.tmp

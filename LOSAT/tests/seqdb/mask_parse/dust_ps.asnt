@@ -1,0 +1,211 @@
+Blast-db-mask-info ::= {
+  algo-id 2,
+  algo-program dust,
+  algo-options "window=64; level=20; linker=1",
+  masks {
+    masks {
+      packed-int {
+        {
+          from 118,
+          to 179,
+          id local str "name1"
+        },
+        {
+          from 260,
+          to 319,
+          id local str "name1"
+        }
+      },
+      int {
+        from 119,
+        to 179,
+        id general {
+          db "mydb",
+          tag str "tag1"
+        }
+      },
+      int {
+        from 120,
+        to 179,
+        id other {
+          accession "NC_000001",
+          version 1
+        }
+      },
+      packed-int {
+        {
+          from 112,
+          to 179,
+          id genbank {
+            name "ABC",
+            accession "AB123456",
+            version 1
+          }
+        },
+        {
+          from 257,
+          to 321,
+          id genbank {
+            name "ABC",
+            accession "AB123456",
+            version 1
+          }
+        }
+      },
+      int {
+        from 120,
+        to 179,
+        id embl {
+          accession "X12345",
+          version 1
+        }
+      },
+      packed-int {
+        {
+          from 97,
+          to 103,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 120,
+          to 179,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        }
+      },
+      packed-int {
+        {
+          from 119,
+          to 179,
+          id pdb {
+            mol "1ABC",
+            chain 65,
+            chain-id "A"
+          }
+        },
+        {
+          from 260,
+          to 319,
+          id pdb {
+            mol "1ABC",
+            chain 65,
+            chain-id "A"
+          }
+        }
+      },
+      int {
+        from 120,
+        to 179,
+        id patent {
+          seqid 1,
+          cit {
+            country "US",
+            id number "RE33188"
+          }
+        }
+      },
+      int {
+        from 119,
+        to 179,
+        id gi 12345
+      },
+      packed-int {
+        {
+          from 120,
+          to 179,
+          id general {
+            db "db",
+            tag id 123
+          }
+        },
+        {
+          from 259,
+          to 319,
+          id general {
+            db "db",
+            tag id 123
+          }
+        }
+      },
+      int {
+        from 119,
+        to 179,
+        id local id 123
+      },
+      int {
+        from 120,
+        to 179,
+        id swissprot {
+          name "NAME_HUMAN",
+          accession "P12345",
+          release "reviewed"
+        }
+      },
+      packed-int {
+        {
+          from 119,
+          to 179,
+          id pir {
+            name "A12345"
+          }
+        },
+        {
+          from 260,
+          to 319,
+          id pir {
+            name "A12345"
+          }
+        }
+      },
+      int {
+        from 119,
+        to 179,
+        id prf {
+          name "123456"
+        }
+      },
+      packed-int {
+        {
+          from 85,
+          to 91,
+          id tpg {
+            accession "BK000001",
+            version 1
+          }
+        },
+        {
+          from 120,
+          to 179,
+          id tpg {
+            accession "BK000001",
+            version 1
+          }
+        }
+      },
+      packed-int {
+        {
+          from 119,
+          to 180,
+          id other {
+            accession "NP_000001",
+            version 2
+          }
+        },
+        {
+          from 260,
+          to 320,
+          id other {
+            accession "NP_000001",
+            version 2
+          }
+        }
+      }
+    },
+    more FALSE
+  }
+}

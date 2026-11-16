@@ -1,6 +1,7 @@
 // The HSP records of a run as columns (plan §5.7, design §10.2): the small fields of every
 // HSP record (docs/web/abi_v2.md §8) in typed arrays, without the aligned sequences. The
-// results screen sorts and filters with these engine values and reads the text it shows
+// results screen sorts with these engine values (its E value and bit score filters read the
+// values that the outfmt 6 rows show, outfmt6.ts) and reads the text it shows
 // from the byte ranges (`out6`, `out0`, `out0_subject`) of the stored outputs. The Data
 // worker builds the table and transfers its buffers, so a run with many HSPs never becomes
 // an array of objects on the UI thread.

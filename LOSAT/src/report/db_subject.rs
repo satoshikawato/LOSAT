@@ -9,25 +9,28 @@
 //! the XML `Hit_def`, the XML2 and JSON `HitDescr` list, `stitle`).
 //!
 //! A database without parsed Seq-ids keeps its own path (the title and `gnl|BL_ORD_ID|n`,
-//! `algorithm::common::database::read_title`); `SeqDb::read_header` tells the two apart.
+//! `algorithm::common::database::stored_title`); `SeqDb::read_header` tells the two apart.
 //!
 //! LOSAT writes the names of the sequence it searched. NCBI's formatters look the Seq-align id
-//! up again, and where another sequence of the database has an id that the lookup also matches
-//! (the same accession in two sequences, PLAN §9.6 of line DBID) they can write that sequence's
-//! names; the test databases leave such records out (`tests/db_search/ids/make_ids.py`), and
-//! the check on NCBI's distributed databases is ID4's. The two-letter PDB chains of one
+//! up again in the database, and where the lookup finds another sequence first (an accession
+//! without a version after the same accession with one, `gb|X.1|` and `emb|X.1|`, `lcl|X` after
+//! `gb|X.1|`: PLAN §9.6 of line DBID) they write that sequence's names and letters, or stop.
+//! LOSAT looks the id up as NCBI does (`seqdb::lookup::SeqidLookup`, `found_instead`) and refuses
+//! such a subject where a format reads its Bioseq (`fetched`). The two-letter PDB chains of one
 //! molecule (`A`, `AA`, `B`) are not such a case (probe of the ID2a review).
 
+use crate::seqdb::DbSequence;
 use crate::seqid::defline_set::{
     alignment_line_id, compare, description_id, seq_id_list, tabular_id, Sic, TabularId,
 };
-use crate::seqid::model::{ObjectId, PatentNumber};
+use crate::seqid::model::PatentNumber;
 use crate::seqid::rank::{find_best, text_score};
 use crate::seqid::{label, BlastDefline, DeflineSet, ParsedSeqId};
 
 use super::blast_xml::HitTaxonomy;
 use super::defline::{
-    bioseq_title_from_source, generate_bioseq_defline, BioseqIds, Defline, UnknownEncoding,
+    bioseq_title_from_source, generate_bioseq_defline, BioseqFacts, Defline, SourceTaxname,
+    UnknownEncoding,
 };
 
 /// A reported database sequence with parsed Seq-ids: its definition lines, its Seq-align id
@@ -38,8 +41,224 @@ pub struct ParsedSubject {
     alignment_id: ParsedSeqId,
     /// `DeflineSet::bioseq_defline` of `alignment_id`.
     target: usize,
-    /// Whether NCBI's formatters cannot find the sequence by its Seq-align id (`fetched`).
+    /// Whether NCBI's formatters find no Bioseq by the Seq-align id whatever its lookup gives
+    /// (`new`, `fetched`).
     unfetchable: bool,
+    /// What NCBI's lookup of the Seq-align id in the database finds where that is not this
+    /// sequence (`found_instead`, `fetched`).
+    found_instead: Option<FoundInstead>,
+    /// Another sequence that NCBI's scope can show for this one by a weak match where its
+    /// formatters read the batch's sequences one by one (`weak_match`, `fetched`).
+    weak_match: Option<WeakMatch>,
+    /// Another sequence (`DbSequence`) that holds an id NCBI's scope takes for the Seq-align id,
+    /// besides the sequence that the lookup gives first or where it gives none
+    /// (`FoundInstead::Sequence`, `Nothing`): NCBI's scope can read it for this one where it has
+    /// read it before (`also_held`, `pssm_read`).
+    also_held: Option<DbSequence>,
+    /// `-show_gis`: the outfmt 0 description line and heading show it (`description`, `heading`).
+    show_gis: bool,
+    /// The name of the organism of the subject Bioseq's first source, from which NCBI makes its
+    /// title (`with_source`).
+    source: SourceTaxname,
+    /// Whether this is a `-subject` record (`of_record`): a Bioseq without definition lines.
+    record: bool,
+    /// Whether it is a record that the reports show as a record without `-parse_deflines`
+    /// (`BelievedIds::subject_local`): only its tabular ids are its own (`shown_as_record`).
+    local_record: bool,
+    /// The strings of the Seq-aligns' `use_this_seqid` (`under_positive_list`); empty without a
+    /// positive list.
+    use_this_seqid: Vec<Vec<u8>>,
+    /// `tabular_saccver`, kept for the reports of later query batches.
+    saccver: std::sync::OnceLock<Option<std::sync::Arc<[u8]>>>,
+    /// `query_scope_keys`, made at the first report that asks.
+    query_scope_keys: std::sync::OnceLock<QueryScopeKeys>,
+}
+
+/// The keys by which NCBI's scope finds a query for the Seq-align id of a reported database
+/// sequence (`ParsedSubject::query_scope_keys`; `common::database::refuse_id_of_a_query`), and
+/// for its display id, by which the description table looks its title up again
+/// (`common::database::refuse_display_id_of_a_query`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QueryScopeKeys {
+    /// Its own keys (`defline_set::scope_keys`).
+    pub own: Vec<u64>,
+    /// The keys of the ids that it matches weakly (`id_scope::weak_keys`).
+    pub weak: Vec<u64>,
+    /// The keys of the display id (`ParsedSubject::display_id`) and of the ids that it matches
+    /// weakly, as `own` and `weak` of the Seq-align id: the same lookup of NCBI's scope.
+    pub display: Vec<u64>,
+}
+
+/// The `use_this_seqid` strings of a database subject, `subject` when it has parsed Seq-ids: a
+/// sequence without them has a `general` id of `BL_ORD_ID`, which is neither a text Seq-id nor a
+/// GI (`ParsedSubject::under_positive_list`).
+pub fn use_this_seqid(subject: Option<&ParsedSubject>) -> &[Vec<u8>] {
+    subject.map_or(&[], ParsedSubject::use_this_seqid)
+}
+
+/// `AdjustSeqIdType` with `eGetId_ForceAcc` (`ParsedSubject::sam_id`) of a Bioseq with the ids
+/// `ids` and the Seq-align id `alignment_id`.
+pub fn forced_accession<'a>(
+    alignment_id: &'a ParsedSeqId,
+    ids: &'a [ParsedSeqId],
+) -> &'a ParsedSeqId {
+    let acc_ver =
+        |id: &crate::seqid::model::TextseqId| id.accession.is_some() && id.version.is_some();
+    if alignment_id.textseq().is_some_and(acc_ver) {
+        return alignment_id;
+    }
+    let mut found = None;
+    for id in ids {
+        if let Some(text) = id.textseq() {
+            found = Some(id);
+            if acc_ver(text) {
+                break;
+            }
+        }
+    }
+    found.unwrap_or(alignment_id)
+}
+
+/// What NCBI's lookup of a subject's Seq-align id in its database finds where that is not the
+/// subject (`ParsedSubject::found_instead`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FoundInstead {
+    /// Another sequence of the database (`DbSequence`) first: NCBI's formatters show it where
+    /// its ids compare equal to the Seq-align id, else no sequence.
+    Sequence(DbSequence),
+    /// The sequence itself first (or the same record), and later another sequence of the
+    /// database (`DbSequence`) that holds an id NCBI's scope takes for the Seq-align id: where
+    /// both are reported, NCBI's formatters can show that one for it.
+    AlsoHeld(DbSequence),
+    /// Another sequence of the database (`DbSequence`) with the same definition lines but for
+    /// their taxids and the same letters (the same record in two databases made with other
+    /// taxids), that the lookup gives first or that also holds the Seq-align id: NCBI's
+    /// formatters can show it for the subject, which only the reports that write the subject's
+    /// taxids show apart (`fetched`).
+    OtherTaxids(DbSequence),
+    /// Such a sequence, also with the same taxids in another volume, that every report that
+    /// reads the Bioseq can show apart, for the reason given.
+    CopyApart(DbSequence, CopyApart),
+    /// No sequence.
+    Nothing,
+    /// The lookup fails on a file of the database (`LookupFailure`): NCBI's formatters, and its
+    /// prefetch, stop with the `CSeqDBException`.
+    Failed(LookupFailure),
+    /// LOSAT's own search of the keys that differ from the Seq-align id's in the case of its
+    /// letters fails, with this message (`SeqidLookup::case_variant_oids`: version 5, a name or a
+    /// `pir` or `prf` id), on pages that NCBI's exact lookup need not read: whether another sequence
+    /// holds an id that NCBI's scope takes for it is unknown.
+    CaseUnknown(String),
+    /// The lookup throws on the id itself before it reads a file (`SeqidLookup::throws_on_id`: a
+    /// `gnl|BL_ORD_ID|0` that makeblastdb stores with a text tag), with this message: NCBI's
+    /// formatters stop, its prefetch catches the exception with its warning
+    /// (`ParsedSubject::prefetch_fails`).
+    ThrowsOnId(String),
+}
+
+/// What NCBI's scope can show for a subject by a weak match where its formatters read the
+/// reported sequences of a batch one by one (`PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch
+/// off; the prefetch loads each by its own id): `ParsedSubject::weak_match`, refused by
+/// `fetched` with `one_by_one`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WeakMatch {
+    /// Another sequence of the database (`DbSequence`) that holds an id the Seq-align id
+    /// matches weakly (`seqid::id_scope::weak_keys`): where that one is read first, NCBI's scope
+    /// shows it for the subject.
+    Held(DbSequence),
+    /// A Seq-align id with weak keys that a version 5 database cannot look up: one with a name,
+    /// or a `pir` or `prf` one (`common::database::HeaderReader::weakly_held`).
+    Unlisted,
+    /// The lookup of the sequences that could match weakly failed, with this message (LOSAT's
+    /// lookup of the name alone; NCBI's scope makes none).
+    Failed(String),
+}
+
+/// What NCBI's prefetch of a query batch reads for a subject that no report shows, by its
+/// Seq-align id (`ParsedSubject::prefetched`): psiblast's traceback hit lists beyond
+/// `-max_target_seqs`, and the Seq-annots with `PRE_FETCH_SEQS_LIMIT=2147483647`
+/// (`common::database::prefetch_reads`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Prefetched {
+    /// The sequence itself, or the same record whose lookups of its taxids write the same texts
+    /// (`ParsedSubject::fetched` without the taxonomy formats).
+    Itself,
+    /// No sequence: the prefetch reads nothing for it.
+    Nothing,
+    /// Another sequence (`DbSequence`) where LOSAT knows it, whose taxids the prefetch can look up
+    /// instead: `FoundInstead::Sequence` (that sequence where one of its ids compares equal to
+    /// the Seq-align id, else none), `AlsoHeld` (`or_itself`: the subject or that sequence, as
+    /// the ids of the blobs read before in the run decide, `CBlastDbDataLoader::m_Ids`), and the
+    /// same record whose lookups write other texts (`None`); `reason` as `fetched` gives it.
+    Another {
+        other: Option<DbSequence>,
+        or_itself: bool,
+        reason: String,
+    },
+    /// A lookup that fails (the reason): on the id itself NCBI's prefetch catches the exception
+    /// and writes the warning `Error pre-fetching sequence data`
+    /// (`ParsedSubject::prefetch_fails`, `common::database::batch_prefetch`); on a file it
+    /// rethrows the `CSeqDBException` and stops.
+    Failed(String),
+}
+
+/// A lookup of a Seq-align id that fails on a file of the database (`FoundInstead::Failed`): the
+/// message, and whether it is NCBI's own (`SeqDbError::ncbi_message`: the text of the
+/// `CSeqDBException` that NCBI writes after `BLAST Database error: `, as "DB contains no accession
+/// info." of a list that puts version 5 databases with and without the accession table side by
+/// side), else LOSAT's text of an error NCBI does not have.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LookupFailure {
+    message: String,
+    ncbi: bool,
+}
+
+impl LookupFailure {
+    /// What NCBI does where it reads a subject whose lookup fails on a file: its prefetch rethrows
+    /// the `CSeqDBException` (`BLAST Database error`, exit status 2); where `PRE_FETCH_SEQS_LIMIT`
+    /// turns the prefetch off, its formatters catch it and write `Unknown`, then stop or not as
+    /// the format decides (DECISIONS 53 (1) of line DBID).
+    pub const NCBI_READS: &'static str = "NCBI BLAST+ 2.17.0's prefetch stops with a BLAST Database error, and where the prefetch is off its formatters fail to read it";
+
+    /// NCBI's own message.
+    pub fn ncbi(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            ncbi: true,
+        }
+    }
+
+    /// LOSAT's text of an error that NCBI does not have.
+    pub fn losat(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            ncbi: false,
+        }
+    }
+
+    /// The text NCBI writes after `BLAST Database error: `, where the message is NCBI's own.
+    pub fn ncbi_message(&self) -> Option<&str> {
+        self.ncbi.then_some(self.message.as_str())
+    }
+}
+
+impl std::fmt::Display for LookupFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+/// Why the reports can show apart a copy of a subject with the same definition lines but for
+/// their taxids (`FoundInstead::CopyApart`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CopyApart {
+    /// A title can be made from the taxids (`ParsedSubject::title_reads_source`), which only
+    /// the reports that show a generated title show apart
+    /// (`ParsedSubject::generated_title_fetched`).
+    Title,
+    /// The taxonomy database writes a text at a lookup that the volume of the copy makes for
+    /// its taxids.
+    TaxonomyTexts,
 }
 
 /// One `HitDescr` of the XML2 and JSON formats (`s_SeqAlignToXMLHit`).
@@ -58,31 +277,34 @@ pub struct HitDescription {
 }
 
 impl ParsedSubject {
-    // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:406-415
+    // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:390-395
     // ```c++
     //     int oid = -1;
-    //     ...
-    //     if (m_BlastDb->SeqidToOid(*seq_id, oid)) {
+    //
+    //     if (! m_BlastDb->SeqidToOid(*seqid, oid)) {
+    //         _TRACE("FAILED to find '" << seqid->AsFastaString() << "'");
+    //         return -1;
+    //     }
     // ```
-    // NCBI's formatters find the subject's sequence again from its Seq-align id. For a gibbsq
-    // id, a `general` id of the database `PIG`, a named-annotation-track id and a `general`
-    // id `BL_ORD_ID` that makeblastdb stored as written, the lookup finds no sequence or
-    // another one: NCBI 2.17.0 stops with a CCoreException in outfmt 6 (exit status 255) and
-    // writes the title `Unknown`, or another sequence's, in outfmt 0 and 5 (probe of line
-    // DBID, DECISIONS 8 (3); `LOSAT/tests/seqid/fasta/variants.fa`). In a version 5 database
-    // (LMDB) a local integer id (`lcl|123`) is not found either (the same failures; probe of
-    // ID2a, `blastdb-ids-20261021/R/probe`), where version 4 (ISAM) finds it. LOSAT refuses
-    // these subjects instead of repeating a defect of NCBI's. So it does where the definition
-    // line of the Bioseq is found by the content of a local id alone (`lcl|777` before the
-    // definition line of the Seq-align id `gi|777`, `DeflineSet::bioseq_defline`): NCBI 2.17.0
-    // finds no Bioseq then, in version 4 and 5 (outfmt 6 stops with a CCoreException, XML2 writes
-    // the Seq-align id alone; probe of the ID2a review).
-    /// The subject of the definition lines `set` of a database of format version 5
-    /// (`version5`) or 4. `Err` names what LOSAT does not write as NCBI: a stored title or
-    /// Seq-id with a byte outside ' ' ..= '~' (NCBI writes an error message each time it reads
-    /// the definition line) and a definition line without a Seq-id (NCBI's formatters take the
-    /// best of none; makeblastdb writes none such).
-    pub fn new(set: DeflineSet, version5: bool) -> Result<Self, String> {
+    // NCBI's formatters find the subject's sequence again from its Seq-align id, by the lookup that
+    // `found_instead` ports, whatever kind of id it is: in version 5 `bbs|123`, `nat|X.1|` and
+    // `lcl|777` by their LMDB keys, in version 4 the ISAM files that makeblastdb writes for neither
+    // `bbs|` nor `nat|`, a `gnl|PIG|` id in the PIG files that it fills from no FASTA id, and a
+    // `gnl|BL_ORD_ID|n` as the stored n plus the first OID of its volume
+    // (`SeqDb::defline_set`), looked up from the start of each volume, so as its own sequence where
+    // the stored n is its own number in its volume, also beside another id (probe of line DBID N2b,
+    // `blastdb-ids-20261021/R/unfetch/p1`: 317 cases of NCBI 2.17.0, databases of NCBI's and
+    // LOSAT's makeblastdb). The lookup does not decide one case: where the definition line of the
+    // Bioseq is found by the content of a local id alone (`lcl|777` before the definition line of
+    // the Seq-align id `gi|777`, `DeflineSet::bioseq_defline`), NCBI 2.17.0 finds no Bioseq, in
+    // version 4 and 5 (outfmt 6 stops with a CCoreException, XML2 writes the Seq-align id alone;
+    // probe of the ID2a review). LOSAT refuses that subject instead of repeating a defect of
+    // NCBI's.
+    /// The subject of the definition lines `set` of a database. `Err` names what LOSAT does not
+    /// write as NCBI: a stored title or Seq-id with a byte outside ' ' ..= '~' (NCBI writes an
+    /// error message each time it reads the definition line) and a definition line without a
+    /// Seq-id (NCBI's formatters take the best of none; makeblastdb writes none such).
+    pub fn new(set: DeflineSet) -> Result<Self, String> {
         if set
             .deflines
             .iter()
@@ -99,7 +321,10 @@ impl ParsedSubject {
         let Some(target) = set.bioseq_defline(&alignment_id) else {
             return Err("has no definition line that holds its Seq-align id".into());
         };
-        let unfetchable = unfetchable(&alignment_id, version5)
+        // A giim Seq-align id is never found again: NCBI's handles never take it for one with an
+        // equal id (`algorithm::psiblast::rounds::HandleIndex`), so its scope finds no Bioseq by it
+        // (NCBI BLAST+ 2.17.0 writes `Unknown`; review 2 of line DBID pssmrows, H1).
+        let unfetchable = matches!(alignment_id, ParsedSeqId::Giim(_))
             || set
                 .display_defline(&alignment_id)
                 .is_some_and(|shown| shown.index != target);
@@ -108,21 +333,573 @@ impl ParsedSubject {
             alignment_id,
             target,
             unfetchable,
+            found_instead: None,
+            weak_match: None,
+            also_held: None,
+            show_gis: false,
+            source: SourceTaxname::Unnamed,
+            record: false,
+            local_record: false,
+            use_this_seqid: Vec::new(),
+            saccver: std::sync::OnceLock::new(),
+            query_scope_keys: std::sync::OnceLock::new(),
         })
     }
 
-    /// `Err` for a subject whose sequence NCBI's formatters cannot find by its Seq-align id
-    /// (see `new`): the formats that read the subject's Bioseq (outfmt 0, 5, 6, 7, 13 to 16 and
-    /// SAM, 17) refuse it; the Seq-annots and the archive (8, 9, 11, 12) write the Seq-align id
-    /// alone.
-    pub fn fetched(&self) -> Result<(), String> {
-        if !self.unfetchable {
-            return Ok(());
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:458-466
+    // ```c++
+    //     // set ID
+    //     retval->SetInt().SetId().Assign(*FindBestChoice(itr->GetId(), CSeq_id::BestRank));
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:272-283
+    // ```c++
+    //     CRef<CBlast_def_line_set> bdlRef = CSeqDB::ExtractBlastDefline(handle);
+    //     const list< CRef< CBlast_def_line > > &bdl = (bdlRef.Empty()) ? list< CRef< CBlast_def_line > >() : bdlRef->Get();
+    //     ...
+    //     if(bdl.empty()){ //no blast defline struct, should be no such case now
+    //         //actually not so fast...as we now fetch from entrez even when it's not in blast db
+    //         //there is no blast defline in such case.
+    //         seqid = GetSeqIdListString(ids, show_gi);
+    //         defline = sequence::CDeflineGenerator().GenerateDefline(handle);
+    // ```
+    /// The `-subject` record with the ids `ids` and the FASTA title `title` under
+    /// `-parse_deflines`, as one definition line: its Bioseq has no Blast-def-line user object, so
+    /// its titles are generated and `stitle` and `salltitles` are `N/A`, and NCBI's scope holds
+    /// it, so it is always found.
+    pub fn of_record(
+        ids: &crate::blastinput::fasta_reader::believed::BelievedIds,
+        title: &[u8],
+    ) -> Self {
+        Self {
+            set: DeflineSet {
+                deflines: vec![BlastDefline {
+                    title: (!title.is_empty()).then(|| title.to_vec()),
+                    ids: ids.ids.clone(),
+                    ..BlastDefline::default()
+                }],
+            },
+            alignment_id: ids.best.clone(),
+            target: 0,
+            unfetchable: false,
+            found_instead: None,
+            weak_match: None,
+            also_held: None,
+            show_gis: false,
+            source: SourceTaxname::Unnamed,
+            record: true,
+            local_record: ids.subject_local(),
+            use_this_seqid: Vec::new(),
+            saccver: std::sync::OnceLock::new(),
+            query_scope_keys: std::sync::OnceLock::new(),
         }
-        Err(format!(
-            "has the Seq-align id {}, by which NCBI BLAST+'s formatters do not find the sequence (NCBI BLAST+ 2.17.0 writes Unknown or another sequence's names, or stops)",
-            String::from_utf8_lossy(&self.alignment_fasta())
-        ))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:484-498
+    // ```c++
+    //     if (sid_in->IsLocal()) {
+    //         string id_token;
+    //         vector<string> title_tokens;
+    //         title_tokens = NStr::Split(CAlignFormatUtil::GetTitle(bh), " ", title_tokens);
+    //         ...
+    //         if (id_token == NcbiEmptyString || parse_local) {
+    //             const CObject_id& obj_id = sid_in->GetLocal();
+    // ```
+    /// Whether the outfmt 0, XML and archive reports show this `-subject` record as one read
+    /// without `-parse_deflines` (a local id `Subject_N`, `BelievedIds::subject_local`); its
+    /// `sall*` are still its own ids (`s_ReplaceLocalId` keeps a local id with `parse_local`).
+    pub fn shown_as_record(&self) -> bool {
+        self.local_record
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:393-416
+    // ```c++
+    //     if (! m_BlastDb->SeqidToOid(*seqid, oid)) {
+    //         _TRACE("FAILED to find '" << seqid->AsFastaString() << "'");
+    //         return -1;
+    //     }
+    //     _TRACE("Found '" << seqid->AsFastaString() << "' at OID " << oid);
+    //
+    //     // Test for deflines.  If the filtering eliminates the Seq-id we
+    //     // are interested in, we just pretend we don't know anything about
+    //     // this Seq-id.  If there are other data loaders installed, they
+    //     // will have an opportunity to resolve the Seq-id.
+    //
+    //     bool found = false;
+    //
+    //     IBlastDbAdapter::TSeqIdList filtered = m_BlastDb->GetSeqIDs(oid);
+    //
+    //     ITERATE(IBlastDbAdapter::TSeqIdList, id, filtered) {
+    //         if (seqid->Compare(**id) == CSeq_id::e_YES) {
+    //             found = true;
+    //             break;
+    //         }
+    //     }
+    // ```
+    // NCBI's data loader serves the Bioseq of the first OID that `SeqidToOid` gives for the
+    // Seq-align id (`seqdb::lookup::SeqidLookup::seqid_to_oid`), and only where one of that
+    // sequence's ids compares equal to it: a version 5 database finds `gb|X|` under the key `X`,
+    // which makeblastdb also writes for `gb|X.1|`, and `gb|X.1|` compares equal to `gb|X|` and
+    // to `emb|X.1|`. NCBI 2.17.0 then writes the other sequence's names and counts the
+    // alignment's identities against its letters (outfmt 6 `AAA00001.1 100.000 ... 0` for the
+    // subject `gb|AAA00001|` of 99.561 % identity), or, for `lcl|X` after `gb|X.1|`, finds no
+    // Bioseq and stops with a CCoreException in outfmt 6 (probe of line DBID N1,
+    // `blastdb-ids-20261021/R/accoid/p1`; version 4 alike).
+    /// The subject as NCBI's formatters find it again: `found` is what NCBI's lookup of the
+    /// Seq-align id in the database finds where that is not this sequence (another one or
+    /// none), which the formats that read the subject's Bioseq refuse (`fetched`).
+    pub fn found_instead(mut self, found: Option<FoundInstead>) -> Self {
+        self.found_instead = found;
+        self
+    }
+
+    /// The subject with `weak`, what NCBI's scope can show for it by a weak match where its
+    /// formatters read the batch's sequences one by one (`fetched`'s `one_by_one`).
+    pub fn weak_match(mut self, weak: Option<WeakMatch>) -> Self {
+        self.weak_match = weak;
+        self
+    }
+
+    /// The subject with `holder`, another sequence that holds an id NCBI's scope takes for the
+    /// Seq-align id where the lookup gives a third sequence first or none (`pssm_read`).
+    pub fn also_held(mut self, holder: Option<DbSequence>) -> Self {
+        self.also_held = holder;
+        self
+    }
+
+    /// Whether NCBI's formatters find no Bioseq by the Seq-align id whatever its lookup gives
+    /// (see `new`), so that no lookup is needed. Read by tests only: the engine asks
+    /// `common::database::scope_bioseq`, which looks it up first.
+    #[cfg(test)]
+    pub fn unfetchable(&self) -> bool {
+        self.unfetchable
+    }
+
+    /// What NCBI's lookup of the Seq-align id finds where that is not this sequence
+    /// (`found_instead`).
+    pub fn found(&self) -> Option<&FoundInstead> {
+        self.found_instead.as_ref()
+    }
+
+    /// The subject as the outfmt 0 report of a run with or without `-show_gis` shows it.
+    pub fn showing_gis(mut self, show_gis: bool) -> Self {
+        self.show_gis = show_gis;
+        self
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1146-1168
+    // ```c++
+    //         bool found_taxid_in_taxonomy_blastdb = true;
+    //         ...
+    //         try {
+    //             found_taxid_in_taxonomy_blastdb = tax_info.GetTaxNames(*taxid, namerecord);
+    //         }
+    //         catch (CSeqDBException &) {
+    //             found_taxid_in_taxonomy_blastdb = false;
+    //         }
+    //         ...
+    //         if (found_taxid_in_taxonomy_blastdb) {
+    //             org->SetTaxname().swap(namerecord.scientific_name);
+    // ```
+    // A title made from the source (`x_SetTitleFromBioSrc`, of the first source of the Bioseq,
+    // whose volume puts the target's taxids first) names the organism only where the taxonomy
+    // database gives a name for the taxid; else NCBI writes the title of a Bioseq without one
+    // (review 1 of line DBID N1b L1, `blastdb-ids-20261021/R/titlesrc/review1/r2.tsv`).
+    // A RefSeq chromosome, mRNA or ncRNA record gets its title from the source too: NCBI's own
+    // functions for them make nothing of a database Bioseq (`report::defline::source_title`).
+    /// The subject with the name of its Bioseq's first source (`names` of its taxid,
+    /// `first_source_taxid`, asked only where `title_from_taxonomy`), from which its generated
+    /// title is made (`source`, `bioseq_title`).
+    pub fn with_source(mut self, names: impl FnOnce(i32) -> SourceTaxname) -> Self {
+        if self.title_from_taxonomy() {
+            if let Some(taxid) = self.first_source_taxid() {
+                self.source = names(taxid);
+            }
+        }
+        self
+    }
+
+    /// The taxid of the subject Bioseq's first source where NCBI fetches it by its Seq-align id
+    /// (`DeflineSet::first_source_taxid`, the first of `volume_lookups`).
+    pub fn first_source_taxid(&self) -> Option<i32> {
+        self.set.first_source_taxid(Some(&self.alignment_id))
+    }
+
+    /// The name of the organism of the subject Bioseq's first source (`with_source`).
+    pub fn source(&self) -> &SourceTaxname {
+        &self.source
+    }
+
+    /// The subject as a database with a positive list (`positive_list`,
+    /// `SeqDb::has_positive_list`) reports it: its Seq-aligns name the ids of the definition
+    /// lines the list keeps. `use_gi` is whether the Seq-align id is a GI.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqinfosrc_aux.cpp:113-150
+    /// ```c++
+    /// void GetFilteredRedundantSeqids(const IBlastSeqInfoSrc & seqinfo_src,
+    ///                              int                      oid,
+    ///                              vector<string>            & seqids,
+    /// 			     bool			use_gi)
+    /// {
+    ///     seqids.resize(0);
+    ///
+    ///     if (! seqinfo_src.HasGiList()) {
+    ///         return;
+    ///     }
+    ///
+    ///     list< CRef<CSeq_id> > seqid_list = seqinfo_src.GetId(oid);
+    ///
+    ///     ITERATE(list< CRef<CSeq_id> >, id, seqid_list) {
+    /// 	if (use_gi)
+    /// 	{
+    ///         	if ((**id).IsGi())
+    /// 		{
+    /// 			string sid_string = "gi:" + (*id)->GetSeqIdString(true);
+    /// 			seqids.push_back(sid_string);
+    /// 		}
+    /// 	}
+    /// 	else
+    /// 	{
+    /// 		const CTextseq_id* tsid = (*id)->GetTextseq_Id();
+    /// 		if (tsid && tsid->IsSetAccession())
+    /// 		{
+    /// 			string sid_string = "seqid:" + (*id)->GetSeqIdString(true);
+    /// 			seqids.push_back(sid_string);
+    /// 		}
+    /// 		else if ((*id)->IsPdb())
+    /// 		{
+    /// 			string sid_string = "seqid:" + (*id)->GetSeqIdString(true);
+    /// 			seqids.push_back(sid_string);
+    /// 		}
+    /// 	}
+    ///     }
+    /// }
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1604-1605
+    /// ```c++
+    ///         // Get SeqIds for entrez query restriction.
+    /// 	vector<string> seqid_list;
+    ///         GetFilteredRedundantSeqids(*seqinfo_src, hsp_list->oid, seqid_list, subject_id->IsGi());
+    /// ```
+    pub fn under_positive_list(mut self, positive_list: bool) -> Self {
+        if !positive_list {
+            return self;
+        }
+        let use_gi = self.alignment_id.gi().is_some();
+        for id in self.set.ids() {
+            let prefix: &[u8] = if use_gi {
+                if id.gi().is_none() {
+                    continue;
+                }
+                b"gi:"
+            } else {
+                if !(id.textseq().is_some_and(|text| text.accession.is_some())
+                    || matches!(id, ParsedSeqId::Pdb(_)))
+                {
+                    continue;
+                }
+                b"seqid:"
+            };
+            let mut string = prefix.to_vec();
+            crate::seqid::label::content(id, true, &mut string);
+            self.use_this_seqid.push(string);
+        }
+        self
+    }
+
+    /// The strings of the Seq-aligns' `use_this_seqid` (`under_positive_list`).
+    pub fn use_this_seqid(&self) -> &[Vec<u8>] {
+        &self.use_this_seqid
+    }
+
+    /// `Err` for a subject whose sequence NCBI's formatters cannot find by its Seq-align id
+    /// (see `new` and `found_instead`): the formats that read the subject's Bioseq (outfmt 0, 5,
+    /// 6, 7, 10, 13 to 16 and SAM, 17) refuse it; the Seq-annots and the archive (8, 9, 11, 12)
+    /// write the Seq-align id alone. `taxonomy`: whether a report writes the subject's taxids
+    /// or their names (outfmt 13 to 16, the tabular `staxid`, `staxids` and the names), which
+    /// alone refuse a sequence found as the same record with other taxids
+    /// (`FoundInstead::OtherTaxids`; also where a generated title can be made from them, which
+    /// the reports that show it refuse, `generated_title_fetched`). `one_by_one`: whether NCBI's
+    /// formatters may read the subject one by one (a batch that reports it has its prefetch
+    /// off, `common::database::ParsedShown::one_by_one`), which alone refuses a sequence that
+    /// another can stand for by a weak match (`WeakMatch`), after what the lookup finds.
+    pub fn fetched(&self, taxonomy: bool, one_by_one: bool) -> Result<(), String> {
+        self.found_fetched(taxonomy)?;
+        self.weakly_fetched(one_by_one)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:440-450 (quoted at
+    // `algorithm::psiblast::pssm::input_msa`)
+    /// LOSAT's refusal of what psiblast's PSSM reads by the Seq-align id of a subject that it
+    /// includes (the `CSeqVector` of each Seq-align's range in NCBI's scope), where LOSAT does not
+    /// read it as NCBI: what the scope gets is `common::database::scope_bioseq`'s, and this
+    /// refuses another sequence that also holds an id the scope takes for the Seq-align id, which
+    /// the scope reads for it where it has read it before (`FoundInstead::AlsoHeld` where the
+    /// lookup gives the subject first, `also_held` where it gives another or none), a lookup that
+    /// fails on a file with LOSAT's error (`FoundInstead::Failed`; with NCBI's exception, which the
+    /// read catches, `prefetch_stops`: the caller reads no letters), the same record whose read writes other
+    /// taxonomy texts (`CopyApart::TaxonomyTexts`), and with `one_by_one` a weak match
+    /// (`fetched`). The reasons are what the lookup finds, also for a subject whose definition
+    /// line the formatters do not find (`unfetchable`), which the PSSM reads by the scope as any
+    /// other (review 2 of line DBID pssmread, M2).
+    pub fn pssm_read(&self, one_by_one: bool) -> Result<(), String> {
+        let id = || String::from_utf8_lossy(&self.alignment_fasta()).into_owned();
+        match &self.found_instead {
+            Some(
+                found @ (FoundInstead::AlsoHeld(_)
+                | FoundInstead::CaseUnknown(_)
+                | FoundInstead::Failed(_)
+                | FoundInstead::CopyApart(_, CopyApart::TaxonomyTexts)),
+            ) => return Err(self.found_reason(found, false).unwrap_or_default()),
+            Some(FoundInstead::Sequence(_) | FoundInstead::Nothing) => {
+                if let Some(holder) = self.also_held {
+                    return Err(format!(
+                        "has the Seq-align id {}, which database sequence {holder} also holds (an id that NCBI BLAST+'s scope takes for it) besides what the lookup gives: NCBI BLAST+ 2.17.0 reads that sequence for it where it has read it before, as its reads and the blobs' layout decide",
+                        id()
+                    ));
+                }
+            }
+            _ => {}
+        }
+        self.weakly_fetched(one_by_one)
+    }
+
+    /// Another sequence (`DbSequence`) that holds an id NCBI's scope takes for the Seq-align id
+    /// besides what the lookup gives (`also_held`, `FoundInstead::AlsoHeld`), whose Bioseq the
+    /// scope gets for this one where it holds it from an earlier read
+    /// (`common::database::scope_bioseq`).
+    pub fn other_holder(&self) -> Option<DbSequence> {
+        match &self.found_instead {
+            Some(FoundInstead::AlsoHeld(other)) => Some(*other),
+            Some(FoundInstead::Sequence(_) | FoundInstead::Nothing) => self.also_held,
+            _ => None,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1437-1439
+    // ```c++
+    //     seqids = defline->GetSeqid();
+    //     ...
+    //     bioseq->SetId().swap(seqids);
+    // ```
+    /// Whether the Bioseq that `GetBioseqNoData` builds of this sequence for its Seq-align id
+    /// holds that id: the ids of the definition line its filter keeps (`target`,
+    /// `DeflineSet::bioseq_defline`) hold one that compares equal to it (the scope's test on the
+    /// Bioseq's ids, `common::database::scope_bioseq`). Not where that line is found by the
+    /// content of a local id alone (`lcl|777` before `gi|777`), nor for a giim id.
+    pub fn bioseq_holds_alignment_id(&self) -> bool {
+        !matches!(self.alignment_id, ParsedSeqId::Giim(_))
+            && self
+                .target()
+                .ids
+                .iter()
+                .any(|id| compare(id, &self.alignment_id) == Sic::Yes)
+    }
+
+    /// `fetched`'s refusal of a weak match where NCBI's formatters may read the subject one by
+    /// one (`one_by_one`).
+    fn weakly_fetched(&self, one_by_one: bool) -> Result<(), String> {
+        let id = || String::from_utf8_lossy(&self.alignment_fasta()).into_owned();
+        match self.weak_match.as_ref().filter(|_| one_by_one) {
+            None => Ok(()),
+            Some(WeakMatch::Held(other)) => Err(format!(
+                "has the Seq-align id {}, which can match an id of database sequence {other} weakly (an accession with a version for one without, a name with or without an accession, a pir or prf accession as a name): in a batch whose prefetch PRE_FETCH_SEQS_LIMIT turns off, where NCBI BLAST+ 2.17.0 reads the reported sequences one by one and that sequence first, it can write that sequence's names and letters for it",
+                id()
+            )),
+            Some(WeakMatch::Unlisted) => Err(format!(
+                "has the Seq-align id {}, which ids of other sequences can match weakly in any letter case (a name with or without an accession, a pir or prf accession as a name) and which a version 5 database does not look up: in a batch whose prefetch PRE_FETCH_SEQS_LIMIT turns off, where NCBI BLAST+ 2.17.0 reads the reported sequences one by one, it can write the names and letters of such a sequence read before",
+                id()
+            )),
+            Some(WeakMatch::Failed(message)) => Err(format!(
+                "has the Seq-align id {}, for which LOSAT cannot look up the sequences that can match it weakly ({message}): in a batch whose prefetch PRE_FETCH_SEQS_LIMIT turns off, where NCBI BLAST+ 2.17.0 reads the reported sequences one by one, it can write the names and letters of such a sequence read before",
+                id()
+            )),
+        }
+    }
+
+    /// `fetched` but for the weak matches: what the lookup of the Seq-align id finds
+    /// (`found_instead`), whatever the batch's prefetch.
+    fn found_fetched(&self, taxonomy: bool) -> Result<(), String> {
+        if self.unfetchable {
+            return Err(format!(
+                "has the Seq-align id {}, by which NCBI BLAST+'s formatters do not find the sequence (NCBI BLAST+ 2.17.0 writes Unknown or another sequence's names, or stops)",
+                String::from_utf8_lossy(&self.alignment_fasta())
+            ));
+        }
+        match &self.found_instead {
+            None => Ok(()),
+            Some(found) => self.found_reason(found, taxonomy).map_or(Ok(()), Err),
+        }
+    }
+
+    /// The reason of a refusal of what the lookup of the Seq-align id finds, `found`, for a format
+    /// that reads the Bioseq (`fetched`; `taxonomy` as there), or for psiblast's PSSM
+    /// (`pssm_read`); `None` for a copy of the record that such a report shows as the subject.
+    fn found_reason(&self, found: &FoundInstead, taxonomy: bool) -> Option<String> {
+        let id = String::from_utf8_lossy(&self.alignment_fasta()).into_owned();
+        Some(match found {
+            FoundInstead::OtherTaxids(_) | FoundInstead::CopyApart(_, CopyApart::Title)
+                if !taxonomy =>
+            {
+                return None
+            }
+            FoundInstead::OtherTaxids(other) | FoundInstead::CopyApart(other, CopyApart::Title) => format!(
+                "has the Seq-align id {id}, which database sequence {other} also holds with the same definition lines and letters but other taxids (NCBI BLAST+ 2.17.0 can write that sequence's taxids and their names for it)"
+            ),
+            FoundInstead::CopyApart(other, CopyApart::TaxonomyTexts) => format!(
+                "has the Seq-align id {id}, which database sequence {other} also holds with the same definition lines and letters: where NCBI BLAST+ 2.17.0 shows that sequence for it, the volume of that sequence looks its taxids up, and the taxonomy database writes a text at such a lookup"
+            ),
+            FoundInstead::Sequence(other) => format!(
+                "has the Seq-align id {id}, by which NCBI BLAST+'s lookup gives database sequence {other} first (NCBI BLAST+ 2.17.0 writes that sequence's names and letters, or stops)"
+            ),
+            FoundInstead::AlsoHeld(other) => format!(
+                "has the Seq-align id {id}, which database sequence {other} also holds (where both are reported, NCBI BLAST+ 2.17.0 can write that sequence's names and letters for it)"
+            ),
+            FoundInstead::CaseUnknown(message) => format!(
+                "has the Seq-align id {id}, for which LOSAT cannot list the sequences that hold it in another letter case ({message}): where such a sequence is also reported, NCBI BLAST+ 2.17.0 can write its names and letters for it"
+            ),
+            FoundInstead::Failed(failure) => format!(
+                "has the Seq-align id {id}, whose lookup in the database fails ({failure}; {})",
+                LookupFailure::NCBI_READS
+            ),
+            FoundInstead::ThrowsOnId(message) => format!(
+                "has the Seq-align id {id}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0 stops)"
+            ),
+            FoundInstead::Nothing => format!(
+                "has the Seq-align id {id}, by which NCBI BLAST+'s formatters do not find the sequence (NCBI BLAST+ 2.17.0 writes Unknown or another sequence's names, or stops)"
+            ),
+        })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:770-786
+    // ```c++
+    //        s_ExtractSeqidsAndRanges(results, ids, ranges);
+    //        _TRACE("Prefetching " << ids.size() << " sequence lengths");
+    //        LoadSequencesToScope(ids, ranges, scope);
+    // 	}
+    //     catch(const CSeqDBException & e) {
+    //         _TRACE(e.GetMsg());
+    //     	throw;
+    //     }
+    //     catch (const CException& e) {
+    // 	   if(s_IsUsingRemoteBlastDbDataLoader()) {
+    //           ERR_POST(Warning << "Error fetching sequence data from BLAST databases at NCBI, "
+    //                      "please try again later");
+    // 	   }
+    // 	   else {
+    //           ERR_POST(Warning << "Error pre-fetching sequence data");
+    // 	   }
+    //    }
+    // ```
+    // The prefetch loads each subject's Bioseq by its Seq-align id, as the formatters find it
+    // (`fetched`), by the exact lookup only (the weak matches come where it is off): an id that
+    // the lookup finds nowhere loads nothing, without a message (probe of DBID P1 review 1:
+    // `gnl|PIG|124`, `gnl|BL_ORD_ID|40` of no sequence); a lookup that fails (a `gnl|BL_ORD_ID|0`
+    // stored with a text tag) ends the prefetch with that warning; `lcl|555` that an earlier
+    // sequence holds loads that sequence, whose taxids it looks up.
+    // The loader reads by the Seq-align id what its lookup gives, also for a subject whose
+    // definition line the formatters do not find (`unfetchable`): its own blob where the lookup
+    // gives it, whose taxids it looks up (review 2 of DBID P1: `lcl|777` before `gi|777`,
+    // `bad_magic`), another sequence's where it gives that one first (review 2 of line DBID
+    // pssmread, H3: `gi|777|gb|YYY00001.1|` of taxid 99990 before `lcl|777 ^A gi|777`).
+    /// What NCBI's prefetch reads for this subject where no report shows it (`Prefetched`).
+    pub fn prefetched(&self) -> Prefetched {
+        let reason = || {
+            self.found_instead
+                .as_ref()
+                .and_then(|found| self.found_reason(found, false))
+                .unwrap_or_default()
+        };
+        match &self.found_instead {
+            None
+            | Some(FoundInstead::OtherTaxids(_) | FoundInstead::CopyApart(_, CopyApart::Title)) => {
+                Prefetched::Itself
+            }
+            Some(FoundInstead::Nothing) => Prefetched::Nothing,
+            // The prefetch catches the exception of a failed lookup and writes its warning, or
+            // rethrows a database error (`CSeqDBException`) and stops; the formats that read the
+            // Bioseq stop (`fetched`).
+            Some(FoundInstead::ThrowsOnId(message)) => Prefetched::Failed(format!(
+                "has the Seq-align id {}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0's prefetch writes Error pre-fetching sequence data, and a report that reads it stops)",
+                String::from_utf8_lossy(&self.alignment_fasta())
+            )),
+            Some(FoundInstead::Failed(failure)) => Prefetched::Failed(format!(
+                "has the Seq-align id {}, whose lookup in the database fails ({failure}; {})",
+                String::from_utf8_lossy(&self.alignment_fasta()),
+                LookupFailure::NCBI_READS
+            )),
+            Some(FoundInstead::Sequence(other)) => Prefetched::Another {
+                other: Some(*other),
+                or_itself: false,
+                reason: reason(),
+            },
+            Some(FoundInstead::AlsoHeld(other)) => Prefetched::Another {
+                other: Some(*other),
+                or_itself: true,
+                reason: reason(),
+            },
+            Some(
+                FoundInstead::CopyApart(_, CopyApart::TaxonomyTexts) | FoundInstead::CaseUnknown(_),
+            ) => Prefetched::Another {
+                other: None,
+                or_itself: false,
+                reason: reason(),
+            },
+        }
+    }
+
+    /// Whether the lookup of this subject's Seq-align id throws on the id where NCBI's prefetch
+    /// loads it (`FoundInstead::ThrowsOnId`): the batch's prefetch catches it and writes `Error
+    /// pre-fetching sequence data` (`common::database::batch_prefetch`). A lookup that fails on a
+    /// file stops NCBI (`FoundInstead::Failed`).
+    pub fn prefetch_fails(&self) -> bool {
+        matches!(self.found_instead, Some(FoundInstead::ThrowsOnId(_)))
+    }
+
+    /// NCBI's message where the lookup of this subject's Seq-align id fails on a file of the
+    /// database with NCBI's own `CSeqDBException` (`FoundInstead::Failed`,
+    /// `LookupFailure::ncbi_message`; "DB contains no accession info." of a list that puts
+    /// version 5 databases with and without the accession table side by side): NCBI's prefetch of
+    /// a batch that reports the subject rethrows it, which stops the run with `BLAST Database
+    /// error: <message>` (exit status 2) before the batch's reports
+    /// (`common::database::batch_prefetch`).
+    pub fn prefetch_stops(&self) -> Option<&str> {
+        match &self.found_instead {
+            Some(FoundInstead::Failed(failure)) => failure.ncbi_message(),
+            _ => None,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2250-2255
+    // ```c++
+    // 		if(bdl->IsSetTitle()){
+    // 			alnDispParams->title = bdl->GetTitle();
+    // 		}
+    //         if(alnDispParams->title.empty()) {
+    //             alnDispParams->title = CDeflineGenerator().GenerateDefline(bsp_handle);
+    //         }
+    // ```
+    // NCBI's formatters generate the title of the Bioseq they fetch (`CDeflineGenerator`, from
+    // the sources of that sequence's volume) for the outfmt 0 description (showdefline.cpp:498)
+    // and heading, for the first word that replaces an id in the tabular formats
+    // (showdefline.cpp:227) and for the XML2 and JSON `title` (blastxml2_format.cpp:405); the
+    // tabular `stitle` and `salltitles` (tabular.cpp:415-434) and the XML `Hit_def`
+    // (`GetBioseqHandleDeflineAndId`, showdefline.cpp:283-299) write the titles of the
+    // definition lines.
+    /// `Err` for a subject found as the same record with other taxids from which NCBI's
+    /// formatters can make the title they generate for it (`FoundInstead::CopyApart` with
+    /// `CopyApart::Title`), for the reports that show a generated title: outfmt 0
+    /// (`check_shown_parsed_subject`) and the tabular word of a replaced id
+    /// (`check_printed_word`); outfmt 13 to 16 write the taxids (`fetched`). The callers ask
+    /// it where the title they show can depend on the source (`pairwise_title_reads_source`, the
+    /// word of a nucleotide or of a protein title ending in `]`).
+    pub fn generated_title_fetched(&self) -> Result<(), String> {
+        match &self.found_instead {
+            Some(FoundInstead::CopyApart(other, CopyApart::Title)) => Err(format!(
+                "has the Seq-align id {}, which database sequence {other} also holds with the same definition lines and letters but other taxids, from which NCBI BLAST+ 2.17.0 can make that sequence's title for it (a title made from the taxids with the taxonomy database, or the end of a protein title rewritten)",
+                String::from_utf8_lossy(&self.alignment_fasta())
+            )),
+            _ => Ok(()),
+        }
     }
 
     /// The Seq-align id (outfmt 8, 9, 11, 12; `DeflineSet::alignment_id`).
@@ -174,21 +951,13 @@ impl ParsedSubject {
     /// with a version, else the first such id of the subject Bioseq (its gis passed over), else
     /// its last Textseq-id, else the Seq-align id.
     pub fn sam_id(&self) -> &ParsedSeqId {
-        let acc_ver =
-            |id: &crate::seqid::model::TextseqId| id.accession.is_some() && id.version.is_some();
-        if self.alignment_id.textseq().is_some_and(acc_ver) {
-            return &self.alignment_id;
-        }
-        let mut found = None;
-        for id in &self.target().ids {
-            if let Some(text) = id.textseq() {
-                found = Some(id);
-                if acc_ver(text) {
-                    break;
-                }
-            }
-        }
-        found.unwrap_or(&self.alignment_id)
+        forced_accession(&self.alignment_id, &self.target().ids)
+    }
+
+    /// The label of the subject's rows in a query-anchored report (outfmt 1 to 4): the Bioseq's
+    /// Seq-ids as `x_FillSeqid` reads them, with `-show_gis` (`report::query_anchored::fill_seqid`).
+    pub(crate) fn anchored_label(&self, out: &mut Vec<u8>) {
+        crate::report::query_anchored::fill_seqid(&self.target().ids, self.show_gis, out);
     }
 
     /// The definition lines.
@@ -201,9 +970,12 @@ impl ParsedSubject {
         &self.set.deflines[self.target]
     }
 
-    /// What `GenerateDefline` reads of the subject Bioseq's Seq-ids.
-    fn bioseq_ids(&self) -> BioseqIds {
-        bioseq_ids(&self.target().ids)
+    /// What `GenerateDefline` reads of the subject Bioseq: its Seq-ids and the name of its first
+    /// source (none where LOSAT refuses it, `source`).
+    fn bioseq_facts(&self) -> BioseqFacts {
+        let mut facts = bioseq_facts(&self.target().ids);
+        facts.taxname = self.source.name().ok().flatten();
+        facts
     }
 
     /// `GenerateDefline` of the subject Bioseq: for the alignment heading
@@ -214,29 +986,30 @@ impl ParsedSubject {
         leave_prefix_suffix: bool,
     ) -> Result<Defline, UnknownEncoding> {
         let title = self.target().title.as_deref().unwrap_or_default();
-        generate_bioseq_defline(title, protein, leave_prefix_suffix, &self.bioseq_ids())
+        generate_bioseq_defline(title, protein, leave_prefix_suffix, &self.bioseq_facts())
     }
 
     /// Whether the subject Bioseq has a source: some definition line has a positive taxid
     /// (`CSeqDBVol::x_GetTaxonomy` makes a source of each, seqdbvol.cpp:1136).
     fn has_source(&self) -> bool {
-        !self.volume_taxids().is_empty()
+        self.first_source_taxid().is_some()
     }
 
-    /// The positive taxids of the definition lines in the order in which the volume looks them
-    /// up when it fetches the subject Bioseq (`CSeqDBVol::x_GetTaxonomy`; `x_GetTaxDefline`
-    /// puts the target first), each once.
+    /// The lookups of the volume's taxonomy cache when NCBI fetches the subject Bioseq by its
+    /// Seq-align id: the positive taxids of the definition lines in the order of
+    /// `CSeqDBVol::x_GetTaxonomy` (`x_GetTaxDefline` puts the line that holds the id first,
+    /// `DeflineSet::taxonomy_lookups`), a taxid of several lines once for each.
+    pub fn volume_lookups(&self) -> Vec<i32> {
+        self.set.taxonomy_lookups(Some(&self.alignment_id))
+    }
+
+    /// The positive taxids that the volume looks up when it fetches the subject Bioseq, each once,
+    /// in the order of their first lookup ([`ParsedSubject::volume_lookups`]).
     pub fn volume_taxids(&self) -> Vec<i32> {
         let mut taxids = Vec::new();
-        let order = std::iter::once(self.target()).chain(
-            (0..self.set.deflines.len())
-                .filter(|&i| i != self.target)
-                .map(|i| &self.set.deflines[i]),
-        );
-        for defline in order {
-            match defline.taxid {
-                Some(taxid) if taxid > 0 && !taxids.contains(&taxid) => taxids.push(taxid),
-                _ => {}
+        for taxid in self.volume_lookups() {
+            if !taxids.contains(&taxid) {
+                taxids.push(taxid);
             }
         }
         taxids
@@ -246,7 +1019,7 @@ impl ParsedSubject {
     /// and that source has a taxid: the title then depends on the taxonomy database.
     pub fn title_from_taxonomy(&self) -> bool {
         let title = self.target().title.as_deref().unwrap_or_default();
-        bioseq_title_from_source(title, &self.bioseq_ids()) && self.has_source()
+        bioseq_title_from_source(title, || self.bioseq_facts()) && self.has_source()
     }
 
     // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3964-3972
@@ -269,11 +1042,46 @@ impl ParsedSubject {
     /// subject Bioseq's title (`x_AdjustProteinTitleSuffix`, which LOSAT does not port): a
     /// protein whose Bioseq has a source and whose title ends in `]`.
     pub fn title_suffix_adjusted(&self, protein: bool) -> bool {
+        protein && self.has_source() && self.title_ends_in_bracket()
+    }
+
+    /// Whether the subject Bioseq's title ends in `]` before NCBI's trimmed end
+    /// (`title_suffix_adjusted`).
+    fn title_ends_in_bracket(&self) -> bool {
         let title = self.target().title.as_deref().unwrap_or_default();
         let end = title
             .iter()
             .rposition(|byte| !b".,;~ ".contains(byte) && !byte.is_ascii_whitespace());
-        protein && self.has_source() && end.is_some_and(|end| title[end] == b']')
+        end.is_some_and(|end| title[end] == b']')
+    }
+
+    /// Whether a title that the reports write of the subject can depend on its Bioseq's
+    /// source, the taxids of its definition lines, whatever they are (`title_from_taxonomy`,
+    /// `title_suffix_adjusted`): in outfmt 0 (`pairwise_title_reads_source`), and the tabular word
+    /// of an id that `seq_id_list` replaces, of a protein title ending in `]` (a title made from
+    /// the source with the taxonomy database is also shown in outfmt 0; of a protein the word is
+    /// `unnamed` either way).
+    pub fn title_reads_source(&self, protein: bool, taxdb_found: bool) -> bool {
+        let replaced =
+            self.set.deflines.iter().any(|defline| {
+                matches!(seq_id_list(&defline.ids, b"x"), std::borrow::Cow::Owned(_))
+            });
+        self.pairwise_title_reads_source(protein, taxdb_found)
+            || (protein && self.title_ends_in_bracket() && replaced)
+    }
+
+    /// Whether a title that outfmt 0 shows of the subject can depend on its Bioseq's source
+    /// (`title_reads_source`): a title made from the source where `taxdb.bti` is found
+    /// (`taxdb_found`; without it NCBI 2.17.0 writes the title of a Bioseq without a source,
+    /// probe of line DBID N1b, `blastdb-ids-20261021/R/copytaxid/p1`) in the description and the
+    /// heading, and a protein title ending in `]` in the heading of a set with a definition line
+    /// without a title, which shows the generated title without `fLeavePrefixSuffix` (the
+    /// description keeps the stored end: probe of line DBID N1b L1,
+    /// `blastdb-ids-20261021/R/titlesrc/p1`).
+    pub fn pairwise_title_reads_source(&self, protein: bool, taxdb_found: bool) -> bool {
+        let title = self.target().title.as_deref().unwrap_or_default();
+        (taxdb_found && bioseq_title_from_source(title, || self.bioseq_facts()))
+            || (protein && self.title_ends_in_bracket() && self.heading_generates_title())
     }
 
     /// Whether the outfmt 0 alignment heading shows the subject Bioseq's generated title: some
@@ -290,45 +1098,279 @@ impl ParsedSubject {
     /// there (the title is then not made). `Err` where NCBI's `x_CleanAndCompress` reads past the
     /// end of the title (NCBI crashes) and where NCBI may rewrite its end
     /// (`title_suffix_adjusted`).
-    fn title_word(&self, protein: bool) -> Result<Vec<u8>, &'static str> {
-        let ids = &self.target().ids;
-        if matches!(seq_id_list(ids, b"x"), std::borrow::Cow::Borrowed(_)) {
-            return Ok(Vec::new());
+    /// `Ok(None)` where `GenerateDefline` throws for that title (a title in no encoding that
+    /// `CUtf8::GuessEncoding` recognises): `GetSeqIdList` makes no ids (`lookup_failure`).
+    fn title_word(&self, protein: bool) -> Result<Option<Vec<u8>>, &'static str> {
+        if !replaces_an_id(&self.target().ids) {
+            return Ok(Some(Vec::new()));
         }
+        self.generated_title_word(protein)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:222-230
+    // ```c++
+    //         if (((*itr)->IsGeneral() &&
+    //             (*itr)->AsFastaString().find("gnl|BL_ORD_ID")
+    //             != string::npos) ||
+    // 		(*itr)->AsFastaString().find("lcl|Subject_") != string::npos) {
+    //             vector<string> title_tokens;
+    //             string defline = sequence::CDeflineGenerator().GenerateDefline(bh);
+    //             if (defline != NcbiEmptyString) {
+    //                 id_token =
+    //                     NStr::Split(defline, " ", title_tokens)[0];
+    // ```
+    // The first word of a title that NCBI makes from the source with the taxonomy database is
+    // the organism's for a nucleotide (`Homo` for an empty title with taxid 9606) and `unnamed`
+    // for a protein, as without a source; of a protein title ending in `]`, the word before the
+    // end that `x_AdjustProteinTitleSuffix` rewrites where the Bioseq has a source (probe of line
+    // DBID N1b L1, `blastdb-ids-20261021/R/titlesrc/p1`). NCBI prints of the ids that
+    // `GetSeqIdList` makes the GI and the best one (`GetSeqIdListString`, showdefline.cpp:155-187),
+    // so a replaced id beside a better one is not printed.
+    /// `Err` where a tabular report prints (`printed`) an id that the first word of a title
+    /// NCBI can make from the source replaces: a title made from the taxids of the same record
+    /// found for the subject (`generated_title_fetched`) for a nucleotide or a protein title
+    /// ending in `]`. The subject's own title made from its source is made with its name
+    /// (`source`); the other refusals of the word are `tabular_ids`' and `all_tabular_ids`'.
+    pub fn check_printed_word(
+        &self,
+        protein: bool,
+        printed: super::tabular::PrintedIds,
+    ) -> Result<(), &'static str> {
+        let problem = if self.generated_title_fetched().is_err()
+            && (!protein || self.title_ends_in_bracket())
+        {
+            "a Seq-align id that another database sequence also holds with the same definition lines and letters but other taxids, from which NCBI BLAST+ 2.17.0 can make the title whose first word replaces a printed id (a title made from the taxids with the taxonomy database, or the end of a protein title rewritten)"
+        } else {
+            return Ok(());
+        };
+        // Whether the printed ids of `ids` change with the word.
+        let shows_word = |ids: &[ParsedSeqId], kinds: &[TabularId]| {
+            let (one, other) = (seq_id_list(ids, b"x"), seq_id_list(ids, b"y"));
+            kinds.iter().any(|&kind| {
+                let (mut a, mut b) = (Vec::new(), Vec::new());
+                tabular_id(&one, kind, &mut a);
+                tabular_id(&other, kind, &mut b);
+                a != b
+            })
+        };
+        let subject = printed.subject
+            && shows_word(
+                &self.target().ids,
+                &[
+                    TabularId::Full,
+                    TabularId::Accession,
+                    TabularId::AccessionVersion,
+                ],
+            );
+        let all =
+            printed.all
+                && !self.record
+                && self.set.deflines.iter().any(|defline| {
+                    shows_word(&defline.ids, &[TabularId::Full, TabularId::Accession])
+                });
+        if subject || all {
+            return Err(problem);
+        }
+        Ok(())
+    }
+
+    /// The first word of the subject Bioseq's generated title (`title_word` without the check
+    /// of the target's ids): `Err` also where LOSAT refuses the source of a title made from it
+    /// (`SourceTaxname::Refused`); `Ok(None)` where `GenerateDefline` throws.
+    fn generated_title_word(&self, protein: bool) -> Result<Option<Vec<u8>>, &'static str> {
+        self.source.name()?;
         if self.title_suffix_adjusted(protein) {
             return Err("a title ending in ']' whose first word NCBI BLAST+ takes after it rewrites the title's end from the taxids (x_AdjustProteinTitleSuffix)");
         }
-        let defline = self
-            .bioseq_title(protein, false)
-            .map_err(|UnknownEncoding| "a title in no encoding that NCBI BLAST+ recognises")?;
+        let Ok(defline) = self.bioseq_title(protein, false) else {
+            return Ok(None);
+        };
         // A nucleotide title stops at the end of the string (approved exception 2 of
         // PD-LOSAT-NCBI-DEFECTS for BLASTN, TBLASTN and TBLASTX).
         if protein && defline.reads_past_end {
-            return Err("a title of punctuation that NCBI BLAST+'s x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes)");
+            return Err(concat!(
+                "a title ",
+                crate::report::defline::punctuation_title!()
+            ));
         }
         let end = defline
             .text
             .iter()
             .position(|&byte| byte == b' ')
             .unwrap_or(defline.text.len());
-        Ok(defline.text[..end].to_vec())
+        Ok(Some(defline.text[..end].to_vec()))
     }
 
     /// The tabular `sseqid`, `sacc` and `saccver` (`tabular_id` of the subject Bioseq's ids after
-    /// `seq_id_list`).
-    pub fn tabular_ids(&self, protein: bool) -> Result<[Vec<u8>; 3], &'static str> {
-        let word = self.title_word(protein)?;
+    /// `seq_id_list`); `Ok(None)` where `SetSubjectId`'s `GetSeqIdList` throws (`lookup_failure`).
+    pub fn tabular_ids(&self, protein: bool) -> Result<Option<[Vec<u8>; 3]>, &'static str> {
+        let Some(word) = self.title_word(protein)? else {
+            return Ok(None);
+        };
         let ids = seq_id_list(&self.target().ids, &word);
         let field = |kind| {
             let mut out = Vec::new();
             tabular_id(&ids, kind, &mut out);
             out
         };
-        Ok([
+        Ok(Some([
             field(TabularId::Full),
             field(TabularId::Accession),
             field(TabularId::AccessionVersion),
-        ])
+        ]))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:862-869
+    // ```c++
+    //         } catch (const CException&) {
+    //             list<CRef<CSeq_id> > subject_ids;
+    //             CRef<CSeq_id> id(new CSeq_id());
+    //             id->Assign(align.GetSeq_id(1));
+    //             subject_ids.push_back(id);
+    //             SetSubjectId(subject_ids);
+    // ```
+    /// Which of NCBI's lookups of the subject's tabular ids throw (`report::tabular::FailedLookup`):
+    /// `SetSubjectId` where the subject Bioseq's ids hold one that `GetSeqIdList` replaces
+    /// (`lcl|Subject_`, `gnl|BL_ORD_ID`) and `GenerateDefline` throws, `x_SetSubjectIds` where a
+    /// definition line holds one (a `-subject` record's ids are not looked up there); `None`
+    /// where neither throws. `Err` as `tabular_ids`'.
+    pub fn lookup_failure(
+        &self,
+        protein: bool,
+    ) -> Result<Option<super::tabular::LookupFailure>, &'static str> {
+        let subject_id = replaces_an_id(&self.target().ids);
+        let all_ids = !self.record
+            && self
+                .set
+                .deflines
+                .iter()
+                .any(|defline| replaces_an_id(&defline.ids));
+        if !subject_id && !all_ids {
+            return Ok(None);
+        }
+        Ok(self
+            .generated_title_word(protein)?
+            .is_none()
+            .then_some(super::tabular::LookupFailure {
+                subject_id,
+                all_ids,
+            }))
+    }
+
+    /// The Seq-align id as `sallseqid` and `sallacc` print it (`tabular_id` of the id alone,
+    /// `eFullId` and `eAccession`): what the catch of `SetFields` pushes where a lookup throws
+    /// (`report::tabular::FailedLookup::full`, `accession`).
+    pub fn alignment_tabular_ids(&self) -> [Vec<u8>; 2] {
+        let ids = std::slice::from_ref(&self.alignment_id);
+        let field = |kind| {
+            let mut out = Vec::new();
+            tabular_id(ids, kind, &mut out);
+            out
+        };
+        [field(TabularId::Full), field(TabularId::Accession)]
+    }
+
+    /// The keys of the ids of queries that NCBI's scope would show for this sequence
+    /// (`QueryScopeKeys`), made once.
+    pub fn query_scope_keys(&self) -> &QueryScopeKeys {
+        self.query_scope_keys.get_or_init(|| {
+            let mut own = Vec::new();
+            scope_keys(self, &mut own);
+            let mut weak = Vec::new();
+            crate::seqid::id_scope::weak_keys(&self.alignment_id, &mut weak);
+            let mut display = Vec::new();
+            if let Some(id) = self.display_id() {
+                crate::seqid::defline_set::scope_keys(id, &mut display);
+                crate::seqid::id_scope::weak_keys(id, &mut display);
+            }
+            QueryScopeKeys { own, weak, display }
+        })
+    }
+
+    /// The `saccver` of `tabular_ids`, made once for a subject (`protein` is its database's);
+    /// `None` where the lookup throws, as `tabular_ids` (the programs' id lists,
+    /// `common::tabular::SubjectId`).
+    pub fn tabular_saccver(
+        &self,
+        protein: bool,
+    ) -> Result<Option<std::sync::Arc<[u8]>>, &'static str> {
+        if let Some(saccver) = self.saccver.get() {
+            return Ok(saccver.clone());
+        }
+        let saccver = self
+            .tabular_ids(protein)?
+            .map(|[_, _, saccver]| std::sync::Arc::from(saccver));
+        Ok(self.saccver.get_or_init(|| saccver).clone())
+    }
+
+    /// `Err` as `tabular_ids`', which it does not make.
+    pub fn check_tabular_ids(&self, protein: bool) -> Result<(), &'static str> {
+        self.title_word(protein).map(drop)
+    }
+
+    /// The tabular `sgi`: the first GI of the subject Bioseq's ids (`FindGi`; `seq_id_list` only
+    /// replaces ids that are no GI), 0 for none.
+    pub fn tabular_gi(&self) -> i64 {
+        self.target().gi()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:544-556
+    // ```c++
+    //     if (bdlRef.NotEmpty() && bdlRef->CanGet() && bdlRef->IsSet() && !bdlRef->Get().empty()){
+    //         vector< CConstRef<CSeq_id> > original_seqids;
+    //
+    //         ITERATE(CBlast_def_line_set::Tdata, itr, bdlRef->Get()) {
+    //             original_seqids.clear();
+    //             ITERATE(CBlast_def_line::TSeqid, id, (*itr)->GetSeqid()) {
+    //                 original_seqids.push_back(*id);
+    //             }
+    //             list<CRef<objects::CSeq_id> > next_seqid_list;
+    //             // Next call replaces BL_ORD_ID if found.
+    //             CShowBlastDefline::GetSeqIdList(bh,original_seqids,next_seqid_list);
+    //             m_SubjectIds.push_back(next_seqid_list);
+    //         }
+    // ```
+    /// The tabular ids of every definition line (`x_SetSubjectIds`: `sallseqid`, `sallgi`,
+    /// `sallacc`), in the stored order: each line's ids after `seq_id_list` with the first word
+    /// of the subject Bioseq's title, as `tabular_ids` makes them. Where `GenerateDefline` throws,
+    /// the ids of the lines before the first line with an id to replace, which `x_SetSubjectIds`
+    /// pushed before it threw (`AllTabularIds::failed`). `Err` as `tabular_ids`'.
+    pub fn all_tabular_ids(&self, protein: bool) -> Result<AllTabularIds, &'static str> {
+        // `GetSeqIdList` replaces the ids of each definition line, so the word is made when any
+        // line has an id to replace, not only the target's.
+        let replaced = !self.record
+            && self
+                .set
+                .deflines
+                .iter()
+                .any(|defline| replaces_an_id(&defline.ids));
+        let word = if replaced {
+            self.generated_title_word(protein)?
+        } else {
+            Some(Vec::new())
+        };
+        let Some(word) = word else {
+            let before = self
+                .set
+                .deflines
+                .iter()
+                .take_while(|defline| !replaces_an_id(&defline.ids))
+                .map(|defline| defline_tabular_ids(defline, b""))
+                .collect();
+            return Ok(AllTabularIds {
+                ids: before,
+                failed: true,
+            });
+        };
+        Ok(AllTabularIds {
+            ids: self
+                .set
+                .deflines
+                .iter()
+                .map(|defline| defline_tabular_ids(defline, &word))
+                .collect(),
+            failed: false,
+        })
     }
 
     /// The title of the first definition line, empty for none (`stitle`; the writers show an
@@ -341,23 +1383,60 @@ impl ParsedSubject {
             .unwrap_or_default()
     }
 
-    /// The start of the outfmt 0 description line (`description_id` of `GetDisplayIds`' id,
-    /// without `-show_gis`, which LOSAT refuses) and its title: `GenerateDefline` of the subject
-    /// Bioseq with `fLeavePrefixSuffix` (`Unknown` where NCBI's `HtmlDecode` throws).
+    /// The start of the outfmt 0 description line (`description_id` of `GetDisplayIds`' id) and
+    /// its title: `GenerateDefline` of the subject Bioseq with `fLeavePrefixSuffix` (`Unknown`
+    /// where NCBI's `HtmlDecode` throws), after two spaces where `gi|N|` was written.
     pub fn description(&self, protein: bool) -> (Vec<u8>, Defline) {
-        let mut start = Vec::new();
-        if let Some(shown) = self.set.display_defline(&self.alignment_id) {
-            let defline = &self.set.deflines[shown.index];
-            if let Some(id) = defline.display_id() {
-                let gi = if shown.found { defline.gi() } else { 0 };
-                description_id(id, gi, false, &mut start);
-            }
-        }
-        let title = self.bioseq_title(protein, true).unwrap_or(Defline {
+        let (start, wrote_gi) = self.description_id();
+        let mut title = self.bioseq_title(protein, true).unwrap_or(Defline {
             text: b"Unknown".to_vec(),
             reads_past_end: false,
         });
+        if wrote_gi {
+            title.text.splice(0..0, *b"  ");
+        }
         (start, title)
+    }
+
+    /// The start of the outfmt 0 description line (`description`).
+    pub fn description_start(&self) -> Vec<u8> {
+        self.description_id().0
+    }
+
+    /// `description`'s start and whether `gi|N|` was written.
+    fn description_id(&self) -> (Vec<u8>, bool) {
+        let mut start = Vec::new();
+        let mut wrote_gi = false;
+        if let Some((defline, found)) = self.display_defline() {
+            if let Some(id) = defline.display_id() {
+                let gi = if found { defline.gi() } else { 0 };
+                wrote_gi = description_id(id, gi, self.show_gis, &mut start);
+            }
+        }
+        (start, wrote_gi)
+    }
+
+    /// The definition line whose id the description line shows (`DeflineSet::display_defline`
+    /// of the Seq-align id) and whether it holds the Seq-align id.
+    fn display_defline(&self) -> Option<(&BlastDefline, bool)> {
+        let shown = self.set.display_defline(&self.alignment_id)?;
+        Some((&self.set.deflines[shown.index], shown.found))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:432-433, 497-498
+    // ```c++
+    //     //get id (sdl->id, sdl-gi)
+    //     sdl->id = CAlignFormatUtil::GetDisplayIds(handle,aln_id,use_this_seqid,&sdl->gi,&sdl->taxid,&sdl->textSeqID);
+    //     ...
+    //     //get defline
+    //     sdl->defline = CDeflineGenerator().GenerateDefline(m_ScopeRef->GetBioseqHandle(*(sdl->id)), sequence::CDeflineGenerator::fLeavePrefixSuffix);
+    // ```
+    /// The display id: the id of the description line (`GetDisplayIds`' `wid`, the `WorstRank`
+    /// best id of `display_defline`), by which the description table (outfmt 0 to 4) looks the
+    /// title up again in NCBI's scope, which finds a query of the batch with that id before the
+    /// database sequence (`common::database::refuse_display_id_of_a_query`).
+    pub fn display_id(&self) -> Option<&ParsedSeqId> {
+        self.display_defline()?.0.display_id()
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2380-2384, 2451-2461
@@ -383,31 +1462,184 @@ impl ParsedSubject {
     // ```
     // `out` holds the heading of this subject only; the title of a definition line is its own,
     // or the subject Bioseq's generated title when it is empty (`x_FillDispParams`).
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3166-3180
+    // ```c++
+    //     ITERATE(CSeq_align_set::Tdata, iter, alnset.Get()){
+    //         const CSeq_align::TSegs& seg = (*iter)->GetSegs();
+    //         if(seg.Which() == CSeq_align::C_Segs::e_Std){
+    //             if(seg.GetStd().size() > 1){
+    //                 //has more than one stdseg. Need to seperate as each
+    //                 //is a distinct HSP
+    //                 ITERATE (CSeq_align::C_Segs::TStd, iterStdseg, seg.GetStd()){
+    //                     CRef<CSeq_align> aln(new CSeq_align);
+    //                     if((*iterStdseg)->IsSetScores()){
+    //                         aln->SetScore() = (*iterStdseg)->GetScores();
+    //                     }
+    //                     aln->SetSegs().SetStd().push_back(*iterStdseg);
+    //                     alnSetRef->Set().push_back(aln);
+    //                 }
+    //
+    //             } else {
+    //                 alnSetRef->Set().push_back(*iter);
+    //             }
+    // ```
     /// The definition-line lines of the outfmt 0 alignment of the subject (each ending with a
-    /// newline; `Length=` follows): every definition line, the first after `>` and the others
-    /// after a space, with its id (`alignment_line_id`) and its title wrapped at 60 bytes.
-    pub fn heading(&self, protein: bool) -> Vec<u8> {
+    /// newline; `Length=` follows): the definition lines (`heading_shows`), the first after `>`
+    /// and the others after a space, with its id (`alignment_line_id`) and its title wrapped at
+    /// 60 bytes. `every_line`: the Seq-align has no `ext` when the report is made, so nothing
+    /// limits the lines: a Seq-align of an ungapped search with two or more HSPs, which the
+    /// formatter splits into new ones (`PrepareBlastUngappedSeqalign` above). The generated title
+    /// is made once, for the first line without a title; where it throws, `Err` with the Seq-id
+    /// text of NCBI's line in place of each alignment (`heading_skipped_id`).
+    pub fn heading(&self, protein: bool, every_line: bool) -> Result<Vec<u8>, Vec<u8>> {
         let mut out = Vec::new();
         let mut generated = None;
-        for (i, defline) in self.set.deflines.iter().enumerate() {
+        let mut first = true;
+        for defline in &self.set.deflines {
+            if !every_line && !self.heading_shows(defline) {
+                continue;
+            }
             let start = out.len();
-            out.push(if i == 0 { b'>' } else { b' ' });
-            alignment_line_id(defline, false, &mut out);
-            if i > 0 || out.len() - start > 1 {
+            out.push(if first { b'>' } else { b' ' });
+            alignment_line_id(defline, self.show_gis, &mut out);
+            if !first || out.len() - start > 1 {
                 out.push(b' ');
             }
+            first = false;
             let title = match defline.title.as_deref() {
-                Some(title) if !title.is_empty() => title,
-                _ => generated.get_or_insert_with(|| {
-                    self.bioseq_title(protein, false)
-                        .map(|defline| defline.text)
-                        .unwrap_or_default()
-                }),
+                Some(title) if !self.heading_generates(title) => title,
+                _ => match &generated {
+                    Some(text) => text,
+                    None => match self.bioseq_title(protein, false) {
+                        Ok(defline) => generated.insert(defline.text),
+                        Err(UnknownEncoding) => return Err(self.skipped_id()),
+                    },
+                },
             };
             wrap_title(title, &mut out);
             out.push(b'\n');
         }
-        out
+        Ok(out)
+    }
+
+    /// Whether the heading shows the generated title for a definition line with the title
+    /// `title` (`x_FillDispParams`: an empty one; every line of a `-subject` record, whose
+    /// title is the record's own, as `heading_skipped_id` has it).
+    fn heading_generates(&self, title: &[u8]) -> bool {
+        title.is_empty() || self.record
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1976-1981
+    // ```c++
+    //                 } catch (const CException&){
+    //                     out << "Sequence with id "
+    //                         << (avRef->GetSeqId(1)).GetSeqIdString().c_str()
+    //                         <<" no longer exists in database...alignment skipped\n";
+    //                     continue;
+    //                 }
+    // ```
+    // `x_DisplayAlnvecInfo` fills each shown definition line (`x_FillDispParams`) before it
+    // writes the heading, and a line without a title gets the Bioseq's generated title, whose
+    // `NStr::HtmlDecode` throws where it cannot guess the encoding (a name of the taxonomy
+    // database, line RG item T5; a `-subject` record's title, which its heading always generates:
+    // probe `T/t5/sub`, `AB999999` for `gb|AB999999.1|`): no heading and no alignment are written,
+    // the message instead, for each Seq-align of the subject (`previousId` is not set, so the
+    // next one throws too).
+    /// The Seq-id text (`CSeq_id::GetSeqIdString` of the Seq-align id) that outfmt 0 writes in
+    /// place of the alignments of a subject whose heading (`heading`, with `every_line`) shows the
+    /// generated title and NCBI cannot make it (`UnknownEncoding`); `None` otherwise.
+    pub fn heading_skipped_id(&self, protein: bool, every_line: bool) -> Option<Vec<u8>> {
+        let generated = self.set.deflines.iter().any(|defline| {
+            (every_line || self.heading_shows(defline))
+                && self.heading_generates(defline.title.as_deref().unwrap_or_default())
+        });
+        if !generated || self.bioseq_title(protein, false).is_ok() {
+            return None;
+        }
+        Some(self.skipped_id())
+    }
+
+    /// `CSeq_id::GetSeqIdString` of the Seq-align id: the id of NCBI's line in place of each
+    /// alignment of a subject whose heading it cannot make (`heading_skipped_id`).
+    pub fn skipped_id(&self) -> Vec<u8> {
+        let mut id = Vec::new();
+        label::content(&self.alignment_id, false, &mut id);
+        id
+    }
+
+    /// Whether the `Score`-best id of the subject Bioseq is a local id (XML2 then writes no
+    /// accession of a `-subject` record, `SubjectNames::of_believed`).
+    pub fn has_local_best_id(&self) -> bool {
+        matches!(
+            find_best(&self.target().ids, text_score),
+            Some(ParsedSeqId::Local(_))
+        )
+    }
+
+    /// The XML `Hit_id` and `Hit_accession` of a `-subject` record (`of_record`; `Hit_def` is the
+    /// generated title, `bioseq_title`).
+    pub fn record_xml_ids(&self) -> (Vec<u8>, Vec<u8>) {
+        let mut id = Vec::new();
+        label::seqid_list_string(&self.target().ids, true, &mut id);
+        let mut accession = Vec::new();
+        if let Some(best) = find_best(&self.target().ids, text_score) {
+            label::format_label(best, false, &mut accession);
+        }
+        (id, accession)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2196-2202
+    // ```c++
+    //     CRef<CSeq_id> wid = FindBestChoice(ids, CSeq_id::WorstRank);
+    //     TGi gi_in_use_this_gi = ZERO_GI;
+    //     bool isGiList = false;
+    //     bool match = CAlignFormatUtil::MatchSeqInSeqList(gi, wid, use_this_seqid,&isGiList);
+    //     if(match && isGiList) gi_in_use_this_gi = gi;
+    //
+    //     if(use_this_seqid.empty() || match) {
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4648-4664
+    // ```c++
+    // bool CAlignFormatUtil::MatchSeqInSeqList(TGi cur_gi, CRef<CSeq_id> &seqID, list<string> &use_this_seq,bool *isGiList)
+    // {
+    //     bool found = false;
+    //     bool isGi = false;
+    //
+    //     string curSeqID = CAlignFormatUtil::GetLabel(seqID,true); //uses GetSeqIdString(true)
+    //     ITERATE(list<string>, iter_seq, use_this_seq){
+    //         isGi = false;
+    //         string useThisSeq = s_UseThisSeqToTextSeqID(*iter_seq, isGi);
+    //         if((isGi && cur_gi == NStr::StringToNumeric<TGi>((useThisSeq))) || (!isGi && curSeqID == useThisSeq)){
+    //             found = true;
+    //             break;
+    //          }
+    //     }
+    // ```
+    /// Whether the outfmt 0 alignment heading shows `defline`: under a positive list only a line
+    /// that `use_this_seqid` names (a line of a local id alone is not shown, nor one without a
+    /// GI when the strings are GIs; probe G05 of line DI-8).
+    fn heading_shows(&self, defline: &BlastDefline) -> bool {
+        if self.use_this_seqid.is_empty() {
+            return true;
+        }
+        // `CAlignFormatUtil::GetLabel`: the tag of a `general` id, else `GetSeqIdString(true)`.
+        let mut label_of_id = Vec::new();
+        match defline.display_id() {
+            Some(id @ ParsedSeqId::General(_)) => {
+                label::content_general_db_is_content(id, &mut label_of_id);
+            }
+            Some(id) => label::content(id, true, &mut label_of_id),
+            None => {}
+        }
+        // `NStr::StringToNumeric<TGi>(useThisSeq)` (`NStr::StringToInt8`, flags 0) of a GI
+        // that `under_positive_list` wrote in decimal.
+        let gi = defline.gi();
+        self.use_this_seqid
+            .iter()
+            .any(|string| match string.strip_prefix(b"gi:") {
+                Some(value) => crate::ncbi_str::string_to_int8(value, 0).is_ok_and(|n| n == gi),
+                None => string.strip_prefix(b"seqid:") == Some(label_of_id.as_slice()),
+            })
     }
 
     /// The outfmt 5 `Hit_id` and `Hit_def` (`DeflineSet::hit_id_and_def` with the GIs shown;
@@ -465,6 +1697,86 @@ impl ParsedSubject {
             .collect()
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:935-976
+    // ```c++
+    // CTaxFormat::SSeqInfo *CTaxFormat::x_FillTaxDispParams(const CRef< CBlast_def_line > &bdl,
+    //                                      const CBioseq_Handle& bsp_handle,
+    //                                      double bits,
+    //                                      double evalue,
+    // 		                             list<string>& use_this_seqid)
+    // {
+    //     SSeqInfo *seqInfo = NULL;
+    //
+    // 	const list<CRef<CSeq_id> > ids = bdl->GetSeqid();
+    // 	TGi gi =  CAlignFormatUtil::GetGiForSeqIdList(ids);
+    //     CRef<CSeq_id> wid = FindBestChoice(ids, CSeq_id::WorstRank);
+    //     bool match = CAlignFormatUtil::MatchSeqInSeqList(gi, wid, use_this_seqid);
+    //
+    //     if(use_this_seqid.empty() || match) {
+    // 		...
+    // 		seqInfo->seqID = FindBestChoice(ids, CSeq_id::WorstRank);
+    // 		seqInfo->label =  CAlignFormatUtil::GetLabel(seqInfo->seqID);//Just accession without db part like ref| or pdbd|
+    // ```
+    /// The definition lines of the organism report (outfmt 18, `report::tax_report`): of a
+    /// database sequence, each line that a positive list keeps (`heading_shows`) with the label of
+    /// its `WorstRank`-best id without version, its title (the Bioseq's generated title where it
+    /// has none) and its taxid; of a `-subject` record (no `Blast-def-line`), the Bioseq's
+    /// `WorstRank`-best id, its generated title and taxid 0 (`TaxDefline::of_record`). A generated
+    /// title that LOSAT does not write as NCBI is a `TaxTitle::Refused` (those of the outfmt 0
+    /// heading, which shows the same title, `common::database::check_shown_parsed_subject`; the
+    /// one made from a source that LOSAT refuses, `SourceTaxname::Refused`, only where the report
+    /// shows it). A title made from the source names the organism of the Bioseq's first source
+    /// (`with_source`). NCBI BLAST+ 2.17.0 keeps the positive list in an ungapped search too
+    /// (probe `T/t2/fix1` `f1.d3.*.sl*`: tblastx and `blastn -ungapped` with `-seqidlist` show the
+    /// listed line alone for a subject of 2 to 5 HSPs).
+    pub fn tax_deflines(&self, protein: bool) -> Vec<crate::report::tax_report::TaxDefline> {
+        use crate::report::tax_report::{generated_title, TaxDefline, TaxTitle};
+        let label_of = |id: Option<&ParsedSeqId>| {
+            let mut label = Vec::new();
+            if let Some(id) = id {
+                label::format_label(id, false, &mut label);
+            }
+            label
+        };
+        let refused = |reason: &str, shown_only: bool| TaxTitle::Refused {
+            reason: reason.to_owned(),
+            shown_only,
+        };
+        let generated = || -> TaxTitle {
+            if let Err(reason) = self.source.name() {
+                return refused(&format!("has {reason}"), true);
+            }
+            if self.title_suffix_adjusted(protein) {
+                return refused("has a definition line without a title and a title ending in ']' that NCBI BLAST+ rewrites from the taxids (x_AdjustProteinTitleSuffix)", false);
+            }
+            if let Err(reason) = self.generated_title_fetched() {
+                return refused(&reason, false);
+            }
+            let title = self.target().title.as_deref().unwrap_or_default();
+            generated_title(title, protein, &self.bioseq_facts())
+        };
+        if self.record {
+            return vec![TaxDefline {
+                label: label_of(find_best(&self.target().ids, text_score)),
+                title: generated(),
+                taxid: 0,
+            }];
+        }
+        self.set
+            .deflines
+            .iter()
+            .filter(|defline| self.heading_shows(defline))
+            .map(|defline| TaxDefline {
+                label: label_of(defline.display_id()),
+                title: match defline.title.as_deref() {
+                    Some(title) if !title.is_empty() => TaxTitle::Text(title.to_vec()),
+                    _ => generated(),
+                },
+                taxid: defline.taxid.unwrap_or(0),
+            })
+            .collect()
+    }
+
     /// The FASTA form of the Seq-align id (`CSeq_id::AsFastaString`): the id of the `HitDescr`
     /// that NCBI writes in place of the rest when the taxonomy database does not know a taxid
     /// (blastxml2_format.cpp:422-428), and the id that LOSAT's refusals name.
@@ -475,15 +1787,91 @@ impl ParsedSubject {
     }
 }
 
-/// Whether NCBI's formatters cannot find a sequence by the Seq-align id `id` in a database of
-/// version 5 (`version5`) or 4 (`ParsedSubject::new`).
-fn unfetchable(id: &ParsedSeqId, version5: bool) -> bool {
-    match id {
-        ParsedSeqId::Gibbsq(_) | ParsedSeqId::NamedAnnotTrack(_) => true,
-        ParsedSeqId::Local(ObjectId::Id(_)) => version5,
-        ParsedSeqId::General(dbtag) => dbtag.db == b"PIG" || dbtag.db == b"BL_ORD_ID",
-        _ => false,
+/// The ids of every definition line of a subject (`ParsedSubject::all_tabular_ids`); where
+/// `failed`, those of the lines before the one whose `GetSeqIdList` throws.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AllTabularIds {
+    pub ids: Vec<super::tabular::DeflineIds>,
+    pub failed: bool,
+}
+
+/// Whether `GetSeqIdList` replaces one of `ids` with the first word of the generated title
+/// (`seq_id_list`: a `gnl|BL_ORD_ID` or `lcl|Subject_` id).
+fn replaces_an_id(ids: &[ParsedSeqId]) -> bool {
+    matches!(seq_id_list(ids, b"x"), std::borrow::Cow::Owned(_))
+}
+
+/// The tabular ids of one definition line after `seq_id_list` with `word`.
+fn defline_tabular_ids(defline: &BlastDefline, word: &[u8]) -> super::tabular::DeflineIds {
+    let ids = seq_id_list(&defline.ids, word);
+    let field = |kind| {
+        let mut out = Vec::new();
+        tabular_id(&ids, kind, &mut out);
+        out
+    };
+    super::tabular::DeflineIds {
+        id: field(TabularId::Full),
+        gi: defline.gi(),
+        accession: field(TabularId::Accession),
     }
+}
+
+/// The subjects of a `-subject` run under `-parse_deflines`, by subject index: `records` gives the
+/// ids (`None`: shown as a record without the option) and title of each. With `pairwise` (outfmt
+/// 0) LOSAT's refusals of `check_pairwise_record`. `program` names the program.
+pub fn parsed_records<'a>(
+    records: impl Iterator<
+        Item = (
+            Option<&'a crate::blastinput::fasta_reader::believed::BelievedIds>,
+            &'a [u8],
+        ),
+    >,
+    show_gis: bool,
+    protein: bool,
+    pairwise: bool,
+    program: &str,
+) -> anyhow::Result<Vec<Option<std::sync::Arc<ParsedSubject>>>> {
+    records
+        .map(|(ids, title)| {
+            let Some(ids) = ids else {
+                return Ok(None);
+            };
+            let subject = ParsedSubject::of_record(ids, title).showing_gis(show_gis);
+            if pairwise && !subject.shown_as_record() {
+                check_pairwise_record(&subject, protein, program)?;
+            }
+            Ok(Some(std::sync::Arc::new(subject)))
+        })
+        .collect()
+}
+
+/// LOSAT's refusals of a `-subject` record in outfmt 0, as of a database sequence
+/// (`algorithm::common::database::check_shown_parsed_subject`): a protein title that NCBI's
+/// `x_CleanAndCompress` reads past the end of, and a description id longer than 65 bytes.
+fn check_pairwise_record(
+    subject: &ParsedSubject,
+    protein: bool,
+    program: &str,
+) -> anyhow::Result<()> {
+    let (start, title) = subject.description(protein);
+    let name = || String::from_utf8_lossy(&start).trim_end().to_string();
+    if protein && title.reads_past_end {
+        anyhow::bail!(
+            "the subject record {} has a title of punctuation that NCBI BLAST+'s \
+             x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes in outfmt 0), \
+             which is not supported by LOSAT's {program}",
+            name()
+        );
+    }
+    if start.len() > 65 {
+        anyhow::bail!(
+            "the subject record {} has an outfmt 0 description id longer than 65 bytes (NCBI \
+             BLAST+ 2.17.0 pads the description line without end), which is not supported by \
+             LOSAT's {program}",
+            name()
+        );
+    }
+    Ok(())
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/accguide2.txt (the rows of the RefSeq
@@ -497,47 +1885,63 @@ fn unfetchable(id: &ParsedSeqId, version5: bool) -> bool {
 // 3+6  XM_      refseq_mrna_predicted
 // 3+9  XM_      refseq_mrna_predicted
 // ```
-/// Whether `CSeq_id::IdentifyAccession` gives `accession` a RefSeq chromosome, mRNA or ncRNA
-/// type (`BioseqIds::refseq_source_title`).
-fn refseq_source_accession(accession: &[u8]) -> bool {
+/// The RefSeq kind that `CSeq_id::IdentifyAccession` gives `accession` where `x_SetFlags` tests
+/// it: a chromosome or ncRNA (`BioseqFacts::refseq_chromosome_or_ncrna`) or an mRNA
+/// (`BioseqFacts::refseq_mrna`).
+fn refseq_accession_kind(accession: &[u8]) -> Option<RefseqKind> {
     if accession.len() < 3 || accession[2] != b'_' {
-        return false;
+        return None;
     }
     let digits = &accession[3..];
     if !digits.iter().all(u8::is_ascii_digit) {
-        return false;
+        return None;
     }
     let prefix = [
         accession[0].to_ascii_uppercase(),
         accession[1].to_ascii_uppercase(),
     ];
     match &prefix {
-        b"AC" | b"NC" | b"NR" => digits.len() == 6,
-        b"NM" | b"XM" => digits.len() == 6 || digits.len() == 9,
-        _ => false,
+        b"AC" | b"NC" | b"NR" if digits.len() == 6 => Some(RefseqKind::ChromosomeOrNcrna),
+        b"NM" | b"XM" if digits.len() == 6 || digits.len() == 9 => Some(RefseqKind::Mrna),
+        _ => None,
     }
 }
 
-/// `BioseqIds` of the Seq-ids `ids` of a Bioseq.
-fn bioseq_ids(ids: &[ParsedSeqId]) -> BioseqIds {
-    let mut flags = BioseqIds::default();
+/// A RefSeq kind whose empty title `GenerateDefline` makes with its own function
+/// (`refseq_accession_kind`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RefseqKind {
+    /// `m_IsNC` or `m_IsNR`.
+    ChromosomeOrNcrna,
+    /// `m_IsNM`.
+    Mrna,
+}
+
+impl BioseqFacts {
+    /// Sets the flag of the RefSeq kind of `accession` (`refseq_accession_kind`), if any.
+    fn add_refseq_accession(&mut self, accession: Option<&[u8]>) {
+        match accession.and_then(refseq_accession_kind) {
+            Some(RefseqKind::ChromosomeOrNcrna) => self.refseq_chromosome_or_ncrna = true,
+            Some(RefseqKind::Mrna) => self.refseq_mrna = true,
+            None => {}
+        }
+    }
+}
+
+/// `BioseqFacts` of the Seq-ids `ids` of a Bioseq.
+pub(crate) fn bioseq_facts(ids: &[ParsedSeqId]) -> BioseqFacts {
+    let mut flags = BioseqFacts::default();
     for id in ids {
         match id {
             ParsedSeqId::Tpg(text) | ParsedSeqId::Tpe(text) | ParsedSeqId::Tpd(text) => {
                 flags.third_party = true;
-                flags.refseq_source_title |= text
-                    .accession
-                    .as_deref()
-                    .is_some_and(refseq_source_accession);
+                flags.add_refseq_accession(text.accession.as_deref());
             }
             ParsedSeqId::Other(text)
             | ParsedSeqId::Genbank(text)
             | ParsedSeqId::Embl(text)
             | ParsedSeqId::Ddbj(text) => {
-                flags.refseq_source_title |= text
-                    .accession
-                    .as_deref()
-                    .is_some_and(refseq_source_accession);
+                flags.add_refseq_accession(text.accession.as_deref());
             }
             ParsedSeqId::Pdb(pdb) => {
                 let (chain_id, chain) = flags.pdb.get_or_insert_with(|| (Vec::new(), 0));
@@ -631,10 +2035,65 @@ pub fn joined_in_reports(a: &ParsedSubject, b: &ParsedSubject) -> bool {
     compare(&a.alignment_id, &b.alignment_id) == Sic::Yes
 }
 
+// No NCBI counterpart: LOSAT joins the hits that NCBI joins only where they are copies of one
+// record; it refuses the others (`common::database::refuse_joined_hits`).
+/// Whether `later`, which follows `earlier` in a hit list, is shown in `earlier`'s hit by the
+/// reports that join following hits (`joined_in_reports`) as LOSAT writes them: the two are
+/// copies of one record (the same definition lines but for their taxids). NCBI shows that hit
+/// with the names of the copy its lookup gives first, and each alignment with the letters of the
+/// copy its scope holds for the Seq-align id; the reports that read the Bioseq refuse either
+/// subject where another sequence holding its Seq-align id is not shown as it (`fetched`: other
+/// letters, other taxids where they are written), so the copies' names and letters are the same.
+pub fn joins_as_copy(earlier: &ParsedSubject, later: &ParsedSubject) -> bool {
+    let without_taxid = |defline: &BlastDefline| BlastDefline {
+        taxid: None,
+        ..defline.clone()
+    };
+    joined_in_reports(earlier, later)
+        && earlier.set.deflines.len() == later.set.deflines.len()
+        && earlier
+            .set
+            .deflines
+            .iter()
+            .zip(&later.set.deflines)
+            .all(|(a, b)| without_taxid(a) == without_taxid(b))
+}
+
+/// `joins_as_copy` of the subjects of ranks `earlier` and `later` of `parsed` (the subjects with
+/// parsed Seq-ids by rank): false where either has none.
+pub fn rank_joins_as_copy(
+    parsed: &[Option<std::sync::Arc<ParsedSubject>>],
+    earlier: usize,
+    later: usize,
+) -> bool {
+    match (
+        parsed.get(earlier).and_then(Option::as_deref),
+        parsed.get(later).and_then(Option::as_deref),
+    ) {
+        (Some(earlier), Some(later)) => joins_as_copy(earlier, later),
+        _ => false,
+    }
+}
+
+// No NCBI counterpart: LOSAT's check that no two sequences of a database are joined
+// (`common::database::reports_may_refuse`).
+/// Adds to `keys` the keys of the Seq-align id of `subject` (`defline_set::match_keys`): two
+/// subjects that the reports join (`joined_in_reports`) share one.
+pub fn join_keys(subject: &ParsedSubject, keys: &mut Vec<u64>) {
+    crate::seqid::defline_set::match_keys(&subject.alignment_id, keys);
+}
+
+/// The keys of the Seq-align id of `subject` as NCBI's scope finds it
+/// (`defline_set::scope_keys`).
+pub fn scope_keys(subject: &ParsedSubject, keys: &mut Vec<u64>) {
+    crate::seqid::defline_set::scope_keys(&subject.alignment_id, keys);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::seqdb::{SeqDb, SeqType};
+    use crate::seqid::model::ObjectId;
     use crate::seqid::model::{Dbtag, PdbSeqId};
 
     /// The subjects of `tests/db_search/ids/prot_v4` (`make_ids.py`), by the FASTA form of the
@@ -648,7 +2107,7 @@ mod tests {
             let mut fasta = Vec::new();
             label::fasta(&set.deflines[0].ids[0], &mut fasta);
             if fasta == first.as_bytes() {
-                return ParsedSubject::new(set, false).unwrap();
+                return ParsedSubject::new(set).unwrap();
             }
         }
         panic!("no sequence {first}");
@@ -671,12 +2130,9 @@ mod tests {
                 ids: vec![id],
                 ..BlastDefline::default()
             };
-            ParsedSubject::new(
-                DeflineSet {
-                    deflines: vec![defline],
-                },
-                true,
-            )
+            ParsedSubject::new(DeflineSet {
+                deflines: vec![defline],
+            })
             .unwrap()
         };
         let stored = crate::report::defline::generate_defline(b", ,", false, true).unwrap();
@@ -690,12 +2146,28 @@ mod tests {
         let (start, title) = accession.description(false);
         assert_eq!(text(&start), "AF000050.1 ");
         assert_eq!(title.text, stored.text);
-        check_shown_parsed_subject(&accession, false, false, 0, "BLASTN")
-            .expect("a nucleotide title of punctuation is shown");
-        assert!(check_shown_parsed_subject(&accession, true, false, 0, "BLASTP").is_err());
+        check_shown_parsed_subject(
+            &accession,
+            false,
+            false,
+            || crate::seqdb::Oid::of_unrestricted(0),
+            "BLASTN",
+        )
+        .expect("a nucleotide title of punctuation is shown");
+        assert!(check_shown_parsed_subject(
+            &accession,
+            true,
+            false,
+            || crate::seqdb::Oid::of_unrestricted(0),
+            "BLASTP"
+        )
+        .is_err());
         let local = subject(ParsedSeqId::Local(ObjectId::Str(b"Subject_51".to_vec())));
         assert!(local.tabular_ids(true).is_err());
-        let [id, _, _] = local.tabular_ids(false).unwrap();
+        assert!(local.tabular_saccver(true).is_err());
+        assert!(local.check_tabular_ids(true).is_err());
+        assert!(local.check_tabular_ids(false).is_ok());
+        let [id, _, _] = local.tabular_ids(false).unwrap().unwrap();
         let word = stored.text.split(|&byte| byte == b' ').next().unwrap();
         assert_eq!(id, word);
     }
@@ -711,7 +2183,7 @@ mod tests {
         let db = SeqDb::open(base.to_str().unwrap(), SeqType::Nucleotide).unwrap();
         let names: Vec<String> = (0..db.num_seqs())
             .map(|ordinal| {
-                let subject = ParsedSubject::new(db.defline_set(ordinal).unwrap(), true).unwrap();
+                let subject = ParsedSubject::new(db.defline_set(ordinal).unwrap()).unwrap();
                 let mut name = Vec::new();
                 crate::report::seqid::SeqId::Db(subject.sam_id()).sam_name(&mut name);
                 String::from_utf8(name).unwrap()
@@ -767,7 +2239,7 @@ mod tests {
             "DAA10002.1 unnamed protein product"
         );
         assert_eq!(
-            text(&subject("tpg|DAA10002.1|").heading(true)),
+            text(&subject("tpg|DAA10002.1|").heading(true, false).unwrap()),
             ">DAA10002.1 TPA: unnamed protein product\n"
         );
         assert_eq!(description("pdb|2XYZ|B"), "2XYZ_B Chain B");
@@ -778,7 +2250,7 @@ mod tests {
         );
         assert_eq!(description("ref|NC_100013.1|"), "NC_100013.1 ");
         assert_eq!(
-            text(&subject("ref|NC_100013.1|").heading(true)),
+            text(&subject("ref|NC_100013.1|").heading(true, false).unwrap()),
             ">NC_100013.1 \n"
         );
         assert_eq!(
@@ -787,19 +2259,19 @@ mod tests {
         );
         assert_eq!(description("lcl|Subject_27"), "subject seven title");
         assert_eq!(
-            text(&subject("lcl|Subject_30").heading(true)),
+            text(&subject("lcl|Subject_30").heading(true, false).unwrap()),
             ">Subject_30 unnamed protein product\n"
         );
         assert_eq!(description("pdb|5ABC|D"), "5ABC_D Chain D");
         assert_eq!(
-            text(&subject("pdb|5ABC|D").heading(true)),
+            text(&subject("pdb|5ABC|D").heading(true, false).unwrap()),
             ">5ABC_D Chain D\n XP_100015.1 second\n"
         );
         assert_eq!(
-            text(&subject("lcl|Subject_36").heading(true)),
+            text(&subject("lcl|Subject_36").heading(true, false).unwrap()),
             ">Subject_36 unnamed protein product\n DAA10016.1 tpa second\n"
         );
-        // A title from the source: the taxonomy database would name its organism.
+        // A title from the source: the taxonomy database can name its organism.
         assert!(!subject("ref|NP_100006.1|").title_from_taxonomy());
         assert!(!subject("pdb|2XYZ|B").title_from_taxonomy());
         assert!(subject("gi|1818").title_from_taxonomy());
@@ -811,6 +2283,7 @@ mod tests {
             subject(first)
                 .tabular_ids(true)
                 .unwrap()
+                .unwrap()
                 .map(|id| String::from_utf8(id).unwrap())
         };
         assert_eq!(ids("lcl|Subject_36"), ["unnamed", "unnamed", "unnamed"]);
@@ -820,6 +2293,15 @@ mod tests {
             ["tpg|DAA10008.1|", "DAA10008", "DAA10008.1"]
         );
         assert_eq!(ids("lcl|Subject_29"), ["pdb|3ABC|C", "3ABC_C", "3ABC_C"]);
+        assert!(subject("lcl|Subject_29").check_tabular_ids(true).is_ok());
+        // The `saccver`, made once.
+        let once = subject("lcl|Subject_28");
+        let first = once.tabular_saccver(true).unwrap().unwrap();
+        assert_eq!(&*first, b"DAA10008.1");
+        assert!(std::sync::Arc::ptr_eq(
+            &first,
+            &once.tabular_saccver(true).unwrap().unwrap()
+        ));
     }
 
     fn one_defline(ids: Vec<ParsedSeqId>) -> DeflineSet {
@@ -832,20 +2314,193 @@ mod tests {
         }
     }
 
+    fn gb(accession: &str, version: i32) -> ParsedSeqId {
+        ParsedSeqId::Genbank(crate::seqid::model::TextseqId {
+            accession: Some(accession.as_bytes().to_vec()),
+            version: Some(version),
+            ..Default::default()
+        })
+    }
+
+    fn lines(lines: Vec<Vec<ParsedSeqId>>) -> ParsedSubject {
+        let deflines = lines
+            .into_iter()
+            .map(|ids| BlastDefline {
+                title: Some(b"t".to_vec()),
+                ids,
+                ..BlastDefline::default()
+            })
+            .collect();
+        ParsedSubject::new(DeflineSet { deflines }).unwrap()
+    }
+
+    fn strings(subject: &ParsedSubject) -> Vec<String> {
+        subject
+            .use_this_seqid()
+            .iter()
+            .map(|string| String::from_utf8(string.clone()).unwrap())
+            .collect()
+    }
+
+    // Review 3 of line RG T3a, D1 (NCBI BLAST+ 2.17.0 probes `T/t3/review3_t3a`, `T/t3/fix3_t3a`):
+    // the description line shows the display id, the `WorstRank` best id of the line that holds
+    // the Seq-align id (`gi|777|lcl|Query_1`: the Seq-align id `gi|777`, the display id
+    // `lcl|Query_1`; `ref|NP_000777.1|lcl|Query_1`: `ref|NP_000777.1|` for both), and looks the
+    // title up again by it: its keys and those of the ids it matches weakly are `display`
+    // (`ref|NP_000781|` finds a query `ref|NP_000781.1|`, `ref|NP_000782.1|` not one
+    // `ref|NP_000782|`), apart from the Seq-align id's `own` and `weak`.
     #[test]
-    fn seq_align_ids_that_ncbi_does_not_find() {
-        let local_id = one_defline(vec![ParsedSeqId::Local(ObjectId::Id(123))]);
-        assert!(ParsedSubject::new(local_id.clone(), false)
-            .unwrap()
-            .fetched()
-            .is_ok());
-        let error = ParsedSubject::new(local_id, true)
-            .unwrap()
-            .fetched()
-            .unwrap_err();
-        assert!(error.contains("Seq-align id lcl|123,"), "{error}");
+    fn the_display_id_has_its_own_scope_keys() {
+        let local = |id: &str| ParsedSeqId::Local(ObjectId::Str(id.as_bytes().to_vec()));
+        let refseq = |accession: &str, version: Option<i32>| {
+            ParsedSeqId::Other(crate::seqid::model::TextseqId {
+                accession: Some(accession.as_bytes().to_vec()),
+                version,
+                ..Default::default()
+            })
+        };
+        let fasta = |id: Option<&ParsedSeqId>| {
+            let mut out = Vec::new();
+            label::fasta(id.unwrap(), &mut out);
+            String::from_utf8(out).unwrap()
+        };
+        let keys = |id: &ParsedSeqId| {
+            let mut keys = Vec::new();
+            crate::seqid::defline_set::scope_keys(id, &mut keys);
+            keys
+        };
+        let query = local("Query_1");
+        let gi = lines(vec![vec![ParsedSeqId::Gi(777), local("Query_1")]]);
+        assert_eq!(text(&gi.alignment_fasta()), "gi|777");
+        assert_eq!(fasta(gi.display_id()), "lcl|Query_1");
+        let scope = gi.query_scope_keys();
+        assert!(keys(&query).iter().all(|key| scope.display.contains(key)));
+        assert!(!keys(&query).iter().any(|key| scope.own.contains(key)));
+        let refq = lines(vec![vec![refseq("NP_000777", Some(1)), local("Query_1")]]);
+        assert_eq!(text(&refq.alignment_fasta()), "ref|NP_000777.1|");
+        assert_eq!(fasta(refq.display_id()), "ref|NP_000777.1|");
+        assert!(!keys(&query)
+            .iter()
+            .any(|key| refq.query_scope_keys().display.contains(key)));
+        let versioned_query = |accession: &str, version: Option<i32>| {
+            crate::seqid::id_scope::version_keys(&refseq(accession, version))
+                .map(|(own, _)| own)
+                .unwrap()
+        };
+        let weak = lines(vec![vec![ParsedSeqId::Gi(781), refseq("NP_000781", None)]]);
+        assert_eq!(fasta(weak.display_id()), "ref|NP_000781|");
+        assert!(weak
+            .query_scope_keys()
+            .display
+            .contains(&versioned_query("NP_000781", Some(1))));
+        let versioned = lines(vec![vec![
+            ParsedSeqId::Gi(782),
+            refseq("NP_000782", Some(1)),
+        ]]);
+        assert!(!versioned
+            .query_scope_keys()
+            .display
+            .contains(&versioned_query("NP_000782", None)));
+    }
+
+    // Line DBID N1b: the titles whose bytes the taxids of the record can change, whatever the
+    // record's taxids are (`title_reads_source`).
+    #[test]
+    fn a_title_reads_the_source_where_it_is_made_from_it_or_its_end_is_rewritten() {
+        let titled = |titles: &[&str]| {
+            let deflines = titles
+                .iter()
+                .enumerate()
+                .map(|(line, title)| BlastDefline {
+                    title: Some(title.as_bytes().to_vec()),
+                    ids: vec![gb(&format!("AF00000{line}"), 1)],
+                    ..BlastDefline::default()
+                })
+                .collect();
+            ParsedSubject::new(DeflineSet { deflines }).unwrap()
+        };
+        // A title made from the source names its organism with the taxonomy database only.
+        let empty = titled(&[""]);
+        assert!(empty.title_reads_source(true, true));
+        assert!(empty.title_reads_source(false, true));
+        assert!(!empty.title_reads_source(true, false));
+        // A protein title ending in ']' where the heading generates the title (another line
+        // without a title), with or without the taxonomy database; not for a nucleotide one.
+        let bracket = titled(&["alpha, partial [Homo sapiens]"]);
+        assert!(!bracket.title_reads_source(true, true));
+        let generated = titled(&["alpha, partial [Homo sapiens]", ""]);
+        assert!(generated.title_reads_source(true, false));
+        assert!(!generated.title_reads_source(false, false));
+        assert!(!titled(&["alpha", ""]).title_reads_source(true, true));
+    }
+
+    // Probes G01, G05 of line DI-8 (`GetFilteredRedundantSeqids`, `x_FillAlnDispParams`).
+    #[test]
+    fn a_positive_list_names_the_text_ids_or_the_gis() {
+        let local = || ParsedSeqId::Local(ObjectId::Str(b"loc".to_vec()));
+        // Text ids of every line, whichever comes first; a local id is not named.
+        let subject = lines(vec![vec![local()], vec![gb("AF000001", 1)]]);
+        assert!(subject.use_this_seqid().is_empty());
+        let subject = subject.under_positive_list(true);
+        assert_eq!(strings(&subject), ["seqid:AF000001.1"]);
+        // The heading leaves out the line the strings do not name, and `>` goes to the next.
+        assert_eq!(subject.heading(true, false).unwrap(), b">AF000001.1 t\n");
+        // An ungapped Seq-align of two HSPs reaches the report without the strings.
+        assert_eq!(
+            subject.heading(true, true).unwrap(),
+            b">loc t\n AF000001.1 t\n"
+        );
+        // A local id alone: no string, every line in the heading.
+        let subject = lines(vec![vec![local()]]).under_positive_list(true);
+        assert!(subject.use_this_seqid().is_empty());
+        assert_eq!(subject.heading(true, false).unwrap(), b">loc t\n");
+        // A Seq-align id that is a GI: only GIs are named, and a line without one is left out.
+        let subject = lines(vec![
+            vec![ParsedSeqId::Gi(888), gb("GG000001", 1)],
+            vec![gb("GG000002", 1)],
+            vec![ParsedSeqId::Gi(890), gb("GG000003", 1)],
+        ])
+        .under_positive_list(true);
+        assert_eq!(strings(&subject), ["gi:888", "gi:890"]);
+        assert_eq!(
+            subject.heading(true, false).unwrap(),
+            b">GG000001.1 t\n GG000003.1 t\n"
+        );
+        // A name without an accession is not named; a PDB id is.
+        let name_only = ParsedSeqId::Prf(crate::seqid::model::TextseqId {
+            name: Some(b"NAME".to_vec()),
+            ..Default::default()
+        });
+        let pdb = ParsedSeqId::Pdb(crate::seqid::model::PdbSeqId {
+            mol: b"3DEF".to_vec(),
+            chain: None,
+            rel: None,
+            chain_id: Some(b"B".to_vec()),
+        });
+        let subject = lines(vec![vec![name_only], vec![pdb]]).under_positive_list(true);
+        assert_eq!(strings(&subject), ["seqid:3DEF_B"]);
+        // Without a positive list nothing changes.
+        let subject =
+            lines(vec![vec![local()], vec![gb("AF000001", 1)]]).under_positive_list(false);
+        assert!(subject.use_this_seqid().is_empty());
+        assert_eq!(
+            subject.heading(true, false).unwrap(),
+            b">loc t\n AF000001.1 t\n"
+        );
+    }
+
+    #[test]
+    fn the_kind_of_a_seq_align_id_refuses_nothing_before_its_lookup() {
+        // NCBI's lookup decides whether its formatters find these (`found_instead`; probe of line
+        // DBID N2b), not the kind of id.
         for id in [
+            ParsedSeqId::Local(ObjectId::Id(123)),
             ParsedSeqId::Gibbsq(123),
+            ParsedSeqId::NamedAnnotTrack(crate::seqid::model::TextseqId {
+                accession: Some(b"NA000001".to_vec()),
+                version: Some(1),
+                ..Default::default()
+            }),
             ParsedSeqId::General(Dbtag {
                 db: b"PIG".to_vec(),
                 tag: ObjectId::Id(123),
@@ -855,12 +2510,27 @@ mod tests {
                 tag: ObjectId::Id(5),
             }),
         ] {
-            let subject = ParsedSubject::new(one_defline(vec![id]), false).unwrap();
-            assert!(subject.fetched().is_err());
+            let subject = ParsedSubject::new(one_defline(vec![id])).unwrap();
+            assert!(!subject.unfetchable(), "{subject:?}");
+            assert!(subject.fetched(false, true).is_ok());
         }
+        // A local id that alone decides the definition line of the Bioseq: no lookup finds it.
+        let shown = lines(vec![
+            vec![ParsedSeqId::Local(ObjectId::Id(777))],
+            vec![ParsedSeqId::Gi(777)],
+        ]);
+        assert!(shown.unfetchable());
+        let error = shown.fetched(false, true).unwrap_err();
+        assert!(
+            error.contains("Seq-align id gi|777, by which NCBI BLAST+'s formatters do not find"),
+            "{error}"
+        );
         // A GI in the set makes the GI the Seq-align id.
         let with_gi = one_defline(vec![ParsedSeqId::Gibbsq(123), ParsedSeqId::Gi(7)]);
-        assert!(ParsedSubject::new(with_gi, true).unwrap().fetched().is_ok());
+        assert!(ParsedSubject::new(with_gi)
+            .unwrap()
+            .fetched(false, true)
+            .is_ok());
         let replaced = DeflineSet {
             deflines: vec![BlastDefline {
                 ids: vec![ParsedSeqId::Gi(7)],
@@ -868,8 +2538,516 @@ mod tests {
                 ..BlastDefline::default()
             }],
         };
-        assert!(ParsedSubject::new(replaced, false).is_err());
-        assert!(ParsedSubject::new(DeflineSet::default(), false).is_err());
+        assert!(ParsedSubject::new(replaced).is_err());
+        assert!(ParsedSubject::new(DeflineSet::default()).is_err());
+    }
+
+    #[test]
+    fn a_seq_align_id_by_which_ncbi_finds_another_sequence_or_none() {
+        let subject = ParsedSubject::new(one_defline(vec![gb("AAA00001", 0)])).unwrap();
+        assert!(subject
+            .clone()
+            .found_instead(None)
+            .fetched(false, true)
+            .is_ok());
+        let error = subject
+            .clone()
+            .found_instead(Some(FoundInstead::Sequence(DbSequence::of_unrestricted(4))))
+            .fetched(false, true)
+            .unwrap_err();
+        assert!(
+            error.contains("lookup gives database sequence 4 first"),
+            "{error}"
+        );
+        let error = subject
+            .clone()
+            .found_instead(Some(FoundInstead::Nothing))
+            .fetched(false, true)
+            .unwrap_err();
+        assert!(error.contains("do not find the sequence"), "{error}");
+        let error = subject
+            .found_instead(Some(FoundInstead::Failed(LookupFailure::ncbi(
+                "DB contains no accession info.",
+            ))))
+            .fetched(false, true)
+            .unwrap_err();
+        assert!(
+            error.contains("whose lookup in the database fails (DB contains no accession info.;"),
+            "{error}"
+        );
+    }
+
+    // Line DBID pssmread (probe `R/pssmread`, reviews 1 and 2): LOSAT's refusals of what
+    // psiblast's PSSM reads by the Seq-align id (what the scope gets is
+    // `common::database::scope_bioseq`'s).
+    #[test]
+    fn the_pssm_refuses_reads_that_losat_does_not_make_as_ncbi() {
+        let subject = ParsedSubject::new(one_defline(vec![gb("AAA00001", 0)])).unwrap();
+        let read = |subject: &ParsedSubject| subject.pssm_read(false);
+        assert_eq!(read(&subject), Ok(()));
+        assert!(subject.bioseq_holds_alignment_id());
+        assert_eq!(subject.other_holder(), None);
+        let other = subject
+            .clone()
+            .found_instead(Some(FoundInstead::Sequence(DbSequence::of_unrestricted(4))));
+        assert_eq!(read(&other), Ok(()));
+        for found in [
+            FoundInstead::Nothing,
+            FoundInstead::ThrowsOnId("Error: ... is not a valid ordinal id".into()),
+            FoundInstead::OtherTaxids(DbSequence::of_unrestricted(2)),
+        ] {
+            assert_eq!(read(&subject.clone().found_instead(Some(found))), Ok(()));
+        }
+        // Refused: another holder besides what the lookup gives, a lookup failing on a file, the
+        // subject first with another holder.
+        let held = other
+            .clone()
+            .also_held(Some(DbSequence::of_unrestricted(6)));
+        assert_eq!(held.other_holder(), Some(DbSequence::of_unrestricted(6)));
+        assert!(read(&held)
+            .unwrap_err()
+            .contains("which database sequence 6 also holds"));
+        let none_held = subject
+            .clone()
+            .found_instead(Some(FoundInstead::Nothing))
+            .also_held(Some(DbSequence::of_unrestricted(6)));
+        assert!(read(&none_held).is_err());
+        for found in [
+            FoundInstead::AlsoHeld(DbSequence::of_unrestricted(6)),
+            FoundInstead::Failed(LookupFailure::ncbi("DB contains no accession info.")),
+        ] {
+            assert!(read(&subject.clone().found_instead(Some(found))).is_err());
+        }
+        // A weak match refuses where the batch reads one by one, whatever the lookup gives.
+        let weak = other
+            .clone()
+            .weak_match(Some(WeakMatch::Held(DbSequence::of_unrestricted(7))));
+        assert_eq!(weak.pssm_read(false), Ok(()));
+        assert!(weak.pssm_read(true).is_err());
+        // A definition line that the formatters do not find: its Bioseq does not hold the id, and
+        // the reasons are what the lookup finds (review 2, M2).
+        let shown = lines(vec![
+            vec![ParsedSeqId::Local(ObjectId::Id(777))],
+            vec![ParsedSeqId::Gi(777)],
+        ]);
+        assert!(shown.unfetchable());
+        assert!(!shown.bioseq_holds_alignment_id());
+        assert_eq!(read(&shown), Ok(()));
+        let also = shown
+            .clone()
+            .found_instead(Some(FoundInstead::AlsoHeld(DbSequence::of_unrestricted(2))));
+        assert_eq!(also.other_holder(), Some(DbSequence::of_unrestricted(2)));
+        let error = read(&also).unwrap_err();
+        assert!(
+            error.contains("which database sequence 2 also holds"),
+            "{error}"
+        );
+        assert!(!error.contains("formatters do not find"), "{error}");
+        let failed = shown.found_instead(Some(FoundInstead::Failed(LookupFailure::ncbi(
+            "no accession info",
+        ))));
+        assert!(read(&failed)
+            .unwrap_err()
+            .contains("whose lookup in the database fails"));
+    }
+
+    // Line DBID weakbatch (probe w0): NCBI's scope matches a Seq-align id weakly only where the
+    // formatters read the batch's subjects one by one, its prefetch off; the prefetch loads each
+    // subject by its own id.
+    #[test]
+    fn a_weak_match_is_refused_only_where_the_batch_reads_one_by_one() {
+        let subject = ParsedSubject::new(one_defline(vec![gb("AAA00001", 0)])).unwrap();
+        for weak in [
+            WeakMatch::Held(DbSequence::of_unrestricted(4)),
+            WeakMatch::Unlisted,
+            WeakMatch::Failed("no accession info".into()),
+        ] {
+            let subject = subject.clone().weak_match(Some(weak.clone()));
+            assert!(subject.fetched(true, false).is_ok(), "{weak:?}");
+            let error = subject.fetched(false, true).unwrap_err();
+            assert!(
+                error.contains("in a batch whose prefetch PRE_FETCH_SEQS_LIMIT turns off"),
+                "{error}"
+            );
+            assert_eq!(subject.prefetched(), Prefetched::Itself, "{weak:?}");
+            // What the lookup finds is refused whatever the batch: a copy with other taxids in
+            // the reports of taxids, before the weak match.
+            let copy = subject.found_instead(Some(FoundInstead::OtherTaxids(
+                DbSequence::of_unrestricted(2),
+            )));
+            assert!(copy.fetched(false, false).is_ok());
+            assert!(copy
+                .fetched(true, false)
+                .unwrap_err()
+                .contains("other taxids"));
+            assert!(copy.fetched(false, true).unwrap_err().contains("weakly"));
+        }
+        let other =
+            subject.found_instead(Some(FoundInstead::AlsoHeld(DbSequence::of_unrestricted(4))));
+        assert!(other.fetched(false, false).is_err());
+    }
+
+    // Line DBID P1: what NCBI's prefetch reads for a subject that no report shows (psiblast's
+    // traceback hit list beyond -max_target_seqs), from what its lookup finds.
+    #[test]
+    fn the_prefetch_of_an_unshown_subject_reads_what_the_lookup_finds() {
+        let subject = ParsedSubject::new(one_defline(vec![gb("AAA00001", 0)])).unwrap();
+        let prefetched =
+            |found: Option<FoundInstead>| subject.clone().found_instead(found).prefetched();
+        for itself in [
+            None,
+            Some(FoundInstead::OtherTaxids(DbSequence::of_unrestricted(2))),
+            Some(FoundInstead::CopyApart(
+                DbSequence::of_unrestricted(2),
+                CopyApart::Title,
+            )),
+        ] {
+            assert_eq!(prefetched(itself.clone()), Prefetched::Itself, "{itself:?}");
+        }
+        assert_eq!(prefetched(Some(FoundInstead::Nothing)), Prefetched::Nothing);
+        // A file's error stops NCBI's prefetch; the exception of the id is its warning.
+        assert!(matches!(
+            prefetched(Some(FoundInstead::Failed(LookupFailure::ncbi("no accession info")))),
+            Prefetched::Failed(reason) if reason.contains("prefetch stops with a BLAST Database error")
+        ));
+        let throws = Some(FoundInstead::ThrowsOnId("Invalid choice selection".into()));
+        assert!(matches!(
+            prefetched(throws.clone()),
+            Prefetched::Failed(reason) if reason.contains("writes Error pre-fetching sequence data")
+        ));
+        assert!(subject.clone().found_instead(throws).prefetch_fails());
+        assert!(!subject
+            .clone()
+            .found_instead(Some(FoundInstead::Failed(LookupFailure::ncbi(
+                "no accession info"
+            ))))
+            .prefetch_fails());
+        assert!(matches!(
+            prefetched(Some(FoundInstead::Sequence(DbSequence::of_unrestricted(4)))),
+            Prefetched::Another {
+                other: Some(other),
+                or_itself: false,
+                ..
+            } if other == DbSequence::of_unrestricted(4)
+        ));
+        assert!(matches!(
+            prefetched(Some(FoundInstead::AlsoHeld(DbSequence::of_unrestricted(4)))),
+            Prefetched::Another {
+                other: Some(other),
+                or_itself: true,
+                ..
+            } if other == DbSequence::of_unrestricted(4)
+        ));
+        assert!(matches!(
+            prefetched(Some(FoundInstead::CopyApart(
+                DbSequence::of_unrestricted(4),
+                CopyApart::TaxonomyTexts
+            ))),
+            Prefetched::Another { other: None, .. }
+        ));
+        // A subject whose definition line the formatters do not find: what its lookup gives, as
+        // any other (review 2 of line DBID pssmread, H3).
+        let shown = lines(vec![
+            vec![ParsedSeqId::Local(ObjectId::Id(777))],
+            vec![ParsedSeqId::Gi(777)],
+        ]);
+        assert_eq!(shown.prefetched(), Prefetched::Itself);
+        assert!(matches!(
+            shown.clone().found_instead(Some(FoundInstead::Sequence(DbSequence::of_unrestricted(3)))).prefetched(),
+            Prefetched::Another { other: Some(other), or_itself: false, reason }
+                if other == DbSequence::of_unrestricted(3) && reason.contains("gives database sequence 3 first")
+        ));
+        assert_eq!(
+            shown
+                .found_instead(Some(FoundInstead::Nothing))
+                .prefetched(),
+            Prefetched::Nothing
+        );
+    }
+
+    // Line DBID N1b L1: a copy with other taxids from which NCBI can make the subject's title is
+    // refused by the reports that show a generated title (outfmt 0, the tabular word of a
+    // replaced id) and by those of taxids, not by the others (tabular ids, `stitle`, XML).
+    #[test]
+    fn a_title_made_from_a_copy_s_taxids_is_refused_where_a_generated_title_is_shown() {
+        use crate::algorithm::common::database::check_shown_parsed_subject;
+        let title_apart = Some(FoundInstead::CopyApart(
+            DbSequence::of_unrestricted(3),
+            CopyApart::Title,
+        ));
+        let subject = ParsedSubject::new(one_defline(vec![gb("AAA00001", 1)]))
+            .unwrap()
+            .found_instead(title_apart.clone());
+        assert!(subject.fetched(false, true).is_ok());
+        let error = subject.fetched(true, true).unwrap_err();
+        assert!(error.contains("database sequence 3 also holds"), "{error}");
+        assert!(error.contains("taxids and their names for it"), "{error}");
+        assert!(subject.check_tabular_ids(true).is_ok());
+        assert!(subject.all_tabular_ids(true).is_ok());
+        // Outfmt 0 where it shows a title that can depend on the source: an empty title with
+        // the taxonomy database, a heading generated of a title ending in `]`.
+        assert!(check_shown_parsed_subject(
+            &subject,
+            true,
+            true,
+            || crate::seqdb::Oid::of_unrestricted(0),
+            "BLASTP"
+        )
+        .is_ok());
+        let titled = |titles: &[&str]| {
+            let deflines = titles
+                .iter()
+                .enumerate()
+                .map(|(line, title)| BlastDefline {
+                    title: Some(title.as_bytes().to_vec()),
+                    ids: vec![gb(&format!("AF00000{line}"), 1)],
+                    ..BlastDefline::default()
+                })
+                .collect();
+            ParsedSubject::new(DeflineSet { deflines })
+                .unwrap()
+                .found_instead(title_apart.clone())
+        };
+        let error = check_shown_parsed_subject(
+            &titled(&[""]),
+            false,
+            true,
+            || crate::seqdb::Oid::of_unrestricted(0),
+            "BLASTN",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("can make that sequence's title"), "{error}");
+        assert!(check_shown_parsed_subject(
+            &titled(&[""]),
+            false,
+            false,
+            || crate::seqdb::Oid::of_unrestricted(0),
+            "BLASTN"
+        )
+        .is_ok());
+        let heading = titled(&["alpha, partial [Homo sapiens]", ""]);
+        assert!(check_shown_parsed_subject(
+            &heading,
+            true,
+            false,
+            || crate::seqdb::Oid::of_unrestricted(0),
+            "BLASTP"
+        )
+        .is_err());
+        let bracket = titled(&["alpha, partial [Homo sapiens]"]);
+        assert!(check_shown_parsed_subject(
+            &bracket,
+            true,
+            true,
+            || crate::seqdb::Oid::of_unrestricted(0),
+            "BLASTP"
+        )
+        .is_ok());
+        // A local id `Subject_N` that the title's first word replaces, of the target or of
+        // another definition line: the word can depend on the source for a nucleotide and for a
+        // protein title ending in `]`; refused where a printed id shows the word.
+        use crate::report::tabular::PrintedIds;
+        let (subject_ids, all_ids) = (
+            PrintedIds {
+                subject: true,
+                all: false,
+            },
+            PrintedIds {
+                subject: false,
+                all: true,
+            },
+        );
+        let local = || ParsedSeqId::Local(ObjectId::Str(b"Subject_1".to_vec()));
+        let replaced = ParsedSubject::new(one_defline(vec![local()]))
+            .unwrap()
+            .found_instead(title_apart.clone());
+        assert!(replaced.check_tabular_ids(false).is_ok());
+        let error = replaced.check_printed_word(false, subject_ids).unwrap_err();
+        assert!(
+            error.contains("whose first word replaces a printed id"),
+            "{error}"
+        );
+        assert!(replaced.check_printed_word(false, all_ids).is_err());
+        assert!(replaced
+            .check_printed_word(false, PrintedIds::default())
+            .is_ok());
+        assert!(replaced.check_printed_word(true, subject_ids).is_ok());
+        let second = ParsedSubject::new(DeflineSet {
+            deflines: vec![
+                one_defline(vec![gb("AAA00001", 1)]).deflines.remove(0),
+                one_defline(vec![local()]).deflines.remove(0),
+            ],
+        })
+        .unwrap()
+        .found_instead(title_apart.clone());
+        assert!(second.check_printed_word(false, subject_ids).is_ok());
+        assert!(second.check_printed_word(false, all_ids).is_err());
+        assert!(second.check_printed_word(true, all_ids).is_ok());
+        // A replaced id beside a better one is not printed (`GetSeqIdListString`).
+        let beside = ParsedSubject::new(one_defline(vec![gb("AAA00001", 1), local()]))
+            .unwrap()
+            .found_instead(title_apart.clone());
+        assert!(beside.check_printed_word(false, subject_ids).is_ok());
+        assert!(beside.check_printed_word(false, all_ids).is_ok());
+        let bracket = ParsedSubject::new(DeflineSet {
+            deflines: vec![BlastDefline {
+                title: Some(b"alpha, partial [Homo sapiens]".to_vec()),
+                ids: vec![local()],
+                ..BlastDefline::default()
+            }],
+        })
+        .unwrap()
+        .found_instead(title_apart);
+        assert!(bracket.check_printed_word(true, subject_ids).is_err());
+        // The other copies are refused as before: the taxonomy texts by every report that reads
+        // the Bioseq, the taxids by those that write them.
+        let texts = ParsedSubject::new(one_defline(vec![gb("AAA00001", 1)]))
+            .unwrap()
+            .found_instead(Some(FoundInstead::CopyApart(
+                DbSequence::of_unrestricted(3),
+                CopyApart::TaxonomyTexts,
+            )));
+        assert!(texts.fetched(false, true).is_err());
+        assert!(texts.generated_title_fetched().is_ok());
+        let taxids = ParsedSubject::new(one_defline(vec![gb("AAA00001", 1)]))
+            .unwrap()
+            .found_instead(Some(FoundInstead::OtherTaxids(
+                DbSequence::of_unrestricted(3),
+            )));
+        assert!(taxids.fetched(false, true).is_ok());
+        assert!(taxids.generated_title_fetched().is_ok());
+    }
+
+    // Line DBID N1b L1 probe: of a nucleotide `lcl|Subject_1` without a title and with taxid 9606,
+    // NCBI's tabular id is the first word of the title it makes from the source where the
+    // taxonomy database names the taxid (`Homo`); a protein's is `unnamed` either way (probe of
+    // line RG T5, `T/t5/out/ncbi/s.*.ids`: `Homo`, `Uncultured`, `unnamed`). A source that
+    // LOSAT refuses (a lookup that crashes NCBI, a named RefSeq record) refuses the word.
+    #[test]
+    fn a_tabular_word_of_a_title_made_from_the_source_names_the_organism() {
+        use crate::report::tabular::PrintedIds;
+        let subject = |first: &str, taxid: Option<i32>, source: SourceTaxname| {
+            ParsedSubject::new(DeflineSet {
+                deflines: vec![BlastDefline {
+                    ids: vec![match first.strip_prefix("ref|") {
+                        Some(accession) => ParsedSeqId::Other(crate::seqid::model::TextseqId {
+                            accession: Some(accession.as_bytes().to_vec()),
+                            version: Some(1),
+                            ..Default::default()
+                        }),
+                        None => ParsedSeqId::Local(ObjectId::Str(first.as_bytes().to_vec())),
+                    }],
+                    taxid,
+                    ..BlastDefline::default()
+                }],
+            })
+            .unwrap()
+            .with_source(|taxid| {
+                assert_eq!(taxid, 9606);
+                source
+            })
+        };
+        let named = || SourceTaxname::Named(std::sync::Arc::from(&b"uncultured bacterium"[..]));
+        let printed = PrintedIds::of(None);
+        let local = subject("Subject_1", Some(9606), named());
+        assert!(local.check_printed_word(false, printed).is_ok());
+        let [id, _, _] = local.tabular_ids(false).unwrap().unwrap();
+        assert_eq!(text(&id), "Uncultured");
+        let [id, _, _] = local.tabular_ids(true).unwrap().unwrap();
+        assert_eq!(text(&id), "unnamed");
+        assert_eq!(
+            text(&local.bioseq_title(true, true).unwrap().text),
+            "unnamed protein product [uncultured bacterium]"
+        );
+        assert_eq!(
+            text(&local.bioseq_title(false, false).unwrap().text),
+            "Uncultured bacterium"
+        );
+        let unnamed = subject("Subject_1", Some(9606), SourceTaxname::Unnamed);
+        assert!(unnamed.tabular_ids(false).is_ok());
+        assert_eq!(text(&unnamed.bioseq_title(false, false).unwrap().text), "");
+        let failed = subject(
+            "Subject_1",
+            Some(9606),
+            SourceTaxname::Refused("a failed lookup"),
+        );
+        assert_eq!(failed.tabular_ids(false).unwrap_err(), "a failed lookup");
+        assert_eq!(failed.tabular_ids(true).unwrap_err(), "a failed lookup");
+        // Without a taxid the Bioseq has no source: nothing is looked up.
+        let none = ParsedSubject::new(DeflineSet {
+            deflines: vec![BlastDefline {
+                ids: vec![ParsedSeqId::Local(ObjectId::Str(b"Subject_1".to_vec()))],
+                ..BlastDefline::default()
+            }],
+        })
+        .unwrap()
+        .with_source(|_| panic!("no source to name"));
+        assert_eq!(none.source(), &SourceTaxname::Unnamed);
+        // A named RefSeq chromosome gets the name (`x_SetTitleFromNC` makes nothing of a database
+        // Bioseq), a protein's not upper-cased and not `unnamed protein product`; an unnamed one
+        // keeps its empty title.
+        let refseq = subject("ref|NC_000001", Some(9606), named());
+        assert!(matches!(refseq.source(), SourceTaxname::Named(_)));
+        assert_eq!(
+            text(&refseq.bioseq_title(false, false).unwrap().text),
+            "Uncultured bacterium"
+        );
+        assert_eq!(
+            text(&refseq.bioseq_title(true, false).unwrap().text),
+            "uncultured bacterium"
+        );
+        let refseq = subject("ref|NC_000001", Some(9606), SourceTaxname::Unnamed);
+        assert_eq!(refseq.source(), &SourceTaxname::Unnamed);
+    }
+
+    // NCBI writes `Sequence with id AB000010 no longer exists in database...alignment skipped` in
+    // place of each alignment of a sequence whose heading's generated title it cannot decode (probe
+    // of line RG T5, `pt.100009.*.f0`); a title it can decode, or a stored one, is shown.
+    #[test]
+    fn a_heading_that_does_not_decode_names_the_seq_align_id() {
+        let subject = |title: Option<&[u8]>, name: &[u8]| {
+            ParsedSubject::new(DeflineSet {
+                deflines: vec![BlastDefline {
+                    ids: vec![gb("AB000010", 1)],
+                    title: title.map(<[u8]>::to_vec),
+                    taxid: Some(100009),
+                    ..BlastDefline::default()
+                }],
+            })
+            .unwrap()
+            .with_source(|_| SourceTaxname::Named(std::sync::Arc::from(name)))
+        };
+        let bad = subject(None, b"Bad \x81 name");
+        assert_eq!(
+            bad.heading_skipped_id(false, false).as_deref(),
+            Some(&b"AB000010"[..])
+        );
+        // The heading's own making of the title gives the same id (one GenerateDefline).
+        assert_eq!(
+            bad.heading(false, false).unwrap_err(),
+            bad.heading_skipped_id(false, false).unwrap()
+        );
+        assert_eq!(text(&bad.description(false).1.text), "Unknown");
+        assert_eq!(
+            subject(None, b"Homo sapiens").heading_skipped_id(false, false),
+            None
+        );
+        assert_eq!(
+            text(
+                &subject(None, b"Homo sapiens")
+                    .heading(false, false)
+                    .unwrap()
+            ),
+            ">AB000010.1 Homo sapiens\n"
+        );
+        assert_eq!(
+            subject(Some(b"stored"), b"Bad \x81 name").heading_skipped_id(true, false),
+            None
+        );
+        assert!(subject(Some(b"stored"), b"Bad \x81 name")
+            .heading(true, false)
+            .is_ok());
     }
 
     #[test]
@@ -881,32 +3059,216 @@ mod tests {
                 rel: None,
                 chain_id: chain_id.map(|id| id.as_bytes().to_vec()),
             });
-            ParsedSubject::new(one_defline(vec![id]), false).unwrap()
+            ParsedSubject::new(one_defline(vec![id])).unwrap()
         };
         assert!(joined_in_reports(&pdb(None), &pdb(Some("AA"))));
         assert!(!joined_in_reports(&pdb(Some("A")), &pdb(Some("B"))));
     }
 
+    // Line DBID N3: the copies of one record in the databases of an alias (three of r1, two of
+    // r3, the b ones with taxid 9606 in pjoin_abt) are joined; r6 (r1's letters under another id)
+    // and a Seq-align id that matches another one's without being its copy (pfound_v5's
+    // gb|DDD00004| and gb|DDD00004.1|, pdb|2XYZ| and pdb|2XYZ|AA) are not.
+    #[test]
+    fn copies_of_one_record_are_joined_and_other_matching_ids_are_not() {
+        let open = |name: &str| {
+            let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/db_search/ids")
+                .join(name);
+            let db = SeqDb::open(base.to_str().unwrap(), SeqType::Protein).unwrap();
+            (0..db.num_seqs())
+                .map(|ordinal| ParsedSubject::new(db.defline_set(ordinal).unwrap()).unwrap())
+                .collect::<Vec<_>>()
+        };
+        // a: r1 r2 r3, b: r1 r3 r4 r6, c: r1.
+        for name in ["pjoin_abc", "pjoin_abt"] {
+            let s = open(name);
+            assert_eq!(s.len(), 8);
+            for (earlier, later) in [(0, 3), (3, 0), (3, 7), (7, 0), (2, 4)] {
+                assert!(
+                    joins_as_copy(&s[earlier], &s[later]),
+                    "{name} {earlier} {later}"
+                );
+            }
+            for (earlier, later) in [(7, 6), (6, 3), (0, 1), (2, 5)] {
+                assert!(
+                    !joined_in_reports(&s[earlier], &s[later]),
+                    "{name} {earlier} {later}"
+                );
+                assert!(
+                    !joins_as_copy(&s[earlier], &s[later]),
+                    "{name} {earlier} {later}"
+                );
+            }
+        }
+        let s = open("pfound_v5");
+        for prefix in ["gb|DDD00004", "pdb|2XYZ|"] {
+            let pair: Vec<&ParsedSubject> = s
+                .iter()
+                .filter(|subject| subject.alignment_fasta().starts_with(prefix.as_bytes()))
+                .collect();
+            assert_eq!(pair.len(), 2, "{prefix}");
+            assert!(joined_in_reports(pair[0], pair[1]), "{prefix}");
+            assert!(!joins_as_copy(pair[0], pair[1]), "{prefix}");
+        }
+        let parsed: Vec<Option<std::sync::Arc<ParsedSubject>>> = open("pjoin_abc")
+            .into_iter()
+            .map(|subject| Some(std::sync::Arc::new(subject)))
+            .chain([None])
+            .collect();
+        assert!(rank_joins_as_copy(&parsed, 3, 0));
+        assert!(!rank_joins_as_copy(&parsed, 0, 8));
+        assert!(!rank_joins_as_copy(&parsed, 8, 0));
+    }
+
     #[test]
     fn refseq_accessions_whose_empty_titles_come_from_the_source() {
-        for (accession, from_source) in [
-            ("NC_000001", true),
-            ("AC_000001", true),
-            ("NM_000001", true),
-            ("NM_000000001", true),
-            ("XM_000000001", true),
-            ("NR_000001", true),
-            ("NR_000000001", false),
-            ("NC_0000001", false),
-            ("NP_000001", false),
-            ("WP_000000001", false),
-            ("XR_000001", false),
+        use RefseqKind::{ChromosomeOrNcrna, Mrna};
+        for (accession, kind) in [
+            ("NC_000001", Some(ChromosomeOrNcrna)),
+            ("AC_000001", Some(ChromosomeOrNcrna)),
+            ("NM_000001", Some(Mrna)),
+            ("NM_000000001", Some(Mrna)),
+            ("XM_000000001", Some(Mrna)),
+            ("NR_000001", Some(ChromosomeOrNcrna)),
+            ("NR_000000001", None),
+            ("NC_0000001", None),
+            ("NP_000001", None),
+            ("WP_000000001", None),
+            ("XR_000001", None),
         ] {
             assert_eq!(
-                refseq_source_accession(accession.as_bytes()),
-                from_source,
+                refseq_accession_kind(accession.as_bytes()),
+                kind,
                 "{accession}"
             );
+        }
+    }
+    /// The subject of a `-subject` record read with `-parse_deflines` (`ParsedSubject::of_record`).
+    fn record_subject(defline: &str, protein: bool) -> ParsedSubject {
+        record_subject_of(defline.as_bytes(), protein)
+    }
+
+    /// `record_subject` of a defline of any bytes.
+    fn record_subject_of(defline: &[u8], protein: bool) -> ParsedSubject {
+        use crate::blastinput::fasta_reader::{read_all, FastaInputSource, ReaderConfig};
+        let mut fasta = defline.to_vec();
+        fasta.extend_from_slice(if protein { b"\nMKV\n" } else { b"\nACGT\n" });
+        let config = ReaderConfig::subject("BLASTN", protein, false).with_parse_deflines(true);
+        let mut source = FastaInputSource::from_bytes(&fasta, config);
+        let record = read_all(&mut source, &mut |_| Ok(())).unwrap().remove(0);
+        ParsedSubject::of_record(record.believed().unwrap(), &record.title)
+    }
+
+    // NCBI BLAST+ 2.17.0 -parse_deflines -subject (probe `T/t7/review` of line RG, `C.lclS9`,
+    // `J.pS9tpa`): a parsed `lcl|Subject_9` keeps its id (`s_ReplaceLocalId` with `parse_local`),
+    // and `GetSeqIdList` puts the first word of the title generated from the rest of the defline
+    // in its place: `s7` of `TPA: s7 third ~`; where that title is in no encoding NCBI guesses the
+    // lookup throws (`sseqid` Unknown, `sall*` the Seq-align id `Subject_9`), a record's
+    // definition line is never looked up.
+    #[test]
+    fn parsed_subject_ids_of_a_title_ncbi_cannot_decode_fail_the_lookup() {
+        let decodable = record_subject(">lcl|Subject_9 TPA: s7 third ~", false);
+        assert_eq!(
+            decodable.tabular_ids(false).unwrap().unwrap()[2],
+            b"s7".to_vec()
+        );
+        let bad = record_subject_of(b">lcl|Subject_9 bad x\x81y title", false);
+        assert_eq!(bad.tabular_ids(false).unwrap(), None);
+        assert_eq!(bad.tabular_saccver(false).unwrap(), None);
+        assert!(bad.check_tabular_ids(false).is_ok());
+        assert_eq!(
+            bad.lookup_failure(false).unwrap(),
+            Some(crate::report::tabular::LookupFailure {
+                subject_id: true,
+                all_ids: false,
+            })
+        );
+        assert_eq!(
+            bad.alignment_tabular_ids(),
+            [b"Subject_9".to_vec(), b"Subject_9".to_vec()]
+        );
+        assert_eq!(bad.skipped_id(), b"Subject_9");
+        let all = bad.all_tabular_ids(false).unwrap();
+        assert!(!all.failed);
+        assert_eq!(text(&all.ids[0].id), "Subject_9");
+        // A record of a decodable title has no failure.
+        assert_eq!(decodable.lookup_failure(false).unwrap(), None);
+    }
+
+    // NCBI BLAST+ 2.17.0 -parse_deflines -subject (probe `DI7/ws/pd_sub.py`, 2026-11-01): `sseqid`,
+    // `sacc`, `saccver`, `sallseqid`, the outfmt 0 heading and description of a record.
+    #[test]
+    fn records_read_with_parse_deflines_follow_the_ncbi_oracle() {
+        for (defline, protein, ids, all, heading, local) in [
+            (
+                ">NM_000003.1 x y",
+                false,
+                ["ref|NM_000003.1|", "NM_000003", "NM_000003.1"],
+                "ref|NM_000003.1|",
+                ">NM_000003.1 x y\n",
+                false,
+            ),
+            (
+                ">plain1 a",
+                false,
+                ["plain1", "plain1", "plain1"],
+                "plain1",
+                ">plain1 a\n",
+                false,
+            ),
+            (
+                ">tpg|BK000001.1| y",
+                false,
+                ["tpg|BK000001.1|", "BK000001", "BK000001.1"],
+                "tpg|BK000001.1|",
+                ">BK000001.1 TPA: y\n",
+                false,
+            ),
+            (">s1", false, ["s1", "s1", "s1"], "s1", ">s1 \n", false),
+            (
+                ">lcl|Subject_1 x y",
+                false,
+                ["x", "x", "x"],
+                "Subject_1",
+                "",
+                true,
+            ),
+            (
+                ">",
+                false,
+                ["Subject_1", "Subject_1", "Subject_1"],
+                "Subject_1",
+                "",
+                true,
+            ),
+            (
+                ">",
+                true,
+                ["unnamed", "unnamed", "unnamed"],
+                "Subject_1",
+                "",
+                true,
+            ),
+        ] {
+            let subject = record_subject(defline, protein);
+            let shown = subject.tabular_ids(protein).unwrap().unwrap();
+            assert_eq!(
+                shown.map(|id| String::from_utf8(id).unwrap()),
+                ids,
+                "{defline}"
+            );
+            let all_ids = subject.all_tabular_ids(protein).unwrap().ids;
+            assert_eq!(text(&all_ids[0].id), all, "{defline}");
+            assert_eq!(subject.shown_as_record(), local, "{defline}");
+            if !local {
+                assert_eq!(
+                    text(&subject.heading(protein, false).unwrap()),
+                    heading,
+                    "{defline}"
+                );
+                assert!(subject.first_title().is_empty() || defline.contains(' '));
+            }
         }
     }
 }

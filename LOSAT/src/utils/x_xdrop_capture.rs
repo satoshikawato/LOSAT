@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_DPCAPTURE=<dir>, LOSAT_X_DPCAPTURE_EVERY=<n>, default 25): diagnostic
+//! EXPERIMENT (`LOSAT_X_DPCAPTURE=<dir>`, `LOSAT_X_DPCAPTURE_EVERY=<n>`, default 25): diagnostic
 //! capture of the X-drop DP problems that reach `xdrop_align`, for the replay benchmark of the
 //! vector kernels (`LOSAT_X_DPREPLAY`, test `replay_captured_problems` in `x_xdrop_avx2.rs`).
 //!
@@ -328,6 +328,7 @@ impl Captured {
     }
 
     /// Replays the call through `xdrop_align` with the forward `Bytes` rows and columns.
+    #[cfg(target_arch = "x86_64")]
     pub(super) fn replay(&self, sc: &mut super::XdropScratch) -> Option<XdropResult> {
         super::xdrop_align(
             &self.row_seq(),

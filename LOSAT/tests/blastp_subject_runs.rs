@@ -28,6 +28,9 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod temp_support;
+use temp_support::{worker_log_if_unset, TempFile};
+
 mod reach_support;
 
 fn fixture(name: &str) -> PathBuf {
@@ -41,6 +44,8 @@ const SUBJECTS: u64 = 124;
 
 /// What one run printed: the report.
 struct Run {
+    /// The run\'s worker log, when the test made one: kept until the caller drops the run.
+    _log: Option<TempFile>,
     stdout: Vec<u8>,
 }
 
@@ -71,12 +76,7 @@ fn blastp(
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat-bpsubjrun-worker.log"),
-        );
-    }
+    let log = worker_log_if_unset(&mut command, "blastp_subject_runs_worker");
     let output = command
         .arg("blastp")
         .args(["-task", task])
@@ -97,6 +97,7 @@ fn blastp(
         "{task} {vars:?} {extra:?} threads {threads}: {stderr}"
     );
     Run {
+        _log: log,
         stdout: output.stdout,
     }
 }
@@ -250,24 +251,24 @@ fn a_subject_without_letters_inside_a_run_gives_the_reports_without_the_switch()
     let _ = std::fs::remove_file(&path);
 }
 
-/// A protein database of the subject proteome, made with `losat makedb` in a directory of the
+/// A protein database of the subject proteome, made with `losat makeblastdb` in a directory of the
 /// test; returns the database name.
 fn subject_database() -> PathBuf {
     let dir = std::env::temp_dir().join(format!("losat-bpsubjrun-db-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let name = dir.join("MejoMJNV");
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(subject_file())
         .args(["-dbtype", "prot"])
         .arg("-out")
         .arg(&name)
         .output()
-        .expect("run losat makedb");
+        .expect("run losat makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     name

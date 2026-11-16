@@ -1,0 +1,5 @@
+m_fam	985	377	5000	BDT61961.1	1	207	207	N/A	4.42e-89	207	71.014	4	4	BDT61961.1 hypothetical protein [Penaeus monodon majanivirus A]
+m_fam	2707	1325	5000	BDT61962.1	4	577	577	N/A	1.29e-88	586	32.253	137	14	BDT61962.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]
+m_fam	4992	4450	5000	BDT61962.1	168	357	577	N/A	1.69e-36	191	38.743	11	5	BDT61962.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]
+m_mix	5579	3399	5600	BDT61866.1	1	729	731	N/A	0.0	739	60.893	22	12	BDT61866.1 wsv220-like protein [Penaeus monodon majanivirus A]
+m_mix	1370	1885	5600	BDT61861.1	20	196	234	N/A	7.85e-56	178	51.685	7	4	BDT61861.1 wsv206-like protein [Penaeus monodon majanivirus A]

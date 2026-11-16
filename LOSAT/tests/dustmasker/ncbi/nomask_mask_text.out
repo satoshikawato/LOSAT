@@ -1,0 +1,10 @@
+Blast-db-mask-info ::= {
+  algo-id 2,
+  algo-program dust,
+  algo-options "window=64; level=64; linker=1",
+  masks {
+    masks {
+    },
+    more FALSE
+  }
+}

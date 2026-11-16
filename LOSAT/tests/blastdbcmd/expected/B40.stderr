@@ -1,0 +1,1 @@
+Error: [blastdbcmd] Must specify query type: one of 'entry', 'entry_batch', or 'pig'

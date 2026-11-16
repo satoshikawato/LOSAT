@@ -35,7 +35,7 @@
 //! one stream, cut into chunks of `chunk_positions(P)` positions; each chunk is cut into P spans of
 //! equal length in stream order, one per reader. Per chunk:
 //! - A (read, job = reader `a`): reader `a` reads the words that end in its span with the loop's
-//!   statements (the same ambiguity resets, `current_kmer`, `valid_bases < lut_word_length` and
+//!   statements (the words of `x_range_words`, with the same ambiguity resets and k-mer, and
 //!   query offset `q_off_1`), entering a range up to `lut_word_length - 1` positions before its
 //!   span (never before the range's start). It writes each word `(q_off_1, cell)` to its scratch
 //!   region in reading order, counting the words per owner, and then copies them, stably, into its
@@ -60,8 +60,8 @@
 //! loop's cell and offset: the k-mer of a position depends only on the last `lut_word_length` bases
 //! (the mask), and a word is taken iff its last `lut_word_length` positions lie in the range and
 //! are unambiguous; a reader that starts `lut_word_length - 1` positions before its span (or at the
-//! range's start) sees those positions, so its `valid_bases` reaches `lut_word_length` at the same
-//! positions of the span as the loop's. Each word is read by the one reader whose span holds its
+//! range's start) sees those positions, so `x_range_words` gives it a word at the same positions
+//! of the span as the loop's. Each word is read by the one reader whose span holds its
 //! last position. A block holds whole counters and whole presence-vector words (`2^block_shift` is
 //! a multiple of 2048 and of `2^pv_array_bts`), so owner `o` is the only job that touches the cells
 //! of its blocks, their counters and their presence-vector words. B takes the chunks in order, the
@@ -97,12 +97,10 @@
 //! regions, about P x 0.5 MiB up to 16 threads (2.0 MiB at 4, 8.0 MiB at 16) and 8.0 MiB at 16 to
 //! 64 threads (8.3 MiB with the rows at 255) for a query of 2^19 positions or more; it does not
 //! grow. That is per fill, not per process: fills that run at the same time each hold their own
-//! arena, and with LOSAT_X_QBATCHPAR each slot of `m >= 2` threads that fills a table while others
-//! do holds about m x 0.5 MiB, so the slots (whose threads add up to n) hold about n x 0.5 MiB at
-//! once, what one fill of n <= 16 threads holds (`x_qbatch_par::batch_estimate_bytes` does not
-//! count it). Until 2026-10-18 the chunk was 2^19 positions at every P, and k slots held about k x
-//! 8 MiB: megablast of three E. coli genomes (15.9 Mb) against LC738868 at 16 threads, 3 slots of
-//! 5 threads, max RSS +25 MiB against the loop's fill (v4-D session 4, ws window w1). On Linux with
+//! arena. Until 2026-10-18 the chunk was 2^19 positions at every P, and the k query-batch slots of
+//! LOSAT_X_QBATCHPAR (removed on 2026-10-28) held about k x 8 MiB: megablast of three E. coli
+//! genomes (15.9 Mb) against LC738868 at 16 threads, 3 slots of 5 threads, max RSS +25 MiB against
+//! the loop's fill (v4-D session 4, ws window w1). On Linux with
 //! glibc its capacity is at least 32 MiB + 4 KiB (`x_mb_lookup_par::lines_capacity`, the rule of
 //! `x_frame_capacity` in `tblastn/x_subject_translate.rs`), so glibc maps it and unmaps it when it
 //! is freed at the end of the fill without moving its mmap threshold, and only the touched part is
@@ -116,8 +114,7 @@
 //! needed.
 //!
 //! The pool. As PAIRPAR's fill (`x_mb_lookup_par::parts`): a LOSAT search pool of two
-//! threads or more (a LOSAT_X_QBATCHPAR slot of `m >= 2` threads fills on its own pool with P = m),
-//! no database word counts, no `BLEMIR_DEBUG`. Without the `parallel`
+//! threads or more, no database word counts, no `BLEMIR_DEBUG`. Without the `parallel`
 //! feature, or on wasm32 without `wasm-threads`, the loop runs; with `wasm-threads` the scopes run
 //! on the search pool, which this module never builds (memory losat-wasm-threads-main-only).
 //!
@@ -192,7 +189,7 @@ use super::x_mb_lookup_par::{
     flush_private, lines_capacity, plan, timing_on, Copies, Line, Private, Shared, SharedTables,
     Tables, Unready, Words, K_COMPRESSION_FACTOR_SHIFT,
 };
-use super::{build_unmasked_ranges, PvArrayType, BLAST2NA_MASK, PV_ARRAY_MASK};
+use super::{build_unmasked_ranges, x_range_words, PvArrayType, PV_ARRAY_MASK};
 use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
@@ -208,11 +205,9 @@ const CHUNK_POSITIONS_PER_PART: usize = 1 << 15;
 
 /// No NCBI counterpart (scheduling only): the positions per chunk of a fill of `parts` workers,
 /// `min(2^19, parts << 15)`: the arena (16 bytes a position) is about `parts x 0.5 MiB` up to 16
-/// workers, so the fills that run at the same time on the slots of LOSAT_X_QBATCHPAR (whose threads
-/// add up to the pool's, n) hold together about n x 0.5 MiB, what one fill on the whole pool holds
-/// for n <= 16 (beyond, one fill stops at 8 MiB while the slots' fills add up: 8 slots of 8 threads
-/// at 64 threads about 32 MiB). The chunk size changes no element of the tables (the module
-/// documentation).
+/// workers and stops at 8 MiB beyond (the size was chosen for the query-batch slots of
+/// LOSAT_X_QBATCHPAR, removed on 2026-10-28, whose fills ran at the same time). The chunk size
+/// changes no element of the tables (the module documentation).
 fn chunk_positions(parts: usize) -> usize {
     CHUNK_POSITIONS.min(parts.clamp(1, 255) * CHUNK_POSITIONS_PER_PART)
 }
@@ -383,7 +378,7 @@ struct Entry {
 
 const ENTRY_BYTES: usize = std::mem::size_of::<Entry>();
 const LINE_BYTES: usize = std::mem::size_of::<Line>();
-const _: () = assert!(ENTRY_BYTES == 8 && LINE_BYTES % ENTRY_BYTES == 0);
+const _: () = assert!(ENTRY_BYTES == 8 && LINE_BYTES.is_multiple_of(ENTRY_BYTES));
 /// Entries per 64-byte line.
 const LINE_ENTRIES: usize = LINE_BYTES / ENTRY_BYTES;
 /// Row values (u32) per 64-byte line.
@@ -550,14 +545,18 @@ impl Fill<'_, '_, '_> {
     /// scratch region in reading order, then copied stably into its sorted region grouped by the
     /// owner of the cell; its row gets the start of each owner's sub-range and the number of words.
     /// A range is entered up to `lut_word_length - 1` positions before `s0` (not before its start),
-    /// so that the k-mer and `valid_bases >= lut_word_length` at the positions from `s0` on are the
+    /// so that the k-mer and the words (`x_range_words`) at the positions from `s0` on are the
     /// loop's. With `MARK` (the first chunk, when the prefault round runs) it also marks in its own
     /// bits (`Faults::marks`), after clearing them, the page of `hashtable` of each word's cell; the
     /// other chunks run the loop without the marking code. `H24` (LOSAT_X_MB24, with `MARK`): the
     /// cells are 3-byte elements, and the pages marked those of the words that hold the first and
     /// the last byte of the cell's element.
     ///
-    /// SAFETY: no other job of the phase uses reader `a`'s region, row or marks.
+    /// SAFETY: `a < parts`, no other job of the phase uses reader `a`'s region, row or marks, and
+    /// the span has at most `shape.half` positions (`s1 - s0 <= half`): each caller's `span` cuts a
+    /// chunk of `L <= chunk.min(total)` positions into `parts` spans of at most `ceil(L / parts)`
+    /// positions (`floor(L(a+1)/P) - floor(La/P) <= ceil(L/P)`), and the `half` of
+    /// `Shape::new(chunk.min(total), parts)` is `ceil(chunk.min(total) / parts)` rounded up.
     unsafe fn read<const MARK: bool, const H24: bool>(&self, a: usize, s0: usize, s1: usize) {
         let words = self.words;
         let lut_word_length = words.lut_word_length;
@@ -578,46 +577,45 @@ impl Fill<'_, '_, '_> {
             let first_pos = seg.start + (s0.max(seg.stream) - seg.stream);
             let end_pos = seg.start + (s1.min(seg.stream + len) - seg.stream);
             let warm_start = seg.start.max(first_pos.saturating_sub(lut_word_length - 1));
-            let mut current_kmer: u64 = 0;
-            let mut valid_bases = 0usize;
-            for pos in warm_start..end_pos {
-                let base = seg.seq[pos];
-                if (base & BLAST2NA_MASK) != 0 {
-                    current_kmer = 0;
-                    valid_bases = 0;
-                    continue;
-                }
-                current_kmer = ((current_kmer << 2) | base as u64) & words.kmer_mask;
-                valid_bases += 1;
-                if valid_bases < lut_word_length || pos < first_pos {
-                    continue;
-                }
-                let cell = current_kmer as usize;
-                let q_off_1 = (seg.query_offset + (pos + 1 - lut_word_length) + 1) as u32;
-                debug_assert!(n < self.arena.shape.half);
-                // SAFETY: reader `a`'s scratch region has `half` entries, at least the positions
-                // of its span (`Shape::new`), and one word per position at most.
-                unsafe {
-                    scratch.add(n).write(Entry {
-                        index: q_off_1,
-                        value: cell as u32,
-                    })
-                };
-                n += 1;
-                counts[self.owner[cell >> self.block_shift] as usize] += 1;
-                if MARK && H24 {
-                    // SAFETY: reader `a`'s bits; the pages are `hashtable`'s (the element's bytes
-                    // lie in its words).
+            x_range_words(
+                &seg.seq[warm_start..end_pos],
+                lut_word_length,
+                words.kmer_mask,
+                || {},
+                |current_kmer, i| {
+                    let pos = warm_start + i;
+                    // A word ends `lut_word_length - 1` letters or more after `warm_start`, so at
+                    // or after `first_pos` (`warm_start` is at most that many letters before it).
+                    debug_assert!(pos >= first_pos);
+                    let cell = current_kmer as usize;
+                    let q_off_1 = (seg.query_offset + (pos + 1 - lut_word_length) + 1) as u32;
+                    debug_assert!(n < self.arena.shape.half);
+                    // SAFETY: `n < half`, the entries of reader `a`'s scratch region: a word is
+                    // written only at a stream position of `[s0, s1)` (the segments' stream ranges
+                    // follow each other without overlap, `segments`), one at most per position, and
+                    // `s1 - s0 <= half` (this function's contract).
                     unsafe {
-                        marks.mark(a, (cells + (3 * cell >> 2)) >> PAGE_ELEMS_SHIFT);
-                        marks.mark(a, (cells + ((3 * cell + 2) >> 2)) >> PAGE_ELEMS_SHIFT);
+                        scratch.add(n).write(Entry {
+                            index: q_off_1,
+                            value: cell as u32,
+                        })
+                    };
+                    n += 1;
+                    counts[self.owner[cell >> self.block_shift] as usize] += 1;
+                    if MARK && H24 {
+                        // SAFETY: reader `a`'s bits; the pages are `hashtable`'s (the element's
+                        // bytes lie in its words).
+                        unsafe {
+                            marks.mark(a, (cells + ((3 * cell) >> 2)) >> PAGE_ELEMS_SHIFT);
+                            marks.mark(a, (cells + ((3 * cell + 2) >> 2)) >> PAGE_ELEMS_SHIFT);
+                        }
+                    } else if MARK {
+                        // SAFETY: reader `a`'s bits; the page is one of `hashtable`'s (`cell` < its
+                        // length).
+                        unsafe { marks.mark(a, (cells + cell) >> PAGE_ELEMS_SHIFT) };
                     }
-                } else if MARK {
-                    // SAFETY: reader `a`'s bits; the page is one of `hashtable`'s (`cell` < its
-                    // length).
-                    unsafe { marks.mark(a, (cells + cell) >> PAGE_ELEMS_SHIFT) };
-                }
-            }
+                },
+            );
             g += 1;
         }
         let row = self.arena.row(a);
@@ -1164,9 +1162,12 @@ fn fill_chunked(
         run_phase(&mut clock, 0, parts, in_pool, |a| {
             if k > 0 {
                 // C of the chunk before.
+                // SAFETY: phase C of job `a < parts` links reader `a`'s words only (all phases).
                 unsafe { fill.link_any(h24, a) };
             }
             let (s0, s1) = span(current, a);
+            // Reader `a < parts` reads its span of chunk `current` (at most `chunk.min(total)`).
+            // SAFETY: the reader is this job's (all phases); the span fits `shape.half` (`read`).
             match (mark, h24) {
                 (true, true) => unsafe { fill.read::<true, true>(a, s0, s1) },
                 (true, false) => unsafe { fill.read::<true, false>(a, s0, s1) },
@@ -1185,6 +1186,9 @@ fn fill_chunked(
                     })
                 })
                 .collect();
+            // SAFETY: toucher `j < parts` alone uses slot `j` of `touched` (all phases); the round
+            // runs between phase A and the first phase B, on the zeroed `hashtable`, and `marked`
+            // (the OR of the readers' marks) holds pages of `hashtable` only (`Fill::prefault`).
             run_phase(&mut clock, PREFAULT_PHASE, parts, in_pool, |j| unsafe {
                 if h24 {
                     fill.prefault::<true>(j, &marked)
@@ -1194,6 +1198,8 @@ fn fill_chunked(
             });
             stats.prefault_rounds += 1;
         }
+        // SAFETY: phase B of owner `o < parts` uses only the sub-ranges `(*, o)`, the cells of
+        // `o`'s blocks and `o`'s copies (all phases); every reader of the chunk has returned.
         run_phase(&mut clock, 1, parts, in_pool, |o| unsafe {
             if h24 {
                 fill.update::<true>(o)
@@ -1217,6 +1223,8 @@ fn fill_chunked(
             };
         }
     }
+    // SAFETY: after the last phase B, job `i < parts` links reader `i`'s words and flushes
+    // owner `i`'s copies into its own blocks' counters and presence words (all phases).
     run_phase(&mut clock, 2, parts, in_pool, |i| unsafe {
         fill.link_any(h24, i);
         fill.flush(i);
@@ -1251,6 +1259,10 @@ impl Fill<'_, '_, '_> {
     ///
     /// SAFETY: reader `a` wrote its row and region in a phase that has ended, and no job writes
     /// them until the slice is dropped.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     #[inline(always)]
     unsafe fn subrange(&self, a: usize, o: usize) -> &[Entry] {
         let row = self.arena.row(a);
@@ -1297,9 +1309,8 @@ impl Fill<'_, '_, '_> {
 /// `fill` runs them, started its last job about 0.15 ms late each time on the workstation for the
 /// discontiguous tables; v4-R R16). The barrier waits for every thread of the pool, so it needs
 /// them free while the table is built: `build_mb_lookup` runs on the search thread before its
-/// batch is scanned (`build_lookup_tables`, called by `search_query_batch`, which a
-/// LOSAT_X_QBATCHPAR slot runs on a pool of its own), with nothing else queued on its pool, and
-/// the broadcast's jobs wait for nothing but each other.
+/// batch is scanned (`build_lookup_tables`, called by `search_query_batch`), with nothing else
+/// queued on its pool, and the broadcast's jobs wait for nothing but each other.
 ///
 /// Memory: the arena of `fill` (16 bytes a position of one chunk, `Shape`), not one list of the
 /// whole query's words (8 bytes a word: 15 MiB more than the chains' fill at 8 threads for the
@@ -1382,7 +1393,7 @@ fn csr_on_pool(
     // Once per table: the owners' cells cover the table (every count is written), and the
     // positions, which bound the words, fit the `u32` offsets.
     assert_eq!(own.iter().map(|&(c0, c1)| c1 - c0).sum::<usize>(), cells);
-    assert!(cells % 2048 == 0 && pv_array_bts >= 5 && helper_array.len() == cells >> 11);
+    assert!(cells.is_multiple_of(2048) && pv_array_bts >= 5 && helper_array.len() == cells >> 11);
     let (segments, total) = segments(words);
     assert!(
         total <= u32::MAX as usize,
@@ -1423,6 +1434,162 @@ fn csr_on_pool(
         #[cfg(test)]
         checks: &checks,
     };
+    // EXPERIMENT (LOSAT_X_BNCSRPACK): a packed head (`x_bn_csr::x_serial_packed`) on the pool, with
+    // the two phases of the chunks' readings below. Owner `o` counts the words of its cells into
+    // their bytes (`x_count8`; the words past 255 in its own map), then sets the presence bits of
+    // its blocks (they own whole words of `bits`) and publishes its number of non-empty cells;
+    // after a barrier it writes the ranks of its blocks from the number of the owners before it and
+    // its cells' counts by rank (`x_rank_counts8`), and after another the sum and place phases
+    // below run on the counts of its ranks instead of its cells.
+    if super::x_bn_csr::x_packed(words.ascending_cells) {
+        use super::x_dc_csr::{
+            x_assemble_packed, x_count8, x_presence8, x_rank, x_rank_counts8, x_sum_packed, XPop,
+        };
+        // EXPERIMENT (LOSAT_X_BNPOPCNT): the form of the bit counts, read once per build.
+        let pop = XPop::get();
+        let blocks = cells >> 6;
+        let mut bits = vec![0u64; 2 * blocks];
+        // The non-empty cells are at most the cells and the words (bounded by the positions).
+        let cap = cells.min(total) + 1;
+        // EXPERIMENT (LOSAT_X_MBLUTKEEP): `x_offsets` is the batch loop's kept table or an empty vector.
+        let mut starts = super::x_dc_csr::x_offsets_buffer(x_offsets, cap);
+        // The counts take the first `cells` bytes of `qs`'s capacity (each owner zeroes its cells'
+        // bytes first, and the place phase writes `qs` only after the barrier that follows the last
+        // read of a count), so the build frees nothing in the middle of a batch (a freed block
+        // there is trimmed and faulted in again, each trim interrupting every thread of the
+        // process).
+        let mut qs: Vec<u32> = Vec::with_capacity(total.max(cells.div_ceil(4)));
+        let bb = Shared {
+            ptr: bits.as_mut_ptr(),
+            len: 2 * blocks,
+        };
+        let cb = Shared {
+            ptr: qs.as_mut_ptr() as *mut u8,
+            len: cells,
+        };
+        let sb = Shared {
+            ptr: starts.as_mut_ptr(),
+            len: cap,
+        };
+        let qb = Shared {
+            ptr: qs.as_mut_ptr(),
+            len: total,
+        };
+        let pv = Shared::new(pv_array);
+        let helper = Shared::new(helper_array);
+        let mut own_words = vec![0u64; parts];
+        let own_w = Shared::new(&mut own_words);
+        let mut own_present = vec![0u64; parts];
+        let own_p = Shared::new(&mut own_present);
+        let chunks = total.div_ceil(chunk);
+        let span = |c: usize, a: usize| {
+            let start = c * chunk;
+            let end = total.min(start + chunk);
+            (
+                start + (end - start) * a / parts,
+                start + (end - start) * (a + 1) / parts,
+            )
+        };
+        let bar = SpinBarrier::new(parts);
+        let (fill, own, bar) = (&fill, &own, &bar);
+        rayon::broadcast(|ctx| {
+            let o = ctx.index();
+            let _poison = Poison(bar);
+            let (bb, cb, sb, qb, pv, helper, own_w, own_p) =
+                (bb, cb, sb, qb, pv, helper, own_w, own_p);
+            let (c0, c1) = own[o];
+            let (b0, b1) = (c0 >> 6, c1 >> 6);
+            let mut more = std::collections::HashMap::new();
+            // SAFETY (all of the job's accesses): as in the unpacked build below; owner `o` alone
+            // writes its cells' bytes of the counts (before the barrier after which the place phase
+            // writes `qs`), the words of its blocks in `bits` (presence, then
+            // ranks, before the barrier after which every thread only reads `bits`), the counts of
+            // its ranks (`starts[p0 .. p0 + its non-empty cells]`, disjoint from the other owners'),
+            // its entries of the owners' words and non-empty cells (read by the later owners after a
+            // barrier) and `qs` at its places.
+            // SAFETY (`o`, `read`): `o = ctx.index() < parts` (the caller runs this only on a pool
+            // of `parts` threads), and `span(c, o)` has at most `shape.half` positions (`read`).
+            unsafe {
+                std::ptr::write_bytes(cb.ptr.add(c0), 0, c1 - c0);
+                let mut got = 0u64;
+                for c in 0..chunks {
+                    let (s0, s1) = span(c, o);
+                    fill.read::<false, false>(o, s0, s1);
+                    bar.wait();
+                    for a in 0..parts {
+                        let es = fill.subrange(a, o);
+                        got += es.len() as u64;
+                        for j in 0..es.len() {
+                            if let Some(ahead) = es.get(j + 16) {
+                                prefetch(cb.ptr.wrapping_add(ahead.value as usize));
+                            }
+                            x_count8(cb.ptr, &mut more, es[j].value as usize);
+                        }
+                    }
+                    if c + 1 == chunks {
+                        own_w.set(o, got);
+                    }
+                    bar.wait();
+                }
+                let mine = x_presence8(bb.ptr, cb.ptr, b0, b1, pop);
+                own_p.set(o, mine as u64);
+                bar.wait();
+                let p0: u64 = (0..o).map(|p| own_p.get(p)).sum();
+                let ranked = x_rank_counts8(bb.ptr, cb.ptr, &more, sb.ptr, b0, b1, p0 as usize);
+                debug_assert_eq!(ranked, p0 as usize + mine);
+                drop(more);
+                bar.wait();
+                let bits_r: &[u64] = std::slice::from_raw_parts(bb.ptr as *const u64, bb.len);
+                let rank = |cell: u32| {
+                    x_rank(bits_r, cell as usize, pop).expect("BNCSRPACK: a word of an empty cell")
+                };
+                let base: u64 = (0..o).map(|p| own_w.get(p)).sum();
+                if c0 < c1 {
+                    x_sum_packed(
+                        pv.ptr,
+                        pv.len,
+                        helper.ptr,
+                        bits_r,
+                        sb.ptr,
+                        base as u32,
+                        b0,
+                        b1,
+                        pv_array_bts,
+                        pop,
+                    );
+                }
+                for c in 0..chunks {
+                    let (s0, s1) = span(c, o);
+                    fill.read::<false, false>(o, s0, s1);
+                    bar.wait();
+                    for a in 0..parts {
+                        for e in fill.subrange(a, o) {
+                            let r = rank(e.value);
+                            let p = sb.get(r) - 1;
+                            sb.set(r, p);
+                            qb.set(p as usize, e.index);
+                        }
+                    }
+                    if c + 1 < chunks {
+                        bar.wait();
+                    }
+                }
+            }
+        });
+        let n_words: u64 = own_words.iter().sum();
+        let present = own_present.iter().sum::<u64>() as usize;
+        assert!(
+            n_words <= total as u64 && n_words <= u32::MAX as u64 && present < cap,
+            "BNCSR: more words than positions"
+        );
+        // SAFETY: no job is running. Every element of `starts[..present]` was written (each owner
+        // zeroed, counted, summed and placed its ranks, which cover `0 .. present`), `starts[present]`
+        // (no cell's end) now, and the runs partition `0 .. n_words`, each place written once.
+        unsafe {
+            sb.set(present, n_words as u32);
+            return x_assemble_packed(starts, bits, qs, present, n_words as usize);
+        }
+    }
     // `offsets` is written by its owners (their counts zeroed, then counted, summed and placed)
     // and by this thread (the elements before the first count, and `offsets[cells]` newest first);
     // `qs` gets one element per word (`total` positions bound them).
@@ -1471,6 +1638,8 @@ fn csr_on_pool(
         // places, which lie in `base .. base + its words` (disjoint from the other owners'); every
         // element read was written before by the same thread or before a barrier (the function's
         // documentation for the cursor of `c0`).
+        // SAFETY (`o`, `read`): `o = ctx.index() < parts` (the caller runs this only on a pool of
+        // `parts` threads), and `span(c, o)` has at most `shape.half` positions (`read`).
         unsafe {
             std::ptr::write_bytes(cnt.add(c0), 0, c1 - c0);
             let mut got = 0u64;
@@ -1746,6 +1915,10 @@ mod tests {
         /// LOSAT_X_MB24: the read-once fill from zero start values into 3-byte elements of `cells`
         /// cells (newest first), with LOSAT_X_MBLUTPREFAULT given (`prefault`) and checked on the
         /// words of the heads (`check_prefault`); the tables widened, and the pages touched.
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
         fn once_h24(
             &self,
             reference: &Built,
@@ -1886,7 +2059,7 @@ mod tests {
     // chunks are `ceil(positions / chunk)`.
     #[test]
     fn once_fill_builds_the_loops_tables() {
-        let mut rng = Lcg(0x0E_CE_5EED);
+        let mut rng = Lcg(0x0ECE_5EED);
         let mut multi_chunk = 0;
         for case in 0..40 {
             let c = Case::random(&mut rng, case % 2 == 1);
@@ -2456,33 +2629,69 @@ mod tests {
     // without cells (more threads than blocks), is the serial build's (`x_bn_csr::serial`: every
     // run, the presence vector and the counters) and lists the loop's chains, newest first and in
     // reading order; `csr` builds on the pool there and on this thread off it.
+    //
+    // Cost: each chunk takes about four passes of the pool's `SpinBarrier`, where a thread spins 2^16
+    // times before it yields its CPU, so a pool of more threads than CPUs (8 and 40 threads on a CI
+    // runner's 4) waits at every pass for threads that are not running. The one-position chunks of
+    // those pools therefore read small cases (`random_case(.., 2, 40)`: 85 to 165 letters, no masked
+    // interval), the pool of 8 threads with one cell of 256 words (one past a byte's count) instead
+    // of `x_with_repeats`; the repeat cells are read at the other chunk sizes (on the pool of 40
+    // threads, in round 2 at chunks of 5,000 positions), and the pools of 2 and 3 threads read every
+    // case at every chunk size.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     #[test]
     fn csr_on_a_pool_is_the_serial_build() {
-        use super::super::x_bn_csr::tests::{chains, pv_params, random_case};
+        use super::super::x_bn_csr::tests::{
+            chains, pv_params, random_case, x_push_query, x_with_repeats,
+        };
         use super::super::x_bn_csr::{serial, x_assert_runs_are_the_chains};
         let mut rng = Lcg(0xB4C5_0003);
         for threads in [2usize, 3, 8, 40] {
             crate::utils::threading::with_search_pool(threads, "blastn", |_pool| {
-                let rounds = if threads == 40 { 2 } else { 8 };
+                let rounds = if threads == 40 { 3 } else { 8 };
                 for round in 0..rounds {
                     // lut 8 has 32 blocks of 2,048 cells: 40 threads leave owners without cells
+                    // one table of LOSAT_X_MBCSR's 4^12 cells, newest first, with repeats
                     let lut = if threads == 40 {
                         8
+                    } else if threads == 3 && round == 0 {
+                        12
                     } else {
                         [8usize, 9, 10, 11][round % 4]
                     };
                     // both orders for every lut and every chunk size
                     let ascending = (round + round / 4) % 2 == 1;
-                    let case = random_case(&mut rng, 2 + round, 2_000 + 900 * round);
+                    let chunk = if lut == 12 {
+                        chunk_positions(threads)
+                    } else if threads == 40 && round == 2 {
+                        // owners without cells with the repeat cells (lut 8, descending: the
+                        // packed head and its map of the words past 255), in a few chunks
+                        assert!(lut == 8 && !ascending, "round 2 at 40 threads is packed");
+                        5000
+                    } else {
+                        [1usize, 97, 5000, chunk_positions(threads)][(round / 2) % 4]
+                    };
+                    // one-position chunks on a pool of more threads than a CI runner's 4 CPUs (above)
+                    let small = chunk == 1 && threads > 3;
+                    let mut case = if small {
+                        random_case(&mut rng, 2, 40)
+                    } else {
+                        random_case(&mut rng, 2 + round, 2_000 + 900 * round)
+                    };
+                    if round % 2 == 0 && !small {
+                        // cells of more words than a byte of LOSAT_X_BNCSRPACK's counts holds
+                        x_with_repeats(&mut case, lut);
+                    } else if round % 2 == 0 && threads == 8 {
+                        // one cell of 256 words (letter G), each in a chunk of its own
+                        x_push_query(&mut case, vec![2u8; 256 + lut - 1]);
+                    }
                     let refs = case.refs();
                     let words = case.words(&refs, lut + rng.below(4) as usize, lut, ascending);
                     let cells = 1usize << (2 * lut);
                     let (pv_len, bts) = pv_params(&case, lut);
-                    let chunk = [1usize, 97, 5000, chunk_positions(threads)][(round / 2) % 4];
                     let what = format!("threads {threads} round {round} lut {lut} chunk {chunk}");
                     let mut pv = vec![0 as PvArrayType; pv_len];
                     let mut helper = vec![0u32; cells >> 11];
@@ -2501,7 +2710,11 @@ mod tests {
                     let one = serial(&words, cells, &mut pv1, bts, &mut helper1, Vec::new());
                     assert_eq!(csr.words(), one.words(), "{what}");
                     for cell in 0..cells {
-                        assert_eq!(csr.run(cell), one.run(cell), "{what} cell {cell}");
+                        assert_eq!(
+                            csr.x_run_any(cell),
+                            one.x_run_any(cell),
+                            "{what} cell {cell}"
+                        );
                     }
                     assert!(pv == pv1 && helper == helper1, "{what}");
                     let (hashtable, next_pos, fill_pv, fill_helper) =

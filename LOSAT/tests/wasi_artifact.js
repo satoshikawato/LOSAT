@@ -1,5 +1,7 @@
 "use strict";
-const crypto = require("node:crypto");
+// node:crypto is loaded at its first use (a caller that passes the SHA-256 never loads it).
+let cryptoModule = null;
+const crypto = () => cryptoModule ??= require("node:crypto");
 
 // NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
 // CATCH_ALL(status); return status;
@@ -58,7 +60,7 @@ function prepareArtifact(bytes, expected, module = new WebAssembly.Module(bytes)
   if (!threaded && (memories[0].shared || names.has("wasi_thread_start"))) throw new Error("inconsistent serial artifact thread interface");
   const kind = `${threaded ? "threaded" : "serial"}-${command ? "command" : "reactor"}`;
   if (expected && kind !== expected) throw new Error(`expected ${expected}, got ${kind}`);
-  return { module, identity: { kind, sha256: sha256 ?? crypto.createHash("sha256").update(bytes).digest("hex"), imports, exports, memory: memories[0] } };
+  return { module, identity: { kind, sha256: sha256 ?? crypto().createHash("sha256").update(bytes).digest("hex"), imports, exports, memory: memories[0] } };
 }
 // NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
 // CATCH_ALL(status); ... return status;

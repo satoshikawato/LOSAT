@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "prd_t2",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "prd_t2 (parsed Seq-ids)",
+  "number-of-letters": 970,
+  "number-of-sequences": 3,
+  "last-updated": "2026-11-11T12:57:00",
+  "number-of-volumes": 1,
+  "bytes-total": 50609,
+  "bytes-to-cache": 1102,
+  "files": [
+    "prd_t2.pdb",
+    "prd_t2.phr",
+    "prd_t2.pin",
+    "prd_t2.pog",
+    "prd_t2.pos",
+    "prd_t2.pot",
+    "prd_t2.psq",
+    "prd_t2.ptf",
+    "prd_t2.pto"
+  ]
+}

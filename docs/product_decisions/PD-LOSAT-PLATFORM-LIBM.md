@@ -38,6 +38,12 @@ the difference on macOS and nowhere else.
 - `platform-checks` runs `40171992341` and `40175184944` failed only in `cargo test
   (macos-x64)` and `cargo test (macos-arm64)`, in `archives_equal_ncbis_at_one_and_four_threads`
   and `the_flow_does_not_change_the_archives`, on this case.
+- `platform-checks` run `41062695644` (dev) failed only in `cargo test (macos-x64)` and `cargo
+  test (macos-arm64)`, in `stats::spouge::tests::pinned_double_rounding_erfc_and_spouge_calls_match_ncbi_double_bits`
+  (`LOSAT/src/stats/spouge.rs`). The pinned ErfC rows passed (the port uses no libm); the pinned
+  `blast_spouge_stoe` rows, whose E value multiplies three libm `exp` results, differ from the
+  Linux bits by 2 ULP on arm64 and 4 ULP on x64 (first failing row each). Same accepted
+  difference, no change of decision: on macOS that test accepts up to 8 ULP and is exact elsewhere.
 - NCBI BLAST+ built on macOS has the same property: it calls the same libm (see
   `PD-NCBI-PLATFORM-VARIANCE` for NCBI's own platform variance).
 

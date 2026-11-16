@@ -3,11 +3,13 @@ use super::{
     args::ResolvedOptions, database::ReportedSubjects, input::FastaRecord, results::Hsp,
     runtime::BatchResults,
 };
+use crate::algorithm::tblastx::report::display_codon;
 use crate::{
     common::GapEditOp,
     report::outfmt6::{
         format_bitscore_ncbi, format_evalue_ncbi_tabular, format_percent_identity_ncbi,
     },
+    report::query_warnings::EMPTY_DATABASE_MESSAGE,
 };
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3563-3581
 // ```c++
@@ -31,6 +33,8 @@ use crate::{
 //     retval('U', 'C') = retval('C', 'C');
 //     retval('C', 'U') = retval('C', 'C');
 // ```
+use super::empty_rows::{rows_empty, AlignQueryIds, SubjectLoc};
+use crate::cli::NativeError;
 use crate::utils::matrix::protein_display_score;
 use anyhow::{ensure, Result};
 use std::{io::Write, path::Path};
@@ -57,7 +61,6 @@ pub(crate) struct DisplayAlignment {
     pub qseq: String,
     pub sseq: String,
     pub masked_qseq: String,
-    pub btop: String,
     pub identity: usize,
     pub positive: usize,
     pub gaps: usize,
@@ -67,6 +70,66 @@ pub(crate) struct DisplayAlignment {
     pub sstart: i32,
     pub send: i32,
     pub frame: i8,
+    /// The columns (0-based) whose subject letter is a stored gap character (`-`): residues of
+    /// the subject that the rows show as the letter of a gap (`PairwiseHit::subject_stored_gaps`).
+    pub subject_stored_gaps: Vec<u32>,
+}
+
+impl DisplayAlignment {
+    /// The alignment of a tabular row that leaves before NCBI's alignment block (the empty rows of
+    /// an HSP of length 0, `empty_rows`): every count and coordinate at `x_ResetFields`' 0.
+    pub(crate) fn empty() -> Self {
+        DisplayAlignment {
+            qseq: String::new(),
+            sseq: String::new(),
+            masked_qseq: String::new(),
+            identity: 0,
+            positive: 0,
+            gaps: 0,
+            gap_opens: 0,
+            qstart: 0,
+            qend: 0,
+            sstart: 0,
+            send: 0,
+            frame: 0,
+            subject_stored_gaps: Vec::new(),
+        }
+    }
+
+    /// The alignment of a tabular row of `-subject`'s mapped alignment without scores of a
+    /// subject's only HSP of length 0 (`empty_rows::MappedAlignment`): its rows of letters, no gap.
+    pub(crate) fn mapped(mapped: &super::empty_rows::MappedAlignment) -> Self {
+        let (qrow, srow) = mapped.rows();
+        DisplayAlignment {
+            qseq: String::from_utf8_lossy(qrow).into_owned(),
+            sseq: String::from_utf8_lossy(srow).into_owned(),
+            masked_qseq: String::new(),
+            identity: qrow.iter().zip(srow).filter(|(q, s)| q == s).count(),
+            positive: 0,
+            gaps: 0,
+            gap_opens: 0,
+            qstart: mapped.q_start as i32,
+            qend: mapped.q_end as i32,
+            sstart: mapped.s_start as i32,
+            send: mapped.s_end as i32,
+            frame: mapped.q_frame as i8,
+            subject_stored_gaps: Vec::new(),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:476-480
+    // ```c++
+    // inline void CBlastTabularInfo::x_PrintMismatches(void)
+    // {
+    //     int num_mismatches = m_AlignLength - m_NumIdent - m_NumGaps;
+    //     m_Ostream << num_mismatches;
+    // }
+    // ```
+    /// The mismatches as NCBI prints them: fewer than none when stored gap characters of the
+    /// subject face gaps of the query (equal letters, so identities, and gaps).
+    pub(crate) fn mismatches(&self) -> i64 {
+        self.qseq.len() as i64 - self.identity as i64 - self.gaps as i64
+    }
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1348-1361
 // ```c++
@@ -160,130 +223,6 @@ pub(super) fn reported(list: &super::results::HspList, gapped: bool) -> bool {
     list.hsps.iter().any(|hsp| has_seqalign(hsp, gapped))
 }
 
-// NCBI reference (598d8ae6): c++/src/objects/seqfeat/Genetic_code_table.cpp:94-112
-// ```c++
-//     static char  charToBase [17] = "-ACMGRSVTWYHKDBN";
-//     static char  baseToComp [17] = "-TGKCYSBAWRDMHVN";
-//
-//     // illegal characters map to 0
-//     for (i = 0; i < 256; i++) {
-//         sm_BaseToIdx [i] = 0;
-//     }
-//
-//     // map iupacna alphabet to EBaseCode
-//     for (i = eBase_gap; i <= eBase_N; i++) {
-//         ch = charToBase [i];
-//         sm_BaseToIdx [(int) ch] = i;
-//         ch = (unsigned char)tolower (ch);
-//         sm_BaseToIdx [(int) ch] = i;
-//     }
-//     sm_BaseToIdx [(int) 'U'] = eBase_T;
-//     sm_BaseToIdx [(int) 'u'] = eBase_T;
-//     sm_BaseToIdx [(int) 'X'] = eBase_N;
-//     sm_BaseToIdx [(int) 'x'] = eBase_N;
-// ```
-// NCBI reference (598d8ae6): c++/src/objects/seqfeat/Genetic_code_table.cpp:145-148
-// ```c++
-//     static int  expansions [4] = {eBase_A, eBase_C, eBase_G, eBase_T};
-//                                 // T = 0, C = 1, A = 2, G = 3
-//     static int  codonIdx [9] = {0, 2, 1, 0, 3, 0, 0, 0, 0};
-//
-// ```
-// NCBI reference (598d8ae6): c++/src/objects/seqfeat/Genetic_code_table.cpp:170-209
-// ```c++
-//                 // expand ambiguous IJK nucleotide symbols into component bases XYZ
-//                 for (p = 0; p < 4 && go_on; p++) {
-//                     x = expansions [p];
-//                     if ((x & i) != 0) {
-//                         for (q = 0; q < 4 && go_on; q++) {
-//                             y = expansions [q];
-//                             if ((y & j) != 0) {
-//                                 for (r = 0; r < 4 && go_on; r++) {
-//                                     z = expansions [r];
-//                                     if ((z & k) != 0) {
-//
-//                                         // calculate offset in genetic code string
-//
-//                                         // the T = 0, C = 1, A = 2, G = 3 order is
-//                                         // necessary because the genetic code strings
-//                                         // are presented in TCAG order in printed tables
-//                                         // and in the genetic code strings
-//                                         cd = 16 * codonIdx [x] + 4 * codonIdx [y] + codonIdx [z];
-//
-//                                         // lookup amino acid for codon XYZ
-//                                         ch = (*ncbieaa) [cd];
-//                                         if (aa == '\0') {
-//                                             aa = ch;
-//                                         } else if (aa != ch) {
-//                                             // allow Asx (Asp or Asn) and Glx (Glu or Gln)
-//                                             if ((aa == 'B' || aa == 'D' || aa == 'N') &&
-//                                                 (ch == 'D' || ch == 'N')) {
-//                                                 aa = 'B';
-//                                             } else if ((aa == 'Z' || aa == 'E' || aa == 'Q') &&
-//                                                        (ch == 'E' || ch == 'Q')) {
-//                                                 aa = 'Z';
-//                                             } else if ((aa == 'J' || aa == 'I' || aa == 'L') &&
-//                                                 (ch == 'I' || ch == 'L')) {
-//                                                 aa = 'J';
-//                                             } else {
-//                                                 aa = 'X';
-//                                             }
-//                                         }
-//
-//                                         // lookup translation start flag
-// ```
-
-// NCBI reference (598d8ae6): c++/src/objects/seqfeat/Genetic_code_table.cpp:155-160
-// ```c++
-//     // ambiguous codons map to unknown amino acid or not start
-//     for (i = 0; i <= 4096; i++) {
-//         m_AminoAcid [i] = 'X';
-//         m_OrfStart [i] = '-';
-//         m_OrfStop [i] = '-';
-//     }
-// ```
-// NCBI reference (598d8ae6): c++/src/objects/seqfeat/Genetic_code_table.cpp:228-231
-// ```c++
-//                 // assign amino acid
-//                 if (aa != '\0') {
-//                     m_AminoAcid [st] = aa;
-//                 }
-// ```
-pub(crate) fn display_codon(masks: [u8; 3], code: &crate::utils::genetic_code::GeneticCode) -> u8 {
-    let expansions = [(1, 2), (2, 1), (4, 3), (8, 0)];
-    let mut aa = 0;
-    for (x, i) in expansions {
-        if masks[0] & x == 0 {
-            continue;
-        }
-        for (y, j) in expansions {
-            if masks[1] & y == 0 {
-                continue;
-            }
-            for (z, k) in expansions {
-                if masks[2] & z == 0 {
-                    continue;
-                }
-                let ch = code.table[16 * i + 4 * j + k];
-                if aa == 0 {
-                    aa = ch;
-                } else if aa != ch {
-                    aa = match (aa, ch) {
-                        (b'B' | b'D' | b'N', b'D' | b'N') => b'B',
-                        (b'Z' | b'E' | b'Q', b'E' | b'Q') => b'Z',
-                        (b'J' | b'I' | b'L', b'I' | b'L') => b'J',
-                        _ => b'X',
-                    };
-                }
-            }
-        }
-    }
-    if aa == 0 {
-        b'X'
-    } else {
-        aa
-    }
-}
 // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:162-176
 // ```c++
 //
@@ -501,6 +440,7 @@ pub(crate) fn alignment(
     subject: &FastaRecord,
     query_record: &FastaRecord,
     code: &crate::utils::genetic_code::GeneticCode,
+    matrix: crate::config::ScoringMatrix,
 ) -> Result<DisplayAlignment> {
     let raw = &hsp.hsp;
     let context = &batch.prepared.contexts[raw.context];
@@ -512,12 +452,11 @@ pub(crate) fn alignment(
     let mut masked = Vec::new();
     let mut query_columns = Vec::new();
     let mut gap_opens = 0;
-    let script = if hsp.edit_script.is_empty() {
-        vec![GapEditOp::Sub(u32::try_from(raw.q_end - raw.q_start)?)]
-    } else {
-        hsp.edit_script.clone()
-    };
-    for op in script {
+    // The gaps of the Dense-seg (`GetAlignLengths`): the columns of a gap op, not the `-` letters
+    // of the rows (a stored gap character of the subject is one).
+    let mut gaps = 0;
+    let mut subject_stored_gaps = Vec::new();
+    for op in display_script(hsp)? {
         let (count, consume_q, consume_s) = match op {
             GapEditOp::Sub(n) => (n, true, true),
             GapEditOp::Ins(n) => (n, true, false),
@@ -525,6 +464,7 @@ pub(crate) fn alignment(
         };
         if !consume_q || !consume_s {
             gap_opens += 1;
+            gaps += count as usize;
         }
         for _ in 0..count {
             // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:162-176
@@ -565,6 +505,9 @@ pub(crate) fn alignment(
             };
             if consume_q {
                 query_columns.push(qseq.len());
+            }
+            if consume_s && sc == b'-' {
+                subject_stored_gaps.push(u32::try_from(sseq.len())?);
             }
             qseq.push(qc);
             sseq.push(sc);
@@ -663,12 +606,58 @@ pub(crate) fn alignment(
     // between the mapped mask endpoints. The masks here are the returned DNA
     // intervals, after the core protein-to-DNA conversion, not lookup AA masks.
     let (qstart, qend) = query_endpoints(query_length, raw.frame, raw.q_start, raw.q_end);
-    for &(from, to) in &context.dna_masks {
-        if from > to
-            || (from == 0 && to == query_length as i32 - 1)
-            || to < qstart.min(qend) - 1
-            || from > qstart.max(qend) - 1
-        {
+    // A record cut to `-query_loc`: the reports read the frame from the record (NCBI reference:
+    // c++/src/objtools/align_format/showalign.cpp:411-422, `seq_range::record_frame`).
+    let query_place = query_record.placement();
+    let frame = if query_place.offset == 0 && query_place.length == query_length {
+        raw.frame
+    } else {
+        crate::blastinput::seq_range::record_frame(
+            raw.frame > 0,
+            (qstart - 1) as usize + query_place.offset,
+            query_place.length,
+        ) as i8
+    };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:936-951
+    // ```c++
+    //                 TSeqRange masked_range(loc->ssr->left, loc->ssr->right);
+    //                 TSeqRange range(Map(kTarget, masked_range));
+    //                 if (range.NotEmpty() && range != kTarget) {
+    //                     int frame = BLAST_ContextToFrame(program, index);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2500-2502
+    // ```c++
+    //             int locFrame = (*iter)->seqloc->GetFrame();
+    //             if(id.Match((*iter)->seqloc->GetInterval().GetId())
+    //                && locFrame == frame){
+    // ```
+    // The masks a row shows are those labelled with the row's frame in the record; a mask keeps
+    // the frame of the context it was found in, which counts from the ends of the searched
+    // letters. With `-query_loc` the two can differ, and NCBI then shows the masks of another
+    // frame's context on the row (the TBLASTX display, `tblastx::report::shown_query_masks`).
+    // `Map` moves each mask into the record, cut at the interval's end, and drops one that
+    // covers the whole interval; here the masks stay in the searched letters' coordinates.
+    // An ungapped HSP of length 0 (`-window_size 0`, `Blast_HSPTest` keeps it) has no letters to
+    // lower: its rows are empty (`query_columns` too), whatever masks its ends touch.
+    let shown_masks: &[(i32, i32)] = if query_columns.is_empty() {
+        &[]
+    } else if frame == raw.frame {
+        &context.dna_masks
+    } else {
+        batch
+            .prepared
+            .contexts
+            .iter()
+            .find(|shown| shown.query_index == context.query_index && shown.frame == frame)
+            .map_or(&[], |shown| &shown.dna_masks)
+    };
+    let last = query_length as i32 - 1;
+    for &(from, to) in shown_masks {
+        if from > to || from > last {
+            continue;
+        }
+        let to = to.min(last);
+        if (from == 0 && to == last) || to < qstart.min(qend) - 1 || from > qstart.max(qend) - 1 {
             continue;
         }
         let map_nt = |nt: i32| {
@@ -710,51 +699,96 @@ pub(crate) fn alignment(
     //     retval('U', 'C') = retval('C', 'C');
     //     retval('C', 'U') = retval('C', 'C');
     // ```
-    let mut btop = String::new();
-    let mut run = 0;
     let mut identity = 0;
     let mut positive = 0;
-    let mut gaps = 0;
     for (&qc, &sc) in qseq.iter().zip(&sseq) {
         if qc == sc {
             identity += 1;
             positive += 1;
-            run += 1;
-        } else {
-            if run > 0 {
-                btop.push_str(&run.to_string());
-                run = 0;
-            }
-            btop.push(qc as char);
-            btop.push(sc as char);
-            if qc != b'-'
-                && sc != b'-'
-                && protein_display_score(crate::config::ScoringMatrix::Blosum62, qc, sc) > 0
-            {
-                positive += 1;
-            }
+        } else if qc != b'-' && sc != b'-' && protein_display_score(matrix, qc, sc) > 0 {
+            positive += 1;
         }
-        gaps += usize::from(qc == b'-' || sc == b'-');
     }
-    if run > 0 {
-        btop.push_str(&run.to_string());
-    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1520-1534
+    // ```c++
+    // void RemapToQueryLoc(CRef<CSeq_align> sar, const CSeq_loc & query)
+    // {
+    //     _ASSERT(sar);
+    //     const int query_row = 0;
+    //
+    //     TSeqPos q_shift = 0;
+    //
+    //     if (query.IsInt()) {
+    //         q_shift = query.GetInt().GetFrom();
+    //     }
+    //
+    //     if (q_shift > 0) {
+    //         sar->OffsetRow(query_row, q_shift);
+    //     }
+    // }
+    // ```
+    // The coordinates of records cut to `-query_loc` / `-subject_loc` move into the records by the
+    // starts of their intervals (the subject's alike, `s_RemapToSubjectLoc`).
+    let query_offset = query_place.offset as i32;
+    let subject_offset = subject.placement().offset as i32;
     Ok(DisplayAlignment {
         qseq: String::from_utf8(qseq)?,
         sseq: String::from_utf8(sseq)?,
         masked_qseq: String::from_utf8(masked)?,
-        btop,
         identity,
         positive,
         gaps,
         gap_opens,
-        qstart,
-        qend,
-        sstart: raw.s_start + 1,
-        send: raw.s_end,
-        frame: raw.frame,
+        qstart: qstart + query_offset,
+        qend: qend + query_offset,
+        sstart: raw.s_start + 1 + subject_offset,
+        send: raw.s_end + subject_offset,
+        frame,
+        subject_stored_gaps,
     })
 }
+
+/// The operations of the display alignment of `hsp` (`alignment`, a column for each letter of an
+/// operation): its edit script, or one substitution of its query span without one.
+fn display_script(hsp: &Hsp) -> Result<Vec<GapEditOp>> {
+    let raw = &hsp.hsp;
+    Ok(if hsp.edit_script.is_empty() {
+        vec![GapEditOp::Sub(u32::try_from(raw.q_end - raw.q_start)?)]
+    } else {
+        hsp.edit_script.clone()
+    })
+}
+
+/// The values of the outfmt 0 row of `hsp`, of a query of `query_length` letters
+/// (`pairwise_hits`), that the report's sorts read (`HspScores::of`), without making the row, for
+/// the model of the reads (`ReportedSubjects::fetch_by_query`): the row's columns (those of
+/// `display_script`, `alignment`'s rows), `alignment`'s coordinates (`query_endpoints` and the
+/// subject's), the engine's identities (the row's `seqalign_num_ident`). The records' offsets of
+/// a ranged query move every HSP of the query alike (a database subject has none), which no sort
+/// reads, and are left out.
+pub(crate) fn hsp_scores(
+    hsp: &Hsp,
+    query_length: usize,
+) -> Result<crate::report::hit_sort::HspScores> {
+    let raw = &hsp.hsp;
+    let length = display_script(hsp)?
+        .iter()
+        .map(|op| op.num() as usize)
+        .sum();
+    let (qstart, qend) = query_endpoints(query_length, raw.frame, raw.q_start, raw.q_end);
+    Ok(crate::report::hit_sort::HspScores::of_values(
+        hsp.bit_score,
+        hsp.evalue,
+        hsp.identity,
+        length,
+        (usize::try_from(qstart)?, usize::try_from(qend)?),
+        (
+            usize::try_from(raw.s_start + 1)?,
+            usize::try_from(raw.s_end)?,
+        ),
+    ))
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:474-504
 // ```c++
 // CRef<CSeq_id> s_ReplaceLocalId(const CBioseq_Handle& bh, CConstRef<CSeq_id> sid_in, bool parse_local)
@@ -805,14 +839,38 @@ pub(crate) fn alignment(
 //
 //     return id_string;
 // ```
-fn local_id(record: &FastaRecord) -> &str {
+pub(super) fn local_id(record: &FastaRecord) -> &[u8] {
+    if let Some(ids) = record.believed() {
+        return &ids.tabular[2];
+    }
     record
         .title
-        .split(' ')
+        .split(|&byte| byte == b' ')
         .next()
-        .filter(|s| !s.is_empty())
-        .unwrap_or(&record.internal_id)
+        .filter(|word| !word.is_empty())
+        .unwrap_or(record.internal_id.as_bytes())
 }
+/// The tabular subject id (`sseqid`, `sacc`, `saccver`) of a `-subject` record read as one
+/// without `-parse_deflines`: the first word of its title, or for a `Subject_` word the first
+/// word of the title that `GenerateDefline` makes (`report::defline::tabular_subject_id`, as the
+/// other programs'); `None` where `GenerateDefline` throws (`report::tabular::SubjectLookup`).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:225-231
+/// ```c++
+/// 		(*itr)->AsFastaString().find("lcl|Subject_") != string::npos) {
+///             vector<string> title_tokens;
+///             string defline = sequence::CDeflineGenerator().GenerateDefline(bh);
+///             if (defline != NcbiEmptyString) {
+///                 id_token =
+///                     NStr::Split(defline, " ", title_tokens)[0];
+///             }
+/// ```
+pub(super) fn subject_tabular_id(record: &FastaRecord) -> Option<std::borrow::Cow<'_, [u8]>> {
+    crate::report::defline::tabular_subject_id(record.internal_id.as_bytes(), &record.title, true)
+        .ok()
+        .map(std::borrow::Cow::Owned)
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:169-191
 // ```c++
 //     string id_str = NcbiEmptyString;
@@ -839,14 +897,12 @@ fn local_id(record: &FastaRecord) -> &str {
 //     default: break;
 //     }
 // ```
-fn id_field(record: &FastaRecord, field: &str) -> String {
-    // Local FASTA uses generated local Seq-ids, replaced by title tokens.
-    // Keep all three source field paths distinct; local content has no accession version object.
+fn id_field(record: &FastaRecord, field: &str) -> Vec<u8> {
+    // Local FASTA uses generated local Seq-ids, replaced by title tokens. The default report's
+    // query field is `qaccver` (its other identifier fields are the shared writer's, `tabular`).
     match field {
-        "qseqid" | "sseqid" => local_id(record).to_owned(),
-        "qacc" | "sacc" => local_id(record).to_owned(),
-        "qaccver" | "saccver" => local_id(record).to_owned(),
-        _ => unreachable!("validated identifier field"),
+        "qaccver" => local_id(record).to_vec(),
+        _ => unreachable!("a std identifier field"),
     }
 }
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1128-1196
@@ -922,41 +978,25 @@ fn id_field(record: &FastaRecord, field: &str) -> String {
 //         case eSubjectTaxIds:
 // ```
 fn field_name(field: &str) -> &str {
+    // The `std` fields of the default report (`ResolvedOptions::fields`); the other fields are
+    // the shared writer's (`report::tabular::TabularField::header_name`).
     match field {
-        "qseqid" => "query id",
-        "qacc" => "query acc.",
         "qaccver" => "query acc.ver",
-        "qlen" => "query length",
-        "sseqid" => "subject id",
-        "sacc" => "subject acc.",
         "saccver" => "subject acc.ver",
-        "slen" => "subject length",
         "qstart" => "q. start",
         "qend" => "q. end",
         "sstart" => "s. start",
         "send" => "s. end",
-        "qseq" => "query seq",
-        "sseq" => "subject seq",
         "evalue" => "evalue",
         "bitscore" => "bit score",
-        "score" => "score",
         "length" => "alignment length",
         "pident" => "% identity",
-        "nident" => "identical",
         "mismatch" => "mismatches",
-        "positive" => "positives",
         "gapopen" => "gap opens",
-        "gaps" => "gaps",
-        "ppos" => "% positives",
-        "qframe" => "query frame",
-        "sframe" => "sbjct frame",
-        "frames" => "query/sbjct frames",
-        "btop" => "BTOP",
-        "stitle" => "subject title",
-        _ => unreachable!("validated BLASTX field"),
+        _ => unreachable!("a std field"),
     }
 }
-// NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:437-479
+// NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:437-442
 // ```c++
 // inline void CBlastTabularInfo::x_PrintPercentIdentical(void)
 // {
@@ -964,116 +1004,44 @@ fn field_name(field: &str) -> &str {
 //         (m_AlignLength > 0 ? ((double)m_NumIdent)/m_AlignLength * 100 : 0);
 //     m_Ostream << NStr::DoubleToString(perc_ident, 3);
 // }
-//
-// inline void CBlastTabularInfo::x_PrintPercentPositives(void)
-// {
-//     double perc_positives =
-//         (m_AlignLength > 0 ? ((double)m_NumPositives)/m_AlignLength * 100 : 0);
-//     m_Ostream << NStr::DoubleToString(perc_positives, 2);
-// }
-//
-// inline void CBlastTabularInfo::x_PrintFrames(void)
-// {
-//     m_Ostream << m_QueryFrame << "/" << m_SubjectFrame;
-// }
-//
-// inline void CBlastTabularInfo::x_PrintQueryFrame(void)
-// {
-//     m_Ostream << m_QueryFrame;
-// }
-//
-// inline void CBlastTabularInfo::x_PrintSubjectFrame(void)
-// {
-//     m_Ostream << m_SubjectFrame;
-// }
-//
-// inline void CBlastTabularInfo::x_PrintBTOP(void)
-// {
-//     m_Ostream << m_BTOP;
-// }
-//
-// inline void CBlastTabularInfo::x_PrintNumIdentical(void)
-// {
-//     m_Ostream << m_NumIdent;
-// }
-//
+// ```
+// NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:543-547
+// ```c++
 // inline void CBlastTabularInfo::x_PrintMismatches(void)
 // {
 //     int num_mismatches = m_AlignLength - m_NumIdent - m_NumGaps;
 //     m_Ostream << num_mismatches;
 // ```
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:415-436
-// ```c++
-// void CBlastTabularInfo::x_PrintSubjectTitle()
-// {
-// 	if(m_SubjectDefline.NotEmpty() && m_SubjectDefline->CanGet() &&
-// 	   m_SubjectDefline->IsSet() && !m_SubjectDefline->Get().empty())
-// 	{
-// 		const list<CRef<CBlast_def_line> > & defline = m_SubjectDefline->Get();
-//
-// 		if(defline.empty())
-// 			m_Ostream << NA;
-// 		else
-// 		{
-// 			if(defline.front()->IsSetTitle())
-// 			{
-// 				if(defline.front()->GetTitle().empty())
-// 					m_Ostream << NA;
-// 				else
-// 					m_Ostream << defline.front()->GetTitle();
-// 			}
-// 			else
-// 				m_Ostream << NA;
-// 		}
-// 	}
-// ```
-/// A subject as the tabular fields show it: its record (letters), its id and `stitle`
-/// (`ShownSubjects`).
+/// A subject as the default tabular report shows it: its `saccver`
+/// (`ShownSubjects::subject_saccver`).
 struct ShownSubject<'a> {
-    record: &'a FastaRecord,
-    /// `sseqid`, `sacc` and `saccver` (`ShownSubjects::subject_ids`).
-    ids: [&'a str; 3],
-    title: &'a str,
+    saccver: std::borrow::Cow<'a, [u8]>,
 }
 
+/// The value of a `std` field of the default report (outfmt 6 and 7 without a field list or
+/// a delimiter) of a row of the scores `(evalue, bit_score)`; the other fields are the shared
+/// writer's (`tabular`).
 fn field_value(
     field: &str,
     query: &FastaRecord,
     subject: &ShownSubject<'_>,
-    hsp: &Hsp,
+    (evalue, bit_score): (f64, f64),
     a: &DisplayAlignment,
-) -> String {
+) -> Vec<u8> {
     match field {
-        "qseqid" | "qacc" | "qaccver" => id_field(query, field),
-        "sseqid" => subject.ids[0].to_owned(),
-        "sacc" => subject.ids[1].to_owned(),
-        "saccver" => subject.ids[2].to_owned(),
-        "qlen" => query.sequence.len().to_string(),
-        "slen" => subject.record.sequence.len().to_string(),
-        "qstart" => a.qstart.to_string(),
-        "qend" => a.qend.to_string(),
-        "sstart" => a.sstart.to_string(),
-        "send" => a.send.to_string(),
-        "qseq" => a.qseq.clone(),
-        "sseq" => a.sseq.clone(),
-        "evalue" => format_evalue_ncbi_tabular(hsp.evalue),
-        "bitscore" => format_bitscore_ncbi(hsp.bit_score),
-        "score" => hsp.hsp.score.to_string(),
-        "length" => a.qseq.len().to_string(),
-        "pident" => format_percent_identity_ncbi(a.identity, a.qseq.len(), 3),
-        "nident" => a.identity.to_string(),
-        "mismatch" => (a.qseq.len() - a.identity - a.gaps).to_string(),
-        "positive" => a.positive.to_string(),
-        "gapopen" => a.gap_opens.to_string(),
-        "gaps" => a.gaps.to_string(),
-        "ppos" => format_percent_identity_ncbi(a.positive, a.qseq.len(), 2),
-        "qframe" => a.frame.to_string(),
-        "sframe" => "0".into(),
-        "frames" => format!("{}/0", a.frame),
-        "btop" => a.btop.clone(),
-        // Local-subject FASTA has no Blast-def-line-set; the source title field is NA.
-        "stitle" => subject.title.to_owned(),
-        _ => unreachable!("validated BLASTX field"),
+        "qaccver" => id_field(query, field),
+        "saccver" => subject.saccver.to_vec(),
+        "qstart" => a.qstart.to_string().into_bytes(),
+        "qend" => a.qend.to_string().into_bytes(),
+        "sstart" => a.sstart.to_string().into_bytes(),
+        "send" => a.send.to_string().into_bytes(),
+        "evalue" => format_evalue_ncbi_tabular(evalue).into_bytes(),
+        "bitscore" => format_bitscore_ncbi(bit_score).into_bytes(),
+        "length" => a.qseq.len().to_string().into_bytes(),
+        "pident" => format_percent_identity_ncbi(a.identity, a.qseq.len(), 3).into_bytes(),
+        "mismatch" => a.mismatches().to_string().into_bytes(),
+        "gapopen" => a.gap_opens.to_string().into_bytes(),
+        _ => unreachable!("a std field"),
     }
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1569-1578
@@ -1114,9 +1082,12 @@ fn field_value(
 /// What the reports show of the subjects: `-subject`'s path (`User specified sequence
 /// set`), or `-db`'s name, its `Database:` lines and the reported sequences of the query
 /// batch, by rank (`database::ReportedSubjects`: ids, stored titles).
+#[derive(Clone, Copy)]
 pub(crate) enum ShownSubjects<'a> {
     Fasta {
         path: &'a Path,
+        /// The records whose ids `-parse_deflines` read (empty without the option).
+        parsed: &'a RecordsParsed,
     },
     Database {
         name: &'a str,
@@ -1126,26 +1097,161 @@ pub(crate) enum ShownSubjects<'a> {
 }
 
 impl ShownSubjects<'_> {
-    /// The tabular subject ids of subject `oid` (`sseqid`, `sacc`, `saccver`): the first
-    /// word of a record's title, or a database sequence's id made from its stored title, the
-    /// same for the three; a database sequence with parsed Seq-ids has its own three
-    /// (`ParsedSubject::tabular_ids`).
-    fn subject_ids<'s>(&'s self, subject: &'s FastaRecord, oid: usize) -> [&'s str; 3] {
+    /// The taxonomy database's messages of the query `ordinal`'s own fetches, which follow its
+    /// warnings where `PRE_FETCH_SEQS_LIMIT` turned its batch's prefetch off
+    /// (`ReportedSubjects::fetch_by_query`); empty otherwise.
+    pub(crate) fn query_fetches(&self, ordinal: usize) -> &[u8] {
         match self {
-            ShownSubjects::Fasta { .. } => [local_id(subject); 3],
-            ShownSubjects::Database { reported, .. } => reported.tabular_ids(oid),
+            ShownSubjects::Database { reported, .. } => reported.query_fetches(ordinal),
+            ShownSubjects::Fasta { .. } => &[],
         }
     }
 
-    /// `stitle` of subject `oid`: `N/A` for a record (NCBI's subject set has no BLAST
-    /// definition line), the stored title of a database sequence, or `N/A` for an empty one
-    /// (tabular.cpp's `NA`, as BLASTP's `blastp_subject_stitle`).
-    fn stitle(&self, oid: usize) -> &str {
+    /// The texts of the subjects that the query `ordinal`'s report reads one by one, which its
+    /// writer places where it reads each (`ReportedSubjects::query_reads`); empty otherwise.
+    pub(crate) fn query_reads(&self, ordinal: usize) -> &crate::report::query_warnings::QueryReads {
+        static NONE: crate::report::query_warnings::QueryReads = Vec::new();
         match self {
-            ShownSubjects::Fasta { .. } => "N/A",
-            ShownSubjects::Database { reported, .. } => match reported.title(oid) {
-                "" => "N/A",
-                title => title,
+            ShownSubjects::Database { reported, .. } => reported.query_reads(ordinal),
+            ShownSubjects::Fasta { .. } => &NONE,
+        }
+    }
+}
+
+/// The records of a subject set whose ids `-parse_deflines` read, by subject index: as subjects
+/// (`db_subject::parsed_records`), with what the tabular rows show of each (`None`: shown as a
+/// record without the option).
+#[derive(Default)]
+pub(crate) struct RecordsParsed {
+    pub(crate) subjects: Vec<Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>>,
+    pub(crate) tabular: Vec<Option<RecordTabularIds>>,
+}
+
+/// `sseqid`, `sacc` and `saccver` (`None` where the lookup throws, `ParsedSubject::tabular_ids`),
+/// and the `sall*` of a subject in `RecordsParsed`.
+pub(crate) struct RecordTabularIds {
+    /// `None` where the lookup throws (`ParsedSubject::tabular_ids`).
+    pub(crate) ids: Option<[String; 3]>,
+    pub(crate) all_ids: Vec<crate::report::tabular::DeflineIds>,
+}
+
+impl RecordsParsed {
+    /// The subject of record `index` as outfmt 0 shows it, `None` for one shown as a record read
+    /// without `-parse_deflines` (`ParsedSubject::shown_as_record`).
+    pub(crate) fn shown(&self, index: usize) -> Option<&crate::report::db_subject::ParsedSubject> {
+        self.subjects
+            .get(index)
+            .and_then(Option::as_deref)
+            .filter(|subject| !subject.shown_as_record())
+    }
+
+    /// The records of `records`, with LOSAT's refusals of outfmt 0 with `pairwise`.
+    pub(crate) fn of(records: &[FastaRecord], show_gis: bool, pairwise: bool) -> Result<Self> {
+        let subjects = crate::report::db_subject::parsed_records(
+            records
+                .iter()
+                .map(|record| (record.believed(), record.title.as_slice())),
+            show_gis,
+            true,
+            pairwise,
+            "BLASTX",
+        )?;
+        let refused = |subject: &crate::report::db_subject::ParsedSubject, problem: &str| {
+            anyhow::anyhow!(
+                "the subject record {} has {problem}, which is not supported by LOSAT's BLASTX",
+                String::from_utf8_lossy(&subject.alignment_fasta())
+            )
+        };
+        let tabular = subjects
+            .iter()
+            .map(|subject| {
+                let Some(subject) = subject else {
+                    return Ok(None);
+                };
+                let text = |bytes: Vec<u8>| String::from_utf8_lossy(&bytes).into_owned();
+                let ids = subject
+                    .tabular_ids(true)
+                    .map_err(|problem| refused(subject, problem))?;
+                // A record's definition line is not looked up (`AllTabularIds::failed` is false).
+                Ok(Some(RecordTabularIds {
+                    ids: ids.map(|ids| ids.map(text)),
+                    all_ids: subject
+                        .all_tabular_ids(true)
+                        .map_err(|problem| refused(subject, problem))?
+                        .ids,
+                }))
+            })
+            .collect::<Result<_>>()?;
+        Ok(Self { subjects, tabular })
+    }
+}
+
+impl ShownSubjects<'_> {
+    /// The `saccver` of subject `oid` (the same as `sseqid` and `sacc` but for a sequence with
+    /// parsed Seq-ids, `ParsedSubject::tabular_ids`): a record's `subject_tabular_id`, or a
+    /// database sequence's id made from its stored title; empty where the lookup fails, whose
+    /// default rows are refused before (`check_failed_lookups`).
+    fn subject_saccver<'s>(
+        &'s self,
+        subject: &'s FastaRecord,
+        oid: usize,
+    ) -> std::borrow::Cow<'s, [u8]> {
+        match self {
+            ShownSubjects::Fasta { parsed, .. } => {
+                match parsed.tabular.get(oid).and_then(Option::as_ref) {
+                    Some(ids) => std::borrow::Cow::Borrowed(
+                        ids.ids
+                            .as_ref()
+                            .map_or(&[][..], |[_, _, saccver]| saccver.as_bytes()),
+                    ),
+                    None => subject_tabular_id(subject).unwrap_or_default(),
+                }
+            }
+            ShownSubjects::Database { reported, .. } => std::borrow::Cow::Borrowed(
+                reported
+                    .tabular_ids(oid)
+                    .map_or(&[][..], |[_, _, saccver]| saccver.as_bytes()),
+            ),
+        }
+    }
+
+    /// Which lookups of subject `oid`'s tabular ids fail (`report::tabular::LookupFailure`) for a
+    /// report of `spec` (`None`: the default fields): a record's (with parsed ids, no
+    /// `RecordTabularIds::ids`; else `subject_tabular_id`), or a database sequence's (no
+    /// `ReportedSubjects::tabular_ids`; with parsed Seq-ids and a report of `sall*`,
+    /// `ParsedSubject::lookup_failure`).
+    pub(super) fn lookup_failure(
+        &self,
+        spec: Option<&crate::report::tabular::TabularSpec>,
+        subject: &FastaRecord,
+        oid: usize,
+    ) -> Option<crate::report::tabular::LookupFailure> {
+        use crate::report::tabular::LookupFailure;
+        match self {
+            ShownSubjects::Fasta { parsed, .. } => {
+                let failed = match parsed.tabular.get(oid).and_then(Option::as_ref) {
+                    Some(ids) => ids.ids.is_none(),
+                    None => subject_tabular_id(subject).is_none(),
+                };
+                failed.then(|| LookupFailure::of_plain(false))
+            }
+            ShownSubjects::Database { reported, .. } => match reported.parsed_subject(oid) {
+                Some(parsed)
+                    if spec.is_some_and(crate::algorithm::common::tabular::reports_all_ids) =>
+                {
+                    parsed.lookup_failure(true).ok().flatten()
+                }
+                Some(_) => reported
+                    .tabular_ids(oid)
+                    .is_none()
+                    .then_some(LookupFailure {
+                        subject_id: true,
+                        all_ids: false,
+                    }),
+                None => reported
+                    .tabular_ids(oid)
+                    .is_none()
+                    .then(|| LookupFailure::of_plain(true)),
             },
         }
     }
@@ -1159,46 +1265,6 @@ impl ShownSubjects<'_> {
     }
 }
 
-pub fn render(
-    writer: &mut impl Write,
-    options: &ResolvedOptions,
-    queries: &[FastaRecord],
-    subjects: &[FastaRecord],
-    subject_path: &Path,
-    batches: &mut [BatchResults],
-) -> Result<()> {
-    let shown = ShownSubjects::Fasta { path: subject_path };
-    write_prolog(writer, options, subjects, &shown)?;
-    // The library entry has no output file: outfmt 13 and 14 are the command line's.
-    let mut xml2 = super::blast_xml::xml2_kind(options.outfmt).map(|kind| {
-        super::blast_xml::xml2_writer(
-            kind,
-            options,
-            subjects,
-            &shown,
-            Box::new(crate::report::blast_xml2::NoSideFiles),
-        )
-    });
-    render_queries(
-        writer,
-        &mut std::io::stderr().lock(),
-        options,
-        queries,
-        subjects,
-        &shown,
-        batches,
-        0,
-        xml2.as_mut(),
-    )?;
-    write_epilog(
-        writer,
-        options,
-        subjects,
-        &shown,
-        queries.len(),
-        xml2.as_mut(),
-    )
-}
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:289-290
 // ```c++
 //             	ITERATE(CSearchResultSet, result, *results) {
@@ -1208,8 +1274,13 @@ pub fn render(
 // ```c++
 //         formatter.PrintEpilog(opt);
 // ```
-pub fn render_queries(
-    writer: &mut impl Write,
+/// The reports of one query batch, the `queries_before` queries of the batches before it written
+/// already. `stops`: the run stops after this batch (a later batch fails before its search), so
+/// a document that holds each report back never writes the last query's
+/// (`blast_xml::written_queries`). `xml_matrix`: where the run's XML formats fail for a matrix
+/// name NCBI's XML does not know (`blast_xml::xml_matrix_failure`, decided once for the run).
+pub(crate) fn render_queries(
+    writer: &mut crate::cli::NcbiOstream<'_>,
     stderr: &mut dyn Write,
     options: &ResolvedOptions,
     queries: &[FastaRecord],
@@ -1217,8 +1288,41 @@ pub fn render_queries(
     shown: &ShownSubjects<'_>,
     batches: &mut [BatchResults],
     queries_before: usize,
+    stops: bool,
     xml2: Option<&mut super::blast_xml::RunXml2>,
+    xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
 ) -> Result<()> {
+    render_queries_with(
+        writer,
+        stderr,
+        options,
+        queries,
+        subjects,
+        shown,
+        batches,
+        queries_before,
+        stops,
+        xml2,
+        xml_matrix,
+        None,
+    )
+}
+
+/// What LOSAT Web's `run_local` (`local.rs`) adds to the reports of one batch in one format.
+pub(super) struct LocalReport<'a, 'p> {
+    /// The format's observer (`api::local_blast::FormatProbe`).
+    pub probe: Option<&'a mut crate::api::local_blast::FormatProbe<'p>>,
+    /// The index of the batch's first reported HSP in the run's hit list.
+    pub first_hsp: crate::api::local_blast::HspIndex,
+    /// The batch's hits (`pairwise_hits`), when they are made already.
+    pub hits: Option<&'a [crate::report::pairwise::PairwiseHit]>,
+    /// What a refusal of the format's checks does (`FormatRefusal::check`); without a local
+    /// report it fails the call.
+    pub refusal: &'a mut crate::api::local_blast::FormatRefusal,
+}
+
+/// Sorts the HSPs of each list of `batches` by e-value, the order of every report.
+pub(super) fn sort_lists(batches: &mut [BatchResults]) {
     for batch in batches.iter_mut() {
         for lists in &mut batch.queries {
             for list in lists {
@@ -1226,8 +1330,130 @@ pub fn render_queries(
             }
         }
     }
+}
+
+/// The number of HSPs that the reports of `batches` show (`has_seqalign`).
+pub(super) fn reported_hsps(batches: &[BatchResults], gapped: bool) -> usize {
+    batches
+        .iter()
+        .flat_map(|batch| batch.queries.iter().flatten())
+        .map(|list| list.hsps.iter().filter(|h| has_seqalign(h, gapped)).count())
+        .sum()
+}
+
+/// LOSAT's refusals of the tabular report (`options.tabular`, `None`: the default fields) of the
+/// batches' rows whose subject lookup fails where NCBI has no result
+/// (`report::tabular::check_failed_lookups`; each query of a batch is a result set).
+fn check_failed_lookups(
+    options: &ResolvedOptions,
+    subjects: &[FastaRecord],
+    shown: &ShownSubjects<'_>,
+    batches: &[BatchResults],
+) -> Result<()> {
+    if !crate::report::tabular::may_stop_at_failed_lookup(options.tabular) {
+        return Ok(());
+    }
+    for batch in batches {
+        crate::report::tabular::check_failed_lookups(
+            options.tabular,
+            batch.queries.iter().map(|lists| {
+                lists[..lists.len().min(options.shown_lists())]
+                    .iter()
+                    .filter(|list| {
+                        list.hsps
+                            .iter()
+                            .any(|hsp| has_seqalign(hsp, options.gapped))
+                    })
+                    .map(|list| list.oid)
+            }),
+            |oid| shown.lookup_failure(options.tabular, &subjects[oid], oid),
+            |oid| match shown {
+                ShownSubjects::Database { reported, .. } => {
+                    crate::report::tabular::failed_database_title(reported.oid(oid))
+                }
+                ShownSubjects::Fasta { .. } => {
+                    crate::report::tabular::failed_record_title(oid, local_id(&subjects[oid]))
+                }
+            },
+            options.program().upper,
+        )?;
+    }
+    Ok(())
+}
+
+/// `render_queries`, with what `run_local` adds (`local`).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn render_queries_with(
+    writer: &mut crate::cli::NcbiOstream<'_>,
+    stderr: &mut dyn Write,
+    options: &ResolvedOptions,
+    queries: &[FastaRecord],
+    subjects: &[FastaRecord],
+    shown: &ShownSubjects<'_>,
+    batches: &mut [BatchResults],
+    queries_before: usize,
+    stops: bool,
+    xml2: Option<&mut super::blast_xml::RunXml2>,
+    xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
+    local: Option<LocalReport<'_, '_>>,
+) -> Result<()> {
+    sort_lists(batches);
+    let (mut probe, first_hsp, made_hits, mut refusal) = match local {
+        Some(local) => (
+            local.probe,
+            local.first_hsp,
+            local.hits,
+            Some(local.refusal),
+        ),
+        None => (None, 0, None, None),
+    };
+    // A check of the format's report before its rows: `false` where the format fails alone
+    // (`FormatRefusal::check`), and writes nothing of the batch.
+    let mut writes = |checked: Result<()>| match refusal.as_deref_mut() {
+        Some(refusal) => refusal.check(checked),
+        None => checked.map(|()| true),
+    };
+    if !options.gapped && options.outfmt != 18 && SubjectLoc::of(shown) == SubjectLoc::Interval {
+        // The tabular reports (`options.tabular`, the default outfmt 6 and 7) write a subject's
+        // only HSP of length 0 as NCBI's formatter reads its mapped alignment.
+        let tabular = (options.tabular.is_some() || matches!(options.outfmt, 6 | 7))
+            .then_some(super::empty_rows::MappedTables { queries, subjects });
+        if !writes(super::empty_rows::refuse_mapped_without_scores(
+            batches,
+            options.gapped,
+            tabular,
+        ))? {
+            return Ok(());
+        }
+    }
+    // The rows of subjects whose lookup fails where NCBI has no result
+    // (`report::tabular::check_failed_lookups`), before the batch's tabular report and before
+    // the format writes a warning of the batch (the prefetch's below, the queries'), so that a
+    // format that fails alone leaves them to the next (`local::write_run`).
+    if options
+        .tabular
+        .map_or(matches!(options.outfmt, 6 | 7), |spec| spec.writes_rows())
+        && !writes(check_failed_lookups(options, subjects, shown, batches))?
+    {
+        return Ok(());
+    }
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-287 (quoted at
+    // `native::reported_batch`)
+    // `-subject`'s prefetch before the batch's reports, as `-db`'s (`native::batch_prefetch`): a
+    // subject's Seq-align whose empty rows the mapper leaves makes it write its warning (a gapped
+    // search has no HSP of length 0).
+    if !options.gapped
+        && SubjectLoc::of(shown) == SubjectLoc::Interval
+        && super::native::batch_prefetch(batches, options, SubjectLoc::Interval).fails
+    {
+        stderr.write_all(&crate::algorithm::common::database::prefetch_warning(
+            options.program().lower,
+        ))?;
+    }
     if options.outfmt == 0 {
-        return write_pairwise(writer, stderr, options, queries, subjects, shown, batches);
+        return write_pairwise(
+            writer, stderr, options, queries, subjects, shown, batches, made_hits, probe, first_hsp,
+        );
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1441
     // ```c++
@@ -1254,11 +1480,24 @@ pub fn render_queries(
             subjects,
             shown,
             batches,
+            queries_before,
+            stops,
+            xml_matrix,
         );
     }
     if let Some(xml2) = xml2 {
         return super::blast_xml::write_blastx_xml(
-            writer, stderr, xml2, options, queries, subjects, shown, batches,
+            writer,
+            stderr,
+            xml2,
+            options,
+            queries,
+            subjects,
+            shown,
+            batches,
+            queries_before,
+            stops,
+            xml_matrix,
         );
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
@@ -1292,11 +1531,19 @@ pub fn render_queries(
         return super::seqalign::write_blastx_seqalign(
             serial,
             writer,
+            stderr,
             options.gapped,
             queries,
             subjects,
             &names,
             batches,
+        );
+    }
+    // The tabular reports with a field list or a delimiter, and outfmt 10 and 20: the shared
+    // writer (`tabular`, NCBI's `CBlastTabularInfo`); the default outfmt 6 and 7 below.
+    if let Some(spec) = options.tabular {
+        return super::tabular::write_blastx_tabular(
+            writer, stderr, options, spec, queries, subjects, shown, batches, probe, first_hsp,
         );
     }
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986
@@ -1309,6 +1556,7 @@ pub fn render_queries(
     // ```
     let code = crate::utils::genetic_code::GeneticCode::from_id(options.query_gencode);
     let comments = options.outfmt == 7;
+    let mut next_hsp = first_hsp;
     for batch in batches {
         for (qidx, lists) in batch.queries.iter().enumerate() {
             let query = &queries[batch.query_ordinal + qidx];
@@ -1318,7 +1566,13 @@ pub fn render_queries(
             //         ERR_POST(Warning << results.GetWarningStrings());
             //     }
             // ```
-            stderr.write_all(&query_warning(query, batch.search_skipped))?;
+            stderr.write_all(&query_warning(options, query, batch.search_skipped))?;
+            stderr.write_all(shown.query_fetches(batch.query_ordinal + qidx))?;
+            // The texts of the subjects that the query's rows read one by one, written where they
+            // read each (`ReadCursor`, the query's only).
+            let mut reads = crate::report::query_warnings::ReadCursor::new(std::slice::from_ref(
+                shown.query_reads(batch.query_ordinal + qidx),
+            ));
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:779-783
             // ```c++
             //               m_FormatType == CFormattingArgs::eCommaSeparatedValuesWithHeader)
@@ -1387,10 +1641,14 @@ pub fn render_queries(
                     })
                     .sum();
                 if comments {
-                    writeln!(writer, "# BLASTX 2.17.0+")?;
                     writeln!(
                         writer,
-                        "# Query: {}",
+                        "# {} {}",
+                        options.program().upper,
+                        crate::NCBI_BLAST_VERSION
+                    )?;
+                    write!(writer, "# Query: ")?;
+                    writer.write_all(
                         // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:630-637
                         // ```c++
                         // CAlignFormatUtil::GetSeqIdString(const list<CRef<CSeq_id> > & ids, bool believe_local_id)
@@ -1413,10 +1671,11 @@ pub fn render_queries(
                         //     if (tabular) {
                         //         out << all_id_str;
                         // ```
-                        &query.title
+                        &query.query_line(),
                     )?;
+                    writeln!(writer)?;
                     match shown {
-                        ShownSubjects::Fasta { path } => writeln!(
+                        ShownSubjects::Fasta { path, .. } => writeln!(
                             writer,
                             "# Database: User specified sequence set (Input: {})",
                             path.display()
@@ -1437,29 +1696,142 @@ pub fn render_queries(
                                 .join(", ")
                         )?;
                     }
-                    if !batch.search_skipped {
+                    // A merged result has an alignment set (`ResolvedOptions::merged_volumes`).
+                    if !batch.search_skipped || options.merged_volumes() {
                         writeln!(writer, "# {count} hits found")?;
                     }
                 }
-                for list in lists {
+                // Several volumes: the merged lists cut once per query (`ResolvedOptions::shown_lists`).
+                let listed = &lists[..lists.len().min(options.shown_lists())];
+                for list in listed {
                     let subject = &subjects[list.oid];
                     let shown_subject = ShownSubject {
-                        record: subject,
-                        ids: shown.subject_ids(subject, list.oid),
-                        title: shown.stitle(list.oid),
+                        saccver: shown.subject_saccver(subject, list.oid),
                     };
+                    let mut read = false;
                     for hsp in &list.hsps {
                         if !has_seqalign(hsp, options.gapped) {
                             continue;
                         }
-                        let a = alignment(batch, hsp, subject, query, &code)?;
+                        // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
+                        // ```c++
+                        //        		const CBioseq_Handle& subject_bh =
+                        //                 scope.GetBioseqHandle(align.GetSeq_id(1));
+                        // ```
+                        // The subject's first row loads it where the query's batch did not
+                        // prefetch it: the texts of its taxonomy lookups follow the rows before it.
+                        if let (Some(reads), false) = (reads.as_mut(), read) {
+                            read = true;
+                            reads.subject_read(0, list.oid as u32, &mut *writer, &mut *stderr)?;
+                        }
+                        // The default fields enter NCBI's alignment block and read the query
+                        // (`qaccver`, `qstart`, ...).
+                        let (form, scores, mapped) = if rows_empty(&hsp.hsp) {
+                            let loc = SubjectLoc::of(shown).of_list(list, options.gapped);
+                            let shown_hsps = list
+                                .hsps
+                                .iter()
+                                .filter(|h| has_seqalign(h, options.gapped))
+                                .count();
+                            // A `-subject` subject whose only shown HSP has length 0: the mapper's
+                            // rows without scores (`empty_rows::MappedRows`, which
+                            // `render_queries_with` let through).
+                            let mapped = super::empty_rows::subject_mapped_rows(
+                                loc,
+                                list,
+                                options.gapped,
+                                query,
+                                subject,
+                            );
+                            let (evalue, bit_score, _) =
+                                super::empty_rows::empty_row_scores(loc, shown_hsps, hsp);
+                            (
+                                super::empty_rows::tabular_empty_row(
+                                    loc,
+                                    true,
+                                    shown_hsps,
+                                    true,
+                                    matches!(
+                                        mapped,
+                                        Some(super::empty_rows::MappedRows::QueryRowWraps)
+                                    ),
+                                ),
+                                (evalue, bit_score),
+                                mapped,
+                            )
+                        } else {
+                            (
+                                super::empty_rows::TabularEmptyRow::Row,
+                                (hsp.evalue, hsp.bit_score),
+                                None,
+                            )
+                        };
+                        if form == super::empty_rows::TabularEmptyRow::Throws {
+                            writer.flush()?;
+                            return Err(NativeError::exception(
+                                &super::empty_rows::std_seg_lengths_not_accurate(),
+                            )
+                            .into());
+                        }
+                        if form == super::empty_rows::TabularEmptyRow::Leaves {
+                            let ids = AlignQueryIds::of(query);
+                            let a = DisplayAlignment::empty();
+                            let values: Vec<_> = options
+                                .fields
+                                .iter()
+                                .map(|f| match f.as_str() {
+                                    "qaccver" => ids.ids[2].to_vec(),
+                                    _ => field_value(f, query, &shown_subject, scores, &a),
+                                })
+                                .collect();
+                            if let Some(probe) = probe.as_deref_mut() {
+                                writer.flush()?;
+                                probe.begin(next_hsp);
+                            }
+                            let mut line = values.join(&b'\t');
+                            line.push(b'\n');
+                            writer.write_all(&line)?;
+                            if let Some(probe) = probe.as_deref_mut() {
+                                writer.flush()?;
+                                probe.end(next_hsp);
+                            }
+                            next_hsp += 1;
+                            continue;
+                        }
+                        let a = if form == super::empty_rows::TabularEmptyRow::Mapped {
+                            let Some(super::empty_rows::MappedRows::Letters(mapped)) = &mapped
+                            else {
+                                return Err(super::empty_rows::EmptyRowsRefusal(
+                                    super::empty_rows::UNPORTED_SUBJECT_ALL_EMPTY.to_string(),
+                                )
+                                .into());
+                            };
+                            DisplayAlignment::mapped(mapped)
+                        } else {
+                            alignment(batch, hsp, subject, query, &code, options.scoring)?
+                        };
                         let values: Vec<_> = options
                             .fields
                             .iter()
-                            .map(|f| field_value(f, query, &shown_subject, hsp, &a))
+                            .map(|f| field_value(f, query, &shown_subject, scores, &a))
                             .collect();
-                        writeln!(writer, "{}", values.join("	"))?;
+                        if let Some(probe) = probe.as_deref_mut() {
+                            writer.flush()?;
+                            probe.begin(next_hsp);
+                        }
+                        let mut line = values.join(&b'\t');
+                        line.push(b'\n');
+                        writer.write_all(&line)?;
+                        if let Some(probe) = probe.as_deref_mut() {
+                            writer.flush()?;
+                            probe.end(next_hsp);
+                        }
+                        next_hsp += 1;
                     }
+                }
+                // A text whose read the rows did not place comes after them.
+                if let Some(reads) = reads.as_mut() {
+                    reads.before_query(1, &mut *writer, &mut *stderr)?;
                 }
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
                 // ```c++
@@ -1502,6 +1874,7 @@ pub fn render_queries(
 //         Blast_HSPListSortByEvalue(hsp_list);
 //
 // ```
+#[allow(clippy::too_many_arguments)]
 fn write_pairwise(
     writer: &mut impl Write,
     stderr: &mut dyn Write,
@@ -1510,28 +1883,22 @@ fn write_pairwise(
     subjects: &[FastaRecord],
     shown: &ShownSubjects<'_>,
     batches: &[BatchResults],
+    made_hits: Option<&[crate::report::pairwise::PairwiseHit]>,
+    probe: Option<&mut crate::api::local_blast::FormatProbe<'_>>,
+    first_hsp: crate::api::local_blast::HspIndex,
 ) -> Result<()> {
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986
-    // ```c++
-    //         alnVec->SetGapChar('-');
-    //         alnVec->SetGenCode(m_QueryGeneticCode, 0);
-    //         alnVec->SetGenCode(m_DbGeneticCode, 1);
-    //         alnVec->GetWholeAlnSeqString(0, m_QuerySeq);
-    //         alnVec->GetWholeAlnSeqString(1, m_SubjectSeq);
-    // ```
-    let code = crate::utils::genetic_code::GeneticCode::from_id(options.query_gencode);
     use crate::report::pairwise::{
-        write_blastx_pairwise_report, BlastpPairwiseQuery, BlastpPairwiseReport,
-        BlastxPairwiseOptions, PairwiseConfig, PairwiseHit,
+        write_blastx_pairwise_report, BlastpPairwiseQuery, BlastxPairwiseOptions, PairwiseConfig,
     };
-    use crate::{common::Hit, config::ScoringMatrix};
-    let mut hits = Vec::new();
     let mut qinfo = Vec::new();
     let mut valid = Vec::new();
     let mut skipped = Vec::new();
     let mut warnings = Vec::new();
+    // The texts of the subjects that each query's report reads one by one, which the writer
+    // places where it reads each (`ShownSubjects::query_reads`).
+    let mut reads = Vec::new();
     for batch in batches {
-        for (qidx, lists) in batch.queries.iter().enumerate() {
+        for qidx in 0..batch.queries.len() {
             let absolute = batch.query_ordinal + qidx;
             let query = &queries[absolute];
             let first = (qidx * 6..qidx * 6 + 6).find(|&c| batch.parameters[c].valid);
@@ -1565,8 +1932,8 @@ fn write_pairwise(
                 //         if(cbs.IsSetInst() && cbs.GetInst().CanGetLength()){
                 //             out << "\nLength=";
                 // ```
-                query_name: query.title.clone(),
-                query_length: query.sequence.len(),
+                query_name: query.query_line().into_owned(),
+                query_length: query.placement().length,
                 ungapped_karlin: stat.map_or(batch.parameters[qidx * 6].ungapped, |p| p.ungapped),
                 effective_search_space: stat.map_or(0, |p| p.search_space),
             });
@@ -1576,22 +1943,175 @@ fn write_pairwise(
             //         ERR_POST(Warning << results.GetWarningStrings());
             //     }
             // ```
-            warnings.push(query_warning(query, batch.search_skipped));
+            let mut query_warnings = query_warning(options, query, batch.search_skipped);
+            query_warnings.extend_from_slice(shown.query_fetches(batch.query_ordinal + qidx));
+            warnings.push(query_warnings);
+            reads.push(shown.query_reads(batch.query_ordinal + qidx).clone());
             valid.push(first.is_some());
             skipped.push(batch.search_skipped);
+        }
+    }
+    let made;
+    let hits = match made_hits {
+        Some(hits) => hits,
+        None => {
+            made = pairwise_hits(options, queries, subjects, shown, batches)?;
+            &made
+        }
+    };
+    let report = pairwise_metadata(options, subjects, shown);
+    // The description line of each subject with hits: the title that `GenerateDefline` makes
+    // (`Unknown` where it throws), or a sequence's with parsed Seq-ids
+    // (`database_description_label`), as the other programs' (D2 of line RG T7: no longer the
+    // record's first word and rest); the others are not shown.
+    let ids: Vec<std::sync::Arc<[u8]>> = match shown {
+        ShownSubjects::Fasta { parsed, .. } => {
+            let mut reported = vec![false; subjects.len()];
+            for hit in hits {
+                if let Some(seen) = reported.get_mut(hit.hit.s_idx as usize) {
+                    *seen = true;
+                }
+            }
+            let none: std::sync::Arc<[u8]> = std::sync::Arc::from(&b""[..]);
+            subjects
+                .iter()
+                .enumerate()
+                .map(|(index, s)| {
+                    if !reported[index] {
+                        return std::sync::Arc::clone(&none);
+                    }
+                    std::sync::Arc::from(crate::report::pairwise::database_description_label(
+                        &s.title,
+                        &crate::report::defline::UNNAMED_SOURCE,
+                        parsed.shown(index),
+                        true,
+                    ))
+                })
+                .collect()
+        }
+        ShownSubjects::Database { reported, .. } => reported.descriptions(),
+    };
+    // The titles of a subject set's records, whose alignment headings `GenerateDefline` makes.
+    let record_titles: Vec<&[u8]> = match shown {
+        ShownSubjects::Fasta { .. } => subjects.iter().map(|s| s.title.as_slice()).collect(),
+        ShownSubjects::Database { .. } => Vec::new(),
+    };
+    let database = match shown {
+        ShownSubjects::Fasta { .. } => None,
+        ShownSubjects::Database {
+            pairwise, reported, ..
+        } => Some((
+            *pairwise,
+            reported.stored_titles(),
+            reported.parsed(),
+            reported.sources(),
+        )),
+    };
+    let records_parsed = match shown {
+        ShownSubjects::Fasta { parsed, .. } => parsed.subjects.as_slice(),
+        ShownSubjects::Database { .. } => &[],
+    };
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:247-249
+    // ```c++
+    //         formatter.SetLineLength(fmt_args->GetLineLength());
+    //         formatter.SetHitsSortOption(fmt_args->GetHitsSortOption());
+    //         formatter.SetHspsSortOption(fmt_args->GetHspsSortOption());
+    // ```
+    let config = PairwiseConfig {
+        program: "blastx".into(),
+        protein_matrix: options.scoring,
+        line_length: options.formatting.line_length(),
+        sort: options.report_sort(),
+        ..PairwiseConfig::default()
+    };
+    write_blastx_pairwise_report(
+        hits,
+        writer,
+        stderr,
+        &warnings,
+        &reads,
+        &config,
+        &qinfo,
+        &valid,
+        &skipped,
+        &ids,
+        &report,
+        &BlastxPairwiseOptions {
+            word_threshold: options.threshold,
+            gapped: options.gapped,
+            sum_stats: options.sum_stats,
+            num_descriptions: options.num_descriptions as usize,
+            num_alignments: options.num_alignments as usize,
+        },
+        database,
+        records_parsed,
+        &record_titles,
+        probe,
+        first_hsp,
+    )
+    .map_err(empty_rows_stop)?;
+    Ok(())
+}
+
+/// The error of outfmt 0's writer: its stop at an HSP of length 0 (`EmptyRowsStop`) is NCBI's
+/// exception, `Row is empty` where the sorts or the description table read the HSP's empty rows
+/// (after the query's `Length=`), `CreateDensegFromStdseg` where they or `-subject`'s alignment
+/// section make a Dense-seg of the Seq-loc mapper's rows; a write error stays.
+fn empty_rows_stop(error: std::io::Error) -> anyhow::Error {
+    use crate::report::pairwise::EmptyRowsStop;
+    match error
+        .get_ref()
+        .and_then(|e| e.downcast_ref::<EmptyRowsStop>())
+    {
+        Some(EmptyRowsStop::RowIsEmpty) => {
+            NativeError::exception(&super::empty_rows::row_is_empty()).into()
+        }
+        Some(EmptyRowsStop::StdSegLengths) => {
+            NativeError::exception(&super::empty_rows::std_seg_lengths_not_accurate()).into()
+        }
+        None => error.into(),
+    }
+}
+
+/// The hits of the HSPs that the reports of `batches` show (`has_seqalign`), in the order of the
+/// reports (the lists sorted by e-value, `sort_lists`); `q_idx` is the query's index in `queries`.
+/// Outfmt 0 writes them (`write_pairwise`), and LOSAT Web's `run_local` hands them to its caller.
+pub(super) fn pairwise_hits(
+    options: &ResolvedOptions,
+    queries: &[FastaRecord],
+    subjects: &[FastaRecord],
+    shown: &ShownSubjects<'_>,
+    batches: &[BatchResults],
+) -> Result<Vec<crate::report::pairwise::PairwiseHit>> {
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986
+    // ```c++
+    //         alnVec->SetGapChar('-');
+    //         alnVec->SetGenCode(m_QueryGeneticCode, 0);
+    //         alnVec->SetGenCode(m_DbGeneticCode, 1);
+    //         alnVec->GetWholeAlnSeqString(0, m_QuerySeq);
+    //         alnVec->GetWholeAlnSeqString(1, m_SubjectSeq);
+    // ```
+    let code = crate::utils::genetic_code::GeneticCode::from_id(options.query_gencode);
+    use crate::common::Hit;
+    use crate::report::pairwise::PairwiseHit;
+    let mut hits = Vec::new();
+    for batch in batches {
+        for (qidx, lists) in batch.queries.iter().enumerate() {
+            let absolute = batch.query_ordinal + qidx;
+            let query = &queries[absolute];
             for list in lists {
                 let subject = &subjects[list.oid];
                 for hsp in &list.hsps {
                     if !has_seqalign(hsp, options.gapped) {
                         continue;
                     }
-                    let a = alignment(batch, hsp, subject, query, &code)?;
+                    let a = alignment(batch, hsp, subject, query, &code, options.scoring)?;
                     let raw = &hsp.hsp;
                     let len = a.qseq.len();
                     let hit = Hit {
                         identity: 100.0 * a.identity as f64 / len as f64,
                         length: len,
-                        mismatch: len - a.identity - a.gaps,
+                        mismatch: a.mismatches(),
                         gapopen: a.gap_opens,
                         q_start: usize::try_from(a.qstart)?,
                         q_end: usize::try_from(a.qend)?,
@@ -1600,8 +2120,8 @@ fn write_pairwise(
                         e_value: hsp.evalue,
                         bit_score: hsp.bit_score,
                         num_ident: a.identity,
-                        query_frame: i32::from(raw.frame),
-                        query_length: query.sequence.len(),
+                        query_frame: i32::from(a.frame),
+                        query_length: query.placement().length,
                         q_idx: u32::try_from(absolute)?,
                         s_idx: u32::try_from(list.oid)?,
                         raw_score: raw.score,
@@ -1617,66 +2137,70 @@ fn write_pairwise(
                         hit,
                         query_seq: Some(a.masked_qseq),
                         subject_seq: Some(a.sseq),
-                        query_frame: Some(raw.frame),
+                        query_frame: Some(a.frame),
                         subject_frame: None,
                         positives: Some(a.positive),
                         gaps: Some(a.gaps),
-                        subject_length: Some(subject.sequence.len()),
+                        subject_length: Some(subject.placement().length),
                         // A database sequence's description line is made from its stored
                         // title alone (`ReportedSubjects::descriptions`).
                         subject_title: match shown {
-                            ShownSubjects::Fasta { .. } => {
-                                subject.title.split_once(' ').map(|(_, t)| t.to_owned())
+                            ShownSubjects::Fasta { parsed, .. }
+                                if parsed.shown(list.oid).is_some() =>
+                            {
+                                None
                             }
+                            // The library's `Hit::subject_title` (no report reads it): the title
+                            // after its first word, `protein product` of an empty one.
+                            ShownSubjects::Fasta { .. } if subject.title.is_empty() => {
+                                Some("protein product".to_owned())
+                            }
+                            ShownSubjects::Fasta { .. } => subject
+                                .title
+                                .iter()
+                                .position(|&byte| byte == b' ')
+                                .map(|space| {
+                                    String::from_utf8_lossy(&subject.title[space + 1..])
+                                        .into_owned()
+                                }),
                             ShownSubjects::Database { .. } => None,
                         },
                         comp_adjust_method: Some(u8::try_from(hsp.composition_method)?),
                         sum_n: Some(hsp.num),
+                        subject_stored_gaps: a.subject_stored_gaps,
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:530-531
+                        // ```c
+                        //         else
+                        //             status = Blast_HSPGetNumIdentitiesAndPositives(query_nomask, subject, hsp, scoring_options, 0, sbp);
+                        // ```
+                        // The Seq-align's `num_ident` (`seqalign::query_records`): the engine's
+                        // identities on the unmasked query frame (`statistics::identity_and_positive`),
+                        // not those of the rows (`a.identity`), which the display's translation
+                        // and the subject's stored gap characters make.
+                        seqalign_num_ident: hsp.identity,
                     });
+                    // The model of the reads sorts by `hsp_scores` of the batch's query length
+                    // without the rows (`ReportedSubjects::fetch_by_query`): the row's values
+                    // where the records' offsets move nothing.
+                    debug_assert!(
+                        query.placement().offset != 0
+                            || subject.placement().offset != 0
+                            || hsp_scores(hsp, batch.prepared.original_lengths[qidx]).ok()
+                                == hits.last().map(crate::report::hit_sort::HspScores::of),
+                        "BLASTX hsp_scores differs from its row"
+                    );
                 }
             }
         }
     }
-    let report = pairwise_metadata(options, subjects, shown);
-    let ids: Vec<std::sync::Arc<str>> = match shown {
-        ShownSubjects::Fasta { .. } => subjects
-            .iter()
-            .map(|s| std::sync::Arc::from(local_id(s)))
-            .collect(),
-        ShownSubjects::Database { reported, .. } => reported.descriptions(),
-    };
-    let database = match shown {
-        ShownSubjects::Fasta { .. } => None,
-        ShownSubjects::Database {
-            pairwise, reported, ..
-        } => Some((*pairwise, reported.stored_titles(), reported.parsed())),
-    };
-    let config = PairwiseConfig {
-        program: "blastx".into(),
-        protein_matrix: ScoringMatrix::Blosum62,
-        ..PairwiseConfig::default()
-    };
-    write_blastx_pairwise_report(
-        &hits,
-        writer,
-        stderr,
-        &warnings,
-        &config,
-        &qinfo,
-        &valid,
-        &skipped,
-        &ids,
-        &report,
-        &BlastxPairwiseOptions {
-            word_threshold: options.threshold,
-            gapped: options.gapped,
-            sum_stats: options.sum_stats,
-            num_descriptions: options.num_descriptions as usize,
-            num_alignments: options.num_alignments as usize,
-        },
-        database,
-    )?;
-    Ok(())
+    // `-lcase_masking`: the subject rows show their records' lower case too (x_soft_subject.rs), in
+    // outfmt 0 and in the hits that LOSAT Web's `run_local` hands out, as the query rows do.
+    // A `-subject_loc` subject can show runs of its record outside the interval
+    // (`FastaRecord::archive_lowercase_runs`).
+    if subjects.iter().any(FastaRecord::has_lowercase_runs) {
+        super::x_soft_subject::x_masked_subject_rows(&mut hits, subjects);
+    }
+    Ok(hits)
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:226-244
@@ -1707,19 +2231,19 @@ fn pairwise_metadata(
     shown: &ShownSubjects<'_>,
 ) -> crate::report::pairwise::BlastpPairwiseReport {
     use crate::{
-        config::{ProteinScoringSpec, ScoringMatrix},
+        config::ProteinScoringSpec,
         report::pairwise::BlastpPairwiseReport,
         stats::{spouge::lookup_protein_gumbel_params, tables::lookup_protein_params},
     };
     let scoring = ProteinScoringSpec {
-        matrix: ScoringMatrix::Blosum62,
+        matrix: options.scoring,
         gap_open: options.gap_open,
         gap_extend: options.gap_extend,
     };
     // A database's lines come from `ShownSubjects::pairwise_database`; these fields serve
     // `-subject` (the Gumbel block's printed numbers do not depend on the length).
     let (database_name, num_sequences, total) = match shown {
-        ShownSubjects::Fasta { path } => (
+        ShownSubjects::Fasta { path, .. } => (
             format!("User specified sequence set (Input: {})", path.display()),
             subjects.len(),
             subjects.iter().map(|s| s.sequence.len()).sum(),
@@ -1731,7 +2255,7 @@ fn pairwise_metadata(
         ),
     };
     BlastpPairwiseReport {
-        version: "2.17.0+".into(),
+        version: crate::NCBI_BLAST_VERSION.into(),
         database_name,
         database_num_sequences: num_sequences,
         database_total_letters: total,
@@ -1740,9 +2264,17 @@ fn pairwise_metadata(
         gap_extend: options.gap_extend,
         word_threshold: 0.0,
         window_size: options.window_size,
-        gapped_karlin: lookup_protein_params(&scoring),
-        gumbel: lookup_protein_gumbel_params(&scoring, total as i64)
-            .expect("pinned BLOSUM62 gap11/1 Gumbel block"),
+        // An ungapped search's gap costs need not be in the matrix's table (`args.rs`): it has no
+        // gapped block (the report prints the ungapped one only).
+        gapped_karlin: if options.gapped {
+            lookup_protein_params(&scoring)
+        } else {
+            Default::default()
+        },
+        gumbel: options.has_gumbel_block().then(|| {
+            lookup_protein_gumbel_params(&scoring, total as i64)
+                .expect("the gap costs are in the matrix's table (`args.rs`)")
+        }),
         // BLASTX writes its own description table and alignments (`write_blastx_report`).
         num_descriptions: usize::MAX,
         num_alignments: usize::MAX,
@@ -1754,6 +2286,7 @@ fn pairwise_metadata(
 // ```
 pub(crate) fn write_prolog(
     writer: &mut impl Write,
+    diagnostics: &mut dyn Write,
     options: &ResolvedOptions,
     subjects: &[FastaRecord],
     shown: &ShownSubjects<'_>,
@@ -1761,8 +2294,20 @@ pub(crate) fn write_prolog(
     if options.outfmt == 0 {
         crate::report::pairwise::write_blastx_prolog(
             writer,
+            options.program().upper,
             &pairwise_metadata(options, subjects, shown),
             shown.pairwise_database(),
+        )?;
+    }
+    // Outfmt 20's line of the field names, after its formatter's warning
+    // (`tabular::write_prolog`).
+    if let Some(spec) = options.tabular {
+        super::tabular::write_prolog(
+            options.program(),
+            spec,
+            options.taxdb_found,
+            &mut *writer,
+            diagnostics,
         )?;
     }
     Ok(())
@@ -1823,12 +2368,24 @@ pub(crate) fn write_prolog(
 // ```
 pub(crate) fn write_epilog(
     writer: &mut impl Write,
+    diagnostics: &mut dyn Write,
     options: &ResolvedOptions,
     subjects: &[FastaRecord],
     shown: &ShownSubjects<'_>,
     queries: usize,
     xml2: Option<&mut super::blast_xml::RunXml2>,
+    xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
 ) -> Result<()> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2204-2212 (quoted at
+    // `blast_xml::matrix::XmlMatrixFailure`)
+    // A run of one query whose XML2 or JSON report is held makes its report data in
+    // `PrintEpilog`: a matrix name that NCBI's XML does not know fails there, before the epilog
+    // (`xml_matrix`, the run's `blast_xml::xml_matrix_failure`; the XML formats of the run).
+    if matches!(options.outfmt, 5 | 13..=16)
+        && xml_matrix.is_some_and(|failure| failure.fails_at_end(queries))
+    {
+        return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
+    }
     if options.outfmt == 0 {
         crate::report::pairwise::write_blastx_epilog(
             writer,
@@ -1848,13 +2405,24 @@ pub(crate) fn write_epilog(
         //     if (m_FormatType == CFormattingArgs::eXml) {
         //         m_Outfile << m_BlastXMLIncremental->m_SerialXmlEnd << endl;
         // ```
-        super::blast_xml::write_xml_epilog(writer, queries, None)?;
+        super::blast_xml::write_xml_epilog(writer, diagnostics, queries, None)?;
     } else if xml2.is_some() {
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2203-2219 and
         // :2419-2423, :2440-2445: the report a `-subject` run holds back, then the end of the
         // document.
-        super::blast_xml::write_xml_epilog(writer, queries, xml2)?;
+        super::blast_xml::write_xml_epilog(writer, diagnostics, queries, xml2)?;
     } else if options.outfmt == 7 {
+        // The warning of the epilog's formatter, for a field list that shows a plural name of
+        // the taxonomy database without `taxdb.bti` (`tabular::write_epilog_warning`).
+        if let Some(spec) = options.tabular {
+            super::tabular::write_epilog_warning(
+                options.program(),
+                spec,
+                options.taxdb_found,
+                &mut *writer,
+                diagnostics,
+            )?;
+        }
         writeln!(writer, "# BLAST processed {queries} queries")?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2233-2236
         // ```c++
@@ -1968,20 +2536,34 @@ pub(crate) fn write_epilog(
 //     }
 // ```
 // Global errorId0 "Could..." precedes per-query "Sequence..." after Combine.
-fn query_warning(query: &FastaRecord, search_skipped: bool) -> Vec<u8> {
-    if !query.sequence.is_empty() && !search_skipped {
+pub(super) fn query_warning(
+    options: &ResolvedOptions,
+    query: &FastaRecord,
+    search_skipped: bool,
+) -> Vec<u8> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:173
+    // ```c++
+    // 			aggregate_messages.Combine(thread_results[d]->GetErrors());
+    // ```
+    // RPSTBLASTN's results of a database of several volumes are merged, which keeps the
+    // messages of error severity only (`ResolvedOptions::merged_volumes`).
+    if options.merged_volumes() {
         return Vec::new();
     }
-    let mut id = query.internal_id.as_bytes().to_vec();
+    let empty_database = options.filtered_empty && !search_skipped;
+    if !query.sequence.is_empty() && !search_skipped && !empty_database {
+        return Vec::new();
+    }
+    let mut id = query.warning_id().to_vec();
     if !query.title.is_empty() {
         id.push(b' ');
-        id.extend_from_slice(query.title.as_bytes());
+        id.extend_from_slice(&query.title);
     }
     if id.len() > 35 {
         id.truncate(25);
         id.extend_from_slice(b".. ");
     }
-    let mut bytes = b"Warning: [blastx] ".to_vec();
+    let mut bytes = format!("Warning: [{}] ", options.program().lower).into_bytes();
     bytes.extend_from_slice(&id);
     bytes.extend_from_slice(b": ");
     if search_skipped {
@@ -1989,6 +2571,10 @@ fn query_warning(query: &FastaRecord, search_skipped: bool) -> Vec<u8> {
     }
     if query.sequence.is_empty() {
         bytes.extend_from_slice(b"Sequence contains no data ");
+    }
+    if empty_database {
+        bytes.extend_from_slice(EMPTY_DATABASE_MESSAGE.as_bytes());
+        bytes.push(b' ');
     }
     bytes.push(b'\n');
     bytes
@@ -2006,7 +2592,7 @@ fn query_warning(query: &FastaRecord, search_skipped: bool) -> Vec<u8> {
 // {
 //     m_Outfile.exceptions(NcbiBadbit);
 // ```
-fn tabular_io_error(error: anyhow::Error) -> anyhow::Error {
+pub(super) fn tabular_io_error(error: anyhow::Error) -> anyhow::Error {
     match error.downcast::<std::io::Error>() {
         Ok(error) => TabularFlushError(error).into(),
         Err(error) => error,

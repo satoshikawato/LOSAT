@@ -1,5 +1,6 @@
 //! BLASTX context/translation/mask preparation before score/statistics setup.
 use super::{args::ResolvedOptions, input::FastaRecord};
+use crate::algorithm::common::masks::{combine_masks, dna_to_protein_masks, protein_to_dna_masks};
 use crate::algorithm::tblastx::translation::generate_frames;
 use crate::core::blast_seg::SegMasker;
 use crate::utils::genetic_code::GeneticCode;
@@ -63,9 +64,44 @@ pub struct PreparedQueryBatch {
     /// the batch is searched in several units (`reader_batch.rs`); `None` when the unit is the
     /// whole batch.
     pub(crate) reader_shape: Option<std::sync::Arc<super::reader_batch::ReaderBatchShape>>,
+    /// The bytes of NCBI's query buffer after this unit's own when the unit is a part of a reader
+    /// batch: the letters and NULLBs of the contexts of the units after it
+    /// (`reader_batch::attach`, `batch_buffer_length`); 0 when the unit is the whole batch;
+    /// `usize::MAX` for a unit prepared again after phase 1 failed, whose batch fails at a unit's
+    /// set-up (`native::XUnit::take_prep`).
+    pub(crate) reader_buffer_after: usize,
     /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): whether `sequence_start` is on the path of the seed
-    /// loops' sentinel walks (`blastx/x_ungap_sent.rs`, `query_fits`; false with the switch off).
+    /// loops' sentinel walks (`blastx/x_ungap_sent.rs`, `query_fits`, another matrix than BLOSUM62
+    /// `query_fits_of`; false with the switch off).
     pub(crate) x_ungap_sent: bool,
+    /// The options' search spaces that NCBI's preliminary stage sets for the contexts of the query
+    /// batch (`SplitQuery_SetEffectiveSearchSpace`, the whole query's, by context index; a query
+    /// chunk reads them by its own index), which the statistics of each subject read
+    /// (`parameters::subject_update`); `None` where the search has none (`search::x_search_core`).
+    pub(crate) subject_option_spaces: Option<std::sync::Arc<[i64]>>,
+}
+impl PreparedQueryBatch {
+    /// EXPERIMENT (LOSAT_X_BXENDMEM): what the results of a searched batch keep: the batch without
+    /// its residues and lookup segments, which the report does not read.
+    pub(crate) fn x_for_results(&self) -> Self {
+        if !super::kappa::x_end_mem() {
+            return self.clone();
+        }
+        Self {
+            original_lengths: self.original_lengths.clone(),
+            contexts: self.contexts.clone(),
+            first_context: self.first_context,
+            max_length: self.max_length,
+            min_length: self.min_length,
+            sequence_start: Vec::new(),
+            sequence_start_nomask: Vec::new(),
+            lookup_segments: Vec::new(),
+            reader_shape: self.reader_shape.clone(),
+            reader_buffer_after: self.reader_buffer_after,
+            x_ungap_sent: self.x_ungap_sent,
+            subject_option_spaces: self.subject_option_spaces.clone(),
+        }
+    }
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:123-136
 // ```c++
@@ -85,6 +121,16 @@ pub struct PreparedQueryBatch {
 //     default:
 // ```
 pub const BATCH_SIZE: usize = 10002;
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:136-139
+// ```c++
+//     case eBlastp:
+//     default:
+//         retval = 10000;
+//         break;
+// ```
+/// The letters of RPSTBLASTN's query batch (`GetQueryBatchSize(eRPSTblastn)`, the `default:`
+/// case; DECISIONS 38 D10): its batches are read with it, never split (`rps_search::translated`).
+pub const RPSTBLASTN_BATCH_SIZE: usize = 10000;
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:139-165
 // ```c++
 //
@@ -245,8 +291,71 @@ pub(crate) fn context_frame(letters: usize, i: usize, strand: &str) -> (usize, b
 //      virtual bool Verify(const string& value) const {
 //          static int gcs[] = {1,2,3,4,5,6,9,10,11,12,13,14,15,16,21,22,23,24,25,26,27,28,29,30,31,33};
 // ```
+/// The error of a query batch with a `-matrix` that NCBI's tables do not have
+/// (`ResolvedOptions::unknown_matrix`): NCBI's (`unknown_matrix_message`), or LOSAT's refusal when
+/// NCBI reads a file for the name (`ResolvedOptions::matrix_file`): NCBI 2.17.0 reads it where it
+/// sets up the batch, and aborts after a matrix or fails on another file (`matrix_file_refusal`).
+/// A run without a batch reads no file.
+pub(crate) fn matrix_error_message(records: &[FastaRecord], options: &ResolvedOptions) -> String {
+    match &options.matrix_file {
+        Some(file) => crate::blastinput::ncbi_environment::matrix_file_refusal(
+            &options.matrix,
+            file,
+            "BLASTX",
+        ),
+        None => unknown_matrix_message(records),
+    }
+}
+
+/// NCBI's error of a query batch whose score block cannot load the `-matrix` of an ungapped search
+/// (a name its matrix loader does not know, `args.rs` `unknown_matrix`): the message of each query
+/// of the batch, a query without letters with its own after it.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:158-182 (the score block of
+/// the batch: a name that the matrix loader does not know fails with -1, blast_stat.c:1679-1680,
+/// posted for all queries, blast_setup.c:498-501)
+/// ```c
+///     Int2 status = BLAST_MainSetUp(opts_memento->m_ProgramType,
+/// ...
+///     Blast_Message2TSearchMessages(blast_msg.Get(), query_info, search_messages);
+///     if (status != 0 &&
+///         (!(blast_msg.Get()) || (blast_msg.Get() && blast_msg.Get()->severity == eBlastSevError)))
+///     {
+///         	string msg;
+///         	if (search_messages.HasMessages()) {
+///             		msg = search_messages.ToString();
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:246 (the text of -1)
+/// ```c
+///             snprintf(buf, sizeof(buf) - 1, "Unknown error code %d", error_code);
+/// ```
+/// One message per query (`TSearchMessages::ToString`), `Error: ` first (`GetMessage`); a query
+/// without letters keeps its `Sequence contains no data` (blast_setup_cxx.cpp:631-638) after the
+/// error, which `RemoveDuplicates` sorts first (`CSearchMessage::operator<`,
+/// blast_types.hpp:295-304), as TBLASTX's (`tblastx/blast_engine/run_impl.rs`).
+pub(crate) fn unknown_matrix_message(records: &[FastaRecord]) -> String {
+    let mut message = String::new();
+    for record in records {
+        message.push_str("Error: Unknown error code -1 ");
+        if record.sequence.is_empty() {
+            message.push_str("Warning: Sequence contains no data ");
+        }
+    }
+    message
+}
+
 pub fn prepare_queries(
     records: &[FastaRecord],
+    options: &ResolvedOptions,
+) -> Result<PreparedQueryBatch> {
+    prepare_unit_queries(records, None, options)
+}
+
+/// `prepare_queries` for `records`, one unit of the reader batch of `batch` when it is given
+/// (`reader_batch.rs`): whether the setup fails for want of data is the reader batch's.
+pub(crate) fn prepare_unit_queries(
+    records: &[FastaRecord],
+    batch: Option<&super::reader_batch::ReaderBatchShape>,
     options: &ResolvedOptions,
 ) -> Result<PreparedQueryBatch> {
     if records.is_empty() {
@@ -336,11 +445,28 @@ pub fn prepare_queries(
     //         NCBI_THROW(CBlastException, eSetup, messages.ToString());
     //     }
     // ```
-    if !contexts.iter().any(|c| c.is_valid) && records.iter().any(|q| q.sequence.is_empty()) {
+    // `qinfo` is the query batch's: a unit of a reader batch (`batch`) fails only when no
+    // context of the reader batch is valid, with the messages of all its empty queries.
+    let (fails, empty) = match batch {
+        Some(batch) => (batch.set_up_fails(), batch.empty_queries),
+        None => {
+            let empty = records.iter().filter(|q| q.sequence.is_empty()).count();
+            (!contexts.iter().any(|c| c.is_valid) && empty > 0, empty)
+        }
+    };
+    if fails {
+        anyhow::bail!("{}", "Warning: Sequence contains no data ".repeat(empty));
+    }
+    // The matrix error comes after the set-up's errors above, with the messages of the whole
+    // query batch: a unit of a reader batch raises its batch's (`ReaderBatchShape::matrix_error`).
+    if options.unknown_matrix {
+        let message = match batch {
+            Some(batch) => batch.matrix_error.as_deref().map(str::to_string),
+            None => None,
+        };
         anyhow::bail!(
             "{}",
-            "Warning: Sequence contains no data "
-                .repeat(records.iter().filter(|q| q.sequence.is_empty()).count())
+            message.unwrap_or_else(|| matrix_error_message(records, options))
         );
     }
     let nomask = buffer.clone();
@@ -364,18 +490,15 @@ pub fn prepare_queries(
     // ```
     // Same SEG parameters as the block above; the masker is built once for all contexts instead of
     // once per context (placement only).
-    let seg_masker = options.seg.enabled.then(|| {
-        let s = &options.seg;
+    let seg_masker = options.seg.filter_options().map(|(window, locut, hicut)| {
         SegMasker::new(
-            if s.window > 0 { s.window as usize } else { 12 },
-            if s.locut > 0.0 { s.locut } else { 2.2 },
-            if s.hicut > 0.0 { s.hicut } else { 2.5 },
+            if window > 0 { window as usize } else { 12 },
+            if locut > 0.0 { locut } else { 2.2 },
+            if hicut > 0.0 { hicut } else { 2.5 },
         )
-        // BLASTX keeps LOSAT's former SEG until SX (plan DW-10).
-        .keeping_all_left_segments()
         // LOSAT_X_SEGTRIMMEMO (graduated 2026-10-26): the chunks of a split query (split.rs) are masked
         // again after the whole query, mostly over the same segments, so this masker takes the
-        // trim of a segment trimmed before on this thread from its memo.
+        // trim of a segment trimmed before (on any thread) from the memo.
         .x_with_trim_memo()
     });
     // SEG reads only the residues of its own context and the hard masking below writes only there,
@@ -434,7 +557,7 @@ pub fn prepare_queries(
         if !context.is_valid {
             continue;
         }
-        let mut masks = context.lowercase_masks.clone();
+        let mut masks = Vec::new();
         if let Some(masker) = seg_masker.as_ref() {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1280-1290
             // ```c
@@ -468,6 +591,10 @@ pub fn prepare_queries(
                 crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
             }
         }
+        // SEG's intervals first, as `BlastSeqLocAppend(filter_out, lcase_mask_slp)`: the sort of
+        // `BlastSeqLocCombine` compares only the left ends, and a one-letter run on the first letter
+        // of a SEG interval is merged only in this order (the results' masks).
+        masks.extend_from_slice(&context.lowercase_masks);
         context.masks = combine_masks(masks);
         if !options.soft_masking {
             for &(from, to) in &context.masks {
@@ -485,8 +612,18 @@ pub fn prepare_queries(
         );
     }
     let lookup_segments = complement_masks(&contexts);
-    let x_ungap_sent =
-        super::seed::x_ungap_sent::query_fits(&buffer, options.word_size, options.window_size);
+    // The sentinel walks take BLOSUM62's keys, or another matrix's where it has them (item SC6b,
+    // `x_ungap_sent.rs` `query_fits_of`).
+    let x_ungap_sent = if options.scoring == crate::config::ScoringMatrix::Blosum62 {
+        super::seed::x_ungap_sent::query_fits(&buffer, options.word_size, options.window_size)
+    } else {
+        super::seed::x_ungap_sent::query_fits_of(
+            options.scoring,
+            &buffer,
+            options.word_size,
+            options.window_size,
+        )
+    };
     Ok(PreparedQueryBatch {
         original_lengths: records.iter().map(|r| r.sequence.len()).collect(),
         contexts,
@@ -497,7 +634,9 @@ pub fn prepare_queries(
         sequence_start_nomask: nomask,
         lookup_segments,
         reader_shape: None,
+        reader_buffer_after: 0,
         x_ungap_sent,
+        subject_option_spaces: None,
     })
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:923-929
@@ -540,139 +679,6 @@ fn contexts_lengths(length: usize) -> [usize; 3] {
 // ```
 fn core_dna_length(lengths: &[usize; 3]) -> usize {
     lengths.iter().sum::<usize>() + 2
-}
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:1604-1635
-// ```c++
-//             short frame = iter->first;
-//             BlastSeqLoc * bsl = iter->second;
-//
-//             for (BlastSeqLoc* itr = bsl; itr; itr = itr->next) {
-//                 int to(0), from(0);
-//
-//                 if (frame < 0) {
-//                     from = ((int) dna_length + frame - itr->ssr->right) / CODON_LENGTH;
-//                     to = ((int) dna_length + frame - itr->ssr->left) / CODON_LENGTH;
-//                 } else {
-//                     from = (itr->ssr->left - frame + 1) / CODON_LENGTH;
-//                     to = (itr->ssr->right - frame + 1) / CODON_LENGTH;
-//                 }
-//                 if (from < 0)
-//                     from = 0;
-//                 if (to < 0)
-//                     to = 0;
-//                 const int kFrameLength = frame_lengths[(CSeqLocInfo::ETranslationFrame)frame];
-//                 if (from >= kFrameLength)
-//                     from = kFrameLength - 1;
-//                 if (to >= kFrameLength)
-//                     to = kFrameLength - 1;
-//
-//                 _ASSERT(from >= 0 && to >= 0);
-//                 _ASSERT(from < kFrameLength && to < kFrameLength);
-//                 itr->ssr->left  = from;
-//                 itr->ssr->right = to;
-//             }
-//         }
-//     }
-// }
-//
-// ```
-pub fn dna_to_protein_masks(masks: &[(i32, i32)], dna_length: usize, frame: i8) -> Vec<(i32, i32)> {
-    let length = dna_length as i32;
-    let frame = frame as i32;
-    let aa_length = (length - (frame.abs() - 1)).max(0) / 3;
-    masks
-        .iter()
-        .map(|&(left, right)| {
-            let (from, to) = if frame < 0 {
-                ((length + frame - right) / 3, (length + frame - left) / 3)
-            } else {
-                ((left - frame + 1) / 3, (right - frame + 1) / 3)
-            };
-            (from.max(0).min(aa_length - 1), to.max(0).min(aa_length - 1))
-        })
-        .collect()
-}
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:928-954
-// ```c++
-//                } else {
-//                    from = CODON_LENGTH*seq_range->left + frame - 1;
-//                    to = CODON_LENGTH*seq_range->right + frame - 1;
-//                }
-//
-//                if (from < 0)
-//                    from = 0;
-//                if (to   < 0)
-//                    to   = 0;
-//                if (from >= dna_length)
-//                    from = dna_length - 1;
-//                if (to   >= dna_length)
-//                    to   = dna_length - 1;
-//
-//                ASSERT(from >= 0);
-//                ASSERT(to   >= 0);
-//                ASSERT(from < dna_length);
-//                ASSERT(to   < dna_length);
-//
-//                seq_range->left = from;
-//                seq_range->right = to;
-//            }
-//        }
-//    }
-//    return status;
-// }
-//
-// ```
-pub fn protein_to_dna_masks(masks: &[(i32, i32)], dna_length: usize, frame: i8) -> Vec<(i32, i32)> {
-    let length = dna_length as i32;
-    let frame = frame as i32;
-    masks
-        .iter()
-        .map(|&(left, right)| {
-            let (from, to) = if frame < 0 {
-                (length - 3 * right + frame + 1, length - 3 * left + frame)
-            } else {
-                (3 * left + frame - 1, 3 * right + frame - 1)
-            };
-            (from.max(0).min(length - 1), to.max(0).min(length - 1))
-        })
-        .collect()
-}
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:983-1004
-// ```c++
-//     qsort(ptrs, (size_t)num_elems, sizeof(*ptrs),
-//           s_SeqRangeSortByStartPosition);
-//
-//     /* Merge the overlapping elements */
-//     {
-//         BlastSeqLoc* curr_tail = *mask_loc = ptrs[0];
-//         for (i = 0; i < num_elems - 1; i++) {
-//             const SSeqRange* next_ssr = ptrs[i+1]->ssr;
-//             const Int4 stop = curr_tail->ssr->right;
-//
-//             if ((stop + link_value) > next_ssr->left) {
-//                 curr_tail->ssr->right = MAX(stop, next_ssr->right);
-//                 ptrs[i+1] = BlastSeqLocNodeFree(ptrs[i+1]);
-//             } else {
-//                 curr_tail = ptrs[i+1];
-//             }
-//         }
-//     }
-//
-//     /* Rebuild the linked list */
-//     {
-//         BlastSeqLoc* tail = *mask_loc;
-// ```
-pub fn combine_masks(mut masks: Vec<(i32, i32)>) -> Vec<(i32, i32)> {
-    masks.sort_by_key(|r| r.0);
-    let mut result: Vec<(i32, i32)> = Vec::new();
-    for mask in masks {
-        if let Some(last) = result.last_mut().filter(|r| r.1 > mask.0) {
-            last.1 = last.1.max(mask.1);
-        } else {
-            result.push(mask);
-        }
-    }
-    result
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1073-1115
 // ```c++
@@ -895,11 +901,12 @@ mod tests {
     fn ncbi_batch_crossing_record_is_retained() {
         let record = |n| FastaRecord {
             internal_id: String::new(),
-            title: String::new(),
+            title: Vec::new(),
             sequence: vec![b'A'; n],
             lowercase_masks: vec![],
             warnings: vec![],
             source: None,
+            around: None,
         };
         assert_eq!(
             batch_ranges(&[record(10001), record(1), record(3)], BATCH_SIZE),
@@ -921,11 +928,12 @@ mod tests {
     fn the_batch_size_is_the_limit_of_a_batch() {
         let record = |n| FastaRecord {
             internal_id: String::new(),
-            title: String::new(),
+            title: Vec::new(),
             sequence: vec![b'A'; n],
             lowercase_masks: vec![],
             warnings: vec![],
             source: None,
+            around: None,
         };
         let records = [
             record(100),

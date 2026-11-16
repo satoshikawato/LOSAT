@@ -171,6 +171,10 @@ impl<R> Ahead<R> {
     // No NCBI counterpart: scheduling only. A helper that leaves frees its thread for other work
     // of the pool (another loop's tasks) while the owner takes the last values.
     /// `new(window)` whose helpers leave once every index of the loop is claimed.
+    #[cfg_attr(
+        not(feature = "parallel"),
+        expect(dead_code, reason = "used only with the parallel feature")
+    )]
     pub(crate) fn x_new_leaving(window: usize) -> Self {
         Self::x_with(window, true)
     }
@@ -294,6 +298,16 @@ impl<R> Ahead<R> {
     /// No NCBI counterpart: the helper loop (scheduling of independent work); it does not
     /// change any value NCBI computes.
     /// Helper thread: evaluate offered indexes until the owner is done.
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        expect(
+            dead_code,
+            reason = "used only where the helper pool runs (parallel, and wasm-threads on wasm32)"
+        )
+    )]
     pub(crate) fn work<S>(&self, scratch: &mut S, compute: &impl Fn(usize, &mut S) -> R) {
         let mut idle = 0u32;
         while !self.finished.load(Ordering::Acquire) {
@@ -393,6 +407,10 @@ impl<R> Ahead<R> {
 
     // No NCBI counterpart: tells the helpers that the loop has ended; it does not change any
     // value NCBI computes.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     fn finish(&self) {
         self.finished.store(true, Ordering::Release);
     }
@@ -409,8 +427,16 @@ impl<R> Ahead<R> {
 }
 
 // No NCBI counterpart: ends the helpers when the loop exits, also on a panic.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 struct Finish<'a, R>(&'a Ahead<R>);
 
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 impl<R> Drop for Finish<'_, R> {
     fn drop(&mut self) {
         self.0.finish();
@@ -511,7 +537,7 @@ mod tests {
             with_helpers(Some(&ahead), scratches, &compute, || {
                 for index in 0..n {
                     // What the owner knows changes with every value it keeps.
-                    let live = |j: usize, sum: u64| (j as u64).wrapping_add(sum) % 3 != 0;
+                    let live = |j: usize, sum: u64| !(j as u64).wrapping_add(sum).is_multiple_of(3);
                     ahead.announce(index, n, |j| live(j, sum));
                     if !live(index, sum) {
                         ahead.skip(index);
@@ -538,7 +564,7 @@ mod tests {
             let mut kept = Vec::new();
             let mut sum = 0u64;
             for index in 0..5000usize {
-                if (index as u64).wrapping_add(sum) % 3 == 0 {
+                if (index as u64).wrapping_add(sum).is_multiple_of(3) {
                     continue;
                 }
                 sum = sum.wrapping_mul(31).wrapping_add(value_of(index));

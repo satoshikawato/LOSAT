@@ -1,9 +1,7 @@
-#![allow(warnings, clippy::all)]
-
 //! outfmt 8 (ASN.1 text), 9 (ASN.1 binary) and 12 (JSON) of the LOSAT CLI against NCBI BLAST+ 2.17.0's output
-//! for the same `-subject` searches, byte for byte, at one and four threads: BLASTN's three
-//! tasks (megablast, blastn, dc-megablast), BLASTP, BLASTX (gapped and `-ungapped`), TBLASTN
-//! (with and without `-subject_loc`) and TBLASTX on the outfmt sample inputs
+//! for the same `-subject` searches, byte for byte, at one, four, eight and sixteen threads:
+//! BLASTN's three tasks (megablast, blastn, dc-megablast), BLASTP, BLASTX (gapped and `-ungapped`),
+//! TBLASTN (with and without `-subject_loc`) and TBLASTX on the outfmt sample inputs
 //! (`tests/fixtures/seqalign/in/`; outfmt-20261019 `ncbi-samples/fixture/`).
 //!
 //! The translated searches' files: `ncbi-samples/out/<name>.out` of `blastx -query
@@ -19,7 +17,7 @@
 //! writes nothing to standard error and exits with 0. A `-subject` search's documents name no
 //! path, so the searches run from the fixture folder with its own file names. (The `-db`
 //! searches are compared by outfmt-20261019 `S/scripts/compare_samples_of3b1.py`; their frozen
-//! fixtures belong to `db_search_manifest.tsv`.)
+//! fixtures belong to `db_search_manifest/`.)
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
 //! ```c++
@@ -103,7 +101,7 @@ fn subject_searches_write_ncbis_seq_annots() {
         for outfmt in ["8", "9", "12"] {
             let expected = std::fs::read(fixtures().join(format!("{name}_fmt{outfmt}.out")))
                 .expect("NCBI's output");
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let output = losat()
                     .args(argv)
                     .args(["-outfmt", outfmt, "-num_threads", threads])
@@ -218,7 +216,7 @@ fn translated_subject_searches_write_ncbis_seq_annots() {
         for &outfmt in formats {
             let expected = std::fs::read(fixtures().join(format!("{name}_fmt{outfmt}.out")))
                 .expect("NCBI's output");
-            for threads in ["1", "4"] {
+            for threads in ["1", "4", "8", "16"] {
                 let output = losat()
                     .args(argv)
                     .args(["-outfmt", outfmt, "-num_threads", threads])

@@ -179,6 +179,130 @@ pub fn best_rank_score(id: &ParsedSeqId) -> i32 {
     adjust_score(id, base_best_rank_score(id))
 }
 
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:3126-3153
+// ```c++
+// int CSeq_id::BaseFastaAAScore(void) const
+// {
+//     switch (Which()) {
+//     case e_not_set: case e_Giim:   return 255;
+//     case e_Local:                  return 230;
+//     case e_Gi: return PreferAccessionOverGi() ? kMaxScore + 1 : 120;
+//     case e_General:
+//         {
+//         const string& db = GetGeneral().GetDb();
+//         if (db.compare("TMSMART") == 0 ||
+//             db.compare("BankIt") == 0 ||
+//             db.compare("NCBIFILE") == 0)
+//             return 240;
+//         else
+//             return 90;
+//         }
+//     case e_Patent:                 return 80;
+//     case e_Prf:                    return 70;
+//     case e_Pdb:                    return 50;
+// //  see SQD-4175 ticket for priorities
+//     case e_Gibbsq:                 return 42;
+//     case e_Gibbmt:                 return 41;
+//     case e_Genbank:                return 40;
+//     case e_Pir:                    return 30;
+//     case e_Swissprot:              return 20;
+//     case e_Other:                  return 15;
+//     default:                       return 60; // [third party] GB/EMBL/DDBJ
+//     }
+// }
+// ```
+fn base_fasta_aa_score(id: &ParsedSeqId) -> i32 {
+    match id {
+        ParsedSeqId::Giim(_) => 255,
+        ParsedSeqId::Local(_) => 230,
+        ParsedSeqId::Gi(_) => 120,
+        ParsedSeqId::General(dbtag) => {
+            if [&b"TMSMART"[..], b"BankIt", b"NCBIFILE"].contains(&dbtag.db.as_slice()) {
+                240
+            } else {
+                90
+            }
+        }
+        ParsedSeqId::Patent(_) => 80,
+        ParsedSeqId::Prf(_) => 70,
+        ParsedSeqId::Pdb(_) => 50,
+        ParsedSeqId::Gibbsq(_) => 42,
+        ParsedSeqId::Gibbmt(_) => 41,
+        ParsedSeqId::Genbank(_) => 40,
+        ParsedSeqId::Pir(_) => 30,
+        ParsedSeqId::Swissprot(_) => 20,
+        ParsedSeqId::Other(_) => 15,
+        _ => 60,
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:3096-3124
+// ```c++
+// int CSeq_id::BaseFastaNAScore(void) const
+// {
+//     switch (Which()) {
+//         // these few are bogus, at least for nucleotide sequences
+//     case e_not_set: case e_Giim:
+//     case e_Pir: case e_Swissprot: case e_Prf:  return 255;
+//     case e_Local:                              return 230;
+//     case e_Gi: return PreferAccessionOverGi() ? kMaxScore + 1 : 120;
+//     case e_General:
+//         {
+//         const string& db = GetGeneral().GetDb();
+//         if (db.compare("TMSMART") == 0 ||
+//             db.compare("BankIt") == 0 ||
+//             db.compare("NCBIFILE") == 0 )
+//             return 240;
+//         else
+//             return 100;
+//         }
+//     case e_Patent:                 return 90;
+//     case e_Pdb:                    return 80;
+// //  see SQD-4175 ticket for priorities
+//     case e_Gibbsq:                 return 72;
+//     case e_Gibbmt:                 return 71;
+//     case e_Genbank:                return 70;
+//     case e_Other:                  return 15;
+//     default: /* [third party] GB/EMBL/DDBJ */  return 20;
+//     }
+// }
+// ```
+fn base_fasta_na_score(id: &ParsedSeqId) -> i32 {
+    match id {
+        ParsedSeqId::Giim(_)
+        | ParsedSeqId::Pir(_)
+        | ParsedSeqId::Swissprot(_)
+        | ParsedSeqId::Prf(_) => 255,
+        ParsedSeqId::Local(_) => 230,
+        ParsedSeqId::Gi(_) => 120,
+        ParsedSeqId::General(dbtag) => {
+            if [&b"TMSMART"[..], b"BankIt", b"NCBIFILE"].contains(&dbtag.db.as_slice()) {
+                240
+            } else {
+                100
+            }
+        }
+        ParsedSeqId::Patent(_) => 90,
+        ParsedSeqId::Pdb(_) => 80,
+        ParsedSeqId::Gibbsq(_) => 72,
+        ParsedSeqId::Gibbmt(_) => 71,
+        ParsedSeqId::Genbank(_) => 70,
+        ParsedSeqId::Other(_) => 15,
+        _ => 20,
+    }
+}
+
+/// `CSeq_id::FastaAARank` (`FastaAAScore`): the id `CFastaOstream` writes first for a
+/// protein; lower is better.
+pub fn fasta_aa_score(id: &ParsedSeqId) -> i32 {
+    adjust_score(id, base_fasta_aa_score(id))
+}
+
+/// `CSeq_id::FastaNARank` (`FastaNAScore`): the same for a nucleotide.
+pub fn fasta_na_score(id: &ParsedSeqId) -> i32 {
+    adjust_score(id, base_fasta_na_score(id))
+}
+
 // NCBI reference (598d8ae6): c++/include/corelib/ncbiutil.hpp:224-258
 // ```c++
 //     void operator() (const T& x)

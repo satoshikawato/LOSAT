@@ -1,0 +1,26 @@
+{
+  "version": "1.2",
+  "dbname": "q1_sq1",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "tests/fasta/psiblast/q1_subj_q1.faa",
+  "number-of-letters": 1275,
+  "number-of-sequences": 9,
+  "last-updated": "2026-11-12T23:55:00",
+  "number-of-volumes": 1,
+  "bytes-total": 52904,
+  "bytes-to-cache": 1477,
+  "files": [
+    "q1_sq1.pdb",
+    "q1_sq1.phr",
+    "q1_sq1.pin",
+    "q1_sq1.pnd",
+    "q1_sq1.pni",
+    "q1_sq1.pog",
+    "q1_sq1.pos",
+    "q1_sq1.pot",
+    "q1_sq1.psq",
+    "q1_sq1.ptf",
+    "q1_sq1.pto"
+  ]
+}

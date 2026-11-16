@@ -54,7 +54,7 @@
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use super::file::DbFile;
+use super::file::{DbFile, MAP_PAGE};
 use super::{SearchPath, SeqDbError};
 
 /// Header of `taxdb.bti`: magic, count, four reserved words (seqdbtax.cpp,
@@ -62,9 +62,6 @@ use super::{SearchPath, SeqDbError};
 const HEADER_LEN: u64 = 4 + 4 + 16;
 /// One (taxid, offset) pair of `taxdb.bti` (`CSeqDBTaxId`).
 const ENTRY_LEN: u64 = 8;
-/// The page size of the oracle platform (Linux x86-64): NCBI's mapping of `taxdb.btd` reads zero
-/// bytes from the end of the file to the end of its last page.
-const MAP_PAGE: u64 = 4096;
 /// seqdbtax.cpp: `TAX_DB_MAGIC_NUMBER`.
 const MAGIC: u32 = 0x8739;
 
@@ -231,6 +228,7 @@ impl TaxDb {
     }
 
     /// Whether NCBI treats the database as missing (`IsMissingTaxInfo`): every lookup finds nothing.
+    #[cfg(test)]
     pub fn is_missing(&self) -> bool {
         self.files.is_none()
     }
@@ -453,77 +451,25 @@ impl TaxDb {
             .then_some(taxid))
     }
 
-    /// Whether [`Self::names`] could refuse some taxid, or give a scientific name for which
-    /// `unwritable` is true, decided by one sequential pass over the two files instead of a
-    /// lookup per taxid (OF5b BLASTX, `taxdb_may_refuse`): `Ok(false)` means that no lookup of
-    /// any taxid can fail that way. `Ok(true)` means that one can, or that the files are not in
-    /// the layout the pass relies on (the index not strictly increasing in taxid, the offsets
-    /// not non-decreasing, a record of 64 MiB or more), where the answer is left to the
-    /// per-taxid lookups. A database that NCBI treats as missing finds nothing: `Ok(false)`.
-    ///
-    /// With a strictly increasing index every lookup ends on its own entry, and the record it
-    /// reads is `offset[i]..offset[i+1]`, the last entry's `offset..file length` (`names`). So
-    /// the pass applies the same rules to each entry's record: no record when its size is not
-    /// positive, a refusal when it reaches past the mapped end of `taxdb.btd`, else the split of
-    /// the bytes (zero bytes past the end of the file) and the check of the first field. The
-    /// index is read in blocks of 64 Ki entries and `taxdb.btd` in 8 MiB windows.
-    pub fn any_lookup_may_refuse(
-        &self,
-        unwritable: &dyn Fn(&[u8]) -> bool,
-    ) -> Result<bool, SeqDbError> {
+    // No NCBI counterpart: LOSAT's check, from the index alone, of whether `names` (the port of
+    // `GetTaxNames` above) can fail; it changes no value NCBI computes.
+    /// Whether [`Self::names`] could fail (`Err`) for some taxid, decided by one sequential pass
+    /// over the index alone (the report streams' check before the search,
+    /// `algorithm::common::database::reports_may_refuse`). Besides a read error, a lookup fails
+    /// only where it reads the record `offset[i]..offset[i+1]` of the entry `i` that its search
+    /// ends on (below the search's last `high_index`; one that ends on it reads to the end of
+    /// `taxdb.btd`, which cannot fail) and that record, of positive size, reaches past the mapped
+    /// end of `taxdb.btd`. So `Ok(false)`, whatever the order of the index, when no two
+    /// consecutive entries make such a record; a database that NCBI treats as missing finds
+    /// nothing. The index is read in blocks of 64 Ki entries.
+    pub fn any_lookup_may_fail(&self) -> Result<bool, SeqDbError> {
         const INDEX_BLOCK: u64 = 1 << 16;
-        const DATA_WINDOW: u64 = 8 << 20;
-        const MAX_RECORD: u64 = 64 << 20;
         let Some(files) = &self.files else {
             return Ok(false);
         };
-        let data_len = files.data.len();
-        let mapped = data_len.div_ceil(MAP_PAGE) * MAP_PAGE;
+        let mapped = files.data.len().div_ceil(MAP_PAGE) * MAP_PAGE;
         let count = files.count as u64;
-        // The data window: `window` holds the bytes `window_start..window_start + window.len()`.
-        let mut window: Vec<u8> = Vec::new();
-        let mut window_start = 0u64;
-        // The previous entry, whose record ends where the current one begins.
-        let mut pending: Option<u32> = None;
-        // Whether the lookup of the record `begin_data..end_data` could be refused or give an
-        // unwritable name: `Ok(true)` stops the pass.
-        let mut check = |begin_data: u32, end_data: u32| -> Result<bool, SeqDbError> {
-            let size = end_data.wrapping_sub(begin_data) as i32;
-            if size <= 0 {
-                return Ok(false);
-            }
-            let begin = u64::from(begin_data);
-            let end = begin + size as u64;
-            if end > mapped {
-                return Ok(true);
-            }
-            if end - begin >= MAX_RECORD {
-                return Ok(true);
-            }
-            // The bytes of the file inside the record; the rest is zero padding.
-            let in_file_end = end.min(data_len);
-            let in_file_begin = begin.min(data_len);
-            if in_file_end > in_file_begin
-                && !(window_start <= in_file_begin
-                    && in_file_end <= window_start + window.len() as u64)
-            {
-                let stop = data_len.min((in_file_begin + DATA_WINDOW).max(in_file_end));
-                window = files.data.read_range(in_file_begin, stop)?;
-                window_start = in_file_begin;
-            }
-            let from = (in_file_begin - window_start) as usize;
-            let to = (in_file_end - window_start) as usize;
-            let record: std::borrow::Cow<[u8]> = if in_file_end == end {
-                std::borrow::Cow::Borrowed(&window[from..to])
-            } else {
-                let mut padded = window[from..to].to_vec();
-                padded.resize(size as usize, 0);
-                std::borrow::Cow::Owned(padded)
-            };
-            Ok(split_fields(&record).is_some_and(|fields| unwritable(fields[0])))
-        };
-        let mut previous_taxid: Option<i32> = None;
-        let mut previous_offset = 0u32;
+        let mut previous: Option<u32> = None;
         let mut block: Vec<u8> = Vec::new();
         let mut i = 0u64;
         while i < count {
@@ -533,31 +479,17 @@ impl TaxDb {
                 .index
                 .read_exact_at(&mut block, HEADER_LEN + ENTRY_LEN * i)?;
             for entry in block.chunks_exact(ENTRY_LEN as usize) {
-                let taxid = be32(&entry[0..4]) as i32;
                 let offset = be32(&entry[4..8]);
-                if previous_taxid.is_some_and(|previous| taxid <= previous)
-                    || (pending.is_some() && offset < previous_offset)
-                {
-                    return Ok(true);
-                }
-                if let Some(begin) = pending {
-                    if check(begin, offset)? {
+                if let Some(begin) = previous {
+                    // `names`: `int(m_End - m_Begin)` of the wrapped `Uint4` difference.
+                    let size = offset.wrapping_sub(begin) as i32;
+                    if size > 0 && u64::from(begin) + size as u64 > mapped {
                         return Ok(true);
                     }
                 }
-                previous_taxid = Some(taxid);
-                previous_offset = offset;
-                pending = Some(offset);
+                previous = Some(offset);
             }
             i += n;
-        }
-        // The last entry's record ends at the end of the file (an end before its beginning is
-        // NCBI's "offset error": no names, no read).
-        if let Some(begin) = pending {
-            let end = data_len as u32;
-            if end >= begin && check(begin, end)? {
-                return Ok(true);
-            }
         }
         Ok(false)
     }
@@ -692,17 +624,14 @@ impl LazyTaxDb {
         Ok(self.open_into(&mut Vec::new())?.entry_count())
     }
 
-    /// [`TaxDb::any_lookup_may_refuse`] of the lazily opened database (this opens it). An open
-    /// that was refused or a file that cannot be read is an `Err`.
-    pub fn any_lookup_may_refuse(
-        &self,
-        unwritable: &dyn Fn(&[u8]) -> bool,
-    ) -> Result<bool, SeqDbError> {
-        self.open_into(&mut Vec::new())?
-            .any_lookup_may_refuse(unwritable)
+    /// [`TaxDb::any_lookup_may_fail`] of the lazily opened database (this opens it). An open that
+    /// was refused or a file that cannot be read is an `Err`.
+    pub fn any_lookup_may_fail(&self) -> Result<bool, SeqDbError> {
+        self.open_into(&mut Vec::new())?.any_lookup_may_fail()
     }
 
     /// Whether the database has been opened (a name has been asked for).
+    #[cfg(test)]
     pub fn is_open(&self) -> bool {
         self.db.get().is_some()
     }
@@ -722,7 +651,25 @@ mod tests {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/taxdb")
     }
 
-    fn temp_dir(tag: &str) -> PathBuf {
+    /// A directory made for one test, removed (with what is in it) when it is dropped: a test
+    /// drops it after the `TaxDb` and the `SearchPath` that read it.
+    struct TempDir(PathBuf);
+
+    impl std::ops::Deref for TempDir {
+        type Target = Path;
+
+        fn deref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn temp_dir(tag: &str) -> TempDir {
         static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let dir = std::env::temp_dir().join(format!(
             "losat-taxdb-{tag}-{}-{}",
@@ -730,13 +677,28 @@ mod tests {
             COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        dir
+        TempDir(dir)
+    }
+
+    /// A search path with the empty current directory it was made with, which is removed with it.
+    struct Searching {
+        search: SearchPath,
+        _cwd: TempDir,
+    }
+
+    impl std::ops::Deref for Searching {
+        type Target = SearchPath;
+
+        fn deref(&self) -> &SearchPath {
+            &self.search
+        }
     }
 
     /// A search path whose only useful directory is `dir` (`BLASTDB`), run from an empty current directory.
-    fn path_of(dir: &Path) -> SearchPath {
+    fn path_of(dir: &Path) -> Searching {
         let cwd = temp_dir("cwd");
-        SearchPath::new(&cwd, Some(dir.as_os_str()), None).unwrap()
+        let search = SearchPath::new(&cwd, Some(dir.as_os_str()), None).unwrap();
+        Searching { search, _cwd: cwd }
     }
 
     fn open_fixture(variant: &str) -> Result<TaxDb, SeqDbError> {
@@ -762,11 +724,19 @@ mod tests {
         (index, data)
     }
 
-    fn write_db(index: &[u8], data: &[u8]) -> PathBuf {
+    fn write_db(index: &[u8], data: &[u8]) -> TempDir {
         let dir = temp_dir("db");
         std::fs::write(dir.join("taxdb.bti"), index).unwrap();
         std::fs::write(dir.join("taxdb.btd"), data).unwrap();
         dir
+    }
+
+    /// Writes a taxdb and opens it: the directory is returned first, so that it is dropped after
+    /// the open database.
+    fn open_built(index: &[u8], data: &[u8]) -> (TempDir, TaxDb) {
+        let dir = write_db(index, data);
+        let db = TaxDb::open(&path_of(&dir)).unwrap();
+        (dir, db)
     }
 
     fn names_of(db: &TaxDb, taxid: i32) -> (Option<TaxNames>, Vec<String>) {
@@ -862,7 +832,7 @@ mod tests {
             let borrowed: Vec<(i32, &[u8])> =
                 rows.iter().map(|(t, r)| (*t, r.as_slice())).collect();
             let (index, data) = build(&borrowed);
-            let db = TaxDb::open(&path_of(&write_db(&index, &data))).unwrap();
+            let (_dir, db) = open_built(&index, &data);
             for i in 0..n {
                 let names = names_of(&db, 10 * i + 5)
                     .0
@@ -981,7 +951,7 @@ mod tests {
             (9, b"a\tb\tc\td\0"),
         ];
         let (index, data) = build(&rows);
-        let db = TaxDb::open(&path_of(&write_db(&index, &data))).unwrap();
+        let (_dir, db) = open_built(&index, &data);
         assert_eq!(four(&names_of(&db, 1).0.unwrap()), [b"a", b"b", b"c", b"d"]);
         assert_eq!(names_of(&db, 2).0, None);
         assert_eq!(names_of(&db, 3).0, None);
@@ -1010,7 +980,7 @@ mod tests {
             (b"", false),
         ] {
             let (index, data) = build(&[(1, b"x\ty\tz\tw"), (2, record)]);
-            let db = TaxDb::open(&path_of(&write_db(&index, &data))).unwrap();
+            let (_dir, db) = open_built(&index, &data);
             assert_eq!(names_of(&db, 2).0.is_some(), found, "{record:?}");
             assert!(names_of(&db, 1).0.is_some());
         }
@@ -1021,7 +991,7 @@ mod tests {
         let (mut index, data) = build(&[(1, b"a\tb\tc\td"), (2, b"e\tf\tg\th")]);
         let at = 24 + 8 + 4; // offset of the second entry
         index[at..at + 4].copy_from_slice(&be(data.len() as u32 + 10));
-        let db = TaxDb::open(&path_of(&write_db(&index, &data))).unwrap();
+        let (_dir, db) = open_built(&index, &data);
         let (names, messages) = names_of(&db, 2);
         assert_eq!(names, None);
         assert_eq!(messages, [MSG_OFFSET_ERROR]);
@@ -1029,7 +999,7 @@ mod tests {
         assert_eq!(names_of(&db, 2).1, [MSG_OFFSET_ERROR]);
         // An offset equal to the size is an empty record: not found, no message.
         index[at..at + 4].copy_from_slice(&be(data.len() as u32));
-        let db = TaxDb::open(&path_of(&write_db(&index, &data))).unwrap();
+        let (_dir, db) = open_built(&index, &data);
         assert_eq!(names_of(&db, 2), (None, vec![]));
     }
 
@@ -1081,7 +1051,7 @@ mod tests {
         let (mut index, data) = build(&rows);
         let at = 24 + 8 * 4 + 4;
         index[at..at + 4].copy_from_slice(&be(data.len() as u32 + 10));
-        let db = TaxDb::open(&path_of(&write_db(&index, &data))).unwrap();
+        let (_dir, db) = open_built(&index, &data);
         assert_eq!(names_of(&db, 50), (None, vec![]));
         assert_eq!(db.offset_error_taxid().unwrap(), None);
         // Sorted, the same entry writes it.
@@ -1089,7 +1059,7 @@ mod tests {
         let (mut index, data) = build(&rows);
         let at = 24 + 8 * 2 + 4;
         index[at..at + 4].copy_from_slice(&be(data.len() as u32 + 1));
-        let db = TaxDb::open(&path_of(&write_db(&index, &data))).unwrap();
+        let (_dir, db) = open_built(&index, &data);
         assert_eq!(db.offset_error_taxid().unwrap(), Some(50));
     }
 
@@ -1102,7 +1072,7 @@ mod tests {
         let off2 = 24 + 8 + 4;
         index[off1..off1 + 4].copy_from_slice(&be(8));
         index[off2..off2 + 4].copy_from_slice(&be(0));
-        let db = TaxDb::open(&path_of(&write_db(&index, &data))).unwrap();
+        let (_dir, db) = open_built(&index, &data);
         assert_eq!(names_of(&db, 1), (None, vec![]));
         // Entry 2 is now [0, 16): both records, the kingdom takes the rest.
         let names = names_of(&db, 2).0.unwrap();
@@ -1123,7 +1093,7 @@ mod tests {
         let off3 = 24 + 16 + 4;
         // Entry 2 ends 10 bytes after the file: zero padding belongs to its kingdom.
         index[off3..off3 + 4].copy_from_slice(&be(data.len() as u32 + 10));
-        let db = TaxDb::open(&path_of(&write_db(&index, &data))).unwrap();
+        let (_dir, db) = open_built(&index, &data);
         let names = names_of(&db, 2).0.unwrap();
         let mut kingdom = b"h".to_vec();
         kingdom.extend(*b"i\tj\tk\tl");
@@ -1133,7 +1103,7 @@ mod tests {
         assert_eq!(names_of(&db, 3), (None, vec![MSG_OFFSET_ERROR.to_string()]));
         // Past the page: refused. Entry 1 is fine.
         index[off3..off3 + 4].copy_from_slice(&be(MAP_PAGE as u32 + 1));
-        let db = TaxDb::open(&path_of(&write_db(&index, &data))).unwrap();
+        let (_dir, db) = open_built(&index, &data);
         let mut messages = Vec::new();
         assert!(matches!(
             db.names(2, &mut messages),
@@ -1154,7 +1124,7 @@ mod tests {
             (60, b"a\tb\tc\td60"),
         ];
         let (index, data) = build(&rows);
-        let db = TaxDb::open(&path_of(&write_db(&index, &data))).unwrap();
+        let (_dir, db) = open_built(&index, &data);
         let found: Vec<i32> = [10, 20, 40, 50, 60]
             .into_iter()
             .filter(|t| names_of(&db, *t).0.is_some())
@@ -1183,7 +1153,8 @@ mod tests {
     #[test]
     fn lazy_handle_opens_once_and_hands_over_the_open_messages_once() {
         let dir = fixture_dir().join("bad_magic");
-        let lazy = LazyTaxDb::new(path_of(&dir));
+        let searching = path_of(&dir);
+        let lazy = LazyTaxDb::new(searching.search.clone());
         assert!(!lazy.is_open());
         let mut messages = Vec::new();
         assert_eq!(lazy.names(9606, &mut messages).unwrap(), None);
@@ -1192,7 +1163,8 @@ mod tests {
         assert_eq!(lazy.names(9606, &mut messages).unwrap(), None);
         assert_eq!(messages, [MSG_WRONG_MAGIC]);
         // A missing database: opened at the first name, silent, finds nothing.
-        let lazy = LazyTaxDb::new(path_of(&fixture_dir().join("nonexistent")));
+        let searching = path_of(&fixture_dir().join("nonexistent"));
+        let lazy = LazyTaxDb::new(searching.search.clone());
         assert!(!lazy.is_open());
         for _ in 0..2 {
             assert_eq!(names_of_lazy(&lazy, 9606), (None, vec![]));
@@ -1266,19 +1238,15 @@ mod tests {
         assert!(checked > 300, "{checked}");
     }
 
-    /// What [`TaxDb::any_lookup_may_refuse`] must agree with: the lookup of every taxid of the
-    /// index with `names`, refused (`Err`) or giving a scientific name with a byte >= 0x80.
+    /// What [`TaxDb::any_lookup_may_fail`] must agree with: the lookup of every taxid of the
+    /// index with `names`, refused (`Err`).
     fn brute_force_may_refuse(db: &TaxDb) -> bool {
         let Some(files) = &db.files else {
             return false;
         };
         (0..files.count).any(|i| {
             let taxid = TaxDb::entry(files, i).unwrap().0;
-            match db.names(taxid, &mut Vec::new()) {
-                Err(_) => true,
-                Ok(Some(names)) => names.scientific_name.iter().any(|&b| b >= 0x80),
-                Ok(None) => false,
-            }
+            db.names(taxid, &mut Vec::new()).is_err()
         })
     }
 
@@ -1296,12 +1264,60 @@ mod tests {
             .all(|pair| pair[0].0 < pair[1].0 && pair[0].1 <= pair[1].1)
     }
 
+    /// The pass over the index answers as the lookups do on every fixture variant: never `false`
+    /// where the lookup of a taxid of the index, of a taxid next to one, or of the extremes fails;
+    /// and exactly the lookups' answer on the taxids of the index when the index is sorted. Of the
+    /// variants, `btd_empty` fails (every record past the mapped end); a record cut by the end of
+    /// the file inside its last page does not (`btd_truncated`, `offset_next_past_end`).
+    #[test]
+    fn the_pass_over_the_index_agrees_with_the_failing_lookups_on_every_variant() {
+        let (mut failing, mut clean) = (Vec::new(), 0);
+        let mut dirs: Vec<_> = std::fs::read_dir(fixture_dir())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.is_dir())
+            .collect();
+        dirs.sort();
+        for dir in dirs {
+            let variant = dir.file_name().unwrap().to_string_lossy().to_string();
+            let Ok(db) = open_fixture(&variant) else {
+                continue;
+            };
+            let pass = db.any_lookup_may_fail().unwrap();
+            let fails = |taxid: i32| db.names(taxid, &mut Vec::new()).is_err();
+            let indexed: Vec<i32> = db.files.as_ref().map_or(Vec::new(), |files| {
+                (0..files.count)
+                    .map(|i| TaxDb::entry(files, i).unwrap().0)
+                    .collect()
+            });
+            let near = indexed
+                .iter()
+                .flat_map(|&taxid| [taxid.wrapping_sub(1), taxid.wrapping_add(1)])
+                .chain([i32::MIN, -1, 0, 1, i32::MAX]);
+            assert!(
+                pass || !indexed.iter().copied().chain(near).any(fails),
+                "{variant}: the pass says no, a lookup fails"
+            );
+            if regular_layout(&db) {
+                assert_eq!(pass, indexed.iter().copied().any(fails), "{variant}");
+            }
+            if pass {
+                failing.push(variant);
+            } else {
+                clean += 1;
+            }
+        }
+        assert!(
+            failing.iter().any(|variant| variant == "btd_empty") && clean >= 20,
+            "{failing:?} {clean}"
+        );
+    }
+
     /// The one pass over the files answers as the lookup of every taxid does on every fixture
     /// variant: never `false` where a lookup refuses, and exactly the same when the index has the
     /// layout the pass relies on.
     #[test]
     fn one_pass_over_the_files_agrees_with_the_lookups_on_every_variant() {
-        let unwritable = |name: &[u8]| name.iter().any(|&b| b >= 0x80);
         let mut refusing = 0;
         let mut clean = 0;
         let mut dirs: Vec<_> = std::fs::read_dir(fixture_dir())
@@ -1316,7 +1332,7 @@ mod tests {
                 continue;
             };
             let brute = brute_force_may_refuse(&db);
-            let walk = db.any_lookup_may_refuse(&unwritable).unwrap();
+            let walk = db.any_lookup_may_fail().unwrap();
             assert!(
                 walk || !brute,
                 "{variant}: the pass says no, a lookup refuses"
@@ -1330,41 +1346,47 @@ mod tests {
                 clean += 1;
             }
         }
-        assert!(refusing >= 2 && clean >= 20, "{refusing} {clean}");
+        // `btd_empty` refuses (an empty taxdb.btd maps no page); a scientific name of any bytes is
+        // no refusal (the two `high_bytes_*` variants are clean); the test of the index's blocks
+        // (`the_pass_counts_entries_and_reads_past_one_index_block`) refuses past the first.
+        assert!(refusing >= 1 && clean >= 20, "{refusing} {clean}");
     }
 
     #[test]
-    fn the_pass_counts_entries_and_reads_past_one_window() {
+    fn the_pass_counts_entries_and_reads_past_one_index_block() {
         assert_eq!(open_fixture("good").unwrap().entry_count(), 7);
         assert_eq!(open_fixture("no_btd").unwrap().entry_count(), 0);
         assert_eq!(open_fixture("bad_magic").unwrap().entry_count(), 0);
-        // 70,000 entries (more than one block of the index) and about 20 MiB of records (more
-        // than two windows of the data), one with a byte >= 0x80 in its name near the end.
-        let dir = std::env::temp_dir().join(format!("losat_taxdb_walk_{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        // 70,000 entries (more than one block of the index); in the damaged copy the record of an
+        // entry near the end reaches past the mapped end of taxdb.btd (the two entries after it
+        // begin past the file's last page), which its lookup refuses.
         let n = 70_000u32;
-        let mut index = Vec::new();
-        index.extend(MAGIC.to_be_bytes());
-        index.extend(n.to_be_bytes());
-        index.extend([0u8; 16]);
         let mut data = Vec::new();
+        let mut offsets = Vec::new();
         for i in 0..n {
-            index.extend((i as i32 + 1).to_be_bytes());
-            index.extend((data.len() as u32).to_be_bytes());
-            let name = if i == n - 3 {
-                "caf\u{e9}".to_string()
-            } else {
-                format!("name {i}")
-            };
-            data.extend(format!("{name}\tc\tb\t{}K\n", "x".repeat(300)).as_bytes());
+            offsets.push(data.len() as u32);
+            data.extend(format!("name {i}\tc\tb\tK\n").as_bytes());
         }
-        std::fs::write(dir.join("taxdb.bti"), &index).unwrap();
-        std::fs::write(dir.join("taxdb.btd"), &data).unwrap();
-        let db = TaxDb::open(&path_of(&dir)).unwrap();
-        assert_eq!(db.entry_count(), u64::from(n));
-        let unwritable = |name: &[u8]| name.iter().any(|&b| b >= 0x80);
-        assert!(db.any_lookup_may_refuse(&unwritable).unwrap());
-        assert!(!db.any_lookup_may_refuse(&|_| false).unwrap());
-        std::fs::remove_dir_all(&dir).unwrap();
+        let past = (data.len().div_ceil(MAP_PAGE as usize) * MAP_PAGE as usize + 4096) as u32;
+        let mut damaged = offsets.clone();
+        damaged[n as usize - 2] = past;
+        damaged[n as usize - 1] = past;
+        for (tag, offsets, refuses) in [("walk", &offsets, false), ("walkpast", &damaged, true)] {
+            let dir = temp_dir(tag);
+            let mut index = Vec::new();
+            index.extend(MAGIC.to_be_bytes());
+            index.extend(n.to_be_bytes());
+            index.extend([0u8; 16]);
+            for (i, offset) in offsets.iter().enumerate() {
+                index.extend((i as i32 + 1).to_be_bytes());
+                index.extend(offset.to_be_bytes());
+            }
+            std::fs::write(dir.join("taxdb.bti"), &index).unwrap();
+            std::fs::write(dir.join("taxdb.btd"), &data).unwrap();
+            let db = TaxDb::open(&path_of(&dir)).unwrap();
+            assert_eq!(db.entry_count(), u64::from(n));
+            assert_eq!(db.any_lookup_may_fail().unwrap(), refuses, "{tag}");
+            assert_eq!(brute_force_may_refuse(&db), refuses, "{tag}");
+        }
     }
 }

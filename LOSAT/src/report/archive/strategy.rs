@@ -1,0 +1,1257 @@
+//! The search strategy file (`-export_search_strategy`): the `Blast4-request` of each query
+//! batch, in ASN.1 text.
+//!
+//! NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:636-651
+//! ```c++
+//! void
+//! SaveSearchStrategy(const CArgs& args,
+//!                    blast::CBlastAppArgs* cmdline_args,
+//!                    CRef<blast::IQueryFactory> queries,
+//!                    CRef<blast::CBlastOptionsHandle> opts_hndl,
+//!                    CRef<objects::CPssmWithParameters> pssm
+//!                      /* = CRef<objects::CPssmWithParameters>() */,
+//!                     unsigned int num_iters /* =0 */)
+//! {
+//!     CNcbiOstream* out = cmdline_args->GetExportSearchStrategyStream(args);
+//!     if ( !out ) {
+//!         return;
+//!     }
+//!
+//!     s_ExportSearchStrategy(out, queries, opts_hndl,
+//!                            cmdline_args->GetBlastDatabaseArgs(),
+//!                            pssm, num_iters);
+//! }
+//! ```
+//! NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:366-369
+//! ```c++
+//! void CExportStrategy::ExportSearchStrategy_ASN1(CNcbiOstream* out)
+//! {
+//! 	*out << MSerial_AsnText << *GetSearchStrategy();
+//! }
+//! ```
+//! The applications call `SaveSearchStrategy` for every query batch, before the batch's
+//! search (blastp_app.cpp:262, blastn_app.cpp:282, blastx_app.cpp:264, tblastn_app.cpp:280,
+//! tblastx_app.cpp:181): the file holds one `Blast4-request` per batch. `CExportStrategy` also
+//! builds the request of the archive (outfmt 11, build_archive.cpp:156-200), after the search.
+//! The strategy's request therefore differs from the archive's of the same batch in what the
+//! search changes (NCBI BLAST+ 2.17.0, 418 runs of the RG-F1 probe):
+//!
+//! - no `ident` (the applications pass no client id, blast_app_util.cpp:335-337);
+//! - `EffectiveSearchSpace` is the option as it stands before the batch: `-searchsp` as typed in
+//!   the first request, else absent there, and the value of the batch before in the later ones
+//!   (the options handle is shared by the batches);
+//! - blastn's `LCaseMask` parameters hold the lower-case runs of `-lcase_masking` only; the
+//!   archive's also hold the DUST intervals that the search added to the query's masks.
+//!
+//! `ARCHIVE_FORMAT` does not change the file: it is always ASN.1 text.
+//!
+//! Which requests the file holds when a run stops follows from where they are written: the
+//! programs that take their batches one at a time (BLASTN, TBLASTX, TBLASTN, BLASTX) write a
+//! batch's request where NCBI does, once the batch is read and is not empty and before any error
+//! of its set-up, search or reports is acted on (TBLASTN, TBLASTX and BLASTX may have searched the
+//! batch ahead; only the order of the file and of what the run writes matters), so a batch that
+//! fails after that point has its request and the batches after it have none; BLASTP, which
+//! searches the batches of a call together, releases them where the call ends, up to the batch
+//! that ends it. One cursor of the run (`State::next_query`), keyed by the run's index of each
+//! batch's first query, keeps every request written once and in order (a batch searched again
+//! writes none), and the batch's searched space moves the next request's `EffectiveSearchSpace`
+//! option (`note_searched`), with what the batch's set-up sets in the options handle (RPS's
+//! database length and `.aux` costs, `OptionsHandle::pass`). A broken order is LOSAT's internal
+//! error, not a file that differs. NCBI writes a batch's reports before the next batch's request,
+//! while LOSAT may search later batches first (BLASTP's calls, the XML documents that keep every
+//! report to the run's end): the run marks where it writes each batch's start (the request's mark
+//! among the batch's posts, `diag_log::Posts::request`), and a run that NCBI's error ends there
+//! (an exception of the XML stream in a report) has the file cut back to the requests of the
+//! batches reached (`end_run`).
+//!
+//! The applications whose search is another program's write their own requests through the same
+//! cursor (`options::RequestKind`): psiblast with a FASTA query one per query (BLASTP's batches
+//! of one query, or `psi_round`'s rounds, before the query's first round), rpsblast BLASTP's,
+//! rpstblastn BLASTX's. A PSSM query (psiblast's and tblastn's `-in_pssm`) is one query whose
+//! request holds the PSSM as the application read it (`requests::RunRequests::with_pssm_query`).
+//! NCBI makes that request only with `-db`: with `-subject` its `SaveSearchStrategy` stops the run
+//! with "Remote PSI-BL2SEQ is not supported", which the programs raise where NCBI does, after the
+//! prolog (`blastp::blast_engine::psiblast_stop_at_pssm_query`, `tblastn::tblastn_app`).
+
+use std::io::Write;
+use std::ops::Range;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+
+use anyhow::Result;
+
+use super::options::OptionInputs;
+use super::writer::{write_strategy_request, RequestInputs};
+use super::{ArchiveRequest, HandleCarry, OptionsHandle, SearchedContext0};
+use crate::report::diag_log::{Posts, ERROR};
+
+/// A writer that counts the bytes written through it to `inner` (the strategy file's ends of
+/// requests, `State::unreached`).
+struct Counted<'a, W: Write + ?Sized> {
+    inner: &'a mut W,
+    written: u64,
+}
+
+impl<W: Write + ?Sized> Write for Counted<'_, W> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let n = self.inner.write(bytes)?;
+        self.written += n as u64;
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+/// The stream of a strategy file: a writer whose written bytes can be cut back (`truncate`) where
+/// it is a regular file (`can_cut`).
+pub trait StrategySink: Write + Send {
+    /// Cuts the file back to its first `len` bytes, after the bytes buffered are written.
+    fn truncate(&mut self, len: u64) -> std::io::Result<()>;
+
+    /// Whether `truncate` can cut it: a regular file (not a FIFO, a pipe, a terminal or another
+    /// device, whose bytes are gone once written).
+    fn can_cut(&self) -> bool;
+}
+
+impl StrategySink for std::io::BufWriter<std::fs::File> {
+    fn truncate(&mut self, len: u64) -> std::io::Result<()> {
+        self.flush()?;
+        self.get_ref().set_len(len)
+    }
+
+    fn can_cut(&self) -> bool {
+        self.get_ref()
+            .metadata()
+            .is_ok_and(|metadata| metadata.file_type().is_file())
+    }
+}
+
+struct State {
+    sink: Box<dyn StrategySink>,
+    /// The requests made for a sink that cannot be cut (`StrategySink::can_cut`), by the run's
+    /// first query of each one's batch, in order, until the run reaches their batches' starts
+    /// (`release_through`) or ends (`end_run`): such a sink gets only the requests NCBI writes.
+    /// `None` for a regular file, which gets each request where it is made and is cut back.
+    held: Option<std::collections::VecDeque<(usize, Vec<u8>)>>,
+    /// The bytes written to `sink`.
+    written: u64,
+    /// The end in the file of the last request whose batch's start the run reached
+    /// (`release_through`).
+    reached: u64,
+    /// What the searches set in the options handle after the batches noted so far
+    /// (`note_searched`).
+    carry: HandleCarry,
+    /// The run's searched queries whose batches' requests are written: the next request starts
+    /// here.
+    next_query: usize,
+    /// The run's searched queries whose batches' searched spaces moved `carry`.
+    noted_through: usize,
+    /// No request starts at or after this query (`stop_after`; `usize::MAX` without a stop).
+    stop: usize,
+    /// The request of each batch written (`write_with`), by the run's first query of the batch,
+    /// with NCBI's posts of the bytes that ASN.1 text replaced in it, until the run takes them
+    /// (`take_posts`) to write them where the batch starts: a request mark (`Posts::request`) and
+    /// the posts.
+    pending: Vec<(usize, Posts)>,
+    /// The end in the file of each request written that the run has not reached yet
+    /// (`release_through`), by the run's first query of its batch, in order.
+    unreached: std::collections::VecDeque<(usize, u64)>,
+}
+
+struct Shared {
+    request: ArchiveRequest,
+    /// The run's options handle, shared with the run's archive (`OptionsHandle`).
+    options: OptionsHandle,
+    state: Mutex<State>,
+}
+
+/// What a run with `-export_search_strategy` holds: the request of its options and the file.
+#[derive(Clone)]
+pub struct StrategyExport(Arc<Shared>);
+
+impl std::fmt::Debug for StrategyExport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StrategyExport").finish_non_exhaustive()
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3560-3569
+// ```c++
+// CNcbiOstream*
+// CSearchStrategyArgs::GetExportStream(const CArgs& args) const
+// {
+//     CNcbiOstream* retval = NULL;
+//     if (args.Exist(kArgOutputSearchStrategy) &&
+//         args[kArgOutputSearchStrategy].HasValue()) {
+//         retval = &args[kArgOutputSearchStrategy].AsOutputFile();
+//     }
+//     return retval;
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
+// ```c++
+//     if (GetExportSearchStrategyStream(args) ||
+//            m_FormattingArgs->ArchiveFormatRequested(args)) {
+//         locality = CBlastOptions::eBoth;
+//     }
+// ```
+/// Creates (and empties) the strategy file where NCBI's `SetOptions` does: after the argument
+/// parser accepted the command line and before any option handler runs, so before the
+/// `-outfmt` text is read, the database list is resolved, and `-subject`, `-query` and `-out`
+/// are opened. A file that cannot be created is NCBI's argument error (exit status 1).
+///
+/// `out` is the `-out` argument. LOSAT refuses a strategy file that is the standard output
+/// (`-`) or the same file as the standard output or `-out`: NCBI writes each request to the
+/// output's stream before the batch's report (`-`), or to a second stream on the same file,
+/// whose bytes then replace or are replaced by the report's as the two buffers are flushed.
+pub fn create_strategy_file(path: &Path, out: Option<&Path>, label: &str) -> Result<std::fs::File> {
+    if path.as_os_str() == "-" {
+        anyhow::bail!(
+            "-export_search_strategy - (the search strategy on the standard output, between the parts of the report) is not supported by LOSAT's {label}; give a file name"
+        );
+    }
+    let file = std::fs::File::create(path)
+        .map_err(|_| crate::cli::inaccessible("export_search_strategy", path))?;
+    if is_same_as_output(&file, path, out) {
+        anyhow::bail!(
+            "an -export_search_strategy file that is also the output (-out or the standard output) is not supported by LOSAT's {label}: NCBI writes both through separate streams and the file's bytes follow the order of their flushes"
+        );
+    }
+    Ok(file)
+}
+
+/// Whether the created strategy `file` is the file of `-out` (which exists then: NCBI creates
+/// it later) or of the standard output.
+#[cfg(unix)]
+fn is_same_as_output(file: &std::fs::File, _path: &Path, out: Option<&Path>) -> bool {
+    use std::os::fd::AsFd;
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    let Ok(own) = file.metadata() else {
+        return false;
+    };
+    // The null device: what NCBI writes there is lost whatever the order of the writes.
+    if own.file_type().is_char_device()
+        && std::fs::metadata("/dev/null").is_ok_and(|null| null.rdev() == own.rdev())
+    {
+        return false;
+    }
+    let same = |other: std::io::Result<std::fs::Metadata>| {
+        other.is_ok_and(|other| other.dev() == own.dev() && other.ino() == own.ino())
+    };
+    let stdout_is_report = out.is_none_or(|out| out.as_os_str() == "-");
+    match out.filter(|out| out.as_os_str() != "-") {
+        Some(out) if same(std::fs::metadata(out)) => return true,
+        _ => {}
+    }
+    stdout_is_report
+        && std::io::stdout()
+            .as_fd()
+            .try_clone_to_owned()
+            .is_ok_and(|fd| same(std::fs::File::from(fd).metadata()))
+}
+
+#[cfg(not(unix))]
+fn is_same_as_output(_file: &std::fs::File, path: &Path, out: Option<&Path>) -> bool {
+    let (Some(out), Ok(own)) = (
+        out.filter(|out| out.as_os_str() != "-"),
+        std::fs::canonicalize(path),
+    ) else {
+        return false;
+    };
+    std::fs::canonicalize(out).is_ok_and(|out| out == own)
+}
+
+/// The arguments that make the `HitlistSize` option of a run's requests besides its format
+/// (`StrategyExport::for_run`).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct HitlistArgs {
+    pub max_target_seqs: Option<usize>,
+    pub num_descriptions: Option<usize>,
+    pub num_alignments: Option<usize>,
+}
+
+/// The `HitlistSize` option of a run of format `outfmt` (`report_counts`): the archive's is that
+/// of outfmt 11, while outfmt 0 to 4 take the larger of `-num_descriptions` and `-num_alignments`
+/// (blast_args.cpp:2910-2936, probe `nd` of RG-F1).
+pub(crate) fn hitlist_size(outfmt: i32, counts: HitlistArgs) -> i32 {
+    crate::blastinput::report_counts::report_counts(
+        outfmt,
+        counts.max_target_seqs,
+        counts.num_descriptions,
+        counts.num_alignments,
+    )
+    .hitlist_size as i32
+}
+
+/// The strategy file of a run's `-export_search_strategy` argument (`path`), created where NCBI
+/// creates it (`create_strategy_file`), or `None` without the argument. A file name that is not
+/// UTF-8 is refused first (`check_utf8_file_name`). `out` is the `-out` argument; `label` names
+/// the program in a refusal.
+pub fn open_strategy_file(
+    path: Option<&Path>,
+    out: Option<&Path>,
+    label: &str,
+) -> Result<Option<std::fs::File>> {
+    path.map(|path| {
+        crate::blastinput::input_files::check_utf8_file_name(
+            path,
+            "export_search_strategy",
+            label,
+        )?;
+        create_strategy_file(path, out, label)
+    })
+    .transpose()
+}
+
+impl StrategyExport {
+    /// The export of a run of `inputs.kind` into `sink` (`create_strategy_file`). `database`
+    /// is the `-db` argument as NCBI keeps it (`None` for `-subject`); `options` is the run's
+    /// options handle, which its archive shares. The request is the archive's
+    /// (`ArchiveRequest::for_inputs`).
+    pub fn new(
+        sink: Box<dyn StrategySink>,
+        inputs: &OptionInputs,
+        database: Option<&str>,
+        options: OptionsHandle,
+    ) -> Self {
+        Self(Arc::new(Shared {
+            request: ArchiveRequest::for_inputs(inputs, database),
+            options,
+            state: Mutex::new(State {
+                held: (!sink.can_cut()).then(std::collections::VecDeque::new),
+                sink,
+                written: 0,
+                reached: 0,
+                carry: HandleCarry::default(),
+                next_query: 0,
+                noted_through: 0,
+                stop: usize::MAX,
+                pending: Vec::new(),
+                unreached: std::collections::VecDeque::new(),
+            }),
+        }))
+    }
+
+    /// The export of a run into its strategy file (`open_strategy_file`), buffered: the program's
+    /// recorded options `inputs` with the `HitlistSize` of the run's format `outfmt` and `counts`
+    /// (the archive's is outfmt 11's), and the run's options handle `options` (made once per run
+    /// and given to its archive too, `ArchiveHandle::for_program`).
+    pub fn for_run(
+        file: std::fs::File,
+        mut inputs: OptionInputs,
+        outfmt: i32,
+        counts: HitlistArgs,
+        database: Option<&str>,
+        options: &OptionsHandle,
+    ) -> Self {
+        inputs.hitlist_size = hitlist_size(outfmt, counts);
+        Self::new(
+            Box::new(std::io::BufWriter::new(file)),
+            &inputs,
+            database,
+            options.clone(),
+        )
+    }
+
+    /// The run's options handle.
+    pub fn options(&self) -> &OptionsHandle {
+        &self.0.options
+    }
+
+    fn with_state<R>(&self, f: impl FnOnce(&mut State) -> R) -> R {
+        let mut state = self
+            .0
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        f(&mut state)
+    }
+
+    /// Whether the request of the batch of the run's queries `queries` is still to be written:
+    /// not one already written (a batch that a run searches again, or a later part of a batch the
+    /// search split) and none at or after the run's stop (`stop_after`).
+    pub fn takes(&self, queries: Range<usize>) -> bool {
+        self.with_state(|state| state.takes(&queries))
+    }
+
+    /// The run's searched queries whose batches' requests are written.
+    pub fn written_through(&self) -> usize {
+        self.with_state(|state| state.next_query)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:259-288
+    // ```c++
+    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+    //
+    //             SaveSearchStrategy(args, m_CmdLineArgs, queries, m_OptsHndl);
+    //             ...
+    //                 results = lcl_blast.Run();
+    //             ...
+    //                 ITERATE(CSearchResultSet, result, *results) {
+    //                     formatter.PrintOneResultSet(**result, query_batch);
+    //                 }
+    // ```
+    /// Makes the request of the batch of the run's searched queries `queries`, where NCBI writes
+    /// it: after the batch is read and made a query factory, before its search. `make` builds the
+    /// request (from the batch's records, `requests::RunRequests`) and hands it to its argument,
+    /// which writes it with what the batches before set in the options handle (`note_searched`),
+    /// all under one lock, and the file is complete after it (the command line's exit does not run
+    /// destructors). NCBI writes a batch's request, searches the batch and writes its reports
+    /// before the next batch's request, so a run that its reports end (an exception of the XML
+    /// stream, a failed write) has the requests up to that batch; LOSAT may search several batches
+    /// before their reports (BLASTP's calls, the XML documents that hold every report until the
+    /// run's end). So the run marks where it reaches each batch's start, with NCBI's posts of the
+    /// bytes that ASN.1 text replaced in the batch's request (`replaced_posts`): the request mark
+    /// that `take_posts` hands out with them (`Posts::write`, `release_through`); `end_run` cuts the
+    /// file back to the requests reached when NCBI's error ends the run. (Holding the requests'
+    /// bytes until then instead would keep every request of a BLASTN XML run in memory: 2.6 MB on a
+    /// run of 82 MB, review 1 of K4h gap 2; so only a sink that cannot be cut holds them,
+    /// `State::held`.)
+    /// Returns false, calling nothing, when the request is not to be written (`takes`). The
+    /// requests are made in the run's order, each starting where the one before ended, after
+    /// the batch before was noted; anything else is LOSAT's internal error.
+    pub fn write_with(
+        &self,
+        queries: Range<usize>,
+        make: impl FnOnce(&mut dyn FnMut(&RequestInputs<'_>) -> Result<()>) -> Result<()>,
+    ) -> Result<bool> {
+        self.with_state(|state| {
+            if !state.takes(&queries) {
+                return Ok(false);
+            }
+            anyhow::ensure!(
+                queries.start == state.next_query && state.noted_through == state.next_query,
+                "LOSAT internal error: the search strategy's request of the queries {queries:?} does not follow the requests written ({}) and noted ({})",
+                state.next_query,
+                state.noted_through
+            );
+            let shared = &self.0;
+            let mut posts = Posts::request(self.clone(), queries.start);
+            let mut made_one = false;
+            let made = make(&mut |request| {
+                let sets = shared.options.request_sets(&state.carry);
+                // A sink that cannot be cut gets the request where the run reaches its batch.
+                let mut held = Vec::new();
+                let mut counted = Counted {
+                    inner: match state.held {
+                        Some(_) => &mut held as &mut dyn Write,
+                        None => &mut *state.sink as &mut dyn Write,
+                    },
+                    written: 0,
+                };
+                let written = write_strategy_request(
+                    &mut counted,
+                    &shared.request,
+                    request,
+                    &sets,
+                    &shared.options.strategy_database_params(),
+                    |replaced| {
+                        posts.append(&replaced_posts(shared.request.application, replaced));
+                        Ok(())
+                    },
+                );
+                let flushed = match state.held.as_mut() {
+                    Some(requests) => {
+                        requests.push_back((queries.start, held));
+                        Ok(())
+                    }
+                    None => {
+                        state.written += counted.written;
+                        state.sink.flush()
+                    }
+                };
+                state.unreached.push_back((queries.start, state.written));
+                state.next_query = queries.end;
+                made_one = true;
+                written?;
+                flushed?;
+                Ok(())
+            });
+            if made_one {
+                state.pending.push((queries.start, posts));
+            }
+            made?;
+            Ok(true)
+        })
+    }
+
+    /// The run reaches the start of the batch whose first query (the run's) is `first`
+    /// (`Posts::write` of its request mark), after the reports of the batches before it: the
+    /// requests of the batches through it are NCBI's whatever ends the run (`end_run`); a sink
+    /// that cannot be cut gets them here.
+    pub(crate) fn release_through(&self, first: usize) -> std::io::Result<()> {
+        self.with_state(|state| {
+            while let Some(&(at, end)) = state.unreached.front() {
+                if at > first {
+                    break;
+                }
+                state.reached = end;
+                state.unreached.pop_front();
+            }
+            state.write_held(|at| at <= first)
+        })
+    }
+
+    /// Whether `other` is this export (`Posts`'s request marks compare by it).
+    pub(crate) fn same(&self, other: &StrategyExport) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+
+    /// `write_with` of a request already made.
+    #[cfg(test)]
+    pub fn write_request(
+        &self,
+        queries: Range<usize>,
+        request: &RequestInputs<'_>,
+    ) -> Result<bool> {
+        self.write_with(queries, |write| write(request))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-282
+    // ```c++
+    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
+    // 	    BLAST_PROF_START( APP.LOOP.PRE );
+    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+    //
+    //             SaveSearchStrategy(args, m_CmdLineArgs, queries, m_OptsHndl);
+    // ```
+    /// Takes the posts of the requests written for the batches whose first query (the run's) is
+    /// below `before`, in the run's order, each with that query: the request's mark (which marks the
+    /// request reached where the run writes it, `release_through`) and NCBI's posts of its replaced
+    /// bytes.
+    /// NCBI writes the request and posts them after it read the batch (the reader's messages of
+    /// its records) and before the batch's search, so after the reports of the batch before; the
+    /// run writes them there, with the posts before the first query's report (`QueryWarnings`),
+    /// or before the error that stops the batch.
+    pub fn take_posts(&self, before: usize) -> Vec<(usize, Posts)> {
+        self.with_state(|state| {
+            let taken = state.pending.partition_point(|&(first, _)| first < before);
+            state.pending.drain(..taken).collect()
+        })
+    }
+
+    /// Every post that `take_posts` would take, as one sequence.
+    pub fn take_all_posts(&self) -> Posts {
+        let mut all = Posts::new();
+        for (_, posts) in self.take_posts(usize::MAX) {
+            all.append(&posts);
+        }
+        all
+    }
+
+    /// Writes every post waiting (`take_all_posts`) to the run's diagnostics `diagnostics`, each
+    /// whole post a message of the run's archive `archive`, and their requests reached
+    /// (`Posts::write`): where the run writes the start of the batch whose request was written
+    /// last, after its reader's messages and before its error.
+    pub fn write_posts(
+        &self,
+        diagnostics: &mut dyn Write,
+        archive: Option<&super::ArchiveHandle>,
+    ) -> std::io::Result<()> {
+        self.take_all_posts().write(diagnostics, archive)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:177-181
+    // ```c++
+    //     vector<Int8> eff_searchsp;
+    //     for (size_t index = 0; index <= (size_t)qinfo->last_context; index++) {
+    //         eff_searchsp.push_back(calc.GetEffSearchSpaceForContext(index));
+    //     }
+    //     options->SetEffectiveSearchSpace(eff_searchsp);
+    // ```
+    /// Moves what the requests after the batch of the run's searched queries `queries` hold of the
+    /// options handle past that batch, once the batch's set-up has written it into the handle
+    /// (above; `OptionsHandle::pass`: the set-up's parameters, then the search space): `searched`
+    /// is the batch's context 0 when NCBI searched the batch (the archive's
+    /// `BatchArchive::searched_space`, from the same values), `None` for a batch NCBI does not
+    /// search. A batch noted already (a search of the batches again, psiblast's later rounds of a
+    /// query) is not passed again; a batch noted out of the run's order is LOSAT's internal error.
+    pub fn note_searched(
+        &self,
+        queries: Range<usize>,
+        searched: Option<SearchedContext0>,
+    ) -> Result<()> {
+        self.with_state(|state| {
+            if queries.end <= state.noted_through {
+                return Ok(());
+            }
+            anyhow::ensure!(
+                queries.start == state.noted_through,
+                "LOSAT internal error: the search strategy's batch of the queries {queries:?} is noted after the batches through {}",
+                state.noted_through
+            );
+            self.0.options.pass(&mut state.carry, searched);
+            state.noted_through = queries.end;
+            Ok(())
+        })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218
+    // ```c++
+    //     else {
+    //         string prog_name = Blast_ProgramNameFromType(
+    //                                            m_Options.GetProgramType());
+    //         if (prog_name != "blastn" && prog_name != "megablast") {
+    //             NCBI_THROW(blast::CBlastException, eInvalidArgument,
+    //                         "unsupported score matrix");
+    // ```
+    /// NCBI stops the run when it formats the batch whose queries end at `queries_end`, after
+    /// that batch's request (the BLAST XML report data of a matrix name it does not know,
+    /// `blast_xml::matrix::XmlMatrixFailure`, `QueryBatches::xml_matrix_request_end`): no request
+    /// of a later batch is written.
+    pub fn stop_after(&self, queries_end: usize) {
+        self.with_state(|state| state.stop = state.stop.min(queries_end));
+    }
+}
+
+// No NCBI counterpart: NCBI posts while it writes the request, so no post can wait there.
+/// The end of a run of a program with `-export_search_strategy` (`strategy`; `None` without
+/// it). The requests written (`StrategyExport::write_with`) whose batches' starts the run did not
+/// reach: a run that ends with one of NCBI's errors (`cli::NativeError`) ended before those starts,
+/// where NCBI's run ends before it writes them (its reports' exception, or a later batch's error,
+/// whose batch's start the run writes before the error), so the file is cut back to the requests
+/// reached; a run that ends with `Ok` keeps them all, as NCBI writes every request (and so does a
+/// refusal of LOSAT's, whose file is not NCBI's). A strategy file that cannot be cut (a FIFO, a
+/// pipe, a terminal: `StrategySink::can_cut`) has got only the requests reached
+/// (`StrategyExport::release_through`): the others are dropped at NCBI's error, written at any
+/// other end. A regular file that fails to be cut is LOSAT's error, not a file with requests that
+/// NCBI does not write. A run that ends as NCBI's (`Ok` or NCBI's error)
+/// has written every post of its requests at its batch's start (`StrategyExport::take_posts`), so
+/// a post still waiting is LOSAT's internal error instead of output that silently lacks it.
+/// LOSAT's refusals (any other error) keep their own text. Each program calls this once, where
+/// its run's result is known (`blastn`, `blastp` for psiblast and rpsblast too, `blastx` for
+/// rpstblastn too, `tblastn`, `tblastx`).
+pub fn end_run(strategy: Option<&StrategyExport>, result: Result<()>) -> Result<()> {
+    let Some(strategy) = strategy else {
+        return result;
+    };
+    let native = matches!(&result, Err(error) if error.is::<crate::cli::NativeError>());
+    let ended = strategy.with_state(|state| -> std::io::Result<()> {
+        state.unreached.clear();
+        if !native {
+            return state.write_held(|_| true);
+        }
+        if let Some(held) = state.held.as_mut() {
+            held.clear();
+        }
+        if state.written > state.reached {
+            state.sink.truncate(state.reached)?;
+            state.written = state.reached;
+        }
+        Ok(())
+    });
+    if let Err(error) = ended {
+        // A refusal of LOSAT's keeps its own text.
+        if result.is_err() && !native {
+            return result;
+        }
+        return Err(anyhow::anyhow!(
+            "LOSAT could not end the -export_search_strategy file with the requests NCBI BLAST+ writes ({error})"
+        ));
+    }
+    if result.is_err() && !native {
+        return result;
+    }
+    let waiting = strategy.with_state(|state| {
+        state
+            .pending
+            .iter()
+            .find(|(_, posts)| posts.has_text())
+            .map(|&(first, _)| first)
+    });
+    match waiting {
+        Some(first) => Err(anyhow::anyhow!(
+            "LOSAT internal error: the run ended ({}) with NCBI's posts of the search strategy request of the batch from query {first} not written",
+            match &result {
+                Ok(()) => "exit status 0".to_string(),
+                Err(error) => error.to_string().trim_end().to_string(),
+            }
+        )),
+        None => result,
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1172
+// ```c++
+// void CBlastAppDiagHandler::Post(const SDiagMessage & mess)
+// {
+// 	if(m_handler != NULL) {
+// 		m_handler->Post(mess);
+// 	}
+// 	if(m_save) {
+// 		CRef<CBlast4_error> d(new CBlast4_error);
+// 		string m;
+// 		mess.Write(m);
+// 		d->SetMessage(NStr::Sanitize(m));
+// 		d->SetCode((int)mess.m_Severity);
+// ```
+/// NCBI's posts of the bytes that ASN.1 text replaced in a request of a run of the application
+/// `application` (`encoder::ReplacedChar`, with its prefix, `ArchiveRequest::application`): one
+/// error post each, which the
+/// application's handler also saves as a message of the batch's archive (outfmt 11) when it
+/// writes one (`Posts::write`; the archive's own posts are not saved, `super::post_replaced`).
+/// NCBI posts them while it writes the request, after it read the batch (whose reader messages
+/// come first) and before the batch's search: blastn_app.cpp:277-282.
+fn replaced_posts(
+    application: &str,
+    replaced: &[crate::report::serial::encoder::ReplacedChar],
+) -> Posts {
+    let mut posts = Posts::new();
+    for byte in replaced {
+        posts.post(ERROR, byte.post(Some(application)));
+    }
+    posts
+}
+
+impl State {
+    // No NCBI counterpart: NCBI writes each request to its file before the batch's search
+    // (blastp_app.cpp:259-262, quoted at `StrategyExport::write_with`); LOSAT, which may search
+    // later batches before an earlier batch's report ends the run, holds them for a sink it
+    // cannot cut back.
+    /// Writes to a sink that cannot be cut its held requests whose batches' first queries pass
+    /// `through` (`State::held`), in order, then flushes it.
+    fn write_held(&mut self, through: impl Fn(usize) -> bool) -> std::io::Result<()> {
+        let Some(held) = self.held.as_mut() else {
+            return Ok(());
+        };
+        let mut wrote = false;
+        while held.front().is_some_and(|(at, _)| through(*at)) {
+            if let Some((_, bytes)) = held.pop_front() {
+                self.sink.write_all(&bytes)?;
+                wrote = true;
+            }
+        }
+        if wrote {
+            self.sink.flush()?;
+        }
+        Ok(())
+    }
+
+    /// `StrategyExport::takes`.
+    fn takes(&self, queries: &Range<usize>) -> bool {
+        queries.end > self.next_query && queries.start < self.stop
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::blastinput::app::Program;
+    use crate::report::archive::bioseq::BioseqInput;
+    use crate::report::archive::masks::{Frame, MaskEntry};
+    use crate::report::archive::ArchiveHandle;
+
+    /// The strategy file's bytes, which the test reads while the export writes them.
+    #[derive(Clone, Default)]
+    struct Sink(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Sink {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl StrategySink for Sink {
+        fn truncate(&mut self, len: u64) -> std::io::Result<()> {
+            self.0.lock().unwrap().truncate(len as usize);
+            Ok(())
+        }
+
+        fn can_cut(&self) -> bool {
+            true
+        }
+    }
+
+    impl Sink {
+        fn text(&self) -> String {
+            String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
+        }
+    }
+
+    /// A searched batch whose context 0 has the search space `space` (a query of 142 letters).
+    fn searched(space: i64) -> Option<crate::report::archive::SearchedContext0> {
+        Some(crate::report::archive::SearchedContext0 {
+            space,
+            query_length: 142,
+        })
+    }
+
+    fn request<'a>(
+        queries: &'a [BioseqInput<'a>],
+        lcase_masks: &'a [MaskEntry],
+    ) -> RequestInputs<'a> {
+        RequestInputs {
+            queries: crate::report::archive::writer::RequestQueries::Bioseqs(queries),
+            subjects: &[],
+            required: None,
+            lcase_masks,
+        }
+    }
+
+    fn protein<'a>(id: &'a str, letters: &'a [u8]) -> BioseqInput<'a> {
+        BioseqInput {
+            id,
+            ids: None,
+            seq_loc: None,
+            defline: std::borrow::Cow::Borrowed(b">q a query"),
+            title: b"q a query",
+            letters,
+            protein: true,
+        }
+    }
+
+    /// A BLASTP export into a sink, with its own options handle (`searchsp`: `-searchsp`).
+    fn export(searchsp: Option<i64>) -> (StrategyExport, Sink) {
+        let sink = Sink::default();
+        let mut inputs = OptionInputs::new(Program::Blastp, "blastp");
+        inputs.searchsp = searchsp;
+        let export = StrategyExport::new(
+            Box::new(sink.clone()),
+            &inputs,
+            Some("in/db/bp"),
+            OptionsHandle::default(),
+        );
+        (export, sink)
+    }
+
+    // NCBI BLAST+ 2.17.0, `blastp -query q.faa -db in/db/bp -export_search_strategy f` with a
+    // query `>q a query` / `MWCHWCMWCHWC` (the layout of the RG-F1 probe's blastp.d.plain.ss).
+    const FIRST: &str = "Blast4-request ::= {\n  body queue-search {\n    program \"blastp\",\n    service \"plain\",\n    queries bioseq-set {\n      seq-set {\n        seq {\n          id {\n            local str \"Query_1\"\n          },\n          descr {\n            user {\n              type str \"CFastaReader\",\n              data {\n                {\n                  label str \"DefLine\",\n                  data str \">q a query\"\n                }\n              }\n            },\n            title \"q a query\"\n          },\n          inst {\n            repr raw,\n            mol aa,\n            length 12,\n            seq-data ncbieaa \"MWCHWCMWCHWC\"\n          }\n        }\n      }\n    },\n    subject database \"in/db/bp\",\n    algorithm-options {\n      {\n        name \"EvalueThreshold\",\n        value cutoff e-value { 1, 10, 1 }\n      },\n      {\n        name \"MaskAtHash\",\n        value boolean FALSE\n      },\n      {\n        name \"SegFiltering\",\n        value boolean FALSE\n      },\n      {\n        name \"WordThreshold\",\n        value integer 11\n      },\n      {\n        name \"WindowSize\",\n        value integer 40\n      },\n      {\n        name \"HitlistSize\",\n        value integer 500\n      },\n      {\n        name \"UngappedMode\",\n        value boolean FALSE\n      },\n      {\n        name \"CompositionBasedStats\",\n        value integer 2\n      },\n      {\n        name \"SmithWatermanMode\",\n        value boolean FALSE\n      }\n    }\n  }\n}\n";
+
+    fn with_space(space: i64) -> String {
+        FIRST.replace(
+            "        value boolean FALSE\n      }\n    }\n  }\n}\n",
+            &format!(
+                "        value boolean FALSE\n      }},\n      {{\n        name \"EffectiveSearchSpace\",\n        value big-integer {space}\n      }}\n    }}\n  }}\n}}\n"
+            ),
+        )
+    }
+
+    /// One request per batch, without `ident`; the `EffectiveSearchSpace` option is absent in
+    /// the first request and is the batch before's in the next ones, also after a batch that
+    /// was not searched.
+    #[test]
+    fn each_batch_is_a_request_with_the_search_space_of_the_batch_before() {
+        let (export, sink) = export(None);
+        let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
+        assert!(export.write_request(0..1, &request(&queries, &[])).unwrap());
+        assert_eq!(sink.text(), FIRST);
+        export.note_searched(0..1, searched(817_380)).unwrap();
+        for (at, searched) in [(1, None), (2, searched(5)), (3, None)] {
+            assert!(export
+                .write_request(at..at + 1, &request(&queries, &[]))
+                .unwrap());
+            export.note_searched(at..at + 1, searched).unwrap();
+        }
+        assert_eq!(
+            sink.text(),
+            [
+                FIRST.to_string(),
+                with_space(817_380),
+                with_space(817_380),
+                with_space(5)
+            ]
+            .concat()
+        );
+    }
+
+    /// `-searchsp` is in the first request as typed and keeps its place in the next ones, with
+    /// the batch before's value; a database list that keeps no sequence makes that value 0.
+    #[test]
+    fn searchsp_keeps_its_place_and_an_empty_database_gives_zero() {
+        let (export, sink) = export(Some(1_000_000));
+        let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
+        let mask = MaskEntry {
+            id: "Query_1".to_string(),
+            best: None,
+            frame: Frame::NotSet,
+            intervals: vec![(2, 5)],
+        };
+        export
+            .write_request(0..1, &request(&queries, std::slice::from_ref(&mask)))
+            .unwrap();
+        export.note_searched(0..1, searched(1_000_000)).unwrap();
+        export
+            .options()
+            .set_database_filter(None, crate::report::archive::RequestLength::Lengths(None))
+            .unwrap();
+        export.write_request(1..2, &request(&queries, &[])).unwrap();
+        export.note_searched(1..2, searched(77)).unwrap();
+        export.write_request(2..3, &request(&queries, &[])).unwrap();
+        export.note_searched(2..3, None).unwrap();
+        let all = sink.text();
+        let docs: Vec<&str> = all.split("Blast4-request ::= ").skip(1).collect();
+        assert_eq!(docs.len(), 3);
+        let space_at = |doc: &str| {
+            let at = doc.find("name \"EffectiveSearchSpace\"").unwrap();
+            let value = &doc[at..];
+            let value = &value[value.find("big-integer ").unwrap() + 12..];
+            (
+                at,
+                value[..value.find('\n').unwrap()].parse::<i64>().unwrap(),
+            )
+        };
+        let places: Vec<(usize, i64)> = docs.iter().map(|doc| space_at(doc)).collect();
+        assert_eq!(places[0].1, 1_000_000);
+        assert_eq!(places[1], places[0]);
+        assert_eq!(places[2], (places[0].0, 0));
+        // The first request has the `LCaseMask` parameter, the others no `program-options`.
+        assert!(docs[0].contains("program-options {\n      {\n        name \"LCaseMask\","));
+        assert!(!docs[1].contains("program-options"));
+        assert!(!docs[0].contains("ident"));
+    }
+
+    /// A batch searched again (a later part of a batch, a call that searches the batches before
+    /// again) writes no second request and does not move the search space again.
+    #[test]
+    fn a_request_written_once_is_not_written_again() {
+        let (export, sink) = export(None);
+        let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
+        assert!(export.takes(0..2));
+        assert!(export.write_request(0..2, &request(&queries, &[])).unwrap());
+        export.note_searched(0..2, searched(5)).unwrap();
+        // The same batch, and a part of it: not taken, nothing written.
+        assert!(!export.takes(0..2));
+        assert!(!export.takes(1..2));
+        assert!(!export.write_request(0..2, &request(&queries, &[])).unwrap());
+        export.note_searched(0..2, searched(9)).unwrap();
+        assert_eq!(sink.text(), FIRST);
+        assert!(export.write_request(2..3, &request(&queries, &[])).unwrap());
+        assert_eq!(sink.text(), [FIRST.to_string(), with_space(5)].concat());
+    }
+
+    /// NCBI's stop when it formats a batch: the requests of the batches after it are not written.
+    #[test]
+    fn no_request_follows_the_stop() {
+        let (export, sink) = export(None);
+        let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
+        export.stop_after(1);
+        assert!(export.write_request(0..1, &request(&queries, &[])).unwrap());
+        export.note_searched(0..1, searched(5)).unwrap();
+        assert!(!export.takes(1..2));
+        assert!(!export.write_request(1..2, &request(&queries, &[])).unwrap());
+        export.note_searched(1..2, searched(6)).unwrap();
+        assert_eq!(sink.text(), FIRST);
+    }
+
+    /// A request that does not start where the one before ended is LOSAT's internal error (a batch
+    /// whose request was never written), in every build.
+    #[test]
+    fn a_gap_between_requests_is_an_error() {
+        let (export, _) = export(None);
+        let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
+        export.write_request(0..1, &request(&queries, &[])).unwrap();
+        export.note_searched(0..1, None).unwrap();
+        let gap = export
+            .write_request(2..3, &request(&queries, &[]))
+            .unwrap_err();
+        assert!(gap.to_string().contains("LOSAT internal error"), "{gap}");
+        // A batch noted out of order too.
+        assert!(export.note_searched(3..4, None).is_err());
+    }
+
+    /// The archive and the search strategy of one run share the options handle: the database's
+    /// list reaches both, each with its own search space carry.
+    #[test]
+    fn one_options_handle_serves_the_archive_and_the_strategy() {
+        let handle = ArchiveHandle::new(
+            crate::report::archive::ArchiveEncoding::Text,
+            ArchiveRequest {
+                program: "blastp",
+                application: "blastp",
+                service: "plain",
+                algorithm: Vec::new(),
+                database: None,
+                step_number: None,
+            },
+            OptionsHandle::default(),
+        );
+        let sink = Sink::default();
+        let export = StrategyExport::new(
+            Box::new(sink.clone()),
+            &OptionInputs::new(Program::Blastp, "blastp"),
+            Some("in/db/bp"),
+            handle.options().clone(),
+        );
+        assert!(export.options().same(handle.options()));
+        let list = crate::report::archive::options::Param {
+            name: "TaxidList",
+            value: crate::report::archive::options::ParamValue::IntegerList(vec![9606]),
+        };
+        handle
+            .options()
+            .set_database_filter(
+                Some(list),
+                crate::report::archive::RequestLength::Lengths(None),
+            )
+            .unwrap();
+        let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
+        export.write_request(0..1, &request(&queries, &[])).unwrap();
+        export.note_searched(0..1, searched(5)).unwrap();
+        export.write_request(1..2, &request(&queries, &[])).unwrap();
+        let all = sink.text();
+        assert_eq!(all.matches("name \"TaxidList\"").count(), 2, "{all}");
+        assert!(all.contains("value big-integer 0\n"), "{all}");
+        // The archive's carry is its own: its first archive's option is its batch's.
+        let space =
+            |searched| crate::report::archive::tests::search_space(&handle.request_sets(searched));
+        assert_eq!(space(None), None);
+        assert_eq!(space(searched(5)), Some(0));
+    }
+
+    /// A post of a request that no batch start wrote is LOSAT's internal error at the end of a run
+    /// that ends as NCBI's (`Ok` or NCBI's error); a refusal of LOSAT's keeps its text.
+    #[test]
+    fn a_post_left_at_the_end_of_a_run_is_an_internal_error() {
+        let (export, _) = export(None);
+        let queries = [BioseqInput {
+            title: b"q caf\xe9",
+            defline: std::borrow::Cow::Borrowed(b">q caf\xe9"),
+            ..protein("Query_1", b"MWCHWCMWCHWC")
+        }];
+        export.write_request(0..1, &request(&queries, &[])).unwrap();
+        let native = || -> Result<()> {
+            Err(crate::cli::NativeError {
+                exit: 3,
+                message: "BLAST engine error: x\n".to_string(),
+            }
+            .into())
+        };
+        for result in [Ok(()), native()] {
+            let error = end_run(Some(&export), result).unwrap_err();
+            assert!(
+                error.to_string().starts_with("LOSAT internal error"),
+                "{error}"
+            );
+        }
+        let refusal = end_run(Some(&export), Err(anyhow::anyhow!("not supported"))).unwrap_err();
+        assert_eq!(refusal.to_string(), "not supported");
+        assert!(!export.take_all_posts().is_empty());
+        end_run(Some(&export), Ok(())).unwrap();
+        let error = end_run(Some(&export), native()).unwrap_err();
+        assert!(error.is::<crate::cli::NativeError>());
+        end_run(None, Ok(())).unwrap();
+    }
+
+    /// A request reaches the file where NCBI writes it; the run marks where it reaches each
+    /// batch's start (its mark, `Posts::request`); the end of a run that NCBI's error ends cuts the
+    /// file back to the requests reached (NCBI wrote the requests up to the batch it stopped at),
+    /// and the end of a run without an error keeps them all.
+    #[test]
+    fn requests_after_the_last_batch_start_reached_are_cut_at_ncbis_error() {
+        let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
+        let three = |export: &StrategyExport| {
+            for at in 0..3 {
+                export
+                    .write_request(at..at + 1, &request(&queries, &[]))
+                    .unwrap();
+                export.note_searched(at..at + 1, searched(5)).unwrap();
+            }
+        };
+        let native = || -> Result<()> {
+            Err(crate::cli::NativeError {
+                exit: 255,
+                message: "Error: x\n".to_string(),
+            }
+            .into())
+        };
+        let all = [FIRST.to_string(), with_space(5), with_space(5)].concat();
+        let (strategy, sink) = export(None);
+        three(&strategy);
+        assert_eq!(sink.text(), all);
+        let marks = strategy.take_posts(usize::MAX);
+        assert_eq!(marks.len(), 3);
+        // The second batch's start reaches the first two requests.
+        marks[1].1.write(&mut std::io::sink(), None).unwrap();
+        let error = end_run(Some(&strategy), native()).unwrap_err();
+        assert!(error.is::<crate::cli::NativeError>());
+        assert_eq!(sink.text(), [FIRST.to_string(), with_space(5)].concat());
+        // A run without an error keeps every request, and so does a refusal of LOSAT's.
+        for result in [Ok(()), Err(anyhow::anyhow!("not supported"))] {
+            let (strategy, sink) = export(None);
+            three(&strategy);
+            let _ = end_run(Some(&strategy), result);
+            assert_eq!(sink.text(), all);
+        }
+    }
+
+    /// A sink that cannot be cut (a FIFO, a pipe; `can_cut` false) or a file whose cut fails.
+    struct Uncut(Sink, bool);
+
+    impl Write for Uncut {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.write(bytes)
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl StrategySink for Uncut {
+        fn truncate(&mut self, _len: u64) -> std::io::Result<()> {
+            Err(std::io::Error::other("Invalid argument"))
+        }
+
+        fn can_cut(&self) -> bool {
+            self.1
+        }
+    }
+
+    /// A sink that cannot be cut (review 2 of K4h, M1: `-export_search_strategy` to a FIFO or
+    /// `>(gzip > f)`, NCBI 2.17.0 2 requests of 3) gets each request where the run reaches its
+    /// batch's start: at NCBI's error it has those, at any other end every one. A regular file whose
+    /// cut fails is LOSAT's error.
+    #[test]
+    fn a_sink_that_cannot_be_cut_gets_only_the_requests_reached() {
+        let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
+        let native = || -> Result<()> {
+            Err(crate::cli::NativeError {
+                exit: 255,
+                message: "Error: x\n".to_string(),
+            }
+            .into())
+        };
+        let uncut = |cut: bool| {
+            let sink = Sink::default();
+            let export = StrategyExport::new(
+                Box::new(Uncut(sink.clone(), cut)),
+                &OptionInputs::new(Program::Blastp, "blastp"),
+                Some("in/db/bp"),
+                OptionsHandle::default(),
+            );
+            for at in 0..3 {
+                export
+                    .write_request(at..at + 1, &request(&queries, &[]))
+                    .unwrap();
+                export.note_searched(at..at + 1, searched(5)).unwrap();
+            }
+            (export, sink)
+        };
+        let (strategy, sink) = uncut(false);
+        assert_eq!(sink.text(), "");
+        let marks = strategy.take_posts(usize::MAX);
+        marks[0].1.write(&mut std::io::sink(), None).unwrap();
+        assert_eq!(sink.text(), FIRST);
+        marks[1].1.write(&mut std::io::sink(), None).unwrap();
+        let error = end_run(Some(&strategy), native()).unwrap_err();
+        assert!(error.is::<crate::cli::NativeError>());
+        assert_eq!(sink.text(), [FIRST.to_string(), with_space(5)].concat());
+        let all = [FIRST.to_string(), with_space(5), with_space(5)].concat();
+        for result in [Ok(()), Err(anyhow::anyhow!("not supported"))] {
+            let (strategy, sink) = uncut(false);
+            let _ = end_run(Some(&strategy), result);
+            assert_eq!(sink.text(), all);
+        }
+        // A regular file that fails to be cut back.
+        let (strategy, sink) = uncut(true);
+        let error = end_run(Some(&strategy), native()).unwrap_err();
+        assert!(!error.is::<crate::cli::NativeError>());
+        assert!(
+            error.to_string().starts_with("LOSAT could not end"),
+            "{error}"
+        );
+        assert_eq!(sink.text(), all);
+    }
+
+    /// The request of a PSSM query (`RequestQueries::Pssm`) as NCBI BLAST+ 2.17.0 writes it: the
+    /// `PssmWithParameters` as read, at the depth of `queries pssm` (its strings and octets wrapped
+    /// there), with psiblast's options and `Web_StepNumber` (`psiblast -in_pssm <rnd> -db
+    /// tests/db_search/paja`, fixture row `psiblast.pssm.db.itdef`) and PSI-TBLASTN's (`tblastn
+    /// -in_pssm <rnd> -db tests/db_search/tslice`, row `tblastn.db.in_pssm`).
+    #[test]
+    fn a_pssm_query_is_the_pssm_as_read() {
+        let fixture = |path: &str| {
+            std::fs::read(format!("{}/tests/{path}", env!("CARGO_MANIFEST_DIR"))).unwrap()
+        };
+        let pssm = crate::blastinput::pssm_text::read_pssm_with_parameters(&fixture(
+            "fixtures/db_search/db.ps.asn.rnd.6.asn",
+        ))
+        .unwrap();
+        for (kind, database, frozen) in [
+            (
+                crate::report::archive::options::RequestKind::Psiblast,
+                "tests/db_search/paja",
+                "psiblast.pssm.db.itdef.ss",
+            ),
+            (
+                crate::report::archive::options::RequestKind::PsiTblastn,
+                "tests/db_search/tslice",
+                "tblastn.db.in_pssm.ss",
+            ),
+        ] {
+            let sink = Sink::default();
+            let mut inputs = OptionInputs::new(kind, "blastp");
+            if kind == crate::report::archive::options::RequestKind::Psiblast {
+                inputs.num_iterations = Some(1);
+            }
+            let export = StrategyExport::new(
+                Box::new(sink.clone()),
+                &inputs,
+                Some(database),
+                OptionsHandle::default(),
+            );
+            let request = RequestInputs {
+                queries: crate::report::archive::writer::RequestQueries::Pssm(&pssm),
+                subjects: &[],
+                required: None,
+                lcase_masks: &[],
+            };
+            assert!(export.write_request(0..1, &request).unwrap());
+            assert_eq!(
+                sink.text(),
+                String::from_utf8(fixture(&format!("fixtures/strategy/{frozen}"))).unwrap(),
+                "{kind:?}"
+            );
+        }
+    }
+
+    /// `-` and a file that is also `-out` are refused; a path that cannot be created is NCBI's
+    /// argument error.
+    #[test]
+    fn the_file_is_created_or_refused() {
+        let dir = std::env::temp_dir().join(format!("losat-strategy-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("s.asn");
+        std::fs::write(&path, b"old").unwrap();
+        drop(create_strategy_file(&path, None, "BLASTP").unwrap());
+        assert_eq!(std::fs::read(&path).unwrap(), b"");
+        let refusal = create_strategy_file(Path::new("-"), None, "BLASTP").unwrap_err();
+        assert!(refusal.to_string().contains("standard output"), "{refusal}");
+        let same = create_strategy_file(&path, Some(&path), "BLASTP").unwrap_err();
+        assert!(same.to_string().contains("also the output"), "{same}");
+        let other = dir.join("o.txt");
+        drop(create_strategy_file(&path, Some(&other), "BLASTP").unwrap());
+        let missing = dir.join("no_such_dir").join("x");
+        let error = create_strategy_file(&missing, None, "BLASTP").unwrap_err();
+        let native = error.downcast_ref::<crate::cli::NativeError>().unwrap();
+        assert_eq!(native.exit, 1);
+        assert_eq!(
+            native.message,
+            format!(
+                "Command line argument error: Argument \"export_search_strategy\". File is not accessible:  `{}'\n",
+                missing.display()
+            )
+        );
+        // The null device as the strategy file and as `-out`: nothing written there is kept.
+        #[cfg(unix)]
+        drop(
+            create_strategy_file(
+                Path::new("/dev/null"),
+                Some(Path::new("/dev/null")),
+                "BLASTP",
+            )
+            .unwrap(),
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}

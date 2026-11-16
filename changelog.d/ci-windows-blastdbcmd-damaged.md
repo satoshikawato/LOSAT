@@ -1,0 +1,1 @@
+- Test hygiene: the Windows `cargo test` job passes again: the test of damaged `blastdbcmd` lookup files names the database with the platform's separator, so its expected NCBI message is the Windows one there.

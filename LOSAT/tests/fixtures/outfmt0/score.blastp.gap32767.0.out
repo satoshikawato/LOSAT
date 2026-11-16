@@ -1,0 +1,602 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/PajaWSV.faa).
+           86 sequences; 66,738 total letters
+
+
+
+Query= BDT63074.1 tyrosine recombinase [Sicyonia whispovirus]
+
+Length=897
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63563.1 hypothetical protein [Pasiphaea japonica whispovirus]      26.7    0.56 
+BDT63533.1 wsv289-like protein [Pasiphaea japonica whispovirus]       26.3    0.69 
+BDT63551.1 wsv423-like protein [Pasiphaea japonica whispovirus]       25.8    1.0  
+BDT63569.1 wsv119-like protein [Pasiphaea japonica whispovirus]       24.4    2.6  
+BDT63565.1 wsv078-like protein [Pasiphaea japonica whispovirus]       24.0    3.2  
+BDT63556.1 wsv447-like protein [Pasiphaea japonica whispovirus]       24.0    3.8  
+BDT63499.1 tyrosine recombinase [Pasiphaea japonica whispovirus]      23.5    4.3  
+BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]       23.5    4.7  
+BDT63516.1 wsv143-like protein [Pasiphaea japonica whispovirus]       23.1    6.2  
+BDT63567.1 hypothetical protein [Pasiphaea japonica whispovirus]      23.1    6.6  
+BDT63572.1 wsv270-like protein [Pasiphaea japonica whispovirus]       22.6    7.9  
+
+
+> BDT63563.1 hypothetical protein [Pasiphaea japonica whispovirus]
+Length=2345
+
+ Score = 26.7 bits (52),  Expect = 0.56, Method: Compositional matrix adjust.
+ Identities = 9/14 (64%), Positives = 11/14 (79%), Gaps = 0/14 (0%)
+
+Query  678   ATTTGNCIPAYSVI  691
+             ATTTGNC+  Y V+
+Sbjct  1748  ATTTGNCLVDYGVL  1761
+
+
+ Score = 26.7 bits (52),  Expect = 0.56, Method: Compositional matrix adjust.
+ Identities = 9/14 (64%), Positives = 11/14 (79%), Gaps = 0/14 (0%)
+
+Query  743   ATTTGNCIPAYSVI  756
+             ATTTGNC+  Y V+
+Sbjct  1748  ATTTGNCLVDYGVL  1761
+
+
+> BDT63533.1 wsv289-like protein [Pasiphaea japonica whispovirus]
+Length=1527
+
+ Score = 26.3 bits (51),  Expect = 0.69, Method: Compositional matrix adjust.
+ Identities = 10/35 (29%), Positives = 17/35 (49%), Gaps = 0/35 (0%)
+
+Query  254  LAKVPVTVHAWIAYESRGGLTTTEGRRGMLKNIRL  288
+            L  V + +H W  YE +      +G +GM + + L
+Sbjct  158  LLPVVINIHDWAIYEEKEIRIELKGNQGMEELVNL  192
+
+
+ Score = 23.1 bits (44),  Expect = 5.9, Method: Compositional matrix adjust.
+ Identities = 9/32 (28%), Positives = 21/32 (66%), Gaps = 0/32 (0%)
+
+Query  836   HHLELIKKIFQRNILNKRIVTVKKIDERRNEL  867
+             HH E +KKI   ++L  +++++ + D +R+ +
+Sbjct  1256  HHNEQMKKIKDSSLLTAKLLSLIRDDTKRDRI  1287
+
+
+> BDT63551.1 wsv423-like protein [Pasiphaea japonica whispovirus]
+Length=815
+
+ Score = 25.8 bits (50),  Expect = 1.0, Method: Compositional matrix adjust.
+ Identities = 15/38 (39%), Positives = 19/38 (50%), Gaps = 0/38 (0%)
+
+Query  636  TATATATTTTTTTTTTTTTTTTTTTTTTTTTNANANAT  673
+            +  A A+ T T  TT++  TTT T  T     AN N T
+Sbjct  115  SLVAEASLTVTGVTTSSHRTTTDTVATPLKNKANMNHT  152
+
+
+ Score = 22.6 bits (43),  Expect = 9.5, Method: Compositional matrix adjust.
+ Identities = 13/36 (36%), Positives = 17/36 (47%), Gaps = 0/36 (0%)
+
+Query  634  TATATATATTTTTTTTTTTTTTTTTTTTTTTTTNAN  669
+            +  A A+ T T  TT++  TTT T  T      N N
+Sbjct  115  SLVAEASLTVTGVTTSSHRTTTDTVATPLKNKANMN  150
+
+
+> BDT63569.1 wsv119-like protein [Pasiphaea japonica whispovirus]
+Length=923
+
+ Score = 24.4 bits (47),  Expect = 2.6, Method: Compositional matrix adjust.
+ Identities = 7/15 (47%), Positives = 12/15 (80%), Gaps = 0/15 (0%)
+
+Query  802  TATSTVDCIDNVKAV  816
+            TA ++ DC+D+VK +
+Sbjct  678  TACASADCVDDVKQI  692
+
+
+> BDT63565.1 wsv078-like protein [Pasiphaea japonica whispovirus]
+Length=514
+
+ Score = 24.0 bits (46),  Expect = 3.2, Method: Compositional matrix adjust.
+ Identities = 13/39 (33%), Positives = 21/39 (54%), Gaps = 0/39 (0%)
+
+Query  637  ATATATTTTTTTTTTTTTTTTTTTTTTTTTNANANATTN  675
+            A   A+ TT+T+    +T T + +   T  N  A+ATT+
+Sbjct  316  ANPRASATTSTSPPHLSTLTASISEGVTFANPRASATTS  354
+
+
+> BDT63556.1 wsv447-like protein [Pasiphaea japonica whispovirus]
+Length=1890
+
+ Score = 24.0 bits (46),  Expect = 3.8, Method: Compositional matrix adjust.
+ Identities = 7/20 (35%), Positives = 12/20 (60%), Gaps = 0/20 (0%)
+
+Query  136  IENILKAPNIKPDKPTCSIC  155
+            I+ IL+   ++PD P   +C
+Sbjct  235  IDAILRIVKLRPDIPFGGVC  254
+
+
+> BDT63499.1 tyrosine recombinase [Pasiphaea japonica whispovirus]
+Length=1203
+
+ Score = 23.5 bits (45),  Expect = 4.3, Method: Compositional matrix adjust.
+ Identities = 8/29 (28%), Positives = 14/29 (48%), Gaps = 0/29 (0%)
+
+Query  196  CNLCGKGVRHMMHHLKNIHGLTPNNKPEE  224
+            C+LC    +++  HL   H +   + P E
+Sbjct  338  CHLCDFETKNIYSHLSKAHKMEKGSPPYE  366
+
+
+> BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]
+Length=6062
+
+ Score = 23.5 bits (45),  Expect = 4.7, Method: Compositional matrix adjust.
+ Identities = 9/25 (36%), Positives = 14/25 (56%), Gaps = 0/25 (0%)
+
+Query  363   NFYTKLCRKKGKMENMERKTAQYVP  387
+             NFY K  +  G  EN+ +++   VP
+Sbjct  4492  NFYGKESKGNGICENVLKRSIANVP  4516
+
+
+> BDT63516.1 wsv143-like protein [Pasiphaea japonica whispovirus]
+Length=2526
+
+ Score = 23.1 bits (44),  Expect = 6.2, Method: Compositional matrix adjust.
+ Identities = 8/9 (89%), Positives = 8/9 (89%), Gaps = 0/9 (0%)
+
+Query  695  ITNFDECDD  703
+            ITN DECDD
+Sbjct  136  ITNKDECDD  144
+
+
+ Score = 23.1 bits (44),  Expect = 6.2, Method: Compositional matrix adjust.
+ Identities = 8/9 (89%), Positives = 8/9 (89%), Gaps = 0/9 (0%)
+
+Query  760  ITNFDECDD  768
+            ITN DECDD
+Sbjct  136  ITNKDECDD  144
+
+
+> BDT63567.1 hypothetical protein [Pasiphaea japonica whispovirus]
+Length=288
+
+ Score = 23.1 bits (44),  Expect = 6.6, Method: Compositional matrix adjust.
+ Identities = 9/17 (53%), Positives = 10/17 (59%), Gaps = 0/17 (0%)
+
+Query  877  NQATLTRKIYEAIRSQI  893
+            NQ  L R+IY  IR Q 
+Sbjct  258  NQTELHREIYAKIRRQF  274
+
+
+> BDT63572.1 wsv270-like protein [Pasiphaea japonica whispovirus]
+Length=141
+
+ Score = 22.6 bits (43),  Expect = 7.9, Method: Composition-based stats.
+ Identities = 9/25 (36%), Positives = 14/25 (56%), Gaps = 0/25 (0%)
+
+Query  600  EQKTSGENALSAITATTANFDEYDD  624
+            + KTS +N L  +T    NF E ++
+Sbjct  41   KTKTSNKNILVGVTWNDVNFGEIEN  65
+
+
+
+Lambda      K        H        a         alpha
+   0.315    0.128    0.366    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.318    0.134    0.401    0.792     4.96     4.96 
+
+Effective search space used: 59863986
+
+
+Query= nohit a query without hits
+
+Length=12
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.343    0.153     1.14    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.318    0.134    0.401    0.792     4.96     4.96 
+
+Effective search space used: 800856
+
+
+Query= BDT63075.1 wsv226-like protein [Sicyonia whispovirus]
+
+Length=1142
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63562.1 wsv226-like protein [Pasiphaea japonica whispovirus]       147     2e-37
+BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]       28.1    0.24 
+BDT63548.1 wsv419-like protein [Pasiphaea japonica whispovirus]       25.8    0.67 
+BDT63512.1 wsv131-like protein [Pasiphaea japonica whispovirus]       25.4    1.7  
+BDT63571.1 wsv269-like protein [Pasiphaea japonica whispovirus]       24.4    2.7  
+BDT63511.1 wsv133-like protein [Pasiphaea japonica whispovirus]       24.0    3.5  
+BDT63503.1 wsv514-like protein [Pasiphaea japonica whispovirus]       24.0    4.0  
+BDT63506.1 wsv199-like protein [Pasiphaea japonica whispovirus]       24.0    5.0  
+BDT63504.1 wsv199-like protein [Pasiphaea japonica whispovirus]       23.5    6.1  
+BDT63505.1 wsv199-like protein [Pasiphaea japonica whispovirus]       23.5    6.5  
+BDT63517.1 wsv188-like protein [Pasiphaea japonica whispovirus]       22.6    9.4  
+
+
+> BDT63562.1 wsv226-like protein [Pasiphaea japonica whispovirus]
+Length=1101
+
+ Score = 147 bits (315),  Expect = 2e-37, Method: Compositional matrix adjust.
+ Identities = 53/105 (50%), Positives = 77/105 (73%), Gaps = 0/105 (0%)
+
+Query  507  RDPLLHMATKEPPVFVRNVLAVAGNYGWFALIVGYMSSPDVLFNKTNCDGLFAPDLIRKY  566
+            RDP+ HM  +E P+F+R++LA+ G+YGWF++++GY  + DVLF   + DGLF+P  IR++
+Sbjct  465  RDPVTHMNRRERPLFLRSMLALCGSYGWFSIVLGYNPTLDVLFMGNDHDGLFSPHWIRRF  524
+
+Query  567  RSEQITTTPLRNRRIDTRFEGLELVDAMGHTSGFRIRPASLSDDH  611
+            R   ++ TP+RNR+ID RF GLEL D  G+   FRIRPASL + +
+Sbjct  525  RKRYVSMTPMRNRKIDLRFHGLELADTPGNACAFRIRPASLCNSN  569
+
+
+ Score = 102 bits (217),  Expect = 8e-24, Method: Compositional matrix adjust.
+ Identities = 42/102 (41%), Positives = 61/102 (60%), Gaps = 0/102 (0%)
+
+Query  142  NVSEFVAGLPHVTGDYAEAERFGAPYLPPGKRRKETYRFWASKDFRAQYLGHLAGNRWIG  201
+            N   F+  LPH+TG   +A ++G PYLP  +  K    +W + + + +YLG+L GN  I 
+Sbjct  89   NDKNFINQLPHITGVCEDAVKYGRPYLPTNEMAKIVDGYWNTNNRKKKYLGYLCGNFAIN  148
+
+Query  202  EFVRGEIDATTCVGMLRSVATAYGCGPIIRIALSCLNTLASG  243
+             FV   IDATTC+G LRS ATA+G   +  +A  CL+T ++ 
+Sbjct  149  AFVSNTIDATTCIGFLRSRATAFGYPGLKCLAEMCLSTSSNN  190
+
+
+ Score = 91.8 bits (194),  Expect = 1e-20, Method: Compositional matrix adjust.
+ Identities = 33/109 (30%), Positives = 62/109 (57%), Gaps = 0/109 (0%)
+
+Query  813  SIDLCQFMLQSCEENKVRFFHGECREAAHEFLREVYRGAARYHVKDAHVRGTRVCLTWHR  872
+            ++ +C  +   C+ N  RF   E RE A E +RE+YR +AR H+KD  +RGT++ LTW +
+Sbjct  765  ALSVCYMLYDECDMNYQRFEDAEVRETAFEMVREMYRVSARLHLKDLLMRGTKMSLTWQK  824
+
+Query  873  PFDAPAHRALAGVPRCKMSRLLSCIEKSSGTNPLPTVAVAAGKEVLTLP  921
+            P++  A   ++ +PRC++  ++   E  +    + T+ +   ++ +  P
+Sbjct  825  PYNPVAEATMSNIPRCRIPWIVHRFENRTLNEKMSTLQILETRDQVYRP  873
+
+
+ Score = 72.1 bits (151),  Expect = 1e-14, Method: Compositional matrix adjust.
+ Identities = 30/82 (37%), Positives = 51/82 (62%), Gaps = 0/82 (0%)
+
+Query  285  KVVSKLLGEKTRCVALDWKDTSRELGFCDSRNVGVLTNLIYAIAVPAYTAEMILSTEGKM  344
+            +V  KL  + T CV +DW + S+++ +  SR V +L NLI  I +PAYT ++IL T+ ++
+Sbjct  223  QVYKKLANKNTVCVTMDWSEASKKINYDYSRKVCLLQNLIVIILLPAYTMDVILDTDREL  282
+
+Query  345  EQHVLRKQGMQPPIERVELLKQ  366
+            E++VL   G Q   ++ +  +Q
+Sbjct  283  ERYVLASVGQQDDRDKYKYNQQ  304
+
+
+ Score = 62.5 bits (130),  Expect = 9e-12, Method: Compositional matrix adjust.
+ Identities = 19/49 (39%), Positives = 32/49 (65%), Gaps = 0/49 (0%)
+
+Query  920  LPSLMCLSTRAITPKPVRHTLLELMYGTRAAATISTLTCLSWINWCMEA  968
+            + +L  L TR    +P+RHTLL+L++G + A  +S +TC  W++WC+  
+Sbjct  858  MSTLQILETRDQVYRPIRHTLLQLVFGEKMANYVSVVTCFQWMDWCLNG  906
+
+
+ Score = 54.2 bits (112),  Expect = 3e-09, Method: Compositional matrix adjust.
+ Identities = 19/41 (46%), Positives = 30/41 (73%), Gaps = 0/41 (0%)
+
+Query  1100  KKSTGRMGFKDIYAVALISLPSTLDQETKDIAADLGIETDI  1140
+             K++TGRMGF+D+Y + LISLP  + ++ K I  +L +ET +
+Sbjct  1057  KRNTGRMGFRDVYMICLISLPVVIHEKCKKIIRELYLETSL  1097
+
+
+ Score = 53.8 bits (111),  Expect = 4e-09, Method: Compositional matrix adjust.
+ Identities = 18/27 (67%), Positives = 21/27 (78%), Gaps = 0/27 (0%)
+
+Query  404  HLFAAPLRLPPFDAHPVVNLENHPLFT  430
+            HL+ APLRLPPFD HPV+NL   P F+
+Sbjct  340  HLYNAPLRLPPFDDHPVINLHECPYFS  366
+
+
+ Score = 35.9 bits (72),  Expect = 0.001, Method: Compositional matrix adjust.
+ Identities = 13/24 (54%), Positives = 17/24 (71%), Gaps = 0/24 (0%)
+
+Query  442  RVLASVSTPAHSAVALKHRSGRRP  465
+            +V+AS+STP+ S V L HR  R P
+Sbjct  375  KVVASISTPSQSMVTLNHRVQRTP  398
+
+
+ Score = 34.5 bits (69),  Expect = 0.003, Method: Compositional matrix adjust.
+ Identities = 11/31 (35%), Positives = 18/31 (58%), Gaps = 0/31 (0%)
+
+Query  621  LGVIGARDNPFYTKTNRPAWYSDASLEDLFG  651
+            L V+    NPF+T+     WY+ + + D+FG
+Sbjct  585  LNVLQGNRNPFFTRLLNFNWYNPSCMSDIFG  615
+
+
+ Score = 29.9 bits (59),  Expect = 0.079, Method: Compositional matrix adjust.
+ Identities = 10/29 (34%), Positives = 17/29 (59%), Gaps = 0/29 (0%)
+
+Query  675  GDDRWLVNLQDKKDVLDRCKLALTFLLEA  703
+             ++RW  NL DK++V + C  +L   L+ 
+Sbjct  644  NENRWKANLLDKREVFNSCIFSLIIRLKC  672
+
+
+ Score = 29.5 bits (58),  Expect = 0.096, Method: Compositional matrix adjust.
+ Identities = 9/23 (39%), Positives = 16/23 (70%), Gaps = 0/23 (0%)
+
+Query  653  VTLEQHVRAFDDRIGVFEDLLEG  675
+            + +EQHV  FD+ + +F +L+ G
+Sbjct  619  IYMEQHVAVFDNCLDMFSNLVRG  641
+
+
+ Score = 26.7 bits (52),  Expect = 0.66, Method: Compositional matrix adjust.
+ Identities = 12/42 (29%), Positives = 22/42 (52%), Gaps = 0/42 (0%)
+
+Query  233  ALSCLNTLASGYSNSNNFEVKREDLVASINPPWRATRPLSMH  274
+             L CL  +    S++N+F V R+ ++A+  P     RP ++ 
+Sbjct  175  GLKCLAEMCLSTSSNNSFTVPRKQMMAATFPEEMRRRPSTIQ  216
+
+
+ Score = 23.1 bits (44),  Expect = 7.6, Method: Compositional matrix adjust.
+ Identities = 11/29 (38%), Positives = 18/29 (62%), Gaps = 0/29 (0%)
+
+Query  467  KLLGLSKNGIELHVLPALKDTGSRRRKKK  495
+            KL+G++ +GIE+ V+     T S   +KK
+Sbjct  419  KLIGVTNSGIEVRVVKKPTATQSSCLRKK  447
+
+
+ Score = 23.1 bits (44),  Expect = 8.9, Method: Compositional matrix adjust.
+ Identities = 7/23 (30%), Positives = 14/23 (61%), Gaps = 0/23 (0%)
+
+Query  1008  LEQLSDAQKISCWLKDDIRCHPF  1030
+             +  +SD + I+ WL +D +  P+
+Sbjct  959   ITNMSDIEIINMWLNNDTKDLPY  981
+
+
+> BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]
+Length=6062
+
+ Score = 28.1 bits (55),  Expect = 0.24, Method: Compositional matrix adjust.
+ Identities = 11/34 (32%), Positives = 20/34 (59%), Gaps = 0/34 (0%)
+
+Query  1104  GRMGFKDIYAVALISLPSTLDQETKDIAADLGIE  1137
+             GR+   ++  V   S+P T+ + TKD+   LG++
+Sbjct  5136  GRVIVNELAGVVAKSVPKTVYENTKDMINQLGVD  5169
+
+
+> BDT63548.1 wsv419-like protein [Pasiphaea japonica whispovirus]
+Length=99
+
+ Score = 25.8 bits (50),  Expect = 0.67, Method: Composition-based stats.
+ Identities = 8/15 (53%), Positives = 10/15 (67%), Gaps = 0/15 (0%)
+
+Query  344  MEQHVLRKQGMQPPI  358
+            M +HV R   MQPP+
+Sbjct  37   MYEHVCRDMAMQPPM  51
+
+
+> BDT63512.1 wsv131-like protein [Pasiphaea japonica whispovirus]
+Length=488
+
+ Score = 25.4 bits (49),  Expect = 1.7, Method: Compositional matrix adjust.
+ Identities = 9/13 (69%), Positives = 12/13 (92%), Gaps = 0/13 (0%)
+
+Query  319  VLTNLIYAIAVPA  331
+            VL ++IYA+AVPA
+Sbjct  98   VLKDIIYAMAVPA  110
+
+
+> BDT63571.1 wsv269-like protein [Pasiphaea japonica whispovirus]
+Length=507
+
+ Score = 24.4 bits (47),  Expect = 2.7, Method: Compositional matrix adjust.
+ Identities = 10/27 (37%), Positives = 17/27 (63%), Gaps = 0/27 (0%)
+
+Query  16   STALTLEQVVQHSLGELAFDFSDIKIE  42
+            +  +T+E+V+  S G  A  FSD+ +E
+Sbjct  198  TNEMTIEEVLAFSEGTAATGFSDLYVE  224
+
+
+> BDT63511.1 wsv133-like protein [Pasiphaea japonica whispovirus]
+Length=258
+
+ Score = 24.0 bits (46),  Expect = 3.5, Method: Composition-based stats.
+ Identities = 8/15 (53%), Positives = 10/15 (67%), Gaps = 0/15 (0%)
+
+Query  609  DDHCGGDSDDGGLGV  623
+            DDH  GD+ DG + V
+Sbjct  138  DDHVSGDNGDGDIKV  152
+
+
+> BDT63503.1 wsv514-like protein [Pasiphaea japonica whispovirus]
+Length=2342
+
+ Score = 24.0 bits (46),  Expect = 4.0, Method: Compositional matrix adjust.
+ Identities = 13/52 (25%), Positives = 19/52 (37%), Gaps = 0/52 (0%)
+
+Query  585  FEGLELVDAMGHTSGFRIRPASLSDDHCGGDSDDGGLGVIGARDNPFYTKTN  636
+            FE   L+ +     G  +     S+ HC    D+G  G +      FY   N
+Sbjct  312  FEKEALMASFVAVGGNEVIGCPHSEKHCLKLDDEGNYGCVACFSTIFYIIGN  363
+
+
+> BDT63506.1 wsv199-like protein [Pasiphaea japonica whispovirus]
+Length=992
+
+ Score = 24.0 bits (46),  Expect = 5.0, Method: Compositional matrix adjust.
+ Identities = 6/15 (40%), Positives = 11/15 (73%), Gaps = 0/15 (0%)
+
+Query  196  GNRWIGEFVRGEIDA  210
+            G++W+   V G++DA
+Sbjct  851  GHKWVSPLVNGKMDA  865
+
+
+> BDT63504.1 wsv199-like protein [Pasiphaea japonica whispovirus]
+Length=986
+
+ Score = 23.5 bits (45),  Expect = 6.1, Method: Compositional matrix adjust.
+ Identities = 6/15 (40%), Positives = 11/15 (73%), Gaps = 0/15 (0%)
+
+Query  196  GNRWIGEFVRGEIDA  210
+            G++W+   V G++DA
+Sbjct  845  GHKWVSLLVNGKMDA  859
+
+
+> BDT63505.1 wsv199-like protein [Pasiphaea japonica whispovirus]
+Length=981
+
+ Score = 23.5 bits (45),  Expect = 6.5, Method: Compositional matrix adjust.
+ Identities = 6/15 (40%), Positives = 11/15 (73%), Gaps = 0/15 (0%)
+
+Query  196  GNRWIGEFVRGEIDA  210
+            G++W+   V G++DA
+Sbjct  846  GHKWVSLLVNGKMDA  860
+
+
+> BDT63517.1 wsv188-like protein [Pasiphaea japonica whispovirus]
+Length=395
+
+ Score = 22.6 bits (43),  Expect = 9.4, Method: Compositional matrix adjust.
+ Identities = 9/26 (35%), Positives = 13/26 (50%), Gaps = 0/26 (0%)
+
+Query  77   VFGELQGDYLPEEEEAEAAVETEATF  102
+            V+GEL    +P+ EE +   E    F
+Sbjct  166  VYGELIDVIIPDNEEKQKLFEASKNF  191
+
+
+
+Lambda      K        H        a         alpha
+   0.319    0.135    0.404    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.318    0.134    0.401    0.792     4.96     4.96 
+
+Effective search space used: 76214796
+
+
+Query= BDT63076.1 hypothetical protein [Sicyonia whispovirus]
+
+Length=109
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63501.1 wsv166-like protein [Pasiphaea japonica whispovirus]       23.1    0.65 
+BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]       21.2    2.3  
+BDT63519.1 wsv026-like protein [Pasiphaea japonica whispovirus]       21.2    2.4  
+BDT63579.1 wsv343-like protein [Pasiphaea japonica whispovirus]       20.8    3.3  
+BDT63521.1 wsv023-like protein [Pasiphaea japonica whispovirus]       20.3    4.0  
+BDT63508.1 wsv001-like protein [Pasiphaea japonica whispovirus]       19.9    5.3  
+
+
+> BDT63501.1 wsv166-like protein [Pasiphaea japonica whispovirus]
+Length=1023
+
+ Score = 23.1 bits (44),  Expect = 0.65, Method: Composition-based stats.
+ Identities = 9/26 (35%), Positives = 12/26 (46%), Gaps = 0/26 (0%)
+
+Query  17   NTMSMLNKTYNLFVLFNFLLLKFSGK  42
+            N  + LNK  NLF+  N       G+
+Sbjct  797  NEKTFLNKNENLFIFSNLFAKNLVGE  822
+
+
+> BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]
+Length=6062
+
+ Score = 21.2 bits (40),  Expect = 2.3, Method: Composition-based stats.
+ Identities = 15/69 (22%), Positives = 26/69 (38%), Gaps = 0/69 (0%)
+
+Query  26   YNLFVLFNFLLLKFSGKKGADPSREAKRNHNITSSLCRVLGCRHLARLYHSAPPCSATLL  85
+            YN +   N + L  +G K  +   +  R  N+ S   R      L + +      +A   
+Sbjct  147  YNAYSSKNLIPLFMAGNKHNEFGAKVIRQSNLRSCFLRQNAVESLLKDFQRMKTNAAKAF  206
+
+Query  86   IPATRRGSM  94
+            I A +  S+
+Sbjct  207  IDAVKEKSV  215
+
+
+> BDT63519.1 wsv026-like protein [Pasiphaea japonica whispovirus]
+Length=1516
+
+ Score = 21.2 bits (40),  Expect = 2.4, Method: Composition-based stats.
+ Identities = 8/22 (36%), Positives = 13/22 (59%), Gaps = 0/22 (0%)
+
+Query  42   KKGADPSREAKRNHNITSSLCR  63
+            K G    R +  + +ITS++CR
+Sbjct  972  KAGTYADRYSNNSISITSAICR  993
+
+
+> BDT63579.1 wsv343-like protein [Pasiphaea japonica whispovirus]
+Length=4023
+
+ Score = 20.8 bits (39),  Expect = 3.3, Method: Composition-based stats.
+ Identities = 7/19 (37%), Positives = 10/19 (53%), Gaps = 0/19 (0%)
+
+Query  10    WRSTASMNTMSMLNKTYNL  28
+             WR T   +  +  N T+NL
+Sbjct  1641  WRKTRQEHQETKTNTTFNL  1659
+
+
+> BDT63521.1 wsv023-like protein [Pasiphaea japonica whispovirus]
+Length=279
+
+ Score = 20.3 bits (38),  Expect = 4.0, Method: Compositional matrix adjust.
+ Identities = 8/23 (35%), Positives = 11/23 (48%), Gaps = 0/23 (0%)
+
+Query  5   MADPPWRSTASMNTMSMLNKTYN  27
+           +ADPP       N     N++YN
+Sbjct  33  VADPPQNLIIDTNESLSANESYN  55
+
+
+> BDT63508.1 wsv001-like protein [Pasiphaea japonica whispovirus]
+Length=1283
+
+ Score = 19.9 bits (37),  Expect = 5.3, Method: Composition-based stats.
+ Identities = 6/21 (29%), Positives = 15/21 (71%), Gaps = 0/21 (0%)
+
+Query  14   ASMNTMSMLNKTYNLFVLFNF  34
+            + + T ++ +  Y+LFV++N+
+Sbjct  960  SCVKTHTLPSLVYSLFVVYNY  980
+
+
+
+Lambda      K        H        a         alpha
+   0.322    0.132    0.422    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.318    0.134    0.401    0.792     4.96     4.96 
+
+Effective search space used: 7274442
+
+
+  Database: User specified sequence set (Input: tests/fasta/PajaWSV.faa).
+    Posted date:  Unknown
+  Number of letters in database: 66,738
+  Number of sequences in database:  86
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 32767, Extension: 32767
+Neighboring words threshold: 11
+Window for multiple hits: 40

@@ -1,0 +1,37 @@
+# BLASTP 2.17.0+
+# Query: selfp1 first record
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/pd_self_p.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+selfp1	selfp1	100.000	220	0	0	331	550	331	550	6.75e-143	414
+selfp1	selfp1	100.000	180	0	0	1	180	1	180	5.30e-131	383
+selfp1	selfp1	88.889	180	20	0	331	510	1	180	3.38e-111	332
+selfp1	selfp1	88.889	180	20	0	1	180	331	510	3.38e-111	332
+# BLASTP 2.17.0+
+# Query: NP_000011.1 with accession
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/pd_self_p.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+NP_000011.1	NP_000011.1	100.000	220	0	0	331	550	331	550	8.39e-142	410
+NP_000011.1	NP_000011.1	100.000	180	0	0	1	180	1	180	3.14e-130	381
+NP_000011.1	NP_000011.1	88.889	180	20	0	331	510	1	180	2.71e-108	324
+NP_000011.1	NP_000011.1	88.889	180	20	0	1	180	331	510	2.71e-108	324
+# BLASTP 2.17.0+
+# Query: NP_000012.1 with gi
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/pd_self_p.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+NP_000012.1	NP_000012.1	100.000	220	0	0	331	550	331	550	9.50e-145	418
+NP_000012.1	NP_000012.1	100.000	180	0	0	1	180	1	180	8.57e-130	380
+NP_000012.1	NP_000012.1	89.444	180	19	0	331	510	1	180	8.12e-112	333
+NP_000012.1	NP_000012.1	89.444	180	19	0	1	180	331	510	8.12e-112	333
+# BLASTP 2.17.0+
+# Query: selfp4
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/pd_self_p.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+selfp4	selfp4	100.000	220	0	0	331	550	331	550	5.80e-143	414
+selfp4	selfp4	100.000	180	0	0	1	180	1	180	1.31e-130	382
+selfp4	selfp4	89.444	180	19	0	331	510	1	180	3.72e-111	332
+selfp4	selfp4	89.444	180	19	0	1	180	331	510	3.72e-111	332
+# BLAST processed 4 queries

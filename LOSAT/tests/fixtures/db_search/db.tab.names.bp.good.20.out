@@ -1,0 +1,8 @@
+qseqid,sseqid,staxid,ssciname,scomname,sblastname,sskingdom,staxids,sscinames,scomnames,sblastnames,sskingdoms
+qp1,st2,9606,"Homo sapiens","human","primates",Eukaryota,9606,"Homo sapiens","human","primates",Eukaryota
+qp1,st1,9606,"Homo sapiens","human","primates",Eukaryota,9606,"Homo sapiens","human","primates",Eukaryota
+qp2,st1,9606,"Homo sapiens","human","primates",Eukaryota,9606,"Homo sapiens","human","primates",Eukaryota
+qp2,st1,9606,"Homo sapiens","human","primates",Eukaryota,9606,"Homo sapiens","human","primates",Eukaryota
+qp2,st1,9606,"Homo sapiens","human","primates",Eukaryota,9606,"Homo sapiens","human","primates",Eukaryota
+qp2,st2,9606,"Homo sapiens","human","primates",Eukaryota,9606,"Homo sapiens","human","primates",Eukaryota
+qp2,st2,9606,"Homo sapiens","human","primates",Eukaryota,9606,"Homo sapiens","human","primates",Eukaryota

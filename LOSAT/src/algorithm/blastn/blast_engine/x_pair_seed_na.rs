@@ -37,12 +37,12 @@
 //!     }
 //! ```
 //!
-//! The reference for these tables is the branch of `run.rs` after `if
-//! two_stage_lookup_ref.is_none()` ("Original lookup method"): one call of
-//! `scan_subject_kmers_with_ranges` with `word_length == lut_word_length`, and per pair of a
-//! lookup hit the context of the query offset, the diagonal, the `last_hit` test,
+//! The reference for these tables is `scan_na_lookup` (`na_scan.rs`), which `run.rs` calls after
+//! `if two_stage_lookup_ref.is_none()` ("Original lookup method") when this module declines the
+//! chunk: one call of `scan_subject_kmers_with_ranges` with `word_length == lut_word_length`, and
+//! per pair of a lookup hit the context of the query offset, the diagonal, the `last_hit` test,
 //! `s_TypeOfWord`, the ungapped extension on the context's own query slice, the cutoff,
-//! `ungapped_hits.push` and the diagonal-hash insert. Phase 1, on any thread
+//! `x_push_ungapped` and the diagonal-hash insert. Phase 1, on any thread
 //! (`scan_strip_na`): the same scan kernel on one strip of a scan range with the `s_range` of
 //! the whole range; every lookup hit of a word in the table's order; for each pair the context
 //! of the query offset (which reads only the inputs), giving a `Seed` (no bounds test and no
@@ -75,8 +75,8 @@ use super::super::{
     QueryContextIndex, UngappedHit,
 };
 use super::{
-    part, plan_strips, pool_threads, run_strips, scan_kernel, FoldCounts, PartScratch, Seed,
-    StageStats, StripJob,
+    part, plan_strips, pool_threads, run_strips, scan_kernel, Cut, FoldCounts, PartScratch, Resume,
+    Seed, SeedOut, StageStats, StripJob,
 };
 use crate::algorithm::blastn::lookup::{NaLookupTable, PvDirectLookup};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -105,7 +105,7 @@ static X_OWNER_SCAN_NS: AtomicU64 = AtomicU64::new(0);
 static X_WAIT_NS: AtomicU64 = AtomicU64::new(0);
 
 /// The inputs of the seed stage of one subject chunk with a table that is not two-stage,
-/// borrowed from `collect_prelim_hits_for_chunk` (the same names as there; `word_length` is
+/// borrowed from `prelim_subject::prelim_chunk_hits` (the same names as there; `word_length` is
 /// its `safe_k`, the word length and the lookup word length of these tables).
 pub(in super::super) struct NaInputs<'a> {
     pub(in super::super) pv_direct_lookup: Option<&'a PvDirectLookup>,
@@ -165,12 +165,63 @@ impl NaInputs<'_> {
 /// No NCBI counterpart: whether a chunk is in the scope of this module (see the module
 /// comment).
 fn in_scope(x: &NaInputs<'_>) -> bool {
-    !x.use_array_indexing
-        && x.window_size == 0
-        && x.scan_range == 0
-        && !x.subject_masked
-        && !x.diagnostics
-        && x.one_subject_owner
+    scope(
+        x.use_array_indexing,
+        x.window_size,
+        x.scan_range,
+        x.subject_masked,
+        x.diagnostics,
+        x.one_subject_owner,
+    )
+}
+
+/// No NCBI counterpart: the test of `in_scope` on the values of `NaInputs` (their names).
+#[inline(always)]
+fn scope(
+    use_array_indexing: bool,
+    window_size: usize,
+    scan_range: usize,
+    subject_masked: bool,
+    diagnostics: bool,
+    one_subject_owner: bool,
+) -> bool {
+    !use_array_indexing
+        && window_size == 0
+        && scan_range == 0
+        && !subject_masked
+        && !diagnostics
+        && one_subject_owner
+}
+
+/// No NCBI counterpart (scheduling only): whether `prelim_subject::prelim_chunk_hits` calls `run`
+/// for a chunk with these inputs (the names of `NaInputs`), asked before it builds `NaInputs`:
+/// `run`'s tests (the switch, `scope` and a pool of two threads or more), so a chunk that `run`
+/// would send back at once costs neither the inputs nor the call. Such a chunk records the
+/// reference side of LOSAT_X_PAIRPARNA here (while the switch is on), as `run` recorded it.
+#[inline(always)]
+pub(in super::super) fn wants(
+    use_array_indexing: bool,
+    window_size: usize,
+    scan_range: usize,
+    subject_masked: bool,
+    diagnostics: bool,
+    one_subject_owner: bool,
+) -> bool {
+    if !on() {
+        return false;
+    }
+    let wanted = scope(
+        use_array_indexing,
+        window_size,
+        scan_range,
+        subject_masked,
+        diagnostics,
+        one_subject_owner,
+    ) && pool_threads().is_some();
+    if !wanted {
+        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARNA", false);
+    }
+    wanted
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:193-207
@@ -194,26 +245,74 @@ fn in_scope(x: &NaInputs<'_>) -> bool {
 /// word length and step (unmasked subject), from `job.start` to `job.end`; every lookup hit of
 /// a word in the table's order, `q_off_1 == 0` skipped as the reference skips it; each pair
 /// becomes a `Seed` with the context of its query offset.
-fn scan_strip_na(x: &NaInputs<'_>, job: &StripJob, out: &mut Vec<Seed>) {
+fn scan_strip_na<O: SeedOut>(x: &NaInputs<'_>, job: &StripJob, out: &mut O) {
+    scan_strip_na_from::<O, false>(x, job, Resume::at(job.start), out);
+}
+
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:76-79
+/// ```c
+///     for(i=0;i<num_hits;i++) {
+///         offset_pairs[i].qs_offsets.q_off = lookup_pos[i];
+///         offset_pairs[i].qs_offsets.s_off = s_off;
+///     }
+/// ```
+/// One lookup hit of the word at subject offset `kmer_start` as a `Seed` with the context of its
+/// query offset (`q_off_1`: the table's 1-based query offset, 0 for no hit, which is skipped). A
+/// function, not a closure of `scan_strip_na_from`: called from the run loop and from the
+/// piece's cut (`Cut::run_cold`), a closure stayed a call per pair (as `seed_of_pair` in the
+/// strips kernels of `x_pair_seed.rs`; blastn-short at 16 threads, +3.2 % instructions over the
+/// strips stage, line EB s15b).
+#[inline(always)]
+fn seed_of_pair_na<O: SeedOut>(
+    x: &NaInputs<'_>,
+    q_off_1: u32,
+    kmer_start: usize,
+    s_range: usize,
+    out: &mut O,
+) {
+    if q_off_1 == 0 {
+        return;
+    }
+    let q_off0 = q_off_1 as usize - 1;
+    let context_idx = x.query_context_index.context_for_offset(q_off0);
+    out.push(Seed {
+        context: context_idx as u32,
+        q: q_off0 as u32,
+        s: kmer_start as u32,
+        s_range: s_range as u32,
+    });
+}
+
+/// `scan_strip_na` from the word at `from.s` (`job.start`, or where a piece stopped), passing over
+/// that word's first `from.skip` pairs. EXPERIMENT (LOSAT_X_SEEDPIECE): with `PIECE` the scan stops at
+/// the first pair `out` has no room for (`Cut`) and returns where it goes on; `None` when the
+/// strip is done.
+fn scan_strip_na_from<O: SeedOut, const PIECE: bool>(
+    x: &NaInputs<'_>,
+    job: &StripJob,
+    from: Resume,
+    out: &mut O,
+) -> Option<Resume> {
     let s_range = job.s_range;
+    let cut = Cut::new(&from);
     let mut on_kmer = |kmer_start: usize, current_kmer: u64| {
-        for &q_off_1 in x.hits(current_kmer) {
-            if q_off_1 == 0 {
-                continue;
+        let mut run = x.hits(current_kmer);
+        if PIECE {
+            match cut.fit(run, out) {
+                Ok(fit) => run = fit,
+                Err((skip, rest)) => {
+                    cut.run_cold(kmer_start, skip, rest, out, |q_off_1, out| {
+                        seed_of_pair_na(x, q_off_1, kmer_start, s_range, out)
+                    });
+                    return cut.go();
+                }
             }
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1412
-            // ```c
-            // offset_pairs[i].qs_offsets.q_off = q_off - 1;
-            // ```
-            let q_off0 = q_off_1 as usize - 1;
-            let context_idx = x.query_context_index.context_for_offset(q_off0);
-            out.push(Seed {
-                context: context_idx as u32,
-                q: q_off0 as u32,
-                s: kmer_start as u32,
-                s_range: s_range as u32,
-            });
         }
+        for &q_off_1 in run {
+            seed_of_pair_na(x, q_off_1, kmer_start, s_range, out);
+        }
+        // (a run that fits never stops the cut; after a stop the scan has left)
+        true
     };
     scan_kernel(
         x.search_seq_packed,
@@ -221,10 +320,11 @@ fn scan_strip_na(x: &NaInputs<'_>, job: &StripJob, out: &mut Vec<Seed>) {
         x.word_length,
         x.scan_step,
         x.subject_masked,
-        job.start,
+        from.s,
         job.end,
         &mut on_kmer,
     );
+    cut.stop.get()
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:656-672
@@ -281,7 +381,36 @@ fn scan_strip_na(x: &NaInputs<'_>, job: &StripJob, out: &mut Vec<Seed>) {
 /// inserts change, and the time of the ungapped extensions (instead of the shared LOSAT_TIMING
 /// counters); without it `out` and `pos` are not read.
 #[allow(clippy::too_many_arguments)]
+#[inline(always)]
 fn fold_na<const PT: bool>(
+    x: &NaInputs<'_>,
+    seeds: &[Seed],
+    diag_hash: &mut DiagHashTable,
+    ungapped_hits: &mut Vec<UngappedHit>,
+    timing: Option<&BlastnTiming>,
+    scan_pause_ns: &mut u64,
+    counts: &mut FoldCounts,
+    out: &mut part::PartOut,
+    pos: &[u32],
+) {
+    fold_na_t::<PT, true>(
+        x,
+        seeds,
+        diag_hash,
+        ungapped_hits,
+        timing,
+        scan_pause_ns,
+        counts,
+        out,
+        pos,
+    );
+}
+
+/// `fold_na`; EXPERIMENT (LOSAT_X_BNSEEDLISTS): without `TRACK` the inserts of a partition do
+/// not record the buckets they change (`part::insert_t`; the merge then writes back every
+/// bucket of the partition).
+#[allow(clippy::too_many_arguments)]
+fn fold_na_t<const PT: bool, const TRACK: bool>(
     x: &NaInputs<'_>,
     seeds: &[Seed],
     diag_hash: &mut DiagHashTable,
@@ -371,7 +500,6 @@ fn fold_na<const PT: bool>(
         let mut s_end = kmer_start + safe_k;
         let mut s_end_pos = s_end + diag_offset as usize;
         let off_found = false;
-        let mut hit_ready = true;
         let query_mask = ctx.masks.as_slice();
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:459-489
@@ -383,6 +511,10 @@ fn fold_na<const PT: bool>(
         //                                      (lookup_wrap, index, q_pos));
         // }
         // ```
+        #[expect(
+            clippy::manual_contains,
+            reason = "a linear scan of the cell's hits with an early exit, as NCBI's loop (na_ungapped.c:131-133); slice::contains would switch this per-seed check to std's chunked search"
+        )]
         let mut is_seed_masked = |s_pos: usize, q_pos: usize| -> bool {
             if s_pos + safe_k > s_len {
                 return true;
@@ -497,14 +629,14 @@ fn fold_na<const PT: bool>(
         //             }
         // ```
         if !(off_found || ungapped_score >= cutoff_score) {
-            hit_ready = false;
+            let hit_ready = false;
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:939-941
             // ```c
             // s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
             //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
             //                       hit_ready, s_off_pos, window_size + Delta + 1);
             // ```
-            part::insert::<PT, false, false>(
+            part::insert_t::<PT, false, false, TRACK>(
                 diag_hash,
                 out,
                 x_key,
@@ -530,12 +662,12 @@ fn fold_na<const PT: bool>(
                 query_idx: ctx.query_idx,
                 query_frame: ctx.frame,
                 query_context_offset: ctx.query_offset,
-                seed_q_off: q_off,
-                seed_s_off: s_off,
-                qs,
-                qe,
-                ss,
-                se: ungapped_se,
+                seed_q_off: q_off as u32,
+                seed_s_off: s_off as u32,
+                qs: qs as u32,
+                qe: qe as u32,
+                ss: ss as u32,
+                se: ungapped_se as u32,
                 score: ungapped_score,
             },
         );
@@ -549,7 +681,7 @@ fn fold_na<const PT: bool>(
         //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
         //                       hit_ready, s_off_pos, window_size + Delta + 1);
         // ```
-        part::insert::<PT, false, false>(
+        part::insert_t::<PT, false, false, TRACK>(
             diag_hash,
             out,
             x_key,
@@ -588,6 +720,32 @@ fn seed_stage(
     timed: bool,
     fold_part: Option<part::FoldPart<'_>>,
 ) -> StageStats {
+    seed_stage_of(
+        x,
+        threads,
+        target_strips,
+        hash,
+        hits,
+        timing,
+        timed,
+        fold_part,
+        super::seed_lists_on(),
+    )
+}
+
+/// `seed_stage`; `lists`: LOSAT_X_BNSEEDLISTS's partitioned stage (`super::seed_lists_on`).
+#[allow(clippy::too_many_arguments)]
+fn seed_stage_of(
+    x: &NaInputs<'_>,
+    threads: usize,
+    target_strips: usize,
+    hash: &mut DiagHashTable,
+    hits: &mut Vec<UngappedHit>,
+    timing: Option<&BlastnTiming>,
+    timed: bool,
+    fold_part: Option<part::FoldPart<'_>>,
+    lists: bool,
+) -> StageStats {
     let jobs = plan_strips(
         x.subject_seq_ranges,
         x.s_len,
@@ -599,6 +757,54 @@ fn seed_stage(
     let produce = |i: usize, out: &mut Vec<Seed>| scan_strip_na(x, &jobs[i], out);
     if let Some(fold_part) = fold_part {
         let parts = fold_part.parts;
+        // EXPERIMENT (LOSAT_X_BNSEEDLISTS): every partitioned stage takes the partitions' lists and
+        // the folds that do not record their buckets.
+        if lists {
+            crate::utils::xreach::x_reach!("LOSAT_X_BNSEEDLISTS", true);
+            let produce_lists =
+                |i: usize, out: &mut part::PartSink<'_>| scan_strip_na(x, &jobs[i], out);
+            // EXPERIMENT (LOSAT_X_SEEDPIECE): a piece of strip i, from its start or a stop.
+            let produce_piece = |i: usize, from: Option<Resume>, out: &mut part::PieceSink<'_>| {
+                let job = &jobs[i];
+                scan_strip_na_from::<_, true>(x, job, from.unwrap_or(Resume::at(job.start)), out)
+            };
+            let fold_one = |st: &mut part::PartState, seeds: &[Seed], pos: &[u32]| {
+                let part::PartState {
+                    hash,
+                    hits,
+                    out,
+                    counts,
+                    scan_pause_ns,
+                    ..
+                } = st;
+                fold_na_t::<true, false>(
+                    x,
+                    seeds,
+                    hash,
+                    hits,
+                    timing,
+                    scan_pause_ns,
+                    counts,
+                    out,
+                    pos,
+                );
+            };
+            let r = part::seed_stage_part_lists(
+                jobs.len(),
+                threads,
+                AHEAD_PER_THREAD * threads,
+                hash,
+                hits,
+                fold_part,
+                &produce,
+                &produce_lists,
+                &produce_piece,
+                &fold_one,
+                timed,
+            );
+            part::record(part::NA_ONE_HIT, parts, &r);
+            return StageStats::of_part(jobs.len(), r, timing);
+        }
         let fold_one = |st: &mut part::PartState, seeds: &[Seed], pos: &[u32]| {
             let part::PartState {
                 hash,
@@ -686,7 +892,7 @@ fn seed_stage(
 ///                                 query_info, ewp, init_hitlist, scan_range[2] + lut_word_length);
 ///     }
 /// ```
-/// Dispatch of `collect_prelim_hits_for_chunk` for a table that is not two-stage: the seed
+/// Dispatch of `prelim_subject::prelim_chunk_hits` for a table that is not two-stage: the seed
 /// stage of this chunk (the loop above with its one-hit extension) when LOSAT_X_PAIRPARNA is
 /// on and the chunk is in scope; `true` means it has run and the reference scan is skipped.
 /// `fold_scratch` holds the allocations of LOSAT_X_PAIRPARFOLD's partition tables and buffers
@@ -829,7 +1035,8 @@ mod tests {
     // on both strands, query masks on one context, so `s_TypeOfWord` checks words there) for
     // the direct table at word sizes 6, 7 and 8: the pairs of the reference wrapper
     // `scan_subject_kmers_with_ranges` folded in one go, against `seed_stage` on 1..6 threads
-    // with the owner's fold and (2 threads or more) the partitioned fold, for the strip target
+    // with the owner's fold and (2 threads or more) the partitioned fold in both forms of
+    // LOSAT_X_BNSEEDLISTS's stage, for the strip target
     // of `run` and for two small targets whose strips start at offsets that are not a
     // multiple of 4 (`plan_strips`: per = max(ceil(grid points / target), 512)). Hit lists and
     // diagonal hashes must be the same.
@@ -870,7 +1077,7 @@ mod tests {
             }
             let s_len = subject.len();
             let packed = encode_subject_ncbi2na_packed(&subject);
-            let ctx_seqs = vec![
+            let ctx_seqs = [
                 encode_iupac_to_blastna(&query),
                 encode_iupac_to_blastna(&minus),
             ];
@@ -1029,22 +1236,36 @@ mod tests {
                     odd_targets[1],
                 ] {
                     let per = grid.div_ceil(target).max(512);
-                    for partitioned in [false, true] {
+                    // unpartitioned, and partitioned in both forms of LOSAT_X_BNSEEDLISTS's stage
+                    // on one scratch (its strip buffers passing from one form to the other)
+                    let mut scratch = PartScratch::default();
+                    // (and the lists' stage in pieces of 1 seed, a few and hundreds,
+                    // EXPERIMENT LOSAT_X_SEEDPIECE: the kernels stop inside words' runs)
+                    for (partitioned, lists, pieces) in [
+                        (false, false, 0usize),
+                        (true, false, 0),
+                        (true, true, 0),
+                        (true, true, 1),
+                        (true, true, 2 + (threads + target) % 7),
+                        (true, true, 300 + 17 * threads),
+                        (true, false, 0),
+                    ] {
                         if partitioned && threads < 2 {
                             continue;
                         }
+                        scratch.x_pieces = Some(pieces);
                         let at =
-                            format!("word {word_length} threads {threads} target {target} partitioned {partitioned}");
+                            format!("word {word_length} threads {threads} target {target} partitioned {partitioned} lists {lists} pieces {pieces}");
                         let (state, keys, stats_seeds, strips) = pool.install(|| {
                             let mut hash = new_hash();
                             let mut hits = Vec::new();
-                            let mut scratch = PartScratch::default();
                             let fold_part = partitioned.then(|| part::FoldPart {
                                 scratch: &mut scratch,
                                 parts: threads.min(DIAGHASH_NUM_BUCKETS),
                             });
-                            let stats = seed_stage(
+                            let stats = seed_stage_of(
                                 &x, threads, target, &mut hash, &mut hits, None, false, fold_part,
+                                lists,
                             );
                             (
                                 hash_state(&hash),

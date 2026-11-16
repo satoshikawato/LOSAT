@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "esc",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "q\"b\\s\u0009t\u0001é~/x",
+  "number-of-letters": 2603,
+  "number-of-sequences": 19,
+  "last-updated": "2026-10-29T19:13:00",
+  "number-of-volumes": 1,
+  "bytes-total": 5896,
+  "bytes-to-cache": 2855,
+  "files": [
+    "esc.phr",
+    "esc.pin",
+    "esc.pjs",
+    "esc.pnd",
+    "esc.pni",
+    "esc.pog",
+    "esc.psd",
+    "esc.psi",
+    "esc.psq"
+  ]
+}

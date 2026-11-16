@@ -106,11 +106,8 @@ mod tests {
     fn memo_of_the_redo_masker_equals_the_masker() {
         use crate::utils::matrix::aa_char_to_ncbistdaa;
         use crate::utils::seg::{SegMasker, SegParams};
-        let masker = |data: &[u8]| {
-            SegMasker::with_params(&SegParams::new(10, 1.8, 2.1))
-                .keeping_all_left_segments()
-                .mask_sequence(data)
-        };
+        let masker =
+            |data: &[u8]| SegMasker::with_params(&SegParams::new(10, 1.8, 2.1)).mask_sequence(data);
         let subjects: Vec<Vec<u8>> = [
             "MKTAYIAKQRQISFVKSHFSRQAAAAAAAAAAAAAAAAAPPPPPPPGGGGGSLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQ",
             "MSTNPKPQRKTKRNTNRRPQDVKFPGGGQIVGGVYLLPRRGPRLGVRATRKTSERSQPRGRRQPIPKARRPEGRTWAQPGYPWPLYG",

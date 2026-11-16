@@ -1,0 +1,74 @@
+238257	cd00455	nuc_hydro	1	active site 	0	1	1	1	5,9,10,34,118,153,159,161,234	0
+239113	cd02647	nuc_hydro_TvIAG	1	active site 	0	1	1	1	7,11,12,38,127,162,173,175,249	0
+239114	cd02648	nuc_hydro_1	1	active site 	0	1	1	1	8,12,13,38,157,192,198,200,299	0
+239115	cd02649	nuc_hydro_CeIAG	1	active site 	0	1	1	1	7,11,12,36,123,158,164,166,241	0
+239116	cd02650	nuc_hydro_CaPnhB	1	active site 	0	1	1	1	6,10,11,35,121,156,162,164,238	0
+239117	cd02651	nuc_hydro_IU_UC_XIUA	1	active site 	0	1	1	1	6,10,11,35,120,154,160,162,235	0
+239118	cd02652	nuc_hydro_2	1	active site 	0	1	1	1	5,11,12,36,115,158,163,165,231	0
+239119	cd02653	nuc_hydro_3	1	active site 	0	1	1	1	6,10,11,35,119,154,160,162,240	0
+239120	cd02654	nuc_hydro_CjNH	1	active site 	0	1	1	1	6,14,15,39,135,173,179,181,252	0
+153129	cd01351	Aconitase	1	ligand binding site	0	1	1	0	92,275,335,338,339,357	5
+153129	cd01351	Aconitase	2	substrate binding site	0	1	1	0	4,7,90,91,339,358,363	5
+153131	cd01581	AcnB	1	ligand binding site	0	1	1	0	115,326,384,387,388,405	5
+153131	cd01581	AcnB	2	substrate binding site	0	1	1	0	30,33,113,114,388,406,411	5
+153132	cd01582	Homoaconitase	1	ligand binding site	0	1	1	0	91,242,309,312,313,331	5
+153132	cd01582	Homoaconitase	2	substrate binding site	0	1	1	0	4,7,89,90,313,332,337	5
+153133	cd01583	IPMI	1	ligand binding site	0	1	1	0	93,268,328,331,332,350	5
+153133	cd01583	IPMI	2	substrate binding site	0	1	1	0	4,7,91,92,332,351,356	5
+153134	cd01584	AcnA_Mitochondrial	1	ligand binding site	0	1	1	0	99,291,354,357,358,379	5
+153134	cd01584	AcnA_Mitochondrial	2	substrate binding site	0	1	1	0	4,7,97,98,358,380,385	5
+153135	cd01585	AcnA_Bact	1	ligand binding site	0	1	1	0	91,267,327,330,331,348	5
+153135	cd01585	AcnA_Bact	2	substrate binding site	0	1	1	0	5,8,89,90,331,349,354	5
+153136	cd01586	AcnA_IRP	1	ligand binding site	0	1	1	0	129,274,340,343,344,372	5
+153136	cd01586	AcnA_IRP	2	substrate binding site	0	1	1	0	4,7,127,128,344,373,378	5
+163674	cd03174	DRE_TIM_metallolyase	1	active site	0	1	1	1	5,6,9,36,71,73,93,135,165,167,195,197,231	1
+163674	cd03174	DRE_TIM_metallolyase	2	catalytic residues	0	0	1	1	5,6,36	1
+163674	cd03174	DRE_TIM_metallolyase	3	metal binding site	0	1	1	0	6,165,195,197	4
+163675	cd07937	DRE_TIM_PC_TC_5S	1	active site	0	1	1	1	6,7,10,38,75,77,110,138,168,170,197,199,233	1
+163675	cd07937	DRE_TIM_PC_TC_5S	2	catalytic residues	0	0	1	1	6,7,38	1
+163675	cd07937	DRE_TIM_PC_TC_5S	3	metal binding site	0	1	1	0	7,168,197,199	4
+163676	cd07938	DRE_TIM_HMGL	1	active site	0	1	1	1	6,7,10,37,71,73,92,134,168,170,198,200,240	1
+163676	cd07938	DRE_TIM_HMGL	2	catalytic residues	0	0	1	1	6,7,37	1
+163676	cd07938	DRE_TIM_HMGL	3	metal binding site	0	1	1	0	7,168,198,200	4
+163677	cd07939	DRE_TIM_NifV	1	active site	0	1	1	1	6,7,10,37,66,68,88,130,158,160,187,189,223	1
+163677	cd07939	DRE_TIM_NifV	2	catalytic residues	0	0	1	1	6,7,37	1
+163677	cd07939	DRE_TIM_NifV	3	metal binding site	0	1	1	0	7,158,187,189	4
+163678	cd07940	DRE_TIM_IPMS	1	active site	0	1	1	1	6,7,10,37,66,68,92,134,162,164,194,196,230	1
+163678	cd07940	DRE_TIM_IPMS	2	catalytic residues	0	0	1	1	6,7,37	1
+163678	cd07940	DRE_TIM_IPMS	3	metal binding site	0	1	1	0	7,162,194,196	4
+163679	cd07941	DRE_TIM_LeuA3	1	active site	0	1	1	1	6,7,10,37,67,69,97,139,170,172,200,202,236	1
+163679	cd07941	DRE_TIM_LeuA3	2	catalytic residues	0	0	1	1	6,7,37	1
+163679	cd07941	DRE_TIM_LeuA3	3	metal binding site	0	1	1	0	7,170,200,202	4
+163680	cd07942	DRE_TIM_LeuA	1	active site	0	1	1	1	9,10,13,40,72,74,98,147,181,183,214,216,250	1
+163680	cd07942	DRE_TIM_LeuA	2	catalytic residues	0	0	1	1	9,10,40	1
+163680	cd07942	DRE_TIM_LeuA	3	metal binding site	0	1	1	0	10,181,214,216	4
+163681	cd07943	DRE_TIM_HOA	1	active site	0	1	1	1	8,9,12,39,79,81,104,132,160,162,190,192,226	1
+163681	cd07943	DRE_TIM_HOA	2	catalytic residues	0	0	1	1	8,9,39	1
+163681	cd07943	DRE_TIM_HOA	3	metal binding site	0	1	1	0	9,160,190,192	4
+163682	cd07944	DRE_TIM_HOA_like	1	active site	0	1	1	1	6,7,10,37,76,78,101,129,157,159,188,190,224	1
+163682	cd07944	DRE_TIM_HOA_like	2	catalytic residues	0	0	1	1	6,7,37	1
+163682	cd07944	DRE_TIM_HOA_like	3	metal binding site	0	1	1	0	7,157,188,190	4
+163683	cd07945	DRE_TIM_CMS	1	active site	0	1	1	1	5,6,9,37,70,72,93,135,166,168,196,198,232	1
+163683	cd07945	DRE_TIM_CMS	2	catalytic residues	0	0	1	1	5,6,37	1
+163683	cd07945	DRE_TIM_CMS	3	metal binding site	0	1	1	0	6,166,196,198	4
+163684	cd07947	DRE_TIM_Re_CS	1	active site	0	1	1	1	8,9,12,43,71,73,93,135,169,171,208,210,244	1
+163684	cd07947	DRE_TIM_Re_CS	2	catalytic residues	0	0	1	1	8,9,43	1
+163684	cd07947	DRE_TIM_Re_CS	3	metal binding site	0	1	1	0	9,169,208,210	4
+163685	cd07948	DRE_TIM_HCS	1	active site	0	1	1	1	8,9,12,39,68,70,90,132,160,162,189,191,225	1
+163685	cd07948	DRE_TIM_HCS	2	catalytic residues	0	0	1	1	8,9,39	1
+163685	cd07948	DRE_TIM_HCS	3	metal binding site	0	1	1	0	9,160,189,191	4
+467611	cd02274	DHDPR_N	1	NAD(P) binding site	0	1	1	0	5,6,7,9,10,11,31,32,33,34,72,73,74,75,76,77,95,96,97,122,123,126	5
+467616	cd24146	nat-AmDH_N_like	1	NAD(P) binding site	0	1	1	0	5,6,7,8,9,10,30,31,32,33,73,74,75,76,77,78,98,99,100,133,134,137	5
+176102	cd05466	PBP2_LTTR_substrate	1	dimerization interface	0	1	1	1	15,16,18,19,22,26,28,29,30,31,32,33,34,126,127,128,129,130,131,137,138,140,141	2
+176109	cd08417	PBP2_Nitroaromatics_like	1	dimerization interface	0	1	1	1	15,16,18,19,22,26,28,29,30,31,32,33,34,125,126,127,128,129,130,136,137,139,140	2
+176151	cd08462	PBP2_NodD	1	dimerization interface	0	1	1	1	15,16,18,19,22,26,28,29,30,31,32,33,34,125,126,127,128,129,130,136,137,139,140	2
+176155	cd08466	PBP2_LeuO	1	dimerization interface	0	1	1	1	15,16,18,19,22,26,28,29,30,31,32,33,34,125,126,127,128,129,130,136,137,139,140	2
+176112	cd08420	PBP2_CysL_like	1	dimerization interface	0	1	1	1	15,16,18,19,22,26,28,29,30,31,32,33,34,129,130,131,132,133,134,140,141,143,144	2
+176122	cd08431	PBP2_HupR	1	dimerization interface	0	1	1	1	15,16,18,19,22,26,28,29,30,31,32,33,34,124,125,126,127,128,129,135,136,138,139	2
+176126	cd08435	PBP2_GbpR	1	dimerization interface	0	1	1	1	15,16,18,19,22,26,28,29,30,31,32,33,34,129,130,131,132,133,134,140,141,143,144	2
+99777	cd06170	LuxR_C_like	1	DNA binding residues	0	1	1	1	1,2,3,16,17,18,26,27,29,30,32,33,34,35,36,47	3
+99777	cd06170	LuxR_C_like	2	dimerization interface	0	1	1	1	12,14,16,47,48,49,52,55,56	2
+199908	cd10719	DnaJ_zf	1	Zn binding sites	CCCCCCCC	1	1	1	0,3,17,20,43,46,57,60	4
+260116	cd13944	lytB_ispH	1	Fe-S cluster binding site	0	1	1	0	9,93,189	4
+260116	cd13944	lytB_ispH	2	substrate binding site	0	1	1	0	12,37,38,70,71,121,123,161,162,216,217,218,219,261	5
+260116	cd13944	lytB_ispH	3	catalytic site	0	0	1	1	121,123,217,219	1

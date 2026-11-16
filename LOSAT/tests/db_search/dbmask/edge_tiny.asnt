@@ -1,0 +1,27 @@
+Blast-db-mask-info ::= {
+  algo-id 2,
+  algo-program dust,
+  algo-options "edge tiny",
+  masks {
+    masks {
+      packed-int {
+        {
+          from 301,
+          to 301,
+          id local id 5
+        },
+        {
+          from 500,
+          to 502,
+          id local id 5
+        },
+        {
+          from 703,
+          to 705,
+          id local id 5
+        }
+      }
+    },
+    more FALSE
+  }
+}

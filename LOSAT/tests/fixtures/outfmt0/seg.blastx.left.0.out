@@ -1,0 +1,78 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/seg_bx_left_s.faa).
+           1 sequences; 468 total letters
+
+
+
+Query= q
+
+Length=1404
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s                                                                     68.2    1e-16
+
+
+> s
+Length=468
+
+ Score = 68.2 bits (165),  Expect = 1e-16, Method: Compositional matrix adjust.
+ Identities = 28/28 (100%), Positives = 28/28 (100%), Gaps = 0/28 (0%)
+ Frame = -1
+
+Query  84   QQRWMRKKCFWHYHKCGVFYSCNEVNNH  1
+            QQRWMRKKCFWHYHKCGVFYSCNEVNNH
+Sbjct  441  QQRWMRKKCFWHYHKCGVFYSCNEVNNH  468
+
+
+ Score = 38.9 bits (89),  Expect = 3e-07, Method: Compositional matrix adjust.
+ Identities = 18/18 (100%), Positives = 18/18 (100%), Gaps = 0/18 (0%)
+ Frame = -1
+
+Query  363  KFMLCAAWMKFWCLMCCK  310
+            KFMLCAAWMKFWCLMCCK
+Sbjct  348  KFMLCAAWMKFWCLMCCK  365
+
+
+ Score = 15.0 bits (27),  Expect = 6.9, Method: Compositional matrix adjust.
+ Identities = 6/20 (30%), Positives = 8/20 (40%), Gaps = 0/20 (0%)
+ Frame = +3
+
+Query  936  RWSGCTCSNPYRTAGTAFAC  995
+            RW    C   Y   G  ++C
+Sbjct  443  RWMRKKCFWHYHKCGVFYSC  462
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 189225
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/seg_bx_left_s.faa).
+    Posted date:  Unknown
+  Number of letters in database: 468
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

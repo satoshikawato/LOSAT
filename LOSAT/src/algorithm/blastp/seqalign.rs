@@ -16,8 +16,9 @@
 //!   `bit_score`, `comp_adjustment_method`; `num` 0 (no linking);
 //! - `num_ident`, `num_positives`: the engine's counts (`kappa.rs` `recompute_num_identities`,
 //!   NCBI's `Blast_HSPGetNumIdentitiesAndPositives` on the search's letters, where O is read
-//!   as X), which `recount_pyrrolysine_identities` replaces by the display counts for the
-//!   pairs with O; `EngineCounts` keeps the engine's values of those HSPs.
+//!   as X), which `recount_shown_identities` replaces by the display counts for the pairs with O
+//!   and the subjects with a gap character; `EngineCounts` keeps the engine's values of those
+//!   HSPs.
 //! - the query length of the construction: the searched length (`query_lengths`, with
 //!   `-query_loc` the interval's), not `BlastpHsp::query_length`, which holds the range as
 //!   given.
@@ -52,10 +53,11 @@ use crate::report::serial::{write_hit_list_seqaligns, SerialFormat};
 /// Where an HSP lies in the final hit lists: (query, HSP list, HSP).
 type HspKey = (u32, u32, u32);
 
-/// The engine's `(num_ident, num_positives)` of the HSPs whose counts the pyrrolysine
-/// recount replaced (`recount_pyrrolysine_identities`), kept only when a Seq-annot format is
-/// requested (`ReportNeeds::seqalign`). The keys are added in the order of the hit lists, so
-/// they are sorted.
+/// The engine's `(num_ident, num_positives)` of the HSPs whose counts the display recount
+/// replaced (`recount_shown_identities`), which the Seq-aligns show (outfmt 8, 11, 12) and the
+/// outfmt 0 report reads from them (`PairwiseHit::seqalign_num_ident`). The keys are added in
+/// the order of the hit lists, so they are sorted. Empty unless a query or subject has
+/// pyrrolysine or a subject a stored gap character.
 #[derive(Default)]
 pub(crate) struct EngineCounts {
     saved: Vec<(HspKey, (usize, usize))>,
@@ -75,10 +77,24 @@ impl EngineCounts {
             .ok()
             .map(|index| self.saved[index].1)
     }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1199-1203
+    // ```c++
+    //     // Set the identity score
+    //     if (hsp->num_ident >= 0) {
+    //         static const string kNumIdent("num_ident");
+    //         scores.push_back(s_MakeScore(kNumIdent, 0.0, hsp->num_ident, true));
+    //     }
+    // ```
+    /// The Seq-align's `num_ident` of the HSP at `key` whose identities are now `shown`: the
+    /// engine's, if the recount replaced them (as `query_records` writes it).
+    pub(crate) fn num_ident(&self, key: HspKey, shown: usize) -> usize {
+        self.get(key).map_or(shown, |(num_ident, _)| num_ident)
+    }
 }
 
 /// Writes the documents of every query of `hit_lists` (indexed by query) to `writer`, each
-/// query's warnings before it.
+/// query's warnings before it (`write_hit_list_seqaligns`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_blastp_seqalign(
     format: SerialFormat,
@@ -88,7 +104,7 @@ pub(crate) fn write_blastp_seqalign(
     subject_placements: &Placements,
     engine_counts: &EngineCounts,
     writer: &mut dyn Write,
-    warnings: Option<&mut QueryWarnings<'_>>,
+    warnings: &mut QueryWarnings<'_>,
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastp,

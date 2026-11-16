@@ -872,7 +872,13 @@ fn run_inner(
     let pairwise_database = database.as_ref().map(BlastxDatabase::pairwise_database);
     let no_reported = ReportedSubjects::default();
     let records_parsed = if args.parse_deflines {
-        report::RecordsParsed::of(&subjects, args.show_gis, options.outfmt == 0)?
+        report::RecordsParsed::of(&subjects, args.show_gis, |parsed| {
+            if options.outfmt == 0 {
+                crate::report::db_subject::check_pairwise_records(parsed, true, "BLASTX")
+            } else {
+                Ok(())
+            }
+        })?
     } else {
         report::RecordsParsed::default()
     };

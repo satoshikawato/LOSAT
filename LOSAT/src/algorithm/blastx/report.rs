@@ -1145,17 +1145,23 @@ impl RecordsParsed {
             .filter(|subject| !subject.shown_as_record())
     }
 
-    /// The records of `records`, with LOSAT's refusals of outfmt 0 with `pairwise`.
-    pub(crate) fn of(records: &[FastaRecord], show_gis: bool, pairwise: bool) -> Result<Self> {
+    /// The records of `records`. `pairwise` gets the parsed subjects first, for LOSAT's refusals of
+    /// them in outfmt 0 (`db_subject::check_pairwise_records`, each outfmt 0 format's), then come
+    /// the refusals of their tabular ids.
+    pub(crate) fn of(
+        records: &[FastaRecord],
+        show_gis: bool,
+        pairwise: impl FnOnce(
+            &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
+        ) -> Result<()>,
+    ) -> Result<Self> {
         let subjects = crate::report::db_subject::parsed_records(
             records
                 .iter()
                 .map(|record| (record.believed(), record.title.as_slice())),
             show_gis,
-            true,
-            pairwise,
-            "BLASTX",
-        )?;
+        );
+        pairwise(&subjects)?;
         let refused = |subject: &crate::report::db_subject::ParsedSubject, problem: &str| {
             anyhow::anyhow!(
                 "the subject record {} has {problem}, which is not supported by LOSAT's BLASTX",

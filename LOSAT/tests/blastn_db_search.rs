@@ -42,6 +42,17 @@ fn temp_dir(tag: &str) -> PathBuf {
     dir
 }
 
+/// The letters of the first record of a FASTA file.
+fn letters(path: &Path) -> String {
+    let text = std::fs::read_to_string(path).expect("read the FASTA file");
+    text.lines()
+        .skip_while(|line| !line.starts_with('>'))
+        .skip(1)
+        .take_while(|line| !line.starts_with('>'))
+        .map(str::trim)
+        .collect()
+}
+
 /// The subject set (seven genomes without ambiguity codes, 2.1 Mb) as one FASTA file, and
 /// its database made by `losat makeblastdb`.
 fn subject_set(dir: &Path) -> (PathBuf, String) {
@@ -130,6 +141,99 @@ fn a_database_search_gives_the_same_report_at_every_thread_count() {
         "{pairwise}"
     );
     assert!(!pairwise.contains("Posted date:  Unknown"), "{pairwise}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// LOSAT_X_BNDECODE (`src/seqdb/volume.rs` `x_blastna_by_byte`): a database sequence's BLASTNA
+// letters made four bases per stored byte give the reports of the decode one base at a time
+// (`LOSAT_X_BNDECODE=0`), for the whole decode of the preliminary search and, with
+// `LOSAT_X_BNTBRANGE=0`, of the traceback, and for the traceback's decode of ranges (the default
+// for a sequence of 1 MiB or more). The database is EDL933 (5.5 Mb, 2,466 ambiguity runs of 11
+// codes, as makeblastdb stores them); the queries are its letters around 24 of those runs, the
+// runs written as `A`, so the alignments cross them and `sseq` prints their codes.
+#[test]
+fn the_by_byte_decode_gives_the_reports_of_the_decode_by_base() {
+    let dir = temp_dir("decode");
+    let genome = fasta("EDL933.fna");
+    let db = dir.join("edl933").to_str().unwrap().to_string();
+    let output = losat()
+        .arg("makeblastdb")
+        .arg("-in")
+        .arg(&genome)
+        .args(["-dbtype", "nucl", "-out", &db])
+        .output()
+        .expect("run losat makeblastdb");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let letters = letters(&genome);
+    let runs: Vec<usize> = letters
+        .bytes()
+        .enumerate()
+        .filter(|&(_, letter)| !b"ACGT".contains(&letter.to_ascii_uppercase()))
+        .map(|(at, _)| at)
+        .collect();
+    let mut queries = String::new();
+    let mut last = 0usize;
+    for &at in &runs {
+        if queries.matches('>').count() == 24 {
+            break;
+        }
+        if at < last + 20_000 || at < 400 || at + 400 > letters.len() {
+            continue;
+        }
+        last = at;
+        let window: String = letters[at - 397..at + 403]
+            .chars()
+            .map(|c| {
+                if "ACGT".contains(c.to_ascii_uppercase()) {
+                    c
+                } else {
+                    'A'
+                }
+            })
+            .collect();
+        queries.push_str(&format!(">q{at}\n{window}\n"));
+    }
+    let query = dir.join("queries.fna");
+    std::fs::write(&query, queries).unwrap();
+    let search = |vars: &[(&str, &str)]| -> Vec<u8> {
+        let output = losat()
+            .arg("blastn")
+            .arg("-query")
+            .arg(&query)
+            .args(["-db", &db, "-outfmt", "6 std sseq", "-num_threads", "1"])
+            .envs(vars.iter().copied())
+            .output()
+            .expect("run LOSAT");
+        assert!(
+            output.status.success() && output.stderr.is_empty(),
+            "{vars:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
+    };
+    for whole in [&[][..], &[("LOSAT_X_BNTBRANGE", "0")][..]] {
+        let by_byte = search(whole);
+        let rows = String::from_utf8(by_byte.clone()).unwrap();
+        assert!(rows.lines().count() >= 24, "{whole:?}: {rows}");
+        let sseq: String = rows
+            .lines()
+            .map(|row| row.rsplit('\t').next().unwrap())
+            .collect();
+        assert!(
+            sseq.bytes().any(|letter| !b"ACGT-".contains(&letter)),
+            "{whole:?}: no ambiguity code in sseq"
+        );
+        let mut off = whole.to_vec();
+        off.push(("LOSAT_X_BNDECODE", "0"));
+        assert!(
+            search(&off) == by_byte,
+            "{whole:?}: LOSAT_X_BNDECODE=0 differs"
+        );
+    }
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

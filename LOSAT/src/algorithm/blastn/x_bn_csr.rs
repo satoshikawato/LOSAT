@@ -105,7 +105,7 @@ use super::x_dc_csr::{
     x_rank_counts8, x_sum_packed, Csr, XPop,
 };
 use super::x_mb_lookup_par::Words;
-use super::{build_unmasked_ranges, PvArrayType, BLAST2NA_MASK};
+use super::{build_unmasked_ranges, x_range_words, PvArrayType};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
@@ -287,25 +287,16 @@ fn each_word(words: &Words<'_>, mut f: impl FnMut(usize, u32)) {
             if words.word_length > range_end.saturating_sub(range_start) {
                 continue;
             }
-            let mut current_kmer: u64 = 0;
-            let mut valid_bases = 0usize;
-            for pos in range_start..range_end {
-                let base = seq[pos];
-                if (base & BLAST2NA_MASK) != 0 {
-                    current_kmer = 0;
-                    valid_bases = 0;
-                    continue;
-                }
-                current_kmer = ((current_kmer << 2) | base as u64) & words.kmer_mask;
-                valid_bases += 1;
-                if valid_bases < lut_word_length {
-                    continue;
-                }
-                f(
-                    current_kmer as usize,
-                    (query_offset + (pos + 1 - lut_word_length) + 1) as u32,
-                );
-            }
+            // `x_range_words`: the word that ends at the range's `i`-th letter starts at
+            // `range_start + i + 1 - lut_word_length`, its `q_off_1` one more.
+            let q_off_1_at_0 = (query_offset + range_start + 2).wrapping_sub(lut_word_length);
+            x_range_words(
+                &seq[range_start..range_end],
+                lut_word_length,
+                words.kmer_mask,
+                || {},
+                |code, i| f(code as usize, q_off_1_at_0.wrapping_add(i) as u32),
+            );
         }
     }
 }

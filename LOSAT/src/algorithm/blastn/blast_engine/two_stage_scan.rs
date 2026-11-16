@@ -54,8 +54,8 @@ use super::pair_extend;
 use super::prelim_subject::ScanBatch;
 use super::{
     scan_subject_disc_words_with_ranges, scan_subject_kmers_with_ranges, select_mb_scan_kind,
-    x_bn_pv_once, x_dc_csr, x_mb_hit_prefetch, DiagHashTable, DiagStruct, OffsetPair, SmallNaWord,
-    SubjectChunk, UngappedHit, OFFSET_ARRAY_SIZE,
+    x_bn_pv_once, x_bn_rank_once, x_dc_csr, x_mb_hit_prefetch, DiagHashTable, DiagStruct,
+    OffsetPair, SmallNaWord, SubjectChunk, UngappedHit, OFFSET_ARRAY_SIZE,
 };
 use crate::algorithm::blastn::lookup::TwoStageLookup;
 
@@ -655,17 +655,21 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
         // per cell, so its scan tests the word there only (`XPacked::x_present`), not
         // first in the coarser presence vector, whose bit stands for several cells;
         // for a head whose bits fit the cache (`x_bn_pv_once`).
+        // EXPERIMENT (LOSAT_X_BNRANKONCE): with `rank_once` a word's run is the one of the
+        // head's element the ring hands over with it (`XHead::run_at`; a packed head's word is
+        // ranked once, where it enters the ring), else the cell's run read again (`XHead::run`).
+        // The ring's methods are called as `XRing`'s, not as those of `Ring` itself (a head of
+        // one element per cell), whose `emit` gets the word only.
         // `x_scan_csr!(head, |k| test)`: the scan of `head` whose per-word closure
         // takes a word `k` to the ring when `test` holds.
-        // The trait's methods are called in two of the three scans below only, so
-        // it is imported here and not in the macro's body.
-        use x_dc_csr::XRing as _;
+        let rank_once = x_bn_rank_once(true);
         let pv_view = two_stage.x_pv_view();
         macro_rules! x_scan_csr {
             ($head:expr, |$k:ident| $has:expr) => {{
                 use x_dc_csr::XHead;
                 let head = $head;
-                let mut x_on_word_csr = |(kmer_start, s_range, index): (usize, usize, u64)| {
+                let mut x_on_word_csr = |(kmer_start, s_range, index): (usize, usize, u64),
+                                         e: usize| {
                     if offset_pairs_len >= OFFSET_ARRAY_SIZE {
                         pair_extend::extend_offset_pairs(
                             scan,
@@ -677,7 +681,11 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                             true,
                         );
                     }
-                    let run: &[u32] = head.run(index as usize);
+                    let run: &[u32] = if rank_once {
+                        head.run_at(e)
+                    } else {
+                        head.run(index as usize)
+                    };
                     if (debug_mode || blastn_debug) && run.len() > 1000 {
                         eprintln!(
                             "[WARN] Large matches_slice: len={} for kmer at position {}",
@@ -745,7 +753,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                         }
                     },
                 );
-                ring.flush(&mut x_on_word_csr);
+                x_dc_csr::XRing::flush(&mut ring, |w| w.2 as usize, &mut x_on_word_csr);
             }};
         }
         match csr.x_packed() {
@@ -756,6 +764,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
             None => x_scan_csr!(csr, |k| pv_view.has_hits(k)),
         }
     } else {
+        x_bn_rank_once(false);
         let mb_scan_kind = select_mb_scan_kind(lut_word_length, scan_step, subject_masked);
         scan_subject_kmers_with_ranges(
             search_seq_packed,
@@ -875,7 +884,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
 fn x_push_word<R, E>(ring: &mut R, kmer_start: usize, s_range: usize, kmer: u64, emit: &mut E)
 where
     R: x_dc_csr::XRing<(usize, usize, u64)>,
-    E: FnMut((usize, usize, u64)),
+    E: FnMut((usize, usize, u64), usize),
 {
     ring.push((kmer_start, s_range, kmer), |w| w.2 as usize, emit);
 }

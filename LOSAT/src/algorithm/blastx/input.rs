@@ -57,9 +57,9 @@ pub struct FastaRecord {
     /// allocation) for every other record.
     pub around: Option<Box<LettersAround>>,
     /// On the first record of a reader batch, the batch's records that the `-query_loc` range
-    /// skipped (`SkippedRecord`), which NCBI's reader added to its scope; `None` (8 bytes, no
-    /// allocation) for every other record.
-    pub skipped: Option<Box<Vec<SkippedRecord>>>,
+    /// skipped (`SkippedRecord`), which NCBI's reader added to its scope; `None` (no allocation)
+    /// for every other record.
+    pub skipped: Option<Box<[SkippedRecord]>>,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:146-155 (quoted at
@@ -120,7 +120,7 @@ pub fn attach_skipped(records: &mut [FastaRecord], skipped: &mut Vec<SkippedReco
     }
     let skipped = std::mem::take(skipped);
     if let Some(first) = records.first_mut() {
-        first.skipped = Some(Box::new(skipped));
+        first.skipped = Some(skipped.into_boxed_slice());
     }
 }
 

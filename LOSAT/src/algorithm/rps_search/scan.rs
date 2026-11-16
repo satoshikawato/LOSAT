@@ -293,7 +293,6 @@ impl RpsBuckets {
         g0: usize,
     ) -> (u32, u32) {
         let numhits = cell[0] as usize;
-        let buckets = self.heads.len();
         if cell[0] <= RPS_HITS_PER_CELL {
             return self.add_list(
                 &cell[1 + taken as usize..=numhits],
@@ -306,7 +305,7 @@ impl RpsBuckets {
         let mut taken = taken;
         if taken == 0 {
             // The first hit is in the cell, the others in the overflow array.
-            let (taken_now, past) = self.add_list(&cell[1..2], 0, s_bits, g0, buckets);
+            let (taken_now, past) = self.add_list(&cell[1..2], 0, s_bits, g0);
             if past != u32::MAX {
                 return (taken_now, past);
             }
@@ -314,7 +313,7 @@ impl RpsBuckets {
         }
         let start = cell[2] as usize / std::mem::size_of::<i32>();
         let run = &table.overflow[start + taken as usize - 1..start + numhits - 1];
-        self.add_list(run, taken, s_bits, g0, buckets)
+        self.add_list(run, taken, s_bits, g0)
     }
 
     /// `s_AddToRPSBucket`: the hit of the concatenated position `q_off` whose query offset gives
@@ -332,85 +331,36 @@ impl RpsBuckets {
     /// ```
     ///
     /// The hits of `list` (entries of a cell, `taken` of the cell's entries before it) into the
-    /// buckets of the group (`g0` its first bucket, `buckets` their number: the one range test of
+    /// buckets of the group (`g0` its first bucket; the lookup of the bucket is the one range test of
     /// a hit, where the dev loop has its bounds check): the number of the cell's entries made and
     /// the position of the first entry past the group (`u32::MAX` when there is none).
     #[inline(always)]
-    fn add_list(
-        &mut self,
-        list: &[i32],
-        taken: u32,
-        s_bits: u32,
-        g0: usize,
-        buckets: usize,
-    ) -> (u32, u32) {
+    fn add_list(&mut self, list: &[i32], taken: u32, s_bits: u32, g0: usize) -> (u32, u32) {
         for (made, &entry) in list.iter().enumerate() {
             let q_off = entry_q_off(entry);
             let bucket = q_off_bucket(q_off).wrapping_sub(g0);
-            if bucket >= buckets {
+            let Some(head) = self.heads.get_mut(bucket) else {
                 return (taken + made as u32, self.past_the_group(q_off));
-            }
-            if self.heads[bucket].fill as usize >= BLOCK_ENTRIES {
+            };
+            if head.fill as usize >= BLOCK_ENTRIES {
                 self.close(bucket);
+                let head = &mut self.heads[bucket];
+                head.block[head.fill as usize] = s_bits | (q_off & BUCKET_MASK);
+                head.fill += 1;
+            } else {
+                head.block[head.fill as usize] = s_bits | (q_off & BUCKET_MASK);
+                head.fill += 1;
             }
-            let head = &mut self.heads[bucket];
-            head.block[head.fill as usize] = s_bits | (q_off & BUCKET_MASK);
-            head.fill += 1;
         }
         (taken + list.len() as u32, u32::MAX)
-    }
-
-    /// The buckets of `group` emptied, the reading cursor at the first of them.
-    fn open_group(&mut self, group: usize) -> RpsReadCursor {
-        self.clear();
-        self.g0 = group * self.group_buckets;
-        self.g1 = (self.g0 + self.group_buckets).min(self.num_buckets);
-        self.g1_q = if self.g1 == self.num_buckets {
-            u32::MAX
-        } else {
-            (self.g1 as u32) << BUCKET_BITS
-        };
-        RpsReadCursor {
-            bucket: self.g0,
-            block: 0,
-        }
-    }
-
-    /// A block of the run's pool.
-    fn take(&mut self) -> Block {
-        self.pool.take()
-    }
-
-    /// The bits that the entries of the hits of the word at the query offset `s_off` hold of it,
-    /// after the buckets' blocks are closed where the offset starts a segment (`start_segment`).
-    #[inline(always)]
-    fn entry_bits(&mut self, s_off: u32) -> u32 {
-        let segment = s_off >> SEGMENT_SHIFT;
-        if segment != self.segment {
-            self.start_segment(segment);
-        }
-        s_off << BUCKET_BITS
-    }
-
-    /// The scan reaches the query offsets of `segment`: every current block that holds hits is
-    /// closed, and every bucket's next hits go to blocks of that segment.
-    #[inline(never)]
-    fn start_segment(&mut self, segment: u32) {
-        for bucket in 0..self.heads.len() {
-            if self.heads[bucket].fill > 0 {
-                self.close(bucket);
-            }
-            self.heads[bucket].segment = segment;
-        }
-        self.segment = segment;
     }
 
     /// One hit into the buckets (`add_list`'s body), for the tests.
     #[cfg(test)]
     fn add(&mut self, q_off: u32, s_bits: u32) {
         let entry = q_off as i32 + (RPS_WORDSIZE as i32 - 1);
-        let (g0, buckets) = (self.g0, self.heads.len());
-        let (_, past) = self.add_list(&[entry], 0, s_bits, g0, buckets);
+        let g0 = self.g0;
+        let (_, past) = self.add_list(&[entry], 0, s_bits, g0);
         assert_eq!(past, u32::MAX, "a hit past the group");
     }
 

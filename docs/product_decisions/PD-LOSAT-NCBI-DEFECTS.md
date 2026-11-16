@@ -100,7 +100,8 @@
   manager or format guess prints addresses, reads outside its data, overflows a signed integer or
   depends on the machine's memory, rule 3, and of well-formed BitMagic data, rule 2, line RG item
   D3-1; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; no rule-1
-  exception: the Owner's questions of D3-1 stay open; written 2026-11-15, numbered after 1.37)
+  exception; the Owner decided D3-1's questions on 2026-11-16 (「推奨通り」: Q1 to Q3 refused, Q-BM
+  to port BitMagic); written 2026-11-15, numbered after 1.37)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1109,8 +1110,9 @@ masked). Line NP item M4a-2c.
   search for `|` past a test buffer of 10 bytes or fewer.
 
   None of these is a rule-1 exception: D3-1's questions to the Owner, Q1 (the Dense-seg division by
-  zero), Q2 (the memory bounds), Q3 (the signed overflows) and Q-BM, are open, and their cases stay
-  refused until the Owner answers. Not rule-3 items but refusals until LOSAT writes NCBI's ASN.1
+  zero), Q2 (the memory bounds), Q3 (the signed overflows) and Q-BM, were decided
+  by the Owner on 2026-11-16 (「推奨通り」): Q1 to Q3 refuse their cases, as built, and Q-BM ports BitMagic
+  in a later item (refused until then, below). Not rule-3 items but refusals until LOSAT writes NCBI's ASN.1
   text of the values it reads (line RG item D3-2): the annotation's text that NCBI prints after its
   `Failed to parse location of` message (1204.6), and with `-out_pssm`, `-export_search_strategy`
   or psiblast `-outfmt 11` a PSSM with members that LOSAT's PSSM writer does not write yet; nor
@@ -1161,8 +1163,8 @@ would port:
   instruction 2026-09-29, restated 2026-10-07): well-formed BitMagic data of a Seq-table of the
   PSSM query's annotations that NCBI's object manager decodes (`bit-bvector` values, a
   `bit-set-bvector`'s sparse index). NCBI's decode is deterministic; LOSAT refuses it ("a PSSM
-  query whose annot has ... is not supported") until the Owner answers question Q-BM of D3-1
-  (port the decode or keep refusing). Streams that NCBI reads past or crashes on are rule-3
+  query whose annot has ... is not supported") until that port lands: the Owner decided on 2026-11-16 (「推奨通り」, Q-BM) to
+  port BitMagic in a later item. Streams that NCBI reads past or crashes on are rule-3
   rejections (above).
 
 ## Ported (rule 4)

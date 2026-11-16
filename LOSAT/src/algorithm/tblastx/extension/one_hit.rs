@@ -73,14 +73,28 @@ pub(crate) fn extend_hit_one_hit<S: TbxScore>(
     s_off: usize,
     x_drop: i32,
 ) -> Option<OneHit> {
-    one_hit_walks(sc, q_seq, qb, s_seq, q_off, s_off, x_drop).map(|(hit, _)| hit)
+    // Not the first pass: the walks give their result (`OneHitAlone::Again` is the first pass's).
+    match one_hit_walks(sc, q_seq, qb, s_seq, q_off, s_off, x_drop, false)? {
+        OneHitAlone::Hit(hit) => Some(hit),
+        OneHitAlone::Again => None,
+    }
 }
 
-/// `extend_hit_one_hit` on the context alone (`InBatch::ALONE`: the walks stop at its ends), and
-/// whether a walk read the context's last letter on its side without a break where the subject
-/// has letters more: only there do NCBI's walks go on into the query batch, and the search runs
-/// the extension again on the batch (`extend_hit_one_hit`); elsewhere the two give the same
-/// result. The search's loop so keeps no values of the batch through the walks.
+/// What the one-hit extension on a context alone gives (`extend_hit_one_hit_alone`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OneHitAlone {
+    /// The extension's result, which NCBI's walks on the query batch also give.
+    Hit(OneHit),
+    /// A walk ended at the context's end where NCBI's would go on past it into the query batch
+    /// (the NULLB not breaking it, `InBatch::left_at_bound`, `InBatch::right_at_bound`): the search
+    /// runs the extension again on the batch (`extend_hit_one_hit`).
+    Again,
+}
+
+/// `extend_hit_one_hit` on the context alone (`InBatch::ALONE`: the walks stop at its ends), up to
+/// a walk that ends at the context's end where NCBI's would go on into the query batch
+/// (`OneHitAlone::Again`); elsewhere the two give the same result. The search's loop so keeps no
+/// values of the batch through the walks.
 pub(crate) fn extend_hit_one_hit_alone<S: TbxScore>(
     sc: S,
     q_seq: &[u8],
@@ -88,12 +102,13 @@ pub(crate) fn extend_hit_one_hit_alone<S: TbxScore>(
     q_off: usize,
     s_off: usize,
     x_drop: i32,
-) -> Option<(OneHit, bool)> {
-    one_hit_walks(sc, q_seq, InBatch::ALONE, s_seq, q_off, s_off, x_drop)
+) -> Option<OneHitAlone> {
+    one_hit_walks(sc, q_seq, InBatch::ALONE, s_seq, q_off, s_off, x_drop, true)
 }
 
-/// The steps of `extend_hit_one_hit` with the walks of `qb`, and whether a walk read the
-/// context's last letter on its side without a break where the subject has letters more.
+/// The steps of `extend_hit_one_hit` with the walks of `qb`. `first`: the search's first pass on
+/// the context alone, which ends at a walk that asks for the batch (`OneHitAlone::Again`; no other
+/// pass gives it).
 #[inline(always)]
 fn one_hit_walks<S: TbxScore>(
     sc: S,
@@ -103,7 +118,8 @@ fn one_hit_walks<S: TbxScore>(
     q_off: usize,
     s_off: usize,
     x_drop: i32,
-) -> Option<(OneHit, bool)> {
+    first: bool,
+) -> Option<OneHitAlone> {
     let word = sc.word();
     if q_off + word > q_seq.len() || s_off + word > s_seq.len() {
         return None;
@@ -126,10 +142,13 @@ fn one_hit_walks<S: TbxScore>(
     let s_left_off = q_left_off + s_off - q_off;
     let s_right_off = q_right_off + s_off - q_off;
     // `extend_left_ungapped` walks from the letter before the offsets it is given.
-    let (left_score, left_disp, left_past) =
+    let (left_score, left_disp, left_again) =
         extend_left_ungapped(sc, q_seq, qb, s_seq, q_left_off, s_left_off, score, x_drop);
+    if first && left_again {
+        return Some(OneHitAlone::Again);
+    }
     // `last` is the walk's `i` at its end: `*s_last_off = s_off + i`.
-    let (total_score, right_disp, last, right_past) = extend_right_ungapped(
+    let (total_score, right_disp, last, right_again) = extend_right_ungapped(
         sc,
         q_seq,
         qb,
@@ -139,14 +158,14 @@ fn one_hit_walks<S: TbxScore>(
         left_score,
         x_drop,
     );
-    Some((
-        OneHit {
-            q_start: (q_left_off - left_disp) as i32,
-            s_start: (s_left_off - left_disp) as i32,
-            length: left_disp as i32 + right_disp as i32 + init_hit_width,
-            score: total_score,
-            s_last_off: (s_right_off + 1 + last) as i32,
-        },
-        left_past || right_past,
-    ))
+    if first && right_again {
+        return Some(OneHitAlone::Again);
+    }
+    Some(OneHitAlone::Hit(OneHit {
+        q_start: (q_left_off - left_disp) as i32,
+        s_start: (s_left_off - left_disp) as i32,
+        length: left_disp as i32 + right_disp as i32 + init_hit_width,
+        score: total_score,
+        s_last_off: (s_right_off + 1 + last) as i32,
+    }))
 }

@@ -28,10 +28,16 @@
 //!
 //! LOSAT's walks (`two_hit.rs`) read the context's letters (`&aa_seq[1..len - 1]`); a walk that
 //! reads the last one on its side without a break, where the subject has letters left, goes on here
-//! (`InBatch::left_past_start`, `InBatch::right_past_end`). With a raw X-drop of 32,768 or less the
+//! (`InBatch::left_at_bound`, `InBatch::right_at_bound`). With a raw X-drop of 32,768 or less the
 //! NULLB always breaks the walk (`maxscore - score >= 32768`), on the left with the same best and
 //! length, on the right also with the same stop: `*s_last_off = s_off + i` with `i` the NULLB's
 //! step, the count of the walk that ended at the context's end.
+//!
+//! The searches so walk a context alone first (`InBatch::ALONE`): a walk that ends at the context's
+//! end tests, from its own sum, best and X-drop, whether the NULLB's step would break it
+//! (`nullb_goes_on_left`, `nullb_goes_on_right`), and only where it would not does the search run
+//! the extension again on the batch (`extend_hit_one_hit`, `extend_hit_two_hit_reference`); the
+//! walks' loops keep no other values.
 //!
 //! A walk past the NULLB that scores no higher than its best leaves the extension's result as it
 //! was, except that the right walk's stop (`s_last_off`, and through it the diagonal's `last_hit`
@@ -47,7 +53,7 @@
 //! The one-hit extension starts its right walk one letter past a word whose running score never
 //! rises above 0 (aa_ungapped.c:1030-1031, 1073-1076), past the context's end for such a word at
 //! the end of its context; the walk then starts on the next context's first letter
-//! (`InBatch::right_past_end` with `q_at` one past the NULLB). Such a word scores below every
+//! (`InBatch::right_at_bound` with `q_at` one past the NULLB). Such a word scores below every
 //! `-threshold` and seeds only as an exact match (blast_aalookup.c:498-504), of a subject word of
 //! the same letters, and only `X` scores below 0 against itself; the seed stage's subject frames
 //! are translated from the subject's 2-bit bases (blast_engine.c:1403-1405, `subjects.rs`) and
@@ -56,11 +62,17 @@
 use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::algorithm::tblastx::scoring::TbxScore;
 use crate::algorithm::tblastx::subjects::XReadFailure;
+use crate::utils::matrix::BLAST_SCORE_MIN;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// The byte between two contexts of NCBI's query batch (`NULLB`, ncbi_std.h), which is also each
 /// context buffer's sentinel in LOSAT.
 const NULLB: u8 = 0;
+
+/// The NULLB's score against every byte in every matrix of the search: `BLAST_SCORE_MIN`, the row
+/// and the column of `-` (blast_stat.c:1559-1576; `utils::matrix::protein_score`, and BLOSUM62's
+/// direct table; test `the_nullb_scores_blast_score_min_against_every_byte`).
+const NULLB_SCORE: i32 = BLAST_SCORE_MIN;
 
 /// The query batch of one subject's search, as its two-hit and one-hit extensions read it: the
 /// batch's contexts, and where the search reports an extension that LOSAT refuses.
@@ -350,9 +362,9 @@ pub(crate) struct InBatch<'a> {
 
 impl InBatch<'static> {
     /// A context alone: the walks stop at its ends. The extensions walk so first and on the batch
-    /// only where a walk would go on past an end (`extend_hit_one_hit`,
-    /// `extend_hit_two_hit_reference`); the tests, and `x_two_hit_cells`, which counts the cells
-    /// of the same walks.
+    /// only where NCBI's walk would go on past an end (`InBatch::left_at_bound`,
+    /// `InBatch::right_at_bound`; `extend_hit_one_hit_alone`, `extend_hit_two_hit_reference`);
+    /// the tests, and `x_two_hit_cells`, which counts the cells of the same walks.
     pub(crate) const ALONE: Self = Self {
         batch: None,
         ctx: 0,
@@ -360,48 +372,110 @@ impl InBatch<'static> {
 }
 
 impl InBatch<'_> {
-    /// The left walk read every letter of the context before its start offset without a break,
-    /// and the subject has `s_next` letters more: NCBI's walk goes on into the batch
-    /// (`QueryBatch::walk_left`). A context alone, or the batch's first, ends here.
+    /// The left walk read the letters before its start without a break (`q_off` of the context's
+    /// letters before it, `s_off` of the subject's: it stopped at the first one of the two), at
+    /// `score` below its best `max_score`. On a batch NCBI's walk goes on into it where the
+    /// subject has letters more (`QueryBatch::walk_left`; the batch's first context ends here),
+    /// and the walk's result stands: false. On a context alone: whether NCBI's walk could go on,
+    /// its next byte (the NULLB before the context) not breaking it (`nullb_goes_on_left`): the
+    /// search then runs the extension again on the batch; elsewhere the walk's result is NCBI's.
     #[inline(always)]
-    pub(super) fn left_past_start<S: TbxScore>(
+    pub(super) fn left_at_bound<S: TbxScore>(
         self,
         sc: S,
         s_seq: &[u8],
-        s_next: usize,
+        q_off: usize,
+        s_off: usize,
         score: i32,
         max_score: i32,
         x_drop: i32,
-    ) {
-        if let (Some(batch), true) = (self.batch, self.ctx > 0) {
-            batch.walk_left(self.ctx, sc, s_seq, s_next, score, max_score, x_drop);
+    ) -> bool {
+        match self.batch {
+            Some(batch) => {
+                if q_off < s_off && self.ctx > 0 {
+                    batch.walk_left(self.ctx, sc, s_seq, s_off - q_off, score, max_score, x_drop);
+                }
+                false
+            }
+            None => nullb_goes_on_left(score, max_score, x_drop),
         }
     }
 
-    /// The right walk read every letter of the context after its start offset without a break in
-    /// `j` steps (it started at or past the context's end where `j` is 0), its next query byte is at
-    /// offset `q_at` of the context and the subject's next letter is `s_seq[s_at]`: NCBI's walk
-    /// goes on into the batch (`QueryBatch::walk_right`). Returns the walk's count at its end (`j`
-    /// for a context alone or the batch's last).
+    /// The right walk read the letters after its start without a break in `j` steps (it stopped
+    /// at the context's end or the subject's), at `score` below its best `max_score`; its next
+    /// query byte is at offset `q_at` of the context's `q_len` letters and the subject's next
+    /// letter is `s_seq[s_at]`. On a batch NCBI's walk goes on into it where the subject has
+    /// letters more (`QueryBatch::walk_right`; the batch's last context ends here): its count at
+    /// its end, and false. On a context alone: `j`, and whether NCBI's walk could go on, its next
+    /// byte (the NULLB after the context) not breaking it (`nullb_goes_on_right`), or the walk
+    /// starting past that NULLB (`q_at > q_len`, the one-hit extension's walk from a word at the
+    /// context's end, `extend_hit_one_hit`): the search then runs the extension again on the
+    /// batch; elsewhere the walk's result is NCBI's.
     #[inline(always)]
-    pub(super) fn right_past_end<S: TbxScore>(
+    pub(super) fn right_at_bound<S: TbxScore>(
         self,
         sc: S,
         s_seq: &[u8],
         s_at: usize,
         q_at: usize,
+        q_len: usize,
         j: usize,
         score: i32,
         max_score: i32,
         x_drop: i32,
-    ) -> usize {
+    ) -> (usize, bool) {
         match self.batch {
-            Some(batch) => {
-                batch.walk_right(self.ctx, sc, s_seq, s_at, q_at, j, score, max_score, x_drop)
-            }
-            None => j,
+            Some(batch) if s_at < s_seq.len() => (
+                batch.walk_right(self.ctx, sc, s_seq, s_at, q_at, j, score, max_score, x_drop),
+                false,
+            ),
+            Some(_) => (j, false),
+            None => (
+                j,
+                q_at > q_len || nullb_goes_on_right(score, max_score, x_drop),
+            ),
         }
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:906-912 (`s_BlastAaExtendLeft`)
+// ```c
+//         score += matrix[q[i]][s[i]];
+//
+//         if (score > maxscore) {
+//             maxscore = score;
+//             best_i = i;
+//         }
+// ...
+//         if ((maxscore - score) >= dropoff)
+//             break;
+// ```
+/// Whether the NULLB's step leaves NCBI's left walk going, the walk being at `score` below its
+/// best `max_score` without a break (`max_score - score < x_drop`): the NULLB takes
+/// `-NULLB_SCORE` (32,768) off, so the sum stays below the best and the walk breaks unless the
+/// X-drop is larger than what it is then below the best. In `i32`: `x_drop - (max_score - score)`
+/// lies in `1..=x_drop`.
+#[inline(always)]
+fn nullb_goes_on_left(score: i32, max_score: i32, x_drop: i32) -> bool {
+    x_drop - (max_score - score) > -NULLB_SCORE
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:851-862 (`s_BlastAaExtendRight`)
+// ```c
+//         score += matrix[q[i]][s[i]];
+//
+//         if (score > maxscore) {
+//             maxscore = score;
+//             best_i = i;
+//         }
+// ...
+//         if (score <= 0 || (maxscore - score) >= dropoff)
+//             break;
+// ```
+/// `nullb_goes_on_left` for the right walk, which also breaks where the sum falls to 0 or less.
+#[inline(always)]
+fn nullb_goes_on_right(score: i32, max_score: i32, x_drop: i32) -> bool {
+    score > -NULLB_SCORE && nullb_goes_on_left(score, max_score, x_drop)
 }
 
 #[cfg(test)]

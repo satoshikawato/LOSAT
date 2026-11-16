@@ -1,7 +1,7 @@
 //! Tests of the walks past a context's ends (query_batch.rs): the extensions of `two_hit.rs` and
 //! `one_hit.rs` on a context of a batch against NCBI's functions on the batch's buffer.
 
-use super::super::one_hit::extend_hit_one_hit;
+use super::super::one_hit::{extend_hit_one_hit, extend_hit_one_hit_alone, OneHitAlone};
 use super::super::two_hit::extend_hit_two_hit_reference;
 use super::*;
 use crate::algorithm::tblastx::scoring::Blosum62Score;
@@ -470,7 +470,7 @@ fn the_two_hit_walks_go_on_into_the_batch_as_ncbis_do() {
 #[test]
 fn the_one_hit_walks_go_on_into_the_batch_as_ncbis_do() {
     let mut rng = Rng(0x0e17_1c0d_e5a5_5a5a);
-    let (mut moved, mut refused, mut past_end) = (0usize, 0usize, 0usize);
+    let (mut moved, mut refused, mut past_end, mut again) = (0usize, 0usize, 0usize, 0usize);
     for round in 0..30_000 {
         let blosum = round % 2 == 0;
         let (contexts, subject, from) = random_case(&mut rng, if blosum { 25 } else { 3 }, 3);
@@ -511,15 +511,34 @@ fn the_one_hit_walks_go_on_into_the_batch_as_ncbis_do() {
                 )
                 .expect("the word fits");
                 let model = ncbi_one_hit($sc, &contexts, ctx, &subject, q_word, s_off, x_drop);
-                (got, alone, model)
+                // The search's first pass, on the context alone.
+                let first = extend_hit_one_hit_alone($sc, letters, &subject, q_word, s_off, x_drop)
+                    .expect("the word fits");
+                (got, alone, model, first)
             }};
         }
-        let (got, alone, model) = if blosum {
+        let (got, alone, model, first) = if blosum {
             run!(Blosum62Score)
         } else {
             run!(Big)
         };
         let was_refused = failure.take().is_some();
+        // The first pass gives the batch's result, or asks for the batch only where a walk ends
+        // at the context's end with an X-drop above 32,768 or starts past it (a word at the
+        // context's end that never scores above 0).
+        match first {
+            OneHitAlone::Hit(hit) => {
+                assert_eq!(hit, got, "round {round}: first pass");
+                assert!(!was_refused, "round {round}: first pass");
+            }
+            OneHitAlone::Again => {
+                assert!(
+                    x_drop > -BLAST_SCORE_MIN || q_word + 3 == len,
+                    "round {round}: again"
+                );
+                again += 1;
+            }
+        }
         match model {
             Some((q_start, s_start, length, score, s_last_off)) => {
                 assert!(!was_refused, "round {round}: refused");
@@ -552,9 +571,52 @@ fn the_one_hit_walks_go_on_into_the_batch_as_ncbis_do() {
         }
     }
     assert!(
-        moved > 100 && refused > 100 && past_end > 0,
-        "{moved} {refused} {past_end}"
+        moved > 100 && refused > 100 && past_end > 0 && again > 100,
+        "{moved} {refused} {past_end} {again}"
     );
+}
+
+// No NCBI counterpart: `NULLB_SCORE` is the NULLB's score against every byte in BLOSUM62's
+// instance and in every matrix's (`nullb_goes_on_left` and `nullb_goes_on_right` take the NULLB's
+// step from it).
+#[test]
+fn the_nullb_scores_blast_score_min_against_every_byte() {
+    for b in 0..=u8::MAX {
+        assert_eq!(Blosum62Score.score(NULLB, b), NULLB_SCORE, "{b}");
+    }
+    for matrix in ScoringMatrix::ALL {
+        let scores = crate::algorithm::tblastx::scoring::MatrixScores::new(matrix);
+        for b in 0..=u8::MAX {
+            assert_eq!(
+                scores.scorer().score(NULLB, b),
+                NULLB_SCORE,
+                "{matrix:?} {b}"
+            );
+            assert_eq!(matrix.score(NULLB, b), NULLB_SCORE, "{matrix:?} {b}");
+        }
+    }
+}
+
+// No NCBI counterpart: the NULLB's step of NCBI's walks against the tests of `left_at_bound` and
+// `right_at_bound` on a context alone, at every distance below the best that a walk without a
+// break can be at, around the X-drops where it changes.
+#[test]
+fn the_nullb_step_breaks_the_walks_as_ncbis() {
+    for x_drop in [1, 2, 100, 32767, 32768, 32769, 32770, 40000, i32::MAX] {
+        for max_score in [1, 5, 32768, 32769, 40000, 1 << 30] {
+            for below in [0, 1, 2, x_drop / 2, x_drop - 2, x_drop - 1] {
+                if below < 0 || below >= x_drop {
+                    continue;
+                }
+                let score = max_score - below;
+                let next = i64::from(score) + i64::from(BLAST_SCORE_MIN);
+                let left = i64::from(max_score) - next >= i64::from(x_drop);
+                let right = next <= 0 || left;
+                assert_eq!(nullb_goes_on_left(score, max_score, x_drop), !left);
+                assert_eq!(nullb_goes_on_right(score, max_score, x_drop), !right);
+            }
+        }
+    }
 }
 
 // No NCBI counterpart: the cases of the brief, one by one (Big's scores: a NULLB costs 32,768,

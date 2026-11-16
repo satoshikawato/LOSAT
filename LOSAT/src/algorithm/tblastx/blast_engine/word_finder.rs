@@ -30,6 +30,7 @@ use super::{
     InitHSP, Instant, OffsetPair, QueryBatch, QueryContext, QueryFrame, SubjectChunk,
     TblastxChunkScanResult, TblastxChunkScanStats, TbxScore, TranslatedChunk, UngappedHit,
 };
+use crate::algorithm::tblastx::extension::OneHitAlone;
 use crate::algorithm::tblastx::lookup::BlastAaLookupTable;
 use crate::algorithm::tblastx::subjects::XReadFailure;
 
@@ -1201,9 +1202,9 @@ fn scan_chunk_bucketed<S: TbxScore>(
 
 /// The one-hit extension of the word at batch offset `query_offset` (in context `ctx_idx`, `ctx`)
 /// and `subject_offset` of the chunk's letters `subject`, on the query batch: where a walk on the
-/// context alone read the context's last letter on its side without a break where the subject has
-/// letters more (`extend_hit_one_hit_alone`), NCBI's walk goes on past the NULLB
-/// (extension/query_batch.rs). Out of the scan's loop, from values the loop keeps.
+/// context alone ended at the context's end and NCBI's would go on past the NULLB
+/// (`extend_hit_one_hit_alone`, `OneHitAlone::Again`; extension/query_batch.rs). Out of the scan's
+/// loop, from values the loop keeps.
 #[cold]
 #[inline(never)]
 fn one_hit_in_batch<S: TbxScore>(
@@ -1421,16 +1422,28 @@ fn scan_chunk_one_hit<S: TbxScore>(
                 // On the context alone; where a walk would go on into the query batch past the
                 // context's ends, as NCBI's do, again on the batch (`one_hit_in_batch`;
                 // extension/query_batch.rs; aa_ungapped.c:841, 897).
-                let Some((hit, past)) =
-                    crate::algorithm::tblastx::extension::extend_hit_one_hit_alone(
+                let found = match crate::algorithm::tblastx::extension::extend_hit_one_hit_alone(
+                    sc,
+                    query,
+                    subject,
+                    q_raw,
+                    subject_offset as usize,
+                    x_dropoff_per_context[ctx_idx],
+                ) {
+                    Some(OneHitAlone::Hit(hit)) => Some(hit),
+                    Some(OneHitAlone::Again) => one_hit_in_batch(
                         sc,
-                        query,
+                        frame,
+                        ctx,
+                        ctx_idx,
+                        query_offset,
                         subject,
-                        q_raw,
-                        subject_offset as usize,
-                        x_dropoff_per_context[ctx_idx],
-                    )
-                else {
+                        subject_offset,
+                        x_dropoff_per_context,
+                    ),
+                    None => None,
+                };
+                let Some(hit) = found else {
                     // A word past the letters, which the scan does not give.
                     x_read_failure.fail(
                         s_idx,
@@ -1441,21 +1454,6 @@ fn scan_chunk_one_hit<S: TbxScore>(
                         ),
                     );
                     continue;
-                };
-                let hit = if past {
-                    one_hit_in_batch(
-                        sc,
-                        frame,
-                        ctx,
-                        ctx_idx,
-                        query_offset,
-                        subject,
-                        subject_offset,
-                        x_dropoff_per_context,
-                    )
-                    .unwrap_or(hit)
-                } else {
-                    hit
                 };
                 // [C] if (score >= cutoffs->cutoff_score)
                 // [C]     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,

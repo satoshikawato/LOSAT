@@ -822,6 +822,90 @@ fn x_bpf_enum() -> bool {
     *ON.get_or_init(|| std::env::var("LOSAT_BPF_ENUM").is_ok_and(|v| v == "1"))
 }
 
+/// PROBE (v4-BPF s13 K2-3, not for merge): `LOSAT_BPF_FILL=1`: the bucket fill's partition writes
+/// through a 64-byte line per bucket (`x_partition_staged`).
+fn x_bpf_fill() -> u8 {
+    static ARM: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
+    *ARM.get_or_init(|| {
+        std::env::var("LOSAT_BPF_FILL")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    })
+}
+
+/// PROBE (v4-BPF s13 item 3, not for merge): the partition of `x_buckets_on` with each bucket's
+/// appends gathered in a staging line of 16 entries (64 bytes, aligned as `hits`' lines) and
+/// copied when the line is full, so the 742 streams take one store burst per line instead of one
+/// store per append. The same slots get the same values.
+#[inline(never)]
+fn x_partition_staged(
+    targets: &[u32],
+    per_offset: &[(i32, u32)],
+    bucket_starts: &[u32],
+    hits: &mut [i32],
+) {
+    const LINE: usize = 16;
+    let buckets = bucket_starts.len() - 1;
+    let mask = (1u32 << X_BUCKET_SHIFT) - 1;
+    #[repr(C, align(64))]
+    #[derive(Clone, Copy)]
+    struct XLine([u32; LINE]);
+    let mut stage = vec![XLine([0; LINE]); buckets];
+    let mut cursors: Vec<u32> = bucket_starts[..buckets].to_vec();
+    // The index phase of `hits`' 64-byte lines.
+    let phase = ((hits.as_ptr() as usize) / 4) & (LINE - 1);
+    let out = hits.as_mut_ptr();
+    let mut at = 0usize;
+    for &(query_offset, appends) in per_offset {
+        let high = (query_offset as u32) << X_BUCKET_SHIFT;
+        let end = at + appends as usize;
+        for &index in &targets[at..end] {
+            let b = (index >> X_BUCKET_SHIFT) as usize;
+            let c = cursors[b] as usize;
+            let slot = (c + phase) & (LINE - 1);
+            stage[b].0[slot] = high | (index & mask);
+            cursors[b] = (c + 1) as u32;
+            if slot == LINE - 1 {
+                // The line ends at c (slot 15): index x has slot 15 - (c - x); its entries of
+                // bucket b start at the bucket's start or at c - 15.
+                let lo = (bucket_starts[b] as usize).max((c + 1).saturating_sub(LINE));
+                let from = LINE - 1 - (c - lo);
+                // SAFETY: lo..=c lie in bucket b's slots (`bucket_starts[b]..bucket_starts[b + 1]`).
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        stage[b].0.as_ptr().add(from).cast::<i32>(),
+                        out.add(lo),
+                        LINE - from,
+                    );
+                }
+            }
+        }
+        at = end;
+    }
+    for b in 0..buckets {
+        let c = cursors[b] as usize;
+        let slot = (c + phase) & (LINE - 1);
+        if slot == 0 {
+            continue;
+        }
+        // Index c would take `slot`: index x < c of this line has slot slot - (c - x).
+        let lo = (bucket_starts[b] as usize).max(c.saturating_sub(slot));
+        if lo >= c {
+            continue;
+        }
+        let from = slot - (c - lo);
+        // SAFETY: lo..c lie in bucket b's slots.
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                stage[b].0.as_ptr().add(from).cast::<i32>(),
+                out.add(lo),
+                c - lo,
+            );
+        }
+    }
+}
+
 fn x_suffix_table(
     alphabet: usize,
     word_length: usize,
@@ -2315,7 +2399,14 @@ fn x_buckets_with<S: CompressedScores>(
     }
     let mut pv = x_zeroed_on(kept.pv, (backbone_size >> PV_ARRAY_BTS) + 1);
     let mut hits = x_sized_on::<S, _>(kept.hits, total, pooled);
-    {
+    if x_bpf_fill() == 1 {
+        x_partition_staged(
+            &targets,
+            &per_offset,
+            &bucket_starts[..buckets + 1],
+            &mut hits,
+        );
+    } else {
         let mut cursors = bucket_starts[..buckets].to_vec();
         let out = hits.as_mut_ptr();
         let mut at = 0usize;

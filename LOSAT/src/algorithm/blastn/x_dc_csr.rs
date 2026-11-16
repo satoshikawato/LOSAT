@@ -1009,10 +1009,10 @@ impl<'a, T: Copy + Default> Ring<'a, T> {
         let n = self.n;
         if (n + 1) % GROUP == 0 {
             let (offsets, qs) = (self.offsets, self.qs);
-            // (constant trip counts: the loops unroll, and with one word per group they are
-            // the hints of that word alone)
+            // (constant trip counts and bounds written from `n` alone: the loops unroll, and
+            // with one word per group they are the hints of that word alone, as before groups)
             for k in 0..GROUP - 1 {
-                let m = n + 1 - GROUP + k;
+                let m = n - (GROUP - 1) + k;
                 // SAFETY: `m < n` and `m > n - GROUP >= n - RING`: word `m` was pushed, and no
                 // later word wrote its slot.
                 x_ahead(
@@ -1021,10 +1021,10 @@ impl<'a, T: Copy + Default> Ring<'a, T> {
                 );
             }
             x_ahead(offsets, cell(&w));
-            if n + 1 >= RING / 2 + GROUP {
+            if n >= RING / 2 + GROUP - 1 {
                 for k in 0..GROUP {
-                    let m = n + 1 - RING / 2 - GROUP + k;
-                    // SAFETY: as above (`m >= n + 1 - RING / 2 - GROUP > n - RING`).
+                    let m = n - (RING / 2 + GROUP - 1) + k;
+                    // SAFETY: as above (`m >= n - (RING / 2 + GROUP - 1) > n - RING`).
                     let c = cell(unsafe { self.buf[m & MASK].assume_init_ref() });
                     let a = offsets[c] as usize;
                     let b = offsets[c + 1] as usize;
@@ -1099,17 +1099,17 @@ impl<T: Copy + Default> XRing<T> for XRingPacked<'_, T> {
         if (n + 1) % GROUP == 0 {
             let (offsets, qs) = (self.head.offsets, self.head.qs);
             for k in 0..GROUP - 1 {
-                let m = n + 1 - GROUP + k;
+                let m = n - (GROUP - 1) + k;
                 // SAFETY: `m < n` and `m > n - GROUP >= n - RING`: word `m` was pushed with its
                 // rank, and no later word wrote its slot.
                 x_ahead(offsets, unsafe { self.ranks[m & MASK].assume_init() }
                     as usize);
             }
             x_ahead(offsets, r);
-            if n + 1 >= RING / 2 + GROUP {
+            if n >= RING / 2 + GROUP - 1 {
                 for j in 0..GROUP {
-                    let m = n + 1 - RING / 2 - GROUP + j;
-                    // SAFETY: as above (`m >= n + 1 - RING / 2 - GROUP > n - RING`).
+                    let m = n - (RING / 2 + GROUP - 1) + j;
+                    // SAFETY: as above (`m >= n - (RING / 2 + GROUP - 1) > n - RING`).
                     let k = unsafe { self.ranks[m & MASK].assume_init() } as usize;
                     let a = offsets[k] as usize;
                     let b = offsets[k + 1] as usize;

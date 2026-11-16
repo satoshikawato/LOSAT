@@ -1520,22 +1520,26 @@ impl ListedTitles<'_> {
 
     /// The stop of NCBI's prefetch of a query batch's subjects of ranks `ranks` whose first query
     /// is `query`, for the XML2 and JSON formats, which write the taxonomy texts at each `Hit`
-    /// (`shared::batch_prefetch_stop`).
+    /// (`shared::held_batch_prefetch_stop`): after the lookups of the reports of the batches
+    /// before, whose final hit lists are `before` (their subjects are those `read_taxids` reads),
+    /// which BLASTP writes after the stop (the search of those batches again, `HeaderReadError`).
     pub(super) fn batch_prefetch_stop(
         &self,
         database: &BlastpDatabase,
+        before: &[Option<BlastpHitList>],
         ranks: impl IntoIterator<Item = usize>,
         query: usize,
     ) -> Result<()> {
-        shared::batch_prefetch_stop(
+        let subject = |rank: usize| {
+            shared::PrefetchSubject::unflipped(
+                self.listed.ordinals[rank],
+                self.parsed_subject(rank),
+            )
+        };
+        shared::held_batch_prefetch_stop(
             &database.db,
-            &database.taxdb,
-            ranks.into_iter().map(|rank| {
-                shared::PrefetchSubject::unflipped(
-                    self.listed.ordinals[rank],
-                    self.parsed_subject(rank),
-                )
-            }),
+            Self::reported_ranks(before).map(subject),
+            ranks.into_iter().map(subject),
             self.program,
             query,
         )

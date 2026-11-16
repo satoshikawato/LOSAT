@@ -512,6 +512,29 @@ impl TabularSpec {
         })
     }
 
+    /// The default report of outfmt 6 or 7 (`kind`): the `std` fields and a tab, which `of`
+    /// leaves to the programs (BLASTX writes it with the shared writer as any field list).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:76-79
+    /// ```c++
+    ///     NStr::Split(format, " ", format_tokens);
+    ///
+    ///     if (format_tokens.empty())
+    ///         x_AddDefaultFieldsToShow();
+    /// ```
+    pub fn std(kind: TabularKind) -> &'static TabularSpec {
+        debug_assert!(matches!(
+            kind,
+            TabularKind::Tabular | TabularKind::Commented
+        ));
+        TabularSpec {
+            kind,
+            fields: STD_FIELDS.to_vec(),
+            delimiter: "\t".to_string(),
+        }
+        .intern()
+    }
+
     /// The spec, kept for the rest of the process (one per distinct spec), so that the
     /// programs' `Copy` format values can hold it.
     pub fn intern(self) -> &'static TabularSpec {

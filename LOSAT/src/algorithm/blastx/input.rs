@@ -75,34 +75,46 @@ impl FastaRecord {
         self.source.as_ref()?.believed.as_deref()
     }
 
-    /// What `Query=` and `# Query:` show (`fasta_reader::FastaRecord::query_line`).
+    /// The record's names (`fasta_reader::RecordNames`, the one owner of their rules for every
+    /// program's records): its local ID (`internal_id`), its title and the Seq-ids
+    /// `-parse_deflines` read.
+    pub fn names(&self) -> crate::blastinput::fasta_reader::RecordNames<'_> {
+        crate::blastinput::fasta_reader::RecordNames {
+            local_id: &self.internal_id,
+            title: &self.title,
+            believed: self.believed(),
+        }
+    }
+
+    /// What `Query=` and `# Query:` show (`RecordNames::query_line`).
     pub fn query_line(&self) -> std::borrow::Cow<'_, [u8]> {
-        if self.believed().is_none() || self.title.is_empty() {
-            return match self.believed() {
-                Some(_) => std::borrow::Cow::Borrowed(self.internal_id.as_bytes()),
-                None => std::borrow::Cow::Borrowed(&self.title),
-            };
-        }
-        let mut line = self.internal_id.as_bytes().to_vec();
-        line.push(b' ');
-        line.extend_from_slice(&self.title);
-        std::borrow::Cow::Owned(line)
+        self.names().query_line()
     }
 
-    /// The id of the record in NCBI's warnings (`fasta_reader::FastaRecord::warning_id`).
+    /// The id of the record in NCBI's warnings (`RecordNames::warning_id`).
     pub fn warning_id(&self) -> &[u8] {
-        match self.believed() {
-            Some(ids) => &ids.warning_id,
-            None => self.internal_id.as_bytes(),
-        }
+        self.names().warning_id()
     }
 
-    /// The Seq-id of the record in the Seq-aligns and the archive.
+    /// The Seq-id of the record in the Seq-aligns and the archive (`RecordNames::seq_id`).
     pub fn seq_id(&self) -> crate::report::seqid::SeqId<'_> {
-        match self.believed() {
-            Some(ids) => crate::report::seqid::SeqId::Db(&ids.best),
-            None => crate::report::seqid::SeqId::Local(&self.internal_id),
-        }
+        self.names().seq_id()
+    }
+
+    /// The ID that the tabular formats and the reports show (`RecordNames::shown_id`): the first
+    /// word of the title, the local ID without a title, with `-parse_deflines` the `qaccver` of
+    /// the record's ids.
+    pub fn shown_id(&self) -> &[u8] {
+        self.names().shown_id()
+    }
+
+    /// The tabular subject id (`sseqid`, `sacc`, `saccver`) of a `-subject` record
+    /// (`RecordNames::subject_tabular_id` of a protein record), read by the reports for a record
+    /// without parsed ids (a record with them has its ids in `report::RecordsParsed`, which
+    /// refuses the ids LOSAT does not write): `None` where `GenerateDefline` throws
+    /// (`report::tabular::SubjectLookup::Failed`).
+    pub fn subject_tabular_id(&self) -> Option<Vec<u8>> {
+        self.names().subject_tabular_id(true).ok().flatten()
     }
 
     /// Where the letters lie in the record: the start of the `-query_loc` / `-subject_loc`
@@ -1438,6 +1450,65 @@ impl std::error::Error for NoDeflineError {}
 // ```
 mod tests {
     use super::*;
+
+    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:214-223 (quoted at
+    // the reader): the title is the defline's bytes up to the first byte below 0x20 after its first,
+    // as they are. BLASTX's record and the shared reader's record of the same title have the same
+    // names (`fasta_reader::RecordNames`, their one owner).
+    #[test]
+    fn titles_keep_their_bytes_and_their_names_are_the_shared_records() {
+        let titles: [&[u8]; 13] = [
+            b"q1 a\xc3\xa9b z",
+            b"q1 a\xe9b z",
+            b"q1 a\xa9b z",
+            b"q1 a\x81b z",
+            b"q1 a\xc0\x80b z",
+            b"q1 a\xe0\x81\x81b z",
+            b"q1 a\xed\xa0\x80b z",
+            b"q1 a\xf5\x80\x80\x80b z",
+            b"q1 one\xe9",
+            b"\x01q1 ab z",
+            b"q1\xe9 rest",
+            b"Subject_1\x81 rest",
+            b"q1 a title longer than thirty-five bytes \xe9 end",
+        ];
+        for title in titles {
+            let mut data = b">".to_vec();
+            data.extend_from_slice(title);
+            data.extend_from_slice(b"\nACGT\n");
+            for protein in [false, true] {
+                let records = parse_fasta(&data, protein, false).unwrap();
+                let record = &records[0];
+                assert_eq!(record.title, title, "{title:?}");
+                let shared = crate::blastinput::fasta_reader::FastaRecord::new(
+                    record.internal_id.clone(),
+                    title,
+                    b"ACGT",
+                );
+                assert_eq!(record.query_line(), shared.query_line(), "{title:?}");
+                assert_eq!(record.shown_id(), shared.shown_id(), "{title:?}");
+                assert_eq!(record.warning_id(), shared.warning_id(), "{title:?}");
+                assert_eq!(
+                    record.names().warning_query_id(),
+                    shared.names().warning_query_id(),
+                    "{title:?}"
+                );
+                assert_eq!(
+                    record.subject_tabular_id(),
+                    shared.subject_tabular_id(true).unwrap(),
+                    "{title:?}"
+                );
+            }
+        }
+        // A byte below 0x20 after the first ends the title.
+        for (data, title) in [
+            (&b">q1 a\x01b z\nACGT\n"[..], &b"q1 a"[..]),
+            (b">q1 a\tb z\nACGT\n", b"q1 a"),
+            (b">q1\x01 rest\nACGT\n", b"q1"),
+        ] {
+            assert_eq!(parse_fasta(data, false, false).unwrap()[0].title, title);
+        }
+    }
     #[test]
     // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:736-751
     // ```c++

@@ -867,12 +867,10 @@ pub struct ResolvedOptions {
     pub outfmt: u8,
     /// `-show_gis`: the labels of the query-anchored sections (outfmt 1 to 4) show a sequence's GI.
     pub show_gis: bool,
-    /// The fields of the default tabular report (outfmt 6 and 7 without `tabular`: the `std`
-    /// fields), by name; empty for outfmt 0.
-    pub fields: Vec<String>,
     /// The tabular report with a field list or a delimiter (outfmt 6 and 7), or outfmt 10 or
-    /// 20 (`TabularSpec::of`), which the shared writer writes (`tabular.rs`); `None` for the
-    /// default outfmt 6 and 7 and the other formats.
+    /// 20 (`TabularSpec::of`); `None` for the default outfmt 6 and 7 (the `std` fields and a
+    /// tab, `TabularSpec::std`, which the reports write with the same shared writer, `tabular.rs`)
+    /// and the other formats.
     pub tabular: Option<&'static crate::report::tabular::TabularSpec>,
     /// Whether `taxdb.bti` is on NCBI's search path, for a `tabular` field list that shows a
     /// plural name of the taxonomy database (its formatters warn without it) or the organism
@@ -1353,35 +1351,6 @@ impl BlastxArgs {
         )?;
         // The counts are at most `i32::MAX` (the options are `Int4`).
         let hitlist_size = counts.hitlist_size as i32;
-        // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:76-99
-        // ```c++
-        //     vector<string> format_tokens;
-        //     NStr::Split(format, " ", format_tokens);
-        //
-        //     if (format_tokens.empty())
-        //         x_AddDefaultFieldsToShow();
-        //
-        //     ITERATE (vector<string>, iter, format_tokens) {
-        //         if (*iter == kDfltArgTabularOutputFmtTag)
-        //             x_AddDefaultFieldsToShow();
-        //         else if ((*iter)[0] == '-') {
-        // ...
-        //     if (m_FieldsToShow.empty()) {
-        //         x_AddDefaultFieldsToShow();
-        //     }
-        // ```
-        // The fields as NCBI reads them (`report::tabular::parse_fields`: unknown words are
-        // dropped, `-name` removes a field). A list that is not the `std` fields with a tab, and
-        // outfmt 10 and 20, are written by the shared writer (`tabular`); the default report
-        // writes the `std` fields (`fields`).
-        let fields = if outfmt > 4 {
-            crate::report::tabular::parse_fields(&choice.spec)
-                .into_iter()
-                .map(|field| field.name().to_string())
-                .collect()
-        } else {
-            Vec::new()
-        };
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:250
         // ```c++
         //         formatter.SetCustomDelimiter(fmt_args->GetCustomDelimiter());
@@ -1533,7 +1502,6 @@ impl BlastxArgs {
             formatting: self.formatting,
             outfmt,
             show_gis: self.show_gis,
-            fields,
             tabular,
             taxdb_found: false,
             subject_taxdb: None,
@@ -1913,9 +1881,22 @@ mod tests {
     #[test]
     fn outfmt_and_fields_are_read_as_ncbi() {
         use crate::report::tabular::{TabularKind, STD_FIELDS};
+        // The fields of a report: its `tabular` spec's, else the `std` fields of the default
+        // outfmt 6 and 7 (`TabularSpec::std`), none for the other formats.
         let fields = |outfmt: &str| {
             let resolved = parse(&["-outfmt", outfmt]).resolve().unwrap();
-            (resolved.outfmt, resolved.fields)
+            let fields = match resolved.tabular {
+                Some(spec) => spec.fields.clone(),
+                None if matches!(resolved.outfmt, 6 | 7) => STD_FIELDS.to_vec(),
+                None => Vec::new(),
+            };
+            (
+                resolved.outfmt,
+                fields
+                    .iter()
+                    .map(|f| f.name().to_string())
+                    .collect::<Vec<_>>(),
+            )
         };
         let std: Vec<String> = STD_FIELDS.iter().map(|f| f.name().to_string()).collect();
         assert_eq!(fields("0 std"), (0, Vec::new()));

@@ -1,6 +1,6 @@
-//! BLASTX's tabular reports with a field list or a delimiter (outfmt 6 and 7 other than the
-//! default `std` fields with a tab) and outfmt 10 and 20: the adapter of the shared writer
-//! (`report::tabular`, NCBI's `CBlastTabularInfo`). For each query of a query batch in order it
+//! BLASTX's tabular reports (outfmt 6 and 7, the default `std` fields with a tab as any field list
+//! or delimiter, `report::tabular::TabularSpec::std`) and outfmt 10 and 20: the adapter of the shared
+//! writer (`report::tabular`, NCBI's `CBlastTabularInfo`). For each query of a query batch in order it
 //! writes the query's warnings, outfmt 7's comment lines and one row per HSP of the query's final
 //! hit list that has a Seq-align (`report::has_seqalign`), in the list's order; outfmt 20's
 //! header line comes with the prolog (`write_prolog`, before the search) and outfmt 7's count of
@@ -46,8 +46,8 @@ use super::empty_rows::{
 };
 use super::input::FastaRecord;
 use super::report::{
-    alignment, has_seqalign, local_id, query_endpoints, query_warning, subject_tabular_id,
-    tabular_io_error, ShownSubjects, TabularFlushError,
+    alignment, has_seqalign, query_endpoints, query_warning, tabular_io_error, ShownSubjects,
+    TabularFlushError,
 };
 use super::runtime::BatchResults;
 use crate::algorithm::common::tabular::FailedValues;
@@ -319,19 +319,19 @@ fn subject_values<'a>(
         }
         // A record without parsed ids: its `sseqid` is the first word of its title, or of the
         // title that `GenerateDefline` makes of it for a `Subject_` word
-        // (`report::subject_tabular_id`), none where that throws; its `sall*` the first word of
+        // (`FastaRecord::subject_tabular_id`), none where that throws; its `sall*` the first word of
         // its title (`s_ReplaceLocalId`, `DeflineIds::of_record`).
         ShownSubjects::Fasta { .. } => {
-            let tabular = subject_tabular_id(subject);
+            let tabular = subject.subject_tabular_id();
             let failed_id = tabular.is_none();
-            let id = tabular.unwrap_or_default();
+            let id = std::borrow::Cow::Owned(tabular.unwrap_or_default());
             SubjectValues {
                 accession: &[],
                 accession_version: &[],
                 gi: 0,
                 // Only where the word is not the id, which the writer prints for none.
-                all_ids: if all_deflines && local_id(subject) != &*id {
-                    std::borrow::Cow::Owned(DeflineIds::of_record(local_id(subject)))
+                all_ids: if all_deflines && subject.shown_id() != &*id {
+                    std::borrow::Cow::Owned(DeflineIds::of_record(subject.shown_id()))
                 } else {
                     std::borrow::Cow::Borrowed(&[])
                 },
@@ -514,7 +514,7 @@ pub(super) fn write_blastx_tabular(
             //     m_Ostream.flush();
             // }
             // ```
-            // As the default report's: a stream failure unwinds through the query's formatter.
+            // A stream failure unwinds through the query's formatter.
             (|| -> Result<()> {
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1277-1278
                 // ```c++
@@ -564,7 +564,7 @@ pub(super) fn write_blastx_tabular(
                     .query_range
                     .map_or(searched_length, |range| range.length());
                 let tabular_query =
-                    TabularQuery::of_ids(query.believed(), local_id(query), query_length);
+                    TabularQuery::of_ids(query.believed(), query.shown_id(), query_length);
                 // Several volumes: the merged lists cut once per query (`ResolvedOptions::shown_lists`).
                 let listed = &lists[..lists.len().min(options.shown_lists())];
                 // The query's formatter (`TabularRows`).

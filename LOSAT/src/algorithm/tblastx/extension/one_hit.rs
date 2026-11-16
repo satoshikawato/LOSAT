@@ -121,13 +121,17 @@ fn one_hit_walks<S: TbxScore>(
     first: bool,
 ) -> Option<OneHitAlone> {
     let word = sc.word();
-    if q_off + word > q_seq.len() || s_off + word > s_seq.len() {
+    // The word's letters (`None` where it does not fit in both).
+    let (Some(q_word), Some(s_word)) = (
+        q_seq.get(q_off..q_off.checked_add(word)?),
+        s_seq.get(s_off..s_off.checked_add(word)?),
+    ) else {
         return None;
-    }
+    };
     let (mut score, mut sum) = (0i32, 0i32);
     let (mut q_left_off, mut q_right_off, mut q_best_left_off) = (q_off, q_off + word, q_off);
-    for i in 0..word {
-        sum += sc.score(q_seq[q_off + i], s_seq[s_off + i]);
+    for (i, (&q, &s)) in q_word.iter().zip(s_word).enumerate() {
+        sum += sc.score(q, s);
         if sum > score {
             score = sum;
             q_best_left_off = q_left_off;

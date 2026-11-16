@@ -1419,11 +1419,55 @@ fn scan_chunk_one_hit<S: TbxScore>(
                 // The context's letters (`query->sequence` from the context's offset,
                 // blast_query_info.c:311-315), as the two-hit extensions read them.
                 let query = &ctx.aa_seq[1..ctx.aa_seq.len() - 1];
+                // What the scan does with the extension's result, written once for the two passes
+                // below (the first pass's result stays in its registers).
+                let mut record = |hit: crate::algorithm::tblastx::extension::OneHit| {
+                    // [C] if (score >= cutoffs->cutoff_score)
+                    // [C]     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
+                    // [C]                      query_offset, subject_offset, hsp_len, score);
+                    if hit.score >= cutoff_scores[ctx_idx] {
+                        // NCBI reference (598d8ae6):
+                        // c++/src/algo/blast/core/aa_ungapped.c:1054,1083
+                        // ```c
+                        //     init_hit_width = q_right_off - q_left_off + 1;
+                        // ...
+                        //     *hsp_len = left_disp + right_disp + init_hit_width;
+                        // ```
+                        // A word whose running sum is reset after its best part (a low
+                        // -threshold allows it) gives a length of 0 or less, saved as any
+                        // other: its ends are at or before its starts, and below 0 near a
+                        // frame's start. NCBI links it with the others and its
+                        // re-evaluation deletes it; LOSAT keeps its `Int4` ends up to the
+                        // first linking call and drops it there (`chaining.rs`, the impl
+                        // of `UngappedHit`; `subject_link::link_subject_hits_int4`).
+                        let hsp_q_absolute = ctx.frame_base + hit.q_start;
+                        init_hsps.push(InitHSP {
+                            q_start_absolute: hsp_q_absolute,
+                            q_end_absolute: hsp_q_absolute + hit.length,
+                            s_start: hit.s_start,
+                            s_end: hit.s_start + hit.length,
+                            q_seed_absolute: query_offset as i32,
+                            s_seed: subject_offset as i32,
+                            score: hit.score,
+                            ctx_idx,
+                            s_f_idx,
+                            q_idx: ctx.q_idx,
+                            s_idx: s_idx as u32,
+                            q_frame: ctx.frame,
+                            s_frame: s_frame.frame,
+                            q_orig_len: ctx.orig_len,
+                            s_orig_len: s_len,
+                        });
+                    }
+                    // [C] diag_array[diag_coord].last_hit =
+                    // [C]     s_last_off - (wordsize - 1) + diag_offset;
+                    diag_entry.set_last_hit(hit.s_last_off - (wordsize - 1) + *diag_offset);
+                };
                 // [C] score = s_BlastAaExtendOneHit(matrix, subject, query, ...);
                 // On the context alone; where a walk would go on into the query batch past the
                 // context's ends, as NCBI's do, again on the batch (`one_hit_in_batch`;
                 // extension/query_batch.rs; aa_ungapped.c:841, 897).
-                let found = match crate::algorithm::tblastx::extension::extend_hit_one_hit_alone(
+                let again = match crate::algorithm::tblastx::extension::extend_hit_one_hit_alone(
                     sc,
                     query,
                     subject,
@@ -1431,7 +1475,10 @@ fn scan_chunk_one_hit<S: TbxScore>(
                     subject_offset as usize,
                     x_dropoff_per_context[ctx_idx],
                 ) {
-                    Some(OneHitAlone::Hit(hit)) => Some(hit),
+                    Some(OneHitAlone::Hit(hit)) => {
+                        record(hit);
+                        continue;
+                    }
                     Some(OneHitAlone::Again) => one_hit_in_batch(
                         sc,
                         frame,
@@ -1444,7 +1491,7 @@ fn scan_chunk_one_hit<S: TbxScore>(
                     ),
                     None => None,
                 };
-                let Some(hit) = found else {
+                let Some(hit) = again else {
                     // A word past the letters, which the scan does not give.
                     x_read_failure.fail(
                         s_idx,
@@ -1456,46 +1503,7 @@ fn scan_chunk_one_hit<S: TbxScore>(
                     );
                     continue;
                 };
-                // [C] if (score >= cutoffs->cutoff_score)
-                // [C]     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
-                // [C]                      query_offset, subject_offset, hsp_len, score);
-                if hit.score >= cutoff_scores[ctx_idx] {
-                    // NCBI reference (598d8ae6):
-                    // c++/src/algo/blast/core/aa_ungapped.c:1054,1083
-                    // ```c
-                    //     init_hit_width = q_right_off - q_left_off + 1;
-                    // ...
-                    //     *hsp_len = left_disp + right_disp + init_hit_width;
-                    // ```
-                    // A word whose running sum is reset after its best part (a low
-                    // -threshold allows it) gives a length of 0 or less, saved as any
-                    // other: its ends are at or before its starts, and below 0 near a
-                    // frame's start. NCBI links it with the others and its
-                    // re-evaluation deletes it; LOSAT keeps its `Int4` ends up to the
-                    // first linking call and drops it there (`chaining.rs`, the impl
-                    // of `UngappedHit`; `subject_link::link_subject_hits_int4`).
-                    let hsp_q_absolute = ctx.frame_base + hit.q_start;
-                    init_hsps.push(InitHSP {
-                        q_start_absolute: hsp_q_absolute,
-                        q_end_absolute: hsp_q_absolute + hit.length,
-                        s_start: hit.s_start,
-                        s_end: hit.s_start + hit.length,
-                        q_seed_absolute: query_offset as i32,
-                        s_seed: subject_offset as i32,
-                        score: hit.score,
-                        ctx_idx,
-                        s_f_idx,
-                        q_idx: ctx.q_idx,
-                        s_idx: s_idx as u32,
-                        q_frame: ctx.frame,
-                        s_frame: s_frame.frame,
-                        q_orig_len: ctx.orig_len,
-                        s_orig_len: s_len,
-                    });
-                }
-                // [C] diag_array[diag_coord].last_hit =
-                // [C]     s_last_off - (wordsize - 1) + diag_offset;
-                diag_entry.set_last_hit(hit.s_last_off - (wordsize - 1) + *diag_offset);
+                record(hit);
             }
         }
     }

@@ -266,12 +266,14 @@ fn extend_right_ungapped_scalar<S: TbxScore>(
     // (`*s_last_off = s_off + i`). The one-hit extension can start the walk one past the
     // context's end (`extend_hit_one_hit`): NCBI's walk starts on the next context's first letter
     // there.
+    // A walk that ends here started past the context's letters only where it took no step, and
+    // then `q_start > q_limit` (`InBatch::right_at_bound`).
     let (j, again) = qb.right_at_bound(
         sc,
         s_seq,
         s_start + j,
         q_start + j,
-        q_limit,
+        q_start > q_limit,
         j,
         score,
         max_score,
@@ -388,12 +390,14 @@ unsafe fn extend_right_ungapped_simd128<S: TbxScore>(
     }
     // As in `extend_right_ungapped_scalar` (aa_ungapped.c:841): both loops return at a break, so
     // `j == n`, and where the subject has letters left, `n` is the context's count.
+    // A walk that ends here started past the context's letters only where it took no step, and
+    // then `q_start > q_limit` (`InBatch::right_at_bound`).
     let (j, again) = qb.right_at_bound(
         sc,
         s_seq,
         s_start + j,
         q_start + j,
-        q_limit,
+        q_start > q_limit,
         j,
         score,
         max_score,

@@ -416,14 +416,15 @@ impl InBatch<'_> {
 
     /// The right walk read the letters after its start without a break in `j` steps (it stopped
     /// at the context's end or the subject's), at `score` below its best `max_score`; its next
-    /// query byte is at offset `q_at` of the context's `q_len` letters and the subject's next
-    /// letter is `s_seq[s_at]`. On a batch NCBI's walk goes on into it where the subject has
-    /// letters more (`QueryBatch::walk_right`; the batch's last context ends here): its count at
-    /// its end, and false. On a context alone: `j`, and whether NCBI's walk could go on, its next
-    /// byte (the NULLB after the context) not breaking it (`nullb_goes_on_right`), or the walk
-    /// starting past that NULLB (`q_at > q_len`, the one-hit extension's walk from a word at the
-    /// context's end, `extend_hit_one_hit`): the search then runs the extension again on the
-    /// batch; elsewhere the walk's result is NCBI's.
+    /// query byte is at offset `q_at` of the context and the subject's next letter is
+    /// `s_seq[s_at]`; `starts_past`: the walk started past the context's letters (the one-hit
+    /// extension's walk from a word at the context's end that never scored above 0,
+    /// `extend_hit_one_hit`; it took no step). On a batch NCBI's walk goes on into it where the
+    /// subject has letters more (`QueryBatch::walk_right`; the batch's last context ends here): its
+    /// count at its end, and false. On a context alone: `j`, and whether NCBI's walk could go on,
+    /// its next byte (the NULLB after the context) not breaking it (`nullb_goes_on_right`), or
+    /// the walk starting past that NULLB (`starts_past`): the search then runs the extension again
+    /// on the batch; elsewhere the walk's result is NCBI's.
     #[inline(always)]
     pub(super) fn right_at_bound<S: TbxScore>(
         self,
@@ -431,7 +432,7 @@ impl InBatch<'_> {
         s_seq: &[u8],
         s_at: usize,
         q_at: usize,
-        q_len: usize,
+        starts_past: bool,
         j: usize,
         score: i32,
         max_score: i32,
@@ -447,7 +448,7 @@ impl InBatch<'_> {
             Some(_) => (j, false),
             None => (
                 j,
-                q_at > q_len || nullb_goes_on_right(score, max_score, x_drop),
+                starts_past || nullb_goes_on_right(score, max_score, x_drop),
             ),
         }
     }

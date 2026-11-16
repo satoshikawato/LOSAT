@@ -66,7 +66,6 @@ pub(super) struct TracebackCtx<'a> {
     pub(super) use_dp: bool,
     /// The hit-saving options.
     pub(super) percent_identity: f64,
-    pub(super) min_hit_length: usize,
     pub(super) min_diag_separation: i32,
     pub(super) evalue_threshold: f64,
 }
@@ -106,7 +105,6 @@ pub(super) fn traceback_post_purge(
         score_matrix,
         use_dp,
         percent_identity,
-        min_hit_length,
         ..
     } = ctx;
 
@@ -272,7 +270,6 @@ pub(super) fn traceback_post_purge(
             q_seq_nomask_blastna,
             s_seq_eval,
             percent_identity,
-            min_hit_length,
         );
         if let (Some(timing), Some(identity_length_start)) = (timing_ref, identity_length_start) {
             BlastnTiming::record_duration(&timing.identity_length_test_ns, identity_length_start);

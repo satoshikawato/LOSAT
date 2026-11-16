@@ -528,6 +528,82 @@ impl TabularSpec {
         fields.iter().any(|field| self.has(*field))
     }
 
+    /// Whether NCBI's formatter reads the query's Bioseq for a row, and with it the HSP's query
+    /// coverage (`x_SetQueryCovSeqalign`, which reads the Seq-align's query range where the
+    /// Seq-align has no `hsp_percent_coverage`): one of the query's id fields or `qcovhsp`.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:778-800
+    /// ```c++
+    ///     if (x_IsFieldRequested(eQuerySeqId) || x_IsFieldRequested(eQueryGi) ||
+    ///         x_IsFieldRequested(eQueryAccession) ||
+    ///         x_IsFieldRequested(eQueryAccessionVersion) ||
+    ///         x_IsFieldRequested(eQueryCovSeqalign)) {
+    ///         try {
+    ///             ...
+    ///             x_SetQueryCovSeqalign(align, m_QueryLength);
+    ///         } catch (const CException&) {
+    ///             list<CRef<CSeq_id> > query_ids;
+    ///             CRef<CSeq_id> id(new CSeq_id());
+    ///             id->Assign(align.GetSeq_id(0));
+    ///             query_ids.push_back(id);
+    ///             SetQueryId(query_ids);
+    ///             bioseqs_found = false;
+    ///         }
+    ///     }
+    /// ```
+    pub fn reads_query(&self) -> bool {
+        self.has_any(&[
+            QuerySeqId,
+            QueryGi,
+            QueryAccession,
+            QueryAccessionVersion,
+            QueryCovHsp,
+        ])
+    }
+
+    /// Whether NCBI's formatter reads the subject's Bioseq for a row before its alignment block,
+    /// which sets the subject's length (`slen`) there: one of the subject's id, taxonomy, title or
+    /// strand fields. A row that leaves before the alignment block (`bioseqs_found` false) shows
+    /// an `slen` of 0 without one of them.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-842
+    /// ```c++
+    ///     if(setSubjectIds || setSubjectTaxInfo || setSubjectTaxInfoAll || setSubjectTitle ||
+    ///        x_IsFieldRequested(eSubjectStrand) || setSubjectId)
+    ///     {
+    ///         try {
+    ///        		const CBioseq_Handle& subject_bh =
+    ///                 scope.GetBioseqHandle(align.GetSeq_id(1));
+    ///             if(setSubjectId) {
+    ///             	SetSubjectId(subject_bh);
+    ///             }
+    ///             m_SubjectLength = subject_bh.GetBioseqLength();
+    /// ```
+    pub fn reads_subject_bioseq(&self) -> bool {
+        self.has_any(&[
+            SubjectAllSeqIds,
+            SubjectAllGis,
+            SubjectAllAccessions,
+            SubjectTaxId,
+            SubjectSciName,
+            SubjectCommonName,
+            SubjectBlastName,
+            SubjectSuperKingdom,
+            SubjectTaxIds,
+            SubjectSciNames,
+            SubjectCommonNames,
+            SubjectBlastNames,
+            SubjectSuperKingdoms,
+            SubjectTitle,
+            SubjectAllTitles,
+            SubjectStrand,
+            SubjectSeqId,
+            SubjectGi,
+            SubjectAccession,
+            SubjectAccessionVersion,
+        ])
+    }
+
     /// Whether NCBI's formatter opens its alignment block for a row whose Seq-align counts
     /// `num_ident` identities (the engine's count): one of its fields, or `nident` with
     /// identities. Only the block counts the identities on the aligned sequences and sets the
@@ -1142,6 +1218,14 @@ pub struct TabularHsp<'a> {
     /// The query and subject rows of the alignment (`-` for a gap; translated rows in
     /// residues), when `TabularNeeds::rows`.
     pub rows: Option<(&'a [u8], &'a [u8])>,
+    /// Whether a `-` that begins or ends a row of `rows` is an end gap (`end_gap_span`), which NCBI
+    /// shows as its end character, a space (`push_alignment_row`), as in the Smith-Waterman
+    /// alignments of rpsblast's `-use_sw_tback`. NCBI decides by where the `-` comes from
+    /// (alnvec.cpp:279-297): a gap segment outside the row's aligned segments is the end
+    /// character, a fill of a segment that has a start is the gap character. `true` for every
+    /// alignment of the engines; `false` only for `-subject`'s mapped row of BLASTX
+    /// (`blastx::empty_rows::MappedAlignment`), whose `-` past the query's end fills its segment.
+    pub end_gaps: bool,
     /// `qcovhsp` (the integer of NCBI's `hsp_percent_coverage`).
     pub qcovhsp: i32,
 }
@@ -1359,8 +1443,12 @@ impl TabularWriter<'_> {
                 QueryEnd => push_num(out, hsp.q_end),
                 SubjectStart => push_num(out, hsp.s_start),
                 SubjectEnd => push_num(out, hsp.s_end),
-                QuerySeq => push_alignment_row(out, hsp.rows.map_or(&[][..], |rows| rows.0)),
-                SubjectSeq => push_alignment_row(out, hsp.rows.map_or(&[][..], |rows| rows.1)),
+                QuerySeq => {
+                    push_alignment_row(out, hsp.rows.map_or(&[][..], |rows| rows.0), hsp.end_gaps)
+                }
+                SubjectSeq => {
+                    push_alignment_row(out, hsp.rows.map_or(&[][..], |rows| rows.1), hsp.end_gaps)
+                }
                 Evalue => out.extend_from_slice(format_evalue_ncbi_tabular(hsp.evalue).as_bytes()),
                 BitScore => out.extend_from_slice(format_bitscore_ncbi(hsp.bit_score).as_bytes()),
                 Score => push_num(out, hsp.score),
@@ -1390,7 +1478,7 @@ impl TabularWriter<'_> {
                 SubjectFrame => push_num(out, frames(hsp).1),
                 Btop => {
                     if let Some((qrow, srow)) = hsp.rows {
-                        write_btop(out, qrow, srow);
+                        write_btop(out, qrow, srow, hsp.end_gaps);
                     }
                 }
                 SubjectTaxId => match subject.taxonomy.taxid {
@@ -1683,11 +1771,16 @@ fn push_coverage(out: &mut Vec<u8>, value: i32) {
 ///                     btop_string += m_SubjectSeq[i];
 /// ```
 /// The rows' end gaps are spaces (`push_alignment_row`), so an end-gap column is the pair of a
-/// letter and a space. Rows without end gaps (every alignment but some Smith-Waterman redos')
-/// take the columns as they are; `end_gap_span` stops at each row's first letter from each end.
-pub fn write_btop(out: &mut Vec<u8>, qrow: &[u8], srow: &[u8]) {
-    let (q_span, s_span) = (end_gap_span(qrow, |_| false), end_gap_span(srow, |_| false));
+/// letter and a space. Rows without end gaps (every alignment but some Smith-Waterman redos', and
+/// rows whose `-` fill a segment, `end_gaps` false: `TabularHsp::end_gaps`) take the columns as
+/// they are; `end_gap_span` stops at each row's first letter from each end.
+pub fn write_btop(out: &mut Vec<u8>, qrow: &[u8], srow: &[u8], end_gaps: bool) {
     let columns = qrow.iter().copied().zip(srow.iter().copied());
+    if !end_gaps {
+        write_btop_columns(out, columns);
+        return;
+    }
+    let (q_span, s_span) = (end_gap_span(qrow, |_| false), end_gap_span(srow, |_| false));
     if q_span == (0, qrow.len()) && s_span == (0, srow.len()) {
         write_btop_columns(out, columns);
     } else {
@@ -1740,9 +1833,14 @@ fn end_char(letter: u8, column: usize, span: (usize, usize)) -> u8 {
 //         alnVec->GetWholeAlnSeqString(1, m_SubjectSeq);
 // ```
 /// `qseq` or `sseq`: the row with `-` for its inner gaps and a space (NCBI's end character, which
-/// the tabular writer does not set) for its end gaps (`end_gap_span`).
-fn push_alignment_row(out: &mut Vec<u8>, row: &[u8]) {
-    let span = end_gap_span(row, |_| false);
+/// the tabular writer does not set) for its end gaps (`end_gap_span`), where it has some
+/// (`end_gaps`, `TabularHsp::end_gaps`).
+fn push_alignment_row(out: &mut Vec<u8>, row: &[u8], end_gaps: bool) {
+    let span = if end_gaps {
+        end_gap_span(row, |_| false)
+    } else {
+        (0, row.len())
+    };
     if span == (0, row.len()) {
         out.extend_from_slice(row);
         return;
@@ -2056,6 +2154,7 @@ mod tests {
                 q_frame: 1,
                 s_frame: 1,
                 rows: None,
+                end_gaps: true,
                 qcovhsp: 100,
             };
             let mut out = Vec::new();
@@ -2247,6 +2346,7 @@ mod tests {
                 q_frame: 1,
                 s_frame: 1,
                 rows,
+                end_gaps: true,
                 qcovhsp: 100,
             };
             let mut out = Vec::new();
@@ -2325,6 +2425,7 @@ mod tests {
             q_frame: 1,
             s_frame: 1,
             rows: None,
+            end_gaps: true,
             qcovhsp: 100,
         };
         let mut out = Vec::new();
@@ -2343,7 +2444,7 @@ mod tests {
     #[test]
     fn btop_counts_runs() {
         let mut out = Vec::new();
-        write_btop(&mut out, b"ACGT-A", b"ACCTTA");
+        write_btop(&mut out, b"ACGT-A", b"ACCTTA", true);
         assert_eq!(out, b"2GC1-T1");
     }
 
@@ -2352,16 +2453,24 @@ mod tests {
     #[test]
     fn end_gaps_are_spaces_in_the_rows_and_btop() {
         let mut out = Vec::new();
-        push_alignment_row(&mut out, b"---AC-DE--");
+        push_alignment_row(&mut out, b"---AC-DE--", true);
         assert_eq!(out, b"   AC-DE  ");
         out.clear();
-        push_alignment_row(&mut out, b"MKV-L");
+        push_alignment_row(&mut out, b"MKV-L", true);
         assert_eq!(out, b"MKV-L");
         out.clear();
-        write_btop(&mut out, b"MQLAC-D", b"---ACKD");
+        write_btop(&mut out, b"MQLAC-D", b"---ACKD", true);
         assert_eq!(out, b"M Q L 2-K1");
         out.clear();
-        write_btop(&mut out, b"AC-DKK", b"ACGD--");
+        write_btop(&mut out, b"AC-DKK", b"ACGD--", true);
         assert_eq!(out, b"2-G1K K ");
+        // Rows whose `-` fill a segment (BLASTX's mapped row past a query's end, db.x2g.bx.s1o.subj.6w
+        // and .10: NCBI's `TCGGCATGGCTG-` and BTOP `...-X`).
+        out.clear();
+        push_alignment_row(&mut out, b"TCG-", false);
+        assert_eq!(out, b"TCG-");
+        out.clear();
+        write_btop(&mut out, b"TCG-", b"TANX", false);
+        assert_eq!(out, b"1CAGN-X");
     }
 }

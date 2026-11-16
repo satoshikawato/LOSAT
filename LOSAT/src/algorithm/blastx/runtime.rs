@@ -1132,24 +1132,70 @@ impl PreliminarySink for Runtime<'_> {
             //    Blast_HSPListAdjustOddBlastnScores(hsp_list, FALSE, sbp);
             //    return 0;
             // ```
-            // BLASTX has protein subjects: ambiguity rescoring is inactive.
-            // The accepted option profile has percent_identity/min_hit_length
-            // at zero, so Blast_HSPTest cannot delete an HSP here.
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:776-790
+            // ```c++
+            //    if (!hsp->gap_info) {
+            //       /* Ungapped case. Check that lengths are the same in query and subject,
+            //          then count number of matches. */
+            //       if (q_length != s_length)
+            //          return -1;
+            //       align_length = q_length;
+            //       for (i=0; i<align_length; i++) {
+            //          if (*q == *s)
+            //             num_ident++;
+            //          else if (NULL != matrix) {
+            //         	 if (matrix[*q][*s] > 0)
+            //         		 num_pos ++;
+            //              }
+            //          q++;
+            //          s++;
+            //       }
+            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1448
+            // ```c++
+            //    *options = (BlastHitSavingOptions*) calloc(1, sizeof(BlastHitSavingOptions));
+            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:74
+            // ```c++
+            //     arg.Reset(new CGenericSearchArgs( !kQueryIsProtein ));
+            // ```
+            // BLASTX has protein subjects: ambiguity rescoring is inactive. Every HSP's query and
+            // subject lengths are equal (`q_end - q_start`, NCBI's `Int4`), so its alignment length
+            // is that difference. BLASTX shows no `-perc_identity` (`CGenericSearchArgs`' default
+            // `show_perc_identity` false) and no minimal hit length (calloc's 0), so
+            // `Blast_HSPTest` (`core::blast_hits::hsp_test`) runs with both at 0: it deletes the
+            // HSPs of negative length that the one-hit word finder saves with `-window_size 0` and
+            // a low `-threshold` (aa_ungapped.c:1054,1083), whose identity loop does not run, here,
+            // after they took part in the first link and the reap above; it keeps those of length
+            // 0, which are linked again and reported.
             let mut payloads: Vec<_> = linked
                 .hsps
                 .into_iter()
-                .map(|h| {
-                    let redone = super::kappa::RedoneHsp {
-                        hsp: h.hsp.clone(),
-                        edit_script: vec![crate::common::GapEditOp::Sub(
-                            (h.hsp.q_end - h.hsp.q_start) as u32,
-                        )],
-                        composition_method: 0,
-                        identity_matrix: None,
+                .filter_map(|h| {
+                    let align_length = h.hsp.q_end - h.hsp.q_start;
+                    let (identity, positive) = match u32::try_from(align_length) {
+                        Ok(length) => identity_and_positive(
+                            &super::kappa::RedoneHsp {
+                                hsp: h.hsp.clone(),
+                                edit_script: vec![crate::common::GapEditOp::Sub(length)],
+                                composition_method: 0,
+                                identity_matrix: None,
+                            },
+                            batch,
+                            &encoded,
+                            self.options.scoring,
+                        ),
+                        Err(_) => (0, 0),
                     };
-                    let (identity, positive) =
-                        identity_and_positive(&redone, batch, &encoded, self.options.scoring);
-                    Hsp {
+                    if crate::core::blast_hits::hsp_test(
+                        identity as i64,
+                        i64::from(align_length),
+                        0.0,
+                        0,
+                    ) {
+                        return None;
+                    }
+                    Some(Hsp {
                         hsp: h.hsp,
                         num: h.num,
                         evalue: h.evalue,
@@ -1158,7 +1204,7 @@ impl PreliminarySink for Runtime<'_> {
                         positive,
                         edit_script: Vec::new(),
                         composition_method: 0,
-                    }
+                    })
                 })
                 .collect();
             payloads.sort_by(|a, b| super::preliminary::compare_score(&a.hsp, &b.hsp));
@@ -1485,6 +1531,29 @@ impl PreliminarySink for Runtime<'_> {
             stream.close_cbs_observed(self.observer, hitlist_size);
         } else {
             stream.close_observed(self.observer);
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575 and
+        // blast_traceback.c:1567-1577 (quoted at `blastp::blast_engine::database::exclude_fetched`)
+        // The redo's and the traceback's fetches (`check_oid_exclusion`) exclude a subject that the
+        // negative seqid list keeps without a line (`FetchExcluded`): its lists leave the closed
+        // stream before the redo or the traceback reads it. An ungapped search fetches no protein
+        // subject; its such hits leave at the Seq-aligns (`ReportedSubjects::drop_unaligned`).
+        // A header that the fetch cannot read ends NCBI's search: LOSAT's refusal
+        // (`FetchExcluded::refusal`).
+        if self.options.gapped {
+            if let Some(excluded) = self
+                .subjects
+                .seqdb()
+                .and_then(crate::algorithm::common::database::FetchExcluded::of)
+            {
+                stream
+                    .retain_closed(|lists| {
+                        excluded.retain(lists, |list| u32::try_from(list.oid).ok())
+                    })
+                    .map_err(|failed| {
+                        crate::algorithm::common::database::FetchExcluded::refusal(failed, "BLASTX")
+                    })?;
+            }
         }
         self.observer.restored(batch, &full);
 

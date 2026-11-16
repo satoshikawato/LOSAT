@@ -1,0 +1,16 @@
+# TBLASTX 2.17.0+
+# Query: qn query
+# Database: tests/db_search/ll2/nucl_v5
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 10 hits found
+qn	AB100002.1	99.333	300	2	0	1	900	1	900	0.0	775
+qn	AB100004.1	98.667	300	4	0	1	900	1	900	0.0	768
+qn	AB100000.1	98.000	300	6	0	1	900	1	900	0.0	767
+qn	AB100005.1	97.333	300	8	0	1	900	1	900	0.0	762
+qn	AB100006.1	96.667	300	10	0	1	900	1	900	0.0	749
+qn	AB100009.1	94.667	300	16	0	1	900	1	900	0.0	735
+qn	AB100008.1	95.333	300	14	0	1	900	1	900	0.0	734
+qn	AB100010.1	94.314	299	17	0	1	897	1	897	0.0	733
+qn	AB100011.1	93.333	300	20	0	1	900	1	900	0.0	722
+qn	AB100012.1	92.977	299	21	0	1	897	1	897	0.0	717
+# BLAST processed 1 queries

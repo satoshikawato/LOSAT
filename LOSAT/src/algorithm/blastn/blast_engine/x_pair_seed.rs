@@ -608,6 +608,7 @@ fn scan_strip_from<O: SeedOut, const PIECE: bool>(
             None => scan_strip_csr::<O, _, true, PIECE>(x, csr, job, from, out),
         };
     }
+    super::x_bn_rank_once(false);
     let two_stage = x.two_stage;
     let lut_word_length = two_stage.lut_word_length();
     let packed = x.search_seq_packed;
@@ -675,13 +676,21 @@ fn scan_strip_csr<
     let two_stage = x.two_stage;
     let s_range = job.s_range;
     let cut = Cut::new(&from);
-    let mut emit = |(kmer_start, index): (usize, u64)| {
+    // EXPERIMENT (LOSAT_X_BNRANKONCE): with `rank_once` a word's run is the one of the head's
+    // element the ring hands over with it (a packed head's word is ranked once), else the cell's
+    // run read again.
+    let rank_once = super::x_bn_rank_once(true);
+    let mut emit = |(kmer_start, index): (usize, u64), e: usize| {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1418
         // ```c
         // offset_pairs[i].qs_offsets.q_off   = q_off - 1;
         // offset_pairs[i++].qs_offsets.s_off = s_off;
         // ```
-        let mut run = csr.run(index as usize);
+        let mut run = if rank_once {
+            csr.run_at(e)
+        } else {
+            csr.run(index as usize)
+        };
         if PIECE {
             match cut.fit(run, out) {
                 Ok(fit) => run = fit,
@@ -719,7 +728,7 @@ fn scan_strip_csr<
     );
     // (a stopped scan drops the words still in the ring: the next piece scans them again)
     if !PIECE || cut.go() {
-        ring.flush(&mut emit);
+        ring.flush(|w| w.1 as usize, &mut emit);
     }
     cut.stop.get()
 }

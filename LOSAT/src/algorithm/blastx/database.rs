@@ -148,6 +148,12 @@ impl BlastxDatabase {
         self.taxdb.found(&self.db)
     }
 
+    /// NCBI's warning of a failed prefetch, which names the run's program
+    /// (`shared::prefetch_warning`).
+    pub(crate) fn prefetch_warning(&self) -> Vec<u8> {
+        shared::prefetch_warning(self.program)
+    }
+
     /// Whether a later query batch of an XML, XML2 or JSON run could still refuse a taxonomy
     /// database name or record (`algorithm::common::database::taxdb_may_refuse`: every
     /// sequence's taxid looked up once, before the first byte). `names`: the run writes the
@@ -356,8 +362,14 @@ impl ReportedSubjects {
     /// subjects that NCBI makes no Seq-align of (`shared::SeqAligned`), where its traceback
     /// makes the batch's Seq-aligns: after the cut to the hit list size (`Runtime::batch_end`),
     /// before `read_titles`.
-    pub(crate) fn drop_unaligned(database: &BlastxDatabase, batches: &mut [BatchResults]) {
-        let Some(mut aligned) = shared::SeqAligned::of(&database.db) else {
+    pub(crate) fn drop_unaligned(
+        database: &BlastxDatabase,
+        batches: &mut [BatchResults],
+        gapped: bool,
+    ) {
+        // A gapped search fetched every subject of the redo or the traceback with
+        // `check_oid_exclusion` (`Runtime::batch_end`); an ungapped one fetches no subject.
+        let Some(mut aligned) = shared::SeqAligned::of(&database.db, gapped) else {
             return;
         };
         for batch in batches {
@@ -644,6 +656,7 @@ impl ReportedSubjects {
                 lowercase_masks: Vec::new(),
                 warnings: Vec::new(),
                 source: None,
+                around: None,
             });
             shared::keep_source(
                 &mut reported.sources,
@@ -731,7 +744,10 @@ impl ReportedSubjects {
 
     /// The stop of NCBI's prefetch of the query batch whose hit lists are `batches`, for the XML2
     /// and JSON formats, which write the taxonomy texts at each `Hit`
-    /// (`shared::batch_prefetch_stop`; the error's query as in `batch_prefetch`).
+    /// (`shared::batch_prefetch_stop`; the error's query as in `batch_prefetch`), after the
+    /// lookups of the reports of the batches before, which the run's record holds: BLASTX reads
+    /// each batch's taxonomy (`for_batch`) and writes its reports before it searches the next, and
+    /// a batch that stops reads none of its own.
     pub(crate) fn batch_prefetch_stop(
         &self,
         database: &BlastxDatabase,
@@ -1178,6 +1194,7 @@ mod tests {
             lowercase_masks: Vec::new(),
             warnings: Vec::new(),
             source: None,
+            around: None,
         };
         let records = [record];
         assert_eq!(&*Subjects::Fasta(&records).encoded(0), &searched[..]);
@@ -1213,6 +1230,7 @@ mod tests {
             lowercase_masks: Vec::new(),
             warnings: Vec::new(),
             source: None,
+            around: None,
         };
         let hsp = |score: i32| Hsp {
             hsp: PreliminaryHsp {

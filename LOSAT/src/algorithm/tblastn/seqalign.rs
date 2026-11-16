@@ -51,7 +51,8 @@ use crate::report::seqid::SeqId;
 use crate::report::serial::{write_query_to, SerialFormat};
 
 /// Writes the documents of every query of `hitlists` (indexed by query) to `writer`, each
-/// query's warnings before it. `subject_records` and `subject_letters` are indexed by the hit
+/// query's warnings before it and NCBI's posts of the bytes that its stream replaces in the
+/// query's document after them (on the warnings' sink, `write_query_to`). `subject_records` and `subject_letters` are indexed by the hit
 /// lists' subject index (a `-db` search's reported sequences by rank, `shown`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn write_tblastn_seqalign(
@@ -63,7 +64,7 @@ pub(super) fn write_tblastn_seqalign(
     shown: &ShownSubjects<'_>,
     hitlists: &[KappaResultHitList],
     ranges: &ReportRanges<'_>,
-    mut warnings: Option<&mut QueryWarnings<'_>>,
+    warnings: &mut QueryWarnings<'_>,
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Tblastn,
@@ -75,9 +76,7 @@ pub(super) fn write_tblastn_seqalign(
     let mut buf: Vec<u8> = Vec::new();
     for (q_idx, (query, hitlist)) in query_records.iter().zip(hitlists).enumerate() {
         // The query's warnings come before its document (`QueryWarnings`).
-        if let Some(warnings) = warnings.as_deref_mut() {
-            warnings.before_query(q_idx, &mut *writer)?;
-        }
+        warnings.before_query(q_idx, &mut *writer)?;
         query_records_of(
             hitlist,
             subject_records,
@@ -92,7 +91,16 @@ pub(super) fn write_tblastn_seqalign(
             searched_length: i32::try_from(query.seq().len())?,
             offset: i32::try_from(ranges.queries.offset(q_idx))?,
         };
-        write_query_to(format, &run, &query, &subjects, &hsps, &mut buf, writer)?;
+        write_query_to(
+            format,
+            &run,
+            &query,
+            &subjects,
+            &hsps,
+            &mut buf,
+            writer,
+            &mut *warnings.sink,
+        )?;
     }
     Ok(())
 }

@@ -680,7 +680,7 @@ fn open_search_database(
             outputs,
         )?,
     }
-    // LOSAT's refusals of a database for the Seq-annot formats, before the search
+    // LOSAT's refusal of a database name for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
     if let Some(database) = database.as_ref() {
         for format in &outputs.formats {
@@ -691,7 +691,6 @@ fn open_search_database(
                 crate::report::serial::seqalign::check_database(
                     serial,
                     database.name(),
-                    &database.pairwise_database().definition,
                     crate::blastinput::app::Program::Tblastn,
                 )?;
             }
@@ -1860,6 +1859,9 @@ fn search(
         // sequence file failed with its error.
         let mut titles = super::database::DatabaseTitles::new();
         let mut failed: Option<(std::ops::Range<usize>, anyhow::Error)> = None;
+        // NCBI's fetches with `check_oid_exclusion` of the redo and the traceback, one check for
+        // the search's batches (`database::fetch_excluded`).
+        let fetch_excluded = database.and_then(super::database::fetch_excluded);
         // Graduated 2026-10-22 (was LOSAT_X_TBNSSIDE, LOSAT_X_TBNBATCH): the batches of the
         // loop below searched ahead (`x_search_batches`), each with its range; `None` when there
         // is none. A batch whose range does not match is searched by the loop.
@@ -1906,6 +1908,7 @@ fn search(
                 engine_positives,
                 culling_limit: resolved.culling_limit,
                 pssm: pssm.as_deref(),
+                fetch_excluded: fetch_excluded.as_ref(),
             },
             compo_adjust_mode,
             resolved.sum_stats,
@@ -1975,6 +1978,7 @@ fn search(
                             engine_positives,
                             culling_limit: resolved.culling_limit,
                             pssm: pssm.as_deref(),
+                            fetch_excluded: fetch_excluded.as_ref(),
                         },
                         compo_adjust_mode,
                         resolved.sum_stats,
@@ -2198,7 +2202,7 @@ fn search(
         });
         // The XML2 and JSON formats (13 to 16), whose prefetch NCBI runs too but which write the
         // taxonomy texts at each `Hit`: of the prefetch only its stop
-        // (`shared::batch_prefetch_stop`).
+        // (`shared::held_batch_prefetch_stop`).
         let first_xml2 = first_number.is_some_and(|number| matches!(number, 13..=16));
         // A batch whose prefetch loads a subject whose lookup fails on a file stops the run in
         // its prefetch (`database::prefetch_stop`): as a batch that a database file failed, it is
@@ -2513,7 +2517,14 @@ fn search(
         // The stopping batch's prefetch, after those of the batches before: NCBI's error, or
         // LOSAT's refusal before any byte.
         if let (Some((span, subjects)), Some(database)) = (prefetch_stop, database) {
-            let error = database.prefetch_stop_error(&subjects, span.start, first_xml2);
+            // The batches before are those of `results`, which the stop truncated (above).
+            let error = database.prefetch_stop_error(
+                reported.as_ref(),
+                &results,
+                &subjects,
+                span.start,
+                first_xml2,
+            );
             match error.downcast::<crate::algorithm::common::database::HeaderReadError>() {
                 Ok(failure) => failed = Some((span, failure.error)),
                 Err(error) => return Err(error),

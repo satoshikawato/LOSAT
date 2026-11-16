@@ -196,12 +196,7 @@ impl TblastnDatabase {
         reported: &ReportedSubjects,
         hitlists: &[KappaResultHitList],
     ) -> Result<XmlTaxa> {
-        let ranks: std::collections::BTreeSet<usize> = hitlists
-            .iter()
-            .flat_map(KappaResultHitList::lists)
-            .filter(|list| !list.hsps.hsps.is_empty())
-            .map(|list| list.oid as usize)
-            .collect();
+        let ranks: std::collections::BTreeSet<usize> = reported_ranks(hitlists).collect();
         let (taxids, taxonomy, parsed_taxonomy, notes) = shared::read_reported_taxonomy(
             &self.db,
             &self.taxdb,
@@ -354,11 +349,15 @@ impl TblastnDatabase {
 
     /// The stop of the prefetch of the batch whose first query is `query` and whose reported
     /// subjects are `subjects` (`prefetch_stop`): NCBI's error (a `shared::HeaderReadError`), or
-    /// LOSAT's refusal (`shared::batch_prefetch`; `at_hits`, the XML2 and JSON formats, which
-    /// write the taxonomy texts at each `Hit`: `shared::batch_prefetch_stop`), after the
-    /// prefetches of the batches before.
+    /// LOSAT's refusal (`shared::batch_prefetch`, after the prefetches of the batches before).
+    /// `at_hits`: the XML2 and JSON formats, which write the taxonomy texts at each `Hit`
+    /// (`shared::held_batch_prefetch_stop`), after the lookups of the reports of the batches
+    /// before, whose final hit lists by rank are `before` (`reported`'s ranks, as `read_taxids`
+    /// reads them); TBLASTN writes those reports after the stop.
     pub(super) fn prefetch_stop_error(
         &self,
+        reported: Option<&ReportedSubjects>,
+        before: &[KappaResultHitList],
         subjects: &[(u32, Option<Arc<ParsedSubject>>)],
         query: usize,
         at_hits: bool,
@@ -367,7 +366,15 @@ impl TblastnDatabase {
             shared::PrefetchSubject::unflipped(*ordinal, parsed.as_deref())
         });
         let stopped = if at_hits {
-            shared::batch_prefetch_stop(&self.db, &self.taxdb, subjects, PROGRAM, query).err()
+            let before = reported.into_iter().flat_map(|reported| {
+                reported_ranks(before).map(|rank| {
+                    shared::PrefetchSubject::unflipped(
+                        reported.ordinals[rank],
+                        reported.parsed_subject(rank),
+                    )
+                })
+            });
+            shared::held_batch_prefetch_stop(&self.db, before, subjects, PROGRAM, query).err()
         } else {
             shared::batch_prefetch(&self.db, &self.taxdb, subjects, PROGRAM, query).err()
         };
@@ -428,11 +435,20 @@ pub(super) fn reads_subject(list: &KappaResultList, rows: SubjectFetch) -> bool 
 /// sequence with parsed Seq-ids.
 pub(super) type DatabaseTitles = BTreeMap<u32, ReportedHeader>;
 
+/// NCBI's fetches with `check_oid_exclusion` of the redo and the traceback of a search of
+/// `database` (`shared::FetchExcluded`; `None` where they exclude nothing): the subjects they
+/// exclude leave the preliminary hit lists (`LocalStageDProfile::fetch_excluded`).
+pub(super) fn fetch_excluded(database: &TblastnDatabase) -> Option<shared::FetchExcluded<'_>> {
+    shared::FetchExcluded::of(&database.db)
+}
+
 /// The final hit lists `hitlists` of a query batch without the sequences that NCBI makes no
 /// Seq-align of (`shared::SeqAligned`): after their cut to the hit list size, before
 /// `read_titles`.
 pub(super) fn drop_unaligned(database: &TblastnDatabase, hitlists: &mut [KappaResultHitList]) {
-    let Some(mut aligned) = shared::SeqAligned::of(&database.db) else {
+    // tblastn is gapped (`-ungapped` is refused): the redo or the traceback fetched every
+    // subject with `check_oid_exclusion` (`fetch_excluded`).
+    let Some(mut aligned) = shared::SeqAligned::of(&database.db, true) else {
         return;
     };
     for hitlist in hitlists {
@@ -541,6 +557,16 @@ impl ReportedSubjects {
             SubjectLetters::Packed(&self.stores)
         }
     }
+}
+
+/// The ranks of the reported sequences of the final hit lists `hitlists` (their subject index is
+/// the rank, `reported_subjects`): those with HSPs.
+fn reported_ranks(hitlists: &[KappaResultHitList]) -> impl Iterator<Item = usize> + '_ {
+    hitlists
+        .iter()
+        .flat_map(KappaResultHitList::lists)
+        .filter(|list| !list.hsps.hsps.is_empty())
+        .map(|list| list.oid as usize)
 }
 
 /// The first of the query batches `batches` (the searched queries of each) of the final hit lists

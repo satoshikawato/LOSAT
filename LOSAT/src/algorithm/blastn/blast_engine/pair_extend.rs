@@ -29,36 +29,43 @@
 //! ```
 //!
 //! This module is a child of `run` for the items it keeps private (the types `DiagHashTable`,
-//! `OffsetPair`, `SubjectChunk`, `QueryContext`, `QueryContextIndex`, `UngappedHit` and
-//! `BlastnTiming`; `x_push_ungapped`, `mask_lookup_index`, `packed_kmer_at_seed_mask` and
-//! `X_HIT_AHEAD`). Its functions are the statements of the scan's closures that were there, in
-//! their order; the strips folds of `x_pair_seed.rs` and `x_pair_seed_disc.rs` copy those
-//! statements one by one, so their order is kept here. What the steps read that is the same for
-//! every pair of a chunk is `PairExtendInputs`, and what they write is `PairExtendState`, both
-//! built once per chunk; what changes from pair to pair is `LutHit` and `OffDiagonal`. Nothing
-//! here runs on the pool. `word_extend_pair` and `off_diagonal_found` are `#[inline(always)]`,
-//! so the loop of `extend_offset_pairs` keeps the shape it had as a closure (callgrind, n1). The
-//! ungapped extension and the save of the initial hit are statements of that loop, whose values
-//! they read as locals: as a function of their own, the 16 values of the hit they read crossed a
-//! struct on every hit and cost `-task blastn -ungapped` 0.3 % more instructions even inlined.
+//! `OffsetPair`, `SubjectChunk` and `UngappedHit`; `x_push_ungapped`, `mask_lookup_index`,
+//! `packed_kmer_at_seed_mask` and `X_HIT_AHEAD`). Its functions are the statements of the scan's
+//! closures that were there, in their order; the strips folds of `x_pair_seed.rs` and
+//! `x_pair_seed_disc.rs` copy those statements one by one, so their order is kept here. What the
+//! steps read that is the same for every pair of a chunk is the batch's word finder
+//! (`prelim_subject::ScanBatch`) and `PairExtendInputs` (the chunk's own values), and what they
+//! write is `PairExtendState`, both built once per chunk; what changes from pair to pair is
+//! `LutHit` and `OffDiagonal`. Nothing here runs on the pool. `word_extend_pair` and
+//! `off_diagonal_found` are `#[inline(always)]`, so the loop of `extend_offset_pairs` keeps the
+//! shape it had as a closure (callgrind, n1). The ungapped extension and the save of the initial
+//! hit are statements of that loop, whose values they read as locals: as a function of their own,
+//! the 16 values of the hit they read crossed a struct on every hit and cost `-task blastn
+//! -ungapped` 0.3 % more instructions even inlined.
 
-use super::x_diag_lv::LvSeeds;
+use super::prelim_subject::ScanBatch;
+use super::x_bn_ext_first;
 use super::{
     blastn_trace, extend_hit_ungapped_approx_ncbi, extend_hit_ungapped_exact_ncbi,
     mask_lookup_index, packed_kmer_at_seed_mask, type_of_word, x_dc_csr, x_push_ungapped,
-    BlastnTiming, DiagHashTable, DiagStruct, OffsetPair, QueryContext, QueryContextIndex,
-    SmallNaWord, SubjectChunk, UngappedHit, COMPRESSION_RATIO, X_HIT_AHEAD,
+    DiagHashTable, DiagStruct, OffsetPair, SmallNaWord, SubjectChunk, UngappedHit,
+    COMPRESSION_RATIO, X_HIT_AHEAD,
 };
-use crate::algorithm::blastn::alignment::gapped::BlastnaMatrix;
 use crate::algorithm::blastn::lookup::TwoStageLookup;
 
-/// What the steps of the offset pairs of one subject chunk read that is the same for every pair:
-/// for the word extension the small-query table's form (`small_na_word`, `None` for the other
-/// tables), whether its aligned one-byte form applies, whether the chunk is masked, the word and
-/// lookup word lengths, the packed subject, the query with its sentinels and the switch of the
-/// debug counters; then what the other steps read, in groups below. Built once per chunk by
-/// `two_stage_scan::scan_two_stage_lookup` before the scan, with the names there; every field is a
-/// shared reference or a `Copy` value.
+/// What the steps of the offset pairs of one subject chunk read that is the same for every pair,
+/// besides the batch's word finder (`prelim_subject::ScanBatch`, built once per batch and passed
+/// to `extend_offset_pairs` as a parameter of its own: the word and lookup word lengths, the query
+/// with and without its sentinels, the context of a pair's query offset, the contexts and their
+/// cutoffs, X-dropoffs and reduced cutoffs, the scoring, the diagonal table's form, sizes and hash
+/// window, the window and the off-diagonal range, the level bound's constants, the diagnostics):
+/// the two-stage table and the chunk's own values: the small-query table's word (`small_na_word`,
+/// `None` for the other tables), whether the chunk is masked, the packed subject from the chunk's
+/// start, the prefetch of the query letters of a later pair (LOSAT_X_MBHITPF), the chunk's length
+/// and the chunk (its offset in the subject), the diagonal table's offset for this chunk, whether
+/// the hash's retrieve takes the level bound of LOSAT_X_DIAGLV, and the subject's index and trace
+/// id. Built once per chunk by `two_stage_scan::scan_two_stage_lookup` before the scan, with the
+/// names there; every field is a shared reference or a `Copy` value.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1052-1060,1064,1081
 /// (`s_BlastNaExtend`) and :651,656,658 (`s_BlastnDiagTableExtendInitialHit`; the hash's
@@ -86,7 +93,25 @@ use crate::algorithm::blastn::lookup::TwoStageLookup;
 /// ```
 /// The prefetch, the level bound and the diagnostics have no NCBI counterpart.
 pub(super) struct PairExtendInputs<'a> {
-    /// The word extension (`word_extend_pair`).
+    pub(super) two_stage: &'a TwoStageLookup,
+    pub(super) small_na_word: &'a Option<SmallNaWord<'a>>,
+    pub(super) subject_masked: bool,
+    pub(super) search_seq_packed: &'a [u8],
+    pub(super) x_hit_prefetch: bool,
+    pub(super) s_len: usize,
+    pub(super) chunk: &'a SubjectChunk,
+    pub(super) diag_offset: isize,
+    pub(super) x_lv_ref: bool,
+    pub(super) s_idx: usize,
+    pub(super) s_id: &'a str,
+}
+
+/// What the word extension of one lookup table hit (`word_extend_pair`) reads that is the same for
+/// every pair of a call of `extend_offset_pairs`, which builds it once from `PairExtendInputs` and
+/// the batch's word finder: the small-query table's word, whether its aligned one-byte form
+/// applies, whether the chunk is masked, the word and lookup word lengths, the packed subject, the
+/// query with its sentinels and the switch of the debug counters.
+pub(super) struct WordExtend<'a> {
     pub(super) small_na_word: &'a Option<SmallNaWord<'a>>,
     pub(super) small_na_aligned_one_byte: bool,
     pub(super) subject_masked: bool,
@@ -95,49 +120,6 @@ pub(super) struct PairExtendInputs<'a> {
     pub(super) search_seq_packed: &'a [u8],
     pub(super) encoded_query_concat_blastna_with_sentinels: &'a [u8],
     pub(super) debug_enabled: bool,
-    /// The prefetch of the query letters of a later pair (LOSAT_X_MBHITPF), the context of a
-    /// pair's query offset, the contexts and their cutoffs, the chunk's length and the chunk (its
-    /// offset in the subject), and the debug window.
-    pub(super) x_hit_prefetch: bool,
-    pub(super) query_context_index: &'a QueryContextIndex,
-    pub(super) query_contexts: &'a [QueryContext],
-    pub(super) cutoff_scores: &'a [i32],
-    pub(super) s_len: usize,
-    pub(super) chunk: &'a SubjectChunk,
-    pub(super) debug_window: Option<(usize, usize, usize, usize)>,
-    /// The diagonal table: whether it is the array (else the hash), the array's length, mask and
-    /// size, the table's offset for this chunk, and the level bound of LOSAT_X_DIAGLV (whether
-    /// the retrieve takes it, and the constants of the chunk's seeds).
-    pub(super) use_array_indexing: bool,
-    pub(super) diag_array_length: isize,
-    pub(super) diag_mask: isize,
-    pub(super) diag_array_size: usize,
-    pub(super) diag_offset: isize,
-    pub(super) x_lv_ref: bool,
-    pub(super) x_lv_seeds: LvSeeds,
-    /// The word type and the window: the table (the lookups of `s_TypeOfWord`), whether a hit
-    /// takes two words, the window, the off-diagonal range, and the window of a hash insert.
-    pub(super) two_stage: &'a TwoStageLookup,
-    pub(super) two_hits: bool,
-    pub(super) window_size: usize,
-    pub(super) scan_range: usize,
-    pub(super) diag_hash_window: i32,
-    /// The ungapped extension: the concatenated query, the X-dropoff and the reduced cutoff of
-    /// each context, the score matrix, and the score table of the approximate extension.
-    pub(super) encoded_query_concat_blastna: &'a [u8],
-    pub(super) x_dropoff_scores: &'a [i32],
-    pub(super) reduced_cutoff_scores: &'a [i32],
-    pub(super) score_matrix: &'a BlastnaMatrix,
-    pub(super) nucl_score_table: &'a [i32; 256],
-    /// The diagnostics: the trace lines (`blastn_trace`) with the subject's index and trace id,
-    /// the debug window's lines with the minimum ungapped score they print, and LOSAT_TIMING.
-    pub(super) blastn_trace_enabled: bool,
-    pub(super) s_idx: usize,
-    pub(super) s_id: &'a str,
-    pub(super) debug_mode: bool,
-    pub(super) min_ungapped_score: i32,
-    pub(super) timing_enabled: bool,
-    pub(super) timing_ref: Option<&'a BlastnTiming>,
 }
 
 /// What the steps write: the chunk's initial hits, the diagonal table (the array's levels and
@@ -207,7 +189,12 @@ pub(super) struct PairExtendState<'s> {
 /// No `#[inline]`: as a closure of `collect_prelim_hits_for_chunk` (now
 /// `prelim_subject::prelim_chunk_hits`) the steps were an out-of-line function already (the scan
 /// calls them from 11 places).
+/// EXPERIMENT (LOSAT_X_BNEXTFIRST): the steps in one of two forms, chosen here once per batch
+/// (`extend_pairs_in`'s `EXT_FIRST`): a lookup hit's word extension before its context, for a
+/// megablast table whose lookup width is below the word size (a word to extend) and none of the
+/// diagnostics that print or count a hit before its extension; else the order before the switch.
 pub(super) fn extend_offset_pairs(
+    scan: &ScanBatch<'_>,
     x: &PairExtendInputs<'_>,
     state: &mut PairExtendState<'_>,
     offset_pairs: &[OffsetPair],
@@ -215,29 +202,78 @@ pub(super) fn extend_offset_pairs(
     scan_pause_ns: &mut u64,
     track_scan_pause: bool,
 ) {
-    // `small_na_aligned_one_byte` and `subject_masked` are read by `word_extend_pair` only.
+    let ext_first = x_bn_ext_first() && {
+        let form = x.small_na_word.is_none()
+            && scan.word_length > scan.lut_word_length
+            && !(scan.debug_enabled || scan.blastn_trace_enabled || scan.debug_window.is_some());
+        crate::utils::xreach::x_reach!("LOSAT_X_BNEXTFIRST", form);
+        form
+    };
+    if ext_first {
+        extend_pairs_in::<true>(
+            scan,
+            x,
+            state,
+            offset_pairs,
+            offset_pairs_len,
+            scan_pause_ns,
+            track_scan_pause,
+        );
+    } else {
+        extend_pairs_in::<false>(
+            scan,
+            x,
+            state,
+            offset_pairs,
+            offset_pairs_len,
+            scan_pause_ns,
+            track_scan_pause,
+        );
+    }
+}
+
+/// `extend_offset_pairs` in the form `EXT_FIRST` (LOSAT_X_BNEXTFIRST, there).
+#[inline(always)]
+fn extend_pairs_in<const EXT_FIRST: bool>(
+    scan: &ScanBatch<'_>,
+    x: &PairExtendInputs<'_>,
+    state: &mut PairExtendState<'_>,
+    offset_pairs: &[OffsetPair],
+    offset_pairs_len: &mut usize,
+    scan_pause_ns: &mut u64,
+    track_scan_pause: bool,
+) {
     let &PairExtendInputs {
+        two_stage,
         small_na_word,
+        subject_masked,
+        search_seq_packed,
+        x_hit_prefetch,
+        s_len,
+        chunk,
+        diag_offset,
+        x_lv_ref,
+        s_idx,
+        s_id,
+    } = x;
+    // The batch's values, read once per call from `scan`, a parameter as `x` is (the loop below
+    // reads them as it read the fields of `x` before they moved to the batch's word finder; read
+    // through a field of `x`, the loop of `-task blastn` kept more of them in memory, +1.9 % of
+    // this function's instructions, callgrind n1).
+    let &ScanBatch {
         word_length,
         lut_word_length,
-        search_seq_packed,
         encoded_query_concat_blastna_with_sentinels,
         debug_enabled,
-        x_hit_prefetch,
         query_context_index,
         query_contexts,
         cutoff_scores,
-        s_len,
-        chunk,
         debug_window,
         use_array_indexing,
         diag_array_length,
         diag_mask,
         diag_array_size,
-        diag_offset,
-        x_lv_ref,
         x_lv_seeds,
-        two_stage,
         two_hits,
         window_size,
         scan_range,
@@ -248,14 +284,25 @@ pub(super) fn extend_offset_pairs(
         score_matrix,
         nucl_score_table,
         blastn_trace_enabled,
-        s_idx,
-        s_id,
         debug_mode,
         min_ungapped_score,
         timing_enabled,
         timing_ref,
+        small_na_aligned_one_byte,
         ..
-    } = x;
+    } = scan;
+    // What the word extension of each pair reads (`word_extend_pair`, inline: its fields stay the
+    // locals above).
+    let word = WordExtend {
+        small_na_word,
+        small_na_aligned_one_byte,
+        subject_masked,
+        word_length,
+        lut_word_length,
+        search_seq_packed,
+        encoded_query_concat_blastna_with_sentinels,
+        debug_enabled,
+    };
     let ungapped_hits = &mut *state.ungapped_hits;
     let hit_level_array = &mut *state.hit_level_array;
     let hit_len_array = &mut *state.hit_len_array;
@@ -267,6 +314,32 @@ pub(super) fn extend_offset_pairs(
     let dbg_ungapped_low = &mut *state.dbg_ungapped_low;
     let dbg_gapped_attempted = &mut *state.dbg_gapped_attempted;
     let hitsfound = *offset_pairs_len;
+    // The batch's pairs (NCBI's `num_hits` first entries of `offset_pairs`): the loop's index and
+    // the prefetch's (below `hitsfound`) need no bound check per pair, and the buffer's length is
+    // not a value of the loop.
+    let offset_pairs = &offset_pairs[..hitsfound];
+    // EXPERIMENT (LOSAT_X_BNEXTFIRST): with `EXT_FIRST` the word extension of a megablast
+    // table's hit (whose lookup width is below the word size) comes first, as in NCBI's
+    // `s_BlastNaExtend`, and a hit whose extension fails does nothing more: its context is looked
+    // up only once its word is found. The extension reads neither the context nor its bounds
+    // (`word_extend_pair`: the query's sentinels stop it), so it gives the same words. The
+    // small-query table's extension takes the context's bounds and keeps the order before the
+    // switch, and so do the diagnostics that print or count a hit before its extension.
+    //
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1093-1121
+    // (`s_BlastNaExtend`; the context is looked up later, in `s_BlastnDiagHashExtendInitialHit`
+    // and `s_BlastnDiagTableExtendInitialHit`, :730-733, for a word that was found)
+    // ```c
+    //     for (; index < num_hits; ++index) {
+    //         Int4 s_offset = offset_pairs[index].qs_offsets.s_off;
+    //         Int4 q_offset = offset_pairs[index].qs_offsets.q_off;
+    // ...
+    //         for (; ext_left < MIN(ext_to, s_offset); ++ext_left) {
+    // ...
+    //             if (ext_left + ext_right < ext_to)
+    //                 continue;
+    //         }
+    // ```
     for idx in 0..hitsfound {
         // EXPERIMENT (LOSAT_X_MBHITPF): the query's letters of a hit
         // `X_HIT_AHEAD` places on.
@@ -281,6 +354,30 @@ pub(super) fn extend_offset_pairs(
         let q_off0 = pair.q_off;
         let kmer_start = pair.s_off;
         let s_range = pair.s_range;
+        // EXPERIMENT (LOSAT_X_BNEXTFIRST): the word, before the context (the subject's bound of
+        // the check below first, as there).
+        let x_word = if EXT_FIRST {
+            if kmer_start + lut_word_length > s_len {
+                continue;
+            }
+            let Some(found) = word_extend_pair(
+                &word,
+                LutHit {
+                    q_off0,
+                    kmer_start,
+                    q_context_start: 0,
+                    q_context_end: 0,
+                    s_range,
+                },
+                dbg_left_ext_iters,
+                dbg_right_ext_iters,
+            ) else {
+                continue;
+            };
+            Some(found)
+        } else {
+            None
+        };
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:730-733
         // ```c
         // Int4 context = BSearchContextInfo(q_off, query_info);
@@ -390,18 +487,22 @@ pub(super) fn extend_offset_pairs(
         // NCBI reference: na_ungapped.c:1081-1140
         // For two-stage lookup, verify word_length match BEFORE ungapped extension
         // This is done by left+right extension from the lut_word_length match position
-        let Some((q_ext_start, s_ext_start, word_ext_left, word_ext_right)) = word_extend_pair(
-            x,
-            LutHit {
-                q_off0,
-                kmer_start,
-                q_context_start,
-                q_context_end,
-                s_range,
-            },
-            dbg_left_ext_iters,
-            dbg_right_ext_iters,
-        ) else {
+        let Some((q_ext_start, s_ext_start, word_ext_left, word_ext_right)) =
+            x_word.or_else(|| {
+                word_extend_pair(
+                    &word,
+                    LutHit {
+                        q_off0,
+                        kmer_start,
+                        q_context_start,
+                        q_context_end,
+                        s_range,
+                    },
+                    dbg_left_ext_iters,
+                    dbg_right_ext_iters,
+                )
+            })
+        else {
             continue;
         };
 
@@ -1137,12 +1238,12 @@ pub(super) struct LutHit {
 /// the off-diagonal search's call), so it keeps the shape it had inside the scan's closure.
 #[inline(always)]
 pub(super) fn word_extend_pair(
-    x: &PairExtendInputs<'_>,
+    x: &WordExtend<'_>,
     hit: LutHit,
     dbg_left_ext_iters: &mut usize,
     dbg_right_ext_iters: &mut usize,
 ) -> Option<(usize, usize, usize, usize)> {
-    let &PairExtendInputs {
+    let &WordExtend {
         small_na_word,
         small_na_aligned_one_byte,
         subject_masked,
@@ -1151,7 +1252,6 @@ pub(super) fn word_extend_pair(
         search_seq_packed,
         encoded_query_concat_blastna_with_sentinels,
         debug_enabled,
-        ..
     } = x;
     let LutHit {
         q_off0,

@@ -265,15 +265,15 @@ flowchart LR
 | input | `CBlastInput::GetNextSeqBatch`; subjects as a `BlastSeqSrc` (`MultiSeqBlastSeqSrcInit`, `SeqDbBlastSeqSrcInit`) | `read_cli_subjects` or `open_search_database`, then `search_cli` reads the queries | the same names in `blast_engine.rs` |
 | query batches | `CBatchSizeMixer` (blastn), `GetQueryBatchSize` | `run_in_pool` with the adaptive `BatchSizeMixer` (`blastinput/query_batch.rs`) | a fixed size: 10,000 letters unless `BATCH_SIZE` is set; psiblast one query |
 | masking, encoding | `Blast_FindDustFilterLoc`, `BlastSetUp_Filter`, `SetupQueries_OMF` | `blastn/coordination.rs` (`query_masks`); the encoding in `batch_setup.rs` (`encode_query_block`) | SEG in `blastp/encoding.rs` |
-| setup | `BlastSetup_ScoreBlkInit`, `BLAST_CalcEffLengths`, `BlastInitialWordParametersUpdate` | `batch_setup.rs`, `context_statistics.rs` and `subject_env.rs`, called from the head of `search_query_batch` | the head of `run_resolved_in_pool` |
-| lookup table | `LookupTableWrapInit` (`BlastMBLookupTableNew`, `BlastAaLookupTableNew`, ...) | `build_lookup_tables` (`blastn/coordination.rs`); discontiguous tables in `disc_lookup.rs` | `blastp_aa_lookup` or `blastp_compressed_lookup` (blastp-fast); PSSM and RPS tables through the hooks |
+| setup | `BlastSetup_ScoreBlkInit`, `BLAST_CalcEffLengths`, `BlastInitialWordParametersUpdate` | `batch_setup.rs`, `context_statistics.rs` and `subject_env.rs`, called from the head of `search_query_batch` | `call_scoring` (`blast_engine/call_setup.rs`; the contexts' Karlin blocks with the lookup table in `call_lookup`), the search spaces in `run_call` |
+| lookup table | `LookupTableWrapInit` (`BlastMBLookupTableNew`, `BlastAaLookupTableNew`, ...) | `build_lookup_tables` (`blastn/coordination.rs`); discontiguous tables in `disc_lookup.rs` | `blastp_aa_lookup` or `blastp_compressed_lookup` (blastp-fast); PSSM and RPS tables through the hooks; the call's choice among them in `call_lookup` (`blast_engine/call_setup.rs`) |
 | scan, ungapped | `BlastNaWordFinder` with `s_BlastNaExtend`, or `s_BlastNaExtendDirect` for a table whose width is the word size (in LOSAT: a small or na table in `na_scan.rs`; megablast-kind and discontiguous tables of that width in `pair_extend.rs`); `BlastAaWordFinder` with `s_BlastAaExtendTwoHit` | `scan_subject_kmers_with_ranges`; for a two-stage table the scan that collects the offset pairs in `two_stage_scan.rs` (`scan_two_stage_lookup`) and their extension in `pair_extend.rs` (`extend_offset_pairs`, with the word extension `word_extend_pair` and the off-diagonal search `off_diagonal_found`), for the other tables the scan with the steps of each seed in `na_scan.rs` (`scan_na_lookup`); and `blastn/extension.rs` | `x_seed_fused` (the scan and the two-hit test in one loop) and `blastp/extension.rs` |
 | gapped (score only) | `BLAST_GetGappedScore`; greedy `BLAST_GreedyGappedAlignment` for megablast | `prelim_hsp_list.rs` (`gapped_hsp_list`, its loop `gapped_score_list`, per subject chunk) with `alignment/gapped.rs` or the greedy aligner | `extend_preliminary_blastp_hit` |
 | purge, reap, collect | `Blast_HSPListPurgeHSPsWithCommonEndpoints`, `s_Blast_HSPListReapByPrelimEvalue`, `s_BlastHSPCollectorRun` | `purge_prelim_hits_with_common_endpoints`, `reap_prelim_by_evalue` (`prelim_subject.rs`), `PrelimHitCollector` | `prepare_preliminary_hits_for_kappa_in_place`, `PrelimCollector` |
 | traceback | `Blast_TracebackFromHSPList`, `BLAST_GappedAlignmentWithTraceback` | `search_subject` (`subject_passes.rs`, its second call per subject) calls `traceback_subject` (`traceback_subject.rs`), which calls `traceback_subject_hits` (`traceback_list.rs`): the loop over a list of kept HSPs (`trace_hsp_list`), then the purges and the final list (`traceback_finish.rs`); the steps of one HSP are in `traceback_hsp.rs`, the subject's letters and the `-ungapped` traceback in `traceback_subject.rs` | `traceback::OrdinaryTraceback` |
 | composition-based statistics | `Blast_RedoAlignmentCore_MT` (`blast_kappa.c`) | none | `kappa::postprocess_preliminary_hits` (default `-comp_based_stats 2`) |
 | filter, sort | `s_FilterBlastResults`, `Blast_HSPResultsSortByEvalue` | `finish_query_hit_list` | `culling::cull_traceback`, `sort_by_evalue` |
-| report | `CBlastFormat::PrintOneResultSet` | `write_reports` → `post_process_hits_and_write` (`run.rs`; the refusals of the query-anchored reports of outfmt 1 to 4 and the SAM writer are in `report_write.rs`) | the `match outfmt` at the end of `run_resolved_in_pool` |
+| report | `CBlastFormat::PrintOneResultSet` | `write_reports` → `post_process_hits_and_write` (`run.rs`; the refusals of the query-anchored reports of outfmt 1 to 4 and the SAM writer are in `report_write.rs`) | the `match outfmt` at the end of `run_call` (its Archive, CustomTabular and Text arms are in `blast_engine/report_write.rs`) |
 
 Neither blastn nor blastp links HSPs or uses sum statistics: NCBI's option handles start with
 sum statistics off (`api/blast_options_local_priv.cpp`), only those of tblastn, blastx and
@@ -302,9 +302,16 @@ tblastn spread their stages over files (blastx `preliminary.rs`, `traceback.rs`,
 - **blastp** (`algorithm/blastp/blast_engine.rs`): `run` → `search_cli` → `search` →
   `run_resolved_in_pool`, once for the queries of every batch that NCBI does not split (a blastp
   query's preliminary hit list does not depend on the other queries of its batch), once per query
-  block, or once per query and round of psiblast. Its
-  `process_subject` does the preliminary search; the traceback, the composition redo and the report
-  follow in the same function.
+  block, or once per query and round of psiblast. It calls `run_call`, whose
+  `process_subject` does the preliminary search; the traceback, the composition redo (its parameters, its
+  plan and all its paths are in `blast_engine/redo_run.rs`) and the report
+  follow in `run_call` (the warning lines of the queries, the checks and the prefetch of the
+  reported subjects and the refusals before any format is written, and before them the residues that
+  the reports read, the check of the prefetch environment, the subjects that the reports show, what
+  the reports read of the final hit lists' Seq-aligns (psiblast's PSSMs and cut among it) and the
+  labels of the reports, are in `blast_engine/report_prep.rs`;
+  the BLAST archive, the tabular reports and the organism report are in
+  `blast_engine/report_write.rs`).
 - **Long queries.** Both re-enter their batch function for NCBI's query chunks (`SplitQuery_GetChunkSize`,
   `CQuerySplitter`): blastn through `search_query_chunks`, blastp through
   `search_split_query_batches`. Only the preliminary stage runs per chunk; the chunks' hit lists are

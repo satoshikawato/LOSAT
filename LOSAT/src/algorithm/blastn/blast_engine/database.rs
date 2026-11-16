@@ -661,17 +661,20 @@ impl BlastnDatabase {
 
     /// The stop of NCBI's prefetch of the query batch whose final hit lists are `hit_lists` and
     /// whose first query is `query`, for the XML2 and JSON formats, which write the taxonomy
-    /// texts at each `Hit` (`shared::batch_prefetch_stop`).
+    /// texts at each `Hit` (`shared::held_batch_prefetch_stop`): after the lookups of the reports
+    /// of the batches before, whose final hit lists are `before` (by ordinal id, as `hit_lists`),
+    /// which BLASTN writes after the stop (the XML formats are not streamed, `x_rpt_stream`).
     pub(super) fn batch_prefetch_stop(
         &self,
         titles: &DatabaseTitles,
+        before: &[Option<BlastnHitList>],
         hit_lists: &[Option<BlastnHitList>],
         gapped: bool,
         query: usize,
     ) -> Result<()> {
-        shared::batch_prefetch_stop(
+        shared::held_batch_prefetch_stop(
             &self.db,
-            &self.taxdb,
+            Self::prefetch_subjects(titles, before, gapped),
             Self::prefetch_subjects(titles, hit_lists, gapped),
             PROGRAM,
             query,
@@ -1611,11 +1614,28 @@ pub(super) fn x_tb_range_print_summary() {
 /// sequence with parsed Seq-ids.
 pub(super) type DatabaseTitles = BTreeMap<u32, ReportedHeader>;
 
+/// NCBI's fetches with `check_oid_exclusion` of a query batch's search of `database`
+/// (`shared::FetchExcluded`; `None` where they exclude nothing): the traceback's of the
+/// subjects of the preliminary hit lists (`SubjectPasses::traceback_pass`), or in an
+/// `-ungapped` search the re-evaluation's of each subject with HSPs, before the preliminary
+/// hit lists (`SubjectPasses::prelim_pass`).
+pub(super) fn fetch_excluded(database: &BlastnDatabase) -> Option<shared::FetchExcluded<'_>> {
+    shared::FetchExcluded::of(&database.db)
+}
+
+/// LOSAT's refusal of a search whose fetch with `check_oid_exclusion` cannot read the header
+/// of a subject (`shared::FetchExcluded::refusal`), where NCBI's search fails.
+pub(super) fn fetch_refusal(failed: (u32, crate::seqdb::SeqDbError)) -> anyhow::Error {
+    shared::FetchExcluded::refusal(failed, PROGRAM)
+}
+
 /// The final hit lists `hit_lists` of a query batch without the sequences that NCBI makes no
 /// Seq-align of (`shared::SeqAligned`): after their cut to the hit list size, before
 /// `read_titles`.
 pub(super) fn drop_unaligned(database: &BlastnDatabase, hit_lists: &mut [Option<BlastnHitList>]) {
-    let Some(mut aligned) = shared::SeqAligned::of(&database.db) else {
+    // Every blastn search fetches its subjects with `check_oid_exclusion`: the gapped traceback,
+    // or the ungapped re-evaluation of a nucleotide subject (`fetch_excluded`).
+    let Some(mut aligned) = shared::SeqAligned::of(&database.db, true) else {
         return;
     };
     for hit_list in hit_lists.iter_mut().flatten() {

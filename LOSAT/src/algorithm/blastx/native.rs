@@ -180,13 +180,15 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
     //     m_Outfile.exceptions(NcbiBadbit);
     // ```
     if error.is::<super::blast_xml::XmlRefusal>()
+        || error.is::<crate::algorithm::common::database::ReportSumRefusal>()
         || crate::report::pairwise::is_total_score_refusal(&error)
         || error.is::<crate::report::tax_report::TaxReportRefusal>()
         || error.is::<crate::report::tabular::FailedLookupRefusal>()
         || error.is::<super::empty_rows::EmptyRowsRefusal>()
         || error.is::<crate::algorithm::common::database::FetchRefusal>()
     {
-        // LOSAT's refusal of a title NCBI's XML cannot write, of a `-sorthits` table whose
+        // LOSAT's refusal of a title NCBI's XML cannot write, of the database counts a report
+        // would print where NCBI's sums overflow (`ReportSumRefusal`), of a `-sorthits` table whose
         // last total NCBI pads without end (`TotalScoreRefusal`, an `io::Error` of the report's
         // writes), of an organism report (outfmt 18, made before its first byte), of a tabular
         // row at which NCBI stops (`report::tabular::check_failed_lookups`), or of a report of
@@ -592,9 +594,15 @@ fn run_inner(
                 strategy.as_ref(),
                 &args.db_filter,
                 database.list_taxids(),
-                database.statistics_length_is_empty(),
+                &database.statistics(),
+                false,
                 args.searchsp.is_some_and(|space| space > 0),
                 args.dbsize.is_some_and(|size| size > 0),
+                program.upper,
+            )?;
+            crate::algorithm::common::database::check_formats_report_sums(
+                || database.pairwise_database(),
+                [args.outfmt.as_str()],
                 program.upper,
             )?;
             Some(database)
@@ -742,17 +750,21 @@ fn run_inner(
             .seek(SeekFrom::Start(start))
             .map_err(|_| inaccessible("query", &args.query))?;
         // A `-db` search in which a later batch can still refuse the taxonomy database or a
-        // subject with parsed Seq-ids (`BlastxDatabase::later_batch_may_refuse`; outfmt 5 looks
-        // the batch's subjects up in its prefetch, `ReportedSubjects::batch_prefetch`, DBID item
-        // T, and asks no scientific name) holds its document too.
-        let prefetch = prefetches_subjects(Some(choice.number));
-        let database_may_refuse = database
-            .as_ref()
-            .is_some_and(|database| database.later_batch_may_refuse(!prefetch));
+        // subject with parsed Seq-ids (outfmt 5 looks the batch's subjects up in its prefetch,
+        // `ReportedSubjects::batch_prefetch`, DBID item T, and asks no scientific name), or whose
+        // database counts the reports would refuse at the first report (`write_blastx_xml`,
+        // after NCBI's own errors of the search, which stop the run after the document's start,
+        // written with the prolog below), holds its document too, as does a `-subject` title
+        // (`blast_xml::documents_may_refuse`, the library's decision too).
+        // A run whose XML format fails for its matrix name holds nothing (`xml_matrix`: no title is
+        // checked, the failure comes before any report and any start).
         if xml_matrix.is_none()
-            && (scan.messages_may_be_refused
-                || database_may_refuse
-                || super::blast_xml::subjects_may_be_refused(&subjects))
+            && super::blast_xml::documents_may_refuse(
+                &[choice.number],
+                scan.messages_may_be_refused,
+                database.as_ref(),
+                &subjects,
+            )
         {
             held.hold();
         }
@@ -947,7 +959,9 @@ fn run_inner(
     // A refusal of a title (BLAST XML) found while a batch is reported drops what the run holds.
     let refused = |error: anyhow::Error| -> anyhow::Error {
         let error = report_error(error);
-        if error.is::<super::blast_xml::XmlRefusal>() {
+        if error.is::<super::blast_xml::XmlRefusal>()
+            || error.is::<crate::algorithm::common::database::ReportSumRefusal>()
+        {
             if let Some(held) = &held {
                 held.discard();
             }

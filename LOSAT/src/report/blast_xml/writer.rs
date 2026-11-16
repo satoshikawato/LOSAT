@@ -96,7 +96,15 @@ fn write_header(out: &mut Vec<u8>, run: &XmlRun<'_>, first: &XmlQuery<'_>) -> Op
 fn write_statistics<E: Encoder>(enc: &mut E, run: &XmlRun<'_>, stats: &XmlStats) {
     enc.member("stat", 5);
     enc.begin_sequence("Statistics");
-    int_member(enc, "db-num", 0, run.db_num);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:116-119
+    // ```c++
+    // 		ITERATE(vector<CBlastFormatUtil::SDbInfo>, i, dbInfo) {
+    // 			m_NumSequences += i->number_seqs;
+    // 			m_NumBases += i->total_length;
+    // 		}
+    // ```
+    // `m_NumSequences` is an `int`: the `Int8` sum fits it (`XmlRun::db_num`).
+    int_member(enc, "db-num", 0, run.db_num as i32);
     enc.member("db-len", 1);
     enc.big_int(run.db_len);
     enc.end_member();
@@ -179,11 +187,14 @@ pub trait StructuredXml {
     /// Appends what `PrintProlog` writes of the document, once: the start of the XML2 and JSON
     /// documents of outfmt 16 and 15 (nothing for BLAST XML, whose header comes with its first
     /// query, and for the side-file forms). NCBI writes it before it reads the first query
-    /// batch, so a program's report writes it before the warnings of its first query, after
-    /// its refusals of what NCBI could write (DECISIONS 20).
-    fn start(&mut self, out: &mut Vec<u8>) {
-        let _ = out;
-    }
+    /// batch, so a program's report calls this before the warnings of its first query, after
+    /// its refusals of what NCBI could write (DECISIONS 20). `reported` is the run of the
+    /// reports that the call writes after it (`None` for a call that writes none, a run without
+    /// a query): its database counts that the reports would print where NCBI's sums overflow,
+    /// which NCBI sums when it formats the first query's report (after its own errors of the
+    /// search), are refused here, before the first byte (`common::database::check_sums_of`;
+    /// BLASTX, which writes the start with the prolog, holds it, `blastx::blast_xml::HeldOutput`).
+    fn start(&mut self, reported: Option<&XmlRun<'_>>, out: &mut Vec<u8>) -> Result<()>;
 
     /// Whether the document holds each query's report back until the next query's arrives, so
     /// that a run that stops (no epilog) never writes the report of the last query it formats:
@@ -339,6 +350,13 @@ impl StructuredXml for BlastXmlWriter {
             Some(error) => Err(error.into()),
             None => Ok(()),
         }
+    }
+
+    /// The report-sum refusal of outfmt 5 (`XmlRun::check_sums`); BLAST XML writes nothing before
+    /// its first query.
+    fn start(&mut self, reported: Option<&XmlRun<'_>>, out: &mut Vec<u8>) -> Result<()> {
+        let _ = out;
+        reported.map_or(Ok(()), |run| run.check_sums(5))
     }
 
     /// Appends the end of the document if any query was formatted:

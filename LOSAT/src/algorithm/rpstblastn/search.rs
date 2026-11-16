@@ -88,6 +88,12 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         let Some(database) = database else {
             bail!("a search without -db is not supported by LOSAT's {PROGRAM}");
         };
+        // A total length of 0 or of 2^63 or more: refused as rpsblast refuses it
+        // (`blastp::blast_engine::rps_hooks::check_alias_keys`) until item D1a-4.
+        crate::algorithm::rps_search::volumes::untraced_total_length(
+            &database.x_seqdb().statistics(),
+            PROGRAM,
+        )?;
         // LOSAT's refusals of the volumes' files come before the first byte, as rpsblast's do;
         // NCBI's own errors of the files stay where NCBI's search of a batch raises them
         // (`search_window`), and the options' refusals below wait for the files to open.
@@ -288,9 +294,10 @@ impl std::error::Error for RpsBatchError {}
 /// The database's length and number of sequences for the effective lengths of the frames: the
 /// whole profile database's (every volume's search reads the totals, `x_AdjustDbSize` without
 /// `-dbsize`); the database is protein, so the length is not divided by 3.
-fn database_lengths(database: &BlastxDatabase) -> (i64, i64) {
+fn database_lengths(database: &BlastxDatabase) -> (i64, i32) {
     let pairwise = database.pairwise_database();
-    (pairwise.total_letters as i64, pairwise.num_sequences as i64)
+    // NCBI's `Int4` number of sequences of the statistics (`stats::setup::calc_eff_lengths`).
+    (pairwise.total_letters, pairwise.num_sequences as i32)
 }
 
 impl TranslatedRpsSearch {
@@ -339,7 +346,7 @@ impl TranslatedRpsSearch {
         database: &BlastxDatabase,
         volumes: &RpsVolumeSet<'_>,
         setup: &RpsVolumeSetup,
-        (db_length, db_count): (i64, i64),
+        (db_length, db_count): (i64, i32),
         pool: &crate::utils::threading::SearchPool<'_>,
         workers: &RpsWorkers,
     ) -> Vec<Option<Result<BatchResults>>> {
@@ -453,7 +460,7 @@ impl TranslatedRpsSearch {
                 // `-dbsize` on several volumes: each volume's statistics read the volume's own
                 // number of sequences (`per_volume_search_spaces`, as rpsblast's).
                 let lengths = if per_volume {
-                    let num_seqs = i64::from(volume.num_oids());
+                    let num_seqs = volume.num_oids() as i32;
                     effective_lengths(prepared, parameters, options, db_length, num_seqs, None)
                         .inspect(|()| {
                             // The merged result keeps the first volume's statistics (in path

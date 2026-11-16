@@ -355,6 +355,51 @@ impl RpsBuckets {
         (taken + list.len() as u32, u32::MAX)
     }
 
+    /// The buckets of `group` emptied, the reading cursor at the first of them.
+    fn open_group(&mut self, group: usize) -> RpsReadCursor {
+        self.clear();
+        self.g0 = group * self.group_buckets;
+        self.g1 = (self.g0 + self.group_buckets).min(self.num_buckets);
+        self.g1_q = if self.g1 == self.num_buckets {
+            u32::MAX
+        } else {
+            (self.g1 as u32) << BUCKET_BITS
+        };
+        RpsReadCursor {
+            bucket: self.g0,
+            block: 0,
+        }
+    }
+
+    /// A block of the run's pool.
+    fn take(&mut self) -> Block {
+        self.pool.take()
+    }
+
+    /// The bits that the entries of the hits of the word at the query offset `s_off` hold of it,
+    /// after the buckets' blocks are closed where the offset starts a segment (`start_segment`).
+    #[inline(always)]
+    fn entry_bits(&mut self, s_off: u32) -> u32 {
+        let segment = s_off >> SEGMENT_SHIFT;
+        if segment != self.segment {
+            self.start_segment(segment);
+        }
+        s_off << BUCKET_BITS
+    }
+
+    /// The scan reaches the query offsets of `segment`: every current block that holds hits is
+    /// closed, and every bucket's next hits go to blocks of that segment.
+    #[inline(never)]
+    fn start_segment(&mut self, segment: u32) {
+        for bucket in 0..self.heads.len() {
+            if self.heads[bucket].fill > 0 {
+                self.close(bucket);
+            }
+            self.heads[bucket].segment = segment;
+        }
+        self.segment = segment;
+    }
+
     /// One hit into the buckets (`add_list`'s body), for the tests.
     #[cfg(test)]
     fn add(&mut self, q_off: u32, s_bits: u32) {

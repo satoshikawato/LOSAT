@@ -86,7 +86,15 @@ fn test_reverse_complement_u_and_t() {
 #[test]
 fn the_head_fifo_emits_every_word_once_in_order() {
     use crate::algorithm::blastn::lookup::{XHeadFifo, X_HEAD_FIFO};
-    for n in [0usize, 1, X_HEAD_FIFO - 1, X_HEAD_FIFO, X_HEAD_FIFO + 1, 2 * X_HEAD_FIFO + 1, 100] {
+    for n in [
+        0usize,
+        1,
+        X_HEAD_FIFO - 1,
+        X_HEAD_FIFO,
+        X_HEAD_FIFO + 1,
+        2 * X_HEAD_FIFO + 1,
+        100,
+    ] {
         let mut fifo: XHeadFifo<(u32, Option<u64>)> = XHeadFifo::new();
         let mut out = Vec::new();
         for i in 0..n {

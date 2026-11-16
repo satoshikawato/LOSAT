@@ -1166,7 +1166,12 @@ impl TwoStageLookup {
     /// use; a prefetch accesses no memory architecturally, so any address is allowed.
     #[inline(always)]
     pub(crate) fn x_prefetch_heads(&self, index: u64, index2: Option<u64>) {
-        x_dc_csr::prefetch(self.mb_lookup.hashtable.as_ptr().wrapping_add(index as usize));
+        x_dc_csr::prefetch(
+            self.mb_lookup
+                .hashtable
+                .as_ptr()
+                .wrapping_add(index as usize),
+        );
         if let (Some(index2), Some(disc)) = (index2, self.disc.as_ref()) {
             x_dc_csr::prefetch(disc.hashtable2.as_ptr().wrapping_add(index2 as usize));
         }

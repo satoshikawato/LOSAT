@@ -732,6 +732,12 @@ trait XSink {
             self.one(partial + letter);
         }
     }
+    /// PROBE (K2-3 arm 2): the cells `partial + codes[i] * scale`, i in order.
+    fn many_coded(&mut self, partial: u32, scale: u32, codes: &[u8]) {
+        for &code in codes {
+            self.one(partial + u32::from(code) * scale);
+        }
+    }
 }
 
 // No NCBI counterpart: the count pass's record of the appends.
@@ -744,6 +750,11 @@ impl XSink for Vec<u32> {
     #[inline(always)]
     fn many(&mut self, partial: u32, last: &[u32]) {
         self.extend(last.iter().map(|&letter| partial + letter));
+    }
+
+    #[inline(always)]
+    fn many_coded(&mut self, partial: u32, scale: u32, codes: &[u8]) {
+        self.extend(codes.iter().map(|&code| partial + u32::from(code) * scale));
     }
 }
 
@@ -800,6 +811,99 @@ struct XWords<'a> {
     /// PROBE (v4-BPF s13 K2-3, not for merge): `LOSAT_BPF_ENUM=1`: the last two positions' cells
     /// from a table of the letter pairs sorted by their score sum (`XSuffixTable`).
     x_suffix: Option<&'static XSuffixTable>,
+    /// PROBE (K2-3 arm 2, `LOSAT_BPF_ENUM=2`): the same pairs with i16 sums and u8 codes.
+    x_suffix2: Option<&'static XSuffixTable2>,
+}
+
+/// PROBE (v4-BPF s13 K2-3 arm 2, not for merge): `XSuffixTable` packed: per pair (a, b) of query
+/// letters `X_SUFFIX2_ROW` slots (alphabet^2 used, the rest `i16::MIN`), the sums as i16 and the
+/// codes `char[a][i] + A * char[b][j]` (the cell's term is `code * A^(w - 2)`), so that a node
+/// counts its pairs in the first 16 slots (one 32-byte line) and reads 16 code bytes.
+struct XSuffixTable2 {
+    alphabet: usize,
+    word_length: usize,
+    matrix_sorted: [[i32; BLASTAA_SIZE]; BLASTAA_SIZE],
+    matrix_sorted_char: [[u8; BLASTAA_SIZE]; BLASTAA_SIZE],
+    sums: Vec<i16>,
+    codes: Vec<u8>,
+}
+
+const X_SUFFIX2_ROW: usize = 256;
+
+fn x_suffix_table2(
+    alphabet: usize,
+    word_length: usize,
+    info: &CompressedNeighborInfo,
+) -> Option<&'static XSuffixTable2> {
+    if std::env::var("LOSAT_BPF_ENUM").ok().as_deref() != Some("2")
+        || word_length < 2
+        || alphabet * alphabet > X_SUFFIX2_ROW
+        || alphabet * alphabet > 256
+    {
+        return None;
+    }
+    static T: std::sync::OnceLock<Option<XSuffixTable2>> = std::sync::OnceLock::new();
+    let t = T
+        .get_or_init(|| {
+            let mut sums = vec![i16::MIN; BLASTAA_SIZE * BLASTAA_SIZE * X_SUFFIX2_ROW];
+            let mut codes = vec![0u8; BLASTAA_SIZE * BLASTAA_SIZE * X_SUFFIX2_ROW];
+            let mut pairs: Vec<(i32, u8)> = Vec::with_capacity(alphabet * alphabet);
+            for a in 0..BLASTAA_SIZE {
+                for b in 0..BLASTAA_SIZE {
+                    pairs.clear();
+                    for i in 0..alphabet {
+                        for j in 0..alphabet {
+                            pairs.push((
+                                info.matrix_sorted[a][i] + info.matrix_sorted[b][j],
+                                info.matrix_sorted_char[a][i]
+                                    + alphabet as u8 * info.matrix_sorted_char[b][j],
+                            ));
+                        }
+                    }
+                    pairs.sort_by(|x, y| y.0.cmp(&x.0));
+                    let base = (a * BLASTAA_SIZE + b) * X_SUFFIX2_ROW;
+                    for (k, &(sum, code)) in pairs.iter().enumerate() {
+                        // A sum outside i16 makes the table unusable (the arm falls back).
+                        sums[base + k] = i16::try_from(sum).ok()?;
+                        codes[base + k] = code;
+                    }
+                }
+            }
+            Some(XSuffixTable2 {
+                alphabet,
+                word_length,
+                matrix_sorted: info.matrix_sorted,
+                matrix_sorted_char: info.matrix_sorted_char,
+                sums,
+                codes,
+            })
+        })
+        .as_ref()?;
+    (t.alphabet == alphabet
+        && t.word_length == word_length
+        && t.matrix_sorted == info.matrix_sorted
+        && t.matrix_sorted_char == info.matrix_sorted_char)
+        .then_some(t)
+}
+
+/// PROBE (K2-3 arm 2): how many of a pair row's sums (descending, padded with `i16::MIN`) are at
+/// least `key`, counted 16 at a time without branches inside a group.
+#[inline(always)]
+fn x_suffix2_count(sums: &[i16], key: i32) -> usize {
+    if key > i32::from(i16::MAX) {
+        return 0;
+    }
+    // Above the padding: a key at i16::MIN would count the padding.
+    let key = key.max(i32::from(i16::MIN) + 1) as i16;
+    let mut count = 0usize;
+    for group in sums.chunks_exact(16) {
+        let n: usize = group.iter().map(|&sum| usize::from(sum >= key)).sum();
+        count += n;
+        if n < 16 {
+            break;
+        }
+    }
+    count
 }
 
 /// PROBE (v4-BPF s13 K2-3, not for merge): for every pair (a, b) of query letters at the last two
@@ -1040,6 +1144,7 @@ impl<'a> XWords<'a> {
             last,
             below_last,
             x_suffix: x_suffix_table(header.alphabet, header.word_length, &power, info),
+            x_suffix2: x_suffix_table2(header.alphabet, header.word_length, info),
         }
     }
 
@@ -1170,6 +1275,16 @@ impl<'a> XWords<'a> {
         let scale = self.power[current_pos];
         if current_pos + 2 == self.length_of::<Q>() {
             crate::utils::xstats::add(&crate::utils::xstats::FBP_SUFFIX_NODES, 1);
+            if let Some(t) = self.x_suffix2 {
+                // PROBE (K2-3 arm 2): as arm 1, the count from the first groups of 16 sums.
+                let b = query_word[current_pos + 1] as usize;
+                let key = threshold - score + self.info.row_max[b];
+                let base = (curr_query_char * BLASTAA_SIZE + b) * X_SUFFIX2_ROW;
+                let count = x_suffix2_count(&t.sums[base..base + X_SUFFIX2_ROW], key);
+                crate::utils::xstats::add(&crate::utils::xstats::FBP_SUFFIX_APPENDS, count as u64);
+                sink.many_coded(partial, scale, &t.codes[base..base + count]);
+                return;
+            }
             if let Some(t) = self.x_suffix {
                 // PROBE (K2-3): the pairs (i, j) with score + row[i] - row_max[b] + row_b[j] >=
                 // threshold, i.e. row[i] + row_b[j] >= threshold - score + row_max[b].

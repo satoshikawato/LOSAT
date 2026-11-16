@@ -657,21 +657,25 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                 on_word(s_off, s_range, index, index2)
             };
             let mut fifo: XHeadFifo<(usize, usize, u64, Option<u64>)> = XHeadFifo::new();
+            // (the closure holds the flag, the presence vector and the table by value, and the
+            // rest by reference: its values stay in registers over the scan's loop instead of
+            // being read again every word through references to the locals here)
+            let (fifo_ref, emit_ref, without_ref) = (&mut fifo, &mut emit, &mut words_without_hits);
             scan_subject_disc_words_with_ranges(
                 search_seq_packed,
                 s_len,
                 disc,
                 subject_seq_ranges,
                 subject_masked,
-                |s_off, s_range, index, index2| {
+                move |s_off, s_range, index, index2| {
                     if every_word
                         || pv_view.has_hits(index)
                         || index2.is_some_and(|i2| pv_view.has_hits(i2))
                     {
                         two_stage.x_prefetch_heads(index, index2);
-                        fifo.push((s_off, s_range, index, index2), &mut emit);
+                        fifo_ref.push((s_off, s_range, index, index2), emit_ref);
                     } else {
-                        words_without_hits += 1;
+                        *without_ref += 1;
                     }
                 },
             );

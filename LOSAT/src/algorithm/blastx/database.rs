@@ -742,7 +742,10 @@ impl ReportedSubjects {
 
     /// The stop of NCBI's prefetch of the query batch whose hit lists are `batches`, for the XML2
     /// and JSON formats, which write the taxonomy texts at each `Hit`
-    /// (`shared::batch_prefetch_stop`; the error's query as in `batch_prefetch`).
+    /// (`shared::batch_prefetch_stop`; the error's query as in `batch_prefetch`), after the
+    /// lookups of the reports of the batches before, which the run's record holds: BLASTX reads
+    /// each batch's taxonomy (`for_batch`) and writes its reports before it searches the next, and
+    /// a batch that stops reads none of its own.
     pub(crate) fn batch_prefetch_stop(
         &self,
         database: &BlastxDatabase,

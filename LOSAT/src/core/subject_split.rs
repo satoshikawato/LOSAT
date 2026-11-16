@@ -93,9 +93,12 @@ pub struct HardChunk {
     /// `residual`: the letters before the chunk's hard range (`next % COMPRESSION_RATIO`),
     /// where its scan starts (`seq_ranges[0].left`).
     pub residual: usize,
-    /// NCBI's "no chunking" branch: the chunk's `seq_ranges` are the soft ranges, the full range
-    /// `[0, subject length)`, also where the chunk is shorter (a mask that runs to the end after
-    /// a chunk from the start, SURVEY §7.1 of M4a-2).
+    /// NCBI's "no chunking" branch: NCBI's `seq_ranges` of the chunk are the soft ranges, the
+    /// full range `[0, subject length)`, also where the chunk is shorter (a mask that runs to the
+    /// end after a chunk from the start, SURVEY §7.1 of M4a-2). LOSAT's search scans every chunk
+    /// from its residual (`[0, length)` here): where the chunk is shorter than the subject that
+    /// is the approved NCBI defect of `blastinput::db_mask::TAIL_MASK_SEARCHED_WORD`, below whose
+    /// word `HardMaskShape::TailMask` refuses the sequence (series NP, M4a-2c).
     pub full_range: bool,
     /// The hard range the chunk is cut from (`hm_index` when it is cut).
     pub range: usize,
@@ -229,8 +232,8 @@ impl HardSplitState {
     /// The next chunk of the subject (`None`: `SUBJECT_SPLIT_DONE`): one chunk per hard range (a
     /// range above `MAX_DBSEQ_LEN` in overlapping chunks of `MAX_DBSEQ_LEN` letters), from `next -
     /// next % 4`, of `right - offset` letters (0 for a hard range of no letters: a mask at 0,
-    /// masks that touch), scanned from the residual, or over the full range in the "no chunking"
-    /// branch ([`HardChunk::full_range`]); with the overlap of the merge after it
+    /// masks that touch), scanned from the residual (NCBI scans the full range in the "no
+    /// chunking" branch, [`HardChunk::full_range`]); with the overlap of the merge after it
     /// ([`HardChunk::overlap`], [`HardChunk::overlap_past_list`]). NCBI's `Int4` arithmetic: the
     /// hard ranges of sorted masks never go back, so no length is negative (masks out of order
     /// are refused before the search, `HardMaskShape::Unsorted`); a negative one would be clamped

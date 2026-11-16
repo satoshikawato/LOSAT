@@ -513,16 +513,19 @@ pub(crate) fn batch_prefetch(
 
 /// The stop of NCBI's prefetch of the query batch whose reported hits are `ordered` and whose
 /// first query is `query`, for the XML2 and JSON formats, which write the taxonomy texts at each
-/// `Hit` (`shared::batch_prefetch_stop`).
+/// `Hit` (`shared::held_batch_prefetch_stop`): after the lookups of the reports of the batches
+/// before, whose reported hits are `before`, which TBLASTX writes after the stop (the XML formats
+/// are not streamed, `report_stream`).
 pub(crate) fn batch_prefetch_stop(
     database: &TblastxDatabase,
+    before: &[TblastxHsp],
     ordered: &[TblastxHsp],
     titles: &DatabaseTitles,
     query: usize,
 ) -> Result<()> {
-    shared::batch_prefetch_stop(
+    shared::held_batch_prefetch_stop(
         &database.db,
-        &database.taxdb,
+        prefetch_subjects(before, titles),
         prefetch_subjects(ordered, titles),
         PROGRAM,
         query,

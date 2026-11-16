@@ -96,7 +96,8 @@ pub struct SubjectNames {
 
 impl SubjectNames {
     /// The names of a `-subject` record `id` with the FASTA title `title` (`Subject_N` and the
-    /// generated definition line). `protein`: the record is a protein.
+    /// generated definition line), or where `GenerateDefline` throws the catch's
+    /// (`SubjectNames::of_unknown` of `lcl|Subject_N`). `protein`: the record is a protein.
     pub fn of_record(id: &[u8], title: &[u8], protein: bool) -> Result<Self, Refusal> {
         let Some((xml_id, title)) = names::xml_subject_names(id, title, protein)? else {
             return Ok(Self::of_unknown(names::fasta_id(id, None)));

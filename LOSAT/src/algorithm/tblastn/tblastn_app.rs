@@ -2734,6 +2734,14 @@ fn parsed_shown(
         .collect();
     let pairwise = numbers.iter().any(|number| (0..=4).contains(number));
     crate::algorithm::common::database::ParsedShown {
+        stops_at_failed_lookup: formats.iter().any(|format| {
+            matches!(
+                super::stage_e_report::format_number(format.outfmt),
+                6 | 7 | 10 | 20
+            ) && crate::report::tabular::may_stop_at_failed_lookup(
+                super::tabular::tabular_spec(format.outfmt).as_ref(),
+            )
+        }),
         tabular: formats.iter().any(|format| {
             matches!(
                 super::stage_e_report::format_number(format.outfmt),

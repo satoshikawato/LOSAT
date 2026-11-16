@@ -821,6 +821,7 @@ fn seq_id_comparisons_follow_ncbi() {
                 ..BlastDefline::default()
             },
         ],
+        utf8: false,
     };
     assert_eq!(set.bioseq_defline(&ParsedSeqId::Gi(2)), Some(1));
     assert_eq!(set.alignment_id(), Some(&ParsedSeqId::Gi(1)));
@@ -1191,7 +1192,7 @@ fn weak_keys_find_the_ids_that_ncbis_scope_matches_weakly() {
 /// unknown members and variants, the long lengths, the end of every kind of constructed value,
 /// the members of Dbtag, Object-id and Textseq-id, a mandatory member left out, and the end of the
 /// record at each kind of frame.
-const NCBI_HEADER_FAILURES: [(&str, &str, &str, &str, &str); 48] = [
+const NCBI_HEADER_FAILURES: [(&str, &str, &str, &str, &str); 57] = [
     (
         "c01",
         "31803080a0801a16736571432070726f7465696e2043206f6620746573740000a1803080aa803080a0801a09424c5f4f52445f49440000a180a080020100000000000000000000000000a28002022586000000000000",
@@ -1528,7 +1529,76 @@ const NCBI_HEADER_FAILURES: [(&str, &str, &str, &str, &str); 48] = [
         "NCBI C++ Exception:\n    T0 \"R/src/serial/objistrasnb.cpp\", line 197: Error: (CSerialException::eFormatError) ncbi::CObjectIStreamAsnBinary::UnexpectedContinuation() - byte 83: EndOfContentsByte expected ( at Blast-def-line-set.[].[])\n",
         "byte 83: EndOfContentsByte expected",
     ),
-
+    // RG-T5d review l04: a member tag in the long form whose number is no member's
+    // (`bf 20`, [32]); `byte N` at the tag's first byte.
+    (
+        "l04",
+        "30803080bf20801a16736571432070726f7465696e2043206f6620746573740000a1803080aa803080a0801a09424c5f4f52445f49440000a180a080020100000000000000000000000000a28002022586000000000000",
+        "what",
+        "NCBI C++ Exception:\n    T0 \"R/src/serial/objistrasnb.cpp\", line 1066: Error: (CSerialException::eFormatError) ncbi::CObjectIStreamAsnBinary::UnexpectedMember() - byte 7: unexpected member: [32], should be one of: title[0] seqid[1] taxid[2] memberships[3] links[4] other-info[5]  ( at Blast-def-line-set.[].[])\n",
+        "byte 7: unexpected member: [32], should be one of: title[0] seqid[1] taxid[2] memberships[3] links[4] other-info[5] ",
+    ),
+    // l07: a long-form number that could pass 2^31 (`PeekLongTag`'s overflow).
+    (
+        "l07",
+        "30803080bf8fffffff7f801a16736571432070726f7465696e2043206f6620746573740000a1803080aa803080a0801a09424c5f4f52445f49440000a180a080020100000000000000000000000000a28002022586000000000000",
+        "what",
+        "NCBI C++ Exception:\n    T0 \"R/src/serial/objistrasnb.cpp\", line 161: Error: (CSerialException::eOverflow) ncbi::CObjectIStreamAsnBinary::PeekLongTag() - byte 4: tag number is too big: 33554431 ( at Blast-def-line-set.[].[])\n",
+        "byte 4: tag number is too big: 33554431",
+    ),
+    // RG-T5d fix 1 le1-le7: the record ends inside a tag in the long form (after its first byte,
+    // or after a byte with the high bit): `byte N` at the tag's first byte (`PeekTagByte(i)` does
+    // not move NCBI's stream), in the frame of the tag; in the outer two frames the
+    // `CEofException` that `HandleEOF` rethrows.
+    (
+        "le1",
+        "30803080bf",
+        "what",
+        "NCBI C++ Exception:\n    T0 \"R/src/serial/objistr.cpp\", line 606: Error: (CSerialException::eEOF) ncbi::CObjectIStream::HandleEOF() - byte 4:  Frame type= eFrameClassMember ( at Blast-def-line-set.[].[])\n",
+        "byte 4:  Frame type= eFrameClassMember",
+    ),
+    (
+        "le2",
+        "30803080bf8f",
+        "what",
+        "NCBI C++ Exception:\n    T0 \"R/src/serial/objistr.cpp\", line 606: Error: (CSerialException::eEOF) ncbi::CObjectIStream::HandleEOF() - byte 4:  Frame type= eFrameClassMember ( at Blast-def-line-set.[].[])\n",
+        "byte 4:  Frame type= eFrameClassMember",
+    ),
+    (
+        "le3",
+        "3f",
+        "what",
+        "NCBI C++ Exception:\n    T0 \"R/src/util/strbuffer.cpp\", line 358: Error: (CEofException::eEof) ncbi::CIStreamBuffer::FillBuffer() - end of file\n    T0 \"R/src/serial/objistr.cpp\", line 604: Error: (CEofException::eEof) ncbi::CObjectIStream::HandleEOF() -  Frame type= eFrameArray, Object type= \n    T0 \"R/src/serial/objistr.cpp\", line 604: Error: (CEofException::eEof) ncbi::CObjectIStream::HandleEOF() -  Frame type= eFrameNamed, Object type= Blast-def-line-set\n",
+        " Frame type= eFrameNamed, Object type= Blast-def-line-set",
+    ),
+    (
+        "le4",
+        "30803f90",
+        "what",
+        "NCBI C++ Exception:\n    T0 \"R/src/serial/objistr.cpp\", line 606: Error: (CSerialException::eEOF) ncbi::CObjectIStream::HandleEOF() - byte 2:  Frame type= eFrameClass, Object type= Blast-def-line ( at Blast-def-line-set.[].[])\n",
+        "byte 2:  Frame type= eFrameClass, Object type= Blast-def-line",
+    ),
+    (
+        "le5",
+        "30803080a0801a21686430207265636f72642030206f662074686520543564206461746162617365730000a1803080bf",
+        "what",
+        "NCBI C++ Exception:\n    T0 \"R/src/serial/objistr.cpp\", line 606: Error: (CSerialException::eEOF) ncbi::CObjectIStream::HandleEOF() - byte 47:  Frame type= eFrameChoiceVariant ( at [].[])\n    T0 \"R/src/serial/member.cpp\", line 752: Error: (CSerialException::eEOF) ncbi::CMemberInfoFunctions::ReadWithSetFlagMember() - error while reading seqid ( at Blast-def-line-set.[].[].seqid.[].[])\n",
+        "error while reading seqid",
+    ),
+    (
+        "le6",
+        "30803080a0801a21686430207265636f72642030206f662074686520543564206461746162617365730000a1803080bf85",
+        "what",
+        "NCBI C++ Exception:\n    T0 \"R/src/serial/objistr.cpp\", line 606: Error: (CSerialException::eEOF) ncbi::CObjectIStream::HandleEOF() - byte 47:  Frame type= eFrameChoiceVariant ( at [].[])\n    T0 \"R/src/serial/member.cpp\", line 752: Error: (CSerialException::eEOF) ncbi::CMemberInfoFunctions::ReadWithSetFlagMember() - error while reading seqid ( at Blast-def-line-set.[].[].seqid.[].[])\n",
+        "error while reading seqid",
+    ),
+    (
+        "le7",
+        "3f90",
+        "what",
+        "NCBI C++ Exception:\n    T0 \"R/src/util/strbuffer.cpp\", line 358: Error: (CEofException::eEof) ncbi::CIStreamBuffer::FillBuffer() - end of file\n    T0 \"R/src/serial/objistr.cpp\", line 604: Error: (CEofException::eEof) ncbi::CObjectIStream::HandleEOF() -  Frame type= eFrameArray, Object type= \n    T0 \"R/src/serial/objistr.cpp\", line 604: Error: (CEofException::eEof) ncbi::CObjectIStream::HandleEOF() -  Frame type= eFrameNamed, Object type= Blast-def-line-set\n",
+        " Frame type= eFrameNamed, Object type= Blast-def-line-set",
+    ),
 ];
 
 /// `decode_full_set` fails where NCBI's object stream does, with its exception: place, code,
@@ -1565,4 +1635,97 @@ fn header_reads_fail_as_ncbis_object_stream_fails() {
             Ok(_) => panic!("{case}: the ordinal-id decoder reads the record"),
         }
     }
+}
+
+/// A hex record.
+fn record_of(hex: &str) -> Vec<u8> {
+    (0..hex.len())
+        .step_by(2)
+        .map(|at| u8::from_str_radix(&hex[at..at + 2], 16).unwrap())
+        .collect()
+}
+
+/// The OID 0 record of the RG-T5d review's probe databases (`T/t5d/review/tools/build.py`,
+/// `p.faa`, made by NCBI makeblastdb 2.17.0), without an edit.
+const REVIEW_RECORD: &str = "30803080a0801a16736571432070726f7465696e2043206f6620746573740000a1803080aa803080a0801a09424c5f4f52445f49440000a180a080020100000000000000000000000000a28002022586000000000000";
+
+/// A constructed tag in the long form (number 31 in its first byte, the number in the bytes
+/// after: `PeekTag`, `PeekLongTag`) reads as its short form, in both decoders; NCBI 2.17.0 reads
+/// these records with no message (RG-T5d review l01-l03, l05, l08: `3f 10` for the set or the
+/// def-line, `bf 00` title, `bf 0a` general, `bf 02` taxid).
+#[test]
+fn long_form_tags_read_as_their_short_form() {
+    let plain = record_of(REVIEW_RECORD);
+    let want = decode_full_set(&plain).unwrap();
+    let path = std::path::Path::new("t.phr");
+    let want_ordinal = crate::seqdb::header::decode_deflines_as(&plain, path, 0, true).unwrap();
+    for (case, record) in [
+        ("l01", "3f10803080a0801a16736571432070726f7465696e2043206f6620746573740000a1803080aa803080a0801a09424c5f4f52445f49440000a180a080020100000000000000000000000000a28002022586000000000000"),
+        ("l02", "30803f1080a0801a16736571432070726f7465696e2043206f6620746573740000a1803080aa803080a0801a09424c5f4f52445f49440000a180a080020100000000000000000000000000a28002022586000000000000"),
+        ("l03", "30803080bf00801a16736571432070726f7465696e2043206f6620746573740000a1803080aa803080a0801a09424c5f4f52445f49440000a180a080020100000000000000000000000000a28002022586000000000000"),
+        ("l05", "30803080a0801a16736571432070726f7465696e2043206f6620746573740000a1803080bf0a803080a0801a09424c5f4f52445f49440000a180a080020100000000000000000000000000a28002022586000000000000"),
+        ("l08", "30803080a0801a16736571432070726f7465696e2043206f6620746573740000a1803080aa803080a0801a09424c5f4f52445f49440000a180a080020100000000000000000000000000bf028002022586000000000000"),
+        // A number in two bytes after the first (`bf 80 00`: 0).
+        ("l03b", "30803080bf8000801a16736571432070726f7465696e2043206f6620746573740000a1803080aa803080a0801a09424c5f4f52445f49440000a180a080020100000000000000000000000000a28002022586000000000000"),
+    ] {
+        let record = record_of(record);
+        assert_eq!(decode_full_set(&record).as_ref(), Ok(&want), "{case}");
+        assert_eq!(
+            crate::seqdb::header::decode_deflines_as(&record, path, 0, true).unwrap(),
+            want_ordinal,
+            "{case}"
+        );
+        assert_eq!(super::ber::utf8_string_path(&record), None, "{case}");
+    }
+}
+
+/// A UTF8String where a VisibleString is expected reads as the VisibleString (NCBI's
+/// `SERIAL_READ_ANY_VISIBLESTRING_TAG` 1), noted by both decoders; NCBI's warning names the
+/// first such member in the order of its read (`GetStackTraceASN`, `.E` for each element), and
+/// names none where its read fails before one (RG-T5d review u01, u04; fix 1 probe hsame, hmem).
+#[test]
+fn utf8_strings_read_with_the_member_of_ncbis_warning() {
+    let plain = record_of(REVIEW_RECORD);
+    let want = decode_full_set(&plain).unwrap();
+    assert!(!want.utf8);
+    assert_eq!(super::ber::utf8_string_path(&plain), None);
+    let path = std::path::Path::new("t.phr");
+    // u01: the title.
+    let mut title = plain.clone();
+    assert_eq!(title[6], 0x1a);
+    title[6] = 0x0c;
+    let set = decode_full_set(&title).unwrap();
+    assert!(set.utf8);
+    assert_eq!(set.deflines, want.deflines);
+    let ordinal = crate::seqdb::header::decode_deflines_as(&title, path, 0, true).unwrap();
+    assert!(ordinal.iter().all(|defline| defline.utf8));
+    assert_eq!(
+        super::ber::utf8_string_path(&title).as_deref(),
+        Some("Blast-def-line-set.E.title")
+    );
+    assert_eq!(
+        super::ber::utf8_string_warning(Some("blastdbcmd"), "Blast-def-line-set.E.title"),
+        b"Warning: (803.10) [blastdbcmd] CObjectIStreamAsnBinary: UTF8String data for VisibleString member Blast-def-line-set.E.title, ASN.1 specification may need an update\n"
+    );
+    // u04: a Textseq-id's accession of a database with parsed Seq-ids.
+    let accession = record_of("30803080a0801a0b70726f7465696e206f6e650000a1803080a9803080a1800c094e505f3030303030310000a38002010100000000000000000000a28002022586000000000000");
+    assert!(decode_full_set(&accession).unwrap().utf8);
+    assert_eq!(
+        super::ber::utf8_string_path(&accession).as_deref(),
+        Some("Blast-def-line-set.E.seqid.E.other.accession")
+    );
+    // A UTF8String title before NCBI's failure at the seqid member's tag: the warning, then the
+    // failure; a failure before the title: no warning.
+    let mut before = title.clone();
+    assert_eq!(before[32], 0xa1);
+    before[32] = 0xa7;
+    assert!(decode_full_set(&before).unwrap_err().exception().is_some());
+    assert_eq!(
+        super::ber::utf8_string_path(&before).as_deref(),
+        Some("Blast-def-line-set.E.title")
+    );
+    let mut after = title;
+    after[4] = 0xa7;
+    assert!(decode_full_set(&after).unwrap_err().exception().is_some());
+    assert_eq!(super::ber::utf8_string_path(&after), None);
 }

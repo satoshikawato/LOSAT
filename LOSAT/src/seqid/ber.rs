@@ -15,7 +15,9 @@
 //! NCBI writes the record with `MSerial_AsnBinary`: EXPLICIT context tags, indefinite length
 //! (`80 ... 00 00`) on every constructed value, definite length on INTEGER and VisibleString,
 //! minimal two's-complement integers. NCBI's reader (`CObjectIStreamAsnBinary`) reads both
-//! length forms; so does this one.
+//! length forms, a constructed tag in the long form (`Reader::tag`) and a UTF8String where a
+//! VisibleString is expected (`Reader::visible_string`, with NCBI's warning once per process,
+//! [`utf8_string_path`]); so does this one.
 //!
 //! ASN.1 definitions (NCBI 598d8ae6): `c++/src/objects/blastdb/blastdb.asn:31-47`
 //! (`Blast-def-line-set`, `Blast-def-line`), `c++/src/objects/seqloc/seqloc.asn:24-74`
@@ -142,6 +144,36 @@ const UNEXPECTED_TAG_CLASS_BYTE: ThrowSite = site(
     177,
     FORMAT_ERROR,
     Some("ncbi::CObjectIStreamAsnBinary::UnexpectedTagClassByte"),
+);
+// NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:151-172
+// ```c++
+// CObjectIStreamAsnBinary::TLongTag
+// CObjectIStreamAsnBinary::PeekLongTag(void)
+// {
+//     TLongTag tag = 0;
+//     size_t i = 1;
+//     const size_t KBitsInByte = 8; // ?
+//     const size_t KTagBits = sizeof(tag) * KBitsInByte - 1;
+//     TByte byte;
+//     do {
+//         if ( tag >= (1 << (KTagBits - 7)) ) {
+//             ThrowError(fOverflow,
+//                        "tag number is too big: "+NStr::IntToString(tag));
+//         }
+//         byte = PeekTagByte(i++);
+//         tag = (tag << 7) | (byte & 0x7f);
+//     } while ( (byte & 0x80) != 0 );
+//     ...
+//     m_CurrentTagLength = i;
+//     return tag;
+// }
+// ```
+// NCBI 2.17.0 reports the throw at line 161 (probe RG-T5d review l07).
+const PEEK_LONG_TAG: ThrowSite = site(
+    OBJISTRASNB,
+    161,
+    OVERFLOW_ERROR,
+    Some("ncbi::CObjectIStreamAsnBinary::PeekLongTag"),
 );
 // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:195-198
 // ```c++
@@ -403,6 +435,48 @@ impl Frame {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/serial/objstack.cpp:79-119
+    // ```c++
+    // string CObjectStack::GetStackTraceASN(void) const
+    // {
+    //     ...
+    //     string stack = FetchFrameFromBottom(0).HasTypeInfo() ?
+    //         FetchFrameFromBottom(0).m_TypeInfo->GetName() : "?";
+    //     for ( size_t i = 1; i < GetStackDepth(); ++i ) {
+    //         const TFrame& frame = FetchFrameFromBottom(i);
+    //         switch ( frame.m_FrameType ) {
+    //         case TFrame::eFrameClassMember:
+    //         case TFrame::eFrameChoiceVariant:
+    //             {
+    //                 if ( !frame.m_MemberId ) {
+    //                     _ASSERT(i == GetStackDepth() - 1);
+    //                 }
+    //                 else {
+    //                     const CMemberId& id = *frame.m_MemberId;
+    //                     stack += '.';
+    //                     if ( !id.GetName().empty() ) {
+    //                         stack += id.GetName();
+    //     ...
+    //         case TFrame::eFrameArrayElement:
+    //             stack += ".E";
+    //             break;
+    //         default:
+    //             break;
+    // ```
+    /// What the frame adds to `GetStackTraceASN` (after a `.`; the root's is the start).
+    fn trace_name(self) -> Option<&'static str> {
+        match self {
+            Frame::Root => Some(SET_TYPE),
+            Frame::ArrayElement => Some("E"),
+            Frame::Member(Some(name)) | Frame::Variant(Some(name)) => Some(name),
+            Frame::SetArray
+            | Frame::Array
+            | Frame::Class(_)
+            | Frame::Member(None)
+            | Frame::Variant(None) => None,
+        }
+    }
+
     /// `GetFrameInfo`.
     fn info(self) -> String {
         let (kind, type_name, member) = match self {
@@ -436,17 +510,21 @@ enum Failure {
     },
     /// The record ends where NCBI's stream needs a byte (the `CEofException` of
     /// `CIStreamBuffer::FillBuffer`), not yet in a frame: the innermost frame makes it NCBI's
-    /// exception (`HandleEOF`), with the record's length, where NCBI's stream then is.
-    Eof { len: usize },
+    /// exception (`HandleEOF`), with the position of NCBI's stream then: the record's length
+    /// where a byte is read, the tag's first byte where a byte after it is peeked
+    /// (`PeekTagByte(i)` of a tag in the long form leaves the stream where it is).
+    Eof { pos: usize },
     /// The `CEofException` that `HandleEOF` rethrows in the outer two frames (the end of the
     /// record where the set's container is read, outside its elements): no frames, and a
     /// backlog for each of the two.
     Rethrown(NcbiException),
-    /// A failure whose report by NCBI's reader is not ported, with LOSAT's text: a tag in the
-    /// long form, a UTF8String where a VisibleString is expected (NCBI reads it, with a
-    /// warning), and the checks of the ordinal-id decoder (`seqdb::header`), which NCBI's read
-    /// replaces where it fails too.
+    /// A failure whose report by NCBI's reader is not ported, with LOSAT's text: the checks of
+    /// the ordinal-id decoder (`seqdb::header`), which NCBI's read replaces where it fails too.
     Unported { pos: usize, message: String },
+    /// Not a failure of NCBI's read: the read that looks for the first UTF8String where a
+    /// VisibleString is expected (`utf8_string_path`) stops there, and each frame it leaves
+    /// adds its part of NCBI's `GetStackTraceASN` to `path` (`Frame::trace_name`).
+    Utf8 { path: String },
 }
 
 /// An error of the BER decoding of a header record: NCBI's exception
@@ -465,7 +543,7 @@ impl BerError {
                 Some(exception.clone().with_extra(frame_extra(frames)))
             }
             Failure::Rethrown(exception) => Some(exception.clone()),
-            Failure::Eof { .. } | Failure::Unported { .. } => None,
+            Failure::Eof { .. } | Failure::Unported { .. } | Failure::Utf8 { .. } => None,
         }
     }
 
@@ -488,7 +566,7 @@ impl BerError {
                 }
                 Failure::Serial { exception, frames }
             }
-            Failure::Eof { len } => match frame {
+            Failure::Eof { pos } => match frame {
                 Frame::SetArray | Frame::Root => {
                     let eof = NcbiException::new(END_OF_FILE, "end of file")
                         .backlog(HANDLE_EOF_RETHROW, Frame::SetArray.info());
@@ -502,7 +580,7 @@ impl BerError {
                 _ => Failure::Serial {
                     exception: NcbiException::new(
                         HANDLE_EOF,
-                        format!("byte {len}: {}", frame.info()),
+                        format!("byte {pos}: {}", frame.info()),
                     ),
                     frames: String::new(),
                 },
@@ -514,6 +592,15 @@ impl BerError {
                 _ => Failure::Rethrown(exception),
             },
             unported @ Failure::Unported { .. } => unported,
+            Failure::Utf8 { mut path } => {
+                if let Some(name) = frame.trace_name() {
+                    if !path.is_empty() {
+                        path.insert(0, '.');
+                    }
+                    path.insert_str(0, name);
+                }
+                Failure::Utf8 { path }
+            }
         };
         BerError(Box::new(failure))
     }
@@ -548,10 +635,16 @@ impl std::fmt::Display for BerError {
             Failure::Unported { pos, message } => {
                 write!(f, "header record, byte {pos}: {message}")
             }
-            Failure::Eof { len } => {
+            Failure::Eof { pos } => {
                 write!(
                     f,
-                    "header record, byte {len}: the record ends inside a value"
+                    "header record, byte {pos}: the record ends inside a value"
+                )
+            }
+            Failure::Utf8 { path } => {
+                write!(
+                    f,
+                    "header record: a UTF8String for VisibleString member {path}"
                 )
             }
             Failure::Serial { .. } | Failure::Rethrown(_) => {
@@ -655,15 +748,55 @@ pub(crate) enum End {
     At(usize),
 }
 
+/// The identifier of a value as NCBI's `PeekTag` reads it: the class and form bits of its first
+/// byte, its number (in the long form, from the bytes after: `PeekLongTag`), and how many bytes
+/// it takes (`m_CurrentTagLength`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Tag {
+    /// The first byte without the number (`first & !TAG_NUMBER_MASK`).
+    pub(crate) class: u8,
+    /// `TLongTag` (an `Int4`; `PeekLongTag` keeps it below 2^31).
+    pub(crate) number: u32,
+    len: u8,
+}
+
+impl Tag {
+    /// Whether this is the tag of the one-byte identifier `byte` (whose number is below 31):
+    /// the same class and form, and the same number in either form.
+    pub(crate) fn is(self, byte: u8) -> bool {
+        self.class == byte & !TAG_NUMBER_MASK && self.number == u32::from(byte & TAG_NUMBER_MASK)
+    }
+
+    /// Whether the value is constructed (`eConstructed`).
+    pub(crate) fn constructed(self) -> bool {
+        self.class & TAG_CONSTRUCTED != 0
+    }
+}
+
 /// A reader of one BER-encoded record.
 pub(crate) struct Reader<'a> {
     data: &'a [u8],
     pos: usize,
+    /// Whether a UTF8String was read where a VisibleString is expected (`visible_string`).
+    utf8: bool,
+    /// Whether such a string stops the read (`Failure::Utf8`; `utf8_string_path`).
+    find_utf8: bool,
 }
 
 impl<'a> Reader<'a> {
     pub(crate) fn new(data: &'a [u8]) -> Self {
-        Reader { data, pos: 0 }
+        Reader {
+            data,
+            pos: 0,
+            utf8: false,
+            find_utf8: false,
+        }
+    }
+
+    /// Whether the reader read a UTF8String where a VisibleString is expected, which NCBI's
+    /// read takes with a warning (`visible_string`; `utf8_string_path` names the member).
+    pub(crate) fn read_utf8(&self) -> bool {
+        self.utf8
     }
 
     /// Whether every byte of the record was read.
@@ -698,7 +831,7 @@ impl<'a> Reader<'a> {
     #[inline(never)]
     fn eof(&self) -> BerError {
         BerError(Box::new(Failure::Eof {
-            len: self.data.len(),
+            pos: self.data.len(),
         }))
     }
 
@@ -731,24 +864,124 @@ impl<'a> Reader<'a> {
         Ok(slice)
     }
 
-    /// Reads one identifier byte. Tag numbers above 30 (the long form) do not
-    /// occur in these types.
-    pub(crate) fn tag(&mut self) -> Result<u8, BerError> {
-        let tag = self.byte()?;
-        if tag & TAG_NUMBER_MASK == TAG_NUMBER_MASK {
-            return Err(self.error("long-form tag"));
+    // NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:175-189
+    // ```c++
+    // inline
+    // CObjectIStreamAsnBinary::TLongTag
+    // CObjectIStreamAsnBinary::PeekTag(TByte first_tag_byte)
+    // {
+    //     TByte byte = StartTag(first_tag_byte);
+    //     ETagValue sysTag = GetTagValue(byte);
+    //     if ( sysTag == eLongTag ) {
+    //         return PeekLongTag();
+    //     }
+    //     ...
+    //     m_CurrentTagLength = 1;
+    //     return sysTag;
+    // }
+    // ```
+    /// `PeekTag` of the identifier whose first byte `first` is at the position, which stays
+    /// (`PeekTagByte(i)` does not move the stream): the one tag reader of both decoders.
+    #[inline]
+    fn peek_tag(&self, first: u8) -> Result<Tag, BerError> {
+        if first & TAG_NUMBER_MASK != TAG_NUMBER_MASK {
+            return Ok(Tag {
+                class: first & !TAG_NUMBER_MASK,
+                number: u32::from(first & TAG_NUMBER_MASK),
+                len: 1,
+            });
         }
+        self.peek_long_tag(first)
+    }
+
+    /// `PeekLongTag` (quoted at `PEEK_LONG_TAG`): the number in the bytes after `first`, seven
+    /// bits each, the last without the high bit; NCBI's overflow before a byte that could pass
+    /// 2^31, and the end of the record at the tag's first byte.
+    #[cold]
+    #[inline(never)]
+    fn peek_long_tag(&self, first: u8) -> Result<Tag, BerError> {
+        let mut tag: u32 = 0;
+        let mut i = 1;
+        loop {
+            if tag >= 1 << 24 {
+                let message = format!("tag number is too big: {tag}");
+                return Err(self.throw(PEEK_LONG_TAG, self.pos, &message));
+            }
+            let Some(&byte) = self.data.get(self.pos + i) else {
+                return Err(BerError(Box::new(Failure::Eof { pos: self.pos })));
+            };
+            i += 1;
+            tag = (tag << 7) | u32::from(byte & 0x7f);
+            if byte & 0x80 == 0 {
+                break;
+            }
+        }
+        Ok(Tag {
+            class: first & !TAG_NUMBER_MASK,
+            number: tag,
+            len: i as u8,
+        })
+    }
+
+    /// Reads one identifier (`peek_tag`), short or long.
+    #[inline]
+    pub(crate) fn tag(&mut self) -> Result<Tag, BerError> {
+        let first = self.peek()?;
+        if first & TAG_NUMBER_MASK != TAG_NUMBER_MASK {
+            self.pos += 1;
+            return Ok(Tag {
+                class: first & !TAG_NUMBER_MASK,
+                number: u32::from(first & TAG_NUMBER_MASK),
+                len: 1,
+            });
+        }
+        self.long_tag(first)
+    }
+
+    /// `tag` of an identifier in the long form.
+    #[cold]
+    #[inline(never)]
+    fn long_tag(&mut self, first: u8) -> Result<Tag, BerError> {
+        let tag = self.peek_long_tag(first)?;
+        self.pos += usize::from(tag.len);
         Ok(tag)
     }
 
-    pub(crate) fn expect_tag(&mut self, expected: u8, what: &str) -> Result<(), BerError> {
-        let tag = self.tag()?;
-        if tag != expected {
-            return Err(self.error(format!(
-                "tag 0x{tag:02x} where {what} (0x{expected:02x}) is expected"
-            )));
+    /// Reads the next identifier where it is that of the one-byte tag `expected` in either form
+    /// (`Tag::is`): whether it was.
+    #[inline]
+    pub(crate) fn take_tag(&mut self, expected: u8) -> Result<bool, BerError> {
+        if self.data.get(self.pos) == Some(&expected) {
+            self.pos += 1;
+            return Ok(true);
         }
-        Ok(())
+        self.take_other_tag(expected)
+    }
+
+    /// `take_tag` of another first byte: the long form of `expected`, or another tag (the
+    /// position stays), or the end of the record.
+    #[cold]
+    #[inline(never)]
+    fn take_other_tag(&mut self, expected: u8) -> Result<bool, BerError> {
+        let at = self.pos;
+        let tag = self.tag()?;
+        if tag.is(expected) {
+            return Ok(true);
+        }
+        self.pos = at;
+        Ok(false)
+    }
+
+    /// Reads the identifier of the one-byte tag `expected` (`Tag::is`), in either form.
+    pub(crate) fn expect_tag(&mut self, expected: u8, what: &str) -> Result<(), BerError> {
+        if self.take_tag(expected)? {
+            return Ok(());
+        }
+        let tag = self.tag()?;
+        Err(self.error(format!(
+            "tag {}/{} where {what} (0x{expected:02x}) is expected",
+            tag.class, tag.number
+        )))
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:394-411
@@ -889,7 +1122,7 @@ impl<'a> Reader<'a> {
     /// members of `Blast-def-line` are an INTEGER or a SEQUENCE OF INTEGER.
     pub(crate) fn skip_value(&mut self, depth: u32) -> Result<(), BerError> {
         let tag = self.tag()?;
-        if tag & (1 << 5) != 0 {
+        if tag.constructed() {
             if depth >= MAX_SKIP_DEPTH {
                 return Err(self.error("values nested too deeply"));
             }
@@ -929,25 +1162,40 @@ impl<'a> Reader<'a> {
     //                     type == eStringTypeVisible? x_FixCharsMethod(): eFNP_Allow);
     // }
     // ```
-    // NCBI's reader also takes a UTF8String (tag 0x0c) where a VisibleString is expected, with a
-    // warning (`SERIAL_READ_ANY_VISIBLESTRING_TAG` 1, NCBI 2.17.0: `Warning: (803.10)
-    // CObjectIStreamAsnBinary: UTF8String data for VisibleString member ...`, probe c24).
-    // makeblastdb writes only VisibleStrings; LOSAT refuses another tag.
-    /// `ReadString` of a VisibleString: the stored bytes.
+    // NCBI's reader takes a UTF8String (tag 0x0c) where a VisibleString is expected: the
+    // parameter `SERIAL_READ_ANY_VISIBLESTRING_TAG` is 1 by default (objistrasnb.cpp:273-279),
+    // and its bytes are read as a VisibleString's (`x_FixCharsMethod`). The warning is posted
+    // once per process (`ERR_POST_X_ONCE`, error code 803 `Serial_IStream`, error_codes.hpp:47),
+    // at NCBI's first read of such a string: the programs post it where NCBI first reads the
+    // record (`utf8_string_warning`, `utf8_string_path`; NCBI 2.17.0, probe RG-T5d review u01).
+    /// `ReadString` of a VisibleString: the stored bytes. A UTF8String is read the same way
+    /// (`read_utf8` tells it).
     pub(crate) fn visible_string(&mut self) -> Result<&'a [u8], BerError> {
         let tag = self.peek()?;
         if tag != TAG_VISIBLE_STRING {
-            if tag == TAG_UTF8_STRING {
-                return Err(self.error(
-                    "a UTF8String where a VisibleString is expected, which NCBI's reader takes \
-                     with a warning",
-                ));
-            }
-            return Err(self.unexpected_sys_tag_byte(tag, TAG_VISIBLE_STRING));
+            self.other_string_tag(tag)?;
         }
         self.pos += 1;
         let length = self.read_length()?;
         self.take(length)
+    }
+
+    /// The tag `tag` at the position where a VisibleString is expected (`ExpectStringTag`): a
+    /// UTF8String, noted (`read_utf8`; with `find_utf8` the read stops there), or NCBI's
+    /// `UnexpectedSysTagByte`.
+    #[cold]
+    #[inline(never)]
+    fn other_string_tag(&mut self, tag: u8) -> Result<(), BerError> {
+        if tag != TAG_UTF8_STRING {
+            return Err(self.unexpected_sys_tag_byte(tag, TAG_VISIBLE_STRING));
+        }
+        if self.find_utf8 {
+            return Err(BerError(Box::new(Failure::Utf8 {
+                path: String::new(),
+            })));
+        }
+        self.utf8 = true;
+        Ok(())
     }
 
     /// `UnexpectedSysTagByte(expected)` with the tag byte `got` at the position.
@@ -1109,20 +1357,30 @@ impl<'a> Reader<'a> {
     /// and the length (`ExpectIndefiniteLength`).
     fn begin_sequence(&mut self) -> Result<End, BerError> {
         let first = self.peek()?;
+        if first == TAG_SEQUENCE {
+            self.pos += 1;
+        } else {
+            self.other_sequence_tag(first)?;
+        }
+        self.expect_indefinite_length()
+    }
+
+    /// `begin_sequence`'s tag other than SEQUENCE's one byte: NCBI's errors, or SEQUENCE's
+    /// number in the long form (read).
+    #[cold]
+    #[inline(never)]
+    fn other_sequence_tag(&mut self, first: u8) -> Result<(), BerError> {
         if first & !TAG_NUMBER_MASK != TAG_CONSTRUCTED {
             return Err(self.unexpected_tag_class_byte(first, TAG_CONSTRUCTED));
         }
-        let number = first & TAG_NUMBER_MASK;
-        if number == TAG_NUMBER_MASK {
-            return Err(self.error("long-form tag"));
-        }
-        if number != TAG_SEQUENCE & TAG_NUMBER_MASK {
-            let expected = TAG_SEQUENCE & TAG_NUMBER_MASK;
-            let message = format!("Unexpected tag: {number}, expected: {expected}");
+        let tag = self.peek_tag(first)?;
+        let expected = u32::from(TAG_SEQUENCE & TAG_NUMBER_MASK);
+        if tag.number != expected {
+            let message = format!("Unexpected tag: {}, expected: {expected}", tag.number);
             return Err(self.throw(UNEXPECTED_TAG_VALUE, self.pos, &message));
         }
-        self.pos += 1;
-        self.expect_indefinite_length()
+        self.pos += usize::from(tag.len);
+        Ok(())
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:1122-1160
@@ -1148,25 +1406,37 @@ impl<'a> Reader<'a> {
     // The types of a header record have automatic tags (the path above); a member's tag must be
     // that of a member after the last one read (`Find` from `pos`, memberlist.cpp:462-472), and
     // `SERIAL_SKIP_UNKNOWN_MEMBERS` (and `..._VARIANTS` of a CHOICE) is no by default.
-    /// The tag of a member or variant (`[n]` EXPLICIT, context-specific constructed) and its
-    /// length: the number `n` and the end of the value.
-    fn context_tag(&mut self) -> Result<(u8, End), BerError> {
+    /// The tag of a member or variant (`[n]` EXPLICIT, context-specific constructed, in either
+    /// form) and its length: the number `n` and the end of the value.
+    fn context_tag(&mut self) -> Result<(u32, End), BerError> {
         let first = self.peek()?;
+        // A context-specific constructed tag in the short form (`[0]` to `[30]`).
+        let number = if first.wrapping_sub(TAG_CONTEXT_CONSTRUCTED) < TAG_NUMBER_MASK {
+            self.pos += 1;
+            u32::from(first & TAG_NUMBER_MASK)
+        } else {
+            self.other_context_tag(first)?
+        };
+        Ok((number, self.expect_indefinite_length()?))
+    }
+
+    /// `context_tag`'s other first bytes: NCBI's error of another class or form, or the number in
+    /// the long form (read).
+    #[cold]
+    #[inline(never)]
+    fn other_context_tag(&mut self, first: u8) -> Result<u32, BerError> {
         if first & !TAG_NUMBER_MASK != TAG_CONTEXT_CONSTRUCTED {
             return Err(self.unexpected_tag_class_byte(first, TAG_CONTEXT_CONSTRUCTED));
         }
-        let number = first & TAG_NUMBER_MASK;
-        if number == TAG_NUMBER_MASK {
-            return Err(self.error("long-form tag"));
-        }
-        self.pos += 1;
-        Ok((number, self.expect_indefinite_length()?))
+        let tag = self.peek_tag(first)?;
+        self.pos += usize::from(tag.len);
+        Ok(tag.number)
     }
 
     /// `UnexpectedMember(tag, items)` of the type whose members (or variants) are `names`.
     #[cold]
     #[inline(never)]
-    fn unexpected_member(&self, tag: u8, names: &[&str]) -> BerError {
+    fn unexpected_member(&self, tag: u32, names: &[&str]) -> BerError {
         let mut message = format!("unexpected member: [{tag}], should be one of: ");
         for (at, name) in names.iter().enumerate() {
             message.push_str(&format!("{name}[{at}] "));
@@ -1593,10 +1863,16 @@ fn begin_class_member(
         return Ok(None);
     }
     let (number, member_end) = ber.context_tag()?;
-    if number < next || usize::from(number) >= names.len() {
-        return Err(ber.unexpected_member(number, names));
+    match member_index(number, names) {
+        Some(member) if member >= next => Ok(Some((member, member_end))),
+        _ => Err(ber.unexpected_member(number, names)),
     }
-    Ok(Some((number, member_end)))
+}
+
+/// The index of the member or variant whose tag is `number` among `names` (automatic tags: 0,
+/// 1, ...), `None` for a tag of none.
+fn member_index(number: u32, names: &[&str]) -> Option<u8> {
+    (number < names.len() as u32).then_some(number as u8)
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/choice.cpp:371-411
@@ -1636,10 +1912,10 @@ fn read_choice<'a, T>(
 /// `BeginChoiceVariant` of a CHOICE whose variants are `names`.
 fn begin_choice_variant(ber: &mut Reader<'_>, names: &[&str]) -> Result<(u8, End), BerError> {
     let (number, end) = ber.context_tag()?;
-    if usize::from(number) >= names.len() {
-        return Err(ber.unexpected_member(number, names));
+    match member_index(number, names) {
+        Some(variant) => Ok((variant, end)),
+        None => Err(ber.unexpected_member(number, names)),
     }
-    Ok((number, end))
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2208-2218
@@ -1680,17 +1956,76 @@ fn begin_choice_variant(ber: &mut Reader<'_>, names: &[&str]) -> Result<(u8, End
 /// `general` ids `BL_ORD_ID` keep the volume-relative tag that the record stores
 /// (`SeqDb::defline_set` adds the volume start).
 pub fn decode_full_set(record: &[u8]) -> Result<DeflineSet, BerError> {
-    let mut deflines = Vec::new();
     if record.is_empty() {
-        return Ok(DeflineSet { deflines });
+        return Ok(DeflineSet::default());
     }
     let mut ber = Reader::new(record);
-    read_container(&mut ber, Frame::SetArray, |ber| {
+    let deflines = read_set(&mut ber)?;
+    Ok(DeflineSet {
+        deflines,
+        utf8: ber.read_utf8(),
+    })
+}
+
+/// `CObjectIStream::Read` of the root `Blast-def-line-set` (quoted at `decode_full_set`).
+fn read_set(ber: &mut Reader<'_>) -> Result<Vec<BlastDefline>, BerError> {
+    let mut deflines = Vec::new();
+    read_container(ber, Frame::SetArray, |ber| {
         deflines.push(decode_defline(ber)?);
         Ok(())
     })
     .map_err(|e| e.left(Frame::Root))?;
-    Ok(DeflineSet { deflines })
+    Ok(deflines)
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:298-309
+// ```c++
+//         static CSafeStatic<NCBI_PARAM_TYPE(SERIAL, READ_ANY_VISIBLESTRING_TAG)> sx_ReadAny;
+//         if ( sx_ReadAny->Get() ) {
+//             // may be eUTF8String
+//             TByte alt_tag = MakeTagByte(eUniversal,ePrimitive,eUTF8String);
+//             if ( PeekTagByte() == alt_tag ) {
+//                 // optionally issue a warning
+//                 if ( sx_ReadAny->Get() == 1 ) {
+//                     ERR_POST_X_ONCE(10, Warning<<
+//                                     "CObjectIStreamAsnBinary: UTF8String data for VisibleString member "<<GetStackTraceASN()<<", ASN.1 specification may need an update");
+//                 }
+// ```
+/// The member that NCBI's warning names where its read of `record` reaches a UTF8String where a
+/// VisibleString is expected (`GetStackTraceASN` there: `Blast-def-line-set.E.title`,
+/// `Blast-def-line-set.E.seqid.E.other.accession`): the first in the order of the read, `None`
+/// where the read meets none or fails before one (NCBI then posts nothing). The record is read
+/// again, as `decode_full_set` reads it, up to that string: asked only of a record whose read
+/// noted one (`DeflineSet::utf8`, `seqdb::header::Defline::utf8`) or failed.
+#[cold]
+#[inline(never)]
+pub fn utf8_string_path(record: &[u8]) -> Option<String> {
+    if record.is_empty() {
+        return None;
+    }
+    let mut ber = Reader::new(record);
+    ber.find_utf8 = true;
+    match read_set(&mut ber) {
+        Err(BerError(failure)) => match *failure {
+            Failure::Utf8 { path } => Some(path),
+            _ => None,
+        },
+        Ok(_) => None,
+    }
+}
+
+/// NCBI's warning of a UTF8String read where a VisibleString is expected (quoted at
+/// `utf8_string_path`), whose member is `path`, as the diagnostics of the program with the post
+/// prefix `prefix` (`SetDiagPostPrefix`: `[blastp]`, `[blastdbcmd]`) print it: `Warning:
+/// (803.10) [<prefix>] CObjectIStreamAsnBinary: UTF8String data for VisibleString member <path>,
+/// ASN.1 specification may need an update` and a line feed. NCBI posts it once per process.
+pub fn utf8_string_warning(prefix: Option<&str>, path: &str) -> Vec<u8> {
+    let prefix = prefix.map_or_else(String::new, |prefix| format!("[{prefix}] "));
+    format!(
+        "Warning: (803.10) {prefix}CObjectIStreamAsnBinary: UTF8String data for VisibleString \
+         member {path}, ASN.1 specification may need an update\n"
+    )
+    .into_bytes()
 }
 
 /// Blast_def_line_.cpp:91-103: every member has a set flag; `seqid` is the one mandatory.

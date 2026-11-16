@@ -218,6 +218,17 @@ const CASES: &[Case] = &[
     ("T526", None, false, &["-db", "../db_search/t5/phd_extra", "-entry", "all"], 1),
     ("T527", None, false, &["-db", "../db_search/t5/phd_seqid", "-entry", "all", "-outfmt", "%o %t"], 1),
     ("T528", None, false, &["-db", "../db_search/t5/nhd_cut", "-entry", "all", "-outfmt", "%o %t"], 1),
+    // Fix 1 of line RG item T5d: header records that NCBI reads (`make_t5.py --header-only utf8
+    // utf8id long longx`): a UTF8String where a VisibleString is expected, read as the
+    // VisibleString with `Warning: (803.10) [blastdbcmd] CObjectIStreamAsnBinary: UTF8String data
+    // for VisibleString member ...` once, before the record's text; a member tag in the long form,
+    // read with no message, or of no member (NCBI's `unexpected member: [32]`). Frozen from NCBI
+    // BLAST+ 2.17.0 blastdbcmd, 2026-11-17.
+    ("T529", None, false, &["-db", "../db_search/t5/phd_utf8", "-entry", "all", "-outfmt", "%o %t"], 0),
+    ("T530", None, false, &["-db", "../db_search/t5/nhd_utf8", "-entry", "all"], 0),
+    ("T531", None, false, &["-db", "../db_search/t5/phd_utf8id", "-entry", "all", "-outfmt", "%o %a %t"], 0),
+    ("T532", None, false, &["-db", "../db_search/t5/phd_long", "-entry", "all", "-outfmt", "%o %t"], 0),
+    ("T533", None, false, &["-db", "../db_search/t5/phd_longx", "-entry", "all", "-outfmt", "%o %t"], 1),
 ];
 
 /// The probe's cases that LOSAT refuses (one line naming LOSAT's BLASTDBCMD, exit status 1,

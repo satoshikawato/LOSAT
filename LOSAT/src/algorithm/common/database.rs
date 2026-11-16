@@ -428,7 +428,29 @@ pub(crate) fn database_error_of(error: &SeqDbError, program: &str) -> anyhow::Er
     //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
     //     }                                                                       \
     // ```
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247
+    // ```c++
+    //     catch (const CIOException& e) {                                         \
+    //         if (e.GetErrCode() == CIOException::eFlush) {                       \
+    //             LOG_POST(Error << "BLAST failed to write output: " << e.GetMsg());\
+    //             exit_code = BLAST_OUTPUT_ERROR;                                 \
+    //         }                                                                   \
+    //     }                                                                       \
+    // ```
+    // A header record that ends before NCBI's read of it enters the set's elements throws the
+    // `CEofException` that `HandleEOF` rethrows (`NCBI_RETHROW_SAME`, objistr.cpp:604): a
+    // `CIOException` whose `GetErrCode()` is `eInvalid` (a derived class, ncbiexpt.hpp), which
+    // this branch takes before the `CException` one and posts nothing: the run ends there with exit
+    // status 0 (NCBI 2.17.0, probe RG-T5d fix 1 le3, le7, le8: after the outfmt 0 prolog and the
+    // reports of the batches before).
     if let Some(exception) = error.ncbi_exception() {
+        if exception.is_class("CEofException") {
+            return NativeError {
+                exit: 0,
+                message: String::new(),
+            }
+            .into();
+        }
         return NativeError::exception(exception).into();
     }
     match error.ncbi_message() {
@@ -732,6 +754,76 @@ impl std::error::Error for PreliminaryReadError {}
 pub(crate) struct HeaderReadError {
     pub(crate) query: usize,
     pub(crate) error: anyhow::Error,
+    /// The first UTF8String that the reads before it (in NCBI's order), or the failed read
+    /// itself before its failure, took for a VisibleString (`HeaderReader::first_utf8`): NCBI
+    /// posted its warning before the error (`Utf8Read::post`).
+    pub(crate) utf8: Option<Utf8Read>,
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:304-309
+// ```c++
+//             if ( PeekTagByte() == alt_tag ) {
+//                 // optionally issue a warning
+//                 if ( sx_ReadAny->Get() == 1 ) {
+//                     ERR_POST_X_ONCE(10, Warning<<
+//                                     "CObjectIStreamAsnBinary: UTF8String data for VisibleString member "<<GetStackTraceASN()<<", ASN.1 specification may need an update");
+//                 }
+// ```
+/// NCBI's first read, in a run of reported sequences' headers (`HeaderReader`), of a record that
+/// holds a UTF8String where a VisibleString is expected: the query whose hit list reached it
+/// (numbered as `HeaderReadError::query`) and the member NCBI's warning names
+/// (`seqid::ber::utf8_string_path`). NCBI reads the headers of a batch's final hit lists when
+/// its traceback's results become Seq-aligns (`read_titles` of each program), so it posts the
+/// warning there, once per process: after the batch's reader messages and the posts of its
+/// search strategy request, before anything the batch writes after its search (`post`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Utf8Read {
+    pub(crate) query: usize,
+    pub(crate) path: String,
+}
+
+impl Utf8Read {
+    /// NCBI's warning of this read, with the post prefix `program` (the lower-case program
+    /// name, `[blastp]`), where the run of `db` has not posted it (`SeqDb::take_utf8_post`):
+    /// the posts that a program writes there (`Posts::write` makes it a message of a BLAST
+    /// archive), `None` once posted.
+    pub(crate) fn post(&self, db: &SeqDb, program: &str) -> Option<crate::report::diag_log::Posts> {
+        db.take_utf8_post().then(|| {
+            crate::report::diag_log::Posts::of_lines(crate::seqid::ber::utf8_string_warning(
+                Some(program),
+                &self.path,
+            ))
+        })
+    }
+
+    /// `post` of the read `read`, where its query is one of `queries` (the batch that reaches
+    /// it).
+    pub(crate) fn post_in(
+        read: Option<&Utf8Read>,
+        queries: std::ops::Range<usize>,
+        db: &SeqDb,
+        program: &str,
+    ) -> Option<crate::report::diag_log::Posts> {
+        read.filter(|read| queries.contains(&read.query))
+            .and_then(|read| read.post(db, program))
+    }
+}
+
+impl HeaderReadError {
+    /// `error` of a batch that fails after NCBI's reads of its Seq-aligns' headers (its
+    /// prefetch), with `read`, the first of those reads that met a UTF8String (`first_utf8`),
+    /// where it is a `HeaderReadError` without one: NCBI posted its warning before the failure.
+    pub(crate) fn after_reads(error: anyhow::Error, read: Option<&Utf8Read>) -> anyhow::Error {
+        match error.downcast::<HeaderReadError>() {
+            Ok(mut failure) => {
+                if failure.utf8.is_none() {
+                    failure.utf8 = read.cloned();
+                }
+                anyhow::Error::new(failure)
+            }
+            Err(error) => error,
+        }
+    }
 }
 
 impl std::fmt::Display for HeaderReadError {
@@ -891,7 +983,7 @@ pub(crate) fn stored_title(
     query: usize,
     program: &str,
 ) -> Result<StoredTitle> {
-    let mut deflines = deflines.map_err(|error| header_read_error(error, query, program))?;
+    let mut deflines = deflines.map_err(|error| header_read_error(error, query, program, None))?;
     // makeblastdb without -parse_seqids writes one definition line per sequence; NCBI
     // shows the others of a sequence as ` >id title` after the first.
     if deflines.len() != 1 {
@@ -934,11 +1026,17 @@ pub(crate) fn keep_source(
 /// reaches it: NCBI's own (a `CSeqDBException`, `SeqDbError::ncbi_message`, or the
 /// `CSerialException` of its read of the record, `SeqDbError::ncbi_exception`) is a
 /// `HeaderReadError` that names the query; LOSAT's refusals are errors of their own.
-fn header_read_error(error: SeqDbError, query: usize, program: &str) -> anyhow::Error {
+fn header_read_error(
+    error: SeqDbError,
+    query: usize,
+    program: &str,
+    utf8: Option<&Utf8Read>,
+) -> anyhow::Error {
     if error.ncbi_message().is_some() || error.ncbi_exception().is_some() {
         anyhow::Error::new(HeaderReadError {
             query,
             error: database_error(error, program),
+            utf8: utf8.cloned(),
         })
     } else {
         database_error(error, program)
@@ -1131,6 +1229,9 @@ impl<'a> SeqAligned<'a> {
 /// (`SeqDb::seqid_lookup`), made at the first of them and kept for the reader's other reads.
 pub(crate) struct HeaderReader<'a> {
     db: &'a SeqDb,
+    /// The first of its reads that met a UTF8String where a VisibleString is expected
+    /// (`first_utf8`).
+    utf8: std::cell::OnceCell<Utf8Read>,
     lookup: std::cell::OnceCell<crate::seqdb::lookup::SeqidLookup<'a>>,
     /// Whether NCBI's formatters may read some reported sequences one by one
     /// (`prefetch_may_be_off`), where the weak matches of its scope are looked for
@@ -1509,11 +1610,32 @@ impl<'a> HeaderReader<'a> {
     pub(crate) fn new(db: &'a SeqDb) -> Self {
         Self {
             db,
+            utf8: std::cell::OnceCell::new(),
             lookup: std::cell::OnceCell::new(),
             prefetch_off: prefetch_may_be_off(),
             taxdb: std::cell::OnceCell::new(),
             source_names: Default::default(),
             lookup_texts: std::cell::OnceCell::new(),
+        }
+    }
+
+    /// The first of the reader's reads (`read_header`), in their order, of a record that holds a
+    /// UTF8String where a VisibleString is expected, with the query that read it (`Utf8Read`):
+    /// where the reads are NCBI's, in NCBI's order (the programs' `read_titles`), NCBI's
+    /// warning names it.
+    pub(crate) fn first_utf8(&self) -> Option<&Utf8Read> {
+        self.utf8.get()
+    }
+
+    /// Notes the read of the sequence `ordinal` by query `query`, whose record holds a
+    /// UTF8String or whose read failed (`first_utf8`), where it is the first.
+    #[cold]
+    #[inline(never)]
+    fn note_utf8(&self, ordinal: u32, query: usize) {
+        if self.utf8.get().is_none() && !self.db.utf8_posted() {
+            if let Some(path) = self.db.utf8_string_path(ordinal) {
+                let _ = self.utf8.set(Utf8Read { query, path });
+            }
         }
     }
 
@@ -2147,6 +2269,17 @@ fn reported_header(
     program: &str,
 ) -> Result<ReportedHeader> {
     let db = headers.db;
+    match &header {
+        Ok(crate::seqdb::SequenceHeader::Parsed(set)) if set.utf8 => {
+            headers.note_utf8(ordinal, query)
+        }
+        Ok(crate::seqdb::SequenceHeader::Ordinal(deflines))
+            if deflines.first().is_some_and(|defline| defline.utf8) =>
+        {
+            headers.note_utf8(ordinal, query)
+        }
+        _ => {}
+    }
     match header {
         Ok(crate::seqdb::SequenceHeader::Parsed(set)) => {
             crate::report::db_subject::ParsedSubject::new(set)
@@ -2171,7 +2304,16 @@ fn reported_header(
             stored.source = headers.stored_source(&stored.title, stored.taxid, ordinal);
             Ok(ReportedHeader::Stored(stored))
         }
-        Err(error) => Err(header_read_error(error, query, program)),
+        Err(error) => {
+            // NCBI's read posted the warning of a UTF8String before it failed.
+            headers.note_utf8(ordinal, query);
+            Err(header_read_error(
+                error,
+                query,
+                program,
+                headers.first_utf8(),
+            ))
+        }
     }
 }
 
@@ -5362,6 +5504,7 @@ fn prefetch_stop(
     );
     match texts {
         Ok(text) if text.is_empty() => anyhow::Error::new(HeaderReadError {
+            utf8: None,
             query,
             error: NativeError {
                 exit: 2,
@@ -7587,5 +7730,23 @@ mod taxdb_prepass_tests {
         let db = database("sprot", Some(&variant("high_bytes_utf8")));
         assert!(db.taxdb_found());
         assert!(!taxdb_may_refuse(&db, true));
+    }
+
+    /// NCBI's `CATCH_ALL` takes the `CEofException` of a record that ends before its read enters
+    /// the set's elements as a `CIOException` other than `eFlush`: no post, exit status 0 (RG-T5d
+    /// fix 1, probe le8); the `CSerialException` of a record cut inside is `Error: what()`, 255.
+    #[test]
+    fn a_header_record_cut_before_its_elements_ends_the_search_with_exit_status_0() {
+        let path = std::path::Path::new("t.phr");
+        let native = |record: &[u8]| {
+            let error = crate::seqdb::header::decode_full(record, path).unwrap_err();
+            let error = database_error(error, "BLASTP");
+            let native = error.downcast_ref::<NativeError>().expect("NCBI's error");
+            (native.exit, native.message.is_empty())
+        };
+        assert_eq!(native(&[0x30]), (0, true));
+        assert_eq!(native(&[0x3f]), (0, true));
+        assert_eq!(native(&[0x30, 0x80]), (255, false));
+        assert_eq!(native(&[0x30, 0x80, 0x30, 0x80, 0xbf]), (255, false));
     }
 }

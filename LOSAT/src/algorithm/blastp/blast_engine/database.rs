@@ -30,7 +30,9 @@ use anyhow::{bail, Context, Result};
 use rayon::prelude::*;
 
 use crate::algorithm::common::database as shared;
-pub(super) use crate::algorithm::common::database::{HeaderReadError, PreliminaryReadError};
+pub(super) use crate::algorithm::common::database::{
+    HeaderReadError, PreliminaryReadError, Utf8Read,
+};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 #[cfg(all(test, unix))]
@@ -1031,6 +1033,7 @@ impl ListedSubjects {
             sources,
             parsed: parsed.by_rank,
             program: database.program,
+            utf8: headers.first_utf8().cloned(),
         })
     }
 }
@@ -1173,6 +1176,10 @@ pub(super) struct ListedTitles<'a> {
     pub(super) parsed: Vec<Option<Arc<ParsedSubject>>>,
     /// The program that LOSAT's refusals name (`BlastpDatabase::program`).
     program: &'static str,
+    /// The first read of the reads above, in NCBI's order, of a record that holds a UTF8String
+    /// where a VisibleString is expected (`shared::HeaderReader::first_utf8`): NCBI posts its
+    /// warning there, once per process (`shared::Utf8Read::post`).
+    pub(super) utf8: Option<shared::Utf8Read>,
 }
 
 /// The reported subjects with parsed Seq-ids of `ListedSubjects::read_titles`, by rank.
@@ -2293,9 +2300,13 @@ pub(super) fn x_titles_allow_blocks(
     >|
      -> bool {
         match deflines {
+            // A record with a UTF8String where a VisibleString is expected: the search of all
+            // queries writes NCBI's warning at its first read (`shared::Utf8Read`), which a block
+            // would write while the blocks before it are searched.
             Ok(deflines) => {
                 deflines.len() == 1
                     && deflines[0].replaced_title_bytes == 0
+                    && !deflines[0].utf8
                     && if pairwise {
                         // The check of the search of all queries (`ListedTitles::check_shown_titles`),
                         // which the name of an empty title's source does not change
@@ -2416,7 +2427,10 @@ pub(super) fn x_titles_read_allow_blocks(
     >|
      -> bool {
         match deflines {
-            Ok(deflines) => deflines.len() == 1 && deflines[0].replaced_title_bytes == 0,
+            // A UTF8String record as in `x_titles_allow_blocks`.
+            Ok(deflines) => {
+                deflines.len() == 1 && deflines[0].replaced_title_bytes == 0 && !deflines[0].utf8
+            }
             Err(_) => false,
         }
     };
@@ -2497,7 +2511,10 @@ pub(super) fn x_titles_taxids_allow_blocks(
         db.visit_deflines(*range, |_ordinal, deflines| match deflines {
             // The taxid `read_reported_taxonomy` takes of a sequence: its first definition
             // line's.
-            Ok(deflines) => deflines.len() == 1 && deflines[0].replaced_title_bytes == 0,
+            // A UTF8String record as in `x_titles_allow_blocks`.
+            Ok(deflines) => {
+                deflines.len() == 1 && deflines[0].replaced_title_bytes == 0 && !deflines[0].utf8
+            }
             Err(_) => false,
         })
     };
@@ -2798,21 +2815,36 @@ mod tests {
                 "{program}"
             );
         }
-        // A UTF8String title, which NCBI's reader takes with a warning.
+        // A UTF8String title, which NCBI's reader takes with its warning once per process
+        // (RG-T5d fix 1): the database opens, the header reads, and the reader names the member
+        // of the warning, which the run posts once.
         let mut utf8 = header;
         assert_eq!(utf8[6], 0x1a);
         utf8[6] = 0x0c;
         std::fs::write(dir.join("b.phr"), &utf8).unwrap();
         for program in ["BLASTP", "PSIBLAST"] {
-            let Err(error) = BlastpDatabase::open(&name, &settings, program) else {
-                panic!("a first header that LOSAT does not read opened ({program})")
-            };
-            assert!(
-                format!("{error:#}").ends_with(&format!(
-                    "b.phr: header record, byte 6: a UTF8String where a VisibleString is expected, which NCBI's reader takes with a warning; this database is not supported by LOSAT's {program}"
-                )),
-                "{error:#}"
+            let database = BlastpDatabase::open(&name, &settings, program)
+                .unwrap_or_else(|error| panic!("{program}: {error:#}"));
+            let headers = shared::HeaderReader::new(&database.db);
+            shared::read_header(&headers, 0, 3, program).unwrap();
+            let read = headers.first_utf8().expect("the UTF8String read").clone();
+            assert_eq!(
+                read,
+                shared::Utf8Read {
+                    query: 3,
+                    path: "Blast-def-line-set.E.title".to_string()
+                }
             );
+            let posts = read.post(&database.db, "blastp").expect("the first post");
+            assert_eq!(
+                posts.text(),
+                b"Warning: (803.10) [blastp] CObjectIStreamAsnBinary: UTF8String data for VisibleString member Blast-def-line-set.E.title, ASN.1 specification may need an update\n"
+            );
+            assert!(read.post(&database.db, "blastp").is_none());
+            // Once posted, a reader names no member again.
+            let again = shared::HeaderReader::new(&database.db);
+            shared::read_header(&again, 0, 0, program).unwrap();
+            assert!(again.first_utf8().is_none());
         }
         std::fs::remove_dir_all(&dir).unwrap();
     }

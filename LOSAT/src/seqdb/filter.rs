@@ -4127,10 +4127,12 @@ mod tests {
         let rule = DeflineRule::Taxids([5].into_iter().collect());
         let set = DeflineSet {
             deflines: vec![defline(Some(1), None), defline(Some(5), None)],
+            utf8: false,
         };
         assert_eq!(rule.keep_mask(&set), Some(vec![false, true]));
         let none = DeflineSet {
             deflines: vec![defline(Some(1), None), defline(Some(2), None)],
+            utf8: false,
         };
         assert_eq!(rule.keep_mask(&none), Some(vec![true, true]));
         let mut lines = vec![1, 2, 3];

@@ -870,12 +870,15 @@ pub(super) fn read_shown_residues(
 pub(super) fn refuse_prefetch_environment(
     setup: &ReportSetup<'_>,
     outputs: &mut ReportOutputs<'_>,
+    utf8_read: Option<&crate::algorithm::common::database::Utf8Read>,
 ) -> Result<()> {
     let ReportSetup {
         args,
         reports,
         subject_source,
         subject_label,
+        query_batches,
+        database,
         ..
     } = *setup;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:280-285
@@ -908,6 +911,17 @@ pub(super) fn refuse_prefetch_environment(
         // The posts of the bytes replaced in that request follow the batch's reader messages
         // (`SaveSearchStrategy` after `GetNextSeqBatch`, blastp_app.cpp:259-262).
         write_request_posts(args, &mut *outputs.diagnostics)?;
+        // NCBI's warning of a UTF8String header that the batch's Seq-aligns read, before.
+        if let (Some(database), Some(batch)) = (database, query_batches.first()) {
+            if let Some(posts) = crate::algorithm::common::database::Utf8Read::post_in(
+                utf8_read,
+                batch.searched.clone(),
+                database.seqdb(),
+                args.app.ncbi_name(),
+            ) {
+                posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+            }
+        }
         return Err(error);
     }
     Ok(())

@@ -78,6 +78,16 @@ pub(crate) struct BlastxDatabase {
 }
 
 impl BlastxDatabase {
+    /// NCBI's warning of its first read of a UTF8String header (`read`), where the run has not
+    /// posted it (`shared::Utf8Read::post`, with the program's prefix: `[blastx]`,
+    /// `[rpstblastn]`).
+    pub(crate) fn utf8_post(
+        &self,
+        read: Option<&shared::Utf8Read>,
+    ) -> Option<crate::report::diag_log::Posts> {
+        read?.post(&self.db, &self.program.to_ascii_lowercase())
+    }
+
     /// `-show_gis` for the subjects of the reports (`ParsedSubject::showing_gis`).
     pub(crate) fn showing_gis(mut self, show_gis: bool) -> Self {
         self.db.set_reports_show_gis(show_gis);
@@ -355,6 +365,9 @@ pub(crate) struct BatchTitles {
     listed: BTreeMap<usize, Option<Arc<[u8]>>>,
     parsed: BTreeMap<usize, Arc<ParsedSubject>>,
     sources: BTreeMap<usize, crate::report::defline::SourceTaxname>,
+    /// The first read of a record with a UTF8String where a VisibleString is expected
+    /// (`shared::HeaderReader::first_utf8`): NCBI posts its warning there (`utf8_post`).
+    pub(crate) utf8: Option<shared::Utf8Read>,
 }
 
 impl ReportedSubjects {
@@ -463,6 +476,7 @@ impl ReportedSubjects {
             listed,
             parsed,
             sources,
+            utf8: headers.first_utf8().cloned(),
         })
     }
 
@@ -519,6 +533,7 @@ impl ReportedSubjects {
             listed,
             parsed,
             mut sources,
+            utf8: _,
         } = titles;
         // A batch whose prefetch looks up a Seq-align id whose lookup fails on a file stops the
         // run there (`shared::batch_prefetch`), before any of its reports: none of their checks

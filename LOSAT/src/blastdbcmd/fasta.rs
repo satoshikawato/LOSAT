@@ -311,6 +311,7 @@ fn target_set(set: &DeflineSet, target_id: &ParsedSeqId) -> Result<DeflineSet, S
     };
     Ok(DeflineSet {
         deflines: vec![set.deflines[index].clone()],
+        utf8: set.utf8,
     })
 }
 
@@ -703,6 +704,7 @@ mod tests {
                 defline(text_ids("emb|X00001.2|"), None),
                 defline(vec![], Some("no ids")),
             ],
+            utf8: false,
         };
         assert_eq!(
             set.bioseq_title(),
@@ -734,6 +736,7 @@ mod tests {
         let header = |ids: Vec<ParsedSeqId>, range, minus| {
             let set = DeflineSet {
                 deflines: vec![defline(ids, Some("title"))],
+                utf8: false,
             };
             let config = Config {
                 strand_minus: minus,

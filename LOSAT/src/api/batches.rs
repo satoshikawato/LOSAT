@@ -34,8 +34,8 @@ use super::local_blast::{
 };
 use super::parts::Parts;
 use super::run::{
-    check_inputs, query_range_of, run_local, searched_queries, CountingWriter, HspRecord,
-    QueryRounds, QueryStats,
+    check_inputs, ends_without_post, query_range_of, run_local, searched_queries, CountingWriter,
+    HspRecord, QueryRounds, QueryStats,
 };
 use super::search::Search;
 use super::start::{CallStart, RunLog};
@@ -337,8 +337,10 @@ impl Batches<'_> {
         start..if end > start { end } else { self.lengths.len() }
     }
 
-    /// Searches the batch `range`, as the command line's loop searches it.
-    fn search_batch(&mut self, range: Range<usize>) -> Result<Batch, Error> {
+    /// Searches the batch `range`, as the command line's loop searches it. `None`: the run ended
+    /// in the batch without a post and with exit status 0 (`run::run_ended`), where NCBI's loop
+    /// ends: no batch is searched after it.
+    fn search_batch(&mut self, range: Range<usize>) -> Result<Option<Batch>, Error> {
         let inputs = match self.inputs.pssm {
             Some(_) => self.inputs,
             None => Inputs {
@@ -414,6 +416,9 @@ impl Batches<'_> {
         if !self.searched_one {
             bytes.splice(0..0, std::mem::take(&mut self.start_messages));
         }
+        if result.as_ref().is_err_and(ends_without_post) {
+            return Ok(None);
+        }
         result.map_err(|error| self.log.failed(&error))?;
         let finished = observer
             .parts
@@ -438,13 +443,13 @@ impl Batches<'_> {
         {
             sizes.searched(extensions);
         }
-        Ok(Batch {
+        Ok(Some(Batch {
             query_indices: range,
             hsps,
             query_stats: finished.query_stats,
             rounds: finished.rounds,
             diagnostics: bytes,
-        })
+        }))
     }
 }
 
@@ -475,8 +480,8 @@ impl Iterator for Batches<'_> {
         self.next_query = range.end;
         let batch = self.search_batch(range);
         self.searched_one = true;
-        self.finished = batch.is_err();
-        Some(batch)
+        self.finished = !matches!(batch, Ok(Some(_)));
+        batch.transpose()
     }
 }
 

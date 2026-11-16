@@ -1846,6 +1846,9 @@ fn search(
         // sequence file failed with its error.
         let mut titles = super::database::DatabaseTitles::new();
         let mut failed: Option<(std::ops::Range<usize>, anyhow::Error)> = None;
+        // NCBI's first read, in a batch's Seq-aligns, of a header with a UTF8String where a
+        // VisibleString is expected: the batch's first query and the read (`query_posts` below).
+        let mut utf8_read: Option<(usize, crate::algorithm::common::database::Utf8Read)> = None;
         // NCBI's fetches with `check_oid_exclusion` of the redo and the traceback, one check for
         // the search's batches (`database::fetch_excluded`).
         let fetch_excluded = database.and_then(super::database::fetch_excluded);
@@ -2086,16 +2089,28 @@ fn search(
             // cannot read fails this batch, after the reports of the batches before.
             if let Some(database) = database {
                 super::database::drop_unaligned(database, &mut batch_results);
-                if let Err(error) =
-                    super::database::read_titles(database, &batch_results, range.start, &mut titles)
-                {
-                    match error.downcast::<HeaderReadError>() {
+                let read = super::database::read_titles(
+                    database,
+                    &batch_results,
+                    range.start,
+                    &mut titles,
+                );
+                match read {
+                    Ok(read) => {
+                        if utf8_read.is_none() {
+                            utf8_read = read.map(|read| (range.start, read));
+                        }
+                    }
+                    Err(error) => match error.downcast::<HeaderReadError>() {
                         Ok(failure) => {
+                            if utf8_read.is_none() {
+                                utf8_read = failure.utf8.map(|read| (range.start, read));
+                            }
                             failed = Some((range, failure.error));
                             break;
                         }
                         Err(error) => return Err(error),
-                    }
+                    },
                 }
             }
             // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:294-299
@@ -2616,12 +2631,21 @@ fn search(
         // The posts before each query's report: NCBI's posts of the bytes replaced in the search
         // strategy request of each reported batch follow the reader's messages of the batch, in
         // its first query (`query_warnings::query_posts`).
+        // NCBI's warning of its first read of a UTF8String header follows them in the first
+        // query of the batch that read it, a reported one (`utf8_read`; a failed batch's below).
+        let header_read = match (&utf8_read, database) {
+            (Some((first, read)), Some(database)) if *first < queries.len() => {
+                database.utf8_post(read).map(|posts| (*first, posts))
+            }
+            _ => None,
+        };
         let query_posts = crate::report::query_warnings::query_posts(
             query_warning_lines,
             args.strategy
                 .as_ref()
                 .map_or_else(Vec::new, |strategy| strategy.take_posts(queries.len())),
             |query| batches.warnings[query].len(),
+            header_read,
         );
         // Diagnostic (LOSAT_TIMING): the report for the common line (utils/xtiming.rs); it is
         // written after all batches are searched. No NCBI counterpart.
@@ -2692,11 +2716,20 @@ fn search(
         // The failed batch's reading messages, NCBI's posts of the bytes replaced in its search
         // strategy request (written before its search), then its error.
         if let Some((range, error)) = failed {
-            for warnings in &batches.warnings[range] {
+            for warnings in &batches.warnings[range.clone()] {
                 outputs.diagnostics.write_all(warnings)?;
             }
             if let Some(strategy) = args.strategy.as_ref() {
                 strategy.write_posts(&mut *outputs.diagnostics, args.archive.as_ref())?;
+            }
+            // NCBI's warning of its first read of a UTF8String header, where the failed batch's
+            // Seq-aligns made it before the failure.
+            if let (Some((first, read)), Some(database)) = (&utf8_read, database) {
+                if *first == range.start {
+                    if let Some(posts) = database.utf8_post(read) {
+                        posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+                    }
+                }
             }
             return Err(error);
         }

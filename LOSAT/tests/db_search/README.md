@@ -597,7 +597,14 @@ tag a VisibleString), `extra` (data where the taxid's end is expected), `prim` (
 (the title's tag an OctetString), `cut` (the record without its last four bytes), `seqid` (`-parse_seqids`, `lcl|hd<n>`: the tag of
 the local id's string); `title_z` edits OID 0, which `hd_q1.*` never reports. NCBI writes its exception after the outfmt 0
 prolog and the reports of the batches before (`BATCH_SIZE=1` rows); `title_z` exits 0. Survey:
-`remaining-gaps-20261112/T/SURVEY_T5d.md`.
+`remaining-gaps-20261112/T/SURVEY_T5d.md`. Records that NCBI reads (fix 1 of item T5d, `make_t5.py NCBI_BIN --header-only utf8
+utf8id long longx`): `utf8` (the title a UTF8String; `utf8_z` at OID 0), `utf8id` (`-parse_seqids`, the local id's string a
+UTF8String), read with NCBI's warning `(803.10) ... UTF8String data for VisibleString member <member>` once per run, where the
+Seq-aligns of a batch first read the record (the `BATCH_SIZE=1` rows: in the second batch; `utf8_z` with `hd_q1.*`: none);
+`long` (the title's member tag in the long form, `bf 00`), read with no message; `longx` (`bf 20`), NCBI's unexpected member. `eof`
+(the record of OID 1 cut after its first byte): NCBI's `CEofException`, which the programs' `CATCH_ALL` takes as a
+`CIOException` without a post, so the run ends there with exit status 0.
+Probe: `remaining-gaps-20261112/T/fix1_t5d.md`.
 
 A title of punctuation without parsed Seq-ids (line DBID tabfields; rows `db.id.tf.*.punct.*`): `make_ids.py
 --tabfields-only` writes `ids/ppunct_np` (version 4, without `-parse_seqids`) from `ids/ppunct.faa`, whose first title

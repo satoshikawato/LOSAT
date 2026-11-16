@@ -40,6 +40,11 @@ pub(super) enum Stop {
     NcbiBytes(Vec<u8>),
     /// LOSAT's refusal: a diagnostic line, exit status 1.
     Refused(String),
+    /// Not an end: NCBI's warning of a UTF8String that its read of a record took for a
+    /// VisibleString (the member it names, `seqid::ber::utf8_string_path`), posted at its first
+    /// such read (`Source::deflines`), before the record's text. `Run::write` posts it and
+    /// writes the record again; the warning is posted once.
+    Utf8Post(String),
     /// A write found the pipe closed where SIGPIPE ends NCBI's process (`Ostream::closed`):
     /// the retrieval ends at once, exit status 0, no message. Any other failed write is
     /// dropped by the `Ostream` and the retrieval goes on.
@@ -122,6 +127,27 @@ impl<'a> Source<'a> {
         }
     }
 
+    /// NCBI's warning of the UTF8String that its read of the header at `at` takes for a
+    /// VisibleString (`Stop::Utf8Post` of the member, `seqid::ber::utf8_string_path`), where
+    /// the run has not posted it (`SeqDb::take_utf8_post`: once per process).
+    #[cold]
+    #[inline(never)]
+    fn utf8_post(&self, at: SeqLocation) -> Option<Stop> {
+        if self.db.utf8_posted() {
+            return None;
+        }
+        let path = self.db.utf8_string_path_at(at)?;
+        self.db.take_utf8_post().then_some(Stop::Utf8Post(path))
+    }
+
+    /// The stop of a read of the header at `at` that failed with `error`: NCBI's warning first
+    /// where its read took a UTF8String before the failure (`utf8_post`), else the error.
+    #[cold]
+    #[inline(never)]
+    fn failed_read(&self, at: SeqLocation, error: crate::seqdb::SeqDbError) -> Stop {
+        self.utf8_post(at).unwrap_or_else(|| error.into())
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:411-425
     // ```c++
     // int CSeqDBImpl::x_GetSeqLength(int oid) const
@@ -158,9 +184,20 @@ impl<'a> Source<'a> {
         }
     }
 
-    /// `GetHdr(oid)`: the definition lines with their Seq-ids.
+    /// `GetHdr(oid)`: the definition lines with their Seq-ids. The first read of a record with
+    /// a UTF8String where a VisibleString is expected gives NCBI's warning first (`Stop::Utf8Post`),
+    /// also where the read then fails.
     pub fn deflines(&self, oid: u32) -> Result<DeflineSet, Stop> {
-        let set = self.db.defline_set_at(self.at(oid)?)?;
+        let at = self.at(oid)?;
+        let set = self
+            .db
+            .defline_set_at(at)
+            .map_err(|error| self.failed_read(at, error))?;
+        if set.utf8 {
+            if let Some(post) = self.utf8_post(at) {
+                return Err(post);
+            }
+        }
         if set
             .deflines
             .iter()
@@ -382,6 +419,12 @@ pub(super) fn process(
         }
         Err(Stop::Refused(reason)) => diag.refuse(&reason),
         Err(Stop::ClosedPipe) => 0,
+        // `Run::write` posts it and writes the record again: it ends no retrieval.
+        Err(Stop::Utf8Post(path)) => {
+            debug_assert!(false, "a post that no write took");
+            diag.post_utf8_string(&path);
+            0
+        }
     }
 }
 
@@ -1103,6 +1146,30 @@ impl Run<'_, '_, '_> {
         if self.formatter.reads_deflines() {
             self.source.db.set_up_oid_list();
         }
+        match self
+            .formatter
+            .write(self.source, oid, config, target, self.out)
+        {
+            Err(Stop::Utf8Post(path)) => self.write_after_utf8_post(&path, oid, config, target),
+            written => written,
+        }
+    }
+
+    /// `write` of the sequence `oid` whose first read posts NCBI's warning of a UTF8String
+    /// (`Stop::Utf8Post` of the member `path`), before the record's text (the formatters read the
+    /// definition lines before they write): after the output so far, as `cerr`'s tie flushes it;
+    /// then the record again, which posts nothing (once per process).
+    #[cold]
+    #[inline(never)]
+    fn write_after_utf8_post(
+        &mut self,
+        path: &str,
+        oid: u32,
+        config: &Config,
+        target: Option<&str>,
+    ) -> Result<(), Stop> {
+        self.out.flush().map_err(Stop::write)?;
+        self.diag.post_utf8_string(path);
         self.formatter
             .write(self.source, oid, config, target, self.out)
     }

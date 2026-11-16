@@ -56,6 +56,15 @@ pub(super) struct TblastnDatabase {
 }
 
 impl TblastnDatabase {
+    /// NCBI's warning of its first read of a UTF8String header (`read`), where the run has not
+    /// posted it (`shared::Utf8Read::post`, prefix `[tblastn]`).
+    pub(super) fn utf8_post(
+        &self,
+        read: &shared::Utf8Read,
+    ) -> Option<crate::report::diag_log::Posts> {
+        read.post(&self.db, "tblastn")
+    }
+
     /// The OIDs of the database's ordinal ids, which name the reported sequences without
     /// parsed Seq-ids (`gnl|BL_ORD_ID|n`).
     pub(super) fn oid_map(&self) -> crate::seqdb::OidMap<'_> {
@@ -470,13 +479,15 @@ pub(super) fn drop_unaligned(database: &TblastnDatabase, hitlists: &mut [KappaRe
 /// query batch name (their subject index is the ordinal id), in NCBI's order (query by query,
 /// in hit-list order) into `titles` (`common::database::read_header`); `first_query` is the
 /// index of the batch's first query. A reader error of NCBI's own is a `HeaderReadError` (it
-/// fails the batch); LOSAT's refusals are errors of their own.
+/// fails the batch); LOSAT's refusals are errors of their own. The first read of a record with a
+/// UTF8String where a VisibleString is expected (`shared::HeaderReader::first_utf8`) is returned:
+/// NCBI posts its warning there.
 pub(super) fn read_titles(
     database: &TblastnDatabase,
     hitlists: &[KappaResultHitList],
     first_query: usize,
     titles: &mut DatabaseTitles,
-) -> Result<()> {
+) -> Result<Option<shared::Utf8Read>> {
     let headers = shared::HeaderReader::new(&database.db);
     for (index, hitlist) in hitlists.iter().enumerate() {
         for list in hitlist.lists() {
@@ -488,7 +499,7 @@ pub(super) fn read_titles(
             titles.insert(ordinal, title);
         }
     }
-    Ok(())
+    Ok(headers.first_utf8().cloned())
 }
 
 /// What the XML2 and JSON formats show of a database sequence beyond its title: its

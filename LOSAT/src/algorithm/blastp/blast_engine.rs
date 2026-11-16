@@ -7741,6 +7741,7 @@ fn search(
             // after the requests of the batches before, which their search again releases with it
             // (`NextRequest`), or alone, before any output.
             let span = batches.searched_span(failure.query);
+            let failed_end = span.end;
             if searched_start > 0 {
                 // The first search looked the taxonomy up for the batches before (their
                 // prefetch and reports): the search again writes those texts again, from the
@@ -7765,6 +7766,18 @@ fn search(
                 .diagnostics
                 .write_all(&batches.warnings[searched_start])?;
             write_request_posts(&args, &mut *outputs.diagnostics)?;
+            // NCBI's warning of its first read of a UTF8String header, where the failed batch
+            // made it (before its failure; a batch before posted its own in its reports).
+            if let Some(posts) = database.and_then(|database: &database::BlastpDatabase| {
+                database::Utf8Read::post_in(
+                    failure.utf8.as_ref(),
+                    0..failed_end,
+                    database.seqdb(),
+                    args.app.ncbi_name(),
+                )
+            }) {
+                posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+            }
             Err(failure.error)
         })?;
     } else if batches.stop.is_some() {
@@ -13073,7 +13086,13 @@ fn run_call(
         }),
         _ => None,
     };
-    report_prep::refuse_prefetch_environment(&setup, outputs)?;
+    // NCBI's first read, in the Seq-aligns of the call's batches, of a header with a UTF8String
+    // where a VisibleString is expected: its warning comes before anything the batch writes after
+    // its search (`query_posts` below), and before an error of the batch's prefetch.
+    let utf8_read = listed_titles
+        .as_ref()
+        .and_then(|titles| titles.utf8.as_ref());
+    report_prep::refuse_prefetch_environment(&setup, outputs, utf8_read)?;
     if let (Some(titles), Some(scopes)) = (listed_titles.as_ref(), reports.query_scopes) {
         titles.refuse_ids_of_queries(&hit_lists, scopes)?;
     }
@@ -13313,7 +13332,8 @@ fn run_call(
         &prep,
         &mut query_warning_lines,
         &mut psiblast_pssms,
-    )?;
+    )
+    .map_err(|error| database::HeaderReadError::after_reads(error, utf8_read))?;
     report_prep::refuse_unreportable(&prep, &rows_of)?;
     // The subject IDs of the tabular formats, checked for the subjects with rows before any
     // format is written (`tabular_subject_ids`). EXPERIMENT (LOSAT_X_BPQBLOCK): the block
@@ -13537,12 +13557,24 @@ fn run_call(
     // strategy request of each of the call's batches follow the reader's messages of the batch
     // (after psiblast's warnings of the PSSM reads of the query before), in its first query
     // (`query_warnings::query_posts`).
+    // NCBI's warning of its first read of a UTF8String header follows them, in the first query of
+    // the batch whose Seq-aligns read it (`utf8_read`).
+    let header_read = utf8_read.and_then(|read| {
+        let batch = query_batches
+            .iter()
+            .find(|batch| batch.searched.contains(&read.query))?;
+        Some((
+            batch.searched.start,
+            read.post(database?.seqdb(), args.app.ncbi_name())?,
+        ))
+    });
     let mut query_posts = crate::report::query_warnings::query_posts(
         query_warning_lines,
         reports
             .call_requests
             .map_or_else(Vec::new, CallRequests::take_posts),
         |query| reports.reader_warnings.get(query).map_or(0, Vec::len),
+        header_read,
     );
     for (query, mut posts) in pssm_posts_before.into_iter().enumerate() {
         if let Some(after) = query_posts.get_mut(query).filter(|_| !posts.is_empty()) {

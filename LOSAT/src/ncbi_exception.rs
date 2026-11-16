@@ -231,6 +231,16 @@ impl NcbiException {
         self.site
     }
 
+    /// Whether the exception's class (the `C<class>` of `GetErrCodeString`'s `C<class>::e<code>`)
+    /// is `class`: the class that a `catch` of NCBI's matches first (`CEofException`, which
+    /// `NCBI_RETHROW_SAME` keeps).
+    pub fn is_class(&self, class: &str) -> bool {
+        self.site
+            .kind
+            .strip_prefix(class)
+            .is_some_and(|rest| rest.starts_with("::"))
+    }
+
     /// Whether LOSAT knows the place of every throw of the chain, which `what()` names (a
     /// [`ThrowSite::generated`] names none).
     pub fn places_known(&self) -> bool {

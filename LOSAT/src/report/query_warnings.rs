@@ -496,12 +496,20 @@ impl<'a> QueryWarnings<'a> {
 /// `lines`, in order; `StrategyExport::take_posts`). NCBI posts them when it writes the request,
 /// after it read the batch and before the batch's search: in the batch's first query, after the
 /// reader's messages of the batch (the first `reader(query)` bytes of its lines) and before the
-/// rest (the messages of the batch's prefetch, the query's own warnings).
+/// rest (the messages of the batch's prefetch, the query's own warnings). NCBI's posts of its
+/// first read of the reported sequences' headers (`header_read`: with the first query of the batch
+/// whose Seq-aligns read them, `common::database::Utf8Read`) come after the search, at the
+/// batch's first query after its request's posts and before the rest.
 pub fn query_posts(
     lines: Vec<Vec<u8>>,
-    requests: Vec<(usize, Posts)>,
+    mut requests: Vec<(usize, Posts)>,
     reader: impl Fn(usize) -> usize,
+    header_read: Option<(usize, Posts)>,
 ) -> Vec<Posts> {
+    if let Some((first, posts)) = header_read {
+        let at = requests.partition_point(|&(request, _)| request <= first);
+        requests.insert(at, (first, posts));
+    }
     let mut requests = requests.into_iter().peekable();
     let mut posts: Vec<Posts> = lines
         .into_iter()
@@ -1068,6 +1076,7 @@ mod tests {
             lines,
             vec![(0, post(b"P0\n")), (2, post(b"P2a\n")), (2, post(b"P2b\n"))],
             |query| reader[query],
+            None,
         );
         let texts: Vec<Vec<u8>> = posts.iter().map(Posts::text).collect();
         assert_eq!(
@@ -1084,8 +1093,27 @@ mod tests {
         whole.lines(b"T2\nW2\n");
         assert_eq!(posts[2], whole);
         // A request after the last query's lines keeps its posts after them.
-        let posts = query_posts(vec![b"W0\n".to_vec()], vec![(1, post(b"P1\n"))], |_| 0);
+        let posts = query_posts(
+            vec![b"W0\n".to_vec()],
+            vec![(1, post(b"P1\n"))],
+            |_| 0,
+            None,
+        );
         assert_eq!(posts[0].text(), b"W0\nP1\n");
+        // NCBI's first read of a UTF8String header (RG-T5d fix 1) after the request's posts of
+        // its batch, before the rest; a batch without a request has it after its reader messages.
+        let header = || Some((2, Posts::of_lines(b"U2\n".to_vec())));
+        let lines = || vec![b"R0\nW0\n".to_vec(), b"W1\n".to_vec(), b"R2\nT2\n".to_vec()];
+        let with = query_posts(
+            lines(),
+            vec![(0, post(b"P0\n")), (2, post(b"P2\n"))],
+            |q| reader[q],
+            header(),
+        );
+        assert_eq!(with[2].text(), b"R2\nP2\nU2\nT2\n");
+        let without = query_posts(lines(), Vec::new(), |q| reader[q], header());
+        assert_eq!(without[2].text(), b"R2\nU2\nT2\n");
+        assert_eq!(without[0].text(), b"R0\nW0\n");
     }
 
     #[test]

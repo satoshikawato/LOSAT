@@ -1,0 +1,2 @@
+Error: (CSerialException::eFormatError) byte 7: unexpected member: [32], should be one of: title[0] seqid[1] taxid[2] memberships[3] links[4] other-info[5]  ( at Blast-def-line-set.[].[])
+Error: (106.16) Application's execution failed (CSerialException::eFormatError) byte 7: unexpected member: [32], should be one of: title[0] seqid[1] taxid[2] memberships[3] links[4] other-info[5]  ( at Blast-def-line-set.[].[])

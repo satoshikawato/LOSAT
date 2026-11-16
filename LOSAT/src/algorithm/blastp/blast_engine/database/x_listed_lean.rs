@@ -99,6 +99,7 @@ impl ListedSubjects {
             sources,
             parsed: parsed.by_rank,
             program: database.program,
+            utf8: headers.first_utf8().cloned(),
         })
     }
 }

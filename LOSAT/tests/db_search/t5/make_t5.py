@@ -60,7 +60,11 @@ header record of OID 1 (OID 0 for the `_z` databases, which the queries `hd_q1.*
 alone never report) edited where NCBI's read of it fails (a taxid tag, data where the taxid's end
 is expected, the taxid's tag primitive, 2^31 as the taxid, the title's tag, the record cut before
 its last four bytes; with `-parse_seqids` and `lcl|hd<n>` ids, the tag of the first string of
-the Seq-ids). NCBI's reports of them: `remaining-gaps-20261112/T/SURVEY_T5d.md` of line RG.
+the Seq-ids; a member tag in the long form of no member) or where NCBI reads it (the title or
+that string a UTF8String, with NCBI's warning; the title's member tag in the long form), and the
+record cut after its first byte (`eof`, which the searches end on with exit status 0). NCBI's
+reports of them: `remaining-gaps-20261112/T/SURVEY_T5d.md` and `T/fix1_t5d.md` of line RG. The
+names after `--header-only` build only those edits (the other databases keep their dates).
 
 Python 3 standard library only; makeblastdb is NCBI's (the comparison oracle builds the inputs).
 """
@@ -291,6 +295,12 @@ def with_first_tag(record, inner_of, old, new):
     return record[:at] + bytes([new]) + record[at + 1:]
 
 
+def with_long_tag(record, member, number):
+    """`record` with the first member tag `member` in the long form: 0xBF, then `number` (one byte)."""
+    at = record.index(member)
+    return record[:at] + b"\xbf" + bytes([number]) + record[at + 1:]
+
+
 def with_primitive_taxid(record):
     """`record` with the taxid `[2]` as the primitive tag 0x82 before the INTEGER."""
     at = 4
@@ -315,7 +325,23 @@ HEADER_EDITS = {
     "cut": (False, lambda r: r[:-4]),
     # NCBI: the string of `local str` (`( at [].[].local.str)`), `error while reading seqid`.
     "seqid": (True, lambda r: with_first_tag(r, b"\xa1\x80", 0x1A, 0x04)),
+    # Records that NCBI reads (RG-T5d fix 1): the title a UTF8String, which NCBI reads as the
+    # VisibleString with `Warning: (803.10) [<prog>] CObjectIStreamAsnBinary: UTF8String data for
+    # VisibleString member Blast-def-line-set.E.title, ...` once per process (none in the maskers);
+    "utf8": (False, lambda r: with_first_tag(r, b"\xa0\x80", 0x1A, 0x0C)),
+    # the string of `local str` a UTF8String (`Blast-def-line-set.E.seqid.E.local.str`);
+    "utf8id": (True, lambda r: with_first_tag(r, b"\xa1\x80", 0x1A, 0x0C)),
+    # the title's member tag in the long form (`bf 00`, NCBI's `PeekLongTag`), with no message.
+    "long": (False, lambda r: with_long_tag(r, b"\xa0\x80", 0x00)),
+    # NCBI: a member tag in the long form whose number is no member's (`bf 20`: `unexpected
+    # member: [32]` at the tag's first byte).
+    "longx": (False, lambda r: with_long_tag(r, b"\xa0\x80", 0x20)),
+    # NCBI: the record cut after its first byte, before the set's elements: the `CEofException`
+    # that `HandleEOF` rethrows, which the search programs' `CATCH_ALL` does not post (exit 0).
+    "eof": (False, lambda r: r[:1]),
 }
+# The edits of OID 0 too (`<kind>hd_<name>_z`).
+HEADER_EDITS_Z = ("title", "utf8")
 HEADER_SEEDS = (11, 22, 33)
 
 
@@ -358,7 +384,7 @@ def patch_record(base, ext, oid, edit):
     open(f"{base}.{ext}in", "wb").write(bytes(index))
 
 
-def header_main(ncbi_bin):
+def header_main(ncbi_bin, only=()):
     here = os.path.join("tests", "db_search", "t5")
     work = os.path.join(here, "work")
     os.makedirs(work, exist_ok=True)
@@ -379,8 +405,10 @@ def header_main(ncbi_bin):
     for kind, dbtype, ext in (("p", "prot", "p"), ("n", "nucl", "n")):
         fext = "faa" if kind == "p" else "fna"
         for name, (parsed, edit) in HEADER_EDITS.items():
+            if only and name not in only:
+                continue
             for suffix, oid in (("", 1), ("_z", 0)):
-                if suffix and name != "title":
+                if suffix and name not in HEADER_EDITS_Z:
                     continue
                 fasta = os.path.join(work, f"hdp.{fext}") if parsed else os.path.join(here, f"hd.{fext}")
                 out = os.path.join(here, f"{kind}hd_{name}{suffix}")
@@ -581,6 +609,6 @@ if __name__ == "__main__":
     elif "--taxid-only" in sys.argv[2:]:
         taxid_main(sys.argv[1])
     elif "--header-only" in sys.argv[2:]:
-        header_main(sys.argv[1])
+        header_main(sys.argv[1], [name for name in sys.argv[2:] if not name.startswith("--")])
     else:
         main()

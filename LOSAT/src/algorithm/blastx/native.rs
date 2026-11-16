@@ -1015,10 +1015,15 @@ fn run_inner(
         };
         let asks = ReportedAsks::of(&options);
         let titles = match &database {
-            Some(database) => {
-                batch_titles(database, search_subjects, results, options.gapped, asks)
-                    .inspect_err(drop_held)?
-            }
+            Some(database) => batch_titles(
+                database,
+                search_subjects,
+                results,
+                options.gapped,
+                asks,
+                &mut *diagnostics,
+            )
+            .inspect_err(drop_held)?,
             None => None,
         };
         app::check_prefetch_environment(false)?;
@@ -1309,12 +1314,16 @@ fn reported_error(error: anyhow::Error) -> anyhow::Error {
 /// of no Seq-align leave `results` (`ReportedSubjects::drop_unaligned`): NCBI's reader error
 /// stops the run at this batch, with no epilog. `None` where the database's sequences could not be
 /// read (the batch's search failed with that error).
+/// NCBI's warning of its first read of a UTF8String header (`BatchTitles::utf8`, or that of the
+/// failed read) is written to `diagnostics` there: after the batch's reader messages and request
+/// posts, before its prefetch.
 pub(super) fn batch_titles(
     database: &BlastxDatabase,
     search_subjects: Subjects<'_>,
     results: &mut [BatchResults],
     gapped: bool,
     asks: ReportedAsks,
+    diagnostics: &mut dyn Write,
 ) -> Result<Option<super::database::BatchTitles>> {
     use super::x_timing::Run as XRun;
     if matches!(search_subjects, Subjects::Unreadable) {
@@ -1324,6 +1333,14 @@ pub(super) fn batch_titles(
     let x_t = super::x_timing::lap();
     let titles = ReportedSubjects::read_titles(database, results, gapped, asks.pairwise);
     super::x_timing::run(XRun::Titles, x_t);
+    if let Some(posts) = database.utf8_post(match &titles {
+        Ok(titles) => titles.utf8.as_ref(),
+        Err(error) => error
+            .downcast_ref::<HeaderReadError>()
+            .and_then(|failure| failure.utf8.as_ref()),
+    }) {
+        posts.write(diagnostics, None)?;
+    }
     titles.map(Some).map_err(reported_error)
 }
 

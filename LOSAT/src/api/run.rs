@@ -780,6 +780,26 @@ fn taxdb_setting(
 // (outfmt 18) and the file of a `-matrix` that NCBI's tables do not have (TBLASTX, ungapped
 // BLASTX), which NCBI's library looks for itself. The settings are the call's application start's
 // (`start::CallStart::settings`).
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247 (quoted at
+// `common::database::database_error_of`)
+/// The result of a run (`run_local`) as the caller of the library gets it: the end without a post
+/// and with exit status 0 that NCBI's `CATCH_ALL` makes of a header record's `CEofException`
+/// (`NativeError` exit 0, `common::database::database_error_of`) is the run's success, with the
+/// reports written before it, as the command line's exit status says.
+pub(super) fn run_ended(result: anyhow::Result<()>) -> anyhow::Result<()> {
+    match result {
+        Err(error) if ends_without_post(&error) => Ok(()),
+        other => other,
+    }
+}
+
+/// Whether `error` ends the run without a post and with exit status 0 (`run_ended`).
+pub(super) fn ends_without_post(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<crate::cli::NativeError>()
+        .is_some_and(|native| native.exit == 0 && native.message.is_empty())
+}
+
 /// One `run_local` call: the program's entry for the parsed arguments and `inputs`.
 pub(super) fn run_local(
     command: Commands,
@@ -1049,7 +1069,7 @@ pub fn run(
                 };
                 run_local(command, inputs, &mut outputs, &mut start)
             };
-            result.map_err(|error| sink.failed(&error))?;
+            run_ended(result).map_err(|error| sink.failed(&error))?;
         }
         Ok(())
     })
@@ -1121,7 +1141,7 @@ pub fn run_to_file(
             };
             run_local(command, inputs, &mut outputs, &mut start)
         };
-        result.map_err(|error| sink.failed(&error))
+        run_ended(result).map_err(|error| sink.failed(&error))
     })?;
     file.flush()
         .map_err(|error| Error::search(&anyhow::Error::from(error)))
@@ -1185,7 +1205,7 @@ fn collect_one(
         };
         run_local(command, inputs, &mut outputs, start)
     };
-    result.map_err(|error| sink.failed(&error))?;
+    run_ended(result).map_err(|error| sink.failed(&error))?;
     if let Some((hsp, _)) = recorder.open.iter().flatten().next() {
         recorder.fault(format!("HSP {hsp} started but did not end"));
     }

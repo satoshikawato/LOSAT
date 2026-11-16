@@ -377,6 +377,7 @@ impl ParsedSubject {
                     ids: ids.ids.clone(),
                     ..BlastDefline::default()
                 }],
+                utf8: false,
             },
             alignment_id: ids.best.clone(),
             target: 0,
@@ -2043,6 +2044,7 @@ mod tests {
             };
             ParsedSubject::new(DeflineSet {
                 deflines: vec![defline],
+                utf8: false,
             })
             .unwrap()
         };
@@ -2221,6 +2223,7 @@ mod tests {
                 ids,
                 ..BlastDefline::default()
             }],
+            utf8: false,
         }
     }
 
@@ -2241,7 +2244,11 @@ mod tests {
                 ..BlastDefline::default()
             })
             .collect();
-        ParsedSubject::new(DeflineSet { deflines }).unwrap()
+        ParsedSubject::new(DeflineSet {
+            deflines,
+            utf8: false,
+        })
+        .unwrap()
     }
 
     fn strings(subject: &ParsedSubject) -> Vec<String> {
@@ -2327,7 +2334,11 @@ mod tests {
                     ..BlastDefline::default()
                 })
                 .collect();
-            ParsedSubject::new(DeflineSet { deflines }).unwrap()
+            ParsedSubject::new(DeflineSet {
+                deflines,
+                utf8: false,
+            })
+            .unwrap()
         };
         // A title made from the source names its organism with the taxonomy database only.
         let empty = titled(&[""]);
@@ -2447,6 +2458,7 @@ mod tests {
                 replaced_title_bytes: 1,
                 ..BlastDefline::default()
             }],
+            utf8: false,
         };
         assert!(ParsedSubject::new(replaced).is_err());
         assert!(ParsedSubject::new(DeflineSet::default()).is_err());
@@ -2714,9 +2726,12 @@ mod tests {
                     ..BlastDefline::default()
                 })
                 .collect();
-            ParsedSubject::new(DeflineSet { deflines })
-                .unwrap()
-                .found_instead(title_apart.clone())
+            ParsedSubject::new(DeflineSet {
+                deflines,
+                utf8: false,
+            })
+            .unwrap()
+            .found_instead(title_apart.clone())
         };
         let error = check_shown_parsed_subject(
             &titled(&[""]),
@@ -2788,6 +2803,7 @@ mod tests {
                 one_defline(vec![gb("AAA00001", 1)]).deflines.remove(0),
                 one_defline(vec![local()]).deflines.remove(0),
             ],
+            utf8: false,
         })
         .unwrap()
         .found_instead(title_apart.clone());
@@ -2806,6 +2822,7 @@ mod tests {
                 ids: vec![local()],
                 ..BlastDefline::default()
             }],
+            utf8: false,
         })
         .unwrap()
         .found_instead(title_apart);
@@ -2851,6 +2868,7 @@ mod tests {
                     taxid,
                     ..BlastDefline::default()
                 }],
+                utf8: false,
             })
             .unwrap()
             .with_source(true, |taxid| {
@@ -2890,6 +2908,7 @@ mod tests {
                 ids: vec![ParsedSeqId::Local(ObjectId::Str(b"Subject_1".to_vec()))],
                 ..BlastDefline::default()
             }],
+            utf8: false,
         })
         .unwrap()
         .with_source(true, |_| panic!("no source to name"));
@@ -2924,6 +2943,7 @@ mod tests {
                     taxid: Some(100009),
                     ..BlastDefline::default()
                 }],
+                utf8: false,
             })
             .unwrap()
             .with_source(false, |_| SourceTaxname::Named(std::sync::Arc::from(name)))
@@ -3159,6 +3179,7 @@ mod tests {
                     ..BlastDefline::default()
                 })
                 .collect(),
+            utf8: false,
         };
         let bacillus = || SourceTaxname::Named(std::sync::Arc::from(&b"Bacillus sp."[..]));
         let named = |lines: &[(ParsedSeqId, &str, Option<i32>)], protein| {

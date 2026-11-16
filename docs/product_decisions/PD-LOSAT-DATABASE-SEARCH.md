@@ -81,8 +81,9 @@
   Seq-ids and LOSAT wrote unchanged in the tabular ids of a database without them, and where the
   rewritten title has no first word (`MAG: (plastid) [ ]` cut to `MAG:` from the tax id) the
   general id of line DBID ordname, in every program; on 2026-11-16 line RG item T5d wrote NCBI's
-  exception where NCBI's read of a header record fails, which LOSAT refused, and refused the
-  header records that NCBI's reader takes in a way LOSAT does not port)
+  exception where NCBI's read of a header record fails, which LOSAT refused, and on 2026-11-17
+  its fix 1 read the header records with a UTF8String or a tag in the long form as NCBI reads
+  them, which it had refused)
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
   database search campaign (decisions P1 to P4 below, each as recommended). The decision
   that version 1.0 left open, the thread count of the parity target, was taken by the
@@ -584,10 +585,21 @@ search code with a different subject source.
   object stack and the backlog `error while reading <member>` of each member with a set flag),
   as each program reports it: the search programs `Error: <what()>` with exit status 255, after
   the outfmt 0 prolog and the reports of the batches before the batch whose reports read the
-  record; blastdbcmd `Error: [blastdbcmd] <GetMsg()>` with exit status 1 after the records
+  record (a record that ends before its first definition line throws NCBI's `CEofException`,
+  which `CATCH_ALL` takes as a `CIOException` and does not post: the run ends there with exit
+  status 0, fix 1 of item T5d); blastdbcmd `Error: [blastdbcmd] <GetMsg()>` with exit status 1 after the records
   before; segmasker `<what()>` (exit 1); dustmasker NCBI's report of each exception and its
   `Application's execution failed` line (exit 3). A record that no report reads fails nothing
-  (NCBI reads no header when it opens a database). Line RG item T5d.
+  (NCBI reads no header when it opens a database). Line RG item T5d. Two encodings that
+  makeblastdb does not write are read as NCBI reads them (fix 1 of item T5d): a UTF8String where
+  a VisibleString is expected, as the VisibleString (`SERIAL_READ_ANY_VISIBLESTRING_TAG`), with
+  NCBI's warning `Warning: (803.10) [<program>] CObjectIStreamAsnBinary: UTF8String data for
+  VisibleString member <member>, ASN.1 specification may need an update` once per run
+  (`ERR_POST_X_ONCE`) where NCBI first reads such a record: in the search programs where the
+  Seq-aligns of a batch read it (after the batch's reader messages, before its prefetch and its
+  reports; a message of the BLAST archive), in blastdbcmd before the record's text; segmasker and
+  dustmasker write none. A tag in the long form is read with no message (`PeekLongTag`), or
+  fails as NCBI's read does.
 - `-db` with `-subject` or `-subject_loc` is a usage error (LOSAT's parser text and exit
   status 2; NCBI prints its usage and exits 1). LOSAT Web rejects `-db` until stage DB-7.
 
@@ -605,7 +617,6 @@ Rejected explicitly (NCBI runs these, or crashes, or LOSAT cannot reproduce what
 | A database of more letters than the target's `usize` (32-bit targets) | |
 | A database that cannot be searched, when the first query batch holds invalid queries only | NCBI would report that batch first; not reproduced |
 | A registry value `[BLAST] BLASTDB` that LOSAT does not read as NCBI does | |
-| A header record with a UTF8String where a VisibleString is expected, or with a tag in the long form (line RG item T5d) | NCBI reads the first with a warning (`SERIAL_READ_ANY_VISIBLESTRING_TAG`) and reads on after the second; neither is ported. makeblastdb writes neither |
 
 Known differences that remain: the reader's (section above), and a version 5 database
 copied under another name, which NCBI refuses (`Input db vol does not match lmdb vol`) and

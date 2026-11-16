@@ -44,6 +44,20 @@ pub struct BlastDefline {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DeflineSet {
     pub deflines: Vec<BlastDefline>,
+    /// Whether the read of the stored record met a UTF8String where a VisibleString is
+    /// expected (`seqid::ber::Reader::visible_string`): NCBI reads it, with its warning once per
+    /// process at its first read of such a record (`seqid::ber::utf8_string_path`). A set that
+    /// was not read from a record has none.
+    pub utf8: bool,
+}
+
+impl From<Vec<BlastDefline>> for DeflineSet {
+    fn from(deflines: Vec<BlastDefline>) -> Self {
+        DeflineSet {
+            deflines,
+            utf8: false,
+        }
+    }
 }
 
 /// `CSeq_id::E_SIC`, the result of `CSeq_id::Compare`.

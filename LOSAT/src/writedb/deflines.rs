@@ -251,7 +251,10 @@ pub fn second_parse(parsed: &ParsedIds, is_aa: bool, warn: Warn<'_>) -> Option<D
             ..BlastDefline::default()
         });
     }
-    Some(DeflineSet { deflines })
+    Some(DeflineSet {
+        deflines,
+        utf8: false,
+    })
 }
 
 /// The ids of one part of the second parse (`x_GetFastaReaderDeflines`, quoted there).
@@ -487,6 +490,7 @@ pub fn extract_bioseq_deflines(bioseq: &Bioseq, warn: Warn<'_>) -> DeflineSet {
             ids: parsed.ids.clone(),
             ..BlastDefline::default()
         }],
+        utf8: false,
     }
 }
 

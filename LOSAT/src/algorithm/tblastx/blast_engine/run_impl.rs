@@ -3983,14 +3983,28 @@ fn run_batch_loop(
                 start,
                 &mut reports.titles.borrow_mut(),
             );
-            if let Err(error) = read {
-                match error.downcast::<crate::algorithm::common::database::HeaderReadError>() {
-                    Ok(failure) => {
-                        reports.write_before_failed_batch(outputs, done, &warnings)?;
-                        batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-                        return Err(failure.error);
+            match read {
+                // NCBI's warning of its first read of a UTF8String header follows the batch's
+                // reader messages and request posts (`warnings[start]`), before its prefetch.
+                Ok(read) => {
+                    if let Some(posts) = database.utf8_post(read.as_ref()) {
+                        warnings[start].append(&posts);
+                        batch_warnings.append(&posts);
                     }
-                    Err(error) => return Err(error),
+                }
+                Err(error) => {
+                    match error.downcast::<crate::algorithm::common::database::HeaderReadError>() {
+                        Ok(failure) => {
+                            reports.write_before_failed_batch(outputs, done, &warnings)?;
+                            batch_warnings
+                                .write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+                            if let Some(posts) = database.utf8_post(failure.utf8.as_ref()) {
+                                posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+                            }
+                            return Err(failure.error);
+                        }
+                        Err(error) => return Err(error),
+                    }
                 }
             }
         }

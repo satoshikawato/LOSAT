@@ -10789,7 +10789,18 @@ fn run_in_pool(
                 }
             }
             database::drop_unaligned(database, &mut batch_hit_lists);
-            if let Err(error) = database::read_titles(database, &batch_hit_lists, &mut titles) {
+            // NCBI's warning of its first read of a UTF8String header follows the batch's reader
+            // messages and request posts (`warnings[start]`), before its prefetch.
+            let read = database::read_titles(database, &batch_hit_lists, &mut titles);
+            if let Some(posts) = database.utf8_post(match &read {
+                Ok(read) => read.as_ref(),
+                Err(error) => error
+                    .downcast_ref::<database::HeaderReadError>()
+                    .and_then(|failure| failure.utf8.as_ref()),
+            }) {
+                warnings[start].append(&posts);
+            }
+            if let Err(error) = read {
                 let error = match error.downcast::<database::HeaderReadError>() {
                     Ok(failure) => failure.error,
                     // LOSAT's refusal: the warnings of the batches read so far, as for the

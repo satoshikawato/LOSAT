@@ -1,0 +1,3 @@
+NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasnb.cpp", line 1066: Error: (CSerialException::eFormatError) ncbi::CObjectIStreamAsnBinary::UnexpectedMember() - byte 7: unexpected member: [32], should be one of: title[0] seqid[1] taxid[2] memberships[3] links[4] other-info[5]  ( at Blast-def-line-set.[].[])
+

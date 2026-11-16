@@ -640,6 +640,9 @@ pub struct SeqDb {
     lookup_isams: OnceLock<lookup::VolumeIsams>,
     /// The filtering algorithms of the mask columns, built on first use (`mask.rs`).
     mask_algorithms: OnceLock<MaskAlgorithms>,
+    /// Whether the run posted NCBI's warning of a UTF8String read for a VisibleString
+    /// (`SeqDb::take_utf8_post`).
+    utf8_posted: AtomicBool,
 }
 
 /// NCBI's counts of a database (`CSeqDBImpl::m_NumSeqs`, `m_TotalLength`, `m_MaxLength`,
@@ -1192,6 +1195,7 @@ impl SeqDb {
             lookup_files: OnceLock::new(),
             lookup_isams: OnceLock::new(),
             mask_algorithms: OnceLock::new(),
+            utf8_posted: AtomicBool::new(false),
         };
         // A volume list that NCBI opens and whose OIDs it then gets wrong
         // (`SeqDbError::Unsupported`) is refused by the lookups that need them, not here.
@@ -2338,6 +2342,47 @@ impl SeqDb {
         self.defline_set_at(self.find_volume(ordinal)?)
     }
 
+    /// The member that NCBI's warning of a UTF8String read where a VisibleString is expected
+    /// names (`seqid::ber::utf8_string_path`) for the header of `ordinal`: where NCBI's read of
+    /// the record meets one before any failure. `None` also where the record cannot be read.
+    /// The record is read again: for a read that noted such a string (`OrdinalDefline::utf8`,
+    /// `DeflineSet::utf8`) or failed.
+    #[cold]
+    pub fn utf8_string_path(&self, ordinal: u32) -> Option<String> {
+        self.utf8_string_path_at(self.find_volume(ordinal).ok()?)
+    }
+
+    // NCBI reference (598d8ae6): c++/include/corelib/ncbidiag.hpp:617-622
+    // ```c++
+    // /// Error posting only once during program execution with default
+    // /// error code and given error subcode.
+    // ///
+    // /// @sa NCBI_DEFINE_ERRCODE_X, NCBI_ERRCODE_X, ERR_POST_X
+    // #define ERR_POST_X_ONCE(err_subcode, message)   \
+    //     ERR_POST_X_N_TIMES(1, err_subcode, message)
+    // ```
+    /// Whether NCBI's warning of a UTF8String read for a VisibleString is to be posted now:
+    /// true once, at the first call (`ERR_POST_X_ONCE` posts once per process; a search opens
+    /// its database once, so once per run of a program).
+    pub fn take_utf8_post(&self) -> bool {
+        !self
+            .utf8_posted
+            .swap(true, std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Whether the run has posted that warning (`take_utf8_post`), so that no read need name
+    /// its member again.
+    pub fn utf8_posted(&self) -> bool {
+        self.utf8_posted.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// [`SeqDb::utf8_string_path`] of the sequence at `at`.
+    #[cold]
+    pub fn utf8_string_path_at(&self, at: SeqLocation) -> Option<String> {
+        let record = self.volumes[at.volume].header_bytes(at.vol_oid).ok()?;
+        crate::seqid::ber::utf8_string_path(&record)
+    }
+
     /// [`SeqDb::defline_set`] of the sequence at `at`.
     pub fn defline_set_at(&self, at: SeqLocation) -> Result<DeflineSet, SeqDbError> {
         let set = self.volumes[at.volume].defline_set(at.vol_oid)?;
@@ -2391,6 +2436,7 @@ impl SeqDb {
                     bl_ord_id: bl_ord_id as u32,
                     replaced_title_bytes: defline.replaced_title_bytes,
                     taxid: defline.taxid,
+                    utf8: defline.utf8,
                 })
             })
             .collect()
@@ -2758,4 +2804,7 @@ pub struct OrdinalDefline {
     /// `Defline::taxid` (0 for none), read with the title by [`SeqDb::deflines`],
     /// [`SeqDb::visit_deflines`] and [`SeqDb::read_header`].
     pub taxid: i32,
+    /// `Defline::utf8`: the record holds a UTF8String where a VisibleString is expected
+    /// ([`SeqDb::utf8_string_path`] names the member of NCBI's warning).
+    pub utf8: bool,
 }

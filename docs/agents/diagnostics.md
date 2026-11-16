@@ -6011,7 +6011,16 @@ Scheduling (each value computed by one thread with the original function; order 
   `x_scan_subject_bf_and_compact_equal_ncbi_scan_on_random_subjects`, byte arm, against
   `s_blast_aa_scan_subject`). The offset arrays get `X_SCAN_BYTE_SLACK` (20) entries more while the
   switch is on. AVX2 CPUs only (`x_scan_byte::x_mode`): elsewhere, and for the tables the
-  branch-free scan takes, the scan before. TIMING_PLACEHOLDER
+  branch-free scan takes, the scan before. Timed on the
+  workstation (ad-DT-5, line DT; one booked core of node 0, same output in every run): ViPTreeGen's
+  `-num_threads 1` searches, wall time against dev 817cb3049 (warm-up and 5 rounds, arms alternating):
+  Autographivirales.40 x0.970 (48.95 s), Begomovirus.40 x0.964 (0.55 s); user-space cycles (perf stat,
+  3 rounds alternating, two runs, against dev ec6bd8123): x0.958-0.967, x0.965-0.967, ssDNA.prok.8
+  x0.966-0.972, Easyfig's tblastx example x0.984-0.986, Galaxy's small tblastx test x0.999-1.010 (its
+  tables are sparse; the same instructions). Branch misses x0.88-0.95. Heap peak (massif) the same
+  within 10 bytes: the presence bytes live with their group table, not at the peak. Probe: line DT
+  (tool-speed-20261115, DECISIONS 8); prefetching the candidates' cells or chain heads before the copy
+  gave nothing more (x0.991-1.023).
 - `LOSAT_X_TBNUNITXLATE=1` tblastn (speed and memory; in the strict set from the pull request that added it,
   2026-10-23; `=0` turns it off; `tblastn/x_subject_translate.rs` `x_packed_lean_plan`, `x_unit_residues`,
   `tblastn/search_gapped.rs` `XUnitResiduesPool`): the plan of a packed subject (every `-db` sequence, `-subject`

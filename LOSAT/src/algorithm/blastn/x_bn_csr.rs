@@ -97,11 +97,12 @@
 //! where the table has no chains.
 //!
 //! With LOSAT_TIMING `main` prints `[TIMING] x_bn_csr: builds=<CSR tables> parallel=<on a pool>
-//! words=<their words>` (the build times are in `[TIMING] x_mb_lookup_build`).
+//! words=<their words> popcnt=<1 when the packed heads count bits with x86-64's popcnt>` (the build
+//! times are in `[TIMING] x_mb_lookup_build`; LOSAT_X_BNPOPCNT, `x_dc_csr::XPop`).
 
 use super::x_dc_csr::{
     assemble, prefetch, sum_cells, x_assemble_packed, x_count8, x_presence8, x_rank,
-    x_rank_counts8, x_sum_packed, Csr,
+    x_rank_counts8, x_sum_packed, Csr, XPop,
 };
 use super::x_mb_lookup_par::Words;
 use super::{build_unmasked_ranges, PvArrayType, BLAST2NA_MASK};
@@ -161,10 +162,11 @@ pub(super) fn print_summary() {
     let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
     if std::env::var_os("LOSAT_TIMING").is_some() && load(&BUILDS) > 0 {
         eprintln!(
-            "[TIMING] x_bn_csr: builds={} parallel={} words={}",
+            "[TIMING] x_bn_csr: builds={} parallel={} words={} popcnt={}",
             load(&BUILDS),
             load(&BUILDS_ON_POOL),
-            load(&BUILT_WORDS)
+            load(&BUILT_WORDS),
+            u8::from(XPop::get().x_instruction())
         );
     }
 }
@@ -525,9 +527,11 @@ pub(super) fn x_serial_packed(
         unsafe { x_count8(cb, &mut more, ring[i % AHEAD]) };
     }
     let mut bits = vec![0u64; 2 * blocks];
+    // EXPERIMENT (LOSAT_X_BNPOPCNT): the form of the bit counts, read once per build.
+    let pop = XPop::get();
     // SAFETY: `blocks` blocks of 64 cells: the `cells` bytes of the counts, the `2 blocks` words of
     // `bits`.
-    let present = unsafe { x_presence8(bits.as_mut_ptr(), cb, 0, blocks) };
+    let present = unsafe { x_presence8(bits.as_mut_ptr(), cb, 0, blocks, pop) };
     // EXPERIMENT (LOSAT_X_MBLUTKEEP): `x_offsets` is the batch loop's kept table or an empty vector.
     let mut starts = super::x_dc_csr::x_offsets_buffer(x_offsets, present + 1);
     let sb = starts.as_mut_ptr();
@@ -553,6 +557,7 @@ pub(super) fn x_serial_packed(
             0,
             blocks,
             pv_array_bts,
+            pop,
         )
     };
     debug_assert_eq!(total as usize, n_words);
@@ -561,7 +566,7 @@ pub(super) fn x_serial_packed(
     // SAFETY: `present < present + 1`; `starts[present]` is no cell's end.
     unsafe { *sb.add(present) = total };
     each_word(words, |cell, q_off_1| {
-        let r = x_rank(&bits, cell).expect("BNCSRPACK: a word of an empty cell");
+        let r = x_rank(&bits, cell, pop).expect("BNCSRPACK: a word of an empty cell");
         // SAFETY: `r < present`, `starts[r]` is the end of the cell's non-empty run (>= 1), so the
         // place `e < n_words` is in the capacity.
         unsafe {

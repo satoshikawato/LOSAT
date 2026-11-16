@@ -35,7 +35,7 @@
 //! one stream, cut into chunks of `chunk_positions(P)` positions; each chunk is cut into P spans of
 //! equal length in stream order, one per reader. Per chunk:
 //! - A (read, job = reader `a`): reader `a` reads the words that end in its span with the loop's
-//!   statements (the same ambiguity resets, `current_kmer`, `valid_bases < lut_word_length` and
+//!   statements (the words of `x_range_words`, with the same ambiguity resets and k-mer, and
 //!   query offset `q_off_1`), entering a range up to `lut_word_length - 1` positions before its
 //!   span (never before the range's start). It writes each word `(q_off_1, cell)` to its scratch
 //!   region in reading order, counting the words per owner, and then copies them, stably, into its
@@ -60,8 +60,8 @@
 //! loop's cell and offset: the k-mer of a position depends only on the last `lut_word_length` bases
 //! (the mask), and a word is taken iff its last `lut_word_length` positions lie in the range and
 //! are unambiguous; a reader that starts `lut_word_length - 1` positions before its span (or at the
-//! range's start) sees those positions, so its `valid_bases` reaches `lut_word_length` at the same
-//! positions of the span as the loop's. Each word is read by the one reader whose span holds its
+//! range's start) sees those positions, so `x_range_words` gives it a word at the same positions
+//! of the span as the loop's. Each word is read by the one reader whose span holds its
 //! last position. A block holds whole counters and whole presence-vector words (`2^block_shift` is
 //! a multiple of 2048 and of `2^pv_array_bts`), so owner `o` is the only job that touches the cells
 //! of its blocks, their counters and their presence-vector words. B takes the chunks in order, the
@@ -189,7 +189,7 @@ use super::x_mb_lookup_par::{
     flush_private, lines_capacity, plan, timing_on, Copies, Line, Private, Shared, SharedTables,
     Tables, Unready, Words, K_COMPRESSION_FACTOR_SHIFT,
 };
-use super::{build_unmasked_ranges, PvArrayType, BLAST2NA_MASK, PV_ARRAY_MASK};
+use super::{build_unmasked_ranges, x_range_words, PvArrayType, PV_ARRAY_MASK};
 use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
@@ -545,7 +545,7 @@ impl Fill<'_, '_, '_> {
     /// scratch region in reading order, then copied stably into its sorted region grouped by the
     /// owner of the cell; its row gets the start of each owner's sub-range and the number of words.
     /// A range is entered up to `lut_word_length - 1` positions before `s0` (not before its start),
-    /// so that the k-mer and `valid_bases >= lut_word_length` at the positions from `s0` on are the
+    /// so that the k-mer and the words (`x_range_words`) at the positions from `s0` on are the
     /// loop's. With `MARK` (the first chunk, when the prefault round runs) it also marks in its own
     /// bits (`Faults::marks`), after clearing them, the page of `hashtable` of each word's cell; the
     /// other chunks run the loop without the marking code. `H24` (LOSAT_X_MB24, with `MARK`): the
@@ -577,48 +577,45 @@ impl Fill<'_, '_, '_> {
             let first_pos = seg.start + (s0.max(seg.stream) - seg.stream);
             let end_pos = seg.start + (s1.min(seg.stream + len) - seg.stream);
             let warm_start = seg.start.max(first_pos.saturating_sub(lut_word_length - 1));
-            let mut current_kmer: u64 = 0;
-            let mut valid_bases = 0usize;
-            for pos in warm_start..end_pos {
-                let base = seg.seq[pos];
-                if (base & BLAST2NA_MASK) != 0 {
-                    current_kmer = 0;
-                    valid_bases = 0;
-                    continue;
-                }
-                current_kmer = ((current_kmer << 2) | base as u64) & words.kmer_mask;
-                valid_bases += 1;
-                if valid_bases < lut_word_length || pos < first_pos {
-                    continue;
-                }
-                let cell = current_kmer as usize;
-                let q_off_1 = (seg.query_offset + (pos + 1 - lut_word_length) + 1) as u32;
-                debug_assert!(n < self.arena.shape.half);
-                // SAFETY: `n < half`, the entries of reader `a`'s scratch region: a word is written
-                // only at a stream position of `[s0, s1)` (the segments' stream ranges follow each
-                // other without overlap, `segments`), one at most per position, and
-                // `s1 - s0 <= half` (this function's contract).
-                unsafe {
-                    scratch.add(n).write(Entry {
-                        index: q_off_1,
-                        value: cell as u32,
-                    })
-                };
-                n += 1;
-                counts[self.owner[cell >> self.block_shift] as usize] += 1;
-                if MARK && H24 {
-                    // SAFETY: reader `a`'s bits; the pages are `hashtable`'s (the element's bytes
-                    // lie in its words).
+            x_range_words(
+                &seg.seq[warm_start..end_pos],
+                lut_word_length,
+                words.kmer_mask,
+                || {},
+                |current_kmer, i| {
+                    let pos = warm_start + i;
+                    // A word ends `lut_word_length - 1` letters or more after `warm_start`, so at
+                    // or after `first_pos` (`warm_start` is at most that many letters before it).
+                    debug_assert!(pos >= first_pos);
+                    let cell = current_kmer as usize;
+                    let q_off_1 = (seg.query_offset + (pos + 1 - lut_word_length) + 1) as u32;
+                    debug_assert!(n < self.arena.shape.half);
+                    // SAFETY: `n < half`, the entries of reader `a`'s scratch region: a word is
+                    // written only at a stream position of `[s0, s1)` (the segments' stream ranges
+                    // follow each other without overlap, `segments`), one at most per position, and
+                    // `s1 - s0 <= half` (this function's contract).
                     unsafe {
-                        marks.mark(a, (cells + ((3 * cell) >> 2)) >> PAGE_ELEMS_SHIFT);
-                        marks.mark(a, (cells + ((3 * cell + 2) >> 2)) >> PAGE_ELEMS_SHIFT);
+                        scratch.add(n).write(Entry {
+                            index: q_off_1,
+                            value: cell as u32,
+                        })
+                    };
+                    n += 1;
+                    counts[self.owner[cell >> self.block_shift] as usize] += 1;
+                    if MARK && H24 {
+                        // SAFETY: reader `a`'s bits; the pages are `hashtable`'s (the element's
+                        // bytes lie in its words).
+                        unsafe {
+                            marks.mark(a, (cells + ((3 * cell) >> 2)) >> PAGE_ELEMS_SHIFT);
+                            marks.mark(a, (cells + ((3 * cell + 2) >> 2)) >> PAGE_ELEMS_SHIFT);
+                        }
+                    } else if MARK {
+                        // SAFETY: reader `a`'s bits; the page is one of `hashtable`'s (`cell` < its
+                        // length).
+                        unsafe { marks.mark(a, (cells + cell) >> PAGE_ELEMS_SHIFT) };
                     }
-                } else if MARK {
-                    // SAFETY: reader `a`'s bits; the page is one of `hashtable`'s (`cell` < its
-                    // length).
-                    unsafe { marks.mark(a, (cells + cell) >> PAGE_ELEMS_SHIFT) };
-                }
-            }
+                },
+            );
             g += 1;
         }
         let row = self.arena.row(a);

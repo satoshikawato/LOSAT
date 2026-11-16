@@ -240,7 +240,7 @@
 
 use super::x_mb_lookup_par::{plan, pool_threads, Shared, K_COMPRESSION_FACTOR_SHIFT};
 use super::{
-    build_unmasked_ranges, DiscTables, DiscWords, PvArrayType, BLAST2NA_MASK, PV_ARRAY_MASK,
+    build_unmasked_ranges, x_range_words, DiscTables, DiscWords, PvArrayType, PV_ARRAY_MASK,
 };
 #[cfg(test)]
 use super::{disc_longest_chain, fill_disc_mb_tables};
@@ -1056,8 +1056,8 @@ impl Fill<'_, '_> {
     /// loop of `fill_disc_mb_tables` (the same resets, `accum`, `index` and template indices),
     /// into the buckets `(a, owner of the cell)` of each template, in reading order. A range is
     /// entered up to `template_length - 1` positions before `s0` (not before its start), so that
-    /// the template window of `accum` and the test `valid_bases < template_length` at the
-    /// positions from `s0` on are those of the loop.
+    /// the template window of `accum` and the words (`x_range_words`) at the positions from `s0`
+    /// on are those of the loop.
     ///
     /// The job first empties its buckets, giving back the room above `keep` entries that a bucket
     /// grew in an earlier chunk (`empty`). For the prefault round (`Fill::prefault`), for each
@@ -1110,68 +1110,67 @@ impl Fill<'_, '_> {
             let first_pos = seg.start + (s0.max(seg.stream) - seg.stream);
             let end_pos = seg.start + (s1.min(seg.stream + len) - seg.stream);
             let warm_start = seg.start.max(first_pos.saturating_sub(template_length - 1));
-            let mut accum: u64 = 0;
-            let mut valid_bases = 0usize;
-            for pos in warm_start..end_pos {
-                let val = seg.seq[pos];
-                if (val & BLAST2NA_MASK) != 0 {
-                    accum = 0;
-                    valid_bases = 0;
-                    continue;
-                }
-                accum = (accum << 2) | val as u64;
-                valid_bases += 1;
-                if valid_bases < template_length || pos < first_pos {
-                    continue;
-                }
-                // The 1-based start of the word in the concatenated query.
-                let index = (seg.query_offset + pos + 2 - template_length) as u32;
-                let ecode1 = compute_discontiguous_index(accum, words.template_type);
-                let o1 = self.owner[(ecode1 as usize) >> self.block_shift] as usize;
-                // SAFETY: row `a` is this job's.
-                unsafe {
-                    self.first.at(a, o1).push(Entry {
-                        index,
-                        value: ecode1,
-                    })
-                };
-                // SAFETY (the marks): reader `a`'s bits; the pages are in the arrays.
-                if mark1 {
+            x_range_words(
+                &seg.seq[warm_start..end_pos],
+                template_length,
+                u64::MAX,
+                || {},
+                |accum, i| {
+                    let pos = warm_start + i;
+                    // A word ends `lut_word_length - 1` letters or more after `warm_start`, so at
+                    // or after `first_pos` (`warm_start` is at most that many letters before it).
+                    debug_assert!(pos >= first_pos);
+                    // The 1-based start of the word in the concatenated query.
+                    let index = (seg.query_offset + pos + 2 - template_length) as u32;
+                    let ecode1 = compute_discontiguous_index(accum, words.template_type);
+                    let o1 = self.owner[(ecode1 as usize) >> self.block_shift] as usize;
+                    // SAFETY: row `a` is this job's.
                     unsafe {
-                        faults.marks[0].mark(a, (cells1 + ecode1 as usize) >> PAGE_ELEMS_SHIFT)
+                        self.first.at(a, o1).push(Entry {
+                            index,
+                            value: ecode1,
+                        })
                     };
-                }
-                if mark_pv && ((ecode1 as usize) >> bts) < pv_len {
-                    let page = (pv + ((ecode1 as usize) >> bts)) >> PAGE_ELEMS_SHIFT;
-                    // SAFETY: reader `a`'s bits (`read`'s contract); `ecode1 >> bts < pv_len`
-                    // (tested above), so `page < pages_of(pv, pv_len) <= 64 * stride`: `mark_pv`
-                    // implies `round_on`, and `fill_with` sized `marks[PV_ARRAY]` for those pages.
-                    unsafe { faults.marks[PV_ARRAY].mark(a, page) };
-                }
-                if !two_templates {
-                    continue;
-                }
-                let ecode2 = compute_discontiguous_index(accum, words.second_template_type);
-                let o2 = self.owner[(ecode2 as usize) >> self.block_shift] as usize;
-                // SAFETY: as above.
-                unsafe {
-                    self.second.at(a, o2).push(Entry {
-                        index,
-                        value: ecode2,
-                    })
-                };
-                if mark2 {
+                    // SAFETY (the marks): reader `a`'s bits; the pages are in the arrays.
+                    if mark1 {
+                        unsafe {
+                            faults.marks[0].mark(a, (cells1 + ecode1 as usize) >> PAGE_ELEMS_SHIFT)
+                        };
+                    }
+                    if mark_pv && ((ecode1 as usize) >> bts) < pv_len {
+                        let page = (pv + ((ecode1 as usize) >> bts)) >> PAGE_ELEMS_SHIFT;
+                        // SAFETY: reader `a`'s bits (`read`'s contract); `ecode1 >> bts < pv_len`
+                        // (tested above), so `page < pages_of(pv, pv_len) <= 64 * stride`:
+                        // `mark_pv` implies `round_on`, and `fill_with` sized `marks[PV_ARRAY]` for
+                        // those pages.
+                        unsafe { faults.marks[PV_ARRAY].mark(a, page) };
+                    }
+                    if !two_templates {
+                        return;
+                    }
+                    let ecode2 = compute_discontiguous_index(accum, words.second_template_type);
+                    let o2 = self.owner[(ecode2 as usize) >> self.block_shift] as usize;
+                    // SAFETY: as above.
                     unsafe {
-                        faults.marks[1].mark(a, (cells2 + ecode2 as usize) >> PAGE_ELEMS_SHIFT)
+                        self.second.at(a, o2).push(Entry {
+                            index,
+                            value: ecode2,
+                        })
                     };
-                }
-                if mark_pv && ((ecode2 as usize) >> bts) < pv_len {
-                    let page = (pv + ((ecode2 as usize) >> bts)) >> PAGE_ELEMS_SHIFT;
-                    // SAFETY: as for `ecode1`'s presence-vector page: reader `a`'s bits, and
-                    // `ecode2 >> bts < pv_len` (tested above) keeps `page` in `marks[PV_ARRAY]`.
-                    unsafe { faults.marks[PV_ARRAY].mark(a, page) };
-                }
-            }
+                    if mark2 {
+                        unsafe {
+                            faults.marks[1].mark(a, (cells2 + ecode2 as usize) >> PAGE_ELEMS_SHIFT)
+                        };
+                    }
+                    if mark_pv && ((ecode2 as usize) >> bts) < pv_len {
+                        let page = (pv + ((ecode2 as usize) >> bts)) >> PAGE_ELEMS_SHIFT;
+                        // SAFETY: as for `ecode1`'s presence-vector page: reader `a`'s bits, and
+                        // `ecode2 >> bts < pv_len` (tested above) keeps `page` in
+                        // `marks[PV_ARRAY]`.
+                        unsafe { faults.marks[PV_ARRAY].mark(a, page) };
+                    }
+                },
+            );
             g += 1;
         }
     }
@@ -1800,24 +1799,21 @@ fn lean_span<const TT: u8>(
         // is `base + i` (`Fill::read`'s `index`; formed only for words, where it is >= 1).
         let base = (seg.query_offset + warm_start + 2).wrapping_sub(template_length);
         let first = first_pos - warm_start;
-        let mut accum: u64 = 0;
-        let mut valid_bases = 0usize;
-        for (i, &val) in seg.seq[warm_start..end_pos].iter().enumerate() {
-            if (val & BLAST2NA_MASK) != 0 {
-                accum = 0;
-                valid_bases = 0;
-                continue;
-            }
-            accum = (accum << 2) | val as u64;
-            valid_bases += 1;
-            if valid_bases < template_length || i < first {
-                continue;
-            }
-            f(
-                compute_discontiguous_index(accum, template),
-                base.wrapping_add(i) as u32,
-            );
-        }
+        x_range_words(
+            &seg.seq[warm_start..end_pos],
+            template_length,
+            u64::MAX,
+            || {},
+            |accum, i| {
+                // A word ends `template_length - 1` letters or more after `warm_start`, so at or
+                // after `first_pos` (`warm_start` is at most that many letters before it).
+                debug_assert!(i >= first);
+                f(
+                    compute_discontiguous_index(accum, template),
+                    base.wrapping_add(i) as u32,
+                );
+            },
+        );
         g += 1;
     }
 }

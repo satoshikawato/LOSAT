@@ -605,6 +605,15 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                 }
             };
             let mut ring: x_dc_csr::Ring<'_, (usize, usize, u64)> = x_dc_csr::Ring::new(csr);
+            // A word without hits (its presence bit, which `x_on_word_csr` tests first) does not
+            // enter the ring: tested here, inline in the scan, it costs neither the ring's
+            // prefetches nor a place in it, and is only counted for the debug summary. The words
+            // with hits leave in the same order, so the same pairs go out in the same order (a
+            // batch that reached `OFFSET_ARRAY_SIZE` goes before the next word with hits, with
+            // the same pairs and state). With the debug output on, every word still enters, as
+            // the warning for a long run comes before that batch's window lines.
+            let every_word = debug_mode || blastn_debug;
+            let mut words_without_hits = 0usize;
             scan_subject_disc_words_with_ranges(
                 search_seq_packed,
                 s_len,
@@ -613,6 +622,10 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                 subject_masked,
                 |s_off, s_range, index, index2| {
                     debug_assert!(index2.is_none());
+                    if !every_word && !two_stage.has_hits(index) {
+                        words_without_hits += 1;
+                        return;
+                    }
                     ring.push(
                         (s_off, s_range, index),
                         |w| w.2 as usize,
@@ -621,19 +634,39 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                 },
             );
             ring.flush(&mut x_on_word_csr);
+            if debug_enabled {
+                *dbg_total_s_positions += words_without_hits;
+            }
         } else {
-            #[expect(
-                clippy::redundant_closure,
-                reason = "a callback closure of its own, as before the move (whose braces rustfmt drops now): `&mut on_word` would make the generic scan's callback another type"
-            )]
+            // A word whose chains are both empty (the presence vector, which `for_each_hit` and
+            // `for_each_hit2` test first) adds no pair: tested here, inline in the scan, so such a
+            // word makes no call to `on_word` and is only counted for the debug summary. A batch
+            // of pairs that reached `OFFSET_ARRAY_SIZE` then goes before the next word with hits
+            // (`on_word`: before the next word), with the same pairs and the same state, so every
+            // value is the same. With the debug output on, every word still goes to `on_word`,
+            // whose warning for a long chain comes before that batch's window lines.
+            let every_word = debug_mode || blastn_debug;
+            let mut words_without_hits = 0usize;
             scan_subject_disc_words_with_ranges(
                 search_seq_packed,
                 s_len,
                 disc,
                 subject_seq_ranges,
                 subject_masked,
-                |s_off, s_range, index, index2| on_word(s_off, s_range, index, index2),
+                |s_off, s_range, index, index2| {
+                    if every_word
+                        || two_stage.has_hits(index)
+                        || index2.is_some_and(|i2| two_stage.has_hits(i2))
+                    {
+                        on_word(s_off, s_range, index, index2);
+                    } else {
+                        words_without_hits += 1;
+                    }
+                },
             );
+            if debug_enabled {
+                *dbg_total_s_positions += words_without_hits;
+            }
         }
     } else if let Some(csr) = two_stage.x_mb_csr() {
         // EXPERIMENT (LOSAT_X_BNCSR): a contiguous table laid out as CSR has no

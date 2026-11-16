@@ -263,58 +263,90 @@ pub(super) fn scan_strip_disc_from<O: SeedOut, const PIECE: bool>(
         disc.template_length as i32,
         [start as i32, job.end as i32],
         &mut |s_off, index, index2| {
-            let kmer_start = s_off as usize;
-            // (where a resumed word's walk starts, and whether its first chain is passed over)
-            let (node, second) = if PIECE { cut.chain_start() } else { (0, false) };
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
-            // ```c
-            //     while (q_off) {
-            //         offset_pairs[i].qs_offsets.q_off   = q_off - 1;
-            //         offset_pairs[i++].qs_offsets.s_off = s_off;
-            //         q_off = lookup->next_pos[q_off];
-            //     }
-            // ```
-            let mut pair = |q_off_1: u32| {
-                if q_off_1 != 0 {
-                    if PIECE && !cut.take(kmer_start, q_off_1, false, out) {
-                        return;
-                    }
-                    seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
-                }
-            };
-            if !PIECE {
-                two_stage.for_each_hit(index as u64, &mut pair);
-            } else if !second {
-                two_stage.for_each_hit_from(index as u64, node, &mut pair);
+            // A word whose chains are both empty (the presence vector, which `for_each_hit` and
+            // `for_each_hit2` test first) has no pair: tested here, so the scan inlines the test
+            // and such a word makes no call; a word with a chain goes to `x_disc_word_pairs`
+            // out of line. (A piece that stopped inside a word's chain resumes at that word,
+            // which has a chain, so `Cut::chain_start` still meets it first.)
+            if !two_stage.has_hits(u64::from(index))
+                && index2.is_none_or(|index2| !two_stage.has_hits(u64::from(index2)))
+            {
+                return !PIECE || cut.go();
             }
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1428-1444
-            // ```c
-            //     Int4 q_off = lookup->hashtable2[index];
-            //
-            //     while (q_off) {
-            //         offset_pairs[i].qs_offsets.q_off   = q_off - 1;
-            //         offset_pairs[i++].qs_offsets.s_off = s_off;
-            //         q_off = lookup->next_pos2[q_off];
-            //     }
-            // ```
-            if let Some(index2) = index2 {
-                let mut pair2 = |q_off_1: u32| {
-                    if PIECE && !cut.take(kmer_start, q_off_1, true, out) {
-                        return;
-                    }
-                    seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
-                };
-                if PIECE {
-                    let node2 = if second { node } else { 0 };
-                    two_stage.for_each_hit2_from(u64::from(index2), node2, &mut pair2);
-                } else {
-                    two_stage.for_each_hit2(u64::from(index2), &mut pair2);
-                }
-            }
+            x_disc_word_pairs::<O, PIECE>(x, &cut, s_range, s_off, index, index2, out);
             !PIECE || cut.go()
         },
     );
     cut.stop.get()
+}
+
+/// No NCBI counterpart (call layout only): the pairs of one word of `scan_strip_disc_from` that
+/// has a chain (its presence bit is set for either template), out of line, so the scan's closure
+/// is the presence test and this call, and the scan inlines it: NCBI's `MB_ACCESS_HITS2` tests
+/// each word's presence in the scan's loop and retrieves a chain only for a word with hits. The
+/// words, their order, the pairs and every value are the same as with the walk in the closure.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1456-1469
+/// (`MB_ACCESS_HITS2`, above `scan_strip_disc`).
+#[inline(never)]
+fn x_disc_word_pairs<O: SeedOut, const PIECE: bool>(
+    x: &Inputs<'_>,
+    cut: &Cut,
+    s_range: usize,
+    s_off: i32,
+    index: u32,
+    index2: Option<u32>,
+    out: &mut O,
+) {
+    let two_stage = x.two_stage;
+    let kmer_start = s_off as usize;
+    // (where a resumed word's walk starts, and whether its first chain is passed over)
+    let (node, second) = if PIECE { cut.chain_start() } else { (0, false) };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
+    // ```c
+    //     while (q_off) {
+    //         offset_pairs[i].qs_offsets.q_off   = q_off - 1;
+    //         offset_pairs[i++].qs_offsets.s_off = s_off;
+    //         q_off = lookup->next_pos[q_off];
+    //     }
+    // ```
+    let mut pair = |q_off_1: u32| {
+        if q_off_1 != 0 {
+            if PIECE && !cut.take(kmer_start, q_off_1, false, out) {
+                return;
+            }
+            seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
+        }
+    };
+    if !PIECE {
+        two_stage.for_each_hit(index as u64, &mut pair);
+    } else if !second {
+        two_stage.for_each_hit_from(index as u64, node, &mut pair);
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1428-1444
+    // ```c
+    //     Int4 q_off = lookup->hashtable2[index];
+    //
+    //     while (q_off) {
+    //         offset_pairs[i].qs_offsets.q_off   = q_off - 1;
+    //         offset_pairs[i++].qs_offsets.s_off = s_off;
+    //         q_off = lookup->next_pos2[q_off];
+    //     }
+    // ```
+    if let Some(index2) = index2 {
+        let mut pair2 = |q_off_1: u32| {
+            if PIECE && !cut.take(kmer_start, q_off_1, true, out) {
+                return;
+            }
+            seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
+        };
+        if PIECE {
+            let node2 = if second { node } else { 0 };
+            two_stage.for_each_hit2_from(u64::from(index2), node2, &mut pair2);
+        } else {
+            two_stage.for_each_hit2(u64::from(index2), &mut pair2);
+        }
+    }
 }
 
 /// EXPERIMENT (LOSAT_X_DCCSR): `scan_strip_disc` over a table laid out as CSR
@@ -377,6 +409,14 @@ fn scan_strip_disc_csr<O: SeedOut, const PIECE: bool>(
         [start as i32, job.end as i32],
         // (a cut stops only in `emit`, so only a word that let one out can have stopped it)
         &mut |s_off, index, _index2| {
+            // A word without hits (its presence bit, which `emit` tests first) does not enter the
+            // ring: tested here, inline in the scan, so it costs neither the ring's prefetches nor
+            // a place in it. The words with hits leave in the same order, so the same pairs reach
+            // `seed_of_pair` in the same order; a cut stops only in `emit`, which runs only in a
+            // push, and is seen after that push as before.
+            if !two_stage.has_hits(u64::from(index)) {
+                return true;
+            }
             let left = ring.push((s_off, index), |w| w.1 as usize, &mut emit);
             !PIECE || !left || cut.go()
         },

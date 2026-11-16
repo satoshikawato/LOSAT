@@ -1,0 +1,1 @@
+- `-task dc-megablast` is faster against long subjects such as a genome: each subject word's presence is tested inside the scan's loop, and only a word with hits calls out, as in NCBI's scanner (a zebrafish genome of 1.37 Gbp searched with 100 short cDNAs on one thread runs 38 % fewer instructions). Reports do not change.

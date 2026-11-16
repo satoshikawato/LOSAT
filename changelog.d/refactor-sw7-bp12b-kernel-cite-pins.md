@@ -1,0 +1,1 @@
+- Engine: the NCBI references in the BLASTP preliminary-search kernel's comments now name the pinned 2.17.0 source lines (commit 598d8ae6). No output changes.

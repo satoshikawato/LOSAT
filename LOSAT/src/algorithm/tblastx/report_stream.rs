@@ -256,10 +256,11 @@ pub(super) fn check(
     // the length adjustment `a`. The adjustment is between 0 and the smaller root of
     // `n a^2 - (q n + db) a + c`, at most `2 c / (q n + db) <= 2 q` with `c <= q db`
     // (`compute_length_adjustment_ncbi`; the bound of blastn's `x_rpt_stream::check`), and a
-    // context has at most a third of its query's letters, plus one.
+    // context has at most a third of its query's letters, plus one. A negative `n` (an alias
+    // file's `NSEQ`, NCBI's `Int4`) adds `|n| a` to the database length: the bound takes `|n|`.
     let db_length = i128::from(subjects.numbers.effective_length() / 3);
     let factor = 2 * (lengths().max().unwrap_or(0) / 3 + 1) + 1;
-    if (db_length.abs() + i128::from(subjects.numbers.count) * factor) * factor
+    if (db_length.abs() + i128::from(subjects.numbers.count.unsigned_abs()) * factor) * factor
         > i128::from(i64::MAX)
     {
         return Err(Off::SearchSpace);
@@ -325,6 +326,8 @@ fn database_check(
         sam: false,
         taxonomy: format.writes_taxonomy(),
         words: format.printed_ids(),
+        stops_at_failed_lookup: format.is_tabular()
+            && crate::report::tabular::may_stop_at_failed_lookup(format.tabular_spec()),
         prefetched: format.prefetches_subjects()
             && !crate::algorithm::common::database::prefetch_always_off(),
         one_by_one: crate::algorithm::common::database::prefetch_may_be_off(),

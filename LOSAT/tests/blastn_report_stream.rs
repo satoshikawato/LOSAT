@@ -1337,8 +1337,10 @@ fn custom_tabular_reports_give_the_off_bytes() {
             );
         }
     }
-    // A subject whose tabular id LOSAT refuses, which only the last batches report.
-    a_refused_subject_id_comes_after_the_batches_before(&dir, &query, "10 qseqid sseqid stitle");
+    // A subject whose tabular id LOSAT refuses (`sacc` of a failed lookup: NCBI's null pointer;
+    // without `sacc` or `saccver` NCBI writes its catch's row, `report::tabular::FailedLookup`),
+    // which only the last batches report.
+    a_refused_subject_id_comes_after_the_batches_before(&dir, &query, "10 qseqid sacc stitle");
     // NCBI's errors in the first batch: a reader error, a batch of queries without letters. The
     // one batch streams; outfmt 20's line of the field names comes before the error.
     let reader_error = dir.path("bad.fa");

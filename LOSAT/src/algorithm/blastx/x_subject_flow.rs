@@ -857,7 +857,7 @@ mod tests {
             .enumerate()
             .map(|(i, &length)| FastaRecord {
                 internal_id: format!("s{i}"),
-                title: String::new(),
+                title: Vec::new(),
                 sequence: vec![b'A'; length],
                 lowercase_masks: Vec::new(),
                 warnings: Vec::new(),

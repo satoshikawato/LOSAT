@@ -62,6 +62,7 @@ fn run_local_does_not_write_outfmt_13_and_14() {
         let mut outputs = ReportOutputs {
             formats: vec![FormatOutput {
                 outfmt: format,
+                refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                 sink: OutputSink::Writer(&mut sink),
             }],
             diagnostics: &mut diagnostics,
@@ -152,6 +153,7 @@ fn run_local_does_not_write_outfmt_13_and_14_in_tblastn_and_tblastx() {
             let mut outputs = ReportOutputs {
                 formats: vec![FormatOutput {
                     outfmt: format,
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut sink),
                 }],
                 diagnostics: &mut diagnostics,
@@ -321,6 +323,7 @@ fn run_local_writes_outfmt_13_and_14_to_a_receiver_as_the_command_line_writes_fi
             let mut outputs = ReportOutputs {
                 formats: vec![FormatOutput {
                     outfmt: format,
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Files(&mut master, SideFileSink::new("r", received.clone())),
                 }],
                 diagnostics: &mut diagnostics,

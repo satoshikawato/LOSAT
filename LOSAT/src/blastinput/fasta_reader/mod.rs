@@ -318,21 +318,28 @@ impl FastaRecord {
         }
     }
 
-    /// The subject ID of the tabular formats of a `-subject` record (`sseqid`, `sacc`, `saccver`
-    /// of the default report): `report::defline::tabular_subject_id`, or with `-parse_deflines`
-    /// the `saccver` of its ids (a record shown as one without the option keeps the first:
-    /// `BelievedIds::subject_local`).
-    pub fn subject_tabular_id(
-        &self,
-        protein: bool,
-    ) -> Result<Vec<u8>, crate::report::defline::UnknownEncoding> {
+    /// The subject ID of the tabular formats of a `-subject` record that the default report
+    /// prints (`saccver`; also `sseqid` and `sacc` of a record read without `-parse_deflines`):
+    /// `report::defline::tabular_subject_id`, or with `-parse_deflines` the `saccver` of the
+    /// record's ids as `report::db_subject::ParsedSubject` makes them (NCBI keeps a parsed local
+    /// id, `s_ReplaceLocalId` with `parse_local`, and `GetSeqIdList` replaces an `lcl|Subject_`
+    /// one with the first word of the title generated from the rest of the defline).
+    /// `Ok(None)` where `GetSeqIdList` throws (`GenerateDefline` cannot decode the title,
+    /// `report::tabular::SubjectLookup::Failed`); `Err` where LOSAT refuses the ids of a record
+    /// read with `-parse_deflines` (`ParsedSubject::tabular_ids`; never a nucleotide record's).
+    pub fn subject_tabular_id(&self, protein: bool) -> Result<Option<Vec<u8>>, &'static str> {
         match self.believed() {
-            Some(ids) if !ids.subject_local() => Ok(ids.tabular[2].clone()),
-            _ => crate::report::defline::tabular_subject_id(
+            Some(ids) => Ok(
+                crate::report::db_subject::ParsedSubject::of_record(ids, &self.title)
+                    .tabular_ids(protein)?
+                    .map(|[_, _, saccver]| saccver),
+            ),
+            None => Ok(crate::report::defline::tabular_subject_id(
                 self.local_id.as_bytes(),
                 &self.title,
                 protein,
-            ),
+            )
+            .ok()),
         }
     }
 

@@ -346,7 +346,7 @@ fn effective_search_spaces<const UNGAPPED: bool>(
     if check_subjects {
         let total_length = seq_data.db_len_total as i64;
         let (total_length, num_seqs) = if total_length > 0 {
-            (total_length, seq_data.db_num_seqs as i64)
+            (total_length, seq_data.db_num_seqs)
         } else {
             // A database with a total length of 0 holds sequences without letters only:
             // the length of its first sequence (`BlastSeqSrcGetSeqLen` of ordinal id 0) is 0.
@@ -361,7 +361,9 @@ fn effective_search_spaces<const UNGAPPED: bool>(
                 1,
             )
         };
-        if total_length / num_seqs <= 0 {
+        // `stats::setup::setup_subject_length`: `(Uint4)(Int4)(total / num_seqs) == 0` (a
+        // negative `NSEQ` passes; one of 2^31 fails).
+        if crate::stats::setup::setup_subject_length(total_length, num_seqs, None).is_none() {
             let error = anyhow::Error::from(crate::cli::NativeError {
                 exit: 3,
                 message: "BLAST engine error: The average subject length is too short\n"
@@ -424,7 +426,7 @@ fn effective_search_spaces<const UNGAPPED: bool>(
     } else {
         seq_data.db_len_total as i64
     };
-    let db_num_seqs_i64 = seq_data.db_num_seqs as i64;
+    let db_num_seqs = seq_data.db_num_seqs;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:778-786
     // ```c
     //       Int8 effective_search_space =
@@ -483,7 +485,7 @@ fn effective_search_spaces<const UNGAPPED: bool>(
             context_lengths(
                 ctx.len as i64,
                 db_len_total_i64,
-                db_num_seqs_i64,
+                db_num_seqs,
                 &blocks.gapped,
             )
             .map(|(_, effective_search_space)| effective_search_space)

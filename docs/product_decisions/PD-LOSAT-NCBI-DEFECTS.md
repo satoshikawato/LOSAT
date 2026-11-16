@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.37
+- Version: 1.38
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -91,7 +91,12 @@
   after the lookups of the batches before, as in the other formats: a stop after a batch that
   opened the taxonomy database is written as NCBI writes it; line DBID item mixtax,
   Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07);
-  1.37 2026-11-16 (the query-anchored views of BLASTX and TBLASTX, line RG item T3c: TBLASTX's
+  1.37 2026-11-16 (a subject whose title, or for an empty database title its name in the taxonomy
+  database, NCBI's `GenerateDefline` cannot decode: the tabular rows and XML values of NCBI's
+  catches reproduced, rule 2, and the rows at which NCBI stops or prints an uninitialised taxid
+  refused, rule 3; line RG item T7, Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07);
+  1.38 2026-11-16 (the query-anchored views of BLASTX and TBLASTX, line RG item T3c: TBLASTX's
   strand drop, the spread of a subject's masks and TBLASTX's merge of a query record that is also a
   subject into the query's sequence reproduced, with the two exceptions that this merge can throw
   (the report up to the query's description table, then NCBI's error, exit 255; 2026-11-16, T3c
@@ -674,7 +679,7 @@ masked). Line NP item M4a-2c.
 
 ## Reproduced as NCBI (rule 2)
 
-- TBLASTX `-outfmt 1` to `4` (the query-anchored views; version 1.37, 2026-11-15, line RG item T3c,
+- TBLASTX `-outfmt 1` to `4` (the query-anchored views; version 1.38, 2026-11-15, line RG item T3c,
   DECISIONS T3-6): NCBI adds TBLASTX's HSPs of each query frame with `CAlnMix::fForceTranslation`
   (`eTranslateNucToNucAlignment`, showalign.cpp:2058-2063), whose `CAlnMixMatches::Add` throws
   "Unable to mix strands when forcing translation!" for an HSP whose subject strand differs from
@@ -687,7 +692,7 @@ masked). Line NP item M4a-2c.
   `Add` reads as `fForceTranslation` (`alnmix.hpp:77,102`): their query rows run from high to low, and
   none is left out (a protein row has no strand).
 - TBLASTX `-outfmt 1` to `4` of a query record that is also a `-subject` record under
-  `-parse_deflines` (version 1.37, line RG item T3c fix 1): without `fPreserveRows`
+  `-parse_deflines` (version 1.38, line RG item T3c fix 1): without `fPreserveRows`
   (`fForceTranslation`, showalign.cpp:2058-2063) `CAlnMixSequences::Add` makes no other row for the
   record's subject row (alnseq.cpp:173-196), so both rows of its HSPs with itself are the query's one
   `CAlnMixSeq`. No sequence then holds as many Dense-segs as the mix (alnmerger.cpp:108-127: no
@@ -701,7 +706,7 @@ masked). Line NP item M4a-2c.
   (`report::query_anchored::aln_mix`; the review of T3c's cases `x.self.*`, `t.self.*`,
   `v.self.b1.f1`, the probes `tx.t3c.self.*`, the 13 rows `pd.self.tblastx.*` of
   `tests/outfmt0_manifest.tsv` in formats 1 and 3; fixture rows `db.of1.tx.self.*`).
-- The same TBLASTX sections where that merge throws (version 1.37, 2026-11-16, line RG item T3c
+- The same TBLASTX sections where that merge throws (version 1.38, 2026-11-16, line RG item T3c
   fix 2, in place of fix 1's explicit rejection). The first HSP of the record with itself that the
   merge takes (the longest, ties in their order, an HSP of the other strand included) goes to the
   query's own row, and its walk can create a start whose segment already has that row
@@ -720,12 +725,12 @@ masked). Line NP item M4a-2c.
   NCBI's exception, `cli::NativeError::of_writer`; the review's 936 cases where NCBI throws, its
   108 `mg*` cases of both exceptions, the probes `T/t3/fix1_t3c/cases_fix1.tsv`; fixture rows
   `db.of1.tx.throw.*`).
-- `-outfmt 1` to `4` of BLASTP, BLASTN and BLASTX (version 1.37, DECISIONS T3-6): a subject's masks
+- `-outfmt 1` to `4` of BLASTP, BLASTN and BLASTX (version 1.38, DECISIONS T3-6): a subject's masks
   (the `-lcase_masking` runs of a `-subject` record, BLASTN's `-db_soft_mask`) are placed on the columns of the subject's first row that
   meets each and shown in lower case on those columns of every row of the subject
   (`x_FillLocList`, showalign.cpp:4291-4338; `x_OutputSeq`, :2486-2523), also on its rows of other
   HSPs, where the letters are not masked (probes `bn.lc2.f2`, `bn.t3b.lc.*`, `bx.t3c.slc.*`).
-- BLASTX `-outfmt 1` to `4` with the HSPs of length 0 of `-ungapped -window_size 0` (version 1.37,
+- BLASTX `-outfmt 1` to `4` with the HSPs of length 0 of `-ungapped -window_size 0` (version 1.38,
   2026-11-16, line RG item T3c after X2g, 1.33): the description table and the sorts stop the report
   as in outfmt 0 (`Row is empty`, the Dense-seg's exception). Past the table, the section makes a
   Dense-seg of every aligned HSP before its first byte and outside its `try`
@@ -810,6 +815,44 @@ masked). Line NP item M4a-2c.
   outfmt 0 prolog and then `BLAST engine error: Empty CBlastQueryVector`, exit 3.
 - `-max_target_seqs` from 2^30 to 2^31-51: the preliminary hit list size
   (`MIN(MAX(2*h,10),h+50)` in `Int4`) wraps and becomes 10.
+- A subject whose `GenerateDefline` throws (version 1.37, 2026-11-16, line RG item T7): a title,
+  or for a database sequence with an empty stored title the scientific name from which NCBI makes
+  it, in no encoding that `CUtf8::GuessEncoding` recognises (not UTF-8, with a byte 0x81, 0x8D,
+  0x8F, 0x90 or 0x9D; `NStr::HtmlDecode` throws, `ncbistr.cpp:4528-4534`). The tabular formats
+  ask it where `CShowBlastDefline::GetSeqIdList` replaces an id (`showdefline.cpp:218-242`): a
+  `-subject` record whose title's first word starts with `Subject_`, or read with
+  `-parse_deflines` with the id `lcl|Subject_N` (NCBI keeps the parsed local id and generates the
+  title from the rest of the defline: `s7` for `>lcl|Subject_9 TPA: s7 third ~`) (`SetSubjectId`,
+  for `sseqid`, `sgi`, `sacc` or `saccver`), and a database sequence without parsed Seq-ids or
+  with an `lcl|Subject_N` id (`SetSubjectId` where the subject Bioseq's ids hold it, and
+  `x_SetSubjectIds` for `sallseqid`, `sallgi` or `sallacc`, which pushes the ids of the
+  definition lines before the first that holds it). The catch of `SetFields`
+  (`tabular.cpp:862-875`) adds the Seq-align id to the `sall*` lists of the rows before
+  (`SetSubjectId(list)`, `tabular.cpp:1374-1378`; after `x_SetSubjectIds` cleared them and pushed
+  those lines where that threw) and returns: the row prints `Unknown` for `sseqid`, 0 for `sgi`, the scores, the query's
+  ids, `qcovs`, `qcovus` and `qcovhsp`, `qlen` where a query id field or `qcovhsp` is asked (else
+  0), `slen` 0 (where only `x_SetSubjectIds` threw, the length and the subject's own `sseqid`,
+  `sgi`, `sacc`, `saccver`), the zeros of `x_ResetFields`
+  (`pident` 0.000, `ppos` 0.00, `frames` 0/0, `sstrand` N/A, empty letters and BTOP), and the titles
+  and taxonomy of the last row of the query's (or psiblast round's) report that found its subject
+  (`N/A` before one). In XML the catches write the Seq-id: outfmt 5 `Hit_id` `lcl|Subject_N`,
+  `Hit_def` and `Hit_accession` `Unknown`, `Hit_len` 0 (`blastxml_format.cpp:398-407`), a query's
+  Seq-loc id (`lcl|Query_N`; with `-parse_deflines` the best of its ids, `lcl|qbad`,
+  `gb|AB000099.1|`, `gi|4504347` of `gi|4504347|ref|NP_000549.1|`) and `No definition line`
+  (`:550-566`); XML2 and JSON a `HitDescr` with the id alone and the sequence's length
+  (`blastxml2_format.cpp:410-415`), a query's id without a title (`:584-596`). Outfmt 0, 11 and 18
+  were NCBI's before (`Unknown`, the line in place of each alignment), but for a `-parse_deflines`
+  record with an `lcl|Subject_N` id, whose line names the Seq-align id (`Subject_9`, LOSAT wrote
+  `Subject_1`). BLASTX reads such a title as its bytes, as the other programs do. Each stream of
+  LOSAT Web is the CLI's run of its format: where the default tabular formats stop (rule 3 below)
+  and the argv asks for another format, streams 6 and 7 fail alone and the others are written in
+  the same search; with the argv's own `-outfmt 6` or `7` the run fails, as the CLI's
+  (`docs/web/abi_v2.md` §7). That holds for these checks of the formats. A Web run still fails
+  as a whole, where the CLI completes the argv's format, in two more cases: (a) a format fails in
+  the middle of its report, `-sorthits` with a description total above 99999 bits in outfmt 0
+  (all programs), or an NCBI error of outfmt 0 alone such as BLASTX `Row is empty`; dev had both;
+  (b) a stream that the Web adds fails alone after it sent a chunk (BLASTX, a later query batch
+  with an undecodable `Subject_` title). These are current limits.
 - Defects without an effect on the output that LOSAT follows: the negative `Int4`
   offset of `BlastGetStartForGappedAlignmentNucl`, the out-of-range read of
   `hard_ranges[1]` for the last subject chunk, the out-of-range `double` to `Int4`
@@ -1075,7 +1118,7 @@ masked). Line NP item M4a-2c.
   does, so its refusal follows the prolog. The other sections of such a record are NCBI's
   (fixture rows `db.of1.bp.self1.*`, `db.of1.bn.selfrc.*`).
 
-- BLASTX `-outfmt 1` to `4` with `-ungapped -window_size 0` (version 1.37, 2026-11-16, line RG item
+- BLASTX `-outfmt 1` to `4` with `-ungapped -window_size 0` (version 1.38, 2026-11-16, line RG item
   T3c after X2g and T3c fix 3, Owner-delegated, rule 3 as 1.23): an HSP of length 0 among the
   aligned subjects whose segment of length 0 NCBI's merge of the section frees while it still reads
   it. A row's map of starts (`CAlnMixStarts`) holds its segments by `CRef`, `m_Segments` by raw
@@ -1140,6 +1183,18 @@ masked). Line NP item M4a-2c.
   and drops the profile, which LOSAT reproduces (rule 2; fixture rows `db.rps.rej.swendless` and
   `db.rps.mini.sw.zero.6`).
 
+- The tabular `sacc` or `saccver` of a row whose subject lookup fails as in rule 2 above (version
+  1.37, 2026-11-16, line RG item T7, Owner-delegated): outfmt 6, 7 and 10 (and 20) with them in the
+  field list, which the default fields of 6, 7 and 10 have (`saccver`). NCBI BLAST+ 2.17.0 takes the
+  label of `FindBestChoice` of the empty `m_SubjectId`, a null pointer (`tabular.cpp:174-185`;
+  `CCoreException::eNullPtr`, `ncbiobj.cpp:1010`), and stops with exit status 255 and a stack trace
+  of its build after the row's earlier fields. Also `staxid` of such a row when it is the first row
+  of its query's (or round's) report: `m_SubjectTaxId` is printed before any row set it
+  (`tabular.cpp:262-268`; the member is not initialised, a different number in each run). LOSAT
+  refuses (exit 1) before the query batch's report, where it refused every such subject before
+  1.37, so its output is a prefix of NCBI's. A failed lookup does not depend on the other
+  subjects: one alone, the first, the last or two give the same rows.
+
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 
 On a database with parsed Seq-ids NCBI gives these results without failing, and they look wrong
@@ -1160,7 +1215,7 @@ would port:
   subject.
 - A reported sequence with the id, or the display id of its description line (outfmt 0 to 4 of
   BLASTP, PSIBLAST and RPSBLAST, 1 to 4 of BLASTN and TBLASTN since version 1.28, of BLASTX and
-  TBLASTX since version 1.37), of a query read with `-parse_deflines` in the query batch that
+  TBLASTX since version 1.38), of a query read with `-parse_deflines` in the query batch that
   reports it (with outfmt 5, in any batch), and in outfmt 1 to 4 of BLASTP, BLASTN, BLASTX, TBLASTN
   and TBLASTX with the id or display id `lcl|Query_N` of a query read without it (TBLASTN's merge
   then reads the protein query's letters as nucleotides, probe `tn.t3b.d.qid.f1`; BLASTX's and

@@ -890,7 +890,7 @@ mod tests {
     fn record(sequence: &str) -> super::super::input::FastaRecord {
         super::super::input::FastaRecord {
             internal_id: "Query_1".to_string(),
-            title: String::new(),
+            title: Vec::new(),
             sequence: sequence.as_bytes().to_vec(),
             lowercase_masks: Vec::new(),
             warnings: Vec::new(),

@@ -582,46 +582,84 @@ pub(crate) fn post_line_in(
 // thread is lost: its post prints the header alone, and `CATCH_ALL`'s `LOG_POST` (no header) its
 // line feed (NCBI BLAST+ 2.17.0, line RG D3-1 `om/` cases k01-k06 and `om/mute/` e01-e16: the query
 // warning line, the taxonomy database warning, the engine error, with 1 to 4 threads).
-// The flag is NCBI's for one run (one application, one main thread). LOSAT's runs in one process
-// (the library's calls, LOSAT Web's runs) each begin a stream of their own (`begin_main_diag_run`,
-// at the command line's `cli::main_entry`, `api::start::CallStart::new` and
-// `api::start::begin_with`): a run never finds the stream failed by an earlier one.
-static MAIN_DIAG: MainDiag = MainDiag::new();
+// The flag is NCBI's for one run (one application, one main thread), and each LOSAT run owns
+// its own (`MainDiag`): the command line's process is one run (`COMMAND_LINE`); a library call
+// (`api::start::CallStart`) holds a stream of its own, which the call's code reads on the threads
+// that run it (`MainDiag::enter` where the call runs, `utils::threading::with_search_pool` for the
+// workers of its searches). Two calls in one process, one after the other, at once on several
+// threads, or as two `run_batches` iterators that one thread advances in turn, never see each
+// other's stream (line RG D3-1 review 4 B1).
+static COMMAND_LINE: MainDiag = MainDiag::new();
 
-/// The main thread's diagnostic stream of the runs of the process: the number of the run going on,
-/// and the number of the run whose stream failed (0: none).
+thread_local! {
+    /// The stream of the library call whose code this thread runs (`MainDiag::enter`).
+    static CURRENT: std::cell::RefCell<Option<std::sync::Arc<MainDiag>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// The diagnostic stream of NCBI's main thread of one run: whether it has failed.
+#[derive(Debug, Default)]
 pub(crate) struct MainDiag {
-    run: std::sync::atomic::AtomicU64,
-    failed: std::sync::atomic::AtomicU64,
+    failed: std::sync::atomic::AtomicBool,
 }
 
 impl MainDiag {
     pub(crate) const fn new() -> MainDiag {
         MainDiag {
-            run: std::sync::atomic::AtomicU64::new(1),
-            failed: std::sync::atomic::AtomicU64::new(0),
+            failed: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
-    /// A run begins, with a stream that has not failed.
-    pub(crate) fn begin_run(&self) {
-        self.run.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    }
-
-    /// The number of the run going on.
-    pub(crate) fn run(&self) -> u64 {
-        self.run.load(std::sync::atomic::Ordering::Relaxed)
-    }
-
-    /// The stream of the run going on fails.
+    /// The stream fails.
     pub(crate) fn fail(&self) {
         self.failed
-            .store(self.run(), std::sync::atomic::Ordering::Relaxed);
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
-    /// Whether the stream of the run going on has failed.
+    /// Whether the stream has failed.
     pub(crate) fn failed(&self) -> bool {
-        self.failed.load(std::sync::atomic::Ordering::Relaxed) == self.run()
+        self.failed.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// The stream of the run whose code this thread runs: the library call's that this thread
+    /// entered (`enter`), else the command line's.
+    fn with_current<R>(read: impl FnOnce(&MainDiag) -> R) -> R {
+        CURRENT.with(|current| match current.borrow().as_deref() {
+            Some(diag) => read(diag),
+            None => read(&COMMAND_LINE),
+        })
+    }
+
+    /// The library call's stream that this thread runs for (`None`: the command line's), to hand to
+    /// the threads that work for the same run (`utils::threading::with_search_pool`).
+    pub(crate) fn current() -> Option<std::sync::Arc<MainDiag>> {
+        CURRENT.with(|current| current.borrow().clone())
+    }
+
+    /// A thread made for one search of a run (a worker of its pool, `with_search_pool`) takes
+    /// that run's stream (`current` on the thread that made it) for the rest of its life.
+    pub(crate) fn adopt(diag: Option<std::sync::Arc<MainDiag>>) {
+        CURRENT.with(|current| *current.borrow_mut() = diag);
+    }
+
+    /// This thread runs `diag`'s run (a library call) until the guard is dropped, which gives
+    /// the thread back the stream it had.
+    pub(crate) fn enter(diag: Option<std::sync::Arc<MainDiag>>) -> MainDiagGuard {
+        MainDiagGuard {
+            before: CURRENT.with(|current| current.replace(diag)),
+        }
+    }
+}
+
+/// The guard of `MainDiag::enter`.
+pub(crate) struct MainDiagGuard {
+    before: Option<std::sync::Arc<MainDiag>>,
+}
+
+impl Drop for MainDiagGuard {
+    fn drop(&mut self) {
+        let before = self.before.take();
+        CURRENT.with(|current| *current.borrow_mut() = before);
     }
 }
 
@@ -630,27 +668,15 @@ impl MainDiag {
 /// `algorithm::pssm_search::annot_index`): the run's later posts print their header only
 /// (`post_line`) and `CATCH_ALL` its line feeds (`cli::catch_all_text`). False unless a psiblast
 /// or tblastn `-in_pssm` run posted it: the command line's, or a library call's (`Inputs::pssm`;
-/// each call is a run, `begin_main_diag_run`); LOSAT Web refuses `-in_pssm`.
+/// each call is a run with a stream of its own, `MainDiag`); LOSAT Web refuses `-in_pssm`.
 pub(crate) fn main_diag_failbit() -> bool {
-    MAIN_DIAG.failed()
+    MainDiag::with_current(MainDiag::failed)
 }
 
 /// Marks NCBI's main-thread diagnostic stream failed for the rest of the run
 /// (`main_diag_failbit`); called where the run writes the post that fails it.
 pub(crate) fn set_main_diag_failbit() {
-    MAIN_DIAG.fail();
-}
-
-/// A run begins (the command line's, a library call's, a LOSAT Web run's): NCBI's application of
-/// that run starts with a diagnostic stream that has not failed.
-pub(crate) fn begin_main_diag_run() {
-    MAIN_DIAG.begin_run();
-}
-
-/// The number of the run going on (tests of the run entries).
-#[cfg(test)]
-pub(crate) fn main_diag_run() -> u64 {
-    MAIN_DIAG.run()
+    MainDiag::with_current(MainDiag::fail);
 }
 
 // NCBI reference (598d8ae6): c++/include/corelib/ncbidiag.hpp:550-551, 564-567
@@ -698,18 +724,35 @@ pub fn err_post_x_bytes(err_code: u32, err_subcode: u32, message: &[u8]) -> Vec<
 mod tests {
     use super::*;
 
-    // A second run in the process (a library call, a LOSAT Web run) does not find the stream
-    // failed by the run before it.
+    // Each run's stream is its own (line RG D3-1 review 4 B1): a library call entered on a thread
+    // reads its stream there, another call entered in turn on the same thread reads its own, and
+    // leaving a call gives the thread back the stream it had; a thread that runs no call reads
+    // the command line's.
     #[test]
-    fn a_new_run_has_a_diagnostic_stream_of_its_own() {
-        let diag = MainDiag::new();
-        assert!(!diag.failed());
-        diag.fail();
-        assert!(diag.failed());
-        diag.begin_run();
-        assert!(!diag.failed());
-        diag.fail();
-        assert!(diag.failed());
+    fn each_run_has_a_diagnostic_stream_of_its_own() {
+        let a = std::sync::Arc::new(MainDiag::new());
+        let b = std::sync::Arc::new(MainDiag::new());
+        {
+            let _a = MainDiag::enter(Some(a.clone()));
+            assert!(!main_diag_failbit());
+            set_main_diag_failbit();
+            assert!(main_diag_failbit());
+            {
+                let _b = MainDiag::enter(Some(b.clone()));
+                assert!(!main_diag_failbit());
+            }
+            assert!(main_diag_failbit());
+        }
+        assert!(a.failed());
+        assert!(!b.failed());
+        assert!(!COMMAND_LINE.failed());
+        assert!(MainDiag::current().is_none());
+        let _b = MainDiag::enter(Some(b.clone()));
+        assert!(!main_diag_failbit());
+        // Another thread runs no call until it enters one.
+        std::thread::scope(|scope| {
+            scope.spawn(|| assert!(MainDiag::current().is_none()));
+        });
     }
 
     // makeblastdb 2.17.0 (the official Linux x64 release) with `MAX_LMDB_TXN_ENTRY=-1x` and two

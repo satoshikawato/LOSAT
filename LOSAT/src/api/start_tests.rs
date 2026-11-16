@@ -95,16 +95,26 @@ fn the_dry_run_and_the_start_are_the_argv_s_words() {
     }
 }
 
-// Line RG D3-1 review 2 N1: every library call is a run of its own, whose posts no earlier run's
-// failed diagnostic stream mutes (`ncbi_exception::main_diag_failbit`, which only a command
-// line's `-in_pssm` run sets).
+// Line RG D3-1 review 2 N1 and review 4 B1: every library call is a run of its own, whose posts no
+// other run's failed diagnostic stream mutes (`ncbi_exception::main_diag_failbit`), and whose
+// failed stream mutes no other run's: two calls entered in turn on one thread each read their own.
 #[test]
 fn a_call_begins_a_diagnostic_stream_of_its_own() {
     let mut diagnostics = Vec::<u8>::new();
     let search = validate(Program::Blastp, &["-evalue", "1"]).unwrap();
-    let before = crate::ncbi_exception::main_diag_run();
-    CallStart::new(&search, Inputs::new(&[], &[]), &mut diagnostics).unwrap();
-    assert!(crate::ncbi_exception::main_diag_run() > before);
+    let first = CallStart::new(&search, Inputs::new(&[], &[]), &mut diagnostics).unwrap();
+    let second = CallStart::new(&search, Inputs::new(&[], &[]), &mut diagnostics).unwrap();
+    {
+        let _first = first.enter();
+        crate::ncbi_exception::set_main_diag_failbit();
+        assert!(crate::ncbi_exception::main_diag_failbit());
+    }
+    assert!(!crate::ncbi_exception::main_diag_failbit());
+    let _second = second.enter();
+    assert!(!crate::ncbi_exception::main_diag_failbit());
+    drop(_second);
+    let _first = first.enter();
+    assert!(crate::ncbi_exception::main_diag_failbit());
 }
 
 // No NCBI counterpart: the library's contract (`api`): a search of records without `-logfile`,

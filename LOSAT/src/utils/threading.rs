@@ -194,6 +194,9 @@ where
         // on this caller below. body lives until its loop and all scoped children
         // have returned; failed construction never starts slot zero.
         let callback = unsafe { CallerCallback::new(&mut body) };
+        // The workers run for the caller's run: they post to its diagnostic stream
+        // (`ncbi_exception::MainDiag`; a library call's own, or the command line's).
+        let diag = crate::ncbi_exception::MainDiag::current();
         std::thread::scope(|scope| -> Result<()> {
             let mut caller = None;
             let pool = rayon::ThreadPoolBuilder::new()
@@ -204,6 +207,8 @@ where
                     if index == 0 {
                         // SAFETY: slot zero is run only by the owning caller.
                         unsafe { callback.call() };
+                    } else {
+                        crate::ncbi_exception::MainDiag::adopt(diag.clone());
                     }
                 })
                 .exit_handler(|_index| {

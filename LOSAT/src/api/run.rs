@@ -790,6 +790,10 @@ pub(super) fn run_local(
     outputs: &mut ReportOutputs<'_>,
     start: &mut CallStart,
 ) -> anyhow::Result<()> {
+    // The call's code runs on this thread with the call's own diagnostic stream (one batch of
+    // `run_batches` after another's of another call, too), and its searches' workers with it
+    // (`utils::threading::with_search_pool`).
+    let _run = start.enter();
     let Err(error) = run_local_entry(command, inputs, outputs, start) else {
         return Ok(());
     };

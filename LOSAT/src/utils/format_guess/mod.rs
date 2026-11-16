@@ -328,19 +328,61 @@ const fn init_symbol_type_table() -> [u8; 256] {
 //         }
 //     }
 // ```
-/// `NStr::Split(data, delims, lines, NStr::fSplit_Tokenize)` with `delims` a set of single characters (`fSplit_ByPattern` is
-/// not set, so every character of the delimiter string is a delimiter): the non-empty runs of bytes between delimiters.
-/// Leading, trailing and repeated delimiters give no empty token.
-pub(crate) fn split_tokenize<F: Fn(u8) -> bool>(data: &[u8], is_delim: F) -> Vec<&[u8]> {
-    data.split(|&c| is_delim(c))
-        .filter(|token| !token.is_empty())
-        .collect()
+// `NStr::Split(data, delims, lines, NStr::fSplit_Tokenize)` with `delims` a set of single characters
+// (`fSplit_ByPattern` is not set, so every character of the delimiter string is a delimiter): the non-empty runs of
+// bytes between delimiters. Leading, trailing and repeated delimiters give no empty token.
+
+/// The tokens a test reads by position: `IsLinePsl`'s 21 after its first column is the most.
+const KEPT_TOKENS: usize = 24;
+
+/// The tokens of `NStr::Split(str, delims, tokens, NStr::fSplit_Tokenize)` (and `fSplit_MergeDelimiters |
+/// fSplit_Truncate`, the same flags): how many there are, and the first [`KEPT_TOKENS`] of them, which are all the
+/// tests read by position (a test that reads every token goes through the line itself).
+#[derive(Clone, Copy)]
+struct Tokens<'a> {
+    kept: [&'a [u8]; KEPT_TOKENS],
+    len: usize,
 }
 
-/// `NStr::Split(str, delims, tokens, NStr::fSplit_Tokenize)` (and `fSplit_MergeDelimiters | fSplit_Truncate`, the
-/// same flags) with the delimiters a list of bytes.
-fn tokens<'a>(str: &'a [u8], delims: &[u8]) -> Vec<&'a [u8]> {
-    split_tokenize(str, |c| delims.contains(&c))
+impl<'a> Tokens<'a> {
+    /// `tokens.size()`.
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    /// `tokens.empty()`.
+    fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// `tokens[i]` of a token that exists (`i < len()`).
+    fn at(&self, i: usize) -> &'a [u8] {
+        assert!(i < self.len.min(KEPT_TOKENS), "token {i} of {}", self.len);
+        self.kept[i]
+    }
+
+    /// `tokens[i]` when it exists.
+    fn get(&self, i: usize) -> Option<&'a [u8]> {
+        (i < self.len.min(KEPT_TOKENS)).then(|| self.kept[i])
+    }
+}
+
+/// [`Tokens`] of `str` split at the bytes `delims`.
+fn tokens<'a>(str: &'a [u8], delims: &[u8]) -> Tokens<'a> {
+    let mut tokens = Tokens {
+        kept: [&[]; KEPT_TOKENS],
+        len: 0,
+    };
+    for token in str
+        .split(|c| delims.contains(c))
+        .filter(|token| !token.is_empty())
+    {
+        if tokens.len < KEPT_TOKENS {
+            tokens.kept[tokens.len] = token;
+        }
+        tokens.len += 1;
+    }
+    tokens
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3574-3597
@@ -365,7 +407,7 @@ fn tokens<'a>(str: &'a [u8], delims: &[u8]) -> Vec<&'a [u8]> {
 // ```
 /// `NStr::SplitInTwo(str, delims, str1, str2, flags)`: `str1` (the bytes before the first delimiter, all of `str`
 /// when there is none), `str2` (after it; after the run of delimiters with `fSplit_MergeDelimiters`, `merge`) and
-/// whether a delimiter was found. `CStrTokenizeBase::Advance` (quoted at [`split_tokenize`]) without
+/// whether a delimiter was found. `CStrTokenizeBase::Advance` (quoted at [`tokens`]) without
 /// `fSplit_Truncate_Begin` keeps an empty `str1` before a leading delimiter.
 fn split_in_two<'a>(str: &'a [u8], delims: &[u8], merge: bool) -> (&'a [u8], &'a [u8], bool) {
     match str.iter().position(|c| delims.contains(c)) {
@@ -399,13 +441,47 @@ fn contains(str: &[u8], pattern: &[u8]) -> bool {
 //             do {
 //                 pos = str.find(pattern, search_pos);
 // ```
-/// `NStr::Find(str, pattern)`: the position of the first `pattern` in `str`.
+/// The position of the first `byte` in `hay`, read eight bytes at a time (a byte equal to `byte` is a zero byte of
+/// the word XOR `byte` in every lane; the lowest flagged lane is the first zero, a borrow only flags lanes above
+/// one).
+fn find_byte(hay: &[u8], byte: u8) -> Option<usize> {
+    const LOW: u64 = 0x0101_0101_0101_0101;
+    const HIGH: u64 = 0x8080_8080_8080_8080;
+    let lanes = LOW * u64::from(byte);
+    let mut chunks = hay.chunks_exact(8);
+    let mut at = 0;
+    for chunk in &mut chunks {
+        let word = u64::from_le_bytes(chunk.try_into().expect("eight bytes")) ^ lanes;
+        let zero = word.wrapping_sub(LOW) & !word & HIGH;
+        if zero != 0 {
+            return Some(at + (zero.trailing_zeros() / 8) as usize);
+        }
+        at += 8;
+    }
+    chunks
+        .remainder()
+        .iter()
+        .position(|&c| c == byte)
+        .map(|rest| at + rest)
+}
+
+/// `NStr::Find(str, pattern)`: the position of the first `pattern` (one byte or more) in `str`, found from its
+/// first byte.
 fn find(str: &[u8], pattern: &[u8]) -> Option<usize> {
+    let (&first, rest) = pattern.split_first()?;
     if pattern.len() > str.len() {
         return None;
     }
-    str.windows(pattern.len())
-        .position(|window| window == pattern)
+    let last = str.len() - pattern.len();
+    let mut from = 0;
+    while from <= last {
+        let at = from + find_byte(&str[from..=last], first)?;
+        if &str[at + 1..at + pattern.len()] == rest {
+            return Some(at);
+        }
+        from = at + 1;
+    }
+    None
 }
 
 /// The C string that starts `bytes` (up to its first NUL): what `std::string(const char*)`, `CTempString(const
@@ -429,19 +505,50 @@ fn fill_to<R: Read>(input: &mut R, data: &mut Vec<u8>, want: usize, ended: &mut 
     }
 }
 
-/// The stream `CFormatGuess` reads (`m_Stream`): the bytes read from the source so far (a read that is stepped back
-/// leaves them for the next one, as `CStreamUtils::Stepback` puts them back into the stream), the read position and
-/// the stream state.
-struct Stream<R> {
-    source: R,
+/// The bytes of the stream `CFormatGuess` reads: all of them for a stream over bytes in memory, those read so far
+/// for a reader.
+pub(crate) trait Source {
+    /// The bytes from the start of the stream.
+    fn bytes(&self) -> &[u8];
+    /// Reads on until [`Source::bytes`] holds `want` bytes or the input ends.
+    fn fill_to(&mut self, want: usize);
+}
+
+impl Source for &[u8] {
+    fn bytes(&self) -> &[u8] {
+        self
+    }
+
+    fn fill_to(&mut self, _want: usize) {}
+}
+
+/// A [`Source`] that reads a reader as far as the guess reads it.
+pub(crate) struct ReadSource<R> {
+    reader: R,
     bytes: Vec<u8>,
     ended: bool,
+}
+
+impl<R: Read> Source for ReadSource<R> {
+    fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    fn fill_to(&mut self, want: usize) {
+        fill_to(&mut self.reader, &mut self.bytes, want, &mut self.ended);
+    }
+}
+
+/// The stream `CFormatGuess` reads (`m_Stream`): its bytes (a read that is stepped back leaves them for the next one,
+/// as `CStreamUtils::Stepback` puts them back into the stream), the read position and the stream state.
+struct Stream<S> {
+    source: S,
     pos: usize,
     /// `good()`: neither `eofbit` nor `failbit` is set.
     good: bool,
 }
 
-impl<R: Read> Stream<R> {
+impl<S: Source> Stream<S> {
     /// `m_Stream.read(buf, n)` and `m_Stream.gcount()`: the bytes read, as a range of `bytes`. A read of fewer than
     /// `n` bytes sets `eofbit` and `failbit`; a stream that is not good reads nothing (its `sentry` fails).
     fn read(&mut self, n: usize) -> Range<usize> {
@@ -449,13 +556,8 @@ impl<R: Read> Stream<R> {
         if !self.good {
             return start..start;
         }
-        fill_to(
-            &mut self.source,
-            &mut self.bytes,
-            start.saturating_add(n),
-            &mut self.ended,
-        );
-        let end = self.bytes.len().min(start.saturating_add(n));
+        self.source.fill_to(start.saturating_add(n));
+        let end = self.source.bytes().len().min(start.saturating_add(n));
         if end - start < n {
             self.good = false;
         }
@@ -487,6 +589,19 @@ pub(crate) struct Stats {
     pub(crate) dna_chars: usize,
     /// `m_iStatsCountAaChars`
     pub(crate) aa_chars: usize,
+}
+
+/// The non-empty runs of `data` between the bytes for which `ends` holds (`NStr::Split(..., fSplit_Tokenize)`, the
+/// lines of `NcbiGetline`): the bytes that are no line end and follow one or the start.
+fn count_runs(data: &[u8], ends: impl Fn(u8) -> bool + Copy) -> usize {
+    let mut runs = 0;
+    let mut after_end = true;
+    for &c in data {
+        let end = ends(c);
+        runs += usize::from(after_end & !end);
+        after_end = end;
+    }
+    runs
 }
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:687-749
@@ -638,33 +753,65 @@ pub(crate) struct Stats {
 //     return is;
 // }
 // ```
+
 /// `EnsureStats` on the sample. `NcbiGetline(..., "\r\n")` ends a line at `\r` or `\n`; a `\r` followed by `\n` is one
 /// delimiter and every other pair (`\n\r`, `\r\r`, `\n\n`) is two, so an empty line only adds an empty `strLine`, which
 /// `EnsureStats` does not count. The lines are therefore the non-empty runs between `\r`/`\n` bytes, each with one `\n`
 /// appended; the loop ends at the first read that finds nothing left (`fail()`), after the last line.
 fn stats_of(data: &[u8]) -> Stats {
-    let mut stats = Stats::default();
-    for line in split_tokenize(data, |c| c == b'\r' || c == b'\n') {
-        let is_header = line[0] == b'>';
-        // `strLine += '\n'`
-        for &c in line.iter().chain(std::iter::once(&b'\n')) {
-            let type_ = SYMBOL_TYPE_TABLE[c as usize];
-            if type_ & (F_ALPHA | F_DIGIT | F_SPACE) != 0 {
-                stats.al_num_chars += 1;
-            } else if c == b'{' || c == b'}' {
-                stats.braces += 1;
+    let line_end = |c: u8| c == b'\n' || c == b'\r';
+    // Every byte counted by value, then those of the lines that start with `>` (found from their `>`) moved to
+    // their own counts; the line ends themselves are no line's bytes, and each line counts a `\n` (a space).
+    let mut all = [0u32; 256];
+    let mut lines = 0;
+    let mut after_end = true;
+    for &c in data {
+        all[usize::from(c)] += 1;
+        let end = line_end(c);
+        lines += usize::from(after_end & !end);
+        after_end = end;
+    }
+    let mut header = [0u32; 256];
+    let mut from = 0;
+    while let Some(at) = find_byte(&data[from..], b'>').map(|at| from + at) {
+        if at == 0 || line_end(data[at - 1]) {
+            let end = data[at..]
+                .iter()
+                .position(|&c| line_end(c))
+                .map_or(data.len(), |len| at + len);
+            for &c in &data[at..end] {
+                header[usize::from(c)] += 1;
             }
-            if !is_header {
-                if type_ & F_SPACE == 0 {
-                    stats.data += 1;
-                }
-                if type_ & F_DNA_MAIN_ALPHABET != 0 {
-                    stats.dna_chars += 1;
-                }
-                if type_ & F_PROTEIN_ALPHABET != 0 {
-                    stats.aa_chars += 1;
-                }
-            }
+            from = end;
+        } else {
+            from = at + 1;
+        }
+        if from >= data.len() {
+            break;
+        }
+    }
+    let mut stats = Stats {
+        al_num_chars: lines,
+        ..Stats::default()
+    };
+    for (c, &type_) in SYMBOL_TYPE_TABLE.iter().enumerate() {
+        if c == usize::from(b'\n') || c == usize::from(b'\r') {
+            continue;
+        }
+        let (in_header, in_data) = (header[c] as usize, (all[c] - header[c]) as usize);
+        if type_ & (F_ALPHA | F_DIGIT | F_SPACE) != 0 {
+            stats.al_num_chars += in_header + in_data;
+        } else if c == usize::from(b'{') || c == usize::from(b'}') {
+            stats.braces += in_header + in_data;
+        }
+        if type_ & F_SPACE == 0 {
+            stats.data += in_data;
+        }
+        if type_ & F_DNA_MAIN_ALPHABET != 0 {
+            stats.dna_chars += in_data;
+        }
+        if type_ & F_PROTEIN_ALPHABET != 0 {
+            stats.aa_chars += in_data;
         }
     }
     stats
@@ -824,17 +971,74 @@ pub(crate) struct Guessed {
     pub(crate) fasta_undecided: bool,
 }
 
+/// The line ends `EnsureSplitLines` split its buffer at.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum LineEnds {
+    /// No split: the buffer is the one line (it holds the whole file).
+    #[default]
+    Whole,
+    /// `\r` and `\n` (the buffer holds a `\r\n`).
+    CrLf,
+    /// `\n`.
+    Lf,
+    /// `\r`.
+    Cr,
+}
+
+impl LineEnds {
+    /// Whether `c` ends a line.
+    fn ends(self, c: u8) -> bool {
+        match self {
+            LineEnds::Whole => false,
+            LineEnds::CrLf => c == b'\r' || c == b'\n',
+            LineEnds::Lf => c == b'\n',
+            LineEnds::Cr => c == b'\r',
+        }
+    }
+}
+
+/// `m_TestLines`, without a copy of a line: the non-empty runs of the stream's bytes `range` between `ends`, the
+/// first `count` of them (`EnsureSplitLines` drops a last line that the buffer may have cut), the first `trimmed` of
+/// those without the spaces at their ends (`IsInputRepeatMaskerWithHeader` trims them in place), then `extra`, the C
+/// string that `TestFormatNewick` (or `TestFormatHgvs`) adds when the split fails. The tests read the lines again
+/// from the bytes each time.
+#[derive(Clone, Debug, Default)]
+struct Lines {
+    range: Range<usize>,
+    ends: LineEnds,
+    count: usize,
+    trimmed: usize,
+    extra: Option<Range<usize>>,
+}
+
+impl Lines {
+    /// `m_TestLines.size()`.
+    fn len(&self) -> usize {
+        self.count + usize::from(self.extra.is_some())
+    }
+
+    /// `m_TestLines.empty()`.
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// `m_TestLines.clear()`.
+    fn clear(&mut self) {
+        *self = Lines::default();
+    }
+}
+
 /// `CFormatGuess` on a stream (`CFormatGuess(CNcbiIstream&)`).
-pub(crate) struct FormatGuess<R> {
-    stream: Stream<R>,
+pub(crate) struct FormatGuess<S> {
+    stream: Stream<S>,
     /// `m_pTestBuffer` (`m_iTestDataSize` bytes), as the bytes of the stream it holds.
     buffer: Option<Range<usize>>,
     /// A NUL follows the buffer (`TestFormatNewick`'s and `TestFormatHgvs`'s buffers; `EnsureTestBuffer`'s has none).
     terminated: bool,
     /// `m_iTestBufferSize`
     buffer_size: usize,
-    /// `m_TestLines`
-    lines: Vec<Vec<u8>>,
+    /// `m_TestLines`.
+    lines: Lines,
     /// `m_bSplitDone`
     split_done: bool,
     /// `m_iStatsCount*`, once `m_bStatsAreValid`.
@@ -842,38 +1046,112 @@ pub(crate) struct FormatGuess<R> {
     fasta_undecided: bool,
 }
 
-impl<R: Read> FormatGuess<R> {
-    /// `CFormatGuess(input)` (`Initialize`).
+impl<R: Read> FormatGuess<ReadSource<R>> {
+    /// `CFormatGuess(input)` (`Initialize`) on a reader.
     pub(crate) fn new(input: R) -> Self {
+        FormatGuess::on(ReadSource {
+            reader: input,
+            bytes: Vec::new(),
+            ended: false,
+        })
+    }
+
+    /// The bytes the guess took from its input (makeblastdb reads the mask file on from them).
+    pub(crate) fn into_bytes(self) -> Vec<u8> {
+        self.stream.source.bytes
+    }
+}
+
+impl<'a> FormatGuess<&'a [u8]> {
+    /// `CFormatGuess(input)` on a stream over `bytes` (the whole input, which the guess does not copy).
+    pub(crate) fn over(bytes: &'a [u8]) -> Self {
+        FormatGuess::on(bytes)
+    }
+}
+
+impl<S: Source> FormatGuess<S> {
+    /// `CFormatGuess(input)` (`Initialize`).
+    fn on(source: S) -> Self {
         FormatGuess {
             stream: Stream {
-                source: input,
-                bytes: Vec::new(),
-                ended: false,
+                source,
                 pos: 0,
                 good: true,
             },
             buffer: None,
             terminated: false,
             buffer_size: 0,
-            lines: Vec::new(),
+            lines: Lines::default(),
             split_done: false,
             stats: None,
             fasta_undecided: false,
         }
     }
 
-    /// The bytes the guess took from its input (makeblastdb reads the mask file on from them).
-    pub(crate) fn into_bytes(self) -> Vec<u8> {
-        self.stream.bytes
-    }
-
     /// The test buffer (`m_pTestBuffer`, `m_iTestDataSize` bytes; empty when there is none).
     pub(crate) fn data(&self) -> &[u8] {
         match &self.buffer {
-            Some(range) => &self.stream.bytes[range.clone()],
+            Some(range) => &self.stream.source.bytes()[range.clone()],
             None => &[],
         }
+    }
+
+    /// `m_TestLines`, read from the stream's bytes.
+    fn lines(&self) -> impl Iterator<Item = &[u8]> + Clone + '_ {
+        let bytes = self.stream.source.bytes();
+        let Lines {
+            range,
+            ends,
+            count,
+            trimmed,
+            extra,
+        } = &self.lines;
+        let (ends, trimmed) = (*ends, *trimmed);
+        bytes[range.clone()]
+            .split(move |&c| ends.ends(c))
+            .filter(|line| !line.is_empty())
+            .take(*count)
+            .enumerate()
+            .map(move |(at, line)| {
+                if at < trimmed {
+                    truncate_spaces(line)
+                } else {
+                    line
+                }
+            })
+            .chain(extra.clone().map(|extra| &bytes[extra]))
+    }
+
+    /// Whether `pattern` (of bytes that end no line) is in the bytes the lines are cut from: a line can hold it,
+    /// or begin with it, only then (the test reads the lines after that).
+    fn lines_may_hold(&self, pattern: &[u8]) -> bool {
+        let bytes = self.stream.source.bytes();
+        find(&bytes[self.lines.range.clone()], pattern).is_some()
+            || self
+                .lines
+                .extra
+                .clone()
+                .is_some_and(|extra| find(&bytes[extra], pattern).is_some())
+    }
+
+    /// `m_TestLines[at]`.
+    fn line_at(&self, at: usize) -> Option<&[u8]> {
+        self.lines().nth(at)
+    }
+
+    /// `m_TestLines.push_back(line)` of `TestFormatNewick` and `TestFormatHgvs`: their split failed, so this is the
+    /// one line they add (the split lines left are those of a buffer whose split failed too, or of a pass that
+    /// doubled it).
+    fn push_line(&mut self, line: Range<usize>) {
+        debug_assert!(self.lines.extra.is_none(), "one line added");
+        self.lines.extra = Some(line);
+    }
+
+    /// The line `m_pTestBuffer` holds as a C string (`m_TestLines.push_back(m_pTestBuffer)` of
+    /// `TestFormatNewick` and `TestFormatHgvs`).
+    fn c_string_line(&self) -> Range<usize> {
+        let buffer = self.buffer.clone().unwrap_or_default();
+        buffer.start..buffer.start + c_string(self.data()).len()
     }
 
     /// The statistics of `EnsureStats` (after a call that returned true).
@@ -1166,8 +1444,7 @@ impl<R: Read> FormatGuess<R> {
         self.split_done = false;
         self.lines.clear();
         self.ensure_split_lines();
-        self.lines
-            .iter()
+        self.lines()
             .all(|line| line.is_empty() || line.starts_with(b"#") || line.starts_with(b"--"))
     }
 
@@ -1239,30 +1516,44 @@ impl<R: Read> FormatGuess<R> {
             self.lines.clear();
             return false;
         };
-        let data = &self.stream.bytes[range];
+        let base = range.start;
+        let data = &self.stream.source.bytes()[range];
         let high_count = data.iter().filter(|&&c| 0x80 & c != 0).count();
         if 0 < high_count && data.len() / high_count < MIN_HIGH_RATIO {
             return false;
         }
         self.lines.clear();
-        let mut lines: Vec<&[u8]> = if data.windows(2).any(|w| w == b"\r\n") {
-            split_tokenize(data, |c| c == b'\r' || c == b'\n')
+        // `NStr::Split(data, delims, m_TestLines, NStr::fSplit_Tokenize)`: the non-empty runs between delimiters.
+        let ends = if data.contains(&b'\r') && find(data, b"\r\n").is_some() {
+            LineEnds::CrLf
         } else if data.contains(&b'\n') {
-            split_tokenize(data, |c| c == b'\n')
+            LineEnds::Lf
         } else if data.contains(&b'\r') {
-            split_tokenize(data, |c| c == b'\r')
+            LineEnds::Cr
         } else if data.len() == self.buffer_size {
             // most likely single truncated line
             return false;
         } else {
             // test buffer contains the entire file
-            vec![data]
+            LineEnds::Whole
         };
-        if data.len() == self.buffer_size && lines.len() > 1 {
+        let mut count = match ends {
+            LineEnds::Whole => 1,
+            LineEnds::CrLf => count_runs(data, |c| c == b'\r' || c == b'\n'),
+            LineEnds::Lf => count_runs(data, |c| c == b'\n'),
+            LineEnds::Cr => count_runs(data, |c| c == b'\r'),
+        };
+        if data.len() == self.buffer_size && count > 1 {
             // multiple lines, last likely truncated
-            lines.pop();
+            count -= 1;
         }
-        self.lines = lines.into_iter().map(<[u8]>::to_vec).collect();
+        self.lines = Lines {
+            range: base..base + data.len(),
+            ends,
+            count,
+            trimmed: 0,
+            extra: None,
+        };
         !self.lines.is_empty()
     }
 
@@ -1580,10 +1871,12 @@ impl<R: Read> FormatGuess<R> {
         }
         for line in data.split(|&c| c == b'\n' || c == b'\r') {
             let fields = tokens(line, b" \t");
-            if fields.is_empty() || fields[0].starts_with(b"--") {
+            if fields.is_empty() || fields.at(0).starts_with(b"--") {
                 continue;
             }
-            return fields.len() >= 2 && fields[1] == b"::=" && fields[0][0].is_ascii_alphabetic();
+            return fields.len() >= 2
+                && fields.at(1) == b"::="
+                && fields.at(0)[0].is_ascii_alphabetic();
         }
         false
     }
@@ -1789,11 +2082,12 @@ impl<R: Read> FormatGuess<R> {
             self.stream.stepback(&read);
             self.buffer = Some(read);
             self.terminated = true;
-            let line = c_string(self.data()).to_vec();
-            self.lines.push(line);
+            let line = self.c_string_line();
+            self.push_line(line);
         }
 
-        let is_nexus = self.lines.iter().any(|line| contains(line, b"#NEXUS"));
+        let is_nexus =
+            self.lines_may_hold(b"#NEXUS") && self.lines().any(|line| contains(line, b"#NEXUS"));
         if is_nexus {
             const READ_SIZE: usize = 16384;
             const CHECK_SIZE: usize = 12;
@@ -1804,16 +2098,16 @@ impl<R: Read> FormatGuess<R> {
                 let num_read = read.len();
                 if num_read > 0 {
                     test_buf[CHECK_SIZE..CHECK_SIZE + num_read]
-                        .copy_from_slice(&self.stream.bytes[read]);
+                        .copy_from_slice(&self.stream.source.bytes()[read]);
                     test_buf[CHECK_SIZE + num_read] = 0; // null terminator
                     if find_nocase(c_string(&test_buf), b"begin trees;") {
                         self.stream.clear(); // in case we reached eof
                         return true;
                     }
                     // `strncpy(test_buf, test_buf + num_read, check_size)`: up to a NUL, the rest NUL.
-                    let carried = c_string(&test_buf[num_read..num_read + CHECK_SIZE]).to_vec();
-                    test_buf[..CHECK_SIZE].fill(0);
-                    test_buf[..carried.len()].copy_from_slice(&carried);
+                    let carried = c_string(&test_buf[num_read..num_read + CHECK_SIZE]).len();
+                    test_buf.copy_within(num_read..num_read + carried, 0);
+                    test_buf[carried..CHECK_SIZE].fill(0);
                 }
                 if !self.stream.good {
                     self.stream.clear(); // clear eof
@@ -1830,7 +2124,7 @@ impl<R: Read> FormatGuess<R> {
         if read.is_empty() {
             return false;
         }
-        is_sample_newick(c_string(&self.stream.bytes[read]))
+        is_sample_newick(&self.stream.source.bytes()[read])
     }
 }
 
@@ -2039,9 +2333,13 @@ fn find_nocase(str: &[u8], pattern: &[u8]) -> bool {
 //     return true;
 // }
 // ```
-/// `IsSampleNewick(cline)` of a C string (no NUL in it).
-fn is_sample_newick(cline: &[u8]) -> bool {
-    let line = truncate_spaces(cline);
+/// `IsSampleNewick(pSample)` of the sample read (`cline` is its C string, up to its first NUL; a sample whose first
+/// byte after the spaces is not `(` is no tree before the C string is cut).
+fn is_sample_newick(sample: &[u8]) -> bool {
+    if truncate_spaces_begin(sample).first() != Some(&b'(') {
+        return false;
+    }
+    let line = truncate_spaces(c_string(sample));
     if line.first() != Some(&b'(') {
         return false;
     }

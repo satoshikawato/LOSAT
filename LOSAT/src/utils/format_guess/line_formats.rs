@@ -1,11 +1,9 @@
 //! The tests of `CFormatGuess` that read the split lines (`m_TestLines`), in the order of `sm_CheckOrder`, with the
 //! line tests they call.
 
-use std::io::Read;
-
 use super::{
-    c_isprint, c_string, contains, find, split_in_two, tokens, truncate_spaces, FormatGuess, Stop,
-    F_DNA_MAIN_ALPHABET, SYMBOL_TYPE_TABLE,
+    c_isprint, c_string, contains, find, split_in_two, tokens, truncate_spaces, FormatGuess,
+    Source, Stop, Tokens, F_DNA_MAIN_ALPHABET, SYMBOL_TYPE_TABLE,
 };
 use crate::ncbi_str::{is_space, string_to_int, string_to_non_negative_int, string_to_uint};
 
@@ -79,17 +77,20 @@ fn is_token_integer(token: &[u8]) -> bool {
 /// `s_IsTokenDouble`: the first `.` (`ReplaceInPlace(token, ".", "1", 0, 1)`), then a first `-` and a first `0`
 /// of a token of two bytes or more, count as `1`.
 fn is_token_double(token: &[u8]) -> bool {
-    let mut token = token.to_vec();
-    if let Some(dot) = token.iter().position(|&c| c == b'.') {
-        token[dot] = b'1';
+    let dot = token.iter().position(|&c| c == b'.');
+    // The byte at `i` after the three replacements.
+    let at = |i: usize| {
+        let mut c = if dot == Some(i) { b'1' } else { token[i] };
+        if i == 0 && token.len() > 1 && (c == b'-' || c == b'0') {
+            c = b'1';
+        }
+        c
+    };
+    match token.len() {
+        0 => false,
+        1 if at(0) == b'0' => true,
+        len => (b'1'..=b'9').contains(&at(0)) && (1..len).all(|i| at(i).is_ascii_digit()),
     }
-    if token.len() > 1 && token[0] == b'-' {
-        token[0] = b'1';
-    }
-    if token.len() > 1 && token[0] == b'0' {
-        token[0] = b'1';
-    }
-    is_token_pos_int(&token)
 }
 
 /// `token.size() == 1 && NPOS != token.find_first_of(set)`.
@@ -97,7 +98,7 @@ fn one_of(token: &[u8], set: &[u8]) -> bool {
     token.len() == 1 && set.contains(&token[0])
 }
 
-impl<R: Read> FormatGuess<R> {
+impl<S: Source> FormatGuess<S> {
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:2085-2122
     // ```c++
     //     if ( ! EnsureTestBuffer() || ! EnsureSplitLines() ) {
@@ -134,7 +135,7 @@ impl<R: Read> FormatGuess<R> {
         if !self.ensure_lines() {
             return false;
         }
-        let mut lines = self.lines.iter().skip_while(|line| line.starts_with(b"#"));
+        let mut lines = self.lines().skip_while(|line| line.starts_with(b"#"));
         let Some(first) = lines.next() else {
             return false;
         };
@@ -259,15 +260,14 @@ impl<R: Read> FormatGuess<R> {
     fn repeat_masker_with_header(&mut self) -> bool {
         const LABELS_1ST_LINE: [&[u8]; 5] = [b"SW", b"perc", b"query", b"position", b"matching"];
         const LABELS_2ND_LINE: [&[u8]; 5] = [b"score", b"div.", b"del.", b"ins.", b"sequence"];
-        let mut at = 0;
-        while at < self.lines.len() {
-            let trimmed = truncate_spaces(&self.lines[at]).to_vec();
-            self.lines[at] = trimmed;
-            if !self.lines[at].is_empty() {
-                break;
-            }
-            at += 1;
-        }
+        // The lines up to the first that is not blank are trimmed (`extra`, added by a later test, is never here).
+        debug_assert!(self.lines.extra.is_none());
+        let count = self.lines.count;
+        let at = self
+            .lines()
+            .position(|line| !truncate_spaces(line).is_empty())
+            .unwrap_or(count);
+        self.lines.trimmed = (at + 1).min(count);
         let labelled = |line: &[u8], labels: &[&[u8]]| {
             let mut current_offset = 0;
             labels.iter().all(|label| {
@@ -280,15 +280,18 @@ impl<R: Read> FormatGuess<R> {
                 }
             })
         };
-        at < self.lines.len()
-            && labelled(&self.lines[at], &LABELS_1ST_LINE)
-            && at + 1 < self.lines.len()
-            && labelled(&self.lines[at + 1], &LABELS_2ND_LINE)
-            && at + 2 < self.lines.len()
+        let mut lines = self.lines().skip(at);
+        lines
+            .next()
+            .is_some_and(|line| labelled(line, &LABELS_1ST_LINE))
+            && lines
+                .next()
+                .is_some_and(|line| labelled(line, &LABELS_2ND_LINE))
+            && lines.next().is_some()
     }
 
     fn repeat_masker_without_header(&self) -> bool {
-        self.lines.iter().all(|line| {
+        self.lines().all(|line| {
             let str = truncate_spaces(line);
             str.is_empty() || is_line_rmo(str)
         })
@@ -310,9 +313,9 @@ impl<R: Read> FormatGuess<R> {
     /// `TestFormatVcf`.
     pub(super) fn test_format_vcf(&mut self) -> bool {
         self.ensure_stats_and_lines()
+            && self.lines_may_hold(b"##fileformat=VCFv")
             && self
-                .lines
-                .iter()
+                .lines()
                 .any(|line| line.starts_with(b"##fileformat=VCFv"))
     }
 
@@ -355,7 +358,7 @@ impl<R: Read> FormatGuess<R> {
             return Ok(false);
         }
         let mut count = 0;
-        for line in &self.lines {
+        for line in self.lines() {
             if line.is_empty() || line[0] == b'#' {
                 if line.starts_with(b"##gvf-version") {
                     return Ok(true);
@@ -405,7 +408,7 @@ impl<R: Read> FormatGuess<R> {
             return false;
         }
         let mut count = 0;
-        for line in &self.lines {
+        for line in self.lines() {
             if count == 0 && line.starts_with(b"##gff-version") {
                 return line.starts_with(b"##gff-version 3");
             }
@@ -460,7 +463,7 @@ impl<R: Read> FormatGuess<R> {
             return false;
         }
         let mut count = 0;
-        for line in &self.lines {
+        for line in self.lines() {
             if line.is_empty() || line[0] == b'#' {
                 continue;
             }
@@ -517,7 +520,7 @@ impl<R: Read> FormatGuess<R> {
             return false;
         }
         let mut count = 0;
-        for line in &self.lines {
+        for line in self.lines() {
             if count == 0 && line.starts_with(b"##gff-version 3") {
                 return false;
             }
@@ -565,10 +568,10 @@ impl<R: Read> FormatGuess<R> {
         if !self.ensure_lines() {
             return Ok(false);
         }
-        if self.lines[0].first() != Some(&b'>') || self.lines.len() < 2 {
+        if self.line_at(0).and_then(<[u8]>::first) != Some(&b'>') || self.lines.len() < 2 {
             return Ok(false);
         }
-        for line in &self.lines[1..] {
+        for line in self.lines().skip(1) {
             if !is_line_glimmer3(line)? {
                 return Ok(false);
             }
@@ -594,7 +597,7 @@ impl<R: Read> FormatGuess<R> {
     // ```
     /// `TestFormatAgp` (`IsLineAgp` throws nothing).
     pub(super) fn test_format_agp(&mut self) -> bool {
-        self.ensure_lines() && self.lines.iter().all(|line| is_line_agp(line))
+        self.ensure_lines() && self.lines().all(is_line_agp)
     }
 
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:1861-1890
@@ -630,8 +633,14 @@ impl<R: Read> FormatGuess<R> {
         if !self.ensure_stats_and_lines() {
             return false;
         }
+        if ![&b"track"[..], b"fixedStep", b"variableStep"]
+            .iter()
+            .any(|start| self.lines_may_hold(start))
+        {
+            return false;
+        }
         let found = |line: &[u8], pattern: &[u8]| find(line, pattern) != Some(0);
-        self.lines.iter().any(|line| {
+        self.lines().any(|line| {
             (line.starts_with(b"track")
                 && (contains(line, b"type=wiggle_0") || contains(line, b"type=bedGraph")))
                 || (line.starts_with(b"fixedStep")
@@ -708,13 +717,13 @@ impl<R: Read> FormatGuess<R> {
         let mut track_line_found = false;
         let mut has_start_and_stop = false;
         let mut columncount = 0;
-        for line in &self.lines {
-            let mut str = truncate_spaces(line).to_vec();
+        for line in self.lines() {
+            let mut str = std::borrow::Cow::Borrowed(truncate_spaces(line));
             if str.is_empty() {
                 continue;
             }
             if str.starts_with(b"chr ") || str.starts_with(b"Chr ") || str.starts_with(b"CHR ") {
-                str.remove(3);
+                str.to_mut().remove(3);
             }
             if str.starts_with(b"track") {
                 track_line_found = true;
@@ -734,7 +743,7 @@ impl<R: Read> FormatGuess<R> {
                     return false;
                 }
             }
-            if is_token_pos_int(columns[1]) && is_token_pos_int(columns[2]) {
+            if is_token_pos_int(columns.at(1)) && is_token_pos_int(columns.at(2)) {
                 has_start_and_stop = true;
             }
         }
@@ -794,7 +803,7 @@ impl<R: Read> FormatGuess<R> {
             return false;
         }
         let mut line_found = false;
-        for line in &self.lines {
+        for line in self.lines() {
             if truncate_spaces(line).is_empty()
                 || line.starts_with(b"track")
                 || line.starts_with(b"browser")
@@ -806,8 +815,8 @@ impl<R: Read> FormatGuess<R> {
             if columns.len() != 15
                 || ![1, 2, 4, 6, 7]
                     .iter()
-                    .all(|&i| is_token_pos_int(columns[i]))
-                || !matches!(truncate_spaces(columns[5]), b"+" | b"-")
+                    .all(|&i| is_token_pos_int(columns.at(i)))
+                || !matches!(truncate_spaces(columns.at(5)), b"+" | b"-")
             {
                 return false;
             }
@@ -856,11 +865,11 @@ impl<R: Read> FormatGuess<R> {
             self.stream.stepback(&read);
             self.buffer = Some(read);
             self.terminated = true;
-            let line = c_string(self.data()).to_vec();
-            self.lines.push(line);
+            let line = self.c_string_line();
+            self.push_line(line);
         }
         let mut count = 0;
-        for line in &self.lines {
+        for line in self.lines() {
             if line.is_empty() || line[0] == b'#' {
                 continue;
             }
@@ -922,17 +931,20 @@ impl<R: Read> FormatGuess<R> {
         if !self.ensure_lines() {
             return false;
         }
-        let first = tokens(&self.lines[0], b"\t ");
-        if first.len() != 1 || !first[0].iter().all(u8::is_ascii_digit) {
+        let first = tokens(self.line_at(0).unwrap_or_default(), b"\t ");
+        if first.len() != 1 || !first.at(0).iter().all(u8::is_ascii_digit) {
             return false;
         }
-        let rest = &self.lines[1..];
-        for (i, line) in rest.iter().enumerate() {
-            let toks = tokens(line, b"\t ");
-            if toks.len() != i + 1 && i + 1 != rest.len() {
+        let rest = self.lines.len() - 1;
+        for (i, line) in self.lines().skip(1).enumerate() {
+            let mut toks = line
+                .split(|&c| c == b'\t' || c == b' ')
+                .filter(|token| !token.is_empty());
+            let count = toks.clone().count();
+            if count != i + 1 && i + 1 != rest {
                 return false;
             }
-            if !toks.iter().skip(1).all(|tok| is_token_double(tok)) {
+            if !toks.by_ref().skip(1).all(is_token_double) {
                 return false;
             }
         }
@@ -954,11 +966,7 @@ impl<R: Read> FormatGuess<R> {
     // ```
     /// `TestFormatFlatFileSequence`.
     pub(super) fn test_format_flat_file_sequence(&mut self) -> bool {
-        self.ensure_lines()
-            && self
-                .lines
-                .iter()
-                .all(|line| is_line_flat_file_sequence(line))
+        self.ensure_lines() && self.lines().all(is_line_flat_file_sequence)
     }
 
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:2400-2497
@@ -1064,11 +1072,10 @@ impl<R: Read> FormatGuess<R> {
         if !self.ensure_stats_and_lines() || self.lines.len() < 15 {
             return false;
         }
-        let code = |line: &Vec<u8>| split_in_two(line, b" ", true).0.to_vec();
-        if code(&self.lines[0]) != b"ID" {
+        let mut records = self.lines().map(|line| split_in_two(line, b" ", true).0);
+        if records.next() != Some(b"ID".as_slice()) {
             return false;
         }
-        let mut records = self.lines[1..].iter().map(code);
         let Some(mut line_code) = records.next() else {
             return false;
         };
@@ -1207,13 +1214,14 @@ impl<R: Read> FormatGuess<R> {
         if !self.ensure_stats_and_lines() || self.lines.len() < 19 {
             return false;
         }
-        if split_in_two(&self.lines[0], b" ", true).0 != b"ID" {
+        if split_in_two(self.line_at(0).unwrap_or_default(), b" ", true).0 != b"ID" {
             return false;
         }
-        let mut records = self.lines[1..]
-            .iter()
+        let mut records = self
+            .lines()
+            .skip(1)
             .filter(|line| !line.starts_with(b"XX"))
-            .map(|line| split_in_two(line, b" ", true).0.to_vec());
+            .map(|line| split_in_two(line, b" ", true).0);
         let Some(mut line_code) = records.next() else {
             return false;
         };
@@ -1391,32 +1399,29 @@ impl<R: Read> FormatGuess<R> {
         if !self.ensure_stats_and_lines() || self.lines.len() < 9 {
             return false;
         }
-        if split_in_two(&self.lines[0], b" ", true).0 != b"LOCUS" {
+        if split_in_two(self.line_at(0).unwrap_or_default(), b" ", true).0 != b"LOCUS" {
             return false;
         }
-        let lines = &self.lines;
-        let mut at = 1;
-        // `GenbankGetKeywordLine`: the keyword of the line at `at` (after the continuation lines), `at` past it.
-        let mut next_keyword = || -> Option<Vec<u8>> {
-            let line = lines.get(at)?;
-            if line.len() > 79 {
+        let mut records = self.lines().skip(1);
+        // `GenbankGetKeywordLine`: the keyword of the next line (after the continuation lines), the lines past it.
+        let mut next_keyword = || -> Option<&[u8]> {
+            let mut current = records.next()?;
+            if current.len() > 79 {
                 return None;
             }
             const VALID_INDENTS: [usize; 6] = [0, 2, 3, 5, 12, 21];
             let first_not = |line: &[u8], set: &[u8]| line.iter().position(|c| !set.contains(c));
-            let mut first_not_blank = first_not(line, b" ");
+            let mut first_not_blank = first_not(current, b" ");
             while first_not_blank != Some(0) {
                 if !first_not_blank.is_some_and(|indent| VALID_INDENTS.contains(&indent))
-                    && first_not(&lines[at], b" 1234567890") != Some(10)
+                    && first_not(current, b" 1234567890") != Some(10)
                 {
                     return None;
                 }
-                at += 1;
-                first_not_blank = first_not(lines.get(at)?, b" ");
+                current = records.next()?;
+                first_not_blank = first_not(current, b" ");
             }
-            let keyword = split_in_two(&lines[at], b" ", true).0.to_vec();
-            at += 1;
-            Some(keyword)
+            Some(split_in_two(current, b" ", true).0)
         };
         let Some(mut keyword) = next_keyword() else {
             return false;
@@ -1487,8 +1492,7 @@ impl<R: Read> FormatGuess<R> {
     pub(super) fn test_format_five_col_feature_table(&mut self) -> bool {
         self.ensure_lines()
             && self
-                .lines
-                .iter()
+                .lines()
                 .find(|line| !line.is_empty())
                 .is_none_or(|line| {
                     line.starts_with(b">Feature ") || line.starts_with(b">Features ")
@@ -1513,10 +1517,10 @@ impl<R: Read> FormatGuess<R> {
     /// `TestFormatSnpMarkers`.
     pub(super) fn test_format_snp_markers(&mut self) -> bool {
         self.ensure_lines()
+            && self.lines_may_hold(b"rs")
             && self
-                .lines
-                .iter()
-                .any(|line| scans_snp_marker(c_string(line)))
+                .lines()
+                .any(|line| line.starts_with(b"rs") && scans_snp_marker(c_string(line)))
     }
 
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:1316-1345
@@ -1541,7 +1545,8 @@ impl<R: Read> FormatGuess<R> {
     pub(super) fn test_format_alignment(&mut self) -> bool {
         self.ensure_lines()
             && (self.test_format_clustal()
-                || self.lines.iter().any(|line| contains(line, b"#NEXUS")))
+                || (self.lines_may_hold(b"#NEXUS")
+                    && self.lines().any(|line| contains(line, b"#NEXUS"))))
     }
 
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:1434-1576
@@ -1811,32 +1816,34 @@ impl<R: Read> FormatGuess<R> {
     /// twice.
     fn test_table_delimiter(&self, delims: &[u8]) -> bool {
         let skip = (5..7).filter(|&i| self.lines.len() > i).count();
-        let commented = |line: &Vec<u8>| line.is_empty() || line[0] == b'#' || line[0] == b';';
-        let Some(start) = (skip..self.lines.len()).find(|&i| !commented(&self.lines[i])) else {
+        let commented = |line: &[u8]| line.is_empty() || line[0] == b'#' || line[0] == b';';
+        let Some((start, first)) = self
+            .lines()
+            .enumerate()
+            .skip(skip)
+            .find(|(_, line)| !commented(line))
+        else {
             return false;
         };
-        let ncols = tokens(&self.lines[start], delims).len();
+        let ncols = tokens(first, delims).len();
         if ncols < 2 {
             return false;
         }
         let data_size = self.data().len();
         let mut nlines = 1;
-        for (i, line) in self.lines.iter().enumerate().skip(start) {
+        for (i, line) in self.lines().enumerate().skip(start) {
             if commented(line) {
                 continue;
             }
-            let toks = tokens(line, delims);
-            if toks.len() != ncols {
+            if tokens(line, delims).len() != ncols {
                 if i + 1 != self.lines.len() || data_size < self.buffer_size {
                     return false;
                 }
             } else {
                 nlines += 1;
             }
-            if toks
-                .iter()
-                .any(|token| token.iter().any(|&c| !c_isprint(c)))
-            {
+            // Every token printable: every byte that is not a delimiter.
+            if line.iter().any(|c| !delims.contains(c) && !c_isprint(*c)) {
                 return false;
             }
         }
@@ -1877,7 +1884,7 @@ impl<R: Read> FormatGuess<R> {
             return Ok(false);
         }
         let mut found_id = false;
-        for line in &self.lines {
+        for line in self.lines() {
             if found_id {
                 if looks_like_nuc_seq_data(line) {
                     return Ok(true);
@@ -1941,13 +1948,13 @@ fn is_line_psl(line: &[u8], ignore_first_column: bool) -> bool {
     if tokens.len().wrapping_sub(first) != 21 {
         return false;
     }
-    let token = tokens[first + 8];
-    (first..first + 8).all(|column| is_token_pos_int(tokens[column]))
+    let token = tokens.at(first + 8);
+    (first..first + 8).all(|column| is_token_pos_int(tokens.at(column)))
         && !token.is_empty()
         && token.len() <= 2
         && token.iter().all(|&c| c == b'-' || c == b'+')
-        && (first + 10..first + 13).all(|column| is_token_pos_int(tokens[column]))
-        && (first + 14..first + 18).all(|column| is_token_pos_int(tokens[column]))
+        && (first + 10..first + 13).all(|column| is_token_pos_int(tokens.at(column)))
+        && (first + 14..first + 18).all(|column| is_token_pos_int(tokens.at(column)))
 }
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:3542-3612
@@ -2020,21 +2027,21 @@ fn is_line_psl(line: &[u8], ignore_first_column: bool) -> bool {
 fn is_line_rmo(line: &[u8]) -> bool {
     let values = tokens(line, b" \t");
     values.len() >= 14
-        && is_token_pos_int(values[0])
-        && values[1..4].iter().all(|value| is_token_double(value))
-        && is_token_pos_int(values[5])
-        && is_token_pos_int(values[6])
-        && matches!(values[8], b"+" | b"C")
+        && is_token_pos_int(values.at(0))
+        && (1..4).all(|i| is_token_double(values.at(i)))
+        && is_token_pos_int(values.at(5))
+        && is_token_pos_int(values.at(6))
+        && matches!(values.at(8), b"+" | b"C")
 }
 
 /// The columns 3 to 7 of the GFF family (`tokens[3]` to `tokens[7]` of `IsLineGtf`, `IsLineGff3`, `IsLineGff2`):
 /// two positions, a score, a strand of `strands`, a phase.
-fn gff_columns(tokens: &[&[u8]], strands: &[u8]) -> bool {
-    is_token_pos_int(tokens[3])
-        && is_token_pos_int(tokens[4])
-        && is_token_double(tokens[5])
-        && one_of(tokens[6], strands)
-        && one_of(tokens[7], b".0123")
+fn gff_columns(tokens: &Tokens<'_>, strands: &[u8]) -> bool {
+    is_token_pos_int(tokens.at(3))
+        && is_token_pos_int(tokens.at(4))
+        && is_token_double(tokens.at(5))
+        && one_of(tokens.at(6), strands)
+        && one_of(tokens.at(7), b".0123")
 }
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:3242-3270
@@ -2069,7 +2076,7 @@ fn is_line_gtf(line: &[u8]) -> bool {
     let tokens = tokens(line, b" \t");
     tokens.len() >= 9
         && gff_columns(&tokens, b".+-")
-        && (contains(tokens[8], b"gene_id") || contains(tokens[8], b"transcript_id"))
+        && (contains(tokens.at(8), b"gene_id") || contains(tokens.at(8), b"transcript_id"))
 }
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:3273-3346
@@ -2152,14 +2159,14 @@ fn is_line_gvf(line: &[u8]) -> Result<bool, Stop> {
     ];
     let tokens = tokens(line, b" \t");
     if tokens.len() < 8
-        || !is_token_pos_int(tokens[3])
-        || !is_token_pos_int(tokens[4])
+        || !is_token_pos_int(tokens.at(3))
+        || !is_token_pos_int(tokens.at(4))
         || !TERMS
             .iter()
-            .any(|term| term.eq_ignore_ascii_case(tokens[2]))
-        || !is_token_double(tokens[5])
-        || !one_of(tokens[6], b".+-")
-        || !one_of(tokens[7], b".0123")
+            .any(|term| term.eq_ignore_ascii_case(tokens.at(2)))
+        || !is_token_double(tokens.at(5))
+        || !one_of(tokens.at(6), b".+-")
+        || !one_of(tokens.at(7), b".0123")
     {
         return Ok(false);
     }
@@ -2217,7 +2224,7 @@ fn is_line_gff3(line: &[u8]) -> bool {
     if tokens.len() < 9 || !gff_columns(&tokens, b".+-?") {
         return false;
     }
-    let col9 = tokens[8];
+    let col9 = tokens.at(8);
     col9.len() <= 1
         || [
             &b"ID"[..],
@@ -2423,14 +2430,14 @@ fn is_line_augustus(line: &[u8]) -> bool {
 fn is_line_glimmer3(line: &[u8]) -> Result<bool, Stop> {
     let toks = tokens(line, b"\t ");
     if toks.len() != 5
-        || !is_token_integer(toks[1])
-        || !is_token_integer(toks[2])
-        || !is_token_integer(toks[3])
+        || !is_token_integer(toks.at(1))
+        || !is_token_integer(toks.at(2))
+        || !is_token_integer(toks.at(3))
     {
         return Ok(false);
     }
-    let frame = string_to_int(toks[3], 0).map_err(Stop::Exception)?;
-    Ok((-3..=3).contains(&frame) && is_token_double(toks[4]))
+    let frame = string_to_int(toks.at(3), 0).map_err(Stop::Exception)?;
+    Ok((-3..=3).contains(&frame) && is_token_double(toks.at(4)))
 }
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:3129-3198
@@ -2511,27 +2518,31 @@ fn is_line_agp(line: &[u8]) -> bool {
     if tokens.len() < 8 {
         return false;
     }
+    // A first `-` counts as `1`: a number of 11 bytes or fewer is converted from a copy (`1` and ten more digits
+    // are 10^10 or more, past `INT_MAX`, as any longer number).
     let non_negative_after_dash = |token: &[u8]| {
-        let mut token = token.to_vec();
         if token.len() > 1 && token[0] == b'-' {
-            token[0] = b'1';
+            if token.len() > 11 {
+                return false;
+            }
+            let mut copy = [0u8; 11];
+            copy[..token.len()].copy_from_slice(token);
+            copy[0] = b'1';
+            return string_to_non_negative_int(&copy[..token.len()]) != -1;
         }
-        string_to_non_negative_int(&token) != -1
+        string_to_non_negative_int(token) != -1
     };
-    if !tokens[1..4]
-        .iter()
-        .all(|token| non_negative_after_dash(token))
-        || !one_of(tokens[4], b"ADFGPNOW")
+    if !(1..4).all(|i| non_negative_after_dash(tokens.at(i))) || !one_of(tokens.at(4), b"ADFGPNOW")
     {
         return false;
     }
-    if tokens[4] == b"N" {
-        string_to_non_negative_int(tokens[5]) != -1
+    if tokens.at(4) == b"N" {
+        string_to_non_negative_int(tokens.at(5)) != -1
     } else {
-        string_to_non_negative_int(tokens[6]) != -1
-            && string_to_non_negative_int(tokens[7]) != -1
+        string_to_non_negative_int(tokens.at(6)) != -1
+            && string_to_non_negative_int(tokens.at(7)) != -1
             && tokens.len() == 9
-            && one_of(tokens[8], b"+-")
+            && one_of(tokens.at(8), b"+-")
     }
 }
 
@@ -2759,10 +2770,10 @@ fn try_process_clustal_seq_data(line: &[u8]) -> Option<(&[u8], usize)> {
     if toks.len() != 2 && toks.len() != 3 {
         return None;
     }
-    let seqdata = toks[1];
+    let seqdata = toks.at(1);
     let mut cumulated_res = 0;
     if toks.len() == 3 {
-        cumulated_res = string_to_uint(toks[2]).unwrap_or(0);
+        cumulated_res = string_to_uint(toks.at(2)).unwrap_or(0);
         if cumulated_res == 0 {
             return None;
         }
@@ -2776,7 +2787,7 @@ fn try_process_clustal_seq_data(line: &[u8]) -> Option<(&[u8], usize)> {
             return None;
         }
     }
-    Some((toks[0], seqdata.len()))
+    Some((toks.at(0), seqdata.len()))
 }
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:307-374 (`CFormatGuess::SequenceType`, from `case
@@ -2868,9 +2879,9 @@ fn strict_sequence_type(str: &[u8]) -> bool {
 /// (`Stop::Undecided`) where `&&` does not stop first.
 fn is_line_phrap_id(line: &[u8]) -> Result<bool, Stop> {
     let values = tokens(line, b" \t");
-    match values.first() {
-        Some(&b"DNA") => Ok(true),
-        Some(&b"AS") => {
+    match values.get(0) {
+        Some(b"DNA") => Ok(true),
+        Some(b"AS") => {
             const PAST: &str = "TestFormatPhrapAce reads past the tokens of an AS line";
             let Some(second) = values.get(1) else {
                 return Err(Stop::Undecided(PAST));

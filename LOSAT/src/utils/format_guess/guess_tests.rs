@@ -8,7 +8,7 @@ use super::*;
 const TEXT: &[u8] = b"PssmWithParameters ::= {\n  pssm {\n    isProtein TRUE\n  }\n}\n";
 
 fn guess(bytes: &[u8]) -> Result<Guessed, Stop> {
-    FormatGuess::new(bytes).guess_format()
+    FormatGuess::over(bytes).guess_format()
 }
 
 fn format_of(bytes: &[u8]) -> Format {
@@ -86,6 +86,123 @@ fn every_test_answers_as_ncbis_format_guess() {
         let guessed = guess(bytes).expect(name);
         assert_eq!(guessed.format, want, "{name}");
         assert!(!guessed.fasta_undecided, "{name}");
+        // A reader read piece by piece guesses as the bytes in memory do.
+        let read = FormatGuess::new(Pieces(bytes)).guess_format().expect(name);
+        assert_eq!(read, guessed, "{name}");
+    }
+}
+
+/// A reader that gives at most 7 bytes a read.
+struct Pieces<'a>(&'a [u8]);
+
+impl std::io::Read for Pieces<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.0.len().min(buf.len()).min(7);
+        buf[..n].copy_from_slice(&self.0[..n]);
+        self.0 = &self.0[n..];
+        Ok(n)
+    }
+}
+
+/// Bytes of every kind the tests look at, from a fixed seed.
+fn mixed_bytes(seed: u64, len: usize) -> Vec<u8> {
+    const ALPHABET: &[u8] =
+        b"ACGTacgtNXZ>{}-#;!: \t\r\n\x0b\x00\x01\x7f\x80\xef\xbb\xbf0123456789|.,+";
+    let mut state = seed;
+    (0..len)
+        .map(|_| {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ALPHABET[(state >> 33) as usize % ALPHABET.len()]
+        })
+        .collect()
+}
+
+/// `EnsureStats` as NCBI writes it: line by line (`\r`, `\n`, either ends one), `\n` appended to each non-empty
+/// line, each byte counted by its kind.
+fn stats_line_by_line(data: &[u8]) -> Stats {
+    let mut stats = Stats::default();
+    for line in data
+        .split(|&c| c == b'\r' || c == b'\n')
+        .filter(|line| !line.is_empty())
+    {
+        let is_header = line[0] == b'>';
+        for &c in line.iter().chain(std::iter::once(&b'\n')) {
+            let type_ = SYMBOL_TYPE_TABLE[c as usize];
+            if type_ & (F_ALPHA | F_DIGIT | F_SPACE) != 0 {
+                stats.al_num_chars += 1;
+            } else if c == b'{' || c == b'}' {
+                stats.braces += 1;
+            }
+            if !is_header {
+                stats.data += usize::from(type_ & F_SPACE == 0);
+                stats.dna_chars += usize::from(type_ & F_DNA_MAIN_ALPHABET != 0);
+                stats.aa_chars += usize::from(type_ & F_PROTEIN_ALPHABET != 0);
+            }
+        }
+    }
+    stats
+}
+
+#[test]
+fn the_counts_and_splits_are_ncbis() {
+    for seed in 0..200 {
+        let data = mixed_bytes(seed, (seed as usize * 37) % 400);
+        let (want, got) = (stats_line_by_line(&data), stats_of(&data));
+        assert_eq!(
+            (
+                want.al_num_chars,
+                want.braces,
+                want.data,
+                want.dna_chars,
+                want.aa_chars
+            ),
+            (
+                got.al_num_chars,
+                got.braces,
+                got.data,
+                got.dna_chars,
+                got.aa_chars
+            ),
+            "{data:?}"
+        );
+        // `NStr::Split(..., fSplit_Tokenize)`: the non-empty runs between delimiters.
+        let runs: Vec<&[u8]> = data
+            .split(|c| b" \t".contains(c))
+            .filter(|run| !run.is_empty())
+            .collect();
+        let toks = tokens(&data, b" \t");
+        assert_eq!(toks.len(), runs.len());
+        for (i, run) in runs.iter().enumerate().take(KEPT_TOKENS) {
+            assert_eq!(toks.at(i), *run);
+        }
+        // The lines of each split: the non-empty runs between line ends.
+        for ends in [
+            (|c: u8| c == b'\n') as fn(u8) -> bool,
+            |c| c == b'\r',
+            |c| c == b'\r' || c == b'\n',
+        ] {
+            let want = data
+                .split(|&c| ends(c))
+                .filter(|run| !run.is_empty())
+                .count();
+            assert_eq!(count_runs(&data, ends), want, "{data:?}");
+        }
+        // `NStr::Find`: the first occurrence.
+        for pattern in [
+            &b"#"[..],
+            b"\r\n",
+            b"AC",
+            b"|.",
+            b"\xef\xbb\xbf",
+            b"ACGTACGT",
+        ] {
+            let want = data
+                .windows(pattern.len())
+                .position(|window| window == pattern);
+            assert_eq!(find(&data, pattern), want, "{pattern:?} in {data:?}");
+        }
     }
 }
 

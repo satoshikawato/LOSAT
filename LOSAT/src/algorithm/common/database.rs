@@ -211,7 +211,9 @@ fn apply_list(
 /// (`SeqDb::statistics`),
 /// `translated` whether its subjects are translated (TBLASTN, TBLASTX). The requests'
 /// `EffectiveSearchSpace` is the search's own value where the statistics' length before the
-/// fallback to OID 0 (`DbStatistics::gumbel_db_length`) is positive or `-searchsp` is given, else
+/// fallback to OID 0 (`DbStatistics::gumbel_db_length`) is positive or `searchsp` (`-searchsp`
+/// is given, or an RPS-BLAST search hands the space of its last search unit,
+/// `rps_search::volumes::RpsUnits::request_space`), else
 /// `BLAST_CalcEffLengths` with that length (`archive::RequestLength`: 0 for a list that kept no
 /// sequence without `STATS_TOTLEN`; the context's query length for an alias file's `LENGTH` of
 /// 2^63 or more). `dbsize` is whether `-dbsize` is given: the
@@ -885,6 +887,13 @@ pub(crate) fn report_sum_refusal(
     }
     None
 }
+
+/// LOSAT's reason for the search strategy's `DbLength` of exactly -2^63 that RPS-BLAST's
+/// `x_AdjustDbSize` writes over several volumes (`rps_search::volumes::RpsUnits::
+/// strategy_db_length`): the serial writer's `-n` of INT64_MIN of `report_sum_refusal`'s third
+/// reason (`COStreamBuffer::PutInt8`, which NCBI's ASN.1 text writer shares with its XML writer),
+/// refused with it until the Owner answers DECISIONS D1a3-2's Q1 (D1a4-6 of line RG).
+pub(crate) const STRATEGY_MINUS_ZERO_LENGTH: &str = "a total length of 9223372036854775808 letters (an alias file's LENGTH or STATS_TOTLEN over several RPS-BLAST volumes), which NCBI BLAST+'s serial writer prints as -0 (a signed overflow), in the search strategy's DbLength";
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-747
 // ```c++

@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.37
+- Version: 1.38
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -95,7 +95,12 @@
   database, NCBI's `GenerateDefline` cannot decode: the tabular rows and XML values of NCBI's
   catches reproduced, rule 2, and the rows at which NCBI stops or prints an uninitialised taxid
   refused, rule 3; line RG item T7, Owner-delegated, standing instruction 2026-09-29, restated
-  2026-10-07)
+  2026-10-07);
+  1.38 2026-11-17 (RPSBLAST and RPSTBLASTN: a hit of a profile that an alias file's `FIRST_OID` and
+  `LAST_OID` leave out, which NCBI's report does not find, refused at its query batch in every
+  format, within the classes of 1.10, rule 2, where NCBI writes `Unknown` and exits 0, and of 1.37,
+  rule 3, where it stops with a null pointer exception; line RG item D1a-4, Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1065,6 +1070,22 @@ masked). Line NP item M4a-2c.
   refuses (exit 1) before the query batch's report, where it refused every such subject before
   1.37, so its output is a prefix of NCBI's. A failed lookup does not depend on the other
   subjects: one alone, the first, the last or two give the same rows.
+
+- RPSBLAST and RPSTBLASTN over an alias file whose `FIRST_OID` and `LAST_OID` leave out profiles of
+  its volumes (version 1.38, 2026-11-17, line RG item D1a-4, Owner-delegated): NCBI's RPS search
+  ignores the range (its lookup table holds every profile of a volume, `blast_aalookup.c:182-184`;
+  the volumes of several are searched bare), while its formatter opens the `-db` name with its keys,
+  whose `SeqidToOids` keeps only the OIDs of the range (`seqdbimpl.cpp:1414-1418`): a hit of a
+  profile outside it is not found. Outfmt 0 then writes `Unknown` and "Sequence with id CDD:N no
+  longer exists in database...alignment skipped", the tabular formats `Unknown`, `N/A` and a length
+  of 0 (the class of rule 2's version 1.10, exit status 0), and `sacc`, `saccver` and the default
+  fields of outfmt 6, 7 and 10 stop with a null pointer exception, exit status 255 (the class of
+  1.37; probes p6_1v_fo22 and p6b_fo22 of line RG D1a-4). LOSAT refuses (exit 1, "a hit of the
+  profile of OID N outside the RPS-BLAST database's alias file FIRST_OID and LAST_OID ... is not
+  supported by LOSAT's RPSBLAST", one text for both programs) at the query batch whose final hit
+  lists hold such a profile; with several volumes also where it lies past the `-max_target_seqs` cut
+  of the merged lists, which no report of NCBI's reads. A run whose hits are all in the range is
+  NCBI's (fixture rows `db.rps.rej.fo22`, `db.rpstbn.rej.fo22`, `db.rpstbn.fo11.e5.6`).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

@@ -232,10 +232,26 @@ effective lengths, the hit-saving cutoffs without the composition-based stretch 
 word cutoffs and the link cutoffs of the subject's length; the e-values of the traceback and the
 reports' counts and spaces are the setup's (Spouge's database factor 1), and the order of the
 results is the one-thread traceback's. The overflowing sums of BLAST XML, XML2 and JSON are refused
-where NCBI formats them (after the search: its own errors of the search come first). Refused until
-item D1a-4: OID ranges, `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH` and a total length of 0 or less
-(`LENGTH` 0 or of 2^63 or more) in RPSBLAST databases (NCBI's RPS search has no
-loop over subjects and opens each volume alone, whose statistics then read the volume's own length). Refused for
+where NCBI formats them (after the search: its own errors of the search come first). Line RG item
+D1a-4 part A (2026-11-17): RPSBLAST and RPSTBLASTN read these keys as NCBI's RPS search does
+(`CLocalRPSBlast`, rpsblast_local.cpp:331-400; one owner, `rps_search::volumes::RpsUnits`): a
+database of one volume is one search unit, the `-db` name with all its alias keys; one of several
+volumes searches each volume bare (its own length and count, no `STATS_*` key, the shortest length
+10, no OID range) under the database-wide `DbLength` (`STATS_TOTLEN`, else `GetTotalLength`) and
+`DbSeqNum` (`STATS_NSEQ`, else `GetNumSeqs`) that `x_AdjustDbSize` sets without `-searchsp` and
+`-dbsize`, each read only where above 0, while the Gumbel block reads `DbLength` where it is not 0.
+The footers print the first unit's search space, the search strategy's requests after the first hold
+that `DbLength` (0 and negatives too) and the last unit's search space, and the traceback sorts the
+results whatever the total length. The search ignores `FIRST_OID` and `LAST_OID` (NCBI's lookup table
+holds every profile of a volume); a hit of a profile that they leave out is refused at its query
+batch, where NCBI's report does not find it (`Unknown`, or a null pointer exception:
+PD-LOSAT-NCBI-DEFECTS 1.38). Refused: a unit's concatenated length (`LENGTH` plus `NSEQ`, NCBI's
+`Int4` of the `Int8` sum) above 2,147,483,647 (NCBI frees the profiles twice and aborts), one whose
+diagonal table passes 2^30 entries (NCBI's loop never ends), one below the volume's profiles (until
+part B ports NCBI's truncation), a setup count of 0 without the Gumbel block (`NSEQ 0` over one
+volume with `-searchsp` or `OLD_FSC`: SIGFPE; a bare volume counts its profiles), and with
+`-export_search_strategy` a `DbLength` of exactly -2^63 (`LENGTH` or `STATS_TOTLEN` 2^63, which NCBI
+writes as `-0`, until the Owner answers D1a-3's Q1). Refused for
 good: a statistics count of 0 (an alias file's `NSEQ 0`, or its `LENGTH` or `STATS_TOTLEN` over
 volumes without sequences without `NSEQ` or `STATS_NSEQ`) in a search without the Gumbel block
 (BLASTN, TBLASTX, and BLASTP, BLASTX, TBLASTN, PSI-BLAST with `-searchsp` or `OLD_FSC`, BLASTX

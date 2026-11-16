@@ -691,8 +691,6 @@ pub struct SeqDb {
     /// The walks of the alias tree, with the exception of each one whose value does not
     /// convert (`check_alias_values`).
     alias_totals: alias::AliasTotals,
-    /// Whether the alias files give an OID range (`alias::range_mask`).
-    alias_ranges: bool,
     /// Whether NCBI's OID bit set is the special all-set one after the alias files' OID ranges
     /// (`alias::all_bits_special_set`): a positive list left with no id then keeps every OID
     /// (`SeqDb::restrict_seqids`).
@@ -1259,7 +1257,6 @@ impl SeqDb {
             included_length: OnceLock::new(),
             first_oid_length: None,
             alias_totals: alias::AliasTotals::default(),
-            alias_ranges: false,
             all_bits_special_set: false,
             oid_list_set_up: AtomicBool::new(false),
             list_applied: false,
@@ -1361,7 +1358,6 @@ impl SeqDb {
         self.stats_total_length = totals.stats_totlen.as_ref().map_or(0, |&value| value);
         self.printed_num_seqs = nseq;
         self.printed_total_length = length;
-        self.alias_ranges = mask.is_some();
         self.all_bits_special_set = alias::all_bits_special_set(root, names, &self.volume_starts);
         if let Some(words) = mask {
             let range = alias::top_iteration_range(root, num_oids).unwrap_or((0, num_oids));
@@ -1533,7 +1529,6 @@ impl SeqDb {
     /// `CSeqDB::GetNumSeqs` of the search: the walk of `NSEQ` (the volumes' OIDs below the
     /// alias files without the key) without a list, the included OIDs with one. It is not the
     /// number of included OIDs ([`SeqDb::num_seqs`]) when an alias file has `NSEQ` or a range.
-    #[cfg(test)]
     pub fn ncbi_num_seqs(&self) -> i32 {
         self.counts.num_seqs
     }
@@ -1561,13 +1556,11 @@ impl SeqDb {
     }
 
     /// `CSeqDB::GetNumSeqsStats`: the walk of `STATS_NSEQ`, 0 without the key.
-    #[cfg(test)]
     pub fn num_seqs_stats(&self) -> i32 {
         self.stats_num_seqs
     }
 
     /// `CSeqDB::GetTotalLengthStats`: the walk of `STATS_TOTLEN`, 0 without the key.
-    #[cfg(test)]
     pub fn total_length_stats(&self) -> u64 {
         self.stats_total_length
     }
@@ -1687,15 +1680,10 @@ impl SeqDb {
         (statistics.setup_total, statistics.setup_count)
     }
 
-    /// Whether the alias files give an OID range (`FIRST_OID`, `LAST_OID`) or a key that
-    /// changes the statistics or the shortest length (`STATS_NSEQ`, `STATS_TOTLEN`,
-    /// `MIN_SEQ_LENGTH`): RPS-BLAST, which searches the volumes' profiles by OID, refuses them
-    /// (`rps_hooks::check_alias_keys`).
-    pub fn alias_ranges_or_statistics(&self) -> bool {
-        self.alias_ranges
-            || self.stats_num_seqs != 0
-            || self.stats_total_length != 0
-            || !matches!(self.alias_totals.min_seq_length, Ok(0))
+    /// Whether every OID of the volumes is included and is its own ordinal id: no alias file's OID
+    /// range (`FIRST_OID`, `LAST_OID`) and no list (`SeqDb::included_ordinal`).
+    pub fn ordinal_ids_are_oids(&self) -> bool {
+        self.filter.is_none()
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:164-173
@@ -1872,6 +1860,18 @@ impl SeqDb {
         }
         let at = self.locate_oid(self.oid(ordinal).get())?;
         Ok(SeqLocation { id: ordinal, ..at })
+    }
+
+    /// The ordinal id of the OID `oid` (`SeqDb::locate_oid`), `None` where the alias files' ranges
+    /// or a list leave it out (NCBI's `x_CheckOrFindOID` of a lookup by Seq-id, which then finds
+    /// nothing: seqdbimpl.cpp:1414-1418) or past the volumes. RPS-BLAST searches every profile of
+    /// its volumes by OID and its reports look them up by ordinal id
+    /// (`rps_search::volumes::report_ordinal_ids`).
+    pub fn included_ordinal(&self, oid: u32) -> Option<u32> {
+        match &self.filter {
+            None => (oid < self.num_oids()).then_some(oid),
+            Some(filter) => filter.contains(oid).then(|| filter.rank(oid)),
+        }
     }
 
     /// The OID in the database of the sequence at `at`, which the readers' messages name (the id

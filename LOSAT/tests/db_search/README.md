@@ -1336,10 +1336,16 @@ most 9 in BLOSUM62).
   to that directory and `-db "NAME NAME2"`; with `@ALIAS` the alias file `rps/ALIAS.pal` is copied beside them and the
   run searches `-db ALIAS`. A row whose `covers` cell has `path: {db_dir}` keeps that directory as
   `{db_dir}` in the frozen bytes (NCBI's RPS errors print the volume's canonical path).
-- Alias files (line RG, D1a-3 review 7 S1, rows `db.rps.rej.l0`, `db.rps.rej.l2p63p1`, `db.rpstbn.rej.l0`,
-  `db.rpstbn.rej.l2p63p1`), written by hand: `rps/l0rps.pal` (`TITLE t`, `DBLIST rps_mini`, `LENGTH 0`) and
-  `rps/l2p63p1rps3v.pal` (`TITLE t`, `DBLIST rps_mini3v`, `LENGTH 9223372036854775809`, 2^63 + 1: negative as NCBI's
-  `Int8`), whose total lengths of 0 or less LOSAT's RPSBLAST and RPSTBLASTN refuse until item D1a-4.
+- Alias files (line RG, D1a-3 review 7 S1 and D1a-4), written by hand, each `TITLE t` and a `DBLIST` of `rps_mini`
+  (one volume: `*rps.pal`), `rps_mini3v` (three volumes: `*rps3v.pal`) or `rps_mini3v.01 rps_mini3v.02` (two volumes:
+  `l0rps2v.pal`) with one or two keys, as named: `l0` `LENGTH 0`, `l0n0` `LENGTH 0` and `NSEQ 0`, `n0` `NSEQ 0`, `nm5`
+  `NSEQ -5`, `sn7` `STATS_NSEQ 7`, `snm5` `STATS_NSEQ -5`, `st5k` `STATS_TOTLEN 5000`, `st63` `STATS_TOTLEN
+  9223372036854775809`, `min1` and `min100` `MIN_SEQ_LENGTH 1` and `100`, `l563n0` `LENGTH 563` and `NSEQ 0`, `fo11` and `fo22` `FIRST_OID` and `LAST_OID` 1
+  and 2, `l2p30`, `l2p31`, `l2p63` and `l2p63p1` `LENGTH` 2^30, 2^31, 2^63 and 2^63 + 1 (the last two 0 and negative as
+  NCBI's `Int8`). The rows `db.rps.{1v,2v,3v}.*`, `db.rpstbn.{1v,3v}.*`, `db.rpstbn.fo11.e5.6` and the rejection rows
+  `db.rps.rej.{l0,l2p30,l2p31,fo22,l563n0.oldfsc}`, `db.rpstbn.rej.{l0,fo22,l563n0.oldfsc}` search them (NCBI's search units of
+  item D1a-4: one volume is searched with all its keys, several volumes each bare under the database's length and count);
+  `tests/fixtures/strategy/cases.tsv` copies some of them (`rpsblast.{3v,2v}.*.q40`, `rpstblastn.3v.*.nq.b2000`).
 - Queries: `tests/fasta/WSSV.faa` (177 records, 10 query batches; its long records share diagonals of the 1,024-entry
   table of these databases), `tests/fasta/rps/q40.faa` (33 WSSV records, 11,434 letters, two query batches: the outfmt
   0 K of each batch's first query), `tests/fasta/rps/xoj.faa` (a record of X only, the TK-TMK record with an O at 30

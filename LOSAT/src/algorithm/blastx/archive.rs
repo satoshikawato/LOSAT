@@ -207,14 +207,16 @@ fn first_context(batch: &BatchResults, gapped: Option<KarlinParams>) -> FirstCon
 /// `BatchArchive::searched_space`, `StrategyExport::note_searched`): the search space of the first
 /// query's context 0 (frame +1; an invalid context keeps `-searchsp`, else 0,
 /// `effective_lengths`) and that context's query length (0 for an invalid one;
-/// `archive::RequestLength::space`), when NCBI searched the batch (a unit was searched).
+/// `archive::RequestLength::space`), when NCBI searched the batch (a unit was searched); for
+/// RPSTBLASTN the space its last search unit leaves in the options handle
+/// (`BatchResults::request_space`).
 pub(crate) fn batch_searched_space(
     batches: &[BatchResults],
 ) -> Option<crate::report::archive::SearchedContext0> {
     batches.iter().any(|batch| !batch.search_skipped).then(|| {
         let parameters = &batches[0].parameters[0];
         crate::report::archive::SearchedContext0 {
-            space: parameters.search_space,
+            space: batches[0].request_space.unwrap_or(parameters.search_space),
             query_length: if parameters.valid {
                 batches[0].prepared.contexts[0].length as i64
             } else {

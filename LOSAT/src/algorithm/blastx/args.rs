@@ -524,14 +524,10 @@ pub(crate) trait RpsTblastnSearch: std::fmt::Debug + Send + Sync {
         ) -> Result<()>,
     ) -> Result<usize>;
     /// What each query batch's set-up of the search writes into NCBI's options handle beyond the
-    /// batch's search space (`rps_search::volumes::search_sets`; `-searchsp` and `-dbsize` as
-    /// given), which the search strategy's requests after the first hold.
-    fn handle_sets(
-        &self,
-        database: Option<&super::database::BlastxDatabase>,
-        searchsp: Option<i64>,
-        dbsize: Option<i64>,
-    ) -> Vec<crate::report::archive::options::Param>;
+    /// batch's search space (`rps_search::volumes::search_sets`), which the search strategy's
+    /// requests after the first hold: the search that `for_database` returned for a run that
+    /// writes a strategy knows it.
+    fn handle_sets(&self) -> Vec<crate::report::archive::options::Param>;
     /// Whether the batches' results are merged over a database of several volumes, as NCBI's
     /// `CLocalRPSBlast` merges them: the merge keeps only NCBI's messages of error severity (no
     /// query warning, `report::query_warning`) and gives a batch that was not searched an empty

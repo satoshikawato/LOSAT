@@ -32,14 +32,14 @@ use crate::algorithm::rps_search::engine::{
     batch_gapped_k, RpsFrame, RpsQuery, RpsRun, RpsSearch, RpsWorkers,
 };
 use crate::algorithm::rps_search::volumes::{
-    mask_unsupported_letters, merge_volume, shift_ordinal_ids, Consensus, RpsVolumeError,
-    RpsVolumeSet, RpsVolumeSetup,
+    mask_unsupported_letters, merge_volume, report_ordinal_ids, shift_ordinal_ids, Consensus,
+    RpsUnits, RpsVolumeError, RpsVolumeSet, RpsVolumeSetup,
 };
 use crate::algorithm::tblastx::lookup::{
     prepare_blosum62_lookup_query_for_word_size, QueryContext,
 };
 use crate::algorithm::tblastx::translation::QueryFrame;
-use crate::stats::{BlastGumbelBlk, KarlinParams};
+use crate::stats::KarlinParams;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:159-164
 // ```c++
@@ -176,17 +176,30 @@ pub(super) fn note_strategy_sets(
         .into_iter()
         .collect();
     // The volumes' matrix and gap costs as the first volume's files read them (the search sets the
-    // volumes up again, `rps_search`).
+    // volumes up again, `rps_search`), after `x_AdjustDbSize`'s length (`RpsUnits`).
+    let db_length = units(args, database)?.strategy_db_length("RPSBLAST")?;
     let volumes = RpsVolumeSet::of(database.seqdb());
     let costs = RpsVolumeSetup::new("RPSBLAST", args.window_size as i32).costs(volumes.first());
     strategy.options().set_search_sets(
         before_batches,
-        crate::algorithm::rps_search::volumes::search_sets(
-            database.seqdb(),
-            costs,
-            args.searchsp,
-            Some(args.dbsize),
-        ),
+        crate::algorithm::rps_search::volumes::search_sets(db_length, costs),
+    )
+}
+
+/// The search units of rpsblast's search of `database` and their statistics
+/// (`rps_search::volumes::RpsUnits`, one owner with rpstblastn's), with the run's `-searchsp` and
+/// `-dbsize`.
+#[cold]
+#[inline(never)]
+pub(super) fn units(
+    args: &ResolvedBlastpArgs,
+    database: &database::BlastpDatabase,
+) -> Result<RpsUnits> {
+    RpsUnits::of(
+        database.seqdb(),
+        args.searchsp.unwrap_or(0),
+        args.dbsize,
+        "RPSBLAST",
     )
 }
 
@@ -215,128 +228,66 @@ pub(super) struct RpsSearchRun<'a> {
     pub(super) contexts: &'a [QueryContext],
     /// `kbp_gap_std`: BLOSUM62 11/1's table values.
     pub(super) gapped_params: &'a KarlinParams,
-    pub(super) gumbel: Option<&'a BlastGumbelBlk>,
-    /// Each query's effective search space over the whole database or `-searchsp`
-    /// (`exact_search_spaces`; `None` where the database has no letters); the per-volume values
-    /// of `-dbsize` with several volumes are made by `volume_search_space`.
+    /// Whether the search has the Gumbel block (none with `-searchsp`, at any value, or
+    /// `OLD_FSC`): each unit's is made from its length (`RpsUnits::gumbel_length`).
+    pub(super) gumbel: bool,
+    /// The search units of the run and their statistics (`units`; `None` without a database):
+    /// each query's search space, the Gumbel block and the hit cutoff's subject length in each
+    /// volume's search.
+    pub(super) units: Option<&'a RpsUnits>,
+    /// Each query's effective search space in the first unit, which the set-up computed with that
+    /// unit's numbers (`RpsSetup`; `exact_search_spaces`, `None` where the length is 0).
     pub(super) search_spaces: &'a [Option<i64>],
-    pub(super) cutoff_subject_length: i32,
     pub(super) prelim_hitlist_size: usize,
     /// The query batches (searched-query ranges) of the run.
     pub(super) batches: Vec<std::ops::Range<usize>>,
 }
 
-/// The sequence count that the statistics of an RPS search with `-dbsize` or `-searchsp` read:
-/// NCBI's `x_AdjustDbSize` gives the volumes of a database the whole database's length and
-/// count, but returns early where the user gave a length or a search space (`-searchsp` above 0;
-/// the search space itself is then the user's, only the length adjustment reads the count),
-/// which leaves the count 0 and
-/// each volume's search reads its own: volume 0's, the first of the volumes in path order, is
-/// the one whose effective search space the footers print (`thread_results[0]`'s ancillary
-/// data). `None` where the database's count is the one to use.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:351-354
-/// ```c++
-/// 	if(m_opt_handle->GetOptions().GetEffectiveSearchSpace()!= 0)
-/// 		return;
-///
-/// 	if(m_opt_handle->GetOptions().GetDbLength()!= 0)
-/// 		return;
-/// ```
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-727
-/// ```c
-///    if (eff_len_options->db_length > 0)
-///       db_length = eff_len_options->db_length;
-///    else
-///       db_length = eff_len_params->real_db_length;
-///    ...
-///    if (eff_len_options->dbseq_num > 0)
-///       db_num_seqs = eff_len_options->dbseq_num;
-///    else
-///       db_num_seqs = eff_len_params->real_num_seqs;
-/// ```
+/// What blastp's set-up of an rpsblast search reads of its first search unit in place of the
+/// database's numbers (`run_call`): the merged result keeps that unit's statistics
+/// (`thread_results[0]`), whose search spaces the footers print; each unit's search reads its own
+/// (`rps_search`).
+#[derive(Clone, Copy)]
+pub(super) struct RpsSetup {
+    /// `BLAST_GapAlignSetUp`'s total and count (`RpsUnit::setup_total`, `setup_count`): the
+    /// average of the hit cutoff without the Gumbel block and the "too short" test.
+    pub(super) setup_total: i64,
+    pub(super) setup_count: i32,
+    /// `BLAST_CalcEffLengths`' length and count (`RpsUnits::eff_lengths`).
+    pub(super) eff_db_length: i64,
+    pub(super) eff_num_seqs: i32,
+    /// The Gumbel block's length (`RpsUnits::gumbel_length`, `-dbsize` included).
+    pub(super) gumbel_db_length: i64,
+    /// The hit cutoff's subject length with the Gumbel block (`RpsUnit::min_length`).
+    pub(super) min_length: i32,
+}
+
+impl RpsSetup {
+    /// The first unit of `units`.
+    pub(super) fn of(units: &RpsUnits) -> Self {
+        let first = units.first();
+        let (eff_db_length, eff_num_seqs) = units.eff_lengths(first);
+        Self {
+            setup_total: first.setup_total,
+            setup_count: first.setup_count,
+            eff_db_length,
+            eff_num_seqs,
+            gumbel_db_length: units.gumbel_length(first),
+            min_length: first.min_length,
+        }
+    }
+}
+
+/// LOSAT's refusals of the search units' concatenated lengths (`RpsUnits::check_engine_lengths`),
+/// where the database opens (`open_search_database`), as rpstblastn's
+/// (`rpstblastn::search::TranslatedRpsSearch::for_database`).
 #[cold]
 #[inline(never)]
-pub(super) fn dbsize_volume_num_seqs(
+pub(super) fn check_units(
     args: &ResolvedBlastpArgs,
     database: &database::BlastpDatabase,
-) -> Option<usize> {
-    if args.rps_search.is_none() || (args.dbsize <= 0 && args.searchsp.unwrap_or(0) == 0) {
-        return None;
-    }
-    let volumes = RpsVolumeSet::of(database.seqdb());
-    if volumes.order.len() < 2 {
-        return None;
-    }
-    Some(volumes.first().num_oids() as usize)
-}
-
-/// Whether the volumes of rpsblast's search have their own effective search spaces
-/// (`rps_search::volumes::per_volume_search_spaces`).
-pub(super) fn per_volume_search_spaces(args: &ResolvedBlastpArgs, volumes: usize) -> bool {
-    crate::algorithm::rps_search::volumes::per_volume_search_spaces(
-        args.dbsize,
-        args.searchsp.unwrap_or(0),
-        volumes,
-    )
-}
-
-/// One query's effective search space in a volume of `num_seqs` sequences with the database
-/// length `db_length` (`-dbsize`): `(db_length - num_seqs * adj) * (query_length - adj)` with
-/// NCBI's length adjustment, and its floor of 1 on the effective database length. A product
-/// that does not fit NCBI's `Int8` is refused (NCBI's arithmetic overflows).
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:826-846
-/// ```c
-///          if (effective_search_space == 0) {
-///         	 Int8 effective_db_length = db_length - ((Int8)db_num_seqs * length_adjustment);
-///
-///         	 // Just in case effective_db_length < 0
-///         	 if (effective_db_length <= 0)
-///         		 effective_db_length = 1;
-///
-///              effective_search_space = effective_db_length *
-///                              (query_length - length_adjustment);
-///          }
-/// ```
-/// (`database::blastp_database_search_space` calls the same function.)
-#[cold]
-#[inline(never)]
-pub(super) fn volume_search_space(
-    query_length: usize,
-    db_length: i64,
-    num_seqs: i64,
-    gapped: &KarlinParams,
-) -> Result<i64> {
-    // `stats::setup::calc_eff_lengths` (one owner for the six programs, line RG D1a-3): NCBI's
-    // `Int4` count of the volume.
-    let query_length = i64::try_from(query_length).unwrap_or(i64::MAX);
-    Ok(crate::stats::setup::calc_eff_lengths(
-        query_length,
-        db_length,
-        num_seqs as i32,
-        gapped,
-        0,
-        "RPSBLAST",
-    )?
-    .eff_searchsp)
-}
-
-/// LOSAT's refusal of an RPS-BLAST database whose alias files give an OID range or a key of the
-/// statistics or the shortest length (`SeqDb::alias_ranges_or_statistics`): NCBI's RPS search
-/// opens each volume alone and searches every profile of its lookup files
-/// (rpsblast_local.cpp:341-400), which LOSAT has not traced for these keys (line RG, D1a-2).
-pub(super) fn check_alias_keys(database: &database::BlastpDatabase, program: &str) -> Result<()> {
-    if database.seqdb().alias_ranges_or_statistics() {
-        return Err(crate::algorithm::common::database::refusal(
-            "an alias file's FIRST_OID, LAST_OID, STATS_NSEQ, STATS_TOTLEN or MIN_SEQ_LENGTH over an RPS-BLAST database",
-            program,
-        ));
-    }
-    // A total length of 0 (which a database search of the other programs reads as NCBI's
-    // statistics of each subject, `DbStatistics::per_subject`) or of 2^63 or more: kept refused
-    // with the other alias keys until item D1a-4 traces them.
-    crate::algorithm::rps_search::volumes::untraced_total_length(&database.statistics(), program)
+) -> Result<()> {
+    units(args, database)?.check_engine_lengths(args.window_size as i32, "RPSBLAST")
 }
 
 /// The number of volumes that an RPS search of the database runs (`-num_threads 0` runs a thread
@@ -368,16 +319,16 @@ pub(super) struct RpsSearched {
 
 /// The RPS search of every query of the run against each volume of the database in turn: the
 /// final hit lists of the volumes merged into `hit_lists` (by query; their subjects named by the
-/// database's ordinal ids; with several volumes longer than `-max_target_seqs` and not to be
-/// sorted or cut by blastp's driver before the formatter's cut), and the gapped K of each query's
-/// outfmt 0 footer (volume 0's).
+/// database's ordinal ids, `report_ordinal_ids`; with several volumes longer than
+/// `-max_target_seqs` and not to be sorted or cut by blastp's driver before the formatter's cut),
+/// and the gapped K of each query's outfmt 0 footer (volume 0's).
 ///
 /// Every volume is searched alone, the queries in parallel, and its files are unmapped before
 /// the next volume's are mapped. NCBI searches the volumes in the sorted order of their paths
-/// (a `set<string>`, `FindVolumePaths`), with the statistics of the whole database
-/// (`x_AdjustDbSize`: the database's length and sequence count, which `run` already holds), a
-/// per-volume hit list size, and merges each query's results into volume 0's (`s_MergeAlignSet`,
-/// `merge_volume`).
+/// (a `set<string>`, `FindVolumePaths`), each a search unit with its own statistics
+/// (`RpsUnits`: the search spaces, the Gumbel block and the shortest length under
+/// `x_AdjustDbSize`'s length and count), a per-volume hit list size, and merges each query's
+/// results into volume 0's (`s_MergeAlignSet`, `merge_volume`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:341-346
 /// ```c++
@@ -398,7 +349,7 @@ pub(super) fn rps_search(
     pool: &crate::utils::threading::SearchPool<'_>,
     hit_lists: &mut [Option<BlastpHitList>],
 ) -> Result<RpsSearched> {
-    let Some(database) = database else {
+    let (Some(database), Some(units)) = (database, run.units) else {
         bail!("a search without -db is not supported by LOSAT's RPSBLAST");
     };
     let db = database.seqdb();
@@ -413,9 +364,25 @@ pub(super) fn rps_search(
         BlastpCompositionMode::CompositionMatrixAdjust => 2,
         BlastpCompositionMode::ForceFullMatrixAdjust => 3,
     };
-    // The Gumbel block, none with `-searchsp` (at any value) or `OLD_FSC`.
-    let gumbel = run.gumbel;
-    let per_volume_spaces = per_volume_search_spaces(args, db_volumes.len());
+    let searchsp = args.searchsp.unwrap_or(0);
+    // Each query's effective search space in the unit being searched, with the effective lengths
+    // of the unit it was computed for (`RpsUnits::eff_lengths`): the set-up's are the first unit's;
+    // a unit of other lengths computes its own (`RpsUnits::search_space`; in the common case
+    // every unit's lengths are the first's).
+    let mut spaces: ((i64, i32), Vec<i64>) = (
+        units.eff_lengths(units.first()),
+        run.contexts
+            .iter()
+            .zip(run.search_spaces)
+            .map(|(ctx, &space)| {
+                if ctx.is_valid && ctx.aa_len > 0 {
+                    space.unwrap_or(0)
+                } else {
+                    0
+                }
+            })
+            .collect(),
+    );
     let lambda = run.gapped_params.lambda;
     // BLOSUM62's score block for the matrix information of the redo.
     let sbp = if cbs > 0 {
@@ -482,9 +449,23 @@ pub(super) fn rps_search(
     // The first failing batch (its number and error) of the volumes searched so far.
     let spans: Vec<usize> = run.batches.iter().map(|batch| batch.len()).collect();
     let mut failed: Option<(usize, anyhow::Error)> = None;
-    for (position, &index) in order.iter().enumerate() {
+    for ((position, &index), unit) in order.iter().enumerate().zip(units.units()) {
         let volume = &db_volumes[index];
-        let num_seqs = volume.num_oids();
+        // The unit's Gumbel block (none with `-searchsp`, at any value, or `OLD_FSC`), from its
+        // own length (`RpsUnits::gumbel_length`).
+        let gumbel = if run.gumbel {
+            Some(
+                crate::stats::lookup_protein_gumbel_params(
+                    &args.scoring,
+                    units.gumbel_length(unit),
+                )
+                .ok_or_else(|| {
+                    anyhow::anyhow!("missing NCBI gumbel parameters for supported blastp scoring")
+                })?,
+            )
+        } else {
+            None
+        };
         let files = match setup.open(volume, cbs > 0)? {
             Ok(files) => files,
             Err(RpsVolumeError::Files(text)) => return Err(RpsEngineError(text).into()),
@@ -510,26 +491,30 @@ pub(super) fn rps_search(
         } else {
             args.evalue
         };
-        // Each query's effective search space in this volume.
-        let search_spaces = run
-            .contexts
-            .iter()
-            .zip(run.search_spaces)
-            .map(|(ctx, &whole)| {
-                if !(ctx.is_valid && ctx.aa_len > 0) {
-                    Ok(0)
-                } else if per_volume_spaces {
-                    volume_search_space(
-                        ctx.aa_len,
-                        args.dbsize,
-                        i64::from(num_seqs),
-                        run.gapped_params,
-                    )
-                } else {
-                    Ok(whole.unwrap_or(0))
-                }
-            })
-            .collect::<Result<Vec<i64>>>()?;
+        // Each query's effective search space in this unit (`spaces`).
+        let lengths = units.eff_lengths(unit);
+        if lengths != spaces.0 {
+            spaces = (
+                lengths,
+                run.contexts
+                    .iter()
+                    .map(|ctx| {
+                        if !(ctx.is_valid && ctx.aa_len > 0) {
+                            Ok(0)
+                        } else {
+                            units.search_space(
+                                unit,
+                                ctx.aa_len as i64,
+                                run.gapped_params,
+                                searchsp,
+                                "RPSBLAST",
+                            )
+                        }
+                    })
+                    .collect::<Result<Vec<i64>>>()?,
+            );
+        }
+        let search_spaces = &spaces.1;
         let engine = RpsRun {
             queries: run
                 .contexts
@@ -537,7 +522,7 @@ pub(super) fn rps_search(
                 .zip(&first_query_length)
                 .zip(&masked)
                 .zip(&batch_kbp)
-                .zip(&search_spaces)
+                .zip(search_spaces)
                 .map(
                     |((((ctx, &first), masked), &batch_kbp), &search_space)| RpsQuery {
                         frames: vec![RpsFrame {
@@ -566,8 +551,10 @@ pub(super) fn rps_search(
                 )
                 .collect(),
             gapped: *run.gapped_params,
-            gumbel,
-            cutoff_subject_length: run.cutoff_subject_length,
+            gumbel: gumbel.as_ref(),
+            // The hit cutoff's subject length with the Gumbel block: the unit's shortest length
+            // (without the block the cutoff reads the search space alone).
+            cutoff_subject_length: unit.min_length,
             evalue: args.evalue,
             prelim_evalue,
             cbs,
@@ -680,6 +667,18 @@ pub(super) fn rps_search(
             merge_volume(hit_lists, lists);
         }
     }
+    // The reports look the profiles up by ordinal id (`report_ordinal_ids`), batch after batch as
+    // NCBI's loop reports them, up to a batch whose search failed: a profile they would not find
+    // ends the run at its batch.
+    let live = failed
+        .as_ref()
+        .map_or(run.batches.len(), |(batch, _)| *batch);
+    for (number, batch) in run.batches.iter().enumerate().take(live) {
+        if let Err(refusal) = report_ordinal_ids(db, &mut hit_lists[batch.clone()], "RPSBLAST") {
+            failed = Some((number, refusal));
+            break;
+        }
+    }
     if let Some((batch, error)) = failed {
         return Err(failed_batch_error(run, batch, error));
     }
@@ -687,6 +686,27 @@ pub(super) fn rps_search(
         gapped_k,
         volumes: order.len(),
     })
+}
+
+/// The `EffectiveSearchSpace` option that the search of a query batch leaves in NCBI's options
+/// handle, which the search strategy's next request holds, for the batch's first query `ctx`
+/// (`RpsUnits::request_space` of the last unit; `-searchsp` as given, also for an invalid query,
+/// whose space is 0 without it).
+#[cold]
+#[inline(never)]
+pub(super) fn request_space(
+    units: &RpsUnits,
+    args: &ResolvedBlastpArgs,
+    ctx: &QueryContext,
+    gapped: &KarlinParams,
+) -> Result<i64> {
+    match args.searchsp.unwrap_or(0) {
+        0 if ctx.is_valid && ctx.aa_len > 0 => {
+            units.request_space(ctx.aa_len as i64, gapped, "RPSBLAST")
+        }
+        0 => Ok(0),
+        searchsp => Ok(searchsp),
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:193-213
@@ -785,45 +805,6 @@ mod tests {
             .iter()
             .map(|list| list.oid)
             .collect()
-    }
-
-    fn blosum62_gapped() -> KarlinParams {
-        KarlinParams {
-            lambda: 0.267,
-            k: 0.041,
-            h: 0.14,
-            alpha: 1.9,
-            beta: -30.0,
-        }
-    }
-
-    // blast_setup.c:826-846 (quoted at `volume_search_space`): each volume's space reads the
-    // given length and its own sequence count; an effective database length of 0 or below is 1.
-    #[test]
-    fn a_volumes_search_space_reads_its_own_sequence_count() {
-        use crate::stats::length_adjustment::compute_length_adjustment_ncbi;
-        let gapped = blosum62_gapped();
-        for (query, db_length, seqs) in [
-            (302usize, 5_000i64, 1i64),
-            (302, 5_000, 3),
-            (40, 100_000, 7),
-        ] {
-            let adjustment = compute_length_adjustment_ncbi(query as i64, db_length, seqs, &gapped)
-                .length_adjustment;
-            assert_eq!(
-                volume_search_space(query, db_length, seqs, &gapped).unwrap(),
-                (db_length - seqs * adjustment) * (query as i64 - adjustment),
-                "{query} {db_length} {seqs}"
-            );
-        }
-        let one = volume_search_space(302, 5_000, 1, &gapped).unwrap();
-        let three = volume_search_space(302, 5_000, 3, &gapped).unwrap();
-        assert_ne!(one, three);
-        // A product past `Int8` is refused.
-        assert!(volume_search_space(302, i64::MAX, 1, &gapped)
-            .unwrap_err()
-            .to_string()
-            .contains("overflows NCBI BLAST+'s 64-bit effective search space"));
     }
 
     #[test]

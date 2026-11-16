@@ -589,6 +589,10 @@ fn run_inner(
                 program.upper,
             )?
             .showing_gis(args.show_gis);
+            // RPSTBLASTN: each batch's `EffectiveSearchSpace` option is its last search unit's
+            // own (`BatchResults::request_space`), and its units read `-dbsize` themselves
+            // (`rps_search::volumes::RpsUnits`): no program of RPS-BLAST takes a list.
+            let rps = options.rpstblastn.is_some();
             crate::algorithm::common::database::note_archive_database_filter(
                 archive.as_ref(),
                 strategy.as_ref(),
@@ -596,8 +600,8 @@ fn run_inner(
                 database.list_taxids(),
                 &database.statistics(),
                 false,
-                args.searchsp.is_some_and(|space| space > 0),
-                args.dbsize.is_some_and(|size| size > 0),
+                rps || args.searchsp.is_some_and(|space| space > 0),
+                !rps && args.dbsize.is_some_and(|size| size > 0),
                 program.upper,
             )?;
             crate::algorithm::common::database::check_formats_report_sums(
@@ -869,10 +873,9 @@ fn run_inner(
         // later requests hold (`OptionsHandle::pass`): the search for the database knows its
         // volumes' costs.
         if let Some(strategy) = &strategy {
-            strategy.options().set_search_sets(
-                Vec::new(),
-                search.handle_sets(database.as_ref(), args.searchsp, args.dbsize),
-            )?;
+            strategy
+                .options()
+                .set_search_sets(Vec::new(), search.handle_sets())?;
         }
         options.rpstblastn = Some(search);
     }
@@ -3197,6 +3200,7 @@ mod reader_batch_tests {
             .unwrap(),
             parameters: Vec::new(),
             search_skipped: skipped,
+            request_space: None,
         }]
     }
 

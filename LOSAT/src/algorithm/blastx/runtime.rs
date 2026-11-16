@@ -102,6 +102,13 @@ pub struct BatchResults {
     //               for(unsigned int i =1; i < num_subjects; i++)
     // ```
     pub search_skipped: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:177-181 (quoted
+    // at `report::archive::OptionsHandle::pass`)
+    /// The `EffectiveSearchSpace` option that the batch's search leaves in the options handle
+    /// where it is not context 0's search space (`archive::batch_searched_space`): RPSTBLASTN's
+    /// last search unit's (`rps_search::volumes::RpsUnits::request_space`). `None`: the search
+    /// space of context 0.
+    pub request_space: Option<i64>,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1539-1554
@@ -1282,6 +1289,7 @@ impl PreliminarySink for Runtime<'_> {
             prepared: batch.x_for_results(),
             parameters: params.to_vec(),
             search_skipped: true,
+            request_space: None,
         });
         Ok(())
     }
@@ -2216,6 +2224,7 @@ impl PreliminarySink for Runtime<'_> {
             prepared: batch.x_for_results(),
             parameters: full,
             search_skipped: false,
+            request_space: None,
         });
         super::x_timing::end(XEnd::Finish, x_t_finish);
         Ok(())

@@ -5731,9 +5731,13 @@ fn open_search_database(
                 outputs.diagnostics,
             )?
             .showing_gis(args.show_gis);
-            if resolved.rps_search.is_some() {
-                rps_hooks::check_alias_keys(&database, args.app.name())?;
+            let rps = resolved.rps_search.is_some();
+            if rps {
+                rps_hooks::check_units(resolved, &database)?;
             }
+            // rpsblast: each batch's `EffectiveSearchSpace` option is its last search unit's own
+            // (`rps_hooks::RpsSearched::request_spaces`), and its units read `-dbsize` themselves
+            // (`rps_search::volumes::RpsUnits`): no program of RPS-BLAST takes a list.
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 args.strategy.as_ref(),
@@ -5741,8 +5745,8 @@ fn open_search_database(
                 database.list_taxids(),
                 &database.statistics(),
                 false,
-                args.searchsp.is_some_and(|space| space > 0),
-                args.dbsize.is_some_and(|size| size > 0),
+                rps || args.searchsp.is_some_and(|space| space > 0),
+                !rps && args.dbsize.is_some_and(|size| size > 0),
                 args.app.name(),
             )?;
             // rpsblast: what the application and each batch's RPS set-up set in the options
@@ -9090,6 +9094,11 @@ impl<'a> CallRequests<'a> {
         })
     }
 
+    /// The call-local index of each batch's first query, in order.
+    fn batch_firsts(&self) -> impl Iterator<Item = usize> + '_ {
+        self.spans.iter().map(|span| span.start)
+    }
+
     /// The searched space of each batch (`searched(first query)`, `None` for a batch NCBI does not
     /// search), once the call's set-up has computed them.
     fn set_searched(
@@ -10559,6 +10568,13 @@ fn run_call(
         None => subjects.iter().map(|subject| subject.aa_len).sum::<usize>(),
         Some(database) => database.total_letters_usize()?,
     };
+    // rpsblast: the search units of the database (`rps_hooks::units`, line RG D1a-4), whose first
+    // unit's numbers the set-up reads in place of the database's (`rps_hooks::RpsSetup`).
+    let rps_units = match database.filter(|_| args.rps_search.is_some()) {
+        Some(database) => Some(rps_hooks::units(&args, database)?),
+        None => None,
+    };
+    let rps_setup = rps_units.as_ref().map(rps_hooks::RpsSetup::of);
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_setup.c:914-921
     // ```c
     // /* Set the database length for new FSC */
@@ -10588,8 +10604,16 @@ fn run_call(
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1768-1772 (quoted at
     // `DbStatistics::sorts_results`): whether the traceback sorts the results at its end. A
     // FASTA subject set that finds hits has letters.
-    let sorts_results = database.is_none_or(|database| database.statistics().sorts_results());
-    let gumbel_db_length = if args.dbsize != 0 {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1306 (RPS-BLAST's
+    // traceback, `s_RPSComputeTraceback`, sorts always)
+    // ```c
+    //     Blast_HSPResultsSortByEvalue(results);
+    // ```
+    let sorts_results = rps_setup.is_some()
+        || database.is_none_or(|database| database.statistics().sorts_results());
+    let gumbel_db_length = if let Some(rps) = &rps_setup {
+        rps.gumbel_db_length
+    } else if args.dbsize != 0 {
         args.dbsize
     } else {
         database.map_or(total_db_len as i64, |database| {
@@ -10633,16 +10657,28 @@ fn run_call(
     let num_subjects: i32 = match database {
         None if total_db_len == 0 => 1,
         None => i32::try_from(subjects.len().max(1)).unwrap_or(i32::MAX),
-        Some(database) => rps_hooks::dbsize_volume_num_seqs(&args, database)
-            .map_or_else(|| database.statistics_num_sequences(), |count| count as i32),
+        Some(database) => rps_setup.map_or_else(
+            || database.statistics_num_sequences(),
+            |rps| rps.eff_num_seqs,
+        ),
     };
+    // The setup's own total and count, which its average divides (`BLAST_GapAlignSetUp`; an RPS
+    // search's first unit's, without `x_AdjustDbSize`'s `DbSeqNum`).
+    let (setup_total, setup_count) = rps_setup.map_or((total_db_len as i64, num_subjects), |rps| {
+        (rps.setup_total, rps.setup_count)
+    });
     // Without the Gumbel block (`-searchsp`, `OLD_FSC`) NCBI's shortest subject length is the
     // statistics' average (blast_setup.c:975 below), which divides by their number of sequences.
     if let Some(database) = database.filter(|_| args.old_fsc) {
-        database.check_statistics_count(args.app.name())?;
-        // RPS-BLAST's first volume of none of the profiles (`rps_hooks::dbsize_volume_num_seqs`)
-        // gives the same division by 0: the same refusal (DECISIONS 14 of line RG), not a panic.
-        if num_subjects == 0 {
+        // RPS-BLAST: each unit's setup divides by its own count (`RpsUnits::check_setup_counts`;
+        // over several volumes a volume counts its profiles, probe p7 of line RG D1a-4).
+        match &rps_units {
+            Some(units) => units.check_setup_counts(false, args.app.name())?,
+            None => database.check_statistics_count(args.app.name())?,
+        }
+        // A database whose setup counts no sequence of no letters gives the same division by 0:
+        // the same refusal (DECISIONS 14 of line RG), not a panic.
+        if setup_count == 0 {
             return Err(crate::algorithm::common::database::refusal(
                 crate::algorithm::common::database::STATISTICS_COUNT_ZERO,
                 args.app.name(),
@@ -10659,7 +10695,9 @@ fn run_call(
     //       db_length = eff_len_params->real_db_length;
     // ```
     // `-dbsize` above 0 replaces the total length behind the effective lengths.
-    let eff_db_length: i64 = if args.dbsize > 0 {
+    let eff_db_length: i64 = if let Some(rps) = &rps_setup {
+        rps.eff_db_length
+    } else if args.dbsize > 0 {
         args.dbsize
     } else {
         total_db_len as i64
@@ -10699,16 +10737,17 @@ fn run_call(
         // `setup_subject_length` without the block: the average as NCBI's `Int4` (0 where it is
         // 0 or the count is 0, which the check below refuses for a search).
         (_, false) => {
-            crate::stats::setup::setup_subject_length(total_db_len as i64, num_subjects, None)
-                .unwrap_or(0)
+            crate::stats::setup::setup_subject_length(setup_total, setup_count, None).unwrap_or(0)
         }
         (None, true) => blastp_preliminary_cutoff_subject_length(subjects),
-        (Some(database), true) => database.cutoff_subject_length(),
+        (Some(database), true) => {
+            rps_setup.map_or_else(|| database.cutoff_subject_length(), |rps| rps.min_length)
+        }
     };
     if contexts.iter().any(|ctx| ctx.is_valid)
         && crate::stats::setup::setup_subject_length(
-            total_db_len as i64,
-            num_subjects,
+            setup_total,
+            setup_count,
             (!args.old_fsc).then_some((cutoff_subject_length, false)),
         )
         .is_none()
@@ -12538,9 +12577,9 @@ fn run_call(
         let run = rps_hooks::RpsSearchRun {
             contexts: &contexts,
             gapped_params: &gapped_params,
-            gumbel: gapped_gumbel.as_ref(),
+            gumbel: gapped_gumbel.is_some(),
+            units: rps_units.as_ref(),
             search_spaces: &exact_search_spaces,
-            cutoff_subject_length,
             prelim_hitlist_size,
             batches: query_batches
                 .iter()
@@ -13001,16 +13040,37 @@ fn run_call(
     // The search strategy's requests carry each batch's `EffectiveSearchSpace` option, the
     // archive's (`FirstContext::context0_space`), now that the call's set-up has computed them.
     if let Some(call) = reports.call_requests {
+        // rpsblast: the space its last search unit leaves in the options handle
+        // (`rps_hooks::request_space`).
+        let rps_request_spaces = match &rps_units {
+            Some(units) => {
+                let mut spaces = vec![None; contexts.len()];
+                for first in call.batch_firsts() {
+                    spaces[first] = Some(rps_hooks::request_space(
+                        units,
+                        &args,
+                        &contexts[first],
+                        &gapped_params,
+                    )?);
+                }
+                Some(spaces)
+            }
+            None => None,
+        };
         call.set_searched(|first| {
             (!query_batch_skipped[first]).then(|| {
-                context0_searched(
+                let mut context0 = context0_searched(
                     &contexts,
                     &query_valid,
                     args.searchsp,
                     &exact_search_spaces,
                     &search_spaces,
                     first,
-                )
+                );
+                if let Some(space) = rps_request_spaces.as_ref().and_then(|spaces| spaces[first]) {
+                    context0.space = space;
+                }
+                context0
             })
         });
     }

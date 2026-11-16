@@ -5,7 +5,7 @@
 use crate::algorithm::tblastx::scoring::{Blosum62Score, TbxScore};
 // Where the context's letters lie in the query batch: NCBI's walks go on past the context's ends
 // (query_batch.rs).
-use super::query_batch::InBatch;
+use super::query_batch::{Again, InBatch, Pass, WalkEnd};
 // The table walks of the two-hit extension (x_two_hit_fast.rs).
 use super::x_two_hit_fast;
 
@@ -27,7 +27,7 @@ fn extend_left_ungapped_scalar<S: TbxScore>(
     s_off: usize,
     initial_score: i32,
     x_drop: i32,
-) -> (i32, usize, bool) {
+) -> (i32, usize, Option<i32>) {
     // The left extension of the two-hit extension (its own copy: the walk starts at the word).
     let max_left = q_off.min(s_off);
 
@@ -48,7 +48,7 @@ fn extend_left_ungapped_scalar<S: TbxScore>(
         }
 
         if (max_score - score) >= x_drop {
-            return (max_score, left_disp, false);
+            return (max_score, left_disp, None);
         }
         i += 1;
     }
@@ -57,7 +57,7 @@ fn extend_left_ungapped_scalar<S: TbxScore>(
     // the subject has letters left, the walk goes on before the context (query_batch.rs).
     let again = qb.left_at_bound(sc, s_seq, q_off, s_off, score, max_score, x_drop);
 
-    (max_score, left_disp, again)
+    (max_score, left_disp, again.then_some(score))
 }
 
 // NCBI BLAST reference (c++/src/algo/blast/core/aa_ungapped.c:886-921):
@@ -91,7 +91,7 @@ unsafe fn extend_left_ungapped_simd128<S: TbxScore>(
     s_off: usize,
     initial_score: i32,
     x_drop: i32,
-) -> (i32, usize, bool) {
+) -> (i32, usize, Option<i32>) {
     use std::arch::wasm32::*;
 
     let max_left = q_off.min(s_off);
@@ -123,7 +123,7 @@ unsafe fn extend_left_ungapped_simd128<S: TbxScore>(
                     left_disp = ext_len;
                 }
                 if (max_score - score) >= x_drop {
-                    return (max_score, left_disp, false);
+                    return (max_score, left_disp, None);
                 }
                 $pos += 1;
             }};
@@ -160,20 +160,20 @@ unsafe fn extend_left_ungapped_simd128<S: TbxScore>(
         }
 
         if (max_score - score) >= x_drop {
-            return (max_score, left_disp, false);
+            return (max_score, left_disp, None);
         }
         i += 1;
     }
     // As in `extend_left_ungapped_scalar` (aa_ungapped.c:897): both loops return at a break.
     let again = qb.left_at_bound(sc, s_seq, q_off, s_off, score, max_score, x_drop);
 
-    (max_score, left_disp, again)
+    (max_score, left_disp, again.then_some(score))
 }
 
 /// NCBI's left walk (`s_BlastAaExtendLeft`) from the letters before `q_off` and `s_off`: its best
-/// sum and length, and whether the extension is to run again on the query batch (`again`: on
-/// `InBatch::ALONE`, which stops at the context's start, where NCBI's walk would go on past it;
-/// a walk of `QueryBatch::at` goes on into the batch as NCBI's, `InBatch::left_at_bound`).
+/// sum and length, and where the search is to go on on the query batch, the walk's sum at its end
+/// (on `InBatch::ALONE`, which stops at the context's start, where NCBI's walk could go on past
+/// it; a walk of `QueryBatch::at` goes on into the batch as NCBI's, `InBatch::left_at_bound`).
 #[inline(always)]
 pub(super) fn extend_left_ungapped<S: TbxScore>(
     sc: S,
@@ -184,7 +184,7 @@ pub(super) fn extend_left_ungapped<S: TbxScore>(
     s_off: usize,
     initial_score: i32,
     x_drop: i32,
-) -> (i32, usize, bool) {
+) -> (i32, usize, Option<i32>) {
     #[cfg(all(
         target_arch = "wasm32",
         target_feature = "simd128",
@@ -232,7 +232,7 @@ fn extend_right_ungapped_scalar<S: TbxScore>(
     s_start: usize,
     initial_score: i32,
     x_drop: i32,
-) -> (i32, usize, usize, bool) {
+) -> (i32, usize, usize, Option<i32>) {
     let q_limit = q_seq.len();
 
     // NCBI's `n = MIN(subject->length - s_off, query->length - q_off)` (aa_ungapped.c:841), on the
@@ -259,7 +259,7 @@ fn extend_right_ungapped_scalar<S: TbxScore>(
         }
 
         if score <= 0 || (max_score - score) >= x_drop {
-            return (max_score, right_disp, j, false);
+            return (max_score, right_disp, j, None);
         }
         j += 1;
     }
@@ -284,7 +284,7 @@ fn extend_right_ungapped_scalar<S: TbxScore>(
         x_drop,
     );
 
-    (max_score, right_disp, j, again)
+    (max_score, right_disp, j, again.then_some(score))
 }
 
 // NCBI BLAST reference (c++/src/algo/blast/core/aa_ungapped.c:846-866):
@@ -314,7 +314,7 @@ unsafe fn extend_right_ungapped_simd128<S: TbxScore>(
     s_start: usize,
     initial_score: i32,
     x_drop: i32,
-) -> (i32, usize, usize, bool) {
+) -> (i32, usize, usize, Option<i32>) {
     use std::arch::wasm32::*;
 
     let q_limit = q_seq.len();
@@ -352,7 +352,7 @@ unsafe fn extend_right_ungapped_simd128<S: TbxScore>(
                     right_disp = $pos + 1;
                 }
                 if score <= 0 || (max_score - score) >= x_drop {
-                    return (max_score, right_disp, $pos, false);
+                    return (max_score, right_disp, $pos, None);
                 }
                 $pos += 1;
             }};
@@ -388,7 +388,7 @@ unsafe fn extend_right_ungapped_simd128<S: TbxScore>(
         }
 
         if score <= 0 || (max_score - score) >= x_drop {
-            return (max_score, right_disp, j, false);
+            return (max_score, right_disp, j, None);
         }
         j += 1;
     }
@@ -408,13 +408,13 @@ unsafe fn extend_right_ungapped_simd128<S: TbxScore>(
         x_drop,
     );
 
-    (max_score, right_disp, j, again)
+    (max_score, right_disp, j, again.then_some(score))
 }
 
 /// NCBI's right walk (`s_BlastAaExtendRight`) from `q_start` and `s_start`: its best sum and
-/// length, its count (`*s_last_off = s_off + i`), and whether the extension is to run again on the
-/// query batch (`again`: on `InBatch::ALONE`, which stops at the context's end, where NCBI's walk
-/// would go on past it; a walk of `QueryBatch::at` goes on into the batch as NCBI's,
+/// length, its count (`*s_last_off = s_off + i`), and where the search is to go on on the query
+/// batch, the walk's sum at its end (on `InBatch::ALONE`, which stops at the context's end, where
+/// NCBI's walk could go on past it; a walk of `QueryBatch::at` goes on into the batch as NCBI's,
 /// `InBatch::right_at_bound`).
 #[inline(always)]
 pub(super) fn extend_right_ungapped<S: TbxScore>(
@@ -426,7 +426,7 @@ pub(super) fn extend_right_ungapped<S: TbxScore>(
     s_start: usize,
     initial_score: i32,
     x_drop: i32,
-) -> (i32, usize, usize, bool) {
+) -> (i32, usize, usize, Option<i32>) {
     #[cfg(all(
         target_arch = "wasm32",
         target_feature = "simd128",
@@ -629,11 +629,11 @@ fn extend_hit_two_hit_sent_refused(
 /// outside 1..=127, a word that does not fit) and the debug output, with the scores of `sc`.
 ///
 /// Its walks go on past the context's ends into the query batch `qb` as NCBI's do (query_batch.rs).
-/// They first run on the context alone, and only where one of them ends at the context's end
-/// where NCBI's would go on past it (the NULLB not breaking it, `InBatch::left_at_bound`,
-/// `InBatch::right_at_bound`) does the extension run again on the batch
-/// (`extend_hit_two_hit_in_batch`): elsewhere the two give the same result, and the walks' loops
-/// keep no values of the batch.
+/// They first run on the context alone (`Pass::First`), and only where one of them ends at the
+/// context's end where NCBI's could go on past it (the NULLB not breaking it,
+/// `InBatch::left_at_bound`, `InBatch::right_at_bound`) does the extension go on from there on the
+/// batch (`extend_hit_two_hit_in_batch`, `Pass::Resume`): elsewhere the result is NCBI's, and the
+/// walks' loops keep no values of the batch.
 pub(super) fn extend_hit_two_hit_reference<S: TbxScore>(
     sc: S,
     q_seq: &[u8],
@@ -645,8 +645,10 @@ pub(super) fn extend_hit_two_hit_reference<S: TbxScore>(
     x_drop: i32,
     debug_ext: bool,
 ) -> (usize, usize, usize, usize, i32, bool, usize) {
-    if !debug_ext {
-        let (r, again) = two_hit_walks(
+    let pass = if debug_ext {
+        Pass::Whole
+    } else {
+        match two_hit_walks(
             sc,
             q_seq,
             InBatch::ALONE,
@@ -656,12 +658,12 @@ pub(super) fn extend_hit_two_hit_reference<S: TbxScore>(
             q_right_off,
             x_drop,
             false,
-            true,
-        );
-        if !again {
-            return r;
+            Pass::First,
+        ) {
+            Ok(r) => return r,
+            Err(again) => Pass::Resume(again),
         }
-    }
+    };
     extend_hit_two_hit_in_batch(
         sc,
         q_seq,
@@ -672,11 +674,12 @@ pub(super) fn extend_hit_two_hit_reference<S: TbxScore>(
         q_right_off,
         x_drop,
         debug_ext,
+        pass,
     )
 }
 
-/// `extend_hit_two_hit_reference` on the batch: its walks past the context's ends, and the debug
-/// output.
+/// `extend_hit_two_hit_reference` on the batch: from where its first pass stopped (`Pass::Resume`),
+/// or both walks with the debug output (`Pass::Whole`).
 #[cold]
 #[inline(never)]
 fn extend_hit_two_hit_in_batch<S: TbxScore>(
@@ -689,8 +692,9 @@ fn extend_hit_two_hit_in_batch<S: TbxScore>(
     q_right_off: usize,
     x_drop: i32,
     debug_ext: bool,
+    pass: Pass,
 ) -> (usize, usize, usize, usize, i32, bool, usize) {
-    two_hit_walks(
+    match two_hit_walks(
         sc,
         q_seq,
         qb,
@@ -700,17 +704,18 @@ fn extend_hit_two_hit_in_batch<S: TbxScore>(
         q_right_off,
         x_drop,
         debug_ext,
-        false,
-    )
-    .0
+        pass,
+    ) {
+        Ok(r) => r,
+        Err(_) => unreachable!("only the first pass stops at a walk"),
+    }
 }
 
-/// The steps of `extend_hit_two_hit_reference` with the walks of `qb`, and whether the extension
-/// is to run again on the query batch (`InBatch::ALONE` only, where a walk ends at the context's
-/// end and NCBI's would go on). `first`: the search's first pass on the context alone, which ends
-/// at that walk (its result is then not used: no other value is kept past the walk).
+/// The steps of `extend_hit_two_hit_reference` with the walks of `qb` in `pass`: its result, or
+/// where the first pass stopped (`Pass::First` on `InBatch::ALONE` only, where a walk ends at the
+/// context's end and NCBI's could go on; the second pass goes on from there).
 #[inline(always)]
-fn two_hit_walks<S: TbxScore>(
+pub(super) fn two_hit_walks<S: TbxScore>(
     sc: S,
     q_seq: &[u8],
     // Where `q_seq` lies in the query batch: the walks go on past its ends as NCBI's do on the
@@ -727,8 +732,8 @@ fn two_hit_walks<S: TbxScore>(
     // ```
     // Existing LOSAT diagnostics only; supplied by the current search owner.
     debug_ext: bool,
-    first: bool,
-) -> ((usize, usize, usize, usize, i32, bool, usize), bool) {
+    pass: Pass,
+) -> Result<(usize, usize, usize, usize, i32, bool, usize), Again> {
     // DEBUG: Print sequence segment for tracing
     static DEBUG_PRINTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -770,11 +775,37 @@ fn two_hit_walks<S: TbxScore>(
     // Note: NCBI BLAST does NOT explicitly check for stop codons in s_BlastAaExtendLeft.
     // Stop codons have very negative scores in BLOSUM62 (-4 to -5), so X-drop handles them.
     // Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:886-921
-    let (left_score, left_disp, left_again) =
-        extend_left_ungapped(sc, q_seq, qb, s_seq, q_right_off, s_right_off, 0, x_drop);
-    if first && left_again {
-        return ((0, 0, 0, 0, 0, false, 0), true);
-    }
+    let left = match pass {
+        // NCBI's walk goes on past the context's start (which leaves its best and length).
+        Pass::Resume(Again::Left(left)) => {
+            qb.left_at_bound(
+                sc,
+                s_seq,
+                q_right_off,
+                s_right_off,
+                left.score,
+                left.max_score,
+                x_drop,
+            );
+            left
+        }
+        Pass::Resume(Again::Right(left, _)) => left,
+        Pass::First | Pass::Whole => {
+            let (max_score, disp, again) =
+                extend_left_ungapped(sc, q_seq, qb, s_seq, q_right_off, s_right_off, 0, x_drop);
+            let left = WalkEnd {
+                max_score,
+                disp,
+                steps: 0,
+                score: again.unwrap_or(max_score),
+            };
+            if let (Pass::First, Some(_)) = (pass, again) {
+                return Err(Again::Left(left));
+            }
+            left
+        }
+    };
+    let (left_score, left_disp) = (left.max_score, left.disp);
 
     // Check if left extension reached the first hit
     // The distance from R to L is (s_right_off - s_left_off)
@@ -795,19 +826,47 @@ fn two_hit_walks<S: TbxScore>(
         right_extended = true;
 
         // NCBI BLAST extends right starting from left_score as initial score
-        let (new_max_score, new_right_disp, j, right_again) = extend_right_ungapped(
-            sc,
-            q_seq,
-            qb,
-            s_seq,
-            q_right_off,
-            s_right_off,
-            left_score,
-            x_drop,
-        );
-        if first && right_again {
-            return ((0, 0, 0, 0, 0, false, 0), true);
-        }
+        let (new_max_score, new_right_disp, j) = match pass {
+            // NCBI's walk goes on past the context's end (which leaves its best and length).
+            Pass::Resume(Again::Right(_, right)) => {
+                let (j, _) = qb.right_at_bound(
+                    sc,
+                    s_seq,
+                    s_right_off + right.steps,
+                    q_right_off + right.steps,
+                    q_right_off > q_seq.len(),
+                    right.steps,
+                    right.score,
+                    right.max_score,
+                    x_drop,
+                );
+                (right.max_score, right.disp, j)
+            }
+            _ => {
+                let (max_score, disp, j, again) = extend_right_ungapped(
+                    sc,
+                    q_seq,
+                    qb,
+                    s_seq,
+                    q_right_off,
+                    s_right_off,
+                    left_score,
+                    x_drop,
+                );
+                if let (Pass::First, Some(score)) = (pass, again) {
+                    return Err(Again::Right(
+                        left,
+                        WalkEnd {
+                            max_score,
+                            disp,
+                            steps: j,
+                            score,
+                        },
+                    ));
+                }
+                (max_score, disp, j)
+            }
+        };
         right_score = new_max_score;
         right_disp = new_right_disp;
         // s_last_off is the rightmost subject position scanned (NCBI BLAST style)
@@ -862,18 +921,15 @@ fn two_hit_walks<S: TbxScore>(
         );
     }
 
-    (
-        (
-            q_start,
-            q_end,
-            s_start,
-            s_end,
-            max_score_total,
-            right_extended,
-            s_last_off,
-        ),
-        false,
-    )
+    Ok((
+        q_start,
+        q_end,
+        s_start,
+        s_end,
+        max_score_total,
+        right_extended,
+        s_last_off,
+    ))
 }
 
 // No NCBI counterpart (LOSAT_X_STATS): the cells one call of `extend_hit_two_hit_reference` scores,

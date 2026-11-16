@@ -33,11 +33,15 @@
 //! length, on the right also with the same stop: `*s_last_off = s_off + i` with `i` the NULLB's
 //! step, the count of the walk that ended at the context's end.
 //!
-//! The searches so walk a context alone first (`InBatch::ALONE`): a walk that ends at the context's
-//! end tests, from its own sum, best and X-drop, whether the NULLB's step would break it
-//! (`nullb_goes_on_left`, `nullb_goes_on_right`), and only where it would not does the search run
-//! the extension again on the batch (`extend_hit_one_hit`, `extend_hit_two_hit_reference`); the
-//! walks' loops keep no other values.
+//! The searches so walk a context alone first (`InBatch::ALONE`, `Pass::First`): a walk that ends at
+//! the context's end tests, from its own sum, best and X-drop, whether the NULLB's step would break
+//! it (`nullb_goes_on_left`, `nullb_goes_on_right`), and only where it would not does the search go
+//! on from there on the batch (`Pass::Resume` with the walk's end, `WalkEnd`); the walks' loops keep
+//! no other values. The two-hit extension's second pass is out of line in the extension
+//! (`extend_hit_two_hit_reference`); the one-hit scan calls its own (`word_finder::one_hit_in_batch`)
+//! so that it records the first pass's result from its registers: with one result for both passes
+//! the first pass's went through memory at every extension (X2c, `-window_size 0`, +1.4 %
+//! instructions).
 //!
 //! A walk past the NULLB that scores no higher than its best leaves the extension's result as it
 //! was, except that the right walk's stop (`s_last_off`, and through it the diagonal's `last_hit`
@@ -75,9 +79,9 @@ const NULLB: u8 = 0;
 const NULLB_SCORE: i32 = BLAST_SCORE_MIN;
 
 /// The query batch of a search, as its two-hit and one-hit extensions read it: the batch's
-/// contexts, and where the search reports an extension that LOSAT refuses. The searches make it
-/// once per batch (or per subject on the unit path, `noting`); an extension reads it through
-/// `QueryBatch::at`, with its subject. `Copy`: it holds references only (a subject's
+/// contexts, and where the search reports an extension that LOSAT refuses. The frame loop makes it
+/// once per batch (`WordFinderCx::query_batch`), the unit path once per hit context (`XHitCtx`,
+/// `noting`); an extension reads it through `QueryBatch::at`, with its subject. `Copy`: it holds references only (a subject's
 /// `WordFinderCx` copies the batch's).
 #[derive(Clone, Copy)]
 pub(crate) struct QueryBatch<'a> {
@@ -111,6 +115,7 @@ impl<'a> QueryBatch<'a> {
     /// Context `ctx` of the batch, as an extension in it against subject `s_idx` reads the batch.
     #[inline(always)]
     pub(crate) fn at(&'a self, ctx: usize, s_idx: usize) -> InBatch<'a> {
+        debug_assert!(ctx <= u32::MAX as usize && s_idx <= u32::MAX as usize);
         InBatch {
             batch: Some(self),
             // A batch's contexts and a search's subjects are counted in `u32`, as `InitHSP`
@@ -384,7 +389,7 @@ impl InBatch<'_> {
 
 impl InBatch<'static> {
     /// A context alone: the walks stop at its ends. The extensions walk so first and on the batch
-    /// only where NCBI's walk would go on past an end (`InBatch::left_at_bound`,
+    /// only where NCBI's walk could go on past an end (`InBatch::left_at_bound`,
     /// `InBatch::right_at_bound`; `extend_hit_one_hit_alone`, `extend_hit_two_hit_reference`);
     /// the tests, and `x_two_hit_cells`, which counts the cells of the same walks.
     pub(crate) const ALONE: Self = Self { batch: None, at: 0 };
@@ -478,6 +483,37 @@ impl InBatch<'_> {
     }
 }
 
+/// Where a walk of a search's first pass, on a context alone, ended at the context's end and NCBI's
+/// could go on (`InBatch::left_at_bound`, `InBatch::right_at_bound`): its best sum and length, its
+/// count (the right walk's; 0 for the left walk) and its sum there. The second pass goes on from
+/// there on the query batch (`Pass::Resume`): a walk past a NULLB that scores higher refuses the
+/// search, so the best and the length stand, and only the right walk's count can change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WalkEnd {
+    pub(crate) max_score: i32,
+    pub(crate) disp: usize,
+    pub(crate) steps: usize,
+    pub(crate) score: i32,
+}
+
+/// Where a search's first pass stopped: at the end of its left walk, or of its right walk (with
+/// the left walk's best and length).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Again {
+    Left(WalkEnd),
+    Right(WalkEnd, WalkEnd),
+}
+
+/// The pass of an extension (`extend_hit_one_hit`, `extend_hit_two_hit_reference`): the first,
+/// on a context alone, which stops at a walk that asks for the batch; the second, which goes on
+/// from there (`Resume`); or both walks in one pass (`Whole`, the debug output's).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Pass {
+    First,
+    Resume(Again),
+    Whole,
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:906-912 (`s_BlastAaExtendLeft`)
 // ```c
 //         score += matrix[q[i]][s[i]];
@@ -491,10 +527,11 @@ impl InBatch<'_> {
 //             break;
 // ```
 /// Whether the NULLB's step leaves NCBI's left walk going, the walk being at `score` below its
-/// best `max_score` without a break (`max_score - score < x_drop`): the NULLB takes
-/// `-NULLB_SCORE` (32,768) off, so the sum stays below the best and the walk breaks unless the
-/// X-drop is larger than what it is then below the best. In `i32`: `x_drop - (max_score - score)`
-/// lies in `1..=x_drop`.
+/// best `max_score` without a break (`max_score - score < x_drop` after a step; 0 with no step):
+/// the NULLB takes `-NULLB_SCORE` (32,768) off, so the sum stays below the best and the walk breaks
+/// unless the X-drop is larger than what it is then below the best. In `i32`: `x_drop - (max_score
+/// - score)` lies in `1..=x_drop` after a step and is `x_drop` with none (an X-drop of 0 or less
+/// then gives false, as NCBI's step breaks there), so it does not overflow.
 #[inline(always)]
 fn nullb_goes_on_left(score: i32, max_score: i32, x_drop: i32) -> bool {
     x_drop - (max_score - score) > -NULLB_SCORE

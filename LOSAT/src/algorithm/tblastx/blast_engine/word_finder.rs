@@ -41,9 +41,10 @@ use crate::algorithm::tblastx::subjects::XReadFailure;
 /// the clocks of the scan and the extension), LOSAT_DEBUG_EXTENSION (`extension_debug_enabled`),
 /// the query contexts with their cutoffs and X-drops, the scan's LOSAT_X_TBXSCANBF (`x_scan_bf`)
 /// and offset-array size, LOSAT_X_TBXUNGAPSENT (`tbx_sent`), LOSAT_DEBUG_SCAN_SOFF's range
-/// (`scan_debug_range`), and the search's failure (`x_read_failure`, where the one-hit word finder
-/// reports an error). `Sync`: every worker's `process_subject` reads it (`SubjectStatistics::
-/// word_finder_cx`), and where NCBI computes the statistics of each subject copies it once per
+/// (`scan_debug_range`), the search's failure (`x_read_failure`, where the one-hit word finder
+/// reports an error), and the query batch as the extensions read it past a context's ends
+/// (`query_batch`, which refuses into `x_read_failure`). `Sync`: every worker's `process_subject`
+/// reads it (`SubjectStatistics::word_finder_cx`), and where NCBI computes the statistics of each subject copies it once per
 /// subject with that subject's own `cutoff_scores` (`context_cutoffs::subject_cutoffs`); the frame
 /// loop's two-hit and one-hit word finders save their extensions against the `cutoff_scores` of
 /// the one they are given (`FrameCx::cx`).
@@ -1209,9 +1210,9 @@ fn scan_chunk_bucketed<S: TbxScore>(
 }
 
 /// The one-hit extension of the word at batch offset `query_offset` (in context `ctx_idx`, `ctx`)
-/// and `subject_offset` of the chunk's letters `subject`, on the query batch: where a walk on the
-/// context alone ended at the context's end and NCBI's would go on past the NULLB
-/// (`extend_hit_one_hit_alone`, `OneHitAlone::Again`; extension/query_batch.rs). Out of the scan's
+/// and `subject_offset` of the chunk's letters `subject`, on the query batch, from where its first
+/// pass on the context alone stopped (`again`: a walk ended at the context's end where NCBI's could
+/// go on past the NULLB; `extend_hit_one_hit_alone`, extension/query_batch.rs). Out of the scan's
 /// loop, from values the loop keeps.
 #[cold]
 #[inline(never)]
@@ -1224,9 +1225,10 @@ fn one_hit_in_batch<S: TbxScore>(
     subject: &[u8],
     subject_offset: u32,
     x_dropoff_per_context: &[i32],
+    again: crate::algorithm::tblastx::extension::Again,
 ) -> Option<crate::algorithm::tblastx::extension::OneHit> {
     let q_raw = query_offset.wrapping_sub(ctx.frame_base as u32) as usize;
-    crate::algorithm::tblastx::extension::extend_hit_one_hit(
+    crate::algorithm::tblastx::extension::extend_hit_one_hit_resume(
         sc,
         &ctx.aa_seq[1..ctx.aa_seq.len() - 1],
         frame.cx.query_batch.at(ctx_idx, frame.s_idx),
@@ -1234,6 +1236,7 @@ fn one_hit_in_batch<S: TbxScore>(
         q_raw,
         subject_offset as usize,
         x_dropoff_per_context[ctx_idx],
+        again,
     )
 }
 
@@ -1472,7 +1475,7 @@ fn scan_chunk_one_hit<S: TbxScore>(
                     diag_entry.set_last_hit(hit.s_last_off - (wordsize - 1) + *diag_offset);
                 };
                 // [C] score = s_BlastAaExtendOneHit(matrix, subject, query, ...);
-                // On the context alone; where a walk would go on into the query batch past the
+                // On the context alone; where a walk could go on into the query batch past the
                 // context's ends, as NCBI's do, again on the batch (`one_hit_in_batch`;
                 // extension/query_batch.rs; aa_ungapped.c:841, 897).
                 let again = match crate::algorithm::tblastx::extension::extend_hit_one_hit_alone(
@@ -1487,7 +1490,7 @@ fn scan_chunk_one_hit<S: TbxScore>(
                         record(hit);
                         continue;
                     }
-                    Some(OneHitAlone::Again) => one_hit_in_batch(
+                    Some(OneHitAlone::Again(again)) => one_hit_in_batch(
                         sc,
                         frame,
                         ctx,
@@ -1496,6 +1499,7 @@ fn scan_chunk_one_hit<S: TbxScore>(
                         subject,
                         subject_offset,
                         x_dropoff_per_context,
+                        again,
                     ),
                     None => None,
                 };

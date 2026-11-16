@@ -2,7 +2,7 @@
 //! `one_hit.rs` on a context of a batch against NCBI's functions on the batch's buffer.
 
 use super::super::one_hit::{extend_hit_one_hit, extend_hit_one_hit_alone, OneHitAlone};
-use super::super::two_hit::extend_hit_two_hit_reference;
+use super::super::two_hit::{extend_hit_two_hit_reference, two_hit_walks};
 use super::*;
 use crate::algorithm::tblastx::scoring::Blosum62Score;
 use crate::config::ScoringMatrix;
@@ -376,7 +376,7 @@ const X_DROPS: [i32; 9] = [1, 16, 5000, 32767, 32768, 32769, 40000, 100_000, 50_
 #[test]
 fn the_two_hit_walks_go_on_into_the_batch_as_ncbis_do() {
     let mut rng = Rng(0x2c2c_9e37_79b9_7f4a);
-    let (mut moved, mut refused, mut equal) = (0usize, 0usize, 0usize);
+    let (mut moved, mut refused, mut equal, mut again) = (0usize, 0usize, 0usize, 0usize);
     for round in 0..30_000 {
         let blosum = round % 3 == 0;
         let (contexts, subject, from) = random_case(&mut rng, if blosum { 20 } else { 3 }, 3);
@@ -417,15 +417,44 @@ fn the_two_hit_walks_go_on_into_the_batch_as_ncbis_do() {
                 let model = ncbi_two_hit(
                     $sc, &contexts, ctx, &subject, s_left, s_right, q_right, x_drop,
                 );
-                (got, alone, model)
+                // The search's first pass, on the context alone.
+                let first = two_hit_walks(
+                    $sc,
+                    letters,
+                    InBatch::ALONE,
+                    &subject,
+                    s_left,
+                    s_right,
+                    q_right,
+                    x_drop,
+                    false,
+                    Pass::First,
+                );
+                (got, alone, model, first)
             }};
         }
-        let (got, alone, model) = if blosum {
+        let (got, alone, model, first) = if blosum {
             run!(Blosum62Score)
         } else {
             run!(Big)
         };
+        // A refusal fails the search of the subject the extension reads (7).
+        if failure.failed() {
+            assert!(failure.skips(8) && !failure.skips(7), "round {round}");
+        }
         let was_refused = failure.take().is_some();
+        // The first pass gives the batch's result, or asks for the batch only with an X-drop
+        // above 32,768.
+        match first {
+            Ok(r) => {
+                assert_eq!(r, got, "round {round}: first pass");
+                assert!(!was_refused, "round {round}: first pass");
+            }
+            Err(_) => {
+                assert!(x_drop > -BLAST_SCORE_MIN, "round {round}: again");
+                again += 1;
+            }
+        }
         match model {
             Some(expect) => {
                 assert!(!was_refused, "round {round}: refused, NCBI {expect:?}");
@@ -458,8 +487,8 @@ fn the_two_hit_walks_go_on_into_the_batch_as_ncbis_do() {
         }
     }
     assert!(
-        moved > 100 && refused > 100 && equal > 1000,
-        "{moved} {refused} {equal}"
+        moved > 100 && refused > 100 && equal > 1000 && again > 100,
+        "{moved} {refused} {equal} {again}"
     );
 }
 
@@ -522,6 +551,10 @@ fn the_one_hit_walks_go_on_into_the_batch_as_ncbis_do() {
         } else {
             run!(Big)
         };
+        // A refusal fails the search of the subject the extension reads (7).
+        if failure.failed() {
+            assert!(failure.skips(8) && !failure.skips(7), "round {round}");
+        }
         let was_refused = failure.take().is_some();
         // The first pass gives the batch's result, or asks for the batch only where a walk ends
         // at the context's end with an X-drop above 32,768 or starts past it (a word at the
@@ -531,7 +564,7 @@ fn the_one_hit_walks_go_on_into_the_batch_as_ncbis_do() {
                 assert_eq!(hit, got, "round {round}: first pass");
                 assert!(!was_refused, "round {round}: first pass");
             }
-            OneHitAlone::Again => {
+            OneHitAlone::Again(_) => {
                 assert!(
                     x_drop > -BLAST_SCORE_MIN || q_word + 3 == len,
                     "round {round}: again"

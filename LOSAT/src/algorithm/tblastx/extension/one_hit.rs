@@ -2,7 +2,7 @@
 //!
 //! Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c
 
-use super::query_batch::InBatch;
+use super::query_batch::{Again, InBatch, Pass, WalkEnd};
 use super::two_hit::{extend_left_ungapped, extend_right_ungapped};
 use crate::algorithm::tblastx::scoring::TbxScore;
 
@@ -63,7 +63,10 @@ pub(crate) struct OneHit {
 /// or negative when the sum is reset after its best part. The left and right walks are the two-hit
 /// extension's (`s_BlastAaExtendLeft` and `s_BlastAaExtendRight`): they stop at the subject
 /// slice's ends, and at the context's ends they go on into the query batch `qb` as NCBI's walks do
-/// (query_batch.rs).
+/// (query_batch.rs). The two passes as the one-hit scan runs them (`extend_hit_one_hit_alone`,
+/// then `extend_hit_one_hit_resume` where the first stops; `word_finder::scan_chunk_one_hit`); the
+/// tests' entry.
+#[cfg(test)]
 pub(crate) fn extend_hit_one_hit<S: TbxScore>(
     sc: S,
     q_seq: &[u8],
@@ -73,10 +76,11 @@ pub(crate) fn extend_hit_one_hit<S: TbxScore>(
     s_off: usize,
     x_drop: i32,
 ) -> Option<OneHit> {
-    // Not the first pass: the walks give their result (`OneHitAlone::Again` is the first pass's).
-    match one_hit_walks(sc, q_seq, qb, s_seq, q_off, s_off, x_drop, false)? {
+    match extend_hit_one_hit_alone(sc, q_seq, s_seq, q_off, s_off, x_drop)? {
         OneHitAlone::Hit(hit) => Some(hit),
-        OneHitAlone::Again => None,
+        OneHitAlone::Again(again) => {
+            extend_hit_one_hit_resume(sc, q_seq, qb, s_seq, q_off, s_off, x_drop, again)
+        }
     }
 }
 
@@ -85,16 +89,17 @@ pub(crate) fn extend_hit_one_hit<S: TbxScore>(
 pub(crate) enum OneHitAlone {
     /// The extension's result, which NCBI's walks on the query batch also give.
     Hit(OneHit),
-    /// A walk ended at the context's end where NCBI's would go on past it into the query batch
+    /// A walk ended at the context's end where NCBI's could go on past it into the query batch
     /// (the NULLB not breaking it, `InBatch::left_at_bound`, `InBatch::right_at_bound`): the search
-    /// runs the extension again on the batch (`extend_hit_one_hit`).
-    Again,
+    /// goes on from there on the batch (`extend_hit_one_hit_resume`).
+    Again(Again),
 }
 
-/// `extend_hit_one_hit` on the context alone (`InBatch::ALONE`: the walks stop at its ends), up to
-/// a walk that ends at the context's end where NCBI's would go on into the query batch
-/// (`OneHitAlone::Again`); elsewhere the two give the same result. The search's loop so keeps no
-/// values of the batch through the walks.
+/// The first pass of `extend_hit_one_hit`, on the context alone (`InBatch::ALONE`: the walks stop
+/// at its ends), up to a walk that ends at the context's end where NCBI's could go on into the
+/// query batch (`OneHitAlone::Again`); elsewhere its result is NCBI's. The search's loop so keeps
+/// no values of the batch through the walks.
+#[inline(always)]
 pub(crate) fn extend_hit_one_hit_alone<S: TbxScore>(
     sc: S,
     q_seq: &[u8],
@@ -103,12 +108,53 @@ pub(crate) fn extend_hit_one_hit_alone<S: TbxScore>(
     s_off: usize,
     x_drop: i32,
 ) -> Option<OneHitAlone> {
-    one_hit_walks(sc, q_seq, InBatch::ALONE, s_seq, q_off, s_off, x_drop, true)
+    Some(
+        match one_hit_walks(
+            sc,
+            q_seq,
+            InBatch::ALONE,
+            s_seq,
+            q_off,
+            s_off,
+            x_drop,
+            Pass::First,
+        )? {
+            Ok(hit) => OneHitAlone::Hit(hit),
+            Err(again) => OneHitAlone::Again(again),
+        },
+    )
 }
 
-/// The steps of `extend_hit_one_hit` with the walks of `qb`. `first`: the search's first pass on
-/// the context alone, which ends at a walk that asks for the batch (`OneHitAlone::Again`; no other
-/// pass gives it).
+/// The second pass of `extend_hit_one_hit`: from where the first stopped (`again`), on the batch
+/// `qb` (the word's offsets and scores are taken again; its walks are not).
+pub(crate) fn extend_hit_one_hit_resume<S: TbxScore>(
+    sc: S,
+    q_seq: &[u8],
+    qb: InBatch<'_>,
+    s_seq: &[u8],
+    q_off: usize,
+    s_off: usize,
+    x_drop: i32,
+    again: Again,
+) -> Option<OneHit> {
+    match one_hit_walks(
+        sc,
+        q_seq,
+        qb,
+        s_seq,
+        q_off,
+        s_off,
+        x_drop,
+        Pass::Resume(again),
+    )? {
+        Ok(hit) => Some(hit),
+        Err(_) => unreachable!("only the first pass stops at a walk"),
+    }
+}
+
+/// The steps of `extend_hit_one_hit` with the walks of `qb` in `pass` (`Pass::First` or
+/// `Pass::Resume`): `None` where the word does not fit, else the result, or where the first pass
+/// stopped.
 #[inline(always)]
 fn one_hit_walks<S: TbxScore>(
     sc: S,
@@ -118,8 +164,8 @@ fn one_hit_walks<S: TbxScore>(
     q_off: usize,
     s_off: usize,
     x_drop: i32,
-    first: bool,
-) -> Option<OneHitAlone> {
+    pass: Pass,
+) -> Option<Result<OneHit, Again>> {
     let word = sc.word();
     // The word's letters (`None` where it does not fit in both).
     let (Some(q_word), Some(s_word)) = (
@@ -146,26 +192,73 @@ fn one_hit_walks<S: TbxScore>(
     let s_left_off = q_left_off + s_off - q_off;
     let s_right_off = q_right_off + s_off - q_off;
     // `extend_left_ungapped` walks from the letter before the offsets it is given.
-    let (left_score, left_disp, left_again) =
-        extend_left_ungapped(sc, q_seq, qb, s_seq, q_left_off, s_left_off, score, x_drop);
-    if first && left_again {
-        return Some(OneHitAlone::Again);
-    }
+    let left = match pass {
+        // NCBI's walk goes on past the context's start (which leaves its best and length).
+        Pass::Resume(Again::Left(left)) => {
+            qb.left_at_bound(
+                sc,
+                s_seq,
+                q_left_off,
+                s_left_off,
+                left.score,
+                left.max_score,
+                x_drop,
+            );
+            left
+        }
+        Pass::Resume(Again::Right(left, _)) => left,
+        Pass::First | Pass::Whole => {
+            let (max_score, disp, again) =
+                extend_left_ungapped(sc, q_seq, qb, s_seq, q_left_off, s_left_off, score, x_drop);
+            let left = WalkEnd {
+                max_score,
+                disp,
+                steps: 0,
+                score: again.unwrap_or(max_score),
+            };
+            if let (Pass::First, Some(_)) = (pass, again) {
+                return Some(Err(Again::Left(left)));
+            }
+            left
+        }
+    };
+    let (left_score, left_disp) = (left.max_score, left.disp);
     // `last` is the walk's `i` at its end: `*s_last_off = s_off + i`.
-    let (total_score, right_disp, last, right_again) = extend_right_ungapped(
-        sc,
-        q_seq,
-        qb,
-        s_seq,
-        q_right_off + 1,
-        s_right_off + 1,
-        left_score,
-        x_drop,
-    );
-    if first && right_again {
-        return Some(OneHitAlone::Again);
-    }
-    Some(OneHitAlone::Hit(OneHit {
+    let (q_start, s_start) = (q_right_off + 1, s_right_off + 1);
+    let (total_score, right_disp, last) = match pass {
+        // NCBI's walk goes on past the context's end (which leaves its best and length).
+        Pass::Resume(Again::Right(_, right)) => {
+            let (j, _) = qb.right_at_bound(
+                sc,
+                s_seq,
+                s_start + right.steps,
+                q_start + right.steps,
+                q_start > q_seq.len(),
+                right.steps,
+                right.score,
+                right.max_score,
+                x_drop,
+            );
+            (right.max_score, right.disp, j)
+        }
+        _ => {
+            let (max_score, disp, j, again) =
+                extend_right_ungapped(sc, q_seq, qb, s_seq, q_start, s_start, left_score, x_drop);
+            if let (Pass::First, Some(score)) = (pass, again) {
+                return Some(Err(Again::Right(
+                    left,
+                    WalkEnd {
+                        max_score,
+                        disp,
+                        steps: j,
+                        score,
+                    },
+                )));
+            }
+            (max_score, disp, j)
+        }
+    };
+    Some(Ok(OneHit {
         q_start: (q_left_off - left_disp) as i32,
         s_start: (s_left_off - left_disp) as i32,
         length: left_disp as i32 + right_disp as i32 + init_hit_width,

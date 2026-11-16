@@ -1093,16 +1093,26 @@ masked). Line NP item M4a-2c.
     row's next segment does not follow at once (unaligned letters between them): the fill of that
     stretch starts at the segment's own start (`new_start = prev_start + prev_len * width`, with a
     length of 0), so `row->SetStarts()[new_start] = seg` (:323) replaces the row's reference to the
-    segment. It is the last one unless another row's map holds the segment (a segment of length 0
-    that `x_MinimizeGaps` made for several query rows) or the segment is the last that `x_Merge`
-    made (its local `CRef<CAlnMixSegment> seg`, alnmerger.cpp:161, alive until `x_CreateDenseg`
-    has returned, :822-830); no other `CRef` holds a segment then. `x_CreateDenseg` then reads the
-    freed segment through `m_Segments` (alnmerger.cpp:1196-1210). Official NCBI BLAST+ 2.17.0
-    exits 139 (SIGSEGV), and valgrind finds the invalid reads of a block "free'd by
+    segment. It is the last one unless the segment is the last that `x_Merge` made (its local
+    `CRef<CAlnMixSegment> seg`, alnmerger.cpp:161, alive until `x_CreateDenseg` has returned,
+    :822-830). Besides `seg`, only the rows' maps hold a segment then, and none holds one of length
+    0 elsewhere: on the first row, whose segments `x_MinimizeGaps` never takes
+    (alnsegments.cpp:254-256), such a segment has one start (the walk of a match's second row does
+    not run for a length of 0, alnmerger.cpp:752); the first frame group's other query rows hold
+    segments of length 0 only, which `x_MinimizeGaps` makes into one segment per run that nothing
+    on those rows follows, so no fill starts at one. (A map that still holds a replaced segment at
+    another start of its row keeps it alive: where a run of `x_MinimizeGaps` ends at a segment that
+    shares a row with an earlier one, each new segment is bound at both starts,
+    alnsegments.cpp:478-480, :526, and a later fill can write at the earlier one. That happens to
+    segments of letters, as in an alignment with an insertion next to a deletion, and frees
+    nothing.) `x_CreateDenseg` then reads the freed segment through `m_Segments`
+    (alnmerger.cpp:1196-1210). Official NCBI BLAST+
+    2.17.0 exits 139 (SIGSEGV), and valgrind finds the invalid reads of a block "free'd by
     `CAlnMixSegments::FillUnalignedRegions()`" (review 3 of T3c: the 8 runs of its seed-11 fuzz
     with `-strand minus -num_descriptions 0`, cases `r11_001` and `r11_019`); where the segment is
     still held, or no fill starts at it, NCBI exits 0 and valgrind is clean (`r21_173`, `r21_322`,
-    `r21_381` and the x2g case f3147 at query offset 0, held by `seg`; `r21_470`, `r11_003`).
+    `r21_381`, review 4's `r41_079` on the default strand and the x2g case f3147 at query offset 0,
+    held by `seg`; `r21_470`, `r11_003`).
 
   No checkable result in either place. LOSAT runs the same merge and refuses (exit 1) where it
   reaches that split or replaces that last reference

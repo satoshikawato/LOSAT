@@ -314,7 +314,9 @@ fn blastx_hsp_of_length_0_at_a_codon_of_frame_plus_one_frees_the_segment() {
 // first, of the HSP at 59, is `x_Merge`'s last), in r11_019 that of the HSP at 136. NCBI exits 0 where the replaced
 // segment is `x_Merge`'s last (`seg`, alnmerger.cpp:161, alive until `x_CreateDenseg` has returned: r21_173, r21_322,
 // r21_381, and f3147's at query offset 0) or no fill follows a segment of length 0 (r21_470: `x_MinimizeGaps` makes one
-// segment of the frame 0 row's two, which both their starts hold).
+// segment of the frame 0 row's two, which both their starts hold). r41_079 (review 4 of T3c) adds the default strand: the
+// one replacement of its run, in the first group of its query q1, is of `x_Merge`'s last segment (official NCBI BLAST+
+// 2.17.0 under gdb: 18 calls of `FillUnalignedRegions`, one write over an existing start, no free).
 #[test]
 fn blastx_fill_after_a_segment_of_length_0_frees_its_last_reference() {
     let frees = |query_len: usize, rows: &[(u32, u32, u32, u32, u32, i8, &str)]| {
@@ -401,4 +403,46 @@ fn blastx_fill_after_a_segment_of_length_0_frees_its_last_reference() {
         ),
         "f3147"
     );
+    // r41_079 q1 (default strand; NCBI exit 0, valgrind clean): the fill replaces `x_Merge`'s last segment
+    assert!(
+        !frees(
+            74,
+            &[
+                (1, 31, 45, 31, 35, 1, "1HTLMLW1"),
+                (1, 31, 36, 23, 24, 1, "1HN"),
+                (1, 40, 48, 6, 8, 1, "LI1EK"),
+                (1, 34, 45, 16, 19, 1, "1LNLR1"),
+                (1, 31, 33, 34, 34, 1, "1"),
+                (1, 34, 36, 3, 3, 1, "1"),
+                (1, 31, 51, 9, 15, 1, "WYHYLVLKCMEQIL"),
+                (1, 64, 72, 12, 14, 1, "RKKM1"),
+                (1, 40, 48, 20, 22, 1, "LMCAED"),
+                (1, 55, 60, 14, 15, 1, "EQVL"),
+                (0, 28, 39, 6, 9, 1, "2HKLI"),
+                (0, 31, 36, 10, 11, 1, "2"),
+                (0, 31, 33, 17, 17, 1, "1"),
+                (0, 31, 33, 23, 23, 1, "1"),
+                (0, 52, 60, 1, 3, 1, "ST1VI"),
+                (0, 46, 51, 2, 3, 1, "2"),
+                (0, 24, 25, 3, 2, -3, ""),
+                (0, 52, 54, 25, 25, 1, "1"),
+                (0, 49, 51, 26, 26, 1, "1")
+            ]
+        ),
+        "r41_079"
+    );
+}
+
+// A fill that writes at a start where its row's map still holds the replaced segment at another start frees nothing
+// (`Mix::held` scans every row's map, not only `x_Merge`'s `seg`): where a run of `x_MinimizeGaps` ends at a segment
+// that shares a row with an earlier one, each new segment is bound at the starts of both on that row
+// (alnsegments.cpp:478-480, :526), and `FillUnalignedRegions` can write at the earlier one (:317, :323). Here one frame +1
+// HSP whose subject has inserted letters on either side of a query letter that it lacks (BTOP `-KA--K`, an insertion
+// next to a deletion): the subject row's two one-letter segments, in one run, become one segment bound at subject
+// offsets 29 and 30, and the fill of the subject row writes at 29. A synthetic HSP: about 26,000 searches of the
+// probe sets of reviews 3 and 4 and the outfmt 1 to 4 fixture rows met no such replacement.
+#[test]
+fn blastx_fill_at_a_start_that_its_row_still_holds_elsewhere_frees_nothing() {
+    let hsps = subject_hsps(53, &[(0, 7, 48, 27, 42, 1, "3-KA--K5A--K-K4")]);
+    assert!(matches!(super::aln_mix::merge(&hsps, &[0]), Ok(Some(_))));
 }

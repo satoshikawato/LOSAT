@@ -586,10 +586,10 @@ pub(crate) const UNPORTED_SUBJECT_ALL_EMPTY: &str = "BLASTX -ungapped -window_si
 /// length of 0, which replaces every reference to the segment while the merge still walks it
 /// (`Mix::place`). One that its query row's next segment does not follow at once is where
 /// `FillUnalignedRegions` starts to fill the row, which replaces the row's reference to its
-/// segment: the last one unless another row's map holds the segment or it is the merge's last
-/// segment, so the segment is freed while `m_Segments` still lists it and `x_CreateDenseg`
+/// segment: the last one unless the segment is the last that the merge made (`x_Merge`'s local
+/// `CRef`), so the segment is freed while `m_Segments` still lists it and `x_CreateDenseg`
 /// reads it (`Mix::fill_unaligned_regions`). PD-LOSAT-NCBI-DEFECTS rule 3.
-pub(crate) const UNPORTED_ANCHORED_FREE: &str = "BLASTX -ungapped -window_size 0 with -outfmt 1 to 4: a one-hit ungapped alignment of length 0 among the alignments shown where NCBI BLAST+'s merge of the query-anchored alignments frees memory that it still reads (it crashed in our runs): one whose query row starts at the first nucleotide of a codon of an alignment in the query's reading frame +1, whose segment the merge splits at a length of 0, or one followed on its query row by unaligned letters, whose segment of length 0 the merge's FillUnalignedRegions replaces, unless another row holds that segment or it is the last segment the merge made, which LOSAT does not support";
+pub(crate) const UNPORTED_ANCHORED_FREE: &str = "BLASTX -ungapped -window_size 0 with -outfmt 1 to 4: a one-hit ungapped alignment of length 0 among the alignments shown where NCBI BLAST+'s merge of the query-anchored alignments frees memory that it still reads (it crashed in our runs): one whose query row starts at the first nucleotide of a codon of an alignment in the query's reading frame +1, whose segment the merge splits at a length of 0, or one followed on its query row by unaligned letters, whose segment of length 0 the merge's FillUnalignedRegions replaces, unless it is the last segment the merge made, which LOSAT does not support";
 
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:422-427,499-503
 // ```c++

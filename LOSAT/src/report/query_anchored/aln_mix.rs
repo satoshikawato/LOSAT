@@ -139,10 +139,10 @@ pub(crate) enum MixError {
     ///   its `m_StartIts` (alnmerger.cpp:598-614).
     /// - `FillUnalignedRegions` (`Mix::fill_unaligned_regions`): the fill after a segment of
     ///   length 0 of a row starts at that segment's own start, so `row->SetStarts()[new_start] =
-    ///   seg` (alnsegments.cpp:323) replaces the row's `CRef` of it; where no other map holds it
-    ///   and it is not the last segment that `x_Merge` created (`Mix::merge_seg`), it is freed
-    ///   while `m_Segments` still lists it, and `x_CreateDenseg` reads it (alnmerger.cpp:
-    ///   1196-1210).
+    ///   seg` (alnsegments.cpp:323) replaces the row's `CRef` of it; unless it is the last segment
+    ///   that `x_Merge` created (`Mix::merge_seg`), the only other `CRef` that such a segment has
+    ///   there (`Mix::held`), it is freed while `m_Segments` still lists it, and `x_CreateDenseg`
+    ///   reads it (alnmerger.cpp:1196-1210).
     ///
     /// A read of freed memory (SIGSEGV in our runs). The program refuses the report before its
     /// first byte (PD-LOSAT-NCBI-DEFECTS rule 3, `super::section_frees`).
@@ -336,6 +336,19 @@ impl Mix {
     /// (alnsegments.hpp:67,80,106,119), and the `CRef`s of `Build` (`gapped_segs`, `seg_stack`,
     /// `seg_set`) and `x_MinimizeGaps` (`seg`, `len_map`, `new_segs`) are locals that went with
     /// their functions (alnsegments.cpp:69,111-113,442-448).
+    ///
+    /// The replaced row's own map can hold it too, at another start: where a run of
+    /// `x_MinimizeGaps` ends at a segment that shares a row with an earlier one of the run, each
+    /// new segment is bound at the starts of both on that row (alnsegments.cpp:478-480,526, quoted
+    /// at `minimize_gaps`), and a later fill can write at the earlier one, which frees nothing (a
+    /// segment of letters: in `tests_x2g`, a subject row whose inserted letters lie on either side
+    /// of a query letter that the subject lacks, an insertion next to a deletion). A segment of
+    /// length 0 has no such second start where the fill replaces it: on the first row, whose
+    /// segments `x_MinimizeGaps` never takes (alnsegments.cpp:254-256), it has one start (the
+    /// merge's walk of a match's second row does not run for a length of 0, alnmerger.cpp:752),
+    /// and the other rows of the first frame group hold segments of length 0 only, which
+    /// `x_MinimizeGaps` makes into one segment per run that nothing of their rows follows, so no
+    /// fill starts at one there. Only `seg` can keep a segment of length 0.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:161,822-830
     /// ```c++
@@ -2302,13 +2315,14 @@ impl Mix {
     ///
     /// After a segment of length 0 of a plus-strand row the fill starts at that segment's own
     /// start (`prev_start + prev_len * width`), so the write into the row's map replaces the row's
-    /// `CRef` of it. Where that was its last (`Mix::held`: no map of a row holds it, as one of the
-    /// segments of length 0 that `x_MinimizeGaps` made for several rows would be, and it is not
-    /// `x_Merge`'s `seg`), NCBI frees it there, and `x_CreateDenseg` reads it through
-    /// `m_Segments` (alnmerger.cpp:1196-1210, quoted at `create_denseg`): a read of freed memory,
-    /// `MixError::NcbiFreesSegment`, at the first such replacement (official NCBI BLAST+ 2.17.0
-    /// crashed with SIGSEGV in our runs; valgrind names the block "free'd by
-    /// `FillUnalignedRegions`", the review 3 of line RG T3c, case r11_001). A segment that
+    /// `CRef` of it. Where that was its last (`Mix::held`: it is not `x_Merge`'s `seg`, the only
+    /// other `CRef` that a segment of length 0 has there), NCBI frees it there, and
+    /// `x_CreateDenseg` reads it through `m_Segments` (alnmerger.cpp:1196-1210, quoted at
+    /// `create_denseg`): a read of freed memory, `MixError::NcbiFreesSegment`, at the first such
+    /// replacement (official NCBI BLAST+ 2.17.0 crashed with SIGSEGV in our runs; valgrind names
+    /// the block "free'd by `FillUnalignedRegions`", the review 3 of line RG T3c, case r11_001). A
+    /// fill that writes at a start where the row's map still holds the replaced segment at another
+    /// one frees nothing (`Mix::held`). A segment that
     /// `m_Segments` does not list is read by nothing after its free. Only BLASTX's HSPs of length
     /// 0 make segments of length 0, on the query's rows of the first frame group, which are plus
     /// (`fPreserveRows`, `place`): no minus-strand row holds one (there the fill starts at the end

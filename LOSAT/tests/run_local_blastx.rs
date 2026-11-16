@@ -212,6 +212,16 @@ fn every_format_of_one_search_matches_the_cli_run_of_that_format() {
             Inputs::new("tests/fasta/small_test.fasta", "tests/fasta/PajaWSV.faa"),
             false,
         ),
+        // Query and subject titles of every byte class, not UTF-8 ones too (K4j,
+        // `tests/db_search/make_xj_inputs.py`): the records of NCBI's reader keep the bytes as
+        // BLASTX's reader does.
+        (
+            Inputs::new(
+                "tests/db_search/xj/xj_qn_mq.fna",
+                "tests/db_search/xj/xj_sp_ms.faa",
+            ),
+            true,
+        ),
     ];
     for (inputs, hits) in &cases {
         for threads in ["1", "2", "4"] {

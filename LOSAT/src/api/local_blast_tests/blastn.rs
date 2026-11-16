@@ -131,10 +131,12 @@ fn unsupported_formats_fail_before_searching() {
             formats: vec![
                 FormatOutput {
                     outfmt: "6",
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut valid),
                 },
                 FormatOutput {
                     outfmt,
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut invalid),
                 },
             ],
@@ -176,6 +178,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
                 .zip(sinks.iter_mut())
                 .map(|(outfmt, sink)| FormatOutput {
                     outfmt,
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(sink),
                 })
                 .collect(),
@@ -382,6 +385,7 @@ fn subject_ids_of_subject_titles_follow_get_seq_id_list() {
         let mut outputs = ReportOutputs {
             formats: vec![FormatOutput {
                 outfmt,
+                refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                 sink: OutputSink::Writer(&mut output),
             }],
             diagnostics: &mut diagnostics,
@@ -433,6 +437,7 @@ fn run_local_outputs(
                 .zip(sinks.iter_mut())
                 .map(|(outfmt, sink)| FormatOutput {
                     outfmt,
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(sink),
                 })
                 .collect(),
@@ -495,6 +500,7 @@ fn a_word_size_below_four_is_ncbis_core_error() {
             let mut outputs = ReportOutputs {
                 formats: vec![FormatOutput {
                     outfmt: "6",
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut sink),
                 }],
                 diagnostics: &mut diagnostics,
@@ -572,6 +578,7 @@ fn hand_set_template_lookup_and_task_are_refused() {
             let mut outputs = ReportOutputs {
                 formats: vec![FormatOutput {
                     outfmt: "6",
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut sink),
                 }],
                 diagnostics: &mut diagnostics,
@@ -593,6 +600,7 @@ fn hand_set_template_lookup_and_task_are_refused() {
         let mut outputs = ReportOutputs {
             formats: vec![FormatOutput {
                 outfmt: "6",
+                refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                 sink: OutputSink::Writer(&mut sink),
             }],
             diagnostics: &mut diagnostics,
@@ -880,6 +888,7 @@ fn blastn_batches_are_those_of_the_search_of_all_queries() {
             let mut outputs = ReportOutputs {
                 formats: vec![FormatOutput {
                     outfmt: "6",
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut report),
                 }],
                 diagnostics: &mut diagnostics,

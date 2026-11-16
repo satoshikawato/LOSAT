@@ -1486,13 +1486,17 @@ struct XGroup {
     scan_bf: bool,
     /// The presence-vector rank of a compacted table, empty for a table of the full backbone.
     rank: Vec<u32>,
+    /// EXPERIMENT (LOSAT_X_TBXSCANBYTE): the presence bytes of a table of the full backbone that
+    /// NCBI's loop scanned (`x_scan_bf::x_tbx_presence`), `None` for the others.
+    presence: Option<std::sync::Arc<[u8]>>,
 }
 
 impl XGroup {
     // No NCBI counterpart: the layout of a group table (`x_scan_bf::x_compact`); its cells,
     // entries and presence bits are those of `lookup`.
     /// The group of `lookup`. A table the branch-free scan takes (`x_scan_bf_for`: fewer than
-    /// half of its cells have entries) keeps only the cells with entries.
+    /// half of its cells have entries) keeps only the cells with entries; the others get their
+    /// presence bytes when LOSAT_X_TBXSCANBYTE scans them (`x_tbx_presence`).
     fn new(mut lookup: BlastAaLookupTable, q_min: u32, q_max: u32) -> Self {
         let scan_bf = crate::algorithm::tblastx::x_scan_bf::x_scan_bf_for(&lookup);
         let rank = if scan_bf {
@@ -1500,12 +1504,19 @@ impl XGroup {
         } else {
             Vec::new()
         };
+        let presence = if scan_bf {
+            crate::algorithm::tblastx::x_scan_bf::x_reach_scan_byte_not_taken();
+            None
+        } else {
+            crate::algorithm::tblastx::x_scan_bf::x_tbx_presence(&lookup)
+        };
         Self {
             lookup,
             q_min,
             q_max,
             scan_bf,
             rank,
+            presence,
         }
     }
 
@@ -1519,12 +1530,19 @@ impl XGroup {
             crate::algorithm::tblastx::x_scan_bf::x_reach_scan_bf(true);
             true
         };
+        let presence = if scan_bf {
+            crate::algorithm::tblastx::x_scan_bf::x_reach_scan_byte_not_taken();
+            None
+        } else {
+            crate::algorithm::tblastx::x_scan_bf::x_tbx_presence(&g.table)
+        };
         Self {
             lookup: g.table,
             q_min: g.q_min,
             q_max: g.q_max,
             scan_bf,
             rank: g.rank,
+            presence,
         }
     }
 
@@ -1532,7 +1550,8 @@ impl XGroup {
     // ```c
     // hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
     // ```
-    /// One scan call of this group's table: `x_scan_subject` (LOSAT_X_TBXSCANBF's choice), or
+    /// One scan call of this group's table: `x_scan_subject_byte` on a table with presence bytes
+    /// (LOSAT_X_TBXSCANBYTE), `x_scan_subject` (LOSAT_X_TBXSCANBF's choice), or
     /// `x_scan_subject_compact` on a compacted table. The offset array holds
     /// `x_offset_pairs_len(array_size)` entries.
     #[inline(always)]
@@ -1544,7 +1563,17 @@ impl XGroup {
         array_size: i32,
         scan_range: &mut [i32; 3],
     ) -> i32 {
-        if self.rank.is_empty() {
+        if let Some(presence) = &self.presence {
+            crate::algorithm::tblastx::x_scan_bf::x_scan_subject_byte(
+                &self.lookup,
+                presence,
+                subject,
+                seq_ranges,
+                offset_pairs,
+                array_size,
+                scan_range,
+            )
+        } else if self.rank.is_empty() {
             crate::algorithm::tblastx::x_scan_bf::x_scan_subject(
                 self.scan_bf,
                 &self.lookup,

@@ -467,7 +467,8 @@ impl From<Hit> for PairwiseHit {
 /// ```
 #[derive(Debug, Clone)]
 pub struct BlastpPairwiseQuery {
-    pub query_name: String,
+    /// BLASTX's `Query=` text (the others read their queries' title bytes by query index).
+    pub query_name: Vec<u8>,
     pub query_length: usize,
     pub ungapped_karlin: KarlinParams,
     pub effective_search_space: i64,
@@ -534,10 +535,12 @@ pub struct DatabaseInfo {
     pub definition: Vec<u8>,
     /// `date`.
     pub date: String,
-    /// `number_seqs`.
-    pub num_sequences: u64,
-    /// `total_length`.
-    pub total_letters: u64,
+    /// `number_seqs`: NCBI's `int` of `GetNumSeqs` (negative for an alias file's negative
+    /// `NSEQ`, or one of 2^31 or more).
+    pub num_sequences: i32,
+    /// `total_length`: NCBI's `Int8` of `GetTotalLength` (negative for an alias file's `LENGTH`
+    /// of 2^63 or more).
+    pub total_letters: i64,
     /// `filt_algorithm_name`: the database masking's algorithm (`Masked using:`), empty for a
     /// search without it.
     pub filt_algorithm_name: String,
@@ -570,10 +573,14 @@ pub struct DatabaseInfo {
 pub struct PairwiseDatabase {
     /// The definitions of the databases joined with `"; "`.
     pub definition: Vec<u8>,
-    /// The sum of their numbers of sequences.
-    pub num_sequences: u64,
-    /// The sum of their total lengths.
-    pub total_letters: u64,
+    /// The sum of their numbers of sequences, NCBI's `Int8` (`tot_num_seqs`).
+    pub num_sequences: i64,
+    /// The sum of their total lengths, NCBI's `Int8` (`tot_length`). A sum that overflows the
+    /// `Int8` (`total_letters_overflow`) is refused where NCBI's formatter would sum it
+    /// (`common::database::report_sum_refusal`).
+    pub total_letters: i64,
+    /// Whether the sum of the total lengths passes NCBI's `Int8` (a signed overflow).
+    pub total_letters_overflow: bool,
     /// The databases in the order of the list, a name given twice twice: the blocks of the
     /// epilog.
     pub databases: Vec<DatabaseInfo>,
@@ -593,12 +600,18 @@ impl PairwiseDatabase {
             definition,
             num_sequences: databases
                 .iter()
-                .map(|database| database.num_sequences)
-                .sum(),
+                .map(|database| i64::from(database.num_sequences))
+                .fold(0, i64::wrapping_add),
             total_letters: databases
                 .iter()
                 .map(|database| database.total_letters)
-                .sum(),
+                .fold(0, i64::wrapping_add),
+            total_letters_overflow: databases
+                .iter()
+                .try_fold(0i64, |sum, database| {
+                    sum.checked_add(database.total_letters)
+                })
+                .is_none(),
             databases,
         }
     }
@@ -707,6 +720,7 @@ fn write_subject_alignments_part<W: Write>(
     writer: &mut W,
     mut probe: Option<&mut FormatProbe<'_>>,
     s_idx: u32,
+    parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     title: &[u8],
     protein: bool,
     hits: &[&PairwiseHit],
@@ -736,10 +750,9 @@ fn write_subject_alignments_part<W: Write>(
         }
         match heading {
             Ok(_) => write_hsp(writer, hit)?,
-            Err(super::defline::UnknownEncoding) => write_skipped_alignment(
-                writer,
-                format!("Subject_{}", u64::from(s_idx) + 1).as_bytes(),
-            )?,
+            Err(super::defline::UnknownEncoding) => {
+                write_skipped_alignment(writer, &record_skipped_id(parsed, s_idx))?
+            }
         }
         if let Some(probe) = probe.as_mut() {
             writer.flush()?;
@@ -852,7 +865,7 @@ fn write_database_subject_alignments_part<W: Write>(
 }
 
 /// NCBI's line in place of an alignment whose heading it cannot make (showalign.cpp:1976-1981,
-/// quoted at `write_subject_alignments`): of a database subject (`DatabaseHeading::skipped_id`)
+/// quoted at `write_subject_alignments_part`): of a database subject (`DatabaseHeading::skipped_id`)
 /// and of a `-subject` record (`Subject_N`), `id` the Seq-id text of the Seq-align's subject.
 fn write_skipped_alignment<W: Write>(writer: &mut W, id: &[u8]) -> io::Result<()> {
     writer.write_all(b"Sequence with id ")?;
@@ -1830,13 +1843,15 @@ fn ncbi_k_bits_for(ctoolkit_compatible: bool) -> &'static str {
     }
 }
 
+/// BLASTX's description table: `subject_labels` holds each subject's line (`database_description_label`
+/// of a database sequence or a `-subject` record).
 #[allow(clippy::too_many_arguments)]
 fn write_subject_summary_table_with_sum_n<W: Write>(
     writer: &mut W,
     subject_order: &[u32],
     last_row_counted: bool,
     subject_hits: &std::collections::HashMap<u32, Vec<&PairwiseHit>>,
-    subject_ids: &[Arc<str>],
+    subject_labels: &[Arc<[u8]>],
     show_sum_n: bool,
     columns: Option<SortColumns>,
     read: super::query_warnings::SubjectReadHook<'_, W>,
@@ -1849,20 +1864,10 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
         show_sum_n,
         columns,
         |s_idx| {
-            let subject_id = subject_ids
+            subject_labels
                 .get(s_idx as usize)
-                .map(|id| id.as_ref())
-                .unwrap_or("unknown");
-            let mut label = subject_id.as_bytes().to_vec();
-            let title = subject_hits
-                .get(&s_idx)
-                .and_then(|hits| hits.first())
-                .and_then(|hit| hit.subject_title.as_deref());
-            if let Some(title) = title {
-                label.push(b' ');
-                label.extend_from_slice(title.as_bytes());
-            }
-            label
+                .map_or(&b"unknown"[..], |label| label)
+                .to_vec()
         },
         read,
     )
@@ -1895,20 +1900,6 @@ fn write_spaces<W: Write>(writer: &mut W, count: usize) -> io::Result<()> {
         writer.write_all(b" ")?;
     }
     Ok(())
-}
-
-#[inline]
-fn format_count_with_commas(value: i64) -> String {
-    let digits = value.to_string();
-    let mut formatted = String::with_capacity(digits.len() + digits.len() / 3);
-    let len = digits.len();
-    for (index, ch) in digits.chars().enumerate() {
-        if index > 0 && (len - index).is_multiple_of(3) {
-            formatted.push(',');
-        }
-        formatted.push(ch);
-    }
-    formatted
 }
 
 #[inline]
@@ -2387,8 +2378,8 @@ fn write_blast_database_header<W: Write>(
     writeln!(
         writer,
         "           {} sequences; {} total letters",
-        format_count_with_commas(i64::try_from(database.num_sequences).unwrap_or(i64::MAX)),
-        format_count_with_commas(i64::try_from(database.total_letters).unwrap_or(i64::MAX))
+        crate::ncbi_str::int8_with_commas(database.num_sequences),
+        crate::ncbi_str::int8_with_commas(database.total_letters)
     )?;
     writeln!(writer)
 }
@@ -2484,12 +2475,12 @@ fn write_final_database_block<W: Write>(
         writeln!(
             writer,
             "  Number of letters in database: {}",
-            format_count_with_commas(i64::try_from(database.total_letters).unwrap_or(i64::MAX))
+            crate::ncbi_str::int8_with_commas(database.total_letters)
         )?;
         writeln!(
             writer,
             "  Number of sequences in database:  {}",
-            format_count_with_commas(i64::try_from(database.num_sequences).unwrap_or(i64::MAX))
+            crate::ncbi_str::int_with_commas(database.num_sequences)
         )?;
         writeln!(writer)?;
     }
@@ -2534,8 +2525,8 @@ fn write_blastp_database_header_spacing<W: Write>(
     writeln!(
         writer,
         "           {} sequences; {} total letters",
-        format_count_with_commas(i64::try_from(database_num_sequences).unwrap_or(0)),
-        format_count_with_commas(i64::try_from(database_total_letters).unwrap_or(0))
+        crate::ncbi_str::int8_with_commas(i64::try_from(database_num_sequences).unwrap_or(0)),
+        crate::ncbi_str::int8_with_commas(i64::try_from(database_total_letters).unwrap_or(0))
     )?;
     for _ in 0..trailing {
         writeln!(writer)?;
@@ -2791,12 +2782,12 @@ fn write_final_database_report<W: Write>(
     writeln!(
         writer,
         "  Number of letters in database: {}",
-        format_count_with_commas(i64::try_from(database_total_letters).unwrap_or(0))
+        crate::ncbi_str::int8_with_commas(i64::try_from(database_total_letters).unwrap_or(0))
     )?;
     writeln!(
         writer,
         "  Number of sequences in database:  {}",
-        format_count_with_commas(i64::try_from(database_num_sequences).unwrap_or(0))
+        crate::ncbi_str::int_with_commas(i32::try_from(database_num_sequences).unwrap_or(0))
     )?;
     writeln!(writer)?;
     writeln!(writer)?;
@@ -3348,6 +3339,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
             writer,
             probe,
             s_idx,
+            self.parsed_subjects,
             &group.subject_titles[&s_idx],
             true,
             &group.subject_hits[&s_idx],
@@ -3990,6 +3982,20 @@ fn parsed_subject(
         .filter(|subject| !subject.shown_as_record())
 }
 
+/// The id of NCBI's line in place of each alignment of `-subject` record `s_idx` whose heading
+/// it cannot make (`write_subject_alignments_part`): `GetSeqIdString` of the Seq-align id, the local id
+/// `Subject_N` (N = `s_idx` + 1) of a record without parsed ids, else its parsed id (`parsed`:
+/// `ParsedSubject::skipped_id`, `Subject_9` of `lcl|Subject_9`).
+fn record_skipped_id(
+    parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    s_idx: u32,
+) -> Vec<u8> {
+    match parsed.get(s_idx as usize).and_then(Option::as_deref) {
+        Some(subject) => subject.skipped_id(),
+        None => format!("Subject_{}", u64::from(s_idx) + 1).into_bytes(),
+    }
+}
+
 /// The description-table label of a database sequence (before the cut to the line): the title
 /// that `GenerateDefline` makes of the stored title `title` and the source `source` of the
 /// Bioseq, which an empty title is made from (`Unknown` where NCBI's `HtmlDecode` throws), or for
@@ -4515,6 +4521,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
             writer,
             probe,
             s_idx,
+            &self.report.parsed_subjects,
             &group.subject_titles[&s_idx],
             false,
             &group.subject_hits[&s_idx],
@@ -5261,6 +5268,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
             writer,
             probe,
             s_idx,
+            &self.report.parsed_subjects,
             &group.subject_titles[&s_idx],
             false,
             &group.subject_hits[&s_idx],
@@ -6528,6 +6536,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
             writer,
             probe,
             s_idx,
+            self.parsed_subjects,
             &group.subject_titles[&s_idx],
             false,
             &group.subject_hits[&s_idx],
@@ -6931,7 +6940,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
     queries: &[BlastpPairwiseQuery],
     query_validity: &[bool],
     skipped: &[bool],
-    subject_ids: &[Arc<str>],
+    subject_labels: &[Arc<[u8]>],
     report: &BlastpPairwiseReport,
     options: &BlastxPairwiseOptions,
     database: Option<(
@@ -6941,6 +6950,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
         &[super::defline::SourceTaxname],
     )>,
     records_parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    record_titles: &[&[u8]],
     mut probe: Option<&mut FormatProbe<'_>>,
     first_hsp: HspIndex,
 ) -> io::Result<()> {
@@ -6973,7 +6983,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
         // ```
         writeln!(writer)?;
         writeln!(writer)?;
-        write_blastp_query_header(&mut writer, query.query_name.as_bytes(), query.query_length)?;
+        write_blastp_query_header(&mut writer, &query.query_name, query.query_length)?;
         let query_hits = &by_query[qidx];
         if query_hits.is_empty() {
             write_no_hits_found(&mut writer)?;
@@ -7043,7 +7053,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
                 descriptions,
                 order.len() <= options.num_descriptions,
                 grouped,
-                subject_ids,
+                subject_labels,
                 !options.gapped && options.sum_stats,
                 config.sort_columns(query.query_length),
                 &mut |s_idx, writer: &mut io::BufWriter<&mut W>| match reads.as_mut() {
@@ -7108,14 +7118,32 @@ pub fn write_blastx_pairwise_report<W: Write>(
                         true,
                         first.subject_length,
                     )?,
+                    // A `-subject` record's heading: the title that `GenerateDefline` makes (flags
+                    // 0), as the other programs' (`write_record_alignments`); NCBI's line in place
+                    // of each alignment where it throws.
+                    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2273
+                    // ```c++
+                    // 	alnDispParams->title = CDeflineGenerator().GenerateDefline(bsp_handle);
+                    // ```
                     None => {
-                        write_subject_header(
-                            &mut writer,
-                            subject_ids[*oid as usize].as_bytes(),
-                            first.subject_title.as_deref().map(str::as_bytes),
-                            first.subject_length,
-                        )?;
-                        None
+                        let title = record_titles
+                            .get(*oid as usize)
+                            .copied()
+                            .unwrap_or_default();
+                        match super::defline::generate_defline(title, true, false) {
+                            Ok(heading) => {
+                                write_subject_header(
+                                    &mut writer,
+                                    &heading.text,
+                                    None,
+                                    first.subject_length,
+                                )?;
+                                None
+                            }
+                            Err(super::defline::UnknownEncoding) => {
+                                Some(record_skipped_id(records_parsed, *oid))
+                            }
+                        }
                     }
                 };
                 if let Some(probe) = probe.as_deref_mut() {
@@ -7279,12 +7307,12 @@ pub fn write_blastx_epilog(
         writeln!(
             writer,
             "  Number of letters in database: {}",
-            format_count_with_commas(report.database_total_letters as i64)
+            crate::ncbi_str::int8_with_commas(report.database_total_letters as i64)
         )?;
         writeln!(
             writer,
             "  Number of sequences in database:  {}",
-            format_count_with_commas(report.database_num_sequences as i64)
+            crate::ncbi_str::int_with_commas(report.database_num_sequences as i32)
         )?;
         writeln!(writer)?;
         writeln!(writer)?;
@@ -8181,7 +8209,7 @@ mod tblastx_tests {
         }
         let hits: std::collections::HashMap<u32, Vec<&PairwiseHit>> =
             [(0, vec![&first, &best, &tie])].into_iter().collect();
-        let ids = [Arc::<str>::from("YOL075C")];
+        let ids = [Arc::<[u8]>::from(&b"YOL075C pep YOL075C"[..])];
         for (show_sum_n, end) in [(false, ""), (true, "  2")] {
             let mut out = Vec::new();
             write_subject_summary_table_with_sum_n(
@@ -8351,6 +8379,7 @@ mod tblastx_tests {
             &mut out,
             None,
             0,
+            &[],
             &titles[&0],
             false,
             &hits[&0],
@@ -8379,7 +8408,7 @@ mod tblastx_tests {
             ..KarlinParams::default()
         };
         let query = |length: usize| BlastpPairwiseQuery {
-            query_name: String::new(),
+            query_name: Vec::new(),
             query_length: length,
             ungapped_karlin: karlin,
             effective_search_space: 1_000_000,

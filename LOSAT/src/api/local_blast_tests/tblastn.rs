@@ -109,6 +109,7 @@ fn a_task_that_is_not_tblastns_is_refused() {
             let mut outputs = ReportOutputs {
                 formats: vec![FormatOutput {
                     outfmt: "6",
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut sink),
                 }],
                 diagnostics: &mut diagnostics,
@@ -374,10 +375,12 @@ fn unsupported_formats_fail_before_searching() {
             formats: vec![
                 FormatOutput {
                     outfmt: "6",
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut valid),
                 },
                 FormatOutput {
                     outfmt,
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut invalid),
                 },
             ],
@@ -415,6 +418,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
                 .zip(sinks.iter_mut())
                 .map(|(outfmt, sink)| FormatOutput {
                     outfmt,
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(sink),
                 })
                 .collect(),

@@ -317,6 +317,13 @@ const CASES: &[(&str, &[&str], i32)] = &[
     ("A188", &["-db", "db/ak/p_range", "-entry_batch", "in/or_gi.txt", "-get_dups", "-outfmt", "%o %a"], 0),
     ("A189", &["-db", "db/ak/p_range", "-entry", "123456", "-outfmt", "%o %l"], 0),
     ("A190", &["-db", "db/p5", "-entry", "123456,1818", "-outfmt", "%o %a"], 0),
+    // D1a-3 (`make_d1a3_fixtures.py`): `-info` of NCBI's `int` count and `Uint8` length with its
+    // commas (`UInt8ToString` loses a digit from 4,294,967,296,000,000,000).
+    ("A191", &["-db", "db/ak/cnt/negm1", "-dbtype", "prot", "-info"], 0),
+    ("A192", &["-db", "db/ak/cnt/l4295", "-dbtype", "prot", "-info"], 0),
+    ("A193", &["-db", "db/ak/cnt/nsm5", "-dbtype", "prot", "-info"], 0),
+    ("A194", &["-db", "db/ak/cnt/neg1", "-dbtype", "prot", "-info"], 0),
+    ("A195", &["-db", "db/ak/cnt/ns2p31", "-dbtype", "prot", "-info"], 0),
 ];
 
 /// The cases of probe p4c_c that LOSAT's BLASTDBCMD refuses: `-outfmt %d` and `%b` (the ASN.1

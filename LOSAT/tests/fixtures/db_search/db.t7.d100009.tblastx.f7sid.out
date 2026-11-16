@@ -1,0 +1,35 @@
+# TBLASTX 2.17.0+
+# Query: ndq query of the duplicated nucleotide record
+# Database: tests/db_search/t5/n_100009
+# Fields: query id, subject id, evalue
+# 29 hits found
+ndq	Unknown	8.48e-178
+ndq	Unknown	3.02e-165
+ndq	Unknown	5.28e-140
+ndq	Unknown	9.94e-133
+ndq	Unknown	9.94e-133
+ndq	Unknown	2.75e-95
+ndq	Unknown	2.75e-95
+ndq	Unknown	2.75e-95
+ndq	Unknown	3.77e-95
+ndq	Unknown	3.77e-95
+ndq	Unknown	3.77e-95
+ndq	Unknown	0.12
+ndq	Unknown	0.12
+ndq	Unknown	0.16
+ndq	Unknown	0.16
+ndq	Unknown	0.58
+ndq	Unknown	0.58
+ndq	Unknown	0.80
+ndq	Unknown	1.1
+ndq	Unknown	1.1
+ndq	Unknown	2.8
+ndq	Unknown	2.8
+ndq	Unknown	3.9
+ndq	Unknown	3.9
+ndq	Unknown	3.9
+ndq	Unknown	3.9
+ndq	Unknown	3.9
+ndq	Unknown	5.3
+ndq	Unknown	7.3
+# BLAST processed 1 queries

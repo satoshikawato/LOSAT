@@ -72,6 +72,12 @@ impl StreamWriter {
         self.position.clone()
     }
 
+    /// Whether a chunk of the stream was sent to the host: bytes were written beyond what the
+    /// buffer holds. A writer dropped before `finish` sends nothing else.
+    pub fn sent(&self) -> bool {
+        self.position.load(Ordering::SeqCst) > self.buffer.len() as u64
+    }
+
     /// Sends what is left.
     pub fn finish(&mut self) {
         emit(self.stream, &self.buffer);

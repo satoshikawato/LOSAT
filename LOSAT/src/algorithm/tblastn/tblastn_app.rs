@@ -640,9 +640,15 @@ fn open_search_database(
                 args.strategy.as_ref(),
                 &args.db_filter,
                 database.list_taxids(),
-                database.statistics_length_is_empty(),
+                &database.statistics(),
+                true,
                 args.searchsp.is_some_and(|space| space > 0),
                 args.dbsize.is_some_and(|size| size > 0),
+                "TBLASTN",
+            )?;
+            crate::algorithm::common::database::check_formats_report_sums(
+                || database.pairwise_database(),
+                outputs.formats.iter().map(|format| format.outfmt),
                 "TBLASTN",
             )?;
             Some(database)
@@ -1504,18 +1510,6 @@ fn search(
         database.check_statistics_count()?;
     }
     let pairwise_database = database.map(TblastnDatabase::pairwise_database);
-    // BLAST XML (5, and the XML2 documents of 16 and 15) cannot carry a database name outside
-    // US-ASCII (NCBI's stream throws): refused before the search, and before anything is
-    // written.
-    if let Some(database) = database {
-        if outputs
-            .formats
-            .iter()
-            .any(|format| super::stage_e_report::is_structured_xml(format.outfmt))
-        {
-            crate::report::blast_xml::names::check_database_name("TBLASTN", database.name())?;
-        }
-    }
     let subject_path = match database {
         Some(_) => None,
         None => Some(
@@ -1751,7 +1745,14 @@ fn search(
                         Some(failure) => failure.error("TBLASTN"),
                         None => PreliminaryReadError("Database memory map file error").into(),
                     })
-                } else if !subject_set.old_fsc && database.numbers().min_length as u32 / 3 == 0 {
+                } else if !subject_set.old_fsc
+                    && crate::stats::setup::setup_subject_length(
+                        0,
+                        1,
+                        Some((database.numbers().min_length, true)),
+                    )
+                    .is_none()
+                {
                     Err(PreliminaryReadError("The average subject length is too short").into())
                 } else if let Some(failure) = pssm_failure {
                     Err(failure.error("TBLASTN"))
@@ -1987,6 +1988,8 @@ fn search(
                                 super::archive::batch_searched_space(
                                     validity.iter().any(|&valid| valid),
                                     &lengths.lengths[0],
+                                    &queries[range.start],
+                                    validity[0],
                                 ),
                             )?;
                         }
@@ -2056,13 +2059,14 @@ fn search(
             //     }
             // ```
             // `-max_hsps` and `-qcov_hsp_perc` filter the batch's final hit lists (each query's
-            // context is its searched letters), which the search has sorted by e-value; the
-            // sort is a total order (best e-value, first score, OID), so sorting again after
-            // the filter gives NCBI's order. A search with hits has subject letters.
+            // context is its searched letters), which the search has sorted by e-value where NCBI
+            // sorts the results (a positive `BlastSeqSrcGetTotLen`); the sort is a total order
+            // (best e-value, first score, OID), so sorting again after the filter gives NCBI's
+            // order, and where NCBI does not sort the lists keep their order.
             // `-culling_limit` runs NCBI's culling pipe first on each query's hit list
             // (`BlastHSPStreamTBackClose`, before the filters of `s_FilterBlastResults`;
             // hspfilter_culling.c:699-733); its lists leave in the order of the tree, and the
-            // sort by e-value below is the one NCBI runs unconditionally after the pipes.
+            // sort by e-value below is NCBI's after the pipes, where it sorts.
             if resolved.max_hsps > 0
                 || resolved.query_cov_hsp_perc > 0.0
                 || resolved.culling_limit > 0
@@ -2078,7 +2082,9 @@ fn search(
                             query.len(),
                         );
                     }
-                    hitlist.sort_by_evalue_for_positive_totlen();
+                    if subject_set.sorts_results() {
+                        hitlist.sort_by_evalue_for_positive_totlen();
+                    }
                 }
             }
             // `-db`: the definition lines of the batch's final hit lists are read where NCBI
@@ -2273,6 +2279,26 @@ fn search(
         // The texts of the subjects that the reports of the queries whose batch's prefetch is
         // off read one by one, by query, where the first format places them (`places_reads`).
         let mut subject_reads = crate::report::query_warnings::SubjectReads::default();
+        // Outfmt 5 first: a later batch's prefetch stop asks whether a report before it was cut
+        // (`shared::XmlReportsBefore`), from the reads of the queries' reports modelled here.
+        let xml_first = outputs
+            .formats
+            .first()
+            .and_then(crate::api::local_blast::FormatOutput::report_format)
+            == Some(crate::blastinput::app::ReportFormat::Xml);
+        let xml_cut = |query: usize| {
+            queries.get(query).is_some_and(|record| {
+                crate::report::blast_xml::names::iteration_cut_before_hits(
+                    record.local_id.as_bytes(),
+                    record.warning_id(),
+                    record.believed(),
+                    record.title(),
+                    true,
+                )
+            })
+        };
+        // The posts of each batch's prefetch, with its first query (`query_warnings::query_posts`).
+        let mut prefetch_posts = Vec::new();
         let mut query_warning_lines: Vec<Vec<u8>> = queries
             .iter()
             .zip(&query_validity)
@@ -2491,13 +2517,23 @@ fn search(
                     if seq_aligns == 0 {
                         continue;
                     }
-                    let messages = database.batch_prefetch(reported, hitlists, span.start)?;
+                    let xml_before =
+                        xml_first.then(|| crate::algorithm::common::database::XmlReportsBefore {
+                            reads: subject_reads.queries(),
+                            cut: &xml_cut,
+                        });
+                    let messages = database.batch_prefetch(
+                        reported,
+                        hitlists,
+                        span.start,
+                        xml_before.as_ref(),
+                    )?;
                     rows_open(hitlists)?;
-                    if messages.is_empty() {
-                        continue;
+                    // After the reader's messages of the batch, in its first query
+                    // (`query_warnings::query_posts`).
+                    if !messages.is_empty() {
+                        prefetch_posts.push((span.start, messages));
                     }
-                    let reader = batches.warnings[span.start].len();
-                    query_warning_lines[span.start].splice(reader..reader, messages);
                 }
             }
         }
@@ -2505,12 +2541,18 @@ fn search(
         // LOSAT's refusal before any byte.
         if let (Some((span, subjects)), Some(database)) = (prefetch_stop, database) {
             // The batches before are those of `results`, which the stop truncated (above).
+            let xml_before =
+                xml_first.then(|| crate::algorithm::common::database::XmlReportsBefore {
+                    reads: subject_reads.queries(),
+                    cut: &xml_cut,
+                });
             let error = database.prefetch_stop_error(
                 reported.as_ref(),
                 &results,
                 &subjects,
                 span.start,
                 first_xml2,
+                xml_before.as_ref(),
             );
             match error.downcast::<crate::algorithm::common::database::HeaderReadError>() {
                 Ok(failure) => failed = Some((span, failure.error)),
@@ -2621,6 +2663,7 @@ fn search(
             args.strategy
                 .as_ref()
                 .map_or_else(Vec::new, |strategy| strategy.take_posts(queries.len())),
+            prefetch_posts,
             |query| batches.warnings[query].len(),
         );
         // Diagnostic (LOSAT_TIMING): the report for the common line (utils/xtiming.rs); it is
@@ -2743,6 +2786,14 @@ fn parsed_shown(
         .collect();
     let pairwise = numbers.iter().any(|number| (0..=4).contains(number));
     crate::algorithm::common::database::ParsedShown {
+        stops_at_failed_lookup: formats.iter().any(|format| {
+            matches!(
+                super::stage_e_report::format_number(format.outfmt),
+                6 | 7 | 10 | 20
+            ) && crate::report::tabular::may_stop_at_failed_lookup(
+                super::tabular::tabular_spec(format.outfmt).as_ref(),
+            )
+        }),
         tabular: formats.iter().any(|format| {
             matches!(
                 super::stage_e_report::format_number(format.outfmt),

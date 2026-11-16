@@ -158,12 +158,18 @@ pub(super) fn requests(subjects: Option<&[FastaRecord]>, mask_lowercase: bool) -
 /// The `EffectiveSearchSpace` option of a batch (`BatchArchive::searched_space`,
 /// `StrategyExport::note_searched`): the search space of its first query's context, `first`
 /// (`-searchsp` in an invalid context too), when NCBI searched the batch (`searched`: a query of
-/// it has a valid context).
+/// it has a valid context), and that context's query length (`archive::RequestLength::space`):
+/// the letters of the first query, `record`, or 0 where its context is not valid (`valid`).
 pub(super) fn batch_searched_space(
     searched: bool,
     first: &super::stage_d_stats::LocalContextLength,
-) -> Option<i64> {
-    searched.then_some(first.eff_searchsp)
+    record: &FastaRecord,
+    valid: bool,
+) -> Option<crate::report::archive::SearchedContext0> {
+    searched.then(|| crate::report::archive::SearchedContext0 {
+        space: first.eff_searchsp,
+        query_length: if valid { record.seq().len() as i64 } else { 0 },
+    })
 }
 
 pub(crate) use crate::report::archive::error_lines;
@@ -368,7 +374,12 @@ fn for_each_batch(
                 ka_blocks,
                 search_space: context.search_space,
                 length_adjustment: context.length_adjustment,
-                searched_space: batch_searched_space(searched, length),
+                searched_space: batch_searched_space(
+                    searched,
+                    length,
+                    &data.queries[first],
+                    data.query_validity[first],
+                ),
             };
             each(span, &batch)
         })?;

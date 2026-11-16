@@ -1,0 +1,119 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/t7/lat.faa).
+           1 sequences; 450 total letters
+
+
+
+Query= nq1 query nucleotide one
+
+Length=900
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+Subject_9 café title                                                 313     1e-109
+
+
+> Subject_9 café title
+Length=450
+
+ Score = 313 bits (803),  Expect = 1e-109, Method: Compositional matrix adjust.
+ Identities = 151/153 (99%), Positives = 151/153 (99%), Gaps = 0/153 (0%)
+ Frame = +1
+
+Query  1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  180
+            CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR
+Sbjct  1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+
+Query  181  PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  360
+            PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK
+Sbjct  61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+
+Query  361  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGL  459
+            VSAYDFAVKTSNDFDGGVCERDKSYVTLIP  L
+Sbjct  121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPPPL  153
+
+
+ Score = 228 bits (580),  Expect = 5e-76, Method: Compositional matrix adjust.
+ Identities = 118/149 (79%), Positives = 124/149 (83%), Gaps = 0/149 (0%)
+ Frame = +1
+
+Query  454  GLSTPFVNLVRHAMQLKVPSRLAACYTHLAALKGLGSPRLTEYNRCSTHSGRGLFEPEST  633
+            GLSTPFVNLVRHA QLKV SRLA    H AALKG  SPRLT+Y RCS HSGRGLF+PEST
+Sbjct  302  GLSTPFVNLVRHAAQLKVYSRLACDIAHPAALKGTRSPRLTDYPRCSIHSGRGLFDPEST  361
+
+Query  634  LGDPSRVQIPLTETRCNSRLVTPITNYCTSKSREPRHSCNLVRVNVILICNSARGYLCKR  813
+            LGDPSRVQIPLTE  CN RL+T  T+YCTSK+REP HSC LV VNVILICNS+RG LCKR
+Sbjct  362  LGDPSRVQIPLTERACNLRLITVSTDYCTSKTREPAHSCVLVDVNVILICNSSRGSLCKR  421
+
+Query  814  SRGTEYHKFTSSEFSSPPWMNLTLVNYQN  900
+            SRGTEY KFTSS FSSPP M  TLVNYQN
+Sbjct  422  SRGTEYSKFTSSGFSSPPSMVTTLVNYQN  450
+
+
+ Score = 16.5 bits (31),  Expect = 1.5, Method: Compositional matrix adjust.
+ Identities = 11/45 (24%), Positives = 17/45 (38%), Gaps = 11/45 (24%)
+ Frame = -1
+
+Query  708  RDRCYQTTVAPSLGEWYLHSTGIPKRRFRLE*ATSRMSTTAVIFC  574
+            RD+ Y T + P L           +R +RL        +   +FC
+Sbjct  141  RDKSYVTLIPPPL-----------RRTYRLALVALNPVSRHYVFC  174
+
+
+ Score = 16.2 bits (30),  Expect = 1.6, Method: Compositional matrix adjust.
+ Identities = 8/24 (33%), Positives = 12/24 (50%), Gaps = 0/24 (0%)
+ Frame = -1
+
+Query  732  SRL*CTIIRDRCYQTTVAPSLGEW  661
+            SRL C I      + T +P L ++
+Sbjct  321  SRLACDIAHPAALKGTRSPRLTDY  344
+
+
+ Score = 14.6 bits (26),  Expect = 5.6, Method: Compositional matrix adjust.
+ Identities = 5/16 (31%), Positives = 7/16 (44%), Gaps = 0/16 (0%)
+ Frame = -2
+
+Query  656  CTLLGSPSVDSGSNRP  609
+            C L+     +   NRP
+Sbjct  266  CRLIMPRRAEEEHNRP  281
+
+
+ Score = 13.9 bits (24),  Expect = 8.5, Method: Compositional matrix adjust.
+ Identities = 6/17 (35%), Positives = 7/17 (41%), Gaps = 0/17 (0%)
+ Frame = +1
+
+Query  577  EYNRCSTHSGRGLFEPE  627
+            E+NR          EPE
+Sbjct  277  EHNRPGLTKQHIWLEPE  293
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 113400
+
+
+  Database: User specified sequence set (Input: tests/db_search/t7/lat.faa).
+    Posted date:  Unknown
+  Number of letters in database: 450
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

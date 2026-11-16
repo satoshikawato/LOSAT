@@ -182,7 +182,9 @@ reported parsed Seq-id up in a file without the table stops as NCBI's does, with
 error: DB contains no accession info.` (exit 2) after the prologs and the reports of the batches
 before (line DBID item mixdb2); refused is a run whose reports read such a Seq-id with the prefetch
 off, and a stopping batch whose other sequences' loads write texts of the taxonomy database or
-throw on their ids (`PD-LOSAT-NCBI-DEFECTS`, rule 3; before line DBID item mixdb, every such
+throw on their ids, or, after a BLAST XML report that NCBI's XML stream cuts before its hits
+(outfmt 5, a query title or id outside US-ASCII: that report makes none of its loads, line RG
+item K4h), look a tax id up (`PD-LOSAT-NCBI-DEFECTS`, rule 3; before line DBID item mixdb, every such
 list where NCBI starts the search; before item mixdb2, every run whose reports or prefetch
 looked such a Seq-id up). `losat blastdbcmd` keeps one
 database per `-db`. Since line RG (series D, D1a, 2026-11-12) a volume reached through an
@@ -204,10 +206,38 @@ range); a `LENGTH` or `STATS_TOTLEN` over volumes without sequences is searched 
 it (no hit, the empty-database warning where no count is given); `blastdbcmd -ipg` and
 `-ipg_batch` write a PIG whose OID a range leaves out, as NCBI's formatter reads by OID; and a
 database's errors come in NCBI's order (a list, the alias files' values, the first header, the
-accession tables). Refused until item D1a-3: `NSEQ` negative as NCBI's `int`, `LENGTH` 0 or at
-least 2^63 while sequences are included (NCBI computes the statistics of each subject, or reads
-a negative `Int8`), `LENGTH` of 10^18 or more (NCBI's commas lose digits); until item D1a-4:
-OID ranges, `STATS_NSEQ`, `STATS_TOTLEN` and `MIN_SEQ_LENGTH` in RPSBLAST databases. Refused for
+accession tables). Since item D1a-3 (2026-11-14): an `NSEQ` negative as NCBI's `int` or of
+2^31 or more, and a `LENGTH` of 2^63 or more (a negative `Int8`), go through the statistics and
+the reports as NCBI's `int` and `Int8` (`SeqDb::statistics`, `stats::setup`): the effective
+lengths with the negative count, NCBI's test `(Uint4)(Int4)(total / count) == 0` of "The average
+subject length is too short" (it fails for a count of 2^31 or a length of 2^32 times the count),
+`Unknown error code 1` for BLASTX and TBLASTN without the Gumbel block and a negative average
+(NCBI's hit-saving parameters), the Gumbel block's negative length (negative e-values, printed
+0), no sort of the results at the end of the traceback where `GetTotalLength` is not positive (the
+order of NCBI's one-thread traceback: by OID, then the hit list's heap), and the reports'
+signed counts with NCBI's commas, which lose digits from 4,294,967,296,000,000,000. Refused,
+where NCBI's arithmetic overflows: the total lengths of a `-db` list's databases summed past
+`Int8` (outfmt 0 to 5 and 13 to 16), their numbers of sequences summed past `int` (outfmt 5),
+and a summed length of exactly 2^63 in BLAST XML and XML2 (outfmt 5, 14, 16; NCBI writes `-0`;
+the Owner's question D1a3-2 of line RG may make it an exception). The requests of `-outfmt 11` and
+`-export_search_strategy` compute their `EffectiveSearchSpace` from the negative length as NCBI does
+(the query length of context 0; probe run2 of D1a-3). The preliminary stage of every search reads
+NCBI's option spaces of the statistics before their fallback to OID 0
+(`SplitQuery_SetEffectiveSearchSpace`, prelim_stage.cpp:219-220; `stats::setup::
+preliminary_option_space`): for a negative length each context's query length, for a length of 0
+none (with `-dbsize` the spaces of `-dbsize` and the walk's count), while the traceback and the
+reports read the setup's. Where `GetTotalLength` is 0 (an alias file's `LENGTH 0`, also with
+`STATS_*`, or a list whose count visits no sequence) NCBI's preliminary search computes the
+statistics of each subject it searches (`BLAST_OneSubjectUpdateParameters`, blast_engine.c:1434-1443;
+TBLASTN and TBLASTX skip the shorter subjects first), and so does LOSAT in the six programs: the
+effective lengths, the hit-saving cutoffs without the composition-based stretch of the e-value, the
+word cutoffs and the link cutoffs of the subject's length; the e-values of the traceback and the
+reports' counts and spaces are the setup's (Spouge's database factor 1), and the order of the
+results is the one-thread traceback's. The overflowing sums of BLAST XML, XML2 and JSON are refused
+where NCBI formats them (after the search: its own errors of the search come first). Refused until
+item D1a-4: OID ranges, `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH` and a total length of 0 or less
+(`LENGTH` 0 or of 2^63 or more) in RPSBLAST databases (NCBI's RPS search has no
+loop over subjects and opens each volume alone, whose statistics then read the volume's own length). Refused for
 good: a statistics count of 0 (an alias file's `NSEQ 0`, or its `LENGTH` or `STATS_TOTLEN` over
 volumes without sequences without `NSEQ` or `STATS_NSEQ`) in a search without the Gumbel block
 (BLASTN, TBLASTX, and BLASTP, BLASTX, TBLASTN, PSI-BLAST with `-searchsp` or `OLD_FSC`, BLASTX
@@ -238,7 +268,7 @@ is an explicit error of `LOSAT/src/seqdb`:
 | --- | --- |
 | A header with a Seq-id other than `gnl|BL_ORD_ID|n` of the sequence's number n in its volume | parsed Seq-ids (P4); searched since version 1.3, section "Databases with parsed Seq-ids" |
 | Alias keys `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`, `OIDLIST`, `OID_MASK_TYPE`, `MEMB_BIT`, `MASKLIST` | filters (P4); `FIRST_OID`, `LAST_OID` read since line RG D1a, `VDBLIST` ignored as NCBI's reader ignores it |
-| Alias keys `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH`; `NSEQ` or `LENGTH` whose value is not the number of sequences or the total length of the alias file's databases | read since line RG D1a (2026-11-12) as NCBI's walks; the values listed above as refused until D1a-3 and D1a-4 |
+| Alias keys `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH`; `NSEQ` or `LENGTH` whose value is not the number of sequences or the total length of the alias file's databases | read since line RG D1a (2026-11-12) as NCBI's walks, negative and wrapped counts since D1a-3 (2026-11-14); the values listed above as refused |
 | A name that lists several databases | one database per search (P4); searched since version 1.2 |
 | A volume listed more than once, a group alias file (`index.alx`) in a directory, two volumes of one name in different directories | NCBI derives counts or the volume order from them in ways the reader does not reproduce; since version 1.2 two volumes of one name in different directories are read (NCBI orders them by base name, then path); since line RG D1a a volume listed more than once is read once and counted per alias node, as NCBI does |
 | Column files of a volume (mask data of `makeblastdb -mask_data`) | not read; searched since 2026-11-11 (line SW, SW8 follow-up 2): NCBI's searches open no column file without a database mask named by `-db_soft_mask`, `-db_hard_mask` or an imported search strategy (`-import_search_strategy`), so LOSAT searches the volume without reading them, whatever they hold; since 2026-11-14 BLASTN reads the mask column for `-db_soft_mask` and `-db_hard_mask` (line NP, M4a-2a and M4a-2b; LOSAT refuses the third) |
@@ -908,7 +938,15 @@ a result that LOSAT does not reproduce.
 | An outfmt 0 description id of 65 bytes or more | 0 | Pads the line without end, from 65 bytes with a title of 3 bytes or more, from 67 with any title | 3 |
 | A protein title of punctuation that `x_CleanAndCompress` reads past | 0; tabular formats for an `lcl|Subject_N` id | Crashes | 3 |
 | A protein with a tax id and a title ending in `]`, where a definition line has no title (0) or the id is `lcl|Subject_N` (tabular formats) | 0, tabular formats | With `taxdb.bti` on the search path `x_AdjustProteinTitleSuffix` rewrites the title from the tax ids; without it NCBI keeps the title | 2 |
-| A title in no encoding that NCBI recognises, for an `lcl|Subject_N` id | tabular formats | Not compared | |
+| A title in no encoding that NCBI recognises (or, for an empty title, the name in the taxonomy database from which NCBI makes it), for an `lcl|Subject_N` id: the rows that `SetSubjectId` cannot make (the subject Bioseq's ids hold that id), and the first row of a query's report that either `SetSubjectId` or `x_SetSubjectIds` cannot make (`sallseqid`, `sallgi` or `sallacc` of a sequence whose definition line with that id follows one with another id): `x_SetTaxInfo` comes after them in the same `try` and never runs (`tabular.cpp:839-854`) | 6, 7, 10, 20 with `sacc` or `saccver` (the default fields of 6, 7, 10); `staxid` in such a first row | Stops at the row's `sacc` or `saccver` (null pointer, exit 255); prints an uninitialised `staxid` | 3 |
+
+A sequence without parsed Seq-ids or with an `lcl|Subject_N` id whose title, or whose empty title's
+name in the taxonomy database, is in no encoding that NCBI recognises is NCBI's in every format: the
+tabular rows of NCBI's catch (`Unknown`, the Seq-align id in `sallseqid`, `gnl|BL_ORD_ID|n` or
+`Subject_N`, after the ids of the definition lines before the first that holds `lcl|Subject_N`; the
+titles and taxonomy of the row before) and refused only where NCBI stops or prints an uninitialised
+number (the row above; [`PD-LOSAT-NCBI-DEFECTS`](PD-LOSAT-NCBI-DEFECTS.md) version 1.37, line RG
+item T7).
 
 A tabular field list reads the sequence that NCBI's formatters find by the Seq-align id only with
 the default fields, a subject id (`sseqid`, `sgi`, `sacc`, `saccver`, `sallseqid`, `sallgi`,

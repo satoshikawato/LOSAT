@@ -104,8 +104,9 @@ pub(super) struct PreparedXml {
     gap_open: i32,
     gap_extend: i32,
     db_name: String,
-    db_num: i32,
+    db_num: i64,
     db_len: i64,
+    db_len_overflow: bool,
     /// By query, the texts of the queries whose reports the documents write: every query, or
     /// all but the last of a run that stops when the documents hold that report back
     /// (`written_queries`).
@@ -225,6 +226,7 @@ pub(super) fn prepare(
         .map(|(q_idx, ((query, hitlist), &valid))| {
             names::query_text(
                 PROGRAM,
+                query.local_id.as_bytes(),
                 query.warning_id(),
                 query.believed(),
                 query.title(),
@@ -279,19 +281,19 @@ pub(super) fn prepare(
                     taxa.taxids.get(s_idx).copied().unwrap_or(0),
                     taxa.taxonomy.get(s_idx).cloned().unwrap_or_default(),
                 ),
-            }
-            .map_err(|refusal| refusal.error(PROGRAM, "a database title"))?,
+            },
         });
         // The whole record (`-subject_loc` searches part of it).
         subject_lengths[s_idx] =
             i32::try_from(ranges.subjects.length(s_idx, subject_letters.length(s_idx)))?;
     }
-    let (db_name, db_num, db_len) = match shown {
-        ShownSubjects::Fasta { .. } => (String::new(), 0, 0),
+    let (db_name, db_num, db_len, db_len_overflow) = match shown {
+        ShownSubjects::Fasta { .. } => (String::new(), 0, 0, false),
         ShownSubjects::Database { name, pairwise, .. } => (
             name.to_string(),
-            i32::try_from(pairwise.num_sequences)?,
-            i64::try_from(pairwise.total_letters)?,
+            pairwise.num_sequences,
+            pairwise.total_letters,
+            pairwise.total_letters_overflow,
         ),
     };
     let xml2_run = Xml2Run {
@@ -330,6 +332,7 @@ pub(super) fn prepare(
         db_name,
         db_num,
         db_len,
+        db_len_overflow,
         texts,
         stats,
         subject_names,
@@ -400,29 +403,11 @@ impl PreparedXml {
         ranges: &ReportRanges<'_>,
         mut warnings: Option<&mut QueryWarnings<'_>>,
     ) -> Result<()> {
-        // The document's start (`StructuredXml::start`), before the first query's warnings, also
-        // for a run that stops before its first report (its first batch fails) and for a run
-        // without a query.
-        let mut buf: Vec<u8> = Vec::new();
-        document.start(&mut buf);
-        writer.write_all(&buf)?;
-        buf.clear();
-        let Some(positives) = &self.positives else {
-            // A run without a query (with one, `render` stops before) and a matrix the formatting
-            // table does not know (`-matrix blosum62`: TBLASTN runs it, the table does not):
-            // NCBI never builds the table and writes the epilog alone (for outfmt 5 its end of
-            // line).
-            if ranges.epilog {
-                document.finish(&mut buf)?;
-                writer.write_all(&buf)?;
-            }
-            return Ok(());
-        };
-        let run = XmlRun {
+        let run = self.positives.as_ref().map(|positives| XmlRun {
             program: "tblastn",
             version: concat!("TBLASTN ", crate::ncbi_blast_version!()),
             reference: REFERENCE_GAPPED_BLAST,
-            db_name: self.db_name.as_bytes(),
+            db_name: &self.db_name,
             matrix: Some(&self.matrix_name),
             expect: self.values.expect,
             gap_open: self.gap_open,
@@ -431,8 +416,33 @@ impl PreparedXml {
             filter: &self.filter,
             db_num: self.db_num,
             db_len: self.db_len,
+            db_len_overflow: self.db_len_overflow,
             positives: Some(positives),
             mask_char: b'X',
+        });
+        // The document's start (`StructuredXml::start`), before the first query's warnings, after
+        // the refusal of the database counts that the written reports would print, also for a run
+        // that stops before its first report (its first batch fails) and for a run without a
+        // query.
+        let mut buf: Vec<u8> = Vec::new();
+        document.start(run.as_ref().filter(|_| !self.texts.is_empty()), &mut buf)?;
+        writer.write_all(&buf)?;
+        buf.clear();
+        let Some(run) = run else {
+            // A run without a query (with one, `render` stops before) and a matrix the formatting
+            // table does not know (`-matrix blosum62`: TBLASTN runs it, the table does not):
+            // NCBI never builds the table and writes the epilog alone (for outfmt 5 its end of
+            // line).
+            if ranges.epilog {
+                document.finish(&mut buf)?;
+                crate::report::query_warnings::write_document_posts(
+                    &buf,
+                    document.take_posts(),
+                    writer,
+                    warnings.as_deref_mut(),
+                )?;
+            }
+            return Ok(());
         };
         let code = GeneticCode::try_from_id(genetic_code).map_err(anyhow::Error::msg)?;
         let mut taxdb_printer = self.taxa_notes.printer();
@@ -448,7 +458,12 @@ impl PreparedXml {
             if q_idx == self.texts.len() {
                 // The held report that is never written (`prepare`, `written_queries`).
                 document.unwritten(&mut buf)?;
-                writer.write_all(&buf)?;
+                crate::report::query_warnings::write_document_posts(
+                    &buf,
+                    document.take_posts(),
+                    writer,
+                    warnings.as_deref_mut(),
+                )?;
                 buf.clear();
                 break;
             }
@@ -476,7 +491,7 @@ impl PreparedXml {
                 );
             }
             let xml_query = XmlQuery {
-                id: query.local_id.as_bytes(),
+                id: text.query_id(query.local_id.as_bytes()),
                 title: &text.title,
                 len: i32::try_from(query_letters.len())?,
                 stats: self.stats[q_idx],
@@ -606,6 +621,7 @@ impl PreparedXml {
             });
             // A failed query leaves its partial bytes in `buf`, which the error return drops.
             written?;
+            posts.document(document.take_posts());
             crate::report::query_warnings::write_hit_posts(
                 &buf,
                 &posts,
@@ -617,7 +633,12 @@ impl PreparedXml {
         }
         if ranges.epilog {
             document.finish(&mut buf)?;
-            writer.write_all(&buf)?;
+            crate::report::query_warnings::write_document_posts(
+                &buf,
+                document.take_posts(),
+                writer,
+                warnings,
+            )?;
         }
         Ok(())
     }

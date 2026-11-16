@@ -1,0 +1,89 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/t7/lclS9g.fna).
+           2 sequences; 1,710 total letters
+
+
+
+Query= nq1 query nucleotide one
+
+Length=900
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+Unknown                                                               812     0.0  
+s2 good two                                                           252     2e-70
+
+
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+>s2 good two
+Length=360
+
+ Score = 252 bits (279),  Expect = 2e-70
+ Identities = 264/345 (77%), Gaps = 4/345 (1%)
+ Strand=Plus/Plus
+
+Query  1    TGCTTCGATTATCAAGGCAAGGGCTTTATTTCTATGTATTCATTGCGTTTGACATCGAAC  60
+            ||||||  ||||||||||   |||||||||   ||    |||   ||| | |||||||||
+Sbjct  1    TGCTTCACTTATCAAGGCGTTGGCTTTATTGGGATACGATCAGCTCGTGTCACATCGAAC  60
+
+Query  61   CCATTCCCAGAGATATTTAGTAGAGTAGAAAGACCAATGAGGGGGCGACTGGCATTGATA  120
+            |||||||||   |  |||   |||||||||      ||||||||||||   |||   |||
+Sbjct  61   CCATTCCCATTTAGTTTTCAGAGAGTAGAATATTGCATGAGGGGGCGAGGCGCAACCATA  120
+
+Query  121  GACGTGCGTCATAGAGTCCCCTATGCATGTGGTGACGAGTCTCACATCGTGGCAGGACGT  180
+             |  | || ||||||||||||||||||||||||||||||||||    ||  |||||||||
+Sbjct  121  AATTTACGCCATAGAGTCCCCTATGCATGTGGTGACGAGTCTCTTGCCGCTGCAGGACGT  180
+
+Query  181  CCTGCCCGTCCGACTTTGACTCGGAGCGTACGCCACACCATTTCACCCGATCCTTTCTTT  240
+            |||||||||||||||| |||||||   ||||||||||||||||  ||| |   |||||||
+Sbjct  181  CCTGCCCGTCCGACTTCGACTCGGGTGGTACGCCACACCATTTGTCCCAAGTATTTCTTT  240
+
+Query  241  GTATGTAGGTGTAGAAGAGACTATTCT--ATCCAATACATGCTTCAGCCGAGACTACTTC  298
+             | ||| | ||||||||||  || | |  ||||||||||||||||||   ||||||||||
+Sbjct  241  CTGTGTCGATGTAGAAGAG--TAGTGTGGATCCAATACATGCTTCAGAGTAGACTACTTC  298
+
+Query  299  GCCCGTCCGAAAATGTGGAATCCGGGACTTGTGCGAACCTAGTTA  343
+            || |   |  ||||||||||||||||  ||||| || ||||||||
+Sbjct  299  GCGCTGACAGAAATGTGGAATCCGGGTATTGTGTGACCCTAGTTA  343
+
+
+ Score = 28.3 bits (30),  Expect = 0.004
+ Identities = 15/15 (100%), Gaps = 0/15 (0%)
+ Strand=Plus/Minus
+
+Query  171  GGCAGGACGTCCTGC  185
+            |||||||||||||||
+Sbjct  186  GGCAGGACGTCCTGC  172
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 1486800
+
+
+  Database: User specified sequence set (Input: tests/db_search/t7/lclS9g.fna).
+    Posted date:  Unknown
+  Number of letters in database: 1,710
+  Number of sequences in database:  2
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

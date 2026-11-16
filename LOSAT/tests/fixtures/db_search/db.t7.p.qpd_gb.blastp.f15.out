@@ -1,0 +1,104 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "s2"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "gb|AB000099.1|",
+            "query_len": 300,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s2",
+                    "title": "good two"
+                  }
+                ],
+                "len": 450,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 313.923,
+                    "score": 803,
+                    "evalue": 1.31624e-109,
+                    "identity": 151,
+                    "positive": 151,
+                    "query_from": 1,
+                    "query_to": 153,
+                    "hit_from": 1,
+                    "hit_to": 153,
+                    "align_len": 153,
+                    "gaps": 0,
+                    "qseq": "CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGRPARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVKVSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGL",
+                    "hseq": "CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGRPARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVKVSAYDFAVKTSNDFDGGVCERDKSYVTLIPPPL",
+                    "midline": "CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGRPARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVKVSAYDFAVKTSNDFDGGVCERDKSYVTLIP  L"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 228.024,
+                    "score": 580,
+                    "evalue": 4.21489e-76,
+                    "identity": 118,
+                    "positive": 124,
+                    "query_from": 152,
+                    "query_to": 300,
+                    "hit_from": 302,
+                    "hit_to": 450,
+                    "align_len": 149,
+                    "gaps": 0,
+                    "qseq": "GLSTPFVNLVRHAMQLKVPSRLAACYTHLAALKGLGSPRLTEYNRCSTHSGRGLFEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCTSKSREPRHSCNLVRVNVILICNSARGYLCKRSRGTEYHKFTSSEFSSPPWMNLTLVNYQN",
+                    "hseq": "GLSTPFVNLVRHAAQLKVYSRLACDIAHPAALKGTRSPRLTDYPRCSIHSGRGLFDPESTLGDPSRVQIPLTERACNLRLITVSTDYCTSKTREPAHSCVLVDVNVILICNSSRGSLCKRSRGTEYSKFTSSGFSSPPSMVTTLVNYQN",
+                    "midline": "GLSTPFVNLVRHA QLKV SRLA    H AALKG  SPRLT+Y RCS HSGRGLF+PESTLGDPSRVQIPLTE  CN RL+T  T+YCTSK+REP HSC LV VNVILICNS+RG LCKRSRGTEY KFTSS FSSPP M  TLVNYQN"
+                  },
+                  {
+                    "num": 3,
+                    "bit_score": 13.853,
+                    "score": 24,
+                    "evalue": 7.65567,
+                    "identity": 6,
+                    "positive": 7,
+                    "query_from": 193,
+                    "query_to": 209,
+                    "hit_from": 277,
+                    "hit_to": 293,
+                    "align_len": 17,
+                    "gaps": 0,
+                    "qseq": "EYNRCSTHSGRGLFEPE",
+                    "hseq": "EHNRPGLTKQHIWLEPE",
+                    "midline": "E+NR          EPE"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 30,
+              "eff_space": 113400,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+]
+}

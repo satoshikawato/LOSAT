@@ -169,10 +169,6 @@ pub(crate) struct RpsFrame<'a> {
     /// e-values and the hit cutoff read without the Gumbel block (`EvalueStats`), and the
     /// Smith-Waterman redo with it (series PR, item PS11c-3). 0 for an invalid context.
     pub(crate) search_space: i64,
-    /// The search space of the preliminary stage's hit cutoff (without the Gumbel block):
-    /// `SplitQuery_SetEffectiveSearchSpace`'s, `search_space` except over one volume whose total
-    /// is negative (`RpsUnits::prelim_lengths`).
-    pub(crate) prelim_search_space: i64,
     /// The length of the first query of the query's batch at this context (`-qcov_hsp_perc`).
     pub(crate) first_query_length: usize,
 }
@@ -273,6 +269,11 @@ pub(crate) struct RpsRun<'a> {
     /// Whether the traceback sorts each query's list again after its filters
     /// (`RpsUnit::sorts_results`: the unit's total length above 0; `finish_volume_list`).
     pub(crate) sorts_results: bool,
+    /// The search spaces of the preliminary stage's hit cutoff (without the Gumbel block), one for
+    /// each context of each query (query after query, `RpsQuery::frames` each), where they are not
+    /// the contexts' `RpsFrame::search_space`: `SplitQuery_SetEffectiveSearchSpace`'s spaces over
+    /// one volume whose total is negative (`RpsUnits::prelim_lengths`); `None` elsewhere.
+    pub(crate) prelim_spaces: Option<&'a [i64]>,
     /// The X-drops in bits (`word_options->x_dropoff`, `ext_options->gap_x_dropoff` and
     /// `gap_x_dropoff_final`: `-xdrop_ungap`, `-xdrop_gap`, `-xdrop_gap_final` or NCBI's RPS
     /// defaults) and the gap trigger in bits (`kOptions->gap_trigger`).
@@ -385,7 +386,13 @@ struct RpsCutoffs {
 impl RpsRun<'_> {
     /// The query's cutoffs; the refusal where the ungapped X-drop (`-xdrop_ungap`) or a scaled
     /// cutoff leaves `i32`.
-    fn cutoffs(&self, query: &RpsFrame<'_>, frames: usize, scale: f64) -> Result<RpsCutoffs> {
+    fn cutoffs(
+        &self,
+        query: &RpsFrame<'_>,
+        prelim_space: i64,
+        frames: usize,
+        scale: f64,
+    ) -> Result<RpsCutoffs> {
         let int_scale = scale as i32;
         let x_dropoff = ungapped_x_dropoff(self.x_drop_ungapped_bits, query.kbp_std.lambda, scale)
             .ok_or_else(|| {
@@ -406,9 +413,9 @@ impl RpsRun<'_> {
         //          if (program_number == eBlastTypeRpsTblastn)
         //             searchsp /= NUM_FRAMES;
         // ```
-        // (`frames` is 1 for rpsblast, `NUM_FRAMES` for rpstblastn; the preliminary stage's
-        // space, `RpsFrame::prelim_search_space`.)
-        let hit_cutoff = EvalueStats::new(self.gumbel, query.prelim_search_space / frames as i64)
+        // (`frames` is 1 for rpsblast, `NUM_FRAMES` for rpstblastn; `prelim_space` the
+        // preliminary stage's space, `RpsRun::prelim_spaces`.)
+        let hit_cutoff = EvalueStats::new(self.gumbel, prelim_space / frames as i64)
             .hit_cutoff(
                 self.prelim_evalue,
                 &self.gapped,
@@ -580,22 +587,34 @@ impl RpsRun<'_> {
         // ```
         let mut refused: Vec<Option<anyhow::Error>> = Vec::with_capacity(self.queries.len());
         let mut cutoffs: Vec<Vec<RpsCutoffs>> = Vec::with_capacity(self.queries.len());
-        for query in &self.queries {
-            let frames = query
-                .frames
-                .iter()
-                .map(|frame| {
-                    if frame.valid {
-                        self.cutoffs(frame, query.frames.len(), scale)
-                    } else {
-                        Ok(RpsCutoffs {
-                            x_dropoff: 0,
-                            word_cutoff: 0,
-                            hit_cutoff: 0,
-                        })
-                    }
-                })
-                .collect::<Result<Vec<_>>>();
+        for (q_idx, query) in self.queries.iter().enumerate() {
+            let frames = query.frames.len();
+            let frame_cutoffs = |frame: &RpsFrame<'_>, prelim_space: i64| {
+                if frame.valid {
+                    self.cutoffs(frame, prelim_space, frames, scale)
+                } else {
+                    Ok(RpsCutoffs {
+                        x_dropoff: 0,
+                        word_cutoff: 0,
+                        hit_cutoff: 0,
+                    })
+                }
+            };
+            // The preliminary stage's spaces are the contexts' own (`search_space`) unless the run
+            // has its own (`prelim_spaces`).
+            let frames = match self.prelim_spaces {
+                None => query
+                    .frames
+                    .iter()
+                    .map(|frame| frame_cutoffs(frame, frame.search_space))
+                    .collect::<Result<Vec<_>>>(),
+                Some(spaces) => query
+                    .frames
+                    .iter()
+                    .zip(&spaces[q_idx * frames..])
+                    .map(|(frame, &space)| frame_cutoffs(frame, space))
+                    .collect::<Result<Vec<_>>>(),
+            };
             match frames {
                 Ok(frames) => {
                     cutoffs.push(frames);
@@ -673,7 +692,16 @@ impl RpsRun<'_> {
         // past the last profile is LOSAT's refusal (`RpsRows::overran`).
         let concat_length = self.concat_length;
         let extension_length = concat_length.clamp(0, rows.len() as i32) as usize;
-        let past_rows = i64::from(concat_length) > rows.len() as i64;
+        // One flag for each context of each query (query after query, the same number of contexts
+        // each), only where `Lc` is above the rows.
+        let overrun_flags: Option<Vec<std::sync::atomic::AtomicBool>> =
+            (i64::from(concat_length) > rows.len() as i64).then(|| {
+                self.queries
+                    .iter()
+                    .flat_map(|query| &query.frames)
+                    .map(|_| std::sync::atomic::AtomicBool::new(false))
+                    .collect()
+            });
         // The preliminary stage of one context of a query (NCBI's frame loop: each context
         // scanned as a subject with its own cutoffs).
         let prelim_of = |q_idx: usize, context: usize| -> RpsPrelim<'_> {
@@ -684,7 +712,9 @@ impl RpsRun<'_> {
                     rows: RpsRows {
                         rows,
                         length: extension_length,
-                        overran: None,
+                        overran: overrun_flags.as_deref().map(|flags| {
+                            &flags[q_idx * self.queries[q_idx].frames.len() + context]
+                        }),
                     },
                     table,
                     window: self.window,
@@ -822,11 +852,7 @@ impl RpsRun<'_> {
                 .word
                 .prepare_for(rows.len(), concat_length, self.window);
             let mut hsps = Vec::new();
-            let mut prelim = prelim_of(q_idx, context);
-            if past_rows {
-                prelim.word.rows.overran = Some(&scratch.overran);
-            }
-            let searched = prelim
+            let searched = prelim_of(q_idx, context)
                 .search_frame(
                     &mut scratch.prelim,
                     &frame.aa_seq[1..],
@@ -969,9 +995,6 @@ fn take_results(
 struct RpsScratch {
     prelim: RpsPrelimScratch,
     trace: RpsTraceScratch,
-    /// Set by an ungapped extension of the worker's context that NCBI runs past the rows
-    /// (`RpsRows::overran`), read and cleared by the context's search.
-    overran: std::sync::atomic::AtomicBool,
 }
 
 impl RpsScratch {
@@ -980,7 +1003,6 @@ impl RpsScratch {
         Self {
             prelim: RpsPrelimScratch::new(RpsWordScratch::new(pool.clone())),
             trace: RpsTraceScratch::new(),
-            overran: std::sync::atomic::AtomicBool::new(false),
         }
     }
 }
@@ -1187,6 +1209,7 @@ mod tests {
             // rps_mini's rows: 190 + 180 + 190 letters and 3 sentinel rows.
             concat_length: 563,
             sorts_results: true,
+            prelim_spaces: None,
             x_drop_ungapped_bits: 7.0,
             x_drop_gapped_bits: gapped_bits,
             x_drop_final_bits: final_bits,
@@ -1213,7 +1236,6 @@ mod tests {
                 valid: true,
                 kbp_std: kbp,
                 search_space,
-                prelim_search_space: search_space,
                 first_query_length: letters.len() - 2,
             }],
             batch_kbp: kbp,
@@ -1234,19 +1256,25 @@ mod tests {
         let mut run = x_drop_run(&gumbel, &options, 15.0, 25.0);
         run.cutoff_subject_length = 250;
         let query = cutoff_query(&letters, 1_000_000);
-        let with_block = run.cutoffs(&query.frames[0], 1, 100.0).unwrap();
+        let with_block = run
+            .cutoffs(&query.frames[0], query.frames[0].search_space, 1, 100.0)
+            .unwrap();
         assert_eq!(
             with_block.hit_cutoff,
             crate::stats::blast_spouge_etos(10.0, &run.gapped, &gumbel, 300, 250) * 100
         );
         // Without the block: ceil(ln(K * searchsp / E) / Lambda) = ceil(ln(4100) / 0.267) = 32.
         run.gumbel = None;
-        let without = run.cutoffs(&query.frames[0], 1, 100.0).unwrap();
+        let without = run
+            .cutoffs(&query.frames[0], query.frames[0].search_space, 1, 100.0)
+            .unwrap();
         assert_eq!(without.hit_cutoff, 3_200);
         // The search space is the query's, not a constant.
         let other = cutoff_query(&letters, 1_000_000_000);
         assert_eq!(
-            run.cutoffs(&other.frames[0], 1, 100.0).unwrap().hit_cutoff,
+            run.cutoffs(&other.frames[0], other.frames[0].search_space, 1, 100.0)
+                .unwrap()
+                .hit_cutoff,
             5_800
         );
         // The word cutoff is the gap trigger, at most the hit cutoff (blast_parameters.c:370).
@@ -1254,7 +1282,9 @@ mod tests {
         // The preliminary e-value is `-evalue` as given (the stretch is the caller's).
         run.prelim_evalue = 1e300;
         assert_eq!(
-            run.cutoffs(&query.frames[0], 1, 100.0).unwrap().hit_cutoff,
+            run.cutoffs(&query.frames[0], query.frames[0].search_space, 1, 100.0)
+                .unwrap()
+                .hit_cutoff,
             100
         );
     }
@@ -1533,7 +1563,6 @@ mod tests {
                 valid: true,
                 kbp_std: KarlinParams::default(),
                 search_space: 0,
-                prelim_search_space: 0,
                 first_query_length: letters.len(),
             }],
             batch_kbp: KarlinParams::default(),
@@ -1591,7 +1620,6 @@ mod tests {
                 valid: true,
                 kbp_std: KarlinParams::default(),
                 search_space: 0,
-                prelim_search_space: 0,
                 first_query_length: 100,
             }],
             batch_kbp: KarlinParams::default(),
@@ -1779,7 +1807,6 @@ mod tests {
                                 ..kbp
                             },
                             search_space: 20_000_000,
-                            prelim_search_space: 20_000_000,
                             first_query_length: aa_seq.len() - 2,
                         }
                     })
@@ -1808,6 +1835,7 @@ mod tests {
             // rps_mini's rows: 190 + 180 + 190 letters and 3 sentinel rows.
             concat_length: 563,
             sorts_results: true,
+            prelim_spaces: None,
             x_drop_ungapped_bits: 7.0,
             x_drop_gapped_bits: 15.0,
             x_drop_final_bits: 25.0,

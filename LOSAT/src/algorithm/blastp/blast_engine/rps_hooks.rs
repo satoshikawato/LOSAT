@@ -357,7 +357,7 @@ pub(super) fn rps_search(
         volumes: db_volumes,
         starts,
         order,
-    } = RpsVolumeSet::of(db);
+    } = RpsVolumeSet::with_order(db, units.order().to_vec());
     let cbs = match args.comp_based_stats.mode {
         BlastpCompositionMode::NoCompositionBasedStats => 0u8,
         BlastpCompositionMode::CompositionBasedStats => 1,
@@ -516,7 +516,7 @@ pub(super) fn rps_search(
         }
         let search_spaces = &spaces.1;
         // The preliminary stage's spaces where its lengths are not the setup's
-        // (`RpsUnits::prelim_lengths`: one volume whose total is negative), else the setup's.
+        // (`RpsUnits::prelim_lengths`: one volume whose total is negative; `RpsRun::prelim_spaces`).
         let prelim_spaces = units
             .prelim_lengths(unit, searchsp)
             .map(|(length, count)| {
@@ -540,7 +540,6 @@ pub(super) fn rps_search(
                     .collect::<Result<Vec<i64>>>()
             })
             .transpose()?;
-        let prelim_spaces = prelim_spaces.as_deref().unwrap_or(search_spaces);
         let engine = RpsRun {
             queries: run
                 .contexts
@@ -548,34 +547,31 @@ pub(super) fn rps_search(
                 .zip(&first_query_length)
                 .zip(&masked)
                 .zip(&batch_kbp)
-                .zip(search_spaces.iter().zip(prelim_spaces))
+                .zip(search_spaces)
                 .map(
-                    |((((ctx, &first), masked), &batch_kbp), (&search_space, &prelim_space))| {
-                        RpsQuery {
-                            frames: vec![RpsFrame {
-                                frame: 0,
-                                search_space,
-                                prelim_search_space: prelim_space,
-                                aa_seq: masked.as_deref().unwrap_or(&ctx.aa_seq),
-                                valid: ctx.is_valid && ctx.aa_len > 0,
-                                kbp_std: ctx.karlin_params,
-                                first_query_length: first,
-                                // The letters as read where the searched ones are masked: before
-                                // SEG and the lower-case masks (`aa_seq_nomask`), else before the
-                                // 26-column mask. The tabular report with a field list counts its
-                                // identities on the rows itself, inside NCBI's alignment block,
-                                // which the engine's count opens (`tabular::needs_rows`): it keeps
-                                // that count.
-                                aa_seq_nomask: if recount_identities {
-                                    ctx.aa_seq_nomask
-                                        .as_deref()
-                                        .or(masked.as_ref().map(|_| ctx.aa_seq.as_slice()))
-                                } else {
-                                    None
-                                },
-                            }],
-                            batch_kbp,
-                        }
+                    |((((ctx, &first), masked), &batch_kbp), &search_space)| RpsQuery {
+                        frames: vec![RpsFrame {
+                            frame: 0,
+                            search_space,
+                            aa_seq: masked.as_deref().unwrap_or(&ctx.aa_seq),
+                            valid: ctx.is_valid && ctx.aa_len > 0,
+                            kbp_std: ctx.karlin_params,
+                            first_query_length: first,
+                            // The letters as read where the searched ones are masked: before
+                            // SEG and the lower-case masks (`aa_seq_nomask`), else before the
+                            // 26-column mask. The tabular report with a field list counts its
+                            // identities on the rows itself, inside NCBI's alignment block,
+                            // which the engine's count opens (`tabular::needs_rows`): it keeps
+                            // that count.
+                            aa_seq_nomask: if recount_identities {
+                                ctx.aa_seq_nomask
+                                    .as_deref()
+                                    .or(masked.as_ref().map(|_| ctx.aa_seq.as_slice()))
+                            } else {
+                                None
+                            },
+                        }],
+                        batch_kbp,
                     },
                 )
                 .collect(),
@@ -591,9 +587,11 @@ pub(super) fn rps_search(
             hitlist_size: args.traceback_hitlist_size(),
             prelim_hitlist_size: run.prelim_hitlist_size,
             window: args.window_size as i32,
-            // The unit's concatenated length `Lc` (an alias file's `LENGTH` and `NSEQ` over one volume).
+            // The unit's concatenated length `Lc` (an alias file's `LENGTH` and `NSEQ` over one
+            // volume).
             concat_length: unit.concat_length(),
             sorts_results: unit.sorts_results,
+            prelim_spaces: prelim_spaces.as_deref(),
             x_drop_ungapped_bits: x_drops.ungapped,
             x_drop_gapped_bits: x_drops.gapped,
             x_drop_final_bits: x_drops.final_,

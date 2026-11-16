@@ -35,18 +35,26 @@ pub(crate) struct RpsVolumeSet<'a> {
 impl<'a> RpsVolumeSet<'a> {
     pub(crate) fn of(db: &'a SeqDb) -> Self {
         let db_volumes = db.volumes();
-        // The first ordinal id of each volume (the database's order), and the volumes in the order
-        // of their paths as strings (a name given twice is searched once).
+        // The volumes in the order of their paths as strings (a name given twice is searched
+        // once).
+        let mut order: Vec<usize> = (0..db_volumes.len()).collect();
+        order.sort_by(|&a, &b| {
+            crate::seqdb::SeqDb::compare_volume_paths(db_volumes[a].base(), db_volumes[b].base())
+        });
+        Self::with_order(db, order)
+    }
+
+    /// The set of `db`'s volumes in the search order `order` that `of` gave them before
+    /// (`RpsUnits::order`), without sorting them again.
+    pub(crate) fn with_order(db: &'a SeqDb, order: Vec<usize>) -> Self {
+        let db_volumes = db.volumes();
+        // The first ordinal id of each volume (the database's order).
         let mut starts = Vec::with_capacity(db_volumes.len());
         let mut next_start = 0u32;
         for volume in db_volumes {
             starts.push(next_start);
             next_start += volume.num_oids();
         }
-        let mut order: Vec<usize> = (0..db_volumes.len()).collect();
-        order.sort_by(|&a, &b| {
-            crate::seqdb::SeqDb::compare_volume_paths(db_volumes[a].base(), db_volumes[b].base())
-        });
         Self {
             volumes: db_volumes,
             starts,
@@ -204,6 +212,8 @@ pub(crate) struct RpsUnits {
     db_length: i64,
     /// The `DbSeqNum` option: `M` (0: none).
     db_num_seqs: i32,
+    /// The volumes' search order (`RpsVolumeSet::order`), for `RpsVolumeSet::with_order`.
+    order: Vec<usize>,
 }
 
 impl RpsUnits {
@@ -240,7 +250,13 @@ impl RpsUnits {
             adjusted,
             db_length,
             db_num_seqs,
+            order: volumes.order,
         })
+    }
+
+    /// The volumes' search order (`RpsVolumeSet::order` of the database the units are of).
+    pub(crate) fn order(&self) -> &[usize] {
+        &self.order
     }
 
     /// The units in the order of their search.
@@ -401,7 +417,7 @@ impl RpsUnits {
     /// with `-searchsp` (`searchsp`), which both stages read), so they differ only for one
     /// volume whose `LENGTH` is 2^63 or more (a negative total: the setup reads OID 0's length
     /// and 1, SplitQuery the negative total and the count); the hit cutoff of the preliminary
-    /// stage reads them without the Gumbel block (`RpsFrame::prelim_search_space`).
+    /// stage reads them without the Gumbel block (`RpsRun::prelim_spaces`).
     pub(crate) fn prelim_lengths(&self, unit: &RpsUnit, searchsp: i64) -> Option<(i64, i32)> {
         if searchsp != 0 {
             return None;
@@ -1074,11 +1090,13 @@ mod tests {
 
     fn units(units: Vec<RpsUnit>, adjusted: Option<(i64, i32)>, dbsize: i64) -> RpsUnits {
         let (db_length, db_num_seqs) = adjusted.unwrap_or((dbsize, 0));
+        let order = (0..units.len()).collect();
         RpsUnits {
             units,
             adjusted,
             db_length,
             db_num_seqs,
+            order,
         }
     }
 

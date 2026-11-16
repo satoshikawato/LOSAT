@@ -1622,10 +1622,23 @@ impl BlastIntervalTree {
     /// which run before the insertion and may drop the HSP or a leaf on its way (end points only
     /// empty a slot), run on a copy of the tree and the walk repeated there. `add_hsp` and the
     /// functions it calls keep their code.
+    ///
+    /// The test of the bounds is inlined into the caller (RPS-BLAST's gapped stage adds every HSP
+    /// through here); the walk is out of line.
+    #[inline]
     pub fn try_add_hsp(&mut self, hsp: TreeHsp, query_context_offset: i32) -> bool {
-        if !self.x_insertion_ends(&hsp, query_context_offset)
-            && self.x_insert_inverts(&hsp, query_context_offset)
-        {
+        if self.x_insertion_ends(&hsp, query_context_offset) {
+            self.add_hsp(hsp, query_context_offset, IndexMethod::QueryAndSubject);
+            return true;
+        }
+        self.x_try_add_hsp_outside(hsp, query_context_offset)
+    }
+
+    /// `try_add_hsp` of an HSP that leaves the tree's bounds or is out of order.
+    #[cold]
+    #[inline(never)]
+    fn x_try_add_hsp_outside(&mut self, hsp: TreeHsp, query_context_offset: i32) -> bool {
+        if self.x_insert_inverts(&hsp, query_context_offset) {
             let mut copy = self.clone();
             let x_on = copy.x.usable;
             let dropped =
@@ -1649,6 +1662,7 @@ impl BlastIntervalTree {
     /// tree's bounds, so each node the insertion enters or makes holds the range it compares (a
     /// split goes to the half that holds it) and every split makes a smaller node; a node `[p, p]`
     /// holding the range sees it straddle its middle.
+    #[inline(always)]
     fn x_insertion_ends(&self, hsp: &TreeHsp, query_context_offset: i32) -> bool {
         let root = &self.nodes[0];
         hsp.query_offset <= hsp.query_end

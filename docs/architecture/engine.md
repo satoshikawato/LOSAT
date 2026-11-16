@@ -303,8 +303,11 @@ tblastn spread their stages over files (blastx `preliminary.rs`, `traceback.rs`,
   `run_resolved_in_pool`, once for the queries of every batch that NCBI does not split (a blastp
   query's preliminary hit list does not depend on the other queries of its batch), once per query
   block, or once per query and round of psiblast. It calls `run_call`, whose
-  `process_subject` does the preliminary search; the traceback, the composition redo (its parameters, its
-  plan and all its paths are in `blast_engine/redo_run.rs`) and the report
+  `process_subject` does the preliminary search of a subject (the stage's drivers, the choice of the
+  pool and the call's branch: the calls of RPS-BLAST's and the PSSM search's hooks, the query blocks,
+  a database's blocks and the subject loops, are in `blast_engine/prelim_run.rs`); the traceback, the
+  composition redo (its parameters, its plan and all its paths are in `blast_engine/redo_run.rs`)
+  and the report
   follow in `run_call` (the warning lines of the queries, the checks and the prefetch of the
   reported subjects and the refusals before any format is written, and before them the residues that
   the reports read, the check of the prefetch environment, the subjects that the reports show, what
@@ -322,7 +325,7 @@ tblastn spread their stages over files (blastx `preliminary.rs`, `traceback.rs`,
 
 NCBI reads both through one `BlastSeqSrc` iterator. LOSAT splits them where subjects reach the
 kernel: a `-subject` set is encoded first and searched by `search_subjects` (blastn) or the subject
-loop of `run_resolved_in_pool` (blastp); a database is read in blocks by
+loops of `run_preliminary` (blastp, `blast_engine/prelim_run.rs`); a database is read in blocks by
 `database::search_blocks` (`blastn/blast_engine/database.rs`, `blastp/blast_engine/database.rs`),
 and the sequences with hits are read again for the traceback (`traceback_listed`) or the
 composition redo (`ListedSubjects`). Both paths share the per-subject kernel (blastn `search_subject`,

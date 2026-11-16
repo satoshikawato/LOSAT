@@ -167,11 +167,14 @@ impl NumericIsam {
             path: index.path().to_path_buf(),
             message,
         };
+        let crashes = |message: String| SeqDbError::NcbiCrashes {
+            path: index.path().to_path_buf(),
+            message,
+        };
         if index.len() < HEADER_BYTES {
-            return Err(bad(format!(
-                "a {what} index file of {} bytes {}",
-                index.len(),
-                super::NCBI_CRASHES_ON_IT
+            return Err(crashes(format!(
+                "a {what} index file of {} bytes",
+                index.len()
             )));
         }
         let header = index.read_range(0, HEADER_BYTES)?;
@@ -179,9 +182,8 @@ impl NumericIsam {
         let version = word(0);
         let isam_type = word(1);
         if version != ISAM_VERSION || (isam_type != NUMERIC && isam_type != NUMERIC_LONG_ID) {
-            return Err(bad(format!(
-                "a {what} index file of version {version} and type {isam_type} {}",
-                super::NCBI_CRASHES_ON_IT
+            return Err(crashes(format!(
+                "a {what} index file of version {version} and type {isam_type}"
             )));
         }
         let (num_terms, num_samples, page_size) = (word(3), word(4), word(5));
@@ -488,12 +490,14 @@ mod tests {
         std::fs::write(&ni, &index).unwrap();
         assert!(matches!(
             NumericIsam::open_volume(&base, SeqType::Protein),
-            Err(SeqDbError::Unsupported { .. })
+            Err(error @ SeqDbError::NcbiCrashes { .. }) if error.ncbi_crashes()
+                && error.to_string().contains(": unsupported database: a GI index file of version 2 and type ")
+                && error.to_string().ends_with(" (NCBI crashes on it)")
         ));
         std::fs::write(&ni, &index[..20]).unwrap();
         assert!(matches!(
             NumericIsam::open_volume(&base, SeqType::Protein),
-            Err(SeqDbError::Unsupported { .. })
+            Err(SeqDbError::NcbiCrashes { .. })
         ));
         std::fs::remove_dir_all(&dir).unwrap();
     }

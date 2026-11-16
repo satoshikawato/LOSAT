@@ -2549,10 +2549,17 @@ fn search(
                     if seq_aligns == 0 {
                         continue;
                     }
+                    let prefetched = |query: usize| {
+                        prefetch_posts
+                            .iter()
+                            .find(|(first, _)| *first == query)
+                            .map(|(_, posts)| posts)
+                    };
                     let xml_before =
                         xml_first.then(|| crate::algorithm::common::database::XmlReportsBefore {
                             reads: subject_reads.queries(),
                             cut: &xml_cut,
+                            prefetched: &prefetched,
                         });
                     let scope = || batch_scope(span);
                     // The batches before (`results`): what NCBI's data loader loaded for them
@@ -2586,10 +2593,17 @@ fn search(
         // LOSAT's refusal before any byte.
         if let (Some((span, subjects)), Some(database)) = (prefetch_stop, database) {
             // The batches before are those of `results`, which the stop truncated (above).
+            let prefetched = |query: usize| {
+                prefetch_posts
+                    .iter()
+                    .find(|(first, _)| *first == query)
+                    .map(|(_, posts)| posts)
+            };
             let xml_before =
                 xml_first.then(|| crate::algorithm::common::database::XmlReportsBefore {
                     reads: subject_reads.queries(),
                     cut: &xml_cut,
+                    prefetched: &prefetched,
                 });
             let scope = || batch_scope(&span);
             let error = database.prefetch_stop_error(

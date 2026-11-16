@@ -786,6 +786,16 @@ fn run_inner(
     // 	return false;
     // ```
     let mut query_stream = query_settings.stream(query_file);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:146-155 (quoted at
+    // `input::emit_fasta_batch`: the batch drops a record whose range starts past its end, after
+    // the reader added it to its scope)
+    // The records that `-query_loc` skips are kept for NCBI's scope of a batch's prefetch, which
+    // only a stop of the prefetch asks (`BatchScopes::of_batch`): where a prefetch of the run can
+    // stop (review 5 of line DBID loadord, L2; the gate opens the database's lookup files once).
+    query_stream.keep_skipped = query_range.is_some()
+        && database
+            .as_ref()
+            .is_some_and(|database| database.prefetch_can_stop());
     // With `-subject`, the letters around each `-query_loc` interval that the Seq-loc mapper can
     // read into a query row (`empty_rows::query_letters_around`): NCBI reads the subjects first.
     if args.db.is_none() {

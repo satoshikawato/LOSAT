@@ -11099,11 +11099,15 @@ fn run_in_pool(
                                 )
                             })
                     };
+                    // The posts before each query's report: those of the prefetch of the
+                    // batch it begins (`warnings`, the batches before this one).
+                    let prefetched = |query: usize| warnings.get(query);
                     let xml_before =
                         matches!(output_formats.first(), Some(BlastnOutputFormat::Xml)).then(
                             || crate::algorithm::common::database::XmlReportsBefore {
                                 reads: &query_reads,
                                 cut: &xml_cut,
+                                prefetched: &prefetched,
                             },
                         );
                     database

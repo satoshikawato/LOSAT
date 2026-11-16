@@ -444,11 +444,13 @@ pub(super) fn prefetch_reported_subjects(
         if let Some(span) = prefetch_stop.as_ref().filter(|_| xml2_prefetch) {
             let scope = || batch_scope(span);
             // The loads of the batches before (psiblast's traceback beyond the cut, which no
-            // report reads), beside their reports' lookups that the stop records.
-            titles.note_loaded(database, || loaded(span.start));
+            // report reads), beside their reports' lookups, which the stop records as every stop
+            // records the call's loads before it (without the record's gate, f8 decision b of
+            // line DBID loadord; review 5 L3).
             titles.batch_prefetch_stop(
                 database,
                 &hit_lists[..span.start],
+                loaded(span.start),
                 prefetched_ranks(span.clone()),
                 &crate::algorithm::common::database::PrefetchQueries::new(span.start, &scope)
                     .after_unrecorded_calls(unrecorded_calls),
@@ -582,10 +584,17 @@ pub(super) fn prefetch_reported_subjects(
                 }
                 // The taxonomy texts, and NCBI's warning where the prefetch fails at a subject
                 // whose lookup fails (`ListedTitles::batch_prefetch`), also without `taxdb.bti`.
+                let prefetched = |query: usize| {
+                    prefetch_posts
+                        .iter()
+                        .find(|(first, _)| *first == query)
+                        .map(|(_, posts)| posts)
+                };
                 let xml_before =
                     xml_first.then(|| crate::algorithm::common::database::XmlReportsBefore {
                         reads: subject_reads.queries(),
                         cut: &xml_cut,
+                        prefetched: &prefetched,
                     });
                 let scope = || batch_scope(&batch.searched);
                 let queries = crate::algorithm::common::database::PrefetchQueries::new(

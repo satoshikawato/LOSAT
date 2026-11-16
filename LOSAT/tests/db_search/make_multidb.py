@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Builds tests/db_search/multidb/: the databases of the rows db.mdb.* (DI-8f: -db with several names).
 
-Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only | --loadord-only | --loadord2-only | --loadord3-only | --loadord4-only | --loadord5-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
+Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only | --loadord-only | --loadord2-only | --loadord3-only | --loadord4-only | --loadord5-only | --loadord6-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
 
 The records are those of taxfilter/tfp.faa (23 protein globins) and taxfilter/tfn.fna (16 globin cDNAs); the definition
 lines (some records carry a second one) stay as they are, the taxids come from taxfilter/tfp.map and tfn.map.
@@ -91,6 +91,19 @@ lines (some records carry a second one) stay as they are, the taxids come from t
   which NCBI's `CSeqDBIsam::IndexExists` (`CFile::Exists`, a regular file) takes for no ISAM: its lookups find nothing
   in that volume and go on to the next (H1). `make_multidb.py --loadord5-only MAKEBLASTDB` builds only these (the
   databases before keep their dates).
+- Review 5 of line DBID loadord (DECISIONS 60 (15), line RG K4h's E2 in loadord's shapes): `ldl` (`ldln`), version 5
+  without `-parse_seqids`, taxid 99990 (the last entry of ../../seqdb/taxdb/offset_last_past_end, whose lookup writes
+  the offset error), two records of `lda`'s letters (`qp1`, glob1): beside `ldp`, OID 0 (`gnl|BL_ORD_ID|0`) loads after
+  the stop and OID 1 before it, in one volume. The queries `ldo_e2.faa` (BLASTP), `ldo_e2x.fna` (BLASTX), `ldo_e2.fna`
+  (BLASTN, TBLASTX) and `ldo_e2t.faa` (TBLASTN): `q0` without hits, `q1` titled `q1 a<U+00E9>b z` (in UTF-8, at which NCBI's
+  XML stream cuts its outfmt 5 `Iteration`, so its report makes none of its loads) with `lda`'s letters repeated (qp1
+  16 times, back-translated in `ldo_e2x.fna`; glob1 6 times in `ldo_e2.fna`; glob1's ORF 16 times in `ldo_e2t.faa`), so
+  that its HSPs turn its batch's prefetch off under `PRE_FETCH_SEQS_LIMIT`, and `q2` with the letters of
+  ../taxfilter/q.faa (q.fna) and then those of `lda` (`ldan`) once, which hits the stopping accession and the unparsed
+  record. TBLASTX counts a Seq-align per subject (an ungapped search), so its `q1` must hit more subjects than `q2`:
+  `ldyn`, version 5 without `-parse_seqids`, taxid 9606, four records of random letters (seed 20261116 + 5), and
+  `ldo_e2y.fna`, whose `q1` holds glob1 and then those letters. `make_multidb.py --loadord6-only MAKEBLASTDB` builds
+  only these (the databases before keep their dates).
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
 """
@@ -442,6 +455,46 @@ def make_loadord5(binary):
             f.write("A directory in place of the string ISAM index (make_multidb.py --loadord5-only).\n")
 
 
+def make_loadord6(binary):
+    """Builds ldl, ldln, ldyn and the queries ldo_e2.faa, ldo_e2x.fna, ldo_e2.fna, ldo_e2t.faa and ldo_e2y.fna (review 5
+    of line DBID loadord)."""
+
+    def letters(path, pick=lambda header: True):
+        return next("".join(line.strip() for line in lines) for header, lines in read_fasta_path(path) if pick(header))
+
+    def write(name, records):
+        with open(os.path.join(HERE, name), "w", encoding="utf-8") as f:
+            for header, seq in records:
+                f.write(header + "\n" + "\n".join(seq[at:at + 60] for at in range(0, len(seq), 60)) + "\n")
+
+    qp1 = letters(os.path.join(os.path.dirname(HERE), "ids", "ids_q.faa"))
+    glob1 = letters(os.path.join(HERE, "nnp.fa"), lambda header: header.split()[0] == ">FBtr0083245")
+    qp1_x = letters(os.path.join(HERE, "mix2_qx.fna"))
+    orf = letters(os.path.join(HERE, "mix2_qt.faa"))
+    globin, globin_x = letters(os.path.join(SRC, "q.faa")), letters(os.path.join(SRC, "q.fna"))
+    for kind, suffix, unparsed in (("prot", "", qp1), ("nucl", "n", glob1)):
+        name = "ldl" + suffix
+        write(name + ".fa", [(">loadord the unparsed hit at OID 0, taxid 99990", unparsed),
+                             (">loadord the unparsed hit at OID 1, taxid 99990", unparsed)])
+        makeblastdb(binary, "-in", name + ".fa", "-dbtype", kind, "-out", name, "-blastdb_version", "5", "-taxid",
+                    "99990", "-title", "multidb " + name)
+        os.remove(os.path.join(HERE, name + (".pjs" if kind == "prot" else ".njs")))
+    rng = random.Random(20261116 + 5)
+    other = "".join(rng.choice("ACGT") for _ in range(360))
+    write("ldyn.fa", [(f">loadord random letters that only q1 of ldo_e2y.fna hits, copy {n}", other) for n in range(4)])
+    makeblastdb(binary, "-in", "ldyn.fa", "-dbtype", "nucl", "-out", "ldyn", "-blastdb_version", "5", "-taxid", "9606",
+                "-title", "multidb ldyn")
+    os.remove(os.path.join(HERE, "ldyn.njs"))
+    none_p, none_n = "WWWWWWWWWWHHHHHHHHHHWWWWWWWWWW", "ACGTTGCAAGTCCTAGGATCCGTAGCATGCAATTGGCCAATCGATCGTTAACCGGTACG"
+    cut = ">q1 a\u00e9b z"
+    for name, nohit, repeated, two in (("ldo_e2.faa", none_p, qp1 * 16, globin + qp1),
+                                       ("ldo_e2x.fna", none_n, qp1_x * 16, globin_x + qp1_x),
+                                       ("ldo_e2.fna", none_n, glob1 * 6, globin_x + glob1),
+                                       ("ldo_e2t.faa", none_p, orf * 16, globin + orf),
+                                       ("ldo_e2y.fna", none_n, glob1 + other, globin_x + glob1)):
+        write(name, [(">q0 none", nohit), (cut, repeated), (">q2 two", two)])
+
+
 def main(binary):
     os.makedirs(os.path.join(HERE, "d1"), exist_ok=True)
     os.makedirs(os.path.join(HERE, "d2"), exist_ok=True)
@@ -505,6 +558,8 @@ if __name__ == "__main__":
         make_loadord4(sys.argv[2])
     elif sys.argv[1] == "--loadord5-only":
         make_loadord5(sys.argv[2])
+    elif sys.argv[1] == "--loadord6-only":
+        make_loadord6(sys.argv[2])
     else:
         main(sys.argv[1])
         make_ordsl(sys.argv[1])
@@ -515,3 +570,4 @@ if __name__ == "__main__":
         make_loadord3(sys.argv[1])
         make_loadord4(sys.argv[1])
         make_loadord5(sys.argv[1])
+        make_loadord6(sys.argv[1])

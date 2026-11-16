@@ -387,6 +387,7 @@ impl TblastnDatabase {
                 &self.db,
                 &self.taxdb,
                 before,
+                std::iter::empty(),
                 subjects,
                 PROGRAM,
                 queries,

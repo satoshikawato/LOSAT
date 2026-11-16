@@ -15,8 +15,19 @@
   point (the batch's queries as read, one that `-query_loc` skips included, numbered over the whole run; with
   `-parse_deflines` the ids of the deflines; the PSSM's query of `-in_pssm`; with `-outfmt 5` also the queries
   before).
+- After a BLAST XML (`-outfmt 5`) iteration that NCBI BLAST+'s stream leaves out at a query title outside US-ASCII
+  (with `PRE_FETCH_SEQS_LIMIT`, whose sequences it then does not load), a later query batch whose prefetch stops at
+  such a Seq-id now writes, in every search program (`blastp`, `blastx`, `blastn`, `tblastn`, `tblastx`), the
+  taxonomy database's messages that those loads would have written where NCBI BLAST+ writes them: at the first load
+  before the stop (in NCBI BLAST+'s order of the loads) that makes the same lookup, or not at all where only loads
+  after the stop would make it, then `BLAST Database error: DB contains no accession info.` (exit status 2); LOSAT
+  refused such a batch where any of its other loads looked a tax id up. A load whose order to the stop LOSAT does not
+  know that would write such a message stays refused.
 - A version 4 database whose string ISAM file (`.psi`, `.psd`, `.nsi`, `.nsd`) or PIG ISAM file (`.ppi`, `.ppd`) is a
   directory: a volume with such a file now has no such index, as in NCBI BLAST+, whose lookups find nothing there and go
   on to the next volume; LOSAT stopped with `BLAST Database error: Error: Could not open input file`. A reported
   sequence that the lookup then finds as another sequence of a later volume is refused, as in every other database,
-  and the refusal of an empty string ISAM file now says that NCBI BLAST+ crashes where it reads it.
+  and the refusal of an empty string ISAM file now says that NCBI BLAST+ crashes where it reads it. A trace-id ISAM
+  file (`.pti`, `.ptd`, `.nti`, `.ntd`) that is a directory likewise is no such index (NCBI BLAST+ takes only regular
+  files for one): such a volume is no longer refused as one with an ISAM of trace ids, and its `ti|` lookups use the
+  string ISAM, as in a volume without trace-id files.

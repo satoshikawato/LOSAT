@@ -1527,11 +1527,14 @@ impl ListedTitles<'_> {
     /// `queries`), for the XML2 and JSON formats, which write the taxonomy texts at each `Hit`
     /// (`shared::held_batch_prefetch_stop`): after the lookups of the reports of the batches
     /// before, whose final hit lists are `before` (their subjects are those `read_taxids` reads),
-    /// which BLASTP writes after the stop (the search of those batches again, `HeaderReadError`).
+    /// which BLASTP writes after the stop (the search of those batches again, `HeaderReadError`),
+    /// and the loads of those batches of ranks `loaded` (`shared::batch_loads`, with psiblast's
+    /// traceback beyond the cut, which no report reads), recorded where the batch stops.
     pub(super) fn batch_prefetch_stop(
         &self,
         database: &BlastpDatabase,
         before: &[Option<BlastpHitList>],
+        loaded: impl IntoIterator<Item = usize>,
         ranks: impl IntoIterator<Item = usize>,
         queries: &shared::PrefetchQueries<'_>,
     ) -> Result<()> {
@@ -1539,6 +1542,7 @@ impl ListedTitles<'_> {
             &database.db,
             &database.taxdb,
             Self::reported_ranks(before).map(|rank| self.prefetch_subject(rank)),
+            loaded.into_iter().map(|rank| self.prefetch_subject(rank)),
             ranks.into_iter().map(|rank| self.prefetch_subject(rank)),
             self.program,
             queries,

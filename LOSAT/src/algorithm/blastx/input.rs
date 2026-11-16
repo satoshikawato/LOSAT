@@ -59,8 +59,8 @@ pub struct FastaRecord {
     /// allocation) for every other record.
     pub around: Option<Box<LettersAround>>,
     /// On the first record of a reader batch, the batch's records that the `-query_loc` range
-    /// skipped (`SkippedRecord`), which NCBI's reader added to its scope; `None` (no allocation)
-    /// for every other record.
+    /// skipped (`SkippedRecord`), which NCBI's reader added to its scope, where the reader keeps
+    /// them (`FastaStream::keep_skipped`); `None` (no allocation) for every other record.
     pub skipped: Option<Box<[SkippedRecord]>>,
 }
 
@@ -634,6 +634,7 @@ pub(crate) fn parse_fasta_batches_with_warnings(
         None,
         None,
         0,
+        false,
         deliver,
         warn,
     )
@@ -677,6 +678,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
     parse_deflines: Option<BelievedRead<'_>>,
     range: Option<&SequenceRange>,
     around: usize,
+    keep_skipped: bool,
     deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
     warn: &mut dyn FnMut(&InputWarning) -> Result<()>,
 ) -> Result<Vec<FastaRecord>> {
@@ -688,6 +690,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
         keep_whole: keep_defline,
         around,
         kept: keep_records.then(Vec::new),
+        keep_skipped,
         ..ReaderBatch::default()
     };
 
@@ -1665,7 +1668,9 @@ fn emit_fasta_batch(
         Some(RecordInterval::PastEnd) => {
             let skipped = records.pop().expect("completed FASTA record");
             batch.skipped += 1;
-            batch.skipped_records.push(SkippedRecord::of(&skipped));
+            if batch.keep_skipped {
+                batch.skipped_records.push(SkippedRecord::of(&skipped));
+            }
         }
     }
     if batch.length >= batch_size {
@@ -1719,8 +1724,10 @@ struct ReaderBatch<'r> {
     /// The records the range skipped so far: NCBI's reader numbers them (`Query_<n>`).
     skipped: usize,
     /// The records of the batch that the range skipped, for its first record
-    /// (`FastaRecord::skipped`).
+    /// (`FastaRecord::skipped`), where they are kept (`keep_skipped`).
     skipped_records: Vec<SkippedRecord>,
+    /// Whether the batch keeps the records that the range skipped (`FastaStream::keep_skipped`).
+    keep_skipped: bool,
 }
 
 impl ReaderBatch<'_> {
@@ -1999,6 +2006,12 @@ pub(crate) struct FastaStream<R: Read> {
     /// The letters on each side of its `-query_loc` interval that each record cut to it keeps
     /// (`FastaRecord::keep_around`, `empty_rows::query_letters_around`); 0 for none.
     pub(crate) around: usize,
+    /// Whether the reader keeps the records that the `-query_loc` range skips
+    /// (`FastaRecord::skipped`): NCBI's scope of a batch's prefetch holds them, which only the
+    /// stop of a prefetch asks (`common::database::PrefetchQueries`), so the caller sets it where
+    /// a prefetch of the run can stop (`BlastxDatabase::prefetch_can_stop`; review 5 of line DBID
+    /// loadord, L2). Off by default.
+    pub(crate) keep_skipped: bool,
 }
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:81-89
 // ```c++
@@ -2071,6 +2084,7 @@ impl<R: Read> FastaStream<R> {
             program: super::args::ProgramName::BLASTX,
             unget_line: None,
             around: 0,
+            keep_skipped: false,
         }
     }
     // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:224-236
@@ -2888,7 +2902,7 @@ fn read_fasta_stream<R: Read>(
             stream.unget_line = Some(line);
         }
     }
-    let around = stream.around;
+    let (around, keep_skipped) = (stream.around, stream.keep_skipped);
     let records = parse_fasta_lines(
         stream,
         protein,
@@ -2899,6 +2913,7 @@ fn read_fasta_stream<R: Read>(
         parse_deflines,
         range,
         around,
+        keep_skipped,
         &mut |records| {
             delivered = true;
             deliver(records)
@@ -3331,8 +3346,10 @@ mod range_tests {
         batch_size: usize,
     ) -> (Vec<Batch>, Vec<FastaRecord>) {
         let mut delivered = Vec::new();
+        let mut stream = FastaStream::new(Cursor::new(data.to_vec()));
+        stream.keep_skipped = true;
         let kept = parse_fasta_stream_keeping(
-            &mut FastaStream::new(Cursor::new(data.to_vec())),
+            &mut stream,
             false,
             true,
             batch_size,
@@ -3511,27 +3528,38 @@ mod range_tests {
         };
         assert_eq!(ids(&kept[..2]), ["Query_1", "Query_3", "Query_2"]);
         assert_eq!(ids(&kept[2..]), ["Query_4", "Query_5"]);
-        let mut unkept = Vec::new();
-        read_fasta_stream_batches(
-            &mut FastaStream::new(Cursor::new(data.to_vec())),
-            false,
-            true,
-            15,
-            false,
-            Some(&range),
-            &mut |records| {
-                unkept.push(ids(records));
-                Ok(())
-            },
-            &mut |_| Ok(()),
-        )
-        .unwrap();
+        let unkept = |keep_skipped: bool| {
+            let mut unkept = Vec::new();
+            let mut stream = FastaStream::new(Cursor::new(data.to_vec()));
+            stream.keep_skipped = keep_skipped;
+            read_fasta_stream_batches(
+                &mut stream,
+                false,
+                true,
+                15,
+                false,
+                Some(&range),
+                &mut |records| {
+                    unkept.push(ids(records));
+                    Ok(())
+                },
+                &mut |_| Ok(()),
+            )
+            .unwrap();
+            unkept
+        };
         assert_eq!(
-            unkept,
+            unkept(true),
             [
                 vec!["Query_1", "Query_3", "Query_2"],
                 vec!["Query_4", "Query_5"]
             ]
+        );
+        // A run whose prefetch cannot stop keeps none of them (review 5 of line DBID loadord,
+        // L2); the numbers stay.
+        assert_eq!(
+            unkept(false),
+            [vec!["Query_1", "Query_3"], vec!["Query_4", "Query_5"]]
         );
     }
 

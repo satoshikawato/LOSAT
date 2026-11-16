@@ -337,6 +337,7 @@ fn scan_xml_titles(
             batch_size,
             keep_whole,
             0,
+            false,
             deliver,
             &mut |_| Ok(()),
         )
@@ -367,7 +368,9 @@ fn batch_shown<'a>(
 /// `query_range` (`-query_loc`) a record is cut to its interval (its whole letters kept with
 /// `keep_whole`, the archive's) and the batch counts the whole record; a record whose interval
 /// starts more than one letter past its end is not searched and adds nothing, so the last batch
-/// can hold none (NCBI's `Empty CBlastQueryVector`). Only the batch being read is kept.
+/// can hold none (NCBI's `Empty CBlastQueryVector`). Only the batch being read is kept. The
+/// skipped records are kept for the batch's scope (`FastaRecord::skipped`) with `keep_skipped`
+/// (`input::FastaStream::keep_skipped`).
 fn reader_batches(
     query_records: &[fasta_reader::FastaRecord],
     lowercase: bool,
@@ -375,6 +378,7 @@ fn reader_batches(
     batch_size: usize,
     keep_whole: bool,
     around: usize,
+    keep_skipped: bool,
     deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
     warn: &mut dyn FnMut(&[u8]) -> Result<()>,
 ) -> Result<()> {
@@ -401,7 +405,9 @@ fn reader_batches(
             }
             Some(RecordInterval::Empty) => query.cut_in_place(length, length, keep_whole),
             Some(RecordInterval::PastEnd) => {
-                skipped.push(super::input::SkippedRecord::of(&query));
+                if keep_skipped {
+                    skipped.push(super::input::SkippedRecord::of(&query));
+                }
                 continue;
             }
         }
@@ -640,6 +646,12 @@ fn write_run(
         Some(_) => 0,
         None => super::empty_rows::query_letters_around(search_options, subjects),
     };
+    // The records that `-query_loc` skips, for NCBI's scope of a batch's prefetch, where a
+    // prefetch of the run can stop (as the command line's reader, `native`).
+    let keep_skipped = query_range.is_some()
+        && database
+            .as_ref()
+            .is_some_and(|run| run.database.prefetch_can_stop());
     let mut read = |deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
                     warn: &mut dyn FnMut(&[u8]) -> Result<()>|
      -> Result<()> {
@@ -650,6 +662,7 @@ fn write_run(
             batch_size,
             keep_whole,
             around,
+            keep_skipped,
             deliver,
             warn,
         )

@@ -142,6 +142,14 @@ impl Posts {
         }
     }
 
+    /// The reads of the loads of a batch's prefetch among these posts (`loads`), in order.
+    pub fn load_reads(&self) -> impl Iterator<Item = &crate::report::query_warnings::SubjectRead> {
+        self.0.iter().flat_map(|post| match post {
+            Post::Loads(reads) => reads.as_slice(),
+            _ => &[],
+        })
+    }
+
     /// Adds one post of `severity` whose text is `text` (with its line feed).
     pub fn post(&mut self, severity: i32, text: impl Into<Vec<u8>>) {
         let text = text.into();

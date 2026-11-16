@@ -4275,11 +4275,15 @@ fn run_batch_loop(
                         })
                     };
                     let reads = reports.reads.borrow();
+                    // The posts before each query's report: those of the prefetch of the batch
+                    // it begins (`warnings`, the batches before this one).
+                    let prefetched = |query: usize| warnings.get(query);
                     let xml_before = (first_report
                         == Some(crate::blastinput::app::ReportFormat::Xml))
                     .then(|| crate::algorithm::common::database::XmlReportsBefore {
                         reads: &reads,
                         cut: &xml_cut,
+                        prefetched: &prefetched,
                     });
                     let scope = || batch_scope(input_start..input_end);
                     let prefetch = super::super::database::batch_prefetch(

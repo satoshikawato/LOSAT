@@ -192,9 +192,12 @@ round before, or in a call of the library's batches before; or a query that NCBI
 the prefetch has it: the batch's records as read, those that `-query_loc` drops included, by
 their `lcl|Query_N` or the ids of `-parse_deflines`, or the query of `-in_pssm`, and with outfmt 5
 those of the batches before; of several stopping ids, the first that NCBI surely looks up ends
-the loads), and one where, after a BLAST XML report that NCBI's XML stream cuts before its hits
-(outfmt 5, a query title or id outside US-ASCII: that report makes none of its loads, line RG
-item K4h), another load of the batch looks a tax id up (`PD-LOSAT-NCBI-DEFECTS`, rule 3; before
+the loads), and one where a load whose order to the stop LOSAT does not know would make a lookup
+of a tax id that a BLAST XML report before the batch left (outfmt 5: NCBI's XML stream cuts the
+report before its hits at a query title or id outside US-ASCII, and it makes none of its loads,
+line RG item K4h; the texts of such lookups come at the first load before the stopping lookup that
+makes the same lookup, or not at all, in every search program since review 5 of line DBID item
+loadord) (`PD-LOSAT-NCBI-DEFECTS`, rule 3; before
 line DBID item mixdb, every such
 list where NCBI starts the search; before item mixdb2, every run whose reports or prefetch
 looked such a Seq-id up). `losat blastdbcmd` keeps one

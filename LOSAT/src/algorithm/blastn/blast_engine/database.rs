@@ -684,6 +684,7 @@ impl BlastnDatabase {
             &self.db,
             &self.taxdb,
             Self::prefetch_subjects(titles, before, gapped, SubjectFetch::Every),
+            std::iter::empty(),
             Self::prefetch_subjects(titles, hit_lists, gapped, SubjectFetch::Every),
             PROGRAM,
             queries,

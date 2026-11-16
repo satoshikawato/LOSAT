@@ -395,12 +395,9 @@ impl IdLookup<'_> {
                     return Ok(None);
                 };
                 if !isam.is_initialized() {
-                    return Err(SeqDbError::Unsupported {
+                    return Err(SeqDbError::NcbiCrashes {
                         path: volume.base().to_path_buf(),
-                        message: format!(
-                            "a string ISAM whose header does not fit its files {}",
-                            super::NCBI_CRASHES_ON_IT
-                        ),
+                        message: "a string ISAM whose header does not fit its files".to_string(),
                     });
                 }
                 if self.isams.index_in_memory {

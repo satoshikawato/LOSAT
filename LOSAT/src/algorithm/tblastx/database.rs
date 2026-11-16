@@ -541,6 +541,7 @@ pub(crate) fn batch_prefetch_stop(
         &database.db,
         &database.taxdb,
         prefetch_subjects(before, titles),
+        std::iter::empty(),
         prefetch_subjects(ordered, titles),
         PROGRAM,
         queries,

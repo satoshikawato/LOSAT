@@ -5128,6 +5128,35 @@ impl<'s> PrefetchSubject<'s> {
     }
 }
 
+/// The BLAST XML (outfmt 5) reports of the queries before a batch whose prefetch stops
+/// ([`batch_prefetch`]), where outfmt 5 is the first format: by query, the model's reads of its
+/// report (`reads`: those of the reports of a batch whose prefetch is off, which load their
+/// subjects), and whether NCBI's XML stream throws in its `Iteration` before the first `Hit`
+/// (`cut`, `report::blast_xml::names::iteration_cut_before_hits`). Asked only where the batch's
+/// prefetch stops.
+pub(crate) struct XmlReportsBefore<'a> {
+    pub reads: &'a [crate::report::query_warnings::QueryReads],
+    pub cut: &'a dyn Fn(usize) -> bool,
+}
+
+impl XmlReportsBefore<'_> {
+    /// Whether the report of a query before `query` may leave the texts of loads that NCBI does
+    /// not make to a later load (`report::query_warnings::ReadLoad::left_out`): a report that the
+    /// stream cuts before its hits, whose reads have a text in the model.
+    fn leave_texts(&self, query: usize) -> bool {
+        self.reads
+            .iter()
+            .take(query)
+            .enumerate()
+            .any(|(before, reads)| {
+                reads
+                    .iter()
+                    .any(|read| read.load.is_some() && !read.text.is_empty())
+                    && (self.cut)(before)
+            })
+    }
+}
+
 /// NCBI's prefetch of one query batch's reported subjects on standard error, for a first format
 /// that prefetches ([`prefetches_subjects`]) and a batch whose prefetch is on: the posts of the
 /// taxonomy database's texts of the loads (those of [`prefetch_messages`], none without
@@ -5153,16 +5182,22 @@ impl<'s> PrefetchSubject<'s> {
 /// refused where the other subjects' loads write a text, which NCBI writes before the error or
 /// not as the order of the loads decides, and where another subject's lookup throws on its id
 /// (the prefetch catches that one and ends its loads, so whether it stops is that order's too).
+/// `xml_before`: the outfmt 5 reports of the queries before the batch, for that stop
+/// ([`XmlReportsBefore`]; `None` for other first formats, and for BLASTX, whose model of a batch
+/// follows the reports of the batches before).
 pub(crate) fn batch_prefetch<'s>(
     db: &SeqDb,
     run: &TaxdbRun,
     subjects: impl IntoIterator<Item = PrefetchSubject<'s>>,
     program: &str,
     query: usize,
+    xml_before: Option<&XmlReportsBefore<'_>>,
 ) -> Result<crate::report::diag_log::Posts> {
     let subjects: Vec<PrefetchSubject<'s>> = subjects.into_iter().collect();
     if let Some(stopping) = stopping_subject(&subjects) {
-        return Err(prefetch_stop(db, run, &subjects, program, query, stopping));
+        return Err(prefetch_stop(
+            db, run, &subjects, program, query, stopping, xml_before,
+        ));
     }
     let mut failed_lookup: Option<(u32, String)> = None;
     let mut fails = false;
@@ -5318,7 +5353,9 @@ pub(crate) fn batch_prefetch_stop<'s>(
 ) -> Result<()> {
     let subjects: Vec<PrefetchSubject<'s>> = subjects.into_iter().collect();
     match stopping_subject(&subjects) {
-        Some(stopping) => Err(prefetch_stop(db, run, &subjects, program, query, stopping)),
+        Some(stopping) => Err(prefetch_stop(
+            db, run, &subjects, program, query, stopping, None,
+        )),
         None => Ok(()),
     }
 }
@@ -5340,7 +5377,9 @@ pub(crate) fn held_batch_prefetch_stop<'s, 'b>(
         return Ok(());
     };
     let run = reports_record(db, before, program)?;
-    Err(prefetch_stop(db, &run, &subjects, program, query, stopping))
+    Err(prefetch_stop(
+        db, &run, &subjects, program, query, stopping, None,
+    ))
 }
 
 /// The record of the taxonomy lookups of the XML2 and JSON reports of the subjects `reported`
@@ -5385,7 +5424,7 @@ fn stopping_subject<'s>(
 /// lookup fails on a file with NCBI's exception ([`batch_prefetch`], [`batch_prefetch_stop`]),
 /// after the lookups that `run` records: the [`HeaderReadError`] of `query` with NCBI's `BLAST
 /// Database error`, or LOSAT's refusal where what NCBI writes before it depends on the order of
-/// the loads.
+/// the loads. `xml_before`: the outfmt 5 reports before the batch ([`XmlReportsBefore`]).
 fn prefetch_stop(
     db: &SeqDb,
     run: &TaxdbRun,
@@ -5393,6 +5432,7 @@ fn prefetch_stop(
     program: &str,
     query: usize,
     stopping: (u32, &crate::report::db_subject::ParsedSubject),
+    xml_before: Option<&XmlReportsBefore<'_>>,
 ) -> anyhow::Error {
     let (ordinal, parsed) = stopping;
     let message = parsed
@@ -5424,24 +5464,42 @@ fn prefetch_stop(
     // misses its slot, which needs another taxid of the slot: `TaxdbRun::cache_collision` refuses
     // such a run): where the other subjects' loads after `run`'s lookups write none, none of them
     // writes one before the stop in any order, nor in any part of them.
-    let texts = prefetch_messages(
+    let reads = match subject_read_texts(
         db,
         run,
-        others.map(|subject| (subject.ordinal, subject.parsed)),
+        others.map(|subject| (0, subject.ordinal, subject.parsed)),
+        false,
         program,
-    );
-    match texts {
-        Ok(text) if text.is_empty() => anyhow::Error::new(HeaderReadError {
-            query,
-            error: NativeError {
-                exit: 2,
-                message: format!("BLAST Database error: {message}\n"),
-            }
-            .into(),
-        }),
-        Ok(_) => refuse("their loads make the taxonomy database write a text"),
-        Err(error) => error,
+    ) {
+        Ok(reads) => reads,
+        Err(error) => return error,
+    };
+    if reads.iter().any(|read| !read.text.is_empty()) {
+        return refuse("their loads make the taxonomy database write a text");
     }
+    // A BLAST XML report before the batch that NCBI's stream cuts before its hits makes none of
+    // its loads, whose texts (in the model, those of its reads) go to the next loads that make the
+    // same asks (`report::query_warnings::ReadLoad::left_out`): then a load of these that asks may
+    // write them before the stop, or not, as the order decides. The four programs that model every
+    // batch before they write a report know of the cut only where they write it, after this.
+    let asks = || {
+        reads.iter().any(|read| {
+            read.load
+                .as_ref()
+                .is_some_and(|load| load.looks_up || load.offset)
+        })
+    };
+    if xml_before.is_some_and(|before| before.leave_texts(query)) && asks() {
+        return refuse("their loads may write the taxonomy database's texts of the loads that a BLAST XML report before them does not make, whose Iteration NCBI's XML stream cuts at a query title or id outside US-ASCII");
+    }
+    anyhow::Error::new(HeaderReadError {
+        query,
+        error: NativeError {
+            exit: 2,
+            message: format!("BLAST Database error: {message}\n"),
+        }
+        .into(),
+    })
 }
 
 /// The volume of `db` that holds the taxid `last` and another positive taxid of the same slot of
@@ -6583,7 +6641,7 @@ mod taxdb_prepass_tests {
                 parsed: Some(&*subject),
                 flipped,
             };
-            batch_prefetch(&db, &run, [subject], "TBLASTX", 0)
+            batch_prefetch(&db, &run, [subject], "TBLASTX", 0, None)
                 .unwrap()
                 .text()
         };
@@ -6634,6 +6692,7 @@ mod taxdb_prepass_tests {
                 }],
                 "BLASTN",
                 0,
+                None,
             );
             assert_eq!(text(alone.unwrap()), warning);
             // With the other subject, whose load writes the offset error before the failed
@@ -6655,6 +6714,7 @@ mod taxdb_prepass_tests {
                 ],
                 "BLASTN",
                 0,
+                None,
             );
             match taxdb {
                 None => assert_eq!(text(both.unwrap()), warning),
@@ -6680,6 +6740,7 @@ mod taxdb_prepass_tests {
                     }],
                     "BLASTN",
                     0,
+                    None,
                 );
                 assert_eq!(text(first.unwrap()), offset);
                 let later = batch_prefetch(
@@ -6699,6 +6760,7 @@ mod taxdb_prepass_tests {
                     ],
                     "BLASTN",
                     0,
+                    None,
                 );
                 assert_eq!(text(later.unwrap()), warning);
             }
@@ -6730,6 +6792,7 @@ mod taxdb_prepass_tests {
             ],
             "BLASTN",
             0,
+            None,
         );
         assert_eq!(text(prefetch.unwrap()), format!("{offset}{warning}"));
         let run = TaxdbRun::default();
@@ -6743,6 +6806,7 @@ mod taxdb_prepass_tests {
             }],
             "BLASTN",
             0,
+            None,
         );
         assert_eq!(text(plus.unwrap()), "");
         std::fs::remove_dir_all(&cwd).unwrap();
@@ -6826,7 +6890,7 @@ mod taxdb_prepass_tests {
             let run = TaxdbRun::default();
             let alone = [subject(stop, &parsed[stop as usize])];
             assert_eq!(
-                stopped(batch_prefetch(&db, &run, alone, "BLASTN", 3).map(drop)),
+                stopped(batch_prefetch(&db, &run, alone, "BLASTN", 3, None).map(drop)),
                 (3, error.clone())
             );
             assert_eq!(
@@ -6839,7 +6903,7 @@ mod taxdb_prepass_tests {
             match taxdb {
                 None => {
                     assert_eq!(
-                        stopped(batch_prefetch(&db, &run, both(), "BLASTN", 0).map(drop)).1,
+                        stopped(batch_prefetch(&db, &run, both(), "BLASTN", 0, None).map(drop)).1,
                         error
                     );
                     assert_eq!(
@@ -6862,7 +6926,8 @@ mod taxdb_prepass_tests {
                     // Each in a run that has looked nothing up: a refused prefetch has recorded
                     // its loads in its run.
                     for refused in [
-                        batch_prefetch(&db, &TaxdbRun::default(), both(), "BLASTN", 0).map(drop),
+                        batch_prefetch(&db, &TaxdbRun::default(), both(), "BLASTN", 0, None)
+                            .map(drop),
                         batch_prefetch_stop(&db, &TaxdbRun::default(), both(), "BLASTN", 0),
                         held_batch_prefetch_stop(&db, std::iter::empty(), both(), "BLASTN", 0),
                     ] {
@@ -6880,12 +6945,12 @@ mod taxdb_prepass_tests {
                     // writes nothing now, so NCBI's error.
                     let run = TaxdbRun::default();
                     assert!(
-                        !batch_prefetch(&db, &run, [subject(other, &None)], "BLASTN", 0)
+                        !batch_prefetch(&db, &run, [subject(other, &None)], "BLASTN", 0, None)
                             .unwrap()
                             .is_empty()
                     );
                     assert_eq!(
-                        stopped(batch_prefetch(&db, &run, both(), "BLASTN", 1).map(drop)),
+                        stopped(batch_prefetch(&db, &run, both(), "BLASTN", 1, None).map(drop)),
                         (1, error.clone())
                     );
                     // The same after a batch whose XML2 or JSON reports looked it up: in the run
@@ -6952,6 +7017,7 @@ mod taxdb_prepass_tests {
                 [subject(stop as u32, &parsed[stop]), subject(other, &throws)],
                 "BLASTN",
                 0,
+                None,
             )
             .map(drop),
             batch_prefetch_stop(

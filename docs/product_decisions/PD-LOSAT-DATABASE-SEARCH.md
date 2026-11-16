@@ -182,7 +182,9 @@ reported parsed Seq-id up in a file without the table stops as NCBI's does, with
 error: DB contains no accession info.` (exit 2) after the prologs and the reports of the batches
 before (line DBID item mixdb2); refused is a run whose reports read such a Seq-id with the prefetch
 off, and a stopping batch whose other sequences' loads write texts of the taxonomy database or
-throw on their ids (`PD-LOSAT-NCBI-DEFECTS`, rule 3; before line DBID item mixdb, every such
+throw on their ids, or, after a BLAST XML report that NCBI's XML stream cuts before its hits
+(outfmt 5, a query title or id outside US-ASCII: that report makes none of its loads, line RG
+item K4h), look a tax id up (`PD-LOSAT-NCBI-DEFECTS`, rule 3; before line DBID item mixdb, every such
 list where NCBI starts the search; before item mixdb2, every run whose reports or prefetch
 looked such a Seq-id up). `losat blastdbcmd` keeps one
 database per `-db`. Since line RG (series D, D1a, 2026-11-12) a volume reached through an

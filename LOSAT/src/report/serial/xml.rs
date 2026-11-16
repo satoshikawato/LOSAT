@@ -304,6 +304,20 @@ impl XmlThrow {
     }
 }
 
+/// Whether NCBI's XML stream of outfmt 5 / 14 / 16 throws where it writes the string `value`
+/// (`XmlThrow`: a byte >= 0x80 that does not decode to a US-ASCII character before the string's
+/// first NUL): the stream's own `write_string` on a scratch stream, for a question asked before
+/// the document is written (`report::blast_xml::names::iteration_cut_before_hits`).
+pub(crate) fn us_ascii_stream_throws(value: &[u8]) -> bool {
+    if value.is_ascii() {
+        return false;
+    }
+    let mut out = Vec::new();
+    let mut stream = XmlEncoder::fragment(&mut out);
+    stream.write_string::<true>(value);
+    stream.thrown.is_some()
+}
+
 impl<'b> XmlEncoder<'b, false> {
     /// A document of a root type of the ASN.1 module `module`: `begin_document` writes the
     /// declaration and the DOCTYPE.

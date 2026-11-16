@@ -1507,12 +1507,14 @@ impl ListedTitles<'_> {
     /// NCBI's prefetch of a query batch's subjects of ranks `ranks` on standard error
     /// (`shared::batch_prefetch`): the taxonomy texts of `prefetch_messages`, then the warning
     /// where the prefetch fails at a subject whose lookup fails (a protein has no strand); the
-    /// stop of the batch whose first query is `query` (`shared::batch_prefetch`).
+    /// stop of the batch whose first query is `query` (`shared::batch_prefetch`; `xml_before`: the
+    /// outfmt 5 reports before it, `shared::XmlReportsBefore`).
     pub(super) fn batch_prefetch(
         &self,
         database: &BlastpDatabase,
         ranks: impl IntoIterator<Item = usize>,
         query: usize,
+        xml_before: Option<&shared::XmlReportsBefore<'_>>,
     ) -> Result<crate::report::diag_log::Posts> {
         shared::batch_prefetch(
             &database.db,
@@ -1525,6 +1527,7 @@ impl ListedTitles<'_> {
             }),
             self.program,
             query,
+            xml_before,
         )
     }
 

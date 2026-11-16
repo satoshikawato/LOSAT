@@ -495,12 +495,15 @@ pub(crate) fn subject_read_texts<'h>(
 /// [`prefetch_messages`], then the warning where the prefetch fails, at a subject whose lookup
 /// fails or one without a Bioseq with a Seq-align whose first Std-seg has a minus query frame
 /// and a plus subject frame (`CSeq_align::GetSeqStrand` reads the first segment): `ordered`
-/// holds each query's HSPs of a subject in one run, in the order of the Std-segs (`seqalign`).
+/// holds each query's HSPs of a subject in one run, in the order of the Std-segs (`seqalign`);
+/// `xml_before`: the outfmt 5 reports before the batch whose first query is `query`
+/// (`shared::XmlReportsBefore`).
 pub(crate) fn batch_prefetch(
     database: &TblastxDatabase,
     ordered: &[TblastxHsp],
     titles: &DatabaseTitles,
     query: usize,
+    xml_before: Option<&shared::XmlReportsBefore<'_>>,
 ) -> Result<crate::report::diag_log::Posts> {
     shared::batch_prefetch(
         &database.db,
@@ -508,6 +511,7 @@ pub(crate) fn batch_prefetch(
         prefetch_subjects(ordered, titles),
         PROGRAM,
         query,
+        xml_before,
     )
 }
 

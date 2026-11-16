@@ -745,6 +745,9 @@ impl ReportedSubjects {
             self.prefetch_subjects(batches, gapped),
             database.program,
             0,
+            // The model of each batch follows the reports of the batches before, so the texts
+            // that their loads left are the model's (`ReadLoad::place`).
+            None,
         )
     }
 

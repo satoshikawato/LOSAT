@@ -11020,8 +11020,37 @@ fn run_in_pool(
                     // A batch without Seq-aligns prefetches no sequence.
                     rows_open(&batch_hit_lists).map(|()| Posts::new())
                 } else {
+                    // Outfmt 5 first: whether a report of the batches before was cut, asked only
+                    // where the batch's prefetch stops (`shared::XmlReportsBefore`).
+                    let xml_cut = |query: usize| {
+                        queries
+                            .before(&kept, start)
+                            .get(query)
+                            .is_some_and(|record| {
+                                crate::report::blast_xml::names::iteration_cut_before_hits(
+                                    record.local_id.as_bytes(),
+                                    record.warning_id(),
+                                    record.believed(),
+                                    &record.title,
+                                    false,
+                                )
+                            })
+                    };
+                    let xml_before =
+                        matches!(output_formats.first(), Some(BlastnOutputFormat::Xml)).then(
+                            || crate::algorithm::common::database::XmlReportsBefore {
+                                reads: &query_reads,
+                                cut: &xml_cut,
+                            },
+                        );
                     database
-                        .batch_prefetch(&titles, &batch_hit_lists, !args.ungapped, start)
+                        .batch_prefetch(
+                            &titles,
+                            &batch_hit_lists,
+                            !args.ungapped,
+                            start,
+                            xml_before.as_ref(),
+                        )
                         .and_then(|messages| {
                             rows_open(&batch_hit_lists)?;
                             Ok(messages)

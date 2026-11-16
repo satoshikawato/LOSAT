@@ -237,6 +237,35 @@ pub fn query_text(
     })
 }
 
+/// Whether NCBI's XML stream throws in the outfmt 5 `Iteration` of a query before its first `Hit`
+/// (the query's record as `query_text` takes it): at its `Iteration_query-ID` or
+/// `Iteration_query-def` (`report::serial::xml::us_ascii_stream_throws`), the strings it writes
+/// before the hits. NCBI then makes none of the loads of the report's reads, whose texts go to its
+/// next loads that make the same asks (`report::query_warnings::ReadCursor::cut`). A title that
+/// LOSAT refuses (`Refusal`) is not written, so it cuts nothing.
+pub fn iteration_cut_before_hits(
+    local_id: &[u8],
+    warning_id: &[u8],
+    believed: Option<&crate::blastinput::fasta_reader::believed::BelievedIds>,
+    title: &[u8],
+    protein: bool,
+) -> bool {
+    use crate::report::serial::xml::us_ascii_stream_throws;
+    query_text(
+        "",
+        local_id,
+        warning_id,
+        believed,
+        title,
+        protein,
+        &[],
+        true,
+    )
+    .is_ok_and(|text| {
+        us_ascii_stream_throws(text.query_id(local_id)) || us_ascii_stream_throws(&text.title)
+    })
+}
+
 /// The `QueryText` of every query of `records` (`program` names the program in a refusal):
 /// `warnings[q]` are the query's warning messages and `has_hits(q)` whether it has Seq-aligns.
 pub fn query_texts(
@@ -294,6 +323,31 @@ mod tests {
         // messages are sorted and without repeats
         let message = xml_message(b"Q", &["b".into(), "a".into(), "b".into()], true).unwrap();
         assert_eq!(String::from_utf8(message).unwrap(), "Q:  Q: a b ");
+    }
+
+    #[test]
+    fn an_iteration_is_cut_before_its_hits_by_a_title_outside_us_ascii() {
+        // K4h review 3 H1 (E2): q1's two-byte UTF-8 title cuts its Iteration at the query-def,
+        // before any Hit; an ASCII title cuts nothing.
+        assert!(iteration_cut_before_hits(
+            b"Query_2",
+            b"Query_2",
+            None,
+            b"q1 a\xc3\xa9b z",
+            true
+        ));
+        assert!(!iteration_cut_before_hits(
+            b"Query_2", b"Query_2", None, b"q1 ab z", true
+        ));
+        // A title whose GenerateDefline throws (0x81, in no encoding NCBI guesses) is not written:
+        // the catch's id `lcl|Query_2` and no title come before the hits.
+        assert!(!iteration_cut_before_hits(
+            b"Query_2",
+            b"Query_2",
+            None,
+            b"q1 a\x81b",
+            true
+        ));
     }
 
     #[test]

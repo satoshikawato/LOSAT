@@ -563,6 +563,17 @@ fn a_strategy_fifo_gets_the_requests_that_ncbi_writes() {
         .env("HOME", &dir)
         .env("USERPROFILE", &dir);
     let status = command.status().expect("run LOSAT CLI");
+    // A run that ends before it opens the FIFO leaves the reader waiting in its open: a writer
+    // that opens the FIFO without blocking and closes it ends that wait (the reader reads nothing),
+    // so the run's failure shows below instead of a hang. Where the reader is done, nothing has the
+    // FIFO open for reading and this open fails (ENXIO), which changes nothing.
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let _ = std::fs::OpenOptions::new()
+            .write(true)
+            .custom_flags(rustix::fs::OFlags::NONBLOCK.bits() as i32)
+            .open(&fifo);
+    }
     let strategy = reader.join().unwrap();
     let merged = std::fs::read(&path).unwrap();
     std::fs::remove_dir_all(&dir).unwrap();

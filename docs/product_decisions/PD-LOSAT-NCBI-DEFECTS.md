@@ -93,9 +93,9 @@
   Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07);
   1.37 2026-11-16 (the explicit rejections of psiblast and tblastn `-in_pssm` where NCBI's object
   manager or format guess prints addresses, reads outside its data, overflows a signed integer or
-  depends on the machine's memory, rule 3, line RG item D3-1; Owner-delegated, standing
-  instruction 2026-09-29, restated 2026-10-07; no rule-1 exception: the Owner's questions of D3-1
-  stay open; written 2026-11-15, numbered after 1.36)
+  depends on the machine's memory, rule 3, and of well-formed BitMagic data, rule 2, line RG item
+  D3-1; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; no rule-1
+  exception: the Owner's questions of D3-1 stay open; written 2026-11-15, numbered after 1.36)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1027,7 +1027,7 @@ masked). Line NP item M4a-2c.
   on the machine's memory:
   - an empty location of a feature, graph, alignment, location set or Seq-table before NCBI's
     diagnostic stream fails: `Empty region in 0x...` (1204.1 to 1204.4, 1204.7, 1204.8,
-    `seq_annot_info.cpp:761, 825, 898`) prints a heap address;
+    `seq_annot_info.cpp:761, 825, 898, 971, 1057, 1138`) prints a heap address;
   - a Seq-table row without a Seq-id or a location: NCBI's `CCoreException` NULL-pointer report
     holds a stack of addresses;
   - two Seq-ids of one Seq-table row location that get different messages and that no gi,
@@ -1043,15 +1043,10 @@ masked). Line NP item M4a-2c.
   - a feature Seq-table of more than 10,000,000 rows, a Std-seg `dim` above 1,000,000: NCBI's
     allocations succeed or fail by the machine's memory (10,000,000 rows take NCBI 1.4 GB,
     100,000,000 rows end in `BLAST ran out of memory`);
-  - two `giim` Seq-ids of one number in one location after an earlier annotation, a Seq-table
-    column or a Std-seg looked that number up, or with `-subject`: NCBI's `giim` tree
-    (`seq_id_tree.cpp:2926-2964`) takes them for one Seq-id or two by the `giim` handles alive at
-    that moment, which LOSAT follows only within one annotation (a conservative refusal; the port
-    of those handles' lives stays open);
   - BitMagic data of a Seq-table that NCBI decodes (`bit-bvector` values, a `bit-set-bvector`'s
-    sparse index): NCBI decodes well-formed streams deterministically and reads past or crashes on
-    some malformed ones; refused until the Owner answers question Q-BM of D3-1 (port the decode or
-    keep refusing). A `bit-bvector`'s size, which NCBI reads without a decode, is NCBI's.
+    sparse index) in a stream that NCBI reads past or crashes on (well-formed data, which NCBI
+    decodes deterministically, is a rule-2 rejection below). A `bit-bvector`'s size, which NCBI
+    reads without a decode, is NCBI's.
 
   The `-in_pssm` file's format guess (NCBI's `CFormatGuess`, ported) is refused where one of its
   tests reads memory that the file does not decide: `TestFormatGvf`'s ninth column of a GVF line
@@ -1073,8 +1068,9 @@ masked). Line NP item M4a-2c.
   reader's format errors, number-range and member-tag reports, its `#` for a byte outside the
   visible ASCII range and the deprecated members of a `Variation-ref`; where the index's
   exception ends the run, each output format's bytes (tblastn's `-outfmt 11` error archive with
-  every message saved whole with its severity, psiblast's `-outfmt 10` and `20`), as with the
-  reader's errors (fixture rows `db.ps.inpssm.d3.*`, `db.tbn.inpssm.d3.*`, `db.ps.inpssm.fg.*`,
+  every message saved whole with its severity, psiblast's `-outfmt 10` and `20`), whatever the
+  PSSM's values that NCBI reads only later, and no PSSM file of `-out_pssm` and an empty file of
+  `-export_search_strategy`, as with the reader's errors (fixture rows `db.ps.inpssm.d3.*`, `db.tbn.inpssm.d3.*`, `db.ps.inpssm.fg.*`,
   `db.tbn.inpssm.fg.*`).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
@@ -1107,6 +1103,13 @@ would port:
 - Titles NCBI takes from the tax ids, where a report shows them (outfmt 0, a printed tabular id
   that replaces `lcl|Subject_N`): a title whose end `x_AdjustProteinTitleSuffix` rewrites (an
   empty title LOSAT makes from the tax id's name as NCBI does since line RG item T5).
+- psiblast and tblastn `-in_pssm` (version 1.37, line RG item D3-1, Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07): well-formed BitMagic data of a Seq-table of the
+  PSSM query's annotations that NCBI's object manager decodes (`bit-bvector` values, a
+  `bit-set-bvector`'s sparse index). NCBI's decode is deterministic; LOSAT refuses it ("a PSSM
+  query whose annot has ... is not supported") until the Owner answers question Q-BM of D3-1
+  (port the decode or keep refusing). Streams that NCBI reads past or crashes on are rule-3
+  rejections (above).
 
 ## Ported (rule 4)
 

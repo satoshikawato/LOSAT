@@ -7,16 +7,23 @@
   search goes on, as NCBI's), and so are the messages of a `Variation-ref`'s deprecated members. The members that
   LOSAT skipped are kept (line RG item D3-1).
   A query's `annot` (feature tables, alignments, graphs, locations, Seq-tables) is indexed as NCBI's object manager
-  indexes it: the PSSM is searched, with NCBI's messages and errors where NCBI writes them; the few cases whose
-  NCBI output names a memory address or depends on the machine are refused, each with its reason. The Seq-ids of
-  the annotations are one sequence where NCBI's Seq-id index takes them for one (accessions, names, local and
-  general ids and patent numbers in any letter case; versions and releases exactly; `giim` ids as NCBI's index of
-  them takes them), and their messages come in NCBI's order (by gi, accession and general id number). A Seq-table
+  indexes it: the PSSM is searched, with NCBI's messages and errors where NCBI writes them. Refused, each with its
+  reason: the cases whose NCBI output names a memory address, depends on the machine or reads outside NCBI's data,
+  well-formed BitMagic data of a Seq-table (until the Owner decides on its decode), and the annotation's text that
+  NCBI prints after its `Failed to parse location of` message. The Seq-ids of the annotations are one sequence
+  where NCBI's Seq-id index takes them for one (accessions, names, local and general ids and patent numbers in any
+  letter case; versions and releases exactly; `giim` ids by the `giim` handles alive in the run, across the
+  annotations), and their messages come in NCBI's order (by gi, accession and general id number). A Seq-table
   bit-bvector column whose size alone is read (an int-delta over it, an extra fuzz column) is no longer refused. A PSSM file that
   starts with a UTF-8 byte order mark gets NCBI's "Unrecognized format for PSSM". With tblastn `-outfmt 11`, a PSSM
   that NCBI cannot read (`Error: vector::reserve` too) or whose annotations stop NCBI's object manager gets NCBI's
   error archive, each of the reader's and the object manager's messages saved whole with its severity; such a stop
-  is no longer refused in tblastn's formats, in psiblast's `-outfmt 10` and `20` and for the query's titles. The
+  is no longer refused in tblastn's formats, in psiblast's `-outfmt 10` and `20`, for the query's titles, with
+  `-out_pssm` (no file written, an existing one left as it was) and `-export_search_strategy` (an empty file), and
+  for the PSSM's own values that NCBI reads after the stop (its sizes, scores, statistics, letters and ids). The
   library API's PSSM query (`Inputs::pssm`) ends as the command line's run: a PSSM file that NCBI ends without a word
   gives a call without an error, and an error after the object manager's `Failed to parse location of` message has
   the command line's text (its line feed).
+  Two library calls in one process (one after the other, at once on several threads, or two `run_batches`
+  iterators advanced in turn) each keep their own diagnostic stream: a call whose stream the object manager fails
+  no longer mutes another call's warnings and errors.

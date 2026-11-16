@@ -1443,6 +1443,22 @@ fn packed_base_at(packed: &[u8], pos: usize) -> u8 {
     (byte >> shift) & 0x03
 }
 
+/// No NCBI counterpart (bounds checks only): the `N` bytes of `packed` from `i` read as one
+/// big-endian number (`s[0] << 24 | s[1] << 16 | s[2] << 8 | s[3]` of the scans for `N` = 4,
+/// `s[0] << 16 | s[1] << 8 | s[2]` for 3), or `None` when they pass its end: one test of the
+/// length where indexing each byte tested it `N` times.
+#[inline(always)]
+fn x_be_bytes<const N: usize>(packed: &[u8], i: usize) -> Option<u32> {
+    let b = packed.get(i..)?.first_chunk::<N>()?;
+    Some(b.iter().fold(0u32, |v, &x| (v << 8) | x as u32))
+}
+
+/// `x_be_bytes` at an index that the scans keep as `i32` (`None` below 0).
+#[inline(always)]
+fn x_be_bytes_from<const N: usize>(packed: &[u8], i: i32) -> Option<u32> {
+    x_be_bytes::<N>(packed, usize::try_from(i).ok()?)
+}
+
 #[inline]
 fn packed_kmer_at(packed: &[u8], start: usize, k: usize) -> u64 {
     let mut kmer = 0u64;
@@ -1595,9 +1611,9 @@ fn scan_subject_kmers_range_mb_any<F>(
         let max_byte_idx = packed_len.saturating_sub(3);
         let end_byte_idx = (end / COMPRESSION_RATIO).min(max_byte_idx);
         while byte_idx <= end_byte_idx {
-            let idx = ((packed[byte_idx] as u32) << 16)
-                | ((packed[byte_idx + 1] as u32) << 8)
-                | (packed[byte_idx + 2] as u32);
+            let Some(idx) = x_be_bytes::<3>(packed, byte_idx) else {
+                break;
+            };
             let kmer = ((idx >> shift) as u64) & mask;
             if !on_kmer(byte_idx * COMPRESSION_RATIO, kmer) {
                 return;
@@ -1624,10 +1640,9 @@ fn scan_subject_kmers_range_mb_any<F>(
             while pos <= fast_end {
                 let byte_idx = pos / COMPRESSION_RATIO;
                 let shift = 2 * (16 - ((pos % COMPRESSION_RATIO) + lut_word_length));
-                let idx = ((packed[byte_idx] as u32) << 24)
-                    | ((packed[byte_idx + 1] as u32) << 16)
-                    | ((packed[byte_idx + 2] as u32) << 8)
-                    | (packed[byte_idx + 3] as u32);
+                let Some(idx) = x_be_bytes::<4>(packed, byte_idx) else {
+                    break;
+                };
                 let kmer = ((idx >> shift) as u64) & mask;
                 if !on_kmer(pos, kmer) {
                     return;
@@ -1651,9 +1666,9 @@ fn scan_subject_kmers_range_mb_any<F>(
         while pos <= fast_end {
             let byte_idx = pos / COMPRESSION_RATIO;
             let shift = 2 * (12 - ((pos % COMPRESSION_RATIO) + lut_word_length));
-            let idx = ((packed[byte_idx] as u32) << 16)
-                | ((packed[byte_idx + 1] as u32) << 8)
-                | (packed[byte_idx + 2] as u32);
+            let Some(idx) = x_be_bytes::<3>(packed, byte_idx) else {
+                break;
+            };
             let kmer = ((idx >> shift) as u64) & mask;
             if !on_kmer(pos, kmer) {
                 return;
@@ -1746,12 +1761,10 @@ fn scan_subject_kmers_range_mb_9_1<F>(
 
     while pos <= end {
         if !init_valid {
-            if byte_idx + 2 >= packed_len {
+            let Some(v) = x_be_bytes::<3>(packed, byte_idx) else {
                 break;
-            }
-            init_index = ((packed[byte_idx] as u32) << 16)
-                | ((packed[byte_idx + 1] as u32) << 8)
-                | (packed[byte_idx + 2] as u32);
+            };
+            init_index = v;
             init_valid = true;
         }
 
@@ -1864,12 +1877,10 @@ fn scan_subject_kmers_range_mb_9_2<F>(
 
     while pos <= end {
         if !init_valid {
-            if byte_idx + 2 >= packed_len {
+            let Some(v) = x_be_bytes::<3>(packed, byte_idx) else {
                 break;
-            }
-            init_index = ((packed[byte_idx] as u32) << 16)
-                | ((packed[byte_idx + 1] as u32) << 8)
-                | (packed[byte_idx + 2] as u32);
+            };
+            init_index = v;
             init_valid = true;
         }
 
@@ -1968,12 +1979,10 @@ fn scan_subject_kmers_range_mb_10_1<F>(
 
     while pos <= end {
         if !init_valid {
-            if byte_idx + 2 >= packed_len {
+            let Some(v) = x_be_bytes::<3>(packed, byte_idx) else {
                 break;
-            }
-            init_index = ((packed[byte_idx] as u32) << 16)
-                | ((packed[byte_idx + 1] as u32) << 8)
-                | (packed[byte_idx + 2] as u32);
+            };
+            init_index = v;
             init_valid = true;
         }
 
@@ -2003,10 +2012,9 @@ fn scan_subject_kmers_range_mb_10_1<F>(
                 state = 3;
             }
             _ => {
-                if byte_idx + 3 >= packed_len {
+                let Some(s3) = x_be_bytes::<1>(packed, byte_idx + 3) else {
                     break;
-                }
-                let s3 = packed[byte_idx + 3] as u32;
+                };
                 init_index = (init_index << 8) | s3;
                 let index = ((init_index >> 6) as u64) & mask;
                 if !on_kmer(pos, index) {
@@ -2091,12 +2099,10 @@ fn scan_subject_kmers_range_mb_10_2<F>(
 
     while pos <= end {
         if !init_valid {
-            if byte_idx + 2 >= packed_len {
+            let Some(v) = x_be_bytes::<3>(packed, byte_idx) else {
                 break;
-            }
-            init_index = ((packed[byte_idx] as u32) << 16)
-                | ((packed[byte_idx + 1] as u32) << 8)
-                | (packed[byte_idx + 2] as u32);
+            };
+            init_index = v;
             init_valid = true;
         }
 
@@ -2251,15 +2257,10 @@ fn scan_subject_kmers_range_mb_10_3<F>(
     while pos <= end {
         match state {
             0 => {
-                if byte_idx < 0 || byte_idx + 2 >= packed_len_i32 {
+                let Some(v) = x_be_bytes_from::<3>(packed, byte_idx) else {
                     break;
-                }
-                let idx0 = byte_idx as usize;
-                let idx1 = (byte_idx + 1) as usize;
-                let idx2 = (byte_idx + 2) as usize;
-                init_index = ((packed[idx0] as u32) << 16)
-                    | ((packed[idx1] as u32) << 8)
-                    | (packed[idx2] as u32);
+                };
+                init_index = v;
                 let index = ((init_index >> 4) as u64) & mask;
                 if !on_kmer(pos, index) {
                     return;
@@ -2268,11 +2269,10 @@ fn scan_subject_kmers_range_mb_10_3<F>(
                 state = 1;
             }
             1 => {
-                let idx3 = byte_idx + 3;
-                if idx3 < 0 || idx3 >= packed_len_i32 {
+                let Some(b) = x_be_bytes_from::<1>(packed, byte_idx + 3) else {
                     break;
-                }
-                init_index = (init_index << 8) | (packed[idx3 as usize] as u32);
+                };
+                init_index = (init_index << 8) | b;
                 let index = ((init_index >> 6) as u64) & mask;
                 if !on_kmer(pos, index) {
                     return;
@@ -2289,11 +2289,10 @@ fn scan_subject_kmers_range_mb_10_3<F>(
                 state = 3;
             }
             _ => {
-                let idx4 = byte_idx + 4;
-                if idx4 < 0 || idx4 >= packed_len_i32 {
+                let Some(b) = x_be_bytes_from::<1>(packed, byte_idx + 4) else {
                     break;
-                }
-                init_index = (init_index << 8) | (packed[idx4 as usize] as u32);
+                };
+                init_index = (init_index << 8) | b;
                 let index = ((init_index >> 2) as u64) & mask;
                 if !on_kmer(pos, index) {
                     return;
@@ -2386,12 +2385,9 @@ fn scan_subject_kmers_range_mb_11_1mod4<F>(
     while pos <= end {
         match state {
             0 => {
-                if byte_idx + 2 >= packed_len {
+                let Some(idx) = x_be_bytes::<3>(packed, byte_idx) else {
                     break;
-                }
-                let idx = ((packed[byte_idx] as u32) << 16)
-                    | ((packed[byte_idx + 1] as u32) << 8)
-                    | (packed[byte_idx + 2] as u32);
+                };
                 let index = ((idx >> 2) as u64) & mask;
                 if !on_kmer(pos, index) {
                     return;
@@ -2401,12 +2397,9 @@ fn scan_subject_kmers_range_mb_11_1mod4<F>(
                 state = 1;
             }
             1 => {
-                if byte_idx + 2 >= packed_len {
+                let Some(idx) = x_be_bytes::<3>(packed, byte_idx) else {
                     break;
-                }
-                let idx = ((packed[byte_idx] as u32) << 16)
-                    | ((packed[byte_idx + 1] as u32) << 8)
-                    | (packed[byte_idx + 2] as u32);
+                };
                 let index = (idx as u64) & mask;
                 if !on_kmer(pos, index) {
                     return;
@@ -2416,13 +2409,9 @@ fn scan_subject_kmers_range_mb_11_1mod4<F>(
                 state = 2;
             }
             2 => {
-                if byte_idx + 3 >= packed_len {
+                let Some(idx) = x_be_bytes::<4>(packed, byte_idx) else {
                     break;
-                }
-                let idx = ((packed[byte_idx] as u32) << 24)
-                    | ((packed[byte_idx + 1] as u32) << 16)
-                    | ((packed[byte_idx + 2] as u32) << 8)
-                    | (packed[byte_idx + 3] as u32);
+                };
                 let index = ((idx >> 6) as u64) & mask;
                 if !on_kmer(pos, index) {
                     return;
@@ -2432,13 +2421,9 @@ fn scan_subject_kmers_range_mb_11_1mod4<F>(
                 state = 3;
             }
             _ => {
-                if byte_idx + 3 >= packed_len {
+                let Some(idx) = x_be_bytes::<4>(packed, byte_idx) else {
                     break;
-                }
-                let idx = ((packed[byte_idx] as u32) << 24)
-                    | ((packed[byte_idx + 1] as u32) << 16)
-                    | ((packed[byte_idx + 2] as u32) << 8)
-                    | (packed[byte_idx + 3] as u32);
+                };
                 let index = ((idx >> 4) as u64) & mask;
                 if !on_kmer(pos, index) {
                     return;
@@ -2527,12 +2512,9 @@ fn scan_subject_kmers_range_mb_11_2mod4<F>(
 
     while pos <= end {
         if !use_bottom {
-            if byte_idx + 2 >= packed_len {
+            let Some(idx) = x_be_bytes::<3>(packed, byte_idx) else {
                 break;
-            }
-            let idx = ((packed[byte_idx] as u32) << 16)
-                | ((packed[byte_idx + 1] as u32) << 8)
-                | (packed[byte_idx + 2] as u32);
+            };
             let index = ((idx >> top_shift) as u64) & mask;
             if !on_kmer(pos, index) {
                 return;
@@ -2541,13 +2523,9 @@ fn scan_subject_kmers_range_mb_11_2mod4<F>(
             byte_idx = byte_idx.saturating_add(scan_step_byte);
             use_bottom = true;
         } else {
-            if byte_idx + 3 >= packed_len {
+            let Some(idx) = x_be_bytes::<4>(packed, byte_idx) else {
                 break;
-            }
-            let idx = ((packed[byte_idx] as u32) << 24)
-                | ((packed[byte_idx + 1] as u32) << 16)
-                | ((packed[byte_idx + 2] as u32) << 8)
-                | (packed[byte_idx + 3] as u32);
+            };
             let index = ((idx >> bottom_shift) as u64) & mask;
             if !on_kmer(pos, index) {
                 return;
@@ -2635,7 +2613,6 @@ fn scan_subject_kmers_range_mb_11_3mod4<F>(
     }
 
     let mask = (1u64 << (2 * LUT_WORD_LENGTH)) - 1;
-    let packed_len_i32 = packed_len as i32;
     let scan_step_byte = scan_step / COMPRESSION_RATIO;
     let mut pos = start;
     let mut byte_idx = (pos / COMPRESSION_RATIO) as i32;
@@ -2655,15 +2632,10 @@ fn scan_subject_kmers_range_mb_11_3mod4<F>(
     while pos <= end {
         match state {
             0 => {
-                if byte_idx < 0 || byte_idx + 2 >= packed_len_i32 {
+                let Some(v) = x_be_bytes_from::<3>(packed, byte_idx) else {
                     break;
-                }
-                let idx0 = byte_idx as usize;
-                let idx1 = (byte_idx + 1) as usize;
-                let idx2 = (byte_idx + 2) as usize;
-                let idx = ((packed[idx0] as u32) << 16)
-                    | ((packed[idx1] as u32) << 8)
-                    | (packed[idx2] as u32);
+                };
+                let idx = v;
                 let index = ((idx >> 2) as u64) & mask;
                 if !on_kmer(pos, index) {
                     return;
@@ -2673,18 +2645,9 @@ fn scan_subject_kmers_range_mb_11_3mod4<F>(
                 state = 1;
             }
             1 => {
-                let idx3 = byte_idx + 3;
-                if idx3 < 0 || idx3 >= packed_len_i32 {
+                let Some(idx) = x_be_bytes_from::<4>(packed, byte_idx) else {
                     break;
-                }
-                let idx0 = byte_idx as usize;
-                let idx1 = (byte_idx + 1) as usize;
-                let idx2 = (byte_idx + 2) as usize;
-                let idx3u = idx3 as usize;
-                let idx = ((packed[idx0] as u32) << 24)
-                    | ((packed[idx1] as u32) << 16)
-                    | ((packed[idx2] as u32) << 8)
-                    | (packed[idx3u] as u32);
+                };
                 let index = ((idx >> 4) as u64) & mask;
                 if !on_kmer(pos, index) {
                     return;
@@ -2694,18 +2657,9 @@ fn scan_subject_kmers_range_mb_11_3mod4<F>(
                 state = 2;
             }
             2 => {
-                let idx4 = byte_idx + 4;
-                if idx4 < 0 || idx4 >= packed_len_i32 {
+                let Some(idx) = x_be_bytes_from::<4>(packed, byte_idx + 1) else {
                     break;
-                }
-                let idx1 = (byte_idx + 1) as usize;
-                let idx2 = (byte_idx + 2) as usize;
-                let idx3 = (byte_idx + 3) as usize;
-                let idx4u = idx4 as usize;
-                let idx = ((packed[idx1] as u32) << 24)
-                    | ((packed[idx2] as u32) << 16)
-                    | ((packed[idx3] as u32) << 8)
-                    | (packed[idx4u] as u32);
+                };
                 let index = ((idx >> 6) as u64) & mask;
                 if !on_kmer(pos, index) {
                     return;
@@ -2715,16 +2669,9 @@ fn scan_subject_kmers_range_mb_11_3mod4<F>(
                 state = 3;
             }
             _ => {
-                let idx4 = byte_idx + 4;
-                if idx4 < 0 || idx4 >= packed_len_i32 {
+                let Some(idx) = x_be_bytes_from::<3>(packed, byte_idx + 2) else {
                     break;
-                }
-                let idx2 = (byte_idx + 2) as usize;
-                let idx3 = (byte_idx + 3) as usize;
-                let idx4u = idx4 as usize;
-                let idx = ((packed[idx2] as u32) << 16)
-                    | ((packed[idx3] as u32) << 8)
-                    | (packed[idx4u] as u32);
+                };
                 let index = (idx as u64) & mask;
                 if !on_kmer(pos, index) {
                     return;
@@ -13391,6 +13338,137 @@ fn merge_prelim_hit_list(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // No NCBI counterpart (a check of the scans' reads): every megablast scan
+    // (`scan_subject_kmers_range_mb_*`, which read their three or four bytes with one test of the
+    // length, `x_be_bytes`) gives, for random packed subjects (with and without a byte past the
+    // last base) and ranges from every offset modulo 4, the words at `start`, `start + scan_step`,
+    // ... up to `end`, each the word `packed_kmer_at` reads there; the scan of any stride also for
+    // a masked subject (no aligned read), and its aligned read from aligned starts. The stride-2
+    // scans of 9 and 10 bases take even starts only (NCBI's s_MBScanSubject_9_2 and _10_2 enter at
+    // an offset of 0 or 2 modulo 4, blast_nascan.c:1733, 1863).
+    #[test]
+    fn the_megablast_scans_give_the_word_at_each_step_of_their_range() {
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed as usize
+        };
+        macro_rules! got {
+            ($scan:expr) => {{
+                let mut got = Vec::new();
+                $scan(&mut |pos: usize, kmer: u64| {
+                    got.push((pos, kmer));
+                    true
+                });
+                got
+            }};
+        }
+        let mut checked = 0usize;
+        for round in 0..4000 {
+            let len = 12 + next() % 150;
+            let packed: Vec<u8> = (0..len.div_ceil(COMPRESSION_RATIO) + round % 2)
+                .map(|_| next() as u8)
+                .collect();
+            let p = packed.as_slice();
+            // `m`: the starts a scan takes are multiples of `m` (NCBI's stride-2 scans of 9 and 10
+            // bases start on an even offset, its aligned read on a byte).
+            let range = |lut: usize, m: usize, next: &mut dyn FnMut() -> usize| {
+                let last = len - lut;
+                let mut start = next() % (last + 1);
+                start -= start % m;
+                (start, start + next() % (last - start + 1))
+            };
+            let want =
+                |lut: usize, step: usize, (start, end): (usize, usize)| -> Vec<(usize, u64)> {
+                    (start..=end)
+                        .step_by(step)
+                        .map(|pos| (pos, packed_kmer_at(p, pos, lut)))
+                        .collect()
+                };
+            type Scan = fn(&[u8], usize, usize, usize, usize, &mut dyn FnMut(usize, u64) -> bool);
+            let fixed: [(usize, usize, Scan); 9] = [
+                (9, 1, |p, l, s, a, b, f| {
+                    scan_subject_kmers_range_mb_9_1(p, l, s, a, b, &mut |x, y| f(x, y))
+                }),
+                (9, 2, |p, l, s, a, b, f| {
+                    scan_subject_kmers_range_mb_9_2(p, l, s, a, b, &mut |x, y| f(x, y))
+                }),
+                (10, 1, |p, l, s, a, b, f| {
+                    scan_subject_kmers_range_mb_10_1(p, l, s, a, b, &mut |x, y| f(x, y))
+                }),
+                (10, 2, |p, l, s, a, b, f| {
+                    scan_subject_kmers_range_mb_10_2(p, l, s, a, b, &mut |x, y| f(x, y))
+                }),
+                (10, 3, |p, l, s, a, b, f| {
+                    scan_subject_kmers_range_mb_10_3(p, l, s, a, b, &mut |x, y| f(x, y))
+                }),
+                (11, 1, |p, l, s, a, b, f| {
+                    scan_subject_kmers_range_mb_11_1mod4(p, l, s, a, b, &mut |x, y| f(x, y))
+                }),
+                (11, 2, |p, l, s, a, b, f| {
+                    scan_subject_kmers_range_mb_11_2mod4(p, l, s, a, b, &mut |x, y| f(x, y))
+                }),
+                (11, 3, |p, l, s, a, b, f| {
+                    scan_subject_kmers_range_mb_11_3mod4(p, l, s, a, b, &mut |x, y| f(x, y))
+                }),
+                (11, 1, |p, l, s, a, b, f| {
+                    scan_subject_kmers_range_mb_11_1mod4(p, l, s, a, b, &mut |x, y| f(x, y))
+                }),
+            ];
+            for (i, &(lut, base_step, scan)) in fixed.iter().enumerate() {
+                // The 11-base scans take any stride of their class modulo 4 (the last row: 17).
+                let step = if lut == 11 {
+                    base_step + 4 * (next() % 5)
+                } else {
+                    base_step
+                };
+                let step = if i == 8 { 17 } else { step };
+                let r = range(
+                    lut,
+                    if base_step == 2 && lut < 11 { 2 } else { 1 },
+                    &mut next,
+                );
+                let got =
+                    got!(|f: &mut dyn FnMut(usize, u64) -> bool| scan(p, len, step, r.0, r.1, f));
+                assert_eq!(
+                    got,
+                    want(lut, step, r),
+                    "lut {lut} step {step} range {r:?} len {len}"
+                );
+                checked += got.len();
+            }
+            for lut in 9..=12 {
+                for step in [1 + next() % 24, 4 * (1 + next() % 6)] {
+                    for masked in [false, true] {
+                        let aligned = step % COMPRESSION_RATIO == 0 && !masked;
+                        let r = range(lut, if aligned { COMPRESSION_RATIO } else { 1 }, &mut next);
+                        let got = got!(|f: &mut dyn FnMut(usize, u64) -> bool| {
+                            scan_subject_kmers_range_mb_any(
+                                p,
+                                len,
+                                lut,
+                                step,
+                                masked,
+                                r.0,
+                                r.1,
+                                &mut |x, y| f(x, y),
+                            )
+                        });
+                        assert_eq!(
+                            got,
+                            want(lut, step, r),
+                            "any: lut {lut} step {step} masked {masked} range {r:?} len {len}"
+                        );
+                        checked += got.len();
+                    }
+                }
+            }
+        }
+        assert!(checked > 400_000, "{checked} words");
+    }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1647-1668 (quoted at
     // `scan_subject_kmers_with_ranges`); SURVEY §10 of M4a-2, review 1 T3 of M4a-2a. With

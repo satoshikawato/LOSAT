@@ -2423,8 +2423,10 @@ impl<M: TbxScore> XPairPar<M> {
         // one table, with the search's failure. Else the units' refusal is the search's.
         if passed.load(AtomicOrdering::Relaxed) && self.x_group_count() > 1 {
             self.x_units_in_order(&units, inp_all, &mut outputs);
-        } else if let Some(error) = failure.take() {
-            inp_all.failure.fail(inp_all.s_idx, error);
+        } else if failure.failed() {
+            if let Some(error) = failure.take() {
+                inp_all.failure.fail(inp_all.s_idx, error);
+            }
         }
         add_ns(&NS_UNITS, t_units);
         XSubjectUnits {

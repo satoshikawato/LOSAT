@@ -338,6 +338,11 @@ impl XReadFailure {
         }
     }
 
+    /// Whether a read failed (without the lock of `take`).
+    pub(crate) fn failed(&self) -> bool {
+        self.first.load(Ordering::Relaxed) != usize::MAX
+    }
+
     /// The error of the failed read kept, if any, taken.
     pub(crate) fn take(&self) -> Option<anyhow::Error> {
         let mut failed = self.failed.lock().unwrap_or_else(|e| e.into_inner());

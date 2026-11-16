@@ -4746,6 +4746,20 @@ impl Drop for XEndBatch<'_> {
     }
 }
 
+/// What the rest of `process_subject` reads of the statistics after a subject's length check: the
+/// hit-saving cutoffs (`cutoff_scores`, their minimum, the word finder's `WordFinderCx`) and the
+/// effective lengths of each context, the batch's (`context_cutoffs::context_cutoffs`, made once
+/// per batch) or, where NCBI computes the statistics of each subject, the subject's own
+/// (`context_cutoffs::subject_cutoffs`). One pointer per subject, so that the default path reads
+/// the batch's as it did before the statistics of each subject.
+struct SubjectStatistics<'a> {
+    cutoff_scores: &'a [i32],
+    cutoff_score_min: i32,
+    length_adj_per_context: &'a [i64],
+    eff_searchsp_per_context: &'a [i64],
+    word_finder_cx: word_finder::WordFinderCx<'a>,
+}
+
 /// Searches one query batch against the subjects and returns its hits and query statistics: the
 /// set-up of the batch (the flags, the queries' frames, the lookup table: `batch_setup.rs`; the
 /// diagonal table, the offset arrays and the seed release: `seed_tables.rs`; the cutoffs, length
@@ -4763,20 +4777,6 @@ impl Drop for XEndBatch<'_> {
 /// c++/src/algo/blast/core/lookup_wrap.c:61-195 (`LookupTableWrapInit_MT`),
 /// c++/src/algo/blast/core/blast_parameters.c:279-419 (`BlastInitialWordParametersUpdate`) and
 /// c++/src/algo/blast/core/blast_setup.c:699-850 (`BLAST_CalcEffLengths`).
-/// What the rest of `process_subject` reads of the statistics after a subject's length check: the
-/// hit-saving cutoffs (`cutoff_scores`, their minimum, the word finder's `WordFinderCx`) and the
-/// effective lengths of each context, the batch's (`context_cutoffs::context_cutoffs`, made once
-/// per batch) or, where NCBI computes the statistics of each subject, the subject's own
-/// (`context_cutoffs::subject_cutoffs`). One pointer per subject, so that the default path reads
-/// the batch's as it did before the statistics of each subject.
-struct SubjectStatistics<'a> {
-    cutoff_scores: &'a [i32],
-    cutoff_score_min: i32,
-    length_adj_per_context: &'a [i64],
-    eff_searchsp_per_context: &'a [i64],
-    word_finder_cx: word_finder::WordFinderCx<'a>,
-}
-
 fn search_query_batch<S: TbxScore>(
     // The scores of the search's matrix (`scoring.rs`).
     sc: S,

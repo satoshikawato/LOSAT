@@ -1471,8 +1471,8 @@ impl PreliminarySink for Runtime<'_> {
         }
         Ok(())
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443 (quoted at
-    // `search::compute_own_subject`): where NCBI computes the statistics of each subject (the
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443 (quoted above
+    // `search::search_preliminary`): where NCBI computes the statistics of each subject (the
     // batch's `subject_option_spaces`), the e-values of a subject's HSPs read the subject's own
     // parameters, the ones `search::compute_own_subject` searched it with (`parameters::
     // subject_update` of the same chunk, options' spaces and length); a subject without HSPs

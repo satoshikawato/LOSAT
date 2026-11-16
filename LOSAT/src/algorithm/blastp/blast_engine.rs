@@ -38,12 +38,8 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range;
 use crate::common::{GapEditOp, Hit};
 use crate::config::ScoringMatrix;
-use crate::core::composition_adjustment::adjust_scores::{
-    build_matrix_info, BlastCompositionWorkspace,
-};
-use crate::core::composition_adjustment::redo_alignment::{
-    BlastCompoAdjustMode, BlastCompoGappingParams,
-};
+use crate::core::composition_adjustment::adjust_scores::BlastCompositionWorkspace;
+use crate::core::composition_adjustment::redo_alignment::BlastCompoAdjustMode;
 use crate::report::{
     write_blastp_pairwise_report, write_blastp_pairwise_window, BlastpPairwiseQuery,
     BlastpPairwiseReport, OutputConfig, OutputFormat, PairwiseConfig, PairwiseHit, ReportContext,
@@ -54,7 +50,7 @@ use crate::stats::{
     blast_spouge_etos, blast_spouge_stoe, lookup_protein_gumbel_params, lookup_protein_params,
     lookup_protein_params_ungapped, BlastGumbelBlk, KarlinParams,
 };
-use crate::utils::matrix::{standard_score, BLASTAA_SIZE};
+use crate::utils::matrix::standard_score;
 
 mod culling;
 mod database;
@@ -76,7 +72,7 @@ mod x_subject_runs;
 pub(super) mod x_subject_meta;
 // `-comp_based_stats 0`: NCBI's ordinary traceback in place of the composition-based redo.
 mod traceback;
-// The composition-based redo's parameters of each query and its parallel paths (`run_call`).
+// The composition-based redo: its parameters of each query, its plan and its paths (`run_call`).
 mod redo_run;
 // psiblast `-in_pssm` (series PS, item PS4a): the stages of a PSSM search, reached through the
 // `psi_search` hooks of `run_resolved_in_pool`.
@@ -119,25 +115,16 @@ use super::gapalign::{
     BlastpGappedAlignmentMode, BlastpPreliminaryHsp, GapAlignScratch,
 };
 use super::hsp::{
-    blast_compo_early_termination, collect_hits_and_methods_from_hit_lists,
-    fill_results_from_compo_heaps, hit_list_to_seqalign_order, reap_hsplist_by_evalue,
-    trim_by_max_hsps, update_best_evalue, BlastCompoHeap, BlastpHitList, BlastpHsp, BlastpHspList,
+    collect_hits_and_methods_from_hit_lists, fill_results_from_compo_heaps,
+    hit_list_to_seqalign_order, reap_hsplist_by_evalue, trim_by_max_hsps, update_best_evalue,
+    BlastCompoHeap, BlastpHitList, BlastpHsp, BlastpHspList,
 };
-#[cfg(all(
-    feature = "parallel",
-    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-))]
-use super::kappa::BlastpPostprocessResult;
 use super::kappa::{
     blastp_kappa_range_counters_env_enabled, blastp_trace_hsp_target, blastp_trace_matches_pair,
-    build_query_workspace, postprocess_preliminary_hits, print_blastp_kappa_range_counters,
-    reset_blastp_kappa_range_counters, x_newton_lanes_prefetch_matches, BlastRedoAlignParams,
-    BlastpKappaSubjectRangeCache, BlastpTraceHspTarget,
+    print_blastp_kappa_range_counters, reset_blastp_kappa_range_counters, BlastpTraceHspTarget,
 };
 use super::protein_query_split::protein_query_split_sizes;
-use super::x_prelim_compact::{
-    x_expand_hit_list, x_expanded_lists, x_finish_compact_lists, XPrelimHsp,
-};
+use super::x_prelim_compact::{x_expanded_lists, x_finish_compact_lists, XPrelimHsp};
 use crate::core::blast_hits::reap_by_query_coverage;
 // No NCBI counterpart: matches per Newton lanes prefetch in the BLASTP redo loops; it does not
 // change any value NCBI computes.
@@ -12743,7 +12730,7 @@ fn run_call(
     }
     // The redo reads lists of full HSPs. With more than one thread its parallel paths read the
     // lists of all queries, so all are expanded here (but for the windows of the redo below); the
-    // one-thread loop below expands each query's list when it reaches it.
+    // one-thread loop (`redo_run::one_thread_redo`) expands each query's list when it reaches it.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -12756,7 +12743,7 @@ fn run_call(
     let x_compact_expand_all = false;
     // Where the redo in windows (LOSAT_X_BPREDOPAR) may run,
     // its windows expand the compact lists as they reach them (`x_redo_par.rs`); where it does not
-    // run, every list is expanded below before the other paths.
+    // run, every list is expanded in `redo_run::plan_redo_and_expand_lists` before the other paths.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -12859,251 +12846,11 @@ fn run_call(
     };
     let build_redo_align_params = |q_idx: usize| redo_params.build(q_idx);
 
-    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-260,274-276
-    // ```c++
-    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-    // 	    BLAST_PROF_START( APP.LOOP.PRE );
-    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-    // ...
-    //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-    //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-    //                 results = lcl_blast.Run();
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3013,3119-3128
-    // ```c
-    //     int numQueries = queryInfo->num_queries;
-    // ...
-    //     redoneMatches = calloc(numQueries, sizeof(BlastCompo_Heap));
-    //     if (redoneMatches == NULL) {
-    //         status_code = -1;
-    //         goto function_cleanup;
-    //     }
-    //     for (query_index = 0;  query_index < numQueries;  query_index++) {
-    //         status_code =
-    //             BlastCompo_HeapInitialize(&redoneMatches[query_index],
-    //                                       hitParams->options->hitlist_size,
-    //                                       inclusion_ethresh);
-    // ```
-    // NCBI searches one query batch at a time, so the heaps that the redo of a query reads
-    // (BlastCompo_EarlyTermination) are those of the queries of its batch. `redone_matches`
-    // holds the heaps of all batches; this is each query's batch as a range of it. A query
-    // outside every batch is not searched and stands alone.
-    let mut kappa_query_batches: Vec<std::ops::Range<usize>> =
-        (0..query_ids.len()).map(|q_idx| q_idx..q_idx + 1).collect();
-    for batch in &query_batches {
-        for q_idx in batch.searched.clone() {
-            if let Some(range) = kappa_query_batches.get_mut(q_idx) {
-                *range = batch.searched.clone();
-            }
-        }
-    }
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    let kappa_parallel_query_indices: Vec<usize> = (0..preliminary_hit_lists.len())
-        .filter(|&q_idx| {
-            x_prelim_hsplist_count(&preliminary_hit_lists, &x_compact_hit_lists, q_idx) > 0
-        })
-        .collect();
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    let use_parallel_kappa_redo = {
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3429-3449
-        // ```c
-        // #pragma omp parallel ... num_threads(actual_num_threads)
-        // #pragma omp for schedule(static)
-        // for (b = 0; b < numMatches; ++b) {
-        // ```
-        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:405-409,417-418
-        // ```c
-        // BlastCompo_HeapFilledToCutoff(const BlastCompo_Heap * self)
-        // {
-        //     return self->n >= self->heapThreshold &&
-        //         self->worstEvalue <= self->ecutoff;
-        // }
-        // ...
-        //     self->n             = 0;
-        //     self->heapThreshold = heapThreshold;
-        // ```
-        // The query-parallel redo below relies on a heap that no match has reached not being
-        // filled to its cutoff (hitlist_size >= 1); otherwise the one-thread loop is used.
-        kappa_parallel_query_indices.len() > 1
-            && !BlastCompoHeap::new(args.traceback_hitlist_size(), args.inclusion_ethresh)
-                .filled_to_cutoff()
-            && blastp_should_parallelize_stage(
-                "kappa-query-redo",
-                args.num_threads,
-                blastp_num_threads,
-                subjects.len(),
-                kappa_parallel_query_indices.len(),
-                total_db_len,
-            )
-    };
-    #[cfg(any(
-        not(feature = "parallel"),
-        all(target_arch = "wasm32", not(feature = "wasm-threads"))
-    ))]
-    let use_parallel_kappa_redo = false;
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    let kappa_match_parallel_query_index = {
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3429-3449
-        // ```c
-        // #pragma omp parallel ... num_threads(actual_num_threads)
-        // #pragma omp for schedule(static)
-        // for (b = 0; b < numMatches; ++b) {
-        // ```
-        if use_parallel_kappa_redo || kappa_parallel_query_indices.len() != 1 {
-            None
-        } else {
-            let q_idx = kappa_parallel_query_indices[0];
-            let match_jobs =
-                x_prelim_hsplist_count(&preliminary_hit_lists, &x_compact_hit_lists, q_idx);
-            if blastp_should_parallelize_stage(
-                "kappa-match-redo",
-                args.num_threads,
-                blastp_num_threads,
-                subjects.len(),
-                match_jobs,
-                total_db_len,
-            ) {
-                Some(q_idx)
-            } else {
-                None
-            }
-        }
-    };
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    let use_parallel_kappa_match_redo = kappa_match_parallel_query_index.is_some();
-    #[cfg(any(
-        not(feature = "parallel"),
-        all(target_arch = "wasm32", not(feature = "wasm-threads"))
-    ))]
-    let use_parallel_kappa_match_redo = false;
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3398-3399,3447-3449
-    // ```c
-    //         while (BlastHSPStreamRead(hsp_stream, &localMatch)
-    //                 != kBlastHSPStream_Eof) {
-    // ...
-    //         int b;
-    // #pragma omp for schedule(static)
-    //         for (b = 0; b < numMatches; ++b) {
-    // ```
-    // EXPERIMENT (LOSAT_X_BPREDOPAR, a strict-set switch): NCBI splits one loop over the matches
-    // of all queries between its threads. With the switch, more than one thread and at least two
-    // matches, the matches run on the pool in jobs of up to four matches of one query, and the
-    // early termination test, the heap insertions and the error that ends the redo are replayed
-    // in the order of the one-thread loop below; it replaces both parallel paths
-    // (`x_redo_par.rs`).
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    let x_redo_par_search = super::x_redo_par::XRedoParSearch {
-        pool: blastp_parallel_pool,
-        threads: blastp_num_threads,
-        contexts: &contexts,
-        query_nomask: query_nomask_sequence,
-        search_spaces: &search_spaces,
-        subjects,
-        query_batches: &kappa_query_batches,
-        matrix: args.scoring.matrix,
-        gapped_params: &gapped_params,
-        gapped_gumbel: gapped_gumbel.as_ref(),
-        evalue: args.evalue,
-        build_redo_align_params: &build_redo_align_params,
-        timing: timing_enabled,
-        engine_positives: needs.seqalign,
-    };
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    let x_redo_par_switch = super::x_redo_par::x_bp_redo_par();
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    let x_redo_par_on = x_redo_par_switch
-        && blastp_should_parallelize_stage(
-            "kappa-redo-par",
-            args.num_threads,
-            blastp_num_threads,
-            subjects.len(),
-            // The compact lists count while not expanded.
-            super::x_redo_par::x_matches(
-                &preliminary_hit_lists,
-                if x_win_expand {
-                    &x_compact_hit_lists
-                } else {
-                    &[]
-                },
-            ),
-            total_db_len,
-        );
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    if x_redo_par_switch && !ordinary_traceback {
-        crate::utils::xreach::x_reach!("LOSAT_X_BPREDOPAR", x_redo_par_on);
-    }
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    let x_redo_par_run = x_redo_par_on;
-    #[cfg(any(
-        not(feature = "parallel"),
-        all(target_arch = "wasm32", not(feature = "wasm-threads"))
-    ))]
-    let x_redo_par_run = false;
-    // The other paths read the expanded lists of all queries.
-    if x_win_expand && !x_redo_par_run {
-        x_finish_compact_lists(&mut preliminary_hit_lists, &mut x_compact_hit_lists);
-    }
-
-    // Graduated 2026-10-22 (was `LOSAT_X_SEGSHARE`): the query-parallel redo and the windows of
-    // `x_redo_par` share the masked ranges; the match-parallel redo shares none, and the
-    // one-thread loop shares none.
-    // The serial and the query-parallel redo loops solve the first Newton problems of the next
-    // `X_NEWTON_LANES_MATCHES` matches ahead (Newton lanes); the match-parallel redo solves none.
-    // With `-comp_based_stats 0` no redo runs, so neither side is reached.
-    if !ordinary_traceback {
-        crate::utils::xreach::x_reach!(
-            "LOSAT_X_SEGSHARE",
-            x_redo_par_run || (!use_parallel_kappa_match_redo && use_parallel_kappa_redo)
-        );
-        crate::utils::xreach::x_reach!(
-            "LOSAT_X_NEWTONLANES",
-            x_redo_par_run || !use_parallel_kappa_match_redo
-        );
-    }
-    // EXPERIMENT (LOSAT_X_BPSEGWIN): a redo not in windows empties no store; the windows record
-    // their side (`x_redo_par::x_redo`).
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    if super::kappa::x_bp_seg_win().is_some() && !x_redo_par_on && !ordinary_traceback {
-        crate::utils::xreach::x_reach!("LOSAT_X_BPSEGWIN", false);
-    }
-    // What the redo's parallel paths below read (`redo_run::ParallelRedo`).
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    let redo = redo_run::ParallelRedo {
+    // Each query's batch (`redo_run::kappa_query_batches`): the heaps that its redo's early
+    // termination test reads.
+    let kappa_query_batches = redo_run::kappa_query_batches(query_ids.len(), &query_batches);
+    // What the redo's plan and its paths read (`redo_run::RedoInputs`).
+    let redo = redo_run::RedoInputs {
         args: &args,
         blastp_parallel_pool,
         needs,
@@ -13113,251 +12860,72 @@ fn run_call(
         gapped_params: &gapped_params,
         gapped_gumbel: &gapped_gumbel,
         kappa_query_batches: &kappa_query_batches,
-        kappa_parallel_query_indices: &kappa_parallel_query_indices,
-        kappa_match_parallel_query_index,
-        x_redo_par_search: &x_redo_par_search,
         build_redo_align_params: &build_redo_align_params,
         x_win_expand,
-    };
-    if x_redo_par_run {
+        ordinary_traceback,
         #[cfg(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
-        redo_run::x_windows_redo(
+        blastp_num_threads,
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        total_db_len,
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        timing_enabled,
+    };
+    // The plan chooses the redo's path (`redo_run::RedoPath`) and expands the compact lists that
+    // the path reads expanded; the path redoes the matches.
+    match redo_run::plan_redo_and_expand_lists(
+        &redo,
+        &mut preliminary_hit_lists,
+        &mut x_compact_hit_lists,
+    ) {
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        redo_run::RedoPath::Windows => redo_run::x_windows_redo(
             &redo,
             &mut preliminary_hit_lists,
             &mut x_compact_hit_lists,
             &mut redone_matches,
             &mut x_prelim_freed,
-        )?;
-    } else if use_parallel_kappa_match_redo {
+        )?,
         #[cfg(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
-        redo_run::match_parallel_redo(&redo, &preliminary_hit_lists, &mut redone_matches)?;
-    } else if use_parallel_kappa_redo {
+        redo_run::RedoPath::MatchParallel(q_idx) => redo_run::match_parallel_redo(
+            &redo,
+            q_idx,
+            &preliminary_hit_lists,
+            &mut redone_matches,
+        )?,
         #[cfg(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
-        redo_run::query_parallel_redo(&redo, &preliminary_hit_lists, &mut redone_matches)?;
-    } else {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3329-3334
-        // ```c
-        // if ((int) compo_adjust_mode > 1 && !positionBased) {
-        //     NRrecord_tld[i] = Blast_CompositionWorkspaceNew();
-        //     status_code = Blast_CompositionWorkspaceInit(...);
-        // }
-        // ```
-        let mut composition_workspace = BlastCompositionWorkspace::new_blosum62();
-        if args.scoring.matrix != ScoringMatrix::Blosum62 {
-            blastp_use_matrix_workspace(&mut composition_workspace, args.scoring.matrix);
+        redo_run::RedoPath::QueryParallel(kappa_parallel_query_indices) => {
+            redo_run::query_parallel_redo(
+                &redo,
+                &kappa_parallel_query_indices,
+                &preliminary_hit_lists,
+                &mut redone_matches,
+            )?
         }
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3656-3667
-        // ```c
-        // s_HSPListFromDistinctAlignments(hsp_list,
-        //         &alignments[context_index],
-        //         matchingSeq.index,
-        //         queryInfo, qframe);
-        // BlastCompo_AlignmentsFree(&incoming_aligns, NULL);
-        // ```
-        let mut kappa_preliminary_hits = Vec::new();
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3017-3019
-        // ```c
-        // /* keeps track of gapped alignment params */
-        // BlastGapAlignStruct* gapAlign = NULL;
-        // ```
-        //
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1934-1942
-        // ```c
-        // status =
-        //     BLAST_GappedAlignmentWithTraceback(..., gapAlign,
-        //                                        context->scoringParams,
-        //                                        q_start, s_start,
-        //                                        query_data->length,
-        //                                        subject_data->length,
-        //                                        &fence_hit);
-        // ```
-        let mut kappa_gap_scratch = GapAlignScratch::new();
-        // In a block search of the subjects encoded for all blocks, the store of SEG-masked subject
-        // ranges of all blocks (`x_query_blocks::x_block_seg_store`): an entry depends on its key
-        // only.
-        let x_block_seg_store =
-            super::x_query_blocks::x_block_seg_store(blastp_parallel_pool, subjects);
-        let mut kappa_subject_range_cache =
-            BlastpKappaSubjectRangeCache::new(x_block_seg_store.clone());
-
-        for q_idx in 0..query_ids.len() {
-            let batch = kappa_query_batches[q_idx].clone();
-            let redo_align_params = build_redo_align_params(q_idx)?;
-
-            let ctx = &contexts[q_idx];
-            let query_raw = &ctx.aa_seq[1..ctx.aa_seq.len() - 1];
-            let query_nomask = query_nomask_sequence(ctx);
-            // This query's list of full HSPs (`x_prelim_compact.rs`).
-            if let Some(compact) = x_compact_hit_lists[q_idx].take() {
-                preliminary_hit_lists[q_idx] = Some(x_expand_hit_list(compact));
-            }
-            let Some(preliminary_hit_list) = preliminary_hit_lists[q_idx].as_ref() else {
-                continue;
-            };
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:821-847
-            // ```c
-            // BLAST_ComputeLengthAdjustment(..., query_length, db_length,
-            //                               db_num_seqs, &length_adjustment);
-            // query_info->contexts[index].eff_searchsp = effective_search_space;
-            // query_info->contexts[index].length_adjustment = length_adjustment;
-            // ```
-            //
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3244-3248
-            // ```c
-            // query_info_tld[i] = s_GetQueryInfo(queryBlk->sequence, queryInfo, ...);
-            // ```
-            let query_workspace = build_query_workspace(
-                query_raw,
-                ctx.aa_len as i32,
-                search_spaces[q_idx].length_adjustment as i32,
-                search_spaces[q_idx].effective_space,
-            );
-
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:133-151
-            // ```c
-            // if (hsp_stream->sort_by_score->sort_on_read) {
-            //     Blast_HSPResultsReverseSort(hsp_stream->results);
-            // }
-            // ```
-            //
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:289-318
-            // ```c
-            // hit_list = results->hitlist_array[index];
-            // last_hsplist_index = hit_list->hsplist_count - 1;
-            // *hsp_list_out = hit_list->hsplist_array[last_hsplist_index];
-            // --hit_list->hsplist_count;
-            // ```
-            //
-            // For composition-based searches the preliminary stream is read in
-            // query order, and within each query from best to worst preliminary
-            // HSPList. Use the sorted preliminary hitlist directly instead of
-            // draining an unordered map, so `localMatch->best_evalue` and the
-            // admission order match NCBI.
-            // No NCBI counterpart: position of the next Newton lanes prefetch.
-            let mut x_next_prefetch = 0usize;
-            for (x_match_position, local_match) in preliminary_hit_list
-                .hsplist_array
-                .iter()
-                .take(preliminary_hit_list.hsplist_count)
-                .enumerate()
-            {
-                let s_idx = local_match.oid;
-                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3612-3619
-                // ```c
-                // localMatch->hsp_array,  /* i */
-                // localMatch->hspcnt,     /* i */
-                // ...
-                // *pStatusCode = s_ResultHspToDistinctAlign(...);
-                // ```
-                kappa_preliminary_hits.clear();
-                kappa_preliminary_hits.extend(
-                    local_match
-                        .hsps
-                        .iter()
-                        .map(preliminary_hit_from_local_match_hsp),
-                );
-                if kappa_preliminary_hits.is_empty() {
-                    continue;
-                }
-
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3525-3528
-                // ```c
-                // if (BlastCompo_EarlyTermination(localMatch->best_evalue,
-                //                                 redoneMatches,
-                //                                 numQueries)) {
-                //     ...
-                // }
-                // ```
-                // `redoneMatches` and `numQueries` are those of the query's batch
-                // (`kappa_query_batches`).
-                if blast_compo_early_termination(
-                    local_match.best_evalue,
-                    &redone_matches[batch.clone()],
-                ) {
-                    continue;
-                }
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529
-                // ```c
-                //                 if (BlastCompo_EarlyTermination(
-                //                         localMatch->best_evalue,
-                //                         redoneMatches,
-                //                         numQueries
-                //                 )) {
-                // ```
-                // No NCBI counterpart: the Newton lanes solve the first Newton problems of this
-                // and the next matches ahead, four per vector (kappa::x_newton_lanes_prefetch_matches);
-                // a result is used only by a call with the same input bits. It does not change any value
-                // NCBI computes.
-                if x_match_position >= x_next_prefetch {
-                    x_next_prefetch = x_match_position + X_NEWTON_LANES_MATCHES;
-                    x_newton_lanes_prefetch_matches(
-                        &preliminary_hit_list.hsplist_array[x_match_position
-                            ..x_next_prefetch.min(preliminary_hit_list.hsplist_count)],
-                        subjects,
-                        &redone_matches[batch.clone()],
-                        &query_workspace,
-                        &composition_workspace,
-                        &redo_align_params,
-                        &mut kappa_subject_range_cache,
-                    );
-                }
-                // Read from the database here, after the test, as
-                // NCBI reads it, and after the first Newton problems, which read it ahead and drop it.
-                let subject = subjects.read(s_idx)?;
-                let subject_raw = subject.residues();
-                let postprocessed = postprocess_preliminary_hits(
-                    &kappa_preliminary_hits,
-                    &query_workspace,
-                    &mut composition_workspace,
-                    query_nomask,
-                    subject_raw,
-                    args.scoring.matrix,
-                    &gapped_params,
-                    gapped_gumbel.as_ref(),
-                    &redo_align_params,
-                    args.evalue,
-                    &mut kappa_gap_scratch,
-                    &mut kappa_subject_range_cache,
-                    needs.seqalign,
-                )?;
-                let best_score = postprocessed.best_score;
-                let best_evalue = postprocessed.best_evalue;
-                let Some(hsp_list) = postprocessed.hsp_list else {
-                    continue;
-                };
-                let redone_match = &mut redone_matches[q_idx];
-                if redone_match.would_insert(best_evalue, best_score, s_idx) {
-                    redone_match.insert(hsp_list, best_evalue, best_score, s_idx);
-                }
-            }
-            // Nothing reads this query's preliminary list after its redo; it is freed here as NCBI
-            // frees each list it has redone (`x_prelim_free.rs`).
-            preliminary_hit_lists[q_idx] = None;
-            x_prelim_freed += 1;
-        }
-        // EXPERIMENT (LOSAT_X_BPQBLOCK): the block search keeps the store for the next block only as
-        // LOSAT_X_BPSEGWIN keeps it for the next window (`x_redo_par.rs` `x_redo`).
-        if let Some(store) = &x_block_seg_store {
-            let seg_win = super::kappa::x_bp_seg_win();
-            let emptied = seg_win.is_none_or(|min| store.x_len() >= min);
-            if emptied {
-                store.x_clear();
-            }
-            // The switch's own side here is a store kept for the next block (`=0` empties it after
-            // every block, as each block of the search before the store).
-            if seg_win.is_some() {
-                crate::utils::xreach::x_reach!("LOSAT_X_BPSEGWIN", !emptied);
-            }
-        }
+        redo_run::RedoPath::OneThread => redo_run::one_thread_redo(
+            &redo,
+            &mut preliminary_hit_lists,
+            &mut x_compact_hit_lists,
+            &mut redone_matches,
+            &mut x_prelim_freed,
+        )?,
     }
 
     if timing_enabled {

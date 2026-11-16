@@ -2549,7 +2549,7 @@ fn search(
                     let messages = database.batch_prefetch(
                         reported,
                         super::database::LoadedBefore {
-                            results: &results[..span.start],
+                            hits: &results[..span.start],
                             spans: &batch_spans,
                             rows: first_rows,
                         },
@@ -2576,7 +2576,7 @@ fn search(
             let error = database.prefetch_stop_error(
                 reported.as_ref(),
                 super::database::LoadedBefore {
-                    results: &results,
+                    hits: &results,
                     spans: &batch_spans,
                     rows: first_rows,
                 },

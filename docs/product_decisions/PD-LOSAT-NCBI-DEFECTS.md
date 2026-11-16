@@ -100,8 +100,9 @@
   of its Seq-id handles: the texts of the loads before the stopping lookup in the order of the
   handles are written as NCBI writes them, and of several stopping ids the first that NCBI looks
   up ends the loads; refused, a stopping id that NCBI may never look up, as its scope or its data
-  loader, which keeps the ids of what the run loaded, finds it first; line DBID item loadord,
-  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
+  loader, which keeps the ids of what the run loaded, finds it first; a directory in place of a
+  version 4 ISAM file is no ISAM, as NCBI's; line DBID item loadord, Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -858,8 +859,10 @@ masked). Line NP item M4a-2c.
   batch's order, or a sequence that the run loaded before (in a batch, a query or a psiblast
   round before: every subject of its Seq-aligns where its prefetch is on, else, with
   `PRE_FETCH_SEQS_LIMIT`, the subjects that its reports' rows read, none for `6 qseqid evalue`,
-  and those that psiblast's PSSM includes), or the first sequence that a lookup of another id of
-  such a sequence gives; not a sequence that no batch loaded (NCBI then stops), nor a copy with
+  and those that psiblast's PSSM includes) where the lookup of its Seq-align id gives it first
+  (the loader loads the first sequence that the lookup gives: of two holders of one gi, the
+  first; review 4 of item loadord), or the first sequence that a lookup of an id of such a
+  sequence gives; not a sequence that no batch loaded (NCBI then stops), nor a copy with
   the same Seq-align id, whose load is the same lookup; and, in a call of the library's query
   batches after the first, which has no record of the calls before, any such sequence. Or a query that NCBI's scope holds at the prefetch has the stopping id, or one
   that it matches weakly: the records that NCBI's reader read for the batch, a record that
@@ -871,9 +874,16 @@ masked). Line NP item M4a-2c.
   batch has several stopping ids, NCBI's loads end at the first lookup that it makes, in the
   order of the handles (review 3 of item loadord): a stopping id before it that NCBI may skip so
   does not refuse the batch by itself, but the loads from the first stopping id to the one that
-  NCBI surely looks up, and the sequence that the skipped lookup is given instead, are loads of
-  an unknown order (refused where one writes a text), and the stops that the loads may end at
-  must fail with one message.
+  NCBI surely looks up, and the sequence that the skipped lookup is given instead, are loads that
+  NCBI makes only where it skips the lookups before them, which LOSAT does not know (refused
+  where one writes a text), and the stops that the loads may end at must fail with one message.
+  A volume of a version 4 database whose string ISAM (`.psi`/`.psd`, `.nsi`/`.nsd`) or PIG ISAM
+  (`.ppi`/`.ppd`) has a file that is not a regular file (a directory) has no such ISAM, as NCBI's
+  `CSeqDBIsam::IndexExists` (`CFile::Exists`, a regular file) says: the lookups find nothing in
+  that volume and go on to the next (review 4 of item loadord: NCBI exit 0 where a later volume
+  holds the id, 255 where none does; LOSAT stopped with NCBI's `Error: Could not open input
+  file`, which NCBI writes for a regular file that does not open). Where its index or data file
+  is empty, NCBI crashes where its lookup reads it (SIGSEGV), which LOSAT refuses.
   Versions 1.9 to 1.24 refused every such list before the search (line DI-8 `DECISIONS.md` 31),
   versions 1.25 to 1.30 every run whose reports or prefetch looked such a Seq-id up.
 

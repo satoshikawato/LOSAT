@@ -1351,6 +1351,8 @@ pub(super) fn batch_titles(
 /// What NCBI's prefetch (`BlastFormatter_PreFetchSequenceData`, quoted at `reported_batch`) does
 /// with a query batch.
 pub(super) struct BatchPrefetch {
+    /// The batch's Seq-aligns, which `PRE_FETCH_SEQS_LIMIT` counts.
+    seq_aligns: usize,
     /// `PRE_FETCH_SEQS_LIMIT` turns it off (`common::database::prefetch_off`).
     pub(super) off: bool,
     /// It throws at an empty subject row before it loads anything and writes its warning
@@ -1390,7 +1392,30 @@ pub(super) fn batch_prefetch(
         && !options.gapped
         && crate::algorithm::common::database::prefetch_reads_seq_aligns(i32::from(options.outfmt))
         && super::empty_rows::prefetch_reads_empty_row(results, options.gapped, loc);
-    BatchPrefetch { off, fails }
+    BatchPrefetch {
+        seq_aligns,
+        off,
+        fails,
+    }
+}
+
+impl BatchPrefetch {
+    /// What NCBI's BLAST database data loader loaded for the batch, the run's record
+    /// (`ReportedSubjects::note_loaded`): `common::database::batch_loads` of its Seq-aligns (every
+    /// subject of its Seq-aligns where its prefetch is on, else what the first format's rows read,
+    /// `rows`), and those rows where its prefetch failed before it loaded anything (`fails`,
+    /// BLASTX's own: only its ungapped search leaves a subject row of length 0, whose reports then
+    /// read the subjects as with the prefetch off).
+    fn loads(
+        &self,
+        rows: crate::report::tabular::SubjectFetch,
+    ) -> crate::report::tabular::SubjectFetch {
+        if self.fails {
+            rows
+        } else {
+            crate::algorithm::common::database::batch_loads(self.seq_aligns, rows)
+        }
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2310-2313 (quoted at
@@ -1482,11 +1507,9 @@ pub(super) fn reported_batch(
     let Some(titles) = titles else {
         return Ok(ReportedSubjects::default());
     };
-    let BatchPrefetch {
-        off: prefetch_off,
-        fails: prefetch_fails,
-    } = batch_prefetch(results, options, super::empty_rows::SubjectLoc::Whole);
-    let unfetched = prefetch_off || prefetch_fails;
+    let prefetch = batch_prefetch(results, options, super::empty_rows::SubjectLoc::Whole);
+    let prefetch_fails = prefetch.fails;
+    let unfetched = prefetch.off || prefetch_fails;
     let x_t = super::x_timing::lap();
     let reported = ReportedSubjects::for_batch(
         database,
@@ -1616,17 +1639,15 @@ pub(super) fn reported_batch(
     }
     // The batch's prefetch (or its reports' reads one by one) did not stop: the run's record of
     // what NCBI's data loader loaded for it, for a later batch's stop
-    // (`ReportedSubjects::note_loaded`, `shared::batch_loads`): the subjects of its Seq-aligns
+    // (`ReportedSubjects::note_loaded`, `BatchPrefetch::loads`): the subjects of its Seq-aligns
     // where its prefetch read them, else those that the first format's rows read.
-    let loads = if unfetched {
+    let loads = prefetch.loads(
         options
             .tabular
             .map_or(crate::report::tabular::SubjectFetch::Every, |spec| {
                 spec.subject_fetch(crate::blastinput::app::Program::Blastx)
-            })
-    } else {
-        crate::report::tabular::SubjectFetch::Every
-    };
+            }),
+    );
     reported.note_loaded(database, results, options.gapped, loads);
     // The values of a custom tabular field list that reads more of the
     // definition lines than the default report (`sall*`) or the taxonomy

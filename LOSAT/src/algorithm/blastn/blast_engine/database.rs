@@ -702,31 +702,26 @@ impl BlastnDatabase {
         rows: SubjectFetch,
     ) {
         if self.parsed_seqids() {
-            let rows = shared::batch_loads(seq_aligns_of(hit_lists, gapped), rows);
-            self.taxdb.note_loaded(
-                &self.db,
-                Self::prefetch_subjects(titles, hit_lists, gapped, rows),
-            );
+            self.taxdb.note_loaded(&self.db, || {
+                let rows = shared::batch_loads(seq_aligns_of(hit_lists, gapped), rows);
+                Self::prefetch_subjects(titles, hit_lists, gapped, rows)
+            });
         }
     }
 
     /// The sequences that NCBI's BLAST database data loader loaded for the batches `before`
-    /// (`shared::batch_loads` of each: the subjects of its Seq-aligns where its prefetch is on,
-    /// else those that its reports' rows read; review 3 of line DBID loadord, H2).
+    /// (`shared::LoadedBefore::subjects`: the subjects of each batch's Seq-aligns where its
+    /// prefetch is on, else those that its reports' rows read; review 3 of line DBID loadord, H2).
     fn loaded_subjects<'s>(
         titles: &'s DatabaseTitles,
         before: LoadedBefore<'s>,
         gapped: bool,
     ) -> impl Iterator<Item = shared::PrefetchSubject<'s>> + 's {
-        before
-            .spans
-            .iter()
-            .filter(move |span| span.end <= before.hit_lists.len())
-            .flat_map(move |span| {
-                let hit_lists = &before.hit_lists[span.clone()];
-                let rows = shared::batch_loads(seq_aligns_of(hit_lists, gapped), before.rows);
-                Self::prefetch_subjects(titles, hit_lists, gapped, rows)
-            })
+        before.subjects(
+            |hit_lists, span| hit_lists.get(span),
+            move |_, hit_lists| seq_aligns_of(hit_lists, gapped),
+            move |_, hit_lists, rows| Self::prefetch_subjects(titles, hit_lists, gapped, rows),
+        )
     }
 
     /// The sequences that the prefetch of the query batch whose final hit lists are `hit_lists`
@@ -1819,17 +1814,11 @@ pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown
 /// The Seq-aligns of the results `hit_lists` that NCBI's prefetch counts against
 /// `PRE_FETCH_SEQS_LIMIT` (`shared::prefetch_off`): one for each HSP of a `gapped` search, one
 /// for each subject of an ungapped one (`shared::subject_seq_aligns`).
-/// The query batches of a call before a batch's prefetch that the loop holds, for the run's
-/// record of what NCBI's BLAST database data loader loaded for them
-/// (`BlastnDatabase::loaded_subjects`): their final hit lists by query (`hit_lists`), the queries
-/// of each batch (`spans`; those past `hit_lists` are not held), and which rows of the first
-/// format read a subject where a batch's prefetch is off (`rows`, `TabularSpec::subject_fetch`).
-#[derive(Clone, Copy)]
-pub(super) struct LoadedBefore<'a> {
-    pub(super) hit_lists: &'a [Option<BlastnHitList>],
-    pub(super) spans: &'a [std::ops::Range<usize>],
-    pub(super) rows: SubjectFetch,
-}
+/// The query batches of a call before a batch's prefetch that the loop holds
+/// (`shared::LoadedBefore`, read by `BlastnDatabase::loaded_subjects`): their final hit lists by
+/// query (`hits`), the queries of each batch (`spans`; those past `hits` are not held), and which
+/// rows of the first format read a subject where a batch's prefetch is off (`rows`).
+pub(super) type LoadedBefore<'a> = shared::LoadedBefore<'a, Option<BlastnHitList>>;
 
 pub(super) fn seq_aligns_of(hit_lists: &[Option<BlastnHitList>], gapped: bool) -> usize {
     hit_lists

@@ -1548,18 +1548,17 @@ impl ListedTitles<'_> {
     /// loaded for a call's batches (`shared::TaxdbRun::note_loaded`): psiblast's round of a query,
     /// a call of its own, for the stop of a later round's or query's prefetch, and the batches
     /// before a stop of the XML2 and JSON formats.
-    pub(super) fn note_loaded(
+    pub(super) fn note_loaded<I: IntoIterator<Item = usize>>(
         &self,
         database: &BlastpDatabase,
-        ranks: impl IntoIterator<Item = usize>,
+        ranks: impl FnOnce() -> I,
     ) {
         if self.parsed.is_empty() {
             return;
         }
-        database.taxdb.note_loaded(
-            &database.db,
-            ranks.into_iter().map(|rank| self.prefetch_subject(rank)),
-        );
+        database.taxdb.note_loaded(&database.db, || {
+            ranks().into_iter().map(|rank| self.prefetch_subject(rank))
+        });
     }
 
     /// The subjects of ranks `ranks` of psiblast's traceback hit lists as NCBI's prefetch reads
@@ -1671,6 +1670,10 @@ impl ListedTitles<'_> {
         // included subjects that the formatter's cut drops from its hit list, in its order (each
         // subject once: its HSPs follow each other).
         let mut read: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+        // The PSSM's reads one by one are kept for the run's record of loads only where a
+        // prefetch of the run can stop (`shared::TaxdbRun::prefetch_can_stop`, asked at the first
+        // such read; review 4 of line DBID loadord, M1).
+        let mut records_loads: Option<bool> = None;
         for (query, hit_list) in hit_lists.iter().enumerate() {
             let Some(hit_list) = hit_list else {
                 continue;
@@ -1686,7 +1689,10 @@ impl ListedTitles<'_> {
             {
                 if self.parsed_subject(hsp_list.oid as usize).is_some() {
                     read.insert(hsp_list.oid as usize);
-                    if prefetch.reads_one_by_one(query) {
+                    if prefetch.reads_one_by_one(query)
+                        && *records_loads
+                            .get_or_insert_with(|| database.taxdb.prefetch_can_stop(&database.db))
+                    {
                         if reads.one_by_one.len() <= query {
                             reads.one_by_one.resize_with(query + 1, Vec::new);
                         }
@@ -4591,8 +4597,9 @@ impl PssmReads {
     /// `query` reads by their Seq-align ids where its batch reads one by one (prefetch off:
     /// `shared::BatchPrefetch::reads_one_by_one`), before the cut: loads of NCBI's BLAST
     /// database data loader that no prefetch made (`shared::TaxdbRun::note_loaded`; where the
-    /// prefetch is on, it loaded them first). Empty for the other queries, and where no PSSM
-    /// reads are made.
+    /// prefetch is on, it loaded them first). Empty for the other queries, where no PSSM reads
+    /// are made, and where no prefetch of the run can stop (`shared::TaxdbRun::prefetch_can_stop`:
+    /// nothing reads them then).
     pub(super) fn one_by_one(&self, query: usize) -> &[usize] {
         self.one_by_one.get(query).map_or(&[], Vec::as_slice)
     }

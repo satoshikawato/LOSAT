@@ -778,8 +778,7 @@ impl ReportedSubjects {
         rows: SubjectFetch,
     ) {
         if database.parsed_seqids() {
-            database.taxdb.note_loaded(
-                &database.db,
+            database.taxdb.note_loaded(&database.db, || {
                 batches
                     .iter()
                     .flat_map(|batch| batch.queries.iter().flatten())
@@ -789,8 +788,8 @@ impl ReportedSubjects {
                             self.ordinals[list.oid],
                             self.parsed_subject(list.oid),
                         )
-                    }),
-            );
+                    })
+            });
         }
     }
 

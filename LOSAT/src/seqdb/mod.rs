@@ -227,12 +227,23 @@ impl std::fmt::Display for SeqDbError {
     }
 }
 
+/// The end of the message of LOSAT's refusal of a database file that NCBI BLAST+ crashes on where
+/// it reads it ([`SeqDbError::ncbi_crashes`]).
+pub const NCBI_CRASHES_ON_IT: &str = "(NCBI crashes on it)";
+
 impl SeqDbError {
     /// Whether this is the error of the ordinal-id decoders for a record with a Seq-id other
     /// than the `gnl|BL_ORD_ID|n` of the sequence's own number in its volume (a database built
     /// with `-parse_seqids`; `SeqDb::read_header`).
     pub fn is_parsed_seqids(&self) -> bool {
         matches!(self, SeqDbError::Unsupported { message, .. } if message == header::PARSED_SEQIDS)
+    }
+
+    /// Whether this is LOSAT's refusal of a file that NCBI BLAST+ crashes on where it reads it
+    /// (an ISAM whose header does not fit its files, as an empty `.psi` or `.psd`: probe I of
+    /// line BDC, review 4 of line DBID loadord): its message ends in [`NCBI_CRASHES_ON_IT`].
+    pub fn ncbi_crashes(&self) -> bool {
+        matches!(self, SeqDbError::Unsupported { message, .. } if message.ends_with(NCBI_CRASHES_ON_IT))
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:247-250

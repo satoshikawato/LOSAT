@@ -376,36 +376,48 @@ pub(super) fn prefetch_reported_subjects(
         }
         _ => crate::report::tabular::SubjectFetch::Every,
     };
+    // The Seq-aligns of the batch of the searched queries `span`, one for each HSP of its results
+    // (psiblast's before the cut, `psiblast_hits_found`), which `PRE_FETCH_SEQS_LIMIT` counts
+    // (`shared::prefetch_off`; as `batch_prefetch` counts them).
+    let batch_seq_aligns = |span: std::ops::Range<usize>| -> usize {
+        match psiblast_hits_found.as_ref() {
+            Some(found) => found[span].iter().sum(),
+            None => blastp_hit_list_hsp_count(&hit_lists[span]),
+        }
+    };
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:764-766 (quoted at
     // `shared::batch_loads`)
     // The subjects, by rank, that NCBI's BLAST database data loader loaded for the call's batches
-    // before the searched query `start` (`shared::batch_loads`, review 3 of line DBID loadord,
-    // H2): a batch whose prefetch is on loads the subjects of its Seq-aligns (psiblast's of its
-    // traceback hit lists, `prefetched_ranks`); one whose prefetch is off, those that its reports'
-    // rows read (`ListedTitles::fetched_ranks`) and the subjects that psiblast's PSSM includes
-    // (`PssmReads::one_by_one`, where a PSSM is made). Made only where the batch at `start` stops,
-    // and for the run's record of psiblast's rounds (an iterator that reads nothing until then).
+    // before the searched query `start` (`shared::LoadedBefore::subjects`, review 3 of line DBID
+    // loadord, H2): a batch whose prefetch is on loads the subjects of its Seq-aligns (psiblast's
+    // of its traceback hit lists, `prefetched_ranks`); one whose prefetch is off, those that its
+    // reports' rows read (`ListedTitles::fetched_ranks`) and the subjects that psiblast's PSSM
+    // includes (`PssmReads::one_by_one`, where a PSSM is made). Made only where the batch at
+    // `start` stops, and for the run's record of psiblast's rounds where a prefetch of the run can
+    // stop (`ListedTitles::note_loaded`).
     let loaded = |start: usize| {
-        query_batches
-            .iter()
-            .filter(move |batch| batch.searched.end <= start)
-            .flat_map(move |batch| {
-                let span = batch.searched.clone();
-                match batch_prefetch.loads(span.start, rows) {
-                    crate::report::tabular::SubjectFetch::Every => prefetched_ranks(span),
-                    rows => {
-                        let mut ranks: Vec<usize> =
-                            database::ListedTitles::fetched_ranks(&hit_lists[span.clone()], rows)
-                                .collect();
-                        if pssm_made {
-                            for query in span {
-                                ranks.extend_from_slice(pssm_reads.one_by_one(query));
-                            }
+        crate::algorithm::common::database::LoadedBefore {
+            hits: &hit_lists[..start],
+            spans: batch_ranges,
+            rows,
+        }
+        .subjects(
+            |hits, span| hits.get(span),
+            move |span, _| batch_seq_aligns(span),
+            move |span, hits, loads| match loads {
+                crate::report::tabular::SubjectFetch::Every => prefetched_ranks(span),
+                rows => {
+                    let mut ranks: Vec<usize> =
+                        database::ListedTitles::fetched_ranks(hits, rows).collect();
+                    if pssm_made {
+                        for query in span {
+                            ranks.extend_from_slice(pssm_reads.one_by_one(query));
                         }
-                        ranks
                     }
+                    ranks
                 }
-            })
+            },
+        )
     };
     if let (Some(titles), Some(database)) = (listed_titles.as_ref(), database) {
         // Without `taxdb.bti` the prefetch of a table that reads the subjects writes nothing
@@ -417,7 +429,7 @@ pub(super) fn prefetch_reported_subjects(
             let scope = || batch_scope(span);
             // The loads of the batches before (psiblast's traceback beyond the cut, which no
             // report reads), beside their reports' lookups that the stop records.
-            titles.note_loaded(database, loaded(span.start));
+            titles.note_loaded(database, || loaded(span.start));
             titles.batch_prefetch_stop(
                 database,
                 &hit_lists[..span.start],
@@ -459,11 +471,7 @@ pub(super) fn prefetch_reported_subjects(
             };
             for batch in query_batches {
                 let lists = &hit_lists[batch.searched.clone()];
-                // The batch's Seq-aligns, one for each HSP of its results.
-                let seq_aligns = match psiblast_hits_found.as_ref() {
-                    Some(found) => found[batch.searched.clone()].iter().sum(),
-                    None => blastp_hit_list_hsp_count(lists),
-                };
+                let seq_aligns = batch_seq_aligns(batch.searched.clone());
                 if crate::algorithm::common::database::prefetch_off(seq_aligns) {
                     if !prefetch_taxids {
                         continue;
@@ -622,7 +630,7 @@ pub(super) fn prefetch_reported_subjects(
         // (`shared::TaxdbRun::note_loaded`, on the database that the rounds share). The call
         // reaches here where its prefetch did not stop.
         if reports.psi_round.is_some() {
-            titles.note_loaded(database, loaded(hit_lists.len()));
+            titles.note_loaded(database, || loaded(hit_lists.len()));
         }
     }
     Ok(subject_reads)

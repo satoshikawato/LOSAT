@@ -6,10 +6,17 @@
   accession info.` (exit status 2), as NCBI BLAST+ does; LOSAT refused such a run. A load whose order NCBI takes from
   memory addresses (the same number, ids that are not packed, more than 200 ids in the batch) that writes a message
   stays refused. Where a batch has several such Seq-ids, the first that NCBI BLAST+ looks up ends its loads, as in
-  NCBI BLAST+. Newly refused, where NCBI BLAST+ may never look such a Seq-id up and LOSAT cannot tell whether it goes
+  NCBI BLAST+; where one before it may never be looked up, a message written by a load between the two, or by the
+  sequence that NCBI BLAST+ would load for the earlier one instead, is refused (LOSAT does not know whether NCBI BLAST+
+  looks the earlier one up), and so are two such Seq-ids whose lookups fail with different messages. Newly refused, where NCBI BLAST+ may never look such a Seq-id up and LOSAT cannot tell whether it goes
   on: a stopping Seq-id that another sequence of the database holds under another Seq-align id where that sequence
   may be loaded first (in the batch, or in a batch, query or psiblast round before: by its prefetch, or with
   `PRE_FETCH_SEQS_LIMIT` by its reports and psiblast's PSSM), and the id of a query that NCBI BLAST+ holds at that
   point (the batch's queries as read, one that `-query_loc` skips included, numbered over the whole run; with
   `-parse_deflines` the ids of the deflines; the PSSM's query of `-in_pssm`; with `-outfmt 5` also the queries
   before).
+- A version 4 database whose string ISAM file (`.psi`, `.psd`, `.nsi`, `.nsd`) or PIG ISAM file (`.ppi`, `.ppd`) is a
+  directory: a volume with such a file now has no such index, as in NCBI BLAST+, whose lookups find nothing there and go
+  on to the next volume; LOSAT stopped with `BLAST Database error: Error: Could not open input file`. A reported
+  sequence that the lookup then finds as another sequence of a later volume is refused, as in every other database,
+  and the refusal of an empty string ISAM file now says that NCBI BLAST+ crashes where it reads it.

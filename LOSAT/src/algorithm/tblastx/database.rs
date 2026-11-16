@@ -557,50 +557,55 @@ pub(crate) fn note_loaded(
     titles: &DatabaseTitles,
     rows: SubjectFetch,
 ) {
-    if database.parsed_seqids() && batch_loads(ordered, rows) {
-        database
-            .taxdb
-            .note_loaded(&database.db, prefetch_subjects(ordered, titles));
+    if database.parsed_seqids() {
+        database.taxdb.note_loaded(&database.db, || {
+            batch_loaded(
+                ordered,
+                shared::batch_loads(seq_aligns_of(ordered), rows),
+                titles,
+            )
+        });
     }
 }
 
-/// The query batches of the run before a batch's prefetch that the loop holds, for the run's
-/// record of what NCBI's BLAST database data loader loaded for them ([`loaded_subjects`]): their
-/// reported hits in report order (`hits`, by query of the run), the queries of each batch
-/// (`spans`), and which rows of the first format read a subject where a batch's prefetch is off
-/// (`rows`, `TabularSpec::subject_fetch`).
-#[derive(Clone, Copy)]
-pub(crate) struct LoadedBefore<'a> {
-    pub(crate) hits: &'a [TblastxHsp],
-    pub(crate) spans: &'a [std::ops::Range<usize>],
-    pub(crate) rows: SubjectFetch,
-}
+/// The query batches of the run before a batch's prefetch that the loop holds
+/// (`shared::LoadedBefore`, read by [`loaded_subjects`]): their reported hits in report order
+/// (`hits`, by query of the run), the queries of each batch (`spans`), and which rows of the
+/// first format read a subject where a batch's prefetch is off (`rows`).
+pub(crate) type LoadedBefore<'a> = shared::LoadedBefore<'a, TblastxHsp>;
 
-/// Whether NCBI's BLAST database data loader loaded the subjects of a batch whose reported hits
-/// are `ordered` (`shared::batch_loads`, review 3 of line DBID loadord, H2): every subject where
-/// its prefetch is on; where it is off, those that its rows read (`rows`), which LOSAT takes as
-/// all of them unless no row reads one (`SubjectFetch::Never`): rows that read a subject for its
-/// identities only (`nident`) read those of HSPs with identities, which the stores of the batch
-/// count (`run_impl`'s fetches of a batch whose prefetch is off), so every subject is a superset.
-fn batch_loads(ordered: &[TblastxHsp], rows: SubjectFetch) -> bool {
-    shared::batch_loads(seq_aligns_of(ordered), rows) != SubjectFetch::Never
+/// The sequences that NCBI's BLAST database data loader loaded for a batch whose reported hits
+/// are `ordered` and whose loads are `loads` (`shared::batch_loads`, review 3 of line DBID
+/// loadord, H2): every subject where its prefetch is on; where it is off, those that its rows
+/// read, which LOSAT takes as all of them unless no row reads one (`SubjectFetch::Never`): rows
+/// that read a subject for its identities only (`nident`) read those of HSPs with identities,
+/// which the stores of the batch count (`run_impl`'s fetches of a batch whose prefetch is off),
+/// so every subject is a superset (TBLASTX's own: its hits carry no identities before those
+/// fetches).
+fn batch_loaded<'s>(
+    ordered: &'s [TblastxHsp],
+    loads: SubjectFetch,
+    titles: &'s DatabaseTitles,
+) -> impl Iterator<Item = shared::PrefetchSubject<'s>> + 's {
+    let loaded = if loads == SubjectFetch::Never {
+        &[]
+    } else {
+        ordered
+    };
+    prefetch_subjects(loaded, titles)
 }
 
 /// The sequences that NCBI's BLAST database data loader loaded for the batches `before`
-/// ([`batch_loads`] of each).
+/// (`shared::LoadedBefore::subjects`, [`batch_loaded`] of each).
 fn loaded_subjects<'s>(
     before: LoadedBefore<'s>,
     titles: &'s DatabaseTitles,
 ) -> impl Iterator<Item = shared::PrefetchSubject<'s>> + 's {
-    before.spans.iter().flat_map(move |span| {
-        let hits = query_hits(before.hits, span.clone());
-        let loaded = if batch_loads(hits, before.rows) {
-            hits
-        } else {
-            &[]
-        };
-        prefetch_subjects(loaded, titles)
-    })
+    before.subjects(
+        |hits, span| Some(query_hits(hits, span)),
+        |_, hits| seq_aligns_of(hits),
+        move |_, hits, loads| batch_loaded(hits, loads, titles),
+    )
 }
 
 /// The sequences that the prefetch of the query batch whose reported hits are `ordered` reads

@@ -375,7 +375,7 @@ impl TblastnDatabase {
         });
         let stopped = if at_hits {
             let before = reported.into_iter().flat_map(|reported| {
-                reported_ranks(before.results).map(|rank| {
+                reported_ranks(before.hits).map(|rank| {
                     shared::PrefetchSubject::unflipped(
                         reported.ordinals[rank],
                         reported.parsed_subject(rank),
@@ -423,21 +423,17 @@ impl TblastnDatabase {
     }
 
     /// The sequences that NCBI's BLAST database data loader loaded for the query batches `before`
-    /// (`shared::batch_loads` of each batch: the subjects of its Seq-aligns where its prefetch is
-    /// on, else those that its reports' rows read; review 3 of line DBID loadord, H2).
+    /// (`shared::LoadedBefore::subjects`: the subjects of each batch's Seq-aligns where its
+    /// prefetch is on, else those that its reports' rows read; review 3 of line DBID loadord, H2).
     fn loaded_subjects<'s>(
         reported: &'s ReportedSubjects,
         before: LoadedBefore<'s>,
     ) -> impl Iterator<Item = shared::PrefetchSubject<'s>> + 's {
-        before
-            .spans
-            .iter()
-            .filter(move |span| span.end <= before.results.len())
-            .flat_map(move |span| {
-                let hitlists = &before.results[span.clone()];
-                let rows = shared::batch_loads(seq_aligns_of(hitlists), before.rows);
-                Self::prefetch_subjects(reported, hitlists, rows)
-            })
+        before.subjects(
+            |hitlists, span| hitlists.get(span),
+            |_, hitlists| seq_aligns_of(hitlists),
+            move |_, hitlists, rows| Self::prefetch_subjects(reported, hitlists, rows),
+        )
     }
 
     /// NCBI's prefetch of the query batch whose final hit lists are `hitlists` (subjects named by
@@ -487,17 +483,11 @@ pub(super) fn reads_subject(list: &KappaResultList, rows: SubjectFetch) -> bool 
     }
 }
 
-/// The query batches of a call before a batch's prefetch, for the run's record of what NCBI's
-/// BLAST database data loader loaded for them (`TblastnDatabase::loaded_subjects`): their final
-/// hit lists by searched query (`results`, named by rank), the searched queries of each batch
-/// (`spans`; those past `results` are not of them), and which rows of the first format read a
-/// subject where a batch's prefetch is off (`rows`, `TabularSpec::subject_fetch`).
-#[derive(Clone, Copy)]
-pub(super) struct LoadedBefore<'a> {
-    pub(super) results: &'a [KappaResultHitList],
-    pub(super) spans: &'a [std::ops::Range<usize>],
-    pub(super) rows: SubjectFetch,
-}
+/// The query batches of a call before a batch's prefetch (`shared::LoadedBefore`, read by
+/// `TblastnDatabase::loaded_subjects`): their final hit lists by searched query (`hits`, named by
+/// rank), the searched queries of each batch (`spans`; those past `hits` are not of them), and
+/// which rows of the first format read a subject where a batch's prefetch is off (`rows`).
+pub(super) type LoadedBefore<'a> = shared::LoadedBefore<'a, KappaResultHitList>;
 
 /// The headers of the database sequences that the final hit lists of the query batches searched
 /// so far name, by ordinal id (`read_titles`): the stored title, or the definition lines of a

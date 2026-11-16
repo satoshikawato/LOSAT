@@ -185,7 +185,8 @@ prefetch makes before the stopping lookup, in the order of the Seq-id handles of
 ids (line DBID item loadord); refused is a run whose reports read such a Seq-id with the prefetch
 off, a stopping batch where a load whose order to the stop NCBI takes from the addresses of
 its Seq-id handles writes such a text, or where a lookup that throws on its id may come before the
-stop, and one whose stopping ids NCBI may all never look up (another sequence holds an id of its
+stop, one where a load that NCBI makes only where it skips an earlier stopping lookup writes such a
+text, and one whose stopping ids NCBI may all never look up (another sequence holds an id of its
 handle that the batch may load first or the run loaded before, in a batch, query or psiblast
 round before, or in a call of the library's batches before; or a query that NCBI's scope holds at
 the prefetch has it: the batch's records as read, those that `-query_loc` drops included, by
@@ -905,7 +906,9 @@ program writes, the same bytes at every `-num_threads` (P1, P1.1), apart from wh
   write their reports batch by batch, first read every header of a database of up to 2^20 sequences
   to learn whether a refusal below can occur. The Seq-align id of a reported sequence is looked up
   as NCBI's formatters look it up (`CSeqDB::SeqidToOid`: the LMDB keys of version 5, the ISAM files
-  of version 4, under the search's id or taxonomy list), whatever its kind: version 5 finds `bbs|`,
+  of version 4, under the search's id or taxonomy list; an ISAM with a file that is not a regular
+  file, such as a directory, is none, as NCBI's `CSeqDBIsam::IndexExists` says, so the lookup
+  finds nothing in that volume, since line DBID item loadord), whatever its kind: version 5 finds `bbs|`,
   `nat|` and `lcl|<integer>` by their keys, and `gnl|BL_ORD_ID|n` of the sequence's own number in
   its volume is found also beside another id. NCBI's scope first looks among the sequences of the
   batch it has already read, without case, so another reported sequence that holds the id can be

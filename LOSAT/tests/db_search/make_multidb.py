@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Builds tests/db_search/multidb/: the databases of the rows db.mdb.* (DI-8f: -db with several names).
 
-Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only | --loadord-only | --loadord2-only | --loadord3-only | --loadord4-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
+Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only | --loadord-only | --loadord2-only | --loadord3-only | --loadord4-only | --loadord5-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
 
 The records are those of taxfilter/tfp.faa (23 protein globins) and taxfilter/tfn.fna (16 globin cDNAs); the definition
 lines (some records carry a second one) stay as they are, the taxids come from taxfilter/tfp.map and tfn.map.
@@ -85,6 +85,12 @@ lines (some records carry a second one) stay as they are, the taxids come from t
   before `ldp`'s 2), `lds` (`ldsn`) `ref|NP_000003.1|` (packed 3, after it), and `ldi` (`ldin`)
   `gi|1|ref|NP_000003.1|`, a holder of `lds`'s accession whose gi (handle 1) loads before both. `make_multidb.py
   --loadord4-only MAKEBLASTDB` builds only these (the databases before keep their dates).
+- Review 4 of line DBID loadord (DECISIONS 60 (12)): version 4, `-parse_seqids`, taxid 9606, one record each,
+  `ref|NP_000002.1|` (`NM_`) with the letters of `ldp`'s first record (copies of one record): `l5c` (`l5cn`), `l5d`
+  (`l5dn`) and `l5e` (`l5en`); `l5d`'s string ISAM index (`.psi`, `.nsi`) is a directory holding a placeholder file,
+  which NCBI's `CSeqDBIsam::IndexExists` (`CFile::Exists`, a regular file) takes for no ISAM: its lookups find nothing
+  in that volume and go on to the next (H1). `make_multidb.py --loadord5-only MAKEBLASTDB` builds only these (the
+  databases before keep their dates).
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
 """
@@ -408,6 +414,34 @@ def make_loadord4(binary):
             os.remove(os.path.join(HERE, name + (".pjs" if kind == "prot" else ".njs")))
 
 
+def make_loadord5(binary):
+    """Builds l5c, l5d, l5e and their nucleotide counterparts l5cn, l5dn, l5en (review 4 of line DBID loadord, H1)."""
+
+    def letters(path):
+        return next("".join(line.strip() for line in lines) for header, lines in read_fasta_path(path))
+
+    for kind, suffix, prefix, letter, globin in (("prot", "", "NP", "p", letters(os.path.join(SRC, "q.faa"))),
+                                                 ("nucl", "n", "NM", "n", letters(os.path.join(SRC, "q.fna")))):
+        for base in ("l5c", "l5d", "l5e"):
+            name = base + suffix
+            with open(os.path.join(HERE, name + ".fa"), "w") as f:
+                f.write(f">ref|{prefix}_000002.1| loadord a copy of ldp's first record, version 4\n"
+                        + "\n".join(globin[at:at + 60] for at in range(0, len(globin), 60)) + "\n")
+            makeblastdb(binary, "-in", name + ".fa", "-dbtype", kind, "-out", name, "-parse_seqids", "-blastdb_version",
+                        "4", "-taxid", "9606", "-title", "multidb " + name)
+            for extra in (".pjs", ".njs"):
+                path = os.path.join(HERE, name + extra)
+                if os.path.exists(path):
+                    os.remove(path)
+        # l5d's string ISAM index: a directory, which CSeqDBIsam::IndexExists (CFile::Exists, a regular file) does not
+        # take for one, so that NCBI's lookups find nothing in that volume.
+        index = os.path.join(HERE, f"l5d{suffix}.{letter}si")
+        os.remove(index)
+        os.mkdir(index)
+        with open(os.path.join(index, "placeholder"), "w") as f:
+            f.write("A directory in place of the string ISAM index (make_multidb.py --loadord5-only).\n")
+
+
 def main(binary):
     os.makedirs(os.path.join(HERE, "d1"), exist_ok=True)
     os.makedirs(os.path.join(HERE, "d2"), exist_ok=True)
@@ -469,6 +503,8 @@ if __name__ == "__main__":
         make_loadord3(sys.argv[2])
     elif sys.argv[1] == "--loadord4-only":
         make_loadord4(sys.argv[2])
+    elif sys.argv[1] == "--loadord5-only":
+        make_loadord5(sys.argv[2])
     else:
         main(sys.argv[1])
         make_ordsl(sys.argv[1])
@@ -478,3 +514,4 @@ if __name__ == "__main__":
         make_loadord2(sys.argv[1])
         make_loadord3(sys.argv[1])
         make_loadord4(sys.argv[1])
+        make_loadord5(sys.argv[1])

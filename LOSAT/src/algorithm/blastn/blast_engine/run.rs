@@ -11096,7 +11096,7 @@ fn run_in_pool(
                         .batch_prefetch(
                             &titles,
                             database::LoadedBefore {
-                                hit_lists: &hit_lists,
+                                hits: &hit_lists,
                                 spans: &batch_spans,
                                 rows: first_rows,
                             },

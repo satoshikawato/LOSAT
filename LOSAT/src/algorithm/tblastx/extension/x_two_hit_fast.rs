@@ -16,10 +16,13 @@
 //! (right walk; the left walk, aa_ungapped.c:886-921, counts `i` down from `n`, has no
 //! `score <= 0` test, and returns `n - best_i + 1`.)
 //!
-//! The walks of `two_hit.rs` call `get_score` for every step, which tests both codes against the
-//! matrix size, branches to the sentinel and the rare codes, and multiplies for the row: 22
-//! instructions and five branches a step on the left, about 30 and six on the right (whose
-//! bounds are reloaded from the stack; release build of dev 7cdcd4a7). A step here loads the two
+//! When these walks were written, the walks of `two_hit.rs` called `get_score` for every step,
+//! which tests both codes against the matrix size, branches to the sentinel and the rare codes,
+//! and multiplies for the row: 22 instructions and five branches a step on the left, about 30 and
+//! six on the right (whose bounds are reloaded from the stack; release build of dev 7cdcd4a7).
+//! Since line RG item X2c-s they read the matrix's rows (`TbxScore::score`, `ScoreRows`: a row and
+//! its score, two loads; 16 to 19 instructions a step, for the X-drops and the one-hit extension
+//! these walks do not cover). A step here loads the two
 //! codes, forms `q << 8 | s`, loads one signed byte from the table and makes the reference's
 //! update and exit tests; the statements, their order and the exit tests are those of the
 //! reference walks. Each walk is a function of its own, so that its loop has the registers to

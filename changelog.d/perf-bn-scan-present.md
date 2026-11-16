@@ -1,0 +1,1 @@
+- BLASTN's scan of a large packed CSR table (megablast against many subjects with a large query, as mlst's) tests each word's own presence bit in its loop after the presence vector's, so a word that the vector passes but whose cell has no run makes no call: mlst's search runs 5.4 % fewer instructions. Reports do not change.

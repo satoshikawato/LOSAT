@@ -209,6 +209,11 @@ const CASES: &[Case] = &[
     ("T520", None, false, &["-db", "../db_search/t5/ptx_sx9", "-entry", "all", "-outfmt", "%o %T %t"], 0),
     ("T521", None, false, &["-db", "../db_search/t5/ntx_app42", "-entry", "all", "-outfmt", "%o %T %t"], 0),
     ("T522", None, false, &["-db", "../db_search/t5/ntx_sx9", "-entry", "all", "-outfmt", "%o %T %t"], 0),
+    // Merge 5 of line RG item T5c with item K4h (`make_t5.py --k5-only`): titles ending in `]` (`%t`
+    // keeps the stored title) and scientific names with two-byte UTF-8 and a control byte, written
+    // as they are (frozen from NCBI BLAST+ 2.17.0 blastdbcmd, 2026-11-17).
+    ("T525", Some("../seqdb/taxdb/k5"), false, &["-db", "../db_search/t5/pk5", "-entry", "all", "-outfmt", "%t %T %S"], 0),
+    ("T526", Some("../seqdb/taxdb/k5"), false, &["-db", "../db_search/t5/pk5s", "-entry", "all", "-outfmt", "%t %T %S"], 0),
 ];
 
 /// The probe's cases that LOSAT refuses (one line naming LOSAT's BLASTDBCMD, exit status 1,

@@ -274,8 +274,8 @@ pub(super) fn render(
     }
     let hitlists: &[KappaResultHitList] = hitlists;
     // BLAST XML (outfmt 5, and the XML2 and JSON documents of 15 and 16): its texts are made,
-    // and what NCBI cannot write is refused, before any format writes (`-out` is already
-    // created, empty, as NCBI's).
+    // and a title that NCBI crashes on (`names::Refusal`) is refused, before any format writes
+    // (`-out` is already created, empty, as NCBI's).
     //
     // NCBI writes the XML2 and JSON documents' start before the search (`PrintProlog`) and
     // fails for a matrix of its formatting table's that it does not know when it makes a report's
@@ -564,8 +564,7 @@ pub(super) fn render(
         // name (`x_CheckTaxDB`, `tabular`), and the Seq-annots' posts of the bytes that NCBI's
         // stream replaces (`seqalign::write_query_to`).
         let mut warnings = (warning_lines.is_some()
-            || xml2_kind(format.outfmt).is_some()
-            || matches!(format_number(format.outfmt), 8 | 9 | 12 | ARCHIVE_FORMAT)
+            || crate::report::query_warnings::report_posts(format.report_format())
             || custom_tabular
                 .as_ref()
                 .is_some_and(crate::report::tabular::TabularSpec::looks_up_every_taxid))

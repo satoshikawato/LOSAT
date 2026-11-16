@@ -16,8 +16,9 @@ pub struct XmlRun<'a> {
     pub version: &'a str,
     /// `BlastOutput_reference`, before the XML escapes (`Sch&auml;ffer` stands as written).
     pub reference: &'static str,
-    /// `BlastOutput_db`: the `-db` value; empty for `-subject`.
-    pub db_name: &'a [u8],
+    /// `BlastOutput_db`: the `-db` value (UTF-8: LOSAT refuses another file name when it reads the
+    /// command line); empty for `-subject`.
+    pub db_name: &'a str,
     /// `Parameters_matrix`; none for BLASTN.
     pub matrix: Option<&'a str>,
     /// `Parameters_expect`.
@@ -106,6 +107,9 @@ pub struct XmlHit<'a> {
     /// The `HitDescr` list of a database sequence with parsed Seq-ids (`SubjectNames::
     /// descriptions`; empty for the others).
     pub descriptions: &'a [crate::report::db_subject::HitDescription],
+    /// `GenerateDefline` threw for the `-subject` record (`SubjectNames::defline_thrown`):
+    /// outfmt 5's `Hit_len` is 0.
+    pub defline_thrown: bool,
 }
 
 impl<'a> XmlHit<'a> {
@@ -119,6 +123,7 @@ impl<'a> XmlHit<'a> {
             taxid: names.taxid,
             taxonomy: &names.taxonomy,
             descriptions: &names.descriptions,
+            defline_thrown: names.defline_thrown,
         }
     }
 }

@@ -225,6 +225,7 @@ pub(super) fn prepare(
         .map(|(q_idx, ((query, hitlist), &valid))| {
             names::query_text(
                 PROGRAM,
+                query.local_id.as_bytes(),
                 query.warning_id(),
                 query.believed(),
                 query.title(),
@@ -279,8 +280,7 @@ pub(super) fn prepare(
                     taxa.taxids.get(s_idx).copied().unwrap_or(0),
                     taxa.taxonomy.get(s_idx).cloned().unwrap_or_default(),
                 ),
-            }
-            .map_err(|refusal| refusal.error(PROGRAM, "a database title"))?,
+            },
         });
         // The whole record (`-subject_loc` searches part of it).
         subject_lengths[s_idx] =
@@ -414,7 +414,12 @@ impl PreparedXml {
             // line).
             if ranges.epilog {
                 document.finish(&mut buf)?;
-                writer.write_all(&buf)?;
+                crate::report::query_warnings::write_document_posts(
+                    &buf,
+                    document.take_posts(),
+                    writer,
+                    warnings.as_deref_mut(),
+                )?;
             }
             return Ok(());
         };
@@ -422,7 +427,7 @@ impl PreparedXml {
             program: "tblastn",
             version: concat!("TBLASTN ", crate::ncbi_blast_version!()),
             reference: REFERENCE_GAPPED_BLAST,
-            db_name: self.db_name.as_bytes(),
+            db_name: &self.db_name,
             matrix: Some(&self.matrix_name),
             expect: self.values.expect,
             gap_open: self.gap_open,
@@ -448,7 +453,12 @@ impl PreparedXml {
             if q_idx == self.texts.len() {
                 // The held report that is never written (`prepare`, `written_queries`).
                 document.unwritten(&mut buf)?;
-                writer.write_all(&buf)?;
+                crate::report::query_warnings::write_document_posts(
+                    &buf,
+                    document.take_posts(),
+                    writer,
+                    warnings.as_deref_mut(),
+                )?;
                 buf.clear();
                 break;
             }
@@ -476,7 +486,7 @@ impl PreparedXml {
                 );
             }
             let xml_query = XmlQuery {
-                id: query.local_id.as_bytes(),
+                id: text.query_id(query.local_id.as_bytes()),
                 title: &text.title,
                 len: i32::try_from(query_letters.len())?,
                 stats: self.stats[q_idx],
@@ -606,6 +616,7 @@ impl PreparedXml {
             });
             // A failed query leaves its partial bytes in `buf`, which the error return drops.
             written?;
+            posts.document(document.take_posts());
             crate::report::query_warnings::write_hit_posts(
                 &buf,
                 &posts,
@@ -617,7 +628,12 @@ impl PreparedXml {
         }
         if ranges.epilog {
             document.finish(&mut buf)?;
-            writer.write_all(&buf)?;
+            crate::report::query_warnings::write_document_posts(
+                &buf,
+                document.take_posts(),
+                writer,
+                warnings,
+            )?;
         }
         Ok(())
     }

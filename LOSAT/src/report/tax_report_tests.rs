@@ -478,7 +478,10 @@ fn the_texts_of_a_subjects_read_come_before_its_lookups() {
         hsps: Some(vec![hsp(0, 3e-171, 461.0), hsp(1, 1e-3, 30.0)]),
     }];
     let report = TaxReport::new(&queries, &subjects, lookups(names.as_ref())).unwrap();
-    let reads = vec![vec![(0, b"read A\n".to_vec()), (1, b"read B\n".to_vec())]];
+    let reads = vec![vec![
+        crate::report::query_warnings::SubjectRead::of_text(0, b"read A\n"),
+        crate::report::query_warnings::SubjectRead::of_text(1, b"read B\n"),
+    ]];
     let mut cursor = ReadCursor::new(&reads).unwrap();
     let merged = Merged::default();
     report

@@ -174,9 +174,9 @@ pub(crate) fn xml2_run(run: &TblastxReportRun<'_>) -> Xml2Run {
 /// Writes the document of every query of `run` (`hits` is the final list after
 /// `shift_to_records`: record coordinates, in query order) through `document` (BLAST XML, or
 /// the XML2 / JSON documents) to `writer`, each query's warnings before it, with the document's
-/// header before the first query and its end after the last when `run.epilog`. Everything NCBI
-/// cannot write is refused before the first byte: the `-db` name, the query titles and
-/// messages, the titles of the subjects with hits. `all_masks`: the masks of every searched
+/// header before the first query and its end after the last when `run.epilog`. A query or
+/// subject title that NCBI crashes on (`names::Refusal`) is refused before the first byte; every
+/// other text is written as NCBI's streams write it. `all_masks`: the masks of every searched
 /// query are listed (XML2 and JSON), not those of the queries with hits alone (outfmt 5).
 /// `run.xml_taxa` holds the taxids of the database sequences that XML2 and JSON show.
 pub(crate) fn write_tblastx_xml<W: StructuredXml>(
@@ -198,7 +198,6 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         ),
         None => ("", 0, 0),
     };
-    names::check_database_name(PROGRAM, db_name)?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2206-2208 (XML2
     // and JSON) and :2242-2243 (BLAST XML)
     // ```c++
@@ -237,7 +236,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         program: "tblastx",
         version: concat!("TBLASTX ", crate::ncbi_blast_version!()),
         reference: REFERENCE_GAPPED_BLAST,
-        db_name: db_name.as_bytes(),
+        db_name,
         matrix: Some(matrix),
         expect: args.evalue,
         gap_open,
@@ -280,6 +279,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         .map(|(q_idx, query)| {
             names::query_text(
                 PROGRAM,
+                query.local_id.as_bytes(),
                 query.warning_id(),
                 query.believed(),
                 query.title(),
@@ -339,7 +339,12 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         if q_idx == reports {
             // The held report that is never written (`written_queries`).
             document.unwritten(&mut buf)?;
-            writer.write_all(&buf)?;
+            crate::report::query_warnings::write_document_posts(
+                &buf,
+                document.take_posts(),
+                writer,
+                warnings.as_deref_mut(),
+            )?;
             buf.clear();
             break;
         }
@@ -359,7 +364,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
             );
         }
         let xml_query = XmlQuery {
-            id: query.local_id.as_bytes(),
+            id: text.query_id(query.local_id.as_bytes()),
             title: &text.title,
             len: i32::try_from(searched_length)?,
             stats: query_stats(&run.query_stats[q_idx], run.numbers),
@@ -466,6 +471,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         });
         // A failed query leaves its partial bytes in `buf`, which the error return drops.
         written?;
+        posts.document(document.take_posts());
         crate::report::query_warnings::write_hit_posts(
             &buf,
             &posts,
@@ -477,7 +483,12 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     }
     if run.epilog {
         document.finish(&mut buf)?;
-        writer.write_all(&buf)?;
+        crate::report::query_warnings::write_document_posts(
+            &buf,
+            document.take_posts(),
+            writer,
+            warnings,
+        )?;
     }
     Ok(())
 }

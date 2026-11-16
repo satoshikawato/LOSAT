@@ -390,7 +390,7 @@ impl TblastnDatabase {
         reported: &ReportedSubjects,
         hitlists: &[KappaResultHitList],
         query: usize,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<crate::report::diag_log::Posts> {
         let subjects = hitlists
             .iter()
             .flat_map(KappaResultHitList::lists)

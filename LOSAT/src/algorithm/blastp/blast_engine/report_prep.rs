@@ -191,6 +191,7 @@ pub(super) fn query_warning_lines(prep: &ReportPrep<'_, '_>) -> Vec<Vec<u8>> {
 pub(super) fn prefetch_reported_subjects(
     prep: &ReportPrep<'_, '_>,
     query_warning_lines: &mut [Vec<u8>],
+    prefetch_posts: &mut Vec<(usize, crate::report::diag_log::Posts)>,
     psiblast_pssms: &mut Option<PssmFiles>,
 ) -> Result<SubjectReads> {
     let ReportPrep {
@@ -512,12 +513,11 @@ pub(super) fn prefetch_reported_subjects(
                     }
                 };
                 open_for_rows(lists)?;
-                if messages.is_empty() {
-                    continue;
+                // After the reader's messages of the batch, in its first query
+                // (`query_warnings::query_posts`).
+                if !messages.is_empty() {
+                    prefetch_posts.push((batch.searched.start, messages));
                 }
-                let first = batch.searched.start;
-                let reader = reports.reader_warnings.get(first).map_or(0, Vec::len);
-                query_warning_lines[first].splice(reader..reader, messages);
             }
         }
     }

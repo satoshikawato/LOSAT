@@ -718,7 +718,7 @@ opener, the reader's error texts and the title rules are those of BLASTP's and B
 Rejected explicitly, besides what BLASTN `-db` and the reader reject (the same rules apply):
 `-searchsp`, `-db_soft_mask`, `-db_hard_mask`, and the options TBLASTN rejects with `-subject`.
 
-## BLASTN database masks (line NP, M4a-2a and M4a-2b, 2026-11-14)
+## BLASTN database masks (line NP, M4a-2a and M4a-2b, 2026-11-14; M4a-2c, 2026-11-15)
 
 `losat blastn -db NAME -db_soft_mask ID` searches with the masks of the filtering algorithm `ID`
 that `makeblastdb -mask_data` stored in the database, as NCBI BLAST+ 2.17.0 does, byte for byte:
@@ -758,14 +758,24 @@ with the masked letters cut out, as NCBI BLAST+ 2.17.0 does, byte for byte:
   into the chunks the search cuts (one chunker for both), and the search is refused at the first
   sequence whose masks NCBI's chunks do not handle; the error names it by its OID and volume:
   masks stored out of order or overlapping (hand-made mask data), whose result NCBI ties to the
-  slices of its partial fetch; a chunk from the sequence's start that a mask running to its end
-  follows (the first mask with letters, with at most 5,000,000 letters and no other mask before
-  it than masks of no letters at 0: all masked, or one masked tail such as a poly-A tail),
+  slices of its partial fetch; at a scanned word (the word size, the template's length for
+  dc-megablast) below 11 letters (blastn-short's 7), a chunk from the sequence's start that a mask running to
+  its end follows (the first mask with letters, with at most 5,000,000 letters and no other mask
+  before it than masks of no letters at 0: all masked, or one masked tail such as a poly-A tail),
   which NCBI scans over the whole sequence past the chunk, in a sequence of at least the
-  word's letters (the template's for dc-megablast; NCBI scans every BLASTN subject, however
-  short): a normal-looking result, or a corrupt heap and a crash (question Q1 of line NP to the
-  Owner); after a mask of no letters elsewhere, or after more than 5,000,000 letters, the
-  chunk from 0 is one of NCBI's normal chunks and the sequence is searched; and a last mask
+  word's letters (NCBI scans every BLASTN subject, however short): rows that differ from those
+  of the input with the mask one letter shorter, or a crash. At a scanned word
+  of 11 or more (megablast, blastn, dc-megablast) such a sequence is searched over that chunk
+  alone, the range before the mask, with the masked letters read as `B` in the traceback (the
+  approved NCBI defect PD-LOSAT-NCBI-DEFECTS exception 13, the Owner's decision of 2026-11-15,
+  line NP M4a-2c): NCBI's own result where NCBI ends normally and its scan past the chunk adds
+  no alignment; where that scan adds one (a word across the mask's start, in an alignment with
+  too few letters before the mask for a word), leaves diagonal state that drops seeds of the
+  sequence searched next in the same thread (which sequence depends on NCBI's threads), or ends in a
+  crash, the result of NCBI's normal chunks, as for the input with the mask one letter shorter; the
+  sequences after it are searched as without it. After a
+  mask of no letters elsewhere, or after more than 5,000,000 letters, the chunk from 0 is one of
+  NCBI's normal chunks and the sequence is searched; and a last mask
   after which the final chunk starts before the end of an earlier chunk of another stretch (the
   mask is shorter than the 1 to 3 letters before its end that the final chunk starts with),
   where both chunks hold a word, so that the overlap that NCBI reads past its list of ranges

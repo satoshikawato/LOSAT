@@ -47,8 +47,9 @@ pub enum SerialError {
     /// A VisibleString byte outside 0x20..0x7E in the ASN.1 text or binary stream (in XML a
     /// control character other than TAB, LF and CR), which NCBI replaces by `#` with an error
     /// message (`eFNP_ReplaceAndWarn`, `ReplacedChar`): `visible_str` reports it here; a
-    /// caller that posts NCBI's messages writes the document again through `Traced`
-    /// (`visible_str_replacing`), the other callers refuse such strings before the search.
+    /// writer that posts NCBI's messages writes the document again through `Traced`
+    /// (`visible_str_replacing`: the archive, the search strategy, the Seq-annots of outfmt 8
+    /// and 9, the mask writers, psiblast's PSSM file); for the others it is the writer's error.
     NonVisibleChar(u8),
     /// A NaN or an infinity in the ASN.1 binary stream, which NCBI marks with its own form
     /// byte and LOSAT does not write (no BLAST report has one).
@@ -378,9 +379,10 @@ enum Frame {
 /// 14 / 16, which writes it otherwise) with NCBI's object stack, for the posts of the bytes that
 /// it replaces (`ReplacedChar`). A caller that posts NCBI's messages writes a document through
 /// it when one of its strings has such a byte (the archive and the search strategy decide that
-/// before they write, `report::archive`; the mask writers write a document again when the first
-/// writing reported `SerialError::NonVisibleChar`); it writes the strings with
-/// `visible_str_replacing`. The encoders by themselves keep no stack and replace nothing, so that
+/// before they write, `report::archive`; the mask writers, the Seq-annots of outfmt 8 and 9
+/// (`seqalign::write_query_to`) and psiblast's PSSM file (`pssm::asn_text_posting`) write a
+/// document again when the first writing reported `SerialError::NonVisibleChar`); it writes the
+/// strings with `visible_str_replacing`. The encoders by themselves keep no stack and replace nothing, so that
 /// the documents without such a byte are written as before.
 ///
 /// The positions count from the document's start: `flush_to` counts the bytes that it hands on

@@ -51,6 +51,14 @@ pub(crate) enum Subjects<'a> {
 }
 
 impl<'a> Subjects<'a> {
+    /// The database of a `-db` search whose sequences are read (`None` for `-subject`).
+    pub(crate) fn seqdb(&self) -> Option<&'a crate::seqdb::SeqDb> {
+        match self {
+            Self::Stream(stream) => Some(stream.seqdb()),
+            Self::Fasta(_) | Self::Stored(_) | Self::Unreadable => None,
+        }
+    }
+
     /// The number of subjects.
     pub(crate) fn count(&self) -> usize {
         match self {

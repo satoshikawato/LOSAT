@@ -60,6 +60,14 @@ impl<'a> From<&'a Vec<FastaRecord>> for Subjects<'a> {
 }
 
 impl<'a> Subjects<'a> {
+    /// The database of a `-db` search whose sequences are read (`None` for `-subject`).
+    pub(crate) fn seqdb(&self) -> Option<&'a crate::seqdb::SeqDb> {
+        match self {
+            Subjects::Stream(stream) => Some(stream.db.seqdb()),
+            Subjects::Fasta(_) | Subjects::Unreadable => None,
+        }
+    }
+
     /// The number of subjects.
     pub(crate) fn len(&self) -> usize {
         match self {

@@ -229,6 +229,11 @@ impl<'a> XDbStream<'a> {
         self.checked.count
     }
 
+    /// The database read.
+    pub(crate) fn seqdb(&self) -> &'a SeqDb {
+        self.db
+    }
+
     /// The number of bases of the longest sequence and of all the sequences.
     pub(crate) fn longest_and_total(&self) -> (usize, u64) {
         (self.checked.longest as usize, self.checked.total)

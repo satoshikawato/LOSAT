@@ -1123,45 +1123,164 @@ impl ReportedHeader {
     }
 }
 
+/// Whether the sequences of a database search keep a definition line under its seqid list
+/// (`SeqDb::keeps_line`), each read once: the one check of NCBI's two places that drop a
+/// sequence without a line, the fetches with `check_oid_exclusion` (`FetchExcluded`) and the
+/// Seq-aligns (`SeqAligned`). A header that cannot be read as NCBI's header read adjusts it is
+/// not kept in the cache: each place decides what its error does.
+struct LineCheck<'a> {
+    db: &'a SeqDb,
+    kept: std::sync::Mutex<std::collections::HashMap<u32, bool>>,
+}
+
+impl<'a> LineCheck<'a> {
+    fn new(db: &'a SeqDb) -> Self {
+        LineCheck {
+            db,
+            kept: std::sync::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    /// Whether `ordinal` keeps a line (read at its first check; the lock is not held while the
+    /// header is read and decoded), or the reader's error.
+    fn read(&self, ordinal: u32) -> Result<bool, SeqDbError> {
+        let cached = self
+            .kept
+            .lock()
+            .expect("the line cache is not poisoned")
+            .get(&ordinal)
+            .copied();
+        if let Some(kept) = cached {
+            return Ok(kept);
+        }
+        let kept = self.db.keeps_line(ordinal)?;
+        self.kept
+            .lock()
+            .expect("the line cache is not poisoned")
+            .insert(ordinal, kept);
+        Ok(kept)
+    }
+}
+
+/// NCBI's fetches with `check_oid_exclusion` of a database search (line DBID item lineless2):
+/// under a negative seqid list with ids (`SeqDb::excludes_lineless_at_fetch`), a sequence that
+/// the list keeps without any of its definition lines is excluded where the gapped traceback,
+/// the composition-based redo or the ungapped re-evaluation of a nucleotide subject fetches it
+/// (seqsrc_seqdb.cpp:302-313). It was searched and counts in the statistics; a gapped search's
+/// preliminary hit lists hold it (it took its place there), and its hits leave the search
+/// before the final hit lists are made, so they take no place in them. Each program removes
+/// such subjects from the preliminary hit lists right before its traceback or redo, after
+/// their cut and trim (`ADAPTIVE_CBS`), and an ungapped search of a nucleotide database drops
+/// a subject's HSPs before they reach the preliminary hit lists. Shared by the threads of a
+/// search (`Sync`); each subject's header is read once.
+///
+/// NCBI's fetch reads the header of every subject it fetches (`GetSeqIDs`), so a header that
+/// cannot be read ends NCBI's search there (exit 255 in the traceback, `BLAST engine error`
+/// in the ungapped re-evaluation) even where the subject would not be reported; LOSAT refuses
+/// such a search there (`refusal`). The composition-based redo fetches only the matches that
+/// its early termination test leaves (blast_kappa.c:3525-3540), so LOSAT, which checks every
+/// subject of the preliminary hit lists, may refuse a search with such a header that NCBI ends
+/// without reading it.
+pub(crate) struct FetchExcluded<'a>(LineCheck<'a>);
+
+impl<'a> FetchExcluded<'a> {
+    /// The check of `db`'s fetches; `None` where they exclude nothing (no negative seqid list
+    /// with ids).
+    pub(crate) fn of(db: &'a SeqDb) -> Option<Self> {
+        db.excludes_lineless_at_fetch()
+            .then(|| FetchExcluded(LineCheck::new(db)))
+    }
+
+    /// Whether the fetch of `ordinal` excludes it; the reader's error where its header cannot
+    /// be read (`refusal`).
+    pub(crate) fn excludes(&self, ordinal: u32) -> Result<bool, SeqDbError> {
+        self.0.read(ordinal).map(|kept| !kept)
+    }
+
+    /// `items` (preliminary hit lists, or HSP lists) without those on a subject the fetch
+    /// excludes, in their order; `ordinal` names an item's subject (`None`: kept). The first
+    /// header that cannot be read, in the order of `items`, is the error (with its ordinal),
+    /// and `items` is left as it was.
+    pub(crate) fn retain<T>(
+        &self,
+        items: &mut Vec<T>,
+        ordinal: impl Fn(&T) -> Option<u32>,
+    ) -> Result<(), (u32, SeqDbError)> {
+        let mut keep = Vec::with_capacity(items.len());
+        for item in items.iter() {
+            keep.push(match ordinal(item) {
+                Some(ordinal) => !self.excludes(ordinal).map_err(|error| (ordinal, error))?,
+                None => true,
+            });
+        }
+        let mut keep = keep.into_iter();
+        items.retain(|_| keep.next().unwrap_or(true));
+        Ok(())
+    }
+
+    /// LOSAT's refusal (in `program`'s name) of a search whose fetch of `ordinal` cannot read
+    /// its header (`error`), where NCBI's search fails (`FetchRefusal`).
+    pub(crate) fn refusal((ordinal, error): (u32, SeqDbError), program: &str) -> anyhow::Error {
+        FetchRefusal(
+            refusal(
+                &format!(
+                    "under the negative seqid list NCBI reads the definition lines of each \
+                     sequence that its search aligns again, and those of sequence {ordinal} \
+                     cannot be read ({error})"
+                ),
+                program,
+            )
+            .to_string(),
+        )
+        .into()
+    }
+}
+
+/// LOSAT's refusal of `FetchExcluded::refusal`, a type of its own so that a program that
+/// reports the other errors of its search as NCBI's engine errors passes it on as it is.
+#[derive(Debug)]
+pub(crate) struct FetchRefusal(String);
+
+impl std::fmt::Display for FetchRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for FetchRefusal {}
+
 /// NCBI's Seq-aligns of the final hit lists of a database search (line DBID item lineless):
-/// a hit on a sequence that the database's positive seqid list keeps without any of its
-/// definition lines gets none (`SeqDb::keeps_line`, blast_seqalign.cpp:1582-1586), so it leaves every
+/// a hit on a sequence that the database's seqid list keeps without any of its definition
+/// lines gets none (`SeqDb::keeps_line`, blast_seqalign.cpp:1582-1586), so it leaves every
 /// report, the prefetch, the taxonomy lookups and psiblast's PSSM, while it was searched, took
 /// its place in the hit list before the cut to `-max_target_seqs` and counts in the
 /// statistics. Each program drops such hit lists right after that cut, before the reads of
 /// the reported sequences; a check reads each sequence's header once (one check per query
-/// batch or search call; the reads of the reports decode the kept ones again).
-pub(crate) struct SeqAligned<'a> {
-    db: &'a SeqDb,
-    kept: std::collections::HashMap<u32, bool>,
-}
+/// batch or search call; the reads of the reports decode the kept ones again). Under a
+/// negative seqid list with ids the search's fetches have excluded them before
+/// (`FetchExcluded`), except a protein subject of an ungapped search, which no fetch checks.
+pub(crate) struct SeqAligned<'a>(LineCheck<'a>);
 
 impl<'a> SeqAligned<'a> {
-    /// The check of `db`'s hits; `None` where no positive seqid list removes lines (no hit is
-    /// dropped here: `SeqDb::drops_lineless_hits`).
-    pub(crate) fn of(db: &'a SeqDb) -> Option<Self> {
-        db.drops_lineless_hits().then(|| SeqAligned {
-            db,
-            kept: std::collections::HashMap::new(),
-        })
-    }
-
-    /// Whether a hit on `ordinal` gets a Seq-align. A header that cannot be read as NCBI's
-    /// header read adjusts it counts as kept: the reads of the reports then give its error, as
-    /// before (NCBI's `GetSeqIDs` fails at the same Seq-align).
-    fn keeps(&mut self, ordinal: u32) -> bool {
-        let db = self.db;
-        *self
-            .kept
-            .entry(ordinal)
-            .or_insert_with(|| db.keeps_line(ordinal).unwrap_or(true))
+    /// The check of `db`'s hits; `None` where no hit is dropped here: no seqid list removes
+    /// lines, or the search's fetches have excluded the sequences without a line before
+    /// (`fetched`, the caller's: the search fetches its subjects with `check_oid_exclusion`, a
+    /// gapped search or an ungapped one of a nucleotide database; and the database's list is
+    /// negative with ids, `SeqDb::excludes_lineless_at_fetch`).
+    pub(crate) fn of(db: &'a SeqDb, fetched: bool) -> Option<Self> {
+        (db.drops_lineless_hits() && !(fetched && db.excludes_lineless_at_fetch()))
+            .then(|| SeqAligned(LineCheck::new(db)))
     }
 
     /// `items` (hit lists, or the HSPs of a batch) without those on a subject that gets no
     /// Seq-align, in their order; `ordinal` names an item's subject (`None`: no database
     /// ordinal, kept).
     pub(crate) fn retain<T>(&mut self, items: &mut Vec<T>, ordinal: impl Fn(&T) -> Option<u32>) {
-        items.retain(|item| ordinal(item).is_none_or(|ordinal| self.keeps(ordinal)));
+        // A header that cannot be read counts as kept: the reads of the reports then give its
+        // error, as before (NCBI's `GetSeqIDs` fails at the same Seq-align).
+        items.retain(|item| {
+            ordinal(item).is_none_or(|ordinal| self.0.read(ordinal).unwrap_or(true))
+        });
     }
 }
 

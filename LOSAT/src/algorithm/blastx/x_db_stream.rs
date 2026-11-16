@@ -213,6 +213,11 @@ impl<'a> XStreamDb<'a> {
         self.count
     }
 
+    /// The database read.
+    pub(crate) fn seqdb(&self) -> &'a SeqDb {
+        self.db
+    }
+
     /// `GetTotalLength` (`SeqDb::total_length`).
     pub(crate) fn total_length(&self) -> u64 {
         self.db.total_length()

@@ -1,0 +1,762 @@
+Error: (803.7) [blastx] Seq-annot.desc.E.user.data.E.label.str
+Bad char [0xC3] in string at byte 199
+café db 
+Error: (803.7) [blastx] Seq-annot.desc.E.user.data.E.label.str
+Bad char [0xA9] in string at byte 200
+café db 
+Error: (803.7) [blastx] Seq-annot.desc.E.user.data.E.label.str
+Bad char [0x7F] in string at byte 205
+café db 
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 628
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 711
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 1193
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 1276
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 1758
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 1841
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 2323
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 2406
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 2888
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 2971
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 3453
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 3536
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 4018
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 4101
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 4583
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 4666
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 5148
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 5231
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 5713
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 5796
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 6278
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 6361
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 6843
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 6926
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 7408
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 7491
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 7973
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 8056
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 8538
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 8621
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 9103
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 9186
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 9668
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 9751
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 10233
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 10316
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 10798
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 10881
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 11363
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 11446
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 11927
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 12010
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 12490
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 12573
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 13054
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 13137
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 13618
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 13701
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 14182
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 14265
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 14746
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 14829
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 15310
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 15393
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 15874
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 15957
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 16438
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 16521
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 17002
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 17085
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 17566
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 17649
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 18130
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 18213
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 18694
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 18777
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 19258
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 19341
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 19822
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 19905
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 20386
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 20469
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 20950
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 21033
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 21514
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 21597
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 22078
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 22161
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 22642
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 22725
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 23207
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 23290
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 23770
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 23853
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 24335
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 24418
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 24900
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 24983
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 25465
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 25548
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 26030
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 26113
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 26595
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 26678
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 27160
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 27243
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 27725
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 27808
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 28290
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 28373
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 28855
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 28938
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 29420
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 29503
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 29985
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 30068
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 30550
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 30633
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 31115
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 31198
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 31680
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 31763
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 32245
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 32328
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 32810
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 32893
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 33375
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 33458
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 33940
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 34023
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 34513
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 34595
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 35084
+q1
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 35166
+q1
+Error: (803.7) [blastx] Seq-annot.desc.E.user.data.E.label.str
+Bad char [0xC3] in string at byte 199
+café db 
+Error: (803.7) [blastx] Seq-annot.desc.E.user.data.E.label.str
+Bad char [0xA9] in string at byte 200
+café db 
+Error: (803.7) [blastx] Seq-annot.desc.E.user.data.E.label.str
+Bad char [0x7F] in string at byte 205
+café db 
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 628
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 711
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 1193
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 1276
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 1758
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 1841
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 2323
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 2406
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 2888
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 2971
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 3453
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 3536
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 4018
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 4101
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 4583
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 4666
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 5148
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 5231
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 5713
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 5796
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 6278
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 6361
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 6843
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 6926
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 7408
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 7491
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 7973
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 8056
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 8538
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 8621
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 9103
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 9186
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 9668
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 9751
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 10233
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 10316
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 10798
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 10881
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 11363
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 11446
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 11927
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 12010
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 12490
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 12573
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 13054
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 13137
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 13618
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 13701
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 14182
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 14265
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 14746
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 14829
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 15310
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 15393
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 15874
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 15957
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 16438
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 16521
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 17002
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 17085
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 17566
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 17649
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 18130
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 18213
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 18694
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 18777
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 19258
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 19341
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 19822
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 19905
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 20386
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 20469
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 20950
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 21033
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 21514
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 21597
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 22078
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 22161
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 22642
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 22725
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 23207
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 23290
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 23770
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 23853
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 24335
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 24418
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 24900
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 24983
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 25465
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 25548
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 26030
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 26113
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 26595
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 26678
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 27160
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 27243
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 27725
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 27808
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 28290
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 28373
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 28855
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 28938
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 29420
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 29503
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 29985
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 30068
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 30550
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 30633
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 31115
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 31198
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 31680
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 31763
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 32245
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 32328
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 32810
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 32893
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 33375
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 33458
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 33940
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 34023
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 34513
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 34597
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str
+Bad char [0x7F] in string at byte 35086
+q2
+Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.loc.E.int.id.local.str
+Bad char [0x7F] in string at byte 35169
+q2

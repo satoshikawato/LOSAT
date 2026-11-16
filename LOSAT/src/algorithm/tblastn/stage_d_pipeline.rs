@@ -90,6 +90,10 @@ pub(super) struct LocalStageDProfile<'a> {
     /// query (`score::PssmScore`) and of its Karlin-Altschul blocks (`query_set_setup`); `None`
     /// for a FASTA query batch.
     pub pssm: Option<&'a crate::algorithm::pssm_search::PsiSearch>,
+    /// NCBI's fetches with `check_oid_exclusion` of a database search (`database::fetch_excluded`;
+    /// `None` without a database or where they exclude nothing): the subjects they exclude leave
+    /// the preliminary hit lists before the redo or the traceback.
+    pub fetch_excluded: Option<&'a crate::algorithm::common::database::FetchExcluded<'a>>,
 }
 
 /// The numbers of a database (`-db`) as NCBI's setup reads them from its sequence source
@@ -1520,6 +1524,21 @@ fn run_local_search_with_pool(
             })
         })
         .collect();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575 and
+    // blast_traceback.c:1567-1577 (quoted at `blastp::blast_engine::database::exclude_fetched`)
+    // The redo's and the traceback's fetches (`check_oid_exclusion`) exclude a subject that the
+    // negative seqid list keeps without a line: its lists leave here, after the trim of
+    // `ADAPTIVE_CBS`, before the redo or the traceback (tblastn is gapped: `-ungapped` is
+    // refused).
+    if let Some(excluded) = profile.fetch_excluded {
+        excluded
+            .retain(&mut preliminary_lists, |(_, oid, _)| {
+                u32::try_from(*oid).ok()
+            })
+            .map_err(|failed| {
+                crate::algorithm::common::database::FetchExcluded::refusal(failed, "TBLASTN")
+            })?;
+    }
     // NCBI c++/src/algo/blast/core/blast_hspstream.c:91-96,158-204,
     // 569-610: the ordinary traceback stream sorts HSP lists by decreasing
     // OID, then each batch reads from the end; equal-OID query lists were
@@ -3701,7 +3720,6 @@ fn finish_local_mode0_no_sum_stats(
                 scoring.gap_extend,
                 final_xdrop,
                 0.0,
-                0,
                 profile.seg,
                 profile.soft_masking,
                 profile.mask_lowercase,
@@ -3935,6 +3953,7 @@ mod tests {
                 engine_positives: false,
                 culling_limit: 0,
                 pssm: None,
+                fetch_excluded: None,
             },
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             true,
@@ -3986,6 +4005,7 @@ mod tests {
                 engine_positives: false,
                 culling_limit: 0,
                 pssm: None,
+                fetch_excluded: None,
             },
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             true,
@@ -4277,6 +4297,7 @@ mod tests {
                 engine_positives: false,
                 culling_limit: 0,
                 pssm: None,
+                fetch_excluded: None,
             },
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             true,
@@ -4366,6 +4387,7 @@ mod tests {
                 engine_positives: false,
                 culling_limit: 0,
                 pssm: None,
+                fetch_excluded: None,
             },
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             true,
@@ -4524,6 +4546,7 @@ mod tests {
                 engine_positives: false,
                 culling_limit: 0,
                 pssm: None,
+                fetch_excluded: None,
             },
         )
         .unwrap();
@@ -4618,6 +4641,7 @@ mod tests {
                     engine_positives: false,
                     culling_limit: 0,
                     pssm: None,
+                    fetch_excluded: None,
                 },
             )
             .unwrap();
@@ -4803,6 +4827,7 @@ mod tests {
                     engine_positives: false,
                     culling_limit: 0,
                     pssm: None,
+                    fetch_excluded: None,
                 };
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
@@ -5035,6 +5060,7 @@ mod tests {
                     engine_positives: false,
                     culling_limit: 0,
                     pssm: None,
+                    fetch_excluded: None,
                 };
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
@@ -5250,6 +5276,7 @@ mod tests {
                 engine_positives: false,
                 culling_limit: 0,
                 pssm: None,
+                fetch_excluded: None,
             },
             BlastCompoAdjustMode::NoCompositionBasedStats,
             false,
@@ -5399,6 +5426,7 @@ mod tests {
                 engine_positives: false,
                 culling_limit: 0,
                 pssm: None,
+                fetch_excluded: None,
             },
             BlastCompoAdjustMode::NoCompositionBasedStats,
             false,
@@ -5570,6 +5598,7 @@ mod tests {
                 engine_positives: false,
                 culling_limit: 0,
                 pssm: None,
+                fetch_excluded: None,
             };
             let mut boundary = StageDBoundaryTrace::default();
             let result = run_local_search(
@@ -5772,6 +5801,7 @@ mod tests {
                     engine_positives: false,
                     culling_limit: 0,
                     pssm: None,
+                    fetch_excluded: None,
                 };
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
@@ -5937,6 +5967,7 @@ mod tests {
                         engine_positives: false,
                         culling_limit: 0,
                         pssm: None,
+                        fetch_excluded: None,
                     },
                     BlastCompoAdjustMode::CompositionMatrixAdjust,
                     true,
@@ -6249,6 +6280,7 @@ mod tests {
                 engine_positives: false,
                 culling_limit: 0,
                 pssm: None,
+                fetch_excluded: None,
             },
         )
         .unwrap();
@@ -6440,6 +6472,7 @@ mod tests {
                     engine_positives: false,
                     culling_limit: 0,
                     pssm: None,
+                    fetch_excluded: None,
                 },
             )
             .unwrap();
@@ -6556,6 +6589,7 @@ mod tests {
                 engine_positives: false,
                 culling_limit: 0,
                 pssm: None,
+                fetch_excluded: None,
             },
         )
         .unwrap();
@@ -6654,6 +6688,7 @@ mod tests {
                 engine_positives: false,
                 culling_limit: 0,
                 pssm: None,
+                fetch_excluded: None,
             },
         )
         .unwrap();
@@ -6769,6 +6804,7 @@ mod tests {
                 engine_positives: false,
                 culling_limit: 0,
                 pssm: None,
+                fetch_excluded: None,
             },
         )
         .unwrap();
@@ -7045,6 +7081,7 @@ mod tests {
             engine_positives: false,
             culling_limit: 0,
             pssm: None,
+            fetch_excluded: None,
         };
         for ranges in [
             vec![0..1],
@@ -7139,6 +7176,7 @@ mod tests {
             engine_positives: false,
             culling_limit: 0,
             pssm: None,
+            fetch_excluded: None,
         };
         let ranges = vec![0..1, 1..2, 2..3, 3..4];
         let searched = x_search_batches(

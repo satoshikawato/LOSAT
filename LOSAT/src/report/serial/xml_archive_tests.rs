@@ -341,11 +341,18 @@ fn a_string_byte_from_0x7f_up_is_written_as_it_is_and_a_control_byte_is_an_error
         b"T.m\nBad char [0x1] in string at line 4".to_vec()
     );
     assert!(buf.ends_with(b"<T_m>a&#x9;b#c\x7f</T_m>\n</T>\n"));
-    // The US-ASCII stream of outfmt 5 still refuses a byte >= 0x80.
+    // The US-ASCII stream of outfmt 5 decodes a byte >= 0x80 and throws where the character is
+    // not ASCII (`report::blast_xml::tests` has the cases).
     let mut buf = Vec::new();
     let mut enc = XmlEncoder::object(&mut buf);
     enc.visible_str(b"caf\xc3\xa9");
-    assert_eq!(enc.error(), Some(SerialError::NonAsciiChar(0xc3)));
+    assert_eq!(
+        enc.error(),
+        Some(SerialError::Utf8(
+            crate::ncbi_str::utf8::Utf8Error::SymbolToChar
+        ))
+    );
+    assert_eq!(buf, b"caf".to_vec());
 }
 
 #[test]

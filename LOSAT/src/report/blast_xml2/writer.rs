@@ -21,14 +21,14 @@ use anyhow::Result;
 use crate::report::blast_xml::hsp::{round6, MaskLetter};
 use crate::report::blast_xml::records::{HitTaxonomy, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats};
 use crate::report::blast_xml::writer::{
-    count_hsp, int_member, real_member, string_member, HitSink, HitWrite, HspSink, HspWrite,
-    Scratch, StructuredXml,
+    count_hsp, int_member, real_member, replaced_posts, string_member, DocumentPost, HitSink,
+    HitWrite, HspSink, HspWrite, Scratch, StructuredXml,
 };
-use crate::report::serial::encoder::Encoder;
+use crate::report::serial::encoder::{Encoder, SerialError};
 use crate::report::serial::json::JsonEncoder;
 use crate::report::serial::xml::XmlEncoder;
 
-use super::framing::{NoSideFiles, RunSideFiles, SideFiles, Xml2Document, Xml2Kind};
+use super::framing::{MadeReport, NoSideFiles, RunSideFiles, SideFiles, Xml2Document, Xml2Kind};
 use super::records::{Xml2Run, Xml2Target};
 
 /// `Parameters` (`s_SetBlastXMLParameters`, blastxml2_format.cpp:514-555), members in the order
@@ -221,8 +221,9 @@ where
         // (`seqdb::alias::report_names`): quotes kept, one space between names.
         Xml2Target::Database => {
             enc.variant("Target", "db", 0);
-            let names = crate::seqdb::alias::report_names(&String::from_utf8_lossy(run.db_name));
-            enc.visible_str(names.join(" ").as_bytes());
+            // The names' bytes reach the stream as they are; the stream writes or throws on them.
+            let names = crate::seqdb::alias::report_names(run.db_name).join(" ");
+            enc.visible_str(names.as_bytes());
             enc.end_variant();
         }
         Xml2Target::Subjects(count) => match &params.subject_names {
@@ -437,6 +438,110 @@ impl<E: Encoder> HspWrite for Xml2Hsps<'_, E> {
     }
 }
 
+/// Whether the text of the element `tag` of a report is a VisibleString (`string_member`, the
+/// target's `db` and `subjects`) rather than a number (`int_member`, `real_member`, `big_int`):
+/// NCBI's stream writes a string one character at a time and a number at once, which decides
+/// where its buffer reaches the output (`out_buffer::xml_written_at`).
+pub(super) fn is_string_element(tag: &[u8]) -> bool {
+    matches!(
+        tag,
+        b"program"
+            | b"version"
+            | b"reference"
+            | b"db"
+            | b"subjects"
+            | b"matrix"
+            | b"filter"
+            | b"query-id"
+            | b"query-title"
+            | b"id"
+            | b"accession"
+            | b"title"
+            | b"sciname"
+            | b"query-strand"
+            | b"hit-strand"
+            | b"qseq"
+            | b"hseq"
+            | b"midline"
+            | b"message"
+    )
+}
+
+/// What an XML report of outfmt 16 or 14 hands the framing (`MadeReport`) after its writer's
+/// `result`: the posts of its replaced control characters and, when NCBI's stream threw, the
+/// report cut at the failing byte (`XmlThrow::at`) and the exception's report. Outfmt 16 catches
+/// the exception and posts it after the bytes written (the stream's destructor writes its buffer
+/// out), and the run goes on; outfmt 14 does not catch it (`MadeReport::ends_run`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:749-766
+/// ```c++
+/// void
+/// BlastXML2_FormatReport(const IBlastXML2ReportData* data, CNcbiOstream *out_stream)
+/// {
+/// 	blastxml2::CBlastOutput2 bxmlout;
+/// 	try {
+/// 		s_FillBlastOutput(bxmlout, data);
+/// 		s_WriteXML2ObjectNoHeader(bxmlout, out_stream);
+/// 	}
+/// 	catch(CException &e){
+/// 	    ERR_POST(Error << e.GetMsg() << e.what() );
+/// 	    return;
+/// 	}
+/// ```
+/// The report of 16 is written to the output stream through the object stream's buffer
+/// (`s_WriteXML2ObjectNoHeader`, blastxml2_format.cpp:716-724): a post comes after the bytes that
+/// the buffer had written by then (`out_buffer::xml_written_at`). A 14 report goes to its file,
+/// so its posts only keep their order.
+fn xml_report_made(
+    report: &mut Vec<u8>,
+    kind: Xml2Kind,
+    program: &str,
+    result: Result<()>,
+    posts: Vec<crate::report::serial::xml::XmlPost>,
+    thrown: Option<Box<crate::report::serial::xml::XmlThrow>>,
+) -> Result<MadeReport> {
+    match (result, thrown) {
+        (Err(error), thrown)
+            if thrown.is_none()
+                || !matches!(
+                    error.downcast_ref::<SerialError>(),
+                    Some(SerialError::Utf8(_))
+                ) =>
+        {
+            Err(error)
+        }
+        (_, thrown) => {
+            if let Some(thrown) = &thrown {
+                report.truncate(thrown.at);
+            }
+            let written: Vec<u64> = if kind == Xml2Kind::Single16 && !posts.is_empty() {
+                let at: Vec<usize> = posts.iter().map(|post| post.at).collect();
+                crate::report::serial::out_buffer::xml_written_at(report, &at, is_string_element)
+            } else {
+                vec![0; posts.len()]
+            };
+            let mut written = written.into_iter();
+            let mut made = MadeReport {
+                posts: replaced_posts(posts, program, |_| written.next().unwrap_or(0) as usize),
+                ends_run: None,
+            };
+            match (kind, thrown) {
+                (Xml2Kind::Single16, Some(thrown)) => {
+                    let exception = thrown.exception();
+                    let mut message = exception.get_msg().as_bytes().to_vec();
+                    message.extend_from_slice(exception.what().as_bytes());
+                    made.posts.push(DocumentPost {
+                        at: report.len(),
+                        text: crate::ncbi_exception::error_post_line(None, Some(program), &message),
+                    });
+                }
+                (_, thrown) => made.ends_run = thrown,
+            }
+            Ok(made)
+        }
+    }
+}
+
 /// The writer of the XML2 and JSON documents of outfmt 16, 15, 14 and 13: one complete report per
 /// query, framed by `Xml2Document`.
 pub struct Xml2Writer<F: SideFiles = NoSideFiles> {
@@ -506,23 +611,32 @@ impl<F: SideFiles> StructuredXml for Xml2Writer<F> {
         // (`HitSink::position`: the start of the report written now).
         self.document
             .report(&mut self.report, out, |start, report| match kind {
-                Xml2Kind::Single16 => {
-                    let mut enc = XmlEncoder::xml2_report(report);
-                    write_report(&mut enc, run, params, query, scratch, start, hits)
-                }
-                Xml2Kind::Files14 => {
-                    let mut enc = XmlEncoder::xml2_document(report);
-                    write_report(&mut enc, run, params, query, scratch, start, hits)
+                Xml2Kind::Single16 | Xml2Kind::Files14 => {
+                    let mut enc = if kind == Xml2Kind::Single16 {
+                        XmlEncoder::xml2_report(report)
+                    } else {
+                        XmlEncoder::xml2_document(report)
+                    };
+                    let result = write_report(&mut enc, run, params, query, scratch, start, hits);
+                    let posts = enc.take_posts();
+                    let thrown = enc.take_thrown();
+                    xml_report_made(report, kind, run.program, result, posts, thrown)
                 }
                 Xml2Kind::Single15 => {
                     let mut enc = JsonEncoder::array_element(report);
                     write_report(&mut enc, run, params, query, scratch, start, hits)
+                        .map(|()| MadeReport::default())
                 }
                 Xml2Kind::Files13 => {
                     let mut enc = JsonEncoder::new(report);
                     write_report(&mut enc, run, params, query, scratch, start, hits)
+                        .map(|()| MadeReport::default())
                 }
             })
+    }
+
+    fn take_posts(&mut self) -> crate::report::blast_xml::DocumentPosts {
+        self.document.take_posts()
     }
 
     fn start(&mut self, reported: Option<&XmlRun<'_>>, out: &mut Vec<u8>) -> Result<()> {

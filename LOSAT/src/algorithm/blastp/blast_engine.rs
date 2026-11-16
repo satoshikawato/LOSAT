@@ -54,6 +54,9 @@ use crate::utils::matrix::standard_score;
 
 mod culling;
 mod database;
+// The preliminary stage of a call after its kernel (`run_call`): the choice of the pool and the
+// call's branch (RPS-BLAST, PSSM, query blocks, a database's blocks, a subject set).
+mod prelim_run;
 // EXPERIMENT (LOSAT_X_BPIHPOOL): the arrays of initial hits past NCBI's first size in one pool
 // shared by the threads.
 mod x_ih_pool;
@@ -75,10 +78,10 @@ mod traceback;
 // The composition-based redo: its parameters of each query, its plan and its paths (`run_call`).
 mod redo_run;
 // psiblast `-in_pssm` (series PS, item PS4a): the stages of a PSSM search, reached through the
-// `psi_search` hooks of `run_call`.
+// `psi_search` hooks of `run_call` and its preliminary stage (`blast_engine/prelim_run.rs`).
 mod pssm_hooks;
 // rpsblast (series PR, item PS11a): the RPS engine's search, reached through the `rps_search`
-// hooks of `search_cli` and `run_call`.
+// hooks of `search_cli`, `run_call` and its preliminary stage (`blast_engine/prelim_run.rs`).
 mod rps_hooks;
 // psiblast's rounds of FASTA queries (series PS, item PS5a): the round driver, reached from
 // `search`, and the round's outcome hook of `run_call`.
@@ -86,7 +89,7 @@ mod psi_round;
 // The rendered rows of the final hits a window of queries at a time, as the reports read them.
 pub(super) mod query_rows;
 // The setup of a call before its search: its requested reports, query frames, subjects, scoring
-// values and lookup table (`run_call`).
+// values, lookup table, search spaces, cutoffs, hit lists and scan's sizes (`run_call`).
 mod call_setup;
 // The warning lines of a call's queries, the checks and the prefetch of its reported subjects and
 // its refusals before any format is written (`run_call`).
@@ -249,7 +252,7 @@ impl BlastpSubjectResult {
 // diag_table->offset = window_size;
 // ```
 /// The statistics of one subject that NCBI's preliminary search computes for a database length of
-/// 0 (`BLAST_OneSubjectUpdateParameters`, `run_call`'s `subject_parameters`): each context's search
+/// 0 (`BLAST_OneSubjectUpdateParameters`, `call_setup::subject_parameters`): each context's search
 /// space (the preliminary e-values without the Gumbel block and the linking) and the cutoffs at
 /// the subject's length (`blastp_prelim_cutoffs`: hit-saving and word cutoffs, and with psiblast's
 /// `-sum_stats true` the subject's sum statistics, the lowered hit-saving cutoffs and the
@@ -971,7 +974,7 @@ fn blastp_cutoff_score_max(
             query_length,
             subject_length_for_hit_cutoff,
         ),
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:943-945
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:942-944
         // ```c
         //          } else {
         //              BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
@@ -1615,8 +1618,8 @@ struct BlastpPrelimCutoffs {
 /// search spaces (0 where none is exact). The PSSM rounds' counterpart is
 /// `pssm_hooks::psi_prelim_cutoffs`.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1010-1024 (quoted at
-/// `run_call`'s `subject_parameters`)
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1015-1025 (quoted at
+/// `call_setup::subject_parameters`)
 fn blastp_prelim_cutoffs(
     args: &ResolvedBlastpArgs,
     contexts: &[QueryContext],
@@ -7432,8 +7435,8 @@ fn search(
     // outfmt 0, 5, 6 and 7 with `taxdb.bti` on the search path also the taxids that each batch's
     // prefetch reads and looks up, read in the block search's pool before the first block), and
     // with outfmt 0 and `-subject` only when no subject's title is refused where the report shows
-    // it (`x_block_shown_titles_allowed`), with outfmt 5, 15 and 16 only when the names of the
-    // database, the queries and the subjects can be written (`x_query_blocks.rs`
+    // it (`x_block_shown_titles_allowed`), with outfmt 5, 15 and 16 only when no title of the
+    // queries and the subjects is refused (`names::Refusal`; `x_query_blocks.rs`
     // `x_block_xml_*_allowed`).
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218 (the BLAST
     // XML report data of the first result NCBI formats: the matrix of its formatting table,
@@ -7507,8 +7510,8 @@ fn search(
                 // found also the taxids and lookups of the batches' prefetch), with outfmt 0 and
                 // `-subject` the
                 // subjects' titles (`x_block_shown_titles_allowed`), and with outfmt 5 the
-                // subjects' names (`x_block_xml_subjects_allowed`, `-subject`) and the database
-                // name and queries' names (`x_block_xml_run_allowed`); with several outputs, the
+                // subjects' names (`x_block_xml_subjects_allowed`, `-subject`) and the queries'
+                // titles (`x_block_xml_run_allowed`); with several outputs, the
                 // checks of every kind of report among them.
                 // A plan of one block of letters whose standard table's words pass the most
                 // (`x_aa_one_block_splits`) is split here; one block stays the search of all queries.
@@ -7574,7 +7577,7 @@ fn search(
                     // Outfmt 5 whose batches read the taxids: the check of outfmt 15 and 16.
                     // The prefetch asks for no scientific name.
                     (Some(database), XBlockReport::Xml) if x_prefetch_taxids(x_kind) => {
-                        database::x_titles_taxids_allow_blocks(database, false, pool)
+                        database::x_titles_taxids_allow_blocks(database, pool)
                     }
                     // Outfmt 8, 9, 12 and 5 write no tabular id: only the definition lines' reading
                     // and bytes can fail (`x_titles_read_allow_blocks`).
@@ -7585,7 +7588,7 @@ fn search(
                     // database's name of it, in the same pass over the headers
                     // (`x_titles_taxids_allow_blocks`).
                     (Some(database), XBlockReport::Xml2) => {
-                        database::x_titles_taxids_allow_blocks(database, true, pool)
+                        database::x_titles_taxids_allow_blocks(database, pool)
                     }
                     (Some(database), _) => database::x_titles_allow_blocks(
                         database,
@@ -7610,15 +7613,10 @@ fn search(
                     super::x_query_blocks::x_reach_block_search(false);
                     return Ok(false);
                 }
-                // EXPERIMENT (LOSAT_X_BPQBLOCK): the XML report's refusals
-                // of the database name and of the queries' names, which it makes before its first
-                // byte.
+                // EXPERIMENT (LOSAT_X_BPQBLOCK): the XML report's refusals of the queries'
+                // titles (`names::Refusal`), which it makes before its first byte.
                 if x_kinds.iter().any(|x_kind| x_kind.is_xml())
-                    && !super::x_query_blocks::x_block_xml_run_allowed(
-                        database.map_or("", |database| database.name()),
-                        query_records,
-                        pool,
-                    )
+                    && !super::x_query_blocks::x_block_xml_run_allowed(query_records, pool)
                 {
                     super::x_query_blocks::x_reach_block_search(false);
                     return Ok(false);
@@ -8206,7 +8204,7 @@ fn x_block_input(
 // EXPERIMENT (LOSAT_X_BPQBLOCK): whether the search of all queries passes the checks that refuse
 // it before any row is written and that a block search would make only in the block that holds
 // the cause, after the rows of the blocks before:
-// - the diagonal table of all queries (`check_diag_table_window` in `run_call`, with
+// - the diagonal table of all queries (`check_diag_table_window` in `call_setup::scan_shape`, with
 //   the concatenated length of all queries; a block's is shorter);
 // - the split of a long query batch (the `ensure!`s of `search_split_query_batches`);
 // - with the compressed lookup table, a table of one of NCBI's query batches (or of a query
@@ -10540,132 +10538,15 @@ fn run_call(
         ));
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_setup.c:766-769
-    // ```c
-    // kbp_ptr = (scoring_options->gapped_calculation ? sbp->kbp_gap_std : sbp->kbp);
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:182-187
-    // ```c++
-    // static Int8
-    // s_SeqDbGetTotLen(void* seqdb_handle, void*)
-    // {
-    //     CSeqDB & seqdb = **(TSeqDBData *) seqdb_handle;
-    //     return seqdb.GetTotalLength();
-    // }
-    // ```
-    // The total length of a database is the one of its index files, not a sum over
-    // sequences read.
-    let total_db_len = match database {
-        None => subjects.iter().map(|subject| subject.aa_len).sum::<usize>(),
-        Some(database) => database.total_letters_usize()?,
-    };
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_setup.c:914-921
-    // ```c
-    // /* Set the database length for new FSC */
-    // if (sbp->gbp) {
-    //     sbp->gbp->db_length =
-    //         (Blast_SubjectIsTranslated(program_number)) ? dbl/3 : dbl;
-    // }
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:912-923
-    // ```c
-    //       /* Set the database length for new FSC */
-    //       if (sbp->gbp) {
-    //           Int8 dbl = total_length;
-    //           /* Override the database length or set one (e.g., blast2seq). */
-    //           if (eff_len_options->db_length) {
-    //               dbl = eff_len_options->db_length;
-    //           }
-    //           sbp->gbp->db_length =
-    //               (Blast_SubjectIsTranslated(program_number))?
-    //               dbl/3 : dbl;
-    //       }
-    // ```
-    // `-dbsize` (any value but 0) replaces the total length in the Gumbel block. A database's
-    // length is the setup's total before its fallback to the length of OID 0
-    // (`DbStatistics::gumbel_db_length`): 0 for a `LENGTH` of 0, negative for one of 2^63 or
-    // more, where every Spouge e-value is negative (written 0; line RG D1a-3).
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1768-1772 (quoted at
-    // `DbStatistics::sorts_results`): whether the traceback sorts the results at its end. A
-    // FASTA subject set that finds hits has letters.
-    let sorts_results = database.is_none_or(|database| database.statistics().sorts_results());
-    let gumbel_db_length = if args.dbsize != 0 {
-        args.dbsize
-    } else {
-        database.map_or(total_db_len as i64, |database| {
-            database.statistics().gumbel_db_length
-        })
-    };
-    let gapped_gumbel = if !args.old_fsc {
-        Some(
-            lookup_protein_gumbel_params(&args.scoring, gumbel_db_length)
-                .context("missing NCBI gumbel parameters for supported blastp scoring")?,
-        )
-    } else {
-        None
-    };
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:163-168
-    // ```c++
-    // static Int4
-    // s_SeqDbGetNumSeqs(void* seqdb_handle, void*)
-    // {
-    //     CSeqDB & seqdb = **(TSeqDBData *) seqdb_handle;
-    //     return seqdb.GetNumSeqs();
-    // }
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:917-935 (`BLAST_GapAlignSetUp`)
-    // ```c
-    //       if (total_length > 0) {
-    //           num_seqs = BlastSeqSrcGetNumSeqsStats(seq_src);
-    //           if (num_seqs <= 0)
-    //               num_seqs = BlastSeqSrcGetNumSeqs(seq_src);
-    //       } else {
-    //           /* Not a database search; each subject sequence is considered
-    //              individually */
-    //           ...
-    //           num_seqs = 1;
-    //       }
-    // ```
-    // A subject set of no letters at all (every record empty) is not a database search to
-    // NCBI: it counts one sequence, whatever the number of records (visible only with
-    // `-dbsize`, the effective search space of the XML statistics and the outfmt 0 footer).
-    // NCBI's `Int4`: negative for an alias file's negative `NSEQ` or one of 2^31 or more.
-    let num_subjects: i32 = match database {
-        None if total_db_len == 0 => 1,
-        None => i32::try_from(subjects.len().max(1)).unwrap_or(i32::MAX),
-        Some(database) => rps_hooks::dbsize_volume_num_seqs(&args, database)
-            .map_or_else(|| database.statistics_num_sequences(), |count| count as i32),
-    };
-    // Without the Gumbel block (`-searchsp`, `OLD_FSC`) NCBI's shortest subject length is the
-    // statistics' average (blast_setup.c:975 below), which divides by their number of sequences.
-    if let Some(database) = database.filter(|_| args.old_fsc) {
-        database.check_statistics_count(args.app.name())?;
-        // RPS-BLAST's first volume of none of the profiles (`rps_hooks::dbsize_volume_num_seqs`)
-        // gives the same division by 0: the same refusal (DECISIONS 14 of line RG), not a panic.
-        if num_subjects == 0 {
-            return Err(crate::algorithm::common::database::refusal(
-                crate::algorithm::common::database::STATISTICS_COUNT_ZERO,
-                args.app.name(),
-            ));
-        }
-    }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-721
-    // ```c
-    //    /* use overriding value from effective lengths options or the real value
-    //       from effective lengths parameters. */
-    //    if (eff_len_options->db_length > 0)
-    //       db_length = eff_len_options->db_length;
-    //    else
-    //       db_length = eff_len_params->real_db_length;
-    // ```
-    // `-dbsize` above 0 replaces the total length behind the effective lengths.
-    let eff_db_length: i64 = if args.dbsize > 0 {
-        args.dbsize
-    } else {
-        total_db_len as i64
-    };
-    // The effective search space of a database or a FASTA subject set is computed in NCBI's
-    // `Int8` (`blastp_database_search_space`, the one owner `stats::setup::calc_eff_lengths`).
+    // The database's extent (`call_setup::db_extent`).
+    let call_setup::BlastpDbExtent {
+        total_db_len,
+        sorts_results,
+        gapped_gumbel,
+        num_subjects,
+        eff_db_length,
+        cutoff_subject_length,
+    } = call_setup::db_extent(&args, database, subjects)?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
     // ```c
     //    if (sbp->gbp) {
@@ -10689,22 +10570,6 @@ fn run_call(
     // `-subject` of the letters `M`, ``, `` with `-searchsp` or `OLD_FSC`: exit 3). After a first
     // batch of invalid queries only, which NCBI does not search, the error follows the reports of
     // the batches before the first searched one (`unsearched_batches_then_engine_error`).
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:128-136
-    // (quoted at `hit_cutoff_scores` below): the Gumbel block's shortest length.
-    // NCBI's `min_subject_length` (blast_setup.c:969-976, quoted above), which the hit-saving
-    // parameters read: the shortest length with the Gumbel block, else (`-searchsp`, `OLD_FSC`)
-    // the statistics' average, which only psiblast's `-sum_stats true` reads (its cutoff,
-    // `sum_stats_hit_cutoff`; the cutoffs without the block read the search space).
-    let cutoff_subject_length = match (database, gapped_gumbel.is_some()) {
-        // `setup_subject_length` without the block: the average as NCBI's `Int4` (0 where it is
-        // 0 or the count is 0, which the check below refuses for a search).
-        (_, false) => {
-            crate::stats::setup::setup_subject_length(total_db_len as i64, num_subjects, None)
-                .unwrap_or(0)
-        }
-        (None, true) => blastp_preliminary_cutoff_subject_length(subjects),
-        (Some(database), true) => database.cutoff_subject_length(),
-    };
     if contexts.iter().any(|ctx| ctx.is_valid)
         && crate::stats::setup::setup_subject_length(
             total_db_len as i64,
@@ -10729,452 +10594,81 @@ fn run_call(
             "The average subject length is too short",
         ));
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:943-945
-    // ```c
-    //          } else {
-    //              BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
-    //          }
-    // ```
-    // Without the Gumbel block (`old_fsc`: `-searchsp` or `OLD_FSC`) the hit cutoffs read
-    // each context's search space, which the exact computation hands them
-    // (`exact_search_spaces`; `blastp_cutoff_score_max`).
-    let options_searchsp = args.searchsp.unwrap_or(0);
-    // NCBI reference: c++/src/algo/blast/core/blast_setup.c:729-732
-    // ```c
-    //    if (db_length == 0 &&
-    //        !BlastEffectiveLengthsOptions_IsSearchSpaceSet(eff_len_options)) {
-    //       return 0;
-    //    }
-    // ```
-    // When every subject is empty, NCBI leaves each query's effective search space and
-    // length adjustment at 0 (the outfmt 0 footers print 0).
-    let mut exact_search_spaces: Vec<Option<i64>> = Vec::new();
-    let search_spaces: Vec<SearchSpace> = contexts
-        .iter()
-        .enumerate()
-        .map(|(context_index, ctx)| -> Result<SearchSpace> {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:676-697
-            // ```c
-            //     if (eff_len_options->num_searchspaces == 0) {
-            //         retval = 0;
-            //     } else if (eff_len_options->num_searchspaces == 1) {
-            //         ...
-            //         retval = eff_len_options->searchsp_eff[0];
-            //     } else if (eff_len_options->num_searchspaces > 1) {
-            //         ASSERT(context_index < eff_len_options->num_searchspaces);
-            //         retval = eff_len_options->searchsp_eff[context_index];
-            // ```
-            // A query chunk's search takes its batch's search spaces as options
-            // (`search_split_query_batches`), by the context's index in the chunk, unless the
-            // user's `-searchsp` is set (`SplitQuery_SetEffectiveSearchSpace` leaves it).
-            let given_searchsp = match ranges.split_search_spaces {
-                Some(batch) => split_option_space(batch, context_index, options_searchsp),
-                None => options_searchsp,
-            };
-            if given_searchsp != 0 {
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:826-846
-                // ```c
-                //          if (effective_search_space == 0) {
-                //          ...
-                //       query_info->contexts[index].eff_searchsp = effective_search_space;
-                // ```
-                exact_search_spaces.push(Some(given_searchsp));
-                return Ok(SearchSpace {
-                    effective_space: given_searchsp as f64,
-                    length_adjustment: if ctx.aa_len > 0 {
-                        i64::from(
-                            crate::stats::setup::calc_eff_lengths(
-                                ctx.aa_len as i64,
-                                eff_db_length,
-                                num_subjects,
-                                &gapped_params,
-                                options_searchsp,
-                                args.app.name(),
-                            )?
-                            .length_adjustment,
-                        )
-                    } else {
-                        0
-                    },
-                });
-            }
-            if eff_db_length == 0 {
-                exact_search_spaces.push(None);
-                return Ok(SearchSpace {
-                    effective_space: 0.0,
-                    length_adjustment: 0,
-                });
-            }
-            let (space, exact) = database::blastp_database_search_space(
-                ctx.aa_len,
-                eff_db_length,
-                num_subjects,
-                &gapped_params,
-                args.app.name(),
-            )?;
-            exact_search_spaces.push(Some(exact));
-            Ok(space)
-        })
-        .collect::<Result<Vec<_>>>()?;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:195-221
-    // ```c
-    // for (context = query_info->first_context;
-    //                  context <= query_info->last_context; ++context) {
-    //    ...
-    //    kbp= sbp->kbp[context];
-    //    ...
-    //    p->cutoffs[context].x_dropoff_init =
-    //        (Int4)(sbp->scale_factor *
-    //               ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda));
-    // }
-    // ```
-    //
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:318-323,417-420
-    // ```c
-    // sbp->kbp_std[index] = (Blast_KarlinBlk*)
-    //     BlastMemDup(sbp->kbp_gap_std[0], sizeof(Blast_KarlinBlk));
-    // sbp->kbp = sbp->kbp_std;
-    // ...
-    // Blast_KarlinBlkCopy(sbp->kbp_std[context], sbp->kbp_ideal);
-    // sbp->kbp = sbp->kbp_std;
-    // ```
-    //
-    // Default blastp uses the score-block ungapped Karlin blocks (`sbp->kbp`
-    // / `sbp->kbp_std`), not per-query lookup composition estimates.
-    let x_dropoff_per_context: Vec<i32> = contexts
-        .iter()
-        .map(|ctx| blastp_x_dropoff_init_for_context(ctx, args.x_drop_ungapped_bits))
-        .collect();
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:128-136
-    // ```c++
-    //             m_NumSeqs     = x_GetNumSeqs();
-    //             m_TotalLength = x_GetTotalLength();
-    //             m_MaxLength   = x_GetMaxLength();
-    //             m_MinLength   = x_GetMinLength();
-    //
-    //             // Do not bother scanning the db... it would be slow
-    //             // FIXME: future implementation should probably have the
-    //             // shortest length encoded in index file...
-    //             if ( m_MinLength <= 0)  m_MinLength = BLAST_SEQSRC_MINLENGTH;
-    // ```
-    // A database answers `BLAST_SEQSRC_MINLENGTH` (10) for its shortest sequence (an
-    // index file stores none, and the alias key `MIN_SEQ_LENGTH` is rejected by the
-    // reader), whatever its sequences are, unless a list made NCBI scan its totals (then
-    // the scanned shortest length, line DI-8); a FASTA subject set answers its real minimum,
-    // raised to 10.
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-220 (quoted at
-    // `stats::setup::preliminary_option_space`): the preliminary stage's setup reads the options'
-    // search spaces of the statistics before their fallback to OID 0, which differ from the
-    // setup's own only for a total length that is not positive, and which the statistics of each
-    // subject read too (`DbStatistics::per_subject`, blast_engine.c:1434-1443).
-    let statistics = database.map(|database| database.statistics());
-    // RPS-BLAST's engine has no loop over subjects (blast_engine.c:1384-1393).
-    let per_subject = args.rps_search.is_none() && statistics.is_some_and(|s| s.per_subject());
-    let (option_total, option_count) = statistics
-        .map_or((total_db_len as i64, num_subjects), |statistics| {
-            (statistics.gumbel_db_length, statistics.request_count)
-        });
-    // The option space of a context of this search's queries (`preliminary_option_space`): 0 for
-    // a context that is not valid (its Karlin-Altschul block failed on the query, or it has no
-    // letters) unless `-searchsp` gives it.
-    let option_space_of = |ctx: &QueryContext| {
-        crate::stats::setup::preliminary_option_space(
-            if ctx.is_valid { ctx.aa_len as i64 } else { 0 },
-            option_total,
-            option_count,
-            args.dbsize,
-            options_searchsp,
-            false,
-            &gapped_params,
-            args.app.name(),
-        )
+    let call_statistics = call_setup::CallStatistics {
+        args: &args,
+        database,
+        ranges,
+        contexts: &contexts,
+        gapped_params: &gapped_params,
+        gapped_gumbel: &gapped_gumbel,
+        total_db_len,
+        num_subjects,
+        eff_db_length,
+        cutoff_subject_length,
     };
-    // A query chunk's search reads the whole batch's option spaces by its own context index
-    // (`BlastpRanges::split_search_spaces`, made by `search_split_query_batches`), as its setup's
-    // spaces above do.
-    let preliminary_option_spaces: Option<Vec<i64>> =
-        if option_total <= 0 && statistics.is_some() || per_subject {
-            Some(match ranges.split_search_spaces {
-                Some(batch) => (0..contexts.len())
-                    .map(|ctx_idx| split_option_space(batch, ctx_idx, options_searchsp))
-                    .collect(),
-                None => contexts
-                    .iter()
-                    .map(option_space_of)
-                    .collect::<Result<_, _>>()?,
-            })
-        } else {
-            None
-        };
-    // The preliminary stage's own spaces where they differ from the setup's (a total length that
-    // is not positive): the setup's computation with the option spaces.
-    let preliminary_spaces: Option<(Vec<SearchSpace>, Vec<Option<i64>>)> =
-        match &preliminary_option_spaces {
-            // `BLAST_CalcEffLengths` returns before the contexts for a length of 0 without an
-            // option space (blast_setup.c:729-732): the setup's spaces stay.
-            Some(option_spaces)
-                if option_total <= 0
-                    && statistics.is_some()
-                    && (eff_db_length != 0 || option_spaces.iter().any(|&space| space != 0)) =>
-            {
-                let mut spaces = search_spaces.clone();
-                let mut exact = exact_search_spaces.clone();
-                for (ctx_idx, ctx) in contexts.iter().enumerate() {
-                    if !ctx.is_valid || ctx.aa_len == 0 {
-                        continue;
-                    }
-                    let lengths = crate::stats::setup::calc_eff_lengths(
-                        ctx.aa_len as i64,
-                        eff_db_length,
-                        num_subjects,
-                        &gapped_params,
-                        option_spaces[ctx_idx],
-                        args.app.name(),
-                    )?;
-                    spaces[ctx_idx] = SearchSpace {
-                        effective_space: lengths.eff_searchsp as f64,
-                        length_adjustment: i64::from(lengths.length_adjustment),
-                    };
-                    exact[ctx_idx] = Some(lengths.eff_searchsp);
-                }
-                Some((spaces, exact))
-            }
-            _ => None,
-        };
+    let call_setup::BlastpSearchSpaces {
+        search_spaces,
+        exact_search_spaces,
+        per_subject,
+        option_space_of,
+        preliminary_option_spaces,
+        preliminary_spaces,
+    } = call_setup::call_search_spaces(&call_statistics)?;
     let (preliminary_search_spaces, preliminary_exact_spaces) = match &preliminary_spaces {
         Some((spaces, exact)) => (spaces, exact),
         None => (&search_spaces, &exact_search_spaces),
     };
-    // The setup's cutoffs; psiblast's `-sum_stats true` lowers the cutoff of the HSPs a search
-    // keeps (`cutoff_score`) to the sum statistics' cutoff where that is smaller, and the
-    // preliminary stage links the HSPs of each subject (`BlastpSumStats`).
-    let BlastpPrelimCutoffs {
+    let call_setup::BlastpCallCutoffs {
         hit_cutoff_scores,
         word_cutoff_scores,
         sum_stats,
-    } = blastp_prelim_cutoffs(
-        &args,
-        &contexts,
-        cutoff_subject_length,
-        args.comp_based_stats.mode,
+        hit_cutoff_score_min,
+        prelim_hitlist_size,
+        prelim_evalue,
+    } = call_setup::prelim_cutoffs(&call_statistics, preliminary_exact_spaces)?;
+    // The statistics of each subject (`per_subject`), which `process_own_subject` reads.
+    let subject_parameters = call_setup::subject_parameters(
+        &call_statistics,
+        &preliminary_option_spaces,
+        preliminary_search_spaces,
         preliminary_exact_spaces,
-        &gapped_params,
-        gapped_gumbel.as_ref(),
     );
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:978-990
-    // ```c
-    //       /* scale up the computed cutoffs, and find the smallest one */
-    //       for (context = query_info->first_context;
-    //                              context <= query_info->last_context; ++context) {
-    //
-    //          if (query_info->contexts[context].is_valid) {
-    // ...
-    //             cutoff_min = MIN(cutoff_min,
-    //                              params->cutoffs[context].cutoff_score);
-    //          }
-    //       }
-    //       params->cutoff_score_min = cutoff_min;
-    // ```
-    // `hit_params->cutoff_score_min`, which the redo reads with sum statistics.
-    let hit_cutoff_score_min = contexts
-        .iter()
-        .zip(&hit_cutoff_scores)
-        .filter(|(ctx, _)| ctx.is_valid)
-        .map(|(_, &cutoff)| cutoff)
-        .min()
-        .unwrap_or(i32::MAX);
-
-    // NCBI computes the size in its `int` (`blastn/hsp.rs` `get_prelim_hitlist_size`): a
-    // -max_target_seqs from 2^31 - 24 wraps to 2..48; a size that is not positive (NCBI
-    // crashes) was rejected with the options (`validate_requested_blastp_support`).
-    let prelim_hitlist_size =
-        usize::try_from(crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
-            args.max_target_seqs,
-            args.comp_based_stats.is_enabled(),
-            true,
-        ))
-        .ok()
-        .filter(|&size| size > 0)
-        .context("BLASTP preliminary hit list size is not positive")?;
-    // `-culling_limit`: NCBI's culling writer takes the place of the collector (`CreateHspWriter`,
-    // setup_factory.cpp:318-342). The choice is made once for this call: the whole search, a block
-    // of query batches, or one chunk of a split query, each with its own writer.
-    // EXPERIMENT (LOSAT_X_BPQBLOCK): with the preliminary stage in blocks (`x_blocks`) each block's
-    // call has its own writer, as NCBI's batch.
-    let mut culling = (args.culling_limit > 0 && x_blocks.is_none())
-        .then(|| culling::PrelimCulling::new(prelim_hitlist_size, args.culling_limit));
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:1008-1018
-    // ```c
-    // BLAST_OneSubjectUpdateParameters(..., subject_length, ...);
-    // BlastHitSavingParametersUpdate(program_number, sbp, query_info,
-    //                                subject_length, 0, hit_params);
-    // ```
-    //
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:926-940
-    // ```c
-    // params->prelim_evalue = evalue;  /* evalue and prelim_evalue same if no CBS. */
-    // ...
-    // int cbs_stretch = (compositionBasedStats > 1) ? 5 : 1;
-    // params->prelim_evalue = cbs_stretch*evalue;
-    // ```
-    // `params->prelim_evalue = evalue` without a Gumbel block (blast_parameters.c:931-935).
-    let prelim_evalue = if gapped_gumbel.is_some() {
-        blastp_prelim_evalue(args.evalue, args.comp_based_stats.mode)
-    } else {
-        args.evalue
-    };
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1010-1024
-    // ```c
-    //    /* Update cutoff scores in hit saving parameters */
-    //    BlastHitSavingParametersUpdate(program_number, sbp, query_info, subject_length, 0, /* FIXME */
-    //                                   hit_params);
-    //
-    //    if (word_params) {
-    //       /* Update cutoff scores in initial word parameters */
-    //       BlastInitialWordParametersUpdate(program_number, hit_params, sbp, query_info,
-    //            subject_length, word_params);
-    //       /* Update the parameters for linking HSPs, if necessary. */
-    //       BlastLinkHSPParametersUpdate(word_params, hit_params, scoring_options->gapped_calculation);
-    //    }
-    // ```
-    // The statistics of one subject (`per_subject`): each context's effective lengths
-    // (`stats::setup::subject_eff_lengths`) and, through the setup's own `blastp_prelim_cutoffs`,
-    // the hit-saving cutoffs of `BlastHitSavingParametersUpdate` with the subject's length and a
-    // composition-based statistics of 0 (no stretch of the
-    // e-value: `params->prelim_evalue = evalue`, blast_parameters.c:868, 937-938), and the
-    // word cutoffs of `BlastInitialWordParametersUpdate` (gapped: the gap trigger, at most the
-    // hit-saving cutoff before the sum statistics lower it, `cutoff_score_max`; the X-drops keep
-    // their initial values, `x_dropoff_init` is not 0). With psiblast's `-sum_stats true` the
-    // subject's sum statistics (`BlastpSumStats` at the subject's length, blast_parameters.c:949-976)
-    // lower its hit-saving cutoffs, and the preliminary linking reads the subject's small-gap
-    // cutoff (`BlastLinkHSPParametersUpdate`, blast_parameters.c:625-646) and search spaces. The
-    // traceback reads the setup's values (blast_traceback.c:1598-1650: it updates its own copy of
-    // the query information, which the traceback of a list does not read, and its hit-saving
-    // cutoffs, which only the complexity adjustment reads, and links with the traceback's
-    // parameters, which no word parameters update).
-    let subject_space_overflow = crate::stats::setup::SubjectSpaceOverflow::default();
-    let subject_parameters = |subject_length: usize| -> Result<
-        BlastpSubjectParameters,
-        crate::stats::setup::SearchSpaceOverflow,
-    > {
-        let option_spaces = preliminary_option_spaces
-            .as_deref()
-            .expect("the statistics of each subject have their preliminary option spaces");
-        let mut search_spaces = preliminary_search_spaces.clone();
-        let mut exact_spaces = preliminary_exact_spaces.clone();
-        for (ctx_idx, ctx) in contexts.iter().enumerate() {
-            if !ctx.is_valid || ctx.aa_len == 0 {
-                continue;
-            }
-            let lengths = crate::stats::setup::subject_eff_lengths(
-                ctx.aa_len as i64,
-                subject_length as i64,
-                num_subjects,
-                args.dbsize,
-                option_spaces[ctx_idx],
-                false,
-                &gapped_params,
-                args.app.name(),
-            )?;
-            search_spaces[ctx_idx] = SearchSpace {
-                effective_space: lengths.eff_searchsp as f64,
-                length_adjustment: i64::from(lengths.length_adjustment),
-            };
-            exact_spaces[ctx_idx] = Some(lengths.eff_searchsp);
-        }
-        Ok(BlastpSubjectParameters {
-            search_spaces,
-            cutoffs: blastp_prelim_cutoffs(
-                &args,
-                &contexts,
-                subject_length as i32,
-                BlastpCompositionMode::NoCompositionBasedStats,
-                &exact_spaces,
-                &gapped_params,
-                gapped_gumbel.as_ref(),
-            ),
-        })
-    };
-    // `x_prelim_free.rs`.
-    let mut x_prelim_freed = 0usize;
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3074-3077
-    // ```c
-    //     inclusion_ethresh = (psiOptions /* this can be NULL for CBl2Seq */
-    //                          ? psiOptions->inclusion_ethresh
-    //                          : PSI_INCLUSION_ETHRESH);
-    //     ASSERT(inclusion_ethresh != 0.0);
-    // ```
-    // The heaps hold psiblast's larger hit lists (`traceback_hitlist_size`).
-    let mut redone_matches = build_redone_match_heaps(
+    let call_setup::BlastpPrelimSinks {
+        mut culling,
+        subject_space_overflow,
+        mut x_prelim_freed,
+        mut redone_matches,
+        mut preliminary_hit_lists,
+        x_expanded_at_start,
+        x_pooled_at_start,
+        mut x_compact_hit_lists,
+    } = call_setup::prelim_sinks(
+        &args,
+        x_blocks.as_deref(),
+        prelim_hitlist_size,
         query_ids.len(),
-        args.traceback_hitlist_size(),
-        args.inclusion_ethresh,
     );
-    let mut preliminary_hit_lists: Vec<Option<BlastpHitList>> = std::iter::repeat_with(|| None)
-        .take(query_ids.len())
-        .collect();
-    // The preliminary hit lists with the compact element (`x_prelim_compact.rs`), the lists the
-    // subject scan keeps until the redo.
-    let x_expanded_at_start = x_expanded_lists();
-    let x_pooled_at_start = x_ih_pool::x_pooled();
-    let mut x_compact_hit_lists: Vec<Option<BlastpHitList<XPrelimHsp>>> =
-        std::iter::repeat_with(|| None)
-            .take(query_ids.len())
-            .collect();
 
-    let window = args.window_size as i32;
-    let word_size = lookup.word_length();
-    // EXPERIMENT (LOSAT_X_BPUNGAPSENT): this block made ready for the inlined two-hit extension of
-    // the fused loop (`x_ungapped_sent.rs`); None when the switch is off or a check fails. Another
-    // matrix than BLOSUM62 scores with its own byte table (`XSentQuery::new_of`, item SC2c).
-    // EXPERIMENT (LOSAT_X_BPQBLOCK): none where the preliminary stage runs in blocks (`x_blocks`):
-    // each block's call makes its own.
-    let x_ungap_sent = if x_blocks.is_some() {
-        None
-    } else if args.scoring.matrix == ScoringMatrix::Blosum62 {
-        super::x_ungapped_sent::XSentQuery::new(
-            &concatenated_query,
-            &x_dropoff_per_context,
-            word_size,
-            args.word_size,
-        )
-    } else {
-        super::x_ungapped_sent::XSentQuery::new_of(
-            args.scoring.matrix,
-            &concatenated_query,
-            &x_dropoff_per_context,
-            word_size,
-            args.word_size,
-        )
-    };
-    if x_ungap_sent.is_none() && x_blocks.is_none() && super::x_ungapped_sent::on() {
-        crate::utils::xreach::x_reach!("LOSAT_X_BPUNGAPSENT", false);
-    }
-    let offset_array_size = blastp_offset_array_size(lookup.longest_chain());
-    let query_length = blastp_concatenated_query_length(&contexts);
-    crate::blastinput::app::check_diag_table_window(query_length, window, "BLASTP")?;
-    let (diag_array_size, diag_mask) = compute_diag_table_shape(query_length, window);
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:369-372
-    // ```c
-    // tree = Blast_IntervalTreeInit(0, query_blk->length + 1,
-    //                               0, (subject_length > 0 ? subject_length :
-    //                               subject_blk->length / CODON_LENGTH) + 1);
-    // ```
-    let total_query_span = query_length + 1;
-    // `-lcase_masking`: the scan ranges of each subject of a FASTA set (`-db` subjects have no
-    // case; `database` masks are other options). Empty for a subject without lower case.
-    // EXPERIMENT (LOSAT_X_BPQBLOCK): made once by the search of all queries for its blocks of the
-    // preliminary stage, which take them (`PrelimOnly::Block`).
-    let x_owned_soft_subjects: Option<Vec<Vec<(i32, i32)>>>;
-    let x_soft_subjects: Option<&[Vec<(i32, i32)>]> = match x_block_inputs {
-        Some((_, _, soft_subjects)) => soft_subjects,
-        None => {
-            x_owned_soft_subjects = args
-                .lcase_masking
-                .then(|| x_soft_subject::x_subject_scan_ranges(subject_records));
-            x_owned_soft_subjects.as_deref()
-        }
-    };
+    // The scan's sizes (`call_setup::scan_shape`; the owner of the scan ranges it makes).
+    let mut x_owned_soft_subjects: Option<Vec<Vec<(i32, i32)>>> = None;
+    let call_setup::BlastpScanShape {
+        x_dropoff_per_context,
+        window,
+        word_size,
+        x_ungap_sent,
+        offset_array_size,
+        diag_array_size,
+        diag_mask,
+        total_query_span,
+        x_soft_subjects,
+    } = call_setup::scan_shape(
+        &call_in,
+        &lookup,
+        &contexts,
+        &concatenated_query,
+        x_blocks.as_deref(),
+        &mut x_owned_soft_subjects,
+    )?;
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1498
     // ```c
@@ -12497,456 +11991,69 @@ fn run_call(
     //    BlastHSPStreamWrite(hsp_stream, &hsp_list);
     // }
     // ```
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    let use_parallel = {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1475
-        // ```c
-        // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-        //        != BLAST_SEQSRC_EOF) {
-        //    status = s_BlastSearchEngineCore(...);
-        // }
-        // ```
-        // (A database has its own driver below, `database::search_blocks`.)
-        database.is_none()
-            && blastp_should_parallelize_stage(
-                "prelim",
-                args.num_threads,
-                blastp_num_threads,
-                subjects.len(),
-                subjects.len(),
-                total_db_len,
-            )
-    };
-    #[cfg(any(
-        not(feature = "parallel"),
-        all(target_arch = "wasm32", not(feature = "wasm-threads"))
-    ))]
-    let use_parallel = false;
-
-    // rpsblast: the RPS engine's whole search (`rps_hooks::rps_search`): the final hit lists,
-    // which the ordinary traceback below hands on, and each query's outfmt 0 gapped K.
-    let mut rps_gapped_k: Option<Vec<f64>> = None;
-    // A database of several volumes: its merged lists are not sorted or cut below, and it prints
-    // no query warnings; so even when no batch is searched (every query invalid), as NCBI merges
-    // the volumes' empty results (review A of PS12a, S2's rpsblast half).
-    let mut rps_multi_volume = args.rps_search.is_some()
-        && database.is_some_and(|database| rps_hooks::volume_count(database) > 1);
-    if let Some(rps) = args.rps_search.as_deref() {
-        let run = rps_hooks::RpsSearchRun {
-            contexts: &contexts,
-            gapped_params: &gapped_params,
-            gumbel: gapped_gumbel.as_ref(),
-            search_spaces: &exact_search_spaces,
-            cutoff_subject_length,
-            prelim_hitlist_size,
-            batches: query_batches
-                .iter()
-                .map(|batch| batch.searched.clone())
-                .collect(),
-        };
-        let searched = rps_hooks::rps_search(
-            rps,
-            &args,
-            &run,
-            database,
+    // The preliminary stage (`blast_engine/prelim_run.rs`): the choice of the pool and the call's
+    // branch, into the hit lists and the culling writer; RPS-BLAST's gapped K and its volumes'
+    // merge are read below.
+    let prelim_run::PrelimOutcome {
+        rps_gapped_k,
+        rps_multi_volume,
+    } = prelim_run::run_preliminary(
+        &prelim_run::PrelimRun {
+            args: &args,
+            query_records,
+            subject_source,
+            subject_label,
             blastp_parallel_pool,
-            &mut preliminary_hit_lists,
-        )
-        .map_err(|error| {
-            match (database, error.downcast::<rps_hooks::RpsEngineError>()) {
-                // NCBI's errors of the RPS files come from the first batch's set-up, after the
-                // outfmt 0 prolog, whatever its queries' validity.
-                (Some(database), Ok(engine_error)) => preliminary_search_error(
-                    &args,
-                    query_records,
-                    subject_source,
-                    subject_label,
-                    outputs,
-                    blastp_parallel_pool,
-                    ranges,
-                    reports,
-                    &query_batches,
-                    &query_batch_skipped,
-                    true,
-                    database.name(),
-                    &engine_error.0,
-                ),
-                (_, Ok(engine_error)) => anyhow::Error::new(engine_error),
-                (_, Err(other)) => other,
-            }
-        })?;
-        rps_gapped_k = Some(searched.gapped_k);
-        rps_multi_volume = searched.volumes > 1;
-    } else if let Some(psi) = args.psi_search.as_deref() {
-        pssm_hooks::pssm_prelim(
-            psi,
-            &args,
-            &lookup,
-            &pssm_hooks::PssmPrelimRun {
-                contexts: &contexts,
-                gapped_params: &gapped_params,
-                gumbel: gapped_gumbel.as_ref(),
-                exact_search_spaces: preliminary_exact_spaces,
-                search_spaces: preliminary_search_spaces,
-                cutoff_subject_length,
-                prelim_evalue,
-                per_subject: per_subject.then(|| pssm_hooks::PsiSubjectStatistics {
-                    option_space: preliminary_option_spaces
-                        .as_ref()
-                        .map_or(0, |spaces| spaces[0]),
-                    setup_count: num_subjects,
-                    dbsize: args.dbsize,
-                }),
-                window,
-                diag_mask,
-                offset_array_size,
-                diag_array_size,
-                total_query_span,
-                prelim_hitlist_size,
-            },
+            ranges,
+            reports,
+            query_batches: &query_batches,
+            query_batch_skipped: &query_batch_skipped,
+            query_chunk,
             database,
             subjects,
-            blastp_parallel_pool,
-            culling.as_mut(),
-            &mut x_compact_hit_lists,
-        )
-        .map_err(|error| match database {
-            // A sequence file that cannot be read: NCBI's error of the batch's preliminary
-            // search, as for blastp's database search below.
-            Some(database) => match error.downcast::<database::PreliminaryReadError>() {
-                Ok(read_error) => preliminary_search_error(
-                    &args,
-                    query_records,
-                    subject_source,
-                    subject_label,
-                    outputs,
-                    blastp_parallel_pool,
-                    ranges,
-                    reports,
-                    &query_batches,
-                    &query_batch_skipped,
-                    query_chunk,
-                    database.name(),
-                    read_error.0,
-                ),
-                Err(other) => other,
-            },
-            None => error,
-        })?;
-    } else if database.is_some() && !contexts.iter().any(|ctx| ctx.is_valid) {
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
-        // ```c++
-        //     int status = m_PrelimSearch->CheckInternalData();
-        //     if (status != 0)
-        //     {
-        //          // Search was not run, but we send back an empty CSearchResultSet.
-        // ```
-        // No query of the call has Karlin-Altschul parameters: NCBI searches none of its
-        // batches and reads no sequence of the database (a sequence file that cannot be read
-        // fails no batch: NCBI 2.17.0 blastp, an all-X query, exit 0; line PS DECISIONS 30).
-    } else if let Some(blocks) = x_blocks.as_deref() {
-        // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276
-        // ```c++
-        //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-        //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-        //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-        //             ...
-        //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-        //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-        //                 results = lcl_blast.Run();
-        // ```
-        // EXPERIMENT (LOSAT_X_BPQBLOCK): the preliminary stage in blocks of whole batches, NCBI's
-        // batches in order: each block a call of its own (`PrelimOnly::Block`: its lookup table,
-        // diagonal table and scratch, freed when it returns), whose compact hit lists move to their
-        // queries here. A query's preliminary hit list does not depend on the other queries of the
-        // search (`x_query_blocks.rs`), and its HSPs' query coordinates are relative to its
-        // context (`blastp_adjust_initial_hsp_offsets`), so only the query's index moves
-        // (`query_split::rebase_hit_list`). Nothing is written before the redo and the reports
-        // below, which run over all queries as after one table. A sequence file that cannot be
-        // read fails a block's search (`database::PreliminaryReadError`, handed on by the block):
-        // it is this call's error, made with this call's batches and reports
-        // (`preliminary_search_error`), as where one table finds it.
-        // The blocks run (`LOSAT_X_REACH`): recorded here, not where they are planned, so that a
-        // call whose blocks do not run (no valid query of a database, or an error of the set-up)
-        // does not record them.
-        super::x_query_blocks::x_reach_block_search(true);
-        for block in blocks {
-            let input = x_block_input(&query_batches, block);
-            let block_input = ranges.query_input.slice(input.clone());
-            let mut block_lists = Vec::new();
-            let searched = run_resolved_in_pool(
-                args.clone(),
-                &query_records[block.clone()],
-                subject_source,
-                "",
-                subject_label,
-                outputs,
-                blastp_parallel_pool,
-                Some(PrelimOnly::Block {
-                    lists: &mut block_lists,
-                    subjects,
-                    soft_subjects: x_soft_subjects,
-                    frames: &query_frames[block.clone()],
-                    first_query: block.start,
-                }),
-                &BlastpRanges {
-                    input_records: &ranges.input_records[input.clone()],
-                    query_input: &block_input,
-                    subject_placements: ranges.subject_placements,
-                    x_ordinal_base: ranges.x_ordinal_base + input.start,
-                    // As the block search's blocks; a call of the preliminary stage only makes no
-                    // search strategy requests (`run_resolved_in_pool`), the only reader.
-                    searched_base: ranges.searched_base + input.start,
-                    split_search_spaces: None,
-                },
-                &BlastpReports::prelim_only(false),
-                x_lookup_ahead::XAheadBlock::none(),
-            );
-            if let Err(error) = searched {
-                return Err(match error.downcast::<database::PreliminaryReadError>() {
-                    Ok(read_error) => preliminary_search_error(
-                        &args,
-                        query_records,
-                        subject_source,
-                        subject_label,
-                        outputs,
-                        blastp_parallel_pool,
-                        ranges,
-                        reports,
-                        &query_batches,
-                        &query_batch_skipped,
-                        query_chunk,
-                        database.map_or("", |database| database.name()),
-                        read_error.0,
-                    ),
-                    Err(other) => other,
-                });
-            }
-            for (q_idx, list) in block.clone().zip(block_lists) {
-                if let Some(mut list) = list {
-                    super::query_split::rebase_hit_list(
-                        &mut list,
-                        q_idx as u32,
-                        0,
-                        contexts[q_idx].aa_len,
-                    );
-                    x_compact_hit_lists[q_idx] = Some(list);
-                }
-            }
-        }
-    } else if let Some(database) = database {
-        // The preliminary stage of a database: its sequences are read in blocks and
-        // searched in the order of their ordinal ids (`database::search_blocks`).
-        let merge_sort_start = blastp_timing_start(timing_enabled);
-        let new_scratch = || {
-            BlastpSubjectScratch::new(offset_array_size, diag_array_size, window, total_query_span)
-        };
-        // The blocks of the database with the kernel of the setup's statistics or of each subject's
-        // (`process_own_subject`), chosen once here.
-        macro_rules! search_database_blocks {
-            ($process_subject:expr) => {
-                match culling.as_mut() {
-                    Some(culling) => database::search_blocks(
-                        database,
-                        blastp_parallel_pool,
-                        window,
-                        &new_scratch,
-                        $process_subject,
-                        culling,
-                    ),
-                    None => database::search_blocks(
-                        database,
-                        blastp_parallel_pool,
-                        window,
-                        &new_scratch,
-                        $process_subject,
-                        &mut PrelimCollector {
-                            x_compact_hit_lists: &mut x_compact_hit_lists,
-                            prelim_hitlist_size,
-                        },
-                    ),
-                }
-            };
-        }
-        if per_subject {
-            search_database_blocks!(&process_own_subject)
-        } else {
-            search_database_blocks!(&process_subject)
-        }
-        .map_err(|error| {
-            // A sequence file that cannot be read: NCBI's error of the batch's
-            // preliminary search (`database::PreliminaryReadError`). EXPERIMENT
-            // (LOSAT_X_BPQBLOCK): a block of the preliminary stage hands it to the search of all
-            // queries, whose batches and reports it is (`x_blocks`).
-            match error.downcast::<database::PreliminaryReadError>() {
-                Ok(read_error) if x_block_inputs.is_some() => anyhow::Error::new(read_error),
-                Ok(read_error) => preliminary_search_error(
-                    &args,
-                    query_records,
-                    subject_source,
-                    subject_label,
-                    outputs,
-                    blastp_parallel_pool,
-                    ranges,
-                    reports,
-                    &query_batches,
-                    &query_batch_skipped,
-                    query_chunk,
-                    database.name(),
-                    read_error.0,
-                ),
-                Err(other) => other,
-            }
-        })?;
-        subject_space_overflow.check()?;
-        if let Some(timing) = timing.as_ref() {
-            BlastpTiming::record_call(
-                &timing.prelim_merge_sort_ns,
-                &timing.prelim_merge_sort_calls,
-                merge_sort_start,
-            );
-        }
-    } else if use_parallel {
-        #[cfg(all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        ))]
-        {
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1688
-            // ```c
-            // aux_arg->gap_align = BLAST_GapAlignStructNew(...);
-            // aux_arg->hsp_stream = BlastHSPStreamNew(...);
-            // status = Blast_RunPreliminarySearchWithInterrupt_MT(...);
-            // ```
-            let subject_diag_offsets = blastp_subject_diag_offsets(subjects, window);
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1688
-            // ```c
-            // BlastScoringParameters* score_params = NULL;
-            // BlastExtensionParameters* ext_params = NULL;
-            // BlastGapAlignStruct* gap_align = NULL;
-            // ```
-            let pool = blastp_parallel_pool;
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1554
-            // ```c
-            // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
-            //     status = s_BlastSearchEngineCore(..., &hsp_list, ...);
-            //     status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
-            // }
-            // ```
-            //
-            // Parallel workers write one subject result into its oid-indexed
-            // slot; the reducer below replays those slots in NCBI subject
-            // iteration order.
-            let mut subject_results: Vec<Option<BlastpSubjectResult>> =
-                std::iter::repeat_with(|| None)
-                    .take(subjects.len())
-                    .collect();
-            let new_scratch = || {
-                BlastpSubjectScratch::new(
-                    offset_array_size,
-                    diag_array_size,
-                    window,
-                    total_query_span,
-                )
-            };
-            // EXPERIMENT (LOSAT_X_BPSUBJRUN): runs of consecutive subjects, one scratch per
-            // thread and one diagonal table fill per run (`x_subject_runs.rs`).
-            if x_subject_runs::x_bp_subj_run() {
-                crate::utils::xreach::x_reach!("LOSAT_X_BPSUBJRUN", true);
-                x_subject_runs::x_search_subject_runs(
-                    pool,
-                    subjects,
-                    &subject_diag_offsets,
-                    &new_scratch,
-                    &process_subject,
-                    &mut subject_results,
-                );
-            } else {
-                pool.install(|| {
-                    subject_results.par_iter_mut().enumerate().for_each_init(
-                        new_scratch,
-                        |scratch, (s_idx, subject_result_slot)| {
-                            scratch.prepare_independent_subject(subject_diag_offsets[s_idx]);
-                            let mut subject_result = BlastpSubjectResult::new(s_idx);
-                            process_subject(
-                                scratch,
-                                s_idx,
-                                BlastpSubjectRef::of(&subjects[s_idx]),
-                                &mut subject_result,
-                            );
-                            *subject_result_slot = Some(subject_result);
-                        },
-                    );
-                });
-            }
-            let merge_sort_start = blastp_timing_start(timing_enabled);
-            match culling.as_mut() {
-                Some(culling) => merge_blastp_subject_results_culled(culling, subject_results),
-                None => merge_blastp_subject_results_in_order(
-                    &mut x_compact_hit_lists,
-                    subject_results,
-                    prelim_hitlist_size,
-                ),
-            }
-            if let Some(timing) = timing.as_ref() {
-                BlastpTiming::record_call(
-                    &timing.prelim_merge_sort_ns,
-                    &timing.prelim_merge_sort_calls,
-                    merge_sort_start,
-                );
-            }
-        }
-    } else if let Some(culling) = culling.as_mut() {
-        // `-culling_limit`: the serial loop below with the culling writer in place of the
-        // collector, chosen once here so that the default loop is unchanged.
-        let mut scratch =
-            BlastpSubjectScratch::new(offset_array_size, diag_array_size, window, total_query_span);
-        let mut subject_result = BlastpSubjectResult::new(0);
-        for s_idx in 0..subjects.len() {
-            process_subject(
-                &mut scratch,
-                s_idx,
-                BlastpSubjectRef::of(&subjects[s_idx]),
-                &mut subject_result,
-            );
-            culling.add(&mut subject_result);
-        }
-    } else {
-        #[cfg(all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        ))]
-        if x_subject_runs::x_bp_subj_run() {
-            crate::utils::xreach::x_reach!("LOSAT_X_BPSUBJRUN", false);
-        }
-        let mut scratch =
-            BlastpSubjectScratch::new(offset_array_size, diag_array_size, window, total_query_span);
-        let mut subject_result = BlastpSubjectResult::new(0);
-        for s_idx in 0..subjects.len() {
-            process_subject(
-                &mut scratch,
-                s_idx,
-                BlastpSubjectRef::of(&subjects[s_idx]),
-                &mut subject_result,
-            );
-            let merge_sort_start = blastp_timing_start(timing_enabled);
-            update_blastp_preliminary_hit_lists(
-                &mut x_compact_hit_lists,
-                &mut subject_result,
-                prelim_hitlist_size,
-            );
-            if let Some(timing) = timing.as_ref() {
-                BlastpTiming::record_call(
-                    &timing.prelim_merge_sort_ns,
-                    &timing.prelim_merge_sort_calls,
-                    merge_sort_start,
-                );
-            }
-        }
-    }
+            x_soft_subjects,
+            query_frames,
+            x_blocks: &x_blocks,
+            x_block_call: x_block_inputs.is_some(),
+            lookup: &lookup,
+            contexts: &contexts,
+            gapped_params: &gapped_params,
+            gapped_gumbel: &gapped_gumbel,
+            exact_search_spaces: &exact_search_spaces,
+            preliminary_exact_spaces,
+            preliminary_search_spaces,
+            preliminary_option_spaces: &preliminary_option_spaces,
+            per_subject,
+            num_subjects,
+            cutoff_subject_length,
+            prelim_hitlist_size,
+            prelim_evalue,
+            subject_space_overflow: &subject_space_overflow,
+            window,
+            diag_mask,
+            offset_array_size,
+            diag_array_size,
+            total_query_span,
+            timing_enabled,
+            timing: &timing,
+            #[cfg(all(
+                feature = "parallel",
+                any(not(target_arch = "wasm32"), feature = "wasm-threads")
+            ))]
+            blastp_num_threads,
+            #[cfg(all(
+                feature = "parallel",
+                any(not(target_arch = "wasm32"), feature = "wasm-threads")
+            ))]
+            total_db_len,
+        },
+        &process_subject,
+        &process_own_subject,
+        &mut preliminary_hit_lists,
+        &mut x_compact_hit_lists,
+        &mut culling,
+        outputs,
+    )?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:155-180
     // ```c++
     // 		CRef<CSeq_align_set>  align_set(new CSeq_align_set);
@@ -13689,9 +12796,11 @@ fn run_call(
         pssm_reads: &pssm_reads,
     };
     let mut query_warning_lines = report_prep::query_warning_lines(&prep);
+    let mut prefetch_posts = Vec::new();
     let subject_reads = report_prep::prefetch_reported_subjects(
         &prep,
         &mut query_warning_lines,
+        &mut prefetch_posts,
         &mut psiblast_pssms,
     )?;
     report_prep::refuse_unreportable(&prep, &rows_of)?;
@@ -13970,6 +13079,7 @@ fn run_call(
         reports
             .call_requests
             .map_or_else(Vec::new, CallRequests::take_posts),
+        prefetch_posts,
         |query| reports.reader_warnings.get(query).map_or(0, Vec::len),
     );
     for (query, mut posts) in pssm_posts_before.into_iter().enumerate() {
@@ -14070,10 +13180,7 @@ fn run_call(
         // read one by one (`subject_reads`).
         let first_lines = warning_lines.take();
         let mut warnings = (first_lines.is_some()
-            || matches!(
-                outfmt,
-                BlastpReport::Xml2(_) | BlastpReport::Archive | BlastpReport::Seqalign(_)
-            )
+            || crate::report::query_warnings::report_posts(format.report_format())
             || matches!(
                 outfmt,
                 BlastpReport::CustomTabular(spec)
@@ -14348,7 +13455,7 @@ fn run_call(
                         program: "blastp",
                         version: &version,
                         reference: crate::report::blast_xml::REFERENCE_GAPPED_BLAST,
-                        db_name: db_name.as_deref().unwrap_or("").as_bytes(),
+                        db_name: db_name.as_deref().unwrap_or(""),
                         matrix: Some(&args.matrix_name),
                         expect: args.evalue,
                         gap_open: args.scoring.gap_open,

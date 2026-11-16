@@ -307,6 +307,25 @@ fn cell_hits<'a>(cell: &'a [i32; 4], overflow: &'a [i32]) -> Option<(&'a [i32], 
     Some((&cell[1..2], run))
 }
 
+/// One list of a cell for `check_cells`: whether every entry lies in the rows (`entry - 2 <
+/// rows_limit` unsigned), and `ungrouped` set when a group of buckets is smaller than its
+/// predecessor's (`list_is_grouped` for `RPS_GROUP_BUCKETS`). Written without an early exit, so
+/// that the compiler makes it a vector loop.
+#[inline]
+fn hits_in_rows_and_groups(list: &[i32], rows_limit: u32, ungrouped: &mut bool) -> bool {
+    let (mut outside, mut decreasing) = (0u8, 0u8);
+    if let Some(&first) = list.first() {
+        outside |= (entry_q_off(first) >= rows_limit) as u8;
+    }
+    for pair in list.windows(2) {
+        outside |= (entry_q_off(pair[1]) >= rows_limit) as u8;
+        decreasing |= (entry_group(pair[1], RPS_GROUP_BUCKETS)
+            < entry_group(pair[0], RPS_GROUP_BUCKETS)) as u8;
+    }
+    *ungrouped |= decreasing != 0;
+    outside == 0
+}
+
 /// Whether the hits of a cell (`cell_hits`) are in groups of `group_buckets` buckets in
 /// non-decreasing order: what `RpsBuckets::fill_group` needs of a table (it makes the hits of one
 /// group of buckets at a time from the entries of a cell in turn, so the entries of a group must
@@ -843,11 +862,11 @@ impl RpsVolumeFiles {
     fn check_cells(&mut self, num_rows: usize, check_hits: bool) -> Result<bool, String> {
         let cells = self.cells().expect("checked by the caller");
         let overflow = self.overflow().expect("checked by the caller");
-        let in_rows = |entry: i32| {
-            usize::try_from(entry)
-                .ok()
-                .is_some_and(|entry| entry >= RPS_WORDSIZE - 1 && entry < num_rows)
-        };
+        // `entry >= RPS_WORDSIZE - 1 && entry < num_rows` as one unsigned compare of `entry - 2`
+        // (a negative entry wraps above any bound under 2^31 - 2).
+        let rows_limit = u32::try_from(num_rows.saturating_sub(RPS_WORDSIZE - 1))
+            .unwrap_or(u32::MAX)
+            .min(i32::MAX as u32 - 1);
         let mut pv = vec![0u64; RPS_BACKBONE_SIZE / 64];
         let mut ungrouped = false;
         for (index, cell) in cells.iter().enumerate().take(RPS_BACKBONE_SIZE) {
@@ -871,14 +890,15 @@ impl RpsVolumeFiles {
                     ".loo word {index} names a position outside the profiles' rows"
                 ));
             };
-            let (mut all_in_rows, mut previous) = (true, 0);
+            // Both tests run over a list without a branch on the hits' values (so that the walk
+            // is vectorized): the junction of the cell's first slice and its run is tested alone.
+            let mut all_in_rows = true;
             for list in [head, run] {
-                for &entry in list {
-                    all_in_rows &= in_rows(entry);
-                    let group = entry_group(entry, RPS_GROUP_BUCKETS);
-                    ungrouped |= group < previous;
-                    previous = group;
-                }
+                all_in_rows &= hits_in_rows_and_groups(list, rows_limit, &mut ungrouped);
+            }
+            if let (Some(&last), Some(&first)) = (head.last(), run.first()) {
+                ungrouped |=
+                    entry_group(first, RPS_GROUP_BUCKETS) < entry_group(last, RPS_GROUP_BUCKETS);
             }
             if !all_in_rows {
                 return Err(format!(

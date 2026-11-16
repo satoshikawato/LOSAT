@@ -117,7 +117,7 @@ fn x_prepare_nt_tables(
     matrix: &BlastnaMatrix,
 ) -> bool {
     if let Some((cached, _)) = slot.as_ref() {
-        if cached[..] == matrix[..] {
+        if x_same_matrix(cached, matrix) {
             return true;
         }
     }
@@ -132,6 +132,24 @@ fn x_prepare_nt_tables(
             false
         }
     }
+}
+
+/// No NCBI counterpart: whether the cached matrix of `x_prepare_nt_tables` is `matrix`; it does not
+/// change any value NCBI computes.
+///
+/// `cached == matrix` for every cell, as `cached[..] == matrix[..]`: the bits of every pair of cells
+/// are XORed and the results ORed, so the test is 0 exactly when every pair is equal. It reads all
+/// 256 cells without an early exit, which the compiler turns into vector code on every target. The
+/// slice comparison was a `memcmp` call, which in the WebAssembly build is wasi-libc's loop of one
+/// byte at a time (`x_prepare_nt_tables` runs before each X-drop extension: 7 % of a 1-thread blastn
+/// search in Node, cDNAs x 3 Mb of the fly genome).
+#[inline]
+fn x_same_matrix(cached: &BlastnaMatrix, matrix: &BlastnaMatrix) -> bool {
+    cached
+        .iter()
+        .zip(matrix.iter())
+        .fold(0i32, |acc, (a, b)| acc | (a ^ b))
+        == 0
 }
 
 /// Scratch memory mirroring NCBI's BlastGapAlignStruct.
@@ -3142,6 +3160,32 @@ pub(crate) fn extend_gapped_heuristic_with_traceback_with_scratch(
 #[cfg(test)]
 mod tests {
     use super::blast_get_start_for_gapped_alignment_nucl;
+
+    // `x_same_matrix` against the slice comparison it replaces: equal matrices, and a matrix that
+    // differs from the cached one in one cell by one bit (every cell, every bit), or in its sign.
+    #[test]
+    fn x_same_matrix_is_the_slice_comparison() {
+        use super::{x_same_matrix, BlastnaMatrix};
+        let mut cached: BlastnaMatrix = [0; 256];
+        for (k, v) in cached.iter_mut().enumerate() {
+            *v = (k as i32 % 7) - 3;
+        }
+        cached[15] = i32::MIN / 2;
+        let same = cached;
+        assert!(x_same_matrix(&cached, &same));
+        assert_eq!(x_same_matrix(&cached, &same), cached[..] == same[..]);
+        for cell in 0..256 {
+            for bit in 0..32 {
+                let mut other = cached;
+                other[cell] ^= 1i32 << bit;
+                assert!(!x_same_matrix(&cached, &other), "cell {cell} bit {bit}");
+                assert_eq!(x_same_matrix(&cached, &other), cached[..] == other[..]);
+            }
+            let mut other = cached;
+            other[cell] = other[cell].wrapping_neg().wrapping_sub(1);
+            assert_eq!(x_same_matrix(&cached, &other), cached[..] == other[..]);
+        }
+    }
 
     // A final X-drop far past the sequences (`-xdrop_gap_final 1e9`, raw 1.1e9 with 2/-3 5/2)
     // gives the report of a saturated one (1e4 bits, NCBI 2.17.0 line RG X1b probe `b2.A.*`)

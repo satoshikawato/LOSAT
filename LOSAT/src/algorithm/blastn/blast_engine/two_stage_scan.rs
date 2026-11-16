@@ -57,7 +57,7 @@ use super::{
     x_bn_pv_once, x_bn_rank_once, x_dc_csr, x_mb_hit_prefetch, DiagHashTable, DiagStruct,
     OffsetPair, SmallNaWord, SubjectChunk, UngappedHit, OFFSET_ARRAY_SIZE,
 };
-use crate::algorithm::blastn::lookup::TwoStageLookup;
+use crate::algorithm::blastn::lookup::{TwoStageLookup, XHeadFifo};
 
 /// What the scan of one subject chunk with a two-stage table reads: the batch's word finder
 /// (`ScanBatch`, or its copy per subject: the query block, the cutoffs, the scoring, word lengths,
@@ -648,8 +648,15 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
             // (`on_word`: before the next word), with the same pairs and the same state, so every
             // value is the same. With the debug output on, every word still goes to `on_word`,
             // whose warning for a long chain comes before that batch's window lines.
+            // A word that calls `on_word` has its chains' heads prefetched and goes through the
+            // FIFO (`lookup::XHeadFifo`) to `on_word`, in the same order, so the same pairs and
+            // batches go out in the same order (with the debug output on, its lines too).
             let every_word = debug_mode || blastn_debug;
             let mut words_without_hits = 0usize;
+            let mut emit = |(s_off, s_range, index, index2): (usize, usize, u64, Option<u64>)| {
+                on_word(s_off, s_range, index, index2)
+            };
+            let mut fifo: XHeadFifo<(usize, usize, u64, Option<u64>)> = XHeadFifo::new();
             scan_subject_disc_words_with_ranges(
                 search_seq_packed,
                 s_len,
@@ -661,12 +668,14 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                         || pv_view.has_hits(index)
                         || index2.is_some_and(|i2| pv_view.has_hits(i2))
                     {
-                        on_word(s_off, s_range, index, index2);
+                        two_stage.x_prefetch_heads(index, index2);
+                        fifo.push((s_off, s_range, index, index2), &mut emit);
                     } else {
                         words_without_hits += 1;
                     }
                 },
             );
+            fifo.flush(&mut emit);
             if debug_enabled {
                 *dbg_total_s_positions += words_without_hits;
             }

@@ -1107,7 +1107,71 @@ impl XPvView<'_> {
     }
 }
 
+/// No NCBI counterpart (scheduling only): the depth of `XHeadFifo`.
+pub(crate) const X_HEAD_FIFO: usize = 16;
+
+/// No NCBI counterpart (scheduling only): the FIFO of the words with hits of a scan over a table
+/// of chains. A word enters after its chains' heads were prefetched
+/// (`TwoStageLookup::x_prefetch_heads`) and leaves through `emit`, unchanged and in order,
+/// `X_HEAD_FIFO` words later, when its walk reads a head the prefetch brought in: NCBI's scan reads
+/// the head (`hashtable[index]`, `hashtable2[index2]`) of each word whose presence bit is set at
+/// once, a cache miss for a table larger than the caches (drer's dc-megablast table of 4^11 cells
+/// takes 16 MiB). The words, and so every pair and its order, are the scan's own. A slot no word
+/// has reached is uninitialised (never read).
+pub(crate) struct XHeadFifo<T: Copy> {
+    buf: [std::mem::MaybeUninit<T>; X_HEAD_FIFO],
+    n: usize,
+}
+
+impl<T: Copy> XHeadFifo<T> {
+    #[inline(always)]
+    pub(crate) fn new() -> Self {
+        Self {
+            buf: [std::mem::MaybeUninit::uninit(); X_HEAD_FIFO],
+            n: 0,
+        }
+    }
+
+    /// The word `w` enters, and the word `X_HEAD_FIFO` places back leaves through `emit`;
+    /// whether one left (none while fewer than `X_HEAD_FIFO` words came before).
+    #[inline(always)]
+    pub(crate) fn push(&mut self, w: T, emit: &mut impl FnMut(T)) -> bool {
+        let slot = self.n & (X_HEAD_FIFO - 1);
+        let leaves = self.n >= X_HEAD_FIFO;
+        if leaves {
+            // SAFETY: `n >= X_HEAD_FIFO`, so word `n - X_HEAD_FIFO`, whose slot this is, was
+            // pushed and written; the `X_HEAD_FIFO - 1` words pushed since then wrote other slots.
+            emit(unsafe { self.buf[slot].assume_init() });
+        }
+        self.buf[slot] = std::mem::MaybeUninit::new(w);
+        self.n += 1;
+        leaves
+    }
+
+    /// The words still in the FIFO leave through `emit`, in order.
+    pub(crate) fn flush(&mut self, emit: &mut impl FnMut(T)) {
+        for m in self.n.saturating_sub(X_HEAD_FIFO)..self.n {
+            // SAFETY: `m < n` and `m >= n - X_HEAD_FIFO`: word `m` was pushed, and no later word
+            // wrote its slot.
+            emit(unsafe { self.buf[m & (X_HEAD_FIFO - 1)].assume_init() });
+        }
+        self.n = 0;
+    }
+}
+
 impl TwoStageLookup {
+    /// No NCBI counterpart (scheduling only): prefetches the heads of a word's chains, its cell
+    /// of `hashtable` and, for a second template's word `index2`, of `hashtable2` (`XHeadFifo`).
+    /// A table without a first template's chains (`hashtable` empty: CSR) gets a prefetch of no
+    /// use; a prefetch accesses no memory architecturally, so any address is allowed.
+    #[inline(always)]
+    pub(crate) fn x_prefetch_heads(&self, index: u64, index2: Option<u64>) {
+        x_dc_csr::prefetch(self.mb_lookup.hashtable.as_ptr().wrapping_add(index as usize));
+        if let (Some(index2), Some(disc)) = (index2, self.disc.as_ref()) {
+            x_dc_csr::prefetch(disc.hashtable2.as_ptr().wrapping_add(index2 as usize));
+        }
+    }
+
     /// No NCBI counterpart (layout only): the presence vector and its shift (`XPvView`).
     #[inline(always)]
     pub(crate) fn x_pv_view(&self) -> XPvView<'_> {

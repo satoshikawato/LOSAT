@@ -1,0 +1,6795 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastx",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">first nucleotide query with a title long enough
+ to be cut"
+                  }
+                }
+              },
+              title "first nucleotide query with a title long enough to be cut"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 429,
+              seq-data ncbi2na '3AE7B75E5842141B42965EAB0ADA66467A62CEB9A295E8
+8A3BD7B5F55145085C7D591F61789469DE54AF0A9469082BA5866785065BA646E8613950667B59
+5E26179199109F6AE856B41F4275C251E5E7AE15E96545D5658BD1579AE465D5E842F5E9F7B891
+6E785D40C5BC00'H
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/taxfilter/tfp",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "LongestIntronLength",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFilteringWindow",
+          value integer 12
+        },
+        {
+          name "SegFilteringLocut",
+          value real { 22, 10, -1 }
+        },
+        {
+          name "SegFilteringHicut",
+          value real { 25, 10, -1 }
+        },
+        {
+          name "WordThreshold",
+          value integer 12
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "QueryGeneticCode",
+          value integer 1
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 242352
+        }
+      },
+      program-options {
+        {
+          name "NegativeTaxidList",
+          value integer-list {
+            9606
+          }
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 733
+          },
+          {
+            id str "blast_score",
+            value int 733
+          },
+          {
+            id str "e_value",
+            value real { 368946036908701, 10, -119 }
+          },
+          {
+            id str "bit_score",
+            value real { 286959521427464, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 142
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 142
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 993006993006993, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P01972",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 0,
+                to 425,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 141,
+                strand unknown,
+                id swissprot {
+                  accession "P01972",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 721
+          },
+          {
+            id str "blast_score",
+            value int 721
+          },
+          {
+            id str "e_value",
+            value real { 198046698253212, 10, -117 }
+          },
+          {
+            id str "bit_score",
+            value real { 282337126516456, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 140
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 141
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 991013986013986, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P01923",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 3,
+                to 425,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 140,
+                strand unknown,
+                id swissprot {
+                  accession "P01923",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 719
+          },
+          {
+            id str "blast_score",
+            value int 719
+          },
+          {
+            id str "e_value",
+            value real { 44179064210923, 10, -116 }
+          },
+          {
+            id str "bit_score",
+            value real { 281566727364621, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 140
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 141
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 993006993006993, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "Q9TS35",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 0,
+                to 425,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 141,
+                strand unknown,
+                id swissprot {
+                  accession "Q9TS35",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 712
+          },
+          {
+            id str "blast_score",
+            value int 712
+          },
+          {
+            id str "e_value",
+            value real { 615401799343468, 10, -116 }
+          },
+          {
+            id str "bit_score",
+            value real { 2788703303332, 10, -10 }
+          },
+          {
+            id str "num_ident",
+            value int 138
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 139
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 993006993006993, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P63107",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 0,
+                to 425,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 141,
+                strand unknown,
+                id swissprot {
+                  accession "P63107",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 702
+          },
+          {
+            id str "blast_score",
+            value int 702
+          },
+          {
+            id str "e_value",
+            value real { 184605138293855, 10, -114 }
+          },
+          {
+            id str "bit_score",
+            value real { 275018334574026, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 136
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 139
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 991013986013986, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P67818",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 3,
+                to 425,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 140,
+                strand unknown,
+                id swissprot {
+                  accession "P67818",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 679
+          },
+          {
+            id str "blast_score",
+            value int 679
+          },
+          {
+            id str "e_value",
+            value real { 648802951261322, 10, -111 }
+          },
+          {
+            id str "bit_score",
+            value real { 266158744327927, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 125
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 137
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 991013986013986, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P01935",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 3,
+                to 425,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 140,
+                strand unknown,
+                id swissprot {
+                  accession "P01935",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 645
+          },
+          {
+            id str "blast_score",
+            value int 645
+          },
+          {
+            id str "e_value",
+            value real { 982353415786759, 10, -106 }
+          },
+          {
+            id str "bit_score",
+            value real { 253061958746737, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 122
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 129
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 993006993006993, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P01942",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 0,
+                to 425,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 141,
+                strand unknown,
+                id swissprot {
+                  accession "P01942",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 27
+          },
+          {
+            id str "blast_score",
+            value int 27
+          },
+          {
+            id str "e_value",
+            value real { 996089948518224, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 150086208298125, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 6
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 6
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 46958041958042, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P01942",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 395,
+                to 412,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 132,
+                to 137,
+                strand unknown,
+                id swissprot {
+                  accession "P01942",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 643
+          },
+          {
+            id str "blast_score",
+            value int 643
+          },
+          {
+            id str "e_value",
+            value real { 17189687357752, 10, -104 }
+          },
+          {
+            id str "bit_score",
+            value real { 252291559594902, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 125
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 129
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 993006993006993, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P01966",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 0,
+                to 425,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 141,
+                strand unknown,
+                id swissprot {
+                  accession "P01966",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 640
+          },
+          {
+            id str "blast_score",
+            value int 640
+          },
+          {
+            id str "e_value",
+            value real { 456054070144158, 10, -105 }
+          },
+          {
+            id str "bit_score",
+            value real { 25113596086715, 10, -11 }
+          },
+          {
+            id str "num_ident",
+            value int 120
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 131
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 991013986013986, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P07405",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 3,
+                to 425,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 140,
+                strand unknown,
+                id swissprot {
+                  accession "P07405",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 619
+          },
+          {
+            id str "blast_score",
+            value int 619
+          },
+          {
+            id str "e_value",
+            value real { 758118794336805, 10, -102 }
+          },
+          {
+            id str "bit_score",
+            value real { 243046769772886, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 118
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 128
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 991013986013986, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P60529",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 3,
+                to 425,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 140,
+                strand unknown,
+                id swissprot {
+                  accession "P60529",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 531
+          },
+          {
+            id str "blast_score",
+            value int 531
+          },
+          {
+            id str "e_value",
+            value real { 225235031985975, 10, -88 }
+          },
+          {
+            id str "bit_score",
+            value real { 209149207092159, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 111
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 121
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 993006993006993, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P01946",
+                release "reviewed",
+                version 3
+              }
+            },
+            loc {
+              int {
+                from 0,
+                to 425,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 141,
+                strand unknown,
+                id swissprot {
+                  accession "P01946",
+                  release "reviewed",
+                  version 3
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 528
+          },
+          {
+            id str "blast_score",
+            value int 528
+          },
+          {
+            id str "e_value",
+            value real { 559429950792454, 10, -88 }
+          },
+          {
+            id str "bit_score",
+            value real { 207993608364407, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 100
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 121
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 993006993006993, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P01994",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 0,
+                to 425,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 141,
+                strand unknown,
+                id swissprot {
+                  accession "P01994",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 521
+          },
+          {
+            id str "blast_score",
+            value int 521
+          },
+          {
+            id str "e_value",
+            value real { 623692836125908, 10, -87 }
+          },
+          {
+            id str "bit_score",
+            value real { 205297211332985, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 95
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 123
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 993006993006993, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P01999",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 0,
+                to 425,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 141,
+                strand unknown,
+                id swissprot {
+                  accession "P01999",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 496
+          },
+          {
+            id str "blast_score",
+            value int 496
+          },
+          {
+            id str "e_value",
+            value real { 471773034075296, 10, -83 }
+          },
+          {
+            id str "bit_score",
+            value real { 195667221935051, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 91
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 117
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 993006993006993, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P83135",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 0,
+                to 425,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 141,
+                strand unknown,
+                id swissprot {
+                  accession "P83135",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 470
+          },
+          {
+            id str "blast_score",
+            value int 470
+          },
+          {
+            id str "e_value",
+            value real { 423945190847722, 10, -79 }
+          },
+          {
+            id str "bit_score",
+            value real { 1856520329612, 10, -10 }
+          },
+          {
+            id str "num_ident",
+            value int 90
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 111
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 993006993006993, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P06638",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 0,
+                to 425,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 141,
+                strand unknown,
+                id swissprot {
+                  accession "P06638",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 439
+          },
+          {
+            id str "blast_score",
+            value int 439
+          },
+          {
+            id str "e_value",
+            value real { 249757012108413, 10, -74 }
+          },
+          {
+            id str "bit_score",
+            value real { 173710846107762, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 87
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 107
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 991013986013986, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "Q9PRL9",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 3,
+                to 425,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 140,
+                strand unknown,
+                id swissprot {
+                  accession "Q9PRL9",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 438
+          },
+          {
+            id str "blast_score",
+            value int 438
+          },
+          {
+            id str "e_value",
+            value real { 294016779033214, 10, -74 }
+          },
+          {
+            id str "bit_score",
+            value real { 173325646531845, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 78
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 110
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 993006993006993, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P06467",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 0,
+                to 425,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 141,
+                strand unknown,
+                id swissprot {
+                  accession "P06467",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 393
+          },
+          {
+            id str "blast_score",
+            value int 393
+          },
+          {
+            id str "e_value",
+            value real { 187198981581749, 10, -67 }
+          },
+          {
+            id str "bit_score",
+            value real { 155991665615564, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 78
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 101
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 984020979020979, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P11748",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 6,
+                to 140,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 2,
+                to 46,
+                strand unknown,
+                id swissprot {
+                  accession "P11748",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P11748",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 47,
+                to 47,
+                strand unknown,
+                id swissprot {
+                  accession "P11748",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P11748",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 141,
+                to 425,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 48,
+                to 142,
+                strand unknown,
+                id swissprot {
+                  accession "P11748",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 388
+          },
+          {
+            id str "blast_score",
+            value int 388
+          },
+          {
+            id str "e_value",
+            value real { 121652519867007, 10, -66 }
+          },
+          {
+            id str "bit_score",
+            value real { 154065667735977, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 75
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 108
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 984020979020979, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P02018",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 6,
+                to 140,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 1,
+                to 45,
+                strand unknown,
+                id swissprot {
+                  accession "P02018",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P02018",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 46,
+                to 46,
+                strand unknown,
+                id swissprot {
+                  accession "P02018",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P02018",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 141,
+                to 425,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 47,
+                to 141,
+                strand unknown,
+                id swissprot {
+                  accession "P02018",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 385
+          },
+          {
+            id str "blast_score",
+            value int 385
+          },
+          {
+            id str "e_value",
+            value real { 395506229116163, 10, -66 }
+          },
+          {
+            id str "bit_score",
+            value real { 152910069008225, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 76
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 103
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 993006993006993, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "Q90487",
+                release "reviewed",
+                version 3
+              }
+            },
+            loc {
+              int {
+                from 0,
+                to 140,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 46,
+                strand unknown,
+                id swissprot {
+                  accession "Q90487",
+                  release "reviewed",
+                  version 3
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "Q90487",
+                release "reviewed",
+                version 3
+              }
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 47,
+                to 47,
+                strand unknown,
+                id swissprot {
+                  accession "Q90487",
+                  release "reviewed",
+                  version 3
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "Q90487",
+                release "reviewed",
+                version 3
+              }
+            },
+            loc {
+              int {
+                from 141,
+                to 425,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 48,
+                to 142,
+                strand unknown,
+                id swissprot {
+                  accession "Q90487",
+                  release "reviewed",
+                  version 3
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 30
+          },
+          {
+            id str "blast_score",
+            value int 30
+          },
+          {
+            id str "e_value",
+            value real { 419342413320239, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 161642195575646, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 5
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 7
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 539510489510489, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "Q90487",
+                release "reviewed",
+                version 3
+              }
+            },
+            loc {
+              int {
+                from 36,
+                to 56,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 47,
+                to 53,
+                strand unknown,
+                id swissprot {
+                  accession "Q90487",
+                  release "reviewed",
+                  version 3
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 379
+          },
+          {
+            id str "blast_score",
+            value int 379
+          },
+          {
+            id str "e_value",
+            value real { 276838920156275, 10, -65 }
+          },
+          {
+            id str "bit_score",
+            value real { 150598871552721, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 82
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 102
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 993006993006993, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P11251",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 0,
+                to 140,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 46,
+                strand unknown,
+                id swissprot {
+                  accession "P11251",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P11251",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 47,
+                to 47,
+                strand unknown,
+                id swissprot {
+                  accession "P11251",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P11251",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 141,
+                to 425,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 48,
+                to 142,
+                strand unknown,
+                id swissprot {
+                  accession "P11251",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 29
+          },
+          {
+            id str "blast_score",
+            value int 29
+          },
+          {
+            id str "e_value",
+            value real { 543440503090073, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 157790199816472, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 6
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 7
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 679370629370629, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P11251",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 39,
+                to 65,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 44,
+                to 52,
+                strand unknown,
+                id swissprot {
+                  accession "P11251",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 79,
+              to 271,
+              id local str "Query_1"
+            },
+            {
+              from 289,
+              to 313,
+              id local str "Query_1"
+            },
+            {
+              from 316,
+              to 376,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 17,
+              to 68,
+              id local str "Query_1"
+            },
+            {
+              from 161,
+              to 245,
+              id local str "Query_1"
+            },
+            {
+              from 302,
+              to 362,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 318,
+              to 377,
+              id local str "Query_1"
+            },
+            {
+              from 189,
+              to 269,
+              id local str "Query_1"
+            },
+            {
+              from 84,
+              to 146,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 280,
+              to 378,
+              id local str "Query_1"
+            },
+            {
+              from 88,
+              to 240,
+              id local str "Query_1"
+            },
+            {
+              from 31,
+              to 69,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame minus3
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 317605957635731, 10, -15 },
+        k { 133956144488482, 10, -15 },
+        h { 401214524497119, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 242352",
+      "Effective search space used: 242352",
+      "Length adjustment: 35"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastx",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">second"
+                  }
+                }
+              },
+              title "second"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 444,
+              seq-data ncbi2na '3AE4DE1D78A20B796F1E57BAA42B81BA382FAEB8A57A92
+9E7AEB715FA1522BDFE2D7FAA37B51D78E7BCEA415C2B829D3A4202E76B97F2E3A5E9D17A105D0
+A917F94478B89E47B842791BA35E207D29D7A906E7ADEEE7A54D1FE9020F45514B929E5CD202EB
+A7AEE9C395E9510B3470'H
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/taxfilter/tfp",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "LongestIntronLength",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFilteringWindow",
+          value integer 12
+        },
+        {
+          name "SegFilteringLocut",
+          value real { 22, 10, -1 }
+        },
+        {
+          name "SegFilteringHicut",
+          value real { 25, 10, -1 }
+        },
+        {
+          name "WordThreshold",
+          value integer 12
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "QueryGeneticCode",
+          value integer 1
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 253572
+        }
+      },
+      program-options {
+        {
+          name "NegativeTaxidList",
+          value integer-list {
+            9606
+          }
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 303
+          },
+          {
+            id str "blast_score",
+            value int 303
+          },
+          {
+            id str "e_value",
+            value real { 120833309627353, 10, -53 }
+          },
+          {
+            id str "bit_score",
+            value real { 121323703783002, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 63
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 99
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 977972972972973, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P11748",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 9,
+                to 59,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 2,
+                to 18,
+                strand unknown,
+                id swissprot {
+                  accession "P11748",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P11748",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              empty local str "Query_2",
+              int {
+                from 19,
+                to 20,
+                strand unknown,
+                id swissprot {
+                  accession "P11748",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P11748",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 60,
+                to 152,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 21,
+                to 51,
+                strand unknown,
+                id swissprot {
+                  accession "P11748",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P11748",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 153,
+                to 167,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "P11748",
+                release "reviewed",
+                version 1
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P11748",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 168,
+                to 440,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 52,
+                to 142,
+                strand unknown,
+                id swissprot {
+                  accession "P11748",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 295
+          },
+          {
+            id str "blast_score",
+            value int 295
+          },
+          {
+            id str "e_value",
+            value real { 172840564658473, 10, -52 }
+          },
+          {
+            id str "bit_score",
+            value real { 118242107175663, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 60
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 102
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 977972972972973, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P02018",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 9,
+                to 56,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 1,
+                to 16,
+                strand unknown,
+                id swissprot {
+                  accession "P02018",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P02018",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              empty local str "Query_2",
+              int {
+                from 17,
+                to 18,
+                strand unknown,
+                id swissprot {
+                  accession "P02018",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P02018",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 57,
+                to 152,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 19,
+                to 50,
+                strand unknown,
+                id swissprot {
+                  accession "P02018",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P02018",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 153,
+                to 167,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "P02018",
+                release "reviewed",
+                version 1
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P02018",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 168,
+                to 440,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 51,
+                to 141,
+                strand unknown,
+                id swissprot {
+                  accession "P02018",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 291
+          },
+          {
+            id str "blast_score",
+            value int 291
+          },
+          {
+            id str "e_value",
+            value real { 748457958245369, 10, -52 }
+          },
+          {
+            id str "bit_score",
+            value real { 116701308871994, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 60
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 105
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 991486486486486, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "Q90487",
+                release "reviewed",
+                version 3
+              }
+            },
+            loc {
+              int {
+                from 3,
+                to 59,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 0,
+                to 18,
+                strand unknown,
+                id swissprot {
+                  accession "Q90487",
+                  release "reviewed",
+                  version 3
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "Q90487",
+                release "reviewed",
+                version 3
+              }
+            },
+            loc {
+              empty local str "Query_2",
+              int {
+                from 19,
+                to 20,
+                strand unknown,
+                id swissprot {
+                  accession "Q90487",
+                  release "reviewed",
+                  version 3
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "Q90487",
+                release "reviewed",
+                version 3
+              }
+            },
+            loc {
+              int {
+                from 60,
+                to 152,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 21,
+                to 51,
+                strand unknown,
+                id swissprot {
+                  accession "Q90487",
+                  release "reviewed",
+                  version 3
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "Q90487",
+                release "reviewed",
+                version 3
+              }
+            },
+            loc {
+              int {
+                from 153,
+                to 167,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "Q90487",
+                release "reviewed",
+                version 3
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "Q90487",
+                release "reviewed",
+                version 3
+              }
+            },
+            loc {
+              int {
+                from 168,
+                to 440,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 52,
+                to 142,
+                strand unknown,
+                id swissprot {
+                  accession "Q90487",
+                  release "reviewed",
+                  version 3
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 287
+          },
+          {
+            id str "blast_score",
+            value int 287
+          },
+          {
+            id str "e_value",
+            value real { 356164568975114, 10, -51 }
+          },
+          {
+            id str "bit_score",
+            value real { 115160510568324, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 63
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 102
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 971216216216216, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01972",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 9,
+                to 56,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 2,
+                to 17,
+                strand unknown,
+                id swissprot {
+                  accession "P01972",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01972",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              empty local str "Query_2",
+              int {
+                from 18,
+                to 19,
+                strand unknown,
+                id swissprot {
+                  accession "P01972",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01972",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 57,
+                to 137,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 20,
+                to 46,
+                strand unknown,
+                id swissprot {
+                  accession "P01972",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01972",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 138,
+                to 140,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "P01972",
+                release "reviewed",
+                version 1
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01972",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 141,
+                to 149,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 47,
+                to 49,
+                strand unknown,
+                id swissprot {
+                  accession "P01972",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01972",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 150,
+                to 164,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "P01972",
+                release "reviewed",
+                version 1
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01972",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 165,
+                to 437,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 50,
+                to 140,
+                strand unknown,
+                id swissprot {
+                  accession "P01972",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 284
+          },
+          {
+            id str "blast_score",
+            value int 284
+          },
+          {
+            id str "e_value",
+            value real { 983558409139298, 10, -51 }
+          },
+          {
+            id str "bit_score",
+            value real { 114004911840572, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 60
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 95
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 971216216216216, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01935",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 9,
+                to 56,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 1,
+                to 16,
+                strand unknown,
+                id swissprot {
+                  accession "P01935",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01935",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              empty local str "Query_2",
+              int {
+                from 17,
+                to 18,
+                strand unknown,
+                id swissprot {
+                  accession "P01935",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01935",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 57,
+                to 137,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 19,
+                to 45,
+                strand unknown,
+                id swissprot {
+                  accession "P01935",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01935",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 138,
+                to 140,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "P01935",
+                release "reviewed",
+                version 1
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01935",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 141,
+                to 149,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 46,
+                to 48,
+                strand unknown,
+                id swissprot {
+                  accession "P01935",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01935",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 150,
+                to 164,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "P01935",
+                release "reviewed",
+                version 1
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01935",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 165,
+                to 437,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 49,
+                to 139,
+                strand unknown,
+                id swissprot {
+                  accession "P01935",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 283
+          },
+          {
+            id str "blast_score",
+            value int 283
+          },
+          {
+            id str "e_value",
+            value real { 114536307681887, 10, -50 }
+          },
+          {
+            id str "bit_score",
+            value real { 113619712264655, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 62
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 102
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 971216216216216, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01923",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 9,
+                to 56,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 1,
+                to 16,
+                strand unknown,
+                id swissprot {
+                  accession "P01923",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01923",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              empty local str "Query_2",
+              int {
+                from 17,
+                to 18,
+                strand unknown,
+                id swissprot {
+                  accession "P01923",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01923",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 57,
+                to 137,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 19,
+                to 45,
+                strand unknown,
+                id swissprot {
+                  accession "P01923",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01923",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 138,
+                to 140,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "P01923",
+                release "reviewed",
+                version 1
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01923",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 141,
+                to 149,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 46,
+                to 48,
+                strand unknown,
+                id swissprot {
+                  accession "P01923",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01923",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 150,
+                to 164,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "P01923",
+                release "reviewed",
+                version 1
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01923",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 165,
+                to 437,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 49,
+                to 139,
+                strand unknown,
+                id swissprot {
+                  accession "P01923",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 281
+          },
+          {
+            id str "blast_score",
+            value int 281
+          },
+          {
+            id str "e_value",
+            value real { 226347345970704, 10, -50 }
+          },
+          {
+            id str "bit_score",
+            value real { 11284931311282, 10, -11 }
+          },
+          {
+            id str "num_ident",
+            value int 62
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 101
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 971216216216216, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "Q9TS35",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 9,
+                to 56,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 2,
+                to 17,
+                strand unknown,
+                id swissprot {
+                  accession "Q9TS35",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "Q9TS35",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              empty local str "Query_2",
+              int {
+                from 18,
+                to 19,
+                strand unknown,
+                id swissprot {
+                  accession "Q9TS35",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "Q9TS35",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 57,
+                to 137,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 20,
+                to 46,
+                strand unknown,
+                id swissprot {
+                  accession "Q9TS35",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "Q9TS35",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 138,
+                to 140,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "Q9TS35",
+                release "reviewed",
+                version 2
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "Q9TS35",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 141,
+                to 149,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 47,
+                to 49,
+                strand unknown,
+                id swissprot {
+                  accession "Q9TS35",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "Q9TS35",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 150,
+                to 164,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "Q9TS35",
+                release "reviewed",
+                version 2
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "Q9TS35",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 165,
+                to 437,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 50,
+                to 140,
+                strand unknown,
+                id swissprot {
+                  accession "Q9TS35",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 280
+          },
+          {
+            id str "blast_score",
+            value int 280
+          },
+          {
+            id str "e_value",
+            value real { 288721474745892, 10, -50 }
+          },
+          {
+            id str "bit_score",
+            value real { 112464113536903, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 62
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 100
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 971216216216216, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P67818",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 9,
+                to 56,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 1,
+                to 16,
+                strand unknown,
+                id swissprot {
+                  accession "P67818",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P67818",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              empty local str "Query_2",
+              int {
+                from 17,
+                to 18,
+                strand unknown,
+                id swissprot {
+                  accession "P67818",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P67818",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 57,
+                to 137,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 19,
+                to 45,
+                strand unknown,
+                id swissprot {
+                  accession "P67818",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P67818",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 138,
+                to 140,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "P67818",
+                release "reviewed",
+                version 1
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P67818",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 141,
+                to 149,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 46,
+                to 48,
+                strand unknown,
+                id swissprot {
+                  accession "P67818",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P67818",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 150,
+                to 164,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "P67818",
+                release "reviewed",
+                version 1
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P67818",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 165,
+                to 437,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 49,
+                to 139,
+                strand unknown,
+                id swissprot {
+                  accession "P67818",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 280
+          },
+          {
+            id str "blast_score",
+            value int 280
+          },
+          {
+            id str "e_value",
+            value real { 383076565300157, 10, -50 }
+          },
+          {
+            id str "bit_score",
+            value real { 112464113536903, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 63
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 97
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 971216216216216, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P60529",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 9,
+                to 56,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 1,
+                to 16,
+                strand unknown,
+                id swissprot {
+                  accession "P60529",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P60529",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              empty local str "Query_2",
+              int {
+                from 17,
+                to 18,
+                strand unknown,
+                id swissprot {
+                  accession "P60529",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P60529",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 57,
+                to 137,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 19,
+                to 45,
+                strand unknown,
+                id swissprot {
+                  accession "P60529",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P60529",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 138,
+                to 140,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "P60529",
+                release "reviewed",
+                version 1
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P60529",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 141,
+                to 152,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 46,
+                to 49,
+                strand unknown,
+                id swissprot {
+                  accession "P60529",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P60529",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 153,
+                to 167,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "P60529",
+                release "reviewed",
+                version 1
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P60529",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 168,
+                to 437,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 50,
+                to 139,
+                strand unknown,
+                id swissprot {
+                  accession "P60529",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 28
+          },
+          {
+            id str "blast_score",
+            value int 28
+          },
+          {
+            id str "e_value",
+            value real { 720245900697305, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 153938204057299, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 4
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 6
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 522972972972973, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P60529",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 181,
+                to 201,
+                strand minus,
+                id local str "Query_2"
+              },
+              int {
+                from 108,
+                to 114,
+                strand unknown,
+                id swissprot {
+                  accession "P60529",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 279
+          },
+          {
+            id str "blast_score",
+            value int 279
+          },
+          {
+            id str "e_value",
+            value real { 479354799940081, 10, -50 }
+          },
+          {
+            id str "bit_score",
+            value real { 112078913960986, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 63
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 99
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 971216216216216, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P63107",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 9,
+                to 56,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 2,
+                to 17,
+                strand unknown,
+                id swissprot {
+                  accession "P63107",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P63107",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              empty local str "Query_2",
+              int {
+                from 18,
+                to 19,
+                strand unknown,
+                id swissprot {
+                  accession "P63107",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P63107",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 57,
+                to 137,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 20,
+                to 46,
+                strand unknown,
+                id swissprot {
+                  accession "P63107",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P63107",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 138,
+                to 140,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "P63107",
+                release "reviewed",
+                version 2
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P63107",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 141,
+                to 149,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 47,
+                to 49,
+                strand unknown,
+                id swissprot {
+                  accession "P63107",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P63107",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 150,
+                to 164,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "P63107",
+                release "reviewed",
+                version 2
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P63107",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 165,
+                to 437,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 50,
+                to 140,
+                strand unknown,
+                id swissprot {
+                  accession "P63107",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 278
+          },
+          {
+            id str "blast_score",
+            value int 278
+          },
+          {
+            id str "e_value",
+            value real { 716774503453451, 10, -50 }
+          },
+          {
+            id str "bit_score",
+            value real { 111693714385068, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 61
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 92
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 971216216216216, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01942",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 9,
+                to 56,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 2,
+                to 17,
+                strand unknown,
+                id swissprot {
+                  accession "P01942",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01942",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              empty local str "Query_2",
+              int {
+                from 18,
+                to 19,
+                strand unknown,
+                id swissprot {
+                  accession "P01942",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01942",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 57,
+                to 137,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 20,
+                to 46,
+                strand unknown,
+                id swissprot {
+                  accession "P01942",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01942",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 138,
+                to 155,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "P01942",
+                release "reviewed",
+                version 2
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01942",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 156,
+                to 437,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 47,
+                to 140,
+                strand unknown,
+                id swissprot {
+                  accession "P01942",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 272
+          },
+          {
+            id str "blast_score",
+            value int 272
+          },
+          {
+            id str "e_value",
+            value real { 577834029113512, 10, -49 }
+          },
+          {
+            id str "bit_score",
+            value real { 109382516929564, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 60
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 98
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 971216216216216, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P06638",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 9,
+                to 59,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 2,
+                to 18,
+                strand unknown,
+                id swissprot {
+                  accession "P06638",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P06638",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              empty local str "Query_2",
+              int {
+                from 19,
+                to 20,
+                strand unknown,
+                id swissprot {
+                  accession "P06638",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P06638",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 60,
+                to 137,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 21,
+                to 46,
+                strand unknown,
+                id swissprot {
+                  accession "P06638",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P06638",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 138,
+                to 140,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "P06638",
+                release "reviewed",
+                version 2
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P06638",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 141,
+                to 149,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 47,
+                to 49,
+                strand unknown,
+                id swissprot {
+                  accession "P06638",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P06638",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 150,
+                to 164,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "P06638",
+                release "reviewed",
+                version 2
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P06638",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 165,
+                to 437,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 50,
+                to 140,
+                strand unknown,
+                id swissprot {
+                  accession "P06638",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 271
+          },
+          {
+            id str "blast_score",
+            value int 271
+          },
+          {
+            id str "e_value",
+            value real { 710356437826348, 10, -49 }
+          },
+          {
+            id str "bit_score",
+            value real { 108997317353647, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 62
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 95
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 971216216216216, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01966",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 9,
+                to 56,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 2,
+                to 17,
+                strand unknown,
+                id swissprot {
+                  accession "P01966",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01966",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              empty local str "Query_2",
+              int {
+                from 18,
+                to 19,
+                strand unknown,
+                id swissprot {
+                  accession "P01966",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01966",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 57,
+                to 137,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 20,
+                to 46,
+                strand unknown,
+                id swissprot {
+                  accession "P01966",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01966",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 138,
+                to 140,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "P01966",
+                release "reviewed",
+                version 2
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01966",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 141,
+                to 149,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 47,
+                to 49,
+                strand unknown,
+                id swissprot {
+                  accession "P01966",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01966",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 150,
+                to 164,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "P01966",
+                release "reviewed",
+                version 2
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01966",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 165,
+                to 437,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 50,
+                to 140,
+                strand unknown,
+                id swissprot {
+                  accession "P01966",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 35
+          },
+          {
+            id str "blast_score",
+            value int 35
+          },
+          {
+            id str "e_value",
+            value real { 107666318423777, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 180902174371514, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 6
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 12
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 995945945945946, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01966",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 198,
+                to 239,
+                strand minus,
+                id local str "Query_2"
+              },
+              int {
+                from 60,
+                to 73,
+                strand unknown,
+                id swissprot {
+                  accession "P01966",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 266
+          },
+          {
+            id str "blast_score",
+            value int 266
+          },
+          {
+            id str "e_value",
+            value real { 376182121952004, 10, -48 }
+          },
+          {
+            id str "bit_score",
+            value real { 10707131947406, 10, -11 }
+          },
+          {
+            id str "num_ident",
+            value int 61
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 92
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 971216216216216, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P07405",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 9,
+                to 56,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 1,
+                to 16,
+                strand unknown,
+                id swissprot {
+                  accession "P07405",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P07405",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              empty local str "Query_2",
+              int {
+                from 17,
+                to 18,
+                strand unknown,
+                id swissprot {
+                  accession "P07405",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P07405",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 57,
+                to 137,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 19,
+                to 45,
+                strand unknown,
+                id swissprot {
+                  accession "P07405",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P07405",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 138,
+                to 140,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "P07405",
+                release "reviewed",
+                version 1
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P07405",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 141,
+                to 149,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 46,
+                to 48,
+                strand unknown,
+                id swissprot {
+                  accession "P07405",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P07405",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 150,
+                to 164,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "P07405",
+                release "reviewed",
+                version 1
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P07405",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 165,
+                to 437,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 49,
+                to 139,
+                strand unknown,
+                id swissprot {
+                  accession "P07405",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 28
+          },
+          {
+            id str "blast_score",
+            value int 28
+          },
+          {
+            id str "e_value",
+            value real { 884360250559875, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 153938204057299, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 4
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 6
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 522972972972973, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P07405",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 181,
+                to 201,
+                strand minus,
+                id local str "Query_2"
+              },
+              int {
+                from 108,
+                to 114,
+                strand unknown,
+                id swissprot {
+                  accession "P07405",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 267
+          },
+          {
+            id str "blast_score",
+            value int 267
+          },
+          {
+            id str "e_value",
+            value real { 380931813471499, 10, -48 }
+          },
+          {
+            id str "bit_score",
+            value real { 107456519049977, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 63
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 99
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 977972972972973, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P11251",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 9,
+                to 59,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 2,
+                to 18,
+                strand unknown,
+                id swissprot {
+                  accession "P11251",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P11251",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              empty local str "Query_2",
+              int {
+                from 19,
+                to 20,
+                strand unknown,
+                id swissprot {
+                  accession "P11251",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P11251",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 60,
+                to 152,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 21,
+                to 51,
+                strand unknown,
+                id swissprot {
+                  accession "P11251",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P11251",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 153,
+                to 167,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "P11251",
+                release "reviewed",
+                version 2
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P11251",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 168,
+                to 440,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 52,
+                to 142,
+                strand unknown,
+                id swissprot {
+                  accession "P11251",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 260
+          },
+          {
+            id str "blast_score",
+            value int 260
+          },
+          {
+            id str "e_value",
+            value real { 374303402654685, 10, -47 }
+          },
+          {
+            id str "bit_score",
+            value real { 104760122018556, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 54
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 95
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 971216216216216, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01999",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 9,
+                to 59,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 2,
+                to 18,
+                strand unknown,
+                id swissprot {
+                  accession "P01999",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01999",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              empty local str "Query_2",
+              int {
+                from 19,
+                to 20,
+                strand unknown,
+                id swissprot {
+                  accession "P01999",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01999",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 60,
+                to 137,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 21,
+                to 46,
+                strand unknown,
+                id swissprot {
+                  accession "P01999",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01999",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 138,
+                to 155,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "P01999",
+                release "reviewed",
+                version 2
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01999",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 156,
+                to 437,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 47,
+                to 140,
+                strand unknown,
+                id swissprot {
+                  accession "P01999",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 257
+          },
+          {
+            id str "blast_score",
+            value int 257
+          },
+          {
+            id str "e_value",
+            value real { 114485591031291, 10, -46 }
+          },
+          {
+            id str "bit_score",
+            value real { 103604523290804, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 56
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 99
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 971216216216216, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P83135",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 9,
+                to 56,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 2,
+                to 17,
+                strand unknown,
+                id swissprot {
+                  accession "P83135",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P83135",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              empty local str "Query_2",
+              int {
+                from 18,
+                to 19,
+                strand unknown,
+                id swissprot {
+                  accession "P83135",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P83135",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 57,
+                to 137,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 20,
+                to 46,
+                strand unknown,
+                id swissprot {
+                  accession "P83135",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P83135",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 138,
+                to 155,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "P83135",
+                release "reviewed",
+                version 2
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P83135",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 156,
+                to 437,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 47,
+                to 140,
+                strand unknown,
+                id swissprot {
+                  accession "P83135",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 245
+          },
+          {
+            id str "blast_score",
+            value int 245
+          },
+          {
+            id str "e_value",
+            value real { 640080371718989, 10, -45 }
+          },
+          {
+            id str "bit_score",
+            value real { 989821283797956, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 55
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 94
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 971216216216216, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01994",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 9,
+                to 56,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 2,
+                to 17,
+                strand unknown,
+                id swissprot {
+                  accession "P01994",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01994",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              empty local str "Query_2",
+              int {
+                from 18,
+                to 19,
+                strand unknown,
+                id swissprot {
+                  accession "P01994",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01994",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 57,
+                to 137,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 20,
+                to 46,
+                strand unknown,
+                id swissprot {
+                  accession "P01994",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01994",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 138,
+                to 140,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "P01994",
+                release "reviewed",
+                version 2
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01994",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 141,
+                to 149,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 47,
+                to 49,
+                strand unknown,
+                id swissprot {
+                  accession "P01994",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01994",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 150,
+                to 164,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "P01994",
+                release "reviewed",
+                version 2
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01994",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 165,
+                to 437,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 50,
+                to 140,
+                strand unknown,
+                id swissprot {
+                  accession "P01994",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 239
+          },
+          {
+            id str "blast_score",
+            value int 239
+          },
+          {
+            id str "e_value",
+            value real { 496106712293417, 10, -44 }
+          },
+          {
+            id str "bit_score",
+            value real { 966709309242914, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 50
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 95
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 971216216216216, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P06467",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 9,
+                to 56,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 2,
+                to 17,
+                strand unknown,
+                id swissprot {
+                  accession "P06467",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P06467",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              empty local str "Query_2",
+              int {
+                from 18,
+                to 19,
+                strand unknown,
+                id swissprot {
+                  accession "P06467",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P06467",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 57,
+                to 137,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 20,
+                to 46,
+                strand unknown,
+                id swissprot {
+                  accession "P06467",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P06467",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 138,
+                to 155,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "P06467",
+                release "reviewed",
+                version 2
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P06467",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 156,
+                to 437,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 47,
+                to 140,
+                strand unknown,
+                id swissprot {
+                  accession "P06467",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 236
+          },
+          {
+            id str "blast_score",
+            value int 236
+          },
+          {
+            id str "e_value",
+            value real { 168649817305304, 10, -43 }
+          },
+          {
+            id str "bit_score",
+            value real { 955153321965394, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 52
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 92
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 971216216216216, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01946",
+                release "reviewed",
+                version 3
+              }
+            },
+            loc {
+              int {
+                from 9,
+                to 80,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 2,
+                to 25,
+                strand unknown,
+                id swissprot {
+                  accession "P01946",
+                  release "reviewed",
+                  version 3
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01946",
+                release "reviewed",
+                version 3
+              }
+            },
+            loc {
+              empty local str "Query_2",
+              int {
+                from 26,
+                to 27,
+                strand unknown,
+                id swissprot {
+                  accession "P01946",
+                  release "reviewed",
+                  version 3
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01946",
+                release "reviewed",
+                version 3
+              }
+            },
+            loc {
+              int {
+                from 81,
+                to 137,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 28,
+                to 46,
+                strand unknown,
+                id swissprot {
+                  accession "P01946",
+                  release "reviewed",
+                  version 3
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01946",
+                release "reviewed",
+                version 3
+              }
+            },
+            loc {
+              int {
+                from 138,
+                to 155,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "P01946",
+                release "reviewed",
+                version 3
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "P01946",
+                release "reviewed",
+                version 3
+              }
+            },
+            loc {
+              int {
+                from 156,
+                to 437,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 47,
+                to 140,
+                strand unknown,
+                id swissprot {
+                  accession "P01946",
+                  release "reviewed",
+                  version 3
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 235
+          },
+          {
+            id str "blast_score",
+            value int 235
+          },
+          {
+            id str "e_value",
+            value real { 237263234584706, 10, -43 }
+          },
+          {
+            id str "bit_score",
+            value real { 95130132620622, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 55
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 88
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 977972972972973, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "Q9PRL9",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 9,
+                to 56,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 1,
+                to 16,
+                strand unknown,
+                id swissprot {
+                  accession "Q9PRL9",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "Q9PRL9",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              empty local str "Query_2",
+              int {
+                from 17,
+                to 18,
+                strand unknown,
+                id swissprot {
+                  accession "Q9PRL9",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "Q9PRL9",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 57,
+                to 137,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 19,
+                to 45,
+                strand unknown,
+                id swissprot {
+                  accession "Q9PRL9",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "Q9PRL9",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 138,
+                to 140,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "Q9PRL9",
+                release "reviewed",
+                version 1
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "Q9PRL9",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 141,
+                to 152,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 46,
+                to 49,
+                strand unknown,
+                id swissprot {
+                  accession "Q9PRL9",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "Q9PRL9",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 153,
+                to 167,
+                strand plus,
+                id local str "Query_2"
+              },
+              empty swissprot {
+                accession "Q9PRL9",
+                release "reviewed",
+                version 1
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              swissprot {
+                accession "Q9PRL9",
+                release "reviewed",
+                version 1
+              }
+            },
+            loc {
+              int {
+                from 168,
+                to 440,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 50,
+                to 140,
+                strand unknown,
+                id swissprot {
+                  accession "Q9PRL9",
+                  release "reviewed",
+                  version 1
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 10,
+              to 40,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 62,
+              to 110,
+              id local str "Query_2"
+            },
+            {
+              from 224,
+              to 248,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 380,
+              to 427,
+              id local str "Query_2"
+            },
+            {
+              from 266,
+              to 304,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 208,
+              to 255,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame minus3
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 317605957635731, 10, -15 },
+        k { 133956144488482, 10, -15 },
+        h { 401214524497119, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 253572",
+      "Effective search space used: 253572",
+      "Length adjustment: 35"
+    }
+  }
+}

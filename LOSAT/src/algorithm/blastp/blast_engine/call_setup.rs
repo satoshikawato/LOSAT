@@ -34,11 +34,11 @@ use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
 
+use super::database::BlastpDatabase;
 use super::x_lookup_ahead::{XAheadBlock, XAheadLookup};
 use super::x_subject_meta::XSubjectMeta;
 // `compute_blosum62_ideal_karlin_params` is `blast_engine`'s import (from `stats`), which only this
 // module reads.
-use super::database::BlastpDatabase;
 use super::{
     blastp_aa_lookup, blastp_aa_lookup_on_block_spare, blastp_compressed_lookup,
     blastp_concatenated_query_length, blastp_context_lookup_bounds, blastp_is_archive,
@@ -707,9 +707,8 @@ pub(super) fn call_lookup(
 /// results, the gapped Gumbel block (none with `-old_fsc`), the number of subjects, the length of
 /// the effective lengths and the shortest subject length of the cutoffs (`min_subject_length`).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:903-906
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:904-906
 /// ```c
-///    Uint4 max_subject_length;
 ///    Uint4 min_subject_length;
 ///    Int8 total_length = -1;
 ///    Int4 num_seqs = -1;
@@ -764,7 +763,7 @@ pub(super) fn db_extent(
     //         (Blast_SubjectIsTranslated(program_number)) ? dbl/3 : dbl;
     // }
     // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:912-923
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:913-923
     // ```c
     //       /* Set the database length for new FSC */
     //       if (sbp->gbp) {
@@ -834,7 +833,8 @@ pub(super) fn db_extent(
             .map_or_else(|| database.statistics_num_sequences(), |count| count as i32),
     };
     // Without the Gumbel block (`-searchsp`, `OLD_FSC`) NCBI's shortest subject length is the
-    // statistics' average (blast_setup.c:975 below), which divides by their number of sequences.
+    // statistics' average (blast_setup.c:975, quoted at the check of the average in `run_call`),
+    // which divides by their number of sequences.
     if let Some(database) = database.filter(|_| args.old_fsc) {
         database.check_statistics_count(args.app.name())?;
         // RPS-BLAST's first volume of none of the profiles (`rps_hooks::dbsize_volume_num_seqs`)
@@ -885,7 +885,7 @@ pub(super) fn db_extent(
     // space).
     let cutoff_subject_length = match (database, gapped_gumbel.is_some()) {
         // `setup_subject_length` without the block: the average as NCBI's `Int4` (0 where it is
-        // 0 or the count is 0, which the check below refuses for a search).
+        // 0 or the count is 0, which `run_call` refuses for a search after this function).
         (_, false) => {
             crate::stats::setup::setup_subject_length(total_db_len as i64, num_subjects, None)
                 .unwrap_or(0)
@@ -904,7 +904,8 @@ pub(super) fn db_extent(
 }
 
 /// What `call_search_spaces`, `prelim_cutoffs` and `subject_parameters` read of `run_call`: each
-/// field is `run_call`'s value of the same name, by reference where it is not `Copy`.
+/// field is `run_call`'s value of the same name; the arguments, the contexts and the two Karlin
+/// blocks by reference, as `run_call`'s closures read them.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:894-895
 /// ```c
@@ -1196,7 +1197,7 @@ pub(super) fn prelim_cutoffs(
         gapped_params,
         gapped_gumbel.as_ref(),
     );
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:978-990
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:979-990
     // ```c
     //       /* scale up the computed cutoffs, and find the smallest one */
     //       for (context = query_info->first_context;

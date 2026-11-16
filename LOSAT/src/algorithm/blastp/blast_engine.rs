@@ -86,7 +86,7 @@ mod psi_round;
 // The rendered rows of the final hits a window of queries at a time, as the reports read them.
 pub(super) mod query_rows;
 // The setup of a call before its search: its requested reports, query frames, subjects, scoring
-// values and lookup table (`run_call`).
+// values, lookup table, search spaces, cutoffs, hit lists and scan's sizes (`run_call`).
 mod call_setup;
 // The warning lines of a call's queries, the checks and the prefetch of its reported subjects and
 // its refusals before any format is written (`run_call`).

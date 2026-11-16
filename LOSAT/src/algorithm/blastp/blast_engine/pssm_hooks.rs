@@ -183,7 +183,7 @@ pub(super) struct PsiKarlin {
 /// What the e-values and the hit-saving cutoff of a PSSM search read (`EvalueStats`): the Gumbel
 /// block (`sbp->gbp`, Spouge's finite-size correction), and without it (`-searchsp`, `OLD_FSC`:
 /// `ResolvedBlastpArgs::old_fsc`) the effective search space of the query's one context,
-/// `exact_search_spaces[0]`, which `run_call` computed for blastp.
+/// `exact_search_spaces[0]`, which `call_setup::call_search_spaces` computes for blastp.
 ///
 /// Called for a valid context only (`pssm_prelim`, `pssm_traceback`): the space is then exact
 /// (`exact_search_spaces` holds every context's), and its one `None`, a subject set without
@@ -484,7 +484,7 @@ pub(super) fn pssm_prelim(
         return Ok(());
     }
     let stats = psi_stats(run.gumbel, run.exact_search_spaces);
-    // `run.prelim_evalue` is `-evalue` without the Gumbel block (`run_call`,
+    // `run.prelim_evalue` is `-evalue` without the Gumbel block (`call_setup::prelim_cutoffs`,
     // blast_parameters.c:931-939).
     // psiblast's `-sum_stats true`: the preliminary stage links each subject's HSPs
     // (`psi_prelim_cutoffs`).

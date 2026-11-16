@@ -7,9 +7,9 @@ No NCBI counterpart: test inputs for build.sh. Two subcommands:
       Tiles the PSSM of f101 (build.sh: psiblast PSSM with the scores dropped) K times: a profile of
       K x 190 columns, its consensus letters and frequency ratios repeated. build.sh makes rps_wide of
       K = 700 (133,000 columns: 131,072 rows are 64 buckets of 2,048, the most that one group of
-      buckets of LOSAT's scan holds, so the volume has 66 buckets and two groups) with makeprofiledb
+      buckets of LOSAT's scan holds, so the volume has 65 buckets: two groups, the second of one bucket) with makeprofiledb
       -threshold 20 -force: only the words that match exactly are in the table (9 words, each with
-      700 hits, one in every tile, so a cell's hits lie in 65 buckets and both groups).
+      700 hits, one in every tile, so a cell's hits lie in all 65 buckets and both groups).
 
   build_wide.py ungroup IN.loo OUT.loo
       Writes the table with the hits of its cells not in ascending order (never written by

@@ -28,8 +28,8 @@
 #
 # rps_wide and the .loo rps_wide_ug.loo (series PR, item PS12m): one profile of 133,000 columns (f101 tiled 700 times by
 #   build_wide.py, version 5, gnl|CDD|901) with makeprofiledb -threshold 20 -force, so that its table holds the nine words that
-#   match exactly (700 hits each, one per tile): 66 buckets of 2,048 rows, a cell's hits in 65 of them, in both groups of
-#   64 buckets of LOSAT's scan. Its .freq is left out (the rows use -comp_based_stats 0). rps_wide_ug.loo is its table with
+#   match exactly (700 hits each, one per tile): 65 buckets of 2,048 rows, a cell's hits in all of them, in both groups of
+#   LOSAT's scan (64 buckets and one). Its .freq is left out (the rows use -comp_based_stats 0). rps_wide_ug.loo is its table with
 #   the hits of those nine cells not in ascending order (reversed, rotated, first and last swapped; build_wide.py), which
 #   makeprofiledb never writes: the cell-order read of a table like it would lose hits of the later group.
 #

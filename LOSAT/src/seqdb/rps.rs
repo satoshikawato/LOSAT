@@ -307,20 +307,31 @@ fn cell_hits<'a>(cell: &'a [i32; 4], overflow: &'a [i32]) -> Option<(&'a [i32], 
     Some((&cell[1..2], run))
 }
 
-/// One list of a cell for `check_cells`: whether every entry lies in the rows (`entry - 2 <
-/// rows_limit` unsigned), and `ungrouped` set when a group of buckets is smaller than its
-/// predecessor's (`list_is_grouped` for `RPS_GROUP_BUCKETS`). Written without an early exit, so
-/// that the compiler makes it a vector loop.
+/// A cell's hits (`cell_hits`) for `check_cells`: whether every entry lies in the rows (`entry - 2
+/// < rows_limit` unsigned), and `ungrouped` set when the hits are not in groups of
+/// `RPS_GROUP_BUCKETS` buckets in order (the answer of `list_is_grouped`, which a test holds this
+/// to). Written without an early exit on a list's values, so that the compiler makes it a vector
+/// loop: one compare per hit besides the range test.
 #[inline]
-fn hits_in_rows_and_groups(list: &[i32], rows_limit: u32, ungrouped: &mut bool) -> bool {
+fn hits_in_rows_and_groups(
+    head: &[i32],
+    run: &[i32],
+    rows_limit: u32,
+    ungrouped: &mut bool,
+) -> bool {
+    let group = |entry: i32| entry_group(entry, RPS_GROUP_BUCKETS);
     let (mut outside, mut decreasing) = (0u8, 0u8);
-    if let Some(&first) = list.first() {
-        outside |= (entry_q_off(first) >= rows_limit) as u8;
+    for list in [head, run] {
+        if let Some(&first) = list.first() {
+            outside |= (entry_q_off(first) >= rows_limit) as u8;
+        }
+        for pair in list.windows(2) {
+            outside |= (entry_q_off(pair[1]) >= rows_limit) as u8;
+            decreasing |= (group(pair[1]) < group(pair[0])) as u8;
+        }
     }
-    for pair in list.windows(2) {
-        outside |= (entry_q_off(pair[1]) >= rows_limit) as u8;
-        decreasing |= (entry_group(pair[1], RPS_GROUP_BUCKETS)
-            < entry_group(pair[0], RPS_GROUP_BUCKETS)) as u8;
+    if let (Some(&last), Some(&first)) = (head.last(), run.first()) {
+        decreasing |= (group(first) < group(last)) as u8;
     }
     *ungrouped |= decreasing != 0;
     outside == 0
@@ -890,16 +901,7 @@ impl RpsVolumeFiles {
                     ".loo word {index} names a position outside the profiles' rows"
                 ));
             };
-            // Both tests run over a list without a branch on the hits' values (so that the walk
-            // is vectorized): the junction of the cell's first slice and its run is tested alone.
-            let mut all_in_rows = true;
-            for list in [head, run] {
-                all_in_rows &= hits_in_rows_and_groups(list, rows_limit, &mut ungrouped);
-            }
-            if let (Some(&last), Some(&first)) = (head.last(), run.first()) {
-                ungrouped |=
-                    entry_group(first, RPS_GROUP_BUCKETS) < entry_group(last, RPS_GROUP_BUCKETS);
-            }
+            let all_in_rows = hits_in_rows_and_groups(head, run, rows_limit, &mut ungrouped);
             if !all_in_rows {
                 return Err(format!(
                     ".loo word {index} names a position outside the profiles' rows"
@@ -1293,6 +1295,49 @@ mod tests {
         std::fs::write(base.with_extension("loo"), words(&loo)).unwrap();
         std::fs::write(base.with_extension("aux"), AUX).unwrap();
         base
+    }
+
+    // PS12m: the walk of `check_cells` (`hits_in_rows_and_groups`) and the regroup's test
+    // (`list_is_grouped`) are one predicate: they agree on random cells, ordered and not, in
+    // a cell's head and run, with entries in and out of the rows.
+    #[test]
+    fn the_check_walk_and_the_regroup_test_agree_on_grouped_cells() {
+        let mut state = 12345u64;
+        let mut next = move || {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (state >> 33) as u32
+        };
+        let (mut grouped, mut ungrouped) = (0, 0);
+        for case in 0..4_000 {
+            let len = 1 + next() as usize % 40;
+            let rows = 140_000u32;
+            let mut list: Vec<i32> = (0..len).map(|_| 2 + (next() % (rows - 2)) as i32).collect();
+            if case % 3 != 0 {
+                // Ascending by group (what makeprofiledb writes), the order inside a group free.
+                list.sort_by_key(|&entry| entry_group(entry, RPS_GROUP_BUCKETS));
+            }
+            if case % 11 == 0 {
+                list[len / 2] = 1; // a hit outside the rows
+            }
+            let split = 1.min(len);
+            let (head, run) = list.split_at(split);
+            let mut walk_ungrouped = false;
+            let in_rows = hits_in_rows_and_groups(head, run, rows - 2, &mut walk_ungrouped);
+            assert_eq!(in_rows, list.iter().all(|&e| (2..rows as i32).contains(&e)));
+            assert_eq!(
+                !walk_ungrouped,
+                list_is_grouped(head, run, RPS_GROUP_BUCKETS),
+                "{list:?}"
+            );
+            if walk_ungrouped {
+                ungrouped += 1;
+            } else {
+                grouped += 1;
+            }
+        }
+        assert!(grouped > 500 && ungrouped > 500, "{grouped} {ungrouped}");
     }
 
     // PS12m: the groups of a cell's hits (entry - 2, per 2,048 rows, per 64 buckets) are

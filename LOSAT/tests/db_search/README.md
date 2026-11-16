@@ -1255,8 +1255,8 @@ most 9 in BLOSUM62).
 - `rps_wide` and `rps_wide_ug.loo.gz` (version 5, PS12m): one profile of 133,000 columns (`gnl|CDD|901`: the first
   fragment of `rps_mini`, 190 columns, tiled 700 times by `rps/build_wide.py tile`), made by makeprofiledb with
   `-threshold 20 -force`, so that its table holds the nine words that match exactly (700 hits each, one per tile) and
-  the volume has 66 buckets of 2,048 rows: two groups of 64 buckets of the scan of `losat rpsblast` and `rpstblastn`
-  (`RPS_GROUP_BUCKETS`), and each cell's hits lie in both. Its `.freq` is left out (rows with `-comp_based_stats 0`
+  the volume has 65 buckets of 2,048 rows: two groups of the scan of `losat rpsblast` and `rpstblastn` (the first
+  of 64 buckets, `RPS_GROUP_BUCKETS`, the second of one bucket, rows 131,072 to 133,000), and each cell's hits lie in both. Its `.freq` is left out (rows with `-comp_based_stats 0`
   only) and `.rps.gz` is 113 KB (a 15 MB file of one tile's rows repeated). `rps_wide_ug.loo.gz` is its `.loo` with the
   hits of the nine cells not in ascending order (reversed, rotated by a third, first and last swapped; `build_wide.py
   ungroup`), which makeprofiledb never writes: rows `db.rps.ungrouped.6` and `db.rpstbn.ungrouped.6` put it in place

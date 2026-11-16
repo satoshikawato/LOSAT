@@ -190,7 +190,9 @@ fn search_records(
     // (`native::run_inner`).
     app::check_search_environment("BLASTX", true)?;
     let records_parsed = if args.parse_deflines {
-        let pairwise = resolved.iter().any(|options| options.outfmt == 0);
+        let pairwise = resolved
+            .iter()
+            .any(|options| options.pairwise_view().is_some());
         RecordsParsed::of(&subjects, args.show_gis, pairwise)?
     } else {
         RecordsParsed::default()

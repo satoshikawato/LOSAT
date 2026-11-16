@@ -1128,8 +1128,20 @@ impl<'d> AlnMap<'d> {
     ///                    "NA size expected to be divisible by 3");
     ///     }
     /// ```
-    /// (A row's positions lie in its sequence and a row of width 3 has whole codons: the throw is
-    /// an internal error here.)
+    /// NCBI reference (598d8ae6): c++/src/objects/seqfeat/Genetic_code_table.cpp:554-557
+    /// ```c++
+    ///     // throw exception if failure
+    ///     NCBI_THROW (CException, eUnknown,
+    ///                 "Unable to find genetic code number " +
+    ///                 NStr::IntToString (id));
+    /// ```
+    /// (A row's positions lie in its sequence and a row of width 3 has whole codons: the
+    /// `TranslateNAToAA` throw is an internal error here.) A segment of length 0 (an HSP of length
+    /// 0, `serial::seqalign::empty_row_segments`) reads `seq_from` to `seq_from - 1`, whose
+    /// `GetSeqData` interval is empty (`seq_to + 1` is `seq_from` in the unsigned `TSeqPos`, also
+    /// at position 0): no letter, and still a translation, which `GetTransTable` makes of the
+    /// row's genetic code (`Sequences::genetic_code`, row 0's or the database's): without one
+    /// (`None`, BLASTX's code 0) it throws (`UnknownGeneticCode`).
     pub(crate) fn seq_string(
         &self,
         row: usize,
@@ -1140,23 +1152,52 @@ impl<'d> AlnMap<'d> {
     ) -> io::Result<()> {
         let key = self.ds.ids[row];
         let plus = self.is_positive_strand(row);
+        let empty = seq_to.wrapping_add(1) == seq_from;
         if self.width(row) == 3 {
             let mut nucleotides = Vec::new();
-            sequences.letters(key, seq_from, seq_to, &mut nucleotides);
+            if !empty {
+                sequences.letters(key, seq_from, seq_to, &mut nucleotides);
+            }
             if nucleotides.len() % 3 != 0 {
                 return Err(internal("a translated row's letters are not whole codons"));
             }
-            let code = sequences
-                .genetic_code(key)
-                .ok_or_else(|| internal("a translated row without a genetic code"))?;
+            let Some(code) = sequences.genetic_code(row == 0) else {
+                return Err(if row == 0 {
+                    internal("a translated query row without a genetic code")
+                } else {
+                    io::Error::other(UnknownGeneticCode)
+                });
+            };
             code.translate(&nucleotides, !plus, out);
-        } else if plus {
-            sequences.letters(key, seq_from, seq_to, out);
-        } else {
+        } else if !empty {
             let first = out.len();
             sequences.letters(key, seq_from, seq_to, out);
-            crate::algorithm::blastn::lookup::reverse_complement_in_place(&mut out[first..]);
+            if !plus {
+                crate::algorithm::blastn::lookup::reverse_complement_in_place(&mut out[first..]);
+            }
         }
         Ok(())
     }
 }
+
+/// NCBI's `Unable to find genetic code number 0` (`CGen_code_table_imp::GetTransTable`), which a
+/// translation of a BLASTX row after row 0 throws (the database's code 0,
+/// `Sequences::genetic_code`): the error of `AlnMap::seq_string`, which `super::write_section`
+/// catches as `DisplaySeqalign`'s `try` does.
+#[derive(Debug)]
+pub(crate) struct UnknownGeneticCode;
+
+impl UnknownGeneticCode {
+    /// Whether `error` is this one.
+    pub(crate) fn is(error: &io::Error) -> bool {
+        error.get_ref().is_some_and(|inner| inner.is::<Self>())
+    }
+}
+
+impl std::fmt::Display for UnknownGeneticCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Unable to find genetic code number 0")
+    }
+}
+
+impl std::error::Error for UnknownGeneticCode {}

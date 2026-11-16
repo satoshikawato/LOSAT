@@ -1,5 +1,6 @@
 //! Query batches of a search (NCBI `CBlastInput::GetNextSeqBatch`).
 
+use crate::blastinput::fasta_reader::believed::BelievedIds;
 use crate::blastinput::fasta_reader::{FastaRecord, ReadError};
 
 /// The query batch size from the environment variable `BATCH_SIZE` (`value`; 0 when it is not
@@ -359,18 +360,30 @@ pub(crate) struct AnchoredBatchScopes {
 }
 
 impl AnchoredBatchScopes {
-    /// The scopes of the batches `spans` of the query records `records` (a span past the records
-    /// is cut to them; `QueryScope::of_shown_records` of each: every record is read with
-    /// `-parse_deflines` or none is).
+    /// The scopes of the batches `spans` of the query records `records` (`of_ids` of their ids).
     pub(crate) fn new(records: &[FastaRecord], spans: Vec<std::ops::Range<usize>>) -> Self {
-        let generated = records
-            .first()
-            .is_none_or(|query| query.believed().is_none());
+        let ids: Vec<(&str, Option<&BelievedIds>)> = records
+            .iter()
+            .map(|record| (record.local_id.as_str(), record.believed()))
+            .collect();
+        Self::of_ids(&ids, spans)
+    }
+
+    /// `new` of the query records whose local ids and `-parse_deflines` Seq-ids are `ids` (BLASTX's
+    /// records, which have their own type): a span past the records is cut to them;
+    /// `QueryScope::of_shown` of each (every record is read with `-parse_deflines` or none is).
+    pub(crate) fn of_ids(
+        ids: &[(&str, Option<&BelievedIds>)],
+        spans: Vec<std::ops::Range<usize>>,
+    ) -> Self {
+        let generated = ids.first().is_none_or(|(_, believed)| believed.is_none());
         let scopes = spans
             .iter()
             .map(|span| {
-                QueryScope::of_shown_records(
-                    &records[span.start.min(records.len())..span.end.min(records.len())],
+                QueryScope::of_shown(
+                    ids[span.start.min(ids.len())..span.end.min(ids.len())]
+                        .iter()
+                        .copied(),
                 )
             })
             .collect();

@@ -1096,6 +1096,11 @@ impl ReportedSubjects {
         self.oids[rank]
     }
 
+    /// The OID of each rank (`oid`).
+    pub(crate) fn oids(&self) -> &[crate::seqdb::Oid] {
+        &self.oids
+    }
+
     /// The Blast-def-line taxid of the sequence of rank `rank` (0 for none, and for a run that
     /// does not read taxids).
     pub(crate) fn taxid(&self, rank: usize) -> i32 {

@@ -279,11 +279,48 @@ pub(super) fn x_masked_subject_rows(hits: &mut [PairwiseHit], subjects: &[FastaR
     }
 }
 
-/// [`x_masked_subject_rows`] of subjects cut to a `-subject_loc` interval that starts past the
-/// record's start. A query's hits with a subject keep the runs of the whole record (record
-/// coordinates) that meet the closed range `[offset, end]` of one of their HSPs in the searched
-/// letters (the end one past the HSP); each row shows the kept runs where they lie in the record.
-fn x_shifted_subject_rows(hits: &mut [PairwiseHit], subjects: &[FastaRecord]) {
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1588-1600
+// ```c++
+//         // Union subject sequence ranges
+//         vector <TSeqRange> ranges;
+//         for (int i=0; i<hsp_list->hspcnt; i++) {
+//             const BlastHSP* hsp = hsp_list->hsp_array[i];
+//             TSeqRange rg;
+//             rg.SetFrom(hsp->subject.offset);
+//             rg.SetTo(hsp->subject.end);
+//             ranges.push_back(rg);
+//         }
+//
+//         // Extract subject masks
+//         TMaskedSubjRegions masks;
+//         if (!ranges.empty() && seqinfo_src->GetMasks(kOid, ranges, masks)) {
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqinfosrc_seqvec.cpp:115-122
+// ```c++
+//     for (size_t ir=0; ir< target_ranges.size(); ir++) {
+//         if (target_ranges[ir] != TSeqRange::GetEmpty() &&
+//            loc.IntersectingWith(target_ranges[ir])) {
+//            CRef<CSeqLocInfo> sli(new CSeqLocInfo(interval, frame));
+//            retval.push_back(sli);
+//            return;
+//         }
+//     }
+// ```
+/// The subject masks of each query's hits (`GetSubjectMasks` of the query's results, by (query,
+/// subject)): the lower-case runs of the subject's record (record coordinates, inclusive) that
+/// meet the closed range `[offset, end]` of one of the query's HSPs with it in the searched letters
+/// (the end one past the HSP): with `-subject_loc` the two coordinates differ by the interval's
+/// start, so a run is kept by where it would lie in the interval and shown where it lies in the
+/// record (BLASTP's `x_soft_subject::x_subject_masks`). Only records of `-subject` read with
+/// `-lcase_masking` have runs. The outfmt 0 rows of shifted subjects show them
+/// ([`x_shifted_subject_rows`]), the query-anchored reports map them to their columns
+/// (`report::query_anchored`).
+#[cold]
+#[inline(never)]
+pub(super) fn x_subject_masks(
+    hits: &[PairwiseHit],
+    subjects: &[FastaRecord],
+) -> std::collections::HashMap<(u32, u32), Vec<(i32, i32)>> {
     let mut hsp_ranges: std::collections::HashMap<(u32, u32), Vec<(i32, i32)>> =
         std::collections::HashMap::new();
     for hit in hits.iter() {
@@ -301,25 +338,35 @@ fn x_shifted_subject_rows(hits: &mut [PairwiseHit], subjects: &[FastaRecord]) {
     }
     let mut record_runs: std::collections::HashMap<u32, Vec<(i32, i32)>> =
         std::collections::HashMap::new();
+    hsp_ranges
+        .into_iter()
+        .filter_map(|(key, ranges)| {
+            let record = subjects.get(key.1 as usize)?;
+            let runs: Vec<(i32, i32)> = record_runs
+                .entry(key.1)
+                .or_insert_with(|| record.archive_lowercase_runs())
+                .iter()
+                .copied()
+                .filter(|&(from, to)| {
+                    ranges
+                        .iter()
+                        .any(|&(offset, end)| from <= end && offset <= to)
+                })
+                .collect();
+            (!runs.is_empty()).then_some((key, runs))
+        })
+        .collect()
+}
+
+/// [`x_masked_subject_rows`] of subjects cut to a `-subject_loc` interval that starts past the
+/// record's start: each row shows the kept runs of its query and subject ([`x_subject_masks`])
+/// where they lie in the record.
+fn x_shifted_subject_rows(hits: &mut [PairwiseHit], subjects: &[FastaRecord]) {
+    let kept = x_subject_masks(hits, subjects);
     for hit in hits.iter_mut() {
-        let Some(record) = subjects.get(hit.hit.s_idx as usize) else {
+        let Some(runs) = kept.get(&(hit.hit.q_idx, hit.hit.s_idx)) else {
             continue;
         };
-        let ranges = &hsp_ranges[&(hit.hit.q_idx, hit.hit.s_idx)];
-        let runs: Vec<(i32, i32)> = record_runs
-            .entry(hit.hit.s_idx)
-            .or_insert_with(|| record.archive_lowercase_runs())
-            .iter()
-            .copied()
-            .filter(|&(from, to)| {
-                ranges
-                    .iter()
-                    .any(|&(offset, end)| from <= end && offset <= to)
-            })
-            .collect();
-        if runs.is_empty() {
-            continue;
-        }
         let Some(row) = hit.subject_seq.as_mut() else {
             continue;
         };

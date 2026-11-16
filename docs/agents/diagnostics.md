@@ -302,8 +302,10 @@ their variables mean
   on a packed subject (`TBNSTORE`: `-subject`, the plans of `run_local`'s letters; `-db`) and with AVX2; `BPSUBJRUN` acts only in the parallel `-subject` loop of blastp (2 or
   more threads, several subjects); `BPDIAG` batches only with AVX2 (else the per-hit loop); `BPDEFER` acts only
   in `BPDIAG`'s AVX2 batch; `BPMASKED` only with `BPDEFER`'s deferred calls, on tables of at least `BPMASKEDMIN` hits per used cell; `BPGAP` runs the
-  vector alignment only with AVX2, BMI1 and LZCNT (else the reference function); `BPGAP16` acts only
-  in `BPGAP`'s vector alignment, where its costs fit 16 bits; `BPQBLOCK` takes the block path only for one output of outfmt 0, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15 or 16, or a
+  vector alignment only with AVX2, BMI1 and LZCNT, or with `BPGAP128` on wasm32 simd128 and with SSSE3 and
+  SSE4.1 (else the reference function); `BPGAP16` acts only
+  in `BPGAP`'s vector alignment, where its costs fit 16 bits; `BPGAP128` only where the AVX2 rows do not run
+  (`=2`: in their place) and `BPGAP16` is on; `BPQBLOCK` takes the block path only for one output of outfmt 0, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15 or 16, or a
   `run_local` call with several outputs, the hit records or an observer, with more than one block, and blastp's search of all queries
   (the other reports, `-query_loc`) runs its preliminary stage in the same blocks (see its entry);
   `BNSTREAM` only in blastn's `-subject` search at 2 or more threads;
@@ -370,6 +372,7 @@ export LOSAT_X_BPDEFER=1
 export LOSAT_X_BPDIAG=1
 export LOSAT_X_BPFFILL=1
 export LOSAT_X_BPGAP=1
+export LOSAT_X_BPGAP128=1
 export LOSAT_X_BPGAP16=1
 export LOSAT_X_BPGAPBAND=1
 export LOSAT_X_BPHITBF=1
@@ -6177,8 +6180,9 @@ Scheduling (each value computed by one thread with the original function; order 
   its header): in the rows where no gap opens in A the cells depend on each other only through the
   X-drop test, whose `best_score` is a prefix maximum; in the other rows the row gap is a decayed
   prefix maximum. 32-bit values as in the reference, the matrix rows read from 16-bit tables built
-  from the reference's score function. Without AVX2 (other CPUs, aarch64, Wasm) the reference
-  function runs (the scalar loops on the same arrays were slower than it). A letter
+  from the reference's score function. Without AVX2 the reference function runs (the scalar loops
+  on the same arrays were slower than it), except where `LOSAT_X_BPGAP128` runs the sixteen-bit
+  rows in 128 bits (Wasm simd128, x86-64 with SSSE3 and SSE4.1); aarch64 runs it. A letter
   code of 28 or more, a negative gap cost, a gap cost above 65,536 or an X-drop above 2^28 leaves
   the call to the reference function. In the strict set since 2026-10-14 (`=0` turns it off). With
   `LOSAT_X_STATS=1` a `[X_STATS] BPGAP fast= not_taken=` line on stderr at the end.
@@ -6191,8 +6195,9 @@ Scheduling (each value computed by one thread with the original function; order 
   are at most 4,096, `gap_extend` at most 256 and the largest matrix entry at most 4,096 (every
   matrix and gap cost pair blastp supports); a row starts in 16 bits only while the best score is at
   most 32,767 - largest entry - 16 x `gap_extend` - 1 (32,739 for BLOSUM62 with 11/1), and past that
-  the 32-bit rows compute the alignment again from row 0. x86_64 with AVX2, BMI1 and LZCNT only:
-  aarch64 and WebAssembly keep the reference function (no AVX-512 on the default path).
+  the 32-bit rows compute the alignment again from row 0. x86_64 with AVX2, BMI1 and LZCNT; since
+  `LOSAT_X_BPGAP128` also WebAssembly simd128 and x86-64 without AVX2 (eight cells per step, see
+  its entry); aarch64 keeps the reference function (no AVX-512 on the default path).
   Measured 2026-10-23 on the workstation (node 1, CPU 40 for one thread and CPUs 40-47 for eight,
   their HT siblings idle, warmed 3 s before every run, arm order reversed every other round, medians
   of the per-round ratios against dev 7cfec941, the binary before the switch; every report identical
@@ -6205,6 +6210,39 @@ Scheduling (each value computed by one thread with the original function; order 
   Blast0_6 the restricted rows went from 20.1 to 13.3 G cycles (11.6 % of dev's cycles in `perf
   record`). With `=0` the instruction counts equal dev's (x1.00006) at x1.002-1.003 of its time. Max
   RSS within the spread of repeated runs of one binary.
+- `LOSAT_X_BPGAP128=1` (BLASTP, speed; in the strict set from the pull request that added it,
+  2026-11-17, class platform, on by default; `=0` turns it off, `=2` runs it on any x86-64 CPU with
+  SSSE3 and SSE4.1, AVX2 or not, as a diagnostic; acts only where `LOSAT_X_BPGAP` and
+  `LOSAT_X_BPGAP16` are on; `restricted_rows16_w128` and `x_w128_16` in
+  `blastp/x_restricted_gap.rs`) the sixteen-bit rows of the restricted gapped alignment
+  (`LOSAT_X_BPGAP16`) in 128 bits, eight cells per step, for the targets without the AVX2 rows: the
+  WebAssembly build (simd128) and x86-64 with SSSE3 and SSE4.1 but not AVX2, BMI1 and LZCNT, which
+  ran the reference function before. A step does for its eight cells what a block of the AVX2
+  rows does for sixteen, with the same lane operations and saturation; the exactness argument of
+  the module comment ("Sixteen-bit rows") does not depend on the cells per step, and the row gap's
+  lanes add at most 8 x `gap_extend`. Written differently, with the same values: the letters are
+  looked up sixteen at a time for two steps; the steps whose lanes are all cells take no lane mask
+  and only the first step of a row clears lane 0's diagonal (const parameters, so no test of them
+  runs per step); the lanes moved up across the vector take the lanes moved in from a second
+  vector (`palignr`; on wasm32 a window of two vectors, one `palignr` in V8); the row gap carried
+  between steps stays a vector; a step that raises the best score takes `b_offset` from the last
+  lane above the best before it (the first lane holding the step's maximum); the vector constants
+  are made once per alignment from values the compiler cannot see (`black_box`), since a wasm
+  engine builds a constant again at each use in a loop. The operations come from the 128-bit layer
+  of the X-drop kernel (`utils/xdrop_simd.rs` `arch`, one source for x86-64 SSE and wasm32 simd128,
+  which gained `subs16`, `up16_1`, `up16_2`, `up16_4` and `lut32k`; not the aarch64 layer: the rows
+  do not run there). They are the only rows of that build: where they do not take an alignment
+  (costs past `fits16`, which no matrix and gap cost pair blastp supports is, or a best score past
+  `limit16`, about 32,700) the reference function runs, as before the switch, and so it does with
+  `LOSAT_X_BPGAP16=0`. The AVX2 rows are not changed: only the choice (`x_rows`, `restricted_fast`)
+  is new, and `fill_col` has an instance of its own for the 128-bit rows. Tests: lib tests
+  `x_bpgap128_rows_match_the_reference_and_the_avx2_rows` (rows of 1 to 40 cells, every column
+  phase, X-drop 0 to 4,096, gap costs from 0, ties, long related pairs; the result of the
+  reference and of the AVX2 sixteen-bit rows), `x_bpgap128_layer_operations_match_their_definitions`,
+  `x_bpgap16_*` with both sixteen-bit rows, and every restricted-alignment test of `check()` with the
+  128-bit rows (their x86-64 SSSE3 / SSE4.1 build); `tests/blastp_restricted_gapped.rs` compares
+  NCBI BLAST+ 2.17.0's rows with `=0` and `=2` and counts the 128-bit rows' alignments with `=2`
+  (`[X_STATS] BPGAP fast=`).
 - `LOSAT_X_BPGAPBAND=1` (BLASTP, memory; in the strict set from the pull request that added it (perf/bp-gap-band,
   v4-D12 s23-s25, `DECISIONS` 66-70): on unless it is `0`; acts only where `LOSAT_X_BPGAP` runs its vector rows) the
   restricted gapped alignment's arrays (`XRestrictedScratch` in `blastp/x_restricted_gap.rs`: the score rows `h`, the

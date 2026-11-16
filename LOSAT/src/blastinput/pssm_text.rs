@@ -26,7 +26,7 @@
 
 use crate::report::serial::asn_types::table::named;
 use crate::report::serial::asn_types::{
-    member_index, members, read_document, resolved, Kind, Post, ReadError, Value,
+    member_index, members, read_document, resolved, Kind, NcbiStack, Post, ReadError, Value,
 };
 use crate::report::serial::pssm::{
     FormatRpsDbParameters, ObjectId, Pssm, PssmFinalData, PssmIntermediateData, PssmParameters,
@@ -50,13 +50,14 @@ pub(crate) struct PssmRead {
 }
 
 /// Reads the `PssmWithParameters` document at the start of `text` (what follows it is not read,
-/// as `stream >> object` reads one object).
-pub(crate) fn read_pssm(text: &[u8]) -> PssmRead {
-    let (value, posts) = read_document(text, named::PSSMWITHPARAMETERS);
+/// as `stream >> object` reads one object) as the program of `ncbi_stack` does.
+pub(crate) fn read_pssm(text: &[u8], ncbi_stack: &'static NcbiStack) -> PssmRead {
+    let (value, posts) = read_document(text, named::PSSMWITHPARAMETERS, ncbi_stack);
     PssmRead {
         result: value
             .map_err(|error| match error {
-                // LOSAT's own limit of the lexical reader: a refusal, not NCBI's error.
+                // LOSAT's own limit of the lexical reader, or a depth at which NCBI's reader may
+                // overflow its stack: a refusal, not NCBI's error.
                 ReadError::Unsupported(what) => PssmReadError::Refused(what),
                 error => PssmReadError::Ncbi(error),
             })
@@ -68,7 +69,7 @@ pub(crate) fn read_pssm(text: &[u8]) -> PssmRead {
 /// `read_pssm`'s PSSM, for the tests: an error names NCBI's class or LOSAT's refusal.
 #[cfg(test)]
 pub(crate) fn read_pssm_with_parameters(text: &[u8]) -> Result<PssmWithParameters, PssmReadError> {
-    read_pssm(text).result
+    read_pssm(text, &crate::report::serial::asn_types::PSIBLAST_STACK).result
 }
 
 // The typed boundary: the model of the value read, its parts moved out of it. The value has the

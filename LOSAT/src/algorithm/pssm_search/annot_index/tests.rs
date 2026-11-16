@@ -11,8 +11,11 @@ fn index(annots: &[&str]) -> Result<AnnotOutcome, Refusal> {
     let values: Vec<Value> = annots
         .iter()
         .map(|text| {
-            let (value, posts) =
-                read_document(format!("Seq-annot ::= {text}").as_bytes(), named::SEQ_ANNOT);
+            let (value, posts) = read_document(
+                format!("Seq-annot ::= {text}").as_bytes(),
+                named::SEQ_ANNOT,
+                &crate::report::serial::asn_types::PSIBLAST_STACK,
+            );
             assert!(posts.is_empty(), "{posts:?}");
             value.unwrap_or_else(|error| panic!("{text}: {error:?}"))
         })

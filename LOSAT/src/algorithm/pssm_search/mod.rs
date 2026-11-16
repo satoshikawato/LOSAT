@@ -408,17 +408,21 @@ impl PsiSearch {
     /// `query_record`, whose ids, when the reports show them, join the scope `scope` of the
     /// `-subject` records that `-parse_deflines` reads, as a FASTA query's do (NCBI's scope holds
     /// the PSSM's Bioseq, psiblast_app.cpp:537: a subject with one of its ids shows as the query, or
-    /// NCBI's tblastn fails; `IdScope::add_record` refuses it). A query that never joins the scope
-    /// (`joins_scope`) meets no subject there: NCBI BLAST+ 2.17.0 writes the object manager's stop
-    /// (line RG D3-1 review 4b S1 (c)).
+    /// NCBI's tblastn fails; `IdScope::add_record` refuses it) in a run that searches (`searches`, of
+    /// `PsiSearch::searches`):
+    /// the subjects' Seq-ids matter to NCBI only in the reports, so a run that NCBI ends before the
+    /// search (the object manager's stop, the PSSM's checks, the PSSM engine's error) meets no
+    /// subject there and writes NCBI's stop (NCBI BLAST+ 2.17.0, line RG D3-1 review 4b S1 (c),
+    /// review 4c N1).
     pub(crate) fn query_record_in(
         &self,
         parse_deflines: bool,
         scope: Option<&crate::seqid::id_scope::IdScope>,
         program: &str,
+        searches: bool,
     ) -> anyhow::Result<FastaRecord> {
         let query = self.query_record(parse_deflines);
-        if let (Some(scope), Some(believed), true) = (scope, query.believed(), self.joins_scope()) {
+        if let (Some(scope), Some(believed), true) = (scope, query.believed(), searches) {
             scope.add_record(&believed.ids, None, "query", program)?;
         }
         Ok(query)

@@ -29,7 +29,7 @@ mod range;
 mod table;
 mod view;
 
-use range::{GiimTree, Handle, HandleRangeMap, Mode, Range};
+use range::{Handle, HandleRangeMap, LiveHandles, Mode, Range};
 use view::V;
 
 use crate::ncbi_exception::{post_line_in, NcbiException, Severity};
@@ -102,11 +102,9 @@ pub(crate) enum Refusal {
     TableRows,
     /// A Std-seg `dim` above `align::STD_DIM_LIMIT`.
     StdDim,
-    /// Two different Seq-ids of the query's entry that NCBI's scope may take as one (LOSAT does not
-    /// make NCBI's handles of every Seq-id kind: `entry::Tse::attach`).
-    IdsMaybeOne,
-    /// A Seq-id twice in the query's entry of a search whose scope holds other sequences first
-    /// (`-subject`): NCBI's message names the Seq-ids as its scope first held them.
+    /// A Seq-id handle twice in the query's entry of a search whose scope holds other sequences
+    /// first (`-subject`), when a Seq-id of NCBI's message may be written as a subject spelled it
+    /// (`entry::Tse::attach`, `seqid::mask_handle::handle_fasta_is_own`).
     DuplicateIdInScope,
 }
 
@@ -127,8 +125,7 @@ impl Refusal {
             Refusal::IdOrder => "a PSSM query whose annot has a Seq-table row location whose Seq-ids get different messages and have no different gi, accession or general id numbers (NCBI's object manager writes them in the order of memory addresses)",
             Refusal::TableRows => "a PSSM query whose annot has a feature Seq-table of more than 10000000 rows (NCBI's object manager runs out of memory depending on the machine)",
             Refusal::StdDim => "a PSSM query whose annot has a Std-seg dim above 1000000 (NCBI's object manager allocates its rows depending on the machine's memory)",
-            Refusal::IdsMaybeOne => "a PSSM query entry with two different Seq-ids that NCBI's object manager may take as one Bioseq id (its duplicate Bioseq id exception)",
-            Refusal::DuplicateIdInScope => "a PSSM query entry with a Seq-id twice in a search of -subject records (NCBI's duplicate Bioseq id exception names the Seq-ids as its scope first held them)",
+            Refusal::DuplicateIdInScope => "a PSSM query entry with a Seq-id twice in a search of -subject records, when the entry's Bioseqs have a Seq-id that NCBI's duplicate Bioseq id exception may write as a subject record spelled it (a GenBank, EMBL or DDBJ accession alone, a name or a patent with a letter, more than 64 letters in a local or general id or an accession)",
         }
     }
 }
@@ -179,8 +176,8 @@ pub(super) struct Indexer<'p> {
     posts: Posts,
     muted: bool,
     caches: table::Caches,
-    /// NCBI's `giim` Seq-id tree (`range::GiimTree`).
-    giim: GiimTree,
+    /// NCBI's Seq-id handles of the step (`range::LiveHandles`).
+    handles: LiveHandles,
 }
 
 /// The object manager's step as the query's Seq-entry `entry` of a PSSM read by `program`
@@ -199,7 +196,7 @@ pub(crate) fn index_entry(
         posts: Posts::new(),
         muted: false,
         caches: table::Caches::default(),
-        giim: GiimTree::new(&tse.ids()),
+        handles: LiveHandles::default(),
     };
     let abort = match ix.run(&tse, ids_known) {
         Ok(()) => None,
@@ -299,12 +296,24 @@ impl Indexer<'_> {
             .collect();
         let mut tables: Vec<Option<table::TableInfo<'_>>> =
             std::iter::repeat_with(|| None).take(annots.len()).collect();
-        for &index in &tse.construction {
-            if let Some(("seq-table", table)) = data[index] {
-                tables[index] = Some(self.table_info(table)?);
+        let mut ids: Vec<Vec<Handle>> = vec![Vec::new(); tse.objects()];
+        for &made in &tse.construction {
+            match made {
+                entry::Made::Bioseq(object) => {
+                    ids[object] = tse
+                        .bioseq_ids(object)
+                        .iter()
+                        .map(|id| Handle::of_run(id, &mut self.handles))
+                        .collect();
+                }
+                entry::Made::Annot(index) => {
+                    if let Some(("seq-table", table)) = data[index] {
+                        tables[index] = Some(self.table_info(table)?);
+                    }
+                }
             }
         }
-        tse.attach(ids_known)?;
+        tse.attach(&ids, &self.handles, ids_known)?;
         for ((annot, kind), table) in annots.iter().zip(&data).zip(&tables) {
             match kind {
                 Some(("ftable", feats)) => {
@@ -320,9 +329,9 @@ impl Indexer<'_> {
                 Some(("graph", graphs)) => {
                     for graph in graphs.items() {
                         let loc = graph.field("loc");
-                        let map = HandleRangeMap::of_location(loc, Mode::None, &mut self.giim);
+                        let map = HandleRangeMap::of_location(loc, Mode::None, &mut self.handles);
                         self.refuse_empty(std::slice::from_ref(&map), Event::Graph)?;
-                        self.giim.end_object();
+                        self.handles.end_object();
                     }
                 }
                 Some(("locs", locs)) => self.index_locs(*annot, *locs)?,
@@ -392,10 +401,10 @@ impl Indexer<'_> {
             .into_iter()
             .flatten()
         {
-            let map = HandleRangeMap::of_location(loc, mode, &mut self.giim);
+            let map = HandleRangeMap::of_location(loc, mode, &mut self.handles);
             self.map_location(&map, Event::Feature)?;
         }
-        self.giim.end_object();
+        self.handles.end_object();
         Ok(())
     }
 
@@ -469,7 +478,7 @@ impl Indexer<'_> {
             if total.iter().any(|(_, range)| range.is_empty()) {
                 return Err(self.empty_region());
             }
-            self.giim.mapped_all(all.iter().flatten());
+            self.handles.mapped_all(all.iter().flatten());
         } else {
             let mut rows = Vec::new();
             align::process_align(self, &mut rows, align)?;
@@ -477,7 +486,7 @@ impl Indexer<'_> {
                 self.refuse_empty(std::slice::from_ref(map), Event::Align)?;
             }
         }
-        self.giim.end_object();
+        self.handles.end_object();
         Ok(())
     }
 
@@ -526,9 +535,9 @@ impl Indexer<'_> {
                 .map(|(_, region)| region)
         });
         if let Some(region) = region {
-            let map = HandleRangeMap::of_location(region, Mode::None, &mut self.giim);
+            let map = HandleRangeMap::of_location(region, Mode::None, &mut self.handles);
             self.refuse_empty(std::slice::from_ref(&map), Event::Locs)?;
-            self.giim.end_object();
+            self.handles.end_object();
         }
         Ok(())
     }
@@ -543,7 +552,7 @@ impl Indexer<'_> {
         if maps.iter().any(empty) {
             return Err(self.empty_region());
         }
-        self.giim.mapped_all(maps);
+        self.handles.mapped_all(maps);
         Ok(())
     }
 
@@ -645,7 +654,7 @@ impl Indexer<'_> {
         let Some(handle) = handle else {
             return Err(self.null_pointer());
         };
-        self.giim.mapped(&handle);
+        self.handles.mapped(&handle);
         Ok(())
     }
 }

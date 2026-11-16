@@ -42,7 +42,11 @@
 //!
 //! The probes are in `tests/seqdb/mask_ids/` (`README.md` says how they were made).
 
-use super::model::{Date, DateStd, ObjectId, ParsedSeqId, PatentNumber, PdbSeqId, TextseqId};
+use std::collections::HashMap;
+
+use super::model::{
+    Date, DateStd, GiimportId, ObjectId, ParsedSeqId, PatentNumber, PdbSeqId, TextseqId,
+};
 
 /// A Seq-id whose handle a pure function cannot know: it is found in a tree whose state the
 /// caller keeps.
@@ -216,6 +220,175 @@ pub(crate) fn mask_handle_packed(id: &ParsedSeqId) -> i64 {
 /// (0) comes last.
 pub(crate) fn mask_handle_order(packed: i64) -> u64 {
     (packed as u64).wrapping_sub(1)
+}
+
+// NCBI reference (598d8ae6): c++/include/objects/seq/seq_id_handle.hpp:300-312 (the Seq-id of a
+// handle: its info's own, or the one its packed number and case variant give back)
+// ```c++
+//     CConstRef<CSeq_id> GetSeqId(void) const
+//         {
+//             CConstRef<CSeq_id> ret;
+//             if ( m_Packed || m_Variant ) {
+//                 ret = m_Info->GetPackedSeqId(m_Packed, m_Variant);
+//             }
+//             else {
+//                 ret = m_Info->GetSeqId();
+//             }
+//             return ret;
+//         }
+// ```
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:736-786 (a case variant has
+// one bit per letter of the info's Seq-id, at most 64: `TVariant` is `Uint8`)
+// ```c++
+//     for ( size_t i = 0; variant && i != len; ++i ) {
+//         int c = Uint1(str[i]);
+//         if ( isalpha(c) ) {
+//             if ( variant & 1 ) {
+//                 // flip case
+// ...
+//     for ( size_t i = 0; bit && i != ref.size(); ++i ) {
+//         int cr = Uint1(ref[i]);
+//         if ( !isalpha(cr) ) {
+//             continue;
+//         }
+//         int cs = Uint1(str[i]);
+//         if ( cs != cr ) {
+//             ...
+//             variant |= bit;
+//         }
+//         bit <<= 1;
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:938-966, 1022-1029 (a packed
+// Textseq-id is made again with the info's alternative and the accession's case; a plain one is
+// the info's Seq-id with the accession's case only), 1934-1950 (a local string id), 2172-2181,
+// 2338-2357, 2466-2481 (a general id: the database, then a string tag), 3408-3463 (a PDB id: the
+// variant of `CSeq_id_PDB_Info::Normalize` gives back the molecule's case, `chain` and `chain-id`)
+// ```c++
+//     const_cast<CSeq_id&>(*ret).Select(GetType(), eDoNotResetVariant);
+//     Restore(*const_cast<CTextseq_id*>(ret->GetTextseq_Id()), param, variant);
+// ...
+//     CRef<CSeq_id> ret(new CSeq_id);
+//     s_AssignSeq_id(*ret, *m_Seq_id);
+//     s_RestoreCaseVariant(const_cast<CTextseq_id*>(ret->GetTextseq_Id())->SetAccession(), variant);
+// ```
+/// `CSeq_id_Handle::GetSeqId()` of the handle that `CSeq_id_Handle::GetHandle(id)` gives when the
+/// handle's info was made from `first` (the two are one handle: [`mask_handle_key`], or the `giim`
+/// tree's [`GiimTree::made_from`]): the Seq-id that `AsString()` writes. The info keeps `first`;
+/// the handle's case variant gives back the case of `id`'s first 64 letters where the tree keeps
+/// one:
+/// - a local string id; a general id's database, then its string tag;
+/// - a Textseq-id's accession only (a name keeps `first`'s case); a packed one (accession only)
+///   takes `first`'s alternative (GenBank, EMBL and DDBJ are one tree);
+/// - a PDB id as a whole (molecule case, `chain` and `chain-id`, release date);
+/// - nothing of a patent or a `giim` id (`first` as it is); gi, gibbsq, gibbmt and local integer
+///   ids are their number.
+pub(crate) fn handle_seq_id(first: &ParsedSeqId, id: &ParsedSeqId) -> ParsedSeqId {
+    match (first, id) {
+        (ParsedSeqId::Local(ObjectId::Str(text)), ParsedSeqId::Local(ObjectId::Str(own))) => {
+            let mut text = text.clone();
+            restore_case(&mut [&mut text], &[own]);
+            ParsedSeqId::Local(ObjectId::Str(text))
+        }
+        (ParsedSeqId::General(dbtag), ParsedSeqId::General(own)) => {
+            let mut dbtag = dbtag.clone();
+            match (&mut dbtag.tag, &own.tag) {
+                (ObjectId::Str(text), ObjectId::Str(own_text)) => {
+                    restore_case(&mut [&mut dbtag.db, text], &[&own.db, own_text]);
+                }
+                _ => restore_case(&mut [&mut dbtag.db], &[&own.db]),
+            }
+            ParsedSeqId::General(dbtag)
+        }
+        (ParsedSeqId::Patent(_) | ParsedSeqId::Giim(_), _) => first.clone(),
+        _ => match (first.textseq(), id.textseq()) {
+            (Some(text), Some(own)) => {
+                let mut out = first.clone();
+                let target = out.textseq_mut().expect("a Textseq-id");
+                if textseq_packs(own) {
+                    *target = own.clone();
+                } else if let (Some(accession), Some(own)) =
+                    (target.accession.as_mut(), own.accession.as_ref())
+                {
+                    debug_assert_eq!(text.accession.as_ref().map(Vec::len), Some(own.len()));
+                    restore_case(&mut [accession], &[own]);
+                }
+                out
+            }
+            _ => id.clone(),
+        },
+    }
+}
+
+/// Whether `AsString()` of `id`'s handle writes `id`'s FASTA text whatever Seq-id of the handle
+/// made its info (`handle_seq_id`): false where the info's Seq-id shows through, namely a GenBank,
+/// EMBL or DDBJ accession that packs (the alternative), a Textseq-id name with a letter, a patent
+/// country or number with a letter, and more than 64 letters in a local string id, a general id's
+/// database and string tag, or a Textseq-id's accession (the case variant's 64 bits). A `giim` id's
+/// text is its number.
+pub(crate) fn handle_fasta_is_own(id: &ParsedSeqId) -> bool {
+    let letters = |text: &[u8]| text.iter().filter(|c| c.is_ascii_alphabetic()).count();
+    match id {
+        ParsedSeqId::Local(ObjectId::Str(text)) => letters(text) <= VARIANT_LETTERS,
+        ParsedSeqId::General(dbtag) => {
+            let tag = match &dbtag.tag {
+                ObjectId::Str(text) => letters(text),
+                ObjectId::Id(_) => 0,
+            };
+            letters(&dbtag.db) + tag <= VARIANT_LETTERS
+        }
+        ParsedSeqId::Patent(patent) => {
+            let number = match &patent.cit.id {
+                PatentNumber::Number(number) | PatentNumber::AppNumber(number) => number,
+            };
+            letters(&patent.cit.country) + letters(number) == 0
+        }
+        _ => match id.textseq() {
+            Some(text) if textseq_packs(text) => !matches!(
+                id,
+                ParsedSeqId::Genbank(_) | ParsedSeqId::Embl(_) | ParsedSeqId::Ddbj(_)
+            ),
+            Some(text) => {
+                text.name.as_deref().is_none_or(|name| letters(name) == 0)
+                    && text
+                        .accession
+                        .as_deref()
+                        .is_none_or(|acc| letters(acc) <= VARIANT_LETTERS)
+            }
+            None => true,
+        },
+    }
+}
+
+/// The letters a case variant covers (`CSeq_id_Handle::TVariant` = `Uint8`, one bit each).
+const VARIANT_LETTERS: usize = 64;
+
+/// `s_RestoreCaseVariant` of `s_ParseCaseVariant`: the first 64 letters of `to` (its strings in
+/// order) take the case of the same letters of `from` (equal to `to` but for case).
+fn restore_case(to: &mut [&mut Vec<u8>], from: &[&Vec<u8>]) {
+    let mut left = VARIANT_LETTERS;
+    for (to, from) in to.iter_mut().zip(from) {
+        for (c, &own) in to.iter_mut().zip(from.iter()) {
+            if left == 0 {
+                return;
+            }
+            if c.is_ascii_alphabetic() {
+                *c = own;
+                left -= 1;
+            }
+        }
+    }
+}
+
+/// Whether a Textseq-id packs (`FindOrCreate`, seq_id_tree.cpp:1165-1185): an accession only that
+/// `ParseAcc` takes.
+fn textseq_packs(text: &TextseqId) -> bool {
+    text.name.is_none()
+        && text.release.is_none()
+        && text
+            .accession
+            .as_deref()
+            .is_some_and(|acc| textseq_packed_split(acc).is_some())
 }
 
 /// The handle's tree (`CSeq_id_Which_Tree::Initialize`, seq_id_tree.cpp:244-275): the alternative,
@@ -427,6 +600,91 @@ fn push_opt_i32(key: &mut Vec<u8>, value: Option<i32>) {
         Some(value) => {
             key.push(1);
             key.extend(value.to_le_bytes());
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:2926-2964
+// ```c++
+// CSeq_id_Info* CSeq_id_Giim_Tree::x_FindInfo(const CGiimport_id& gid) const
+// {
+//     TIdMap::const_iterator id_it = m_IdMap.find(gid.GetId());
+//     if (id_it == m_IdMap.end())
+//         return 0;
+//     ITERATE (TGiimList, dbr_it, id_it->second) {
+//         CConstRef<CSeq_id> id = (*dbr_it)->GetSeqId();
+//         const CGiimport_id& gid2 = id->GetGiim();
+//         // Both Db and Release must be equal
+//         if ( !gid.Equals(gid2) ) {
+//             return *dbr_it;
+//         }
+//     }
+//     // Not found
+//     return 0;
+// }
+// ...
+// CSeq_id_Handle CSeq_id_Giim_Tree::FindOrCreate(const CSeq_id& id)
+// {
+//     ...
+//     CSeq_id_Info* info = x_FindInfo(gid);
+//     if ( !info ) {
+//         info = CreateInfo(id);
+//         m_IdMap[gid.GetId()].push_back(info);
+//     }
+//     return CSeq_id_Handle(info);
+// }
+// ```
+/// NCBI's `CSeq_id_Giim_Tree` ([`TreeHandle::Giim`]): the live handles of each `giim` number, in
+/// the order they were made, each with the Giimport-id it was made from (`GetSeqId()` of the
+/// info). The one model of the tree: `makeblastdb`'s mask ranges (`writedb::mask_data::range_set`)
+/// and the object manager's index and attach of a PSSM query (`algorithm::pssm_search::annot_index`)
+/// keep their handles in it and drop each one when the last thing holding it goes.
+#[derive(Debug, Default)]
+pub(crate) struct GiimTree {
+    lists: HashMap<i32, Vec<(usize, GiimportId)>>,
+    made: usize,
+}
+
+impl GiimTree {
+    /// `x_FindInfo`: the first live handle whose Giimport-id is not `Equals` to `id`.
+    pub(crate) fn find(&self, id: &GiimportId) -> Option<usize> {
+        self.lists
+            .get(&id.id)?
+            .iter()
+            .find(|(_, made_from)| made_from != id)
+            .map(|(handle, _)| *handle)
+    }
+
+    /// `FindOrCreate`: the handle, and whether it is new.
+    pub(crate) fn find_or_create(&mut self, id: &GiimportId) -> (usize, bool) {
+        if let Some(handle) = self.find(id) {
+            return (handle, false);
+        }
+        self.made += 1;
+        self.lists
+            .entry(id.id)
+            .or_default()
+            .push((self.made, id.clone()));
+        (self.made, true)
+    }
+
+    /// The Giimport-id the handle was made from.
+    pub(crate) fn made_from(&self, number: i32, handle: usize) -> &GiimportId {
+        let list = &self.lists[&number];
+        &list
+            .iter()
+            .find(|(h, _)| *h == handle)
+            .expect("a live handle")
+            .1
+    }
+
+    /// `x_Unindex` of a handle that nothing holds any more.
+    pub(crate) fn drop_handle(&mut self, number: i32, handle: usize) {
+        if let Some(list) = self.lists.get_mut(&number) {
+            list.retain(|(h, _)| *h != handle);
+            if list.is_empty() {
+                self.lists.remove(&number);
+            }
         }
     }
 }

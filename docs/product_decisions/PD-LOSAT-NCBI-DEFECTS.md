@@ -1128,10 +1128,13 @@ masked). Line NP item M4a-2c.
   reads only later (the PSSM's values and the alphabet of its letters, the `-subject` records'
   Seq-ids under `-parse_deflines`, the search's options), and no PSSM file of `-out_pssm` and an
   empty file of `-export_search_strategy`, as with the reader's errors; a query Seq-entry set,
-  whose annotations NCBI's object manager takes (the set's own before its members') and at which
-  NCBI then stops (`CSeq_entry::GetSeq()`), and a Seq-id twice in the query's entry (the
-  attach's `duplicate Bioseq id` exception, before the index; two Seq-ids that NCBI's scope may take
-  as one, or a Seq-id twice with `-subject`, LOSAT refuses) (fixture rows `db.ps.inpssm.d3.*`, `db.tbn.inpssm.d3.*`, `db.ps.inpssm.fg.*`,
+  whose annotations NCBI's object manager takes (the members' first as it makes them, the set's own
+  first as it indexes them) and at which NCBI then stops (`CSeq_entry::GetSeq()`), and a Seq-id
+  twice in the query's entry (the attach's `duplicate Bioseq id` exception, before the index, for
+  every two Seq-ids that NCBI's Seq-id handles take as one, with NCBI's spelling of each; with
+  `-subject` LOSAT refuses it where a subject record's spelling may show in the message); a PSSM
+  whose values nest as deep as NCBI's reader may overflow its stack (a crash) LOSAT refuses, and
+  reads every shallower one (fixture rows `db.ps.inpssm.d3.*`, `db.tbn.inpssm.d3.*`, `db.ps.inpssm.fg.*`,
   `db.tbn.inpssm.fg.*`).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)

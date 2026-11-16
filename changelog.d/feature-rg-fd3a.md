@@ -24,10 +24,15 @@
   alphabet and ids), the Seq-ids of `-subject` records under `-parse_deflines`, the PSSM files, the search strategy and
   LOSAT's limits of the search (`-evalue`, `-use_sw_tback`, gap costs, tblastn's `-xdrop_gap`, `-dbsize` with a list
   that keeps no sequence, report sums). A query Seq-entry set is no longer refused: NCBI's object manager takes its
-  annotations (the set's own before its members'), and NCBI then stops at the set (`CSeq_entry::GetSeq()`). A Seq-id
-  twice in the query's entry gets NCBI's `duplicate Bioseq id` exception, before the index of the annotations (it
-  was the index's message or LOSAT's refusal); two Seq-ids that NCBI may take as one, and a Seq-id twice with
-  `-subject`, are refused. The
+  annotations (the members' first as it makes them, the set's own first as it indexes them), and NCBI then stops at
+  the set (`CSeq_entry::GetSeq()`). A Seq-id twice in the query's entry gets NCBI's `duplicate Bioseq id` exception,
+  before the index of the annotations (it was the index's message or LOSAT's refusal), for every two Seq-ids that
+  NCBI's Seq-id handles take as one (equal ones, and ones that differ only in what NCBI's index does not look at: the
+  case of letters, GenBank, EMBL or DDBJ for an accession alone, PDB's `chain` and `chain-id`, a `giim` id's other
+  database) and with NCBI's spelling of each (the first Seq-id of a handle, with the case of the letters of each);
+  with `-subject` it is refused only where a subject record's spelling may show in the message. A PSSM whose values
+  nest so deep that NCBI's reader may overflow its stack and crash is refused (from 3,961 to 9,503 levels, by type);
+  every shallower one is read, where LOSAT's reader overflowed its own stack at about 2,400 nested Bioseq-sets. The
   library API's PSSM query (`Inputs::pssm`) ends as the command line's run: a PSSM file that NCBI ends without a word
   gives a call without an error, and an error after the object manager's `Failed to parse location of` message has
   the command line's text (its line feed).

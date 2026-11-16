@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use super::range::{GiimTree, Handle, HandleRangeMap, Mode, Range};
+use super::range::{Handle, HandleRangeMap, LiveHandles, Mode, Range};
 use super::view::V;
 use super::{Event, Indexer, Refusal, Stop};
 use crate::ncbi_exception::{NcbiException, Severity, ThrowSite};
@@ -468,7 +468,7 @@ impl<'a> LocColumns<'a> {
     //     }
     // }
     // ```
-    fn parse_defaults(&mut self, giim: &mut GiimTree) -> Result<(), Stop> {
+    fn parse_defaults(&mut self, handles: &mut LiveHandles) -> Result<(), Stop> {
         if !self.is_set {
             return Ok(());
         }
@@ -499,7 +499,7 @@ impl<'a> LocColumns<'a> {
         }
         if let Some(default) = self.id.and_then(Column::default) {
             // The default handle lives as long as the table (the run).
-            self.default_id = Some(Handle::of_run(single_get_id(default)?.seq_id(), giim));
+            self.default_id = Some(Handle::of_run(single_get_id(default)?.seq_id(), handles));
         }
         if let Some(default) = self.gi.and_then(Column::default) {
             self.default_id = Some(Handle::gi(single_get(default, Want::Int8)?));
@@ -827,8 +827,8 @@ impl Indexer<'_> {
             }
         }
         if is_feat {
-            info.loc.parse_defaults(&mut self.giim)?;
-            info.product.parse_defaults(&mut self.giim)?;
+            info.loc.parse_defaults(&mut self.handles)?;
+            info.product.parse_defaults(&mut self.handles)?;
         }
         info.sorted = info.is_sorted(sorted_max);
         // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:486-498 (`x_InitFeatTable`)
@@ -938,9 +938,9 @@ impl Indexer<'_> {
     pub(super) fn index_table(&mut self, info: &TableInfo<'_>) -> Result<(), Stop> {
         if !info.is_feat {
             if let Some(loc) = info.table_loc {
-                let map = HandleRangeMap::of_location(loc, Mode::None, &mut self.giim);
+                let map = HandleRangeMap::of_location(loc, Mode::None, &mut self.handles);
                 self.map_location(&map, Event::TableLocation)?;
-                self.giim.end_object();
+                self.handles.end_object();
             }
             return Ok(());
         }
@@ -950,11 +950,11 @@ impl Indexer<'_> {
             let (id, range, _) = super::range::interval_parts(interval);
             // `key.m_Handle` holds the handle (mapped, unless the range is empty) until the table
             // has been indexed.
-            let handle = Handle::of(id, &mut self.giim);
+            let handle = Handle::of(id, &mut self.handles);
             let mapped = self.x_map(range, Some(handle.clone()));
-            self.giim.set_key(Some(&handle));
-            self.giim.end_object();
-            self.giim.end_table();
+            self.handles.set_key(Some(&handle));
+            self.handles.end_object();
+            self.handles.end_table();
             return mapped;
         }
         for row in 0..info.num_rows.max(0) as u64 {
@@ -992,23 +992,23 @@ impl Indexer<'_> {
                     let Some(loc) = self.column_seq_loc(column, row)? else {
                         return Err(self.null_pointer());
                     };
-                    let map = HandleRangeMap::of_location(loc, Mode::None, &mut self.giim);
+                    let map = HandleRangeMap::of_location(loc, Mode::None, &mut self.handles);
                     self.map_location(&map, Event::Row)?;
                     // `key.m_Handle` takes each handle of a non-empty range (mapped).
                     if map.map.iter().any(|(_, hr)| !hr.overlapping().is_empty()) {
-                        self.giim.set_key(None);
+                        self.handles.set_key(None);
                     }
                 } else {
                     let (id, range) = self.table_key(cols, row)?;
                     self.x_map(range, id.clone())?;
                     // `SetTableKeyAndIndex` puts the row's handle in `key.m_Handle`.
-                    self.giim.set_key(id.as_ref());
+                    self.handles.set_key(id.as_ref());
                 }
                 // NCBI's row map is made for each location (seq_annot_info.cpp:1130).
-                self.giim.end_object();
+                self.handles.end_object();
             }
         }
-        self.giim.end_table();
+        self.handles.end_table();
         Ok(())
     }
 
@@ -1095,7 +1095,7 @@ impl Indexer<'_> {
             if id.data().is_some() {
                 handle = self
                     .column_seq_id(id, row)?
-                    .map(|id| Handle::of(id.seq_id(), &mut self.giim));
+                    .map(|id| Handle::of(id.seq_id(), &mut self.handles));
             }
         } else if let Some(gi) = cols.gi.filter(|gi| gi.data().is_some()) {
             handle = self.column_try_get(gi, row, Want::Int8)?.map(Handle::gi);

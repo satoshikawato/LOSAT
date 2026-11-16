@@ -631,13 +631,16 @@ impl MainDiag {
     }
 
     /// The library call's stream that this thread runs for (`None`: the command line's), to hand to
-    /// the threads that work for the same run (`utils::threading::with_search_pool`).
+    /// the threads that work for the same run (`utils::threading::with_search_pool`, which a build
+    /// without threads does not have).
+    #[cfg(feature = "parallel")]
     pub(crate) fn current() -> Option<std::sync::Arc<MainDiag>> {
         CURRENT.with(|current| current.borrow().clone())
     }
 
     /// A thread made for one search of a run (a worker of its pool, `with_search_pool`) takes
     /// that run's stream (`current` on the thread that made it) for the rest of its life.
+    #[cfg(feature = "parallel")]
     pub(crate) fn adopt(diag: Option<std::sync::Arc<MainDiag>>) {
         CURRENT.with(|current| *current.borrow_mut() = diag);
     }
@@ -746,12 +749,13 @@ mod tests {
         assert!(a.failed());
         assert!(!b.failed());
         assert!(!COMMAND_LINE.failed());
-        assert!(MainDiag::current().is_none());
+        let entered = || CURRENT.with(|current| current.borrow().is_some());
+        assert!(!entered());
         let _b = MainDiag::enter(Some(b.clone()));
         assert!(!main_diag_failbit());
         // Another thread runs no call until it enters one.
         std::thread::scope(|scope| {
-            scope.spawn(|| assert!(MainDiag::current().is_none()));
+            scope.spawn(|| assert!(!entered()));
         });
     }
 

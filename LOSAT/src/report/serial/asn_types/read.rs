@@ -23,6 +23,7 @@
 //! `CATCH_ALL`); and an end of the text directly in the root object, a `CEofException` that NCBI's
 //! stack passes on.
 
+use super::table::named;
 use super::{resolved, EnumValue, Kind, Member, Storage, StringKind, Value};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::serial::asn_text_reader::{
@@ -286,11 +287,13 @@ const NUMBER_OVERFLOW: ThrowSite = ThrowSite {
 /// Reads the ASN.1 text document at the start of `text` as the root type `root` (an object of
 /// `CObjectIStream::Read`: its file header, then the value; what follows it is not read), with
 /// the messages posted.
-pub(crate) fn read_document(text: &[u8], root: u16) -> Read<Value> {
+pub(crate) fn read_document(text: &[u8], root: u16, ncbi_stack: &'static NcbiStack) -> Read<Value> {
     let mut reader = TypedReader {
         r: Reader::new(SliceSource::new(text), "PSSM", "PSSM reader"),
         frames: Vec::new(),
         posts: Vec::new(),
+        ncbi_stack,
+        stack: 0,
     };
     let value = reader.document(root);
     (value, reader.posts)
@@ -300,6 +303,81 @@ struct TypedReader<'a> {
     r: Reader<SliceSource<'a>>,
     frames: Vec<Frame>,
     posts: Vec<Post>,
+    /// NCBI's stack of the program that reads, and the share of it that the open values of its
+    /// recursive types take (in units of `STACK_UNITS`).
+    ncbi_stack: &'static NcbiStack,
+    stack: u64,
+}
+
+// NCBI BLAST+ 2.17.0 reads a PSSM with `CObjectIStreamAsn`, whose functions recurse once per open
+// value, on the main thread's stack (8 MB by default). A type that nests in itself can fill it: the
+// reader overflows the stack and the run ends with SIGSEGV before any output (gdb: the deepest
+// frames are `CObjectIStreamAsn` functions under `CPsiBlastArgs::ExtractAlgorithmOptions`). Where
+// it does depends on the stack's random start (`arch_align_stack`: up to 8 KB less stack, a few
+// levels) and on the size of the environment and the command line; LOSAT refuses a PSSM from the
+// depth at which NCBI may crash, that of a run whose stack starts as low as it can (`setarch -R`
+// with 8,192 more bytes of environment, in an environment of about 5 KB), and reads every
+// shallower one as NCBI does.
+/// NCBI's stack as one program's reader of a PSSM fills it: for each type that nests in itself,
+/// the number of its values open at once at which the program may crash, one type nested in
+/// itself in a query Bioseq (a Bioseq-set: the query entry; Seq-loc-mix and Seq-loc-equiv: a
+/// feature's location; User-object, Pub, OrgName: a descriptor; Seq-align: an annotation;
+/// Variation-ref: a feature; SeqTable-multi-data: a Seq-table column), `-db` (line RG D3-1 fix
+/// round 5, `r5/bisect/`). A value of a recursive type takes `1 / count` of the stack, and the
+/// reader refuses the PSSM when its open values take all of it; values of other types and the
+/// frames above the first recursive one count as the measured contexts had them.
+pub(crate) struct NcbiStack {
+    depths: [(u16, u64); 9],
+}
+
+/// psiblast's (`r5/bisect/psiblast.*.fixed.pad8192.txt`).
+pub(crate) const PSIBLAST_STACK: NcbiStack = NcbiStack {
+    depths: [
+        (named::BIOSEQ_SET, 5074),
+        (named::SEQ_LOC_MIX, 6877),
+        (named::SEQ_LOC_EQUIV, 6877),
+        (named::USER_OBJECT, 4149),
+        (named::SEQ_ALIGN, 5743),
+        (named::PUB, 7575),
+        (named::VARIATION_REF, 3961),
+        (named::SEQTABLE_MULTI_DATA, 9503),
+        (named::ORGNAME, 4507),
+    ],
+};
+
+/// tblastn's (`r5/bisect/tblastn.*.fixed.pad8192.txt`).
+pub(crate) const TBLASTN_STACK: NcbiStack = NcbiStack {
+    depths: [
+        (named::BIOSEQ_SET, 5074),
+        (named::SEQ_LOC_MIX, 6878),
+        (named::SEQ_LOC_EQUIV, 6878),
+        (named::USER_OBJECT, 4150),
+        (named::SEQ_ALIGN, 5743),
+        (named::PUB, 7575),
+        (named::VARIATION_REF, 3961),
+        (named::SEQTABLE_MULTI_DATA, 9504),
+        (named::ORGNAME, 4507),
+    ],
+};
+
+/// The whole of NCBI's stack (`NcbiStack`): a value of a type of count `n` takes
+/// `ceil(STACK_UNITS / n)`, so that `n - 1` values of one type fit and `n` do not (`n` < 2^20).
+const STACK_UNITS: u64 = 1 << 40;
+
+impl NcbiStack {
+    /// A stack of the counts `depths` (the tests of the rule with small counts).
+    #[cfg(test)]
+    pub(crate) const fn of(depths: [(u16, u64); 9]) -> NcbiStack {
+        NcbiStack { depths }
+    }
+
+    /// The share of the stack that a value of the type `ty` takes, and its count.
+    fn share(&self, ty: u16) -> Option<(u64, u64)> {
+        self.depths
+            .iter()
+            .find(|&&(nested, _)| nested == ty)
+            .map(|&(_, count)| (STACK_UNITS.div_ceil(count), count))
+    }
 }
 
 impl TypedReader<'_> {
@@ -420,8 +498,27 @@ impl TypedReader<'_> {
     }
 
     /// One value of the type `ty` (`ReadObject`), or its skip (`SkipObject`, `skip`), then the
-    /// hooks of NCBI's classes that a read runs.
+    /// hooks of NCBI's classes that a read runs; LOSAT's refusal of a value that NCBI's stack does
+    /// not hold (`NcbiStack`).
     fn value(&mut self, ty: u16, skip: bool) -> R<Value> {
+        let Some((share, count)) = self.ncbi_stack.share(alias_target(ty)) else {
+            return self.value_of(ty, skip);
+        };
+        self.stack += share;
+        let value = if self.stack >= STACK_UNITS {
+            Err(ReadError::Unsupported(format!(
+                "a PSSM whose values nest as deep as NCBI's reader does not read (NCBI BLAST+ overflows its stack and crashes from {count} {} values open at once, or fewer with other recursive values open)",
+                resolved(ty).name()
+            )))
+        } else {
+            self.value_of(ty, skip)
+        };
+        self.stack -= share;
+        value
+    }
+
+    /// `value` of a type that is not recursive, or within NCBI's stack.
+    fn value_of(&mut self, ty: u16, skip: bool) -> R<Value> {
         let info = resolved(ty);
         let target = alias_target(ty);
         let value = match info.kind {

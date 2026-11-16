@@ -854,12 +854,14 @@ impl TblastnArgs {
     }
 }
 
-/// LOSAT's limits, checked where NCBI starts the search: the options that NCBI runs and
-/// LOSAT's TBLASTN does not implement are rejected, and the others select the search.
-pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettings> {
+/// LOSAT's limits of the search: the options that NCBI runs and LOSAT's TBLASTN does not, refused
+/// where NCBI searches the first query batch (with IDENTITY's compressed lookup table,
+/// `check_identity_compressed_lookup_of`): a run that NCBI stops before (a first batch without
+/// letters, a PSSM that its checks reject, the PSSM engine's error, the object manager's stop) gives
+/// NCBI's error (NCBI BLAST+ 2.17.0 `-xdrop_gap 5e8` or `-ungapped`: line RG D3-1 review 4c N1, as
+/// psiblast's `validate_requested_blastp_support`).
+pub(super) fn check_search_limits(args: &ResolvedTblastnArgs) -> Result<()> {
     use crate::blastinput::app::CompositionMode;
-    // IDENTITY with the compressed lookup table is refused where the search reaches its first
-    // query batch (`check_identity_compressed_lookup_of`).
     if !args.gapped {
         anyhow::bail!("{}", crate::cli::run_refusal("TBLASTN", "ungapped"));
     }
@@ -912,6 +914,57 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
             args.max_intron_length
         );
     }
+    let (compo_adjust_mode, _) = composition(args);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:409,3687
+    // ```c
+    //     *pbestEvalue = DBL_MAX;
+    //                 if (best_evalue <= hitParams->options->expect_value) {
+    // ```
+    // A list whose HSPs all fail keeps the best e-value DBL_MAX, so an -evalue of DBL_MAX
+    // or more (+inf, 1e999, 1.7976931348623157e308) puts an empty list into the hit list,
+    // and NCBI's tblastn dies of SIGSEGV reading its first HSP (blast_hits.c:3266) when
+    // the search keeps enough HSPs, and runs otherwise; LOSAT cannot tell beforehand, so
+    // it rejects the value (decision D12 of docs/evidence/losat_web_e2e/AUTHORITY.md). A
+    // smaller -evalue such as 1e308 runs.
+    if args.evalue >= f64::MAX {
+        anyhow::bail!(
+            "an -evalue of DBL_MAX or more ({}), with which NCBI BLAST+'s tblastn crashes on some inputs, is not supported by LOSAT's TBLASTN",
+            args.evalue
+        );
+    }
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:43-70 (the
+    // preliminary hit list size through NCBI's `int`; `blastn/hsp.rs`)
+    // A hit list size whose preliminary size is not positive crashes NCBI.
+    crate::algorithm::blastn::hsp::check_prelim_hitlist_size(
+        args.hitlist_size,
+        args.max_target_seqs_given,
+        compo_adjust_mode.is_enabled(),
+        true,
+        "TBLASTN",
+    )?;
+    Ok(())
+}
+
+/// The search's composition mode, and IDENTITY's reset (IDENTITY with a mode above 0, which NCBI
+/// searches in mode 0).
+fn composition(args: &ResolvedTblastnArgs) -> (BlastCompoAdjustMode, bool) {
+    use crate::blastinput::app::CompositionMode;
+    let identity_cbs_reset = args.matrix_name.eq_ignore_ascii_case("identity")
+        && args.composition_mode != CompositionMode::NoCompositionBasedStats;
+    let mode = match args.composition_mode {
+        _ if identity_cbs_reset => BlastCompoAdjustMode::NoCompositionBasedStats,
+        CompositionMode::NoCompositionBasedStats => BlastCompoAdjustMode::NoCompositionBasedStats,
+        CompositionMode::CompositionBasedStats => BlastCompoAdjustMode::CompositionBasedStats,
+        CompositionMode::CompositionMatrixAdjust => BlastCompoAdjustMode::CompositionMatrixAdjust,
+        CompositionMode::CompoForceFullMatrixAdjust => BlastCompoAdjustMode::ForceFullMatrixAdjust,
+    };
+    (mode, identity_cbs_reset)
+}
+
+/// The options of the search: the composition mode, IDENTITY's reset and the scoring; a matrix and
+/// word size that LOSAT's TBLASTN does not implement is refused (LOSAT's limits of the search
+/// itself are `check_search_limits`).
+pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettings> {
     // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:1486-1499
     // ```c
     //     } else if (ext_params->options->compositionBasedStats > 0 ||
@@ -941,47 +994,12 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
     // later batches start in mode 0, `tblastn_app::search`). The reset is made with the score
     // block, before the HSP writer takes the preliminary hit list size
     // (`blast_aux_priv.cpp:175-229`), so that size is mode 0's too.
-    let identity_cbs_reset = args.matrix_name.eq_ignore_ascii_case("identity")
-        && args.composition_mode != CompositionMode::NoCompositionBasedStats;
-    let compo_adjust_mode = match args.composition_mode {
-        _ if identity_cbs_reset => BlastCompoAdjustMode::NoCompositionBasedStats,
-        CompositionMode::NoCompositionBasedStats => BlastCompoAdjustMode::NoCompositionBasedStats,
-        CompositionMode::CompositionBasedStats => BlastCompoAdjustMode::CompositionBasedStats,
-        CompositionMode::CompositionMatrixAdjust => BlastCompoAdjustMode::CompositionMatrixAdjust,
-        CompositionMode::CompoForceFullMatrixAdjust => BlastCompoAdjustMode::ForceFullMatrixAdjust,
-    };
+    let (compo_adjust_mode, identity_cbs_reset) = composition(args);
     // NCBI c++/src/algo/blast/blastinput/blast_args.cpp:3152-3187:
     // arg_desc.SetConstraint(kArgNumThreads, new CArgAllowValuesGreaterThanOrEqual(1));
     // NCBI c++/src/algo/blast/api/prelim_stage.cpp:145-147:
     // TBlastThreads the_threads(GetNumberOfThreads());
     crate::utils::threading::validate_threads(args.num_threads)?;
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:409,3687
-    // ```c
-    //     *pbestEvalue = DBL_MAX;
-    //                 if (best_evalue <= hitParams->options->expect_value) {
-    // ```
-    // A list whose HSPs all fail keeps the best e-value DBL_MAX, so an -evalue of DBL_MAX
-    // or more (+inf, 1e999, 1.7976931348623157e308) puts an empty list into the hit list,
-    // and NCBI's tblastn dies of SIGSEGV reading its first HSP (blast_hits.c:3266) when
-    // the search keeps enough HSPs, and runs otherwise; LOSAT cannot tell beforehand, so
-    // it rejects the value (decision D12 of docs/evidence/losat_web_e2e/AUTHORITY.md). A
-    // smaller -evalue such as 1e308 runs.
-    if args.evalue >= f64::MAX {
-        anyhow::bail!(
-            "an -evalue of DBL_MAX or more ({}), with which NCBI BLAST+'s tblastn crashes on some inputs, is not supported by LOSAT's TBLASTN",
-            args.evalue
-        );
-    }
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:43-70 (the
-    // preliminary hit list size through NCBI's `int`; `blastn/hsp.rs`)
-    // A hit list size whose preliminary size is not positive crashes NCBI.
-    crate::algorithm::blastn::hsp::check_prelim_hitlist_size(
-        args.hitlist_size,
-        args.max_target_seqs_given,
-        compo_adjust_mode.is_enabled(),
-        true,
-        "TBLASTN",
-    )?;
     let matrix: Option<ScoringMatrix> = args.matrix_name.parse().ok();
     let threshold = args.threshold;
     let window = args.window_size;
@@ -1055,6 +1073,7 @@ pub fn check_options(args: &TblastnArgs) -> Result<()> {
     refuse_browser_pssm_query(args)?;
     let resolved = args.resolve()?;
     search_settings(&resolved)?;
+    check_search_limits(&resolved)?;
     // Without the inputs: IDENTITY with the compressed lookup table, which the search refuses where
     // it searches its first query batch.
     check_identity_compressed_lookup_of(&resolved)
@@ -1586,7 +1605,7 @@ mod tests {
     // 35 Q3 of line PS: accepted without `-sum_stats true`, refused with it as before).
     #[test]
     fn the_largest_intron_is_refused_with_sum_statistics_only() {
-        let settings = |args: TblastnArgs| search_settings(&args.resolve().unwrap()).map(|_| ());
+        let settings = |args: TblastnArgs| check_search_limits(&args.resolve().unwrap());
         assert!(settings(parse_pssm(&["-max_intron_length", "100"]).unwrap()).is_ok());
         assert!(
             settings(parse(&["-max_intron_length", "100", "-sum_stats", "false"]).unwrap()).is_ok()
@@ -1637,14 +1656,15 @@ mod tests {
         }
         // 4.2e8 bits are 1.09e9 raw at BLOSUM62 11/1's Lambda, past the kernels' 2^30 - 103: the
         // preliminary X-drop at every mode, the final one only without the redo (mode 0, or
-        // IDENTITY's reset). LOSAT refuses them where the search starts (`search_settings`), which
-        // a PSSM run that NCBI's object manager ends never reaches.
+        // IDENTITY's reset). LOSAT refuses them where the search starts (`check_search_limits`),
+        // which a run that NCBI stops before its first batch never reaches.
         for extra in [
             &["-xdrop_gap", "4.2e8"][..],
             &["-xdrop_gap_final", "4.2e8", "-comp_based_stats", "0"],
         ] {
             let resolved = parse(extra).unwrap().resolve().unwrap();
-            let error = search_settings(&resolved).map(|_| ()).unwrap_err();
+            assert!(search_settings(&resolved).is_ok());
+            let error = check_search_limits(&resolved).unwrap_err();
             assert!(
                 format!("{error:#}").starts_with(&format!("an {} of 420000000.0 bits", extra[0])),
                 "{extra:?}: {error:#}"
@@ -1655,7 +1675,7 @@ mod tests {
                 .unwrap()
                 .resolve()
                 .unwrap();
-            assert!(search_settings(&resolved).is_ok());
+            assert!(check_search_limits(&resolved).is_ok());
         }
     }
 }

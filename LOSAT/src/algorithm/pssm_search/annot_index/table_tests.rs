@@ -11,6 +11,7 @@ fn column_value(text: &str) -> Value {
     let (value, posts) = read_document(
         format!("SeqTable-column ::= {{ header {{ field-id 3 }}, {text} }}").as_bytes(),
         named::SEQTABLE_COLUMN,
+        &crate::report::serial::asn_types::PSIBLAST_STACK,
     );
     assert!(posts.is_empty());
     value.unwrap_or_else(|error| panic!("{text}: {error:?}"))
@@ -22,7 +23,7 @@ fn indexer() -> Indexer<'static> {
         posts: crate::report::diag_log::Posts::new(),
         muted: false,
         caches: Caches::default(),
-        giim: Default::default(),
+        handles: Default::default(),
     }
 }
 

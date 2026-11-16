@@ -6173,7 +6173,7 @@ fn search_pssm_query(
     // sequence with one of them as the PSSM's query (its title and letters), refused as for a
     // FASTA query (`IdScope::add_record` of the `-subject` records that `-parse_deflines`
     // reads; the database's, `query_batch::QueryScopes`).
-    let mut record = psi.query_record_in(resolved.parse_deflines, scope, program)?;
+    let mut record = psi.query_record_in(resolved.parse_deflines, scope, program, searches)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:506, 537 (quoted at
     // `PsiSearch::write_annot_posts`)
     // The messages of NCBI's object manager about the query's annotations come after the

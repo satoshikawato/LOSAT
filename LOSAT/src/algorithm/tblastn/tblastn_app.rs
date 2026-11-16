@@ -962,8 +962,9 @@ fn search_pssm_query(
     for &outfmt in outfmts {
         super::in_pssm::check_limits(args, &resolved, psi, outfmt)?;
     }
-    // The query record's refusal comes before any output.
-    let records = vec![psi.query_record_in(args.parse_deflines, scope, "TBLASTN")?];
+    // The query record's refusal comes before any output, in a run that searches.
+    let searches = psi.searches(args.strategy.is_some(), database.is_some());
+    let records = vec![psi.query_record_in(args.parse_deflines, scope, "TBLASTN", searches)?];
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:222-226, 241-270 (the query's
     // Bioseq joins the scope, quoted at `PsiSearch::write_annot_posts`, before the formatter is
     // made and its prolog written)
@@ -1669,10 +1670,12 @@ fn search(
     if let Some(refusal) = batches.query_refusal.take() {
         return Err(refusal);
     }
-    // NCBI crashes with IDENTITY's compressed lookup table once it searches a query batch: a run
-    // that stops at its first batch gives NCBI's error.
+    // NCBI crashes with IDENTITY's compressed lookup table once it searches a query batch, and
+    // LOSAT's limits of the search apply where it searches (`check_search_limits`): a run that
+    // stops at its first batch (or before it, `pssm_stop` above) gives NCBI's error.
     if batches.searched_done > 0 {
         super::args::check_identity_compressed_lookup_of(&resolved)?;
+        super::args::check_search_limits(&resolved)?;
     }
     // The search strategy's requests of the batches (`-export_search_strategy`), with every
     // `-subject` record: written in the loop below, and for the batch that stops the run (every

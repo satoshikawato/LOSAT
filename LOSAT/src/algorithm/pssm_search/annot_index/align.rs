@@ -3,7 +3,7 @@
 //! sizes that do not agree.
 
 use super::range::{
-    interval_parts, point_parts, GiimTree, Handle, HandleRangeMap, Range, Strand, UNKNOWN,
+    interval_parts, point_parts, Handle, HandleRangeMap, LiveHandles, Range, Strand, UNKNOWN,
 };
 use super::view::V;
 use super::{Indexer, Refusal, Stop};
@@ -55,11 +55,11 @@ pub(super) fn process_align(
         "denseg" => dense_seg(ix, rows, segs),
         "std" => {
             for seg in segs.items() {
-                std_seg(&mut ix.giim, rows, seg)?;
+                std_seg(&mut ix.handles, rows, seg)?;
             }
             Ok(())
         }
-        "packed" => packed_seg(&mut ix.giim, rows, segs),
+        "packed" => packed_seg(&mut ix.handles, rows, segs),
         "disc" => {
             for sub in segs.items() {
                 process_align(ix, rows, sub)?;
@@ -67,7 +67,7 @@ pub(super) fn process_align(
             Ok(())
         }
         "spliced" => {
-            spliced_seg(&mut ix.giim, rows, segs);
+            spliced_seg(&mut ix.handles, rows, segs);
             Ok(())
         }
         "sparse" => {
@@ -163,7 +163,7 @@ fn dense_diag(ix: &mut Indexer<'_>, rows: &mut Vec<HandleRangeMap>, diag: V<'_>)
         let from = at(starts, row) as u32;
         let to = from.wrapping_add(len).wrapping_sub(1);
         let strand = strands.map_or(UNKNOWN, |strands| at(strands, row));
-        row_map(rows, row).add_range(id.seq_id(), Range::new(from, to), strand, &mut ix.giim);
+        row_map(rows, row).add_range(id.seq_id(), Range::new(from, to), strand, &mut ix.handles);
     }
 }
 
@@ -267,7 +267,12 @@ fn dense_seg(ix: &mut Indexer<'_>, rows: &mut Vec<HandleRangeMap>, seg: V<'_>) -
             let from = start as u32;
             let to = from.wrapping_add(len).wrapping_sub(1);
             let strand = strands.map_or(UNKNOWN, |strands| at(strands, seg_index * dim + row));
-            row_map(rows, row).add_range(id.seq_id(), Range::new(from, to), strand, &mut ix.giim);
+            row_map(rows, row).add_range(
+                id.seq_id(),
+                Range::new(from, to),
+                strand,
+                &mut ix.handles,
+            );
         }
     }
     Ok(())
@@ -298,7 +303,11 @@ fn dense_seg(ix: &mut Indexer<'_>, rows: &mut Vec<HandleRangeMap>, seg: V<'_>) -
 // ```
 // A negative `dim` is a `size_t` above `max_size()`: `resize` throws libstdc++'s
 // `std::length_error("vector::_M_default_append")`, which `CATCH_ALL` reports (probe `a20`).
-fn std_seg(giim: &mut GiimTree, rows: &mut Vec<HandleRangeMap>, seg: V<'_>) -> Result<(), Stop> {
+fn std_seg(
+    handles: &mut LiveHandles,
+    rows: &mut Vec<HandleRangeMap>,
+    seg: V<'_>,
+) -> Result<(), Stop> {
     let dim = seg.get("dim").map_or(2, V::int) as i32;
     if dim < 0 {
         return Err(Stop::std_exception("vector::_M_default_append"));
@@ -327,13 +336,13 @@ fn std_seg(giim: &mut GiimTree, rows: &mut Vec<HandleRangeMap>, seg: V<'_>) -> R
         // }
         // ```
         for id in lookups {
-            Handle::look_up_in_iterator(id, giim);
+            Handle::look_up_in_iterator(id, handles);
         }
         for (row, (id, range, strand)) in ranges.into_iter().enumerate() {
             grow(rows, row + 1);
-            row_map(rows, row).add_range(id, range, strand, giim);
+            row_map(rows, row).add_range(id, range, strand, handles);
         }
-        giim.end_iterator();
+        handles.end_iterator();
     }
     Ok(())
 }
@@ -445,7 +454,11 @@ fn loc_ci_ranges<'a>(
 // size) are read without a check: NCBI reads past them (refused). A strand read past `strands`
 // changes no output of the index (`annot_index::index_align`: an alignment's row only posts when
 // all its ranges are empty, which no strand changes), so it is read as `unknown`.
-fn packed_seg(giim: &mut GiimTree, rows: &mut Vec<HandleRangeMap>, seg: V<'_>) -> Result<(), Stop> {
+fn packed_seg(
+    handles: &mut LiveHandles,
+    rows: &mut Vec<HandleRangeMap>,
+    seg: V<'_>,
+) -> Result<(), Stop> {
     let mut dim = seg.get("dim").map_or(2, V::int) as i32 as i64 as u64;
     let numseg = seg.field("numseg").int() as i32 as i64 as u64;
     let ids = seg.field("ids");
@@ -495,7 +508,7 @@ fn packed_seg(giim: &mut GiimTree, rows: &mut Vec<HandleRangeMap>, seg: V<'_>) -
             let strand = strands
                 .and_then(|strands| strands.int_at(i))
                 .unwrap_or(UNKNOWN);
-            row_map(rows, row).add_range(id.seq_id(), Range::new(from, to), strand, giim);
+            row_map(rows, row).add_range(id.seq_id(), Range::new(from, to), strand, handles);
         }
     }
     Ok(())
@@ -542,7 +555,7 @@ fn packed_seg(giim: &mut GiimTree, rows: &mut Vec<HandleRangeMap>, seg: V<'_>) -
 //             }
 // ```
 // `resize(2)` also cuts rows that a Seq-align before it in the same `disc` made.
-fn spliced_seg(giim: &mut GiimTree, rows: &mut Vec<HandleRangeMap>, seg: V<'_>) {
+fn spliced_seg(handles: &mut LiveHandles, rows: &mut Vec<HandleRangeMap>, seg: V<'_>) {
     rows.truncate(2);
     grow(rows, 2);
     let genomic_id = seg.get("genomic-id");
@@ -562,7 +575,7 @@ fn spliced_seg(giim: &mut GiimTree, rows: &mut Vec<HandleRangeMap>, seg: V<'_>) 
                 .get("genomic-strand")
                 .or(seg.get("genomic-strand"))
                 .map_or(UNKNOWN, V::int);
-            row_map(rows, 1).add_range(id.seq_id(), Range::new(from, to), strand, giim);
+            row_map(rows, 1).add_range(id.seq_id(), Range::new(from, to), strand, handles);
         }
         if let Some(id) = exon.get("product-id").or(product_id) {
             let from = product_pos(exon.field("product-start"));
@@ -571,7 +584,7 @@ fn spliced_seg(giim: &mut GiimTree, rows: &mut Vec<HandleRangeMap>, seg: V<'_>) 
                 .get("product-strand")
                 .or(seg.get("product-strand"))
                 .map_or(UNKNOWN, V::int);
-            row_map(rows, 0).add_range(id.seq_id(), Range::new(from, to), strand, giim);
+            row_map(rows, 0).add_range(id.seq_id(), Range::new(from, to), strand, handles);
         }
     }
 }
@@ -687,7 +700,7 @@ fn sparse_seg(ix: &mut Indexer<'_>, rows: &mut Vec<HandleRangeMap>, seg: V<'_>) 
                 first_id,
                 Range::new(from, from.wrapping_add(len).wrapping_sub(1)),
                 UNKNOWN,
-                &mut ix.giim,
+                &mut ix.handles,
             );
             let from = at(second_starts, seg_index) as u32;
             let strand = second_strands
@@ -697,7 +710,7 @@ fn sparse_seg(ix: &mut Indexer<'_>, rows: &mut Vec<HandleRangeMap>, seg: V<'_>) 
                 second_id,
                 Range::new(from, from.wrapping_add(len).wrapping_sub(1)),
                 strand,
-                &mut ix.giim,
+                &mut ix.handles,
             );
         }
     }

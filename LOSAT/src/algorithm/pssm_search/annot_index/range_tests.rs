@@ -2,7 +2,7 @@
 //! object manager's index reads them (line RG D3-1 `om/SPEC.md` §5.8).
 
 use super::super::view::V;
-use super::{GiimTree, Handle, HandleRange, HandleRangeMap, Mode, Range, MAX, UNKNOWN};
+use super::{Handle, HandleRange, HandleRangeMap, LiveHandles, Mode, Range, MAX, UNKNOWN};
 use crate::report::serial::asn_types::{read_document, table::named, Value};
 use crate::seqid::model::ObjectId;
 use crate::seqid::ParsedSeqId;
@@ -90,19 +90,23 @@ fn a_handle_range_becomes_circular() {
 }
 
 fn location(text: &str) -> Value {
-    let (value, posts) = read_document(format!("Seq-loc ::= {text}").as_bytes(), named::SEQ_LOC);
+    let (value, posts) = read_document(
+        format!("Seq-loc ::= {text}").as_bytes(),
+        named::SEQ_LOC,
+        &crate::report::serial::asn_types::PSIBLAST_STACK,
+    );
     assert!(posts.is_empty());
     value.unwrap()
 }
 
 /// The map of the location `text`, as the first annotation object of a run with a database.
 fn map(text: &str, mode: Mode) -> HandleRangeMap {
-    map_in(text, mode, &mut GiimTree::default())
+    map_in(text, mode, &mut LiveHandles::default())
 }
 
-fn map_in(text: &str, mode: Mode, giim: &mut GiimTree) -> HandleRangeMap {
+fn map_in(text: &str, mode: Mode, handles: &mut LiveHandles) -> HandleRangeMap {
     let value = location(text);
-    HandleRangeMap::of_location(V::new(named::SEQ_LOC, &value), mode, giim)
+    HandleRangeMap::of_location(V::new(named::SEQ_LOC, &value), mode, handles)
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/handle_range_map.cpp:91-205, 249-281 (quoted at
@@ -119,7 +123,7 @@ fn a_map_marks_the_ranges_between_seq_ids() {
         m.map[1].0,
         Handle::of(
             &ParsedSeqId::Local(ObjectId::Id(1)),
-            &mut GiimTree::default()
+            &mut LiveHandles::default()
         )
     );
     assert!(!m.map[1].1.overlapping().is_empty());
@@ -156,11 +160,11 @@ fn a_map_marks_the_ranges_between_seq_ids() {
     assert_eq!(
         Handle::of(
             &ParsedSeqId::Local(ObjectId::Str(b"Query_1".to_vec())),
-            &mut GiimTree::default()
+            &mut LiveHandles::default()
         ),
         Handle::of(
             &ParsedSeqId::Local(ObjectId::Str(b"query_1".to_vec())),
-            &mut GiimTree::default()
+            &mut LiveHandles::default()
         )
     );
     // `packed-pnt` (f18): the point 4294967295 is empty; `empty` is empty; `whole` is whole.
@@ -546,102 +550,102 @@ fn giim_handles_follow_ncbis_inverted_tree() {
             release: None,
         },
     )];
-    let mut giim = GiimTree::new(&query);
+    let mut handles = LiveHandles::new(&query);
     let m = map_in(
         &pair("giim { id 5, db \"q\" }", "giim { id 5 }"),
         Mode::None,
-        &mut giim,
+        &mut handles,
     );
     assert_eq!(m.map.len(), 2);
     let m = map_in(
         &pair("giim { id 5 }", "giim { id 5, db \"x\" }"),
         Mode::None,
-        &mut giim,
+        &mut handles,
     );
     assert_eq!(m.map.len(), 1);
     // An earlier object's mapped handle lives on (review 3 gq4, gq5; om s_i74); an unmapped one
     // goes with its object.
     let earlier = |mapped: bool| {
-        let mut giim = GiimTree::default();
+        let mut handles = LiveHandles::default();
         let m = map_in(
             "int { from 1, to 2, id giim { id 5 } }",
             Mode::None,
-            &mut giim,
+            &mut handles,
         );
         if mapped {
-            giim.mapped_all([&m]);
+            handles.mapped_all([&m]);
         }
-        giim.end_object();
-        giim
+        handles.end_object();
+        handles
     };
-    let mut giim = earlier(true);
+    let mut handles = earlier(true);
     let m = map_in(
         &pair("giim { id 5 }", "giim { id 5, db \"x\" }"),
         Mode::None,
-        &mut giim,
+        &mut handles,
     );
     assert_eq!(m.map.len(), 2);
     let m = map_in(
         &pair("giim { id 5, db \"x\" }", "giim { id 5, db \"y\" }"),
         Mode::None,
-        &mut giim,
+        &mut handles,
     );
     assert_eq!(m.map.len(), 1);
-    let mut giim = earlier(false);
+    let mut handles = earlier(false);
     let m = map_in(
         &pair("giim { id 5 }", "giim { id 5, db \"x\" }"),
         Mode::None,
-        &mut giim,
+        &mut handles,
     );
     assert_eq!(m.map.len(), 1);
     // A Seq-table's `key` keeps a simple row's handle until the next one (om s_i77); a location
     // iterator's handle is held until it goes (om s_i79).
-    let mut giim = GiimTree::default();
+    let mut handles = LiveHandles::default();
     let key = Handle::of(
         &crate::seqid::ParsedSeqId::Giim(crate::seqid::model::GiimportId {
             id: 5,
             db: Some(b"x".to_vec()),
             release: None,
         }),
-        &mut giim,
+        &mut handles,
     );
-    giim.set_key(Some(&key));
-    giim.end_object();
+    handles.set_key(Some(&key));
+    handles.end_object();
     let m = map_in(
         &pair("giim { id 5 }", "giim { id 5 }"),
         Mode::None,
-        &mut giim,
+        &mut handles,
     );
     assert_eq!(m.map.len(), 1);
-    giim.end_object();
-    giim.end_table();
+    handles.end_object();
+    handles.end_table();
     let m = map_in(
         &pair("giim { id 5 }", "giim { id 5 }"),
         Mode::None,
-        &mut giim,
+        &mut handles,
     );
     assert_eq!(m.map.len(), 2);
-    let mut giim = GiimTree::default();
+    let mut handles = LiveHandles::default();
     Handle::look_up_in_iterator(
         &crate::seqid::ParsedSeqId::Giim(crate::seqid::model::GiimportId {
             id: 5,
             db: Some(b"x".to_vec()),
             release: None,
         }),
-        &mut giim,
+        &mut handles,
     );
     let m = map_in(
         &pair("giim { id 5 }", "giim { id 5 }"),
         Mode::None,
-        &mut giim,
+        &mut handles,
     );
     assert_eq!(m.map.len(), 1);
-    giim.end_iterator();
-    giim.end_object();
+    handles.end_iterator();
+    handles.end_object();
     let m = map_in(
         &pair("giim { id 5 }", "giim { id 5 }"),
         Mode::None,
-        &mut giim,
+        &mut handles,
     );
     assert_eq!(m.map.len(), 2);
 }

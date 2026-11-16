@@ -10,7 +10,7 @@ use crate::seqid::model::{ObjectId, ParsedSeqId};
 
 /// The value of the document `text` of the root type `root`, or the error, with the posts.
 fn read(root: u16, text: impl AsRef<[u8]>) -> (Result<Value, ReadError>, Vec<Post>) {
-    read_document(text.as_ref(), root)
+    read_document(text.as_ref(), root, &super::PSIBLAST_STACK)
 }
 
 fn value(root: u16, text: &str) -> Value {
@@ -725,4 +725,73 @@ fn a_value_is_small() {
         "{}",
         std::mem::size_of::<Value>()
     );
+}
+
+/// NCBI's stack (`read::NcbiStack`): the reader refuses a value that would fill it, from the count
+/// of one type nested in itself or from several types' shares together (with the counts of a test,
+/// 3 Bioseq-sets and 4 Seq-loc mixes; NCBI's are thousands, line RG D3-1 fix round 5).
+#[test]
+fn values_nested_as_deep_as_ncbis_stack_holds_are_refused() {
+    static SMALL: super::NcbiStack = super::NcbiStack::of([
+        (named::BIOSEQ_SET, 3),
+        (named::SEQ_LOC_MIX, 4),
+        (named::SEQ_LOC_EQUIV, 4),
+        (named::USER_OBJECT, 9),
+        (named::SEQ_ALIGN, 9),
+        (named::PUB, 9),
+        (named::VARIATION_REF, 9),
+        (named::SEQTABLE_MULTI_DATA, 9),
+        (named::ORGNAME, 9),
+    ]);
+    let read = |root: u16, text: &str| read_document(text.as_bytes(), root, &SMALL).0;
+    let bioseq = "seq { id { local id 1 }, inst { repr raw, mol aa } }";
+    let sets = |n: usize| {
+        let mut entry = bioseq.to_string();
+        for _ in 0..n {
+            entry = format!("set {{ seq-set {{ {entry} }} }}");
+        }
+        format!("Seq-entry ::= {entry}")
+    };
+    assert!(read(named::SEQ_ENTRY, &sets(2)).is_ok());
+    match read(named::SEQ_ENTRY, &sets(3)) {
+        Err(ReadError::Unsupported(what)) => {
+            assert!(
+                what.contains("from 3 Bioseq-set values open at once"),
+                "{what}"
+            )
+        }
+        other => panic!("{other:?}"),
+    }
+    // Two sets side by side are never open at once.
+    let wide = format!(
+        "Seq-entry ::= set {{ seq-set {{ {0}, {0} }} }}",
+        sets(1).trim_start_matches("Seq-entry ::= ")
+    );
+    assert!(read(named::SEQ_ENTRY, &wide).is_ok());
+    let mixes = |n: usize, inner: &str| {
+        let mut loc = inner.to_string();
+        for _ in 0..n {
+            loc = format!("mix {{ {loc} }}");
+        }
+        format!("Seq-loc ::= {loc}")
+    };
+    let int = "int { from 0, to 1, id local id 1 }";
+    assert!(read(named::SEQ_LOC, &mixes(3, int)).is_ok());
+    assert!(matches!(
+        read(named::SEQ_LOC, &mixes(4, int)),
+        Err(ReadError::Unsupported(_))
+    ));
+    // Half of the stack in mixes and half in equivs is the whole of it.
+    let equivs = |n: usize| {
+        let mut loc = int.to_string();
+        for _ in 0..n {
+            loc = format!("equiv {{ {loc} }}");
+        }
+        loc
+    };
+    assert!(read(named::SEQ_LOC, &mixes(2, &equivs(1))).is_ok());
+    assert!(matches!(
+        read(named::SEQ_LOC, &mixes(2, &equivs(2))),
+        Err(ReadError::Unsupported(_))
+    ));
 }

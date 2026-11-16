@@ -309,7 +309,22 @@ impl PssmReader<'static> {
     };
 }
 
+/// The stack of the reader of a PSSM and of the object manager's step over its query entry
+/// (`read_in_pssm`): LOSAT's recursion over the values that NCBI's stack holds
+/// (`asn_types::NcbiStack`, about 3.5 KB of LOSAT's stack for each Bioseq-set level that takes
+/// 1.6 KB of NCBI's) with room to spare. Only the pages the recursion reaches are used.
+const DEEP_STACK: usize = 256 << 20;
+
 impl PssmReader<'_> {
+    /// NCBI's stack as the program's reader of a PSSM fills it.
+    fn ncbi_stack(&self) -> &'static crate::report::serial::asn_types::NcbiStack {
+        if self.program == "TBLASTN" {
+            &crate::report::serial::asn_types::TBLASTN_STACK
+        } else {
+            &crate::report::serial::asn_types::PSIBLAST_STACK
+        }
+    }
+
     /// The refusal of the PSSM search's limits ("... is not supported by LOSAT's PSIBLAST").
     fn refuse(&self, what: impl std::fmt::Display) -> anyhow::Error {
         anyhow::anyhow!("{what} is not supported by LOSAT's {}", self.program)
@@ -420,7 +435,13 @@ pub(crate) fn read_in_pssm(
     // severity; the reader's posts are errors (`ERR_POST_X(7, ...)` of a replaced byte, whose text
     // has three lines, and `ERR_POST(Error << ...)` of `PostRead`; NCBI BLAST+ 2.17.0 tblastn
     // -outfmt 11 of a PSSM whose title has a control byte and whose ratios overflow: `code 2`).
-    let read = crate::blastinput::pssm_text::read_pssm(text);
+    // The reader and the object manager's step recurse as deep as the PSSM's values nest, which
+    // NCBI's reader lets go until its own stack is full (`asn_types::NcbiStack`): both run on a
+    // stack that holds that (`DEEP_STACK`).
+    let ncbi_stack = reader.ncbi_stack();
+    let read = crate::utils::threading::with_stack(DEEP_STACK, || {
+        crate::blastinput::pssm_text::read_pssm(text, ncbi_stack)
+    });
     let program = reader.program.to_ascii_lowercase();
     let mut posts = crate::report::diag_log::Posts::new();
     for post in &read.posts {
@@ -665,11 +686,10 @@ pub(crate) fn psi_search_and_object(
     // (`PsiSearch::write_annot_posts`). What NCBI does not do the same way on every run (memory
     // addresses, crashes, undefined behaviour) is refused here, before any output. With `-db` no
     // other sequence is in NCBI's scope before the query (`PssmReader::database`).
-    let mut annot = super::annot_index::index_entry(
-        &reader.program.to_ascii_lowercase(),
-        entry,
-        reader.database,
-    )
+    let program = reader.program.to_ascii_lowercase();
+    let mut annot = crate::utils::threading::with_stack(DEEP_STACK, || {
+        super::annot_index::index_entry(&program, entry, reader.database)
+    })
     .map_err(|refusal| reader.refuse(refusal.text()))?;
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:539-540 (tblastn_app.cpp:228)
     // ```c++
@@ -796,15 +816,18 @@ pub(crate) fn psi_search_and_object(
             "a PSSM query with a local Seq-id among other Seq-ids (NCBI's reports show it as no FASTA query is shown)",
         ));
     }
-    // A Textseq-id with neither an accession nor a name: NCBI's label of it is empty, and NCBI
-    // BLAST+ 2.17.0 stops on it (`BLAST Database error: Accessions to Oids lookup error in tfp`,
-    // exit 2, `-db`; line RG Q1b's review, S1).
+    // A Textseq-id with neither an accession nor a name: NCBI's label of it is empty, and what NCBI
+    // BLAST+ 2.17.0 does with it depends on the database and the report: `BLAST Database error:
+    // Accessions to Oids lookup error in tfp` (exit 2, `-db tfp`; line RG Q1b's review, S1), the
+    // pairwise report's `Failed to resolve SeqId: gb||` (exit 255, after its prolog), and `Unknown`
+    // for `qseqid` in a tabular report (exit 0; line RG D3-1 review 4c `out_z/`), which LOSAT's
+    // reports do not write.
     if ids.iter().any(|id| {
         id.textseq()
             .is_some_and(|text| text.accession.is_none() && text.name.is_none())
     }) {
         return Err(reader.refuse(
-            "a PSSM query whose Seq-id has neither an accession nor a name (NCBI BLAST+ stops with a database error)",
+            "a PSSM query whose Seq-id has neither an accession nor a name (NCBI's run then depends on the database and the report: a database error, 'Failed to resolve SeqId' or the query 'Unknown')",
         ));
     }
     // A local id that is empty: NCBI's reports show it as no id. (A byte outside the visible range
@@ -1814,13 +1837,15 @@ mod tests {
             error.contains("tse_info.cpp\", line 901: Error: (CObjMgrException::eAddDataError) ncbi::objects::CTSE_Info::x_SetBioseqIds() - duplicate Bioseq id lcl|Query_1 present in\n  seq1: lcl|Query_1 | lcl|Query_1\n  seq2: lcl|Query_1 | lcl|Query_1\n"),
             "{error}"
         );
-        // With `-subject` NCBI's message names the ids as its scope first held them: refused.
-        let refusal = stop("dupid_a19", false).unwrap_err().to_string();
+        // With `-subject` a subject's Seq-id of the handle may have made its info: a local id's
+        // text is its own whatever made it (NCBI BLAST+ 2.17.0 `-subject -parse_deflines` with
+        // `lcl|query_1`, review 4c `out_x/` x01, x02), a GenBank accession's is not (an EMBL
+        // subject's shows, `r5/out_ids5/ncbi/sub.ps.gb_twice_emb`).
+        let (_, error) = stop("dupid_a19", false).unwrap();
         assert!(
-            refusal.contains("a Seq-id twice in a search of -subject records"),
-            "{refusal}"
+            error.contains("duplicate Bioseq id lcl|Query_1 present in"),
+            "{error}"
         );
-        // A run that goes on: the Seq-data and a query Seq-id that may be another's are refused.
         let plain = String::from_utf8(gunzip("pssm/d3om_r4_ncbi8aa_t04.asn.gz")).unwrap();
         let annot = ", annot { { data seq-table { feat-type 1, num-rows 1, columns { { header { field-id partial }, data bit '80'H }, { header { field-id partial }, data bit '80'H } } } } }";
         assert_eq!(plain.matches(annot).count(), 1);
@@ -1829,15 +1854,43 @@ mod tests {
             crate::blastinput::pssm_text::read_pssm_with_parameters(go_on.as_bytes()).unwrap();
         let refusal = psi_search_of(pssm).unwrap_err().to_string();
         assert!(refusal.contains("whose Seq-data is ncbi8aa"), "{refusal}");
-        let two = go_on
-            .replace("seq-data ncbi8aa", "seq-data ncbistdaa")
-            .replace(
-                "local str \"Query_1\"",
-                "genbank { accession \"AAA00001\", version 1 }, genbank { accession \"AAA00001\" }",
-            );
-        let pssm = crate::blastinput::pssm_text::read_pssm_with_parameters(two.as_bytes()).unwrap();
-        let refusal = psi_search_of(pssm).unwrap_err().to_string();
-        assert!(refusal.contains("may take as one Bioseq id"), "{refusal}");
+        // Two Seq-ids of one handle (GenBank and EMBL share an accession alone): NCBI's exception
+        // with the spelling of the handle's first Seq-id (`r5/out_ids5/ncbi/ps.one_emb_gb`).
+        let two = |ids: &str, database: bool| {
+            let text = go_on
+                .replace("seq-data ncbi8aa", "seq-data ncbistdaa")
+                .replace("local str \"Query_1\"", ids);
+            let pssm =
+                crate::blastinput::pssm_text::read_pssm_with_parameters(text.as_bytes()).unwrap();
+            let reader = PssmReader {
+                database,
+                ..PssmReader::PSIBLAST
+            };
+            psi_search_and_object(pssm, reader).map(|(search, _)| {
+                search
+                    .annot
+                    .abort
+                    .as_ref()
+                    .map_or_else(String::new, |abort| abort.message.clone())
+            })
+        };
+        let ids = "embl { accession \"AAA00001\", version 1 }, genbank { accession \"AAA00001\", version 1 }";
+        let error = two(ids, true).unwrap();
+        assert!(
+            error.contains("duplicate Bioseq id emb|AAA00001.1| present in\n  seq1: emb|AAA00001.1| | emb|AAA00001.1|\n  seq2: emb|AAA00001.1| | emb|AAA00001.1|\n"),
+            "{error}"
+        );
+        let refusal = two(ids, false).unwrap_err().to_string();
+        assert!(
+            refusal.contains("may write as a subject record spelled it"),
+            "{refusal}"
+        );
+        // Two versions are two handles: no exception.
+        let error = two(
+            "genbank { accession \"AAA00001\", version 1 }, genbank { accession \"AAA00001\" }",
+            true,
+        );
+        assert!(!error.unwrap_or_default().contains("duplicate Bioseq id"));
     }
 
     #[test]

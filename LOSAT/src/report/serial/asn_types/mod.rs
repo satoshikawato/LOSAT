@@ -45,7 +45,7 @@ pub(crate) mod table;
 #[cfg(test)]
 mod read_tests;
 
-pub(crate) use read::{read_document, Post, ReadError};
+pub(crate) use read::{read_document, NcbiStack, Post, ReadError, PSIBLAST_STACK, TBLASTN_STACK};
 
 /// `Member::flags`: an OPTIONAL member (`->SetOptional()`).
 pub(crate) const OPTIONAL: u8 = 1;

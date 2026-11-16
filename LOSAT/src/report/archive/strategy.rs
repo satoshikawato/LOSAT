@@ -104,10 +104,15 @@ impl<W: Write + ?Sized> Write for Counted<'_, W> {
     }
 }
 
-/// The stream of a strategy file: a writer whose written bytes can be cut back (`truncate`).
+/// The stream of a strategy file: a writer whose written bytes can be cut back (`truncate`) where
+/// it is a regular file (`can_cut`).
 pub trait StrategySink: Write + Send {
     /// Cuts the file back to its first `len` bytes, after the bytes buffered are written.
     fn truncate(&mut self, len: u64) -> std::io::Result<()>;
+
+    /// Whether `truncate` can cut it: a regular file (not a FIFO, a pipe, a terminal or another
+    /// device, whose bytes are gone once written).
+    fn can_cut(&self) -> bool;
 }
 
 impl StrategySink for std::io::BufWriter<std::fs::File> {
@@ -115,10 +120,21 @@ impl StrategySink for std::io::BufWriter<std::fs::File> {
         self.flush()?;
         self.get_ref().set_len(len)
     }
+
+    fn can_cut(&self) -> bool {
+        self.get_ref()
+            .metadata()
+            .is_ok_and(|metadata| metadata.file_type().is_file())
+    }
 }
 
 struct State {
     sink: Box<dyn StrategySink>,
+    /// The requests made for a sink that cannot be cut (`StrategySink::can_cut`), by the run's
+    /// first query of each one's batch, in order, until the run reaches their batches' starts
+    /// (`release_through`) or ends (`end_run`): such a sink gets only the requests NCBI writes.
+    /// `None` for a regular file, which gets each request where it is made and is cut back.
+    held: Option<std::collections::VecDeque<(usize, Vec<u8>)>>,
     /// The bytes written to `sink`.
     written: u64,
     /// The end in the file of the last request whose batch's start the run reached
@@ -304,6 +320,7 @@ impl StrategyExport {
             request: ArchiveRequest::for_inputs(inputs, database),
             options,
             state: Mutex::new(State {
+                held: (!sink.can_cut()).then(std::collections::VecDeque::new),
                 sink,
                 written: 0,
                 reached: 0,
@@ -391,7 +408,8 @@ impl StrategyExport {
     /// that `take_posts` hands out with them (`Posts::write`, `release_through`); `end_run` cuts the
     /// file back to the requests reached when NCBI's error ends the run. (Holding the requests'
     /// bytes until then instead would keep every request of a BLASTN XML run in memory: 2.6 MB on a
-    /// run of 82 MB, review 1 of K4h gap 2.)
+    /// run of 82 MB, review 1 of K4h gap 2; so only a sink that cannot be cut holds them,
+    /// `State::held`.)
     /// Returns false, calling nothing, when the request is not to be written (`takes`). The
     /// requests are made in the run's order, each starting where the one before ended, after
     /// the batch before was noted; anything else is LOSAT's internal error.
@@ -415,8 +433,13 @@ impl StrategyExport {
             let mut made_one = false;
             let made = make(&mut |request| {
                 let sets = shared.options.request_sets(&state.carry);
+                // A sink that cannot be cut gets the request where the run reaches its batch.
+                let mut held = Vec::new();
                 let mut counted = Counted {
-                    inner: &mut *state.sink,
+                    inner: match state.held {
+                        Some(_) => &mut held as &mut dyn Write,
+                        None => &mut *state.sink as &mut dyn Write,
+                    },
                     written: 0,
                 };
                 let written = write_strategy_request(
@@ -430,8 +453,16 @@ impl StrategyExport {
                         Ok(())
                     },
                 );
-                state.written += counted.written;
-                let flushed = state.sink.flush();
+                let flushed = match state.held.as_mut() {
+                    Some(requests) => {
+                        requests.push_back((queries.start, held));
+                        Ok(())
+                    }
+                    None => {
+                        state.written += counted.written;
+                        state.sink.flush()
+                    }
+                };
                 state.unreached.push_back((queries.start, state.written));
                 state.next_query = queries.end;
                 made_one = true;
@@ -449,7 +480,8 @@ impl StrategyExport {
 
     /// The run reaches the start of the batch whose first query (the run's) is `first`
     /// (`Posts::write` of its request mark), after the reports of the batches before it: the
-    /// requests of the batches through it are NCBI's whatever ends the run (`end_run`).
+    /// requests of the batches through it are NCBI's whatever ends the run (`end_run`); a sink
+    /// that cannot be cut gets them here.
     pub(crate) fn release_through(&self, first: usize) -> std::io::Result<()> {
         self.with_state(|state| {
             while let Some(&(at, end)) = state.unreached.front() {
@@ -459,7 +491,7 @@ impl StrategyExport {
                 state.reached = end;
                 state.unreached.pop_front();
             }
-            Ok(())
+            state.write_held(|at| at <= first)
         })
     }
 
@@ -580,8 +612,10 @@ impl StrategyExport {
 /// whose batch's start the run writes before the error), so the file is cut back to the requests
 /// reached; a run that ends with `Ok` keeps them all, as NCBI writes every request (and so does a
 /// refusal of LOSAT's, whose file is not NCBI's). A strategy file that cannot be cut (a FIFO, a
-/// terminal: `set_len` fails) keeps what LOSAT wrote, the requests of the batches LOSAT searched
-/// before the end; the run's own error stands. A run that ends as NCBI's (`Ok` or NCBI's error)
+/// pipe, a terminal: `StrategySink::can_cut`) has got only the requests reached
+/// (`StrategyExport::release_through`): the others are dropped at NCBI's error, written at any
+/// other end. A regular file that fails to be cut is LOSAT's error, not a file with requests that
+/// NCBI does not write. A run that ends as NCBI's (`Ok` or NCBI's error)
 /// has written every post of its requests at its batch's start (`StrategyExport::take_posts`), so
 /// a post still waiting is LOSAT's internal error instead of output that silently lacks it.
 /// LOSAT's refusals (any other error) keep their own text. Each program calls this once, where
@@ -592,15 +626,28 @@ pub fn end_run(strategy: Option<&StrategyExport>, result: Result<()>) -> Result<
         return result;
     };
     let native = matches!(&result, Err(error) if error.is::<crate::cli::NativeError>());
-    if native {
-        strategy.with_state(|state| {
-            if state.written > state.reached {
-                // A sink that cannot be cut keeps its bytes (see above).
-                let _ = state.sink.truncate(state.reached);
-                state.written = state.reached;
-            }
-            state.unreached.clear();
-        });
+    let ended = strategy.with_state(|state| -> std::io::Result<()> {
+        state.unreached.clear();
+        if !native {
+            return state.write_held(|_| true);
+        }
+        if let Some(held) = state.held.as_mut() {
+            held.clear();
+        }
+        if state.written > state.reached {
+            state.sink.truncate(state.reached)?;
+            state.written = state.reached;
+        }
+        Ok(())
+    });
+    if let Err(error) = ended {
+        // A refusal of LOSAT's keeps its own text.
+        if result.is_err() && !native {
+            return result;
+        }
+        return Err(anyhow::anyhow!(
+            "LOSAT could not end the -export_search_strategy file with the requests NCBI BLAST+ writes ({error})"
+        ));
     }
     if result.is_err() && !native {
         return result;
@@ -657,6 +704,29 @@ fn replaced_posts(
 }
 
 impl State {
+    // No NCBI counterpart: NCBI writes each request to its file before the batch's search
+    // (blastp_app.cpp:259-262, quoted at `StrategyExport::write_with`); LOSAT, which may search
+    // later batches before an earlier batch's report ends the run, holds them for a sink it
+    // cannot cut back.
+    /// Writes to a sink that cannot be cut its held requests whose batches' first queries pass
+    /// `through` (`State::held`), in order, then flushes it.
+    fn write_held(&mut self, through: impl Fn(usize) -> bool) -> std::io::Result<()> {
+        let Some(held) = self.held.as_mut() else {
+            return Ok(());
+        };
+        let mut wrote = false;
+        while held.front().is_some_and(|(at, _)| through(*at)) {
+            if let Some((_, bytes)) = held.pop_front() {
+                self.sink.write_all(&bytes)?;
+                wrote = true;
+            }
+        }
+        if wrote {
+            self.sink.flush()?;
+        }
+        Ok(())
+    }
+
     /// `StrategyExport::takes`.
     fn takes(&self, queries: &Range<usize>) -> bool {
         queries.end > self.next_query && queries.start < self.stop
@@ -690,6 +760,10 @@ mod tests {
         fn truncate(&mut self, len: u64) -> std::io::Result<()> {
             self.0.lock().unwrap().truncate(len as usize);
             Ok(())
+        }
+
+        fn can_cut(&self) -> bool {
+            true
         }
     }
 
@@ -990,6 +1064,85 @@ mod tests {
             let _ = end_run(Some(&strategy), result);
             assert_eq!(sink.text(), all);
         }
+    }
+
+    /// A sink that cannot be cut (a FIFO, a pipe; `can_cut` false) or a file whose cut fails.
+    struct Uncut(Sink, bool);
+
+    impl Write for Uncut {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.write(bytes)
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl StrategySink for Uncut {
+        fn truncate(&mut self, _len: u64) -> std::io::Result<()> {
+            Err(std::io::Error::other("Invalid argument"))
+        }
+
+        fn can_cut(&self) -> bool {
+            self.1
+        }
+    }
+
+    /// A sink that cannot be cut (review 2 of K4h, M1: `-export_search_strategy` to a FIFO or
+    /// `>(gzip > f)`, NCBI 2.17.0 2 requests of 3) gets each request where the run reaches its
+    /// batch's start: at NCBI's error it has those, at any other end every one. A regular file whose
+    /// cut fails is LOSAT's error.
+    #[test]
+    fn a_sink_that_cannot_be_cut_gets_only_the_requests_reached() {
+        let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
+        let native = || -> Result<()> {
+            Err(crate::cli::NativeError {
+                exit: 255,
+                message: "Error: x\n".to_string(),
+            }
+            .into())
+        };
+        let uncut = |cut: bool| {
+            let sink = Sink::default();
+            let export = StrategyExport::new(
+                Box::new(Uncut(sink.clone(), cut)),
+                &OptionInputs::new(Program::Blastp, "blastp"),
+                Some("in/db/bp"),
+                OptionsHandle::default(),
+            );
+            for at in 0..3 {
+                export
+                    .write_request(at..at + 1, &request(&queries, &[]))
+                    .unwrap();
+                export.note_searched(at..at + 1, Some(5)).unwrap();
+            }
+            (export, sink)
+        };
+        let (strategy, sink) = uncut(false);
+        assert_eq!(sink.text(), "");
+        let marks = strategy.take_posts(usize::MAX);
+        marks[0].1.write(&mut std::io::sink(), None).unwrap();
+        assert_eq!(sink.text(), FIRST);
+        marks[1].1.write(&mut std::io::sink(), None).unwrap();
+        let error = end_run(Some(&strategy), native()).unwrap_err();
+        assert!(error.is::<crate::cli::NativeError>());
+        assert_eq!(sink.text(), [FIRST.to_string(), with_space(5)].concat());
+        let all = [FIRST.to_string(), with_space(5), with_space(5)].concat();
+        for result in [Ok(()), Err(anyhow::anyhow!("not supported"))] {
+            let (strategy, sink) = uncut(false);
+            let _ = end_run(Some(&strategy), result);
+            assert_eq!(sink.text(), all);
+        }
+        // A regular file that fails to be cut back.
+        let (strategy, sink) = uncut(true);
+        let error = end_run(Some(&strategy), native()).unwrap_err();
+        assert!(!error.is::<crate::cli::NativeError>());
+        assert!(
+            error.to_string().starts_with("LOSAT could not end"),
+            "{error}"
+        );
+        assert_eq!(sink.text(), all);
     }
 
     /// The request of a PSSM query (`RequestQueries::Pssm`) as NCBI BLAST+ 2.17.0 writes it: the

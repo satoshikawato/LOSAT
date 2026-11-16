@@ -338,6 +338,10 @@ mod tests {
             self.0.lock().unwrap().truncate(len as usize);
             Ok(())
         }
+
+        fn can_cut(&self) -> bool {
+            true
+        }
     }
 
     fn export() -> (StrategyExport, Sink) {

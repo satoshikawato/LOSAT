@@ -863,12 +863,18 @@ fn x_suffix_table2(
                     pairs.sort_by(|x, y| y.0.cmp(&x.0));
                     let base = (a * BLASTAA_SIZE + b) * X_SUFFIX2_ROW;
                     for (k, &(sum, code)) in pairs.iter().enumerate() {
-                        // A sum outside i16 makes the table unusable (the arm falls back).
-                        sums[base + k] = i16::try_from(sum).ok()?;
+                        // Saturated into (i16::MIN, i16::MAX]: only the pairs of letters outside
+                        // the compressed alphabet (whose words `for_each_word` skips, so no node
+                        // reads them) have sums outside it.
+                        sums[base + k] =
+                            sum.clamp(i32::from(i16::MIN) + 1, i32::from(i16::MAX)) as i16;
                         codes[base + k] = code;
                     }
                 }
             }
+            eprintln!(
+                "[BPF_ENUM2] pair table built (alphabet {alphabet}, word length {word_length})"
+            );
             Some(XSuffixTable2 {
                 alphabet,
                 word_length,

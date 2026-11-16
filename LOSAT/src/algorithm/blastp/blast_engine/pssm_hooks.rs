@@ -527,7 +527,7 @@ pub(super) fn pssm_prelim(
             return;
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443 and
-        // c++/src/algo/blast/core/blast_setup.c:1010-1024 (quoted at `run_call`'s
+        // c++/src/algo/blast/core/blast_setup.c:1015-1025 (quoted at `call_setup`'s
         // `subject_parameters`): the statistics of each subject, with the subject's length in the
         // hit-saving cutoff (no stretch of the e-value; with psiblast's `-sum_stats true` lowered
         // at the subject's length) and in the effective lengths, which the linking reads with the

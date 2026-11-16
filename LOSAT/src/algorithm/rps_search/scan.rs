@@ -273,7 +273,7 @@ impl RpsBuckets {
                 continue;
             }
             let s_bits = self.entry_bits(s as u32);
-            self.add_cell_hits(table, cell, from, s_bits);
+            self.add_cell_hits(table, cell, from, s_bits, self.g0);
         }
         cursor
     }
@@ -288,37 +288,76 @@ impl RpsBuckets {
         &mut self,
         table: &RpsTable<'_>,
         cell: &[i32; 4],
-        mut taken: u32,
+        taken: u32,
         s_bits: u32,
+        g0: usize,
     ) -> (u32, u32) {
         let numhits = cell[0] as usize;
+        let buckets = self.heads.len();
         if cell[0] <= RPS_HITS_PER_CELL {
-            for &entry in &cell[1 + taken as usize..=numhits] {
-                let q_off = entry_q_off(entry);
-                if !self.add(q_off, s_bits) {
-                    return (taken, q_off);
-                }
-                taken += 1;
-            }
-        } else {
-            if taken == 0 {
-                // The first hit is in the cell, the others in the overflow array.
-                let q_off = entry_q_off(cell[1]);
-                if !self.add(q_off, s_bits) {
-                    return (0, q_off);
-                }
-                taken = 1;
-            }
-            let start = cell[2] as usize / std::mem::size_of::<i32>();
-            for &entry in &table.overflow[start + taken as usize - 1..start + numhits - 1] {
-                let q_off = entry_q_off(entry);
-                if !self.add(q_off, s_bits) {
-                    return (taken, q_off);
-                }
-                taken += 1;
-            }
+            return self.add_list(
+                &cell[1 + taken as usize..=numhits],
+                taken,
+                s_bits,
+                g0,
+                buckets,
+            );
         }
-        (taken, u32::MAX)
+        let mut taken = taken;
+        if taken == 0 {
+            // The first hit is in the cell, the others in the overflow array.
+            let (taken_now, past) = self.add_list(&cell[1..2], 0, s_bits, g0, buckets);
+            if past != u32::MAX {
+                return (taken_now, past);
+            }
+            taken = 1;
+        }
+        let start = cell[2] as usize / std::mem::size_of::<i32>();
+        let run = &table.overflow[start + taken as usize - 1..start + numhits - 1];
+        self.add_list(run, taken, s_bits, g0, buckets)
+    }
+
+    /// `s_AddToRPSBucket`: the hit of the concatenated position `q_off` whose query offset gives
+    /// `s_bits` (`entry_bits`) at the end of the bucket of its row.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:422-436
+    /// ```c
+    /// static void s_AddToRPSBucket(RPSBucket * b, Uint4 q_off, Uint4 s_off)
+    /// {
+    ///     ...
+    ///     offset_pairs[i].qs_offsets.q_off = q_off;
+    ///     offset_pairs[i].qs_offsets.s_off = s_off;
+    ///     b->num_filled++;
+    /// }
+    /// ```
+    ///
+    /// The hits of `list` (entries of a cell, `taken` of the cell's entries before it) into the
+    /// buckets of the group (`g0` its first bucket, `buckets` their number: the one range test of
+    /// a hit, where the dev loop has its bounds check): the number of the cell's entries made and
+    /// the position of the first entry past the group (`u32::MAX` when there is none).
+    #[inline(always)]
+    fn add_list(
+        &mut self,
+        list: &[i32],
+        taken: u32,
+        s_bits: u32,
+        g0: usize,
+        buckets: usize,
+    ) -> (u32, u32) {
+        for (made, &entry) in list.iter().enumerate() {
+            let q_off = entry_q_off(entry);
+            let bucket = q_off_bucket(q_off).wrapping_sub(g0);
+            if bucket >= buckets {
+                return (taken + made as u32, self.past_the_group(q_off));
+            }
+            if self.heads[bucket].fill as usize >= BLOCK_ENTRIES {
+                self.close(bucket);
+            }
+            let head = &mut self.heads[bucket];
+            head.block[head.fill as usize] = s_bits | (q_off & BUCKET_MASK);
+            head.fill += 1;
+        }
+        (taken + list.len() as u32, u32::MAX)
     }
 
     /// The buckets of `group` emptied, the reading cursor at the first of them.
@@ -366,45 +405,26 @@ impl RpsBuckets {
         self.segment = segment;
     }
 
-    /// `s_AddToRPSBucket`: the hit of the concatenated position `q_off` whose query offset gives
-    /// `s_bits` (`entry_bits`) at the end of the bucket of its row.
-    ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:422-436
-    /// ```c
-    /// static void s_AddToRPSBucket(RPSBucket * b, Uint4 q_off, Uint4 s_off)
-    /// {
-    ///     ...
-    ///     offset_pairs[i].qs_offsets.q_off = q_off;
-    ///     offset_pairs[i].qs_offsets.s_off = s_off;
-    ///     b->num_filled++;
-    /// }
-    /// ```
-    #[inline(always)]
-    fn add(&mut self, q_off: u32, s_bits: u32) -> bool {
-        let bucket = q_off_bucket(q_off).wrapping_sub(self.g0);
-        if bucket >= self.heads.len() {
-            return self.past_the_group(q_off);
-        }
-        if self.heads[bucket].fill as usize >= BLOCK_ENTRIES {
-            self.close(bucket);
-        }
-        let head = &mut self.heads[bucket];
-        head.block[head.fill as usize] = s_bits | (q_off & BUCKET_MASK);
-        head.fill += 1;
-        true
+    /// One hit into the buckets (`add_list`'s body), for the tests.
+    #[cfg(test)]
+    fn add(&mut self, q_off: u32, s_bits: u32) {
+        let entry = q_off as i32 + (RPS_WORDSIZE as i32 - 1);
+        let (g0, buckets) = (self.g0, self.heads.len());
+        let (_, past) = self.add_list(&[entry], 0, s_bits, g0, buckets);
+        assert_eq!(past, u32::MAX, "a hit past the group");
     }
 
-    /// `add` found `q_off` outside the buckets of the group (the one range test of a hit, where
-    /// the dev loop has its bounds check): `false` when it lies past the group, the end of the
+    /// `add_list` found `q_off` outside the buckets of the group (the one range test of a hit, where
+    /// the dev loop has its bounds check): `q_off` itself when it lies past the group, the end of the
     /// entries of its cell that belong to the group (the cells are in groups in order). A position
     /// before the group means the table's cells are not: only a table that `seqdb::rps` did not
     /// regroup when the volume was opened reaches it, so the volume's files were not opened as the
     /// search needs.
     #[cold]
     #[inline(never)]
-    fn past_the_group(&self, q_off: u32) -> bool {
+    fn past_the_group(&self, q_off: u32) -> u32 {
         if q_off >= self.g1_q {
-            return false;
+            return q_off;
         }
         panic!(
             "RPS scan: a hit at position {q_off} lies before the buckets {}..{} of its group; \
@@ -719,7 +739,7 @@ pub(crate) fn scan_subject(
             let numhits = cell[0];
             if numhits <= max_hits - totalhits {
                 let s_bits = buckets.entry_bits(s as u32);
-                let (_, next_q) = buckets.add_cell_hits(table, cell, 0, s_bits);
+                let (_, next_q) = buckets.add_cell_hits(table, cell, 0, s_bits, 0);
                 buckets.beyond |= next_q != u32::MAX;
                 totalhits += numhits;
             } else {

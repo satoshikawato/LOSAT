@@ -1,7 +1,7 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.21
+- Version: 1.22
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -37,7 +37,9 @@
   NCBI's XML without the arguments that LOSAT refuses by name, exception 1; line RG item E2x,
   the Owner's choice of 2026-11-13, RG DECISIONS E2x-1); 1.21 2026-11-14 (the library API runs
   `-logfile`, `-conffile` and `-dryrun` as the command line does; line RG item E1w-2, RG DECISIONS
-  E1w2-1 to E1w2-11, Owner-delegated, the same standing instruction)
+  E1w2-1 to E1w2-11, Owner-delegated, the same standing instruction); 1.22 2026-11-17 (exception 3
+  narrowed to a closed pipe: a failed write of outfmt 6, 7 or 10 aborts as NCBI's; line RG item
+  T6a, RG DECISIONS T6-1 and T6-2, Owner-delegated, the same standing instruction)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -82,6 +84,13 @@ BLAST+.
    exits with a non-zero code. For outfmt 0 LOSAT must follow NCBI
    (`BLAST failed to write output: <msg>`, exit code 6 `BLAST_OUTPUT_ERROR`,
    `blast_app_util.hpp:242-254`); this is ported program by program (BLASTN in S07+++b).
+   Version 1.22: withdrawn but for a closed pipe. Every program's report stream fails where
+   NCBI's does (`report::ostream::ReportStream`, line RG item T6a): a failed write of outfmt 6,
+   7 or 10 aborts with libstdc++'s `terminate called after throwing an instance of
+   'std::__ios_failure'` text, as NCBI's (the destructor of `CBlastTabularInfo` flushes the failed
+   stream, `tabular.cpp:160-163`). A closed pipe, where NCBI is ended by SIGPIPE in every
+   format (exception 5), is reported as before (the write's error and exit code 1; BLASTX and
+   RPSTBLASTN abort as above) until the Owner decides line RG's question T6-Q1.
 4. **Memory exhaustion.** LOSAT aborts when an allocation fails. NCBI catches the
    allocation failure and prints `BLAST ran out of memory`, exit code 4
    (`BLAST_OUT_OF_MEMORY`, `blast_app_util.hpp:216-235,255-258`).

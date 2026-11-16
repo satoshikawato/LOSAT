@@ -504,29 +504,81 @@ struct Core {
     failure: Option<Failure>,
     /// Whether the stream is `cout` (tied to `cerr`).
     standard_output: bool,
+    /// Whether the format is 0-4 or 18 (`ClosedPipe::reported`).
+    pipe_reported: bool,
     /// The application's name in NCBI's posts.
     program: &'static str,
+    /// A write to a closed pipe failed (`ClosedPipe`).
+    pipe: Option<ClosedPipe>,
+}
+
+// NCBI reference (598d8ae6): c++/src/connect/ncbi_socket.c:866-873 (NCBI keeps the default action
+// of SIGPIPE unless SOCK starts, which only the usage report does, after the run)
+// ```c
+// #ifdef NCBI_OS_UNIX
+//         if (s_SigPipeIgnored == eOff) {
+//             ...
+//                 signal(SIGPIPE, SIG_IGN);
+// ```
+/// A write of the report to a pipe whose reader closed it, where NCBI is ended by SIGPIPE (exit
+/// status 141, no text, every format) and LOSAT cannot be (the Rust runtime ignores SIGPIPE;
+/// approved exceptions 3 and 5 of `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`). Until the Owner's answer
+/// to line RG's question T6-Q1 the run ends as before this stream (item T6c): the formats 0-4 and
+/// 18 with "BLAST failed to write output" (exit 6), every other format with the error of the
+/// write (`Broken pipe`, exit 1), BLASTX's and RPSTBLASTN's with their own (outfmt 6, 7, 10 and 20
+/// `std::terminate`'s text and an abort, every other format "BLAST failed to write output").
+#[derive(Clone, Copy, Debug)]
+struct ClosedPipe {
+    /// Whether the format is 0-4 or 18.
+    reported: bool,
+    /// The error of the failed write (`EPIPE`).
+    raw: Option<i32>,
+}
+
+impl ClosedPipe {
+    fn error(self) -> std::io::Error {
+        self.raw.map_or_else(
+            || std::io::ErrorKind::BrokenPipe.into(),
+            std::io::Error::from_raw_os_error,
+        )
+    }
 }
 
 impl Core {
     /// One insertion (`NcbiBuffer::sputn`): what NCBI's buffer writes of the bytes held and
-    /// `buf` is written, the first of them, and it holds the rest.
+    /// `buf` is written, the first of them, and it holds the rest (at most a buffer's bytes: the
+    /// insertion is not copied before it is written).
     fn insert(&mut self, buf: &[u8]) -> std::io::Result<()> {
         if self.bad {
             return self.after_failure();
         }
-        self.held.extend_from_slice(buf);
-        let written = match &mut self.buffer {
+        let kept = match &mut self.buffer {
             Some(buffer) => {
-                buffer.sputn(buf.len(), &self.held);
-                self.held.len() - buffer.held()
+                buffer.sputn(buf.len(), buf);
+                buffer.held()
             }
-            None => self.held.len(),
+            None => 0,
         };
-        if written > 0 {
-            self.write_device(written, false)?;
+        let written = self.held.len() + buf.len() - kept;
+        if written == 0 {
+            self.held.extend_from_slice(buf);
+            return Ok(());
         }
-        Ok(())
+        // NCBI's buffer writes all that it held, then the insertion's first bytes.
+        let from_buf = written - self.held.len();
+        let device = &mut self.device;
+        let result = device
+            .write_all(&self.held)
+            .and_then(|()| device.write_all(&buf[..from_buf]))
+            .and_then(|()| device.flush());
+        self.held.clear();
+        match result {
+            Ok(()) => {
+                self.held.extend_from_slice(&buf[from_buf..]);
+                Ok(())
+            }
+            Err(error) => self.failed_write(error, false),
+        }
     }
 
     /// A flush of NCBI's (`flush`, `endl`, `cerr`'s tie): the buffer writes what it holds.
@@ -538,26 +590,30 @@ impl Core {
             buffer.flush();
         }
         if !self.held.is_empty() {
-            self.write_device(self.held.len(), true)?;
+            let device = &mut self.device;
+            let result = device.write_all(&self.held).and_then(|()| device.flush());
+            self.held.clear();
+            if let Err(error) = result {
+                return self.failed_write(error, true);
+            }
         }
         Ok(())
     }
 
-    /// Writes the first `n` bytes held to the device, for an insertion or for a flush
-    /// (`flushing`).
-    fn write_device(&mut self, n: usize, flushing: bool) -> std::io::Result<()> {
-        let written = self
-            .device
-            .write_all(&self.held[..n])
-            .and_then(|()| self.device.flush());
-        match written {
-            Ok(()) => {
-                self.held.drain(..n);
-                Ok(())
-            }
-            Err(_) => {
+    /// A write of the device that failed with `error`, for an insertion or for a flush
+    /// (`flushing`): the stream is bad, and NCBI's end is the region's (`Site`).
+    fn failed_write(&mut self, error: std::io::Error, flushing: bool) -> std::io::Result<()> {
+        match error {
+            error if error.kind() == std::io::ErrorKind::BrokenPipe => {
                 self.bad = true;
-                self.held.clear();
+                self.pipe = Some(ClosedPipe {
+                    reported: self.pipe_reported,
+                    raw: error.raw_os_error(),
+                });
+                Err(error)
+            }
+            _ => {
+                self.bad = true;
                 if !self.throws {
                     return Ok(());
                 }
@@ -590,7 +646,9 @@ impl Core {
 
     /// An insertion or flush of a bad stream: it throws while the formatter lives.
     fn after_failure(&self) -> std::io::Result<()> {
-        if self.throws {
+        if let Some(pipe) = self.pipe {
+            Err(pipe.error())
+        } else if self.throws {
             Err(write_failure())
         } else {
             Ok(())
@@ -602,6 +660,9 @@ impl Core {
     /// (`std::terminate`); the text is not written.
     fn tie(&mut self) -> std::io::Result<()> {
         let tied = self.flush();
+        if self.pipe.is_some() {
+            return tied;
+        }
         if tied.is_err() || (self.bad && self.throws) {
             self.failure = Some(Failure::Terminate);
             return Err(write_failure());
@@ -620,6 +681,25 @@ impl Core {
         }
         self.throws = false;
         let _ = self.flush();
+        if let Some(pipe) = self.pipe {
+            let blastx = matches!(self.program, "blastx" | "rpstblastn");
+            let failed = |exit: i32, message: &str| {
+                Err(crate::cli::NativeError {
+                    exit,
+                    message: message.to_string(),
+                }
+                .into())
+            };
+            return match (pipe.reported, result) {
+                (true, _) => failed(6, "BLAST failed to write output\n"),
+                (false, Err(error)) => Err(error),
+                (false, Ok(())) if blastx && self.site == Site::Tabular => {
+                    failed(-6, TERMINATE_TEXT)
+                }
+                (false, Ok(())) if blastx => failed(6, "BLAST failed to write output\n"),
+                (false, Ok(())) => Err(pipe.error().into()),
+            };
+        }
         match self.failure.take() {
             None => result,
             Some(Failure::Thrown { posts }) => Err(crate::cli::NativeError {
@@ -674,6 +754,8 @@ impl ReportStream {
             failure: None,
             standard_output,
             program,
+            pipe_reported: false,
+            pipe: None,
         })))
     }
 
@@ -683,12 +765,18 @@ impl ReportStream {
     /// with them) or, with `None`, standard output (glibc's buffer, `NcbiStdio::cout`, tied to
     /// standard error).
     pub fn of_cli(out_file: Option<std::fs::File>, program: &'static str, outfmt: &str) -> Self {
-        let site = crate::blastinput::app::parse_formatting_string(outfmt)
-            .map_or(Site::Report, |choice| Site::of_format(choice.number));
-        match out_file {
-            Some(file) => Self::file(Box::new(file), program, site),
-            None => Self::standard_output(Box::new(std::io::stdout()), program, site),
-        }
+        let number = crate::blastinput::app::parse_formatting_string(outfmt)
+            .map_or(0, |choice| choice.number);
+        let stream = match out_file {
+            Some(file) => Self::file(Box::new(file), program, Site::of_format(number)),
+            None => Self::standard_output(
+                Box::new(std::io::stdout()),
+                program,
+                Site::of_format(number),
+            ),
+        };
+        lock(&stream.0).pipe_reported = matches!(number, 0..=4 | 18);
+        stream
     }
 
     /// The `-out` file `inner`, its report starting in `site`.
@@ -1154,7 +1242,9 @@ mod tests {
         buffer.flush().unwrap();
         assert_eq!(offered.load(std::sync::atomic::Ordering::Relaxed), 0);
         assert!(buffer.write_all(b"x").is_err());
-        assert_eq!(offered.load(std::sync::atomic::Ordering::Relaxed), 8191);
+        // The bytes held are offered first (then the insertion's, which a full device does not
+        // reach): the write comes at the 8191st byte.
+        assert_eq!(offered.load(std::sync::atomic::Ordering::Relaxed), 8190);
         // What a buffer holds at the end is written, a failure unreported.
         let quiet = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let mut buffer = ReportStream::file(Box::new(Full(quiet.clone())), "blastn", Site::Report);

@@ -507,10 +507,11 @@ fn run_inner(
     };
     // The run's standard error goes through the held output (`HeldOutput::stderr`): a held
     // document gets the texts written in the meantime where NCBI writes them. The structured
-    // formats write no BLAST archive, so the run's standard error is the process's.
+    // formats write no BLAST archive, so the run's standard error is the process's, tied to the
+    // report on standard output (`cli::CliStderr`).
     if let Some(held) = &held {
         debug_assert!(archive.is_none());
-        stderr = Box::new(held.stderr(Box::new(io::stderr())));
+        stderr = Box::new(held.stderr(Box::new(crate::cli::CliStderr::process())));
     }
     // The run keeps its output in the caller's slot: an error of NCBI's own is followed by the
     // error archive in the same output (`run`).

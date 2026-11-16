@@ -55,6 +55,7 @@ pub(crate) struct DisplayAlignment {
     pub qseq: String,
     pub sseq: String,
     pub masked_qseq: String,
+    /// The identities and positives of the rows (0 where `alignment` was asked for no counts).
     pub identity: usize,
     pub positive: usize,
     pub gaps: usize,
@@ -393,7 +394,7 @@ pub(crate) fn alignment(
     subject: &FastaRecord,
     query_record: &FastaRecord,
     code: &crate::utils::genetic_code::GeneticCode,
-    matrix: crate::config::ScoringMatrix,
+    counts: Option<crate::config::ScoringMatrix>,
 ) -> Result<DisplayAlignment> {
     let raw = &hsp.hsp;
     let context = &batch.prepared.contexts[raw.context];
@@ -652,14 +653,19 @@ pub(crate) fn alignment(
     //     retval('U', 'C') = retval('C', 'C');
     //     retval('C', 'U') = retval('C', 'C');
     // ```
+    // The tabular rows count the identities and positives of the rows themselves
+    // (`report::tabular::TabularWriter::row`, tabular.cpp:987-1004): without `counts` they are not
+    // counted here (0), which only outfmt 0 and LOSAT Web's hits read.
     let mut identity = 0;
     let mut positive = 0;
-    for (&qc, &sc) in qseq.iter().zip(&sseq) {
-        if qc == sc {
-            identity += 1;
-            positive += 1;
-        } else if qc != b'-' && sc != b'-' && protein_display_score(matrix, qc, sc) > 0 {
-            positive += 1;
+    if let Some(matrix) = counts {
+        for (&qc, &sc) in qseq.iter().zip(&sseq) {
+            if qc == sc {
+                identity += 1;
+                positive += 1;
+            } else if qc != b'-' && sc != b'-' && protein_display_score(matrix, qc, sc) > 0 {
+                positive += 1;
+            }
         }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1520-1534
@@ -1251,32 +1257,33 @@ fn write_pairwise(
     //     } catch (const CException&){
     //         sdl->defline = "Unknown";
     // ```
-    // The description-table labels, as every program's (`database_description_label`): a
-    // `-subject` record's is the title `GenerateDefline` makes of its title's bytes (`Unknown`
-    // where it throws), with `-parse_deflines` its ids and title.
-    let ids: Vec<std::sync::Arc<[u8]>> = match shown {
-        ShownSubjects::Fasta { parsed, .. } => subjects
-            .iter()
-            .enumerate()
-            .map(|(index, s)| {
-                let label = match parsed.shown(index) {
-                    Some(subject) => crate::report::pairwise::database_description_label(
-                        b"",
-                        &crate::report::defline::UNNAMED_SOURCE,
-                        Some(subject),
-                        true,
-                    ),
-                    None => crate::report::pairwise::database_description_label(
-                        &s.title,
-                        &crate::report::defline::UNNAMED_SOURCE,
-                        None,
-                        true,
-                    ),
-                };
-                std::sync::Arc::from(label)
-            })
-            .collect(),
+    // The description-table labels, as every program's (`database_description_label`), made for
+    // the subjects that a table describes, as NCBI makes them: a `-subject` record's is the title
+    // `GenerateDefline` makes of its title's bytes (`Unknown` where it throws), with
+    // `-parse_deflines` its ids and title.
+    let descriptions = match shown {
+        ShownSubjects::Fasta { .. } => Vec::new(),
         ShownSubjects::Database { reported, .. } => reported.descriptions(),
+    };
+    let label = |s_idx: u32| -> Vec<u8> {
+        let index = s_idx as usize;
+        match shown {
+            ShownSubjects::Fasta { parsed, .. } => match parsed.shown(index) {
+                Some(subject) => crate::report::pairwise::database_description_label(
+                    b"",
+                    &crate::report::defline::UNNAMED_SOURCE,
+                    Some(subject),
+                    true,
+                ),
+                None => crate::report::pairwise::database_description_label(
+                    &subjects[index].title,
+                    &crate::report::defline::UNNAMED_SOURCE,
+                    None,
+                    true,
+                ),
+            },
+            ShownSubjects::Database { .. } => descriptions[index].to_vec(),
+        }
     };
     // The `-subject` records' titles, whose headings `write_blastx_pairwise_report` makes
     // (`pairwise::record_heading`).
@@ -1322,7 +1329,7 @@ fn write_pairwise(
         &qinfo,
         &valid,
         &skipped,
-        &ids,
+        &label,
         &record_titles,
         &report,
         &BlastxPairwiseOptions {
@@ -1392,7 +1399,7 @@ pub(super) fn pairwise_hits(
                     if !has_seqalign(hsp, options.gapped) {
                         continue;
                     }
-                    let a = alignment(batch, hsp, subject, query, &code, options.scoring)?;
+                    let a = alignment(batch, hsp, subject, query, &code, Some(options.scoring))?;
                     let raw = &hsp.hsp;
                     let len = a.qseq.len();
                     let hit = Hit {

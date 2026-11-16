@@ -1846,7 +1846,7 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
     subject_order: &[u32],
     last_row_counted: bool,
     subject_hits: &std::collections::HashMap<u32, Vec<&PairwiseHit>>,
-    subject_labels: &[Arc<[u8]>],
+    subject_label: &dyn Fn(u32) -> Vec<u8>,
     show_sum_n: bool,
     columns: Option<SortColumns>,
     read: super::query_warnings::SubjectReadHook<'_, W>,
@@ -1858,7 +1858,7 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
         subject_hits,
         show_sum_n,
         columns,
-        |s_idx| subject_labels[s_idx as usize].to_vec(),
+        subject_label,
         read,
     )
 }
@@ -6915,9 +6915,9 @@ pub struct BlastxPairwiseOptions {
 /// Writes the BLASTX pairwise report (outfmt 0) of `queries`, whose hits are `hits` in the
 /// order of the reports (`q_idx` is the index in `queries`). `probe` marks each subject's
 /// heading and each HSP, `hits[i]` being HSP `first_hsp + i`, without changing the written bytes.
-/// `subject_labels` are the description-table labels by subject (`database_description_label`),
-/// `record_titles` the titles of the `-subject` records (empty with `-db`), whose headings are
-/// `record_heading`'s.
+/// `subject_label` makes the description-table label of a subject (`database_description_label`)
+/// where the table describes it, `record_titles` are the titles of the `-subject` records (empty
+/// with `-db`), whose headings are `record_heading`'s.
 #[allow(clippy::too_many_arguments)]
 pub fn write_blastx_pairwise_report<W: Write>(
     hits: &[PairwiseHit],
@@ -6929,7 +6929,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
     queries: &[BlastpPairwiseQuery],
     query_validity: &[bool],
     skipped: &[bool],
-    subject_labels: &[Arc<[u8]>],
+    subject_label: &dyn Fn(u32) -> Vec<u8>,
     record_titles: &[&[u8]],
     report: &BlastpPairwiseReport,
     options: &BlastxPairwiseOptions,
@@ -7042,7 +7042,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
                 descriptions,
                 order.len() <= options.num_descriptions,
                 grouped,
-                subject_labels,
+                subject_label,
                 !options.gapped && options.sum_stats,
                 config.sort_columns(query.query_length),
                 &mut |s_idx, writer: &mut io::BufWriter<&mut W>| match reads.as_mut() {
@@ -8180,7 +8180,7 @@ mod tblastx_tests {
         tie.hit.e_value = 0.5;
         let hits: std::collections::HashMap<u32, Vec<&PairwiseHit>> =
             [(0, vec![&first, &best, &tie])].into_iter().collect();
-        let ids = [Arc::<[u8]>::from(&b"YOL075C pep YOL075C"[..])];
+        let ids = |_: u32| b"YOL075C pep YOL075C".to_vec();
         for (show_sum_n, end) in [(false, ""), (true, "  2")] {
             let mut out = Vec::new();
             write_subject_summary_table_with_sum_n(

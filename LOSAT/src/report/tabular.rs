@@ -1356,6 +1356,19 @@ impl TabularWriter<'_> {
     ) {
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:973-1027
         // (the identities and positives counted again from the rows, and the BTOP string).
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:987-992
+        // ```c++
+        //         if (x_IsFieldRequested(ePositives) ||
+        //             x_IsFieldRequested(ePercentPositives) ||
+        //             x_IsFieldRequested(eBTOP) ||
+        //             x_IsFieldRequested(eNumIdentical) ||
+        //             x_IsFieldRequested(eMismatches) ||
+        //             x_IsFieldRequested(ePercentIdentical)) {
+        // ```
+        // NCBI counts the positives in the loop of the identities; LOSAT scores the pairs of letters
+        // only for a field that prints the positives (`positive`, `ppos`), the only readers of the
+        // count, so the other rows skip the matrix lookups and print the same bytes.
+        let shows_positives = self.spec.has_any(&[Positives, PercentPositives]);
         let (num_ident, positives) = match hsp.rows {
             Some((qrow, srow)) => {
                 let (mut ident, mut positive) = (0usize, 0usize);
@@ -1363,9 +1376,11 @@ impl TabularWriter<'_> {
                     if q == s {
                         ident += 1;
                         positive += 1;
-                    } else if self.matrix.is_some_and(|matrix| {
-                        crate::utils::matrix::protein_display_score(matrix, q, s) > 0
-                    }) {
+                    } else if shows_positives
+                        && self.matrix.is_some_and(|matrix| {
+                            crate::utils::matrix::protein_display_score(matrix, q, s) > 0
+                        })
+                    {
                         positive += 1;
                     }
                 }

@@ -3106,7 +3106,7 @@ mod archive_error_tests {
                 std::slice::from_ref(&query),
                 &[true],
                 &[false],
-                &[std::sync::Arc::from(&b"s0"[..])],
+                &|_| b"s0".to_vec(),
                 &[b"s0"],
                 &report,
                 &BlastxPairwiseOptions {

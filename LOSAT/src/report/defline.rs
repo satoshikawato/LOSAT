@@ -1646,8 +1646,8 @@ fn clean_and_compress(input: &[u8], is_protein: bool) -> (Vec<u8>, bool) {
         out.push(curr);
     }
     if is_protein {
-        out = replace_in_place(&out, b". [", b" [");
-        out = replace_in_place(&out, b", [", b" [");
+        out = replace_in_place(out, b". [", b" [");
+        out = replace_in_place(out, b", [", b" [");
     }
     (out, wrapped)
 }
@@ -1670,8 +1670,8 @@ fn clean_and_compress(input: &[u8], is_protein: bool) -> (Vec<u8>, bool) {
 ///         ...
 ///         start_pos += replace.size();
 /// ```
-fn replace_in_place(src: &[u8], search: &[u8], replace: &[u8]) -> Vec<u8> {
-    let mut src = src.to_vec();
+fn replace_in_place(mut src: Vec<u8>, search: &[u8], replace: &[u8]) -> Vec<u8> {
+    // The text is changed where it lies (NCBI's `string& src`): no copy of a text without a match.
     let mut start_pos = 0;
     if start_pos + search.len() > src.len() || search == replace {
         return src;
@@ -2137,7 +2137,10 @@ mod tests {
             b"id \xff [x] y [z]"
         );
         assert_eq!(clean_and_compress(b"a. . [b", true).0, b"a.  [b");
-        assert_eq!(replace_in_place(b"x. [. [", b". [", b" ["), b"x [ [");
+        assert_eq!(
+            replace_in_place(b"x. [. [".to_vec(), b". [", b" ["),
+            b"x [ ["
+        );
     }
 
     /// The facts of a database sequence without parsed Seq-ids whose source names `taxname`.

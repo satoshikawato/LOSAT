@@ -239,10 +239,15 @@ pub struct Written {
     pub diagnostics: Vec<u8>,
 }
 
-/// The `index`-th tab-separated field of a tabular row.
+/// The `index`-th tab-separated field of a tabular row, as text (a title's bytes that are not
+/// UTF-8 as U+FFFD, as the library's hit records hold the ids).
 pub fn field(row: &[u8], index: usize) -> String {
-    let row = std::str::from_utf8(row).expect("utf-8 row").trim_end();
-    row.split('\t').nth(index).expect("field").to_string()
+    let row = String::from_utf8_lossy(row);
+    row.trim_end()
+        .split('\t')
+        .nth(index)
+        .expect("field")
+        .to_string()
 }
 
 // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108

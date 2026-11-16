@@ -1439,20 +1439,21 @@ impl Indexer<'_> {
     // A bit-bvector is BitMagic's serialized vector, which `GetBitVector()` decodes from the raw
     // bytes without a check (BVector_data.cpp:64-72): refused. An `int-scaled` value that leaves
     // `Int8` is a signed overflow: refused.
-    /// `x_TryGetInt8(row, v, type_name)` of the multi-data `data`.
-    fn x_try_get_int8(
+    /// `x_TryGetInt8(row, v, type_name)` of the multi-data `data`, one level: its value, or the
+    /// multi-data inside it to read first (`Get`).
+    fn x_try_get_int8<'v>(
         &mut self,
-        data: V<'_>,
+        data: V<'v>,
         row: u64,
         type_name: &str,
-    ) -> Result<Option<i64>, Stop> {
+    ) -> Result<Get<'v>, Stop> {
         let (variant, value) = data.choice();
         let element = |value: V<'_>| usize::try_from(row).ok().and_then(|row| value.int_at(row));
-        Ok(match variant {
+        Ok(Get::Value(match variant {
             "bit" => {
                 let bytes = value.octets();
                 let Some(&byte) = usize::try_from(row / 8).ok().and_then(|i| bytes.get(i)) else {
-                    return Ok(None);
+                    return Ok(Get::Value(None));
                 };
                 let shifted = u32::from(byte) << (row % 8);
                 Some(i64::from(shifted & 0x80 != 0))
@@ -1465,24 +1466,16 @@ impl Indexer<'_> {
             "int2" | "int" | "int8" => element(value),
             "int-delta" => {
                 if row >= multi_size(value) {
-                    return Ok(None);
+                    return Ok(Get::Value(None));
                 }
-                Some(self.delta_sum(value, row)?)
+                return Ok(Get::Delta(value));
             }
             "int-scaled" => {
-                let inner = value.field("data");
-                let Some(v) = self.x_try_get_int8(inner, row, "Int8")? else {
-                    return Ok(None);
-                };
-                let mul = value.field("mul").int() as i32;
-                let add = value.field("add").int() as i32;
-                let Some(scaled) = v
-                    .checked_mul(i64::from(mul))
-                    .and_then(|v| v.checked_add(i64::from(add)))
-                else {
-                    return Err(Stop::Refuse(Refusal::ScaledOverflow));
-                };
-                Some(scaled)
+                return Ok(Get::Scaled {
+                    data: value.field("data"),
+                    mul: value.field("mul").int() as i32,
+                    add: value.field("add").int() as i32,
+                })
             }
             _ => {
                 return Err(Stop::exception(NcbiException::new(
@@ -1492,7 +1485,7 @@ impl Indexer<'_> {
                     ),
                 )))
             }
-        })
+        }))
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_multi_data.cpp:435-475
@@ -1524,20 +1517,88 @@ impl Indexer<'_> {
     // ```
     /// `CSeqTable_multi_data::TryGetValue(row, v)` of the type `want`.
     fn multi_try_get(&mut self, data: V<'_>, row: u64, want: Want) -> Result<Option<i64>, Stop> {
-        let Some(value) = self.x_try_get_int8(data, row, want.multi_name())? else {
-            return Ok(None);
-        };
-        let cast = want.cast(value);
-        if cast != value {
-            return Err(Stop::exception(NcbiException::new(
-                MULTI_TOO_BIG,
-                format!(
-                    "CSeqTable_multi_data::TryGet{}(): value is too big for requested type: {value}",
-                    want.multi_name()
-                ),
-            )));
+        // The multi-data values waiting for one inside them, from a list on the heap (to any depth
+        // the reader read), and the one to read next.
+        let mut pending = vec![Pending::Cast(want)];
+        let mut get = Some((data, row, want.multi_name()));
+        let mut result = Ok(None);
+        loop {
+            if let Some((data, row, type_name)) = get.take() {
+                result = match self.x_try_get_int8(data, row, type_name) {
+                    Err(stop) => Err(stop),
+                    Ok(Get::Value(value)) => Ok(value),
+                    Ok(Get::Scaled { data, mul, add }) => {
+                        pending.push(Pending::Scale { mul, add });
+                        get = Some((data, row, "Int8"));
+                        continue;
+                    }
+                    Ok(Get::Delta(deltas)) => match self.delta_sum(deltas, row) {
+                        Err(stop) => Err(stop),
+                        Ok(sum) => match self.delta_next(sum) {
+                            DeltaNext::Read(sum) => {
+                                get = Some((
+                                    sum.deltas,
+                                    sum.sums.len() as u64,
+                                    sum.want.multi_name(),
+                                ));
+                                let want = sum.want;
+                                pending.push(Pending::Delta(sum));
+                                pending.push(Pending::Cast(want));
+                                continue;
+                            }
+                            DeltaNext::Sum(sum) => Ok(Some(sum)),
+                        },
+                    },
+                };
+            }
+            let Some(waiting) = pending.pop() else {
+                return result;
+            };
+            result = match waiting {
+                Pending::Scale { mul, add } => result.and_then(|value| {
+                    value
+                        .map(|v| {
+                            v.checked_mul(i64::from(mul))
+                                .and_then(|v| v.checked_add(i64::from(add)))
+                                .ok_or(Stop::Refuse(Refusal::ScaledOverflow))
+                        })
+                        .transpose()
+                }),
+                Pending::Cast(want) => result.and_then(|value| {
+                    let Some(value) = value else {
+                        return Ok(None);
+                    };
+                    let cast = want.cast(value);
+                    if cast != value {
+                        return Err(Stop::exception(NcbiException::new(
+                            MULTI_TOO_BIG,
+                            format!(
+                                "CSeqTable_multi_data::TryGet{}(): value is too big for requested type: {value}",
+                                want.multi_name()
+                            ),
+                        )));
+                    }
+                    Ok(Some(cast))
+                }),
+                Pending::Delta(mut sum) => match result.and_then(|value| sum.add(value)) {
+                    Err(stop) => {
+                        self.caches.int_delta.insert(sum.key, sum.sums);
+                        Err(stop)
+                    }
+                    Ok(()) => match self.delta_next(sum) {
+                        DeltaNext::Read(sum) => {
+                            get = Some((sum.deltas, sum.sums.len() as u64, sum.want.multi_name()));
+                            let want = sum.want;
+                            pending.push(Pending::Delta(sum));
+                            pending.push(Pending::Cast(want));
+                            // (`get` gives the next result.)
+                            Ok(None)
+                        }
+                        DeltaNext::Sum(sum) => Ok(Some(sum)),
+                    },
+                },
+            };
         }
-        Ok(Some(cast))
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_multi_data.cpp:81-94, 138-169,
@@ -1593,29 +1654,35 @@ impl Indexer<'_> {
     // element that throws there throws for `r`; a sum that leaves the accumulator's type is a
     // signed overflow (refused). `CInt4DeltaSumCache`'s sum is the `Int8` that `GetDeltaSum8`
     // returns (`CIntDeltaSumCache::GetDeltaSum8` calls the virtual `GetDeltaSum4`).
-    fn delta_sum(&mut self, deltas: V<'_>, row: u64) -> Result<i64, Stop> {
+    fn delta_sum<'v>(&mut self, deltas: V<'v>, row: u64) -> Result<DeltaSum<'v>, Stop> {
         const BLOCK: u64 = 128;
         let key = address(deltas);
         let size = multi_size(deltas);
         let int4 = int_size(deltas)? <= 4;
         let want = if int4 { Want::Int4 } else { Want::Int8 };
         let end = ((row / BLOCK + 1) * BLOCK).min(size);
-        let mut sums = self.caches.int_delta.remove(&key).unwrap_or_default();
-        let result = (|| {
-            let mut sum = sums.last().copied().unwrap_or(0);
-            for index in sums.len() as u64..end {
-                if let Some(value) = self.multi_try_get(deltas, index, want)? {
-                    sum = match sum.checked_add(value) {
-                        Some(next) if !int4 || i32::try_from(next).is_ok() => next,
-                        _ => return Err(Stop::Refuse(Refusal::DeltaOverflow)),
-                    };
-                }
-                sums.push(sum);
-            }
-            Ok(sums.get(row as usize).copied().unwrap_or_default())
-        })();
-        self.caches.int_delta.insert(key, sums);
-        result
+        let sums = self.caches.int_delta.remove(&key).unwrap_or_default();
+        Ok(DeltaSum {
+            deltas,
+            key,
+            row,
+            want,
+            int4,
+            end,
+            sum: sums.last().copied().unwrap_or(0),
+            sums,
+        })
+    }
+
+    /// `delta_sum`'s next delta to read (`DeltaSum::add`), or the row's sum once the sums reach
+    /// the end of its block (cached again).
+    fn delta_next<'v>(&mut self, sum: DeltaSum<'v>) -> DeltaNext<'v> {
+        if (sum.sums.len() as u64) < sum.end {
+            return DeltaNext::Read(sum);
+        }
+        let value = sum.sums.get(sum.row as usize).copied().unwrap_or_default();
+        self.caches.int_delta.insert(sum.key, sum.sums);
+        DeltaNext::Sum(value)
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_sparse_index.cpp:533-581
@@ -1769,15 +1836,23 @@ impl Indexer<'_> {
 // The size of a bit-bvector is its `size` member (a Uint4), read without decoding BitMagic's data
 // (`bm/` probes p01, p03: NCBI is silent where only the size is asked); only a value decodes
 // (`x_try_get_int8`, `sparse_index_at`, refused).
-fn multi_size(data: V<'_>) -> u64 {
-    let (variant, value) = data.choice();
-    match variant {
-        "common-string" | "common-bytes" => value.field("indexes").len() as u64,
-        "bit" => value.octets().len() as u64 * 8,
-        "bit-bvector" => value.field("size").int() as u32 as u64,
-        "int-delta" => multi_size(value),
-        "int-scaled" | "real-scaled" => multi_size(value.field("data")),
-        _ => value.len() as u64,
+fn multi_size(mut data: V<'_>) -> u64 {
+    loop {
+        let (variant, value) = data.choice();
+        return match variant {
+            "common-string" | "common-bytes" => value.field("indexes").len() as u64,
+            "bit" => value.octets().len() as u64 * 8,
+            "bit-bvector" => value.field("size").int() as u32 as u64,
+            "int-delta" => {
+                data = value;
+                continue;
+            }
+            "int-scaled" | "real-scaled" => {
+                data = value.field("data");
+                continue;
+            }
+            _ => value.len() as u64,
+        };
     }
 }
 
@@ -1817,14 +1892,18 @@ fn multi_size(data: V<'_>) -> u64 {
 //     return sizeof(int);
 // }
 // ```
-fn int_size(data: V<'_>) -> Result<u64, Stop> {
-    let (variant, value) = data.choice();
+fn int_size(mut data: V<'_>) -> Result<u64, Stop> {
+    let (variant, value) = loop {
+        match data.choice() {
+            ("int-delta", value) => data = value,
+            choice => break choice,
+        }
+    };
     Ok(match variant {
         "int" => 4,
         "int1" | "bit" | "bit-bvector" => 1,
         "int2" => 2,
         "int8" => 8,
-        "int-delta" => int_size(value)?,
         "int-scaled" => {
             let max = value.get("max").map(V::int);
             let min = value.get("min").map(V::int);
@@ -1958,3 +2037,59 @@ fn single_get_id(default: V<'_>) -> Result<V<'_>, Stop> {
 #[cfg(test)]
 #[path = "table_tests.rs"]
 mod table_tests;
+
+/// What `x_try_get_int8` gives for one multi-data value.
+enum Get<'v> {
+    Value(Option<i64>),
+    /// `int-scaled`: its `data`, then `v*GetMul()+GetAdd()`.
+    Scaled {
+        data: V<'v>,
+        mul: i32,
+        add: i32,
+    },
+    /// `int-delta`: the sum of its deltas up to the row (`delta_sum`).
+    Delta(V<'v>),
+}
+
+/// A multi-data value waiting for one inside it (`multi_try_get`).
+enum Pending<'v> {
+    /// `int-scaled`'s `v*GetMul()+GetAdd()`; a value that leaves `Int8` is a signed overflow
+    /// (refused).
+    Scale { mul: i32, add: i32 },
+    /// `TryGetValue`'s check that the value fits the type asked for.
+    Cast(Want),
+    /// `delta_sum`'s loop, waiting for the delta at `sums.len()`.
+    Delta(DeltaSum<'v>),
+}
+
+/// The sums of an `int-delta`'s deltas being made (`delta_sum`).
+struct DeltaSum<'v> {
+    deltas: V<'v>,
+    key: usize,
+    row: u64,
+    want: Want,
+    int4: bool,
+    end: u64,
+    sum: i64,
+    sums: Vec<i64>,
+}
+
+impl DeltaSum<'_> {
+    /// The delta read (`None`: no value) added to the sums; a sum that leaves the accumulator's
+    /// type is a signed overflow (refused).
+    fn add(&mut self, value: Option<i64>) -> Result<(), Stop> {
+        if let Some(value) = value {
+            self.sum = match self.sum.checked_add(value) {
+                Some(next) if !self.int4 || i32::try_from(next).is_ok() => next,
+                _ => return Err(Stop::Refuse(Refusal::DeltaOverflow)),
+            };
+        }
+        self.sums.push(self.sum);
+        Ok(())
+    }
+}
+
+enum DeltaNext<'v> {
+    Read(DeltaSum<'v>),
+    Sum(i64),
+}

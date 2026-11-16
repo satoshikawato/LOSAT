@@ -35,46 +35,53 @@ fn at(list: V<'_>, index: usize) -> i64 {
 // NCBI reference (598d8ae6): c++/src/objmgr/annot_object.cpp:563-846 (`x_ProcessAlign`, quoted per
 // segment type below)
 /// `x_ProcessAlign(rows, align)`: the rows of `align` added to `rows`, with NCBI's warnings
-/// (`Warning: (1207.<n>)`).
-pub(super) fn process_align(
+/// (`Warning: (1207.<n>)`); the alignments of a `disc` in order, from a list on the heap (to any
+/// depth the reader read).
+pub(super) fn process_align<'v>(
     ix: &mut Indexer<'_>,
     rows: &mut Vec<HandleRangeMap>,
-    align: V<'_>,
+    align: V<'v>,
 ) -> Result<(), Stop> {
-    let Some(segs) = align.get("segs") else {
-        return Ok(());
-    };
-    let (variant, segs) = segs.choice();
-    match variant {
-        "dendiag" => {
-            for diag in segs.items() {
-                dense_diag(ix, rows, diag);
+    // The `disc` sets being walked: the set and its next alignment.
+    let mut discs: Vec<(V<'v>, usize)> = Vec::new();
+    let mut next = Some(align);
+    loop {
+        let align = match next.take() {
+            Some(align) => align,
+            None => {
+                let Some((set, index)) = discs.last_mut() else {
+                    return Ok(());
+                };
+                let Some(sub) = set.item(*index) else {
+                    discs.pop();
+                    continue;
+                };
+                *index += 1;
+                sub
             }
-            Ok(())
-        }
-        "denseg" => dense_seg(ix, rows, segs),
-        "std" => {
-            for seg in segs.items() {
-                std_seg(&mut ix.handles, rows, seg)?;
+        };
+        let Some(segs) = align.get("segs") else {
+            continue;
+        };
+        let (variant, segs) = segs.choice();
+        match variant {
+            "dendiag" => {
+                for diag in segs.items() {
+                    dense_diag(ix, rows, diag);
+                }
             }
-            Ok(())
-        }
-        "packed" => packed_seg(&mut ix.handles, rows, segs),
-        "disc" => {
-            for sub in segs.items() {
-                process_align(ix, rows, sub)?;
+            "denseg" => dense_seg(ix, rows, segs)?,
+            "std" => {
+                for seg in segs.items() {
+                    std_seg(&mut ix.handles, rows, seg)?;
+                }
             }
-            Ok(())
+            "packed" => packed_seg(&mut ix.handles, rows, segs)?,
+            "disc" => discs.push((segs, 0)),
+            "spliced" => spliced_seg(&mut ix.handles, rows, segs),
+            "sparse" => sparse_seg(ix, rows, segs),
+            other => unreachable!("Seq-align.segs has no variant {other}"),
         }
-        "spliced" => {
-            spliced_seg(&mut ix.handles, rows, segs);
-            Ok(())
-        }
-        "sparse" => {
-            sparse_seg(ix, rows, segs);
-            Ok(())
-        }
-        other => unreachable!("Seq-align.segs has no variant {other}"),
     }
 }
 
@@ -366,55 +373,70 @@ fn std_seg(
 // `packed-pnt` (one id and strand), `mix`, `equiv` (every part), `bond` (a, then b), and the
 // exception above for any other)
 /// The ranges of `CSeq_loc_CI(loc)`: Seq-id, range and strand (`unknown` when not set); and the
-/// Seq-ids its construction looks up (`x_SetId`: one for each part, one for a `packed-pnt`).
+/// Seq-ids its construction looks up (`x_SetId`: one for each part, one for a `packed-pnt`). The
+/// parts of a `mix` or `equiv` are walked in order from a list on the heap.
 fn loc_ci_ranges<'a>(
     loc: V<'a>,
     out: &mut Vec<(&'a crate::seqid::ParsedSeqId, Range, Strand)>,
     lookups: &mut Vec<&'a crate::seqid::ParsedSeqId>,
 ) -> Result<(), Stop> {
-    let (variant, value) = loc.choice();
-    let mut push = |part: (&'a crate::seqid::ParsedSeqId, Range, Strand)| {
-        lookups.push(part.0);
-        out.push(part);
-    };
-    match variant {
-        "null" | "empty" => {}
-        "whole" => push((value.seq_id(), Range::WHOLE, UNKNOWN)),
-        "int" => push(interval_parts(value)),
-        "pnt" => push(point_parts(value)),
-        "packed-int" => {
-            for part in value.items().map(interval_parts) {
-                push(part);
+    // The `mix` and `equiv` locations being walked: the location's parts and the next one.
+    let mut sets: Vec<(V<'a>, usize)> = Vec::new();
+    let mut next = Some(loc);
+    loop {
+        let loc = match next.take() {
+            Some(loc) => loc,
+            None => {
+                let Some((parts, index)) = sets.last_mut() else {
+                    return Ok(());
+                };
+                let Some(part) = parts.item(*index) else {
+                    sets.pop();
+                    continue;
+                };
+                *index += 1;
+                part
             }
-        }
-        "packed-pnt" => {
-            let id = value.field("id").seq_id();
-            let strand = value.get("strand").map_or(UNKNOWN, V::int);
-            lookups.push(id);
-            for point in value.field("points").ints() {
-                let point = point as u32;
-                out.push((id, Range::new(point, point), strand));
+        };
+        let (variant, value) = loc.choice();
+        let mut push = |part: (&'a crate::seqid::ParsedSeqId, Range, Strand)| {
+            lookups.push(part.0);
+            out.push(part);
+        };
+        match variant {
+            "null" | "empty" => {}
+            "whole" => push((value.seq_id(), Range::WHOLE, UNKNOWN)),
+            "int" => push(interval_parts(value)),
+            "pnt" => push(point_parts(value)),
+            "packed-int" => {
+                for part in value.items().map(interval_parts) {
+                    push(part);
+                }
             }
-        }
-        "mix" | "equiv" => {
-            for part in value.items() {
-                loc_ci_ranges(part, out, lookups)?;
+            "packed-pnt" => {
+                let id = value.field("id").seq_id();
+                let strand = value.get("strand").map_or(UNKNOWN, V::int);
+                lookups.push(id);
+                for point in value.field("points").ints() {
+                    let point = point as u32;
+                    out.push((id, Range::new(point, point), strand));
+                }
             }
-        }
-        "bond" => {
-            push(point_parts(value.field("a")));
-            if let Some(b) = value.get("b") {
-                push(point_parts(b));
+            "mix" | "equiv" => sets.push((value, 0)),
+            "bond" => {
+                push(point_parts(value.field("a")));
+                if let Some(b) = value.get("b") {
+                    push(point_parts(b));
+                }
             }
-        }
-        other => {
-            return Err(Stop::exception(NcbiException::new(
-                LOC_CI_UNSUPPORTED,
-                format!("CSeq_loc_CI: unsupported location type: {other}"),
-            )))
+            other => {
+                return Err(Stop::exception(NcbiException::new(
+                    LOC_CI_UNSUPPORTED,
+                    format!("CSeq_loc_CI: unsupported location type: {other}"),
+                )))
+            }
         }
     }
-    Ok(())
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/annot_object.cpp:680-716

@@ -51,7 +51,7 @@ pub(crate) struct PssmRead {
 
 /// Reads the `PssmWithParameters` document at the start of `text` (what follows it is not read,
 /// as `stream >> object` reads one object) as the program of `ncbi_stack` does.
-pub(crate) fn read_pssm(text: &[u8], ncbi_stack: &'static NcbiStack) -> PssmRead {
+pub(crate) fn read_pssm(text: &[u8], ncbi_stack: NcbiStack) -> PssmRead {
     let (value, posts) = read_document(text, named::PSSMWITHPARAMETERS, ncbi_stack);
     PssmRead {
         result: value
@@ -69,7 +69,7 @@ pub(crate) fn read_pssm(text: &[u8], ncbi_stack: &'static NcbiStack) -> PssmRead
 /// `read_pssm`'s PSSM, for the tests: an error names NCBI's class or LOSAT's refusal.
 #[cfg(test)]
 pub(crate) fn read_pssm_with_parameters(text: &[u8]) -> Result<PssmWithParameters, PssmReadError> {
-    read_pssm(text, &crate::report::serial::asn_types::PSIBLAST_STACK).result
+    read_pssm(text, crate::report::serial::asn_types::PSIBLAST_STACK).result
 }
 
 // The typed boundary: the model of the value read, its parts moved out of it. The value has the
@@ -107,39 +107,39 @@ fn real(value: Value) -> f64 {
     }
 }
 
-fn string(value: Value) -> Vec<u8> {
-    match value {
-        Value::Str(text) => text,
+fn string(mut value: Value) -> Vec<u8> {
+    match &mut value {
+        Value::Str(text) => std::mem::take(text),
         other => unreachable!("a string of the table, not {other:?}"),
     }
 }
 
-fn list(value: Value) -> Vec<Value> {
-    match value {
-        Value::List(items) => items,
+fn list(mut value: Value) -> Vec<Value> {
+    match &mut value {
+        Value::List(items) => std::mem::take(items),
         other => unreachable!("a SEQUENCE OF of the table, not {other:?}"),
     }
 }
 
 /// A SEQUENCE OF INTEGER of Int4 storage.
-fn int4s(value: Value) -> Vec<i32> {
-    match value {
-        Value::Int4s(values) => values,
+fn int4s(mut value: Value) -> Vec<i32> {
+    match &mut value {
+        Value::Int4s(values) => std::mem::take(values),
         other => unreachable!("a SEQUENCE OF INTEGER of the table, not {other:?}"),
     }
 }
 
 /// A SEQUENCE OF REAL.
-fn reals(value: Value) -> Vec<f64> {
-    match value {
-        Value::Reals(values) => values,
+fn reals(mut value: Value) -> Vec<f64> {
+    match &mut value {
+        Value::Reals(values) => std::mem::take(values),
         other => unreachable!("a SEQUENCE OF REAL of the table, not {other:?}"),
     }
 }
 
-fn choice(value: Value) -> (usize, Value) {
-    match value {
-        Value::Choice(index, value) => (usize::from(index), *value),
+fn choice(mut value: Value) -> (usize, Value) {
+    match &mut value {
+        Value::Choice(index, value) => (usize::from(*index), value.take()),
         other => unreachable!("a CHOICE of the table, not {other:?}"),
     }
 }
@@ -210,21 +210,21 @@ fn seq_entry(value: Value) -> SeqEntry {
     SeqEntry::Seq(Box::new(PssmQuery {
         ids: list(get("id").expect("mandatory"))
             .into_iter()
-            .map(|id| match id {
-                Value::SeqId(id) => *id,
-                other => unreachable!("a Seq-id is read into the Seq-id model, not {other:?}"),
+            .map(|id| {
+                id.into_seq_id()
+                    .unwrap_or_else(|| unreachable!("a Seq-id is read into the Seq-id model"))
             })
             .collect(),
         descr: get("descr").map(|descr| {
             list(descr)
                 .into_iter()
-                .map(|descriptor| match descriptor {
-                    Value::Choice(variant, title)
-                        if members(named::SEQDESC)[usize::from(variant)].name() == "title" =>
-                    {
-                        Seqdesc::Title(string(*title))
+                .map(|mut descriptor| {
+                    if let Value::Choice(variant, title) = &mut descriptor {
+                        if members(named::SEQDESC)[usize::from(*variant)].name() == "title" {
+                            return Seqdesc::Title(string(title.take()));
+                        }
                     }
-                    other => Seqdesc::Other(other),
+                    Seqdesc::Other(descriptor)
                 })
                 .collect()
         }),
@@ -239,13 +239,13 @@ fn seq_inst(mut value: Value) -> SeqInst {
     let seq_data = match get("seq-data") {
         None => None,
         Some(data) => {
-            let (variant, value) = choice(data);
+            let (variant, mut value) = choice(data);
             let index = u16::try_from(variant).expect("a CHOICE variant");
             Some(match members(named::SEQ_DATA)[variant].name() {
                 "iupacaa" => SeqData::Iupacaa(string(value)),
                 "ncbieaa" => SeqData::Ncbieaa(string(value)),
-                "ncbistdaa" => SeqData::Ncbistdaa(match value {
-                    Value::Octets(codes) => codes,
+                "ncbistdaa" => SeqData::Ncbistdaa(match &mut value {
+                    Value::Octets(codes) => std::mem::take(codes),
                     other => unreachable!("NCBIstdaa is an OCTET STRING, not {other:?}"),
                 }),
                 _ => SeqData::Other(Value::Choice(index, Box::new(value))),

@@ -37,6 +37,7 @@
 //! serial/typeinfo.cpp:249-252), which the reader's stack names in NCBI's exception reports.
 
 mod hooks;
+mod ncbi_stack;
 pub(crate) mod read;
 // Generated (`scripts/asn_spec_gen.py`), checked byte for byte by `scripts/asn_spec_check.py`.
 #[rustfmt::skip]
@@ -45,7 +46,8 @@ pub(crate) mod table;
 #[cfg(test)]
 mod read_tests;
 
-pub(crate) use read::{read_document, NcbiStack, Post, ReadError, PSIBLAST_STACK, TBLASTN_STACK};
+pub(crate) use ncbi_stack::{NcbiStack, PSIBLAST_STACK, TBLASTN_STACK};
+pub(crate) use read::{read_document, Post, ReadError};
 
 /// `Member::flags`: an OPTIONAL member (`->SetOptional()`).
 pub(crate) const OPTIONAL: u8 = 1;
@@ -236,7 +238,7 @@ pub(crate) fn member_index(ty: u16, name: &str) -> usize {
 
 /// A value read under the table: the shape of its type, the members of a SEQUENCE by their
 /// position in the module (those set, in order).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum Value {
     /// INTEGER of any storage.
     Int(i64),
@@ -269,6 +271,101 @@ pub enum Value {
     SeqId(Box<crate::seqid::ParsedSeqId>),
 }
 
+/// A value is dropped with the values nested in it from a list on the heap: the drop of each one
+/// inside the one that holds it would recurse as deep as the values nest (the reader reads any
+/// depth that NCBI's stack holds, `ncbi_stack`).
+impl Drop for Value {
+    fn drop(&mut self) {
+        let mut nested = Vec::new();
+        self.take_nested(&mut nested);
+        while let Some(mut value) = nested.pop() {
+            value.take_nested(&mut nested);
+        }
+    }
+}
+
+/// A value is cloned with the values nested in it from a list on the heap (as `Drop`).
+impl Clone for Value {
+    fn clone(&self) -> Value {
+        /// A value being cloned: its values and the clones made of them so far.
+        enum Cloning<'a> {
+            Sequence(&'a [(u16, Value)], Vec<(u16, Value)>),
+            Choice(u16),
+            List(&'a [Value], Vec<Value>),
+        }
+        let mut open: Vec<Cloning<'_>> = Vec::new();
+        let mut next = self;
+        loop {
+            let mut done = match next {
+                Value::Sequence(members) => {
+                    open.push(Cloning::Sequence(
+                        members,
+                        Vec::with_capacity(members.len()),
+                    ));
+                    None
+                }
+                Value::Choice(index, value) => {
+                    open.push(Cloning::Choice(*index));
+                    next = value;
+                    continue;
+                }
+                Value::List(items) => {
+                    open.push(Cloning::List(items, Vec::with_capacity(items.len())));
+                    None
+                }
+                Value::Int(n) => Some(Value::Int(*n)),
+                Value::Enum(n) => Some(Value::Enum(*n)),
+                Value::Bool(b) => Some(Value::Bool(*b)),
+                Value::Null => Some(Value::Null),
+                Value::Real(r) => Some(Value::Real(*r)),
+                Value::Str(text) => Some(Value::Str(text.clone())),
+                Value::Octets(bytes) => Some(Value::Octets(bytes.clone())),
+                Value::Int4s(numbers) => Some(Value::Int4s(numbers.clone())),
+                Value::Ints(numbers) => Some(Value::Ints(numbers.clone())),
+                Value::Reals(numbers) => Some(Value::Reals(numbers.clone())),
+                Value::Delayed(text) => Some(Value::Delayed(text.clone())),
+                Value::SeqId(id) => Some(Value::SeqId(id.clone())),
+            };
+            // The clone made goes to the value that holds it, until one has a value left to clone.
+            loop {
+                let Some(top) = open.last_mut() else {
+                    return done.expect("the clone");
+                };
+                match top {
+                    Cloning::Sequence(members, made) => {
+                        let members: &[(u16, Value)] = members;
+                        if let Some(value) = done.take() {
+                            made.push((members[made.len()].0, value));
+                        }
+                        if let Some((_, value)) = members.get(made.len()) {
+                            next = value;
+                            break;
+                        }
+                    }
+                    Cloning::List(items, made) => {
+                        let items: &[Value] = items;
+                        if let Some(value) = done.take() {
+                            made.push(value);
+                        }
+                        if let Some(value) = items.get(made.len()) {
+                            next = value;
+                            break;
+                        }
+                    }
+                    Cloning::Choice(_) => {}
+                }
+                done = Some(match open.pop().expect("a value being cloned") {
+                    Cloning::Sequence(_, made) => Value::Sequence(made),
+                    Cloning::List(_, made) => Value::List(made),
+                    Cloning::Choice(index) => {
+                        Value::Choice(index, Box::new(done.take().expect("the variant's clone")))
+                    }
+                });
+            }
+        }
+    }
+}
+
 impl Value {
     /// The member at position `index` of a SEQUENCE value, when set.
     pub(crate) fn member(&self, index: usize) -> Option<&Value> {
@@ -289,6 +386,47 @@ impl Value {
                 .position(|(position, _)| usize::from(*position) == index)
                 .map(|at| members.remove(at).1),
             _ => None,
+        }
+    }
+
+    /// The value, moved out (`Null` in its place).
+    pub(crate) fn take(&mut self) -> Value {
+        std::mem::replace(self, Value::Null)
+    }
+
+    /// The Seq-id of a Seq-id value, moved out of it.
+    pub(crate) fn into_seq_id(mut self) -> Option<crate::seqid::ParsedSeqId> {
+        match &mut self {
+            Value::SeqId(id) => Some(std::mem::replace(
+                &mut **id,
+                crate::seqid::ParsedSeqId::Local(crate::seqid::model::ObjectId::Str(Vec::new())),
+            )),
+            _ => None,
+        }
+    }
+
+    /// Whether the value holds values (that may hold more).
+    fn holds_values(&self) -> bool {
+        match self {
+            Value::Sequence(members) => !members.is_empty(),
+            Value::Choice(..) => true,
+            Value::List(items) => !items.is_empty(),
+            _ => false,
+        }
+    }
+
+    /// Moves the values in this one that hold values themselves to `out` (`Null` in their place).
+    fn take_nested(&mut self, out: &mut Vec<Value>) {
+        let mut take = |value: &mut Value| {
+            if value.holds_values() {
+                out.push(value.take());
+            }
+        };
+        match self {
+            Value::Sequence(members) => members.iter_mut().for_each(|(_, value)| take(value)),
+            Value::Choice(_, value) => take(value),
+            Value::List(items) => items.iter_mut().for_each(take),
+            _ => {}
         }
     }
 

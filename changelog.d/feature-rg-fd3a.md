@@ -30,9 +30,10 @@
   NCBI's Seq-id handles take as one (equal ones, and ones that differ only in what NCBI's index does not look at: the
   case of letters, GenBank, EMBL or DDBJ for an accession alone, PDB's `chain` and `chain-id`, a `giim` id's other
   database) and with NCBI's spelling of each (the first Seq-id of a handle, with the case of the letters of each);
-  with `-subject` it is refused only where a subject record's spelling may show in the message. A PSSM whose values
-  nest so deep that NCBI's reader may overflow its stack and crash is refused (from 3,961 to 9,503 levels, by type);
-  every shallower one is read, where LOSAT's reader overflowed its own stack at about 2,400 nested Bioseq-sets. The
+  with `-subject` it is refused only where a subject record's spelling may show in the message. A query Seq-entry set
+  (refused before) and values nested in themselves (Seq-loc mixes, User-objects and the like) are read to every depth
+  that NCBI reads with the run's stack limit and environment, on every target; deeper nests, at which NCBI's reader
+  may overflow its stack and crash, are refused (they were read before). The
   library API's PSSM query (`Inputs::pssm`) ends as the command line's run: a PSSM file that NCBI ends without a word
   gives a call without an error, and an error after the object manager's `Failed to parse location of` message has
   the command line's text (its line feed).

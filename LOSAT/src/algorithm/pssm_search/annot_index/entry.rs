@@ -85,6 +85,14 @@ enum Attach<'a> {
     Bioseq(Vec<&'a ParsedSeqId>),
 }
 
+/// A Bioseq-set being walked (`Tse::add_set`): its members and the next one, and its own
+/// annotations (phase C makes them after the members).
+struct SetWalk<'a> {
+    members: Option<V<'a>>,
+    next: usize,
+    own: Vec<Made>,
+}
+
 impl<'a> Tse<'a> {
     /// The TSE of `entry`.
     pub(super) fn of(entry: &'a SeqEntry) -> Self {
@@ -114,8 +122,38 @@ impl<'a> Tse<'a> {
     /// Adds the set `set` (phase I's order of `annots` and the attach order are the order of the
     /// walk: the set's own annotations and id, then its members); its phase C order (members, each
     /// Bioseq's Seq-ids before its annotations, then the set's own annotations) goes to
-    /// `construction`.
+    /// `construction`. The sets inside it are walked from a list on the heap (`SetWalk`), to any
+    /// depth the reader read.
     fn add_set(&mut self, set: V<'a>, construction: &mut Vec<Made>) {
+        let mut walks = vec![self.enter_set(set)];
+        while let Some(walk) = walks.last_mut() {
+            let Some(member) = walk.members.and_then(|members| members.item(walk.next)) else {
+                let done = walks.pop().expect("a set");
+                construction.extend(done.own);
+                continue;
+            };
+            walk.next += 1;
+            match member.choice() {
+                ("seq", bioseq) => {
+                    construction.push(Made::Bioseq(self.attach.len()));
+                    self.attach.push(Attach::Bioseq(
+                        bioseq.field("id").items().map(V::seq_id).collect(),
+                    ));
+                    for annot in bioseq.get("annot").into_iter().flat_map(V::items) {
+                        construction.push(Made::Annot(self.annots.len()));
+                        self.annots.push(annot);
+                    }
+                }
+                (_, set) => {
+                    let walk = self.enter_set(set);
+                    walks.push(walk);
+                }
+            }
+        }
+    }
+
+    /// The set `set` entered: its id and its own annotations added, its members to walk.
+    fn enter_set(&mut self, set: V<'a>) -> SetWalk<'a> {
         if let Some(id) = set.get("id") {
             if let ("id", number) = id.choice() {
                 self.attach.push(Attach::SetId(number.int()));
@@ -130,22 +168,11 @@ impl<'a> Tse<'a> {
                 Made::Annot(self.annots.len() - 1)
             })
             .collect();
-        for member in set.get("seq-set").into_iter().flat_map(V::items) {
-            match member.choice() {
-                ("seq", bioseq) => {
-                    construction.push(Made::Bioseq(self.attach.len()));
-                    self.attach.push(Attach::Bioseq(
-                        bioseq.field("id").items().map(V::seq_id).collect(),
-                    ));
-                    for annot in bioseq.get("annot").into_iter().flat_map(V::items) {
-                        construction.push(Made::Annot(self.annots.len()));
-                        self.annots.push(annot);
-                    }
-                }
-                (_, set) => self.add_set(set, construction),
-            }
+        SetWalk {
+            members: set.get("seq-set"),
+            next: 0,
+            own,
         }
-        construction.extend(own);
     }
 
     /// The number of objects that attach (Bioseq-set ids and Bioseqs).

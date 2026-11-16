@@ -1008,54 +1008,66 @@ impl HandleRangeMap {
     //         return;
     //     }
     // ```
-    fn add_location(&mut self, loc: V<'_>, state: &mut AddState<'_>) {
-        let (variant, value) = loc.choice();
-        match variant {
-            "empty" => {
-                let handle = Handle::of(value.seq_id(), state.handles);
-                self.add(handle, Range::EMPTY, UNKNOWN, state)
-            }
-            "whole" => {
-                let handle = Handle::of(value.seq_id(), state.handles);
-                self.add(handle, Range::WHOLE, UNKNOWN, state)
-            }
-            "int" => self.add_interval(value, state),
-            "packed-int" => {
-                for interval in value.items() {
-                    self.add_interval(interval, state);
-                }
-            }
-            "pnt" => self.add_point(value, state),
-            "packed-pnt" => {
-                // One handle for all the points (`idh`).
-                let handle = Handle::of(value.field("id").seq_id(), state.handles);
-                let strand = value.get("strand").map_or(UNKNOWN, V::int);
-                for point in value.field("points").ints() {
-                    let point = point as u32;
-                    self.add(handle.clone(), Range::new(point, point), strand, state);
-                }
-            }
-            "mix" => {
-                for part in value.items() {
-                    self.add_location(part, state);
-                }
-            }
-            "equiv" => {
-                for (index, part) in value.items().enumerate() {
-                    if index > 0 {
+    fn add_location<'v>(&mut self, loc: V<'v>, state: &mut AddState<'_>) {
+        // The `mix` and `equiv` locations being walked (to any depth the reader read): the
+        // location's parts, the next one, and whether it is an `equiv`.
+        let mut sets: Vec<(V<'v>, usize, bool)> = Vec::new();
+        let mut next = Some(loc);
+        loop {
+            let loc = match next.take() {
+                Some(loc) => loc,
+                None => {
+                    let Some((parts, index, equiv)) = sets.last_mut() else {
+                        return;
+                    };
+                    let Some(part) = parts.item(*index) else {
+                        sets.pop();
+                        continue;
+                    };
+                    if *equiv && *index > 0 {
                         state.prev = None;
                     }
-                    self.add_location(part, state);
+                    *index += 1;
+                    part
                 }
-            }
-            "bond" => {
-                self.add_point(value.field("a"), state);
-                if let Some(b) = value.get("b") {
-                    self.add_point(b, state);
+            };
+            let (variant, value) = loc.choice();
+            match variant {
+                "empty" => {
+                    let handle = Handle::of(value.seq_id(), state.handles);
+                    self.add(handle, Range::EMPTY, UNKNOWN, state)
                 }
+                "whole" => {
+                    let handle = Handle::of(value.seq_id(), state.handles);
+                    self.add(handle, Range::WHOLE, UNKNOWN, state)
+                }
+                "int" => self.add_interval(value, state),
+                "packed-int" => {
+                    for interval in value.items() {
+                        self.add_interval(interval, state);
+                    }
+                }
+                "pnt" => self.add_point(value, state),
+                "packed-pnt" => {
+                    // One handle for all the points (`idh`).
+                    let handle = Handle::of(value.field("id").seq_id(), state.handles);
+                    let strand = value.get("strand").map_or(UNKNOWN, V::int);
+                    for point in value.field("points").ints() {
+                        let point = point as u32;
+                        self.add(handle.clone(), Range::new(point, point), strand, state);
+                    }
+                }
+                "mix" => sets.push((value, 0, false)),
+                "equiv" => sets.push((value, 0, true)),
+                "bond" => {
+                    self.add_point(value.field("a"), state);
+                    if let Some(b) = value.get("b") {
+                        self.add_point(b, state);
+                    }
+                }
+                // `null`, `feat`.
+                _ => {}
             }
-            // `null`, `feat`.
-            _ => {}
         }
     }
 

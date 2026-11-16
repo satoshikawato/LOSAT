@@ -10,7 +10,7 @@ use crate::seqid::model::{ObjectId, ParsedSeqId};
 
 /// The value of the document `text` of the root type `root`, or the error, with the posts.
 fn read(root: u16, text: impl AsRef<[u8]>) -> (Result<Value, ReadError>, Vec<Post>) {
-    read_document(text.as_ref(), root, &super::PSIBLAST_STACK)
+    read_document(text.as_ref(), root, super::PSIBLAST_STACK)
 }
 
 fn value(root: u16, text: &str) -> Value {
@@ -249,10 +249,11 @@ fn visible_strings_replace_their_bad_bytes_with_ncbis_message() {
     ]
     .concat();
     let (comment, posts) = read(named::SEQDESC, text);
-    let Value::Choice(_, comment) = comment.unwrap() else {
+    let comment = comment.unwrap();
+    let Value::Choice(_, comment) = &comment else {
         panic!()
     };
-    assert_eq!(*comment, Value::Str(format!("#\"qz#{long}#").into_bytes()));
+    assert_eq!(**comment, Value::Str(format!("#\"qz#{long}#").into_bytes()));
     let messages: Vec<Vec<u8>> = posts.iter().map(|post| post.line("tblastn")).collect();
     assert_eq!(
         messages,
@@ -472,7 +473,7 @@ fn comments_are_white_space() {
         named::SEQ_DESCR,
         "Seq-descr ::= { -- one --\n  title \"a -- not a comment --\" -- two\n , name \"n\" }",
     );
-    let Value::List(items) = descr else { panic!() };
+    let Value::List(items) = &descr else { panic!() };
     assert_eq!(
         items[0],
         Value::Choice(
@@ -586,9 +587,8 @@ fn a_seq_id_is_read_into_the_seq_id_model() {
         named::SEQ_ID,
         "Seq-id ::= pdb { mol \"1abc\", chain 32, rel std { year 2000 } }",
     );
-    let Value::SeqId(pdb) = pdb else { panic!() };
-    let ParsedSeqId::Pdb(pdb) = *pdb else {
-        panic!("{pdb:?}")
+    let Some(ParsedSeqId::Pdb(pdb)) = pdb.into_seq_id() else {
+        panic!()
     };
     assert_eq!(pdb.chain, Some(32));
     assert_eq!(pdb.mol, b"1abc");
@@ -600,10 +600,7 @@ fn a_seq_id_is_read_into_the_seq_id_model() {
         ))))
     );
     let general = value(named::SEQ_ID, "Seq-id ::= general { db \"x\", tag id -3 }");
-    let Value::SeqId(general) = general else {
-        panic!()
-    };
-    let ParsedSeqId::General(dbtag) = *general else {
+    let Some(ParsedSeqId::General(dbtag)) = general.into_seq_id() else {
         panic!()
     };
     assert_eq!(dbtag.tag, ObjectId::Id(-3));
@@ -727,23 +724,21 @@ fn a_value_is_small() {
     );
 }
 
-/// NCBI's stack (`read::NcbiStack`): the reader refuses a value that would fill it, from the count
-/// of one type nested in itself or from several types' shares together (with the counts of a test,
-/// 3 Bioseq-sets and 4 Seq-loc mixes; NCBI's are thousands, line RG D3-1 fix round 5).
+/// NCBI's stack (`ncbi_stack`): the reader refuses a value that would fill it, from the bytes of one
+/// type nested in itself or of several types together (in a room of a test that holds 2 Bioseq-sets
+/// or 3 Seq-loc mixes; NCBI's 8 MiB hold thousands, line RG D3-1 fix rounds 5 and 6).
 #[test]
 fn values_nested_as_deep_as_ncbis_stack_holds_are_refused() {
-    static SMALL: super::NcbiStack = super::NcbiStack::of([
-        (named::BIOSEQ_SET, 3),
-        (named::SEQ_LOC_MIX, 4),
-        (named::SEQ_LOC_EQUIV, 4),
-        (named::USER_OBJECT, 9),
-        (named::SEQ_ALIGN, 9),
-        (named::PUB, 9),
-        (named::VARIATION_REF, 9),
-        (named::SEQTABLE_MULTI_DATA, 9),
-        (named::ORGNAME, 9),
-    ]);
-    let read = |root: u16, text: &str| read_document(text.as_bytes(), root, &SMALL).0;
+    let read = |root: u16, room: i64, text: &str| {
+        read_document(
+            text.as_bytes(),
+            root,
+            super::NcbiStack::with_room(false, room),
+        )
+        .0
+    };
+    // psiblast's bases and bytes per value (`ncbi_stack::PSIBLAST`).
+    let sets_room = 13072 + 2 * 1648;
     let bioseq = "seq { id { local id 1 }, inst { repr raw, mol aa } }";
     let sets = |n: usize| {
         let mut entry = bioseq.to_string();
@@ -752,11 +747,11 @@ fn values_nested_as_deep_as_ncbis_stack_holds_are_refused() {
         }
         format!("Seq-entry ::= {entry}")
     };
-    assert!(read(named::SEQ_ENTRY, &sets(2)).is_ok());
-    match read(named::SEQ_ENTRY, &sets(3)) {
+    assert!(read(named::SEQ_ENTRY, sets_room, &sets(2)).is_ok());
+    match read(named::SEQ_ENTRY, sets_room, &sets(3)) {
         Err(ReadError::Unsupported(what)) => {
             assert!(
-                what.contains("from 3 Bioseq-set values open at once"),
+                what.contains("(3 Bioseq-set values open at once)"),
                 "{what}"
             )
         }
@@ -767,7 +762,7 @@ fn values_nested_as_deep_as_ncbis_stack_holds_are_refused() {
         "Seq-entry ::= set {{ seq-set {{ {0}, {0} }} }}",
         sets(1).trim_start_matches("Seq-entry ::= ")
     );
-    assert!(read(named::SEQ_ENTRY, &wide).is_ok());
+    assert!(read(named::SEQ_ENTRY, sets_room, &wide).is_ok());
     let mixes = |n: usize, inner: &str| {
         let mut loc = inner.to_string();
         for _ in 0..n {
@@ -775,13 +770,14 @@ fn values_nested_as_deep_as_ncbis_stack_holds_are_refused() {
         }
         format!("Seq-loc ::= {loc}")
     };
+    let mixes_room = 11920 + 3 * 1216;
     let int = "int { from 0, to 1, id local id 1 }";
-    assert!(read(named::SEQ_LOC, &mixes(3, int)).is_ok());
+    assert!(read(named::SEQ_LOC, mixes_room, &mixes(3, int)).is_ok());
     assert!(matches!(
-        read(named::SEQ_LOC, &mixes(4, int)),
+        read(named::SEQ_LOC, mixes_room, &mixes(4, int)),
         Err(ReadError::Unsupported(_))
     ));
-    // Half of the stack in mixes and half in equivs is the whole of it.
+    // Mixes and equivs open at once add their bytes.
     let equivs = |n: usize| {
         let mut loc = int.to_string();
         for _ in 0..n {
@@ -789,9 +785,73 @@ fn values_nested_as_deep_as_ncbis_stack_holds_are_refused() {
         }
         loc
     };
-    assert!(read(named::SEQ_LOC, &mixes(2, &equivs(1))).is_ok());
+    assert!(read(named::SEQ_LOC, mixes_room, &mixes(2, &equivs(1))).is_ok());
     assert!(matches!(
-        read(named::SEQ_LOC, &mixes(2, &equivs(2))),
+        read(named::SEQ_LOC, mixes_room, &mixes(2, &equivs(2))),
         Err(ReadError::Unsupported(_))
     ));
+}
+
+/// The reader keeps the values it reads in a list on the heap, and a value drops its nested values
+/// from one: 100,000 nested Seq-loc mixes (NCBI's stack holds them with a stack limit of about
+/// 116 MiB) are read and dropped on a thread of 256 KiB, as on the main thread of every target.
+#[test]
+fn a_nest_of_any_depth_is_read_without_recursion() {
+    std::thread::Builder::new()
+        .stack_size(256 << 10)
+        .spawn(|| {
+            let depth = 100_000;
+            let mut text = String::from("Seq-loc ::= ");
+            text.push_str(&"mix { ".repeat(depth));
+            text.push_str("int { from 0, to 1, id local id 1 }");
+            text.push_str(&" }".repeat(depth));
+            let (value, posts) = read_document(
+                text.as_bytes(),
+                named::SEQ_LOC,
+                super::NcbiStack::with_room(false, i64::MAX),
+            );
+            assert!(posts.is_empty());
+            let value = value.expect("read");
+            let (mut at, mut levels) = (&value, 0);
+            while let Value::Choice(_, inner) = at {
+                match &**inner {
+                    Value::List(items) if items.len() == 1 => {
+                        at = &items[0];
+                        levels += 1;
+                    }
+                    _ => break,
+                }
+            }
+            assert_eq!(levels, depth);
+            // A clone is made from a list on the heap too.
+            let copy = value.clone();
+            drop(value);
+            let (mut at, mut levels) = (&copy, 0);
+            while let Value::Choice(_, inner) = at {
+                match &**inner {
+                    Value::List(items) if items.len() == 1 => {
+                        at = &items[0];
+                        levels += 1;
+                    }
+                    _ => break,
+                }
+            }
+            assert_eq!(levels, depth);
+            assert!(
+                matches!(at, Value::Choice(..)),
+                "the interval at the bottom"
+            );
+            drop(copy);
+            // An error deep inside: NCBI's frames are left one by one.
+            let broken = text.replacen("int {", "int [", 1);
+            let (value, _) = read_document(
+                broken.as_bytes(),
+                named::SEQ_LOC,
+                super::NcbiStack::with_room(false, i64::MAX),
+            );
+            assert!(matches!(value, Err(ReadError::Serial(_))), "{value:?}");
+        })
+        .expect("a thread")
+        .join()
+        .expect("no overflow");
 }

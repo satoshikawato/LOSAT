@@ -23,13 +23,14 @@
 //! `CATCH_ALL`); and an end of the text directly in the root object, a `CEofException` that NCBI's
 //! stack passes on.
 
-use super::table::named;
 use super::{resolved, EnumValue, Kind, Member, Storage, StringKind, Value};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::serial::asn_text_reader::{
     real_of_parts, AsnSource, AsnTextError, AsnTextErrorKind, MemberId, Reader, SliceSource,
 };
 use crate::report::serial::encoder::{object_stack_trace, ReplacedChar, StackStep, StreamPosition};
+
+use super::ncbi_stack::{Depth, NcbiStack};
 
 /// A message that NCBI's reader posts while it reads, in the order posted.
 #[derive(Clone, Debug, PartialEq)]
@@ -286,14 +287,14 @@ const NUMBER_OVERFLOW: ThrowSite = ThrowSite {
 
 /// Reads the ASN.1 text document at the start of `text` as the root type `root` (an object of
 /// `CObjectIStream::Read`: its file header, then the value; what follows it is not read), with
-/// the messages posted.
-pub(crate) fn read_document(text: &[u8], root: u16, ncbi_stack: &'static NcbiStack) -> Read<Value> {
+/// the messages posted, refusing the values that NCBI's stack `ncbi_stack` may not hold.
+pub(crate) fn read_document(text: &[u8], root: u16, ncbi_stack: NcbiStack) -> Read<Value> {
     let mut reader = TypedReader {
         r: Reader::new(SliceSource::new(text), "PSSM", "PSSM reader"),
         frames: Vec::new(),
         posts: Vec::new(),
-        ncbi_stack,
-        stack: 0,
+        open: Vec::new(),
+        depth: Depth::new(ncbi_stack),
     };
     let value = reader.document(root);
     (value, reader.posts)
@@ -303,81 +304,49 @@ struct TypedReader<'a> {
     r: Reader<SliceSource<'a>>,
     frames: Vec<Frame>,
     posts: Vec<Post>,
-    /// NCBI's stack of the program that reads, and the share of it that the open values of its
-    /// recursive types take (in units of `STACK_UNITS`).
-    ncbi_stack: &'static NcbiStack,
-    stack: u64,
+    /// The values being read, outermost first (`Open`): NCBI's recursion of `ReadObject` as a list
+    /// on the heap, so that a value nested to any depth is read in LOSAT's own stack.
+    open: Vec<Open>,
+    /// The values of NCBI's recursive types open, against NCBI's stack (`ncbi_stack::Depth`).
+    depth: Depth,
 }
 
-// NCBI BLAST+ 2.17.0 reads a PSSM with `CObjectIStreamAsn`, whose functions recurse once per open
-// value, on the main thread's stack (8 MB by default). A type that nests in itself can fill it: the
-// reader overflows the stack and the run ends with SIGSEGV before any output (gdb: the deepest
-// frames are `CObjectIStreamAsn` functions under `CPsiBlastArgs::ExtractAlgorithmOptions`). Where
-// it does depends on the stack's random start (`arch_align_stack`: up to 8 KB less stack, a few
-// levels) and on the size of the environment and the command line; LOSAT refuses a PSSM from the
-// depth at which NCBI may crash, that of a run whose stack starts as low as it can (`setarch -R`
-// with 8,192 more bytes of environment, in an environment of about 5 KB), and reads every
-// shallower one as NCBI does.
-/// NCBI's stack as one program's reader of a PSSM fills it: for each type that nests in itself,
-/// the number of its values open at once at which the program may crash, one type nested in
-/// itself in a query Bioseq (a Bioseq-set: the query entry; Seq-loc-mix and Seq-loc-equiv: a
-/// feature's location; User-object, Pub, OrgName: a descriptor; Seq-align: an annotation;
-/// Variation-ref: a feature; SeqTable-multi-data: a Seq-table column), `-db` (line RG D3-1 fix
-/// round 5, `r5/bisect/`). A value of a recursive type takes `1 / count` of the stack, and the
-/// reader refuses the PSSM when its open values take all of it; values of other types and the
-/// frames above the first recursive one count as the measured contexts had them.
-pub(crate) struct NcbiStack {
-    depths: [(u16, u64); 9],
+/// A value being read that waits for a value inside it (`TypedReader::value`).
+enum Open {
+    /// The end of `ReadObject` of the type `target`: the hooks of its class (not after a skip),
+    /// and the recursive value closed (`recursive`).
+    Value {
+        target: u16,
+        skip: bool,
+        recursive: bool,
+    },
+    /// A SEQUENCE reading the member at `reading` (`members`).
+    Sequence {
+        ty: u16,
+        members: &'static [Member],
+        skip: bool,
+        values: Vec<(u16, Value)>,
+        reading: usize,
+        block_start: bool,
+    },
+    /// A CHOICE reading its variant.
+    Choice { index: u16 },
+    /// A SEQUENCE OF or SET OF reading an element.
+    List {
+        element: u16,
+        skip: bool,
+        values: Vec<Value>,
+        block_start: bool,
+    },
+    /// A delayed member (`delayed`) from `start`.
+    Delayed { start: usize },
 }
 
-/// psiblast's (`r5/bisect/psiblast.*.fixed.pad8192.txt`).
-pub(crate) const PSIBLAST_STACK: NcbiStack = NcbiStack {
-    depths: [
-        (named::BIOSEQ_SET, 5074),
-        (named::SEQ_LOC_MIX, 6877),
-        (named::SEQ_LOC_EQUIV, 6877),
-        (named::USER_OBJECT, 4149),
-        (named::SEQ_ALIGN, 5743),
-        (named::PUB, 7575),
-        (named::VARIATION_REF, 3961),
-        (named::SEQTABLE_MULTI_DATA, 9503),
-        (named::ORGNAME, 4507),
-    ],
-};
-
-/// tblastn's (`r5/bisect/tblastn.*.fixed.pad8192.txt`).
-pub(crate) const TBLASTN_STACK: NcbiStack = NcbiStack {
-    depths: [
-        (named::BIOSEQ_SET, 5074),
-        (named::SEQ_LOC_MIX, 6878),
-        (named::SEQ_LOC_EQUIV, 6878),
-        (named::USER_OBJECT, 4150),
-        (named::SEQ_ALIGN, 5743),
-        (named::PUB, 7575),
-        (named::VARIATION_REF, 3961),
-        (named::SEQTABLE_MULTI_DATA, 9504),
-        (named::ORGNAME, 4507),
-    ],
-};
-
-/// The whole of NCBI's stack (`NcbiStack`): a value of a type of count `n` takes
-/// `ceil(STACK_UNITS / n)`, so that `n - 1` values of one type fit and `n` do not (`n` < 2^20).
-const STACK_UNITS: u64 = 1 << 40;
-
-impl NcbiStack {
-    /// A stack of the counts `depths` (the tests of the rule with small counts).
-    #[cfg(test)]
-    pub(crate) const fn of(depths: [(u16, u64); 9]) -> NcbiStack {
-        NcbiStack { depths }
-    }
-
-    /// The share of the stack that a value of the type `ty` takes, and its count.
-    fn share(&self, ty: u16) -> Option<(u64, u64)> {
-        self.depths
-            .iter()
-            .find(|&&(nested, _)| nested == ty)
-            .map(|&(_, count)| (STACK_UNITS.div_ceil(count), count))
-    }
+/// What the reader does next: read a value of a type (`skip`), or give a value read to the one
+/// that holds it.
+enum Step {
+    Read(u16, bool),
+    Done(Value),
 }
 
 impl TypedReader<'_> {
@@ -497,36 +466,58 @@ impl TypedReader<'_> {
         self.pop(value)
     }
 
-    /// One value of the type `ty` (`ReadObject`), or its skip (`SkipObject`, `skip`), then the
-    /// hooks of NCBI's classes that a read runs; LOSAT's refusal of a value that NCBI's stack does
-    /// not hold (`NcbiStack`).
+    /// One value of the type `ty` (`ReadObject`), or its skip (`SkipObject`, `skip`), with the hooks
+    /// of NCBI's classes that a read runs and LOSAT's refusal of a value that NCBI's stack may not
+    /// hold (`Depth`). The values inside it are read in turn from the list of the values being read
+    /// (`open`), as NCBI's functions recurse; an error leaves NCBI's frames from the innermost out
+    /// (`pop`), as it passes `END_OBJECT_FRAME` of each.
     fn value(&mut self, ty: u16, skip: bool) -> R<Value> {
-        let Some((share, count)) = self.ncbi_stack.share(alias_target(ty)) else {
-            return self.value_of(ty, skip);
-        };
-        self.stack += share;
-        let value = if self.stack >= STACK_UNITS {
-            Err(ReadError::Unsupported(format!(
-                "a PSSM whose values nest as deep as NCBI's reader does not read (NCBI BLAST+ overflows its stack and crashes from {count} {} values open at once, or fewer with other recursive values open)",
-                resolved(ty).name()
-            )))
-        } else {
-            self.value_of(ty, skip)
-        };
-        self.stack -= share;
-        value
+        let (open, frames) = (self.open.len(), self.frames.len());
+        let mut step = self.start(ty, skip);
+        loop {
+            step = match step {
+                Ok(Step::Read(ty, skip)) => self.start(ty, skip),
+                Ok(Step::Done(value)) if self.open.len() == open => return Ok(value),
+                Ok(Step::Done(value)) => {
+                    let held = self.open.pop().expect("a value being read");
+                    self.resume(held, value)
+                }
+                Err(mut error) => {
+                    self.open.truncate(open);
+                    while self.frames.len() > frames {
+                        error = match self.pop::<()>(Err(error)) {
+                            Err(error) => error,
+                            Ok(()) => unreachable!("an error stays one"),
+                        };
+                    }
+                    return Err(error);
+                }
+            };
+        }
     }
 
-    /// `value` of a type that is not recursive, or within NCBI's stack.
-    fn value_of(&mut self, ty: u16, skip: bool) -> R<Value> {
+    /// The start of a value of the type `ty` (`ReadObject`'s type function): a value without
+    /// values inside it is read here, a SEQUENCE, CHOICE or SEQUENCE OF opens (`Open`).
+    fn start(&mut self, ty: u16, skip: bool) -> R<Step> {
         let info = resolved(ty);
         let target = alias_target(ty);
+        let recursive = self.depth.open(target).map_err(ReadError::Unsupported)?;
+        self.open.push(Open::Value {
+            target,
+            skip,
+            recursive,
+        });
         let value = match info.kind {
             Kind::Sequence(members) => {
-                self.sequence(target, info.name(), members.members(), skip)?
+                self.push_object(FrameKind::Class, target, info.name(), skip);
+                self.r.start_block()?;
+                self.push(FrameKind::ClassMember, None, skip);
+                return self.next_member(target, members.members(), skip, Vec::new(), 0, true);
             }
-            Kind::Choice(variants) => self.choice(target, info.name(), variants.members(), skip)?,
-            Kind::List { element, .. } => self.list(element, skip)?,
+            Kind::Choice(variants) => {
+                return self.start_choice(target, info.name(), variants.members(), skip)
+            }
+            Kind::List { element, .. } => return self.start_list(element, skip),
             Kind::Alias(_) => unreachable!("resolved"),
             Kind::Integer(storage) => self.integer(storage, skip)?,
             Kind::Enumerated { integer, values } => {
@@ -541,16 +532,74 @@ impl TypedReader<'_> {
             Kind::String(kind) => Value::Str(self.string(kind, skip)?),
             Kind::Octets => self.octets(skip)?,
         };
-        if skip {
-            return Ok(value);
-        }
-        super::hooks::post_read(target, value, &mut self.posts)
+        Ok(Step::Done(value))
     }
 
-    /// `ReadClassSequential` / `SkipClassSequential`: the class frame, `{`, the member frame, the
-    /// members in module order (`BeginClassMember(classType, pos)`) with the mandatory members
-    /// before each one checked, the member frame left, the mandatory members after the last one
-    /// checked, `}`.
+    /// A value read is given to the value being read that holds it (`held`).
+    fn resume(&mut self, held: Open, value: Value) -> R<Step> {
+        match held {
+            Open::Value {
+                target,
+                skip,
+                recursive,
+            } => {
+                if recursive {
+                    self.depth.close();
+                }
+                if skip {
+                    return Ok(Step::Done(value));
+                }
+                super::hooks::post_read(target, value, &mut self.posts).map(Step::Done)
+            }
+            Open::Sequence {
+                ty,
+                members,
+                skip,
+                mut values,
+                reading,
+                block_start,
+            } => {
+                if !skip {
+                    // The `num-rows` of a Seq-table, which the reserve hook of its columns' data
+                    // reads from the object being read (`hooks::pre_read_variant`).
+                    if ty == super::table::named::SEQ_TABLE && members[reading].name() == "num-rows"
+                    {
+                        let at = self.frames.len() - 2;
+                        if let Value::Int(rows) = &value {
+                            self.frames[at].num_rows = Some(*rows);
+                        }
+                    }
+                    values.push((reading as u16, value));
+                }
+                self.next_member(ty, members, skip, values, reading + 1, block_start)
+            }
+            Open::Choice { index } => {
+                self.frames.pop();
+                self.frames.pop();
+                Ok(Step::Done(Value::Choice(index, Box::new(value))))
+            }
+            Open::List {
+                element,
+                skip,
+                mut values,
+                block_start,
+            } => {
+                if !skip {
+                    values.push(value);
+                }
+                self.next_element(element, skip, values, block_start)
+            }
+            Open::Delayed { start } => Ok(Step::Done(Value::Delayed(
+                self.r.bytes(start..self.r.pos).to_vec(),
+            ))),
+        }
+    }
+
+    /// `ReadClassSequential` / `SkipClassSequential` (`start`: the class frame, `{`, the member
+    /// frame): the next member in module order (`BeginClassMember(classType, pos)`) with the
+    /// mandatory members before it checked, and a read's (not a skip's) member hooks before its
+    /// value (`hooks::pre_read_member`); after the last, the member frame left, the mandatory
+    /// members after it checked, `}`, the class frame left.
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrimpl.hpp:86-111
     // ```c++
     // #define ClassSequentialContentsBegin(classType) \
@@ -580,42 +629,16 @@ impl TypedReader<'_> {
     //     } \
     // }
     // ```
-    fn sequence(
-        &mut self,
-        ty: u16,
-        name: &'static str,
-        members: &'static [Member],
-        skip: bool,
-    ) -> R<Value> {
-        self.push_object(FrameKind::Class, ty, name, skip);
-        let result = self.sequence_in_frame(ty, members, skip);
-        self.pop(result)
-    }
-
-    fn sequence_in_frame(&mut self, ty: u16, members: &'static [Member], skip: bool) -> R<Value> {
-        self.r.start_block()?;
-        self.push(FrameKind::ClassMember, None, skip);
-        let result = self.members(ty, members, skip);
-        let (values, pos) = self.pop(result)?;
-        for member in &members[pos..] {
-            expected_member(member)?;
-        }
-        self.r.end_block()?;
-        Ok(Value::Sequence(values))
-    }
-
-    /// The members of the SEQUENCE `ty`; a read (not a skip) runs the class's member hooks
-    /// before each member's value (`hooks::pre_read_member`).
-    fn members(
+    fn next_member(
         &mut self,
         ty: u16,
         members: &'static [Member],
         skip: bool,
-    ) -> R<(Vec<(u16, Value)>, usize)> {
-        let mut values = Vec::new();
-        let mut pos = 0;
-        let mut block_start = true;
-        while self.r.next_element(&mut block_start)? {
+        values: Vec<(u16, Value)>,
+        pos: usize,
+        mut block_start: bool,
+    ) -> R<Step> {
+        if self.r.next_element(&mut block_start)? {
             let index = self.item_index(members, pos, true)?;
             let member = &members[index];
             self.set_member(member.name());
@@ -625,25 +648,33 @@ impl TypedReader<'_> {
             if !skip {
                 super::hooks::pre_read_member(ty, index, &values)?;
             }
-            let value = if member.flags & super::DELAYED != 0 && !skip {
-                self.delayed(member.ty)?
+            let delayed = member.flags & super::DELAYED != 0 && !skip;
+            let start = if delayed {
+                Some(self.delay_start()?)
             } else {
-                self.value(member.ty, skip)?
+                None
             };
-            if !skip {
-                // The `num-rows` of a Seq-table, which the reserve hook of its columns' data reads
-                // from the object being read (`hooks::pre_read_variant`).
-                if ty == super::table::named::SEQ_TABLE && member.name() == "num-rows" {
-                    let at = self.frames.len() - 2;
-                    if let Value::Int(rows) = &value {
-                        self.frames[at].num_rows = Some(*rows);
-                    }
-                }
-                values.push((index as u16, value));
+            self.open.push(Open::Sequence {
+                ty,
+                members,
+                skip,
+                values,
+                reading: index,
+                block_start,
+            });
+            if let Some(start) = start {
+                self.open.push(Open::Delayed { start });
+                return Ok(Step::Read(member.ty, true));
             }
-            pos = index + 1;
+            return Ok(Step::Read(member.ty, skip));
         }
-        Ok((values, pos))
+        self.frames.pop();
+        for member in &members[pos..] {
+            expected_member(member)?;
+        }
+        self.r.end_block()?;
+        self.frames.pop();
+        Ok(Step::Done(Value::Sequence(values)))
     }
 
     /// `ReadMemberId(SkipWhiteSpace())` and `GetMemberIndex(classType, id, pos)` (from `pos`,
@@ -693,8 +724,8 @@ impl TypedReader<'_> {
         found.ok_or_else(|| ReadError::Serial("unexpected member or variant".into()))
     }
 
-    /// The delayed member: `StartDelayBuffer` (white space skipped), the value skipped, the text
-    /// kept (`Value::Delayed`).
+    /// The delayed member: `StartDelayBuffer` (white space skipped), then the value skipped
+    /// (`Open::Delayed`), the text kept (`Value::Delayed`).
     // NCBI reference (598d8ae6): c++/src/serial/member.cpp:848-869
     // ```c++
     // void CMemberInfoFunctions::ReadLongMember(CObjectIStream& in,
@@ -723,14 +754,13 @@ impl TypedReader<'_> {
     // ```
     // (psiblast and tblastn set no hook on their stream: `ShouldParseDelayBuffer` is false,
     // objistr.cpp:745-760.)
-    fn delayed(&mut self, ty: u16) -> R<Value> {
+    fn delay_start(&mut self) -> R<usize> {
         self.r.skip_white_space()?;
-        let start = self.r.pos;
-        self.value(ty, true)?;
-        Ok(Value::Delayed(self.r.bytes(start..self.r.pos).to_vec()))
+        Ok(self.r.pos)
     }
 
-    /// `ReadChoiceSimple` / `SkipChoiceSimple`.
+    /// `ReadChoiceSimple` / `SkipChoiceSimple`: the variant of the CHOICE `ty`; a read (not a skip)
+    /// runs the class's variant hooks before its value (`hooks::pre_read_variant`).
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1482-1501
     // ```c++
     // void CObjectIStream::ReadChoiceSimple(const CChoiceTypeInfo* choiceType,
@@ -756,23 +786,15 @@ impl TypedReader<'_> {
     // ```
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1453-1475 (`BeginChoiceVariant`,
     // quoted at `Reader::choice`: `NextElement` at the choice's start, then the variant's id)
-    fn choice(
+    fn start_choice(
         &mut self,
         ty: u16,
         name: &'static str,
         variants: &'static [Member],
         skip: bool,
-    ) -> R<Value> {
+    ) -> R<Step> {
         self.push_object(FrameKind::Choice, ty, name, skip);
         self.push(FrameKind::ChoiceVariant, None, skip);
-        let result = self.variant(ty, variants, skip);
-        let result = self.pop(result);
-        self.pop(result)
-    }
-
-    /// The variant of the CHOICE `ty`; a read (not a skip) runs the class's variant hooks before
-    /// its value (`hooks::pre_read_variant`).
-    fn variant(&mut self, ty: u16, variants: &'static [Member], skip: bool) -> R<Value> {
         let mut block_start = true;
         if !self.r.next_element(&mut block_start)? {
             return Err(ReadError::Serial("choice variant id expected".into()));
@@ -783,8 +805,10 @@ impl TypedReader<'_> {
         if !skip {
             super::hooks::pre_read_variant(ty, index, &self.frames)?;
         }
-        let value = self.value(variant.ty, skip)?;
-        Ok(Value::Choice(index as u16, Box::new(value)))
+        self.open.push(Open::Choice {
+            index: index as u16,
+        });
+        Ok(Step::Read(variant.ty, skip))
     }
 
     /// `ReadContainer` / `SkipContainer`.
@@ -812,42 +836,49 @@ impl TypedReader<'_> {
     // The container's type information is anonymous (an implicit class such as `Seq-descr` has
     // no frame of its own, `ReadImplicitMember`, classinfo.cpp:289-306): `Object type= ` names
     // nothing (c07 of SURVEY_D3).
-    fn list(&mut self, element: u16, skip: bool) -> R<Value> {
+    fn start_list(&mut self, element: u16, skip: bool) -> R<Step> {
         self.push(FrameKind::Array, Some(""), skip);
-        let result = self.list_in_frame(element, skip);
-        self.pop(result)
-    }
-
-    fn list_in_frame(&mut self, element: u16, skip: bool) -> R<Value> {
         self.r.start_block()?;
         self.push(FrameKind::ArrayElement, None, skip);
-        let result = match resolved(element).kind {
+        let numbers = match resolved(element).kind {
             // The elements of an INTEGER or REAL list are read as the numbers themselves (no
             // `Value` each: a PSSM holds thousands); they have no hook.
             Kind::Integer(storage @ (Storage::Int2 | Storage::Int4)) => {
                 // `integer` checked the storage's range.
-                self.integers(storage, skip, |value| value as i32)
-                    .map(Value::Int4s)
+                Value::Int4s(self.integers(storage, skip, |value| value as i32)?)
             }
-            Kind::Integer(storage) => self.integers(storage, skip, |value| value).map(Value::Ints),
-            Kind::Real => self.reals(skip).map(Value::Reals),
-            _ => self.elements(element, skip).map(Value::List),
+            Kind::Integer(storage) => Value::Ints(self.integers(storage, skip, |value| value)?),
+            Kind::Real => Value::Reals(self.reals(skip)?),
+            _ => return self.next_element(element, skip, Vec::new(), true),
         };
-        let value = self.pop(result)?;
+        self.frames.pop();
         self.r.end_block()?;
-        Ok(value)
+        self.frames.pop();
+        Ok(Step::Done(numbers))
     }
 
-    fn elements(&mut self, element: u16, skip: bool) -> R<Vec<Value>> {
-        let mut values = Vec::new();
-        let mut block_start = true;
-        while self.r.next_element(&mut block_start)? {
-            let value = self.value(element, skip)?;
-            if !skip {
-                values.push(value);
-            }
+    /// The next element of a SEQUENCE OF or SET OF of values; after the last, the element frame
+    /// left, `}`, the array frame left.
+    fn next_element(
+        &mut self,
+        element: u16,
+        skip: bool,
+        values: Vec<Value>,
+        mut block_start: bool,
+    ) -> R<Step> {
+        if self.r.next_element(&mut block_start)? {
+            self.open.push(Open::List {
+                element,
+                skip,
+                values,
+                block_start,
+            });
+            return Ok(Step::Read(element, skip));
         }
-        Ok(values)
+        self.frames.pop();
+        self.r.end_block()?;
+        self.frames.pop();
+        Ok(Step::Done(Value::List(values)))
     }
 
     /// `elements` of an INTEGER list, each `store`d as the list keeps it.

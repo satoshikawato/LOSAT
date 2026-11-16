@@ -542,7 +542,26 @@ def check(args: argparse.Namespace) -> int:
     return 1 if bad else 0
 
 
+# The stack limit of every run of both programs: the default 8 MiB, whatever the caller's. psiblast's
+# and tblastn's `-in_pssm` refuse a PSSM nested deeper than NCBI's stack holds with the run's limit
+# (`asn_types::ncbi_stack`; rows `*.inpssm.d3.om.r6.nest_*`, whose depths NCBI reads, or not, with any
+# environment below about 290 KB at this limit).
+STACK_LIMIT = 8 << 20
+
+
+def pin_stack_limit() -> None:
+    """Sets this process's (and so its children's) stack limit to `STACK_LIMIT` (POSIX only)."""
+    try:
+        import resource
+    except ImportError:
+        return
+    _, hard = resource.getrlimit(resource.RLIMIT_STACK)
+    if hard == resource.RLIM_INFINITY or hard >= STACK_LIMIT:
+        resource.setrlimit(resource.RLIMIT_STACK, (STACK_LIMIT, hard))
+
+
 def main() -> int:
+    pin_stack_limit()
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
     fz = sub.add_parser("freeze", help="run NCBI and write the frozen bytes and the manifest columns")

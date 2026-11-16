@@ -11,7 +11,7 @@ fn column_value(text: &str) -> Value {
     let (value, posts) = read_document(
         format!("SeqTable-column ::= {{ header {{ field-id 3 }}, {text} }}").as_bytes(),
         named::SEQTABLE_COLUMN,
-        &crate::report::serial::asn_types::PSIBLAST_STACK,
+        crate::report::serial::asn_types::PSIBLAST_STACK,
     );
     assert!(posts.is_empty());
     value.unwrap_or_else(|error| panic!("{text}: {error:?}"))
@@ -207,4 +207,55 @@ fn int_scaled_values() {
         ),
         ["R:ScaledOverflow"]
     );
+}
+
+/// The multi-data inside multi-data are read from a list on the heap: 50,000 nested `int-scaled`
+/// (each adding 1) and 2,000 nested `int-delta` values give their rows on a thread of 256 KiB.
+#[test]
+fn nested_multi_data_are_read_without_recursion() {
+    std::thread::Builder::new()
+        .stack_size(256 << 10)
+        .spawn(|| {
+            let read = |text: String| {
+                let (value, posts) = read_document(
+                    text.as_bytes(),
+                    named::SEQTABLE_COLUMN,
+                    crate::report::serial::asn_types::NcbiStack::with_room(false, i64::MAX),
+                );
+                assert!(posts.is_empty());
+                value.expect("read")
+            };
+            let wrap = |n: usize, open: &str, inner: &str, close: &str| {
+                format!("{}{inner}{}", open.repeat(n), close.repeat(n))
+            };
+            let rows = |value: &Value| {
+                let column = Column(V::new(named::SEQTABLE_COLUMN, value));
+                let mut ix = indexer();
+                (0..3)
+                    .map(|row| match ix.column_try_get(column, row, Want::Int8) {
+                        Ok(v) => format!("{v:?}"),
+                        Err(other) => format!("{other:?}"),
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let scaled = read(format!(
+                "SeqTable-column ::= {{ header {{ field-id 3 }}, data {} }}",
+                wrap(
+                    50_000,
+                    "int-scaled { mul 1, add 1, data ",
+                    "int { 4, 9 }",
+                    " }"
+                )
+            ));
+            assert_eq!(rows(&scaled), ["Some(50004)", "Some(50009)", "None"]);
+            // `int-delta` of `int-delta`s: the sums of the sums.
+            let delta = read(format!(
+                "SeqTable-column ::= {{ header {{ field-id 3 }}, data {} }}",
+                wrap(2_000, "int-delta ", "int { 4, 9 }", "")
+            ));
+            assert_eq!(rows(&delta), ["Some(4)", "Some(8009)", "None"]);
+        })
+        .expect("a thread")
+        .join()
+        .expect("no overflow");
 }

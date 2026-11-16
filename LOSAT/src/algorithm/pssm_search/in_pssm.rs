@@ -309,19 +309,13 @@ impl PssmReader<'static> {
     };
 }
 
-/// The stack of the reader of a PSSM and of the object manager's step over its query entry
-/// (`read_in_pssm`): LOSAT's recursion over the values that NCBI's stack holds
-/// (`asn_types::NcbiStack`, about 3.5 KB of LOSAT's stack for each Bioseq-set level that takes
-/// 1.6 KB of NCBI's) with room to spare. Only the pages the recursion reaches are used.
-const DEEP_STACK: usize = 256 << 20;
-
 impl PssmReader<'_> {
-    /// NCBI's stack as the program's reader of a PSSM fills it.
-    fn ncbi_stack(&self) -> &'static crate::report::serial::asn_types::NcbiStack {
+    /// NCBI's stack as the program's reader of a PSSM fills it in this run.
+    fn ncbi_stack(&self) -> crate::report::serial::asn_types::NcbiStack {
         if self.program == "TBLASTN" {
-            &crate::report::serial::asn_types::TBLASTN_STACK
+            crate::report::serial::asn_types::TBLASTN_STACK
         } else {
-            &crate::report::serial::asn_types::PSIBLAST_STACK
+            crate::report::serial::asn_types::PSIBLAST_STACK
         }
     }
 
@@ -435,13 +429,10 @@ pub(crate) fn read_in_pssm(
     // severity; the reader's posts are errors (`ERR_POST_X(7, ...)` of a replaced byte, whose text
     // has three lines, and `ERR_POST(Error << ...)` of `PostRead`; NCBI BLAST+ 2.17.0 tblastn
     // -outfmt 11 of a PSSM whose title has a control byte and whose ratios overflow: `code 2`).
-    // The reader and the object manager's step recurse as deep as the PSSM's values nest, which
-    // NCBI's reader lets go until its own stack is full (`asn_types::NcbiStack`): both run on a
-    // stack that holds that (`DEEP_STACK`).
-    let ncbi_stack = reader.ncbi_stack();
-    let read = crate::utils::threading::with_stack(DEEP_STACK, || {
-        crate::blastinput::pssm_text::read_pssm(text, ncbi_stack)
-    });
+    // NCBI's reader lets the PSSM's values nest until its own stack is full: LOSAT's reader and
+    // the object manager's step keep the values they are in on the heap, and LOSAT refuses the
+    // depths at which NCBI's stack may overflow in this run (`asn_types::NcbiStack`).
+    let read = crate::blastinput::pssm_text::read_pssm(text, reader.ncbi_stack());
     let program = reader.program.to_ascii_lowercase();
     let mut posts = crate::report::diag_log::Posts::new();
     for post in &read.posts {
@@ -687,10 +678,8 @@ pub(crate) fn psi_search_and_object(
     // addresses, crashes, undefined behaviour) is refused here, before any output. With `-db` no
     // other sequence is in NCBI's scope before the query (`PssmReader::database`).
     let program = reader.program.to_ascii_lowercase();
-    let mut annot = crate::utils::threading::with_stack(DEEP_STACK, || {
-        super::annot_index::index_entry(&program, entry, reader.database)
-    })
-    .map_err(|refusal| reader.refuse(refusal.text()))?;
+    let mut annot = super::annot_index::index_entry(&program, entry, reader.database)
+        .map_err(|refusal| reader.refuse(refusal.text()))?;
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:539-540 (tblastn_app.cpp:228)
     // ```c++
     // 		CRef<CSeq_loc> sl(new CSeq_loc());

@@ -14,7 +14,7 @@ fn index(annots: &[&str]) -> Result<AnnotOutcome, Refusal> {
             let (value, posts) = read_document(
                 format!("Seq-annot ::= {text}").as_bytes(),
                 named::SEQ_ANNOT,
-                &crate::report::serial::asn_types::PSIBLAST_STACK,
+                crate::report::serial::asn_types::PSIBLAST_STACK,
             );
             assert!(posts.is_empty(), "{posts:?}");
             value.unwrap_or_else(|error| panic!("{text}: {error:?}"))
@@ -610,4 +610,70 @@ fn giim_handles_live_as_ncbis_object_manager_keeps_them() {
         ))]),
         ""
     );
+}
+
+/// The object manager's step walks the values it reads from lists on the heap: 50,000 nested
+/// Bioseq-sets, a feature location of 50,000 nested Seq-loc mixes around 50,000 equivs, and an
+/// alignment of 50,000 nested `disc` sets are indexed on a thread of 256 KiB, as on the main
+/// thread of every target (the Seq-table's data: `table_tests`).
+#[test]
+fn nests_of_any_depth_are_walked_without_recursion() {
+    std::thread::Builder::new()
+        .stack_size(256 << 10)
+        .spawn(|| {
+            let deep = 50_000;
+            let read = |root: u16, text: String| {
+                let (value, posts) = read_document(
+                    text.as_bytes(),
+                    root,
+                    crate::report::serial::asn_types::NcbiStack::with_room(false, i64::MAX),
+                );
+                assert!(posts.is_empty(), "{posts:?}");
+                value.expect("read")
+            };
+            let wrap = |open: &str, inner: &str, close: &str| {
+                format!("{}{inner}{}", open.repeat(deep), close.repeat(deep))
+            };
+            let bioseq = format!(
+                "seq {{ id {{ {Q1} }}, inst {{ repr raw, mol aa, length 1, seq-data ncbistdaa '01'H }} }}"
+            );
+            let set = read(
+                named::BIOSEQ_SET,
+                format!(
+                    "Bioseq-set ::= {{ seq-set {{ {} }} }}",
+                    wrap("set { seq-set { ", &bioseq, " } }")
+                ),
+            );
+            let outcome = super::index_entry(
+                "psiblast",
+                &crate::report::serial::pssm::SeqEntry::Set(set),
+                true,
+            )
+            .expect("indexed");
+            assert!(outcome.abort.is_none());
+            let int = format!("int {{ from 0, to 1, id {Q1} }}");
+            let location = wrap("mix { ", &wrap("equiv { ", &int, " }"), " }");
+            let std = format!(
+                "{{ type global, dim 2, segs std {{ {{ dim 2, loc {{ {int}, {int} }} }} }} }}"
+            );
+            let annots = [
+                read(
+                    named::SEQ_ANNOT,
+                    format!("Seq-annot ::= {{ data ftable {{ {{ data region \"x\", location {location} }} }} }}"),
+                ),
+                read(
+                    named::SEQ_ANNOT,
+                    format!(
+                        "Seq-annot ::= {{ data align {{ {} }} }}",
+                        wrap("{ type disc, segs disc { ", &std, " } }")
+                    ),
+                ),
+            ];
+            let outcome = index_annots("psiblast", &annots, &[]).expect("indexed");
+            assert!(outcome.abort.is_none());
+            assert!(outcome.posts.is_empty());
+        })
+        .expect("a thread")
+        .join()
+        .expect("no overflow");
 }

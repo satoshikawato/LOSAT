@@ -489,35 +489,6 @@ pub(crate) fn probe_write(message: String) {
         .expect("diagnostic worker log write");
 }
 
-/// Runs `work` on a thread whose stack has `bytes`, and gives back its result: for code whose
-/// recursion goes as deep as its input nests (the ASN.1 reader of a PSSM and the object manager's
-/// step over its query entry, which NCBI's reader lets nest until its own stack is full:
-/// `report::serial::asn_types::NcbiStack`). Where no thread starts (a target without threads), the
-/// work runs on this thread. A panic of the work goes on here.
-pub(crate) fn with_stack<T: Send>(bytes: usize, work: impl FnOnce() -> T + Send) -> T {
-    let slot = std::sync::Mutex::new(Some(work));
-    let run = || {
-        let work = slot
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take()
-            .expect("the work runs once");
-        work()
-    };
-    std::thread::scope(|scope| {
-        match std::thread::Builder::new()
-            .name("losat-deep".into())
-            .stack_size(bytes)
-            .spawn_scoped(scope, run)
-        {
-            Ok(handle) => handle
-                .join()
-                .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
-            Err(_) => run(),
-        }
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

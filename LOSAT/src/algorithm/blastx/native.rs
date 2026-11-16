@@ -184,17 +184,19 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         || crate::report::pairwise::is_total_score_refusal(&error)
         || error.is::<crate::report::tax_report::TaxReportRefusal>()
         || error.is::<crate::report::tabular::FailedLookupRefusal>()
+        || error.is::<crate::algorithm::common::database::ParsedRefusal>()
         || error.is::<super::empty_rows::EmptyRowsRefusal>()
         || error.is::<crate::algorithm::common::database::FetchRefusal>()
     {
-        // LOSAT's refusal of a title NCBI's XML cannot write, of the database counts a report
+        // LOSAT's refusal of a title NCBI's XML crashes on, of the database counts a report
         // would print where NCBI's sums overflow (`ReportSumRefusal`), of a `-sorthits` table whose
         // last total NCBI pads without end (`TotalScoreRefusal`, an `io::Error` of the report's
         // writes), of an organism report (outfmt 18, made before its first byte), of a tabular
-        // row at which NCBI stops (`report::tabular::check_failed_lookups`), or of a report of
-        // an ungapped HSP of length 0 in a form LOSAT does not write
-        // (`empty_rows::EmptyRowsRefusal`): not an error of NCBI's engine or of its output
-        // stream.
+        // row at which NCBI stops (`report::tabular::check_failed_lookups`), of a database
+        // sequence that a query-anchored report (outfmt 1 to 4) would show as a query
+        // (`ParsedRefusal`, `report::write_pairwise`), or of a report of an ungapped HSP of
+        // length 0 in a form LOSAT does not write (`empty_rows::EmptyRowsRefusal`): not an error
+        // of NCBI's engine or of its output stream.
         error
     } else if error.downcast_ref::<NativeError>().is_some_and(|e| {
         (e.exit == 1 && e.message.starts_with("Command line argument error"))
@@ -207,7 +209,8 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         // already (`blast_xml::matrix::unsupported_score_matrix`), or any exception of NCBI's
         // that a report raises and that ends the program through `CATCH_ALL`'s `CException`
         // branch (`NativeError::exception`, exit status 255, blast_app_util.hpp:247-250; such as
-        // the formatters' exceptions on an ungapped HSP of length 0, `empty_rows`), which is not
+        // an exception of NCBI's XML stream, `blast_xml::writer::run_ending_exception`, or the
+        // formatters' exceptions on an ungapped HSP of length 0, `empty_rows`), which is not
         // an engine error.
         error
     } else if error.downcast_ref::<report::TabularFlushError>().is_some() {
@@ -429,7 +432,8 @@ fn run_inner(
     // and of the search strategy and the lower case of outfmt 0's Sbjct rows (`x_soft_subject::x_masked_subject_rows`, records
     // with lower case only) read the whole record.
     if let Some(range) = &subject_range {
-        let shows_lower_case = args.lcase_masking && choice.number == 0;
+        // Outfmt 0 to 4: the rows of outfmt 0 and the query-anchored sections (1 to 4).
+        let shows_lower_case = args.lcase_masking && (0..=4).contains(&choice.number);
         for record in &mut subjects {
             let (from, to_exclusive) =
                 crate::blastinput::seq_range::record_cut(range, record.sequence.len())?;
@@ -652,11 +656,6 @@ fn run_inner(
     ) {
         crate::report::serial::seqalign::check_database(serial, database.name(), Program::Blastx)?;
     }
-    // LOSAT's refusal of a database name that BLAST XML (outfmt 5, 15 and 16) cannot write,
-    // before the search (`blast_xml::check_database_name`).
-    if let (Some(database), true) = (database.as_ref(), structured_xml) {
-        super::blast_xml::check_database_name(database.name())?;
-    }
     // How the search reads the query file (`-parse_deflines`, its ids, `-strand`), which the
     // reads of the file before the search share (`QueryStreamSettings`).
     let query_settings = QueryStreamSettings {
@@ -674,7 +673,7 @@ fn run_inner(
     };
     let batch_size = crate::blastinput::app::query_batch_size(default_batch_size as u32)
         .map(|size| size as usize);
-    // LOSAT's other refusals of BLAST XML (a title with a byte NCBI's XML stream cannot write)
+    // LOSAT's other refusals of BLAST XML (a title NCBI crashes on, `names::Refusal`)
     // come before the first byte, though the query file is read batch by batch: the query
     // titles are checked by a read of the file before the search, and a run in which a
     // `-subject` title, the message of a query or a subject of a database with parsed Seq-ids
@@ -761,7 +760,6 @@ fn run_inner(
         if xml_matrix.is_none()
             && super::blast_xml::documents_may_refuse(
                 &[choice.number],
-                scan.messages_may_be_refused,
                 database.as_ref(),
                 &subjects,
             )
@@ -884,7 +882,7 @@ fn run_inner(
     let pairwise_database = database.as_ref().map(BlastxDatabase::pairwise_database);
     let no_reported = ReportedSubjects::default();
     let records_parsed = if args.parse_deflines {
-        report::RecordsParsed::of(&subjects, args.show_gis, options.outfmt == 0)?
+        report::RecordsParsed::of(&subjects, args.show_gis, options.pairwise_view().is_some())?
     } else {
         report::RecordsParsed::default()
     };
@@ -1245,10 +1243,10 @@ impl ReportedAsks {
                     options.tabular,
                     crate::blastinput::app::Program::Blastx,
                 ),
-            pairwise: options.outfmt == 0,
+            pairwise: options.pairwise_view().is_some(),
             structured: matches!(options.outfmt, 5 | 13..=16),
             taxids: matches!(options.outfmt, 13..=16),
-            joined: matches!(options.outfmt, 0 | 5 | 13..=16)
+            joined: matches!(options.outfmt, 0..=5 | 13..=16)
                 || options
                     .tabular
                     .is_some_and(|spec| spec.needs().joins_subjects()),
@@ -1511,9 +1509,11 @@ pub(super) fn reported_batch(
             let rows_open = options
                 .tabular
                 .is_some_and(|spec| spec.looks_up_every_taxid());
-            // The pairwise report reads its subjects in the order of its `-sorthits`.
-            let pairwise =
-                (first_report == Some(ReportFormat::Pairwise)).then(|| options.report_sort());
+            // The pairwise report (outfmt 0 to 4) reads its subjects in the order of its
+            // `-sorthits`.
+            let pairwise = first_report
+                .and_then(crate::report::pairwise::PairwiseView::of)
+                .map(|view| view.report_sort(options.report_sort()));
             reported.fetch_by_query(
                 database,
                 results,
@@ -1532,7 +1532,7 @@ pub(super) fn reported_batch(
             let messages = reported
                 .batch_prefetch(database, results, options.gapped)
                 .map_err(reported_error)?;
-            diagnostics.write_all(&messages)?;
+            messages.write(diagnostics, None)?;
         }
     } else if asks.prefetch_runs && !unfetched && database.parsed_seqids() {
         // The XML2 and JSON formats write the taxonomy texts at each `Hit`: of the batch's
@@ -3144,6 +3144,7 @@ mod archive_error_tests {
                 &[],
                 None,
                 0,
+                None,
             )
             .map(|()| out)
         };

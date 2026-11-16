@@ -1,0 +1,6 @@
+ndq	delta,	delta,	delta,	delta, partial [Homo sapiens]	2.06e-174
+ndq	delta,	delta,	delta,	delta, partial [Homo sapiens]	0.12
+ndq	gb|AC400031.1|	gb|AC400031.1|;gb|AD400031.1|	AC400031;AD400031	omega, partial [ ]	2.06e-174
+ndq	gb|AC400031.1|	gb|AC400031.1|;gb|AD400031.1|	AC400031;AD400031	omega, partial [ ]	0.12
+ndq	Unknown	gb|AC400031.1|;gb|AD400031.1|;Subject_901	AC400031;AD400031;Subject_901	omega, partial [ ]	2.06e-174
+ndq	Unknown	gb|AC400031.1|;gb|AD400031.1|;Subject_901;Subject_901	AC400031;AD400031;Subject_901;Subject_901	omega, partial [ ]	0.12

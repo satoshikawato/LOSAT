@@ -122,7 +122,7 @@
 //! another worker's, so no 4-byte access may cover them. The plan, the reading order and the
 //! updates are the same, so the table is the same.
 
-use super::{build_unmasked_ranges, MaskedInterval, PvArrayType, BLAST2NA_MASK, PV_ARRAY_MASK};
+use super::{build_unmasked_ranges, x_range_words, MaskedInterval, PvArrayType, PV_ARRAY_MASK};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
@@ -685,60 +685,51 @@ fn fill_part<const H24: bool>(
                 continue;
             }
 
-            let mut current_kmer: u64 = 0;
-            let mut valid_bases = 0usize;
-
-            for pos in range_start..range_end {
-                let base = seq[pos];
-                if (base & BLAST2NA_MASK) != 0 {
-                    current_kmer = 0;
-                    valid_bases = 0;
-                    continue;
-                }
-
-                current_kmer = ((current_kmer << 2) | base as u64) & words.kmer_mask;
-                valid_bases += 1;
-                if valid_bases < lut_word_length {
-                    continue;
-                }
-
-                let bucket = current_kmer as usize;
-                if owner[bucket >> block_shift] != part {
-                    continue;
-                }
-                let q_off_1 = (query_offset + (pos + 1 - lut_word_length) + 1) as u32;
-                if words.ascending_cells {
-                    own_words.push((bucket as u32, q_off_1));
-                }
-                #[cfg(target_arch = "x86_64")]
-                {
-                    // SAFETY: `bucket` < table size (masked k-mer); a prefetch does not fault.
-                    unsafe {
-                        core::arch::x86_64::_mm_prefetch(
-                            if H24 {
-                                super::x_mb_narrow::at(t.hashtable.ptr, bucket)
-                            } else {
-                                t.hashtable.ptr.add(bucket) as *const i8
-                            },
-                            core::arch::x86_64::_MM_HINT_T0,
-                        );
+            x_range_words(
+                &seq[range_start..range_end],
+                lut_word_length,
+                words.kmer_mask,
+                || {},
+                |current_kmer, i| {
+                    let pos = range_start + i;
+                    let bucket = current_kmer as usize;
+                    if owner[bucket >> block_shift] != part {
+                        return;
                     }
-                    let slot = x_ring_len % X_DELAY;
-                    if x_ring_len >= X_DELAY {
-                        let (b, q) = x_ring[slot];
-                        // SAFETY: the cell block of `b` is owned by this part; `q` is the
-                        // offset of one of this part's words.
-                        unsafe { t.apply::<H24>(b as usize, q) };
+                    let q_off_1 = (query_offset + (pos + 1 - lut_word_length) + 1) as u32;
+                    if words.ascending_cells {
+                        own_words.push((bucket as u32, q_off_1));
                     }
-                    x_ring[slot] = (bucket as u32, q_off_1);
-                    x_ring_len += 1;
-                }
-                #[cfg(not(target_arch = "x86_64"))]
-                {
-                    // SAFETY: as above.
-                    unsafe { t.apply::<H24>(bucket, q_off_1) };
-                }
-            }
+                    #[cfg(target_arch = "x86_64")]
+                    {
+                        // SAFETY: `bucket` < table size (masked k-mer); a prefetch does not fault.
+                        unsafe {
+                            core::arch::x86_64::_mm_prefetch(
+                                if H24 {
+                                    super::x_mb_narrow::at(t.hashtable.ptr, bucket)
+                                } else {
+                                    t.hashtable.ptr.add(bucket) as *const i8
+                                },
+                                core::arch::x86_64::_MM_HINT_T0,
+                            );
+                        }
+                        let slot = x_ring_len % X_DELAY;
+                        if x_ring_len >= X_DELAY {
+                            let (b, q) = x_ring[slot];
+                            // SAFETY: the cell block of `b` is owned by this part; `q` is the
+                            // offset of one of this part's words.
+                            unsafe { t.apply::<H24>(b as usize, q) };
+                        }
+                        x_ring[slot] = (bucket as u32, q_off_1);
+                        x_ring_len += 1;
+                    }
+                    #[cfg(not(target_arch = "x86_64"))]
+                    {
+                        // SAFETY: as above.
+                        unsafe { t.apply::<H24>(bucket, q_off_1) };
+                    }
+                },
+            );
         }
     }
     #[cfg(target_arch = "x86_64")]

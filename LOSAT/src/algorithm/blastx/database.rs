@@ -155,11 +155,10 @@ impl BlastxDatabase {
     }
 
     /// Whether a later query batch of an XML, XML2 or JSON run could still refuse a taxonomy
-    /// database name or record (`algorithm::common::database::taxdb_may_refuse`: every
-    /// sequence's taxid looked up once, before the first byte). `names`: the run writes the
-    /// scientific names (XML2 and JSON); outfmt 5's prefetch asks for none.
-    pub(crate) fn taxdb_may_refuse(&self, names: bool) -> bool {
-        shared::taxdb_may_refuse(&self.db, names)
+    /// database record (`algorithm::common::database::taxdb_may_refuse`: every sequence's taxid
+    /// looked up once, before the first byte).
+    pub(crate) fn taxdb_may_refuse(&self) -> bool {
+        shared::taxdb_may_refuse(&self.db)
     }
 
     /// Whether the batches' fetches of the run are refused for NCBI's taxonomy cache
@@ -173,18 +172,17 @@ impl BlastxDatabase {
     /// could still be refused, which only the batch's hits show, so that the run holds what it
     /// writes until its epilog (the command line's document, `native::run_inner`; every format of
     /// a library call, `local::report_batches`) and the refusal follows no byte:
-    /// - with `taxdb.bti` on the search path, a taxonomy database name or record
-    ///   (`taxdb_may_refuse`; `names`: one of the formats is XML2 or JSON, which write the
-    ///   scientific names), or a fetch where NCBI's taxonomy cache would repeat the offset error
+    /// - with `taxdb.bti` on the search path, a taxonomy database record (`taxdb_may_refuse`),
+    ///   or a fetch where NCBI's taxonomy cache would repeat the offset error
     ///   (`prefetch_refused`: outfmt 5's prefetch, and the XML2 and JSON lookups of a batch with a
     ///   subject that has a taxid, `read_reported_taxonomy`);
     /// - with parsed Seq-ids, one of the batch's subjects (`ReportedSubjects::for_batch`).
     ///
-    /// The taxids of every sequence are looked up here, once (DECISIONS 32; outfmt 5 asks no
-    /// scientific name); the usual run, in which none would be refused, writes batch by batch.
-    pub(crate) fn later_batch_may_refuse(&self, names: bool) -> bool {
+    /// The taxids of every sequence are looked up here, once (DECISIONS 32); the usual run, in
+    /// which none would be refused, writes batch by batch.
+    pub(crate) fn later_batch_may_refuse(&self) -> bool {
         let taxdb_may_refuse =
-            self.taxdb_found() && (self.taxdb_may_refuse(names) || self.prefetch_refused());
+            self.taxdb_found() && (self.taxdb_may_refuse() || self.prefetch_refused());
         taxdb_may_refuse || self.parsed_seqids()
     }
 
@@ -702,8 +700,8 @@ impl ReportedSubjects {
                 .filter(|(_, (_, title))| title.is_some())
                 .map(|(rank, _)| rank)
                 .collect();
-            // A scientific name NCBI cannot write, or a taxonomy database LOSAT cannot read as NCBI
-            // does, is LOSAT's refusal of the XML2 document (a run that holds its output drops it).
+            // A taxonomy database LOSAT cannot read as NCBI does is LOSAT's refusal of the XML2
+            // document (a run that holds its output drops it).
             (
                 reported.taxids,
                 reported.taxonomy,
@@ -740,13 +738,16 @@ impl ReportedSubjects {
         database: &BlastxDatabase,
         batches: &[BatchResults],
         gapped: bool,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<crate::report::diag_log::Posts> {
         shared::batch_prefetch(
             &database.db,
             &database.taxdb,
             self.prefetch_subjects(batches, gapped),
             database.program,
             0,
+            // The model of each batch follows the reports of the batches before, so the texts
+            // that their loads left are the model's (`ReadLoad::place`).
+            None,
         )
     }
 
@@ -884,7 +885,7 @@ impl ReportedSubjects {
                 if places {
                     self.query_reads.insert(ordinal, reads);
                 } else {
-                    let messages = reads.into_iter().flat_map(|(_, text)| text).collect();
+                    let messages = reads.into_iter().flat_map(|read| read.text).collect();
                     self.query_fetches.insert(ordinal, messages);
                 }
             }
@@ -1036,6 +1037,11 @@ impl ReportedSubjects {
     /// The OID of rank `rank` (`gnl|BL_ORD_ID|n`).
     pub(crate) fn oid(&self, rank: usize) -> crate::seqdb::Oid {
         self.oids[rank]
+    }
+
+    /// The OID of each rank (`oid`).
+    pub(crate) fn oids(&self) -> &[crate::seqdb::Oid] {
+        &self.oids
     }
 
     /// The Blast-def-line taxid of the sequence of rank `rank` (0 for none, and for a run that
@@ -1327,7 +1333,7 @@ mod tests {
             )
             .unwrap();
             let messages = reported.batch_prefetch(database, &batches, true);
-            String::from_utf8(messages.unwrap()).unwrap()
+            String::from_utf8(messages.unwrap().text()).unwrap()
         };
         let database = open_with_taxdb("x16_taxid_99990", Some("offset_last_past_end"), &cwd);
         assert!(database.taxdb_found());

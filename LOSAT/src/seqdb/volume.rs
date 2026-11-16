@@ -489,29 +489,23 @@ impl Volume {
         self.read_block_in(first, end, first_ordinal, first_oid, BlockBuffer::Mapped)
     }
 
-    /// EXPERIMENT (LOSAT_X_BPDBKEEP): `read_block` with the bytes in `buf`
-    /// (`File::x_read_range_into`; `SequenceBlock::x_into_data` gives the buffer back).
-    #[cfg(any(
-        test,
-        all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        )
-    ))]
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP, LOSAT_X_BNMAPPED): `read_block` with the bytes in the
+    /// worker's buffer `kept` (`File::x_read_range_into`; `SequenceBlock::x_into_kept` gives the
+    /// buffer back).
     pub fn x_read_block_into(
         &self,
         first: u32,
         end: u32,
         first_ordinal: u32,
         first_oid: u32,
-        buf: Vec<u8>,
+        kept: &mut Vec<u8>,
     ) -> Result<SequenceBlock, SeqDbError> {
         self.read_block_in(
             first,
             end,
             first_ordinal,
             first_oid,
-            BlockBuffer::Given(buf),
+            BlockBuffer::Given(kept),
         )
     }
 
@@ -521,7 +515,7 @@ impl Volume {
         end: u32,
         first_ordinal: u32,
         first_oid: u32,
-        buffer: BlockBuffer,
+        buffer: BlockBuffer<'_>,
     ) -> Result<SequenceBlock, SeqDbError> {
         self.check_range(first, end)?;
         let seqtype = self.index.seqtype;
@@ -543,14 +537,7 @@ impl Volume {
         let data = match buffer {
             BlockBuffer::New => file.read_range(data_start, data_end)?,
             BlockBuffer::Mapped => file.x_read_range_mapped(data_start, data_end)?,
-            #[cfg(any(
-                test,
-                all(
-                    feature = "parallel",
-                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-                )
-            ))]
-            BlockBuffer::Given(buf) => file.x_read_range_into(data_start, data_end, buf)?,
+            BlockBuffer::Given(kept) => file.x_read_range_into(data_start, data_end, kept)?,
         };
         let block = SequenceBlock {
             seqtype,
@@ -811,14 +798,15 @@ impl Volume {
         Ok(decoded)
     }
 
-    /// The header of the sequence `oid` (volume-relative) in the bytes `record` (`header`).
+    /// The header of the sequence `oid` (volume-relative) in the bytes `record` (`header`): the
+    /// definition lines of a record without parsed Seq-ids with their `taxid` (`deflines`).
     fn decode_header(
         &self,
         oid: u32,
         record: &[u8],
         path: &Path,
     ) -> Result<VolumeHeader, SeqDbError> {
-        match decode_deflines_as(record, path, oid, false) {
+        match decode_deflines_as(record, path, oid, true) {
             Err(error) if error.is_parsed_seqids() => self
                 .decode_kept_set(oid, record, path)
                 .map(VolumeHeader::Parsed),
@@ -853,10 +841,21 @@ impl Volume {
         Ok(set)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2208-2218
+    // ```c++
+    //     CTempString raw_data = x_GetHdrAsn1Binary(oid);
+    //     ...
+    //     CObjectIStreamAsnBinary inpstr(raw_data.data(), raw_data.size());
+    //
+    //     bdls.Reset(new objects::CBlast_def_line_set);
+    // ```
+    // NCBI decodes every member of the header for each report (`x_GetFilteredHeader`); the
+    // reports read the title and the taxid of a record without parsed Seq-ids (its source,
+    // `algorithm::common::database::HeaderReader::stored_source`) from this one decode.
     /// The definition lines of the sequence `oid` (volume-relative), with
-    /// their ordinal ids still relative to the volume.
+    /// their ordinal ids still relative to the volume and their `taxid`.
     pub fn deflines(&self, oid: u32) -> Result<Vec<Defline>, SeqDbError> {
-        self.deflines_as(oid, false)
+        self.deflines_as(oid, true)
     }
 
     /// `deflines` with every definition line of the stored header: the volume's `DeflineRule` is
@@ -868,8 +867,10 @@ impl Volume {
         decode_deflines_as(&record, &path, oid, false)
     }
 
-    /// `deflines`, with the `taxid` of each definition line decoded when `want_taxid` (the
-    /// decode of `defline_taxids`, which also gives the titles).
+    /// `deflines`, with the `taxid` of each definition line decoded when `want_taxid`, as NCBI's
+    /// `x_GetHdrAsn1` reads the record (`header::decode_deflines_as`; `defline_taxids` keeps the
+    /// taxids of the same decode). The reads of the stored titles (`deflines`, `visit_deflines_as`)
+    /// decode the taxid; only `stored_deflines` skips it.
     pub fn deflines_as(&self, oid: u32, want_taxid: bool) -> Result<Vec<Defline>, SeqDbError> {
         let record = self.header_bytes(oid)?;
         let path = with_extension(&self.base, self.index.seqtype, "hr");
@@ -1074,7 +1075,7 @@ impl Volume {
         piece_bytes: u64,
         visit: &mut dyn FnMut(u32, Result<Vec<Defline>, SeqDbError>) -> bool,
     ) -> bool {
-        self.visit_deflines_as(first, end, piece_bytes, false, visit)
+        self.visit_deflines_as(first, end, piece_bytes, true, visit)
     }
 
     /// `visit_deflines`, with the `taxid` of each definition line decoded when `want_taxid`
@@ -1283,20 +1284,14 @@ pub(super) fn held_block_end(offsets: &[u32], first: u32, max_bytes: u64, lead: 
 }
 
 /// Where `Volume::read_block_in` puts the bytes of a block.
-enum BlockBuffer {
+enum BlockBuffer<'a> {
     /// A new buffer (`read_block`).
     New,
     /// EXPERIMENT (LOSAT_X_BNMAPPED): `File::x_read_range_mapped`'s buffer.
     Mapped,
-    /// EXPERIMENT (LOSAT_X_BPDBKEEP): the caller's buffer.
-    #[cfg(any(
-        test,
-        all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        )
-    ))]
-    Given(Vec<u8>),
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP, LOSAT_X_BNMAPPED): the worker's buffer
+    /// (`File::x_read_range_into`).
+    Given(&'a mut Vec<u8>),
 }
 
 /// A contiguous range of sequences of one volume, held in memory.
@@ -1403,7 +1398,14 @@ fn overlay_ambiguity_runs(
 /// whole decode's tests (`nucleotide_blastna_in`: a run that ends before the sequence is skipped,
 /// the first one that starts at or after its end stops the loop), each run written over the
 /// ranges it overlaps. So a range's bytes are the whole decode's for ordered and unordered runs.
-fn x_overlay_runs_in_ranges(runs: &[AmbiguityRun], ranges: &[(usize, usize)], seq: &mut [u8]) {
+/// A run writes `letter[ncbi4na & 0xF]`: `X_NCBI4NA` (its code) for the decode that maps every
+/// byte to BLASTNA after it, `NCBINA8_TO_BLASTNA8` (its BLASTNA letter) for `x_blastna_by_byte`.
+fn x_overlay_runs_in_ranges(
+    runs: &[AmbiguityRun],
+    ranges: &[(usize, usize)],
+    seq: &mut [u8],
+    letter: &[u8; 16],
+) {
     let region_end = seq.len() as i64;
     for run in runs {
         let position = i64::from(run.offset as i32);
@@ -1421,8 +1423,9 @@ fn x_overlay_runs_in_ranges(runs: &[AmbiguityRun], ranges: &[(usize, usize)], se
             if from >= run_to {
                 break;
             }
+            let letter = letter[usize::from(run.ncbi4na & 0xF)];
             for at in run_from.max(from)..run_to.min(to) {
-                seq[at] = run.ncbi4na;
+                seq[at] = letter;
             }
         }
     }
@@ -1450,6 +1453,132 @@ fn x_overlay_runs_in_ranges(runs: &[AmbiguityRun], ranges: &[(usize, usize)], se
 // };
 // ```
 const NCBINA8_TO_BLASTNA8: [u8; 16] = [15, 0, 1, 6, 2, 4, 9, 13, 3, 8, 5, 12, 7, 11, 10, 14];
+
+/// No NCBI counterpart: each NCBI4na code as itself (`x_overlay_runs_in_ranges`'s letters for a
+/// decode that maps every byte to BLASTNA after the runs).
+const X_NCBI4NA: [u8; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+
+/// EXPERIMENT (LOSAT_X_BNDECODE): the four bases of each stored 2-bit byte, from the high bits
+/// down, as the BLASTNA letters NCBI's decode makes of them: `s_SeqDBMapNA2ToNA8` (quoted above
+/// `nucleotide_blastna`) turns code `p` into `1 << p`, `s_SeqDBMapNcbiNA8ToBlastNA8` that into
+/// `NCBINA8_TO_BLASTNA8[1 << p]` (which is `p`: BLASTNA's A, C, G and T are 0 to 3).
+const X_PACKED_TO_BLASTNA: [[u8; 4]; 256] = {
+    let mut table = [[0u8; 4]; 256];
+    let mut byte = 0;
+    while byte < 256 {
+        let mut base = 0;
+        while base < 4 {
+            table[byte][base] = NCBINA8_TO_BLASTNA8[1 << ((byte >> (6 - 2 * base)) & 3)];
+            base += 1;
+        }
+        byte += 1;
+    }
+    table
+};
+
+/// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNDECODE, in the strict set: on unless it is `0`)
+/// a `-db` sequence's BLASTNA letters (`nucleotide_blastna`, its mapped form and
+/// `x_nucleotide_blastna_ranges`) are made four bases per stored byte with their BLASTNA letters
+/// (`x_blastna_by_byte`), and each ambiguity run writes its BLASTNA letter; `=0` makes each base's
+/// NCBI8na value from its two bits, writes the runs' NCBI4na codes, then maps every byte to
+/// BLASTNA. The letters are the same.
+fn x_bn_decode() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNDECODE"))
+}
+
+/// EXPERIMENT (LOSAT_X_BNDECODE): the BLASTNA letters of the bases `from .. to` of a stored
+/// sequence (`packed`: four bases per byte, from the high bits down) into `seq[from .. to]`
+/// (`seq` holds one byte per base of the sequence): the letters of each stored byte whose four
+/// bases are all in the range at once, the bases of a byte the range cuts one by one.
+fn x_blastna_bases(packed: &[u8], from: usize, to: usize, seq: &mut [u8]) {
+    let head_end = from.next_multiple_of(4).min(to);
+    for at in from..head_end {
+        seq[at] = X_PACKED_TO_BLASTNA[usize::from(packed[at >> 2])][at & 3];
+    }
+    let body_end = head_end + (to - head_end) / 4 * 4;
+    let bytes = &packed[head_end >> 2..body_end >> 2];
+    for (bases, &byte) in seq[head_end..body_end].chunks_exact_mut(4).zip(bytes) {
+        bases.copy_from_slice(&X_PACKED_TO_BLASTNA[usize::from(byte)]);
+    }
+    for at in body_end..to {
+        seq[at] = X_PACKED_TO_BLASTNA[usize::from(packed[at >> 2])][at & 3];
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_BNDECODE): the BLASTNA letters of the bases of `ranges` (sorted, disjoint,
+/// non-empty, within `seq`, which holds one byte per base) of a stored sequence with its ambiguity
+/// `runs` in stored order: the bases four per stored byte (`x_blastna_bases`), then each run's
+/// BLASTNA letter over the ranges it overlaps, with the whole decode's tests
+/// (`x_overlay_runs_in_ranges`). The bytes of `=0`'s decode, which writes the bases' NCBI8na
+/// values and the runs' NCBI4na codes and then maps each byte with `NCBINA8_TO_BLASTNA8`: that map
+/// is per byte, so mapping each letter where it is written gives the same byte.
+fn x_blastna_by_byte(
+    packed: &[u8],
+    runs: &[AmbiguityRun],
+    ranges: &[(usize, usize)],
+    seq: &mut [u8],
+) {
+    for &(from, to) in ranges {
+        x_blastna_bases(packed, from, to, seq);
+    }
+    x_overlay_runs_in_ranges(runs, ranges, seq, &NCBINA8_TO_BLASTNA8);
+}
+
+/// The decode of `nucleotide_blastna` that `LOSAT_X_BNDECODE=0` runs: each base's NCBI8na value
+/// `1 << p` from its two bits, the ambiguity `runs` in stored order (a run that ends before the
+/// sequence is skipped, the first that starts at or after its end stops the loop), then every byte
+/// mapped with `NCBINA8_TO_BLASTNA8` (`seq` holds one byte per base).
+fn x_blastna_by_base(packed: &[u8], runs: &[AmbiguityRun], seq: &mut [u8]) {
+    for (position, base) in seq.iter_mut().enumerate() {
+        let code = (packed[position >> 2] >> (6 - 2 * (position & 3))) & 3;
+        *base = 1 << code;
+    }
+    let region_end = seq.len() as i64;
+    for run in runs {
+        let mut position = i64::from(run.offset as i32);
+        let row_len = i64::from(run.length);
+        if position + row_len <= 0 {
+            continue;
+        }
+        if position >= region_end {
+            break;
+        }
+        for _ in 0..row_len {
+            if position >= 0 && position < region_end {
+                seq[position as usize] = run.ncbi4na;
+            }
+            position += 1;
+        }
+    }
+    for base in seq.iter_mut() {
+        *base = NCBINA8_TO_BLASTNA8[usize::from(*base & 0xF)];
+    }
+}
+
+/// The decode of `x_nucleotide_blastna_ranges` that `LOSAT_X_BNDECODE=0` runs on `ranges`
+/// (sorted, disjoint, non-empty, within `seq`): `x_blastna_by_base`'s steps on each range, the runs
+/// by `x_overlay_runs_in_ranges`.
+fn x_blastna_by_base_ranges(
+    packed: &[u8],
+    runs: &[AmbiguityRun],
+    ranges: &[(usize, usize)],
+    seq: &mut [u8],
+) {
+    for &(from, to) in ranges {
+        for (position, base) in seq[from..to].iter_mut().enumerate() {
+            let position = from + position;
+            let code = (packed[position >> 2] >> (6 - 2 * (position & 3))) & 3;
+            *base = 1 << code;
+        }
+    }
+    x_overlay_runs_in_ranges(runs, ranges, seq, &X_NCBI4NA);
+    for &(from, to) in ranges {
+        for base in &mut seq[from..to] {
+            *base = NCBINA8_TO_BLASTNA8[usize::from(*base & 0xF)];
+        }
+    }
+}
 
 /// `NCBI4NA_TO_IUPACNA` (c++/src/algo/blast/core/blast_encoding.c:80-83).
 const NCBI4NA_TO_IUPAC: [u8; 16] = *b"-ACMGRSVTWYHKDBN";
@@ -1519,14 +1648,12 @@ impl SequenceBlock {
         crate::utils::x_mapped::X_BYTES.give(&mut self.data);
     }
 
-    /// EXPERIMENT (LOSAT_X_BPDBKEEP): the block's buffer, for the next `x_read_block_into`. No
-    /// NCBI counterpart: only where the bytes are kept.
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    pub fn x_into_data(self) -> Vec<u8> {
-        self.data
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP, LOSAT_X_BNMAPPED): gives the buffer of a block of
+    /// `x_read_block_into` back for the worker's next block: into `kept` below 1 MiB, else to
+    /// `utils::x_mapped::X_BYTES` (`x_mapped::X_BYTES.x_keep`). No NCBI counterpart: only where
+    /// the bytes are kept.
+    pub fn x_into_kept(self, kept: &mut Vec<u8>) {
+        crate::utils::x_mapped::X_BYTES.x_keep(kept, self.data);
     }
 
     /// The bytes of a block of one nucleotide cut to its 2-bit
@@ -1937,19 +2064,12 @@ impl SequenceBlock {
                     seq[to] = FENCE_SENTRY;
                 }
             }
-            for (from, to) in ranges.clone() {
-                for (position, base) in seq[from..to.max(from)].iter_mut().enumerate() {
-                    let position = from + position;
-                    let code = (packed[position >> 2] >> (6 - 2 * (position & 3))) & 3;
-                    *base = 1 << code;
-                }
-            }
             let ranges: Vec<(usize, usize)> = ranges.filter(|r| r.0 < r.1).collect();
-            x_overlay_runs_in_ranges(&self.ambiguity_runs(i)?, &ranges, seq);
-            for &(from, to) in &ranges {
-                for base in &mut seq[from..to] {
-                    *base = NCBINA8_TO_BLASTNA8[usize::from(*base & 0xF)];
-                }
+            let runs = self.ambiguity_runs(i)?;
+            if x_bn_decode() {
+                x_blastna_by_byte(packed, &runs, &ranges, seq);
+            } else {
+                x_blastna_by_base_ranges(packed, &runs, &ranges, seq);
             }
         }
         buffer[0] = BLASTNA_SENTINEL;
@@ -1973,29 +2093,11 @@ impl SequenceBlock {
         };
         {
             let seq = &mut buffer[1..=base_length];
-            for (position, base) in seq.iter_mut().enumerate() {
-                let code = (packed[position >> 2] >> (6 - 2 * (position & 3))) & 3;
-                *base = 1 << code;
-            }
-            let region_end = base_length as i64;
-            for run in self.ambiguity_runs(i)? {
-                let mut position = i64::from(run.offset as i32);
-                let row_len = i64::from(run.length);
-                if position + row_len <= 0 {
-                    continue;
-                }
-                if position >= region_end {
-                    break;
-                }
-                for _ in 0..row_len {
-                    if position >= 0 && position < region_end {
-                        seq[position as usize] = run.ncbi4na;
-                    }
-                    position += 1;
-                }
-            }
-            for base in seq.iter_mut() {
-                *base = NCBINA8_TO_BLASTNA8[usize::from(*base & 0xF)];
+            let runs = self.ambiguity_runs(i)?;
+            if x_bn_decode() {
+                x_blastna_by_byte(packed, &runs, &[(0, base_length)], seq);
+            } else {
+                x_blastna_by_base(packed, &runs, seq);
             }
         }
         buffer[0] = BLASTNA_SENTINEL;
@@ -2100,7 +2202,7 @@ mod tests {
             let mut whole = vec![1u8; length];
             whole_runs(&runs, &mut whole);
             let mut ranged = vec![1u8; length];
-            super::x_overlay_runs_in_ranges(&runs, &ranges, &mut ranged);
+            super::x_overlay_runs_in_ranges(&runs, &ranges, &mut ranged, &super::X_NCBI4NA);
             for &(from, to) in &ranges {
                 assert_eq!(
                     ranged[from..to],
@@ -2168,5 +2270,61 @@ mod tests {
         let mut letters = vec![b'C'; 6];
         ambiguity.overlay(8, 14, &mut letters);
         assert_eq!(letters, b"CCNNNN");
+    }
+
+    // LOSAT_X_BNDECODE: the by-byte decode gives the bytes of the decode `=0` runs, for the whole
+    // sequence and for ranges that start and end inside a stored byte, with every stored byte
+    // value, ordered and shuffled runs, runs of each code, offsets of 2^31 and more (negative as
+    // NCBI's Int4) and runs past the end.
+    #[test]
+    fn the_by_byte_decode_equals_the_by_base_decode() {
+        let mut rng = Rng(0x0DDB_1A5E_5BAD_5EED);
+        for case in 0..600 {
+            let mut length = 1 + rng.next(if case % 3 == 0 { 9 } else { 4000 }) as usize;
+            let mut packed: Vec<u8> = (0..length.div_ceil(4))
+                .map(|_| rng.next(256) as u8)
+                .collect();
+            if case == 0 {
+                // Every stored byte value once.
+                packed = (0..=255u8).collect();
+                length = packed.len() * 4;
+            }
+            let mut runs = Vec::new();
+            for _ in 0..rng.next(30) {
+                let offset = match rng.next(20) {
+                    0 => 0x8000_0000u32 + rng.next(1 << 20) as u32,
+                    1 => length as u32 + rng.next(100) as u32,
+                    2 => u32::MAX - rng.next(50) as u32,
+                    _ => rng.next(length as u64) as u32,
+                };
+                let longest = if rng.next(10) == 0 { 5000 } else { 20 };
+                runs.push(AmbiguityRun {
+                    offset,
+                    length: 1 + rng.next(longest) as u32,
+                    ncbi4na: rng.next(16) as u8,
+                });
+            }
+            if case % 2 == 0 {
+                runs.sort_by_key(|run| run.offset);
+            }
+            let mut by_base = vec![0u8; length];
+            super::x_blastna_by_base(&packed, &runs, &mut by_base);
+            let mut by_byte = vec![0u8; length];
+            super::x_blastna_by_byte(&packed, &runs, &[(0, length)], &mut by_byte);
+            assert_eq!(by_byte, by_base, "case {case}, whole");
+            let mut ranges = Vec::new();
+            let mut at = rng.next(7) as usize;
+            while at < length {
+                let to =
+                    (at + 1 + rng.next(if case % 2 == 0 { 9 } else { 300 }) as usize).min(length);
+                ranges.push((at, to));
+                at = to + rng.next(12) as usize;
+            }
+            let mut by_base = vec![201u8; length];
+            super::x_blastna_by_base_ranges(&packed, &runs, &ranges, &mut by_base);
+            let mut by_byte = vec![201u8; length];
+            super::x_blastna_by_byte(&packed, &runs, &ranges, &mut by_byte);
+            assert_eq!(by_byte, by_base, "case {case}, ranges {ranges:?}");
+        }
     }
 }

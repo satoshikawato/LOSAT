@@ -8,6 +8,7 @@
 
 use super::reader::{format_err, Fail, Input, R};
 use super::schema::{ChoiceDef, ClassDef, EnumDef};
+use crate::seqid::ber::StdSignedError;
 
 pub(super) struct BerIn<'a> {
     data: &'a [u8],
@@ -425,7 +426,7 @@ impl<'a> BerIn<'a> {
         Ok(())
     }
 
-    // NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:112-132
+    // NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:145-160
     // ```c++
     // inline
     // void CObjectIStreamAsnBinary::ExpectIntegerTag(void)
@@ -457,83 +458,20 @@ impl<'a> BerIn<'a> {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:396-428
-    // ```c++
-    // template<typename T>
-    // void ReadStdSigned(CObjectIStreamAsnBinary& in, T& data)
-    // {
-    //     size_t length = in.ReadShortLength();
-    //     if ( length == 0 ) {
-    //         in.ThrowError(in.fFormatError, "zero length of number");
-    //     }
-    //     T n;
-    //     if ( length > sizeof(data) ) {
-    //         // skip
-    //         --length;
-    //         Int1 c = in.ReadSByte();
-    //         if ( c != 0 && c != -1 ) {
-    //             in.ThrowError(in.fOverflow, "overflow error");
-    //         }
-    //         while ( length > sizeof(data) ) {
-    //             --length;
-    //             if ( in.ReadSByte() != c ) {
-    //                 in.ThrowError(in.fOverflow, "overflow error");
-    //             }
-    //         }
-    //         --length;
-    //         n = in.ReadSByte();
-    //         if ( ((n ^ c) & 0x80) != 0 ) {
-    //             in.ThrowError(in.fOverflow, "overflow error");
-    //         }
-    //     }
-    //     else {
-    //         --length;
-    //         n = in.ReadSByte();
-    //     }
-    //     while ( length > 0 ) {
-    //         --length;
-    //         n = (n << 8) | in.ReadByte();
-    //     }
-    //     data = n;
-    //     in.EndOfTag();
-    // }
-    // ```
-    /// `size` is `sizeof(T)`; the result is the value of `T` widened to `i64`.
+    /// `ReadStdSigned` (`crate::seqid::ber::read_std_signed`, the one port of it): `size` is
+    /// `sizeof(T)`; the result is the value of `T` widened to `i64`.
     fn read_std_signed(&mut self, size: usize) -> R<i64> {
-        let mut length = self.read_short_length()?;
-        if length == 0 {
-            return format_err("zero length of number");
-        }
-        let mut n: i64;
-        if length > size {
-            length -= 1;
-            let c = self.byte()? as i8;
-            if c != 0 && c != -1 {
-                return format_err("overflow error");
-            }
-            while length > size {
-                length -= 1;
-                if self.byte()? as i8 != c {
-                    return format_err("overflow error");
-                }
-            }
-            length -= 1;
-            n = i64::from(self.byte()? as i8);
-            if ((n ^ i64::from(c)) & 0x80) != 0 {
-                return format_err("overflow error");
-            }
-        } else {
-            length -= 1;
-            n = i64::from(self.byte()? as i8);
-        }
-        while length > 0 {
-            length -= 1;
-            n = (n << 8) | i64::from(self.byte()?);
-        }
-        Ok(if size == 4 { i64::from(n as i32) } else { n })
+        let length = self.read_short_length()?;
+        crate::seqid::ber::read_std_signed(length, size, || self.byte()).or_else(
+            |error| match error {
+                StdSignedError::ZeroLength => format_err("zero length of number"),
+                StdSignedError::Overflow => format_err("overflow error"),
+                StdSignedError::Read(fail) => Err(fail),
+            },
+        )
     }
 
-    // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:430-466
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:514-549
     // ```c++
     // template<typename T>
     // void ReadStdUnsigned(CObjectIStreamAsnBinary& in, T& data)

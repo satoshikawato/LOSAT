@@ -1,0 +1,4 @@
+TITLE alias over bxs OIDs 2 to 4
+DBLIST bxs
+FIRST_OID 2
+LAST_OID 4

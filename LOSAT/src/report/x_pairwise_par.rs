@@ -1180,9 +1180,15 @@ mod tests {
         // Query 0 shows subjects 5, 2 and 7, query 2 subjects 1 and 5; subject 6's text is not
         // placed (no line reads it) and comes after query 2's report.
         let reads: Vec<crate::report::query_warnings::QueryReads> = vec![
-            vec![(2, b"T2\n".to_vec()), (7, b"T7\n".to_vec())],
+            vec![
+                crate::report::query_warnings::SubjectRead::of_text(2, b"T2\n"),
+                crate::report::query_warnings::SubjectRead::of_text(7, b"T7\n"),
+            ],
             Vec::new(),
-            vec![(5, b"T5\n".to_vec()), (6, b"T6\n".to_vec())],
+            vec![
+                crate::report::query_warnings::SubjectRead::of_text(5, b"T5\n"),
+                crate::report::query_warnings::SubjectRead::of_text(6, b"T6\n"),
+            ],
         ];
         let before: Vec<crate::report::diag_log::Posts> = [b"W0\n", b"W1\n", b"W2\n"]
             .map(|lines| crate::report::diag_log::Posts::of_lines(lines.to_vec()))

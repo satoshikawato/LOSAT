@@ -1544,18 +1544,6 @@ fn search(
         database.check_statistics_count()?;
     }
     let pairwise_database = database.map(TblastnDatabase::pairwise_database);
-    // BLAST XML (5, and the XML2 documents of 16 and 15) cannot carry a database name outside
-    // US-ASCII (NCBI's stream throws): refused before the search, and before anything is
-    // written.
-    if let Some(database) = database {
-        if outputs
-            .formats
-            .iter()
-            .any(|format| super::stage_e_report::is_structured_xml(format.outfmt))
-        {
-            crate::report::blast_xml::names::check_database_name("TBLASTN", database.name())?;
-        }
-    }
     let subject_path = match database {
         Some(_) => None,
         None => Some(
@@ -2327,6 +2315,26 @@ fn search(
         // The texts of the subjects that the reports of the queries whose batch's prefetch is
         // off read one by one, by query, where the first format places them (`places_reads`).
         let mut subject_reads = crate::report::query_warnings::SubjectReads::default();
+        // Outfmt 5 first: a later batch's prefetch stop asks whether a report before it was cut
+        // (`shared::XmlReportsBefore`), from the reads of the queries' reports modelled here.
+        let xml_first = outputs
+            .formats
+            .first()
+            .and_then(crate::api::local_blast::FormatOutput::report_format)
+            == Some(crate::blastinput::app::ReportFormat::Xml);
+        let xml_cut = |query: usize| {
+            queries.get(query).is_some_and(|record| {
+                crate::report::blast_xml::names::iteration_cut_before_hits(
+                    record.local_id.as_bytes(),
+                    record.warning_id(),
+                    record.believed(),
+                    record.title(),
+                    true,
+                )
+            })
+        };
+        // The posts of each batch's prefetch, with its first query (`query_warnings::query_posts`).
+        let mut prefetch_posts = Vec::new();
         let mut query_warning_lines: Vec<Vec<u8>> = queries
             .iter()
             .zip(&query_validity)
@@ -2545,13 +2553,23 @@ fn search(
                     if seq_aligns == 0 {
                         continue;
                     }
-                    let messages = database.batch_prefetch(reported, hitlists, span.start)?;
+                    let xml_before =
+                        xml_first.then(|| crate::algorithm::common::database::XmlReportsBefore {
+                            reads: subject_reads.queries(),
+                            cut: &xml_cut,
+                        });
+                    let messages = database.batch_prefetch(
+                        reported,
+                        hitlists,
+                        span.start,
+                        xml_before.as_ref(),
+                    )?;
                     rows_open(hitlists)?;
-                    if messages.is_empty() {
-                        continue;
+                    // After the reader's messages of the batch, in its first query
+                    // (`query_warnings::query_posts`).
+                    if !messages.is_empty() {
+                        prefetch_posts.push((span.start, messages));
                     }
-                    let reader = batches.warnings[span.start].len();
-                    query_warning_lines[span.start].splice(reader..reader, messages);
                 }
             }
         }
@@ -2559,12 +2577,18 @@ fn search(
         // LOSAT's refusal before any byte.
         if let (Some((span, subjects)), Some(database)) = (prefetch_stop, database) {
             // The batches before are those of `results`, which the stop truncated (above).
+            let xml_before =
+                xml_first.then(|| crate::algorithm::common::database::XmlReportsBefore {
+                    reads: subject_reads.queries(),
+                    cut: &xml_cut,
+                });
             let error = database.prefetch_stop_error(
                 reported.as_ref(),
                 &results,
                 &subjects,
                 span.start,
                 first_xml2,
+                xml_before.as_ref(),
             );
             match error.downcast::<crate::algorithm::common::database::HeaderReadError>() {
                 Ok(failure) => failed = Some((span, failure.error)),
@@ -2675,6 +2699,7 @@ fn search(
             args.strategy
                 .as_ref()
                 .map_or_else(Vec::new, |strategy| strategy.take_posts(queries.len())),
+            prefetch_posts,
             |query| batches.warnings[query].len(),
         );
         // Diagnostic (LOSAT_TIMING): the report for the common line (utils/xtiming.rs); it is

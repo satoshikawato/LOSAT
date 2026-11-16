@@ -36,8 +36,8 @@
 //! `packed_kmer_at_seed_mask`). Its function is the statements of the branch of `prelim_chunk_hits`
 //! that were there, in their order; the fold of LOSAT_X_PAIRPARNA (`x_pair_seed_na.rs` `fold_na_t`)
 //! copies those of one-hit mode with the diagonal hash one by one, so their order is kept here.
-//! What the scan reads is `NaScanInputs` (the batch's word finder, `prelim_subject::ScanBatch`,
-//! built once per batch, and the chunk's own values), and what it writes is `NaScanState`, both
+//! What the scan reads is `NaScanInputs` (the batch's word finder, `prelim_subject::ScanBatch` or
+//! `special_subject`'s copy, and the chunk's own values), and what it writes is `NaScanState`, both
 //! built once per chunk. Nothing here runs on the pool.
 
 use super::pair_extend;
@@ -50,7 +50,7 @@ use super::{
 };
 
 /// What the scan of one subject chunk with a table that is not two-stage reads: the batch's word
-/// finder (`prelim_subject::ScanBatch`, built once per batch: the tables, the word length `safe_k`,
+/// finder (`ScanBatch` or `special_subject`'s copy: the tables, the word length `safe_k`,
 /// the scan step, the query block, the cutoffs, the scoring, the diagonal table's form and sizes,
 /// the window and the off-diagonal range, the level bound's constants, the diagnostics), and the
 /// chunk's own values: the packed subject from the chunk's start, the chunk's length, ranges and

@@ -77,7 +77,7 @@ use anyhow::Result;
 
 use super::options::OptionInputs;
 use super::writer::{write_strategy_request, RequestInputs};
-use super::{ArchiveRequest, HandleCarry, OptionsHandle};
+use super::{ArchiveRequest, HandleCarry, OptionsHandle, SearchedContext0};
 use crate::report::diag_log::{Posts, ERROR};
 
 struct State {
@@ -433,11 +433,15 @@ impl StrategyExport {
     /// Moves what the requests after the batch of the run's searched queries `queries` hold of the
     /// options handle past that batch, once the batch's set-up has written it into the handle
     /// (above; `OptionsHandle::pass`: the set-up's parameters, then the search space): `searched`
-    /// is the batch's `EffectiveSearchSpace` option when NCBI searched the batch (the archive's
+    /// is the batch's context 0 when NCBI searched the batch (the archive's
     /// `BatchArchive::searched_space`, from the same values), `None` for a batch NCBI does not
     /// search. A batch noted already (a search of the batches again, psiblast's later rounds of a
     /// query) is not passed again; a batch noted out of the run's order is LOSAT's internal error.
-    pub fn note_searched(&self, queries: Range<usize>, searched: Option<i64>) -> Result<()> {
+    pub fn note_searched(
+        &self,
+        queries: Range<usize>,
+        searched: Option<SearchedContext0>,
+    ) -> Result<()> {
         self.with_state(|state| {
             if queries.end <= state.noted_through {
                 return Ok(());
@@ -571,6 +575,14 @@ mod tests {
         }
     }
 
+    /// A searched batch whose context 0 has the search space `space` (a query of 142 letters).
+    fn searched(space: i64) -> Option<crate::report::archive::SearchedContext0> {
+        Some(crate::report::archive::SearchedContext0 {
+            space,
+            query_length: 142,
+        })
+    }
+
     fn request<'a>(
         queries: &'a [BioseqInput<'a>],
         lcase_masks: &'a [MaskEntry],
@@ -631,8 +643,8 @@ mod tests {
         let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
         assert!(export.write_request(0..1, &request(&queries, &[])).unwrap());
         assert_eq!(sink.text(), FIRST);
-        export.note_searched(0..1, Some(817_380)).unwrap();
-        for (at, searched) in [(1, None), (2, Some(5)), (3, None)] {
+        export.note_searched(0..1, searched(817_380)).unwrap();
+        for (at, searched) in [(1, None), (2, searched(5)), (3, None)] {
             assert!(export
                 .write_request(at..at + 1, &request(&queries, &[]))
                 .unwrap());
@@ -665,10 +677,13 @@ mod tests {
         export
             .write_request(0..1, &request(&queries, std::slice::from_ref(&mask)))
             .unwrap();
-        export.note_searched(0..1, Some(1_000_000)).unwrap();
-        export.options().set_database_filter(None, true).unwrap();
+        export.note_searched(0..1, searched(1_000_000)).unwrap();
+        export
+            .options()
+            .set_database_filter(None, crate::report::archive::RequestLength::Lengths(None))
+            .unwrap();
         export.write_request(1..2, &request(&queries, &[])).unwrap();
-        export.note_searched(1..2, Some(77)).unwrap();
+        export.note_searched(1..2, searched(77)).unwrap();
         export.write_request(2..3, &request(&queries, &[])).unwrap();
         export.note_searched(2..3, None).unwrap();
         let all = sink.text();
@@ -701,12 +716,12 @@ mod tests {
         let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
         assert!(export.takes(0..2));
         assert!(export.write_request(0..2, &request(&queries, &[])).unwrap());
-        export.note_searched(0..2, Some(5)).unwrap();
+        export.note_searched(0..2, searched(5)).unwrap();
         // The same batch, and a part of it: not taken, nothing written.
         assert!(!export.takes(0..2));
         assert!(!export.takes(1..2));
         assert!(!export.write_request(0..2, &request(&queries, &[])).unwrap());
-        export.note_searched(0..2, Some(9)).unwrap();
+        export.note_searched(0..2, searched(9)).unwrap();
         assert_eq!(sink.text(), FIRST);
         assert!(export.write_request(2..3, &request(&queries, &[])).unwrap());
         assert_eq!(sink.text(), [FIRST.to_string(), with_space(5)].concat());
@@ -719,10 +734,10 @@ mod tests {
         let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
         export.stop_after(1);
         assert!(export.write_request(0..1, &request(&queries, &[])).unwrap());
-        export.note_searched(0..1, Some(5)).unwrap();
+        export.note_searched(0..1, searched(5)).unwrap();
         assert!(!export.takes(1..2));
         assert!(!export.write_request(1..2, &request(&queries, &[])).unwrap());
-        export.note_searched(1..2, Some(6)).unwrap();
+        export.note_searched(1..2, searched(6)).unwrap();
         assert_eq!(sink.text(), FIRST);
     }
 
@@ -772,11 +787,14 @@ mod tests {
         };
         handle
             .options()
-            .set_database_filter(Some(list), true)
+            .set_database_filter(
+                Some(list),
+                crate::report::archive::RequestLength::Lengths(None),
+            )
             .unwrap();
         let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
         export.write_request(0..1, &request(&queries, &[])).unwrap();
-        export.note_searched(0..1, Some(5)).unwrap();
+        export.note_searched(0..1, searched(5)).unwrap();
         export.write_request(1..2, &request(&queries, &[])).unwrap();
         let all = sink.text();
         assert_eq!(all.matches("name \"TaxidList\"").count(), 2, "{all}");
@@ -785,7 +803,7 @@ mod tests {
         let space =
             |searched| crate::report::archive::tests::search_space(&handle.request_sets(searched));
         assert_eq!(space(None), None);
-        assert_eq!(space(Some(5)), Some(0));
+        assert_eq!(space(searched(5)), Some(0));
     }
 
     /// A post of a request that no batch start wrote is LOSAT's internal error at the end of a run

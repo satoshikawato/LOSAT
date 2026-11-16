@@ -203,6 +203,14 @@ impl TabularField {
         &FIELDS[self as usize]
     }
 
+    /// The field's bit in a set of fields (`TabularSpec::has_any`): every field is one of the
+    /// `FIELDS`, by its index (`fields_follow_ncbis_rules`).
+    #[inline]
+    const fn bit(self) -> u64 {
+        const _: () = assert!(FIELDS.len() <= u64::BITS as usize);
+        1 << self as u32
+    }
+
     /// The `-outfmt` name (outfmt 20's header line).
     pub fn name(self) -> &'static str {
         self.entry().0
@@ -524,8 +532,13 @@ impl TabularSpec {
         self.fields.contains(&field)
     }
 
-    fn has_any(&self, fields: &[TabularField]) -> bool {
-        fields.iter().any(|field| self.has(*field))
+    /// Whether any of `fields` is among the spec's fields: one pass over the spec's fields, each
+    /// tested against the set of `fields` (`TabularField::bit`), instead of one pass for each of
+    /// `fields` (no NCBI counterpart: code placement only).
+    #[inline]
+    pub(crate) fn has_any(&self, fields: &[TabularField]) -> bool {
+        let set = fields.iter().fold(0, |set, field| set | field.bit());
+        self.fields.iter().any(|field| set & field.bit() != 0)
     }
 
     /// Whether NCBI's formatter reads the query's Bioseq for a row, and with it the HSP's query
@@ -860,6 +873,77 @@ impl TabularSpec {
         self.kind != TabularKind::TaxReport
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:808-811,828-851
+    // ```c++
+    //     bool setSubjectIds = (x_IsFieldRequested(eSubjectAllSeqIds) ||
+    //     					  x_IsFieldRequested(eSubjectAllGis) ||
+    //                           x_IsFieldRequested(eSubjectAllAccessions));
+    //     ...
+    //     bool setSubjectId = (x_IsFieldRequested(eSubjectSeqId) ||
+    //     		 	 	 	 x_IsFieldRequested(eSubjectGi) ||
+    //     		 	 	 	 x_IsFieldRequested(eSubjectAccession) ||
+    //     		 	 	 	 x_IsFieldRequested(eSubjAccessionVersion));
+    //     ...
+    //             if(setSubjectId) {
+    //             	SetSubjectId(subject_bh);
+    //             }
+    //             m_SubjectLength = subject_bh.GetBioseqLength();
+    //
+    //             if(setSubjectIds || setSubjectTaxInfo || setSubjectTitle || setSubjectTaxInfoAll) {
+    //             	CRef<CBlast_def_line_set> bdlRef =
+    //             			CSeqDB::ExtractBlastDefline(subject_bh);
+    //             	if(setSubjectIds) {
+    //             		x_SetSubjectIds(subject_bh, bdlRef);
+    //             	}
+    // ```
+    /// Where `SetFields` stops for a row of a subject with the lookup `lookup`: `None` where the
+    /// lookup does not fail or no field of the list makes it (the organism report writes no rows).
+    pub fn failed_stage(&self, lookup: SubjectLookup<'_>) -> Option<FailedStage> {
+        match lookup {
+            SubjectLookup::Found => None,
+            SubjectLookup::Failed(failed) => self.failure_stage(failed.failure()),
+        }
+    }
+
+    /// `failed_stage` of a subject whose lookups fail as `failure` says.
+    pub fn failure_stage(&self, failure: LookupFailure) -> Option<FailedStage> {
+        if !self.writes_rows() {
+            None
+        } else if failure.subject_id
+            && self.has_any(&[
+                SubjectSeqId,
+                SubjectGi,
+                SubjectAccession,
+                SubjectAccessionVersion,
+            ])
+        {
+            Some(FailedStage::SubjectId)
+        } else if failure.all_ids
+            && self.has_any(&[SubjectAllSeqIds, SubjectAllGis, SubjectAllAccessions])
+        {
+            Some(FailedStage::SubjectIds)
+        } else {
+            None
+        }
+    }
+
+    /// Whether a row of this report can stop where NCBI has no result (`failed_lookup_stop`):
+    /// the report asks `sacc` or `saccver`, or `staxid` with a field that runs a lookup (a
+    /// failed first row). A report that cannot stop needs no check of its rows before it is
+    /// written.
+    pub fn may_stop_at_failed_lookup(&self) -> bool {
+        self.writes_rows()
+            && (self.has_any(&[SubjectAccession, SubjectAccessionVersion])
+                || (self.has(SubjectTaxId)
+                    && self.has_any(&[
+                        SubjectSeqId,
+                        SubjectGi,
+                        SubjectAllSeqIds,
+                        SubjectAllGis,
+                        SubjectAllAccessions,
+                    ])))
+    }
+
     /// Whether the report looks every taxid of its subjects up in the taxonomy database, 0 too:
     /// the plural names (`x_SetTaxInfoAll`, `checks_taxdb`) and the organism report (outfmt 18,
     /// `CTaxFormat::x_InitBlastDBTaxInfo`); its rows write the texts of those lookups.
@@ -881,6 +965,133 @@ impl TabularSpec {
     fn is_csv(&self) -> bool {
         self.delimiter == ","
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:174-185
+// ```c++
+//     case CBlastTabularInfo::eAccession:
+//     {
+//         CConstRef<CSeq_id> accid = FindBestChoice(id, CSeq_id::Score);
+//         accid->GetLabel(&id_str, CSeq_id::eContent, 0);
+//         break;
+//     }
+//     case CBlastTabularInfo::eAccVersion:
+//     {
+//         CConstRef<CSeq_id> accid = FindBestChoice(id, CSeq_id::Score);
+//         accid->GetLabel(&id_str, CSeq_id::eContent, CSeq_id::fLabel_Version);
+//         break;
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:262-268
+// ```c++
+// void CBlastTabularInfo::x_PrintSubjectTaxId()
+// {
+// 	if(m_SubjectTaxId == ZERO_TAX_ID) {
+// 		m_Ostream << NA;
+// 		return;
+// 	}
+// 	m_Ostream << m_SubjectTaxId;
+// ```
+/// Why NCBI has no result for a tabular report of `spec` (`None`: the default fields, whose
+/// `saccver` is the first case) with a row whose subject lookups fail as `failure` says, the row
+/// being the first of its result set when `first`: `sacc` and `saccver` of the empty
+/// `m_SubjectId` (`SetSubjectId` threw) take the label of a null `FindBestChoice` (NCBI BLAST+
+/// 2.17.0 stops with `CCoreException::eNullPtr`, exit 255, after the row's earlier fields), and
+/// `staxid` of a first row prints `m_SubjectTaxId` before any row set it (an uninitialised `int`:
+/// a different number in each run). `None`: the report has a result (`TabularWriter::row`).
+pub fn failed_lookup_stop(
+    spec: Option<&TabularSpec>,
+    failure: LookupFailure,
+    first: bool,
+) -> Option<&'static str> {
+    let Some(spec) = spec else {
+        return failure.subject_id.then_some(FAILED_LOOKUP_NULL_POINTER);
+    };
+    let stage = spec.failure_stage(failure)?;
+    if stage == FailedStage::SubjectId && spec.has_any(&[SubjectAccession, SubjectAccessionVersion])
+    {
+        Some(FAILED_LOOKUP_NULL_POINTER)
+    } else if first && spec.has(SubjectTaxId) {
+        Some("NCBI BLAST+ prints an uninitialised staxid in the row when it is the first row of a query's report (a different number in each run)")
+    } else {
+        None
+    }
+}
+
+const FAILED_LOOKUP_NULL_POINTER: &str = "NCBI BLAST+ stops with a null pointer exception (exit 255) at the sacc or saccver of its row (the default fields of outfmt 6, 7 and 10 print saccver)";
+
+/// Whether a tabular report of `spec` (`None`: the default fields) can stop where NCBI has no
+/// result (`TabularSpec::may_stop_at_failed_lookup`), so that its rows are checked
+/// (`check_failed_lookups`) before it is written.
+pub fn may_stop_at_failed_lookup(spec: Option<&TabularSpec>) -> bool {
+    spec.is_none_or(TabularSpec::may_stop_at_failed_lookup)
+}
+
+/// The check, before a tabular report of `spec` (`None`: the default fields) writes the rows of
+/// `result_sets` (each the indices of its subjects in row order, a subject's run of rows once,
+/// one set per query or psiblast round), that NCBI has a result for each row whose subject
+/// lookups fail (`failure`, `None` where they do not): `failed_lookup_stop`'s cases are LOSAT's
+/// refusals, which name the subject (`describe`: what its title is) and the program.
+pub fn check_failed_lookups<S>(
+    spec: Option<&TabularSpec>,
+    result_sets: impl IntoIterator<Item = S>,
+    failure: impl Fn(usize) -> Option<LookupFailure>,
+    describe: impl Fn(usize) -> String,
+    program: &str,
+) -> anyhow::Result<()>
+where
+    S: IntoIterator<Item = usize>,
+{
+    if !may_stop_at_failed_lookup(spec) {
+        return Ok(());
+    }
+    for set in result_sets {
+        for (row, s_idx) in set.into_iter().enumerate() {
+            let Some(failure) = failure(s_idx) else {
+                continue;
+            };
+            if let Some(reason) = failed_lookup_stop(spec, failure, row == 0) {
+                return Err(FailedLookupRefusal(format!(
+                    "{}; {reason}, which is not supported by LOSAT's {program}",
+                    describe(s_idx)
+                ))
+                .into());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// LOSAT's refusal of `check_failed_lookups` (exit status 1 with its message in every program; a
+/// type of its own, so that a program that reports its engine's errors otherwise, BLASTX's
+/// `native::report_error`, passes it on as a refusal).
+#[derive(Debug)]
+pub struct FailedLookupRefusal(String);
+
+impl std::fmt::Display for FailedLookupRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for FailedLookupRefusal {}
+
+/// What `check_failed_lookups` says of the `-subject` record `s_idx` (0-based) shown as
+/// `shown_id`, whose lookup fails (a `Subject_` first word of its title, or a parsed
+/// `lcl|Subject_N` id).
+pub fn failed_record_title(s_idx: usize, shown_id: &[u8]) -> String {
+    format!(
+        "subject record {} ({}) has a title whose non-UTF-8 bytes are in no encoding that NCBI BLAST+ recognises, from which NCBI BLAST+ makes the id of a 'Subject_' record",
+        s_idx + 1,
+        String::from_utf8_lossy(shown_id)
+    )
+}
+
+/// What `check_failed_lookups` says of the database sequence `oid` whose lookup fails.
+pub fn failed_database_title(oid: impl std::fmt::Display) -> String {
+    format!(
+        "database sequence {oid} has a title (or, for an empty one, a name in the taxonomy database from which NCBI BLAST+ makes it) in no encoding that NCBI BLAST+ recognises"
+    )
 }
 
 /// The warning of `x_CheckTaxDB` (`TabularSpec::checks_taxdb`), as NCBI's `ERR_POST` writes it
@@ -945,6 +1156,33 @@ pub struct DeflineIds {
     pub id: Vec<u8>,
     pub gi: i64,
     pub accession: Vec<u8>,
+}
+
+impl DeflineIds {
+    /// The one list of `x_SetSubjectIds` of a `-subject` record (no definition lines): its local
+    /// id after `s_ReplaceLocalId`, the first word of its title (an empty title: the local id;
+    /// `FastaRecord::shown_id`), as `word`. `GetSeqIdList`, which makes `sseqid`, does not run
+    /// there, so a title that `GenerateDefline` changes (`Subject_4.`) keeps its first word.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:557-564
+    /// ```c++
+    ///     } else {
+    ///         // Blast-def-line is not filled, hence retrieve all Seq-ids directly
+    ///         // from the Bioseq handle's Seq-id.
+    ///         list<CRef<objects::CSeq_id> > subject_id_list;
+    ///         ITERATE(CBioseq_Handle::TId, itr, bh.GetId()) {
+    ///             CRef<CSeq_id> next_id = s_ReplaceLocalId(bh, itr->GetSeqId(), m_ParseLocalIds);
+    ///             subject_id_list.push_back(next_id);
+    ///         }
+    ///         m_SubjectIds.push_back(subject_id_list);
+    /// ```
+    pub fn of_record(word: &[u8]) -> Vec<DeflineIds> {
+        vec![DeflineIds {
+            id: word.to_vec(),
+            gi: 0,
+            accession: word.to_vec(),
+        }]
+    }
 }
 
 /// The taxonomy of a subject (`x_SetTaxInfo`, `x_SetTaxInfoAll`).
@@ -1187,6 +1425,183 @@ pub struct TabularSubject<'a> {
     /// `qcovs` and `qcovus` of the subject's HSPs; -1 for `N/A`.
     pub qcovs: i32,
     pub qcovus: i32,
+    /// Whether NCBI's `GetSeqIdList` finds the subject's ids (`SubjectLookup`).
+    pub lookup: SubjectLookup<'a>,
+    /// The caller's index of the subject (its subject index or rank), which `TabularRows` keeps
+    /// for the last row that found its subject (`TabularRows::last_found`).
+    pub index: usize,
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:222-230
+// ```c++
+//         if (((*itr)->IsGeneral() &&
+//             (*itr)->AsFastaString().find("gnl|BL_ORD_ID")
+//             != string::npos) ||
+// 		(*itr)->AsFastaString().find("lcl|Subject_") != string::npos) {
+//             vector<string> title_tokens;
+//             string defline = sequence::CDeflineGenerator().GenerateDefline(bh);
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:862-875
+// ```c++
+//         } catch (const CException&) {
+//             list<CRef<CSeq_id> > subject_ids;
+//             CRef<CSeq_id> id(new CSeq_id());
+//             id->Assign(align.GetSeq_id(1));
+//             subject_ids.push_back(id);
+//             SetSubjectId(subject_ids);
+//             bioseqs_found = false;
+//         }
+//
+//     }
+//
+//     // If Bioseq has not been found for one or both of the sequences, all
+//     // subsequent computations cannot proceed. Hence don't set any of the other
+//     // fields.
+//     if (!bioseqs_found)
+//         return -1;
+// ```
+/// Whether NCBI's `GetSeqIdList` makes a subject's tabular ids, or throws: it puts the first word
+/// of the subject Bioseq's generated title in the place of a `gnl|BL_ORD_ID` id or an id with
+/// `lcl|Subject_`, and `GenerateDefline` throws for a title in no encoding that
+/// `CUtf8::GuessEncoding` recognises (`report::defline::html_decode`). The catch of `SetFields`
+/// then ends the row's fields (`FailedLookup`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SubjectLookup<'a> {
+    #[default]
+    Found,
+    Failed(FailedLookup<'a>),
+}
+
+/// A subject whose ids `GetSeqIdList` cannot make (`SubjectLookup::Failed`): the subject's
+/// Seq-align id, which the catch pushes onto `m_SubjectIds` (`sallseqid`, `sallgi`, `sallacc`),
+/// and where the lookup throws.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FailedLookup<'a> {
+    /// The Seq-align id as `sallseqid` prints it (`eFullId`: `Subject_1`, `gnl|BL_ORD_ID|0`)
+    /// and as `sallacc` prints it (`eAccession`: `Subject_1`, `BL_ORD_ID:0`); `sallgi` prints 0.
+    pub full: &'a [u8],
+    pub accession: &'a [u8],
+    /// Whether `SetSubjectId` throws: `GetSeqIdList` of the subject Bioseq's own ids replaces
+    /// one (`gnl|BL_ORD_ID`, `lcl|Subject_`) with the first word of a title that
+    /// `GenerateDefline` cannot make. A database sequence whose Seq-align id is on a definition
+    /// line without such an id has its ids (`gb|X.1|` before `lcl|Subject_9`).
+    pub subject_id: bool,
+    /// Where `x_SetSubjectIds` throws: `None` where it does not (a `-subject` record has no
+    /// definition lines, and its ids are only `s_ReplaceLocalId`'s, tabular.cpp:557-564), else
+    /// after the ids of the definition lines before the first whose `GetSeqIdList` throws
+    /// (tabular.cpp:546-556: each line's list is pushed as it is made).
+    pub all_ids: Option<&'a [DeflineIds]>,
+}
+
+impl FailedLookup<'_> {
+    /// Which of NCBI's two lookups throw.
+    pub fn failure(&self) -> LookupFailure {
+        LookupFailure {
+            subject_id: self.subject_id,
+            all_ids: self.all_ids.is_some(),
+        }
+    }
+}
+
+/// Which of NCBI's lookups of a subject throw (`FailedLookup` without its ids): `SetSubjectId`
+/// (`subject_id`) and `x_SetSubjectIds` (`all_ids`), the checks of a report's field list
+/// (`failed_lookup_stop`) read only these.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LookupFailure {
+    pub subject_id: bool,
+    pub all_ids: bool,
+}
+
+impl LookupFailure {
+    /// The failure of a subject without parsed Seq-ids whose generated title throws: a `-subject`
+    /// record's (`SetSubjectId` only), or a database sequence's (`database`: its one definition
+    /// line holds the `gnl|BL_ORD_ID` id, so `x_SetSubjectIds` throws at it too).
+    pub fn of_plain(database: bool) -> Self {
+        Self {
+            subject_id: true,
+            all_ids: database,
+        }
+    }
+}
+
+/// Where `SetFields` stops for a row whose subject lookup failed (`TabularSpec::failed_stage`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FailedStage {
+    /// `SetSubjectId` (`sseqid`, `sgi`, `sacc`, `saccver` asked): `m_SubjectId` stays empty,
+    /// `m_SubjectLength` 0, and the Seq-align id is added to the `m_SubjectIds` of the rows before.
+    SubjectId,
+    /// `x_SetSubjectIds` (`sallseqid`, `sallgi`, `sallacc` asked, none of the above): after
+    /// `m_SubjectIds.clear()`, so the Seq-align id is its only list; the length is set.
+    SubjectIds,
+}
+
+/// The fields of a row that a row whose subject lookup failed leaves as the last row of the result
+/// set that found its subject set them (`x_SetTaxInfoAll`, `x_SetTaxInfo` and `m_SubjectDefline`
+/// come after the lookups; `x_ResetFields` does not reset them).
+fn kept_by_failed_row(field: TabularField) -> bool {
+    matches!(
+        field,
+        SubjectTaxId
+            | SubjectSciName
+            | SubjectCommonName
+            | SubjectBlastName
+            | SubjectSuperKingdom
+            | SubjectTaxIds
+            | SubjectSciNames
+            | SubjectCommonNames
+            | SubjectBlastNames
+            | SubjectSuperKingdoms
+            | SubjectTitle
+            | SubjectAllTitles
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:780-786
+// ```c++
+//         CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec, kDelim);
+//         if(!m_CustomDelim.empty()) {
+//             tabinfo.SetCustomDelim(m_CustomDelim);
+//         }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:101-114
+// ```c++
+// void CBlastTabularInfo::x_ResetFields()
+// {
+//     m_QueryLength = m_SubjectLength = 0U;
+//     m_Score = m_AlignLength = m_NumGaps = m_NumGapOpens = m_NumIdent =
+//     m_NumPositives = m_QueryStart = m_QueryEnd = m_SubjectStart =
+//     m_SubjectEnd = m_QueryFrame = m_SubjectFrame = 0;
+//     m_BitScore = NcbiEmptyString;
+//     m_Evalue = NcbiEmptyString;
+//     m_QuerySeq = NcbiEmptyString;
+//     m_SubjectSeq = NcbiEmptyString;
+//     m_BTOP = NcbiEmptyString;
+//     m_SubjectStrand = NcbiEmptyString;
+//     m_QueryCovSeqalign = -1;
+// }
+// ```
+/// What NCBI's formatter of one result set (a query's report, or a psiblast round's: one
+/// `CBlastTabularInfo` each) keeps from row to row: the subject ids of `sall*` (`m_SubjectIds`,
+/// to which a row whose lookup fails adds its Seq-align id) and the fields that such a row leaves
+/// as the last row that found its subject set them (`kept_by_failed_row`). Made empty for each
+/// result set. A row that finds its subject stores only its subject's index (`last_found`); a
+/// row whose lookup fails is given that subject again (`TabularWriter::row`'s `kept`) and writes
+/// the kept fields from it, so that the rows that find their subjects copy nothing.
+#[derive(Debug, Default)]
+pub struct TabularRows {
+    /// `TabularSubject::index` of the subject of the last row that found its subject.
+    last_found: Option<usize>,
+    /// `sallseqid`, `sallgi`, `sallacc` as the rows whose lookup failed since the last row that
+    /// found its subject printed them; `None`: that row's own (its subject's ids).
+    failed_ids: Option<[Vec<u8>; 3]>,
+}
+
+impl TabularRows {
+    /// The index (`TabularSubject::index`) of the subject of the result set's last row that found
+    /// its subject, which a row whose lookup fails is given as `kept` (`TabularWriter::row`).
+    pub fn last_found(&self) -> Option<usize> {
+        self.last_found
+    }
 }
 
 /// An HSP of the report, with the values as NCBI's tabular report shows them.
@@ -1346,8 +1761,224 @@ impl TabularWriter<'_> {
         writeln!(out, "# BLAST processed {num_queries} queries")
     }
 
-    /// One row (`SetFields` then `Print`), appended to `out`.
+    /// Whether the row of `subject` sets the subject's values, as a row whose lookup does not fail
+    /// (`TabularSpec::failed_stage`): only then does NCBI look its taxids up
+    /// (`TabularNames::row_messages`).
+    pub fn sets_subject(&self, subject: &TabularSubject<'_>) -> bool {
+        self.spec.failed_stage(subject.lookup).is_none()
+    }
+
+    /// Whether a row of `subject` fails its lookups (`TabularSpec::failed_stage`), so that it is
+    /// written with the subject of the result set's last row that found its subject
+    /// (`TabularRows::last_found`, the `kept` of `row`).
+    pub fn fails(&self, subject: &TabularSubject<'_>) -> bool {
+        !self.sets_subject(subject)
+    }
+
+    /// One row (`SetFields` then `Print`) of the result set whose formatter state is `rows`,
+    /// appended to `out`. A row whose subject lookup fails (`fails`) is given `kept`, the subject
+    /// of `rows.last_found()` (`None` before a row that found its subject), whose titles,
+    /// taxonomy and `sall*` it shows as NCBI's members keep them; other rows ignore it.
     pub fn row(
+        &self,
+        out: &mut Vec<u8>,
+        rows: &mut TabularRows,
+        query: &TabularQuery<'_>,
+        subject: &TabularSubject<'_>,
+        kept: Option<&TabularSubject<'_>>,
+        hsp: &TabularHsp<'_>,
+    ) {
+        if let (SubjectLookup::Failed(failed), Some(stage)) =
+            (subject.lookup, self.spec.failed_stage(subject.lookup))
+        {
+            self.failed_row(out, rows, query, subject, kept, hsp, failed, stage);
+            return;
+        }
+        rows.last_found = Some(subject.index);
+        rows.failed_ids = None;
+        self.found_row(out, query, subject, hsp);
+    }
+
+    /// The row of a subject whose lookup fails at `stage`: the fields before the catch (the
+    /// scores, the query's ids and `qcovhsp`, `qcovs`, `qcovus`), the values of `x_ResetFields`,
+    /// and the kept members of the result set (`TabularRows`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:771-797
+    /// ```c++
+    ///     if (x_IsFieldRequested(eQuerySeqId) || x_IsFieldRequested(eQueryGi) ||
+    ///         x_IsFieldRequested(eQueryAccession) ||
+    ///         x_IsFieldRequested(eQueryAccessionVersion) ||
+    ///         x_IsFieldRequested(eQueryCovSeqalign)) {
+    ///         try {
+    ///             // FIXME: do this only if the query has changed
+    ///             const CBioseq_Handle& query_bh =
+    ///                 scope.GetBioseqHandle(align.GetSeq_id(0));
+    ///             SetQueryId(query_bh);
+    ///             if(m_QueryRange.NotEmpty())
+    ///             	m_QueryLength = m_QueryRange.GetLength();
+    ///             else
+    ///             	m_QueryLength = query_bh.GetBioseqLength();
+    ///             x_SetQueryCovSeqalign(align, m_QueryLength);
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:169-194
+    /// ```c++
+    ///     case CBlastTabularInfo::eAccession:
+    ///     {
+    ///         CConstRef<CSeq_id> accid = FindBestChoice(id, CSeq_id::Score);
+    ///         accid->GetLabel(&id_str, CSeq_id::eContent, 0);
+    ///         break;
+    ///     }
+    ///     ...
+    ///     case CBlastTabularInfo::eGi:
+    ///         id_str = NStr::NumericToString(FindGi(id));
+    ///         break;
+    ///     default: break;
+    ///     }
+    ///
+    ///     if (id_str == NcbiEmptyString)
+    ///         id_str = "Unknown";
+    /// ```
+    /// `sseqid` of the empty `m_SubjectId` (`SetSubjectId` threw) is `Unknown` and `sgi` 0;
+    /// `sacc` and `saccver` read a null `FindBestChoice` (NCBI stops: `failed_lookup_stop`, before
+    /// the report), so no row of this writer prints them. Where only `x_SetSubjectIds` threw, the
+    /// subject's own ids and length were set.
+    #[allow(clippy::too_many_arguments)]
+    #[cold]
+    #[inline(never)]
+    fn failed_row(
+        &self,
+        out: &mut Vec<u8>,
+        rows: &mut TabularRows,
+        query: &TabularQuery<'_>,
+        subject: &TabularSubject<'_>,
+        kept: Option<&TabularSubject<'_>>,
+        hsp: &TabularHsp<'_>,
+        failed: FailedLookup<'_>,
+        stage: FailedStage,
+    ) {
+        let spec = self.spec;
+        let all_ids = spec.has_any(&[SubjectAllSeqIds, SubjectAllGis, SubjectAllAccessions]);
+        if all_ids {
+            // `m_SubjectIds` as the last row left it: the kept subject's lists, or those of the
+            // failed rows since.
+            let lists = rows.failed_ids.get_or_insert_with(|| {
+                let mut lists: [Vec<u8>; 3] = Default::default();
+                if let Some(kept) = kept {
+                    for (list, field) in lists.iter_mut().zip([
+                        SubjectAllSeqIds,
+                        SubjectAllGis,
+                        SubjectAllAccessions,
+                    ]) {
+                        push_all_ids(list, field, kept);
+                    }
+                }
+                lists
+            });
+            // `x_SetSubjectIds` clears the lists and pushes the lists of the definition lines
+            // before the one that throws; `SetSubjectId(list)` of the catch pushes the Seq-align id
+            // (tabular.cpp:1374-1378).
+            if stage == FailedStage::SubjectIds {
+                lists.iter_mut().for_each(Vec::clear);
+                for line in failed.all_ids.unwrap_or_default() {
+                    for (list, field) in lists.iter_mut().zip([
+                        SubjectAllSeqIds,
+                        SubjectAllGis,
+                        SubjectAllAccessions,
+                    ]) {
+                        if !list.is_empty() {
+                            list.push(b';');
+                        }
+                        push_defline_id(list, field, line);
+                    }
+                }
+            }
+            for (list, id) in lists.iter_mut().zip([failed.full, b"0", failed.accession]) {
+                if !list.is_empty() {
+                    list.push(b';');
+                }
+                list.extend_from_slice(id);
+            }
+        }
+        // The query's block of `SetFields` sets `m_QueryLength` and `qcovhsp`; `qlen`'s own
+        // block comes after the catch's `return -1`.
+        let query_block = spec.has_any(&[
+            QuerySeqId,
+            QueryGi,
+            QueryAccession,
+            QueryAccessionVersion,
+            QueryCovHsp,
+        ]);
+        let names = kept.map(|kept| RowNames::of(spec, kept));
+        let subject_set = stage == FailedStage::SubjectIds;
+        for (i, field) in spec.fields.iter().enumerate() {
+            if i > 0 {
+                out.extend_from_slice(spec.delimiter.as_bytes());
+            }
+            if kept_by_failed_row(*field) {
+                match (kept, &names) {
+                    (Some(kept), Some(names)) => self.subject_field(out, *field, kept, names),
+                    // Before a row that found its subject: the members as constructed (empty).
+                    // `staxid` reads an uninitialised `m_SubjectTaxId` there
+                    // (`failed_lookup_stop`, before the report).
+                    _ => {
+                        let quoted = spec.is_csv()
+                            && matches!(
+                                field,
+                                SubjectSciNames | SubjectCommonNames | SubjectBlastNames
+                            );
+                        if quoted {
+                            write_quoted(out, NA);
+                        } else {
+                            out.extend_from_slice(NA);
+                        }
+                    }
+                }
+                continue;
+            }
+            let lists = rows.failed_ids.as_ref();
+            let list = |n: usize| lists.map_or(&[][..], |lists| lists[n].as_slice());
+            match field {
+                QuerySeqId => out.extend_from_slice(query.id),
+                QueryAccession => out.extend_from_slice(query.accession),
+                QueryAccessionVersion => out.extend_from_slice(query.accession_version),
+                QueryGi => push_num(out, query.gi as usize),
+                QueryLength => push_num(out, if query_block { query.length } else { 0 }),
+                SubjectSeqId if subject_set => out.extend_from_slice(subject.id),
+                SubjectAccession if subject_set => out.extend_from_slice(subject.accession),
+                SubjectAccessionVersion if subject_set => {
+                    out.extend_from_slice(subject.accession_version)
+                }
+                SubjectGi if subject_set => push_num(out, subject.gi),
+                SubjectSeqId => out.extend_from_slice(b"Unknown"),
+                SubjectGi => push_num(out, 0),
+                SubjectAccession | SubjectAccessionVersion => {}
+                SubjectAllSeqIds => out.extend_from_slice(list(0)),
+                SubjectAllGis => out.extend_from_slice(list(1)),
+                SubjectAllAccessions => out.extend_from_slice(list(2)),
+                SubjectLength => push_num(out, if subject_set { subject.length } else { 0 }),
+                Evalue => out.extend_from_slice(format_evalue_ncbi_tabular(hsp.evalue).as_bytes()),
+                BitScore => out.extend_from_slice(format_bitscore_ncbi(hsp.bit_score).as_bytes()),
+                Score => push_num(out, hsp.score),
+                PercentIdentical => out.extend_from_slice(b"0.000"),
+                PercentPositives => out.extend_from_slice(b"0.00"),
+                Frames => out.extend_from_slice(b"0/0"),
+                QuerySeq | SubjectSeq | Btop => {}
+                SubjectStrand => out.extend_from_slice(NA),
+                QueryCovSubject => push_coverage(out, subject.qcovs),
+                QueryCovUniqSubject => push_coverage(out, subject.qcovus),
+                QueryCovHsp => push_coverage(out, hsp.qcovhsp),
+                // The other counts and coordinates keep `x_ResetFields`' 0.
+                _ => push_num(out, 0),
+            }
+        }
+        out.push(b'\n');
+    }
+
+    /// The row of a subject whose lookup does not fail. Inline in its one caller (`row`), so that
+    /// such a row costs no call more than before the rows whose lookups fail (no NCBI
+    /// counterpart: code placement only).
+    #[inline(always)]
+    fn found_row(
         &self,
         out: &mut Vec<u8>,
         query: &TabularQuery<'_>,
@@ -1374,7 +2005,6 @@ impl TabularWriter<'_> {
             None => (hsp.num_ident, hsp.num_ident),
         };
         let spec = self.spec;
-        let csv = spec.is_csv();
         // Only NCBI's alignment block (`TabularSpec::opens_counts`) sets the frames (`SetCounts`);
         // without one of its fields `frames` and `sframe` keep the 0 of `x_ResetFields`.
         let counts_set = spec.opens_counts(&hsp.num_ident);
@@ -1414,23 +2044,7 @@ impl TabularWriter<'_> {
                 // `x_PrintSubjectAllGis` and `x_PrintSubjectAllAccessions` (tabular.cpp:238-264)
                 // are the same loop with `eGi` and `eAccession`.
                 SubjectAllSeqIds | SubjectAllGis | SubjectAllAccessions => {
-                    if subject.all_ids.is_empty() {
-                        match field {
-                            SubjectAllSeqIds => out.extend_from_slice(subject.id),
-                            SubjectAllGis => push_num(out, subject.gi),
-                            _ => out.extend_from_slice(subject.accession),
-                        }
-                    }
-                    for (n, ids) in subject.all_ids.iter().enumerate() {
-                        if n > 0 {
-                            out.push(b';');
-                        }
-                        match field {
-                            SubjectAllSeqIds => out.extend_from_slice(&ids.id),
-                            SubjectAllGis => push_num(out, ids.gi),
-                            _ => out.extend_from_slice(&ids.accession),
-                        }
-                    }
+                    push_all_ids(out, *field, subject)
                 }
                 SubjectLength => push_num(out, subject.length),
                 QueryStart => push_num(out, hsp.q_start),
@@ -1475,143 +2089,11 @@ impl TabularWriter<'_> {
                         write_btop(out, qrow, srow, hsp.end_gaps);
                     }
                 }
-                SubjectTaxId => match subject.taxonomy.taxid {
-                    0 => out.extend_from_slice(NA),
-                    taxid => push_num(out, taxid),
-                },
-                SubjectTaxIds => {
-                    if subject.taxonomy.taxids.is_empty() {
-                        out.extend_from_slice(NA);
-                    }
-                    for (n, taxid) in subject.taxonomy.taxids.iter().enumerate() {
-                        if n > 0 {
-                            out.push(b';');
-                        }
-                        push_num(out, *taxid);
-                    }
+                SubjectTaxId | SubjectTaxIds | SubjectSciName | SubjectCommonName
+                | SubjectBlastName | SubjectSuperKingdom | SubjectSciNames | SubjectCommonNames
+                | SubjectBlastNames | SubjectSuperKingdoms | SubjectTitle | SubjectAllTitles => {
+                    self.subject_field(out, *field, subject, &names)
                 }
-                // The names of `RowNames`: an empty singular name is `N/A`, an empty list of
-                // plural names `N/A`; the scientific, common and blast names are quoted in a CSV
-                // (`NStr::Quote`, so `N/A` too and an empty name not), the super kingdoms never.
-                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:337-359
-                // ```c++
-                // void CBlastTabularInfo::x_PrintSubjectSciName()
-                // {
-                // 	if(m_SubjectSciName == kEmptyStr) {
-                // 		m_Ostream << NA;
-                // 		return;
-                // 	}
-                // 	m_Ostream << (x_IsCsv() ? NStr::Quote(m_SubjectSciName) : m_SubjectSciName);
-                // }
-                //
-                // void CBlastTabularInfo::x_PrintSubjectSciNames()
-                // {
-                //     CNcbiOstrstream oss;
-                // 	if(m_SubjectSciNames.empty()) {
-                // 		oss << NA;
-                // 	} else {
-                //         ITERATE(vector<string>, iter, m_SubjectSciNames) {
-                //              if (iter != m_SubjectSciNames.begin())
-                //                  oss << ";";
-                //              oss << *iter;
-                //         }
-                //     }
-                //     const string output = CNcbiOstrstreamToString(oss);
-                //     m_Ostream << (x_IsCsv() ? NStr::Quote(output) : output);
-                // ```
-                SubjectSciName | SubjectCommonName | SubjectBlastName | SubjectSuperKingdom => {
-                    let name = match field {
-                        SubjectSciName => names.sci,
-                        SubjectCommonName => names.common,
-                        SubjectBlastName => names.blast,
-                        _ => names.kingdom,
-                    };
-                    if name.is_empty() {
-                        out.extend_from_slice(NA);
-                    } else if csv && *field != SubjectSuperKingdom {
-                        write_quoted(out, name);
-                    } else {
-                        out.extend_from_slice(name);
-                    }
-                }
-                SubjectSciNames | SubjectCommonNames | SubjectBlastNames | SubjectSuperKingdoms => {
-                    let list = match field {
-                        SubjectSciNames => &names.scis,
-                        SubjectCommonNames => &names.commons,
-                        SubjectBlastNames => &names.blasts,
-                        _ => &names.kingdoms,
-                    };
-                    let joined = if list.is_empty() {
-                        NA.to_vec()
-                    } else {
-                        list.join(&b';')
-                    };
-                    if csv && *field != SubjectSuperKingdoms {
-                        write_quoted(out, &joined);
-                    } else {
-                        out.extend_from_slice(&joined);
-                    }
-                }
-                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:387-440
-                // ```c++
-                // void CBlastTabularInfo::x_PrintSubjectAllTitles ()
-                // {
-                // 	if(m_SubjectDefline.NotEmpty() && m_SubjectDefline->CanGet() &&
-                // 	   m_SubjectDefline->IsSet() && !m_SubjectDefline->Get().empty())
-                // 	{
-                // 		const list<CRef<CBlast_def_line> > & defline = m_SubjectDefline->Get();
-                // 		list<CRef<CBlast_def_line> >::const_iterator iter = defline.begin();
-                // 		for(; iter != defline.end(); ++iter)
-                // 		{
-                // 			if (iter != defline.begin())
-                // 						 m_Ostream << "<>";
-                //
-                // 			if((*iter)->IsSetTitle())
-                // 			{
-                // 				if((*iter)->GetTitle().empty())
-                // 					m_Ostream << NA;
-                // 				else
-                // 					m_Ostream << (*iter)->GetTitle();
-                // 			}
-                // 			else
-                // 				m_Ostream << NA;
-                // 		}
-                // 	}
-                // 	else
-                // 		m_Ostream << NA;
-                //
-                // }
-                //
-                // void CBlastTabularInfo::x_PrintSubjectTitle()
-                // ...
-                // 			if(defline.front()->IsSetTitle())
-                // 			{
-                // 				if(defline.front()->GetTitle().empty())
-                // 					m_Ostream << NA;
-                // 				else
-                // 					m_Ostream << defline.front()->GetTitle();
-                // 			}
-                // 			else
-                // 				m_Ostream << NA;
-                // ```
-                // `x_PrintSubjectTitle` is the `stitle` arm below, `x_PrintSubjectAllTitles` the
-                // `salltitles` arm after it. An absent title is empty in `titles`, so both read as
-                // `N/A`.
-                SubjectTitle => match subject.titles.and_then(|titles| titles.first()) {
-                    Some(title) if !title.is_empty() => out.extend_from_slice(title),
-                    _ => out.extend_from_slice(NA),
-                },
-                SubjectAllTitles => match subject.titles.filter(|titles| !titles.is_empty()) {
-                    Some(titles) => {
-                        for (n, title) in titles.iter().enumerate() {
-                            if n > 0 {
-                                out.extend_from_slice(b"<>");
-                            }
-                            out.extend_from_slice(if title.is_empty() { NA } else { title });
-                        }
-                    }
-                    None => out.extend_from_slice(NA),
-                },
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1064-1070
                 // ```c++
                 //         	if(!subject_is_na)
@@ -1632,6 +2114,188 @@ impl TabularWriter<'_> {
             }
         }
         out.push(b'\n');
+    }
+
+    /// A field of `subject` that a row whose lookup fails keeps from the last row that found its
+    /// subject (`kept_by_failed_row`: the taxonomy and the titles), with the row's names `names`.
+    #[inline(always)]
+    fn subject_field(
+        &self,
+        out: &mut Vec<u8>,
+        field: TabularField,
+        subject: &TabularSubject<'_>,
+        names: &RowNames<'_>,
+    ) {
+        let csv = self.spec.is_csv();
+        match field {
+            SubjectTaxId => match subject.taxonomy.taxid {
+                0 => out.extend_from_slice(NA),
+                taxid => push_num(out, taxid),
+            },
+            SubjectTaxIds => {
+                if subject.taxonomy.taxids.is_empty() {
+                    out.extend_from_slice(NA);
+                }
+                for (n, taxid) in subject.taxonomy.taxids.iter().enumerate() {
+                    if n > 0 {
+                        out.push(b';');
+                    }
+                    push_num(out, *taxid);
+                }
+            }
+            // The names of `RowNames`: an empty singular name is `N/A`, an empty list of
+            // plural names `N/A`; the scientific, common and blast names are quoted in a CSV
+            // (`NStr::Quote`, so `N/A` too and an empty name not), the super kingdoms never.
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:337-359
+            // ```c++
+            // void CBlastTabularInfo::x_PrintSubjectSciName()
+            // {
+            // 	if(m_SubjectSciName == kEmptyStr) {
+            // 		m_Ostream << NA;
+            // 		return;
+            // 	}
+            // 	m_Ostream << (x_IsCsv() ? NStr::Quote(m_SubjectSciName) : m_SubjectSciName);
+            // }
+            //
+            // void CBlastTabularInfo::x_PrintSubjectSciNames()
+            // {
+            //     CNcbiOstrstream oss;
+            // 	if(m_SubjectSciNames.empty()) {
+            // 		oss << NA;
+            // 	} else {
+            //         ITERATE(vector<string>, iter, m_SubjectSciNames) {
+            //              if (iter != m_SubjectSciNames.begin())
+            //                  oss << ";";
+            //              oss << *iter;
+            //         }
+            //     }
+            //     const string output = CNcbiOstrstreamToString(oss);
+            //     m_Ostream << (x_IsCsv() ? NStr::Quote(output) : output);
+            // ```
+            SubjectSciName | SubjectCommonName | SubjectBlastName | SubjectSuperKingdom => {
+                let name = match field {
+                    SubjectSciName => names.sci,
+                    SubjectCommonName => names.common,
+                    SubjectBlastName => names.blast,
+                    _ => names.kingdom,
+                };
+                if name.is_empty() {
+                    out.extend_from_slice(NA);
+                } else if csv && field != SubjectSuperKingdom {
+                    write_quoted(out, name);
+                } else {
+                    out.extend_from_slice(name);
+                }
+            }
+            SubjectSciNames | SubjectCommonNames | SubjectBlastNames | SubjectSuperKingdoms => {
+                let list = match field {
+                    SubjectSciNames => &names.scis,
+                    SubjectCommonNames => &names.commons,
+                    SubjectBlastNames => &names.blasts,
+                    _ => &names.kingdoms,
+                };
+                let joined = if list.is_empty() {
+                    NA.to_vec()
+                } else {
+                    list.join(&b';')
+                };
+                if csv && field != SubjectSuperKingdoms {
+                    write_quoted(out, &joined);
+                } else {
+                    out.extend_from_slice(&joined);
+                }
+            }
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:387-440
+            // ```c++
+            // void CBlastTabularInfo::x_PrintSubjectAllTitles ()
+            // {
+            // 	if(m_SubjectDefline.NotEmpty() && m_SubjectDefline->CanGet() &&
+            // 	   m_SubjectDefline->IsSet() && !m_SubjectDefline->Get().empty())
+            // 	{
+            // 		const list<CRef<CBlast_def_line> > & defline = m_SubjectDefline->Get();
+            // 		list<CRef<CBlast_def_line> >::const_iterator iter = defline.begin();
+            // 		for(; iter != defline.end(); ++iter)
+            // 		{
+            // 			if (iter != defline.begin())
+            // 						 m_Ostream << "<>";
+            //
+            // 			if((*iter)->IsSetTitle())
+            // 			{
+            // 				if((*iter)->GetTitle().empty())
+            // 					m_Ostream << NA;
+            // 				else
+            // 					m_Ostream << (*iter)->GetTitle();
+            // 			}
+            // 			else
+            // 				m_Ostream << NA;
+            // 		}
+            // 	}
+            // 	else
+            // 		m_Ostream << NA;
+            //
+            // }
+            //
+            // void CBlastTabularInfo::x_PrintSubjectTitle()
+            // ...
+            // 			if(defline.front()->IsSetTitle())
+            // 			{
+            // 				if(defline.front()->GetTitle().empty())
+            // 					m_Ostream << NA;
+            // 				else
+            // 					m_Ostream << defline.front()->GetTitle();
+            // 			}
+            // 			else
+            // 				m_Ostream << NA;
+            // ```
+            // `x_PrintSubjectTitle` is the `stitle` arm below, `x_PrintSubjectAllTitles` the
+            // `salltitles` arm after it. An absent title is empty in `titles`, so both read as
+            // `N/A`.
+            SubjectTitle => match subject.titles.and_then(|titles| titles.first()) {
+                Some(title) if !title.is_empty() => out.extend_from_slice(title),
+                _ => out.extend_from_slice(NA),
+            },
+            SubjectAllTitles => match subject.titles.filter(|titles| !titles.is_empty()) {
+                Some(titles) => {
+                    for (n, title) in titles.iter().enumerate() {
+                        if n > 0 {
+                            out.extend_from_slice(b"<>");
+                        }
+                        out.extend_from_slice(if title.is_empty() { NA } else { title });
+                    }
+                }
+                None => out.extend_from_slice(NA),
+            },
+            _ => unreachable!("not a field that a failed row keeps"),
+        }
+    }
+}
+
+/// `sallseqid`, `sallgi` or `sallacc` (`field`) of `subject` as its row prints them: the ids of
+/// its definition lines joined by `;`, or a subject's own ids where it has none.
+#[inline(always)]
+fn push_all_ids(out: &mut Vec<u8>, field: TabularField, subject: &TabularSubject<'_>) {
+    if subject.all_ids.is_empty() {
+        match field {
+            SubjectAllSeqIds => out.extend_from_slice(subject.id),
+            SubjectAllGis => push_num(out, subject.gi),
+            _ => out.extend_from_slice(subject.accession),
+        }
+    }
+    for (n, ids) in subject.all_ids.iter().enumerate() {
+        if n > 0 {
+            out.push(b';');
+        }
+        push_defline_id(out, field, ids);
+    }
+}
+
+/// The id of one definition line that `sallseqid`, `sallgi` or `sallacc` (`field`) prints.
+#[inline(always)]
+fn push_defline_id(out: &mut Vec<u8>, field: TabularField, ids: &DeflineIds) {
+    match field {
+        SubjectAllSeqIds => out.extend_from_slice(&ids.id),
+        SubjectAllGis => push_num(out, ids.gi),
+        _ => out.extend_from_slice(&ids.accession),
     }
 }
 
@@ -1680,6 +2344,7 @@ struct RowNames<'a> {
 }
 
 impl<'a> RowNames<'a> {
+    #[inline(always)]
     fn of(spec: &TabularSpec, subject: &TabularSubject<'a>) -> Self {
         let mut names = RowNames::default();
         let lookup = |taxid: i32| subject.names.and_then(|names| names.get(taxid));
@@ -2132,6 +2797,8 @@ mod tests {
                 nucleotide: true,
                 qcovs: -1,
                 qcovus: -1,
+                lookup: SubjectLookup::Found,
+                index: 0,
             };
             let hsp = TabularHsp {
                 q_start: 1,
@@ -2152,7 +2819,14 @@ mod tests {
                 qcovhsp: 100,
             };
             let mut out = Vec::new();
-            writer.row(&mut out, &TabularQuery::local(b"q", 10), &subject, &hsp);
+            writer.row(
+                &mut out,
+                &mut TabularRows::default(),
+                &TabularQuery::local(b"q", 10),
+                &subject,
+                None,
+                &hsp,
+            );
             String::from_utf8(out).unwrap()
         };
         let two = TabularTaxonomy {
@@ -2318,6 +2992,8 @@ mod tests {
             nucleotide: false,
             qcovs: -1,
             qcovus: -1,
+            lookup: SubjectLookup::Found,
+            index: 0,
         };
         let row = |spec: &TabularSpec, num_ident: usize, rows: Option<(&[u8], &[u8])>| {
             let writer = TabularWriter {
@@ -2344,7 +3020,14 @@ mod tests {
                 qcovhsp: 100,
             };
             let mut out = Vec::new();
-            writer.row(&mut out, &TabularQuery::local(b"q", 6), &subject, &hsp);
+            writer.row(
+                &mut out,
+                &mut TabularRows::default(),
+                &TabularQuery::local(b"q", 6),
+                &subject,
+                None,
+                &hsp,
+            );
             String::from_utf8(out).unwrap()
         };
         let frames = spec(ReportFormat::Tabular, "qseqid frames sframe");
@@ -2403,6 +3086,8 @@ mod tests {
             nucleotide: false,
             qcovs: -1,
             qcovus: -1,
+            lookup: SubjectLookup::Found,
+            index: 0,
         };
         let hsp = TabularHsp {
             q_start: 1,
@@ -2428,11 +3113,306 @@ mod tests {
             program_version: "BLASTP 2.17.0+",
             matrix: None,
         }
-        .row(&mut out, &TabularQuery::local(b"q1", 6), &subject, &hsp);
+        .row(
+            &mut out,
+            &mut TabularRows::default(),
+            &TabularQuery::local(b"q1", 6),
+            &subject,
+            None,
+            &hsp,
+        );
         assert_eq!(
             String::from_utf8(out).unwrap(),
             "q1\tq1\tq1\tgb|AE000111.1|\tAE000111\tAE000111.1\t42\tfirst title\tfirst title<>N/A\n"
         );
+    }
+
+    /// The rows of `subjects` (failed or found, in order) of one query under `fields`, with a
+    /// nucleotide HSP of 450 letters (qcovs 99, qcovhsp 50) and query length 900.
+    fn failed_rows(fields: &str, subjects: &[TabularSubject<'_>]) -> String {
+        let spec = TabularSpec::of(
+            ReportFormat::Tabular,
+            &FormatChoice {
+                number: 6,
+                spec: fields.to_string(),
+                delimiter: String::new(),
+            },
+        )
+        .unwrap();
+        let hsp = TabularHsp {
+            q_start: 1,
+            q_end: 450,
+            s_start: 1,
+            s_end: 450,
+            evalue: 0.0,
+            bit_score: 812.0,
+            score: 900,
+            length: 450,
+            gap_opens: 0,
+            gaps: 0,
+            num_ident: 450,
+            q_frame: 1,
+            s_frame: 1,
+            rows: None,
+            end_gaps: true,
+            qcovhsp: 50,
+        };
+        let writer = TabularWriter {
+            spec: &spec,
+            program_version: "BLASTN 2.17.0+",
+            matrix: None,
+        };
+        let mut rows = TabularRows::default();
+        let mut out = Vec::new();
+        for subject in subjects {
+            // The kept subject of a failed row: the last found one, by its index.
+            let kept = rows
+                .last_found()
+                .and_then(|index| subjects.iter().find(|subject| subject.index == index));
+            writer.row(
+                &mut out,
+                &mut rows,
+                &TabularQuery::local(b"nq1", 900),
+                subject,
+                kept.filter(|_| writer.fails(subject)),
+                &hsp,
+            );
+        }
+        String::from_utf8(out).unwrap()
+    }
+
+    // NCBI tabular.cpp:828-875 and 1374-1378 (the catch of `SetFields` and `SetSubjectId(list)`):
+    // NCBI BLAST+ 2.17.0 `blastn -subject` with two titles `Subject_9 bad x\x81y title`,
+    // `Subject_7 other \x8dz` (probe `remaining-gaps-20261112/T/t7`, `s.bb.blastn.f6wide`), and a
+    // found subject before a failed one (`s.gb`): `sseqid` Unknown, `sgi` 0, the Seq-align ids added
+    // to `sall*` row by row, the counts of `x_ResetFields`, `slen` 0, the scores, the query's ids
+    // and coverages real, the titles and taxonomy of the last found row.
+    #[test]
+    fn failed_lookups_write_ncbis_catch_row() {
+        let taxonomy = TabularTaxonomy::default();
+        let subject = |id: &'static [u8], failed: Option<&'static [u8]>, index| TabularSubject {
+            id,
+            accession: id,
+            accession_version: id,
+            gi: 0,
+            all_ids: &[],
+            length: 1350,
+            titles: None,
+            taxonomy: &taxonomy,
+            names: None,
+            nucleotide: true,
+            qcovs: 99,
+            qcovus: -1,
+            lookup: match failed {
+                Some(align_id) => SubjectLookup::Failed(FailedLookup {
+                    full: align_id,
+                    accession: align_id,
+                    subject_id: true,
+                    all_ids: None,
+                }),
+                None => SubjectLookup::Found,
+            },
+            index,
+        };
+        let wide = "qseqid sseqid evalue bitscore pident length mismatch qstart sstart slen qlen \
+                    nident sgi sallseqid sallgi sallacc stitle salltitles staxids sscinames \
+                    sstrand qcovs qcovhsp";
+        let bad = |n: &'static [u8]| subject(b"", Some(n), 9);
+        let fallback = "\t0.0\t812\t0.000\t0\t0\t0\t0\t0\t900\t0\t0\t";
+        let tail = "\tN/A\tN/A\tN/A\tN/A\tN/A\t99\t50\n";
+        assert_eq!(
+            failed_rows(
+                wide,
+                &[bad(b"Subject_1"), bad(b"Subject_1"), bad(b"Subject_2")]
+            ),
+            format!(
+                "nq1\tUnknown{fallback}Subject_1\t0\tSubject_1{tail}\
+                 nq1\tUnknown{fallback}Subject_1;Subject_1\t0;0\tSubject_1;Subject_1{tail}\
+                 nq1\tUnknown{fallback}Subject_1;Subject_1;Subject_2\t0;0;0\t\
+                 Subject_1;Subject_1;Subject_2{tail}"
+            )
+        );
+        let rows = failed_rows(wide, &[subject(b"s2", None, 1), bad(b"Subject_2")]);
+        assert_eq!(
+            rows.lines().nth(1).unwrap(),
+            format!(
+                "nq1\tUnknown{fallback}s2;Subject_2\t0;0\ts2;Subject_2{}",
+                tail.trim_end()
+            )
+        );
+        // Without `sseqid`, `sgi`, `sacc` and `saccver` a `-subject` record's lookup does not run
+        // (`x_SetSubjectIds` of a record has no `GetSeqIdList`): the row is the found one's.
+        assert_eq!(
+            failed_rows(
+                "qseqid sallseqid evalue",
+                &[subject(b"Subject_9", Some(b"Subject_1"), 0)]
+            ),
+            "nq1\tSubject_9\t0.0\n"
+        );
+    }
+
+    // NCBI BLAST+ 2.17.0 `blastn -db` of a sequence with an empty title and a taxid whose
+    // name has 0x81 after one of Homo sapiens (probe `t.tx_bh.blastn.f6all|f6wide`): without
+    // `sseqid` the lookup fails in `x_SetSubjectIds`, which clears `m_SubjectIds` first, so the
+    // Seq-align id is the list alone and `slen` is set; the taxonomy is the last found row's.
+    #[test]
+    fn a_database_lookup_failing_in_x_set_subject_ids_keeps_the_length() {
+        let homo = TabularTaxonomy {
+            taxid: 9606,
+            taxids: vec![9606],
+        };
+        let none = TabularTaxonomy::default();
+        let titles: [&[u8]; 1] = [b""];
+        let subject = |id: &'static [u8], taxonomy, failed: bool, index| TabularSubject {
+            id,
+            accession: id,
+            accession_version: id,
+            gi: 0,
+            all_ids: &[],
+            length: 660,
+            titles: Some(&titles),
+            taxonomy,
+            names: None,
+            nucleotide: true,
+            qcovs: 100,
+            qcovus: -1,
+            lookup: if failed {
+                SubjectLookup::Failed(FailedLookup {
+                    full: b"gnl|BL_ORD_ID|0",
+                    accession: b"BL_ORD_ID:0",
+                    subject_id: true,
+                    all_ids: Some(&[]),
+                })
+            } else {
+                SubjectLookup::Found
+            },
+            index,
+        };
+        let found = subject(b"Homo", &homo, false, 1);
+        let failed = subject(b"", &none, true, 0);
+        assert_eq!(
+            failed_rows("qseqid sallseqid sallacc slen staxids", &[found, failed]),
+            "nq1\tHomo\tHomo\t660\t9606\nnq1\tgnl|BL_ORD_ID|0\tBL_ORD_ID:0\t660\t9606\n"
+        );
+        assert_eq!(
+            failed_rows("qseqid sseqid slen staxids", &[found, failed]),
+            "nq1\tHomo\t660\t9606\nnq1\tUnknown\t0\t9606\n"
+        );
+    }
+
+    // NCBI BLAST+ 2.17.0 `blastn -db` of a `-parse_seqids` sequence with the definition lines
+    // `gb|AB000001.1|` and `lcl|Subject_9`, an empty title and a taxid whose name has 0x81 (probe
+    // `T/t7/review` `B.gbs9.blastn.f6wide`): `SetSubjectId` finds the Bioseq's `gb` id, and
+    // `x_SetSubjectIds` throws at the second line after it pushed the first one's ids, so `sall*`
+    // are the first line's and the Seq-align id; `slen` is set, the counts are `x_ResetFields`'.
+    #[test]
+    fn a_lookup_failing_after_the_first_definition_line_keeps_its_ids() {
+        let none = TabularTaxonomy::default();
+        let titles: [&[u8]; 2] = [b"", b""];
+        let before = [DeflineIds {
+            id: b"gb|AB000001.1|".to_vec(),
+            gi: 0,
+            accession: b"AB000001".to_vec(),
+        }];
+        let subject = TabularSubject {
+            id: b"gb|AB000001.1|",
+            accession: b"AB000001",
+            accession_version: b"AB000001.1",
+            gi: 0,
+            all_ids: &before,
+            length: 1350,
+            titles: Some(&titles),
+            taxonomy: &none,
+            names: None,
+            nucleotide: true,
+            qcovs: 99,
+            qcovus: -1,
+            lookup: SubjectLookup::Failed(FailedLookup {
+                full: b"gb|AB000001.1|",
+                accession: b"AB000001",
+                subject_id: false,
+                all_ids: Some(&before),
+            }),
+            index: 0,
+        };
+        assert_eq!(
+            failed_rows("qseqid sseqid slen sallseqid sallgi sallacc evalue", &[subject; 2]),
+            "nq1\tgb|AB000001.1|\t1350\tgb|AB000001.1|;gb|AB000001.1|\t0;0\tAB000001;AB000001\t0.0\n"
+                .repeat(2)
+        );
+        // `saccver` is the Bioseq's: no stop where only `x_SetSubjectIds` throws.
+        assert_eq!(
+            failed_rows("qseqid saccver sallseqid", &[subject]),
+            "nq1\tAB000001.1\tgb|AB000001.1|;gb|AB000001.1|\n"
+        );
+    }
+
+    // NCBI tabular.cpp:174-185 (`FindBestChoice` of the empty `m_SubjectId`, a null pointer:
+    // NCBI BLAST+ 2.17.0 exits 255) and :262-268 (`staxid` of an `m_SubjectTaxId` that no row set:
+    // a different number in each run, probe of line RG T7 `6 qseqid sseqid staxid`).
+    #[test]
+    fn failed_lookups_stop_where_ncbi_has_no_result() {
+        let spec = |fields: &str| {
+            TabularSpec::of(
+                ReportFormat::CommaSeparatedValues,
+                &FormatChoice {
+                    number: 10,
+                    spec: fields.to_string(),
+                    delimiter: String::new(),
+                },
+            )
+            .unwrap()
+        };
+        let stop = |fields: Option<&str>, all_ids: bool, first: bool| {
+            let spec = fields.map(spec);
+            let failure = LookupFailure {
+                subject_id: true,
+                all_ids,
+            };
+            failed_lookup_stop(spec.as_ref(), failure, first).is_some()
+        };
+        assert!(stop(None, false, false));
+        assert!(stop(Some(""), false, false));
+        assert!(stop(Some("qseqid sacc"), false, false));
+        assert!(stop(Some("qseqid saccver"), true, false));
+        assert!(!stop(Some("qseqid sseqid evalue"), false, true));
+        assert!(stop(Some("qseqid sseqid staxid"), false, true));
+        assert!(!stop(Some("qseqid sseqid staxid"), false, false));
+        assert!(!stop(Some("qseqid sallseqid staxid"), false, true));
+        assert!(stop(Some("qseqid sallseqid staxid"), true, true));
+        // `SetSubjectId` finds the ids where only `x_SetSubjectIds` throws: no null pointer.
+        let only_all = LookupFailure {
+            subject_id: false,
+            all_ids: true,
+        };
+        assert!(
+            failed_lookup_stop(Some(&spec("qseqid saccver sallseqid")), only_all, false).is_none()
+        );
+        assert!(failed_lookup_stop(None, only_all, true).is_none());
+        assert!(!may_stop_at_failed_lookup(Some(&spec(
+            "qseqid sseqid sallseqid evalue"
+        ))));
+        assert!(may_stop_at_failed_lookup(None));
+        let record = |s_idx| (s_idx == 1).then(|| LookupFailure::of_plain(false));
+        let result = check_failed_lookups(
+            Some(&spec("qseqid sseqid staxid")),
+            [vec![0, 1], vec![1, 0]],
+            record,
+            |s_idx| failed_record_title(s_idx, b"Subject_9"),
+            "BLASTN",
+        );
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .starts_with("subject record 2 (Subject_9) has a title"));
+        assert!(check_failed_lookups(
+            Some(&spec("qseqid sseqid staxid")),
+            [vec![0, 1], vec![0, 1]],
+            record,
+            |s_idx| failed_record_title(s_idx, b"x"),
+            "BLASTN",
+        )
+        .is_ok());
     }
 
     #[test]

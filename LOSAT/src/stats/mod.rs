@@ -2,12 +2,12 @@ pub mod karlin;
 pub mod karlin_calc;
 pub mod length_adjustment;
 pub mod search_space;
+pub(crate) mod setup;
 pub mod spouge;
 pub mod sum_statistics;
 pub mod tables;
 
 pub use karlin_calc::*;
-pub use length_adjustment::*;
 pub use spouge::*;
 pub use sum_statistics::*;
 pub use tables::*;

@@ -1,5 +1,5 @@
 //! The stages of an rpsblast search (series PR, item PS11a) that differ from blastp's, called
-//! once per run from `search_cli` and `run_resolved_in_pool` when the search is RPS-BLAST's
+//! once per run from `search_cli` and `run_call` when the search is RPS-BLAST's
 //! (`ResolvedBlastpArgs::rps_search`): the check of the database's frequency ratios, the queries'
 //! contexts, and the whole RPS search (`algorithm::rps_search`) into the final hit lists, whose
 //! subjects are the profiles' consensus sequences of the database. blastp's driver does the rest
@@ -210,7 +210,7 @@ pub(super) fn rps_contexts(
     (super::empty_aa_lookup(args.word_size), contexts)
 }
 
-/// The per-run values of the search that `run_resolved_in_pool` computed for blastp.
+/// The per-run values of the search that `run_call` computed for blastp.
 pub(super) struct RpsSearchRun<'a> {
     pub(super) contexts: &'a [QueryContext],
     /// `kbp_gap_std`: BLOSUM62 11/1's table values.
@@ -299,7 +299,7 @@ pub(super) fn per_volume_search_spaces(args: &ResolvedBlastpArgs, volumes: usize
 ///                              (query_length - length_adjustment);
 ///          }
 /// ```
-/// (Not `database::blastp_database_search_space`, which blastp's default path inlines.)
+/// (`database::blastp_database_search_space` calls the same function.)
 #[cold]
 #[inline(never)]
 pub(super) fn volume_search_space(
@@ -308,38 +308,18 @@ pub(super) fn volume_search_space(
     num_seqs: i64,
     gapped: &KarlinParams,
 ) -> Result<i64> {
-    let overflow = || {
-        anyhow::anyhow!(
-            "a database length of {db_length} letters with a query of {query_length} letters overflows NCBI BLAST+'s 64-bit effective search space, which is not supported by LOSAT's RPSBLAST"
-        )
-    };
-    let query_length = i64::try_from(query_length).map_err(|_| overflow())?;
-    let adjustment = crate::stats::length_adjustment::compute_length_adjustment_ncbi(
+    // `stats::setup::calc_eff_lengths` (one owner for the six programs, line RG D1a-3): NCBI's
+    // `Int4` count of the volume.
+    let query_length = i64::try_from(query_length).unwrap_or(i64::MAX);
+    Ok(crate::stats::setup::calc_eff_lengths(
         query_length,
         db_length,
-        num_seqs,
+        num_seqs as i32,
         gapped,
-    )
-    .length_adjustment;
-    adjusted_search_space(query_length, db_length, num_seqs, adjustment).ok_or_else(overflow)
-}
-
-/// `(db_length - num_seqs * adjustment) * (query_length - adjustment)` in NCBI's `Int8`, with the
-/// effective database length raised to 1 when it is 0 or below; `None` where a product leaves
-/// `Int8`.
-fn adjusted_search_space(
-    query_length: i64,
-    db_length: i64,
-    num_seqs: i64,
-    adjustment: i64,
-) -> Option<i64> {
-    let mut effective_db_length = num_seqs
-        .checked_mul(adjustment)
-        .and_then(|adjusted| db_length.checked_sub(adjusted))?;
-    if effective_db_length <= 0 {
-        effective_db_length = 1;
-    }
-    effective_db_length.checked_mul(query_length - adjustment)
+        0,
+        "RPSBLAST",
+    )?
+    .eff_searchsp)
 }
 
 /// LOSAT's refusal of an RPS-BLAST database whose alias files give an OID range or a key of the
@@ -353,7 +333,10 @@ pub(super) fn check_alias_keys(database: &database::BlastpDatabase, program: &st
             program,
         ));
     }
-    Ok(())
+    // A total length of 0 (which a database search of the other programs reads as NCBI's
+    // statistics of each subject, `DbStatistics::per_subject`) or of 2^63 or more: kept refused
+    // with the other alias keys until item D1a-4 traces them.
+    crate::algorithm::rps_search::volumes::untraced_total_length(&database.statistics(), program)
 }
 
 /// The number of volumes that an RPS search of the database runs (`-num_threads 0` runs a thread
@@ -836,11 +819,6 @@ mod tests {
         let one = volume_search_space(302, 5_000, 1, &gapped).unwrap();
         let three = volume_search_space(302, 5_000, 3, &gapped).unwrap();
         assert_ne!(one, three);
-        // The floor: an effective database length of 0 or below is 1 (NCBI's length adjustment
-        // keeps it above 0, so the arithmetic is tried on given adjustments).
-        assert_eq!(adjusted_search_space(302, 100, 10, 10), Some(292));
-        assert_eq!(adjusted_search_space(302, 100, 10, 11), Some(291));
-        assert_eq!(adjusted_search_space(302, 100, 10, 9), Some(10 * 293));
         // A product past `Int8` is refused.
         assert!(volume_search_space(302, i64::MAX, 1, &gapped)
             .unwrap_err()

@@ -1,0 +1,53 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/t7/bb.faa).
+           2 sequences; 570 total letters
+
+
+
+Query= nq1 query nucleotide one
+
+Length=900
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+Unknown                                                               313     2e-109
+Unknown                                                               159     1e-53 
+
+
+Sequence with id Subject_1 no longer exists in database...alignment skipped
+Sequence with id Subject_1 no longer exists in database...alignment skipped
+Sequence with id Subject_1 no longer exists in database...alignment skipped
+Sequence with id Subject_1 no longer exists in database...alignment skipped
+Sequence with id Subject_1 no longer exists in database...alignment skipped
+Sequence with id Subject_2 no longer exists in database...alignment skipped
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 136652
+
+
+  Database: User specified sequence set (Input: tests/db_search/t7/bb.faa).
+    Posted date:  Unknown
+  Number of letters in database: 570
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

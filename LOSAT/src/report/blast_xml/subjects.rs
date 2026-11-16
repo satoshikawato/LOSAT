@@ -89,13 +89,23 @@ pub struct SubjectNames {
     /// The taxids that the volume looks up when it fetches a subject with parsed Seq-ids
     /// (`ParsedSubject::volume_taxids`; empty for the others, whose one is `taxid`).
     pub volume_taxids: Vec<i32>,
+    /// The catch of NCBI's hit writers (`SubjectNames::unknown`): outfmt 5's `Hit_len` is 0.
+    pub unknown: bool,
 }
 
 impl SubjectNames {
     /// The names of a `-subject` record `id` with the FASTA title `title` (`Subject_N` and the
-    /// generated definition line). `protein`: the record is a protein.
+    /// generated definition line), or where `GenerateDefline` throws the catch's
+    /// (`SubjectNames::unknown` of `lcl|Subject_N`). `protein`: the record is a protein.
     pub fn of_record(id: &[u8], title: &[u8], protein: bool) -> Result<Self, Refusal> {
-        let (xml_id, title) = names::xml_subject_names(id, title, protein)?;
+        let (xml_id, title) = match names::xml_subject_names(id, title, protein) {
+            Err(Refusal::UnknownEncoding) => {
+                let mut fasta = b"lcl|".to_vec();
+                fasta.extend_from_slice(id);
+                return Ok(Self::unknown(fasta));
+            }
+            names => names?,
+        };
         Ok(SubjectNames {
             id: xml_id,
             title,
@@ -104,7 +114,53 @@ impl SubjectNames {
             taxonomy: HitTaxonomy::Unnamed,
             descriptions: Vec::new(),
             volume_taxids: Vec::new(),
+            unknown: false,
         })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:398-407
+    // ```c++
+    //     } catch (const CException&) {
+    //         // If Bioseq handle didn't return some of the information, and not all
+    //         // mandatory couldn't be filled, skip this hit completely.
+    //         //hit.Reset(NULL);
+    //         hit->SetId(kSeqId.AsFastaString());
+    //         hit->SetDef("Unknown");
+    //         hit->SetAccession("Unknown");
+    //         hit->SetLen(0);
+    //     };
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:410-415
+    // ```c++
+    //     } catch (const CException&) {
+    //     	CRef<blastxml2::CHitDescr> hit_exp(new blastxml2::CHitDescr);
+    //     	hit_exp->SetId(kSeqId.AsFastaString());
+    //         hit->SetDescription().push_back(hit_exp);
+    //         hit->SetLen(sequence::GetLength(kSeqId, scope));
+    //     };
+    // ```
+    /// The names that the catches of NCBI's hit writers give a subject whose `GenerateDefline`
+    /// throws (a title in no encoding that NCBI guesses), whose Seq-align id is `seq_id`
+    /// (`AsFastaString`: `lcl|Subject_1`): outfmt 5's `Hit_id` is the id, `Hit_def` and
+    /// `Hit_accession` `Unknown`, `Hit_len` 0 (`unknown`); XML2's and JSON's one `HitDescr` has the
+    /// id alone, and the length is the sequence's.
+    pub fn unknown(seq_id: Vec<u8>) -> Self {
+        SubjectNames {
+            id: seq_id.clone(),
+            title: b"Unknown".to_vec(),
+            accession: b"Unknown".to_vec(),
+            taxid: 0,
+            taxonomy: HitTaxonomy::Unnamed,
+            descriptions: vec![HitDescription {
+                id: seq_id,
+                accession: Vec::new(),
+                title: None,
+                taxid: 0,
+                taxonomy: HitTaxonomy::Unnamed,
+            }],
+            volume_taxids: Vec::new(),
+            unknown: true,
+        }
     }
 
     /// The names of a `-subject` record whose ids `-parse_deflines` read (`ParsedSubject::of_record`):
@@ -121,9 +177,9 @@ impl SubjectNames {
         }
         let subject = ParsedSubject::of_record(ids, title);
         let (id, accession) = subject.record_xml_ids();
-        let title = subject
-            .bioseq_title(protein, false)
-            .map_err(|_| Refusal::UnknownEncoding)?;
+        let Ok(title) = subject.bioseq_title(protein, false) else {
+            return Ok(Self::unknown(subject.alignment_fasta()));
+        };
         if title.reads_past_end {
             return Err(Refusal::ReadsPastEnd);
         }
@@ -161,6 +217,7 @@ impl SubjectNames {
             taxonomy: HitTaxonomy::Unnamed,
             descriptions,
             volume_taxids: Vec::new(),
+            unknown: false,
         })
     }
 
@@ -180,6 +237,7 @@ impl SubjectNames {
             taxonomy,
             descriptions: Vec::new(),
             volume_taxids: Vec::new(),
+            unknown: false,
         })
     }
 
@@ -234,6 +292,7 @@ impl SubjectNames {
             taxonomy: HitTaxonomy::Unnamed,
             descriptions,
             volume_taxids: subject.volume_taxids(),
+            unknown: false,
         })
     }
 }

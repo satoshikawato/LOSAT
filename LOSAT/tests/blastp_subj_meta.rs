@@ -266,7 +266,7 @@ fn a_reported_subject_without_a_tabular_id_is_refused_alike_in_blocks() {
     assert_ne!(all.code, Some(0));
     assert!(
         all.stderr
-            .contains("has a title whose first word starts with 'Subject_'"),
+            .contains("has a title whose non-UTF-8 bytes are in no encoding"),
         "{}",
         all.stderr
     );

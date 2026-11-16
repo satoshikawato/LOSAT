@@ -126,16 +126,26 @@ pub(crate) enum MixError {
     /// (`Mix::merge_match`, `Mix::build`); `super::write_section` fails with it
     /// (`NcbiException::into_io_error`).
     NcbiThrows(NcbiException),
-    /// NCBI frees a segment that it still reads: a match of length 0 (BLASTX's HSP of length 0,
-    /// `serial::seqalign::empty_row_segments`) that starts at the start of a longer segment of its
-    /// row, or inside one (whose split gives it that start), "splits" that segment at its own
-    /// length of 0 (`Mix::place`). The new segment's start on each row of the old one is the old
-    /// one's: `SetStarts()[start + 0] = seg` replaces the `CRef` in that row's map, and on a row of
-    /// the first row's strand (every row of such a segment of a BLASTX section) nothing else holds
-    /// the old segment, so the replacement on its last row frees it while `ITERATE` still walks its
-    /// `m_StartIts` (alnmerger.cpp:598-614): a read of freed memory (SIGSEGV in our runs). The
-    /// program refuses the report before its first byte (PD-LOSAT-NCBI-DEFECTS rule 3,
-    /// `super::section_frees`).
+    /// NCBI frees a segment that it still reads, where a write into a row's map replaces the last
+    /// `CRef` of a segment (a `CAlnMixStarts` holds its segments by `CRef`, `m_Segments` by raw
+    /// pointer, alnsegments.hpp:67,80,89), in one of two places:
+    /// - The merge's split (`Mix::place`): a match of length 0 (BLASTX's HSP of length 0,
+    ///   `serial::seqalign::empty_row_segments`) that starts at the start of a longer segment of
+    ///   its row, or inside one (whose split gives it that start), "splits" that segment at its own
+    ///   length of 0. The new segment's start on each row of the old one is the old one's:
+    ///   `SetStarts()[start + 0] = seg` replaces the `CRef` in that row's map, and on a row of the
+    ///   first row's strand (every row of such a segment of a BLASTX section) nothing else holds
+    ///   the old segment, so the replacement on its last row frees it while `ITERATE` still walks
+    ///   its `m_StartIts` (alnmerger.cpp:598-614).
+    /// - `FillUnalignedRegions` (`Mix::fill_unaligned_regions`): the fill after a segment of
+    ///   length 0 of a row starts at that segment's own start, so `row->SetStarts()[new_start] =
+    ///   seg` (alnsegments.cpp:323) replaces the row's `CRef` of it; where no other map holds it
+    ///   and it is not the last segment that `x_Merge` created (`Mix::merge_seg`), it is freed
+    ///   while `m_Segments` still lists it, and `x_CreateDenseg` reads it (alnmerger.cpp:
+    ///   1196-1210).
+    ///
+    /// A read of freed memory (SIGSEGV in our runs). The program refuses the report before its
+    /// first byte (PD-LOSAT-NCBI-DEFECTS rule 3, `super::section_frees`).
     NcbiFreesSegment,
 }
 
@@ -264,6 +274,10 @@ struct Mix {
     query_bioseq: Option<u32>,
     /// `m_SingleRefseq` (`Mix::merge`; `m_IndependentDSs` is false for every section, there).
     single_refseq: bool,
+    /// `x_Merge`'s `CRef<CAlnMixSegment> seg` (alnmerger.cpp:161): the segment that the merge
+    /// created last (`Mix::merge_segment`), which that `CRef` holds until `x_CreateDenseg` has
+    /// returned (alnmerger.cpp:822-830, quoted at `Mix::held`).
+    merge_seg: Option<SegIx>,
 }
 
 /// The first key of `map` (`begin()`), `None` (`end()`) when it is empty.
@@ -296,12 +310,53 @@ fn lower_bound(map: &BTreeMap<u32, SegIx>, key: u32) -> It {
 }
 
 impl Mix {
+    /// A new `CAlnMixSegment` of length `len`. The arena keeps every segment; NCBI frees one when
+    /// its last `CRef` goes (`Mix::held`).
     fn new_segment(&mut self, len: u32) -> SegIx {
         self.segs.push(MixSegment {
             len,
             start_its: BTreeMap::new(),
         });
         self.segs.len() - 1
+    }
+
+    /// `seg = new CAlnMixSegment()` of `x_Merge` (alnmerger.cpp:492, 528, 589, 654, quoted at
+    /// `Mix::place`): a new segment, which `seg` now holds (`merge_seg`).
+    fn merge_segment(&mut self, len: u32) -> SegIx {
+        let seg = self.new_segment(len);
+        self.merge_seg = Some(seg);
+        seg
+    }
+
+    /// Whether a `CRef` still holds `seg` after `FillUnalignedRegions` replaced one in a row's
+    /// map: the maps of the rows (`CAlnMixStarts`, a `map<TSeqPos, CRef<CAlnMixSegment> >`) of
+    /// every sequence (`m_Seqs` and `m_ExtraRows` keep them all to the end of the merge), and
+    /// `x_Merge`'s `seg`, which is alive until `x_CreateDenseg` has returned. Nothing else holds a
+    /// segment then: `m_Segments` and `m_StartIts` hold raw pointers and map iterators
+    /// (alnsegments.hpp:67,80,106,119), and the `CRef`s of `Build` (`gapped_segs`, `seg_stack`,
+    /// `seg_set`) and `x_MinimizeGaps` (`seg`, `len_map`, `new_segs`) are locals that went with
+    /// their functions (alnsegments.cpp:69,111-113,442-448).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:161,822-830
+    /// ```c++
+    ///     CRef<CAlnMixSegment> seg;
+    ///     ...
+    ///     m_AlnMixSequences->BuildRows();
+    ///     m_AlnMixSegments->Build(m_MergeFlags & fGapJoin,
+    ///                             m_MergeFlags & fMinGap,
+    ///                             m_MergeFlags & fRemoveLeadTrailGaps);
+    ///     if (m_MergeFlags & fFillUnalignedRegions) {
+    ///         m_AlnMixSegments->FillUnalignedRegions();
+    ///     }
+    ///     x_CreateDenseg();
+    /// }
+    /// ```
+    fn held(&self, seg: SegIx) -> bool {
+        self.merge_seg == Some(seg)
+            || self
+                .seqs
+                .iter()
+                .any(|seq| seq.starts.values().any(|&held| held == seg))
     }
 
     // NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnsegments.hpp:108-112
@@ -949,7 +1004,7 @@ impl Mix {
                 AddFlags::ForceTranslation => self.seqs[seq1].strand_score >= 0,
                 AddFlags::PreserveRows => true,
             };
-            let seg = self.new_segment(len);
+            let seg = self.merge_segment(len);
             self.seqs[seq1].starts.insert(start1, seg);
             self.set_start_iterator(seg, seq1, start1);
             lo_start_i = Some(start1);
@@ -973,7 +1028,7 @@ impl Mix {
                 if lo_key + self.segs[prev_seg].len * width1 > start1 {
                     let len1 = (start1 - lo_key) / width1;
                     let len2 = self.segs[prev_seg].len - len1;
-                    let seg = self.new_segment(len2);
+                    let seg = self.merge_segment(len2);
                     self.seqs[seq1].starts.insert(start1, seg);
                     self.split_rows(seq1, prev_seg, seg, len1, len2);
                     self.segs[prev_seg].len = len1;
@@ -1020,7 +1075,7 @@ impl Mix {
                     }
                     if prev_len > curr_len {
                         let len1 = prev_len - curr_len;
-                        let seg = self.new_segment(len1);
+                        let seg = self.merge_segment(len1);
                         start += curr_len * width1;
                         self.segs[prev_seg].len = curr_len;
                         self.split_rows(seq1, prev_seg, seg, curr_len, len1);
@@ -1034,7 +1089,7 @@ impl Mix {
                     }
                 }
                 _ => {
-                    let seg = self.new_segment(0);
+                    let seg = self.merge_segment(0);
                     self.seqs[seq1].starts.insert(start, seg);
                     let starts = &self.seqs[seq1].starts;
                     let mut tmp_start_i = start_i;
@@ -2245,6 +2300,22 @@ impl Mix {
     /// stretch goes before the segment being read, whose own rows are then
     /// still read from it (`seg_i` points to it again after the insertion).
     ///
+    /// After a segment of length 0 of a plus-strand row the fill starts at that segment's own
+    /// start (`prev_start + prev_len * width`), so the write into the row's map replaces the row's
+    /// `CRef` of it. Where that was its last (`Mix::held`: no map of a row holds it, as one of the
+    /// segments of length 0 that `x_MinimizeGaps` made for several rows would be, and it is not
+    /// `x_Merge`'s `seg`), NCBI frees it there, and `x_CreateDenseg` reads it through
+    /// `m_Segments` (alnmerger.cpp:1196-1210, quoted at `create_denseg`): a read of freed memory,
+    /// `MixError::NcbiFreesSegment`, at the first such replacement (official NCBI BLAST+ 2.17.0
+    /// crashed with SIGSEGV in our runs; valgrind names the block "free'd by
+    /// `FillUnalignedRegions`", the review 3 of line RG T3c, case r11_001). A segment that
+    /// `m_Segments` does not list is read by nothing after its free. Only BLASTX's HSPs of length
+    /// 0 make segments of length 0, on the query's rows of the first frame group, which are plus
+    /// (`fPreserveRows`, `place`): no minus-strand row holds one (there the fill starts at the end
+    /// of the segment being read, that segment's own start only for a length of 0). The only
+    /// other stop of this function, `MixError::NcbiAborts`, needs the query's own Bioseq, which
+    /// BLASTX's protein subjects never are.
+    ///
     /// A row that `BuildRows` left out keeps the `m_RowIdx` of -1 of `CAlnMixSeq()`: the extra
     /// rows of a sequence without starts, the query's own Bioseq whose `m_AnotherRow` kept none
     /// (`place`). NCBI's `starts[rowidx]` and `lens[rowidx]` then write before their vectors'
@@ -2277,7 +2348,13 @@ impl Mix {
                         (start_plus_len, (prev_start as u32 - start_plus_len) / width)
                     };
                     let seg = self.new_segment(seg_len);
-                    self.seqs[row].starts.insert(new_start, seg);
+                    if let Some(old) = self.seqs[row].starts.insert(new_start, seg) {
+                        // The map's `CRef` of `old` goes (`MixError::NcbiFreesSegment`): its last
+                        // one frees it, which `x_CreateDenseg` reads where `m_Segments` lists it.
+                        if !self.held(old) && self.segments.contains(&old) {
+                            return Err(MixError::NcbiFreesSegment);
+                        }
+                    }
                     self.set_start_iterator(seg, row, new_start);
                     self.segments.insert(seg_i, seg);
                     seg_i += 1;
@@ -2441,6 +2518,7 @@ pub(crate) fn merge(hsps: &Hsps, group: &[usize]) -> Result<Option<Denseg>, MixE
         add_flags: AddFlags::PreserveRows,
         query_bioseq: hsps.query_bioseq,
         single_refseq: true,
+        merge_seg: None,
     };
     let mut has_aln = false;
     for &index in group {

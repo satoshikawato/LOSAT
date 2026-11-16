@@ -92,7 +92,12 @@ FASTA files:
   12 150`), whose HSP of length 0 starts at a codon of an HSP of the query's frame +1, where NCBI's
   query-anchored merge frees a segment it still reads; `x2g_ord.faa` holds p0127's subject, a protein that
   matches the first 48 nucleotides of P1's p0055 query in frame +1, and p0055's subject, and `x2g_ord_q.fna` and
-  `x2g_ord_q2.fna` the two queries in both orders.
+  `x2g_ord_q2.fna` the two queries in both orders. `x2g_r11_001` and `x2g_r11_019` (rows `db.x2g.bx.of.r11_*`,
+  line RG T3c fix 3; titles `x2g r11_001 subjects` and `x2g r11_019 subjects`) are the five subjects
+  `x2g_r11_001_s.faa` and `x2g_r11_019_s.faa` there, with their queries `x2g_r11_001_q.fna` (one) and
+  `x2g_r11_019_q.fna` (two): the sets r11_001 and r11_019 of the seed-11 fuzz of the review 3 of T3c
+  (`gen_sets.py 11 30`), whose HSPs of length 0 with `-strand minus` make segments of length 0 of a query row,
+  where NCBI's `FillUnalignedRegions` frees one that it still reads.
 
 - `x2f_c0384_q.fna` / `x2f_c0384_s.faa`, `x2f_c0326_q.fna` / `x2f_c0326_s.faa`: two random pairs of the line RG
   X2f survey (cases c0384 and c0326), rows `db.x2f.*`: with `-window_size 0` and a low `-threshold`, BLASTX's
@@ -137,6 +142,13 @@ makeblastdb also writes was deleted). Run from `LOSAT/`:
     for n in s1 s1z s1d; do
         makeblastdb -in tests/fasta/outfmt0/x2g_${n}_s.faa -dbtype prot -out tests/db_search/x2g_$n \
             -title "x2g $n subject" -blastdb_version 4; done
+    makeblastdb -in tests/fasta/outfmt0/x2g_p0127_s.faa -dbtype prot -out tests/db_search/x2g_p0127 \
+        -title "x2g p0127 subject" -blastdb_version 4
+    makeblastdb -in tests/fasta/outfmt0/x2g_ord.faa -dbtype prot -out tests/db_search/x2g_ord \
+        -title "x2g ord subjects" -blastdb_version 4
+    for n in r11_001 r11_019; do
+        makeblastdb -in tests/fasta/outfmt0/x2g_${n}_s.faa -dbtype prot -out tests/db_search/x2g_$n \
+            -title "x2g $n subjects" -blastdb_version 4; done
 
 `wm_s60k` (rows `db.wm.*`, line NP M2: `-window_masker_db`) is the subject `s60k.fa` of
 `LOSAT/tests/blastn_regression_fixtures.py`, with only `.nin .nsq .nhr` kept:

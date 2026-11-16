@@ -854,11 +854,14 @@ pub(crate) fn ncbi_aborts(hsps: &Hsps) -> io::Result<bool> {
 }
 
 /// Whether NCBI BLAST+'s merge of the section of `hsps` frees a segment that it still reads
-/// (`aln_mix::MixError::NcbiFreesSegment`): a BLASTX HSP of length 0 (`HspStrands::no_widths`, in
-/// the first group) whose query position lies in a segment of letters of its query row. The
-/// groups are merged in order, all before the section's first byte (`write_section`), so the
-/// first group's merge comes first; only a group with such an HSP is merged here. The program
-/// asks it before any byte of the call's reports, as `ncbi_aborts`, and refuses the report there
+/// (`aln_mix::MixError::NcbiFreesSegment`): with a BLASTX HSP of length 0
+/// (`HspStrands::no_widths`, in the first group), the merge's split of a segment of letters of
+/// its query row at a length of 0 (`aln_mix::Mix::place`), or `FillUnalignedRegions` replacing
+/// the last reference to a segment of length 0 that `m_Segments` lists
+/// (`aln_mix::Mix::fill_unaligned_regions`). The groups are merged in order, all before the
+/// section's first byte (`write_section`), so the first group's merge comes first; only a group
+/// with such an HSP is merged here (only such HSPs make segments of length 0). The program asks
+/// it before any byte of the call's reports, as `ncbi_aborts`, and refuses the report there
 /// (PD-LOSAT-NCBI-DEFECTS rule 3): what NCBI writes before its crash is what its stream had
 /// flushed.
 pub(crate) fn section_frees(hsps: &Hsps) -> io::Result<bool> {

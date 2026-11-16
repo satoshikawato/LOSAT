@@ -98,7 +98,8 @@
   fix 2, in place of fix 1's explicit rejection), rule 2; and the rule-2 rejection of a query's id
   of 1.24 and 1.28 in BLASTX and TBLASTX; BLASTX's HSPs of length 0 of 1.33 in these views
   reproduced, rule 2, with the explicit rejection of a section whose merge NCBI frees a segment in,
-  rule 3 (2026-11-16, T3c after X2g); Owner-delegated, standing instruction 2026-09-29,
+  rule 3 (2026-11-16: the split of T3c after X2g, and `FillUnalignedRegions`'s free of T3c fix 3);
+  Owner-delegated, standing instruction 2026-09-29,
   restated 2026-10-07, within rule 2, rule 3 as 1.23 and the class of 1.10)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
@@ -1075,19 +1076,42 @@ masked). Line NP item M4a-2c.
   (fixture rows `db.of1.bp.self1.*`, `db.of1.bn.selfrc.*`).
 
 - BLASTX `-outfmt 1` to `4` with `-ungapped -window_size 0` (version 1.37, 2026-11-16, line RG item
-  T3c after X2g, Owner-delegated, rule 3 as 1.23): an HSP of length 0 among the aligned subjects
-  whose query row starts at the first nucleotide of a codon of an HSP of the query's frame +1. Its
-  match (merged with that frame's HSPs, above) starts at or inside a segment of letters of that
-  row, and `x_Merge` "splits" the segment at the match's length of 0
-  (alnmerger.cpp:580-614): `SetStarts()[start + 0] = seg` replaces each row's reference to the
-  segment, whose rows are all on the query's strand, so the last one frees it while `ITERATE`
-  still walks its `m_StartIts`. NCBI reads freed memory there: SIGSEGV in every such probe (37 of
-  the 1,880 cases in each of the four views, 98 of the grid's 277 searches, the second query of
-  `x2g_ord_q2.fna`), no checkable result. LOSAT runs the same merge and refuses (exit 1) where it
-  reaches that split (`report::query_anchored::aln_mix::MixError::NcbiFreesSegment`), before the
-  first byte of the reports of the search's call (as 1.23), unless the report of a query before it
-  ends with NCBI's exception, where NCBI stops first (`pairwise::blastx_anchored_stop`; fixture rows
-  `db.x2g.bx.of.p0127.nd0.1`, `db.x2g.bx.of.ord.n1a5.1`, `db.x2g.bx.of.ord2.n1a5.3`).
+  T3c after X2g and T3c fix 3, Owner-delegated, rule 3 as 1.23): an HSP of length 0 among the
+  aligned subjects whose segment of length 0 NCBI's merge of the section frees while it still reads
+  it. A row's map of starts (`CAlnMixStarts`) holds its segments by `CRef`, `m_Segments` by raw
+  pointer (alnsegments.hpp:67,80,89), so a write into a map that replaces a segment's last `CRef`
+  frees it. That happens in two places:
+  - The split. An HSP of length 0 whose query row starts at the first nucleotide of a codon of an
+    HSP of the query's frame +1: its match (merged with that frame's HSPs, above) starts at or
+    inside a segment of letters of that row, and `x_Merge` "splits" the segment at the match's
+    length of 0 (alnmerger.cpp:580-614): `SetStarts()[start + 0] = seg` replaces each row's
+    reference to the segment, whose rows are all on the query's strand, so the last one frees it
+    while `ITERATE` still walks its `m_StartIts`. SIGSEGV in every such probe (37 of the 1,880
+    cases in each of the four views, 98 of the grid's 277 searches, the second query of
+    `x2g_ord_q2.fna`).
+  - `FillUnalignedRegions` (alnsegments.cpp:286-334). An HSP of length 0 whose segment its query
+    row's next segment does not follow at once (unaligned letters between them): the fill of that
+    stretch starts at the segment's own start (`new_start = prev_start + prev_len * width`, with a
+    length of 0), so `row->SetStarts()[new_start] = seg` (:323) replaces the row's reference to the
+    segment. It is the last one unless another row's map holds the segment (a segment of length 0
+    that `x_MinimizeGaps` made for several query rows) or the segment is the last that `x_Merge`
+    made (its local `CRef<CAlnMixSegment> seg`, alnmerger.cpp:161, alive until `x_CreateDenseg`
+    has returned, :822-830); no other `CRef` holds a segment then. `x_CreateDenseg` then reads the
+    freed segment through `m_Segments` (alnmerger.cpp:1196-1210). Official NCBI BLAST+ 2.17.0
+    exits 139 (SIGSEGV), and valgrind finds the invalid reads of a block "free'd by
+    `CAlnMixSegments::FillUnalignedRegions()`" (review 3 of T3c: the 8 runs of its seed-11 fuzz
+    with `-strand minus -num_descriptions 0`, cases `r11_001` and `r11_019`); where the segment is
+    still held, or no fill starts at it, NCBI exits 0 and valgrind is clean (`r21_173`, `r21_322`,
+    `r21_381` and the x2g case f3147 at query offset 0, held by `seg`; `r21_470`, `r11_003`).
+
+  No checkable result in either place. LOSAT runs the same merge and refuses (exit 1) where it
+  reaches that split or replaces that last reference
+  (`report::query_anchored::aln_mix::MixError::NcbiFreesSegment`, the predicate
+  `aln_mix::Mix::held`), before the first byte of the reports of the search's call (as 1.23),
+  unless the report of a query before it ends with NCBI's exception, where NCBI stops first
+  (`pairwise::blastx_anchored_stop`; fixture rows `db.x2g.bx.of.p0127.nd0.1`,
+  `db.x2g.bx.of.ord.n1a5.1`, `db.x2g.bx.of.ord2.n1a5.3`, `db.x2g.bx.of.r11_001.nd0m.1`,
+  `db.x2g.bx.of.r11_019.nd0m.3`).
 
 - RPSBLAST `-use_sw_tback` with composition-based statistics (version 1.30, 2026-11-15, line PS
   item PS11c-3, Owner-delegated, line PS `DECISIONS.md` 63): a profile with two or more

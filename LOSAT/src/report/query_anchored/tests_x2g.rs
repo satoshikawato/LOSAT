@@ -48,9 +48,20 @@ impl Sequences for Probe {
 /// The section's HSPs `rows` (qstart, qend, sstart, send, the query's frame in its record, BTOP; an empty
 /// BTOP for an HSP of length 0) of subject 0.
 fn hsps(probe: &Probe, rows: &[(u32, u32, u32, u32, i8, &str)]) -> Hsps {
+    let rows: Vec<_> = rows
+        .iter()
+        .map(|&(qstart, qend, sstart, send, qframe, btop)| {
+            (0, qstart, qend, sstart, send, qframe, btop)
+        })
+        .collect();
+    subject_hsps(probe.query.len(), &rows)
+}
+
+/// The section's HSPs `rows` (the subject's OID, then as in `hsps`) of a query of `query_len` nucleotides.
+fn subject_hsps(query_len: usize, rows: &[(u32, u32, u32, u32, u32, i8, &str)]) -> Hsps {
     let mut hsps = Hsps::of_translated_query();
     let mut segments = Segments::default();
-    for &(qstart, qend, sstart, send, qframe, btop) in rows {
+    for &(subject, qstart, qend, sstart, send, qframe, btop) in rows {
         let hit = hit(
             qstart,
             qend,
@@ -64,12 +75,12 @@ fn hsps(probe: &Probe, rows: &[(u32, u32, u32, u32, i8, &str)]) -> Hsps {
         } else {
             crate::report::serial::seqalign::translated_row_segments(
                 &hit,
-                Some((qframe, probe.query.len())),
+                Some((qframe, query_len)),
                 None,
                 &mut segments,
             )
         };
-        hsps.push_dense_seg(0, segments.starts(), segments.lens(), 0, 0, strands);
+        hsps.push_dense_seg(subject, segments.starts(), segments.lens(), 0, 0, strands);
     }
     hsps
 }
@@ -291,4 +302,103 @@ fn blastx_hsp_of_length_0_at_a_codon_of_frame_plus_one_frees_the_segment() {
     assert!(!frees((31, 30, 4, 3, 1, "")));
     // Without an HSP of length 0 nothing is merged.
     assert!(!super::section_frees(&hsps(&probe, &[(1, 30, 1, 10, 1, "10")])).expect("no merge"));
+}
+
+// Review 3 of T3c, D1 (the 8 differences of its seed-11 fuzz: cases r11_001 and r11_019, `-strand minus -num_descriptions 0`,
+// formats 1 to 4): the first frame group holds the HSPs of length 0 alone (in f3147 below the frame +1 HSPs too), each a
+// segment of length 0 of the query's row of its own frame (`x_SetSeqFrame`). `FillUnalignedRegions`
+// fills a row from the end of its previous segment, the own start of a segment of length 0, so `row->SetStarts()[new_start]
+// = seg` (alnsegments.cpp:323) replaces the row's `CRef` of it. Official NCBI BLAST+ 2.17.0 exits 139 (SIGSEGV) where that
+// was the last `CRef` and `m_Segments` still lists the segment (valgrind: invalid reads in `x_CreateDenseg` of a block
+// "free'd by `FillUnalignedRegions`"): in r11_001 the segment of the HSP at qstart 86, the second of its frame 2 row (the
+// first, of the HSP at 59, is `x_Merge`'s last), in r11_019 that of the HSP at 136. NCBI exits 0 where the replaced
+// segment is `x_Merge`'s last (`seg`, alnmerger.cpp:161, alive until `x_CreateDenseg` has returned: r21_173, r21_322,
+// r21_381, and f3147's at query offset 0) or no fill follows a segment of length 0 (r21_470: `x_MinimizeGaps` makes one
+// segment of the frame 0 row's two, which both their starts hold).
+#[test]
+fn blastx_fill_after_a_segment_of_length_0_frees_its_last_reference() {
+    let frees = |query_len: usize, rows: &[(u32, u32, u32, u32, u32, i8, &str)]| {
+        super::section_frees(&subject_hsps(query_len, rows)).expect("a merge")
+    };
+    // r11_001 (NCBI exit 139, 20 invalid reads)
+    assert!(
+        frees(
+            229,
+            &[
+                (0, 86, 87, 88, 87, -3, ""),
+                (2, 113, 114, 13, 12, -3, ""),
+                (3, 185, 186, 6, 5, -3, ""),
+                (3, 99, 100, 7, 6, -2, ""),
+                (3, 59, 60, 53, 52, -3, "")
+            ]
+        ),
+        "r11_001"
+    );
+    // r11_019, its second query (NCBI exit 139, 10 invalid reads)
+    assert!(
+        frees(
+            232,
+            &[
+                (3, 136, 137, 92, 91, -1, ""),
+                (3, 136, 137, 92, 91, -1, ""),
+                (3, 184, 185, 90, 89, -1, ""),
+                (2, 139, 140, 63, 62, -1, "")
+            ]
+        ),
+        "r11_019"
+    );
+    // r21_470 (NCBI exit 0, valgrind clean)
+    assert!(
+        !frees(
+            123,
+            &[
+                (0, 31, 32, 14, 13, -3, ""),
+                (0, 60, 61, 8, 7, -1, ""),
+                (1, 78, 79, 8, 7, -1, "")
+            ]
+        ),
+        "r21_470"
+    );
+    // r21_173 (NCBI exit 0)
+    assert!(
+        !frees(
+            49,
+            &[
+                (1, 49, 50, 13, 12, -1, ""),
+                (2, 25, 26, 20, 19, -1, ""),
+                (2, 25, 26, 20, 19, -1, "")
+            ]
+        ),
+        "r21_173"
+    );
+    // r21_322 (NCBI exit 0)
+    assert!(
+        !frees(
+            100,
+            &[(1, 74, 75, 58, 57, -3, ""), (1, 23, 24, 35, 34, -3, "")]
+        ),
+        "r21_322"
+    );
+    // r21_381 (NCBI exit 0)
+    assert!(
+        !frees(
+            128,
+            &[(0, 79, 80, 22, 21, -2, ""), (2, 37, 38, 4, 3, -2, "")]
+        ),
+        "r21_381"
+    );
+    // x2g f3147, the frame +1 HSPs and one of length 0 at query offset 0 (NCBI exit 0, valgrind clean)
+    assert!(
+        !frees(
+            51,
+            &[
+                (0, 37, 42, 1, 2, 1, "VL1"),
+                (0, 22, 27, 13, 14, 1, "1RK"),
+                (0, 28, 30, 2, 2, 1, "1"),
+                (0, 37, 39, 13, 13, 1, "1"),
+                (0, 1, 0, 11, 10, 1, "")
+            ]
+        ),
+        "f3147"
+    );
 }

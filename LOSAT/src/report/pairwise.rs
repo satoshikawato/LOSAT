@@ -3155,8 +3155,9 @@ fn blastx_mapped_empty_rows(remaps: bool, hits: &[&PairwiseHit]) -> bool {
 /// aligned subjects (`blastx_mapped_empty_rows`, with `-subject`, `remaps`), all of which throw
 /// (`write_blastx_pairwise_report` writes NCBI's report up to there and its exception), and the
 /// merge of its section, which frees a segment that it still reads
-/// (`EmptyRowsStop::MergeFreesSegment`, `query_anchored::section_frees`: an HSP of length 0 at a
-/// codon of an alignment in the query's reading frame +1). `None` for a report without such an
+/// (`EmptyRowsStop::MergeFreesSegment`, `query_anchored::section_frees`: the split of a segment at
+/// an HSP of length 0 at a codon of an alignment in the query's reading frame +1, or
+/// `FillUnalignedRegions` after a segment of length 0). `None` for a report without such an
 /// HSP among its aligned subjects. What NCBI writes before the crash is what its stream had flushed
 /// (no prefix of it is NCBI's, as for `query_anchored::ncbi_aborts`): the program refuses the
 /// report before the call's first byte (`empty_rows::UNPORTED_ANCHORED_FREE`), unless a query

@@ -369,7 +369,7 @@ pub(super) fn render(
     };
     let subject_ids = if outputs.formats.iter().any(shows_ids) {
         match shown {
-            ShownSubjects::Fasta { .. } => tabular_subject_ids(hitlists, subject_records)?,
+            ShownSubjects::Fasta { .. } => tabular_subject_ids(subject_records),
             ShownSubjects::Database { reported, oids, .. } => reported.tabular_subject_ids(
                 *oids,
                 outputs.formats.iter().any(|format| {
@@ -384,6 +384,60 @@ pub(super) fn render(
     } else {
         Vec::new()
     };
+    // The rows of subjects whose lookup fails (no id) where NCBI has no result
+    // (`report::tabular::check_failed_lookups`), before any format is written.
+    let parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>] = match shown {
+        ShownSubjects::Fasta { parsed, .. } => parsed,
+        ShownSubjects::Database { reported, .. } => &reported.parsed,
+    };
+    let database = matches!(shown, ShownSubjects::Database { .. });
+    // Each tabular format's refusal is that format's (`FormatRefusal::check`).
+    for format in outputs
+        .formats
+        .iter_mut()
+        .filter(|format| shows_ids(format))
+    {
+        let spec = super::tabular::tabular_spec(format.outfmt);
+        if crate::algorithm::common::tabular::checks_failed_lookups(
+            spec.as_ref(),
+            &subject_ids,
+            parsed,
+        ) {
+            let checked = crate::report::tabular::check_failed_lookups(
+                spec.as_ref(),
+                hitlists.iter().map(|hitlist| {
+                    hitlist
+                        .lists()
+                        .iter()
+                        .filter(|list| !list.hsps.hsps.is_empty())
+                        .map(|list| list.oid as usize)
+                }),
+                |s_idx| {
+                    crate::algorithm::common::tabular::subject_lookup_failure(
+                        spec.as_ref(),
+                        &subject_ids,
+                        parsed,
+                        database,
+                        false,
+                        s_idx,
+                    )
+                },
+                |s_idx| match shown {
+                    ShownSubjects::Database { reported, oids, .. } => {
+                        crate::report::tabular::failed_database_title(
+                            oids.oid(reported.ordinals[s_idx]),
+                        )
+                    }
+                    ShownSubjects::Fasta { .. } => crate::report::tabular::failed_record_title(
+                        s_idx,
+                        subject_records[s_idx].shown_id(),
+                    ),
+                },
+                "TBLASTN",
+            );
+            format.refusal.check(checked)?;
+        }
+    }
     // NCBI c++/src/algo/blast/format/blast_format.cpp:1411:
     // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
     // The alignments are rendered once from the final result, for outfmt 0 and for
@@ -549,6 +603,10 @@ pub(super) fn render(
         ranges,
     };
     for (format_index, format) in outputs.formats.iter_mut().enumerate() {
+        // A format that failed alone writes nothing more; the next takes the warnings.
+        if format.refusal.refused() {
+            continue;
+        }
         // The warnings that a format other than the archive writes are not the archive's
         // messages (a call with several formats, `run_local`).
         if let Some(handle) = archive.map(|render| render.handle) {
@@ -774,7 +832,7 @@ fn write_tabular(
     query_records: &[FastaRecord],
     subject_records: &[FastaRecord],
     subject_letters: SubjectLetters<'_>,
-    subject_ids: &[Arc<[u8]>],
+    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     shown: &ShownSubjects<'_>,
     hitlists: &[KappaResultHitList],
     query_batch_skipped: &[bool],
@@ -913,7 +971,11 @@ fn write_tabular(
                 // written as bytes.
                 writer.write_all(query.shown_id())?;
                 writer.write_all(b"\t")?;
-                writer.write_all(&subject_ids[oid])?;
+                // A failed lookup's rows are refused before (`check_failed_lookups`).
+                writer.write_all(crate::algorithm::common::tabular::printed_id(
+                    subject_ids,
+                    oid,
+                ))?;
                 writeln!(
                     writer,
                     "\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
@@ -1000,7 +1062,9 @@ pub(super) fn record_coordinates(
 
 /// The subject ID of the tabular formats of every subject, by subject index
 /// (`report::defline::tabular_subject_id`: the title's first word, or the local ID, and
-/// for `lcl|Subject_...` the first word of `GenerateDefline`), as BLASTN's and TBLASTX's.
+/// for `lcl|Subject_...` the first word of `GenerateDefline`), as BLASTN's and TBLASTX's; `None`
+/// where `GenerateDefline` throws (`common::tabular::SubjectId`), whose rows NCBI writes with its catch's values
+/// (`report::tabular::SubjectLookup::Failed`) or stops at (`check_failed_lookups`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:863-870
 /// ```c++
@@ -1013,37 +1077,20 @@ pub(super) fn record_coordinates(
 ///             bioseqs_found = false;
 ///         }
 /// ```
-/// A subject with a row whose `GenerateDefline` throws (a `Subject_` first word and a title
-/// in no encoding that `CUtf8::GuessEncoding` recognises) makes NCBI 2.17.0 write part of the
-/// row and stop with a `CCoreException` that names its build's source files (exit 255;
-/// `AUTHORITY.md` §J-6, §K-1, RP-20). No result can be defined for it, so LOSAT rejects such
-/// a subject explicitly before it writes any format; a subject without rows is never
-/// named.
 fn tabular_subject_ids(
-    hitlists: &[KappaResultHitList],
     subjects: &[FastaRecord],
-) -> Result<Vec<Arc<[u8]>>> {
-    let ids: Vec<Option<Arc<[u8]>>> = subjects
+) -> Vec<crate::algorithm::common::tabular::SubjectId> {
+    subjects
         .iter()
-        .map(|subject| subject.subject_tabular_id(false).ok().map(Arc::from))
-        .collect();
-    for list in hitlists.iter().flat_map(KappaResultHitList::lists) {
-        if list.hsps.hsps.is_empty() {
-            continue;
-        }
-        let s_idx = usize::try_from(list.oid).context("negative TBLASTN subject OID")?;
-        if ids.get(s_idx).is_some_and(Option::is_none) {
-            bail!(
-                "subject record {} ({}) has a title whose first word starts with 'Subject_' and whose non-UTF-8 bytes are in no encoding that NCBI BLAST+ recognises; NCBI BLAST+ writes part of a tabular row for such a subject and stops with an exception that names its build's source files (exit 255), which is not supported by LOSAT's TBLASTN",
-                s_idx + 1,
-                String::from_utf8_lossy(subjects[s_idx].shown_id())
-            );
-        }
-    }
-    Ok(ids
-        .into_iter()
-        .map(|id| id.unwrap_or_else(|| Arc::from(&b""[..])))
-        .collect())
+        .map(|subject| {
+            // A nucleotide record's ids are never refused (`FastaRecord::subject_tabular_id`).
+            subject
+                .subject_tabular_id(false)
+                .ok()
+                .flatten()
+                .map(Arc::from)
+        })
+        .collect()
 }
 
 // NCBI c++/src/algo/blast/core/blast_hits.c:1087-1105: the nucleotide coordinates of a
@@ -1440,7 +1487,7 @@ fn write_pairwise(
             valid: true,
             batch_skipped: false,
             // TBLASTN's report reads the query's title bytes by query index (`query_titles`).
-            query_name: String::new(),
+            query_name: Vec::new(),
             // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:742-744
             // ```c++
             //         if(cbs.IsSetInst() && cbs.GetInst().CanGetLength()){
@@ -1884,6 +1931,7 @@ mod tests {
                     .zip(outputs_bytes.iter_mut())
                     .map(|(outfmt, bytes)| FormatOutput {
                         outfmt,
+                        refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                         sink: OutputSink::Writer(bytes),
                     })
                     .collect(),

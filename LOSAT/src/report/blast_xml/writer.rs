@@ -472,7 +472,11 @@ impl HitWrite for Xml5Hits<'_, '_> {
             string_member(&mut enc, "id", 1, hit.id);
             string_member(&mut enc, "def", 2, query_def(hit.title));
             string_member(&mut enc, "accession", 3, hit.accession);
-            int_member(&mut enc, "len", 4, hit.len);
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:405
+            // ```c++
+            //         hit->SetLen(0);
+            // ```
+            int_member(&mut enc, "len", 4, if hit.unknown { 0 } else { hit.len });
             enc.member("hsps", 5);
             enc.begin_list(false);
             let mut writer = Xml5Hsps {

@@ -284,10 +284,65 @@ impl Write for OutFile {
 //         NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
 // ```
 /// One requested output: an `-outfmt` value, parsed and validated by the program exactly
-/// as on the command line, and where to write it.
+/// as on the command line, where to write it, and what LOSAT's refusal of its report does.
 pub struct FormatOutput<'a> {
     pub outfmt: &'a str,
     pub sink: OutputSink<'a>,
+    pub refusal: FormatRefusal,
+}
+
+/// What LOSAT's refusal of one format's report does where a program's check of that format makes
+/// it before the report's rows (`FormatRefusal::check`): a tabular row at which NCBI stops
+/// (`report::tabular::check_failed_lookups`, every program), BLASTP's subject title of
+/// punctuation in outfmt 0 to 4, BLASTX's subject of empty rows that the mapper rewrites
+/// (`blastx::empty_rows::refuse_mapped_without_scores`). Each check is that of the command line's
+/// run of the format alone.
+#[derive(Debug, Default)]
+pub enum FormatRefusal {
+    /// The refusal fails the call: the command line's one format, the library's reports.
+    #[default]
+    FailsCall,
+    /// The refusal fails this format alone: the call writes no more of its report and writes the
+    /// other formats (LOSAT Web's formats that the argv does not ask for, docs/web/abi_v2.md §7).
+    /// What the call wrote of it before (outfmt 0's prolog to a writer before the search, the
+    /// rows of BLASTX's earlier query batches) is the caller's to drop.
+    FailsAlone,
+    /// The refusal of a format that fails alone.
+    Refused(anyhow::Error),
+}
+
+impl FormatRefusal {
+    /// `checked`, a check of the format's report before its rows (`Err`: LOSAT's refusal):
+    /// `Ok(true)` where the report is written, `Ok(false)` where it is not (the format fails
+    /// alone, now or at an earlier check: `Refused` keeps the first refusal), and the refusal
+    /// itself where it fails the call.
+    pub(crate) fn check(&mut self, checked: anyhow::Result<()>) -> anyhow::Result<bool> {
+        match (checked, &*self) {
+            (_, FormatRefusal::Refused(_)) => Ok(false),
+            (Ok(()), _) => Ok(true),
+            (Err(error), FormatRefusal::FailsCall) => Err(error),
+            (Err(error), FormatRefusal::FailsAlone) => {
+                *self = FormatRefusal::Refused(error);
+                Ok(false)
+            }
+        }
+    }
+
+    /// Whether the format failed alone (`Refused`): the call writes no more of it.
+    pub(crate) fn refused(&self) -> bool {
+        matches!(self, FormatRefusal::Refused(_))
+    }
+
+    /// The refusal of a format that failed alone, taken by the caller after the call.
+    pub fn take_refused(&mut self) -> Option<anyhow::Error> {
+        match std::mem::take(self) {
+            FormatRefusal::Refused(error) => Some(error),
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
 }
 
 impl FormatOutput<'_> {
@@ -747,6 +802,8 @@ impl ReportOutputs<'_> {
                             OutputSink::Files(&mut **writer, sink.clone())
                         }
                     },
+                    // Moved into the view and back after `f` (a format that fails alone).
+                    refusal: std::mem::take(&mut format.refusal),
                 })
                 .collect(),
             diagnostics: &mut tee,
@@ -755,7 +812,16 @@ impl ReportOutputs<'_> {
                 .as_mut()
                 .map(|observer| &mut **observer as &mut (dyn FormatObserver + Send)),
         };
-        f(&mut view)
+        let result = f(&mut view);
+        let refusals: Vec<FormatRefusal> = view
+            .formats
+            .into_iter()
+            .map(|format| format.refusal)
+            .collect();
+        for (format, refusal) in formats.iter_mut().zip(refusals) {
+            format.refusal = refusal;
+        }
+        result
     }
 }
 
@@ -773,7 +839,11 @@ impl<'a> ReportOutputs<'a> {
         diagnostics: &'a mut (dyn Write + Send),
     ) -> Self {
         Self {
-            formats: vec![FormatOutput { outfmt, sink }],
+            formats: vec![FormatOutput {
+                outfmt,
+                sink,
+                refusal: FormatRefusal::FailsCall,
+            }],
             diagnostics,
             hits: None,
             observer: None,

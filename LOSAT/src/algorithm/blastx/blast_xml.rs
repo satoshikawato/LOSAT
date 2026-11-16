@@ -254,12 +254,8 @@ fn subject_names(
 ) -> Result<SubjectNames> {
     match shown {
         ShownSubjects::Fasta { .. } => match subject.believed() {
-            Some(ids) => SubjectNames::of_believed(ids, subject.title.as_bytes(), true),
-            None => SubjectNames::of_record(
-                subject.internal_id.as_bytes(),
-                subject.title.as_bytes(),
-                true,
-            ),
+            Some(ids) => SubjectNames::of_believed(ids, &subject.title, true),
+            None => SubjectNames::of_record(subject.internal_id.as_bytes(), &subject.title, true),
         }
         .map_err(|refusal| refuse(refusal, "a subject title")),
         ShownSubjects::Database { reported, .. } => match reported.parsed_subject(s_idx) {
@@ -900,7 +896,7 @@ fn query_text(
         PROGRAM,
         query.warning_id(),
         query.believed(),
-        query.title.as_bytes(),
+        &query.title,
         false,
         &query_messages(query, search_skipped, filtered_empty),
         has_hits,
@@ -1101,15 +1097,14 @@ pub(super) fn documents_may_refuse(
         }
 }
 
-/// Whether the title of some `-subject` would be refused if the subject had a hit.
+/// Whether the title of some `-subject` would be refused if the subject had a hit (a title whose
+/// `GenerateDefline` throws is the writers' catch, `SubjectNames::unknown`).
 pub(super) fn subjects_may_be_refused(subjects: &[FastaRecord]) -> bool {
     subjects.iter().any(|subject| {
-        names::xml_subject_names(
-            subject.internal_id.as_bytes(),
-            subject.title.as_bytes(),
-            true,
+        matches!(
+            names::xml_subject_names(subject.internal_id.as_bytes(), &subject.title, true),
+            Err(refusal) if refusal != names::Refusal::UnknownEncoding
         )
-        .is_err()
     })
 }
 
@@ -1363,7 +1358,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
             let place = query.placement();
             let masks = query_masks(batch, qidx, query);
             let xml_query = XmlQuery {
-                id: query.internal_id.as_bytes(),
+                id: text.id.as_deref().unwrap_or(query.internal_id.as_bytes()),
                 title: &text.title,
                 len: i32::try_from(length)?,
                 stats: query_stats(batch, qidx, options.gapped, &gapped_karlin),
@@ -1652,7 +1647,7 @@ mod scan_tests {
             .collect();
         FastaRecord {
             internal_id: String::new(),
-            title: title.to_string(),
+            title: title.as_bytes().to_vec(),
             sequence,
             lowercase_masks: Vec::new(),
             warnings: Vec::new(),

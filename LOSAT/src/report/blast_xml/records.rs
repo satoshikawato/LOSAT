@@ -127,6 +127,8 @@ pub struct XmlHit<'a> {
     /// The `HitDescr` list of a database sequence with parsed Seq-ids (`SubjectNames::
     /// descriptions`; empty for the others).
     pub descriptions: &'a [crate::report::db_subject::HitDescription],
+    /// The catch of outfmt 5's hit writer (`SubjectNames::unknown`): `Hit_len` is 0.
+    pub unknown: bool,
 }
 
 impl<'a> XmlHit<'a> {
@@ -140,6 +142,7 @@ impl<'a> XmlHit<'a> {
             taxid: names.taxid,
             taxonomy: &names.taxonomy,
             descriptions: &names.descriptions,
+            unknown: names.unknown,
         }
     }
 }

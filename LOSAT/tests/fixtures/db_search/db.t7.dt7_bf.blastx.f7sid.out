@@ -1,0 +1,10 @@
+# BLASTX 2.17.0+
+# Query: ndq query of the duplicated nucleotide record
+# Database: tests/db_search/t5/pt7_bf
+# Fields: query id, subject id, evalue
+# 4 hits found
+ndq	Unknown	1.37e-174
+ndq	Unknown	0.083
+ndq	unnamed	1.37e-174
+ndq	unnamed	0.083
+# BLAST processed 1 queries

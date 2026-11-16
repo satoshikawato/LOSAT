@@ -1,0 +1,9 @@
+# TBLASTN 2.17.0+
+# Query: pdq query of the duplicated record
+# Database: tests/db_search/t5/n_100009
+# Fields: query id, subject id, evalue
+# 3 hits found
+pdq	Unknown	6.87e-175
+pdq	Unknown	0.036
+pdq	Unknown	8.2
+# BLAST processed 1 queries

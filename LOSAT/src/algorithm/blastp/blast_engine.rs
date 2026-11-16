@@ -2828,6 +2828,14 @@ impl BlastpReport {
         }
     }
 
+    /// The field list of a custom tabular report (`None`: the default fields, or no table).
+    fn tabular_spec(self) -> Option<&'static crate::report::tabular::TabularSpec> {
+        match self {
+            BlastpReport::CustomTabular(spec) => Some(spec),
+            _ => None,
+        }
+    }
+
     /// The subject ids that the report prints (`PrintedIds`): none but in a table.
     fn printed_ids(self) -> crate::report::tabular::PrintedIds {
         match self {
@@ -2998,10 +3006,22 @@ fn write_blastp_outfmt7_header<W: Write>(
     Ok(())
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:225-231
+// ```c++
+// 		(*itr)->AsFastaString().find("lcl|Subject_") != string::npos) {
+//             vector<string> title_tokens;
+//             string defline = sequence::CDeflineGenerator().GenerateDefline(bh);
+//             if (defline != NcbiEmptyString) {
+//                 id_token =
+//                     NStr::Split(defline, " ", title_tokens)[0];
+//             }
+// ```
 /// The subject ID of the tabular formats of every subject, by subject index
 /// (`report::defline::tabular_subject_id`: the title's first word, or the local ID, and
 /// for `lcl|Subject_...` the first word of `GenerateDefline`, which is `unnamed` for a
-/// protein without a title), as the other programs'.
+/// protein without a title), as the other programs'; `None` where `GenerateDefline` throws
+/// (`common::tabular::SubjectId`), whose rows NCBI writes with its catch's values
+/// (`report::tabular::SubjectLookup::Failed`) or stops at (`report::tabular::check_failed_lookups`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:863-870
 /// ```c++
@@ -3014,122 +3034,50 @@ fn write_blastp_outfmt7_header<W: Write>(
 ///             bioseqs_found = false;
 ///         }
 /// ```
-/// A subject with a row whose `GenerateDefline` throws (a `Subject_` first word and a title
-/// in no encoding that `CUtf8::GuessEncoding` recognises) makes NCBI 2.17.0 write part of the
-/// row and stop with a `CCoreException` that names its build's source files (exit 255;
-/// `AUTHORITY.md` §J-6, §K-1, RP-20). No result can be defined for it, so LOSAT rejects such
-/// a subject explicitly before it writes any format; a subject without rows is never
-/// named.
 fn tabular_subject_ids(
-    hit_lists: &[Option<BlastpHitList>],
     subjects: &[FastaRecord],
-) -> Result<Vec<Arc<[u8]>>> {
-    let ids = tabular_subject_id_results(subjects);
-    check_tabular_subject_ids(hit_lists, subjects, &ids)?;
-    Ok(ids
-        .into_iter()
-        .map(|id| id.unwrap_or_else(|| Arc::from(&b""[..])))
-        .collect())
+) -> Vec<crate::algorithm::common::tabular::SubjectId> {
+    subjects
+        .iter()
+        .map(|subject| {
+            subject
+                .subject_tabular_id(true)
+                .ok()
+                .flatten()
+                .map(Arc::from)
+        })
+        .collect()
 }
 
 /// The tabular subject ids of a subject set under `-parse_deflines`: `tabular_subject_ids`, with
 /// `sseqid`, `sacc` and `saccver` of the records in `parsed` (`ParsedSubject::tabular_ids`).
 #[allow(clippy::type_complexity)]
 fn record_tabular_ids(
-    hit_lists: &[Option<BlastpHitList>],
     subjects: &[FastaRecord],
     parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     program: &str,
-) -> Result<(Vec<Arc<[u8]>>, Vec<Option<[Arc<[u8]>; 2]>>)> {
-    let mut ids = tabular_subject_ids(hit_lists, subjects)?;
+) -> Result<(
+    Vec<crate::algorithm::common::tabular::SubjectId>,
+    Vec<Option<[Arc<[u8]>; 2]>>,
+)> {
+    let mut ids = tabular_subject_ids(subjects);
     let mut accessions = vec![None; ids.len()];
     for (index, subject) in parsed.iter().enumerate() {
         let Some(subject) = subject else {
             continue;
         };
-        let [id, accession, version] = subject.tabular_ids(true).map_err(|problem| {
+        // No ids where the lookup throws (`ParsedSubject::tabular_ids`).
+        let found = subject.tabular_ids(true).map_err(|problem| {
             anyhow::anyhow!(
                 "the subject record {} has {problem}, which is not supported by LOSAT's {program}",
                 String::from_utf8_lossy(&subject.alignment_fasta())
             )
         })?;
-        ids[index] = Arc::from(id);
-        accessions[index] = Some([Arc::from(accession), Arc::from(version)]);
+        ids[index] = found.as_ref().map(|[id, _, _]| Arc::from(id.as_slice()));
+        accessions[index] =
+            found.map(|[_, accession, version]| [Arc::from(accession), Arc::from(version)]);
     }
     Ok((ids, accessions))
-}
-
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:225-231
-// ```c++
-// 		(*itr)->AsFastaString().find("lcl|Subject_") != string::npos) {
-//             vector<string> title_tokens;
-//             string defline = sequence::CDeflineGenerator().GenerateDefline(bh);
-//             if (defline != NcbiEmptyString) {
-//                 id_token =
-//                     NStr::Split(defline, " ", title_tokens)[0];
-//             }
-// ```
-/// `report::defline::tabular_subject_id` of every subject, by subject index
-/// (`tabular_subject_ids`): `None` for a subject whose ID cannot be written.
-fn tabular_subject_id_results(subjects: &[FastaRecord]) -> Vec<Option<Arc<[u8]>>> {
-    subjects
-        .iter()
-        .map(|subject| subject.subject_tabular_id(true).ok().map(Arc::from))
-        .collect()
-}
-
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:863-870
-// ```c++
-//         } catch (const CException&) {
-//             list<CRef<CSeq_id> > subject_ids;
-//             CRef<CSeq_id> id(new CSeq_id());
-//             id->Assign(align.GetSeq_id(1));
-//             subject_ids.push_back(id);
-//             SetSubjectId(subject_ids);
-//             bioseqs_found = false;
-//         }
-// ```
-/// The check of `tabular_subject_ids`: the first subject, in the order of the hit lists' HSPs,
-/// whose ID in `ids` (`tabular_subject_id_results`) cannot be written is the error.
-fn check_tabular_subject_ids(
-    hit_lists: &[Option<BlastpHitList>],
-    subjects: &[FastaRecord],
-    ids: &[Option<Arc<[u8]>>],
-) -> Result<()> {
-    for hit_list in hit_lists.iter().flatten() {
-        let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-        for hsp in hit_list.hsplist_array[..count]
-            .iter()
-            .flat_map(|hsp_list| hsp_list.hsps.iter())
-        {
-            let s_idx = hsp.s_idx as usize;
-            if ids.get(s_idx).is_some_and(Option::is_none) {
-                bail!(
-                    "subject record {} ({}) has a title whose first word starts with 'Subject_' and whose non-UTF-8 bytes are in no encoding that NCBI BLAST+ recognises; NCBI BLAST+ writes part of a tabular row for such a subject and stops with an exception that names its build's source files (exit 255), which is not supported by LOSAT's BLASTP",
-                    s_idx + 1,
-                    String::from_utf8_lossy(subjects[s_idx].shown_id())
-                );
-            }
-        }
-    }
-    Ok(())
-}
-
-// No NCBI counterpart: values NCBI makes per row (tabular.cpp above), made once for all blocks;
-// reuse only.
-/// EXPERIMENT (LOSAT_X_BPQBLOCK): `tabular_subject_ids` of a block of the block search with the
-/// subjects' ID results made once for all blocks (`blast_engine/x_subject_meta.rs`): the same
-/// check over the block's hit lists, with the stored results, and the shown IDs borrowed.
-/// The stored results are `tabular_subject_id_results` of the same records, a function of each
-/// record only (`tabular_subject_id(local_id, title, true)`), so the check fails for the same block
-/// and names the same record as `tabular_subject_ids`, and otherwise the shown IDs are its IDs.
-/// No floating-point operation is involved.
-fn x_tabular_subject_ids_cached<'m>(
-    hit_lists: &[Option<BlastpHitList>],
-    subjects: &[FastaRecord],
-    meta: &'m x_subject_meta::XSubjectMeta,
-) -> Result<&'m [Arc<[u8]>]> {
-    check_tabular_subject_ids(hit_lists, subjects, meta.ids()).map(|()| meta.shown())
 }
 
 /// The tabular subject id field of one subject that the default fields print: `saccver`. It is
@@ -3149,10 +3097,15 @@ impl<'a> SubjectIdFields<'a> {
         }
     }
 
-    /// The fields of subject `s_idx`: its id among `ids` (empty for none), and its
-    /// `saccver` among `accessions` where it has one.
-    fn of(ids: &'a [Arc<[u8]>], accessions: &'a [Option<[Arc<[u8]>; 2]>], s_idx: usize) -> Self {
-        let id = ids.get(s_idx).map_or(&b""[..], |id| id.as_ref());
+    /// The fields of subject `s_idx`: its id among `ids` (empty for none; a failed lookup's
+    /// rows are refused before, `check_failed_lookups`), and its `saccver` among `accessions`
+    /// where it has one.
+    fn of(
+        ids: &'a [crate::algorithm::common::tabular::SubjectId],
+        accessions: &'a [Option<[Arc<[u8]>; 2]>],
+        s_idx: usize,
+    ) -> Self {
+        let id = crate::algorithm::common::tabular::printed_id(ids, s_idx);
         match accessions.get(s_idx).and_then(Option::as_ref) {
             Some([_, version]) => SubjectIdFields {
                 accession_version: version,
@@ -3201,7 +3154,7 @@ fn write_blastp_tabular_hit_lists(
     writer: &mut impl Write,
     query_ids: &[Arc<[u8]>],
     query_titles: &[Arc<[u8]>],
-    subject_ids: &[Arc<[u8]>],
+    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     subject_accessions: &[Option<[Arc<[u8]>; 2]>],
     query_batch_skipped: &[bool],
     hits_found: Option<&[usize]>,
@@ -7731,6 +7684,9 @@ fn search(
                             .map(|((output, &outfmt), side)| {
                                 crate::api::local_blast::FormatOutput {
                                     outfmt,
+                                    // The block search runs only where no format's check can
+                                    // refuse (`x_query_block_plan`): a refusal fails the call.
+                                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                                     sink: match side {
                                         Some(side) => OutputSink::Files(output, side.clone()),
                                         None => OutputSink::Writer(output),
@@ -8114,14 +8070,22 @@ fn x_query_block_plan(
     // its buffers, so no prefix is NCBI's); the blocks are taken as for outfmt 0. (The second
     // has parsed Seq-ids, which the block search never takes, `database::x_titles_allow_blocks`:
     // it refuses in the search of all queries, before any byte.)
+    // A subject set whose tabular id lookup fails (`check_failed_lookups`) or, for outfmt 0 to 4,
+    // whose title of punctuation `check_shown_subject_titles` refuses takes the search of all
+    // queries, which refuses before any byte: there LOSAT Web's format that the argv does not ask
+    // for fails alone (`FormatRefusal`), and the block search's outputs fail the call.
     let tabular = kinds.contains(&XBlockReport::Tabular);
+    let pairwise = kinds.contains(&XBlockReport::Pairwise);
     match subject_source {
         BlastpSubjectSource::Fasta(subjects) => {
             if tabular
                 && subjects
                     .iter()
-                    .any(|subject| subject.subject_tabular_id(true).is_err())
+                    .any(|subject| !matches!(subject.subject_tabular_id(true), Ok(Some(_))))
             {
+                return None;
+            }
+            if pairwise && check_shown_subject_titles(0..subjects.len(), subjects).is_err() {
                 return None;
             }
         }
@@ -13733,7 +13697,7 @@ fn run_call(
     report_prep::refuse_unreportable(&prep, &rows_of)?;
     // The subject IDs of the tabular formats, checked for the subjects with rows before any
     // format is written (`tabular_subject_ids`). EXPERIMENT (LOSAT_X_BPQBLOCK): the block
-    // search's IDs made once for all blocks, with the same check (`x_tabular_subject_ids_cached`).
+    // search's IDs made once for all blocks (`x_subject_meta`).
     // `sacc` and `saccver` of the database sequences with parsed Seq-ids, by rank (empty
     // without them: the others' are their `sseqid`).
     let mut subject_accessions: Vec<Option<[Arc<[u8]>; 2]>> = Vec::new();
@@ -13753,16 +13717,12 @@ fn run_call(
     } else {
         Vec::new()
     };
-    let subject_ids: std::borrow::Cow<'_, [Arc<[u8]>]> =
+    let subject_ids: std::borrow::Cow<'_, [crate::algorithm::common::tabular::SubjectId]> =
         if format_plans.iter().any(|outfmt| outfmt.is_tabular()) {
             match (listed_titles.as_ref(), x_meta) {
                 (None, _) if !records_parsed.is_empty() => {
-                    let (ids, accessions) = record_tabular_ids(
-                        &hit_lists,
-                        subject_records,
-                        &records_parsed,
-                        args.app.name(),
-                    )?;
+                    let (ids, accessions) =
+                        record_tabular_ids(subject_records, &records_parsed, args.app.name())?;
                     subject_accessions = accessions;
                     ids.into()
                 }
@@ -13776,14 +13736,64 @@ fn run_call(
                     subject_accessions = accessions;
                     ids.into()
                 }
-                (None, Some(meta)) => {
-                    x_tabular_subject_ids_cached(&hit_lists, subject_records, meta)?.into()
-                }
-                (None, None) => tabular_subject_ids(&hit_lists, subject_records)?.into(),
+                // EXPERIMENT (LOSAT_X_BPQBLOCK): the block search's ids made once for all
+                // blocks (`x_subject_meta`), `tabular_subject_ids` of the same records.
+                (None, Some(meta)) => meta.shown().into(),
+                (None, None) => tabular_subject_ids(subject_records).into(),
             }
         } else {
             Vec::new().into()
         };
+    // The rows of subjects whose lookups fail where NCBI has no result
+    // (`report::tabular::check_failed_lookups`), before any format is written: each tabular
+    // format's refusal is that format's (`FormatRefusal::check`).
+    let parsed_for_checks: &[Option<Arc<crate::report::db_subject::ParsedSubject>>] = listed_titles
+        .as_ref()
+        .map_or(records_parsed.as_slice(), |titles| &titles.parsed);
+    for (format, outfmt) in outputs
+        .formats
+        .iter_mut()
+        .zip(format_plans)
+        .filter(|(_, outfmt)| outfmt.is_tabular())
+    {
+        let spec = outfmt.tabular_spec();
+        if !crate::algorithm::common::tabular::checks_failed_lookups(
+            spec,
+            &subject_ids,
+            parsed_for_checks,
+        ) {
+            continue;
+        }
+        let checked = crate::report::tabular::check_failed_lookups(
+            spec,
+            hit_lists.iter().flatten().map(|hit_list| {
+                let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                hit_list.hsplist_array[..count]
+                    .iter()
+                    .filter_map(|hsp_list| hsp_list.hsps.first())
+                    .map(|hsp| hsp.s_idx as usize)
+            }),
+            |s_idx| {
+                crate::algorithm::common::tabular::subject_lookup_failure(
+                    spec,
+                    &subject_ids,
+                    parsed_for_checks,
+                    listed_titles.is_some(),
+                    true,
+                    s_idx,
+                )
+            },
+            |s_idx| match listed_titles.as_ref() {
+                Some(titles) => crate::report::tabular::failed_database_title(titles.oid(s_idx)),
+                None => crate::report::tabular::failed_record_title(
+                    s_idx,
+                    subject_records[s_idx].shown_id(),
+                ),
+            },
+            args.app.name(),
+        );
+        format.refusal.check(checked)?;
+    }
     // The `stitle` text of the custom tabular reports by subject: the stored titles of a
     // database (the first definition line's of a sequence with parsed Seq-ids); none for the
     // records of a subject set, which have no BLAST definition line (`N/A`).
@@ -14009,6 +14019,39 @@ fn run_call(
         .zip(format_plans.iter())
         .enumerate()
     {
+        // A format that failed alone writes nothing more; the next takes the warnings.
+        if format.refusal.refused() {
+            continue;
+        }
+        // NCBI makes the titles of the subjects that the pairwise report shows, those with hits
+        // (blast_format.cpp:1540); LOSAT rejects the titles that it does not write as NCBI
+        // (`check_shown_subject_titles`), before the report's first byte and before the format
+        // takes the warnings that the formats share, so that a format that fails alone
+        // (`FormatRefusal::check`) leaves them to the next. The shown subjects are those of the
+        // final lists (the rows' subjects).
+        let pairwise_shown: Option<std::collections::BTreeSet<usize>> = match outfmt {
+            BlastpReport::Pairwise(_) => {
+                let shown: std::collections::BTreeSet<usize> = hit_lists
+                    .iter()
+                    .flatten()
+                    .flat_map(|hit_list| hit_list.hsplist_array.iter().take(hit_list.hsplist_count))
+                    .flat_map(|hsp_list| &hsp_list.hsps)
+                    .map(|hsp| hsp.s_idx as usize)
+                    .collect();
+                let checked = match listed_titles.as_ref() {
+                    Some(titles) => titles.check_shown_titles(
+                        database.expect("listed titles are a database's"),
+                        &shown,
+                    ),
+                    None => check_shown_subject_titles(shown.iter().copied(), subject_records),
+                };
+                if !format.refusal.check(checked)? {
+                    continue;
+                }
+                Some(shown)
+            }
+            _ => None,
+        };
         // The warnings that a format other than the archive writes are not the archive's
         // messages (a call with several formats, `run_local`).
         if let Some(handle) = args.archive.as_ref() {
@@ -14474,7 +14517,7 @@ fn run_call(
                     .iter()
                     .enumerate()
                     .map(|(q_idx, &query_length)| BlastpPairwiseQuery {
-                        query_name: String::new(),
+                        query_name: Vec::new(),
                         // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:742-744
                         // ```c++
                         //         if(cbs.IsSetInst() && cbs.GetInst().CanGetLength()){
@@ -14519,24 +14562,10 @@ fn run_call(
                     num_descriptions: args.num_descriptions,
                     num_alignments: args.num_alignments,
                 };
-                // NCBI makes the titles of the subjects that the report shows, those with
-                // hits (blast_format.cpp:1540); LOSAT rejects the titles that it does not
-                // write as NCBI (`check_shown_subject_titles`), before the report's first byte.
-                // The shown subjects are those of the final lists (the rows' subjects).
-                let shown: std::collections::BTreeSet<usize> = hit_lists
-                    .iter()
-                    .flatten()
-                    .flat_map(|hit_list| hit_list.hsplist_array.iter().take(hit_list.hsplist_count))
-                    .flat_map(|hsp_list| &hsp_list.hsps)
-                    .map(|hsp| hsp.s_idx as usize)
-                    .collect();
-                match listed_titles.as_ref() {
-                    Some(titles) => titles.check_shown_titles(
-                        database.expect("listed titles are a database's"),
-                        &shown,
-                    )?,
-                    None => check_shown_subject_titles(shown.iter().copied(), subject_records)?,
-                }
+                // The shown subjects, whose titles are checked above (`pairwise_shown`).
+                let shown = pairwise_shown
+                    .as_ref()
+                    .expect("made for every pairwise format");
                 // psiblast's two-part table looks each shown subject up in the previous round's
                 // set by its handle: LOSAT refuses one that it cannot place as NCBI does.
                 if let (Some(_), Some(found)) = (reports.psi_round, psi_found_before.as_ref()) {

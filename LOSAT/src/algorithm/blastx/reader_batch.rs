@@ -460,7 +460,7 @@ mod tests {
             .collect();
         FastaRecord {
             internal_id: String::new(),
-            title: String::new(),
+            title: Vec::new(),
             sequence,
             lowercase_masks: Vec::new(),
             warnings: Vec::new(),

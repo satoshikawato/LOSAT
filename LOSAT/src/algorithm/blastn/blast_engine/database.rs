@@ -1728,6 +1728,10 @@ pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown
         tabular: output_formats
             .iter()
             .any(|format| format.tabular_reads_subject()),
+        stops_at_failed_lookup: output_formats.iter().any(|format| {
+            format.is_tabular()
+                && crate::report::tabular::may_stop_at_failed_lookup(format.tabular_spec())
+        }),
         pairwise,
         structured: output_formats
             .iter()
@@ -2043,12 +2047,13 @@ impl ReportedSubjects {
     /// The subject id of the tabular formats (`sseqid`, `sacc`, `saccver`) of every
     /// reported sequence, by rank (`algorithm::common::database::tabular_subject_ids`). A
     /// sequence whose id LOSAT cannot write as NCBI is an error before any format is
-    /// written where a tabular report `reads` the subject, else its id is empty.
+    /// written where a tabular report `reads` the subject, else its id is empty; `None` where the
+    /// lookup fails (`common::tabular::SubjectId`).
     pub(super) fn tabular_subject_ids(
         &self,
         oids: crate::seqdb::OidMap<'_>,
         reads: bool,
-    ) -> Result<Vec<Arc<[u8]>>> {
+    ) -> Result<Vec<crate::algorithm::common::tabular::SubjectId>> {
         shared::tabular_subject_ids(
             &self.records,
             &self.ordinals,
@@ -2870,9 +2875,9 @@ mod tests {
                 .tabular_subject_ids(database.db.oid_map(), true)
                 .unwrap()
                 .iter()
-                .map(|id| id.as_ref())
+                .map(|id| id.as_deref())
                 .collect::<Vec<_>>(),
-            [&b"n06"[..], b"n10"]
+            [Some(&b"n06"[..]), Some(b"n10")]
         );
         // Without the letters (the tabular formats without alignment rows): no stored data.
         let mut hit_lists = vec![hit_list(vec![(9, 1e-9)], 1)];

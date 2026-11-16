@@ -481,7 +481,7 @@ impl PreparedXml {
                 );
             }
             let xml_query = XmlQuery {
-                id: query.local_id.as_bytes(),
+                id: text.id.as_deref().unwrap_or(query.local_id.as_bytes()),
                 title: &text.title,
                 len: i32::try_from(query_letters.len())?,
                 stats: self.stats[q_idx],

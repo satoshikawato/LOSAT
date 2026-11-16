@@ -1,0 +1,4 @@
+pdq	Unknown	1.37e-174	466	0.000	0	0	0	0	0	220	0	0	gnl|BL_ORD_ID|1	0	BL_ORD_ID:1	N/A	N/A	N/A	N/A	N/A	100	100
+pdq	Unknown	0.071	20.0	0.000	0	0	0	0	0	220	0	0	gnl|BL_ORD_ID|1;gnl|BL_ORD_ID|1	0;0	BL_ORD_ID:1;BL_ORD_ID:1	N/A	N/A	N/A	N/A	N/A	100	6
+pdq	Uncultured	1.37e-174	466	100.000	220	0	1	1	660	220	220	0	Uncultured	0	Uncultured	N/A	N/A	100001	uncultured bacterium	plus	100	100
+pdq	Uncultured	0.071	20.0	42.857	14	8	5	54	660	220	6	0	Uncultured	0	Uncultured	N/A	N/A	100001	uncultured bacterium	minus	100	6

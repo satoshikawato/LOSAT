@@ -1,0 +1,170 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/of1/txselfs.fa).
+           2 sequences; 1,389 total letters
+
+
+
+Query= other1 first
+
+Length=500
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+selfx self record                                                     16.2    1.3    2
+ydup two copies                                                       16.2    1.7    1
+
+
+
+For reading frame +1 of query sequence:
+
+other1  37   LWRKNHCSRKTECAGTEIVKGYCTTWQ  117
+selfx   56   ..YG.G.GTRLTSL.              100
+selfx   251                       F.SN..  268
+ydup    56   ..YG.G.GTRLTSL.              100
+ydup    539  ..YG.G.GTRLTSL.              583
+ydup    251                       F.SN..  268
+ydup    734                       F.SN..  751
+
+For reading frame -2 of query sequence:
+
+other1  109  SCSNPLQFRSQHIPSCGCS  53
+selfx   356  ..TR.TPIPWSSSCQ.A.A  412
+ydup    356  ..TR.TPIPWSSSCQ.A.A  412
+ydup    839  ..TR.TPIPWSSSCQ.A.A  895
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 62475
+
+
+Query= selfx self record
+
+Length=453
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value   N
+
+selfx self record                                                     392     6e-114  1
+ydup two copies                                                       392     6e-114  1
+
+
+
+For reading frame +1 of query sequence:
+
+selfx  1    SDHQWKNLPLRQHIGNWMTMVWEWVWYKTDIAGFQEQAHYHLPEKALPIAQQITRSVPAN  180
+ydup   1    ............................................................  180
+ydup   484  ............................................................  663
+
+selfx  181  WSRIENVHSGSFRKHANPEC*FSILLQLAGTLRVICCAMGSAFSGR**CAVS*KPRISVL  360
+ydup   181  ....................*.........................**....*.......  360
+ydup   664  ....................*.........................**....*.......  843
+
+selfx  361  YQTHSHTMVIQLPMCMRKCRFFHWWQDSVRL  453
+ydup   361  ...............................  453
+ydup   844  ...............................  936
+
+For reading frame +2 of query sequence:
+
+selfx  2    VTTSGRTYPCDNILAIG*LWYGNGCGTRLTSLGFKSKPTIIFPKKLFR*PNRSLGASQQI  181
+ydup   2    .................*..............................*...........  181
+ydup   485  .................*..............................*...........  664
+
+selfx  182  GPGSRTSTPVLSGSTLTQSADFRFCSNWQGRSV*SAVLWVVPFRAGDSVQSLENPGYPSC  361
+ydup   182  .................................*..........................  361
+ydup   665  .................................*..........................  844
+
+selfx  362  TRPTPIPWSSSCQCACASVGSSIGGRTL*G  451
+selfx  368      .T.IPW.SS.Q..               406
+selfx  374    .I.WSS.CQ.A..                 412
+ydup   362  ............................*.  451
+ydup   845  ............................*.  934
+ydup   368      .T.IPW.SS.Q..               406
+ydup   374    .I.WSS.CQ.A..                 412
+ydup   851      .T.IPW.SS.Q..               889
+ydup   857    .I.WSS.CQ.A..                 895
+
+For reading frame +3 of query sequence:
+
+selfx  3    *PPVEEPTPATTYWQLDDYGMGMGVVQD*HRWVSRASPLSSSRKSSSDSPTDHSERPSKL  182
+ydup   3    *...........................*...............................  182
+ydup   486  *...........................*...............................  665
+
+selfx  183  VQDRERPLRFFPEAR*PRVLIFDSAPIGRDAPCDLLCYG*CLFGQVIVCSLLKTPDIRLV  362
+ydup   183  ...............*.......................*....................  362
+ydup   666  ...............*.......................*....................  845
+
+selfx  363  PDPLPYHGHPVANVHAQV*VLPLVAGLCEV  452
+ydup   363  ..................*...........  452
+ydup   846  ..................*...........  935
+
+For reading frame -1 of query sequence:
+
+selfx  453  QPHRVLPPMEEPTLAHAHWQLDDHGMGVGLVQDGYPGFSRDCTLSPARKGTTHSTADHTE  274
+ydup   936  ............................................................  757
+ydup   453  ............................................................  274
+
+selfx  273  RPCQLEQNRKSALWVSVLPERTGVDVLDPGPICWDAPSDLLGYRKSFFGKMIVGLLLKPS  94
+ydup   756  ............................................................  577
+ydup   273  ............................................................  94
+
+selfx  93   DVSLVPHPFPYHSHPIANMLSQG*VLPLVVT  1
+ydup   576  .......................*.......  484
+ydup   93   .......................*.......  1
+
+For reading frame -2 of query sequence:
+
+selfx  452  NLTESCHQWKNLHLRMHIGNWMTMVWEWVWYKTDIRGFQETAHYHLPEKALPIAQQITRS  273
+ydup   935  ............................................................  756
+ydup   452  ............................................................  273
+
+selfx  272  VPANWSRIENQHSGLACFRKEPEWTFSILDQFAGTLRVICWAIGRAFSGR**WACS*NPA  93
+ydup   755  ..................................................**....*...  576
+ydup   272  ..................................................**....*...  93
+
+selfx  92   MSVLYHTHSHTIVIQLPICCRRGRFFHWWS  3
+ydup   575  ..............................  486
+ydup   92   ..............................  3
+
+For reading frame -3 of query sequence:
+
+selfx  451  TSQSPATNGRTYTCACTLATG*PWYGSGSGTRRISGVFKRLHTITCPKRHYP*HSRSHGA  272
+ydup   934  .....................*..............................*.......  755
+ydup   451  .....................*..............................*.......  272
+
+selfx  271  SLPIGAESKISTLG*RASGKNRSGRSRSWTNLLGRSE*SVGLSEELFREDDSGLALETQR  92
+ydup   754  ..............*......................*......................  575
+ydup   271  ..............*......................*......................  92
+
+selfx  91   CQSCTTPIPIP*SSNCQYVVAGVGSSTGGH  2
+ydup   574  ...........*..................  485
+ydup   91   ...........*..................  2
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 56100
+
+
+  Database: User specified sequence set (Input: tests/db_search/of1/txselfs.fa).
+    Posted date:  Unknown
+  Number of letters in database: 1,389
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

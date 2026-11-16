@@ -405,14 +405,11 @@ impl Program {
             Tabular => true,
             TabularWithComments => true,
             // Line RG T3 (the query-anchored formats 1 to 4, `report::query_anchored`): BLASTP
-            // (T3a), BLASTN and TBLASTN (T3b); BLASTX and TBLASTX (T3c) refuse them until their
-            // parts land.
+            // (T3a), BLASTN and TBLASTN (T3b), BLASTX and TBLASTX (T3c): every program.
             QueryAnchoredIdentities
             | QueryAnchoredNoIdentities
             | FlatQueryAnchoredIdentities
-            | FlatQueryAnchoredNoIdentities => {
-                matches!(self, Program::Blastp | Program::Blastn | Program::Tblastn)
-            }
+            | FlatQueryAnchoredNoIdentities => true,
             // 10 and 20 with the shared tabular writer (line CLI C2).
             CommaSeparatedValues => self.shared_tabular(),
             // Line RG T2: the organism report, which reads the hit lists as the shared tabular
@@ -1319,15 +1316,14 @@ mod tests {
             // parts 1 to 3: BLASTX, TBLASTN, TBLASTX).
             // 10 and 20 with the shared tabular writer (line CLI C2: every program); 18, the
             // organism report (line RG T2: every program); 1 to 4, the query-anchored views (line RG
-            // T3a: BLASTP; T3b: BLASTN, TBLASTN).
+            // T3a: BLASTP; T3b: BLASTN, TBLASTN; T3c: BLASTX, TBLASTX: every program).
             let expected: &[i32] = match program {
                 Program::Blastn => &[
                     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20,
                 ],
-                Program::Blastp | Program::Tblastn => &[
+                _ => &[
                     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20,
                 ],
-                _ => &[0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20],
             };
             assert_eq!(written, expected, "{program:?}");
         }

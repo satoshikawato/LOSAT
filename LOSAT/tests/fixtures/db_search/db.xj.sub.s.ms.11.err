@@ -1,0 +1,171 @@
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xC3] in string at line 74
+s2 aÃ©b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xA9] in string at line 74
+s2 aÃ©b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xE2] in string at line 98
+s3 aâ‚¬b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x82] in string at line 98
+s3 aâ‚¬b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xAC] in string at line 98
+s3 aâ‚¬b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xF0] in string at line 122
+s4 ağŸ˜€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x9F] in string at line 122
+s4 ağŸ˜€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x98] in string at line 122
+s4 ağŸ˜€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x80] in string at line 122
+s4 ağŸ˜€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xE9] in string at line 146
+s5 aéb z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xA9] in string at line 170
+s6 a©b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x80] in string at line 194
+s7 a€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x81] in string at line 218
+s8 ab z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xC1] in string at line 242
+s9 aÁb z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x81] in string at line 242
+s9 aÁb z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xC0] in string at line 266
+s10 aÀ€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x80] in string at line 266
+s10 aÀ€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xE0] in string at line 290
+s11 aàb z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x81] in string at line 290
+s11 aàb z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x81] in string at line 290
+s11 aàb z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xE0] in string at line 314
+s12 aà€¼b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x80] in string at line 314
+s12 aà€¼b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xBC] in string at line 314
+s12 aà€¼b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xE0] in string at line 338
+s13 aà€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x80] in string at line 338
+s13 aà€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x81] in string at line 338
+s13 aà€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xED] in string at line 362
+s14 aí €b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xA0] in string at line 362
+s14 aí €b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x80] in string at line 362
+s14 aí €b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xF4] in string at line 386
+s15 aô€€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x90] in string at line 386
+s15 aô€€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x80] in string at line 386
+s15 aô€€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x80] in string at line 386
+s15 aô€€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xF5] in string at line 410
+s16 aõ€€€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x80] in string at line 410
+s16 aõ€€€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x80] in string at line 410
+s16 aõ€€€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x80] in string at line 410
+s16 aõ€€€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xFF] in string at line 434
+s17 aÿb z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x7F] in string at line 506
+s20 ab z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xC3] in string at line 794
+s32 oneÃ©
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xA9] in string at line 794
+s32 oneÃ©
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xE2] in string at line 818
+s33 oneâ‚¬
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x82] in string at line 818
+s33 oneâ‚¬
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xAC] in string at line 818
+s33 oneâ‚¬
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xE9] in string at line 842
+s34 oneé
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xA9] in string at line 866
+s35 one©
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xF0] in string at line 890
+s36 oneğŸ˜€
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x9F] in string at line 890
+s36 oneğŸ˜€
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x98] in string at line 890
+s36 oneğŸ˜€
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x80] in string at line 890
+s36 oneğŸ˜€
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x1] in string at line 914
+s37 ab z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x1B] in string at line 938
+s38 ab z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xC3] in string at line 962
+s39Ã© rest
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xA9] in string at line 962
+s39Ã© rest
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xE9] in string at line 986
+s40é rest
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x81] in string at line 1010
+s41 rest
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xFF] in string at line 1058
+s43ÿ rest

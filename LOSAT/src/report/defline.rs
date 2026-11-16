@@ -295,9 +295,9 @@ pub enum SourceTaxname {
     },
     /// A source without a name: the definition lines have a positive taxid that no taxonomy
     /// database names. Asked only for a database sequence without parsed Seq-ids whose protein
-    /// title can lose its end to `x_AdjustProteinTitleSuffix` (`protein_title_suffix_adjustable`;
-    /// `common::database::HeaderReader::stored_source`), which runs for any source: it then drops
-    /// a ` [ ]` end. Elsewhere it reads as `Unnamed`.
+    /// title's first word can change where `x_AdjustProteinTitleSuffix` rewrites its end
+    /// (`protein_title_word_needs_source`; `common::database::HeaderReader::stored_source`), which
+    /// runs for any source: it then drops a ` [ ]` end. Elsewhere it reads as `Unnamed`.
     Nameless,
     /// LOSAT's refusal where a report shows the title, with what the sequence has (after
     /// "database sequence N has"): a lookup of the taxid that reads past the mapped end of
@@ -325,14 +325,13 @@ impl SourceTaxname {
     //         }
     // ```
     /// The source of a Bioseq whose first source's taxid the taxonomy database gives `names`
-    /// (`None`: `GetTaxNames` returned false): its scientific name, none where that is empty (an
-    /// empty `m_Taxname` makes the title of a Bioseq without one).
-    pub fn of_names(names: Option<&crate::seqdb::taxdb::TaxNames>) -> SourceTaxname {
-        match names {
-            Some(names) if !names.scientific_name.is_empty() => {
-                SourceTaxname::Named(std::sync::Arc::from(names.scientific_name.as_slice()))
-            }
-            _ => SourceTaxname::Unnamed,
+    /// (`seqdb::taxdb::TaxCache::names`): its scientific name, none where the lookup found none or
+    /// it is empty (an empty `m_Taxname` makes the title of a Bioseq without one,
+    /// `seqdb::taxdb::SourceNames::taxname`).
+    pub fn of_names(names: &crate::seqdb::taxdb::SourceNames) -> SourceTaxname {
+        match names.taxname() {
+            Some(name) => SourceTaxname::Named(std::sync::Arc::clone(name)),
+            None => SourceTaxname::Unnamed,
         }
     }
 
@@ -1141,13 +1140,78 @@ pub(crate) fn adjust_protein_title_suffix(title: &mut Vec<u8>, taxname: &[u8]) {
 }
 
 /// Whether `adjust_protein_title_suffix` can change `title` with some source: its main title
-/// (after `s_TrimMainTitle`) ends in `]` (`s_TitleEndsInOrganism` asks for it). The readers ask
-/// for the name of a database sequence's source only then (and for an empty title).
+/// (after `s_TrimMainTitle`) ends in `]` (`s_TitleEndsInOrganism` asks for it). The readers that
+/// show the whole title ask for the name of a database sequence's source only then (and for an
+/// empty title); the search's tabular ids, which show its first word, only where
+/// `protein_title_word_needs_source`.
 pub fn protein_title_suffix_adjustable(title: &[u8]) -> bool {
     title
         .iter()
         .rposition(|byte| !b".,;~ ".contains(byte))
         .is_some_and(|end| title[end] == b']')
+}
+
+// No NCBI counterpart: which titles `x_AdjustProteinTitleSuffix` (quoted at
+// `adjust_protein_title_suffix`) cannot change the first word of; it changes no value NCBI
+// computes. Let M be the main title after `s_TrimMainTitle`, ending in `]`, w its bytes before its
+// first space (at s) and c the byte after that space. The adjustment changes M only in two ways:
+// (a) M ends in ` [X]` with X the source's name in some ASCII case (`s_TitleEndsInOrganism`,
+// a name that is not empty): M becomes P + ` [name]`; (b) M ends in ` [ ]` (the binomial
+// `" "` of a source without genus and species): M becomes P, or P + ` [name]` for any name. P is
+// M cut at the `[` of a ` [`, then stripped from its end of `.,;~ `, of one `(organelle)` and of
+// one `, partial`, all ASCII. Where w is not empty and holds only the "plain" bytes below (no
+// `.,;~` that the strip takes, no `(`, `)` or `,` that its organelle and `, partial` end in), and c
+// is plain or `[` (no `(` that would begin an organelle at s + 1), each stage of the strip stops
+// at w (the space at s goes, and c with it only where c is the cut `[`) or keeps w, the space and
+// c: P is w, or begins with w, a space and c. In (a) the bytes of M' and M at and above 0x80 are
+// the same, in runs that ASCII bytes end in both (P's and the name's), so
+// `CUtf8::GuessEncoding` gives both an encoding that fails or both one that keeps ASCII bytes as
+// they are (UTF-8 and CESU-8 keep every byte). Then the passes after the adjustment read w, the
+// space and c alike in both: no TPA prefix matches (all but `MAG ` end in `:`, which w lacks, and
+// w is not `MAG`), `NStr::HtmlDecode` keeps them (no `&`), `x_CleanAndCompress` writes w and then
+// the space (no pair of its patterns: `,,`, two spaces, `( `, ` )`, ` ,`, ` ;`, `, `, `; `), which
+// its `. [` and `, [` replacements do not reach (w ends in neither `.` nor `,`), and it does not
+// read past the end of a title ending in `]`. So the first word is w with any source, or the
+// title is undecodable with any source, as without one. (b) can put any name in M, whose bytes
+// can make the encoding fail: such a title needs the source.
+/// Whether the first word of the title that `GenerateDefline` makes of the stored protein title
+/// `title` (`database_subject_id`, the tabular ids of a database sequence without parsed
+/// Seq-ids) can depend on the Bioseq's source (its name, or whether it has one), which
+/// `x_AdjustProteinTitleSuffix` reads (`adjust_protein_title_suffix`): a title ending in `]`
+/// unless its first word is made of bytes from `!` to `~` other than `& , ; . ( ) : ~`, is not
+/// `MAG` (any case), and is followed by a space and such a byte or `[`, and the title does not end
+/// in ` [ ]` (see above).
+pub fn protein_title_word_needs_source(title: &[u8]) -> bool {
+    /// The plain bytes: `!` to `~` but `& , ; . ( ) : ~`.
+    const PLAIN: [bool; 256] = {
+        let mut plain = [false; 256];
+        let mut byte = b'!';
+        while byte <= b'~' {
+            plain[byte as usize] =
+                !matches!(byte, b'&' | b',' | b';' | b'.' | b'(' | b')' | b':' | b'~');
+            byte += 1;
+        }
+        plain
+    };
+    let Some(end) = title.iter().rposition(|byte| !b".,;~ ".contains(byte)) else {
+        return false;
+    };
+    let main = &title[..=end];
+    if main[end] != b']' {
+        return false;
+    }
+    if main.ends_with(b" [ ]") {
+        return true;
+    }
+    // The first word, up to the first space; the title ends in `]`, so a byte follows that space.
+    let Some(space) = main.iter().position(|&byte| !PLAIN[byte as usize]) else {
+        return true;
+    };
+    let next = main[space + 1..].first().copied().unwrap_or(b' ');
+    !(space > 0
+        && main[space] == b' '
+        && !main[..space].eq_ignore_ascii_case(b"MAG")
+        && (PLAIN[next as usize] || next == b'['))
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:1545-1550
@@ -2911,5 +2975,157 @@ mod tests {
                 }
             }
         }
+    }
+
+    // `protein_title_word_needs_source` (its derivation above it): where it says no, the first
+    // word of the generated title (`database_subject_id`) is the same without a source, with a
+    // source without a name and with any name, also the names that the title's ` [X]` ends match
+    // in either ASCII case and names that make the encoding fail. Titles: one thousand built
+    // from the parts NCBI's passes read (prefixes, organelles, `, partial`, entities, separators)
+    // and 60,000 drawn from an alphabet of such bytes (a fixed seed).
+    #[test]
+    fn a_title_whose_first_word_needs_no_source_gives_it_with_any_source() {
+        let mut titles: Vec<Vec<u8>> = Vec::new();
+        let words: [&[u8]; 12] = [
+            b"hypothetical",
+            b"alpha,",
+            b"MAG",
+            b"mag:",
+            b"TPA:",
+            b"a.b",
+            b"x&amp;",
+            b"caf\xc3\xa9",
+            b"q\x81",
+            b"(x)",
+            b"WP_1|2",
+            b"[x]",
+        ];
+        let middles: [&[u8]; 9] = [
+            b"",
+            b"protein 1",
+            b", partial",
+            b"(plastid)",
+            b"x (mitochondrion), partial",
+            b"&#44;y",
+            b",z",
+            b" ;",
+            b"[y]",
+        ];
+        let ends: [&[u8]; 6] = [
+            b"[Bacillus sp.]",
+            b"[bacillus SP.]",
+            b"[ ]",
+            b"[]",
+            b"[caf\x81]",
+            b"[a [b]",
+        ];
+        for word in words {
+            for middle in middles {
+                for end in ends {
+                    for tail in [&b""[..], b".", b" ;~"] {
+                        let mut title = word.to_vec();
+                        title.push(b' ');
+                        title.extend_from_slice(middle);
+                        if !middle.is_empty() {
+                            title.push(b' ');
+                        }
+                        title.extend_from_slice(end);
+                        title.extend_from_slice(tail);
+                        titles.push(title);
+                    }
+                }
+            }
+        }
+        let alphabet: &[u8] = b" [],.;~():&#aBM G1pX\x81\xc3\xa9";
+        let mut seed: u64 = 0x5eed_1234_abcd_0001;
+        let mut next = |bound: usize| {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((seed >> 33) as usize) % bound
+        };
+        for _ in 0..60_000 {
+            let len = 1 + next(20);
+            let mut title: Vec<u8> = (0..len).map(|_| alphabet[next(alphabet.len())]).collect();
+            if next(5) > 0 {
+                title.push(b']');
+            }
+            titles.push(title);
+        }
+        let mut safe = 0;
+        for title in &titles {
+            if protein_title_word_needs_source(title) {
+                continue;
+            }
+            safe += 1;
+            let main = match title.iter().rposition(|byte| !b".,;~ ".contains(byte)) {
+                Some(end) => &title[..=end],
+                None => &title[..],
+            };
+            let mut names: Vec<Vec<u8>> = vec![
+                b"Bacillus sp.".to_vec(),
+                b"caf\x81".to_vec(),
+                b"\xc3\xa9".to_vec(),
+                b" ".to_vec(),
+                b"a".to_vec(),
+            ];
+            for at in 1..main.len() {
+                if main[at - 1] == b' ' && main[at] == b'[' && main.len() > at + 2 {
+                    let inside = &main[at + 1..main.len() - 1];
+                    names.push(inside.to_vec());
+                    names.push(
+                        inside
+                            .iter()
+                            .map(|byte| {
+                                if byte.is_ascii_lowercase() {
+                                    byte.to_ascii_uppercase()
+                                } else {
+                                    byte.to_ascii_lowercase()
+                                }
+                            })
+                            .collect(),
+                    );
+                }
+            }
+            let without = database_subject_id(title, &BioseqFacts::default(), true);
+            let nameless = BioseqFacts {
+                has_source: true,
+                ..BioseqFacts::default()
+            };
+            assert_eq!(
+                database_subject_id(title, &nameless, true),
+                without,
+                "{title:?} nameless"
+            );
+            for name in &names {
+                assert_eq!(
+                    database_subject_id(title, &named(name), true),
+                    without,
+                    "{title:?} {name:?}"
+                );
+            }
+        }
+        assert!(safe > 500, "{safe}");
+        for title in [
+            &b"hypothetical protein 1 [Bacillus sp.]"[..],
+            b"alpha [Bacillus sp.]",
+            b"WP_1 [x]",
+            b"x [y]",
+        ] {
+            assert!(!protein_title_word_needs_source(title), "{title:?}");
+        }
+        for title in [
+            &b"alpha, partial [Bacillus sp.]"[..],
+            b"MAG: (plastid) [ ]",
+            b"MAG x [y]",
+            b"chi [ ]",
+            b" lead [x]",
+            b"w (plastid) [x]",
+            b"w &amp; [x]",
+            b"w, [x]",
+        ] {
+            assert!(protein_title_word_needs_source(title), "{title:?}");
+        }
+        assert!(!protein_title_word_needs_source(b"no bracket"));
     }
 }

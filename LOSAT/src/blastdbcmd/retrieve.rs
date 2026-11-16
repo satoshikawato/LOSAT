@@ -15,7 +15,7 @@ use crate::ncbi_str::string_to_non_negative_int;
 use crate::seqdb::isam::{seqdb_simplify_accession, SimplifyError};
 use crate::seqdb::lookup::{IdLookup, ID_OVERFLOWS};
 use crate::seqdb::tax_files::NO_ACCESSION_INFO;
-use crate::seqdb::taxdb::{LazyTaxDb, TaxNames};
+use crate::seqdb::taxdb::{LazyTaxDb, SourceNames, TaxCache};
 use crate::seqdb::{MaskRanges, SearchPath, SeqDb, SeqDbError, SeqLocation, SeqType};
 use crate::seqid::accguide::parse_flags::{ANY_LOCAL, DEFAULT, PARTIAL_OK, RAW_TEXT};
 use crate::seqid::label::{content, fasta};
@@ -103,6 +103,8 @@ pub(super) struct Source<'a> {
     /// (`x_InitBlastDB_TaxIdList`). It decides whether `-strand minus` is taken.
     dbtype_protein: bool,
     taxdb: LazyTaxDb,
+    /// What `tax_names` looked up, as NCBI's volume keeps it (`seqdb::taxdb::TaxCache`).
+    source_names: TaxCache,
 }
 
 impl<'a> Source<'a> {
@@ -112,6 +114,7 @@ impl<'a> Source<'a> {
             protein: db.seqtype() == SeqType::Protein,
             dbtype_protein,
             taxdb: LazyTaxDb::new(path.clone()),
+            source_names: TaxCache::default(),
         }
     }
 
@@ -225,11 +228,15 @@ impl<'a> Source<'a> {
         }
     }
 
-    /// `CSeqDB::GetTaxInfo(taxid)`: the names of the taxonomy database on the search path,
-    /// `None` where NCBI's lookup throws (no database, no such taxid).
-    pub fn tax_names(&self, taxid: i32) -> Result<Option<TaxNames>, Stop> {
+    /// `CSeqDB::GetTaxInfo(taxid)` (and `GetBioseq`'s lookup of a source): the names of the
+    /// taxonomy database on the search path, none where NCBI's lookup throws (no database, no such
+    /// taxid). The lookups are kept as NCBI's volume keeps them (`source_names`), which keeps no
+    /// lookup that writes a text: the refusal of one comes at its first.
+    pub fn tax_names(&self, taxid: i32) -> Result<std::sync::Arc<SourceNames>, Stop> {
         let mut messages = Vec::new();
-        let names = self.taxdb.names(taxid, &mut messages)?;
+        let names = self.source_names.names(taxid, &mut messages, |messages| {
+            self.taxdb.names(taxid, messages)
+        })?;
         if let Some(message) = messages.first() {
             return Err(Stop::refused(format!(
                 "a taxonomy database NCBI opens with a diagnostic ({message})"

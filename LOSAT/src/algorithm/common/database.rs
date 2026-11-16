@@ -1139,10 +1139,8 @@ pub(crate) struct HeaderReader<'a> {
     /// The taxonomy database of the search path where `taxdb.bti` is found and it opens, opened
     /// at the first record whose title NCBI can make from its taxids (`source_taxname`).
     taxdb: std::cell::OnceCell<Option<crate::seqdb::taxdb::TaxDb>>,
-    /// `source_taxname` of the first sources' taxids of the titles made from a source, by taxid
-    /// (asked for every reported protein title ending in `]` that has a taxid: a cheap hash).
-    source_names:
-        std::cell::RefCell<rustc_hash::FxHashMap<i32, crate::report::defline::SourceTaxname>>,
+    /// What `source_taxname` looked up, as NCBI's volume keeps it (`seqdb::taxdb::TaxCache`).
+    source_names: crate::seqdb::taxdb::TaxCache,
     /// `LookupTexts::of`, asked at the first record found with other taxids or in another
     /// volume (`copy_of`).
     lookup_texts: std::cell::OnceCell<LookupTexts>,
@@ -1557,7 +1555,8 @@ impl<'a> HeaderReader<'a> {
     /// The name that the taxonomy database gives the taxid `taxid` of a Bioseq's first source
     /// (`DeflineSet::first_source_taxid`: of a stored title its definition line's, of a sequence
     /// with parsed Seq-ids `ParsedSubject::first_source_taxid`; none: `Unnamed`), its titles made
-    /// from (`report::defline::BioseqFacts::taxname`). Each taxid is looked up once.
+    /// from (`report::defline::BioseqFacts::taxname`). The lookups are kept as NCBI's volume keeps
+    /// them (`source_names`); their texts are `TaxdbRun`'s and `LookupTexts`'.
     fn source_taxname(&self, taxid: Option<i32>) -> crate::report::defline::SourceTaxname {
         use crate::report::defline::SourceTaxname;
         let Some(taxid) = taxid else {
@@ -1566,19 +1565,15 @@ impl<'a> HeaderReader<'a> {
         let Some(taxdb) = self.taxdb() else {
             return SourceTaxname::Unnamed;
         };
-        self.source_names
-            .borrow_mut()
-            .entry(taxid)
-            .or_insert_with(|| {
-                let mut messages = Vec::new();
-                match taxdb.names(taxid, &mut messages) {
-                    Ok(names) => SourceTaxname::of_names(names.as_ref()),
-                    Err(_) => SourceTaxname::Refused(
-                        "a title that NCBI BLAST+ makes from its taxid with the taxonomy database (an empty one, or the end of a protein title ending in ']'), whose lookup of that taxid reads past the mapped end of taxdb.btd (NCBI BLAST+ 2.17.0 reads unmapped memory)",
-                    ),
-                }
-            })
-            .clone()
+        match self
+            .source_names
+            .names(taxid, &mut Vec::new(), |messages| taxdb.names(taxid, messages))
+        {
+            Ok(names) => SourceTaxname::of_names(&names),
+            Err(_) => SourceTaxname::Refused(
+                "a title that NCBI BLAST+ makes from its taxid with the taxonomy database (an empty one, or the end of a protein title ending in ']'), whose lookup of that taxid reads past the mapped end of taxdb.btd (NCBI BLAST+ 2.17.0 reads unmapped memory)",
+            ),
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:497-498
@@ -1598,15 +1593,21 @@ impl<'a> HeaderReader<'a> {
     // first word that replaces `gnl|BL_ORD_ID|n` in the tabular ids is the adjusted title's
     // (`alpha` of `alpha, partial [Bacillus sp.]` with taxid 100002; `chi` of `chi, partial [ ]`
     // also without a name: probe of line RG T5c, `T/t5c/out/ncbi/psall.blastp.f6.*`). The other
-    // reports show the stored title, or the description's without the adjustment.
+    // reports show the stored title, or the description's without the adjustment. So the source
+    // of such a title is asked only where the first word can depend on it: most titles ending in
+    // `]` (`hypothetical protein [Bacillus sp.]`) keep their first word whatever the source
+    // (`report::defline::protein_title_word_needs_source`) and ask nothing, as for any other title.
+    // NCBI looks the taxid up where it loads the Bioseq, whatever the title: that lookup, and its
+    // refusal of a record past the mapped end of `taxdb.btd`, are the prefetch's and the XML2
+    // reports' (`TaxdbRun::load`).
     /// The source of the sequence `ordinal` without parsed Seq-ids, whose stored title is `title`
     /// and whose definition line's taxid is `taxid` (`StoredTitle::taxid`, read with the title;
     /// one definition line, so its positive taxid is the first source's,
     /// `DeflineSet::first_source_taxid` without a target: NCBI reads the sequence by its ordinal
     /// id), where a title that NCBI makes depends on it: the name from which it makes an empty
     /// title (`report::defline::bioseq_title_from_source`, where a taxonomy database opens), and
-    /// for a protein title whose end it can rewrite
-    /// (`report::defline::protein_title_suffix_adjustable`) whether there is a source
+    /// for a protein title ending in `]` whose first word its rewritten end can change
+    /// (`report::defline::protein_title_word_needs_source`) whether there is a source
     /// (`SourceTaxname::Nameless` without a name) and its name (`source_taxname`). Other titles
     /// ask nothing (`Unnamed`).
     pub(crate) fn stored_source(
@@ -1617,15 +1618,13 @@ impl<'a> HeaderReader<'a> {
     ) -> crate::report::defline::SourceTaxname {
         use crate::report::defline::SourceTaxname;
         let taxid = (taxid > 0).then_some(taxid);
-        if self.db.seqtype() == SeqType::Protein
-            && crate::report::defline::protein_title_suffix_adjustable(title)
-        {
-            return match taxid {
-                None => SourceTaxname::Unnamed,
-                Some(taxid) => match self.source_taxname(Some(taxid)) {
-                    SourceTaxname::Unnamed => SourceTaxname::Nameless,
-                    source => source,
-                },
+        if let Some(taxid) = taxid.filter(|_| {
+            self.db.seqtype() == SeqType::Protein
+                && crate::report::defline::protein_title_word_needs_source(title)
+        }) {
+            return match self.source_taxname(Some(taxid)) {
+                SourceTaxname::Unnamed => SourceTaxname::Nameless,
+                source => source,
             };
         }
         if !crate::report::defline::bioseq_title_from_source(title, Default::default)

@@ -94,6 +94,8 @@ pub(crate) struct MaskBdbReader {
     /// The taxonomy database of the search path (`CSeqDBTaxInfo`), opened at the first name asked
     /// for.
     taxdb: Option<crate::seqdb::taxdb::LazyTaxDb>,
+    /// What `source_taxname` looked up, as NCBI's volume keeps it (`seqdb::taxdb::TaxCache`).
+    source_names: crate::seqdb::taxdb::TaxCache,
 }
 
 /// Whether the writer of `outfmt` prints the title of a sequence (`CMaskWriter::IdToString`).
@@ -132,6 +134,7 @@ impl MaskBdbReader {
             title_printed,
             program,
             taxdb,
+            source_names: Default::default(),
         })
     }
 
@@ -225,7 +228,9 @@ impl MaskBdbReader {
     // names the organism (`DeflineSet::first_source_taxid`, `report::defline::SourceTaxname::of_names`).
     // The texts that a lookup writes (those of opening a damaged taxonomy database, the offset
     // error) and a lookup that reads past the mapped end of `taxdb.btd` (NCBI reads unmapped
-    // memory) are LOSAT's refusals, as blastdbcmd's (`blastdbcmd::retrieve::Source::tax_names`).
+    // memory) are LOSAT's refusals, as blastdbcmd's (`blastdbcmd::retrieve::Source::tax_names`),
+    // at the first lookup that meets them: the cache of the lookups (`source_names`, NCBI's
+    // `m_TaxCache`) keeps none of those, and a taxid looked up again gives the same answer.
     /// The name of the organism of the first source of the sequence `oid`, whose definition lines
     /// are `set`, from which NCBI makes its empty title or the end of its protein title.
     fn source_taxname(
@@ -236,21 +241,21 @@ impl MaskBdbReader {
         let Some(taxdb) = &self.taxdb else {
             return Ok(None);
         };
-        let first_source = set.first_source_taxid(None);
-        let taxids = set.taxonomy_lookups(None);
         let mut first = None;
-        for (index, &taxid) in taxids.iter().enumerate() {
-            if taxids[..index].contains(&taxid) {
-                continue;
-            }
+        for (index, taxid) in set.taxonomy_order(None).enumerate() {
             let mut messages = Vec::new();
-            let names = taxdb.names(taxid, &mut messages).map_err(|error| {
-                BdbError::Unsupported(format!(
+            let names = self
+                .source_names
+                .names(taxid, &mut messages, |messages| {
+                    taxdb.names(taxid, messages)
+                })
+                .map_err(|error| {
+                    BdbError::Unsupported(format!(
                     "sequence {oid} of the database, whose title NCBI makes from its taxid {taxid} \
                      (an empty one, or the end of a protein title ending in ']') and whose lookup \
                      in the taxonomy database fails ({error}),"
                 ))
-            })?;
+                })?;
             if let Some(message) = messages.first() {
                 return Err(BdbError::Unsupported(format!(
                     "sequence {oid} of the database, whose title NCBI makes from its taxid {taxid} \
@@ -258,10 +263,8 @@ impl MaskBdbReader {
                      in the taxonomy database writes a diagnostic ({message}),"
                 )));
             }
-            if Some(taxid) == first_source {
-                first = crate::report::defline::SourceTaxname::of_names(names.as_ref())
-                    .name()
-                    .unwrap_or_default();
+            if index == 0 {
+                first = names.taxname().cloned();
             }
         }
         Ok(first)

@@ -610,10 +610,7 @@ fn generated_title(
     bioseq_facts.has_source = source_taxid.is_some();
     let from_source = bioseq_title_from_source(title, || bioseq_facts.clone());
     if let Some(taxid) = source_taxid.filter(|_| from_source || source.protein) {
-        let names = source.tax_names(taxid)?;
-        bioseq_facts.taxname = crate::report::defline::SourceTaxname::of_names(names.as_ref())
-            .name()
-            .unwrap_or_default();
+        bioseq_facts.taxname = source.tax_names(taxid)?.taxname().cloned();
     }
     let defline =
         generate_bioseq_defline(title, source.protein, false, &bioseq_facts).map_err(|_| {

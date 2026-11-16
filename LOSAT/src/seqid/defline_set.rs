@@ -389,8 +389,8 @@ impl DeflineSet {
         self.taxonomy_order(target).next()
     }
 
-    /// `taxonomy_lookups` as an iterator.
-    fn taxonomy_order(&self, target: Option<&ParsedSeqId>) -> TaxonomyOrder<'_> {
+    /// `taxonomy_lookups` as an iterator (the maskers' reader walks it without a list).
+    pub(crate) fn taxonomy_order(&self, target: Option<&ParsedSeqId>) -> TaxonomyOrder<'_> {
         let front = target.and_then(|target| {
             self.deflines
                 .iter()

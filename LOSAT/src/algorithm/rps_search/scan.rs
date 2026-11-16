@@ -294,13 +294,7 @@ impl RpsBuckets {
     ) -> (u32, u32) {
         let numhits = cell[0] as usize;
         if cell[0] <= RPS_HITS_PER_CELL {
-            return self.add_list(
-                &cell[1 + taken as usize..=numhits],
-                taken,
-                s_bits,
-                g0,
-                buckets,
-            );
+            return self.add_list(&cell[1 + taken as usize..=numhits], taken, s_bits, g0);
         }
         let mut taken = taken;
         if taken == 0 {

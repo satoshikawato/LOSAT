@@ -1679,9 +1679,10 @@ Rebuilding less:
   RSS (164-286 MiB) in both shapes (outside this switch); megablast stays below NCBI's.
 - `LOSAT_X_BNMAPPED=1` (BLASTN, every task, memory; in the strict set from the pull request that added it
   (perf/bn-mapped-pool, evidence at the end of this entry): on unless it is `0`;
-  acts only with 64-bit glibc (Linux) and on buffers of 1 MiB or more) the large per-subject buffers of BLASTN are
+  acts only with 64-bit glibc (Linux) and on buffers of 1 MiB or more, except the block buffer of the preliminary
+  stage below) the large per-subject buffers of BLASTN are
   kept where glibc returns them to the system when they are dropped: the blocks and sequences read from a `-db`
-  (`seqdb` `x_read_block_mapped`, `x_read_sequence_mapped`), their BLASTNA letters (`blastn/blast_engine/database.rs`
+  (`seqdb` `x_read_block_into` from 1 MiB on, `x_read_sequence_mapped`), their BLASTNA letters (`blastn/blast_engine/database.rs`
   `x_blastna`), the ungapped hits of a subject as the seed stages push them (`run.rs` `x_push_ungapped`) and the
   scratch of their sort by score (`utils/x_mapped.rs` `x_sort_by_mapped`). Such a buffer gets a capacity above glibc's
   largest dynamic mmap threshold (32 MiB and one page) once it needs 1 MiB, so glibc maps it; its pages beyond its
@@ -1700,6 +1701,25 @@ Rebuilding less:
   sorted with `sort_by`, merged pairwise into the scratch and back, the left run first among equal elements), so the
   order is that of `sort_by`; its scratch is as long as the hits (a half-size scratch, the left run copied out before
   each merge, held no less at the peak).
+  The preliminary stage's blocks below 1 MiB (the usual block: at most 1 MiB at one thread, 256 KiB with
+  `LOSAT_X_BNDBSMALL` at more) are read, with every allocator, into one buffer per worker (the one-thread loop, the
+  rounds' `map_init`, the window of `LOSAT_X_BNDBSTREAM`) that the worker keeps from one block to the next
+  (`blastn/blast_engine/database.rs` `x_read_block`, `seqdb` `x_read_block_into` and `SequenceBlock::x_into_kept`,
+  `utils/x_mapped.rs` `x_filled_kept` and `x_keep`, the path of `LOSAT_X_BPDBKEEP`'s blocks): it is allocated once
+  per worker and grows only for a larger block, and only its bytes past the last block's length are zeroed. Before,
+  each block was a new buffer, zeroed and freed (BLASTN syn megablast at one thread: 54 `memset` calls, 14.1 M
+  instructions). A block of 1 MiB or more takes a buffer of `X_BYTES` and gives it back, so a worker keeps at most a
+  buffer below 1 MiB, freed when its stage (or the window's segment, or the `map_init` run) ends. NCBI reads the
+  sequences in place in the mapped volume (seqsrc_seqdb.cpp:375, seqdbvol.cpp:1817) and allocates each search
+  thread's structures once (blast_engine.c:1376-1378). With `=0` every block is a new buffer (`read_block`).
+  Measured on the workstation (line NP C4-3, dev bc182b374, node 1, 11 rounds, dev / null / head rotated; every output
+  equal to NCBI 2.17.0's): task-clock many40 megablast x0.991 (10/11 rounds faster), the mlst example x0.994 (10/11),
+  syn `-task blastn` x0.998 (10/11); syn megablast, many40 `-db_hard_mask`, SILVA at 1 and 16 threads and the zebrafish
+  genome at one thread within the null arm (x0.999-1.003; null x1.000-1.006). Callgrind: syn megablast -3.0 % instructions (block reads'
+  `memset` 14.1 M -> 2.1 M), mlst -1.7 % (54.5 M -> 2.1 M); perf counts glibc's `rep stosb` as few instructions, so
+  user-space instructions are flat. Max RSS (21 runs, 61 for syn at 16 threads): many40 at one thread +68 KiB
+  (+0.39 %; with `MALLOC_MMAP_THRESHOLD_` fixed equal: glibc raises its mmap threshold when the kept buffer is freed at
+  the end of the stage instead of after the first block), mlst -0.9 MiB, the others equal within the runs' spread.
   Every pooled buffer is written before it is read (zeroed and read into, or BLASTNA letters written whole), so values
   and order never change; it only chooses where the bytes live and when they are freed. Not mapped: the merge of the
   folded strips (`x_pair_seed_part.rs`) and the per-query sorts of `LOSAT_X_QGROUPPAR`. With other allocators (macOS,
@@ -1726,8 +1746,9 @@ Rebuilding less:
   of the 16S cells at 16 threads x1.000 (4). User-space instructions are equal; system time rises where buffers are
   mapped (D. melanogaster blastn at 16 threads 2.5 -> 3.3 s, inside the same wall).
 - `LOSAT_X_POOLIDLE=<MiB>` (tuning variable of `LOSAT_X_BNMAPPED`; not in the strict set, read once when the pool
-  first takes a buffer back) the bound of the bytes that the idle buffers of `X_BYTES` (the database's blocks,
-  sequences and BLASTNA letters) may have touched, 0 to 65,536. The oldest idle buffers beyond it are freed, and a
+  first takes a buffer back) the bound of the bytes that the idle buffers of `X_BYTES` (BLASTN's database blocks of
+  1 MiB or more, sequences and BLASTNA letters, BLASTP's database blocks of 1 MiB or more, TBLASTN's reads and frames)
+  may have touched, 0 to 65,536. The oldest idle buffers beyond it are freed, and a
   buffer that alone touched more is freed at once. Unset or any other value gives 64, without a message, as the value
   switches of `utils/xswitch.rs` give their built-in value. The output does not depend on it. D. melanogaster blastn
   at 16 threads (above): max RSS 273 MiB with 0, 317-331 with 64, 346-367 with 256; with 0 every reuse faults again
@@ -2219,7 +2240,9 @@ Rebuilding less:
   threshold. With the switch:
   (1) each worker of the pool keeps one scratch and one block buffer for the whole stage
   (`blastp/blast_engine/database/x_db_keep.rs`), and the blocks are cut to at most 96 KiB (`X_KEEP_BLOCK_BYTES`, at
-  one thread too), so that a kept buffer stays in its worker's arena instead of a mapping of its own beside it;
+  one thread too), so that a kept buffer stays in its worker's arena instead of a mapping of its own beside it (a
+  block of 1 MiB or more, a protein of a million residues or more, takes a buffer of `X_BYTES` and gives it back,
+  `SeqDb::x_read_block_into`, as BLASTN's blocks; the worker keeps its own buffer);
   (2) the workers take the blocks one at a time in ordinal order and put each block's results into a window of 8
   blocks per worker; the worker that ends the oldest block not yet merged merges it and the later blocks already
   ended, in ordinal order, and a worker takes block j only once the blocks before j - W are merged (W, the window).

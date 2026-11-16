@@ -518,6 +518,9 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
             );
         }
     };
+    // The presence vector and its shift, held by the scans' per-word closures by value
+    // (`lookup::XPvView`), which test each word there before they call out.
+    let pv_view = two_stage.x_pv_view();
     if let Some(disc) = two_stage.disc() {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1647-1684
         // ```c
@@ -622,7 +625,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                 subject_masked,
                 |s_off, s_range, index, index2| {
                     debug_assert!(index2.is_none());
-                    if !every_word && !two_stage.has_hits(index) {
+                    if !every_word && !pv_view.has_hits(index) {
                         words_without_hits += 1;
                         return;
                     }
@@ -655,8 +658,8 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                 subject_masked,
                 |s_off, s_range, index, index2| {
                     if every_word
-                        || two_stage.has_hits(index)
-                        || index2.is_some_and(|i2| two_stage.has_hits(i2))
+                        || pv_view.has_hits(index)
+                        || index2.is_some_and(|i2| pv_view.has_hits(i2))
                     {
                         on_word(s_off, s_range, index, index2);
                     } else {
@@ -696,7 +699,6 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
         // `x_scan_csr!(head, |k| test)`: the scan of `head` whose per-word closure
         // takes a word `k` to the ring when `test` holds.
         let rank_once = x_bn_rank_once(true);
-        let pv_view = two_stage.x_pv_view();
         macro_rules! x_scan_csr {
             ($head:expr, |$k:ident| $has:expr) => {{
                 use x_dc_csr::XHead;
@@ -799,6 +801,15 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
     } else {
         x_bn_rank_once(false);
         let mb_scan_kind = select_mb_scan_kind(lut_word_length, scan_step, subject_masked);
+        // A word whose chain is empty (the presence vector, which `for_each_hit` tests first)
+        // adds no pair: tested here, inline in the scan, so such a word makes no call to
+        // `on_word` and is only counted for the debug summary (as the disc scans above). A batch
+        // of pairs that reached `OFFSET_ARRAY_SIZE` then goes before the next word with hits,
+        // with the same pairs and the same state, so every value is the same. With the debug
+        // output on, every word still goes to `on_word`, whose warning for a long chain comes
+        // before that batch's window lines.
+        let every_word = debug_mode || blastn_debug;
+        let mut words_without_hits = 0usize;
         scan_subject_kmers_with_ranges(
             search_seq_packed,
             s_len,
@@ -809,9 +820,16 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
             subject_masked,
             mb_scan_kind,
             |kmer_start, s_range, current_lut_kmer| {
-                on_word(kmer_start, s_range, current_lut_kmer, None)
+                if every_word || pv_view.has_hits(current_lut_kmer) {
+                    on_word(kmer_start, s_range, current_lut_kmer, None);
+                } else {
+                    words_without_hits += 1;
+                }
             },
         );
+        if debug_enabled {
+            *dbg_total_s_positions += words_without_hits;
+        }
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207

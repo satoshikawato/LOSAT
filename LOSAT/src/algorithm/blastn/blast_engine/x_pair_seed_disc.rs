@@ -251,6 +251,8 @@ pub(super) fn scan_strip_disc_from<O: SeedOut, const PIECE: bool>(
         return scan_strip_disc_csr::<O, PIECE>(x, disc, csr, job, from, out);
     }
     let two_stage = x.two_stage;
+    // (the presence vector by value: `lookup::XPvView`)
+    let pv_view = two_stage.x_pv_view();
     let s_range = job.s_range;
     let kind = choose_disc_scan_subject(disc.template_type, disc.two_templates);
     let cut = Cut::new(&from);
@@ -268,8 +270,8 @@ pub(super) fn scan_strip_disc_from<O: SeedOut, const PIECE: bool>(
             // and such a word makes no call; a word with a chain goes to `x_disc_word_pairs`
             // out of line. (A piece that stopped inside a word's chain resumes at that word,
             // which has a chain, so `Cut::chain_start` still meets it first.)
-            if !two_stage.has_hits(u64::from(index))
-                && index2.is_none_or(|index2| !two_stage.has_hits(u64::from(index2)))
+            if !pv_view.has_hits(u64::from(index))
+                && index2.is_none_or(|index2| !pv_view.has_hits(u64::from(index2)))
             {
                 return !PIECE || cut.go();
             }
@@ -374,6 +376,8 @@ fn scan_strip_disc_csr<O: SeedOut, const PIECE: bool>(
 ) -> Option<Resume> {
     debug_assert!(!disc.two_templates);
     let two_stage = x.two_stage;
+    // (the presence vector by value: `lookup::XPvView`)
+    let pv_view = two_stage.x_pv_view();
     let s_range = job.s_range;
     let kind = choose_disc_scan_subject(disc.template_type, disc.two_templates);
     let cut = Cut::new(&from);
@@ -414,7 +418,7 @@ fn scan_strip_disc_csr<O: SeedOut, const PIECE: bool>(
             // a place in it. The words with hits leave in the same order, so the same pairs reach
             // `seed_of_pair` in the same order; a cut stops only in `emit`, which runs only in a
             // push, and is seen after that push as before.
-            if !two_stage.has_hits(u64::from(index)) {
+            if !pv_view.has_hits(u64::from(index)) {
                 return true;
             }
             let left = ring.push((s_off, index), |w| w.1 as usize, &mut emit);

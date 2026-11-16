@@ -46,7 +46,7 @@ use anyhow::{bail, Result};
 
 use crate::core::blast_util::{BLASTAA_SIZE, BLAST_SCORE_MIN};
 use crate::core::psi::KarlinBlk;
-use crate::report::serial::pssm::{PssmWithParameters, SeqData};
+use crate::report::serial::pssm::{PssmWithParameters, SeqData, SeqEntry};
 
 use super::pssm::{AsciiPssmDiagnostics, PssmRequest};
 #[cfg(test)]
@@ -203,6 +203,7 @@ fn query_codes(object: &PssmWithParameters) -> Vec<u8> {
         .pssm
         .query
         .as_ref()
+        .and_then(SeqEntry::seq)
         .and_then(|query| query.inst.seq_data.as_ref())
     {
         Some(SeqData::Ncbistdaa(codes)) => codes.clone(),
@@ -210,7 +211,7 @@ fn query_codes(object: &PssmWithParameters) -> Vec<u8> {
             .iter()
             .map(|letter| LETTERS.iter().position(|c| c == letter).unwrap_or(0) as u8)
             .collect(),
-        None => Vec::new(),
+        Some(SeqData::Other(_)) | None => Vec::new(),
     }
 }
 
@@ -429,7 +430,7 @@ mod tests {
                 num_columns: columns as i32,
                 row_labels: None,
                 by_row: Some(false),
-                query: Some(PssmQuery {
+                query: Some(SeqEntry::Seq(PssmQuery {
                     ids: vec![ParsedSeqId::Local(id)],
                     descr: None,
                     inst: SeqInst::new(
@@ -439,7 +440,7 @@ mod tests {
                         Some(SeqData::Ncbistdaa(vec![12; columns])),
                     ),
                     annot: None,
-                }),
+                })),
                 intermediate_data: Some(PssmIntermediateData {
                     freq_ratios: (0..columns * rows).map(|i| i as f64).collect(),
                     ..PssmIntermediateData::default()
@@ -508,7 +509,12 @@ mod tests {
             if !params {
                 object.params = None;
             }
-            let query = object.pssm.query.as_mut().unwrap();
+            let query = object
+                .pssm
+                .query
+                .as_mut()
+                .and_then(SeqEntry::seq_mut)
+                .unwrap();
             for name in unwritten {
                 match name {
                     "Seqdesc" => {

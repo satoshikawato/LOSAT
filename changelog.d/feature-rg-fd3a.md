@@ -20,7 +20,14 @@
   error archive, each of the reader's and the object manager's messages saved whole with its severity; such a stop
   is no longer refused in tblastn's formats, in psiblast's `-outfmt 10` and `20`, for the query's titles, with
   `-out_pssm` (no file written, an existing one left as it was) and `-export_search_strategy` (an empty file), and
-  for the PSSM's own values that NCBI reads after the stop (its sizes, scores, statistics, letters and ids). The
+  for everything that NCBI reads after the stop: the PSSM's own values (its sizes, scores, statistics, letters, their
+  alphabet and ids), the Seq-ids of `-subject` records under `-parse_deflines`, the PSSM files, the search strategy and
+  LOSAT's limits of the search (`-evalue`, `-use_sw_tback`, gap costs, tblastn's `-xdrop_gap`, `-dbsize` with a list
+  that keeps no sequence, report sums). A query Seq-entry set is no longer refused: NCBI's object manager takes its
+  annotations (the set's own before its members'), and NCBI then stops at the set (`CSeq_entry::GetSeq()`). A Seq-id
+  twice in the query's entry gets NCBI's `duplicate Bioseq id` exception, before the index of the annotations (it
+  was the index's message or LOSAT's refusal); two Seq-ids that NCBI may take as one, and a Seq-id twice with
+  `-subject`, are refused. The
   library API's PSSM query (`Inputs::pssm`) ends as the command line's run: a PSSM file that NCBI ends without a word
   gives a call without an error, and an error after the object manager's `Failed to parse location of` message has
   the command line's text (its line feed).

@@ -1124,9 +1124,14 @@ masked). Line NP item M4a-2c.
   reader's format errors, number-range and member-tag reports, its `#` for a byte outside the
   visible ASCII range and the deprecated members of a `Variation-ref`; where the index's
   exception ends the run, each output format's bytes (tblastn's `-outfmt 11` error archive with
-  every message saved whole with its severity, psiblast's `-outfmt 10` and `20`), whatever the
-  PSSM's values that NCBI reads only later, and no PSSM file of `-out_pssm` and an empty file of
-  `-export_search_strategy`, as with the reader's errors (fixture rows `db.ps.inpssm.d3.*`, `db.tbn.inpssm.d3.*`, `db.ps.inpssm.fg.*`,
+  every message saved whole with its severity, psiblast's `-outfmt 10` and `20`), whatever NCBI
+  reads only later (the PSSM's values and the alphabet of its letters, the `-subject` records'
+  Seq-ids under `-parse_deflines`, the search's options), and no PSSM file of `-out_pssm` and an
+  empty file of `-export_search_strategy`, as with the reader's errors; a query Seq-entry set,
+  whose annotations NCBI's object manager takes (the set's own before its members') and at which
+  NCBI then stops (`CSeq_entry::GetSeq()`), and a Seq-id twice in the query's entry (the
+  attach's `duplicate Bioseq id` exception, before the index; two Seq-ids that NCBI's scope may take
+  as one, or a Seq-id twice with `-subject`, LOSAT refuses) (fixture rows `db.ps.inpssm.d3.*`, `db.tbn.inpssm.d3.*`, `db.ps.inpssm.fg.*`,
   `db.tbn.inpssm.fg.*`).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
@@ -1136,7 +1141,10 @@ or need NCBI's object manager to reproduce. LOSAT refuses them instead (line DBI
 `DECISIONS.md` 9, 20 and 21, line DI-7 for the query's id), under the maintainer's standing
 delegation, which the maintainer accepted on 2026-11-02 with version 1.10. Each is a row of the table
 in [`PD-LOSAT-DATABASE-SEARCH`](PD-LOSAT-DATABASE-SEARCH.md), which also lists refusals that rule 4
-would port:
+would port. The last entry (version 1.38, line RG item D3-1) is not of these: it concerns a PSSM
+query's annotations, not a database; it is Owner-delegated (standing instruction 2026-09-29, restated
+2026-10-07), not under the acceptance of 2026-11-02; it has no row in PD-LOSAT-DATABASE-SEARCH; and
+it is a refusal until a port lands, which the Owner decided on 2026-11-16 (「推奨通り」, Q-BM):
 
 - A reported sequence whose id NCBI's formatters do not find, in the formats and field lists
   where NCBI exits 0: it writes `Unknown` or the id alone.

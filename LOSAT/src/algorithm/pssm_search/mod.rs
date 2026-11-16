@@ -101,7 +101,7 @@ pub struct PsiSearch {
     /// NCBI's check passes; `None` otherwise and for a FASTA query's later rounds.
     pub(crate) request: Option<PssmQueryRequest>,
     /// What NCBI's object manager makes of the annotations of the PSSM's query when the query
-    /// joins the scope (`annot_index::index_annots`): its messages, the diagnostic stream it
+    /// joins the scope (`annot_index::index_entry`): its messages, the diagnostic stream it
     /// leaves failed and its exception, which the run writes where NCBI posts them
     /// (`annot_posts`, `annot_abort`); empty without annotations and for a FASTA query's rounds.
     pub(crate) annot: annot_index::AnnotOutcome,
@@ -408,7 +408,9 @@ impl PsiSearch {
     /// `query_record`, whose ids, when the reports show them, join the scope `scope` of the
     /// `-subject` records that `-parse_deflines` reads, as a FASTA query's do (NCBI's scope holds
     /// the PSSM's Bioseq, psiblast_app.cpp:537: a subject with one of its ids shows as the query, or
-    /// NCBI's tblastn fails; `IdScope::add_record` refuses it).
+    /// NCBI's tblastn fails; `IdScope::add_record` refuses it). A query that never joins the scope
+    /// (`joins_scope`) meets no subject there: NCBI BLAST+ 2.17.0 writes the object manager's stop
+    /// (line RG D3-1 review 4b S1 (c)).
     pub(crate) fn query_record_in(
         &self,
         parse_deflines: bool,
@@ -416,10 +418,25 @@ impl PsiSearch {
         program: &str,
     ) -> anyhow::Result<FastaRecord> {
         let query = self.query_record(parse_deflines);
-        if let (Some(scope), Some(believed)) = (scope, query.believed()) {
+        if let (Some(scope), Some(believed), true) = (scope, query.believed(), self.joins_scope()) {
             scope.add_record(&believed.ids, None, "query", program)?;
         }
         Ok(query)
+    }
+
+    /// Whether the PSSM's query joins NCBI's scope: false where NCBI's object manager ends the run
+    /// as it adds the query's Seq-entry (`annot.abort`, `scope->AddTopLevelSeqEntry`, and
+    /// `GetSeq()` of a set, psiblast_app.cpp:537-540, tblastn_app.cpp:226-228). Such a run makes
+    /// nothing that NCBI makes after it (tblastn's formatter and prolog, the search strategy, the
+    /// search, its reports and PSSM files), so none of LOSAT's limits of those apply to it.
+    pub(crate) fn joins_scope(&self) -> bool {
+        self.annot.abort.is_none()
+    }
+
+    /// Whether the run searches the PSSM: its query joins the scope (`joins_scope`) and NCBI does
+    /// not stop before the search (`stop_before_search`, `strategy` and `database` as there).
+    pub(crate) fn searches(&self, strategy: bool, database: bool) -> bool {
+        self.joins_scope() && self.stop_before_search(strategy, database).is_none()
     }
 
     /// The id of the query's Seq-loc of `-in_pssm` (`query_ids`), `None` for a FASTA query.

@@ -2,7 +2,7 @@
 //! (`report::serial::pssm`).
 
 use super::*;
-use crate::report::serial::pssm::{asn_text, PssmWithParameters};
+use crate::report::serial::pssm::{asn_text, PssmWithParameters, SeqEntry};
 
 fn fixture(name: &str) -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -142,7 +142,7 @@ fn small_pssm(title: &[u8]) -> PssmWithParameters {
             num_columns: 1,
             row_labels: None,
             by_row: Some(false),
-            query: Some(PssmQuery {
+            query: Some(SeqEntry::Seq(PssmQuery {
                 ids: vec![crate::seqid::ParsedSeqId::Local(ObjectId::Str(
                     b"Query_7".to_vec(),
                 ))],
@@ -154,7 +154,7 @@ fn small_pssm(title: &[u8]) -> PssmWithParameters {
                     Some(SeqData::Ncbistdaa(vec![12])),
                 ),
                 annot: None,
-            }),
+            })),
             intermediate_data: Some(PssmIntermediateData {
                 weighted_res_freqs_per_pos: Some(vec![0.0, 0.25]),
                 freq_ratios: vec![0.0, 1.5],
@@ -288,7 +288,7 @@ fn strings_octets_and_comments_are_read_as_ncbi_reads_them() {
     // An odd number of hex digits: the last one is the high half of a byte.
     let odd = SMALL_PSSM.replace("'0C'H", "'0C1'H");
     let read = read_pssm_with_parameters(odd.as_bytes()).unwrap();
-    let query = read.pssm.query.unwrap();
+    let query = read.pssm.query.and_then(SeqEntry::into_seq).unwrap();
     assert_eq!(
         query.inst.seq_data,
         Some(crate::report::serial::pssm::SeqData::Ncbistdaa(vec![
@@ -298,10 +298,11 @@ fn strings_octets_and_comments_are_read_as_ncbi_reads_them() {
 }
 
 // The reader's errors are NCBI's `CSerialException` for the grammar (an unknown type, a bad value,
-// a text cut short, members out of order), and LOSAT's refusal of what NCBI reads and the PSSM
-// search does not take, made after NCBI's reader read the whole document (a query Seq-entry set).
+// a text cut short, members out of order). What NCBI reads and the PSSM search does not take is
+// read as it is (a query Seq-entry set, Seq-data of another alphabet): NCBI's object manager takes
+// it before NCBI reads it, and the search refuses it after (`in_pssm::psi_search_and_object`).
 #[test]
-fn errors_are_ncbis_classes_and_losats_refusals() {
+fn errors_are_ncbis_classes_and_what_the_search_does_not_take_is_kept() {
     let serial = |text: &str| {
         matches!(
             read_pssm_with_parameters(text.as_bytes()),
@@ -322,15 +323,25 @@ fn errors_are_ncbis_classes_and_losats_refusals() {
             ..SMALL_PSSM.find("    intermediateData").unwrap()],
         "    query set {\n      seq-set {\n      }\n    },\n",
     );
-    match read_pssm_with_parameters(set.as_bytes()) {
-        Err(PssmReadError::Refused(what)) => {
-            assert!(
-                what.contains("not supported by LOSAT's PSSM reader"),
-                "{what}"
-            )
-        }
+    match read_pssm_with_parameters(set.as_bytes())
+        .unwrap()
+        .pssm
+        .query
+    {
+        Some(SeqEntry::Set(_)) => {}
         other => panic!("{other:?}"),
     }
+    let ncbi8aa = SMALL_PSSM.replace("seq-data ncbistdaa", "seq-data ncbi8aa");
+    let query = read_pssm_with_parameters(ncbi8aa.as_bytes())
+        .unwrap()
+        .pssm
+        .query
+        .and_then(SeqEntry::into_seq)
+        .unwrap();
+    assert!(matches!(
+        query.inst.seq_data,
+        Some(crate::report::serial::pssm::SeqData::Other(_))
+    ));
 }
 
 // The members the PSSM writer does not write yet are kept and named (NCBI's object keeps them and
@@ -360,7 +371,7 @@ fn kept_members_are_named_and_an_empty_descr_is_an_error() {
         value.unwritten_members(),
         ["Seqdesc", "topology", "constraints"]
     );
-    let query = value.pssm.query.as_ref().unwrap();
+    let query = value.pssm.query.as_ref().and_then(SeqEntry::seq).unwrap();
     assert_eq!(query.titles(), [&b"a \"quoted\" title"[..]]);
     assert_eq!(query.inst.topology, Some(1));
     let annot = SMALL_PSSM.replace(
@@ -377,6 +388,7 @@ fn kept_members_are_named_and_an_empty_descr_is_an_error() {
         .unwrap()
         .pssm
         .query
+        .and_then(SeqEntry::into_seq)
         .unwrap()
         .has_molinfo());
     let empty = SMALL_PSSM.replace("        title \"a \"\"quoted\"\" title\"\n", "");
@@ -397,7 +409,7 @@ fn ncbis_pssm_with_frequency_ratios_is_read() {
     let pssm = &value.pssm;
     assert_eq!((pssm.num_rows, pssm.num_columns), (26, 232));
     assert_eq!((pssm.is_protein, pssm.by_row), (Some(true), Some(false)));
-    let query = pssm.query.as_ref().unwrap();
+    let query = pssm.query.as_ref().and_then(SeqEntry::seq).unwrap();
     assert_eq!(
         query.ids,
         vec![

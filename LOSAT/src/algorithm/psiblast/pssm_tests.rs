@@ -1233,7 +1233,7 @@ fn a_querys_read_messages_keep_the_order_of_the_queries() {
 /// title without one writes no post and the same bytes as `asn_text`.
 #[test]
 fn a_pssm_title_outside_the_visible_range_is_written_with_ncbis_posts() {
-    use crate::report::serial::pssm::{asn_text, asn_text_posting};
+    use crate::report::serial::pssm::{asn_text, asn_text_posting, SeqEntry};
     let value = |title: &[u8]| PssmWithParameters {
         pssm: Pssm {
             is_protein: None,
@@ -1242,14 +1242,14 @@ fn a_pssm_title_outside_the_visible_range_is_written_with_ncbis_posts() {
             num_columns: 1,
             row_labels: None,
             by_row: None,
-            query: Some(PssmQuery {
+            query: Some(SeqEntry::Seq(PssmQuery {
                 ids: vec![crate::seqid::ParsedSeqId::Local(ObjectId::Str(
                     b"Query_1".to_vec(),
                 ))],
                 descr: Some(vec![Seqdesc::Title(title.to_vec())]),
                 inst: SeqInst::new(("raw", 2), ("aa", 3), Some(1), None),
                 annot: None,
-            }),
+            })),
             intermediate_data: None,
             final_data: None,
         },

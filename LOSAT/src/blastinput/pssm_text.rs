@@ -18,9 +18,11 @@
 //! (`report::serial::asn_types`, line RG item D3-1): every member of every type it reaches, with
 //! NCBI's grammar, ranges, replacements and messages (`Post`) and NCBI's errors (`ReadError`). The
 //! typed model is then made of the value (`pssm_of`): the members LOSAT's search reads, typed, and
-//! the others kept as the generic reader's values. LOSAT refuses at that boundary, after NCBI's
-//! reader has read everything, what its PSSM search does not take (`PssmReadError::Refused`): a
-//! query `Seq-entry` that is a `set`, `Seq-data` other than `iupacaa`, `ncbieaa` and `ncbistdaa`.
+//! the others kept as the generic reader's values: also a query `Seq-entry` that is a `set` and
+//! `Seq-data` other than `iupacaa`, `ncbieaa` and `ncbistdaa`, which NCBI's object manager takes
+//! (or stops at) before NCBI reads them; the PSSM search refuses them after the object manager's
+//! step, for a run that goes on (`pssm_search::in_pssm::psi_search_and_object`). Only the lexical
+//! reader's own limits are refused here (`PssmReadError::Refused`).
 
 use crate::report::serial::asn_types::table::named;
 use crate::report::serial::asn_types::{
@@ -28,7 +30,7 @@ use crate::report::serial::asn_types::{
 };
 use crate::report::serial::pssm::{
     FormatRpsDbParameters, ObjectId, Pssm, PssmFinalData, PssmIntermediateData, PssmParameters,
-    PssmQuery, PssmWithParameters, SeqData, SeqInst, Seqdesc,
+    PssmQuery, PssmWithParameters, SeqData, SeqEntry, SeqInst, Seqdesc,
 };
 
 /// Why a PSSM file is not read.
@@ -58,7 +60,7 @@ pub(crate) fn read_pssm(text: &[u8]) -> PssmRead {
                 ReadError::Unsupported(what) => PssmReadError::Refused(what),
                 error => PssmReadError::Ncbi(error),
             })
-            .and_then(|value| pssm_of(value).map_err(PssmReadError::Refused)),
+            .map(pssm_of),
         posts,
     }
 }
@@ -172,42 +174,39 @@ fn object_id(value: Value) -> ObjectId {
 }
 
 /// The model of a `PssmWithParameters` value, or LOSAT's refusal.
-fn pssm_of(mut value: Value) -> Result<PssmWithParameters, String> {
+fn pssm_of(mut value: Value) -> PssmWithParameters {
     const T: u16 = named::PSSMWITHPARAMETERS;
-    Ok(PssmWithParameters {
-        pssm: pssm(take(&mut value, T, "pssm").expect("mandatory"))?,
+    PssmWithParameters {
+        pssm: pssm(take(&mut value, T, "pssm").expect("mandatory")),
         params: take(&mut value, T, "params").map(params),
-    })
+    }
 }
 
-fn pssm(mut value: Value) -> Result<Pssm, String> {
+fn pssm(mut value: Value) -> Pssm {
     const T: u16 = named::PSSM;
     let mut get = |name: &str| take(&mut value, T, name);
-    Ok(Pssm {
+    Pssm {
         is_protein: get("isProtein").map(boolean),
         identifier: get("identifier").map(object_id),
         num_rows: get("numRows").map(int4).expect("mandatory"),
         num_columns: get("numColumns").map(int4).expect("mandatory"),
         row_labels: get("rowLabels").map(|labels| list(labels).into_iter().map(string).collect()),
         by_row: get("byRow").map(boolean),
-        query: get("query").map(seq_entry).transpose()?,
+        query: get("query").map(seq_entry),
         intermediate_data: get("intermediateData").map(intermediate_data),
         final_data: get("finalData").map(final_data),
-    })
+    }
 }
 
-/// The query's `Seq-entry`: its `seq` variant, a Bioseq.
-fn seq_entry(value: Value) -> Result<PssmQuery, String> {
+/// The query's `Seq-entry`: its `seq` variant, a Bioseq, or its `set` variant as read.
+fn seq_entry(value: Value) -> SeqEntry {
     let (variant, mut bioseq) = choice(value);
-    let name = members(named::SEQ_ENTRY)[variant].name();
-    if name != "seq" {
-        return Err(format!(
-            "a query Seq-entry {name} is not supported by LOSAT's PSSM reader"
-        ));
+    if members(named::SEQ_ENTRY)[variant].name() != "seq" {
+        return SeqEntry::Set(bioseq);
     }
     const T: u16 = named::BIOSEQ;
     let mut get = |name: &str| take(&mut bioseq, T, name);
-    Ok(PssmQuery {
+    SeqEntry::Seq(PssmQuery {
         ids: list(get("id").expect("mandatory"))
             .into_iter()
             .map(|id| match id {
@@ -228,18 +227,19 @@ fn seq_entry(value: Value) -> Result<PssmQuery, String> {
                 })
                 .collect()
         }),
-        inst: seq_inst(get("inst").expect("mandatory"))?,
+        inst: seq_inst(get("inst").expect("mandatory")),
         annot: get("annot").map(list),
     })
 }
 
-fn seq_inst(mut value: Value) -> Result<SeqInst, String> {
+fn seq_inst(mut value: Value) -> SeqInst {
     const T: u16 = named::SEQ_INST;
     let mut get = |name: &str| take(&mut value, T, name);
     let seq_data = match get("seq-data") {
         None => None,
         Some(data) => {
             let (variant, value) = choice(data);
+            let index = u16::try_from(variant).expect("a CHOICE variant");
             Some(match members(named::SEQ_DATA)[variant].name() {
                 "iupacaa" => SeqData::Iupacaa(string(value)),
                 "ncbieaa" => SeqData::Ncbieaa(string(value)),
@@ -247,15 +247,11 @@ fn seq_inst(mut value: Value) -> Result<SeqInst, String> {
                     Value::Octets(codes) => codes,
                     other => unreachable!("NCBIstdaa is an OCTET STRING, not {other:?}"),
                 }),
-                other => {
-                    return Err(format!(
-                        "query Seq-data {other} is not supported by LOSAT's PSSM reader"
-                    ))
-                }
+                _ => SeqData::Other(Value::Choice(index, Box::new(value))),
             })
         }
     };
-    Ok(SeqInst {
+    SeqInst {
         repr: enumerated(get("repr").expect("mandatory"), T, "repr"),
         mol: enumerated(get("mol").expect("mandatory"), T, "mol"),
         length: get("length").map(|length| u32::try_from(int(length)).expect("a Uint4")),
@@ -265,7 +261,7 @@ fn seq_inst(mut value: Value) -> Result<SeqInst, String> {
         seq_data,
         ext: get("ext"),
         hist: get("hist"),
-    })
+    }
 }
 
 fn intermediate_data(mut value: Value) -> PssmIntermediateData {

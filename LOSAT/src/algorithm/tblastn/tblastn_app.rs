@@ -609,11 +609,17 @@ fn open_out_file(args: &TblastnArgs) -> Result<Option<std::io::BufWriter<std::fs
 
 /// What `search_cli` and `run_local_database` do after the options are processed and before the
 /// query: the opening of the database of `-db` (`list`: its taxid or seqid list, `None` for a
-/// search without `-db`), and what the requested reports ask of it.
+/// search without `-db`), and what the requested reports and requests ask of it, which a run whose
+/// PSSM query never joins NCBI's scope does not make (`joins_scope`, `PsiSearch::joins_scope`:
+/// NCBI's tblastn makes its formatter and its search strategy after `AddTopLevelSeqEntry`,
+/// tblastn_app.cpp:226, 241-270, 307; NCBI BLAST+ 2.17.0 writes the object manager's stop with
+/// `-dbsize` and a list that keeps no sequence, with a database list whose lengths overflow, with
+/// a database named `n/a`: line RG D3-1 fix 4).
 fn open_search_database(
     args: &mut TblastnArgs,
     list: Option<&crate::seqdb::DbList>,
     settings: &crate::blastinput::ncbi_environment::ApplicationSettings,
+    joins_scope: bool,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<Option<TblastnDatabase>> {
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:189-193
@@ -635,6 +641,9 @@ fn open_search_database(
                 outputs.diagnostics,
             )?
             .showing_gis(args.show_gis);
+            if !joins_scope {
+                return Ok(Some(database));
+            }
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 args.strategy.as_ref(),
@@ -655,6 +664,9 @@ fn open_search_database(
         }
         None => None,
     };
+    if !joins_scope {
+        return Ok(database);
+    }
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
     // ```c++
     // void CBlastTabularInfo::x_CheckTaxDB()
@@ -746,7 +758,11 @@ fn search_cli(
         read_queries, FastaInputSource, QueryEnd, QueryRecords, ReaderConfig,
     };
     let resolved = args.check_options(outputs.diagnostics)?;
-    let database = open_search_database(&mut args, list.as_ref(), &settings, outputs)?;
+    let joins_scope = resolved
+        .pssm
+        .as_deref()
+        .is_none_or(crate::algorithm::pssm_search::PsiSearch::joins_scope);
+    let database = open_search_database(&mut args, list.as_ref(), &settings, joins_scope, outputs)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:194-196,225-238
     // ```c++
     //         /*** Get the query sequence(s) or PSSM (these two options are mutually
@@ -1218,7 +1234,11 @@ fn search_database(
     outputs.open_out()?;
     let outfmts = read_formats(outputs, args.out.as_deref())?;
     let resolved = args.check_options_for_formats(&outfmts, outputs.diagnostics)?;
-    let database = open_search_database(&mut args, list.as_ref(), &settings, outputs)?
+    let joins_scope = resolved
+        .pssm
+        .as_deref()
+        .is_none_or(crate::algorithm::pssm_search::PsiSearch::joins_scope);
+    let database = open_search_database(&mut args, list.as_ref(), &settings, joins_scope, outputs)?
         .ok_or_else(crate::blastinput::app::missing_subject_error)?;
     // `-in_pssm` (the library API's `Inputs::pssm_database`): the query is the PSSM's. No subject
     // record holds an id (the database's sequences are checked against the query's,

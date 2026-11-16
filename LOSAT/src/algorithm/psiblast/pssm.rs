@@ -21,7 +21,7 @@ use crate::report::diag_log::Posts;
 use crate::report::serial::encoder::ReplacedChar;
 use crate::report::serial::pssm::{
     FormatRpsDbParameters, ObjectId, Pssm, PssmFinalData, PssmIntermediateData, PssmParameters,
-    PssmQuery, PssmWithParameters, SeqData, SeqInst, Seqdesc,
+    PssmQuery, PssmWithParameters, SeqData, SeqEntry, SeqInst, Seqdesc,
 };
 use crate::seqid::ParsedSeqId;
 use crate::utils::matrix::{aa_char_to_ncbistdaa, ncbistdaa, BLASTAA_SIZE, BLAST_SCORE_MIN};
@@ -722,7 +722,7 @@ fn pssm_with_parameters(
             num_columns: letters.len() as i32,
             row_labels: None,
             by_row: Some(false),
-            query: Some(PssmQuery {
+            query: Some(SeqEntry::Seq(PssmQuery {
                 ids: vec![query.id.clone()],
                 descr: Some(vec![Seqdesc::Title(query.title.to_vec())]),
                 inst: SeqInst::new(
@@ -732,7 +732,7 @@ fn pssm_with_parameters(
                     Some(SeqData::Ncbistdaa(letters.to_vec())),
                 ),
                 annot: None,
-            }),
+            })),
             intermediate_data: Some(intermediate_data),
             final_data: Some(PssmFinalData {
                 scores: pssm.scores.iter().flatten().copied().collect(),

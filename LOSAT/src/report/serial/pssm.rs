@@ -80,7 +80,7 @@ pub struct Pssm {
     pub row_labels: Option<Vec<Vec<u8>>>,
     /// `byRow`: `Some` when set (written), `None` for the default FALSE (not written).
     pub by_row: Option<bool>,
-    pub query: Option<PssmQuery>,
+    pub query: Option<SeqEntry>,
     pub intermediate_data: Option<PssmIntermediateData>,
     pub final_data: Option<PssmFinalData>,
 }
@@ -108,6 +108,48 @@ pub struct PssmQuery {
     pub inst: SeqInst,
     /// `annot SET OF Seq-annot`, each a value of the generic reader.
     pub annot: Option<Vec<Value>>,
+}
+
+/// The PSSM's `query Seq-entry`: its `seq` variant, the Bioseq that the search reads, or its `set`
+/// variant, a Bioseq-set as the generic reader read it, which NCBI's object manager takes with its
+/// annotations (`pssm_search::annot_index::index_entry`) and NCBI's application then stops at
+/// (`CSeq_entry::GetSeq()`, `pssm_search::in_pssm::psi_search_and_object`).
+// NCBI reference (598d8ae6): c++/src/objects/seqset/seqset.asn:63-66
+// ```asn
+// Seq-entry ::= CHOICE {
+//         seq Bioseq ,
+//         set Bioseq-set }
+// ```
+#[derive(Debug, Clone, PartialEq)]
+pub enum SeqEntry {
+    Seq(PssmQuery),
+    Set(Value),
+}
+
+impl SeqEntry {
+    /// The Bioseq of the `seq` variant.
+    pub fn seq(&self) -> Option<&PssmQuery> {
+        match self {
+            SeqEntry::Seq(query) => Some(query),
+            SeqEntry::Set(_) => None,
+        }
+    }
+
+    /// The Bioseq of the `seq` variant, moved out.
+    pub fn into_seq(self) -> Option<PssmQuery> {
+        match self {
+            SeqEntry::Seq(query) => Some(query),
+            SeqEntry::Set(_) => None,
+        }
+    }
+
+    /// The Bioseq of the `seq` variant, to change.
+    pub fn seq_mut(&mut self) -> Option<&mut PssmQuery> {
+        match self {
+            SeqEntry::Seq(query) => Some(query),
+            SeqEntry::Set(_) => None,
+        }
+    }
 }
 
 /// One `Seqdesc` of the query: a `title`, or another variant as the generic reader read it (the
@@ -248,7 +290,7 @@ pub const SEQ_INST_MOL: [(&str, i32); 6] = [
     ("other", 255),
 ];
 
-/// The protein `Seq-data` variants that the reader types; it refuses the others.
+/// The protein `Seq-data` variants that the reader types, and the others as it read them.
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:346-358
 // ```asn
 // Seq-data ::= CHOICE {              -- sequence representations
@@ -261,7 +303,7 @@ pub const SEQ_INST_MOL: [(&str, i32); 6] = [
 //     gap Seq-gap                    -- gap types
 // }
 // ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SeqData {
     /// `iupacaa` (`IUPACaa ::= StringStore`).
     Iupacaa(Vec<u8>),
@@ -269,6 +311,9 @@ pub enum SeqData {
     Ncbieaa(Vec<u8>),
     /// `ncbistdaa` (`NCBIstdaa ::= OCTET STRING`).
     Ncbistdaa(Vec<u8>),
+    /// Another variant, the `Seq-data` CHOICE value of the generic reader: NCBI's object manager
+    /// does not read it, LOSAT's search refuses it (`in_pssm::psi_search_and_object`).
+    Other(Value),
 }
 
 /// `PssmIntermediateData`.
@@ -381,10 +426,21 @@ impl PssmWithParameters {
     /// and of the search strategy's request, which line RG item D3-2 lifts): `"molinfo"` for a
     /// `molinfo` descriptor of the query and `"Seqdesc"` for another descriptor other than a
     /// title, then `fuzz`, `topology`, `strand`, `ext`, `hist` of its `Seq-inst`, `annot`,
-    /// `constraints` and `annotatedSites`, in the order of the document.
+    /// `constraints` and `annotatedSites`, in the order of the document; first `"set"` for a query
+    /// Seq-entry set and `"seq-data"` for Seq-data that the reader does not type (a run never
+    /// reaches the writer with either: `in_pssm::psi_search_and_object`).
     pub fn unwritten_members(&self) -> Vec<&'static str> {
         let mut names = Vec::new();
-        if let Some(query) = &self.pssm.query {
+        match self.pssm.query.as_ref() {
+            Some(SeqEntry::Set(_)) => names.push("set"),
+            Some(SeqEntry::Seq(query))
+                if matches!(query.inst.seq_data, Some(SeqData::Other(_))) =>
+            {
+                names.push("seq-data")
+            }
+            _ => {}
+        }
+        if let Some(query) = self.pssm.query.as_ref().and_then(SeqEntry::seq) {
             for descriptor in query.descr.iter().flatten() {
                 match descriptor.variant_name() {
                     "title" => {}
@@ -550,6 +606,12 @@ fn write_pssm<E: Encoder>(enc: &mut E, pssm: &Pssm, karlin: Option<FinalKarlin>)
         enc.end_member();
     }
     if let Some(query) = &pssm.query {
+        // A set, or a query whose Seq-data the reader does not type, never reaches the writer: NCBI
+        // stops the run first (`in_pssm::psi_search_and_object`), and `unwritten_members` names
+        // both.
+        let SeqEntry::Seq(query) = query else {
+            unreachable!("a query Seq-entry set is never written")
+        };
         enc.member("query", 6);
         enc.variant("Seq-entry", "seq", 0);
         write_query(enc, query);
@@ -654,6 +716,9 @@ fn write_query<E: Encoder>(enc: &mut E, query: &PssmQuery) {
                 enc.begin_named("NCBIstdaa");
                 enc.octets(codes);
                 enc.end_named();
+            }
+            SeqData::Other(_) => {
+                unreachable!("Seq-data that the reader does not type is never written")
             }
         }
         enc.end_variant();

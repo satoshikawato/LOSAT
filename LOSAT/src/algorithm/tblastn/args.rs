@@ -816,35 +816,6 @@ impl TblastnArgs {
             psi_tblastn: psi,
             x_dropoff: self.xdrop_ungap,
         })?;
-        // The gapped X-drops that NCBI's kernels cannot size are refused before the search
-        // (`core::x_drop::check_gapped_x_dropoffs`), at the search's gapped Lambda: the matrix's,
-        // or a PSSM query's `kbp_gap_psi` (`PsiSearch::gapped_karlin`, whose Lambda NCBI's X-drops
-        // read, blast_parameters.c:455-458).
-        // (A name that LOSAT has no matrix for is refused when the search starts.)
-        let matrix = matrix_name.parse::<ScoringMatrix>();
-        if let (false, Ok(matrix)) = (self.ungapped, matrix) {
-            let gapped = crate::stats::lookup_protein_params(&crate::config::ProteinScoringSpec {
-                matrix,
-                gap_open,
-                gap_extend,
-            });
-            // The final X-drop reaches the unscaled `ALIGN_EX` only without the
-            // composition-based redo: mode 0, or IDENTITY's reset (`search_settings`).
-            crate::core::x_drop::check_gapped_x_dropoffs(
-                "TBLASTN",
-                (xdrop_gap, xdrop_gap_final),
-                crate::core::x_drop::gapped_x_dropoffs(
-                    xdrop_gap,
-                    xdrop_gap_final,
-                    pssm.as_deref()
-                        .map_or(gapped.lambda, |psi| psi.gapped_karlin(&gapped).lambda),
-                ),
-                (gap_open, gap_extend),
-                composition_mode
-                    == crate::blastinput::app::CompositionMode::NoCompositionBasedStats
-                    || matrix_name.eq_ignore_ascii_case("identity"),
-            )?;
-        }
         Ok(ResolvedTblastnArgs {
             task: self.task.clone(),
             evalue,
@@ -891,6 +862,35 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
     // query batch (`check_identity_compressed_lookup_of`).
     if !args.gapped {
         anyhow::bail!("{}", crate::cli::run_refusal("TBLASTN", "ungapped"));
+    }
+    // The gapped X-drops that NCBI's kernels cannot size are refused where the search starts
+    // (`core::x_drop::check_gapped_x_dropoffs`), at the search's gapped Lambda: the matrix's, or a
+    // PSSM query's `kbp_gap_psi` (`PsiSearch::gapped_karlin`, whose Lambda NCBI's X-drops read,
+    // blast_parameters.c:455-458). A PSI-TBLASTN run that NCBI's object manager ends as its query
+    // joins the scope never gets here (NCBI BLAST+ 2.17.0 writes that stop with any -xdrop_gap,
+    // line RG D3-1 fix 4). (A name that LOSAT has no matrix for is refused below.)
+    if let Ok(matrix) = args.matrix_name.parse::<ScoringMatrix>() {
+        let gapped = crate::stats::lookup_protein_params(&crate::config::ProteinScoringSpec {
+            matrix,
+            gap_open: args.gap_open,
+            gap_extend: args.gap_extend,
+        });
+        // The final X-drop reaches the unscaled `ALIGN_EX` only without the composition-based
+        // redo: mode 0, or IDENTITY's reset (below).
+        crate::core::x_drop::check_gapped_x_dropoffs(
+            "TBLASTN",
+            (args.xdrop_gap, args.xdrop_gap_final),
+            crate::core::x_drop::gapped_x_dropoffs(
+                args.xdrop_gap,
+                args.xdrop_gap_final,
+                args.pssm
+                    .as_deref()
+                    .map_or(gapped.lambda, |psi| psi.gapped_karlin(&gapped).lambda),
+            ),
+            (args.gap_open, args.gap_extend),
+            args.composition_mode == CompositionMode::NoCompositionBasedStats
+                || args.matrix_name.eq_ignore_ascii_case("identity"),
+        )?;
     }
     // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:774-815 (uneven gap
     // linking of the HSPs, `longest_intron`)
@@ -1637,24 +1637,25 @@ mod tests {
         }
         // 4.2e8 bits are 1.09e9 raw at BLOSUM62 11/1's Lambda, past the kernels' 2^30 - 103: the
         // preliminary X-drop at every mode, the final one only without the redo (mode 0, or
-        // IDENTITY's reset).
+        // IDENTITY's reset). LOSAT refuses them where the search starts (`search_settings`), which
+        // a PSSM run that NCBI's object manager ends never reaches.
         for extra in [
             &["-xdrop_gap", "4.2e8"][..],
             &["-xdrop_gap_final", "4.2e8", "-comp_based_stats", "0"],
         ] {
-            let error = parse(extra).unwrap().resolve().unwrap_err();
+            let resolved = parse(extra).unwrap().resolve().unwrap();
+            let error = search_settings(&resolved).map(|_| ()).unwrap_err();
             assert!(
                 format!("{error:#}").starts_with(&format!("an {} of 420000000.0 bits", extra[0])),
                 "{extra:?}: {error:#}"
             );
         }
         for cbs in ["1", "2", "3"] {
-            assert!(
-                parse(&["-xdrop_gap_final", "4.2e8", "-comp_based_stats", cbs])
-                    .unwrap()
-                    .resolve()
-                    .is_ok()
-            );
+            let resolved = parse(&["-xdrop_gap_final", "4.2e8", "-comp_based_stats", cbs])
+                .unwrap()
+                .resolve()
+                .unwrap();
+            assert!(search_settings(&resolved).is_ok());
         }
     }
 }

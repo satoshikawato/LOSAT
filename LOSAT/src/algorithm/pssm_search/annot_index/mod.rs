@@ -1,7 +1,8 @@
 //! The annotations of a PSSM's query as NCBI's object manager takes them when psiblast and
-//! tblastn add the PSSM's Bioseq to their scope (line RG D3-1, `om/SPEC.md`): the Seq-tables'
-//! column checks when each annotation is added (phase C, `CSeqTableInfo`), then the index of every
-//! annotation in order (phase I, `CSeq_annot_Info::x_InitAnnotKeys`), with NCBI's messages, its
+//! tblastn add the PSSM's query Seq-entry to their scope (line RG D3-1, `om/SPEC.md`; a Bioseq or a
+//! Bioseq-set, `entry`): the Seq-tables' column checks when each annotation is added (phase C,
+//! `CSeqTableInfo`), the attach of the entry's Bioseq-set and Bioseq ids (`entry::Tse::attach`),
+//! then the index of every annotation (phase I, `CSeq_annot_Info::x_InitAnnotKeys`), with NCBI's messages, its
 //! exceptions, and the failed diagnostic stream after its "Failed to parse location of" message
 //! (`ncbi_exception::main_diag_failbit`). What NCBI does not do the same way on every run (a
 //! message with a memory address, a crash, BitMagic's decoding, a signed overflow, the order of
@@ -23,6 +24,7 @@
 //! ```
 
 mod align;
+mod entry;
 mod range;
 mod table;
 mod view;
@@ -32,8 +34,7 @@ use view::V;
 
 use crate::ncbi_exception::{post_line_in, NcbiException, Severity};
 use crate::report::diag_log::Posts;
-use crate::report::serial::asn_types::{table::named, Value};
-use crate::seqid::ParsedSeqId;
+use crate::report::serial::pssm::SeqEntry;
 
 /// What NCBI's object manager made of the query's annotations: its messages in order, each one
 /// post of its severity (standard error shows their lines; the BLAST archive saves each as one
@@ -52,6 +53,23 @@ pub(crate) struct AnnotOutcome {
 pub(crate) struct Abort {
     pub(crate) exit: i32,
     pub(crate) message: String,
+}
+
+impl Abort {
+    /// The end of the run by NCBI's error `error` (its `CATCH_ALL` report), `muted` when the
+    /// object manager failed the diagnostic stream: the `LOG_POST` then writes its line feed alone
+    /// (`cli::catch_all_text`, which the run applies once the stream is failed; the text kept is
+    /// that line feed).
+    pub(crate) fn of(error: crate::cli::NativeError, muted: bool) -> Abort {
+        Abort {
+            exit: error.exit,
+            message: if muted {
+                "\n".to_string()
+            } else {
+                error.message
+            },
+        }
+    }
 }
 
 /// What LOSAT refuses: an annotation that NCBI's object manager does not index the same way on
@@ -84,6 +102,12 @@ pub(crate) enum Refusal {
     TableRows,
     /// A Std-seg `dim` above `align::STD_DIM_LIMIT`.
     StdDim,
+    /// Two different Seq-ids of the query's entry that NCBI's scope may take as one (LOSAT does not
+    /// make NCBI's handles of every Seq-id kind: `entry::Tse::attach`).
+    IdsMaybeOne,
+    /// A Seq-id twice in the query's entry of a search whose scope holds other sequences first
+    /// (`-subject`): NCBI's message names the Seq-ids as its scope first held them.
+    DuplicateIdInScope,
 }
 
 impl Refusal {
@@ -103,6 +127,8 @@ impl Refusal {
             Refusal::IdOrder => "a PSSM query whose annot has a Seq-table row location whose Seq-ids get different messages and have no different gi, accession or general id numbers (NCBI's object manager writes them in the order of memory addresses)",
             Refusal::TableRows => "a PSSM query whose annot has a feature Seq-table of more than 10000000 rows (NCBI's object manager runs out of memory depending on the machine)",
             Refusal::StdDim => "a PSSM query whose annot has a Std-seg dim above 1000000 (NCBI's object manager allocates its rows depending on the machine's memory)",
+            Refusal::IdsMaybeOne => "a PSSM query entry with two different Seq-ids that NCBI's object manager may take as one Bioseq id (its duplicate Bioseq id exception)",
+            Refusal::DuplicateIdInScope => "a PSSM query entry with a Seq-id twice in a search of -subject records (NCBI's duplicate Bioseq id exception names the Seq-ids as its scope first held them)",
         }
     }
 }
@@ -157,26 +183,25 @@ pub(super) struct Indexer<'p> {
     giim: GiimTree,
 }
 
-/// The object manager's index of the annotations `annots` (`Seq-annot` values) of the query of a
-/// PSSM read by `program` (`psiblast`, `tblastn`: the diagnostic prefix), whose Seq-ids are
-/// `query_ids`, or LOSAT's refusal.
-pub(crate) fn index_annots(
+/// The object manager's step as the query's Seq-entry `entry` of a PSSM read by `program`
+/// (`psiblast`, `tblastn`: the diagnostic prefix) joins the scope (`entry::Tse`: phase C, the
+/// attach of its Bioseq-sets' and Bioseqs' ids, phase I), or LOSAT's refusal. `ids_known`: no other
+/// sequence is in NCBI's scope before it (a search of `-db`), so the attach's messages name the
+/// entry's own Seq-ids.
+pub(crate) fn index_entry(
     program: &str,
-    annots: &[Value],
-    query_ids: &[ParsedSeqId],
+    entry: &SeqEntry,
+    ids_known: bool,
 ) -> Result<AnnotOutcome, Refusal> {
+    let tse = entry::Tse::of(entry);
     let mut ix = Indexer {
         program,
         posts: Posts::new(),
         muted: false,
         caches: table::Caches::default(),
-        giim: GiimTree::new(query_ids),
+        giim: GiimTree::new(&tse.ids()),
     };
-    let annots: Vec<V<'_>> = annots
-        .iter()
-        .map(|annot| V::new(named::SEQ_ANNOT, annot))
-        .collect();
-    let abort = match ix.run(&annots) {
+    let abort = match ix.run(&tse, ids_known) {
         Ok(()) => None,
         Err(Stop::Refuse(refusal)) => return Err(refusal),
         Err(Stop::Exception(e)) => Some(crate::cli::NativeError::exception(&e)),
@@ -201,19 +226,29 @@ pub(crate) fn index_annots(
     // ```
     // After the stream failed, the `LOG_POST` writes its line feed alone (`cli::catch_all_text`,
     // which the run applies once the stream is failed; the text kept here is that line feed).
-    let abort = abort.map(|error| Abort {
-        exit: error.exit,
-        message: if ix.muted {
-            "\n".to_string()
-        } else {
-            error.message
-        },
-    });
+    let abort = abort.map(|error| Abort::of(error, ix.muted));
     Ok(AnnotOutcome {
         posts: ix.posts,
         muted: ix.muted,
         abort,
     })
+}
+
+/// `index_entry` of a query Bioseq with the Seq-ids `query_ids` and the annotations `annots`.
+#[cfg(test)]
+pub(crate) fn index_annots(
+    program: &str,
+    annots: &[crate::report::serial::asn_types::Value],
+    query_ids: &[crate::seqid::ParsedSeqId],
+) -> Result<AnnotOutcome, Refusal> {
+    use crate::report::serial::pssm::{PssmQuery, SeqInst};
+    let query = PssmQuery {
+        ids: query_ids.to_vec(),
+        descr: None,
+        inst: SeqInst::new(("raw", 2), ("aa", 3), None, None),
+        annot: Some(annots.to_vec()),
+    };
+    index_entry(program, &SeqEntry::Seq(query), true)
 }
 
 impl Indexer<'_> {
@@ -256,18 +291,20 @@ impl Indexer<'_> {
     //         break;
     //     }
     // ```
-    fn run(&mut self, annots: &[V<'_>]) -> Result<(), Stop> {
+    fn run(&mut self, tse: &entry::Tse<'_>, ids_known: bool) -> Result<(), Stop> {
+        let annots = &tse.annots;
         let data: Vec<Option<(&'static str, V<'_>)>> = annots
             .iter()
             .map(|annot| annot.get("data").map(V::choice))
             .collect();
-        let mut tables = Vec::with_capacity(annots.len());
-        for kind in &data {
-            tables.push(match kind {
-                Some(("seq-table", table)) => Some(self.table_info(*table)?),
-                _ => None,
-            });
+        let mut tables: Vec<Option<table::TableInfo<'_>>> =
+            std::iter::repeat_with(|| None).take(annots.len()).collect();
+        for &index in &tse.construction {
+            if let Some(("seq-table", table)) = data[index] {
+                tables[index] = Some(self.table_info(table)?);
+            }
         }
+        tse.attach(ids_known)?;
         for ((annot, kind), table) in annots.iter().zip(&data).zip(&tables) {
             match kind {
                 Some(("ftable", feats)) => {

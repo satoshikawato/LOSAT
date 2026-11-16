@@ -5734,17 +5734,26 @@ fn open_search_database(
             if resolved.rps_search.is_some() {
                 rps_hooks::check_alias_keys(&database, args.app.name())?;
             }
-            crate::algorithm::common::database::note_archive_database_filter(
-                args.archive.as_ref(),
-                args.strategy.as_ref(),
-                &args.db_filter,
-                database.list_taxids(),
-                &database.statistics(),
-                false,
-                args.searchsp.is_some_and(|space| space > 0),
-                args.dbsize.is_some_and(|size| size > 0),
-                args.app.name(),
-            )?;
+            // The requests of the archive and of the search strategy, which a `-in_pssm` run that
+            // the object manager ends as its query joins the scope never writes
+            // (`PsiSearch::joins_scope`; NCBI saves the strategy in `DoIterations`, after it).
+            if resolved
+                .psi_search
+                .as_deref()
+                .is_none_or(crate::algorithm::pssm_search::PsiSearch::joins_scope)
+            {
+                crate::algorithm::common::database::note_archive_database_filter(
+                    args.archive.as_ref(),
+                    args.strategy.as_ref(),
+                    &args.db_filter,
+                    database.list_taxids(),
+                    &database.statistics(),
+                    false,
+                    args.searchsp.is_some_and(|space| space > 0),
+                    args.dbsize.is_some_and(|size| size > 0),
+                    args.app.name(),
+                )?;
+            }
             // rpsblast: what the application and each batch's RPS set-up set in the options
             // handle, which the search strategy's requests hold.
             if let (Some(rps), Some(strategy)) =
@@ -6128,10 +6137,11 @@ fn search_pssm_query(
 ) -> Result<()> {
     let program = resolved.app.name();
     psi.refuse_request_members(program)?;
-    if psi
-        .stop_before_search(resolved.strategy.is_some(), database.is_some())
-        .is_none()
-    {
+    // The PSSM files of round 1 (written back from the input PSSM, or the engine's), which a run
+    // that never searches does not write (NCBI BLAST+ 2.17.0 leaves `-out_pssm` and
+    // `-out_ascii_pssm` alone when the object manager ends the run: line RG D3-1 fix 3 S1, fix 4).
+    let searches = psi.searches(resolved.strategy.is_some(), database.is_some());
+    if searches {
         if let Some(input) = resolved
             .psi_rounds
             .as_deref()
@@ -6177,6 +6187,7 @@ fn search_pssm_query(
         .psi_rounds
         .as_deref()
         .and_then(crate::algorithm::psiblast::rounds::PsiRoundPlan::file_request)
+        .filter(|_| searches)
     {
         crate::algorithm::psiblast::pssm::check_pssm_files(
             request,
@@ -7006,6 +7017,9 @@ fn psiblast_stop_at_pssm_query(
             batches.searched_done = 0;
             batches.stop = Some((warnings, abort));
             batches.stop_batch = None;
+            // The query's ids never join the scope (`PsiSearch::joins_scope`): no refusal of
+            // another record with one of them (NCBI BLAST+ 2.17.0, line RG D3-1 fix 4 d01-d06).
+            batches.query_refusal = None;
             return batches;
         }
     }
@@ -7164,8 +7178,6 @@ fn search(
             )?;
         }
     }
-    // LOSAT's limits come where NCBI starts the search, after its checks.
-    validate_requested_blastp_support(&args)?;
     // The query range applies to every query record as NCBI's batch reader reads it
     // (`seq_range::cut_queries`): a record is searched cut, and one whose interval starts
     // just past its end is a query without data.
@@ -7241,16 +7253,23 @@ fn search(
             ),
         ),
     };
+    // psiblast `-in_pssm`: the object manager's stop as the query joins the scope, NCBI's check of
+    // the PSSM, or the search strategy's request without a database, stops the run at its query
+    // (`psiblast_stop_at_pssm_query`); a query that never joins NCBI's scope meets no other record
+    // there.
+    let mut batches = psiblast_stop_at_pssm_query(&args, database, batches);
     // LOSAT's refusal of two queries of one scope with one id comes before any report.
     if let Some(refusal) = batches.query_refusal.take() {
         return Err(refusal);
     }
-    // psiblast `-in_pssm`: NCBI's check of the PSSM, or the search strategy's request without a
-    // database, stops the run at its query (`psiblast_stop_at_pssm_query`).
-    let batches = psiblast_stop_at_pssm_query(&args, database, batches);
-    // NCBI crashes with IDENTITY's compressed lookup table once it searches a query batch: a run
-    // that stops at its first batch (`batches.starts` empty) gives NCBI's error.
+    // LOSAT's limits come where NCBI starts the search, after its checks: a run that stops at its
+    // first batch (`batches.starts` empty: a reader's error, NCBI's check of a PSSM, the object
+    // manager's stop as a PSSM's query joins the scope) never searches, and gives NCBI's error
+    // (NCBI BLAST+ 2.17.0 with `-evalue 1e999`, `-use_sw_tback`, `-gapopen 9 -gapextend 2` and
+    // `-matrix BLOSUM45`: line RG D3-1 fix 4 `r4/probe`). NCBI crashes with IDENTITY's compressed
+    // lookup table once it searches a query batch, so that refusal follows the same rule.
     if !batches.starts.is_empty() {
+        validate_requested_blastp_support(&args)?;
         check_identity_compressed_lookup_of(&args)?;
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513-523 (quoted below)

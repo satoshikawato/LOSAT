@@ -225,7 +225,9 @@
 //! state of a fresh cell after its first hit. Flag 1: the last right extension of d, from (q0, s0),
 //! stopped at the end of q0's context at the latest, at most a + G, so s_last_off - s0 <= a + G -
 //! q0, while s' - s0 = q' - q0 + m P >= a - q0 + P: s' >= s_last_off + window, the hit is not masked,
-//! it resets the cell to the fresh state. So the first hit of d' leaves its cell as on an unmasked
+//! it resets the cell to the fresh state. (A walk past a NULLB stops later, but in a batch of one
+//! group still at the batch's end, at most a + G; with several groups such a pass makes the
+//! subject's units run again on one unmasked table, item 3.) So the first hit of d' leaves its cell as on an unmasked
 //! table, and by induction every hit takes the branch it takes there. The scan in slices cannot use
 //! such a table: a slice's pass over the whole chunk brings hits of d' (low q') before the later
 //! slices' hits of d. The masked loops are their own instances (`scan_unit_masked`,
@@ -4325,7 +4327,8 @@ mod tests {
     // frame 2 alone extends P/P, whose left walk crosses the NULLB into R and scores higher there:
     // a refusal, and a P/P HSP, that the reference does not make. `run_subject_units` runs the
     // chunk's units again in group order on one table (`x_units_in_order`): the reference's list
-    // and no refusal, on 1 and 4 threads, with unmasked and masked unit tables.
+    // and no refusal, on 1 and 4 threads, with unmasked and masked unit tables and with frame 1's
+    // group cut into slices (LOSAT_X_TBXQSLICE), and the re-run alone into today's full lists.
     #[test]
     fn a_walk_past_a_nullb_into_another_group_is_seen_by_its_units() {
         let mut rng = Rng(0x5eed_02c3);
@@ -4367,13 +4370,19 @@ mod tests {
         let mut expect: Vec<UngappedHit> =
             get_ungapped_hsp_list(reference[0].clone(), &contexts, &s_frames);
         sort_ungapped_hits_by_score_ncbi(&mut expect);
-        for masked in [false, true] {
+        for (masked, sliced) in [(false, false), (true, false), (false, true)] {
+            // Frame 1's group in seven slices of 1,000 offsets, frame 2's in one.
+            let parts: Vec<Vec<i32>> = vec![(0..7).map(|i| i * 1_000).collect(), vec![p_start]];
             let pp = XPairPar {
-                groups: build_groups(&lookup, &contexts, X_MAX_GROUPS),
+                groups: if sliced {
+                    Vec::new()
+                } else {
+                    build_groups(&lookup, &contexts, X_MAX_GROUPS)
+                },
                 stub: false,
                 sent: false,
                 sc: Blosum62Score,
-                sliced: None,
+                sliced: sliced.then(|| x_tbx_qslice::build_sliced(&lookup, &parts)),
                 mask_rule: masked.then_some(XMaskRule {
                     max_cells: usize::MAX,
                     ratio: 1,
@@ -4385,8 +4394,8 @@ mod tests {
                     Vec::new()
                 },
             };
-            assert_eq!(pp.groups.len(), 2);
-            assert!(pp.groups.iter().all(|g| g.lookup.longest_chain > 0));
+            assert_eq!(pp.x_group_count(), 2);
+            assert!((0..2).all(|g| pp.x_group_has_entries(g)));
             let alone = crate::algorithm::tblastx::subjects::XReadFailure::new();
             let failure = crate::algorithm::tblastx::subjects::XReadFailure::new();
             let inp = XSubject {
@@ -4403,17 +4412,47 @@ mod tests {
                 failure: &alone,
                 passed: None,
             };
+            let chunk = SubjectChunk {
+                offset: 0,
+                length: subject.len(),
+                overlap: 0,
+            };
+            let units: Vec<XUnit> = (0..2)
+                .map(|g| XUnit {
+                    f: 0,
+                    k: 0,
+                    chunk,
+                    g,
+                })
+                .collect();
             // Each unit alone: the refusal and the P/P HSP the reference does not make.
-            let units = unit_lists(&pp, &inp);
-            assert!(
-                alone.take().is_some(),
-                "masked {masked}: the units alone refuse"
-            );
-            assert_ne!(units, reference, "masked {masked}");
+            if !sliced {
+                assert_ne!(unit_lists(&pp, &inp), reference, "masked {masked}");
+                assert!(
+                    alone.take().is_some(),
+                    "masked {masked}: the units alone refuse"
+                );
+            }
             let inp = XSubject {
                 failure: &failure,
                 ..inp
             };
+            // The re-run alone, into today's lists: the reference's sorted list.
+            let mut again = XUnitOutputs::Full(vec![Vec::new(), Vec::new()]);
+            pp.x_units_in_order(&units, &inp, &mut again);
+            let XUnitOutputs::Full(lists) = again else {
+                unreachable!("the form given")
+            };
+            let mut joined: Vec<InitHSP> = lists.into_iter().flatten().collect();
+            sort_init_hsps_by_score_ncbi(&mut joined);
+            assert_eq!(
+                joined, reference[0],
+                "masked {masked} sliced {sliced}: the re-run"
+            );
+            assert!(
+                failure.take().is_none(),
+                "sliced {sliced}: the re-run refuses nothing"
+            );
             for threads in [1, 4] {
                 let merged =
                     crate::utils::threading::with_search_pool(threads, "tblastx", |pool| {
@@ -4425,15 +4464,18 @@ mod tests {
                     .expect("search pool");
                 assert!(
                     failure.take().is_none(),
-                    "masked {masked}, {threads} threads: no refusal"
+                    "masked {masked} sliced {sliced}, {threads} threads: no refusal"
                 );
                 assert_eq!(
                     merged.len(),
                     expect.len(),
-                    "masked {masked}, {threads} threads"
+                    "masked {masked} sliced {sliced}, {threads} threads"
                 );
                 for (got, want) in merged.iter().zip(&expect) {
-                    assert!(x_same_hit(got, want), "masked {masked}, {threads} threads");
+                    assert!(
+                        x_same_hit(got, want),
+                        "masked {masked} sliced {sliced}, {threads} threads"
+                    );
                 }
             }
         }

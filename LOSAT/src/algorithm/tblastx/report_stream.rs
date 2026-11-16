@@ -53,10 +53,12 @@
 //!   without a query or without letters, an unknown matrix, the average subject length, a
 //!   database that cannot be read, a header file that cannot be read) comes after the reports of
 //!   the batches before, without the epilog, in both: here they were written when the loop took
-//!   them, so the error paths write only what follows them (`BatchReports::queries_written`). An
-//!   error that LOSAT raises where NCBI would not stop (LOSAT's refusals) is written without the
-//!   reports of the batches before; so the stream acts only where no such refusal can come after
-//!   the first batch (`check`): a query batch whose concatenated query is too long for the diag
+//!   them, so the error paths write only what follows them (`BatchReports::queries_written`). So
+//!   do LOSAT's refusals of what a batch's search meets (`ErrorAfterBatchReports`: an ungapped
+//!   extension that scores higher past the end of its query frame, `extension::query_batch`, and a
+//!   one-hit merge of lengths that add up to 0). Any other error that LOSAT raises where NCBI would
+//!   not stop (LOSAT's refusals) is written without the reports of the batches before; so the
+//!   stream acts only where no such refusal can come after the first batch (`check`): a query batch whose concatenated query is too long for the diag
 //!   table (`check_diag_table_window`), a search space that overflows (`SearchSpaceOverflow`),
 //!   a `-db` whose sequences could not be read before the search (some of those read errors are
 //!   LOSAT's refusals, raised by the first batch with a valid context, `Off::Unreadable`),

@@ -46,6 +46,25 @@ fn manifest_path(relative: &str) -> PathBuf {
 /// needs that file name once a search has more than one thread; it selects nothing) and none of the
 /// other variables that change a search (the list of `tests/blastn_window_masker.rs`).
 fn tblastx(case: &str, args: &[&str], outfmt: &str, threads: u32) -> Output {
+    tblastx_on(
+        &manifest_path(&format!("tests/fasta/outfmt0/x2c_{case}_q.fna")),
+        &manifest_path(&format!("tests/fasta/outfmt0/x2c_{case}_s.fna")),
+        case,
+        args,
+        outfmt,
+        threads,
+    )
+}
+
+/// `tblastx` on the files `query` and `subject` (`tag` names its worker log).
+fn tblastx_on(
+    query: &Path,
+    subject: &Path,
+    tag: &str,
+    args: &[&str],
+    outfmt: &str,
+    threads: u32,
+) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
@@ -72,7 +91,7 @@ fn tblastx(case: &str, args: &[&str], outfmt: &str, threads: u32) -> Output {
         }
     }
     let log = std::env::temp_dir().join(format!(
-        "losat_tblastx_query_batch_{}_{case}_{threads}.log",
+        "losat_tblastx_query_batch_{}_{tag}_{threads}.log",
         std::process::id()
     ));
     let output = command
@@ -80,13 +99,9 @@ fn tblastx(case: &str, args: &[&str], outfmt: &str, threads: u32) -> Output {
         .env("LOSAT_BLASTX_WORKER_LOG", &log)
         .arg("tblastx")
         .arg("-query")
-        .arg(manifest_path(&format!(
-            "tests/fasta/outfmt0/x2c_{case}_q.fna"
-        )))
+        .arg(query)
         .arg("-subject")
-        .arg(manifest_path(&format!(
-            "tests/fasta/outfmt0/x2c_{case}_s.fna"
-        )))
+        .arg(subject)
         .args(args)
         .args(["-outfmt", outfmt, "-num_threads", &threads.to_string()])
         .output()
@@ -183,7 +198,7 @@ fn a_one_hit_extension_that_gains_in_the_previous_frame_is_refused() {
 /// different context groups; the units run again in group order on one table
 /// (`x_pair_par::x_units_in_order`) and give NCBI BLAST+ 2.17.0's rows, as at 1 thread.
 #[test]
-fn a_right_walk_past_the_nullb_covers_the_next_frames_hits_at_every_thread_count() {
+fn a_right_walk_past_the_nullb_covers_the_next_frames_hits_at_1_and_16_threads() {
     let expected = std::fs::read(manifest_path(
         "tests/fixtures/outfmt0/x2c.tblastx.f48.6.out",
     ))
@@ -213,4 +228,69 @@ fn a_right_walk_past_the_nullb_covers_the_next_frames_hits_at_every_thread_count
             "threads {threads}: the rows differ from NCBI BLAST+ 2.17.0's"
         );
     }
+}
+
+/// Two query batches (`f48`'s query of 14,523 bases and `g48`'s of 28,803, each more than a
+/// batch of 10,002 bases) against both subjects: the first batch's search reports (`f48`'s right
+/// walk passes the NULLB without scoring higher), the second's is refused (`g48`). The Owner's
+/// decision of 2026-11-16 (line RG, Q-X2c): the results of the query batches before are written,
+/// then the error. The default tabular report is written batch by batch and the one with a field
+/// list after the search (`report_stream`); both write the first batch's rows.
+#[test]
+fn the_results_of_the_query_batches_before_a_refusal_are_written() {
+    let dir = std::env::temp_dir().join(format!("losat_x2c_two_batches_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temporary directory");
+    let join = |name: &str, parts: [&str; 2]| {
+        let path = dir.join(name);
+        let mut text = Vec::new();
+        for part in parts {
+            text.extend(
+                std::fs::read(manifest_path(&format!("tests/fasta/outfmt0/{part}")))
+                    .expect("x2c input"),
+            );
+        }
+        std::fs::write(&path, text).expect("joined input");
+        path
+    };
+    let query = join("q.fna", ["x2c_f48_q.fna", "x2c_g48_q.fna"]);
+    let subject = join("s.fna", ["x2c_f48_s.fna", "x2c_g48_s.fna"]);
+    let args = [
+        "-seg",
+        "no",
+        "-threshold",
+        "999",
+        "-xdrop_ungap",
+        "20000",
+        "-evalue",
+        "1e-20",
+    ];
+    let mut reports = Vec::new();
+    for outfmt in ["6", "6 std"] {
+        for threads in [1, 4] {
+            let output = tblastx_on(&query, &subject, "two", &args, outfmt, threads);
+            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+            assert_eq!(
+                output.status.code(),
+                Some(1),
+                "{outfmt} {threads}: {stderr}"
+            );
+            assert!(
+                stderr.starts_with(REFUSAL)
+                    && stderr.ends_with("is not supported by LOSAT's TBLASTX\n")
+                    && stderr.lines().count() == 1,
+                "{outfmt} {threads}: {stderr}"
+            );
+            let rows = String::from_utf8_lossy(&output.stdout).into_owned();
+            assert!(
+                !rows.is_empty() && rows.lines().all(|row| row.starts_with("x2cfq\t")),
+                "{outfmt} {threads}: the first batch's rows only"
+            );
+            reports.push(rows);
+        }
+    }
+    assert!(
+        reports.iter().all(|rows| *rows == reports[0]),
+        "the same rows in both formats and at 1 and 4 threads"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }

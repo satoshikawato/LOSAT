@@ -38,10 +38,20 @@
 //! for the later hits of that diagonal, aa_ungapped.c:593-597) moves past the NULLB: that is NCBI's
 //! output, which LOSAT reproduces (PD-LOSAT-NCBI-DEFECTS, rule 2). A walk that scores higher there
 //! moves the HSP's start into the previous context or its end into the next: NCBI keeps the HSP in
-//! the seed's context with offsets outside it (`s_AdjustInitialHSPOffsets`, whose
-//! `ASSERT(q_start >= 0)` is compiled out of release builds, blast_gapalign.c:2384-2392), and its
-//! later steps write query coordinates past the query or drop the alignment from every report.
-//! LOSAT refuses such a search (PD-LOSAT-NCBI-DEFECTS, rule 3: `refusal`).
+//! the seed's context with offsets outside it (a start before the context fails the assertion of
+//! `s_AdjustInitialHSPOffsets`, which is compiled out of release builds, blast_gapalign.c:2390-2391;
+//! an end past it is not tested), and its later steps write query coordinates past the query or
+//! drop the alignment from every report. LOSAT refuses such a search (PD-LOSAT-NCBI-DEFECTS, rule
+//! 3, the Owner's decision of 2026-11-16: `refusal`), after the reports of the query batches before.
+//!
+//! The one-hit extension starts its right walk one letter past a word whose running score never
+//! rises above 0 (aa_ungapped.c:1030-1031, 1073-1076), past the context's end for such a word at
+//! the end of its context; the walk then starts on the next context's first letter
+//! (`InBatch::right_past_end` with `q_at` one past the NULLB). Such a word scores below every
+//! `-threshold` and seeds only as an exact match (blast_aalookup.c:498-504), of a subject word of
+//! the same letters, and only `X` scores below 0 against itself; the seed stage's subject frames
+//! are translated from the subject's 2-bit bases (blast_engine.c:1403-1405, `subjects.rs`) and
+//! hold no `X`, so no such seed is found.
 
 use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::algorithm::tblastx::scoring::TbxScore;
@@ -290,7 +300,7 @@ impl<'a> QueryBatch<'a> {
         j + n
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2384-2392
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2383-2392
     // ```c
     // static NCBI_INLINE void
     // s_AdjustInitialHSPOffsets(BlastInitHSP* init_hsp, Int4 query_start)
@@ -299,13 +309,14 @@ impl<'a> QueryBatch<'a> {
     //     if (init_hsp->ungapped_data) {
     //         init_hsp->ungapped_data->q_start -= query_start;
     //     }
-    //     ASSERT(init_hsp->offsets.qs_offsets.q_off >= 0);
-    //     ASSERT(init_hsp->ungapped_data ? init_hsp->ungapped_data->q_start >= 0 : TRUE);
+    //     ASSERT(init_hsp->ungapped_data == NULL ||
+    //            init_hsp->ungapped_data->q_start >= 0);
     // }
     // ```
     // An HSP that a walk past a NULLB makes span two contexts keeps the seed's context with offsets
-    // outside it (the debug-only assertions above), and NCBI's later steps report query
-    // coordinates past the query or no alignment (PD-LOSAT-NCBI-DEFECTS, rule 3).
+    // outside it (a start before it fails the debug-only assertion above; an end past it is not
+    // tested), and NCBI's later steps report query coordinates past the query or no alignment
+    // (PD-LOSAT-NCBI-DEFECTS, rule 3, the Owner's decision of 2026-11-16).
     /// Refuses the search of this subject (and so the query batch's search).
     fn refuse(&self) {
         self.failure.fail(self.s_idx, refusal());
@@ -313,14 +324,18 @@ impl<'a> QueryBatch<'a> {
 }
 
 /// The error of a search that `QueryBatch` refuses: an ungapped extension that scores higher past
-/// the end of its query frame, in the frame next to it in the query batch.
+/// the end of its query frame, in the frame next to it in the query batch. It comes after the
+/// reports of the query batches before (`ErrorAfterBatchReports`; the Owner's decision of
+/// 2026-11-16 on line RG's Q-X2c).
 pub(crate) fn refusal() -> anyhow::Error {
-    anyhow::anyhow!(
-        "an ungapped extension that passes the end of a query frame into the frame next to it in \
-         the query batch and scores higher there (a raw -xdrop_ungap above 32,768, with BLOSUM62 \
-         about 15,000 bits or more; NCBI BLAST+ 2.17.0 then keeps an alignment of two frames with \
-         query coordinates outside the query's frame and writes them past the query or drops the \
-         alignment) is not supported by LOSAT's TBLASTX"
+    anyhow::Error::new(
+        crate::algorithm::tblastx::blast_engine::ErrorAfterBatchReports(anyhow::anyhow!(
+            "an ungapped extension that passes the end of a query frame into the frame next to it \
+             in the query batch and scores higher there (an -xdrop_ungap of a raw X-drop above \
+             32,768, with BLOSUM62 about 15,000 bits or more; NCBI BLAST+ 2.17.0 then keeps an \
+             alignment of two frames with query coordinates outside the query's frame and writes \
+             them past the query or drops the alignment) is not supported by LOSAT's TBLASTX"
+        )),
     )
 }
 

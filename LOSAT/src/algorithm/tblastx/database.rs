@@ -320,6 +320,18 @@ pub(crate) struct XmlTaxa {
 /// sequence with parsed Seq-ids.
 pub(crate) type DatabaseTitles = BTreeMap<u32, ReportedHeader>;
 
+/// The final HSPs `ordered` of a query batch (report order) without those of the sequences that
+/// NCBI makes no Seq-align of (`shared::SeqAligned`): after the cut of each query's hit list to
+/// the hit list size, before `read_titles`.
+pub(crate) fn drop_unaligned(database: &TblastxDatabase, ordered: &mut Vec<TblastxHsp>) {
+    // tblastx fetches every subject with HSPs with `check_oid_exclusion` (the ungapped
+    // re-evaluation of a nucleotide subject: `run_impl::search_query_batch`).
+    let Some(mut aligned) = shared::SeqAligned::of(&database.db, true) else {
+        return;
+    };
+    aligned.retain(ordered, |hsp| Some(hsp.hit.s_idx));
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:283-293
 // ```c++
 //     m_TbackSearch.Reset(new CBlastTracebackSearch(m_QueryFactory,
@@ -488,9 +500,43 @@ pub(crate) fn batch_prefetch(
     database: &TblastxDatabase,
     ordered: &[TblastxHsp],
     titles: &DatabaseTitles,
+    query: usize,
 ) -> Result<Vec<u8>> {
+    shared::batch_prefetch(
+        &database.db,
+        &database.taxdb,
+        prefetch_subjects(ordered, titles),
+        PROGRAM,
+        query,
+    )
+}
+
+/// The stop of NCBI's prefetch of the query batch whose reported hits are `ordered` and whose
+/// first query is `query`, for the XML2 and JSON formats, which write the taxonomy texts at each
+/// `Hit` (`shared::batch_prefetch_stop`).
+pub(crate) fn batch_prefetch_stop(
+    database: &TblastxDatabase,
+    ordered: &[TblastxHsp],
+    titles: &DatabaseTitles,
+    query: usize,
+) -> Result<()> {
+    shared::batch_prefetch_stop(
+        &database.db,
+        &database.taxdb,
+        prefetch_subjects(ordered, titles),
+        PROGRAM,
+        query,
+    )
+}
+
+/// The sequences that the prefetch of the query batch whose reported hits are `ordered` reads
+/// ([`batch_prefetch`]).
+fn prefetch_subjects<'s>(
+    ordered: &'s [TblastxHsp],
+    titles: &'s DatabaseTitles,
+) -> impl Iterator<Item = shared::PrefetchSubject<'s>> + 's {
     let mut previous = None;
-    let subjects = ordered.iter().map(|hsp| {
+    ordered.iter().map(move |hsp| {
         let ordinal = hsp.hit.s_idx;
         let parsed = match titles.get(&ordinal) {
             Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
@@ -504,8 +550,7 @@ pub(crate) fn batch_prefetch(
             parsed,
             flipped,
         }
-    });
-    shared::batch_prefetch(&database.db, &database.taxdb, subjects, PROGRAM)
+    })
 }
 
 /// The database sequences that the reports show, by rank (`reported_subjects`).

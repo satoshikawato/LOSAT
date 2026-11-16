@@ -36,11 +36,12 @@ run keeps its wheels for 7 days.
 lists them, from the engine's own table, and the type stubs list them by program.
 `Search.from_argv("blastn", ["-evalue", "1e-5"])` takes the words themselves. The command line's
 parser checks every option, so an option means, and fails, as it does there (`ArgumentError`).
-`pylosat.PROGRAMS` names the programs; `psiblast` is its first round, as on the command line.
+`pylosat.PROGRAMS` names the programs; `psiblast` runs its rounds (`num_iterations`) as on the command line.
 
-`-query`, `-subject`, `-db`, `-out` and `-outfmt` are not options here: the inputs and the formats
-are arguments of `run`. Nor are psiblast's `-out_pssm`, `-out_ascii_pssm`, `-save_pssm_after_last_round`
-and `-save_each_pssm`: the library writes no PSSM file; nor `-in_pssm`: the queries are records.
+`-query`, `-subject`, `-db`, `-in_pssm`, `-out` and `-outfmt` are not options here: the inputs and
+the formats are arguments of `run`. psiblast's `-out_pssm` and
+`-out_ascii_pssm` (with `-save_pssm_after_last_round` and `-save_each_pssm`) write the command line's PSSM
+files under their names; `-save_each_pssm` numbers them over the search, also over `batches`.
 
 ## Inputs
 
@@ -49,6 +50,11 @@ A `Sequences` is one FASTA input, and the search reads it with the command line'
 - `Sequences.from_fasta(path)`: a file, inflated when it is named `.gz`, `.bz2` or `.zst`.
 - `Sequences.from_text(text)`: FASTA text.
 - `Sequences.from_pairs([(title, sequence), ...])`: the FASTA file of those records.
+
+A PSSM takes the place of the query of psiblast and tblastn: `Pssm.from_file(path)` is
+`-in_pssm path` (psiblast's checkpoint file, as `out_pssm` writes it), read by the search as the
+command line reads it. The one query is the PSSM's sequence: `q_idx` 0, one entry of `query_stats`,
+one batch of `batches`.
 
 A BLAST database takes the place of the subject: `Database("core_nt")` is `-db core_nt`, found as
 the command line finds it (`BLASTDB`, `.ncbirc`), and the options of a database search (`taxids`,
@@ -70,6 +76,11 @@ first: `qaccver saccver pident length mismatch gapopen qstart qend sstart send e
 `hsps[i]` is an `Hsp` with the field names of LOSAT's Rust API (`bit_score`, `e_value`, `q_start`).
 `outcome.queries()` and `QueryHits.subjects()` group the rows by query and by subject. Everything
 that a search returns can be pickled, so a process pool can return it.
+
+psiblast's rounds of each query follow one another in the table, round 1 first: `hsp.round` (the `round` column)
+is the round that found the HSP, 1 in the other searches. `outcome.rounds[q]` holds the statistics of
+each round of query `q` and whether its rounds converged (`Search has CONVERGED!`), and
+`QueryHits.rounds()` gives each round's HSPs with its statistics.
 
 The numbers are the engine's, not rounded. Text to show comes from a report: `report.spans[hsp.index]`
 is the slice of `report.bytes` that holds the row or section of an HSP.

@@ -10,8 +10,10 @@ name: Release Readiness v0.2.0
 # Dispatch with the filled contract committed on R, on the branch whose head is R (a workflow_dispatch
 # workflow must also exist on the default branch `main` to be dispatchable):
 #   gh workflow run release-readiness-v020.yml --repo satoshikawato/LOSAT --ref release/0.2 -f candidate_sha=<R>
-# The build provenance names the dispatched ref and its head as the source, so job `quality` refuses a
-# run whose head is not R. The assembler refuses an unfilled contract and a candidate that changes a
+# Every job checks out the dispatched commit (GITHUB_SHA) and candidate_sha is only checked against it:
+# a run whose head is not R fails in each job before any build or test step (nothing here checks out an
+# input SHA, so a dispatch cannot run another commit's code), and the build provenance names the
+# dispatched ref and its head as the source. The assembler refuses an unfilled contract and a candidate that changes a
 # runtime input after the certified candidate C. Nothing here tags, releases, publishes to a registry,
 # code-signs or notarizes a binary, or uses a self-hosted runner; the integrated certification (set A)
 # runs locally per the plan.
@@ -64,7 +66,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-          ref: ${{ inputs.candidate_sha }}
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -78,13 +79,13 @@ jobs:
 
       - name: Verify exact candidate
         run: |
-          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
-          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
           # The attestations of job `handoff` name GITHUB_SHA as the source commit.
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
           if [[ "$GITHUB_SHA" != "$CANDIDATE_SHA" ]]; then
-            echo "::error::dispatch on the branch whose head is R (--ref release/0.2): $GITHUB_REF is at $GITHUB_SHA"
+            echo "::error::candidate_sha is checked, not checked out: dispatch on the branch whose head is the candidate ($CANDIDATE_SHA); $GITHUB_REF is at $GITHUB_SHA"
             exit 1
           fi
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
 
       # The contract must be filled and R must descend from the certified candidate C with no
       # runtime-input change; checked here first so that a bad candidate fails in seconds, not after
@@ -206,7 +207,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-          ref: ${{ inputs.candidate_sha }}
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -215,6 +215,10 @@ jobs:
       - name: Verify exact committed candidate SHA
         run: |
           [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          if [[ "$GITHUB_SHA" != "$CANDIDATE_SHA" ]]; then
+            echo "::error::candidate_sha is checked, not checked out: dispatch on the branch whose head is the candidate ($CANDIDATE_SHA); $GITHUB_REF is at $GITHUB_SHA"
+            exit 1
+          fi
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
 
       - name: Build exact native release artifact
@@ -256,7 +260,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-          ref: ${{ inputs.candidate_sha }}
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -270,6 +273,10 @@ jobs:
       - name: Verify exact committed candidate SHA
         run: |
           [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          if [[ "$GITHUB_SHA" != "$CANDIDATE_SHA" ]]; then
+            echo "::error::candidate_sha is checked, not checked out: dispatch on the branch whose head is the candidate ($CANDIDATE_SHA); $GITHUB_REF is at $GITHUB_SHA"
+            exit 1
+          fi
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
 
       - name: Build exact serial-Wasm release artifact
@@ -302,7 +309,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-          ref: ${{ inputs.candidate_sha }}
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -316,6 +322,10 @@ jobs:
       - name: Verify exact committed candidate SHA
         run: |
           [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          if [[ "$GITHUB_SHA" != "$CANDIDATE_SHA" ]]; then
+            echo "::error::candidate_sha is checked, not checked out: dispatch on the branch whose head is the candidate ($CANDIDATE_SHA); $GITHUB_REF is at $GITHUB_SHA"
+            exit 1
+          fi
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
 
       # The contract's build command. The shared-memory maximum is a link argument of the target's
@@ -418,12 +428,14 @@ jobs:
       PYTHON: ${{ matrix.python }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.candidate_sha }}
 
       - name: Verify exact committed candidate SHA
         run: |
           [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          if [[ "$GITHUB_SHA" != "$CANDIDATE_SHA" ]]; then
+            echo "::error::candidate_sha is checked, not checked out: dispatch on the branch whose head is the candidate ($CANDIDATE_SHA); $GITHUB_REF is at $GITHUB_SHA"
+            exit 1
+          fi
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -470,7 +482,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-          ref: ${{ inputs.candidate_sha }}
+
+      - name: Verify exact committed candidate SHA
+        run: |
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          if [[ "$GITHUB_SHA" != "$CANDIDATE_SHA" ]]; then
+            echo "::error::candidate_sha is checked, not checked out: dispatch on the branch whose head is the candidate ($CANDIDATE_SHA); $GITHUB_REF is at $GITHUB_SHA"
+            exit 1
+          fi
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -506,7 +526,7 @@ jobs:
         with:
           toolchain: 1.92.0
 
-      - uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2.89.0
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-cyclonedx@0.5.9
 

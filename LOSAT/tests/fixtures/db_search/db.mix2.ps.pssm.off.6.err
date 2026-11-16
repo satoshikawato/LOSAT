@@ -1,0 +1,13 @@
+Warning: [psiblast] Failed to retrieve sequence sp|P69905.2|
+Warning: [psiblast] Failed to retrieve sequence sp|P01923.1|
+Warning: [psiblast] Failed to retrieve sequence sp|Q9TS35.2|
+Warning: [psiblast] Failed to retrieve sequence sp|P63107.2|
+Warning: [psiblast] Failed to retrieve sequence sp|P67818.1|
+Warning: [psiblast] Failed to retrieve sequence sp|P01935.1|
+Warning: [psiblast] Failed to retrieve sequence sp|P01942.2|
+Warning: [psiblast] Failed to retrieve sequence sp|P01966.2|
+Warning: [psiblast] Failed to retrieve sequence sp|P07405.1|
+Warning: [psiblast] Failed to retrieve sequence sp|P60529.1|
+Warning: [psiblast] Failed to retrieve sequence sp|P01946.3|
+Warning: [psiblast] Failed to retrieve sequence sp|P01994.2|
+Warning: [psiblast] Query_1 P69905.2 RecName:.. : Composition-based score adjustment conditioned on sequence properties and unconditional composition-based score adjustment is not supported with PSSMs, resetting to default value of standard composition-based statistics Frequency ratios for PSSM are all zeros, frequency ratios for BLOSUM62 will be used during traceback in composition based statistics 

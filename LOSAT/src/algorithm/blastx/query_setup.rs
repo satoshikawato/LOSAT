@@ -492,7 +492,7 @@ pub(crate) fn prepare_unit_queries(
         )
         // LOSAT_X_SEGTRIMMEMO (graduated 2026-10-26): the chunks of a split query (split.rs) are masked
         // again after the whole query, mostly over the same segments, so this masker takes the
-        // trim of a segment trimmed before on this thread from its memo.
+        // trim of a segment trimmed before (on any thread) from the memo.
         .x_with_trim_memo()
     });
     // SEG reads only the residues of its own context and the hard masking below writes only there,
@@ -899,6 +899,7 @@ mod tests {
             lowercase_masks: vec![],
             warnings: vec![],
             source: None,
+            around: None,
         };
         assert_eq!(
             batch_ranges(&[record(10001), record(1), record(3)], BATCH_SIZE),
@@ -925,6 +926,7 @@ mod tests {
             lowercase_masks: vec![],
             warnings: vec![],
             source: None,
+            around: None,
         };
         let records = [
             record(100),

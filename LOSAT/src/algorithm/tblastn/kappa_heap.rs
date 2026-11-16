@@ -262,7 +262,7 @@ impl CompoHeap {
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:64,
-// 1560-1582:
+// 1560-1580:
 // #define EVALUE_STRETCH 5
 // for (i = 0; i < numQueries; i++) {
 //     if (BlastCompo_HeapFilledToCutoff(&significantMatches[i])) {
@@ -286,7 +286,7 @@ mod tests {
     use super::*;
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:64,
-    // 1560-1582; composition_adjustment/compo_heap.c:405-410:
+    // 1560-1580; composition_adjustment/compo_heap.c:405-410:
     // if (BlastCompo_HeapFilledToCutoff(&significantMatches[i])) {
     //     if (evalue <= EVALUE_STRETCH * ecutoff) return FALSE;
     // } else return FALSE;

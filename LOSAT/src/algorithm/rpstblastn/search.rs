@@ -119,7 +119,7 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         diagnostics: &mut dyn Write,
         search_error: &dyn Fn(anyhow::Error) -> anyhow::Error,
         render: &mut BatchRender<'_>,
-        take: &mut dyn FnMut(&[FastaRecord], usize) -> Result<()>,
+        take: &mut dyn FnMut(&mut dyn Write, &[FastaRecord], usize) -> Result<()>,
     ) -> Result<usize> {
         let Some(database) = database else {
             bail!("a search without -db is not supported by LOSAT's {PROGRAM}");
@@ -160,6 +160,8 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
             // before the batch's search (`SaveSearchStrategy`, quoted in the module's header):
             // after the batches before it are reported (their search spaces, which the request
             // holds, `StrategyExport::note_searched`), and none for a batch after one that fails.
+            // NCBI's posts of the bytes replaced in it go to the diagnostics there, after the
+            // batch's reader messages (its `Warn` events, replayed before it; K4b-2 of line RG).
             let mut flush = || -> Result<()> {
                 let events = std::mem::take(&mut *window.borrow_mut()).events;
                 let batches: Vec<&[FastaRecord]> = events
@@ -176,7 +178,7 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
                     &events,
                     searched,
                     &mut |bytes| Ok(diagnostics.borrow_mut().write_all(bytes)?),
-                    &mut |queries| take(queries, processed.get()),
+                    &mut |queries| take(&mut **diagnostics.borrow_mut(), queries, processed.get()),
                     &mut |queries, results| {
                         render(
                             &mut **diagnostics.borrow_mut(),
@@ -915,6 +917,7 @@ mod tests {
             lowercase_masks: Vec::new(),
             warnings: Vec::new(),
             source: None,
+            around: None,
         }
     }
 

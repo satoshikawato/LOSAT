@@ -1,0 +1,133 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: prot_v5 (parsed Seq-ids)
+           51 sequences; 4,677 total letters
+
+
+
+Query= qp1 query protein one
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+long1 long title word long title word long title word long title ...  121     9e-42
+
+
+>long1 long title word long title word long title word long title word 
+long title word long title word long title word long title 
+word long title word long title word long title word long 
+title word long title word long title word long title word long 
+title word long title word long title word long title word 
+long title word 
+Length=60
+
+ Score = 121 bits (303),  Expect = 9e-42, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+
+Query  1   MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+           MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1   MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 32249
+
+
+Query= qp2 unrelated protein
+
+Length=45
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+long1 long title word long title word long title word long title ...  12.7    1.5  
+
+
+>long1 long title word long title word long title word long title word 
+long title word long title word long title word long title 
+word long title word long title word long title word long 
+title word long title word long title word long title word long 
+title word long title word long title word long title word 
+long title word 
+Length=60
+
+ Score = 12.7 bits (21),  Expect = 1.5, Method: Compositional matrix adjust.
+ Identities = 3/9 (33%), Positives = 5/9 (56%), Gaps = 0/9 (0%)
+
+Query  24  LWKEHLTFQ  32
+           +W EH   +
+Sbjct  1   MWMEHSVLK  9
+
+
+ Score = 12.7 bits (21),  Expect = 1.5, Method: Compositional matrix adjust.
+ Identities = 4/7 (57%), Positives = 4/7 (57%), Gaps = 0/7 (0%)
+
+Query  33  WCNYFWT  39
+           W NY W 
+Sbjct  35  WENYCWP  41
+
+
+
+Lambda      K        H        a         alpha
+   0.328    0.137    0.542    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 9834
+
+
+Query= qnone no hits
+
+Length=36
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.304    0.171    0.587    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 8289
+
+
+  Database: prot_v5 (parsed Seq-ids)
+    Posted date:  Oct 26, 2026  9:07 PM
+  Number of letters in database: 4,677
+  Number of sequences in database:  51
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

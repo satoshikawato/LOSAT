@@ -91,7 +91,7 @@ mod disc;
 
 #[path = "x_pair_seed_na.rs"]
 mod na;
-pub(super) use na::{run as run_na, NaInputs};
+pub(super) use na::{run as run_na, wants as wants_na, NaInputs};
 
 // EXPERIMENT (LOSAT_X_PAIRPARFOLD): the fold of both strips paths split by diagonal-hash bucket
 // over the pool (`x_pair_seed_part.rs`); its scratch is a field of `SubjectScratch`.
@@ -387,6 +387,68 @@ fn chunk_free_scope(
         && scan_range == 0
         && !small_na_word
         && !diagnostics
+}
+
+/// No NCBI counterpart (scheduling only): the test of `run` for a chunk with a contiguous table
+/// (the names of `Inputs`): `chunk_free_scope`, an unmasked subject and a chunk the subject's
+/// owner searches by itself. `run` and `wants` read it.
+#[inline(always)]
+fn owner_chunk(
+    use_array_indexing: bool,
+    window_size: usize,
+    scan_range: usize,
+    small_na_word: bool,
+    diagnostics: bool,
+    subject_masked: bool,
+    one_subject_owner: bool,
+) -> bool {
+    chunk_free_scope(
+        false,
+        use_array_indexing,
+        window_size,
+        scan_range,
+        small_na_word,
+        diagnostics,
+    ) && !subject_masked
+        && one_subject_owner
+}
+
+/// No NCBI counterpart (scheduling only): whether `prelim_subject::prelim_chunk_hits` calls `run`
+/// for a chunk with these inputs (the names of `Inputs`; `disc`: the table is discontiguous),
+/// asked before it builds `Inputs`: always for a discontiguous table (`disc::run` decides with
+/// its own switches), else `run`'s tests for a contiguous table (`owner_chunk` and a pool of two
+/// threads or more), so a chunk that `run` would send back at once (every chunk of a database
+/// search: one thread has no pool, and a pool searches the subjects in parallel) costs neither
+/// the inputs nor the call. Such a chunk records the reference side of LOSAT_X_PAIRPAR here, as
+/// `run` recorded it.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+pub(super) fn wants(
+    disc: bool,
+    use_array_indexing: bool,
+    window_size: usize,
+    scan_range: usize,
+    small_na_word: bool,
+    diagnostics: bool,
+    subject_masked: bool,
+    one_subject_owner: bool,
+) -> bool {
+    if disc {
+        return true;
+    }
+    let wanted = owner_chunk(
+        use_array_indexing,
+        window_size,
+        scan_range,
+        small_na_word,
+        diagnostics,
+        subject_masked,
+        one_subject_owner,
+    ) && pool_threads().is_some();
+    if !wanted {
+        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", false);
+    }
+    wanted
 }
 
 /// No NCBI counterpart (scheduling only): whether the strips take an unmasked chunk that the owner
@@ -1816,16 +1878,15 @@ pub(super) fn run(
     if x.two_stage.disc().is_some() {
         return disc::run(x, diag_hash, diag_array, ungapped_hits, fold_scratch);
     }
-    if !chunk_free_scope(
-        false,
+    if !owner_chunk(
         x.use_array_indexing,
         x.window_size,
         x.scan_range,
         x.small_na_word,
         x.diagnostics,
-    ) || x.subject_masked
-        || !x.one_subject_owner
-    {
+        x.subject_masked,
+        x.one_subject_owner,
+    ) {
         crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", false);
         return false;
     }

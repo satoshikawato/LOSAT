@@ -100,6 +100,14 @@ fn reach_directory(value: Option<OsString>) -> Result<Option<PathBuf>, OsString>
     }
 }
 
+/// No NCBI counterpart: whether this run records the sides (`LOSAT_X_REACH` names a directory).
+/// A decision point that runs for every subject chunk tests it before its marks and before the
+/// tests that only choose a mark, so a run that records nothing pays one test there.
+#[inline]
+pub fn recording() -> bool {
+    directory().is_some()
+}
+
 /// No NCBI counterpart: records that the switch at `index` took its own path (`own_path`) or
 /// the reference path. Called through `x_reach!`. Never inlined: a decision point keeps only the
 /// call, so the code around it compiles as it did without the mark.

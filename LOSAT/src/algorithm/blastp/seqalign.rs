@@ -94,7 +94,7 @@ impl EngineCounts {
 }
 
 /// Writes the documents of every query of `hit_lists` (indexed by query) to `writer`, each
-/// query's warnings before it.
+/// query's warnings before it (`write_hit_list_seqaligns`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_blastp_seqalign(
     format: SerialFormat,
@@ -104,7 +104,7 @@ pub(crate) fn write_blastp_seqalign(
     subject_placements: &Placements,
     engine_counts: &EngineCounts,
     writer: &mut dyn Write,
-    warnings: Option<&mut QueryWarnings<'_>>,
+    warnings: &mut QueryWarnings<'_>,
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastp,

@@ -1166,3 +1166,64 @@ fn side_files_on_the_file_system_are_truncated_and_numbered() {
     assert_eq!(std::fs::read(dir.join("p.out_1.xml")).unwrap(), b"one\n");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// A report that raises an exception NCBI's report function catches (`CaughtException`, BLASTX's
+/// HSPs of length 0): JSON counts it, so its separator stays (`,\n,\n` for a failed middle
+/// report); a `-subject` run fails where it writes the held report (the next arrival or the
+/// epilog, whose end still follows).
+#[test]
+fn a_failed_report_keeps_its_separator_and_fails_where_it_is_written() {
+    use crate::ncbi_exception::{NcbiException, ThrowSite};
+    let exception = || {
+        NcbiException::new(
+            ThrowSite {
+                file: "src/objects/seq/../seqalign/Seq_align.cpp",
+                line: 227,
+                kind: "CSeqalignException::eInvalidAlignment",
+                function: None,
+            },
+            "CSeq_align::GetSeqRange(): Row is empty",
+        )
+    };
+    let fail = |doc: &mut Xml2Document, out: &mut Vec<u8>| {
+        let mut report = Vec::new();
+        doc.report(&mut report, out, |_, _| {
+            Err(crate::report::blast_xml::CaughtException(exception()).into())
+        })
+    };
+    let caught = |result: anyhow::Result<()>| {
+        result
+            .unwrap_err()
+            .is::<crate::report::blast_xml::CaughtException>()
+    };
+    // `-db`: a, (failed), b.
+    let mut doc = Xml2Document::new(Xml2Kind::Single15, false);
+    let mut out = Vec::new();
+    put(&mut doc, b"{\n  a\n}\n", &mut out).unwrap();
+    assert!(caught(fail(&mut doc, &mut out)));
+    put(&mut doc, b"{\n  b\n}\n", &mut out).unwrap();
+    doc.epilog(&mut out).unwrap();
+    assert_eq!(
+        String::from_utf8(out).unwrap(),
+        "{\n\"BlastOutput2\": [\n{\n  a\n}\n,\n,\n{\n  b\n}\n]\n}\n"
+    );
+    // `-subject`: (failed) held, then a arrives: the failure; a is written by the epilog.
+    let mut doc = Xml2Document::new(Xml2Kind::Single15, true);
+    let mut out = Vec::new();
+    fail(&mut doc, &mut out).unwrap();
+    assert!(caught(put(&mut doc, b"{\n  a\n}\n", &mut out)));
+    doc.epilog(&mut out).unwrap();
+    assert_eq!(
+        String::from_utf8(out).unwrap(),
+        "{\n\"BlastOutput2\": [\n,\n{\n  a\n}\n]\n}\n"
+    );
+    // `-subject`: the held failed report in the epilog: the failure after the document's end.
+    let mut doc = Xml2Document::new(Xml2Kind::Single16, true);
+    let mut out = Vec::new();
+    fail(&mut doc, &mut out).unwrap();
+    assert!(caught(doc.epilog(&mut out)));
+    assert_eq!(
+        String::from_utf8(out).unwrap(),
+        format!("{}</BlastXML2>\n", framing::header16())
+    );
+}

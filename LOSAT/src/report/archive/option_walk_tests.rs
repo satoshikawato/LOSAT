@@ -12,7 +12,7 @@
 
 use super::options::OptionInputs;
 use super::strategy::{hitlist_size, HitlistArgs};
-use super::{ArchiveEncoding, ArchiveRequest};
+use super::ArchiveRequest;
 use crate::cli::{Cli, Commands};
 
 /// A change of the default request: the parameter in its place, a new one after another, or a
@@ -53,8 +53,7 @@ fn parse(program: &str, words: &[&str]) -> Result<Commands, String> {
 
 /// The request's options, `HitlistSize` included, and `Web_StepNumber` last.
 fn render(inputs: &OptionInputs, database: Option<&str>) -> Vec<String> {
-    let request =
-        ArchiveRequest::for_inputs(ArchiveEncoding::Text, inputs, database, "TEST", "-x").unwrap();
+    let request = ArchiveRequest::for_inputs(inputs, database);
     let mut listed: Vec<String> = request
         .algorithm
         .iter()
@@ -601,6 +600,13 @@ fn every_rpsblast_argument_is_recorded_as_ncbi_records_it() {
             "comp_based_stats",
             &["-comp_based_stats", "2u"],
             &[At("CompositionBasedStats", "Integer(2)")],
+        ),
+        // `SetSmithWatermanMode` (blast_args.cpp:885): fixture `rpsblast.mask.sw` of
+        // tests/fixtures/strategy (PS11c-3).
+        (
+            "use_sw_tback",
+            &["-use_sw_tback"],
+            &[At("SmithWatermanMode", "Boolean(true)")],
         ),
     ];
     walk(&App {

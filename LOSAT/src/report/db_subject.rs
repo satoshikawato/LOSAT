@@ -141,9 +141,9 @@ pub enum FoundInstead {
     CopyApart(DbSequence, CopyApart),
     /// No sequence.
     Nothing,
-    /// The lookup fails on a file of the database, with this message: NCBI's formatters, and its
+    /// The lookup fails on a file of the database (`LookupFailure`): NCBI's formatters, and its
     /// prefetch, stop with the `CSeqDBException`.
-    Failed(String),
+    Failed(LookupFailure),
     /// LOSAT's own search of the keys that differ from the Seq-align id's in the case of its
     /// letters fails, with this message (`SeqidLookup::case_variant_oids`: version 5, a name or a
     /// `pir` or `prf` id), on pages that NCBI's exact lookup need not read: whether another sequence
@@ -200,6 +200,52 @@ pub enum Prefetched {
     /// (`ParsedSubject::prefetch_fails`, `common::database::batch_prefetch`); on a file it
     /// rethrows the `CSeqDBException` and stops.
     Failed(String),
+}
+
+/// A lookup of a Seq-align id that fails on a file of the database (`FoundInstead::Failed`): the
+/// message, and whether it is NCBI's own (`SeqDbError::ncbi_message`: the text of the
+/// `CSeqDBException` that NCBI writes after `BLAST Database error: `, as "DB contains no accession
+/// info." of a list that puts version 5 databases with and without the accession table side by
+/// side), else LOSAT's text of an error NCBI does not have.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LookupFailure {
+    message: String,
+    ncbi: bool,
+}
+
+impl LookupFailure {
+    /// What NCBI does where it reads a subject whose lookup fails on a file: its prefetch rethrows
+    /// the `CSeqDBException` (`BLAST Database error`, exit status 2); where `PRE_FETCH_SEQS_LIMIT`
+    /// turns the prefetch off, its formatters catch it and write `Unknown`, then stop or not as
+    /// the format decides (DECISIONS 53 (1) of line DBID).
+    pub const NCBI_READS: &'static str = "NCBI BLAST+ 2.17.0's prefetch stops with a BLAST Database error, and where the prefetch is off its formatters fail to read it";
+
+    /// NCBI's own message.
+    pub fn ncbi(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            ncbi: true,
+        }
+    }
+
+    /// LOSAT's text of an error that NCBI does not have.
+    pub fn losat(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            ncbi: false,
+        }
+    }
+
+    /// The text NCBI writes after `BLAST Database error: `, where the message is NCBI's own.
+    pub fn ncbi_message(&self) -> Option<&str> {
+        self.ncbi.then_some(self.message.as_str())
+    }
+}
+
+impl std::fmt::Display for LookupFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
 }
 
 /// Why the reports can show apart a copy of a subject with the same definition lines but for
@@ -592,7 +638,8 @@ impl ParsedSubject {
     /// refuses another sequence that also holds an id the scope takes for the Seq-align id, which
     /// the scope reads for it where it has read it before (`FoundInstead::AlsoHeld` where the
     /// lookup gives the subject first, `also_held` where it gives another or none), a lookup that
-    /// fails on a file (`FoundInstead::Failed`), the same record whose read writes other
+    /// fails on a file with LOSAT's error (`FoundInstead::Failed`; with NCBI's exception, which the
+    /// read catches, `prefetch_stops`: the caller reads no letters), the same record whose read writes other
     /// taxonomy texts (`CopyApart::TaxonomyTexts`), and with `one_by_one` a weak match
     /// (`fetched`). The reasons are what the lookup finds, also for a subject whose definition
     /// line the formatters do not find (`unfetchable`), which the PSSM reads by the scope as any
@@ -713,7 +760,11 @@ impl ParsedSubject {
             FoundInstead::CaseUnknown(message) => format!(
                 "has the Seq-align id {id}, for which LOSAT cannot list the sequences that hold it in another letter case ({message}): where such a sequence is also reported, NCBI BLAST+ 2.17.0 can write its names and letters for it"
             ),
-            FoundInstead::Failed(message) | FoundInstead::ThrowsOnId(message) => format!(
+            FoundInstead::Failed(failure) => format!(
+                "has the Seq-align id {id}, whose lookup in the database fails ({failure}; {})",
+                LookupFailure::NCBI_READS
+            ),
+            FoundInstead::ThrowsOnId(message) => format!(
                 "has the Seq-align id {id}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0 stops)"
             ),
             FoundInstead::Nothing => format!(
@@ -774,9 +825,10 @@ impl ParsedSubject {
                 "has the Seq-align id {}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0's prefetch writes Error pre-fetching sequence data, and a report that reads it stops)",
                 String::from_utf8_lossy(&self.alignment_fasta())
             )),
-            Some(FoundInstead::Failed(message)) => Prefetched::Failed(format!(
-                "has the Seq-align id {}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0's prefetch stops with a BLAST Database error)",
-                String::from_utf8_lossy(&self.alignment_fasta())
+            Some(FoundInstead::Failed(failure)) => Prefetched::Failed(format!(
+                "has the Seq-align id {}, whose lookup in the database fails ({failure}; {})",
+                String::from_utf8_lossy(&self.alignment_fasta()),
+                LookupFailure::NCBI_READS
             )),
             Some(FoundInstead::Sequence(other)) => Prefetched::Another {
                 other: Some(*other),
@@ -804,6 +856,20 @@ impl ParsedSubject {
     /// file stops NCBI (`FoundInstead::Failed`).
     pub fn prefetch_fails(&self) -> bool {
         matches!(self.found_instead, Some(FoundInstead::ThrowsOnId(_)))
+    }
+
+    /// NCBI's message where the lookup of this subject's Seq-align id fails on a file of the
+    /// database with NCBI's own `CSeqDBException` (`FoundInstead::Failed`,
+    /// `LookupFailure::ncbi_message`; "DB contains no accession info." of a list that puts
+    /// version 5 databases with and without the accession table side by side): NCBI's prefetch of
+    /// a batch that reports the subject rethrows it, which stops the run with `BLAST Database
+    /// error: <message>` (exit status 2) before the batch's reports
+    /// (`common::database::batch_prefetch`).
+    pub fn prefetch_stops(&self) -> Option<&str> {
+        match &self.found_instead {
+            Some(FoundInstead::Failed(failure)) => failure.ncbi_message(),
+            _ => None,
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2250-2255
@@ -2410,9 +2476,9 @@ mod tests {
             .unwrap_err();
         assert!(error.contains("do not find the sequence"), "{error}");
         let error = subject
-            .found_instead(Some(FoundInstead::Failed(
-                "DB contains no accession info.".into(),
-            )))
+            .found_instead(Some(FoundInstead::Failed(LookupFailure::ncbi(
+                "DB contains no accession info.",
+            ))))
             .fetched(false, true)
             .unwrap_err();
         assert!(
@@ -2458,7 +2524,7 @@ mod tests {
         assert!(read(&none_held).is_err());
         for found in [
             FoundInstead::AlsoHeld(DbSequence::of_unrestricted(6)),
-            FoundInstead::Failed("DB contains no accession info.".into()),
+            FoundInstead::Failed(LookupFailure::ncbi("DB contains no accession info.")),
         ] {
             assert!(read(&subject.clone().found_instead(Some(found))).is_err());
         }
@@ -2487,7 +2553,9 @@ mod tests {
             "{error}"
         );
         assert!(!error.contains("formatters do not find"), "{error}");
-        let failed = shown.found_instead(Some(FoundInstead::Failed("no accession info".into())));
+        let failed = shown.found_instead(Some(FoundInstead::Failed(LookupFailure::ncbi(
+            "no accession info",
+        ))));
         assert!(read(&failed)
             .unwrap_err()
             .contains("whose lookup in the database fails"));
@@ -2549,7 +2617,7 @@ mod tests {
         assert_eq!(prefetched(Some(FoundInstead::Nothing)), Prefetched::Nothing);
         // A file's error stops NCBI's prefetch; the exception of the id is its warning.
         assert!(matches!(
-            prefetched(Some(FoundInstead::Failed("no accession info".into()))),
+            prefetched(Some(FoundInstead::Failed(LookupFailure::ncbi("no accession info")))),
             Prefetched::Failed(reason) if reason.contains("prefetch stops with a BLAST Database error")
         ));
         let throws = Some(FoundInstead::ThrowsOnId("Invalid choice selection".into()));
@@ -2560,7 +2628,9 @@ mod tests {
         assert!(subject.clone().found_instead(throws).prefetch_fails());
         assert!(!subject
             .clone()
-            .found_instead(Some(FoundInstead::Failed("no accession info".into())))
+            .found_instead(Some(FoundInstead::Failed(LookupFailure::ncbi(
+                "no accession info"
+            ))))
             .prefetch_fails());
         assert!(matches!(
             prefetched(Some(FoundInstead::Sequence(DbSequence::of_unrestricted(4)))),

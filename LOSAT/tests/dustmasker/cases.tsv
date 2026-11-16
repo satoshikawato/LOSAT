@@ -306,3 +306,9 @@ id_del_seqloc_bin	-in in/id_del.fa -outfmt seqloc_asn1_bin -parse_seqids
 id_del_maskinfo_txt	-in in/id_del.fa -outfmt maskinfo_asn1_text -parse_seqids
 id_del_maskinfo_bin	-in in/id_del.fa -outfmt maskinfo_asn1_bin -parse_seqids
 id_del_int_ps	-in in/id_del.fa -parse_seqids
+# order_* (a DEL byte in a -parse_seqids id of a sequence with 300 masked intervals, each writing the id in the serial formats; order_int_ps reads the input as the reader cases do: NCBI's 803.7 messages fall among the document's bytes where its output buffer (4096 bytes; back limit text 80, binary 0) handed them out; ncbi/<name>.merged is NCBI's 2>&1 stream of a run of its own; M4a-1b part 6) frozen 2026-11-14 by ad-M4a-3 with the local official release.
+order_seqloc_txt	-in in/order_del.fa -outfmt seqloc_asn1_text -parse_seqids
+order_seqloc_bin	-in in/order_del.fa -outfmt seqloc_asn1_bin -parse_seqids
+order_maskinfo_txt	-in in/order_del.fa -outfmt maskinfo_asn1_text -parse_seqids
+order_maskinfo_bin	-in in/order_del.fa -outfmt maskinfo_asn1_bin -parse_seqids
+order_int_ps	-in in/order_del.fa -parse_seqids

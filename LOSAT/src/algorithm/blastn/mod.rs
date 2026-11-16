@@ -1,4 +1,5 @@
 pub mod alignment;
+pub(crate) mod anchored;
 pub(crate) mod archive;
 pub mod args;
 pub mod blast_engine;

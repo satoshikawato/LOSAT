@@ -15,10 +15,47 @@ pub enum Xml2Target {
 
 impl Xml2Target {
     /// Whether the documents of the search hold each query's report back until the next query's
-    /// arrives (`m_IsBl2Seq`, blast_format.cpp:2362-2389; `Xml2Document`): a `-subject` search.
+    /// arrives (`reports_held`; `Xml2Document`): a `-subject` search. The writer is made for the
+    /// programs that do not iterate: psiblast's and tblastn `-in_pssm`'s XML formats are not
+    /// written yet (line PS, items PS15 and PS15b).
     pub fn holds_back(self) -> bool {
-        matches!(self, Self::Subjects(_))
+        reports_held(matches!(self, Self::Subjects(_)), false)
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:121, :196
+// ```c++
+//     m_IsBl2Seq = (m_DbName == kEmptyStr ? true : false);
+//     ...
+//     m_IsIterative = options.IsIterativeSearch();
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:862-866
+// ```c++
+// CBlastOptions::IsIterativeSearch() const{
+//     switch ( GetProgram()) {
+//     	case ePSIBlast :
+//     	case ePSITblastn :
+//     	case eDeltaBlast :
+//     		return true;
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2364, :2376-2377
+// ```c++
+// 	if((m_IsIterative) || (m_IsBl2Seq)) {
+// 		if(m_AccumulatedResults.empty()) {
+// 			_ASSERT(m_AccumulatedQueries->size() == 0);
+// 			...
+// 			CConstRef<CSeq_id> query_id = results.GetSeqId();
+// 			if(m_AccumulatedResults[0].GetSeqId()->Match(*query_id)) {
+// ```
+/// NCBI's `m_IsBl2Seq || m_IsIterative`: whether the XML2 and JSON documents of a search hold each
+/// query's report back until a result of a query whose Seq-id does not match arrives (or the
+/// epilog): a search of subject records (`subject_search`: `-subject`, no database name) or of an
+/// iterative program (`iterative`: psiblast, tblastn `-in_pssm`). The one rule behind the writer's
+/// hold (`Xml2Target::holds_back`), the place where a matrix name NCBI's XML does not know fails
+/// (`blast_xml::matrix::xml_formatting_failure`) and BLASTX's checks of the reports' titles before
+/// the search (`blastx::blast_xml::scan_queries`).
+pub fn reports_held(subject_search: bool, iterative: bool) -> bool {
+    subject_search || iterative
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xml2format.cpp:174-185

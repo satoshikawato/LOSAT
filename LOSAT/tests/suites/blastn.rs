@@ -9,6 +9,8 @@ mod blastn_bn_csr;
 mod blastn_bn_seed_lists;
 #[path = "../blastn_db_cut.rs"]
 mod blastn_db_cut;
+#[path = "../blastn_db_hard_long.rs"]
+mod blastn_db_hard_long;
 #[path = "../blastn_db_search.rs"]
 mod blastn_db_search;
 #[path = "../blastn_db_soft_long.rs"]
@@ -23,6 +25,8 @@ mod blastn_diag_lv;
 mod blastn_disc_lookup_par;
 #[path = "../blastn_dp32.rs"]
 mod blastn_dp32;
+#[path = "../blastn_ext_first.rs"]
+mod blastn_ext_first;
 #[path = "../blastn_few_subj.rs"]
 mod blastn_few_subj;
 #[path = "../blastn_greedy_row_fuse.rs"]

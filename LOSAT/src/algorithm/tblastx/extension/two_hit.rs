@@ -648,17 +648,14 @@ pub(super) fn extend_hit_two_hit_reference<S: TbxScore>(
     let pass = if debug_ext {
         Pass::Whole
     } else {
-        match two_hit_walks(
+        match extend_hit_two_hit_first(
             sc,
             q_seq,
-            InBatch::ALONE,
             s_seq,
             s_left_off,
             s_right_off,
             q_right_off,
             x_drop,
-            false,
-            Pass::First,
         ) {
             Ok(r) => return r,
             Err(again) => Pass::Resume(again),
@@ -675,6 +672,34 @@ pub(super) fn extend_hit_two_hit_reference<S: TbxScore>(
         x_drop,
         debug_ext,
         pass,
+    )
+}
+
+/// The first pass of `extend_hit_two_hit_reference`, on the context alone. Out of line, so that its
+/// loops keep none of the values the second pass takes (the batch, the call's offsets): with them
+/// the left loop rebuilt its score table's address at every step (X2c, `-xdrop_ungap 100`, +0.5 %
+/// instructions).
+#[inline(never)]
+fn extend_hit_two_hit_first<S: TbxScore>(
+    sc: S,
+    q_seq: &[u8],
+    s_seq: &[u8],
+    s_left_off: usize,
+    s_right_off: usize,
+    q_right_off: usize,
+    x_drop: i32,
+) -> Result<(usize, usize, usize, usize, i32, bool, usize), Again> {
+    two_hit_walks(
+        sc,
+        q_seq,
+        InBatch::ALONE,
+        s_seq,
+        s_left_off,
+        s_right_off,
+        q_right_off,
+        x_drop,
+        false,
+        Pass::First,
     )
 }
 

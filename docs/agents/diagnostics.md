@@ -488,6 +488,7 @@ export LOSAT_X_TBXQSLICE=1
 export LOSAT_X_TBXRESOLVE=1
 export LOSAT_X_TBXRPTPAR=1
 export LOSAT_X_TBXSCANBF=1
+export LOSAT_X_TBXSCANBYTE=1
 export LOSAT_X_TBXSTORE=1
 export LOSAT_X_TBXUNGAPSENT=1
 export LOSAT_X_TBXUNITMASK=256
@@ -5997,6 +5998,20 @@ Scheduling (each value computed by one thread with the original function; order 
   reference frame loop, which scans each subject frame once with the batch's table: 0.99 (47.33 ->
   46.91 s). Joined the strict set on these timings (no case slower; Owner decision of 2026-10-17 that
   the branch-free scans of blastp / blastx / tblastx join the set once each shows no loss).
+- `LOSAT_X_TBXSCANBYTE=1` TBLASTX (speed; in the strict set from the pull request that added it,
+  2026-11-16, on by default; `=0` turns it off; `tblastx/x_scan_bf.rs` `x_scan_subject_byte`): the
+  unit path's group tables of the full backbone, those `LOSAT_X_TBXSCANBF` leaves to NCBI's loop
+  (presence bits in half or more of the backbone cells, `x_scan_bf_for`), are scanned with tblastn's
+  scan on presence bytes (`LOSAT_X_TBNSCANBYTE`, `tblastn/x_scan_byte.rs` `x_scan_one_range_byte`,
+  exactness argument in its header): the table indexes of a block of 256 words made 16 at a time from
+  the letters, candidates listed from a presence vector of one byte per index (32 KB, built once per
+  group table), and each candidate copied once, NCBI's room test kept where the block could fill the
+  offset array. NCBI's range walk (`s_BlastAaScanSubject`, `blast_aascan.c:48-131`) is kept around
+  it, so every call returns NCBI's pairs and scan range (test
+  `x_scan_subject_bf_and_compact_equal_ncbi_scan_on_random_subjects`, byte arm, against
+  `s_blast_aa_scan_subject`). The offset arrays get `X_SCAN_BYTE_SLACK` (20) entries more while the
+  switch is on. AVX2 CPUs only (`x_scan_byte::x_mode`): elsewhere, and for the tables the
+  branch-free scan takes, the scan before. TIMING_PLACEHOLDER
 - `LOSAT_X_TBNUNITXLATE=1` tblastn (speed and memory; in the strict set from the pull request that added it,
   2026-10-23; `=0` turns it off; `tblastn/x_subject_translate.rs` `x_packed_lean_plan`, `x_unit_residues`,
   `tblastn/search_gapped.rs` `XUnitResiduesPool`): the plan of a packed subject (every `-db` sequence, `-subject`

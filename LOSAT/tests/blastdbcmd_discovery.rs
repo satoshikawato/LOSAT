@@ -229,6 +229,13 @@ const CASES: &[Case] = &[
     ("T531", None, false, &["-db", "../db_search/t5/phd_utf8id", "-entry", "all", "-outfmt", "%o %a %t"], 0),
     ("T532", None, false, &["-db", "../db_search/t5/phd_long", "-entry", "all", "-outfmt", "%o %t"], 0),
     ("T533", None, false, &["-db", "../db_search/t5/phd_longx", "-entry", "all", "-outfmt", "%o %t"], 1),
+    // RG-T5d fix 2 (review 2 D2): the version check of an accession reads each candidate's header
+    // (`x_CheckVersions`), and HDA1.1's UTF8String title writes NCBI's warning before the lookup's
+    // own message; the stored version reads the header only for the record's text.
+    ("T534", None, false, &["-db", "../db_search/t5/pva_utf8", "-entry", "HDA1.2", "-outfmt", "%a %t"], 1),
+    ("T535", None, false, &["-db", "../db_search/t5/pva_utf8", "-entry", "HDA1.2,HDA2.1", "-outfmt", "%a %t"], 1),
+    ("T536", None, false, &["-db", "../db_search/t5/pva_utf8", "-entry_batch", "../db_search/t5/pva_batch.txt", "-outfmt", "%a %t"], 1),
+    ("T537", None, false, &["-db", "../db_search/t5/pva_utf8", "-entry", "HDA1.1", "-outfmt", "%a %t"], 0),
 ];
 
 /// The probe's cases that LOSAT refuses (one line naming LOSAT's BLASTDBCMD, exit status 1,

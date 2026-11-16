@@ -12797,6 +12797,9 @@ fn run_call(
     // Item SC2d: a flat table's vectors go to the next block's build here.
     let lookup = x_lookup_after_prelim(lookup, blastp_parallel_pool, &x_ahead);
     let kappa_redo_start = blastp_timing_start(timing_enabled);
+    // Whether the PSSM's position-based redo ran (`pssm_hooks::pssm_traceback`), which notes the
+    // subjects its fetches read itself (`ListedSubjects::note_fetched`).
+    let pssm_redone = std::cell::Cell::new(false);
     // `-comp_based_stats 0`: the ordinary traceback (blast_traceback.c:1500-1723) takes every
     // preliminary list here, so the composition-based redo below finds none; its hit lists
     // replace the redo's after it.
@@ -12805,7 +12808,15 @@ fn run_call(
         Some(preliminary_hit_lists.iter_mut().map(Option::take).collect())
     } else if ordinary_traceback && args.psi_search.is_some() {
         // psiblast `-in_pssm`: the PSSM's traceback (`pssm_hooks::pssm_traceback`: mode 0's, or
-        // the position-based redo of modes 1 to 3).
+        // the position-based redo of modes 1 to 3, whose heaps tell which subjects its fetches
+        // read, `ListedSubjects::note_fetched`).
+        let redone = |heaps: &[crate::algorithm::blastp::hsp::BlastCompoHeap]| {
+            pssm_redone.set(true);
+            if let (Some(listed), Some(database)) = (listed_subjects.as_ref(), database) {
+                let all = |_: usize| 0..heaps.len();
+                listed.note_fetched(database, Some(heaps), &all);
+            }
+        };
         Some(pssm_hooks::pssm_traceback(
             &args,
             &contexts,
@@ -12819,6 +12830,7 @@ fn run_call(
             &mut preliminary_hit_lists,
             &mut x_compact_hit_lists,
             blastp_parallel_pool,
+            &redone,
         )?)
     } else if ordinary_traceback {
         let ordinary = traceback::OrdinaryTraceback {
@@ -12952,6 +12964,18 @@ fn run_call(
             x_ih_pool::x_pooled() - x_pooled_at_start
         );
     }
+    // The subjects that the call's fetches with `check_oid_exclusion` read (a seqid list's,
+    // `ListedSubjects::note_fetched`): every subject of the ordinary traceback, or those the
+    // composition-based redo's early termination test leaves (its heaps as it left them; the
+    // PSSM's position-based redo noted its own above).
+    if let (Some(listed), Some(database)) = (listed_subjects.as_ref(), database) {
+        let batch_of = |q_idx: usize| kappa_query_batches[q_idx].clone();
+        if ordinary_hit_lists.is_none() {
+            listed.note_fetched(database, Some(&redone_matches), &batch_of);
+        } else if !pssm_redone.get() {
+            listed.note_fetched(database, None, &batch_of);
+        }
+    }
     let mut hit_lists =
         fill_results_from_compo_heaps(args.traceback_hitlist_size(), &mut redone_matches);
     if let Some(ordinary_hit_lists) = ordinary_hit_lists {
@@ -13078,11 +13102,17 @@ fn run_call(
         Some(listed) => &listed.encoded,
         None => subject_set,
     };
+    // The first queries of the call's batches, which read their headers one batch after the
+    // other (`shared::HeaderReader::batch_starts`).
+    let batch_starts: Vec<usize> = query_batches
+        .iter()
+        .map(|batch| batch.searched.start)
+        .collect();
     let listed_titles = match (listed_subjects.as_ref(), database) {
         (Some(listed), Some(database)) => Some(if x_listed_lean {
-            listed.x_read_titles_lean(database, &hit_lists)?
+            listed.x_read_titles_lean(database, &hit_lists, &batch_starts)?
         } else {
-            listed.read_titles(database, &hit_lists)?
+            listed.read_titles(database, &hit_lists, &batch_starts)?
         }),
         _ => None,
     };

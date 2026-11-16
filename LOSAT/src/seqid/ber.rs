@@ -761,6 +761,17 @@ pub(crate) struct Tag {
 }
 
 impl Tag {
+    /// The identifier whose first byte is `first` in the short form (`PeekTag`'s one byte,
+    /// `m_CurrentTagLength = 1`); `None` in the long form (`PeekLongTag`).
+    #[inline(always)]
+    fn short(first: u8) -> Option<Tag> {
+        (first & TAG_NUMBER_MASK != TAG_NUMBER_MASK).then_some(Tag {
+            class: first & !TAG_NUMBER_MASK,
+            number: u32::from(first & TAG_NUMBER_MASK),
+            len: 1,
+        })
+    }
+
     /// Whether this is the tag of the one-byte identifier `byte` (whose number is below 31):
     /// the same class and form, and the same number in either form.
     pub(crate) fn is(self, byte: u8) -> bool {
@@ -884,14 +895,10 @@ impl<'a> Reader<'a> {
     /// (`PeekTagByte(i)` does not move the stream): the one tag reader of both decoders.
     #[inline]
     fn peek_tag(&self, first: u8) -> Result<Tag, BerError> {
-        if first & TAG_NUMBER_MASK != TAG_NUMBER_MASK {
-            return Ok(Tag {
-                class: first & !TAG_NUMBER_MASK,
-                number: u32::from(first & TAG_NUMBER_MASK),
-                len: 1,
-            });
+        match Tag::short(first) {
+            Some(tag) => Ok(tag),
+            None => self.peek_long_tag(first),
         }
-        self.peek_long_tag(first)
     }
 
     /// `PeekLongTag` (quoted at `PEEK_LONG_TAG`): the number in the bytes after `first`, seven
@@ -927,13 +934,9 @@ impl<'a> Reader<'a> {
     #[inline]
     pub(crate) fn tag(&mut self) -> Result<Tag, BerError> {
         let first = self.peek()?;
-        if first & TAG_NUMBER_MASK != TAG_NUMBER_MASK {
+        if let Some(tag) = Tag::short(first) {
             self.pos += 1;
-            return Ok(Tag {
-                class: first & !TAG_NUMBER_MASK,
-                number: u32::from(first & TAG_NUMBER_MASK),
-                len: 1,
-            });
+            return Ok(tag);
         }
         self.long_tag(first)
     }

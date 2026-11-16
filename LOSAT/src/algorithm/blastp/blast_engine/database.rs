@@ -29,6 +29,7 @@ use anyhow::{bail, Context, Result};
 ))]
 use rayon::prelude::*;
 
+use crate::algorithm::blastp::hsp::BlastCompoHeap;
 use crate::algorithm::common::database as shared;
 pub(super) use crate::algorithm::common::database::{
     HeaderReadError, PreliminaryReadError, Utf8Read,
@@ -829,6 +830,178 @@ pub(super) struct ListedSubjects {
     /// Whether a read of the redo or of the first Newton problems found a pyrrolysine (O) or a
     /// gap character, by rank (`x_list`).
     x_recounted: Vec<std::sync::atomic::AtomicBool>,
+    /// The subjects of the preliminary hit lists whose header holds a UTF8String where a
+    /// VisibleString is expected, which NCBI's fetches with `check_oid_exclusion` read
+    /// (`exclude_fetched`; `note_fetched`).
+    fetched_utf8: XFetchedUtf8,
+    /// The call's reads before those of its reported sequences that took a UTF8String for a
+    /// VisibleString: of its fetches (`note_fetched`) and of its Seq-aligns (`drop_unaligned`).
+    earlier_utf8: std::sync::Mutex<shared::EarlierUtf8>,
+}
+
+/// What `exclude_fetched` keeps of the subjects whose header holds a UTF8String where a
+/// VisibleString is expected: each with its query and its place in the order in which the redo
+/// takes its query's lists (`XRedoKey`), and, for each query with one, the ordinal ids of its
+/// kept lists in that order (the redo's positions of its heap's records, `note_fetched`).
+#[derive(Debug, Default)]
+struct XFetchedUtf8 {
+    reads: Vec<XFetchedRead>,
+    orders: Vec<(usize, Vec<u32>)>,
+}
+
+/// One subject of `XFetchedUtf8`: the query of its list, its key in the redo's order, and the
+/// kept lists of its query that come before it there (`shared::redo_fetches`).
+#[derive(Clone, Copy, Debug)]
+struct XFetchedRead {
+    query: usize,
+    key: XRedoKey,
+    kept: bool,
+    before: usize,
+}
+
+/// What `compare_hsp_lists` (`Blast_HitListSortByEvalue`, the order in which the redo takes a
+/// query's lists, quoted at `BlastpHitList::sort_by_evalue`) reads of a list: lists without HSPs
+/// last, then the best E-value (`s_EvalueComp`), the first HSP's score, larger first, and the
+/// subject, larger first (the ordinal id: the ranks that the lists hold after `x_list` keep its
+/// order).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct XRedoKey {
+    has_hsps: bool,
+    best_evalue: f64,
+    score: i32,
+    ordinal: u32,
+}
+
+impl XRedoKey {
+    fn of<H: crate::algorithm::blastp::hsp::HitListHsp>(
+        list: &crate::algorithm::blastp::hsp::BlastpHspList<H>,
+    ) -> Self {
+        XRedoKey {
+            has_hsps: !list.hsps.is_empty(),
+            best_evalue: list.best_evalue,
+            score: list.hsps.first().map_or(0, |hsp| hsp.raw_score()),
+            ordinal: list.oid,
+        }
+    }
+
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        other
+            .has_hsps
+            .cmp(&self.has_hsps)
+            .then_with(|| {
+                crate::algorithm::blastp::hsp::evalue_comp(self.best_evalue, other.best_evalue)
+            })
+            .then_with(|| other.score.cmp(&self.score))
+            .then_with(|| other.ordinal.cmp(&self.ordinal))
+    }
+}
+
+impl XFetchedUtf8 {
+    /// Keeps the subjects `found` of the list of `query` (whose kept lists are `kept`).
+    #[cold]
+    #[inline(never)]
+    fn add<H: crate::algorithm::blastp::hsp::HitListHsp>(
+        &mut self,
+        query: usize,
+        kept: &[crate::algorithm::blastp::hsp::BlastpHspList<H>],
+        found: Vec<(shared::FetchedUtf8, XRedoKey)>,
+    ) {
+        let mut keys: Vec<XRedoKey> = kept.iter().map(XRedoKey::of).collect();
+        keys.sort_unstable_by(XRedoKey::cmp);
+        for (read, key) in found {
+            self.reads.push(XFetchedRead {
+                query,
+                key,
+                kept: read.kept,
+                before: keys.partition_point(|other| other.cmp(&key).is_lt()),
+            });
+        }
+        self.orders
+            .push((query, keys.iter().map(|key| key.ordinal).collect()));
+    }
+
+    /// The first, in NCBI's order of the fetches, of the reads that the ordinary traceback
+    /// (`shared::FetchedUtf8::traceback_first`: every subject, in increasing ordinal) or, with
+    /// `heaps` (as the redo left them), the composition-based redo makes
+    /// (`shared::redo_fetches`: query by query, each in its lists' order), the batches of the
+    /// queries (`batch_of`) one after the other: its query and ordinal id.
+    #[cold]
+    #[inline(never)]
+    fn first(
+        &self,
+        heaps: Option<&[BlastCompoHeap]>,
+        batch_of: &dyn Fn(usize) -> std::ops::Range<usize>,
+        ordinals: &[u32],
+    ) -> Option<(usize, u32)> {
+        let Some(heaps) = heaps else {
+            // A batch's traceback, then the next batch's.
+            return self
+                .reads
+                .iter()
+                .min_by_key(|read| (batch_of(read.query).start, read.key.ordinal))
+                .map(|read| (read.query, read.key.ordinal));
+        };
+        // The heap of `query` at the turn of a match after `before` of its lists (`order`), as
+        // `shared::redo_fetches` reads it.
+        let heap_at = |query: usize, before: Option<(&[u32], usize)>| {
+            let heap = &heaps[query];
+            let inserted = |record: &&crate::algorithm::blastp::hsp::BlastCompoHeapRecord| {
+                before.is_none_or(|(order, before)| {
+                    let ordinal = ordinals[record.subject_index as usize];
+                    order[..before.min(order.len())].contains(&ordinal)
+                })
+            };
+            shared::RedoHeap {
+                ecutoff: heap.ecutoff,
+                heap_threshold: heap.heap_threshold,
+                inserted_before: heap
+                    .records()
+                    .iter()
+                    .filter(|record| record.best_evalue <= heap.ecutoff)
+                    .filter(inserted)
+                    .count(),
+            }
+        };
+        self.reads
+            .iter()
+            .filter(|read| read.key.has_hsps)
+            .filter(|read| {
+                let order = &self
+                    .orders
+                    .iter()
+                    .find(|(of, _)| *of == read.query)
+                    .expect("a query with a read has its order")
+                    .1;
+                // The heaps of the queries before the match's are as the redo left them, those
+                // after it untouched (the redo takes the lists query by query).
+                let redo_heaps: Vec<shared::RedoHeap> = batch_of(read.query)
+                    .filter(|&query| query <= read.query)
+                    .map(|query| {
+                        heap_at(
+                            query,
+                            (query == read.query).then_some((order.as_slice(), read.before)),
+                        )
+                    })
+                    .chain(
+                        batch_of(read.query)
+                            .filter(|&query| query > read.query)
+                            .map(|query| shared::RedoHeap {
+                                inserted_before: 0,
+                                ..heap_at(query, None)
+                            }),
+                    )
+                    .collect();
+                shared::redo_fetches(read.key.best_evalue, &redo_heaps)
+            })
+            .min_by(|a, b| {
+                a.query
+                    .cmp(&b.query)
+                    .then(a.before.cmp(&b.before))
+                    .then(a.kept.cmp(&b.kept))
+                    .then_with(|| a.key.cmp(&b.key))
+            })
+            .map(|read| (read.query, read.key.ordinal))
+    }
 }
 
 impl ListedSubjects {
@@ -900,13 +1073,67 @@ impl ListedSubjects {
         let Some(mut aligned) = shared::SeqAligned::of(&database.db, true) else {
             return;
         };
-        for hit_list in hit_lists.iter_mut().flatten() {
+        let mut first = None;
+        for (query, hit_list) in hit_lists.iter_mut().enumerate() {
+            let Some(hit_list) = hit_list else {
+                continue;
+            };
             hit_list.hsplist_array.truncate(hit_list.hsplist_count);
             aligned.retain(&mut hit_list.hsplist_array, |list| {
                 Some(self.ordinals[list.oid as usize])
             });
             hit_list.hsplist_count = hit_list.hsplist_array.len();
+            if first.is_none() {
+                first = aligned.first_utf8().map(|at| (query, at));
+            }
         }
+        self.earlier_utf8
+            .lock()
+            .expect("the UTF8String reads are not poisoned")
+            .aligned = first;
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3575 (quoted at
+    // `exclude_fetched`) and blast_traceback.c:1567-1577
+    /// Notes the call's first fetch with `check_oid_exclusion` that read a header with a
+    /// UTF8String where a VisibleString is expected (`XFetchedUtf8::first`): of the ordinary
+    /// traceback, or with `heaps` of the composition-based redo (its heaps as it left them, by
+    /// query), the batch of each query being `batch_of` (`redo_run::kappa_query_batches`). NCBI
+    /// posts its warning there, before the reads of the batch's Seq-aligns (`read_titles`).
+    pub(super) fn note_fetched(
+        &self,
+        database: &BlastpDatabase,
+        heaps: Option<&[BlastCompoHeap]>,
+        batch_of: &dyn Fn(usize) -> std::ops::Range<usize>,
+    ) {
+        if self.fetched_utf8.reads.is_empty() {
+            return;
+        }
+        if let Some((query, ordinal)) = self.fetched_utf8.first(heaps, batch_of, &self.ordinals) {
+            self.earlier_utf8
+                .lock()
+                .expect("the UTF8String reads are not poisoned")
+                .fetched = database.db.location_of(ordinal).map(|at| (query, at));
+        }
+    }
+
+    /// The reader of the reported sequences' headers of the call (`read_titles`), whose batches
+    /// start at the queries `batch_starts`, with the call's reads before them that took a
+    /// UTF8String for a VisibleString (`note_fetched`, `drop_unaligned`).
+    fn header_reader<'a>(
+        &self,
+        database: &'a BlastpDatabase,
+        batch_starts: &[usize],
+    ) -> shared::HeaderReader<'a> {
+        let headers = shared::HeaderReader::new(&database.db);
+        headers.batch_starts(batch_starts.to_vec());
+        headers.note_earlier(
+            *self
+                .earlier_utf8
+                .lock()
+                .expect("the UTF8String reads are not poisoned"),
+        );
+        headers
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:264-275
@@ -973,10 +1200,11 @@ impl ListedSubjects {
         &'a self,
         database: &'a BlastpDatabase,
         hit_lists: &[Option<BlastpHitList>],
+        batch_starts: &[usize],
     ) -> Result<ListedTitles<'a>> {
         let mut titles: Vec<Option<shared::StoredTitle>> = vec![None; self.ordinals.len()];
         let mut parsed = ParsedSubjects::default();
-        let headers = shared::HeaderReader::new(&database.db);
+        let headers = self.header_reader(database, batch_starts);
         for (query, hit_list) in hit_lists.iter().enumerate() {
             let Some(hit_list) = hit_list else {
                 continue;
@@ -1033,7 +1261,7 @@ impl ListedSubjects {
             sources,
             parsed: parsed.by_rank,
             program: database.program,
-            utf8: headers.first_utf8().cloned(),
+            utf8: headers.first_utf8(),
         })
     }
 }
@@ -1067,30 +1295,53 @@ impl ListedSubjects {
 /// The preliminary hit lists of a call (subjects named by ordinal id) without the subjects
 /// that NCBI's fetches of the redo or the traceback exclude, in their order; LOSAT's refusal
 /// where a subject's header cannot be read there (`shared::FetchExcluded::refusal`).
+/// The subjects whose header holds a UTF8String where a VisibleString is expected are returned
+/// (`XFetchedUtf8`): NCBI's fetches read them (`ListedSubjects::note_fetched`).
 fn exclude_fetched(
     database: &BlastpDatabase,
     hit_lists: &mut [Option<BlastpHitList>],
     x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
-) -> Result<()> {
+) -> Result<XFetchedUtf8> {
+    let mut fetched = XFetchedUtf8::default();
     let Some(excluded) = shared::FetchExcluded::of(&database.db) else {
-        return Ok(());
+        return Ok(fetched);
     };
     let refused = |failed| shared::FetchExcluded::refusal(failed, database.program);
-    for hit_list in hit_lists.iter_mut().flatten() {
+    for (query, hit_list) in hit_lists.iter_mut().enumerate() {
+        let Some(hit_list) = hit_list else {
+            continue;
+        };
         hit_list.hsplist_array.truncate(hit_list.hsplist_count);
-        excluded
-            .retain(&mut hit_list.hsplist_array, |list| Some(list.oid))
+        let found = excluded
+            .retain_noting(
+                &mut hit_list.hsplist_array,
+                |list| Some(list.oid),
+                XRedoKey::of,
+            )
             .map_err(refused)?;
         hit_list.hsplist_count = hit_list.hsplist_array.len();
+        if !found.is_empty() {
+            fetched.add(query, &hit_list.hsplist_array, found);
+        }
     }
-    for hit_list in x_compact_hit_lists.iter_mut().flatten() {
+    for (query, hit_list) in x_compact_hit_lists.iter_mut().enumerate() {
+        let Some(hit_list) = hit_list else {
+            continue;
+        };
         hit_list.hsplist_array.truncate(hit_list.hsplist_count);
-        excluded
-            .retain(&mut hit_list.hsplist_array, |list| Some(list.oid))
+        let found = excluded
+            .retain_noting(
+                &mut hit_list.hsplist_array,
+                |list| Some(list.oid),
+                XRedoKey::of,
+            )
             .map_err(refused)?;
         hit_list.hsplist_count = hit_list.hsplist_array.len();
+        if !found.is_empty() {
+            fetched.add(query, &hit_list.hsplist_array, found);
+        }
     }
-    Ok(())
+    Ok(fetched)
 }
 
 /// The ordinal ids of the subjects of `hit_lists` and `x_compact_hit_lists`, ascending, each once.
@@ -2300,13 +2551,13 @@ pub(super) fn x_titles_allow_blocks(
     >|
      -> bool {
         match deflines {
-            // A record with a UTF8String where a VisibleString is expected: the search of all
-            // queries writes NCBI's warning at its first read (`shared::Utf8Read`), which a block
-            // would write while the blocks before it are searched.
+            // A record with a UTF8String where a VisibleString is expected reads with NCBI's
+            // warning, which the block whose call reads it first posts where the search of all
+            // queries posts it (`shared::Utf8Read`, in the first query of the batch that reads it;
+            // the blocks write their reports one after the other, and the warning once per run).
             Ok(deflines) => {
                 deflines.len() == 1
                     && deflines[0].replaced_title_bytes == 0
-                    && !deflines[0].utf8
                     && if pairwise {
                         // The check of the search of all queries (`ListedTitles::check_shown_titles`),
                         // which the name of an empty title's source does not change
@@ -2428,9 +2679,7 @@ pub(super) fn x_titles_read_allow_blocks(
      -> bool {
         match deflines {
             // A UTF8String record as in `x_titles_allow_blocks`.
-            Ok(deflines) => {
-                deflines.len() == 1 && deflines[0].replaced_title_bytes == 0 && !deflines[0].utf8
-            }
+            Ok(deflines) => deflines.len() == 1 && deflines[0].replaced_title_bytes == 0,
             Err(_) => false,
         }
     };
@@ -2512,9 +2761,7 @@ pub(super) fn x_titles_taxids_allow_blocks(
             // The taxid `read_reported_taxonomy` takes of a sequence: its first definition
             // line's.
             // A UTF8String record as in `x_titles_allow_blocks`.
-            Ok(deflines) => {
-                deflines.len() == 1 && deflines[0].replaced_title_bytes == 0 && !deflines[0].utf8
-            }
+            Ok(deflines) => deflines.len() == 1 && deflines[0].replaced_title_bytes == 0,
             Err(_) => false,
         })
     };
@@ -3971,7 +4218,7 @@ mod tests {
         let mut hit_lists = vec![Some(first), None, Some(second)];
         let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
         assert_eq!(listed.ordinals, [0, 2, 7, 9]);
-        let titles = listed.read_titles(&database, &hit_lists).unwrap();
+        let titles = listed.read_titles(&database, &hit_lists, &[0]).unwrap();
         let oids = |hit_list: &Option<BlastpHitList>| -> Vec<(u32, Vec<u32>)> {
             let hit_list = hit_list.as_ref().unwrap();
             hit_list.hsplist_array[..hit_list.hsplist_count]
@@ -4047,8 +4294,10 @@ mod tests {
         let first = hit_lists[0].as_mut().unwrap();
         first.hsplist_array.retain(|hsp_list| hsp_list.oid == 1);
         first.hsplist_count = first.hsplist_array.len();
-        let records = listed.read_titles(&database, &hit_lists).unwrap();
-        let lean = listed.x_read_titles_lean(&database, &hit_lists).unwrap();
+        let records = listed.read_titles(&database, &hit_lists, &[0]).unwrap();
+        let lean = listed
+            .x_read_titles_lean(&database, &hit_lists, &[0])
+            .unwrap();
         let ListedShown::Lean(lean_titles) = &lean.shown else {
             panic!("lean titles");
         };
@@ -4124,7 +4373,7 @@ mod tests {
         let mut hit_lists = vec![None, hit_list(vec![list(3, 1e-9), list(1, 1e-3)], 1)];
         let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
         assert_eq!(listed.ordinals, [1, 3]);
-        let titles = listed.read_titles(&database, &hit_lists).unwrap();
+        let titles = listed.read_titles(&database, &hit_lists, &[0]).unwrap();
         assert_eq!(
             titles.records()[1].title(),
             b"p04 lower case and ambiguity codes"
@@ -4132,7 +4381,9 @@ mod tests {
         assert_eq!(titles.records()[0].title(), b"");
         assert_eq!(titles.records()[0].seq(), b"I");
         // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the lean titles do not read it either.
-        let lean = listed.x_read_titles_lean(&database, &hit_lists).unwrap();
+        let lean = listed
+            .x_read_titles_lean(&database, &hit_lists, &[0])
+            .unwrap();
         assert_eq!(lean.title(1), b"p04 lower case and ambiguity codes");
         assert_eq!(lean.title(0), b"");
         // Query 2 reports ordinal id 9 (volume 05) before ordinal id 0 (volume 00): the
@@ -4145,7 +4396,7 @@ mod tests {
         let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
         assert_eq!(listed.ordinals, [0, 1, 3, 9]);
         let error = listed
-            .read_titles(&database, &hit_lists)
+            .read_titles(&database, &hit_lists, &[0])
             .err()
             .expect("a missing header file")
             .downcast::<HeaderReadError>()
@@ -4159,7 +4410,7 @@ mod tests {
         // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the lean titles are read in the same order, with
         // the same error.
         let lean_error = listed
-            .x_read_titles_lean(&database, &hit_lists)
+            .x_read_titles_lean(&database, &hit_lists, &[0])
             .err()
             .expect("a missing header file")
             .downcast::<HeaderReadError>()
@@ -4226,7 +4477,7 @@ mod tests {
         clean.update(list(0));
         let mut hit_lists = vec![Some(clean)];
         let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
-        let titles = listed.read_titles(&database, &hit_lists).unwrap();
+        let titles = listed.read_titles(&database, &hit_lists, &[0]).unwrap();
         titles.check_reported_titles(&hit_lists).unwrap();
         // The subject with the bad byte: read as `#`, and rejected when it is reported.
         let mut bad = BlastpHitList::new(10);
@@ -4234,7 +4485,7 @@ mod tests {
         bad.update(list(0));
         let mut hit_lists = vec![Some(bad)];
         let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
-        let titles = listed.read_titles(&database, &hit_lists).unwrap();
+        let titles = listed.read_titles(&database, &hit_lists, &[0]).unwrap();
         assert_eq!(titles.records()[1].title(), b"p10 l#st protein");
         let error = titles.check_reported_titles(&hit_lists).unwrap_err();
         assert!(
@@ -4245,7 +4496,9 @@ mod tests {
         );
         // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the lean titles hold the same title and flag, and
         // give the same refusal.
-        let lean = listed.x_read_titles_lean(&database, &hit_lists).unwrap();
+        let lean = listed
+            .x_read_titles_lean(&database, &hit_lists, &[0])
+            .unwrap();
         assert_eq!(lean.title(1), b"p10 l#st protein");
         let lean_error = lean.check_reported_titles(&hit_lists).unwrap_err();
         assert_eq!(format!("{lean_error:#}"), format!("{error:#}"));

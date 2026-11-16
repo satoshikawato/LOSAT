@@ -95,7 +95,27 @@ pub(super) struct LocalStageDProfile<'a> {
     /// NCBI's fetches with `check_oid_exclusion` of a database search (`database::fetch_excluded`;
     /// `None` without a database or where they exclude nothing): the subjects they exclude leave
     /// the preliminary hit lists before the redo or the traceback.
-    pub fetch_excluded: Option<&'a crate::algorithm::common::database::FetchExcluded<'a>>,
+    pub fetch_excluded: Option<BatchFetches<'a>>,
+}
+
+/// NCBI's fetches with `check_oid_exclusion` of one query batch of a database search: the
+/// search's check (`database::fetch_excluded`, which its batches share) and the note of the
+/// batch's first fetch that read a header with a UTF8String where a VisibleString is expected
+/// (NCBI's warning comes there, before the batch's Seq-aligns: `database::read_titles`).
+#[derive(Clone, Copy)]
+pub(super) struct BatchFetches<'a> {
+    pub excluded: &'a crate::algorithm::common::database::FetchExcluded<'a>,
+    pub utf8: Option<&'a crate::seqdb::Utf8Reads>,
+}
+
+impl BatchFetches<'_> {
+    /// Notes the batch's fetch of `ordinal`, whose header holds a UTF8String where a
+    /// VisibleString is expected (`FetchExcluded::note_fetched`).
+    fn note(&self, ordinal: u32) {
+        if let Some(utf8) = self.utf8 {
+            self.excluded.note_fetched(utf8, ordinal);
+        }
+    }
 }
 
 /// The numbers of a database (`-db`) as NCBI's search reads them from its sequence source:
@@ -1420,21 +1440,6 @@ fn run_local_search_with_pool(
             })
         })
         .collect();
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575 and
-    // blast_traceback.c:1567-1577 (quoted at `blastp::blast_engine::database::exclude_fetched`)
-    // The redo's and the traceback's fetches (`check_oid_exclusion`) exclude a subject that the
-    // negative seqid list keeps without a line: its lists leave here, after the trim of
-    // `ADAPTIVE_CBS`, before the redo or the traceback (tblastn is gapped: `-ungapped` is
-    // refused).
-    if let Some(excluded) = profile.fetch_excluded {
-        excluded
-            .retain(&mut preliminary_lists, |(_, oid, _)| {
-                u32::try_from(*oid).ok()
-            })
-            .map_err(|failed| {
-                crate::algorithm::common::database::FetchExcluded::refusal(failed, "TBLASTN")
-            })?;
-    }
     // NCBI c++/src/algo/blast/core/blast_hspstream.c:91-96,158-204,
     // 569-610: the ordinary traceback stream sorts HSP lists by decreasing
     // OID, then each batch reads from the end; equal-OID query lists were
@@ -1447,6 +1452,40 @@ fn run_local_search_with_pool(
         });
     } else {
         preliminary_lists.sort_by(|(qa, oa, _), (qb, ob, _)| oa.cmp(ob).then_with(|| qb.cmp(qa)));
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575 and
+    // blast_traceback.c:1567-1577 (quoted at `blastp::blast_engine::database::exclude_fetched`)
+    // The redo's and the traceback's fetches (`check_oid_exclusion`) exclude a subject that the
+    // negative seqid list keeps without a line: its lists leave here, after the trim of
+    // `ADAPTIVE_CBS`, before the redo or the traceback (tblastn is gapped: `-ungapped` is
+    // refused). They leave the lists in the order in which the redo or the traceback takes them
+    // (a stable sort, so the order of the others is the same either way), which places the
+    // subjects whose header holds a UTF8String where a VisibleString is expected in it
+    // (`fetched_utf8`).
+    let mut fetched_utf8 = Vec::new();
+    if let Some(fetches) = profile.fetch_excluded {
+        fetched_utf8 = fetches
+            .excluded
+            .retain_noting(
+                &mut preliminary_lists,
+                |(_, oid, _)| u32::try_from(*oid).ok(),
+                |(context, _, list)| (*context, list.best_evalue, !list.hsps.is_empty()),
+            )
+            .map_err(|failed| {
+                crate::algorithm::common::database::FetchExcluded::refusal(failed, "TBLASTN")
+            })?;
+        // The traceback fetches every listed subject; the redo's are noted after it
+        // (`note_redo_fetched`).
+        if !compo_adjust_mode.is_enabled() {
+            if let Some(ordinal) = crate::algorithm::common::database::FetchedUtf8::traceback_first(
+                &fetched_utf8
+                    .iter()
+                    .map(|(read, _)| *read)
+                    .collect::<Vec<_>>(),
+            ) {
+                fetches.note(ordinal);
+            }
+        }
     }
 
     if !compo_adjust_mode.is_enabled() {
@@ -1469,6 +1508,9 @@ fn run_local_search_with_pool(
             pool,
         );
     }
+    // The redo's order of the lists of each query that holds a subject whose header has a
+    // UTF8String where a VisibleString is expected (`note_redo_fetched`, after the redo).
+    let fetched_orders = redo_fetched_orders(&preliminary_lists, &fetched_utf8);
     // With a `-db` stream, the subjects of the lists, each read
     // when first aligned, held until their last match is done (LOSAT_X_TBNSTAGEDROP; with it off
     // until the redo ends).
@@ -1929,6 +1971,9 @@ fn run_local_search_with_pool(
         }
     }
 
+    if let Some(fetches) = profile.fetch_excluded {
+        note_redo_fetched(fetches, &heaps, &fetched_utf8, &fetched_orders);
+    }
     // NCBI c++/src/algo/blast/core/blast_kappa.c:2494-2515;
     // c++/src/algo/blast/core/blast_hits.c:3243-3297,3383-3400,3420-3437:
     // while ((hsp_list = BlastCompo_HeapPop(heap)) != NULL)
@@ -1951,6 +1996,81 @@ fn run_local_search_with_pool(
         results.push(hitlist);
     }
     Ok(results)
+}
+
+/// A subject of the batch's lists whose header holds a UTF8String where a VisibleString is
+/// expected (`FetchExcluded::retain_noting`), with its query, its list's best E-value and whether
+/// the list has HSPs.
+type FetchedRead = (
+    crate::algorithm::common::database::FetchedUtf8,
+    (usize, f64, bool),
+);
+
+/// For each query with a read of `fetched`, where its lists start in `lists` (the redo's order,
+/// query by query) and their subjects in that order. Empty without one.
+#[cold]
+#[inline(never)]
+fn redo_fetched_orders<L>(
+    lists: &[(usize, usize, L)],
+    fetched: &[FetchedRead],
+) -> Vec<(usize, usize, Vec<i32>)> {
+    let mut queries: Vec<usize> = fetched.iter().map(|(_, (query, _, _))| *query).collect();
+    queries.sort_unstable();
+    queries.dedup();
+    queries
+        .into_iter()
+        .map(|query| {
+            let start = lists.partition_point(|(context, _, _)| *context < query);
+            let oids = lists[start..]
+                .iter()
+                .take_while(|(context, _, _)| *context == query)
+                .map(|(_, oid, _)| *oid as i32)
+                .collect();
+            (query, start, oids)
+        })
+        .collect()
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3575 (quoted at
+// `blastp::blast_engine::database::exclude_fetched`)
+/// Notes the batch's first fetch of the composition-based redo that read a header with a
+/// UTF8String where a VisibleString is expected (`fetched`, in the redo's order, query by
+/// query): the subjects whose turn its early termination test leaves
+/// (`common::database::redo_fetches`, with `heaps` as the redo left them: every query's, as the
+/// test reads them; the heaps of the queries before a match's are as at its turn, those after it
+/// untouched), kept or excluded.
+#[cold]
+#[inline(never)]
+fn note_redo_fetched(
+    fetches: BatchFetches<'_>,
+    heaps: &[CompoHeap],
+    fetched: &[FetchedRead],
+    orders: &[(usize, usize, Vec<i32>)],
+) {
+    let first = fetched
+        .iter()
+        .filter(|(_, (_, _, has_hsps))| *has_hsps)
+        .filter(|(read, (query, evalue, _))| {
+            let (_, start, oids) = orders
+                .iter()
+                .find(|(of, _, _)| of == query)
+                .expect("a query with a read has its order");
+            let before = &oids[..(read.before - start).min(oids.len())];
+            let redo_heaps: Vec<_> = heaps
+                .iter()
+                .enumerate()
+                .map(|(index, heap)| match index.cmp(query) {
+                    std::cmp::Ordering::Less => heap.redo_heap(|_| true),
+                    std::cmp::Ordering::Equal => heap.redo_heap(|oid| before.contains(&oid)),
+                    std::cmp::Ordering::Greater => heap.redo_heap(|_| false),
+                })
+                .collect();
+            crate::algorithm::common::database::redo_fetches(*evalue, &redo_heaps)
+        })
+        .min_by_key(|(read, _)| read.index);
+    if let Some((read, _)) = first {
+        fetches.note(read.ordinal);
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:153-154

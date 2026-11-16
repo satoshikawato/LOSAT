@@ -45,7 +45,7 @@ const PROGRAM: &str = "TBLASTN";
 /// The database of a `-db` search: the opened database and its name as NCBI keeps it
 /// (`TblastnArgs::database_name`: the `-db` value without white space at its ends).
 pub(super) struct TblastnDatabase {
-    db: SeqDb,
+    pub(crate) db: SeqDb,
     name: String,
     /// The taxonomy database of the run, opened by the XML2 and JSON formats and by the
     /// batches' prefetch of outfmt 0, 5, 6 and 7 (`prefetch_messages`).
@@ -56,15 +56,6 @@ pub(super) struct TblastnDatabase {
 }
 
 impl TblastnDatabase {
-    /// NCBI's warning of its first read of a UTF8String header (`read`), where the run has not
-    /// posted it (`shared::Utf8Read::post`, prefix `[tblastn]`).
-    pub(super) fn utf8_post(
-        &self,
-        read: &shared::Utf8Read,
-    ) -> Option<crate::report::diag_log::Posts> {
-        read.post(&self.db, "tblastn")
-    }
-
     /// The OIDs of the database's ordinal ids, which name the reported sequences without
     /// parsed Seq-ids (`gnl|BL_ORD_ID|n`).
     pub(super) fn oid_map(&self) -> crate::seqdb::OidMap<'_> {
@@ -454,15 +445,17 @@ pub(super) fn fetch_excluded(database: &TblastnDatabase) -> Option<shared::Fetch
 /// The final hit lists `hitlists` of a query batch without the sequences that NCBI makes no
 /// Seq-align of (`shared::SeqAligned`): after their cut to the hit list size, before
 /// `read_titles`.
-pub(super) fn drop_unaligned(database: &TblastnDatabase, hitlists: &mut [KappaResultHitList]) {
+pub(super) fn drop_unaligned(
+    database: &TblastnDatabase,
+    hitlists: &mut [KappaResultHitList],
+) -> Option<crate::seqdb::SeqLocation> {
     // tblastn is gapped (`-ungapped` is refused): the redo or the traceback fetched every
     // subject with `check_oid_exclusion` (`fetch_excluded`).
-    let Some(mut aligned) = shared::SeqAligned::of(&database.db, true) else {
-        return;
-    };
+    let mut aligned = shared::SeqAligned::of(&database.db, true)?;
     for hitlist in hitlists {
         hitlist.with_lists_mut(|lists| aligned.retain(lists, |list| u32::try_from(list.oid).ok()));
     }
+    aligned.first_utf8()
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:283-293
@@ -486,9 +479,11 @@ pub(super) fn read_titles(
     database: &TblastnDatabase,
     hitlists: &[KappaResultHitList],
     first_query: usize,
+    earlier: shared::EarlierUtf8,
     titles: &mut DatabaseTitles,
 ) -> Result<Option<shared::Utf8Read>> {
     let headers = shared::HeaderReader::new(&database.db);
+    headers.note_earlier(earlier);
     for (index, hitlist) in hitlists.iter().enumerate() {
         for list in hitlist.lists() {
             let ordinal = u32::try_from(list.oid).context("negative TBLASTN subject OID")?;
@@ -499,7 +494,7 @@ pub(super) fn read_titles(
             titles.insert(ordinal, title);
         }
     }
-    Ok(headers.first_utf8().cloned())
+    Ok(headers.first_utf8())
 }
 
 /// What the XML2 and JSON formats show of a database sequence beyond its title: its
@@ -943,7 +938,7 @@ mod tests {
         let of = |letters: bool| {
             let mut hitlists = vec![hitlist(&[(1, 50), (0, 40)])];
             let mut titles = DatabaseTitles::new();
-            read_titles(&database, &hitlists, 0, &mut titles).unwrap();
+            read_titles(&database, &hitlists, 0, Default::default(), &mut titles).unwrap();
             reported_subjects(
                 &database,
                 &titles,
@@ -998,7 +993,7 @@ mod tests {
             let mut hitlists: Vec<KappaResultHitList> =
                 queries.iter().map(|&lists| hitlist(lists)).collect();
             let mut titles = DatabaseTitles::new();
-            read_titles(database, &hitlists, 0, &mut titles).unwrap();
+            read_titles(database, &hitlists, 0, Default::default(), &mut titles).unwrap();
             let reported = reported_subjects(
                 database,
                 &titles,

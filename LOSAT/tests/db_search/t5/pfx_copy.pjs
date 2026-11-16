@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "pfx_copy",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pfx_copy",
+  "number-of-letters": 360,
+  "number-of-sequences": 3,
+  "last-updated": "2026-11-17T05:18:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 1,
+  "bytes-total": 49946,
+  "bytes-to-cache": 484,
+  "files": [
+    "pfx_copy.pdb",
+    "pfx_copy.phr",
+    "pfx_copy.pin",
+    "pfx_copy.pog",
+    "pfx_copy.pos",
+    "pfx_copy.pot",
+    "pfx_copy.psq",
+    "pfx_copy.ptf",
+    "pfx_copy.pto"
+  ]
+}

@@ -66,6 +66,10 @@ record cut after its first byte (`eof`, which the searches end on with exit stat
 reports of them: `remaining-gaps-20261112/T/SURVEY_T5d.md` and `T/fix1_t5d.md` of line RG. The
 names after `--header-only` build only those edits (the other databases keep their dates).
 
+With `--fetch-only` (`python3 tests/db_search/t5/make_t5.py NCBI_BIN --fetch-only`, fix 2 of line RG item
+T5d) it writes the databases of NCBI's other reads of a UTF8String header (`fetch_main`): the fetches of the
+traceback and of the composition-based redo under a negative seqid list, and blastdbcmd's version check.
+
 Python 3 standard library only; makeblastdb is NCBI's (the comparison oracle builds the inputs).
 """
 import os
@@ -419,6 +423,94 @@ def header_main(ncbi_bin, only=()):
     os.rmdir(work)
 
 
+def patch_record_any(base, ext, oid, edit):
+    """`patch_record` of a database of either version (version 5's index holds the LMDB file's name
+    after the title)."""
+    index = bytearray(open(f"{base}.{ext}in", "rb").read())
+    version, = struct.unpack(">I", index[0:4])
+    at = 8 + (4 if version == 5 else 0)
+    for _ in range(3 if version == 5 else 2):  # title, (LMDB name,) date
+        at += 4 + struct.unpack(">I", index[at:at + 4])[0]
+    count, = struct.unpack(">I", index[at:at + 4])
+    at += 4 + 8 + 4
+    offsets = list(struct.unpack(f">{count + 1}I", index[at:at + 4 * (count + 1)]))
+    headers = open(f"{base}.{ext}hr", "rb").read()
+    records = [headers[offsets[k]:offsets[k + 1]] for k in range(count)]
+    records[oid] = edit(records[oid])
+    offsets = [0]
+    for record in records:
+        offsets.append(offsets[-1] + len(record))
+    index[at:at + 4 * (count + 1)] = struct.pack(f">{count + 1}I", *offsets)
+    open(f"{base}.{ext}hr", "wb").write(b"".join(records))
+    open(f"{base}.{ext}in", "wb").write(bytes(index))
+
+
+def fetch_main(ncbi_bin):
+    """`--fetch-only` (line RG item T5d fix 2): the databases of NCBI's other reads of a header with a
+    UTF8String title. The version 5 databases `pfx_utf8`, `pfx_utf8r` and `nfx_utf8` with `-parse_seqids`
+    (`NSW0.1` the protein hd0 of `hd.faa`, which the query `hd_q0.faa` matches, `NSW1.1` hd2, whose chance
+    alignment with it has an E-value of about 6, with the UTF8String title, and `NSW2.1` hd1; `pfx_utf8r` the
+    first two in the other order; `nfx_utf8` their codons as `NSWN<n>.1`; `pfx_copy` and `nfx_copy` with
+    `NSC1.1` / `NSCN1.1` a weaker copy of hd0 instead, every sixth letter changed, which the redo fetches),
+    and the negative seqid lists `fx_neg1.txt` (the weak sequence) and `fx_neg2.txt` (another; `nfx_*`,
+    `cfx_*` and `ncfx_*` of the other databases): under them NCBI's
+    traceback and composition-based redo read the header of each subject they fetch, the redo only those its
+    early termination test leaves (`BlastCompo_EarlyTermination`: with `-max_target_seqs 1` the strong match
+    fills the heap, and the weak one is not fetched where the redo takes it after). The version 4 database
+    `pva_utf8` with `-parse_seqids` (`gb|HDA<n>.1|`, the UTF8String title at OID 1) and `pva_batch.txt`:
+    blastdbcmd's version check of `HDA1.2` reads HDA1.1's header."""
+    here = os.path.join("tests", "db_search", "t5")
+    work = os.path.join(here, "work")
+    os.makedirs(work, exist_ok=True)
+    proteins, nucleotides = header_letters()
+    for ext, seqs in (("faa", proteins), ("fna", nucleotides)):
+        with open(os.path.join(here, f"hd_q0.{ext}"), "w") as f:
+            f.write(f">q0\n{seqs[0]}\n")
+    utf8 = lambda r: with_first_tag(r, b"\xa0\x80", 0x1A, 0x0C)
+    amino = "ACDEFGHIKLMNPQRSTVWY"
+    # A weaker copy of hd0: every sixth letter the next of the alphabet (83 % identity), and its codons.
+    copy = "".join(amino[(amino.index(c) + 1) % 20] if i % 6 == 3 else c for i, c in enumerate(proteins[0]))
+    codons = {c: nucleotides[0][3 * i:3 * i + 3] for i, c in enumerate(proteins[0])}
+    for k, c in enumerate(proteins[1] + proteins[2]):
+        codons.setdefault(c, (nucleotides[1] + nucleotides[2])[3 * k:3 * k + 3])
+    copied = "".join(codons[c] for c in copy)
+    for name, kind, order, prefix, weak in (("pfx_utf8", "p", (0, 2, 1), "NSW", None),
+                                             ("pfx_utf8r", "p", (2, 0, 1), "NSW", None),
+                                             ("nfx_utf8", "n", (0, 2, 1), "NSWN", None),
+                                             ("pfx_copy", "p", (0, 2, 1), "NSC", copy),
+                                             ("nfx_copy", "n", (0, 2, 1), "NSCN", copied)):
+        seqs = list(proteins if kind == "p" else nucleotides)
+        if weak is not None:
+            seqs[2] = weak
+        fasta = os.path.join(work, f"{name}.fa")
+        names = {0: "0.1 strong", 2: "1.1 weak", 1: "2.1 other"}
+        with open(fasta, "w") as f:
+            for k in order:
+                f.write(f">{prefix}{names[k]}\n{seqs[k]}\n")
+        out = os.path.join(here, name)
+        cmd = [os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", "prot" if kind == "p" else "nucl",
+               "-blastdb_version", "5", "-taxid", "9606", "-title", name, "-out", out, "-parse_seqids"]
+        env = {"PATH": "/usr/bin:/bin", "HOME": os.path.abspath(here), "BLAST_USAGE_REPORT": "false"}
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, env=env)
+        patch_record_any(out, kind, order.index(2), utf8)
+    for kind, prefix in (("", "NSW"), ("n", "NSWN"), ("c", "NSC"), ("nc", "NSCN")):
+        for k in (1, 2):
+            with open(os.path.join(here, f"{kind}fx_neg{k}.txt"), "w") as f:
+                f.write(f"{prefix}{k}.1\n")
+    fasta = os.path.join(work, "pva.fa")
+    with open(fasta, "w") as f:
+        for n, seq in enumerate(proteins):
+            f.write(f">gb|HDA{n}.1| record {n} of the T5d databases\n{seq}\n")
+    out = os.path.join(here, "pva_utf8")
+    makeblastdb(ncbi_bin, fasta, "prot", 9606, out, True)
+    patch_record(out, "p", 1, utf8)
+    with open(os.path.join(here, "pva_batch.txt"), "w") as f:
+        f.write("HDA1.2\nHDA2.1\n")
+    for name in os.listdir(work):
+        os.remove(os.path.join(work, name))
+    os.rmdir(work)
+
+
 def stored_main(ncbi_bin, prefix, stored):
     """The version 4 protein databases `<prefix>_<taxid>` of the titles `stored` (the letters of
     `pdup.faa`, `-taxid <taxid>`, none for `None`) and the alias `<prefix>` over them."""
@@ -608,6 +700,8 @@ if __name__ == "__main__":
         stored_main(sys.argv[1], "pword", WORD_STORED)
     elif "--taxid-only" in sys.argv[2:]:
         taxid_main(sys.argv[1])
+    elif "--fetch-only" in sys.argv[2:]:
+        fetch_main(sys.argv[1])
     elif "--header-only" in sys.argv[2:]:
         header_main(sys.argv[1], [name for name in sys.argv[2:] if not name.startswith("--")])
     else:

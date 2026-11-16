@@ -366,7 +366,7 @@ pub(crate) const COMPO_HEAP_EVALUE_STRETCH: f64 = 5.0;
 //     else return 0;
 // }
 // ```
-fn evalue_comp(evalue1: f64, evalue2: f64) -> Ordering {
+pub(crate) fn evalue_comp(evalue1: f64, evalue2: f64) -> Ordering {
     const EPSILON: f64 = 1.0e-180;
     if evalue1 < EPSILON && evalue2 < EPSILON {
         Ordering::Equal
@@ -1050,6 +1050,15 @@ impl BlastCompoHeap {
     // ```
     pub(crate) fn filled_to_cutoff(&self) -> bool {
         self.n >= self.heap_threshold && self.worst_evalue <= self.ecutoff
+    }
+
+    /// The heap's records (`array[1..=n]` of a list, `heapArray[1..=n]` of a heap).
+    pub(crate) fn records(&self) -> &[BlastCompoHeapRecord] {
+        self.array
+            .as_ref()
+            .or(self.heap_array.as_ref())
+            .and_then(|records| records.get(1..=self.n))
+            .unwrap_or(&[])
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_heap.c:391-414

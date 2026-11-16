@@ -106,7 +106,9 @@
 //!   has written them to its writer.
 //! - [`run_batches`] searches one of NCBI's query batches at a time: the host reports progress
 //!   between batches and stops the search by not asking for the next one. Inside a batch only
-//!   the host can stop it, by ending the thread or the process.
+//!   the host can stop it, by ending the thread or the process. A run that ends with exit status
+//!   0 and no message in a batch (a database header record that ends before NCBI's read enters
+//!   its elements) ends with that batch: it carries no HSPs and its diagnostics.
 //! - The records are read before the search, so a reader error is an [`Error::Input`] before
 //!   any report, where the command line has reported the batches before the error (and, with
 //!   `-out`, made the file: [`run_to_file`] makes it where the command line makes `-out`, after

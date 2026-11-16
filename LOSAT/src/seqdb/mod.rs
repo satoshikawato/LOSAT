@@ -2376,11 +2376,29 @@ impl SeqDb {
         self.utf8_posted.load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// The member of NCBI's warning of a read of the header at `at` that took a UTF8String for a
+    /// VisibleString (`Utf8Reads`), where the run posts it now (`take_utf8_post`, once per
+    /// process): `None` once posted, or where the record holds no such string before a failure.
+    #[cold]
+    #[inline(never)]
+    pub fn take_utf8_post_at(&self, at: SeqLocation) -> Option<String> {
+        if self.utf8_posted() {
+            return None;
+        }
+        let path = self.utf8_string_path_at(at)?;
+        self.take_utf8_post().then_some(path)
+    }
+
     /// [`SeqDb::utf8_string_path`] of the sequence at `at`.
     #[cold]
     pub fn utf8_string_path_at(&self, at: SeqLocation) -> Option<String> {
         let record = self.volumes[at.volume].header_bytes(at.vol_oid).ok()?;
         crate::seqid::ber::utf8_string_path(&record)
+    }
+
+    /// The place of the sequence `ordinal` (`None` outside the database).
+    pub fn location_of(&self, ordinal: u32) -> Option<SeqLocation> {
+        self.find_volume(ordinal).ok()
     }
 
     /// [`SeqDb::defline_set`] of the sequence at `at`.
@@ -2788,6 +2806,92 @@ impl OrdinalTagError {
             path: path.to_path_buf(),
             message,
         }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:304-309 (quoted at
+// `algorithm::common::database::Utf8Read`)
+/// The first, in NCBI's order, of a reader's reads of header records that hold a UTF8String
+/// where a VisibleString is expected (`DeflineSet::utf8`, `OrdinalDefline::utf8`). NCBI's reader
+/// posts its warning at the first such read of the process (`ERR_POST_X_ONCE`,
+/// [`SeqDb::take_utf8_post`]), naming the member the record holds
+/// ([`SeqDb::utf8_string_path`]), wherever the read is: this is the one note of every LOSAT read
+/// that stands for one of NCBI's reads of a header. Its readers: a search's reads of its
+/// reported sequences and of the other sequences its scope reads
+/// (`algorithm::common::database::HeaderReader`), the fetches with `check_oid_exclusion` and the
+/// Seq-aligns under a seqid list (`LineCheck`), the lookups of an accession whose version NCBI
+/// checks against the candidates' Seq-ids (`IdLookup`, `x_CheckVersions`), and blastdbcmd's
+/// reads (`Source`). A reader gives each read its place in NCBI's order (`order`, the least
+/// first; of equal places the one noted first), so that reads on several threads note the same
+/// first; a record is noted only where its read found the string (cold).
+#[derive(Debug, Default)]
+pub struct Utf8Reads {
+    first: std::sync::Mutex<Option<Utf8Note>>,
+    /// Whether `first` may hold a read (a reader asks this before it locks).
+    noted: AtomicBool,
+}
+
+/// A read that `Utf8Reads` noted: its place in the reader's order and the sequence read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Utf8Note {
+    pub order: u128,
+    pub at: SeqLocation,
+}
+
+impl Utf8Reads {
+    /// Notes the read of the sequence at `at` at `order`, where it comes before the reads noted
+    /// so far.
+    #[cold]
+    #[inline(never)]
+    pub fn note(&self, order: u128, at: SeqLocation) {
+        let mut first = self
+            .first
+            .lock()
+            .expect("the UTF8String note is not poisoned");
+        if first.is_none_or(|first| order < first.order) {
+            *first = Some(Utf8Note { order, at });
+        }
+        self.noted.store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    /// [`Utf8Reads::note`] of the sequence `ordinal` of `db` (none outside the database).
+    #[cold]
+    #[inline(never)]
+    pub fn note_ordinal(&self, db: &SeqDb, order: u128, ordinal: u32) {
+        if let Ok(at) = db.find_volume(ordinal) {
+            self.note(order, at);
+        }
+    }
+
+    /// The first read noted.
+    pub fn first(&self) -> Option<Utf8Note> {
+        if !self.noted.load(std::sync::atomic::Ordering::Acquire) {
+            return None;
+        }
+        *self
+            .first
+            .lock()
+            .expect("the UTF8String note is not poisoned")
+    }
+
+    /// `first`, which the reader then forgets (each batch of a search takes its own).
+    pub fn take(&self) -> Option<Utf8Note> {
+        if !self.noted.load(std::sync::atomic::Ordering::Acquire) {
+            return None;
+        }
+        self.take_noted()
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn take_noted(&self) -> Option<Utf8Note> {
+        let mut first = self
+            .first
+            .lock()
+            .expect("the UTF8String note is not poisoned");
+        self.noted
+            .store(false, std::sync::atomic::Ordering::Release);
+        first.take()
     }
 }
 

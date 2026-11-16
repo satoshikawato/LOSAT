@@ -773,15 +773,17 @@ impl Volume {
     }
 
     /// Whether the volume's rule keeps a line of the sequence `oid` (volume-relative;
-    /// `SeqDb::keeps_line`): false only where a seqid rule keeps none; the reader's error for a
+    /// `SeqDb::line_read`): false only where a seqid rule keeps none; the reader's error for a
     /// tag that NCBI's read cannot adjust (NCBI's `GetSeqIDs` of the Seq-align throws there).
-    pub(super) fn keeps_line(&self, oid: u32) -> Result<bool, SeqDbError> {
+    /// With it, whether the record holds a UTF8String where a VisibleString is expected
+    /// (`DeflineSet::utf8`; false where no seqid rule reads the record).
+    pub(super) fn line_read(&self, oid: u32) -> Result<(bool, bool), SeqDbError> {
         let Some(line_rule) = self
             .defline_rule
             .as_ref()
             .filter(|line_rule| line_rule.rule.reads_seqids())
         else {
-            return Ok(true);
+            return Ok((true, false));
         };
         let record = self.header_bytes(oid)?;
         let set = decode_full(
@@ -789,7 +791,7 @@ impl Volume {
             &with_extension(&self.base, self.index.seqtype, "hr"),
         )?;
         Self::rule_mask(line_rule, &set)
-            .map(|mask| mask.is_some())
+            .map(|mask| (mask.is_some(), set.utf8))
             .map_err(|error| error.error(&self.base, line_rule.volume_start + oid))
     }
 

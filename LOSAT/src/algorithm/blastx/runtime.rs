@@ -102,6 +102,11 @@ pub struct BatchResults {
     //               for(unsigned int i =1; i < num_subjects; i++)
     // ```
     pub search_skipped: bool,
+    /// The ordinal id of the first of the batch's fetches with `check_oid_exclusion` (its
+    /// traceback's or redo's, by subject) that read a header with a UTF8String where a
+    /// VisibleString is expected: NCBI's warning comes there, before its Seq-aligns' reads
+    /// (`ReportedSubjects::read_titles`; of the units of a reader batch, the least).
+    pub fetched_utf8: Option<u32>,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1539-1554
@@ -638,6 +643,7 @@ impl PreliminarySink for Runtime<'_> {
             prepared: batch.x_for_results(),
             parameters: params.to_vec(),
             search_skipped: true,
+            fetched_utf8: None,
         });
         Ok(())
     }
@@ -1540,6 +1546,13 @@ impl PreliminarySink for Runtime<'_> {
         // subject; its such hits leave at the Seq-aligns (`ReportedSubjects::drop_unaligned`).
         // A header that the fetch cannot read ends NCBI's search: LOSAT's refusal
         // (`FetchExcluded::refusal`).
+        // The subjects whose header holds a UTF8String where a VisibleString is expected, with
+        // the query of their list, its best E-value and whether it has HSPs, and the lists left in
+        // the stream's order (their query and subject) where there is one: the batch's first such
+        // fetch is NCBI's warning (`fetched_utf8`; the redo's, `kappa_batch::redo_fetched`).
+        let mut fetched_reads = Vec::new();
+        let mut fetched_order = Vec::new();
+        let mut fetched_utf8 = None;
         if self.options.gapped {
             if let Some(excluded) = self
                 .subjects
@@ -1548,11 +1561,32 @@ impl PreliminarySink for Runtime<'_> {
             {
                 stream
                     .retain_closed(|lists| {
-                        excluded.retain(lists, |list| u32::try_from(list.oid).ok())
+                        let found = excluded.retain_noting(
+                            lists,
+                            |list| u32::try_from(list.oid).ok(),
+                            |list| (list.query_index, list.best_evalue, !list.hsps.is_empty()),
+                        )?;
+                        if !found.is_empty() {
+                            fetched_order = lists
+                                .iter()
+                                .map(|list| (list.query_index, list.oid))
+                                .collect();
+                        }
+                        fetched_reads = found;
+                        Ok(())
                     })
                     .map_err(|failed| {
                         crate::algorithm::common::database::FetchExcluded::refusal(failed, "BLASTX")
                     })?;
+                // The traceback fetches every subject of the stream.
+                if self.options.composition == 0 {
+                    fetched_utf8 = crate::algorithm::common::database::FetchedUtf8::traceback_first(
+                        &fetched_reads
+                            .iter()
+                            .map(|(read, _)| *read)
+                            .collect::<Vec<_>>(),
+                    );
+                }
             }
         }
         self.observer.restored(batch, &full);
@@ -1773,6 +1807,7 @@ impl PreliminarySink for Runtime<'_> {
                 }
             }
         } else if let Some(state) = &mut kappa {
+            let mut redo_fetched = None;
             x_t_finish = self.kappa_redo_batch(KappaBatch {
                 batch,
                 full: &full,
@@ -1781,7 +1816,9 @@ impl PreliminarySink for Runtime<'_> {
                 queries: &mut queries,
                 heaps: &mut heaps,
                 inactive_heaps: &mut inactive_heaps,
+                fetched: (&fetched_reads, &fetched_order, &mut redo_fetched),
             })?;
+            fetched_utf8 = redo_fetched;
         } else {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1640-1707
             // ```c++
@@ -2162,6 +2199,7 @@ impl PreliminarySink for Runtime<'_> {
             prepared: batch.x_for_results(),
             parameters: full,
             search_skipped: false,
+            fetched_utf8,
         });
         super::x_timing::end(XEnd::Finish, x_t_finish);
         Ok(())

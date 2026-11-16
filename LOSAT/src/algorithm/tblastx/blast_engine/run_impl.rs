@@ -3975,19 +3975,28 @@ fn run_batch_loop(
         // prefetch is off (below), by query of the batch.
         let mut query_fetches: Vec<Vec<u8>> = Vec::new();
         if let ShownSubjects::Database { database, .. } = &subjects.shown {
-            super::super::database::drop_unaligned(database, &mut batch.hits);
+            let earlier = crate::algorithm::common::database::EarlierUtf8 {
+                fetched: batch.fetched_utf8.map(|at| (start, at)),
+                aligned: super::super::database::drop_unaligned(database, &mut batch.hits)
+                    .map(|at| (start, at)),
+            };
             let ordered = batch.hits.as_slice();
             let read = super::super::database::read_titles(
                 database,
                 ordered,
                 start,
+                earlier,
                 &mut reports.titles.borrow_mut(),
             );
             match read {
                 // NCBI's warning of its first read of a UTF8String header follows the batch's
                 // reader messages and request posts (`warnings[start]`), before its prefetch.
                 Ok(read) => {
-                    if let Some(posts) = database.utf8_post(read.as_ref()) {
+                    if let Some(posts) = crate::algorithm::common::database::Utf8Read::post_of(
+                        read.as_ref(),
+                        &database.db,
+                        "tblastx",
+                    ) {
                         warnings[start].append(&posts);
                         batch_warnings.append(&posts);
                     }
@@ -3998,7 +4007,13 @@ fn run_batch_loop(
                             reports.write_before_failed_batch(outputs, done, &warnings)?;
                             batch_warnings
                                 .write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-                            if let Some(posts) = database.utf8_post(failure.utf8.as_ref()) {
+                            if let Some(posts) =
+                                crate::algorithm::common::database::Utf8Read::post_of(
+                                    failure.utf8.as_ref(),
+                                    &database.db,
+                                    "tblastx",
+                                )
+                            {
                                 posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
                             }
                             return Err(failure.error);
@@ -4871,6 +4886,7 @@ fn search_query_batch<S: TbxScore>(
             searched: true,
             queries: vec![TblastxQueryStats::default(); queries_raw.len()],
             x_timing: Vec::new(),
+            fetched_utf8: None,
         });
     }
     let t_read_subjects = t_phase_read_subjects.elapsed();
@@ -5091,6 +5107,7 @@ fn search_query_batch<S: TbxScore>(
             searched: false,
             queries: vec![TblastxQueryStats::default(); queries_raw.len()],
             x_timing: Vec::new(),
+            fetched_utf8: None,
         });
     }
     // `-db` whose sequences could not be read: this first batch with a valid context fails
@@ -5744,6 +5761,9 @@ fn search_query_batch<S: TbxScore>(
         searched: true,
         queries: query_stats,
         x_timing,
+        fetched_utf8: fetch_excluded
+            .as_ref()
+            .and_then(crate::algorithm::common::database::FetchExcluded::take_utf8),
     })
 }
 

@@ -2315,6 +2315,23 @@ impl CompoHeap {
     //     return TRUE;
     // }
     // ```
+    /// The heap as `common::database::redo_fetches` reads it at a match's turn, `before` telling
+    /// whether a record's subject came before the match in the redo.
+    pub fn redo_heap(
+        &self,
+        before: impl Fn(usize) -> bool,
+    ) -> crate::algorithm::common::database::RedoHeap {
+        crate::algorithm::common::database::RedoHeap {
+            ecutoff: self.cutoff,
+            heap_threshold: self.threshold,
+            inserted_before: self
+                .entries
+                .iter()
+                .filter(|entry| entry.list.best_evalue <= self.cutoff && before(entry.list.oid))
+                .count(),
+        }
+    }
+
     pub fn early(e: f64, heaps: &[Self]) -> bool {
         heaps
             .iter()

@@ -782,7 +782,58 @@ pub(crate) struct Utf8Read {
     pub(crate) path: String,
 }
 
+/// The places of a batch's reads of header records in NCBI's order (`HeaderReader::first_utf8`):
+/// the fetches with `check_oid_exclusion` of its traceback or redo (`FetchExcluded`), then its
+/// Seq-aligns of the final hit lists (`SeqAligned` under a seqid list, which reads them all),
+/// the reads of the reported sequences (`read_header`, which the Seq-aligns of the other
+/// databases read), then the formatters' scope, which reads other sequences (a lookup's version
+/// check, the copies and the weak matches it compares).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Utf8Phase {
+    Fetch,
+    Aligned,
+    Reported,
+    Scope,
+}
+
+impl Utf8Phase {
+    /// The place in `Utf8Reads`' order of a read of this phase for the query `query` of the
+    /// batch that starts at `batch` (of equal places, the first noted is the first): a batch's
+    /// reads come before the next batch's.
+    fn order(self, batch: usize, query: usize) -> u128 {
+        (batch as u128) << 96 | (self as u128) << 88 | ((query as u128) & ((1 << 56) - 1)) << 32
+    }
+
+    /// The query of the place `order`.
+    fn query(order: u128) -> usize {
+        ((order >> 32) & ((1 << 56) - 1)) as usize
+    }
+}
+
+/// The reads of a search call's batches that come before those of their reported sequences in
+/// NCBI's order and that took a UTF8String for a VisibleString (`HeaderReader::note_earlier`),
+/// each with a query of its batch: the first of its fetches with `check_oid_exclusion`
+/// (`FetchExcluded`: those of the traceback, `FetchedUtf8::traceback_first`, or of the redo,
+/// `redo_fetches`) and of its Seq-aligns under a seqid list (`SeqAligned`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct EarlierUtf8 {
+    pub(crate) fetched: Option<(usize, crate::seqdb::SeqLocation)>,
+    pub(crate) aligned: Option<(usize, crate::seqdb::SeqLocation)>,
+}
+
 impl Utf8Read {
+    /// The read `note` of a `HeaderReader` (its query from the place, `Utf8Phase::order`), with
+    /// the member of NCBI's warning; `None` where the record holds no such string before a
+    /// failure.
+    #[cold]
+    #[inline(never)]
+    fn of_note(db: &SeqDb, note: crate::seqdb::Utf8Note) -> Option<Self> {
+        Some(Utf8Read {
+            query: Utf8Phase::query(note.order),
+            path: db.utf8_string_path_at(note.at)?,
+        })
+    }
+
     /// NCBI's warning of this read, with the post prefix `program` (the lower-case program
     /// name, `[blastp]`), where the run of `db` has not posted it (`SeqDb::take_utf8_post`):
     /// the posts that a program writes there (`Posts::write` makes it a message of a BLAST
@@ -794,6 +845,15 @@ impl Utf8Read {
                 &self.path,
             ))
         })
+    }
+
+    /// `post` of the read `read`, where there is one.
+    pub(crate) fn post_of(
+        read: Option<&Utf8Read>,
+        db: &SeqDb,
+        program: &str,
+    ) -> Option<crate::report::diag_log::Posts> {
+        read?.post(db, program)
     }
 
     /// `post` of the read `read`, where its query is one of `queries` (the batch that reaches
@@ -1064,13 +1124,23 @@ impl ReportedHeader {
 }
 
 /// Whether the sequences of a database search keep a definition line under its seqid list
-/// (`SeqDb::keeps_line`), each read once: the one check of NCBI's two places that drop a
+/// (`SeqDb::line_read`), each read once: the one check of NCBI's two places that drop a
 /// sequence without a line, the fetches with `check_oid_exclusion` (`FetchExcluded`) and the
-/// Seq-aligns (`SeqAligned`). A header that cannot be read as NCBI's header read adjusts it is
-/// not kept in the cache: each place decides what its error does.
+/// Seq-aligns (`SeqAligned`), with whether NCBI's read of the record there takes a UTF8String
+/// for a VisibleString (its warning, `seqdb::Utf8Reads`). A header that cannot be read as
+/// NCBI's header read adjusts it is not kept in the cache: each place decides what its error
+/// does.
 struct LineCheck<'a> {
     db: &'a SeqDb,
-    kept: std::sync::Mutex<std::collections::HashMap<u32, bool>>,
+    kept: std::sync::Mutex<std::collections::HashMap<u32, LineRead>>,
+}
+
+/// What a `LineCheck` read of a header found: whether the sequence keeps a line, and whether
+/// the record holds a UTF8String where a VisibleString is expected.
+#[derive(Clone, Copy, Debug)]
+struct LineRead {
+    kept: bool,
+    utf8: bool,
 }
 
 impl<'a> LineCheck<'a> {
@@ -1081,24 +1151,113 @@ impl<'a> LineCheck<'a> {
         }
     }
 
-    /// Whether `ordinal` keeps a line (read at its first check; the lock is not held while the
-    /// header is read and decoded), or the reader's error.
-    fn read(&self, ordinal: u32) -> Result<bool, SeqDbError> {
+    /// What the read of `ordinal`'s header finds (read at its first check; the lock is not held
+    /// while the header is read and decoded), or the reader's error.
+    fn read(&self, ordinal: u32) -> Result<LineRead, SeqDbError> {
         let cached = self
             .kept
             .lock()
             .expect("the line cache is not poisoned")
             .get(&ordinal)
             .copied();
-        if let Some(kept) = cached {
-            return Ok(kept);
+        if let Some(read) = cached {
+            return Ok(read);
         }
-        let kept = self.db.keeps_line(ordinal)?;
+        let (kept, utf8) = self.db.line_read(ordinal)?;
+        let read = LineRead { kept, utf8 };
         self.kept
             .lock()
             .expect("the line cache is not poisoned")
-            .insert(ordinal, kept);
-        Ok(kept)
+            .insert(ordinal, read);
+        Ok(read)
+    }
+}
+
+/// A subject of the items of `FetchExcluded::retain` whose header holds a UTF8String where a
+/// VisibleString is expected: NCBI's fetch of it reads the header (`GetSeqIDs`) and posts its
+/// warning, where the fetch is made (the ordinary traceback fetches every subject,
+/// `FetchedUtf8::traceback_first`; the composition-based redo only those its early termination
+/// test leaves, `redo_fetches`). Its item's index before the retain, whether the fetch keeps it,
+/// the number of items kept before it (its index after the retain where it is kept) and its
+/// ordinal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FetchedUtf8 {
+    pub(crate) index: usize,
+    pub(crate) kept: bool,
+    pub(crate) before: usize,
+    pub(crate) ordinal: u32,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1560-1580
+// ```c
+// BlastCompo_EarlyTermination(double evalue,
+//                             BlastCompo_Heap significantMatches[],
+//                             int numQueries)
+// {
+//     int i;
+//     for (i = 0;  i < numQueries;  i++) {
+//         if (BlastCompo_HeapFilledToCutoff(&significantMatches[i])) {
+//             double ecutoff = significantMatches[i].ecutoff;
+//             /* Only matches with evalue <= ethresh will be saved. */
+//             if (evalue <= EVALUE_STRETCH * ecutoff) {
+// ...
+//                 return FALSE;
+//             }
+//         } else {
+//             return FALSE;
+//         }
+//     }
+//     return TRUE;
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:354-359
+// ```c
+//     } else {                      /* "self" is currently a heap */
+//         if (self->n < self->heapThreshold ||
+//             (eValue <= self->ecutoff &&
+//              self->worstEvalue <= self->ecutoff)) {
+//             /* The new alignments must be inserted into the heap, and all old
+//              * alignments retained */
+// ```
+// A match inserts into its own query's heap only. A heap is filled to its cutoff once the
+// records within the cutoff that the redo inserted reach `heapThreshold`: an insert pops a record
+// only where the heap holds one beyond the cutoff (its worst), so every record within the cutoff
+// that the redo inserted stays to the end, and the heap at a match's turn is filled where enough
+// of them came before the match (the redo's order: query by query for a protein query,
+// blast_hspstream.c:289-319; by subject for blastx, whose stream does not sort by score,
+// blast_hspstream.c:676-686).
+/// One heap of a batch's composition-based redo at a match's turn (`redo_fetches`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct RedoHeap {
+    pub(crate) ecutoff: f64,
+    pub(crate) heap_threshold: usize,
+    /// The records within `ecutoff` that the redo had inserted before the match: those of the
+    /// heap as the redo left it whose matches come before the match's.
+    pub(crate) inserted_before: usize,
+}
+
+/// Whether NCBI's composition-based redo fetches (and reads the header of) a match whose
+/// preliminary best E-value is `evalue`, `heaps` those of its batch at its turn (the ones
+/// `BlastCompo_EarlyTermination` reads): not where the early termination test ends it. A match
+/// without HSPs is not fetched (blast_kappa.c:3513-3523); the caller leaves it out.
+pub(crate) fn redo_fetches(evalue: f64, heaps: &[RedoHeap]) -> bool {
+    // `EVALUE_STRETCH` (redo_alignment.c:64).
+    const EVALUE_STRETCH: f64 = 5.0;
+    !heaps.iter().all(|heap| {
+        heap.inserted_before >= heap.heap_threshold && evalue > EVALUE_STRETCH * heap.ecutoff
+    })
+}
+
+impl FetchedUtf8 {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream_mt_utils.c:145-170
+    // and blast_hspstream.c:196-203 (`s_SortHSPListByOid`: decreasing OID, read from the end)
+    // The ordinary traceback (blast_traceback.c:1505-1577) fetches the subjects of the batch's
+    // preliminary hit lists one OID at a time, in increasing OID.
+    /// The first of `fetched` in the ordinary traceback's order (the least ordinal), of every
+    /// fetch with `check_oid_exclusion` that reads all of its subjects (also the ungapped
+    /// re-evaluation of a nucleotide subject, in the order of the subject loop).
+    pub(crate) fn traceback_first(fetched: &[FetchedUtf8]) -> Option<u32> {
+        fetched.iter().map(|read| read.ordinal).min()
     }
 }
 
@@ -1121,41 +1280,99 @@ impl<'a> LineCheck<'a> {
 /// its early termination test leaves (blast_kappa.c:3525-3540), so LOSAT, which checks every
 /// subject of the preliminary hit lists, may refuse a search with such a header that NCBI ends
 /// without reading it.
-pub(crate) struct FetchExcluded<'a>(LineCheck<'a>);
+pub(crate) struct FetchExcluded<'a> {
+    check: LineCheck<'a>,
+    /// The first of the reads of `excludes` that took a UTF8String for a VisibleString, in the
+    /// ordinary traceback's order (`FetchedUtf8::traceback_first`).
+    utf8: crate::seqdb::Utf8Reads,
+}
 
 impl<'a> FetchExcluded<'a> {
     /// The check of `db`'s fetches; `None` where they exclude nothing (no negative seqid list
     /// with ids).
     pub(crate) fn of(db: &'a SeqDb) -> Option<Self> {
-        db.excludes_lineless_at_fetch()
-            .then(|| FetchExcluded(LineCheck::new(db)))
+        db.excludes_lineless_at_fetch().then(|| FetchExcluded {
+            check: LineCheck::new(db),
+            utf8: Default::default(),
+        })
     }
 
     /// Whether the fetch of `ordinal` excludes it; the reader's error where its header cannot
-    /// be read (`refusal`).
+    /// be read (`refusal`). A header that holds a UTF8String where a VisibleString is expected
+    /// is noted, in increasing ordinal (`take_utf8`): of a fetch that reads every subject with
+    /// hits, as the ungapped re-evaluation of a nucleotide subject does.
     pub(crate) fn excludes(&self, ordinal: u32) -> Result<bool, SeqDbError> {
-        self.0.read(ordinal).map(|kept| !kept)
+        let read = self.check.read(ordinal)?;
+        if read.utf8 {
+            self.utf8
+                .note_ordinal(self.check.db, u128::from(ordinal), ordinal);
+        }
+        Ok(!read.kept)
+    }
+
+    /// Notes in `reads` NCBI's fetch of the sequence `ordinal`, whose header holds a UTF8String
+    /// where a VisibleString is expected (the batch's first such fetch: `FetchedUtf8`).
+    pub(crate) fn note_fetched(&self, reads: &crate::seqdb::Utf8Reads, ordinal: u32) {
+        reads.note_ordinal(self.check.db, 0, ordinal);
+    }
+
+    /// The first of the reads of `excludes` since the last call that took a UTF8String for a
+    /// VisibleString (a batch takes its own after its search).
+    pub(crate) fn take_utf8(&self) -> Option<crate::seqdb::SeqLocation> {
+        self.utf8.take().map(|note| note.at)
     }
 
     /// `items` (preliminary hit lists, or HSP lists) without those on a subject the fetch
     /// excludes, in their order; `ordinal` names an item's subject (`None`: kept). The first
     /// header that cannot be read, in the order of `items`, is the error (with its ordinal),
-    /// and `items` is left as it was.
+    /// and `items` is left as it was. The items whose header holds a UTF8String where a
+    /// VisibleString is expected are returned (`FetchedUtf8`: those that NCBI's fetches of the
+    /// item read post its warning).
     pub(crate) fn retain<T>(
         &self,
         items: &mut Vec<T>,
         ordinal: impl Fn(&T) -> Option<u32>,
-    ) -> Result<(), (u32, SeqDbError)> {
+    ) -> Result<Vec<FetchedUtf8>, (u32, SeqDbError)> {
+        self.retain_noting(items, ordinal, |_| ())
+            .map(|fetched| fetched.into_iter().map(|(read, ())| read).collect())
+    }
+
+    /// `retain`, each `FetchedUtf8` with `noted(item)` of its item (what its redo's order and
+    /// early termination test read of it, `redo_fetches`).
+    pub(crate) fn retain_noting<T, N>(
+        &self,
+        items: &mut Vec<T>,
+        ordinal: impl Fn(&T) -> Option<u32>,
+        noted: impl Fn(&T) -> N,
+    ) -> Result<Vec<(FetchedUtf8, N)>, (u32, SeqDbError)> {
         let mut keep = Vec::with_capacity(items.len());
-        for item in items.iter() {
-            keep.push(match ordinal(item) {
-                Some(ordinal) => !self.excludes(ordinal).map_err(|error| (ordinal, error))?,
+        let mut utf8 = Vec::new();
+        let mut kept = 0;
+        for (index, item) in items.iter().enumerate() {
+            let keeps = match ordinal(item) {
+                Some(ordinal) => {
+                    let read = self.check.read(ordinal).map_err(|error| (ordinal, error))?;
+                    if read.utf8 {
+                        utf8.push((
+                            FetchedUtf8 {
+                                index,
+                                kept: read.kept,
+                                before: kept,
+                                ordinal,
+                            },
+                            noted(item),
+                        ));
+                    }
+                    read.kept
+                }
                 None => true,
-            });
+            };
+            kept += usize::from(keeps);
+            keep.push(keeps);
         }
         let mut keep = keep.into_iter();
         items.retain(|_| keep.next().unwrap_or(true));
-        Ok(())
+        Ok(utf8)
     }
 
     /// LOSAT's refusal (in `program`'s name) of a search whose fetch of `ordinal` cannot read
@@ -1199,7 +1416,14 @@ impl std::error::Error for FetchRefusal {}
 /// batch or search call; the reads of the reports decode the kept ones again). Under a
 /// negative seqid list with ids the search's fetches have excluded them before
 /// (`FetchExcluded`), except a protein subject of an ungapped search, which no fetch checks.
-pub(crate) struct SeqAligned<'a>(LineCheck<'a>);
+pub(crate) struct SeqAligned<'a> {
+    check: LineCheck<'a>,
+    /// The first read that took a UTF8String for a VisibleString, before any read that failed
+    /// (`first_utf8`).
+    utf8: Option<crate::seqdb::SeqLocation>,
+    /// Whether a read failed: NCBI's Seq-aligns stop there, so no later read posts.
+    failed: bool,
+}
 
 impl<'a> SeqAligned<'a> {
     /// The check of `db`'s hits; `None` where no hit is dropped here: no seqid list removes
@@ -1208,19 +1432,46 @@ impl<'a> SeqAligned<'a> {
     /// gapped search or an ungapped one of a nucleotide database; and the database's list is
     /// negative with ids, `SeqDb::excludes_lineless_at_fetch`).
     pub(crate) fn of(db: &'a SeqDb, fetched: bool) -> Option<Self> {
-        (db.drops_lineless_hits() && !(fetched && db.excludes_lineless_at_fetch()))
-            .then(|| SeqAligned(LineCheck::new(db)))
+        (db.drops_lineless_hits() && !(fetched && db.excludes_lineless_at_fetch())).then(|| {
+            SeqAligned {
+                check: LineCheck::new(db),
+                utf8: None,
+                failed: false,
+            }
+        })
     }
 
     /// `items` (hit lists, or the HSPs of a batch) without those on a subject that gets no
     /// Seq-align, in their order; `ordinal` names an item's subject (`None`: no database
-    /// ordinal, kept).
+    /// ordinal, kept). The calls of a batch give its items in NCBI's order of the Seq-aligns
+    /// (query by query, each in hit-list order), so that the first read that took a
+    /// UTF8String for a VisibleString is NCBI's (`first_utf8`).
     pub(crate) fn retain<T>(&mut self, items: &mut Vec<T>, ordinal: impl Fn(&T) -> Option<u32>) {
         // A header that cannot be read counts as kept: the reads of the reports then give its
         // error, as before (NCBI's `GetSeqIDs` fails at the same Seq-align).
+        let (check, utf8, failed) = (&self.check, &mut self.utf8, &mut self.failed);
         items.retain(|item| {
-            ordinal(item).is_none_or(|ordinal| self.0.read(ordinal).unwrap_or(true))
+            ordinal(item).is_none_or(|ordinal| match check.read(ordinal) {
+                Ok(read) => {
+                    if read.utf8 && utf8.is_none() && !*failed {
+                        *utf8 = check.db.location_of(ordinal);
+                    }
+                    read.kept
+                }
+                Err(_) => {
+                    *failed = true;
+                    true
+                }
+            })
         });
+    }
+
+    /// The batch's first read of a header record (in NCBI's order of the Seq-aligns, before a
+    /// read that fails) that took a UTF8String for a VisibleString: NCBI posts its warning
+    /// there, before the reads of the reports (`HeaderReader::note_earlier`), also where the
+    /// sequence gets no Seq-align.
+    pub(crate) fn first_utf8(&self) -> Option<crate::seqdb::SeqLocation> {
+        self.utf8
     }
 }
 
@@ -1229,9 +1480,16 @@ impl<'a> SeqAligned<'a> {
 /// (`SeqDb::seqid_lookup`), made at the first of them and kept for the reader's other reads.
 pub(crate) struct HeaderReader<'a> {
     db: &'a SeqDb,
-    /// The first of its reads that met a UTF8String where a VisibleString is expected
-    /// (`first_utf8`).
-    utf8: std::cell::OnceCell<Utf8Read>,
+    /// The first of the batch's reads, in NCBI's order, that met a UTF8String where a
+    /// VisibleString is expected (`first_utf8`): the reader's own and those before it
+    /// (`note_earlier`), in the order of `Utf8Phase`.
+    utf8: crate::seqdb::Utf8Reads,
+    /// The query of the reader's last read of a reported sequence, whose report the scope's
+    /// reads of other sequences serve (`Utf8Phase::Scope`).
+    query: std::cell::Cell<usize>,
+    /// The first queries of NCBI's query batches among the reader's queries, ascending
+    /// (`batch_starts`; none: one batch), which order its reads before their phases.
+    batches: std::cell::OnceCell<Vec<usize>>,
     lookup: std::cell::OnceCell<crate::seqdb::lookup::SeqidLookup<'a>>,
     /// Whether NCBI's formatters may read some reported sequences one by one
     /// (`prefetch_may_be_off`), where the weak matches of its scope are looked for
@@ -1610,7 +1868,9 @@ impl<'a> HeaderReader<'a> {
     pub(crate) fn new(db: &'a SeqDb) -> Self {
         Self {
             db,
-            utf8: std::cell::OnceCell::new(),
+            utf8: Default::default(),
+            query: std::cell::Cell::new(0),
+            batches: std::cell::OnceCell::new(),
             lookup: std::cell::OnceCell::new(),
             prefetch_off: prefetch_may_be_off(),
             taxdb: std::cell::OnceCell::new(),
@@ -1619,12 +1879,60 @@ impl<'a> HeaderReader<'a> {
         }
     }
 
-    /// The first of the reader's reads (`read_header`), in their order, of a record that holds a
-    /// UTF8String where a VisibleString is expected, with the query that read it (`Utf8Read`):
-    /// where the reads are NCBI's, in NCBI's order (the programs' `read_titles`), NCBI's
-    /// warning names it.
-    pub(crate) fn first_utf8(&self) -> Option<&Utf8Read> {
-        self.utf8.get()
+    /// The first of the batch's reads, in NCBI's order, of a record that holds a UTF8String where
+    /// a VisibleString is expected, with the query it is posted with (`Utf8Read`): the reads of
+    /// the batch's fetches and Seq-aligns (`note_earlier`), then the reader's own (`read_header`,
+    /// in their order: the programs' `read_titles` read in NCBI's), then those of the scope's
+    /// lookups and of the other sequences it reads (`Utf8Phase::Scope`). NCBI's warning names
+    /// it; `None` where the run has posted it.
+    pub(crate) fn first_utf8(&self) -> Option<Utf8Read> {
+        let note = self.utf8.first()?;
+        if self.db.utf8_posted() {
+            return None;
+        }
+        Utf8Read::of_note(self.db, note)
+    }
+
+    /// `first_utf8` of the reads that NCBI makes up to the read of `phase` by `query` (a read
+    /// that fails ends NCBI's Seq-aligns, before the scope reads anything).
+    fn first_utf8_before(&self, phase: Utf8Phase, query: usize) -> Option<Utf8Read> {
+        let note = self.utf8.first()?;
+        if note.order > self.order(phase, query) || self.db.utf8_posted() {
+            return None;
+        }
+        Utf8Read::of_note(self.db, note)
+    }
+
+    /// Sets the first queries of NCBI's query batches among the reader's queries (`batches`):
+    /// a search call that holds several batches reads each batch's fetches, then its
+    /// Seq-aligns, before the next batch's (`Utf8Phase`).
+    pub(crate) fn batch_starts(&self, starts: Vec<usize>) {
+        let _ = self.batches.set(starts);
+    }
+
+    /// The place in NCBI's order of a read of `phase` by `query`: its batch's (`batches`), then
+    /// its phase's, then its query's.
+    fn order(&self, phase: Utf8Phase, query: usize) -> u128 {
+        let batch = self.batches.get().map_or(0, |starts| {
+            starts[..starts.partition_point(|&start| start <= query)]
+                .last()
+                .copied()
+                .unwrap_or(0)
+        });
+        phase.order(batch, query)
+    }
+
+    /// Notes the reads of the batches' fetches and Seq-aligns that come before those of the
+    /// reader in NCBI's order and that took a UTF8String for a VisibleString (`EarlierUtf8`).
+    pub(crate) fn note_earlier(&self, earlier: EarlierUtf8) {
+        for (phase, read) in [
+            (Utf8Phase::Fetch, earlier.fetched),
+            (Utf8Phase::Aligned, earlier.aligned),
+        ] {
+            if let Some((query, at)) = read {
+                self.utf8.note(self.order(phase, query), at);
+            }
+        }
     }
 
     /// Notes the read of the sequence `ordinal` by query `query`, whose record holds a
@@ -1632,10 +1940,28 @@ impl<'a> HeaderReader<'a> {
     #[cold]
     #[inline(never)]
     fn note_utf8(&self, ordinal: u32, query: usize) {
-        if self.utf8.get().is_none() && !self.db.utf8_posted() {
-            if let Some(path) = self.db.utf8_string_path(ordinal) {
-                let _ = self.utf8.set(Utf8Read { query, path });
-            }
+        if !self.db.utf8_posted() {
+            self.utf8
+                .note_ordinal(self.db, self.order(Utf8Phase::Reported, query), ordinal);
+        }
+    }
+
+    /// Notes the read, by the scope that serves the report of the reader's last read
+    /// (`query`), of the header at `at` that took a UTF8String for a VisibleString.
+    #[cold]
+    #[inline(never)]
+    fn note_scope_utf8(&self, at: crate::seqdb::SeqLocation) {
+        if !self.db.utf8_posted() {
+            self.utf8
+                .note(self.order(Utf8Phase::Scope, self.query.get()), at);
+        }
+    }
+
+    /// Notes the reads of the lookup `lookup` that took a UTF8String for a VisibleString
+    /// (`SeqidLookup::take_utf8`: the version check of an accession).
+    fn note_lookup_utf8(&self, lookup: &crate::seqdb::lookup::SeqidLookup<'_>) {
+        if let Some(note) = lookup.take_utf8() {
+            self.note_scope_utf8(note.at);
         }
     }
 
@@ -1863,7 +2189,9 @@ impl<'a> HeaderReader<'a> {
             },
         };
         let id = subject.alignment_id();
-        let oids = match lookup.seqid_to_oids(id, true) {
+        let found = lookup.seqid_to_oids(id, true);
+        self.note_lookup_utf8(lookup);
+        let oids = match found {
             Ok(_) if giim => return (None, None, None),
             Ok(oids) => oids,
             Err(error) => {
@@ -2074,7 +2402,9 @@ impl<'a> HeaderReader<'a> {
                 release: None,
                 version: None,
             };
-            found.extend(lookup.seqid_to_oids(&name_alone, true)?);
+            let alone = lookup.seqid_to_oids(&name_alone, true);
+            self.note_lookup_utf8(lookup);
+            found.extend(alone?);
         }
         let own = self.db.oid(ordinal).get();
         Ok(found
@@ -2269,6 +2599,7 @@ fn reported_header(
     program: &str,
 ) -> Result<ReportedHeader> {
     let db = headers.db;
+    headers.query.set(query);
     match &header {
         Ok(crate::seqdb::SequenceHeader::Parsed(set)) if set.utf8 => {
             headers.note_utf8(ordinal, query)
@@ -2305,13 +2636,19 @@ fn reported_header(
             Ok(ReportedHeader::Stored(stored))
         }
         Err(error) => {
-            // NCBI's read posted the warning of a UTF8String before it failed.
-            headers.note_utf8(ordinal, query);
+            // NCBI's read posted the warning of a UTF8String before it failed (where the record
+            // holds one before the failure), after the reads before it; the scope reads nothing
+            // after a Seq-align fails.
+            if headers.db.utf8_string_path(ordinal).is_some() {
+                headers.note_utf8(ordinal, query);
+            }
             Err(header_read_error(
                 error,
                 query,
                 program,
-                headers.first_utf8(),
+                headers
+                    .first_utf8_before(Utf8Phase::Reported, query)
+                    .as_ref(),
             ))
         }
     }
@@ -7748,5 +8085,79 @@ mod taxdb_prepass_tests {
         assert_eq!(native(&[0x3f]), (0, true));
         assert_eq!(native(&[0x30, 0x80]), (255, false));
         assert_eq!(native(&[0x30, 0x80, 0x30, 0x80, 0xbf]), (255, false));
+    }
+}
+
+#[cfg(all(test, unix))]
+mod utf8_read_tests {
+    use super::*;
+
+    /// `BlastCompo_EarlyTermination` at a match's turn: every heap of the batch filled to its
+    /// cutoff by the records within it that came before the match, and the match's E-value above
+    /// five times every cutoff (RG-T5d fix 2, review 2 D1).
+    #[test]
+    fn the_redo_fetches_a_match_that_its_early_termination_test_leaves() {
+        let heap = |inserted_before| RedoHeap {
+            ecutoff: 0.002,
+            heap_threshold: 1,
+            inserted_before,
+        };
+        // Filled, and the E-value above 0.01: ended, not fetched.
+        assert!(!redo_fetches(6.2, &[heap(1)]));
+        // At most five times the cutoff: fetched.
+        assert!(redo_fetches(0.01, &[heap(1)]));
+        // Not filled at its turn (the strong match comes after it): fetched.
+        assert!(redo_fetches(6.2, &[heap(0)]));
+        // Another heap of the batch not filled (a later query's, untouched): fetched.
+        assert!(redo_fetches(6.2, &[heap(1), heap(0)]));
+        assert!(!redo_fetches(6.2, &[heap(1), heap(2)]));
+        // A larger threshold (`-max_target_seqs 5`) not reached: fetched.
+        let five = RedoHeap {
+            heap_threshold: 5,
+            ..heap(4)
+        };
+        assert!(redo_fetches(6.2, &[five]));
+    }
+
+    /// The batches of a search call read their headers one after the other, each its fetches,
+    /// then its Seq-aligns, then its scope (`Utf8Phase`): the first read of a UTF8String record
+    /// is NCBI's in that order (RG-T5d fix 2).
+    #[test]
+    fn a_batch_reads_its_fetches_and_seq_aligns_before_the_next_batch() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/t5/phd_utf8");
+        let db = SeqDb::open(path.to_str().unwrap(), SeqType::Protein).unwrap();
+        let at = db.location_of(1).unwrap();
+        // One batch: its fetch comes before its reports' reads.
+        let headers = HeaderReader::new(&db);
+        headers.note_earlier(EarlierUtf8 {
+            fetched: Some((2, at)),
+            aligned: None,
+        });
+        read_header(&headers, 1, 0, "BLASTP").unwrap();
+        assert_eq!(headers.first_utf8().unwrap().query, 2);
+        // Two batches (queries 0..3 and 3..): the first batch's report read comes before the
+        // second batch's fetch, and its Seq-aligns' read before its own report read.
+        let headers = HeaderReader::new(&db);
+        headers.batch_starts(vec![0, 3]);
+        headers.note_earlier(EarlierUtf8 {
+            fetched: Some((4, at)),
+            aligned: None,
+        });
+        read_header(&headers, 1, 1, "BLASTP").unwrap();
+        assert_eq!(headers.first_utf8().unwrap().query, 1);
+        let headers = HeaderReader::new(&db);
+        headers.batch_starts(vec![0, 3]);
+        headers.note_earlier(EarlierUtf8 {
+            fetched: None,
+            aligned: Some((2, at)),
+        });
+        read_header(&headers, 1, 0, "BLASTP").unwrap();
+        let read = headers.first_utf8().unwrap();
+        assert_eq!(read.query, 2);
+        assert_eq!(read.path, "Blast-def-line-set.E.title");
+        // Once the run has posted the warning, no read names its member.
+        assert!(read.post(&db, "blastp").is_some());
+        assert!(headers.first_utf8().is_none());
     }
 }

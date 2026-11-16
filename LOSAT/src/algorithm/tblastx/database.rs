@@ -50,7 +50,7 @@ const PROGRAM: &str = "TBLASTX";
 /// The database of a `-db` search: the opened database and its name as NCBI keeps it
 /// (`TblastxArgs::database_name`: the `-db` value without white space at its ends).
 pub(crate) struct TblastxDatabase {
-    db: SeqDb,
+    pub(crate) db: SeqDb,
     name: String,
     /// Whether the first header of some volume holds parsed Seq-ids (`shared::check_seqids`).
     parsed: bool,
@@ -61,15 +61,6 @@ pub(crate) struct TblastxDatabase {
 }
 
 impl TblastxDatabase {
-    /// NCBI's warning of its first read of a UTF8String header (`read`), where the run has not
-    /// posted it (`shared::Utf8Read::post`, prefix `[tblastx]`).
-    pub(crate) fn utf8_post(
-        &self,
-        read: Option<&shared::Utf8Read>,
-    ) -> Option<crate::report::diag_log::Posts> {
-        read?.post(&self.db, "tblastx")
-    }
-
     /// The OIDs of the database's ordinal ids, which name the reported sequences without
     /// parsed Seq-ids (`gnl|BL_ORD_ID|n`).
     pub(crate) fn oid_map(&self) -> crate::seqdb::OidMap<'_> {
@@ -332,13 +323,15 @@ pub(crate) type DatabaseTitles = BTreeMap<u32, ReportedHeader>;
 /// The final HSPs `ordered` of a query batch (report order) without those of the sequences that
 /// NCBI makes no Seq-align of (`shared::SeqAligned`): after the cut of each query's hit list to
 /// the hit list size, before `read_titles`.
-pub(crate) fn drop_unaligned(database: &TblastxDatabase, ordered: &mut Vec<TblastxHsp>) {
+pub(crate) fn drop_unaligned(
+    database: &TblastxDatabase,
+    ordered: &mut Vec<TblastxHsp>,
+) -> Option<crate::seqdb::SeqLocation> {
     // tblastx fetches every subject with HSPs with `check_oid_exclusion` (the ungapped
     // re-evaluation of a nucleotide subject: `run_impl::search_query_batch`).
-    let Some(mut aligned) = shared::SeqAligned::of(&database.db, true) else {
-        return;
-    };
+    let mut aligned = shared::SeqAligned::of(&database.db, true)?;
     aligned.retain(ordered, |hsp| Some(hsp.hit.s_idx));
+    aligned.first_utf8()
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:283-293
@@ -362,9 +355,11 @@ pub(crate) fn read_titles(
     database: &TblastxDatabase,
     ordered: &[TblastxHsp],
     first_query: usize,
+    earlier: shared::EarlierUtf8,
     titles: &mut DatabaseTitles,
 ) -> Result<Option<shared::Utf8Read>> {
     let headers = shared::HeaderReader::new(&database.db);
+    headers.note_earlier(earlier);
     // A subject's HSPs follow each other: one look-up per run of them.
     let mut previous = None;
     for hsp in ordered {
@@ -380,7 +375,7 @@ pub(crate) fn read_titles(
         )?;
         titles.insert(ordinal, title);
     }
-    Ok(headers.first_utf8().cloned())
+    Ok(headers.first_utf8())
 }
 
 /// The stores of the sequences that the reported hits of the query batches read so far name, by
@@ -892,7 +887,7 @@ mod tests {
             let ordered: Vec<TblastxHsp> =
                 ordinals.iter().map(|&ordinal| hit_on(ordinal)).collect();
             let mut titles = DatabaseTitles::new();
-            read_titles(database, &ordered, 0, &mut titles).unwrap();
+            read_titles(database, &ordered, 0, Default::default(), &mut titles).unwrap();
             String::from_utf8(prefetch_messages(database, &ordered, &titles).unwrap()).unwrap()
         };
         let database = open_with_taxdb("x16_ntaxid_99990", Some("offset_last_past_end"), &cwd);

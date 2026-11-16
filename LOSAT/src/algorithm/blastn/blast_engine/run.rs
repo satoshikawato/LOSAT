@@ -9835,6 +9835,10 @@ struct QueryBatch {
     /// `run_in_pool` writes to standard error when it takes the batch, where the search wrote
     /// them before.
     timing: String,
+    /// The first of the batch's fetches with `check_oid_exclusion` (the traceback's, or the
+    /// ungapped re-evaluation's) that read a header with a UTF8String where a VisibleString is
+    /// expected: NCBI's warning comes there, before its Seq-aligns' reads (`read_titles`).
+    fetched_utf8: Option<crate::seqdb::SeqLocation>,
 }
 
 /// Which of NCBI's stages `search_query_batch` runs for its queries.
@@ -10788,16 +10792,23 @@ fn run_in_pool(
                     );
                 }
             }
-            database::drop_unaligned(database, &mut batch_hit_lists);
+            let earlier = crate::algorithm::common::database::EarlierUtf8 {
+                fetched: batch.fetched_utf8.map(|at| (0, at)),
+                aligned: database::drop_unaligned(database, &mut batch_hit_lists).map(|at| (0, at)),
+            };
             // NCBI's warning of its first read of a UTF8String header follows the batch's reader
             // messages and request posts (`warnings[start]`), before its prefetch.
-            let read = database::read_titles(database, &batch_hit_lists, &mut titles);
-            if let Some(posts) = database.utf8_post(match &read {
-                Ok(read) => read.as_ref(),
-                Err(error) => error
-                    .downcast_ref::<database::HeaderReadError>()
-                    .and_then(|failure| failure.utf8.as_ref()),
-            }) {
+            let read = database::read_titles(database, &batch_hit_lists, earlier, &mut titles);
+            if let Some(posts) = crate::algorithm::common::database::Utf8Read::post_of(
+                match &read {
+                    Ok(read) => read.as_ref(),
+                    Err(error) => error
+                        .downcast_ref::<database::HeaderReadError>()
+                        .and_then(|failure| failure.utf8.as_ref()),
+                },
+                &database.db,
+                "blastn",
+            ) {
                 warnings[start].append(&posts);
             }
             if let Err(error) = read {
@@ -12918,6 +12929,7 @@ fn search_query_batch<const UNGAPPED: bool>(
         prelim_hitlist_size,
         hitlist_size,
         db_hard_mask,
+        fetched_utf8: Default::default(),
     };
 
     // The batch's results, read after its subjects are searched.
@@ -12931,6 +12943,7 @@ fn search_query_batch<const UNGAPPED: bool>(
         context_karlin: context_karlin.clone(),
         query_eff_searchsp: query_eff_searchsp.clone(),
         timing: String::new(),
+        fetched_utf8: passes.fetched_utf8.first().map(|note| note.at),
     };
     // The preliminary pass over the subjects (`SubjectPasses::prelim_pass`); its error is the database's
     // read error as it is, reported before the masks' read errors below.

@@ -1329,16 +1329,30 @@ pub(super) fn batch_titles(
     if matches!(search_subjects, Subjects::Unreadable) {
         return Ok(None);
     }
-    ReportedSubjects::drop_unaligned(database, results, gapped);
+    let first_query = results.first().map_or(0, |results| results.query_ordinal);
+    let earlier = crate::algorithm::common::database::EarlierUtf8 {
+        fetched: results
+            .iter()
+            .filter_map(|results| results.fetched_utf8)
+            .min()
+            .and_then(|ordinal| database.db.location_of(ordinal))
+            .map(|at| (first_query, at)),
+        aligned: ReportedSubjects::drop_unaligned(database, results, gapped)
+            .map(|at| (first_query, at)),
+    };
     let x_t = super::x_timing::lap();
-    let titles = ReportedSubjects::read_titles(database, results, gapped, asks.pairwise);
+    let titles = ReportedSubjects::read_titles(database, results, gapped, asks.pairwise, earlier);
     super::x_timing::run(XRun::Titles, x_t);
-    if let Some(posts) = database.utf8_post(match &titles {
-        Ok(titles) => titles.utf8.as_ref(),
-        Err(error) => error
-            .downcast_ref::<HeaderReadError>()
-            .and_then(|failure| failure.utf8.as_ref()),
-    }) {
+    if let Some(posts) = crate::algorithm::common::database::Utf8Read::post_of(
+        match &titles {
+            Ok(titles) => titles.utf8.as_ref(),
+            Err(error) => error
+                .downcast_ref::<HeaderReadError>()
+                .and_then(|failure| failure.utf8.as_ref()),
+        },
+        &database.db,
+        &database.program.to_ascii_lowercase(),
+    ) {
         posts.write(diagnostics, None)?;
     }
     titles.map(Some).map_err(reported_error)
@@ -3196,6 +3210,7 @@ mod reader_batch_tests {
             .unwrap(),
             parameters: Vec::new(),
             search_skipped: skipped,
+            fetched_utf8: None,
         }]
     }
 

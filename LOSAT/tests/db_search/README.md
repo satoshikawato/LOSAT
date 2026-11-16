@@ -604,7 +604,14 @@ Seq-aligns of a batch first read the record (the `BATCH_SIZE=1` rows: in the sec
 `long` (the title's member tag in the long form, `bf 00`), read with no message; `longx` (`bf 20`), NCBI's unexpected member. `eof`
 (the record of OID 1 cut after its first byte): NCBI's `CEofException`, which the programs' `CATCH_ALL` takes as a
 `CIOException` without a post, so the run ends there with exit status 0.
-Probe: `remaining-gaps-20261112/T/fix1_t5d.md`.
+Probe: `remaining-gaps-20261112/T/fix1_t5d.md`. NCBI's other reads of a UTF8String header (fix 2 of item T5d, rows
+`db.t5d.*.fx*`, blastdbcmd cases `T534`-`T537`): `make_t5.py NCBI_BIN --fetch-only` writes the version 5 databases
+`pfx_utf8`, `pfx_utf8r`, `nfx_utf8`, `pfx_copy` and `nfx_copy` (`-parse_seqids`; hd0, which `hd_q0.*` matches, a weak
+match with a UTF8String title (hd2, a chance alignment of E-value about 6, or a weaker copy of hd0), hd1), the negative seqid
+lists `*fx_neg1.txt` and `*fx_neg2.txt`, and the version 4 database `pva_utf8` (`gb|HDA<n>.1|`, the UTF8String title at
+OID 1) with `pva_batch.txt`: under a negative seqid list with ids NCBI's traceback and composition-based redo read the
+header of every subject they fetch (the redo only those its early termination test leaves), and blastdbcmd's version check
+of `HDA1.2` reads HDA1.1's. Probe: `remaining-gaps-20261112/T/fix2_t5d.md`.
 
 A title of punctuation without parsed Seq-ids (line DBID tabfields; rows `db.id.tf.*.punct.*`): `make_ids.py
 --tabfields-only` writes `ids/ppunct_np` (version 4, without `-parse_seqids`) from `ids/ppunct.faa`, whose first title

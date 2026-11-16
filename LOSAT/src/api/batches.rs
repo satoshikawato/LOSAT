@@ -67,6 +67,27 @@ pub struct Batch {
 }
 
 impl Batch {
+    /// The batch `range` in which the run ended without a post and with exit status 0
+    /// (`run::run_ended`: NCBI's end at a header record that ends before its read enters the
+    /// set's elements): no HSPs, the statistics and rounds of queries that were not searched,
+    /// and what the command line writes to its standard error for the batch, `diagnostics`.
+    fn ended(range: Range<usize>, diagnostics: Vec<u8>) -> Self {
+        let queries = range.len();
+        Batch {
+            query_indices: range,
+            hsps: Vec::new(),
+            query_stats: vec![None; queries],
+            rounds: vec![
+                QueryRounds {
+                    stats: vec![None],
+                    converged: false,
+                };
+                queries
+            ],
+            diagnostics,
+        }
+    }
+
     /// The results of each query of the batch, in the order of the inputs.
     pub fn queries(&self) -> impl Iterator<Item = QueryHits<'_>> + '_ {
         let first = self.query_indices.start;
@@ -232,7 +253,10 @@ pub struct Batches<'a> {
 /// A caller reports progress between batches (`Batch::query_indices`), and stops the search by not
 /// asking for the next batch. A batch that fails gives its error (`Error::Search`) and ends the
 /// iterator: the batches before it stand, as the reports that the command line has written by
-/// then do. A batch is searched by one `run_local` call, each with its own thread pool of
+/// then do. A batch in which the run ends with exit status 0 and no message (a database header
+/// record that ends before NCBI's read enters its elements, which NCBI's search programs take as
+/// the end of the run) is the last: it has no HSPs and carries its diagnostics (with the first
+/// batch, the run's own), what the command line writes to its standard error up to that end. A batch is searched by one `run_local` call, each with its own thread pool of
 /// `-num_threads` threads; of a database, each opens the database again, so what NCBI writes once
 /// per run about a taxonomy database comes with every batch that reads one.
 pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches<'a>, Error> {
@@ -337,10 +361,11 @@ impl Batches<'_> {
         start..if end > start { end } else { self.lengths.len() }
     }
 
-    /// Searches the batch `range`, as the command line's loop searches it. `None`: the run ended
-    /// in the batch without a post and with exit status 0 (`run::run_ended`), where NCBI's loop
-    /// ends: no batch is searched after it.
-    fn search_batch(&mut self, range: Range<usize>) -> Result<Option<Batch>, Error> {
+    /// Searches the batch `range`, as the command line's loop searches it, and whether the run
+    /// ended in it without a post and with exit status 0 (`run::run_ended`), where NCBI's loop
+    /// ends: no batch is searched after it, and the batch itself has no HSPs (NCBI wrote no
+    /// report of it) and its diagnostics (`Batch::ended`).
+    fn search_batch(&mut self, range: Range<usize>) -> Result<(Batch, bool), Error> {
         let inputs = match self.inputs.pssm {
             Some(_) => self.inputs,
             None => Inputs {
@@ -417,7 +442,7 @@ impl Batches<'_> {
             bytes.splice(0..0, std::mem::take(&mut self.start_messages));
         }
         if result.as_ref().is_err_and(ends_without_post) {
-            return Ok(None);
+            return Ok((Batch::ended(range, bytes), true));
         }
         result.map_err(|error| self.log.failed(&error))?;
         let finished = observer
@@ -443,13 +468,16 @@ impl Batches<'_> {
         {
             sizes.searched(extensions);
         }
-        Ok(Some(Batch {
-            query_indices: range,
-            hsps,
-            query_stats: finished.query_stats,
-            rounds: finished.rounds,
-            diagnostics: bytes,
-        }))
+        Ok((
+            Batch {
+                query_indices: range,
+                hsps,
+                query_stats: finished.query_stats,
+                rounds: finished.rounds,
+                diagnostics: bytes,
+            },
+            false,
+        ))
     }
 }
 
@@ -480,8 +508,8 @@ impl Iterator for Batches<'_> {
         self.next_query = range.end;
         let batch = self.search_batch(range);
         self.searched_one = true;
-        self.finished = !matches!(batch, Ok(Some(_)));
-        batch.transpose()
+        self.finished = !matches!(batch, Ok((_, false)));
+        Some(batch.map(|(batch, _)| batch))
     }
 }
 
@@ -511,6 +539,96 @@ mod tests {
         let outcome = run_collect(&search, Inputs::new(&query, &subject), &["6"]).unwrap();
         assert_eq!(only.hsps, outcome.hsps);
         assert_eq!(only.query_stats, outcome.query_stats);
+    }
+
+    /// The version 4 protein database `tests/db_search/t5/phd_utf8` (its OID 1 a UTF8String
+    /// title) copied to `dir` as `name`, with the header record of OID 2 cut to its first byte:
+    /// NCBI's searches end there with exit status 0 and no message (`run::run_ended`).
+    #[cfg(unix)]
+    fn utf8_then_cut_database(dir: &std::path::Path) -> String {
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/t5");
+        let read = |ext: &str| std::fs::read(source.join(format!("phd_utf8.{ext}"))).unwrap();
+        let mut index = read("pin");
+        let header = read("phr");
+        let word = |at: usize| u32::from_be_bytes(index[at..at + 4].try_into().unwrap()) as usize;
+        let mut at = 8;
+        for _ in 0..2 {
+            at += 4 + word(at);
+        }
+        let count = word(at);
+        at += 4 + 8 + 4;
+        let offsets: Vec<usize> = (0..=count).map(|k| word(at + 4 * k)).collect();
+        let mut records: Vec<Vec<u8>> = (0..count)
+            .map(|k| header[offsets[k]..offsets[k + 1]].to_vec())
+            .collect();
+        records[2] = vec![0x30];
+        let mut offset = 0u32;
+        for (k, record) in std::iter::once(&Vec::new()).chain(&records).enumerate() {
+            offset += record.len() as u32;
+            index[at + 4 * k..at + 4 * k + 4].copy_from_slice(&offset.to_be_bytes());
+        }
+        std::fs::write(dir.join("u.pin"), index).unwrap();
+        std::fs::write(dir.join("u.phr"), records.concat()).unwrap();
+        std::fs::write(dir.join("u.psq"), read("psq")).unwrap();
+        dir.join("u").to_str().unwrap().to_string()
+    }
+
+    /// The batch in which the run ends without a post and with exit status 0 is the last, and
+    /// carries its diagnostics: NCBI's warning of the UTF8String read before the end, which the
+    /// command line writes (review 2 of RG-T5d, D3), in a run of one batch (with the run's own
+    /// messages) and in the second of two.
+    #[cfg(unix)]
+    #[test]
+    fn the_batch_where_the_run_ends_carries_its_diagnostics() {
+        let dir = std::env::temp_dir().join(format!(
+            "losat-batches-end-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = utf8_then_cut_database(&dir);
+        let fasta = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/t5/hd_q.faa"),
+        )
+        .unwrap();
+        let letters: Vec<&str> = fasta
+            .lines()
+            .filter(|line| !line.starts_with('>'))
+            .collect();
+        let record =
+            |name: &str, seq: &str| FastaRecord::new(name.to_string(), b"", seq.as_bytes());
+        let warning = "Warning: (803.10) [blastp] CObjectIStreamAsnBinary: UTF8String data for \
+                       VisibleString member Blast-def-line-set.E.title, ASN.1 specification may \
+                       need an update\n";
+        let search = validate(Program::Blastp, &["-evalue", "1e-10"]).unwrap();
+        // One batch: q0 reports OID 0, q1 reads OID 1 (the warning), q2 OID 2 (the end).
+        let one: Vec<FastaRecord> = (0..3)
+            .map(|k| record(&format!("q{k}"), letters[k]))
+            .collect();
+        let mut batches = run_batches(&search, Inputs::database(&one, &db)).unwrap();
+        let only = batches.next().unwrap().unwrap();
+        assert_eq!(only.query_indices, 0..3);
+        assert!(only.hsps.is_empty());
+        assert_eq!(only.query_stats, vec![None; 3]);
+        assert_eq!(String::from_utf8_lossy(&only.diagnostics), warning);
+        assert!(batches.next().is_none());
+        // Two batches: a first query of 10,000 letters fills the first; the second ends the run.
+        let long: String = letters[0].chars().cycle().take(10_000).collect();
+        let two = vec![
+            record("q0", &long),
+            record("q1", letters[1]),
+            record("q2", letters[2]),
+        ];
+        let mut batches = run_batches(&search, Inputs::database(&two, &db)).unwrap();
+        let first = batches.next().unwrap().unwrap();
+        assert_eq!(first.query_indices, 0..1);
+        assert!(first.diagnostics.is_empty());
+        let last = batches.next().unwrap().unwrap();
+        assert_eq!(last.query_indices, 1..3);
+        assert!(last.hsps.is_empty());
+        assert_eq!(String::from_utf8_lossy(&last.diagnostics), warning);
+        assert!(batches.next().is_none());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

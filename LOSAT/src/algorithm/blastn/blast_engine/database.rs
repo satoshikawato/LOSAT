@@ -198,7 +198,7 @@ fn search_read_error(error: SeqDbError) -> anyhow::Error {
 /// (`BlastnArgs::database_name`: the `-db` value without white space at its ends) and its
 /// numbers as the search uses them.
 pub(super) struct BlastnDatabase {
-    db: SeqDb,
+    pub(crate) db: SeqDb,
     name: String,
     metadata: SubjectMetadata,
     /// The taxonomy database of this run, opened at the first name asked for (outfmt 15 and 16,
@@ -215,15 +215,6 @@ pub(super) struct BlastnDatabase {
 pub(super) struct SamLetterCache(RefCell<HashMap<u32, NucleotideAmbiguity>>);
 
 impl BlastnDatabase {
-    /// NCBI's warning of its first read of a UTF8String header (`read`), where the run has not
-    /// posted it (`shared::Utf8Read::post`, prefix `[blastn]`).
-    pub(super) fn utf8_post(
-        &self,
-        read: Option<&shared::Utf8Read>,
-    ) -> Option<crate::report::diag_log::Posts> {
-        read?.post(&self.db, "blastn")
-    }
-
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2645-2668
     // (`Blast_HSPListReevaluateUngapped`)
     // ```c
@@ -1640,18 +1631,21 @@ pub(super) fn fetch_refusal(failed: (u32, crate::seqdb::SeqDbError)) -> anyhow::
 
 /// The final hit lists `hit_lists` of a query batch without the sequences that NCBI makes no
 /// Seq-align of (`shared::SeqAligned`): after their cut to the hit list size, before
-/// `read_titles`.
-pub(super) fn drop_unaligned(database: &BlastnDatabase, hit_lists: &mut [Option<BlastnHitList>]) {
+/// `read_titles`. The first of its reads that took a UTF8String for a VisibleString is returned
+/// (`shared::SeqAligned::first_utf8`).
+pub(super) fn drop_unaligned(
+    database: &BlastnDatabase,
+    hit_lists: &mut [Option<BlastnHitList>],
+) -> Option<crate::seqdb::SeqLocation> {
     // Every blastn search fetches its subjects with `check_oid_exclusion`: the gapped traceback,
     // or the ungapped re-evaluation of a nucleotide subject (`fetch_excluded`).
-    let Some(mut aligned) = shared::SeqAligned::of(&database.db, true) else {
-        return;
-    };
+    let mut aligned = shared::SeqAligned::of(&database.db, true)?;
     for hit_list in hit_lists.iter_mut().flatten() {
         hit_list.hsplist_array.truncate(hit_list.hsplist_count);
         aligned.retain(&mut hit_list.hsplist_array, |list| Some(list.oid));
         hit_list.hsplist_count = hit_list.hsplist_array.len();
     }
+    aligned.first_utf8()
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:264-275
@@ -1698,14 +1692,17 @@ pub(super) fn drop_unaligned(database: &BlastnDatabase, hit_lists: &mut [Option<
 /// Reads the definition lines of the sequences that the final hit lists `hit_lists` of a
 /// query batch name, in NCBI's order, into `titles` (`common::database::read_header`). A reader
 /// error of NCBI's own is a `HeaderReadError` (it fails the batch); LOSAT's refusals are errors
-/// of their own. The first read of a record with a UTF8String where a VisibleString is expected
-/// is returned (`shared::HeaderReader::first_utf8`): NCBI posts its warning there.
+/// of their own. The batch's first read of a record with a UTF8String where a VisibleString is
+/// expected, its fetches' and Seq-aligns' (`earlier`) or these, is returned
+/// (`shared::HeaderReader::first_utf8`): NCBI posts its warning there.
 pub(super) fn read_titles(
     database: &BlastnDatabase,
     hit_lists: &[Option<BlastnHitList>],
+    earlier: shared::EarlierUtf8,
     titles: &mut DatabaseTitles,
 ) -> Result<Option<shared::Utf8Read>> {
     let headers = shared::HeaderReader::new(&database.db);
+    headers.note_earlier(earlier);
     for (query, hit_list) in hit_lists.iter().enumerate() {
         let Some(hit_list) = hit_list else {
             continue;
@@ -1719,7 +1716,7 @@ pub(super) fn read_titles(
             titles.insert(hsp_list.oid, title);
         }
     }
-    Ok(headers.first_utf8().cloned())
+    Ok(headers.first_utf8())
 }
 
 /// What the reports `output_formats` show of a reported sequence with parsed Seq-ids
@@ -2770,7 +2767,7 @@ mod tests {
             None,
             hit_list(vec![(middle, 1e-9), (first_volume_ordinal, 1e-3)], 1),
         ];
-        read_titles(&database, &batch, &mut titles).unwrap();
+        read_titles(&database, &batch, Default::default(), &mut titles).unwrap();
         assert_eq!(titles.keys().copied().collect::<Vec<_>>(), [middle]);
         assert_eq!(
             titles[&middle].stored().title,
@@ -2783,7 +2780,7 @@ mod tests {
             hit_list(vec![(middle, 1e-9)], 1),
             hit_list(vec![(last, 1e-9), (first_volume_ordinal, 1e-5)], 2),
         ];
-        let error = read_titles(&database, &batch, &mut titles)
+        let error = read_titles(&database, &batch, Default::default(), &mut titles)
             .expect_err("a missing header file")
             .downcast::<HeaderReadError>()
             .expect("NCBI's error, with the query that reached it");
@@ -2821,7 +2818,7 @@ mod tests {
             hit_list(vec![(5, 1e-9), (11, 1e-5)], 2),
         ];
         let mut titles = DatabaseTitles::new();
-        read_titles(&database, &hit_lists, &mut titles).unwrap();
+        read_titles(&database, &hit_lists, Default::default(), &mut titles).unwrap();
         // A list left without HSPs (its HSPs had score 0) is not reported.
         hit_lists[2].as_mut().unwrap().hsplist_array[1].hsps.clear();
         let reported = reported_subjects(
@@ -2915,7 +2912,7 @@ mod tests {
         let database = BlastnDatabase::open(&name, &ApplicationSettings::default()).unwrap();
         let mut titles = DatabaseTitles::new();
         let mut clean = vec![hit_list(vec![(0, 1e-9)], 1)];
-        read_titles(&database, &clean, &mut titles).unwrap();
+        read_titles(&database, &clean, Default::default(), &mut titles).unwrap();
         reported_subjects(
             &database,
             &titles,
@@ -2928,7 +2925,7 @@ mod tests {
         )
         .unwrap();
         let mut bad = vec![hit_list(vec![(1, 1e-9)], 1)];
-        read_titles(&database, &bad, &mut titles).unwrap();
+        read_titles(&database, &bad, Default::default(), &mut titles).unwrap();
         assert_eq!(titles[&1].stored().title, b"n02 l#ngth 41");
         let error = reported_subjects(
             &database,

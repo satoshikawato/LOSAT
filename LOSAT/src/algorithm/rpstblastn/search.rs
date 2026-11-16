@@ -720,6 +720,7 @@ impl WindowBatch {
             prepared: self.prepared.x_for_results(),
             parameters,
             search_skipped: false,
+            fetched_utf8: None,
         }
     }
 }
@@ -784,6 +785,7 @@ fn unsearched_batch(
         prepared: prepared.x_for_results(),
         parameters,
         search_skipped: true,
+        fetched_utf8: None,
     }
 }
 

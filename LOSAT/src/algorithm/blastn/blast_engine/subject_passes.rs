@@ -106,6 +106,9 @@ pub(super) struct SubjectPasses<'a> {
     /// The algorithm of `-db_hard_mask`, whose masked letters the traceback and the ungapped
     /// re-evaluation of a database sequence read as 'B' (`database::mask_hard_letters`; decision H2).
     pub(super) db_hard_mask: Option<i32>,
+    /// The batch's first fetch with `check_oid_exclusion` that read a header with a UTF8String
+    /// where a VisibleString is expected (`QueryBatch::fetched_utf8`).
+    pub(super) fetched_utf8: crate::seqdb::Utf8Reads,
 }
 
 impl SubjectPasses<'_> {
@@ -587,7 +590,7 @@ impl SubjectPasses<'_> {
                     // smallest ordinal stays) and the sequence has no HSPs. The default search has its own
                     // callback (the default branch has its own closure, so that the default instance of this
                     // function holds no capture of this one).
-                    database::search_blocks(
+                    let searched = database::search_blocks(
                         database,
                         parallel_pool,
                         use_parallel,
@@ -638,7 +641,17 @@ impl SubjectPasses<'_> {
                             Some((_, error)) => Err(error),
                             None => Ok(()),
                         }
-                    })
+                    });
+                    // The re-evaluation's fetches read every sequence with HSPs, in the order of
+                    // the subject loop: the first that took a UTF8String for a VisibleString
+                    // (`FetchExcluded::excludes`) is the batch's first read of one.
+                    if let Some(at) = excluded
+                        .as_ref()
+                        .and_then(crate::algorithm::common::database::FetchExcluded::take_utf8)
+                    {
+                        self.fetched_utf8.note(0, at);
+                    }
+                    searched
                 } else {
                     database::search_blocks(
                         database,
@@ -722,9 +735,18 @@ impl SubjectPasses<'_> {
                 // fetches nothing here; its re-evaluation excluded them, `prelim_pass`).
                 if !UNGAPPED {
                     if let Some(excluded) = database::fetch_excluded(database) {
-                        excluded
+                        let fetched = excluded
                             .retain(&mut listed, |(ordinal, _)| Some(*ordinal))
                             .map_err(database::fetch_refusal)?;
+                        // The traceback fetches every listed sequence (its first read of a
+                        // UTF8String header: `FetchedUtf8::traceback_first`).
+                        if let Some(ordinal) =
+                            crate::algorithm::common::database::FetchedUtf8::traceback_first(
+                                &fetched,
+                            )
+                        {
+                            excluded.note_fetched(&self.fetched_utf8, ordinal);
+                        }
                     }
                 }
                 let found = database::traceback_listed(

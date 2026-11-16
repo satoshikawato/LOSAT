@@ -44,6 +44,60 @@ pub(super) struct KappaBatch<'a> {
     pub(super) queries: &'a mut [HitList],
     pub(super) heaps: &'a mut [CompoHeap],
     pub(super) inactive_heaps: &'a mut [CompoHeap],
+    /// The subjects of the stream whose header holds a UTF8String where a VisibleString is
+    /// expected (`FetchExcluded::retain_noting`: with the query of the list, its best E-value and
+    /// whether it has HSPs), the lists left in the stream (query and subject, in the stream's
+    /// order) where there is one, and the first that the redo fetches (`redo_fetched`).
+    pub(super) fetched: (
+        &'a [(
+            crate::algorithm::common::database::FetchedUtf8,
+            (usize, f64, bool),
+        )],
+        &'a [(usize, usize)],
+        &'a mut Option<u32>,
+    ),
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3575 (quoted at
+// `blastp::blast_engine::database::exclude_fetched`)
+/// The first of `reads` that NCBI's composition-based redo fetches, in its order: the stream's
+/// read from its end (`order`: the lists that the fetches left, in the stream's order), each
+/// match's turn where its early termination test leaves it (`common::database::redo_fetches`, the
+/// heaps `heaps` as the redo left them: a record counts at a match's turn where its list came
+/// before the match's).
+#[cold]
+#[inline(never)]
+fn redo_fetched(
+    reads: &[(
+        crate::algorithm::common::database::FetchedUtf8,
+        (usize, f64, bool),
+    )],
+    order: &[(usize, usize)],
+    heaps: &[CompoHeap],
+) -> Option<u32> {
+    // A list's turn: the kept lists the redo takes before it (it reads the stream from its end).
+    let turn_of = |query: usize, oid: usize| {
+        order
+            .iter()
+            .position(|&list| list == (query, oid))
+            .map(|at| order.len() - 1 - at)
+    };
+    reads
+        .iter()
+        .filter(|(_, (_, _, has_hsps))| *has_hsps)
+        .filter(|(read, (_, evalue, _))| {
+            let turn = order.len() - read.before - usize::from(read.kept);
+            let redo_heaps: Vec<_> = heaps
+                .iter()
+                .enumerate()
+                .map(|(query, heap)| {
+                    heap.redo_heap(|oid| turn_of(query, oid).is_some_and(|at| at < turn))
+                })
+                .collect();
+            crate::algorithm::common::database::redo_fetches(*evalue, &redo_heaps)
+        })
+        .max_by_key(|(read, _)| read.index)
+        .map(|(read, _)| read.ordinal)
 }
 
 impl Runtime<'_> {
@@ -68,6 +122,7 @@ impl Runtime<'_> {
             queries,
             heaps,
             inactive_heaps,
+            fetched: (fetched_reads, fetched_order, fetched_first),
         } = args;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3392-3424
         // ```c++
@@ -440,6 +495,9 @@ impl Runtime<'_> {
         x_timing::end_add(XEnd::Serial, x_serial as u64);
         let x_t_finish = x_timing::lap();
         let _ = (x_reused, x_serial);
+        if !fetched_reads.is_empty() {
+            *fetched_first = redo_fetched(fetched_reads, fetched_order, heaps);
+        }
         for (q, (heap, query)) in heaps.iter_mut().zip(&mut *queries).enumerate() {
             loop {
                 let entry = heap.pop();

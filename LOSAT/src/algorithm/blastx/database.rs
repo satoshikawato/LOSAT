@@ -64,7 +64,7 @@ const NCBISTDAA_TO_AMINOACID: &[u8; 28] = b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
 /// The database of a `-db` search: the opened database and its name as NCBI keeps it
 /// (`BlastxArgs::database_name`: the `-db` value without white space at its ends).
 pub(crate) struct BlastxDatabase {
-    db: SeqDb,
+    pub(crate) db: SeqDb,
     name: String,
     /// The taxonomy database of the run and the taxids its volumes have looked up (XML2 and
     /// JSON, and the batches' prefetch of outfmt 0, 5, 6 and 7), kept across the query batches
@@ -74,20 +74,10 @@ pub(crate) struct BlastxDatabase {
     parsed_seqids: bool,
     /// The program of the run (`args::ProgramName::upper`: BLASTX, or RPSTBLASTN), which the
     /// database's messages name.
-    program: &'static str,
+    pub(crate) program: &'static str,
 }
 
 impl BlastxDatabase {
-    /// NCBI's warning of its first read of a UTF8String header (`read`), where the run has not
-    /// posted it (`shared::Utf8Read::post`, with the program's prefix: `[blastx]`,
-    /// `[rpstblastn]`).
-    pub(crate) fn utf8_post(
-        &self,
-        read: Option<&shared::Utf8Read>,
-    ) -> Option<crate::report::diag_log::Posts> {
-        read?.post(&self.db, &self.program.to_ascii_lowercase())
-    }
-
     /// `-show_gis` for the subjects of the reports (`ParsedSubject::showing_gis`).
     pub(crate) fn showing_gis(mut self, show_gis: bool) -> Self {
         self.db.set_reports_show_gis(show_gis);
@@ -379,17 +369,16 @@ impl ReportedSubjects {
         database: &BlastxDatabase,
         batches: &mut [BatchResults],
         gapped: bool,
-    ) {
+    ) -> Option<crate::seqdb::SeqLocation> {
         // A gapped search fetched every subject of the redo or the traceback with
         // `check_oid_exclusion` (`Runtime::batch_end`); an ungapped one fetches no subject.
-        let Some(mut aligned) = shared::SeqAligned::of(&database.db, gapped) else {
-            return;
-        };
+        let mut aligned = shared::SeqAligned::of(&database.db, gapped)?;
         for batch in batches {
             for lists in &mut batch.queries {
                 aligned.retain(lists, |list| u32::try_from(list.oid).ok());
             }
         }
+        aligned.first_utf8()
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:264-275
@@ -419,6 +408,7 @@ impl ReportedSubjects {
         batches: &[BatchResults],
         gapped: bool,
         pairwise: bool,
+        earlier: shared::EarlierUtf8,
     ) -> Result<BatchTitles> {
         // Every listed subject gets a record (the tabular writer looks its list's subject
         // up before it filters the HSPs); only the reported ones have their titles read.
@@ -427,6 +417,7 @@ impl ReportedSubjects {
         // The sources of the empty stored titles that NCBI makes from them.
         let mut sources: BTreeMap<usize, crate::report::defline::SourceTaxname> = BTreeMap::new();
         let headers = shared::HeaderReader::new(&database.db);
+        headers.note_earlier(earlier);
         for batch in batches {
             for (qidx, lists) in batch.queries.iter().enumerate() {
                 for list in lists {
@@ -476,7 +467,7 @@ impl ReportedSubjects {
             listed,
             parsed,
             sources,
-            utf8: headers.first_utf8().cloned(),
+            utf8: headers.first_utf8(),
         })
     }
 
@@ -1285,6 +1276,7 @@ mod tests {
             .unwrap(),
             parameters: Vec::new(),
             search_skipped: false,
+            fetched_utf8: None,
         }]
     }
 
@@ -1305,7 +1297,9 @@ mod tests {
             let longest = database.x_check_stores().unwrap();
             let stream = super::super::x_db_stream::XStreamDb::new(&database.db, longest);
             let mut batches = one_query(lists);
-            let titles = ReportedSubjects::read_titles(database, &batches, true, false).unwrap();
+            let titles =
+                ReportedSubjects::read_titles(database, &batches, true, false, Default::default())
+                    .unwrap();
             let reported = ReportedSubjects::for_batch(
                 database,
                 Subjects::Stream(super::super::x_db_stream::XStream {
@@ -1373,7 +1367,9 @@ mod tests {
             let mut second = one_query(&[(1, 50), (0, 40)]);
             second[0].query_ordinal = 1;
             batches.append(&mut second);
-            let titles = ReportedSubjects::read_titles(&database, &batches, true, false).unwrap();
+            let titles =
+                ReportedSubjects::read_titles(&database, &batches, true, false, Default::default())
+                    .unwrap();
             let mut reported = ReportedSubjects::for_batch(
                 &database,
                 Subjects::Stream(super::super::x_db_stream::XStream {

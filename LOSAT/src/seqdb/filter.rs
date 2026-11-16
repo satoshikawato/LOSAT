@@ -2858,11 +2858,18 @@ impl SeqDb {
     /// tag cannot be read as NCBI's header read adjusts it. True without a seqid list (a
     /// taxid list keeps at least one line of each sequence it keeps).
     pub fn keeps_line(&self, ordinal: u32) -> Result<bool, SeqDbError> {
+        self.line_read(ordinal).map(|(kept, _)| kept)
+    }
+
+    /// [`SeqDb::keeps_line`], read as NCBI's `GetSeqIDs` reads the header, with whether the
+    /// record holds a UTF8String where a VisibleString is expected (NCBI's read then posts its
+    /// warning, `Utf8Reads`): false where no seqid list reads it.
+    pub fn line_read(&self, ordinal: u32) -> Result<(bool, bool), SeqDbError> {
         if self.filter.is_none() {
-            return Ok(true);
+            return Ok((true, false));
         }
         let at = self.find_volume(ordinal)?;
-        self.volumes[at.volume].keeps_line(at.vol_oid)
+        self.volumes[at.volume].line_read(at.vol_oid)
     }
 
     /// The bitmap of the OIDs a seqid list keeps in a version 5 database (`ids`: sorted and

@@ -1121,8 +1121,13 @@ fn the_frozen_ncbi_rows_of_two_query_batches_are_written_by_two_blocks() {
 // `LOSAT_X_BPQBLOCK` of 50,000 letters, on which the rows alone depend (the fixture script drops
 // `LOSAT_*`). Here `LOSAT_X_BPQBLOCK=1` makes each of its six NCBI batches a block whatever the
 // default, so that the blocks of the preliminary stage (outfmt 10, `PrelimOnly::Block`) and the block
-// search (outfmt 6: blastp, and psiblast's one round) run (`LOSAT_X_REACH`), and each run must write
-// the bytes NCBI froze, standard error included, at one and four threads.
+// search (outfmt 6: blastp, and psiblast's one round) run, and each run must write the bytes NCBI
+// froze, standard error included, at one and four threads. Both block paths record the switch's
+// new side (`LOSAT_X_REACH`), so each row's pair of sides is pinned: an outfmt 6 row records the
+// new side only (the block search ran and did not leave it: a blastp call that leaves it records
+// the reference side, then runs the preliminary stage in blocks, which records the new side); the
+// outfmt 10 row records both (the block search takes the reference path for outfmt 10,
+// `x_query_block_plan`, then the preliminary stage runs in blocks).
 #[test]
 fn the_frozen_rows_of_a_database_length_of_0_are_written_by_blocks() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -1148,6 +1153,12 @@ fn the_frozen_rows_of_a_database_length_of_0_are_written_by_blocks() {
             let expected_out = std::fs::read(frozen.join(format!("{row}.out"))).unwrap();
             let expected_err =
                 std::fs::read_to_string(frozen.join(format!("{row}.err"))).unwrap_or_default();
+            // The sides (new, ref) of LOSAT_X_BPQBLOCK the row records (above).
+            let sides = match cells[format].split_whitespace().next() {
+                Some("6") => (true, false),
+                Some("10") => (true, true),
+                other => panic!("{row}: no sides for outfmt {other:?}"),
+            };
             for threads in THREADS {
                 let reach = reach_support::Reach::new("l0paja");
                 let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
@@ -1178,7 +1189,11 @@ fn the_frozen_rows_of_a_database_length_of_0_are_written_by_blocks() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 let what = format!("{row} threads {threads}");
                 assert!(output.status.success(), "{what}: {stderr}");
-                assert!(reach.sides("LOSAT_X_BPQBLOCK").0, "{what}: no blocks ran");
+                assert_eq!(
+                    reach.sides("LOSAT_X_BPQBLOCK"),
+                    sides,
+                    "{what}: the sides (new, ref) of LOSAT_X_BPQBLOCK"
+                );
                 assert!(
                     output.stdout == expected_out,
                     "{what}: the bytes of NCBI differ"

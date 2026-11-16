@@ -27,7 +27,7 @@
   directory: a volume with such a file now has no such index, as in NCBI BLAST+, whose lookups find nothing there and go
   on to the next volume; LOSAT stopped with `BLAST Database error: Error: Could not open input file`. A reported
   sequence that the lookup then finds as another sequence of a later volume is refused, as in every other database,
-  and the refusal of an empty string ISAM file now says that NCBI BLAST+ crashes where it reads it. A trace-id ISAM
-  file (`.pti`, `.ptd`, `.nti`, `.ntd`) that is a directory likewise is no such index (NCBI BLAST+ takes only regular
-  files for one): such a volume is no longer refused as one with an ISAM of trace ids, and its `ti|` lookups use the
-  string ISAM, as in a volume without trace-id files.
+  and the refusal of an empty string ISAM file now says that NCBI BLAST+ crashes where it reads it. Trace-id ISAM
+  files (`.pti` and `.ptd`, `.nti` and `.ntd`) that are directories likewise are no such index (NCBI BLAST+ takes only
+  regular files for one): such a volume is searched as NCBI BLAST+ searches it, as a volume without trace-id files;
+  LOSAT refused it as one with an ISAM of trace ids.

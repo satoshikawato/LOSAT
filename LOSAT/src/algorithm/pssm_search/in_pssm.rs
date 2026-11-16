@@ -110,7 +110,7 @@ const UNDECIDED_GUESS: &str =
 /// is its file header: `CObjectIStreamXml::ReadFileHeader`, objistrxml.cpp:582-660, with the declaration's
 /// attributes and encodings, comments, `DOCTYPE` and namespace prefixes, not ported).
 fn guess_format(bytes: &[u8]) -> PssmFileFormat {
-    let guessed = match FormatGuess::new(bytes).guess_format() {
+    let guessed = match FormatGuess::over(bytes).guess_format() {
         Ok(guessed) => guessed,
         Err(Stop::Exception(exception)) => return PssmFileFormat::Exception(exception),
         Err(Stop::Undecided(detail)) => {

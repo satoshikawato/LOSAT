@@ -1251,7 +1251,9 @@ pub(super) fn report_values(
 
 /// The labels that the reports show of the subjects (`report_labels`), each `run_call`'s value of
 /// the same name: the subject tag (`subject_input_label`), the numbers of sequences and letters of
-/// the `Database:` lines, and the context of the tabular reports.
+/// the `Database:` lines, the database's sums as NCBI's `Int8` values (`shown_database`, `None` for
+/// a subject set: the XML report's `db-num`, `db-len` and their overflow), and the context of the
+/// tabular reports.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:138-139
 /// ```c++
@@ -1262,6 +1264,7 @@ pub(super) struct ReportLabels {
     pub(super) subject_input_label: String,
     pub(super) shown_num_sequences: usize,
     pub(super) shown_total_letters: usize,
+    pub(super) shown_database: Option<crate::report::pairwise::PairwiseDatabase>,
     pub(super) context: ReportContext,
 }
 
@@ -1326,6 +1329,7 @@ pub(super) fn report_labels(
         subject_input_label,
         shown_num_sequences,
         shown_total_letters,
+        shown_database,
         context,
     }
 }

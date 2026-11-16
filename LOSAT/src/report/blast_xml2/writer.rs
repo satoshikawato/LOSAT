@@ -92,7 +92,7 @@ fn write_statistics<E: Encoder>(enc: &mut E, run: &XmlRun<'_>, params: &Xml2Run,
     enc.begin_sequence("Statistics");
     if params.target == Xml2Target::Database {
         enc.member("db-num", 0);
-        enc.big_int(i64::from(run.db_num));
+        enc.big_int(run.db_num);
         enc.end_member();
         enc.member("db-len", 1);
         enc.big_int(run.db_len);
@@ -525,8 +525,17 @@ impl<F: SideFiles> StructuredXml for Xml2Writer<F> {
             })
     }
 
-    fn start(&mut self, out: &mut Vec<u8>) {
+    fn start(&mut self, reported: Option<&XmlRun<'_>>, out: &mut Vec<u8>) -> Result<()> {
+        if let Some(run) = reported {
+            run.check_sums(match self.document.kind() {
+                Xml2Kind::Files13 => 13,
+                Xml2Kind::Files14 => 14,
+                Xml2Kind::Single15 => 15,
+                Xml2Kind::Single16 => 16,
+            })?;
+        }
         self.document.start(out);
+        Ok(())
     }
 
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<()> {

@@ -1,0 +1,12 @@
+# BLASTX 2.17.0+
+# Query: nq1 query nucleotide one
+# Database: User specified sequence set (Input: tests/db_search/t7/gb.faa)
+# Fields: query id, subject id, evalue
+# 6 hits found
+nq1	s2	1.85e-109
+nq1	s2	5.93e-76
+nq1	s2	1.9
+nq1	s2	2.1
+nq1	s2	7.1
+nq1	Unknown	1.47e-53
+# BLAST processed 1 queries

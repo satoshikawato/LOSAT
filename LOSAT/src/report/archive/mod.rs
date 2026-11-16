@@ -57,7 +57,7 @@ use options::OptionInputs;
 
 pub use writer::{
     write_archive, write_error_archive, AlignSource, ArchiveOut, BatchArchive, KaBlock,
-    RequestInputs,
+    RequestInputs, SearchedContext0,
 };
 
 /// The Karlin-Altschul block of the results (`Blast4-ka-block`) that `params` makes.
@@ -245,6 +245,62 @@ impl ArchiveRequest {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:164-173 (quoted
+// at `OptionsHandle::set_database_filter`) and c++/src/algo/blast/api/effsearchspace_calc.cpp:111-121
+// ```c++
+//     BlastEffectiveLengthsParametersNew(opts_memento->m_EffLenOpts,
+//                                        db_num_bases, db_num_seqs,
+//                                        &eff_len_params);
+//
+//     Int2 status =
+//         BLAST_CalcEffLengths(m_Program, opts_memento->m_ScoringOpts,
+//                              eff_len_params, sbp, m_QueryInfo, NULL);
+// ```
+// The request's `EffectiveSearchSpace` is `BLAST_CalcEffLengths` with the statistics' length and
+// count before the setup's fallback to OID 0 (`BLAST_GapAlignSetUp`, blast_setup.c:929-937): the
+// search's own value where the length is positive; nothing (0) for a length of 0 (blast_setup.c:
+// 729-732); for a negative one (an alias file's `LENGTH` of 2^63 or more), no length adjustment
+// (`BLAST_ComputeLengthAdjustment`'s `c < 0`, whatever the Karlin block) and an effective database
+// length of 1, so the context's query length (NCBI 2.17.0: blastp 142, blastn 577 with
+// `LENGTH 9223372036854775809`, probe run2 of line RG D1a-3, impl1).
+/// How the `EffectiveSearchSpace` option of a searched batch's request is made.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RequestLength {
+    /// The search's own value of the batch's context 0: a positive statistics length, or
+    /// `-searchsp`.
+    #[default]
+    Search,
+    /// `BLAST_CalcEffLengths` of context 0 with the database numbers that
+    /// `stats::setup::eff_lengths_database` gives for the statistics' length before the fallback
+    /// (`None`: it returns at once, the option is 0), a length that is not positive
+    /// (`note_archive_database_filter` refuses `-dbsize` there).
+    Lengths(Option<(i64, i32)>),
+}
+
+impl RequestLength {
+    /// The `EffectiveSearchSpace` option of a searched batch whose context 0 is `context0`.
+    pub fn space(self, context0: writer::SearchedContext0) -> i64 {
+        match self {
+            Self::Search => context0.space,
+            Self::Lengths(None) => 0,
+            Self::Lengths(Some(_)) if context0.query_length <= 0 => 0,
+            Self::Lengths(Some((db_length, num_seqs))) => {
+                debug_assert!(db_length <= 0, "a request length that is not positive");
+                // The Karlin block is not read for a database length that is not positive.
+                crate::stats::setup::calc_eff_lengths(
+                    context0.query_length,
+                    db_length,
+                    num_seqs,
+                    &crate::stats::KarlinParams::default(),
+                    0,
+                    "",
+                )
+                .map_or(0, |lengths| lengths.eff_searchsp)
+            }
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:280-282,304-306
 // ```c++
 //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
@@ -255,8 +311,9 @@ impl ArchiveRequest {
 //                 formatter.WriteArchive(*queries, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
 // ```
 /// What NCBI's options handle (`m_OptsHndl`) holds for the requests of a run beyond the options
-/// of the command line: the database list's parameter and whether that list kept no sequence, and
-/// the parameters that the application and each batch's set-up set in it (`set_search_sets`). One
+/// of the command line: the database list's parameter and how the database's statistics make the
+/// `EffectiveSearchSpace` option of a searched batch (`RequestLength`), and the parameters that
+/// the application and each batch's set-up set in it (`set_search_sets`). One
 /// handle per run, which the archive (`ArchiveHandle`) and the search strategy
 /// (`strategy::StrategyExport`) share, as NCBI's applications hand the one handle to
 /// `SaveSearchStrategy` and `WriteArchive`; it is set once, where the database is opened
@@ -292,8 +349,8 @@ struct DatabaseMasking {
 struct DatabaseFilter {
     /// The `TaxidList` or `NegativeTaxidList` program option.
     list: Option<options::Param>,
-    /// A list kept no sequence and `-searchsp` is not given.
-    empty: bool,
+    /// How the `EffectiveSearchSpace` option of a searched batch is made.
+    request_length: RequestLength,
 }
 
 /// The parameters that a run sets in the handle besides the command line's and the batches'
@@ -327,21 +384,20 @@ impl OptionsHandle {
     //                                          num_seqs, total_length,
     //                                          full_data->m_ScoreBlk->GetPointer());
     // ```
-    /// What the database's list makes of the requests: its `program-options` parameter
-    /// (`DbFilterArgs::archive_parameter`), and `empty_database` when a list kept no sequence and
-    /// `-searchsp` is not given. The `EffectiveSearchSpace` option is then 0
-    /// (`BLAST_CalcEffLengths` returns at once for a database length of 0, blast_setup.c:729-732),
-    /// though the statistics of the results read the length of OID 0 (`SeqDb::statistics_numbers`).
-    /// Set once per run, where the database is opened; a second setting is LOSAT's internal
-    /// error.
+    /// What the database's list and statistics make of the requests: its `program-options`
+    /// parameter (`DbFilterArgs::archive_parameter`), and how the `EffectiveSearchSpace` option
+    /// of a searched batch is made (`RequestLength`, `common::database::note_archive_database_filter`):
+    /// for a statistics length that is not positive it is not the search's own value, though the
+    /// statistics of the results read the length of OID 0 (`SeqDb::statistics`). Set once per
+    /// run, where the database is opened; a second setting is LOSAT's internal error.
     pub fn set_database_filter(
         &self,
         list: Option<options::Param>,
-        empty_database: bool,
+        request_length: RequestLength,
     ) -> anyhow::Result<()> {
         let set = self.0.filter.set(DatabaseFilter {
             list,
-            empty: empty_database,
+            request_length,
         });
         anyhow::ensure!(
             set.is_ok(),
@@ -474,20 +530,25 @@ impl OptionsHandle {
     // ```
     /// Moves `carry` past a batch: what the batch's set-up sets in the handle (`set_search_sets`'s
     /// `each_batch`), then the batch's `EffectiveSearchSpace` option when the batch was searched
-    /// (`SplitQuery_SetEffectiveSearchSpace` writes it into the handle): `searched`, `None` for a
-    /// batch NCBI does not search, which leaves the option as the batch before left it; a list that
-    /// kept no sequence makes it 0.
-    pub fn pass(&self, carry: &mut HandleCarry, searched: Option<i64>) {
+    /// (`SplitQuery_SetEffectiveSearchSpace` writes it into the handle): `searched` is the batch's
+    /// context 0 (the option is the search's own value, or what `RequestLength` makes of it),
+    /// `None` for a batch NCBI does not search, which leaves the option as the batch before left
+    /// it.
+    pub fn pass(&self, carry: &mut HandleCarry, searched: Option<SearchedContext0>) {
         if let Some(search) = self.0.search.get() {
             for param in &search.each_batch {
                 carry.0.set(param.name, param.value.clone());
             }
         }
-        if let Some(space) = searched {
-            let empty = self.0.filter.get().is_some_and(|filter| filter.empty);
+        if let Some(context0) = searched {
+            let length = self
+                .0
+                .filter
+                .get()
+                .map_or(RequestLength::Search, |filter| filter.request_length);
             carry.0.set(
                 "EffectiveSearchSpace",
-                options::ParamValue::BigInteger(if empty { 0 } else { space }),
+                options::ParamValue::BigInteger(length.space(context0)),
             );
         }
     }
@@ -688,9 +749,10 @@ impl ArchiveHandle {
 
     /// What the next archive's request holds of the options handle beyond the command line's
     /// options, after its batch (`OptionsHandle::request_sets`): its `EffectiveSearchSpace` option
-    /// is the batch's own value when the batch was searched (kept for the batches after it), else
-    /// the one of the last searched batch, which is absent before one (`OptionsHandle::pass`).
-    pub fn request_sets(&self, searched: Option<i64>) -> Vec<options::Param> {
+    /// is the batch's own value when the batch was searched (`searched`, its context 0; kept for
+    /// the batches after it), else the one of the last searched batch, which is absent before one
+    /// (`OptionsHandle::pass`).
+    pub fn request_sets(&self, searched: Option<writer::SearchedContext0>) -> Vec<options::Param> {
         self.with_state(|state| {
             self.0.options.pass(&mut state.carry, searched);
             self.0.options.request_sets(&state.carry)
@@ -1107,12 +1169,57 @@ mod tests {
             },
             OptionsHandle::default(),
         );
-        let space = |searched| search_space(&handle.request_sets(searched));
-        assert_eq!(space(None), None);
-        assert_eq!(space(Some(8738)), Some(8738));
-        assert_eq!(space(None), Some(8738));
-        assert_eq!(space(Some(0)), Some(0));
-        assert_eq!(space(None), Some(0));
+        let searched = |space| {
+            Some(writer::SearchedContext0 {
+                space,
+                query_length: 142,
+            })
+        };
+        let space = |handle: &ArchiveHandle, searched| search_space(&handle.request_sets(searched));
+        assert_eq!(space(&handle, None), None);
+        assert_eq!(space(&handle, searched(8738)), Some(8738));
+        assert_eq!(space(&handle, None), Some(8738));
+        assert_eq!(space(&handle, searched(0)), Some(0));
+        assert_eq!(space(&handle, None), Some(0));
+        // A statistics length of 0, and a negative one (probe run2 of line RG D1a-3: the query's
+        // length, 142): the run's options handle is set once, so each case has its own.
+        let with_length = |length| {
+            let handle = ArchiveHandle::new(
+                ArchiveEncoding::Text,
+                ArchiveRequest {
+                    program: "blastp",
+                    application: "blastp",
+                    service: "plain",
+                    algorithm: Vec::new(),
+                    database: None,
+                    step_number: None,
+                },
+                OptionsHandle::default(),
+            );
+            handle.options().set_database_filter(None, length).unwrap();
+            handle
+        };
+        assert_eq!(
+            space(&with_length(RequestLength::Lengths(None)), searched(8738)),
+            Some(0)
+        );
+        assert_eq!(
+            space(
+                &with_length(RequestLength::Lengths(Some((i64::MIN + 1, 23)))),
+                searched(15_876)
+            ),
+            Some(142)
+        );
+        assert_eq!(
+            space(
+                &with_length(RequestLength::Lengths(Some((-1, -5)))),
+                Some(writer::SearchedContext0 {
+                    space: 0,
+                    query_length: 0,
+                })
+            ),
+            Some(0)
+        );
     }
 
     /// The `EffectiveSearchSpace` option among a request's sets.
@@ -1165,8 +1272,14 @@ mod tests {
             names(&carry),
             ["CompositionBasedStats", "DbLength", "MatrixName"]
         );
-        handle.pass(&mut carry, Some(85_680));
-        handle.pass(&mut carry, Some(96_628));
+        let searched = |space| {
+            Some(writer::SearchedContext0 {
+                space,
+                query_length: 142,
+            })
+        };
+        handle.pass(&mut carry, searched(85_680));
+        handle.pass(&mut carry, searched(96_628));
         assert_eq!(
             names(&carry),
             [

@@ -138,16 +138,9 @@ fn a_query_title_outside_us_ascii_is_refused() {
                 "-outfmt",
                 "5",
             ]);
-            if title == b"caf\xe9" {
-                // BLASTX's reader refuses a title that is not UTF-8 for every format.
-                assert_eq!(output.status.code(), Some(1));
-                assert!(output.stdout.is_empty());
-                assert!(
-                    String::from_utf8_lossy(&output.stderr).contains("invalid UTF-8 FASTA title")
-                );
-            } else {
-                refused(&output, "a query title");
-            }
+            // BLASTX reads a title that is not UTF-8 as its bytes, as NCBI's reader does (line RG
+            // T7); the XML stream cannot write either title.
+            refused(&output, "a query title");
         }
     }
     fs::remove_dir_all(dir).ok();

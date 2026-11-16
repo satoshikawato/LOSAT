@@ -29,15 +29,36 @@ pub struct XmlRun<'a> {
     pub reward_penalty: Option<(i32, i32)>,
     /// `Parameters_filter` (`filter::filter_string`).
     pub filter: &'a [u8],
-    /// `Statistics_db-num` and `Statistics_db-len`: the database's sequences and letters; 0 and
-    /// 0 for `-subject`.
-    pub db_num: i32,
+    /// `Statistics_db-num` and `Statistics_db-len`: the database's sequences and letters (the
+    /// sums over the names of the `-db` list, `PairwiseDatabase`); 0 and 0 for `-subject`. The
+    /// number is the `Int8` sum that XML2 and JSON write (data4xml2format.hpp:215-217); BLAST
+    /// XML sums NCBI's `int` (data4xmlformat.hpp:276), equal where that sum does not overflow,
+    /// which LOSAT refuses (`XmlRun::check_sums`).
+    pub db_num: i64,
     pub db_len: i64,
+    /// Whether the sum of `db_len` passes NCBI's `Int8` (`PairwiseDatabase::total_letters_overflow`),
+    /// which LOSAT refuses when it writes a document (`XmlRun::check_sums`).
+    pub db_len_overflow: bool,
     /// The positives table of the recount; `None` for BLASTN (a nucleotide search shows `|`).
     pub positives: Option<&'a FormattingMatrix>,
     /// The letter of a masked query position: `N` for BLASTN, `X` otherwise
     /// (blastxml_format.cpp:280-283).
     pub mask_char: u8,
+}
+
+impl XmlRun<'_> {
+    /// LOSAT's refusal of the database counts that a report of `outfmt` (5, 13 to 16) of this
+    /// run would print where NCBI's sums overflow (`common::database::check_sums_of`), made by
+    /// the documents' `StructuredXml::start` before their first byte.
+    pub(crate) fn check_sums(&self, outfmt: i32) -> anyhow::Result<()> {
+        crate::algorithm::common::database::check_sums_of(
+            self.db_num,
+            self.db_len,
+            self.db_len_overflow,
+            outfmt,
+            &self.program.to_ascii_uppercase(),
+        )
+    }
 }
 
 /// The `Statistics` of a query.
@@ -106,6 +127,8 @@ pub struct XmlHit<'a> {
     /// The `HitDescr` list of a database sequence with parsed Seq-ids (`SubjectNames::
     /// descriptions`; empty for the others).
     pub descriptions: &'a [crate::report::db_subject::HitDescription],
+    /// The catch of outfmt 5's hit writer (`SubjectNames::unknown`): `Hit_len` is 0.
+    pub unknown: bool,
 }
 
 impl<'a> XmlHit<'a> {
@@ -119,6 +142,7 @@ impl<'a> XmlHit<'a> {
             taxid: names.taxid,
             taxonomy: &names.taxonomy,
             descriptions: &names.descriptions,
+            unknown: names.unknown,
         }
     }
 }

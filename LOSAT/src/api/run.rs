@@ -1086,6 +1086,7 @@ pub fn run(
                         .iter()
                         .map(|&position| FormatOutput {
                             outfmt: formats[position],
+                            refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                             sink: OutputSink::Writer(
                                 writers[position].take().expect("one group per format"),
                             ),
@@ -1161,6 +1162,7 @@ pub fn run_to_file(
             let mut outputs = ReportOutputs {
                 formats: vec![FormatOutput {
                     outfmt,
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Out(&mut file),
                 }],
                 diagnostics: &mut sink,
@@ -1224,6 +1226,7 @@ fn collect_one(
                 .zip(writers.iter_mut())
                 .map(|(&position, writer)| FormatOutput {
                     outfmt: formats[position],
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(writer),
                 })
                 .collect(),
@@ -1344,7 +1347,9 @@ pub(super) fn records(
                         let subject = &inputs.subject[s_idx];
                         subject
                             .subject_tabular_id(subject_protein)
-                            .unwrap_or_else(|_| subject.shown_id().to_vec())
+                            .ok()
+                            .flatten()
+                            .unwrap_or_else(|| subject.shown_id().to_vec())
                     }),
                     length(inputs.subject, s_idx),
                 ),

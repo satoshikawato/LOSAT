@@ -16,6 +16,7 @@ use anyhow::{bail, Result};
 
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::cli::NativeError;
+use crate::report::defline::SubjectWord;
 use crate::report::pairwise::{DatabaseInfo, PairwiseDatabase};
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 use crate::sequence::packed_subject::PackedNucleotide;
@@ -152,21 +153,6 @@ pub(crate) fn restrict_database(
     // without it, before the search (`pairwise_database`), and meets the others there.
     db.check_alias_values()
         .map_err(|error| database_error(error, program))?;
-    if db.is_restricted() && db.statistics_per_subject() {
-        return Err(database_error(
-            SeqDbError::Unsupported {
-                path: std::path::PathBuf::from(name),
-                message: format!(
-                    "the total length of NCBI's scan of the list is 0 while the search reads {} \
-                     sequences (the scan stops at the FIRST_OID-LAST_OID range of the only alias \
-                     file of the -db), so NCBI computes the statistics of each subject on its \
-                     own; LOSAT does not search such a database with this list yet",
-                    db.num_seqs()
-                ),
-            },
-            program,
-        ));
-    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/uniform_search.cpp:292-298
     // ```c++
     //     else {
@@ -219,20 +205,27 @@ fn apply_list(
 }
 
 /// Tells the BLAST archive of the run (`archive`, `None` without one) and its search strategy
-/// export (`strategy`) what the database's list makes of their requests: the run's options
-/// handle, made once per run and shared by both (`report::archive::OptionsHandle::set_database_filter`).
-/// `empty_length` is whether the
-/// total length of the statistics is not positive (`SeqDb::statistics_length_is_empty`: a list
-/// that kept no sequence, without `STATS_TOTLEN`). `dbsize` is whether `-dbsize` is given: the
+/// export (`strategy`) what the database's list and statistics make of their requests: the run's
+/// options handle, made once per run and shared by both
+/// (`report::archive::OptionsHandle::set_database_filter`). `statistics` are the database's
+/// (`SeqDb::statistics`),
+/// `translated` whether its subjects are translated (TBLASTN, TBLASTX). The requests'
+/// `EffectiveSearchSpace` is the search's own value where the statistics' length before the
+/// fallback to OID 0 (`DbStatistics::gumbel_db_length`) is positive or `-searchsp` is given, else
+/// `BLAST_CalcEffLengths` with that length (`archive::RequestLength`: 0 for a list that kept no
+/// sequence without `STATS_TOTLEN`; the context's query length for an alias file's `LENGTH` of
+/// 2^63 or more). `dbsize` is whether `-dbsize` is given: the
 /// `EffectiveSearchSpace` option then counts the length adjustment with no sequence, while the
 /// searches read the length of OID 0 as one sequence (probes E14 and E17 of line DI-8): LOSAT
 /// refuses it (the strategy's requests after the first carry that option too).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn note_archive_database_filter(
     archive: Option<&crate::report::archive::ArchiveHandle>,
     strategy: Option<&crate::report::archive::strategy::StrategyExport>,
     filter: &crate::blastinput::db_filter::DbFilterArgs,
     list_taxids: &[i32],
-    empty_length: bool,
+    statistics: &crate::seqdb::DbStatistics,
+    translated: bool,
     searchsp: bool,
     dbsize: bool,
     program: &str,
@@ -240,7 +233,8 @@ pub(crate) fn note_archive_database_filter(
     if archive.is_none() && strategy.is_none() {
         return Ok(());
     }
-    if empty_length && dbsize {
+    let statistics_length = statistics.gumbel_db_length;
+    if statistics_length <= 0 && dbsize {
         let option = if archive.is_some() {
             "-outfmt 11"
         } else {
@@ -261,10 +255,18 @@ pub(crate) fn note_archive_database_filter(
         (None, Some(strategy)) => strategy.options(),
         (None, None) => return Ok(()),
     };
-    options.set_database_filter(
-        filter.archive_parameter(list_taxids),
-        empty_length && !searchsp,
-    )?;
+    let request_length = if statistics_length > 0 || searchsp {
+        crate::report::archive::RequestLength::Search
+    } else {
+        crate::report::archive::RequestLength::Lengths(crate::stats::setup::eff_lengths_database(
+            statistics_length,
+            statistics.request_count,
+            0,
+            false,
+            translated,
+        ))
+    };
+    options.set_database_filter(filter.archive_parameter(list_taxids), request_length)?;
     Ok(())
 }
 
@@ -803,8 +805,10 @@ pub(crate) fn pairwise_database_masked(
                         record.title.clone()
                     },
                     date: record.date.clone(),
-                    num_sequences: u64::from(record.num_seqs),
-                    total_letters: record.total_length,
+                    num_sequences: record.num_seqs,
+                    // `SDbInfo::total_length` is an `Int8`: a `LENGTH` of 2^63 or more is
+                    // negative.
+                    total_letters: record.total_length as i64,
                     filt_algorithm_name: algorithm
                         .map(|algorithm| algorithm.program_name.clone())
                         .unwrap_or_default(),
@@ -815,6 +819,166 @@ pub(crate) fn pairwise_database_masked(
             })
             .collect(),
     )
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:513-522
+// ```c++
+//         Int8 tot_num_seqs = static_cast<Int8>(dbinfo->number_seqs);
+//         Int8 tot_length = dbinfo->total_length;
+//
+//         for (size_t i = 1; i < dbinfo_list.size(); i++) {
+//             db_titles += "; " + dbinfo_list[i].definition;
+//             tot_num_seqs += static_cast<Int8>(dbinfo_list[i].number_seqs);
+//             tot_length += dbinfo_list[i].total_length;
+//         }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:116-119 (`int
+// m_NumSequences`, `Int8 m_NumBases`) and c++/src/algo/blast/format/data4xml2format.cpp:166-169
+// (`Int8 m_NumSequences`, `Int8 m_NumBases`)
+// ```c++
+// 			m_NumSequences += i->number_seqs;
+// 			m_NumBases += i->total_length;
+// ```
+// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:1002-1010
+// ```c++
+// void COStreamBuffer::PutInt8(Int8 v)
+//     THROWS1((CIOException, bad_alloc))
+// {
+//     const size_t BSIZE = (sizeof(v)*CHAR_BIT) / 3 + 2;
+//     char b[BSIZE];
+//     Int8 n = v;
+//     if ( n < 0 ) {
+//         n = -n;
+//     }
+// ```
+// The sums are signed overflow where they pass their type (NCBI 2.17.0 prints them wrapped,
+// probes p5_pr_sum2 and p5b_sum_int of line RG D1a-3), and the serial XML writer's `-n` of
+// INT64_MIN is too (it writes `-0`, probes p5_neg_2p63 and p5b_neg_fmt): LOSAT refuses these
+// (DECISIONS D1a3-2 of line RG: Q2 = A, rule 3; Q1 waits for the Owner, refused until then).
+/// What LOSAT refuses of the database counts that the report of `outfmt` (NCBI's format number)
+/// would print where NCBI's arithmetic overflows (`num_sequences` and `total_letters` are the
+/// `PairwiseDatabase` sums over the names of the `-db` list, `total_letters_overflow` whether the
+/// lengths' sum passes `Int8`): a sum of the total lengths past `Int8` (the pairwise prolog of
+/// outfmt 0 to 4, BLAST XML 5, the XML2 and JSON documents 13 to 16), a sum of the numbers of
+/// sequences past NCBI's `int` (BLAST XML), and a summed length of exactly -2^63 in the serial
+/// XML of BLAST XML and XML2 (5, 14, 16).
+pub(crate) fn report_sum_refusal(
+    num_sequences: i64,
+    total_letters: i64,
+    total_letters_overflow: bool,
+    outfmt: i32,
+) -> Option<&'static str> {
+    if matches!(outfmt, 0..=5 | 13..=16) && total_letters_overflow {
+        return Some(
+            "the total lengths of the databases of the -db list (their alias files' LENGTH) sum to more than NCBI BLAST+'s 64-bit report count holds",
+        );
+    }
+    if outfmt == 5 && i32::try_from(num_sequences).is_err() {
+        return Some(
+            "the numbers of sequences of the databases of the -db list (their alias files' NSEQ) sum to more than BLAST XML's 32-bit count holds",
+        );
+    }
+    if matches!(outfmt, 5 | 14 | 16) && !total_letters_overflow && total_letters == i64::MIN {
+        return Some(
+            "a total length of 9223372036854775808 letters (an alias file's LENGTH), which NCBI BLAST+'s XML writer prints as -0 (a signed overflow), in BLAST XML or XML2",
+        );
+    }
+    None
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-747
+// ```c++
+//     } else if (m_FormatType == CFormattingArgs::eXml) {
+//         CRef<CSearchResults> res(const_cast<CSearchResults*>(&results));
+//         res->TrimSeqAlign(m_HitlistSize);
+//         m_AccumulatedResults.push_back(res);
+//         ...
+//         	CCmdLineBlastXMLReportData report_data(m_AccumulatedQueries,
+//                                                    m_AccumulatedResults,
+//                                                    *m_Options, m_DbName, m_DbIsAA,
+//         ...
+//     	x_PrintXML2Report(results, queries);
+// ```
+// NCBI sums the counts of the pairwise prolog (outfmt 0 to 4) before it searches, those of the
+// XML and JSON documents when it formats a query's report: a search that fails before (an engine
+// error of the setup, "The average subject length is too short", probe p5_pr_sum2#6 of line RG
+// D1a-3) never reaches the documents' sums. The documents' refusals are LOSAT's report writers'
+// (`StructuredXml::start` of `report::blast_xml::writer` and `report::blast_xml2::writer`), made
+// before the first byte of the document (the XML2 and JSON documents' start included, which NCBI
+// writes before the search: BLASTX holds it, `blastx::blast_xml::HeldOutput`).
+/// LOSAT's refusal of the database counts of the report of `outfmt` that NCBI's sums overflow
+/// (`report_sum_refusal`): its own type, so that a run that holds its document drops it
+/// (`blastx::blast_xml::drops_held_document`) and the refusal follows no byte.
+#[derive(Debug)]
+pub(crate) struct ReportSumRefusal(String);
+
+impl std::fmt::Display for ReportSumRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ReportSumRefusal {}
+
+/// LOSAT's refusal (`ReportSumRefusal`) of the database counts that the report of `outfmt` would
+/// print where NCBI's sums overflow (`report_sum_refusal`), for `program` (its name in the
+/// message): `num_sequences`, `total_letters` and `total_letters_overflow` are the
+/// `PairwiseDatabase` sums of the `-db` list.
+pub(crate) fn check_sums_of(
+    num_sequences: i64,
+    total_letters: i64,
+    total_letters_overflow: bool,
+    outfmt: i32,
+    program: &str,
+) -> Result<()> {
+    match report_sum_refusal(num_sequences, total_letters, total_letters_overflow, outfmt) {
+        Some(reason) => Err(ReportSumRefusal(refusal(reason, program).to_string()).into()),
+        None => Ok(()),
+    }
+}
+
+/// LOSAT's refusals of the counts of the pairwise prolog of `outfmt` (`report_sum_refusal` for
+/// outfmt 0 to 4, which NCBI writes before the search) for the `-db` list's databases `database`.
+pub(crate) fn check_report_sums(
+    database: &PairwiseDatabase,
+    outfmt: i32,
+    program: &str,
+) -> Result<()> {
+    if !prints_report_sums(outfmt) {
+        return Ok(());
+    }
+    check_sums_of(
+        database.num_sequences,
+        database.total_letters,
+        database.total_letters_overflow,
+        outfmt,
+        program,
+    )
+}
+
+/// Whether the report format `outfmt` prints the database's sums (`check_report_sums`).
+fn prints_report_sums(outfmt: i32) -> bool {
+    (0..=4).contains(&outfmt)
+}
+
+/// [`check_report_sums`] for each report format of `outfmts` (`-outfmt` values), with the
+/// database's report made by `shown` once, only where a format prints its sums.
+pub(crate) fn check_formats_report_sums<'f>(
+    shown: impl FnOnce() -> PairwiseDatabase,
+    outfmts: impl IntoIterator<Item = &'f str>,
+    program: &str,
+) -> Result<()> {
+    let mut shown = Some(shown);
+    let mut made = None;
+    for outfmt in outfmts {
+        let number = crate::blastinput::app::parse_formatting_string(outfmt)?.number;
+        if !prints_report_sums(number) {
+            continue;
+        }
+        let database = made.get_or_insert_with(|| (shown.take().expect("made once"))());
+        check_report_sums(database, number, program)?;
+    }
+    Ok(())
 }
 
 /// The stored title of a database sequence, as the reports read it (`stored_title`).
@@ -2592,6 +2756,10 @@ pub(crate) struct ParsedShown {
     pub(crate) taxonomy: bool,
     /// The subject ids that the tabular formats print (`ParsedSubject::check_printed_word`).
     pub(crate) words: crate::report::tabular::PrintedIds,
+    /// Whether a tabular format can stop at a row whose subject lookups fail
+    /// (`report::tabular::may_stop_at_failed_lookup`: `sacc`, `saccver`, the default fields, a
+    /// first row's `staxid`), so that such a sequence may be refused (`reports_may_refuse`).
+    pub(crate) stops_at_failed_lookup: bool,
     /// Whether the batches' prefetch reads the subjects by their Seq-align ids (the first
     /// format's: outfmt 0, 5, 6, 7, 10, 17 and 20, with `PRE_FETCH_SEQS_LIMIT=2147483647` also the
     /// Seq-annots 8, 9 and 12, [`prefetches_subjects`]), unless `PRE_FETCH_SEQS_LIMIT` turns it
@@ -2723,10 +2891,10 @@ pub(crate) fn check_reported_parsed(
 /// an empty one made from the name of its source, `sources[rank]`, or `BL_ORD_ID:n`), or of a
 /// sequence with parsed Seq-ids (`parsed[rank]`, `ParsedSubject::tabular_ids`). The custom fields
 /// ask `sseqid` of it (`tabular_seqid`). `records[rank]` holds the stored title, `ordinals[rank]`
-/// the ordinal id, `oids` the database's OIDs; `protein` for a protein database. An id that LOSAT
-/// cannot write as NCBI is its refusal where a tabular report `reads` the subject
-/// (`report::tabular::reads_subject`), else empty: a table of fields that read nothing of the
-/// subject prints none of its ids.
+/// the ordinal id, `oids` the database's OIDs; `protein` for a protein database. `None` where the
+/// lookup fails (`common::tabular::SubjectId`). An id that LOSAT cannot write as NCBI is its
+/// refusal where a tabular report `reads` the subject (`report::tabular::reads_subject`), else
+/// empty: a table of fields that read nothing of the subject prints none of its ids.
 pub(crate) fn tabular_subject_ids(
     records: &[crate::blastinput::fasta_reader::FastaRecord],
     ordinals: &[u32],
@@ -2736,7 +2904,7 @@ pub(crate) fn tabular_subject_ids(
     protein: bool,
     reads: bool,
     program: &str,
-) -> Result<Vec<std::sync::Arc<[u8]>>> {
+) -> Result<Vec<crate::algorithm::common::tabular::SubjectId>> {
     records
         .iter()
         .zip(ordinals)
@@ -2755,10 +2923,13 @@ pub(crate) fn tabular_subject_ids(
                     protein,
                     program,
                 )
-                .map(|id| std::sync::Arc::from(id.accession())),
+                .map(|id| match id {
+                    TabularSubjectId::Unknown(_) => None,
+                    id => Some(std::sync::Arc::from(id.accession())),
+                }),
             };
             match id {
-                Err(_) if !reads => Ok(std::sync::Arc::from(&b""[..])),
+                Err(_) if !reads => Ok(Some(std::sync::Arc::from(&b""[..]))),
                 id => id,
             }
         })
@@ -2797,9 +2968,15 @@ pub(crate) fn library_subject(
     program: &str,
 ) -> crate::api::local_blast::ReportedSubject {
     let id = match parsed {
-        Some(subject) => subject.tabular_saccver(protein).ok().map(|id| id.to_vec()),
+        // No `saccver`: the lookup throws; the library names it as one without parsed ids.
+        Some(subject) => subject
+            .tabular_saccver(protein)
+            .ok()
+            .flatten()
+            .map(|id| id.to_vec()),
         None => tabular_subject_id(title, source, db.oid(ordinal), protein, program)
             .ok()
+            .filter(|id| !matches!(id, TabularSubjectId::Unknown(_)))
             .map(|id| id.accession().into_owned()),
     }
     .unwrap_or_else(|| {
@@ -2927,15 +3104,20 @@ pub(crate) fn reports_may_refuse(
             Ok(ReportedHeader::Stored(stored)) => {
                 check_reported_title(stored.replaced_bytes, || db.oid(ordinal), program)
                     .map_err(|_| ReportRefusal::Headers)?;
+                // A failed lookup (`TabularSubjectId::Unknown`) is refused only by the field lists
+                // that can stop at it (`report::tabular::failed_lookup_stop`).
                 if shown.tabular {
-                    tabular_subject_id(
+                    match tabular_subject_id(
                         &stored.title,
                         &stored.source,
                         db.oid(ordinal),
                         protein,
                         program,
-                    )
-                    .map_err(|_| ReportRefusal::Headers)?;
+                    ) {
+                        Ok(TabularSubjectId::Word(_) | TabularSubjectId::General(_)) => {}
+                        Ok(TabularSubjectId::Unknown(_)) if !shown.stops_at_failed_lookup => {}
+                        _ => return Err(ReportRefusal::Headers),
+                    }
                 }
                 if shown.pairwise {
                     stored
@@ -2961,6 +3143,14 @@ pub(crate) fn reports_may_refuse(
                     program,
                 )
                 .map_err(|_| ReportRefusal::Headers)?;
+                // A sequence whose lookups fail (`ParsedSubject::lookup_failure`), where a field
+                // list can stop at it.
+                if shown.tabular
+                    && shown.stops_at_failed_lookup
+                    && !matches!(subject.lookup_failure(protein), Ok(None))
+                {
+                    return Err(ReportRefusal::Headers);
+                }
                 if let Some(queries) = queries {
                     refuse_id_of_a_query(&subject, || db.oid(ordinal), queries, program)
                         .map_err(|_| ReportRefusal::Headers)?;
@@ -3152,32 +3342,48 @@ pub(crate) fn check_reported_title(
 /// empty one from the name of its source), which `GetSeqIdList` puts in the place of its id, or
 /// where that word is empty its general id `gnl|BL_ORD_ID|n`, n its OID (`seqdb::Oid`; NCBI
 /// BLAST+ 2.17.0, line DBID ordname, `blastdb-ids-20261021/R/ordname`).
+/// `Unknown` where `GetSeqIdList` makes no id: the generated title throws
+/// (`report::defline::SubjectWord::Unknown`, `report::tabular::SubjectLookup::Failed`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TabularSubjectId {
     Word(Vec<u8>),
     General(crate::seqdb::Oid),
+    Unknown(crate::seqdb::Oid),
 }
 
 impl TabularSubjectId {
     /// `sseqid`, and `sallseqid` of the one definition line: the word (a local id prints its
-    /// label), or `gnl|BL_ORD_ID|n`.
+    /// label), or `gnl|BL_ORD_ID|n`; empty where the lookup fails (`Unknown`).
     pub(crate) fn id(&self) -> std::borrow::Cow<'_, [u8]> {
         match self {
             TabularSubjectId::Word(word) => std::borrow::Cow::Borrowed(word),
             TabularSubjectId::General(oid) => std::borrow::Cow::Owned(oid.fasta_id().into_bytes()),
+            TabularSubjectId::Unknown(_) => std::borrow::Cow::Borrowed(&[]),
         }
     }
 
     /// `sacc` and `saccver`, and `sallacc`: the word, or the general id's content label
-    /// `BL_ORD_ID:n`.
+    /// `BL_ORD_ID:n`; empty where the lookup fails (`Unknown`, which the programs' id lists hold
+    /// as `None`, `common::tabular::SubjectId`).
     pub(crate) fn accession(&self) -> std::borrow::Cow<'_, [u8]> {
         match self {
             TabularSubjectId::Word(word) => std::borrow::Cow::Borrowed(word),
             TabularSubjectId::General(oid) => {
                 std::borrow::Cow::Owned(oid.content_label().into_bytes())
             }
+            TabularSubjectId::Unknown(_) => std::borrow::Cow::Borrowed(&[]),
         }
     }
+}
+
+/// The failed lookup (`report::tabular::FailedLookup`) of the database sequence `oid` without
+/// parsed Seq-ids: its Seq-align id `gnl|BL_ORD_ID|n` (`sallseqid`) and `BL_ORD_ID:n` (`sallacc`),
+/// whose definition line also fails in `x_SetSubjectIds`.
+pub(crate) fn failed_general_lookup(oid: crate::seqdb::Oid) -> [Vec<u8>; 2] {
+    [
+        oid.fasta_id().into_bytes(),
+        oid.content_label().into_bytes(),
+    ]
 }
 
 /// The subject id of the tabular formats (`sseqid`, `sacc`, `saccver`) of the database
@@ -3195,8 +3401,9 @@ pub(crate) fn tabular_subject_id(
     let facts =
         crate::report::defline::BioseqFacts::of_source(source_name(source, || oid, program)?);
     match crate::report::defline::database_subject_id(title, &facts, protein) {
-        Ok(Some(word)) => Ok(TabularSubjectId::Word(word)),
-        Ok(None) => Ok(TabularSubjectId::General(oid)),
+        Ok(SubjectWord::Word(word)) => Ok(TabularSubjectId::Word(word)),
+        Ok(SubjectWord::General) => Ok(TabularSubjectId::General(oid)),
+        Ok(SubjectWord::Unknown) => Ok(TabularSubjectId::Unknown(oid)),
         Err(problem) => bail!(
             "database sequence {oid} has a title {problem}, which is not supported by LOSAT's {program}"
         ),
@@ -3222,7 +3429,7 @@ pub(crate) fn tabular_seqid<'a>(
                 title,
                 &crate::report::defline::BioseqFacts::of_source(name),
                 protein,
-            ) == Ok(None)
+            ) == Ok(SubjectWord::General)
         })
     {
         return std::borrow::Cow::Owned(oid.fasta_id().into_bytes());
@@ -3427,6 +3634,70 @@ mod tests {
     }
 
     use super::*;
+
+    // Probes p5_pr_sum2, p5b_sum_int and p5_neg_2p63 of line RG D1a-3 (NCBI 2.17.0 prints the
+    // wrapped sums and `-0`): the report counts LOSAT refuses, by format; the prolog's (outfmt 0 to
+    // 4) at open (`check_report_sums`), the documents' when they are written (`report_sum_refusal`,
+    // after NCBI's own errors of the search: p5_pr_sum2#6).
+    #[test]
+    fn report_sums_past_ncbis_types_are_refused_for_the_formats_that_sum_them() {
+        let info = |num_sequences: i32, total_letters: i64| DatabaseInfo {
+            definition: b"t".to_vec(),
+            date: String::new(),
+            num_sequences,
+            total_letters,
+            filt_algorithm_name: String::new(),
+            filt_algorithm_options: String::new(),
+        };
+        let two = |a: DatabaseInfo, b: DatabaseInfo| PairwiseDatabase::new(vec![a, b]);
+        let refused = |database: &PairwiseDatabase, outfmt: i32| {
+            report_sum_refusal(
+                database.num_sequences,
+                database.total_letters,
+                database.total_letters_overflow,
+                outfmt,
+            )
+            .is_some()
+        };
+        let lengths = two(
+            info(23, 5_000_000_000_000_000_000),
+            info(23, 5_000_000_000_000_000_000),
+        );
+        assert!(lengths.total_letters_overflow);
+        for outfmt in [0, 1, 4] {
+            assert!(
+                check_report_sums(&lengths, outfmt, "BLASTP").is_err(),
+                "{outfmt}"
+            );
+        }
+        for outfmt in [5, 13, 14, 15, 16, 6, 7, 8, 10, 11, 17] {
+            assert!(
+                check_report_sums(&lengths, outfmt, "BLASTP").is_ok(),
+                "{outfmt}"
+            );
+        }
+        for outfmt in [0, 1, 4, 5, 13, 14, 15, 16] {
+            assert!(refused(&lengths, outfmt), "{outfmt}");
+        }
+        for outfmt in [6, 7, 8, 10, 11, 17] {
+            assert!(!refused(&lengths, outfmt), "{outfmt}");
+        }
+        let counts = two(info(2_000_000_000, 3263), info(2_000_000_000, 3263));
+        assert!(refused(&counts, 5));
+        assert!(check_report_sums(&counts, 5, "BLASTP").is_ok());
+        for outfmt in [0, 15, 16] {
+            assert!(!refused(&counts, outfmt), "{outfmt}");
+        }
+        // Two lengths of 2^64 - 1 (-1 as NCBI's Int8) sum to -2 without an overflow.
+        assert!(check_report_sums(&two(info(23, -1), info(23, -1)), 0, "BLASTP").is_ok());
+        let int64_min = PairwiseDatabase::new(vec![info(23, i64::MIN)]);
+        for outfmt in [5, 14, 16] {
+            assert!(refused(&int64_min, outfmt), "{outfmt}");
+        }
+        for outfmt in [0, 13, 15, 6] {
+            assert!(!refused(&int64_min, outfmt), "{outfmt}");
+        }
+    }
     use crate::utils::matrix::BLASTAA_SIZE;
 
     // `check_shown_protein_title` asks for no source name: the title that NCBI makes from the

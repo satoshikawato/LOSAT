@@ -105,7 +105,7 @@ pub(crate) fn write_tabular<W: Write>(
     query_titles: &[&[u8]],
     database: &str,
     query_ids: &[Arc<[u8]>],
-    subject_ids: &[Arc<[u8]>],
+    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     unsearched: &[bool],
     epilog: Option<usize>,
     mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
@@ -185,7 +185,7 @@ pub(crate) fn write_tabular<W: Write>(
 fn format_chunk(
     rows: &[&TblastxHsp],
     query_ids: &[Arc<[u8]>],
-    subject_ids: &[Arc<[u8]>],
+    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     config: &crate::report::outfmt6::OutputConfig,
 ) -> io::Result<Vec<u8>> {
     let mut buffer = Vec::with_capacity(rows.len() * 96);
@@ -356,7 +356,7 @@ fn format_rows(
     pool: &SearchPool<'_>,
     window: &[&TblastxHsp],
     query_ids: &[Arc<[u8]>],
-    subject_ids: &[Arc<[u8]>],
+    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     config: &crate::report::outfmt6::OutputConfig,
 ) -> io::Result<Vec<Vec<u8>>> {
     pool.install(|| {
@@ -376,7 +376,7 @@ fn format_rows(
     _pool: &SearchPool<'_>,
     window: &[&TblastxHsp],
     query_ids: &[Arc<[u8]>],
-    subject_ids: &[Arc<[u8]>],
+    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     config: &crate::report::outfmt6::OutputConfig,
 ) -> io::Result<Vec<Vec<u8>>> {
     window

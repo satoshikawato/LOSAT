@@ -8,7 +8,6 @@
 //! - ncbi-blast/c++/src/algo/blast/core/blast_setup.c
 //! - ncbi-blast/c++/src/algo/blast/core/blast_stat.c
 
-use crate::stats::length_adjustment::compute_length_adjustment_ncbi;
 use crate::stats::KarlinParams;
 
 /// Smallest float to avoid floating point exception in BlastKarlinEtoS_simple
@@ -142,41 +141,33 @@ pub struct EffLengthsResult {
 /// `EffLengthsResult` containing both length_adjustment and eff_searchsp, or `None` when the
 /// effective search space overflows NCBI's `Int8` (a `-dbsize` near the `Int8` limit), where
 /// NCBI's arithmetic overflows.
+#[cfg(test)]
 pub fn try_compute_eff_lengths_tblastx(
     query_len_aa: i64,
     subject_len_nucl: i64,
     db_num_seqs: i64,
     karlin_params: &KarlinParams,
 ) -> Option<EffLengthsResult> {
-    // NCBI reference: c++/src/algo/blast/core/blast_setup.c:734-740,785-847
-    // db_length = db_length/3;
-    // db_num_seqs = eff_len_params->real_num_seqs;
-    // if (query_info->contexts[index].is_valid && query_length > 0) { ... }
-    // Sum nucleotide lengths BEFORE translated division. Invalid contexts are
-    // excluded by the caller; empty contexts retain zero search space.
     if query_len_aa <= 0 {
         return Some(EffLengthsResult {
             length_adjustment: 0,
             eff_searchsp: 0,
         });
     }
-    let db_length = subject_len_nucl / 3;
-
-    // NCBI blast_setup.c:821-824: BLAST_ComputeLengthAdjustment(...)
-    let result =
-        compute_length_adjustment_ncbi(query_len_aa, db_length, db_num_seqs, karlin_params);
-    let length_adjustment = result.length_adjustment;
-
-    // NCBI blast_setup.c:836: effective_db_length = db_length - (db_num_seqs * length_adjustment)
-    let effective_db_length = (db_length - db_num_seqs * length_adjustment).max(1);
-
-    // NCBI blast_setup.c:842-843: effective_search_space = effective_db_length * (query_length - length_adjustment)
-    let effective_query_length = query_len_aa - length_adjustment;
-    let eff_searchsp = effective_db_length.checked_mul(effective_query_length)?;
-
+    // `stats::setup::calc_eff_lengths` (one owner for the six programs, line RG D1a-3), with the
+    // translated subject's length in residues and NCBI's `Int4` count.
+    let lengths = crate::stats::setup::calc_eff_lengths(
+        query_len_aa,
+        subject_len_nucl / 3,
+        db_num_seqs as i32,
+        karlin_params,
+        0,
+        "TBLASTX",
+    )
+    .ok()?;
     Some(EffLengthsResult {
-        length_adjustment,
-        eff_searchsp,
+        length_adjustment: i64::from(lengths.length_adjustment),
+        eff_searchsp: lengths.eff_searchsp,
     })
 }
 

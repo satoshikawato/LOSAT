@@ -183,6 +183,8 @@ pub(crate) struct FirstContext {
     pub length_adjustment: i64,
     /// The search space of the batch's context 0 (the option).
     pub context0_space: i64,
+    /// That context's query length, 0 for an invalid one (`archive::RequestLength::space`).
+    pub context0_length: i64,
 }
 
 /// The Seq-aligns of one batch of a call.
@@ -411,7 +413,10 @@ pub(crate) fn for_each_batch(
                     ka_blocks,
                     search_space: context.search_space,
                     length_adjustment: context.length_adjustment,
-                    searched_space: searched.then_some(context.context0_space),
+                    searched_space: searched.then_some(crate::report::archive::SearchedContext0 {
+                        space: context.context0_space,
+                        query_length: context.context0_length,
+                    }),
                 };
                 each(span, &batch)
             },

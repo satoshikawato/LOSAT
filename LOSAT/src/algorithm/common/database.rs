@@ -4514,11 +4514,12 @@ impl TaxdbRun {
     /// record of loads, [`TaxdbRun::note_loaded`]; BLASTX's scopes of the batches before in outfmt
     /// 5): the lookup of `db` cannot be opened, or one of its LMDB files has no accession table
     /// (`SeqidLookup::lacks_an_accession_table`), or an ISAM of a version 4 volume may fail to open
-    /// (`SeqDb::isams_may_fail_to_open`: a string or PIG ISAM whose two files exist and one of
-    /// which does not open, NCBI's `Error: Could not open input file`; review 3 of line DBID
-    /// loadord, M1). Asked once, at the first sequence recorded (whose lookup has opened the
-    /// files): the files are opened, never read, and a database whose files all open keeps
-    /// nothing for the rest of the run.
+    /// (`SeqDb::isams_may_fail_to_open`: the lookup's own open of a string or PIG ISAM, which
+    /// fails with NCBI's `Error: Could not open input file` where both files are regular files
+    /// and one does not open; review 3 of line DBID loadord, M1, and review 4, H1). Asked once, at
+    /// the first record of the run's loads (`note_loaded`, before it makes its subjects, review
+    /// 4, M1) or of psiblast's PSSM's reads: the files are opened, never read, and a database
+    /// whose lookups cannot stop keeps nothing for the rest of the run.
     pub(crate) fn prefetch_can_stop(&self, db: &SeqDb) -> bool {
         *self.can_stop.get_or_init(|| {
             db.seqid_lookup()

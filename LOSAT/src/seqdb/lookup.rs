@@ -437,8 +437,21 @@ impl IdLookup<'_> {
                 None => Vec::new(),
             },
             SeqDbIdType::Ti => {
-                // `x_OpenTiFile` (seqdbvol.cpp:214-223) makes the ISAM where `IndexExists` with
-                // `t`, as the string and PIG ISAMs (`isam::index_exists`).
+                // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:214-223
+                // ```c++
+                // CSeqDBVol::x_OpenTiFile(void) const{
+                //     CFastMutexGuard mtx_gurad(m_MtxTi);
+                //     if (m_IsamTi.NotEmpty()) {
+                //     	m_IsamTi->AddReference();
+                //     }
+                //     else if (CSeqDBIsam::IndexExists(m_VolName, (m_IsAA?'p':'n'), 't') &&
+                //              m_Idx->GetNumOIDs() != 0) {
+                //         m_IsamTi = new CSeqDBIsam(m_Atlas, m_VolName, (m_IsAA?'p':'n'), 't', eTiId);
+                //     }
+                // }
+                // ```
+                // The trace-id ISAM exists where `IndexExists` says so, as the string and PIG
+                // ISAMs (`isam::index_exists`: two regular files).
                 let index = with_extension(volume.base(), seqtype, "ti");
                 if super::isam::index_exists(&index, &with_extension(volume.base(), seqtype, "td"))
                 {

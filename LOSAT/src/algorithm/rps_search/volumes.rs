@@ -61,12 +61,6 @@ impl<'a> RpsVolumeSet<'a> {
     }
 }
 
-/// The positions of a volume's concatenated profiles: their lengths and one delimiter each (the
-/// rows of its `.rps` file).
-fn volume_concatenation(volume: &Volume) -> i64 {
-    volume.index().volume_length as i64 + i64::from(volume.num_oids())
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:905-937 (quoted at
 // `SeqDb::statistics_total_length`) and c++/src/algo/blast/core/blast_engine.c:1129-1143
 // ```c
@@ -102,13 +96,27 @@ pub(crate) struct RpsUnit {
     /// `GetMinLength`: the subject length of the hit cutoff with the Gumbel block.
     pub(crate) min_length: i32,
     /// The RPS engine's `dbsize`, `BlastSeqSrcGetTotLen + BlastSeqSrcGetNumSeqs` (NCBI's `Int8`,
-    /// widened: it cannot overflow here), whose `Int4` is the concatenated length `Lc`.
+    /// widened: it cannot overflow here), whose `Int4` is the concatenated length `Lc`
+    /// (`concat_length`).
     pub(crate) engine_size: i128,
-    /// The positions of the unit's volume's concatenated profiles (`volume_concatenation`).
-    pub(crate) concatenation: i64,
+    /// Whether the unit's `BlastSeqSrcGetTotLen` (`GetTotalLength`, no STATS key) is above 0, the
+    /// gate of the sort after the traceback's filters (`RpsRun::sorts_results`): not for an alias
+    /// file's `LENGTH` of 0 or of 2^63 or more over one volume.
+    pub(crate) sorts_results: bool,
 }
 
 impl RpsUnit {
+    /// The concatenated length `Lc` of the unit's search, `concat_db.length = (Int4) dbsize`
+    /// (blast_engine.c:1143, quoted above): the low 32 bits of `engine_size`. A bare volume's is
+    /// the letters of its index and one delimiter row per profile, the rows of its `.rps` file; an
+    /// alias file's `LENGTH` and `NSEQ` over one volume move it below the rows or above them, also
+    /// to a negative value. The RPS engine reads it in three places (`RpsRun::concat_length`): the
+    /// size of the diagonal table, the bound of the ungapped extensions to the right and the root
+    /// of the gapped stage's interval tree.
+    pub(crate) fn concat_length(&self) -> i32 {
+        self.engine_size as i32
+    }
+
     /// The unit of the `-db` name with all its alias keys, the only unit of one volume
     /// (`SeqDb::statistics`).
     fn of_name(db: &SeqDb) -> Self {
@@ -120,7 +128,7 @@ impl RpsUnit {
             request_count: statistics.request_count,
             min_length: statistics.min_length,
             engine_size: i128::from(statistics.engine_db_length) + i128::from(db.ncbi_num_seqs()),
-            concatenation: db.volumes().first().map_or(0, volume_concatenation),
+            sorts_results: statistics.sorts_results(),
         }
     }
 
@@ -143,7 +151,7 @@ impl RpsUnit {
             request_count: count,
             min_length: crate::seqdb::BLAST_SEQSRC_MINLENGTH,
             engine_size: i128::from(total) + i128::from(count),
-            concatenation: volume_concatenation(volume),
+            sorts_results: total > 0,
         })
     }
 }
@@ -340,6 +348,25 @@ impl RpsUnits {
         program: &str,
     ) -> Result<i64> {
         let unit = &self.units[self.units.len() - 1];
+        match self.split_query_lengths(unit) {
+            Some((length, count)) if query_length > 0 => Ok(crate::stats::setup::calc_eff_lengths(
+                query_length,
+                length,
+                count,
+                ka,
+                0,
+                program,
+            )?
+            .eff_searchsp),
+            _ => Ok(0),
+        }
+    }
+
+    /// The database length and count of `SplitQuery_SetEffectiveSearchSpace` for `unit`
+    /// (quoted above `request_space`): the unit's total before the setup's fallback to OID 0 and
+    /// its count without the fallback, under the `DbLength` and `DbSeqNum` options; `None` where
+    /// that length is 0 (`BLAST_CalcEffLengths` then sets no space, blast_setup.c:729-732).
+    fn split_query_lengths(&self, unit: &RpsUnit) -> Option<(i64, i32)> {
         let length = if self.db_length > 0 {
             self.db_length
         } else {
@@ -350,13 +377,37 @@ impl RpsUnits {
         } else {
             unit.request_count
         };
-        if length == 0 || query_length <= 0 {
-            return Ok(0);
+        (length != 0).then_some((length, count))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-221 and
+    // c++/src/algo/blast/core/blast_setup.c:775-778, 822-841
+    // ```c++
+    //     CEffectiveSearchSpacesMemento eff_memento(m_Options);
+    //     SplitQuery_SetEffectiveSearchSpace(m_Options, m_QueryFactory,
+    //                                        m_InternalData);
+    // ...
+    //       Int8 effective_search_space =
+    //           s_GetEffectiveSearchSpaceForContext(eff_len_options, index,
+    //                                               blast_message);
+    // ...
+    //          if (effective_search_space == 0) {
+    // ```
+    /// The effective lengths of `unit`'s preliminary search where they differ from the setup's
+    /// (`eff_lengths`), else `None`: NCBI's preliminary stage reads the search space that
+    /// `SplitQuery_SetEffectiveSearchSpace` puts in the options for each context (under a memento
+    /// that the traceback's set-up no longer sees), with `split_query_lengths`, and the setup's
+    /// own where that is 0. Both give the same lengths where the unit's total is above 0 (and
+    /// with `-searchsp` (`searchsp`), which both stages read), so they differ only for one
+    /// volume whose `LENGTH` is 2^63 or more (a negative total: the setup reads OID 0's length
+    /// and 1, SplitQuery the negative total and the count); the hit cutoff of the preliminary
+    /// stage reads them without the Gumbel block (`RpsFrame::prelim_search_space`).
+    pub(crate) fn prelim_lengths(&self, unit: &RpsUnit, searchsp: i64) -> Option<(i64, i32)> {
+        if searchsp != 0 {
+            return None;
         }
-        Ok(
-            crate::stats::setup::calc_eff_lengths(query_length, length, count, ka, 0, program)?
-                .eff_searchsp,
-        )
+        self.split_query_lengths(unit)
+            .filter(|&lengths| lengths != self.eff_lengths(unit))
     }
 
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:1002-1010 (quoted at
@@ -412,33 +463,30 @@ impl RpsUnits {
     //                 diag_array_length = diag_array_length << 1;
     //         }
     // ```
-    /// LOSAT's refusals of the concatenated length `Lc` (`RpsUnit::engine_size`) of a unit, which
-    /// only an alias file's `LENGTH` and `NSEQ` over one volume move from the volume's own: a
-    /// `dbsize` above `INT4_MAX` (NCBI returns -3 with the profiles attached to its score block,
-    /// which frees them twice: the run aborts); an `Lc` whose diagonal table (the power of 2 of
-    /// at least `Lc` plus the word window) passes 2^30 (NCBI's loop never ends); and, until item
-    /// D1a-4's part B ports the concatenated length into the engine, an `Lc` below the volume's
-    /// own concatenation (NCBI truncates its search to it, or its interval tree splits without
-    /// end). Checked once per run, before the first byte of output.
+    /// LOSAT's refusals of the concatenated length of a unit (`RpsUnit::concat_length`), the one
+    /// owner of both programs and of every unit, checked once per run before the first byte of
+    /// output: a `dbsize` above `INT4_MAX` (NCBI returns -3 with the profiles attached to its score
+    /// block, which frees them twice: the run aborts), and a length `Lc` whose diagonal table never
+    /// stops growing. `diag_array_length` is an `Int4` that doubles from 1 while it is below `Lc`
+    /// plus the word window (`window`): it ends at 2^30 where the sum is at most 2^30, else it
+    /// doubles to 2^31 (`INT_MIN`) and then to 0, and stays 0. A sum above `INT4_MAX` (an `Lc`
+    /// within the window of it, such as `LENGTH` 2^31 - 4 with `NSEQ` 3) overflows NCBI's `Int4`
+    /// addition, and the widened sum here is above 2^30. A bare volume of several meets them only
+    /// with its own rows, one volume also through an alias file's `LENGTH` and `NSEQ`; an `Lc`
+    /// below the rows, also 0 or negative, is searched as NCBI searches it
+    /// (`RpsRun::concat_length`).
     pub(crate) fn check_engine_lengths(&self, window: i32, program: &str) -> Result<()> {
         for unit in &self.units {
             if unit.engine_size > i128::from(i32::MAX) {
                 bail!(
-                    "an alias file's LENGTH and NSEQ whose sum ({}) is above 2147483647 over one RPS-BLAST volume (NCBI BLAST+ 2.17.0 then frees the profiles twice and aborts) is not supported by LOSAT's {program}",
+                    "an RPS-BLAST volume whose length and number of profiles (an alias file's LENGTH and NSEQ over one volume) sum to {}, above 2147483647 (NCBI BLAST+ 2.17.0 then frees the profiles twice and aborts), is not supported by LOSAT's {program}",
                     unit.engine_size
                 );
             }
-            // `(Int4) dbsize`: the low 32 bits of the widened sum.
-            let concatenated = unit.engine_size as i32;
+            let concatenated = unit.concat_length();
             if i64::from(concatenated) + i64::from(window) > 1 << 30 {
                 bail!(
-                    "an alias file's LENGTH and NSEQ that give one RPS-BLAST volume a concatenated length of {concatenated} positions (NCBI BLAST+ 2.17.0's diagonal table of them never ends its growth) is not supported by LOSAT's {program}"
-                );
-            }
-            if i64::from(concatenated) < unit.concatenation {
-                bail!(
-                    "an alias file's LENGTH and NSEQ that give one RPS-BLAST volume a concatenated length of {concatenated} positions, below the {} of its profiles, are not supported by LOSAT's {program} yet",
-                    unit.concatenation
+                    "an RPS-BLAST volume of {concatenated} concatenated positions (its length and number of profiles, or an alias file's LENGTH and NSEQ over one volume), whose diagonal table NCBI BLAST+ 2.17.0 never stops growing (above 2^30 entries with the window), is not supported by LOSAT's {program}"
                 );
             }
         }
@@ -611,19 +659,17 @@ impl<'a> Consensus<'a> {
     }
 }
 
-/// The set-up of the volumes of one run: the program of LOSAT's refusals, the word window (the
-/// diagonal table's bound) and the matrix and gap costs of the first volume set up.
+/// The set-up of the volumes of one run: the program of LOSAT's refusals and the matrix and gap
+/// costs of the first volume set up.
 pub(crate) struct RpsVolumeSetup {
     program: &'static str,
-    window: i32,
     first_costs: Option<(String, i32, i32)>,
 }
 
 impl RpsVolumeSetup {
-    pub(crate) fn new(program: &'static str, window: i32) -> Self {
+    pub(crate) fn new(program: &'static str) -> Self {
         Self {
             program,
-            window,
             first_costs: None,
         }
     }
@@ -782,20 +828,8 @@ impl RpsVolumeSetup {
                 self.program
             );
         }
-        let concat = files.rows().len();
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1129-1133
-        // ```c
-        //     num_db_seqs = BlastSeqSrcGetNumSeqs(seq_src);
-        //     dbsize = BlastSeqSrcGetTotLen(seq_src) + num_db_seqs;
-        //     if (dbsize > INT4_MAX)
-        //       return -3;
-        // ```
-        if concat as u64 + self.window as u64 > (i32::MAX / 2) as u64 {
-            bail!(
-                "a profile volume of {concat} positions is not supported by LOSAT's {}",
-                self.program
-            );
-        }
+        // (The concatenated length is refused, or not, once for the run by its unit:
+        // `RpsUnits::check_engine_lengths`.)
         // The consensus letters at the profiles' offsets (the traceback's query letters, read
         // as stored: `Blast_TracebackGetEncoding` gives `eBlastEncodingProtein`).
         Ok(())
@@ -1034,7 +1068,7 @@ mod tests {
             request_count,
             min_length: 10,
             engine_size,
-            concatenation: 563,
+            sorts_results: total > 0,
         }
     }
 
@@ -1124,6 +1158,33 @@ mod tests {
         assert_eq!(negative.request_space(0, &gapped, "RPSBLAST").unwrap(), 0);
     }
 
+    // prelim_stage.cpp:219-221 (quoted at `RpsUnits::prelim_lengths`): the preliminary stage reads
+    // SplitQuery's space, whose lengths are the setup's except for a negative total (review A of
+    // D1a-4, MF1): `LENGTH` 2^63 + 1 and `NSEQ` 600 over one volume, SplitQuery's 208 (1 times the
+    // query's 208 letters less no adjustment) where the setup reads OID 0's 190 letters and 1.
+    #[test]
+    fn the_preliminary_lengths_differ_from_the_setups_for_a_negative_total_only() {
+        let negative = unit(-9_223_372_036_854_775_807, (190, 1), 600, 601);
+        let one = |unit: RpsUnit| units(vec![unit], None, 0);
+        assert_eq!(
+            one(negative).prelim_lengths(&negative, 0),
+            Some((-9_223_372_036_854_775_807, 600))
+        );
+        // `-searchsp`: both stages read it.
+        assert_eq!(one(negative).prelim_lengths(&negative, 1_000_000), None);
+        // `LENGTH 0`: SplitQuery sets no space, the setup computes its own.
+        let zero = unit(0, (190, 1), 600, 600);
+        assert_eq!(one(zero).prelim_lengths(&zero, 0), None);
+        // A positive total: the same lengths (also `STATS_NSEQ`'s count, and under D and M).
+        let plain = unit(560, (560, 7), 7, 563);
+        assert_eq!(one(plain).prelim_lengths(&plain, 0), None);
+        let volume = unit(190, (190, 1), 1, 191);
+        let several = units(vec![volume, volume], Some((-5, -3)), 0);
+        assert_eq!(several.prelim_lengths(&volume, 0), None);
+        let several = units(vec![volume, volume], Some((5000, 7)), 0);
+        assert_eq!(several.prelim_lengths(&volume, 0), None);
+    }
+
     // blast_setup.c:826-846 (quoted at `stats::setup::calc_eff_lengths`): with `-dbsize` each
     // volume's space reads the given length and its own sequence count; an effective database
     // length of 0 or below is 1; a product past `Int8` is refused.
@@ -1202,16 +1263,39 @@ mod tests {
         };
         assert!(check(563).is_ok());
         assert!(check(1003).is_ok());
-        // LENGTH 0, NSEQ -300: below the profiles.
-        assert!(check(3).unwrap_err().contains("below the 563"));
-        assert!(check(260).unwrap_err().contains("below the 563"));
+        // LENGTH 0 and NSEQ -300 over the 563 rows of three profiles: searched (an `Lc` below the
+        // rows, `RpsRun::concat_length`), also a negative one (LENGTH 0, NSEQ -5).
+        assert!(check(3).is_ok());
+        assert!(check(260).is_ok());
+        assert!(check(-2).is_ok());
         // LENGTH 2^63 + 1 and NSEQ 600: `(Int4)` keeps 601.
         assert!(check(-9_223_372_036_854_775_807 + 600).is_ok());
-        // LENGTH 2^30: the diagonal table; 2^31: above INT4_MAX.
-        assert!(check(1_073_741_827).unwrap_err().contains("diagonal table"));
+        // The diagonal table: NCBI's loop ends at 2^30 (`Lc` plus the window 40 of exactly 2^30,
+        // also with `(Int4)` of a negative sum) and never past it (LENGTH 2^30).
         assert!(check((1 << 30) - 40).is_ok());
+        assert!(check((1 << 30) - 40 - (1i128 << 32)).is_ok());
+        assert!(check((1 << 30) - 39)
+            .unwrap_err()
+            .contains("never stops growing"));
+        assert!(check(1_073_741_827)
+            .unwrap_err()
+            .contains("of 1073741827 concatenated positions"));
+        // LENGTH 2^31 - 4 and NSEQ 3: `Lc` is INT4_MAX, whose sum with the window overflows NCBI's
+        // `Int4`; the widened sum is above 2^30.
+        assert!(check(2_147_483_647)
+            .unwrap_err()
+            .contains("never stops growing"));
+        // LENGTH 2^31: above INT4_MAX (the double free comes first in NCBI's engine).
         assert!(check(2_147_483_651)
             .unwrap_err()
             .contains("above 2147483647"));
+        // The window of the one-hit finder (`-window_size 0`): the sum is `Lc` alone.
+        let one_hit = |engine_size: i128| {
+            units(vec![unit(560, (560, 3), 3, engine_size)], None, 0)
+                .check_engine_lengths(0, "RPSBLAST")
+                .is_ok()
+        };
+        assert!(one_hit(1 << 30));
+        assert!(!one_hit((1 << 30) + 1));
     }
 }

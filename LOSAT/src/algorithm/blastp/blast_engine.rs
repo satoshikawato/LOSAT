@@ -12219,9 +12219,11 @@ fn run_call(
     };
 
     let merge_sort_start = blastp_timing_start(timing_enabled);
-    // (rpsblast over several volumes: the merged lists keep `s_MergeAlignSet`'s order, which
-    // NCBI sorts nowhere after.)
-    if !rps_multi_volume {
+    // (rpsblast: the RPS engine's lists are its traceback's, which sorted them before its filters
+    // and after them where the unit's total length is above 0, blast_traceback.c:1306, 1768-1771;
+    // over several volumes the merged lists keep `s_MergeAlignSet`'s order, which NCBI sorts
+    // nowhere after.)
+    if args.rps_search.is_none() {
         for hit_list_opt in &mut preliminary_hit_lists {
             if let Some(hit_list) = hit_list_opt.as_mut() {
                 hit_list.sort_by_evalue();

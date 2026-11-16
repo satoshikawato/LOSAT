@@ -2,10 +2,12 @@
 //! the scan's hits, bucket by bucket, on NCBI's diagonal table of the concatenation, extended
 //! with PS4a's PSSM ungapped kernels on the whole concatenation.
 //!
-//! The diagonal table has `L` entries, `L` the smallest power of two at least the
-//! concatenation's length plus the window (`s_BlastDiagTableNew`), and is indexed with `mask =
-//! L - 1`: the two-hit finder reads `(q - s) & mask`, the one-hit finder `(s - q) & mask`. Where a
-//! query is longer than `L` less the concatenation, two diagonals share an entry, as in NCBI.
+//! The diagonal table has `L` entries, `L` the smallest power of two at least the concatenated
+//! length `Lc` plus the window (`s_BlastDiagTableNew` of `concat_db.length`,
+//! `RpsRun::concat_length`: the volume's rows, or an alias file's `LENGTH` and `NSEQ` over one
+//! volume, so that `L` may be below the rows or above them), and is indexed with `mask = L - 1`:
+//! the two-hit finder reads `(q - s) & mask`, the one-hit finder `(s - q) & mask`. Where a query
+//! is longer than `L` less the concatenation, two diagonals share an entry, as in NCBI.
 //!
 //! NCBI keeps one table for the queries of a batch, moving `diag_offset` on by the query's
 //! length and the window after each (`Blast_ExtendWordExit`); an entry that an earlier query
@@ -75,7 +77,7 @@ impl RpsDiagTable {
         }
     }
 
-    /// `BlastExtendWordNew(concat_length, ...)`: a zeroed table of the volume's length. The
+    /// `BlastExtendWordNew(concat_length, ...)`: a zeroed table of the unit's length. The
     /// table is allocated zeroed and not written (NCBI's `calloc`): only the pages of the
     /// diagonals that the queries hit become resident, whatever the window.
     ///
@@ -154,7 +156,8 @@ impl RpsDiagTable {
     }
 }
 
-/// The length of the diagonal table of a concatenation of `concat_length` rows.
+/// The length of the diagonal table of a concatenated length `concat_length` (`Lc`, also 0 or
+/// negative: a table of 1 entry; `Lc + window` is at most 2^30, `RpsUnits::check_engine_lengths`).
 pub(crate) fn diag_array_length(concat_length: i32, window: i32) -> i32 {
     let mut length = 1i32;
     while length < concat_length + window {
@@ -199,10 +202,12 @@ impl RpsWordScratch {
         }
     }
 
-    /// The table and the buckets of a volume of `num_rows` concatenated rows
-    /// (`RpsDiagTable::prepare_for`, `RpsBuckets::reset_for`): what the scratch kept stays.
-    pub(crate) fn prepare_for(&mut self, num_rows: usize, window: i32) {
-        self.diag.prepare_for(num_rows as i32, window);
+    /// The table of a search of the concatenated length `concat_length` (`Lc`,
+    /// `RpsRun::concat_length`: `BlastExtendWordNew(concat_db.length, ...)`) and the buckets of a
+    /// volume of `num_rows` concatenated rows (`RpsDiagTable::prepare_for`,
+    /// `RpsBuckets::reset_for`): what the scratch kept stays.
+    pub(crate) fn prepare_for(&mut self, num_rows: usize, concat_length: i32, window: i32) {
+        self.diag.prepare_for(concat_length, window);
         self.buckets.reset_for(num_rows);
     }
 }
@@ -588,7 +593,11 @@ mod tests {
         query[2144..2147].fill(3);
         query[2149..2152].fill(4);
         let params = RpsWordParams {
-            rows: RpsRows { rows: &rows },
+            rows: RpsRows {
+                rows: &rows,
+                length: rows.len(),
+                overran: None,
+            },
             table: RpsTable {
                 cells: &cells,
                 overflow: &[],
@@ -636,7 +645,11 @@ mod tests {
         cells[w] = [6, 2, 0, 0];
         pv[w / 64] |= 1 << (w % 64);
         let params = RpsWordParams {
-            rows: RpsRows { rows: &rows },
+            rows: RpsRows {
+                rows: &rows,
+                length: rows.len(),
+                overran: None,
+            },
             table: RpsTable {
                 cells: &cells,
                 overflow: &overflow,
@@ -724,7 +737,11 @@ mod tests {
         let (rows_a, cells_a, pv_a, overflow_a) = volume(984, 1);
         let (rows_b, cells_b, pv_b, overflow_b) = volume(900, 3);
         let a = RpsWordParams {
-            rows: RpsRows { rows: &rows_a },
+            rows: RpsRows {
+                rows: &rows_a,
+                length: rows_a.len(),
+                overran: None,
+            },
             table: RpsTable {
                 cells: &cells_a,
                 overflow: &overflow_a,
@@ -735,7 +752,11 @@ mod tests {
             dropoff: 20,
         };
         let b = RpsWordParams {
-            rows: RpsRows { rows: &rows_b },
+            rows: RpsRows {
+                rows: &rows_b,
+                length: rows_b.len(),
+                overran: None,
+            },
             table: RpsTable {
                 cells: &cells_b,
                 overflow: &overflow_b,
@@ -747,7 +768,7 @@ mod tests {
         let query_b: Vec<u8> = (0..60).map(|i| if i % 7 == 6 { 20 } else { 3 }).collect();
         let hits =
             |scratch: &mut RpsWordScratch, params: &RpsWordParams<'_>, rows: usize, q: &[u8]| {
-                scratch.prepare_for(rows, 40);
+                scratch.prepare_for(rows, rows as i32, 40);
                 let mut hits = Vec::new();
                 word_finder(params, scratch, q, &mut hits);
                 hits
@@ -766,7 +787,7 @@ mod tests {
         assert_eq!(hits(&mut scratch, &b, 900, &query_b), fresh_b);
         assert_eq!(scratch.diag.array.as_ptr(), kept, "the table is kept");
         // A volume whose table has another length gets a table of its own.
-        scratch.prepare_for(5035, 40);
+        scratch.prepare_for(5035, 5035, 40);
         assert_eq!(scratch.diag.array.len(), 8192);
         assert_eq!(scratch.diag.offset, 40);
         assert!(scratch.diag.array.iter().all(|&entry| entry == 0));

@@ -99,7 +99,10 @@
   1.38 2026-11-17 (RPSBLAST and RPSTBLASTN: a hit of a profile that an alias file's `FIRST_OID` and
   `LAST_OID` leave out, which NCBI's report does not find, refused at its query batch in every
   format, within the classes of 1.10, rule 2, where NCBI writes `Unknown` and exits 0, and of 1.37,
-  rule 3, where it stops with a null pointer exception; line RG item D1a-4, Owner-delegated,
+  rule 3, where it stops with a null pointer exception; and the explicit rejections, rule 3, of the
+  concatenated length of an RPS search unit at which NCBI's interval tree splits a node without
+  end, its diagonal table never stops growing, it frees the profiles twice, or an ungapped
+  extension reads past its score matrix, precedent 1.30; line RG item D1a-4, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
@@ -1086,6 +1089,57 @@ masked). Line NP item M4a-2c.
   lists hold such a profile; with several volumes also where it lies past the `-max_target_seqs` cut
   of the merged lists, which no report of NCBI's reads. A run whose hits are all in the range is
   NCBI's (fixture rows `db.rps.rej.fo22`, `db.rpstbn.rej.fo22`, `db.rpstbn.fo11.e5.6`).
+
+- RPSBLAST and RPSTBLASTN over one volume whose alias file's `LENGTH` and `NSEQ` make the
+  concatenated length `Lc = (Int4)(LENGTH + NSEQ)` shorter than the profiles (version 1.38,
+  2026-11-17, line RG item D1a-4 part B, Owner-delegated; precedent 1.30): NCBI's gapped stage roots
+  its interval tree at `[0, Lc + 1]` (`blast_gapalign.c:3830-3831`) while the HSPs of later profiles
+  lie past it. A region (the profile's offset plus the HSP's range) that starts past `R = Lc + 1`
+  goes right at every node `[l, R]` of the right spine, whose middles `(l + R) / 2` are at most `R`,
+  and becomes the leaf at its end; a second one in the same tree (one tree per query, per frame for
+  RPSTBLASTN) meets that leaf, and `BlastIntervalTreeAddHSP` (`blast_itree.c:603-793`) splits
+  `[R, R]` into `[R + 1, R]`, whose middle is `R` again, without end, doubling its node pool until
+  an allocation fails (`BLAST ran out of memory`, exit status 4 under an 8 GiB limit, after outfmt
+  0's prolog; the OOM killer without it). A region that crosses `R` straddles a middle of the spine
+  and ends in a subject tree; below `R = 0` every middle of the spine is below the regions' starts.
+  LOSAT refuses (exit 1, "... where two gapped alignments of a query start past position ... is not
+  supported by LOSAT's RPSBLAST") the query batch at the insertion that would make the node, after
+  NCBI's end-point checks (which may drop the HSP or the leaf it meets): `BlastIntervalTree::
+  try_add_hsp`, the stop of TBLASTN's endless split of 1.18). With at most one such
+  region in each tree NCBI ends, and LOSAT gives its bytes: the truncated extensions to the right
+  and the diagonal table of `Lc` (fixture rows `db.rps.rej.l0`, `db.rpstbn.rej.l0`,
+  `db.rps.rej.nm300`, `db.rpstbn.rej.nm300`, and the one-volume rows that end).
+
+- RPSBLAST and RPSTBLASTN over one volume whose concatenated length `Lc` is longer than the profiles
+  (an alias file's `LENGTH` and `NSEQ`, or `-db "a x"` with an alias `a` of the volume `x`, which counts
+  it twice; version 1.38, 2026-11-17, line RG item D1a-4 part B, Owner-delegated): the ungapped
+  extension to the right runs to `MIN(subject->length - s_off, Lc - q_off)` (`aa_ungapped.c:948`),
+  past the rows. The last profile's sentinel row (`-BLAST_SCORE_MAX`, `makeprofiledb.cpp:1166-1167`)
+  stops it unless the X-drop is above that score; past it NCBI reads the row pointer after the last
+  row, which points past the rows in the `.rps` file's mapping, and then past its pointer array
+  (`blast_aalookup.c:185-190`): with `-xdrop_ungap 100000` and a query that matches the profiles to
+  their end NCBI crashes (SIGSEGV, exit status -11; probe p9_over of line RG D1a-4). LOSAT reads the
+  rows up to `MIN(Lc, rows)` and refuses (exit 1, "... whose ungapped extension of a query runs past
+  the last profile ... is not supported by LOSAT's RPSBLAST") the query batch of an extension that runs
+  through the rows to their end with letters of the query left, where `Lc` is above them; elsewhere
+  `Lc` above the rows is NCBI's search (its diagonal table of `Lc`; fixture row `db.rps.rej.over`).
+
+- RPSBLAST and RPSTBLASTN with a concatenated length `Lc` whose diagonal table never stops growing
+  (version 1.38, 2026-11-17, line RG item D1a-4 part B, Owner-delegated): `s_BlastDiagTableNew`
+  (`blast_extend.c:52-57`) doubles an `Int4` from 1 while it is below `Lc` plus the word window; past
+  a sum of 2^30 it doubles to 2^31 (`INT_MIN`) and then to 0 and stays there (an alias file's
+  `LENGTH` 2^30 over one volume: no end, timeout); a sum above `INT4_MAX` (`LENGTH` 2^31 - 4 and
+  `NSEQ` 3) overflows NCBI's `Int4` addition. LOSAT refuses (exit 1, before the first byte) a unit
+  whose `Lc` plus the window is above 2^30, for every unit (also a bare volume of that many rows;
+  the volume test of earlier versions refused a sum of exactly 2^30, where NCBI's loop ends; fixture
+  row `db.rps.rej.l2p30`).
+
+- RPSBLAST and RPSTBLASTN over one volume whose `LENGTH` and `NSEQ` sum above `INT4_MAX` (version
+  1.38, 2026-11-17, line RG item D1a-4 part B, Owner-delegated): `s_RPSPreliminarySearchEngine`
+  returns -3 (`blast_engine.c:1131-1135`) after `RPSPsiMatrixAttach` gave the score block the
+  lookup table's profiles, and the score block's free frees them again (`double free or corruption`,
+  SIGABRT, exit status -6 after outfmt 0's prolog; `LENGTH` 2^31). LOSAT refuses (exit 1, before the
+  first byte; fixture row `db.rps.rej.l2p31`).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

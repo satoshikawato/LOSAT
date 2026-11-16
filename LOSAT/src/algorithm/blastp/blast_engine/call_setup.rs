@@ -798,13 +798,10 @@ pub(super) fn db_extent(
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1768-1772 (quoted at
     // `DbStatistics::sorts_results`): whether the traceback sorts the results at its end. A
     // FASTA subject set that finds hits has letters.
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1306 (RPS-BLAST's
-    // traceback, `s_RPSComputeTraceback`, sorts always)
-    // ```c
-    //     Blast_HSPResultsSortByEvalue(results);
-    // ```
-    let sorts_results = rps_setup.is_some()
-        || database.is_none_or(|database| database.statistics().sorts_results());
+    // (RPS-BLAST's traceback sorts before its filters whatever the length, blast_traceback.c:1306,
+    // in the RPS engine, `rps_search::traceback`; after them it follows this gate too, one volume
+    // with the `-db` name's length: `RpsUnit::sorts_results`.)
+    let sorts_results = database.is_none_or(|database| database.statistics().sorts_results());
     let gumbel_db_length = if let Some(rps) = &rps_setup {
         rps.gumbel_db_length
     } else if args.dbsize != 0 {

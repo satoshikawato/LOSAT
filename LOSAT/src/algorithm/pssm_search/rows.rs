@@ -31,6 +31,13 @@ pub(crate) trait PssmRows: Sync {
     fn row(&self, pos: usize) -> &[i32; BLASTAA_SIZE];
     /// The number of rows (the query length).
     fn len(&self) -> usize;
+    /// Called by the extension to the right (`pssm_extend_right`) when it scored every position
+    /// up to its bound without stopping: `end` is the query position after the last one scored,
+    /// `subject_left` whether the subject has letters after it. Nothing for a PSSM whose bound is
+    /// its rows (the extension never reads past them); RPS-BLAST's concatenated rows note where
+    /// NCBI's bound lies past its rows (`rps_search::RpsRows`).
+    #[inline(always)]
+    fn ran_to_end(&self, _end: i32, _subject_left: bool) {}
 }
 
 /// The PSSM of a query: `rows[position][residue]`, as NCBI's `psi_matrix->pssm->data`.

@@ -244,13 +244,23 @@ volumes searches each volume bare (its own length and count, no `STATS_*` key, t
 `-dbsize`, each read only where above 0, while the Gumbel block reads `DbLength` where it is not 0.
 The footers print the first unit's search space, the search strategy's requests after the first hold
 that `DbLength` (0 and negatives too) and the last unit's search space, and the traceback sorts the
-results whatever the total length. The search ignores `FIRST_OID` and `LAST_OID` (NCBI's lookup table
+results before its filters whatever the total length and after them (`-max_hsps`, `-qcov_hsp_perc`)
+only where the unit's `GetTotalLength` is above 0 (blast_traceback.c:1306, 1768-1771; part B, review A
+MF2). The preliminary stage's hit cutoff without the Gumbel block reads the space that
+`SplitQuery_SetEffectiveSearchSpace` sets (prelim_stage.cpp:219-221: the unit's total before the
+fallback to OID 0), the traceback the setup's: they differ only over one volume whose total is
+negative (part B, review A MF1). The search ignores `FIRST_OID` and `LAST_OID` (NCBI's lookup table
 holds every profile of a volume); a hit of a profile that they leave out is refused at its query
 batch, where NCBI's report does not find it (`Unknown`, or a null pointer exception:
-PD-LOSAT-NCBI-DEFECTS 1.38). Refused: a unit's concatenated length (`LENGTH` plus `NSEQ`, NCBI's
-`Int4` of the `Int8` sum) above 2,147,483,647 (NCBI frees the profiles twice and aborts), one whose
-diagonal table passes 2^30 entries (NCBI's loop never ends), one below the volume's profiles (until
-part B ports NCBI's truncation), a setup count of 0 without the Gumbel block (`NSEQ 0` over one
+PD-LOSAT-NCBI-DEFECTS 1.38). A unit's concatenated length `Lc` (`LENGTH` plus `NSEQ` over one volume,
+NCBI's `Int4` of the `Int8` sum; a bare volume's rows) sizes the diagonal table, bounds the ungapped
+extensions to the right and ends the gapped stage's interval tree, below the profiles, above them or
+negative, as in NCBI (blast_engine.c:1129-1149; part B). Refused (PD-LOSAT-NCBI-DEFECTS 1.38, rule
+3): an `Lc` above 2,147,483,647 (NCBI frees the profiles twice and aborts), one whose diagonal table
+passes 2^30 entries (`Lc` plus the window above 2^30: NCBI's loop never ends), a query batch where two
+gapped alignments of one tree start past `Lc + 1` (NCBI's interval tree splits without end) and one
+where `Lc` is above the rows and an ungapped extension runs past the last profile (NCBI reads past its
+score matrix), a setup count of 0 without the Gumbel block (`NSEQ 0` over one
 volume with `-searchsp` or `OLD_FSC`: SIGFPE; a bare volume counts its profiles), and with
 `-export_search_strategy` a `DbLength` of exactly -2^63 (`LENGTH` or `STATS_TOTLEN` 2^63, which NCBI
 writes as `-0`, until the Owner answers D1a-3's Q1). Refused for

@@ -114,7 +114,7 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         // NCBI's own errors of the files stay where NCBI's search of a batch raises them
         // (`search_window`), and the options' refusals below wait for the files to open.
         let volumes = RpsVolumeSet::of(database.x_seqdb());
-        let mut setup = RpsVolumeSetup::new(PROGRAM, options.window_size);
+        let mut setup = RpsVolumeSetup::new(PROGRAM);
         let mut faulty_files = false;
         for &index in &volumes.order {
             if setup.check(&volumes.volumes[index], false)?.is_err() {
@@ -153,7 +153,7 @@ impl RpsTblastnSearch for TranslatedRpsSearch {
         let processed = std::cell::Cell::new(0usize);
         let diagnostics = std::cell::RefCell::new(diagnostics);
         let volumes = RpsVolumeSet::of(database.x_seqdb());
-        let setup = RpsVolumeSetup::new(PROGRAM, options.window_size);
+        let setup = RpsVolumeSetup::new(PROGRAM);
         let Some(units) = self.units.as_ref() else {
             bail!("LOSAT internal error: {PROGRAM}'s query batches are searched before its database is set up");
         };
@@ -446,6 +446,9 @@ impl TranslatedRpsSearch {
             // valid frame search it, with their frames' letters masked for its alphabet.
             let mut searching: Vec<usize> = Vec::new();
             let mut masks: Vec<Vec<Option<Vec<u8>>>> = Vec::new();
+            // The frames' search spaces of the preliminary stage where its lengths are not the
+            // setup's (`RpsUnits::prelim_lengths`: one volume whose total is negative).
+            let mut prelims: Vec<Option<Vec<ContextParameters>>> = Vec::new();
             for batch in 0..states.len() {
                 let WindowBatch {
                     prepared,
@@ -473,15 +476,29 @@ impl TranslatedRpsSearch {
                     effective_lengths(prepared, parameters, options, db_length, db_count, None)
                         .inspect(|()| *held = Some((db_length, db_count)))
                 };
-                if let Err(error) = lengths {
-                    fail(
-                        &mut states,
-                        &mut outcome,
-                        batch,
-                        RpsBatchError::Setup(error).into(),
-                    );
-                    break;
-                }
+                let prelim = lengths.and_then(|()| {
+                    units
+                        .prelim_lengths(unit, options.effective_search_space)
+                        .map(|(length, count)| {
+                            let mut prelim = parameters.clone();
+                            effective_lengths(prepared, &mut prelim, options, length, count, None)
+                                .map(|()| prelim)
+                        })
+                        .transpose()
+                });
+                let prelim = match prelim {
+                    Ok(prelim) => prelim,
+                    Err(error) => {
+                        fail(
+                            &mut states,
+                            &mut outcome,
+                            batch,
+                            RpsBatchError::Setup(error).into(),
+                        );
+                        break;
+                    }
+                };
+                prelims.push(prelim);
                 // `Blast_MaskUnsupportedAA` of a 26-column database, per frame.
                 masks.push(
                     prepared
@@ -504,7 +521,7 @@ impl TranslatedRpsSearch {
             // The queries of the searching batches, batch after batch, in one run.
             let mut queries = Vec::new();
             let mut spans = Vec::with_capacity(searching.len());
-            for (&batch, masked) in searching.iter().zip(&masks) {
+            for ((&batch, masked), prelim) in searching.iter().zip(&masks).zip(&prelims) {
                 let state = &states[batch];
                 let start = queries.len();
                 queries.extend(frame_queries(
@@ -513,6 +530,7 @@ impl TranslatedRpsSearch {
                         .parameters
                         .as_deref()
                         .expect("a searching batch has its score blocks"),
+                    prelim.as_deref(),
                     masked,
                 ));
                 spans.push(queries.len() - start);
@@ -531,6 +549,10 @@ impl TranslatedRpsSearch {
                     options,
                 ),
                 window: options.window_size,
+                // The unit's concatenated length `Lc` (an alias file's `LENGTH` and `NSEQ` over
+                // one volume).
+                concat_length: unit.concat_length(),
+                sorts_results: unit.sorts_results,
                 x_drop_ungapped_bits: x_drops.ungapped,
                 x_drop_gapped_bits: x_drops.gapped,
                 x_drop_final_bits: x_drops.final_,
@@ -856,15 +878,22 @@ fn unsearched_batch(
 /// statistics of their contexts (`score_block`, `effective_lengths`): BLASTX's layout of
 /// `sequence_start` holds each frame with letters between two sentinels at its context's offset;
 /// `masked` holds a frame's letters where a 26-column database masks some
-/// (`mask_unsupported_letters`). `-qcov_hsp_perc` reads the batch's first query's frames.
+/// (`mask_unsupported_letters`), `prelim` the contexts' statistics of the preliminary stage's
+/// lengths where they are not the setup's (`RpsUnits::prelim_lengths`). `-qcov_hsp_perc` reads the
+/// batch's first query's frames.
 pub(crate) fn frame_queries<'a>(
     prepared: &'a PreparedQueryBatch,
     parameters: &[ContextParameters],
+    prelim: Option<&[ContextParameters]>,
     masked: &'a [Option<Vec<u8>>],
 ) -> Vec<RpsQuery<'a>> {
     let frame = |context: usize| -> RpsFrame<'a> {
         let c = &prepared.contexts[context];
         let p = &parameters[context];
+        // The preliminary stage's space (`RpsFrame::prelim_search_space`), the setup's unless
+        // `prelim` holds other lengths' spaces.
+        let prelim_search_space =
+            prelim.map_or(p.search_space, |prelim| prelim[context].search_space);
         let letters = |buffer: &'a [u8]| -> &'a [u8] {
             if c.length == 0 {
                 &[]
@@ -882,6 +911,7 @@ pub(crate) fn frame_queries<'a>(
             valid: p.valid && c.length > 0,
             kbp_std: p.ungapped,
             search_space: p.search_space,
+            prelim_search_space,
             first_query_length: prepared.contexts[context % NUM_FRAMES].length,
         }
     };
@@ -999,7 +1029,7 @@ mod tests {
         let prepared = prepare_unit_queries(&records, None, &options).unwrap();
         let parameters = score_block(&prepared);
         let masked = vec![None; prepared.contexts.len()];
-        let queries = frame_queries(&prepared, &parameters, &masked);
+        let queries = frame_queries(&prepared, &parameters, None, &masked);
         assert_eq!(queries.len(), 2);
         let frames: Vec<i8> = queries[0].frames.iter().map(|f| f.frame).collect();
         assert_eq!(frames, [1, 2, 3, -1, -2, -3]);
@@ -1040,7 +1070,7 @@ mod tests {
         let prepared = prepare_unit_queries(&records, None, &options).unwrap();
         let parameters = score_block(&prepared);
         let masked = vec![None; prepared.contexts.len()];
-        let queries = frame_queries(&prepared, &parameters, &masked);
+        let queries = frame_queries(&prepared, &parameters, None, &masked);
         for frame in &queries[0].frames {
             assert_eq!(frame.valid, frame.length() > 0);
         }
@@ -1055,21 +1085,21 @@ mod tests {
         let prepared = prepare_unit_queries(&records, None, &options_both).unwrap();
         let parameters = score_block(&prepared);
         let masked = vec![None; prepared.contexts.len()];
-        let queries = frame_queries(&prepared, &parameters, &masked);
+        let queries = frame_queries(&prepared, &parameters, None, &masked);
         // Frames of 59 letters: +1 19, +2 19, +3 19, -1 19, -2 19, -3 19 ((59 - i) / 3).
         assert_eq!(queries[0].stat_length(), queries[0].frames[5].length());
         let options_plus = options(&["-strand", "plus"]);
         let prepared = prepare_unit_queries(&[record("b", DNA)], None, &options_plus).unwrap();
         let parameters = score_block(&prepared);
         let masked = vec![None; prepared.contexts.len()];
-        let queries = frame_queries(&prepared, &parameters, &masked);
+        let queries = frame_queries(&prepared, &parameters, None, &masked);
         assert_eq!(queries[0].stat_length(), 19);
         // A query of 4 letters: one letter in frames +1, -1 only (frames +2, +3: (4 - 1) / 3 =
         // 1, (4 - 2) / 3 = 0 letters).
         let prepared = prepare_unit_queries(&[record("c", b"ACGT")], None, &options_both).unwrap();
         let parameters = score_block(&prepared);
         let masked = vec![None; prepared.contexts.len()];
-        let queries = frame_queries(&prepared, &parameters, &masked);
+        let queries = frame_queries(&prepared, &parameters, None, &masked);
         let lengths: Vec<usize> = queries[0].frames.iter().map(RpsFrame::length).collect();
         assert_eq!(lengths, [1, 1, 0, 1, 1, 0]);
         assert_eq!(queries[0].stat_length(), 1);
@@ -1086,7 +1116,7 @@ mod tests {
             let prepared = prepare_unit_queries(&[record("a", letters)], None, &options).unwrap();
             let parameters = score_block(&prepared);
             let masked = vec![None; prepared.contexts.len()];
-            let queries = frame_queries(&prepared, &parameters, &masked);
+            let queries = frame_queries(&prepared, &parameters, None, &masked);
             let first = prepared.contexts[0].offset;
             let contexts: Vec<(usize, usize)> = prepared.contexts[..NUM_FRAMES]
                 .iter()
@@ -1451,7 +1481,7 @@ mod tests {
     ) -> Vec<Option<std::result::Result<(), String>>> {
         let options = options(&[]);
         let volumes = RpsVolumeSet::of(database.x_seqdb());
-        let setup = RpsVolumeSetup::new(PROGRAM, options.window_size);
+        let setup = RpsVolumeSetup::new(PROGRAM);
         let units = RpsUnits::of(database.x_seqdb(), 0, 0, PROGRAM).unwrap();
         search
             .search_window(

@@ -62,6 +62,9 @@ fn pssm_extend_right<R: PssmRows>(
         }
         i += 1;
     }
+    if i == n {
+        rows.ran_to_end(q_off + i, s_off + i < subject.len() as i32);
+    }
     (maxscore, best_i + 1, s_off + i)
 }
 

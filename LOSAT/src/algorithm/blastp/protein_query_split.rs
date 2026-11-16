@@ -356,14 +356,13 @@ pub fn protein_chunk_part_in_record(record: &[u8], offset: usize, part: &ChunkQu
 ///     m_TotalQueryLength = m_LocalQueryData->GetSumOfSequenceLengths();
 ///     m_NumChunks = SplitQuery_CalculateNumChunks(m_Options->GetProgramType(),
 /// ```
-pub fn protein_query_split_sizes(
-    program: &str,
-    default_chunk_size: u32,
-) -> anyhow::Result<SplitSizes> {
+/// A value that NCBI cannot convert is the `Err` (its exception), which stops the first query
+/// batch in its query splitter before any batch is split (`query_batch::read_query_batches`).
+pub fn protein_query_split_sizes(default_chunk_size: u32) -> anyhow::Result<SplitSizes> {
     Ok(protein_split_sizes(
         default_chunk_size,
-        read_query_split_variable(program, "CHUNK_SIZE")?,
-        read_query_split_variable(program, "OVERLAP_CHUNK_SIZE")?,
+        read_query_split_variable("CHUNK_SIZE")?,
+        read_query_split_variable("OVERLAP_CHUNK_SIZE")?,
     ))
 }
 

@@ -1,0 +1,6 @@
+>patched record, its taxid in another encoding
+229 - 236
+512 - 521
+>plain record as makeblastdb writes it
+229 - 236
+512 - 521

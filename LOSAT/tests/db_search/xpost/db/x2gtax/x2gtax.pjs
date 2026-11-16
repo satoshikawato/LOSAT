@@ -1,0 +1,23 @@
+{
+  "version": "1.2",
+  "dbname": "x2gtax",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "ms.faa",
+  "number-of-letters": 24,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-16T18:27:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 1,
+  "bytes-total": 37183,
+  "bytes-to-cache": 131,
+  "files": [
+    "x2gtax.pdb",
+    "x2gtax.phr",
+    "x2gtax.pin",
+    "x2gtax.pot",
+    "x2gtax.psq",
+    "x2gtax.ptf",
+    "x2gtax.pto"
+  ]
+}

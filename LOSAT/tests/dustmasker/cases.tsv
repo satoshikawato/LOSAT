@@ -298,11 +298,20 @@ db_t5_interval	-infmt blastdb -in ../db_search/t5/nclean -outfmt interval -conff
 db_t5_acclist	-infmt blastdb -in ../db_search/t5/nclean -outfmt acclist -conffile conf/t5.ini
 db_t5_fasta_ps	-infmt blastdb -in ../db_search/t5/npall -outfmt fasta -parse_seqids -conffile conf/t5.ini
 db_t5_maskinfo	-infmt blastdb -in ../db_search/t5/nclean -outfmt maskinfo_asn1_text -conffile conf/t5.ini
+# Taxids of other encodings (fix 2 of line RG item T5c): ../db_search/t5/ntx_app42 and ntx_sx9 (make_t5.py --taxid-only), whose first record's taxid NCBI's ReadInt4 reads as makeblastdb's (the application INTEGER tag 0x42, nine content bytes of sign extension). NCBI BLAST+ 2.17.0 (local oracle), 2026-11-15, T5c fix 2.
+db_t5c_taxid_app42	-infmt blastdb -in ../db_search/t5/ntx_app42
+db_t5c_taxid_sx9	-infmt blastdb -in ../db_search/t5/ntx_sx9
 id_del_seqloc_txt	-in in/id_del.fa -outfmt seqloc_asn1_text -parse_seqids
 id_del_seqloc_bin	-in in/id_del.fa -outfmt seqloc_asn1_bin -parse_seqids
 id_del_maskinfo_txt	-in in/id_del.fa -outfmt maskinfo_asn1_text -parse_seqids
 id_del_maskinfo_bin	-in in/id_del.fa -outfmt maskinfo_asn1_bin -parse_seqids
 id_del_int_ps	-in in/id_del.fa -parse_seqids
+# order_* (a DEL byte in a -parse_seqids id of a sequence with 300 masked intervals, each writing the id in the serial formats; order_int_ps reads the input as the reader cases do: NCBI's 803.7 messages fall among the document's bytes where its output buffer (4096 bytes; back limit text 80, binary 0) handed them out; ncbi/<name>.merged is NCBI's 2>&1 stream of a run of its own; M4a-1b part 6) frozen 2026-11-14 by ad-M4a-3 with the local official release.
+order_seqloc_txt	-in in/order_del.fa -outfmt seqloc_asn1_text -parse_seqids
+order_seqloc_bin	-in in/order_del.fa -outfmt seqloc_asn1_bin -parse_seqids
+order_maskinfo_txt	-in in/order_del.fa -outfmt maskinfo_asn1_text -parse_seqids
+order_maskinfo_bin	-in in/order_del.fa -outfmt maskinfo_asn1_bin -parse_seqids
+order_int_ps	-in in/order_del.fa -parse_seqids
 # A damaged taxonomy database (line RG item T5b): ../db_search/t5b (make_t5b.py there), the taxonomy database ../seqdb/taxdb/<variant> on the search path of conf/t5b_<variant>.ini. NCBI's GetBioseq looks up each positive taxid of every sequence it reads, whatever the format: the texts of opening a damaged database once, at the first lookup (Error: Error: Tax database file has wrong magic number., Error: SeqDB: Taxid metadata indicates ...), and the offset error of the last entry at each lookup that misses the volume's 256-slot cache; exit status 0. NCBI BLAST+ 2.17.0 (local oracle), 2026-11-14, ad-RG-T5-4.
 db_t5b_bad_magic_fasta	-infmt blastdb -in ../db_search/t5b/nmv -outfmt fasta -conffile conf/t5b_bad_magic.ini
 db_t5b_bad_magic_interval	-infmt blastdb -in ../db_search/t5b/nmv -outfmt interval -conffile conf/t5b_bad_magic.ini

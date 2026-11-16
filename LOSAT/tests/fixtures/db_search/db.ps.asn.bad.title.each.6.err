@@ -1,0 +1,7 @@
+Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.descr.E.title
+Bad char [0xC3] in string at line 12
+tk café title
+Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.descr.E.title
+Bad char [0xA9] in string at line 12
+tk café title
+Warning: [psiblast] Query_1 tk café title: Composition-based score adjustment conditioned on sequence properties and unconditional composition-based score adjustment is not supported with PSSMs, resetting to default value of standard composition-based statistics 

@@ -10,6 +10,14 @@ use std::path::{Path, PathBuf};
 
 use super::SeqDbError;
 
+/// The memory page of NCBI's mapping of a database file: 4 KiB, the page of the oracle platform
+/// (Linux x86-64) and the smallest of the systems NCBI BLAST+ runs on. NCBI maps a file whole
+/// from offset 0, and the system fills the part of the last page after the end of the file with
+/// zeros (POSIX `mmap`), so NCBI reads zero bytes there (`taxdb.btd` past its end,
+/// `Volume::protein_mapped_bytes_after`). A larger page only gives NCBI more zeros to read past
+/// the file, where LOSAT then refuses or reads none.
+pub(crate) const MAP_PAGE: u64 = 4096;
+
 /// Where `DbFile::read_range_in` puts the bytes it reads.
 enum RangeBuffer {
     /// A new buffer (`read_range`).
@@ -185,8 +193,9 @@ impl DbFile {
     }
 
     /// EXPERIMENT (LOSAT_X_BNMAPPED): `read_range` into a buffer taken from or sized
-    /// by `utils::x_mapped::X_BYTES.reserve` (a mapped buffer from 1 MiB on, given back with
-    /// `x_mapped::X_BYTES.give`). No NCBI counterpart: only where the bytes are kept.
+    /// by `utils::x_mapped::X_BYTES.x_filled` (a mapped buffer from 1 MiB on, given back with
+    /// `x_mapped::X_BYTES.give`; a buffer of the pool is zeroed only past the bytes it holds).
+    /// No NCBI counterpart: only where the bytes are kept.
     pub fn x_read_range_mapped(&self, start: u64, end: u64) -> Result<Vec<u8>, SeqDbError> {
         self.read_range_in(start, end, RangeBuffer::Mapped)
     }
@@ -239,12 +248,9 @@ impl DbFile {
         })?;
         let mut buf = match buffer {
             RangeBuffer::New => vec![0u8; len],
-            RangeBuffer::Mapped => {
-                let mut buf = Vec::new();
-                crate::utils::x_mapped::X_BYTES.reserve(&mut buf, len);
-                buf.resize(len, 0u8);
-                buf
-            }
+            // A buffer of the pool keeps the bytes its last read left in it, and only the bytes
+            // past them are zeroed before the read writes them all (as `Given` below).
+            RangeBuffer::Mapped => crate::utils::x_mapped::X_BYTES.x_filled(len, 0u8),
             #[cfg(any(
                 test,
                 all(

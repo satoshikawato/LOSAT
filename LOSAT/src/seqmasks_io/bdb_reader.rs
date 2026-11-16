@@ -30,9 +30,14 @@ pub(crate) struct BdbRecord {
     /// The title (`CSeqDB::GetBioseq`'s title descriptor).
     pub title: Vec<u8>,
     /// The name of the organism of the Bioseq's first source, from which `GenerateDefline` makes
-    /// an empty title (`report::defline::BioseqFacts::taxname`); looked up only for such a title
-    /// that the writer prints.
+    /// an empty title and rewrites the end of a protein title ending in `]`
+    /// (`report::defline::BioseqFacts::taxname`); looked up only for such a title that the
+    /// writer prints.
     pub taxname: Option<std::sync::Arc<[u8]>>,
+    /// Whether the Bioseq has a source: a definition line with a positive taxid
+    /// (`report::defline::BioseqFacts::has_source`); asked only for a title as `taxname` (else
+    /// `false`, which writes the same title).
+    pub has_source: bool,
     /// IUPACna letters of a nucleotide, NCBIstdaa codes of a protein.
     pub residues: Vec<u8>,
     /// The `ERR_POST` texts of the taxonomy database that NCBI's `GetBioseq` writes while it
@@ -93,6 +98,8 @@ pub(crate) struct MaskBdbReader {
     /// The taxonomy database of the search path (`CSeqDBTaxInfo`, opened at the first lookup) and
     /// the lookups of the volumes' caches, each `GetBioseq` a load.
     taxdb: crate::algorithm::common::database::TaxdbRun,
+    /// What `source_taxname` looked up, as NCBI's volume keeps it (`seqdb::taxdb::TaxCache`).
+    source_names: crate::seqdb::taxdb::TaxCache,
 }
 
 /// Whether the writer of `outfmt` prints the title of a sequence (`CMaskWriter::IdToString`).
@@ -128,6 +135,7 @@ impl MaskBdbReader {
             title_printed,
             program,
             taxdb: crate::algorithm::common::database::TaxdbRun::sequential(),
+            source_names: Default::default(),
         })
     }
 
@@ -177,12 +185,20 @@ impl MaskBdbReader {
                 .map_err(|error| lookup_refusal(oid, error))?;
         }
         // NCBI makes the title of a sequence without one from its BioSource (the taxonomy
-        // names of a definition line with a taxid; seqdbvol.cpp:1100-1188).
-        let taxname = if self.title_printed
+        // names of a definition line with a taxid; seqdbvol.cpp:1100-1188), and rewrites the end
+        // of a protein title ending in `]` from it (`x_AdjustProteinTitleSuffix`,
+        // `report::defline::adjust_protein_title_suffix`, which runs for any source: probe of
+        // line RG T5c, `T/t5c/out/seg`, `>alpha [Bacillus sp.]` of `alpha, partial [Bacillus
+        // sp.]`, `>a` of `a, [ ]` without a name), for a Bioseq it makes (one with letters).
+        // The title is asked first: a printed title that NCBI neither makes from the source nor
+        // rewrites the end of (the reader's usual one) asks nothing of the source.
+        let source_shown = self.title_printed
             && !residues.is_empty()
-            && bioseq_title_from_source(&title, || bioseq_facts(&ids))
-            && set.first_source_taxid(None).is_some()
-        {
+            && (bioseq_title_from_source(&title, || bioseq_facts(&ids))
+                || (self.molecule == SeqType::Protein
+                    && crate::report::defline::protein_title_suffix_adjustable(&title)));
+        let has_source = source_shown && set.first_source_taxid(None).is_some();
+        let taxname = if has_source {
             self.source_taxname(oid, &set)?
         } else {
             None
@@ -191,6 +207,7 @@ impl MaskBdbReader {
             ids,
             title,
             taxname,
+            has_source,
             residues,
             texts,
         }))
@@ -215,11 +232,13 @@ impl MaskBdbReader {
     //             }
     // ```
     // The first source names the organism (`DeflineSet::first_source_taxid`,
-    // `report::defline::SourceTaxname::of_names`). The load of the sequence
-    // (`TaxdbRun::bioseq_texts`, in `next_record` before this) made the lookups and has their
-    // texts; the name is asked again here, and its texts are dropped.
+    // `seqdb::taxdb::SourceNames::taxname`). The load of the sequence (`TaxdbRun::bioseq_texts`,
+    // in `next_record` before this) made the lookups and has their texts; the name is asked again
+    // here, through the cache of the lookups (`source_names`, NCBI's `m_TaxCache`), and its texts
+    // are dropped. A lookup that faults or whose names NCBI reads past its mapping of `taxdb.btd`
+    // is refused at the first that meets it (the cache keeps none of those).
     /// The name of the organism of the first source of the sequence `oid`, whose definition lines
-    /// are `set`, from which NCBI makes its empty title.
+    /// are `set`, from which NCBI makes its empty title or the end of its protein title.
     fn source_taxname(
         &self,
         oid: u32,
@@ -229,15 +248,12 @@ impl MaskBdbReader {
             return Ok(None);
         };
         let names = self
-            .taxdb
-            .lookup(&self.db, taxid, &mut Vec::new())
-            .and_then(crate::seqdb::taxdb::TaxLookup::into_names)
+            .source_names
+            .names(taxid, &mut Vec::new(), |messages| {
+                self.taxdb.lookup(&self.db, taxid, messages)?.into_names()
+            })
             .map_err(|error| lookup_refusal(oid, error))?;
-        Ok(
-            crate::report::defline::SourceTaxname::of_names(names.as_ref())
-                .name()
-                .unwrap_or_default(),
-        )
+        Ok(names.taxname().cloned())
     }
 }
 

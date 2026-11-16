@@ -32,15 +32,17 @@ use super::input::Inputs;
 use super::local_blast::{
     FormatObserver, FormatOutput, HspIndex, OutputSink, ReportOutputs, ReportedSubject,
 };
+use super::parts::Parts;
 use super::run::{
-    check_inputs, query_ordinal, query_range_of, records, run_local, searched_queries,
-    CountingWriter, HspRecord, QueryStats,
+    check_inputs, query_range_of, run_local, searched_queries, CountingWriter, HspRecord,
+    QueryRounds, QueryStats,
 };
 use super::search::Search;
 use super::start::{CallStart, RunLog};
 use super::view::{self, QueryHits};
 use crate::algorithm::blastn::blast_engine::QueryBatchSizes;
 use crate::blastinput::app::query_batch_size;
+use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::{next_ranged_batch_end, record_interval, RecordInterval};
 use crate::cli::Commands;
 use crate::report::blast_xml::XmlStats;
@@ -57,6 +59,8 @@ pub struct Batch {
     pub hsps: Vec<HspRecord>,
     /// One entry per query of `query_indices`, as in `Outcome::query_stats`.
     pub query_stats: Vec<Option<QueryStats>>,
+    /// One entry per query of `query_indices`, as in `Outcome::rounds`.
+    pub rounds: Vec<QueryRounds>,
     /// What the command line writes to its standard error for this batch: the warnings of its
     /// queries, and with the first batch those of the run.
     pub diagnostics: Vec<u8>,
@@ -70,7 +74,12 @@ impl Batch {
             .iter()
             .enumerate()
             .map(move |(offset, stats)| {
-                view::query_hits(&self.hsps, first + offset, stats.as_ref())
+                view::query_hits(
+                    &self.hsps,
+                    first + offset,
+                    stats.as_ref(),
+                    self.rounds.get(offset),
+                )
             })
     }
 }
@@ -121,11 +130,10 @@ fn batch_sizes(
             }
             None => QueryBatchSizes::new(args, inputs.subject)?,
         }),
-        Commands::Blastp(_) => BatchSizes::Fixed(query_batch_size("BLASTP", 10000)?),
-        Commands::Tblastn(_) => BatchSizes::Fixed(query_batch_size("TBLASTN", 20000)?),
-        Commands::Tblastx(_) => BatchSizes::Fixed(query_batch_size("TBLASTX", 10002)?),
+        Commands::Blastp(_) => BatchSizes::Fixed(query_batch_size(10000)?),
+        Commands::Tblastn(_) => BatchSizes::Fixed(query_batch_size(20000)?),
+        Commands::Tblastx(_) => BatchSizes::Fixed(query_batch_size(10002)?),
         Commands::Blastx(_) => BatchSizes::Fixed(query_batch_size(
-            "BLASTX",
             crate::algorithm::blastx::QUERY_BATCH_SIZE as u32,
         )?),
         // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:468-468
@@ -147,10 +155,9 @@ struct BatchObserver {
     diagnostics: Arc<AtomicUsize>,
     /// Where the run's own messages end in the diagnostics (`queries_begin`).
     queries_begin: Option<usize>,
-    query_stats: Vec<Option<QueryStats>>,
     extensions: Option<i32>,
-    /// The sequences that a database search's hit list names.
-    database_subjects: Option<Vec<ReportedSubject>>,
+    /// The statistics, database ranks and rounds of the batch's search calls.
+    parts: Parts,
 }
 
 impl FormatObserver for BatchObserver {
@@ -159,10 +166,7 @@ impl FormatObserver for BatchObserver {
     fn hsp_end(&mut self, _format: usize, _hsp: HspIndex) {}
 
     fn query_stats(&mut self, q_idx: usize, stats: XmlStats) {
-        if self.query_stats.len() <= q_idx {
-            self.query_stats.resize(q_idx + 1, None);
-        }
-        self.query_stats[q_idx] = QueryStats::of_context(stats);
+        self.parts.query_stats(q_idx, stats);
     }
 
     fn queries_begin(&mut self) {
@@ -174,7 +178,19 @@ impl FormatObserver for BatchObserver {
     }
 
     fn database_subjects(&mut self, subjects: Vec<ReportedSubject>) {
-        self.database_subjects = Some(subjects);
+        self.parts.database_subjects(subjects);
+    }
+
+    fn round_begin(&mut self, query: usize, round: u32) {
+        self.parts.round_begin(query, round);
+    }
+
+    fn rounds_converged(&mut self, query: usize) {
+        self.parts.rounds_converged(query);
+    }
+
+    fn pssm_query(&mut self, query: &FastaRecord) {
+        self.parts.pssm_query(query);
     }
 }
 
@@ -184,7 +200,8 @@ pub struct Batches<'a> {
     search: &'a Search,
     inputs: Inputs<'a>,
     sizes: BatchSizes,
-    /// The letters of each query record, which size the batches.
+    /// The letters of each query record, which size the batches (one query of no letters for a
+    /// PSSM query, one batch).
     lengths: Vec<usize>,
     /// The query records that NCBI's reader skips (`-query_loc`).
     skipped: Vec<bool>,
@@ -200,6 +217,9 @@ pub struct Batches<'a> {
     start_messages: Vec<u8>,
     /// Whether the call is a dry run: one batch of no query, with the start's messages.
     dry_run: bool,
+    /// The run's numbers of psiblast's `-save_each_pssm` files, which go on over the batches as
+    /// over the command line's (`PsiblastArgs::pssm_versions`).
+    pssm_versions: crate::algorithm::psiblast::pssm::PssmVersions,
 }
 
 /// Searches the queries one of NCBI's query batches at a time and returns the batches as an
@@ -218,11 +238,17 @@ pub struct Batches<'a> {
 pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches<'a>, Error> {
     let mut start_messages = Vec::new();
     let mut start = CallStart::new(search, inputs, &mut start_messages)?;
-    let lengths: Vec<usize> = inputs
-        .query
-        .iter()
-        .map(|record| record.seq().len())
-        .collect();
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:534-543 (the PSSM's query
+    // searched without a `CBlastInput`, quoted at `blastp::blast_engine::search_pssm_query`)
+    // A PSSM query (`Inputs::pssm`) is one batch of its own: NCBI reads no query batches then.
+    let lengths: Vec<usize> = match inputs.pssm {
+        Some(_) => vec![0],
+        None => inputs
+            .query
+            .iter()
+            .map(|record| record.seq().len())
+            .collect(),
+    };
     if start.dry_run() {
         let log = start.take_log();
         return Ok(Batches {
@@ -239,6 +265,7 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
             log,
             start_messages,
             dry_run: true,
+            pssm_versions: Default::default(),
         });
     }
     check_inputs(search, inputs)?;
@@ -262,8 +289,13 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
         .map_err(|error| Error::search(&error))?;
     }
     let command = search.command(inputs)?;
-    let sizes = batch_sizes(&command, inputs, &mut start, &mut start_messages)
-        .map_err(|error| Error::search(&error))?;
+    // A PSSM query is one batch, whose size NCBI does not read (`BATCH_SIZE`; tblastn_app.cpp:
+    // 208-221 reads it for a FASTA query only).
+    let sizes = match inputs.pssm {
+        Some(_) => BatchSizes::Fixed(1),
+        None => batch_sizes(&command, inputs, &mut start, &mut start_messages)
+            .map_err(|error| Error::search(&error))?,
+    };
     let query_range = query_range_of(&command);
     let skipped = lengths
         .iter()
@@ -286,12 +318,13 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
         start,
         start_messages,
         dry_run: false,
+        pssm_versions: Default::default(),
     })
 }
 
 impl Batches<'_> {
-    /// How many query records the inputs hold: with `Batch::query_indices`, how far the search
-    /// is.
+    /// How many queries the inputs hold (the records, or the one sequence of a PSSM file,
+    /// `Inputs::pssm`): with `Batch::query_indices`, how far the search is.
     pub fn query_count(&self) -> usize {
         self.lengths.len()
     }
@@ -306,9 +339,12 @@ impl Batches<'_> {
 
     /// Searches the batch `range`, as the command line's loop searches it.
     fn search_batch(&mut self, range: Range<usize>) -> Result<Batch, Error> {
-        let inputs = Inputs {
-            query: &self.inputs.query[range.clone()],
-            ..self.inputs
+        let inputs = match self.inputs.pssm {
+            Some(_) => self.inputs,
+            None => Inputs {
+                query: &self.inputs.query[range.clone()],
+                ..self.inputs
+            },
         };
         let mut command = self.search.command(inputs)?;
         let query_range = query_range_of(&command);
@@ -320,7 +356,20 @@ impl Batches<'_> {
             Commands::Blastp(args) => args.first_query_ordinal = range.start,
             Commands::Tblastn(args) => args.first_query_ordinal = range.start,
             Commands::Tblastx(args) => args.first_query_ordinal = range.start,
-            Commands::Psiblast(args) => args.first_query_ordinal = range.start,
+            Commands::Psiblast(args) => {
+                use crate::algorithm::psiblast::pssm::PssmCheckScope;
+                args.first_query_ordinal = range.start;
+                args.pssm_versions = self.pssm_versions.clone();
+                // The command line checks the PSSM files of all its queries before its first
+                // byte: the first batch checks the run's, where the command line does.
+                args.pssm_check = if self.searched_one {
+                    PssmCheckScope::Checked
+                } else {
+                    PssmCheckScope::Run {
+                        queries: self.lengths.len(),
+                    }
+                };
+            }
             // BLASTX's messages show the record's own id; rpsblast and rpstblastn are refused
             // by `Program::parse`.
             Commands::Blastx(_)
@@ -334,21 +383,21 @@ impl Batches<'_> {
         let mut observer = BatchObserver {
             diagnostics: diagnostics.position.clone(),
             queries_begin: None,
-            query_stats: Vec::new(),
             extensions: None,
-            database_subjects: None,
+            parts: Parts::new(),
         };
-        let mut collected: Option<Arc<Vec<PairwiseHit>>> = None;
+        let mut collected: Vec<Arc<Vec<PairwiseHit>>> = Vec::new();
         let mut report = io::sink();
         // The batch's messages are gathered, so that a later batch's repeat of the run's own
         // messages is cut before they go where the run's messages go (`RunLog::route`: tblastx's
         // `-logfile` file), on the way of a failure too.
         let result = {
-            let mut on_hits = |hits| collected = Some(hits);
+            let mut on_hits = |hits| collected.push(hits);
             let mut sink = self.log.sink(&mut diagnostics, false);
             let mut outputs = ReportOutputs {
                 formats: vec![FormatOutput {
                     outfmt: "6",
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut report),
                 }],
                 diagnostics: &mut sink,
@@ -367,29 +416,24 @@ impl Batches<'_> {
             bytes.splice(0..0, std::mem::take(&mut self.start_messages));
         }
         result.map_err(|error| self.log.failed(&error))?;
-        let ordinals = ordinals.as_deref();
-        let mut hsps = match &collected {
-            Some(hits) => records(
+        let finished = observer
+            .parts
+            .finish(
                 self.search.program(),
                 inputs,
-                hits,
+                &collected,
                 query_range,
-                ordinals,
-                observer.database_subjects.as_deref(),
-            ),
-            None => Vec::new(),
-        };
+                ordinals.as_deref(),
+                self.hsps_before,
+            )
+            .map_err(|fault| {
+                Error::Search(format!("internal error in the search's parts: {fault}"))
+            })?;
+        let mut hsps = finished.hsps;
         for hsp in &mut hsps {
-            hsp.index += self.hsps_before;
             hsp.q_idx += range.start;
         }
         self.hsps_before += hsps.len();
-        let mut query_stats = vec![None; inputs.query.len()];
-        for (q_idx, stats) in observer.query_stats.iter().enumerate() {
-            if let Some(slot) = query_stats.get_mut(query_ordinal(ordinals, q_idx)) {
-                *slot = *stats;
-            }
-        }
         if let (BatchSizes::Blastn(sizes), Some(extensions)) =
             (&mut self.sizes, observer.extensions)
         {
@@ -398,7 +442,8 @@ impl Batches<'_> {
         Ok(Batch {
             query_indices: range,
             hsps,
-            query_stats,
+            query_stats: finished.query_stats,
+            rounds: finished.rounds,
             diagnostics: bytes,
         })
     }
@@ -418,6 +463,7 @@ impl Iterator for Batches<'_> {
                 query_indices: 0..0,
                 hsps: Vec::new(),
                 query_stats: Vec::new(),
+                rounds: Vec::new(),
                 diagnostics: std::mem::take(&mut self.start_messages),
             }));
         }

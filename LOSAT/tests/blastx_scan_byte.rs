@@ -1,6 +1,6 @@
 //! The scan on presence bytes in BLASTX's direct seed loop (`LOSAT_X_BXSCANBYTE`, in the strict
 //! set; `src/algorithm/blastx/x_seed_scan.rs` module header, tblastn's
-//! `src/algorithm/tblastn/x_scan_byte.rs` for the scan) on whole searches.
+//! `src/algorithm/tblastx/x_scan_byte.rs` for the scan) on whole searches.
 //!
 //! NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127
 //! ```c
@@ -38,6 +38,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+mod temp_support;
+use temp_support::TempPath;
 
 const SWITCH: &str = "LOSAT_X_BXSCANBYTE";
 const OFF: (&str, &str) = (SWITCH, "0");
@@ -124,7 +127,8 @@ impl Inputs {
         write_fasta(&long, &pieces);
         write_fasta(&subject, &proteins);
         let db = dir.join("db");
-        let made = losat(&[])
+        let (mut command, _log) = losat(&[]);
+        let made = command
             .arg("makeblastdb")
             .arg("-in")
             .arg(&subject)
@@ -157,7 +161,7 @@ impl Drop for Inputs {
 /// names a file of its own: a binary built with the `blastx-worker-probe` feature (`cargo test
 /// --all-features`, as in CI) needs that file name as soon as a search has more than one thread,
 /// and it selects nothing.
-fn losat(env: &[(&str, &str)]) -> Command {
+fn losat(env: &[(&str, &str)]) -> (Command, TempPath) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
@@ -170,13 +174,16 @@ fn losat(env: &[(&str, &str)]) -> Command {
             command.env_remove(name);
         }
     }
+    let log = TempPath::keep_on_failure(temp_path("worker.log"));
     command
-        .env("LOSAT_BLASTX_WORKER_LOG", temp_path("worker.log"))
+        .env("LOSAT_BLASTX_WORKER_LOG", &log)
         .envs(env.iter().copied());
-    command
+    (command, log)
 }
 
 struct Run {
+    /// The worker log of the search: kept when the test panics, removed with the run otherwise.
+    _log: TempPath,
     stdout: Vec<u8>,
     stderr: String,
     code: Option<i32>,
@@ -199,7 +206,8 @@ impl Run {
 fn blastx(args: &[&str], env: &[(&str, &str)]) -> Run {
     let dir = temp_path("reach");
     std::fs::create_dir_all(&dir).unwrap();
-    let output = losat(env)
+    let (mut command, log) = losat(env);
+    let output = command
         .env("LOSAT_X_REACH", &dir)
         .arg("blastx")
         .args(args)
@@ -218,6 +226,7 @@ fn blastx(args: &[&str], env: &[(&str, &str)]) -> Run {
     }
     let _ = std::fs::remove_dir_all(&dir);
     Run {
+        _log: log,
         stdout: output.stdout,
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         code: output.status.code(),
@@ -303,6 +312,13 @@ fn the_scan_on_presence_bytes_gives_the_reports_of_the_scans_before() {
                     "sparse",
                     blastx(&args, &[DIRECT, SPARSE]),
                     Some((sparse, !sparse)),
+                ),
+                // The AVX2 copy without its chain runs (`LOSAT_X_CHAINRUN=0`; the direct arm has
+                // them where the CPU has AVX2).
+                (
+                    "direct, no chain runs",
+                    blastx(&args, &[DIRECT, ("LOSAT_X_CHAINRUN", "0")]),
+                    Some(default_sides(sparse)),
                 ),
                 // The default: the fused loop where it pays (AVX2), the direct loop elsewhere.
                 ("default", blastx(&args, &[]), None),

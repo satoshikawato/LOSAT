@@ -99,8 +99,7 @@ pub(crate) use super::ncbi_cutoffs::{
     x_drop_raw_score, BLAST_GAP_DECAY_RATE,
 };
 pub(crate) use super::reevaluate::{
-    get_num_identities_and_positives_ungapped, hsp_test,
-    reevaluate_ungapped_hit_ncbi_translated_with,
+    get_num_identities_and_positives_ungapped, reevaluate_ungapped_hit_ncbi_translated_with,
 };
 pub(crate) use super::report;
 pub(crate) use super::scoring::{Blosum62Score, MatrixScores, TbxScore};
@@ -115,7 +114,8 @@ pub(crate) use super::stage_dump;
 // ```
 pub(crate) use super::sum_stats_linking::{
     apply_sum_stats_even_gap_linking_with_parallel, calculate_link_hsp_cutoffs_ncbi,
-    compute_avg_query_length_ncbi, find_smallest_lambda_params, LinkingParams,
+    compute_avg_query_length_ncbi, find_smallest_lambda_params, link_one_hit_with_int4_ends,
+    LinkingParams,
 };
 pub(crate) use super::tracing::{
     trace_final_hit_if_match, trace_hsp_target, trace_match_target, trace_ungapped_hit_if_match,
@@ -131,8 +131,9 @@ pub(crate) use super::blast_extend::DiagStruct;
 
 // Import InitHSP and related functions from blast_gapalign module (NCBI blast_gapalign.c equivalent)
 pub(crate) use super::blast_gapalign::{
-    get_ungapped_hsp_list, sort_init_hsps_by_score_ncbi, sort_ungapped_hits_by_score_ncbi,
-    trace_init_hsp_if_match, ungapped_hits_is_sorted_by_score_ncbi, InitHSP,
+    get_ungapped_hsp_list, get_ungapped_hsp_list_int4, sort_init_hsps_by_score_ncbi,
+    sort_ungapped_hits_by_score_int4, sort_ungapped_hits_by_score_ncbi, trace_init_hsp_if_match,
+    ungapped_hits_is_sorted_by_score_ncbi, InitHSP,
 };
 
 // Import subject scanning functions from blast_aascan module (NCBI blast_aascan.c equivalent)
@@ -202,6 +203,8 @@ pub(crate) struct TblastxQueryStats {
     /// not valid: the `EffectiveSearchSpace` option of a BLAST archive (outfmt 11) takes the
     /// first context of the batch's first query, not its first valid one.
     pub context0_search_space: i64,
+    /// That context's length in residues, 0 when it is not valid (`archive::RequestLength::space`).
+    pub context0_aa_len: i64,
     /// The SEG intervals (residues of the frame, end exclusive) of each translated frame.
     pub seg_masks: Vec<(i8, Vec<(usize, usize)>)>,
 }
@@ -338,6 +341,14 @@ pub(crate) fn reevaluate_ungapped_hsp_list<S: TbxScore>(
     let mut kept_hits = Vec::new();
 
     for mut hit in ungapped_hits {
+        // No HSP of length 0 or less arrives (its end, an `Int4` at or below its start, would read
+        // here as a `u32`): the one-hit word finder's path drops those HSPs after its first linking
+        // call, where NCBI's re-evaluation (this function) deletes them
+        // (`link_one_hit_with_int4_ends`).
+        debug_assert!(
+            !hit.is_int4_inverted(),
+            "an HSP of length 0 or less reached the re-evaluation"
+        );
         let ctx = &contexts[hit.ctx_idx as usize];
         let s_frame_scoring = &s_frames_scoring[usize::from(hit.s_f_idx)];
         let s_frame_report = &s_frames_report[usize::from(hit.s_f_idx)];
@@ -450,8 +461,13 @@ pub(crate) fn reevaluate_ungapped_hsp_list<S: TbxScore>(
         //         align_length < hit_options->min_hit_length) ;
         // ```
         let percent_identity = 0.0;
-        let min_hit_length = 0usize;
-        if hsp_test(num_ident, new_len, percent_identity, min_hit_length) {
+        let min_hit_length = 0;
+        if crate::core::blast_hits::hsp_test(
+            num_ident as i64,
+            new_len as i64,
+            percent_identity,
+            min_hit_length,
+        ) {
             continue;
         }
 

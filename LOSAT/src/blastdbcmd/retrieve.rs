@@ -16,7 +16,7 @@ use crate::ncbi_str::string_to_non_negative_int;
 use crate::seqdb::isam::{seqdb_simplify_accession, SimplifyError};
 use crate::seqdb::lookup::{IdLookup, ID_OVERFLOWS};
 use crate::seqdb::tax_files::NO_ACCESSION_INFO;
-use crate::seqdb::taxdb::TaxNames;
+use crate::seqdb::taxdb::{SourceNames, TaxCache};
 use crate::seqdb::{MaskRanges, SeqDb, SeqDbError, SeqLocation, SeqType};
 use crate::seqid::accguide::parse_flags::{ANY_LOCAL, DEFAULT, PARTIAL_OK, RAW_TEXT};
 use crate::seqid::label::{content, fasta};
@@ -106,6 +106,8 @@ pub(super) struct Source<'a> {
     /// The taxonomy database of the search path (NCBI's one per process) and the lookups of the
     /// volumes' caches, each `GetBioseq` of the FASTA formatter a load.
     taxdb: TaxdbRun,
+    /// What `tax_info` looked up, as NCBI's volume keeps it (`seqdb::taxdb::TaxCache`).
+    source_names: TaxCache,
 }
 
 impl<'a> Source<'a> {
@@ -115,6 +117,7 @@ impl<'a> Source<'a> {
             protein: db.seqtype() == SeqType::Protein,
             dbtype_protein,
             taxdb: TaxdbRun::sequential(),
+            source_names: TaxCache::default(),
         }
     }
 
@@ -241,29 +244,29 @@ impl<'a> Source<'a> {
     //     }
     // }
     // ```
-    /// `CSeqDB::GetTaxInfo(taxid)`: the names of the taxonomy database on the search path,
-    /// `None` where NCBI's lookup throws (no database, no such taxid), and the `ERR_POST` texts
-    /// of the lookup (of opening the database, when it is the run's first lookup, and the offset
-    /// error), which NCBI writes where it looks the taxid up. Err: LOSAT's refusal of a lookup
-    /// that reads a record of an empty `taxdb.btd` (NCBI faults) or whose names NCBI reads past
-    /// its mapping of `taxdb.btd` without a defined result (`TaxLookup::into_names`); a super
-    /// kingdom past the mapping is refused where the format writes it (`format::DeflineFields`).
-    pub fn tax_info(&self, taxid: i32) -> Result<(Option<TaxNames>, Vec<String>), Stop> {
+    /// `CSeqDB::GetTaxInfo(taxid)` (and `GetBioseq`'s lookup of a source, [`Source::tax_names`]):
+    /// the names of the taxonomy database on the search path, none where NCBI's lookup throws (no
+    /// database, no such taxid), and the `ERR_POST` texts of the lookup (of opening the database,
+    /// when it is the run's first lookup, and the offset error), which NCBI writes where it looks
+    /// the taxid up. The lookups are kept as NCBI's volume keeps them (`source_names`), which keeps
+    /// no lookup that writes a text: a kept answer is that of a lookup that writes none. Err:
+    /// LOSAT's refusal of a lookup that reads a record of an empty `taxdb.btd` (NCBI faults) or
+    /// whose names NCBI reads past its mapping of `taxdb.btd` without a defined result
+    /// (`TaxLookup::into_names`); a super kingdom past the mapping is refused where the format
+    /// writes it (`format::DeflineFields`).
+    pub fn tax_info(&self, taxid: i32) -> Result<(std::sync::Arc<SourceNames>, Vec<String>), Stop> {
         let mut texts = Vec::new();
-        let names = self
-            .taxdb
-            .lookup(self.db, taxid, &mut texts)?
-            .into_names()?;
+        let names = self.source_names.names(taxid, &mut texts, |messages| {
+            self.taxdb.lookup(self.db, taxid, messages)?.into_names()
+        })?;
         Ok((names, texts))
     }
 
-    /// The names of `taxid` that the Bioseq's source holds (a title made from it): the load of
-    /// the sequence ([`Source::post_bioseq_texts`], before) wrote the lookup's texts.
-    pub fn tax_names(&self, taxid: i32) -> Result<Option<TaxNames>, Stop> {
-        Ok(self
-            .taxdb
-            .lookup(self.db, taxid, &mut Vec::new())?
-            .into_names()?)
+    /// The names of `taxid` that the Bioseq's source holds (a title made from it,
+    /// [`Source::tax_info`]): the load of the sequence ([`Source::post_bioseq_texts`], before)
+    /// wrote the lookup's texts.
+    pub fn tax_names(&self, taxid: i32) -> Result<std::sync::Arc<SourceNames>, Stop> {
+        Ok(self.tax_info(taxid)?.0)
     }
 
     /// The lookups of `CSeqDB::GetBioseq` of the OID `oid`, whose definition lines are `set`, for
@@ -1602,7 +1605,9 @@ impl Run<'_, '_, '_> {
     fn tax_id_list(&mut self, tax_ids: &BTreeSet<i32>, config: &Config) -> Result<bool, Stop> {
         let db = self.source.db;
         let oids: Vec<u32> = if db.is_restricted() {
-            (0..db.num_seqs()).map(|ordinal| db.oid(ordinal)).collect()
+            (0..db.num_seqs())
+                .map(|ordinal| db.oid(ordinal).get())
+                .collect()
         } else {
             db.tax_id_lookup()?.tax_ids_to_oids(tax_ids)?
         };

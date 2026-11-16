@@ -104,8 +104,9 @@ pub(super) struct PreparedXml {
     gap_open: i32,
     gap_extend: i32,
     db_name: String,
-    db_num: i32,
+    db_num: i64,
     db_len: i64,
+    db_len_overflow: bool,
     /// By query, the texts of the queries whose reports the documents write: every query, or
     /// all but the last of a run that stops when the documents hold that report back
     /// (`written_queries`).
@@ -130,26 +131,6 @@ pub(super) struct PreparedXml {
     xml2: Xml2Run,
     /// NCBI's messages about the taxonomy database (XML2 and JSON with `-db`).
     taxa_notes: crate::algorithm::common::database::TaxdbNotes,
-}
-
-/// NCBI's error for a matrix that its formatting table does not know, thrown by the report
-/// data's constructor when a query is formatted.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218
-/// ```c++
-///     else {
-///         string prog_name = Blast_ProgramNameFromType(
-///                                            m_Options.GetProgramType());
-///         if (prog_name != "blastn" && prog_name != "megablast") {
-///             NCBI_THROW(blast::CBlastException, eInvalidArgument,
-///                         "unsupported score matrix");
-/// ```
-/// (the matrix table is made from the name as typed, as BLASTP's.)
-pub(super) fn unsupported_matrix(matrix_name: &str, has_queries: bool) -> Result<()> {
-    if FormattingMatrix::new(matrix_name).is_none() && has_queries {
-        return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
-    }
-    Ok(())
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
@@ -204,7 +185,7 @@ pub(super) fn prepare(
     query_batch_skipped: &[bool],
     scoring: LocalStageDScoring,
     matrix_name: &str,
-    seg: Option<&SegParams>,
+    seg_filter: Option<(i32, f64, f64)>,
     ranges: &ReportRanges<'_>,
     xml2: bool,
     only_xml2: bool,
@@ -215,7 +196,8 @@ pub(super) fn prepare(
             && parameters.lengths.len() >= query_records.len(),
         "TBLASTN query statistics count mismatch"
     );
-    unsupported_matrix(matrix_name, !query_records.is_empty())?;
+    // A matrix name that the formatting table does not know stops a run with queries before its
+    // reports (`stage_e_report::xml_matrix_failure`, `render`): here only a run without a query.
     let positives = FormattingMatrix::new(matrix_name);
     let stats = query_stats(parameters, query_validity, scoring);
     let has_hits = |hitlist: &KappaResultHitList| {
@@ -244,6 +226,7 @@ pub(super) fn prepare(
         .map(|(q_idx, ((query, hitlist), &valid))| {
             names::query_text(
                 PROGRAM,
+                query.local_id.as_bytes(),
                 query.warning_id(),
                 query.believed(),
                 query.title(),
@@ -273,44 +256,44 @@ pub(super) fn prepare(
         if list.hsps.hsps.is_empty() {
             continue;
         }
-        let oid = usize::try_from(list.oid).context("negative TBLASTN subject OID")?;
-        if subject_names[oid].is_some() {
+        let s_idx = usize::try_from(list.oid).context("negative TBLASTN subject OID")?;
+        if subject_names[s_idx].is_some() {
             continue;
         }
         let record = subject_records
-            .get(oid)
+            .get(s_idx)
             .context("TBLASTN subject OID out of range")?;
-        subject_names[oid] = Some(match shown.ordinal(oid) {
+        subject_names[s_idx] = Some(match shown.oid(s_idx) {
             None => match record.believed() {
                 Some(ids) => SubjectNames::of_believed(ids, record.title(), false),
                 None => SubjectNames::of_record(record.local_id.as_bytes(), record.title(), false),
             }
             .map_err(|refusal| refusal.error(PROGRAM, "a subject title"))?,
             // The taxid is shown by XML2 alone (`taxa` is empty for the other formats).
-            Some(ordinal) => match shown.parsed_subject(oid) {
+            Some(db_oid) => match shown.parsed_subject(s_idx) {
                 Some(parsed) => SubjectNames::of_parsed(
                     parsed,
-                    taxa.parsed_taxonomy.get(oid).map_or(&[], Vec::as_slice),
+                    taxa.parsed_taxonomy.get(s_idx).map_or(&[], Vec::as_slice),
                 ),
                 None => SubjectNames::of_database_sequence(
-                    ordinal,
+                    db_oid,
                     record.title(),
-                    taxa.taxids.get(oid).copied().unwrap_or(0),
-                    taxa.taxonomy.get(oid).cloned().unwrap_or_default(),
+                    taxa.taxids.get(s_idx).copied().unwrap_or(0),
+                    taxa.taxonomy.get(s_idx).cloned().unwrap_or_default(),
                 ),
-            }
-            .map_err(|refusal| refusal.error(PROGRAM, "a database title"))?,
+            },
         });
         // The whole record (`-subject_loc` searches part of it).
-        subject_lengths[oid] =
-            i32::try_from(ranges.subjects.length(oid, subject_letters.length(oid)))?;
+        subject_lengths[s_idx] =
+            i32::try_from(ranges.subjects.length(s_idx, subject_letters.length(s_idx)))?;
     }
-    let (db_name, db_num, db_len) = match shown {
-        ShownSubjects::Fasta { .. } => (String::new(), 0, 0),
+    let (db_name, db_num, db_len, db_len_overflow) = match shown {
+        ShownSubjects::Fasta { .. } => (String::new(), 0, 0, false),
         ShownSubjects::Database { name, pairwise, .. } => (
             name.to_string(),
-            i32::try_from(pairwise.num_sequences)?,
-            i64::try_from(pairwise.total_letters)?,
+            pairwise.num_sequences,
+            pairwise.total_letters,
+            pairwise.total_letters_overflow,
         ),
     };
     let xml2_run = Xml2Run {
@@ -329,18 +312,27 @@ pub(super) fn prepare(
     Ok(PreparedXml {
         values,
         positives,
-        filter: filter::filter_string(
-            None,
-            seg.map(|seg| (seg.window as i32, seg.locut, seg.hicut)),
-            None,
-            values.soft_masking,
-        ),
+        // NCBI prints the filtering options (`BlastFilteringOptionsToString` of `SSegOptions`), as
+        // blastp, blastx and tblastx do, not the parameters `SegParametersNewAa` makes of them.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1146-1154
+        // ```c
+        //         sparamsp = SegParametersNewAa();
+        //         sparamsp->overlaps = TRUE;
+        //         if (seg_options->window > 0)
+        //             sparamsp->window = seg_options->window;
+        //         if (seg_options->locut > 0.0)
+        //             sparamsp->locut = seg_options->locut;
+        //         if (seg_options->hicut > 0.0)
+        //             sparamsp->hicut = seg_options->hicut;
+        // ```
+        filter: filter::filter_string(None, seg_filter, None, values.soft_masking),
         matrix_name: matrix_name.to_string(),
         gap_open: scoring.gap_open,
         gap_extend: scoring.gap_extend,
         db_name,
         db_num,
         db_len,
+        db_len_overflow,
         texts,
         stats,
         subject_names,
@@ -411,29 +403,11 @@ impl PreparedXml {
         ranges: &ReportRanges<'_>,
         mut warnings: Option<&mut QueryWarnings<'_>>,
     ) -> Result<()> {
-        // The document's start (`StructuredXml::start`), before the first query's warnings, also
-        // for a run that stops before its first report (its first batch fails) and for a run
-        // without a query.
-        let mut buf: Vec<u8> = Vec::new();
-        document.start(&mut buf);
-        writer.write_all(&buf)?;
-        buf.clear();
-        let Some(positives) = &self.positives else {
-            // A run without a query (with one, `prepare` refuses) and a matrix the formatting
-            // table does not know (`-matrix blosum62`: TBLASTN runs it, the table does not):
-            // NCBI never builds the table and writes the epilog alone (for outfmt 5 its end of
-            // line).
-            if ranges.epilog {
-                document.finish(&mut buf)?;
-                writer.write_all(&buf)?;
-            }
-            return Ok(());
-        };
-        let run = XmlRun {
+        let run = self.positives.as_ref().map(|positives| XmlRun {
             program: "tblastn",
             version: concat!("TBLASTN ", crate::ncbi_blast_version!()),
             reference: REFERENCE_GAPPED_BLAST,
-            db_name: self.db_name.as_bytes(),
+            db_name: &self.db_name,
             matrix: Some(&self.matrix_name),
             expect: self.values.expect,
             gap_open: self.gap_open,
@@ -442,8 +416,33 @@ impl PreparedXml {
             filter: &self.filter,
             db_num: self.db_num,
             db_len: self.db_len,
+            db_len_overflow: self.db_len_overflow,
             positives: Some(positives),
             mask_char: b'X',
+        });
+        // The document's start (`StructuredXml::start`), before the first query's warnings, after
+        // the refusal of the database counts that the written reports would print, also for a run
+        // that stops before its first report (its first batch fails) and for a run without a
+        // query.
+        let mut buf: Vec<u8> = Vec::new();
+        document.start(run.as_ref().filter(|_| !self.texts.is_empty()), &mut buf)?;
+        writer.write_all(&buf)?;
+        buf.clear();
+        let Some(run) = run else {
+            // A run without a query (with one, `render` stops before) and a matrix the formatting
+            // table does not know (`-matrix blosum62`: TBLASTN runs it, the table does not):
+            // NCBI never builds the table and writes the epilog alone (for outfmt 5 its end of
+            // line).
+            if ranges.epilog {
+                document.finish(&mut buf)?;
+                crate::report::query_warnings::write_document_posts(
+                    &buf,
+                    document.take_posts(),
+                    writer,
+                    warnings.as_deref_mut(),
+                )?;
+            }
+            return Ok(());
         };
         let code = GeneticCode::try_from_id(genetic_code).map_err(anyhow::Error::msg)?;
         let mut taxdb_printer = self.taxa_notes.printer();
@@ -459,7 +458,12 @@ impl PreparedXml {
             if q_idx == self.texts.len() {
                 // The held report that is never written (`prepare`, `written_queries`).
                 document.unwritten(&mut buf)?;
-                writer.write_all(&buf)?;
+                crate::report::query_warnings::write_document_posts(
+                    &buf,
+                    document.take_posts(),
+                    writer,
+                    warnings.as_deref_mut(),
+                )?;
                 buf.clear();
                 break;
             }
@@ -487,7 +491,7 @@ impl PreparedXml {
                 );
             }
             let xml_query = XmlQuery {
-                id: query.local_id.as_bytes(),
+                id: text.query_id(query.local_id.as_bytes()),
                 title: &text.title,
                 len: i32::try_from(query_letters.len())?,
                 stats: self.stats[q_idx],
@@ -617,6 +621,7 @@ impl PreparedXml {
             });
             // A failed query leaves its partial bytes in `buf`, which the error return drops.
             written?;
+            posts.document(document.take_posts());
             crate::report::query_warnings::write_hit_posts(
                 &buf,
                 &posts,
@@ -628,7 +633,12 @@ impl PreparedXml {
         }
         if ranges.epilog {
             document.finish(&mut buf)?;
-            writer.write_all(&buf)?;
+            crate::report::query_warnings::write_document_posts(
+                &buf,
+                document.take_posts(),
+                writer,
+                warnings,
+            )?;
         }
         Ok(())
     }

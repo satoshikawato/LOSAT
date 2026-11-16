@@ -64,10 +64,21 @@ pub struct PreparedQueryBatch {
     /// the batch is searched in several units (`reader_batch.rs`); `None` when the unit is the
     /// whole batch.
     pub(crate) reader_shape: Option<std::sync::Arc<super::reader_batch::ReaderBatchShape>>,
+    /// The bytes of NCBI's query buffer after this unit's own when the unit is a part of a reader
+    /// batch: the letters and NULLBs of the contexts of the units after it
+    /// (`reader_batch::attach`, `batch_buffer_length`); 0 when the unit is the whole batch;
+    /// `usize::MAX` for a unit prepared again after phase 1 failed, whose batch fails at a unit's
+    /// set-up (`native::XUnit::take_prep`).
+    pub(crate) reader_buffer_after: usize,
     /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): whether `sequence_start` is on the path of the seed
     /// loops' sentinel walks (`blastx/x_ungap_sent.rs`, `query_fits`, another matrix than BLOSUM62
     /// `query_fits_of`; false with the switch off).
     pub(crate) x_ungap_sent: bool,
+    /// The options' search spaces that NCBI's preliminary stage sets for the contexts of the query
+    /// batch (`SplitQuery_SetEffectiveSearchSpace`, the whole query's, by context index; a query
+    /// chunk reads them by its own index), which the statistics of each subject read
+    /// (`parameters::subject_update`); `None` where the search has none (`search::x_search_core`).
+    pub(crate) subject_option_spaces: Option<std::sync::Arc<[i64]>>,
 }
 impl PreparedQueryBatch {
     /// EXPERIMENT (LOSAT_X_BXENDMEM): what the results of a searched batch keep: the batch without
@@ -86,7 +97,9 @@ impl PreparedQueryBatch {
             sequence_start_nomask: Vec::new(),
             lookup_segments: Vec::new(),
             reader_shape: self.reader_shape.clone(),
+            reader_buffer_after: self.reader_buffer_after,
             x_ungap_sent: self.x_ungap_sent,
+            subject_option_spaces: self.subject_option_spaces.clone(),
         }
     }
 }
@@ -485,7 +498,7 @@ pub(crate) fn prepare_unit_queries(
         )
         // LOSAT_X_SEGTRIMMEMO (graduated 2026-10-26): the chunks of a split query (split.rs) are masked
         // again after the whole query, mostly over the same segments, so this masker takes the
-        // trim of a segment trimmed before on this thread from its memo.
+        // trim of a segment trimmed before (on any thread) from the memo.
         .x_with_trim_memo()
     });
     // SEG reads only the residues of its own context and the hard masking below writes only there,
@@ -621,7 +634,9 @@ pub(crate) fn prepare_unit_queries(
         sequence_start_nomask: nomask,
         lookup_segments,
         reader_shape: None,
+        reader_buffer_after: 0,
         x_ungap_sent,
+        subject_option_spaces: None,
     })
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:923-929
@@ -886,11 +901,12 @@ mod tests {
     fn ncbi_batch_crossing_record_is_retained() {
         let record = |n| FastaRecord {
             internal_id: String::new(),
-            title: String::new(),
+            title: Vec::new(),
             sequence: vec![b'A'; n],
             lowercase_masks: vec![],
             warnings: vec![],
             source: None,
+            around: None,
         };
         assert_eq!(
             batch_ranges(&[record(10001), record(1), record(3)], BATCH_SIZE),
@@ -912,11 +928,12 @@ mod tests {
     fn the_batch_size_is_the_limit_of_a_batch() {
         let record = |n| FastaRecord {
             internal_id: String::new(),
-            title: String::new(),
+            title: Vec::new(),
             sequence: vec![b'A'; n],
             lowercase_masks: vec![],
             warnings: vec![],
             source: None,
+            around: None,
         };
         let records = [
             record(100),

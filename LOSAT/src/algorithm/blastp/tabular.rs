@@ -42,6 +42,7 @@ use anyhow::Result;
 use super::args::BlastpApp;
 use super::blast_engine::query_rows::QueryRows;
 use super::hsp::{BlastpHitList, BlastpHsp};
+use crate::algorithm::common::tabular::FailedValues;
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::config::ScoringMatrix;
@@ -49,9 +50,9 @@ use crate::report::db_subject::ParsedSubject;
 use crate::report::pairwise::PairwiseHit;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::tabular::{
-    coverage_percent, hsp_coverage, taxdb_warning_line, union_length, DeflineIds, TabularField,
-    TabularHsp, TabularKind, TabularNames, TabularQuery, TabularSpec, TabularSubject,
-    TabularTaxonomy, TabularWriter,
+    coverage_percent, hsp_coverage, taxdb_warning_line, union_length, DeflineIds, FailedLookup,
+    SubjectLookup, TabularField, TabularHsp, TabularKind, TabularNames, TabularQuery, TabularRows,
+    TabularSpec, TabularSubject, TabularTaxonomy, TabularWriter,
 };
 
 /// What the report needs besides the final hit lists.
@@ -90,6 +91,10 @@ pub(super) struct BlastpTabular<'a> {
     pub taxdb_found: bool,
     /// The names of the taxonomy database that the rows look up (`None`: every lookup fails).
     pub names: Option<&'a TabularNames>,
+    /// The Seq-aligns' `num_ident` of the HSPs whose counts the reports' recount replaced
+    /// (`recount_shown_identities`): NCBI's formatter opens its alignment block, and reads the
+    /// subject for `nident`, on the Seq-align's count (`TabularSpec::opens_counts`).
+    pub engine_counts: &'a super::seqalign::EngineCounts,
 }
 
 /// The subjects as the report shows them, by subject index (a subject set) or rank (the
@@ -100,7 +105,7 @@ pub(super) enum TabularSubjects<'a> {
     /// read their `sacc` and `saccver` and ids (both empty without the option).
     Records {
         records: &'a [FastaRecord],
-        ids: &'a [Arc<[u8]>],
+        ids: &'a [crate::algorithm::common::tabular::SubjectId],
         accessions: &'a [Option<[Arc<[u8]>; 2]>],
         parsed: &'a [Option<Arc<ParsedSubject>>],
         length: &'a dyn Fn(usize) -> usize,
@@ -112,9 +117,11 @@ pub(super) enum TabularSubjects<'a> {
     /// titles of the others (empty when none has one), lengths, and taxonomy (empty when no field
     /// shows it).
     Database {
-        ids: &'a [Arc<[u8]>],
+        ids: &'a [crate::algorithm::common::tabular::SubjectId],
         accessions: &'a [Option<[Arc<[u8]>; 2]>],
         ordinals: &'a [u32],
+        /// The OID of each ordinal id, which names a sequence without parsed Seq-ids.
+        oids: crate::seqdb::OidMap<'a>,
         titles: &'a [Arc<[u8]>],
         parsed: &'a [Option<Arc<ParsedSubject>>],
         sources: &'a [crate::report::defline::SourceTaxname],
@@ -133,6 +140,49 @@ struct SubjectValues<'a> {
     titles: Option<Vec<&'a [u8]>>,
     length: usize,
     taxonomy: Cow<'a, TabularTaxonomy>,
+    /// How the lookups of a subject fail (an empty id: `SetSubjectId`), `None` where they do not.
+    failed: Option<FailedValues<'a>>,
+}
+
+impl SubjectValues<'_> {
+    /// The subject of the shared writer, with the names of the taxonomy database (`None`: every
+    /// lookup fails), `qcovs` of its HSPs (-1 for `N/A`) and its subject index `index`.
+    fn subject<'s>(
+        &'s self,
+        names: Option<&'s TabularNames>,
+        qcovs: i32,
+        index: usize,
+    ) -> TabularSubject<'s> {
+        TabularSubject {
+            id: self.id,
+            accession: self.accession,
+            accession_version: self.accession_version,
+            gi: self.gi,
+            all_ids: &self.all_ids,
+            length: self.length,
+            titles: self.titles.as_deref(),
+            taxonomy: &self.taxonomy,
+            names,
+            nucleotide: false,
+            qcovs,
+            qcovus: -1,
+            lookup: self.lookup(),
+            index,
+        }
+    }
+
+    /// The lookup of the subject's ids (`report::tabular::SubjectLookup`).
+    fn lookup(&self) -> SubjectLookup<'_> {
+        match &self.failed {
+            Some(failed) => SubjectLookup::Failed(FailedLookup {
+                full: &failed.align_id[0],
+                accession: &failed.align_id[1],
+                subject_id: failed.subject_id,
+                all_ids: failed.all_ids.then_some(self.all_ids.as_slice()),
+            }),
+            None => SubjectLookup::Found,
+        }
+    }
 }
 
 impl<'a> TabularSubjects<'a> {
@@ -155,8 +205,9 @@ impl<'a> TabularSubjects<'a> {
             //         }
             //         m_SubjectIds.push_back(subject_id_list);
             // ```
-            // A FASTA subject has no definition lines: its `sall*` are its own ids, its title
-            // and taxonomy are empty (`N/A`).
+            // A FASTA subject has no definition lines: its `sall*` are its own ids after
+            // `s_ReplaceLocalId` (the title's first word, `FastaRecord::shown_id`, not the word of
+            // `GetSeqIdList`), its title and taxonomy are empty (`N/A`).
             TabularSubjects::Records {
                 records,
                 ids,
@@ -164,14 +215,16 @@ impl<'a> TabularSubjects<'a> {
                 parsed,
                 length,
             } => {
-                let id: &[u8] = ids.get(s_idx).map_or(&b""[..], |id| id.as_ref());
+                // `None`: the lookup throws (`common::tabular::SubjectId`).
+                let found = ids.get(s_idx).and_then(Option::as_deref);
+                let id: &[u8] = found.unwrap_or_default();
                 if let Some(subject) = parsed.get(s_idx).and_then(Option::as_deref) {
                     let (accession, accession_version): (&[u8], &[u8]) =
                         match accessions.get(s_idx).and_then(Option::as_ref) {
                             Some([accession, version]) => (accession, version),
                             None => (id, id),
                         };
-                    let all_ids = if needs.all_deflines {
+                    let all = if needs.all_deflines {
                         subject.all_tabular_ids(true).map_err(|problem| {
                             anyhow::anyhow!(
                                 "the subject record {} has {problem}, which is not supported by \
@@ -181,31 +234,41 @@ impl<'a> TabularSubjects<'a> {
                             )
                         })?
                     } else {
-                        Vec::new()
+                        Default::default()
                     };
                     return Ok(SubjectValues {
                         id,
                         accession,
                         accession_version,
                         gi: subject.tabular_gi(),
-                        all_ids,
                         titles: None,
                         length: if shows_length { length(s_idx) } else { 0 },
                         taxonomy: Cow::Owned(TabularTaxonomy::default()),
+                        failed: FailedValues::of_parsed(subject, found.is_none(), all.failed),
+                        all_ids: all.ids,
                     });
                 }
                 // A record without a title: its `sseqid` is the first word of its generated title
-                // (`unnamed`, `report::defline::tabular_subject_id`), its `sall*` its local id
-                // (`s_ReplaceLocalId`).
-                let all_ids = match records.get(s_idx) {
-                    Some(record) if needs.all_deflines && record.title.is_empty() => {
-                        vec![DeflineIds {
-                            id: record.local_id.as_bytes().to_vec(),
-                            gi: 0,
-                            accession: record.local_id.as_bytes().to_vec(),
-                        }]
+                // (`unnamed`, `report::defline::tabular_subject_id`), its `sall*` its local id.
+                let record = records.get(s_idx);
+                let all_ids = match record {
+                    // Only where the word is not the id, which the writer prints for none.
+                    Some(record) if needs.all_deflines && record.shown_id() != id => {
+                        DeflineIds::of_record(record.shown_id())
                     }
                     _ => Vec::new(),
+                };
+                // No id: `GetSeqIdList` throws (`FastaRecord::subject_tabular_id`).
+                let failed = match record {
+                    Some(record) if found.is_none() => {
+                        let local = Cow::Borrowed(record.local_id.as_bytes());
+                        Some(FailedValues {
+                            align_id: [local.clone(), local],
+                            subject_id: true,
+                            all_ids: false,
+                        })
+                    }
+                    _ => None,
                 };
                 Ok(SubjectValues {
                     id,
@@ -216,19 +279,23 @@ impl<'a> TabularSubjects<'a> {
                     titles: None,
                     length: if shows_length { length(s_idx) } else { 0 },
                     taxonomy: Cow::Owned(TabularTaxonomy::default()),
+                    failed,
                 })
             }
             TabularSubjects::Database {
                 ids,
                 accessions,
                 ordinals,
+                oids,
                 titles,
                 parsed,
                 length,
                 taxonomy,
                 ..
             } => {
-                let id: &[u8] = ids.get(s_idx).map_or(&b""[..], |id| id.as_ref());
+                // `None`: the lookup throws (`common::tabular::SubjectId`).
+                let found = ids.get(s_idx).and_then(Option::as_deref);
+                let id: &[u8] = found.unwrap_or_default();
                 let (accession, accession_version): (&[u8], &[u8]) =
                     match accessions.get(s_idx).and_then(Option::as_ref) {
                         Some([accession, version]) => (accession, version),
@@ -243,23 +310,24 @@ impl<'a> TabularSubjects<'a> {
                     // A sequence with parsed Seq-ids: the ids of each definition line and their
                     // titles.
                     Some(subject) => {
-                        let all_ids = if needs.all_deflines {
+                        let all = if needs.all_deflines {
                             subject.all_tabular_ids(true).map_err(|problem| {
                                 crate::algorithm::common::database::parsed_refusal(
-                                    ordinals.get(s_idx).copied().unwrap_or_default(),
+                                    oids.oid(ordinals.get(s_idx).copied().unwrap_or_default()),
                                     &format!("has {problem}"),
                                     app.name(),
                                 )
                             })?
                         } else {
-                            Vec::new()
+                            Default::default()
                         };
+                        let failed = FailedValues::of_parsed(subject, found.is_none(), all.failed);
                         Ok(SubjectValues {
                             id,
                             accession,
                             accession_version,
                             gi: subject.tabular_gi(),
-                            all_ids,
+                            all_ids: all.ids,
                             titles: Some(
                                 subject
                                     .deflines()
@@ -269,9 +337,12 @@ impl<'a> TabularSubjects<'a> {
                             ),
                             length,
                             taxonomy,
+                            failed,
                         })
                     }
-                    // A sequence without parsed Seq-ids: its one definition line's title.
+                    // A sequence without parsed Seq-ids: its one definition line's title; no id,
+                    // where `GetSeqIdList` throws for the general id
+                    // (`TabularSubjectId::Unknown`), in `SetSubjectId` and `x_SetSubjectIds`.
                     None => Ok(SubjectValues {
                         id,
                         accession,
@@ -281,6 +352,17 @@ impl<'a> TabularSubjects<'a> {
                         titles: Some(vec![titles.get(s_idx).map_or(&[][..], |title| title)]),
                         length,
                         taxonomy,
+                        failed: found.is_none().then(|| {
+                            let [full, accession] =
+                                crate::algorithm::common::database::failed_general_lookup(
+                                    oids.oid(ordinals.get(s_idx).copied().unwrap_or_default()),
+                                );
+                            FailedValues {
+                                align_id: [Cow::Owned(full), Cow::Owned(accession)],
+                                subject_id: true,
+                                all_ids: true,
+                            }
+                        }),
                     }),
                 }
             }
@@ -488,16 +570,19 @@ pub(super) fn write_blastp_tax_report(
                 .get(q_idx)
                 .map_or(&b""[..], |title| title.as_ref()),
             length: record_lengths.get(q_idx).copied().unwrap_or_default(),
-            hsps: hit_list
-                .iter()
-                .flat_map(reported)
-                .flat_map(|hsp_list| &hsp_list.hsps)
-                .map(|hsp| TaxHsp {
-                    subject: hsp.s_idx as usize,
-                    evalue: hsp.e_value,
-                    bit_score: hsp.bit_score,
-                })
-                .collect(),
+            // A query of a batch that NCBI did not search has no Seq-align-set.
+            hsps: (!tab.unsearched.get(q_idx).copied().unwrap_or(false)).then(|| {
+                hit_list
+                    .iter()
+                    .flat_map(reported)
+                    .flat_map(|hsp_list| &hsp_list.hsps)
+                    .map(|hsp| TaxHsp {
+                        subject: hsp.s_idx as usize,
+                        evalue: hsp.e_value,
+                        bit_score: hsp.bit_score,
+                    })
+                    .collect()
+            }),
         })
         .collect();
     let plain = |s_idx: usize| match &tab.subjects {
@@ -507,12 +592,13 @@ pub(super) fn write_blastp_tax_report(
         },
         TabularSubjects::Database {
             ordinals,
+            oids,
             titles,
             sources,
             taxonomy,
             ..
         } => TaxPlain::Stored {
-            ordinal: ordinals.get(s_idx).copied().unwrap_or_default(),
+            oid: oids.oid(ordinals.get(s_idx).copied().unwrap_or_default()),
             title: titles.get(s_idx).map_or(&[][..], |title| title),
             source: crate::report::pairwise::stored_source(sources, s_idx as u32),
             taxid: taxonomy.get(s_idx).map_or(0, |taxonomy| taxonomy.taxid),
@@ -690,11 +776,14 @@ fn write_tabular_rows<const RPS: bool>(
             _ => None,
         };
         let mut row_index = 0usize;
-        for hsp_list in reported(hit_list) {
+        // The query's (or round's) formatter (`TabularRows`).
+        let mut table_rows = TabularRows::default();
+        for (list_index, hsp_list) in reported(hit_list).enumerate() {
             let Some(first) = hsp_list.hsps.first() else {
                 continue;
             };
-            let values = tab.subjects.values(first.s_idx as usize, spec, tab.app)?;
+            let s_idx = first.s_idx as usize;
+            let values = tab.subjects.values(s_idx, spec, tab.app)?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:595-605
             // ```c++
             //     CConstRef<CBioseq> query_bioseq = query_handle.GetCompleteBioseq();
@@ -722,21 +811,26 @@ fn write_tabular_rows<const RPS: bool>(
             } else {
                 -1
             };
-            let subject = TabularSubject {
-                id: values.id,
-                accession: values.accession,
-                accession_version: values.accession_version,
-                gi: values.gi,
-                all_ids: &values.all_ids,
-                length: values.length,
-                titles: values.titles.as_deref(),
-                taxonomy: &values.taxonomy,
-                names: tab.names,
-                nucleotide: false,
-                qcovs,
-                qcovus: -1,
+            let subject = values.subject(tab.names, qcovs, s_idx);
+            // A subject whose lookups fail shows what the last found subject set
+            // (`TabularRows::last_found`), made again from its index.
+            let kept_values = match table_rows.last_found() {
+                Some(kept) if table.fails(&subject) => {
+                    Some(tab.subjects.values(kept, spec, tab.app)?)
+                }
+                _ => None,
             };
-            for hsp in &hsp_list.hsps {
+            let kept = kept_values
+                .as_ref()
+                .zip(table_rows.last_found())
+                .map(|(values, kept)| values.subject(tab.names, -1, kept));
+            for (index_in_list, hsp) in hsp_list.hsps.iter().enumerate() {
+                // The Seq-align's `num_ident` (the engine's count where the reports' recount
+                // replaced it, `BlastpTabular::engine_counts`).
+                let seqalign_num_ident = tab.engine_counts.num_ident(
+                    (q_idx as u32, list_index as u32, index_in_list as u32),
+                    hsp.num_ident,
+                );
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
                 // ```c++
                 //        		const CBioseq_Handle& subject_bh =
@@ -746,7 +840,7 @@ fn write_tabular_rows<const RPS: bool>(
                 // prefetch it: the texts of its taxonomy lookups follow the rows before it
                 // (`QueryWarnings::subject_read`), before those of the row's own lookups.
                 if let Some(warnings) = warnings.as_deref_mut() {
-                    if warnings.reads_with_texts(q_idx) && fetch.reads(hsp.num_ident) {
+                    if warnings.reads_with_texts(q_idx) && fetch.reads(seqalign_num_ident) {
                         writer.write_all(&buf)?;
                         buf.clear();
                         warnings.subject_read(q_idx, hsp.s_idx, &mut *writer)?;
@@ -754,7 +848,11 @@ fn write_tabular_rows<const RPS: bool>(
                 }
                 // The texts of the row's lookups of the taxonomy database (`x_SetTaxInfoAll`,
                 // `x_SetTaxInfo`) follow the rows before it.
-                if let (Some(names), Some(warnings)) = (tab.names, warnings.as_deref_mut()) {
+                if let (Some(names), Some(warnings), true) = (
+                    tab.names,
+                    warnings.as_deref_mut(),
+                    table.sets_subject(&subject),
+                ) {
                     let text = names.row_messages(spec, &values.taxonomy);
                     if !text.is_empty() {
                         writer.write_all(&buf)?;
@@ -767,17 +865,29 @@ fn write_tabular_rows<const RPS: bool>(
                 let rows = match query_rows {
                     // rpsblast's identities: the rows inside NCBI's alignment block only (`nident`
                     // alone opens it on the engine's count, `needs_rows`).
-                    Some(_) if RPS && !spec.opens_counts(&hsp.num_ident) => None,
+                    Some(_) if RPS && !spec.opens_counts(&seqalign_num_ident) => None,
                     Some(rows) => Some(hsp_rows(rows, row_index, hsp)?),
                     None => None,
                 };
                 row_index += 1;
-                let row = tabular_hsp(hsp, searched_length, rows);
+                let mut row = tabular_hsp(hsp, searched_length, rows);
+                // Outside NCBI's alignment block `nident` is the 0 of `x_ResetFields`: with
+                // `nident` the block stays closed only on a Seq-align count of 0, which is that 0.
+                if !spec.opens_counts(&seqalign_num_ident) {
+                    row.num_ident = seqalign_num_ident;
+                }
                 match probe.as_deref_mut() {
                     // One printed row is one HSP; the probe marks it without changing it.
                     Some(probe) => {
                         buf.clear();
-                        table.row(&mut buf, &query, &subject, &row);
+                        table.row(
+                            &mut buf,
+                            &mut table_rows,
+                            &query,
+                            &subject,
+                            kept.as_ref(),
+                            &row,
+                        );
                         writer.flush()?;
                         probe.begin(hsp_index);
                         writer.write_all(&buf)?;
@@ -785,7 +895,14 @@ fn write_tabular_rows<const RPS: bool>(
                         probe.end(hsp_index);
                         buf.clear();
                     }
-                    None => table.row(&mut buf, &query, &subject, &row),
+                    None => table.row(
+                        &mut buf,
+                        &mut table_rows,
+                        &query,
+                        &subject,
+                        kept.as_ref(),
+                        &row,
+                    ),
                 }
                 hsp_index += 1;
             }
@@ -885,6 +1002,7 @@ fn tabular_hsp<'r>(
         s_frame: 1,
         rows,
         // `Blast_HSPGetQueryCoverage` of the HSP's context, which has the searched length.
+        end_gaps: true,
         qcovhsp: hsp_coverage((hsp.q_end - hsp.q_start + 1) as i32, searched_length as i32),
     }
 }
@@ -960,7 +1078,8 @@ mod tests {
             },
         )
         .unwrap();
-        let ids: Vec<Arc<[u8]>> = vec![Arc::from(&b"s1"[..]), Arc::from(&b"s2"[..])];
+        let ids: Vec<crate::algorithm::common::tabular::SubjectId> =
+            vec![Some(Arc::from(&b"s1"[..])), Some(Arc::from(&b"s2"[..]))];
         let length = |s_idx: usize| 200 + s_idx;
         let tab = BlastpTabular {
             spec: &spec,
@@ -987,10 +1106,13 @@ mod tests {
             epilog: Some(2),
             taxdb_found: false,
             names: None,
+            engine_counts: &crate::algorithm::blastp::seqalign::EngineCounts::default(),
         };
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let before = [b"Warning: q1\n".to_vec()];
-        let mut warnings = QueryWarnings::new(&before, &mut err);
+        let before = [crate::report::diag_log::Posts::of_lines(
+            b"Warning: q1\n".to_vec(),
+        )];
+        let mut warnings = QueryWarnings::of_posts(&before, None, &mut err);
         write_blastp_tabular(&tab, hit_lists, &mut out, Some(&mut warnings), None, None).unwrap();
         drop(warnings);
         (

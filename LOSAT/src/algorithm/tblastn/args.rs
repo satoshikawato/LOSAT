@@ -336,16 +336,23 @@ pub struct TblastnArgs {
     #[arg(skip)]
     pub strategy: Option<crate::report::archive::strategy::StrategyExport>,
     /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath("taxdb.bti")`), asked
-    /// by the command line before the search where a tabular field list shows a name of the
-    /// taxonomy database (`algorithm::tblastn::tabular`); `None` elsewhere (`run_local`'s callers
-    /// give no search path: not found, DECISIONS 7 of line CLI C2). Not a public option.
+    /// before the search where a tabular field list looks every taxid up (the plural names of the
+    /// taxonomy database, the organism report; `algorithm::tblastn::tabular`), by the command line
+    /// and the library (`common::database::subject_taxonomy`); `None` elsewhere (LOSAT Web has no
+    /// files: not found). Not a public option.
     #[arg(skip)]
     pub tabular_taxdb: Option<bool>,
-    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), made by the
-    /// command line with `tabular_taxdb` (`common::database::SubjectTaxdb`); `None` elsewhere.
-    /// Not a public option.
+    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), made with
+    /// `tabular_taxdb` (`common::database::SubjectTaxdb`); `None` elsewhere. Not a public option.
     #[arg(skip)]
     pub subject_taxdb: Option<crate::algorithm::common::database::SubjectTaxdb>,
+    /// The `[BLAST] BLASTDB` setting through which a `-subject` search's tabular reports look for
+    /// the taxonomy database (`common::database::subject_taxonomy`), which a search of records of
+    /// the library (`api::run`) reads from the call's application settings when a report looks
+    /// every taxid up; `None` elsewhere (the command line passes its settings, LOSAT Web has no
+    /// files). Not a public option.
+    #[arg(skip)]
+    pub taxdb_setting: Option<crate::algorithm::common::database::TaxdbSetting>,
     // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input.hpp:180-182
     // ```c++
     //     int GetLocalIdCounterInitValue() const { return m_LocalIdCounter; }
@@ -659,7 +666,7 @@ impl TblastnArgs {
         //             const string& seg_opts = args[kArgSegFiltering].AsString();
         // ```
         let soft_masking = self.soft_masking.unwrap_or(false);
-        let seg = parse_seg_option(self.seg.as_deref().unwrap_or("12 2.2 2.5"), "TBLASTN")?;
+        let seg = parse_seg_option(self.seg.as_deref().unwrap_or("12 2.2 2.5"))?;
         // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:586-623 (the word
         // threshold handler: the matrix's suggestion replaces only tblastn's default 13)
         // ```c
@@ -709,7 +716,6 @@ impl TblastnArgs {
         let query_range = crate::blastinput::seq_range::parse_optional_range(
             self.query_loc.as_deref(),
             crate::blastinput::seq_range::RangeRole::Query,
-            "TBLASTN",
         )?;
         // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2874-2886 and
         // 2960-2977 (the formatting handler: other programs' formats, the hit list size
@@ -775,6 +781,8 @@ impl TblastnArgs {
             Some(path) => Some(std::sync::Arc::new(super::in_pssm::read(
                 path,
                 &matrix_name,
+                self.export_search_strategy.is_some(),
+                self.db.is_some(),
             )?)),
             None => None,
         };
@@ -1024,6 +1032,17 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
     })
 }
 
+// No NCBI counterpart: LOSAT Web's host has no file system.
+/// The browser's refusal of `-in_pssm` (a PSSM query): the host has no PSSM files (line PS, item
+/// PSW1). The Web's checks of the options (`check_options`) and its runs (the adapter's `run`,
+/// before `run_local`) make it; the library API's records take the option (`api::Inputs::pssm`).
+pub fn refuse_browser_pssm_query(args: &TblastnArgs) -> Result<()> {
+    if args.in_pssm.is_some() {
+        anyhow::bail!("-in_pssm (a PSSM query) is not supported in the browser yet");
+    }
+    Ok(())
+}
+
 /// The checks of the options alone, without the inputs (the `validate` of web ABI v2):
 /// NCBI's processing of the options (`TblastnArgs::check_options`) and LOSAT's limits.
 pub fn check_options(args: &TblastnArgs) -> Result<()> {
@@ -1031,10 +1050,7 @@ pub fn check_options(args: &TblastnArgs) -> Result<()> {
     if args.db.is_some() {
         anyhow::bail!("-db (a database search) is not supported in the browser yet");
     }
-    // The host has no PSSM files either (line PS, item PSW1).
-    if args.in_pssm.is_some() {
-        anyhow::bail!("-in_pssm (a PSSM query) is not supported in the browser yet");
-    }
+    refuse_browser_pssm_query(args)?;
     let resolved = args.resolve()?;
     search_settings(&resolved)?;
     // Without the inputs: IDENTITY with the compressed lookup table, which the search refuses where

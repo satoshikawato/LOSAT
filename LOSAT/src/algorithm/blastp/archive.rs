@@ -1,10 +1,10 @@
 //! BLASTP's BLAST archive (outfmt 11): the request options from the arguments, the archive of
 //! each query batch from the batch's report data, and the error archive.
 //!
-//! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:281-283
+//! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:280-283
 //! ```c++
-//!             if (isArchiveFormat) {
-//!                 formatter.WriteArchive(*queries, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
+//!             if (fmt_args->ArchiveFormatRequested(args)) {
+//!                 formatter.WriteArchive(*queries, *m_OptsHndl, *results,  0, m_Bah.GetMessages());
 //!                 m_Bah.ResetMessages();
 //!             } else {
 //! ```
@@ -28,7 +28,7 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::Placements;
 use crate::core::blast_util::ncbi_int4_from_double;
 use crate::report::archive::masks::{Frame, MaskEntry};
-use crate::report::archive::options::{Filter, OptionInputs};
+use crate::report::archive::options::OptionInputs;
 use crate::report::archive::requests::{LcaseFrames, RequestPolicy, RunRequests};
 use crate::report::archive::{
     ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
@@ -88,8 +88,7 @@ pub(crate) fn option_inputs(args: &BlastpArgs) -> OptionInputs {
     inputs.seg = args
         .seg
         .as_deref()
-        .and_then(|value| crate::blastinput::app::parse_seg_option(value, "BLASTP").ok())
-        .map(Filter::from);
+        .and_then(crate::report::archive::options::seg_filter);
     inputs.hitlist_size = args
         .max_target_seqs
         .or(args.num_alignments)
@@ -110,25 +109,30 @@ pub(crate) fn handle_for(
     args: &BlastpArgs,
     archive_requested: bool,
     options: &crate::report::archive::OptionsHandle,
-) -> Result<Option<ArchiveHandle>> {
+) -> Option<ArchiveHandle> {
     if !archive_requested {
-        return Ok(None);
+        return None;
     }
     // NCBI keeps the name without the white space at its ends (`NStr::TruncateSpaces`,
     // blast_args.cpp:2472-2476), and the request's `database` is that name.
     let database = args.db.as_deref().map(crate::seqdb::db_argument_name);
-    ArchiveHandle::for_program(&option_inputs(args), database, args.app.name(), options).map(Some)
+    Some(ArchiveHandle::for_program(
+        &option_inputs(args),
+        database,
+        options,
+    ))
 }
 
 /// The requests of a run's batches (`RunRequests`): protein queries and subjects (the `-subject`
 /// records `subjects`, `None` for `-db`), and with `-lcase_masking` (`lcase_masking`) one `notset`
-/// mask of each query's lower-case runs (SEG is never one); `label` names the application
-/// (`BlastpApp::name`) in a refusal.
-pub(crate) fn requests<'a>(
-    subjects: Option<&'a [FastaRecord]>,
+/// mask of each query's lower-case runs (SEG is never one); `pssm` is psiblast's `-in_pssm` as
+/// read, which every request holds in place of the queries (`RunRequests::with_pssm_query`,
+/// `PsiSearch::request`).
+pub(crate) fn requests(
+    subjects: Option<&[FastaRecord]>,
     lcase_masking: bool,
-    label: &'static str,
-) -> RunRequests<'a, FastaRecord> {
+    pssm: Option<std::sync::Arc<crate::report::serial::pssm::PssmWithParameters>>,
+) -> RunRequests<'_> {
     RunRequests::new(
         RequestPolicy {
             query_protein: true,
@@ -136,20 +140,8 @@ pub(crate) fn requests<'a>(
             lcase: lcase_masking.then_some(LcaseFrames::NotSet),
         },
         subjects,
-        label,
     )
-}
-
-/// `report::archive::check_request_titles` for BLASTP's records: the archive's (`archive`) and
-/// the search strategy's (`strategy`); `label` names the application (`BlastpApp::name`).
-pub(crate) fn check_request_titles(
-    records: &[FastaRecord],
-    role: &str,
-    label: &str,
-    archive: bool,
-    strategy: bool,
-) -> Result<()> {
-    crate::report::archive::check_request_titles(records, role, label, archive, strategy)
+    .with_pssm_query(pssm)
 }
 
 pub(crate) use crate::report::archive::error_lines;
@@ -198,6 +190,8 @@ pub(crate) struct FirstContext {
     /// The `EffectiveSearchSpace` option: that of the first query's context, `-searchsp` in an
     /// invalid one too.
     pub context0_space: i64,
+    /// That context's query length, 0 for an invalid one (`archive::RequestLength::space`).
+    pub context0_length: i64,
 }
 
 /// The Seq-aligns of one batch of a call (the elements of outfmt 8, without the Seq-annot).
@@ -267,7 +261,9 @@ pub(crate) fn for_each_batch(
     } else {
         call.spans
     };
-    let requests = requests(call.subject_records, call.lcase_masking, "BLASTP");
+    // psiblast's `-in_pssm` writes no archive (`in_pssm::check_in_pssm_options`): the requests'
+    // queries are the call's records.
+    let requests = requests(call.subject_records, call.lcase_masking, None);
     for span in spans.iter().cloned() {
         if span.is_empty() {
             continue;
@@ -311,7 +307,10 @@ pub(crate) fn for_each_batch(
                     ka_blocks,
                     search_space: context.search_space,
                     length_adjustment: context.length_adjustment,
-                    searched_space: searched.then_some(context.context0_space),
+                    searched_space: searched.then_some(crate::report::archive::SearchedContext0 {
+                        space: context.context0_space,
+                        query_length: context.context0_length,
+                    }),
                 };
                 each(span, &batch)
             },
@@ -322,11 +321,12 @@ pub(crate) fn for_each_batch(
 
 /// Writes the archive of each batch of `call` to `writer`; `warnings` writes the warnings
 /// of a batch's queries (to the diagnostics, which saves them as the batch's messages)
-/// before its archive. `first_context(first_query)` gives the values of a batch's first
+/// before its archive, and its sink gets NCBI's posts of the bytes that the archive's stream
+/// replaces (`write_archive`). `first_context(first_query)` gives the values of a batch's first
 /// query.
 pub(crate) fn write_blastp_archives(
     call: &ArchiveCall<'_>,
-    mut warnings: Option<&mut QueryWarnings<'_>>,
+    warnings: &mut QueryWarnings<'_>,
     first_context: &dyn Fn(usize) -> FirstContext,
     writer: &mut dyn Write,
 ) -> Result<()> {
@@ -338,10 +338,8 @@ pub(crate) fn write_blastp_archives(
         gapped: true,
     };
     for_each_batch(&call.batches, first_context, |span, batch| {
-        if let Some(warnings) = warnings.as_deref_mut() {
-            for index in span.clone() {
-                warnings.before_query(index, &mut *writer)?;
-            }
+        for index in span.clone() {
+            warnings.before_query(index, &mut *writer)?;
         }
         let mut aligns = BlastpAligns {
             run,
@@ -356,7 +354,13 @@ pub(crate) fn write_blastp_archives(
             engine_counts: call.engine_counts,
             first: span.start,
         };
-        write_archive(call.handle, batch, &mut aligns, &mut *writer)
+        write_archive(
+            call.handle,
+            batch,
+            &mut aligns,
+            &mut *writer,
+            &mut *warnings.sink,
+        )
     })
 }
 

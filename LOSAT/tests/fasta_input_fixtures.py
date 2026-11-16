@@ -841,8 +841,8 @@ def extra_rows() -> list[Row]:
     # outfmt 11's titles (line NP, series SM): the archive of each batch that NCBI completes holds
     # the batch's queries and every `-subject` record; the batch that stops the run (here record 6's
     # CheckDataLine error, a last batch without letters, a batch size of 0) writes neither, and the
-    # error archive holds no sequence. A title the archive cannot write is LOSAT's refusal
-    # (`losat-rejection`) where NCBI writes it, and NCBI's output where NCBI does not.
+    # error archive holds no sequence. A title that the serial stream replaces bytes of (`café`) is
+    # written as NCBI writes it: `#` for each byte in the archive and a `Bad char` report on stderr.
     arch_sizes = {"nuc": ("100", "200"), "prot": ("50", "100")}
     for program, task in ALL_PROGRAMS:
         if task == "blastn":
@@ -852,31 +852,27 @@ def extra_rows() -> list[Row]:
         each, two = arch_sizes[kind]
         bad_s = f"@/batch_title.s.{'prot' if program == 'blastp' else 'nuc'}.{EXT['prot' if program == 'blastp' else 'nuc']}"
         file = lambda name: f"@/{name}.{kind}.{EXT[kind]}"
-        refused = "losat-rejection"
         add("arch_title_late.two", program, task, file("batch_title_late"), s, env=f"BATCH_SIZE={two}", fmts=(11,))
-        add("arch_title_late.each", program, task, file("batch_title_late"), s, env=f"BATCH_SIZE={each}", fmts=(11,),
-            kind=refused)
+        add("arch_title_late.each", program, task, file("batch_title_late"), s, env=f"BATCH_SIZE={each}", fmts=(11,))
         add("arch_title_late.default", program, task, file("batch_title_late"), s, fmts=(11,))
-        add("arch_title_first.two", program, task, file("batch_title_first"), s, env=f"BATCH_SIZE={two}", fmts=(11,),
-            kind=refused)
+        add("arch_title_first.two", program, task, file("batch_title_first"), s, env=f"BATCH_SIZE={two}", fmts=(11,))
         add("arch_title_first.default", program, task, file("batch_title_first"), s, fmts=(11,))
         # BLASTN's batch size 0 is the mixer's (its first batch, 5,000 letters, holds every record up to
         # record 6's error); the others' first batch is empty.
         add("arch_title_first.zero", program, task, file("batch_title_first"), s, env="BATCH_SIZE=0", fmts=(11,))
         add("arch_title_lastempty.each", program, task, file("batch_title_lastempty"), s, env=f"BATCH_SIZE={each}",
             fmts=(11,))
-        add("arch_title_lastempty.default", program, task, file("batch_title_lastempty"), s, fmts=(11,), kind=refused)
+        add("arch_title_lastempty.default", program, task, file("batch_title_lastempty"), s, fmts=(11,))
         add("arch_title_s.after_error", program, task, file("batch_late_bad"), bad_s, fmts=(11,))
-        add("arch_title_s.clean", program, task, file("batch_clean"), bad_s, fmts=(11,), kind=refused)
+        add("arch_title_s.clean", program, task, file("batch_clean"), bad_s, fmts=(11,))
         # (BLASTN's mixer completes the batch, whose archive holds the subjects.)
-        add("arch_title_s.zero", program, task, file("batch_clean"), bad_s, env="BATCH_SIZE=0", fmts=(11,),
-            kind=refused if program == "blastn" else "ncbi")
+        add("arch_title_s.zero", program, task, file("batch_clean"), bad_s, env="BATCH_SIZE=0", fmts=(11,))
     # outfmt 15 and 16 of a `-subject` search (line NP, series SM): NCBI writes a query's report when
     # the next query's results arrive, or in the epilog; a run that a later batch stops (record 6's
     # CheckDataLine error) never writes the last query of the batches before it, so the title of
     # that query (record 5 with one record a batch, `each`) is not refused. With two records a
     # batch, record 5 is in the batch that stops (record 4 is the held one); a title on record 1 is
-    # written when record 2's results arrive (LOSAT's refusal).
+    # written when record 2's results arrive (NCBI's XML2 stream stops at the byte of `café`, K4h).
     for program, task in ALL_PROGRAMS:
         if task == "blastn":
             continue
@@ -889,7 +885,7 @@ def extra_rows() -> list[Row]:
         add("xml2_title_late.two", program, task, file("batch_title_late"), s, env=f"BATCH_SIZE={two}",
             fmts=(15, 16))
         add("xml2_title_first.each", program, task, file("batch_title_first"), s, env=f"BATCH_SIZE={each}",
-            fmts=(15, 16), kind="losat-rejection")
+            fmts=(15, 16))
     # BLASTN: the search of the batch fails (gap costs that NCBI's tables lack, `BLAST engine error`,
     # exit 3): NCBI writes no archive of it
     add("arch_title_lastempty.search_error", "blastn", "blastn", "@/batch_title_lastempty.nuc.fa",
@@ -898,7 +894,25 @@ def extra_rows() -> list[Row]:
     add("arch_titlelong_late", "blastn", "megablast", "@/batchlong_title_late.nuc.fa", "@/batchlong.s.nuc.fa",
         fmts=(11,))
     add("arch_titlelong_first", "blastn", "megablast", "@/batchlong_title_first.nuc.fa", "@/batchlong.s.nuc.fa",
-        fmts=(11,), kind="losat-rejection")
+        fmts=(11,))
+    # NCBI's messages of a binary document fall where its output buffer (4096 bytes, back limit 0) has
+    # handed the document's bytes out (M4a-1b part 6; the text archive's back limit is 80): the
+    # combined stream holds them among the bytes. The Seq-annots of outfmt 8 and 9 (M4a-1b2) are one
+    # document per query, whose `-parse_deflines` subject id with a DEL byte NCBI writes as `#` in
+    # each Seq-align, with a message each.
+    for env in ("", "ARCHIVE_FORMAT=bin"):
+        suffix = ".bin" if env else ""
+        add(f"order_title_s{suffix}", "blastn", "megablast", "@/order_big.q.nuc.fa", "@/order_title.s.nuc.fa",
+            env=env, fmts=(11,))
+        add(f"order_delid_s{suffix}", "blastn", "megablast", "@/order_unit.q.nuc.fa", "@/order_delid.s.nuc.fa",
+            env=env, args="-parse_deflines", fmts=(11,))
+    add("order_delid_s", "blastn", "megablast", "@/order_unit.q.nuc.fa", "@/order_delid.s.nuc.fa",
+        args="-parse_deflines", fmts=(8, 9))
+    # BLASTP's Seq-annots (M4a-1b2): a protein subject with a `-parse_deflines` local id holding DEL
+    # (tests/db_search/seqannot/pdel.faa, whose letters repeat the query's, under lcl|p<DEL>1), written
+    # `#` in each Seq-align with NCBI's message each, among the document's bytes.
+    add("seqannot_delid_s", "blastp", "", "tests/db_search/seqannot/qp.faa", "tests/db_search/seqannot/pdel.faa",
+        args="-parse_deflines", fmts=(8, 9))
     # a subject cannot be in a later batch, but its errors and warnings come before the query's
     for program, task in ALL_PROGRAMS:
         q, s = base_pair(program)
@@ -1052,6 +1066,27 @@ def batchlong_files() -> dict[str, bytes]:
     return out
 
 
+def serial_order_files() -> dict[str, bytes]:
+    """The order of NCBI's 803.7 messages among a binary document's bytes (M4a-1b part 6): a
+    query of 20,000 nucleotides whose archive's first 4 KB go out before the `-subject` title's
+    `café`; a 200-nucleotide unit and a subject of 60 copies of it under a `-parse_deflines` local
+    id with a DEL byte, whose 60 Seq-aligns each write the id (one message each)."""
+    rng = random.Random(20261114)
+    big = "".join(rng.choice("ACGT") for _ in range(20000)).encode()
+    unit = "".join(rng.choice("ACGT") for _ in range(200)).encode()
+    subject = b"".join(unit + "".join(rng.choice("ACGT") for _ in range(80)).encode() for _ in range(60))
+
+    def render(title, seq):
+        return b">" + title + b"\n" + b"\n".join(wrap_lines(seq, 60)) + b"\n"
+
+    return {
+        "order_big.q.nuc.fa": render(b"q1 big query", big),
+        "order_title.s.nuc.fa": render("s1 café subject".encode(), big[5000:7000]),
+        "order_unit.q.nuc.fa": render(b"q1 unit", unit),
+        "order_delid.s.nuc.fa": render(b"lcl|s\x7f1 subject", subject),
+    }
+
+
 def seqid_files() -> dict[str, bytes]:
     out = {}
     for i, line in enumerate(SEQID_LINES):
@@ -1060,6 +1095,15 @@ def seqid_files() -> dict[str, bytes]:
                 c = Ctx(kind, role)
                 out[f"seqid{i}.{role}.{kind}.{EXT[kind]}"] = line + b"\n" + c.render()
     return out
+
+
+# Inputs in FIXTURES made by hand, which other fixtures read (tests/db_search/README.md, rows
+# db.archtitle.*.nosq.*): `generate` does not make them and keeps them.
+HAND_MADE = frozenset(
+    f"{stem}.{kind}.{EXT[kind]}"
+    for stem in ("batch_title_unsearched", "batch_title_unsearched_next")
+    for kind in ("nuc", "prot")
+)
 
 
 def command_generate(args) -> int:
@@ -1074,9 +1118,10 @@ def command_generate(args) -> int:
                 files[f"{name}.{role}.{kind}.{EXT[kind]}"] = v["fn"](Ctx(kind, role))
     files.update(batch_files())
     files.update(batchlong_files())
+    files.update(serial_order_files())
     files.update(seqid_files())
     for existing in FIXTURES.iterdir():
-        if existing.is_file() and existing.name not in files:
+        if existing.is_file() and existing.name not in files and existing.name not in HAND_MADE:
             existing.unlink()
     total = 0
     for name, data in files.items():

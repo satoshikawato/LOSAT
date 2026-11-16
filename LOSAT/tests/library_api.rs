@@ -13,6 +13,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::library_examples::example_binary;
 
+mod temp_support;
+use temp_support::TempPath;
+
 use losat::api::{
     describe, read_fasta, read_inputs, run, run_batches, run_blastdbcmd, run_collect,
     run_dustmasker, run_makeblastdb, run_to_file, validate, Error, FastaRecord, HspRecord, Inputs,
@@ -90,7 +93,19 @@ const CASES: &[Case] = &[
         options: &["-evalue", "1e-5"],
         formats: &["6", "0", "7"],
     },
+    // psiblast's rounds (line RG item Q5): NCBI 2.17.0 finds 300 subjects in round 1 and 299 in
+    // round 2, then writes `Search has CONVERGED!`.
+    Case {
+        program: Program::Psiblast,
+        query: "outfmt0/e2e_many_query.faa",
+        subject: "outfmt0/e2e_many_subject.faa",
+        options: &["-evalue", "1e-5", "-num_iterations", "3"],
+        formats: &["6", "0", "7"],
+    },
 ];
+
+/// The psiblast rounds case above.
+const ROUNDS_CASE: usize = 8;
 
 /// The warnings case above.
 const WARNINGS_CASE: usize = 6;
@@ -187,12 +202,18 @@ fn api(case: &Case, query: &Path, subject: &Path, extra: &[&str]) -> Outcome {
         .unwrap_or_else(|error| panic!("{} {:?}: {error}", case.program, case.options))
 }
 
-/// The line ranges of a tabular report: one per row.
+/// The line ranges of a tabular report: one per row (not the comments of outfmt 7, nor the empty
+/// line and `Search has CONVERGED!` that psiblast writes after a query's rounds converged).
 fn rows(report: &[u8]) -> Vec<std::ops::Range<usize>> {
     let mut rows = Vec::new();
     let mut start = 0;
     for (at, &byte) in report.iter().enumerate() {
-        if byte == b'\n' && !report[start..at].starts_with(b"#") {
+        let line = &report[start..at];
+        if byte == b'\n'
+            && !line.starts_with(b"#")
+            && !line.is_empty()
+            && line != b"Search has CONVERGED!"
+        {
             rows.push(start..at + 1);
         }
         if byte == b'\n' {
@@ -506,8 +527,9 @@ fn check_columns(context: &str, hsp: &HspRecord, row: &[u8]) {
         number(15),
         "{context}: score of {row}"
     );
-    // The reports cut these to a few digits (`report::tabular`).
-    let bits: f64 = fields[16].parse().unwrap();
+    // The reports cut these to a few digits (`report::tabular`); a bit score in (99.9, 100) is
+    // NCBI's ` 99` (`report::outfmt6::format_bitscore_ncbi`).
+    let bits: f64 = fields[16].trim_start().parse().unwrap();
     assert!(
         (hsp.bit_score - bits).abs() <= 1.0 + hsp.bit_score / 1000.0,
         "{context}: bitscore of {row}: {}",
@@ -870,7 +892,8 @@ fn check_batches(case: &Case, query_bytes: &[u8], subject_bytes: &[u8]) -> usize
     let search = validate(case.program, case.options).unwrap();
     let batches = run_batches(&search, Inputs::new(&queries, &subjects)).unwrap();
     assert_eq!(batches.query_count(), queries.len(), "{context}");
-    let (mut hsps, mut stats, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut hsps, mut stats, mut rounds, mut diagnostics) =
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut count = 0;
     for batch in batches {
         let batch = batch.unwrap_or_else(|error| panic!("{context}: {error}"));
@@ -880,6 +903,7 @@ fn check_batches(case: &Case, query_bytes: &[u8], subject_bytes: &[u8]) -> usize
             batch.query_indices.len(),
             "{context}"
         );
+        assert_eq!(batch.rounds.len(), batch.query_indices.len(), "{context}");
         // The views of a batch number the queries as the inputs do.
         for (query, view) in batch.query_indices.clone().zip(batch.queries()) {
             assert_eq!(view.q_idx, query, "{context}");
@@ -887,12 +911,14 @@ fn check_batches(case: &Case, query_bytes: &[u8], subject_bytes: &[u8]) -> usize
         }
         hsps.extend(batch.hsps);
         stats.extend(batch.query_stats);
+        rounds.extend(batch.rounds);
         diagnostics.extend(batch.diagnostics);
         count += 1;
     }
     assert_eq!(stats.len(), queries.len(), "{context}: every query");
     assert!(hsps == whole.hsps, "{context}: the records");
     assert_eq!(stats, whole.query_stats, "{context}: the statistics");
+    assert_eq!(rounds, whole.rounds, "{context}: the rounds");
     assert_eq!(
         String::from_utf8_lossy(&diagnostics),
         String::from_utf8_lossy(&whole.diagnostics),
@@ -929,6 +955,8 @@ fn the_batches_one_after_the_other_are_the_whole_search() {
         (&CASES[3], 200),
         (&CASES[4], 100),
         (&CASES[5], 2),
+        // Two queries of two rounds each: a batch per query, its rounds in it.
+        (&CASES[ROUNDS_CASE], 2),
     ] {
         let once = std::fs::read(fixture(case.query)).expect("query fixture");
         let subject_bytes = std::fs::read(fixture(case.subject)).expect("subject fixture");
@@ -1002,6 +1030,7 @@ fn the_views_hold_each_query_and_each_pair_together() {
         assert_eq!(outcome.queries().count(), outcome.query_stats.len());
         let mut seen = 0;
         let mut pairs = std::collections::HashSet::new();
+        let mut first_rounds = std::collections::HashSet::new();
         for (q_idx, query) in outcome.queries().enumerate() {
             assert_eq!(query.q_idx, q_idx, "{context}");
             assert_eq!(
@@ -1009,17 +1038,42 @@ fn the_views_hold_each_query_and_each_pair_together() {
                 outcome.query_stats[q_idx].as_ref(),
                 "{context}"
             );
+            assert_eq!(query.round, None, "{context}");
             assert_eq!(outcome.query(q_idx), Some(query), "{context}");
             for subject in query.subjects() {
-                // A pair is one run of the hit list: it comes once.
-                assert!(pairs.insert((q_idx, subject.s_idx)), "{context}");
-                assert_eq!(query.subject(subject.s_idx), Some(subject), "{context}");
+                // A pair is one run of the hit list in each round: it comes once a round.
+                assert!(
+                    pairs.insert((q_idx, subject.s_idx, subject.round)),
+                    "{context}"
+                );
+                if first_rounds.insert((q_idx, subject.s_idx)) {
+                    assert_eq!(query.subject(subject.s_idx), Some(subject), "{context}");
+                }
                 for hsp in subject.hsps {
-                    assert_eq!((hsp.q_idx, hsp.s_idx), (q_idx, subject.s_idx), "{context}");
+                    assert_eq!(
+                        (hsp.q_idx, hsp.s_idx, hsp.round),
+                        (q_idx, subject.s_idx, subject.round),
+                        "{context}"
+                    );
                     assert_eq!(hsp.index, seen, "{context}: in the order of the hit list");
                     seen += 1;
                 }
             }
+            // The rounds of the query: its HSPs round by round, each with its statistics.
+            let rounds = &outcome.rounds[q_idx];
+            assert_eq!(rounds.stats[0], outcome.query_stats[q_idx], "{context}");
+            let views: Vec<_> = query.rounds().collect();
+            assert_eq!(views.len(), rounds.stats.len(), "{context}");
+            let mut held = Vec::new();
+            for (offset, view) in views.iter().enumerate() {
+                let round = offset as u32 + 1;
+                assert_eq!(view.round, Some(round), "{context}");
+                assert_eq!(view.stats, rounds.stats[offset].as_ref(), "{context}");
+                assert!(view.hsps.iter().all(|hsp| hsp.round == round), "{context}");
+                assert_eq!(view.rounds().collect::<Vec<_>>(), [*view], "{context}");
+                held.extend_from_slice(view.hsps);
+            }
+            assert!(held == query.hsps, "{context}: the rounds hold every HSP");
         }
         assert_eq!(seen, outcome.hsps.len(), "{context}: every HSP");
         assert_eq!(outcome.query(outcome.query_stats.len()), None);
@@ -1259,6 +1313,230 @@ fn a_report_in_a_file_has_its_side_files_as_on_the_command_line() {
     std::fs::remove_dir_all(&directory).unwrap();
 }
 
+// Series Q item Q6a: psiblast's PSSM files are written where the command line writes them, with
+// its names: `-save_each_pssm` numbers them over the run, also over `run_batches`' batches of one
+// query each (NCBI's `CAutoOutputFileReset`, made once per run, blast_args.cpp:1304-1318). Two
+// queries (each makes a PSSM), with rounds and with the PSSM after the last round.
+#[test]
+fn the_pssm_files_are_the_command_lines() {
+    let directory = temp_path("pssm");
+    std::fs::create_dir_all(&directory).unwrap();
+    let (query, subject) = (fixture("psiblast/q4c_tk_pol.faa"), fixture("PajaWSV.faa"));
+    let queries = read_fasta(
+        Program::Psiblast,
+        Role::Query,
+        &std::fs::read(&query).unwrap(),
+    )
+    .unwrap();
+    let subjects = read_fasta(
+        Program::Psiblast,
+        Role::Subject,
+        &std::fs::read(&subject).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(queries.len(), 2);
+    let inputs =
+        Inputs::new(&queries, &subjects).named(query.to_str().unwrap(), subject.to_str().unwrap());
+    let (asn, ascii) = (directory.join("p.asn"), directory.join("p.txt"));
+    let files = [
+        "-out_pssm",
+        asn.to_str().unwrap(),
+        "-out_ascii_pssm",
+        ascii.to_str().unwrap(),
+    ];
+    for options in [
+        &["-num_iterations", "2", "-save_each_pssm"][..],
+        &["-num_iterations", "2"],
+        &["-save_pssm_after_last_round", "-save_each_pssm"],
+        &[
+            "-num_iterations",
+            "3",
+            "-save_pssm_after_last_round",
+            "-save_each_pssm",
+        ],
+    ] {
+        let options: Vec<&str> = options.iter().chain(&files).copied().collect();
+        let context = options[..options.len() - 4].join(" ");
+        let out = directory.join("report.out");
+        let status = command(env!("CARGO_BIN_EXE_losat"))
+            .arg("psiblast")
+            .arg("-query")
+            .arg(&query)
+            .arg("-subject")
+            .arg(&subject)
+            .args(&options)
+            .args(["-outfmt", "6", "-out"])
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert!(status.status.success(), "{context}");
+        let report = std::fs::read(&out).unwrap();
+        std::fs::remove_file(&out).unwrap();
+        let frozen = take_files(&directory);
+        let names: Vec<&str> = frozen.iter().map(|file| file.0.as_str()).collect();
+        if options.contains(&"-save_each_pssm") {
+            assert!(
+                names.contains(&"p.asn.2") && names.contains(&"p.txt.2"),
+                "{context}: {names:?}"
+            );
+        } else {
+            assert_eq!(names, ["p.asn", "p.txt"], "{context}");
+        }
+        let search = validate(Program::Psiblast, &options).unwrap();
+        let collected = run_collect(&search, inputs, &["6"]).unwrap();
+        assert_eq!(collected.reports[0].bytes, report, "{context}: run_collect");
+        assert!(
+            take_files(&directory) == frozen,
+            "{context}: run_collect's files"
+        );
+        let mut written = Vec::new();
+        run(
+            &search,
+            inputs,
+            &mut [("6", &mut written)],
+            &mut std::io::sink(),
+        )
+        .unwrap();
+        assert_eq!(written, report, "{context}: run");
+        assert!(take_files(&directory) == frozen, "{context}: run's files");
+        run_to_file(&search, inputs, "6", &out, &mut std::io::sink()).unwrap();
+        assert_eq!(
+            std::fs::read(&out).unwrap(),
+            report,
+            "{context}: run_to_file"
+        );
+        std::fs::remove_file(&out).unwrap();
+        assert!(
+            take_files(&directory) == frozen,
+            "{context}: run_to_file's files"
+        );
+        let batches: Vec<_> = run_batches(&search, inputs)
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(batches.len(), 2, "{context}: one query per batch");
+        assert_eq!(
+            batches.iter().map(|batch| batch.hsps.len()).sum::<usize>(),
+            collected.hsps.len(),
+            "{context}"
+        );
+        assert!(
+            take_files(&directory) == frozen,
+            "{context}: the batches' files"
+        );
+    }
+    // A call whose formats take two searches (`-num_descriptions` with a report and a table) would
+    // write the files of two searches: refused before any search.
+    let search = validate(
+        Program::Psiblast,
+        &[
+            &["-num_iterations", "2", "-num_descriptions", "5"][..],
+            &files,
+        ]
+        .concat(),
+    )
+    .unwrap();
+    let error = run_collect(&search, inputs, &["0", "6"]).unwrap_err();
+    assert!(
+        matches!(&error, Error::Argv(message) if message.starts_with("-out_pssm is not accepted by the library API with formats of two hit list sizes")),
+        "{error}"
+    );
+    assert!(take_files(&directory).is_empty());
+    // One format, or formats of one hit list size, search once.
+    run_collect(&search, inputs, &["6", "7"]).unwrap();
+    assert!(!take_files(&directory).is_empty());
+    // A query title that the ASN.1 PSSM cannot write as it is (here the third query's `é`, two
+    // bytes outside the visible ASCII range): NCBI writes each such byte as `#` and posts error
+    // 803.7 for it as it writes the file, once per file written, and ends with status 0
+    // (objostrasn.cpp:413-444; psiblast_app.cpp:385-407 `SavePssmToFile`; NCBI BLAST+ 2.17.0's
+    // standard error for this command, line NP M4a-1b2). Nothing is refused: the library's calls,
+    // and its batches of one query each, write the command line's files and give its posts where
+    // the library gives its diagnostics.
+    let mut records = std::fs::read(&query).unwrap();
+    records.extend_from_slice(b">third query \xc3\xa9\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ\n");
+    let titled = temp_path("titled.faa");
+    std::fs::write(&titled, &records).unwrap();
+    let queries = read_fasta(Program::Psiblast, Role::Query, &records).unwrap();
+    assert_eq!(queries.len(), 3);
+    let inputs =
+        Inputs::new(&queries, &subjects).named(titled.to_str().unwrap(), subject.to_str().unwrap());
+    let options = [&["-save_pssm_after_last_round"][..], &files].concat();
+    let written = command(env!("CARGO_BIN_EXE_losat"))
+        .arg("psiblast")
+        .arg("-query")
+        .arg(&titled)
+        .arg("-subject")
+        .arg(&subject)
+        .args(&options)
+        .args(["-outfmt", "6"])
+        .output()
+        .unwrap();
+    std::fs::remove_file(&titled).unwrap();
+    assert!(written.status.success(), "{written:?}");
+    let posts: Vec<u8> = [0xc3u8, 0xa9]
+        .iter()
+        .flat_map(|byte| {
+            let mut post = format!(
+                "Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.descr.E.title\nBad char [0x{byte:02X}] in string at line 12\n"
+            )
+            .into_bytes();
+            post.extend_from_slice(b"third query \xc3\xa9\n");
+            post
+        })
+        .collect();
+    assert_eq!(
+        String::from_utf8_lossy(&written.stderr),
+        String::from_utf8_lossy(&posts),
+        "the command line's posts"
+    );
+    // Without `-save_each_pssm` each query's PSSM replaces the file of the query before: the
+    // files left are the third query's.
+    let frozen = take_files(&directory);
+    let names: Vec<&str> = frozen.iter().map(|file| file.0.as_str()).collect();
+    assert_eq!(names, ["p.asn", "p.txt"]);
+    let asn = String::from_utf8(frozen[0].1.clone()).unwrap();
+    assert!(asn.contains("        title \"third query ##\""), "{asn}");
+    let search = validate(Program::Psiblast, &options).unwrap();
+    let collected = run_collect(&search, inputs, &["6"]).unwrap();
+    assert_eq!(collected.reports[0].bytes, written.stdout, "run_collect");
+    assert_eq!(collected.diagnostics, posts, "run_collect's posts");
+    assert!(take_files(&directory) == frozen, "run_collect's files");
+    let (mut report, mut diagnostics) = (Vec::new(), Vec::new());
+    run(&search, inputs, &mut [("6", &mut report)], &mut diagnostics).unwrap();
+    assert_eq!(report, written.stdout, "run");
+    assert_eq!(diagnostics, posts, "run's posts");
+    assert!(take_files(&directory) == frozen, "run's files");
+    let out = temp_path("titled.out");
+    let mut diagnostics = Vec::new();
+    run_to_file(&search, inputs, "6", &out, &mut diagnostics).unwrap();
+    assert_eq!(std::fs::read(&out).unwrap(), written.stdout, "run_to_file");
+    std::fs::remove_file(&out).unwrap();
+    assert_eq!(diagnostics, posts, "run_to_file's posts");
+    assert!(take_files(&directory) == frozen, "run_to_file's files");
+    // The posts come with the batch of the query whose file NCBI writes then.
+    let batches: Vec<_> = run_batches(&search, inputs)
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(batches.len(), 3, "one query per batch");
+    let batch_posts: Vec<&[u8]> = batches
+        .iter()
+        .map(|batch| batch.diagnostics.as_slice())
+        .collect();
+    let none: &[u8] = &[];
+    assert_eq!(
+        batch_posts,
+        [none, none, posts.as_slice()],
+        "the batches' posts"
+    );
+    assert_eq!(
+        batches.iter().map(|batch| batch.hsps.len()).sum::<usize>(),
+        collected.hsps.len()
+    );
+    assert!(take_files(&directory) == frozen, "the batches' files");
+    std::fs::remove_dir_all(&directory).unwrap();
+}
+
 #[test]
 fn the_writers_of_a_run_receive_the_reports_of_the_collected_run() {
     for case in [&CASES[0], &CASES[1], &CASES[WARNINGS_CASE]] {
@@ -1426,6 +1704,22 @@ const DATABASE_CASES: &[DatabaseCase] = &[
         db: "db_search/paja",
         options: &[],
     },
+    // psiblast's rounds: 9 subjects in round 1, 5 in round 2, converged (the fixture
+    // `db.ps.it.it3.tk.7`); each round's hit list ranks its own subjects.
+    DatabaseCase {
+        program: Program::Psiblast,
+        query: "fasta/psiblast/tk.faa",
+        db: "db_search/paja",
+        options: &["-num_iterations", "3"],
+    },
+    // psiblast's rounds of the second query record: `-query_loc` starts past the end of the first
+    // (10 letters), which NCBI's reader skips (the fixture `db.ps.it.qloc.skip.6`).
+    DatabaseCase {
+        program: Program::Psiblast,
+        query: "fasta/psiblast/q4a_skip.faa",
+        db: "db_search/paja",
+        options: &["-num_iterations", "2", "-query_loc", "20-300"],
+    },
 ];
 
 fn engine_tests(name: &str) -> String {
@@ -1522,6 +1816,417 @@ fn a_database_search_is_the_command_lines() {
     }
 }
 
+/// A PSSM query (series Q item Q6b): `Inputs::pssm` and `Inputs::pssm_database`, the command
+/// line's `-in_pssm` of psiblast and tblastn (PSI-TBLASTN), against records and a database. The
+/// whole set of PSSM queries through the API is `tests/db_search_fixtures.py check --library`.
+struct PssmCase {
+    program: Program,
+    /// Under `tests/`; `.gz` is inflated into a file of its own first (the harness does the same).
+    pssm: &'static str,
+    /// Under `tests/`: a FASTA subject set (`-subject`), or a database (`-db`).
+    subject: &'static str,
+    database: bool,
+    options: &'static [&'static str],
+}
+
+const PSSM_CASES: &[PssmCase] = &[
+    PssmCase {
+        program: Program::Psiblast,
+        pssm: "fixtures/pssm/ps4_tk_paja.asn.gz",
+        subject: "fasta/PajaWSV.faa",
+        database: false,
+        options: &[],
+    },
+    PssmCase {
+        program: Program::Psiblast,
+        pssm: "fixtures/pssm/ps4_tk_paja.asn.gz",
+        subject: "db_search/paja",
+        database: true,
+        options: &[],
+    },
+    // The rounds of a PSSM query (`-in_pssm` with `-num_iterations`, item PS5b of line PS).
+    PssmCase {
+        program: Program::Psiblast,
+        pssm: "fixtures/pssm/ps4_tk_paja.asn.gz",
+        subject: "db_search/paja",
+        database: true,
+        options: &["-num_iterations", "3"],
+    },
+    PssmCase {
+        program: Program::Tblastn,
+        pssm: "db_search/of1/tnq1.pssm",
+        subject: "db_search/of1/tns.fa",
+        database: false,
+        options: &[],
+    },
+    PssmCase {
+        program: Program::Tblastn,
+        pssm: "fixtures/pssm/ps7_ts1_tslice.asn.gz",
+        subject: "db_search/tslice",
+        database: true,
+        options: &[],
+    },
+];
+
+impl PssmCase {
+    /// The PSSM file as the command line reads it: the fixture, or its inflated copy in `directory`.
+    fn file(&self, directory: &Path) -> PathBuf {
+        let path = PathBuf::from(engine_tests(self.pssm));
+        if !self.pssm.ends_with(".gz") {
+            return path;
+        }
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(
+            &mut flate2::read::GzDecoder::new(std::fs::read(&path).unwrap().as_slice()),
+            &mut bytes,
+        )
+        .unwrap();
+        let inflated = directory.join(path.file_stem().unwrap());
+        std::fs::write(&inflated, bytes).unwrap();
+        inflated
+    }
+
+    /// The command line's report for one `-outfmt`, and its standard error.
+    fn cli(&self, pssm: &Path, extra: &[&str], outfmt: &str) -> (Vec<u8>, Vec<u8>) {
+        let output = command(env!("CARGO_BIN_EXE_losat"))
+            .arg(self.program.name())
+            .arg("-in_pssm")
+            .arg(pssm)
+            .arg(if self.database { "-db" } else { "-subject" })
+            .arg(engine_tests(self.subject))
+            .args(self.options)
+            .args(extra)
+            .arg("-outfmt")
+            .arg(outfmt)
+            .output()
+            .expect("run the command line");
+        assert!(
+            output.status.success(),
+            "{} {} -outfmt {outfmt}: {}",
+            self.program,
+            self.pssm,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        (output.stdout, output.stderr)
+    }
+}
+
+#[test]
+fn a_pssm_query_is_the_command_lines() {
+    let directory = temp_path("pssm_query");
+    std::fs::create_dir_all(&directory).unwrap();
+    for case in PSSM_CASES {
+        let context = format!(
+            "{} {} {} {:?}",
+            case.program, case.pssm, case.subject, case.options
+        );
+        let pssm = case.file(&directory);
+        let search = validate(case.program, case.options).unwrap();
+        let subject = engine_tests(case.subject);
+        let subjects = match case.database {
+            true => Vec::new(),
+            false => read_fasta(
+                case.program,
+                Role::Subject,
+                &std::fs::read(&subject).unwrap(),
+            )
+            .unwrap(),
+        };
+        let inputs = match case.database {
+            true => Inputs::pssm_database(&pssm, &subject),
+            false => Inputs::pssm(&pssm, &subjects).named("ignored", &subject),
+        };
+        let formats = ["6", "0", "7", COLUMNS];
+        let outcome = run_collect(&search, inputs, &formats)
+            .unwrap_or_else(|error| panic!("{context}: {error}"));
+        for (report, outfmt) in outcome.reports.iter().zip(formats) {
+            let (stdout, stderr) = case.cli(&pssm, &[], outfmt);
+            assert!(report.bytes == stdout, "{context} -outfmt {outfmt}");
+            if outfmt == "6" {
+                assert_eq!(
+                    outcome.diagnostics, stderr,
+                    "{context}: the diagnostics are the command line's"
+                );
+            }
+        }
+        // One query, the PSSM's: query 0, with its statistics and rounds.
+        assert!(!outcome.hsps.is_empty(), "{context}");
+        assert!(outcome.hsps.iter().all(|hsp| hsp.q_idx == 0), "{context}");
+        assert_eq!(outcome.query_stats.len(), 1, "{context}");
+        assert!(outcome.query_stats[0].is_some(), "{context}");
+        assert_eq!(outcome.rounds.len(), 1, "{context}");
+        let rounds = outcome.hsps.iter().map(|hsp| hsp.round).max().unwrap();
+        assert_eq!(outcome.rounds[0].stats.len() as u32, rounds, "{context}");
+        if case.options.contains(&"-num_iterations") {
+            assert!(rounds > 1, "{context}");
+        }
+        let table = &outcome.reports[3].bytes;
+        let rows = rows(table);
+        assert_eq!(rows.len(), outcome.hsps.len(), "{context}");
+        for (hsp, row) in outcome.hsps.iter().zip(rows) {
+            check_columns(&context, hsp, &table[row]);
+            assert!(outcome.reports[0].spans[hsp.index].is_some(), "{context}");
+        }
+        // One batch, the same records: NCBI reads no query batches for a PSSM query.
+        let batches = run_batches(&search, inputs).unwrap();
+        assert_eq!(batches.query_count(), 1, "{context}");
+        let batches: Vec<_> = batches.map(Result::unwrap).collect();
+        assert_eq!(batches.len(), 1, "{context}");
+        assert_eq!(batches[0].query_indices, 0..1, "{context}");
+        assert_eq!(batches[0].hsps, outcome.hsps, "{context}");
+        assert_eq!(batches[0].query_stats, outcome.query_stats, "{context}");
+        assert_eq!(batches[0].rounds, outcome.rounds, "{context}");
+        // The writer of `run` and the file of `run_to_file` hold the same bytes.
+        let mut written = Vec::new();
+        let mut diagnostics = Vec::new();
+        run(
+            &search,
+            inputs,
+            &mut [("6", &mut written)],
+            &mut diagnostics,
+        )
+        .unwrap();
+        assert!(written == outcome.reports[0].bytes, "{context}");
+        let out = directory.join("out.6");
+        run_to_file(&search, inputs, "6", &out, &mut Vec::new()).unwrap();
+        assert!(
+            std::fs::read(&out).unwrap() == outcome.reports[0].bytes,
+            "{context}"
+        );
+    }
+    // The rounds of a PSSM query write the command line's PSSM files.
+    let case = &PSSM_CASES[2];
+    let pssm = case.file(&directory);
+    let (api_file, cli_file) = (directory.join("api.txt"), directory.join("cli.txt"));
+    let options = [
+        case.options,
+        &["-out_ascii_pssm", api_file.to_str().unwrap()],
+    ]
+    .concat();
+    let search = validate(case.program, &options).unwrap();
+    let database = engine_tests(case.subject);
+    let outcome = run_collect(&search, Inputs::pssm_database(&pssm, &database), &["6"]).unwrap();
+    let (stdout, _) = case.cli(&pssm, &["-out_ascii_pssm", cli_file.to_str().unwrap()], "6");
+    assert!(outcome.reports[0].bytes == stdout);
+    assert!(std::fs::read(&api_file).unwrap() == std::fs::read(&cli_file).unwrap());
+    // Each format is checked as the command line checks it alone: psiblast's `-in_pssm` writes
+    // outfmt 0, 6 and 7 (`in_pssm::check_in_pssm_options`), whatever the order of the formats.
+    let search = validate(Program::Psiblast, &[]).unwrap();
+    for formats in [&["6", "10"][..], &["10", "6"], &["0", "20"]] {
+        let error =
+            run_collect(&search, Inputs::pssm_database(&pssm, &database), formats).unwrap_err();
+        assert!(
+            error
+                .message()
+                .contains("with -in_pssm is not supported by LOSAT's PSIBLAST"),
+            "{formats:?}: {error}"
+        );
+    }
+    // A PSSM file the command line cannot read is its error, and so is `-query_loc` with it.
+    let missing = directory.join("none.asn");
+    let search = validate(Program::Psiblast, &[]).unwrap();
+    let subjects = read_fasta(
+        Program::Psiblast,
+        Role::Subject,
+        &std::fs::read(fixture("PajaWSV.faa")).unwrap(),
+    )
+    .unwrap();
+    let error = run_collect(&search, Inputs::pssm(&missing, &subjects), &["6"]).unwrap_err();
+    let output = command(env!("CARGO_BIN_EXE_losat"))
+        .args(["psiblast", "-in_pssm"])
+        .arg(&missing)
+        .arg("-subject")
+        .arg(fixture("PajaWSV.faa"))
+        .args(["-outfmt", "6"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(
+        error.message().trim_end(),
+        String::from_utf8_lossy(&output.stderr).trim_end(),
+        "{error}"
+    );
+    let ranged = validate(Program::Tblastn, &["-query_loc", "1-10"]).unwrap();
+    assert!(matches!(
+        run_collect(&ranged, Inputs::pssm(&missing, &[]), &["6"]),
+        Err(Error::Argv(_))
+    ));
+    // Under `-parse_deflines` a subject record with the PSSM query's id is refused, as on the
+    // command line (the fixtures `db.ps.q1b.rej.subj.pd`, `db.tbn.inpssm.q1b.rej.subj.pd`): the
+    // records of `read_inputs` were read in a scope of their own.
+    for (program, subject) in [
+        (Program::Psiblast, "fasta/psiblast/q1_subj_ids.faa"),
+        (Program::Tblastn, "fasta/psiblast/q1b_gi_nt.fna"),
+    ] {
+        let search = validate(program, &["-parse_deflines"]).unwrap();
+        let (_, subjects) =
+            read_inputs(&search, b"", &std::fs::read(engine_tests(subject)).unwrap()).unwrap();
+        let pssm = PathBuf::from(engine_tests("fixtures/pssm/q1b_gi.asn"));
+        let error = run_collect(&search, Inputs::pssm(&pssm, &subjects), &["6"]).unwrap_err();
+        assert!(
+            error
+                .message()
+                .contains("a query and a subject record have the Seq-id gi|4504347"),
+            "{program}: {error}"
+        );
+    }
+    std::fs::remove_dir_all(&directory).unwrap();
+}
+
+/// Each round's `Gapped` Karlin-Altschul values (lambda, K, H) and effective search space in
+/// psiblast's pairwise report of one query, round 1 first.
+fn round_footers(report: &str) -> Vec<([f64; 3], i64)> {
+    let lines: Vec<&str> = report.lines().collect();
+    let mut footers = Vec::new();
+    for (at, line) in lines.iter().enumerate() {
+        if *line == "Gapped" {
+            let values: Vec<f64> = lines[at + 2]
+                .split_whitespace()
+                .take(3)
+                .map(|value| value.parse().unwrap())
+                .collect();
+            let space = lines[at + 4..]
+                .iter()
+                .find_map(|line| line.strip_prefix("Effective search space used: "))
+                .unwrap()
+                .parse()
+                .unwrap();
+            footers.push(([values[0], values[1], values[2]], space));
+        }
+    }
+    footers
+}
+
+/// Whether `value` prints as `printed` with NCBI's three significant digits.
+fn prints_as(value: f64, printed: f64) -> bool {
+    (value - printed).abs() <= 0.0051 * printed.abs()
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1474-1476
+// ```c++
+//     if (itr_num != numeric_limits<unsigned int>::max()) {
+//         m_Outfile << "Results from round " << itr_num << "\n";
+//     }
+// ```
+// Line RG item Q5: psiblast's rounds in the library: the records carry their round, the rounds of
+// a query hold each round's statistics (those its pairwise report prints) and its convergence, and
+// round 1 is the search of `-num_iterations 1`.
+#[test]
+fn psiblast_rounds_carry_their_round_and_its_statistics() {
+    let one_round = &CASES[ROUNDS_CASE - 1];
+    let rounds_case = &CASES[ROUNDS_CASE];
+    let query_bytes = std::fs::read(fixture(rounds_case.query)).unwrap();
+    let subject_bytes = std::fs::read(fixture(rounds_case.subject)).unwrap();
+    let searches = [
+        (
+            "subject",
+            search_case(one_round, &query_bytes, &subject_bytes, &["0", "7"]),
+            search_case(rounds_case, &query_bytes, &subject_bytes, &["0", "7"]),
+        ),
+        {
+            let [one, rounds] = [&DATABASE_CASES[7], &DATABASE_CASES[8]].map(|case| {
+                assert_eq!(case.program, Program::Psiblast);
+                let (_, records, search) = case.read();
+                let db = engine_tests(case.db);
+                run_collect(&search, Inputs::database(&records, &db), &["0", "7"]).unwrap()
+            });
+            ("database", one, rounds)
+        },
+    ];
+    for (context, one, outcome) in searches {
+        // One query of two rounds: round 1 is the one-round search.
+        assert_eq!(outcome.rounds.len(), 1, "{context}");
+        let rounds = &outcome.rounds[0];
+        assert_eq!(rounds.stats.len(), 2, "{context}");
+        assert!(rounds.converged, "{context}");
+        assert!(!one.rounds[0].converged, "{context}");
+        assert_eq!(one.rounds[0].stats, [one.query_stats[0]], "{context}");
+        assert_eq!(outcome.query_stats, one.query_stats, "{context}");
+        assert_eq!(rounds.stats[0], outcome.query_stats[0], "{context}");
+        let first: Vec<HspRecord> = outcome
+            .hsps
+            .iter()
+            .filter(|hsp| hsp.round == 1)
+            .cloned()
+            .collect();
+        assert!(first == one.hsps, "{context}: round 1");
+        let second = outcome.hsps.len() - first.len();
+        assert!(second > 0, "{context}: round 2");
+        // Round 2 follows round 1; each round ranks its own HSPs.
+        for (index, hsp) in outcome.hsps.iter().enumerate() {
+            assert_eq!(hsp.index, index, "{context}");
+            let (round, rank) = if index < first.len() {
+                (1, index)
+            } else {
+                (2, index - first.len())
+            };
+            assert_eq!((hsp.round, hsp.rank), (round, rank), "{context}");
+        }
+        // The statistics of each round are those that its pairwise report prints.
+        let pairwise = String::from_utf8(outcome.reports[0].bytes.clone()).unwrap();
+        assert!(pairwise.contains("\nSearch has CONVERGED!\n"), "{context}");
+        let footers = round_footers(&pairwise);
+        assert_eq!(footers.len(), 2, "{context}");
+        for (stats, (printed, space)) in rounds.stats.iter().zip(&footers) {
+            let stats = stats.unwrap();
+            assert_eq!(stats.eff_space, *space, "{context}");
+            for (value, printed) in [stats.lambda, stats.kappa, stats.entropy]
+                .iter()
+                .zip(printed)
+            {
+                assert!(prints_as(*value, *printed), "{context}: {value} {printed}");
+            }
+        }
+        assert_ne!(
+            rounds.stats[0], rounds.stats[1],
+            "{context}: a PSSM's own values"
+        );
+        // Every row of outfmt 7 lies in its round's part of the report.
+        let commented = &outcome.reports[1];
+        let text = String::from_utf8(commented.bytes.clone()).unwrap();
+        for hsp in &outcome.hsps {
+            let row = commented.spans[hsp.index].clone().unwrap();
+            let heading = text[..row.start].rfind("# Iteration: ").unwrap();
+            let round = text[heading..].lines().next().unwrap();
+            assert_eq!(round, format!("# Iteration: {}", hsp.round), "{context}");
+        }
+    }
+}
+
+// Line RG item Q5: the rounds of a query after a record that `-query_loc` skips are the second
+// record's, in the whole search and in its batches.
+#[test]
+fn psiblast_rounds_after_a_skipped_record_are_the_next_records() {
+    let case = &DATABASE_CASES[9];
+    let (_, records, search) = case.read();
+    let db = engine_tests(case.db);
+    let inputs = Inputs::database(&records, &db);
+    let outcome = run_collect(&search, inputs, &["7"]).unwrap();
+    assert_eq!(outcome.rounds.len(), 2);
+    assert_eq!(outcome.query_stats[0], None);
+    assert_eq!(outcome.rounds[0].stats, [None]);
+    assert!(!outcome.rounds[0].converged);
+    assert_eq!(outcome.rounds[1].stats.len(), 2);
+    assert_eq!(outcome.rounds[1].stats[0], outcome.query_stats[1]);
+    assert!(outcome.hsps.iter().all(|hsp| hsp.q_idx == 1));
+    assert!(outcome.hsps.iter().any(|hsp| hsp.round == 2));
+    let text = String::from_utf8(outcome.reports[0].bytes.clone()).unwrap();
+    for hsp in &outcome.hsps {
+        let row = outcome.reports[0].spans[hsp.index].clone().unwrap();
+        let heading = text[..row.start].rfind("# Iteration: ").unwrap();
+        let round = text[heading..].lines().next().unwrap();
+        assert_eq!(round, format!("# Iteration: {}", hsp.round));
+    }
+    let (mut hsps, mut rounds) = (Vec::new(), Vec::new());
+    for batch in run_batches(&search, inputs).unwrap() {
+        let batch = batch.unwrap();
+        hsps.extend(batch.hsps);
+        rounds.extend(batch.rounds);
+    }
+    assert!(hsps == outcome.hsps, "the batches' records");
+    assert_eq!(rounds, outcome.rounds, "the batches' rounds");
+}
+
 #[test]
 fn a_database_record_is_the_database_ordinal_id_in_every_batch() {
     for case in DATABASE_CASES {
@@ -1551,12 +2256,13 @@ fn a_database_record_is_the_database_ordinal_id_in_every_batch() {
         let whole = run_collect(&search, inputs, &["6"]).unwrap();
         let batches = run_batches(&search, inputs).unwrap();
         assert_eq!(batches.query_count(), repeated.len(), "{context}");
-        let (mut hsps, mut stats, mut diagnostics, mut count) =
-            (Vec::new(), Vec::new(), Vec::new(), 0);
+        let (mut hsps, mut stats, mut rounds, mut diagnostics, mut count) =
+            (Vec::new(), Vec::new(), Vec::new(), Vec::new(), 0);
         for batch in batches {
             let batch = batch.unwrap_or_else(|error| panic!("{context}: {error}"));
             hsps.extend(batch.hsps);
             stats.extend(batch.query_stats);
+            rounds.extend(batch.rounds);
             diagnostics.extend(batch.diagnostics);
             count += 1;
         }
@@ -1566,6 +2272,7 @@ fn a_database_record_is_the_database_ordinal_id_in_every_batch() {
         );
         assert!(hsps == whole.hsps, "{context}: the records");
         assert_eq!(stats, whole.query_stats, "{context}: the statistics");
+        assert_eq!(rounds, whole.rounds, "{context}: the rounds");
         assert_eq!(diagnostics, whole.diagnostics, "{context}: the diagnostics");
     }
 }
@@ -1621,7 +2328,8 @@ fn a_masked_database_made_through_the_library_equals_the_command_lines() {
     let fasta = seqdb.join("mask_nucl.fna");
     let masks = seqdb.join("mask_writer/dust.asnt");
     let (fasta, masks) = (fasta.to_str().unwrap(), masks.to_str().unwrap());
-    let directory = temp_path("masked");
+    // Removed when the test passes, kept when it fails (the databases to compare).
+    let directory = TempPath::keep_on_failure(temp_path("masked"));
     std::fs::create_dir_all(&directory).unwrap();
     let library = directory.join("library");
     let binary = directory.join("binary");
@@ -1806,7 +2514,13 @@ fn a_database_made_through_the_library_is_read_and_searched_through_it() {
 fn the_api_owns_the_inputs_and_the_outputs() {
     for owned in API_OWNED {
         let flag = format!("-{owned}");
-        let error = validate(Program::Blastp, &[&flag, "x"]).unwrap_err();
+        // `-in_pssm` is psiblast's and tblastn's (`Inputs::pssm`); blastp's parser knows no such
+        // option.
+        let program = match *owned {
+            "in_pssm" => Program::Psiblast,
+            _ => Program::Blastp,
+        };
+        let error = validate(program, &[&flag, "x"]).unwrap_err();
         assert!(matches!(error, Error::Argv(_)), "{flag}: {error}");
         assert!(error.message().starts_with(&flag), "{flag}: {error}");
         for program in Program::ALL {

@@ -335,8 +335,7 @@ fn x_shadow_check(kept: &[(usize, SubjectComputation)], failed_at: Option<usize>
                 && ca.raw == cb.raw
                 && ca.purged == cb.purged
                 && ca.containment == cb.containment
-                && ca.prepared_link.map(|(c, f)| (c, f.to_bits()))
-                    == cb.prepared_link.map(|(c, f)| (c, f.to_bits())),
+                && ca.prepared_link == cb.prepared_link,
             "LOSAT_X_BXSUBJFLOWSHADOW: subject {oa} differs"
         );
     }
@@ -858,11 +857,12 @@ mod tests {
             .enumerate()
             .map(|(i, &length)| FastaRecord {
                 internal_id: format!("s{i}"),
-                title: String::new(),
+                title: Vec::new(),
                 sequence: vec![b'A'; length],
                 lowercase_masks: Vec::new(),
                 warnings: Vec::new(),
                 source: None,
+                around: None,
             })
             .collect()
     }

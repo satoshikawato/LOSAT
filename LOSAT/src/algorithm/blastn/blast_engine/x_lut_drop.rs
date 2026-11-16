@@ -23,8 +23,8 @@
 //! the batch's peak was in the traceback: the 64 MiB hashtable, the chains (`next_pos`, 4 bytes a
 //! position of both strands, 42 MiB) and the traceback's 21 MiB (plan v4 line MF, `REPORT.md`
 //! §2.3). Now the batch drops them where NCBI's traceback stage drops its table: the
-//! `-subject` and `-db` traceback reads the kept HSPs (`process_subject` with the preliminary
-//! hits, which goes past the scan), and the lookup tables are passed to `process_subject` by the
+//! `-subject` and `-db` traceback reads the kept HSPs (`search_subject` with the preliminary
+//! hits, which goes past the scan), and the lookup tables are passed to `search_subject` by the
 //! preliminary stage's calls only (`None` in the traceback's), so the compiler proves that no
 //! traceback reads them. A LOSAT_X_MBLUTKEEP table goes back to the batch loop's keep when the
 //! tables drop (`x_mb_lut_keep.rs`), as at the end of the batch before: the keep is zeroed and
@@ -33,7 +33,7 @@
 //! (its chunks' calls stop after their preliminary stage and drop theirs when they return).
 //!
 //! Why the reports are the same. The tables are read only by the scan of the preliminary stage
-//! (`collect_prelim_hits_for_chunk`); the batch's values derived from them before the scan (the
+//! (`prelim_subject::prelim_chunk_hits`); the batch's values derived from them before the scan (the
 //! offset array size, the shape of the subject search) are plain numbers kept in their own
 //! variables. Dropping memory changes no value that the search computes. No floating-point
 //! operation is involved.

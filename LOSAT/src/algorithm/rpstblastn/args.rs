@@ -225,6 +225,9 @@ impl RpstblastnArgs {
                 x_drop_gapped_bits: self.xdrop_gap,
                 x_drop_final_bits: self.xdrop_gap_final,
                 sum_stats: self.sum_stats == Some(true),
+                // rpstblastn's `-use_sw_tback` with composition-based statistics is refused
+                // (`TranslatedRpsSearch::check_options`); without them NCBI does not read it.
+                use_sw_tback: false,
             },
             ungapped: self.ungapped,
             use_sw_tback: self.use_sw_tback,
@@ -335,7 +338,7 @@ impl RpstblastnArgs {
             comp_based_stats: requested_cbs.to_string(),
             rpstblastn: Some(Arc::new(search)),
             request_inputs,
-            subject_taxdb: None,
+            taxdb_setting: None,
             matrix_search: None,
         })
     }
@@ -359,10 +362,7 @@ impl RpstblastnArgs {
         inputs.query_gencode = i32::from(self.query_gencode);
         inputs.window_size = self.window_size;
         inputs.soft_masking = self.soft_masking;
-        inputs.seg = self
-            .seg
-            .as_deref()
-            .and_then(|value| seg_filter(value, "RPSTBLASTN"));
+        inputs.seg = self.seg.as_deref().and_then(seg_filter);
         inputs.ungapped = self.ungapped;
         inputs.comp_based_stats = i32::from(
             crate::algorithm::rpsblast::args::rps_composition_mode(&self.comp_based_stats),

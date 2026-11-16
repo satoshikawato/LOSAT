@@ -174,15 +174,10 @@ fn run_masks(
     diag: &mut Diag,
 ) -> Result<(), Failure> {
     let value = |name| args.value(name).expect("a key with a default");
-    // `CSegMasker masker(args["window"].AsInteger(), args["locut"].AsDouble(), ...)`: a value
-    // that NCBI computes in extended precision is refused here (`Args::double`).
-    let double = |name| {
-        args.double(name)
-            .expect("an eDouble key with a default")
-            .map_err(|what| Failure::Refused(unsupported(&what)))
-    };
+    // `CSegMasker masker(args["window"].AsInteger(), args["locut"].AsDouble(), ...)`.
+    let double = |name| args.double(name).expect("an eDouble key with a default");
     let window = args.integer("window").expect("-window has a default");
-    let (locut, hicut) = (double("locut")?, double("hicut")?);
+    let (locut, hicut) = (double("locut"), double("hicut"));
     let outfmt = value("outfmt");
     let parse_seqids = args.flag("parse_seqids");
     let masker = seg_masker(window, locut, hicut);
@@ -215,6 +210,7 @@ fn run_masks(
                 ids: &record.ids,
                 title: record.title.as_deref(),
                 taxname: record.taxname.as_ref(),
+                has_source: record.has_source,
                 iupac: &record.iupacaa,
                 protein: true,
             };
@@ -320,6 +316,8 @@ struct Record {
     /// The name of a database sequence's source, from which its empty title is made
     /// (`seqmasks_io::bdb_reader::BdbRecord::taxname`); none for a FASTA record.
     taxname: Option<std::sync::Arc<[u8]>>,
+    /// Whether a database sequence's Bioseq has a source (`BdbRecord::has_source`).
+    has_source: bool,
     stdaa: Vec<u8>,
     iupacaa: Vec<u8>,
     /// The taxonomy database's texts of reading a database sequence
@@ -420,6 +418,7 @@ impl Source<'_> {
                     title: record.title,
                     taxname: None,
                     texts: Vec::new(),
+                    has_source: false,
                     // IUPACaa letters: the 20 of SEG's alphabet have their NCBIstdaa codes, and
                     // every other letter is one SEG counts as bogus, as NCBIstdaa's `*` and `-`
                     // that the IUPACaa `X` stands for.
@@ -445,6 +444,7 @@ impl Source<'_> {
                     ids: record.ids,
                     title: Some(record.title),
                     taxname: record.taxname,
+                    has_source: record.has_source,
                     iupacaa: iupacaa_letters(&record.residues),
                     stdaa: record.residues,
                     texts: record.texts,

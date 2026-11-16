@@ -168,17 +168,18 @@ impl<'a> XStreamDb<'a> {
         if self.x_checked.load(std::sync::atomic::Ordering::Acquire) {
             return Ok(());
         }
-        let first = part.first_ordinal() as usize;
+        let first = part.first_ordinal();
         for i in 0..part.len() {
             let with_sentinels = part.protein_with_sentinels(i);
-            let ordinal = first + i;
-            check_protein_sequence(with_sentinels, ordinal as u64, PROGRAM).map_err(XReadError)?;
+            let ordinal = first + i as u32;
+            check_protein_sequence(with_sentinels, || self.db.oid(ordinal), PROGRAM)
+                .map_err(XReadError)?;
             let length = with_sentinels.len() - 2;
             if length > MAX_DBSEQ_LEN {
-                return Err(XReadError(too_long(ordinal, length)).into());
+                return Err(XReadError(too_long(self.db.oid(ordinal), length)).into());
             }
         }
-        self.x_cover(first, first + part.len());
+        self.x_cover(first as usize, first as usize + part.len());
         Ok(())
     }
 
@@ -212,6 +213,11 @@ impl<'a> XStreamDb<'a> {
         self.count
     }
 
+    /// The database read.
+    pub(crate) fn seqdb(&self) -> &'a SeqDb {
+        self.db
+    }
+
     /// `GetTotalLength` (`SeqDb::total_length`).
     pub(crate) fn total_length(&self) -> u64 {
         self.db.total_length()
@@ -223,19 +229,25 @@ impl<'a> XStreamDb<'a> {
         self.db.included_length()
     }
 
-    /// The total length and the number of sequences of the statistics
-    /// (`SeqDb::statistics_numbers`).
-    pub(crate) fn statistics_numbers(&self) -> (u64, u32) {
-        self.db.statistics_numbers()
-    }
-
-    /// `BlastSeqSrcGetAvgSeqLen` (`SeqDb::average_length`).
-    pub(crate) fn average_length(&self) -> i32 {
-        self.db.average_length()
+    /// The numbers of the statistics, with NCBI's types (`SeqDb::statistics`).
+    pub(crate) fn statistics(&self) -> crate::seqdb::DbStatistics {
+        self.db.statistics()
     }
 
     pub(crate) fn longest(&self) -> usize {
         self.longest
+    }
+
+    /// The bytes that NCBI's mapping of its volume's sequence file holds after the sentinel byte
+    /// of sequence `oid` (`SeqDb::protein_mapped_bytes_after`: the next sequences, then the rest
+    /// of the file's last memory page), from the index and the file's length; an error is the
+    /// reader's.
+    pub(crate) fn bytes_after(&self, oid: usize) -> Result<usize> {
+        let after = self
+            .db
+            .protein_mapped_bytes_after(u32::try_from(oid)?)
+            .map_err(read_error)?;
+        Ok(usize::try_from(after)?)
     }
 
     /// Whether the reads have checked every sequence (`x_check`).
@@ -279,17 +291,17 @@ impl<'a> XStreamDb<'a> {
         self.db.min_length()
     }
 
-    /// The block of a pass that starts at `oid`: as many sequences as fit `block_bytes`
+    /// The block of a pass that starts at `ordinal`: as many sequences as fit `block_bytes`
     /// (`SeqDb::next_block`, at least one).
-    fn read_from(&self, oid: usize) -> Result<XBlock> {
-        let range = u32::try_from(oid)
+    fn read_from(&self, ordinal: usize) -> Result<XBlock> {
+        let range = u32::try_from(ordinal)
             .ok()
             .and_then(|first| self.db.next_block(first, self.block_bytes))
-            .ok_or_else(|| anyhow!("BLASTX database ordinal id {oid} is past the database"))?;
+            .ok_or_else(|| anyhow!("BLASTX database ordinal id {ordinal} is past the database"))?;
         let part = self.db.read_block(range).map_err(read_error)?;
         self.x_check(&part)?;
         Ok(XBlock {
-            first: oid,
+            first: ordinal,
             end: range.end_ordinal() as usize,
             parts: vec![part],
         })

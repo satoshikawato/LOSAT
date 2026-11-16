@@ -394,9 +394,16 @@ impl CallerCallback {
 
 // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
 // /* Use a local diagnostics structure ... shared between multiple threads */
+// LOSAT_WASI_THREADS_DEBUG is read once per process, as LOSAT's other switches are: the stage
+// reports run once per subject chunk, and a read of the environment there cost about 340
+// instructions each (3 % of a megablast search of 20,000 short subjects).
+#[inline]
 pub fn diagnostics_enabled() -> bool {
-    std::env::var("LOSAT_WASI_THREADS_DEBUG")
-        .is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("LOSAT_WASI_THREADS_DEBUG")
+            .is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+    })
 }
 
 // Diagnostic lines go out as one write, so a line another thread or the host
@@ -417,10 +424,22 @@ fn report_pool(program: &str, requested: usize, pool: usize) {
 // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
 // /* Use a local diagnostics structure ... shared between multiple threads */
 // Record stage selection separately from the already verified pool size.
+// The test is taken where the stage runs (blastn reports a stage for every subject chunk); the
+// line is written out of line.
+#[inline]
 pub fn report_stage(program: &str, stage: &str, work_items: usize, parallel: bool) {
     if diagnostics_enabled() {
-        write_diagnostic_line(format!("[losat-thread-stage] program={program} stage={stage} work_items={work_items} parallel_selected={parallel} measured_activity=null\n"));
+        report_stage_line(program, stage, work_items, parallel);
     }
+}
+
+// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1659-1668
+// /* Use a local diagnostics structure ... shared between multiple threads */
+// The line of `report_stage`, written only when LOSAT_WASI_THREADS_DEBUG is on.
+#[cold]
+#[inline(never)]
+fn report_stage_line(program: &str, stage: &str, work_items: usize, parallel: bool) {
+    write_diagnostic_line(format!("[losat-thread-stage] program={program} stage={stage} work_items={work_items} parallel_selected={parallel} measured_activity=null\n"));
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1659-1664

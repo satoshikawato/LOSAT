@@ -68,6 +68,23 @@
 /// and print the same text around it (line NP, M/DECISIONS.md 14).
 pub const NCBI_BUILD_ROOT: &str = "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../..";
 
+/// The build tree that NCBI rpsbproc 0.5.1's reports name: that of its Linux x64 binary of the
+/// 2025-05-13 package (the oracle of `tests/fixtures/rpsbproc`), built apart from BLAST+ on its own
+/// toolkit. Its `ncbireg.cpp` throws at the lines of BLAST+ 2.17.0's (env parity probe I of
+/// 2026-11-14 on ws: the seven throws of `IRWRegistry::x_Read`); bioconda's rpsbproc 0.5.1 names
+/// another tree (`/opt/conda/conda-bld/rpsbproc_<n>/work/ncbi_cxx/c++`).
+pub const RPSBPROC_BUILD_ROOT: &str =
+    "/export/home/tomcat/TeamCity/Agent2/work/b895474bf74772ad/struct_tree";
+
+/// The build tree that the reports of NCBI's `program` name: rpsbproc's own
+/// ([`RPSBPROC_BUILD_ROOT`]), else BLAST+ 2.17.0's ([`NCBI_BUILD_ROOT`]).
+pub fn build_root(program: &str) -> &'static str {
+    match program {
+        "rpsbproc" => RPSBPROC_BUILD_ROOT,
+        _ => NCBI_BUILD_ROOT,
+    }
+}
+
 /// Where NCBI throws an exception (`NCBI_THROW`, `NCBI_THROW2`, `NCBI_RETHROW`): what its
 /// report prints of the place.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -160,6 +177,47 @@ impl NcbiException {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/include/corelib/ncbiexpt.hpp:749-752
+    // ```c++
+    // #define NCBI_RETHROW_SAME(prev_exception, message)                \
+    //     do { prev_exception.AddBacklog(DIAG_COMPILE_INFO, message,    \
+    //                                    prev_exception.GetSeverity()); \
+    //     throw; }  while (0)
+    // ```
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:274-285
+    // ```c++
+    // void CException::AddBacklog(const CDiagCompileInfo& info,
+    //                             const string& message,
+    //                             EDiagSev severity)
+    // {
+    //     const CException* prev = m_Predecessor;
+    //     m_Predecessor = x_Clone();
+    //     ...
+    //     x_Init(info, message, 0, severity);
+    // ```
+    /// `NCBI_RETHROW_SAME(self, message)` in `function` at `line` of `file`: the same exception
+    /// (its class, code and extra text) with the new place and message, the old one its
+    /// predecessor (the serial object frames' `END_OBJECT_FRAME`, `report::serial::xml`).
+    pub fn rethrow_same(
+        self,
+        file: &'static str,
+        line: u32,
+        function: &'static str,
+        message: impl Into<String>,
+    ) -> Self {
+        NcbiException {
+            site: ThrowSite {
+                file,
+                line,
+                kind: self.site.kind,
+                function: Some(function),
+            },
+            message: message.into(),
+            extra: self.extra.clone(),
+            predecessor: Some(Box::new(self)),
+        }
+    }
+
     /// Where the exception was thrown (for the tests; the report reads the field in `report_this`).
     #[cfg(test)]
     pub fn site(&self) -> ThrowSite {
@@ -177,8 +235,9 @@ impl NcbiException {
         &self.message
     }
 
-    /// `ReportThis()`: the line of this exception, without its predecessors.
-    fn report_this(&self, out: &mut String) {
+    /// `ReportThis()`: the line of this exception, without its predecessors, with the build tree
+    /// `root`.
+    fn report_this(&self, out: &mut String, root: &str) {
         let ThrowSite {
             file,
             line,
@@ -186,7 +245,7 @@ impl NcbiException {
             function,
         } = self.site;
         out.push_str(&format!(
-            "T0 \"{NCBI_BUILD_ROOT}/{file}\", line {line}: Error: ({kind}) "
+            "T0 \"{root}/{file}\", line {line}: Error: ({kind}) "
         ));
         if let Some(function) = function {
             out.push_str(function);
@@ -207,12 +266,17 @@ impl NcbiException {
     }
 
     /// `CException::what()` (`ReportAll`): the report of the chain, oldest exception first,
-    /// ending with a line feed.
+    /// ending with a line feed, in BLAST+ 2.17.0's build ([`NCBI_BUILD_ROOT`]).
     pub fn what(&self) -> String {
+        self.what_in(NCBI_BUILD_ROOT)
+    }
+
+    /// [`NcbiException::what`] of the build whose tree is `root` ([`build_root`]).
+    pub fn what_in(&self, root: &str) -> String {
         let mut os = String::from("NCBI C++ Exception:\n");
         for e in self.chain().iter().rev() {
             os.push_str("    ");
-            e.report_this(&mut os);
+            e.report_this(&mut os, root);
             os.push('\n');
         }
         os
@@ -380,7 +444,42 @@ fn post_error(id: &str, message: &str) -> String {
 
 /// `post_error` of a message that is bytes: NCBI's diagnostic stream writes them as they are.
 fn post_error_bytes(id: &str, message: &[u8]) -> Vec<u8> {
-    let mut line = format!("Error: ({id}) ").into_bytes();
+    error_post_line(Some(id), None, message)
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:5685-5694, 5749-5755
+// ```c++
+//     // (<err_code>.<err_subcode>) or (err_text)
+//     if ((m_ErrCode  ||  m_ErrSubCode || m_ErrText)  &&
+//         IsSetDiagPostFlag(eDPF_ErrorID, m_Flags)) {
+//         os << '(';
+//         ...
+//         os << ") ";
+//     }
+//     ...
+//     // [<prefix1>::<prefix2>::.....]
+//     if (m_Prefix  &&  *m_Prefix  &&  IsSetDiagPostFlag(eDPF_Prefix, m_Flags))
+//         os << '[' << m_Prefix << "] ";
+//
+//     // <message>
+//     if (m_BufferLen)
+//         os.write(m_Buffer, m_BufferLen);
+// ```
+/// A post of severity `Error` as `SDiagMessage::x_OldWrite` writes it with NCBI's default flags
+/// (quoted above and at [`NcbiException::report_default_ex`]): `Error: `, the error id `(<id>) `
+/// when the post has one (`<err_code>.<err_subcode>` or `m_ErrText`), the application's prefix
+/// `[<prefix>] ` when it set one (`SetDiagPostPrefix`), the message as it is, and a line feed.
+/// The one place that makes this line: the exception reports here, the posts of the bytes that
+/// NCBI's object streams replace (`report::serial::encoder::ReplacedChar::post`) and the
+/// applications' `ERR_POST(Error << ...)` (`ncbi_app::Diag::err_post_bytes`).
+pub(crate) fn error_post_line(id: Option<&str>, prefix: Option<&str>, message: &[u8]) -> Vec<u8> {
+    let mut line = b"Error: ".to_vec();
+    if let Some(id) = id {
+        line.extend_from_slice(format!("({id}) ").as_bytes());
+    }
+    if let Some(prefix) = prefix {
+        line.extend_from_slice(format!("[{prefix}] ").as_bytes());
+    }
     line.extend_from_slice(message);
     line.push(b'\n');
     line

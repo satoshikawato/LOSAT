@@ -748,9 +748,9 @@ impl DeflineFields {
             let tax_id = defline.taxid.unwrap_or(0);
             fields.tax_id = tax_id.to_string();
             if wants(b"LBKS") {
-                let (names, lookup_texts) = source.tax_info(tax_id)?;
+                let (found, lookup_texts) = source.tax_info(tax_id)?;
                 texts.extend(lookup_texts);
-                match names {
+                match found.names() {
                     Some(names) => {
                         // A kingdom that NCBI reads past its mapping of taxdb.btd: refused
                         // where `%K` writes it.
@@ -761,8 +761,8 @@ impl DeflineFields {
                             }
                             Err(_) => Vec::new(),
                         };
-                        fields.scientific_name = names.scientific_name;
-                        fields.common_name = names.common_name;
+                        fields.scientific_name = names.scientific_name.clone();
+                        fields.common_name = names.common_name.clone();
                         fields.blast_name = check_name(&names.blast_name);
                     }
                     None => {
@@ -792,9 +792,9 @@ impl DeflineFields {
                     fields
                         .leaf_node_common_names
                         .extend_from_slice(separator.as_bytes());
-                    let (names, lookup_texts) = source.tax_info(tax_id)?;
+                    let (found, lookup_texts) = source.tax_info(tax_id)?;
                     texts.extend(lookup_texts);
-                    match names {
+                    match found.names() {
                         Some(names) => {
                             fields
                                 .leaf_node_scientific_names

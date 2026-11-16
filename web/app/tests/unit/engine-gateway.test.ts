@@ -69,7 +69,7 @@ function setup(renewal?: { maxRuns?: number; highWaterBytes?: number }, extra: P
   const engine = new WasmEngine({
     ...extra,
     assets: ASSETS,
-    control: { describe: () => Promise.reject(new Error('unused')), validate: () => Promise.reject(new Error('unused')) },
+    control: { describe: () => Promise.reject(new Error('unused')), start: () => Promise.reject(new Error('unused')), validate: () => Promise.reject(new Error('unused')) },
     hardwareConcurrency: 8,
     ...(renewal === undefined ? {} : { renewal }),
     createWorker: () => {

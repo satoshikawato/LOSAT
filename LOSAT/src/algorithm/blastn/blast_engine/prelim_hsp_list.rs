@@ -9,7 +9,7 @@
 //! the loop. An ungapped search (`ungapped_hsp_list`) makes the list from the sorted hits.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:503-578 (the chunk loop of
-//! `s_BlastSearchEngineCore` after the word finder: `GetGappedScore`, which is
+//! `s_BlastSearchEngineOneContext` after the word finder: `GetGappedScore`, which is
 //! `BLAST_GetGappedScore`, c++/src/algo/blast/core/blast_gapalign.c:3664-4114, with its loop on
 //! the initial hits at :3850; the purge and the sort; or `BLAST_GetUngappedHSPList`,
 //! blast_gapalign.c:4719-4775; the offsets)
@@ -30,25 +30,24 @@
 //! ```
 //!
 //! This module is a child of `run` for the types it keeps private (`UngappedHit`, `PrelimHit`,
-//! `SubjectChunk`, `QueryContext`, `XAheadScratch`, `BlastnTiming`, the sorts). Its functions are
-//! the code of `search_query_batch`'s `collect_prelim_hits_for_chunk` after the scan loop:
-//! `gapped_score_list` and `x_prelim_extend` the bodies of what were the closures `x_prelim_list`
-//! and `x_prelim_extend`, and `ungapped_hsp_list`, `sort_ungapped_hits_for_gapped` and
-//! `gapped_hsp_list` the code around them. The values they read are the fields of `GappedPrelim`
-//! and `GappedDrive`; what the loop works on is `GappedListState`. The query group tasks of
-//! `x_qgroup_par` run `gapped_score_list`, and the look-ahead helpers `x_prelim_extend`, on the
-//! threads of the pool, so what they read is `Sync`.
+//! `SubjectChunk`, `XAheadScratch`, the sorts). Its functions are the code of
+//! `prelim_subject::prelim_chunk_hits` after the scan loop: `gapped_score_list` and
+//! `x_prelim_extend` the bodies of what were the closures `x_prelim_list` and `x_prelim_extend`,
+//! and `ungapped_hsp_list`, `sort_ungapped_hits_for_gapped` and `gapped_hsp_list` the code around
+//! them. The values they read are the fields of `GappedPrelim` (the batch's
+//! `prelim_subject::PrelimBatch` and the chunk's own) and `GappedDrive`; what the loop works on is
+//! `GappedListState`. The query group tasks of `x_qgroup_par` run `gapped_score_list`, and the
+//! look-ahead helpers `x_prelim_extend`, on the threads of the pool, so what they read is `Sync`.
 
+use super::prelim_subject::PrelimBatch;
 use super::x_greedy_prelim::XPrelimSubject;
 use super::{
     blastn_trace, extend_gapped_heuristic_with_scratch, purge_prelim_hits_with_common_endpoints,
     score_compare_prelim_hits, score_compare_ungapped_hits, sort_prelim_hits_by_score, x_bn_mapped,
-    x_bn_mapped_reach, x_qgroup_par, BlastIntervalTree, BlastnTiming, FastaRecord, GapAlignScratch,
-    GreedyAlignScratch, IndexMethod, PrelimHit, QueryContext, SubjectChunk, TreeHsp, UngappedHit,
-    XAheadScratch, COMPRESSION_RATIO, X_SORT,
+    x_bn_mapped_reach, x_qgroup_par, BlastIntervalTree, FastaRecord, GapAlignScratch,
+    GreedyAlignScratch, IndexMethod, PrelimHit, SubjectChunk, TreeHsp, UngappedHit, XAheadScratch,
+    COMPRESSION_RATIO, X_SORT,
 };
-use crate::algorithm::blastn::alignment::gapped::BlastnaMatrix;
-use crate::utils::threading::SearchPool;
 use std::sync::atomic::AtomicU64;
 
 /// The HSP list of one subject chunk of an ungapped (`-ungapped`) search, made from its initial
@@ -242,13 +241,14 @@ pub(super) fn sort_ungapped_hits_for_gapped(
 }
 
 /// What the gapped preliminary loop of one subject chunk (`gapped_score_list`) and one hit's
-/// extension (`x_prelim_extend`) read: the trace and verbose switches, the subject (its index, its
-/// trace id, its letters for the greedy aligner), the chunk (its offset, packed letters and
-/// length), the queries' contexts, the scoring, whether the chunk is the owner's serial call (not
-/// one of a chunk batch on the pool) and the chunk's number of initial hits, and the look-ahead's schedule. Built once per chunk by
-/// `collect_prelim_hits_for_chunk`, where the closures were; every field is a shared reference or
-/// a `Copy` value, so the struct is `Sync` for the query group tasks and the look-ahead helpers on
-/// the pool.
+/// extension (`x_prelim_extend`) read: the batch's (`PrelimBatch`, or its copy per subject: the
+/// trace and verbose switches, the queries' contexts, the scoring, the look-ahead's schedule), and
+/// the chunk's own: the subject (its index, its trace id, its letters for the greedy aligner), the
+/// chunk (its offset, packed letters and length), whether the chunk is the owner's serial call (not
+/// one of a chunk batch on the pool) and the chunk's number of initial hits. Built once per chunk
+/// by `prelim_subject::prelim_chunk_hits`, where the closures were; every field is a shared
+/// reference or a `Copy` value, so the struct is `Sync` for the query group tasks and the
+/// look-ahead helpers on the pool.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3664-3675
 /// ```c
@@ -267,9 +267,13 @@ pub(super) fn sort_ungapped_hits_for_gapped(
 /// NCBI's function takes the query, the subject and the parameters; the look-ahead's fields
 /// have no NCBI counterpart (scheduling only).
 pub(super) struct GappedPrelim<'a> {
-    /// The trace lines (`blastn_trace`) and the verbose lines.
-    pub(super) blastn_trace_enabled: bool,
-    pub(super) verbose: bool,
+    /// The batch's values: the trace lines (`blastn_trace`) and the verbose lines; the queries'
+    /// contexts (their letters in blastna, their lengths and frames, and their hit-saving cutoffs,
+    /// by context); the scoring, the aligner (dynamic programming or greedy) and its X-dropoff,
+    /// and the interval tree's diagonal separation; the look-ahead window (`None` when the helpers
+    /// do not run), the rule of LOSAT_X_GREEDYSPEC (kept as its `x_reach!` key) and the threads of
+    /// the pool.
+    pub(super) batch: &'a PrelimBatch<'a>,
     /// The subject's index in the batch, its trace id, and its letters one per byte for the
     /// greedy aligner (`XPrelimSubject`).
     pub(super) s_idx: usize,
@@ -279,38 +283,18 @@ pub(super) struct GappedPrelim<'a> {
     pub(super) chunk: &'a SubjectChunk,
     pub(super) s_seq_packed: &'a [u8],
     pub(super) s_len: usize,
-    /// The queries' contexts: their letters in blastna, their lengths and frames, and their
-    /// hit-saving cutoffs, by context.
-    pub(super) encoded_queries_blastna: &'a [&'a [u8]],
-    pub(super) query_contexts: &'a [QueryContext],
-    pub(super) hit_saving_cutoff_scores: &'a [i32],
-    /// The scoring, the aligner (dynamic programming or greedy) and its X-dropoff, and the
-    /// interval tree's diagonal separation.
-    pub(super) reward: i32,
-    pub(super) penalty: i32,
-    pub(super) gap_open: i32,
-    pub(super) gap_extend: i32,
-    pub(super) score_matrix: &'a BlastnaMatrix,
-    pub(super) use_dp: bool,
-    pub(super) x_drop_gapped: i32,
-    pub(super) min_diag_separation: i32,
     /// Whether this is the owner's serial call for the chunk (the look-ahead's condition), and the
     /// chunk's number of initial hits (the verbose line).
     pub(super) reuse_prelim_hits: bool,
     pub(super) total_ungapped: usize,
-    /// The look-ahead window (`None` when the helpers do not run), the rule of LOSAT_X_GREEDYSPEC
-    /// (kept as its `x_reach!` key) and the threads of the pool.
-    pub(super) x_ahead_window: Option<usize>,
-    pub(super) x_greedy_spec: bool,
-    pub(super) num_threads: usize,
 }
 
 /// What the gapped preliminary loop over one list works on and fills: the interval tree, the
 /// scratch of its score-only calls, the scratch list of the look-ahead helpers (`None` for a query
 /// group task, which runs without helpers) and the list that the hits it keeps go to. The owner's
 /// tree, greedy scratch, helper list and hit list come from the subject's scratch
-/// (`SubjectScratch`), its gap scratch from `collect_prelim_hits_for_chunk`; a query group task's
-/// tree and scratch come from its state, its list from the task.
+/// (`SubjectScratch`), its gap scratch from `prelim_subject::prelim_chunk_hits`; a query group
+/// task's tree and scratch come from its state, its list from the task.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3830-3831,4084-4088
 /// ```c
@@ -371,10 +355,14 @@ pub(super) fn x_prelim_extend(
     x_scratch: &mut XAheadScratch<'_>,
 ) -> Option<(usize, usize, usize, usize, i32, usize, usize)> {
     let &GappedPrelim {
+        batch,
         x_prelim_subject,
         chunk,
         s_seq_packed,
         s_len,
+        ..
+    } = gapped;
+    let &PrelimBatch {
         encoded_queries_blastna,
         reward,
         penalty,
@@ -384,7 +372,7 @@ pub(super) fn x_prelim_extend(
         use_dp,
         x_drop_gapped,
         ..
-    } = gapped;
+    } = batch;
     let q_seq_blastna = encoded_queries_blastna[uh.context_idx as usize];
     if use_dp {
         let mut seed_qs = uh.seed_q_off as usize;
@@ -451,14 +439,19 @@ pub(super) fn gapped_score_list(
     state: GappedListState<'_>,
 ) -> (usize, usize) {
     let &GappedPrelim {
-        blastn_trace_enabled,
-        verbose,
+        batch,
         s_idx,
         s_id,
         x_prelim_subject,
         chunk,
         s_seq_packed,
         s_len,
+        reuse_prelim_hits,
+        total_ungapped,
+    } = gapped;
+    let &PrelimBatch {
+        blastn_trace_enabled,
+        verbose,
         encoded_queries_blastna,
         query_contexts,
         hit_saving_cutoff_scores,
@@ -470,12 +463,11 @@ pub(super) fn gapped_score_list(
         use_dp,
         x_drop_gapped,
         min_diag_separation,
-        reuse_prelim_hits,
-        total_ungapped,
         x_ahead_window,
         x_greedy_spec,
         num_threads,
-    } = gapped;
+        ..
+    } = batch;
     let GappedListState {
         interval_tree,
         gap_scratch,
@@ -985,12 +977,31 @@ pub(super) fn gapped_score_list(
     (dbg_gapped_calls, dbg_containment_skipped)
 }
 
+/// No NCBI counterpart: LOSAT's `-verbose` line of a chunk's gapped stage (its time, the
+/// alignments run, the hits the tree held and the chunk's initial hits); a chunk without initial
+/// hits writes it from `prelim_subject::prelim_chunk_hits` (no stage ran: zeros). Out of line,
+/// off the chunk's path.
+#[cold]
+#[inline(never)]
+pub(super) fn verbose_gapped_line(
+    gapped_elapsed: std::time::Duration,
+    dbg_gapped_calls: usize,
+    dbg_containment_skipped: usize,
+    total_ungapped: usize,
+) {
+    eprintln!(
+        "[INFO] Gapped extension took {:?}: calls={}, skipped={}, total_ungapped={}",
+        gapped_elapsed, dbg_gapped_calls, dbg_containment_skipped, total_ungapped
+    );
+}
+
 /// What the gapped HSP list of one subject chunk (`gapped_hsp_list`) reads besides
 /// `GappedPrelim`: the query groups' counts and order (`sort_ungapped_hits_for_gapped`; the order
-/// is `None` unless the loop runs per query, LOSAT_X_QGROUPPAR), the batch's queries (their number), the
-/// length that bounds a query group task's interval tree (the concatenated queries; the chunk's is
-/// `GappedPrelim::s_len`), the pool, the LOSAT_TIMING counters and the start of the gapped stage's
-/// clock.
+/// is `None` unless the loop runs per query, LOSAT_X_QGROUPPAR) and the start of the gapped stage's
+/// clock (`None` unless LOSAT_TIMING or `-verbose` reads it). The batch's queries (their number),
+/// the length that bounds a query group task's interval tree (the concatenated queries; the
+/// chunk's is `GappedPrelim::s_len`), the pool and the LOSAT_TIMING counters are the batch's
+/// (`GappedPrelim::batch`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3830-3831
 /// ```c
@@ -1003,12 +1014,7 @@ pub(super) struct GappedDrive<'d> {
     /// Borrowed from the caller, which owns them (they are dropped where they were before).
     pub(super) x_counts: &'d Option<Vec<u32>>,
     pub(super) x_order: &'d Option<Vec<u32>>,
-    pub(super) queries: &'d [FastaRecord],
-    pub(super) query_concat_length: usize,
-    pub(super) parallel_pool: &'d SearchPool<'d>,
-    /// `LOSAT_TIMING` counters, `None` when timing is off.
-    pub(super) timing_ref: Option<&'d BlastnTiming>,
-    pub(super) gapped_start_time: std::time::Instant,
+    pub(super) gapped_start_time: Option<std::time::Instant>,
 }
 
 /// The gapped HSP list of one subject chunk, from its initial hits in score order: the gapped loop
@@ -1042,20 +1048,24 @@ pub(super) fn gapped_hsp_list(
     state: GappedListState<'_>,
 ) -> Vec<PrelimHit> {
     let &GappedPrelim {
-        verbose,
+        batch,
         chunk,
         s_len,
         reuse_prelim_hits,
         total_ungapped,
         ..
     } = gapped;
-    let &GappedDrive {
-        x_counts,
-        x_order,
+    let &PrelimBatch {
+        verbose,
         queries,
         query_concat_length,
         parallel_pool,
         timing_ref,
+        ..
+    } = batch;
+    let &GappedDrive {
+        x_counts,
+        x_order,
         gapped_start_time,
     } = drive;
     let GappedListState {
@@ -1125,6 +1135,26 @@ pub(super) fn gapped_hsp_list(
         *prelim_hits = x_hits;
         x_purged = true;
     } else {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3706-3707,3826-3831
+        // ```c
+        //    if (init_hitlist->total == 0)
+        //       return 0;
+        // ...
+        //    else {
+        //       tree = Blast_IntervalTreeInit(0, query->length+1,
+        //                                     0, subject->length+1);
+        //    }
+        // ```
+        // query->length is the concatenated length for both strands (2*len + 1). The tree is
+        // the subject scratch's (`x_tree`), given this chunk's ranges here, inside the gapped
+        // stage of a chunk with initial hits (a chunk without one returns before it,
+        // `prelim_subject::prelim_chunk_hits`); the query group tasks above set up their own.
+        interval_tree.reset_with_bounds(
+            0,                                // q_min
+            (query_concat_length + 1) as i32, // q_max
+            0,                                // s_min
+            (s_len + 1) as i32,               // s_max
+        );
         let (calls, skipped) = gapped_score_list(
             gapped,
             ungapped_hits,
@@ -1140,8 +1170,11 @@ pub(super) fn gapped_hsp_list(
         dbg_containment_skipped = skipped;
     }
 
-    // DEBUG: Log gapped extension stats
-    let gapped_elapsed = gapped_start_time.elapsed();
+    // DEBUG: Log gapped extension stats (the clock is read only when LOSAT_TIMING or `-verbose`
+    // is on, `prelim_subject::prelim_chunk_hits`).
+    let gapped_elapsed = gapped_start_time
+        .map(|start| start.elapsed())
+        .unwrap_or_default();
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3917-3922
     // ```c
     // if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
@@ -1160,9 +1193,11 @@ pub(super) fn gapped_hsp_list(
         );
     }
     if verbose {
-        eprintln!(
-            "[INFO] Gapped extension took {:?}: calls={}, skipped={}, total_ungapped={}",
-            gapped_elapsed, dbg_gapped_calls, dbg_containment_skipped, total_ungapped
+        verbose_gapped_line(
+            gapped_elapsed,
+            dbg_gapped_calls,
+            dbg_containment_skipped,
+            total_ungapped,
         );
     }
 

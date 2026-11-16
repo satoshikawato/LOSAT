@@ -81,8 +81,9 @@
 //!   `.ncbirc`) and the query batch and archive settings (`BATCH_SIZE`, `ARCHIVE_FORMAT`, ...);
 //!   a search of records reads no NCBI setting, unless its argv has one of the NCBI C++ Toolkit's
 //!   words below, but where NCBI's library looks one up itself: blastn's `-window_masker_taxid`,
-//!   the organism report of outfmt 18 and the file of a `-matrix` that NCBI's tables do not have
-//!   (tblastx, blastx `-ungapped`).
+//!   the taxonomy database of the organism report of outfmt 18 and of the plural taxonomy names
+//!   (`sscinames`, `scomnames`, `sblastnames`, `sskingdoms`), and the file of a `-matrix` that
+//!   NCBI's tables do not have (tblastx, blastx `-ungapped`).
 //! - `-logfile`, `-conffile` and `-dryrun` work as on the command line: a call whose argv has one
 //!   runs NCBI's application start first (as does a call that reads NCBI's settings, when it
 //!   first reads them). The start's messages about the registry files go where the command line
@@ -107,13 +108,24 @@
 //!   between batches and stops the search by not asking for the next one. Inside a batch only
 //!   the host can stop it, by ending the thread or the process.
 //! - The records are read before the search, so a reader error is an [`Error::Input`] before
-//!   any report, where the command line has reported the batches before the error.
+//!   any report, where the command line has reported the batches before the error (and, with
+//!   `-out`, made the file: [`run_to_file`] makes it where the command line makes `-out`, after
+//!   the subjects are read, so an error of the query records leaves no file there).
 //! - Outfmt 13 and 14 write side files next to their report, so they come through
 //!   [`run_to_file`] only; a report in memory has no place for them (the in-memory search under
 //!   the API, `local_blast`, takes a receiver of them, `OutputSink::Files`, which LOSAT Web gives).
-//! - [`Program::Psiblast`] is the search of LOSAT's `psiblast`: its first round, and the formats
-//!   it writes. The API writes no PSSM file, so it refuses `-out_pssm`, `-out_ascii_pssm`,
-//!   `-save_pssm_after_last_round` and `-save_each_pssm` ([`validate`]).
+//! - [`Program::Psiblast`] is the search of LOSAT's `psiblast`, with its rounds
+//!   (`-num_iterations`) and the formats it writes: the reports hold every round as the command
+//!   line writes them, each HSP record its round ([`HspRecord::round`]) and each query the
+//!   statistics of each round and whether its rounds converged ([`QueryRounds`],
+//!   [`QueryHits::rounds`]). Its PSSM files (`-out_pssm`, `-out_ascii_pssm`, with
+//!   `-save_pssm_after_last_round` and `-save_each_pssm`) are written where the command line
+//!   writes them, with the argv's names: `-save_each_pssm` numbers them over the call, and over
+//!   the batches of [`run_batches`] as over the command line's run; a call of [`run`](run()) or
+//!   [`run_collect`] whose formats take two searches and that writes them is refused.
+//! - A PSSM query of psiblast and tblastn (the command line's `-in_pssm`) is an input:
+//!   [`Inputs::pssm`] and [`Inputs::pssm_database`] name the file, which the search reads; its one
+//!   query is the PSSM's sequence, query 0 of the results, in one batch of [`run_batches`].
 //! - The API writes no search strategy file either: every program refuses
 //!   `-export_search_strategy` ([`validate`]); the command line writes it.
 //! - [`run_makeblastdb`] and [`run_blastdbcmd`] are the two database programs, and
@@ -130,7 +142,7 @@
 //! - The options: [`validate`], [`Search`], [`API_OWNED`]
 //! - The search: [`run_collect`], [`run`](run()), [`run_to_file`], [`run_batches`]
 //! - The results: [`Outcome`], [`Batches`], [`Batch`], [`Report`], [`HspRecord`], [`QueryStats`],
-//!   [`Strand`], [`QueryHits`], [`SubjectHits`]
+//!   [`QueryRounds`], [`Strand`], [`QueryHits`], [`SubjectHits`]
 //! - The tools: [`run_makeblastdb`], [`run_blastdbcmd`], [`run_dustmasker`], [`run_segmasker`],
 //!   [`run_convert2blastmask`]
 //! - The failures: [`Error`]
@@ -140,13 +152,14 @@ mod batches;
 mod describe;
 mod error;
 mod input;
+mod parts;
 // The shared local search entry of the command line and the web ABIs: each program's `run_local`
 // and the routing of its outputs. It speaks the engine's types, so it stays outside the API.
 pub(crate) mod local_blast;
 mod program;
 mod run;
 mod search;
-mod start;
+pub(crate) mod start;
 mod tools;
 mod view;
 
@@ -156,7 +169,9 @@ pub use describe::{describe, Description, Parameter, ValueKind};
 pub use error::Error;
 pub use input::{read_fasta, read_input_file, read_inputs, Inputs, Role};
 pub use program::Program;
-pub use run::{run, run_collect, run_to_file, HspRecord, Outcome, QueryStats, Report, Strand};
+pub use run::{
+    run, run_collect, run_to_file, HspRecord, Outcome, QueryRounds, QueryStats, Report, Strand,
+};
 pub(crate) use search::file_options;
 pub use search::{validate, Search, API_OWNED};
 pub use tools::{

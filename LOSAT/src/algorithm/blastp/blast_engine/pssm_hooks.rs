@@ -1,5 +1,5 @@
 //! The stages of a psiblast `-in_pssm` search (series PS, item PS4a) that differ from blastp's,
-//! called once per stage from `run_resolved_in_pool` when the search has a PSSM
+//! called once per stage from `run_call` when the search has a PSSM
 //! (`ResolvedBlastpArgs::psi_search`): the lookup table and contexts, the preliminary search with
 //! its cutoffs from the PSSM's Karlin blocks, the CBS-0 traceback, and the Karlin blocks of the
 //! report. The kernels and stages are `algorithm::pssm_search`'s; this module hands them blastp's
@@ -33,7 +33,7 @@ use crate::algorithm::blastp::hsp::BlastpHitList;
 use crate::algorithm::blastp::x_prelim_compact::XPrelimHsp;
 use crate::algorithm::blastp::x_redo_subjects::XRedoSubjects;
 use crate::algorithm::pssm_search::evalue::EvalueStats;
-use crate::algorithm::pssm_search::lookup::build_pssm_lookup;
+use crate::algorithm::pssm_search::lookup::build_pssm_lookup_in;
 use crate::algorithm::pssm_search::prelim::{PssmPrelim, PssmSubjectScratch};
 use crate::algorithm::pssm_search::redo1;
 use crate::algorithm::pssm_search::traceback0::PssmTraceback0;
@@ -47,8 +47,48 @@ use crate::core::link_hsps::{EvenGapLinkParams, LinkContext};
 use crate::stats::search_space::SearchSpace;
 use crate::stats::{BlastGumbelBlk, KarlinParams};
 
-/// The lookup table of the PSSM and the query's contexts ([`psi_contexts`]).
+/// The lookup table of the PSSM and the query's contexts ([`psi_contexts`]): the PSSM's words
+/// over the query's lookup segments, the complement of its masks (`-seg`, `-lcase_masking`; with
+/// `-soft_masking true` the masks keep words out of the table only), which blastp's query
+/// preparation computes for its own table (`prepare_matrix_lookup_query_for_word_size`). The
+/// query frames are blastp's (`blastp_query_frames`): a hard mask's letters are X there, which
+/// `kbp_std` reads (`psi_contexts`), and the PSSM search reads them where NCBI reads the masked
+/// query (the gap trigger, the position-based scaling of `pssm_redo`). The PSSM itself is made
+/// of the query's letters unmasked (`psi_round::next_pssm`).
 ///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:170-214
+/// ```c++
+///     BlastSeqLoc* lookup_segments = NULL;
+///     BlastScoreBlk* sbp = NULL;
+///     try {
+///         sbp =
+///         CSetupFactory::CreateScoreBlock(opts_memento.get(), query_data,
+///                                         &lookup_segments, retval->m_Messages,
+///     ...
+///     if (pssm.NotEmpty()) {
+///     ...
+///         PsiBlastSetupScoreBlock(sbp, pssm, retval->m_Messages, options);
+///     }
+///     ...
+///     // 5. Create the lookup table
+///     if ( !retval->m_QuerySplitter->IsQuerySplit() ) {
+///         LookupTableWrap* lut =
+///             CSetupFactory::CreateLookupTable(query_data, opts_memento.get(),
+///                                              sbp, lookup_segments_wrap,
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:621-637 (the masked letters,
+/// then the complement of the masks)
+/// ```c
+///     if (!mask_at_hash) {
+///         BlastSetUp_MaskQuery(query_blk, query_info, filter_maskloc,
+///                              program_number);
+///     }
+///     ...
+///     if (lookup_segments) {
+///         BLAST_ComplementMaskLocations(program_number, query_info,
+///                                       filter_maskloc, lookup_segments);
+///     }
+/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:86-95 (quoted at
 /// `pssm_search::lookup`)
 #[cold]
@@ -61,11 +101,32 @@ pub(super) fn pssm_lookup(
         .psi_search
         .as_deref()
         .expect("the lookup table of a PSSM search");
-    let contexts = psi_contexts(args, query_frames);
-    let table = build_pssm_lookup(
+    let (lookup_segments, mut contexts) = psi_query(args, query_frames);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-215 (quoted above:
+    // no lookup table for a split query)
+    // A later round of a query that NCBI splits: its chunks search without the PSSM
+    // (`search_split_query_batches`), so the PSSM's table indexes no word, and the round reads
+    // `kbp_std` of its set-up's query (`PsiSearch::split_setup`), whose validity the round driver
+    // checked.
+    let lookup_segments: Vec<(i64, i64)> = match psi.split_setup.as_ref() {
+        Some(setup) => {
+            let (_, setup_contexts) = psi_query(args, &[vec![setup.clone()]]);
+            for (context, setup) in contexts.iter_mut().zip(setup_contexts) {
+                context.karlin_params = setup.karlin_params;
+                context.is_valid = setup.is_valid;
+            }
+            Vec::new()
+        }
+        None => lookup_segments
+            .iter()
+            .map(|&(left, right)| (i64::from(left), i64::from(right)))
+            .collect(),
+    };
+    let table = build_pssm_lookup_in(
         &psi.pssm,
         args.word_size,
         crate::core::blast_util::ncbi_int4_from_double(args.threshold),
+        &lookup_segments,
     );
     (BlastpRuntimeLookup::Aa(table), contexts)
 }
@@ -93,14 +154,23 @@ pub(super) fn psi_contexts(
     args: &ResolvedBlastpArgs,
     query_frames: &[Vec<QueryFrame>],
 ) -> Vec<QueryContext> {
-    let (_, _, contexts) = prepare_matrix_lookup_query_for_word_size(
+    psi_query(args, query_frames).1
+}
+
+/// The query's lookup segments (inclusive offsets, NCBI's `lookup_segments` of the query's one
+/// context) and its contexts ([`psi_contexts`]), as blastp's query preparation computes them.
+fn psi_query(
+    args: &ResolvedBlastpArgs,
+    query_frames: &[Vec<QueryFrame>],
+) -> (Vec<(i32, i32)>, Vec<QueryContext>) {
+    let (_, lookup_segments, contexts) = prepare_matrix_lookup_query_for_word_size(
         query_frames,
         args.word_size,
         false,
         args.scoring.matrix,
         None,
     );
-    contexts
+    (lookup_segments, contexts)
 }
 
 /// The Karlin blocks of a PSSM search: `kbp_psi[0]` and `kbp_gap_psi[0]`.
@@ -113,12 +183,12 @@ pub(super) struct PsiKarlin {
 /// What the e-values and the hit-saving cutoff of a PSSM search read (`EvalueStats`): the Gumbel
 /// block (`sbp->gbp`, Spouge's finite-size correction), and without it (`-searchsp`, `OLD_FSC`:
 /// `ResolvedBlastpArgs::old_fsc`) the effective search space of the query's one context,
-/// `exact_search_spaces[0]`, which `run_resolved_in_pool` computed for blastp.
+/// `exact_search_spaces[0]`, which `call_setup::call_search_spaces` computes for blastp.
 ///
-/// Called for a valid context only (`pssm_prelim`, `pssm_traceback`): without the Gumbel block
-/// the space is then exact (`exact_search_space` holds with `old_fsc`), and its one `None`, a
-/// subject set without letters, has been NCBI's engine error before the search ("The average
-/// subject length is too short").
+/// Called for a valid context only (`pssm_prelim`, `pssm_traceback`): the space is then exact
+/// (`exact_search_spaces` holds every context's), and its one `None`, a subject set without
+/// letters, has been NCBI's engine error before the search ("The average subject length is too
+/// short").
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1885-1889
 /// ```c
@@ -132,9 +202,8 @@ fn psi_stats<'a>(
     exact_search_spaces: &[Option<i64>],
 ) -> EvalueStats<'a> {
     match gumbel {
-        // With the block the search space is 0, which is not a value: nothing of a psiblast
-        // search reads it then (`e_value` and `hit_cutoff` do not; `-use_sw_tback`, whose
-        // Smith-Waterman redo would, is refused), and a `-subject` search has no exact one.
+        // With the block nothing of a psiblast search reads the search space (`e_value` and
+        // `hit_cutoff` do not; `-use_sw_tback`, whose Smith-Waterman redo would, is refused).
         // A reader that needs it with the block (series PR, item PS11c-3) fills it first.
         Some(gumbel) => EvalueStats::spouge(gumbel),
         None => EvalueStats::new(
@@ -165,7 +234,7 @@ thread_local! {
     static PSSM_SCRATCH: RefCell<PssmSubjectScratch> = RefCell::new(PssmSubjectScratch::new());
 }
 
-/// The per-run values of the preliminary search that `run_resolved_in_pool` computed for blastp.
+/// The per-run values of the preliminary search that `run_call` computed for blastp.
 pub(super) struct PssmPrelimRun<'a> {
     pub(super) contexts: &'a [QueryContext],
     pub(super) gapped_params: &'a KarlinParams,
@@ -179,12 +248,24 @@ pub(super) struct PssmPrelimRun<'a> {
     pub(super) search_spaces: &'a [SearchSpace],
     pub(super) cutoff_subject_length: i32,
     pub(super) prelim_evalue: f64,
+    /// The statistics of each subject (`DbStatistics::per_subject`), `None` for the setup's.
+    pub(super) per_subject: Option<PsiSubjectStatistics>,
     pub(super) window: i32,
     pub(super) diag_mask: i32,
     pub(super) offset_array_size: i32,
     pub(super) diag_array_size: i32,
     pub(super) total_query_span: i32,
     pub(super) prelim_hitlist_size: usize,
+}
+
+/// What the statistics of one subject read in a PSSM search (`BLAST_OneSubjectUpdateParameters`,
+/// `stats::setup::subject_eff_lengths`): the query's preliminary option space, the setup's number
+/// of sequences and `-dbsize`.
+#[derive(Clone, Copy)]
+pub(super) struct PsiSubjectStatistics {
+    pub(super) option_space: i64,
+    pub(super) setup_count: i32,
+    pub(super) dbsize: i64,
 }
 
 /// The preliminary and final gapped X-drops of a PSSM search (raw scores): the search's X-drops in
@@ -200,13 +281,18 @@ fn psi_gapped_x_dropoffs(args: &ResolvedBlastpArgs, karlin: &PsiKarlin) -> (i32,
     )
 }
 
-/// The hit-saving cutoff of a PSSM search's context (`hit_params->cutoffs[0]`): `cutoff_score_max`
-/// from `-evalue` (the preliminary e-value) with `kbp_gap_psi`, which the initial words' cutoff
-/// reads, and `cutoff_score`, which psiblast's `-sum_stats true` lowers to the sum statistics'
-/// cutoff where that is smaller (`blast_engine::sum_stats_hit_cutoff` with `kbp_gap_psi`: NCBI's
-/// `kbp_array` is `sbp->kbp_gap`); without sum statistics the two are the same. The traceback's
-/// hit-saving parameters are made again from the same options (`BLAST_GapAlignSetUp`), so its
-/// `cutoff_score_min` is this `cutoff_score` (one context).
+/// The hit-saving cutoff of a PSSM search's context (`hit_params->cutoffs[0]`) at the subject
+/// length `cutoff_subject_length` and the e-value `prelim_evalue`: `cutoff_score_max` with
+/// `kbp_gap_psi`, which the initial words' cutoff reads, and `cutoff_score`, which psiblast's
+/// `-sum_stats true` lowers to the sum statistics' cutoff at that length where that is smaller
+/// (`blast_engine::sum_stats_hit_cutoff` with `kbp_gap_psi`: NCBI's `kbp_array` is
+/// `sbp->kbp_gap`); without sum statistics the two are the same. `psi_prelim_cutoffs` calls it
+/// with the setup's subject length and preliminary e-value, or with a subject's length and
+/// `-evalue` unstretched (the statistics of each subject). With the setup's (as `pssm_traceback`
+/// calls it), its `cutoff_score` is the traceback's `cutoff_score_min` (one context): the
+/// traceback's hit-saving parameters are made again from the same options
+/// (`BLAST_GapAlignSetUp`), and the update for each subject does not reach them
+/// (blast_traceback.c:1596-1628 updates the thread's copy).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:949-976 (quoted at
 /// `blast_engine::sum_stats_hit_cutoff`)
@@ -245,6 +331,47 @@ fn psi_link_context(
     search_space: &SearchSpace,
 ) -> LinkContext {
     super::blastp_link_context(&karlin.gapped, context.aa_len, search_space)
+}
+
+/// The cutoffs of a PSSM search's preliminary stage at one subject length: the setup's
+/// (`cutoff_subject_length`, the preliminary e-value, the setup's search space) or, with the
+/// statistics of each subject, the subject's own (`BLAST_OneSubjectUpdateParameters`: its
+/// length, `-evalue` unstretched, its search space). The initial words' cutoff is the gap trigger
+/// (`kbp_std`) at most `cutoff_score_max` (`BlastInitialWordParametersUpdate`), the hit-saving
+/// cutoff is `psi_hit_cutoffs`' `cutoff_score`, and with psiblast's `-sum_stats true` the
+/// linking reads the words' cutoff as its small-gap cutoff (`BlastLinkHSPParametersUpdate`, one
+/// context: `EvenGapLinkParams::preliminary`) and the context at `search_space`. The matrix's
+/// counterpart is `blast_engine::blastp_prelim_cutoffs`.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:625-646
+/// ```c
+///    if (gapped_calculation) {
+///       /* FIXME, is this correct?? */
+///       hit_params->link_hsp_params->cutoff_small_gap =
+///                                 word_params->cutoff_score_min;
+/// ```
+#[allow(clippy::too_many_arguments)]
+fn psi_prelim_cutoffs(
+    args: &ResolvedBlastpArgs,
+    contexts: &[QueryContext],
+    karlin: &PsiKarlin,
+    stats: &EvalueStats<'_>,
+    subject_length: i32,
+    evalue: f64,
+    search_space: &SearchSpace,
+) -> (i32, i32, Option<(EvenGapLinkParams, LinkContext)>) {
+    let ctx = &contexts[0];
+    let (cutoff_score_max, hit_cutoff) =
+        psi_hit_cutoffs(args, contexts, karlin, stats, subject_length, evalue);
+    let word_cutoff =
+        gap_trigger_raw_score(args.gap_trigger_bits, &ctx.karlin_params).min(cutoff_score_max);
+    let link = args.sum_stats.then(|| {
+        (
+            EvenGapLinkParams::preliminary(word_cutoff),
+            psi_link_context(karlin, ctx, search_space),
+        )
+    });
+    (word_cutoff, hit_cutoff, link)
 }
 
 /// The preliminary search of a PSSM query over the database `database` or the subject set
@@ -344,28 +471,32 @@ pub(super) fn pssm_prelim(
         (args.scoring.gap_open, args.scoring.gap_extend),
         args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats,
     )?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:233-236
+    // ```c++
+    //     if (query_splitter->IsQuerySplit()) {
+    //
+    //         CRef<CSplitQueryBlk> split_query_blk = query_splitter->Split();
+    // ```
+    // A later round of a query that NCBI splits: only its chunks are searched
+    // (`search_split_query_batches`); the whole query scans no subject (its table is empty,
+    // `pssm_lookup`). The X-drops above are the PSSM's, which NCBI's traceback converts.
+    if psi.split_setup.is_some() {
+        return Ok(());
+    }
     let stats = psi_stats(run.gumbel, run.exact_search_spaces);
-    // `run.prelim_evalue` is `-evalue` without the Gumbel block (`run_resolved_in_pool`,
+    // `run.prelim_evalue` is `-evalue` without the Gumbel block (`call_setup::prelim_cutoffs`,
     // blast_parameters.c:931-939).
-    let (cutoff_score_max, hit_cutoff) = psi_hit_cutoffs(
+    // psiblast's `-sum_stats true`: the preliminary stage links each subject's HSPs
+    // (`psi_prelim_cutoffs`).
+    let (word_cutoff, hit_cutoff, link) = psi_prelim_cutoffs(
         args,
         run.contexts,
         &karlin,
         &stats,
         run.cutoff_subject_length,
         run.prelim_evalue,
+        &run.search_spaces[0],
     );
-    let word_cutoff =
-        gap_trigger_raw_score(args.gap_trigger_bits, &ctx.karlin_params).min(cutoff_score_max);
-    // psiblast's `-sum_stats true`: the preliminary stage links each subject's HSPs, with the
-    // small gaps' cutoff of the initial words' smallest cutoff (`word_params->cutoff_score_min`,
-    // one context: `EvenGapLinkParams::preliminary`).
-    let link = args.sum_stats.then(|| {
-        (
-            EvenGapLinkParams::preliminary(word_cutoff),
-            psi_link_context(&karlin, ctx, &run.search_spaces[0]),
-        )
-    });
     let window = run.window;
     let prelim = PssmPrelim {
         rows: &psi.pssm,
@@ -384,6 +515,7 @@ pub(super) fn pssm_prelim(
         link,
     };
     let diag_mask = run.diag_mask;
+    let subject_space_overflow = crate::stats::setup::SubjectSpaceOverflow::default();
     let process_subject = |scratch: &mut BlastpSubjectScratch,
                            s_idx: usize,
                            subject: BlastpSubjectRef<'_>,
@@ -394,6 +526,59 @@ pub(super) fn pssm_prelim(
         if subject.aa_len == 0 {
             return;
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443 and
+        // c++/src/algo/blast/core/blast_setup.c:1015-1025 (quoted at `call_setup`'s
+        // `subject_parameters`): the statistics of each subject, with the subject's length in the
+        // hit-saving cutoff (no stretch of the e-value; with psiblast's `-sum_stats true` lowered
+        // at the subject's length) and in the effective lengths, which the linking reads with the
+        // subject's small-gap cutoff (`psi_prelim_cutoffs`).
+        let subject_prelim;
+        let prelim = match run.per_subject {
+            None => &prelim,
+            Some(statistics) => {
+                let lengths = match crate::stats::setup::subject_eff_lengths(
+                    ctx.aa_len as i64,
+                    subject.aa_len as i64,
+                    statistics.setup_count,
+                    statistics.dbsize,
+                    statistics.option_space,
+                    false,
+                    run.gapped_params,
+                    args.app.name(),
+                ) {
+                    Ok(lengths) => lengths,
+                    Err(overflow) => {
+                        subject_space_overflow.note(overflow);
+                        return;
+                    }
+                };
+                let stats = match run.gumbel {
+                    Some(gumbel) => EvalueStats::spouge(gumbel),
+                    None => EvalueStats::new(None, lengths.eff_searchsp),
+                };
+                let (word_cutoff, hit_cutoff, link) = psi_prelim_cutoffs(
+                    args,
+                    run.contexts,
+                    &karlin,
+                    &stats,
+                    subject.aa_len as i32,
+                    args.evalue,
+                    &SearchSpace {
+                        effective_space: lengths.eff_searchsp as f64,
+                        length_adjustment: i64::from(lengths.length_adjustment),
+                    },
+                );
+                subject_prelim = PssmPrelim {
+                    word_cutoff,
+                    hit_cutoff,
+                    stats,
+                    prelim_evalue: args.evalue,
+                    link,
+                    ..prelim
+                };
+                &subject_prelim
+            }
+        };
         let list = PSSM_SCRATCH.with(|own| {
             prelim.search_subject(
                 &mut own.borrow_mut(),
@@ -426,7 +611,7 @@ pub(super) fn pssm_prelim(
             run.total_query_span,
         )
     };
-    match (database, culling) {
+    let searched = match (database, culling) {
         // The preliminary stage of a database: blocks of sequences in the order of their ordinal
         // ids (`database::search_blocks`, the deterministic merge of every thread count).
         (Some(database), None) => database::search_blocks(
@@ -472,7 +657,10 @@ pub(super) fn pssm_prelim(
             }
             Ok(())
         }
-    }
+    };
+    searched?;
+    subject_space_overflow.check()?;
+    Ok(())
 }
 
 /// The traceback of a PSSM search: mode 0's (`pssm_search::traceback0`), or the position-based
@@ -504,6 +692,7 @@ pub(super) fn pssm_traceback(
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
     compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     pool: &crate::utils::threading::SearchPool<'_>,
+    sorts_results: bool,
 ) -> Result<Vec<Option<BlastpHitList>>> {
     let psi = args
         .psi_search
@@ -559,6 +748,7 @@ pub(super) fn pssm_traceback(
         stats,
         expect_value: args.evalue,
         hitlist_size: args.traceback_hitlist_size(),
+        sorts_results,
         link: link_context.map(|context| (EvenGapLinkParams::traceback(), context)),
     }
     .run(preliminary_hit_lists, compact_hit_lists, pool)

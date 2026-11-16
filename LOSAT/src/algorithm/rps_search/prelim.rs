@@ -56,8 +56,8 @@ pub(crate) struct RpsPrelimScratch {
     tree: BlastIntervalTree,
     hsps: Vec<BlastpPreliminaryHsp>,
     gap: PssmGapScratch,
-    /// The query's HSPs of its contexts so far (`finish`).
-    combined: Vec<BlastpPreliminaryHsp>,
+    /// A query's HSPs of its contexts, concatenated for `finish` (kept from query to query).
+    pub(crate) combined: Vec<BlastpPreliminaryHsp>,
 }
 
 impl RpsPrelimScratch {
@@ -147,13 +147,15 @@ fn sort_init_hsps_by_score(init_hsps: &mut [RpsInitHsp]) {
 impl RpsPrelim<'_> {
     /// The preliminary HSPs of one context of the query on this volume (`subject_seq`: its
     /// letters and the trailing sentinel, `subject->sequence`; `frame`: its frame, 0 for a protein
-    /// query), sorted by score, after those of the query's earlier contexts in `scratch`
-    /// (`finish`), as `s_BlastSearchEngineOneContext` gives them to `Blast_HSPListAppend`.
+    /// query), sorted by score, at the end of `out`, as `s_BlastSearchEngineOneContext` gives them
+    /// to `Blast_HSPListAppend`; the query's contexts' HSPs are concatenated in the context order
+    /// for `finish`.
     pub(crate) fn search_frame(
         &self,
         scratch: &mut RpsPrelimScratch,
         subject_seq: &[u8],
         frame: i8,
+        out: &mut Vec<BlastpPreliminaryHsp>,
     ) -> Result<()> {
         let subject_len = subject_seq.len() - 1;
         let subject = &subject_seq[..subject_len];
@@ -163,7 +165,7 @@ impl RpsPrelim<'_> {
             tree,
             hsps,
             gap,
-            combined,
+            combined: _,
         } = scratch;
         init_hsps.clear();
         word_finder(&self.word, word, subject, init_hsps);
@@ -201,23 +203,22 @@ impl RpsPrelim<'_> {
         // ```
         // Without a cap (`hsp_num_max` 0: `INT4_MAX`, blast_hits.c:213-226) the lists of the
         // frames are concatenated in the frame order (`s_BlastHSPListsCombineByScore`).
-        combined.extend(hsps.iter().map(|hsp| BlastpPreliminaryHsp {
+        out.extend(hsps.iter().map(|hsp| BlastpPreliminaryHsp {
             subject_frame: frame.into(),
             ..*hsp
         }));
         Ok(())
     }
 
-    /// The query's preliminary hit list on this volume from the HSPs of its contexts
-    /// (`search_frame`; emptied here), with the e-values of the length `stat_length`
-    /// (`RpsQuery::stat_length`), or `None` when it has no HSP. The lists' oids are the profiles'
-    /// local ordinal ids.
+    /// The query's preliminary hit list on this volume from the HSPs of its contexts `hsps`
+    /// (`search_frame`'s, in the context order; emptied here), with the e-values of the length
+    /// `stat_length` (`RpsQuery::stat_length`), or `None` when it has no HSP. The lists' oids are
+    /// the profiles' local ordinal ids.
     pub(crate) fn finish(
         &self,
-        scratch: &mut RpsPrelimScratch,
+        hsps: &mut Vec<BlastpPreliminaryHsp>,
         stat_length: usize,
     ) -> Option<BlastpHitList<XPrelimHsp>> {
-        let hsps = &mut scratch.combined;
         if hsps.is_empty() {
             return None;
         }

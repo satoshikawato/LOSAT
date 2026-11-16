@@ -87,6 +87,9 @@ fn write_header_if_needed(file: &mut std::fs::File, path: &PathBuf) -> std::io::
 // Snapshots record the internal BlastHSP/LinkHSP fields at those NCBI stage
 // boundaries, before TBLASTX nucleotide-coordinate output adjustment can hide
 // negative-frame or frame-relative ordering differences.
+// The ends are NCBI's `Int4` (`UngappedHit::q_end_int4`): a list of the one-hit word finder may
+// hold an HSP of length 0 or less before its first linking call, whose end lies at or before its
+// start, below 0 near a frame's start.
 pub(crate) fn dump_ungapped_hits(stage: &str, hits: &[UngappedHit]) {
     let Some(dump) = stage_dump() else {
         return;
@@ -140,9 +143,9 @@ pub(crate) fn dump_ungapped_hits(stage: &str, hits: &[UngappedHit]) {
             h.q_frame,
             h.s_frame,
             h.q_aa_start,
-            h.q_aa_end,
+            h.q_end_int4(),
             h.s_aa_start,
-            h.s_aa_end,
+            h.s_end_int4(),
             h.q_seed_off,
             h.s_seed_off,
             h.raw_score,

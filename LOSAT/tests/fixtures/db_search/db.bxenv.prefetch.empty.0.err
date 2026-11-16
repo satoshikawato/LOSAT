@@ -1,0 +1,3 @@
+Error: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/corelib/ncbistr.cpp", line 861: Error: (CStringException::eConvert) ncbi::NStr::StringToInt8() - Cannot convert string '' to Int8 (m_Pos = 0)
+

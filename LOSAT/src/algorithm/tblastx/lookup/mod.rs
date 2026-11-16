@@ -22,6 +22,8 @@ pub mod compressed;
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 pub(crate) use backbone::x_prepare_blosum62_lookup_query_in_pool;
+// The complement of a protein context's masks (blastp's query preparation; tblastn's PSSM table).
+pub(crate) use backbone::build_lookup_segments_for_context;
 // TBLASTN's query set setup on the batch's pool (`tblastn/stage_d_pipeline.rs`); no NCBI
 // counterpart for the re-export itself.
 #[cfg(all(
@@ -170,7 +172,9 @@ pub struct QueryContext {
 pub(crate) use backbone::{build_ncbi_lookup_from_prepared, build_ncbi_lookup_from_prepared_of};
 // BLASTP's table built in place (lookup/x_lut_direct.rs); no NCBI counterpart for the re-export
 // itself.
-pub(crate) use backbone::{x_bp_build_ncbi_lookup, x_bp_build_ncbi_lookup_as};
+pub(crate) use backbone::{
+    x_bp_build_ncbi_lookup, x_bp_build_ncbi_lookup_as, x_bp_build_wide_lookup,
+};
 // EXPERIMENT (LOSAT_X_BPLKPAHEAD): exact blastp's table built ahead of its block
 // (lookup/x_lut_direct.rs `XAaSpares`); no NCBI counterpart for the re-export itself.
 pub(crate) use backbone::{XAaSpares, XBpLookup};

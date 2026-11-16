@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import type { HspRecord, ProgramDescription } from 'losat/ports';
 import type { AppState, RunView } from '../../src/application/coordinator';
-import { ResultsBrowser, type ResultsDeps } from '../../src/application/results';
+import { noHspReason, ResultsBrowser, type ResultsDeps } from '../../src/application/results';
 import { Store } from '../../src/application/store';
 import { hspTable, out0Range, out6Range, frame, subjectSpan } from '../../src/domain/hsp-table';
 import { headingTitle } from '../../src/domain/outfmt0';
@@ -28,7 +28,8 @@ import {
   type BadgeInput,
   type VerificationTable,
 } from '../../src/domain/verification';
-import type { RunSnapshot } from '../../src/domain/run';
+import type { RunRecord, RunSnapshot } from '../../src/domain/run';
+import { NO_HSP_TEXT } from '../../src/ui/no-hsp-text';
 
 // --- a small run: two queries (the second without hits), three subjects ----------------------
 
@@ -304,6 +305,17 @@ describe('optionKey', () => {
     expect(optionKey(['-evalue'], grammar)).toBeUndefined();
     expect(optionKey(['-lcase_masking', 'stray'], grammar)).toBeUndefined();
   });
+
+  // Line RG E1w-3b: -logfile names a file of the run's messages, as -out names its output; the
+  // outputs do not change with it. -conffile and -dryrun change the run: they stay options, which no
+  // record compares (the engine's describe does not list them).
+  it('leaves -logfile out of the options, as -out, and keeps -conffile and -dryrun', () => {
+    const plain = optionKey(['blastn', '-query', 'q.fa', '-subject', 's.fa', '-evalue', '1e-5'], grammar);
+    expect(optionKey(['blastn', '-query', 'q.fa', '-subject', 's.fa', '-evalue', '1e-5', '-logfile', 'run.log'], grammar)).toBe(plain);
+    expect(optionKey(['blastn', '-logfile=run.log', '-evalue', '1e-5'], grammar)).toBe(plain);
+    expect(optionKey(['blastn', '-evalue', '1e-5', '-dryrun'], grammar)).not.toBe(plain);
+    expect(optionKey(['blastn', '-evalue', '1e-5', '-conffile', 'settings.ini'], grammar)).toBeUndefined();
+  });
 });
 
 describe('verificationBadge', () => {
@@ -417,12 +429,22 @@ function snapshot(runId: string, argv: readonly string[] = ['blastn', '-query', 
   return { runId, number: 1, program: 'blastn', argv, query: input(['q0', 'q1']), subject: input(['s0', 's1', 's2']), requestedThreads: 1, queuedAt: 0 };
 }
 
-function setup(options: { status?: RunView['status']; specs?: readonly Spec[]; argv?: readonly string[]; unreadable?: boolean; error?: string } = {}) {
+function setup(
+  options: {
+    status?: RunView['status'];
+    specs?: readonly Spec[];
+    argv?: readonly string[];
+    unreadable?: boolean;
+    error?: string;
+    snapshot?: Partial<RunSnapshot>;
+    record?: Partial<RunRecord>;
+  } = {},
+) {
   const run = makeRun(options.specs);
   const view: RunView = {
-    snapshot: snapshot('r1', options.argv),
+    snapshot: { ...snapshot('r1', options.argv), ...options.snapshot },
     status: options.status ?? 'completed',
-    record: { runtimePath: 'serial', threads: 1, ...(options.status === 'failed' ? { error: options.error ?? 'boom' } : {}) },
+    record: { runtimePath: 'serial', threads: 1, ...(options.status === 'failed' ? { error: options.error ?? 'boom' } : {}), ...options.record },
   };
   const runs = new Store<AppState>({ runs: [view] });
   const pending: Array<() => void> = [];
@@ -644,6 +666,13 @@ describe('ResultsBrowser', () => {
       expect(run.results.state.get().message).toBe(`Run 1 failed: ${said} A failed run keeps no results.`);
     }
 
+    // A failed run that made the file of its -logfile keeps it (line RG E1w-3b).
+    const logged = setup({ status: 'failed', error: 'BLAST engine error: The average subject length is too short', record: { runFiles: [{ name: 'run.log', bytes: new Uint8Array([65]) }] } });
+    await logged.results.open('r1');
+    expect(logged.results.state.get().message).toBe(
+      'Run 1 failed: BLAST engine error: The average subject length is too short. A failed run keeps no results. It keeps the file of its -logfile, run.log.',
+    );
+
     const running = setup({ status: 'running' });
     await running.results.open('r1');
     expect(running.results.state.get().phase).toBe('unavailable');
@@ -651,6 +680,18 @@ describe('ResultsBrowser', () => {
     await settle();
     await settle();
     expect(running.results.state.get().phase).toBe('ready');
+  });
+
+  // A dry run (-dryrun; line RG E1w-3b) completes without a search: its notice says so in place of "no hits".
+  it('says that a completed dry run searched nothing', async () => {
+    const { results } = setup({ specs: [], snapshot: { dryRun: true } });
+    await results.open('r1');
+    expect(results.state.get().phase).toBe('ready');
+    expect(noHspReason(results.state.get())).toBe('dry-run');
+    expect(NO_HSP_TEXT['dry-run']).toBe('This run was a dry run (-dryrun): LOSAT read the arguments and the settings and ran no search.');
+    const searched = setup({ specs: [] });
+    await searched.results.open('r1');
+    expect(noHspReason(searched.results.state.get())).toBe('no-hits');
   });
 
   // WA-FM-07: the command of a run without results is read with the grammar too.

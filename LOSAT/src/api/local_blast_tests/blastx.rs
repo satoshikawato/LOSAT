@@ -63,6 +63,7 @@ fn try_run(
                 .zip(sinks.iter_mut())
                 .map(|(outfmt, sink)| FormatOutput {
                     outfmt,
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(sink),
                 })
                 .collect(),
@@ -373,7 +374,7 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
     let inputs = Inputs::new("tests/fasta/small_test.fasta", "tests/fasta/PajaWSV.faa");
     let queries = queries(&Inputs::path(&inputs.query));
     let subjects = subjects(&Inputs::path(&inputs.subject));
-    let cases: [(&str, fn(&mut BlastxArgs)); 10] = [
+    let cases: [(&str, fn(&mut BlastxArgs)); 9] = [
         ("Word-size must be greater than zero", |a| {
             a.word_size = Some(0)
         }),
@@ -396,10 +397,6 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
             "an -evalue that is not finite (inf) is not supported by LOSAT's BLASTX",
             |a| a.evalue = f64::INFINITY,
         ),
-        (
-            "the SEG locut or hicut \"+nan\" (not a finite decimal number) is not supported by LOSAT's BLASTX",
-            |a| a.seg = "12 +nan 2.5".into(),
-        ),
         ("Invalid number of arguments to filtering option", |a| {
             a.seg = "12 2.2".into()
         }),
@@ -417,6 +414,7 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
             let mut outputs = ReportOutputs {
                 formats: vec![FormatOutput {
                     outfmt: "6",
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut sink),
                 }],
                 diagnostics: &mut diagnostics,
@@ -438,6 +436,7 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
         let mut outputs = ReportOutputs {
             formats: vec![FormatOutput {
                 outfmt: "6",
+                refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                 sink: OutputSink::Writer(&mut sink),
             }],
             diagnostics: &mut diagnostics,
@@ -456,6 +455,52 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
         error.contains("'blastz' is not a supported task"),
         "{error}"
     );
+}
+
+/// NCBI's posts of the bytes that a Seq-annot's stream replaces (outfmt 8 and 9: a `-parse_deflines`
+/// subject id with DEL, `#` in every Seq-align) reach the diagnostics at every format of one search,
+/// as a run of each format alone writes them, not only at the first format (review F1 of line NP
+/// M4a-1b2; NCBI 2.17.0 `blastx -subject -parse_deflines -outfmt 8`: `Error: (803.7) [blastx]
+/// Seq-annot.data.align.E.segs.std.E.ids.E.local.str` / `Bad char [0x7F] in string at line N`).
+#[test]
+fn every_seq_annot_format_posts_the_bytes_its_stream_replaces() {
+    // The unit of tests/db_search/seqannot/q2n_del.fa and the protein of its repeats.
+    let query_path = temp_path("blastx_seqannot_query.fna");
+    let subject_path = temp_path("blastx_seqannot_subject.faa");
+    let crate_dir = crate_dir();
+    let query = std::fs::read(crate_dir.join("tests/db_search/seqannot/q2n_del.fa")).unwrap();
+    let first = query[1..].iter().position(|&byte| byte == b'>').unwrap() + 1;
+    std::fs::write(&query_path, &query[..first]).unwrap();
+    std::fs::copy(
+        crate_dir.join("tests/db_search/seqannot/pdel.faa"),
+        &subject_path,
+    )
+    .unwrap();
+    let inputs = Inputs::new(&query_path, &subject_path);
+    let queries = reader_records(
+        &query_path,
+        ReaderConfig::query("BLASTX", false, true).with_parse_deflines(true),
+    );
+    let subjects = reader_records(
+        &subject_path,
+        ReaderConfig::subject("BLASTX", true, true).with_parse_deflines(true),
+    );
+    let run = |formats: &[&str]| {
+        let (result, outputs, diagnostics) =
+            try_run(&inputs, &queries, &subjects, formats, &["-parse_deflines"]);
+        result.expect("searched");
+        (outputs, diagnostics)
+    };
+    let (text, text_posts) = run(&["8"]);
+    let (binary, binary_posts) = run(&["9"]);
+    let (both, both_posts) = run(&["8", "9"]);
+    let has = |posts: &[u8], what: &[u8]| posts.windows(what.len()).any(|window| window == what);
+    assert!(has(&text_posts, b"Error: (803.7) [blastx] Seq-annot.data.align.E.segs.std.E.ids.E.local.str\nBad char [0x7F] in string at line "));
+    assert!(has(&binary_posts, b"Bad char [0x7F] in string at byte "));
+    assert_eq!(both, [text[0].clone(), binary[0].clone()]);
+    assert_eq!(both_posts, [text_posts, binary_posts].concat());
+    let _ = std::fs::remove_file(&query_path);
+    let _ = std::fs::remove_file(&subject_path);
 }
 
 /// A query whose first batch ends on its first record only when the batch counts the whole record:

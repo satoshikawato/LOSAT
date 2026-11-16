@@ -268,6 +268,17 @@ impl DisplayCode {
         };
         table[(base(0) << 8) | (base(1) << 4) | base(2)]
     }
+
+    /// `CAlnVec::TranslateNAToAA` of the codons of `nucleotides` (IUPAC letters, whole codons), or
+    /// of their reverse complement's when `minus` (the letters of a minus-strand row,
+    /// `CAlnVec::GetSeqString`): `residue` of each codon (the query-anchored reports,
+    /// `report::query_anchored`).
+    pub(crate) fn translate(&self, nucleotides: &[u8], minus: bool, out: &mut Vec<u8>) {
+        let frame = if minus { -1 } else { 1 };
+        out.extend(
+            (0..nucleotides.len() / 3).map(|offset| self.residue(nucleotides, frame, offset)),
+        );
+    }
 }
 
 // NCBI reference: c++/src/objtools/alnmgr/alnvec.hpp:292-302
@@ -1475,7 +1486,7 @@ pub(crate) fn write_tabular<W: Write>(
     query_titles: &[&[u8]],
     database: &str,
     query_ids: &[Arc<[u8]>],
-    subject_ids: &[Arc<[u8]>],
+    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     unsearched: &[bool],
     epilog: Option<usize>,
     mut probe: Option<&mut FormatProbe<'_>>,
@@ -1554,7 +1565,7 @@ pub(crate) fn write_tabular_row<W: Write>(
     writer: &mut W,
     hsp: &TblastxHsp,
     query_ids: &[Arc<[u8]>],
-    subject_ids: &[Arc<[u8]>],
+    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     config: &OutputConfig,
 ) -> io::Result<()> {
     let hit = &hsp.hit;
@@ -1563,9 +1574,8 @@ pub(crate) fn write_tabular_row<W: Write>(
     let query_id = query_ids
         .get(hit.q_idx as usize)
         .map_or(&b""[..], |id| id.as_ref());
-    let subject_id = subject_ids
-        .get(hit.s_idx as usize)
-        .map_or(&b""[..], |id| id.as_ref());
+    // A failed lookup's rows are refused before (`check_failed_lookups`).
+    let subject_id = crate::algorithm::common::tabular::printed_id(subject_ids, hit.s_idx as usize);
     write_hit_fields_bytes(
         writer,
         query_id,
@@ -1623,12 +1633,19 @@ impl TblastxOutputFormat {
     /// formatter finds by a subject's Seq-align id (`report::tabular::reads_subject`: the default
     /// fields do).
     pub(crate) fn tabular_reads_subject(self) -> bool {
-        let spec = match self {
+        self.is_tabular()
+            && crate::report::tabular::reads_subject(
+                self.tabular_spec(),
+                crate::blastinput::app::Program::Tblastx,
+            )
+    }
+
+    /// The field list of the custom tabular report (`CustomTabular`).
+    pub(crate) fn tabular_spec(self) -> Option<&'static crate::report::tabular::TabularSpec> {
+        match self {
             Self::CustomTabular(spec) => Some(spec),
             _ => None,
-        };
-        self.is_tabular()
-            && crate::report::tabular::reads_subject(spec, crate::blastinput::app::Program::Tblastx)
+        }
     }
 
     /// Whether the format writes the displayed identity counts of the rows
@@ -1889,7 +1906,7 @@ pub(crate) fn final_hit_order(
     for ((q_idx, oid), hsps) in pairs {
         lists.add(q_idx, oid, hsps, filters);
     }
-    lists.finish(filters)
+    lists.finish(filters, true)
 }
 
 /// The final HSP list of a run with `-culling_limit` (`culling_limit` > 0) in NCBI's order:
@@ -1969,16 +1986,19 @@ pub(crate) fn final_hit_order(
 /// in OID order, with the merit `culling_max` (+3 above 1; in `i64`, where NCBI's `Int4`
 /// overflows near `INT4_MAX`, NCBI parity DECISIONS 17). The trees' HSPs then reach the hit list of the traceback in OID order, where
 /// the `-max_target_seqs` cut is made (`Blast_HitListUpdate`), and the pipe culls the kept
-/// lists again, sorted by e-value, with the merit `culling_limit`. The rest is
-/// `final_hit_order`'s: the lists sorted by e-value (their HSPs in score order) and each
-/// list's HSPs sorted by e-value. The trees belong to the query's contexts, so the
-/// queries are culled one after another.
+/// lists again, sorted by e-value, with the merit `culling_limit`. The pipe's lists come out in
+/// the rip order of its trees (hspfilter_culling.c:501-580); they are sorted by e-value only where
+/// NCBI sorts the results (`sorts_results`: a positive `BlastSeqSrcGetTotLen`,
+/// blast_traceback.c:1768-1772), then cut to `-max_target_seqs` (blast_traceback.c:1777), and each
+/// list's HSPs sorted by e-value. The trees belong to the query's contexts, so the queries are
+/// culled one after another.
 pub(crate) fn culled_hit_order(
     hits: Vec<TblastxHsp>,
     hitlist_size: usize,
     culling_limit: i32,
     query_lengths: &[usize],
     filters: &HitFilters<'_>,
+    sorts_results: bool,
 ) -> Vec<TblastxHsp> {
     use super::hsp_culling::{tblastx_context_lengths, CullingWriter};
     use crate::algorithm::blastn::hsp::{HitList, HitListEntry};
@@ -2040,7 +2060,11 @@ pub(crate) fn culled_hit_order(
             final_lists.hsplist_array.push(list);
         }
         final_lists.hsplist_count = final_lists.hsplist_array.len();
-        final_lists.sort_by_evalue();
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1768-1772 (quoted at
+        // `DbStatistics::sorts_results`)
+        if sorts_results {
+            final_lists.sort_by_evalue();
+        }
         final_lists.prune_by_size(hitlist_size);
         for mut list in final_lists.hsplist_array {
             HitListEntry::sort_by_evalue(&mut list);

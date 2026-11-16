@@ -34,6 +34,10 @@ pub(crate) struct ReaderBatchShape {
     pub(crate) word_cutoff_min: Option<i32>,
     /// `hit_params->cutoff_score_min` of the batch (the composition redo).
     pub(crate) redo_cutoff_min: Option<i32>,
+    /// Each context of the batch, in order: its length, whether it is valid and its ungapped
+    /// Karlin block, of which the statistics of each subject take the batch's word cutoff minimum
+    /// (`parameters::subject_word_cutoff_min`; empty before the units are prepared).
+    pub(crate) batch_contexts: Vec<(usize, bool, KarlinParams)>,
     /// NCBI's error of the batch's set-up when the score block cannot load the `-matrix` of an
     /// ungapped search: the message of each query of the batch (`query_setup::unknown_matrix_message`),
     /// which every unit's preparation raises (`query_setup::prepare_unit_queries`).
@@ -53,6 +57,40 @@ pub(crate) struct UnitPrep {
 }
 
 impl PreparedQueryBatch {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:245-250 and
+    // c++/src/algo/blast/api/blast_setup_cxx.cpp:500-501
+    // ```c
+    // Uint4
+    // QueryInfo_GetSeqBufLen(const BlastQueryInfo* qinfo)
+    // {
+    //     BlastContextInfo * cinfo = & qinfo->contexts[qinfo->last_context];
+    //     return cinfo->query_offset + cinfo->query_length + (cinfo->query_length ? 2 : 1);
+    // }
+    // ...
+    //     int buflen = QueryInfo_GetSeqBufLen(qinfo);
+    //     TAutoUint1Ptr buf((Uint1*) calloc(buflen+1, sizeof(Uint1)));
+    // ```
+    // NCBI's query buffer is `calloc(buflen + 1)` and `query->sequence` starts one byte into it
+    // (after the first NULLB), so `query->sequence[i]` lies inside it for `i < buflen`: the
+    // contexts with their NULLBs, then calloc's last byte (0). A reader batch searched in units
+    // holds the units' contexts one after another (`query_offset` advances by a positive length
+    // + 1 across them as within a unit), so from a unit's first context the buffer holds the
+    // unit's own bytes and then the next units' (`reader_buffer_after`, set by `attach`).
+    /// `QueryInfo_GetSeqBufLen` of the batch NCBI searches, counted from this unit's first
+    /// context: `query->sequence` (from the unit's first context) is inside NCBI's buffer below
+    /// it.
+    pub(crate) fn batch_buffer_length(&self) -> usize {
+        self.unit_buffer_length()
+            .saturating_add(self.reader_buffer_after)
+    }
+
+    /// `QueryInfo_GetSeqBufLen` of this unit's contexts alone.
+    fn unit_buffer_length(&self) -> usize {
+        self.contexts.last().map_or(1, |last| {
+            last.offset + last.length + if last.length > 0 { 2 } else { 1 }
+        })
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:954-957
     // ```c
     //          Int4 concat_qlen =
@@ -155,6 +193,7 @@ impl ReaderBatchShape {
             smallest_lambda: None,
             word_cutoff_min: None,
             redo_cutoff_min: None,
+            batch_contexts: Vec::new(),
             matrix_error: options
                 .unknown_matrix
                 .then(|| super::query_setup::matrix_error_message(records, options).into()),
@@ -182,9 +221,17 @@ impl ReaderBatchShape {
             smallest_lambda: None,
             word_cutoff_min: None,
             redo_cutoff_min: None,
+            batch_contexts: Vec::new(),
             matrix_error: layout.matrix_error.clone(),
         };
         for unit in units {
+            shape.batch_contexts.extend(
+                unit.prepared
+                    .contexts
+                    .iter()
+                    .zip(&unit.params)
+                    .map(|(context, p)| (context.length, p.valid, p.ungapped)),
+            );
             for p in unit.params.iter().filter(|p| p.valid) {
                 if p.ungapped.lambda > 0.0
                     && shape
@@ -247,7 +294,7 @@ pub(crate) fn prepare_unit(
     let params = score_block_for(&prepared, options.scoring);
     prepared.reader_shape = Some(Arc::clone(layout));
     let kappa = options.composition != 0 && options.gapped;
-    let ungapped_link = !options.gapped && options.sum_stats;
+    let ungapped_link = super::linking::computes_link_cutoffs(options);
     let (mut word_cutoff_min, mut redo_cutoff_min) = (None, None);
     if (kappa || ungapped_link)
         && params.iter().any(|p| p.valid)
@@ -255,13 +302,46 @@ pub(crate) fn prepare_unit(
         && !subjects.is_empty()
     {
         let mut minima = params.clone();
-        let computed =
-            (|| subject_parameters(&prepared, &mut minima, options, subjects.numbers()?, None))();
+        // The word cutoffs are the preliminary stage's, with its option spaces where they differ
+        // from the setup's (`parameters::preliminary_spaces`); the redo reads the setup's.
+        let mut word_minima = None;
+        let computed = (|| {
+            let numbers = subjects.numbers()?;
+            subject_parameters(&prepared, &mut minima, options, numbers, None)?;
+            if ungapped_link {
+                if let Some(spaces) = super::parameters::preliminary_spaces(
+                    &prepared,
+                    &params,
+                    options,
+                    numbers,
+                    matches!(subjects, Subjects::Stream(_)),
+                )? {
+                    let mut preliminary = params.clone();
+                    subject_parameters(
+                        &prepared,
+                        &mut preliminary,
+                        options,
+                        numbers,
+                        Some(&spaces),
+                    )?;
+                    word_minima = Some(preliminary);
+                }
+            }
+            anyhow::Ok(())
+        })();
         match computed {
-            Ok(_) => {
+            Ok(()) => {
                 let valid = || minima.iter().filter(|p| p.valid);
                 word_cutoff_min = ungapped_link
-                    .then(|| valid().map(|p| p.word_cutoff).min())
+                    .then(|| {
+                        word_minima
+                            .as_ref()
+                            .unwrap_or(&minima)
+                            .iter()
+                            .filter(|p| p.valid)
+                            .map(|p| p.word_cutoff)
+                            .min()
+                    })
                     .flatten();
                 redo_cutoff_min = kappa.then(|| valid().map(|p| p.hit_cutoff).min()).flatten();
             }
@@ -298,9 +378,30 @@ pub(crate) fn prepare_lone_unit(
     })
 }
 
-/// The end of phase 1 for one unit: the batch's shape replaces the layout.
-pub(crate) fn attach(unit: &mut UnitPrep, shape: &Arc<ReaderBatchShape>) {
-    unit.prepared.reader_shape = Some(Arc::clone(shape));
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:71-88 (quoted above
+// `ReaderBatchShape::layout`)
+// ```c++
+//         Uint4 shift = prev_len ? prev_len + 1 : 0;
+//
+//         qinfo->contexts[index].query_offset = prev_loc + shift;
+// ```
+// The units' contexts follow one another in NCBI's buffer of the reader batch, so the bytes after
+// a unit's are the bytes of the units after it (each its `QueryInfo_GetSeqBufLen` less the first
+// NULLB, `PreparedQueryBatch::batch_buffer_length`).
+/// The end of phase 1 for the units of a reader batch, in order: the batch's shape replaces the
+/// layout, and each unit learns the bytes of NCBI's query buffer after its own
+/// (`PreparedQueryBatch::reader_buffer_after`).
+pub(crate) fn attach<'u>(
+    units: impl DoubleEndedIterator<Item = &'u mut UnitPrep>,
+    shape: ReaderBatchShape,
+) {
+    let shape = Arc::new(shape);
+    let mut after = 0;
+    for unit in units.rev() {
+        unit.prepared.reader_shape = Some(Arc::clone(&shape));
+        unit.prepared.reader_buffer_after = after;
+        after += unit.prepared.unit_buffer_length() - 1;
+    }
 }
 
 /// Phase 1 of the search of a reader batch of `ranges.len()` > 1 units, all at once (with a pool
@@ -337,10 +438,8 @@ pub(crate) fn prepare_reader_batch(
         ranges.iter().map(prepare).collect::<Result<Vec<_>>>()?
     };
     super::x_timing::batch(super::x_timing::Batch::QuerySetup, x_t);
-    let shape = Arc::new(ReaderBatchShape::reduce(&layout, &units));
-    for unit in &mut units {
-        attach(unit, &shape);
-    }
+    let shape = ReaderBatchShape::reduce(&layout, &units);
+    attach(units.iter_mut(), shape);
     Ok(units)
 }
 
@@ -361,11 +460,12 @@ mod tests {
             .collect();
         FastaRecord {
             internal_id: String::new(),
-            title: String::new(),
+            title: Vec::new(),
             sequence,
             lowercase_masks: Vec::new(),
             warnings: Vec::new(),
             source: None,
+            around: None,
         }
     }
 
@@ -409,6 +509,21 @@ mod tests {
                 );
                 assert_eq!(unit.prepared.batch_context_count(), shape.contexts);
             }
+            // From each unit's first context NCBI's buffer of the batch holds the unit's bytes and
+            // then the next units' (`reader_buffer_after`), up to the batch's `QueryInfo_GetSeqBufLen`.
+            let mut before = 0;
+            for unit in &units {
+                assert_eq!(
+                    before + unit.prepared.batch_buffer_length(),
+                    whole.prepared.batch_buffer_length(),
+                    "{strand}"
+                );
+                before += unit.prepared.unit_buffer_length() - 1;
+            }
+            assert_eq!(
+                units.last().unwrap().prepared.batch_buffer_length(),
+                units.last().unwrap().prepared.unit_buffer_length()
+            );
         }
     }
 
@@ -469,6 +584,7 @@ mod tests {
             smallest_lambda: None,
             word_cutoff_min: None,
             redo_cutoff_min: None,
+            batch_contexts: Vec::new(),
             matrix_error: None,
         }));
         assert_eq!(

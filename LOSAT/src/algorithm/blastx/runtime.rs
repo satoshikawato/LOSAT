@@ -3,7 +3,7 @@ use super::{
     args::ResolvedOptions,
     input::FastaRecord,
     kappa::KappaState,
-    parameters::{subject_parameters, ContextParameters},
+    parameters::{subject_parameters, subject_update, ContextParameters},
     preliminary::PreliminaryHsp,
     query_setup::PreparedQueryBatch,
     reader_batch::UnitPrep,
@@ -20,6 +20,10 @@ use super::{
 };
 use crate::core::blast_hits::{reap_by_query_coverage, trim_by_max_hsps};
 use anyhow::Result;
+// The redo of a batch's matches with composition-based statistics (a child module, so that it uses
+// the private types of this file).
+mod kappa_batch;
+use kappa_batch::KappaBatch;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1763-1777
 // ```c++
 //     if(hit_params->options->query_cov_hsp_perc > 0 || hit_params->options->max_hsps_per_subject > 0 ||
@@ -215,7 +219,7 @@ pub trait RuntimeObserver: super::results::ResultsObserver + Send {
         &mut self,
         _subject_length: i32,
         _db_length: i64,
-        _state: ([i32; 2], f64),
+        _state: crate::core::link_hsps::LinkCutoffs,
         _link: &super::linking::LinkParameters,
     ) {
     }
@@ -514,7 +518,8 @@ pub(crate) fn x_search_unit_in_pool<'a>(
         subjects,
         x_cursor: subjects.x_cursor(),
         x_residues: subjects.x_residue_pass(),
-        db_length: subjects.numbers()?.total,
+        // The Gumbel block's length of the e-values (`SubjectNumbers::gumbel_total`).
+        db_length: subjects.numbers()?.gumbel_total,
         ordinal: 0,
         stream: None,
         chunk: None,
@@ -564,7 +569,8 @@ pub(crate) fn search_internal_observed<'a>(
         subjects,
         x_cursor: subjects.x_cursor(),
         x_residues: subjects.x_residue_pass(),
-        db_length: subjects.numbers()?.total,
+        // The Gumbel block's length of the e-values (`SubjectNumbers::gumbel_total`).
+        db_length: subjects.numbers()?.gumbel_total,
         ordinal: 0,
         stream: None,
         chunk: None,
@@ -576,7 +582,7 @@ pub(crate) fn search_internal_observed<'a>(
     Ok(pipeline.output)
 }
 struct Runtime<'a> {
-    ungapped_link_state: Option<([i32; 2], f64)>,
+    ungapped_link_state: Option<crate::core::link_hsps::LinkCutoffs>,
     observer: &'a mut dyn RuntimeObserver,
     options: &'a ResolvedOptions,
     subjects: Subjects<'a>,
@@ -602,228 +608,34 @@ impl Runtime<'_> {
             None => Ok(self.subjects.length(oid)),
         }
     }
-}
-impl PreliminarySink for Runtime<'_> {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:176-181,202-210
-    // ```c++
-    //
-    //     int status = m_PrelimSearch->CheckInternalData();
-    //     if (status != 0)
-    //     {
-    //          // Search was not run, but we send back an empty CSearchResultSet.
-    //          CRef<ILocalQueryData> local_query_data = m_QueryFactory->MakeLocalQueryData(m_Opts);
-    //               msg_vec.push_back(q_msg);
-    //               seqid_vec.push_back(query_id);
-    //               CRef<objects::CSeq_align_set> tmp_align;
-    //               sa_vec.push_back(tmp_align);
-    //               pair<double, double> tmp_pair(-1.0, -1.0);
-    //               CRef<CBlastAncillaryData>  tmp_ancillary_data(new CBlastAncillaryData(tmp_pair, tmp_pair, tmp_pair, 0));
-    //               ancill_vec.push_back(tmp_ancillary_data);
-    //
-    //               for(unsigned int i =1; i < num_subjects; i++)
-    // ```
-    fn unsearched_batch(
+
+    /// `PreliminarySink::subject` for the statistics of each subject: the subject's own
+    /// parameters (`parameters::subject_update`, at the subject's length) in place of the
+    /// chunk's `params`.
+    #[cold]
+    #[inline(never)]
+    fn subject_own(
         &mut self,
-        ordinal: usize,
+        oid: usize,
+        input: &[PreliminaryHsp],
         batch: &PreparedQueryBatch,
         params: &[ContextParameters],
+        option_spaces: &[i64],
     ) -> Result<()> {
-        self.output.push(BatchResults {
-            query_ordinal: ordinal,
-            queries: vec![Vec::new(); batch.original_lengths.len()],
-            prepared: batch.x_for_results(),
-            parameters: params.to_vec(),
-            search_skipped: true,
-        });
-        Ok(())
-    }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-235
-    // ```c++
-    //     CEffectiveSearchSpacesMemento eff_memento(m_Options);
-    //     SplitQuery_SetEffectiveSearchSpace(m_Options, m_QueryFactory,
-    //                                        m_InternalData);
-    //     int retval = 0;
-    //
-    //     unique_ptr<const CBlastOptionsMemento> opts_memento
-    //         (m_Options->CreateSnapshot());
-    //     BLAST_SequenceBlk* queries = m_InternalData->m_Queries;
-    //     LookupTableOptions * lut_options = opts_memento->m_LutOpts;
-    //     BlastInitialWordOptions * word_options = opts_memento->m_InitWordOpts;
-    //
-    //     // Query splitting data structure (used only if applicable)
-    //     CRef<SBlastSetupData> setup_data(new SBlastSetupData(m_QueryFactory, m_Options));
-    //     CRef<CQuerySplitter> query_splitter = setup_data->m_QuerySplitter;
-    //     if (query_splitter->IsQuerySplit()) {
-    //
-    //         CRef<CSplitQueryBlk> split_query_blk = query_splitter->Split();
-    // ```
-    fn batch_start(
-        &mut self,
-        ordinal: usize,
-        batch: &PreparedQueryBatch,
-        _params: &[ContextParameters],
-    ) -> Result<()> {
-        self.ordinal = ordinal;
-        self.stream = Some(if self.options.culling_limit > 0 {
-            HspStream::with_culling(
-                batch.contexts.iter().map(|c| c.length as i32).collect(),
-                self.options.culling_limit,
-                prelim_hitlist_size(self.options),
-            )
-        } else {
-            HspStream::new(
-                batch.original_lengths.len(),
-                prelim_hitlist_size(self.options),
-            )
-        });
-        Ok(())
+        let length = self.subject_length(oid)?;
+        let own = subject_update(
+            batch,
+            params,
+            self.options,
+            self.subjects.numbers()?,
+            length,
+            option_spaces,
+        )?;
+        self.subject_with(oid, input, batch, &own)
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:237-244
-    // ```c++
-    //         for (Uint4 i = 0; i < query_splitter->GetNumberOfChunks(); i++) {
-    //             try {
-    //                 CRef<IQueryFactory> chunk_qf =
-    //                     query_splitter->GetQueryFactoryForChunk(i);
-    //                 _TRACE("Query chunk " << i << "/" <<
-    //                        query_splitter->GetNumberOfChunks());
-    //                 CRef<SInternalData> chunk_data =
-    //                     SplitQuery_CreateChunkData(chunk_qf, m_Options,
-    // ```
-    fn chunk_start(&mut self, chunk: &QueryChunk) -> Result<()> {
-        self.chunk = Some(if self.options.culling_limit > 0 {
-            HspStream::with_culling(
-                chunk
-                    .prepared
-                    .contexts
-                    .iter()
-                    .map(|c| c.length as i32)
-                    .collect(),
-                self.options.culling_limit,
-                prelim_hitlist_size(self.options),
-            )
-        } else {
-            HspStream::new(
-                chunk.prepared.original_lengths.len(),
-                prelim_hitlist_size(self.options),
-            )
-        });
-        Ok(())
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:583-593
-    // ```c++
-    //                      overlap, score_options->gapped_calculation,
-    //                      Blast_ProgramIsMapping(program_number));
-    //
-    //         if((hit_params->options->hsp_filt_opt != NULL) &&
-    //            (hit_params->options->hsp_filt_opt->subject_besthit_opts != NULL)) {
-    //            	Blast_HSPListSubjectBestHit(program_number,
-    //            								hit_params->options->hsp_filt_opt->subject_besthit_opts,
-    //            								query_info, combined_hsp_list);
-    //         }
-    //
-    //     } /* End loop on chunks of subject sequence */
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1450-1458
-    // ```c++
-    //          searches. */
-    //       if (hit_params->link_hsp_params && !kNucleotide &&
-    //           !gapped_calculation) {
-    //           CalculateLinkHSPCutoffs(program_number, query_info, sbp,
-    //             hit_params->link_hsp_params, word_params, db_length,
-    //             seq_arg.seq->length);
-    //       }
-    //
-    //       if (Blast_SubjectIsTranslated(program_number)) {
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:550-552
-    // ```c++
-    //             Blast_HSPListAdjustOddBlastnScores(hsp_list, score_options->gapped_calculation, gap_align->sbp);
-    // #endif
-    //
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3916-3921
-    // ```c++
-    //
-    //       /* use priate interval tree when recomputing alignments */
-    //       if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
-    //                                         hit_options->min_diag_separation))
-    //       {
-    //          BlastHSP* new_hsp;
-    // ```
-    fn containment(&mut self, h: &PreliminaryHsp, contained: bool) {
-        self.observer.containment(h, contained);
-    }
-    // No NCBI counterpart: tells the search whether the containment callback is read; it does not
-    // change any value NCBI computes.
-    fn x_wants_containment(&self) -> bool {
-        !self.observer.x_passive()
-    }
-    fn preliminary_purge(
-        &mut self,
-        oid: usize,
-        before: &[PreliminaryHsp],
-        after: &[PreliminaryHsp],
-    ) -> Result<()> {
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:550-568
-        // ```c++
-        //             Blast_HSPListAdjustOddBlastnScores(hsp_list, score_options->gapped_calculation, gap_align->sbp);
-        // #endif
-        //
-        //         }
-        //
-        //         Blast_HSPListSortByScore(hsp_list);
-        //
-        //
-        //         if (score_options->is_ooframe && kTranslatedSubject)
-        //             subject->length = prot_length;
-        //         } else {
-        //             BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
-        //                     hit_params->options, &hsp_list);
-        //         }
-        //
-        //         if (hsp_list->hspcnt == 0) continue;
-        //
-        //         /* The subject ordinal id is not yet filled in this HSP list */
-        //         hsp_list->oid = subject->oid;
-        // ```
-        self.observer.preliminary_call(oid);
-        // The score-only list is newly allocated with oid=0; the engine sets
-        // its real subject OID only after endpoint purge/score sort.
-        self.observer.numeric("PRE_ENDPOINT_IN", 0, before);
-        self.observer.numeric("PRE_ENDPOINT_OUT", 0, after);
-        Ok(())
-    }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1451-1455
-    // ```c++
-    //       if (hit_params->link_hsp_params && !kNucleotide &&
-    //           !gapped_calculation) {
-    //           CalculateLinkHSPCutoffs(program_number, query_info, sbp,
-    //             hit_params->link_hsp_params, word_params, db_length,
-    //             seq_arg.seq->length);
-    // ```
-    // search::compute_subject has performed this exact preparation before
-    // WordFinder with worker-local state. Adopt it without recomputation,
-    // retaining serial observer and linking state in input OID order.
-    fn subject_start(
-        &mut self,
-        oid: usize,
-        _batch: &PreparedQueryBatch,
-        _params: &[ContextParameters],
-        prepared: Option<([i32; 2], f64)>,
-    ) -> Result<()> {
-        self.ungapped_link_state = prepared;
-        if let Some(prepared) = prepared {
-            let length = self.subject_length(oid)? as i32;
-            let link = super::linking::link_parameters(self.options)
-                .expect("ungapped sum-stat parameters");
-            self.observer
-                .link_setup(length, self.db_length, prepared, &link);
-        }
-        Ok(())
-    }
-    fn subject(
+    /// The body of `PreliminarySink::subject` with the parameters `params` of the subject.
+    fn subject_with(
         &mut self,
         oid: usize,
         input: &[PreliminaryHsp],
@@ -1128,24 +940,70 @@ impl PreliminarySink for Runtime<'_> {
             //    Blast_HSPListAdjustOddBlastnScores(hsp_list, FALSE, sbp);
             //    return 0;
             // ```
-            // BLASTX has protein subjects: ambiguity rescoring is inactive.
-            // The accepted option profile has percent_identity/min_hit_length
-            // at zero, so Blast_HSPTest cannot delete an HSP here.
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:776-790
+            // ```c++
+            //    if (!hsp->gap_info) {
+            //       /* Ungapped case. Check that lengths are the same in query and subject,
+            //          then count number of matches. */
+            //       if (q_length != s_length)
+            //          return -1;
+            //       align_length = q_length;
+            //       for (i=0; i<align_length; i++) {
+            //          if (*q == *s)
+            //             num_ident++;
+            //          else if (NULL != matrix) {
+            //         	 if (matrix[*q][*s] > 0)
+            //         		 num_pos ++;
+            //              }
+            //          q++;
+            //          s++;
+            //       }
+            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1448
+            // ```c++
+            //    *options = (BlastHitSavingOptions*) calloc(1, sizeof(BlastHitSavingOptions));
+            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:74
+            // ```c++
+            //     arg.Reset(new CGenericSearchArgs( !kQueryIsProtein ));
+            // ```
+            // BLASTX has protein subjects: ambiguity rescoring is inactive. Every HSP's query and
+            // subject lengths are equal (`q_end - q_start`, NCBI's `Int4`), so its alignment length
+            // is that difference. BLASTX shows no `-perc_identity` (`CGenericSearchArgs`' default
+            // `show_perc_identity` false) and no minimal hit length (calloc's 0), so
+            // `Blast_HSPTest` (`core::blast_hits::hsp_test`) runs with both at 0: it deletes the
+            // HSPs of negative length that the one-hit word finder saves with `-window_size 0` and
+            // a low `-threshold` (aa_ungapped.c:1054,1083), whose identity loop does not run, here,
+            // after they took part in the first link and the reap above; it keeps those of length
+            // 0, which are linked again and reported.
             let mut payloads: Vec<_> = linked
                 .hsps
                 .into_iter()
-                .map(|h| {
-                    let redone = super::kappa::RedoneHsp {
-                        hsp: h.hsp.clone(),
-                        edit_script: vec![crate::common::GapEditOp::Sub(
-                            (h.hsp.q_end - h.hsp.q_start) as u32,
-                        )],
-                        composition_method: 0,
-                        identity_matrix: None,
+                .filter_map(|h| {
+                    let align_length = h.hsp.q_end - h.hsp.q_start;
+                    let (identity, positive) = match u32::try_from(align_length) {
+                        Ok(length) => identity_and_positive(
+                            &super::kappa::RedoneHsp {
+                                hsp: h.hsp.clone(),
+                                edit_script: vec![crate::common::GapEditOp::Sub(length)],
+                                composition_method: 0,
+                                identity_matrix: None,
+                            },
+                            batch,
+                            &encoded,
+                            self.options.scoring,
+                        ),
+                        Err(_) => (0, 0),
                     };
-                    let (identity, positive) =
-                        identity_and_positive(&redone, batch, &encoded, self.options.scoring);
-                    Hsp {
+                    if crate::core::blast_hits::hsp_test(
+                        identity as i64,
+                        i64::from(align_length),
+                        0.0,
+                        0,
+                    ) {
+                        return None;
+                    }
+                    Some(Hsp {
                         hsp: h.hsp,
                         num: h.num,
                         evalue: h.evalue,
@@ -1154,7 +1012,7 @@ impl PreliminarySink for Runtime<'_> {
                         positive,
                         edit_script: Vec::new(),
                         composition_method: 0,
-                    }
+                    })
                 })
                 .collect();
             payloads.sort_by(|a, b| super::preliminary::compare_score(&a.hsp, &b.hsp));
@@ -1392,6 +1250,247 @@ impl PreliminarySink for Runtime<'_> {
             .write_observed(oid, hsps, self.observer)?;
         Ok(())
     }
+}
+impl PreliminarySink for Runtime<'_> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:176-181,202-210
+    // ```c++
+    //
+    //     int status = m_PrelimSearch->CheckInternalData();
+    //     if (status != 0)
+    //     {
+    //          // Search was not run, but we send back an empty CSearchResultSet.
+    //          CRef<ILocalQueryData> local_query_data = m_QueryFactory->MakeLocalQueryData(m_Opts);
+    //               msg_vec.push_back(q_msg);
+    //               seqid_vec.push_back(query_id);
+    //               CRef<objects::CSeq_align_set> tmp_align;
+    //               sa_vec.push_back(tmp_align);
+    //               pair<double, double> tmp_pair(-1.0, -1.0);
+    //               CRef<CBlastAncillaryData>  tmp_ancillary_data(new CBlastAncillaryData(tmp_pair, tmp_pair, tmp_pair, 0));
+    //               ancill_vec.push_back(tmp_ancillary_data);
+    //
+    //               for(unsigned int i =1; i < num_subjects; i++)
+    // ```
+    fn unsearched_batch(
+        &mut self,
+        ordinal: usize,
+        batch: &PreparedQueryBatch,
+        params: &[ContextParameters],
+    ) -> Result<()> {
+        self.output.push(BatchResults {
+            query_ordinal: ordinal,
+            queries: vec![Vec::new(); batch.original_lengths.len()],
+            prepared: batch.x_for_results(),
+            parameters: params.to_vec(),
+            search_skipped: true,
+        });
+        Ok(())
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-235
+    // ```c++
+    //     CEffectiveSearchSpacesMemento eff_memento(m_Options);
+    //     SplitQuery_SetEffectiveSearchSpace(m_Options, m_QueryFactory,
+    //                                        m_InternalData);
+    //     int retval = 0;
+    //
+    //     unique_ptr<const CBlastOptionsMemento> opts_memento
+    //         (m_Options->CreateSnapshot());
+    //     BLAST_SequenceBlk* queries = m_InternalData->m_Queries;
+    //     LookupTableOptions * lut_options = opts_memento->m_LutOpts;
+    //     BlastInitialWordOptions * word_options = opts_memento->m_InitWordOpts;
+    //
+    //     // Query splitting data structure (used only if applicable)
+    //     CRef<SBlastSetupData> setup_data(new SBlastSetupData(m_QueryFactory, m_Options));
+    //     CRef<CQuerySplitter> query_splitter = setup_data->m_QuerySplitter;
+    //     if (query_splitter->IsQuerySplit()) {
+    //
+    //         CRef<CSplitQueryBlk> split_query_blk = query_splitter->Split();
+    // ```
+    fn batch_start(
+        &mut self,
+        ordinal: usize,
+        batch: &PreparedQueryBatch,
+        _params: &[ContextParameters],
+    ) -> Result<()> {
+        self.ordinal = ordinal;
+        self.stream = Some(if self.options.culling_limit > 0 {
+            HspStream::with_culling(
+                batch.contexts.iter().map(|c| c.length as i32).collect(),
+                self.options.culling_limit,
+                prelim_hitlist_size(self.options),
+            )
+        } else {
+            HspStream::new(
+                batch.original_lengths.len(),
+                prelim_hitlist_size(self.options),
+            )
+        });
+        Ok(())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:237-244
+    // ```c++
+    //         for (Uint4 i = 0; i < query_splitter->GetNumberOfChunks(); i++) {
+    //             try {
+    //                 CRef<IQueryFactory> chunk_qf =
+    //                     query_splitter->GetQueryFactoryForChunk(i);
+    //                 _TRACE("Query chunk " << i << "/" <<
+    //                        query_splitter->GetNumberOfChunks());
+    //                 CRef<SInternalData> chunk_data =
+    //                     SplitQuery_CreateChunkData(chunk_qf, m_Options,
+    // ```
+    fn chunk_start(&mut self, chunk: &QueryChunk) -> Result<()> {
+        self.chunk = Some(if self.options.culling_limit > 0 {
+            HspStream::with_culling(
+                chunk
+                    .prepared
+                    .contexts
+                    .iter()
+                    .map(|c| c.length as i32)
+                    .collect(),
+                self.options.culling_limit,
+                prelim_hitlist_size(self.options),
+            )
+        } else {
+            HspStream::new(
+                chunk.prepared.original_lengths.len(),
+                prelim_hitlist_size(self.options),
+            )
+        });
+        Ok(())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:583-593
+    // ```c++
+    //                      overlap, score_options->gapped_calculation,
+    //                      Blast_ProgramIsMapping(program_number));
+    //
+    //         if((hit_params->options->hsp_filt_opt != NULL) &&
+    //            (hit_params->options->hsp_filt_opt->subject_besthit_opts != NULL)) {
+    //            	Blast_HSPListSubjectBestHit(program_number,
+    //            								hit_params->options->hsp_filt_opt->subject_besthit_opts,
+    //            								query_info, combined_hsp_list);
+    //         }
+    //
+    //     } /* End loop on chunks of subject sequence */
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1450-1458
+    // ```c++
+    //          searches. */
+    //       if (hit_params->link_hsp_params && !kNucleotide &&
+    //           !gapped_calculation) {
+    //           CalculateLinkHSPCutoffs(program_number, query_info, sbp,
+    //             hit_params->link_hsp_params, word_params, db_length,
+    //             seq_arg.seq->length);
+    //       }
+    //
+    //       if (Blast_SubjectIsTranslated(program_number)) {
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:550-552
+    // ```c++
+    //             Blast_HSPListAdjustOddBlastnScores(hsp_list, score_options->gapped_calculation, gap_align->sbp);
+    // #endif
+    //
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3916-3921
+    // ```c++
+    //
+    //       /* use priate interval tree when recomputing alignments */
+    //       if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
+    //                                         hit_options->min_diag_separation))
+    //       {
+    //          BlastHSP* new_hsp;
+    // ```
+    fn containment(&mut self, h: &PreliminaryHsp, contained: bool) {
+        self.observer.containment(h, contained);
+    }
+    // No NCBI counterpart: tells the search whether the containment callback is read; it does not
+    // change any value NCBI computes.
+    fn x_wants_containment(&self) -> bool {
+        !self.observer.x_passive()
+    }
+    fn preliminary_purge(
+        &mut self,
+        oid: usize,
+        before: &[PreliminaryHsp],
+        after: &[PreliminaryHsp],
+    ) -> Result<()> {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:550-568
+        // ```c++
+        //             Blast_HSPListAdjustOddBlastnScores(hsp_list, score_options->gapped_calculation, gap_align->sbp);
+        // #endif
+        //
+        //         }
+        //
+        //         Blast_HSPListSortByScore(hsp_list);
+        //
+        //
+        //         if (score_options->is_ooframe && kTranslatedSubject)
+        //             subject->length = prot_length;
+        //         } else {
+        //             BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
+        //                     hit_params->options, &hsp_list);
+        //         }
+        //
+        //         if (hsp_list->hspcnt == 0) continue;
+        //
+        //         /* The subject ordinal id is not yet filled in this HSP list */
+        //         hsp_list->oid = subject->oid;
+        // ```
+        self.observer.preliminary_call(oid);
+        // The score-only list is newly allocated with oid=0; the engine sets
+        // its real subject OID only after endpoint purge/score sort.
+        self.observer.numeric("PRE_ENDPOINT_IN", 0, before);
+        self.observer.numeric("PRE_ENDPOINT_OUT", 0, after);
+        Ok(())
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1451-1455
+    // ```c++
+    //       if (hit_params->link_hsp_params && !kNucleotide &&
+    //           !gapped_calculation) {
+    //           CalculateLinkHSPCutoffs(program_number, query_info, sbp,
+    //             hit_params->link_hsp_params, word_params, db_length,
+    //             seq_arg.seq->length);
+    // ```
+    // search::compute_subject has performed this exact preparation before
+    // WordFinder with worker-local state. Adopt it without recomputation,
+    // retaining serial observer and linking state in input OID order.
+    fn subject_start(
+        &mut self,
+        oid: usize,
+        _batch: &PreparedQueryBatch,
+        _params: &[ContextParameters],
+        prepared: Option<crate::core::link_hsps::LinkCutoffs>,
+    ) -> Result<()> {
+        self.ungapped_link_state = prepared;
+        if let Some(prepared) = prepared {
+            let length = self.subject_length(oid)? as i32;
+            let link = super::linking::link_parameters(self.options)
+                .expect("ungapped sum-stat parameters");
+            self.observer
+                .link_setup(length, self.db_length, prepared, &link);
+        }
+        Ok(())
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443 (quoted above
+    // `search::search_preliminary`): where NCBI computes the statistics of each subject (the
+    // batch's `subject_option_spaces`), the e-values of a subject's HSPs read the subject's own
+    // parameters, the ones `search::compute_own_subject` searched it with (`parameters::
+    // subject_update` of the same chunk, options' spaces and length); a subject without HSPs
+    // reads none. One test per subject on the default path.
+    fn subject(
+        &mut self,
+        oid: usize,
+        input: &[PreliminaryHsp],
+        batch: &PreparedQueryBatch,
+        params: &[ContextParameters],
+    ) -> Result<()> {
+        if let (Some(option_spaces), false) =
+            (batch.subject_option_spaces.as_deref(), input.is_empty())
+        {
+            return self.subject_own(oid, input, batch, params, option_spaces);
+        }
+        self.subject_with(oid, input, batch, params)
+    }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:268-271
     // ```c++
@@ -1481,6 +1580,29 @@ impl PreliminarySink for Runtime<'_> {
             stream.close_cbs_observed(self.observer, hitlist_size);
         } else {
             stream.close_observed(self.observer);
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575 and
+        // blast_traceback.c:1567-1577 (quoted at `blastp::blast_engine::database::exclude_fetched`)
+        // The redo's and the traceback's fetches (`check_oid_exclusion`) exclude a subject that the
+        // negative seqid list keeps without a line (`FetchExcluded`): its lists leave the closed
+        // stream before the redo or the traceback reads it. An ungapped search fetches no protein
+        // subject; its such hits leave at the Seq-aligns (`ReportedSubjects::drop_unaligned`).
+        // A header that the fetch cannot read ends NCBI's search: LOSAT's refusal
+        // (`FetchExcluded::refusal`).
+        if self.options.gapped {
+            if let Some(excluded) = self
+                .subjects
+                .seqdb()
+                .and_then(crate::algorithm::common::database::FetchExcluded::of)
+            {
+                stream
+                    .retain_closed(|lists| {
+                        excluded.retain(lists, |list| u32::try_from(list.oid).ok())
+                    })
+                    .map_err(|failed| {
+                        crate::algorithm::common::database::FetchExcluded::refusal(failed, "BLASTX")
+                    })?;
+            }
         }
         self.observer.restored(batch, &full);
 
@@ -1700,469 +1822,15 @@ impl PreliminarySink for Runtime<'_> {
                 }
             }
         } else if let Some(state) = &mut kappa {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3392-3424
-            // ```c++
-            //         BlastHSPListLinkedList* head = NULL;
-            //         BlastHSPListLinkedList* tail = NULL;
-            //         /*
-            //          * Collect matches from stream into linked list, counting them
-            //          * along the way.
-            //          */
-            //         while (BlastHSPStreamRead(hsp_stream, &localMatch)
-            //                 != kBlastHSPStream_Eof) {
-            //             BlastHSPListLinkedList* entry =
-            //                     (BlastHSPListLinkedList*) calloc(
-            //                             1,
-            //                             sizeof(BlastHSPListLinkedList)
-            //                     );
-            //             entry->match = localMatch;
-            //             if (head == NULL) {
-            //                 head = entry;
-            //             } else {
-            //                 tail->next = entry;
-            //             }
-            //             tail = entry;
-            //             ++numMatches;
-            //         }
-            //         /*
-            //          * Convert linked list of matches into array.
-            //          */
-            //         theseMatches =
-            //                 (BlastHSPList**) calloc(numMatches, sizeof(BlastHSPList*));
-            //         int i;
-            //         for (i = 0; i < numMatches; ++i) {
-            //             theseMatches[i] = head->match;
-            //             BlastHSPListLinkedList* here = head;
-            //             head = head->next;
-            //             sfree(here);
-            // ```
-            let x_t = super::x_timing::lap();
-            let mut matches = Vec::new();
-            while let Some(list) = stream.read_observed(self.observer) {
-                matches.push(list);
-            }
-            super::x_timing::end(XEnd::Read, x_t);
-            // Redo the matches of one batch on the search pool before walking them in stream order.
-            // A match is a function of its own HSP list and of the matrix left by the match before
-            // it; `x_speculate_match` returns a result only when the latter was never read, and
-            // reports the matrix the match leaves.
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3448-3451,3499-3502
-            // ```c
-            // #pragma omp for schedule(static)
-            //         for (b = 0; b < numMatches; ++b) {
-            // #pragma omp flush(interrupt)
-            //             if (!interrupt) {
-            // ...
-            //                 NRrecord             = NRrecord_tld[tid];
-            //                 sbp                  = sbp_tld[tid];
-            //                 redo_align_params    = redo_align_params_tld[tid];
-            //                 matrix               = matrix_tld[tid];
-            // ```
-            // NCBI redoes the matches in this omp loop, each thread with its own state. The batch
-            // of speculative redoes below does the same per-match work on the pool. A result is
-            // used only if the match did not read the matrix of its predecessor; every other match
-            // is redone in stream order (see x_speculate_match).
-            #[cfg(feature = "parallel")]
-            let mut speculated: Vec<Option<(HspList, i32, Option<XMatrixLeft>)>> = Vec::new();
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3329-3334,3499-3502
-            // ```c
-            //         if ((int) compo_adjust_mode > 1 && !positionBased) {
-            //             NRrecord_tld[i] = Blast_CompositionWorkspaceNew();
-            //             status_code = Blast_CompositionWorkspaceInit(
-            //                     NRrecord_tld[i],
-            //                     scoringParams->options->matrix
-            //             );
-            // ...
-            //                 NRrecord             = NRrecord_tld[tid];
-            //                 sbp                  = sbp_tld[tid];
-            //                 redo_align_params    = redo_align_params_tld[tid];
-            //                 matrix               = matrix_tld[tid];
-            // ```
-            // One Kappa state per pool thread, as NCBI keeps one NRrecord, redo_align_params and
-            // matrix per thread.
-            #[cfg(feature = "parallel")]
-            let x_workers = if x_bx_par_rule(|| {
-                self.observer.x_passive()
-                    && !x_inner_serial()
-                    && rayon::current_thread_index().is_some()
-                    && rayon::current_num_threads() > 1
-                    && matches.len() > 1
-            }) {
-                (0..x_kappa_workers(rayon::current_num_threads(), matches.len()))
-                    .map(|_| {
-                        Ok(std::sync::Mutex::new(XKappaWorker(state.x_for_thread(
-                            batch,
-                            &full,
-                            self.options,
-                        )?)))
-                    })
-                    .collect::<Result<Vec<_>>>()?
-            } else {
-                Vec::new()
-            };
-            // `x_workers` has one entry per pool thread, or one per match where there are fewer
-            // matches (`x_kappa_workers`); none outside a pool (asking Rayon for the thread count
-            // there would start its global pool).
-            // No NCBI counterpart: size of one speculative batch (scheduling only); it does not
-            // change any value NCBI computes.
-            #[cfg(feature = "parallel")]
-            let x_batch = x_workers.len().saturating_mul(32).max(64);
-            // No NCBI counterpart: stage report for the thread-use statistics; it does not change
-            // any value NCBI computes.
-            #[cfg(feature = "parallel")]
-            crate::utils::threading::report_stage(
-                "blastx",
-                "kappa_redo",
-                matches.len(),
-                !x_workers.is_empty(),
-            );
-            // No NCBI counterpart: counters of speculative results used and matches redone in
-            // order; it does not change any value NCBI computes.
-            let mut x_reused = 0usize;
-            let mut x_serial = 0usize;
-            let x_t_loop = super::x_timing::lap();
-            #[cfg_attr(
-                not(feature = "parallel"),
-                expect(unused_variables, reason = "used only with parallel")
-            )]
-            for (match_index, list) in matches.iter().enumerate() {
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3448-3451
-                // ```c
-                // #pragma omp for schedule(static)
-                //         for (b = 0; b < numMatches; ++b) {
-                // #pragma omp flush(interrupt)
-                //             if (!interrupt) {
-                // ```
-                // A batch of the following matches is redone ahead of time on the pool. The early-
-                // termination test (BlastCompo_EarlyTermination) is evaluated here on the heaps as
-                // they are now, and again, in stream order, below; a result is used only when the
-                // second test agrees.
-                #[cfg(feature = "parallel")]
-                if !x_workers.is_empty() && match_index % x_batch == 0 {
-                    use rayon::prelude::*;
-                    let batch_lists =
-                        &matches[match_index..(match_index + x_batch).min(matches.len())];
-                    // Early termination only becomes true as the heaps fill.
-                    let wanted: Vec<bool> = batch_lists
-                        .iter()
-                        .map(|list| !CompoHeap::early(list.best_evalue, &heaps))
-                        .collect();
-                    let (options, subjects, db_length) =
-                        (self.options, self.subjects, self.db_length);
-                    let full = &full;
-                    let workers = &x_workers;
-                    let x_t = super::x_timing::lap();
-                    // One worker per thread: the thread's own. One per match (fewer matches than
-                    // threads, so this batch holds them all): the match's own.
-                    let per_thread = workers.len() == rayon::current_num_threads();
-                    speculated = batch_lists
-                        .par_iter()
-                        .zip(wanted.par_iter())
-                        .enumerate()
-                        .map(|(position, (list, &wanted))| {
-                            if !wanted {
-                                return None;
-                            }
-                            let slot = if per_thread {
-                                rayon::current_thread_index().unwrap_or(0) % workers.len()
-                            } else {
-                                position % workers.len()
-                            };
-                            let mut guard = workers[slot].lock().expect("BLASTX redo worker state");
-                            x_speculate_match(
-                                &mut guard.0,
-                                list,
-                                batch,
-                                full,
-                                options,
-                                subjects,
-                                db_length,
-                            )
-                        })
-                        .collect();
-                    super::x_timing::end(XEnd::KappaSpec, x_t);
-                }
-                // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1560-1582
-                // ```c++
-                // BlastCompo_EarlyTermination(double evalue,
-                //                             BlastCompo_Heap significantMatches[],
-                //                             int numQueries)
-                // {
-                //     int i;
-                //     for (i = 0;  i < numQueries;  i++) {
-                //         if (BlastCompo_HeapFilledToCutoff(&significantMatches[i])) {
-                //             double ecutoff = significantMatches[i].ecutoff;
-                //             /* Only matches with evalue <= ethresh will be saved. */
-                //             if (evalue <= EVALUE_STRETCH * ecutoff) {
-                //                 /* The evalue if this match is sufficiently small
-                //                  * that we want to redo it to try to obtain an
-                //                  * alignment with evalue smaller than ecutoff. */
-                //                 return FALSE;
-                //             }
-                //         } else {
-                //             return FALSE;
-                //         }
-                //     }
-                //     return TRUE;
-                // }
-                // ```
-                let early = CompoHeap::early(list.best_evalue, &heaps);
-                self.observer.early(list.best_evalue, heaps.len(), early);
-                if early {
-                    continue;
-                }
-                #[cfg(feature = "parallel")]
-                let x_ready = if x_workers.is_empty() {
-                    None
-                } else {
-                    speculated[match_index % x_batch].take()
-                };
-                #[cfg(not(feature = "parallel"))]
-                let x_ready: Option<(HspList, i32, Option<XMatrixLeft>)> = None;
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3625-3626
-                // ```c
-                //                                 Blast_RedoOneMatch(
-                //                                         alignments,             // thread-local
-                // ```
-                // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1232-1234
-                // ```c
-                //                 if (compo_adjust_mode != eNoCompositionBasedStats &&
-                //                         (subject_is_translated || hsp_index == 0
-                //                                 || (nearIdenticalStatus != oldNearIdenticalStatus))) {
-                // ```
-                // Dispatch point: the reference path is the else branch, which redoes the match in
-                // stream order (Blast_RedoOneMatch). A speculative result is taken instead only
-                // when it was computed without reading its predecessor's matrix; its matrix, if it
-                // leaves one, is handed on.
-                let (output, best_score) = if let Some((output, best_score, matrix)) = x_ready {
-                    x_reused += 1;
-                    if let Some(matrix) = matrix {
-                        state.x_set_matrix(Some(*matrix));
-                    }
-                    (output, best_score)
-                } else {
-                    x_serial += 1;
-                    let x_t = super::x_timing::lap();
-                    let encoded = self.subjects.read_encoded(list.oid)?;
-                    let input: Vec<_> = list.hsps.iter().map(|h| h.hsp.clone()).collect();
-                    let redone = state.redo_list_observed(&input, batch, &encoded)?;
-                    let finalized = finalize_redone(
-                        &redone,
-                        batch,
-                        &full,
-                        self.options,
-                        &encoded,
-                        self.db_length,
-                        list.query_index,
-                        list.oid,
-                        self.observer,
-                    );
-                    super::x_timing::end(XEnd::KappaSerial, x_t);
-                    finalized?
-                };
-                if output.hsps.is_empty() {
-                    continue;
-                }
-                // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:252-275
-                // ```c++
-                // BlastCompo_HeapWouldInsert(BlastCompo_Heap * self,
-                //                            double eValue,
-                //                            int score,
-                //                            int subject_index)
-                // {
-                //     if (self->n < self->heapThreshold ||
-                //         eValue <= self->ecutoff ||
-                //         eValue <  self->worstEvalue) {
-                //         return TRUE;
-                //     } else {
-                //         /* self is either currently a heap, or must be converted to
-                //          * one; use s_CompoHeapRecordCompare to compare against
-                //          * the worst element in the heap */
-                //         BlastCompo_HeapRecord heapRecord; /* temporary record to
-                //                                              compare against */
-                //         if (self->heapArray == NULL) s_ConvertToHeap(self);
-                //
-                //         heapRecord.bestEvalue       = eValue;
-                //         heapRecord.bestScore        = score;
-                //         heapRecord.subject_index    = subject_index;
-                //         heapRecord.theseAlignments  = NULL;
-                //
-                //         return s_CompoHeapRecordCompare(&self->heapArray[1], &heapRecord);
-                //     }
-                // ```
-                let heap = &mut heaps[list.query_index];
-                let e = output.best_evalue;
-                let insert = heap.would_insert(e, best_score, list.oid);
-                self.observer.heap(
-                    list.query_index + inactive_heaps.len(),
-                    "WOULD",
-                    e,
-                    best_score,
-                    list.oid as i64,
-                    i64::from(insert),
-                    heap,
-                );
-                if insert {
-                    let discarded = heap.insert(HeapEntry {
-                        list: output,
-                        best_score,
-                    });
-                    self.observer.heap(
-                        list.query_index + inactive_heaps.len(),
-                        "INSERT",
-                        e,
-                        best_score,
-                        list.oid as i64,
-                        discarded.as_ref().map_or(-1, |h| h.list.oid as i64),
-                        heap,
-                    );
-                }
-            }
-
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2493-2513
-            // ```c++
-            // s_FillResultsFromCompoHeaps(BlastHSPResults * results,
-            //                             BlastCompo_Heap heaps[],
-            //                             Int4 hitlist_size)
-            // {
-            //     int query_index;   /* loop index */
-            //     int num_queries;   /* Number of queries in this search */
-            //
-            //     num_queries = results->num_queries;
-            //     for (query_index = 0;  query_index < num_queries;  query_index++) {
-            //         BlastHSPList* hsp_list;
-            //         BlastHitList* hitlist;
-            //         BlastCompo_Heap * heap = &heaps[query_index];
-            //
-            //         results->hitlist_array[query_index] = Blast_HitListNew(hitlist_size);
-            //         hitlist = results->hitlist_array[query_index];
-            //
-            //         while (NULL != (hsp_list = BlastCompo_HeapPop(heap))) {
-            //             Blast_HitListUpdate(hitlist, hsp_list);
-            //         }
-            //     }
-            //     Blast_HSPResultsReverseOrder(results);
-            // ```
-            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:444-464
-            // ```c++
-            // BlastCompo_HeapPop(BlastCompo_Heap * self)
-            // {
-            //     void * results = NULL;   /* the list of SeqAligns to be returned */
-            //
-            //     s_ConvertToHeap(self);
-            //     if (self->n > 0) { /* The heap is not empty */
-            //         BlastCompo_HeapRecord *first, *last; /* The first and last
-            //                                                 elements of the array
-            //                                                 that represents the
-            //                                                 heap.  */
-            //         first = &self->heapArray[1];
-            //         last  = &self->heapArray[self->n];
-            //
-            //         results = first->theseAlignments;
-            //         if (--self->n > 0) {
-            //             /* The heap is still not empty */
-            //             memcpy(first, last, sizeof(BlastCompo_HeapRecord));
-            //             s_CompoHeapifyDown(self->heapArray, 1, self->n);
-            //         }
-            //     }
-            //     if (COMPO_INTENSE_DEBUG) {
-            // ```
-            super::x_timing::end(XEnd::Loop, x_t_loop);
-            super::x_timing::end_add(XEnd::Matches, matches.len() as u64);
-            super::x_timing::end_add(XEnd::Reused, x_reused as u64);
-            super::x_timing::end_add(XEnd::Serial, x_serial as u64);
-            x_t_finish = super::x_timing::lap();
-            let _ = (x_reused, x_serial);
-            for (q, (heap, query)) in heaps.iter_mut().zip(&mut queries).enumerate() {
-                loop {
-                    let entry = heap.pop();
-                    self.observer.heap(
-                        q + inactive_heaps.len(),
-                        "POP",
-                        0.0,
-                        0,
-                        entry.as_ref().map_or(-1, |e| e.list.oid as i64),
-                        0,
-                        heap,
-                    );
-                    let Some(entry) = entry else {
-                        break;
-                    };
-                    query.update_observed(entry.list, self.observer);
-                }
-            }
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2503-2513
-            // ```c++
-            //         BlastHitList* hitlist;
-            //         BlastCompo_Heap * heap = &heaps[query_index];
-            //
-            //         results->hitlist_array[query_index] = Blast_HitListNew(hitlist_size);
-            //         hitlist = results->hitlist_array[query_index];
-            //
-            //         while (NULL != (hsp_list = BlastCompo_HeapPop(heap))) {
-            //             Blast_HitListUpdate(hitlist, hsp_list);
-            //         }
-            //     }
-            //     Blast_HSPResultsReverseOrder(results);
-            // ```
-            for query in &mut queries {
-                query.lists.reverse();
-            }
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3787-3814
-            // ```c++
-            //             if (redoneMatches_tld[i] != NULL) {
-            //                 int qi;
-            //                 for (qi = 0; qi < numQueries; ++qi) {
-            //                     sfree(redoneMatches_tld[i][qi].array);
-            //                     sfree(redoneMatches_tld[i][qi].heapArray);
-            //                 }
-            //                 s_ClearHeap(redoneMatches_tld[i]);
-            //             }
-            //         } else {
-            //             if (redoneMatches_tld[i] != NULL) {
-            //                 int qi;
-            //                 for (qi = 0; qi < numQueries; ++qi) {
-            //                     sfree(redoneMatches_tld[i][qi].array);
-            //                     sfree(redoneMatches_tld[i][qi].heapArray);
-            //                 }
-            //                 s_ClearHeap(redoneMatches_tld[i]);
-            //             }
-            //         }
-            //         sfree(redoneMatches_tld[i]);
-            //     }
-            //     if (redoneMatches != NULL) {
-            //         int qi;
-            //         for (qi = 0; qi < numQueries; ++qi) {
-            //             sfree(redoneMatches[qi].array);
-            //             sfree(redoneMatches[qi].heapArray);
-            //         }
-            //         s_ClearHeap(redoneMatches);
-            //     }
-            // ```
-            if let Some(heap) = heaps.first_mut() {
-                let entry = heap.pop();
-                self.observer.heap(
-                    inactive_heaps.len(),
-                    "POP",
-                    0.0,
-                    0,
-                    entry.as_ref().map_or(-1, |e| e.list.oid as i64),
-                    0,
-                    heap,
-                );
-            }
-            if let Some(heap) = inactive_heaps.first_mut() {
-                let entry = heap.pop();
-                self.observer.heap(
-                    0,
-                    "POP",
-                    0.0,
-                    0,
-                    entry.as_ref().map_or(-1, |e| e.list.oid as i64),
-                    0,
-                    heap,
-                );
-            }
+            x_t_finish = self.kappa_redo_batch(KappaBatch {
+                batch,
+                full: &full,
+                state,
+                stream: &mut stream,
+                queries: &mut queries,
+                heaps: &mut heaps,
+                inactive_heaps: &mut inactive_heaps,
+            })?;
         } else {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1640-1707
             // ```c++
@@ -2482,8 +2150,13 @@ impl PreliminarySink for Runtime<'_> {
         //        larger than the final hit list size */
         //     s_BlastPruneExtraHits(results, hit_params->options->hitlist_size);
         // ```
-        for query in &mut queries {
-            query.lists.sort_by(super::results::compare_list);
+        // Not where `BlastSeqSrcGetTotLen` (`Subjects::total_length`) is 0 or negative: the lists
+        // keep the traceback's order, by OID through `update_observed` (and the composition
+        // heap's reversed order with composition-based statistics), NCBI's one-thread order.
+        if self.subjects.total_length()? > 0 {
+            for query in &mut queries {
+                query.lists.sort_by(super::results::compare_list);
+            }
         }
         for (q, query) in queries.iter().enumerate() {
             self.observer.targets("IN", q, &query.lists);

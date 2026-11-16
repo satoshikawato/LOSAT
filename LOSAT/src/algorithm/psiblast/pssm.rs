@@ -17,6 +17,8 @@ use crate::config::ScoringMatrix;
 use crate::core::psi::{
     self, KarlinBlk, PsiDiagnosticsRequest, PsiError, PsiMsa, PsiMsaCell, PsiPssm,
 };
+use crate::report::diag_log::Posts;
+use crate::report::serial::encoder::ReplacedChar;
 use crate::report::serial::pssm::{
     FormatRpsDbParameters, ObjectId, Pssm, PssmFinalData, PssmIntermediateData, PssmParameters,
     PssmQuery, PssmWithParameters, SeqData, SeqInst,
@@ -34,6 +36,10 @@ pub struct PsiblastPssmOptions {
     pub pseudocount: i32,
     /// `-in_pssm`: the query as a PSSM file (`algorithm::psiblast::in_pssm`).
     pub in_pssm: Option<std::path::PathBuf>,
+    /// The run's `-save_each_pssm` numbers (`PsiblastArgs::pssm_versions`).
+    pub versions: PssmVersions,
+    /// The queries that the call's checks of its PSSM files cover (`PsiblastArgs::pssm_check`).
+    pub check_scope: PssmCheckScope,
     /// The rounds that the round driver runs (`algorithm::psiblast::rounds`): `-num_iterations`
     /// when it is not 1 (0: until convergence), or 1 with `-in_pssm` and a PSSM file (the input
     /// PSSM is written before round 1); `None` for the one search of today's call.
@@ -51,9 +57,104 @@ pub struct PssmRequest {
     pub save_each: bool,
     /// `-pseudocount` (`PSIBlastOptions::pseudo_count`).
     pub pseudocount: i32,
+    /// The run's numbers of the files of `-save_each_pssm` (`PssmVersions`).
+    pub versions: PssmVersions,
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1304-1318
+// ```c++
+//         const bool kSaveAllPssms
+//             = args.Exist(kArgSaveAllPssms) && args[kArgSaveAllPssms];
+//         if (args.Exist(kArgPSIOutputChkPntFile) &&
+//             args[kArgPSIOutputChkPntFile]) {
+//             m_CheckPointOutput.Reset
+//                 (new CAutoOutputFileReset
+//                  (args[kArgPSIOutputChkPntFile].AsString(), kSaveAllPssms));
+//         }
+//         const bool kSaveAsciiPssm = args[kArgAsciiPssmOutputFile];
+//         if (kSaveAsciiPssm) {
+//             m_AsciiMatrixOutput.Reset
+//                 (new CAutoOutputFileReset
+//                  (args[kArgAsciiPssmOutputFile].AsString(), kSaveAllPssms));
+//         }
+// ```
+/// The next number of each of a run's two PSSM streams under `-save_each_pssm`
+/// (`CAutoOutputFileReset::m_Version` of `-out_pssm`'s and of `-out_ascii_pssm`'s, from 1). NCBI's
+/// argument object makes the two streams once per run, so their numbers go on over the run's
+/// queries and rounds. The clones of one `PssmVersions` share its numbers: the library's
+/// `run_batches`, whose query batches are calls of their own, gives every batch the run's
+/// (`api::batches`); a command line's run has one.
+#[derive(Debug, Clone)]
+pub struct PssmVersions {
+    asn: Version,
+    ascii: Version,
+}
+
+/// The next number of one PSSM stream, shared by the clones of its `PssmVersions`.
+type Version = std::sync::Arc<std::sync::atomic::AtomicU32>;
+
+impl Default for PssmVersions {
+    fn default() -> Self {
+        let first = || Version::new(std::sync::atomic::AtomicU32::new(1));
+        Self {
+            asn: first(),
+            ascii: first(),
+        }
+    }
+}
+
+impl PssmVersions {
+    /// The next numbers of the two streams.
+    fn next(&self) -> [u32; 2] {
+        use std::sync::atomic::Ordering;
+        [
+            self.asn.load(Ordering::SeqCst),
+            self.ascii.load(Ordering::SeqCst),
+        ]
+    }
+}
+
+/// Which queries a call's check of its PSSM files before its search covers
+/// (`blastp::blast_engine::check_psiblast_pssm_files`: the names, `check_pssm_files`; a query title
+/// with a byte that NCBI's stream replaces is written as NCBI writes it, `file_posts`). The command
+/// line reads all its queries and checks them once, before its first byte; the library's
+/// `run_batches`, whose batches are calls of their own, has its first batch make the run's check,
+/// where the command line makes it, and the later batches none (`api::batches`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum PssmCheckScope {
+    /// The call's own records (the command line, the library's `run`, `run_collect`,
+    /// `run_to_file`).
+    #[default]
+    Call,
+    /// The run's: its number of query records.
+    Run { queries: usize },
+    /// Checked by the run's first batch.
+    Checked,
+}
+
+/// Two `PssmVersions` are the same where their next numbers are.
+impl PartialEq for PssmVersions {
+    fn eq(&self, other: &Self) -> bool {
+        self.next() == other.next()
+    }
+}
+
+impl Eq for PssmVersions {}
+
 impl PssmRequest {
+    /// The run's streams of `-out_pssm` and of `-out_ascii_pssm` (`CAutoOutputFileReset`), each
+    /// where it is requested: with `-save_each_pssm` they number their files with the run's
+    /// numbers (`versions`).
+    pub(crate) fn streams(&self) -> [Option<OutputFileReset>; 2] {
+        let stream = |path: Option<&str>, version: &Version| {
+            path.map(|path| OutputFileReset::new(path, self.save_each.then(|| version.clone())))
+        };
+        [
+            stream(self.asn_path.as_deref(), &self.versions.asn),
+            stream(self.ascii_path.as_deref(), &self.versions.ascii),
+        ]
+    }
+
     /// The diagnostics the engine computes (`PSIDiagnosticsRequestNewEx(SaveAsciiPssm())`).
     pub(crate) fn diagnostics(&self) -> PsiDiagnosticsRequest {
         PsiDiagnosticsRequest::new_ex(self.ascii_path.is_some())
@@ -132,7 +233,19 @@ impl PsiblastPssmOptions {
             ascii_path: self.out_ascii_pssm.clone(),
             save_each: self.save_each_pssm,
             pseudocount: self.pseudocount,
+            versions: self.versions.clone(),
         })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-248 (quoted at
+    // `in_pssm_files`: the loop writes the PSSM of each round at its start, the input PSSM of
+    // `-in_pssm` in round 1)
+    /// Whether the run can write a PSSM file: the PSSM after the last round (`request`), or one
+    /// of the rounds' (`rounds`: at the start of each round after the first, and with `-in_pssm`
+    /// before round 1).
+    pub(crate) fn writes_files(&self) -> bool {
+        self.request().is_some()
+            || (self.rounds.is_some() && (self.out_pssm.is_some() || self.out_ascii_pssm.is_some()))
     }
 }
 
@@ -260,6 +373,10 @@ pub(crate) struct PssmScoring<'a> {
 #[derive(Debug)]
 pub(crate) struct QueryPssm {
     pub(crate) asn: Option<Vec<u8>>,
+    /// NCBI's posts of the bytes that its stream replaces in the ASN.1 text (a query title
+    /// outside the visible ASCII range; `report::serial::pssm::asn_text_posting`), which come
+    /// with each write of the file (`file_posts`).
+    pub(crate) asn_posts: Vec<ReplacedChar>,
     pub(crate) ascii: Option<Vec<u8>>,
     /// The engine's PSSM, which the next round searches (`algorithm::psiblast::rounds`).
     pub(crate) engine: PsiPssm,
@@ -452,15 +569,14 @@ pub(crate) fn query_pssm(
     let pssm =
         psi::create_pssm_with_diagnostics(&msa, request.pseudocount, &sbp, request.diagnostics())
             .map_err(|error| crate::blastinput::app::engine_error(error_code_to_string(error)))?;
-    let asn = match request.asn_path {
+    let (asn, asn_posts) = match request.asn_path {
         Some(_) => {
             let value = pssm_with_parameters(&pssm, letters, &query, scoring, request.pseudocount);
-            Some(
-                crate::report::serial::pssm::asn_text(&value)
-                    .map_err(|error| anyhow::anyhow!("{error}"))?,
-            )
+            let (asn, posts) = crate::report::serial::pssm::asn_text_posting(&value)
+                .map_err(|error| anyhow::anyhow!("{error}"))?;
+            (Some(asn), posts)
         }
-        None => None,
+        None => (None, Vec::new()),
     };
     let ascii = request
         .ascii_path
@@ -468,6 +584,7 @@ pub(crate) fn query_pssm(
         .map(|_| print_ascii_pssm(&pssm, letters, ancillary));
     Ok(QueryPssm {
         asn,
+        asn_posts,
         ascii,
         engine: pssm,
     })
@@ -1303,55 +1420,25 @@ pub(crate) fn write_ascii_pssm(
     out.into_bytes()
 }
 
-/// With `-out_pssm`, the refusal of a query whose title has a byte outside the visible ASCII
-/// range (0x20 to 0x7E), before the search: the PSSM's Bioseq holds the title as a
-/// VisibleString, and NCBI's ASN.1 text stream writes `#` for each such byte with an error message
-/// of three lines for each (`Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.descr.E.title`,
-/// `Bad char [0xC3] in string at line 12`, the title; NCBI 2.17.0, a UTF-8 title, status 0),
-/// which LOSAT does not reproduce (as outfmt 11's titles, `report::archive::check_titles`). The
-/// FASTA reader cuts a title at its first byte below 0x20, so the bytes refused are those from
-/// 0x7F on.
-// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:413-444
-// ```c++
-// void CObjectOStreamAsn::WriteString(const char* ptr, size_t length)
-// {
-//     m_Output.PutChar('"');
-//     CTempString original(ptr, length);
-//     size_t valid=0;
-//     while ( length > 0 ) {
-//         char c = *ptr;
-//         if ( x_FixCharsMethod() != eFNP_Allow ) {
-//             if ( !GoodVisibleChar(c) ) {
-//                 if (valid == 0) {
-// #if SERIAL_ALLOW_UTF8_IN_VISIBLESTRING_ON_WRITING
-//                     valid = CUtf8::EvaluateSymbolLength(CTempString(ptr,length));
-// #endif
-//                     if (valid == 0) {
-//                         c = ReplaceVisibleChar(c, x_FixCharsMethod(), this, original, x_FixCharsSubst());
-//                     }
-// ```
-// NCBI reference (598d8ae6): c++/include/serial/impl/objistr.inl:456-459
-// ```c++
-// bool GoodVisibleChar(char c)
-// {
-//     return c >= ' ' && c <= '~';
-// }
-// ```
-pub(crate) fn check_pssm_titles(
-    records: &[crate::blastinput::fasta_reader::FastaRecord],
-) -> Result<()> {
-    if let Some(record) = records.iter().find(|record| {
-        record
-            .title
-            .iter()
-            .any(|byte| !(0x20..=0x7E).contains(byte))
-    }) {
-        anyhow::bail!(
-            "the title of the query {} has a character the PSSM file cannot write as NCBI does (outside the visible ASCII range), which is not supported by LOSAT's PSIBLAST with -out_pssm",
-            record.local_id
-        );
+/// NCBI's posts of the bytes replaced in a PSSM's ASN.1 text (`QueryPssm::asn_posts`), which
+/// psiblast makes while `SavePssmToFile` writes the file, one error post 803.7 of the application
+/// `application` for each byte, after what the run wrote before (`cerr` is tied to `cout`), each
+/// whole, which a BLAST archive saves as one message (`Posts::write`; NCBI 2.17.0 `psiblast
+/// -outfmt 11 -out_pssm` saves them in the next archive's messages and the last ones in the error
+/// archive at the end of the run; LOSAT's psiblast does not write outfmt 11). One title byte
+/// outside 0x20..0x7E gives `Error: (803.7) [psiblast]
+/// PssmWithParameters.pssm.query.seq.descr.E.title` / `Bad char [0xE9] in string at line 12` /
+/// the whole title, `#` in its place in the file, status 0.
+// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:413-444 (quoted at
+// `report::serial::seqalign::write_query_posting`)
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1855-1897 (quoted at
+// `report::serial::encoder::ReplacedChar`)
+pub(crate) fn file_posts(application: &str, replaced: &[ReplacedChar]) -> Posts {
+    let mut posts = Posts::new();
+    for byte in replaced {
+        posts.post(crate::report::diag_log::ERROR, byte.post(Some(application)));
     }
-    Ok(())
+    posts
 }
 
 /// `CAutoOutputFileReset`: the file of one PSSM option, opened again at each write
@@ -1386,29 +1473,30 @@ pub(crate) fn check_pssm_titles(
 #[derive(Debug)]
 pub(crate) struct OutputFileReset {
     file_name: String,
-    version: u32,
+    /// `m_Version`: `None` for version 0 (no `-save_each_pssm`), else the run's number of the
+    /// stream (`PssmVersions`).
+    version: Option<Version>,
 }
 
 impl OutputFileReset {
-    pub(crate) fn new(file_name: &str, use_versions: bool) -> Self {
+    fn new(file_name: &str, version: Option<Version>) -> Self {
         Self {
             file_name: file_name.to_string(),
-            version: u32::from(use_versions),
+            version,
         }
     }
 
-    /// `GetStream`'s file: `F`, or `F.<version>` (the version counts the writes).
+    /// `GetStream`'s file: `F`, or `F.<version>` (the version counts the run's writes).
     pub(crate) fn next_file(&mut self) -> PssmFile {
-        if self.version == 0 {
+        let Some(version) = self.version.as_ref() else {
             return PssmFile {
                 path: std::path::PathBuf::from(&self.file_name),
                 replaced: true,
             };
-        }
-        let path = std::path::PathBuf::from(format!("{}.{}", self.file_name, self.version));
-        self.version += 1;
+        };
+        let number = version.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         PssmFile {
-            path,
+            path: std::path::PathBuf::from(format!("{}.{number}", self.file_name)),
             replaced: false,
         }
     }
@@ -1659,6 +1747,10 @@ pub(crate) struct PssmFiles {
     /// NCBI's messages of each query's PSSM reads (`PssmReadMessages`), by searched query in the
     /// order of the queries: NCBI writes them after that query's report.
     read_warnings: Vec<(usize, PssmReadMessages)>,
+    /// NCBI's posts of the bytes replaced in each query's ASN.1 PSSM (`file_posts`), by searched
+    /// query in the order of the queries: NCBI writes them when it writes the file, after the
+    /// query's read messages.
+    file_posts: Vec<(usize, Posts)>,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:440-450 (quoted at
@@ -1740,15 +1832,15 @@ enum Staged {
 
 impl PssmFiles {
     pub(crate) fn new(request: &PssmRequest) -> Self {
-        let stream =
-            |path: Option<&str>| path.map(|path| OutputFileReset::new(path, request.save_each));
+        let [asn, ascii] = request.streams();
         Self {
-            asn: stream(request.asn_path.as_deref()),
-            ascii: stream(request.ascii_path.as_deref()),
+            asn,
+            ascii,
             pending: Vec::new(),
             last_replaced: None,
             staging_count: 0,
             read_warnings: Vec::new(),
+            file_posts: Vec::new(),
         }
     }
 
@@ -1778,13 +1870,34 @@ impl PssmFiles {
         &mut self.read_warnings[at].1
     }
 
-    /// The messages of the PSSMs' reads, by searched query, in the order of the queries.
-    pub(crate) fn take_read_warnings(&mut self) -> Vec<(usize, Vec<u8>)> {
-        std::mem::take(&mut self.read_warnings)
-            .into_iter()
-            .filter(|(_, messages)| !messages.is_empty())
-            .map(|(query, messages)| (query, messages.bytes()))
-            .collect()
+    /// The posts of the write of the searched query `query`'s ASN.1 PSSM (`file_posts`), made in
+    /// the order of the queries.
+    pub(crate) fn add_file_posts(&mut self, query: usize, posts: Posts) {
+        if !posts.is_empty() {
+            self.file_posts.push((query, posts));
+        }
+    }
+
+    /// What NCBI writes after each query's report as it makes and writes the query's PSSM, by
+    /// searched query, in the order of the queries: the messages of the PSSM's reads (lines, each
+    /// a warning), then the posts of its ASN.1 file's write.
+    pub(crate) fn take_read_warnings(&mut self) -> Vec<(usize, Posts)> {
+        let mut file_posts = std::mem::take(&mut self.file_posts).into_iter().peekable();
+        let mut taken = Vec::new();
+        for (query, messages) in std::mem::take(&mut self.read_warnings) {
+            taken.extend(std::iter::from_fn(|| {
+                file_posts.next_if(|&(of, _)| of < query)
+            }));
+            let mut posts = Posts::of_lines(messages.bytes());
+            if let Some((_, written)) = file_posts.next_if(|&(of, _)| of == query) {
+                posts.append(&written);
+            }
+            if !posts.is_empty() {
+                taken.push((query, posts));
+            }
+        }
+        taken.extend(file_posts);
+        taken
     }
 
     /// One query's PSSM: its ASN.1 file staged and its ASCII PSSM kept. `Err` is LOSAT's refusal
@@ -1991,8 +2104,8 @@ impl PssmFiles {
 }
 
 impl Drop for PssmFiles {
-    // Out of line: it runs where the blastp engine's function that holds the files
-    // (`run_resolved_in_pool`) returns.
+    // Out of line: it runs where the function that holds the files returns (`run_call`, or
+    // `report_prep::report_values` on an error after the files are staged).
     #[cold]
     #[inline(never)]
     fn drop(&mut self) {
@@ -2029,8 +2142,9 @@ fn unsupported_target(path: &std::path::Path, kind: &str) -> anyhow::Error {
 /// query's files after its report through streams of their own, so a PSSM file that is also the
 /// standard output, the standard error or the `-out` file gets its bytes among the reports' in an
 /// order that their buffers make, which LOSAT does not reproduce (it writes the PSSM files after
-/// all reports). Every name the run can write is checked: `F`, or with `-save_each_pssm` `F.1` to
-/// `F.<number of queries>`; a name that does not exist cannot be one of those streams. The same
+/// all reports). Every name the run can write is checked: `F`, or with `-save_each_pssm` the next
+/// `<number of queries>` names `F.N` of the run (`PssmVersions`: from `F.1` but in the library's
+/// later query batches); a name that does not exist cannot be one of those streams. The same
 /// file is the same device and inode (`metadata` follows `/dev/stdout` to the stream's file),
 /// or for a character device the same device number (`/dev/null` excepted: no order of its bytes
 /// shows); without inode numbers, the same canonical path as `-out`, or one of the names of the
@@ -2042,15 +2156,18 @@ pub(crate) fn check_pssm_files(
     out: Option<&std::path::Path>,
 ) -> Result<()> {
     let check = PssmFileCheck::new(out);
-    for (option, path) in [
+    for ((option, path), first) in [
         ("-out_pssm", request.asn_path.as_deref()),
         ("-out_ascii_pssm", request.ascii_path.as_deref()),
-    ] {
+    ]
+    .into_iter()
+    .zip(request.versions.next())
+    {
         let Some(path) = path else {
             continue;
         };
         let names: Vec<std::path::PathBuf> = if request.save_each {
-            (1..=queries)
+            (first..first.saturating_add(u32::try_from(queries).unwrap_or(u32::MAX)))
                 .map(|n| std::path::PathBuf::from(format!("{path}.{n}")))
                 .collect()
         } else {

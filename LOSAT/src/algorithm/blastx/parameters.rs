@@ -8,10 +8,9 @@ use crate::stats::karlin_calc::{
     apply_check_ideal, compute_aa_composition, compute_karlin_params_ungapped,
     compute_score_freq_profile_for_matrix, compute_std_aa_composition,
 };
-use crate::stats::length_adjustment::compute_length_adjustment_ncbi;
 use crate::stats::spouge::{blast_spouge_etos, lookup_protein_gumbel_params, BlastGumbelBlk};
 use crate::stats::{lookup_protein_params, KarlinParams};
-use anyhow::{ensure, Result};
+use anyhow::{bail, ensure, Result};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2743-2754
 // ```c++
@@ -313,90 +312,52 @@ pub fn gumbel_block(options: &ResolvedOptions, db_length: i64) -> Option<BlastGu
 //       query_info->contexts[index].eff_searchsp = effective_search_space;
 //       query_info->contexts[index].length_adjustment = length_adjustment;
 // ```
-/// LOSAT's refusal of a search whose effective search space overflows NCBI's `Int8`
-/// (`db_length` letters of the database, or of `-dbsize`, against a context of
-/// `query_length` residues): NCBI's arithmetic overflows there (as BLASTP's `-dbsize`).
-#[derive(Debug)]
-pub struct SearchSpaceOverflow {
-    pub db_length: i64,
-    pub query_length: usize,
-    /// The program of the refusal (`args::ProgramName::upper`).
-    pub program: &'static str,
-}
-
-impl std::fmt::Display for SearchSpaceOverflow {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "a database length of {} letters with a query of {} letters overflows NCBI BLAST+'s 64-bit effective search space, which is not supported by LOSAT's {}",
-            self.db_length, self.query_length, self.program
-        )
-    }
-}
-
-impl std::error::Error for SearchSpaceOverflow {}
+/// LOSAT's refusal of a search whose effective search space overflows NCBI's `Int8` (the shared
+/// one of `stats::setup::calc_eff_lengths`).
+pub(crate) use crate::stats::setup::SearchSpaceOverflow;
 
 pub fn effective_lengths(
     batch: &PreparedQueryBatch,
     parameters: &mut [ContextParameters],
     options: &ResolvedOptions,
     db_length: i64,
-    db_count: i64,
+    db_count: i32,
     fixed_spaces: Option<&[i64]>,
 ) -> Result<()> {
     ensure!(
         parameters.len() == batch.contexts.len(),
         "one statistical block per BLASTX context"
     );
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-720
-    // ```c
-    //    /* use overriding value from effective lengths options or the real value
-    //       from effective lengths parameters. */
-    //    if (eff_len_options->db_length > 0)
-    //       db_length = eff_len_options->db_length;
-    //    else
-    // ```
-    // `db_length` is the real total; `-dbsize` above 0 replaces it here (never divided by
-    // 3: BLASTX's subject is not translated).
-    let db_length = if options.db_length > 0 {
-        options.db_length
-    } else {
-        db_length
-    };
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:729-732
-    // ```c
-    //    if (db_length == 0 &&
-    //        !BlastEffectiveLengthsOptions_IsSearchSpaceSet(eff_len_options)) {
-    //       return 0;
-    //    }
-    // ```
     let options_space = options.effective_search_space;
-    if db_length == 0 && fixed_spaces.is_none() && options_space == 0 {
+    // `stats::setup::eff_lengths_database`: BLASTX's subject is not translated.
+    let Some((db_length, db_count)) = crate::stats::setup::eff_lengths_database(
+        db_length,
+        db_count,
+        options.db_length,
+        fixed_spaces.is_some() || options_space != 0,
+        false,
+    ) else {
         return Ok(());
-    }
+    };
     let gapped = gapped_karlin(options);
     for (i, (c, p)) in batch.contexts.iter().zip(parameters).enumerate() {
+        let space = fixed_spaces.map_or(options_space, |spaces| spaces[i]);
         if !p.valid {
             p.length_adjustment = 0;
-            p.search_space = fixed_spaces.map_or(options_space, |spaces| spaces[i]);
+            p.search_space = space;
             continue;
         }
         let ka = if options.gapped { gapped } else { p.ungapped };
-        let adj = compute_length_adjustment_ncbi(c.length as i64, db_length, db_count, &ka)
-            .length_adjustment;
-        p.length_adjustment = i32::try_from(adj)?;
-        p.search_space = match fixed_spaces {
-            Some(spaces) => spaces[i],
-            None if options_space != 0 => options_space,
-            None => (db_length - db_count * adj)
-                .max(1)
-                .checked_mul(c.length as i64 - adj)
-                .ok_or_else(|| SearchSpaceOverflow {
-                    db_length,
-                    query_length: c.length,
-                    program: options.program().upper,
-                })?,
-        };
+        let lengths = crate::stats::setup::calc_eff_lengths(
+            c.length as i64,
+            db_length,
+            db_count,
+            &ka,
+            space,
+            options.program().upper,
+        )?;
+        p.length_adjustment = lengths.length_adjustment;
+        p.search_space = lengths.eff_searchsp;
     }
     Ok(())
 }
@@ -567,9 +528,14 @@ pub struct SubjectNumbers {
     /// The total length of the statistics (blast_setup.c:908-911): `STATS_TOTLEN` or
     /// `BlastSeqSrcGetTotLen` (`SeqDb::statistics_numbers`), the sum of a FASTA set's records.
     pub total: i64,
-    /// The number of sequences of the statistics (blast_setup.c:925-928): `STATS_NSEQ` or
-    /// `GetNumSeqs`, 0 for an alias file's `NSEQ 0`; a FASTA set's records.
-    pub count: i64,
+    /// The number of sequences of the statistics (blast_setup.c:925-928), NCBI's `Int4`:
+    /// `STATS_NSEQ` or `GetNumSeqs`, 0 for an alias file's `NSEQ 0` and negative for a negative
+    /// one; a FASTA set's records.
+    pub count: i32,
+    /// The Gumbel block's database length before `-dbsize` (blast_setup.c:913-920): a
+    /// database's total before the fallback to OID 0 (`DbStatistics::gumbel_db_length`, 0 or
+    /// negative for an alias file's `LENGTH` of 0 or of 2^63 or more), a FASTA set's total.
+    pub gumbel_total: i64,
     /// `BlastSeqSrcGetMinSeqLen` (blast_setup.c:969-973): a database's `GetMinLength`
     /// (`SeqDb::min_length`), a FASTA set's shortest record raised to `BLAST_SEQSRC_MINLENGTH`.
     pub shortest: usize,
@@ -577,6 +543,9 @@ pub struct SubjectNumbers {
     /// `GetTotalLength / MAX(1, GetNumSeqs)` (`SeqDb::average_length`, no `STATS_*` key), a
     /// FASTA set's total over its records.
     pub average: i32,
+    /// The number of sequences of the preliminary stage's option spaces (`STATS_NSEQ` or
+    /// `GetNumSeqs` without the fallback: `DbStatistics::request_count`), a FASTA set's records.
+    pub request_count: i32,
 }
 
 impl SubjectNumbers {
@@ -586,8 +555,10 @@ impl SubjectNumbers {
         Self {
             total: length as i64,
             count: 1,
+            gumbel_total: length as i64,
             shortest: length.max(super::subjects::BLAST_SEQSRC_MINLENGTH),
             average: length as i32,
+            request_count: 1,
         }
     }
 }
@@ -602,8 +573,10 @@ pub fn subject_parameters(
     let SubjectNumbers {
         total: db_length,
         count: db_count,
+        gumbel_total,
         shortest,
         average,
+        request_count: _,
     } = numbers;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
     // ```c
@@ -640,12 +613,18 @@ pub fn subject_parameters(
             "BLASTX",
         ));
     }
-    let n = if gumbel_block_used {
-        i32::try_from(shortest)?
-    } else {
-        i32::try_from(db_length / db_count.max(1))?
+    let Some(n) = crate::stats::setup::setup_subject_length(
+        db_length,
+        db_count,
+        gumbel_block_used.then_some((i32::try_from(shortest).unwrap_or(i32::MAX), false)),
+    ) else {
+        bail!("The average subject length is too short");
     };
-    ensure!(n > 0, "The average subject length is too short");
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:759-760 (quoted at
+    // `stats::setup::hit_saving_parameters_fail`)
+    if crate::stats::setup::hit_saving_parameters_fail(options.sum_stats, options.gapped, n) {
+        bail!(crate::stats::setup::HIT_SAVING_PARAMETERS_ERROR);
+    }
     effective_lengths(
         batch,
         parameters,
@@ -654,21 +633,242 @@ pub fn subject_parameters(
         db_count,
         fixed_spaces,
     )?;
-    let gapped = gapped_karlin(options);
-    let gumbel = gumbel_block(options, db_length);
-    let decay = if options.sum_stats
-        && (!options.gapped
-            || options.max_intron_length == 0
-            || (options.max_intron_length - 2) / 3 > 0)
-    {
-        if options.gapped {
-            0.1
-        } else {
-            0.5
-        }
+    let gumbel = gumbel_block(options, gumbel_total);
+    context_cutoffs(
+        batch,
+        parameters,
+        options,
+        gumbel.as_ref(),
+        n,
+        average,
+        options.composition > 1,
+    )?;
+    Ok(if options.gapped {
+        gapped_x_drops(options, &gapped_karlin(options)).0
     } else {
-        0.0
-    };
+        0
+    })
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-220 and
+// c++/src/algo/blast/api/split_query_aux_priv.cpp:155-181 (quoted at
+// `stats::setup::preliminary_option_space`)
+/// The option spaces that NCBI's preliminary stage sets for the contexts of the query batch
+/// `batch` (`SplitQuery_SetEffectiveSearchSpace`), where they differ from the setup's own spaces
+/// (`effective_lengths` of the batch): a database whose statistics' total before the fallback to
+/// OID 0 is not positive (`SubjectNumbers::gumbel_total`), without `-searchsp`. `None` otherwise,
+/// where the setup's spaces are the options' (`x_search_core`'s `spaces`).
+pub(crate) fn preliminary_spaces(
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    numbers: SubjectNumbers,
+    database: bool,
+) -> Result<Option<Vec<i64>>> {
+    if !database || numbers.gumbel_total > 0 || options.effective_search_space != 0 {
+        return Ok(None);
+    }
+    let gapped = gapped_karlin(options);
+    let spaces = batch
+        .contexts
+        .iter()
+        .zip(parameters)
+        .map(|(c, p)| {
+            let ka = if options.gapped { gapped } else { p.ungapped };
+            crate::stats::setup::preliminary_option_space(
+                if p.valid { c.length as i64 } else { 0 },
+                numbers.gumbel_total,
+                numbers.request_count,
+                options.db_length,
+                0,
+                false,
+                &ka,
+                options.program().upper,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Some(spaces))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1001-1024 (quoted at
+// `stats::setup::subject_eff_lengths`)
+// ```c
+//    eff_len_params->real_db_length = subject_length;
+//    if ((status = BLAST_CalcEffLengths(program_number, scoring_options,
+//                                 eff_len_params, sbp, query_info, NULL)) != 0)
+//       return status;
+//    /* Update cutoff scores in hit saving parameters */
+//    BlastHitSavingParametersUpdate(program_number, sbp, query_info, subject_length, 0, /* FIXME */
+//                                   hit_params);
+//
+//    if (word_params) {
+//       /* Update cutoff scores in initial word parameters */
+//       BlastInitialWordParametersUpdate(program_number, hit_params, sbp, query_info,
+//            subject_length, word_params);
+// ```
+/// The parameters of the contexts of a query chunk `batch` for the subject of `subject_length`
+/// residues, where NCBI's preliminary search computes the statistics of each subject
+/// (`Subjects::per_subject`, a database length of 0): the chunk's preliminary parameters
+/// `preliminary` with the effective lengths of the subject's length (`numbers.count` sequences,
+/// `-dbsize`, the options' spaces of the preliminary stage), the hit-saving and word cutoffs of
+/// the subject's length without the stretch of a composition-based statistics. `option_spaces` are
+/// the whole query's options' spaces of the preliminary stage (`PreparedQueryBatch::
+/// subject_option_spaces`), which a chunk reads by its own context index.
+pub(crate) fn subject_update(
+    batch: &PreparedQueryBatch,
+    preliminary: &[ContextParameters],
+    options: &ResolvedOptions,
+    numbers: SubjectNumbers,
+    subject_length: usize,
+    option_spaces: &[i64],
+) -> Result<Vec<ContextParameters>> {
+    let mut parameters = preliminary.to_vec();
+    effective_lengths(
+        batch,
+        &mut parameters,
+        options,
+        subject_length as i64,
+        numbers.count,
+        Some(option_spaces),
+    )?;
+    let gumbel = gumbel_block(options, numbers.gumbel_total);
+    let length = i32::try_from(subject_length)?;
+    context_cutoffs(
+        batch,
+        &mut parameters,
+        options,
+        gumbel.as_ref(),
+        length,
+        length,
+        false,
+    )?;
+    Ok(parameters)
+}
+
+/// The gap decay rate of the hit-saving and word cutoffs (`BlastLinkHSPParametersNew`, quoted at
+/// `linking::link_parameters`, the one rule of whether BLASTX links), 0 without linking: no sum
+/// statistics, or a gapped search whose intron length links nothing (blast_parameters.c:793-805).
+fn gap_decay_rate(options: &ResolvedOptions) -> f64 {
+    super::linking::link_parameters(options).map_or(0.0, |link| link.gap_decay_rate)
+}
+
+/// The word cutoff of a valid context of `length` residues (`BlastInitialWordParametersUpdate`,
+/// quoted above `SubjectNumbers`): the gap trigger of its ungapped block, below it an ungapped
+/// search's `BLAST_Cutoffs` at the subject length `average`, at most the hit-saving cutoff
+/// `p.hit_cutoff_max`.
+fn word_cutoff(
+    options: &ResolvedOptions,
+    length: usize,
+    average: i32,
+    decay: f64,
+    p: &ContextParameters,
+) -> i32 {
+    let trigger = gap_trigger_raw_score(options.gap_trigger, &p.ungapped);
+    if options.gapped {
+        trigger
+    } else {
+        // NCBI blast_parameters.c:143-144 uses CUTOFF_E_BLASTX;
+        // c++/include/algo/blast/core/blast_parameters.h:78:
+        // #define CUTOFF_E_BLASTX 1.0
+        cutoff_score_sum_stats(length as i32, average, decay, &p.ungapped)
+            .max(1)
+            .min(trigger)
+    }
+    .min(p.hit_cutoff_max)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:396-416
+// ```c
+//       if (new_cutoff < cutoff_min) {
+//          cutoff_min = new_cutoff;
+//       }
+//       ...
+//    parameters->cutoff_score_min = cutoff_min;
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1448-1455 (quoted at
+// `search::compute_subject_with`): the link cutoffs read it (`linking::link_cutoffs`).
+// NCBI's query batch is the reader batch (`reader_batch.rs`): the statistics of each subject update
+// the word cutoffs of all its contexts, also those of the units LOSAT searches apart.
+/// The smallest word cutoff over the contexts `contexts` of a reader batch (`ReaderBatchShape::
+/// batch_contexts`: length, validity, ungapped block) for the subject of `subject_length` residues,
+/// where NCBI computes the statistics of each subject: each context's effective lengths with its
+/// preliminary option space (`stats::setup::preliminary_option_space`: the spaces `x_search_core`
+/// gives the batch), its hit-saving cutoff (an ungapped search has no Gumbel block) and its word
+/// cutoff, as `subject_update` computes them. `None` without a valid context. Only an ungapped
+/// search with sum statistics reads it.
+pub(crate) fn subject_word_cutoff_min(
+    contexts: &[(usize, bool, KarlinParams)],
+    options: &ResolvedOptions,
+    numbers: SubjectNumbers,
+    subject_length: usize,
+) -> Result<Option<i32>> {
+    let decay = gap_decay_rate(options);
+    let average = i32::try_from(subject_length)?;
+    let mut minimum: Option<i32> = None;
+    for &(query_length, valid, ungapped) in contexts {
+        if !valid || query_length == 0 {
+            continue;
+        }
+        let option_space = crate::stats::setup::preliminary_option_space(
+            query_length as i64,
+            numbers.gumbel_total,
+            numbers.request_count,
+            options.db_length,
+            options.effective_search_space,
+            false,
+            &ungapped,
+            options.program().upper,
+        )?;
+        let lengths = crate::stats::setup::subject_eff_lengths(
+            query_length as i64,
+            subject_length as i64,
+            numbers.count,
+            options.db_length,
+            option_space,
+            false,
+            &ungapped,
+            options.program().upper,
+        )?;
+        let p = ContextParameters {
+            valid,
+            ungapped,
+            search_space: lengths.eff_searchsp,
+            length_adjustment: lengths.length_adjustment,
+            word_cutoff: 0,
+            word_xdrop_init: 0,
+            word_xdrop: 0,
+            hit_cutoff: 0,
+            hit_cutoff_max: cutoff_score_from_evalue(
+                options.evalue,
+                lengths.eff_searchsp,
+                &ungapped,
+            )
+            .max(1),
+        };
+        let cutoff = word_cutoff(options, query_length, average, decay, &p);
+        minimum = Some(minimum.map_or(cutoff, |m| m.min(cutoff)));
+    }
+    Ok(minimum)
+}
+
+/// The cutoffs of each valid context (`BlastHitSavingParametersNew`/`Update`,
+/// `BlastInitialWordParametersNew`/`Update`, quoted above `SubjectNumbers`) after its effective
+/// lengths: the hit-saving cutoff from `evalue` (stretched 5 times for the Gumbel block with
+/// `stretch`, a composition-based statistics above 1) at the subject length `n` (Spouge's, and the
+/// sum statistics' search space), and the word cutoff, which an ungapped search computes at the
+/// subject length `average`. The setup passes the shortest or average subject length, the
+/// statistics of each subject the subject's own length and no stretch (`subject_update`).
+fn context_cutoffs(
+    batch: &PreparedQueryBatch,
+    parameters: &mut [ContextParameters],
+    options: &ResolvedOptions,
+    gumbel: Option<&BlastGumbelBlk>,
+    n: i32,
+    average: i32,
+    stretch: bool,
+) -> Result<()> {
+    let gapped = gapped_karlin(options);
+    let decay = gap_decay_rate(options);
     // The average context length is that of the query batch (a reader batch searched in several
     // units has one: `reader_batch.rs`, c++/src/algo/blast/core/blast_parameters.c:954-957).
     let avg_q = i32::try_from(batch.batch_concatenated_length() / batch.batch_context_count())?;
@@ -677,9 +877,9 @@ pub fn subject_parameters(
             continue;
         }
         let ka = if options.gapped { gapped } else { p.ungapped };
-        p.hit_cutoff_max = if let Some(gbp) = gumbel.as_ref() {
+        p.hit_cutoff_max = if let Some(gbp) = gumbel {
             blast_spouge_etos(
-                if options.composition > 1 {
+                if stretch {
                     5.0 * options.evalue
                 } else {
                     options.evalue
@@ -698,18 +898,7 @@ pub fn subject_parameters(
                 .hit_cutoff
                 .min(cutoff_score_sum_stats(avg_q, n, decay, &ka).max(1));
         }
-        let trigger = gap_trigger_raw_score(options.gap_trigger, &p.ungapped);
-        p.word_cutoff = if options.gapped {
-            trigger
-        } else {
-            // NCBI blast_parameters.c:143-144 uses CUTOFF_E_BLASTX;
-            // c++/include/algo/blast/core/blast_parameters.h:78:
-            // #define CUTOFF_E_BLASTX 1.0
-            cutoff_score_sum_stats(c.length as i32, average, decay, &ka)
-                .max(1)
-                .min(trigger)
-        }
-        .min(p.hit_cutoff_max);
+        p.word_cutoff = word_cutoff(options, c.length, average, decay, p);
         p.word_xdrop_init = x_drop_raw_score(options.x_dropoff, &p.ungapped, 1.0);
         p.word_xdrop = if p.word_xdrop_init == 0 {
             p.word_cutoff
@@ -717,11 +906,7 @@ pub fn subject_parameters(
             p.word_xdrop_init
         };
     }
-    Ok(if options.gapped {
-        gapped_x_drops(options, &gapped).0
-    } else {
-        0
-    })
+    Ok(())
 }
 
 /// The preliminary and final gapped X-drops in raw scores (`gap_x_dropoff`,

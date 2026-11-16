@@ -1,0 +1,67 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/t7/lclS9g.fna).
+           2 sequences; 1,710 total letters
+
+
+
+Query= pq1 query protein one
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+Unknown                                                               313     2e-109
+s2 good two                                                           159     1e-53 
+
+
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+>s2 good two
+Length=360
+
+ Score = 159 bits (402),  Expect = 1e-53, Method: Compositional matrix adjust.
+ Identities = 81/120 (68%), Positives = 87/120 (73%), Gaps = 0/120 (0%)
+ Frame = +1
+
+Query  1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+            CF YQG GFI + S R+TSNPFP  F RVE  MRGR A I++RHRVPYACGDES   AGR
+Sbjct  1    CFTYQGVGFIGIRSARVTSNPFPFSFQRVEYCMRGRGATINLRHRVPYACGDESLAAAGR  180
+
+Query  61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+            PARPT TR VRHTI P  FF+CRCRR   IQYMLQ RLLR   NVESG C  LV   V+K
+Sbjct  181  PARPTSTRVVRHTICPKYFFLCRCRRVVWIQYMLQSRLLRADRNVESGYCVTLVSLLVLK  360
+
+
+
+Lambda      K        H        a         alpha
+   0.323    0.136    0.422    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 136652
+
+
+  Database: User specified sequence set (Input: tests/db_search/t7/lclS9g.fna).
+    Posted date:  Unknown
+  Number of letters in database: 1,710
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

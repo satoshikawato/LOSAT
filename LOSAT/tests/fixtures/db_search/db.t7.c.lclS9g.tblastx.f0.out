@@ -1,0 +1,156 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/t7/lclS9g.fna).
+           2 sequences; 1,710 total letters
+
+
+
+Query= nq1 query nucleotide one
+
+Length=900
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value   N
+
+Unknown                                                               372     1e-177  2
+s2 good two                                                           185     4e-51   1
+
+
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+>s2 good two
+Length=360
+
+ Score = 185 bits (399),  Expect = 4e-51
+ Identities = 81/120 (68%), Positives = 87/120 (73%), Gaps = 0/120 (0%)
+ Frame = +1/+1
+
+Query  1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  180
+            CF YQG GFI + S R+TSNPFP  F RVE  MRGR A I++RHRVPYACGDES   AGR
+Sbjct  1    CFTYQGVGFIGIRSARVTSNPFPFSFQRVEYCMRGRGATINLRHRVPYACGDESLAAAGR  180
+
+Query  181  PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  360
+            PARPT TR VRHTI P  FF+CRCRR   IQYMLQ RLLR   NVESG C  LV   V+K
+Sbjct  181  PARPTSTRVVRHTICPKYFFLCRCRRVVWIQYMLQSRLLRADRNVESGYCVTLVSLLVLK  360
+
+
+ Score = 171 bits (368),  Expect = 7e-47
+ Identities = 79/120 (66%), Positives = 84/120 (70%), Gaps = 0/120 (0%)
+ Frame = -1/-1
+
+Query  360  FNNRSHN*VRTSPGFHIFGRAK*SRLKHVLDRIVSSTPTYKERIG*NGVAYAPSQSRTGR  181
+            F N+  N*  T PGFHI   AK*S LKHVLD   SST T KE +G NGVAY PS+SRTGR
+Sbjct  360  FENK*AN*GHTIPGFHISVSAK*STLKHVLDPHYSSTSTQKEILGTNGVAYHPSRSRTGR  181
+
+Query  180  TSCHDVRLVTTCIGDSMTHVYQCQSPPHWSFYSTKYLWEWVRCQTQ*IHRNKALALIIEA  1
+            TSC   RLVTTCIGDSM  +Y C SPPH  FYS K  WEWVRC T * + NKA ALI EA
+Sbjct  180  TSCSGKRLVTTCIGDSMA*IYGCASPPHAIFYSLKTKWEWVRCDTS*SYPNKANALISEA  1
+
+
+ Score = 160 bits (343),  Expect = 2e-43
+ Identities = 75/119 (63%), Positives = 86/119 (72%), Gaps = 0/119 (0%)
+ Frame = -2/-2
+
+Query  359  LTTARITRFAQVPDSTFSDGRSSLG*SMYWIE*SLLHLHTKKGSGEMVWRTLRVKVGRAG  180
+            L T+++TR  Q PDSTF   RSSL *SMYWI  +LLH H KK  G+MVWRT RV+VGRAG
+Sbjct  359  LRTSKLTRVTQYPDSTFLSARSSLL*SMYWIHTTLLHRHRKKYLGQMVWRTTRVEVGRAG  180
+
+Query  179  RPATM*DSSPHA*GTL*RTSINASRPLIGLSTLLNISGNGFDVKRNEYIEIKPLP**SK  3
+            RPA   DSSPHA*GTL R  + A RPL+  STL  ++GNGFDV R + I IKP P** K
+Sbjct  179  RPAAARDSSPHA*GTLWRKFMVAPRPLMQYSTL*KLNGNGFDVTRADRIPIKPTP**VK  3
+
+
+ Score = 133 bits (284),  Expect = 3e-35
+ Identities = 65/116 (56%), Positives = 77/116 (66%), Gaps = 0/116 (0%)
+ Frame = -3/-3
+
+Query  358  *QPLA*LGSHKSRIPHFRTGEVVSAEACIG*NSLFYTYIQRKDRVKWCGVRSESKSDGQD  179
+            *+ ++*LGSH +RIPHF   EVV +EACIG   LFY   +R    KWCGV  ESKSDGQD
+Sbjct  358  *EQVS*LGSHNTRIPHFCQREVVYSEACIGSTLLFYIDTERNTWDKWCGVPPESKSDGQD  179
+
+Query  178  VLPRCETRHHMHRGLYDARLSMPVAPSLVFLLY*ISLGMGSMSNAMNT*K*SPCLD  11
+            VL R ETRHHMHRGLY   L + +APS   LL    +GMGSM + +   +*S  LD
+Sbjct  178  VLQRQETRHHMHRGLYGVNLWLRLAPSCNILLSEN*MGMGSM*HELIVSQ*SQRLD  11
+
+
+ Score = 128 bits (274),  Expect = 6e-34
+ Identities = 66/110 (60%), Positives = 71/110 (65%), Gaps = 0/110 (0%)
+ Frame = +2/+2
+
+Query  2    ASIIKARALFLCIHCV*HRTHSQRYLVE*KDQ*GGDWH**TCVIESPMHVVTSLTSWQDV  181
+            AS+IKA AL      V HRTHS     E*   *GG+   *   IESPMHVVTSL   QDV
+Sbjct  2    ASLIKALALLGYDQLVSHRTHSHLVFRE*NIA*GGEAQP*IYAIESPMHVVTSLLPLQDV  181
+
+Query  182  LPVRL*LGAYATPFHPILSLYVGVEETILSNTCFSRDYFARPKMWNPGLV  331
+            LPVRL LG YATPF P +S  V VEE   SNTCF  DYFA  +MWNPG+V
+Sbjct  182  LPVRLRLGWYATPFVPSISFCVDVEE*CGSNTCFRVDYFALTEMWNPGIV  331
+
+
+ Score = 125 bits (268),  Expect = 4e-33
+ Identities = 63/113 (56%), Positives = 74/113 (65%), Gaps = 0/113 (0%)
+ Frame = +3/+3
+
+Query  3    LRLSRQGLYFYVFIAFDIEPIPRDI**SRKTNEGATGIDRRAS*SPLCMW*RVSHRGRTS  182
+            L LSR+ LY+    +  IEPIP     SR  +EGA    +   *SPLCMW*RVS R RTS
+Sbjct  3    LHLSRRWLYWDTISSCHIEPIPI*FSESRILHEGARRNHKFTP*SPLCMW*RVSCRCRTS  182
+
+Query  183  CPSDFDSERTPHHFTRSFLCM*V*KRLFYPIHASAETTSPVRKCGIRDLCEPS  341
+            CPSDFDS  TPHH ++ FL + +*K    PIHAS  TTS  +KCGIR LC+PS
+Sbjct  183  CPSDFDSGGTPHHLSQVFLSVSM*KSSVDPIHASE*TTSR*QKCGIRVLCDPS  341
+
+
+ Score = 16.2 bits (29),  Expect = 3.9
+ Identities = 6/11 (55%), Positives = 8/11 (73%), Gaps = 0/11 (0%)
+ Frame = +2/-3
+
+Query  728  LESHDTRVT*F  760
+            L SH+TR+  F
+Sbjct  340  LGSHNTRIPHF  308
+
+
+ Score = 15.7 bits (28),  Expect = 5.4
+ Identities = 4/8 (50%), Positives = 6/8 (75%), Gaps = 0/8 (0%)
+ Frame = -3/-2
+
+Query  412  HLHQNRYL  389
+            H H+ +YL
+Sbjct  251  HRHRKKYL  228
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 147312
+
+
+  Database: User specified sequence set (Input: tests/db_search/t7/lclS9g.fna).
+    Posted date:  Unknown
+  Number of letters in database: 1,710
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

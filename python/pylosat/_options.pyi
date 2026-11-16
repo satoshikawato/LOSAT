@@ -20,13 +20,17 @@ class BlastnOptions(TypedDict, total=False):
     negative_taxidlist: str
     """Restrict search of database to everything except the specified taxonomy IDs and their
     descendants"""
-    no_taxid_expansion: Literal['true', 'false']
+    no_taxid_expansion: bool
     """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
+    db_soft_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as soft masking"""
+    db_hard_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as hard masking"""
     dbsize: int
     """Effective length of the database"""
-    show_gis: Literal['true', 'false']
+    show_gis: bool
     """Show NCBI GIs in deflines?"""
-    parse_deflines: Literal['true', 'false']
+    parse_deflines: bool
     """Should the query and subject defline(s) be parsed?"""
     searchsp: int
     """Effective length of the search space"""
@@ -83,7 +87,7 @@ class BlastnOptions(TypedDict, total=False):
     """Cost to extend a gap (default: 0 for megablast, 2 for the other tasks)"""
     dust: str
     """DUST: no, yes, or LEVEL WINDOW LINKER (default: 20 64 1; no for blastn-short)"""
-    lcase_masking: Literal['true', 'false']
+    lcase_masking: bool
     soft_masking: bool
     """Apply filtering locations as soft masks [default: true]"""
     window_masker_taxid: int
@@ -95,13 +99,13 @@ class BlastnOptions(TypedDict, total=False):
     """Location on the query sequence in 1-based offsets (Format: start-stop)"""
     subject_loc: str
     """Location on the subject sequence in 1-based offsets (Format: start-stop)"""
-    subject_besthit: Literal['true', 'false']
+    subject_besthit: bool
     """Apply subject best hit filtering (disabled by default). Reference:
     ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:135"""
     culling_limit: int
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit (default: 0, no culling)"""
-    ungapped: Literal['true', 'false']
+    ungapped: bool
     """Perform ungapped alignment only"""
     xdrop_ungap: float
     """X-dropoff value (in bits) for ungapped extensions (default: 20 for blastn, dc-megablast
@@ -111,7 +115,7 @@ class BlastnOptions(TypedDict, total=False):
     30 for the other tasks)"""
     xdrop_gap_final: float
     """X-dropoff value (in bits) for final gapped alignment (default: 100)"""
-    no_greedy: Literal['true', 'false']
+    no_greedy: bool
     """Use non-greedy dynamic programming extension"""
     min_raw_gapped_score: int
     """Minimum raw gapped score to keep an alignment in the preliminary gapped and traceback
@@ -139,13 +143,13 @@ class BlastpOptions(TypedDict, total=False):
     negative_taxidlist: str
     """Restrict search of database to everything except the specified taxonomy IDs and their
     descendants"""
-    no_taxid_expansion: Literal['true', 'false']
+    no_taxid_expansion: bool
     """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
     dbsize: int
     """Effective length of the database"""
-    show_gis: Literal['true', 'false']
+    show_gis: bool
     """Show NCBI GIs in deflines?"""
-    parse_deflines: Literal['true', 'false']
+    parse_deflines: bool
     """Should the query and subject defline(s) be parsed?"""
     searchsp: int
     """Effective length of the search space"""
@@ -185,7 +189,7 @@ class BlastpOptions(TypedDict, total=False):
     culling_limit: int
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit (default: 0, no culling)"""
-    ungapped: Literal['true', 'false']
+    ungapped: bool
     xdrop_ungap: float
     """X-dropoff value (in bits) for ungapped extensions [default: 7]"""
     xdrop_gap: float
@@ -209,8 +213,8 @@ class BlastpOptions(TypedDict, total=False):
     """SEG: no, yes, or 'WINDOW LOCUT HICUT' [default: no]"""
     soft_masking: bool
     """Apply filtering locations as soft masks [default: false]"""
-    lcase_masking: Literal['true', 'false']
-    use_sw_tback: Literal['true', 'false']
+    lcase_masking: bool
+    use_sw_tback: bool
     query_loc: str
     """Location on the query sequence in 1-based offsets (Format: start-stop)"""
     subject_loc: str
@@ -235,13 +239,13 @@ class BlastxOptions(TypedDict, total=False):
     negative_taxidlist: str
     """Restrict search of database to everything except the specified taxonomy IDs and their
     descendants"""
-    no_taxid_expansion: Literal['true', 'false']
+    no_taxid_expansion: bool
     """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
     dbsize: int
     """Effective length of the database"""
-    show_gis: Literal['true', 'false']
+    show_gis: bool
     """Show NCBI GIs in deflines?"""
-    parse_deflines: Literal['true', 'false']
+    parse_deflines: bool
     """Should the query and subject defline(s) be parsed?"""
     searchsp: int
     """Effective length of the search space"""
@@ -277,9 +281,9 @@ class BlastxOptions(TypedDict, total=False):
     culling_limit: int
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit [default: 0, no culling]"""
-    subject_besthit: Literal['true', 'false']
-    ungapped: Literal['true', 'false']
-    lcase_masking: Literal['true', 'false']
+    subject_besthit: bool
+    ungapped: bool
+    lcase_masking: bool
     strand: Literal['both', 'plus', 'minus']
     query_loc: str
     """Location on the query sequence in 1-based offsets (Format: start-stop)"""
@@ -328,13 +332,13 @@ class TblastnOptions(TypedDict, total=False):
     negative_taxidlist: str
     """Restrict search of database to everything except the specified taxonomy IDs and their
     descendants"""
-    no_taxid_expansion: Literal['true', 'false']
+    no_taxid_expansion: bool
     """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
     dbsize: int
     """Effective length of the database"""
-    show_gis: Literal['true', 'false']
+    show_gis: bool
     """Show NCBI GIs in deflines?"""
-    parse_deflines: Literal['true', 'false']
+    parse_deflines: bool
     """Should the query and subject defline(s) be parsed?"""
     searchsp: int
     """Effective length of the search space"""
@@ -373,7 +377,7 @@ class TblastnOptions(TypedDict, total=False):
     """Location on the subject sequence in 1-based offsets (Format: start-stop)"""
     seg: str
     """SEG: no, yes, or 'WINDOW LOCUT HICUT' [default: 12 2.2 2.5]"""
-    lcase_masking: Literal['true', 'false']
+    lcase_masking: bool
     soft_masking: bool
     """Apply filtering locations as soft masks [default: false]"""
     sum_stats: bool
@@ -409,7 +413,7 @@ class TblastnOptions(TypedDict, total=False):
     mt_mode: int
     """Multi-thread mode: 0 auto, 1 split by queries, 2 split by database (accepted; the output
     does not depend on it)"""
-    ungapped: Literal['true', 'false']
+    ungapped: bool
 
 class TblastxOptions(TypedDict, total=False):
     seqidlist: str
@@ -428,13 +432,13 @@ class TblastxOptions(TypedDict, total=False):
     negative_taxidlist: str
     """Restrict search of database to everything except the specified taxonomy IDs and their
     descendants"""
-    no_taxid_expansion: Literal['true', 'false']
+    no_taxid_expansion: bool
     """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
     dbsize: int
     """Effective length of the database"""
-    show_gis: Literal['true', 'false']
+    show_gis: bool
     """Show NCBI GIs in deflines?"""
-    parse_deflines: Literal['true', 'false']
+    parse_deflines: bool
     """Should the query and subject defline(s) be parsed?"""
     searchsp: int
     """Effective length of the search space"""
@@ -474,7 +478,7 @@ class TblastxOptions(TypedDict, total=False):
     """SEG: no, yes, or WINDOW LOCUT HICUT"""
     soft_masking: bool
     """Apply filtering locations as soft masks [default: false]"""
-    lcase_masking: Literal['true', 'false']
+    lcase_masking: bool
     xdrop_ungap: float
     """X-dropoff value (in bits) for ungapped extensions [default: 7]"""
     window_size: int
@@ -505,13 +509,13 @@ class PsiblastOptions(TypedDict, total=False):
     negative_taxidlist: str
     """Restrict search of database to everything except the specified taxonomy IDs and their
     descendants"""
-    no_taxid_expansion: Literal['true', 'false']
+    no_taxid_expansion: bool
     """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
     dbsize: int
     """Effective length of the database"""
-    show_gis: Literal['true', 'false']
+    show_gis: bool
     """Show NCBI GIs in deflines?"""
-    parse_deflines: Literal['true', 'false']
+    parse_deflines: bool
     """Should the query and subject defline(s) be parsed?"""
     searchsp: int
     """Effective length of the search space"""
@@ -573,8 +577,8 @@ class PsiblastOptions(TypedDict, total=False):
     """SEG: no, yes, or 'WINDOW LOCUT HICUT' [default: no]"""
     soft_masking: bool
     """Apply filtering locations as soft masks [default: false]"""
-    lcase_masking: Literal['true', 'false']
-    use_sw_tback: Literal['true', 'false']
+    lcase_masking: bool
+    use_sw_tback: bool
     query_loc: str
     """Location on the query sequence in 1-based offsets (Format: start-stop)"""
     subject_loc: str
@@ -585,3 +589,12 @@ class PsiblastOptions(TypedDict, total=False):
     """Pseudo-count value used when constructing PSSM"""
     inclusion_ethresh: float
     """E-value inclusion threshold for pairwise alignments"""
+    out_pssm: str
+    """File name to store checkpoint file"""
+    out_ascii_pssm: str
+    """File name to store ASCII version of PSSM"""
+    save_pssm_after_last_round: bool
+    """Save PSSM after the last database search"""
+    save_each_pssm: bool
+    """Save PSSM after each iteration (file name is given in -save_pssm or -save_ascii_pssm
+    options)"""

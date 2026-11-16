@@ -159,18 +159,21 @@ fn unsupported_formats_fail_before_searching() {
     let subjects = subjects(&inputs.subject);
     // NCBI blast_args.cpp:2845-2851 and tabular.cpp:70-99: a custom specification of
     // outfmt 0 and a token that is not a field name are ignored ("0 qseqid", "6 nosuchfield"
-    // run as "0" and "6"); a format that LOSAT's BLASTP does not write is rejected, and a
-    // delimiter that a field uses between its entries is NCBI's error (blast_args.cpp:2753-2792).
-    for outfmt in ["1", "6 delim=; qseqid staxids", "abc"] {
+    // run as "0" and "6"); SAM (17) is NCBI's error for blastp (blast_args.cpp:2876-2879; LOSAT's
+    // BLASTP writes every other format of NCBI's blastp since line RG T3a), and a delimiter that a
+    // field uses between its entries is NCBI's error (blast_args.cpp:2753-2792).
+    for outfmt in ["17", "6 delim=; qseqid staxids", "abc"] {
         let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
             formats: vec![
                 FormatOutput {
                     outfmt: "6",
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut valid),
                 },
                 FormatOutput {
                     outfmt,
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut invalid),
                 },
             ],
@@ -186,6 +189,71 @@ fn unsupported_formats_fail_before_searching() {
             valid.is_empty() && invalid.is_empty(),
             "nothing is written when a requested format is invalid"
         );
+    }
+}
+
+// A library call reads a format value as given: words after outfmt 0 to 4 are a field list,
+// which these formats do not take, refused before the search (the command line drops them, as
+// NCBI's application does: `FormatChoice::normalized`; line RG T3a review N2).
+#[test]
+fn a_field_list_after_a_pairwise_format_is_refused() {
+    let inputs = Inputs::new(1);
+    let queries = queries(&inputs.query);
+    let subjects = subjects(&inputs.subject);
+    for (outfmt, number) in [
+        ("0 qseqid", 0),
+        ("1 qseqid", 1),
+        ("2 std", 2),
+        ("3 delim=,", 3),
+        (" 4 qseqid sseqid ", 4),
+    ] {
+        let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
+        let mut outputs = ReportOutputs {
+            formats: vec![
+                FormatOutput {
+                    outfmt: "6",
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
+                    sink: OutputSink::Writer(&mut valid),
+                },
+                FormatOutput {
+                    outfmt,
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
+                    sink: OutputSink::Writer(&mut invalid),
+                },
+            ],
+            diagnostics: &mut diagnostics,
+            hits: None,
+            observer: None,
+        };
+        let args = blastp_args(&inputs.query, &inputs.subject, &[]);
+        let result = run_local_blastp(args, &queries, &subjects, "", "", &mut outputs);
+        drop(outputs);
+        let error = format!("{:#}", result.expect_err(outfmt));
+        assert!(
+            error.contains(&format!(
+                "blastp outfmt {number} does not accept custom field lists"
+            )),
+            "{outfmt:?}: {error}"
+        );
+        assert!(valid.is_empty() && invalid.is_empty(), "{outfmt:?}");
+    }
+    // Without words, each writes its report.
+    for outfmt in ["1", "2", " 3 ", "4"] {
+        let (mut report, mut diagnostics) = (Vec::new(), Vec::new());
+        let mut outputs = ReportOutputs {
+            formats: vec![FormatOutput {
+                outfmt,
+                refusal: crate::api::local_blast::FormatRefusal::FailsCall,
+                sink: OutputSink::Writer(&mut report),
+            }],
+            diagnostics: &mut diagnostics,
+            hits: None,
+            observer: None,
+        };
+        let args = blastp_args(&inputs.query, &inputs.subject, &[]);
+        run_local_blastp(args, &queries, &subjects, "", "", &mut outputs).expect(outfmt);
+        drop(outputs);
+        assert!(report.starts_with(b"BLASTP 2.17.0+"), "{outfmt:?}");
     }
 }
 
@@ -207,6 +275,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
                 .zip(sinks.iter_mut())
                 .map(|(outfmt, sink)| FormatOutput {
                     outfmt,
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(sink),
                 })
                 .collect(),
@@ -288,6 +357,7 @@ fn run_local_outputs(
                 .zip(sinks.iter_mut())
                 .map(|(outfmt, sink)| FormatOutput {
                     outfmt,
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(sink),
                 })
                 .collect(),
@@ -653,10 +723,12 @@ fn several_file_outputs_are_written_one_after_the_other() {
             formats: vec![
                 FormatOutput {
                     outfmt: "6",
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::File(first),
                 },
                 FormatOutput {
                     outfmt: "7",
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::File(second),
                 },
             ],
@@ -722,10 +794,12 @@ fn the_hit_records_of_the_block_search_are_those_of_the_search_of_all_queries() 
             formats: vec![
                 FormatOutput {
                     outfmt: "6",
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut rows),
                 },
                 FormatOutput {
                     outfmt: "7",
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::File(&file),
                 },
             ],

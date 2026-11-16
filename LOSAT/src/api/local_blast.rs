@@ -11,6 +11,7 @@ use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::path::Path;
 
+use crate::record::FastaRecord;
 use crate::report::blast_xml::XmlStats;
 use crate::report::PairwiseHit;
 
@@ -144,6 +145,9 @@ pub enum OutputSink<'a> {
     /// A writer provided by the caller. It is not buffered here, so that every byte a
     /// formatter has written reaches it before each `FormatObserver` call.
     Writer(&'a mut (dyn Write + Send)),
+    /// The `-out` file of the library's `run_to_file`, made where the command line makes its
+    /// `-out` (`ReportOutputs::open_out`); otherwise as `Writer`.
+    Out(&'a mut OutFile),
     /// A writer provided by the caller, as `Writer`, and the caller's receiver of the side files
     /// of outfmt 13 and 14 (a caller without files: LOSAT Web). The writer gets the master file,
     /// the receiver each side file, named as next to the receiver's `-out`
@@ -171,13 +175,8 @@ impl OutputSink<'_> {
             OutputSink::Stdout => Box::new(BufWriter::new(io::stdout())),
             OutputSink::File(path) => Box::new(BufWriter::new(File::create(path)?)),
             OutputSink::Writer(writer) | OutputSink::Files(writer, _) => Box::new(&mut **writer),
+            OutputSink::Out(out) => Box::new(&mut **out),
         })
-    }
-
-    /// Opens the sink as the stream of the format's report (`cli::NcbiOstream`, which the organism
-    /// report of outfmt 18 takes): `open`'s writer, passed on as it is.
-    pub(crate) fn ostream(&mut self) -> io::Result<crate::cli::NcbiOstream<'_>> {
-        self.open().map(crate::cli::NcbiOstream::new)
     }
 
     /// The caller's receiver of the side files of outfmt 13 and 14 (`OutputSink::Files`).
@@ -188,9 +187,93 @@ impl OutputSink<'_> {
         }
     }
 
-    /// Whether the output is a writer of the caller (`Writer` or `Files`).
+    /// Whether the output is a writer of the caller (`Writer` or `Files`), or the `-out` file of
+    /// `run_to_file`, which is written as one (`Out`).
     pub(crate) fn is_writer(&self) -> bool {
-        matches!(self, OutputSink::Writer(_) | OutputSink::Files(..))
+        matches!(
+            self,
+            OutputSink::Writer(_) | OutputSink::Files(..) | OutputSink::Out(_)
+        )
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
+// ```c
+// else {
+//     m_OutputStream = &args[kArgOutput].AsOutputFile();
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:913-916 (quoted at
+// `ReportOutputs::finish_archive`): `PrintErrorArchive` opens `-out` for the error archive of an
+// error that came before the argument handling opened it.
+/// The `-out` file of the library's `run_to_file` (`OutputSink::Out`). It is made where the
+/// command line makes `-out`: each program's entry calls `ReportOutputs::open_out` after it has
+/// read the subjects (or the taxid or seqid list of `-db`) and before it processes the options,
+/// so an error after that point leaves the file empty and an error before it leaves no file, as on
+/// the command line. The first write makes it too: the error archive of an earlier error (outfmt
+/// 11, `ReportOutputs::finish_archive`), as NCBI's `PrintErrorArchive` opens `-out`. A making that
+/// failed is not tried again.
+pub struct OutFile {
+    path: std::path::PathBuf,
+    /// The program whose file names must be UTF-8 (`cli::create_out_file`).
+    program: Option<&'static str>,
+    state: OutState,
+}
+
+/// Whether `OutFile` has been made.
+enum OutState {
+    Unmade,
+    Made { file: BufWriter<File> },
+    Failed,
+}
+
+impl OutFile {
+    /// The file `path` of a search of `program` (`cli::create_out_file`), not made yet.
+    pub(crate) fn new(path: &Path, program: Option<&'static str>) -> Self {
+        OutFile {
+            path: path.to_path_buf(),
+            program,
+            state: OutState::Unmade,
+        }
+    }
+
+    /// Makes the file as the command line makes `-out` (`cli::create_out_file`), once.
+    fn make(&mut self) -> anyhow::Result<()> {
+        match self.state {
+            OutState::Unmade => match crate::cli::create_out_file(&self.path, self.program) {
+                Ok(file) => {
+                    self.state = OutState::Made {
+                        file: BufWriter::new(file),
+                    };
+                    Ok(())
+                }
+                Err(error) => {
+                    self.state = OutState::Failed;
+                    Err(error)
+                }
+            },
+            OutState::Made { .. } => Ok(()),
+            OutState::Failed => Err(anyhow::anyhow!("the -out file could not be made")),
+        }
+    }
+}
+
+impl Write for OutFile {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if matches!(self.state, OutState::Unmade) {
+            self.make().map_err(io::Error::other)?;
+        }
+        match &mut self.state {
+            OutState::Made { file, .. } => file.write(buf),
+            _ => Err(io::Error::other("the -out file could not be made")),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match &mut self.state {
+            OutState::Made { file, .. } => file.flush(),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -201,10 +284,65 @@ impl OutputSink<'_> {
 //         NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
 // ```
 /// One requested output: an `-outfmt` value, parsed and validated by the program exactly
-/// as on the command line, and where to write it.
+/// as on the command line, where to write it, and what LOSAT's refusal of its report does.
 pub struct FormatOutput<'a> {
     pub outfmt: &'a str,
     pub sink: OutputSink<'a>,
+    pub refusal: FormatRefusal,
+}
+
+/// What LOSAT's refusal of one format's report does where a program's check of that format makes
+/// it before the report's rows (`FormatRefusal::check`): a tabular row at which NCBI stops
+/// (`report::tabular::check_failed_lookups`, every program), BLASTP's subject title of
+/// punctuation in outfmt 0 to 4, BLASTX's subject of empty rows that the mapper rewrites
+/// (`blastx::empty_rows::refuse_mapped_without_scores`). Each check is that of the command line's
+/// run of the format alone.
+#[derive(Debug, Default)]
+pub enum FormatRefusal {
+    /// The refusal fails the call: the command line's one format, the library's reports.
+    #[default]
+    FailsCall,
+    /// The refusal fails this format alone: the call writes no more of its report and writes the
+    /// other formats (LOSAT Web's formats that the argv does not ask for, docs/web/abi_v2.md §7).
+    /// What the call wrote of it before (outfmt 0's prolog to a writer before the search, the
+    /// rows of BLASTX's earlier query batches) is the caller's to drop.
+    FailsAlone,
+    /// The refusal of a format that fails alone.
+    Refused(anyhow::Error),
+}
+
+impl FormatRefusal {
+    /// `checked`, a check of the format's report before its rows (`Err`: LOSAT's refusal):
+    /// `Ok(true)` where the report is written, `Ok(false)` where it is not (the format fails
+    /// alone, now or at an earlier check: `Refused` keeps the first refusal), and the refusal
+    /// itself where it fails the call.
+    pub(crate) fn check(&mut self, checked: anyhow::Result<()>) -> anyhow::Result<bool> {
+        match (checked, &*self) {
+            (_, FormatRefusal::Refused(_)) => Ok(false),
+            (Ok(()), _) => Ok(true),
+            (Err(error), FormatRefusal::FailsCall) => Err(error),
+            (Err(error), FormatRefusal::FailsAlone) => {
+                *self = FormatRefusal::Refused(error);
+                Ok(false)
+            }
+        }
+    }
+
+    /// Whether the format failed alone (`Refused`): the call writes no more of it.
+    pub(crate) fn refused(&self) -> bool {
+        matches!(self, FormatRefusal::Refused(_))
+    }
+
+    /// The refusal of a format that failed alone, taken by the caller after the call.
+    pub fn take_refused(&mut self) -> Option<anyhow::Error> {
+        match std::mem::take(self) {
+            FormatRefusal::Refused(error) => Some(error),
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
 }
 
 impl FormatOutput<'_> {
@@ -230,6 +368,17 @@ impl FormatOutput<'_> {
     fn is_archive(&self) -> bool {
         self.report_format() == Some(crate::blastinput::app::ReportFormat::ArchiveFormat)
     }
+}
+
+/// `ReportOutputs::open_out` of the outputs `formats` (for a caller that holds the diagnostics
+/// stream of the same outputs).
+pub(crate) fn open_out(formats: &mut [FormatOutput<'_>]) -> anyhow::Result<()> {
+    for format in formats {
+        if let OutputSink::Out(out) = &mut format.sink {
+            out.make()?;
+        }
+    }
+    Ok(())
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1411
@@ -296,8 +445,8 @@ pub type HspIndex = usize;
 /// A sequence of a database that a search reported (`FormatObserver::database_subjects`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReportedSubject {
-    /// The sequence's ordinal id in the database (the `n` of `gnl|BL_ORD_ID|n`), the same in
-    /// every search of the database.
+    /// The sequence's OID in the database (the `n` of `gnl|BL_ORD_ID|n`), the same in every
+    /// search of the database, also one that a taxid or Seq-id list restricts.
     pub oid: u32,
     /// The `saccver` of the default tabular report.
     pub id: std::sync::Arc<str>,
@@ -307,7 +456,9 @@ pub struct ReportedSubject {
 
 /// Reports which HSP a formatter is writing, so that a caller can relate each HSP to its
 /// bytes in every output, and the statistics of each query of the search. The written bytes do
-/// not change.
+/// not change. The query-anchored reports (outfmt 1 to 4) write one section of all of a query's
+/// HSPs merged, which has no part of one HSP or subject: they call none of the HSP and subject
+/// events.
 pub trait FormatObserver {
     /// The formatter for `ReportOutputs::formats[format]` starts the row (outfmt 6/7) or
     /// the alignment section (outfmt 0: the score lines and the alignment, without the
@@ -407,6 +558,54 @@ pub trait FormatObserver {
     /// names, by that index. The call comes once, with `ReportOutputs::hits` only (the program
     /// does not make these values otherwise).
     fn database_subjects(&mut self, _subjects: Vec<ReportedSubject>) {}
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:537-543
+    // ```c++
+    // 		scope->AddTopLevelSeqEntry(pssm->SetQuery());
+    //
+    // 		CRef<CSeq_loc> sl(new CSeq_loc());
+    // 		sl->SetWhole().Assign(*pssm->GetQuery().GetSeq().GetFirstId());
+    //
+    // 		CRef<CBlastSearchQuery> q(new CBlastSearchQuery(*sl, *scope));
+    // 		CRef<CBlastQueryVector> query(new CBlastQueryVector());
+    // ```
+    // A PSSM search's query is the PSSM's Bioseq, which the inputs do not hold
+    // (`api::Inputs::pssm`): the search reads it with the options.
+    /// The query of a PSSM search (psiblast's and tblastn's `-in_pssm`): the record of the PSSM's
+    /// sequence as the reports show it, the query 0 of the hit lists. The call comes once, before
+    /// the search's queries (`queries_begin`), and only for a PSSM query.
+    fn pssm_query(&mut self, _query: &FastaRecord) {}
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:250-285
+    // ```c++
+    //                 CRef<CSearchResultSet> results;
+    //                 ...
+    //                    results = psiblast->Run();
+    //                    ...
+    // 	                      formatter.PrintOneResultSet(**result, query,
+    // 	                                                itr.GetIterationNumber(),
+    // 	                                                itr.GetPreviouslyFoundSeqIds());
+    // ```
+    // NCBI's psiblast searches one query per round and formats each round's result set; LOSAT's
+    // round driver makes one search call per round of a query (`blastp::blast_engine::psi_round`).
+    /// psiblast's round driver starts round `round` (1-based, NCBI's `GetIterationNumber`) of the
+    /// searched query `query` (the index that `Hit::q_idx` counts in a search without rounds):
+    /// the next hit list (`ReportOutputs::hits`), its HSP events, `query_stats` (whose `q_idx` is
+    /// 0, the round's only query) and `database_subjects` belong to that round, and its HSP
+    /// numbers start again at 0. A search without rounds never calls it.
+    fn round_begin(&mut self, _query: usize, _round: u32) {}
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:525-528
+    // ```c++
+    //                 if (converged && !fmt_args->HasStructuredOutputFormat() &&
+    //                 	fmt_args->GetFormattedOutputChoice() != CFormattingArgs::eArchiveFormat) {
+    //                 	out_stream << NcbiEndl << "Search has CONVERGED!" << NcbiEndl;
+    //             	}
+    // ```
+    /// The rounds of the searched query `query` converged (NCBI's `HasConverged`): every subject
+    /// below `-inclusion_ethresh` in its last round was below it in the round before too. It
+    /// comes after the query's last round, whatever the formats.
+    fn rounds_converged(&mut self, _query: usize) {}
 }
 
 // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1970-1973
@@ -494,6 +693,13 @@ pub struct ReportOutputs<'a> {
 }
 
 impl ReportOutputs<'_> {
+    /// Makes the `-out` file of `run_to_file` (`OutputSink::Out`) where the command line opens its
+    /// `-out`: each program's entry calls it after reading the subjects (or the taxid or seqid list
+    /// of `-db`) and before processing the options. The other sinks are not opened here.
+    pub(crate) fn open_out(&mut self) -> anyhow::Result<()> {
+        open_out(&mut self.formats)
+    }
+
     /// Whether every requested format is the BLAST archive (outfmt 11), which NCBI's apps but
     /// psiblast write without fetching the report's sequences ahead
     /// (`blastinput::app::check_search_environment`); a call without formats (hit records
@@ -551,6 +757,13 @@ impl ReportOutputs<'_> {
             lines,
             self.formats.iter_mut().find(|format| format.is_archive()),
         ) {
+            // `PrintErrorArchive` opens `-out` before the archive's encoding is read
+            // (`ARCHIVE_FORMAT`, which can write nothing), and ignores a file it cannot open: the
+            // file of `run_to_file` is made here when the search ended before making it.
+            if let (OutputSink::Out(out), true) = (&mut format.sink, handle.error_archive_enabled())
+            {
+                let _ = out.make();
+            }
             let mut writer = format.sink.open()?;
             let written = crate::report::archive::write_error_archive(handle, &lines, &mut writer)
                 .and_then(|()| writer.flush().map_err(anyhow::Error::from));
@@ -584,10 +797,13 @@ impl ReportOutputs<'_> {
                         OutputSink::Stdout => OutputSink::Stdout,
                         OutputSink::File(path) => OutputSink::File(path),
                         OutputSink::Writer(writer) => OutputSink::Writer(&mut **writer),
+                        OutputSink::Out(out) => OutputSink::Out(out),
                         OutputSink::Files(writer, sink) => {
                             OutputSink::Files(&mut **writer, sink.clone())
                         }
                     },
+                    // Moved into the view and back after `f` (a format that fails alone).
+                    refusal: std::mem::take(&mut format.refusal),
                 })
                 .collect(),
             diagnostics: &mut tee,
@@ -596,7 +812,16 @@ impl ReportOutputs<'_> {
                 .as_mut()
                 .map(|observer| &mut **observer as &mut (dyn FormatObserver + Send)),
         };
-        f(&mut view)
+        let result = f(&mut view);
+        let refusals: Vec<FormatRefusal> = view
+            .formats
+            .into_iter()
+            .map(|format| format.refusal)
+            .collect();
+        for (format, refusal) in formats.iter_mut().zip(refusals) {
+            format.refusal = refusal;
+        }
+        result
     }
 }
 
@@ -614,7 +839,11 @@ impl<'a> ReportOutputs<'a> {
         diagnostics: &'a mut (dyn Write + Send),
     ) -> Self {
         Self {
-            formats: vec![FormatOutput { outfmt, sink }],
+            formats: vec![FormatOutput {
+                outfmt,
+                sink,
+                refusal: FormatRefusal::FailsCall,
+            }],
             diagnostics,
             hits: None,
             observer: None,

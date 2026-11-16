@@ -500,7 +500,7 @@ fn read_seqid_lists(name: &str, seqtype: SeqType, ids: &[Vec<u8>], trace: &mut T
         trace.read(db.restrict(&list, &mut warnings));
         trace.note(&warnings);
         let ordinals = db.num_seqs().min(MAX_OIDS as u32);
-        let oids: Vec<u32> = (0..ordinals).map(|ordinal| db.oid(ordinal)).collect();
+        let oids: Vec<u32> = (0..ordinals).map(|ordinal| db.oid(ordinal).get()).collect();
         trace.note(&oids);
     }
 }
@@ -688,7 +688,7 @@ fn read_tx(dir: &Path, trace: &mut Trace) {
             };
             trace.read(db.restrict_taxids(&list));
             let ordinals = db.num_seqs().min(MAX_OIDS as u32);
-            let oids: Vec<u32> = (0..ordinals).map(|ordinal| db.oid(ordinal)).collect();
+            let oids: Vec<u32> = (0..ordinals).map(|ordinal| db.oid(ordinal).get()).collect();
             trace.note(&oids);
         }
     }
@@ -719,7 +719,7 @@ const TAXDB_TAXIDS: [i32; 11] = [
 ];
 
 /// The taxonomy name files on the search path, read by the lookups of the taxonomy columns
-/// (`names`) and of the checks before a search (`offset_error_taxid`, `any_lookup_faults`, `any_lookup_may_refuse`).
+/// (`names`) and of the checks before a search (`offset_error_taxid`, `any_lookup_faults`, `any_lookup_may_fail`).
 fn read_taxdb(dir: &Path, trace: &mut Trace) {
     let search = SearchPath::new(dir, Some(dir.as_os_str()), None).unwrap();
     match TaxDb::open(&search) {
@@ -733,7 +733,7 @@ fn read_taxdb(dir: &Path, trace: &mut Trace) {
             trace.note(&db.entry_count());
             trace.read(db.offset_error_taxid());
             trace.read(db.any_lookup_faults());
-            trace.read(db.any_lookup_may_refuse(&|name: &[u8]| name.contains(&b'\t')));
+            trace.read(db.any_lookup_may_fail());
             for tax_id in TAXDB_TAXIDS {
                 let mut messages = Vec::new();
                 trace.read(db.names(tax_id, &mut messages));

@@ -1,0 +1,33 @@
+Error: (803.7) [blastp] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xC3] in string at line 21
+q1 oneé
+Error: (803.7) [blastp] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA9] in string at line 21
+q1 oneé
+# BLASTP 2.17.0+
+# Query: q1 oneé
+# Database: User specified sequence set (Input: in/s_p.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q1	s1	100.000	60	0	0	1	60	1	60	2.96e-46	127
+Warning: [blastp] Query_2 q2 two: One or more O characters replaced by X for alignment score calculations at positions 10 
+# BLASTP 2.17.0+
+# Query: q2 two
+# Database: User specified sequence set (Input: in/s_p.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q2	s1	98.333	60	1	0	1	60	1	60	2.67e-45	125
+Error: (803.7) [blastp] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xC3] in string at line 21
+q3 thrée
+Error: (803.7) [blastp] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA9] in string at line 21
+q3 thrée
+Warning: [blastp] Query_3 q3 thrée: One or more O characters replaced by X for alignment score calculations at positions 10 
+# BLASTP 2.17.0+
+# Query: q3 thrée
+# Database: User specified sequence set (Input: in/s_p.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q3	s1	98.333	60	1	0	1	60	1	60	2.67e-45	125
+# BLAST processed 3 queries

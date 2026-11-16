@@ -1,4 +1,4 @@
-# rpsbproc fixtures (PS16a-PS16d)
+# rpsbproc fixtures (PS16a-PS16d, PS16-Q1)
 
 Inputs and frozen NCBI outputs for `losat rpsbproc` (NCBI rpsbproc 0.5.1, the 2025-05-13 package).
 
@@ -147,8 +147,7 @@ spaces). PS16a's cases of `-t feats`, `-t both` and the default `-t` (named `ref
     NCBI's binary with the full data files print three different lines).
   - `refuse_ntnoids1`: `nt67.asn` whose first alignment has no ids in its segments (its query id comes from the
     first location): NCBI reads the hit id past the ids (segmentation fault after the `SESSION` line).
-  - `refuse_ntplusmax`: `nt67.asn` whose first alignment, on the plus strand, ends at base 2^31 (`to 2147483647`):
-    NCBI's `int` overflows and both builds print `-2147483648`.
+  (`refuse_ntplusmax` of PS16c is the `widened` row `ntplusmax.doms.std` since PS16-Q1, below.)
 
 ## The NCBI C++ Toolkit options (line RG, item E1c)
 
@@ -163,6 +162,13 @@ spaces). PS16a's cases of `-t feats`, `-t both` and the default `-t` (named `ref
   that is not an entry (NCBI's report, exit 2); `bom2.ini` a UTF-8 byte order mark and one byte more (NCBI's
   `Error: (110.4) Error reading the registry after line 1: `, the run goes on); `bom1.ini` the first byte of one (as a
   `.ncbirc`: the same post; as a `.ini` NCBI posts nothing).
+- The rows `i_ncbirc_*` (env parity item I, 2026-11-14): a `.ncbirc` with a syntax error (`ncbirc:garbage.ini`,
+  `sec.ini`, `quote.ini`; not `cont.ini`, whose entry before the bad line LOSAT refuses as an entry it does not
+  know). NCBI posts it once, at its configuration load (`Critical: (110.6) CNcbiRegistry:
+  Syntax error in system-wide configuration file: ` and the exception, whose place names the build tree), then runs;
+  with `-logfile` the post goes to the file. `oracle/i_ncbirc_*` is the binary of the 2025-05-13 package (its tree
+  `/export/home/tomcat/TeamCity/Agent2/work/b895474bf74772ad/struct_tree`); bioconda's build names its own tree and
+  is otherwise the same.
 - `arch/bad/subj_sequences.asn`, `matrix_integer.asn`, `evalue_rawscore.asn` (the review of item E1c): `arch/one.asn`
   edited by hand: `subject sequences { }`, `MatrixName` `value integer 5`, `EvalueThreshold` `value cutoff raw-score
   5`. NCBI writes the `SESSION` line's tab before each getter throws; with `-o log.txt -logfile log.txt` its stream
@@ -242,10 +248,61 @@ spaces). PS16a's cases of `-t feats`, `-t both` and the default `-t` (named `ref
   the same, cut data = full data.
 - `refused/refuse_x*`: LOSAT's bytes for the hand-made XML that it refuses (PD-LOSAT-NCBI-DEFECTS 1.17): an
   attribute (`refuse_xattr`), a namespace prefix (`refuse_xns`), a control character (`refuse_xctrl`; NCBI replaces it
-  and posts a warning), an `Hsp_query-from` of -2147483648 (`refuse_xcoordmin`: `- 1` overflows `int`; NCBI's builds
-  then throw `basic_string::replace`), an `Hsp_hseq` two letters short (`refuse_xhshort2`),
+  and posts a warning), an `Hsp_hseq` two letters short (`refuse_xhshort2`),
   a protein query of length -3 (`refuse_xqlenneg`: NCBI's string of 2^32 - 3 bytes, `std::bad_alloc` by the address
   space), a nucleotide query of 1 base (`refuse_xntqlen1`: frames of 1,431,655,765 residues) and of 2 bases
   (`refuse_xntqlen2`: empty frames, whose residues NCBI writes over the strings' terminator, undefined). Each is NCBI's
   standard output cut at a line end (before the document's session for what the reader refuses, before the query
   for the rest) and its standard error up to the same point, then the refusal.
+  (`refuse_xcoordmin` of PS16d is the `widened` row `x.h_qfmin.doms` since PS16-Q1, below.)
+
+## Coordinates past NCBI's `int` (PS16-Q1, PD-LOSAT-NCBI-DEFECTS exception 12)
+
+The Owner's Q1 = B (2026-11-14): where rpsbproc 0.5.1's signed `int` coordinate arithmetic overflows (undefined; its
+two builds wrap it), LOSAT computes the value. Each case at the limit sits beside its nearby input, whose coordinates
+are moved away from the limit by a known shift; the nearby row is a `compare` row (NCBI's bytes), and LOSAT's bytes of
+the limit equal them moved back by that shift (the input file's name aside). Made 2026-11-14 by `gen_oracle.py` and
+`gen_fixrows.py` of the task folder (`psiblast-20261025/PR/tmp/impl16q1/`, `oracle/INDEX.md` there); NCBI's binary and
+bioconda's gave the same bytes in every case.
+
+- `widened/<case>.{out,err,rc}`: LOSAT's bytes for the rows of `use` `widened`, where NCBI's builds print the wrap:
+  - `ntplusmax.doms.std`, `ntplusmax.doms.rep.f` (`arch/ntplusmax.asn`: `nt67.asn` whose first alignment, plus strand,
+    ends at base 2^31, `to 2147483647`; NCBI prints the end `-2147483648`, LOSAT 2147483648): nearby
+    `ntplusmax3.*` (`to 2147483644`, end 2147483645; shift 3).
+  - `ntminusmax.doms.std` (`nt67.asn` whose first minus-strand alignment ends at `to 2147483647`: `alignedLen` of
+    715,827,882 codons, the end printed 2147483648, NCBI `-2147483648`): nearby `ntminusmax1.doms.std` (`to
+    2147483646`, the same `alignedLen`, end 2147483647; shift 1).
+  - `ntmotifmax.feats.std` (`nt68.asn` whose first sd00045 alignment is moved 2,147,483,047 bases, so that its first
+    ANK motif starts at base 2^31; data `data_with/ntmot/`, `nt` without sd00045's `oligomer interface` site, so that
+    the moved hit prints its motifs only; NCBI prints that motif's start `-2147483648`, LOSAT 2147483648): nearby
+    `ntmotifmax3.feats.std` (moved 3 bases less: every number of the three motifs 3 lower).
+  - `x.h_qfmin.doms` (`arch/x_h_p_coordmin.xml`, `Hsp_query-from` -2147483648; NCBI's `replace` throws at
+    position 2147483647, LOSAT's at 18446744071562067967): nearby `x.h_qfmin1.doms` (`x_h_p_qfmin1.xml`,
+    -2147483647: position 18446744071562067968; shift 1).
+  - `x.h_qtmin.rep` (`x_h_p_qtmin.xml`, `Hsp_query-to` -2147483648: NCBI's wrapped range to 2^31 - 1 makes the hit a
+    representative; LOSAT's ends below its start, so it prints no DOMAINS): nearby `x.h_qtmin1.rep` (-2147483647, the
+    same bytes).
+  - `x.h_hfmin.std` (`x_h_p_hfmin.xml`, `Hsp_hit-from` -2147483648: NCBI's wrapped domain start marks the hit `N`,
+    LOSAT's -2^31 - 1 does not): nearby `x.h_hfmin1.std` (-2147483647, the same bytes).
+  - `x.h_ntmqfmin.rep` (`x_h_n_mqfmin.xml`: `x_ntpair.xml` whose first minus-frame HSP has `Hsp_query-from`
+    -2147483648; NCBI's wrapped range reclassifies the hit and drops its line, LOSAT prints it with start
+    `-2147483648`): nearby `x.h_ntmqfmin1.rep` (-2147483647, start `-2147483647`; shift 1). `x.h_ntphfmin.rep`
+    (`x_h_n_phfmin.xml`: the first plus-frame HSP's `Hsp_hit-from` -2147483648; NCBI marks the hit `N`, LOSAT does
+    not): nearby `x.h_ntphfmin1.rep` (the same bytes). The PS16-Q1 review's oracle `nx` (both builds, full CDD v3.22
+    data; the cut data `nt` gives the same bytes).
+  - `widened/PAIRS.tsv` names each `widened` row's nearby row and its shift (the numbers that move, as `old=>new`);
+    the test `widened_rows_are_their_nearby_rows_moved_back` makes each `widened` row from NCBI's bytes of its
+    nearby row (`oracle/`) with that shift and the input's name, and compares.
+- `compare` rows whose limit gives NCBI's bytes too (the overflow ends in an `unsigned int` or is not printed):
+  `ntslen.both.std` / `ntslen1.both.std` (`nt67.asn` whose first subject interval runs from 2^32 - 5 to 2^31 - 2,
+  `t - f + 1` = 2^31 + 4, and to 2^31 - 7, 2^31 - 1), `x.h_qtmin.full` / `x.h_qtmin1.full` (the hit of `x_h_p_qtmin.xml`
+  in `-m full`: its end `-2147483648` in both), `x.h_hfmax.both` / `x.h_hfmax5.both` (`x_one.xml` with a query gap at
+  column 11 and `Hsp_hit-from` 2147483638, so that `++hf` passes 2^31 - 1, and 2147483633), `x.h_span.doms` /
+  `x.h_span1.doms` (a query of length 0, `Hsp_query-from` 0 and `Hsp_query-to` 2147483647: "see if NA"'s span 2^31,
+  and 2147483646).
+- `mse86.both`, `mse76.both` (`compare`, NCBI's bytes; PD-LOSAT-NCBI-DEFECTS rule 2): the PS16-Q1 review's oracle `mse`,
+  `three.asn` whose three 199908 Dense-segs have their subject starts moved by K, with 199908's site positions moved
+  by K in the layers `data_with/mse86` and `data_with/mse76` (`cddannot.dat`, `cddannot_generic.dat`). At K =
+  2147483586 (`arch/mse86.asn`) the last segment passes model position 2^31 - 1: NCBI's `MapSegSet` end, an
+  `unsigned int` sum stored in an `int`, wraps, two of the eight Zn sites stay unmapped and no SITES line is printed;
+  at K = 2147483576 (`arch/mse76.asn`) the SITES line is printed. Both builds the same.

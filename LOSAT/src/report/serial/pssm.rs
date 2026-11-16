@@ -323,6 +323,16 @@ fn write_document<E: Encoder>(
     karlin: Option<FinalKarlin>,
 ) {
     enc.begin_document("PssmWithParameters");
+    write_sequence(enc, value, karlin);
+    enc.end_document();
+}
+
+/// The `PssmWithParameters` SEQUENCE, with `karlin` in place of the six values of `finalData`.
+fn write_sequence<E: Encoder>(
+    enc: &mut E,
+    value: &PssmWithParameters,
+    karlin: Option<FinalKarlin>,
+) {
     enc.begin_sequence("PssmWithParameters");
     enc.member("pssm", 0);
     write_pssm(enc, &value.pssm, karlin);
@@ -333,7 +343,23 @@ fn write_document<E: Encoder>(
         enc.end_member();
     }
     enc.end_sequence();
-    enc.end_document();
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:138-142 (the `pssm` variant of the
+// request's queries; line RG F1b-2)
+// ```asn
+// Blast4-queries ::= CHOICE {
+//     pssm                    PssmWithParameters,
+//     seq-loc-list            SEQUENCE OF Seq-loc,
+//     bioseq-set              Bioseq-set
+// }
+// ```
+/// Writes `value` as the value of a member or variant of an enclosing document, with the
+/// enclosing document's encoder: the search strategy's request writes a PSSM query so
+/// (`report::archive::writer`, `queries pssm`), and its strings and octets wrap at the depth where
+/// they stand, as NCBI's object stream writes them.
+pub fn write_value<E: Encoder>(enc: &mut E, value: &PssmWithParameters) {
+    write_sequence(enc, value, None);
 }
 
 fn write_ints<E: Encoder>(enc: &mut E, values: &[i32]) {
@@ -632,10 +658,45 @@ fn write_params<E: Encoder>(enc: &mut E, params: &PssmParameters) {
 }
 
 /// `value` in ASN.1 text (`MSerial_AsnText`), as one document; `Err` when the encoder refuses a
-/// value (a byte outside the visible ASCII range in a VisibleString, which the callers refuse
-/// first).
+/// value (a byte outside the visible ASCII range in a VisibleString: `asn_text_posting` writes it
+/// as NCBI does).
 pub fn asn_text(value: &PssmWithParameters) -> Result<Vec<u8>, super::encoder::SerialError> {
     asn_text_with_karlin(value, None)
+}
+
+/// `asn_text` of a PSSM that psiblast writes to its file: the document with `#` for each byte of a
+/// VisibleString that NCBI's ASN.1 text stream replaces (a query title outside 0x20..0x7E), and
+/// NCBI's post of each such byte (`encoder::ReplacedChar`, positions from the document's start),
+/// which psiblast makes while it writes the file (`SavePssmToFile`, quoted at the module). A PSSM
+/// without such a byte is written by `asn_text` alone; one with it again through `Traced`.
+///
+/// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:413-444 (quoted at
+/// `seqalign::write_query_posting`: `ReplaceVisibleChar` for each byte that is not
+/// `GoodVisibleChar`)
+pub fn asn_text_posting(
+    value: &PssmWithParameters,
+) -> Result<(Vec<u8>, Vec<super::encoder::ReplacedChar>), super::encoder::SerialError> {
+    match asn_text(value) {
+        Err(super::encoder::SerialError::NonVisibleChar(_)) => asn_text_traced(value),
+        written => written.map(|bytes| (bytes, Vec::new())),
+    }
+}
+
+/// `asn_text_posting` through `Traced`.
+#[cold]
+#[inline(never)]
+fn asn_text_traced(
+    value: &PssmWithParameters,
+) -> Result<(Vec<u8>, Vec<super::encoder::ReplacedChar>), super::encoder::SerialError> {
+    let mut out = Vec::new();
+    let mut enc = super::encoder::Traced::new(super::asn_text::AsnTextEncoder::new(&mut out), 0);
+    write_document(&mut enc, value, None);
+    if let Some(error) = enc.error() {
+        return Err(error);
+    }
+    let replaced = enc.take_replaced_chars();
+    drop(enc);
+    Ok((out, replaced))
 }
 
 /// `asn_text` of `value` with `karlin`, when given, in place of the six values of its `finalData`

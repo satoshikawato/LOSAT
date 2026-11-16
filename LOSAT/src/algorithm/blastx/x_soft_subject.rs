@@ -517,11 +517,12 @@ mod tests {
     fn record(letters: &[u8], runs: &[(i32, i32)]) -> FastaRecord {
         FastaRecord {
             internal_id: String::new(),
-            title: String::new(),
+            title: Vec::new(),
             sequence: letters.to_vec(),
             lowercase_masks: runs.to_vec(),
             warnings: Vec::new(),
             source: None,
+            around: None,
         }
     }
 

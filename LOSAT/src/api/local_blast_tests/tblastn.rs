@@ -109,6 +109,7 @@ fn a_task_that_is_not_tblastns_is_refused() {
             let mut outputs = ReportOutputs {
                 formats: vec![FormatOutput {
                     outfmt: "6",
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut sink),
                 }],
                 diagnostics: &mut diagnostics,
@@ -366,17 +367,20 @@ fn unsupported_formats_fail_before_searching() {
     let (query_name, subject_name) = inputs.names();
     // NCBI blast_args.cpp:2845-2851: a custom specification of outfmt 0 is ignored, so
     // "0 qseqid" is outfmt 0. A delimiter that a field separates its entries with is NCBI's
-    // error (blast_args.cpp:2753-2792, `s_ValidateCustomDelim`).
-    for outfmt in ["2", "6 delim=; qseqid staxids"] {
+    // error (blast_args.cpp:2753-2792, `s_ValidateCustomDelim`). SAM (17) is BLASTN's alone (TBLASTN
+    // writes 1 to 4 since line RG T3b).
+    for outfmt in ["17", "6 delim=; qseqid staxids"] {
         let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
             formats: vec![
                 FormatOutput {
                     outfmt: "6",
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut valid),
                 },
                 FormatOutput {
                     outfmt,
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut invalid),
                 },
             ],
@@ -414,6 +418,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
                 .zip(sinks.iter_mut())
                 .map(|(outfmt, sink)| FormatOutput {
                     outfmt,
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(sink),
                 })
                 .collect(),

@@ -242,7 +242,7 @@ pub fn run_makeblastdb(
         Err(reason) => return Err(refused(recorded, &reason)),
     }
     drop(opened.target);
-    let cli: Cli = crate::cli::try_parse_from_library(words())
+    let cli: Cli = crate::cli::try_parse_with_own_start(words())
         .map_err(|error| Error::Argv(crate::cli::render_message(&error)))?;
     let Commands::Makedb(args) = cli.command else {
         unreachable!("the first word names makeblastdb");

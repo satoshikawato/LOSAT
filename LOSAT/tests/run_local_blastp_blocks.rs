@@ -34,6 +34,9 @@ use std::process::Command;
 use losat::api::{read_fasta, Program, Role};
 use run_local_support::{assert_observer_ranges, field, temp_path, Files};
 
+mod temp_support;
+use temp_support::{worker_log_if_unset, TempFile};
+
 const CUSTOM: &str =
     "6 qseqid sseqid pident length qstart qend sstart send evalue bitscore qseq sseq btop";
 /// The outputs of ABI v2 of the Web build.
@@ -142,7 +145,7 @@ impl Drop for Child {
 /// batch size of the test's environment, `LOSAT_BLASTX_WORKER_LOG` kept or set (a binary built with
 /// the `blastx-worker-probe` feature, `cargo test --all-features` as in CI, needs it at 2 or more
 /// threads; it selects nothing), then `vars`.
-fn clean_env(command: &mut Command, vars: &[(&str, &str)]) {
+fn clean_env(command: &mut Command, vars: &[(&str, &str)]) -> Option<TempFile> {
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")
@@ -154,13 +157,9 @@ fn clean_env(command: &mut Command, vars: &[(&str, &str)]) {
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join(format!("losat-qblockweb-worker-{}.log", std::process::id())),
-        );
-    }
+    let log = worker_log_if_unset(command, "run_local_blastp_blocks_worker");
     command.envs(vars.iter().copied());
+    log
 }
 
 /// Runs `child_search` in a child process with `vars` (and `LOSAT_TIMING`).
@@ -187,7 +186,7 @@ fn child(
     .collect::<Vec<_>>()
     .join("\n");
     let mut command = Command::new(std::env::current_exe().expect("test binary"));
-    clean_env(&mut command, vars);
+    let _log = clean_env(&mut command, vars);
     let output = command
         .args([
             child_test_name().as_str(),
@@ -224,7 +223,7 @@ fn child(
 fn cli(inputs: &Inputs, outfmt: &str, threads: u32, vars: &[(&str, &str)]) -> (Vec<u8>, Vec<u8>) {
     let out = temp_path(&format!("qblockweb_cli_{}_{threads}.out", outfmt.len()));
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
-    clean_env(&mut command, vars);
+    let _log = clean_env(&mut command, vars);
     let output = command
         .arg("blastp")
         .arg("-query")

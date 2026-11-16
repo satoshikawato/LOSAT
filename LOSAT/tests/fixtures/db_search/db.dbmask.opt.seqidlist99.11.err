@@ -1,0 +1,2 @@
+Warning: [blastn] To obtain better run time performance, please run blastdb_aliastool -seqid_file_in <INPUT_FILE_NAME> -seqid_file_out <OUT_FILE_NAME> and use <OUT_FILE_NAME> as the argument to -seqidlist
+BLAST options error: Masking algorithm ID 99 is not supported in nucleotide 'tests/db_search/dbmask/p5' BLAST database

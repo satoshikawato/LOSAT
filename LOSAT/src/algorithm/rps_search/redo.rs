@@ -36,15 +36,24 @@ use anyhow::Result;
 use super::traceback::{sort_by_score, swap_roles, RpsTraceScratch, RpsTraceback, RpsTraced};
 use super::RPS_K_MULT;
 use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
-use crate::algorithm::blastp::hsp::BlastpHitList;
+use crate::algorithm::blastp::hsp::{BlastCompoHeap, BlastpHitList};
 use crate::algorithm::blastp::x_prelim_compact::XPrelimHsp;
 use crate::algorithm::pssm_search::evalue::EvalueStats;
+use crate::algorithm::pssm_search::redo1::smith_waterman::SwEndless;
 use crate::algorithm::pssm_search::redo1::{RedoMatch, RedoRun, SCALING_FACTOR};
 use crate::algorithm::pssm_search::rows::QueryPssm;
 use crate::core::composition_adjustment::compo_scale::PosMatrixInfo;
 use crate::core::psi::PsiScoreBlk;
 use crate::seqdb::rps::RpsVolumeFiles;
 use crate::stats::KarlinParams;
+
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:163
+// ```c
+// #define PSI_INCLUSION_ETHRESH 0.002 /**< Inclusion threshold for PSI BLAST */
+// ```
+/// The inclusion threshold of rpsblast's PSI options (`PSIBlastOptionsNew`), the e-value cutoff of
+/// the redo's heaps (blast_kappa.c:3074-3076).
+const PSI_INCLUSION_ETHRESH: f64 = 0.002;
 
 /// What the redo of every profile reads besides the traceback's values: the volume's frequency
 /// ratios, BLOSUM62's score block (the matrix information of the position-based adjustment),
@@ -56,6 +65,26 @@ pub(crate) struct RpsRedoParams<'a> {
     pub(crate) gap_open: i32,
     pub(crate) gap_extend: i32,
     pub(crate) x_drop_final_bits: f64,
+    /// `-use_sw_tback`: NCBI's Smith-Waterman redo of each profile
+    /// (`RedoMatch::redo_match_smith_waterman`). The redo runs with composition-based statistics
+    /// 1 to 3 only; without them NCBI's RPS traceback does not read the flag
+    /// (`s_RPSComputeTraceback` takes no Smith-Waterman path and `kSmithWaterman` asks for the
+    /// other mode).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:291-292
+    /// ```c
+    ///    const Boolean kSmithWaterman = (ext_options->eTbackExt ==
+    ///                                    eSmithWatermanTbckFull);
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:1210-1214
+    /// ```c++
+    /// inline void
+    /// CBlastOptionsLocal::SetSmithWatermanMode(bool m)
+    /// {
+    ///     if (m == true)
+    ///        m_ExtnOpts->eTbackExt = eSmithWatermanTbck;
+    /// ```
+    pub(crate) smith_waterman: bool,
 }
 
 /// The statistics the traceback of one query reads: the batch's ungapped Karlin block and the
@@ -102,6 +131,32 @@ impl RpsTraceback<'_> {
         let count = prelim.hsplist_count;
         let mut hit_list: Option<BlastpHitList> = None;
         let mut k_mark: Option<u32> = None;
+        // The heap of redone matches that the Smith-Waterman redo's first alignment asks
+        // (`BlastCompo_HeapWouldInsert`). NCBI's redo of each profile makes its own
+        // (`BlastCompo_HeapInitialize` with the hit list size and the inclusion threshold) and
+        // never inserts into it: RPS-BLAST's redo has no sequence source and leaves the match
+        // before the insertion, so the heap stays empty and asks only `n < heapThreshold`.
+        //
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3288-3292
+        // ```c
+        //         for (query_index = 0; query_index < numQueries; query_index++) {
+        //             status_code =
+        //                 BlastCompo_HeapInitialize(&redoneMatches_tld[i][query_index],
+        //                                           hitParams->options->hitlist_size,
+        //                                           inclusion_ethresh);
+        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3702-3709
+        // ```c
+        //                     if (!seqSrc) {
+        //                         goto query_loop_cleanup;
+        //                     }
+        //                     if (BlastCompo_HeapWouldInsert(
+        //                             &redoneMatches[query_index],
+        //                             best_evalue,
+        //                             best_score,
+        //                             localMatch->oid
+        // ```
+        let mut sw_heap: Option<BlastCompoHeap> = None;
         let kbp_psi = crate::core::psi::KarlinBlk {
             lambda: batch_kbp.lambda,
             k: batch_kbp.k,
@@ -175,11 +230,13 @@ impl RpsTraceback<'_> {
             )
             .with_bound_check();
             let hsps: Vec<BlastpPreliminaryHsp> = list.hsps.iter().map(|hsp| hsp.hsp).collect();
-            let redone = RedoMatch {
+            let redo_match = RedoMatch {
                 info: &info,
                 // The query's statistics in this volume: the Gumbel block, or without it
                 // (`-searchsp`, `OLD_FSC`) the search space the redo copy of the score block
-                // keeps (the user query's, blast_traceback.c:1238-1255).
+                // keeps (the user query's, blast_traceback.c:1238-1255). The Smith-Waterman
+                // redo's significance reads that search space also with the Gumbel block
+                // (`eff_search_space`, redo_alignment.c:1406).
                 stats,
                 expect_value: self.expect_value,
                 query_length: length as i32,
@@ -188,8 +245,22 @@ impl RpsTraceback<'_> {
                 matrix: crate::config::ScoringMatrix::Blosum62,
                 // rpsblast refuses `-sum_stats true`.
                 link: None,
-            }
-            .redo_match(&mut run, list.oid, &hsps, query);
+            };
+            let redone = if redo.smith_waterman {
+                let heap = sw_heap.get_or_insert_with(|| {
+                    BlastCompoHeap::new(self.hitlist_size, PSI_INCLUSION_ETHRESH)
+                });
+                redo_match.redo_match_smith_waterman(
+                    &mut run,
+                    &mut scratch.sw,
+                    heap,
+                    list.oid,
+                    &hsps,
+                    query,
+                )
+            } else {
+                Ok(redo_match.redo_match(&mut run, list.oid, &hsps, query))
+            };
             let exceeded = run.bound_exceeded();
             let (matrix, gap) = run.into_buffers();
             // The bound of every matrix the adjustments built (`RedoRun::with_bound_check`).
@@ -198,6 +269,11 @@ impl RpsTraceback<'_> {
                     "a profile whose composition-adjusted scores can add up to {bound} (above 2147483647, where NCBI BLAST+'s 32-bit scores overflow) is not supported by LOSAT's RPSBLAST"
                 );
             }
+            let redone = redone.map_err(|SwEndless| {
+                anyhow::anyhow!(
+                    "a profile whose Smith-Waterman redo (-use_sw_tback) does not end in NCBI BLAST+ 2.17.0 (the e-value of a score of 0 passes the threshold, the profile has several preliminary HSPs and its first position scores the query's first letter above 0) is not supported by LOSAT's RPSBLAST"
+                )
+            })?;
             scratch.pssm.rows = matrix.rows;
             scratch.gap = gap;
             // The list's HSPs are switched back and sorted even if none is left, and a list

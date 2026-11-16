@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<!DOCTYPE BlastOutput PUBLIC "-//NCBI//NCBI BlastOutput/EN" "http://www.ncbi.nlm.nih.gov/dtd/NCBI_BlastOutput.dtd">
+<BlastOutput>
+  <BlastOutput_program>blastp</BlastOutput_program>
+  <BlastOutput_version>BLASTP 2.17.0+</BlastOutput_version>
+  <BlastOutput_reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</BlastOutput_reference>
+  <BlastOutput_db>xpost/db/pA/pA xpost/db/pB/pB</BlastOutput_db>
+  <BlastOutput_query-ID>Query_1</BlastOutput_query-ID>
+  <BlastOutput_query-def>q0 none</BlastOutput_query-def>
+  <BlastOutput_query-len>30</BlastOutput_query-len>
+  <BlastOutput_param>
+    <Parameters>
+      <Parameters_matrix>BLOSUM62</Parameters_matrix>
+      <Parameters_expect>1e-20</Parameters_expect>
+      <Parameters_gap-open>11</Parameters_gap-open>
+      <Parameters_gap-extend>1</Parameters_gap-extend>
+      <Parameters_filter>F</Parameters_filter>
+    </Parameters>
+  </BlastOutput_param>
+<BlastOutput_iterations>
+<Iteration>
+  <Iteration_iter-num>1</Iteration_iter-num>
+  <Iteration_query-ID>Query_1</Iteration_query-ID>
+  <Iteration_query-def>q0 none</Iteration_query-def>
+  <Iteration_query-len>30</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>2</Statistics_db-num>
+      <Statistics_db-len>240</Statistics_db-len>
+      <Statistics_hsp-len>4</Statistics_hsp-len>
+      <Statistics_eff-space>6032</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>No hits found</Iteration_message>
+</Iteration>Error: [blastp] Failed s_BlastXMLAddIteration Q(0/1NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/corelib/ncbistr.cpp", line 6901: Error: (CStringException::eConvert) ncbi::CUtf8::SymbolToChar() - Failed to convert symbol to requested encoding (m_Pos = 0)
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objostrxml.cpp", line 1538: Error: (CStringException::eConvert) ncbi::CObjectOStreamXml::WriteClassMember() -  Frame type= eFrameClassMember, Member name= query-def (m_Pos = 0)
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objostrxml.cpp", line 1519: Error: (CStringException::eConvert) ncbi::CObjectOStreamXml::WriteClass() -  Frame type= eFrameClass, Object type= Iteration (m_Pos = 0)
+
+
+<Iteration>
+  <Iteration_iter-num>3</Iteration_iter-num>
+  <Iteration_query-ID>Query_3</Iteration_query-ID>
+  <Iteration_query-def>q2 two</Iteration_query-def>
+  <Iteration_query-len>120</Iteration_query-len>
+<Iteration_hits>
+Error: [blastp] Error: Offset error at end of taxdb file.
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|1</Hit_id>
+  <Hit_def>rb two</Hit_def>
+  <Hit_accession>1</Hit_accession>
+  <Hit_len>120</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>255.758</Hsp_bit-score>
+      <Hsp_score>652</Hsp_score>
+      <Hsp_evalue>1.07365e-94</Hsp_evalue>
+      <Hsp_query-from>1</Hsp_query-from>
+      <Hsp_query-to>120</Hsp_query-to>
+      <Hsp_hit-from>1</Hsp_hit-from>
+      <Hsp_hit-to>120</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>120</Hsp_identity>
+      <Hsp_positive>120</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>120</Hsp_align-len>
+      <Hsp_qseq>MFIAYRGENDIKCMYGVQCWAWKLQHGEWTWCMYMKGPLTFKKGQCMVCQKTLTQPGLWNPWALWYVVTQTQDDRNEQPCHTIPAERHGAVPNGMNHRCDVFHECHQEFWRCESTFWLSS</Hsp_qseq>
+      <Hsp_hseq>MFIAYRGENDIKCMYGVQCWAWKLQHGEWTWCMYMKGPLTFKKGQCMVCQKTLTQPGLWNPWALWYVVTQTQDDRNEQPCHTIPAERHGAVPNGMNHRCDVFHECHQEFWRCESTFWLSS</Hsp_hseq>
+      <Hsp_midline>MFIAYRGENDIKCMYGVQCWAWKLQHGEWTWCMYMKGPLTFKKGQCMVCQKTLTQPGLWNPWALWYVVTQTQDDRNEQPCHTIPAERHGAVPNGMNHRCDVFHECHQEFWRCESTFWLSS</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>2</Statistics_db-num>
+      <Statistics_db-len>240</Statistics_db-len>
+      <Statistics_hsp-len>18</Statistics_hsp-len>
+      <Statistics_eff-space>20808</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>4</Iteration_iter-num>
+  <Iteration_query-ID>Query_4</Iteration_query-ID>
+  <Iteration_query-def>q3 three</Iteration_query-def>
+  <Iteration_query-len>120</Iteration_query-len>
+<Iteration_hits>
+Error: [blastp] Error: Offset error at end of taxdb file.
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|0</Hit_id>
+  <Hit_def>ra one</Hit_def>
+  <Hit_accession>0</Hit_accession>
+  <Hit_len>120</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>253.832</Hsp_bit-score>
+      <Hsp_score>647</Hsp_score>
+      <Hsp_evalue>6.01822e-94</Hsp_evalue>
+      <Hsp_query-from>1</Hsp_query-from>
+      <Hsp_query-to>120</Hsp_query-to>
+      <Hsp_hit-from>1</Hsp_hit-from>
+      <Hsp_hit-to>120</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>120</Hsp_identity>
+      <Hsp_positive>120</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>120</Hsp_align-len>
+      <Hsp_qseq>MRVRRTWHGTSYGERLFDVCYPRYGYATDCCHIYARMRWHTILSADRKQVDKMITLADWEPELPDAAHHCSPPQDWHKMDLMAQEFIEACRSGVHRTHFQPEPQHAKWLAHGPYWECFHR</Hsp_qseq>
+      <Hsp_hseq>MRVRRTWHGTSYGERLFDVCYPRYGYATDCCHIYARMRWHTILSADRKQVDKMITLADWEPELPDAAHHCSPPQDWHKMDLMAQEFIEACRSGVHRTHFQPEPQHAKWLAHGPYWECFHR</Hsp_hseq>
+      <Hsp_midline>MRVRRTWHGTSYGERLFDVCYPRYGYATDCCHIYARMRWHTILSADRKQVDKMITLADWEPELPDAAHHCSPPQDWHKMDLMAQEFIEACRSGVHRTHFQPEPQHAKWLAHGPYWECFHR</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>2</Statistics_db-num>
+      <Statistics_db-len>240</Statistics_db-len>
+      <Statistics_hsp-len>18</Statistics_hsp-len>
+      <Statistics_eff-space>20808</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+</Iteration>
+</BlastOutput_iterations>
+</BlastOutput>
+

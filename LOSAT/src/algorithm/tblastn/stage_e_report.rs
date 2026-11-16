@@ -50,6 +50,8 @@ pub(super) enum ShownSubjects<'a> {
         name: &'a str,
         pairwise: &'a PairwiseDatabase,
         reported: &'a super::database::ReportedSubjects,
+        /// The OID of each ordinal id, which names a sequence without parsed Seq-ids.
+        oids: crate::seqdb::OidMap<'a>,
     },
 }
 
@@ -79,11 +81,11 @@ impl ShownSubjects<'_> {
             .map(|pairwise| pairwise.definition.as_slice())
     }
 
-    /// The ordinal ID of the reported database sequence of rank `rank`, `None` for `-subject`.
-    pub(super) fn ordinal(&self, rank: usize) -> Option<u32> {
+    /// The OID of the reported database sequence of rank `rank`, `None` for `-subject`.
+    pub(super) fn oid(&self, rank: usize) -> Option<crate::seqdb::Oid> {
         match self {
             Self::Fasta { .. } => None,
-            Self::Database { reported, .. } => Some(reported.ordinals[rank]),
+            Self::Database { reported, oids, .. } => Some(oids.oid(reported.ordinals[rank])),
         }
     }
 
@@ -177,6 +179,27 @@ pub(super) fn reads_subject_letters<'a>(
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:121, :196 (quoted at
+// `blast_xml2::reports_held`)
+/// Where TBLASTN's run of the formats `formats` stops for a matrix name `matrix_name` that NCBI's
+/// BLAST XML report data does not know (`blast_xml::matrix::xml_formatting_failure`), with the
+/// facts of the search: no database (`-subject`, `m_IsBl2Seq`) and `-in_pssm` (PSI-TBLASTN,
+/// `m_IsIterative`). The one decision behind the search strategy's last request
+/// (`tblastn_app::search`) and the error of `render`.
+pub(super) fn xml_matrix_failure(
+    formats: &[crate::api::local_blast::FormatOutput<'_>],
+    matrix_name: &str,
+    database: bool,
+    pssm: bool,
+) -> Option<crate::report::blast_xml::matrix::XmlMatrixFailure> {
+    crate::report::blast_xml::matrix::xml_formatting_failure(
+        formats.iter().map(|format| format.outfmt),
+        matrix_name,
+        !database,
+        pssm,
+    )
+}
+
 /// The ranges of a search as the reports use them: where the searched letters of each
 /// query and subject lie in its record (`-query_loc`, `-subject_loc`), and whether the
 /// reports end with the epilog (a search that stops at a query batch writes none).
@@ -205,8 +228,12 @@ pub(super) fn render(
     formatting: crate::blastinput::report_counts::FormattingArgs,
     genetic_code: u8,
     seg: Option<&SegParams>,
+    // The `-seg` options as NCBI's filter string prints them (`SegSpec::filter_options`), not the
+    // SEG parameters `seg` (a value not above 0 or NaN there is SEG's default, a hicut below the
+    // locut the locut): BLAST XML's `Parameters_filter`.
+    seg_filter: Option<(i32, f64, f64)>,
     mask_lowercase: bool,
-    query_warning_lines: &[Vec<u8>],
+    query_posts: &[crate::report::diag_log::Posts],
     // The texts of the subjects that each query's report reads one by one (its batch's prefetch
     // off), by query, which the first format's writer places where it reads them
     // (`QueryWarnings::subject_read`).
@@ -220,6 +247,11 @@ pub(super) fn render(
     // `-in_pssm` (PSI-TBLASTN): the query's PSSM, whose reports (outfmt 0, 6, 7 and 10) name the
     // program PSITBLASTN, show no query masks and print the PSSM's gapped Karlin-Altschul values.
     pssm: Option<&crate::algorithm::pssm_search::PsiSearch>,
+    // `-show_gis`: the labels of the query-anchored sections (outfmt 1 to 4).
+    show_gis: bool,
+    // The first searched query of each query batch (NCBI's scope of the batch's queries, which
+    // the query-anchored formats' refusals read); empty: one batch.
+    batch_starts: &[usize],
 ) -> Result<()> {
     ensure!(
         query_records.len() == hitlists.len(),
@@ -242,18 +274,29 @@ pub(super) fn render(
     }
     let hitlists: &[KappaResultHitList] = hitlists;
     // BLAST XML (outfmt 5, and the XML2 and JSON documents of 15 and 16): its texts are made,
-    // and what NCBI cannot write is refused, before any format writes (`-out` is already
-    // created, empty, as NCBI's).
+    // and a title that NCBI crashes on (`names::Refusal`) is refused, before any format writes
+    // (`-out` is already created, empty, as NCBI's).
     //
     // NCBI writes the XML2 and JSON documents' start before the search (`PrintProlog`) and
-    // fails for a matrix of its formatting table's that it does not know when it makes the
-    // first report's data: the start alone is written then (probe `tblastn_sub_lcmatrix`).
-    // (The search strategy's file holds the first batch's request alone: `search` stops the
-    // requests after it with the same decision, `StrategyExport::stop_after`.)
-    if crate::report::blast_xml::matrix::xml_formatting_fails(
-        outputs.formats.iter().map(|format| format.outfmt),
+    // fails for a matrix of its formatting table's that it does not know when it makes a report's
+    // data (`xml_matrix_failure`): that of the run's first query, or of its second where the
+    // report is held (`XmlMatrixFailure::SecondQueryOrEnd`: NCBI's next query of another Seq-id,
+    // the second as LOSAT refuses two queries of one id before any output), in the batch of that
+    // query, or for a run of one query whose report is held
+    // in `PrintEpilog` (blast_format.cpp:2204-2212, quoted at
+    // `blast_xml::matrix::XmlMatrixFailure`) unless the run stops before (`ranges.epilog`; the
+    // caller writes that stop). The start alone is written then (probe `tblastn_sub_lcmatrix`),
+    // and the posts of the queries up to the failing one: the reader's messages of their batches
+    // and NCBI's posts of the bytes replaced in the batches' search strategy requests.
+    // (The search strategy's file holds the requests up to the failing batch's: `search` stops
+    // the requests after it with the same decision, `StrategyExport::stop_after`.)
+    if let Some(failure) = xml_matrix_failure(
+        &outputs.formats,
         matrix_name,
-    ) && !query_records.is_empty()
+        matches!(shown, ShownSubjects::Database { .. }),
+        pssm.is_some(),
+    )
+    .filter(|_| !query_records.is_empty())
     {
         for format in outputs.formats.iter_mut() {
             if let Some(kind) = xml2_kind(format.outfmt) {
@@ -262,7 +305,20 @@ pub(super) fn render(
                 writer.flush()?;
             }
         }
-        return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
+        let failing = (failure.query() < query_records.len()).then(|| failure.query());
+        for posts in query_posts
+            .iter()
+            .take(failing.map_or(query_records.len(), |query| query + 1))
+        {
+            posts.write(
+                &mut *outputs.diagnostics,
+                archive.map(|render| render.handle),
+            )?;
+        }
+        if failing.is_some() || (ranges.epilog && failure.fails_at_end(query_records.len())) {
+            return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
+        }
+        return Ok(());
     }
     let xml_is_xml2 = outputs
         .formats
@@ -292,7 +348,7 @@ pub(super) fn render(
             query_batch_skipped,
             scoring,
             matrix_name,
-            seg,
+            seg_filter,
             ranges,
             xml_is_xml2,
             xml_only_xml2,
@@ -313,29 +369,90 @@ pub(super) fn render(
     };
     let subject_ids = if outputs.formats.iter().any(shows_ids) {
         match shown {
-            ShownSubjects::Fasta { .. } => tabular_subject_ids(hitlists, subject_records)?,
-            ShownSubjects::Database { reported, .. } => {
-                reported.tabular_subject_ids(outputs.formats.iter().any(|format| {
+            ShownSubjects::Fasta { .. } => tabular_subject_ids(subject_records),
+            ShownSubjects::Database { reported, oids, .. } => reported.tabular_subject_ids(
+                *oids,
+                outputs.formats.iter().any(|format| {
                     shows_ids(format)
                         && crate::report::tabular::reads_subject(
                             super::tabular::tabular_spec(format.outfmt).as_ref(),
                             crate::blastinput::app::Program::Tblastn,
                         )
-                }))?
-            }
+                }),
+            )?,
         }
     } else {
         Vec::new()
     };
+    // The rows of subjects whose lookup fails (no id) where NCBI has no result
+    // (`report::tabular::check_failed_lookups`), before any format is written.
+    let parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>] = match shown {
+        ShownSubjects::Fasta { parsed, .. } => parsed,
+        ShownSubjects::Database { reported, .. } => &reported.parsed,
+    };
+    let database = matches!(shown, ShownSubjects::Database { .. });
+    // Each tabular format's refusal is that format's (`FormatRefusal::check`).
+    for format in outputs
+        .formats
+        .iter_mut()
+        .filter(|format| shows_ids(format))
+    {
+        let spec = super::tabular::tabular_spec(format.outfmt);
+        if crate::algorithm::common::tabular::checks_failed_lookups(
+            spec.as_ref(),
+            &subject_ids,
+            parsed,
+        ) {
+            let checked = crate::report::tabular::check_failed_lookups(
+                spec.as_ref(),
+                hitlists.iter().map(|hitlist| {
+                    hitlist
+                        .lists()
+                        .iter()
+                        .filter(|list| !list.hsps.hsps.is_empty())
+                        .map(|list| list.oid as usize)
+                }),
+                |s_idx| {
+                    crate::algorithm::common::tabular::subject_lookup_failure(
+                        spec.as_ref(),
+                        &subject_ids,
+                        parsed,
+                        database,
+                        false,
+                        s_idx,
+                    )
+                },
+                |s_idx| match shown {
+                    ShownSubjects::Database { reported, oids, .. } => {
+                        crate::report::tabular::failed_database_title(
+                            oids.oid(reported.ordinals[s_idx]),
+                        )
+                    }
+                    ShownSubjects::Fasta { .. } => crate::report::tabular::failed_record_title(
+                        s_idx,
+                        subject_records[s_idx].shown_id(),
+                    ),
+                },
+                "TBLASTN",
+            );
+            format.refusal.check(checked)?;
+        }
+    }
     // NCBI c++/src/algo/blast/format/blast_format.cpp:1411:
     // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
     // The alignments are rendered once from the final result, for outfmt 0 and for
     // the caller's hit records, in the order of the tabular rows.
+    let anchored_formats = outputs
+        .formats
+        .iter()
+        .any(|format| (1..=4).contains(&format_number(format.outfmt)));
+    // The masks of the rows, kept for the sections of outfmt 1 to 4 only (`pairwise_hits`).
+    let mut section_masks: Vec<Vec<(usize, usize)>> = Vec::new();
     let pairwise_hits = if outputs.hits.is_some()
         || outputs
             .formats
             .iter()
-            .any(|format| format_number(format.outfmt) == 0)
+            .any(|format| (0..=4).contains(&format_number(format.outfmt)))
     {
         Some(std::sync::Arc::new(pairwise_hits(
             query_records,
@@ -348,6 +465,7 @@ pub(super) fn render(
             mask_lowercase,
             ranges,
             pssm.is_none(),
+            anchored_formats.then_some(&mut section_masks),
         )?))
     } else {
         None
@@ -356,10 +474,95 @@ pub(super) fn render(
     {
         hits_sink(std::sync::Arc::clone(pairwise_hits));
     }
+    // The query-anchored formats (outfmt 1 to 4, line RG T3b), before any format of the call is
+    // written: a reported database sequence that NCBI's scope finds as a query of its batch, by
+    // its Seq-align id (a generated `lcl|Query_N`) or, in a description line, by its display id
+    // (`common::database::refuse_query_ids_of_anchored_reports`, as BLASTN's): NCBI shows the
+    // query in its place (with the protein query's letters translated as nucleotides).
+    let anchored_view = outputs.formats.iter().find_map(|format| {
+        crate::blastinput::app::ReportFormat::from_number(format_number(format.outfmt))
+            .and_then(crate::report::pairwise::PairwiseView::of)
+            .filter(|view| *view != crate::report::pairwise::PairwiseView::Pairwise)
+    });
+    if let (Some(view), Some(rows)) = (anchored_view, pairwise_hits.as_deref()) {
+        if matches!(shown, ShownSubjects::Database { .. }) {
+            let batches = crate::blastinput::query_batch::AnchoredBatchScopes::of_starts(
+                query_records,
+                batch_starts,
+            );
+            let parsed = shown.parsed_subjects();
+            crate::algorithm::common::database::refuse_query_ids_of_anchored_reports(
+                query_records.len(),
+                |q_idx| {
+                    hitlists[q_idx]
+                        .lists()
+                        .iter()
+                        .filter(|list| !list.hsps.hsps.is_empty())
+                        .filter_map(|list| u32::try_from(list.oid).ok())
+                        .collect()
+                },
+                |q_idx| {
+                    Ok(crate::report::pairwise::blastp_described_subjects(
+                        view.report_sort(formatting.report_sort()),
+                        false,
+                        report_counts.num_descriptions,
+                        q_idx,
+                        rows,
+                        |previous, s_idx| {
+                            crate::report::db_subject::rank_joins_as_copy(
+                                parsed,
+                                previous as usize,
+                                s_idx as usize,
+                            )
+                        },
+                    ))
+                },
+                parsed,
+                |rank| {
+                    shown
+                        .oid(rank as usize)
+                        .expect("a database search names its sequences by OID")
+                },
+                |q_idx| batches.of_query(q_idx),
+                batches.generated(),
+                program,
+            )?;
+        }
+    }
+    // The sequences of the query-anchored sections of outfmt 1 to 4 (line RG T3b), made once.
+    let anchored = if anchored_formats {
+        let code = GeneticCode::try_from_id(genetic_code).map_err(anyhow::Error::msg)?;
+        Some(super::anchored::AnchoredSequences {
+            queries: query_records,
+            query_placements: ranges.queries,
+            subject_records,
+            subject_letters,
+            subject_placements: ranges.subjects,
+            shown,
+            show_gis,
+            // The masks of outfmt 0's rows (`pairwise_hits`), half-open in the searched letters.
+            query_masks: (0..query_records.len())
+                .map(|q_idx| {
+                    let offset = ranges.queries.offset(q_idx) as u32;
+                    section_masks
+                        .get(q_idx)
+                        .map(Vec::as_slice)
+                        .unwrap_or_default()
+                        .iter()
+                        .filter(|&&(left, right)| left < right)
+                        .map(|&(left, right)| (left as u32 + offset, right as u32 - 1 + offset))
+                        .collect()
+                })
+                .collect(),
+            code: crate::algorithm::tblastx::report::DisplayCode::new(&code),
+        })
+    } else {
+        None
+    };
     // The warnings of each query are written before its report, once, with the first
     // format (`QueryWarnings`); the taxonomy database's messages of XML2 and JSON go to the
     // diagnostics at every format.
-    let mut warning_lines = Some(query_warning_lines);
+    let mut warning_lines = Some(query_posts);
     let observer = &mut outputs.observer;
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
     // ```c++
@@ -400,6 +603,10 @@ pub(super) fn render(
         ranges,
     };
     for (format_index, format) in outputs.formats.iter_mut().enumerate() {
+        // A format that failed alone writes nothing more; the next takes the warnings.
+        if format.refusal.refused() {
+            continue;
+        }
         // The warnings that a format other than the archive writes are not the archive's
         // messages (a call with several formats, `run_local`).
         if let Some(handle) = archive.map(|render| render.handle) {
@@ -412,17 +619,18 @@ pub(super) fn render(
         // (`tabular::tabular_spec`); `None` for the default 6 and 7.
         let custom_tabular = super::tabular::tabular_spec(format.outfmt);
         // So do the warnings of the formatters of a tabular field list that shows a taxonomy
-        // name (`x_CheckTaxDB`, `tabular`).
+        // name (`x_CheckTaxDB`, `tabular`), and the Seq-annots' posts of the bytes that NCBI's
+        // stream replaces (`seqalign::write_query_to`).
         let mut warnings = (warning_lines.is_some()
-            || xml2_kind(format.outfmt).is_some()
-            || format_number(format.outfmt) == ARCHIVE_FORMAT
+            || crate::report::query_warnings::report_posts(format.report_format())
             || custom_tabular
                 .as_ref()
                 .is_some_and(crate::report::tabular::TabularSpec::looks_up_every_taxid))
         .then(|| {
             let first = warning_lines.take();
-            let warnings = crate::report::query_warnings::QueryWarnings::new(
+            let warnings = crate::report::query_warnings::QueryWarnings::of_posts(
                 first.unwrap_or(&[]),
+                archive.map(|render| render.handle),
                 &mut *outputs.diagnostics,
             );
             // The first format's writer also writes the texts of the subjects that the reports
@@ -434,7 +642,7 @@ pub(super) fn render(
         });
         // The caller's receiver of the side files of outfmt 13 and 14, if it gives one.
         let side_sink = format.sink.side_files().cloned();
-        let mut writer = format.sink.ostream()?;
+        let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
         match format_number(format.outfmt) {
             // The tabular reports with a field list or a delimiter, and outfmt 10 and 20
             // (`tabular`); never the default 6 and 7 below.
@@ -475,11 +683,11 @@ pub(super) fn render(
                 probe.as_mut(),
                 warnings.as_mut(),
             )?,
-            0 => write_pairwise(
+            number @ 0..=4 => write_pairwise(
                 &mut writer,
                 pairwise_hits
                     .as_deref()
-                    .expect("pairwise hits prepared for TBLASTN outfmt 0"),
+                    .expect("pairwise hits prepared for TBLASTN outfmt 0 to 4"),
                 query_records,
                 subject_records,
                 subject_letters,
@@ -497,6 +705,12 @@ pub(super) fn render(
                 probe.as_mut(),
                 warnings.as_mut(),
                 pssm,
+                crate::report::pairwise::PairwiseView::of(
+                    crate::blastinput::app::ReportFormat::from_number(number)
+                        .expect("a format number 0 to 4"),
+                )
+                .expect("a pairwise view of formats 0 to 4"),
+                anchored.as_ref(),
             )?,
             // BLAST XML: one document per run, a header before the first query and a
             // trailer after the last (`blast_xml`).
@@ -568,7 +782,9 @@ pub(super) fn render(
                 shown,
                 hitlists,
                 ranges,
-                warnings.as_mut(),
+                warnings
+                    .as_mut()
+                    .expect("a Seq-annot writes its posts to the diagnostics"),
             )?,
             // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:295
             // ```c++
@@ -583,7 +799,9 @@ pub(super) fn render(
                     render.handle,
                     render,
                     &archive_data(),
-                    warnings.as_mut(),
+                    warnings
+                        .as_mut()
+                        .expect("the BLAST archive writes its posts to the diagnostics"),
                     &mut writer,
                 )?
             }
@@ -613,7 +831,7 @@ fn write_tabular(
     query_records: &[FastaRecord],
     subject_records: &[FastaRecord],
     subject_letters: SubjectLetters<'_>,
-    subject_ids: &[Arc<[u8]>],
+    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     shown: &ShownSubjects<'_>,
     hitlists: &[KappaResultHitList],
     query_batch_skipped: &[bool],
@@ -752,7 +970,11 @@ fn write_tabular(
                 // written as bytes.
                 writer.write_all(query.shown_id())?;
                 writer.write_all(b"\t")?;
-                writer.write_all(&subject_ids[oid])?;
+                // A failed lookup's rows are refused before (`check_failed_lookups`).
+                writer.write_all(crate::algorithm::common::tabular::printed_id(
+                    subject_ids,
+                    oid,
+                ))?;
                 writeln!(
                     writer,
                     "\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
@@ -839,7 +1061,9 @@ pub(super) fn record_coordinates(
 
 /// The subject ID of the tabular formats of every subject, by subject index
 /// (`report::defline::tabular_subject_id`: the title's first word, or the local ID, and
-/// for `lcl|Subject_...` the first word of `GenerateDefline`), as BLASTN's and TBLASTX's.
+/// for `lcl|Subject_...` the first word of `GenerateDefline`), as BLASTN's and TBLASTX's; `None`
+/// where `GenerateDefline` throws (`common::tabular::SubjectId`), whose rows NCBI writes with its catch's values
+/// (`report::tabular::SubjectLookup::Failed`) or stops at (`check_failed_lookups`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:863-870
 /// ```c++
@@ -852,37 +1076,20 @@ pub(super) fn record_coordinates(
 ///             bioseqs_found = false;
 ///         }
 /// ```
-/// A subject with a row whose `GenerateDefline` throws (a `Subject_` first word and a title
-/// in no encoding that `CUtf8::GuessEncoding` recognises) makes NCBI 2.17.0 write part of the
-/// row and stop with a `CCoreException` that names its build's source files (exit 255;
-/// `AUTHORITY.md` §J-6, §K-1, RP-20). No result can be defined for it, so LOSAT rejects such
-/// a subject explicitly before it writes any format; a subject without rows is never
-/// named.
 fn tabular_subject_ids(
-    hitlists: &[KappaResultHitList],
     subjects: &[FastaRecord],
-) -> Result<Vec<Arc<[u8]>>> {
-    let ids: Vec<Option<Arc<[u8]>>> = subjects
+) -> Vec<crate::algorithm::common::tabular::SubjectId> {
+    subjects
         .iter()
-        .map(|subject| subject.subject_tabular_id(false).ok().map(Arc::from))
-        .collect();
-    for list in hitlists.iter().flat_map(KappaResultHitList::lists) {
-        if list.hsps.hsps.is_empty() {
-            continue;
-        }
-        let s_idx = usize::try_from(list.oid).context("negative TBLASTN subject OID")?;
-        if ids.get(s_idx).is_some_and(Option::is_none) {
-            bail!(
-                "subject record {} ({}) has a title whose first word starts with 'Subject_' and whose non-UTF-8 bytes are in no encoding that NCBI BLAST+ recognises; NCBI BLAST+ writes part of a tabular row for such a subject and stops with an exception that names its build's source files (exit 255), which is not supported by LOSAT's TBLASTN",
-                s_idx + 1,
-                String::from_utf8_lossy(subjects[s_idx].shown_id())
-            );
-        }
-    }
-    Ok(ids
-        .into_iter()
-        .map(|id| id.unwrap_or_else(|| Arc::from(&b""[..])))
-        .collect())
+        .map(|subject| {
+            // A nucleotide record's ids are never refused (`FastaRecord::subject_tabular_id`).
+            subject
+                .subject_tabular_id(false)
+                .ok()
+                .flatten()
+                .map(Arc::from)
+        })
+        .collect()
 }
 
 // NCBI c++/src/algo/blast/core/blast_hits.c:1087-1105: the nucleotide coordinates of a
@@ -951,6 +1158,10 @@ fn pairwise_hits(
     ranges: &ReportRanges<'_>,
     // Whether the alignments show the query's masks (not a PSSM query's).
     query_masks: bool,
+    // With `Some`, the masks of each query's rows (half-open, in the searched letters; none for a
+    // PSSM query) are pushed in query order, for the query-anchored sections of outfmt 1 to 4,
+    // which show the same masks (`render`: SEG runs once per query).
+    mut masks_out: Option<&mut Vec<Vec<(usize, usize)>>>,
 ) -> Result<Vec<PairwiseHit>> {
     let code = GeneticCode::try_from_id(genetic_code).map_err(anyhow::Error::msg)?;
     let mut hits = Vec::new();
@@ -1163,6 +1374,9 @@ fn pairwise_hits(
                 );
             }
         }
+        if let Some(masks_out) = masks_out.as_deref_mut() {
+            masks_out.push(report_masks);
+        }
     }
     Ok(hits)
 }
@@ -1191,6 +1405,10 @@ fn write_pairwise(
     probe: Option<&mut FormatProbe<'_>>,
     warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
     pssm: Option<&crate::algorithm::pssm_search::PsiSearch>,
+    // The alignment section: outfmt 0's, or a query-anchored section (outfmt 1 to 4) of the
+    // sequences `anchored`.
+    view: crate::report::pairwise::PairwiseView,
+    anchored: Option<&super::anchored::AnchoredSequences<'_>>,
 ) -> Result<()> {
     ensure!(
         ungapped_karlin.len() == query_records.len() && query_validity.len() == query_records.len(),
@@ -1207,9 +1425,11 @@ fn write_pairwise(
             subject_records.len(),
             subject_letters.lengths().sum::<usize>(),
         ),
+        // A database's lines print `pairwise` itself (NCBI's signed counts); these numbers serve
+        // a FASTA set's lines only.
         ShownSubjects::Database { pairwise, .. } => (
-            usize::try_from(pairwise.num_sequences)?,
-            usize::try_from(pairwise.total_letters)?,
+            usize::try_from(pairwise.num_sequences).unwrap_or(usize::MAX),
+            usize::try_from(pairwise.total_letters).unwrap_or(usize::MAX),
         ),
     };
     // The Gumbel block's database length takes `-dbsize` (`SubjectSetNumbers`).
@@ -1266,7 +1486,7 @@ fn write_pairwise(
             valid: true,
             batch_skipped: false,
             // TBLASTN's report reads the query's title bytes by query index (`query_titles`).
-            query_name: String::new(),
+            query_name: Vec::new(),
             // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:742-744
             // ```c++
             //         if(cbs.IsSetInst() && cbs.GetInst().CanGetLength()){
@@ -1297,7 +1517,10 @@ fn write_pairwise(
         program: "tblastn".into(),
         protein_matrix: scoring.matrix,
         line_length: formatting.line_length(),
-        sort: formatting.report_sort(),
+        // `-sorthits` for every view, `-sorthsps` for outfmt 0 only (NCBI's warning for the others,
+        // `PairwiseView::report_sort`).
+        sort: view.report_sort(formatting.report_sort()),
+        view,
         ..PairwiseConfig::default()
     };
     write_tblastn_pairwise_report(
@@ -1321,6 +1544,7 @@ fn write_pairwise(
         probe,
         warnings,
         ranges.epilog,
+        anchored.map(|sequences| sequences as &dyn crate::report::query_anchored::ReportSequences),
     )?;
     Ok(())
 }
@@ -1686,6 +1910,7 @@ mod tests {
                     engine_positives: false,
                     culling_limit: 0,
                     pssm: None,
+                    fetch_excluded: None,
                 },
                 if mode == 2 {
                     BlastCompoAdjustMode::CompositionMatrixAdjust
@@ -1705,6 +1930,7 @@ mod tests {
                     .zip(outputs_bytes.iter_mut())
                     .map(|(outfmt, bytes)| FormatOutput {
                         outfmt,
+                        refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                         sink: OutputSink::Writer(bytes),
                     })
                     .collect(),
@@ -1733,6 +1959,7 @@ mod tests {
                 Default::default(),
                 1,
                 Some(&seg),
+                Some((12, 2.2, 2.5)),
                 false,
                 &[],
                 &[],
@@ -1755,6 +1982,8 @@ mod tests {
                 None,
                 &Default::default(),
                 None,
+                false,
+                &[],
             )
             .unwrap();
             drop(outputs);

@@ -14,6 +14,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod temp_support;
+use temp_support::{worker_log_if_unset, TempFile};
+
 mod reach_support;
 
 /// The blastp switches of the bundle.
@@ -53,7 +56,7 @@ fn work_dir(label: &str) -> PathBuf {
 /// `blastx-worker-probe` feature (`cargo test --all-features`, as in CI) needs that file name as
 /// soon as a search has more than one thread, and it selects nothing. Must exit with 0; returns
 /// the report and standard error.
-fn losat(args: &[&str], vars: &[(&str, &str)]) -> (Vec<u8>, String) {
+fn losat(args: &[&str], vars: &[(&str, &str)]) -> (Vec<u8>, String, Option<TempFile>) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
@@ -66,12 +69,7 @@ fn losat(args: &[&str], vars: &[(&str, &str)]) -> (Vec<u8>, String) {
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat-default-bundle-worker.log"),
-        );
-    }
+    let log = worker_log_if_unset(&mut command, "default_bundle_worker");
     let output = command
         .args(args)
         .envs(vars.iter().copied())
@@ -79,7 +77,7 @@ fn losat(args: &[&str], vars: &[(&str, &str)]) -> (Vec<u8>, String) {
         .expect("run LOSAT");
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     assert!(output.status.success(), "{args:?} {vars:?}: {stderr}");
-    (output.stdout, stderr)
+    (output.stdout, stderr, log)
 }
 
 /// The search `args` (with `base` set in every run) gives one report and one standard error with
@@ -97,7 +95,7 @@ fn one_report(
         base.iter().copied().chain(extra).collect()
     };
     let default_vars: Vec<(&str, &str)> = base.iter().chain(first).copied().collect();
-    let (report, stderr) = losat(args, &default_vars);
+    let (report, stderr, _log) = losat(args, &default_vars);
     assert!(!report.is_empty(), "{args:?}: the search has hits");
     let mut arms = Vec::new();
     for &name in switches {
@@ -111,7 +109,7 @@ fn one_report(
             .collect(),
     ));
     for vars in &arms {
-        let (other, other_stderr) = losat(args, vars);
+        let (other, other_stderr, _log) = losat(args, vars);
         assert!(
             other == report,
             "{args:?}: the report differs with {vars:?}"
@@ -238,7 +236,7 @@ fn blastp_gives_one_report_with_the_switches_on_and_off() {
     );
     // The default runs BPREDOPAR's path (and BPREDOLPT's windows); its switch at 0 does not.
     let timing = [("LOSAT_TIMING", "1")];
-    let (_, stderr) = losat(&fast, &timing);
+    let (_, stderr, _log) = losat(&fast, &timing);
     let lines: Vec<&str> = stderr
         .lines()
         .filter(|line| line.starts_with("[TIMING] x_bpredopar: "))
@@ -251,7 +249,7 @@ fn blastp_gives_one_report_with_the_switches_on_and_off() {
         lines.iter().all(|line| line.contains(" lpt_windows=")),
         "{lines:?}"
     );
-    let (_, stderr) = losat(&fast, &[("LOSAT_TIMING", "1"), ("LOSAT_X_BPREDOPAR", "0")]);
+    let (_, stderr, _log) = losat(&fast, &[("LOSAT_TIMING", "1"), ("LOSAT_X_BPREDOPAR", "0")]);
     assert!(!stderr.contains("[TIMING] x_bpredopar: "), "{stderr}");
 }
 
@@ -293,7 +291,7 @@ fn blastn_gives_one_report_with_the_switches_on_and_off() {
             ("LOSAT_TIMING", "1"),
             ("LOSAT_X_STATS", "1"),
         ];
-        let (_, stderr) = losat(&args, &observed);
+        let (_, stderr, _log) = losat(&args, &observed);
         let seeds = counts(&stderr, stage);
         assert!(
             seeds["chunks"] > 0 && seeds["partitions"] > 0,
@@ -312,7 +310,7 @@ fn blastn_gives_one_report_with_the_switches_on_and_off() {
             ("LOSAT_TIMING", "1"),
             ("LOSAT_X_PAIRPARFOLD", "0"),
         ];
-        let (_, stderr) = losat(&args, &folded_off);
+        let (_, stderr, _log) = losat(&args, &folded_off);
         let unfolded = counts(&stderr, stage);
         assert_eq!(
             unfolded.get("partitions").copied().unwrap_or(0),

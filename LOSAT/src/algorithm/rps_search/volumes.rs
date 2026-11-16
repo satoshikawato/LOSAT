@@ -18,7 +18,26 @@ pub(crate) enum RpsVolumeError {
     /// each query of the batch ("Unknown error code -1").
     NoMatrix,
 }
-use crate::seqdb::{SeqDb, Volume};
+use crate::seqdb::{DbStatistics, SeqDb, Volume};
+
+/// LOSAT's refusal of a profile database whose total length (`BlastSeqSrcGetTotLen`, NCBI's `Int8`)
+/// is 0 or negative: an alias file's `LENGTH 0` or a `LENGTH` of 2^63 or more (no list reaches it:
+/// NCBI's RPS programs take no list option, blast_args.cpp:2241-2251, and the alias keys of lists
+/// are refused before). NCBI's RPS search has no loop over subjects (blast_engine.c:1384-1393) and
+/// opens each volume alone, whose statistics then read the volume's own length and count (probe of
+/// D1a-3 fix 6: a footer's "Effective search space used" and the next request's
+/// `EffectiveSearchSpace` differ from a plain reading of the negative total); LOSAT has not traced
+/// these totals (item D1a-4). One owner of the refusal and its text for `rpsblast` and `rpstblastn`
+/// (`program`), so neither program reaches `common::database` for it.
+pub(crate) fn untraced_total_length(statistics: &DbStatistics, program: &str) -> Result<()> {
+    if statistics.engine_db_length <= 0 {
+        return Err(crate::algorithm::common::database::refusal(
+            "an alias file's LENGTH of 0 or of 2^63 or more (a total length of 0 or less as NCBI's Int8) over an RPS-BLAST database",
+            program,
+        ));
+    }
+    Ok(())
+}
 
 /// The volumes of a profile database in the order of their search.
 pub(crate) struct RpsVolumeSet<'a> {
@@ -121,10 +140,13 @@ pub(crate) fn search_sets(
     let volumes = RpsVolumeSet::of(db);
     let mut sets = Vec::new();
     if volumes.order.len() > 1 && searchsp.unwrap_or(0) == 0 && dbsize.unwrap_or(0) == 0 {
-        // `check_alias_keys` refuses `STATS_TOTLEN`, so the length is `GetTotalLength`.
+        // `check_alias_keys` refuses `STATS_TOTLEN`, so the length is `GetTotalLength`, the `Uint8`
+        // that `SetDbLength(Int8)` takes as NCBI's `Int8`: `DbStatistics::engine_db_length`
+        // (positive here: `untraced_total_length` refuses 0 and the negative totals of an alias
+        // `LENGTH` of 2^63 or more).
         sets.push(Param {
             name: "DbLength",
-            value: ParamValue::BigInteger(i64::try_from(db.total_length()).unwrap_or(i64::MAX)),
+            value: ParamValue::BigInteger(db.statistics().engine_db_length),
         });
     }
     if let Some((matrix, gap_open, gap_extend)) = costs {
@@ -218,7 +240,7 @@ impl RpsVolumeSetup {
         volume: &Volume,
         cbs: bool,
     ) -> Result<std::result::Result<RpsVolumeFiles, RpsVolumeError>> {
-        let files = match self.files(volume, cbs)? {
+        let files = match self.files(volume, cbs, true)? {
             Ok(files) => files,
             Err(error) => return Ok(Err(error)),
         };
@@ -233,7 +255,7 @@ impl RpsVolumeSetup {
         if let Some(costs) = &self.first_costs {
             return Some(costs.clone());
         }
-        match self.files(volume, false) {
+        match self.files(volume, false, true) {
             Ok(Ok(files)) => Some((
                 files.aux.matrix.clone(),
                 files.aux.gap_open,
@@ -250,7 +272,7 @@ impl RpsVolumeSetup {
         volume: &Volume,
         cbs: bool,
     ) -> Result<std::result::Result<(), RpsVolumeError>> {
-        let files = match self.files(volume, cbs)? {
+        let files = match self.files(volume, cbs, true)? {
             Ok(files) => files,
             Err(error) => return Ok(Err(error)),
         };
@@ -259,20 +281,24 @@ impl RpsVolumeSetup {
     }
 
     /// The files of `volume`, which `check` has checked in this run, opened again for a search
-    /// (the consensus letters: `Consensus`).
+    /// (the consensus letters: `Consensus`) without LOSAT's checks of `check` (series PR, item
+    /// PS12s, D6: `RpsVolumeFiles::open_checked`); NCBI's own errors of the files come where its
+    /// search of a batch meets them.
     pub(crate) fn reopen(
         &self,
         volume: &Volume,
         cbs: bool,
     ) -> Result<std::result::Result<RpsVolumeFiles, RpsVolumeError>> {
-        self.files(volume, cbs)
+        self.files(volume, cbs, false)
     }
 
-    /// The volume's files (and frequency ratios when `cbs`).
+    /// The volume's files (and frequency ratios when `cbs`), the table's hits checked when
+    /// `check_hits` (`RpsVolumeFiles::open_for`, `open_checked`).
     fn files(
         &self,
         volume: &Volume,
         cbs: bool,
+        check_hits: bool,
     ) -> Result<std::result::Result<RpsVolumeFiles, RpsVolumeError>> {
         let num_seqs = volume.num_oids();
         let lengths = (0..num_seqs)
@@ -281,7 +307,12 @@ impl RpsVolumeSetup {
             .map_err(|error| {
                 crate::algorithm::common::database::database_error(error, self.program)
             })?;
-        let mut files = match RpsVolumeFiles::open_for(volume.base(), &lengths, self.program) {
+        let opened = if check_hits {
+            RpsVolumeFiles::open_for(volume.base(), &lengths, self.program)
+        } else {
+            RpsVolumeFiles::open_checked(volume.base(), &lengths, self.program)
+        };
+        let mut files = match opened {
             Ok(files) => files,
             Err(RpsVolumeFault::Files(RpsOpenError::Refused(text))) => bail!(text),
             Err(RpsVolumeFault::Files(RpsOpenError::Ncbi(text))) => {
@@ -380,7 +411,7 @@ impl RpsVolumeSetup {
         let offsets = files.offsets();
         let mut consensus = vec![0u8; concat];
         if num_seqs > 0 {
-            let block = volume.read_block(0, num_seqs, 0).map_err(|error| {
+            let block = volume.read_block(0, num_seqs, 0, 0).map_err(|error| {
                 crate::algorithm::common::database::database_error(error, self.program)
             })?;
             for oid in 0..num_seqs as usize {
@@ -591,4 +622,39 @@ fn merge_align_set(final_list: &mut BlastpHitList, mut input: BlastpHitList) {
     }
     final_list.hsplist_count = final_list.hsplist_array.len();
     final_list.hsplist_array.shrink_to_fit();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::untraced_total_length;
+    use crate::seqdb::DbStatistics;
+
+    fn with_total(engine_db_length: i64) -> DbStatistics {
+        DbStatistics {
+            setup_total: engine_db_length,
+            setup_count: 3,
+            gumbel_db_length: engine_db_length,
+            engine_db_length,
+            request_count: 3,
+            min_length: 10,
+            average: 100,
+        }
+    }
+
+    /// The RPS search refuses a total length of 0 (an alias `LENGTH 0`) and the negative totals of
+    /// an alias `LENGTH` of 2^63 or more (`Int8` of `GetTotalLength`), and searches a positive one.
+    #[test]
+    fn an_rps_search_refuses_totals_of_zero_or_less() {
+        for total in [0, i64::MIN, i64::MIN + 1, -1] {
+            let refusal = untraced_total_length(&with_total(total), "rpsblast").unwrap_err();
+            assert_eq!(
+                refusal.to_string(),
+                "an alias file's LENGTH of 0 or of 2^63 or more (a total length of 0 or less as \
+                 NCBI's Int8) over an RPS-BLAST database; this database is not supported by \
+                 LOSAT's rpsblast"
+            );
+        }
+        assert!(untraced_total_length(&with_total(1), "rpsblast").is_ok());
+        assert!(untraced_total_length(&with_total(i64::MAX), "rpstblastn").is_ok());
+    }
 }

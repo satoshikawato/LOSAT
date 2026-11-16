@@ -1,0 +1,68 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/of1/bselfrc.fa).
+           1 sequences; 270 total letters
+
+
+
+Query= bselfrc self record with an inverted repeat
+
+Length=270
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+bselfrc self record with an inverted repeat                           488     7e-143
+
+
+
+bselfrc  1    CTATAGATTGTTCGCACAGTTTGGTTTCGTCCGCCTCGGTCAGTACTAGCTGCACTAACA  60
+bselfrc  1    ............................................................  60
+bselfrc  270  ...............G....G.......................................  211
+
+bselfrc  61   GATAACCTCTACAATAAGTCGATGGCCATTTCGGTGCGCAAATCACCGCACCCTCGGCCT  120
+bselfrc  61   ............................................................  120
+bselfrc  210  .........................................C.G...C............  151
+
+bselfrc  121  TGGGCTATTCACCGCGGTCGTCTCAAAACCAGGCCGAGGGTGGGGTCAGTTGCGCACCGA  180
+bselfrc  121  ............................................................  180
+bselfrc  150  G.TTT..GA.........-.AA.-.GCC.A............C...G.T...........  91
+                    \   \                                                 
+                    |   |                                                 
+                    G   G
+
+bselfrc  181  AATGGCCATCGACTTATTGTAGAGGTTATCTGTTAGTGCAGCTAGTACTGACCGAGGCGG  240
+bselfrc  181  ............................................................  240
+bselfrc  90   ............................................................  31
+
+bselfrc  241  ACGAAACCACACTGCGCGAACAATCTATAG  270
+bselfrc  241  ..............................  270
+bselfrc  30   .........A....T...............  1
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 67081
+
+
+  Database: User specified sequence set (Input: tests/db_search/of1/bselfrc.fa).
+    Posted date:  Unknown
+  Number of letters in database: 270
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

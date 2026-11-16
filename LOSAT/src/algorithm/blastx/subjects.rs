@@ -60,6 +60,14 @@ impl<'a> From<&'a Vec<FastaRecord>> for Subjects<'a> {
 }
 
 impl<'a> Subjects<'a> {
+    /// The database of a `-db` search whose sequences are read (`None` for `-subject`).
+    pub(crate) fn seqdb(&self) -> Option<&'a crate::seqdb::SeqDb> {
+        match self {
+            Subjects::Stream(stream) => Some(stream.db.seqdb()),
+            Subjects::Fasta(_) | Subjects::Unreadable => None,
+        }
+    }
+
     /// The number of subjects.
     pub(crate) fn len(&self) -> usize {
         match self {
@@ -70,21 +78,23 @@ impl<'a> Subjects<'a> {
     }
 
     /// The numbers that the parameters of the search read (`SubjectNumbers`): a database's
-    /// statistics (`SeqDb::statistics_numbers`: `STATS_TOTLEN` or the total, `STATS_NSEQ` or
-    /// `GetNumSeqs`, the length of OID 0 and one sequence for a list that kept none),
+    /// statistics (`SeqDb::statistics`: `STATS_TOTLEN` or the total, `STATS_NSEQ` or
+    /// `GetNumSeqs`, the length of OID 0 and one sequence for a list that kept none, and the
+    /// Gumbel block's length before that fallback),
     /// `GetMinLength` and `BlastSeqSrcGetAvgSeqLen`; a FASTA set's total, records, shortest
     /// record (raised to `BLAST_SEQSRC_MINLENGTH`) and average.
     pub(crate) fn numbers(&self) -> Result<super::parameters::SubjectNumbers> {
         let shortest = self.shortest_length();
         Ok(match self {
             Subjects::Stream(stream) => {
-                let (total, count) = stream.db.statistics_numbers();
+                let statistics = stream.db.statistics();
                 super::parameters::SubjectNumbers {
-                    total: i64::try_from(total)
-                        .map_err(|_| anyhow!("BLASTX database length exceeds Int8"))?,
-                    count: i64::from(count),
+                    total: statistics.setup_total,
+                    count: statistics.setup_count,
+                    gumbel_total: statistics.gumbel_db_length,
                     shortest,
-                    average: stream.db.average_length(),
+                    average: statistics.average,
+                    request_count: statistics.request_count,
                 }
             }
             Subjects::Fasta(_) | Subjects::Unreadable => {
@@ -92,15 +102,26 @@ impl<'a> Subjects<'a> {
                 let count = self.len() as i64;
                 super::parameters::SubjectNumbers {
                     total,
-                    count,
+                    count: i32::try_from(count).unwrap_or(i32::MAX),
+                    gumbel_total: total,
                     shortest,
                     average: (total / count.max(1)) as i32,
+                    request_count: i32::try_from(count).unwrap_or(i32::MAX),
                 }
             }
         })
     }
 
     /// Whether the subjects are `Unreadable`.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407, 1434 (quoted at
+    // `seqdb::DbStatistics`)
+    /// Whether NCBI's preliminary search computes the statistics of each subject on its own: a
+    /// database whose `BlastSeqSrcGetTotLen` is 0 (`DbStatistics::per_subject`). A FASTA set's
+    /// total is the sum of its records (NCBI's "dbscan" mode).
+    pub(crate) fn per_subject(&self) -> bool {
+        matches!(self, Subjects::Stream(stream) if stream.db.statistics().per_subject())
+    }
+
     pub(crate) fn is_unreadable(&self) -> bool {
         matches!(self, Subjects::Unreadable)
     }
@@ -172,6 +193,40 @@ impl<'a> Subjects<'a> {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:885-893,919,1236-1239
+    // and c++/src/algo/blast/api/seqsrc_seqdb.cpp:375
+    // ```c++
+    //     buflen = CalculateSeqBufferLength(sv.size(), eBlastEncodingProtein);
+    //     _ASSERT(buflen != 0);
+    //     buf = buf_var = (Uint1*) malloc(sizeof(Uint1)*buflen);
+    // ...
+    //     *buf_var++ = GetSentinelByte(eBlastEncodingProtein);
+    // ...
+    //     *buf_var++ = GetSentinelByte(eBlastEncodingProtein);
+    // ...
+    //     case eBlastEncodingProtein:
+    //         _ASSERT(sentinel == eSentinels);
+    //         _ASSERT(strand == eNa_strand_unknown);
+    //         retval = sequence_length + 2;
+    // ...
+    //         len = seqdb.GetSequence(oid, &buf);
+    // ```
+    /// The bytes that NCBI's buffer of subject `oid` holds after the sentinel byte that follows its
+    /// residues: none for a record of `-subject` (`GetSequenceProtein` allocates the residues and a
+    /// sentinel byte on each side, `CalculateSeqBufferLength`), and for a database sequence the
+    /// rest of its volume's sequence file and of the file's last memory page, which NCBI maps
+    /// whole (`XStreamDb::bytes_after`). The second item names the buffer in a refusal.
+    pub(crate) fn buffer_after(&self, oid: usize) -> Result<(usize, &'static str)> {
+        match self {
+            Subjects::Fasta(_) => Ok((0, "subject")),
+            Subjects::Stream(stream) => Ok((
+                stream.db.bytes_after(oid)?,
+                "database volume's last memory page",
+            )),
+            Subjects::Unreadable => unreachable!("no subject is read from an unreadable database"),
+        }
+    }
+
     /// The NCBIstdaa residues of subject `oid` (what the linking, the redo and the
     /// traceback read), as `encoded_with_sentinel` without the byte 0.
     pub(crate) fn encoded(&self, oid: usize) -> Cow<'a, [u8]> {
@@ -211,8 +266,10 @@ impl<'a> Subjects<'a> {
                     sum.checked_add(i64::try_from(s.sequence.len()).ok()?)
                 })
                 .ok_or_else(|| anyhow!("BLASTX subject-set length exceeds Int8")),
-            Subjects::Stream(stream) => i64::try_from(stream.db.total_length())
-                .map_err(|_| anyhow!("BLASTX database length exceeds Int8")),
+            // NCBI's `Int8` of the `Uint8` (seqsrc_seqdb.cpp:183-189): negative for an alias
+            // file's `LENGTH` of 2^63 or more, which takes the subject's own branch of the link
+            // cutoffs (`linking::link_cutoffs`; line RG D1a-3).
+            Subjects::Stream(stream) => Ok(stream.db.total_length() as i64),
             Subjects::Unreadable => Ok(0),
         }
     }

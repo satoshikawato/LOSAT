@@ -29,6 +29,9 @@ pub(crate) struct DisplayMasks<'a> {
     pub query_offsets: &'a crate::blastinput::seq_range::Placements,
     /// Per subject, with `-lcase_masking`: the input lowercase of the subject's record.
     pub subject: Option<&'a [Vec<MaskedInterval>]>,
+    /// Per reported database sequence (by rank), with `-db_soft_mask`: its stored masks of the
+    /// search's algorithm in the order they are stored (`BlastnDatabase::display_masks`).
+    pub database: Option<&'a [Vec<MaskedInterval>]>,
 }
 
 impl<'a> Rows<'a> {
@@ -55,9 +58,14 @@ impl<'a> Rows<'a> {
                 )
             })
             .collect();
-        let subject_masks: Option<Vec<Vec<MaskedInterval>>> = masks
-            .subject
-            .map(|masks| masks.iter().map(|masks| merged(masks)).collect());
+        // A subject set's lowercase is merged first; a database's masks are kept as stored
+        // (`shown_subject_masks` merges what it keeps).
+        let subject_masks: Option<Vec<Vec<MaskedInterval>>> = match (masks.database, masks.subject)
+        {
+            (Some(database), _) => Some(database.to_vec()),
+            (None, Some(subject)) => Some(subject.iter().map(|masks| merged(masks)).collect()),
+            (None, None) => None,
+        };
         Rows {
             queries,
             subjects,
@@ -180,11 +188,33 @@ pub(crate) struct Rows<'a> {
     subjects: SubjectLetters<'a>,
     /// Per query, the shown masks (`shown_query_masks`).
     query_masks: Vec<Vec<MaskedInterval>>,
-    /// Per subject, with `-lcase_masking`: its merged masks.
+    /// Per subject, the masks that `shown_subject_masks` shows with its HSPs: of a subject set's
+    /// record with `-lcase_masking`, its merged lowercase (`DisplayMasks::subject`); of a reported
+    /// database sequence with `-db_soft_mask`, its stored masks as stored
+    /// (`DisplayMasks::database`).
     subject_masks: Option<Vec<Vec<MaskedInterval>>>,
 }
 
 impl Rows<'_> {
+    /// The shown masks of query `q_idx` (`shown_query_masks`), the query's `TMaskedQueryRegions`
+    /// in record positions (the query-anchored reports, `algorithm::blastn::anchored`).
+    pub(crate) fn query_masks(&self, q_idx: usize) -> &[MaskedInterval] {
+        self.query_masks.get(q_idx).map_or(&[], Vec::as_slice)
+    }
+
+    /// The masks of the subject of the HSPs `hsps` (one subject's list of a query) that NCBI's
+    /// `GetSubjectMasks` gives with them (`subject_mask_regions`), in their order and unmerged:
+    /// the query-anchored reports place each one on the first row that meets it
+    /// (`query_anchored::fill_loc_list`). None without subject masks.
+    pub(crate) fn subject_masks(&self, hsps: &[BlastnHsp]) -> Vec<MaskedInterval> {
+        match (self.subject_masks.as_deref(), hsps.first()) {
+            (Some(subject_masks), Some(hsp)) => {
+                subject_mask_regions(&subject_masks[hsp.s_idx as usize], hsps).collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
     /// The rows of every HSP of one subject's list, appended to `hits` in the list's order.
     fn list(&self, hsp_list: &BlastnHspList, hits: &mut Vec<PairwiseHit>) -> Result<()> {
         let (queries, subjects) = (self.queries, self.subjects);
@@ -206,6 +236,30 @@ impl Rows<'_> {
                 displayed_rows(hsp, query.seq(), subject_length, |from, to| {
                     subjects.upper_letters(s_idx, from, to)
                 })?;
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1796-1798
+            // ```c++
+            //     x_FillIdentityInfo(aln_vec_info->alnRowInfo->sequence[0],
+            //                        aln_vec_info->alnRowInfo->sequence[1],
+            //                        aln_vec_info->match,
+            // ```
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2127-2140
+            // ```c++
+            //     int min_length=min<int>((int)sequence_standard.size(), (int)sequence.size());
+            //     ...
+            //     for(int i=0; i<min_length; i++){
+            //         if(sequence_standard[i]==sequence[i]){
+            //     ...
+            //             match ++;
+            // ```
+            // The identities that outfmt 0 shows are those of the displayed rows (the stored
+            // letters in upper case, before the masks' lower case), counted again (series NP,
+            // M4a-2b decision H6): with `-db_hard_mask` the engine's `num_ident` counts a masked
+            // letter ('B' in the traceback) as a mismatch. Elsewhere the two counts are equal.
+            let displayed_ident = query_row
+                .iter()
+                .zip(&subject_row)
+                .filter(|(query, subject)| query == subject)
+                .count();
             lowercase_masked(
                 &mut query_row,
                 hsp.q_start,
@@ -221,8 +275,10 @@ impl Rows<'_> {
                 .chain(&subject_row)
                 .filter(|&&residue| residue == b'-')
                 .count();
+            let mut hit = hsp.clone().into_hit();
+            hit.num_ident = displayed_ident;
             hits.push(PairwiseHit {
-                hit: hsp.clone().into_hit(),
+                hit,
                 query_seq: Some(String::from_utf8(query_row).context("BLASTN query row")?),
                 subject_seq: Some(String::from_utf8(subject_row).context("BLASTN subject row")?),
                 query_frame: None,
@@ -241,8 +297,7 @@ impl Rows<'_> {
                 sum_n: None,
                 subject_stored_gaps: Vec::new(),
                 // The Seq-align's `num_ident` (`seqalign::query_records` writes the same
-                // `hsp.num_ident`), which `into_hit` copies to `hit.num_ident` as well: BLASTN's
-                // rows are not counted again.
+                // `hsp.num_ident`): the engine's count, which "Max ident" and the sorts read.
                 seqalign_num_ident: hsp.num_ident,
             });
         }
@@ -476,20 +531,51 @@ pub(crate) fn shown_query_masks(
 //     }
 // }
 // ```
-// The subject masks shown with the HSPs of one subject: the lowercase regions of its record
-// (record coordinates) that meet the closed range `[offset, end]` of an HSP in the searched
-// letters (the end is one past the HSP). With `-subject_loc` the two coordinates differ by
-// the interval's start, so a region of the record is kept by where it would lie in the
-// interval, and shown where it lies in the record.
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqinfosrc_seqdb.cpp:121-133
+// ```c++
+//     CSeqDB::TSequenceRanges ranges;
+//     m_iSeqDb->GetMaskData(index, m_FilteringAlgoId, ranges);
+//     ITERATE(CSeqDB::TSequenceRanges, itr, ranges) {
+//         for (size_t it=0; it<target.size(); it++) {
+//             if (target[it] != TSeqRange::GetEmpty() &&
+//                 target[it].IntersectingWith(*itr)) {
+//                 CRef<CSeq_interval> si
+//                     (new CSeq_interval(*id, itr->first, itr->second-1));
+//                 CRef<CSeqLocInfo> sli(new CSeqLocInfo(si, kFrame));
+//                 retval.push_back(sli);
+//                 break;
+//             }
+//         }
+//     }
+// ```
+// The subject masks shown with the HSPs of one subject (`GetMasks` of the subject set's
+// `CSeqVecSeqInfoSrc` or of the database's `CSeqDbSeqInfoSrc`): each mask `[start, end)` that
+// holds a letter (a stored database mask `TSeqRange(first, second-1)` of none is empty) and meets
+// the closed range `[offset, end]` of an HSP in the searched letters (the end is one past the
+// HSP), in the order of `masks`, merged for `lowercase_masked`, which marks each position once
+// (the merged lowercase of a subject set's record is kept as it is). With `-subject_loc` the
+// record's coordinates and the searched letters' differ by the interval's start, so a region of
+// the record is kept by where it would lie in the interval, and shown where it lies in the
+// record.
 fn shown_subject_masks(masks: &[MaskedInterval], hsps: &[BlastnHsp]) -> Vec<MaskedInterval> {
+    merged(&subject_mask_regions(masks, hsps).collect::<Vec<_>>())
+}
+
+/// The masks of `masks` that `GetSubjectMasks` gives with the HSPs `hsps` (`shown_subject_masks`
+/// before the merge), in their order.
+fn subject_mask_regions<'m>(
+    masks: &'m [MaskedInterval],
+    hsps: &'m [BlastnHsp],
+) -> impl Iterator<Item = MaskedInterval> + 'm {
     masks
         .iter()
         .filter(|mask| {
-            hsps.iter()
-                .any(|hsp| mask.start <= hsp.internal_s_end_0 && hsp.internal_s_offset_0 < mask.end)
+            mask.start < mask.end
+                && hsps.iter().any(|hsp| {
+                    mask.start <= hsp.internal_s_end_0 && hsp.internal_s_offset_0 < mask.end
+                })
         })
         .cloned()
-        .collect()
 }
 
 /// The masked positions as disjoint intervals in order, for `lowercase_masked`.
@@ -680,6 +766,49 @@ mod tests {
             gap_info: ops,
             num_positives: 0,
         }
+    }
+
+    // seqinfosrc_seqdb.cpp:121-133 (quoted at `shown_subject_masks`): a stored mask is shown
+    // when it holds a letter and meets the closed range `[offset, end]` of an HSP (the end one
+    // past the HSP); overlapping and nested masks (hand-made masks of the M4a-2 edge databases)
+    // are merged for the display. A subject set's merged lowercase is kept as it is.
+    #[test]
+    fn database_masks_meeting_an_hsp_are_shown() {
+        let masks = [
+            MaskedInterval::new(600, 700),
+            MaskedInterval::new(100, 200),
+            MaskedInterval::new(150, 250),
+            MaskedInterval::new(250, 260),
+            MaskedInterval::new(300, 300),
+            MaskedInterval::new(900, 950),
+        ];
+        // The mask 600-700 holds 600..=699: it meets an HSP from 699 on, not one from 700 on.
+        let hsps = [
+            hsp(1, (0, 10), (199, 250), None),
+            hsp(1, (0, 10), (700, 760), None),
+        ];
+        assert!(shown_subject_masks(&masks[..1], &hsps).is_empty());
+        let hsps = [
+            hsp(1, (0, 10), (199, 250), None),
+            hsp(1, (0, 10), (699, 701), None),
+        ];
+        // 100-200, 150-250 and 250-260 meet the first HSP, 600-700 the second; the empty 300-300
+        // and 900-950 none.
+        assert_eq!(
+            shown_subject_masks(&masks, &hsps),
+            [MaskedInterval::new(100, 260), MaskedInterval::new(600, 700)]
+        );
+        // Merged lowercase runs are kept as they are.
+        let runs = merged(&masks);
+        assert_eq!(
+            shown_subject_masks(&runs, &hsps),
+            [MaskedInterval::new(100, 260), MaskedInterval::new(600, 700)]
+        );
+        let hsps = [hsp(1, (0, 10), (940, 960), None)];
+        assert_eq!(
+            shown_subject_masks(&runs, &hsps),
+            [MaskedInterval::new(900, 950)]
+        );
     }
 
     #[test]

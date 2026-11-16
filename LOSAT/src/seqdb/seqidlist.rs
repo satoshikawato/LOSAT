@@ -8,6 +8,7 @@
 //! upper-cased accession with its version when given), sorted and unique.
 
 use crate::seqid::accguide::parse_flags::{ANY_LOCAL, PARTIAL_OK, RAW_TEXT};
+use crate::seqid::accguide::SeqIdWarning;
 use crate::seqid::label;
 use crate::seqid::parse::{seq_id_from_text, SeqIdError};
 use crate::seqid::ParsedSeqId;
@@ -383,13 +384,29 @@ impl InvalidSeqId {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2532-2541
+// ```c++
+//         x_Init(fasta_pieces, type, tv);
+//         if ( !fasta_pieces.empty() ) {
+//             // tolerate trailing parts if they're all empty.
+//             ITERATE(list<CTempString>, it, fasta_pieces) {
+//                 if ( !it->empty() ) {
+//                     if ((flags & fParse_PartialOK) != 0) {
+//                         ERR_POST_X(10, Warning << "Ignoring extra parts"
+//                                    " (synonyms?) in FASTA-style ID "
+//                                    << the_id);
+// ```
 /// The ids of a text list as a version 5 database looks them up (`s_ProcessSeqIDsForV5`):
 /// sorted and unique. An empty result is NCBI's `Empty seqid list` warning (the caller
-/// writes it).
-pub fn process_for_v5(ids: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, InvalidSeqId> {
+/// writes it). `warn` gets the warnings the parse of each token posts, in order (a FASTA-style
+/// id of several parts: one for each non-empty part after the first id), the gi ids' too.
+pub fn process_for_v5(
+    ids: &[Vec<u8>],
+    warn: &mut dyn FnMut(SeqIdWarning),
+) -> Result<Vec<Vec<u8>>, InvalidSeqId> {
     let mut out: Vec<Vec<u8>> = Vec::with_capacity(ids.len());
     for token in ids {
-        let id = parse_list_id(token).map_err(|error| InvalidSeqId {
+        let id = seq_id_from_text(token, LIST_ID_FLAGS, warn).map_err(|error| InvalidSeqId {
             token: token.clone(),
             error,
         })?;
@@ -406,12 +423,14 @@ pub fn process_for_v5(ids: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, InvalidSeqId> {
     Ok(out)
 }
 
+/// `fParse_RawText | fParse_AnyLocal | fParse_PartialOK`, the flags of a list id's `CSeq_id`.
+const LIST_ID_FLAGS: u32 = RAW_TEXT | ANY_LOCAL | PARTIAL_OK;
+
 /// `CSeq_id(text, fParse_RawText | fParse_AnyLocal | fParse_PartialOK)`, the parse of a
-/// list id (the list's and the lookup files' ids alike). The accession guide's warnings are
-/// not posted here (NCBI posts them through the diagnostic stream, which the search
-/// programs leave at its default).
+/// list id where nothing is posted: the lookup files' ids and the processed ids, one part
+/// each ([`process_for_v5`] posts the warnings of the list's tokens).
 pub fn parse_list_id(text: &[u8]) -> Result<ParsedSeqId, SeqIdError> {
-    seq_id_from_text(text, RAW_TEXT | ANY_LOCAL | PARTIAL_OK, &mut |_| {})
+    seq_id_from_text(text, LIST_ID_FLAGS, &mut |_| {})
 }
 
 #[cfg(test)]
@@ -539,13 +558,21 @@ mod tests {
         assert!(!list.ids.is_empty());
     }
 
-    fn processed(tokens: &[&str]) -> Vec<String> {
+    fn processed_warned(tokens: &[&str]) -> (Vec<String>, Vec<SeqIdWarning>) {
         let ids: Vec<Vec<u8>> = tokens.iter().map(|t| t.as_bytes().to_vec()).collect();
-        process_for_v5(&ids)
+        let mut warnings = Vec::new();
+        let ids = process_for_v5(&ids, &mut |warning| warnings.push(warning))
             .unwrap()
             .into_iter()
             .map(|t| String::from_utf8(t).unwrap())
-            .collect()
+            .collect();
+        (ids, warnings)
+    }
+
+    fn processed(tokens: &[&str]) -> Vec<String> {
+        let (ids, warnings) = processed_warned(tokens);
+        assert_eq!(warnings, []);
+        ids
     }
 
     #[test]
@@ -586,7 +613,18 @@ mod tests {
         // An unknown FASTA tag is a local id under `fParse_AnyLocal` (probe S23 of
         // dropin-survey-20261029/DI8: no error, the id is looked up as it is).
         assert_eq!(processed(&["xyz|ABC|DEF"]), ["xyz|ABC|DEF"]);
-        let bad = process_for_v5(&[b"gi|abc".to_vec()]).unwrap_err();
+        let bad = process_for_v5(&[b"gi|abc".to_vec()], &mut |_| {}).unwrap_err();
         assert_eq!(bad.message(), "Invalid seq id: gi|abc");
+        // A FASTA-style id of several parts: NCBI's warning for each non-empty part after the
+        // first id (rows db.gisl.bp.full.6, db.gisl.bn.full.6), the gi dropped.
+        let warning = SeqIdWarning {
+            subcode: 10,
+            message: "Ignoring extra parts (synonyms?) in FASTA-style ID gi|1111|ref|NP_1.1|"
+                .to_string(),
+        };
+        assert_eq!(
+            processed_warned(&["gi|1111|ref|NP_1.1|", "NP_2.1"]),
+            (vec!["NP_2.1".to_string()], vec![warning.clone(), warning])
+        );
     }
 }

@@ -1,0 +1,145 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/x2b_c3_s.fna).
+           1 sequences; 51 total letters
+
+
+
+Query= c3q
+
+Length=51
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+c3s                                                                   12.1    0.11   2
+
+
+> c3s
+Length=51
+
+ Score = 11.6 bits (20),  Expect(2) = 0.068
+ Identities = 3/4 (75%), Positives = 3/4 (75%), Gaps = 0/4 (0%)
+ Frame = -2/+3
+
+Query  20  SSLV  9
+           S LV
+Sbjct  15  SALV  26
+
+
+ Score = 10.2 bits (17),  Expect(2) = 0.068
+ Identities = 2/2 (100%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+ Frame = -1/+2
+
+Query  36  FI  31
+           FI
+Sbjct  8   FI  13
+
+
+ Score = 12.1 bits (21),  Expect = 0.11
+ Identities = 3/4 (75%), Positives = 3/4 (75%), Gaps = 0/4 (0%)
+ Frame = +1/-3
+
+Query  10  TNED  21
+           TN D
+Sbjct  25  TNAD  14
+
+
+ Score = 11.1 bits (19),  Expect = 0.19
+ Identities = 2/3 (67%), Positives = 3/3 (100%), Gaps = 0/3 (0%)
+ Frame = -1/+2
+
+Query  21  IFI  13
+           +FI
+Sbjct  5   VFI  13
+
+
+ Score = 11.1 bits (19),  Expect = 0.19
+ Identities = 2/3 (67%), Positives = 3/3 (100%), Gaps = 0/3 (0%)
+ Frame = -1/+2
+
+Query  21  IFI  13
+           IF+
+Sbjct  41  IFV  49
+
+
+ Score = 11.1 bits (19),  Expect = 0.19
+ Identities = 2/2 (100%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+ Frame = +3/+1
+
+Query  42  YF  47
+           YF
+Sbjct  40  YF  45
+
+
+ Score =  9.7 bits (16),  Expect = 0.52
+ Identities = 2/4 (50%), Positives = 3/4 (75%), Gaps = 0/4 (0%)
+ Frame = -1/+3
+
+Query  21  IFIS  10
+           +F S
+Sbjct  3   VFLS  14
+
+
+ Score =  9.7 bits (16),  Expect = 0.55
+ Identities = 2/2 (100%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+ Frame = -1/-2
+
+Query  51  RR  46
+           RR
+Sbjct  38  RR  33
+
+
+ Score =  9.2 bits (15),  Expect = 0.78
+ Identities = 2/2 (100%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+ Frame = -1/-1
+
+Query  42  IT  37
+           IT
+Sbjct  42  IT  37
+
+
+ Score =  8.7 bits (14),  Expect = 1.1
+ Identities = 2/3 (67%), Positives = 2/3 (67%), Gaps = 0/3 (0%)
+ Frame = +1/-3
+
+Query  13  NED  21
+           N D
+Sbjct  40  NAD  32
+
+
+ Score =  8.2 bits (13),  Expect = 1.4
+ Identities = 2/3 (67%), Positives = 2/3 (67%), Gaps = 0/3 (0%)
+ Frame = -2/+3
+
+Query  20  SSL  12
+           S L
+Sbjct  33  SAL  41
+
+
+
+Lambda      K        H
+   0.335    0.265     1.82 
+
+
+Effective search space used: 225
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/x2b_c3_s.fna).
+    Posted date:  Unknown
+  Number of letters in database: 51
+  Number of sequences in database:  1
+
+
+
+Matrix: PAM30
+Neighboring words threshold: 13

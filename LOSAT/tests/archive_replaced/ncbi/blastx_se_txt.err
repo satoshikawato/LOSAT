@@ -1,0 +1,6 @@
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xC3] in string at line 50
+s1 subéject
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xA9] in string at line 50
+s1 subéject

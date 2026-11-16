@@ -22,10 +22,11 @@ pub enum XmlSubjects<'a> {
         length: &'a dyn Fn(usize) -> usize,
         protein: bool,
     },
-    /// A database: the sequences with hits by rank (`ordinals[rank]` the ordinal id, the
-    /// stored title `titles.get(rank)`, `length(rank)` the sequence length).
+    /// A database: the sequences with hits by rank (`ordinals[rank]` the ordinal id, whose OID
+    /// `oids` gives, the stored title `titles.get(rank)`, `length(rank)` the sequence length).
     Database {
         ordinals: &'a [u32],
+        oids: crate::seqdb::OidMap<'a>,
         titles: XmlTitles<'a>,
         /// The Blast-def-line taxid of each sequence by rank, 0 for none; only XML2 shows
         /// it. Empty where the program has not read them (outfmt 5 alone): every taxid is
@@ -88,13 +89,19 @@ pub struct SubjectNames {
     /// The taxids that the volume looks up when it fetches a subject with parsed Seq-ids
     /// (`ParsedSubject::volume_taxids`; empty for the others, whose one is `taxid`).
     pub volume_taxids: Vec<i32>,
+    /// `GenerateDefline` threw for the `-subject` record (`of_unknown`): outfmt 5 writes
+    /// `Hit_len` 0.
+    pub defline_thrown: bool,
 }
 
 impl SubjectNames {
     /// The names of a `-subject` record `id` with the FASTA title `title` (`Subject_N` and the
-    /// generated definition line). `protein`: the record is a protein.
+    /// generated definition line), or where `GenerateDefline` throws the catch's
+    /// (`SubjectNames::of_unknown` of `lcl|Subject_N`). `protein`: the record is a protein.
     pub fn of_record(id: &[u8], title: &[u8], protein: bool) -> Result<Self, Refusal> {
-        let (xml_id, title) = names::xml_subject_names(id, title, protein)?;
+        let Some((xml_id, title)) = names::xml_subject_names(id, title, protein)? else {
+            return Ok(Self::of_unknown(names::fasta_id(id, None)));
+        };
         Ok(SubjectNames {
             id: xml_id,
             title,
@@ -103,7 +110,53 @@ impl SubjectNames {
             taxonomy: HitTaxonomy::Unnamed,
             descriptions: Vec::new(),
             volume_taxids: Vec::new(),
+            defline_thrown: false,
         })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:399-407
+    // ```c++
+    //     } catch (const CException&) {
+    //         // If Bioseq handle didn't return some of the information, and not all
+    //         // mandatory couldn't be filled, skip this hit completely.
+    //         //hit.Reset(NULL);
+    //         hit->SetId(kSeqId.AsFastaString());
+    //         hit->SetDef("Unknown");
+    //         hit->SetAccession("Unknown");
+    //         hit->SetLen(0);
+    //     };
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:412-417
+    // ```c++
+    //     } catch (const CException&) {
+    //     	CRef<blastxml2::CHitDescr> hit_exp(new blastxml2::CHitDescr);
+    //     	hit_exp->SetId(kSeqId.AsFastaString());
+    //         hit->SetDescription().push_back(hit_exp);
+    //         hit->SetLen(sequence::GetLength(kSeqId, scope));
+    //     };
+    // ```
+    /// The names of a `-subject` record whose `GenerateDefline` threw (`NStr::HtmlDecode` cannot
+    /// guess its title's encoding), as NCBI's catch writes them: outfmt 5's `Hit_id`
+    /// `kSeqId.AsFastaString()` (`fasta_id`), `Hit_def` and `Hit_accession` `Unknown` and `Hit_len`
+    /// 0 (`defline_thrown`); XML2's and JSON's one `HitDescr` of that id alone, with the record's
+    /// length.
+    fn of_unknown(fasta_id: Vec<u8>) -> Self {
+        SubjectNames {
+            descriptions: vec![HitDescription {
+                id: fasta_id.clone(),
+                accession: Vec::new(),
+                title: None,
+                taxid: 0,
+                taxonomy: HitTaxonomy::Unnamed,
+            }],
+            id: fasta_id,
+            title: b"Unknown".to_vec(),
+            accession: b"Unknown".to_vec(),
+            taxid: 0,
+            taxonomy: HitTaxonomy::Unnamed,
+            volume_taxids: Vec::new(),
+            defline_thrown: true,
+        }
     }
 
     /// The names of a `-subject` record whose ids `-parse_deflines` read (`ParsedSubject::of_record`):
@@ -120,14 +173,12 @@ impl SubjectNames {
         }
         let subject = ParsedSubject::of_record(ids, title);
         let (id, accession) = subject.record_xml_ids();
-        let title = subject
-            .bioseq_title(protein, false)
-            .map_err(|_| Refusal::UnknownEncoding)?;
+        let Ok(title) = subject.bioseq_title(protein, false) else {
+            return Ok(Self::of_unknown(names::fasta_id(b"", Some(ids))));
+        };
         if title.reads_past_end {
             return Err(Refusal::ReadsPastEnd);
         }
-        names::check_text(&id)?;
-        names::check_text(&title.text)?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:393-406
         // ```c++
         //         	CRef<CSeq_id> best_id = FindBestChoice(ids, CSeq_id::Score);
@@ -160,26 +211,29 @@ impl SubjectNames {
             taxonomy: HitTaxonomy::Unnamed,
             descriptions,
             volume_taxids: Vec::new(),
+            defline_thrown: false,
         })
     }
 
-    /// The names of the database sequence `ordinal` with the stored title `title`
-    /// (`gnl|BL_ORD_ID|n`, the title as stored).
+    /// The names of the database sequence `oid` with the stored title `title`
+    /// (`gnl|BL_ORD_ID|n`, the title as stored: showdefline.cpp:265-303 reads the Blast-def-line's
+    /// title).
     pub fn of_database_sequence(
-        ordinal: impl std::fmt::Display,
+        oid: crate::seqdb::Oid,
         title: &[u8],
         taxid: i32,
         taxonomy: HitTaxonomy,
-    ) -> Result<Self, Refusal> {
-        Ok(SubjectNames {
-            id: format!("gnl|BL_ORD_ID|{ordinal}").into_bytes(),
-            title: names::xml_db_title(title)?,
-            accession: ordinal.to_string().into_bytes(),
+    ) -> Self {
+        SubjectNames {
+            id: oid.fasta_id().into_bytes(),
+            title: title.to_vec(),
+            accession: oid.get().to_string().into_bytes(),
             taxid,
             taxonomy,
             descriptions: Vec::new(),
             volume_taxids: Vec::new(),
-        })
+            defline_thrown: false,
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:380-388, 422-428
@@ -206,10 +260,8 @@ impl SubjectNames {
     /// about its taxid (`taxonomy[i]` for definition line `i`; empty where nothing was asked).
     /// `GetTaxInfo` throws for a taxid that the taxonomy database does not know: the
     /// descriptions before that definition line stay, and the Seq-align id alone follows them.
-    pub fn of_parsed(subject: &ParsedSubject, taxonomy: &[HitTaxonomy]) -> Result<Self, Refusal> {
+    pub fn of_parsed(subject: &ParsedSubject, taxonomy: &[HitTaxonomy]) -> Self {
         let (id, title, accession) = subject.xml_hit();
-        names::check_text(&id)?;
-        names::check_text(&title)?;
         let mut descriptions = subject.hit_descriptions();
         for (at, answer) in taxonomy.iter().enumerate().take(descriptions.len()) {
             if matches!(answer, HitTaxonomy::NotFound(_)) {
@@ -225,7 +277,7 @@ impl SubjectNames {
             }
             descriptions[at].taxonomy = answer.clone();
         }
-        Ok(SubjectNames {
+        SubjectNames {
             id,
             title,
             accession,
@@ -233,13 +285,14 @@ impl SubjectNames {
             taxonomy: HitTaxonomy::Unnamed,
             descriptions,
             volume_taxids: subject.volume_taxids(),
-        })
+            defline_thrown: false,
+        }
     }
 }
 
 impl XmlSubjects<'_> {
     /// The names of subject `s_idx`; `program` (`BLASTP`) names the program in the refusal of
-    /// a title that NCBI cannot write.
+    /// a title that NCBI crashes on (`Refusal`).
     pub fn names(&self, s_idx: usize, program: &str) -> Result<SubjectNames> {
         match self {
             XmlSubjects::Records {
@@ -256,6 +309,7 @@ impl XmlSubjects<'_> {
             }
             XmlSubjects::Database {
                 ordinals,
+                oids,
                 titles,
                 taxids,
                 taxonomy,
@@ -265,8 +319,7 @@ impl XmlSubjects<'_> {
             } => {
                 if let Some(subject) = parsed.get(s_idx).and_then(Option::as_deref) {
                     let answers = parsed_taxonomy.get(s_idx).map_or(&[][..], Vec::as_slice);
-                    return SubjectNames::of_parsed(subject, answers)
-                        .map_err(|refusal: Refusal| refusal.error(program, "a database title"));
+                    return Ok(SubjectNames::of_parsed(subject, answers));
                 }
                 let ordinal = *ordinals
                     .get(s_idx)
@@ -276,8 +329,12 @@ impl XmlSubjects<'_> {
                     .context("HSP of an unknown database sequence")?;
                 let taxid = taxids.get(s_idx).copied().unwrap_or(0);
                 let taxonomy = taxonomy.get(s_idx).cloned().unwrap_or_default();
-                SubjectNames::of_database_sequence(ordinal, title, taxid, taxonomy)
-                    .map_err(|refusal: Refusal| refusal.error(program, "a database title"))
+                Ok(SubjectNames::of_database_sequence(
+                    oids.oid(ordinal),
+                    title,
+                    taxid,
+                    taxonomy,
+                ))
             }
         }
     }

@@ -25,8 +25,7 @@
 //! ```
 #![warn(missing_docs, unused)]
 
-use std::fs::File;
-use std::io::{self, BufWriter, Write};
+use std::io::{self, Write};
 use std::ops::Range;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -38,8 +37,9 @@ use super::local_blast::{
     run_local_blastn, run_local_blastp, run_local_blastx, run_local_database_blastn,
     run_local_database_blastp, run_local_database_blastx, run_local_database_tblastn,
     run_local_database_tblastx, run_local_tblastn, run_local_tblastx, with_run_pool,
-    FormatObserver, FormatOutput, HspIndex, OutputSink, ReportOutputs, ReportedSubject,
+    FormatObserver, FormatOutput, HspIndex, OutFile, OutputSink, ReportOutputs, ReportedSubject,
 };
+use super::parts::Parts;
 use super::program::Program;
 use super::search::Search;
 use super::start::{CallStart, RunLog, RunSink};
@@ -125,17 +125,22 @@ fn strand(protein: bool, start: usize, end: usize) -> Option<Strand> {
 #[non_exhaustive]
 pub struct HspRecord {
     /// 0-based position of the HSP in the final, sorted hit list; the same HSP has the same
-    /// index in every report (`Report::spans`).
+    /// index in every report (`Report::spans`). With psiblast's rounds the hit lists of the
+    /// rounds of each query follow one another, as the reports write them.
     pub index: usize,
     /// 0-based index of the query record in the inputs (records without residues count; with
     /// `-query_loc`, a query record that NCBI skips because its interval starts past its end
     /// keeps its place).
     pub q_idx: usize,
     /// 0-based index of the subject record in the inputs; for a database
-    /// (`Inputs::database`), the sequence's ordinal id (the `n` of `gnl|BL_ORD_ID|n`).
+    /// (`Inputs::database`), the sequence's OID (the `n` of `gnl|BL_ORD_ID|n`).
     pub s_idx: usize,
-    /// 0-based position of the HSP among the HSPs of its query.
+    /// 0-based position of the HSP among the HSPs of its query in its round (`round`).
     pub rank: usize,
+    /// psiblast's round that found the HSP (1-based, NCBI's `Results from round N` and outfmt 7's
+    /// `# Iteration: N`); 1 in a search without rounds. The HSPs of each round of a query follow
+    /// those of the round before, each round's in the order of its own hit list.
+    pub round: u32,
     /// The query's id (`qaccver`): the first word of its title, its generated `Query_N` without a
     /// title, and with `-parse_deflines` the accession and version of its id. A byte that is not
     /// UTF-8 shows as U+FFFD here and as itself in the reports. The HSPs of a query share it.
@@ -292,6 +297,50 @@ impl QueryStats {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_iteration.cpp:76-91
+// ```c++
+//     // if the most current list of ids is empty, that means that no new
+//     // sequences were found and therefore we have converged.
+//     if ( !m_PreviousData.empty() && m_CurrentData.empty() ) {
+//         return true;
+//     }
+//
+//     // Element by element comparison: has every element in the current Seq-id
+//     // list been found in the previous iterations?
+//     bool retval = true;
+//     ITERATE(TSeqIds, current_id, m_CurrentData) {
+//         if (m_PreviousData.find(*current_id) == m_PreviousData.end()) {
+//             retval = false;
+//             break;
+//         }
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_results.hpp:211-215
+// ```c++
+//     /// Accessor for the query's search ancillary
+//     CRef<CBlastAncillaryData> GetAncillaryData() const
+//     {
+//         return m_AncillaryData;
+//     }
+// ```
+// Each round of psiblast is a result set of its own, with its own ancillary data: a PSSM round's
+// Karlin-Altschul values are the PSSM's.
+/// The rounds of one query of a search: psiblast's rounds (`-num_iterations` other than 1),
+/// one round for the other searches.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct QueryRounds {
+    /// The statistics of each round of the query, round 1 first: what fixed the E-values of the
+    /// HSPs of that round (`HspRecord::round`). The first is `Outcome::query_stats`'s; a search
+    /// without rounds, and a query that was not searched, have that one only.
+    pub stats: Vec<Option<QueryStats>>,
+    /// Whether the query's rounds converged (NCBI's `Search has CONVERGED!`, `HasConverged`):
+    /// after two rounds or more, every subject below `-inclusion_ethresh` in the last round was
+    /// below it in the round before too (`algorithm::psiblast::rounds::IterationState`). False
+    /// without rounds.
+    pub converged: bool,
+}
+
 /// What `run_collect` gathers from a search.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
@@ -303,8 +352,11 @@ pub struct Outcome {
     /// One entry per query record of the inputs, in their order (`HspRecord::q_idx`). `None` for
     /// a query that has no statistics: no valid context (no residues, all `N` or all `X`), or
     /// not searched (its `-query_loc` interval starts past its end, or NCBI searches no query of
-    /// its batch).
+    /// its batch). With psiblast's rounds, round 1's (`rounds`).
     pub query_stats: Vec<Option<QueryStats>>,
+    /// One entry per query record of the inputs, in their order: the statistics of each of its
+    /// rounds and whether they converged.
+    pub rounds: Vec<QueryRounds>,
     /// What the command line writes to its standard error for the search: the warnings of the
     /// reader and of the search, each once. Empty for a search without warnings.
     pub diagnostics: Vec<u8>,
@@ -362,22 +414,22 @@ impl Write for CountingWriter {
 // 			out << "\n";
 // ```
 /// Records, for every report of one search, the byte range of each HSP's row or section and
-/// of the heading of each HSP's subject, from the formatter's observer events.
+/// of the heading of each HSP's subject, from the formatter's observer events; and the parts of
+/// the search's results (`Parts`: with psiblast's rounds, each round's call numbers its HSPs
+/// from 0).
 struct RangeRecorder {
     positions: Vec<Arc<AtomicUsize>>,
     /// Per report: the HSP whose row or section is being written, and where it started.
     open: Vec<Option<(HspIndex, usize)>>,
-    /// Per report, per HSP: the row or section.
-    spans: Vec<Vec<Option<Range<usize>>>>,
-    /// Per report, per HSP: the heading of the HSP's subject.
-    headings: Vec<Vec<Option<Range<usize>>>>,
+    /// Per part, per report, per HSP of the part: the row or section.
+    spans: Vec<Vec<Vec<Option<Range<usize>>>>>,
+    /// Per part, per report, per HSP of the part: the heading of the HSP's subject.
+    headings: Vec<Vec<Vec<Option<Range<usize>>>>>,
     /// Per report: the start of the heading being written, and the last complete heading.
     heading_start: Vec<Option<usize>>,
     heading: Vec<Option<Range<usize>>>,
-    /// By the engine's query number: the query's statistics.
-    query_stats: Vec<Option<QueryStats>>,
-    /// The sequences that a database search's hit list names.
-    database_subjects: Option<Vec<ReportedSubject>>,
+    /// The statistics, database ranks and rounds of each part.
+    parts: Parts,
     /// The first observer event that does not fit the formatter contract; the search fails.
     fault: Option<String>,
 }
@@ -388,14 +440,28 @@ impl RangeRecorder {
         Self {
             positions,
             open: vec![None; reports],
-            spans: vec![Vec::new(); reports],
-            headings: vec![Vec::new(); reports],
+            spans: vec![vec![Vec::new(); reports]],
+            headings: vec![vec![Vec::new(); reports]],
             heading_start: vec![None; reports],
             heading: vec![None; reports],
-            query_stats: Vec::new(),
-            database_subjects: None,
+            parts: Parts::new(),
             fault: None,
         }
+    }
+
+    /// The places of part `part`'s HSPs in report `slot`, `length` of them.
+    fn places(
+        recorded: &mut [Vec<Vec<Option<Range<usize>>>>],
+        part: usize,
+        slot: usize,
+        length: usize,
+    ) -> Vec<Option<Range<usize>>> {
+        let mut places = recorded
+            .get_mut(part)
+            .map(|reports| std::mem::take(&mut reports[slot]))
+            .unwrap_or_default();
+        places.resize(length, None);
+        places
     }
 
     fn position(&self, report: usize) -> usize {
@@ -440,12 +506,14 @@ impl FormatObserver for RangeRecorder {
             return;
         }
         let end = self.position(format);
-        let stored = store(&mut self.spans[format], hsp, start..end).and_then(|()| {
-            match self.heading[format].clone() {
-                Some(heading) => store(&mut self.headings[format], hsp, heading),
-                None => Ok(()),
-            }
-        });
+        let part = self.parts.current();
+        let stored =
+            store(&mut self.spans[part][format], hsp, start..end).and_then(|()| {
+                match self.heading[format].clone() {
+                    Some(heading) => store(&mut self.headings[part][format], hsp, heading),
+                    None => Ok(()),
+                }
+            });
         if let Err(fault) = stored {
             self.fault(fault);
         }
@@ -462,14 +530,31 @@ impl FormatObserver for RangeRecorder {
     }
 
     fn query_stats(&mut self, q_idx: usize, stats: XmlStats) {
-        if self.query_stats.len() <= q_idx {
-            self.query_stats.resize(q_idx + 1, None);
-        }
-        self.query_stats[q_idx] = QueryStats::of_context(stats);
+        self.parts.query_stats(q_idx, stats);
     }
 
     fn database_subjects(&mut self, subjects: Vec<ReportedSubject>) {
-        self.database_subjects = Some(subjects);
+        self.parts.database_subjects(subjects);
+    }
+
+    fn round_begin(&mut self, query: usize, round: u32) {
+        self.parts.round_begin(query, round);
+        // A round's report starts its subjects' headings again.
+        self.heading_start.fill(None);
+        self.heading.fill(None);
+        let reports = self.positions.len();
+        self.spans
+            .resize(self.parts.current() + 1, vec![Vec::new(); reports]);
+        self.headings
+            .resize(self.parts.current() + 1, vec![Vec::new(); reports]);
+    }
+
+    fn rounds_converged(&mut self, query: usize) {
+        self.parts.rounds_converged(query);
+    }
+
+    fn pssm_query(&mut self, query: &FastaRecord) {
+        self.parts.pssm_query(query);
     }
 }
 
@@ -507,18 +592,18 @@ pub(super) fn searched_queries(
     )
 }
 
-/// The `-query_loc` of the program's arguments and the program's name in NCBI's messages.
-fn query_loc(command: &Commands) -> (Option<&str>, &'static str) {
+/// The `-query_loc` of the program's arguments.
+fn query_loc(command: &Commands) -> Option<&str> {
     match command {
-        Commands::Blastp(a) => (a.query_loc.as_deref(), "BLASTP"),
-        Commands::Tblastn(a) => (a.query_loc.as_deref(), "TBLASTN"),
-        Commands::Blastn(a) => (a.query_loc.as_deref(), "BLASTN"),
-        Commands::Tblastx(a) => (a.query_loc.as_deref(), "TBLASTX"),
-        Commands::Blastx(a) => (a.query_loc.as_deref(), "BLASTX"),
-        Commands::Psiblast(a) => (a.query_loc.as_deref(), "BLASTP"),
-        Commands::Rpsblast(a) => (a.query_loc.as_deref(), "RPSBLAST"),
-        Commands::Rpstblastn(a) => (a.query_loc.as_deref(), "RPSTBLASTN"),
-        Commands::Makedb(_) | Commands::Rpsbproc(_) => (None, ""),
+        Commands::Blastp(a) => a.query_loc.as_deref(),
+        Commands::Tblastn(a) => a.query_loc.as_deref(),
+        Commands::Blastn(a) => a.query_loc.as_deref(),
+        Commands::Tblastx(a) => a.query_loc.as_deref(),
+        Commands::Blastx(a) => a.query_loc.as_deref(),
+        Commands::Psiblast(a) => a.query_loc.as_deref(),
+        Commands::Rpsblast(a) => a.query_loc.as_deref(),
+        Commands::Rpstblastn(a) => a.query_loc.as_deref(),
+        Commands::Makedb(_) | Commands::Rpsbproc(_) => None,
     }
 }
 
@@ -534,8 +619,7 @@ fn query_loc(command: &Commands) -> (Option<&str>, &'static str) {
 /// The `-query_loc` interval of the program's arguments. A value that the search will refuse
 /// has no interval here.
 pub(super) fn query_range_of(command: &Commands) -> Option<SequenceRange> {
-    let (query_loc, program) = query_loc(command);
-    parse_optional_range(query_loc, RangeRole::Query, program)
+    parse_optional_range(query_loc(command), RangeRole::Query)
         .ok()
         .flatten()
 }
@@ -653,33 +737,48 @@ pub(crate) fn search_groups(command: &Commands, numbers: &[i32]) -> Vec<Vec<usiz
 // {
 // 	static CTaxDBFileInfo t;
 // ```
-// The organism report (outfmt 18) looks the taxonomy database up itself, through the search
-// path of NCBI's databases: a search of records reads the application settings for it, as the
-// command line does (`common::database::SubjectTaxdb`).
-/// The taxonomy database of `name`'s organism report when `outputs` has one (outfmt 18), found
-/// with the call's settings (`start`).
-fn subject_taxdb(
-    name: &str,
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
+// ```c++
+// void CBlastTabularInfo::x_CheckTaxDB()
+// {
+//    	if( x_IsFieldRequested(eSubjectSciNames) ||
+//     ...
+//    		string resolved = SeqDB_ResolveDbPath("taxdb.bti");
+// ```
+// The formatters of the plural names (`x_CheckTaxDB`) and the organism report (outfmt 18) look
+// the taxonomy database up themselves, through the search path of NCBI's databases: a search of
+// records reads the application settings for them, as the command line does, and the search asks
+// where the command line asks (`common::database::subject_taxonomy`).
+/// The `[BLAST] BLASTDB` setting of the call (`start`) when a report of `outputs` looks every
+/// taxid up (the plural names of the taxonomy database, the organism report); `None` otherwise,
+/// without reading the settings.
+fn taxdb_setting(
     outputs: &mut ReportOutputs<'_>,
     start: &mut CallStart,
-) -> anyhow::Result<Option<crate::algorithm::common::database::SubjectTaxdb>> {
-    let tax_report = outputs.formats.iter().any(|format| {
-        crate::blastinput::app::parse_formatting_string(format.outfmt)
-            .is_ok_and(|choice| choice.number == 18)
+) -> anyhow::Result<Option<crate::algorithm::common::database::TaxdbSetting>> {
+    use crate::blastinput::app::{parse_formatting_string, ReportFormat};
+    let looks_up = outputs.formats.iter().any(|format| {
+        parse_formatting_string(format.outfmt).is_ok_and(|choice| {
+            ReportFormat::from_number(choice.number)
+                .and_then(|report| crate::report::tabular::TabularSpec::of(report, &choice))
+                .is_some_and(|spec| spec.looks_up_every_taxid())
+        })
     });
-    if !tax_report {
+    if !looks_up {
         return Ok(None);
     }
     let settings = start.settings(&mut *outputs.diagnostics)?;
-    crate::algorithm::common::database::SubjectTaxdb::of(&settings, &name.to_ascii_uppercase())
+    Ok(Some(crate::algorithm::common::database::TaxdbSetting::of(
+        &settings,
+    )))
 }
 
 // NCBI's application layer reads its environment and registry files before its own code runs,
 // and a database is found by them (the `BLASTDB` search path); LOSAT rejects the settings that
 // change the output. A search of records reads neither, but for the directory of BLASTN's
-// `-window_masker_taxid`, the taxonomy database of the organism report (outfmt 18) and the file
-// of a `-matrix` that NCBI's tables do not have (TBLASTX, ungapped BLASTX), which NCBI's library
-// looks for itself. The settings are the call's application start's
+// `-window_masker_taxid`, the taxonomy database of the plural names and the organism report
+// (outfmt 18) and the file of a `-matrix` that NCBI's tables do not have (TBLASTX, ungapped
+// BLASTX), which NCBI's library looks for itself. The settings are the call's application start's
 // (`start::CallStart::settings`).
 /// One `run_local` call: the program's entry for the parsed arguments and `inputs`.
 pub(super) fn run_local(
@@ -711,17 +810,15 @@ pub(super) fn run_local(
     }
     match command {
         Commands::Blastp(mut args) => {
-            args.subject_taxdb = subject_taxdb("blastp", outputs, start)?;
+            args.taxdb_setting = taxdb_setting(outputs, start)?;
             run_local_blastp(args, query, subject, "", "", outputs)
         }
         Commands::Tblastn(mut args) => {
-            args.subject_taxdb = subject_taxdb("tblastn", outputs, start)?;
-            args.tabular_taxdb = args.subject_taxdb.as_ref().map(|_| true);
+            args.taxdb_setting = taxdb_setting(outputs, start)?;
             run_local_tblastn(args, query, subject, outputs)
         }
         Commands::Blastn(mut args) => {
-            args.subject_taxdb = subject_taxdb("blastn", outputs, start)?;
-            args.tabular_taxdb = args.subject_taxdb.as_ref().map(|_| true);
+            args.taxdb_setting = taxdb_setting(outputs, start)?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:446-448
             // ```c++
             //     if (args.Exist(kArgWindowMaskerDatabase) &&
@@ -758,12 +855,11 @@ pub(super) fn run_local(
                 let settings = start.settings(&mut *outputs.diagnostics)?;
                 args.find_matrix_file(&settings.matrix_search)?;
             }
-            args.subject_taxdb = subject_taxdb("tblastx", outputs, start)?;
-            args.tabular_taxdb = args.subject_taxdb.as_ref().map(|_| true);
+            args.taxdb_setting = taxdb_setting(outputs, start)?;
             run_local_tblastx(args, query, subject, outputs)
         }
         Commands::Blastx(mut args) => {
-            args.subject_taxdb = subject_taxdb("blastx", outputs, start)?;
+            args.taxdb_setting = taxdb_setting(outputs, start)?;
             // The file of a `-matrix` that NCBI's tables do not have, looked up after the options
             // are resolved, as on the command line (`ResolvedOptions::find_matrix_file`).
             if args.unknown_matrix_name() {
@@ -772,7 +868,8 @@ pub(super) fn run_local(
             run_local_blastx(args, query, subject, outputs)
         }
         Commands::Psiblast(args) => {
-            let args = psiblast_args(args, outputs)?;
+            let mut args = psiblast_args(args, outputs)?;
+            args.taxdb_setting = taxdb_setting(outputs, start)?;
             run_local_blastp(args, query, subject, "", "", outputs)
         }
         Commands::Rpsblast(_)
@@ -796,8 +893,8 @@ pub(super) fn run_local(
 //                 } else {
 //                     psiblast.Reset(new CPsiBlast(query_factory, db_adapter, psi_opts));
 // ```
-/// blastp's arguments for psiblast's first round (`algorithm::psiblast`), after LOSAT's refusals
-/// of each requested format.
+/// blastp's arguments for psiblast's search and its rounds (`algorithm::psiblast`,
+/// `PsiblastArgs::into_blastp_args`), after LOSAT's refusals of each requested format.
 fn psiblast_args(
     args: crate::algorithm::psiblast::PsiblastArgs,
     outputs: &ReportOutputs<'_>,
@@ -861,7 +958,33 @@ fn searches(
         check_archive_inputs(search.program(), inputs)?;
     }
     let command = search.command(inputs)?;
-    Ok((search_groups(&command, &numbers), num_threads(&command)))
+    let groups = search_groups(&command, &numbers);
+    if groups.len() > 1 {
+        if let Some(option) = pssm_file_option(&command) {
+            return Err(Error::Argv(format!(
+                "{option} is not accepted by the library API with formats of two hit list sizes, which take two searches: the PSSM files are one search's; search those formats in calls of their own"
+            )));
+        }
+    }
+    Ok((groups, num_threads(&command)))
+}
+
+// No NCBI counterpart: the command line writes one format per run, so one search writes its PSSM
+// files; the library's call of formats of two hit list sizes searches twice (`search_groups`).
+/// The PSSM file option (`-out_pssm`, else `-out_ascii_pssm`) of a psiblast search that can write
+/// one (`PsiblastPssmOptions::writes_files`).
+fn pssm_file_option(command: &Commands) -> Option<&'static str> {
+    let Commands::Psiblast(args) = command else {
+        return None;
+    };
+    let options = args.clone().into_blastp_args().ok()?.psiblast_pssm?;
+    options.writes_files().then(|| {
+        if options.out_pssm.is_some() {
+            "-out_pssm"
+        } else {
+            "-out_ascii_pssm"
+        }
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:286-288
@@ -915,6 +1038,7 @@ pub fn run(
                         .iter()
                         .map(|&position| FormatOutput {
                             outfmt: formats[position],
+                            refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                             sink: OutputSink::Writer(
                                 writers[position].take().expect("one group per format"),
                             ),
@@ -949,6 +1073,13 @@ pub fn run(
 /// come through here: the file is the master file, which names the side files that the search
 /// writes next to it (`path_1.json` or `path_1.xml`, ...). The error is the command line's, as in
 /// [`run`].
+///
+/// `path` is the command line's `-out`: its parser checks the name (NCBI's `Illegal value` for a
+/// file name of 256 bytes or more, dry run or not), and the search makes the file where the
+/// command line makes `-out`, after it has read the subjects (or the taxid or seqid list of `-db`)
+/// and before it processes the options: an error before that point leaves no file, an error after
+/// it an empty one, and the subjects' warnings come before an error of a file that cannot be made.
+/// A dry run makes no file.
 pub fn run_to_file(
     search: &Search,
     inputs: Inputs<'_>,
@@ -962,6 +1093,7 @@ pub fn run_to_file(
             "run_to_file writes a file: `run` gives a report to a writer".to_string(),
         ));
     }
+    let search = &search.writing_to(path);
     let mut start = CallStart::new(search, inputs, &mut *diagnostics)?;
     // The command line's dry run does not make the `-out` file (line RG item E1b).
     if start.dry_run() {
@@ -974,18 +1106,16 @@ pub fn run_to_file(
         let formats = [outfmt];
         searches(search, inputs, &formats, &mut log)?.1
     };
-    let mut command = search.command(inputs)?;
-    set_output_file(&mut command, path);
-    let file =
-        File::create(path).map_err(|_| log.failed(&crate::cli::inaccessible("out", path)))?;
-    let mut file = BufWriter::new(file);
+    let command = search.command(inputs)?;
+    let mut file = OutFile::new(path, out_file_program(search.program()));
     with_run_pool(threads, search.program().name(), || -> Result<(), Error> {
         let mut sink = log.sink(&mut *diagnostics, true);
         let result = {
             let mut outputs = ReportOutputs {
                 formats: vec![FormatOutput {
                     outfmt,
-                    sink: OutputSink::Writer(&mut file),
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
+                    sink: OutputSink::Out(&mut file),
                 }],
                 diagnostics: &mut sink,
                 hits: None,
@@ -999,22 +1129,16 @@ pub fn run_to_file(
         .map_err(|error| Error::search(&anyhow::Error::from(error)))
 }
 
-/// The search's `-out` file: a report names its side files by it (`run_to_file`).
-fn set_output_file(command: &mut Commands, path: &Path) {
-    let out = Some(path.to_path_buf());
-    match command {
-        Commands::Blastp(args) => args.out = out,
-        Commands::Tblastn(args) => args.out = out,
-        Commands::Blastn(args) => args.out = out,
-        Commands::Tblastx(args) => args.out = out,
-        Commands::Blastx(args) => args.out = out,
-        Commands::Psiblast(args) => args.out = out,
-        Commands::Rpsblast(_)
-        | Commands::Rpstblastn(_)
-        | Commands::Makedb(_)
-        | Commands::Rpsbproc(_) => {
-            unreachable!("Program::parse admits the search programs only")
-        }
+/// The program whose `-out` file names must be UTF-8, as its command line checks them
+/// (`cli::create_out_file`): every search program but BLASTX.
+fn out_file_program(program: Program) -> Option<&'static str> {
+    match program {
+        Program::Blastn => Some("BLASTN"),
+        Program::Blastp => Some("BLASTP"),
+        Program::Psiblast => Some("PSIBLAST"),
+        Program::Tblastn => Some("TBLASTN"),
+        Program::Tblastx => Some("TBLASTX"),
+        Program::Blastx => None,
     }
 }
 
@@ -1023,7 +1147,8 @@ struct Searched {
     /// Per format of the group: the report's bytes.
     writers: Vec<CountingWriter>,
     recorder: RangeRecorder,
-    hits: Option<Arc<Vec<PairwiseHit>>>,
+    /// The hit list of each search call (`Parts`).
+    hits: Vec<Arc<Vec<PairwiseHit>>>,
     /// The `-query_loc` interval.
     query_range: Option<SequenceRange>,
     ordinals: Option<Vec<usize>>,
@@ -1044,15 +1169,16 @@ fn collect_one(
     let mut writers: Vec<CountingWriter> =
         positions.iter().map(|_| CountingWriter::new()).collect();
     let mut recorder = RangeRecorder::new(writers.iter().map(|w| w.position.clone()).collect());
-    let mut collected: Option<Arc<Vec<PairwiseHit>>> = None;
+    let mut collected: Vec<Arc<Vec<PairwiseHit>>> = Vec::new();
     let result = {
-        let mut on_hits = |hits| collected = Some(hits);
+        let mut on_hits = |hits| collected.push(hits);
         let mut outputs = ReportOutputs {
             formats: positions
                 .iter()
                 .zip(writers.iter_mut())
                 .map(|(&position, writer)| FormatOutput {
                     outfmt: formats[position],
+                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(writer),
                 })
                 .collect(),
@@ -1109,9 +1235,6 @@ pub(super) fn query_ordinal(ordinals: Option<&[usize]>, q_idx: usize) -> usize {
 //     	else
 //     		m_QueryLength = sequence::GetLength(align.GetSeq_id(0), &scope);
 // ```
-/// The HSP records of the final hit list of a search of `inputs`. `qlen` is the record's length
-/// or the length of the `-query_loc` interval as given; `slen` is the record's, or the database
-/// sequence's (`database_subjects`, which the hit list's subject numbers index).
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-40
 // ```c++
 // const char* kDfltArgTabularOutputFmt =
@@ -1130,6 +1253,12 @@ fn shared_id(
         .clone()
 }
 
+/// The HSP records of the final hit list of a search of `inputs`. `qlen` is the record's length
+/// or the length of the `-query_loc` interval as given; `slen` is the record's, or the database
+/// sequence's (`database_subjects`, which the hit list's subject numbers index).
+///
+/// `query_base` is the searched query that the hit list numbers 0: a round of psiblast searches
+/// one query (`parts::Parts`), a search without rounds numbers the searched queries (0).
 pub(super) fn records(
     program: Program,
     inputs: Inputs<'_>,
@@ -1137,6 +1266,7 @@ pub(super) fn records(
     query_range: Option<SequenceRange>,
     ordinals: Option<&[usize]>,
     database_subjects: Option<&[ReportedSubject]>,
+    query_base: usize,
 ) -> Vec<HspRecord> {
     let query_protein = is_protein(program, Role::Query);
     let subject_protein = is_protein(program, Role::Subject);
@@ -1149,7 +1279,7 @@ pub(super) fn records(
         .enumerate()
         .map(|(index, record)| {
             let hit = &record.hit;
-            let q_idx = query_ordinal(ordinals, hit.q_idx as usize);
+            let q_idx = query_ordinal(ordinals, query_base + hit.q_idx as usize);
             let s_idx = hit.s_idx as usize;
             let length = |records: &[FastaRecord], index: usize| {
                 records.get(index).map_or(0, |record| record.seq().len())
@@ -1169,7 +1299,9 @@ pub(super) fn records(
                         let subject = &inputs.subject[s_idx];
                         subject
                             .subject_tabular_id(subject_protein)
-                            .unwrap_or_else(|_| subject.shown_id().to_vec())
+                            .ok()
+                            .flatten()
+                            .unwrap_or_else(|| subject.shown_id().to_vec())
                     }),
                     length(inputs.subject, s_idx),
                 ),
@@ -1179,6 +1311,7 @@ pub(super) fn records(
                 q_idx,
                 s_idx: subject_index,
                 rank: this_rank,
+                round: 1,
                 query_id: shared_id(&mut query_ids, q_idx, || {
                     inputs.query[q_idx].shown_id().to_vec()
                 }),
@@ -1253,7 +1386,14 @@ pub fn run_collect(
                 })
                 .collect(),
             hsps: Vec::new(),
-            query_stats: vec![None; inputs.query.len()],
+            query_stats: vec![None; inputs.query_count()],
+            rounds: vec![
+                QueryRounds {
+                    stats: vec![None],
+                    converged: false,
+                };
+                inputs.query_count()
+            ],
             diagnostics,
         });
     }
@@ -1279,41 +1419,36 @@ pub fn run_collect(
         }
         Ok(())
     })?;
-    let first = searched.first();
-    let ordinals = first.and_then(|first| first.ordinals.as_deref());
-    let hsps = match first {
-        Some(Searched {
-            hits: Some(hits),
-            query_range,
-            recorder,
-            ..
-        }) => records(
-            search.program(),
-            inputs,
-            hits,
-            *query_range,
-            ordinals,
-            recorder.database_subjects.as_deref(),
-        ),
-        _ => Vec::new(),
+    // The records, statistics and rounds of the first search.
+    let finished = match searched.first_mut() {
+        Some(first) => std::mem::replace(&mut first.recorder.parts, Parts::new())
+            .finish(
+                search.program(),
+                inputs,
+                &first.hits,
+                first.query_range,
+                first.ordinals.as_deref(),
+                0,
+            )
+            .map_err(|fault| {
+                Error::Search(format!("internal error in the search's parts: {fault}"))
+            })?,
+        None => Parts::new()
+            .finish(search.program(), inputs, &[], None, None, 0)
+            .expect("no hit list"),
     };
-    let mut query_stats = vec![None; inputs.query.len()];
-    if let Some(first) = first {
-        for (q_idx, stats) in first.recorder.query_stats.iter().enumerate() {
-            if let Some(slot) = query_stats.get_mut(query_ordinal(ordinals, q_idx)) {
-                *slot = *stats;
-            }
-        }
-    }
+    let hsps = finished.hsps;
     let mut reports: Vec<Option<Report>> = (0..formats.len()).map(|_| None).collect();
     for (ordinal, (group, done)) in groups.iter().zip(&mut searched).enumerate() {
         for (slot, (&position, writer)) in group.iter().zip(done.writers.drain(..)).enumerate() {
-            // The places of the records' HSPs: those of the records' search, by HSP.
-            let places = |recorded: &mut Vec<Vec<Option<Range<usize>>>>| {
-                let mut places = match ordinal {
-                    0 => std::mem::take(&mut recorded[slot]),
-                    _ => Vec::new(),
-                };
+            // The places of the records' HSPs: those of the records' search, by part and HSP.
+            let places = |recorded: &mut Vec<Vec<Vec<Option<Range<usize>>>>>| {
+                let mut places = Vec::with_capacity(hsps.len());
+                if ordinal == 0 {
+                    for (part, &length) in finished.lengths.iter().enumerate() {
+                        places.extend(RangeRecorder::places(recorded, part, slot, length));
+                    }
+                }
                 places.resize(hsps.len(), None);
                 places
             };
@@ -1331,7 +1466,8 @@ pub fn run_collect(
             .map(|report| report.expect("every requested format belongs to one group"))
             .collect(),
         hsps,
-        query_stats,
+        query_stats: finished.query_stats,
+        rounds: finished.rounds,
         diagnostics,
     })
 }

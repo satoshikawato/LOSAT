@@ -480,10 +480,20 @@ fn a_dry_run_parses_with_the_kind_of_its_subject() {
         ),
         Err(refused.clone())
     );
+    // `run_to_file`'s file is the parser's `-out`: its usage line names it, as the command line's
+    // does when `-out` is given.
     let out = dir.join("out.txt");
+    let Error::Argv(message) = &refused else {
+        unreachable!()
+    };
+    let refused_out = Error::Argv(message.replace(
+        "Usage: losat blastp -query <PATH> -db <NAME>\n",
+        "Usage: losat blastp -query <PATH> -db <NAME> -out <PATH>\n",
+    ));
+    assert_ne!(refused_out, refused);
     assert_eq!(
         run_to_file(&search, database, "6", &out, &mut diagnostics),
-        Err(refused.clone())
+        Err(refused_out)
     );
     assert_eq!(run_batches(&search, database).err(), Some(refused.clone()));
     assert!(diagnostics.is_empty() && !out.exists());
@@ -653,4 +663,110 @@ fn an_outfmt_error_goes_where_the_run_s_errors_go() {
         }
     }
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Registry files in memory, by path (the start of a caller that gives its own files:
+/// `ApplicationStart::with_files`).
+struct Files(Vec<(&'static str, &'static [u8])>);
+
+impl crate::blastinput::ncbi_environment::RegistryFiles for Files {
+    fn is_file(&self, path: &Path) -> bool {
+        self.read(path).is_some()
+    }
+
+    fn read(&self, path: &Path) -> Option<std::io::Result<Vec<u8>>> {
+        // A file of the working directory: `./NAME` and `NAME` are one file.
+        let in_working = |path: &Path| -> PathBuf {
+            path.components()
+                .skip_while(|part| matches!(part, std::path::Component::CurDir))
+                .collect()
+        };
+        self.0
+            .iter()
+            .find(|(name, _)| in_working(Path::new(name)) == in_working(path))
+            .map(|(_, bytes)| Ok(bytes.to_vec()))
+    }
+}
+
+/// A receiver that keeps the files handed to it.
+#[derive(Default)]
+struct Kept(std::sync::Mutex<Vec<(Vec<u8>, Vec<u8>)>>);
+
+impl crate::report::run_files::FileReceiver for Kept {
+    fn receive(&self, name: &[u8], bytes: &[u8]) -> std::io::Result<()> {
+        self.0.lock().unwrap().push((name.to_vec(), bytes.to_vec()));
+        Ok(())
+    }
+}
+
+// The start that a caller makes (`begin_with`, LOSAT Web's): the file of `-conffile` from the
+// caller's files (found by NCBI's search path, `.` first), a load that ends the run with NCBI's report
+// and the `-logfile` file holding its part (TBLASTX: the report and its replay, as on the command
+// line), the run's messages and NCBI's error in that file in TBLASTX, and the dry run.
+#[test]
+fn a_callers_start_reads_its_files_and_hands_over_the_log() {
+    use crate::blastinput::ncbi_environment::ApplicationStart;
+    use crate::report::run_files::RunFiles;
+    use std::io::Write as _;
+    let report = "Error: (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\n";
+    let files = Files(vec![("./good.ini", b"[BLAST]\n"), ("./bad.ini", b"[x\n")]);
+    let start = |program: &str, words: &[&str], kept: &std::sync::Arc<Kept>| {
+        let mut stderr = Vec::new();
+        let started = begin_with(
+            ApplicationStart::with_files(program, words, &[], &files),
+            words,
+            &RunFiles::Receiver(kept.clone()),
+            &mut stderr,
+        )
+        .unwrap();
+        (started, stderr)
+    };
+    let kept = std::sync::Arc::new(Kept::default());
+    let (started, stderr) = start(
+        "blastn",
+        &["-conffile", "good.ini", "-logfile", "a.log", "-dryrun"],
+        &kept,
+    );
+    assert_eq!((started.ended(), stderr.as_slice()), (None, &b""[..]));
+    assert!(started.settings().is_ok() && started.dry_run());
+    started.finish().unwrap();
+    let (started, stderr) = start(
+        "tblastx",
+        &["-conffile", "bad.ini", "-logfile", "b.log"],
+        &kept,
+    );
+    assert_eq!(started.ended(), Some(report.repeat(2).trim_end()));
+    assert!(stderr.is_empty() && !started.dry_run());
+    started.finish().unwrap();
+    // TBLASTX's run messages and its NCBI error go to the file, the others' to `cerr`.
+    for (program, name) in [("tblastx", "c.log"), ("blastn", "d.log")] {
+        let (mut started, _) = start(program, &["-logfile", name], &kept);
+        let mut cerr = Vec::new();
+        started.sink(&mut cerr).write_all(b"Warning: w\n").unwrap();
+        started.post(b"BLAST engine error: e\n");
+        started.finish().unwrap();
+        let expected: &[u8] = if program == "tblastx" {
+            b""
+        } else {
+            b"Warning: w\n"
+        };
+        assert_eq!(cerr, expected, "{program}");
+    }
+    let (started, _) = start("blastn", &["-conffile", "missing.ini"], &kept);
+    assert_eq!(
+        started.ended(),
+        Some("Critical: (106.23) Registry file \"missing.ini\" not found, aborting.")
+    );
+    assert_eq!(
+        *kept.0.lock().unwrap(),
+        vec![
+            (b"a.log".to_vec(), Vec::new()),
+            (b"b.log".to_vec(), report.repeat(2).into_bytes()),
+            (
+                b"c.log".to_vec(),
+                b"Warning: w\nBLAST engine error: e\n".to_vec()
+            ),
+            (b"d.log".to_vec(), Vec::new()),
+        ]
+    );
 }

@@ -1,5 +1,5 @@
 //! The stages of an rpsblast search (series PR, item PS11a) that differ from blastp's, called
-//! once per run from `search_cli` and `run_resolved_in_pool` when the search is RPS-BLAST's
+//! once per run from `search_cli` and `run_call` when the search is RPS-BLAST's
 //! (`ResolvedBlastpArgs::rps_search`): the check of the database's frequency ratios, the queries'
 //! contexts, and the whole RPS search (`algorithm::rps_search`) into the final hit lists, whose
 //! subjects are the profiles' consensus sequences of the database. blastp's driver does the rest
@@ -28,23 +28,35 @@ use anyhow::{bail, Result};
 use super::{database, BlastpRuntimeLookup};
 use crate::algorithm::blastp::args::{BlastpCompositionMode, ResolvedBlastpArgs};
 use crate::algorithm::blastp::hsp::BlastpHitList;
-use crate::algorithm::rps_search::engine::{batch_gapped_k, RpsFrame, RpsQuery, RpsRun, RpsSearch};
+use crate::algorithm::rps_search::engine::{
+    batch_gapped_k, RpsFrame, RpsQuery, RpsRun, RpsSearch, RpsWorkers,
+};
 use crate::algorithm::rps_search::volumes::{
     mask_unsupported_letters, merge_volume, shift_ordinal_ids, Consensus, RpsVolumeError,
     RpsVolumeSet, RpsVolumeSetup,
 };
 use crate::algorithm::tblastx::lookup::{
-    prepare_blosum62_lookup_query_for_word_size, BlastAaLookupTable, QueryContext,
+    prepare_blosum62_lookup_query_for_word_size, QueryContext,
 };
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::stats::{BlastGumbelBlk, KarlinParams};
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:159-164
+// ```c++
+//     // 2. Take care of any rps information
+//     if (Blast_ProgramIsRpsBlast(options->GetProgramType())) {
+//         ...
+//         retval->m_InternalData->m_RpsData =
+//             CSetupFactory::CreateRpsStructures(rps_dbname, options);
+// ```
 /// The error of the RPS files that NCBI reports itself (`BLAST engine error: <text>`, exit
-/// status 3), after what the first batch's search writes before (`preliminary_search_error`);
-/// the second field is true for the error that NCBI raises in the first batch whatever its
-/// queries' validity (the score block of an `.aux` without a matrix name: review B of PS12a, N4).
+/// status 3): a volume's files that cannot be mapped or read, or the score block of an `.aux`
+/// without a matrix name (review B of PS12a, N4). NCBI sets up every volume's files in the first
+/// batch's set-up (`BlastSetupPreliminarySearchEx`, before `CheckInternalData` looks at the
+/// batch's queries), so the error is the first batch's whatever its queries' validity, after
+/// what that batch writes before (`preliminary_search_error`; series PR, item PS12f, review S1).
 #[derive(Debug)]
-pub(super) struct RpsEngineError(pub(super) String, pub(super) bool);
+pub(super) struct RpsEngineError(pub(super) String);
 
 impl std::fmt::Display for RpsEngineError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -195,25 +207,10 @@ pub(super) fn rps_contexts(
 ) -> (BlastpRuntimeLookup, Vec<QueryContext>) {
     let (_, _, contexts) =
         prepare_blosum62_lookup_query_for_word_size(query_frames, args.word_size, false);
-    let table = BlastAaLookupTable {
-        backbone: Vec::new(),
-        overflow: Vec::new(),
-        pv: Vec::new(),
-        frame_bases: Vec::new(),
-        num_contexts: 0,
-        query_length: 0,
-        word_length: args.word_size as i32,
-        alphabet_size: crate::core::blast_util::BLASTAA_SIZE as i32,
-        charsize: 5,
-        mask: 0,
-        longest_chain: 0,
-        threshold: 0,
-        row_max: Vec::new(),
-    };
-    (BlastpRuntimeLookup::Aa(table), contexts)
+    (super::empty_aa_lookup(args.word_size), contexts)
 }
 
-/// The per-run values of the search that `run_resolved_in_pool` computed for blastp.
+/// The per-run values of the search that `run_call` computed for blastp.
 pub(super) struct RpsSearchRun<'a> {
     pub(super) contexts: &'a [QueryContext],
     /// `kbp_gap_std`: BLOSUM62 11/1's table values.
@@ -302,7 +299,7 @@ pub(super) fn per_volume_search_spaces(args: &ResolvedBlastpArgs, volumes: usize
 ///                              (query_length - length_adjustment);
 ///          }
 /// ```
-/// (Not `database::blastp_database_search_space`, which blastp's default path inlines.)
+/// (`database::blastp_database_search_space` calls the same function.)
 #[cold]
 #[inline(never)]
 pub(super) fn volume_search_space(
@@ -311,38 +308,18 @@ pub(super) fn volume_search_space(
     num_seqs: i64,
     gapped: &KarlinParams,
 ) -> Result<i64> {
-    let overflow = || {
-        anyhow::anyhow!(
-            "a database length of {db_length} letters with a query of {query_length} letters overflows NCBI BLAST+'s 64-bit effective search space, which is not supported by LOSAT's RPSBLAST"
-        )
-    };
-    let query_length = i64::try_from(query_length).map_err(|_| overflow())?;
-    let adjustment = crate::stats::length_adjustment::compute_length_adjustment_ncbi(
+    // `stats::setup::calc_eff_lengths` (one owner for the six programs, line RG D1a-3): NCBI's
+    // `Int4` count of the volume.
+    let query_length = i64::try_from(query_length).unwrap_or(i64::MAX);
+    Ok(crate::stats::setup::calc_eff_lengths(
         query_length,
         db_length,
-        num_seqs,
+        num_seqs as i32,
         gapped,
-    )
-    .length_adjustment;
-    adjusted_search_space(query_length, db_length, num_seqs, adjustment).ok_or_else(overflow)
-}
-
-/// `(db_length - num_seqs * adjustment) * (query_length - adjustment)` in NCBI's `Int8`, with the
-/// effective database length raised to 1 when it is 0 or below; `None` where a product leaves
-/// `Int8`.
-fn adjusted_search_space(
-    query_length: i64,
-    db_length: i64,
-    num_seqs: i64,
-    adjustment: i64,
-) -> Option<i64> {
-    let mut effective_db_length = num_seqs
-        .checked_mul(adjustment)
-        .and_then(|adjusted| db_length.checked_sub(adjusted))?;
-    if effective_db_length <= 0 {
-        effective_db_length = 1;
-    }
-    effective_db_length.checked_mul(query_length - adjustment)
+        0,
+        "RPSBLAST",
+    )?
+    .eff_searchsp)
 }
 
 /// LOSAT's refusal of an RPS-BLAST database whose alias files give an OID range or a key of the
@@ -356,7 +333,10 @@ pub(super) fn check_alias_keys(database: &database::BlastpDatabase, program: &st
             program,
         ));
     }
-    Ok(())
+    // A total length of 0 (which a database search of the other programs reads as NCBI's
+    // statistics of each subject, `DbStatistics::per_subject`) or of 2^63 or more: kept refused
+    // with the other alias keys until item D1a-4 traces them.
+    crate::algorithm::rps_search::volumes::untraced_total_length(&database.statistics(), program)
 }
 
 /// The number of volumes that an RPS search of the database runs (`-num_threads 0` runs a thread
@@ -497,18 +477,21 @@ pub(super) fn rps_search(
     }
     let mut gapped_k = Vec::new();
     let mut setup = RpsVolumeSetup::new("RPSBLAST", args.window_size as i32);
+    // The workers' scratch, kept from volume to volume (`RpsWorkers`).
+    let workers = RpsWorkers::new(pool.threads());
+    // The first failing batch (its number and error) of the volumes searched so far.
+    let spans: Vec<usize> = run.batches.iter().map(|batch| batch.len()).collect();
+    let mut failed: Option<(usize, anyhow::Error)> = None;
     for (position, &index) in order.iter().enumerate() {
         let volume = &db_volumes[index];
         let num_seqs = volume.num_oids();
         let files = match setup.open(volume, cbs > 0)? {
             Ok(files) => files,
-            Err(RpsVolumeError::Files(text)) => return Err(RpsEngineError(text, false).into()),
+            Err(RpsVolumeError::Files(text)) => return Err(RpsEngineError(text).into()),
             // N2 of review A (PS12a): the score block of each query of the first batch fails.
             Err(RpsVolumeError::NoMatrix) => {
                 let queries = run.batches.first().map_or(0, |batch| batch.len());
-                return Err(
-                    RpsEngineError("Error: Unknown error code -1 ".repeat(queries), true).into(),
-                );
+                return Err(RpsEngineError("Error: Unknown error code -1 ".repeat(queries)).into());
             }
         };
         let masked: Vec<Option<Vec<u8>>> = run
@@ -623,13 +606,48 @@ pub(super) fn rps_search(
                 "-sum_stats true (NCBI BLAST+ 2.17.0's rpsblast links HSPs with the profiles' contexts as query indexes and reads past its arrays: its output depends on memory contents or it crashes) is not supported by LOSAT's RPSBLAST"
             );
         }
-        let traced = engine.search_volume(&files, &Consensus::new(&setup, volume, &files), pool)?;
+        // The run's query batches (`run.batches`) in NCBI's order: each batch's first refusal of
+        // its cutoffs, else its first search error in query order (`RpsVolumeResults::batches`).
+        // NCBI finishes batch 0 over every volume before it sets up batch 1, so a failing batch
+        // ends the run only when it is batch 0; otherwise the later volumes go on for the
+        // batches before it (one of them may fail there first), as `search_window` of
+        // RPSTBLASTN does.
+        let live = failed.as_ref().map_or(spans.len(), |(batch, _)| *batch);
+        let mut traced = Vec::new();
+        for (number, batch) in engine
+            .search_volume(
+                &files,
+                &Consensus::new(&setup, volume, &files),
+                pool,
+                &workers,
+            )?
+            .batches(&spans)
+            .into_iter()
+            .take(live)
+            .enumerate()
+        {
+            match batch {
+                Ok(results) => traced.extend(results),
+                Err(error) => {
+                    failed = Some((number, error));
+                    break;
+                }
+            }
+        }
         // The volume's mappings and per-volume data go before the next volume is opened (and
         // before its lists are merged): at most one volume's pages are resident.
         drop(engine);
         drop(masked);
         let aux_karlin_k = files.aux.karlin_k.clone();
         drop(files);
+        if let Some((batch, _)) = &failed {
+            // Nothing of this volume is merged: the run ends with the failing batch's error, and
+            // the later volumes only look for an earlier batch's error.
+            if *batch == 0 {
+                break;
+            }
+            continue;
+        }
         // The volume's local ordinal ids become the database's.
         let start = starts[index];
         let mut lists: Vec<Option<BlastpHitList>> = Vec::with_capacity(traced.len());
@@ -662,19 +680,56 @@ pub(super) fn rps_search(
             merge_volume(hit_lists, lists);
         }
     }
+    if let Some((batch, error)) = failed {
+        return Err(failed_batch_error(run, batch, error));
+    }
     Ok(RpsSearched {
         gapped_k,
         volumes: order.len(),
     })
 }
 
-/// `MAX_DBSEQ_LEN`: the longest subject (here a user query) that NCBI's engine searches whole.
-///
-/// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:54
-/// ```c
-/// #define MAX_DBSEQ_LEN 5000000
-/// ```
-const MAX_DBSEQ_LEN: usize = 5_000_000;
+// NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:193-213
+// ```c++
+//         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+//
+//             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+//             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+//
+//             SaveSearchStrategy(args, m_CmdLineArgs, queries, opts_hndl);
+//             ...
+//             	CLocalRPSBlast  local_search (query_batch, db_args->GetDatabaseName(), opts_hndl, args[kArgNumThreads].AsInteger() );
+//             	results = local_search.Run();
+// ```
+/// The run's error when the query batch `batch` of `run.batches` fails (`rps_search`). NCBI reads,
+/// writes the search strategy request of, searches and reports one batch before it reads the next,
+/// so an error of its own in a batch's search (a profile volume's sequence file that the batch's
+/// traceback reads, `Consensus`: `BLAST Database error`, exit status 2) ends the run after the
+/// reports of the batches before it (without the epilog) and after that batch's reader messages
+/// and request. That is the error of a header file that a batch reaches (`HeaderReadError`, named
+/// by the batch's first query), whose batches before blastp's driver searches again and reports
+/// alone (`search`). LOSAT's refusals end the run as they are.
+#[cold]
+#[inline(never)]
+fn failed_batch_error(run: &RpsSearchRun<'_>, batch: usize, error: anyhow::Error) -> anyhow::Error {
+    if !error.is::<crate::cli::NativeError>() {
+        return error;
+    }
+    database::HeaderReadError {
+        query: run.batches[batch].start,
+        error,
+    }
+    .into()
+}
+
+// `MAX_DBSEQ_LEN`: the longest subject (here a user query) that NCBI's engine searches whole (the
+// one copy of the macro).
+//
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:54
+// ```c
+// #define MAX_DBSEQ_LEN 5000000
+// ```
+use crate::core::subject_split::MAX_DBSEQ_LEN;
 
 #[cfg(test)]
 mod tests {
@@ -764,11 +819,6 @@ mod tests {
         let one = volume_search_space(302, 5_000, 1, &gapped).unwrap();
         let three = volume_search_space(302, 5_000, 3, &gapped).unwrap();
         assert_ne!(one, three);
-        // The floor: an effective database length of 0 or below is 1 (NCBI's length adjustment
-        // keeps it above 0, so the arithmetic is tried on given adjustments).
-        assert_eq!(adjusted_search_space(302, 100, 10, 10), Some(292));
-        assert_eq!(adjusted_search_space(302, 100, 10, 11), Some(291));
-        assert_eq!(adjusted_search_space(302, 100, 10, 9), Some(10 * 293));
         // A product past `Int8` is refused.
         assert!(volume_search_space(302, i64::MAX, 1, &gapped)
             .unwrap_err()

@@ -40,6 +40,8 @@ pub(super) struct Record {
     /// The name of a database sequence's source, from which its empty title is made
     /// (`seqmasks_io::bdb_reader::BdbRecord::taxname`); none for a FASTA record.
     pub taxname: Option<std::sync::Arc<[u8]>>,
+    /// Whether a database sequence's Bioseq has a source (`BdbRecord::has_source`).
+    pub has_source: bool,
     pub iupac: Vec<u8>,
     /// The taxonomy database's texts of reading a database sequence
     /// (`seqmasks_io::bdb_reader::BdbRecord::texts`); none for a FASTA record.
@@ -300,6 +302,7 @@ fn masks_of_input(
             ids: &record.ids,
             title: record.title.as_deref(),
             taxname: record.taxname.as_ref(),
+            has_source: record.has_source,
             iupac: &record.iupac,
             protein: false,
         };
@@ -387,6 +390,7 @@ impl SequenceSource for DatabaseSource {
             ids: record.ids,
             title: Some(record.title),
             taxname: record.taxname,
+            has_source: record.has_source,
             iupac: record.residues,
             texts: record.texts,
         }))

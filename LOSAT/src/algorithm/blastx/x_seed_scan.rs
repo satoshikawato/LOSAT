@@ -104,13 +104,13 @@
 //! (`x_word_finder_direct_sent`, never inlined); the loops without it keep their code.
 //!
 //! EXPERIMENT (LOSAT_X_BXSCANBYTE): the direct loop scans the standard table with tblastn's scan on
-//! presence bytes (`tblastn/x_scan_byte.rs` `x_scan_one_range_byte`, LOSAT_X_TBNSCANBYTE's code,
+//! presence bytes (`tblastx/x_scan_byte.rs` `x_scan_one_range_byte`, LOSAT_X_TBNSCANBYTE's code,
 //! whose header gives the exactness argument): the indexes of a block of 256 words made from the
 //! letters at once, the candidates listed from one byte per index, the hits of a block copied with
 //! one capacity test. It returns the pairs and `scan_range` values of
 //! `s_blast_aa_scan_subject_one_range` on every call, so the loop above reads the same pairs; it
-//! writes up to `X_SCAN_BYTE_SLACK` pairs past `array_size` (one more than the branch-free scan), which
-//! the per-thread buffer holds and nothing reads. The presence bytes (32 KB) are built the first
+//! writes up to `X_SCAN_BYTE_SLACK` pairs past `array_size` (more than the branch-free scan, for
+//! the chain runs of LOSAT_X_CHAINRUN), which the per-thread buffer holds and nothing reads. The presence bytes (32 KB) are built the first
 //! time the direct loop scans with the table and kept with it (`XKeptPresence` in
 //! `Lookup::Standard`), so they go with the table and no other table can see them. The switch
 //! takes the CPU policy of LOSAT_X_TBNSCANBYTE (`x_mode`): on unless it is `0`, the AVX2 forms
@@ -121,14 +121,14 @@
 //! its candidate loop. On x86-64 with AVX2 and POPCNT the direct loop scans the subjects of batches
 //! with few hits per used cell (BXDIAGMIN: short queries); elsewhere every batch.
 
-use super::x_ungap_sent::XSent;
+use super::x_ungap_sent::{by_word_size, XSent};
 use super::*;
 use crate::algorithm::blastp::extension::BlastpTwoHitUngappedResult;
 use crate::algorithm::blastp::x_seed_fused::XHitBf;
-use crate::algorithm::tblastn::x_scan_byte::{
+use crate::algorithm::tblastx::x_aascan_bf::{x_scan_one_range_bf, X_SCAN_BF_SLACK};
+use crate::algorithm::tblastx::x_scan_byte::{
     x_kept_presence, x_mode, x_scan_one_range_byte, x_table_presence, XScanByte, X_SCAN_BYTE_SLACK,
 };
-use crate::algorithm::tblastx::x_aascan_bf::{x_scan_one_range_bf, X_SCAN_BF_SLACK};
 use std::cell::RefCell;
 use std::sync::{Arc, OnceLock};
 
@@ -155,7 +155,7 @@ pub(crate) fn x_bxscan_byte() -> XScanByte {
 // No NCBI counterpart: the presence vector in another layout, kept with the table; it does not
 // change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BXSCANBYTE): a standard table's presence bytes and whether the table is
-/// sparse (`tblastn/x_scan_byte.rs` `x_table_presence`), built the first time the direct loop scans
+/// sparse (`tblastx/x_scan_byte.rs` `x_table_presence`), built the first time the direct loop scans
 /// with the table on presence bytes; `None` inside for a table they do not fit. It also carries the
 /// table's build number (`build`), which names the table for the choice of the loop
 /// (LOSAT_X_BXDIAGMIN, `x_seed_diag.rs`): a table built from pooled vectors
@@ -332,16 +332,20 @@ fn x_word_finder_scan_with<S: BxScoring>(
         }
     }
     if let Some(sent) = sent {
-        return x_word_finder_direct_sent(
-            batch,
-            parameters,
-            options,
-            subject,
-            lookup,
-            diagonals,
-            x_bxscan_byte(),
-            x_bxhitbf(),
-            sent,
+        // The instance of the word size, chosen once for the subject (item SC9b-1).
+        return by_word_size!(
+            options.word_size,
+            W => x_word_finder_direct_sent::<S, W>(
+                batch,
+                parameters,
+                options,
+                subject,
+                lookup,
+                diagonals,
+                x_bxscan_byte(),
+                x_bxhitbf(),
+                sent,
+            )
         );
     }
     if !S::BLOSUM62 {
@@ -480,10 +484,11 @@ fn x_word_finder_direct(
 /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): `x_word_finder_direct` with the extension of `sent`
 /// (`x_ungap_sent.rs`), in a function of its own so that the loops without it keep their code.
 /// With another matrix (item SC6b) the walks are its keys' and the one-hit argument is never
-/// called (`sent` exists only with a two-hit window).
+/// called (`sent` exists only with a two-hit window). `W` is `options.word_size` as a const (2 to
+/// 4), the walks' instance: the caller chooses it once per subject (`by_word_size!`).
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-fn x_word_finder_direct_sent<S: BxScoring>(
+fn x_word_finder_direct_sent<S: BxScoring, const W: usize>(
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
@@ -512,7 +517,7 @@ fn x_word_finder_direct_sent<S: BxScoring>(
                 diagonals,
                 scan_byte,
                 move |_: &[u8], _: &[u8], s_left_off, s_right_off, q_right_off, dropoff, _| {
-                    sent.two_hit::<$shadow>(s_left_off, s_right_off, q_right_off, dropoff)
+                    sent.two_hit::<$shadow, W>(s_left_off, s_right_off, q_right_off, dropoff)
                 },
                 extend_one_hit_blosum62,
             )
@@ -650,7 +655,7 @@ where
         while range[1] <= range[2] {
             let n = match (lookup, presence) {
                 // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127
-                // (`s_BlastAaScanSubject`; tblastn/x_scan_byte.rs gives the loop): the same pairs
+                // (`s_BlastAaScanSubject`; tblastx/x_scan_byte.rs gives the loop): the same pairs
                 // and `scan_range` on every call.
                 (Lookup::Standard(l, _), Some(presence)) => x_scan_one_range_byte(
                     scan_byte, l, presence, scanned, pairs, array_size, &mut range,
@@ -1092,16 +1097,19 @@ mod tests {
                 }
                 for (&(scan_byte, hit_bf), pair) in arms.iter().zip(&mut sent_tables) {
                     for (d, shadow) in pair.iter_mut().zip([false, true]) {
-                        let hits = x_word_finder_direct_sent(
-                            &batch,
-                            &params,
-                            &options,
-                            &subject,
-                            &lookup,
-                            d,
-                            scan_byte,
-                            hit_bf,
-                            XSent::for_test(Blosum62Bx, &batch.sequence_start, &lead, shadow),
+                        let hits = by_word_size!(
+                            options.word_size,
+                            W => x_word_finder_direct_sent::<_, W>(
+                                &batch,
+                                &params,
+                                &options,
+                                &subject,
+                                &lookup,
+                                d,
+                                scan_byte,
+                                hit_bf,
+                                XSent::for_test(Blosum62Bx, &batch.sequence_start, &lead, shadow),
+                            )
                         )
                         .unwrap();
                         let arm = format!(

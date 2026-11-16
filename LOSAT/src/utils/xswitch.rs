@@ -67,8 +67,8 @@ use std::ops::RangeInclusive;
 /// `LOSAT_X_TBNOIDNEXT`, `LOSAT_X_TBNOIDUNITS`, `LOSAT_X_TBNSSIDE`, `LOSAT_X_TBNBATCH`,
 /// `LOSAT_X_SEGSHARE` and `LOSAT_X_DEKKER` graduated on 2026-10-22 (see `GRADUATED`).
 /// `LOSAT_X_ERFABSORB` (Spouge's ErfC returns 2.0 below -6 without evaluating ErfImpl,
-/// `stats/spouge.rs`) and `LOSAT_X_SEGTRIMMEMO` (the SEG trim of a segment kept per thread for the
-/// maskers that repeat segments, `utils/x_seg_trim_memo.rs`) graduated on 2026-10-26: they left
+/// `stats/spouge.rs`) and `LOSAT_X_SEGTRIMMEMO` (the SEG trim of a segment kept for the maskers
+/// that repeat segments, `utils/x_seg_trim_memo.rs`) graduated on 2026-10-26: they left
 /// `STRICT_SET` and their previous code was deleted (the maskers that do not ask for the memo keep
 /// trimming every segment, a rule of the masker and not a switch).
 /// `LOSAT_X_BPCOMPOREUSE`, `LOSAT_X_BPLUT`, `LOSAT_X_BPPCOMPACT`, `LOSAT_X_BPPFREE`,
@@ -291,13 +291,16 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BNDBSTREAM",
     "LOSAT_X_BNDBWIDE",
     "LOSAT_X_BNDCONE",
+    "LOSAT_X_BNEXTFIRST",
     "LOSAT_X_BNFEWSUBJ",
     "LOSAT_X_BNHITGROUP",
     "LOSAT_X_BNHLGROW",
     "LOSAT_X_BNMAPPED",
+    "LOSAT_X_BNPOPCNT",
     "LOSAT_X_BNPVONCE",
     "LOSAT_X_BNQPACK",
     "LOSAT_X_BNQPARTS",
+    "LOSAT_X_BNRANKONCE",
     "LOSAT_X_BNSEEDLISTS",
     "LOSAT_X_BNSTORE",
     "LOSAT_X_BNSTREAM",
@@ -356,6 +359,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BXUNGAPSENT",
     "LOSAT_X_BXUNITCAP",
     "LOSAT_X_BXW4CAP",
+    "LOSAT_X_CHAINRUN",
     "LOSAT_X_DBIDXREAD",
     "LOSAT_X_DCCSR",
     "LOSAT_X_DCSEEDLEAN",
@@ -392,6 +396,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_REDOCONTAINIDX",
     "LOSAT_X_RPTSTREAM",
     "LOSAT_X_SEEDCOMPACT",
+    "LOSAT_X_SEEDPIECE",
     "LOSAT_X_SEEDUNMAP",
     "LOSAT_X_TBNBATCHRULE",
     "LOSAT_X_TBNDIAGPACK",
@@ -412,6 +417,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBNSTORE",
     "LOSAT_X_TBNUNGAP",
     "LOSAT_X_TBNUNITXLATE",
+    "LOSAT_X_TBNXLATE128",
     "LOSAT_X_TBNXLATESIMD",
     "LOSAT_X_TBXBAND",
     "LOSAT_X_TBXBOARD",
@@ -428,6 +434,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBXRESOLVE",
     "LOSAT_X_TBXRPTPAR",
     "LOSAT_X_TBXSCANBF",
+    "LOSAT_X_TBXSCANBYTE",
     "LOSAT_X_TBXSTORE",
     "LOSAT_X_TBXUNGAPSENT",
     "LOSAT_X_TBXUNITMASK",

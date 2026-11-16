@@ -1,9 +1,11 @@
-//! BLAST XML (outfmt 5) of TBLASTX: the refusals of what NCBI BLAST+ 2.17.0 cannot write (a
-//! byte >= 0x80 in a title or in the `-db` name, DECISIONS 19, Q2), made before the first byte
-//! of stdout or `-out` at 1, 4, 8 and 16 threads, and the document across several query batches
-//! (one header, global Iteration numbers, one trailer: TBLASTX renders once per run, after every
-//! batch is searched), and the run that stops at a failing batch (the earlier batches' Iterations,
-//! no trailer).
+//! BLAST XML (outfmt 5) of TBLASTX: the one title that NCBI BLAST+ 2.17.0 cannot make (punctuation
+//! alone, such as `, ,`, on which `x_CleanAndCompress` reads past the end of the string) is refused
+//! before the first byte of stdout or `-out` at 1, 4, 8 and 16 threads, also in a later batch, the
+//! document across several query batches (one header, global Iteration numbers, one trailer: TBLASTX
+//! renders once per run, after every batch is searched), and the run that stops at a failing batch
+//! (the earlier batches' Iterations, no trailer). The titles NCBI does write (a byte >= 0x80, a
+//! control byte, a title whose encoding it cannot guess, the `-db` name) are the rows `db.xb.tblastx.*`
+//! of `tests/db_search_manifest/tblastx.tsv` and `tests/xml_dbname.rs`.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:725-733
 //! ```c++
@@ -19,6 +21,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod temp_support;
+use temp_support::{Finished, TempFile};
+
 fn temp_dir(stem: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -33,7 +38,7 @@ fn temp_dir(stem: &str) -> PathBuf {
     dir
 }
 
-fn run_str(args: &[&str]) -> Output {
+fn run_str(args: &[&str]) -> Finished<Output, TempFile> {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") {
@@ -41,15 +46,13 @@ fn run_str(args: &[&str]) -> Output {
         }
     }
     // An --all-features binary at 2+ threads keeps this variable (see the other tests).
-    command.env(
-        "LOSAT_BLASTX_WORKER_LOG",
-        std::env::temp_dir().join("losat_outfmt5_worker.log"),
-    );
-    command.args(args).output().expect("run LOSAT")
+    let log = TempFile::keep_on_failure("losat_outfmt5_worker", "worker.log");
+    command.env("LOSAT_BLASTX_WORKER_LOG", &log);
+    let output = command.args(args).output().expect("run LOSAT");
+    Finished::new(output, log)
 }
 
 const PROTEIN: &str = "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG";
-const OTHER_NUCLEOTIDE: &[u8] = b"TTTTGGGGCCCCAAAATTTTGGGGCCCCAAAATTTTGGGGCCCCAAAATTTTGGGGCCCCAAAA";
 
 /// One codon per amino acid.
 fn codon(letter: char) -> &'static str {
@@ -100,163 +103,15 @@ fn refused(output: &Output, what: &str) {
     assert!(output.stdout.is_empty(), "{what}: nothing is written");
     assert!(
         stderr.contains(&format!(
-            "{what} with a character outside the US-ASCII range (which the XML output of NCBI BLAST+ cannot write) is not supported by LOSAT's TBLASTX"
+            "{what} with punctuation that NCBI BLAST+ 2.17.0 crashes on when it makes the definition line is not supported by LOSAT's TBLASTX"
         )),
         "{stderr}"
     );
 }
 
-#[test]
-fn a_query_title_outside_us_ascii_is_refused() {
-    let dir = temp_dir("query");
-    let (query, subject) = (dir.join("q.fa"), dir.join("s.fa"));
-    let nucleotide = back_translate(PROTEIN);
-    for title in ["caf\u{e9} ".as_bytes(), b"caf\xe9"] {
-        for position in 0..2 {
-            let mut records: Vec<(&[u8], &[u8])> = vec![
-                (b"q1 ok", nucleotide.as_bytes()),
-                (b"q2 ok", nucleotide.as_bytes()),
-            ];
-            records[position] = (title, nucleotide.as_bytes());
-            fasta(&query, &records);
-            fasta(&subject, &[(b"s1 subject", nucleotide.as_bytes())]);
-            for threads in ["1", "4", "8", "16"] {
-                let out = dir.join("out.xml");
-                let output = run_str(&[
-                    "tblastx",
-                    "-query",
-                    query.to_str().unwrap(),
-                    "-subject",
-                    subject.to_str().unwrap(),
-                    "-outfmt",
-                    "5",
-                    "-num_threads",
-                    threads,
-                    "-out",
-                    out.to_str().unwrap(),
-                ]);
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                assert_eq!(output.status.code(), Some(1), "{stderr}");
-                assert!(stderr.contains("a query title with a character outside the US-ASCII range (which the XML output of NCBI BLAST+ cannot write) is not supported by LOSAT's TBLASTX"));
-                // NCBI creates the -out file before it checks anything (blast_args.cpp:3456-3481),
-                // so the file exists, empty.
-                assert_eq!(
-                    fs::metadata(&out).map(|m| m.len()).unwrap_or(0),
-                    0,
-                    "-out stays empty"
-                );
-                // to stdout
-                let output = run_str(&[
-                    "tblastx",
-                    "-query",
-                    query.to_str().unwrap(),
-                    "-subject",
-                    subject.to_str().unwrap(),
-                    "-outfmt",
-                    "5",
-                    "-num_threads",
-                    threads,
-                ]);
-                refused(&output, "a query title");
-            }
-        }
-    }
-    fs::remove_dir_all(dir).ok();
-}
+/// The title of punctuation that NCBI's `x_CleanAndCompress` reads past the end of.
+const PUNCTUATION: &[u8] = b", ,";
 
-#[test]
-fn a_subject_title_outside_us_ascii_is_refused_where_it_is_written() {
-    let dir = temp_dir("subject");
-    let (query, subject) = (dir.join("q.fa"), dir.join("s.fa"));
-    let nucleotide = back_translate(PROTEIN);
-    fasta(&query, &[(b"q1 ok", nucleotide.as_bytes())]);
-    // The subject with the bad title has a hit: NCBI cuts the document after the Iteration's
-    // hits start; LOSAT refuses before the first byte.
-    fasta(
-        &subject,
-        &[
-            (b"s1 ok", OTHER_NUCLEOTIDE),
-            ("s2 caf\u{e9}".as_bytes(), nucleotide.as_bytes()),
-        ],
-    );
-    for threads in ["1", "4", "8", "16"] {
-        let args = [
-            "tblastx",
-            "-query",
-            query.to_str().unwrap(),
-            "-subject",
-            subject.to_str().unwrap(),
-            "-outfmt",
-            "5",
-            "-num_threads",
-            threads,
-        ];
-        refused(&run_str(&args), "a subject title");
-        // Without a hit the subject is never written, and the search succeeds (an all-N query
-        // has none).
-        fasta(&query, &[(b"q1 ok", &[b'N'; 90])]);
-        fasta(
-            &subject,
-            &[("s1 caf\u{e9}".as_bytes(), nucleotide.as_bytes())],
-        );
-        let output = run_str(&args);
-        assert_eq!(
-            output.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert!(output
-            .stdout
-            .starts_with(b"<?xml version=\"1.0\" encoding=\"US-ASCII\"?>\n"));
-        fasta(&query, &[(b"q1 ok", nucleotide.as_bytes())]);
-        fasta(
-            &subject,
-            &[
-                (b"s1 ok", OTHER_NUCLEOTIDE),
-                ("s2 caf\u{e9}".as_bytes(), nucleotide.as_bytes()),
-            ],
-        );
-    }
-    fs::remove_dir_all(dir).ok();
-}
-
-#[test]
-fn a_database_name_outside_us_ascii_is_refused() {
-    let dir = temp_dir("db");
-    let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search");
-    let copy = dir.join("xslice_caf\u{e9}");
-    for extension in ["nhr", "nin", "nsq"] {
-        fs::copy(
-            tests.join(format!("xslice.{extension}")),
-            format!("{}.{extension}", copy.display()),
-        )
-        .expect("copy database");
-    }
-    for threads in ["1", "4", "8", "16"] {
-        let output = run_str(&[
-            "tblastx",
-            "-query",
-            tests.join("xslice_q.fna").to_str().unwrap(),
-            "-db",
-            copy.to_str().unwrap(),
-            "-outfmt",
-            "5",
-            "-num_threads",
-            threads,
-        ]);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert_eq!(output.status.code(), Some(1), "{stderr}");
-        assert!(output.stdout.is_empty(), "nothing is written");
-        assert!(
-            stderr.contains("a database name with a character outside the US-ASCII range (which the XML output of NCBI BLAST+ cannot write) is not supported by LOSAT's TBLASTX"),
-            "{stderr}"
-        );
-    }
-    fs::remove_dir_all(dir).ok();
-}
-
-/// 120 queries of 390 letters (a query batch holds 10,002 letters, so several batches).
 fn many_queries(path: &Path, bad_title: Option<(usize, &[u8])>) {
     let titles: Vec<String> = (0..120).map(|n| format!("q{n} plain")).collect();
     let nucleotide = back_translate(PROTEIN);
@@ -293,7 +148,7 @@ fn several_batches_make_one_document_with_global_iteration_numbers() {
         ]);
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert_eq!(output.status.code(), Some(0), "{stderr}");
-        let text = String::from_utf8(output.stdout).expect("ASCII");
+        let text = String::from_utf8(output.stdout.clone()).expect("ASCII");
         assert_eq!(text.matches("<?xml").count(), 1);
         assert_eq!(text.matches("<BlastOutput_program>").count(), 1);
         assert_eq!(text.matches("<Iteration>").count(), 120);
@@ -314,7 +169,7 @@ fn a_refusal_in_a_later_batch_writes_nothing() {
     // before its first byte.
     let dir = temp_dir("later");
     let (query, subject) = (dir.join("q.fa"), dir.join("s.fa"));
-    many_queries(&query, Some((110, "q110 caf\u{e9}".as_bytes())));
+    many_queries(&query, Some((110, PUNCTUATION)));
     fasta(
         &subject,
         &[(b"s1 subject", back_translate(PROTEIN).as_bytes())],
@@ -354,10 +209,8 @@ fn an_empty_seekable_query_input_writes_nothing() {
                 command.env_remove(name);
             }
         }
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat_outfmt5_worker.log"),
-        );
+        let log = TempFile::keep_on_failure("losat_outfmt5_worker", "worker.log");
+        command.env("LOSAT_BLASTX_WORKER_LOG", &log);
         let output = command
             .args([
                 "tblastx",
@@ -397,6 +250,8 @@ fn a_failing_batch_ends_the_run_after_the_earlier_iterations_without_the_trailer
     let good = text.clone();
     text.extend_from_slice(b">q3\nACGT%%%%\n");
     for threads in ["1", "4", "8", "16"] {
+        // The worker log of this iteration's runs: removed after them, kept when the test panics.
+        let log = TempFile::keep_on_failure("losat_outfmt5_worker", "worker.log");
         let run = |text: &[u8]| {
             fs::write(&query, text).expect("write query");
             let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
@@ -405,10 +260,7 @@ fn a_failing_batch_ends_the_run_after_the_earlier_iterations_without_the_trailer
                     command.env_remove(name);
                 }
             }
-            command.env(
-                "LOSAT_BLASTX_WORKER_LOG",
-                std::env::temp_dir().join("losat_outfmt5_worker.log"),
-            );
+            command.env("LOSAT_BLASTX_WORKER_LOG", &log);
             command
                 .env("BATCH_SIZE", "500")
                 .args([
@@ -449,10 +301,8 @@ fn a_failing_batch_ends_the_run_after_the_earlier_iterations_without_the_trailer
                 command.env_remove(name);
             }
         }
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat_outfmt5_worker.log"),
-        );
+        let log = TempFile::keep_on_failure("losat_outfmt5_worker", "worker.log");
+        command.env("LOSAT_BLASTX_WORKER_LOG", &log);
         let first = command
             .env("BATCH_SIZE", "5000")
             .args([

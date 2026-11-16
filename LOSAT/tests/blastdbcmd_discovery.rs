@@ -194,6 +194,26 @@ const CASES: &[Case] = &[
     ("T512", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/psuffix", "-entry", "AB362001.1", "-target_only", "-long_seqids"], 0),
     ("T513", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/nmix", "-entry", "AB301002.1", "-target_only", "-long_seqids"], 0),
     ("T514", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/pmix", "-entry", "AB302002.1", "-target_only", "-long_seqids"], 0),
+    // Line RG item T5c (`make_t5.py --suffix-only`): the end of a protein title ending in `]`
+    // rewritten from the Bioseq's first source (`x_AdjustProteinTitleSuffix`), with the taxonomy
+    // database and without it (a source without a name drops a ` [ ]` end; ` []` stays), with
+    // and without parsed Seq-ids (frozen from NCBI BLAST+ 2.17.0 blastdbcmd, 2026-11-14).
+    ("T515", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/psfx", "-entry", "all", "-long_seqids"], 0),
+    ("T516", None, false, &["-db", "../db_search/t5/psfx", "-entry", "all", "-long_seqids"], 0),
+    ("T517", Some("../seqdb/taxdb/t5"), false, &["-db", "../db_search/t5/psfs", "-entry", "all", "-long_seqids"], 0),
+    ("T518", None, false, &["-db", "../db_search/t5/psfs", "-entry", "all", "-long_seqids"], 0),
+    // Fix 2 of line RG item T5c (`make_t5.py --taxid-only`): the taxid of the first record in an
+    // encoding that NCBI's `ReadInt4` reads as makeblastdb's (the application INTEGER tag 0x42,
+    // nine content bytes of sign extension; frozen from NCBI BLAST+ 2.17.0 blastdbcmd, 2026-11-15).
+    ("T519", None, false, &["-db", "../db_search/t5/ptx_app42", "-entry", "all", "-outfmt", "%o %T %t"], 0),
+    ("T520", None, false, &["-db", "../db_search/t5/ptx_sx9", "-entry", "all", "-outfmt", "%o %T %t"], 0),
+    ("T521", None, false, &["-db", "../db_search/t5/ntx_app42", "-entry", "all", "-outfmt", "%o %T %t"], 0),
+    ("T522", None, false, &["-db", "../db_search/t5/ntx_sx9", "-entry", "all", "-outfmt", "%o %T %t"], 0),
+    // Merge 5 of line RG item T5c with item K4h (`make_t5.py --k5-only`): titles ending in `]` (`%t`
+    // keeps the stored title) and scientific names with two-byte UTF-8 and a control byte, written
+    // as they are (frozen from NCBI BLAST+ 2.17.0 blastdbcmd, 2026-11-17).
+    ("T525", Some("../seqdb/taxdb/k5"), false, &["-db", "../db_search/t5/pk5", "-entry", "all", "-outfmt", "%t %T %S"], 0),
+    ("T526", Some("../seqdb/taxdb/k5"), false, &["-db", "../db_search/t5/pk5s", "-entry", "all", "-outfmt", "%t %T %S"], 0),
     // Line RG item T5b: a damaged taxonomy database (`../seqdb/taxdb/<variant>`) on the search path
     // of `../db_search/t5b` (make_t5b.py there): NCBI posts the texts of opening it once, at the
     // first lookup, and the offset error of its last entry at each lookup that asks for taxid
@@ -264,8 +284,9 @@ const CASES: &[Case] = &[
 /// The probe's cases that LOSAT refuses (one line naming LOSAT's BLASTDBCMD, exit status 1,
 /// nothing written): NCBI's exception that names its source files (`-taxids` with an empty id,
 /// a date `CTime` does not read), NCBI's protein letters written reversed (a taxid list on a
-/// protein database read with `-dbtype guess` and `-strand minus`), and the OID that NCBI's
-/// `-ipg` never sets on a database without PIG files.
+/// protein database read with `-dbtype guess` and `-strand minus`), the OID that NCBI's
+/// `-ipg` never sets on a database without PIG files, and a first record whose taxid is outside
+/// an `int` (`make_t5.py --taxid-only`: NCBI's `error while reading taxid`, exit 1, at that record).
 #[rustfmt::skip]
 const REFUSED: &[(&str, &[&str])] = &[
     ("J101", &["-db", "j/lst/p5", "-taxids", "4840,,4841", "-no_taxid_expansion", "-outfmt", "%a %T"]),
@@ -273,6 +294,8 @@ const REFUSED: &[(&str, &[&str])] = &[
     ("J189", &["-db", "j/jd/feb30", "-metadata"]),
     ("J190", &["-db", "j/jd/bad", "-metadata"]),
     ("J204", &["-db", "j/lst/p5", "-ipg", "5"]),
+    ("T523", &["-db", "../db_search/t5/ptx_big5", "-entry", "all", "-outfmt", "%o %T %t"]),
+    ("T524", &["-db", "../db_search/t5/ntx_big5", "-entry", "all", "-outfmt", "%o %T %t"]),
 ];
 
 #[test]

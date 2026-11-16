@@ -3,6 +3,7 @@
 use crate::blastinput::fasta_reader::InputRecord;
 use crate::report::archive::ArchiveHandle;
 use crate::report::diag_log::Posts;
+use anyhow::Result;
 use std::io::{self, Write};
 
 /// The warnings that NCBI posts between the reports of a search: the title warnings of a
@@ -28,8 +29,10 @@ use std::io::{self, Write};
 ///     }
 /// ```
 pub struct QueryWarnings<'a> {
-    /// The warnings to write before the report of each query, by query index.
-    before: Before<'a>,
+    /// The posts to write before the report of each query, by query index (`of_posts`).
+    before: &'a [Posts],
+    /// The BLAST archive's handle, which saves each whole post as one message (`Posts::write`).
+    archive: Option<&'a ArchiveHandle>,
     /// Standard error (the CLI) or the caller's diagnostics.
     pub sink: &'a mut (dyn Write + Send),
     /// The texts of the subjects that the reports read one by one (`with_subject_reads`), and
@@ -78,12 +81,169 @@ pub struct SubjectReads {
     queries: Vec<QueryReads>,
 }
 
-/// The texts of one query's reads (`SubjectReads`): `(subject, text)` in the order of the
-/// reads, a subject named as the report's writer names it (its index in the hit lists).
-pub type QueryReads = Vec<(u32, Vec<u8>)>;
+/// The reads of one query's report (`SubjectReads`), in the order of the reads.
+pub type QueryReads = Vec<SubjectRead>;
+
+/// One read of a query's report: the subject as the report's writer names it (its index in the
+/// hit lists), the text that its load writes in the program's model, and, in a run whose lookups
+/// can write a text, what the load looks up (`ReadLoad`; then every read has an entry, with or
+/// without a text of its own).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SubjectRead {
+    pub subject: u32,
+    pub text: Vec<u8>,
+    pub load: Option<ReadLoad>,
+}
+
+impl SubjectRead {
+    /// A read of `subject` whose text is `text`, without the facts of its load (the tests of the
+    /// writers).
+    #[cfg(test)]
+    pub fn of_text(subject: u32, text: &[u8]) -> Self {
+        Self {
+            subject,
+            text: text.to_vec(),
+            load: None,
+        }
+    }
+
+    /// The text of this read where it happens: the texts of the loads left out before that this
+    /// load makes ([`ReadLoad::placed`]) around the model's own (also a load of a batch's prefetch,
+    /// `diag_log::Posts::loads`).
+    pub fn placed(&self) -> Vec<u8> {
+        match &self.load {
+            Some(load) => load.placed(&self.text),
+            None => self.text.clone(),
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1440-1466 (quoted at
+// `TaxdbRun::load`): a load asks the taxonomy database for a taxid that its volume's cache does
+// not hold, and the run's first ask opens it (the static `CTaxDBFileInfo` of `GetTaxNames`).
+/// What the load of a read's subject looks up, as far as it decides the texts: NCBI's lookups write
+/// the texts of opening the taxonomy database at the run's first ask, and the offset error at a
+/// volume's first lookup of the taxid whose record begins past the end of `taxdb.btd`
+/// (`TaxDb::offset_error_taxid`; a volume whose cache would ask again is refused,
+/// `TaxdbRun::cache_collision`), nothing else. The model of the reads gives each text to the load
+/// that makes the ask, assuming every load it models happens; a load that NCBI does not make (a
+/// BLAST XML `Iteration` or `Hit` that the stream leaves out, `ReadCursor::cut`) leaves its texts
+/// to NCBI's next load that makes the same ask (`LoadTexts`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReadLoad {
+    /// The run's texts of the loads left out (shared by every read of the run).
+    pub texts: std::sync::Arc<LoadTexts>,
+    /// The volume of the loaded blob.
+    pub volume: u32,
+    /// Whether the load looks a positive taxid up (so it makes the run's first ask, where no load
+    /// before it asked).
+    pub looks_up: bool,
+    /// Whether the load looks up the taxid of the offset error.
+    pub offset: bool,
+    /// The bytes of the model's text that are the texts of opening (its start).
+    pub opening: usize,
+}
+
+impl ReadLoad {
+    /// The text that this load writes where it happens, `own` being the model's: before it the
+    /// texts of opening that a load left out (`left_out`) placed, where this load looks a taxid
+    /// up, and after it the offset error that a load of the same volume left out, where this load
+    /// looks that taxid up (the texts of a load are those of opening, then those of its lookups).
+    /// They are NCBI's texts of this load: the asks that the left-out load made in the model are
+    /// this load's first.
+    pub fn placed(&self, own: &[u8]) -> Vec<u8> {
+        self.with_left_out(own.to_vec()).0
+    }
+
+    /// `placed` for the model's read of this load (`common::database::subject_read_texts`, a
+    /// batch modelled after a report that left loads out): its text, whose texts of opening are
+    /// then those placed before its own.
+    pub fn place(&mut self, own: Vec<u8>) -> Vec<u8> {
+        let (text, opening) = self.with_left_out(own);
+        self.opening = opening;
+        text
+    }
+
+    /// The text of `placed` and the length of its texts of opening.
+    fn with_left_out(&self, own: Vec<u8>) -> (Vec<u8>, usize) {
+        let mut pending = self.texts.pending.lock().expect("the texts of the loads");
+        if pending.opening.is_empty() && pending.offsets.is_empty() {
+            return (own, self.opening);
+        }
+        let mut text = Vec::new();
+        if self.looks_up {
+            text.append(&mut pending.opening);
+        }
+        let opening = text.len() + self.opening;
+        text.extend(own);
+        if self.offset {
+            if let Some(at) = pending
+                .offsets
+                .iter()
+                .position(|(volume, _)| *volume == self.volume)
+            {
+                text.extend(pending.offsets.remove(at).1);
+            }
+        }
+        (text, opening)
+    }
+
+    /// NCBI does not make this load, whose text in the model is `text`: its texts of opening and
+    /// its offset error go to the next load that makes those asks (`placed`).
+    pub fn left_out(&self, text: &[u8]) {
+        let (opening, offset) = text.split_at(self.opening.min(text.len()));
+        let mut pending = self.texts.pending.lock().expect("the texts of the loads");
+        if !opening.is_empty() {
+            pending.opening.extend_from_slice(opening);
+        }
+        if !offset.is_empty() {
+            match pending
+                .offsets
+                .iter_mut()
+                .find(|(volume, _)| *volume == self.volume)
+            {
+                Some((_, texts)) => texts.extend_from_slice(offset),
+                None => pending.offsets.push((self.volume, offset.to_vec())),
+            }
+        }
+    }
+}
+
+/// The texts of the loads of a run that NCBI does not make (`ReadLoad::left_out`), until the load
+/// that makes their asks (`ReadLoad::placed`): a load of a later read of the report, of a later
+/// batch's reads, or a later batch's prefetch (`common::database::subject_read_texts`). A text
+/// that no later load asks for is never written. One per run (`TaxdbRun`).
+#[derive(Debug, Default)]
+pub struct LoadTexts {
+    pending: std::sync::Mutex<PendingTexts>,
+}
+
+/// The run's one ledger: two are the same where they are one (the loads of one run share it).
+impl PartialEq for LoadTexts {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self, other)
+    }
+}
+
+impl Eq for LoadTexts {}
+
+impl LoadTexts {
+    /// No text left out (`TaxdbRun::restart`: the batches are searched again).
+    pub fn clear(&self) {
+        *self.pending.lock().expect("the texts of the loads") = PendingTexts::default();
+    }
+}
+
+#[derive(Debug, Default)]
+struct PendingTexts {
+    /// The texts of opening the taxonomy database (empty: none left out).
+    opening: Vec<u8>,
+    /// By volume, its offset error.
+    offsets: Vec<(u32, Vec<u8>)>,
+}
 
 impl SubjectReads {
-    /// Sets the texts of query `query`'s reads.
+    /// Sets the reads of query `query`.
     pub fn set(&mut self, query: usize, reads: QueryReads) {
         if reads.is_empty() {
             return;
@@ -110,26 +270,21 @@ pub fn reads_by_rank(reads: &[QueryReads], ordinals: &[u32]) -> Vec<QueryReads> 
         .map(|query| {
             query
                 .iter()
-                .filter_map(|(ordinal, text)| {
-                    let rank = ordinals.binary_search(ordinal).ok()?;
-                    Some((rank as u32, text.clone()))
+                .filter_map(|read| {
+                    let rank = ordinals.binary_search(&read.subject).ok()?;
+                    Some(SubjectRead {
+                        subject: rank as u32,
+                        ..read.clone()
+                    })
                 })
                 .collect()
         })
         .collect()
 }
 
-/// The texts of query `query`'s reads in `reads`, in order.
-fn reads_of(reads: &[QueryReads], query: usize) -> &[(u32, Vec<u8>)] {
+/// The reads of query `query` in `reads`, in order.
+fn reads_of(reads: &[QueryReads], query: usize) -> &[SubjectRead] {
     reads.get(query).map_or(&[], Vec::as_slice)
-}
-
-/// Every text of the reads of the queries `queries` in `reads`, in order.
-pub fn read_texts(reads: &[QueryReads], queries: std::ops::Range<usize>) -> Vec<u8> {
-    queries
-        .flat_map(|query| reads_of(reads, query))
-        .flat_map(|(_, text)| text.iter().copied())
-        .collect()
 }
 
 /// A report writer's call where NCBI reads a subject (`QueryWarnings::subject_read`): the
@@ -144,15 +299,19 @@ pub fn no_subject_reads<W>(_subject: u32, _writer: &mut W) -> io::Result<()> {
 }
 
 /// The writing of the texts of `SubjectReads` where the reports read the subjects: every text
-/// of the queries below `query` is written, and the first `next` of query `query`'s.
+/// of the queries below `query` is written, and the first `next` of query `query`'s. A read
+/// writes its text where it happens (`SubjectRead::placed`), with the texts that the loads NCBI
+/// does not make left to it (`cut`).
 pub struct ReadCursor<'a> {
     reads: &'a [QueryReads],
     query: usize,
     next: usize,
+    /// The run ended at an exception of NCBI's XML stream (`end_run`): no text is written after.
+    ended: bool,
 }
 
 impl<'a> ReadCursor<'a> {
-    /// The cursor of `reads` (by query index), or `None` where no read writes a text.
+    /// The cursor of `reads` (by query index), or `None` where no query has a read.
     pub fn new(reads: &'a [QueryReads]) -> Option<Self> {
         reads
             .iter()
@@ -161,19 +320,20 @@ impl<'a> ReadCursor<'a> {
                 reads,
                 query: 0,
                 next: 0,
+                ended: false,
             })
     }
 
-    /// Whether the report of query `query` reads a subject that writes a text.
+    /// Whether the report of query `query` reads a subject that may write a text.
     pub fn has_texts(&self, query: usize) -> bool {
-        !reads_of(self.reads, query).is_empty()
+        !self.ended && !reads_of(self.reads, query).is_empty()
     }
 
     /// The report of query `query` reads subject `subject` here (a tabular row that reads it,
     /// its description line, its alignment's heading, its BLAST XML `Hit`): the texts of the
     /// query's reads up to its first are written to `sink`, after the report written so far
-    /// (`report`) is flushed, unless they are written already. A subject whose reads write no
-    /// text, or that the query's report read before, writes nothing.
+    /// (`report`) is flushed, unless they are written already. A subject that the query's report
+    /// read before, or that is not among its reads, writes nothing.
     pub fn subject_read(
         &mut self,
         query: usize,
@@ -181,23 +341,63 @@ impl<'a> ReadCursor<'a> {
         report: &mut dyn Write,
         sink: &mut dyn Write,
     ) -> io::Result<()> {
-        if query < self.query {
+        if query < self.query || self.ended {
             return Ok(());
         }
         let from = if query == self.query { self.next } else { 0 };
         let reads = reads_of(self.reads, query);
         let Some(found) = reads
             .get(from..)
-            .and_then(|rest| rest.iter().position(|(read, _)| *read == subject))
+            .and_then(|rest| rest.iter().position(|read| read.subject == subject))
         else {
             return Ok(());
         };
         let mut text = self.unwritten_before(query);
-        for (_, read) in &reads[from..=from + found] {
-            text.extend_from_slice(read);
+        for read in &reads[from..=from + found] {
+            text.extend(read.placed());
         }
         self.next = from + found + 1;
         write_after(report, sink, &text)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:372-375
+    // ```c++
+    //     const CSeq_id& kSeqId = kAlignSet.Get().front()->GetSeq_id(1);
+    //
+    //     try {
+    //         const CBioseq_Handle& kSubjBioseqHandle = scope->GetBioseqHandle(kSeqId);
+    // ```
+    /// The report of query `query` made no read after the ones written (BLAST XML: its `Iteration`
+    /// threw, or one of its `Hit`s did, `blast_xml::DocumentPosts::cut`): NCBI loads a subject
+    /// when it makes its `Hit` (`s_SeqAlignToXMLHit`), so the query's later reads do not happen.
+    /// Their texts go to NCBI's next loads that make the same asks (`ReadLoad::left_out`); one
+    /// that no later load asks for is never written. The texts of the queries before it that
+    /// their reports did not place are written first, to `sink` after `report` is flushed
+    /// (`before_query`).
+    pub fn cut(
+        &mut self,
+        query: usize,
+        report: &mut dyn Write,
+        sink: &mut dyn Write,
+    ) -> io::Result<()> {
+        if query < self.query || self.ended {
+            return Ok(());
+        }
+        self.before_query(query, report, sink)?;
+        let reads = reads_of(self.reads, query);
+        for read in &reads[self.next.min(reads.len())..] {
+            if let Some(load) = &read.load {
+                load.left_out(&read.text);
+            }
+        }
+        self.next = reads.len();
+        Ok(())
+    }
+
+    /// The run ends at an exception of NCBI's XML stream (`blast_xml::DocumentPosts::ends_run`):
+    /// NCBI loads nothing after it, so no text not written yet is written.
+    pub fn end_run(&mut self) {
+        self.ended = true;
     }
 
     /// Writes to `sink` the texts of the reads of the queries below `query` that their reports
@@ -209,27 +409,37 @@ impl<'a> ReadCursor<'a> {
         report: &mut dyn Write,
         sink: &mut dyn Write,
     ) -> io::Result<()> {
+        if self.ended {
+            return Ok(());
+        }
         let text = self.unwritten_before(query);
         write_after(report, sink, &text)
     }
 
     /// The texts not written yet of every query (a report that ends without placing them).
     fn unwritten(&mut self) -> Vec<u8> {
+        if self.ended {
+            return Vec::new();
+        }
         let queries = self.reads.len().max(self.query + 1);
         self.unwritten_before(queries)
     }
 
-    /// The texts not written yet of the queries below `query`, which count as written after
-    /// this; the cursor moves to the start of `query`'s.
+    /// The texts not written yet of the queries below `query`, which count as written (their
+    /// loads as made) after this; the cursor moves to the start of `query`'s.
     fn unwritten_before(&mut self, query: usize) -> Vec<u8> {
         if query <= self.query {
             return Vec::new();
         }
         let mut text = Vec::new();
-        for (_, read) in reads_of(self.reads, self.query).iter().skip(self.next) {
-            text.extend_from_slice(read);
+        for read in reads_of(self.reads, self.query).iter().skip(self.next) {
+            text.extend(read.placed());
         }
-        text.extend(read_texts(self.reads, self.query + 1..query));
+        for later in self.query + 1..query {
+            for read in reads_of(self.reads, later) {
+                text.extend(read.placed());
+            }
+        }
         (self.query, self.next) = (query, 0);
         text
     }
@@ -250,9 +460,16 @@ pub fn write_marked(
         every: true,
         marks: reads.to_vec(),
         ends: vec![0; reads.len()],
-        texts: Vec::new(),
+        ..HitPosts::default()
     };
-    write_hit_posts(report, &posts, query, writer, warnings)
+    match warnings {
+        Some(warnings) => {
+            let QueryWarnings { reads, sink, .. } = warnings;
+            write_reads(report, &posts, query, writer, &mut **sink, reads.as_mut())
+        }
+        // Marks alone post nothing of their own.
+        None => writer.write_all(report),
+    }
 }
 
 /// The places in a query's report, formatted into a buffer, where NCBI loads a subject and posts
@@ -261,8 +478,10 @@ pub fn write_marked(
 /// program's model (`ReadCursor::subject_read`) and the texts that the report's writer makes there
 /// (the taxonomy database's messages of the XML2 and JSON documents' `Hit`s, `TaxdbPrinter`).
 /// NCBI posts them on `cerr`, which flushes the report written before them (`QueryWarnings`);
-/// `write` writes them so.
+/// `write` writes them so. Dropping it loses them and the exception that ends the run, so it is
+/// `must_use`.
 #[derive(Debug, Default)]
+#[must_use = "a report's posts and the exception that ends the run go through write_hit_posts"]
 pub struct HitPosts {
     /// Whether every `Hit` is marked (the model's reads of the query write texts); else only one
     /// whose writer makes a text.
@@ -272,6 +491,13 @@ pub struct HitPosts {
     /// By marked `Hit`: the end of its texts in `texts`.
     ends: Vec<usize>,
     texts: Vec<u8>,
+    /// What the document's writer posted while it wrote the report
+    /// (`StructuredXml::take_posts`), at offsets of the report, in order.
+    document: Vec<crate::report::blast_xml::writer::DocumentPost>,
+    /// The report made no read after its last marked `Hit` (`DocumentPosts::cut`).
+    cut: bool,
+    /// The exception that ends the run after these posts (`DocumentPosts::ends_run`).
+    ends_run: Option<Box<crate::ncbi_exception::NcbiException>>,
 }
 
 impl HitPosts {
@@ -301,9 +527,32 @@ impl HitPosts {
         Ok(())
     }
 
+    /// Adds what the document's writer posted while it wrote the report (`DocumentPost`, at
+    /// offsets of the report): each comes after the report's bytes before it, and after a `Hit`'s
+    /// texts at the same place (NCBI loads a subject before it writes the `Hit`); with the cut of
+    /// the report's loads and the exception that ends the run after them (`DocumentPosts`).
+    pub fn document(&mut self, posts: crate::report::blast_xml::DocumentPosts) {
+        let crate::report::blast_xml::DocumentPosts {
+            posts,
+            cut,
+            ends_run,
+        } = posts;
+        self.document.extend(posts);
+        self.cut |= cut;
+        if ends_run.is_some() {
+            self.ends_run = ends_run;
+        }
+    }
+
+    /// Whether nothing of these posts goes to the diagnostics (no text, no document post).
+    fn posts_nothing(&self) -> bool {
+        self.texts.is_empty() && self.document.is_empty()
+    }
+
     /// Writes `report`, the query's output, to `writer`, and at each marked `Hit`, after the
     /// bytes before it: `read` of its subject (the model's text, to `sink`; `writer` is the
-    /// report) and the texts the writer made there, to `sink` after `writer` is flushed.
+    /// report) and the texts the writer made there, to `sink` after `writer` is flushed; the
+    /// document's posts (`document`) likewise at their places.
     pub fn write(
         &self,
         report: &[u8],
@@ -312,58 +561,179 @@ impl HitPosts {
         mut read: impl FnMut(u32, &mut dyn Write, &mut dyn Write) -> io::Result<()>,
     ) -> io::Result<()> {
         let (mut index, mut from) = (0, 0);
-        write_at_marks(report, &self.marks, writer, |subject, writer| {
+        let mut document = self.document.iter().peekable();
+        let mut written = 0;
+        for &(at, subject) in &self.marks {
+            while let Some(post) = document.next_if(|post| post.at < at) {
+                writer.write_all(&report[written..post.at])?;
+                written = post.at;
+                write_after(writer, &mut *sink, &post.text)?;
+            }
+            writer.write_all(&report[written..at])?;
+            written = at;
             read(subject, writer, &mut *sink)?;
             let end = self.ends[index];
             index += 1;
             let texts = &self.texts[from..end];
             from = end;
-            write_after(writer, &mut *sink, texts)
-        })
+            write_after(writer, &mut *sink, texts)?;
+        }
+        for post in document {
+            writer.write_all(&report[written..post.at])?;
+            written = post.at;
+            write_after(writer, &mut *sink, &post.text)?;
+        }
+        writer.write_all(&report[written..])
     }
+}
+
+/// Writes `report`, a part of a structured document that holds no `Hit` of its own (the end of the
+/// document, a held report written there), with what the document's writer posted while it wrote
+/// it (`StructuredXml::take_posts`), as `write_hit_posts`.
+pub fn write_document_posts(
+    report: &[u8],
+    posts: crate::report::blast_xml::DocumentPosts,
+    writer: &mut dyn Write,
+    warnings: Option<&mut QueryWarnings<'_>>,
+) -> Result<()> {
+    let mut hits = HitPosts::default();
+    hits.document(posts);
+    write_hit_posts(report, &hits, 0, writer, warnings)
 }
 
 /// Writes query `query`'s structured report `report` with the posts of its `Hit`s
 /// (`HitPosts::write`): the model's reads through the warnings' cursor
-/// (`QueryWarnings::subject_read`) and the writer's texts, both to the warnings' sink. Without
-/// warnings, the report alone.
+/// (`QueryWarnings::subject_read`) and the writer's texts, both to the warnings' sink (the run's
+/// diagnostics; `write_posts_to`). Without warnings, the report alone: a post there would be lost,
+/// which is LOSAT's internal error.
 pub fn write_hit_posts(
     report: &[u8],
     hits: &HitPosts,
     query: usize,
     writer: &mut dyn Write,
     warnings: Option<&mut QueryWarnings<'_>>,
-) -> io::Result<()> {
-    let Some(warnings) = warnings else {
-        return writer.write_all(report);
-    };
-    let QueryWarnings { reads, sink, .. } = warnings;
-    hits.write(
-        report,
-        writer,
-        &mut **sink,
-        |subject, writer, sink| match reads.as_mut() {
-            Some(cursor) => cursor.subject_read(query, subject, writer, sink),
-            None => Ok(()),
-        },
-    )
+) -> Result<()> {
+    match warnings {
+        Some(warnings) => {
+            let QueryWarnings { reads, sink, .. } = warnings;
+            write_posts_to(report, hits, query, writer, &mut **sink, reads.as_mut())
+        }
+        None => {
+            anyhow::ensure!(
+                hits.posts_nothing(),
+                "LOSAT internal error: a structured report posts on the diagnostics, but its format writes no warnings"
+            );
+            write_posts_to(report, hits, query, writer, &mut std::io::sink(), None)
+        }
+    }
 }
 
-/// Writes `report`, a buffer, to `writer` with `read` of each subject at its place `marks` (the
-/// buffer's length where the serial writer reads it, and the subject), after the bytes before it.
-pub fn write_at_marks(
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:775-776
+// ```c++
+// 		s_FillBlastOutput(bxmlout, data);
+// 		s_WriteXML2Object(bxmlout, &out_stream);
+// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
+// ```c++
+//     catch (const CException& e) {                                           \
+//         LOG_POST(Error << "Error: " << e.what());                           \
+//         exit_code = BLAST_UNKNOWN_ERROR;                                    \
+//     }                                                                       \
+// ```
+/// The one writer of a structured report's posts (`write_hit_posts`; BLASTX, whose reports keep
+/// their own cursor, calls it with that): `report` to `writer` with the posts of its `Hit`s and of
+/// its document (`HitPosts::write`) to `sink`, the reads' texts through `reads`. A report that made
+/// no read after its last `Hit` (`DocumentPosts::cut`) moves the texts of the later reads
+/// (`ReadCursor::cut`); an exception of NCBI's XML stream that ends the run is returned after the
+/// posts (`blast_xml::writer::run_ending_exception`), and no text of a read is written after it.
+pub fn write_posts_to(
     report: &[u8],
-    marks: &[(usize, u32)],
+    hits: &HitPosts,
+    query: usize,
     writer: &mut dyn Write,
-    mut read: impl FnMut(u32, &mut dyn Write) -> io::Result<()>,
-) -> io::Result<()> {
-    let mut written = 0;
-    for &(at, subject) in marks {
-        writer.write_all(&report[written..at])?;
-        written = at;
-        read(subject, writer)?;
+    sink: &mut dyn Write,
+    mut reads: Option<&mut ReadCursor<'_>>,
+) -> Result<()> {
+    write_reads(
+        report,
+        hits,
+        query,
+        writer,
+        &mut *sink,
+        reads.as_deref_mut(),
+    )?;
+    if let Some(cursor) = reads {
+        if hits.ends_run.is_some() {
+            cursor.end_run();
+        } else if hits.cut {
+            cursor.cut(query, writer, sink)?;
+        }
     }
-    writer.write_all(&report[written..])
+    match &hits.ends_run {
+        Some(thrown) => Err(crate::report::blast_xml::writer::run_ending_exception(
+            thrown,
+        )),
+        None => Ok(()),
+    }
+}
+
+/// `HitPosts::write` of query `query`'s report, the reads' texts through `reads`.
+fn write_reads(
+    report: &[u8],
+    hits: &HitPosts,
+    query: usize,
+    writer: &mut dyn Write,
+    sink: &mut dyn Write,
+    mut reads: Option<&mut ReadCursor<'_>>,
+) -> io::Result<()> {
+    hits.write(report, writer, sink, |subject, writer, sink| {
+        match reads.as_deref_mut() {
+            Some(cursor) => cursor.subject_read(query, subject, writer, sink),
+            None => Ok(()),
+        }
+    })
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:756-758
+// ```c++
+// 	catch(CException &e){
+// 	    ERR_POST(Error << "Failed s_BlastXMLAddIteration " << query_label << e.what() );
+// 	    return;
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1160
+// ```c++
+// void CBlastAppDiagHandler::Post(const SDiagMessage & mess)
+// {
+// 	if(m_handler != NULL) {
+// 		m_handler->Post(mess);
+// 	}
+// 	if(m_save) {
+// ```
+/// Whether the writer of a report of format `format` posts on the run's diagnostics while it
+/// writes the report, so that it gets the run's warnings (`QueryWarnings`, whose sink is the
+/// diagnostics) whatever its place among the run's formats (the first format gets them anyway, for
+/// the posts before each query): BLAST XML and the XML2 and JSON documents (the 803.7 posts and
+/// exceptions of their streams, `write_hit_posts`, and the taxonomy database's messages at their
+/// `Hit`s), the BLAST archive (NCBI's posts, which it saves as messages) and the Seq-annots of
+/// outfmt 8, 9 and 12 (the posts of the bytes that NCBI's stream replaces,
+/// `serial::seqalign::write_query_to`). A writer that posts without warnings is LOSAT's internal
+/// error (`write_hit_posts`), not a silent loss.
+pub fn report_posts(format: Option<crate::blastinput::app::ReportFormat>) -> bool {
+    use crate::blastinput::app::ReportFormat;
+    matches!(
+        format,
+        Some(
+            ReportFormat::Xml
+                | ReportFormat::Xml2
+                | ReportFormat::Xml2S
+                | ReportFormat::Json
+                | ReportFormat::JsonS
+                | ReportFormat::ArchiveFormat
+                | ReportFormat::AsnText
+                | ReportFormat::AsnBinary
+                | ReportFormat::JsonSeqalign
+        )
+    )
 }
 
 /// Writes `text` to `sink` after `report` is flushed (nothing for an empty text).
@@ -391,28 +761,7 @@ impl Drop for QueryWarnings<'_> {
     }
 }
 
-/// What `QueryWarnings` writes before the report of each query, by query index.
-enum Before<'a> {
-    /// Lines that are each a warning (`Posts::of_lines`): what the programs other than BLASTN
-    /// post there.
-    Lines(&'a [Vec<u8>]),
-    /// The posts of each query, written with the BLAST archive's handle (`Posts::write`).
-    Posts {
-        posts: &'a [Posts],
-        archive: Option<&'a ArchiveHandle>,
-    },
-}
-
 impl<'a> QueryWarnings<'a> {
-    /// The warnings `before` (lines, each a warning) of each query, written to `sink`.
-    pub fn new(before: &'a [Vec<u8>], sink: &'a mut (dyn Write + Send)) -> Self {
-        Self {
-            before: Before::Lines(before),
-            sink,
-            reads: None,
-        }
-    }
-
     /// These warnings with the texts of the subjects that the reports read one by one
     /// (`SubjectReads`), which the report's writer places where it reads each subject
     /// (`subject_read`). A text that the writer does not place is written after the query's
@@ -459,10 +808,8 @@ impl<'a> QueryWarnings<'a> {
         sink: &'a mut (dyn Write + Send),
     ) -> Self {
         Self {
-            before: Before::Posts {
-                posts: before,
-                archive,
-            },
+            before,
+            archive,
             sink,
             reads: None,
         }
@@ -493,25 +840,82 @@ impl<'a> QueryWarnings<'a> {
         if let Some(cursor) = self.reads.as_mut() {
             cursor.before_query(index, report, &mut *self.sink)?;
         }
-        match &self.before {
-            Before::Lines(before) => match before.get(index) {
-                Some(warnings) if !warnings.is_empty() => {
-                    report.flush()?;
-                    self.sink.write_all(warnings)?;
-                    self.sink.flush()
-                }
-                _ => Ok(()),
-            },
-            Before::Posts { posts, archive } => match posts.get(index) {
-                Some(posts) if !posts.is_empty() => {
-                    report.flush()?;
-                    posts.write(&mut *self.sink, *archive)?;
-                    self.sink.flush()
-                }
-                _ => Ok(()),
-            },
+        // The texts of a prefetch's loads are made here (`Posts::placed`), where NCBI's prefetch
+        // loads the subjects: after the reports of the batches before.
+        match self.before.get(index).map(Posts::placed) {
+            Some(posts) if posts.has_text() => {
+                report.flush()?;
+                posts.write(&mut *self.sink, self.archive)?;
+                self.sink.flush()
+            }
+            // A search strategy request's mark alone shows nothing (`Posts::request`).
+            Some(posts) => posts.write(&mut *self.sink, self.archive),
+            None => Ok(()),
         }
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:259-262
+// ```c++
+//             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+//             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+//
+//             SaveSearchStrategy(args, m_CmdLineArgs, queries, m_OptsHndl);
+// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288
+// ```c++
+//                 BlastFormatter_PreFetchSequenceData(*results, scope,
+//                 		                            fmt_args->GetFormattedOutputChoice());
+//                 ITERATE(CSearchResultSet, result, *results) {
+//                     formatter.PrintOneResultSet(**result, query_batch);
+//                 }
+// ```
+/// The posts written before each query's report (`QueryWarnings::of_posts`) from the lines of
+/// each query (`lines`, each line a warning), NCBI's posts of the bytes replaced in the search
+/// strategy requests of the batches (`requests`: each with the batch's first query, numbered as
+/// `lines`, in order; `StrategyExport::take_posts`) and the texts of the batches' prefetches
+/// (`prefetches`, the same way; `common::database::batch_prefetch`, whose loads' texts are made
+/// where they are written, `Posts::loads`). NCBI posts a request's when it writes the request,
+/// after it read the batch and before the batch's search, and the prefetch's after the search:
+/// in the batch's first query, after the reader's messages of the batch (the first
+/// `reader(query)` bytes of its lines), the request's, the prefetch's, then the rest (the query's
+/// own warnings).
+pub fn query_posts(
+    lines: Vec<Vec<u8>>,
+    requests: Vec<(usize, Posts)>,
+    prefetches: Vec<(usize, Posts)>,
+    reader: impl Fn(usize) -> usize,
+) -> Vec<Posts> {
+    // A batch's prefetch after its request (a stable sort keeps the order of each list).
+    let mut requests: Vec<(usize, Posts)> = requests.into_iter().chain(prefetches).collect();
+    requests.sort_by_key(|&(first, _)| first);
+    let mut requests = requests.into_iter().peekable();
+    let mut posts: Vec<Posts> = lines
+        .into_iter()
+        .enumerate()
+        .map(|(query, mut lines)| {
+            let Some((_, request)) = requests.next_if(|&(first, _)| first <= query) else {
+                return Posts::of_lines(lines);
+            };
+            let rest = lines.split_off(reader(query).min(lines.len()));
+            let mut posts = Posts::of_lines(lines);
+            posts.append(&request);
+            while let Some((_, request)) = requests.next_if(|&(first, _)| first <= query) {
+                posts.append(&request);
+            }
+            posts.lines(&rest);
+            posts
+        })
+        .collect();
+    // A request whose batch starts after the last query's lines (none is made) keeps its posts
+    // after them.
+    for (_, request) in requests {
+        match posts.last_mut() {
+            Some(last) => last.append(&request),
+            None => posts.push(request),
+        }
+    }
+    posts
 }
 
 /// The warning for a query whose ungapped Karlin-Altschul parameters cannot be computed.
@@ -956,17 +1360,20 @@ mod tests {
     fn the_texts_of_the_reads_follow_the_report_up_to_each_read() {
         let reads: Vec<QueryReads> = vec![
             vec![
-                (5, b"A\n".to_vec()),
-                (7, b"B\n".to_vec()),
-                (8, b"C\n".to_vec()),
+                SubjectRead::of_text(5, b"A\n"),
+                SubjectRead::of_text(7, b"B\n"),
+                SubjectRead::of_text(8, b"C\n"),
             ],
-            vec![(3, b"D\n".to_vec())],
-            vec![(4, b"E\n".to_vec())],
+            vec![SubjectRead::of_text(3, b"D\n")],
+            vec![SubjectRead::of_text(4, b"E\n")],
         ];
-        let before = vec![b"W0\n".to_vec(), b"W1\n".to_vec(), b"W2\n".to_vec()];
+        let before: Vec<Posts> = [b"W0\n", b"W1\n", b"W2\n"]
+            .map(|lines| Posts::of_lines(lines.to_vec()))
+            .into();
         let log = Log::default();
         let (mut report, mut sink) = (log.clone(), log.clone());
-        let mut warnings = QueryWarnings::new(&before, &mut sink).with_subject_reads(&reads);
+        let mut warnings =
+            QueryWarnings::of_posts(&before, None, &mut sink).with_subject_reads(&reads);
         assert!(warnings.reads_with_texts(0) && !warnings.reads_with_texts(3));
         warnings.before_query(0, &mut report).unwrap();
         // A subject without a text writes nothing; a read writes the texts up to its own.
@@ -1009,10 +1416,10 @@ mod tests {
         assert_eq!(text, "{0}\n,\nT1\nT3\n{1}\n");
         // BLAST XML: each `Hit` loads its subject at its own start; a query whose model's reads
         // write texts marks every `Hit`, and a `Hit`'s read comes before the texts made there.
-        let reads: Vec<QueryReads> = vec![vec![(5, b"A\n".to_vec())]];
+        let reads: Vec<QueryReads> = vec![vec![SubjectRead::of_text(5, b"A\n")]];
         let log = Log::default();
         let (mut report, mut sink) = (log.clone(), log.clone());
-        let mut warnings = QueryWarnings::new(&[], &mut sink).with_subject_reads(&reads);
+        let mut warnings = QueryWarnings::of_posts(&[], None, &mut sink).with_subject_reads(&reads);
         let mut posts = HitPosts::new(warnings.reads_with_texts(0));
         posts.hit(0, 5, |texts| texts.write_all(b"P5\n")).unwrap();
         posts.hit(4, 6, |texts| texts.write_all(b"P6\n")).unwrap();
@@ -1020,17 +1427,222 @@ mod tests {
         drop(warnings);
         let text = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
         assert_eq!(text, "A\nP5\n<H5>P6\n<H6>");
-        // Without warnings, the report alone.
+        // Without warnings, texts that would be lost are LOSAT's internal error; marks alone
+        // write the report.
         let mut alone = Vec::new();
-        write_hit_posts(b"<H5><H6>", &posts, 0, &mut alone, None).unwrap();
+        let lost = write_hit_posts(b"<H5><H6>", &posts, 0, &mut alone, None).unwrap_err();
+        assert!(
+            lost.to_string().starts_with("LOSAT internal error"),
+            "{lost}"
+        );
+        let mut marks = HitPosts::new(true);
+        marks.hit(0, 5, |_| Ok(())).unwrap();
+        let mut alone = Vec::new();
+        write_hit_posts(b"<H5><H6>", &marks, 0, &mut alone, None).unwrap();
         assert_eq!(alone, b"<H5><H6>");
+    }
+
+    /// A read with what its load looks up (`ReadLoad`), the run's texts `texts`.
+    fn loaded(
+        texts: &std::sync::Arc<LoadTexts>,
+        subject: u32,
+        text: &[u8],
+        (volume, offset, opening): (u32, bool, usize),
+    ) -> SubjectRead {
+        SubjectRead {
+            subject,
+            text: text.to_vec(),
+            load: Some(ReadLoad {
+                texts: std::sync::Arc::clone(texts),
+                volume,
+                looks_up: true,
+                offset,
+                opening,
+            }),
+        }
+    }
+
+    /// A BLAST XML report that made no `Hit` after its last mark (`DocumentPosts::cut`: its
+    /// `Iteration` or a `Hit` threw) loads none of its later subjects: the texts of their loads go
+    /// to NCBI's next load that makes the same ask, of whichever subject (NCBI 2.17.0, review 1 of
+    /// K4h M2, `q3w.faa` with `PRE_FETCH_SEQS_LIMIT=1`: the offset error at query 3's `Hit`, not
+    /// after query 2's post; agent3 probes m2.*): the texts of opening at the next load that looks
+    /// a taxid up, a volume's offset error at its next load that looks that taxid up. A text that
+    /// no later load asks for is never written, and a run that NCBI's XML stream ends writes no
+    /// text after its posts.
+    #[test]
+    fn a_cut_report_leaves_its_texts_to_the_next_load_that_asks() {
+        let texts = std::sync::Arc::new(LoadTexts::default());
+        // Query 0 reads 5 (the run's first ask: the texts of opening, then volume 0's offset
+        // error) and 6 (volume 1's offset error); query 1 reads 9 (volume 1, the offset taxid)
+        // and 6 again; query 2 reads 7 (volume 0, another taxid).
+        let reads: Vec<QueryReads> = vec![
+            vec![
+                loaded(&texts, 5, b"O\nE0\n", (0, true, 2)),
+                loaded(&texts, 6, b"E1\n", (1, true, 0)),
+            ],
+            vec![
+                loaded(&texts, 9, b"", (1, true, 0)),
+                loaded(&texts, 6, b"", (1, true, 0)),
+            ],
+            vec![loaded(&texts, 7, b"", (0, false, 0))],
+        ];
+        // Query 0 reads 5, then a `Hit` throws: 6's offset error goes to 9's load.
+        let log = Log::default();
+        let (mut report, mut sink) = (log.clone(), log.clone());
+        let mut cursor = ReadCursor::new(&reads).unwrap();
+        cursor.subject_read(0, 5, &mut report, &mut sink).unwrap();
+        cursor.cut(0, &mut report, &mut sink).unwrap();
+        cursor.before_query(1, &mut report, &mut sink).unwrap();
+        assert!(cursor.has_texts(1));
+        report.write_all(b"<Q1>").unwrap();
+        cursor.subject_read(1, 9, &mut report, &mut sink).unwrap();
+        cursor.subject_read(1, 6, &mut report, &mut sink).unwrap();
+        report.write_all(b"<H6>").unwrap();
+        let text = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
+        assert_eq!(text, "O\nE0\n<Q1>E1\n<H6>");
+        // Query 0's `Iteration` throws: its texts of opening and volume 1's offset error go to 9's
+        // load, volume 0's offset error waits for a load that looks its taxid up (7 does not).
+        let log = Log::default();
+        let (mut report, mut sink) = (log.clone(), log.clone());
+        let mut cursor = ReadCursor::new(&reads).unwrap();
+        cursor.cut(0, &mut report, &mut sink).unwrap();
+        report.write_all(b"<Q1>").unwrap();
+        cursor.subject_read(1, 9, &mut report, &mut sink).unwrap();
+        cursor.before_query(2, &mut report, &mut sink).unwrap();
+        cursor.subject_read(2, 7, &mut report, &mut sink).unwrap();
+        assert!(cursor.unwritten().is_empty());
+        let text = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
+        assert_eq!(text, "<Q1>O\nE1\n");
+        // A batch modelled after that report: its first read of volume 0 that looks the taxid up
+        // makes volume 0's ask, whose text then counts as its own (cut again, it moves again).
+        let mut load = reads[0][0].load.clone().unwrap();
+        load.opening = 0;
+        assert_eq!(load.place(b"X\n".to_vec()), b"X\nE0\n");
+        assert_eq!(load.opening, 0);
+        load.left_out(b"X\nE0\n");
+        let next = loaded(&texts, 8, b"", (0, true, 0));
+        assert_eq!(next.placed(), b"X\nE0\n");
+        texts.clear();
+        // The end of the run: nothing after it.
+        let log = Log::default();
+        let (mut report, mut sink) = (log.clone(), log.clone());
+        let mut cursor = ReadCursor::new(&reads).unwrap();
+        cursor.cut(0, &mut report, &mut sink).unwrap();
+        cursor.end_run();
+        cursor.subject_read(1, 9, &mut report, &mut sink).unwrap();
+        cursor.before_query(2, &mut report, &mut sink).unwrap();
+        assert!(cursor.unwritten().is_empty() && !cursor.has_texts(1));
+        assert!(log.0.lock().unwrap().is_empty());
+    }
+
+    /// NCBI's posts of the bytes replaced in a batch's search strategy request follow the reader's
+    /// messages of the batch in its first query and come before the rest of its lines (NCBI
+    /// 2.17.0, probe RG K/k4b/probe2 `blastp_b3_f6`: the O warning of query 3 after the posts of
+    /// its batch); a batch without posts keeps its lines, and the posts are whole posts.
+    /// A batch whose prefetch is on, modelled before the report of a batch before it that the
+    /// stream cut (a program that models every batch before it writes): its loads' texts are made
+    /// where the posts are written (`Posts::loads`), after that report, so the texts that the cut
+    /// left go to the prefetch's loads that make their asks, in the order of the loads, after the
+    /// batch's reader messages and request posts (NCBI 2.17.0, agent4 m2 probe `*.qm.*.mix.f5`:
+    /// the offset error of query 2's prefetch after query 1's `Failed s_BlastXMLAddIteration`).
+    #[test]
+    fn a_prefetch_takes_the_texts_that_a_cut_report_before_it_left() {
+        let texts = std::sync::Arc::new(LoadTexts::default());
+        // Query 0's batch reads 5 (the texts of opening, then volume 0's offset error) one by one;
+        // query 1's batch prefetches 6 (volume 1, its offset error) and 7 (volume 0, the offset
+        // taxid), whose model gave 7 no text: 5 asked before it.
+        let reads: Vec<QueryReads> = vec![vec![loaded(&texts, 5, b"O\nE0\n", (0, true, 2))]];
+        let mut prefetch = Posts::new();
+        prefetch.loads(vec![
+            loaded(&texts, 6, b"E1\n", (1, true, 0)),
+            loaded(&texts, 7, b"", (0, true, 0)),
+        ]);
+        let mut request = Posts::new();
+        request.post(crate::report::diag_log::ERROR, b"P1\n".to_vec());
+        let posts = query_posts(
+            vec![Vec::new(), b"R1\nW1\n".to_vec()],
+            vec![(1, request)],
+            vec![(1, prefetch)],
+            |query| [0, 3][query],
+        );
+        let log = Log::default();
+        let mut report = log.clone();
+        let mut sink = log.clone();
+        let mut warnings =
+            QueryWarnings::of_posts(&posts, None, &mut sink).with_subject_reads(&reads);
+        warnings.before_query(0, &mut report).unwrap();
+        // Query 0's report is cut before its read of 5.
+        let (cursor, sink) = warnings.reads_and_sink();
+        cursor.unwrap().cut(0, &mut report, sink).unwrap();
+        warnings.before_query(1, &mut report).unwrap();
+        drop(warnings);
+        let text = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
+        // The opening at 6, the first load that looks a taxid up; volume 0's offset error at 7.
+        assert_eq!(text, "R1\nP1\nO\nE1\nE0\nW1\n");
+        // Without a cut, the model's texts.
+        let texts = std::sync::Arc::new(LoadTexts::default());
+        let mut prefetch = Posts::new();
+        prefetch.loads(vec![
+            loaded(&texts, 6, b"E1\n", (1, true, 0)),
+            loaded(&texts, 7, b"", (0, true, 0)),
+        ]);
+        assert_eq!(prefetch.text(), b"E1\n");
+        // A run whose lookups write no text keeps the prefetch's lines as they are.
+        let mut plain = Posts::new();
+        plain.loads(vec![SubjectRead::of_text(6, b"T\n")]);
+        assert_eq!(plain, Posts::of_lines(b"T\n".to_vec()));
+    }
+
+    #[test]
+    fn request_posts_follow_the_reader_messages_of_their_batch() {
+        use crate::report::diag_log::ERROR;
+        let lines = vec![
+            b"R0\nW0\n".to_vec(),
+            b"W1\n".to_vec(),
+            b"R2\nT2\nW2\n".to_vec(),
+        ];
+        let post = |text: &[u8]| {
+            let mut posts = Posts::new();
+            posts.post(ERROR, text);
+            posts
+        };
+        let reader = [3, 0, 3];
+        let posts = query_posts(
+            lines,
+            vec![(0, post(b"P0\n")), (2, post(b"P2a\n")), (2, post(b"P2b\n"))],
+            Vec::new(),
+            |query| reader[query],
+        );
+        let texts: Vec<Vec<u8>> = posts.iter().map(Posts::text).collect();
+        assert_eq!(
+            texts,
+            [
+                b"R0\nP0\nW0\n".to_vec(),
+                b"W1\n".to_vec(),
+                b"R2\nP2a\nP2b\nT2\nW2\n".to_vec()
+            ]
+        );
+        let mut whole = Posts::of_lines(b"R2\n".to_vec());
+        whole.append(&post(b"P2a\n"));
+        whole.append(&post(b"P2b\n"));
+        whole.lines(b"T2\nW2\n");
+        assert_eq!(posts[2], whole);
+        // A request after the last query's lines keeps its posts after them.
+        let posts = query_posts(
+            vec![b"W0\n".to_vec()],
+            vec![(1, post(b"P1\n"))],
+            Vec::new(),
+            |_| 0,
+        );
+        assert_eq!(posts[0].text(), b"W0\nP1\n");
     }
 
     #[test]
     fn a_query_without_texts_reads_nothing() {
         let reads: Vec<QueryReads> = vec![Vec::new(), Vec::new()];
         let mut sink = Vec::new();
-        let warnings = QueryWarnings::new(&[], &mut sink).with_subject_reads(&reads);
+        let warnings = QueryWarnings::of_posts(&[], None, &mut sink).with_subject_reads(&reads);
         assert!(!warnings.reads_with_texts(0));
         assert!(ReadCursor::new(&reads).is_none());
     }

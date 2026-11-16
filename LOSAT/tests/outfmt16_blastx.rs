@@ -1,9 +1,12 @@
 //! BLAST XML2 and JSON (outfmt 16 and 15) of BLASTX: what the frozen-fixture rows cannot show.
 //! The `-subject` report that NCBI holds back one query (a failed batch loses it), the run that stops
-//! at its first batch (the prolog alone), and the searches LOSAT refuses before the first byte (a byte >=
-//! 0x80 in a title or the `-db` name, DECISIONS 19 Q2; a taxonomy database scientific name, DECISIONS
-//! 30; a query that is not a regular file, DECISIONS 22), with the output held in memory when a later
-//! batch can still refuse (DECISIONS 21), and the taxonomy database of a `-db` taxid (DECISIONS 28).
+//! at its first batch (the prolog alone), and the searches LOSAT refuses before the first byte (a title
+//! of punctuation alone, on which NCBI crashes; a query that is not a regular file, DECISIONS 22), with
+//! the output held in memory when a later batch can still refuse (DECISIONS 21), and the taxonomy
+//! database of a `-db` taxid (DECISIONS 28). The titles, taxonomy names and `-db` names with a byte >=
+//! 0x80 or a control byte are written as NCBI writes them: the rows `db.xb.blastx.*` and
+//! `db.x16_bx_taxid.nonascii.*` of `db_search_manifest/blastx.tsv`, `tests/xml_dbname.rs` and
+//! `taxbad_blastx_db_{15,16}` below.
 //! BLASTX reads its queries in batches of 10,002 bases and not `BATCH_SIZE`, so the queries of the
 //! failed-batch tests are padded to 10,003 bases (`tests/db_search/make_x16_blastx_inputs.py`). The bytes
 //! of NCBI BLAST+ 2.17.0 are in `tests/fixtures/outfmt16` (`badbatch_blastx_{sub,db,dbtax}_{15,16}`:
@@ -19,6 +22,9 @@ use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::process::Stdio;
 use std::process::{Command, Output};
+
+mod temp_support;
+use temp_support::{home_and_worker_log, Finished, RunFiles};
 
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/outfmt16")
@@ -38,7 +44,9 @@ fn temp_dir(stem: &str) -> PathBuf {
     dir
 }
 
-fn command(env: &[(&str, &str)]) -> Command {
+/// LOSAT with an empty home, a worker log and `env`: the home and the log are removed when the
+/// returned files are dropped (the log is kept when the test panics).
+fn command(env: &[(&str, &str)]) -> (Command, RunFiles) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") {
@@ -55,23 +63,19 @@ fn command(env: &[(&str, &str)]) -> Command {
     for name in ["BATCH_SIZE", "CHUNK_SIZE", "BLASTDB"] {
         command.env_remove(name);
     }
-    let home = std::env::temp_dir().join("losat_outfmt16_home");
-    fs::create_dir_all(&home).expect("empty home");
-    command.env("HOME", &home).env("USERPROFILE", &home);
-    command.env(
-        "LOSAT_BLASTX_WORKER_LOG",
-        std::env::temp_dir().join("losat_outfmt16_worker.log"),
-    );
+    let files = home_and_worker_log(&mut command, "losat_outfmt16");
     command.envs(env.iter().copied());
-    command
+    (command, files)
 }
 
-fn run_in(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
-    command(env)
+fn run_in(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Finished<Output> {
+    let (mut command, files) = command(env);
+    let output = command
         .current_dir(dir)
         .args(args)
         .output()
-        .expect("run LOSAT")
+        .expect("run LOSAT");
+    Finished::new(output, files)
 }
 
 const PROTEIN: &str = "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG";
@@ -262,22 +266,26 @@ fn a_query_without_a_sequence_leaves_the_prolog_alone() {
     );
 }
 
+/// The title of punctuation that NCBI's `x_CleanAndCompress` reads past the end of.
+const PUNCTUATION: &[u8] = b", ,";
+
 fn refused(output: &Output, what: &str, label: &str) {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert_eq!(output.status.code(), Some(1), "{label}: {stderr}");
     assert!(output.stdout.is_empty(), "{label}: nothing is written");
     assert!(
         stderr.contains(&format!(
-            "{what} with a character outside the US-ASCII range (which the XML output of NCBI BLAST+ cannot write) is not supported by LOSAT's BLASTX"
+            "{what} with punctuation that NCBI BLAST+ 2.17.0 crashes on when it makes the definition line is not supported by LOSAT's BLASTX"
         )),
         "{label}: {stderr}"
     );
 }
 
-/// Q2: a byte >= 0x80 in a title or the `-db` name is refused for 15 and 16 as for 5, before the first byte,
-/// also when the title is that of a later query batch or of a subject that only a later batch hits.
+/// The title that NCBI BLAST+ 2.17.0 cannot make (punctuation alone) is refused for 15 and 16 as for 5,
+/// before the first byte, also when the title is that of a later query batch or of a subject that only a
+/// later batch hits.
 #[test]
-fn a_title_or_database_name_outside_us_ascii_is_refused_in_15_and_16() {
+fn a_title_of_punctuation_is_refused_in_15_and_16() {
     let dir = temp_dir("q2");
     let (query, subject) = (dir.join("q.fa"), dir.join("s.fa"));
     let nucleotide = back_translate(PROTEIN);
@@ -301,7 +309,7 @@ fn a_title_or_database_name_outside_us_ascii_is_refused_in_15_and_16() {
                     &[],
                 )
             };
-            // a query title, first or second, in the same batch or in a later one; UTF-8
+            // a query title, first or second, in the same batch or in a later one
             for position in 0..2 {
                 for later_batch in [false, true] {
                     let filler: &[u8] = if later_batch {
@@ -311,7 +319,7 @@ fn a_title_or_database_name_outside_us_ascii_is_refused_in_15_and_16() {
                     };
                     let mut records: Vec<(&[u8], &[u8])> =
                         vec![(b"q1 ok", filler), (b"q2 ok", nucleotide.as_bytes())];
-                    records[position].0 = "caf\u{e9} ".as_bytes();
+                    records[position].0 = PUNCTUATION;
                     fasta(&query, &records);
                     fasta(&subject, &[(b"s1 subject", PROTEIN.as_bytes())]);
                     refused(
@@ -333,47 +341,13 @@ fn a_title_or_database_name_outside_us_ascii_is_refused_in_15_and_16() {
                 &subject,
                 &[
                     (b"s1 ok", OTHER_PROTEIN.as_bytes()),
-                    ("s2 caf\u{e9}".as_bytes(), PROTEIN.as_bytes()),
+                    (PUNCTUATION, PROTEIN.as_bytes()),
                 ],
             );
             refused(
                 &run(),
                 "a subject title",
                 &format!("{format} {threads} subject"),
-            );
-        }
-    }
-    // the -db name
-    let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search");
-    let copy = dir.join("bslice_caf\u{e9}");
-    for extension in ["phr", "pin", "psq"] {
-        fs::copy(
-            tests.join(format!("bslice.{extension}")),
-            format!("{}.{extension}", copy.display()),
-        )
-        .expect("copy database");
-    }
-    for format in ["15", "16"] {
-        for threads in ["1", "4", "8", "16"] {
-            let output = run_in(
-                &dir,
-                &[
-                    "blastx",
-                    "-query",
-                    tests.join("bslice_q.fna").to_str().unwrap(),
-                    "-db",
-                    copy.to_str().unwrap(),
-                    "-num_threads",
-                    threads,
-                    "-outfmt",
-                    format,
-                ],
-                &[],
-            );
-            refused(
-                &output,
-                "a database name",
-                &format!("{format} {threads} db"),
             );
         }
     }
@@ -392,7 +366,8 @@ fn a_query_that_is_not_a_regular_file_is_refused_in_15_and_16() {
     fasta(&subject, &[(b"s1 subject", PROTEIN.as_bytes())]);
     let text = format!(">q1 plain\n{}\n", back_translate(PROTEIN)).into_bytes();
     for (format, expected) in [("15", true), ("16", true), ("6", false)] {
-        let mut child = command(&[])
+        let (mut command, _files) = command(&[]);
+        let mut child = command
             .args([
                 "blastx",
                 "-query",
@@ -434,15 +409,22 @@ fn a_query_that_is_not_a_regular_file_is_refused_in_15_and_16() {
     fs::remove_dir_all(dir).ok();
 }
 
-/// DECISIONS 28 and 30: a `-db` search with the taxonomy database on the search path can still refuse in a
-/// later batch (here the scientific name of a taxid has a byte >= 0x80, and the sequence that carries it is
-/// first hit by the second batch). The output of the first batch is held in memory and dropped with the
-/// refusal: nothing is written. Without the taxonomy database the same search writes both reports.
+/// DECISIONS 28 and 30: a `-db` search with the taxonomy database on the search path whose scientific name of
+/// a reported taxid has a byte >= 0x80 (`high_bytes_utf8`: 9606, first reported by the second batch) writes
+/// what NCBI BLAST+ 2.17.0 writes (`taxbad_blastx_db_{15,16}`: `BLASTDB=.../high_bytes_utf8 blastx -query
+/// qnx_late.fna -db db/sprot_tax -num_threads 1 -outfmt N`, run in that directory): the XML2 document is
+/// cut at the byte of the second report's `sciname` (`Error: [blastx]  Frame type= eFrameNamed, ...` and its
+/// trace on standard error, exit status 0, the first batch's report before it), the JSON one has the name's
+/// bytes as they are. Without the taxonomy database the same search writes both reports with the taxid
+/// alone.
 #[test]
-fn a_taxdb_refusal_in_a_later_batch_leaves_nothing_written() {
+fn a_taxdb_name_outside_us_ascii_in_a_later_batch_is_written_as_ncbi_writes_it() {
     let dir = fixtures();
     let taxdb = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/taxdb/high_bytes_utf8");
     for format in ["15", "16"] {
+        let name = format!("taxbad_blastx_db_{format}");
+        let out = fs::read(dir.join(format!("{name}.out"))).unwrap();
+        let err = fs::read(dir.join(format!("{name}.err"))).unwrap_or_default();
         for threads in ["1", "4", "8", "16"] {
             let args = [
                 "blastx",
@@ -462,15 +444,17 @@ fn a_taxdb_refusal_in_a_later_batch_leaves_nothing_written() {
             assert_eq!(text.matches("gnl|BL_ORD_ID|").count(), 2, "{text}");
             assert!(text.contains("9606") && !text.contains("sciname"), "{text}");
             let with = run_in(&dir, &args, &[("BLASTDB", taxdb.to_str().unwrap())]);
-            let stderr = String::from_utf8_lossy(&with.stderr);
-            assert_eq!(with.status.code(), Some(1), "{format} {threads}: {stderr}");
-            assert!(
-                with.stdout.is_empty(),
-                "{format} {threads}: nothing is written"
+            let case = format!("{name} threads {threads}");
+            assert_eq!(with.status.code(), Some(0), "{case}");
+            assert_eq!(
+                String::from_utf8_lossy(&with.stdout),
+                String::from_utf8_lossy(&out),
+                "{case}: stdout"
             );
-            assert!(
-                stderr.contains("a taxonomy database scientific name with a character outside the US-ASCII range"),
-                "{stderr}"
+            assert_eq!(
+                String::from_utf8_lossy(&with.stderr),
+                String::from_utf8_lossy(&err),
+                "{case}: stderr"
             );
         }
     }
@@ -480,13 +464,13 @@ fn a_taxdb_refusal_in_a_later_batch_leaves_nothing_written() {
 /// only when some sequence of the database has a taxid whose lookup would be refused (the pre-pass,
 /// `algorithm::common::database::taxdb_may_refuse`, unit-tested in `taxdb_prepass_tests`). `db/sprot_mixtax` is
 /// `sprot.faa` with taxid 10090 and a third protein, never hit, with taxid 9606; `qnx_late.fna` is two batches
-/// (the second hits the first two sequences). With the `good` taxonomy database nothing is held; with
-/// `high_bytes_utf8` (the name of 9606 has bytes >= 0x80) the pre-pass finds the unreported taxid and holds, and
-/// the run writes what NCBI BLAST+ 2.17.0 writes (`mixtax_blastx_{good,badname}_{15,16}`: it never looks 9606 up).
-/// The same taxonomy database with `db/sprot_tax`, where 9606 is reported in the second batch, is refused with
-/// nothing written (`a_taxdb_refusal_in_a_later_batch_leaves_nothing_written`).
+/// (the second hits the first two sequences). With the `good` taxonomy database or with `high_bytes_utf8` (the
+/// name of 9606 has bytes >= 0x80) the run writes what NCBI BLAST+ 2.17.0 writes
+/// (`mixtax_blastx_{good,badname}_{15,16}`: it never looks 9606 up, so no name is written). The same taxonomy
+/// database with `db/sprot_tax`, where 9606 is reported in the second batch, is cut at the name
+/// (`a_taxdb_name_outside_us_ascii_in_a_later_batch_is_written_as_ncbi_writes_it`).
 #[test]
-fn a_taxid_that_is_in_the_database_but_never_reported_does_not_refuse_the_run() {
+fn a_taxid_that_is_in_the_database_but_never_reported_writes_no_name() {
     let dir = fixtures();
     for format in ["15", "16"] {
         for (case, taxdb) in [("good", "good"), ("badname", "high_bytes_utf8")] {

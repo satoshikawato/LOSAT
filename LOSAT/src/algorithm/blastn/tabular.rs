@@ -52,7 +52,7 @@ use crate::common::GapEditOp;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::tabular::{
     coverage_percent, hsp_coverage, taxdb_warning_line, union_length, TabularHsp, TabularKind,
-    TabularNames, TabularQuery, TabularSpec, TabularWriter,
+    TabularNames, TabularQuery, TabularRows, TabularSpec, TabularWriter,
 };
 
 const PROGRAM: &str = "BLASTN";
@@ -128,26 +128,6 @@ pub(crate) fn write_tabular_prolog_warning(
         diagnostics.flush()?;
     }
     Ok(())
-}
-
-/// Whether `taxdb.bti` is on NCBI's search path for a `-subject` search (`x_CheckTaxDB`'s
-/// `SeqDB_ResolveDbPath("taxdb.bti")`: the current directory, `BLASTDB` and the registry's
-/// `[BLAST] BLASTDB`, as a database is looked for, `seqdb::SearchPath`). A registry value that
-/// LOSAT does not read as NCBI is its refusal, as for `-db`.
-///
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
-/// ```c++
-/// void CBlastTabularInfo::x_CheckTaxDB()
-/// {
-///    	if( x_IsFieldRequested(eSubjectSciNames) ||
-///     ...
-///    		string resolved = SeqDB_ResolveDbPath("taxdb.bti");
-///    		if(resolved.empty())
-/// ```
-pub(crate) fn subject_taxdb_found(
-    settings: &crate::blastinput::ncbi_environment::ApplicationSettings,
-) -> Result<bool> {
-    crate::algorithm::common::database::subject_taxdb_found(settings, PROGRAM)
 }
 
 /// Writes the report of every query of `hit_lists` (indexed by query) to `writer`, each query's
@@ -250,6 +230,8 @@ pub(crate) fn write_blastn_tabular(
             writer.write_all(&buf)?;
             continue;
         };
+        // The query's formatter (`TabularRows`).
+        let mut rows = TabularRows::default();
         for hsp_list in &hit_list.hsplist_array {
             let Some(first) = hsp_list.hsps.first() else {
                 continue;
@@ -289,6 +271,17 @@ pub(crate) fn write_blastn_tabular(
                 -1
             };
             let subject = values.nucleotide_subject(tab.names, qcovs, qcovus);
+            // A subject whose lookups fail shows what the last found subject set
+            // (`TabularRows::last_found`), made again from its index.
+            let kept_values = match rows.last_found() {
+                Some(kept) if table.fails(&subject) => {
+                    Some(tab.subjects.values(kept, spec, PROGRAM)?)
+                }
+                _ => None,
+            };
+            let kept = kept_values
+                .as_ref()
+                .map(|values| values.nucleotide_subject(tab.names, -1, -1));
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
             // ```c++
             //        		const CBioseq_Handle& subject_bh =
@@ -310,7 +303,11 @@ pub(crate) fn write_blastn_tabular(
             for hsp in &hsp_list.hsps {
                 // The texts of the row's lookups of the taxonomy database (`x_SetTaxInfoAll`,
                 // `x_SetTaxInfo`) follow the rows before it.
-                if let (Some(names), Some(warnings)) = (tab.names, warnings.as_deref_mut()) {
+                if let (Some(names), Some(warnings), true) = (
+                    tab.names,
+                    warnings.as_deref_mut(),
+                    table.sets_subject(&subject),
+                ) {
                     let text = names.row_messages(spec, subject.taxonomy);
                     if !text.is_empty() {
                         writer.write_all(&buf)?;
@@ -341,7 +338,7 @@ pub(crate) fn write_blastn_tabular(
                     // One printed row is one HSP; the probe marks it without changing it.
                     Some(probe) => {
                         buf.clear();
-                        table.row(&mut buf, &query, &subject, &row);
+                        table.row(&mut buf, &mut rows, &query, &subject, kept.as_ref(), &row);
                         writer.flush()?;
                         probe.begin(hsp_index);
                         writer.write_all(&buf)?;
@@ -349,7 +346,7 @@ pub(crate) fn write_blastn_tabular(
                         probe.end(hsp_index);
                         buf.clear();
                     }
-                    None => table.row(&mut buf, &query, &subject, &row),
+                    None => table.row(&mut buf, &mut rows, &query, &subject, kept.as_ref(), &row),
                 }
                 hsp_index += 1;
             }
@@ -432,6 +429,7 @@ fn tabular_hsp<'r>(
         s_frame: if hsp.s_start > hsp.s_end { -1 } else { 1 },
         rows,
         // `Blast_HSPGetQueryCoverage` of the HSP's context, which has the searched length.
+        end_gaps: true,
         qcovhsp: hsp_coverage((hsp.q_end - hsp.q_start + 1) as i32, searched_length as i32),
     }
 }

@@ -772,7 +772,8 @@ mod tests {
                     min_subject_length: (subject_nt_length / 3) as i32,
                     composition_based_stats: 2,
                 },
-            );
+            )
+            .unwrap();
             let query_lengths: Vec<_> = query_contexts
                 .iter()
                 .map(|&(length, _)| length as i32)
@@ -923,7 +924,8 @@ mod tests {
                 min_subject_length: 2_125,
                 composition_based_stats: 2,
             },
-        );
+        )
+        .unwrap();
         let query_lengths = [120, 70, 120];
         for (link_event, reap_event) in [(3, 5), (6, 8)] {
             let before_prefix = format!("D_HSP\t{link_event}\tlink_before\t");
@@ -1206,7 +1208,8 @@ mod tests {
                 min_subject_length: 120,
                 composition_based_stats: 2,
             },
-        );
+        )
+        .unwrap();
         assert!(params_trace.contains("D_PARAM_CONTEXT\t0\t25\t25\n"));
         assert_eq!(
             (
@@ -1316,7 +1319,7 @@ mod tests {
             .collect();
         assert_eq!(early_decisions.len(), retained.len());
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3383-3427,
-        // 3525-3535; composition_adjustment/redo_alignment.c:64,1560-1582;
+        // 3525-3535; composition_adjustment/redo_alignment.c:64,1560-1580;
         // composition_adjustment/compo_heap.c:252-275,330-391,405-410:
         // if (BlastCompo_EarlyTermination(localMatch->best_evalue,
         //     redoneMatches, numQueries)) { Blast_HSPListFree(localMatch); continue; }

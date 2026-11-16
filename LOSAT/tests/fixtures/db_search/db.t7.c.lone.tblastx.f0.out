@@ -1,0 +1,57 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/t7/lone.fna).
+           1 sequences; 1,350 total letters
+
+
+
+Query= nq1 query nucleotide one
+
+Length=900
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value   N
+
+Unknown                                                               372     1e-177  2
+
+
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+Sequence with id Subject_9 no longer exists in database...alignment skipped
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 120400
+
+
+  Database: User specified sequence set (Input: tests/db_search/t7/lone.fna).
+    Posted date:  Unknown
+  Number of letters in database: 1,350
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

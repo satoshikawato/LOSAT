@@ -26,6 +26,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+mod temp_support;
+use temp_support::{worker_log_if_unset, TempFile};
+
 /// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), each
 /// `0`, the default before, unless the search sets it: every search here runs as it was written,
 /// with the switches off that it does not name (the default runs in `default_bundle.rs`).
@@ -187,11 +190,19 @@ fn queries(dir: &TempDir, name: &str, tail: &[u8]) -> PathBuf {
 }
 
 /// One run's exit status, report (standard output, or the `-out` file) and standard error.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 struct Run {
+    /// The run\'s worker log, when the test made one: kept until the caller drops the run.
+    _log: Option<TempFile>,
     status: Option<i32>,
     report: Vec<u8>,
     stderr: Vec<u8>,
+}
+
+impl PartialEq for Run {
+    fn eq(&self, other: &Run) -> bool {
+        self.status == other.status && self.report == other.report && self.stderr == other.stderr
+    }
 }
 
 /// One search with `args`, the given variables as its only `LOSAT_*` variables and `BATCH_SIZE`
@@ -211,12 +222,7 @@ fn blastn(args: &[&str], threads: u32, switches: &[(&str, &str)], out: Option<&P
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join(format!("losat_rptstream_{}_worker.log", std::process::id())),
-        );
-    }
+    let log = worker_log_if_unset(&mut command, "blastn_report_stream_worker");
     command
         .arg("blastn")
         .args(args)
@@ -237,6 +243,7 @@ fn blastn(args: &[&str], threads: u32, switches: &[(&str, &str)], out: Option<&P
         None => output.stdout,
     };
     Run {
+        _log: log,
         status: output.status.code(),
         report,
         stderr: output.stderr,
@@ -705,8 +712,9 @@ fn a_database_search_refused_in_a_later_batch_writes_the_batches_before() {
         sequences[at..at + 4].copy_from_slice(&(count + 1).to_be_bytes());
         std::fs::write(&path, sequences).unwrap();
     });
-    // A title of spaces only: NCBI makes no tabular subject id of it, which LOSAT refuses where a
-    // tabular report shows the sequence; outfmt 0 and 17 show it (and stream, with the off bytes).
+    // A title of spaces only: NCBI makes no word of it for the tabular subject id and keeps the
+    // general id (`BL_ORD_ID:1` for `saccver`, line DBID ordname); outfmt 0, 17 and 6 show it (and
+    // stream, with the off bytes).
     let blank = database(&dir, "blank", |db| {
         let path = format!("{db}.nhr");
         let mut header = std::fs::read(&path).unwrap();
@@ -718,17 +726,22 @@ fn a_database_search_refused_in_a_later_batch_writes_the_batches_before() {
         header[at..at + title.len()].fill(b' ');
         std::fs::write(&path, header).unwrap();
     });
-    for (outfmt, threads) in [("0", 4), ("17", 1)] {
+    for (outfmt, threads) in [("0", 4), ("17", 1), ("6", 1), ("6", 4)] {
         let (off, (batches, reason)) = run(&query, &blank, outfmt, threads);
         assert_eq!(off.status, Some(0), "blank title, outfmt {outfmt}: {off:?}");
         assert!(
             batches >= 8 && reason == "none",
             "blank title, outfmt {outfmt}"
         );
+        if outfmt == "6" {
+            assert!(
+                String::from_utf8_lossy(&off.report).contains("\tBL_ORD_ID:1\t"),
+                "blank title, outfmt 6: the general id's accession"
+            );
+        }
     }
     for (db, refusal) in [
         (&title, "has a stored title with a byte outside"),
-        (&blank, "makes no subject id"),
         (
             &ambiguity,
             "the ambiguity data are shorter than their count",
@@ -1324,8 +1337,10 @@ fn custom_tabular_reports_give_the_off_bytes() {
             );
         }
     }
-    // A subject whose tabular id LOSAT refuses, which only the last batches report.
-    a_refused_subject_id_comes_after_the_batches_before(&dir, &query, "10 qseqid sseqid stitle");
+    // A subject whose tabular id LOSAT refuses (`sacc` of a failed lookup: NCBI's null pointer;
+    // without `sacc` or `saccver` NCBI writes its catch's row, `report::tabular::FailedLookup`),
+    // which only the last batches report.
+    a_refused_subject_id_comes_after_the_batches_before(&dir, &query, "10 qseqid sacc stitle");
     // NCBI's errors in the first batch: a reader error, a batch of queries without letters. The
     // one batch streams; outfmt 20's line of the field names comes before the error.
     let reader_error = dir.path("bad.fa");

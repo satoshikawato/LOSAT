@@ -103,13 +103,11 @@ fn refusal(message: impl Into<String>) -> anyhow::Error {
 /// `CHUNK_SIZE` always, `OVERLAP_CHUNK_SIZE` only when the batch has one query
 /// (`SplitQuery_ShouldSplit`), also for an ungapped search, which is not split. The `int`
 /// becomes NCBI's 64-bit `size_t`, so -1 passes the check of 3 and -2 does not. A chunk size
-/// not divisible by 3 is NCBI's engine error; a value NCBI cannot convert is LOSAT's refusal
-/// (NCBI stops with a `CStringException` that names its build's source files).
+/// not divisible by 3 is NCBI's engine error; a value NCBI cannot convert is its
+/// `CStringException`, which ends the program (`app::read_query_split_variable`; the search's
+/// error frames pass it on as it is, `native::database_search_error`).
 pub fn split_sizes(query_count: usize) -> Result<SplitSizes> {
-    let read = |variable: &str| {
-        crate::blastinput::app::read_query_split_variable("BLASTX", variable)
-            .map_err(|error| refusal(error.to_string()))
-    };
+    let read = crate::blastinput::app::read_query_split_variable;
     let chunk_size = read("CHUNK_SIZE")?.map_or(CHUNK_SIZE as u64, |value| i64::from(value) as u64);
     validate_chunk_size(chunk_size)?;
     let overlap = match query_count > 1 {
@@ -784,6 +782,7 @@ fn x_chunk_record(whole: &FastaRecord, start: usize, end: usize) -> FastaRecord 
             .source
             .as_deref()
             .map(crate::blastinput::fasta_reader::RecordSource::without_uncut),
+        around: None,
     }
 }
 
@@ -896,6 +895,10 @@ fn absolute_length(chunks: &[QueryChunk], index: isize, absolute: i32) -> i32 {
 //    return FALSE;
 // }
 // ```
+// The divisor is never 0 here, unlike in TBLASTX's merge across subject chunks
+// (`ChunkMergeUndefined`): only the one-hit word finder's ungapped HSPs can have a length of 0 or
+// less, and an ungapped search is never split (`split_queries`, split_query_cxx.cpp:60-61), so
+// the HSPs of a split query are gapped ones, each of positive length.
 pub(crate) fn merge_two(a: &mut PreliminaryHsp, b: &PreliminaryHsp) -> bool {
     let inside = |q, s| a.q_start <= q && a.q_end >= q && a.s_start <= s && a.s_end >= s;
     if !inside(b.q_start, b.s_start) && !inside(b.q_end, b.s_end) {
@@ -929,7 +932,7 @@ mod x_chunk_record_tests {
     fn whole() -> FastaRecord {
         FastaRecord {
             internal_id: "Query_1".to_string(),
-            title: "long query".to_string(),
+            title: b"long query".to_vec(),
             sequence: (0..30_000u32)
                 .map(|k| b"ACGT"[(k.wrapping_mul(2_654_435_761) >> 30) as usize])
                 .collect(),
@@ -944,6 +947,7 @@ mod x_chunk_record_tests {
                 defline: b">long query".to_vec(),
                 ..RecordSource::default()
             })),
+            around: None,
         }
     }
 

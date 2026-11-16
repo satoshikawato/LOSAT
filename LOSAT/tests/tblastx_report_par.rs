@@ -14,10 +14,12 @@
 //! `docs/release/tblastx_v0.1.0_certification.md`), so the identities, the outfmt 0 rows and the
 //! tabular rows are cut into several chunks on the pool.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Output};
 
 mod reach_support;
+mod temp_support;
+use temp_support::TempFile;
 
 const OFF: (&str, &str) = ("LOSAT_X_TBXRPTPAR", "0");
 const THREADS: [u32; 5] = [1, 2, 4, 8, 16];
@@ -36,11 +38,10 @@ fn letters(name: &str) -> Vec<u8> {
         .collect()
 }
 
-/// A FASTA file of `records` (title, letters) in this test's temporary directory.
-fn write_fasta(file: &str, records: &[(&str, &[u8])]) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("losat-tbxrptpar-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("temporary directory");
-    let path = dir.join(file);
+/// A FASTA file of `records` (title, letters) in a temporary directory of its own, removed with
+/// the file when the value is dropped (kept when the test panics, to be looked at).
+fn write_fasta(file: &str, records: &[(&str, &[u8])]) -> TempFile {
+    let path = TempFile::keep_on_failure("losat-tbxrptpar", file);
     let mut text = Vec::new();
     for (title, seq) in records {
         text.extend_from_slice(format!(">{title}\n").as_bytes());
@@ -54,35 +55,45 @@ fn write_fasta(file: &str, records: &[(&str, &[u8])]) -> PathBuf {
 }
 
 /// Two queries from AP027131 (the second with a title of several words) and a record without
-/// letters between them, which has a warning before its report; written once.
-fn queries() -> &'static Path {
-    static QUERIES: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-    QUERIES.get_or_init(|| {
-        let a = letters("AP027131.fasta");
-        write_fasta(
-            "queries.fa",
-            &[
-                ("a", &a[..120_000]),
-                ("empty record", b""),
-                ("a second part", &a[400_000..430_000]),
-            ],
-        )
-    })
+/// letters between them, which has a warning before its report; written per test (see `Files`).
+fn queries() -> TempFile {
+    let a = letters("AP027131.fasta");
+    write_fasta(
+        "queries.fa",
+        &[
+            ("a", &a[..120_000]),
+            ("empty record", b""),
+            ("a second part", &a[400_000..430_000]),
+        ],
+    )
 }
 
-/// A subject from AP027133 (a title of several words), written once (the tests run in parallel).
-fn subjects() -> &'static Path {
-    static SUBJECTS: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-    SUBJECTS.get_or_init(|| {
-        let b = letters("AP027133.fasta");
-        write_fasta("subjects.fa", &[("b first part", &b[..120_000])])
-    })
+/// A subject from AP027133 (a title of several words), written per test (see `Files`).
+fn subjects() -> TempFile {
+    let b = letters("AP027133.fasta");
+    write_fasta("subjects.fa", &[("b first part", &b[..120_000])])
+}
+
+/// The query and the subject files of one test, removed when the value is dropped. The reports
+/// (outfmt 0 and 7) name the files, so the runs of one test, which are compared, all use these.
+struct Files {
+    queries: TempFile,
+    subjects: TempFile,
+}
+
+impl Files {
+    fn new() -> Files {
+        Files {
+            queries: queries(),
+            subjects: subjects(),
+        }
+    }
 }
 
 /// The binary with the given variables as its only `LOSAT_*` variables that choose a code path
 /// (`LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the `blastx-worker-probe` feature needs it
 /// as soon as a search has more than one thread, and it selects nothing).
-fn tblastx(threads: u32, outfmt: &str, switches: &[(&str, &str)]) -> Output {
+fn tblastx(files: &Files, threads: u32, outfmt: &str, switches: &[(&str, &str)]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG" {
@@ -93,9 +104,9 @@ fn tblastx(threads: u32, outfmt: &str, switches: &[(&str, &str)]) -> Output {
     command
         .arg("tblastx")
         .arg("-query")
-        .arg(queries())
+        .arg(&files.queries)
         .arg("-subject")
-        .arg(subjects())
+        .arg(&files.subjects)
         .args(["-query_gencode", "4", "-db_gencode", "4"])
         .args(["-outfmt", outfmt])
         .args(["-num_threads", &threads.to_string()])
@@ -108,7 +119,8 @@ fn stderr(output: &Output) -> String {
 }
 
 fn check_format(outfmt: &str) {
-    let off = tblastx(1, outfmt, &[OFF]);
+    let files = Files::new();
+    let off = tblastx(&files, 1, outfmt, &[OFF]);
     assert!(off.status.success(), "{}", stderr(&off));
     assert!(!off.stdout.is_empty(), "the pairs have hits");
     // LOSAT writes no warning with outfmt 8.
@@ -130,7 +142,7 @@ fn check_format(outfmt: &str) {
     }
     for threads in THREADS {
         let reach = reach_support::Reach::new("rptpar");
-        let on = tblastx(threads, outfmt, &[reach.var()]);
+        let on = tblastx(&files, threads, outfmt, &[reach.var()]);
         assert!(on.status.success(), "threads {threads}: {}", stderr(&on));
         assert_eq!(on.stdout, off.stdout, "outfmt {outfmt}, threads {threads}");
         assert_eq!(

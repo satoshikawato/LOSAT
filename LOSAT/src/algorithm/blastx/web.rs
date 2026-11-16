@@ -1,5 +1,6 @@
 //! Existing reactor ABI adapter; the search, batching and reports use BLASTX owners.
 use super::{args::BlastxArgs, input, native, query_setup::BATCH_SIZE, report, runtime};
+use crate::api::local_blast::OutputSink;
 use anyhow::{bail, Result};
 use std::{cell::RefCell, io::Write, path::Path};
 
@@ -176,6 +177,9 @@ pub(crate) fn run_pair(
         path: label,
         parsed: &no_parsed,
     };
+    // The run's decision for a matrix name that NCBI's XML does not know
+    // (`blast_xml::xml_matrix_failure`): none, as ABI v1 writes outfmt 0, 6 and 7 (`v1_outfmt`).
+    let xml_matrix = super::blast_xml::xml_matrix_failure(std::slice::from_ref(&options), true);
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:784-788
     // ```c++
     //         		if(warning != kEmptyStr){
@@ -185,12 +189,10 @@ pub(crate) fn run_pair(
     //         		ERR_POST(Warning << warning);
     // ```
     for s in subjects.iter().filter(|s| s.sequence.is_empty()) {
-        writeln!(
-            diagnostics.borrow_mut(),
-            "Warning: [blastx] {} {}: Subject sequence contains no data",
-            s.internal_id,
-            s.title
-        )?;
+        let mut diagnostics = diagnostics.borrow_mut();
+        write!(diagnostics, "Warning: [blastx] {} ", s.internal_id)?;
+        diagnostics.write_all(&s.title)?;
+        writeln!(diagnostics, ": Subject sequence contains no data")?;
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
     // ```c++
@@ -299,7 +301,9 @@ pub(crate) fn run_pair(
                             let mut results =
                                 searched.next().expect("one search per queued batch")?;
                             report::render_queries(
-                                &mut crate::cli::NcbiOstream::new(Box::new(&mut output)),
+                                &mut crate::cli::NcbiOstream::sink(&mut OutputSink::Writer(
+                                    &mut output,
+                                ))?,
                                 &mut *diagnostics.borrow_mut(),
                                 &options,
                                 queries,
@@ -310,6 +314,7 @@ pub(crate) fn run_pair(
                                 // No document here holds a report back (`stops`).
                                 false,
                                 None,
+                                xml_matrix,
                             )?;
                             processed += queries.len();
                         }
@@ -385,7 +390,7 @@ pub(crate) fn run_pair(
                 //                	    formatter.PrintOneResultSet(**result, query_batch);
                 // ```
                 report::render_queries(
-                    &mut crate::cli::NcbiOstream::new(Box::new(&mut output)),
+                    &mut crate::cli::NcbiOstream::sink(&mut OutputSink::Writer(&mut output))?,
                     &mut *diagnostics.borrow_mut(),
                     &options,
                     queries,
@@ -396,6 +401,7 @@ pub(crate) fn run_pair(
                     // No document here holds a report back (`stops`).
                     false,
                     None,
+                    xml_matrix,
                 )?;
                 processed += queries.len();
                 Ok(())
@@ -432,6 +438,7 @@ pub(crate) fn run_pair(
         &shown,
         processed,
         None,
+        xml_matrix,
     )?;
     Ok(output)
 }

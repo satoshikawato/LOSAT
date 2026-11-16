@@ -33,7 +33,7 @@ use crate::blastinput::app::Program;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::core::blast_util::ncbi_int4_from_double;
 use crate::report::archive::masks::{Frame, MaskEntry};
-use crate::report::archive::options::{Filter, OptionInputs};
+use crate::report::archive::options::{OptionInputs, RequestKind};
 use crate::report::archive::requests::{LcaseFrames, RequestPolicy, RunRequests};
 use crate::report::archive::{
     ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
@@ -46,9 +46,16 @@ use crate::utils::seg::SegParams;
 
 /// The recorded options of a TBLASTN run (`options::algorithm_options`'s inputs), from the
 /// arguments as given: a value is recorded only when it was given or the class of its argument
-/// always sets it (`S/DESIGN_OF8.md` 2.2).
+/// always sets it (`S/DESIGN_OF8.md` 2.2). A run of `-in_pssm` is PSI-TBLASTN's
+/// (`RequestKind::PsiTblastn`: psiblast's handle, whose rules `algorithm_options` applies to the
+/// same arguments).
 pub(crate) fn option_inputs(args: &TblastnArgs) -> OptionInputs {
-    let mut inputs = OptionInputs::new(Program::Tblastn, &args.task);
+    let kind = if args.in_pssm.is_some() {
+        RequestKind::PsiTblastn
+    } else {
+        RequestKind::from(Program::Tblastn)
+    };
+    let mut inputs = OptionInputs::new(kind, &args.task);
     inputs.dbsize = args.dbsize;
     inputs.searchsp = args.searchsp;
     inputs.evalue = args.evalue;
@@ -82,8 +89,7 @@ pub(crate) fn option_inputs(args: &TblastnArgs) -> OptionInputs {
     inputs.seg = args
         .seg
         .as_deref()
-        .and_then(|value| crate::blastinput::app::parse_seg_option(value, "TBLASTN").ok())
-        .map(Filter::from);
+        .and_then(crate::report::archive::options::seg_filter);
     inputs.max_intron_length = args.max_intron_length.unwrap_or(0);
     inputs.db_gencode = i32::from(args.db_gencode);
     inputs.hitlist_size = args
@@ -104,28 +110,23 @@ pub(crate) fn handle_for(
     args: &TblastnArgs,
     archive_requested: bool,
     options: &crate::report::archive::OptionsHandle,
-) -> Result<Option<ArchiveHandle>> {
+) -> Option<ArchiveHandle> {
     if !archive_requested {
-        return Ok(None);
+        return None;
     }
     // NCBI keeps the name without the white space at its ends (`NStr::TruncateSpaces`,
     // blast_args.cpp:2472-2476), and the request's `database` is that name.
-    ArchiveHandle::for_program(
+    Some(ArchiveHandle::for_program(
         &option_inputs(args),
         args.database_name(),
-        "TBLASTN",
         options,
-    )
-    .map(Some)
+    ))
 }
 
 /// The requests of a run's batches (`RunRequests`): protein queries, nucleotide subjects (the
 /// `-subject` records `subjects`, `None` for `-db`), and with `-lcase_masking` (`mask_lowercase`)
 /// one `notset` mask of each query's lower-case runs.
-pub(super) fn requests(
-    subjects: Option<&[FastaRecord]>,
-    mask_lowercase: bool,
-) -> RunRequests<'_, FastaRecord> {
+pub(super) fn requests(subjects: Option<&[FastaRecord]>, mask_lowercase: bool) -> RunRequests<'_> {
     RunRequests::new(
         RequestPolicy {
             query_protein: true,
@@ -133,14 +134,7 @@ pub(super) fn requests(
             lcase: mask_lowercase.then_some(LcaseFrames::NotSet),
         },
         subjects,
-        "TBLASTN",
     )
-}
-
-/// `report::archive::check_titles` for TBLASTN's records (the archive's; the search strategy's
-/// requests check theirs where they are written, `RunRequests::write`).
-pub(crate) fn check_titles(records: &[FastaRecord], role: &str) -> Result<()> {
-    crate::report::archive::check_titles(records, role, "TBLASTN")
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:1718-1725
@@ -164,12 +158,18 @@ pub(crate) fn check_titles(records: &[FastaRecord], role: &str) -> Result<()> {
 /// The `EffectiveSearchSpace` option of a batch (`BatchArchive::searched_space`,
 /// `StrategyExport::note_searched`): the search space of its first query's context, `first`
 /// (`-searchsp` in an invalid context too), when NCBI searched the batch (`searched`: a query of
-/// it has a valid context).
+/// it has a valid context), and that context's query length (`archive::RequestLength::space`):
+/// the letters of the first query, `record`, or 0 where its context is not valid (`valid`).
 pub(super) fn batch_searched_space(
     searched: bool,
     first: &super::stage_d_stats::LocalContextLength,
-) -> Option<i64> {
-    searched.then_some(first.eff_searchsp)
+    record: &FastaRecord,
+    valid: bool,
+) -> Option<crate::report::archive::SearchedContext0> {
+    searched.then(|| crate::report::archive::SearchedContext0 {
+        space: first.eff_searchsp,
+        query_length: if valid { record.seq().len() as i64 } else { 0 },
+    })
 }
 
 pub(crate) use crate::report::archive::error_lines;
@@ -374,7 +374,12 @@ fn for_each_batch(
                 ka_blocks,
                 search_space: context.search_space,
                 length_adjustment: context.length_adjustment,
-                searched_space: batch_searched_space(searched, length),
+                searched_space: batch_searched_space(
+                    searched,
+                    length,
+                    &data.queries[first],
+                    data.query_validity[first],
+                ),
             };
             each(span, &batch)
         })?;
@@ -384,12 +389,13 @@ fn for_each_batch(
 
 /// Writes the archive of each batch of `render` to `writer`; `warnings` writes the warnings of a
 /// batch's queries (to the diagnostics, which saves them as the batch's messages) before its
-/// archive.
+/// archive, and its sink gets NCBI's posts of the bytes that the archive's stream replaces
+/// (`write_archive`).
 pub(super) fn write_tblastn_archives(
     handle: &ArchiveHandle,
     render: &ArchiveRender<'_>,
     data: &ArchiveData<'_>,
-    mut warnings: Option<&mut QueryWarnings<'_>>,
+    warnings: &mut QueryWarnings<'_>,
     writer: &mut dyn Write,
 ) -> Result<()> {
     let run = RunRecord {
@@ -398,10 +404,8 @@ pub(super) fn write_tblastn_archives(
         gapped: true,
     };
     for_each_batch(data, render.spans, |span, batch| {
-        if let Some(warnings) = warnings.as_deref_mut() {
-            for index in span.clone() {
-                warnings.before_query(index, &mut *writer)?;
-            }
+        for index in span.clone() {
+            warnings.before_query(index, &mut *writer)?;
         }
         let first = span.start;
         let mut aligns = TblastnAligns {
@@ -418,7 +422,13 @@ pub(super) fn write_tblastn_archives(
             shown: data.shown,
             ranges: data.ranges,
         };
-        write_archive(handle, batch, &mut aligns, &mut *writer)
+        write_archive(
+            handle,
+            batch,
+            &mut aligns,
+            &mut *writer,
+            &mut *warnings.sink,
+        )
     })
 }
 

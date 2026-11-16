@@ -4,6 +4,8 @@
 //! two lines in its suite (`common` for the command line, the output formats and shared parts;
 //! `tests/suite_layout.rs` checks that every file is in exactly one test binary).
 
+#[path = "../archive_replaced_bytes.rs"]
+mod archive_replaced_bytes;
 #[path = "../blastdbcmd_alias_keys.rs"]
 mod blastdbcmd_alias_keys;
 #[path = "../blastdbcmd_batch_line_ends.rs"]
@@ -38,6 +40,8 @@ mod export_search_strategy;
 mod library_api;
 #[path = "../library_examples.rs"]
 mod library_examples;
+#[path = "../library_out_taxdb.rs"]
+mod library_out_taxdb;
 #[path = "../makeblastdb_ncbi_exceptions.rs"]
 mod makeblastdb_ncbi_exceptions;
 #[path = "../makeblastdb_output_streams.rs"]
@@ -128,3 +132,7 @@ mod taxonomy_read_order;
 mod web_v1_search_space;
 #[path = "../x_reach_directory.rs"]
 mod x_reach_directory;
+#[path = "../xml_dbname.rs"]
+mod xml_dbname;
+#[path = "../xml_post_order.rs"]
+mod xml_post_order;

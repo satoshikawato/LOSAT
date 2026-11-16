@@ -43,7 +43,7 @@ use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::common::GapEditOp;
 use crate::core::composition_adjustment::adjust_scores::read_aa_composition;
 use crate::core::composition_adjustment::compo_scale::{
-    pssm_composition_based_stats, PosMatrixInfo,
+    pssm_composition_based_stats, PosMatrixInfo, RedoInstance, XDropRedo,
 };
 use crate::core::composition_adjustment::redo_alignment::{
     build_query_word_hashes, test_near_identical, BlastCompoAlignment, BlastCompoSequenceData,
@@ -604,7 +604,7 @@ impl RedoMatch<'_> {
             .collect();
         redone.sort_by(|a, b| score_compare(&a.align, &b.align));
         if redone.len() > 1 {
-            reap_contained(&mut redone);
+            reap_contained::<XDropRedo>(&mut redone);
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:410-446
         // ```c
@@ -833,7 +833,7 @@ impl RedoMatch<'_> {
                 );
             }
             if hsp_index == 0 || (subject_maybe_biased && near_identical != old_near_identical) {
-                subject_data = self.subject_range(
+                subject_data = self.subject_range::<XDropRedo>(
                     run,
                     subject,
                     &incoming[0],
@@ -875,7 +875,7 @@ impl RedoMatch<'_> {
                         adjust_search_failed = true;
                     } else {
                         matrix_adjust_rule = EMatrixAdjustRule::CompoScaleOldMatrix;
-                        pssm_composition_based_stats(
+                        pssm_composition_based_stats::<XDropRedo>(
                             &mut run.matrix.rows,
                             self.info,
                             &subject_composition.prob,
@@ -940,7 +940,7 @@ impl RedoMatch<'_> {
     /// /** Default instructions and mask residue for SEG filtering */
     /// #define BLASTP_MASK_INSTRUCTIONS "S 10 1.8 2.1"
     /// ```
-    fn subject_range(
+    fn subject_range<C: RedoInstance>(
         &self,
         run: &RedoRun<'_>,
         subject: &[u8],
@@ -1081,7 +1081,7 @@ fn link_redone(
             subject_end: hsp.align.match_end,
             score: hsp.align.score,
         },
-        &[context],
+        |_| context,
         subject_length,
         &link.params,
         |hsp, linked| {
@@ -1391,7 +1391,7 @@ fn score_compare(a: &Align, b: &Align) -> std::cmp::Ordering {
 ///                 }
 /// ```
 /// Every HSP of a PSSM search has the query frame and subject frame 0.
-fn reap_contained(redone: &mut Vec<Redone>) {
+fn reap_contained<C: RedoInstance>(redone: &mut Vec<Redone>) {
     let mut keep = vec![true; redone.len()];
     for iread in 1..redone.len() {
         let hsp1 = &redone[iread].align;
@@ -1427,6 +1427,12 @@ fn reap_contained(redone: &mut Vec<Redone>) {
         keep[index - 1]
     });
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3038-3039 (quoted in the
+// module): `-use_sw_tback` (`eSmithWatermanTbck`) redoes each match with
+// `Blast_RedoOneMatchSmithWaterman` in the place of `Blast_RedoOneMatch` (series PR, item
+// PS11c-3: RPS-BLAST's redo).
+pub(crate) mod smith_waterman;
 
 #[cfg(test)]
 mod tests {
@@ -1482,7 +1488,7 @@ mod tests {
                 num: 1,
             },
         ];
-        reap_contained(&mut redone);
+        reap_contained::<XDropRedo>(&mut redone);
         assert_eq!(
             redone.iter().map(|r| r.align.score).collect::<Vec<_>>(),
             vec![100, 80]

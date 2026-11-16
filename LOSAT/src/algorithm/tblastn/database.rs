@@ -56,6 +56,12 @@ pub(super) struct TblastnDatabase {
 }
 
 impl TblastnDatabase {
+    /// The OIDs of the database's ordinal ids, which name the reported sequences without
+    /// parsed Seq-ids (`gnl|BL_ORD_ID|n`).
+    pub(super) fn oid_map(&self) -> crate::seqdb::OidMap<'_> {
+        self.db.oid_map()
+    }
+
     /// `-show_gis` for the subjects of the reports (`ParsedSubject::showing_gis`).
     pub(super) fn showing_gis(mut self, show_gis: bool) -> Self {
         self.db.set_reports_show_gis(show_gis);
@@ -91,11 +97,12 @@ impl TblastnDatabase {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2b).
         let parsed_seqids =
-            shared::restrict_database(&mut db, name, list, diagnostics, settings, PROGRAM)?;
-        let total = db.total_length();
+            shared::restrict_database(&mut db, name, list, None, diagnostics, settings, PROGRAM)?;
+        // The statistics' setup total (`DbStatistics::setup_total`: not negative, below 2^63; a
+        // `LENGTH` of 2^63 or more is NCBI's negative `Int8`, read as such) as the engine holds it.
+        let total = db.statistics().setup_total;
         usize::try_from(total)
             .ok()
-            .filter(|&letters| i64::try_from(letters).is_ok())
             .with_context(|| {
                 format!(
                     "a database of {total} letters is not supported by LOSAT's TBLASTN on this platform"
@@ -129,14 +136,20 @@ impl TblastnDatabase {
     //     return seqdb.GetTotalLength();
     // }
     // ```
-    /// The number of sequences (`CSeqDB::GetNumSeqs`) and the total length
-    /// (`CSeqDB::GetTotalLength`): the real numbers, also with `-dbsize`.
+    /// The numbers of the statistics (`SeqDb::statistics`): the setup's total length and number
+    /// of sequences, the Gumbel block's length and `CSeqDB::GetMinLength`; the real numbers, also
+    /// with `-dbsize`.
     pub(super) fn numbers(&self) -> DatabaseNumbers {
-        let (total_length, num_seqs) = self.db.statistics_numbers();
+        let statistics = self.db.statistics();
         DatabaseNumbers {
-            total_length,
-            num_seqs: u64::from(num_seqs),
-            min_length: self.db.min_length(),
+            // The setup's total is not negative (a length of OID 0 where the total is not
+            // positive).
+            total_length: statistics.setup_total as u64,
+            num_seqs: statistics.setup_count,
+            gumbel_db_length: statistics.gumbel_db_length,
+            engine_db_length: statistics.engine_db_length,
+            min_length: statistics.min_length,
+            request_count: statistics.request_count,
         }
     }
 
@@ -145,10 +158,10 @@ impl TblastnDatabase {
         self.db.filtered_empty()
     }
 
-    /// Whether the total length of the statistics is not positive (`SeqDb::
-    /// statistics_length_is_empty`): what the BLAST archive's database length reads.
-    pub(super) fn statistics_length_is_empty(&self) -> bool {
-        self.db.statistics_length_is_empty()
+    /// The numbers the statistics read, with NCBI's types (`SeqDb::statistics`); the BLAST
+    /// archive's database length reads them too.
+    pub(super) fn statistics(&self) -> crate::seqdb::DbStatistics {
+        self.db.statistics()
     }
 
     /// The taxids of the search's list (`SeqDb::list_taxids`).
@@ -160,6 +173,12 @@ impl TblastnDatabase {
     /// file error` (`SeqDb::first_oid_read_fails`: no OID, and statistics that read OID 0).
     pub(super) fn first_oid_read_fails(&self) -> bool {
         self.db.first_oid_read_fails()
+    }
+
+    /// What a PSSM search's first read of the database meets (`shared::PsiSearchReadFailure`:
+    /// NCBI's `CPsiBlast` gives SeqDB's own error).
+    pub(super) fn pssm_search_read_failure(&self) -> Option<shared::PsiSearchReadFailure> {
+        shared::PsiSearchReadFailure::of(&self.db)
     }
 
     /// LOSAT's refusal of statistics of 0 sequences for a search without the Gumbel block
@@ -184,12 +203,7 @@ impl TblastnDatabase {
         reported: &ReportedSubjects,
         hitlists: &[KappaResultHitList],
     ) -> Result<XmlTaxa> {
-        let ranks: std::collections::BTreeSet<usize> = hitlists
-            .iter()
-            .flat_map(KappaResultHitList::lists)
-            .filter(|list| !list.hsps.hsps.is_empty())
-            .map(|list| list.oid as usize)
-            .collect();
+        let ranks: std::collections::BTreeSet<usize> = reported_ranks(hitlists).collect();
         let (taxids, taxonomy, parsed_taxonomy, notes) = shared::read_reported_taxonomy(
             &self.db,
             &self.taxdb,
@@ -340,15 +354,55 @@ impl TblastnDatabase {
         shared::subject_read_texts(&self.db, &self.taxdb, subjects, rows_open, PROGRAM)
     }
 
+    /// The stop of the prefetch of the batch whose first query is `query` and whose reported
+    /// subjects are `subjects` (`prefetch_stop`): NCBI's error (a `shared::HeaderReadError`), or
+    /// LOSAT's refusal (`shared::batch_prefetch`, after the prefetches of the batches before).
+    /// `at_hits`: the XML2 and JSON formats, which write the taxonomy texts at each `Hit`
+    /// (`shared::held_batch_prefetch_stop`), after the lookups of the reports of the batches
+    /// before, whose final hit lists by rank are `before` (`reported`'s ranks, as `read_taxids`
+    /// reads them); TBLASTN writes those reports after the stop. `xml_before`: the outfmt 5
+    /// reports before the batch (`shared::XmlReportsBefore`).
+    pub(super) fn prefetch_stop_error(
+        &self,
+        reported: Option<&ReportedSubjects>,
+        before: &[KappaResultHitList],
+        subjects: &[(u32, Option<Arc<ParsedSubject>>)],
+        query: usize,
+        at_hits: bool,
+        xml_before: Option<&shared::XmlReportsBefore<'_>>,
+    ) -> anyhow::Error {
+        let subjects = subjects.iter().map(|(ordinal, parsed)| {
+            shared::PrefetchSubject::unflipped(*ordinal, parsed.as_deref())
+        });
+        let stopped = if at_hits {
+            let before = reported.into_iter().flat_map(|reported| {
+                reported_ranks(before).map(|rank| {
+                    shared::PrefetchSubject::unflipped(
+                        reported.ordinals[rank],
+                        reported.parsed_subject(rank),
+                    )
+                })
+            });
+            shared::held_batch_prefetch_stop(&self.db, before, subjects, PROGRAM, query).err()
+        } else {
+            shared::batch_prefetch(&self.db, &self.taxdb, subjects, PROGRAM, query, xml_before)
+                .err()
+        };
+        stopped.expect("`prefetch_stop` found a subject whose lookup stops the batch's prefetch")
+    }
+
     /// NCBI's prefetch of the query batch whose final hit lists are `hitlists` (subjects named by
     /// rank, `reported_subjects`) on standard error (`shared::batch_prefetch`): the taxonomy
     /// texts of the sequences with HSPs in them, then the warning where the prefetch fails at a
-    /// subject whose lookup fails (the protein query has no strand).
+    /// subject whose lookup fails (the protein query has no strand); the stop of the batch whose first query is `query`
+    /// (`xml_before`: the outfmt 5 reports before it, `shared::XmlReportsBefore`).
     pub(super) fn batch_prefetch(
         &self,
         reported: &ReportedSubjects,
         hitlists: &[KappaResultHitList],
-    ) -> Result<Vec<u8>> {
+        query: usize,
+        xml_before: Option<&shared::XmlReportsBefore<'_>>,
+    ) -> Result<crate::report::diag_log::Posts> {
         let subjects = hitlists
             .iter()
             .flat_map(KappaResultHitList::lists)
@@ -360,7 +414,7 @@ impl TblastnDatabase {
                     reported.parsed_subject(rank),
                 )
             });
-        shared::batch_prefetch(&self.db, &self.taxdb, subjects, PROGRAM)
+        shared::batch_prefetch(&self.db, &self.taxdb, subjects, PROGRAM, query, xml_before)
     }
 
     /// The database read where it is searched by `threads` threads, after the checks of
@@ -392,6 +446,27 @@ pub(super) fn reads_subject(list: &KappaResultList, rows: SubjectFetch) -> bool 
 /// so far name, by ordinal id (`read_titles`): the stored title, or the definition lines of a
 /// sequence with parsed Seq-ids.
 pub(super) type DatabaseTitles = BTreeMap<u32, ReportedHeader>;
+
+/// NCBI's fetches with `check_oid_exclusion` of the redo and the traceback of a search of
+/// `database` (`shared::FetchExcluded`; `None` where they exclude nothing): the subjects they
+/// exclude leave the preliminary hit lists (`LocalStageDProfile::fetch_excluded`).
+pub(super) fn fetch_excluded(database: &TblastnDatabase) -> Option<shared::FetchExcluded<'_>> {
+    shared::FetchExcluded::of(&database.db)
+}
+
+/// The final hit lists `hitlists` of a query batch without the sequences that NCBI makes no
+/// Seq-align of (`shared::SeqAligned`): after their cut to the hit list size, before
+/// `read_titles`.
+pub(super) fn drop_unaligned(database: &TblastnDatabase, hitlists: &mut [KappaResultHitList]) {
+    // tblastn is gapped (`-ungapped` is refused): the redo or the traceback fetched every
+    // subject with `check_oid_exclusion` (`fetch_excluded`).
+    let Some(mut aligned) = shared::SeqAligned::of(&database.db, true) else {
+        return;
+    };
+    for hitlist in hitlists {
+        hitlist.with_lists_mut(|lists| aligned.retain(lists, |list| u32::try_from(list.oid).ok()));
+    }
+}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:283-293
 // ```c++
@@ -496,6 +571,73 @@ impl ReportedSubjects {
     }
 }
 
+/// The ranks of the reported sequences of the final hit lists `hitlists` (their subject index is
+/// the rank, `reported_subjects`): those with HSPs.
+fn reported_ranks(hitlists: &[KappaResultHitList]) -> impl Iterator<Item = usize> + '_ {
+    hitlists
+        .iter()
+        .flat_map(KappaResultHitList::lists)
+        .filter(|list| !list.hsps.hsps.is_empty())
+        .map(|list| list.oid as usize)
+}
+
+/// The first of the query batches `batches` (the searched queries of each) of the final hit lists
+/// `hitlists` (subjects named by ordinal id, before `reported_subjects`) whose prefetch is on (its
+/// Seq-aligns of a nonzero score do not outnumber a positive `PRE_FETCH_SEQS_LIMIT`,
+/// `shared::prefetch_off`) and loads a subject whose lookup fails on a file with NCBI's exception
+/// (`ParsedSubject::prefetch_stops`), with the subjects that batch reports (ordinal id, and the
+/// definition lines of one with parsed Seq-ids, `titles`): NCBI's prefetch stops the run there
+/// (`shared::batch_prefetch`), before that batch's reports. The caller asks it where the first
+/// format prefetches.
+pub(super) fn prefetch_stop(
+    titles: &DatabaseTitles,
+    hitlists: &[KappaResultHitList],
+    batches: &[std::ops::Range<usize>],
+) -> Option<(
+    std::ops::Range<usize>,
+    Vec<(u32, Option<Arc<ParsedSubject>>)>,
+)> {
+    // The report drops the HSPs of score 0 first (`reported_subjects`).
+    let scored = |list: &KappaResultList| {
+        list.hsps
+            .hsps
+            .iter()
+            .filter(|linked| linked.hsp.score != 0)
+            .count()
+    };
+    batches.iter().find_map(|span| {
+        let lists = || {
+            hitlists
+                .get(span.clone())
+                .into_iter()
+                .flatten()
+                .flat_map(KappaResultHitList::lists)
+        };
+        if shared::prefetch_off(lists().map(scored).sum()) {
+            return None;
+        }
+        let subjects: Vec<(u32, Option<Arc<ParsedSubject>>)> = lists()
+            .filter(|list| scored(list) > 0)
+            .filter_map(|list| u32::try_from(list.oid).ok())
+            .map(|ordinal| {
+                let parsed = match titles.get(&ordinal) {
+                    Some(ReportedHeader::Parsed(subject)) => Some(Arc::clone(subject)),
+                    _ => None,
+                };
+                (ordinal, parsed)
+            })
+            .collect();
+        subjects
+            .iter()
+            .any(|(_, parsed)| {
+                parsed
+                    .as_ref()
+                    .is_some_and(|subject| subject.prefetch_stops().is_some())
+            })
+            .then(|| (span.clone(), subjects))
+    })
+}
+
 /// The Seq-aligns of the results `hitlists` that NCBI's prefetch counts against
 /// `PRE_FETCH_SEQS_LIMIT` (`shared::prefetch_off`): one for each HSP (TBLASTN's search is gapped;
 /// LOSAT refuses `-ungapped`, whose Seq-aligns are one per subject).
@@ -569,14 +711,21 @@ pub(super) fn reported_subjects(
     // Seq-ids that outfmt 0 shows.
     let mut taxdb_found: Option<bool> = None;
     for (rank, &ordinal) in ordinals.iter().enumerate() {
-        let header = titles
-            .get(&ordinal)
-            .with_context(|| format!("database sequence {ordinal} has no title read"))?;
+        let header = titles.get(&ordinal).with_context(|| {
+            format!(
+                "database sequence {} has no title read",
+                database.db.oid(ordinal)
+            )
+        })?;
         let title = match header {
             ReportedHeader::Stored(stored) => {
-                shared::check_reported_title(stored.replaced_bytes, ordinal, PROGRAM)?;
+                shared::check_reported_title(
+                    stored.replaced_bytes,
+                    || database.db.oid(ordinal),
+                    PROGRAM,
+                )?;
                 if shown.pairwise {
-                    stored.check_shown_source(ordinal, PROGRAM)?;
+                    stored.check_shown_source(|| database.db.oid(ordinal), PROGRAM)?;
                 }
                 shared::keep_source(&mut sources, rank, ordinals.len(), stored.source.clone());
                 stored.title.clone()
@@ -603,7 +752,7 @@ pub(super) fn reported_subjects(
         records.push(FastaRecord {
             // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the OID
             // (line DI-8).
-            local_id: format!("gnl|BL_ORD_ID|{}", database.db.oid(ordinal)),
+            local_id: database.db.oid(ordinal).fasta_id(),
             title,
             sequence: Vec::new(),
             warnings: Vec::new(),
@@ -615,9 +764,12 @@ pub(super) fn reported_subjects(
             let SubjectLetters::Packed(stores) = stores else {
                 unreachable!("a -db search holds its sequences")
             };
-            stores
-                .get(ordinal as usize)
-                .with_context(|| format!("database sequence {ordinal} was not read"))
+            stores.get(ordinal as usize).with_context(|| {
+                format!(
+                    "database sequence {} was not read",
+                    database.db.oid(ordinal)
+                )
+            })
         };
         lengths.push(if letters {
             let store = match stores {
@@ -646,6 +798,7 @@ pub(super) fn reported_subjects(
                         let rank = usize::try_from(list.oid).ok()?;
                         Some((ordinals[rank], parsed[rank].as_deref()?))
                     }),
+                database.db.oid_map(),
                 PROGRAM,
             )?;
         }
@@ -665,10 +818,15 @@ impl ReportedSubjects {
     /// sequence, by rank (`algorithm::common::database::tabular_subject_ids`). A sequence whose
     /// id LOSAT cannot write as NCBI is an error before any format is written where a tabular
     /// report `reads` the subject, else its id is empty.
-    pub(super) fn tabular_subject_ids(&self, reads: bool) -> Result<Vec<Arc<[u8]>>> {
+    pub(super) fn tabular_subject_ids(
+        &self,
+        oids: crate::seqdb::OidMap<'_>,
+        reads: bool,
+    ) -> Result<Vec<crate::algorithm::common::tabular::SubjectId>> {
         shared::tabular_subject_ids(
             &self.records,
             &self.ordinals,
+            oids,
             &self.parsed,
             &self.sources,
             false,
@@ -724,7 +882,7 @@ mod tests {
             db: {
                 let mut db =
                     SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
-                db.read_name_records(path.to_str().unwrap()).unwrap();
+                db.read_name_records(path.to_str().unwrap(), false).unwrap();
                 db
             },
             name: name.to_string(),

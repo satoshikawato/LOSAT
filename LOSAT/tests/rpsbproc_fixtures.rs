@@ -6,8 +6,10 @@
 //! error and exit status (and the `-o` file `out.txt` and the `-logfile` file `log.txt`); a
 //! `refuse` case is refused by LOSAT (exit 1, the
 //! last line of standard error `Error: ... is not supported by LOSAT's rpsbproc...`, standard
-//! output cut at a line end) with the bytes of `refused/` (LOSAT's own; README.md). NCBI is not
-//! run here.
+//! output cut at a line end) with the bytes of `refused/` (LOSAT's own; README.md); a `widened`
+//! case gives the bytes of `widened/`, LOSAT's own where NCBI's `int` coordinate arithmetic
+//! overflows (PD-LOSAT-NCBI-DEFECTS exception 12; each beside a `compare` case of its nearby
+//! input, README.md). NCBI is not run here.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -210,12 +212,12 @@ fn assert_same(dir: &Path, case: &str, out: &[u8], err: &[u8], status: i32) {
     assert_eq!(status, rc, "{case}: exit status");
 }
 
-/// Runs the rows of CASES.tsv whose `use` is `usage` and compares them with `oracle/`: the
-/// number of rows.
-fn compare_rows(stem: &str, usage: &str) -> usize {
+/// Runs the rows of CASES.tsv whose `use` is `usage` and compares them with `expected` (`oracle/`
+/// or `widened/`): the number of rows.
+fn compare_rows(stem: &str, usage: &str, expected: &str) -> usize {
     let run_dir = RunDir::new(stem);
     let dir = &run_dir.0;
-    let oracle = fixtures().join("oracle");
+    let oracle = fixtures().join(expected);
     let mut compared = 0;
     for [case, row_usage, stdin, setup, arguments] in cases() {
         if row_usage != usage {
@@ -243,7 +245,69 @@ fn compare_rows(stem: &str, usage: &str) -> usize {
 
 #[test]
 fn rpsbproc_gives_ncbis_bytes() {
-    assert_eq!(compare_rows("compare", "compare"), 362);
+    assert_eq!(compare_rows("compare", "compare", "oracle"), 384);
+}
+
+// The rows where NCBI's `int` coordinate arithmetic overflows (undefined; NCBI's 0.5.1 builds wrap
+// it): LOSAT computes it as its value (PD-LOSAT-NCBI-DEFECTS exception 12), and its bytes equal
+// NCBI's for the row's nearby input (a `compare` row) moved back by the shift that README.md names.
+#[test]
+fn rpsbproc_widens_ncbis_int_overflows() {
+    assert_eq!(compare_rows("widened", "widened", "widened"), 9);
+}
+
+// Each `widened` row's bytes are NCBI's bytes of its nearby `compare` row moved back by the shift
+// that `widened/PAIRS.tsv` names (the input file's name, and the printed numbers it lists, each of
+// which must occur): the evidence of PD-LOSAT-NCBI-DEFECTS exception 12 kept as a check, so that
+// `widened/` cannot drift from NCBI's nearby bytes.
+#[test]
+fn widened_rows_are_their_nearby_rows_moved_back() {
+    let rows = cases();
+    let row = |case: &str| {
+        rows.iter()
+            .find(|row| row[0] == case)
+            .unwrap_or_else(|| panic!("{case}: no row"))
+            .clone()
+    };
+    let input = |case: &str| {
+        let arguments = row(case)[4].clone();
+        let words: Vec<&str> = arguments.split(' ').collect();
+        let at = words.iter().position(|&word| word == "-i").unwrap();
+        words[at + 1].to_string()
+    };
+    let read = |dir: &str, case: &str, suffix: &str| {
+        fs::read_to_string(fixtures().join(dir).join(format!("{case}.{suffix}"))).unwrap()
+    };
+    let table = fs::read_to_string(fixtures().join("widened").join("PAIRS.tsv")).unwrap();
+    let mut pairs = 0;
+    for line in table.lines().skip(1).filter(|line| !line.is_empty()) {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let (case, nearby) = (fields[0], fields[1]);
+        assert_eq!(row(case)[1], "widened", "{case}");
+        assert_eq!(row(nearby)[1], "compare", "{nearby}");
+        let mut out = read("oracle", nearby, "out").replace(&input(nearby), &input(case));
+        let mut err = read("oracle", nearby, "err").replace(&input(nearby), &input(case));
+        for shift in &fields[2..] {
+            let (old, new) = shift.split_once("=>").unwrap();
+            let (old, new) = (old.replace("\\t", "\t"), new.replace("\\t", "\t"));
+            assert!(
+                out.contains(&old) || err.contains(&old),
+                "{case}: {old:?} is not in {nearby}"
+            );
+            out = out.replace(&old, &new);
+            err = err.replace(&old, &new);
+        }
+        assert_eq!(out, read("widened", case, "out"), "{case}: stdout");
+        assert_eq!(err, read("widened", case, "err"), "{case}: stderr");
+        assert_eq!(
+            read("oracle", nearby, "rc"),
+            read("widened", case, "rc"),
+            "{case}: rc"
+        );
+        pairs += 1;
+    }
+    let widened = rows.iter().filter(|row| row[1] == "widened").count();
+    assert_eq!((pairs, widened), (9, 9));
 }
 
 // The rows of `use` `linux`: `-logfile /dev/stdout` writes the diagnostics into the pipe of the
@@ -253,7 +317,7 @@ fn rpsbproc_gives_ncbis_bytes() {
 #[cfg(target_os = "linux")]
 #[test]
 fn rpsbproc_gives_ncbis_bytes_through_a_pipe_on_linux() {
-    assert_eq!(compare_rows("linux", "linux"), 1);
+    assert_eq!(compare_rows("linux", "linux", "oracle"), 1);
 }
 
 // The refusals end LOSAT with exit 1 and the refusal as the last line of standard error, and
@@ -288,7 +352,7 @@ fn rpsbproc_refuses_what_it_does_not_give() {
         assert_same(&expected, &case, &out, &err, status);
         refused += 1;
     }
-    assert_eq!(refused, 16);
+    assert_eq!(refused, 14);
 }
 
 // The command line outside NCBI's report (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`): `-version`

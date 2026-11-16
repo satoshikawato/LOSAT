@@ -1,19 +1,23 @@
-//! BLAST XML (outfmt 5) of BLASTP and BLASTN: the searches whose XML NCBI BLAST+ 2.17.0 cannot
-//! write (a byte >= 0x80 in a title or in the `-db` name: an exception, rc 255 with no output
-//! for the first query, a document cut after the failed element for a later one) are refused
-//! (DECISIONS 19, Q2) instead of reproducing the failure.
+//! BLAST XML (outfmt 5) of BLASTP and BLASTN: the one title that NCBI BLAST+ 2.17.0 cannot make (a
+//! protein or nucleotide title of punctuation alone, such as `, ,`, on which `x_CleanAndCompress`
+//! reads past the end of the string: NCBI crashes) is refused (PD-LOSAT-NCBI-DEFECTS) and the refusal
+//! comes before the first byte, also when only a later batch of queries has the title.
 //!
-//! NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:6900-6903
-//! ```c++
-//!     ... "Failed to convert symbol to requested encoding" ...
-//! ```
-//! (`CUtf8::SymbolToChar`, reached from `CObjectOStreamXml::WriteEncodedChar` of the US-ASCII
-//! stream of blastxml_format.cpp:786.)
+//! The titles NCBI does write (a byte >= 0x80, a control byte, a title whose encoding NCBI cannot
+//! guess; the `-db` name) are not refused: their documents, cut where NCBI's XML stream fails, and
+//! their posts are the frozen rows `db.xb.*` of `tests/db_search_manifest/` and the cases of
+//! `tests/xml_dbname.rs`.
+//!
+//! NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:219-314
+//! (`CDeflineGenerator::x_CleanAndCompress`, `size_t left` wraps where a separator reaches the end).
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+mod temp_support;
+use temp_support::{Finished, TempFile};
 
 fn temp_dir(stem: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -29,12 +33,8 @@ fn temp_dir(stem: &str) -> PathBuf {
     dir
 }
 
-fn run(args: &[&std::ffi::OsStr]) -> Output {
-    run_with(args, &[])
-}
-
-/// `run` with the extra environment variables `env` (NCBI's own `BATCH_SIZE`, for example).
-fn run_with(args: &[&std::ffi::OsStr], env: &[(&str, &str)]) -> Output {
+/// The binary with the extra environment variables `env` (NCBI's own `BATCH_SIZE`, for example).
+fn run_with(args: &[&std::ffi::OsStr], env: &[(&str, &str)]) -> Finished<Output, TempFile> {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") {
@@ -42,23 +42,12 @@ fn run_with(args: &[&std::ffi::OsStr], env: &[(&str, &str)]) -> Output {
         }
     }
     // An --all-features binary at 2+ threads keeps this variable (see the other tests).
-    command.env(
-        "LOSAT_BLASTX_WORKER_LOG",
-        std::env::temp_dir().join("losat_outfmt5_worker.log"),
-    );
+    let log = TempFile::keep_on_failure("losat_outfmt5_worker", "worker.log");
+    command.env("LOSAT_BLASTX_WORKER_LOG", &log);
     command.envs(env.iter().copied());
-    command.args(args).output().expect("run LOSAT")
+    let output = command.args(args).output().expect("run LOSAT");
+    Finished::new(output, log)
 }
-
-fn run_str(args: &[&str]) -> Output {
-    let args: Vec<&std::ffi::OsStr> = args.iter().map(std::ffi::OsStr::new).collect();
-    run(&args)
-}
-
-const PROTEIN: &[u8] = b"MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG";
-const NUCLEOTIDE: &[u8] = b"ATGGCTAGCTAGGATCCGATCGATTTAGGCTAGCTAGGCTAATCGGATCGATCGGGATCGATTAGCCTAGGATCGATCGAAATTTCCCGGGAAATTTCCCGGGATCGATCGATGGCTAGCTAGGATCCGATCGATTTAGGCTAGCTAGGCTAATCGGATCGATCGGGATCGATTAGCCTAGGATCGATCGAAATTTCCCGGGAAATTTCCCGGG";
-const OTHER_PROTEIN: &[u8] = b"WQERTYIPASDFGHKLCVNMWQERTYIPASDFGHKLCVNMWQERTYIPASDFGHKLCVNM";
-const OTHER_NUCLEOTIDE: &[u8] = b"TTTTGGGGCCCCAAAATTTTGGGGCCCCAAAATTTTGGGGCCCCAAAATTTTGGGGCCCCAAAA";
 
 fn fasta(path: &Path, records: &[(&[u8], &[u8])]) {
     let mut text = Vec::new();
@@ -78,135 +67,14 @@ fn refused(output: &Output, program: &str, what: &str) {
     assert!(output.stdout.is_empty(), "{what}: nothing is written");
     assert!(
         stderr.contains(&format!(
-            "{what} with a character outside the US-ASCII range (which the XML output of NCBI BLAST+ cannot write) is not supported by LOSAT's {program}"
+            "{what} with punctuation that NCBI BLAST+ 2.17.0 crashes on when it makes the definition line is not supported by LOSAT's {program}"
         )),
         "{stderr}"
     );
 }
 
-fn programs() -> [(&'static str, &'static str, &'static [u8], &'static [u8]); 2] {
-    [
-        ("blastp", "BLASTP", PROTEIN, OTHER_PROTEIN),
-        ("blastn", "BLASTN", NUCLEOTIDE, OTHER_NUCLEOTIDE),
-    ]
-}
-
-#[test]
-fn a_query_title_outside_us_ascii_is_refused() {
-    for (program, name, hit, _) in programs() {
-        let dir = temp_dir("query");
-        let (query, subject) = (dir.join("q.fa"), dir.join("s.fa"));
-        for title in ["caf\u{e9} ".as_bytes(), b"caf\xe9"] {
-            // the first query, and a later one (NCBI catches the later one and goes on)
-            for position in 0..2 {
-                let mut records: Vec<(&[u8], &[u8])> = vec![(b"q1 ok", hit), (b"q2 ok", hit)];
-                records[position] = (title, hit);
-                fasta(&query, &records);
-                fasta(&subject, &[(b"s1 subject", hit)]);
-                let output = run_str(&[
-                    program,
-                    "-query",
-                    query.to_str().unwrap(),
-                    "-subject",
-                    subject.to_str().unwrap(),
-                    "-outfmt",
-                    "5",
-                ]);
-                refused(&output, name, "a query title");
-            }
-        }
-        fs::remove_dir_all(dir).ok();
-    }
-}
-
-#[test]
-fn a_subject_title_outside_us_ascii_is_refused_where_it_is_written() {
-    for (program, name, hit, miss) in programs() {
-        let dir = temp_dir("subject");
-        let (query, subject) = (dir.join("q.fa"), dir.join("s.fa"));
-        fasta(&query, &[(b"q1 ok", hit)]);
-        // the subject with the bad title has a hit: NCBI cuts the document after the Iteration's
-        // hits start; LOSAT refuses
-        fasta(
-            &subject,
-            &[(b"s1 ok", miss), ("s2 caf\u{e9}".as_bytes(), hit)],
-        );
-        let args = [
-            program,
-            "-query",
-            query.to_str().unwrap(),
-            "-subject",
-            subject.to_str().unwrap(),
-            "-outfmt",
-            "5",
-        ];
-        refused(&run_str(&args), name, "a subject title");
-        // without a hit the subject is never written, and the search succeeds (an invalid query
-        // has none)
-        let invalid: Vec<u8> = vec![if program == "blastp" { b'X' } else { b'N' }; 40];
-        fasta(&query, &[(b"q1 ok", &invalid)]);
-        fasta(&subject, &[("s1 caf\u{e9}".as_bytes(), hit)]);
-        let output = run_str(&args);
-        assert_eq!(
-            output.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert!(output
-            .stdout
-            .starts_with(b"<?xml version=\"1.0\" encoding=\"US-ASCII\"?>\n"));
-        fs::remove_dir_all(dir).ok();
-    }
-}
-
-#[test]
-fn a_database_name_outside_us_ascii_is_refused() {
-    let dir = temp_dir("db");
-    let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search");
-    for (program, name, db, query, extensions) in [
-        (
-            "blastn",
-            "BLASTN",
-            "nslice",
-            "nslice_q.fna",
-            ["nhr", "nin", "nsq"],
-        ),
-        (
-            "blastp",
-            "BLASTP",
-            "residues",
-            "residues_q.faa",
-            ["phr", "pin", "psq"],
-        ),
-    ] {
-        let copy = dir.join(format!("{db}_caf\u{e9}"));
-        for extension in extensions {
-            fs::copy(
-                tests.join(format!("{db}.{extension}")),
-                format!("{}.{extension}", copy.display()),
-            )
-            .expect("copy database");
-        }
-        let output = run(&[
-            std::ffi::OsStr::new(program),
-            std::ffi::OsStr::new("-query"),
-            tests.join(query).as_os_str(),
-            std::ffi::OsStr::new("-db"),
-            copy.as_os_str(),
-            std::ffi::OsStr::new("-outfmt"),
-            std::ffi::OsStr::new("5"),
-        ]);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert_eq!(output.status.code(), Some(1), "{program}: {stderr}");
-        assert!(output.stdout.is_empty(), "{program}: nothing is written");
-        assert!(
-            stderr.contains(&format!("a database name with a character outside the US-ASCII range (which the XML output of NCBI BLAST+ cannot write) is not supported by LOSAT's {name}")),
-            "{stderr}"
-        );
-    }
-    fs::remove_dir_all(dir).ok();
-}
+/// The title of punctuation that NCBI's `x_CleanAndCompress` reads past the end of.
+const PUNCTUATION: &[u8] = b", ,";
 
 /// 300 BLASTN queries of 400 letters from a fixed pseudo-random sequence generator; the titles
 /// are `q<n> plain` except for the one at `bad_title`. Only the last query is `hit`.
@@ -236,7 +104,8 @@ fn many_queries(path: &Path, bad_title: Option<(usize, &[u8])>, hit: &[u8]) {
 /// With more than one report batch (NCBI's `BATCH_SIZE` here, the default batch size of 300
 /// queries of 400 letters in the other) a refusal that only a later batch finds must still come
 /// before the first byte: BLAST XML is not streamed batch by batch (`x_rpt_stream`, `Off::Xml`).
-/// Standard output and the `-out` file stay empty.
+/// Standard output and the `-out` file stay empty. (A title NCBI writes does not make a later
+/// batch refuse: its document is the one of `db.xb.*`.)
 #[test]
 fn a_refusal_in_a_later_batch_writes_nothing() {
     let dir = temp_dir("batches");
@@ -259,11 +128,11 @@ fn a_refusal_in_a_later_batch_writes_nothing() {
             // a query title: the 291st query; a subject title: the subject of the last query's
             // hit (the only query with one)
             if what == "a query title" {
-                many_queries(&query, Some((290, "q290 caf\u{e9}".as_bytes())), &hit);
+                many_queries(&query, Some((290, PUNCTUATION)), &hit);
                 fasta(&subject, &[(b"s1 subject", &hit)]);
             } else {
                 many_queries(&query, None, &hit);
-                fasta(&subject, &[("s1 caf\u{e9}".as_bytes(), &hit)]);
+                fasta(&subject, &[(PUNCTUATION, &hit)]);
             }
             let out = dir.join("o.xml");
             fs::remove_file(&out).ok();

@@ -11028,7 +11028,17 @@ fn run_in_pool(
                     rows_open(&batch_hit_lists).map(|()| Vec::new())
                 } else {
                     database
-                        .batch_prefetch(&titles, &batch_hit_lists, !args.ungapped, start)
+                        .batch_prefetch(
+                            &titles,
+                            &batch_hit_lists,
+                            !args.ungapped,
+                            // NCBI's scope at the prefetch: outfmt 5 keeps the queries of the
+                            // batches before (`shared::PrefetchQueries`).
+                            &crate::algorithm::common::database::PrefetchQueries::new(
+                                start..end,
+                                output_formats.first() == Some(&BlastnOutputFormat::Xml),
+                            ),
+                        )
                         .and_then(|messages| {
                             rows_open(&batch_hit_lists)?;
                             Ok(messages)
@@ -11052,7 +11062,10 @@ fn run_in_pool(
                                 &hit_lists,
                                 &batch_hit_lists,
                                 !args.ungapped,
-                                start,
+                                &crate::algorithm::common::database::PrefetchQueries::new(
+                                    start..end,
+                                    output_formats.first() == Some(&BlastnOutputFormat::Xml),
+                                ),
                             )
                             .map(|()| Vec::new())
                     })

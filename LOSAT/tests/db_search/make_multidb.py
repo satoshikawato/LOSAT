@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Builds tests/db_search/multidb/: the databases of the rows db.mdb.* (DI-8f: -db with several names).
 
-Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only | --loadord-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
+Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only | --loadord-only | --loadord2-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
 
 The records are those of taxfilter/tfp.faa (23 protein globins) and taxfilter/tfn.fna (16 globin cDNAs); the definition
 lines (some records carry a second one) stay as they are, the taxids come from taxfilter/tfp.map and tfn.map.
@@ -64,6 +64,11 @@ lines (some records carry a second one) stay as they are, the taxids come from t
   (review 1 of loadord, H1); `ldq` (`ldqn`): `lcl|Query_1` with those letters, which NCBI's scope finds among the queries
   (H2); both `-parse_seqids`. `ldo_qc.faa`: one query, the letters of ../taxfilter/q.faa followed by `qp1`, which hits both
   (psiblast's batch is one query). `make_multidb.py --loadord-only MAKEBLASTDB` builds only these.
+- `ldc` (`ldcn`) and `ldh` (`ldhn`) (line DBID loadord, DECISIONS 60 (6)): version 5, `-parse_seqids`, taxid 9606, the
+  letters of `ldp`'s first record: `ldc` a copy of it (`ref|NP_000002.1|`), the same Seq-align id, whose load is the
+  stopping lookup itself (beside `ldp`, NCBI stops in a later batch too); `ldh` `gi|9000|ref|NP_000002.1|`, which holds
+  the accession but whose gi (handle 9000) loads after it in one batch, so NCBI stops. `make_multidb.py
+  --loadord2-only MAKEBLASTDB` builds only these (the databases of `--loadord-only` keep their dates).
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
 """
@@ -294,6 +299,28 @@ def make_loadord(binary):
                 + "\n")
 
 
+def make_loadord2(binary):
+    """Builds ldc, ldh and their nucleotide counterparts ldcn, ldhn (line DBID loadord, DECISIONS 60 (6))."""
+
+    def letters(path):
+        return next("".join(line.strip() for line in lines) for header, lines in read_fasta_path(path))
+
+    for kind, suffix, prefix, globin in (("prot", "", "NP", letters(os.path.join(SRC, "q.faa"))),
+                                         ("nucl", "n", "NM", letters(os.path.join(SRC, "q.fna")))):
+        sets = {
+            "ldc": [(f">ref|{prefix}_000002.1| loadord a copy of ldp's first record", globin)],
+            "ldh": [(f">gi|9000|ref|{prefix}_000002.1| loadord the accession of ldp under a gi after it", globin)],
+        }
+        for base, records in sets.items():
+            name = base + suffix
+            with open(os.path.join(HERE, name + ".fa"), "w") as f:
+                for header, seq in records:
+                    f.write(header + "\n" + "\n".join(seq[at:at + 60] for at in range(0, len(seq), 60)) + "\n")
+            makeblastdb(binary, "-in", name + ".fa", "-dbtype", kind, "-out", name, "-parse_seqids", "-blastdb_version",
+                        "5", "-taxid", "9606", "-title", "multidb " + name)
+            os.remove(os.path.join(HERE, name + (".pjs" if kind == "prot" else ".njs")))
+
+
 def main(binary):
     os.makedirs(os.path.join(HERE, "d1"), exist_ok=True)
     os.makedirs(os.path.join(HERE, "d2"), exist_ok=True)
@@ -349,9 +376,12 @@ if __name__ == "__main__":
         make_mixtax(sys.argv[2])
     elif sys.argv[1] == "--loadord-only":
         make_loadord(sys.argv[2])
+    elif sys.argv[1] == "--loadord2-only":
+        make_loadord2(sys.argv[2])
     else:
         main(sys.argv[1])
         make_ordsl(sys.argv[1])
         make_mixdb2(sys.argv[1])
         make_mixtax(sys.argv[1])
         make_loadord(sys.argv[1])
+        make_loadord2(sys.argv[1])

@@ -699,6 +699,7 @@ fn write_run(
                     .borrow()
                     .as_ref()
                     .map(|scopes| scopes.numbered_from(queries_before)),
+                queries_before..queries_before + queries.len(),
                 &mut *diagnostics,
             )?),
             None => None,

@@ -1507,12 +1507,12 @@ impl ListedTitles<'_> {
     /// NCBI's prefetch of a query batch's subjects of ranks `ranks` on standard error
     /// (`shared::batch_prefetch`): the taxonomy texts of `prefetch_messages`, then the warning
     /// where the prefetch fails at a subject whose lookup fails (a protein has no strand); the
-    /// stop of the batch whose first query is `query` (`shared::batch_prefetch`).
+    /// stop of the batch of `queries` (`shared::batch_prefetch`).
     pub(super) fn batch_prefetch(
         &self,
         database: &BlastpDatabase,
         ranks: impl IntoIterator<Item = usize>,
-        query: usize,
+        queries: &shared::PrefetchQueries,
     ) -> Result<Vec<u8>> {
         shared::batch_prefetch(
             &database.db,
@@ -1524,12 +1524,12 @@ impl ListedTitles<'_> {
                 )
             }),
             self.program,
-            query,
+            queries,
         )
     }
 
-    /// The stop of NCBI's prefetch of a query batch's subjects of ranks `ranks` whose first query
-    /// is `query`, for the XML2 and JSON formats, which write the taxonomy texts at each `Hit`
+    /// The stop of NCBI's prefetch of a query batch's subjects of ranks `ranks` (the batch of
+    /// `queries`), for the XML2 and JSON formats, which write the taxonomy texts at each `Hit`
     /// (`shared::held_batch_prefetch_stop`): after the lookups of the reports of the batches
     /// before, whose final hit lists are `before` (their subjects are those `read_taxids` reads),
     /// which BLASTP writes after the stop (the search of those batches again, `HeaderReadError`).
@@ -1538,7 +1538,7 @@ impl ListedTitles<'_> {
         database: &BlastpDatabase,
         before: &[Option<BlastpHitList>],
         ranks: impl IntoIterator<Item = usize>,
-        query: usize,
+        queries: &shared::PrefetchQueries,
     ) -> Result<()> {
         let subject = |rank: usize| {
             shared::PrefetchSubject::unflipped(
@@ -1551,7 +1551,7 @@ impl ListedTitles<'_> {
             Self::reported_ranks(before).map(subject),
             ranks.into_iter().map(subject),
             self.program,
-            query,
+            queries,
         )
     }
 

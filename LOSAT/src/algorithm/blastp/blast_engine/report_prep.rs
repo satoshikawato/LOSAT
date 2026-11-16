@@ -339,6 +339,16 @@ pub(super) fn prefetch_reported_subjects(
     // (blast_format.cpp:1523-1541), so they read the subjects in one order.
     let pairwise_first = first_report
         .is_some_and(|format| blastp_pairwise_view_of(args.app, format as i32).is_some());
+    // The queries of a batch as NCBI's scope holds them at its prefetch (outfmt 5 keeps those of
+    // the batches before), after psiblast's PSSM reads of the rounds before
+    // (`shared::PrefetchQueries`).
+    let prefetch_queries = |span: &std::ops::Range<usize>| {
+        crate::algorithm::common::database::PrefetchQueries::new(
+            span.clone(),
+            first_report == Some(crate::blastinput::app::ReportFormat::Xml),
+        )
+        .after_loads(pssm_made)
+    };
     if let (Some(titles), Some(database)) = (listed_titles.as_ref(), database) {
         // Without `taxdb.bti` the prefetch of a table that reads the subjects writes nothing
         // before it stops: the stopping batch's prefetch alone (`ListedTitles::prefetch_stop`).
@@ -350,7 +360,7 @@ pub(super) fn prefetch_reported_subjects(
                 database,
                 &hit_lists[..span.start],
                 prefetched_ranks(span.clone()),
-                span.start,
+                &prefetch_queries(span),
             )?;
         } else if let Some(span) = prefetch_stop
             .as_ref()
@@ -359,7 +369,7 @@ pub(super) fn prefetch_reported_subjects(
             titles.batch_prefetch(
                 database,
                 database::ListedTitles::reported_ranks(&hit_lists[span.clone()]),
-                span.start,
+                &prefetch_queries(span),
             )?;
         }
         if prefetch_taxids || psiblast_prefetched.is_some() || prefetch_only {
@@ -495,7 +505,11 @@ pub(super) fn prefetch_reported_subjects(
                             prefetch_taxids,
                             !prefetch_only,
                         )?;
-                        titles.batch_prefetch(database, prefetched, batch.searched.start)?
+                        titles.batch_prefetch(
+                            database,
+                            prefetched,
+                            &prefetch_queries(&batch.searched),
+                        )?
                     }
                     None => {
                         if !prefetch_taxids {
@@ -507,7 +521,7 @@ pub(super) fn prefetch_reported_subjects(
                         titles.batch_prefetch(
                             database,
                             database::ListedTitles::reported_ranks(lists),
-                            batch.searched.start,
+                            &prefetch_queries(&batch.searched),
                         )?
                     }
                 };

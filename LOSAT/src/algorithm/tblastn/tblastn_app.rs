@@ -2191,6 +2191,14 @@ fn search(
         // taxonomy texts at each `Hit`: of the prefetch only its stop
         // (`shared::held_batch_prefetch_stop`).
         let first_xml2 = first_number.is_some_and(|number| matches!(number, 13..=16));
+        // The queries of a batch as NCBI's scope holds them at its prefetch: outfmt 5 keeps
+        // those of the batches before (`shared::PrefetchQueries`).
+        let prefetch_queries = |span: &std::ops::Range<usize>| {
+            crate::algorithm::common::database::PrefetchQueries::new(
+                span.clone(),
+                first_number == Some(5),
+            )
+        };
         // A batch whose prefetch loads a subject whose lookup fails on a file stops the run in
         // its prefetch (`database::prefetch_stop`): as a batch that a database file failed, it is
         // not reported, nor are the batches after it; its error is made after the prefetches of
@@ -2491,7 +2499,8 @@ fn search(
                     if seq_aligns == 0 {
                         continue;
                     }
-                    let messages = database.batch_prefetch(reported, hitlists, span.start)?;
+                    let messages =
+                        database.batch_prefetch(reported, hitlists, &prefetch_queries(span))?;
                     rows_open(hitlists)?;
                     if messages.is_empty() {
                         continue;
@@ -2509,7 +2518,7 @@ fn search(
                 reported.as_ref(),
                 &results,
                 &subjects,
-                span.start,
+                &prefetch_queries(&span),
                 first_xml2,
             );
             match error.downcast::<crate::algorithm::common::database::HeaderReadError>() {

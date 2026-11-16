@@ -725,20 +725,22 @@ impl ReportedSubjects {
     /// error.
     ///
     /// A subject whose lookup fails on a file stops the run there (`shared::batch_prefetch`):
-    /// BLASTX writes each batch's reports before it searches the next, so the error names the
-    /// batch's first query as 0 (`native::reported_error` takes the error alone).
+    /// BLASTX writes each batch's reports before it searches the next, so the error of the batch
+    /// of `queries` names query 0 (`native::reported_batch`; `native::reported_error` takes the
+    /// error alone).
     pub(crate) fn batch_prefetch(
         &self,
         database: &BlastxDatabase,
         batches: &[BatchResults],
         gapped: bool,
+        queries: &shared::PrefetchQueries,
     ) -> Result<Vec<u8>> {
         shared::batch_prefetch(
             &database.db,
             &database.taxdb,
             self.prefetch_subjects(batches, gapped),
             database.program,
-            0,
+            queries,
         )
     }
 
@@ -753,13 +755,14 @@ impl ReportedSubjects {
         database: &BlastxDatabase,
         batches: &[BatchResults],
         gapped: bool,
+        queries: &shared::PrefetchQueries,
     ) -> Result<()> {
         shared::batch_prefetch_stop(
             &database.db,
             &database.taxdb,
             self.prefetch_subjects(batches, gapped),
             database.program,
-            0,
+            queries,
         )
     }
 
@@ -1313,7 +1316,12 @@ mod tests {
                 false,
             )
             .unwrap();
-            let messages = reported.batch_prefetch(database, &batches, true);
+            let messages = reported.batch_prefetch(
+                database,
+                &batches,
+                true,
+                &shared::PrefetchQueries::new(0..1, false).naming(0),
+            );
             String::from_utf8(messages.unwrap()).unwrap()
         };
         let database = open_with_taxdb("x16_taxid_99990", Some("offset_last_past_end"), &cwd);

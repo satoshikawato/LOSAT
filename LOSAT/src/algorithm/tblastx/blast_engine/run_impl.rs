@@ -3619,6 +3619,14 @@ fn run_batch_loop(
         .is_some_and(|format| report::output_format(format.outfmt).prefetches_subjects());
     // The XML2 and JSON formats, whose prefetch NCBI runs too but which write the taxonomy texts
     // at each `Hit`: of the prefetch only its stop (`database::batch_prefetch_stop`).
+    // The queries of a batch as NCBI's scope holds them at its prefetch: outfmt 5 keeps those of
+    // the batches before (`shared::PrefetchQueries`).
+    let scope_keeps_queries = outputs.formats.first().is_some_and(|format| {
+        report::output_format(format.outfmt) == report::TblastxOutputFormat::Xml
+    });
+    let prefetch_queries = |batch: std::ops::Range<usize>| {
+        crate::algorithm::common::database::PrefetchQueries::new(batch, scope_keeps_queries)
+    };
     let xml2_prefetch = outputs.formats.first().is_some_and(|format| {
         matches!(
             report::output_format(format.outfmt),
@@ -4117,7 +4125,7 @@ fn run_batch_loop(
                     &done.hits,
                     ordered,
                     &reports.titles.borrow(),
-                    start,
+                    &prefetch_queries(start..end),
                 ) {
                     prefetch_failed!(error);
                 }
@@ -4216,7 +4224,7 @@ fn run_batch_loop(
                         database,
                         ordered,
                         &reports.titles.borrow(),
-                        start,
+                        &prefetch_queries(start..end),
                     );
                     let messages = match prefetch {
                         Ok(messages) => messages,

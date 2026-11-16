@@ -1037,6 +1037,7 @@ fn run_inner(
                         .borrow()
                         .as_ref()
                         .map(|scopes| scopes.numbered_from(queries_before)),
+                    queries_before..queries_before + queries.len(),
                     diagnostics,
                 )
                 .inspect_err(drop_held)?;
@@ -1387,9 +1388,18 @@ pub(super) fn reported_batch(
     asks: ReportedAsks,
     results: &mut [BatchResults],
     query_scopes: Option<crate::blastinput::query_batch::QueryScopesFrom<'_>>,
+    batch_queries: std::ops::Range<usize>,
     diagnostics: &mut dyn Write,
 ) -> Result<ReportedSubjects> {
     use super::x_timing::Run as XRun;
+    // The queries of the batch (numbered in the run) as NCBI's scope holds them at its prefetch
+    // (outfmt 5 keeps those of the batches before); the stop's error names query 0 (each batch's
+    // reports are written before the next is searched, `reported_error`).
+    let prefetch_queries = crate::algorithm::common::database::PrefetchQueries::new(
+        batch_queries,
+        options.outfmt == 5,
+    )
+    .naming(0);
     let Some(titles) = titles else {
         return Ok(ReportedSubjects::default());
     };
@@ -1514,7 +1524,7 @@ pub(super) fn reported_batch(
             // A lookup that fails on a file stops the run here, after the reports of the
             // batches before and this batch's reader messages (`shared::batch_prefetch`).
             let messages = reported
-                .batch_prefetch(database, results, options.gapped)
+                .batch_prefetch(database, results, options.gapped, &prefetch_queries)
                 .map_err(reported_error)?;
             diagnostics.write_all(&messages)?;
         }
@@ -1522,7 +1532,7 @@ pub(super) fn reported_batch(
         // The XML2 and JSON formats write the taxonomy texts at each `Hit`: of the batch's
         // prefetch only its stop (`ReportedSubjects::batch_prefetch_stop`).
         reported
-            .batch_prefetch_stop(database, results, options.gapped)
+            .batch_prefetch_stop(database, results, options.gapped, &prefetch_queries)
             .map_err(reported_error)?;
     }
     // The values of a custom tabular field list that reads more of the

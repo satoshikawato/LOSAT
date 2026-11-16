@@ -6,4 +6,6 @@
   accession info.` (exit status 2), as NCBI BLAST+ does; LOSAT refused such a run. A load whose order NCBI takes from
   memory addresses (the same number, ids that are not packed, more than 200 ids in the batch) that writes a message
   stays refused. Newly refused, where LOSAT wrote the stop and NCBI BLAST+ goes on: a stopping Seq-id that another
-  sequence of the database also holds, and one of the form `lcl|Query_N`.
+  sequence of the database holds under another Seq-align id where that sequence may be loaded
+  first (in the batch, or in a batch before), and the generated id `lcl|Query_N` of a query that
+  NCBI BLAST+ holds at that point (the batch's queries; with `-outfmt 5` also those before).

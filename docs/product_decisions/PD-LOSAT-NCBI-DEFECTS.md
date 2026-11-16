@@ -807,11 +807,14 @@ masked). Line NP item M4a-2c.
   writes a text of the taxonomy database (after the lookups of the batches before: their
   prefetch, or in the JSON and XML2 formats their reports, since version 1.36), one where
   another lookup that throws on its id may come before the stop, and one whose stopping id NCBI
-  may never look up: another sequence of the database holds an id of its Seq-id handle (NCBI's
-  data loader keeps the ids of every sequence it has loaded and gives that sequence for them,
-  `gi|1|ref|NP_000002.1|` before `ref|NP_000002.1|`), or it is a local id of the form of a
-  generated query id (`lcl|Query_1`, which NCBI's scope finds among the queries; review 1 of
-  item loadord, H1 and H2: NCBI then searches to the end, exit 0).
+  may never look up: another sequence of the database that holds an id of its Seq-id handle
+  may be loaded first (NCBI's data loader keeps the ids of every sequence it has loaded and
+  gives that sequence for them: `gi|1|ref|NP_000002.1|` before `ref|NP_000002.1|` in the
+  batch's order, or in a batch before, or psiblast's PSSM reads; not a copy with the same
+  Seq-align id, whose load is the same lookup), or it is the generated id (`lcl|Query_1`) of a
+  query that NCBI's scope holds at the prefetch (the batch's queries, and with outfmt 5, whose
+  report keeps the scope, those of the batches before; review 1 of item loadord, H1 and H2:
+  NCBI then searches to the end, exit 0).
   Versions 1.9 to 1.24 refused every such list before the search (line DI-8 `DECISIONS.md` 31),
   versions 1.25 to 1.30 every run whose reports or prefetch looked such a Seq-id up.
 

@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "plcls9",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "plcls9",
+  "number-of-letters": 450,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-15T07:46:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 1,
+  "bytes-total": 49840,
+  "bytes-to-cache": 548,
+  "files": [
+    "plcls9.pdb",
+    "plcls9.phr",
+    "plcls9.pin",
+    "plcls9.pog",
+    "plcls9.pos",
+    "plcls9.pot",
+    "plcls9.psq",
+    "plcls9.ptf",
+    "plcls9.pto"
+  ]
+}

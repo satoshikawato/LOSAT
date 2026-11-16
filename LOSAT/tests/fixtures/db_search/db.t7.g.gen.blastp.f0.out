@@ -1,0 +1,133 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/t7/gen.faa).
+           3 sequences; 720 total letters
+
+
+
+Query= pq1 query protein one
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+Subject_4                                                             313     2e-109
+TPA: s7 third                                                         247     2e-87 
+Subject_5 a & b                                                       159     2e-53 
+
+
+> Subject_4
+Length=450
+
+ Score = 313 bits (803),  Expect = 2e-109, Method: Compositional matrix adjust.
+ Identities = 151/153 (99%), Positives = 151/153 (99%), Gaps = 0/153 (0%)
+
+Query  1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+            CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR
+Sbjct  1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+
+Query  61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+            PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK
+Sbjct  61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+
+Query  121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGL  153
+            VSAYDFAVKTSNDFDGGVCERDKSYVTLIP  L
+Sbjct  121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPPPL  153
+
+
+ Score = 228 bits (580),  Expect = 7e-76, Method: Compositional matrix adjust.
+ Identities = 118/149 (79%), Positives = 124/149 (83%), Gaps = 0/149 (0%)
+
+Query  152  GLSTPFVNLVRHAMQLKVPSRLAACYTHLAALKGLGSPRLTEYNRCSTHSGRGLFEPEST  211
+            GLSTPFVNLVRHA QLKV SRLA    H AALKG  SPRLT+Y RCS HSGRGLF+PEST
+Sbjct  302  GLSTPFVNLVRHAAQLKVYSRLACDIAHPAALKGTRSPRLTDYPRCSIHSGRGLFDPEST  361
+
+Query  212  LGDPSRVQIPLTETRCNSRLVTPITNYCTSKSREPRHSCNLVRVNVILICNSARGYLCKR  271
+            LGDPSRVQIPLTE  CN RL+T  T+YCTSK+REP HSC LV VNVILICNS+RG LCKR
+Sbjct  362  LGDPSRVQIPLTERACNLRLITVSTDYCTSKTREPAHSCVLVDVNVILICNSSRGSLCKR  421
+
+Query  272  SRGTEYHKFTSSEFSSPPWMNLTLVNYQN  300
+            SRGTEY KFTSS FSSPP M  TLVNYQN
+Sbjct  422  SRGTEYSKFTSSGFSSPPSMVTTLVNYQN  450
+
+
+> s7 third
+Length=150
+
+ Score = 247 bits (630),  Expect = 2e-87, Method: Compositional matrix adjust.
+ Identities = 127/150 (85%), Positives = 128/150 (85%), Gaps = 0/150 (0%)
+
+Query  51   GDESHIVAGRPARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTC  110
+            GDESHIVA  PA PTLTRSVR TISPDPFF CRCRRD SIQYMLQPRLLRPSENVES TC
+Sbjct  1    GDESHIVADLPAAPTLTRSVRVTISPDPFFPCRCRRDSSIQYMLQPRLLRPSENVESITC  60
+
+Query  111  ANLVMRAVVKVSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNLVRHAMQLKVP  170
+            AN VMRAV K SAYDFAVKTSNDFDG VCERDKS VTLI SGLSTP  NLVRHAMQL+VP
+Sbjct  61   ANSVMRAVSKASAYDFAVKTSNDFDGKVCERDKSQVTLIHSGLSTPRRNLVRHAMQLQVP  120
+
+Query  171  SRLAACYTHLAALKGLGSPRLTEYNRCSTH  200
+            SRLA CYTH AA KGLGS  L E NRCSTH
+Sbjct  121  SRLALCYTHGAASKGLGSSPLPESNRCSTH  150
+
+
+ Score = 15.0 bits (27),  Expect = 5.2, Method: Compositional matrix adjust.
+ Identities = 5/8 (63%), Positives = 6/8 (75%), Gaps = 0/8 (0%)
+
+Query  17   LTSNPFPE  24
+            L S+P PE
+Sbjct  136  LGSSPLPE  143
+
+
+> Subject_5 a & b
+Length=120
+
+ Score = 159 bits (402),  Expect = 2e-53, Method: Compositional matrix adjust.
+ Identities = 81/120 (68%), Positives = 87/120 (73%), Gaps = 0/120 (0%)
+
+Query  1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+            CF YQG GFI + S R+TSNPFP  F RVE  MRGR A I++RHRVPYACGDES   AGR
+Sbjct  1    CFTYQGVGFIGIRSARVTSNPFPFSFQRVEYCMRGRGATINLRHRVPYACGDESLAAAGR  60
+
+Query  61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+            PARPT TR VRHTI P  FF+CRCRR   IQYMLQ RLLR   NVESG C  LV   V+K
+Sbjct  61   PARPTSTRVVRHTICPKYFFLCRCRRVVWIQYMLQSRLLRADRNVESGYCVTLVSLLVLK  120
+
+
+
+Lambda      K        H        a         alpha
+   0.323    0.136    0.422    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 167232
+
+
+  Database: User specified sequence set (Input: tests/db_search/t7/gen.faa).
+    Posted date:  Unknown
+  Number of letters in database: 720
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

@@ -506,6 +506,7 @@ impl RoundSections<'_> {
             writer,
             probe,
             s_idx,
+            self.parsed_subjects,
             &group.subject_titles[&s_idx],
             true,
             &group.subject_hits[&s_idx],

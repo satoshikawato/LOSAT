@@ -637,7 +637,10 @@ fn pdb_or_patent_title(ids: &BioseqFacts) -> Vec<u8> {
 ///         }
 /// ```
 /// A local ID is written `lcl|` and its text (`CSeq_id::WriteAsFasta`, Seq_id.cpp:2164-2196,
-/// `CObject_id::AsString`, Object_id.cpp:202-210).
+/// `CObject_id::AsString`, Object_id.cpp:202-210). Of `lcl|` and the text, `lcl|Subject_` is
+/// found where the text starts with `Subject_` or holds it all: the `lcl|` before the text takes
+/// part in no other match.
+#[inline]
 pub fn tabular_subject_id(
     local_id: &[u8],
     title: &[u8],
@@ -649,9 +652,7 @@ pub fn tabular_subject_id(
     } else {
         replaced
     };
-    let mut fasta = b"lcl|".to_vec();
-    fasta.extend_from_slice(replaced);
-    if contains(&fasta, b"lcl|Subject_") {
+    if replaced.starts_with(b"Subject_") || contains(replaced, b"lcl|Subject_") {
         let defline = generate_defline(title, protein, false)?.text;
         let token = first_word(&defline);
         if !token.is_empty() {
@@ -678,16 +679,17 @@ pub(crate) use punctuation_title;
 /// title `title`: the first word of the title that `GenerateDefline` makes of it
 /// (flags 0), which `GetSeqIdList` puts in the place of the id.
 ///
-/// `None` for a title whose generated first word is empty (a title of spaces; `MAG:` alone; a
-/// nucleotide's empty title whose source has no name; `MAG: (plastid) [ ]` of a protein with a
-/// source, see below): NCBI keeps the general id and writes it in two forms,
+/// `SubjectWord::General` for a title whose generated first word is empty (a title of spaces;
+/// `MAG:` alone; a nucleotide's empty title whose source has no name; `MAG: (plastid) [ ]` of a
+/// protein with a source, see below): NCBI keeps the general id and writes it in two forms,
 /// `gnl|BL_ORD_ID|n` for `sseqid` and `BL_ORD_ID:n` for `sacc` and `saccver`, n the sequence's
 /// OID (`algorithm::common::database::TabularSubjectId`). Where the taxonomy database names the
 /// taxid of an empty title, NCBI makes the title from the name (`bioseq_title_from_source`,
 /// `ids`), whose first word is the id (`Homo` for taxid 9606).
+/// `SubjectWord::Unknown` for a title (or name) whose encoding NCBI cannot guess:
+/// `GenerateDefline` throws and `GetSeqIdList` makes no id (`report::tabular::SubjectLookup`).
 ///
-/// `Err` names what LOSAT does not write as NCBI: a title whose encoding NCBI cannot
-/// guess (`GenerateDefline` throws), and a title of punctuation that NCBI's
+/// `Err` names what LOSAT does not write as NCBI: a title of punctuation that NCBI's
 /// `x_CleanAndCompress` reads past the end of (NCBI crashes).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:218-242
@@ -743,14 +745,31 @@ pub fn database_subject_id(
     title: &[u8],
     ids: &BioseqFacts,
     protein: bool,
-) -> Result<Option<Vec<u8>>, &'static str> {
-    let defline = generate_bioseq_defline(title, protein, false, ids)
-        .map_err(|UnknownEncoding| "in no encoding that NCBI BLAST+ recognises")?;
+) -> Result<SubjectWord, &'static str> {
+    let Ok(defline) = generate_bioseq_defline(title, protein, false, ids) else {
+        return Ok(SubjectWord::Unknown);
+    };
     if defline.reads_past_end {
         return Err(punctuation_title!());
     }
     let token = first_word(&defline.text);
-    Ok((!token.is_empty()).then(|| token.to_vec()))
+    Ok(if token.is_empty() {
+        SubjectWord::General
+    } else {
+        SubjectWord::Word(token.to_vec())
+    })
+}
+
+/// What `GetSeqIdList` puts in the place of a database sequence's general id
+/// (`database_subject_id`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SubjectWord {
+    /// The first word of the generated title.
+    Word(Vec<u8>),
+    /// The general id itself: the generated title's first word is empty.
+    General,
+    /// No id: `GenerateDefline` throws (a title in no encoding that NCBI guesses).
+    Unknown,
 }
 
 /// `NStr::Split(text, " ", tokens)[0]`: the bytes before the first space.
@@ -2157,7 +2176,7 @@ mod tests {
         ] {
             assert_eq!(
                 database_subject_id(title.as_bytes(), &BioseqFacts::default(), true),
-                Ok(Some(id.as_bytes().to_vec())),
+                Ok(SubjectWord::Word(id.as_bytes().to_vec())),
                 "{title:?}"
             );
         }
@@ -2191,7 +2210,7 @@ mod tests {
         ] {
             assert_eq!(
                 database_subject_id(title.as_bytes(), &BioseqFacts::default(), protein),
-                Ok(None),
+                Ok(SubjectWord::General),
                 "{title:?}"
             );
         }
@@ -2201,14 +2220,17 @@ mod tests {
         };
         assert_eq!(
             database_subject_id(b"MAG: (plastid) [ ]", &nameless, true),
-            Ok(None)
+            Ok(SubjectWord::General)
         );
         assert_eq!(
             database_subject_id(b"MAG: (plastid) [ ]", &BioseqFacts::default(), true),
-            Ok(Some(b"(plastid)".to_vec()))
+            Ok(SubjectWord::Word(b"(plastid)".to_vec()))
         );
         // A nucleotide's empty title without a name of its source.
-        assert_eq!(database_subject_id(b"", &nameless, false), Ok(None));
+        assert_eq!(
+            database_subject_id(b"", &nameless, false),
+            Ok(SubjectWord::General)
+        );
         for title in [", ,", "; ;"] {
             assert!(
                 database_subject_id(title.as_bytes(), &BioseqFacts::default(), true)
@@ -2217,10 +2239,9 @@ mod tests {
                 "{title:?}"
             );
         }
-        assert!(
-            database_subject_id(b"caf\x81", &BioseqFacts::default(), true)
-                .unwrap_err()
-                .contains("in no encoding")
+        assert_eq!(
+            database_subject_id(b"caf\x81", &BioseqFacts::default(), true),
+            Ok(SubjectWord::Unknown)
         );
     }
 
@@ -2378,6 +2399,28 @@ mod tests {
                 assert_eq!(made.as_deref(), heading, "{case} protein={protein} heading");
                 let tabular = tabular_subject_id(b"Subject_1", &title, protein).ok();
                 assert_eq!(tabular.as_deref(), id, "{case} protein={protein} sseqid");
+            }
+        }
+    }
+
+    #[test]
+    fn subject_ids_take_the_generated_word_where_lcl_subject_is_found() {
+        // `lcl|Subject_` of `lcl|` and the word: at its start (the word starts with `Subject_`)
+        // or inside the word, whose generated title drops the last period; nowhere else.
+        for (title, id) in [
+            ("Subject_4.", "Subject_4"),
+            ("xlcl|Subject_4.", "xlcl|Subject_4"),
+            ("lcl|Subject_4.", "lcl|Subject_4"),
+            ("xSubject_4.", "xSubject_4."),
+            ("Subject4.", "Subject4."),
+            ("cl|Subject_4.", "cl|Subject_4."),
+        ] {
+            for protein in [false, true] {
+                assert_eq!(
+                    tabular_subject_id(b"Subject_1", title.as_bytes(), protein).as_deref(),
+                    Ok(id.as_bytes()),
+                    "{title} protein={protein}"
+                );
             }
         }
     }

@@ -86,6 +86,11 @@ ALIASES = {
     "ntab": ("n", NAMED),
     "npall": ("np", PARSED),
     "ppall": ("pp", PARSED),
+    # Line RG item T7: the name NCBI cannot decode before and after a named sequence (rows db.t7.*).
+    "nt7_bf": ("n", [100009, 100001]),
+    "nt7_fb": ("n", [100001, 100009]),
+    "pt7_bf": ("p", [100009, 100001]),
+    "pt7_fb": ("p", [100001, 100009]),
 }
 
 CTRL_A = "\x01"

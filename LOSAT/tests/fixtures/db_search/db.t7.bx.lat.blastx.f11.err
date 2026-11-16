@@ -1,0 +1,3 @@
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0xE9] in string at line 55
+Subject_9 café title

@@ -1919,18 +1919,23 @@ impl ListedTitles<'_> {
 
     /// The subject id of the tabular formats (`sseqid`, `sacc`, `saccver`) of every
     /// listed subject, by rank (`shared::tabular_subject_id`); a
-    /// subject without rows gets an empty id. A subject with rows whose id LOSAT cannot write
-    /// as NCBI is an error before any format is written where a tabular report `reads` the
-    /// subject (`report::tabular::reads_subject`), else its ids are empty: a table of fields
-    /// that read nothing of the subject prints none of them.
+    /// subject without rows gets an empty id, one whose lookup fails none
+    /// (`common::tabular::SubjectId`: `TabularSubjectId::Unknown`, a parsed subject's
+    /// `ParsedSubject::tabular_ids`; `report::tabular::check_failed_lookups`). A subject with rows
+    /// whose id LOSAT cannot write as NCBI is an error before any format is written where a
+    /// tabular report `reads` the subject (`report::tabular::reads_subject`), else its ids are
+    /// empty: a table of fields that read nothing of the subject prints none of them.
     pub(super) fn tabular_subject_ids(
         &self,
         hit_lists: &[Option<BlastpHitList>],
         reads: bool,
-    ) -> Result<(Vec<Arc<[u8]>>, Vec<Option<[Arc<[u8]>; 2]>>)> {
+    ) -> Result<(
+        Vec<crate::algorithm::common::tabular::SubjectId>,
+        Vec<Option<[Arc<[u8]>; 2]>>,
+    )> {
         let reported = Self::reported(hit_lists);
         let ranks = self.listed.ordinals.len();
-        let mut ids: Vec<Arc<[u8]>> = Vec::with_capacity(ranks);
+        let mut ids: Vec<crate::algorithm::common::tabular::SubjectId> = Vec::with_capacity(ranks);
         // `sacc` and `saccver` of the subjects with parsed Seq-ids and of those with the general
         // id, by rank (empty without them; the others' are their `sseqid`).
         let mut accessions: Vec<Option<[Arc<[u8]>; 2]>> = Vec::new();
@@ -1938,17 +1943,18 @@ impl ListedTitles<'_> {
         let empty: Arc<[u8]> = Arc::from(&b""[..]);
         for rank in 0..ranks {
             if !reported.contains(&rank) {
-                ids.push(match self.shown {
+                ids.push(Some(match self.shown {
                     ListedShown::Lean(_) => Arc::clone(&empty),
                     ListedShown::Records(_) => Arc::from(&b""[..]),
-                });
+                }));
                 continue;
             }
             let ordinal = self.listed.ordinals[rank];
             if let Some(subject) = self.parsed_subject(rank) {
-                let [id, accession, version] = match subject.tabular_ids(true) {
+                // No ids where the lookup throws (`ParsedSubject::tabular_ids`).
+                let found = match subject.tabular_ids(true) {
                     Ok(ids) => ids,
-                    Err(_) if !reads => Default::default(),
+                    Err(_) if !reads => Some(Default::default()),
                     Err(problem) => {
                         return Err(shared::parsed_refusal(
                             self.oids.oid(ordinal),
@@ -1957,11 +1963,12 @@ impl ListedTitles<'_> {
                         ))
                     }
                 };
-                ids.push(Arc::from(id));
+                ids.push(found.as_ref().map(|[id, _, _]| Arc::from(id.as_slice())));
                 if accessions.is_empty() {
                     accessions = vec![None; ranks];
                 }
-                accessions[rank] = Some([Arc::from(accession), Arc::from(version)]);
+                accessions[rank] =
+                    found.map(|[_, accession, version]| [Arc::from(accession), Arc::from(version)]);
                 continue;
             }
             let id = match shared::tabular_subject_id(
@@ -1972,12 +1979,15 @@ impl ListedTitles<'_> {
                 self.program,
             ) {
                 Err(_) if !reads => {
-                    ids.push(Arc::from(&b""[..]));
+                    ids.push(Some(Arc::from(&b""[..])));
                     continue;
                 }
                 id => id?,
             };
-            ids.push(Arc::from(id.id()));
+            ids.push(match id {
+                shared::TabularSubjectId::Unknown(_) => None,
+                ref id => Some(Arc::from(id.id())),
+            });
             if let shared::TabularSubjectId::General(_) = id {
                 if accessions.is_empty() {
                     accessions = vec![None; ranks];
@@ -2057,6 +2067,11 @@ impl ListedTitles<'_> {
     /// The subject of rank `rank` when it has parsed Seq-ids.
     pub(super) fn parsed_subject(&self, rank: usize) -> Option<&ParsedSubject> {
         self.parsed.get(rank).and_then(Option::as_deref)
+    }
+
+    /// The OID of the subject of rank `rank`.
+    pub(super) fn oid(&self, rank: usize) -> crate::seqdb::Oid {
+        self.oids.oid(self.listed.ordinals[rank])
     }
 
     /// The source from which NCBI makes the empty stored title of the subject of rank `rank`
@@ -2273,8 +2288,9 @@ fn x_all_header_ranges(
 /// queries then reports it where NCBI does). The tabular id is the reports' own question
 /// (`shared::tabular_subject_id` of the title and the record's source,
 /// `shared::HeaderReader::stored_source` of the taxid read with it, as `shared::read_header`
-/// gives them to `ListedTitles::tabular_subject_ids`), so a title is refused here exactly where
-/// the search of all queries refuses it.
+/// gives them to `ListedTitles::tabular_subject_ids`), so a title is ruled out here wherever the
+/// search of all queries can refuse it (a failed lookup, `TabularSubjectId::Unknown`, also where
+/// the field list does not stop at it).
 /// EXPERIMENT (LOSAT_X_DBIDXREAD): the definition lines are read in ranges of
 /// `HEADER_RANGE_SEQS` sequences (`SeqDb::visit_deflines`, the same results as
 /// `SeqDb::deflines`, the titles and the taxids in one pass) instead of one sequence at a time.
@@ -2313,16 +2329,21 @@ pub(super) fn x_titles_allow_blocks(
                     } else {
                         // The tabular id of the title with its source (an empty title made from
                         // it, the end of a title ending in `]` rewritten from it). A lookup that
-                        // LOSAT refuses is ruled out with `taxids` too.
+                        // LOSAT refuses is ruled out with `taxids` too. A failed lookup
+                        // (`TabularSubjectId::Unknown`) is refused by some field lists
+                        // (`report::tabular::failed_lookup_stop`): not allowed.
                         let defline = &deflines[0];
-                        shared::tabular_subject_id(
-                            &defline.title,
-                            &headers.stored_source(&defline.title, defline.taxid, ordinal),
-                            db.oid(ordinal),
-                            true,
-                            database.program,
+                        matches!(
+                            shared::tabular_subject_id(
+                                &defline.title,
+                                &headers.stored_source(&defline.title, defline.taxid, ordinal),
+                                db.oid(ordinal),
+                                true,
+                                database.program,
+                            ),
+                            Ok(shared::TabularSubjectId::Word(_)
+                                | shared::TabularSubjectId::General(_))
                         )
-                        .is_ok()
                     }
             }
             Err(_) => false,
@@ -3962,8 +3983,8 @@ mod tests {
         let (ids, accessions) = titles.tabular_subject_ids(&hit_lists, true).unwrap();
         assert!(accessions.is_empty());
         assert_eq!(
-            ids.iter().map(|id| id.as_ref()).collect::<Vec<_>>(),
-            [&b"p01"[..], b"p03", b"p08", b"p10"]
+            ids.iter().map(|id| id.as_deref()).collect::<Vec<_>>(),
+            [Some(&b"p01"[..]), Some(b"p03"), Some(b"p08"), Some(b"p10")]
         );
         assert_eq!(
             titles.stitles()[0].as_ref(),

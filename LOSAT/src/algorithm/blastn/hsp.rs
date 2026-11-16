@@ -1211,7 +1211,7 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
     hit_lists: &[Option<BlastnHitList>],
     writer: &mut W,
     query_ids: &[Arc<[u8]>],
-    subject_ids: &[Arc<[u8]>],
+    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     output_format: BlastnOutputFormat,
     query_titles: &[Arc<[u8]>],
     subject_title: &str,
@@ -1279,7 +1279,7 @@ pub(crate) fn write_query_rows<W: Write>(
     q_idx: usize,
     hit_list_opt: Option<&BlastnHitList>,
     query_ids: &[Arc<[u8]>],
-    subject_ids: &[Arc<[u8]>],
+    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     output_format: BlastnOutputFormat,
     query_titles: &[Arc<[u8]>],
     subject_title: &str,
@@ -1359,7 +1359,7 @@ pub(crate) fn write_hsp_rows<W: Write>(
     writer: &mut W,
     hsps: &[BlastnHsp],
     query_ids: &[Arc<[u8]>],
-    subject_ids: &[Arc<[u8]>],
+    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     config: &OutputConfig,
     hsp_index: &mut HspIndex,
     mut probe: Option<&mut FormatProbe<'_>>,
@@ -1369,9 +1369,10 @@ pub(crate) fn write_hsp_rows<W: Write>(
             .get(hsp.q_idx as usize)
             .map(|id| id.as_ref())
             .unwrap_or(b"unknown");
+        // A failed lookup's rows are refused before (`check_failed_lookups`).
         let subject_id = subject_ids
             .get(hsp.s_idx as usize)
-            .map(|id| id.as_ref())
+            .map(|id| id.as_deref().unwrap_or_default())
             .unwrap_or(b"unknown");
         // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
         // ```c
@@ -1841,7 +1842,7 @@ mod tests {
     fn test_blastn_outfmt7_header_matches_ncbi_shape() {
         let hit_lists = vec![None];
         let query_ids = vec![Arc::<[u8]>::from(&b"query"[..])];
-        let subject_ids = vec![Arc::<[u8]>::from(&b"subject"[..])];
+        let subject_ids = vec![Some(Arc::<[u8]>::from(&b"subject"[..]))];
         let query_titles = vec![Arc::<[u8]>::from(&b"query full description"[..])];
         let mut output = Vec::new();
 

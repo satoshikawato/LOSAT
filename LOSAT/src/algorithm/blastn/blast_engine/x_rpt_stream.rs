@@ -226,7 +226,7 @@ impl Off {
 /// as without the switch), and for outfmt 0 the titles and, with `-lcase_masking`, the lowercase
 /// masks. None of them depends on the hit lists.
 pub(super) struct SubjectCache {
-    pub(super) ids: Option<Vec<Arc<[u8]>>>,
+    pub(super) ids: Option<Vec<crate::algorithm::common::tabular::SubjectId>>,
     pub(super) titles: Option<Vec<Arc<[u8]>>>,
     pub(super) masks: Option<Vec<Vec<MaskedInterval>>>,
 }
@@ -552,11 +552,17 @@ fn check(
     // module doc).
     let cache = match source {
         SubjectSource::Prepared(prepared) => {
-            // `tabular_subject_ids` of every subject, where LOSAT refuses none.
-            let ids: Option<Vec<Arc<[u8]>>> = prepared
+            // `tabular_subject_ids` of every subject, where every lookup finds its id.
+            let ids: Option<Vec<crate::algorithm::common::tabular::SubjectId>> = prepared
                 .records
                 .iter()
-                .map(|subject| subject.subject_tabular_id(false).ok().map(Arc::from))
+                .map(|subject| {
+                    subject
+                        .subject_tabular_id(false)
+                        .ok()
+                        .flatten()
+                        .map(|id| Some(Arc::from(id)))
+                })
                 .collect();
             let pairwise = output_formats.iter().any(|format| format.is_pairwise());
             let titles = pairwise.then(|| prepared.records.iter().map(record_title).collect());
@@ -767,6 +773,7 @@ mod tests {
         let mut outputs = ReportOutputs::single("6", OutputSink::Writer(&mut one), &mut errors2);
         outputs.formats.push(FormatOutput {
             outfmt: "7",
+            refusal: crate::api::local_blast::FormatRefusal::FailsCall,
             sink: OutputSink::Writer(&mut two),
         });
         assert_eq!(

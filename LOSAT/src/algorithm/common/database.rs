@@ -16,6 +16,7 @@ use anyhow::{bail, Result};
 
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::cli::NativeError;
+use crate::report::defline::SubjectWord;
 use crate::report::pairwise::{DatabaseInfo, PairwiseDatabase};
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 use crate::sequence::packed_subject::PackedNucleotide;
@@ -2613,6 +2614,10 @@ pub(crate) struct ParsedShown {
     pub(crate) taxonomy: bool,
     /// The subject ids that the tabular formats print (`ParsedSubject::check_printed_word`).
     pub(crate) words: crate::report::tabular::PrintedIds,
+    /// Whether a tabular format can stop at a row whose subject lookups fail
+    /// (`report::tabular::may_stop_at_failed_lookup`: `sacc`, `saccver`, the default fields, a
+    /// first row's `staxid`), so that such a sequence may be refused (`reports_may_refuse`).
+    pub(crate) stops_at_failed_lookup: bool,
     /// Whether the batches' prefetch reads the subjects by their Seq-align ids (the first
     /// format's: outfmt 0, 5, 6, 7, 10, 17 and 20, with `PRE_FETCH_SEQS_LIMIT=2147483647` also the
     /// Seq-annots 8, 9 and 12, [`prefetches_subjects`]), unless `PRE_FETCH_SEQS_LIMIT` turns it
@@ -2744,10 +2749,10 @@ pub(crate) fn check_reported_parsed(
 /// an empty one made from the name of its source, `sources[rank]`, or `BL_ORD_ID:n`), or of a
 /// sequence with parsed Seq-ids (`parsed[rank]`, `ParsedSubject::tabular_ids`). The custom fields
 /// ask `sseqid` of it (`tabular_seqid`). `records[rank]` holds the stored title, `ordinals[rank]`
-/// the ordinal id, `oids` the database's OIDs; `protein` for a protein database. An id that LOSAT
-/// cannot write as NCBI is its refusal where a tabular report `reads` the subject
-/// (`report::tabular::reads_subject`), else empty: a table of fields that read nothing of the
-/// subject prints none of its ids.
+/// the ordinal id, `oids` the database's OIDs; `protein` for a protein database. `None` where the
+/// lookup fails (`common::tabular::SubjectId`). An id that LOSAT cannot write as NCBI is its
+/// refusal where a tabular report `reads` the subject (`report::tabular::reads_subject`), else
+/// empty: a table of fields that read nothing of the subject prints none of its ids.
 pub(crate) fn tabular_subject_ids(
     records: &[crate::blastinput::fasta_reader::FastaRecord],
     ordinals: &[u32],
@@ -2757,7 +2762,7 @@ pub(crate) fn tabular_subject_ids(
     protein: bool,
     reads: bool,
     program: &str,
-) -> Result<Vec<std::sync::Arc<[u8]>>> {
+) -> Result<Vec<crate::algorithm::common::tabular::SubjectId>> {
     records
         .iter()
         .zip(ordinals)
@@ -2776,10 +2781,13 @@ pub(crate) fn tabular_subject_ids(
                     protein,
                     program,
                 )
-                .map(|id| std::sync::Arc::from(id.accession())),
+                .map(|id| match id {
+                    TabularSubjectId::Unknown(_) => None,
+                    id => Some(std::sync::Arc::from(id.accession())),
+                }),
             };
             match id {
-                Err(_) if !reads => Ok(std::sync::Arc::from(&b""[..])),
+                Err(_) if !reads => Ok(Some(std::sync::Arc::from(&b""[..]))),
                 id => id,
             }
         })
@@ -2818,9 +2826,15 @@ pub(crate) fn library_subject(
     program: &str,
 ) -> crate::api::local_blast::ReportedSubject {
     let id = match parsed {
-        Some(subject) => subject.tabular_saccver(protein).ok().map(|id| id.to_vec()),
+        // No `saccver`: the lookup throws; the library names it as one without parsed ids.
+        Some(subject) => subject
+            .tabular_saccver(protein)
+            .ok()
+            .flatten()
+            .map(|id| id.to_vec()),
         None => tabular_subject_id(title, source, db.oid(ordinal), protein, program)
             .ok()
+            .filter(|id| !matches!(id, TabularSubjectId::Unknown(_)))
             .map(|id| id.accession().into_owned()),
     }
     .unwrap_or_else(|| {
@@ -2948,15 +2962,20 @@ pub(crate) fn reports_may_refuse(
             Ok(ReportedHeader::Stored(stored)) => {
                 check_reported_title(stored.replaced_bytes, || db.oid(ordinal), program)
                     .map_err(|_| ReportRefusal::Headers)?;
+                // A failed lookup (`TabularSubjectId::Unknown`) is refused only by the field lists
+                // that can stop at it (`report::tabular::failed_lookup_stop`).
                 if shown.tabular {
-                    tabular_subject_id(
+                    match tabular_subject_id(
                         &stored.title,
                         &stored.source,
                         db.oid(ordinal),
                         protein,
                         program,
-                    )
-                    .map_err(|_| ReportRefusal::Headers)?;
+                    ) {
+                        Ok(TabularSubjectId::Word(_) | TabularSubjectId::General(_)) => {}
+                        Ok(TabularSubjectId::Unknown(_)) if !shown.stops_at_failed_lookup => {}
+                        _ => return Err(ReportRefusal::Headers),
+                    }
                 }
                 if shown.pairwise {
                     stored
@@ -2982,6 +3001,14 @@ pub(crate) fn reports_may_refuse(
                     program,
                 )
                 .map_err(|_| ReportRefusal::Headers)?;
+                // A sequence whose lookups fail (`ParsedSubject::lookup_failure`), where a field
+                // list can stop at it.
+                if shown.tabular
+                    && shown.stops_at_failed_lookup
+                    && !matches!(subject.lookup_failure(protein), Ok(None))
+                {
+                    return Err(ReportRefusal::Headers);
+                }
                 if let Some(queries) = queries {
                     refuse_id_of_a_query(&subject, || db.oid(ordinal), queries, program)
                         .map_err(|_| ReportRefusal::Headers)?;
@@ -3173,32 +3200,48 @@ pub(crate) fn check_reported_title(
 /// empty one from the name of its source), which `GetSeqIdList` puts in the place of its id, or
 /// where that word is empty its general id `gnl|BL_ORD_ID|n`, n its OID (`seqdb::Oid`; NCBI
 /// BLAST+ 2.17.0, line DBID ordname, `blastdb-ids-20261021/R/ordname`).
+/// `Unknown` where `GetSeqIdList` makes no id: the generated title throws
+/// (`report::defline::SubjectWord::Unknown`, `report::tabular::SubjectLookup::Failed`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TabularSubjectId {
     Word(Vec<u8>),
     General(crate::seqdb::Oid),
+    Unknown(crate::seqdb::Oid),
 }
 
 impl TabularSubjectId {
     /// `sseqid`, and `sallseqid` of the one definition line: the word (a local id prints its
-    /// label), or `gnl|BL_ORD_ID|n`.
+    /// label), or `gnl|BL_ORD_ID|n`; empty where the lookup fails (`Unknown`).
     pub(crate) fn id(&self) -> std::borrow::Cow<'_, [u8]> {
         match self {
             TabularSubjectId::Word(word) => std::borrow::Cow::Borrowed(word),
             TabularSubjectId::General(oid) => std::borrow::Cow::Owned(oid.fasta_id().into_bytes()),
+            TabularSubjectId::Unknown(_) => std::borrow::Cow::Borrowed(&[]),
         }
     }
 
     /// `sacc` and `saccver`, and `sallacc`: the word, or the general id's content label
-    /// `BL_ORD_ID:n`.
+    /// `BL_ORD_ID:n`; empty where the lookup fails (`Unknown`, which the programs' id lists hold
+    /// as `None`, `common::tabular::SubjectId`).
     pub(crate) fn accession(&self) -> std::borrow::Cow<'_, [u8]> {
         match self {
             TabularSubjectId::Word(word) => std::borrow::Cow::Borrowed(word),
             TabularSubjectId::General(oid) => {
                 std::borrow::Cow::Owned(oid.content_label().into_bytes())
             }
+            TabularSubjectId::Unknown(_) => std::borrow::Cow::Borrowed(&[]),
         }
     }
+}
+
+/// The failed lookup (`report::tabular::FailedLookup`) of the database sequence `oid` without
+/// parsed Seq-ids: its Seq-align id `gnl|BL_ORD_ID|n` (`sallseqid`) and `BL_ORD_ID:n` (`sallacc`),
+/// whose definition line also fails in `x_SetSubjectIds`.
+pub(crate) fn failed_general_lookup(oid: crate::seqdb::Oid) -> [Vec<u8>; 2] {
+    [
+        oid.fasta_id().into_bytes(),
+        oid.content_label().into_bytes(),
+    ]
 }
 
 /// The subject id of the tabular formats (`sseqid`, `sacc`, `saccver`) of the database
@@ -3217,8 +3260,9 @@ pub(crate) fn tabular_subject_id(
 ) -> Result<TabularSubjectId> {
     let facts = stored_facts(source, source_name(source, || oid, program)?);
     match crate::report::defline::database_subject_id(title, &facts, protein) {
-        Ok(Some(word)) => Ok(TabularSubjectId::Word(word)),
-        Ok(None) => Ok(TabularSubjectId::General(oid)),
+        Ok(SubjectWord::Word(word)) => Ok(TabularSubjectId::Word(word)),
+        Ok(SubjectWord::General) => Ok(TabularSubjectId::General(oid)),
+        Ok(SubjectWord::Unknown) => Ok(TabularSubjectId::Unknown(oid)),
         Err(problem) => bail!(
             "database sequence {oid} has a title {problem}, which is not supported by LOSAT's {program}"
         ),
@@ -3256,7 +3300,7 @@ pub(crate) fn tabular_seqid<'a>(
         && accession == oid.content_label().as_bytes()
         && source.name().is_ok_and(|name| {
             crate::report::defline::database_subject_id(title, &stored_facts(source, name), protein)
-                == Ok(None)
+                == Ok(SubjectWord::General)
         })
     {
         return std::borrow::Cow::Owned(oid.fasta_id().into_bytes());

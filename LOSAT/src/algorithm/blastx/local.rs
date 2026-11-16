@@ -460,24 +460,22 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
             crate::cli::NcbiOstream::sink(&mut format.sink)
         })
         .collect::<io::Result<Vec<_>>>()?;
-    // A run in which a `-subject` title (refused with its first hit) or the message of a query
-    // (refused where NCBI does not search its batch) could still be refused by the BLAST XML,
-    // XML2 or JSON documents holds every format in order (`blast_xml::HeldFormats`), as the command
-    // line holds its document (`blast_xml::HeldOutput`), so that the refusal follows no byte. So does a `-db` run
-    // in which a later batch could still refuse the taxonomy database or a subject with parsed
-    // Seq-ids (`BlastxDatabase::later_batch_may_refuse`; the scientific names are those of the
-    // XML2 and JSON documents).
-    let writes_names = resolved
+    // A run whose XML documents could still refuse after their first byte (a `-subject` title, the
+    // message of a query that NCBI does not search, a later batch's taxonomy database or subject
+    // with parsed Seq-ids, the database counts of the reports: `blast_xml::documents_may_refuse`,
+    // the command line's decision too) holds every format in order (`blast_xml::HeldFormats`), as
+    // the command line holds its document (`blast_xml::HeldOutput`), so that the refusal follows
+    // no byte.
+    let outfmts: Vec<i32> = resolved
         .iter()
-        .any(|options| matches!(options.outfmt, 13..=16));
-    let xml_may_refuse = resolved
-        .iter()
-        .any(|options| matches!(options.outfmt, 5 | 13..=16))
-        && (xml_scan.messages_may_be_refused
-            || match database {
-                Some(run) => run.database.later_batch_may_refuse(writes_names),
-                None => super::blast_xml::subjects_may_be_refused(subjects),
-            });
+        .map(|options| i32::from(options.outfmt))
+        .collect();
+    let xml_may_refuse = super::blast_xml::documents_may_refuse(
+        &outfmts,
+        xml_scan.messages_may_be_refused,
+        database.as_ref().map(|run| run.database),
+        subjects,
+    );
     let hold = xml_may_refuse.then(super::blast_xml::HeldFormats::new);
     // The hold comes between a format's stream and the caller's writer, which has no stream of
     // NCBI's (`cli::NcbiOstream::held`): it keeps the writes and flushes in order.
@@ -1059,9 +1057,18 @@ fn search_database(
         None,
         &args.db_filter,
         database.list_taxids(),
-        database.statistics_length_is_empty(),
+        &database.statistics(),
+        false,
         args.searchsp.is_some_and(|space| space > 0),
         args.dbsize.is_some_and(|size| size > 0),
+        "BLASTX",
+    )?;
+    crate::algorithm::common::database::check_formats_report_sums(
+        || database.pairwise_database(),
+        outputs
+            .formats
+            .iter_mut()
+            .map(|format| (format.outfmt, &mut format.refusal)),
         "BLASTX",
     )?;
     for options in &mut resolved {

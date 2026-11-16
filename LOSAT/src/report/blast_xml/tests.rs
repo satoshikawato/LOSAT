@@ -21,6 +21,7 @@ fn run<'a>(matrix: &'a FormattingMatrix) -> XmlRun<'a> {
         filter: b"F",
         db_num: 0,
         db_len: 0,
+        db_len_overflow: false,
         positives: Some(matrix),
         mask_char: b'X',
     }
@@ -305,6 +306,7 @@ fn run_blastn() -> XmlRun<'static> {
         filter: b"L;m;",
         db_num: 0,
         db_len: 0,
+        db_len_overflow: false,
         positives: None,
         mask_char: b'N',
     }

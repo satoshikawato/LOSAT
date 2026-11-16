@@ -294,8 +294,10 @@ pub struct FormatOutput<'a> {
 /// What an error of one format's report does (`FormatRefusal::check`), the error that the command
 /// line's run of that format alone stops with: LOSAT's refusals that a program's check of the
 /// format makes before the report's rows (a tabular row at which NCBI stops,
-/// `report::tabular::check_failed_lookups`, every program; BLASTP's subject title of punctuation
-/// in outfmt 0 to 4; BLASTX's subject of empty rows that the mapper rewrites,
+/// `report::tabular::check_failed_lookups`, every program; the `-db` list's counts that the
+/// prolog of outfmt 0 to 4 prints where NCBI's sums overflow,
+/// `common::database::check_formats_report_sums`, every program; BLASTP's subject title of
+/// punctuation in outfmt 0 to 4; BLASTX's subject of empty rows that the mapper rewrites,
 /// `blastx::empty_rows::refuse_mapped_without_scores`), and every error that ends the format's
 /// report in its middle (LOSAT's refusals there, such as the `-sorthits` total that NCBI pads
 /// without end, `report::pairwise::TotalScoreRefusal`, and NCBI's errors of the format alone,

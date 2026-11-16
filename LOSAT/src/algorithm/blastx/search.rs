@@ -571,7 +571,19 @@ fn x_search_core(
         for (context, p) in full.contexts.iter_mut().zip(&full_params) {
             context.is_valid = p.valid;
         }
-        let spaces: Vec<_> = full_params.iter().map(|p| p.search_space).collect();
+        // The options' spaces that each chunk's setup reads (`SplitQuery_SetEffectiveSearchSpace`):
+        // the batch's own, unless the statistics' total before the fallback to OID 0 is not
+        // positive (`parameters::preliminary_spaces`).
+        let spaces: Vec<_> = match super::parameters::preliminary_spaces(
+            &full,
+            &full_params,
+            options,
+            numbers,
+            matches!(subjects, Subjects::Stream(_)),
+        )? {
+            Some(spaces) => spaces,
+            None => full_params.iter().map(|p| p.search_space).collect(),
+        };
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-222
         // ```c++
         //     CEffectiveSearchSpacesMemento eff_memento(m_Options);
@@ -580,7 +592,15 @@ fn x_search_core(
         //     int retval = 0;
         // ```
         sink.batch_start(range.start, &full, &full_params)?;
-        let chunks = split_queries(queries, &full, options, sizes)?;
+        let mut chunks = split_queries(queries, &full, options, sizes)?;
+        // The statistics of each subject read the options' spaces of the whole query by each
+        // chunk's context index (`s_GetEffectiveSearchSpaceForContext`, blast_setup.c:676-697).
+        if subjects.per_subject() {
+            let option_spaces: std::sync::Arc<[i64]> = spaces.clone().into();
+            for chunk in &mut chunks {
+                chunk.prepared.subject_option_spaces = Some(option_spaces.clone());
+            }
+        }
         super::x_timing::batch(XBatch::Setup, x_t);
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:233-236
         // ```c++
@@ -1368,10 +1388,56 @@ fn compute_subject_of(
     )
 }
 
-/// [`compute_subject`] or [`compute_subject_of`] by the search's matrix.
+/// [`compute_subject`] or [`compute_subject_of`] by the search's matrix, with the chunk's
+/// parameters `params`, or, where NCBI computes the statistics of each subject (the batch's
+/// `subject_option_spaces`, a database length of 0), with the subject's own
+/// (`compute_own_subject`): one test of the batch per subject on the default path.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1428-1443 (quoted above
+// `search_preliminary`): the subject's own statistics before its scan.
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
 fn compute_subject_any(
+    subjects: Subjects<'_>,
+    batch: &PreparedQueryBatch,
+    params: &[ContextParameters],
+    options: &ResolvedOptions,
+    lookup: &BxLookup,
+    diagonals: &mut Diagonals,
+    xdrop: i32,
+    oid: usize,
+    x_containment: bool,
+) -> Result<SubjectComputation> {
+    if let Some(option_spaces) = batch.subject_option_spaces.as_deref() {
+        return compute_own_subject(
+            subjects,
+            batch,
+            params,
+            option_spaces,
+            options,
+            lookup,
+            diagonals,
+            xdrop,
+            oid,
+            x_containment,
+        );
+    }
+    compute_subject_scored(
+        subjects,
+        batch,
+        params,
+        options,
+        lookup,
+        diagonals,
+        xdrop,
+        oid,
+        x_containment,
+    )
+}
+
+/// [`compute_subject`] or [`compute_subject_of`] by the search's matrix.
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn compute_subject_scored(
     subjects: Subjects<'_>,
     batch: &PreparedQueryBatch,
     params: &[ContextParameters],
@@ -1407,6 +1473,74 @@ fn compute_subject_any(
             x_containment,
         )
     }
+}
+
+/// [`compute_subject_scored`] with the subject's own parameters where NCBI computes the
+/// statistics of each subject (`parameters::subject_update`, with the whole query's options'
+/// spaces `option_spaces`): a subject with residues, the one NCBI searches (blast_engine.c:1428-
+/// 1432); an empty one keeps the chunk's. The sink computes them again for the e-values of the
+/// subject's HSPs (`Runtime::subject`). Apart from the default path.
+#[cold]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn compute_own_subject(
+    subjects: Subjects<'_>,
+    batch: &PreparedQueryBatch,
+    params: &[ContextParameters],
+    option_spaces: &[i64],
+    options: &ResolvedOptions,
+    lookup: &BxLookup,
+    diagonals: &mut Diagonals,
+    xdrop: i32,
+    oid: usize,
+    x_containment: bool,
+) -> Result<SubjectComputation> {
+    let length = subjects.length(oid);
+    let own = if length > 0 {
+        Some(super::parameters::subject_update(
+            batch,
+            params,
+            options,
+            subjects.numbers()?,
+            length,
+            option_spaces,
+        )?)
+    } else {
+        None
+    };
+    let params = own.as_deref().unwrap_or(params);
+    let mut computed = compute_subject_scored(
+        subjects,
+        batch,
+        params,
+        options,
+        lookup,
+        diagonals,
+        xdrop,
+        oid,
+        x_containment,
+    )?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1448-1455 (quoted at
+    // `compute_subject_with`): a reader batch searched in units (`reader_batch.rs`) links with
+    // `cutoff_score_min` of the word parameters, the minimum over the batch's contexts
+    // (blast_parameters.c:401-416, `parameters::subject_word_cutoff_min`) at the subject's length.
+    if let (Some(shape), Some(_)) = (batch.reader_shape.as_deref(), computed.prepared_link) {
+        if length > 0 {
+            computed.prepared_link = Some(super::linking::link_cutoffs(
+                batch,
+                params,
+                length as i32,
+                subjects.total_length()?,
+                super::parameters::subject_word_cutoff_min(
+                    &shape.batch_contexts,
+                    options,
+                    subjects.numbers()?,
+                    length,
+                )?,
+            ));
+        }
+    }
+    Ok(computed)
 }
 
 /// The body of [`compute_subject`] with the matrix of `scoring`: BLOSUM62's stages are today's
@@ -1453,12 +1587,15 @@ fn compute_subject_with<S: super::seed::BxScoring>(
     // adoption/observer notification is replayed on the serial OID collector.
     // `db_length` is `BlastSeqSrcGetTotLen` (blast_engine.c:1407), not the statistics' total:
     // `Subjects::total_length`.
+    // With the statistics of each subject, `compute_own_subject` makes them again for a reader
+    // batch searched in units.
     let prepared_link = if super::linking::computes_link_cutoffs(options) {
         Some(super::linking::link_cutoffs(
             batch,
             params,
             subject_length as i32,
             subjects.total_length()?,
+            None,
         ))
     } else {
         None

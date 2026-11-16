@@ -122,12 +122,14 @@ impl XmlRefusal {
 
 /// Whether `error` is one of LOSAT's refusals for which a run that holds its BLAST XML, XML2 or
 /// JSON document drops what it holds, so that the refusal follows no byte: a title or name NCBI's
-/// XML stream cannot write (`XmlRefusal`), a reported database sequence with parsed Seq-ids
+/// XML stream cannot write (`XmlRefusal`), the database counts of the reports that NCBI's sums
+/// overflow (`ReportSumRefusal`), a reported database sequence with parsed Seq-ids
 /// (`ParsedRefusal`), or a taxonomy database name or record (`TaxonomyRefusal`). After any other
 /// error the run writes what it holds, the bytes of the batches before it, as the run without a
 /// hold does (the command line's `HeldOutput`; a library call's `HeldFormats`).
 pub(super) fn drops_held_document(error: &anyhow::Error) -> bool {
     error.is::<XmlRefusal>()
+        || error.is::<crate::algorithm::common::database::ReportSumRefusal>()
         || error.is::<crate::algorithm::common::database::ParsedRefusal>()
         || error.is::<TaxonomyRefusal>()
 }
@@ -1058,6 +1060,51 @@ pub(super) fn scan_queries(
     }
 }
 
+/// Whether the XML documents of a run (BLAST XML, outfmt 5; the XML2 and JSON documents, 13 to
+/// 16; `outfmts` are the run's format numbers) may refuse after their first byte, the decision of
+/// both the command line (`native::run_inner`, `HeldOutput::hold`) and the library
+/// (`local::write_run`, `archive::ArchiveHold`), which then hold their output so that the refusal
+/// follows no byte: the message of a query that NCBI does not search (`messages_may_be_refused`,
+/// from the read before the search), with `-db` a later batch's taxonomy database or subject with
+/// parsed Seq-ids (`BlastxDatabase::later_batch_may_refuse`; the scientific names are those of the
+/// XML2 and JSON documents) or the database counts the reports would print where NCBI's sums
+/// overflow (`common::database::report_sum_refusal`, refused at the first report:
+/// `StructuredXml::start` in `write_blastx_xml`), and without it a `-subject` title
+/// (`subjects_may_be_refused`).
+pub(super) fn documents_may_refuse(
+    outfmts: &[i32],
+    messages_may_be_refused: bool,
+    database: Option<&super::database::BlastxDatabase>,
+    subjects: &[FastaRecord],
+) -> bool {
+    let documents = || {
+        outfmts
+            .iter()
+            .filter(|&&outfmt| matches!(outfmt, 5 | 13..=16))
+    };
+    if documents().next().is_none() {
+        return false;
+    }
+    messages_may_be_refused
+        || match database {
+            Some(database) => {
+                let writes_names = documents().any(|&outfmt| outfmt != 5);
+                let pairwise = database.pairwise_database();
+                database.later_batch_may_refuse(writes_names)
+                    || documents().any(|&outfmt| {
+                        crate::algorithm::common::database::report_sum_refusal(
+                            pairwise.num_sequences,
+                            pairwise.total_letters,
+                            pairwise.total_letters_overflow,
+                            outfmt,
+                        )
+                        .is_some()
+                    })
+            }
+            None => subjects_may_be_refused(subjects),
+        }
+}
+
 /// Whether the title of some `-subject` would be refused if the subject had a hit (a title whose
 /// `GenerateDefline` throws is the writers' catch, `SubjectNames::unknown`).
 pub(super) fn subjects_may_be_refused(subjects: &[FastaRecord]) -> bool {
@@ -1207,12 +1254,13 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         }
         return Ok(());
     };
-    let (db_name, db_num, db_len) = match shown {
-        ShownSubjects::Fasta { .. } => (String::new(), 0, 0),
+    let (db_name, db_num, db_len, db_len_overflow) = match shown {
+        ShownSubjects::Fasta { .. } => (String::new(), 0, 0, false),
         ShownSubjects::Database { name, pairwise, .. } => (
             name.to_string(),
-            i32::try_from(pairwise.num_sequences)?,
-            i64::try_from(pairwise.total_letters)?,
+            pairwise.num_sequences,
+            pairwise.total_letters,
+            pairwise.total_letters_overflow,
         ),
     };
     check_database_name(&db_name)?;
@@ -1235,6 +1283,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         filter: &filter,
         db_num,
         db_len,
+        db_len_overflow,
         positives: Some(&positives),
         mask_char: b'X',
     };
@@ -1245,6 +1294,13 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         stops,
         document.holds_back(),
     );
+    // The refusal of the database counts that the written reports would print, before any byte
+    // of the batch (`StructuredXml::start`; the XML2 and JSON documents' start came with the
+    // prolog, which a run that may refuse them holds, `native::run_inner`).
+    let mut buf: Vec<u8> = Vec::new();
+    document.start((reports > 0).then_some(&run), &mut buf)?;
+    writer.write_all(&buf)?;
+    buf.clear();
     let mut texts: Vec<QueryText> = Vec::new();
     let mut subject_cache: HashMap<usize, SubjectNames> = HashMap::new();
     for batch in batches {
@@ -1277,7 +1333,6 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         ShownSubjects::Fasta { .. } => &no_notes,
     }
     .printer();
-    let mut buf: Vec<u8> = Vec::new();
     // The rows of one HSP at a time, reused.
     let (mut qrow, mut srow): (Vec<u8>, Vec<u8>) = (Vec::new(), Vec::new());
     let mut texts = texts.iter();

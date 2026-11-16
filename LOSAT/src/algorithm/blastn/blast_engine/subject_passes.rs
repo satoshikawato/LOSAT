@@ -27,9 +27,8 @@
 //! batch's set-up and its result, in their order; what they read of the batch is `SubjectPasses`, built
 //! once per batch beside `prelim_subject::PrelimBatch` and `traceback_subject::TraceBatch`.
 
-use super::batch_setup::BatchCutoffs;
 use super::calculate_blastn_context_statistics;
-use super::prelim_subject::{self, PrelimBatch};
+use super::prelim_subject::{self, PrelimBatch, ScanBatch};
 use super::traceback_subject::{self, TraceBatch};
 #[cfg(all(
     feature = "parallel",
@@ -39,9 +38,8 @@ use super::X_BNSTREAM_SUBJECTS_PER_THREAD;
 use super::{
     culling, database, listed_prelim_hits, prelim_hits_by_subject, ungapped_reap_query_coverage,
     ungapped_subject_stage, update_hitlists_with_subject_hits, x_bnstream, BlastnArgs,
-    BlastnHitList, BlastnSubjectRef, BlastnTiming, FastaRecord, GapAlignScratch, LookupTables,
-    PrelimHit, PrelimHitCollector, PrelimHitLists, QueryContext, SubjectCtx, SubjectHits,
-    SubjectScratch, SubjectSource,
+    BlastnHitList, BlastnSubjectRef, FastaRecord, GapAlignScratch, LookupTables, PrelimHit,
+    PrelimHitCollector, PrelimHitLists, SubjectCtx, SubjectHits, SubjectScratch, SubjectSource,
 };
 use crate::algorithm::blastn::coordination::subject_trace_id;
 use anyhow::Result;
@@ -96,15 +94,12 @@ pub(super) struct SubjectPasses<'a> {
     pub(super) args: &'a BlastnArgs,
     /// The subject set or the database.
     pub(super) subjects: SubjectSource<'a>,
-    /// The values the preliminary and the traceback stage read (`search_subject` dispatches).
+    /// The values the preliminary and the traceback stage read (`search_subject` dispatches): the
+    /// queries, their contexts, effective search spaces and cutoffs, and the LOSAT_TIMING counters
+    /// among them.
     pub(super) prelim_batch: &'a PrelimBatch<'a>,
     pub(super) trace_batch: &'a TraceBatch<'a>,
     pub(super) any_valid_context: bool,
-    pub(super) queries: &'a [FastaRecord],
-    pub(super) query_contexts: &'a [QueryContext],
-    pub(super) query_eff_searchsp: &'a Vec<i64>,
-    pub(super) batch_cutoffs: &'a BatchCutoffs,
-    pub(super) timing: Option<&'a BlastnTiming>,
     /// The sizes of the preliminary and of the final hit lists.
     pub(super) prelim_hitlist_size: usize,
     pub(super) hitlist_size: usize,
@@ -128,9 +123,9 @@ impl SubjectPasses<'_> {
     }
 
     /// One subject for one stage: the preliminary search (`prelim_source` is `None`: the subject's
-    /// preliminary HSPs, `lookups` its tables) or the traceback of the HSPs the preliminary stage kept
-    /// (`Some`: the subject's final HSPs). `state` is the worker's scratch. Nothing is searched without a
-    /// valid context.
+    /// preliminary HSPs, `scan` the pass's values and tables) or the traceback of the HSPs the
+    /// preliminary stage kept (`Some`: the subject's final HSPs). `state` is the worker's scratch.
+    /// Nothing is searched without a valid context.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1469-1470 (the subject's
     /// preliminary search) and c++/src/algo/blast/core/blast_traceback.c:1521,1632-1633 (its traceback)
@@ -143,16 +138,11 @@ impl SubjectPasses<'_> {
         s_idx: usize,
         subject: BlastnSubjectRef<'_>,
         state: &mut SubjectState,
-        lookups: Option<&LookupTables>,
+        scan: Option<&ScanBatch<'_>>,
         prelim_source: Option<&Vec<PrelimHit>>,
     ) -> (Option<SubjectHits>, Vec<PrelimHit>) {
         let Self {
             any_valid_context,
-            queries,
-            query_contexts,
-            query_eff_searchsp,
-            batch_cutoffs,
-            timing: timing_ref,
             prelim_batch,
             trace_batch,
             ..
@@ -172,24 +162,6 @@ impl SubjectPasses<'_> {
             return (None, Vec::new());
         }
 
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:493-526
-        // ```c
-        // if (aux_struct->WordFinder) {
-        //     aux_struct->WordFinder(subject, query, query_info, lookup, matrix,
-        //                            word_params, aux_struct->ewp,
-        //                            aux_struct->offset_pairs,
-        //                            kScanSubjectOffsetArraySize,
-        //                            init_hitlist, ungapped_stats);
-        // ...
-        //     if (init_hitlist->total == 0) continue;
-        // ...
-        // if (aux_struct->GetGappedScore) {
-        //     status = aux_struct->GetGappedScore(program_number, query,
-        //             query_info,
-        //             subject, gap_align, score_params, ext_params, hit_params,
-        //             word_params, init_hitlist, &hsp_list, gapped_stats, NULL);
-        // ```
-        let timing_enabled = timing_ref.is_some();
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:488-491
         // ```c
         // hsp_list = Blast_HSPListFree(hsp_list);
@@ -219,55 +191,12 @@ impl SubjectPasses<'_> {
         };
         let s_id = s_id_trace.as_str();
 
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:348-374
-        // ```c
-        // if (!gapped_calculation || sbp->matrix_only_scoring) {
-        //    double cutoff_e = s_GetCutoffEvalue(program_number);
-        //    Int4 query_length = query_info->contexts[context].query_length;
-        //
-        // ...
-        //       query_length *= 2;
-        // ...
-        //    kbp = kbp_array[context];
-        // ...
-        //    BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp,
-        //                  MIN((Uint8)subj_length,
-        //                      (Uint8)query_length)*((Uint8)subj_length),
-        //                  TRUE, gap_decay_rate);
-        // ...
-        // } else {
-        //    new_cutoff = gap_trigger;
-        // }
-        // new_cutoff *= (Int4)sbp->scale_factor;
-        // new_cutoff = MIN(new_cutoff,
-        // ...
-        // curr_cutoffs->cutoff_score = new_cutoff;
-        // ```
-        // NCBI uses UNGAPPED params (kbp_std) for gap_trigger calculation
-        // and GAPPED params (kbp_gap) for cutoff_score_max calculation
-        // The values depend on the context only (the gapped calculation's branch above: gap_trigger
-        // capped by cutoff_score_max), so the batch computes them once (`batch_cutoffs`).
-        let (cutoff_scores, hit_saving_cutoff_scores, x_dropoff_scores, reduced_cutoff_scores) = (
-            &batch_cutoffs.0,
-            &batch_cutoffs.1,
-            &batch_cutoffs.2,
-            &batch_cutoffs.3,
-        );
-
-        // What both stages read of this call (`SubjectCtx`).
+        // What both stages read of this call (`SubjectCtx`; the batch's values are the stage's
+        // batch's, built once per batch).
         let subject_ctx = SubjectCtx {
             s_idx,
             s_id,
             s_len_full,
-            queries,
-            query_contexts,
-            query_eff_searchsp,
-            cutoff_scores,
-            hit_saving_cutoff_scores,
-            x_dropoff_scores,
-            reduced_cutoff_scores,
-            timing_ref,
-            timing_enabled,
         };
         if let Some(kept) = prelim_source {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1521,1632-1633
@@ -301,10 +230,9 @@ impl SubjectPasses<'_> {
             (
                 None,
                 prelim_subject::prelim_subject::<UNGAPPED>(
-                    prelim_batch,
+                    scan.expect("the preliminary stage's calls pass the pass's values"),
                     &subject_ctx,
                     subject,
-                    lookups,
                     gap_scratch,
                     subject_scratch,
                 ),
@@ -346,7 +274,7 @@ impl SubjectPasses<'_> {
     fn search_subjects<const UNGAPPED: bool>(
         &self,
         kept: Option<&[Vec<PrelimHit>]>,
-        lookups: Option<&LookupTables>,
+        scan: Option<&ScanBatch<'_>>,
         sink: &mut (dyn FnMut(usize, Option<SubjectHits>, Vec<PrelimHit>) + Send),
     ) {
         let use_parallel = self.prelim_batch.use_parallel;
@@ -359,7 +287,7 @@ impl SubjectPasses<'_> {
                     .expect("the subjects of a subject set")
                     .subject(s_idx),
                 state,
-                lookups,
+                scan,
                 kept.map(|kept| &kept[s_idx]),
             )
         };
@@ -445,7 +373,7 @@ impl SubjectPasses<'_> {
         ungapped_reap_query_coverage(
             hits,
             self.args.qcov_hsp_perc.unwrap_or(0.0),
-            |context_idx| self.query_contexts[context_idx].len,
+            |context_idx| self.prelim_batch.query_contexts[context_idx].len,
         );
     }
 
@@ -476,6 +404,8 @@ impl SubjectPasses<'_> {
             round_down_evalue_score,
             evalue_threshold,
             percent_identity,
+            query_eff_searchsp,
+            cutoff_scores,
             ..
         } = self.prelim_batch;
         if hits.is_empty() {
@@ -488,11 +418,10 @@ impl SubjectPasses<'_> {
                 encoded_queries_blastna,
                 encoded_queries_nomask,
                 score_matrix,
-                &self.batch_cutoffs.0,
+                cutoff_scores,
                 percent_identity,
                 |prelim| {
-                    let eff_searchsp = self
-                        .query_eff_searchsp
+                    let eff_searchsp = query_eff_searchsp
                         .get(prelim.context_idx as usize)
                         .copied()
                         .unwrap_or(0);
@@ -567,7 +496,7 @@ impl SubjectPasses<'_> {
             Ok(writer.finish())
         } else {
             let mut collector =
-                PrelimHitCollector::new(self.queries.len(), self.prelim_hitlist_size);
+                PrelimHitCollector::new(self.prelim_batch.queries.len(), self.prelim_hitlist_size);
             self.prelim_into::<UNGAPPED, _>(lookup_tables, &mut |oid, prelim| {
                 collector.add(oid, prelim)
             })?;
@@ -593,18 +522,17 @@ impl SubjectPasses<'_> {
         lookup_tables: &LookupTables,
         sink: &mut M,
     ) -> Result<()> {
+        // What the preliminary search of every subject and chunk of the batch reads besides
+        // `PrelimBatch`: its lookup tables (`ScanBatch`), built once for the pass.
+        let scan = ScanBatch::new(self.prelim_batch, lookup_tables);
         match self.subjects {
             SubjectSource::Prepared(_) => {
-                self.search_subjects::<UNGAPPED>(
-                    None,
-                    Some(lookup_tables),
-                    &mut |oid, _, mut prelim| {
-                        if UNGAPPED {
-                            self.x_ungapped_query_coverage(&mut prelim);
-                        }
-                        sink(oid, prelim)
-                    },
-                );
+                self.search_subjects::<UNGAPPED>(None, Some(&scan), &mut |oid, _, mut prelim| {
+                    if UNGAPPED {
+                        self.x_ungapped_query_coverage(&mut prelim);
+                    }
+                    sink(oid, prelim)
+                });
                 Ok(())
             }
             SubjectSource::Database(database) => {
@@ -669,7 +597,7 @@ impl SubjectPasses<'_> {
                                 ordinal as usize,
                                 subject,
                                 state,
-                                Some(lookup_tables),
+                                Some(&scan),
                                 None,
                             );
                             let fetched = match excluded.as_ref() {
@@ -722,7 +650,7 @@ impl SubjectPasses<'_> {
                                 ordinal as usize,
                                 subject,
                                 state,
-                                Some(lookup_tables),
+                                Some(&scan),
                                 None,
                             );
                             (!prelim_hits.is_empty()).then_some(prelim_hits)
@@ -753,7 +681,7 @@ impl SubjectPasses<'_> {
         &self,
         prelim_lists: PrelimHitLists,
     ) -> Result<Vec<Option<BlastnHitList>>> {
-        let (queries_ref, hitlist_size) = (self.queries, self.hitlist_size);
+        let (queries_ref, hitlist_size) = (self.prelim_batch.queries, self.hitlist_size);
         match self.subjects {
             SubjectSource::Prepared(_) => {
                 let kept = prelim_hits_by_subject(prelim_lists, self.subject_records().len());

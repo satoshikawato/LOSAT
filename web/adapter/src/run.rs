@@ -3624,7 +3624,7 @@ mod tests {
     // A coding sequence of the protein of `q_idx_is_the_registered_index`.
     const CODING: &[u8] = b"ATGAAAACCGCGTATATTGCGAAACAGCGTCAGATTAGCTTTGTGAAAAGCCATTTTAGCCGTCAGCTGGAAGAACGTCTGGGCCTGATTGAAGTGCAGGCGCCGATTCTGAGCCGTGTGGGCGATGGCACCCAGGATAACCTGAGCGGCGCGGAAAAAGCGGTGCAGGTGAAAGTGAAAGCGCTGCCGGATGCGCAG";
 
-    // Line RG item T7 (PD-LOSAT-NCBI-DEFECTS 1.35): a subject titled `Subject_9 bad x\x81y title`,
+    // Line RG item T7 (PD-LOSAT-NCBI-DEFECTS 1.37): a subject titled `Subject_9 bad x\x81y title`,
     // whose title NCBI's `GenerateDefline` cannot decode (a `Subject_` first word and a byte in no
     // encoding NCBI guesses). Each stream is the CLI's run of its format: the default tabular
     // formats stop where NCBI stops (at the row's `saccver`, a null pointer), outfmt 0 writes

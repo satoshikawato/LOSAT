@@ -137,14 +137,28 @@ fn x_prepare_nt_tables(
 /// No NCBI counterpart: whether the cached matrix of `x_prepare_nt_tables` is `matrix`; it does not
 /// change any value NCBI computes.
 ///
-/// `cached == matrix` for every cell, as `cached[..] == matrix[..]`: the bits of every pair of cells
-/// are XORed and the results ORed, so the test is 0 exactly when every pair is equal. It reads all
-/// 256 cells without an early exit, which the compiler turns into vector code on every target. The
-/// slice comparison was a `memcmp` call, which in the WebAssembly build is wasi-libc's loop of one
+/// `cached == matrix`. On x86-64 and aarch64 the slice comparison is the C library's vector `bcmp`,
+/// which is kept. In the WebAssembly build it is wasi-libc's `memcmp`, a loop of one
 /// byte at a time (`x_prepare_nt_tables` runs before each X-drop extension: 7 % of a 1-thread blastn
-/// search in Node, cDNAs x 3 Mb of the fly genome).
+/// search in Node, cDNAs x 3 Mb of the fly genome), so wasm32 uses `x_same_matrix_fold`.
 #[inline]
 fn x_same_matrix(cached: &BlastnaMatrix, matrix: &BlastnaMatrix) -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        x_same_matrix_fold(cached, matrix)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        cached == matrix
+    }
+}
+
+/// No NCBI counterpart: `cached == matrix` as one pass over the cells: the bits of every pair of
+/// cells are XORed and the results ORed, so the test is 0 exactly when every pair is equal. It reads
+/// all 256 cells without an early exit, which the compiler turns into simd128 code (16 bytes a step).
+#[cfg(any(target_arch = "wasm32", test))]
+#[inline]
+fn x_same_matrix_fold(cached: &BlastnaMatrix, matrix: &BlastnaMatrix) -> bool {
     cached
         .iter()
         .zip(matrix.iter())
@@ -3161,29 +3175,35 @@ pub(crate) fn extend_gapped_heuristic_with_traceback_with_scratch(
 mod tests {
     use super::blast_get_start_for_gapped_alignment_nucl;
 
-    // `x_same_matrix` against the slice comparison it replaces: equal matrices, and a matrix that
-    // differs from the cached one in one cell by one bit (every cell, every bit), or in its sign.
+    // `x_same_matrix_fold` (wasm32's `x_same_matrix`) against the slice comparison: equal matrices,
+    // and a matrix that differs from the cached one in one cell by one bit (every cell, every bit),
+    // or in its sign.
     #[test]
     fn x_same_matrix_is_the_slice_comparison() {
-        use super::{x_same_matrix, BlastnaMatrix};
+        use super::{x_same_matrix, x_same_matrix_fold, BlastnaMatrix};
         let mut cached: BlastnaMatrix = [0; 256];
         for (k, v) in cached.iter_mut().enumerate() {
             *v = (k as i32 % 7) - 3;
         }
         cached[15] = i32::MIN / 2;
         let same = cached;
+        assert!(x_same_matrix_fold(&cached, &same));
         assert!(x_same_matrix(&cached, &same));
-        assert_eq!(x_same_matrix(&cached, &same), cached[..] == same[..]);
+        assert_eq!(x_same_matrix_fold(&cached, &same), cached[..] == same[..]);
         for cell in 0..256 {
             for bit in 0..32 {
                 let mut other = cached;
                 other[cell] ^= 1i32 << bit;
+                assert!(
+                    !x_same_matrix_fold(&cached, &other),
+                    "cell {cell} bit {bit}"
+                );
                 assert!(!x_same_matrix(&cached, &other), "cell {cell} bit {bit}");
-                assert_eq!(x_same_matrix(&cached, &other), cached[..] == other[..]);
+                assert_eq!(x_same_matrix_fold(&cached, &other), cached[..] == other[..]);
             }
             let mut other = cached;
             other[cell] = other[cell].wrapping_neg().wrapping_sub(1);
-            assert_eq!(x_same_matrix(&cached, &other), cached[..] == other[..]);
+            assert_eq!(x_same_matrix_fold(&cached, &other), cached[..] == other[..]);
         }
     }
 

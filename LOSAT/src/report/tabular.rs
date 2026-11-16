@@ -1679,15 +1679,22 @@ fn write_quoted(out: &mut Vec<u8>, text: &[u8]) {
 
 const NA: &[u8] = b"N/A";
 
-/// The writer of a tabular report.
+/// The writer of a tabular report (`TabularWriter::new`).
 pub struct TabularWriter<'a> {
-    pub spec: &'a TabularSpec,
+    spec: &'a TabularSpec,
     /// The `# BLASTN 2.17.0+` line's program and version.
-    pub program_version: &'a str,
-    /// The matrix of a protein search's positives (`None` for BLASTN: positives are
-    /// identities): the formatter's `m_ScoringMatrix`, which `CBlastFormat` makes with
-    /// `GetAsciiProteinMatrix` (outfmt 0's matrix, `utils::matrix::protein_display_score`), not
-    /// the XML's `CBlastFormattingMatrix`.
+    program_version: &'a str,
+    /// The matrix that scores the rows' pairs of letters for the positives, where the report
+    /// prints them (`new`).
+    matrix: Option<ScoringMatrix>,
+}
+
+impl<'a> TabularWriter<'a> {
+    /// The writer of the report `spec`, whose `# BLASTX 2.17.0+` line names `program_version`;
+    /// `matrix` is the matrix of a protein search's positives (`None` for BLASTN and for a
+    /// formatter without one: positives are identities): the formatter's `m_ScoringMatrix`,
+    /// which `CBlastFormat` makes with `GetAsciiProteinMatrix` (outfmt 0's matrix,
+    /// `utils::matrix::protein_display_score`), not the XML's `CBlastFormattingMatrix`.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:183
     /// ```c++
@@ -1697,10 +1704,37 @@ pub struct TabularWriter<'a> {
     /// ```c++
     ///                     tabinfo.SetFields(s, *m_Scope, &m_ScoringMatrix);
     /// ```
-    pub matrix: Option<ScoringMatrix>,
-}
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1017-1020
+    /// ```c++
+    ///                     if (matrix && !matrix->GetData().empty() &&
+    ///                            (*matrix)(m_QuerySeq[i], m_SubjectSeq[i]) > 0) {
+    ///                         ++num_positives;
+    ///                     }
+    /// ```
+    /// NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:444-449
+    /// ```c++
+    /// inline void CBlastTabularInfo::x_PrintPercentPositives(void)
+    /// {
+    ///     double perc_positives =
+    ///         (m_AlignLength > 0 ? ((double)m_NumPositives)/m_AlignLength * 100 : 0);
+    ///     m_Ostream << NStr::DoubleToString(perc_positives, 2);
+    /// }
+    /// ```
+    /// The count of the positives is read only by `positive` and `ppos` (`x_PrintNumPositives`,
+    /// `x_PrintPercentPositives`): the writer of a report without them keeps no matrix, so its
+    /// rows score no pair of letters (the same bytes; decided once for the writer, not per row).
+    pub fn new(
+        spec: &'a TabularSpec,
+        program_version: &'a str,
+        matrix: Option<ScoringMatrix>,
+    ) -> Self {
+        Self {
+            spec,
+            program_version,
+            matrix: matrix.filter(|_| spec.has_any(&[Positives, PercentPositives])),
+        }
+    }
 
-impl TabularWriter<'_> {
     /// outfmt 20's line of the field names (`PrintProlog` → `PrintFieldSpecs`).
     pub fn prolog(&self, out: &mut dyn Write) -> io::Result<()> {
         if self.spec.kind != TabularKind::CsvWithHeader {
@@ -2009,7 +2043,9 @@ impl TabularWriter<'_> {
         hsp: &TabularHsp<'_>,
     ) {
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:973-1027
-        // (the identities and positives counted again from the rows, and the BTOP string).
+        // (the identities and positives counted again from the rows, and the BTOP string). A pair
+        // of letters is scored only by the matrix of a writer whose report prints the positives
+        // (`new`).
         let (num_ident, positives) = match hsp.rows {
             Some((qrow, srow)) => {
                 let (mut ident, mut positive) = (0usize, 0usize);
@@ -2802,11 +2838,7 @@ mod tests {
                 delimiter: String::new(),
             };
             let spec = TabularSpec::of(format, &choice).unwrap();
-            let writer = TabularWriter {
-                spec: &spec,
-                program_version: "BLASTN 2.17.0+",
-                matrix: None,
-            };
+            let writer = TabularWriter::new(&spec, "BLASTN 2.17.0+", None);
             let subject = TabularSubject {
                 id: b"s",
                 accession: b"s",
@@ -3019,11 +3051,7 @@ mod tests {
             index: 0,
         };
         let row = |spec: &TabularSpec, num_ident: usize, rows: Option<(&[u8], &[u8])>| {
-            let writer = TabularWriter {
-                spec,
-                program_version: "BLASTP 2.17.0+",
-                matrix: Some(ScoringMatrix::Blosum62),
-            };
+            let writer = TabularWriter::new(spec, "BLASTP 2.17.0+", Some(ScoringMatrix::Blosum62));
             let hsp = TabularHsp {
                 q_start: 1,
                 q_end: 6,
@@ -3065,11 +3093,11 @@ mod tests {
         );
         assert_eq!(row(&positives, 1, Some((b"UJ", b"UI"))), "1\t1\t5\tN/A\n");
         let commented = spec(ReportFormat::TabularWithComments, "qseqid");
-        let writer = TabularWriter {
-            spec: &commented,
-            program_version: "PSIBLAST 2.17.0+",
-            matrix: Some(ScoringMatrix::Blosum62),
-        };
+        let writer = TabularWriter::new(
+            &commented,
+            "PSIBLAST 2.17.0+",
+            Some(ScoringMatrix::Blosum62),
+        );
         let mut out = Vec::new();
         writer
             .round_query_header(&mut out, Some(1), b"q1 title", b"db", Some(0))
@@ -3131,12 +3159,7 @@ mod tests {
             qcovhsp: 100,
         };
         let mut out = Vec::new();
-        TabularWriter {
-            spec: &spec,
-            program_version: "BLASTP 2.17.0+",
-            matrix: None,
-        }
-        .row(
+        TabularWriter::new(&spec, "BLASTP 2.17.0+", None).row(
             &mut out,
             &mut TabularRows::default(),
             &TabularQuery::local(b"q1", 6),
@@ -3180,11 +3203,7 @@ mod tests {
             end_gaps: true,
             qcovhsp: 50,
         };
-        let writer = TabularWriter {
-            spec: &spec,
-            program_version: "BLASTN 2.17.0+",
-            matrix: None,
-        };
+        let writer = TabularWriter::new(&spec, "BLASTN 2.17.0+", None);
         let mut rows = TabularRows::default();
         let mut out = Vec::new();
         for subject in subjects {

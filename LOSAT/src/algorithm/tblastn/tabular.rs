@@ -304,11 +304,7 @@ pub(super) fn write_tblastn_tabular(
     }
     let code = GeneticCode::try_from_id(tab.genetic_code).map_err(anyhow::Error::msg)?;
     // The positives of the rows: the formatter's `m_ScoringMatrix` (`GetAsciiProteinMatrix`).
-    let table = TabularWriter {
-        spec,
-        program_version: tab.program_version,
-        matrix: Some(tab.matrix),
-    };
+    let table = TabularWriter::new(spec, tab.program_version, Some(tab.matrix));
     // NCBI makes a formatter for each query's report and for outfmt 7's epilog, and each warns
     // when the field list asks for a name of the taxonomy database that it cannot find.
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158

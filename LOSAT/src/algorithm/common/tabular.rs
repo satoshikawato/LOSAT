@@ -592,12 +592,7 @@ pub(crate) fn write_tabular_prolog(
         diagnostics.write_all(taxdb_warning_line(program).as_bytes())?;
         diagnostics.flush()?;
     }
-    TabularWriter {
-        spec,
-        program_version,
-        matrix: None,
-    }
-    .prolog(writer)?;
+    TabularWriter::new(spec, program_version, None).prolog(writer)?;
     Ok(())
 }
 

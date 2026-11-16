@@ -279,11 +279,7 @@ pub(super) fn write_tblastx_tabular(
         TblastxMatrix::Table(matrix) => matrix,
         TblastxMatrix::Unknown | TblastxMatrix::Aborts => ScoringMatrix::Blosum62,
     };
-    let table = TabularWriter {
-        spec,
-        program_version: PROGRAM_VERSION,
-        matrix: Some(matrix),
-    };
+    let table = TabularWriter::new(spec, PROGRAM_VERSION, Some(matrix));
     // NCBI makes a formatter for each query's report and for outfmt 7's epilog, and each warns
     // when the field list asks for a name of the taxonomy database that it cannot find.
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158

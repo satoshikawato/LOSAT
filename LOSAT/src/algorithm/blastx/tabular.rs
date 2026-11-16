@@ -140,12 +140,7 @@ pub(super) fn write_prolog(
         return Ok(());
     }
     write_taxdb_warning(program.lower, spec, taxdb_found, writer, diagnostics)?;
-    TabularWriter {
-        spec,
-        program_version: program_version(program),
-        matrix: None,
-    }
-    .prolog(writer)?;
+    TabularWriter::new(spec, program_version(program), None).prolog(writer)?;
     Ok(())
 }
 
@@ -446,11 +441,11 @@ pub(super) fn write_blastx_tabular(
     //         return;
     //     }
     // ```
-    let table = TabularWriter {
+    let table = TabularWriter::new(
         spec,
-        program_version: program_version(options.program()),
-        matrix: options.rpstblastn.is_none().then_some(options.scoring),
-    };
+        program_version(options.program()),
+        options.rpstblastn.is_none().then_some(options.scoring),
+    );
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986
     // ```c++
     //         alnVec->SetGapChar('-');
@@ -843,7 +838,9 @@ pub(super) fn write_blastx_tabular(
                             };
                             (row, catch_query, catch_subject)
                         } else {
-                            a = alignment(batch, hsp, subject, query, &code, options.scoring)?;
+                            // The writer counts the rows' identities and positives
+                            // (`TabularWriter::row`): no counts here.
+                            a = alignment(batch, hsp, subject, query, &code, None)?;
                             // NCBI reads the alignment's rows when a field reads its counts
                             // (`COUNTS_FIELDS`, or `nident` with the engine's identities above 0;
                             // BLASTX fetches the sequences, so `nident`, `mismatch` and `pident`

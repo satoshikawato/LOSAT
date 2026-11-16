@@ -55,6 +55,7 @@ pub(crate) struct DisplayAlignment {
     pub qseq: String,
     pub sseq: String,
     pub masked_qseq: String,
+    /// The identities and positives of the rows (0 where `alignment` was asked for no counts).
     pub identity: usize,
     pub positive: usize,
     pub gaps: usize,
@@ -393,7 +394,7 @@ pub(crate) fn alignment(
     subject: &FastaRecord,
     query_record: &FastaRecord,
     code: &crate::utils::genetic_code::GeneticCode,
-    matrix: crate::config::ScoringMatrix,
+    counts: Option<crate::config::ScoringMatrix>,
 ) -> Result<DisplayAlignment> {
     let raw = &hsp.hsp;
     let context = &batch.prepared.contexts[raw.context];
@@ -652,14 +653,20 @@ pub(crate) fn alignment(
     //     retval('U', 'C') = retval('C', 'C');
     //     retval('C', 'U') = retval('C', 'C');
     // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1003-1019 (quoted at
+    // `report::tabular::TabularWriter::new`): the tabular formatter counts the identities and
+    // positives of the rows itself, so the tabular reports ask for no counts here (`counts`
+    // `None`: 0), and outfmt 0's rows (`pairwise_hits`) for the counts with the search's matrix.
     let mut identity = 0;
     let mut positive = 0;
-    for (&qc, &sc) in qseq.iter().zip(&sseq) {
-        if qc == sc {
-            identity += 1;
-            positive += 1;
-        } else if qc != b'-' && sc != b'-' && protein_display_score(matrix, qc, sc) > 0 {
-            positive += 1;
+    if let Some(matrix) = counts {
+        for (&qc, &sc) in qseq.iter().zip(&sseq) {
+            if qc == sc {
+                identity += 1;
+                positive += 1;
+            } else if qc != b'-' && sc != b'-' && protein_display_score(matrix, qc, sc) > 0 {
+                positive += 1;
+            }
         }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1520-1534
@@ -1552,7 +1559,7 @@ pub(super) fn pairwise_hits(
                     if !has_seqalign(hsp, options.gapped) {
                         continue;
                     }
-                    let a = alignment(batch, hsp, subject, query, &code, options.scoring)?;
+                    let a = alignment(batch, hsp, subject, query, &code, Some(options.scoring))?;
                     let raw = &hsp.hsp;
                     let len = a.qseq.len();
                     let hit = Hit {

@@ -444,12 +444,7 @@ pub(super) fn write_tabular_prolog_warning(
 
 /// Writes outfmt 20's line of the field names (`PrintProlog`; nothing for the other kinds).
 pub(super) fn write_tabular_prolog(spec: &TabularSpec, writer: &mut dyn Write) -> Result<()> {
-    TabularWriter {
-        spec,
-        program_version: "",
-        matrix: None,
-    }
-    .prolog(writer)?;
+    TabularWriter::new(spec, "", None).prolog(writer)?;
     Ok(())
 }
 
@@ -480,12 +475,7 @@ pub(super) fn write_tabular_without_queries(
             diagnostics.write_all(taxdb_warning_line(program).as_bytes())?;
             diagnostics.flush()?;
         }
-        TabularWriter {
-            spec,
-            program_version: "",
-            matrix: None,
-        }
-        .epilog(writer, 0)?;
+        TabularWriter::new(spec, "", None).epilog(writer, 0)?;
     }
     Ok(())
 }
@@ -513,12 +503,7 @@ pub(super) fn write_tabular_round_epilog(
         diagnostics.write_all(taxdb_warning_line(program).as_bytes())?;
         diagnostics.flush()?;
     }
-    TabularWriter {
-        spec,
-        program_version: "",
-        matrix: None,
-    }
-    .epilog(writer, rounds)?;
+    TabularWriter::new(spec, "", None).epilog(writer, rounds)?;
     Ok(())
 }
 
@@ -676,11 +661,11 @@ fn write_tabular_rows<const RPS: bool>(
     //                            (*matrix)(m_QuerySeq[i], m_SubjectSeq[i]) > 0) {
     //                         ++num_positives;
     // ```
-    let table = TabularWriter {
+    let table = TabularWriter::new(
         spec,
-        program_version: tab.program_version,
-        matrix: (tab.app != BlastpApp::Rpsblast).then_some(tab.matrix),
-    };
+        tab.program_version,
+        (tab.app != BlastpApp::Rpsblast).then_some(tab.matrix),
+    );
     // NCBI makes a formatter for each query's report and for outfmt 7's epilog, and each warns
     // when the field list asks for a name of the taxonomy database that it cannot find.
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158

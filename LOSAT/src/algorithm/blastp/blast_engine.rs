@@ -10383,9 +10383,10 @@ fn run_call(
         _ => None,
     };
     // Diagnostic (LOSAT_DEBUG_BLASTP_TRACE_HSP): the index among the call's queries of this call's
-    // first query, which the scan's trace adds to its query index: a block of the preliminary
-    // stage (`PrelimOnly::Block`) counts its queries from its first, and the trace names the
-    // queries of the search of all queries, as its redo's does. No NCBI counterpart.
+    // first query, which the preliminary stage's trace (`BlastpPrelimKernel::gapped_subject` in
+    // `blast_engine/prelim_kernel.rs`) adds to its query index: a block of the preliminary stage
+    // (`PrelimOnly::Block`) counts its queries from its first, and the trace names the queries of
+    // the search of all queries, as its redo's does. No NCBI counterpart.
     let x_trace_query_base = match &prelim {
         Some(PrelimOnly::Block { first_query, .. }) => *first_query as u32,
         _ => 0,

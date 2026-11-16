@@ -1,0 +1,250 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: protein subjects of the BLASTX query-anchored rows
+           7 sequences; 542 total letters
+
+
+
+Query= bxq coding query in six frames
+
+Length=1229
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+bx_a frames +1 and -2                                                 122     3e-38
+bx_mins minus insertion and deletion                                  117     9e-37
+bx_ins plus insertion                                                 107     3e-33
+bx_rep two copies in frame +3                                         108     4e-33
+bx_ins2 plus insertion same place                                     89.7    1e-26
+bx_m6 frame -3                                                        85.1    3e-25
+bx_far weak                                                           51.6    3e-13
+
+
+
+For reading frame +1 of query sequence:
+
+Query_1  1    HHPMTMWATHIIKIVIIWTQVNVKCIWQPRERHGIWAAHPSGHFIVVIPEGWDHRHSAQE  180
+0        1    ...............A.........................................K..  60
+
+Query_1  181  DTSTTSYPV*RVYVADSTRASGVTSLHN*YMCRPYCGCVYNDA*LVSLaatrsisaattt  360
+0        61   AST                                                           63
+
+Query_1  361  taaattaatamaEHNYG*L**VLPRAYKFLLFSVATIPLYRPYKHTQSNGIHRKPIVRTA  540
+
+Query_1  541  TITWPTVCARFYAERLSAFHQ**SFNGA*ILPYLESQVLCHRISW*CSATgwlal*lsln  720
+
+Query_1  721  g*lngnchlqhlhl*DIPRNSSQVCIRCLHAYKPAIATIWALSIRTFLQWIMLLRAVAR*  900
+
+Query_1  901  EGHFSHAATWGAPFVVWVCS  960
+5        16             .K..NSYL.D  25
+
+For reading frame +2 of query sequence:
+
+Query_1  53   GLKLT*NAYGSRVRGTAYGRLIPPAIL*S*YQKDGTTGTQLRRILQPHPIPCNGYMLQIP  232
+0        93   ...MSP.V.                                                     101
+1        1                                                         .......  7
+2        1                                                         .......  7
+
+Query_1  233  PERVELPPYTISICADPIAGAYIMMHNWCPWLPQEAYqqqqqqqqqqqqqqqqwqSITMD  412
+0        25                               .I.Q.R.RH                         33
+1        8    ...........M..D.............M....L...H..................M...  72
+                                         \                                
+                                         |                                
+                                     WWWHH
+2        8    ...T............................A.MD......S....C....M.S.....  70
+                                          \                               
+                                          |                               
+                                        KYC
+
+Query_1  413  NCNKYCHERINFCSFLLLLYPFIGPINTLNQMGYTENQS*EQQRLHGLRFVRVSMQNA*V  592
+1        73   .............                                                 85
+2        71   ...                                                           73
+
+Query_1  593  RSTNDNLSMGHKFSPI*NRRCFAIGSRGNARQQVGSHYNCH*TVDSTEIATCNIYISEIF  772
+
+Query_1  773  QETPARYAYAACMHINPQ*QQSGR*VSERFYSGSCYCVRWQDERVIFPMLRLGVHLLLFG  952
+4        44                                     .K.CK..-----..L             53
+6        24                                                            ..W  26
+
+Query_1  953  FAVRK  967
+6        27   .LI..  31
+
+For reading frame +3 of query sequence:
+
+Query_1  492  THSIKWDTQKTNRENSNDYMAYGLCAFLCRTPECVPPMIIFQWGINSPLFRIAGALP*DL  671
+3        1    .......P..H...................M...................QASNE..Q.W  63
+                                                                \         
+                                                                |         
+                                                              NSN
+3        62       D..............P..............D..........                 102
+6        1    ..AR....GQ......R.......FW..I.KMR.                            34
+
+Query_1  672  VVMLGNR  692
+3        64   DTQKT..  70
+
+For reading frame -1 of query sequence:
+
+Query_1  878  NMIHCRNVLILNAQIVAIAGLYACKQRMHTWLEFLGISQRCKCCKWQFPLSQPFNDNYSA  699
+4        1    ............D...........G............Q..............------..  57
+                                            \                             
+                                            |                             
+                                          CFW
+
+Query_1  698  SQPVAEHYHEILWQSTCDSK*GRIYAPLKDYHWWNALRRSA*KRAQTVGHVIVAVLTIGF  519
+4        58   ..........                                                    67
+
+Query_1  518  LCIPFD*VCL*GL*RGIVATEKSRNLYARGSTYYSYP*LCSaiavaavvaaavvvvaadm  339
+
+Query_1  338  llvaAKDTSYASLYTHPQ*GLHIY*LCREVTPLARVESATYTRYTG*DVVEVSS*AECRW  159
+
+Query_1  158  SHPSGITTIKWPEG  117
+0        38   A....HFIVVI...  51
+
+For reading frame -2 of query sequence:
+
+Query_1  1069  F*SHTMLVKMNPENPDCYHNGLKMSPNVYCPTSAFPDCKPKQQKVHPKSQHGKNDPLI  896
+0        73    .GA...Y......R.......................................       125
+3        42                                                     .W.I.S..F  50
+
+For reading frame -3 of query sequence:
+
+Query_1  1209  YSSETREMCGLCTDAGKPFNSYLCDLVFDGATDVACLHQPSVYSPNNSSLIPCW*K*ILK  1030
+0        98                                           .N..C.TSA              106
+5        1     ...............................R........                      40
+
+Query_1  1029  IRIATIMGLRCRQMFIVQLQLFLTANPNNKRCTPSRSMGKMTLSSCHRTQ*HDPL*KRSD  850
+1        69                                            ..MDN.NK              76
+
+Query_1  849   T*RPDCCYCGFICMQAAYAYLAGVSWNISEM*MLQVAISVESTV**QL*CEPTCCRALPR  670
+
+Query_1  669   DPMAKHLRF*IGENLCPIERLSLVERTQAFCIEtrtnrrpcnrcCSHDWFSVYPI*LSVF  490
+
+Query_1  489   IGPIKGYSSNRKEQKFIRSWQYLLQLSIVMLchccccccccccccccc*YASCGSQGHQL  310
+
+Query_1  309   CIIIYAPAIGSAHILIV*GGNSTRSGGICNIYPLHGIGCG*SILLS*VPVVPSFWYH  139
+0        45                                                   IV.I.EG.D.  54
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 125828
+
+
+Query= bxnohit no hits
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+bx_a frames +1 and -2                                                 12.3    4.5  
+bx_rep two copies in frame +3                                         12.3    4.8  
+
+
+
+For reading frame +3 of query sequence:
+
+Query_2  99   CVYPRRLVIQATHSP  143
+3        34   ..P.MIIFQWGIN..  48
+
+For reading frame -1 of query sequence:
+
+Query_2  132  SPE*PDA  112
+0        83   N..R..C  89
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 15295
+
+
+Query= bxq1 one frame
+
+Length=221
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+bx_mins minus insertion and deletion                                  112     4e-39
+bx_m6 frame -3                                                        17.3    0.059
+
+
+
+For reading frame +2 of query sequence:
+
+Query_3  2    NMIHCRNVLILNAQIVAIAGLYACKQRMHTWLEFLQISQRCKCCKWQFPLSQPFNDNYSA  181
+4        1    ............D...........G..........G.Q..............------..  57
+                                            \                             
+                                            |                             
+                                          CFW
+
+Query_3  182  QQPVAEHYHE  211
+4        58   S.........  67
+
+For reading frame -3 of query sequence:
+
+Query_3  102  NSNQVCILCLQAYNPAIATIC  40
+5        4    ETREM.G..TD.GK.FNSYL.  24
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 22880
+
+
+Query= bxqminus one minus frame
+
+Length=122
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+bx_m6 frame -3                                                        82.8    3e-28
+
+
+
+Query_4  120  YSSETRELCGLCTDAGKPFNSYLCDLVFDGALDVACLHQP  1
+5        1    .......M.......................R........  40
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 13485
+
+
+  Database: protein subjects of the BLASTX query-anchored rows
+    Posted date:  Nov 15, 2026  10:24 AM
+  Number of letters in database: 542
+  Number of sequences in database:  7
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

@@ -54,8 +54,8 @@ use crate::utils::matrix::standard_score;
 
 mod culling;
 mod database;
-// The gapped half of the kernel of one subject (`run_call`'s `search_subject`): from the order of
-// its ungapped hits to its HSP lists.
+// The kernel of one subject (`BlastpPrelimKernel::search_subject`): its scan and ungapped
+// extensions, then its gapped half, from the subject's letters to its HSP lists.
 mod prelim_kernel;
 // The preliminary stage of a call after its kernel (`run_call`): the choice of the pool and the
 // call's branch (RPS-BLAST, PSSM, query blocks, a database's blocks, a subject set).
@@ -110,12 +110,9 @@ use super::encoding::{
     encode_protein_query_frame_with_seg, encode_protein_query_frame_with_seg_timed,
     encode_protein_sequence, ncbistdaa_to_ascii, EncodedProtein,
 };
+use super::extension::BlastpUngappedData;
 #[cfg(test)]
 use super::extension::{extend_one_hit, extend_two_hit};
-use super::extension::{
-    extend_one_hit_blosum62, extend_one_hit_of, extend_two_hit_blosum62, extend_two_hit_table,
-    BlastpUngappedData,
-};
 use super::gapalign::{
     blastp_get_start_for_gapped_alignment, blastp_score_only_gapped_alignment_with_scratch,
     BlastpGappedAlignmentMode, BlastpPreliminaryHsp, GapAlignScratch,
@@ -280,7 +277,8 @@ impl BlastpSubjectParameters {
     }
 }
 
-/// What `run_call`'s kernel (`search_subject`) reads of the preliminary statistics: the word and
+/// What `run_call`'s kernel (`BlastpPrelimKernel::search_subject`, `blast_engine/prelim_kernel.rs`)
+/// reads of the preliminary statistics: the word and
 /// hit-saving cutoffs of each context, the search spaces, the preliminary e-value and psiblast's
 /// sum statistics; the setup's (made once per call) or a subject's own
 /// (`BlastpSubjectParameters::values`). One pointer per subject, so that the default path reads
@@ -10694,716 +10692,30 @@ fn run_call(
         prelim_evalue,
         sum_stats: sum_stats.as_ref(),
     };
-    // What the kernel's gapped half reads of the call (`prelim_kernel::BlastpPrelimKernel`): the
-    // closure below reads them through it.
+    // The kernel of one subject (`prelim_kernel::BlastpPrelimKernel::search_subject`: its scan,
+    // ungapped extensions and gapped half) with what it reads of the call; `process_subject` and
+    // `process_own_subject` below call it with the subject's preliminary statistics `values`.
     let kernel = prelim_kernel::BlastpPrelimKernel {
         args: &args,
         query_ids: &query_ids,
         contexts: &contexts,
         context_lookup_bounds,
         concatenated_query: &concatenated_query,
+        lookup: &lookup,
+        x_context_table: &x_context_table,
+        x_dropoff_per_context: &x_dropoff_per_context,
+        window,
+        word_size,
+        x_ungap_sent: &x_ungap_sent,
+        diag_mask,
+        total_query_span,
+        x_soft_subjects,
         x_drop_gapped,
         gapped_params: &gapped_params,
         gapped_gumbel: &gapped_gumbel,
         x_trace_query_base,
         timing_enabled,
         timing: &timing,
-    };
-    // The kernel of one subject, with its preliminary statistics `values` (`process_subject` and
-    // `process_own_subject` below give them).
-    let search_subject = |scratch: &mut BlastpSubjectScratch,
-                          s_idx: usize,
-                          subject: BlastpSubjectRef<'_>,
-                          subject_result: &mut BlastpSubjectResult,
-                          values: &BlastpPrelimValues<'_>| {
-        subject_result.reset(s_idx);
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1354,1429-1432
-        // ```c
-        //     Int4 min_subj_seq_length = 1;
-        // ...
-        //        if (seq_arg.seq->length < min_subj_seq_length) {
-        //            BlastSeqSrcReleaseSequence(seq_src, &seq_arg);
-        //            continue;
-        //        }
-        // ```
-        // A subject without letters (its warning was written when the subjects were set
-        // up) is not searched, and the diagonal offset does not move for it.
-        if subject.aa_len == 0 {
-            return;
-        }
-        // The word cutoffs that the scans' per-hit calls read, as a local.
-        let word_cutoff_scores = values.word_cutoff_scores;
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:112-121
-        // ```c
-        // (*seq_blk)->sequence_start = (Uint1 *) buffer;
-        // /* The first byte is a sentinel byte. */
-        // (*seq_blk)->sequence = (*seq_blk)->sequence_start+1;
-        // (*seq_blk)->length = length;
-        // ```
-        let subject_sequence = &subject.aa_seq[1..];
-        let subject_raw = &subject.aa_seq[1..subject.aa_seq.len() - 1];
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:999-1018
-        // ```c
-        // BLAST_OneSubjectUpdateParameters(..., subject_length, ...);
-        // BlastHitSavingParametersUpdate(program_number, sbp, query_info,
-        //                                subject_length, 0, hit_params);
-        // BlastInitialWordParametersUpdate(program_number, hit_params, sbp,
-        //                                  query_info, subject_length,
-        //                                  word_params);
-        // ```
-        //
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:917-960
-        // ```c
-        // new_cutoff = BLAST_SpougeEtoS(...,
-        //                     query_info->contexts[context].query_length,
-        //                     avg_subject_length);
-        // params->cutoffs[context].cutoff_score = new_cutoff;
-        // ...
-        // curr_cutoffs->cutoff_score = MIN(gap_trigger,
-        //                                  hit_params->cutoffs[context].cutoff_score_max);
-        // ```
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:253-267
-        // ```c
-        // init_hitlist->init_hsp_array =
-        //     malloc(init_hitlist->allocated * sizeof(BlastInitHSP));
-        // ```
-        let mut init_hsps = std::mem::take(&mut scratch.init_hsps);
-        init_hsps.clear();
-        let subject_diag_offset = scratch.diag_offset;
-
-        let scan_ungapped_start = blastp_timing_start(timing_enabled);
-        // `-lcase_masking`: this subject's scan ranges, when it has lower-case letters.
-        let x_soft = x_soft_subjects
-            .and_then(|all| all.get(s_idx))
-            .filter(|ranges| !ranges.is_empty());
-        // The subject scan and the two-hit test in one loop (a search with a window).
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:502-512
-        // ```c
-        // while (scan_range[1] <= scan_range[2]) {
-        //     /* scan the subject sequence for hits */
-        //     hits = scansub(lookup_wrap, subject,
-        //                               offset_pairs, array_size, scan_range);
-        //     ...
-        //     for (i = 0; i < hits; ++i) {
-        // ```
-        // Dispatch point: the two-hit test reads the lookup cells in place
-        // (`x_seed_fused::x_scan_two_hit`, and `x_seed_fused_compressed::x_scan_two_hit_compressed`
-        // for the compressed table of blastp-fast) and this closure takes the hits that need the
-        // context check and the extension, with the same body as the reference closure below.
-        // EXPERIMENT (LOSAT_X_BPDIAG): inside it the hits of a cell are tested in batches.
-        // The two-hit test of a hit that needs the context check and the extension, with the
-        // extension `$extend` (and its leading arguments): `extend_two_hit_blosum62` for BLOSUM62,
-        // `extend_two_hit_table` of the search's matrix for another one (item SC2b). Each
-        // expansion is a closure type of its own, so BLOSUM62's loops keep their own instances.
-        macro_rules! x_candidate_of {
-            ($extend:path $(, $lead:expr)?) => {
-                |query_offset: i32,
-                                   subject_offset: i32,
-                                   last_hit: i32,
-                                   diff: i32,
-                                   diag_entry: &mut DiagStruct| {
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:551-570
-                    // ```c
-                    // curr_context = BSearchContextInfo(query_offset, query_info);
-                    // ...
-                    // if (query_offset - diff <
-                    //     query_info->contexts[curr_context].query_offset) {
-                    //     diag_array[diag_coord].last_hit =
-                    //         subject_offset + diag_offset;
-                    //     continue;
-                    // }
-                    // ```
-                    let (ctx_idx, frame_base) = x_context_table
-                        .get_with_start(query_offset)
-                        .unwrap_or_else(|| {
-                            let idx = blastp_context_idx_for_query_offset_with_bounds(
-                                &contexts,
-                                context_lookup_bounds,
-                                query_offset,
-                            );
-                            (idx, contexts[idx].frame_base)
-                        });
-                    if query_offset - diff < frame_base {
-                        diag_entry.set_last_hit(subject_offset + subject_diag_offset);
-                        return;
-                    }
-                    let x_drop = x_dropoff_per_context[ctx_idx];
-                    let cutoff = word_cutoff_scores[ctx_idx];
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1112-1116
-                    // ```c
-                    // if (use_pssm)
-                    //     score += matrix[q_right_off + i][s[s_right_off + i]];
-                    // else
-                    //     score += matrix[q[q_right_off + i]][s[s_right_off + i]];
-                    // ```
-                    let Some(ungapped_hit) = $extend(
-                        $($lead,)?
-                        &concatenated_query,
-                        subject_raw,
-                        usize::try_from(last_hit + word_size)
-                            .expect("NCBI BLAST two-hit seed boundary must be non-negative"),
-                        usize::try_from(subject_offset)
-                            .expect("NCBI BLAST two-hit subject offset must be non-negative"),
-                        usize::try_from(query_offset)
-                            .expect("NCBI BLAST two-hit query offset must be non-negative"),
-                        x_drop,
-                        args.word_size,
-                    ) else {
-                        return;
-                    };
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:575-588
-                    // ```c
-                    // if (score >= cutoffs->cutoff_score)
-                    //     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
-                    //                      query_offset, subject_offset, hsp_len,
-                    //                      score);
-                    // if (right_extend) {
-                    //     diag_array[diag_coord].flag = 1;
-                    //     diag_array[diag_coord].last_hit =
-                    //         s_last_off - (wordsize - 1) + diag_offset;
-                    // }
-                    // else {
-                    //     diag_array[diag_coord].last_hit =
-                    //         subject_offset + diag_offset;
-                    // }
-                    // ```
-                    if ungapped_hit.ungapped_data.score >= cutoff {
-                        blastp_save_init_hsp(
-                            &mut init_hsps,
-                            ungapped_hit.ungapped_data.q_start,
-                            ungapped_hit.ungapped_data.s_start,
-                            query_offset,
-                            subject_offset,
-                            ungapped_hit.ungapped_data.length,
-                            ungapped_hit.ungapped_data.score,
-                        );
-                    }
-                    if ungapped_hit.right_extend {
-                        diag_entry.set_flag(1);
-                        diag_entry.set_last_hit(
-                            ungapped_hit.s_last_off - (word_size - 1) + subject_diag_offset,
-                        );
-                    } else {
-                        diag_entry.set_last_hit(subject_offset + subject_diag_offset);
-                    }
-                }
-            };
-        }
-        // The one-hit test of a hit (`-window_size 0`) with the extension `$extend` (and its
-        // leading arguments): `extend_one_hit_blosum62` for BLOSUM62, the reference
-        // `extend_one_hit_of` of the search's matrix for another one (item SC2b).
-        macro_rules! x_one_hit_of {
-            ($extend:path $(, $lead:expr)?) => {
-                |pair: OffsetPair| {
-                    let query_offset =
-                        i32::try_from(pair.q_off).expect("NCBI BLAST query offset must fit in Int4");
-                    let subject_offset =
-                        i32::try_from(pair.s_off).expect("NCBI BLAST subject offset must fit in Int4");
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:776-779
-                    // ```c
-                    // diag_coord = (subject_offset - query_offset) & diag_mask;
-                    // diff = subject_offset -
-                    //     (diag_array[diag_coord].last_hit - diag_offset);
-                    // ```
-                    let diag_coord = blastp_diag_coord(subject_offset - query_offset, diag_mask);
-                    let diag_entry = &mut scratch.diag_array[diag_coord];
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:713-775
-                    // ```c
-                    // diff = subject_offset -
-                    //     (diag_array[diag_coord].last_hit - diag_offset);
-                    // if (diff >= 0) {
-                    //     score = s_BlastAaExtendOneHit(...);
-                    //     if (score >= cutoffs->cutoff_score) {
-                    //         BlastSaveInitHsp(...);
-                    //     }
-                    //     diag_array[diag_coord].last_hit =
-                    //         s_last_off - (wordsize - 1) + diag_offset;
-                    // }
-                    // ```
-                    let diff = subject_offset - (diag_entry.last_hit() - subject_diag_offset);
-                    if diff < 0 {
-                        return;
-                    }
-
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:787-793
-                    // ```c
-                    // Int4 curr_context = BSearchContextInfo(query_offset,
-                    //                                        query_info);
-                    // BlastUngappedCutoffs *cutoffs =
-                    //     word_params->cutoffs + curr_context;
-                    // ```
-                    let ctx_idx = blastp_context_idx_for_query_offset_with_bounds(
-                        &contexts,
-                        context_lookup_bounds,
-                        query_offset,
-                    );
-                    let x_drop = x_dropoff_per_context[ctx_idx];
-                    let cutoff = word_cutoff_scores[ctx_idx];
-
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1040-1044
-                    // ```c
-                    // if (use_pssm)
-                    //     sum += matrix[q_off + i][s[s_off + i]];
-                    // else
-                    //     sum += matrix[q[q_off + i]][s[s_off + i]];
-                    // ```
-                    let Some(ungapped_hit) = $extend(
-                        $($lead,)?
-                        &concatenated_query,
-                        subject_raw,
-                        usize::try_from(query_offset)
-                            .expect("NCBI BLAST one-hit query offset must be non-negative"),
-                        usize::try_from(subject_offset)
-                            .expect("NCBI BLAST one-hit subject offset must be non-negative"),
-                        x_drop,
-                        args.word_size,
-                    ) else {
-                        return;
-                    };
-
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:790-800
-                    // ```c
-                    // if (score >= cutoffs->cutoff_score) {
-                    //     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
-                    //                      query_offset, subject_offset, hsp_len,
-                    //                      score);
-                    // }
-                    // diag_array[diag_coord].last_hit =
-                    //     s_last_off - (wordsize - 1) + diag_offset;
-                    // ```
-                    if ungapped_hit.ungapped_data.score >= cutoff {
-                        blastp_save_init_hsp(
-                            &mut init_hsps,
-                            ungapped_hit.ungapped_data.q_start,
-                            ungapped_hit.ungapped_data.s_start,
-                            query_offset,
-                            subject_offset,
-                            ungapped_hit.ungapped_data.length,
-                            ungapped_hit.ungapped_data.score,
-                        );
-                    }
-                    diag_entry
-                        .set_last_hit(ungapped_hit.s_last_off - (word_size - 1) + subject_diag_offset);
-                }
-            };
-        }
-        // The one-hit scan of the search's table with the test `$one_hit` (`x_one_hit_of!`).
-        macro_rules! x_one_hit_scan {
-            ($one_hit:ident, $for_each_offset_pair:ident) => {
-                if let Some(ranges) = x_soft {
-                    x_soft_subject::x_for_each_hit(
-                        &lookup,
-                        subject_sequence,
-                        subject.aa_len,
-                        ranges,
-                        &mut scratch.offset_pairs,
-                        false,
-                        &mut |pair, _| $one_hit(pair),
-                    );
-                } else {
-                    $for_each_offset_pair(
-                        &lookup,
-                        subject_sequence,
-                        subject.aa_len,
-                        &mut scratch.offset_pairs,
-                        BlastpOffsetPairScanMode::OneHit,
-                        $one_hit,
-                    );
-                }
-            };
-        }
-        // EXPERIMENT (LOSAT_X_BPUNGAPSENT): the closure of `x_candidate_of!` with the two-hit
-        // extension of `x_ungapped_sent.rs` inlined (word size 3, walks stopped by the sentinels),
-        // for the table of single letters, on a block and a subject that pass the path's checks,
-        // with the block's byte table (BLOSUM62's, or another matrix's: item SC2c). The macro's
-        // closure is a type of its own, so the loops of the closure above keep their own
-        // instances.
-        macro_rules! x_candidate_sent {
-            ($sent_query:expr, $sent_subject:expr) => {
-                |query_offset: i32,
-                 subject_offset: i32,
-                 last_hit: i32,
-                 diff: i32,
-                 diag_entry: &mut DiagStruct| {
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:551-570
-                    // (as in the closure above)
-                    let (ctx_idx, frame_base) = x_context_table
-                        .get_with_start(query_offset)
-                        .unwrap_or_else(|| {
-                            let idx = blastp_context_idx_for_query_offset_with_bounds(
-                                &contexts,
-                                context_lookup_bounds,
-                                query_offset,
-                            );
-                            (idx, contexts[idx].frame_base)
-                        });
-                    if query_offset - diff < frame_base {
-                        diag_entry.set_last_hit(subject_offset + subject_diag_offset);
-                        return;
-                    }
-                    let x_drop = x_dropoff_per_context[ctx_idx];
-                    let cutoff = word_cutoff_scores[ctx_idx];
-                    let s_left_off = usize::try_from(last_hit + word_size)
-                        .expect("NCBI BLAST two-hit seed boundary must be non-negative");
-                    let s_right_off = usize::try_from(subject_offset)
-                        .expect("NCBI BLAST two-hit subject offset must be non-negative");
-                    let q_right_off = usize::try_from(query_offset)
-                        .expect("NCBI BLAST two-hit query offset must be non-negative");
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1089-1155
-                    // (`x_ungapped_sent::two_hit`)
-                    // SAFETY: x_drop is a context's X-drop, which `XSentQuery::new` (or `new_of`)
-                    // checked.
-                    let extended = unsafe {
-                        super::x_ungapped_sent::two_hit(
-                            $sent_query,
-                            $sent_subject,
-                            s_left_off,
-                            s_right_off,
-                            q_right_off,
-                            x_drop,
-                        )
-                    };
-                    let Some(ungapped_hit) = extended else {
-                        return;
-                    };
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:575-588
-                    // (as in the closure above)
-                    if ungapped_hit.ungapped_data.score >= cutoff {
-                        blastp_save_init_hsp(
-                            &mut init_hsps,
-                            ungapped_hit.ungapped_data.q_start,
-                            ungapped_hit.ungapped_data.s_start,
-                            query_offset,
-                            subject_offset,
-                            ungapped_hit.ungapped_data.length,
-                            ungapped_hit.ungapped_data.score,
-                        );
-                    }
-                    if ungapped_hit.right_extend {
-                        diag_entry.set_flag(1);
-                        diag_entry.set_last_hit(
-                            ungapped_hit.s_last_off - (word_size - 1) + subject_diag_offset,
-                        );
-                    } else {
-                        diag_entry.set_last_hit(subject_offset + subject_diag_offset);
-                    }
-                }
-            };
-        }
-        // Another matrix than BLOSUM62 (items SC2b, SC2c): the same two-hit tests on the same
-        // scans, with the extension of the matrix's byte-table walks (the sentinel walks of
-        // `x_candidate_sent!` where the block and the subject pass their checks, else
-        // `extend_two_hit_table`; the reference where they do not cover a call), in a function of
-        // their own (`x_outlined`), so that this kernel only gains its call. Its one-hit search is
-        // the branch below.
-        if args.window_size != 0 && args.scoring.matrix != ScoringMatrix::Blosum62 {
-            x_outlined(|| {
-                let x_of = (
-                    args.scoring.matrix,
-                    super::x_ungapped_fast::matrix_table(args.scoring.matrix),
-                );
-                let x_candidate = x_candidate_of!(extend_two_hit_table, x_of);
-                if let Some(ranges) = x_soft {
-                    x_soft_subject::x_scan_two_hit_ranges(
-                        &lookup,
-                        subject_sequence,
-                        subject.aa_len,
-                        ranges,
-                        &mut scratch.offset_pairs,
-                        &mut scratch.diag_array,
-                        diag_mask,
-                        subject_diag_offset,
-                        window,
-                        word_size,
-                        x_candidate,
-                    );
-                } else {
-                    // EXPERIMENT (LOSAT_X_BPUNGAPSENT): the standard table's scans (either width)
-                    // with the sentinel walks of the matrix's byte table, on a block and a subject
-                    // that pass the path's checks (item SC2c).
-                    let x_sent = match (&x_ungap_sent, &lookup) {
-                        (
-                            Some(sent_query),
-                            BlastpRuntimeLookup::Aa(_) | BlastpRuntimeLookup::Aa16(_),
-                        ) => {
-                            let sent_subject =
-                                super::x_ungapped_sent::XSentSubject::new(subject.aa_seq);
-                            crate::utils::xreach::x_reach!(
-                                "LOSAT_X_BPUNGAPSENT",
-                                sent_subject.is_some()
-                            );
-                            sent_subject.map(|sent_subject| (sent_query, sent_subject))
-                        }
-                        (Some(_), _) => {
-                            crate::utils::xreach::x_reach!("LOSAT_X_BPUNGAPSENT", false);
-                            None
-                        }
-                        (None, _) => None,
-                    };
-                    // The tables of another matrix: the standard table (either width) or the
-                    // compressed one (`blastp_matrix_compressed_lookup`: the flat table, the
-                    // reference one where the flat build declines or LOSAT_X_BPCLUT is off).
-                    match &lookup {
-                        BlastpRuntimeLookup::Aa(aa_lookup) if x_sent.is_some() => {
-                            let (sent_query, sent_subject) = x_sent.expect("checked");
-                            super::x_seed_fused::x_scan_two_hit(
-                                aa_lookup,
-                                subject_sequence,
-                                subject.aa_len,
-                                &mut scratch.diag_array,
-                                diag_mask,
-                                subject_diag_offset,
-                                window,
-                                word_size,
-                                x_candidate_sent!(sent_query, sent_subject),
-                            )
-                        }
-                        BlastpRuntimeLookup::Aa16(aa_lookup) if x_sent.is_some() => {
-                            let (sent_query, sent_subject) = x_sent.expect("checked");
-                            super::x_seed_fused::x_scan_two_hit(
-                                aa_lookup,
-                                subject_sequence,
-                                subject.aa_len,
-                                &mut scratch.diag_array,
-                                diag_mask,
-                                subject_diag_offset,
-                                window,
-                                word_size,
-                                x_candidate_sent!(sent_query, sent_subject),
-                            )
-                        }
-                        BlastpRuntimeLookup::Aa(aa_lookup) => super::x_seed_fused::x_scan_two_hit(
-                            aa_lookup,
-                            subject_sequence,
-                            subject.aa_len,
-                            &mut scratch.diag_array,
-                            diag_mask,
-                            subject_diag_offset,
-                            window,
-                            word_size,
-                            x_candidate,
-                        ),
-                        BlastpRuntimeLookup::Aa16(aa_lookup) => {
-                            super::x_seed_fused::x_scan_two_hit(
-                                aa_lookup,
-                                subject_sequence,
-                                subject.aa_len,
-                                &mut scratch.diag_array,
-                                diag_mask,
-                                subject_diag_offset,
-                                window,
-                                word_size,
-                                x_candidate,
-                            )
-                        }
-                        BlastpRuntimeLookup::Compressed(compressed_lookup) => {
-                            super::x_seed_fused_compressed::x_scan_two_hit_compressed(
-                                compressed_lookup,
-                                subject_sequence,
-                                subject.aa_len,
-                                &mut scratch.diag_array,
-                                diag_mask,
-                                subject_diag_offset,
-                                window,
-                                word_size,
-                                x_candidate,
-                            )
-                        }
-                        // A copy of its own of the flat scan (`X_BLASTP_MATRIX`), so that
-                        // BLOSUM62's keeps its one caller.
-                        BlastpRuntimeLookup::CompressedFlat(flat_lookup) => {
-                            super::x_seed_fused_clut::x_scan_two_hit_compressed_flat::<
-                                X_BLASTP_MATRIX,
-                                _,
-                            >(
-                                flat_lookup,
-                                subject_sequence,
-                                subject.aa_len,
-                                &mut scratch.diag_array,
-                                diag_mask,
-                                subject_diag_offset,
-                                window,
-                                word_size,
-                                x_candidate,
-                            )
-                        }
-                    }
-                }
-            });
-        } else if args.window_size != 0 {
-            let x_candidate = x_candidate_of!(extend_two_hit_blosum62);
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:555-568
-            // ```c
-            //     if (lookup_wrap->lut_type == eAaLookupTable) {
-            //         ...
-            //            lut->scansub_callback = (void *)s_BlastAaScanSubject;
-            //         ...
-            //     }
-            //     else if (lookup_wrap->lut_type == eCompressedAaLookupTable) {
-            //         ...
-            //         lut->scansub_callback = (void *)s_BlastCompressedAaScanSubject;
-            //     }
-            // ```
-            let x_sent = match (&x_ungap_sent, &lookup) {
-                (Some(sent_query), BlastpRuntimeLookup::Aa(aa_lookup)) => {
-                    let sent_subject = super::x_ungapped_sent::XSentSubject::new(subject.aa_seq);
-                    crate::utils::xreach::x_reach!("LOSAT_X_BPUNGAPSENT", sent_subject.is_some());
-                    sent_subject.map(|sent_subject| (sent_query, sent_subject, aa_lookup))
-                }
-                (Some(_), BlastpRuntimeLookup::Aa16(_)) => None,
-                (Some(_), _) => {
-                    crate::utils::xreach::x_reach!("LOSAT_X_BPUNGAPSENT", false);
-                    None
-                }
-                (None, _) => None,
-            };
-            // EXPERIMENT (LOSAT_X_BPLK16): the same choice for the table of 16-bit hits.
-            let x_sent16 = match (&x_ungap_sent, &lookup) {
-                (Some(sent_query), BlastpRuntimeLookup::Aa16(aa_lookup)) => {
-                    let sent_subject = super::x_ungapped_sent::XSentSubject::new(subject.aa_seq);
-                    crate::utils::xreach::x_reach!("LOSAT_X_BPUNGAPSENT", sent_subject.is_some());
-                    sent_subject.map(|sent_subject| (sent_query, sent_subject, aa_lookup))
-                }
-                _ => None,
-            };
-            if let Some(ranges) = x_soft {
-                x_soft_subject::x_scan_two_hit_ranges(
-                    &lookup,
-                    subject_sequence,
-                    subject.aa_len,
-                    ranges,
-                    &mut scratch.offset_pairs,
-                    &mut scratch.diag_array,
-                    diag_mask,
-                    subject_diag_offset,
-                    window,
-                    word_size,
-                    x_candidate,
-                );
-            } else if let Some((sent_query, sent_subject, aa_lookup)) = x_sent16 {
-                super::x_seed_fused::x_scan_two_hit(
-                    aa_lookup,
-                    subject_sequence,
-                    subject.aa_len,
-                    &mut scratch.diag_array,
-                    diag_mask,
-                    subject_diag_offset,
-                    window,
-                    word_size,
-                    x_candidate_sent!(sent_query, sent_subject),
-                );
-            } else if let Some((sent_query, sent_subject, aa_lookup)) = x_sent {
-                super::x_seed_fused::x_scan_two_hit(
-                    aa_lookup,
-                    subject_sequence,
-                    subject.aa_len,
-                    &mut scratch.diag_array,
-                    diag_mask,
-                    subject_diag_offset,
-                    window,
-                    word_size,
-                    x_candidate_sent!(sent_query, sent_subject),
-                );
-            } else {
-                match &lookup {
-                    BlastpRuntimeLookup::Aa(aa_lookup) => super::x_seed_fused::x_scan_two_hit(
-                        aa_lookup,
-                        subject_sequence,
-                        subject.aa_len,
-                        &mut scratch.diag_array,
-                        diag_mask,
-                        subject_diag_offset,
-                        window,
-                        word_size,
-                        x_candidate,
-                    ),
-                    // EXPERIMENT (LOSAT_X_BPLK16): the same loop on the table of 16-bit hits.
-                    BlastpRuntimeLookup::Aa16(aa_lookup) => super::x_seed_fused::x_scan_two_hit(
-                        aa_lookup,
-                        subject_sequence,
-                        subject.aa_len,
-                        &mut scratch.diag_array,
-                        diag_mask,
-                        subject_diag_offset,
-                        window,
-                        word_size,
-                        x_candidate,
-                    ),
-                    BlastpRuntimeLookup::Compressed(compressed_lookup) => {
-                        super::x_seed_fused_compressed::x_scan_two_hit_compressed(
-                            compressed_lookup,
-                            subject_sequence,
-                            subject.aa_len,
-                            &mut scratch.diag_array,
-                            diag_mask,
-                            subject_diag_offset,
-                            window,
-                            word_size,
-                            x_candidate,
-                        )
-                    }
-                    // EXPERIMENT (LOSAT_X_BPCLUT): the same loop on the flat table, each cell read as one
-                    // slice (`x_seed_fused_clut.rs`).
-                    BlastpRuntimeLookup::CompressedFlat(flat_lookup) => {
-                        super::x_seed_fused_clut::x_scan_two_hit_compressed_flat::<X_BLASTP, _>(
-                            flat_lookup,
-                            subject_sequence,
-                            subject.aa_len,
-                            &mut scratch.diag_array,
-                            diag_mask,
-                            subject_diag_offset,
-                            window,
-                            word_size,
-                            x_candidate,
-                        )
-                    }
-                }
-            }
-        } else if args.scoring.matrix != ScoringMatrix::Blosum62 {
-            x_outlined(|| {
-                let mut x_one_hit = x_one_hit_of!(extend_one_hit_of, args.scoring.matrix);
-                x_one_hit_scan!(x_one_hit, blastp_for_each_offset_pair_of);
-            });
-        } else {
-            // One-hit search (`-window_size 0`): the buffer of offset pairs, as NCBI's
-            // `s_BlastAaWordFinder_OneHit`.
-            let mut x_one_hit = x_one_hit_of!(extend_one_hit_blosum62);
-            x_one_hit_scan!(x_one_hit, blastp_for_each_offset_pair);
-        }
-
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:152-169
-        // ```c
-        // if (ewp->diag_table->offset >= INT4_MAX / 4) {
-        //     ewp->diag_table->offset = ewp->diag_table->window;
-        //     s_BlastDiagClear(ewp->diag_table);
-        // } else {
-        //     ewp->diag_table->offset += subject_length + ewp->diag_table->window;
-        // }
-        // ```
-        scratch.finish_subject(subject.aa_len, window);
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3826-3837
-        // ```c
-        // tree = Blast_IntervalTreeInit(0, query->length+1,
-        //                               0, subject->length+1);
-        // ```
-        let interval_tree = &mut scratch.preliminary_interval_tree;
-        interval_tree.reset_with_bounds_cells(
-            0,
-            total_query_span,
-            0,
-            subject.aa_len as i32 + 1,
-            x_bp_tree_max_cells(),
-        );
-        if let Some(timing) = timing.as_ref() {
-            BlastpTiming::record_call(
-                &timing.scan_ungapped_ns,
-                &timing.scan_ungapped_calls,
-                scan_ungapped_start,
-            );
-        }
-        // The gapped half (`BlastpPrelimKernel::gapped_subject`, `blast_engine/prelim_kernel.rs`):
-        // from the order of the ungapped hits to the subject's HSP lists in `subject_result`.
-        kernel.gapped_subject(scratch, s_idx, subject, subject_result, values, init_hsps);
     };
     // The kernel with the setup's statistics, and with the subject's own where NCBI computes the
     // statistics of each subject (`per_subject`: only a database's blocks, which take the one or
@@ -11412,7 +10724,7 @@ fn run_call(
                            s_idx: usize,
                            subject: BlastpSubjectRef<'_>,
                            subject_result: &mut BlastpSubjectResult| {
-        search_subject(scratch, s_idx, subject, subject_result, &batch_values)
+        kernel.search_subject(scratch, s_idx, subject, subject_result, &batch_values)
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443
     // ```c
@@ -11436,10 +10748,16 @@ fn run_call(
          subject: BlastpSubjectRef<'_>,
          subject_result: &mut BlastpSubjectResult| {
             if subject.aa_len == 0 {
-                return search_subject(scratch, s_idx, subject, subject_result, &batch_values);
+                return kernel.search_subject(
+                    scratch,
+                    s_idx,
+                    subject,
+                    subject_result,
+                    &batch_values,
+                );
             }
             match subject_parameters(subject.aa_len) {
-                Ok(parameters) => search_subject(
+                Ok(parameters) => kernel.search_subject(
                     scratch,
                     s_idx,
                     subject,

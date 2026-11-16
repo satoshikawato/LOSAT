@@ -98,6 +98,18 @@ FASTA files:
   subjects `x2g_s1_s.faa`, `x2g_s1z_s.faa` and `x2g_s1d_s.faa` there (pairs of the line's probe s1c, built for
   one-hit HSPs of length 0: with `x2g_s1_q.fna` one at subject offset 1 and, without the subject's first letter,
   one at offset 0; with `x2g_s1d_q.fna` two, the subject written twice), whose every HSP has length 0.
+  `x2g_p0127` is the subject `x2g_p0127_s.faa` there and `x2g_ord` the three subjects `x2g_ord.faa` (rows
+  `db.x2g.bx.of.*`, line RG T3c after X2g; titles `x2g p0127 subject` and `x2g ord subjects`, `-blastdb_version 4`):
+  `x2g_p0127_q.fna` / `x2g_p0127_s.faa` is the pair p0127 of the X2g-1 probe P1 (`p_gen.py p 150 20261116 36 300
+  12 150`), whose HSP of length 0 starts at a codon of an HSP of the query's frame +1, where NCBI's
+  query-anchored merge frees a segment it still reads; `x2g_ord.faa` holds p0127's subject, a protein that
+  matches the first 48 nucleotides of P1's p0055 query in frame +1, and p0055's subject, and `x2g_ord_q.fna` and
+  `x2g_ord_q2.fna` the two queries in both orders. `x2g_r11_001` and `x2g_r11_019` (rows `db.x2g.bx.of.r11_*`,
+  line RG T3c fix 3; titles `x2g r11_001 subjects` and `x2g r11_019 subjects`) are the five subjects
+  `x2g_r11_001_s.faa` and `x2g_r11_019_s.faa` there, with their queries `x2g_r11_001_q.fna` (one) and
+  `x2g_r11_019_q.fna` (two): the sets r11_001 and r11_019 of the seed-11 fuzz of the review 3 of T3c
+  (`gen_sets.py 11 30`), whose HSPs of length 0 with `-strand minus` make segments of length 0 of a query row,
+  where NCBI's `FillUnalignedRegions` frees one that it still reads.
 
 - `x2f_c0384_q.fna` / `x2f_c0384_s.faa`, `x2f_c0326_q.fna` / `x2f_c0326_s.faa`: two random pairs of the line RG
   X2f survey (cases c0384 and c0326), rows `db.x2f.*`: with `-window_size 0` and a low `-threshold`, BLASTX's
@@ -144,6 +156,13 @@ makeblastdb also writes was deleted). Run from `LOSAT/`:
     for n in s1 s1z s1d; do
         makeblastdb -in tests/fasta/outfmt0/x2g_${n}_s.faa -dbtype prot -out tests/db_search/x2g_$n \
             -title "x2g $n subject" -blastdb_version 4; done
+    makeblastdb -in tests/fasta/outfmt0/x2g_p0127_s.faa -dbtype prot -out tests/db_search/x2g_p0127 \
+        -title "x2g p0127 subject" -blastdb_version 4
+    makeblastdb -in tests/fasta/outfmt0/x2g_ord.faa -dbtype prot -out tests/db_search/x2g_ord \
+        -title "x2g ord subjects" -blastdb_version 4
+    for n in r11_001 r11_019; do
+        makeblastdb -in tests/fasta/outfmt0/x2g_${n}_s.faa -dbtype prot -out tests/db_search/x2g_$n \
+            -title "x2g $n subjects" -blastdb_version 4; done
 
 `wm_s60k` (rows `db.wm.*`, line NP M2: `-window_masker_db`) is the subject `s60k.fa` of
 `LOSAT/tests/blastn_regression_fixtures.py`, with only `.nin .nsq .nhr` kept:
@@ -1762,6 +1781,64 @@ The databases (version 4; `.njs` deleted). Run from `LOSAT/`:
     makeblastdb -in tests/db_search/of1/tnqgi.fa -dbtype nucl -out tests/db_search/of1/tnqgi \
         -title "a translated database sequence whose display id is a query id" -parse_seqids -blastdb_version 4
     rm tests/db_search/of1/*.njs
+
+BLASTX and TBLASTX inputs of the query-anchored rows (rows `db.of1.bx.*` and `db.of1.tx.*`, line RG T3c), in `of1/`,
+from the T3c probes (`T/t3/scripts_t3c/gen3c.py`, a seeded generator that places coding pieces in the frames it names):
+
+- `bxq.fa`: one nucleotide query (1229 letters) with pieces in all six frames (+1 with isoleucines coded ATA, which
+  genetic code 2 reads as M; +2 with 16 Q that SEG masks; +3, -1, -2, -3); `bxqlc.fa`: the same with two lower-case
+  runs (in the +1 piece and in the -2 piece); `bxqminus.fa`: a query with HSPs in one minus frame (-3) only;
+  `bxqm.fa`: `bxq`, a query without hits, a query of one frame and `bxqminus`.
+- `bxs.fa`: seven proteins: `bx_a` (frames +1 and -2), `bx_ins` and `bx_ins2` (insertions of 5 and 3 residues at one
+  query column of frame +2), `bx_rep` (two copies over frame +3), `bx_mins` (an insertion and a deletion on frame -1),
+  `bx_m6` (frame -3), `bx_far` (weak); `bxsids.fa`: the same under `gi|...|gb|`, `ref|`, `lcl|`, `gnl|`, `sp|` and
+  `gi|...|emb|` ids; `bxslc.fa`: the same with lower-case runs (`-lcase_masking`: shown on every row of the subject);
+  `bxqid.fa` (`lcl|Query_1`) and `bxqgi.fa` (`gi|779|lcl|Query_1`): database sequences named as the first query read
+  without `-parse_deflines`, which BLASTX refuses after its prolog (`tests/parse_deflines_subject.rs`).
+- `txq.fa`: one nucleotide query (571 letters) with pieces in frames +1 (isoleucines coded ATA), +2 (12 Q), -1 and -3;
+  `txqlc.fa`: the same with a lower-case run in the -1 piece; `txqm.fa`: `txq`, a query without hits and one of one
+  frame.
+- `txs.fa`: `tx_pm` (a strong plus copy and a weaker minus copy of the +1 piece: in the query's frame +1 the minus
+  HSP comes later and NCBI leaves it out of formats 1 to 4), `tx_mp` (a strong minus copy and two weaker plus copies of
+  the +2 piece: the plus HSPs are left out), `tx_c` (the -1 piece on the subject's plus strand and the -3 piece on its
+  minus strand), `tx_two` (two plus frames over the +1 piece), `tx_far` (weak); `txsids.fa`: the same under parsed
+  ids; `txqid.fa` (`lcl|Query_1`) and `txqgi.fa` (`gi|781|lcl|Query_1`): refused as `bxqid`, `bxqgi`;
+  `txself.fa`: one record with repeats on both strands, read as a query and a subject under `-parse_deflines`
+  (`tests/parse_deflines_subject.rs`). From the review of T3c (`T/t3/review_t3c/in/t_self*.fa`), rows
+  `db.of1.tx.self.*` (line RG T3c fix 1: TBLASTX's sections of a query record that is also a subject, which NCBI's
+  `CAlnMix` folds into the query's row): `txselfq.fa` (`lcl|selfx`, 453 letters), `txselfq2.fa` (`lcl|other1`
+  before `lcl|selfx`), `txselfs.fa` (`lcl|ydup`, two copies of `selfx`, then `selfx`), `txselfs2.fa` (`lcl|ycopy`,
+  the letters of `selfx`, then `selfx`: equal hits) and `txselfs3.fa` (`selfx`, then `ydup`). `txrep2.fa`
+  (`lcl|rep2`, two copies of a 300-letter coding piece; `T/t3/fix1_t3c/in/rep2.fa`) and `txrep2b.fa` (`lcl|other1`
+  before it): with `-query_loc 1-300` or a second query, and `-subject_loc 301-600`, NCBI's merge throws on its
+  sections (`Start iterator already exists for seq2`); `txmg0.fa` (`lcl|mg0`, a tandem record `A+A`) and
+  `txmg0s.fa` (`mg0`, then `lcl|mx0`, which holds `A`; review 2 of T3c fix 1, `T/t3/review2_t3c/in/mg0_*.fa`):
+  with `-subject_loc 154-303 -seg no` NCBI's `Build` throws (`Infinite loop detected`). Rows `db.of1.tx.throw.*`
+  (T3c fix 2: NCBI's report up to the query's description table, then its error, exit 255) and
+  `tests/parse_deflines_subject.rs`.
+- `bxsr.pal` and `txsr.nal`: aliases of the OIDs 2 to 4 of `bxs` and `txs`.
+
+The databases (version 4; `.pjs` and `.njs` deleted). Run from `LOSAT/`:
+
+    makeblastdb -in tests/db_search/of1/bxs.fa -dbtype prot -out tests/db_search/of1/bxs \
+        -title "protein subjects of the BLASTX query-anchored rows" -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/bxsids.fa -dbtype prot -out tests/db_search/of1/bxsids \
+        -title "protein subjects of the BLASTX query-anchored rows with Seq-ids" -parse_seqids -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/bxqid.fa -dbtype prot -out tests/db_search/of1/bxqid \
+        -title "a protein database sequence under the id of a query" -parse_seqids -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/bxqgi.fa -dbtype prot -out tests/db_search/of1/bxqgi \
+        -title "a protein database sequence whose display id is a query id" -parse_seqids -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/txs.fa -dbtype nucl -out tests/db_search/of1/txs \
+        -title "nucleotide subjects of the TBLASTX query-anchored rows" -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/txsids.fa -dbtype nucl -out tests/db_search/of1/txsids \
+        -title "nucleotide subjects of the TBLASTX query-anchored rows with Seq-ids" -parse_seqids \
+        -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/txqid.fa -dbtype nucl -out tests/db_search/of1/txqid \
+        -title "a nucleotide database sequence under the id of a TBLASTX query" -parse_seqids -blastdb_version 4
+    makeblastdb -in tests/db_search/of1/txqgi.fa -dbtype nucl -out tests/db_search/of1/txqgi \
+        -title "a nucleotide database sequence whose display id is a TBLASTX query id" -parse_seqids \
+        -blastdb_version 4
+    rm tests/db_search/of1/*.pjs tests/db_search/of1/*.njs
 ## `dbmask/`: database masks of BLASTN searches (line NP, series M, M4a-2a)
 
 Rows `db.dbmask.*` (`-db_soft_mask`, `-db_hard_mask`). The inputs are the probe inputs of the M4a-2 survey

@@ -1,5 +1,6 @@
 //! Query batches of a search (NCBI `CBlastInput::GetNextSeqBatch`).
 
+use crate::blastinput::fasta_reader::believed::BelievedIds;
 use crate::blastinput::fasta_reader::{FastaRecord, ReadError};
 
 /// The query batch size from the environment variable `BATCH_SIZE` (`value`; 0 when it is not
@@ -284,20 +285,29 @@ impl AnchoredBatchScopes {
     /// The scopes of the batches `spans` of the query records `records` (a span past the records
     /// is cut to them).
     pub(crate) fn new(records: &[FastaRecord], spans: Vec<std::ops::Range<usize>>) -> Self {
-        let generated = records
-            .first()
-            .is_none_or(|query| query.believed().is_none());
+        let ids: Vec<(&str, Option<&BelievedIds>)> = records
+            .iter()
+            .map(|record| (record.local_id.as_str(), record.believed()))
+            .collect();
+        Self::of_ids(&ids, spans)
+    }
+
+    /// `new` of the query records whose local ids and `-parse_deflines` Seq-ids are `ids` (BLASTX's
+    /// records, which have their own type).
+    pub(crate) fn of_ids(
+        ids: &[(&str, Option<&BelievedIds>)],
+        spans: Vec<std::ops::Range<usize>>,
+    ) -> Self {
+        let generated = ids.first().is_none_or(|(_, believed)| believed.is_none());
         let scopes = spans
             .iter()
             .map(|span| {
-                let records = &records[span.start.min(records.len())..span.end.min(records.len())];
+                let ids = &ids[span.start.min(ids.len())..span.end.min(ids.len())];
                 if generated {
-                    QueryScope::of_generated_ids(
-                        records.iter().map(|record| record.local_id.as_str()),
-                    )
+                    QueryScope::of_generated_ids(ids.iter().map(|&(local_id, _)| local_id))
                 } else {
                     let mut scope = QueryScope::default();
-                    scope.add_ids_of(records.iter().filter_map(FastaRecord::believed));
+                    scope.add_ids_of(ids.iter().filter_map(|&(_, believed)| believed));
                     scope
                 }
             })

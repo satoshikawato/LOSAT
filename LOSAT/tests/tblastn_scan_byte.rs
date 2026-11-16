@@ -1,5 +1,5 @@
 //! tblastn's lookup scan on presence bytes (`LOSAT_X_TBNSCANBYTE`, in the strict set;
-//! `src/algorithm/tblastn/x_scan_byte.rs`) on whole searches.
+//! `src/algorithm/tblastx/x_scan_byte.rs`) on whole searches.
 //!
 //! NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127
 //! ```c

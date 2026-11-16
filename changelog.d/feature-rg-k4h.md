@@ -13,3 +13,8 @@
   same lookup, of whichever subject and in whichever later query or batch (a later batch's prefetch
   too), or not at all.
   A library or Web caller gets these messages on its diagnostics, not in the error's text.
+- With a version 5 list of databases with and without the accession table and a taxonomy database that writes a
+  message, a later query batch whose prefetch stops (NCBI's `BLAST Database error`) after an outfmt 5 iteration that
+  NCBI's stream left out at a query title outside US-ASCII is refused before any output where that batch's other
+  loads look a tax id up (`blastp`, `blastn`, `tblastn`, `tblastx`): NCBI writes the messages that the left-out loads
+  did not write before the error or not, as the order of its loads decides.

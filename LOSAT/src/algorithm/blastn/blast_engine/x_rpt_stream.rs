@@ -437,12 +437,13 @@ pub(super) fn refused_before_reading(
     if x_debug_output(args) {
         return Some(Off::Debug);
     }
-    // BLAST XML (DESIGN_OF4 Q8, Owner-delegated 2026-10-20): the XML writer refuses a `-db` name,
-    // a query title or id, or the title of a subject with a hit that it cannot write as NCBI's
-    // XML (DESIGN_OF4 Q2), and those checks are made by the report call of the batch that holds
-    // the query or the subject. With several batches a later batch's refusal would come after
-    // the first batch's Iterations were written, so outfmt 5 is never streamed: the one report
-    // call after the search finds every refusal before the first byte.
+    // BLAST XML (DESIGN_OF4 Q8, Owner-delegated 2026-10-20; OWNER_DECISIONS 20): the XML writer
+    // refuses a query title or the title of a subject with a hit that NCBI's definition line
+    // generator reads past the end of (`names::Refusal`; every other text is written as NCBI's
+    // stream writes it, since line RG item K4h), and that check is made by the report call of the
+    // batch that holds the query or the subject. With several batches a later batch's refusal
+    // would come after the first batch's Iterations were written, so outfmt 5 is never streamed:
+    // the one report call after the search finds every refusal before the first byte.
     if output_formats
         .iter()
         .any(|format| format.is_structured_xml())

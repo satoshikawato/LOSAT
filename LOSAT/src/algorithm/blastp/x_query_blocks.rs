@@ -145,11 +145,11 @@
 //!   flag (the last block), as outfmt 7's count does; the run values (program, version,
 //!   `BlastOutput_db`, matrix, gap costs, filter, `db-num`, `db-len`, kappa, lambda, entropy) are
 //!   fixed inputs; `hsp-len`, `eff-space`, the masks and the message are the query's own. The
-//!   writer refuses what NCBI cannot write (a byte >= 0x80 or a control byte in a name, a title it
-//!   cannot guess the encoding of or reads past the end of) before its first byte, which in a later
-//!   block would come after the earlier blocks' bytes. So the block search is taken only when
-//!   none is refused, checked with the writer's own functions before the first block: the database
-//!   name and every query's definition line and message id (`x_block_xml_run_allowed`), every
+//!   writer refuses a title that NCBI crashes on (`names::Refusal::ReadsPastEnd`) before its first
+//!   byte, which in a later block would come after the earlier blocks' bytes; every other byte
+//!   (>= 0x80, a control byte) NCBI's stream writes or fails at by itself, the same in a block. So
+//!   the block search is taken only when none is refused, checked with the writer's own functions
+//!   before the first block: every query's definition line (`x_block_xml_run_allowed`), every
 //!   `-subject` record's names (`x_block_xml_subjects_allowed`; conservative, the writer refuses
 //!   only a subject with hits), and with `-db` the definition lines as for outfmt 8
 //!   (`database::x_titles_read_allow_blocks`). Otherwise the search of all queries refuses where
@@ -501,36 +501,23 @@ pub(crate) fn x_reach_block_search(own: bool) {
 // ```
 // The refusals of the XML report (`write_blastp_xml`) come before its first byte; a block would
 // make them after the bytes of the blocks before. These are the writer's own checks, made for the
-// whole run before the first block (`names::check_text`, `names::xml_query_title`,
-// `query_warnings::warning_query_id`, `names::xml_subject_names`); when one fails the search of
-// all queries runs and refuses where it does today.
-/// EXPERIMENT (LOSAT_X_BPQBLOCK): whether the database name and every query's definition line and
-/// message id can be written by the XML report. The message of a query holds only its warning id
-/// (`warning_query_id`) besides ASCII text. The database name check is defensive: the CLI refuses
-/// the name in block 0 before any byte with the same output, and `run_local` takes no `-db`; it
-/// would bind if `run_local` ever searched a database (its file is created at `open()`).
-pub(crate) fn x_block_xml_run_allowed(
-    db_name: &str,
-    queries: &[FastaRecord],
-    pool: &SearchPool<'_>,
-) -> bool {
+// whole run before the first block (`names::xml_query_title`, `names::xml_subject_names`: a title
+// NCBI crashes on, `names::Refusal`); when one fails the search of all queries runs and refuses
+// where it does today. Every other text reaches NCBI's stream, which writes it or fails at its own
+// level (`report::serial::xml`), the same in a block.
+/// EXPERIMENT (LOSAT_X_BPQBLOCK): whether no query's definition line is refused by the XML report.
+pub(crate) fn x_block_xml_run_allowed(queries: &[FastaRecord], pool: &SearchPool<'_>) -> bool {
     use crate::report::blast_xml::names;
-    names::check_text(db_name.as_bytes()).is_ok()
-        && x_all_in_groups(queries.len(), pool, |range| {
-            queries[range].iter().all(|record| {
-                names::xml_query_title(&record.title, true).is_ok()
-                    && names::check_text(&crate::report::query_warnings::warning_query_id(
-                        record.warning_id(),
-                        &record.title,
-                    ))
-                    .is_ok()
-            })
-        })
+    x_all_in_groups(queries.len(), pool, |range| {
+        queries[range]
+            .iter()
+            .all(|record| names::xml_query_title(&record.title, true).is_ok())
+    })
 }
 
-/// EXPERIMENT (LOSAT_X_BPQBLOCK): whether the names of every `-subject` record can be written
-/// by the XML report (`names::xml_subject_names`; the report refuses only a subject with hits,
-/// so this is conservative).
+/// EXPERIMENT (LOSAT_X_BPQBLOCK): whether no `-subject` record's names are refused by the XML
+/// report (`names::xml_subject_names`; the report refuses only a subject with hits, so this is
+/// conservative).
 pub(crate) fn x_block_xml_subjects_allowed(
     subjects: &[FastaRecord],
     pool: &SearchPool<'_>,
@@ -1508,8 +1495,8 @@ mod tests {
 
     // The XML checks of the block search agree with the writer's own functions on the probe titles
     // of `report/blast_xml/names.rs`: names that pass (periods, `TPA:`, doubled spaces, an empty
-    // title), a byte >= 0x80 (UTF-8 and Latin-1), a control byte, and punctuation that
-    // `x_CleanAndCompress` reads past the end of. A one-record check and the same record among
+    // title, a byte >= 0x80 in UTF-8 and Latin-1, a control byte: the stream writes them), and
+    // punctuation that `x_CleanAndCompress` reads past the end of (refused). A one-record check and the same record among
     // others, on a pool of 1 and 3 threads.
     #[test]
     fn the_xml_checks_agree_with_the_writers_functions() {
@@ -1561,7 +1548,7 @@ mod tests {
             .collect();
         let passing = records.iter().filter(|record| ok_query(record)).count();
         assert!(
-            passing >= 5 && passing < records.len(),
+            passing >= 9 && passing < records.len(),
             "the probe titles pass and fail: {passing}"
         );
         for threads in [1, 3] {
@@ -1569,7 +1556,7 @@ mod tests {
                 for record in &records {
                     let one = std::slice::from_ref(record);
                     assert_eq!(
-                        x_block_xml_run_allowed("db", one, pool),
+                        x_block_xml_run_allowed(one, pool),
                         ok_query(record),
                         "query title {:?}, threads {threads}",
                         String::from_utf8_lossy(&record.title)
@@ -1586,7 +1573,7 @@ mod tests {
                     (0..50)
                         .map(|index| {
                             let title: &[u8] = if Some(index) == bad {
-                                "caf\u{e9}".as_bytes()
+                                b", ,"
                             } else {
                                 b"ok title"
                             };
@@ -1594,16 +1581,12 @@ mod tests {
                         })
                         .collect()
                 };
-                assert!(x_block_xml_run_allowed("db", &many(None), pool));
+                assert!(x_block_xml_run_allowed(&many(None), pool));
                 assert!(x_block_xml_subjects_allowed(&many(None), pool));
                 for bad in [0, 17, 49] {
-                    assert!(!x_block_xml_run_allowed("db", &many(Some(bad)), pool));
+                    assert!(!x_block_xml_run_allowed(&many(Some(bad)), pool));
                     assert!(!x_block_xml_subjects_allowed(&many(Some(bad)), pool));
                 }
-                // The database name is checked as the writer checks it.
-                assert!(x_block_xml_run_allowed("", &many(None), pool));
-                assert!(!x_block_xml_run_allowed("d\u{e9}", &many(None), pool));
-                assert!(!x_block_xml_run_allowed("d\x01", &many(None), pool));
                 Ok(())
             })
             .expect("pool");

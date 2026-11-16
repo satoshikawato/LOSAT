@@ -346,6 +346,7 @@ export LOSAT_X_BNDBSMALL=1
 export LOSAT_X_BNDBSTREAM=1
 export LOSAT_X_BNDBWIDE=1
 export LOSAT_X_BNDCONE=1
+export LOSAT_X_BNDECODE=1
 export LOSAT_X_BNEXTFIRST=1
 export LOSAT_X_BNFEWSUBJ=1
 export LOSAT_X_BNHITGROUP=1
@@ -1587,6 +1588,24 @@ Rebuilding less:
   on the 31,168 / 1,775 cDNAs x0.726 / x0.732 (peak RSS +13 MiB on the 31,168, the four slots' strips), by default at
   4 threads x1.001 / x0.999; megablast at one thread x0.9997 with the switch at `0` x0.9996 (the layout difference
   above is gone in this binary), 16 threads unchanged.
+- `LOSAT_X_BNDECODE=1` (BLASTN `-db`, every task, speed; in the strict set from the pull request that added it,
+  2026-11-17 (perf/dt16-nadecode); `=0` runs the previous decode) makes a database sequence's BLASTNA letters four bases
+  per stored byte: each stored 2-bit byte gives its four letters at once from a table of 256 entries
+  (`seqdb/volume.rs` `X_PACKED_TO_BLASTNA`, the form of `nucleotide_iupac`'s `PACKED_TO_IUPAC`), and each ambiguity run
+  writes its BLASTNA letter (`x_blastna_by_byte`), for the whole sequence (`nucleotide_blastna` and its mapped form,
+  the preliminary search's and the traceback's) and for the traceback's ranges (`x_nucleotide_blastna_ranges`,
+  `LOSAT_X_BNTBRANGE`). Cause removed: the decode made each base's NCBI8na value from its two bits one base at a time
+  (a shift by the base's place in its byte, an index of the stored bytes per base) and then read and mapped every byte
+  again with `NCBINA8_TO_BLASTNA8` (NCBI's `s_SeqDBMapNA2ToNA8` and `s_SeqDBMapNcbiNA8ToBlastNA8`, two passes); that map
+  is per byte, so mapping each letter where it is written gives the same bytes. The form holds for every sequence
+  (no rule; a range that starts or ends inside a stored byte takes that byte's bases one by one). Tests: the lib test
+  `seqdb::volume::tests::the_by_byte_decode_equals_the_by_base_decode` (600 random sequences with every stored byte
+  value, ordered and shuffled runs of every code, offsets of 2^31 and more, runs past the end; the whole sequence and
+  ranges cut inside stored bytes, against `=0`'s functions), and `LOSAT/tests/blastn_db_search.rs`
+  (`the_by_byte_decode_gives_the_reports_of_the_decode_by_base`: EDL933 as a database, 2,466 ambiguity runs of 11 codes,
+  queries across 24 of them; the reports of the default and of `=0`, with and without `LOSAT_X_BNTBRANGE`, the same,
+  and `sseq` shows the codes).
+  EVIDENCE_PLACEHOLDER
 - `LOSAT_X_BNEXTFIRST=1` (BLASTN, a megablast-type table whose lookup width is below the word size: `-task megablast`
   and `-word_size` 12 or more, `-task blastn` with a lookup width of 9 or 10; speed; in the strict set from the pull
   request that added it (perf/bn-ext-first, 2026-11-16); `=0` keeps the order before) extends each
